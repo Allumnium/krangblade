@@ -17,9 +17,46 @@ jobs:
           version: 4.7.2
           use-dotnet: false
           include-templates: false
-      - run: godot --headless --path . --import
-      - run: godot --headless --path . --check-only --script res://scripts/main.gd
-      - run: godot --headless --path . --check-only --script res://scripts/match.gd
-      - run: godot --headless --path . --check-only --script res://scripts/lobby_rules.gd
-      - run: godot --headless --path . --script res://tests/lobby_rules_test.gd
-      - run: godot --headless --path . --quit-after 3
+      - name: Import
+        run: godot --headless --path . --import
+      - name: Parse scenes and network scripts
+        run: |
+          godot --headless --path . --check-only --script res://scripts/main.gd
+          godot --headless --path . --check-only --script res://scripts/match.gd
+          godot --headless --path . --check-only --script res://scripts/game_session.gd
+          godot --headless --path . --check-only --script res://scripts/lobby_rules.gd
+          godot --headless --path . --check-only --script res://tests/network_smoke.gd
+      - name: Lobby and territory rules
+        run: godot --headless --path . --script res://tests/lobby_rules_test.gd
+      - name: Startup smoke test
+        run: godot --headless --path . --quit-after 3
+      - name: Real ENet multiplayer round trips and disconnect recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_case() {
+            local count="$1"
+            local mode="$2"
+            local failures=0
+            local pids=""
+            timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- host "$count" "$mode" > "/tmp/host-$count-$mode.log" 2>&1 &
+            pids="$pids $!"
+            sleep 1
+            for ((n=1;n<count;n++)); do
+              timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- client "$count" "$n" "$mode" > "/tmp/client-$count-$mode-$n.log" 2>&1 &
+              pids="$pids $!"
+            done
+            for pid in $pids; do
+              wait "$pid" || failures=1
+            done
+            for log in "/tmp/host-$count-$mode.log" /tmp/client-"$count"-"$mode"-*.log; do
+              echo "--- $log ---"
+              cat "$log"
+              grep -q "PASS: network" "$log" || failures=1
+            done
+            test "$failures" -eq 0
+          }
+          run_case 2 normal
+          run_case 8 normal
+          run_case 2 drop-loading
+          run_case 2 host-leave

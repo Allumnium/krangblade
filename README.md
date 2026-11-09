@@ -1,20 +1,28 @@
-# Warbound — territory-control RTS
+# Warbound — multiplayer territory-control RTS
 
-Godot **4.7.2**, GDScript, Compatibility renderer. Multiplayer uses direct ENet over UDP **24567**, without Steam.
+Engine: Godot 4.7.2 (GDScript, Compatibility renderer).
+Networking: ENet, UDP port 24567. No Steam required for local or Tailscale play.
 
-## Test with 2–8 instances
-1. Launch 2–8 copies (or use Godot's multiple run instances).
-2. One player chooses **Multiplayer → Host Game**.
-3. Other players choose **Multiplayer → Join Game**, address `127.0.0.1` locally or the host's Tailscale IPv4 address remotely.
-4. Assign **Team 1–8** in the lobby. Any composition works: 1v7, 2v2v4, 8 free-for-all, or all players on one team.
-5. The host can change any player's team; each guest can change their own. Changes reset guest ready states.
-6. All guests press **Ready**. The host starts once 2–8 players are present and ready.
-7. Each player begins with a territory on a 17-node prototype map. Teammates share a color and can capture neutrals adjacent to any territory owned by their team.
+## Host and join
 
-The lobby supports **up to 8 players** in **1–8 teams**, with no forced balancing. Empty seats are permitted. Host is always ready; the host owns and validates the roster, readiness, assignments, and chat. Chat has a 250-character limit, 100-message history, and basic throttling. Host departure ends the lobby.
+1. Run the project and choose Multiplayer.
+2. Host chooses Host Game. Guests choose Join Game using 127.0.0.1 for same-PC tests or the host's Tailscale IPv4 address for internet play.
+3. Host or guests assign teams. A host can set anyone's team, while guests control their own. Two to eight players can use any distribution among Teams 1–8, including a single cooperative team.
+4. Guests toggle Ready. Host chooses Start Match once everyone is ready.
+5. Input is locked until **all participants report their match scenes loaded**. The host then sends a synchronized start. Each player begins with a territory; teammates share territory ownership and colors.
+6. During a match, Return to Lobby (host) brings everyone back without disconnecting. Ready states reset, while teams, chat, and connections persist. Guests can leave independently.
+7. If a player disconnects while loading, the host removes them; if at least two players remain and all remaining peers load, the match begins. If fewer remain, the host returns everyone to the lobby. A 20-second timeout cancels a stalled start.
+8. If the host disconnects, guests return to the multiplayer menu.
 
-This is an early **team-capable territory prototype**: team colors/capture work, but there is no combat, team scoring, elimination, AI, Steam integration, invites, public matchmaking, or map selection. Players on the same team jointly control territories.
+## Architecture
+
+- scripts/game_session.gd: persistent GameSession autoload with all RPC endpoints, lobby state, chat, load acknowledgments, match roster and territory ownership. Changing scenes does not remove networking RPC handlers.
+- scripts/main.gd: menu and lobby UI; player list scrolls, and lobby panels flow-wrap vertically for narrow windows.
+- scripts/match.gd: the visual territory prototype; sends capture requests through GameSession and disables input until the host starts.
+- scripts/lobby_rules.gd: pure, testable team, readiness, load barrier and capture rules.
 
 ## Validation
 
-GitHub Actions imports with Godot 4.7.2, parses both scene scripts and the rules, runs headless rules tests, and smoke-tests startup. Real 2–8 player network testing must still be done manually.
+GitHub Actions on Godot 4.7.2 checks import, script types, rules, startup, and real two- and eight-process headless ENet round trips: hosting, joining, ready, synchronized match start, and return to lobby. Manually launch 2–8 game instances over LAN/Tailscale to test closing a client during loading, guest departure mid-match, host departure, and narrow window sizes.
+
+Not yet included: Steam matchmaking/invites, spectators, reconnecting to running matches, host migration, combat, economy, victory conditions, or persistence.
