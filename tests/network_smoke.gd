@@ -7,6 +7,7 @@ var expected_players: int = 2
 var saw_match: bool = false
 var started: bool = false
 var finishing: bool = false
+var ready_sent: bool = false
 
 func _initialize() -> void:
     call_deferred("_begin")
@@ -46,7 +47,8 @@ func _roster_changed() -> void:
     elif role == "client":
         var self_id: int = session.multiplayer.get_unique_id()
         var entry: Dictionary = roster.get(self_id, {})
-        if not entry.is_empty() and not bool(entry.get("ready", false)):
+        if not entry.is_empty() and not bool(entry.get("ready", false)) and not ready_sent:
+            ready_sent = true
             session.call_deferred("toggle_ready")
 
 func _phase_changed() -> void:
@@ -84,5 +86,7 @@ func _pass() -> void:
     quit(0)
 
 func _fail(reason: String) -> void:
+    if session != null:
+        print("DEBUG: phase=", session.get("phase"), " roster=", session.get("players"), " loaded=", session.get("loaded"), " status=", session.get("status"), " started=", started, " saw_match=", saw_match)
     push_error("FAIL: %s (%s, %d players)" % [reason, role, expected_players])
     quit(1)
