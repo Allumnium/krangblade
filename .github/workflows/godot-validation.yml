@@ -20,4 +20,6 @@ jobs:
       - run: godot --headless --path . --import
       - run: godot --headless --path . --check-only --script res://scripts/main.gd
       - run: godot --headless --path . --check-only --script res://scripts/match.gd
+      - run: godot --headless --path . --check-only --script res://scripts/lobby_rules.gd
+      - run: godot --headless --path . --script res://tests/lobby_rules_test.gd
       - run: godot --headless --path . --quit-after 3
