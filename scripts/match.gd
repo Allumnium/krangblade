@@ -20,10 +20,13 @@ var owners: Array[int] = []
 var status_label: Label
 var my_team: int = 0
 
+func _roster() -> Dictionary:
+    return get_node("/root/MatchSession").get("roster") as Dictionary
+
 func _ready() -> void:
-    var mine: Dictionary = MatchSession.roster.get(multiplayer.get_unique_id(), {})
+    var mine: Dictionary = _roster().get(multiplayer.get_unique_id(), {})
     my_team = int(mine.get("team", 0))
-    owners = RULES.starting_owners(MatchSession.roster)
+    owners = RULES.starting_owners(_roster())
     multiplayer.peer_connected.connect(_reject_late_join)
     multiplayer.peer_disconnected.connect(_on_peer_disconnected)
     multiplayer.server_disconnected.connect(_on_server_disconnected)
@@ -40,7 +43,7 @@ func _ready() -> void:
     status_label = Label.new()
     row.add_child(status_label)
     _set_status("Warbound | Team %d | %d players | Capture adjacent neutral territories" % [
-        my_team, MatchSession.roster.size()
+        my_team, _roster().size()
     ])
     queue_redraw()
 
@@ -52,7 +55,7 @@ func _reject_late_join(id: int) -> void:
 
 func _leave_match() -> void:
     multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
-    MatchSession.clear_roster()
+    get_node("/root/MatchSession").call("clear_roster")
     get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 func _on_peer_disconnected(id: int) -> void:
@@ -61,7 +64,7 @@ func _on_peer_disconnected(id: int) -> void:
 
 func _on_server_disconnected() -> void:
     multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
-    MatchSession.clear_roster()
+    get_node("/root/MatchSession").call("clear_roster")
     get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
 
 @rpc("authority", "call_remote", "reliable")
@@ -78,7 +81,7 @@ func _request_capture(index: int) -> void:
     var sender: int = multiplayer.get_remote_sender_id()
     if not multiplayer.get_peers().has(sender):
         return
-    var data: Dictionary = MatchSession.roster.get(sender, {})
+    var data: Dictionary = _roster().get(sender, {})
     var team: int = int(data.get("team", 0))
     if RULES.valid_team(team):
         _apply_capture(team, index)

@@ -326,7 +326,7 @@ func _disconnect() -> void:
     players.clear()
     history.clear()
     last_message.clear()
-    MatchSession.clear_roster()
+    get_node("/root/MatchSession").call("clear_roster")
 
 func _leave() -> void:
     _disconnect()
@@ -452,5 +452,5 @@ func _launch(snapshot: Dictionary) -> void:
     _enter_match.call_deferred(snapshot)
 
 func _enter_match(snapshot: Dictionary) -> void:
-    MatchSession.roster = snapshot.duplicate(true)
+    get_node("/root/MatchSession").set("roster", snapshot.duplicate(true))
     get_tree().change_scene_to_file("res://scenes/match.tscn")
