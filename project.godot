@@ -8,7 +8,7 @@ config/features=PackedStringArray("4.7", "GL Compatibility")
 config/description="A multiplayer territory-control RTS prototype."
 
 [autoload]
-MatchSession="*res://scripts/match_session.gd"
+GameSession="*res://scripts/game_session.gd"
 
 [display]
 window/size/viewport_width=1152
