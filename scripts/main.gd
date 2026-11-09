@@ -1,7 +1,8 @@
 extends Control
 
 const PORT: int = 24567
-const MAX_PLAYERS: int = 2
+const MAX_PLAYERS: int = 8
+const RULES = preload("res://scripts/lobby_rules.gd")
 const MAX_CHAT: int = 250
 const BACKGROUND := Color("#121b25")
 const PANEL := Color("#213041")
@@ -133,10 +134,10 @@ func _host() -> void:
         _multiplayer_menu()
         return
     multiplayer.multiplayer_peer = peer
-    players = {1: {"name": player_name, "ready": true}}
+    players = {1: {"name": player_name, "ready": true, "team": 1}}
     history.clear()
     last_message.clear()
-    status = "Waiting for a player."
+    status = "Waiting for players."
     _lobby()
 
 func _join() -> void:
@@ -183,7 +184,7 @@ func _lobby() -> void:
     info.add_spacer(false)
     info.add_child(_text("MATCH SETTINGS", 23))
     info.add_child(_text("Territory Control • Prototype Map", 16, MUTED))
-    info.add_child(_text("2 player slots", 16, MUTED))
+    info.add_child(_text("2–8 players • 1–8 teams • Any arrangement", 15, MUTED))
     ready_button = _button("READY", _toggle_ready)
     info.add_child(ready_button)
     start_button = _button("START MATCH", _start)
@@ -215,13 +216,30 @@ func _refresh() -> void:
     for child in roster.get_children():
         roster.remove_child(child)
         child.queue_free()
-    for id in players.keys():
+    for id in RULES.ordered_peers(players):
         var data: Dictionary = players[id]
-        var role: String = "HOST" if int(id) == 1 else "GUEST"
+        var role: String = "HOST" if id == 1 else "GUEST"
         var state: String = "READY" if bool(data.get("ready", false)) else "NOT READY"
-        roster.add_child(_text("%s  •  %s  •  %s" % [str(data.get("name", "Player")), role, state], 16))
-    for slot in range(MAX_PLAYERS - players.size()):
-        roster.add_child(_text("EMPTY SLOT", 16, MUTED))
+        var row := HBoxContainer.new()
+        row.add_theme_constant_override("separation", 8)
+        roster.add_child(row)
+        var title := _text("%s  •  %s" % [str(data.get("name", "Player")), role], 15)
+        title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        title.clip_text = true
+        row.add_child(title)
+        var selector := OptionButton.new()
+        selector.custom_minimum_size.x = 96
+        for team in range(1, MAX_PLAYERS + 1):
+            selector.add_item("Team %d" % team)
+        selector.select(clampi(int(data.get("team", 1)) - 1, 0, MAX_PLAYERS - 1))
+        selector.disabled = connecting or (not multiplayer.is_server() and id != multiplayer.get_unique_id())
+        selector.item_selected.connect(_team_selected.bind(id))
+        row.add_child(selector)
+        var flag := _text(state, 12, MUTED)
+        flag.custom_minimum_size.x = 80
+        row.add_child(flag)
+    for _slot in range(MAX_PLAYERS - players.size()):
+        roster.add_child(_text("EMPTY SLOT", 14, MUTED))
     status_label.text = status
     ready_button.visible = not multiplayer.is_server() and not connecting
     var self_data: Dictionary = players.get(multiplayer.get_unique_id(), {})
@@ -239,12 +257,41 @@ func _refresh_chat() -> void:
         chat_log.add_text(str(item.get("text", "")) + "\n")
 
 func _can_start() -> bool:
-    if not multiplayer.is_server() or players.size() != MAX_PLAYERS:
-        return false
-    for data in players.values():
-        if not bool(data.get("ready", false)):
-            return false
-    return true
+    return multiplayer.is_server() and RULES.can_start(players)
+
+func _team_selected(index: int, id: int) -> void:
+    var team: int = index + 1
+    if not RULES.valid_team(team):
+        return
+    if multiplayer.is_server():
+        _change_team(id, team)
+    elif not connecting and id == multiplayer.get_unique_id():
+        _request_team.rpc_id(1, team)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_team(team: int) -> void:
+    if not multiplayer.is_server():
+        return
+    var sender: int = multiplayer.get_remote_sender_id()
+    _change_team(sender, team)
+
+func _change_team(id: int, team: int) -> void:
+    if not multiplayer.is_server() or not players.has(id) or not RULES.valid_team(team):
+        return
+    var data: Dictionary = players[id]
+    if int(data.get("team", 1)) == team:
+        return
+    data["team"] = team
+    players[id] = data
+    # Any team change invalidates previous ready confirmations.
+    for peer_id in players.keys():
+        if int(peer_id) == 1:
+            continue
+        var entry: Dictionary = players[peer_id]
+        entry["ready"] = false
+        players[peer_id] = entry
+    status = "Teams changed. Players must ready up again."
+    _broadcast_roster()
 
 func _connected() -> void:
     connecting = false
@@ -279,6 +326,7 @@ func _disconnect() -> void:
     players.clear()
     history.clear()
     last_message.clear()
+    MatchSession.clear_roster()
 
 func _leave() -> void:
     _disconnect()
@@ -295,7 +343,13 @@ func _register(wanted_name: String) -> void:
     var clean: String = wanted_name.replace("\n", " ").replace("\r", " ").strip_edges().substr(0, 24)
     if clean.is_empty():
         clean = "Player"
-    players[sender] = {"name": clean, "ready": false}
+    var team: int = 1
+    var taken: Array[int] = []
+    for entry in players.values():
+        taken.append(int(entry.get("team", 1)))
+    while taken.has(team):
+        team += 1
+    players[sender] = {"name": clean, "ready": false, "team": team}
     status = "Waiting for all players to be ready."
     _broadcast_roster()
     _sync_history.rpc_id(sender, history)
@@ -308,7 +362,7 @@ func _broadcast_roster() -> void:
 @rpc("authority", "call_remote", "reliable")
 func _receive_roster(value: Dictionary) -> void:
     players = value.duplicate(true)
-    status = "Waiting for all players to be ready."
+    status = "Waiting for players to ready up."
     _refresh()
 
 @rpc("authority", "call_remote", "reliable")
@@ -389,12 +443,14 @@ func _receive_chat(item: Dictionary) -> void:
 
 func _start() -> void:
     if _can_start():
-        _launch.rpc()
-        _enter_match.call_deferred()
+        var snapshot: Dictionary = players.duplicate(true)
+        _launch.rpc(snapshot)
+        _enter_match.call_deferred(snapshot)
 
 @rpc("authority", "call_remote", "reliable")
-func _launch() -> void:
-    _enter_match.call_deferred()
+func _launch(snapshot: Dictionary) -> void:
+    _enter_match.call_deferred(snapshot)
 
-func _enter_match() -> void:
+func _enter_match(snapshot: Dictionary) -> void:
+    MatchSession.roster = snapshot.duplicate(true)
     get_tree().change_scene_to_file("res://scenes/match.tscn")
