@@ -1,0 +1,29 @@
+name: Godot validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+      - name: Install Godot 4.7.2
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+      - name: Print engine version
+        run: godot --version
+      - name: Import and parse project
+        run: godot --headless --path . --import
+      - name: Check main script syntax and types
+        run: godot --headless --path . --check-only --script res://scripts/main.gd
+      - name: Smoke-test startup
+        run: godot --headless --path . --quit-after 3
