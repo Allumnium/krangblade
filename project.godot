@@ -1,5 +1,5 @@
-; Godot 4 project settings
-; This file is intended to be opened with Godot 4.x.
+; Godot 4.7 project settings
+; Recommended editor version: Godot 4.7.2-stable.
 
 config_version=5
 
@@ -7,8 +7,8 @@ config_version=5
 
 config/name="Krangblade"
 run/main_scene="res://scenes/main.tscn"
-config/features=PackedStringArray("4.0", "GL Compatibility")
-config/description="A minimal 2D starter project for Krangblade."
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/description="A minimal multiplayer territory-control RTS prototype."
 
 [display]
 
