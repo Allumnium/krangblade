@@ -18,6 +18,7 @@ var roster: VBoxContainer
 var ready_button: Button
 var start_button: Button
 var status_label: Label
+var multiplayer_status_label: Label
 
 func _ready() -> void:
     network = get_node("/root/GameSession")
@@ -77,7 +78,7 @@ func _on_phase_changed() -> void:
         else:
             _refresh_roster()
     elif phase == "offline":
-        if screen == "lobby":
+        if screen == "lobby" or (screen == "" and not str(network.get("status")).is_empty()):
             _show_multiplayer()
         elif screen == "":
             _show_menu()
@@ -126,9 +127,8 @@ func _show_multiplayer() -> void:
     buttons.add_child(_button("HOST GAME", _host))
     buttons.add_child(_button("JOIN GAME", _join))
     form.add_child(_button("BACK", _show_menu))
-    var message: String = str(network.get("status"))
-    if not message.is_empty():
-        form.add_child(_text(message, 14, MUTED))
+    multiplayer_status_label = _text(str(network.get("status")), 14, MUTED)
+    form.add_child(multiplayer_status_label)
 
 func _host() -> void:
     saved_ip = address_edit.text
@@ -216,6 +216,8 @@ func _show_lobby() -> void:
 func _refresh_status() -> void:
     if screen == "lobby" and is_instance_valid(status_label):
         status_label.text = str(network.get("status"))
+    elif screen == "multiplayer" and is_instance_valid(multiplayer_status_label):
+        multiplayer_status_label.text = str(network.get("status"))
 
 func _refresh_roster() -> void:
     if screen != "lobby" or not is_instance_valid(roster):
