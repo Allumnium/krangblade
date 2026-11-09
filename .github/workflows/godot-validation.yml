@@ -30,30 +30,33 @@ jobs:
         run: godot --headless --path . --script res://tests/lobby_rules_test.gd
       - name: Startup smoke test
         run: godot --headless --path . --quit-after 3
-      - name: Real ENet multiplayer round trips (2 and 8 players)
+      - name: Real ENet multiplayer round trips and disconnect recovery
         shell: bash
         run: |
           set -euo pipefail
           run_case() {
             local count="$1"
+            local mode="$2"
             local failures=0
             local pids=""
-            timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- host "$count" > "/tmp/host-$count.log" 2>&1 &
+            timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- host "$count" "$mode" > "/tmp/host-$count-$mode.log" 2>&1 &
             pids="$pids $!"
             sleep 1
             for ((n=1;n<count;n++)); do
-              timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- client "$count" "$n" > "/tmp/client-$count-$n.log" 2>&1 &
+              timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- client "$count" "$n" "$mode" > "/tmp/client-$count-$mode-$n.log" 2>&1 &
               pids="$pids $!"
             done
             for pid in $pids; do
               wait "$pid" || failures=1
             done
-            for log in "/tmp/host-$count.log" /tmp/client-"$count"-*.log; do
+            for log in "/tmp/host-$count-$mode.log" /tmp/client-"$count"-"$mode"-*.log; do
               echo "--- $log ---"
               cat "$log"
               grep -q "PASS: network" "$log" || failures=1
             done
             test "$failures" -eq 0
           }
-          run_case 2
-          run_case 8
+          run_case 2 normal
+          run_case 8 normal
+          run_case 2 drop-loading
+          run_case 2 host-leave
