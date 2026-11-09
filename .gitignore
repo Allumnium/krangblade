@@ -1,0 +1,12 @@
+# Godot 4 cache and imported assets
+.godot/
+
+# Optional generated and local files
+.import/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Game exports
+/builds/
