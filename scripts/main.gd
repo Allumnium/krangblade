@@ -168,7 +168,7 @@ func _draw() -> void:
         draw_line(center + POSITIONS[link[0]], center + POSITIONS[link[1]], Color("#7991a2"), 5.0, true)
     var font := ThemeDB.fallback_font
     for index in POSITIONS.size():
-        var point := center + POSITIONS[index]
+        var point: Vector2 = center + POSITIONS[index]
         draw_circle(point, RADIUS + 4.0, Color("#0b1720"))
         draw_circle(point, RADIUS, COLORS[owners[index]])
         draw_string(font, point + Vector2(-8, 7), str(index + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("#101e28"))
