@@ -1,0 +1,22 @@
+; Godot 4 project settings
+; This file is intended to be opened with Godot 4.x.
+
+config_version=5
+
+[application]
+
+config/name="Krangblade"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.0", "GL Compatibility")
+config/description="A minimal 2D starter project for Krangblade."
+
+[display]
+
+window/size/viewport_width=1152
+window/size/viewport_height=648
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
