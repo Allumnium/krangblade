@@ -17,6 +17,7 @@ var chat_log: RichTextLabel
 var roster: VBoxContainer
 var ready_button: Button
 var start_button: Button
+var add_bot_button: Button
 var status_label: Label
 var multiplayer_status_label: Label
 
@@ -45,6 +46,10 @@ func _root() -> VBoxContainer:
     var column := VBoxContainer.new()
     column.add_theme_constant_override("separation", 10)
     margins.add_child(column)
+    var display_row := HBoxContainer.new()
+    column.add_child(display_row)
+    display_row.add_spacer(false)
+    display_row.add_child(get_node("/root/WindowControls").call("make_button"))
     return column
 
 func _text(value: String, font_size: int = 18, color: Color = TEXT) -> Label:
@@ -186,6 +191,8 @@ func _show_lobby() -> void:
     buttons.add_child(ready_button)
     start_button = _button("START MATCH", _start_match)
     buttons.add_child(start_button)
+    add_bot_button = _button("ADD BOT", func() -> void: network.call("add_bot"))
+    buttons.add_child(add_bot_button)
 
     var right := _panel()
     right.custom_minimum_size = Vector2(430, 370)
@@ -235,6 +242,8 @@ func _refresh_roster() -> void:
         row.add_theme_constant_override("separation", 8)
         roster.add_child(row)
         var role: String = "HOST" if id == 1 else "GUEST"
+        if RULES.is_bot(id):
+            role = "BOT"
         var label := _text("%s • %s" % [str(entry.get("name", "Player")), role], 14)
         label.clip_text = true
         label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -250,6 +259,12 @@ func _refresh_roster() -> void:
         var ready := _text("READY" if bool(entry.get("ready", false)) else "WAITING", 12, MUTED)
         ready.custom_minimum_size.x = 68
         row.add_child(ready)
+        if is_host and RULES.is_bot(id):
+            var remove := Button.new()
+            remove.text = "REMOVE"
+            remove.disabled = not is_lobby
+            remove.pressed.connect(func() -> void: network.call("remove_bot", id))
+            row.add_child(remove)
     for _index in range(RULES.MAX_PLAYERS - roster_data.size()):
         roster.add_child(_text("EMPTY SLOT", 13, MUTED))
     ready_button.visible = not is_host
@@ -258,6 +273,8 @@ func _refresh_roster() -> void:
     ready_button.text = "UNREADY" if bool(my_entry.get("ready", false)) else "READY"
     start_button.visible = is_host
     start_button.disabled = not bool(network.call("can_start"))
+    add_bot_button.visible = is_host
+    add_bot_button.disabled = not is_lobby or roster_data.size() >= RULES.MAX_PLAYERS
     if is_instance_valid(chat_edit):
         chat_edit.editable = is_lobby
 

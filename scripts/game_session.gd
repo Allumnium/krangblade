@@ -7,8 +7,10 @@ signal roster_changed
 signal chat_changed
 signal status_changed
 signal owners_changed
+signal state_changed
 
 const RULES = preload("res://scripts/lobby_rules.gd")
+const SIM = preload("res://scripts/match_simulation.gd")
 const PORT: int = 24567
 const MAX_CHAT: int = 250
 const CHAT_HISTORY: int = 100
@@ -24,6 +26,12 @@ var owners: Array[int] = []
 var round_id: int = 0
 var loaded: Dictionary = {}
 var load_timer: Timer
+var simulation: RefCounted
+var map_data: Dictionary = {}
+var match_state: Dictionary = {}
+var simulation_timer: Timer
+var incoming_tick: int = -1
+var incoming_parts: Dictionary = {}
 
 func _ready() -> void:
     multiplayer.peer_connected.connect(_peer_connected)
@@ -36,8 +44,14 @@ func _ready() -> void:
     load_timer.wait_time = LOAD_TIMEOUT_SECONDS
     load_timer.timeout.connect(_load_timed_out)
     add_child(load_timer)
+    simulation_timer = Timer.new()
+    simulation_timer.wait_time = SIM.TICK
+    simulation_timer.timeout.connect(_simulation_tick)
+    add_child(simulation_timer)
 
 func _set_phase(value: String) -> void:
+    if value != "match":
+        simulation_timer.stop()
     if phase != value:
         phase = value
         phase_changed.emit()
@@ -50,13 +64,13 @@ func _sanitize_name(value: String) -> String:
     var clean: String = value.replace("\n", " ").replace("\r", " ").strip_edges().substr(0, 24)
     return clean if not clean.is_empty() else "Player"
 
-func host_game(wanted_name: String) -> bool:
+func host_game(wanted_name: String, port: int = PORT) -> bool:
     if phase != "offline":
         return false
     var peer := ENetMultiplayerPeer.new()
-    var err: int = peer.create_server(PORT, RULES.MAX_PLAYERS - 1)
+    var err: int = peer.create_server(port, RULES.MAX_PLAYERS - 1)
     if err != OK:
-        _status("Could not host (error %d). Check UDP %d." % [err, PORT])
+        _status("Could not host (error %d). Check UDP %d." % [err, port])
         return false
     multiplayer.multiplayer_peer = peer
     display_name = _sanitize_name(wanted_name)
@@ -66,7 +80,7 @@ func host_game(wanted_name: String) -> bool:
     round_id = 0
     owners.clear()
     _set_phase("lobby")
-    _status("Waiting for players (2–8 required to start).")
+    _status("Waiting for players (2–8 including bots required to start).")
     roster_changed.emit()
     chat_changed.emit()
     return true
@@ -109,6 +123,7 @@ func _reset_network() -> void:
     loaded.clear()
     owners.clear()
     round_id = 0
+    _clear_match()
     _set_phase("offline")
     roster_changed.emit()
     chat_changed.emit()
@@ -143,6 +158,12 @@ func _peer_disconnected(peer_id: int) -> void:
     if not multiplayer.is_server() or not players.has(peer_id):
         return
     var name: String = str((players[peer_id] as Dictionary).get("name", "Player"))
+    if phase == "match" and simulation != null:
+        simulation.call("take_over", peer_id)
+        players[peer_id]["name"] = name + " (bot)"
+        _send_roster()
+        _status("%s disconnected; a bot now controls their army." % name)
+        return
     players.erase(peer_id)
     loaded.erase(peer_id)
     last_message.erase(peer_id)
@@ -166,21 +187,50 @@ func _rpc_register(wanted_name: String) -> void:
     if phase != "lobby" or not multiplayer.get_peers().has(sender):
         return
     if not players.has(sender) and players.size() >= RULES.MAX_PLAYERS:
+        var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+        if peer != null:
+            peer.disconnect_peer(sender)
         return
     if players.has(sender):
         return
+    var name: String = _sanitize_name(wanted_name)
+    players[sender] = {"name": name, "team": _available_team(), "ready": false}
+    _rpc_history.rpc_id(sender, history)
+    _send_roster()
+    _system_message("%s joined." % name)
+    _status("Waiting for players to ready up.")
+
+func _available_team() -> int:
     var used_teams: Array[int] = []
     for entry in players.values():
         used_teams.append(int((entry as Dictionary).get("team", 1)))
     var team: int = 1
     while used_teams.has(team) and team < RULES.MAX_PLAYERS:
         team += 1
-    var name: String = _sanitize_name(wanted_name)
-    players[sender] = {"name": name, "team": team, "ready": false}
-    _rpc_history.rpc_id(sender, history)
+    return team
+
+func add_bot() -> void:
+    if phase != "lobby" or not multiplayer.is_server() or players.size() >= RULES.MAX_PLAYERS:
+        return
+    var id: int = -1
+    while players.has(id):
+        id -= 1
+    var name: String = "Bot %d" % -id
+    players[id] = {"name": name, "team": _available_team(), "ready": true}
+    RULES.reset_guest_ready(players)
     _send_roster()
-    _system_message("%s joined." % name)
-    _status("Waiting for players to ready up.")
+    _system_message("%s added by host." % name)
+    _status("Bot added. Guests must ready up again.")
+
+func remove_bot(id: int) -> void:
+    if phase != "lobby" or not multiplayer.is_server() or not RULES.is_bot(id) or not players.has(id):
+        return
+    var name: String = str((players[id] as Dictionary).get("name", "Bot"))
+    players.erase(id)
+    RULES.reset_guest_ready(players)
+    _send_roster()
+    _system_message("%s removed by host." % name)
+    _status("Bot removed. Guests must ready up again.")
 
 func _send_roster() -> void:
     if not multiplayer.is_server():
@@ -353,27 +403,99 @@ func _maybe_start_match() -> void:
         return
     load_timer.stop()
     var snapshot: Dictionary = players.duplicate(true)
-    var starting: Array[int] = RULES.starting_owners(snapshot)
-    _rpc_begin.rpc(round_id, snapshot, starting)
-    _activate_match(snapshot, starting)
+    simulation = SIM.new()
+    simulation.call("setup", snapshot, int(Time.get_ticks_usec() % 2147483647))
+    var generated_map: Dictionary = simulation.get("map")
+    var initial_state: Dictionary = simulation.call("snapshot")
+    _rpc_begin.rpc(round_id, snapshot, generated_map, initial_state)
+    _activate_match(snapshot, generated_map, initial_state)
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_begin(begin_round: int, snapshot: Dictionary, starting: Array[int]) -> void:
+func _rpc_begin(begin_round: int, snapshot: Dictionary, generated_map: Dictionary, initial_state: Dictionary) -> void:
     if phase != "loading" or begin_round != round_id:
         return
     if not snapshot.has(multiplayer.get_unique_id()):
         return
-    if starting.size() != RULES.MAP_NODE_COUNT:
-        return
-    _activate_match(snapshot, starting)
+    _activate_match(snapshot, generated_map, initial_state)
 
-func _activate_match(snapshot: Dictionary, starting: Array[int]) -> void:
+func _activate_match(snapshot: Dictionary, generated_map: Dictionary, initial_state: Dictionary) -> void:
     players = snapshot.duplicate(true)
-    owners = starting.duplicate()
+    map_data = generated_map.duplicate(true)
+    match_state = initial_state.duplicate(true)
+    owners.assign(match_state.owners)
     _set_phase("match")
-    _status("Match started. Capture adjacent neutral territories.")
+    _status("Set a rally target with right-click, then recruit your army.")
     roster_changed.emit()
     owners_changed.emit()
+    state_changed.emit()
+    if multiplayer.is_server():
+        simulation_timer.start()
+
+func _simulation_tick() -> void:
+    if phase != "match" or not multiplayer.is_server() or simulation == null:
+        return
+    var was_finished: bool = not str(match_state.get("result", "")).is_empty()
+    simulation.call("step")
+    match_state = simulation.call("snapshot")
+    owners.assign(match_state.owners)
+    var payload: PackedByteArray = var_to_bytes(match_state).compress(FileAccess.COMPRESSION_DEFLATE)
+    # Final results use the reliable channel so every guest observes the freeze.
+    if not str(match_state.result).is_empty() and not was_finished:
+        _rpc_final_state.rpc(round_id, payload)
+        simulation_timer.stop()
+    else:
+        # Keep each UDP packet below the MTU, including Godot's RPC overhead.
+        var parts: int = ceili(float(payload.size()) / 1000.0)
+        for part in range(parts):
+            _rpc_state.rpc(round_id, int(match_state.tick), part, parts, payload.slice(part * 1000, (part + 1) * 1000))
+    state_changed.emit()
+
+@rpc("authority", "call_remote", "unreliable", 1)
+func _rpc_state(state_round: int, state_tick: int, part: int, total: int, payload: PackedByteArray) -> void:
+    if phase != "match" or state_round != round_id:
+        return
+    if state_tick <= int(match_state.get("tick", -1)) or state_tick < incoming_tick or total < 1 or total > 1024 or part < 0 or part >= total:
+        return
+    if state_tick != incoming_tick:
+        incoming_tick = state_tick
+        incoming_parts.clear()
+    incoming_parts[part] = payload
+    if incoming_parts.size() != total:
+        return
+    var assembled := PackedByteArray()
+    for index in range(total):
+        if not incoming_parts.has(index):
+            return
+        assembled.append_array(incoming_parts[index])
+    incoming_parts.clear()
+    _accept_snapshot(state_round, assembled)
+
+func _accept_snapshot(state_round: int, payload: PackedByteArray) -> void:
+    if phase != "match" or state_round != round_id:
+        return
+    var decoded: Variant = bytes_to_var(payload.decompress_dynamic(8388608, FileAccess.COMPRESSION_DEFLATE))
+    if not decoded is Dictionary:
+        return
+    var snapshot: Dictionary = decoded
+    if snapshot.get("tick", -1) <= match_state.get("tick", -1):
+        return
+    if not str(match_state.get("result", "")).is_empty():
+        return
+    match_state = snapshot
+    owners.assign(match_state.owners)
+    state_changed.emit()
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_final_state(state_round: int, payload: PackedByteArray) -> void:
+    _accept_snapshot(state_round, payload)
+
+func _clear_match() -> void:
+    simulation_timer.stop()
+    simulation = null
+    map_data.clear()
+    match_state.clear()
+    incoming_tick = -1
+    incoming_parts.clear()
 
 func _load_timed_out() -> void:
     if multiplayer.is_server() and phase == "loading":
@@ -399,6 +521,10 @@ func _rpc_abort(abort_round: int, snapshot: Dictionary, reason: String) -> void:
 func return_to_lobby() -> void:
     if not multiplayer.is_server() or phase != "match":
         return
+    # Disconnected humans are bot-controlled only for this round.
+    for id in players.keys():
+        if int(id) > 1 and not multiplayer.get_peers().has(int(id)):
+            players.erase(id)
     RULES.reset_guest_ready(players)
     _rpc_return.rpc(round_id, players.duplicate(true))
     _back_to_lobby(players.duplicate(true), "Returned to lobby. Ready up for another match.")
@@ -409,6 +535,7 @@ func _rpc_return(match_round: int, snapshot: Dictionary) -> void:
         _back_to_lobby(snapshot, "Host returned everyone to the lobby.")
 
 func _back_to_lobby(snapshot: Dictionary, reason: String) -> void:
+    _clear_match()
     players = snapshot.duplicate(true)
     loaded.clear()
     owners.clear()
@@ -418,39 +545,35 @@ func _back_to_lobby(snapshot: Dictionary, reason: String) -> void:
     owners_changed.emit()
     get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
 
-func request_capture(index: int) -> void:
+func command(action: String, value: int = 0, extra: int = 0) -> void:
     if phase != "match":
         return
     if multiplayer.is_server():
-        _capture_for(1, index)
+        _accept_order(1, action, value, extra)
     else:
-        _rpc_capture.rpc_id(1, index)
+        _rpc_order.rpc_id(1, round_id, action, value, extra)
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_capture(index: int) -> void:
-    if not multiplayer.is_server() or phase != "match":
+func _rpc_order(order_round: int, action: String, value: int, extra: int) -> void:
+    if not multiplayer.is_server() or phase != "match" or order_round != round_id:
         return
-    _capture_for(multiplayer.get_remote_sender_id(), index)
+    var sender: int = multiplayer.get_remote_sender_id()
+    if not multiplayer.get_peers().has(sender):
+        return
+    _accept_order(sender, action, value, extra)
 
-func _capture_for(id: int, index: int) -> void:
-    if not players.has(id):
+func _accept_order(id: int, action: String, value: int, extra: int) -> void:
+    if simulation == null:
         return
-    if id != 1 and not multiplayer.get_peers().has(id):
-        return
-    var team: int = int((players[id] as Dictionary).get("team", 0))
-    if not RULES.can_capture(owners, team, index):
-        return
-    owners[index] = team
-    _rpc_owners.rpc(owners)
-    owners_changed.emit()
-    _status("Territory %d captured by Team %d." % [index + 1, team])
+    var reason: String = simulation.call("apply_command", id, action, value, extra)
+    if reason.is_empty():
+        reason = "Order accepted: %s." % action.replace("_", " ")
+    if id == 1:
+        _status(reason)
+    else:
+        _rpc_order_feedback.rpc_id(id, round_id, reason)
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_owners(snapshot: Array[int]) -> void:
-    if phase != "match" or snapshot.size() != RULES.MAP_NODE_COUNT:
-        return
-    for team in snapshot:
-        if team < 0 or team > RULES.MAX_PLAYERS:
-            return
-    owners = snapshot.duplicate()
-    owners_changed.emit()
+func _rpc_order_feedback(order_round: int, message: String) -> void:
+    if phase == "match" and order_round == round_id:
+        _status(message)

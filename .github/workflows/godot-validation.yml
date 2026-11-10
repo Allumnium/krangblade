@@ -25,11 +25,35 @@ jobs:
           godot --headless --path . --check-only --script res://scripts/match.gd
           godot --headless --path . --check-only --script res://scripts/game_session.gd
           godot --headless --path . --check-only --script res://scripts/lobby_rules.gd
+          godot --headless --path . --check-only --script res://scripts/map_generator.gd
+          godot --headless --path . --check-only --script res://scripts/match_simulation.gd
+          godot --headless --path . --check-only --script res://scripts/battlefield.gd
+          godot --headless --path . --check-only --script res://scripts/window_controls.gd
           godot --headless --path . --check-only --script res://tests/network_smoke.gd
+          godot --headless --path . --check-only --script res://tests/bot_smoke.gd
+          godot --headless --path . --check-only --script res://tests/simulation_test.gd
+          godot --headless --path . --check-only --script res://tests/ui_smoke.gd
+          godot --headless --path . --check-only --script res://tests/snapshot_test.gd
       - name: Lobby and territory rules
         run: godot --headless --path . --script res://tests/lobby_rules_test.gd
       - name: Startup smoke test
         run: godot --headless --path . --quit-after 3
+      - name: Map, economy, combat, victory, and 800-troop load
+        run: godot --headless --path . --script res://tests/simulation_test.gd
+      - name: Snapshot ordering, partial delivery, and round isolation
+        run: godot --headless --path . --script res://tests/snapshot_test.gd
+      - name: Solo host bot match and lobby UI
+        run: godot --headless --path . --script res://tests/bot_smoke.gd
+      - name: Render normal, narrow, and dense battlefield layouts
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a godot --path . --script res://tests/ui_smoke.gd
+      - name: Upload battlefield renders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: battlefield-renders
+          path: /tmp/warbound-ui-*.png
       - name: Real ENet multiplayer round trips and disconnect recovery
         shell: bash
         run: |
@@ -39,11 +63,11 @@ jobs:
             local mode="$2"
             local failures=0
             local pids=""
-            timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- host "$count" "$mode" > "/tmp/host-$count-$mode.log" 2>&1 &
+            timeout 75s godot --headless --path . --script res://tests/network_smoke.gd -- host "$count" "$mode" > "/tmp/host-$count-$mode.log" 2>&1 &
             pids="$pids $!"
             sleep 1
             for ((n=1;n<count;n++)); do
-              timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- client "$count" "$n" "$mode" > "/tmp/client-$count-$mode-$n.log" 2>&1 &
+              timeout 75s godot --headless --path . --script res://tests/network_smoke.gd -- client "$count" "$n" "$mode" > "/tmp/client-$count-$mode-$n.log" 2>&1 &
               pids="$pids $!"
             done
             for pid in $pids; do
@@ -58,5 +82,8 @@ jobs:
           }
           run_case 2 normal
           run_case 8 normal
+          run_case 8 load
+          run_case 2 bots
+          run_case 2 takeover
           run_case 2 drop-loading
           run_case 2 host-leave

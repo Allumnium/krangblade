@@ -16,10 +16,6 @@ func _initialize() -> void:
         for index in range(teams.size()):
             players[index + 1] = {"team": teams[index], "ready": true}
         assert(RULES.can_start(players))
-        var owners: Array[int] = RULES.starting_owners(players)
-        assert(owners.size() == 17)
-        for index in range(8):
-            assert(owners[index] == teams[index])
         var loaded: Dictionary = {1: true}
         assert(not RULES.all_loaded(players, loaded))
         for id in players.keys():
@@ -33,11 +29,22 @@ func _initialize() -> void:
                 assert(not bool(players[id]["ready"]))
     var coop: Dictionary = {1: {"ready": true, "team": 1}, 5: {"ready": true, "team": 1}}
     assert(RULES.can_start(coop))
-    var territory: Array[int] = RULES.starting_owners(coop)
-    assert(territory[0] == 1 and territory[1] == 1)
-    assert(RULES.can_capture(territory, 1, 8))
-    assert(not RULES.can_capture(territory, 2, 8))
-    assert(not RULES.can_capture(territory, 1, 16))
-    assert(not RULES.can_capture(territory, 1, 0))
-    print("PASS: 2-8 teams, ready reset, load barrier, and team captures")
+    var bots: Dictionary = {
+        1: {"ready": true, "team": 1},
+        -1: {"ready": true, "team": 2},
+        -2: {"ready": true, "team": 3}
+    }
+    assert(RULES.ordered_peers(bots) == [1, -1, -2])
+    RULES.reset_guest_ready(bots)
+    assert(RULES.can_start(bots))
+    assert(not RULES.all_loaded(bots, {}))
+    assert(RULES.all_loaded(bots, {1: true}))
+    bots[7] = {"ready": true, "team": 4}
+    assert(not RULES.all_loaded(bots, {1: true}))
+    assert(RULES.all_loaded(bots, {1: true, 7: true}))
+    RULES.reset_guest_ready(bots)
+    assert(not RULES.can_start(bots))
+    assert(bool(bots[-1]["ready"]) and bool(bots[-2]["ready"]))
+    assert(not bool(bots[7]["ready"]))
+    print("PASS: 2-8 teams, ready reset, and human/bot load barrier")
     quit(0)
