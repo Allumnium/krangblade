@@ -99,9 +99,13 @@ func _show_menu() -> void:
     var actions := VBoxContainer.new()
     actions.add_theme_constant_override("separation", 12)
     center.add_child(actions)
+    actions.add_child(_button("SINGLE PLAYER", _start_solo))
     actions.add_child(_button("MULTIPLAYER", _show_multiplayer))
     actions.add_child(_button("QUIT", func() -> void: get_tree().quit()))
     col.add_spacer(false)
+
+func _start_solo() -> void:
+    network.call("start_solo")
 
 func _show_multiplayer() -> void:
     screen = "multiplayer"

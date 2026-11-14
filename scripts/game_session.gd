@@ -7,8 +7,10 @@ signal roster_changed
 signal chat_changed
 signal status_changed
 signal owners_changed
+signal economy_changed
 
 const RULES = preload("res://scripts/lobby_rules.gd")
+const ECONOMY = preload("res://scripts/economy_rules.gd")
 const PORT: int = 24567
 const MAX_CHAT: int = 250
 const CHAT_HISTORY: int = 100
@@ -21,9 +23,13 @@ var players: Dictionary = {}
 var history: Array[Dictionary] = []
 var last_message: Dictionary = {}
 var owners: Array[int] = []
+var buildings: Array[String] = []
+var stocks: Array[Dictionary] = []
+var is_solo: bool = false
 var round_id: int = 0
 var loaded: Dictionary = {}
 var load_timer: Timer
+var economy_timer: Timer
 
 func _ready() -> void:
     multiplayer.peer_connected.connect(_peer_connected)
@@ -36,6 +42,10 @@ func _ready() -> void:
     load_timer.wait_time = LOAD_TIMEOUT_SECONDS
     load_timer.timeout.connect(_load_timed_out)
     add_child(load_timer)
+    economy_timer = Timer.new()
+    economy_timer.wait_time = 1.0
+    economy_timer.timeout.connect(_economy_tick)
+    add_child(economy_timer)
 
 func _set_phase(value: String) -> void:
     if phase != value:
@@ -50,6 +60,26 @@ func _sanitize_name(value: String) -> String:
     var clean: String = value.replace("\n", " ").replace("\r", " ").strip_edges().substr(0, 24)
     return clean if not clean.is_empty() else "Player"
 
+## Solo runs the same authoritative match simulation as a host, with no ENet peer.
+func start_solo() -> bool:
+    if phase != "offline":
+        return false
+    is_solo = true
+    players = {1: {"name": _sanitize_name(display_name), "team": 1, "ready": true}}
+    history.clear()
+    last_message.clear()
+    round_id = 1
+    _activate_match(players, RULES.starting_owners(players))
+    get_tree().call_deferred("change_scene_to_file", "res://scenes/match.tscn")
+    return true
+
+func leave_solo() -> void:
+    if not is_solo or phase != "match":
+        return
+    _reset_network()
+    _status("Solo match ended.")
+    get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
+
 func host_game(wanted_name: String) -> bool:
     if phase != "offline":
         return false
@@ -59,6 +89,7 @@ func host_game(wanted_name: String) -> bool:
         _status("Could not host (error %d). Check UDP %d." % [err, PORT])
         return false
     multiplayer.multiplayer_peer = peer
+    is_solo = false
     display_name = _sanitize_name(wanted_name)
     players = {1: {"name": display_name, "team": 1, "ready": true}}
     history.clear()
@@ -84,6 +115,7 @@ func join_game(wanted_name: String, address: String) -> bool:
         _status("Could not connect (error %d)." % err)
         return false
     multiplayer.multiplayer_peer = peer
+    is_solo = false
     display_name = _sanitize_name(wanted_name)
     players.clear()
     history.clear()
@@ -102,17 +134,22 @@ func leave_session() -> void:
 
 func _reset_network() -> void:
     load_timer.stop()
+    economy_timer.stop()
+    is_solo = false
     multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
     players.clear()
     history.clear()
     last_message.clear()
     loaded.clear()
     owners.clear()
+    buildings.clear()
+    stocks.clear()
     round_id = 0
     _set_phase("offline")
     roster_changed.emit()
     chat_changed.emit()
     owners_changed.emit()
+    economy_changed.emit()
 
 func _connected() -> void:
     if phase == "connecting":
@@ -370,10 +407,18 @@ func _rpc_begin(begin_round: int, snapshot: Dictionary, starting: Array[int]) ->
 func _activate_match(snapshot: Dictionary, starting: Array[int]) -> void:
     players = snapshot.duplicate(true)
     owners = starting.duplicate()
+    buildings = ECONOMY.starting_buildings(players)
+    stocks = ECONOMY.empty_stocks()
     _set_phase("match")
-    _status("Match started. Capture adjacent neutral territories.")
+    if is_solo:
+        _status("Solo economy sandbox. Claim adjacent territories and build a supply chain.")
+    else:
+        _status("Match started. Capture adjacent territories and build a supply chain.")
+    if is_solo or multiplayer.is_server():
+        economy_timer.start()
     roster_changed.emit()
     owners_changed.emit()
+    economy_changed.emit()
 
 func _load_timed_out() -> void:
     if multiplayer.is_server() and phase == "loading":
@@ -411,11 +456,15 @@ func _rpc_return(match_round: int, snapshot: Dictionary) -> void:
 func _back_to_lobby(snapshot: Dictionary, reason: String) -> void:
     players = snapshot.duplicate(true)
     loaded.clear()
+    economy_timer.stop()
     owners.clear()
+    buildings.clear()
+    stocks.clear()
     _set_phase("lobby")
     _status(reason)
     roster_changed.emit()
     owners_changed.emit()
+    economy_changed.emit()
     get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
 
 func request_capture(index: int) -> void:
@@ -441,7 +490,8 @@ func _capture_for(id: int, index: int) -> void:
     if not RULES.can_capture(owners, team, index):
         return
     owners[index] = team
-    _rpc_owners.rpc(owners)
+    if not is_solo:
+        _rpc_owners.rpc(owners)
     owners_changed.emit()
     _status("Territory %d captured by Team %d." % [index + 1, team])
 
@@ -454,3 +504,52 @@ func _rpc_owners(snapshot: Array[int]) -> void:
             return
     owners = snapshot.duplicate()
     owners_changed.emit()
+
+## Construction is validated by the authoritative host (or local solo session).
+func request_build(index: int, kind: String) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _build_for(1, index, kind)
+    else:
+        _rpc_build.rpc_id(1, index, kind)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_build(index: int, kind: String) -> void:
+    if multiplayer.is_server() and phase == "match":
+        _build_for(multiplayer.get_remote_sender_id(), index, kind)
+
+func _build_for(id: int, index: int, kind: String) -> void:
+    if not players.has(id) or (id != 1 and not multiplayer.get_peers().has(id)):
+        return
+    var team: int = int((players[id] as Dictionary).get("team", 0))
+    if not ECONOMY.can_build(owners, buildings, team, index, kind):
+        return
+    buildings[index] = kind
+    _publish_economy()
+    _status("Team %d configured territory %d: %s." % [
+        team, index + 1, kind if not kind.is_empty() else "empty"])
+
+func _economy_tick() -> void:
+    if phase != "match" or not (is_solo or multiplayer.is_server()):
+        return
+    ECONOMY.tick(owners, buildings, stocks)
+    _publish_economy()
+
+func _publish_economy() -> void:
+    if not is_solo:
+        _rpc_economy.rpc(round_id, buildings, stocks)
+    economy_changed.emit()
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_economy(update_round: int, new_buildings: Array[String],
+        new_stocks: Array[Dictionary]) -> void:
+    if phase != "match" or update_round != round_id:
+        return
+    if new_buildings.size() != RULES.MAP_NODE_COUNT             or new_stocks.size() != RULES.MAP_NODE_COUNT:
+        return
+    buildings = new_buildings.duplicate()
+    stocks.clear()
+    for inventory in new_stocks:
+        stocks.append(inventory.duplicate())
+    economy_changed.emit()
