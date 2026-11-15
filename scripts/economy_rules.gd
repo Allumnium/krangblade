@@ -113,6 +113,35 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
     return {"stock": stock, "cargo": cargo, "resources": total, "population": population,
         "planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters, "miners": miners}
 
+## Host-only sample history; only the derived rates are replicated.
+static func sample_resource_rates(state: Dictionary, history: Dictionary) -> void:
+    var now: float = float(state["elapsed"])
+    var rates: Dictionary = {}
+    for player in state["teams"]:
+        var totals: Dictionary = empire_totals(state, int(player))["resources"]
+        var samples: Array = history.get(player, [])
+        if not samples.is_empty() and is_equal_approx(float(samples.back()["time"]), now):
+            samples.pop_back()
+        samples.append({"time": now, "stock": totals})
+        var cutoff: float = now - 5.0
+        while samples.size() > 1 and float(samples[1]["time"]) <= cutoff:
+            samples.pop_front()
+        history[player] = samples
+        var first: Dictionary = samples[0]
+        var start_time: float = maxf(cutoff, float(first["time"]))
+        var duration: float = now - start_time
+        var result: Dictionary = empty_stock()
+        if duration > EPS:
+            for resource in RESOURCES:
+                var previous: float = float(first["stock"][resource])
+                if samples.size() > 1 and start_time > float(first["time"]):
+                    var second: Dictionary = samples[1]
+                    var fraction: float = (start_time - float(first["time"])) / (float(second["time"]) - float(first["time"]))
+                    previous = lerpf(previous, float(second["stock"][resource]), fraction)
+                result[resource] = (float(totals[resource]) - previous) / duration
+        rates[player] = result
+    state["resource_rates"] = rates
+
 static func planet_teams(state: Dictionary) -> Array[int]:
     var result: Array[int] = []
     var teams: Dictionary = state["teams"]

@@ -33,6 +33,7 @@ var loaded: Dictionary = {}
 var load_timer: Timer
 var economy_timer: Timer
 var snapshot_elapsed: float = 0.0
+var resource_history: Dictionary = {}
 
 func _ready() -> void:
     multiplayer.peer_connected.connect(_peer_connected)
@@ -408,9 +409,11 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
     players = snapshot.duplicate(true)
     snapshot_elapsed = 0.0
     economy = ECONOMY.create(MAP.generate(map_seed), players, RULES.ordered_peers(players))
+    resource_history.clear()
+    ECONOMY.sample_resource_rates(economy, resource_history)
     owners = ECONOMY.planet_teams(economy)
     _set_phase("match")
-    _status("Empire development sandbox. Build colony ships to settle neutral planets and develop your economy.")
+    _status("Match in progress")
     if is_solo or multiplayer.is_server():
         economy_timer.start()
     roster_changed.emit()
@@ -538,6 +541,7 @@ func _economy_tick() -> void:
     if phase != "match" or not (is_solo or multiplayer.is_server()):
         return
     ECONOMY.step(economy, SIM_STEP)
+    ECONOMY.sample_resource_rates(economy, resource_history)
     snapshot_elapsed += SIM_STEP
     if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
         _publish_economy()
