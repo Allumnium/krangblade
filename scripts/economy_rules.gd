@@ -29,6 +29,38 @@ const MAX_QUEUE: int = 5
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
 const MINING_STAY: float = 5.0
 
+# Decorative bodies are derived from immutable system data, not simulated entities.
+# Separate RNG keeps the economy's seeded resource generation unchanged.
+static func system_bodies(system: Dictionary, seed_value: int, index: int) -> Array:
+    var rng := RandomNumberGenerator.new()
+    rng.seed = seed_value + 31013 + index * 7919
+    var weights: Dictionary = {}
+    var richness: float = 0.0
+    for resource in EXTRACTED:
+        var amount: float = float(system["abundance"].get(resource, 0.0))
+        weights[resource] = amount
+        richness += amount
+    var organic: float = maxf(0.0, float(system["bonuses"].get("Organics", 1.0)) - 1.0)
+    weights["Organics"] = organic * 2.0
+    richness += organic
+    var count: int = clampi(roundi(2.0 + richness * 0.64 + rng.randf_range(-0.65, 0.65)), 2, 6)
+    var bodies: Array = []
+    for i in range(count):
+        var total: float = 0.8
+        for resource in weights:
+            total += float(weights[resource])
+        var choice: float = rng.randf_range(0.0, total)
+        var material: String = ""
+        for resource in weights:
+            choice -= float(weights[resource])
+            if choice < 0.0:
+                material = resource
+                break
+        bodies.append({"resource": material, "orbit": lerpf(0.28, 0.88, float(i) / float(count - 1)),
+            "phase": rng.randf_range(0.0, TAU), "speed": rng.randf_range(0.65, 1.0) / (1.0 + float(i) * 0.42),
+            "size": rng.randf_range(0.045, 0.069)})
+    return bodies
+
 static func empty_stock() -> Dictionary:
     var result: Dictionary = {}
     for resource in RESOURCES:

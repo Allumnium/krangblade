@@ -233,6 +233,18 @@ func _initialize() -> void:
     assert(ECON.current_year(demographics) == 424)
     print("PASS: 30-year doubling, critically damped population, food shortage, farm upgrades and year clock")
 
+    # Visual planet count loosely follows system richness, without modifying state.
+    var poor: Dictionary = {"abundance": {"Metals": 0.0, "Plastics": 0.0, "Crystals": 0.0}, "bonuses": {"Organics": 1.0}}
+    var rich: Dictionary = {"abundance": {"Metals": 2.0, "Plastics": 2.0, "Crystals": 2.0}, "bonuses": {"Organics": 1.8}}
+    var poor_bodies: Array = ECON.system_bodies(poor, 123, 0)
+    var rich_bodies: Array = ECON.system_bodies(rich, 123, 0)
+    assert(rich_bodies.size() > poor_bodies.size())
+    assert(poor_bodies == ECON.system_bodies(poor, 123, 0))
+    assert(rich_bodies == ECON.system_bodies(rich, 123, 0))
+    for body in poor_bodies:
+        assert(body["resource"] == "")
+    for body in rich_bodies:
+        assert(float(body["orbit"]) + float(body["size"]) < 1.0)
     # Construction is proportional, time-dependent and fully refundable.
     p["levels"]["Metals"] = 0
     p["stock"]["Metals"] = 30.0

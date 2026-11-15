@@ -1,4 +1,4 @@
-# Warbound — planetary strategy RTS
+# Warbound — star-system strategy RTS
 
 Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three intended playable races. Only Empire is implemented. ENet multiplayer uses UDP 24567 (LAN/Tailscale); no Steam dependency.
 
@@ -71,3 +71,7 @@ The single-row match HUD retains menu/reset, six resource totals and their rolli
 ## Construction queue and mining duration
 
 Each planet has five construction slots total including ongoing jobs. Shipyard upgrade orders wait in the shared queue for their specific yard and use fixed-duration upgrade work; they do not interrupt an active ship build. Future yards appear as construction progress rows until completed, when they become regular yard rows. Per-type Auto toggles replenish one queued hull of that type when a slot is available; switching off leaves the already queued order. Canceling an auto-produced order while Auto is enabled permits it to be queued again. Mining ships spend at least five years on site before returning, even if their hold fills or the selected chunk runs out earlier; trips canceled before reaching the chunk can return early. Multiplayer snapshots use compressed state on a dedicated reliable channel to reduce large-map traffic and separate lobby transitions.
+
+## Star systems
+
+Every graph node is a single star system for ownership, population, resources, logistics, construction and upgrades. Named systems replace planet terminology in the UI. At a distance the map shows a luminous star and team ring; close zoom reveals 2–6 animated decorative planets. Number is loosely driven by initial natural richness; planet hues sample local Metals, Plastics, Crystals and Organics suitability. A separate seeded visual RNG ensures stable layouts without changing economy generation. Visual planets are not separately claimable, selectable or simulated, and clicking within the system selects the system. The legacy internal `planets` key and map script names are retained to avoid unnecessary protocol churn. Shipyard cards in the left panel show individual levels, activity and an upgrade button for that specific yard; orders still share the five-slot queue. The right panel has build commands and no yard dropdown.
