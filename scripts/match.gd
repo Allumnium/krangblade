@@ -392,7 +392,7 @@ func _build_global_bar(parent: Container) -> void:
         line.add_child(value)
         global_resource_labels[resource] = value
         global_resource_tiles[resource] = tile
-    global_population_label = _global_stat(stats, "POP  0 M", Color("#b2e2a9"))
+    global_population_label = _global_stat(stats, "POP  0", Color("#b2e2a9"))
     global_craft_label = _global_stat(stats, "CRAFT  0", Color("#c7a4ff"))
     global_planet_label = _global_stat(stats, "WORLDS  0", HUD.ACCENT)
 
@@ -425,8 +425,8 @@ func _refresh_global_bar(state: Dictionary) -> void:
         global_resource_labels[resource].text = _compact_amount(value)
         global_resource_tiles[resource].tooltip_text = "%s: %.1f total\nPlanet inventories: %.1f\nShip cargo: %.1f" % [
             resource, value, float(totals["stock"][resource]), float(totals["cargo"][resource])]
-    global_population_label.text = "POP  %s" % _compact_amount(float(totals["population"]) * 1000000.0)
-    global_population_label.tooltip_text = "Population across owned planets: %.2f million" % float(totals["population"])
+    global_population_label.text = "POP  %s" % _compact_amount(float(totals["population"]))
+    global_population_label.tooltip_text = "Population across owned planets: %.0f" % float(totals["population"])
     global_craft_label.text = "CRAFT  %d" % int(totals["craft"])
     global_craft_label.tooltip_text = "%d logistics / %d colony / %d fighters / %d miners" % [int(totals["logistics"]), int(totals["colonies"]), int(totals["fighters"]), int(totals["miners"])]
     global_planet_label.text = "WORLDS  %d" % int(totals["planets"])
@@ -563,7 +563,8 @@ func _refresh() -> void:
     environment_label.tooltip_text = "Independent environmental modifier for future advanced components; not applied to base resources."
     var population: float = float(p["population"])
     var capacity: float = ECONOMY.population_capacity(p)
-    population_label.text = "Population  %.1f / %.1f M   •   %+.2f M/yr\nResource output  ×%.2f" % [population, capacity, ECONOMY.population_growth(p), ECONOMY.population_multiplier(p)]
+    population_label.text = "Population  %s / %s   •   %+.0f/yr\nResource output  ×%.2f" % [_compact_amount(population), _compact_amount(capacity), ECONOMY.population_growth(p), ECONOMY.population_multiplier(p)]
+    population_label.tooltip_text = "%.0f people / %.0f supported" % [population, capacity]
     population_bar.visible = capacity > 0.0
     population_bar.value = 100.0 * population / maxf(capacity, 1.0)
     inventory.show()
@@ -578,7 +579,7 @@ func _refresh() -> void:
     elif resource == "Organics":
         var output: float = ECONOMY.rate(p, resource)
         var demand: float = ECONOMY.organics_demand(p)
-        detail = "Farming: %.2f/yr  •  Demand: %.2f/yr\nNet: %+.2f/yr  •  Supports %.1f M" % [output, demand, output - demand, ECONOMY.population_capacity(p)]
+        detail = "Farming: %.2f/yr  •  Demand: %.2f/yr\nNet: %+.2f/yr  •  Supports %s people" % [output, demand, output - demand, _compact_amount(ECONOMY.population_capacity(p))]
     resource_detail.text = "%s\nPlanet bonus: %.2fx" % [detail, modifier]
     var trade_resource: String = _trade_resource()
     var t: Dictionary = p["thresholds"][trade_resource]

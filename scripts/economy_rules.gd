@@ -4,11 +4,12 @@ const MAP = preload("res://scripts/planet_map.gd")
 const RESOURCES = ["Metals", "Plastics", "Textiles", "Organics", "Tech", "Crystals"]
 const EXTRACTED = ["Metals", "Plastics", "Crystals"]
 const ACTIVE_PRODUCTION = ["Metals", "Plastics", "Organics", "Crystals"]
-# Prototype demographic scale; population is expressed in millions.
-const HOME_POPULATION: float = 100.0
-const COLONY_POPULATION: float = 10.0
+# Population is expressed in people (fractional values retained in simulation).
+const HOME_POPULATION: float = 10000.0
+const COLONY_POPULATION: float = 1000.0
+const POPULATION_DOUBLING_YEARS: float = 30.0
 const ORGANICS_PER_LEVEL: float = 8.0
-const POPULATION_PER_ORGANICS_RATE: float = 12.5
+const POPULATION_PER_ORGANICS_RATE: float = 12500.0
 # Critically damped demographic response (seconds = years).
 const POPULATION_RESPONSE: float = 0.065
 const FARM_VARIATION: float = 0.05
@@ -224,8 +225,21 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
     var slope: float = velocity + omega * error
     var decay: float = exp(-omega * dt)
     var next: float = target + (error + slope * dt) * decay
+    var next_velocity: float = (velocity - omega * slope * dt) * decay
+    # Far below equilibrium, limit positive growth to a 30-year doubling.
+    # Near capacity the damped response takes over without a hard population cap.
+    var growth_constant: float = log(2.0) / POPULATION_DOUBLING_YEARS
+    var growth_ceiling: float = current * exp(growth_constant * dt)
+    if next > growth_ceiling:
+        next = growth_ceiling
+        next_velocity = growth_constant * next
+    # A food shortfall prevents positive growth even with demographic momentum.
+    var food_available: float = float(planet["stock"]["Organics"]) + rate(planet, "Organics") * dt
+    if food_available + EPS < organics_demand(planet) * dt:
+        next = minf(next, current)
+        next_velocity = minf(next_velocity, 0.0)
     planet["population"] = maxf(0.0, next)
-    planet["population_velocity"] = (velocity - omega * slope * dt) * decay if next > 0.0 else 0.0
+    planet["population_velocity"] = minf(next_velocity, growth_constant * next) if next > 0.0 else 0.0
 
 static func max_size(level: int) -> int:
     return level
