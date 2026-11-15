@@ -97,3 +97,5 @@ Cargo inspectors use non-wrapping numeric columns and bounded scrolling, with la
 ## Versioning
 
 The main menu displays the game version directly from `project.godot` (`application/config/version`). Starting at 0.1.0, every subsequent commit must increment MAJOR.MINOR.PATCH: patch for fixes and small changes, minor for new features, major for breaking milestones. Reset lower components when bumping a higher component. The validation workflow checks numeric ordering for every first-parent commit since the version was introduced (and verifies the current value on manual runs). Update `config/version` in the same commit; do not use a separate bump commit. Squash merges retain the branch's final version. CI reports failure if a subsequent commit omits a bump. The multiplayer regression host waits for all tested guests to finish and disconnect rather than exiting after an arbitrary delay.
+
+Version 0.1.2: compact non-wrapping system production rows, 64× max zoom and distinctive procedurally shaded planet textures. Surface appearances remain cosmetic, seeded, and cached locally. No moons are simulated.

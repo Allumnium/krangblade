@@ -61,7 +61,8 @@ static func system_bodies(system: Dictionary, seed_value: int, index: int) -> Ar
                 break
         bodies.append({"resource": material, "orbit": lerpf(0.28, 0.88, float(i) / float(count - 1)),
             "phase": rng.randf_range(0.0, TAU), "speed": rng.randf_range(0.65, 1.0) / (1.0 + float(i) * 0.42),
-            "size": rng.randf_range(0.045, 0.069)})
+            "size": rng.randf_range(0.035, 0.095), "surface_seed": rng.randi_range(1, 2147483646),
+            "surface_angle": rng.randf_range(0.0, TAU), "muted": rng.randf_range(0.0, 0.65), "bands": rng.randf() < 0.3})
     return bodies
 
 static func empty_stock() -> Dictionary:

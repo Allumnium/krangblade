@@ -247,9 +247,9 @@ func _run() -> void:
     assert((view.call("_world_point", screen) as Vector2).is_equal_approx(world))
     assert(is_equal_approx(float(view.get("zoom")), 2.0))
     view.call("_zoom_at", screen, 100.0)
-    assert(is_equal_approx(float(view.get("zoom")), 16.0))
+    assert(is_equal_approx(float(view.get("zoom")), 64.0))
     assert((view.call("_world_point", screen) as Vector2).is_equal_approx(world))
-    view.call("_zoom_at", screen, 0.125)
+    view.call("_zoom_at", screen, 0.03125)
     mouse.button_index = MOUSE_BUTTON_RIGHT
     view.call("_map_input", mouse)
     var motion := InputEventMouseMotion.new()
@@ -304,6 +304,14 @@ func _run() -> void:
     normal["abundance"]["Metals"] = 1.5
     assert(view.call("_system_bonus_text", normal) == "Metal production 150%")
     var production: Dictionary = view.get("production_values")
+    await process_frame
+    for resource in production:
+        for key in ["level", "rate"]:
+            var value: Label = production[resource][key]
+            assert(value.autowrap_mode == TextServer.AUTOWRAP_OFF)
+            assert(value.get_line_count() == 1)
+            assert(value.size.x >= value.get_minimum_size().x)
+        assert((production[resource]["level"].get_parent() as Control).size.y < 36.0)
     assert(production.size() == 6)
     assert((production["Metals"]["level"] as Label).text == "Lv 1")
     assert((production["Metals"]["rate"] as Label).text.ends_with("/yr"))
@@ -314,6 +322,11 @@ func _run() -> void:
     var body_start: Vector2 = view.call("_body_position", bodies[0], 60.0, 0.0)
     var body_next: Vector2 = view.call("_body_position", bodies[0], 60.0, 1.0)
     assert(not body_start.is_equal_approx(body_next))
+    assert(bodies[0]["surface_seed"] != bodies[1]["surface_seed"])
+    var first_texture: Texture2D = view.call("_body_texture", bodies[0])
+    var second_texture: Texture2D = view.call("_body_texture", bodies[1])
+    assert(first_texture != second_texture)
+    assert(first_texture == view.call("_body_texture", bodies[0]))
     assert(is_equal_approx(body_start.length(), body_next.length()))
     assert(view.call("_system_visual", 0, state) == layout)
     var orbit_start: Vector2 = view.call("_orbit_offset", 0, 17.0, 0.0)

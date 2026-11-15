@@ -44,106 +44,13 @@ jobs:
                   raise SystemExit(f"Version {current} must exceed target {target}")
               if os.environ["EVENT"] == "pull_request":
                   base = git("merge-base", base, head)
-              commits = git("rev-list", "--first-parent", "--reverse", f"{base}..{head}").splitlines()
               prior = version(base)
-              for commit in commits:
+              for commit in git("rev-list", "--first-parent", "--reverse", f"{base}..{head}").splitlines():
                   next_version = version(commit)
                   if prior is not None and (next_version is None or next_version <= prior):
                       raise SystemExit(f"{commit}: version must increase from {prior} to a newer MAJOR.MINOR.PATCH")
                   prior = next_version
           print("Verified version:", current)
-          PY
-      - uses: chickensoft-games/setup-godot@v2
-        with:
-          version: 4.7.2
-          use-dotnet: false
-          include-templates: false
-      - name: Import
-        run: godot --headless --path . --import
-      - name: Check resource metadata is tracked and stable
-        run: |
-          changes="$(git status --porcelain --untracked-files=all -- '*.uid' '*.import')"
-          if [ -n "$changes" ]; then
-            printf '%s\n' "$changes"
-            echo "Commit generated resource .uid and asset .import sidecars."
-            exit 1
-          fi
-      - name: Parse scenes and network scripts
-        run: |
-          godot --headless --path . --check-only --script res://scripts/main.gd
-          godot --headless --path . --check-only --script res://scripts/match.gd
-          godot --headless --path . --check-only --script res://scripts/game_session.gd
-          godot --headless --path . --check-only --script res://scripts/lobby_rules.gd
-          godot --headless --path . --check-only --script res://scripts/planet_map.gd
-          godot --headless --path . --check-only --script res://scripts/economy_rules.gd
-          godot --headless --path . --check-only --script res://tests/economy_rules_test.gd
-          godot --headless --path . --check-only --script res://tests/solo_smoke.gd
-          godot --headless --path . --check-only --script res://tests/network_smoke.gd
-      - name: Lobby and territory rules
-        run: godot --headless --path . --script res://tests/lobby_rules_test.gd
-      - name: Economy and logistics rules
-        run: godot --headless --path . --script res://tests/economy_rules_test.gd
-      - name: Solo match smoke test
-        run: godot --headless --path . --script res://tests/solo_smoke.gd
-      - name: Planet map interaction smoke test
-        run: timeout 30s godot --headless --path . --script res://tests/map_view_smoke.gd
-      - name: Startup smoke test
-        run: godot --headless --path . --quit-after 3
-      - name: Real ENet multiplayer round trips and disconnect recovery
-        shell: bash
-        run: |
-          set -euo pipefail
-          run_case() {
-            local count="$1"
-            local mode="$2"
-            local failures=0
-            local pids=""
-            timeout 75s godot --headless --path . --script res://tests/network_smoke.gd -- host "$count" "$mode" > "/tmp/host-$count-$mode.log" 2>&1 &
-            pids="$pids $!"
-            sleep 1
-            for ((n=1;n<count;n++)); do
-              timeout 75s godot --headless --path . --script res://tests/network_smoke.gd -- client "$count" "$n" "$mode" > "/tmp/client-$count-$mode-$n.log" 2>&1 &
-              pids="$pids $!"
-            done
-            for pid in $pids; do
-              wait "$pid" || failures=1
-            done
-            for log in "/tmp/host-$count-$mode.log" /tmp/client-"$count"-"$mode"-*.log; do
-              echo "--- $log ---"
-              cat "$log"
-              grep -q "PASS: network" "$log" || failures=1
-            done
-            test "$failures" -eq 0
-          }
-          run_case 2 normal
-          run_case 8 normal
-          run_case 2 drop-loading
-          run_case 2 host-leave
-, data, re.M)
-              if not match:
-                  return None
-              value = match.group(1)
-              if not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', value):
-                  raise SystemExit(f"{commit}: invalid version {value}; use MAJOR.MINOR.PATCH")
-              return tuple(map(int, value.split(".")))
-          head = os.environ["HEAD"]
-          base = os.environ.get("BASE", "")
-          current = version(head)
-          if current is None:
-              raise SystemExit("project.godot must specify config/version")
-          if not base or set(base) == {"0"}:
-              print("Version:", current)
-          else:
-              if os.environ["EVENT"] == "pull_request":
-                  base = git("merge-base", base, head)
-              commits = git("rev-list", "--first-parent", "--reverse", f"{base}..{head}").splitlines()
-              prior = version(base)
-              for commit in commits:
-                  next_version = version(commit)
-                  if prior is not None and (next_version is None or next_version <= prior):
-                      raise SystemExit(f"{commit}: version must increase from {prior} to a newer MAJOR.MINOR.PATCH")
-                  prior = next_version
-              print("Verified version:", current)
           PY
       - uses: chickensoft-games/setup-godot@v2
         with:

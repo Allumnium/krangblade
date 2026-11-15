@@ -14,7 +14,7 @@ const HEADER_HEIGHT: float = 46.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
 const MIN_ZOOM: float = 0.5
-const MAX_ZOOM: float = 16.0
+const MAX_ZOOM: float = 64.0
 const SNAPSHOT_SECONDS: float = 0.2
 
 var session: Node
@@ -466,11 +466,16 @@ func _build_production_summary() -> void:
         icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
         row.add_child(icon)
         var name_label := _label(resource, 12)
+        name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
         name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         row.add_child(name_label)
         var level := _label("", 12)
+        level.autowrap_mode = TextServer.AUTOWRAP_OFF
+        level.custom_minimum_size.x = 32
+        level.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(level)
         var rate_label := _label("", 12)
+        rate_label.autowrap_mode = TextServer.AUTOWRAP_OFF
         rate_label.custom_minimum_size.x = 55
         rate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(rate_label)
@@ -886,7 +891,9 @@ func _refresh() -> void:
     environment_label.tooltip_text = "Natural production modifiers; advanced manufacturing is reserved for future recipes."
     for resource in ECONOMY.RESOURCES:
         production_values[resource]["level"].text = "Lv %d" % int(p["levels"][resource])
-        production_values[resource]["rate"].text = "%.1f/yr" % ECONOMY.rate(p, resource)
+        var annual: float = ECONOMY.rate(p, resource)
+        production_values[resource]["rate"].text = (_compact_amount(annual) if annual >= 1000.0 else "%.1f" % annual) + "/yr"
+        production_values[resource]["rate"].tooltip_text = "%.2f/yr" % annual
     var population: float = float(p["population"])
     population_label.text = "Population %s\n%+.0f/yr" % [_compact_amount(population), ECONOMY.population_growth(p)]
     population_label.tooltip_text = "%.0f people" % population
@@ -1142,12 +1149,48 @@ func _planet_radius(index: int, state: Dictionary) -> float:
     var system: Dictionary = state["planets"][index]
     var ideal: float = RADIUS * float(system.get("size_factor", 1.0)) * zoom
     var spacing: float = float(_system_visual(index, state)["spacing"]) * _fit() * zoom
-    return clampf(minf(ideal, spacing * 0.39), 4.0, 200.0)
+    return clampf(minf(ideal, spacing * 0.39), 4.0, 720.0)
 
 func _body_position(body: Dictionary, radius: float, time: float) -> Vector2:
     return Vector2.from_angle(float(body["phase"]) + time * float(body["speed"]) * 0.22) * radius * float(body["orbit"])
 
+# Generate a unique shaded surface once per visible body; no separate highlight dot.
+func _body_texture(body: Dictionary) -> Texture2D:
+    if body.has("texture"):
+        return body["texture"]
+    var noise := FastNoiseLite.new()
+    noise.seed = int(body["surface_seed"])
+    noise.frequency = 0.065
+    noise.fractal_octaves = 3
+    var image := Image.create(96, 96, false, Image.FORMAT_RGBA8)
+    var material: String = body["resource"]
+    var base: Color = HUD.COLORS.get(material, Color("#7d8b9b"))
+    base = base.lerp(Color("#7b8790"), float(body["muted"]))
+    var light := Vector3(-0.55, -0.45, 0.70).normalized()
+    var angle: float = float(body["surface_angle"])
+    var bands: bool = bool(body["bands"])
+    for y in range(96):
+        for x in range(96):
+            var q := (Vector2(x + 0.5, y + 0.5) - Vector2(48, 48)) / 47.0
+            var rr: float = q.length_squared()
+            if rr >= 1.0:
+                continue
+            var z: float = sqrt(1.0 - rr)
+            var uv: Vector2 = q.rotated(angle)
+            var grain: float = noise.get_noise_2d(uv.x * 90.0 + 300.0 * z, uv.y * 90.0)
+            var terrain: float = grain * 0.7
+            if bands:
+                terrain = sin(uv.y * 29.0 + grain * 2.0) * 0.24 + grain * 0.2
+            var diffuse: float = maxf(0.0, Vector3(q.x, q.y, z).dot(light))
+            var color: Color = base.lerp(Color("#d6e1e9"), maxf(0.0, terrain) * 0.7).darkened(clampf(0.74 - diffuse * 0.64 - terrain * 0.18, 0.0, 0.85))
+            color.a = clampf((1.0 - sqrt(rr)) * 47.0, 0.0, 1.0)
+            image.set_pixel(x, y, color)
+    body["texture"] = ImageTexture.create_from_image(image)
+    return body["texture"]
+
 func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
+    if not get_viewport_rect().grow(radius + 32.0).has_point(pos):
+        return
     var system: Dictionary = state["planets"][index]
     var color: Color = _planet_color(system)
     var star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
@@ -1157,12 +1200,12 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
             var orbit: float = radius * float(body["orbit"])
             map_canvas.draw_arc(pos, orbit, 0.0, TAU, 48, Color(tint, 0.24), 0.8, true)
             var point: Vector2 = pos + _body_position(body, radius, visual_clock)
-            var material: String = body["resource"]
-            var body_color: Color = HUD.COLORS.get(material, Color("#7d8b9b"))
             var body_radius: float = maxf(2.1, radius * float(body["size"]))
-            map_canvas.draw_circle(point, body_radius, body_color.darkened(0.4), true)
-            map_canvas.draw_texture_rect(PLANET, Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(body_color.lightened(0.45), 0.8))
-            map_canvas.draw_circle(point - (point - pos).normalized() * body_radius * 0.27, body_radius * 0.35, Color(body_color.lightened(0.4), 0.55), true)
+            if get_viewport_rect().grow(body_radius).has_point(point):
+                if body_radius >= 5.0:
+                    map_canvas.draw_texture_rect(_body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false)
+                else:
+                    map_canvas.draw_circle(point, body_radius, HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), true)
     var pulse: float = 0.96 + 0.04 * sin(visual_clock * 1.2 + float(index))
     for layer in range(5, 0, -1):
         map_canvas.draw_circle(pos, star_radius * (1.0 + float(layer) * 0.33) * pulse, Color(star_color, 0.05), true)
