@@ -579,13 +579,31 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     var costs: GridContainer = _cost_grid(body)
     _show_cost(costs, ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]))
     var row: HBoxContainer = disclosure["actions"]
+    var maintained := _label("(0 / 0)", 11)
+    maintained.autowrap_mode = TextServer.AUTOWRAP_OFF
+    row.add_child(maintained)
+    var maintain_row := HBoxContainer.new()
+    body.add_child(maintain_row)
+    maintain_row.add_child(_label("Maintain", 12))
+    var amount := SpinBox.new()
+    amount.min_value = 0
+    amount.max_value = 9999
+    amount.step = 1
+    amount.custom_minimum_size.x = 85
+    maintain_row.add_child(amount)
+    maintain_row.add_child(_label("ships", 12))
+    amount.value_changed.connect(func(value: float) -> void:
+        session.call("request_maintain", selected, kind, int(value)))
+    var infinity := _label("∞", 14)
+    maintain_row.add_child(infinity)
+    infinity.hide()
     var button: Button = _card_action(disclosure, "Build", _operation.bind(kind))
     if kind != "yard":
         var check: Button = _repeat_button(row, kind)
         continuous_checks[kind] = check
     var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind(kind, ""))
     cancel.tooltip_text = "Cancel one order and stop repeat"
-    disclosure.merge({"button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
+    disclosure.merge({"maintained": maintained, "maintain_amount": amount, "infinity": infinity, "button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
     build_cards[kind] = disclosure
     return button
 
@@ -1786,6 +1804,15 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
         var card: Dictionary = build_cards[kind]
         var count: int = int(counts.get(kind, 0))
         card["button"].text = "Build"
+        var finite: int = int(p.get("maintain", {}).get(kind, 0))
+        var unlimited: bool = bool(p.get("continuous", {}).get(kind, false))
+        var living: int = ECONOMY.origin_count(_state(), selected, kind) if not p.is_empty() else 0
+        card["maintained"].text = "(%d / %s)" % [living, "∞" if unlimited else str(finite)]
+        var amount: SpinBox = card["maintain_amount"]
+        amount.editable = owned
+        if not amount.get_line_edit().has_focus():
+            amount.set_value_no_signal(finite)
+        card["infinity"].visible = unlimited
         _disclosure_title(card, card["title"].trim_prefix("BUILD ").capitalize() + (" (%d)" % count if count > 0 else ""))
         card["button"].tooltip_text = _cost_text(ECONOMY._cost(kind, 1)) + " · %.0f population" % float(ECONOMY.CREW_COSTS[kind])
         var requirements: PackedStringArray = []

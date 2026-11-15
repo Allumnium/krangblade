@@ -135,3 +135,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.13.10: corrected the tooltip construction-category formatter and early UI regression fixture reference during static review; v0.13.8 passed all mandatory checks.
 
 - v0.13.11: the hover regression caught compact inventory rounding hiding a 1 t change. Exact quantities in the detailed hover now show two decimal places in tons; field inventory labels also use tons. v0.13.10 passed all multiplayer checks and the economy suite.
+
+### T-025 — Maintain target input
+- Finite targets are provisionally capped at 9,999. Validate snapshot-safe editing and unlimited-to-finite drag behavior; cancellation stops automatic replacement to prevent immediate requeue.

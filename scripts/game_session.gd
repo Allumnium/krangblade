@@ -567,6 +567,23 @@ func _operation_for(id: int, index: int, kind: String, target: String) -> void:
     if _active_player(id) and ECONOMY.enqueue(economy, id, index, kind, target):
         _publish_economy()
 
+func request_maintain(index: int, kind: String, amount: int) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _maintain_for(1, index, kind, amount)
+    else:
+        _rpc_maintain.rpc_id(1, index, kind, amount)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_maintain(index: int, kind: String, amount: int) -> void:
+    if multiplayer.is_server():
+        _maintain_for(multiplayer.get_remote_sender_id(), index, kind, amount)
+
+func _maintain_for(id: int, index: int, kind: String, amount: int) -> void:
+    if _active_player(id) and ECONOMY.set_maintain(economy, id, index, kind, amount):
+        _publish_economy()
+
 func request_continuous(index: int, kind: String, enabled: bool) -> void:
     if phase != "match":
         return
