@@ -1276,4 +1276,37 @@ func _initialize() -> void:
     assert(not ECON.enqueue(defenses, 1, 0, "pds"))
     assert(defended["pds"].size() == int(defended["planet_count"]))
     print("PASS: starting fleet, planet-limited defenses, refunds, damage, cooldown and allied safety")
+    # Neutral asteroid anchor, with physical return to an owned depot.
+    var neutral_mine: Dictionary = ECON.create(mineral_map.duplicate(true), players, ids, false)
+    var neutral_map: Dictionary = neutral_mine["map"]
+    var neutral_anchor: int = 3
+    neutral_map["fields"] = [{"anchor": neutral_anchor, "position": mineral_points[neutral_anchor] + Vector2(30, 0), "Metals": 1.0, "Crystals": 1.0, "chunks": [{"id": 10001, "position": mineral_points[neutral_anchor] + Vector2(30, 0), "resource": "Crystals", "remaining": 20.0}]}]
+    if not MAP.linked(neutral_map, 0, neutral_anchor):
+        neutral_map["edges"].append([0, neutral_anchor])
+    var neutral_depot: Dictionary = neutral_mine["planets"][0]
+    ECON._finish(neutral_mine, 0, neutral_depot, {"id": 90101, "kind": "miner", "population_allocated": 30.0})
+    for tick in range(1600):
+        ECON.step(neutral_mine, 0.5)
+        if float(neutral_depot["stock"]["Crystals"]) >= 20.0 - ECON.EPS:
+            break
+    assert(is_equal_approx(float(neutral_depot["stock"]["Crystals"]), 20.0))
+    assert(ECON.field_inventory(neutral_map["fields"][0])["Crystals"] == 0.0)
+    var staffed_state: Dictionary = ECON.create(graph, players, ids, false)
+    var staffed_home: Dictionary = staffed_state["planets"][0]
+    staffed_home["yards"].append({"level": 1, "job": -1})
+    staffed_home["yards"].append({"level": 1, "job": -1})
+    staffed_home["population"] = 100.0
+    assert(ECON.enqueue(staffed_state, 1, 0, "fighter"))
+    var staffed_order: Dictionary = staffed_home["queue"][0]
+    ECON._work_planet(staffed_state, 0, 1.0)
+    assert(float(staffed_order["progress"]) == 0.0 and ECON.operational_shipyards(staffed_home) == 0)
+    assert(ECON.construction_blockers(staffed_home, staffed_order).has("Population"))
+    staffed_home["population"] = 1000.0
+    ECON._work_planet(staffed_state, 0, 1.0)
+    assert(float(staffed_order["progress"]) > 0.0 and ECON.operational_shipyards(staffed_home) == 1)
+    staffed_home["population"] = 6000.0
+    assert(ECON.operational_shipyards(staffed_home) == 2)
+    staffed_home["population"] = 21000.0
+    assert(ECON.operational_shipyards(staffed_home) == 3)
+    print("PASS: neutral mining delivery and population-gated shipyards")
     quit(0)

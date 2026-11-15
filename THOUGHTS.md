@@ -112,3 +112,14 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.13.1 corrects a duplicate fixture variable found during static review of the PDS test.
 
 - v0.13.2 corrects the starter fleet test's shadowed home index, caught by Godot parsing.
+
+### T-022 — Starter mining and shipyard staffing
+- **Type:** Verified code restriction; balance hypothesis.
+- **Observation:** Mining required owned field anchors, so starter miners could idle on generated maps. Neutral/friendly access and owned depot delivery added; slots require 500/5k/20k residents to operate.
+- **Consider:** Playtest mining throughput, full warehouses, and colony staffing. Values provisional.
+
+- v0.13.4 adds offline construction feedback and waiting-miner status, preserves disabled cancel controls even for empty shipyard slots, and avoids redundant per-chunk route calculations. Existing routes are not revalidated on territorial change; revisit once conquest is implemented. Fixed an outdated UI label assertion.
+
+- v0.13.5: Both eight-peer runs timed out after entering the match; all other v0.13.4 checks passed. Cache neutral mining routes within each tick and limit idle search retries to twice/year. Added host-side progress diagnostics to identify any remaining verification stall without reducing assertions or changing timeouts. Performance cause is a hypothesis, not yet confirmed.
+
+- v0.13.6: Eight-peer test still timed out. Replace dense mining route searches with sparse adjacency and cached single-source shortest-path trees; add time-control gate diagnostics. No assertion or timeout reductions.

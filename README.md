@@ -166,3 +166,6 @@ v0.12.7: Amber resource-blocked progress, inline resource modifiers, wider syste
 
 
 v0.13.0: Five starter hulls per player (three miners, two fighters). PDS construction in Upgrades, one per visible seeded planet, one pending per system. First recipe: 540 Metals, 120 Plastics, 60 Textiles, 60 Organics, 60 Tech; subsequent recipes 3× each. 36 years construction, 36 damage/shot at fighter range and cadence. System-centered authoritative range, planetary metallic frame and beam visuals. No separate PDS destruction mechanic yet.
+
+
+v0.13.3: Compact inline actions, shared population icon, shipyard staffing (500/5k/20k), neutral asteroid access with owned-depot delivery.

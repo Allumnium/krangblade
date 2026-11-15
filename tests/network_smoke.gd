@@ -18,6 +18,7 @@ var cancelled_yard_id: int = -1
 var promoted_yard_id: int = -1
 var yard_rebuilt: bool = false
 var commands_sent: bool = false
+var next_diagnostic: float = 10.0
 var speed_stage: int = 0
 var paused_elapsed: float = -1.0
 const TEST_SPEEDS: Array[int] = [0, 2, 5, 1]
@@ -260,6 +261,9 @@ func _check_economy_sync() -> void:
         return
     var state: Dictionary = session.get("economy")
     if home_index < 0 or not _check_time_controls(state):
+        if role == "host" and int(Time.get_ticks_msec() / 5000) > int(get_meta("speed_debug", -1)):
+            set_meta("speed_debug", int(Time.get_ticks_msec() / 5000))
+            print("DEBUG: time stage=", speed_stage, " speed=", state.get("time_speed"), " elapsed=", state.get("elapsed"), " home=", home_index)
         create_timer(0.25).timeout.connect(_check_economy_sync)
         return
     var self_id: int = session.multiplayer.get_unique_id()
@@ -338,6 +342,9 @@ func _check_economy_sync() -> void:
             defense_ok = defense_ok or (pds_jobs.is_empty() and system.get("pds", {}).has(0) and system["pds"].size() == 1)
             if defense_ok and correct_upgrade_costs and priced_slots.get(2, {}) == ECON._cost("yard", 2) and priced_slots.get(3, {}) == ECON._cost("yard", 3) and int(system.get("warehouse_level", 0)) == 1 and buildings.size() == 1 and buildings.get("Textiles", false) and int(military.get(field_node, 0)) == 70 and int(military.get(ECON.military_home(state, owner), 0)) == 30 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
                 verified += 1
+        if role == "host" and float(state["elapsed"]) >= next_diagnostic:
+            next_diagnostic = float(state["elapsed"]) + 10.0
+            print("DEBUG: economy elapsed=", state["elapsed"], " verified=", verified, "/", expected_players, " cancel=", cancel_sent, " stack=", yard_rebuilt, " ships=", state["ships"].size())
         var view: Node = current_scene
         if cancel_sent and yard_rebuilt and verified == expected_players and view != null and view.has_method("_update_trade_stock"):
             view.set("selected", home_index)
@@ -353,6 +360,10 @@ func _check_economy_sync() -> void:
                     return
             var sliders: Dictionary = view.get("trade_sliders")
             var home: Dictionary = state["planets"][home_index]
+            for index in range((home["yards"] as Array).size()):
+                if not ECON.shipyard_operational(home, index) and int(home["yards"][index]["job"]) >= 0:
+                    _fail("Understaffed shipyard is operating on replicated state.")
+                    return
             for resource in ECON.RESOURCES:
                 var slider: Control = sliders[resource]
                 var stock: float = float(home["stock"][resource])
