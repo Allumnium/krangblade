@@ -8,6 +8,8 @@ var saw_match: bool = false
 var started: bool = false
 var finishing: bool = false
 var ready_sent: bool = false
+var color_requested: bool = false
+var expected_color: int = 0
 var economy_verified: bool = false
 var home_index: int = -1
 var cancel_id: int = -1
@@ -57,13 +59,24 @@ func _roster_changed() -> void:
         return
     var roster: Dictionary = session.get("players")
     if role == "host":
+        if not color_requested:
+            color_requested = true
+            session.call("choose_color", 1, 8)
+            return
         if roster.size() == expected_players and not started and bool(session.call("can_start")):
             started = true
             session.call_deferred("start_match")
     elif role == "client":
         var self_id: int = session.multiplayer.get_unique_id()
         var entry: Dictionary = roster.get(self_id, {})
-        if not entry.is_empty() and not bool(entry.get("ready", false)) and not ready_sent:
+        if not entry.is_empty() and not color_requested:
+            color_requested = true
+            expected_color = 7 if expected_players == 2 else int(entry["color"])
+            session.call("choose_color", self_id, 8) # occupied by host; must reject
+            if expected_players == 2:
+                session.call("choose_color", self_id, 7)
+            return
+        if not entry.is_empty() and int(entry.get("color", 0)) == expected_color and not bool(entry.get("ready", false)) and not ready_sent:
             ready_sent = true
             session.call_deferred("toggle_ready")
 
@@ -83,6 +96,16 @@ func _phase_changed() -> void:
         var roster: Dictionary = session.get("players")
         if roster.size() != expected_players:
             _fail("Wrong roster size in match: %d" % roster.size())
+            return
+        var colors: Dictionary = {}
+        for entry in roster.values():
+            var choice: int = int(entry.get("color", 0))
+            if choice < 1 or choice > 8 or colors.has(choice):
+                _fail("Empire colors must be unique and valid.")
+                return
+            colors[choice] = true
+        if int(roster[1]["color"]) != 8 or (expected_players == 2 and not colors.has(7)):
+            _fail("Selected empire colors did not replicate.")
             return
         var owners: Array[int] = session.get("owners")
         var state: Dictionary = session.get("economy")

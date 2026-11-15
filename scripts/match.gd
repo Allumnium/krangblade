@@ -6,10 +6,10 @@ const BACKDROP = preload("res://scripts/space_background.gd")
 const PLANET = preload("res://assets/ui/planet.svg")
 const UPGRADE_SOUND = preload("res://assets/sfx/detail.wav")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
-const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77aafe"),
-    Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
+const RULES = preload("res://scripts/lobby_rules.gd")
+const COLORS = RULES.EMPIRE_COLORS
 const PANEL_WIDTH: float = 368.0
-const OVERVIEW_WIDTH: float = 266.0
+const OVERVIEW_WIDTH: float = 316.0
 const HEADER_HEIGHT: float = 46.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
@@ -97,7 +97,7 @@ var production_summary: VBoxContainer
 var production_values: Dictionary = {}
 var fighter_button: Button
 var miner_button: Button
-var environment_label: Label
+var system_owner_label: Label
 var ship_button: Button
 var leave: Button
 var match_menu: AcceptDialog
@@ -321,11 +321,19 @@ func _build_ui() -> void:
     for check in [mining_enabled, mining_metals, mining_crystals]:
         check.toggled.connect(func(_value: bool) -> void: _apply_mining_policy())
     mining_controls.get_parent().hide()
-    info = _label("", 19)
-    planet_overview.add_child(info)
-    environment_label = _label("", 12)
-    environment_label.add_theme_color_override("font_color", HUD.MUTED)
-    planet_overview.add_child(environment_label)
+    var system_header := HBoxContainer.new()
+    planet_overview.add_child(system_header)
+    info = _label("", 16)
+    info.clip_text = true
+    info.autowrap_mode = TextServer.AUTOWRAP_OFF
+    info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    system_header.add_child(info)
+    system_owner_label = _label("", 11)
+    system_owner_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+    system_owner_label.clip_text = true
+    system_owner_label.custom_minimum_size.x = 90
+    system_owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    system_header.add_child(system_owner_label)
     population_label = _label("", 13)
     planet_overview.add_child(population_label)
     production_summary = HUD.section(planet_overview, "Resources")
@@ -418,6 +426,17 @@ func _collapse_card(card: Dictionary) -> void:
         card["body"].hide()
         _disclosure_title(card, str(card["header"].get_meta("caption")))
 
+func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
+    var blocked: Array[String] = [] if job.is_empty() else ECONOMY.construction_blockers(p, job)
+    bar.set_meta("blocked", not blocked.is_empty())
+    if blocked.is_empty():
+        bar.remove_theme_stylebox_override("fill")
+        bar.remove_theme_stylebox_override("background")
+    else:
+        bar.add_theme_stylebox_override("background", HUD.surface(Color("#33251a"), Color("#db9b54"), 0, 3))
+        bar.add_theme_stylebox_override("fill", HUD.surface(Color("#b56b35"), Color("#f2b57e"), 0, 3))
+        bar.tooltip_text = "Blocked: " + ", ".join(blocked)
+
 func _cost_grid(parent: Container) -> GridContainer:
     var grid := GridContainer.new()
     grid.columns = 3
@@ -470,6 +489,11 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     section.get_child(0).hide()
     var disclosure: Dictionary = _make_disclosure(section, title_text.trim_prefix("BUILD ").capitalize())
     var body: VBoxContainer = disclosure["body"]
+    var build_progress := ProgressBar.new()
+    build_progress.custom_minimum_size.y = 12
+    section.add_child(build_progress)
+    section.move_child(build_progress, body.get_index())
+    build_progress.hide()
     body.add_child(_label(_ship_stats(kind), 12))
     var requirements := _label("", 12)
     body.add_child(requirements)
@@ -485,7 +509,7 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     var cancel: Button = _button("×", _cancel_kind.bind(kind, ""), row)
     cancel.custom_minimum_size.x = 26
     cancel.tooltip_text = "Cancel one order and stop repeat"
-    disclosure.merge({"button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs})
+    disclosure.merge({"button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
     build_cards[kind] = disclosure
     return button
 
@@ -519,7 +543,7 @@ func _build_production_summary() -> void:
     var blank := Control.new()
     blank.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     header.add_child(blank)
-    for column in [["Stock", 49], ["Lv", 22], ["/yr", 44]]:
+    for column in [["Stock", 49], ["Lv", 22], ["/yr", 44], ["Bonus", 46]]:
         var title_label := _label(str(column[0]), 10)
         title_label.autowrap_mode = TextServer.AUTOWRAP_OFF
         title_label.custom_minimum_size.x = float(column[1])
@@ -555,7 +579,12 @@ func _build_production_summary() -> void:
         rate_label.custom_minimum_size.x = 44
         rate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(rate_label)
-        production_values[resource] = {"stock": stock, "level": level, "rate": rate_label}
+        var bonus := _label("", 11)
+        bonus.autowrap_mode = TextServer.AUTOWRAP_OFF
+        bonus.custom_minimum_size.x = 46
+        bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        row.add_child(bonus)
+        production_values[resource] = {"stock": stock, "level": level, "rate": rate_label, "bonus": bonus}
 
 func _system_bonus_text(p: Dictionary) -> String:
     var lines: PackedStringArray = []
@@ -689,6 +718,8 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
         _sync_repeat(card["repeat"], planet, "production:" + resource, owned and available and (unlocked or repeating))
         if not job.is_empty():
             progress.value = 100.0 * float(job["progress"]) / float(job["work"])
+            progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
+            _style_progress(progress, planet, job)
             detail.text = "+1 production level · %.0f work\n%.0f%% complete%s" % [float(job["work"]), progress.value, " · Waiting" if ECONOMY._possible(planet, job) <= ECONOMY.EPS else ""]
             _show_cost(card["costs"], job["cost"])
             button.text = "CANCEL / REFUND"
@@ -1037,7 +1068,10 @@ func _refresh_territory(state: Dictionary) -> void:
         territory_radius = _territory_base_radius(state)
         territory_seed = seed_value
         territory_last.clear()
-    var claims: Array[int] = ECONOMY.territory_claims(state)
+    var empires: Array[int] = ECONOMY.territory_empires(state)
+    var claims: Array[int] = []
+    for owner in empires:
+        claims.append(_empire_color_index(owner))
     if claims == territory_last:
         return
     territory_last = claims
@@ -1278,21 +1312,28 @@ func _refresh() -> void:
     ship_button.disabled = true
     if p.is_empty():
         info.text = "Select a system."
+        system_owner_label.text = ""
         population_label.text = ""
         _refresh_build_cards(p, false)
         return
     var owner: int = int(p["owner"])
     var roster: Dictionary = session.get("players")
     var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
-    info.text = "%s%s\n%s" % [_system_name(selected), "  /  Home" if bool(p["home"]) else "", name_text]
-    environment_label.text = _system_bonus_text(p)
-    environment_label.visible = not environment_label.text.is_empty()
-    environment_label.tooltip_text = "Local production modifiers, including installed economic improvements. Advanced manufacturing remains reserved for future recipes."
+    info.text = _system_name(selected)
+    info.tooltip_text = info.text + (" · Home" if bool(p["home"]) else "")
+    system_owner_label.text = name_text
+    system_owner_label.tooltip_text = name_text
+    system_owner_label.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
     for resource in ECONOMY.RESOURCES:
         var amount: float = float(p["stock"][resource])
         production_values[resource]["stock"].text = _compact_amount(amount) if amount >= 1000.0 else "%.1f" % amount
         production_values[resource]["stock"].tooltip_text = "%.1f %s stored" % [amount, resource]
         production_values[resource]["level"].text = str(int(p["levels"][resource]))
+        var percent: int = roundi(100.0 * ECONOMY.production_modifier(p, resource))
+        var bonus: Label = production_values[resource]["bonus"]
+        bonus.text = "—" if percent == 100 else "%d%%" % (percent - 100) if percent < 100 else "+%d%%" % (percent - 100)
+        bonus.add_theme_color_override("font_color", HUD.ACCENT if percent > 100 else (Color("#e4a479") if percent < 100 else HUD.MUTED))
+        bonus.tooltip_text = "%.1f%% of baseline output" % (100.0 * ECONOMY.production_modifier(p, resource))
         var annual: float = ECONOMY.net_rate(p, resource)
         production_values[resource]["rate"].text = _compact_amount(annual) if annual >= 1000.0 else "%.1f" % annual
         production_values[resource]["rate"].tooltip_text = "Production %.2f/yr · Consumption %.2f/yr · Net %.2f/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
@@ -1325,6 +1366,14 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             for job in p["queue"]:
                 if int(job["id"]) == int(yard["job"]):
                     active[i] = job
+                    break
+        # A queued upgrade with no materials may be unassigned; keep its bar visible.
+        for i in range(yards.size()):
+            if not active[i].is_empty():
+                continue
+            for queued in p["queue"]:
+                if queued["kind"] == "yard_upgrade" and int(queued["target"]) == i:
+                    active[i] = queued
                     break
         var reserved: Dictionary = {}
         for job in p["queue"]:
@@ -1433,6 +1482,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             bar.value = 0.0
             bar.show_percentage = false
             bar.tooltip_text = "Shipyard %d" % (int(index) + 1)
+            _style_progress(bar, p, {})
             continue
         bar.show_percentage = true
         var name_text: String = "Logistics ship" if job["kind"] == "ship" else str(job["kind"]).replace("_", " ").capitalize()
@@ -1442,7 +1492,8 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             name_text = "Construction"
         label.text = "Shipyard %d · Lv %d · %s" % [number, level, name_text] if existing else "Shipyard %d · %s" % [number, name_text]
         bar.value = 100.0 * float(job["progress"]) / float(job["work"])
-        bar.tooltip_text = "Waiting for materials" if ECONOMY._possible(p, job) <= ECONOMY.EPS else "Shipyard %d" % number
+        bar.tooltip_text = "Shipyard %d" % number
+        _style_progress(bar, p, job)
 
 func _job_name(item: Dictionary) -> String:
     match str(item["kind"]):
@@ -1473,9 +1524,12 @@ func _cancel_kind(kind: String, target: String) -> void:
 
 func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
     var counts: Dictionary = {}
+    var first_jobs: Dictionary = {}
     for order in p.get("queue", []):
         var kind: String = order["kind"]
         counts[kind] = int(counts.get(kind, 0)) + 1
+        if not first_jobs.has(kind):
+            first_jobs[kind] = order
     for kind in build_cards:
         var card: Dictionary = build_cards[kind]
         var count: int = int(counts.get(kind, 0))
@@ -1494,6 +1548,13 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
                 requirements.append("Insufficient local materials · construction waits")
         card["requirements"].text = "\n".join(requirements)
         card["requirements"].visible = not requirements.is_empty()
+        var job: Dictionary = first_jobs.get(kind, {})
+        var progress: ProgressBar = card["build_progress"]
+        progress.visible = not job.is_empty()
+        if not job.is_empty():
+            progress.value = 100.0 * float(job["progress"]) / float(job["work"])
+            progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
+            _style_progress(progress, p, job)
         card["cancel"].visible = count > 0
         card["cancel"].disabled = not owned
 
@@ -1667,6 +1728,15 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
     map_canvas.draw_circle(pos, star_radius * 0.55 * pulse, Color("#fffdf1"), true)
     if _show_system_rings(index):
         map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
+
+func _empire_color_index(owner: int) -> int:
+    if owner == 0:
+        return 0
+    var roster: Dictionary = session.get("players")
+    return clampi(int(roster.get(owner, {}).get("color", 0)), 0, RULES.MAX_PLAYERS)
+
+func _empire_color(owner: int) -> Color:
+    return COLORS[_empire_color_index(owner)]
 
 func _planet_color(planet: Dictionary) -> Color:
     var sum := Vector3.ZERO
@@ -1994,12 +2064,13 @@ func _draw_map() -> void:
     if state.is_empty():
         return
     var points: Array = state["map"]["points"]
-    var teams: Array[int] = ECONOMY.planet_teams(state)
     for edge in state["map"]["edges"]:
         var a: int = int(edge[0])
         var b: int = int(edge[1])
         var known: bool = ECONOMY.discovered(state, _me(), "planets", a) and ECONOMY.discovered(state, _me(), "planets", b)
-        var color: Color = COLORS[teams[a]].darkened(0.3) if known and teams[a] > 0 and teams[a] == teams[b] else Color("#40566b")
+        var owner_a: int = int(state["planets"][a]["owner"])
+        var owner_b: int = int(state["planets"][b]["owner"])
+        var color: Color = _empire_color(owner_a).darkened(0.3) if known and owner_a > 0 and owner_a == owner_b else Color("#40566b")
         var a_pos: Vector2 = _screen_point(points[a])
         var b_pos: Vector2 = _screen_point(points[b])
         map_canvas.draw_line(a_pos, b_pos, Color(color, 0.30), 1.0, true)
@@ -2036,7 +2107,7 @@ func _draw_map() -> void:
             map_canvas.draw_string(font, pos + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
             continue
         var radius: float = _planet_radius(i, state)
-        var tint: Color = COLORS[teams[i]]
+        var tint: Color = _empire_color(int(state["planets"][i]["owner"]))
         _draw_system(i, state, pos, radius, tint)
         if i == selected and bool(state["planets"][i]["home"]):
             map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
@@ -2064,9 +2135,9 @@ func _draw_map() -> void:
         var direction: Vector2 = pose["direction"]
         var mining: bool = pose["mining"]
         var route: Array = ship["route"]
-        var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+        var empire: Color = _empire_color(int(ship["owner"]))
         var loaded: bool = ECONOMY._cargo_total(ship) > ECONOMY.EPS
-        var hull: Color = COLORS[team].lightened(0.35) if not loaded else Color("#f8df8c")
+        var hull: Color = empire.lightened(0.35) if not loaded else Color("#f8df8c")
         var colony: bool = ship.get("kind", "ship") == "colony_ship"
         var fighter: bool = ship.get("kind", "ship") == "fighter"
         if colony:
@@ -2099,7 +2170,7 @@ func _draw_map() -> void:
         outline.append(shape[0])
         map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)
         # Keep class colors; identify allegiance on every hull, including loaded ships.
-        map_canvas.draw_polyline(outline, COLORS[team].lightened(0.2), scale, true)
+        map_canvas.draw_polyline(outline, empire.lightened(0.2), scale, true)
         var hp: float = clampf(float(ship.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
         if hp < 1.0 and scale >= 0.65:
             var bar_pos: Vector2 = point + Vector2(-10.0, 13.0)

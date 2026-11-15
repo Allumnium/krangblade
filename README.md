@@ -160,3 +160,6 @@ v0.12.4: Inline compact Build buttons and icon costs replace the shared shipyard
 
 
 v0.12.6: Collapsible ship, production, factory, warehouse and shipyard upgrade details, icon recipes and unmet requirements. Population is a gradual hull construction cost (fighter 10, logistics 20, miner 30, colony 1,000), refunded on cancellation. Completed colony ships deliver their settlers to the new system; no crew upkeep or demobilization. Population cannot be spent below one resident.
+
+
+v0.12.7: Amber resource-blocked progress, inline resource modifiers, wider system overview and owner badge. Lobby players pick unique colors from eight swatches; host validates all requests. Map control and hull outlines follow player colors independently of team rules.

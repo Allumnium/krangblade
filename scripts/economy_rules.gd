@@ -749,6 +749,17 @@ static func _possible(p: Dictionary, item: Dictionary) -> float:
         possible = minf(possible, maxf(0.0, float(p["population"]) - 1.0) / people_per_work)
     return maxf(0.0, possible)
 
+static func construction_blockers(p: Dictionary, item: Dictionary) -> Array[String]:
+    var missing: Array[String] = []
+    if float(item["work"]) - float(item["progress"]) <= EPS:
+        return missing
+    for resource in item["cost"]:
+        if float(item["cost"][resource]) > EPS and float(p["stock"].get(resource, 0.0)) <= EPS:
+            missing.append(resource)
+    if float(item.get("population_cost", 0.0)) > 0.0 and float(p["population"]) <= 1.0 + EPS:
+        missing.append("Population")
+    return missing
+
 static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> bool:
     var amount: float = minf(work_budget, _possible(p, item))
     for resource in item["cost"]:
@@ -1410,6 +1421,30 @@ static func territory_claims(state: Dictionary) -> Array[int]:
     for node in contested:
         claims[node] = 0
     return claims
+
+# Visual owner identity is separate from team control and contested logic.
+# An owned system uses its owner's color; a neutral claim uses the lowest
+# ID of its stationary friendly fighters for a deterministic tie.
+static func territory_empires(state: Dictionary) -> Array[int]:
+    var claims: Array[int] = territory_claims(state)
+    var owners: Array[int] = []
+    owners.resize(claims.size())
+    owners.fill(0)
+    for i in range((state["planets"] as Array).size()):
+        if claims[i] > 0:
+            owners[i] = int(state["planets"][i]["owner"])
+    for craft in state["ships"]:
+        if craft.get("kind", "") != "fighter" or not (craft["route"] as Array).is_empty() or _engaged(craft):
+            continue
+        var node: int = int(craft["at"])
+        var owner: int = int(craft["owner"])
+        if node < 0 or node >= claims.size() or claims[node] <= 0 or claims[node] != int(state["teams"].get(owner, 0)):
+            continue
+        if node < (state["planets"] as Array).size() and int(state["planets"][node]["owner"]) != 0:
+            continue
+        if owners[node] == 0 or owner < owners[node]:
+            owners[node] = owner
+    return owners
 
 static func _engaged(ship: Dictionary) -> bool:
     return int(ship.get("combat_target", -1)) >= 0 or int(ship.get("pursuit_target", -1)) >= 0

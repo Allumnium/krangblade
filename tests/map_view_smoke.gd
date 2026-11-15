@@ -393,9 +393,11 @@ func _run() -> void:
     assert((idle_rows[0]["progress"] as ProgressBar).value == 0.0)
     var mineral_button: Button = view.get("miner_button")
     assert(not mineral_button.disabled)
-    var bonuses: Label = view.get("environment_label")
-    assert(not bonuses.text.contains("Fields"))
-    assert(not bonuses.text.contains("100%"))
+    var owner_label: Label = view.get("system_owner_label")
+    assert(owner_label.horizontal_alignment == HORIZONTAL_ALIGNMENT_RIGHT)
+    assert(owner_label.get_parent() == (view.get("info") as Label).get_parent())
+    assert(owner_label.text == str(session.get("players")[1]["name"]))
+    assert(view.call("_empire_color_index", 1) == 1)
     var normal: Dictionary = {"abundance": {"Metals": 1.0, "Plastics": 1.0, "Crystals": 1.0}, "bonuses": {"Organics": 1.0}, "advanced_bonus": 1.0}
     assert(view.call("_system_bonus_text", normal) == "")
     normal["abundance"]["Metals"] = 1.5
@@ -403,7 +405,7 @@ func _run() -> void:
     var production: Dictionary = view.get("production_values")
     await process_frame
     for resource in production:
-        for key in ["stock", "level", "rate"]:
+        for key in ["stock", "level", "rate", "bonus"]:
             var value: Label = production[resource][key]
             assert(value.autowrap_mode == TextServer.AUTOWRAP_OFF)
             assert(value.get_line_count() == 1)
@@ -432,8 +434,20 @@ func _run() -> void:
     assert(is_equal_approx(orbit_start.length(), orbit_next.length()))
     var orbit_heading: Vector2 = view.call("_orbit_direction", orbit_start)
     assert(orbit_heading.dot(orbit_next - orbit_start) > 0.0)
+    # Fund this isolated fighter UI scenario regardless of earlier crew-related production changes.
+    var econ = preload("res://scripts/economy_rules.gd")
+    for resource in econ._cost("fighter", 1):
+        state["planets"][0]["stock"][resource] = maxf(float(state["planets"][0]["stock"][resource]), 2.0 * float(econ._cost("fighter", 1)[resource]))
     var fighter_button: Button = view.get("fighter_button")
     fighter_button.pressed.emit()
+    var saved_metal: float = float(state["planets"][0]["stock"]["Metals"])
+    state["planets"][0]["stock"]["Metals"] = 0.0
+    view.call("_refresh")
+    var fighter_progress: ProgressBar = build["fighter"]["build_progress"]
+    assert(fighter_progress.visible and fighter_progress.get_meta("blocked") and fighter_progress.tooltip_text.contains("Metals"))
+    state["planets"][0]["stock"]["Metals"] = saved_metal
+    view.call("_refresh")
+    assert(not fighter_progress.get_meta("blocked") and not fighter_progress.has_theme_stylebox_override("fill"))
     for i in range(70):
         session.call("_economy_tick")
     assert(state["ships"].size() == 2)

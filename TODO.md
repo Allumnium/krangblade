@@ -17,6 +17,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [x] Validate v0.12.3 exponential upgrade prices: 3× per level for resource production, shipyard upgrades and warehouse logistics; 3× prior price for one-time buildings. Keep population gates and build durations unchanged.
 - [x] Validate v0.12.4 compact per-slot Build controls, sequential slot availability, concurrent construction and stack cancellation with proportional repricing and refunds.
 - [ ] Validate v0.12.6 collapsed ship and upgrade cards, icon recipes, unmet requirements, proportional population costs and refunds, and colony settler transfer.
+- [ ] Validate v0.12.7 blocked progress styles, inline production modifiers and exclusive selectable empire colors in lobby and match.
 - [x] Validate baseline population-scaled production, local population gates for production upgrades (first Tech upgrade at 200k), and one-time Economy buildings with resource-specific percentage bonuses.
 - [ ] Playtest costs, output, trade, AI expansion, population pacing and building choices before choosing final balance.
 - [x] Validate per-resource storage ceilings, three warehouse upgrades, linear consumption by population (all except Crystals), and zero starting Crystal production.

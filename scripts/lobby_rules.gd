@@ -1,6 +1,23 @@
 extends RefCounted
 ## Pure logic for lobby readiness, team assignments, and load barrier.
 const MAX_PLAYERS: int = 8
+const EMPIRE_COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77aafe"),
+    Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
+const COLOR_NAMES = ["Neutral", "Jade", "Orange", "Blue", "Violet", "Gold", "Rose", "Cyan", "Red"]
+
+static func color_available(players: Dictionary, id: int, choice: int) -> bool:
+    if choice < 1 or choice > MAX_PLAYERS:
+        return false
+    for peer in players:
+        if int(peer) != id and int(players[peer].get("color", 0)) == choice:
+            return false
+    return true
+
+static func free_color(players: Dictionary) -> int:
+    for choice in range(1, MAX_PLAYERS + 1):
+        if color_available(players, -1, choice):
+            return choice
+    return 0
 
 static func valid_team(team: int) -> bool:
     return team >= 1 and team <= MAX_PLAYERS
