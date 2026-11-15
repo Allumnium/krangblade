@@ -726,6 +726,19 @@ func _initialize() -> void:
     assert(int(ai_state["planets"][4]["owner"]) == 2)
     assert(ai_state["planets"][0]["queue"].is_empty())
     assert(saw_attack and saw_logistics)
+    # Generated maps, not only a toy graph: each AI builds real ships early.
+    for seed_value in [11, 83, 470, 1337]:
+        var startup_map: Dictionary = MAP.generate(seed_value, 3)
+        var startup_state: Dictionary = ECON.create(startup_map, {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 1, "ai": true}}, ids)
+        var built: Dictionary = {2: {}, 3: {}}
+        for year in range(36):
+            ECON.step(startup_state, 1.0)
+            for craft in startup_state["ships"]:
+                if built.has(int(craft["owner"])):
+                    built[int(craft["owner"])][craft["kind"]] = true
+        for player in [2, 3]:
+            assert(built[player].has("colony_ship"))
+            assert(built[player].has("fighter"))
     print("PASS: six-hit combat, allied safety, AI expansion, logistics and attack")
     print("PASS: seeded maps, ownership, construction, shipyards, mixed cargo, physical transit, ally sharing")
     quit(0)

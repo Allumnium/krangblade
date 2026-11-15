@@ -231,6 +231,11 @@ func _check_economy_sync() -> void:
                 if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.TRADE_REFERENCE * 100.0, 0.0, 100.0)) or not is_equal_approx(float(slider.get("lower")), float(thresholds["min"])) or not is_equal_approx(float(slider.get("upper")), float(thresholds["max"])):
                     _fail("Replicated inventory or thresholds do not match the trade bars.")
                     return
+            var poses: Dictionary = view.call("_ship_poses", state)
+            for ship in state["ships"]:
+                if not poses.has(int(ship["id"])):
+                    _fail("A replicated ship was not rendered.")
+                    return
             economy_verified = true
             # A normal game command is the completion acknowledgment. Return
             # only after each real peer has independently verified its replica.

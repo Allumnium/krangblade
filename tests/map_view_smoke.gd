@@ -452,6 +452,31 @@ func _run() -> void:
         assert(not state["mining_policies"][1][0]["Metals"])
         mouse.position = Vector2(-10000, -10000)
         view.call("_map_input", mouse)
+    # Every replicated hull has a pose, regardless of team, discovery or activity.
+    var visible_state: Dictionary = state.duplicate(true)
+    visible_state["fog_of_war"] = true
+    visible_state["teams"][22] = 2
+    visible_state["teams"][23] = 1
+    visible_state["ships"] = []
+    var unknown_neighbor: int = -1
+    for edge in visible_state["map"]["edges"]:
+        if int(edge[0]) == unknown:
+            unknown_neighbor = int(edge[1])
+        elif int(edge[1]) == unknown:
+            unknown_neighbor = int(edge[0])
+    assert(unknown_neighbor >= 0)
+    for fixture in [{"id": 90001, "owner": 22, "kind": "fighter", "at": unknown, "route": [], "leg": 0.0, "combat_target": 90002},
+            {"id": 90002, "owner": 23, "kind": "ship", "at": unknown, "route": [unknown_neighbor], "leg": 10.0},
+            {"id": 90003, "owner": 22, "kind": "colony_ship", "at": unknown, "route": [], "leg": 0.0}]:
+        visible_state["ships"].append(fixture)
+    if not (visible_state["map"]["fields"] as Array).is_empty():
+        var field: Dictionary = visible_state["map"]["fields"][0]
+        visible_state["ships"].append({"id": 90004, "owner": 22, "kind": "miner", "at": int(field["anchor"]), "route": [], "leg": 0.0, "mining_mode": "mining", "mining_target": field["position"], "field_leg": 1.0})
+        visible_state["ships"].append({"id": 90005, "owner": 23, "kind": "fighter", "at": points.size(), "route": [], "leg": 0.0})
+    var all_poses: Dictionary = view.call("_ship_poses", visible_state)
+    assert(all_poses.size() == visible_state["ships"].size())
+    for fixture in visible_state["ships"]:
+        assert(all_poses.has(int(fixture["id"])))
     # A consumed/disappearing ship clears its selection, rather than leaving stale details.
     view.set("selected", -1)
     view.set("selected_ship_id", logistics_id)
