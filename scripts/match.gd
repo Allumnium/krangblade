@@ -34,18 +34,13 @@ var pan: Vector2 = Vector2.ZERO
 var drag_button: int = 0
 var ship_visuals: Dictionary = {}
 var interaction_panel: VBoxContainer
-var outpost_button: Button
-var military_panel: VBoxContainer
-var military_split: VSlider
-var military_split_label: Label
 var military_lens: Button
 var logistics_lens: Button
 var active_lens: String = ""
-var global_resource_fills: Dictionary = {}
-var frontier_list: VBoxContainer
-var frontier_rows: Dictionary = {}
-var military_drag: int = -2
+var military_drag: int = -1
 var military_drag_weights: Dictionary = {}
+var military_preview: Dictionary = {}
+var global_resource_fills: Dictionary = {}
 var colony_picker: OptionButton
 var send_colony_button: Button
 var colony_button: Button
@@ -327,9 +322,6 @@ func _build_ui() -> void:
     interaction_panel.add_child(colony_picker)
     send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
     HUD.action(send_colony_button, Color("#c7a4ff"))
-    outpost_button = _button("DECLARE OUTPOST", _toggle_outpost, interaction_panel)
-    HUD.action(outpost_button, Color("#e9a276"))
-    _build_military_panel()
     yard_activity = HUD.section(planet_overview, "Shipyards")
     inspector_tabs = TabContainer.new()
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -376,7 +368,7 @@ func _build_ui() -> void:
     HUD.action(colony_button, Color("#c7a4ff"))
     fighter_button = _ship_build_row(shipyards, "BUILD FIGHTER", "fighter")
     HUD.action(fighter_button, Color("#f2b57e"))
-    fighter_button.tooltip_text = "Automatically patrols military outposts or stations at frontiers."
+    fighter_button.tooltip_text = "Assign fighters to points of interest using the military lens."
     miner_button = _ship_build_row(shipyards, "BUILD MINING SHIP", "miner")
     HUD.action(miner_button, Color("#d8e58b"))
     miner_button.tooltip_text = "Automatically mines accessible fields from owned service systems."
@@ -589,6 +581,8 @@ func _ship_is_moving(ship: Dictionary) -> bool:
     return not (ship["route"] as Array).is_empty() or ship.get("mining_mode", "idle") in ["outbound", "return"]
 
 func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
+    if ship.get("kind", "") == "fighter":
+        return maxf(0.0, MAP.route_length(ECONOMY.military_graph(state), _fighter_path(ship)) - float(ship["leg"])) / ECONOMY.SHIP_SPEED
     var points: Array = state["map"]["points"]
     var route: Array = ship["route"]
     var mode: String = ship.get("mining_mode", "idle")
@@ -642,6 +636,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
         status = ("To field" if mode == "outbound" else "Returning") + "\nETA %.1f yr" % _remaining_years(state, ship)
     elif mode == "mining":
         status = "Mining field %02d\n%.1f / 5 yr" % [int(ship["field"]) + 1, minf(5.0, float(ship.get("mining_years", 0.0)))]
+    if kind == "fighter":
+        status = "Stationed at %s" % _poi_name(int(ship["at"])) if route.is_empty() else "%s\nETA %.1f yr" % [_poi_name(int(route.back())), _remaining_years(state, ship)]
     ship_detail.text = "%s\n%s" % [str(roster.get(owner, {}).get("name", "Player")), status]
     ship_detail.tooltip_text = ""
     var cargo_capable: bool = kind in ["ship", "miner"]
@@ -656,8 +652,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
     fleet_detail.visible = kind != "fighter"
     fleet_cargo.get_parent().visible = cargo_capable
     if kind == "fighter":
-        if owner == _me():
-            _refresh_military(state, kind)
+        fleet_detail.visible = true
+        fleet_detail.text = "%d fighters" % int(ECONOMY.empire_totals(state, _me())["fighters"])
+        fleet_detail.tooltip_text = "Assign forces using the Military lens."
         return
     var total: int = 0
     var traveling: int = 0
@@ -699,10 +696,12 @@ func _build_lens_buttons() -> void:
         button.toggle_mode = true
         button.focus_mode = Control.FOCUS_NONE
         button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    military_lens.tooltip_text = "Military outposts and frontiers"
+    military_lens.tooltip_text = "Fleet allocation at systems and asteroid fields"
     logistics_lens.tooltip_text = "System resource storage"
 
 func _toggle_lens(kind: String) -> void:
+    military_drag = -1
+    military_preview.clear()
     active_lens = "" if active_lens == kind else kind
     military_lens.set_pressed_no_signal(active_lens == "military")
     logistics_lens.set_pressed_no_signal(active_lens == "logistics")
@@ -872,7 +871,6 @@ func _refresh() -> void:
     var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
     inspector_tabs.visible = not other_selected and own_system
     interaction_panel.visible = not other_selected and not p.is_empty() and not own_system
-    military_panel.get_parent().hide()
     ship_overview.visible = other_selected
     fleet_scroll.visible = other_selected
     fleet_overview.visible = other_selected
@@ -1053,6 +1051,8 @@ func _system_name(index: int) -> String:
 
 func _open_menu() -> void:
     drag_button = 0
+    military_drag = -1
+    military_preview.clear()
     match_menu.popup_centered(Vector2i(330, 100))
 
 func _menu_action(action: StringName) -> void:
@@ -1076,11 +1076,6 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
     var neutral: bool = not p.is_empty() and int(p.get("owner", -1)) == 0 and phase == "match"
     colony_picker.visible = neutral
     send_colony_button.visible = neutral
-    outpost_button.visible = neutral
-    var declared: bool = state.get("outposts", {}).get(_me(), {}).has(selected)
-    outpost_button.text = "REMOVE OUTPOST" if declared else "DECLARE OUTPOST"
-    outpost_button.disabled = not neutral or (not declared and not ECONOMY.can_declare_outpost(state, _me(), selected))
-    outpost_button.tooltip_text = "Patrol objective. Ships can visit once a route connects it to your military network."
     var choices: Array[int] = []
     var labels: Array[String] = []
     if neutral:
@@ -1102,95 +1097,6 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
             colony_picker.select(maxi(0, choices.find(previous)))
     colony_picker.disabled = choices.is_empty()
     send_colony_button.disabled = choices.is_empty()
-
-func _toggle_outpost() -> void:
-    var declared: bool = _state().get("outposts", {}).get(_me(), {}).has(selected)
-    session.call("request_outpost", selected, not declared)
-
-func _build_military_panel() -> void:
-    military_panel = HUD.section(fleet_overview, "Fighters")
-    var split_row := HBoxContainer.new()
-    military_panel.add_child(split_row)
-    military_split = VSlider.new()
-    military_split.custom_minimum_size = Vector2(28, 108)
-    military_split.max_value = 100
-    military_split.step = 1
-    military_split.focus_mode = Control.FOCUS_NONE
-    split_row.add_child(military_split)
-    military_split_label = _label("", 13)
-    military_split_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    military_split_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-    split_row.add_child(military_split_label)
-    military_split.drag_started.connect(_begin_military_drag.bind(-1))
-    military_split.drag_ended.connect(_end_military_drag.bind(-1))
-    military_split.value_changed.connect(_preview_military.bind(-1))
-    frontier_list = VBoxContainer.new()
-    military_panel.add_child(frontier_list)
-    military_panel.get_parent().hide()
-
-func _begin_military_drag(node: int) -> void:
-    military_drag = node
-    military_drag_weights = {}
-    for index in frontier_rows:
-        military_drag_weights[index] = int(frontier_rows[index]["slider"].value)
-
-func _end_military_drag(changed: bool, node: int) -> void:
-    var value: int = int(military_split.value) if node == -1 else int(frontier_rows[node]["slider"].value) if frontier_rows.has(node) else 0
-    military_drag = -2
-    if changed:
-        session.call("request_military", "fighter", node, value)
-    _refresh()
-
-func _preview_military(value: float, node: int) -> void:
-    if node == -1:
-        military_split_label.text = "Frontier  %d%%\n\nPatrol  %d%%" % [int(value), 100 - int(value)]
-        return
-    if military_drag != node or not frontier_rows.has(node):
-        return
-    var others: Array = frontier_rows.keys()
-    others.erase(node)
-    var weights: Dictionary = ECONOMY._apportion(others, military_drag_weights, 100 - int(value))
-    weights[node] = 100 if others.is_empty() else int(value)
-    for index in weights:
-        frontier_rows[index]["slider"].set_value_no_signal(weights[index])
-        frontier_rows[index]["label"].text = "%s  %d%%" % [_system_name(index), int(weights[index])]
-
-func _refresh_military(state: Dictionary, kind: String) -> void:
-    military_panel.get_parent().show()
-    var network: Dictionary = ECONOMY.military_network(state, _me())
-    var policy: Dictionary = ECONOMY.military_policy(state, _me(), kind, network)
-    var fronts: Array = network["frontiers"]
-    if military_drag != -2:
-        return
-    military_split.editable = not fronts.is_empty()
-    military_split.set_value_no_signal(policy["frontier"] if not fronts.is_empty() else 0)
-    _preview_military(military_split.value, -1)
-    for node in frontier_rows.keys():
-        if not fronts.has(node):
-            var obsolete: Control = frontier_rows[node]["row"]
-            frontier_list.remove_child(obsolete)
-            obsolete.queue_free()
-            frontier_rows.erase(node)
-    for node in fronts:
-        if not frontier_rows.has(node):
-            var row := VBoxContainer.new()
-            frontier_list.add_child(row)
-            var label := _label("", 12)
-            label.autowrap_mode = TextServer.AUTOWRAP_OFF
-            row.add_child(label)
-            var slider := HSlider.new()
-            slider.max_value = 100
-            slider.step = 1
-            slider.focus_mode = Control.FOCUS_NONE
-            slider.custom_minimum_size.y = 24
-            row.add_child(slider)
-            slider.drag_started.connect(_begin_military_drag.bind(int(node)))
-            slider.drag_ended.connect(_end_military_drag.bind(int(node)))
-            slider.value_changed.connect(_preview_military.bind(int(node)))
-            frontier_rows[node] = {"row": row, "label": label, "slider": slider}
-        frontier_rows[node]["slider"].editable = fronts.size() > 1
-        frontier_rows[node]["slider"].set_value_no_signal(policy["weights"][node])
-        frontier_rows[node]["label"].text = "%s  %d%%" % [_system_name(int(node)), int(policy["weights"][node])]
 
 func _send_colony() -> void:
     var index: int = colony_picker.selected
@@ -1372,6 +1278,24 @@ func _map_input(event: InputEvent) -> void:
         return
     if event is InputEventMouseButton:
         var mouse: InputEventMouseButton = event
+        if mouse.button_index == MOUSE_BUTTON_LEFT and active_lens == "military":
+            if mouse.pressed:
+                military_drag = _combat_slider_at(mouse.position)
+                if military_drag >= 0:
+                    military_drag_weights = ECONOMY.military_policy(_state(), _me(), "fighter")
+                    _update_combat_drag(mouse.position)
+                    map_canvas.accept_event()
+                    return
+            elif military_drag >= 0:
+                _update_combat_drag(mouse.position)
+                var node: int = military_drag
+                var percent: int = int(military_preview[node])
+                military_drag = -1
+                military_preview.clear()
+                session.call("request_military", "fighter", node, percent)
+                map_canvas.queue_redraw()
+                map_canvas.accept_event()
+                return
         if mouse.button_index == MOUSE_BUTTON_MIDDLE or mouse.button_index == MOUSE_BUTTON_RIGHT:
             if mouse.pressed:
                 drag_button = mouse.button_index
@@ -1382,6 +1306,8 @@ func _map_input(event: InputEvent) -> void:
                 MOUSE_BUTTON_WHEEL_UP: _zoom_at(mouse.position, 1.15)
                 MOUSE_BUTTON_WHEEL_DOWN: _zoom_at(mouse.position, 1.0 / 1.15)
                 MOUSE_BUTTON_LEFT: _select_at(mouse.position)
+    elif event is InputEventMouseMotion and military_drag >= 0:
+        _update_combat_drag(event.position)
     elif event is InputEventMouseMotion and drag_button != 0:
         var motion: InputEventMouseMotion = event
         if motion.button_mask == 0:
@@ -1391,7 +1317,19 @@ func _map_input(event: InputEvent) -> void:
             map_canvas.queue_redraw()
     map_canvas.accept_event()
 
+func _fighter_path(ship: Dictionary) -> Array[int]:
+    var path: Array[int] = [int(ship["at"])]
+    for node in ship["route"]:
+        path.append(int(node))
+    return path
+
+func _poi_name(node: int) -> String:
+    var count: int = (_state().get("planets", []) as Array).size()
+    return _system_name(node) if node < count else "Asteroid field %02d" % (node - count + 1)
+
 func _ship_position(ship: Dictionary, points: Array) -> Vector2:
+    if ship.get("kind", "") == "fighter":
+        points = ECONOMY.military_graph(_state())["points"]
     var pos: Vector2 = points[int(ship["at"])]
     var route: Array = ship["route"]
     if ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]:
@@ -1487,11 +1425,15 @@ func _ship_poses(state: Dictionary) -> Dictionary:
     var points: Array = state["map"]["points"]
     var docked: Dictionary = {}
     var poses: Dictionary = {}
+    var military_points: Array = ECONOMY.military_graph(state)["points"]
 
     for ship in state["ships"]:
         var at: int = int(ship["at"])
-        if int(ship["owner"]) != _me() and not ECONOMY.discovered(state, _me(), "planets", at):
+        var fighter: bool = ship.get("kind", "") == "fighter"
+        var field_node: bool = fighter and at >= points.size()
+        if int(ship["owner"]) != _me() and not ECONOMY.discovered(state, _me(), "fields" if field_node else "planets", at - points.size() if field_node else at):
             continue
+        var travel_points: Array = military_points if fighter else points
         var route: Array = ship["route"]
         var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
         var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
@@ -1510,37 +1452,67 @@ func _ship_poses(state: Dictionary) -> Dictionary:
             # Idle craft orbit visually; logistics positions remain authoritative planet nodes.
             var slot: int = int(docked.get(at, 0))
             docked[at] = slot + 1
-            var offset: Vector2 = _orbit_offset(slot, _planet_radius(at, state), visual_clock)
+            var orbit_radius: float = maxf(9.0, float(state["map"]["fields"][at - points.size()]["radius"]) * _fit() * zoom) if field_node else _planet_radius(at, state)
+            var offset: Vector2 = _orbit_offset(slot, orbit_radius, visual_clock)
             direction = _orbit_direction(offset)
             point += offset
         else:
-            var next: Vector2 = points[int(route[0])]
-            direction = (next - (points[at] as Vector2)).normalized()
+            var next: Vector2 = travel_points[int(route[0])]
+            direction = (next - (travel_points[at] as Vector2)).normalized()
             point += direction.orthogonal() * (5.0 + float(int(ship["id"]) % 5) * 4.0)
         poses[int(ship["id"])] = {"point": point, "direction": direction, "mining": mining}
     return poses
 
+func _combat_slider_rect(state: Dictionary, node: int, points: Array) -> Rect2:
+    var count: int = (state["planets"] as Array).size()
+    var radius: float = _planet_radius(node, state) if node < count else maxf(9.0, float(state["map"]["fields"][node - count]["radius"]) * _fit() * zoom)
+    var pos: Vector2 = _screen_point(points[node])
+    return Rect2(pos + Vector2(-27.0, -radius - 22.0), Vector2(54.0, 18.0))
+
+func _combat_slider_at(point: Vector2) -> int:
+    if active_lens != "military":
+        return -1
+    var state: Dictionary = _state()
+    if state.is_empty():
+        return -1
+    var points: Array = ECONOMY.military_graph(state)["points"]
+    var best: float = INF
+    var result: int = -1
+    for node in ECONOMY.military_pois(state, _me()):
+        var rect: Rect2 = _combat_slider_rect(state, node, points)
+        if rect.has_point(point):
+            var distance: float = rect.get_center().distance_to(point)
+            if distance < best:
+                best = distance
+                result = node
+    return result
+
+func _update_combat_drag(point: Vector2) -> void:
+    var state: Dictionary = _state()
+    var points: Array = ECONOMY.military_graph(state)["points"]
+    var rect: Rect2 = _combat_slider_rect(state, military_drag, points)
+    var percent: int = roundi(clampf((point.x - rect.position.x - 4.0) / (rect.size.x - 8.0), 0.0, 1.0) * 100.0)
+    military_preview = ECONOMY.change_military_weights(military_drag_weights, ECONOMY.military_home(state, _me()), military_drag, percent)
+    map_canvas.queue_redraw()
+
 func _draw_combat_lens(state: Dictionary, font: Font) -> void:
     if active_lens != "military":
         return
-    var network: Dictionary = ECONOMY.military_network(state, _me())
-    var points: Array = state["map"]["points"]
-    var fronts: Array = network["frontiers"]
-    for node in network["outposts"]:
-        if not ECONOMY.discovered(state, _me(), "planets", int(node)):
+    var points: Array = ECONOMY.military_graph(state)["points"]
+    var weights: Dictionary = military_preview if military_drag >= 0 else ECONOMY.military_policy(state, _me(), "fighter")
+    for node in ECONOMY.military_pois(state, _me()):
+        var rect: Rect2 = _combat_slider_rect(state, node, points)
+        if not Rect2(Vector2.ZERO, map_canvas.size).intersects(rect):
             continue
-        var pos: Vector2 = _screen_point(points[node])
-        var radius: float = _planet_radius(int(node), state)
-        if not get_viewport_rect().grow(radius + 60.0).has_point(pos):
-            continue
-        var frontier: bool = fronts.has(node)
-        var tint: Color = Color("#e9a276") if frontier else HUD.ACCENT if network["distance"].has(node) else HUD.MUTED
-        map_canvas.draw_arc(pos, radius + 8.0, 0.0, TAU, 48, tint, 2.0, true)
-        var tag: String = _system_name(int(node)) + (" · Frontier" if frontier else (" · Outpost" if network["distance"].has(node) else " · Unconnected"))
-        var width: float = font.get_string_size(tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-        var anchor: Vector2 = pos + Vector2(-width * 0.5, -radius - 17.0)
-        map_canvas.draw_rect(Rect2(anchor - Vector2(4, 13), Vector2(width + 8, 19)), Color("#0c1928ec"))
-        map_canvas.draw_string(font, anchor, tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
+        var percent: int = int(weights.get(node, 0))
+        var tint: Color = Color("#e9a276") if percent > 0 else HUD.MUTED
+        map_canvas.draw_rect(rect, Color("#0c1928ed"))
+        map_canvas.draw_rect(rect, Color(tint, 0.6), false, 1.0)
+        var track := Rect2(rect.position + Vector2(4.0, 12.0), Vector2(rect.size.x - 8.0, 3.0))
+        map_canvas.draw_rect(track, Color("#344960"))
+        map_canvas.draw_rect(Rect2(track.position, Vector2(track.size.x * float(percent) / 100.0, 3.0)), tint)
+        map_canvas.draw_circle(track.position + Vector2(track.size.x * float(percent) / 100.0, 1.5), 3.0, tint)
+        map_canvas.draw_string(font, rect.position + Vector2(0, 10), "%d%%" % percent, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 10, tint)
 
 func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
     if active_lens != "logistics":

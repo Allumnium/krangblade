@@ -155,15 +155,10 @@ func _send_commands() -> void:
     for i in range(3):
         session.call("request_operation", home_index, "yard")
     var state: Dictionary = session.get("economy")
-    for index in range((state["planets"] as Array).size()):
-        if int(state["planets"][index]["owner"]) == 0 and not MAP.linked(state["map"], home_index, index):
-            session.call("request_outpost", index, true)
-            break
-    for index in range((state["planets"] as Array).size()):
-        if int(state["planets"][index]["owner"]) == 0 and MAP.linked(state["map"], home_index, index):
-            session.call("request_outpost", index, true)
-            session.call("request_military", "fighter", -1, 70)
-            break
+    var node: int = (state["planets"] as Array).size()
+    session.call("request_military", "fighter", node, 70)
+    session.call("request_military", "fighter", -1, 100)
+    session.call("request_military", "fighter", node, 101)
 
 func _check_economy_sync() -> void:
     if economy_verified or str(session.get("phase")) != "match":
@@ -212,9 +207,9 @@ func _check_economy_sync() -> void:
             for ship in state["ships"]:
                 if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship":
                     ship_progress = true
-            var network: Dictionary = ECON.military_network(state, owner)
-            var military: Dictionary = ECON.military_policy(state, owner, "fighter", network)
-            if network["outposts"].size() >= 2 and not network["frontiers"].is_empty() and int(military["frontier"]) == 70 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
+            var military: Dictionary = ECON.military_policy(state, owner, "fighter")
+            var field_node: int = (state["planets"] as Array).size()
+            if int(military.get(field_node, 0)) == 70 and int(military.get(ECON.military_home(state, owner), 0)) == 30 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
                 verified += 1
         var view: Node = current_scene
         if cancel_sent and verified == expected_players and view != null and view.has_method("_update_trade_stock"):
