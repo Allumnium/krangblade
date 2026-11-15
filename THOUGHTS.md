@@ -89,3 +89,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Gameplay/UX hypothesis.
 - **Observation:** v0.12.4 permits concurrent infrastructure construction; a later shipyard can reach full progress before an earlier one and waits for the preceding slot to complete. Cancelling an earlier slot retains the later job’s percentage at the cheaper recipe and refunds the difference.
 - **Consider:** Verify the waiting-at-100% case is legible; consider a concise status if it confuses players during resource shortages. Review concurrent infrastructure work during pacing tests.
+
+- v0.12.5 fixes a duplicate local variable name in the new regression fixture, caught by the mandatory parse check.
