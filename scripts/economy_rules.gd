@@ -506,6 +506,8 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
         if SHIP_KINDS.has(order[0]) and (p["yards"] as Array).is_empty():
             continue
         if enqueue(state, int(p["owner"]), index, order[0], order[1]):
+            # Each repeated order joins the tail, after every existing turn.
+            p["queue"][-1]["automatic"] = true
             p["continuous_cursor"] = (slot + 1) % keys.size()
 
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
@@ -608,10 +610,21 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
                 chosen = item
                 break
         if chosen.is_empty():
+            # Repeat hulls take turns in queue order, even if the next one
+            # is waiting for materials. Otherwise cheap hulls can repeatedly
+            # leapfrog a more expensive one and starve it. Manual orders and
+            # targeted upgrades retain their existing eligibility rules.
+            var repeat_seen: bool = false
             for item in p["queue"]:
+                if assigned.has(int(item["id"])):
+                    continue
                 var upgrade: bool = item["kind"] == "yard_upgrade" and int(item["target"]) == y
                 var hull: bool = int(item["size"]) > 0 and int(item["size"]) <= max_size(int(yard["level"]))
-                if (upgrade or hull) and not assigned.has(int(item["id"])) and _possible(p, item) > EPS:
+                if hull and bool(item.get("automatic", false)):
+                    if repeat_seen:
+                        continue
+                    repeat_seen = true
+                if (upgrade or hull) and _possible(p, item) > EPS:
                     chosen = item
                     break
         if chosen.is_empty():

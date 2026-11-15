@@ -381,6 +381,55 @@ func _initialize() -> void:
         unique[system_name] = true
     assert(names == MAP.system_names(int(graph["seed"]), names.size()))
 
+    # Repeating hulls cycle in order, including under material starvation.
+    var rotation: Dictionary = ECON.create(graph, players, ids)
+    var rotation_home: Dictionary = rotation["planets"][0]
+    rotation_home["levels"]["Metals"] = 0
+    rotation_home["stock"]["Metals"] = 0.0
+    for kind in ["colony_ship", "fighter", "miner"]:
+        assert(ECON.set_continuous(rotation, 1, 0, kind, true))
+    ECON.step(rotation, 1.0)
+    assert(rotation_home["queue"].size() == 3)
+    for job in rotation_home["queue"]:
+        assert(job["automatic"])
+    assert(rotation_home["queue"][0]["kind"] == "colony_ship")
+    # Partial funding must go to the first turn, not a cheaper fighter.
+    for i in range(12):
+        rotation_home["stock"]["Metals"] += 10.0
+        ECON.step(rotation, 1.0)
+    assert(rotation["ships"].is_empty())
+    assert(float(rotation_home["queue"][0]["progress"]) > 0.0)
+    assert(is_zero_approx(float(rotation_home["queue"][1]["progress"])))
+    rotation_home["stock"]["Metals"] = 10000.0
+    for i in range(100):
+        ECON.step(rotation, 1.0)
+        if rotation["ships"].size() >= 9:
+            break
+    assert(rotation["ships"].size() == 9)
+    for i in range(9):
+        assert(rotation["ships"][i]["kind"] == ["colony_ship", "fighter", "miner"][i % 3])
+    # Canceling an automatic order turns off that type, without stopping the rest.
+    ECON._refill_continuous(rotation, 0, rotation_home)
+    for job in (rotation_home["queue"] as Array).duplicate():
+        if job["kind"] == "fighter":
+            assert(ECON.cancel(rotation, 1, 0, int(job["id"])))
+    assert(not rotation_home["continuous"]["fighter"])
+    for i in range(50):
+        ECON.step(rotation, 1.0)
+    for i in range(9, rotation["ships"].size()):
+        assert(rotation["ships"][i]["kind"] != "fighter")
+    # Two shipyards can start consecutive turns in parallel.
+    var parallel_repeat: Dictionary = ECON.create(graph, players, ids)
+    var parallel_home: Dictionary = parallel_repeat["planets"][0]
+    parallel_home["stock"]["Metals"] = 10000.0
+    parallel_home["yards"].append({"level": 1, "job": -1})
+    for kind in ["fighter", "miner"]:
+        assert(ECON.set_continuous(parallel_repeat, 1, 0, kind, true))
+    ECON.step(parallel_repeat, 1.0)
+    assert(parallel_home["yards"][0]["job"] != parallel_home["yards"][1]["job"])
+    assert(float(parallel_home["queue"][0]["progress"]) > 0.0)
+    assert(float(parallel_home["queue"][1]["progress"]) > 0.0)
+
     # Automatic system and shipyard upgrades use the shared scheduler.
     var upgrades: Dictionary = ECON.create(graph, players, ids)
     var upgrade_home: Dictionary = upgrades["planets"][0]
