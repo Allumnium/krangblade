@@ -744,6 +744,32 @@ func _initialize() -> void:
 
     var ai_map: Dictionary = {"seed": 123, "points": [Vector2(-950, 0), Vector2.ZERO, Vector2(3800, 0), Vector2(950, 0), Vector2(1900, 0)], "edges": [[0, 1], [1, 3], [3, 4], [4, 2]], "fields": []}
     var ai_roster: Dictionary = {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 2}}
+    # Attack orders wait for a physical rally, then commit only that cohort.
+    var wave_state: Dictionary = ECON.create(ai_map, ai_roster, ids)
+    var wave_graph: Dictionary = ECON.military_graph(wave_state)
+    var wave_fleet: Array = []
+    for i in range(2):
+        wave_fleet.append({"id": 100 + i, "owner": 2, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": ai_map["points"][1], "dest": -1})
+    ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
+    assert(wave_state["ai_waves"][2]["members"].is_empty())
+    assert(wave_fleet[0]["dest"] == 1 and wave_fleet[1]["dest"] == 1)
+    wave_fleet.append({"id": 102, "owner": 2, "kind": "fighter", "at": 3, "route": [], "leg": 0.0, "position": ai_map["points"][3], "dest": -1})
+    ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
+    assert(wave_state["ai_waves"][2]["members"].is_empty())
+    ECON._move({"map": wave_graph}, wave_fleet[2], 10.0)
+    ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
+    assert(wave_state["ai_waves"][2]["members"].size() == 3)
+    for craft in wave_fleet:
+        assert(craft["dest"] == 2 and not craft["route"].is_empty())
+    wave_fleet.append({"id": 103, "owner": 2, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": ai_map["points"][1], "dest": -1})
+    ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
+    assert(wave_fleet[3]["dest"] == 1 and wave_state["ai_waves"][2]["members"].size() == 3)
+    for i in range(3):
+        ECON._move({"map": wave_graph}, wave_fleet[i], 100.0)
+    ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
+    assert(wave_state["ai_waves"][2]["members"].is_empty())
+    for craft in wave_fleet:
+        assert(craft["dest"] == 1)
     var ai_state: Dictionary = ECON.create(ai_map, ai_roster, ids)
     var saw_attack: bool = false
     var saw_logistics: bool = false

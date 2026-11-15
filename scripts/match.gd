@@ -23,9 +23,11 @@ var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
 var map_canvas: Control
 var territory_layer: Control
-var territory_image: TextureRect
-var territory_lookup: PackedInt32Array = PackedInt32Array()
-var territory_grid: Vector2i = Vector2i.ZERO
+var territory_image: ColorRect
+var territory_material: ShaderMaterial
+var territory_sites: ImageTexture
+var territory_site_count: int = 0
+var territory_radius: float = 1.0
 var territory_last: Array[int] = []
 var territory_seed: int = -1
 var header_panel: PanelContainer
@@ -780,95 +782,150 @@ func _build_territory_layer() -> void:
     territory_layer.offset_bottom = -8
     territory_layer.clip_contents = true
     territory_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    territory_image = TextureRect.new()
-    territory_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-    territory_image.stretch_mode = TextureRect.STRETCH_SCALE
+    territory_image = ColorRect.new()
     territory_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    territory_image.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
     territory_layer.add_child(territory_image)
+    # The texture stores site coordinates, NOT a spatial raster. Every output
+    # pixel evaluates continuous circle distances in world space.
+    var shader := Shader.new()
+    shader.code = """
+shader_type canvas_item;
+render_mode unshaded;
+uniform sampler2D site_data : filter_nearest, repeat_disable;
+uniform int site_count = 0;
+uniform vec2 world_extent = vec2(1.0);
+uniform float padding = 1.0;
+
+float smooth_min(float a, float b, float k) {
+    float h = max(k - abs(a - b), 0.0) / k;
+    return min(a, b) - h * h * k * 0.25;
+}
+vec3 team_color(int team) {
+    if (team == 1) return vec3(0.404, 0.831, 0.663);
+    if (team == 2) return vec3(0.957, 0.643, 0.416);
+    if (team == 3) return vec3(0.467, 0.667, 0.996);
+    if (team == 4) return vec3(0.808, 0.569, 0.929);
+    if (team == 5) return vec3(0.933, 0.820, 0.420);
+    if (team == 6) return vec3(0.941, 0.518, 0.651);
+    if (team == 7) return vec3(0.420, 0.796, 0.831);
+    return vec3(0.929, 0.459, 0.467);
+}
+void fragment() {
+    vec2 p = UV * world_extent - vec2(padding);
+    float fields[8];
+    for (int j = 0; j < 8; j++) { fields[j] = 10000.0; }
+    float neutral = 10000.0;
+    for (int i = 0; i < site_count; i++) {
+        vec4 site = texelFetch(site_data, ivec2(i, 0), 0);
+        float d = length(p - site.xy) - site.z;
+        int team = int(site.w + 0.5);
+        if (team == 0) {
+            neutral = smooth_min(neutral, d, 0.16);
+        } else {
+            fields[team - 1] = smooth_min(fields[team - 1], d, 0.48);
+        }
+    }
+    float best = 10000.0;
+    float other = 10000.0;
+    int winner = 1;
+    for (int j = 0; j < 8; j++) {
+        float d = fields[j];
+        if (d < best) {
+            other = best;
+            best = d;
+            winner = j + 1;
+        } else {
+            other = min(other, d);
+        }
+    }
+    // Rival fields never overlap; keep a narrow neutral seam. Neutral and
+    // contested sites are excluded with a rounded subtraction.
+    float d = max(best, 0.045 + (best - other) * 0.5);
+    d = -smooth_min(-d, neutral, 0.12);
+    float aa = max(fwidth(d), 0.00001);
+    float inside = 1.0 - smoothstep(-aa * 0.65, aa * 0.65, d);
+    float border = 1.0 - smoothstep(aa * 0.45, aa * 1.45, abs(d));
+    COLOR = vec4(team_color(winner), inside * 0.12 + border * 0.52);
+}
+"""
+    territory_material = ShaderMaterial.new()
+    territory_material.shader = shader
+    territory_image.material = territory_material
     territory_image.hide()
 
-# Cached bounded nearest-site raster. Neutral sites remain in the partition
-# to keep ownership from spreading into undeveloped systems or deep space.
-func _build_territory_lookup(state: Dictionary) -> void:
-    var points: Array = ECONOMY.military_graph(state)["points"]
-    var bounds: Vector2 = state["map"]["size"]
-    var scale: float = 512.0 / maxf(bounds.x, bounds.y)
-    territory_grid = Vector2i(maxi(1, roundi(bounds.x * scale)), maxi(1, roundi(bounds.y * scale)))
-    var cell_size: Vector2 = bounds / Vector2(territory_grid)
-    var count: int = territory_grid.x * territory_grid.y
-    territory_lookup.resize(count)
-    territory_lookup.fill(-1)
-    var best := PackedFloat32Array()
-    best.resize(count)
-    best.fill(INF)
-    var system_count: int = (state["planets"] as Array).size()
-    for node in range(points.size()):
-        var center: Vector2 = points[node]
-        var spacing: float = INF
-        for i in range(system_count):
-            if i != node:
-                spacing = minf(spacing, center.distance_to(points[i]))
-        if not is_finite(spacing):
-            spacing = bounds.length() * 0.25
-        var radius: float = maxf(spacing * 1.35, maxf(cell_size.x, cell_size.y) * 3.0)
-        var lo: Vector2i = Vector2i((center - Vector2.ONE * radius) / cell_size).clamp(Vector2i.ZERO, territory_grid - Vector2i.ONE)
-        var hi: Vector2i = Vector2i((center + Vector2.ONE * radius) / cell_size).clamp(Vector2i.ZERO, territory_grid - Vector2i.ONE)
-        for y in range(lo.y, hi.y + 1):
-            for x in range(lo.x, hi.x + 1):
-                var pixel: int = y * territory_grid.x + x
-                var position: Vector2 = (Vector2(x, y) + Vector2(0.5, 0.5)) * cell_size
-                var d: float = position.distance_squared_to(center)
-                if d <= radius * radius and d < best[pixel]:
-                    best[pixel] = d
-                    territory_lookup[pixel] = node
-    territory_seed = int(state["map"]["seed"])
-    territory_last.clear()
+# One consistent radius per galaxy, based on median nearest-system spacing.
+# Outlier systems cannot create enormous wedges; asteroid fields are smaller.
+func _territory_base_radius(state: Dictionary) -> float:
+    var points: Array = state["map"]["points"]
+    var spacings: Array[float] = []
+    for i in range(points.size()):
+        var point: Vector2 = points[i]
+        var shortest: float = INF
+        for j in range(points.size()):
+            if i != j:
+                shortest = minf(shortest, point.distance_to(points[j]))
+        if is_finite(shortest) and shortest > 0.0:
+            spacings.append(shortest)
+    spacings.sort()
+    if spacings.is_empty():
+        return 300.0
+    return maxf(100.0, spacings[floori(float(spacings.size()) * 0.5)] * 0.73)
 
 func _refresh_territory(state: Dictionary) -> void:
     if state.is_empty():
         territory_image.hide()
+        territory_seed = -1
+        territory_last.clear()
         return
-    if territory_lookup.is_empty() or territory_seed != int(state["map"]["seed"]):
-        _build_territory_lookup(state)
+    var seed_value: int = int(state["map"]["seed"])
+    if territory_seed != seed_value:
+        territory_radius = _territory_base_radius(state)
+        territory_seed = seed_value
+        territory_last.clear()
     var claims: Array[int] = ECONOMY.territory_claims(state)
     if claims == territory_last:
         return
     territory_last = claims
-    # Explicit RGBA pixels: visible team fill and a bright, two-pixel
-    # boundary band. Same-team sectors merge, contested sectors stay clear.
-    var ownership := PackedInt32Array()
-    ownership.resize(territory_lookup.size())
-    for i in range(territory_lookup.size()):
-        var node: int = territory_lookup[i]
-        if node >= 0:
-            ownership[i] = claims[node]
-    var pixels := PackedByteArray()
-    pixels.resize(ownership.size() * 4)
-    for y in range(territory_grid.y):
-        for x in range(territory_grid.x):
-            var i: int = y * territory_grid.x + x
-            var team: int = ownership[i]
-            if team <= 0:
+    var points: Array = ECONOMY.military_graph(state)["points"]
+    var system_count: int = (state["planets"] as Array).size()
+    var sources: Array[int] = []
+    for i in range(points.size()):
+        if claims[i] > 0:
+            sources.append(i)
+    var sites: Array[Color] = []
+    for i in range(points.size()):
+        var point: Vector2 = points[i]
+        var radius: float = 1.0 if i < system_count else 0.68
+        if claims[i] <= 0:
+            # Only nearby neutral sites need exclusion, bounding shader work.
+            var nearest: float = INF
+            for source in sources:
+                nearest = minf(nearest, point.distance_to(points[source]) / territory_radius)
+            if nearest > 1.65:
                 continue
-            var rim: bool = false
-            for offset in [Vector2i(-2, 0), Vector2i(2, 0), Vector2i(0, -2), Vector2i(0, 2), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1), Vector2i(0, 1)]:
-                var neighbor: Vector2i = Vector2i(x, y) + offset
-                if neighbor.x < 0 or neighbor.y < 0 or neighbor.x >= territory_grid.x or neighbor.y >= territory_grid.y or ownership[neighbor.y * territory_grid.x + neighbor.x] != team:
-                    rim = true
-                    break
-            var tint: Color = COLORS[team]
-            pixels[i * 4] = tint.r8
-            pixels[i * 4 + 1] = tint.g8
-            pixels[i * 4 + 2] = tint.b8
-            pixels[i * 4 + 3] = 195 if rim else 36
-    territory_image.texture = ImageTexture.create_from_image(Image.create_from_data(territory_grid.x, territory_grid.y, false, Image.FORMAT_RGBA8, pixels))
+            radius = minf(radius * 0.36, nearest * 0.38)
+            if radius <= 0.01:
+                continue
+        sites.append(Color(point.x / territory_radius, point.y / territory_radius, radius, float(claims[i])))
+    territory_site_count = sites.size()
+    if sources.is_empty():
+        territory_image.hide()
+        return
+    var data: Image = Image.create_empty(sites.size(), 1, false, Image.FORMAT_RGBAF)
+    for i in range(sites.size()):
+        data.set_pixel(i, 0, sites[i])
+    territory_sites = ImageTexture.create_from_image(data)
+    territory_material.set_shader_parameter("site_data", territory_sites)
+    territory_material.set_shader_parameter("site_count", territory_site_count)
+    territory_material.set_shader_parameter("world_extent", _map_size() / territory_radius + Vector2.ONE * 3.0)
+    territory_material.set_shader_parameter("padding", 1.5)
     territory_image.show()
     _position_territory()
 
 func _position_territory() -> void:
-    territory_image.position = _screen_point(Vector2.ZERO)
-    territory_image.size = _map_size() * _fit() * zoom
+    var padding: Vector2 = Vector2.ONE * territory_radius * 1.5
+    territory_image.position = _screen_point(-padding)
+    territory_image.size = (_map_size() + padding * 2.0) * _fit() * zoom
 
 func _show_system_rings(index: int) -> bool:
     return index == selected

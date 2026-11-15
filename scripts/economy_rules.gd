@@ -37,6 +37,8 @@ const SHIP_HP: float = 100.0
 const LASER_DAMAGE: float = 18.0
 const LASER_RANGE: float = 180.0
 const AI_INTERVAL: float = 4.0
+const AI_WAVE_MIN: int = 3
+const AI_RALLY_RADIUS: float = 150.0
 
 # Decorative bodies are derived from immutable system data, not simulated entities.
 # Separate RNG keeps the economy's seeded resource generation unchanged.
@@ -120,7 +122,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
     for id in ordered:
         if bool(players[id].get("ai", false)):
             ai_players.append(id)
-    var state: Dictionary = {"ai_players": ai_players, "next_ai": 0.0, "map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "military": {}}
+    var state: Dictionary = {"ai_players": ai_players, "ai_waves": {}, "next_ai": 0.0, "map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "military": {}}
     update_exploration(state)
     return state
 
@@ -1387,6 +1389,8 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
         elif index == home and level < 2 and abundance > 0.0:
             action = "production"
             target = "Metals"
+        elif has_yard and counts["fighter"] < AI_WAVE_MIN:
+            action = "fighter"
         elif index == home and counts["ship"] < mini(12, owned.size() * 2) and owned.size() > 1:
             action = "ship"
         elif has_yard and expansion and counts["colony_ship"] < 3:
@@ -1452,7 +1456,49 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
             if distance < nearest:
                 nearest = distance
                 goal = node
-    set_military(state, player, "fighter", home if goal < 0 else goal, 100)
+    _ai_wave_order(state, graph, player, home, goal, fighters)
+
+# Launch only assembled cohorts; newly built fighters are held in reserve
+# until the next wave. Existing human allocation behavior is unaffected.
+static func _ai_wave_order(state: Dictionary, graph: Dictionary, player: int, home: int, goal: int, fighters: Array) -> void:
+    var waves: Dictionary = state["ai_waves"]
+    var wave: Dictionary = waves.get(player, {})
+    var members: Array = wave.get("members", [])
+    var active: Array[int] = []
+    var target: int = int(wave.get("target", -1))
+    var all_arrived: bool = true
+    var engaged: bool = false
+    for ship in fighters:
+        var id: int = int(ship["id"])
+        if not members.has(id):
+            continue
+        active.append(id)
+        all_arrived = all_arrived and int(ship["at"]) == target and (ship["route"] as Array).is_empty()
+        engaged = engaged or int(ship.get("combat_target", -1)) >= 0
+    # Once a wave reaches its objective and combat has ended, or is reduced
+    # to a lone unengaged survivor, its remaining hulls regroup.
+    if active.is_empty() or (not engaged and (all_arrived or active.size() < 2)):
+        active.clear()
+        target = -1
+    var ready: Array = []
+    var points: Array = graph["points"]
+    var rally: Vector2 = points[home]
+    var home_paths: Dictionary = _military_paths(graph, home)
+    for ship in fighters:
+        if active.has(int(ship["id"])):
+            continue
+        if int(ship.get("dest", -1)) != home:
+            _redirect_fighter(graph, ship, home, home_paths)
+        if int(ship["at"]) == home and (ship["route"] as Array).is_empty() and combat_position(state, graph, ship).distance_to(rally) <= AI_RALLY_RADIUS and int(ship.get("combat_target", -1)) < 0:
+            ready.append(ship)
+    if active.is_empty() and ready.size() >= AI_WAVE_MIN and goal >= 0 and goal != home:
+        var attack_paths: Dictionary = _military_paths(graph, goal)
+        if attack_paths["distance"].has(home):
+            target = goal
+            for ship in ready:
+                _redirect_fighter(graph, ship, target, attack_paths)
+                active.append(int(ship["id"]))
+    waves[player] = {"target": target, "members": active}
 
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
@@ -1479,7 +1525,8 @@ static func step(state: Dictionary, dt: float) -> void:
                 fleets[player] = []
             fleets[player].append(craft)
     for player in fleets:
-        _allocate_fighters(state, combat_graph, int(player), fleets[player])
+        if not state["ai_players"].has(player):
+            _allocate_fighters(state, combat_graph, int(player), fleets[player])
     for ship in (state["ships"] as Array).duplicate():
         var initial_position: Vector2 = ship["position"]
         if ship.get("kind", "ship") == "colony_ship":

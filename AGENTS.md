@@ -32,7 +32,7 @@ Read this file and current repository state at the beginning of each coding sess
 
 - Render all living ships for every client, friendly or hostile, at all activity states, even if discovery is restricted. Ship outlines identify team; no hiding foreign ships. Test generated maps for visible early AI construction, not just eventual expansion.
 
-- Always show clearly visible territory tint/boundaries beneath the map for owned or fighter-held uncontested sectors; use team colors and no internal same-team borders. Contested sectors lack control shading. This is visual only. Hide system and orbital rings unless the system is selected; keep travel lanes thin and faint.
+- Always show clearly visible territory tint/boundaries beneath the map for owned or fighter-held uncontested sectors; use smooth, consistently sized circular influences with rounded same-team blends, smaller asteroid-field influences, antialiased screen-space outlines and no internal same-team borders. Do not render an enlarged low-resolution spatial raster. Contested sectors lack control shading. This is visual only. Hide system and orbital rings unless the system is selected; keep travel lanes thin and faint.
 
 - Bottom-center time controls offer pause, 1×, 2× and 5×. Each match starts at 1×; solo or the multiplayer host controls speed, guests see the active speed without editing it. Pause halts authoritative fixed-step simulation, not the interface, network or accepted player orders. Keep speed replicated with match state.
 
@@ -41,3 +41,5 @@ Read this file and current repository state at the beginning of each coding sess
 - Colony ships may target any discovered neutral star system, regardless of adjacency or intermediate ownership. Use shortest existing lane routes through all systems; intermediate systems are not colonized, and ships are exposed to combat. AI uses the same rules.
 
 - Run independent multiplayer regression scenarios concurrently on isolated CI runners, alongside core parsing, simulation and UI tests. Keep both real two-/eight-peer round trips, loading-disconnect and host-disconnect checks mandatory; the aggregate validate job requires all jobs to pass. Superseded runs on the same ref may be cancelled. Do not reduce assertions or use shorter timeouts as a substitute for faster execution.
+
+- AI fighters rally at their home system and launch in cohorts of at least three physically assembled hulls on a shared objective. New reinforcements stay in reserve during a wave; survivors regroup when the objective is reached and engagement ends or only one unengaged survivor remains. Preserve human allocation and combat rules. Cohort size is provisional.
