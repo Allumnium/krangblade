@@ -1134,12 +1134,12 @@ static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, 
     ship["leg"] = _lane_progress(graph["points"], ship)
     ship["dest"] = target
 
-static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array) -> void:
+static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array, defer_routes: bool = false) -> void:
     var weights: Dictionary = military_policy(state, player, "fighter")
     var counts: Dictionary = _apportion(weights.keys(), weights, fleet.size())
     var actual: Dictionary = {}
     for ship in fleet:
-        var dest: int = int(ship.get("dest", -1))
+        var dest: int = int(ship.get("operation_target", ship.get("dest", -1))) if defer_routes else int(ship.get("dest", -1))
         actual[dest] = int(actual.get(dest, 0)) + 1
     var matches: bool = true
     for node in counts:
@@ -1147,6 +1147,9 @@ static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int
             matches = false
             break
     if matches:
+        if defer_routes:
+            for ship in fleet:
+                ship["operation_target"] = int(ship.get("operation_target", ship.get("dest", -1)))
         return
     var paths: Dictionary = {}
     for node in counts:
@@ -1170,7 +1173,9 @@ static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int
                     best_node = int(node)
         if best_ship.is_empty():
             return
-        if int(best_ship.get("dest", -1)) != best_node:
+        if defer_routes:
+            best_ship["operation_target"] = best_node
+        elif int(best_ship.get("dest", -1)) != best_node:
             _redirect_fighter(graph, best_ship, best_node, paths[best_node])
         counts[best_node] -= 1
         remaining.erase(best_ship)
@@ -1500,16 +1505,18 @@ static func _ai_wave_order(state: Dictionary, graph: Dictionary, player: int, ho
                 active.append(int(ship["id"]))
     waves[player] = {"target": target, "members": active}
 
-# Shared operation records preserve identity while an objective has members.
-# Existing human quotas and AI wave orders remain the routing authority for now.
+# Operations own human deployment; quotas choose membership rather than routes.
+# Keep exact group identities first, then preserve a disappearing group's ID
+# when its members are reassigned together to another objective.
 static func _sync_operations(state: Dictionary) -> void:
     var previous: Dictionary = state.get("operations", {})
     var current: Dictionary = {}
+    var by_id: Dictionary = {}
     for ship in state["ships"]:
         if ship.get("kind", "") != "fighter":
             continue
         var owner: int = int(ship["owner"])
-        var target: int = int(ship.get("dest", -1))
+        var target: int = int(ship.get("operation_target", ship.get("dest", -1)))
         if target < 0:
             target = int(ship["at"])
         var role: String = "allocation"
@@ -1518,20 +1525,120 @@ static func _sync_operations(state: Dictionary) -> void:
             role = "wave" if wave.get("members", []).has(int(ship["id"])) else "reserve"
         var key: String = "%d:%s:%d" % [owner, role, target]
         if not current.has(key):
-            var old: Dictionary = previous.get(key, {})
-            var operation_id: int = int(old.get("id", 0))
-            if operation_id == 0:
-                operation_id = int(state.get("next_operation_id", 1))
-                state["next_operation_id"] = operation_id + 1
-            current[key] = {"id": operation_id, "owner": owner, "target": target, "role": role, "members": [], "moving": false, "engaged": false}
+            current[key] = {"id": 0, "owner": owner, "target": target, "role": role, "members": [], "moving": false, "engaged": false, "phase": "assigned", "deployed": []}
         var operation: Dictionary = current[key]
-        operation["members"].append(int(ship["id"]))
+        var ship_id: int = int(ship["id"])
+        by_id[ship_id] = ship
+        operation["members"].append(ship_id)
         operation["moving"] = bool(operation["moving"]) or not (ship["route"] as Array).is_empty()
         operation["engaged"] = bool(operation["engaged"]) or int(ship.get("combat_target", -1)) >= 0
-        ship["operation_id"] = int(operation["id"])
-    for operation in current.values():
+    var reused: Dictionary = {}
+    for key in current:
+        var operation: Dictionary = current[key]
         operation["members"].sort()
+        var old: Dictionary = previous.get(key, {})
+        if not old.is_empty():
+            operation["id"] = int(old["id"])
+            operation["phase"] = old.get("phase", "assigned")
+            operation["deployed"] = old.get("deployed", []).duplicate()
+            reused[int(old["id"])] = true
+    for key in current:
+        var operation: Dictionary = current[key]
+        if int(operation["id"]) == 0:
+            var best_id: int = 0
+            var best_overlap: int = 0
+            for old_key in previous:
+                var old: Dictionary = previous[old_key]
+                var candidate: int = int(old["id"])
+                if reused.has(candidate) or current.has(old_key) or old["owner"] != operation["owner"] or old["role"] != operation["role"]:
+                    continue
+                var overlap: int = 0
+                for member in operation["members"]:
+                    if old["members"].has(member):
+                        overlap += 1
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_id = candidate
+            if best_id == 0:
+                best_id = int(state.get("next_operation_id", 1))
+                state["next_operation_id"] = best_id + 1
+            operation["id"] = best_id
+            reused[best_id] = true
+        for member in operation["members"]:
+            by_id[member]["operation_id"] = int(operation["id"])
     state["operations"] = current
+
+static func _order_operation_ship(graph: Dictionary, ship: Dictionary, goal: int, paths: Dictionary) -> void:
+    if int(ship.get("dest", -1)) == goal:
+        return
+    if not paths.has(goal):
+        paths[goal] = _military_paths(graph, goal)
+    _redirect_fighter(graph, ship, goal, paths[goal])
+
+# A hostile-owned system is an attack objective. Other POIs retain immediate
+# allocation orders, including home defense and neutral/field assignments.
+# Reuse the AI minimum and physical rally radius as provisional defaults.
+static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
+    var by_id: Dictionary = {}
+    for ship in state["ships"]:
+        if ship.get("kind", "") == "fighter":
+            by_id[int(ship["id"])] = ship
+    var paths: Dictionary = {}
+    var points: Array = graph["points"]
+    for operation in state["operations"].values():
+        if operation["role"] != "allocation":
+            continue
+        var owner: int = int(operation["owner"])
+        var target: int = int(operation["target"])
+        var home: int = military_home(state, owner)
+        var attack: bool = false
+        if target >= 0 and target < (state["planets"] as Array).size():
+            var defender: int = int(state["planets"][target]["owner"])
+            attack = defender != 0 and state["teams"].get(defender, 0) != state["teams"].get(owner, 0)
+        if not attack or home < 0:
+            operation["phase"] = "assigned"
+            operation["deployed"] = []
+            for member in operation["members"]:
+                _order_operation_ship(graph, by_id[member], target, paths)
+            continue
+        var deployed: Array = []
+        for member in operation["deployed"]:
+            if operation["members"].has(member):
+                deployed.append(member)
+        if deployed.size() == 1 and int(by_id[deployed[0]].get("combat_target", -1)) < 0:
+            deployed.clear()
+        var ready: Array = []
+        for member in operation["members"]:
+            var ship: Dictionary = by_id[member]
+            if deployed.has(member):
+                _order_operation_ship(graph, ship, target, paths)
+                continue
+            _order_operation_ship(graph, ship, home, paths)
+            if int(ship["at"]) == home and (ship["route"] as Array).is_empty() and combat_position(state, graph, ship).distance_to(points[home]) <= AI_RALLY_RADIUS and int(ship.get("combat_target", -1)) < 0:
+                ready.append(member)
+        if ready.size() >= AI_WAVE_MIN:
+            for member in ready:
+                _order_operation_ship(graph, by_id[member], target, paths)
+                deployed.append(member)
+        operation["deployed"] = deployed
+        operation["phase"] = "rallying" if deployed.is_empty() else "deployed"
+
+# Local combat flight temporarily overrides lane navigation, without changing
+# its queued waypoints or teleporting back on disengagement. All maneuvers
+# use positions captured before any hull moves this tick.
+static func _maneuver_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> void:
+    var position: Vector2 = ship["position"]
+    var radial: Vector2 = position - opponent
+    var radius: float = radial.length()
+    var direction: Vector2 = radial / radius if radius > EPS else Vector2.from_angle(float(int(ship["id"]) % 64) * 2.399963)
+    var budget: float = SHIP_SPEED * dt
+    var preferred_radius: float = LASER_RANGE * 0.60
+    # Move tangentially while gradually correcting distance. An angular
+    # waypoint (rather than a straight tangent) keeps the path curved.
+    var next_radius: float = move_toward(radius, preferred_radius, budget * 0.45)
+    var angle: float = minf(0.6, budget * 0.85 / maxf(preferred_radius, radius))
+    var waypoint: Vector2 = opponent + direction.rotated(angle) * next_radius
+    _navigate(ship, waypoint, budget)
 
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
@@ -1559,7 +1666,12 @@ static func step(state: Dictionary, dt: float) -> void:
             fleets[player].append(craft)
     for player in fleets:
         if not state["ai_players"].has(player):
-            _allocate_fighters(state, combat_graph, int(player), fleets[player])
+            _allocate_fighters(state, combat_graph, int(player), fleets[player], true)
+    _sync_operations(state)
+    _dispatch_operations(state, combat_graph)
+    var combat_positions: Dictionary = {}
+    for craft in state["ships"]:
+        combat_positions[int(craft["id"])] = craft["position"]
     for ship in (state["ships"] as Array).duplicate():
         var initial_position: Vector2 = ship["position"]
         if ship.get("kind", "ship") == "colony_ship":
@@ -1570,8 +1682,14 @@ static func step(state: Dictionary, dt: float) -> void:
             _work_ship(state, ship, teams, cache, dt)
         elif ship.get("kind", "ship") == "miner":
             _work_miner(state, ship, teams, cache, budgets, dt)
-        elif ship.get("kind", "") == "fighter" and int(ship.get("combat_target", -1)) < 0:
-            _move({"map": combat_graph}, ship, dt)
+        elif ship.get("kind", "") == "fighter":
+            var target_id: int = int(ship.get("combat_target", -1))
+            if combat_positions.has(target_id):
+                _maneuver_fighter(ship, combat_positions[target_id], dt)
+                ship["leg"] = _lane_progress(combat_graph["points"], ship)
+            else:
+                ship["combat_target"] = -1
+                _move({"map": combat_graph}, ship, dt)
         var fighter: bool = ship.get("kind", "") == "fighter"
         var idle: bool = (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle"
         idle = idle and (int(ship.get("dest", -1)) < 0 or fighter) and int(ship.get("source", -1)) < 0

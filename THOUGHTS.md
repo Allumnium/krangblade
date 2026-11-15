@@ -30,6 +30,16 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Consider:** Authority-level restrictions on behavior across every slot and command path, including clear treatment of ongoing operations. See TODO phase 6.
 
 ### T-006 — Operation identity and retargeting
-- **Type:** Design/technical risk.
-- **Observation:** Initial operation records are keyed by owner, role and destination; a retargeted group receives a new ID. This preserves existing routing but is not a full independent fleet command model.
-- **Consider:** Separate operation identity from mutable objective before implementing coordinated reassignment and formation slots. See TODO phase 1.
+- **Type:** Technical/design risk.
+- **Observation:** v0.10.0 preserves operation IDs on retargeting if an old group disappears and its members transfer to a new objective; splits and merges retain exact surviving groups first. Stable formation slots across these changes still need design and validation.
+- **Consider:** Test complex splits/merges and membership churn before committing to formation-slot geometry. See TODO phase 1.
+
+### T-007 — Small allocations can stall attacks
+- **Type:** Gameplay/UX hypothesis.
+- **Observation:** A hostile-system allocation below three hulls now rallies rather than trickling into battle; splitting a small fleet across several hostile objectives can stall all of them.
+- **Consider:** Show requested versus deployed hull counts and rally status; review cohort size and priority arbitration during policy design. See TODO phases 1–2.
+
+### T-008 — Orbiting combat and concentrated fleets
+- **Type:** Gameplay/visual hypothesis.
+- **Observation:** v0.10.1 uses a common orbit direction and a provisional preferred separation of 60% of laser range; dense fleets may overlap or repeatedly lose contacts when chasing fast targets.
+- **Consider:** Inspect real battles before adding separation, target persistence or a turn-rate model; integrate stable formation slots with combat maneuvers without sacrificing speed bounds.

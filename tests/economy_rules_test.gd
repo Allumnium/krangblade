@@ -842,7 +842,69 @@ func _initialize() -> void:
     operation_fleet[0]["dest"] = 0
     ECON._sync_operations(operation_state)
     assert(not operation_state["operations"].has(operation_key))
-    assert(operation_fleet[0]["operation_id"] != operation_id)
+    assert(operation_fleet[0]["operation_id"] == operation_id)
     var replicated: Dictionary = bytes_to_var(var_to_bytes(operation_state))
     assert(replicated["operations"] == operation_state["operations"])
+    # Human hostile orders assemble physically; objective membership is
+    # independent of the current rally route. Neutral orders remain immediate.
+    var rally_state: Dictionary = ECON.create(ai_map, players, ids)
+    var rally_graph: Dictionary = ECON.military_graph(rally_state)
+    var rally_fleet: Array = rally_state["ships"]
+    for i in range(2):
+        rally_fleet.append({"id": 950 + i, "owner": 2, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": ai_map["points"][1], "dest": -1})
+    assert(ECON.set_military(rally_state, 2, "fighter", 2, 100))
+    ECON._allocate_fighters(rally_state, rally_graph, 2, rally_fleet, true)
+    ECON._sync_operations(rally_state)
+    ECON._dispatch_operations(rally_state, rally_graph)
+    var rally_key: String = "2:allocation:2"
+    assert(rally_state["operations"][rally_key]["phase"] == "rallying")
+    assert(rally_fleet[0]["dest"] == 1 and rally_fleet[1]["dest"] == 1)
+    rally_fleet.append({"id": 952, "owner": 2, "kind": "fighter", "at": 3, "route": [], "leg": 0.0, "position": ai_map["points"][3], "dest": -1})
+    ECON._allocate_fighters(rally_state, rally_graph, 2, rally_fleet, true)
+    ECON._sync_operations(rally_state)
+    ECON._dispatch_operations(rally_state, rally_graph)
+    assert(rally_state["operations"][rally_key]["deployed"].is_empty())
+    ECON._move({"map": rally_graph}, rally_fleet[2], 10.0)
+    ECON._dispatch_operations(rally_state, rally_graph)
+    assert(rally_state["operations"][rally_key]["deployed"].size() == 3)
+    for craft in rally_fleet:
+        assert(craft["dest"] == 2 and not craft["route"].is_empty())
+    rally_fleet.append({"id": 953, "owner": 2, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": ai_map["points"][1], "dest": -1})
+    ECON._allocate_fighters(rally_state, rally_graph, 2, rally_fleet, true)
+    ECON._sync_operations(rally_state)
+    ECON._dispatch_operations(rally_state, rally_graph)
+    assert(rally_fleet[3]["dest"] == 1)
+    assert(rally_state["operations"][rally_key]["deployed"].size() == 3)
+    var rally_id: int = int(rally_state["operations"][rally_key]["id"])
+    assert(ECON.set_military(rally_state, 2, "fighter", 3, 100))
+    ECON._allocate_fighters(rally_state, rally_graph, 2, rally_fleet, true)
+    ECON._sync_operations(rally_state)
+    ECON._dispatch_operations(rally_state, rally_graph)
+    assert(rally_state["operations"]["2:allocation:3"]["id"] == rally_id)
+    for craft in rally_fleet:
+        assert(craft["dest"] == 3)
+    # Fighters break off their lane to orbit opponents, then resume their original route.
+    var transit: Dictionary = ECON.create(ai_map, players, ids)
+    var travelling: Dictionary = {"id": 970, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 400.0, "position": Vector2(400, 0), "dest": 3, "hp": 100.0}
+    var enemy: Dictionary = {"id": 971, "owner": 3, "kind": "fighter", "at": 3, "route": [], "leg": 0.0, "position": Vector2(450, 0), "dest": 3, "hp": 100.0}
+    transit["ships"] = [travelling, enemy]
+    assert(ECON.set_military(transit, 2, "fighter", 3, 100))
+    var original_route: Array = travelling["route"].duplicate()
+    for tick in range(8):
+        var before: Vector2 = travelling["position"]
+        ECON.step(transit, 0.1)
+        assert(int(travelling["combat_target"]) == 971)
+        assert(before.distance_to(travelling["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+        assert(before.distance_to(travelling["position"]) > 0.01)
+        assert(travelling["route"] == original_route and int(travelling["at"]) == 1)
+    assert(float(enemy["hp"]) < 100.0)
+    assert(absf((travelling["position"] as Vector2).y) > 1.0)
+    transit["ships"].erase(enemy)
+    var disengaged_position: Vector2 = travelling["position"]
+    ECON.step(transit, 0.1)
+    assert(int(travelling["combat_target"]) == -1)
+    assert(travelling["route"] == original_route)
+    assert((travelling["position"] as Vector2).distance_to(ai_map["points"][3]) < disengaged_position.distance_to(ai_map["points"][3]))
+    assert(disengaged_position.distance_to(travelling["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+    print("PASS: coordinated human rally, reinforcements, retargeting, combat circling and route resumption")
     quit(0)
