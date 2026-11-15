@@ -103,3 +103,7 @@ Version 0.1.2: compact non-wrapping system production rows, 64× max zoom and di
 Version 0.1.3: consolidate system stock, production level and annual output into six compact left-panel rows. Population shows current count only. Reserve Economy for future manufacturing (empty until implemented). Trade stock values use non-wrapping right-aligned text with compact formatting and exact tooltips. No simulation changes.
 
 Version 0.1.4: seed-stable unique sci-fi system names, predominantly specialized asteroid fields (50% single-resource, 40% strongly biased, 10% mixed by chunk count), themed match dialog, and build-card counts instead of the separate queue panel. No five-order cap; the underlying scheduler still allocates materials and work. Cancel one order via the cross on a build card (newest first), or via its upgrade/construction card; any matching repeat flag is cleared on the authority. Other already queued orders remain. Upgrades remain limited to one pending order per target.
+
+## Project working instructions
+
+Read [AGENTS.md](AGENTS.md) before contributing or starting a new coding session. It records standing workflow, terminology, UI, and validation conventions; later explicit decisions supersede older notes.
