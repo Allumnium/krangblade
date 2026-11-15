@@ -834,7 +834,8 @@ func _refresh() -> void:
     fighter_button.disabled = not owned
     miner_button.disabled = not owned
     ship_button.disabled = true
-    yard_button.disabled = not owned
+    yard_button.disabled = not owned or ECONOMY.shipyard_count(p) >= ECONOMY.MAX_SHIPYARDS
+    yard_button.tooltip_text = "Maximum 3 shipyards per system" if ECONOMY.shipyard_count(p) >= ECONOMY.MAX_SHIPYARDS else ""
     if p.is_empty():
         info.text = "Select a system."
         population_label.text = ""

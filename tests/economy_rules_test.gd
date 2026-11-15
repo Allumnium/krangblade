@@ -181,6 +181,12 @@ func _initialize() -> void:
     assert(is_equal_approx(ECON.population_multiplier(home), 1.0))
     assert(is_zero_approx(ECON.population_growth(home)))
     var baseline: float = ECON.rate(home, "Metals")
+    assert(is_equal_approx(baseline, 4.0))
+    assert(is_equal_approx(ECON.farm_potential(home), 4.0))
+    assert(is_equal_approx(ECON.organics_demand(home), 0.4))
+    assert(is_equal_approx(ECON.MINER_RATE, 6.0))
+    assert(is_equal_approx(ECON.PLANET_MINING_LIMIT, 100.0))
+    assert(is_equal_approx(ECON.FIELD_MINING_LIMIT, 200.0))
     home["population"] = ECON.HOME_POPULATION * 0.5
     assert(is_equal_approx(ECON.rate(home, "Metals"), baseline * 0.5))
     home["population"] = ECON.HOME_POPULATION
@@ -306,6 +312,25 @@ func _initialize() -> void:
         assert(refund_home["queue"].is_empty())
         assert(is_equal_approx(float(refund_home["stock"]["Metals"]), 10000.0))
         assert(int(refund_home["yards"][0]["job"]) == -1)
+    # Completed and pending shipyards share a hard three-slot limit.
+    var capped: Dictionary = ECON.create(graph, players, ids)
+    var cap_home: Dictionary = capped["planets"][0]
+    cap_home["stock"]["Metals"] = 5000.0
+    assert(ECON.shipyard_count(cap_home) == 1)
+    assert(not ECON.enqueue(capped, 2, 0, "yard"))
+    assert(ECON.enqueue(capped, 1, 0, "yard"))
+    assert(ECON.enqueue(capped, 1, 0, "yard"))
+    assert(ECON.shipyard_count(cap_home) == 3)
+    assert(not ECON.enqueue(capped, 1, 0, "yard"))
+    assert(ECON.cancel(capped, 1, 0, int(cap_home["queue"][-1]["id"])))
+    assert(ECON.shipyard_count(cap_home) == 2)
+    assert(ECON.enqueue(capped, 1, 0, "yard"))
+    ECON.step(capped, 30.0)
+    assert(cap_home["yards"].size() == 3)
+    assert(ECON.shipyard_count(cap_home) == 3)
+    assert(not ECON.enqueue(capped, 1, 0, "yard"))
+    assert(ECON.enqueue(capped, 1, 0, "yard_upgrade", "0"))
+
     # Yard upgrades wait behind assigned hull production.
     p["stock"]["Metals"] = 5000.0
     p["yards"].append({"level": 1, "job": -1})
