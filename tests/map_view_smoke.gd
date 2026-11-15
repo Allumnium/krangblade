@@ -136,12 +136,12 @@ func _run() -> void:
     assert(is_equal_approx(float(slider.get("stock_percent")), 22.5))
     var left_resources: Dictionary = view.get("production_values")
     assert(overview.is_ancestor_of(left_resources["Organics"]["stock"]))
-    assert((left_resources["Organics"]["stock"] as Label).text == "450.0")
+    assert((left_resources["Organics"]["stock"] as Label).text == "450.0 t")
     stock_system["stock"]["Organics"] = 1500.0
     view.call("_refresh")
     assert(is_equal_approx(float(slider.get("stock_percent")), 75.0))
-    assert((left_resources["Organics"]["stock"] as Label).text == "1.5K")
-    assert((trade_amounts["Organics"] as Label).text == "1.5K / 2.0K")
+    assert((left_resources["Organics"]["stock"] as Label).text == "1.5 kt")
+    assert((trade_amounts["Organics"] as Label).text == "1.5 kt / 2.0 kt")
     stock_system["stock"]["Organics"] = saved_stock
     view.call("_refresh")
     assert(is_equal_approx(float(slider.get("lower")), 10.0))
@@ -178,6 +178,14 @@ func _run() -> void:
     tabs.current_tab = 0
     assert((view.get("year_label") as Label).text.begins_with("YEAR"))
     assert((view.get("population_label") as Label).get_parent().get_child(0).texture == view.get("population_icon"))
+    assert((view.get("population_label") as Label).autowrap_mode == TextServer.AUTOWRAP_OFF)
+    assert(view.call("_tons", 1500000.0) == "1.5 Mt")
+    var resource_text: String = view.call("_resource_breakdown", opening_state, "Metals")
+    assert(resource_text.contains("in transit") and resource_text.contains("Current local flows") and resource_text.contains(view.call("_system_name", 0)))
+    var before_hover: String = resource_text
+    opening_state["planets"][0]["stock"]["Metals"] += 1.0
+    assert(view.call("_resource_breakdown", opening_state, "Metals") != before_hover)
+    opening_state["planets"][0]["stock"]["Metals"] -= 1.0
     assert(not (view.get("population_label") as Label).text.contains(" / "))
     assert(not (view.get("population_label") as Label).tooltip_text.contains("supported"))
     assert(not (view.get("population_label") as Label).text.contains("/yr"))
@@ -187,23 +195,30 @@ func _run() -> void:
     assert(view.get("global_resource_labels")["Metals"].text.contains("("))
     assert((view.get("global_population_label") as Label).text.begins_with("10."))
     assert((view.get("global_population_label") as Label).get_parent().get_child(0).texture == view.get("population_icon"))
+    tabs.current_tab = 1
     var building_cards: Dictionary = view.get("economy_cards")
     assert(building_cards.size() == 6)
     assert(not (building_cards["Textiles"]["body"] as Control).visible)
     (building_cards["Textiles"]["header"] as Button).pressed.emit()
     assert((building_cards["Textiles"]["body"] as Control).visible)
+    (building_cards["Metals"]["header"] as Button).pressed.emit()
+    assert(not (building_cards["Textiles"]["body"] as Control).visible and (building_cards["Metals"]["body"] as Control).visible)
+    tabs.current_tab = 0
+    tabs.current_tab = 1
+    assert(not (building_cards["Metals"]["body"] as Control).visible)
+    (building_cards["Textiles"]["header"] as Button).pressed.emit()
     assert(not (building_cards["Textiles"]["detail"] as Label).visible)
     assert((building_cards["Textiles"]["costs"] as GridContainer).get_child_count() == 3)
     var textile_mill: Button = building_cards["Textiles"]["button"]
     assert(tabs.get_tab_control(1).is_ancestor_of(textile_mill))
     assert(not textile_mill.disabled)
-    assert(textile_mill.tooltip_text.contains("300 Metals"))
+    assert(textile_mill.tooltip_text.contains("300 t Metals"))
     assert((building_cards["Tech"]["button"] as Button).disabled)
     var warehouse_button: Button = view.get("warehouse_card")["button"]
     assert(not warehouse_button.disabled)
-    assert(warehouse_button.tooltip_text.contains("500 Metals"))
+    assert(warehouse_button.tooltip_text.contains("500 t Metals"))
     warehouse_button.pressed.emit()
-    assert(warehouse_button.tooltip_text.contains("1500 Metals"))
+    assert(warehouse_button.tooltip_text.contains("1500 t Metals"))
     assert(int(state["planets"][0]["warehouse_level"]) == 1)
     assert(warehouse_button.disabled)
     textile_mill.pressed.emit()
@@ -211,6 +226,8 @@ func _run() -> void:
     assert(textile_mill.disabled and textile_mill.text == "Built")
     assert((building_cards["Textiles"]["cancel"] as Button).visible and (building_cards["Textiles"]["cancel"] as Button).disabled)
     assert((view.get("warehouse_card")["cancel"] as Button).disabled)
+    tabs.current_tab = 3
+    assert(not (building_cards["Textiles"]["body"] as Control).visible)
     var cards: Dictionary = view.get("upgrade_cards")
     assert(cards.size() == 6)
     var defense_card: Dictionary = view.get("pds_card")
@@ -224,6 +241,9 @@ func _run() -> void:
     var farm: Dictionary = cards["Organics"]
     assert(not (farm["body"] as Control).visible)
     (farm["header"] as Button).pressed.emit()
+    assert(not (defense_card["body"] as Control).visible)
+    view.call("_refresh")
+    assert((farm["body"] as Control).visible)
     assert(not (farm["detail"] as Label).text.contains("Requires"))
     assert((cards["Tech"]["detail"] as Label).text.contains("Requires"))
     assert((farm["costs"] as GridContainer).get_child_count() == 1)
@@ -267,13 +287,13 @@ func _run() -> void:
     var new_yard: Button = idle_rows[102]["build"]
     assert(overview.is_ancestor_of(new_yard) and not tabs.is_ancestor_of(new_yard))
     assert(new_yard.text == "Build" and new_yard.visible and not new_yard.disabled)
-    assert(new_yard.tooltip_text.contains("2000 Metals"))
+    assert(new_yard.tooltip_text.contains("2000 t Metals"))
     assert((idle_rows[102]["costs"] as GridContainer).get_child_count() == 6)
     assert(not (idle_rows[103]["build"] as Button).visible)
     state["planets"][0]["stock"]["Crystals"] = 100.0
     new_yard.pressed.emit()
     var third_build: Button = idle_rows[103]["build"]
-    assert(third_build.visible and third_build.tooltip_text.contains("6000 Metals"))
+    assert(third_build.visible and third_build.tooltip_text.contains("6000 t Metals"))
     third_build.pressed.emit()
     assert(idle_rows.size() == 3 and not idle_rows.has(102) and not idle_rows.has(103))
     var second_job: Dictionary = state["planets"][0]["queue"][0]

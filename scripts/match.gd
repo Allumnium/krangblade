@@ -9,7 +9,7 @@ const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
 const COLORS = RULES.EMPIRE_COLORS
 const PANEL_WIDTH: float = 368.0
-const OVERVIEW_WIDTH: float = 316.0
+const OVERVIEW_WIDTH: float = 340.0
 const HEADER_HEIGHT: float = 46.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
@@ -78,6 +78,9 @@ var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
 var global_resource_labels: Dictionary = {}
 var global_resource_tiles: Dictionary = {}
+var resource_hover_panel: PanelContainer
+var resource_hover_label: Label
+var hovered_resource: String = ""
 var global_population_label: Label
 var year_label: Label
 var time_buttons: Dictionary = {}
@@ -195,6 +198,7 @@ func _ready() -> void:
     upgrade_audio.stream = UPGRADE_SOUND
     add_child(upgrade_audio)
     _build_ui()
+    _build_resource_hover()
     _on_economy_changed()
     session.call("match_scene_loaded")
 
@@ -337,6 +341,9 @@ func _build_ui() -> void:
     system_owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     system_header.add_child(system_owner_label)
     population_label = _label("", 13)
+    population_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+    population_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    population_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
     _population_row(planet_overview).add_child(population_label)
     production_summary = HUD.section(planet_overview, "Resources")
     _build_production_summary()
@@ -351,7 +358,11 @@ func _build_ui() -> void:
     inspector_tabs = TabContainer.new()
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
     inspector_tabs.clip_contents = true
+    inspector_tabs.tab_changed.connect(func(_tab: int) -> void: _collapse_details())
     body.add_child(inspector_tabs)
+    inspector_tabs.visibility_changed.connect(func() -> void:
+        if not inspector_tabs.is_visible_in_tree():
+            _collapse_details())
     var shipyard_page: VBoxContainer = _inspector_page("Shipyards")
     var economy_page: VBoxContainer = _inspector_page("Economy")
     _build_economy_cards(economy_page)
@@ -376,14 +387,14 @@ func _build_ui() -> void:
         trade_row.add_child(name_label)
         var stock_label := _label("", 12)
         stock_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-        stock_label.custom_minimum_size.x = 88
+        stock_label.custom_minimum_size.x = 120
         stock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         trade_row.add_child(stock_label)
         trade_stock_labels[resource] = stock_label
         var slider := TradeRange.new()
         slider.custom_minimum_size.y = 56
         slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f units." % ECONOMY.TRADE_REFERENCE
+        slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f t." % ECONOMY.TRADE_REFERENCE
         slider.committed.connect(_apply_thresholds.bind(resource))
         logistics.add_child(slider)
         trade_sliders[resource] = slider
@@ -420,10 +431,34 @@ func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
     body.hide()
     header.set_meta("caption", title_text)
     header.text = "▸ " + title_text
-    header.pressed.connect(func() -> void:
-        body.visible = not body.visible
-        header.text = ("▾ " if body.visible else "▸ ") + str(header.get_meta("caption")))
-    return {"header": header, "body": body, "actions": line}
+    var card: Dictionary = {"header": header, "body": body, "actions": line}
+    header.pressed.connect(_toggle_disclosure.bind(card))
+    return card
+
+func _detail_cards() -> Array:
+    return build_cards.values() + economy_cards.values() + upgrade_cards.values() + yard_activity_rows.values() + [warehouse_card, pds_card]
+
+func _card_tab(card: Dictionary) -> Node:
+    var node: Node = card["header"]
+    while node.get_parent() != null:
+        if node.get_parent() == inspector_tabs:
+            return node
+        node = node.get_parent()
+    return null
+
+func _toggle_disclosure(card: Dictionary) -> void:
+    var expanded: bool = not card["body"].visible
+    if expanded:
+        var tab: Node = _card_tab(card)
+        for other in _detail_cards():
+            if other.has("body") and other["body"] != card["body"] and _card_tab(other) == tab:
+                _collapse_card(other)
+    card["body"].visible = expanded
+    _disclosure_title(card, str(card["header"].get_meta("caption")))
+
+func _collapse_details() -> void:
+    for card in _detail_cards():
+        _collapse_card(card)
 
 func _card_action(card: Dictionary, caption: String, callback: Callable) -> Button:
     var button: Button = _button(caption, callback, card["actions"])
@@ -454,6 +489,8 @@ func _population_row(parent: Container) -> HBoxContainer:
     icon.custom_minimum_size = Vector2(14, 14)
     icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
     icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+    icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+    icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
     icon.tooltip_text = "Population"
     row.add_child(icon)
     return row
@@ -512,18 +549,18 @@ func _show_cost(grid: GridContainer, cost: Dictionary, crew: float = 0.0) -> voi
         symbol.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
         pair.add_child(symbol)
         var value: float = float(entries[resource])
-        var amount := _label(_compact_amount(value) if value >= 1000.0 else "%.0f" % value, 11)
+        var amount := _label(_compact_amount(value) if resource == "Population" else _tons(value, 0), 11)
         amount.autowrap_mode = TextServer.AUTOWRAP_OFF
         pair.add_child(amount)
-        pair.tooltip_text = "%.0f %s" % [value, resource]
+        pair.tooltip_text = ("%.0f people" % value) if resource == "Population" else "%.0f t %s" % [value, resource]
 
 func _ship_stats(kind: String) -> String:
     var details: String = ""
     match kind:
-        "ship": details = "Transports resources · Cargo %.0f" % ECONOMY.CARGO_CAPACITY
+        "ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
         "colony_ship": details = "Settles a neutral system · %.0f settlers" % ECONOMY.COLONY_POPULATION
         "fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
-        "miner": details = "Extracts asteroids · Cargo %.0f · Mining %.0f/yr" % [ECONOMY.MINER_CAPACITY, ECONOMY.MINER_RATE]
+        "miner": details = "Extracts asteroids · Cargo %.0f t · Mining %.0f t/yr" % [ECONOMY.MINER_CAPACITY, ECONOMY.MINER_RATE]
     return "%s\nHP %.0f · Speed %.0f/yr · Size %d\nBuild work %.0f" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE, ECONOMY._work(kind, 1)]
 
 func _ship_build_row(parent: Container, title_text: String, kind: String) -> Button:
@@ -582,7 +619,7 @@ func _build_production_summary() -> void:
     var blank := Control.new()
     blank.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     header.add_child(blank)
-    for column in [["Stock", 49], ["Lv", 22], ["/yr", 44], ["Bonus", 46]]:
+    for column in [["Stock", 62], ["Lv", 22], ["/yr", 55], ["Bonus", 46]]:
         var title_label := _label(str(column[0]), 10)
         title_label.autowrap_mode = TextServer.AUTOWRAP_OFF
         title_label.custom_minimum_size.x = float(column[1])
@@ -605,7 +642,7 @@ func _build_production_summary() -> void:
         row.add_child(name_label)
         var stock := _label("", 11)
         stock.autowrap_mode = TextServer.AUTOWRAP_OFF
-        stock.custom_minimum_size.x = 49
+        stock.custom_minimum_size.x = 62
         stock.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(stock)
         var level := _label("", 11)
@@ -615,7 +652,7 @@ func _build_production_summary() -> void:
         row.add_child(level)
         var rate_label := _label("", 11)
         rate_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-        rate_label.custom_minimum_size.x = 44
+        rate_label.custom_minimum_size.x = 55
         rate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(rate_label)
         var bonus := _label("", 11)
@@ -669,9 +706,9 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
     var warehouse_button: Button = warehouse_card["button"]
     warehouse_button.disabled = not owned or not ECONOMY.warehouse_available(p)
     warehouse_button.text = "Max" if level >= 3 else "Upgrade"
-    var warehouse_detail: String = "%s / resource" % _compact_amount(ECONOMY.storage_capacity(p))
+    var warehouse_detail: String = "%s / resource" % _tons(ECONOMY.storage_capacity(p), 0)
     if level < 3:
-        warehouse_detail += " → %s" % _compact_amount(float(ECONOMY.WAREHOUSE_CAPACITIES[level + 1]))
+        warehouse_detail += " → %s" % _tons(float(ECONOMY.WAREHOUSE_CAPACITIES[level + 1]), 0)
         if float(p["population"]) + ECONOMY.EPS < float(ECONOMY.WAREHOUSE_POPULATIONS[level]):
             warehouse_detail += "\nRequires %s population" % _compact_amount(float(ECONOMY.WAREHOUSE_POPULATIONS[level]))
         if not ECONOMY.affordable(p, ECONOMY.WAREHOUSE_COSTS[level]):
@@ -820,7 +857,7 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
                 var minimum: int = ECONOMY.production_population(resource, level + 1)
                 var upgraded: Dictionary = planet.duplicate(true)
                 upgraded["levels"][resource] = level + 1
-                detail.text = "Output %.2f → %.2f/yr · %.0f yr" % [ECONOMY.rate(planet, resource), ECONOMY.rate(upgraded, resource), ECONOMY._work("production", level + 1)]
+                detail.text = "Output %.2f → %.2f t/yr · %.0f yr" % [ECONOMY.rate(planet, resource), ECONOMY.rate(upgraded, resource), ECONOMY._work("production", level + 1)]
                 if not unlocked:
                     detail.text += "\nRequires %s population" % _compact_amount(float(minimum))
                 button.tooltip_text = _cost_text(ECONOMY._cost("production", level + 1))
@@ -890,8 +927,11 @@ func _refresh_field_panels(state: Dictionary) -> void:
         ship_detail.text = "Depleted"
     else:
         var metals: int = roundi(100.0 * float(stock["Metals"]) / total)
-        ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, _compact_amount(float(stock["Metals"])), 100 - metals, _compact_amount(float(stock["Crystals"]))]
-    ship_detail.tooltip_text = "%d chunks remaining · %s" % [field["chunks"].size(), _system_name(int(field["anchor"]))]
+        ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, _tons(float(stock["Metals"])), 100 - metals, _tons(float(stock["Crystals"]))]
+    var access_names: PackedStringArray = []
+    for anchor in ECONOMY.field_access_systems(state["map"], field):
+        access_names.append(_system_name(anchor))
+    ship_detail.tooltip_text = "%d chunks remaining · Access: %s" % [field["chunks"].size(), ", ".join(access_names)]
     ship_cargo.get_parent().hide()
     fleet_title.text = "Mining"
     fleet_detail.hide()
@@ -938,9 +978,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
     ship_cargo.get_parent().visible = cargo_capable
     if cargo_capable:
         var cargo_capacity: float = ECONOMY.CARGO_CAPACITY if kind == "ship" else ECONOMY.MINER_CAPACITY
-        ship_cargo.get_child(0).text = "Cargo %.1f / %.0f" % [ECONOMY._cargo_total(ship), cargo_capacity]
+        ship_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total(ship), cargo_capacity]
         for resource in ECONOMY.RESOURCES:
-            ship_cargo_labels[resource].text = "%.1f" % float(ship["cargo"].get(resource, 0.0))
+            ship_cargo_labels[resource].text = _tons(float(ship["cargo"].get(resource, 0.0)))
             ship_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
     fleet_title.text = {"ship": "Logistics", "fighter": "Military", "miner": "Mining", "colony_ship": "Colonization"}.get(kind, "Fleet")
     fleet_detail.visible = kind != "fighter"
@@ -971,8 +1011,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
     if cargo_capable:
         for resource in ECONOMY.RESOURCES:
             var amount: float = float(cargo[resource])
-            fleet_cargo_labels[resource].text = _compact_amount(amount) if amount >= 1000.0 else "%.1f" % amount
-            fleet_cargo_labels[resource].tooltip_text = "%.1f" % amount
+            fleet_cargo_labels[resource].text = _tons(amount)
+            fleet_cargo_labels[resource].tooltip_text = "%.1f t" % amount
             fleet_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
 
 func _build_lens_buttons() -> void:
@@ -1252,6 +1292,22 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
         tile.add_child(label)
     return label
 
+func _tons(value: float, decimals: int = 1, compact: bool = false) -> String:
+    var magnitude: float = absf(value)
+    var scale: float = 1.0
+    var unit: String = "t"
+    if magnitude >= 1000000000.0:
+        scale = 1000000000.0
+        unit = "Gt"
+    elif magnitude >= 1000000.0:
+        scale = 1000000.0
+        unit = "Mt"
+    elif magnitude >= 1000.0:
+        scale = 1000.0
+        unit = "kt"
+    var number: String = "%.1f" % (value / scale) if scale > 1.0 or decimals == 1 else "%.0f" % value
+    return number + ("" if compact else " ") + unit
+
 func _compact_amount(value: float) -> String:
     if value >= 1000000000.0:
         return "%.1fB" % (value / 1000000000.0)
@@ -1261,6 +1317,88 @@ func _compact_amount(value: float) -> String:
         return "%.1fK" % (value / 1000.0)
     return "%.0f" % value
 
+func _build_resource_hover() -> void:
+    resource_hover_panel = PanelContainer.new()
+    resource_hover_panel.z_index = 50
+    resource_hover_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#42647e"), 9))
+    add_child(resource_hover_panel)
+    var scroll := ScrollContainer.new()
+    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    resource_hover_panel.add_child(scroll)
+    resource_hover_label = _label("", 12)
+    resource_hover_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    resource_hover_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    scroll.add_child(resource_hover_label)
+    resource_hover_panel.hide()
+
+func _flow_name(category: String) -> String:
+    if category.begins_with("Construction: "):
+        var kind: String = category.trim_prefix("Construction: ")
+        match kind:
+            "ship": return "Logistics ships"
+            "yard": return "Shipyard builds"
+            "yard_upgrade": return "Shipyard upgrades"
+            "production": return "Production upgrades"
+            "pds": return "Planetary defense"
+            _: return kind.replace("_", " ").capitalize() + " builds"
+    return category
+
+func _resource_breakdown(state: Dictionary, resource: String) -> String:
+    var totals: Dictionary = ECONOMY.empire_totals(state, _me())
+    var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
+        "%.2f t in transit  /  %.0f t storage" % [float(totals["cargo"][resource]), float(totals["storage_reference"][resource])],
+        "Current local flows (t/yr)"]
+    for i in range((state.get("planets", []) as Array).size()):
+        var p: Dictionary = state["planets"][i]
+        if int(p["owner"]) != _me():
+            continue
+        var parts: PackedStringArray = []
+        var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
+        for category in p.get("flows", {}):
+            if not categories.has(category):
+                categories.append(category)
+        var net: float = 0.0
+        for category in categories:
+            var amount: float = ECONOMY.local_flow(p, category, resource)
+            if amount <= ECONOMY.EPS:
+                continue
+            var sign: float = -1.0 if category == "Population" or category == "Exports" or str(category).begins_with("Construction: ") else 1.0
+            net += sign * amount
+            parts.append("%+.2f %s" % [sign * amount, _flow_name(category)])
+        lines.append("%s  %+.2f" % [_system_name(i), net])
+        if not parts.is_empty():
+            lines.append("  " + " · ".join(parts))
+    if int(state.get("time_speed", 1)) == 0:
+        lines.append("Paused · last simulation step")
+    return "\n".join(lines)
+
+func _update_resource_hover() -> void:
+    if not is_instance_valid(resource_hover_panel):
+        return
+    var mouse: Vector2 = get_global_mouse_position()
+    var resource: String = ""
+    for key in global_resource_tiles:
+        if global_resource_tiles[key].get_global_rect().has_point(mouse):
+            resource = key
+            break
+    if resource.is_empty() and resource_hover_panel.visible and resource_hover_panel.get_global_rect().has_point(mouse):
+        resource = hovered_resource
+    if resource.is_empty() or _state().is_empty():
+        resource_hover_panel.hide()
+        hovered_resource = ""
+        return
+    var state: Dictionary = _state()
+    var value: String = _resource_breakdown(state, resource)
+    if resource_hover_label.text != value:
+        resource_hover_label.text = value
+    hovered_resource = resource
+    var tile_rect: Rect2 = global_resource_tiles[resource].get_global_rect()
+    var viewport: Vector2 = get_viewport_rect().size
+    var width: float = minf(420.0, viewport.x - 16.0)
+    resource_hover_panel.size = Vector2(width, minf(viewport.y - tile_rect.end.y - 12.0, maxf(105.0, 20.0 * float(value.count("\n") + 2))))
+    resource_hover_panel.global_position = Vector2(clampf(tile_rect.position.x, 8.0, viewport.x - width - 8.0), tile_rect.end.y)
+    resource_hover_panel.show()
+
 func _refresh_global_bar(state: Dictionary) -> void:
     year_label.text = "YEAR  %d" % ECONOMY.current_year(state)
     year_label.tooltip_text = "One game year per simulation second"
@@ -1269,16 +1407,15 @@ func _refresh_global_bar(state: Dictionary) -> void:
     for resource in ECONOMY.RESOURCES:
         var value: float = float(totals["resources"][resource])
         var rate: float = float(rates.get(resource, 0.0))
-        var magnitude: String = "%.1f" % absf(rate) if absf(rate) < 1000.0 else _compact_amount(absf(rate))
+        var magnitude: String = _tons(absf(rate), 1, true)
         var rate_text: String = ("-" if rate < -0.05 else "+") + magnitude
-        global_resource_labels[resource].text = "%s (%s)" % [_compact_amount(value), rate_text]
+        global_resource_labels[resource].text = "%s (%s)" % [_tons(value, 0, true), rate_text]
         var stored: float = float(totals["stock"][resource])
         var reference: float = float(totals["storage_reference"][resource])
         global_resource_fills[resource] = clampf(stored / reference, 0.0, 1.0) if reference > 0.0 else 0.0
         var tile: PanelContainer = global_resource_tiles[resource]
         tile.queue_redraw()
-        tile.tooltip_text = "%s: %.1f\nStored: %.1f / %.0f • Cargo: %.1f\nNet: %+.2f/year (last 5 years)\nStorage capacity" % [
-            resource, value, stored, reference, float(totals["cargo"][resource]), rate]
+        tile.tooltip_text = ""
     global_population_label.text = "%s" % _compact_amount(float(totals["population"]))
     global_population_label.tooltip_text = "Population across owned systems: %.0f" % float(totals["population"])
 
@@ -1322,8 +1459,8 @@ func _update_trade_stock(p: Dictionary) -> void:
         var stock: float = float(p["stock"][resource])
         var capacity: float = ECONOMY.storage_capacity(p)
         slider.set_stock(stock, capacity, HUD.COLORS[resource])
-        trade_stock_labels[resource].text = "%s / %s" % [_compact_amount(stock) if stock >= 1000.0 else "%.1f" % stock, _compact_amount(capacity)]
-        trade_stock_labels[resource].tooltip_text = "%.1f / %.0f" % [stock, capacity]
+        trade_stock_labels[resource].text = "%s / %s" % [_tons(stock), _tons(capacity, 0)]
+        trade_stock_labels[resource].tooltip_text = "%.1f / %.0f t" % [stock, capacity]
         slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f units." % capacity
         # Preserve this handle while dragging, even when a snapshot arrives.
         if slider.active_handle < 0:
@@ -1376,8 +1513,7 @@ func _refresh() -> void:
     if current_system != last_system_tab_selection:
         if current_system >= 0:
             inspector_tabs.current_tab = 0
-        for card in build_cards.values() + economy_cards.values() + upgrade_cards.values() + yard_activity_rows.values() + [warehouse_card, pds_card]:
-            _collapse_card(card)
+        _collapse_details()
         last_system_tab_selection = current_system
     interaction_panel.visible = not other_selected and not p.is_empty() and not own_system
     ship_overview.visible = other_selected
@@ -1420,8 +1556,8 @@ func _refresh() -> void:
     system_owner_label.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
     for resource in ECONOMY.RESOURCES:
         var amount: float = float(p["stock"][resource])
-        production_values[resource]["stock"].text = _compact_amount(amount) if amount >= 1000.0 else "%.1f" % amount
-        production_values[resource]["stock"].tooltip_text = "%.1f %s stored" % [amount, resource]
+        production_values[resource]["stock"].text = _tons(amount)
+        production_values[resource]["stock"].tooltip_text = "%.1f t %s stored" % [amount, resource]
         production_values[resource]["level"].text = str(int(p["levels"][resource]))
         var percent: int = roundi(100.0 * ECONOMY.production_modifier(p, resource))
         var bonus: Label = production_values[resource]["bonus"]
@@ -1429,8 +1565,8 @@ func _refresh() -> void:
         bonus.add_theme_color_override("font_color", HUD.ACCENT if percent > 100 else (Color("#e4a479") if percent < 100 else HUD.MUTED))
         bonus.tooltip_text = "%.1f%% of baseline output" % (100.0 * ECONOMY.production_modifier(p, resource))
         var annual: float = ECONOMY.net_rate(p, resource)
-        production_values[resource]["rate"].text = _compact_amount(annual) if annual >= 1000.0 else "%.1f" % annual
-        production_values[resource]["rate"].tooltip_text = "Production %.2f/yr · Consumption %.2f/yr · Net %.2f/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
+        production_values[resource]["rate"].text = _tons(annual, 1, true)
+        production_values[resource]["rate"].tooltip_text = "Production %.2f t/yr · Consumption %.2f t/yr · Net %.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
     var population: float = float(p["population"])
     population_label.text = "%s" % _compact_amount(population)
     population_label.tooltip_text = "%.0f people" % population
@@ -1563,10 +1699,10 @@ func _refresh_yard_activity(p: Dictionary) -> void:
                     symbol.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
                     symbol.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
                     pair.add_child(symbol)
-                    var amount: Label = _label(_compact_amount(float(recipe[resource])) if float(recipe[resource]) >= 1000.0 else "%.0f" % float(recipe[resource]), 11)
+                    var amount: Label = _label(_tons(float(recipe[resource]), 0), 11)
                     amount.autowrap_mode = TextServer.AUTOWRAP_OFF
                     pair.add_child(amount)
-                    pair.tooltip_text = "%.0f %s" % [float(recipe[resource]), resource]
+                    pair.tooltip_text = "%.0f t %s" % [float(recipe[resource]), resource]
             continue
         bar.visible = true
         label.tooltip_text = ""
@@ -1587,7 +1723,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         if existing and not operating:
             yard_activity_rows[index]["upgrade_detail"].text += "\nRequires %s population" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[index]))
         _show_cost(yard_activity_rows[index]["upgrade_costs"], ECONOMY._cost("yard_upgrade", level + 1) if existing else job["cost"])
-        upgrade.tooltip_text = "Lv %d • %.0f Metals • %.0f years" % [level, float(ECONOMY._cost("yard_upgrade", level + 1)["Metals"]), ECONOMY._work("yard_upgrade", level + 1)] if existing else _cost_text(job["cost"], job["allocated"])
+        upgrade.tooltip_text = "Lv %d • %.0f t Metals • %.0f years" % [level, float(ECONOMY._cost("yard_upgrade", level + 1)["Metals"]), ECONOMY._work("yard_upgrade", level + 1)] if existing else _cost_text(job["cost"], job["allocated"])
         if job.is_empty():
             label.text = "Shipyard %d · Lv %d · %s" % [number, level, "Idle" if operating else "Offline"]
             bar.value = 0.0
@@ -1623,9 +1759,9 @@ func _cost_text(cost: Dictionary, allocated: Dictionary = {}) -> String:
     var parts: PackedStringArray = []
     for resource in cost:
         if allocated.is_empty():
-            parts.append("%.0f %s" % [float(cost[resource]), resource])
+            parts.append("%.0f t %s" % [float(cost[resource]), resource])
         else:
-            parts.append("%.0f / %.0f %s" % [float(allocated.get(resource, 0.0)), float(cost[resource]), resource])
+            parts.append("%.0f / %.0f t %s" % [float(allocated.get(resource, 0.0)), float(cost[resource]), resource])
     return " · ".join(parts)
 
 func _cancel_kind(kind: String, target: String) -> void:
@@ -2069,6 +2205,7 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 
 func _process(delta: float) -> void:
     _keyboard_pan(delta)
+    _update_resource_hover()
     visual_clock += delta
     game_visual_clock += delta * float(_state().get("time_speed", 1))
     for visual in ship_visuals.values():
@@ -2182,7 +2319,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
                 var resource: String = ECONOMY.RESOURCES[r]
                 var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 18.0)
                 map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13)), false)
-                map_canvas.draw_string(font, cell + Vector2(15, 11), _compact_amount(float(system["stock"][resource])), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, HUD.COLORS[resource])
+                map_canvas.draw_string(font, cell + Vector2(15, 11), _tons(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, HUD.COLORS[resource])
         else:
             # At wide zoom, compact resource-colored bars avoid dense labels.
             var bar_width: float = clampf(spacing / 8.0, 2.0, 8.0)

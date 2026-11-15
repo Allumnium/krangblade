@@ -69,7 +69,7 @@ func _sanitize_name(value: String) -> String:
     return clean if not clean.is_empty() else "Player"
 
 ## Solo runs the same authoritative match simulation as a host, with no ENet peer.
-func start_solo(team: int = 1, opponent_teams: Array = []) -> bool:
+func start_solo(team: int = 1, opponent_teams: Array = [], colors: Array = []) -> bool:
     if phase != "offline":
         return false
     if not RULES.valid_team(team) or opponent_teams.size() > RULES.MAX_PLAYERS - 1:
@@ -77,10 +77,18 @@ func start_solo(team: int = 1, opponent_teams: Array = []) -> bool:
     for opponent_team in opponent_teams:
         if not RULES.valid_team(int(opponent_team)):
             return false
+    if not colors.is_empty():
+        if colors.size() != opponent_teams.size() + 1:
+            return false
+        var used: Dictionary = {}
+        for choice in colors:
+            if not choice is int or int(choice) < 1 or int(choice) > RULES.MAX_PLAYERS or used.has(choice):
+                return false
+            used[choice] = true
     is_solo = true
-    players = {1: {"name": _sanitize_name(display_name), "team": team, "ready": true, "color": 1}}
+    players = {1: {"name": _sanitize_name(display_name), "team": team, "ready": true, "color": 1 if colors.is_empty() else int(colors[0])}}
     for i in range(opponent_teams.size()):
-        players[i + 2] = {"name": "AI %d" % (i + 1), "team": int(opponent_teams[i]), "ready": true, "ai": true, "color": i + 2}
+        players[i + 2] = {"name": "AI %d" % (i + 1), "team": int(opponent_teams[i]), "ready": true, "ai": true, "color": i + 2 if colors.is_empty() else int(colors[i + 1])}
     history.clear()
     last_message.clear()
     round_id = 1

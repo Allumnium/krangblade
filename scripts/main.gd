@@ -19,6 +19,11 @@ var ready_button: Button
 var start_button: Button
 var status_label: Label
 var multiplayer_status_label: Label
+var solo_players: Dictionary = {}
+var solo_roster: VBoxContainer
+var solo_rows: Dictionary = {}
+var solo_add_button: Button
+var solo_start_button: Button
 
 func _ready() -> void:
     theme = HUD.create()
@@ -105,41 +110,143 @@ func _show_menu() -> void:
     version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     col.add_child(version_label)
 
+func _setup_header(col: VBoxContainer, title_text: String) -> void:
+    var header := HBoxContainer.new()
+    col.add_child(header)
+    var title := _text(title_text, 32)
+    title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    header.add_child(title)
+    header.add_child(_button("BACK", _show_menu))
+
+# Both setup screens use the same palette and disabled occupied swatches.
+func _color_selector(players: Dictionary, id: int) -> OptionButton:
+    var selector := OptionButton.new()
+    selector.custom_minimum_size.x = 100
+    for choice in range(1, RULES.MAX_PLAYERS + 1):
+        var swatch := Image.create_empty(14, 14, false, Image.FORMAT_RGBA8)
+        swatch.fill(RULES.EMPIRE_COLORS[choice])
+        selector.add_icon_item(ImageTexture.create_from_image(swatch), RULES.COLOR_NAMES[choice], choice)
+        selector.set_item_disabled(choice - 1, not RULES.color_available(players, id, choice))
+    selector.select(int(players[id].get("color", 1)) - 1)
+    return selector
+
 func _show_solo_setup() -> void:
     screen = "solo_setup"
+    solo_players.clear()
+    for id in range(1, 5):
+        solo_players[id] = {"team": id, "color": id}
     var col := _root()
-    col.add_child(_text("Single player", 32))
+    _setup_header(col, "Single player")
     var panel := _panel()
+    panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
     col.add_child(panel)
+    var scroll := ScrollContainer.new()
+    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    panel.add_child(scroll)
     var rows := VBoxContainer.new()
-    panel.add_child(rows)
-    var selectors: Array[OptionButton] = []
-    for i in range(RULES.MAX_PLAYERS):
+    rows.add_theme_constant_override("separation", 4)
+    rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    scroll.add_child(rows)
+    solo_roster = rows
+    _refresh_solo_roster()
+    var footer := HBoxContainer.new()
+    col.add_child(footer)
+    solo_start_button = _button("START MATCH", _start_solo_from_setup)
+    footer.add_child(solo_start_button)
+    footer.add_spacer(false)
+
+func _refresh_solo_roster() -> void:
+    for child in solo_roster.get_children():
+        solo_roster.remove_child(child)
+        child.queue_free()
+    solo_rows.clear()
+    for id in RULES.ordered_peers(solo_players):
+        var entry: Dictionary = solo_players[id]
         var row := HBoxContainer.new()
-        rows.add_child(row)
-        var title := _text("Player" if i == 0 else "AI %d" % i, 15)
+        row.custom_minimum_size.y = 36
+        solo_roster.add_child(row)
+        var title := _text("Player" if id == 1 else "AI %d" % (id - 1), 15, RULES.EMPIRE_COLORS[int(entry["color"])])
         title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         row.add_child(title)
+        var color := _color_selector(solo_players, id)
+        color.item_selected.connect(_solo_color_selected.bind(id))
+        row.add_child(color)
         var team := OptionButton.new()
-        if i > 0:
-            team.add_item("Empty")
-        for n in range(1, RULES.MAX_PLAYERS + 1):
-            team.add_item("Team %d" % n)
-        team.select(0)
+        team.custom_minimum_size.x = 100
+        for choice in range(1, solo_players.size() + 1):
+            team.add_item("Team %d" % choice)
+        team.select(int(entry["team"]) - 1)
+        team.item_selected.connect(_solo_team_selected.bind(id))
         row.add_child(team)
-        selectors.append(team)
-    col.add_child(_button("START MATCH", func() -> void:
-        var opponents: Array = []
-        for i in range(1, selectors.size()):
-            if selectors[i].selected > 0:
-                opponents.append(selectors[i].selected)
-        network.call("start_solo", selectors[0].selected + 1, opponents)))
-    col.add_child(_button("BACK", _show_menu))
+        var remove: Button = _button("×", _remove_solo_player.bind(id))
+        remove.custom_minimum_size = Vector2(36, 32)
+        remove.disabled = id == 1
+        remove.tooltip_text = "Remove AI player"
+        row.add_child(remove)
+        solo_rows[id] = {"color": color, "team": team, "remove": remove}
+    var add_row := HBoxContainer.new()
+    solo_roster.add_child(add_row)
+    solo_add_button = _button("+ Add player", _add_solo_player)
+    solo_add_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    solo_add_button.disabled = solo_players.size() >= RULES.MAX_PLAYERS
+    add_row.add_child(solo_add_button)
+
+func _solo_color_selected(index: int, id: int) -> void:
+    if solo_players.has(id) and RULES.color_available(solo_players, id, index + 1):
+        solo_players[id]["color"] = index + 1
+    _refresh_solo_roster()
+
+func _solo_team_selected(index: int, id: int) -> void:
+    if solo_players.has(id) and index >= 0 and index < solo_players.size():
+        solo_players[id]["team"] = index + 1
+
+func _add_solo_player() -> void:
+    if solo_players.size() >= RULES.MAX_PLAYERS:
+        return
+    var id: int = solo_players.size() + 1
+    solo_players[id] = {"team": id, "color": RULES.free_color(solo_players)}
+    _refresh_solo_roster()
+
+func _remove_solo_player(id: int) -> void:
+    if id == 1 or not solo_players.has(id):
+        return
+    solo_players.erase(id)
+    var compact: Dictionary = {}
+    for old_id in RULES.ordered_peers(solo_players):
+        compact[compact.size() + 1] = solo_players[old_id]
+    solo_players = compact
+    # Reassign out-of-range team labels without splitting existing alliances.
+    var used: Dictionary = {}
+    var replacements: Dictionary = {}
+    for entry in solo_players.values():
+        var team: int = int(entry["team"])
+        if team <= solo_players.size():
+            used[team] = true
+    for entry in solo_players.values():
+        var team: int = int(entry["team"])
+        if team > solo_players.size():
+            if not replacements.has(team):
+                for choice in range(1, solo_players.size() + 1):
+                    if not used.has(choice):
+                        replacements[team] = choice
+                        used[choice] = true
+                        break
+            entry["team"] = replacements[team]
+    _refresh_solo_roster()
+
+func _start_solo_from_setup() -> void:
+    var opponents: Array = []
+    var colors: Array = []
+    for id in RULES.ordered_peers(solo_players):
+        colors.append(int(solo_players[id]["color"]))
+        if id != 1:
+            opponents.append(int(solo_players[id]["team"]))
+    network.call("start_solo", int(solo_players[1]["team"]), opponents, colors)
 
 func _show_multiplayer() -> void:
     screen = "multiplayer"
     var col := _root()
-    col.add_child(_text("MULTIPLAYER", 32))
+    _setup_header(col, "MULTIPLAYER")
     var panel := _panel()
     col.add_child(panel)
     var form := VBoxContainer.new()
@@ -158,7 +265,6 @@ func _show_multiplayer() -> void:
     form.add_child(buttons)
     buttons.add_child(_button("HOST GAME", _host))
     buttons.add_child(_button("JOIN GAME", _join))
-    form.add_child(_button("BACK", _show_menu))
     multiplayer_status_label = _text(str(network.get("status")), 14, MUTED)
     form.add_child(multiplayer_status_label)
 
@@ -271,14 +377,7 @@ func _refresh_roster() -> void:
         label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         label.add_theme_color_override("font_color", RULES.EMPIRE_COLORS[int(entry.get("color", 1))])
         row.add_child(label)
-        var color_selector := OptionButton.new()
-        color_selector.custom_minimum_size.x = 74
-        for choice in range(1, RULES.MAX_PLAYERS + 1):
-            var swatch := Image.create_empty(14, 14, false, Image.FORMAT_RGBA8)
-            swatch.fill(RULES.EMPIRE_COLORS[choice])
-            color_selector.add_icon_item(ImageTexture.create_from_image(swatch), RULES.COLOR_NAMES[choice], choice)
-            color_selector.set_item_disabled(choice - 1, not RULES.color_available(roster_data, int(id), choice))
-        color_selector.select(int(entry.get("color", 1)) - 1)
+        var color_selector := _color_selector(roster_data, int(id))
         color_selector.disabled = not is_lobby or id != multiplayer.get_unique_id()
         color_selector.item_selected.connect(_color_selected.bind(int(id)))
         row.add_child(color_selector)

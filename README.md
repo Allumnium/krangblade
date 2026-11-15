@@ -169,3 +169,9 @@ v0.13.0: Five starter hulls per player (three miners, two fighters). PDS constru
 
 
 v0.13.3: Compact inline actions, shared population icon, shipyard staffing (500/5k/20k), neutral asteroid access with owned-depot delivery.
+
+
+v0.13.8: Solo roster defaults to four, unique selectable colors, add/remove AI, dynamic teams, bottom-left Start and top-right Back. Resource quantities use metric tons and expandable cards reset on tab exit.
+
+
+v0.13.9: Multiple nearby system approaches to asteroid fields, physical arrival-only cargo delivery, live per-system resource hover with last-step actual production/consumption/construction/dock transfers; cargo and stored quantities separated. Population indicator no longer wraps. Access distance heuristic provisional.

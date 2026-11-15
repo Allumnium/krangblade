@@ -123,3 +123,15 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.13.5: Both eight-peer runs timed out after entering the match; all other v0.13.4 checks passed. Cache neutral mining routes within each tick and limit idle search retries to twice/year. Added host-side progress diagnostics to identify any remaining verification stall without reducing assertions or changing timeouts. Performance cause is a hypothesis, not yet confirmed.
 
 - v0.13.6: Eight-peer test still timed out. Replace dense mining route searches with sparse adjacency and cached single-source shortest-path trees; add time-control gate diagnostics. No assertion or timeout reductions.
+
+### T-023 — Setup and resource display
+- **Observation:** Solo defaults to four empires; eight occupied colors leave no free selection. Mass labels preserve numerical balance. v0.13.6 passed all checks including eight peers; sparse mining routing resolved the timeout.
+- **Consider:** Review small-window layout and color swap UX.
+
+### T-024 — Local flow visibility and shared mining access
+- **Observation:** Empire total includes ship cargo; actual stock remains local until docking. Native tooltip text can remain cached while hovering. Custom persistent resource panel reports last-step actual flows per owned system rather than averaging. Nearby field connections are based on existing anchor distance and radius.
+- **Consider:** Check hover scroll/layout with many colonies, delivery-rate spikes (annualized from one tick), and access distance after large map scaling. One-time instant purchases are not continuous flows. Visual layout needs playtesting.
+
+- v0.13.10: corrected the tooltip construction-category formatter and early UI regression fixture reference during static review; v0.13.8 passed all mandatory checks.
+
+- v0.13.11: the hover regression caught compact inventory rounding hiding a 1 t change. Exact quantities in the detailed hover now show two decimal places in tons; field inventory labels also use tons. v0.13.10 passed all multiplayer checks and the economy suite.
