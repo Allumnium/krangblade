@@ -28,3 +28,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Design/authority risk.
 - **Observation:** A Wildcard slot or legacy military commands could bypass a restricted offensive policy.
 - **Consider:** Authority-level restrictions on behavior across every slot and command path, including clear treatment of ongoing operations. See TODO phase 6.
+
+### T-006 — Operation identity and retargeting
+- **Type:** Design/technical risk.
+- **Observation:** Initial operation records are keyed by owner, role and destination; a retargeted group receives a new ID. This preserves existing routing but is not a full independent fleet command model.
+- **Consider:** Separate operation identity from mutable objective before implementing coordinated reassignment and formation slots. See TODO phase 1.

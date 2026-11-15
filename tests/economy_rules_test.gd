@@ -819,4 +819,30 @@ func _initialize() -> void:
     assert(ECON.territory_claims(territory)[3] == 0)
     print("PASS: neutral, allied and contested territory including asteroid fields")
     print("PASS: seeded maps, ownership, construction, shipyards, mixed cargo, physical transit, ally sharing")
+    # Shared operations retain identity across reinforcement and casualties,
+    # distinguish owners, and remove empty groups without recycling IDs.
+    var operation_state: Dictionary = ECON.create(graph, players, ids)
+    var operation_fleet: Array = [
+        {"id": 901, "owner": 1, "kind": "fighter", "at": 0, "dest": 2, "route": [2]},
+        {"id": 902, "owner": 1, "kind": "fighter", "at": 0, "dest": 2, "route": [2]},
+        {"id": 903, "owner": 2, "kind": "fighter", "at": 1, "dest": 2, "route": []}
+    ]
+    operation_state["ships"] = operation_fleet
+    ECON._sync_operations(operation_state)
+    var operation_key: String = "1:allocation:2"
+    var operation_id: int = int(operation_state["operations"][operation_key]["id"])
+    assert(operation_state["operations"].size() == 2)
+    assert(operation_state["operations"][operation_key]["members"] == [901, 902])
+    assert(operation_state["operations"][operation_key]["moving"])
+    operation_fleet.remove_at(0)
+    ECON._sync_operations(operation_state)
+    assert(operation_state["operations"][operation_key]["id"] == operation_id)
+    assert(operation_state["operations"][operation_key]["members"] == [902])
+    assert(operation_fleet[0]["operation_id"] == operation_id)
+    operation_fleet[0]["dest"] = 0
+    ECON._sync_operations(operation_state)
+    assert(not operation_state["operations"].has(operation_key))
+    assert(operation_fleet[0]["operation_id"] != operation_id)
+    var replicated: Dictionary = bytes_to_var(var_to_bytes(operation_state))
+    assert(replicated["operations"] == operation_state["operations"])
     quit(0)

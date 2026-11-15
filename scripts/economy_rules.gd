@@ -122,7 +122,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
     for id in ordered:
         if bool(players[id].get("ai", false)):
             ai_players.append(id)
-    var state: Dictionary = {"ai_players": ai_players, "ai_waves": {}, "next_ai": 0.0, "map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "military": {}}
+    var state: Dictionary = {"ai_players": ai_players, "ai_waves": {}, "operations": {}, "next_operation_id": 1, "next_ai": 0.0, "map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "military": {}}
     update_exploration(state)
     return state
 
@@ -1500,6 +1500,39 @@ static func _ai_wave_order(state: Dictionary, graph: Dictionary, player: int, ho
                 active.append(int(ship["id"]))
     waves[player] = {"target": target, "members": active}
 
+# Shared operation records preserve identity while an objective has members.
+# Existing human quotas and AI wave orders remain the routing authority for now.
+static func _sync_operations(state: Dictionary) -> void:
+    var previous: Dictionary = state.get("operations", {})
+    var current: Dictionary = {}
+    for ship in state["ships"]:
+        if ship.get("kind", "") != "fighter":
+            continue
+        var owner: int = int(ship["owner"])
+        var target: int = int(ship.get("dest", -1))
+        if target < 0:
+            target = int(ship["at"])
+        var role: String = "allocation"
+        if state.get("ai_players", []).has(owner):
+            var wave: Dictionary = state.get("ai_waves", {}).get(owner, {})
+            role = "wave" if wave.get("members", []).has(int(ship["id"])) else "reserve"
+        var key: String = "%d:%s:%d" % [owner, role, target]
+        if not current.has(key):
+            var old: Dictionary = previous.get(key, {})
+            var operation_id: int = int(old.get("id", 0))
+            if operation_id == 0:
+                operation_id = int(state.get("next_operation_id", 1))
+                state["next_operation_id"] = operation_id + 1
+            current[key] = {"id": operation_id, "owner": owner, "target": target, "role": role, "members": [], "moving": false, "engaged": false}
+        var operation: Dictionary = current[key]
+        operation["members"].append(int(ship["id"]))
+        operation["moving"] = bool(operation["moving"]) or not (ship["route"] as Array).is_empty()
+        operation["engaged"] = bool(operation["engaged"]) or int(ship.get("combat_target", -1)) >= 0
+        ship["operation_id"] = int(operation["id"])
+    for operation in current.values():
+        operation["members"].sort()
+    state["operations"] = current
+
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
     for i in range((state["planets"] as Array).size()):
@@ -1548,4 +1581,5 @@ static func step(state: Dictionary, dt: float) -> void:
             var slot: int = int(ship["id"]) % 64
             var station: Vector2 = center + Vector2.from_angle(float(slot) * 2.399963) * (64.0 + 20.0 * float(slot % 4))
             _navigate(ship, station, SHIP_SPEED * dt)
+    _sync_operations(state)
     update_exploration(state)
