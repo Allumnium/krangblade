@@ -627,22 +627,41 @@ func _initialize() -> void:
     var c2: Dictionary = colonization["ships"][1]
     assert(c1["kind"] == "colony_ship" and c2["kind"] == "colony_ship")
     assert(not ECON.send_colony(colonization, 2, int(c1["id"]), 3))
-    assert(not ECON.send_colony(colonization, 1, int(c1["id"]), 4))
+    assert(ECON.colony_path(colonization, 1, c1, 4) == [0, 1, 3, 4])
     assert(not ECON.send_colony(colonization, 1, int(c1["id"]), 2))
     assert(ECON.send_colony(colonization, 1, int(c1["id"]), 3))
     assert(ECON.send_colony(colonization, 3, int(c2["id"]), 3))
     assert(int(colonization["planets"][3]["owner"]) == 0)
-    ECON.step(colonization, 0.5)
+    var distance1: float = (c1["position"] as Vector2).distance_to(cp[1]) + (cp[1] as Vector2).distance_to(cp[3])
+    var distance2: float = (c2["position"] as Vector2).distance_to(cp[3])
+    var first_arrival: float = minf(distance1, distance2) / ECON.SHIP_SPEED
+    var winner: int = 1 if distance1 < distance2 else 3
+    var loser: Dictionary = c2 if winner == 1 else c1
+    var loser_home: int = 2 if winner == 1 else 0
+    ECON.step(colonization, first_arrival * 0.5)
     assert(int(colonization["planets"][3]["owner"]) == 0)
-    ECON.step(colonization, 0.5)
-    assert(int(colonization["planets"][3]["owner"]) == 3)
+    ECON.step(colonization, first_arrival * 0.5 + 0.001)
+    assert(int(colonization["planets"][3]["owner"]) == winner)
     assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION))
     assert(int(colonization["planets"][3]["levels"]["Organics"]) == 1)
-    ECON.step(colonization, 1.0)
     assert(colonization["ships"].size() == 1)
-    assert(int(c1["dest"]) == -1)
-    ECON.step(colonization, 2.0)
-    assert(int(c1["at"]) == 0 and c1["route"].is_empty())
+    for i in range(20):
+        if int(loser["at"]) == loser_home and loser["route"].is_empty():
+            break
+        var before: Vector2 = loser["position"]
+        ECON.step(colonization, 0.5)
+        assert(before.distance_to(loser["position"]) <= ECON.SHIP_SPEED * 0.5 + 0.01)
+    assert(int(loser["dest"]) == -1)
+    assert(int(loser["at"]) == loser_home and loser["route"].is_empty())
+    var distant: Dictionary = ECON.create(colony_map, players, ids)
+    var distant_ship: Dictionary = {"id": 999, "kind": "colony_ship", "owner": 1, "at": 0, "position": cp[0], "route": [], "leg": 0.0, "dest": -1}
+    distant["ships"].append(distant_ship)
+    assert(ECON.send_colony(distant, 1, 999, 4))
+    assert(distant_ship["position"] == cp[0])
+    ECON.step(distant, 2.0)
+    assert(int(distant["planets"][3]["owner"]) == 0 and int(distant["planets"][4]["owner"]) == 0)
+    ECON.step(distant, 1.0)
+    assert(int(distant["planets"][3]["owner"]) == 0 and int(distant["planets"][4]["owner"]) == 1)
     print("PASS: colony construction, permissions, travel, neutral arrival and competing colonies")
     # POI allocations reserve nearest fighters, including field destinations.
     var force_map: Dictionary = MAP.generate(1337)

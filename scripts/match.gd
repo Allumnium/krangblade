@@ -24,7 +24,6 @@ var upgrade_audio_initialized: bool = false
 var map_canvas: Control
 var territory_layer: Control
 var territory_image: TextureRect
-var territory_material: ShaderMaterial
 var territory_lookup: PackedInt32Array = PackedInt32Array()
 var territory_grid: Vector2i = Vector2i.ZERO
 var territory_last: Array[int] = []
@@ -787,49 +786,6 @@ func _build_territory_layer() -> void:
     territory_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
     territory_image.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
     territory_layer.add_child(territory_image)
-    # Two four-channel masks preserve team boundaries without blending teams.
-    # A gentle filter rounds corners and removes internal same-team borders.
-    var shader := Shader.new()
-    shader.code = """
-shader_type canvas_item;
-render_mode unshaded;
-uniform sampler2D extra_mask : filter_linear, repeat_disable;
-vec4 soft_mask(sampler2D tex, vec2 uv, vec2 px) {
-    vec4 s = texture(tex, uv) * 4.0;
-    s += texture(tex, uv + vec2(px.x, 0.0)) * 2.0;
-    s += texture(tex, uv - vec2(px.x, 0.0)) * 2.0;
-    s += texture(tex, uv + vec2(0.0, px.y)) * 2.0;
-    s += texture(tex, uv - vec2(0.0, px.y)) * 2.0;
-    s += texture(tex, uv + px) + texture(tex, uv - px);
-    s += texture(tex, uv + vec2(px.x, -px.y)) + texture(tex, uv + vec2(-px.x, px.y));
-    return s / 16.0;
-}
-void fragment() {
-    vec2 px = TEXTURE_PIXEL_SIZE * 1.4;
-    vec4 lo = soft_mask(TEXTURE, UV, px);
-    vec4 hi = soft_mask(extra_mask, UV, px);
-    float strength = 0.0;
-    int team = 0;
-    for (int i = 0; i < 4; i++) {
-        if (lo[i] > strength) { strength = lo[i]; team = i + 1; }
-        if (hi[i] > strength) { strength = hi[i]; team = i + 5; }
-    }
-    vec3 tint = vec3(0.404, 0.831, 0.663);
-    if (team == 2) tint = vec3(0.957, 0.643, 0.416);
-    if (team == 3) tint = vec3(0.467, 0.667, 0.996);
-    if (team == 4) tint = vec3(0.808, 0.569, 0.929);
-    if (team == 5) tint = vec3(0.933, 0.820, 0.420);
-    if (team == 6) tint = vec3(0.941, 0.518, 0.651);
-    if (team == 7) tint = vec3(0.420, 0.796, 0.831);
-    if (team == 8) tint = vec3(0.929, 0.459, 0.467);
-    float fill = smoothstep(0.38, 0.70, strength) * 0.045;
-    float rim = smoothstep(0.22, 0.49, strength) * (1.0 - smoothstep(0.49, 0.88, strength)) * 0.24;
-    COLOR = vec4(tint, fill + rim);
-}
-"""
-    territory_material = ShaderMaterial.new()
-    territory_material.shader = shader
-    territory_image.material = territory_material
     territory_image.hide()
 
 # Cached bounded nearest-site raster. Neutral sites remain in the partition
@@ -879,21 +835,34 @@ func _refresh_territory(state: Dictionary) -> void:
     if claims == territory_last:
         return
     territory_last = claims
-    var low := PackedByteArray()
-    var high := PackedByteArray()
-    low.resize(territory_lookup.size() * 4)
-    high.resize(low.size())
+    # Explicit RGBA pixels: visible team fill and a bright, two-pixel
+    # boundary band. Same-team sectors merge, contested sectors stay clear.
+    var ownership := PackedInt32Array()
+    ownership.resize(territory_lookup.size())
     for i in range(territory_lookup.size()):
         var node: int = territory_lookup[i]
-        if node < 0:
-            continue
-        var team: int = claims[node]
-        if team >= 1 and team <= 4:
-            low[i * 4 + team - 1] = 255
-        elif team >= 5 and team <= 8:
-            high[i * 4 + team - 5] = 255
-    territory_image.texture = ImageTexture.create_from_image(Image.create_from_data(territory_grid.x, territory_grid.y, false, Image.FORMAT_RGBA8, low))
-    territory_material.set_shader_parameter("extra_mask", ImageTexture.create_from_image(Image.create_from_data(territory_grid.x, territory_grid.y, false, Image.FORMAT_RGBA8, high)))
+        if node >= 0:
+            ownership[i] = claims[node]
+    var pixels := PackedByteArray()
+    pixels.resize(ownership.size() * 4)
+    for y in range(territory_grid.y):
+        for x in range(territory_grid.x):
+            var i: int = y * territory_grid.x + x
+            var team: int = ownership[i]
+            if team <= 0:
+                continue
+            var rim: bool = false
+            for offset in [Vector2i(-2, 0), Vector2i(2, 0), Vector2i(0, -2), Vector2i(0, 2), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1), Vector2i(0, 1)]:
+                var neighbor: Vector2i = Vector2i(x, y) + offset
+                if neighbor.x < 0 or neighbor.y < 0 or neighbor.x >= territory_grid.x or neighbor.y >= territory_grid.y or ownership[neighbor.y * territory_grid.x + neighbor.x] != team:
+                    rim = true
+                    break
+            var tint: Color = COLORS[team]
+            pixels[i * 4] = tint.r8
+            pixels[i * 4 + 1] = tint.g8
+            pixels[i * 4 + 2] = tint.b8
+            pixels[i * 4 + 3] = 195 if rim else 36
+    territory_image.texture = ImageTexture.create_from_image(Image.create_from_data(territory_grid.x, territory_grid.y, false, Image.FORMAT_RGBA8, pixels))
     territory_image.show()
     _position_territory()
 
@@ -1438,7 +1407,7 @@ func _select_at(point: Vector2) -> void:
         if distance <= _planet_radius(i, state) + 4.0 and distance < nearest:
             nearest = distance
             hit = i
-    # Use the same rendered pose (including orbital offsets) for hit testing.
+    # Use the same interpolated physical pose for selection and rendering.
     var poses: Dictionary = _ship_poses(state)
     var ship_hit: int = -1
     var ship_distance: float = INF
@@ -1520,7 +1489,7 @@ func _poi_name(node: int) -> String:
     var count: int = (_state().get("planets", []) as Array).size()
     return _system_name(node) if node < count else "Asteroid field %02d" % (node - count + 1)
 
-func _ship_position(ship: Dictionary, points: Array) -> Vector2:
+func _ship_position(ship: Dictionary, _points: Array) -> Vector2:
     if ship.has("position"):
         return ship["position"]
     return ECONOMY.combat_position(_state(), ECONOMY.military_graph(_state()), ship)

@@ -272,20 +272,12 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
     var start: int = int(ship["at"])
     if team == 0 or teams[start] != team:
         return []
-    var best: Array[int] = []
-    var distance: float = INF
-    for i in range(planets.size()):
-        if teams[i] != team or not MAP.linked(state["map"], i, target):
-            continue
-        var path: Array[int] = MAP.path(state["map"], teams, team, start, i)
-        if path.is_empty():
-            continue
-        path.append(target)
-        var length: float = MAP.route_length(state["map"], path)
-        if length < distance:
-            distance = length
-            best = path
-    return best
+    if not discovered(state, player, "planets", target):
+        return []
+    var transit: Array[int] = []
+    transit.resize(planets.size())
+    transit.fill(team)
+    return MAP.path(state["map"], transit, team, start, target)
 
 static func send_colony(state: Dictionary, player: int, ship_id: int, target: int) -> bool:
     for ship in state["ships"]:
@@ -756,10 +748,18 @@ static func _move(state: Dictionary, ship: Dictionary, dt: float) -> bool:
     var points: Array = state["map"]["points"]
     _ensure_position(points, ship)
     var distance: float = SHIP_SPEED * dt
+    if route.is_empty():
+        var here: int = int(ship["at"])
+        var dock_required: bool = int(ship.get("source", -1)) == here or int(ship.get("dest", -1)) == here or ship.get("mining_mode", "") == "approach"
+        if dock_required and ship.get("kind", "") != "fighter":
+            var dock: Vector2 = points[here]
+            _navigate(ship, dock, distance)
+            return (ship["position"] as Vector2) == dock
+        return true
     while not route.is_empty() and distance > EPS:
         var next: Vector2 = points[int(route[0])]
         distance -= _navigate(ship, next, distance)
-        if not (ship["position"] as Vector2).is_equal_approx(next):
+        if (ship["position"] as Vector2) != next:
             ship["leg"] = _lane_progress(points, ship)
             return false
         ship["at"] = int(route.pop_front())
@@ -941,7 +941,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
             return
         _navigate(ship, target, SHIP_SPEED * dt)
         ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
-        if (ship["position"] as Vector2).is_equal_approx(target):
+        if (ship["position"] as Vector2) == target:
             ship["mining_mode"] = "mining"
             ship["mining_years"] = 0.0
         return
@@ -966,7 +966,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
     if mode == "return":
         _navigate(ship, origin, SHIP_SPEED * dt)
         ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
-        if (ship["position"] as Vector2).is_equal_approx(origin):
+        if (ship["position"] as Vector2) == origin:
             var stock: Dictionary = state["planets"][anchor]["stock"]
             for resource in MINED_RESOURCES:
                 stock[resource] = float(stock[resource]) + float(ship["cargo"][resource])
@@ -1305,14 +1305,13 @@ static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, 
         for node in adjacency[current]:
             var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[node])
             if teams[node] == 0:
-                if reserved.has(node) or not discovered(state, player, "planets", int(node)):
-                    continue
-                var richness: float = float(state["planets"][node]["abundance"].get("Metals", 0.0))
-                var score: float = distance / (1.0 + minf(richness, 2.0) * 0.15)
-                if score < best:
-                    best = score
-                    target = int(node)
-            elif teams[node] == team and not visited.has(node) and distance < float(distances.get(node, INF)):
+                if not reserved.has(node) and discovered(state, player, "planets", int(node)):
+                    var richness: float = float(state["planets"][node]["abundance"].get("Metals", 0.0))
+                    var score: float = distance / (1.0 + minf(richness, 2.0) * 0.15)
+                    if score < best:
+                        best = score
+                        target = int(node)
+            if not visited.has(node) and distance < float(distances.get(node, INF)):
                 distances[node] = distance
                 if not open.has(node):
                     open.append(node)
@@ -1482,20 +1481,24 @@ static func step(state: Dictionary, dt: float) -> void:
     for player in fleets:
         _allocate_fighters(state, combat_graph, int(player), fleets[player])
     for ship in (state["ships"] as Array).duplicate():
+        var initial_position: Vector2 = ship["position"]
         if ship.get("kind", "ship") == "colony_ship":
             if _work_colony(state, ship, dt):
                 state["ships"].erase(ship)
+                continue
         elif ship.get("kind", "ship") == "ship":
             _work_ship(state, ship, teams, cache, dt)
         elif ship.get("kind", "ship") == "miner":
             _work_miner(state, ship, teams, cache, budgets, dt)
         elif ship.get("kind", "") == "fighter" and int(ship.get("combat_target", -1)) < 0:
-            if (ship["route"] as Array).is_empty():
-                # Stable, physical station positions near the POI, not renderer offsets.
-                var center: Vector2 = combat_graph["points"][int(ship["at"])]
-                var slot: int = int(ship["id"]) % 24
-                var station: Vector2 = center + Vector2.from_angle(float(slot) * 2.399963) * (36.0 + 16.0 * float(slot % 4))
-                _navigate(ship, station, SHIP_SPEED * dt)
-            else:
-                _move({"map": combat_graph}, ship, dt)
+            _move({"map": combat_graph}, ship, dt)
+        var fighter: bool = ship.get("kind", "") == "fighter"
+        var idle: bool = (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle"
+        idle = idle and (int(ship.get("dest", -1)) < 0 or fighter) and int(ship.get("source", -1)) < 0
+        if idle and int(ship.get("combat_target", -1)) < 0 and ship["position"] == initial_position:
+            var points: Array = combat_graph["points"] if fighter else state["map"]["points"]
+            var center: Vector2 = points[int(ship["at"])]
+            var slot: int = int(ship["id"]) % 64
+            var station: Vector2 = center + Vector2.from_angle(float(slot) * 2.399963) * (64.0 + 20.0 * float(slot % 4))
+            _navigate(ship, station, SHIP_SPEED * dt)
     update_exploration(state)
