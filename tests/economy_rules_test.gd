@@ -74,6 +74,28 @@ func _initialize() -> void:
     assert(is_equal_approx(float(totals["resources"]["Metals"]), 632.0))
     assert(ECON.empire_totals({}, 1)["craft"] == 0)
 
+    # Rolling window measures net holdings, not internal cargo transfers.
+    var history: Dictionary = {}
+    var rolling: Dictionary = ECON.create(graph, players, ids)
+    ECON.sample_resource_rates(rolling, history)
+    for i in range(1, 8):
+        rolling["elapsed"] = float(i)
+        rolling["planets"][0]["stock"]["Metals"] += 10.0 if i <= 5 else -5.0
+        ECON.sample_resource_rates(rolling, history)
+        if i == 2:
+            assert(is_equal_approx(float(rolling["resource_rates"][1]["Metals"]), 10.0))
+    assert(is_equal_approx(float(rolling["resource_rates"][1]["Metals"]), 4.0))
+    assert(is_zero_approx(float(rolling["resource_rates"][2]["Metals"])))
+    var transfer: Dictionary = ECON.empty_stock()
+    transfer["Metals"] = 25.0
+    rolling["planets"][0]["stock"]["Metals"] -= 25.0
+    rolling["ships"].append({"owner": 1, "kind": "ship", "cargo": transfer})
+    ECON.sample_resource_rates(rolling, history)
+    assert(is_equal_approx(float(rolling["resource_rates"][1]["Metals"]), 4.0))
+    rolling["elapsed"] = 7.5
+    rolling["planets"][0]["stock"]["Metals"] -= 50.0
+    ECON.sample_resource_rates(rolling, history)
+    assert(is_equal_approx(float(rolling["resource_rates"][1]["Metals"]), -7.0))
     # Starting growth is exponential when well below a food-supported plateau.
     var demographics: Dictionary = ECON.create(graph, players, ids)
     var home: Dictionary = demographics["planets"][0]

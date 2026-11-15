@@ -90,9 +90,6 @@ func _show_menu() -> void:
     title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     title.add_theme_color_override("font_color", HUD.ACCENT)
     col.add_child(title)
-    var sub := _text("TERRITORY  •  STRATEGY  •  CONQUEST", 14, MUTED)
-    sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-    col.add_child(sub)
     col.add_spacer(false)
     var center := CenterContainer.new()
     col.add_child(center)
@@ -111,7 +108,6 @@ func _show_multiplayer() -> void:
     screen = "multiplayer"
     var col := _root()
     col.add_child(_text("MULTIPLAYER", 32))
-    col.add_child(_text("Direct IP / Tailscale • UDP 24567", 14, MUTED))
     var panel := _panel()
     col.add_child(panel)
     var form := VBoxContainer.new()
@@ -149,7 +145,7 @@ func _show_lobby() -> void:
     var col := _root()
     var header := HBoxContainer.new()
     col.add_child(header)
-    header.add_child(_text("WARBOUND / LOBBY", 28))
+    header.add_child(_text("Lobby", 28))
     header.add_spacer(false)
     header.add_child(_button("LEAVE", _leave))
     status_label = _text("", 14, MUTED)
@@ -173,7 +169,7 @@ func _show_lobby() -> void:
     var left_col := VBoxContainer.new()
     left_col.add_theme_constant_override("separation", 8)
     left.add_child(left_col)
-    left_col.add_child(_text("PLAYERS (MAX 8)", 20))
+    left_col.add_child(_text("Players", 20))
     var roster_scroll := ScrollContainer.new()
     roster_scroll.custom_minimum_size.y = 230
     roster_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -183,7 +179,6 @@ func _show_lobby() -> void:
     roster.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     roster.add_theme_constant_override("separation", 3)
     roster_scroll.add_child(roster)
-    left_col.add_child(_text("TERRITORY CONTROL  •  1–8 TEAMS", 13, MUTED))
     var buttons := HBoxContainer.new()
     left_col.add_child(buttons)
     ready_button = _button("READY", _toggle_ready)
@@ -198,7 +193,7 @@ func _show_lobby() -> void:
     var right_col := VBoxContainer.new()
     right_col.add_theme_constant_override("separation", 8)
     right.add_child(right_col)
-    right_col.add_child(_text("LOBBY CHAT", 20))
+    right_col.add_child(_text("Chat", 20))
     chat_log = RichTextLabel.new()
     chat_log.custom_minimum_size.y = 230
     chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
