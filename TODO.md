@@ -12,6 +12,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 
 ## Phase 1 — Autonomous military foundation
 - [ ] Rework military control into persistent fleet/operation groups shared by human and AI empires.
+  - Initial v0.9.0 prototype: shared authoritative operation IDs, member lists, objectives and movement/engagement flags derived from existing routing. Routing remains controlled by legacy human allocation and AI waves; operation-driven orders and validation remain outstanding.
 - [ ] Automatically assemble sufficiently strong waves, rally reinforcements, coordinate departure and regroup survivors; extend the existing AI-only rally prototype.
 - [ ] Generate formations of varying sizes based on fleet size and ship composition. Assign stable relative positions; smoothly re-form as membership changes without teleportation.
 - [ ] Allow combat ships to continue physically flying and maneuvering during combat; use authoritative world positions for range and movement, keep lane travel intact.
