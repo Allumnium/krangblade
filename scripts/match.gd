@@ -830,7 +830,7 @@ func _refresh() -> void:
     var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
     inspector_tabs.visible = not other_selected and own_system
     interaction_panel.visible = not other_selected and not p.is_empty() and not own_system
-    military_panel.hide()
+    military_panel.get_parent().hide()
     ship_overview.visible = other_selected
     fleet_scroll.visible = other_selected
     fleet_overview.visible = other_selected
@@ -1089,7 +1089,7 @@ func _build_military_panel() -> void:
     military_split.value_changed.connect(_preview_military.bind(-1))
     frontier_list = VBoxContainer.new()
     military_panel.add_child(frontier_list)
-    military_panel.hide()
+    military_panel.get_parent().hide()
 
 func _begin_military_drag(node: int) -> void:
     military_drag = node
@@ -1119,7 +1119,7 @@ func _preview_military(value: float, node: int) -> void:
         frontier_rows[index]["label"].text = "%s  %d%%" % [_system_name(index), int(weights[index])]
 
 func _refresh_military(state: Dictionary, kind: String) -> void:
-    military_panel.show()
+    military_panel.get_parent().show()
     var network: Dictionary = ECONOMY.military_network(state, _me())
     var policy: Dictionary = ECONOMY.military_policy(state, _me(), kind, network)
     var fronts: Array = network["frontiers"]
