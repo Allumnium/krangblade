@@ -88,6 +88,8 @@ var system_visual_seed: int = -1
 var trade_sliders: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var upgrade_cards: Dictionary = {}
+var economy_cards: Dictionary = {}
+var warehouse_card: Dictionary = {}
 var continuous_checks: Dictionary = {}
 var repeat_icon: Texture2D
 var production_summary: VBoxContainer
@@ -340,7 +342,8 @@ func _build_ui() -> void:
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
     inspector_tabs.clip_contents = true
     body.add_child(inspector_tabs)
-    _inspector_page("Economy")
+    var economy_page: VBoxContainer = _inspector_page("Economy")
+    _build_economy_cards(economy_page)
     var trade_page: VBoxContainer = _inspector_page("Trade")
     var shipyard_page: VBoxContainer = _inspector_page("Shipyards")
     var upgrades_page: VBoxContainer = _inspector_page("Upgrades")
@@ -473,7 +476,7 @@ func _build_production_summary() -> void:
 
 func _system_bonus_text(p: Dictionary) -> String:
     var lines: PackedStringArray = []
-    var names: Dictionary = {"Metals": "Metal production", "Plastics": "Plastic production", "Crystals": "Crystal production", "Organics": "Organics production"}
+    var names: Dictionary = {"Metals": "Metal production", "Plastics": "Plastic production", "Crystals": "Crystal production", "Organics": "Organics production", "Tech": "Tech production", "Textiles": "Textile production"}
     for resource in ECONOMY.ACTIVE_PRODUCTION:
         var percent: int = roundi(ECONOMY.production_modifier(p, resource) * 100.0)
         if percent != 100:
@@ -483,8 +486,48 @@ func _system_bonus_text(p: Dictionary) -> String:
         lines.append("Advanced manufacturing %d%% (future)" % advanced)
     return "\n".join(lines)
 
+func _build_economy_cards(parent: Container) -> void:
+    var warehouse: VBoxContainer = HUD.section(parent, "Warehouse logistics")
+    var warehouse_detail: Label = _label("", 12)
+    warehouse.add_child(warehouse_detail)
+    var warehouse_button: Button = _button("UPGRADE", _operation.bind("economy", "warehouse"), warehouse)
+    HUD.action(warehouse_button)
+    warehouse_card = {"button": warehouse_button, "detail": warehouse_detail}
+    for resource in ECONOMY.RESOURCES:
+        var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
+        var card: VBoxContainer = HUD.section(parent, str(definition["name"]))
+        var effect: Label = _label("+25% farm capacity" if resource == "Organics" else "+25%% %s output" % resource, 12)
+        card.add_child(effect)
+        var detail: Label = _label("", 12)
+        card.add_child(detail)
+        var button: Button = _button("BUY", _operation.bind("economy", resource), card)
+        HUD.action(button)
+        economy_cards[resource] = {"button": button, "detail": detail}
+
+func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
+    var level: int = int(p.get("warehouse_level", 0))
+    var warehouse_button: Button = warehouse_card["button"]
+    warehouse_button.disabled = not owned or not ECONOMY.warehouse_available(p)
+    warehouse_button.text = "MAX LEVEL" if level >= 3 else "UPGRADE TO LV %d" % (level + 1)
+    var warehouse_detail: String = "%s / resource" % _compact_amount(ECONOMY.storage_capacity(p))
+    if level < 3:
+        warehouse_detail += " → %s\n%s population\n%s" % [_compact_amount(float(ECONOMY.WAREHOUSE_CAPACITIES[level + 1])), _compact_amount(float(ECONOMY.WAREHOUSE_POPULATIONS[level])), _cost_text(ECONOMY.WAREHOUSE_COSTS[level])]
+    warehouse_card["detail"].text = warehouse_detail
+    warehouse_button.tooltip_text = warehouse_detail
+    for resource in economy_cards:
+        var card: Dictionary = economy_cards[resource]
+        var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
+        var installed: bool = bool(p.get("buildings", {}).get(resource, false))
+        var button: Button = card["button"]
+        button.text = "BUILT" if installed else "BUY"
+        button.disabled = not owned or not ECONOMY.building_available(p, resource)
+        var cost: String = _cost_text(definition["cost"])
+        var requirement: String = "%s population" % _compact_amount(float(definition["population"]))
+        card["detail"].text = "Installed" if installed else "%s\n%s" % [requirement, cost]
+        button.tooltip_text = "Permanent local improvement" if installed else "%s\n%s" % [requirement, cost]
+
 func _build_upgrade_cards(parent: Container) -> void:
-    var labels: Dictionary = {"Metals": "Metal extraction", "Plastics": "Plastic extraction",
+    var labels: Dictionary = {"Metals": "Metal extraction", "Plastics": "Plastic production",
         "Textiles": "Textile production", "Organics": "Organics farming",
         "Tech": "Tech production", "Crystals": "Crystal extraction"}
     for resource in ECONOMY.RESOURCES:
@@ -541,8 +584,10 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
         var progress: ProgressBar = card["progress"]
         progress.visible = not job.is_empty()
         var detail: Label = card["detail"]
-        var available: bool = not ECONOMY._continuous_target(planet, "production:" + resource).is_empty()
-        _sync_repeat(card["repeat"], planet, "production:" + resource, owned and available)
+        var available: bool = ECONOMY.production_available(planet, resource)
+        var unlocked: bool = ECONOMY.production_unlocked(planet, resource)
+        var repeating: bool = bool(planet["continuous"].get("production:" + resource, false))
+        _sync_repeat(card["repeat"], planet, "production:" + resource, owned and available and (unlocked or repeating))
         if not job.is_empty():
             progress.value = 100.0 * float(job["progress"]) / float(job["work"])
             detail.text = "%s%s" % [_cost_text(job["cost"], job["allocated"]), " • Waiting" if ECONOMY._possible(planet, job) <= ECONOMY.EPS else ""]
@@ -550,13 +595,13 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
             button.disabled = not owned
         else:
             button.text = "UPGRADE TO LV %d" % (level + 1)
-            button.disabled = not owned or not available
-            if not ECONOMY.ACTIVE_PRODUCTION.has(resource):
-                detail.text = "Production design pending"
-            elif not available:
+            button.disabled = not owned or not unlocked
+            if not available:
                 detail.text = "No local deposit"
             else:
-                detail.text = "Output %.2f/yr\n%s · %.0f yr" % [ECONOMY.rate(planet, resource), _cost_text(ECONOMY._cost("production", level + 1)), ECONOMY._work("production", level + 1)]
+                var minimum: int = ECONOMY.production_population(resource, level + 1)
+                detail.text = "Output %.2f/yr\n%s population%s\n%s · %.0f yr" % [ECONOMY.rate(planet, resource), _compact_amount(float(minimum)), " required" if not unlocked else "", _cost_text(ECONOMY._cost("production", level + 1)), ECONOMY._work("production", level + 1)]
+                button.tooltip_text = "Requires %d population" % minimum
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
     for resource in ECONOMY.RESOURCES:
@@ -996,7 +1041,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
         global_resource_fills[resource] = clampf(stored / reference, 0.0, 1.0) if reference > 0.0 else 0.0
         var tile: PanelContainer = global_resource_tiles[resource]
         tile.queue_redraw()
-        tile.tooltip_text = "%s: %.1f\nStored: %.1f / %.0f • Cargo: %.1f\nNet: %+.2f/year (last 5 years)\nStorage reference; not a hard capacity" % [
+        tile.tooltip_text = "%s: %.1f\nStored: %.1f / %.0f • Cargo: %.1f\nNet: %+.2f/year (last 5 years)\nStorage capacity" % [
             resource, value, stored, reference, float(totals["cargo"][resource]), rate]
     global_population_label.text = "POP  %s" % _compact_amount(float(totals["population"]))
     global_population_label.tooltip_text = "Population across owned systems: %.0f" % float(totals["population"])
@@ -1039,9 +1084,11 @@ func _update_trade_stock(p: Dictionary) -> void:
     for resource in ECONOMY.RESOURCES:
         var slider: TradeRange = trade_sliders[resource]
         var stock: float = float(p["stock"][resource])
-        slider.set_stock(stock, ECONOMY.TRADE_REFERENCE, HUD.COLORS[resource])
-        trade_stock_labels[resource].text = ("%s / %.0f" % [_compact_amount(stock), ECONOMY.TRADE_REFERENCE]) if stock >= 1000.0 else ("%.1f / %.0f" % [stock, ECONOMY.TRADE_REFERENCE])
-        trade_stock_labels[resource].tooltip_text = "%.1f / %.0f" % [stock, ECONOMY.TRADE_REFERENCE]
+        var capacity: float = ECONOMY.storage_capacity(p)
+        slider.set_stock(stock, capacity, HUD.COLORS[resource])
+        trade_stock_labels[resource].text = "%s / %s" % [_compact_amount(stock) if stock >= 1000.0 else "%.1f" % stock, _compact_amount(capacity)]
+        trade_stock_labels[resource].tooltip_text = "%.1f / %.0f" % [stock, capacity]
+        slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f units." % capacity
         # Preserve this handle while dragging, even when a snapshot arrives.
         if slider.active_handle < 0:
             var t: Dictionary = p["thresholds"][resource]
@@ -1127,20 +1174,21 @@ func _refresh() -> void:
     info.text = "%s%s\n%s" % [_system_name(selected), "  /  Home" if bool(p["home"]) else "", name_text]
     environment_label.text = _system_bonus_text(p)
     environment_label.visible = not environment_label.text.is_empty()
-    environment_label.tooltip_text = "Natural production modifiers; advanced manufacturing is reserved for future recipes."
+    environment_label.tooltip_text = "Local production modifiers, including installed economic improvements. Advanced manufacturing remains reserved for future recipes."
     for resource in ECONOMY.RESOURCES:
         var amount: float = float(p["stock"][resource])
         production_values[resource]["stock"].text = _compact_amount(amount) if amount >= 1000.0 else "%.1f" % amount
         production_values[resource]["stock"].tooltip_text = "%.1f %s stored" % [amount, resource]
         production_values[resource]["level"].text = str(int(p["levels"][resource]))
-        var annual: float = ECONOMY.rate(p, resource)
+        var annual: float = ECONOMY.net_rate(p, resource)
         production_values[resource]["rate"].text = _compact_amount(annual) if annual >= 1000.0 else "%.1f" % annual
-        production_values[resource]["rate"].tooltip_text = "%.2f/yr" % annual
+        production_values[resource]["rate"].tooltip_text = "Production %.2f/yr · Consumption %.2f/yr · Net %.2f/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
     var population: float = float(p["population"])
     population_label.text = "Population %s" % _compact_amount(population)
     population_label.tooltip_text = "%.0f people" % population
     _update_trade_stock(p)
     _refresh_upgrade_cards(p, owned)
+    _refresh_economy_cards(p, owned)
     ship_button.disabled = not owned or not bool(p["home"])
     _refresh_build_cards(p, owned)
 
@@ -1261,6 +1309,7 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
         var card: Dictionary = build_cards[kind]
         var count: int = int(counts.get(kind, 0))
         card["button"].text = "%s (%d)" % [card["title"], count] if count > 0 else card["title"]
+        card["button"].tooltip_text = _cost_text(ECONOMY._cost(kind, 1))
         card["cancel"].visible = count > 0
         card["cancel"].disabled = not owned
 
@@ -1748,7 +1797,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
             var origin: Vector2 = pos + Vector2(-width * 0.5, radius + 5.0)
             for r in range(ECONOMY.RESOURCES.size()):
                 var resource: String = ECONOMY.RESOURCES[r]
-                var fraction: float = clampf(float(system["stock"][resource]) / ECONOMY.TRADE_REFERENCE, 0.0, 1.0)
+                var fraction: float = clampf(float(system["stock"][resource]) / ECONOMY.storage_capacity(system), 0.0, 1.0)
                 var cell: Vector2 = origin + Vector2(float(r) * (bar_width + 1.0), 0)
                 map_canvas.draw_rect(Rect2(cell, Vector2(bar_width, 4)), Color("#263b50"))
                 if fraction > 0.0:

@@ -44,6 +44,10 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Observation:** v0.10.1 uses a common orbit direction and a provisional preferred separation of 60% of laser range; dense fleets may overlap or repeatedly lose contacts when chasing fast targets.
 - **Consider:** Inspect real battles before adding separation, target persistence or a turn-rate model; integrate stable formation slots with combat maneuvers without sacrificing speed bounds.
 
+### T-011 — Population and industrial bottlenecks
+- **Type:** Gameplay/balance hypothesis.
+- **Observation:** Multi-resource ship costs make local Plastics, Textiles, Organics and Tech stock actual constraints. Baseline industrial outputs and population gates may make new colonies slow to develop, while Organics also supports residents. The first Tech upgrade requires 200k population and construction costs remain provisional.
+- **Consider:** Measure time to replenish twelve mixed hulls, evaluate trade throughput and whether AI needs more deliberate industrial investment. Preserve local logistics; do not silently grant free resources to colonies.
 ### T-009 — Pursuit speed and disengagement
 - **Type:** Gameplay/balance hypothesis.
 - **Observation:** Fighters and civilian hulls currently share the same maximum flight speed. A straight-line chase can maintain contact but cannot reliably catch a ship already pulling away. The three-year cap limits detours; targets still in range at expiry cannot immediately restart the same chase.
@@ -53,3 +57,20 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Verified regression (PR #49 eight-peer host check).
 - **Observation:** Authority advances simulation at 10 Hz while snapshot notifications are 5 Hz. Render target could lag a current authoritative position.
 - **Consider:** v0.10.3 synchronizes render destinations when poses are sampled, preserving interpolation; verify mandatory ENet checks before archiving.
+
+### T-012 — Full warehouses and construction refunds
+- **Type:** Gameplay/UX balancing risk.
+- **Observation:** Production and deliveries respect storage space; miners wait with undelivered cargo. Full refunds may temporarily place stock above capacity to avoid resource loss. No positive growth occurs in that state.
+- **Consider:** Playtest warehouse prices and cargo bottlenecks; consider reserved refund capacity or a separate overflow mechanism if temporary refund overflow proves confusing.
+- Integration note: v0.11.2 restored the pursuit duration constant omitted in the v0.11.1 economy integration. CI caught the parse failure.
+### T-013 — Industrial labor ceiling
+- **Type:** Balance hypothesis.
+- **Observation:** Installed industrial capacity now supports 100k productive residents per level, while linear demand continues increasing. At level one, Tech/Textiles output reaches 5 units/year and demand catches up at 200k population (before economic bonuses).
+- **Consider:** Playtest whether industry upgrades are timely and accessible, particularly for AI and colonies. Adjust provisional rates if stockouts routinely stall construction.
+
+### T-014 — Snapshot pressure during lobby return
+- **Type:** Verified eight-peer lobby-return timeouts; queue pressure is a hypothesis.
+- **Observation:** Full reliable snapshots were broadcast after each order, including bursts from seven guests. v0.11.4 batches remote state at the fixed cadence and allows one unacknowledged snapshot per guest. Local authority UI remains immediate. Test guests explicitly leave after the lobby scene loads; headless peers are capped at 60 FPS to avoid CPU starvation on shared runners.
+- **Consider:** Validate under eight real peers and future internet latency; inspect bandwidth and queue age on large fleets.
+
+- v0.11.5 uses the Node-level rpc_id method to obtain send errors; the callable RPC shorthand returns void in Godot 4.7.2 (caught by CI).

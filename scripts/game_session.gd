@@ -34,6 +34,9 @@ var loaded: Dictionary = {}
 var load_timer: Timer
 var economy_timer: Timer
 var snapshot_elapsed: float = 0.0
+var snapshot_revision: int = 0
+var snapshot_sent: Dictionary = {}
+var snapshot_pending: Dictionary = {}
 var resource_history: Dictionary = {}
 
 func _ready() -> void:
@@ -192,6 +195,8 @@ func _peer_disconnected(peer_id: int) -> void:
         return
     var name: String = str((players[peer_id] as Dictionary).get("name", "Player"))
     players.erase(peer_id)
+    snapshot_sent.erase(peer_id)
+    snapshot_pending.erase(peer_id)
     loaded.erase(peer_id)
     last_message.erase(peer_id)
     _send_roster()
@@ -416,6 +421,9 @@ func _rpc_begin(begin_round: int, snapshot: Dictionary, map_seed: int) -> void:
 func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
     players = snapshot.duplicate(true)
     snapshot_elapsed = 0.0
+    snapshot_revision = 0
+    snapshot_sent.clear()
+    snapshot_pending.clear()
     economy = ECONOMY.create(MAP.generate(map_seed, players.size()), players, RULES.ordered_peers(players))
     economy["time_speed"] = 1
     resource_history.clear()
@@ -611,27 +619,49 @@ func _economy_tick() -> void:
     if phase != "match" or not (is_solo or multiplayer.is_server()):
         return
     var speed: int = int(economy.get("time_speed", 1))
-    if speed == 0:
-        return
-    # Keep movement, AI, combat and economy integration at the existing step.
-    # Snapshot cadence and network/UI timers remain on the real-time clock.
+    # Pause stops the simulation, but not accepted orders or replication.
     for i in range(speed):
         ECONOMY.step(economy, SIM_STEP)
         ECONOMY.sample_resource_rates(economy, resource_history)
     snapshot_elapsed += SIM_STEP
     if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
-        _publish_economy()
+        snapshot_elapsed = 0.0
+        if speed > 0:
+            _publish_economy()
+        _flush_economy()
 
 func _publish_economy() -> void:
-    snapshot_elapsed = 0.0
+    # Local UI stays synchronous. Coalesce remote changes on the snapshot clock.
+    snapshot_revision += 1
     owners = ECONOMY.planet_teams(economy)
-    if not is_solo:
-        _rpc_economy.rpc(round_id, var_to_bytes(economy).compress(FileAccess.COMPRESSION_GZIP))
     owners_changed.emit()
     economy_changed.emit()
 
+func _flush_economy() -> void:
+    if is_solo:
+        return
+    var payload: PackedByteArray = PackedByteArray()
+    for id in multiplayer.get_peers():
+        if snapshot_pending.has(id) or int(snapshot_sent.get(id, -1)) == snapshot_revision:
+            continue
+        if payload.is_empty():
+            payload = var_to_bytes(economy).compress(FileAccess.COMPRESSION_GZIP)
+        # At most one reliable full snapshot in flight per guest. A slow guest
+        # skips intermediate states, receiving the newest revision after ACK.
+        if rpc_id(id, "_rpc_economy", round_id, snapshot_revision, payload) == OK:
+            snapshot_pending[id] = snapshot_revision
+            snapshot_sent[id] = snapshot_revision
+
+@rpc("any_peer", "call_remote", "reliable", 1)
+func _rpc_snapshot_ack(ack_round: int, revision: int) -> void:
+    if not multiplayer.is_server() or phase != "match" or ack_round != round_id:
+        return
+    var id: int = multiplayer.get_remote_sender_id()
+    if _active_player(id) and int(snapshot_pending.get(id, -1)) == revision:
+        snapshot_pending.erase(id)
+
 @rpc("authority", "call_remote", "reliable", 1)
-func _rpc_economy(update_round: int, compressed: PackedByteArray) -> void:
+func _rpc_economy(update_round: int, revision: int, compressed: PackedByteArray) -> void:
     if phase != "match" or update_round != round_id:
         return
     var decoded: Variant = bytes_to_var(compressed.decompress_dynamic(16777216, FileAccess.COMPRESSION_GZIP))
@@ -644,3 +674,4 @@ func _rpc_economy(update_round: int, compressed: PackedByteArray) -> void:
     owners = ECONOMY.planet_teams(economy)
     owners_changed.emit()
     economy_changed.emit()
+    _rpc_snapshot_ack.rpc_id(1, update_round, revision)
