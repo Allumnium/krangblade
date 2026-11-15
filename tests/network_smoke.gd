@@ -9,6 +9,11 @@ var started: bool = false
 var finishing: bool = false
 var ready_sent: bool = false
 var economy_verified: bool = false
+var home_index: int = -1
+var cancel_id: int = -1
+var cancel_sent: bool = false
+var commands_sent: bool = false
+const ECON = preload("res://scripts/economy_rules.gd")
 var saw_loading: bool = false
 var mode: String = "normal"
 const MAP = preload("res://scripts/planet_map.gd")
@@ -79,17 +84,17 @@ func _phase_changed() -> void:
             _fail("Wrong territory count.")
             return
         if mode == "normal":
-            call_deferred("_queue_test_ship")
+            call_deferred("_prepare_commands")
             create_timer(0.5).timeout.connect(_check_economy_sync)
         if role == "host":
             if mode == "host-leave":
                 create_timer(1.0).timeout.connect(func() -> void: session.call("leave_session"))
             else:
-                create_timer(5.0).timeout.connect(func() -> void: session.call("return_to_lobby"))
+                create_timer(12.0).timeout.connect(func() -> void: session.call("return_to_lobby"))
     elif phase == "lobby" and saw_loading and not finishing:
         if (mode == "drop-loading" and role == "host") or (mode == "normal" and saw_match):
             if mode == "normal" and not economy_verified:
-                _fail("Never observed all players’ shipyard progress before return.")
+                _fail("Never verified all multiplayer command and replication checks before return.")
                 return
             finishing = true
             var roster: Dictionary = session.get("players")
@@ -109,32 +114,94 @@ func _phase_changed() -> void:
         else:
             _fail("Connection closed before expected transition.")
 
-func _queue_test_ship() -> void:
+func _prepare_commands() -> void:
     var state: Dictionary = session.get("economy")
     var self_id: int = session.multiplayer.get_unique_id()
     for i in range((state["planets"] as Array).size()):
         if int(state["planets"][i]["owner"]) == self_id:
-            session.call("request_operation", i, "ship")
+            home_index = i
+            break
+    if home_index < 0:
+        _fail("No home system for player.")
+        return
+    # Reveal one generated field to every team for a deterministic policy round trip.
+    # This is a test-only scenario; the real discovery rules are unchanged.
+    if role == "host":
+        if (state["map"]["fields"] as Array).is_empty():
+            _fail("Generated map has no asteroid field for policy testing.")
             return
-    _fail("No home planet for player.")
+        for team in state["explored"]:
+            state["explored"][team]["fields"][0] = true
+        session.call("_publish_economy")
+
+func _send_commands() -> void:
+    commands_sent = true
+    session.call("request_thresholds", home_index, "Metals", 15.0, 65.0)
+    # Invalid and unauthorized threshold requests must not win.
+    session.call("request_thresholds", home_index, "Metals", 99.0, 101.0)
+    session.call("request_thresholds", (home_index + 1) % expected_players, "Metals", 77.0, 88.0)
+    session.call("request_operation", home_index, "ship")
+    session.call("request_operation", home_index, "fighter")
+    session.call("request_continuous", home_index, "production:Organics", true)
+    session.call("request_continuous", home_index, "yard_upgrade:0", true)
+    session.call("request_mining_policy", 0, true, false, true)
 
 func _check_economy_sync() -> void:
     if economy_verified or str(session.get("phase")) != "match":
         return
     var state: Dictionary = session.get("economy")
-    var homes: int = 0
-    var verified: int = 0
-    for planet in state.get("planets", []):
-        if bool(planet["home"]):
-            homes += 1
-            if (planet["queue"] as Array).size() == 1 and float(planet["queue"][0]["progress"]) > 0.0:
+    var self_id: int = session.multiplayer.get_unique_id()
+    if not commands_sent and home_index >= 0 and ECON.discovered(state, self_id, "fields", 0):
+        _send_commands()
+        state = session.get("economy")
+    if commands_sent:
+        var own: Dictionary = state["planets"][home_index]
+        if not cancel_sent:
+            for item in own["queue"]:
+                if item["kind"] == "fighter":
+                    cancel_id = int(item["id"])
+                    cancel_sent = true
+                    session.call("request_cancel", home_index, cancel_id)
+                    break
+        var verified: int = 0
+        for system in state["planets"]:
+            if not bool(system["home"]):
+                continue
+            var owner: int = int(system["owner"])
+            var thresholds: Dictionary = system["thresholds"]["Metals"]
+            var flags: Dictionary = system["continuous"]
+            var policy: Dictionary = ECON.mining_policy(state, owner, 0)
+            var ship_progress: bool = false
+            var fighter_pending: bool = false
+            var upgrade_pending: bool = false
+            var yard_pending: bool = false
+            for job in system["queue"]:
+                if job["kind"] == "ship" and float(job["progress"]) > 0.0:
+                    ship_progress = true
+                elif job["kind"] == "fighter":
+                    fighter_pending = true
+                elif job["kind"] == "production" and job["target"] == "Organics":
+                    upgrade_pending = true
+                elif job["kind"] == "yard_upgrade":
+                    yard_pending = true
+            for ship in state["ships"]:
+                if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship":
+                    ship_progress = true
+            if is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and upgrade_pending and yard_pending and not fighter_pending and ship_progress and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
                 verified += 1
-            else:
-                for ship in state.get("ships", []):
-                    if int(ship["owner"]) == int(planet["owner"]) and ship.get("kind", "ship") == "ship":
-                        verified += 1
-                        break
-    economy_verified = homes == expected_players and verified == expected_players
+        var view: Node = current_scene
+        if cancel_sent and verified == expected_players and view != null and view.has_method("_update_trade_stock"):
+            view.set("selected", home_index)
+            var picker: OptionButton = view.get("trade_picker")
+            picker.select(0)
+            view.call("_load_thresholds")
+            view.call("_refresh")
+            var slider: Control = view.get("threshold_slider")
+            var stock: float = float(state["planets"][home_index]["stock"]["Metals"])
+            if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.TRADE_REFERENCE * 100.0, 0.0, 100.0)):
+                _fail("Replicated inventory does not match the trade bar.")
+                return
+            economy_verified = true
     if not economy_verified:
         create_timer(0.25).timeout.connect(_check_economy_sync)
 

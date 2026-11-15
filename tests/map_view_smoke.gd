@@ -72,6 +72,17 @@ func _run() -> void:
     tabs.current_tab = 1
     await process_frame
     var slider: Control = view.get("threshold_slider")
+    var stock_state: Dictionary = session.get("economy")
+    var stock_system: Dictionary = stock_state["planets"][0]
+    var saved_stock: float = float(stock_system["stock"]["Organics"])
+    stock_system["stock"]["Organics"] = 450.0
+    view.call("_refresh")
+    assert(is_equal_approx(float(slider.get("stock_percent")), 45.0))
+    stock_system["stock"]["Organics"] = 1500.0
+    view.call("_refresh")
+    assert(is_equal_approx(float(slider.get("stock_percent")), 100.0))
+    stock_system["stock"]["Organics"] = saved_stock
+    view.call("_refresh")
     assert(is_equal_approx(float(slider.get("lower")), 10.0))
     assert(is_equal_approx(float(slider.get("upper")), 20.0))
     var threshold_mouse := InputEventMouseButton.new()
@@ -82,6 +93,8 @@ func _run() -> void:
     var drag := InputEventMouseMotion.new()
     drag.position = Vector2(float(slider.call("_x", 65.0)), 38)
     slider.call("_gui_input", drag)
+    view.call("_refresh")
+    assert(is_equal_approx(float(slider.get("upper")), 65.0))
     threshold_mouse.pressed = false
     threshold_mouse.position = drag.position
     slider.call("_gui_input", threshold_mouse)
