@@ -64,6 +64,24 @@ func _run() -> void:
     assert(farm_button.text.contains("CANCEL"))
     farm_button.pressed.emit()
     assert(state["planets"][0]["queue"].is_empty())
+    tabs.current_tab = 2
+    var checks: Dictionary = view.get("continuous_checks")
+    assert(checks.size() == 4)
+    var automatic: CheckBox = checks["fighter"]
+    automatic.button_pressed = true
+    assert(state["planets"][0]["continuous"]["fighter"])
+    automatic.button_pressed = false
+    assert(not state["planets"][0]["continuous"]["fighter"])
+    var new_yard: Button = view.get("yard_button")
+    new_yard.pressed.emit()
+    var yard_job: Dictionary = state["planets"][0]["queue"][0]
+    var pending_key: int = -int(yard_job["id"])
+    assert(idle_rows.size() == 2 and idle_rows.has(pending_key))
+    session.call("_economy_tick")
+    session.call("_economy_tick")
+    assert((idle_rows[pending_key]["progress"] as ProgressBar).value > 0.0)
+    session.call("request_cancel", 0, int(yard_job["id"]))
+    assert(idle_rows.size() == 1)
     tabs.current_tab = 0
     var points: Array = state["map"]["points"]
     var neighbor: int = -1

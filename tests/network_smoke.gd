@@ -101,7 +101,7 @@ func _phase_changed() -> void:
                 if int(id) != 1 and bool((roster[id] as Dictionary).get("ready", true)):
                     _fail("Guest remained ready after return.")
                     return
-            create_timer(1.0 if role == "host" else 0.35).timeout.connect(_pass)
+            create_timer(3.0 if role == "host" else 0.35).timeout.connect(_pass)
     elif phase == "offline" and not finishing:
         if (mode == "host-leave" and saw_match) or (mode == "drop-loading" and saw_loading and role == "client"):
             finishing = true

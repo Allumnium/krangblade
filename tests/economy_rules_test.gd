@@ -249,27 +249,56 @@ func _initialize() -> void:
     assert(is_equal_approx(float(p["stock"]["Metals"]), 30.0))
     assert(p["queue"].is_empty())
 
-    # Two yards take two different jobs. Upgrading a yard releases its job.
+    # Yard upgrades wait behind assigned hull production.
     p["stock"]["Metals"] = 5000.0
     p["yards"].append({"level": 1, "job": -1})
     assert(ECON.enqueue(state, 1, 0, "ship"))
     assert(ECON.enqueue(state, 1, 0, "ship"))
     ECON.step(state, 1.0)
     assert(int(p["yards"][0]["job"]) != int(p["yards"][1]["job"]))
-    assert(is_equal_approx(float(p["queue"][0]["progress"]), 6.0))
-    assert(is_equal_approx(float(p["queue"][1]["progress"]), 6.0))
+    var first_job: int = int(p["yards"][0]["job"])
     assert(ECON.enqueue(state, 1, 0, "yard_upgrade", "0"))
-    assert(int(p["yards"][0]["job"]) == -1)
+    assert(int(p["yards"][0]["job"]) == first_job)
     ECON.step(state, 1.0)
-    assert(is_equal_approx(float(p["queue"][0]["progress"]), 6.0))
-    for i in range(25):
+    assert(is_equal_approx(float(p["queue"][0]["progress"]), 12.0))
+    assert(is_zero_approx(float(p["queue"][2]["progress"])))
+    for i in range(6):
         ECON.step(state, 1.0)
     assert(state["ships"].size() == 2)
     assert(p["queue"].size() == 1)
-    for i in range(5):
+    ECON.step(state, 1.0)
+    assert(int(p["yards"][0]["job"]) == int(p["queue"][0]["id"]))
+    assert(is_equal_approx(float(p["queue"][0]["progress"]), 1.0))
+    for i in range(29):
         ECON.step(state, 1.0)
     assert(int(p["yards"][0]["level"]) == 2)
     assert(ECON.max_size(2) > ECON.max_size(1))
+
+    # A five-item shared queue and auto-refill do not bypass ownership or capacity.
+    var repeat_state: Dictionary = ECON.create(graph, players, ids)
+    var repeat_home: Dictionary = repeat_state["planets"][0]
+    repeat_home["stock"]["Metals"] = 5000.0
+    assert(not ECON.set_continuous(repeat_state, 2, 0, "fighter", true))
+    assert(not ECON.set_continuous(repeat_state, 1, 0, "yard", true))
+    assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", true))
+    for i in range(5):
+        assert(ECON.enqueue(repeat_state, 1, 0, "ship"))
+    assert(not ECON.enqueue(repeat_state, 1, 0, "yard"))
+    assert(not ECON.enqueue(repeat_state, 1, 0, "yard_upgrade", "0"))
+    ECON.step(repeat_state, 1.0)
+    assert(repeat_home["queue"].size() == 5)
+    assert(not ECON._has_job(repeat_home, "fighter", ""))
+    for i in range(8):
+        ECON.step(repeat_state, 1.0)
+    assert(ECON._has_job(repeat_home, "fighter", ""))
+    assert(repeat_home["queue"].size() <= 5)
+    for i in range(50):
+        ECON.step(repeat_state, 1.0)
+    assert(ECON.empire_totals(repeat_state, 1)["fighters"] > 1)
+    assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", false))
+    for i in range(12):
+        ECON.step(repeat_state, 1.0)
+    assert(repeat_home["queue"].is_empty())
 
     # Fighters use the shipyard and are counted separately; no logistics behavior.
     var military: Dictionary = ECON.create(graph, players, ids)
@@ -320,6 +349,17 @@ func _initialize() -> void:
     ECON.step(mineral, 0.1)
     assert(miner["mining_target"] == metal_pos)
     assert(int(miner["chunk"]) == 7)
+    for i in range(20):
+        if miner["mining_mode"] == "mining":
+            break
+        ECON.step(mineral, 1.0)
+    assert(miner["mining_mode"] == "mining")
+    for i in range(4):
+        ECON.step(mineral, 1.0)
+        assert(miner["mining_mode"] == "mining")
+    assert(ECON._find_chunk(mineral["map"]["fields"][0], 7).is_empty())
+    ECON.step(mineral, 1.0)
+    assert(miner["mining_mode"] == "return")
     for i in range(20):
         ECON.step(mineral, 1.0)
     assert(is_equal_approx(float(mine_home["stock"]["Metals"]), after_build + 24.0))
