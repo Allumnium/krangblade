@@ -169,3 +169,6 @@ v0.13.0: Five starter hulls per player (three miners, two fighters). PDS constru
 
 
 v0.13.3: Compact inline actions, shared population icon, shipyard staffing (500/5k/20k), neutral asteroid access with owned-depot delivery.
+
+
+v0.13.8: Solo roster defaults to four, unique selectable colors, add/remove AI, dynamic teams, bottom-left Start and top-right Back. Resource quantities use metric tons and expandable cards reset on tab exit.

@@ -123,3 +123,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.13.5: Both eight-peer runs timed out after entering the match; all other v0.13.4 checks passed. Cache neutral mining routes within each tick and limit idle search retries to twice/year. Added host-side progress diagnostics to identify any remaining verification stall without reducing assertions or changing timeouts. Performance cause is a hypothesis, not yet confirmed.
 
 - v0.13.6: Eight-peer test still timed out. Replace dense mining route searches with sparse adjacency and cached single-source shortest-path trees; add time-control gate diagnostics. No assertion or timeout reductions.
+
+### T-023 — Setup and resource display
+- **Observation:** Solo defaults to four empires; eight occupied colors leave no free selection. Mass labels preserve numerical balance. v0.13.6 passed all checks including eight peers; sparse mining routing resolved the timeout.
+- **Consider:** Review small-window layout and color swap UX.
