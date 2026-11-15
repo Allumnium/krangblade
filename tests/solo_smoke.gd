@@ -11,6 +11,10 @@ func _run() -> void:
     assert(session.multiplayer.multiplayer_peer is OfflineMultiplayerPeer)
     var state: Dictionary = session.get("economy")
     assert(int(state["time_speed"]) == 1)
+    assert(state["ships"].size() == 5)
+    assert(state["ships"].filter(func(craft: Dictionary) -> bool: return craft["kind"] == "miner").size() == 3)
+    # Isolate original construction and colonization assertions.
+    state["ships"].clear()
     session.call("request_time_speed", 0)
     var frozen: Dictionary = state.duplicate(true)
     for i in range(4):
@@ -60,6 +64,7 @@ func _run() -> void:
     assert(setup["teams"][1] == 3 and setup["teams"][2] == 3 and setup["teams"][3] == 2)
     assert(session.get("players")[2]["ai"])
     assert(setup["ai_players"] == [2, 3])
+    assert(setup["ships"].size() == 15)
     session.call("_economy_tick")
     assert(not setup["planets"][1]["queue"].is_empty())
     assert(not setup["planets"][2]["queue"].is_empty())

@@ -103,3 +103,12 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Consider:** Playtest palette distinguishability and constrained layout at eight peers. If all eight colors are occupied, free-color changes are unavailable until another color becomes free; no swap mechanism yet. The v0.12.6 UI fixture failed after prior purchases and colony construction; v0.12.7 explicitly funds the later fighter scenario rather than weakening its assertions.
 
 - v0.12.8 corrects the idle-progress typed array initialization and updates ENet territory checks to compare replicated owner palette indices instead of team numbers. These validation issues were caught in the v0.12.7 run.
+
+### T-021 — Planetary defense strength and starting fleet pacing
+- **Type:** Balance and visual hypothesis.
+- **Observation:** All players start with three miners and two fighters without reducing stocks or resident population. PDS installations each fire 36 damage once per year at basic fighter range; each successive planetary installation costs three times the preceding recipe. Build one at a time per system. The shared authoritative system waypoint is the range origin; at close zoom the beam originates at the corresponding decorative planet.
+- **Consider:** Playtest attack waves against multiple defenses. PDS installations are not independently targetable or destructible yet; decide that along with conquest design. Check starter miners' resource throughput and PDS pacing.
+
+- v0.13.1 corrects a duplicate fixture variable found during static review of the PDS test.
+
+- v0.13.2 corrects the starter fleet test's shadowed home index, caught by Godot parsing.

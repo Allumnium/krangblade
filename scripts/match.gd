@@ -89,6 +89,7 @@ var system_visual_seed: int = -1
 var trade_sliders: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var upgrade_cards: Dictionary = {}
+var pds_card: Dictionary = {}
 var economy_cards: Dictionary = {}
 var warehouse_card: Dictionary = {}
 var continuous_checks: Dictionary = {}
@@ -688,6 +689,47 @@ func _build_upgrade_cards(parent: Container) -> void:
         var repeat: Button = _repeat_button(actions, "production:" + resource)
         disclosure.merge({"title": disclosure["header"], "name": labels[resource], "detail": detail, "progress": progress, "button": action, "repeat": repeat, "costs": _cost_grid(card)})
         upgrade_cards[resource] = disclosure
+    var section: VBoxContainer = HUD.section(parent, "")
+    section.get_child(0).hide()
+    pds_card = _make_disclosure(section, "Planetary defense")
+    var body: VBoxContainer = pds_card["body"]
+    var detail := _label("", 12)
+    body.add_child(detail)
+    var progress := ProgressBar.new()
+    progress.custom_minimum_size.y = 15
+    body.add_child(progress)
+    var costs: GridContainer = _cost_grid(body)
+    var action: Button = _button("Build", _pds_action, body)
+    HUD.action(action)
+    pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action})
+
+func _pds_action() -> void:
+    var job: Dictionary = ECONOMY.pds_job(_planet())
+    if job.is_empty():
+        _operation("pds", str(ECONOMY.next_pds(_planet())))
+    else:
+        session.call("request_cancel", selected, int(job["id"]))
+
+func _refresh_pds(planet: Dictionary, owned: bool) -> void:
+    var count: int = planet.get("pds", {}).size()
+    var limit: int = int(planet["planet_count"])
+    var slot: int = ECONOMY.next_pds(planet)
+    var job: Dictionary = ECONOMY.pds_job(planet)
+    _disclosure_title(pds_card, "Planetary defense · %d/%d" % [count, limit])
+    var progress: ProgressBar = pds_card["progress"]
+    progress.visible = not job.is_empty()
+    var action: Button = pds_card["button"]
+    action.text = "Cancel" if not job.is_empty() else ("Build" if slot >= 0 else "Complete")
+    action.disabled = not owned or (slot < 0 and job.is_empty())
+    pds_card["detail"].text = "One battery per planet · %.0f damage / shot · Range %.0f · Fires once/yr" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
+    pds_card["costs"].visible = slot >= 0 or not job.is_empty()
+    if not job.is_empty():
+        progress.value = 100.0 * float(job["progress"]) / float(job["work"])
+        progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
+        _style_progress(progress, planet, job)
+        _show_cost(pds_card["costs"], job["cost"])
+    elif slot >= 0:
+        _show_cost(pds_card["costs"], ECONOMY._cost("pds", slot + 1))
 
 func _upgrade_job(planet: Dictionary, resource: String) -> Dictionary:
     for job in planet.get("queue", []):
@@ -1284,7 +1326,7 @@ func _refresh() -> void:
     if current_system != last_system_tab_selection:
         if current_system >= 0:
             inspector_tabs.current_tab = 0
-        for card in build_cards.values() + economy_cards.values() + upgrade_cards.values() + yard_activity_rows.values() + [warehouse_card]:
+        for card in build_cards.values() + economy_cards.values() + upgrade_cards.values() + yard_activity_rows.values() + [warehouse_card, pds_card]:
             _collapse_card(card)
         last_system_tab_selection = current_system
     interaction_panel.visible = not other_selected and not p.is_empty() and not own_system
@@ -1344,6 +1386,7 @@ func _refresh() -> void:
     population_label.tooltip_text = "%.0f people" % population
     _update_trade_stock(p)
     _refresh_upgrade_cards(p, owned)
+    _refresh_pds(p, owned)
     _refresh_economy_cards(p, owned)
     ship_button.disabled = not owned or not bool(p["home"])
     _refresh_build_cards(p, owned)
@@ -1500,6 +1543,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 func _job_name(item: Dictionary) -> String:
     match str(item["kind"]):
         "ship": return "Logistics ship"
+        "pds": return "Planetary defense"
         "yard": return "New shipyard"
         "yard_upgrade": return "Shipyard %d → Lv %d" % [int(item["target"]) + 1, int(item["level"])]
         "production": return "%s → Lv %d" % [str(item["target"]), int(item["level"])]
@@ -1712,7 +1756,9 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
     var star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
     var star_color: Color = Color("#fff0c4").lerp(color.lightened(0.25), 0.30)
     if zoom >= 2.0 and radius >= 18.0:
-        for body in _system_visual(index, state)["bodies"]:
+        var bodies: Array = _system_visual(index, state)["bodies"]
+        for slot in range(bodies.size()):
+            var body: Dictionary = bodies[slot]
             var orbit: float = radius * float(body["orbit"])
             if _show_system_rings(index):
                 map_canvas.draw_arc(pos, orbit, 0.0, TAU, 48, Color(tint, 0.24), 0.8, true)
@@ -1723,13 +1769,34 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
                     map_canvas.draw_texture_rect(_body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false)
                 else:
                     map_canvas.draw_circle(point, body_radius, HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), true)
+                if system.get("pds", {}).has(slot):
+                    _draw_pds_frame(point, body_radius)
     var pulse: float = 0.96 + 0.04 * sin(visual_clock * 1.2 + float(index))
     for layer in range(5, 0, -1):
         map_canvas.draw_circle(pos, star_radius * (1.0 + float(layer) * 0.33) * pulse, Color(star_color, 0.05), true)
     map_canvas.draw_circle(pos, star_radius * pulse, star_color, true)
     map_canvas.draw_circle(pos, star_radius * 0.55 * pulse, Color("#fffdf1"), true)
+    if (zoom < 2.0 or radius < 18.0) and not system.get("pds", {}).is_empty():
+        map_canvas.draw_arc(pos, star_radius + 3.0, -PI * 0.8, PI * 0.8, 18, Color("#bdcbd6"), 1.5, true)
     if _show_system_rings(index):
         map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
+
+# Thin metallic latitude/longitude ribs, clipped to the planet silhouette.
+func _draw_pds_frame(center: Vector2, radius: float) -> void:
+    var r: float = radius * 1.08
+    var steel := Color("#c4d1dc")
+    var shadow := Color("#344655")
+    map_canvas.draw_arc(center, r, 0.0, TAU, 32, shadow, 2.0, true)
+    map_canvas.draw_arc(center, r, 0.0, TAU, 32, steel, 1.0, true)
+    if radius < 4.0:
+        return
+    for angle in [0.0, PI / 3.0, -PI / 3.0]:
+        var axis := Vector2.from_angle(angle)
+        for fraction in [-0.5, 0.0, 0.5]:
+            var midpoint: Vector2 = center + axis.orthogonal() * r * fraction
+            var extent: Vector2 = axis * r * sqrt(1.0 - fraction * fraction)
+            map_canvas.draw_line(midpoint - extent, midpoint + extent, shadow, 2.0, true)
+            map_canvas.draw_line(midpoint - extent, midpoint + extent, steel, 0.8, true)
 
 func _empire_color_index(owner: int) -> int:
     if owner == 0:
@@ -2123,6 +2190,23 @@ func _draw_map() -> void:
     _draw_combat_lens(state, font)
     _draw_logistics_lens(state, font)
     var poses: Dictionary = _ship_poses(state)
+    for index in range(points.size()):
+        if not ECONOMY.discovered(state, _me(), "planets", index):
+            continue
+        var defenses: Dictionary = state["planets"][index].get("pds", {})
+        if defenses.is_empty():
+            continue
+        var radius: float = _planet_radius(index, state)
+        for slot in defenses:
+            var battery: Dictionary = defenses[slot]
+            var target: int = int(battery["target"])
+            if not poses.has(target) or float(battery["laser_until"]) < float(state["elapsed"]):
+                continue
+            var origin: Vector2 = _screen_point(points[index])
+            if zoom >= 2.0 and radius >= 18.0:
+                origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, game_visual_clock)
+            map_canvas.draw_line(origin, poses[target]["point"], Color("#ff6f6080"), 6.0, true)
+            map_canvas.draw_line(origin, poses[target]["point"], Color("#ffddab"), 2.0, true)
     for ship in state["ships"]:
         var shooter: int = int(ship["id"])
         var target: int = int(ship.get("combat_target", -1))

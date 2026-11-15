@@ -163,3 +163,6 @@ v0.12.6: Collapsible ship, production, factory, warehouse and shipyard upgrade d
 
 
 v0.12.7: Amber resource-blocked progress, inline resource modifiers, wider system overview and owner badge. Lobby players pick unique colors from eight swatches; host validates all requests. Map control and hull outlines follow player colors independently of team rules.
+
+
+v0.13.0: Five starter hulls per player (three miners, two fighters). PDS construction in Upgrades, one per visible seeded planet, one pending per system. First recipe: 540 Metals, 120 Plastics, 60 Textiles, 60 Organics, 60 Tech; subsequent recipes 3× each. 36 years construction, 36 damage/shot at fighter range and cadence. System-centered authoritative range, planetary metallic frame and beam visuals. No separate PDS destruction mechanic yet.

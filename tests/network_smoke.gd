@@ -109,6 +109,16 @@ func _phase_changed() -> void:
             return
         var owners: Array[int] = session.get("owners")
         var state: Dictionary = session.get("economy")
+        for owner in roster:
+            var miners: int = 0
+            var fighters: int = 0
+            for craft in state["ships"]:
+                if int(craft["owner"]) == int(owner):
+                    miners += 1 if craft["kind"] == "miner" else 0
+                    fighters += 1 if craft["kind"] == "fighter" else 0
+            if miners != 3 or fighters != 2:
+                _fail("Starting fleet did not replicate.")
+                return
         if owners.size() != state["map"]["points"].size() or state["map"]["cluster_sizes"].size() != expected_players * 3:
             _fail("Wrong territory count.")
             return
@@ -224,6 +234,10 @@ func _send_commands() -> void:
     session.call("request_operation", home_index, "economy", "Textiles")
     session.call("request_operation", home_index, "economy", "Tech")
     session.call("request_operation", (home_index + 1) % expected_players, "economy", "Metals")
+    session.call("request_operation", home_index, "pds", "999")
+    session.call("request_operation", (home_index + 1) % expected_players, "pds", "1")
+    session.call("request_operation", home_index, "pds", "0")
+    session.call("request_operation", home_index, "pds", "0")
     session.call("request_operation", home_index, "ship")
     session.call("request_operation", home_index, "fighter")
     session.call("request_continuous", home_index, "colony_ship", true)
@@ -319,7 +333,10 @@ func _check_economy_sync() -> void:
             for job in system["queue"]:
                 if job["kind"] in ["production", "yard_upgrade"]:
                     correct_upgrade_costs = correct_upgrade_costs and job["cost"] == ECON._cost(job["kind"], int(job["level"]))
-            if correct_upgrade_costs and priced_slots.get(2, {}) == ECON._cost("yard", 2) and priced_slots.get(3, {}) == ECON._cost("yard", 3) and int(system.get("warehouse_level", 0)) == 1 and buildings.size() == 1 and buildings.get("Textiles", false) and int(military.get(field_node, 0)) == 70 and int(military.get(ECON.military_home(state, owner), 0)) == 30 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
+            var pds_jobs: Array = system["queue"].filter(func(order: Dictionary) -> bool: return order["kind"] == "pds")
+            var defense_ok: bool = pds_jobs.size() == 1 and pds_jobs[0]["target"] == "0" and pds_jobs[0]["cost"] == ECON._cost("pds", 1)
+            defense_ok = defense_ok or (pds_jobs.is_empty() and system.get("pds", {}).has(0) and system["pds"].size() == 1)
+            if defense_ok and correct_upgrade_costs and priced_slots.get(2, {}) == ECON._cost("yard", 2) and priced_slots.get(3, {}) == ECON._cost("yard", 3) and int(system.get("warehouse_level", 0)) == 1 and buildings.size() == 1 and buildings.get("Textiles", false) and int(military.get(field_node, 0)) == 70 and int(military.get(ECON.military_home(state, owner), 0)) == 30 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
                 verified += 1
         var view: Node = current_scene
         if cancel_sent and yard_rebuilt and verified == expected_players and view != null and view.has_method("_update_trade_stock"):
