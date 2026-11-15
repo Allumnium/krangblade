@@ -1107,21 +1107,56 @@ static func _find_chunk(field: Dictionary, id: int) -> Dictionary:
             return chunk
     return {}
 
+# One shortest-path tree per source/team per tick. Sparse adjacency avoids
+# scanning every lane for every candidate node and every asteroid field.
 static func _mining_path(state: Dictionary, teams: Array[int], team: int, start: int, goal: int, cache: Dictionary) -> Array[int]:
-    var key: String = "mine:%d:%d:%d" % [team, start, goal]
+    if start < 0 or goal < 0 or start >= teams.size() or goal >= teams.size():
+        return []
+    if teams[start] not in [0, team] or teams[goal] not in [0, team]:
+        return []
+    var points: Array = state["map"]["points"]
+    if not cache.has("mine:adj"):
+        var adjacency: Array = []
+        for i in range(points.size()):
+            adjacency.append([])
+        for edge in state["map"]["edges"]:
+            adjacency[int(edge[0])].append(int(edge[1]))
+            adjacency[int(edge[1])].append(int(edge[0]))
+        cache["mine:adj"] = adjacency
+    var key: String = "mine:tree:%d:%d" % [team, start]
     if not cache.has(key):
-        var accessible: Array[int] = teams.duplicate()
-        for i in range(accessible.size()):
-            if accessible[i] == 0:
-                accessible[i] = team
-        cache[key] = MAP.path(state["map"], accessible, team, start, goal)
-        var reverse: Array[int] = []
-        reverse.assign(cache[key])
-        reverse.reverse()
-        cache["mine:%d:%d:%d" % [team, goal, start]] = reverse
-    var path: Array[int] = []
-    path.assign(cache[key])
-    return path
+        var adjacency: Array = cache["mine:adj"]
+        var distances: Dictionary = {start: 0.0}
+        var previous: Dictionary = {}
+        var open: Array[int] = [start]
+        var visited: Dictionary = {}
+        while not open.is_empty():
+            var current: int = open[0]
+            for candidate in open:
+                if float(distances[candidate]) < float(distances[current]):
+                    current = candidate
+            open.erase(current)
+            visited[current] = true
+            for neighbor in adjacency[current]:
+                var next: int = int(neighbor)
+                if visited.has(next) or teams[next] not in [0, team]:
+                    continue
+                var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[next])
+                if distance < float(distances.get(next, INF)):
+                    distances[next] = distance
+                    previous[next] = current
+                    if not open.has(next):
+                        open.append(next)
+        cache[key] = previous
+    var previous: Dictionary = cache[key]
+    var route: Array[int] = [goal]
+    var current: int = goal
+    while current != start:
+        if not previous.has(current):
+            return []
+        current = int(previous[current])
+        route.push_front(current)
+    return route
 
 static func _mining_depot(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, anchor: int, resource: String, cache: Dictionary) -> int:
     var best: float = INF
@@ -1130,7 +1165,7 @@ static func _mining_depot(state: Dictionary, ship: Dictionary, teams: Array[int]
         var p: Dictionary = state["planets"][i]
         if int(p["owner"]) != int(ship["owner"]) or storage_free(p, resource) <= EPS:
             continue
-        var distance: float = MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, i, cache))
+        var distance: float = MAP.route_length(state["map"], _mining_path(state, teams, team, i, anchor, cache))
         if distance < best:
             best = distance
             chosen = i
@@ -1161,7 +1196,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
             var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache)
             depots[resource] = depot
             if depot >= 0:
-                return_distances[resource] = MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, depot, cache))
+                return_distances[resource] = MAP.route_length(state["map"], _mining_path(state, teams, team, depot, anchor, cache))
         for chunk in field.get("chunks", []):
             if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
                 continue

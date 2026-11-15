@@ -261,6 +261,9 @@ func _check_economy_sync() -> void:
         return
     var state: Dictionary = session.get("economy")
     if home_index < 0 or not _check_time_controls(state):
+        if role == "host" and int(Time.get_ticks_msec() / 5000) > int(get_meta("speed_debug", -1)):
+            set_meta("speed_debug", int(Time.get_ticks_msec() / 5000))
+            print("DEBUG: time stage=", speed_stage, " speed=", state.get("time_speed"), " elapsed=", state.get("elapsed"), " home=", home_index)
         create_timer(0.25).timeout.connect(_check_economy_sync)
         return
     var self_id: int = session.multiplayer.get_unique_id()
