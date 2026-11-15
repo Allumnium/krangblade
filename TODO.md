@@ -88,3 +88,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate finite origin-system ship maintain targets, unlimited repeat and replacement scheduling (v0.14.0).
 
 - [ ] Validate local population growth and live local resource breakdowns (v0.14.1).
+
+- [ ] Profile large matches; cache military graph and shortest-path trees locally (v0.14.3); consider all-pairs prewarming, civilian routing and GPU territory optimization after benchmarking.
