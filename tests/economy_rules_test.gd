@@ -1255,17 +1255,17 @@ func _initialize() -> void:
     assert(ECON._advance(defended, first_defense, float(first_defense["work"])))
     ECON._finish(defenses, 0, defended, first_defense)
     var center: Vector2 = force_map["points"][0]
-    var enemy: Dictionary = {"id": 40001, "owner": 3, "kind": "ship", "at": 0, "route": [], "leg": 0.0, "position": center + Vector2(100, 0), "hp": 100.0}
+    var defense_enemy: Dictionary = {"id": 40001, "owner": 3, "kind": "ship", "at": 0, "route": [], "leg": 0.0, "position": center + Vector2(100, 0), "hp": 100.0}
     var friendly: Dictionary = {"id": 40002, "owner": 2, "kind": "ship", "at": 0, "route": [], "leg": 0.0, "position": center, "hp": 100.0}
-    defenses["ships"] = [enemy, friendly]
+    defenses["ships"] = [defense_enemy, friendly]
     var defense_graph: Dictionary = ECON.military_graph(defenses)
     ECON._combat(defenses, defense_graph, 0.1)
-    assert(float(enemy["hp"]) == 100.0 - 2.0 * ECON.LASER_DAMAGE and float(friendly["hp"]) == 100.0)
+    assert(float(defense_enemy["hp"]) == 100.0 - 2.0 * ECON.LASER_DAMAGE and float(friendly["hp"]) == 100.0)
     ECON._combat(defenses, defense_graph, 0.1)
-    assert(float(enemy["hp"]) == 64.0)
-    enemy["position"] = center + Vector2(ECON.LASER_RANGE + 1.0, 0)
+    assert(float(defense_enemy["hp"]) == 64.0)
+    defense_enemy["position"] = center + Vector2(ECON.LASER_RANGE + 1.0, 0)
     ECON._combat(defenses, defense_graph, 1.0)
-    assert(float(enemy["hp"]) == 64.0)
+    assert(float(defense_enemy["hp"]) == 64.0)
     for slot in range(1, int(defended["planet_count"])):
         assert(ECON.enqueue(defenses, 1, 0, "pds", str(slot)))
         var battery_order: Dictionary = ECON.pds_job(defended)

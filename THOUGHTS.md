@@ -108,3 +108,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Balance and visual hypothesis.
 - **Observation:** All players start with three miners and two fighters without reducing stocks or resident population. PDS installations each fire 36 damage once per year at basic fighter range; each successive planetary installation costs three times the preceding recipe. Build one at a time per system. The shared authoritative system waypoint is the range origin; at close zoom the beam originates at the corresponding decorative planet.
 - **Consider:** Playtest attack waves against multiple defenses. PDS installations are not independently targetable or destructible yet; decide that along with conquest design. Check starter miners' resource throughput and PDS pacing.
+
+- v0.13.1 corrects a duplicate fixture variable found during static review of the PDS test.
