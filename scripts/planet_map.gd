@@ -1,14 +1,14 @@
 extends RefCounted
 ## Seeded connected planet graph, independent of the rendering layer.
-const COUNT: int = 17
-const SIZE := Vector2(1600, 1100)
+const COUNT: int = 32
+const SIZE := Vector2(2200, 1500)
 
 const CLUSTER_COUNT: int = 4
 
 static func generate(seed_value: int) -> Dictionary:
     var rng := RandomNumberGenerator.new()
     rng.seed = seed_value
-    var centers: Array[Vector2] = [Vector2(350, 275), Vector2(1240, 270), Vector2(360, 825), Vector2(1230, 820)]
+    var centers: Array[Vector2] = [Vector2(480, 380), Vector2(1720, 380), Vector2(480, 1120), Vector2(1720, 1120)]
     var groups: Array = []
     for i in range(CLUSTER_COUNT):
         centers[i] += Vector2(rng.randf_range(-65, 65), rng.randf_range(-35, 35))
@@ -24,14 +24,14 @@ static func generate(seed_value: int) -> Dictionary:
             var offset := Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
             if offset.length_squared() > 1.0:
                 continue
-            var p: Vector2 = centers[group] + offset * Vector2(195, 180)
+            var p: Vector2 = centers[group] + offset * Vector2(340, 285)
             var nearest: float = SIZE.length()
             for index in groups[group]:
                 nearest = minf(nearest, p.distance_to(points[index]))
             if nearest > best:
                 candidate = p
                 best = nearest
-            if nearest >= 155.0:
+            if nearest >= 190.0:
                 break
         points.append(candidate)
         clusters.append(group)
@@ -44,10 +44,6 @@ static func generate(seed_value: int) -> Dictionary:
             var pair: Array = _closest_pair(points, connected, group, connected)
             edges.append(pair)
             connected.append(pair[1] if connected.has(pair[0]) else pair[0])
-        for i in group:
-            for j in group:
-                if i < j and not edges.has([i, j]) and points[i].distance_to(points[j]) < 255.0 and rng.randf() < 0.7:
-                    edges.append([i, j])
     var joined: Array = [0]
     while joined.size() < CLUSTER_COUNT:
         var best_edge: Array = []
@@ -65,7 +61,56 @@ static func generate(seed_value: int) -> Dictionary:
                     next_group = j
         edges.append(best_edge)
         joined.append(next_group)
-    return {"seed": seed_value, "points": points, "edges": edges, "clusters": clusters}
+    # Protect the connected backbone. Fields occupy potential shortcuts, so
+    # ordinary routes never cross a field and the galaxy remains connected.
+    var candidates: Array = []
+    for i in range(COUNT):
+        for j in range(i + 1, COUNT):
+            var distance: float = points[i].distance_to(points[j])
+            var limit: float = 410.0 if clusters[i] == clusters[j] else 850.0
+            if distance <= limit and not edges.has([i, j]):
+                candidates.append([i, j])
+    var fields: Array = []
+    for pair in candidates:
+        if fields.size() >= 10:
+            break
+        var center: Vector2 = (points[pair[0]] + points[pair[1]]) * 0.5
+        var radius: float = rng.randf_range(38.0, 62.0)
+        var safe: bool = true
+        var anchor: int = -1
+        var nearest: float = INF
+        for i in range(COUNT):
+            var distance: float = center.distance_to(points[i])
+            if distance < radius + 45.0:
+                safe = false
+            if distance < nearest:
+                nearest = distance
+                anchor = i
+        for edge in edges:
+            if Geometry2D.get_closest_point_to_segment(center, points[edge[0]], points[edge[1]]).distance_to(center) <= radius:
+                safe = false
+        for field in fields:
+            if center.distance_to(field["position"]) < radius + float(field["radius"]) + 30.0:
+                safe = false
+            if Geometry2D.get_closest_point_to_segment(field["position"], points[anchor], center).distance_to(field["position"]) <= float(field["radius"]):
+                safe = false
+            if Geometry2D.get_closest_point_to_segment(center, points[int(field["anchor"])], field["position"]).distance_to(center) <= radius:
+                safe = false
+        if safe:
+            fields.append({"position": center, "radius": radius, "anchor": anchor,
+                "Metals": rng.randf_range(1.0, 2.0), "Crystals": rng.randf_range(1.0, 2.0)})
+    # Add clear distance-weighted loops, limiting redundant links.
+    for pair in candidates:
+        if not blocked(points[pair[0]], points[pair[1]], fields) and rng.randf() < 0.8:
+            edges.append(pair)
+    return {"seed": seed_value, "points": points, "edges": edges, "clusters": clusters, "fields": fields}
+
+static func blocked(a: Vector2, b: Vector2, fields: Array) -> bool:
+    for field in fields:
+        var center: Vector2 = field["position"]
+        if Geometry2D.get_closest_point_to_segment(center, a, b).distance_to(center) <= float(field["radius"]):
+            return true
+    return false
 
 static func _closest_pair(points: Array[Vector2], a: Array, b: Array, excluded: Array) -> Array:
     var best: float = INF

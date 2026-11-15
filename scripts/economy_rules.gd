@@ -15,6 +15,12 @@ const FARM_VARIATION: float = 0.05
 const FARM_CYCLE_SECONDS: float = 100.0
 const START_YEAR: int = 1
 const CARGO_CAPACITY: float = 10.0
+const MINED_RESOURCES = ["Metals", "Crystals"]
+# Provisional per-resource ceilings, independent of unlimited upgrade levels.
+const PLANET_MINING_LIMIT: float = 200.0
+const FIELD_MINING_LIMIT: float = 400.0
+const MINER_CAPACITY: float = 60.0
+const MINER_RATE: float = 12.0
 const SHIP_SPEED: float = 95.0
 const SHIP_SIZE: int = 1
 const EPS: float = 0.00001
@@ -56,7 +62,13 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
             levels["Organics"] = 1
             stock["Metals"] = 600.0
             yards.append({"level": 1, "job": -1})
-        planets.append({"owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
+        var richness: float = 0.0
+        for resource in EXTRACTED:
+            richness += float(abundance[resource])
+        richness += float(bonuses["Organics"]) - 1.0
+        # Environment is generated separately, not inferred from size or deposits.
+        var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
+        planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
             "abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
             "yards": yards, "queue": []})
     return {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0}
@@ -72,6 +84,7 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
     var logistics: int = 0
     var colonies: int = 0
     var fighters: int = 0
+    var miners: int = 0
     for planet in state.get("planets", []):
         if int(planet["owner"]) != player:
             continue
@@ -87,6 +100,8 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
             colonies += 1
         elif ship.get("kind", "ship") == "fighter":
             fighters += 1
+        elif ship.get("kind", "ship") == "miner":
+            miners += 1
         else:
             logistics += 1
         var contents: Dictionary = ship.get("cargo", {})
@@ -95,7 +110,7 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
     for resource in RESOURCES:
         total[resource] = float(stock[resource]) + float(cargo[resource])
     return {"stock": stock, "cargo": cargo, "resources": total, "population": population,
-        "planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters}
+        "planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters, "miners": miners}
 
 static func planet_teams(state: Dictionary) -> Array[int]:
     var result: Array[int] = []
@@ -195,7 +210,8 @@ static func rate(planet: Dictionary, resource: String) -> float:
             return 0.0
         var labor: float = sqrt(clampf(float(planet["population"]) / capacity, 0.0, 1.0))
         return farm_potential(planet) * labor
-    return 8.0 * level * float(planet["abundance"].get(resource, 0.0)) * bonus * population_multiplier(planet)
+    var output: float = 8.0 * level * float(planet["abundance"].get(resource, 0.0)) * bonus * population_multiplier(planet)
+    return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func _update_population(planet: Dictionary, dt: float) -> void:
     # Exact solution of x'' + 2*w*x' + w*w*(x-target) = 0
@@ -229,6 +245,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
         "ship": return {"Metals": 120.0}
         "colony_ship": return {"Metals": 240.0}
         "fighter": return {"Metals": 90.0}
+        "miner": return {"Metals": 180.0}
         "yard": return {"Metals": 480.0}
         "yard_upgrade": return {"Metals": 240.0 * level}
         "production": return {"Metals": 80.0 * level}
@@ -239,6 +256,7 @@ static func _work(kind: String, level: int) -> float:
         "ship": return 48.0
         "colony_ship": return 72.0
         "fighter": return 36.0
+        "miner": return 60.0
         "yard": return 30.0
         "yard_upgrade": return 15.0 * level
         "production": return 10.0 * level
@@ -260,7 +278,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
             if not bool(p["home"]):
                 return false
             target = ""
-        "colony_ship", "fighter":
+        "colony_ship", "fighter", "miner":
             target = ""
         "yard":
             target = ""
@@ -289,7 +307,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
     state["next_id"] = id + 1
     p["queue"].append({"id": id, "kind": kind, "target": target, "level": level,
         "cost": _cost(kind, level), "work": _work(kind, level),
-        "progress": 0.0, "allocated": empty_stock(), "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter"] else 0})
+        "progress": 0.0, "allocated": empty_stock(), "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
     return true
 
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
@@ -343,9 +361,9 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
             p["yards"].append({"level": 1, "job": -1})
         "yard_upgrade":
             p["yards"][int(item["target"])]["level"] = int(item["level"])
-        "ship", "colony_ship", "fighter":
+        "ship", "colony_ship", "fighter", "miner":
             state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "at": index,
-                "route": [], "leg": 0.0, "source": -1, "dest": -1, "cargo": empty_stock()})
+                "route": [], "leg": 0.0, "source": -1, "dest": -1, "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
     p["queue"].erase(item)
 
 static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
@@ -544,16 +562,90 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
         ship["dest"] = -1
         _choose_delivery(state, ship, teams, team, cache)
 
+static func field_limit(field: Dictionary, resource: String) -> float:
+    return FIELD_MINING_LIMIT * float(field.get(resource, 0.0)) if MINED_RESOURCES.has(resource) else 0.0
+
+static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
+    var fields: Array = state["map"].get("fields", [])
+    var owner: int = int(ship["owner"])
+    var team: int = int(state["teams"].get(owner, 0))
+    var best: float = INF
+    var chosen: int = -1
+    var best_path: Array[int] = []
+    for i in range(fields.size()):
+        var field: Dictionary = fields[i]
+        var anchor: int = int(field["anchor"])
+        if int(state["planets"][anchor]["owner"]) != owner:
+            continue
+        var path: Array[int] = _path(state, teams, team, int(ship["at"]), anchor, cache)
+        if path.is_empty():
+            continue
+        var distance: float = MAP.route_length(state["map"], path) + (state["map"]["points"][anchor] as Vector2).distance_to(field["position"]) * 2.0
+        if distance < best:
+            best = distance
+            chosen = i
+            best_path = path
+    if chosen >= 0:
+        ship["field"] = chosen
+        ship["mining_mode"] = "approach"
+        _set_route(ship, best_path)
+
+static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, budgets: Array, dt: float) -> void:
+    var mode: String = str(ship.get("mining_mode", "idle"))
+    if mode == "idle":
+        _choose_field(state, ship, teams, cache)
+        return
+    var field_index: int = int(ship["field"])
+    var field: Dictionary = state["map"]["fields"][field_index]
+    var anchor: int = int(field["anchor"])
+    if mode == "approach":
+        if _move(state, ship, dt):
+            ship["mining_mode"] = "outbound"
+            ship["field_leg"] = 0.0
+        return
+    var distance: float = (state["map"]["points"][anchor] as Vector2).distance_to(field["position"])
+    var travel: float = SHIP_SPEED * dt / maxf(distance, 1.0)
+    if mode == "outbound":
+        ship["field_leg"] = minf(1.0, float(ship["field_leg"]) + travel)
+        if float(ship["field_leg"]) >= 1.0:
+            ship["mining_mode"] = "mining"
+        return
+    if mode == "mining":
+        var free: float = MINER_CAPACITY - _cargo_total(ship)
+        # Allocate proportional shares of the remaining hold and shared field budget.
+        var richness: float = float(field["Metals"]) + float(field["Crystals"])
+        for resource in MINED_RESOURCES:
+            var amount: float = minf(free * float(field[resource]) / richness, minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource])))
+            ship["cargo"][resource] = float(ship["cargo"][resource]) + amount
+            budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
+        if _cargo_total(ship) >= MINER_CAPACITY - 0.1:
+            ship["mining_mode"] = "return"
+        return
+    if mode == "return":
+        ship["field_leg"] = maxf(0.0, float(ship["field_leg"]) - travel)
+        if float(ship["field_leg"]) <= 0.0:
+            var stock: Dictionary = state["planets"][anchor]["stock"]
+            for resource in MINED_RESOURCES:
+                stock[resource] = float(stock[resource]) + float(ship["cargo"][resource])
+                ship["cargo"][resource] = 0.0
+            ship["mining_mode"] = "idle"
+            ship["field"] = -1
+
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
     for i in range((state["planets"] as Array).size()):
         _work_planet(state, i, dt)
     var teams: Array[int] = planet_teams(state)
     var cache: Dictionary = {}
+    var budgets: Array = []
+    for field in state["map"].get("fields", []):
+        budgets.append({"Metals": field_limit(field, "Metals") * dt, "Crystals": field_limit(field, "Crystals") * dt})
     for ship in (state["ships"] as Array).duplicate():
         if ship.get("kind", "ship") == "colony_ship":
             if _work_colony(state, ship, dt):
                 state["ships"].erase(ship)
         elif ship.get("kind", "ship") == "ship":
             _work_ship(state, ship, teams, cache, dt)
+        elif ship.get("kind", "ship") == "miner":
+            _work_miner(state, ship, teams, cache, budgets, dt)
         # Fighters remain in orbit; combat and military orders are not designed yet.
