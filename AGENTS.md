@@ -1,6 +1,6 @@
 # Warbound — standing project instructions
 
-Read this file and current repository state at the beginning of each coding session. Later explicit user directions take precedence over these notes and older README sections.
+Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current repository state, and outstanding pull requests at the beginning of every Warbound development chat/session. Later explicit user directions take precedence over these notes and older README sections.
 
 ## Workflow
 - The game is **Warbound**. The repository is Allumnium/krangblade; the integration branch is main.
@@ -12,6 +12,12 @@ Read this file and current repository state at the beginning of each coding sess
 - Host/solo authority owns simulation changes. Validate ownership, targets, inputs, and request permissions at the authority; keep local UI and remote snapshots consistent. Extend actual two- and eight-peer ENet regression coverage for new commands. Check parsing, imports/metadata, economy, solo, UI layout, network and disconnect/restart behavior. Do not equate a headless pass with visual or internet-latency verification.
 - Avoid flaky fixed waits in multiplayer tests; wait for meaningful synchronized state and completed peer checks. Investigate failures instead of weakening assertions. Track Godot .uid/.import sidecars where applicable. Do not commit editor caches.
 - Keep status reporting concise: version, what changed, what passed, whether pushed/merged, and genuine limitations. Do not make the user repeatedly ask whether a commit was pushed. Do not claim to continue work asynchronously.
+
+## Roadmap and ongoing observations
+- Maintain [TODO.md](TODO.md) as the living, prioritized roadmap of agreed work and explicitly labeled unresolved design questions. Review dependencies and current implementation before starting tasks. Update it in the same change as relevant implementation or design decisions; check off items only after their acceptance criteria and required validation are met. A roadmap entry is not blanket approval to implement unresolved mechanics or unrelated work.
+- Maintain [THOUGHTS.md](THOUGHTS.md) proactively during every development session. Record concise observations of potential bugs, UX friction, gameplay issues, technical risks and ideas that could improve the game, including those noticed while working on unrelated tasks. Distinguish verified issues from hypotheses and proposals; include useful context, possible remedies and references. Deduplicate and refresh existing entries rather than accumulating stale notes.
+- Thoughts are suggestions for review, not authorization to implement new mechanics. Promote agreed actionable items into TODO.md, preserving a link or identifier where useful. Keep promoted thoughts active until resolved; move completed/resolved thoughts out of THOUGHTS.md into [THOUGHTS_ARCHIVE.md](THOUGHTS_ARCHIVE.md), with date, outcome and version/PR or other evidence where applicable. Do not delete their history; record rejected/superseded ideas with their disposition rather than marking them implemented.
+- Review the roadmap and active thoughts before finishing each change. Keep all three files current in the repository and include their updates in the normal versioned commit/PR workflow. Do not postpone maintenance to another chat.
 
 ## Interface and visual design
 - Minimal, consistent dark sci-fi UI. No unnecessary headings, explanations, duplicate data, filler text, default/normal modifiers, or decorative text. Prefer familiar icons and concise numbers, with exact values and optional details in tooltips.

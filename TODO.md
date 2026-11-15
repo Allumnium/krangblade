@@ -1,0 +1,64 @@
+# Warbound — development TODO
+
+Living roadmap. The game is a low-micro, policy-driven multiplayer galactic RTS: players govern empires rather than command individual ships. Preserve existing local economic controls, physical logistics and star-system gameplay. Target typical matches of 10–30 minutes at 1× (larger matches may be longer).
+
+Review AGENTS.md before work. This is a prioritized design/development backlog, not authorization to implement every idea without agreement. Exact numerical values and unresolved mechanics require design review. Update checkboxes as work is merged and validated; distinguish partial prototypes from complete work.
+
+## Current foundation (v0.8.0)
+- [x] Host-authoritative solo/multiplayer, flexible teams, up to eight players, lobby chat and AI slots.
+- [x] Physical ship navigation and cargo logistics, local import/export thresholds, mining, shipyards and repeat construction.
+- [x] Basic fighters, automatic proximity combat, direct POI allocation and initial AI-only attack waves.
+- [x] Visible territory overlay, time controls and mandatory parallel regression checks.
+
+## Phase 1 — Autonomous military foundation
+- [ ] Rework military control into persistent fleet/operation groups shared by human and AI empires.
+- [ ] Automatically assemble sufficiently strong waves, rally reinforcements, coordinate departure and regroup survivors; extend the existing AI-only rally prototype.
+- [ ] Generate formations of varying sizes based on fleet size and ship composition. Assign stable relative positions; smoothly re-form as membership changes without teleportation.
+- [ ] Allow combat ships to continue physically flying and maneuvering during combat; use authoritative world positions for range and movement, keep lane travel intact.
+- [ ] Have damaged ships automatically fall back; design safe withdrawal destinations, repair/recovery and rejoining. Decide individual versus fleet retreat triggers and prevent oscillation.
+- [ ] Establish clear fleet state feedback and regression coverage for assembly, combat movement, withdrawal, reinforcement, speed bounds and replicated positions.
+
+## Phase 2 — Empire policies and regional commands
+- [ ] Define a shared, host-authoritative policy model with four initial slots: Offense, Defense, Economy, Technology; a fifth Wildcard slot starts locked.
+- [ ] Define policies as behavioral instructions with specific targets where relevant, rather than passive stat bonuses. Design policy changes, cooldowns and validation.
+- [ ] Prototype regional attack/invasion and defense objectives selected on the galaxy map (systems or groups of systems). Decide target selection UX, priority arbitration and allocation of scarce forces.
+- [ ] Connect policies to fleet assembly, deployment, reinforcement and defense. Reconsider direct POI fighter sliders; preserve existing behavior until a replacement is agreed and functional.
+- [ ] Allow the unlocked Wildcard to host an additional policy, including a second military objective. Define eligible policy types and conflict handling.
+- [ ] Let AI empires select policies using the same automation and restrictions as human players.
+- [ ] Preserve local resource import/export controls, mining preferences, ship production, upgrades, inventories and shipyard management; decide which optional economic behaviors policies should automate.
+- [ ] Provide minimal policy UI, operation status and meaningful explanations of stalled/blocked actions (prefer tooltips and concise indicators).
+
+## Phase 3 — Territorial warfare
+- [ ] Design and implement hostile system conquest; distinguish visual military control from actual ownership.
+- [ ] Decide capture requirements, resistance, ownership transfer, infrastructure/inventory handling and interruption/recovery rules.
+- [ ] Evaluate simple supply/repair infrastructure, vulnerable logistics and economic raiding; avoid introducing detailed fuel/ammunition simulation without agreement.
+
+## Phase 4 — Antimatter and match objectives
+- [ ] Specify antimatter geography, extraction, transport, local storage and processing; consider scarce contested deposits near the galactic center.
+- [ ] Define victory condition (stockpiled processed antimatter, cumulative production or sustained rate are options), team scoring and end-of-match handling.
+- [ ] Prototype the smallest functioning antimatter economy and victory loop. Decide whether and how antimatter is consumed for military technology.
+- [ ] Test opportunities for comebacks and alternative industrial/territorial strategies; decide if later extraction opportunities are helpful.
+
+## Phase 5 — Technology, economy and Wildcard
+- [ ] Design meaningful research and technology progression, including improved communications research that unlocks the Wildcard policy slot.
+- [ ] Define Economy and Technology policy choices and their concrete effects. Consider optional star-system specialization and automated development without removing existing local controls.
+- [ ] Design missing manufacturing recipes and distinct combat ship roles only as needed by the core loop.
+
+## Phase 6 — Diplomacy
+- [ ] Prototype bilateral offers exchanging resources for temporary, binding restrictions on specific policy choices.
+- [ ] Decide payment/transfer semantics, duration, expiration, active-operation handling, eligibility, and UI.
+- [ ] Enforce restrictions at the authority across all slots including Wildcard; prevent bypass via alternative commands and invalid restrictions that eliminate required policy options.
+- [ ] Clarify defensive rights and treaty effects on ongoing fleets; defer breakable treaties and multilateral agreements unless approved.
+
+## Phase 7 — Match pacing and polish
+- [ ] Playtest the full loop at 1× for 1v1, four-player and larger team matches. Balance travel, economy, construction, conflict, negotiation, and antimatter timing toward typical 10–30 minute matches.
+- [ ] Assess strategic variety, meaningful decisions per minute, runaway leaders, comeback options and AI competence.
+- [ ] Audit policy readability, map targeting, formation visuals, economy feedback, constrained-window layout and multiplayer behavior.
+- [ ] Keep existing two-/eight-peer ENet, disconnect, simulation and UI regressions mandatory; validate real visual/internet behavior separately.
+
+## Deferred / not yet agreed
+- Formal galactic votes, complex treaties, elaborate tech trees, additional playable races, ship customization and campaigns.
+- Exact policies, capture and retreat rules, formation geometry, cooldowns, antimatter victory threshold, and supply mechanics remain open.
+- Steam integration remains a future goal; preserve direct-IP multiplayer.
+
+See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not yet been resolved.
