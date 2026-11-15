@@ -26,7 +26,34 @@ jobs:
               return subprocess.check_output(["git", *args], text=True).strip()
           def version(commit):
               data = git("show", f"{commit}:project.godot")
-              match = re.search(r'^config/version="([^"]+)"      - uses: chickensoft-games/setup-godot@v2
+              match = re.search(r'^config/version="([^"]+)"$', data, re.M)
+              if not match:
+                  return None
+              value = match.group(1)
+              if not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', value):
+                  raise SystemExit(f"{commit}: invalid version {value}; use MAJOR.MINOR.PATCH")
+              return tuple(map(int, value.split(".")))
+          head = os.environ["HEAD"]
+          base = os.environ.get("BASE", "")
+          current = version(head)
+          if current is None:
+              raise SystemExit("project.godot must specify config/version")
+          if base and set(base) != {"0"}:
+              target = version(base)
+              if target is not None and current <= target:
+                  raise SystemExit(f"Version {current} must exceed target {target}")
+              if os.environ["EVENT"] == "pull_request":
+                  base = git("merge-base", base, head)
+              commits = git("rev-list", "--first-parent", "--reverse", f"{base}..{head}").splitlines()
+              prior = version(base)
+              for commit in commits:
+                  next_version = version(commit)
+                  if prior is not None and (next_version is None or next_version <= prior):
+                      raise SystemExit(f"{commit}: version must increase from {prior} to a newer MAJOR.MINOR.PATCH")
+                  prior = next_version
+          print("Verified version:", current)
+          PY
+      - uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.7.2
           use-dotnet: false
