@@ -594,18 +594,19 @@ func _ship_is_moving(ship: Dictionary) -> bool:
     return not (ship["route"] as Array).is_empty() or ship.get("mining_mode", "idle") in ["outbound", "return"]
 
 func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
-    if ship.get("kind", "") == "fighter":
-        return maxf(0.0, MAP.route_length(ECONOMY.military_graph(state), _fighter_path(ship)) - float(ship["leg"])) / ECONOMY.SHIP_SPEED
-    var points: Array = state["map"]["points"]
-    var route: Array = ship["route"]
+    var points: Array = ECONOMY.military_graph(state)["points"] if ship.get("kind", "") == "fighter" else state["map"]["points"]
+    var pos: Vector2 = ECONOMY.combat_position(state, ECONOMY.military_graph(state), ship)
     var mode: String = ship.get("mining_mode", "idle")
-    if mode in ["outbound", "return"]:
-        var distance: float = (points[int(ship["at"])] as Vector2).distance_to(ship["mining_target"])
-        return distance * (1.0 - float(ship["field_leg"]) if mode == "outbound" else float(ship["field_leg"])) / ECONOMY.SHIP_SPEED
-    var path: Array[int] = [int(ship["at"])]
-    for index in route:
-        path.append(int(index))
-    return maxf(0.0, MAP.route_length(state["map"], path) - float(ship["leg"])) / ECONOMY.SHIP_SPEED
+    if mode == "outbound":
+        return pos.distance_to(ship["mining_target"]) / ECONOMY.SHIP_SPEED
+    if mode == "return":
+        return pos.distance_to(points[int(ship["at"])]) / ECONOMY.SHIP_SPEED
+    var remaining: float = 0.0
+    for index in ship["route"]:
+        var next: Vector2 = points[int(index)]
+        remaining += pos.distance_to(next)
+        pos = next
+    return remaining / ECONOMY.SHIP_SPEED
 
 func _apply_mining_policy() -> void:
     if selected_field >= 0:
@@ -1520,16 +1521,9 @@ func _poi_name(node: int) -> String:
     return _system_name(node) if node < count else "Asteroid field %02d" % (node - count + 1)
 
 func _ship_position(ship: Dictionary, points: Array) -> Vector2:
-    if ship.get("kind", "") == "fighter":
-        points = ECONOMY.military_graph(_state())["points"]
-    var pos: Vector2 = points[int(ship["at"])]
-    var route: Array = ship["route"]
-    if ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]:
-        return pos.lerp(ship["mining_target"], float(ship["field_leg"]))
-    if not route.is_empty():
-        var next: Vector2 = points[int(route[0])]
-        pos = pos.lerp(next, clampf(float(ship["leg"]) / maxf(1.0, pos.distance_to(next)), 0.0, 1.0))
-    return pos
+    if ship.has("position"):
+        return ship["position"]
+    return ECONOMY.combat_position(_state(), ECONOMY.military_graph(_state()), ship)
 
 func _visual_position(visual: Dictionary) -> Vector2:
     return (visual["from"] as Vector2).lerp(visual["to"], clampf(float(visual["age"]) / SNAPSHOT_SECONDS, 0.0, 1.0))
@@ -1628,46 +1622,18 @@ func _ship_scale() -> float:
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
     var points: Array = state["map"]["points"]
     var poses: Dictionary = {}
-    var military_points: Array = ECONOMY.military_graph(state)["points"]
-
     for ship in state["ships"]:
-        var at: int = int(ship["at"])
-        var fighter: bool = ship.get("kind", "") == "fighter"
-        var field_node: bool = fighter and at >= points.size()
-        var travel_points: Array = military_points if fighter else points
-        var route: Array = ship["route"]
-        var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
-        var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
-        var direction: Vector2 = Vector2.UP
-        var offset_world: Vector2 = Vector2.ZERO
-        var mining: bool = ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
-        if mining:
-            direction = ((ship["mining_target"] as Vector2) - (points[at] as Vector2)).normalized()
-            if ship["mining_mode"] == "return":
-                direction = -direction
-            if ship["mining_mode"] == "mining":
-                var mining_offset: Vector2 = Vector2.from_angle(float(int(ship["id"])) * 2.399963 + game_visual_clock * 0.3) * 6.0
-                offset_world = mining_offset * SHIP_WORLD_SCALE
-                direction = _orbit_direction(mining_offset)
-        elif route.is_empty():
-            # All living craft orbit visually, including foreign stationary fighters.
-            var slot: int = int(ship["id"]) % 64
-            var orbit_radius: float = float(state["map"]["fields"][at - points.size()]["radius"]) if field_node else float(_system_visual(at, state)["spacing"]) * 0.25
-            var offset: Vector2 = _orbit_offset(slot, orbit_radius, game_visual_clock)
-            direction = _orbit_direction(offset)
-            offset_world = offset
-        else:
-            var next: Vector2 = travel_points[int(route[0])]
-            direction = (next - (travel_points[at] as Vector2)).normalized()
-            offset_world = direction.orthogonal() * (5.0 + float(int(ship["id"]) % 5) * 4.0) * SHIP_WORLD_SCALE
         var id: int = int(ship["id"])
-        var prior: Dictionary = ship_offsets.get(id, {"offset": offset_world, "angle": direction.angle()})
+        var visual: Dictionary = ship_visuals.get(id, {})
+        var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
+        var direction: Vector2 = ship.get("heading", Vector2.UP)
+        var prior: Dictionary = ship_offsets.get(id, {"angle": direction.angle()})
         var weight: float = 1.0 - exp(-delta / SNAPSHOT_SECONDS * 3.0)
-        var smooth_offset: Vector2 = (prior["offset"] as Vector2).lerp(offset_world, weight)
         var angle: float = lerp_angle(float(prior["angle"]), direction.angle(), weight)
         if delta > 0.0 or not ship_offsets.has(id):
-            ship_offsets[id] = {"offset": smooth_offset, "angle": angle}
-        poses[id] = {"point": _screen_point(pos + smooth_offset), "direction": Vector2.from_angle(angle), "mining": mining}
+            ship_offsets[id] = {"angle": angle}
+        var mining: bool = ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
+        poses[id] = {"point": _screen_point(pos), "direction": Vector2.from_angle(angle), "mining": mining}
     return poses
 
 func _combat_slider_rect(state: Dictionary, node: int, points: Array) -> Rect2:
@@ -1855,7 +1821,9 @@ func _draw_map() -> void:
             shape = PackedVector2Array([point + direction * 12, point - direction * 7 + side * 8, point - direction * 3, point - direction * 7 - side * 8])
         if ship.get("kind", "ship") == "miner":
             shape = PackedVector2Array([point + direction * 8 + side * 4, point + direction * 8 - side * 4, point - direction * 6 - side * 7, point - direction * 6 + side * 7])
-        if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not route.is_empty() or fighter or mining):
+        var physical: Vector2 = ship.get("position", Vector2.ZERO)
+        var target: Vector2 = ship.get("navigation_target", physical)
+        if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (int(ship.get("combat_target", -1)) < 0) and physical.distance_to(target) > ECONOMY.EPS:
             var engine: Vector2 = point - direction * 9.0
             map_canvas.draw_circle(engine, 5.0 * scale, Color("#43a5ff30"), true)
             map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0 * scale, true)

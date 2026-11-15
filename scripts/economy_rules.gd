@@ -613,6 +613,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
             p["yards"][int(item["target"])]["level"] = int(item["level"])
         "ship", "colony_ship", "fighter", "miner":
             state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "at": index,
+                "position": state["map"]["points"][index], "heading": Vector2.UP, "navigation_target": state["map"]["points"][index],
                 "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
     p["queue"].erase(item)
 
@@ -713,18 +714,54 @@ static func _set_route(ship: Dictionary, path: Array[int]) -> void:
     ship["route"] = path.slice(1)
     ship["leg"] = 0.0
 
+# Legacy test fixtures may omit position. Real hulls are initialized at birth.
+static func _initial_position(points: Array, ship: Dictionary) -> Vector2:
+    var origin: Vector2 = points[int(ship["at"])]
+    if ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
+        return origin.lerp(ship["mining_target"], clampf(float(ship["field_leg"]), 0.0, 1.0))
+    var route: Array = ship["route"]
+    if not route.is_empty():
+        var next: Vector2 = points[int(route[0])]
+        return origin.lerp(next, clampf(float(ship["leg"]) / maxf(EPS, origin.distance_to(next)), 0.0, 1.0))
+    return origin
+
+static func _ensure_position(points: Array, ship: Dictionary) -> void:
+    if not ship.has("position"):
+        ship["position"] = _initial_position(points, ship)
+        ship["heading"] = Vector2.UP
+        ship["navigation_target"] = ship["position"]
+
+# The only movement integrator. Orders change targets, never current position.
+# Return the distance actually flown so a tick cannot exceed its travel budget.
+static func _navigate(ship: Dictionary, target: Vector2, budget: float) -> float:
+    ship["navigation_target"] = target
+    var before: Vector2 = ship["position"]
+    var after: Vector2 = before.move_toward(target, maxf(0.0, budget))
+    var displacement: Vector2 = after - before
+    if not displacement.is_zero_approx():
+        ship["heading"] = displacement.normalized()
+    ship["position"] = after
+    return displacement.length()
+
+static func _lane_progress(points: Array, ship: Dictionary) -> float:
+    var route: Array = ship["route"]
+    if route.is_empty():
+        return 0.0
+    var origin: Vector2 = points[int(ship["at"])]
+    var edge: Vector2 = (points[int(route[0])] as Vector2) - origin
+    return clampf(((ship["position"] as Vector2) - origin).dot(edge.normalized()), 0.0, edge.length())
+
 static func _move(state: Dictionary, ship: Dictionary, dt: float) -> bool:
     var route: Array = ship["route"]
     var points: Array = state["map"]["points"]
+    _ensure_position(points, ship)
     var distance: float = SHIP_SPEED * dt
     while not route.is_empty() and distance > EPS:
-        var current: Vector2 = points[int(ship["at"])]
         var next: Vector2 = points[int(route[0])]
-        var remaining: float = current.distance_to(next) - float(ship["leg"])
-        if distance < remaining:
-            ship["leg"] = float(ship["leg"]) + distance
+        distance -= _navigate(ship, next, distance)
+        if not (ship["position"] as Vector2).is_equal_approx(next):
+            ship["leg"] = _lane_progress(points, ship)
             return false
-        distance -= remaining
         ship["at"] = int(route.pop_front())
         ship["leg"] = 0.0
     return route.is_empty()
@@ -893,15 +930,18 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
             ship["mining_mode"] = "outbound"
             ship["field_leg"] = 0.0
         return
-    var distance: float = (state["map"]["points"][anchor] as Vector2).distance_to(ship["mining_target"])
-    var travel: float = SHIP_SPEED * dt / maxf(distance, 1.0)
+    var origin: Vector2 = state["map"]["points"][anchor]
+    var target: Vector2 = ship["mining_target"]
+    var span: Vector2 = target - origin
+    _ensure_position(state["map"]["points"], ship)
     if mode == "outbound":
         var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
         if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
             ship["mining_mode"] = "return"
             return
-        ship["field_leg"] = minf(1.0, float(ship["field_leg"]) + travel)
-        if float(ship["field_leg"]) >= 1.0:
+        _navigate(ship, target, SHIP_SPEED * dt)
+        ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
+        if (ship["position"] as Vector2).is_equal_approx(target):
             ship["mining_mode"] = "mining"
             ship["mining_years"] = 0.0
         return
@@ -924,8 +964,9 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
             ship["mining_mode"] = "return"
         return
     if mode == "return":
-        ship["field_leg"] = maxf(0.0, float(ship["field_leg"]) - travel)
-        if float(ship["field_leg"]) <= 0.0:
+        _navigate(ship, origin, SHIP_SPEED * dt)
+        ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
+        if (ship["position"] as Vector2).is_equal_approx(origin):
             var stock: Dictionary = state["planets"][anchor]["stock"]
             for resource in MINED_RESOURCES:
                 stock[resource] = float(stock[resource]) + float(ship["cargo"][resource])
@@ -1058,29 +1099,28 @@ static func _military_paths(graph: Dictionary, goal: int) -> Dictionary:
     return {"distance": distances, "next": next_hop}
 
 static func _military_approach(graph: Dictionary, ship: Dictionary, paths: Dictionary) -> Dictionary:
+    var points: Array = graph["points"]
     var here: int = int(ship["at"])
-    var leg: float = float(ship["leg"])
     var distances: Dictionary = paths["distance"]
     var route: Array = ship["route"]
-    var best: float = leg + float(distances.get(here, INF))
-    var reverse: bool = not route.is_empty() and leg > EPS
+    var position: Vector2 = ship.get("position", _initial_position(points, ship))
+    var best: float = position.distance_to(points[here]) + float(distances.get(here, INF))
+    var reverse: bool = not route.is_empty() and position.distance_to(points[here]) > EPS
     if not route.is_empty():
         var other: int = int(route[0])
-        var length: float = (graph["points"][here] as Vector2).distance_to(graph["points"][other])
-        var forward: float = length - leg + float(distances.get(other, INF))
+        var forward: float = position.distance_to(points[other]) + float(distances.get(other, INF))
         if forward <= best:
             return {"distance": forward, "anchor": other, "reverse": false, "edge": true}
     return {"distance": best, "anchor": here, "reverse": reverse, "edge": reverse}
 
 static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, paths: Dictionary) -> void:
+    _ensure_position(graph["points"], ship)
     var approach: Dictionary = _military_approach(graph, ship, paths)
     var anchor: int = int(approach["anchor"])
     var route: Array[int] = []
     if bool(approach["edge"]):
         if bool(approach["reverse"]):
-            var old: int = int(ship["at"])
             ship["at"] = int(ship["route"][0])
-            ship["leg"] = (graph["points"][old] as Vector2).distance_to(graph["points"][ship["at"]]) - float(ship["leg"])
         route.append(anchor)
     else:
         ship["leg"] = 0.0
@@ -1089,6 +1129,7 @@ static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, 
         current = int(paths["next"][current])
         route.append(current)
     ship["route"] = route
+    ship["leg"] = _lane_progress(graph["points"], ship)
     ship["dest"] = target
 
 static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array) -> void:
@@ -1134,14 +1175,7 @@ static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int
 
 static func combat_position(state: Dictionary, graph: Dictionary, ship: Dictionary) -> Vector2:
     var points: Array = graph["points"] if ship.get("kind", "") == "fighter" else state["map"]["points"]
-    var pos: Vector2 = points[int(ship["at"])]
-    if ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
-        return pos.lerp(ship["mining_target"], float(ship["field_leg"]))
-    var route: Array = ship["route"]
-    if not route.is_empty():
-        var next: Vector2 = points[int(route[0])]
-        pos = pos.lerp(next, clampf(float(ship["leg"]) / maxf(EPS, pos.distance_to(next)), 0.0, 1.0))
-    return pos
+    return ship.get("position", _initial_position(points, ship))
 
 # Territory is derived from ownership and actual fleet presence, not orders.
 # Stationed fighters claim neutral POIs. Hostile presence or combat suppresses
@@ -1435,6 +1469,8 @@ static func step(state: Dictionary, dt: float) -> void:
         state["next_ai"] = float(state["elapsed"]) + AI_INTERVAL
         for player in state["ai_players"]:
             _ai_turn(state, combat_graph, int(player))
+    for craft in state["ships"]:
+        _ensure_position(combat_graph["points"] if craft.get("kind", "") == "fighter" else state["map"]["points"], craft)
     _combat(state, combat_graph, dt)
     var fleets: Dictionary = {}
     for craft in state["ships"]:
@@ -1454,5 +1490,12 @@ static func step(state: Dictionary, dt: float) -> void:
         elif ship.get("kind", "ship") == "miner":
             _work_miner(state, ship, teams, cache, budgets, dt)
         elif ship.get("kind", "") == "fighter" and int(ship.get("combat_target", -1)) < 0:
-            _move({"map": combat_graph}, ship, dt)
+            if (ship["route"] as Array).is_empty():
+                # Stable, physical station positions near the POI, not renderer offsets.
+                var center: Vector2 = combat_graph["points"][int(ship["at"])]
+                var slot: int = int(ship["id"]) % 24
+                var station: Vector2 = center + Vector2.from_angle(float(slot) * 2.399963) * (36.0 + 16.0 * float(slot % 4))
+                _navigate(ship, station, SHIP_SPEED * dt)
+            else:
+                _move({"map": combat_graph}, ship, dt)
     update_exploration(state)
