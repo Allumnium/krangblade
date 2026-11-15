@@ -65,11 +65,18 @@ func _sanitize_name(value: String) -> String:
     return clean if not clean.is_empty() else "Player"
 
 ## Solo runs the same authoritative match simulation as a host, with no ENet peer.
-func start_solo() -> bool:
+func start_solo(team: int = 1, opponent_teams: Array = []) -> bool:
     if phase != "offline":
         return false
+    if not RULES.valid_team(team) or opponent_teams.size() > RULES.MAX_PLAYERS - 1:
+        return false
+    for opponent_team in opponent_teams:
+        if not RULES.valid_team(int(opponent_team)):
+            return false
     is_solo = true
-    players = {1: {"name": _sanitize_name(display_name), "team": 1, "ready": true}}
+    players = {1: {"name": _sanitize_name(display_name), "team": team, "ready": true}}
+    for i in range(opponent_teams.size()):
+        players[i + 2] = {"name": "AI %d" % (i + 1), "team": int(opponent_teams[i]), "ready": true, "ai": true}
     history.clear()
     last_message.clear()
     round_id = 1
@@ -408,7 +415,7 @@ func _rpc_begin(begin_round: int, snapshot: Dictionary, map_seed: int) -> void:
 func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
     players = snapshot.duplicate(true)
     snapshot_elapsed = 0.0
-    economy = ECONOMY.create(MAP.generate(map_seed), players, RULES.ordered_peers(players))
+    economy = ECONOMY.create(MAP.generate(map_seed, players.size()), players, RULES.ordered_peers(players))
     resource_history.clear()
     ECONOMY.sample_resource_rates(economy, resource_history)
     owners = ECONOMY.planet_teams(economy)
@@ -558,7 +565,7 @@ func _publish_economy() -> void:
 func _rpc_economy(update_round: int, snapshot: Dictionary) -> void:
     if phase != "match" or update_round != round_id:
         return
-    if (snapshot.get("planets", []) as Array).size() != MAP.COUNT:
+    if (snapshot.get("planets", []) as Array).size() != (economy.get("planets", []) as Array).size():
         return
     economy = snapshot
     owners = ECONOMY.planet_teams(economy)

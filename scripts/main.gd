@@ -96,13 +96,41 @@ func _show_menu() -> void:
     var actions := VBoxContainer.new()
     actions.add_theme_constant_override("separation", 12)
     center.add_child(actions)
-    actions.add_child(_button("SINGLE PLAYER", _start_solo))
+    actions.add_child(_button("SINGLE PLAYER", _show_solo_setup))
     actions.add_child(_button("MULTIPLAYER", _show_multiplayer))
     actions.add_child(_button("QUIT", func() -> void: get_tree().quit()))
     col.add_spacer(false)
 
-func _start_solo() -> void:
-    network.call("start_solo")
+func _show_solo_setup() -> void:
+    screen = "solo_setup"
+    var col := _root()
+    col.add_child(_text("Single player", 32))
+    var panel := _panel()
+    col.add_child(panel)
+    var rows := VBoxContainer.new()
+    panel.add_child(rows)
+    var selectors: Array[OptionButton] = []
+    for i in range(RULES.MAX_PLAYERS):
+        var row := HBoxContainer.new()
+        rows.add_child(row)
+        var title := _text("Player" if i == 0 else "AI %d" % i, 15)
+        title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        row.add_child(title)
+        var team := OptionButton.new()
+        if i > 0:
+            team.add_item("Empty")
+        for n in range(1, RULES.MAX_PLAYERS + 1):
+            team.add_item("Team %d" % n)
+        team.select(0)
+        row.add_child(team)
+        selectors.append(team)
+    col.add_child(_button("START MATCH", func() -> void:
+        var opponents: Array = []
+        for i in range(1, selectors.size()):
+            if selectors[i].selected > 0:
+                opponents.append(selectors[i].selected)
+        network.call("start_solo", selectors[0].selected + 1, opponents)))
+    col.add_child(_button("BACK", _show_menu))
 
 func _show_multiplayer() -> void:
     screen = "multiplayer"
