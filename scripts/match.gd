@@ -8,7 +8,8 @@ const ECONOMY = preload("res://scripts/economy_rules.gd")
 const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77aafe"),
     Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
 const PANEL_WIDTH: float = 392.0
-const HEADER_HEIGHT: float = 54.0
+const HEADER_HEIGHT: float = 90.0
+const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 17.0
 const MIN_ZOOM: float = 0.5
 const MAX_ZOOM: float = 4.0
@@ -31,6 +32,12 @@ var send_colony_button: Button
 var colony_button: Button
 var colony_choices: Array[int] = []
 var selected: int = -1
+var initial_selection_done: bool = false
+var global_resource_labels: Dictionary = {}
+var global_resource_tiles: Dictionary = {}
+var global_population_label: Label
+var global_craft_label: Label
+var global_planet_label: Label
 var heading: Label
 var info: Label
 var stock_labels: Dictionary = {}
@@ -108,9 +115,12 @@ func _build_ui() -> void:
     header_panel.offset_right = -8
     header_panel.offset_top = 8
     header_panel.offset_bottom = 8 + HEADER_HEIGHT
+    var header_body := VBoxContainer.new()
+    header_body.add_theme_constant_override("separation", 5)
+    header_panel.add_child(header_body)
     var row := HBoxContainer.new()
     row.add_theme_constant_override("separation", 10)
-    header_panel.add_child(row)
+    header_body.add_child(row)
     leave = _button("RETURN", _leave, row)
     brand_label = _label("WARBOUND", 21)
     brand_label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -124,6 +134,7 @@ func _build_ui() -> void:
     heading.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     row.add_child(heading)
     _button("RESET VIEW", _reset_view, row)
+    _build_global_bar(header_body)
     inspector_panel = PanelContainer.new()
     add_child(inspector_panel)
     inspector_panel.anchor_left = 1.0
@@ -260,6 +271,71 @@ func _build_ui() -> void:
     cancel_button = _button("CANCEL SELECTED / REFUND", _cancel, queue)
     HUD.action(cancel_button, Color("#e9a276"))
 
+func _build_global_bar(parent: Container) -> void:
+    var stats := HBoxContainer.new()
+    stats.add_theme_constant_override("separation", 4)
+    parent.add_child(stats)
+    for resource in ECONOMY.RESOURCES:
+        var tile := PanelContainer.new()
+        tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#284661"), 4, 3))
+        stats.add_child(tile)
+        var line := HBoxContainer.new()
+        tile.add_child(line)
+        var icon := TextureRect.new()
+        icon.texture = HUD.ICONS[resource]
+        icon.custom_minimum_size = Vector2(18, 18)
+        icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+        icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+        icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+        line.add_child(icon)
+        var value := _label("0", 13)
+        value.autowrap_mode = TextServer.AUTOWRAP_OFF
+        value.clip_text = true
+        value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        value.add_theme_color_override("font_color", HUD.COLORS[resource])
+        line.add_child(value)
+        global_resource_labels[resource] = value
+        global_resource_tiles[resource] = tile
+    global_population_label = _global_stat(stats, "POP  0 M", Color("#b2e2a9"))
+    global_craft_label = _global_stat(stats, "CRAFT  0", Color("#c7a4ff"))
+    global_planet_label = _global_stat(stats, "WORLDS  0", HUD.ACCENT)
+
+func _global_stat(parent: Container, value: String, tint: Color) -> Label:
+    var tile := PanelContainer.new()
+    tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#284661"), 4, 3))
+    parent.add_child(tile)
+    var label := _label(value, 12)
+    label.autowrap_mode = TextServer.AUTOWRAP_OFF
+    label.add_theme_color_override("font_color", tint)
+    label.mouse_filter = Control.MOUSE_FILTER_PASS
+    tile.add_child(label)
+    return label
+
+func _compact_amount(value: float) -> String:
+    if value >= 1000000000.0:
+        return "%.1fB" % (value / 1000000000.0)
+    if value >= 1000000.0:
+        return "%.1fM" % (value / 1000000.0)
+    if value >= 1000.0:
+        return "%.1fK" % (value / 1000.0)
+    return "%.0f" % value
+
+func _refresh_global_bar(state: Dictionary) -> void:
+    var totals: Dictionary = ECONOMY.empire_totals(state, _me())
+    for resource in ECONOMY.RESOURCES:
+        var value: float = float(totals["resources"][resource])
+        global_resource_labels[resource].text = _compact_amount(value)
+        global_resource_tiles[resource].tooltip_text = "%s: %.1f total\nPlanet inventories: %.1f\nShip cargo: %.1f" % [
+            resource, value, float(totals["stock"][resource]), float(totals["cargo"][resource])]
+    global_population_label.text = "POP  %s" % _compact_amount(float(totals["population"]) * 1000000.0)
+    global_population_label.tooltip_text = "Population across owned planets: %.2f million" % float(totals["population"])
+    global_craft_label.text = "CRAFT  %d" % int(totals["craft"])
+    global_craft_label.tooltip_text = "%d logistics ships / %d colony ships" % [int(totals["logistics"]), int(totals["colonies"])]
+    global_planet_label.text = "WORLDS  %d" % int(totals["planets"])
+    global_planet_label.tooltip_text = "Owned planets (excludes allied planets)"
+
 func _inspector_page(title_text: String) -> VBoxContainer:
     var scroll := ScrollContainer.new()
     scroll.name = title_text
@@ -316,6 +392,7 @@ func _refresh() -> void:
     var state: Dictionary = _state()
     var phase: String = str(session.get("phase"))
     heading.text = "EMPIRE  /  " + str(session.get("status"))
+    _refresh_global_bar(state)
     leave.text = "MENU" if bool(session.get("is_solo")) else ("RETURN TO LOBBY" if multiplayer.is_server() else "LEAVE")
     if phase == "loading":
         leave.text = "CANCEL START" if multiplayer.is_server() else "LEAVE"
@@ -335,13 +412,16 @@ func _refresh() -> void:
                 moving += 1
     fleet.text = "LOGISTICS   %d ships / %d traveling\nCOLONY   %d ships / %d idle" % [count, moving, colonies, available_colonies]
     var planets: Array = state.get("planets", [])
-    if selected < 0 and not planets.is_empty():
+    if not initial_selection_done and not planets.is_empty():
+        initial_selection_done = true
         for i in range(planets.size()):
             if int(planets[i]["owner"]) == _me():
                 selected = i
                 _load_thresholds()
                 break
     var p: Dictionary = _planet()
+    inspector_panel.visible = not p.is_empty()
+    map_canvas.offset_right = -PANEL_WIDTH - 8 if inspector_panel.visible else -8
     var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and phase == "match"
     _refresh_colony_choices(state, p, phase)
     colony_button.disabled = not owned
@@ -543,10 +623,13 @@ func _select_at(point: Vector2) -> void:
         if distance <= _planet_radius(i, state) + 4.0 and distance < nearest:
             nearest = distance
             hit = i
+    selected = hit
+    var focused: Control = get_viewport().gui_get_focus_owner()
+    if is_instance_valid(focused):
+        focused.release_focus()
     if hit >= 0:
-        selected = hit
         _load_thresholds()
-        _refresh()
+    _refresh()
 
 func _map_input(event: InputEvent) -> void:
     if event is InputEventMouseButton:
@@ -599,7 +682,29 @@ func _on_economy_changed() -> void:
     ship_visuals = updated
     _refresh()
 
+func _keyboard_pan(delta: float) -> void:
+    if str(session.get("phase")) != "match":
+        return
+    if not get_window().has_focus():
+        return
+    var focus: Control = get_viewport().gui_get_focus_owner()
+    if focus is LineEdit or focus is TextEdit:
+        return
+    for picker in [resource_picker, yard_picker, colony_picker]:
+        if picker.get_popup().visible:
+            return
+    var direction := Vector2(
+        float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A)),
+        float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W)))
+    _pan_camera(direction, delta)
+
+func _pan_camera(direction: Vector2, delta: float) -> void:
+    if not direction.is_zero_approx():
+        pan -= direction.normalized() * KEYBOARD_PAN_SPEED * delta
+        map_canvas.queue_redraw()
+
 func _process(delta: float) -> void:
+    _keyboard_pan(delta)
     visual_clock = fmod(visual_clock + delta, TAU * 100.0)
     for visual in ship_visuals.values():
         if float(visual["age"]) < SNAPSHOT_SECONDS:
@@ -687,4 +792,4 @@ func _draw_map() -> void:
     # Overlay legend is fixed to the viewport, not the world.
     var legend_y: float = map_canvas.size.y - 10.0
     map_canvas.draw_rect(Rect2(0, legend_y - 20, map_canvas.size.x, 30), Color("#091522e8"))
-    map_canvas.draw_string(font, Vector2(8, legend_y), "Drag MMB/RMB · Scroll zoom · Gold: cargo · Purple: colony", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c5d3e1"))
+    map_canvas.draw_string(font, Vector2(8, legend_y), "WASD / drag MMB/RMB · Scroll zoom · Gold: cargo · Purple: colony", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c5d3e1"))

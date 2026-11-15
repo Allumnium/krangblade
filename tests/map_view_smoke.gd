@@ -17,7 +17,7 @@ func _run() -> void:
     var brand: Label = view.get("brand_label")
     var canvas: Control = view.get("map_canvas")
     var inspector: PanelContainer = view.get("inspector_panel")
-    assert(header.size.y <= 60.0)
+    assert(header.size.y <= 96.0)
     assert(header.position.y + header.size.y < canvas.position.y)
     assert(header.position.y + header.size.y < inspector.position.y)
     assert(brand.autowrap_mode == TextServer.AUTOWRAP_OFF)
@@ -30,6 +30,9 @@ func _run() -> void:
     for i in range(resources.item_count):
         assert(resources.get_item_icon(i) != null)
     var state: Dictionary = session.get("economy")
+    assert((view.get("global_resource_labels") as Dictionary).size() == 6)
+    assert((view.get("global_population_label") as Label).text.begins_with("POP"))
+    assert((view.get("global_planet_label") as Label).text == "WORLDS  1")
     var points: Array = state["map"]["points"]
     var neighbor: int = -1
     for i in range(1, points.size()):
@@ -90,12 +93,33 @@ func _run() -> void:
     view.call("_reset_view")
     assert(is_equal_approx(float(view.get("zoom")), 1.0))
     assert((view.get("pan") as Vector2).is_zero_approx())
+    view.call("_pan_camera", Vector2(1, 1), 0.5)
+    var keyboard_pan: Vector2 = view.get("pan")
+    assert(keyboard_pan.x < 0.0 and keyboard_pan.y < 0.0)
+    assert(is_equal_approx(keyboard_pan.length(), 210.0))
+    view.call("_reset_view")
+    var prior_width: float = canvas.size.x
+    mouse.button_index = MOUSE_BUTTON_LEFT
+    mouse.pressed = true
+    mouse.position = Vector2(-100, -100)
+    view.call("_map_input", mouse)
+    assert(int(view.get("selected")) == -1 and not inspector.visible)
+    session.call("_economy_tick")
+    session.call("_economy_tick")
+    assert(int(view.get("selected")) == -1 and not inspector.visible)
+    await process_frame
+    assert(canvas.size.x > prior_width)
+    mouse.position = view.call("_screen_point", points[0])
+    view.call("_map_input", mouse)
+    assert(int(view.get("selected")) == 0 and inspector.visible)
+    assert((view.get("global_planet_label") as Label).text == "WORLDS  2")
 
     session.call("request_operation", 0, "ship")
     for i in range(100):
         session.call("_economy_tick")
     assert(state["ships"].size() == 1)
     assert((view.get("ship_visuals") as Dictionary).size() == 1)
+    assert((view.get("global_craft_label") as Label).text == "CRAFT  1")
     await process_frame
     await process_frame
     print("PASS: select without capture, colony dispatch and arrival, zoom anchor, pan, reset and ship rendering")

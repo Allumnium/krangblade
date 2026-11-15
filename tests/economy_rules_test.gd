@@ -25,6 +25,25 @@ func _initialize() -> void:
     assert(ECON.set_thresholds(state, 1, 0, "Metals", 0, 100))
     assert(not ECON.enqueue(state, 1, 0, "production", "Tech"))
 
+    # Empire totals include cargo once and exclude allied/hostile inventories.
+    var totals_state: Dictionary = ECON.create(graph, players, ids)
+    totals_state["planets"][3]["owner"] = 1
+    totals_state["planets"][3]["population"] = 10.0
+    totals_state["planets"][3]["stock"]["Metals"] = 25.0
+    var own_cargo: Dictionary = ECON.empty_stock()
+    own_cargo["Metals"] = 7.0
+    totals_state["ships"].append({"owner": 1, "kind": "ship", "cargo": own_cargo})
+    totals_state["ships"].append({"owner": 1, "kind": "colony_ship", "cargo": ECON.empty_stock()})
+    totals_state["ships"].append({"owner": 2, "kind": "ship", "cargo": own_cargo.duplicate()})
+    var totals: Dictionary = ECON.empire_totals(totals_state, 1)
+    assert(totals["planets"] == 2 and totals["craft"] == 2)
+    assert(totals["logistics"] == 1 and totals["colonies"] == 1)
+    assert(is_equal_approx(float(totals["population"]), ECON.HOME_POPULATION + 10.0))
+    assert(is_equal_approx(float(totals["stock"]["Metals"]), 625.0))
+    assert(is_equal_approx(float(totals["cargo"]["Metals"]), 7.0))
+    assert(is_equal_approx(float(totals["resources"]["Metals"]), 632.0))
+    assert(ECON.empire_totals({}, 1)["craft"] == 0)
+
     # Population and local Organics production are independent of stored food.
     var demographics: Dictionary = ECON.create(graph, players, ids)
     var home: Dictionary = demographics["planets"][0]
