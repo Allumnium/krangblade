@@ -1,6 +1,9 @@
 extends Control
 ## Planet map and inspector. Host/solo session owns all simulation mutations.
 const MAP = preload("res://scripts/planet_map.gd")
+const HUD = preload("res://scripts/ui_theme.gd")
+const BACKDROP = preload("res://scripts/space_background.gd")
+const PLANET = preload("res://assets/ui/planet.svg")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77aafe"),
     Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
@@ -23,6 +26,13 @@ var colony_choices: Array[int] = []
 var selected: int = -1
 var heading: Label
 var info: Label
+var stock_labels: Dictionary = {}
+var level_labels: Dictionary = {}
+var inventory: VBoxContainer
+var job_progress: ProgressBar
+var job_cost: HBoxContainer
+var job_cost_key: String = ""
+var visual_clock: float = 0.0
 var fleet: Label
 var resource_picker: OptionButton
 var resource_detail: Label
@@ -42,6 +52,7 @@ var last_job_text: String = ""
 var last_yard_text: String = ""
 
 func _ready() -> void:
+    theme = HUD.create()
     session = get_node("/root/GameSession")
     session.connect("phase_changed", _refresh)
     session.connect("status_changed", _refresh)
@@ -66,6 +77,10 @@ func _button(text: String, action: Callable, parent: Container) -> Button:
     return b
 
 func _build_ui() -> void:
+    var background := ColorRect.new()
+    background.set_script(BACKDROP)
+    add_child(background)
+    background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     map_canvas = Control.new()
     add_child(map_canvas)
     map_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -85,8 +100,13 @@ func _build_ui() -> void:
     var row := HBoxContainer.new()
     header.add_child(row)
     leave = _button("RETURN", _leave, row)
-    heading = _label("WARBOUND / EMPIRE", 16)
+    var brand := _label("WARBOUND", 21)
+    brand.add_theme_color_override("font_color", HUD.ACCENT)
+    row.add_child(brand)
+    heading = _label("EMPIRE", 13)
+    heading.add_theme_color_override("font_color", HUD.MUTED)
     heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    heading.clip_text = true
     row.add_child(heading)
     _button("RESET VIEW", _reset_view, row)
     var panel := PanelContainer.new()
@@ -107,26 +127,75 @@ func _build_ui() -> void:
         margin.add_theme_constant_override("margin_" + side, 10)
     scroll.add_child(margin)
     var body := VBoxContainer.new()
-    body.add_theme_constant_override("separation", 6)
+    body.add_theme_constant_override("separation", 10)
     margin.add_child(body)
-    fleet = _label("", 14)
-    body.add_child(fleet)
-    info = _label("", 15)
-    body.add_child(info)
+    var overview: VBoxContainer = HUD.section(body, "01  /  PLANETARY COMMAND")
+    info = _label("", 19)
+    overview.add_child(info)
+    fleet = _label("", 13)
+    fleet.add_theme_color_override("font_color", HUD.MUTED)
+    overview.add_child(fleet)
     colony_picker = OptionButton.new()
-    body.add_child(colony_picker)
-    send_colony_button = _button("SEND COLONY SHIP", _send_colony, body)
-    body.add_child(HSeparator.new())
-    body.add_child(_label("RESOURCE MANAGEMENT", 16))
+    overview.add_child(colony_picker)
+    send_colony_button = _button("SEND COLONY SHIP", _send_colony, overview)
+    HUD.action(send_colony_button, Color("#c7a4ff"))
+    var resources: VBoxContainer = HUD.section(body, "02  /  RESOURCE INVENTORY")
+    inventory = VBoxContainer.new()
+    inventory.add_theme_constant_override("separation", 3)
+    resources.add_child(inventory)
+    var columns := HBoxContainer.new()
+    inventory.add_child(columns)
+    var resource_header := _label("RESOURCE", 11)
+    resource_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    resource_header.add_theme_color_override("font_color", HUD.MUTED)
+    columns.add_child(resource_header)
+    var stock_header := _label("STOCK", 11)
+    stock_header.custom_minimum_size.x = 72
+    stock_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    stock_header.add_theme_color_override("font_color", HUD.MUTED)
+    columns.add_child(stock_header)
+    var level_header := _label("LV", 11)
+    level_header.custom_minimum_size.x = 32
+    level_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    level_header.add_theme_color_override("font_color", HUD.MUTED)
+    columns.add_child(level_header)
+    for resource in ECONOMY.RESOURCES:
+        var tile := PanelContainer.new()
+        tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#1d354b"), 4, 3))
+        inventory.add_child(tile)
+        var line := HBoxContainer.new()
+        tile.add_child(line)
+        var icon := TextureRect.new()
+        icon.texture = HUD.ICONS[resource]
+        icon.custom_minimum_size = Vector2(22, 22)
+        icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+        icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+        line.add_child(icon)
+        var resource_name := _label(resource, 13)
+        resource_name.add_theme_color_override("font_color", HUD.COLORS[resource])
+        resource_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        line.add_child(resource_name)
+        var stock_label := _label("—", 14)
+        stock_label.custom_minimum_size.x = 72
+        stock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        line.add_child(stock_label)
+        stock_labels[resource] = stock_label
+        var level_label := _label("—", 12)
+        level_label.custom_minimum_size.x = 32
+        level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        level_label.add_theme_color_override("font_color", HUD.MUTED)
+        line.add_child(level_label)
+        level_labels[resource] = level_label
+    var logistics: VBoxContainer = HUD.section(body, "03  /  PRODUCTION & TRADE")
     resource_picker = OptionButton.new()
     for resource in ECONOMY.RESOURCES:
-        resource_picker.add_item(resource)
+        resource_picker.add_icon_item(HUD.ICONS[resource], resource)
     resource_picker.item_selected.connect(func(_i: int) -> void: _load_thresholds(); _refresh())
-    body.add_child(resource_picker)
+    logistics.add_child(resource_picker)
     resource_detail = _label("")
-    body.add_child(resource_detail)
+    logistics.add_child(resource_detail)
     var thresholds := HBoxContainer.new()
-    body.add_child(thresholds)
+    logistics.add_child(thresholds)
     for i in range(2):
         var col := VBoxContainer.new()
         col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -141,27 +210,34 @@ func _build_ui() -> void:
             min_stock = spin
         else:
             max_stock = spin
-    threshold_button = _button("APPLY THRESHOLDS", _apply_thresholds, body)
-    upgrade_resource = _button("QUEUE PRODUCTION UPGRADE", func() -> void: _operation("production", _resource()), body)
-    body.add_child(HSeparator.new())
-    body.add_child(_label("SHIPYARDS", 16))
+    threshold_button = _button("APPLY THRESHOLDS", _apply_thresholds, logistics)
+    upgrade_resource = _button("UPGRADE PRODUCTION", func() -> void: _operation("production", _resource()), logistics)
+    HUD.action(upgrade_resource)
+    var shipyards: VBoxContainer = HUD.section(body, "04  /  SHIPYARDS")
     yard_picker = OptionButton.new()
     yard_picker.item_selected.connect(func(_i: int) -> void: _refresh())
-    body.add_child(yard_picker)
+    shipyards.add_child(yard_picker)
     yard_info = _label("")
-    body.add_child(yard_info)
-    ship_button = _button("QUEUE LOGISTICS SHIP", func() -> void: _operation("ship"), body)
-    colony_button = _button("QUEUE COLONY SHIP", func() -> void: _operation("colony_ship"), body)
-    yard_button = _button("QUEUE NEW SHIPYARD", func() -> void: _operation("yard"), body)
-    upgrade_yard = _button("QUEUE SHIPYARD UPGRADE", func() -> void: _operation("yard_upgrade", str(yard_picker.selected)), body)
-    body.add_child(HSeparator.new())
-    body.add_child(_label("CONSTRUCTION QUEUE", 16))
+    shipyards.add_child(yard_info)
+    ship_button = _button("BUILD LOGISTICS SHIP", func() -> void: _operation("ship"), shipyards)
+    HUD.action(ship_button)
+    colony_button = _button("BUILD COLONY SHIP", func() -> void: _operation("colony_ship"), shipyards)
+    HUD.action(colony_button, Color("#c7a4ff"))
+    yard_button = _button("BUILD SHIPYARD", func() -> void: _operation("yard"), shipyards)
+    upgrade_yard = _button("UPGRADE SHIPYARD", func() -> void: _operation("yard_upgrade", str(yard_picker.selected)), shipyards)
+    var queue: VBoxContainer = HUD.section(body, "05  /  CONSTRUCTION QUEUE")
     jobs = ItemList.new()
     jobs.custom_minimum_size.y = 130
     jobs.item_selected.connect(func(_i: int) -> void: _refresh())
-    body.add_child(jobs)
-    cancel_button = _button("CANCEL SELECTED / REFUND", _cancel, body)
-    body.add_child(_label("Select a neutral planet and dispatch an available colony ship. Cargo ships automatically serve friendly planets.", 12))
+    queue.add_child(jobs)
+    job_progress = ProgressBar.new()
+    job_progress.custom_minimum_size.y = 20
+    job_progress.show_percentage = true
+    queue.add_child(job_progress)
+    job_cost = HBoxContainer.new()
+    queue.add_child(job_cost)
+    cancel_button = _button("CANCEL SELECTED / REFUND", _cancel, queue)
+    HUD.action(cancel_button, Color("#e9a276"))
 
 func _state() -> Dictionary:
     return session.get("economy")
@@ -247,13 +323,18 @@ func _refresh() -> void:
         resource_detail.text = ""
         yard_info.text = ""
         jobs.clear()
+        inventory.hide()
+        job_progress.hide()
+        job_cost.hide()
         return
     var owner: int = int(p["owner"])
     var roster: Dictionary = session.get("players")
     var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
-    info.text = "PLANET %02d%s  •  %s\n" % [selected + 1, " / HOME" if bool(p["home"]) else "", name_text]
+    info.text = "Planet %02d%s\n%s" % [selected + 1, "  /  Home" if bool(p["home"]) else "", name_text]
+    inventory.show()
     for r in ECONOMY.RESOURCES:
-        info.text += "%s  %.1f   |  Lv %d\n" % [r, float(p["stock"][r]), int(p["levels"][r])]
+        stock_labels[r].text = "%.1f" % float(p["stock"][r])
+        level_labels[r].text = str(int(p["levels"][r]))
     var resource: String = _resource()
     var available: bool = ECONOMY.EXTRACTED.has(resource) and float(p["abundance"].get(resource, 0.0)) > 0.0
     var modifier: float = float(p["bonuses"].get(resource, 1.0))
@@ -297,12 +378,49 @@ func _refresh() -> void:
             if ECONOMY._possible(p, item) <= ECONOMY.EPS:
                 line += " (waiting for materials)"
             jobs.add_item(line)
+            if item["kind"] == "production":
+                jobs.set_item_icon(jobs.item_count - 1, HUD.ICONS[item["target"]])
+            if ECONOMY._possible(p, item) <= ECONOMY.EPS:
+                jobs.set_item_custom_fg_color(jobs.item_count - 1, Color("#e9a276"))
             var i: int = jobs.item_count - 1
             jobs.set_item_metadata(i, int(item["id"]))
             if int(item["id"]) == selected_job:
                 jobs.select(i)
         last_job_text = job_text
     cancel_button.disabled = not owned or jobs.get_selected_items().is_empty()
+    _refresh_selected_job(p)
+
+func _refresh_selected_job(p: Dictionary) -> void:
+    var selection: PackedInt32Array = jobs.get_selected_items()
+    var item: Dictionary = {}
+    if not selection.is_empty():
+        var id: int = int(jobs.get_item_metadata(selection[0]))
+        for entry in p["queue"]:
+            if int(entry["id"]) == id:
+                item = entry
+                break
+    job_progress.visible = not item.is_empty()
+    job_cost.visible = not item.is_empty()
+    if item.is_empty():
+        return
+    job_progress.value = 100.0 * float(item["progress"]) / float(item["work"])
+    var cost: String = str(item["allocated"]) + str(item["cost"])
+    if cost == job_cost_key:
+        return
+    job_cost_key = cost
+    for child in job_cost.get_children():
+        job_cost.remove_child(child)
+        child.queue_free()
+    for r in item["cost"]:
+        var icon := TextureRect.new()
+        icon.texture = HUD.ICONS[r]
+        icon.custom_minimum_size = Vector2(20, 20)
+        icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+        icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+        job_cost.add_child(icon)
+        var label := _label("%.0f / %.0f" % [float(item["allocated"][r]), float(item["cost"][r])], 12)
+        label.add_theme_color_override("font_color", HUD.COLORS[r])
+        job_cost.add_child(label)
 
 func _leave() -> void:
     if bool(session.get("is_solo")):
@@ -440,19 +558,14 @@ func _on_economy_changed() -> void:
     _refresh()
 
 func _process(delta: float) -> void:
-    var animating: bool = false
+    visual_clock = fmod(visual_clock + delta, TAU * 100.0)
     for visual in ship_visuals.values():
         if float(visual["age"]) < SNAPSHOT_SECONDS:
             visual["age"] = minf(SNAPSHOT_SECONDS, float(visual["age"]) + delta)
-            animating = true
-    if animating and is_instance_valid(map_canvas):
+    if is_instance_valid(map_canvas):
         map_canvas.queue_redraw()
 
-func _draw() -> void:
-    draw_rect(Rect2(Vector2.ZERO, size), Color("#0b141e"))
-
 func _draw_map() -> void:
-    map_canvas.draw_rect(Rect2(Vector2.ZERO, map_canvas.size), Color("#0b141e"))
     if session == null:
         return
     var state: Dictionary = _state()
@@ -464,14 +577,27 @@ func _draw_map() -> void:
         var a: int = int(edge[0])
         var b: int = int(edge[1])
         var color: Color = COLORS[teams[a]].darkened(0.3) if teams[a] > 0 and teams[a] == teams[b] else Color("#40566b")
-        map_canvas.draw_line(_screen_point(points[a]), _screen_point(points[b]), color, 2.0, true)
+        var a_pos: Vector2 = _screen_point(points[a])
+        var b_pos: Vector2 = _screen_point(points[b])
+        map_canvas.draw_line(a_pos, b_pos, Color(color, 0.10), 7.0, true)
+        map_canvas.draw_line(a_pos, b_pos, Color(color, 0.78), 1.5, true)
     var font: Font = ThemeDB.fallback_font
     for i in range(points.size()):
         var pos: Vector2 = _screen_point(points[i])
         var radius: float = _planet_radius(i, state)
-        map_canvas.draw_circle(pos, radius + 2, Color("#e2efff") if i == selected else Color("#253748"))
-        map_canvas.draw_circle(pos, radius, COLORS[teams[i]])
-        map_canvas.draw_string(font, pos + Vector2(-18, 5), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 36, 14, Color("#09131e"))
+        var tint: Color = COLORS[teams[i]]
+        map_canvas.draw_circle(pos, radius + 7, Color(tint, 0.055), true)
+        map_canvas.draw_circle(pos, radius + 4, Color(tint, 0.09), true)
+        map_canvas.draw_texture_rect(PLANET, Rect2(pos - Vector2.ONE * radius, Vector2.ONE * radius * 2.0), false)
+        map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, tint, 2.0, true)
+        if bool(state["planets"][i]["home"]):
+            map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
+        if i == selected:
+            var phase: float = 0.6 + 0.35 * sin(visual_clock * 3.0)
+            for angle in range(4):
+                var start: float = float(angle) * TAU / 4.0 + 0.1
+                map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
+        map_canvas.draw_string(font, pos + Vector2(-20, 5), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 40, 14, Color("#f4faff"))
     var docked: Dictionary = {}
 
     for ship in state["ships"]:
@@ -504,6 +630,10 @@ func _draw_map() -> void:
             point - direction * 3, point - direction * 6 - side * 5])
         if colony:
             shape = PackedVector2Array([point + direction * 12, point + side * 7, point - direction * 9, point - side * 7])
+        if not route.is_empty():
+            var engine: Vector2 = point - direction * 9.0
+            map_canvas.draw_circle(engine, 5.0, Color("#43a5ff30"), true)
+            map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0, true)
         map_canvas.draw_colored_polygon(shape, hull)
         var outline: PackedVector2Array = shape.duplicate()
         outline.append(shape[0])
@@ -514,5 +644,5 @@ func _draw_map() -> void:
         map_canvas.draw_string(font, pos + Vector2(-36, 0), "%d docked" % count, HORIZONTAL_ALIGNMENT_CENTER, 72, 12, Color("#e0ebf5"))
     # Overlay legend is fixed to the viewport, not the world.
     var legend_y: float = map_canvas.size.y - 10.0
-    map_canvas.draw_rect(Rect2(0, legend_y - 20, map_canvas.size.x, 30), Color("#0b141e"))
+    map_canvas.draw_rect(Rect2(0, legend_y - 20, map_canvas.size.x, 30), Color("#091522e8"))
     map_canvas.draw_string(font, Vector2(8, legend_y), "Drag MMB/RMB · Scroll zoom · Gold: cargo · Purple: colony", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c5d3e1"))

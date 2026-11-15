@@ -2,10 +2,10 @@ extends Control
 ## Warbound menu and lobby view; networking is owned by /root/GameSession.
 
 const RULES = preload("res://scripts/lobby_rules.gd")
-const BACKGROUND := Color("#121b25")
-const PANEL := Color("#213041")
-const TEXT := Color("#e9eef4")
-const MUTED := Color("#9cabbc")
+const HUD = preload("res://scripts/ui_theme.gd")
+const BACKDROP = preload("res://scripts/space_background.gd")
+const TEXT := HUD.TEXT
+const MUTED := HUD.MUTED
 
 var network: Node
 var screen: String = ""
@@ -21,6 +21,7 @@ var status_label: Label
 var multiplayer_status_label: Label
 
 func _ready() -> void:
+    theme = HUD.create()
     network = get_node("/root/GameSession")
     network.connect("phase_changed", _on_phase_changed)
     network.connect("roster_changed", _refresh_roster)
@@ -33,7 +34,7 @@ func _root() -> VBoxContainer:
         remove_child(child)
         child.queue_free()
     var background := ColorRect.new()
-    background.color = BACKGROUND
+    background.set_script(BACKDROP)
     background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     background.mouse_filter = Control.MOUSE_FILTER_IGNORE
     add_child(background)
@@ -59,15 +60,13 @@ func _button(title: String, handler: Callable) -> Button:
     button.text = title
     button.custom_minimum_size = Vector2(120, 40)
     button.pressed.connect(handler)
+    if title in ["SINGLE PLAYER", "MULTIPLAYER", "HOST GAME", "JOIN GAME", "START MATCH"]:
+        HUD.action(button)
     return button
 
 func _panel() -> PanelContainer:
     var panel := PanelContainer.new()
-    var style := StyleBoxFlat.new()
-    style.bg_color = PANEL
-    style.set_corner_radius_all(8)
-    style.set_content_margin_all(14)
-    panel.add_theme_stylebox_override("panel", style)
+    panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928ed"), Color("#34546e"), 14))
     return panel
 
 func _on_phase_changed() -> void:
@@ -89,6 +88,7 @@ func _show_menu() -> void:
     col.add_spacer(false)
     var title := _text("WARBOUND", 58)
     title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    title.add_theme_color_override("font_color", HUD.ACCENT)
     col.add_child(title)
     var sub := _text("TERRITORY  •  STRATEGY  •  CONQUEST", 14, MUTED)
     sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
