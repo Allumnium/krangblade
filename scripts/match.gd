@@ -1333,7 +1333,14 @@ func _build_resource_hover() -> void:
 
 func _flow_name(category: String) -> String:
     if category.begins_with("Construction: "):
-        return _job_name(category.trim_prefix("Construction: "))
+        var kind: String = category.trim_prefix("Construction: ")
+        match kind:
+            "ship": return "Logistics ships"
+            "yard": return "Shipyard builds"
+            "yard_upgrade": return "Shipyard upgrades"
+            "production": return "Production upgrades"
+            "pds": return "Planetary defense"
+            _: return kind.replace("_", " ").capitalize() + " builds"
     return category
 
 func _resource_breakdown(state: Dictionary, resource: String) -> String:
