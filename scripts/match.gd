@@ -22,6 +22,13 @@ var upgrade_audio: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
 var map_canvas: Control
+var territory_layer: Control
+var territory_image: TextureRect
+var territory_material: ShaderMaterial
+var territory_lookup: PackedInt32Array = PackedInt32Array()
+var territory_grid: Vector2i = Vector2i.ZERO
+var territory_last: Array[int] = []
+var territory_seed: int = -1
 var header_panel: PanelContainer
 var inspector_panel: PanelContainer
 var overview_panel: PanelContainer
@@ -202,6 +209,7 @@ func _build_ui() -> void:
     background.set_script(BACKDROP)
     add_child(background)
     background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    _build_territory_layer()
     map_canvas = Control.new()
     add_child(map_canvas)
     map_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -716,6 +724,139 @@ func _draw_resource_fill(tile: PanelContainer, resource: String) -> void:
     var inner: Vector2 = tile.size - Vector2(2.0, 2.0)
     tile.draw_rect(Rect2(Vector2.ONE, Vector2(maxf(0.0, inner.x * fraction), maxf(0.0, inner.y))), Color(HUD.COLORS[resource], 0.18))
 
+func _build_territory_layer() -> void:
+    territory_layer = Control.new()
+    add_child(territory_layer)
+    territory_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    territory_layer.offset_left = 8
+    territory_layer.offset_top = HEADER_HEIGHT + 16
+    territory_layer.offset_right = -8
+    territory_layer.offset_bottom = -8
+    territory_layer.clip_contents = true
+    territory_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    territory_image = TextureRect.new()
+    territory_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+    territory_image.stretch_mode = TextureRect.STRETCH_SCALE
+    territory_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    territory_image.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+    territory_layer.add_child(territory_image)
+    # Two four-channel masks preserve team boundaries without blending teams.
+    # A gentle filter rounds corners and removes internal same-team borders.
+    var shader := Shader.new()
+    shader.code = """
+shader_type canvas_item;
+render_mode unshaded;
+uniform sampler2D extra_mask : filter_linear, repeat_disable;
+vec4 soft_mask(sampler2D tex, vec2 uv, vec2 px) {
+    vec4 s = texture(tex, uv) * 4.0;
+    s += texture(tex, uv + vec2(px.x, 0.0)) * 2.0;
+    s += texture(tex, uv - vec2(px.x, 0.0)) * 2.0;
+    s += texture(tex, uv + vec2(0.0, px.y)) * 2.0;
+    s += texture(tex, uv - vec2(0.0, px.y)) * 2.0;
+    s += texture(tex, uv + px) + texture(tex, uv - px);
+    s += texture(tex, uv + vec2(px.x, -px.y)) + texture(tex, uv + vec2(-px.x, px.y));
+    return s / 16.0;
+}
+void fragment() {
+    vec2 px = TEXTURE_PIXEL_SIZE * 1.4;
+    vec4 lo = soft_mask(TEXTURE, UV, px);
+    vec4 hi = soft_mask(extra_mask, UV, px);
+    float strength = 0.0;
+    int team = 0;
+    for (int i = 0; i < 4; i++) {
+        if (lo[i] > strength) { strength = lo[i]; team = i + 1; }
+        if (hi[i] > strength) { strength = hi[i]; team = i + 5; }
+    }
+    vec3 tint = vec3(0.404, 0.831, 0.663);
+    if (team == 2) tint = vec3(0.957, 0.643, 0.416);
+    if (team == 3) tint = vec3(0.467, 0.667, 0.996);
+    if (team == 4) tint = vec3(0.808, 0.569, 0.929);
+    if (team == 5) tint = vec3(0.933, 0.820, 0.420);
+    if (team == 6) tint = vec3(0.941, 0.518, 0.651);
+    if (team == 7) tint = vec3(0.420, 0.796, 0.831);
+    if (team == 8) tint = vec3(0.929, 0.459, 0.467);
+    float fill = smoothstep(0.38, 0.70, strength) * 0.045;
+    float rim = smoothstep(0.22, 0.49, strength) * (1.0 - smoothstep(0.49, 0.88, strength)) * 0.24;
+    COLOR = vec4(tint, fill + rim);
+}
+"""
+    territory_material = ShaderMaterial.new()
+    territory_material.shader = shader
+    territory_image.material = territory_material
+    territory_image.hide()
+
+# Cached bounded nearest-site raster. Neutral sites remain in the partition
+# to keep ownership from spreading into undeveloped systems or deep space.
+func _build_territory_lookup(state: Dictionary) -> void:
+    var points: Array = ECONOMY.military_graph(state)["points"]
+    var bounds: Vector2 = state["map"]["size"]
+    var scale: float = 512.0 / maxf(bounds.x, bounds.y)
+    territory_grid = Vector2i(maxi(1, roundi(bounds.x * scale)), maxi(1, roundi(bounds.y * scale)))
+    var cell_size: Vector2 = bounds / Vector2(territory_grid)
+    var count: int = territory_grid.x * territory_grid.y
+    territory_lookup.resize(count)
+    territory_lookup.fill(-1)
+    var best := PackedFloat32Array()
+    best.resize(count)
+    best.fill(INF)
+    var system_count: int = (state["planets"] as Array).size()
+    for node in range(points.size()):
+        var center: Vector2 = points[node]
+        var spacing: float = INF
+        for i in range(system_count):
+            if i != node:
+                spacing = minf(spacing, center.distance_to(points[i]))
+        if not is_finite(spacing):
+            spacing = bounds.length() * 0.25
+        var radius: float = maxf(spacing * 1.35, maxf(cell_size.x, cell_size.y) * 3.0)
+        var lo: Vector2i = Vector2i((center - Vector2.ONE * radius) / cell_size).clamp(Vector2i.ZERO, territory_grid - Vector2i.ONE)
+        var hi: Vector2i = Vector2i((center + Vector2.ONE * radius) / cell_size).clamp(Vector2i.ZERO, territory_grid - Vector2i.ONE)
+        for y in range(lo.y, hi.y + 1):
+            for x in range(lo.x, hi.x + 1):
+                var pixel: int = y * territory_grid.x + x
+                var position: Vector2 = (Vector2(x, y) + Vector2(0.5, 0.5)) * cell_size
+                var d: float = position.distance_squared_to(center)
+                if d <= radius * radius and d < best[pixel]:
+                    best[pixel] = d
+                    territory_lookup[pixel] = node
+    territory_seed = int(state["map"]["seed"])
+    territory_last.clear()
+
+func _refresh_territory(state: Dictionary) -> void:
+    if state.is_empty():
+        territory_image.hide()
+        return
+    if territory_lookup.is_empty() or territory_seed != int(state["map"]["seed"]):
+        _build_territory_lookup(state)
+    var claims: Array[int] = ECONOMY.territory_claims(state)
+    if claims == territory_last:
+        return
+    territory_last = claims
+    var low := PackedByteArray()
+    var high := PackedByteArray()
+    low.resize(territory_lookup.size() * 4)
+    high.resize(low.size())
+    for i in range(territory_lookup.size()):
+        var node: int = territory_lookup[i]
+        if node < 0:
+            continue
+        var team: int = claims[node]
+        if team >= 1 and team <= 4:
+            low[i * 4 + team - 1] = 255
+        elif team >= 5 and team <= 8:
+            high[i * 4 + team - 5] = 255
+    territory_image.texture = ImageTexture.create_from_image(Image.create_from_data(territory_grid.x, territory_grid.y, false, Image.FORMAT_RGBA8, low))
+    territory_material.set_shader_parameter("extra_mask", ImageTexture.create_from_image(Image.create_from_data(territory_grid.x, territory_grid.y, false, Image.FORMAT_RGBA8, high)))
+    territory_image.show()
+    _position_territory()
+
+func _position_territory() -> void:
+    territory_image.position = _screen_point(Vector2.ZERO)
+    territory_image.size = _map_size() * _fit() * zoom
+
+func _show_system_rings(index: int) -> bool:
+    return index == selected
+
 func _build_global_bar(stats: Container) -> void:
     for resource in ECONOMY.RESOURCES:
         var tile := PanelContainer.new()
@@ -1201,7 +1342,8 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
     if zoom >= 2.0 and radius >= 18.0:
         for body in _system_visual(index, state)["bodies"]:
             var orbit: float = radius * float(body["orbit"])
-            map_canvas.draw_arc(pos, orbit, 0.0, TAU, 48, Color(tint, 0.24), 0.8, true)
+            if _show_system_rings(index):
+                map_canvas.draw_arc(pos, orbit, 0.0, TAU, 48, Color(tint, 0.24), 0.8, true)
             var point: Vector2 = pos + _body_position(body, radius, visual_clock)
             var body_radius: float = maxf(2.1, radius * float(body["size"]))
             if get_viewport_rect().grow(body_radius).has_point(point):
@@ -1214,7 +1356,8 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
         map_canvas.draw_circle(pos, star_radius * (1.0 + float(layer) * 0.33) * pulse, Color(star_color, 0.05), true)
     map_canvas.draw_circle(pos, star_radius * pulse, star_color, true)
     map_canvas.draw_circle(pos, star_radius * 0.55 * pulse, Color("#fffdf1"), true)
-    map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
+    if _show_system_rings(index):
+        map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
 
 func _planet_color(planet: Dictionary) -> Color:
     var sum := Vector3.ZERO
@@ -1369,6 +1512,7 @@ func _sync_upgrade_audio(state: Dictionary) -> void:
 func _on_economy_changed() -> void:
     var state: Dictionary = _state()
     _sync_upgrade_audio(state)
+    _refresh_territory(state)
     var updated: Dictionary = {}
     if not state.is_empty():
         var points: Array = state["map"]["points"]
@@ -1413,6 +1557,7 @@ func _process(delta: float) -> void:
         if float(visual["age"]) < SNAPSHOT_SECONDS:
             visual["age"] = minf(SNAPSHOT_SECONDS, float(visual["age"]) + delta)
     if is_instance_valid(map_canvas):
+        _position_territory()
         map_canvas.queue_redraw()
 
 func _orbit_offset(slot: int, radius: float, time: float) -> Vector2:
@@ -1564,8 +1709,7 @@ func _draw_map() -> void:
         var color: Color = COLORS[teams[a]].darkened(0.3) if known and teams[a] > 0 and teams[a] == teams[b] else Color("#40566b")
         var a_pos: Vector2 = _screen_point(points[a])
         var b_pos: Vector2 = _screen_point(points[b])
-        map_canvas.draw_line(a_pos, b_pos, Color(color, 0.10), 7.0, true)
-        map_canvas.draw_line(a_pos, b_pos, Color(color, 0.78), 1.5, true)
+        map_canvas.draw_line(a_pos, b_pos, Color(color, 0.30), 1.0, true)
     var font: Font = ThemeDB.fallback_font
     var fields: Array = state["map"].get("fields", [])
     for field_index in range(fields.size()):
@@ -1601,7 +1745,7 @@ func _draw_map() -> void:
         var radius: float = _planet_radius(i, state)
         var tint: Color = COLORS[teams[i]]
         _draw_system(i, state, pos, radius, tint)
-        if bool(state["planets"][i]["home"]):
+        if i == selected and bool(state["planets"][i]["home"]):
             map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
         if i == selected:
             var phase: float = 0.6 + 0.35 * sin(visual_clock * 3.0)
