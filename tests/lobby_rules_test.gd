@@ -16,10 +16,6 @@ func _initialize() -> void:
         for index in range(teams.size()):
             players[index + 1] = {"team": teams[index], "ready": true}
         assert(RULES.can_start(players))
-        var owners: Array[int] = RULES.starting_owners(players)
-        assert(owners.size() == 17)
-        for index in range(8):
-            assert(owners[index] == teams[index])
         var loaded: Dictionary = {1: true}
         assert(not RULES.all_loaded(players, loaded))
         for id in players.keys():
@@ -33,11 +29,6 @@ func _initialize() -> void:
                 assert(not bool(players[id]["ready"]))
     var coop: Dictionary = {1: {"ready": true, "team": 1}, 5: {"ready": true, "team": 1}}
     assert(RULES.can_start(coop))
-    var territory: Array[int] = RULES.starting_owners(coop)
-    assert(territory[0] == 1 and territory[1] == 1)
-    assert(RULES.can_capture(territory, 1, 8))
-    assert(not RULES.can_capture(territory, 2, 8))
-    assert(not RULES.can_capture(territory, 1, 16))
-    assert(not RULES.can_capture(territory, 1, 0))
-    print("PASS: 2-8 teams, ready reset, load barrier, and team captures")
+    assert(RULES.ordered_peers(coop) == [1, 5])
+    print("PASS: 2–8 teams, readiness and load barrier")
     quit(0)
