@@ -33,6 +33,10 @@ const DEFAULT_FOG_OF_WAR: bool = false
 const TRADE_REFERENCE: float = 1000.0
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
 const MINING_STAY: float = 5.0
+const SHIP_HP: float = 100.0
+const LASER_DAMAGE: float = 18.0
+const LASER_RANGE: float = 180.0
+const AI_INTERVAL: float = 4.0
 
 # Decorative bodies are derived from immutable system data, not simulated entities.
 # Separate RNG keeps the economy's seeded resource generation unchanged.
@@ -112,7 +116,11 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
         planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
             "abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
             "yards": yards, "queue": [], "continuous": {}})
-    var state: Dictionary = {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "military": {}}
+    var ai_players: Array[int] = []
+    for id in ordered:
+        if bool(players[id].get("ai", false)):
+            ai_players.append(id)
+    var state: Dictionary = {"ai_players": ai_players, "next_ai": 0.0, "map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "military": {}}
     update_exploration(state)
     return state
 
@@ -605,7 +613,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
             p["yards"][int(item["target"])]["level"] = int(item["level"])
         "ship", "colony_ship", "fighter", "miner":
             state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "at": index,
-                "route": [], "leg": 0.0, "source": -1, "dest": -1, "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
+                "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
     p["queue"].erase(item)
 
 static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
@@ -1124,6 +1132,202 @@ static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int
         counts[best_node] -= 1
         remaining.erase(best_ship)
 
+static func combat_position(state: Dictionary, graph: Dictionary, ship: Dictionary) -> Vector2:
+    var points: Array = graph["points"] if ship.get("kind", "") == "fighter" else state["map"]["points"]
+    var pos: Vector2 = points[int(ship["at"])]
+    if ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
+        return pos.lerp(ship["mining_target"], float(ship["field_leg"]))
+    var route: Array = ship["route"]
+    if not route.is_empty():
+        var next: Vector2 = points[int(route[0])]
+        pos = pos.lerp(next, clampf(float(ship["leg"]) / maxf(EPS, pos.distance_to(next)), 0.0, 1.0))
+    return pos
+
+static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
+    var ships: Array = state["ships"]
+    var positions: Dictionary = {}
+    var cells: Dictionary = {}
+    for ship in ships:
+        var id: int = int(ship["id"])
+        var pos: Vector2 = combat_position(state, graph, ship)
+        positions[id] = pos
+        var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+        if not cells.has(cell):
+            cells[cell] = []
+        cells[cell].append(ship)
+    var damage: Dictionary = {}
+    for ship in ships:
+        if ship.get("kind", "") != "fighter":
+            continue
+        var id: int = int(ship["id"])
+        var pos: Vector2 = positions[id]
+        var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+        var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+        var target: int = -1
+        var best: float = LASER_RANGE * LASER_RANGE
+        for x in range(-1, 2):
+            for y in range(-1, 2):
+                for other in cells.get(cell + Vector2i(x, y), []):
+                    if int(state["teams"].get(int(other["owner"]), 0)) == team or team == 0:
+                        continue
+                    var other_id: int = int(other["id"])
+                    var distance: float = pos.distance_squared_to(positions[other_id])
+                    if distance < best or (is_equal_approx(distance, best) and (target < 0 or other_id < target)):
+                        best = distance
+                        target = other_id
+        ship["combat_target"] = target
+        var cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
+        if target >= 0 and cooldown <= EPS:
+            damage[target] = float(damage.get(target, 0.0)) + LASER_DAMAGE
+            cooldown = 1.0
+            ship["laser_until"] = float(state["elapsed"]) + 0.2
+        ship["laser_cooldown"] = cooldown
+    for ship in ships.duplicate():
+        var id: int = int(ship["id"])
+        if damage.has(id):
+            ship["hp"] = maxf(0.0, float(ship.get("hp", SHIP_HP)) - float(damage[id]))
+            if float(ship["hp"]) <= EPS:
+                ships.erase(ship)
+
+static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, reserved: Dictionary) -> int:
+    var best: float = INF
+    var target: int = -1
+    for index in range((state["planets"] as Array).size()):
+        if reserved.has(index) or not discovered(state, player, "planets", index):
+            continue
+        var path: Array[int] = colony_path(state, player, ship, index)
+        if path.is_empty():
+            continue
+        var richness: float = float(state["planets"][index]["abundance"].get("Metals", 0.0))
+        var score: float = MAP.route_length(state["map"], path) / (1.0 + minf(richness, 2.0) * 0.15)
+        if score < best:
+            best = score
+            target = index
+    return target
+
+static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
+    var home: int = military_home(state, player)
+    if home < 0:
+        return
+    var planets: Array = state["planets"]
+    var team: int = int(state["teams"][player])
+    var owned: Array[int] = []
+    var counts: Dictionary = {"ship": 0, "colony_ship": 0, "miner": 0, "fighter": 0}
+    var reserved: Dictionary = {}
+    var fighters: Array = []
+    var idle_colonies: Array = []
+    var useful_fields: int = 0
+    for ship in state["ships"]:
+        if int(ship["owner"]) != player:
+            continue
+        var kind: String = ship["kind"]
+        counts[kind] += 1
+        if kind == "fighter":
+            fighters.append(ship)
+        elif kind == "colony_ship":
+            if (ship["route"] as Array).is_empty():
+                idle_colonies.append(ship)
+            elif int(ship["dest"]) >= 0:
+                reserved[int(ship["dest"])] = true
+    for field in state["map"].get("fields", []):
+        if int(planets[int(field["anchor"])]["owner"]) == player and float(field_inventory(field)["Metals"]) > EPS:
+            useful_fields += 1
+    for index in range(planets.size()):
+        var p: Dictionary = planets[index]
+        if int(p["owner"]) != player:
+            continue
+        owned.append(index)
+        for job in p["queue"]:
+            if SHIP_KINDS.has(job["kind"]):
+                counts[job["kind"]] += 1
+        var producer: bool = int(p["levels"]["Metals"]) > 0
+        set_thresholds(state, player, index, "Metals", 10.0 if bool(p["home"]) else (35.0 if producer else 90.0), 40.0 if bool(p["home"]) else (60.0 if producer else 95.0))
+    for ship in idle_colonies:
+        var target: int = _ai_colony_target(state, player, ship, reserved)
+        if target >= 0 and send_colony(state, player, int(ship["id"]), target):
+            reserved[target] = true
+    var probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": home, "route": []}
+    var expansion: bool = _ai_colony_target(state, player, probe, reserved) >= 0
+    for index in owned:
+        var p: Dictionary = planets[index]
+        if not (p["queue"] as Array).is_empty():
+            continue
+        var metal: float = float(p["stock"]["Metals"])
+        var level: int = int(p["levels"]["Metals"])
+        var abundance: float = float(p["abundance"].get("Metals", 0.0))
+        var farm: int = int(p["levels"]["Organics"])
+        # Save for expansion instead of continually spending on cheap hulls.
+        if index == home and expansion and counts["colony_ship"] == 0 and metal < 240.0:
+            continue
+        var action: String = ""
+        var target: String = ""
+        if abundance > 0.0 and level == 0 and metal >= 150.0:
+            action = "production"
+            target = "Metals"
+        elif index == home and expansion and counts["colony_ship"] == 0 and metal >= 240.0:
+            action = "colony_ship"
+        elif index == home and owned.size() > 1 and counts["ship"] < mini(12, owned.size() * 2) and metal >= 120.0:
+            action = "ship"
+        elif not (p["yards"] as Array).is_empty() and useful_fields > 0 and counts["miner"] < mini(6, useful_fields * 2) and metal >= 180.0:
+            action = "miner"
+        elif not (p["yards"] as Array).is_empty() and counts["fighter"] < maxi(3, mini(24, owned.size() * 2)) and metal >= 90.0:
+            action = "fighter"
+        elif expansion and not (p["yards"] as Array).is_empty() and counts["colony_ship"] < 3 and metal >= 240.0:
+            var local_probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": index, "route": []}
+            if _ai_colony_target(state, player, local_probe, reserved) >= 0:
+                action = "colony_ship"
+        if action.is_empty():
+            if abundance > 0.0 and level < 4 and rate(p, "Metals") < PLANET_MINING_LIMIT and metal >= float(_cost("production", level + 1)["Metals"]):
+                action = "production"
+                target = "Metals"
+            elif farm < 3 and float(p["population"]) > population_capacity(p) * 0.8 and metal >= float(_cost("production", farm + 1)["Metals"]):
+                action = "production"
+                target = "Organics"
+            elif (p["yards"] as Array).is_empty() and metal >= 480.0:
+                action = "yard"
+            elif not (p["yards"] as Array).is_empty() and counts["fighter"] < 32 and metal >= 180.0:
+                action = "fighter"
+            else:
+                for resource in ["Plastics", "Crystals"]:
+                    if float(p["abundance"].get(resource, 0.0)) > 0.0 and int(p["levels"][resource]) == 0 and metal >= 300.0:
+                        action = "production"
+                        target = resource
+                        break
+        if not action.is_empty() and enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):
+            counts[action] += 1
+    if fighters.is_empty():
+        return
+    var center: Vector2 = Vector2.ZERO
+    for ship in fighters:
+        center += combat_position(state, graph, ship)
+    center /= float(fighters.size())
+    var goal: int = -1
+    var nearest: float = INF
+    var pois: Array[int] = military_pois(state, player)
+    for ship in state["ships"]:
+        if int(state["teams"].get(int(ship["owner"]), 0)) == team:
+            continue
+        var node: int = int(ship["at"])
+        if not pois.has(node):
+            continue
+        var distance: float = center.distance_squared_to(combat_position(state, graph, ship))
+        if distance < nearest:
+            nearest = distance
+            goal = node if (ship["route"] as Array).is_empty() else int(ship["route"][0])
+            if ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
+                goal = planets.size() + int(ship["field"])
+    if goal < 0 or not pois.has(goal):
+        goal = -1
+        nearest = INF
+        for node in pois:
+            if node >= planets.size() or int(planets[node]["owner"]) == 0 or int(state["teams"].get(int(planets[node]["owner"]), 0)) == team:
+                continue
+            var distance: float = center.distance_squared_to(graph["points"][node])
+            if distance < nearest:
+                nearest = distance
+                goal = node
+    set_military(state, player, "fighter", home if goal < 0 else goal, 100)
+
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
     for i in range((state["planets"] as Array).size()):
@@ -1134,6 +1338,11 @@ static func step(state: Dictionary, dt: float) -> void:
     for field in state["map"].get("fields", []):
         budgets.append({"Metals": field_limit(field, "Metals") * dt, "Crystals": field_limit(field, "Crystals") * dt})
     var combat_graph: Dictionary = military_graph(state)
+    if float(state["elapsed"]) >= float(state.get("next_ai", 0.0)) and not state.get("ai_players", []).is_empty():
+        state["next_ai"] = float(state["elapsed"]) + AI_INTERVAL
+        for player in state["ai_players"]:
+            _ai_turn(state, combat_graph, int(player))
+    _combat(state, combat_graph, dt)
     var fleets: Dictionary = {}
     for craft in state["ships"]:
         if craft.get("kind", "") == "fighter":
@@ -1151,6 +1360,6 @@ static func step(state: Dictionary, dt: float) -> void:
             _work_ship(state, ship, teams, cache, dt)
         elif ship.get("kind", "ship") == "miner":
             _work_miner(state, ship, teams, cache, budgets, dt)
-        elif ship.get("kind", "") == "fighter":
+        elif ship.get("kind", "") == "fighter" and int(ship.get("combat_target", -1)) < 0:
             _move({"map": combat_graph}, ship, dt)
     update_exploration(state)

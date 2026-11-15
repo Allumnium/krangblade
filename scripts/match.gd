@@ -638,7 +638,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
         status = "Mining field %02d\n%.1f / 5 yr" % [int(ship["field"]) + 1, minf(5.0, float(ship.get("mining_years", 0.0)))]
     if kind == "fighter":
         status = "Stationed at %s" % _poi_name(int(ship["at"])) if route.is_empty() else "%s\nETA %.1f yr" % [_poi_name(int(route.back())), _remaining_years(state, ship)]
-    ship_detail.text = "%s\n%s" % [str(roster.get(owner, {}).get("name", "Player")), status]
+    if int(ship.get("combat_target", -1)) >= 0:
+        status = "Engaged"
+    ship_detail.text = "%s\n%s\nHP %.0f / %.0f" % [str(roster.get(owner, {}).get("name", "Player")), status, float(ship.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
     ship_detail.tooltip_text = ""
     var cargo_capable: bool = kind in ["ship", "miner"]
     ship_cargo.get_parent().visible = cargo_capable
@@ -1614,6 +1616,12 @@ func _draw_map() -> void:
     _draw_logistics_lens(state, font)
     var poses: Dictionary = _ship_poses(state)
     for ship in state["ships"]:
+        var shooter: int = int(ship["id"])
+        var target: int = int(ship.get("combat_target", -1))
+        if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
+            map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ff6f6060"), 4.0, true)
+            map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ffbf96"), 1.0, true)
+    for ship in state["ships"]:
         if not poses.has(int(ship["id"])):
             continue
         var pose: Dictionary = poses[int(ship["id"])]
@@ -1651,3 +1659,8 @@ func _draw_map() -> void:
         var outline: PackedVector2Array = shape.duplicate()
         outline.append(shape[0])
         map_canvas.draw_polyline(outline, Color("#08111b"), 1.5, true)
+        var hp: float = clampf(float(ship.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
+        if hp < 1.0:
+            var bar_pos: Vector2 = point + Vector2(-10.0, 13.0)
+            map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0, 3.0)), Color("#182333"))
+            map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0 * hp, 3.0)), Color("#e9a276"))
