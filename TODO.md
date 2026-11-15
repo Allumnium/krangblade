@@ -17,7 +17,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
   - v0.10.0 prototype: hostile-owned system allocations rally in groups of three at home, with additional cohorts and lone-survivor regrouping. Neutral and friendly assignments remain immediate; unified AI/human operation lifecycle and playtesting remain outstanding.
 - [ ] Generate formations of varying sizes based on fleet size and ship composition. Assign stable relative positions; smoothly re-form as membership changes without teleportation.
 - [ ] Allow combat ships to continue physically flying and maneuvering during combat; use authoritative world positions for range and movement, keep lane travel intact.
-  - v0.10.0 prototype: lane transit continues while firing. Local engagement maneuvering and formation movement remain outstanding.
+  - v0.10.1 prototype: fighters temporarily leave their lane to circle live opponents at a preferred engagement distance, then resume queued waypoints from the actual combat position. Formation integration and visual playtesting remain outstanding.
 - [ ] Have damaged ships automatically fall back; design safe withdrawal destinations, repair/recovery and rejoining. Decide individual versus fleet retreat triggers and prevent oscillation.
 - [ ] Establish clear fleet state feedback and regression coverage for assembly, combat movement, withdrawal, reinforcement, speed bounds and replicated positions.
 

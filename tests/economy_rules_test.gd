@@ -883,15 +883,28 @@ func _initialize() -> void:
     assert(rally_state["operations"]["2:allocation:3"]["id"] == rally_id)
     for craft in rally_fleet:
         assert(craft["dest"] == 3)
-    # A fighter on a lane continues moving while firing, within its speed budget.
+    # Fighters break off their lane to orbit opponents, then resume their original route.
     var transit: Dictionary = ECON.create(ai_map, players, ids)
     var travelling: Dictionary = {"id": 970, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 400.0, "position": Vector2(400, 0), "dest": 3, "hp": 100.0}
     var enemy: Dictionary = {"id": 971, "owner": 3, "kind": "fighter", "at": 3, "route": [], "leg": 0.0, "position": Vector2(450, 0), "dest": 3, "hp": 100.0}
     transit["ships"] = [travelling, enemy]
     assert(ECON.set_military(transit, 2, "fighter", 3, 100))
-    ECON.step(transit, 0.1)
-    assert(int(travelling["combat_target"]) == 971)
+    var original_route: Array = travelling["route"].duplicate()
+    for tick in range(8):
+        var before: Vector2 = travelling["position"]
+        ECON.step(transit, 0.1)
+        assert(int(travelling["combat_target"]) == 971)
+        assert(before.distance_to(travelling["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+        assert(before.distance_to(travelling["position"]) > 0.01)
+        assert(travelling["route"] == original_route and int(travelling["at"]) == 1)
     assert(float(enemy["hp"]) < 100.0)
-    assert(is_equal_approx((travelling["position"] as Vector2).distance_to(Vector2(400, 0)), ECON.SHIP_SPEED * 0.1))
-    print("PASS: coordinated human rally, reinforcements, retargeting and moving fire")
+    assert(absf((travelling["position"] as Vector2).y) > 1.0)
+    transit["ships"].erase(enemy)
+    var disengaged_position: Vector2 = travelling["position"]
+    ECON.step(transit, 0.1)
+    assert(int(travelling["combat_target"]) == -1)
+    assert(travelling["route"] == original_route)
+    assert((travelling["position"] as Vector2).distance_to(ai_map["points"][3]) < disengaged_position.distance_to(ai_map["points"][3]))
+    assert(disengaged_position.distance_to(travelling["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+    print("PASS: coordinated human rally, reinforcements, retargeting, combat circling and route resumption")
     quit(0)

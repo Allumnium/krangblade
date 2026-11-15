@@ -38,3 +38,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Gameplay/UX hypothesis.
 - **Observation:** A hostile-system allocation below three hulls now rallies rather than trickling into battle; splitting a small fleet across several hostile objectives can stall all of them.
 - **Consider:** Show requested versus deployed hull counts and rally status; review cohort size and priority arbitration during policy design. See TODO phases 1–2.
+
+### T-008 — Orbiting combat and concentrated fleets
+- **Type:** Gameplay/visual hypothesis.
+- **Observation:** v0.10.1 uses a common orbit direction and a provisional preferred separation of 60% of laser range; dense fleets may overlap or repeatedly lose contacts when chasing fast targets.
+- **Consider:** Inspect real battles before adding separation, target persistence or a turn-rate model; integrate stable formation slots with combat maneuvers without sacrificing speed bounds.

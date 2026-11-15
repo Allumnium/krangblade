@@ -1623,6 +1623,23 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
         operation["deployed"] = deployed
         operation["phase"] = "rallying" if deployed.is_empty() else "deployed"
 
+# Local combat flight temporarily overrides lane navigation, without changing
+# its queued waypoints or teleporting back on disengagement. All maneuvers
+# use positions captured before any hull moves this tick.
+static func _maneuver_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> void:
+    var position: Vector2 = ship["position"]
+    var radial: Vector2 = position - opponent
+    var radius: float = radial.length()
+    var direction: Vector2 = radial / radius if radius > EPS else Vector2.from_angle(float(int(ship["id"]) % 64) * 2.399963)
+    var budget: float = SHIP_SPEED * dt
+    var preferred_radius: float = LASER_RANGE * 0.60
+    # Move tangentially while gradually correcting distance. An angular
+    # waypoint (rather than a straight tangent) keeps the path curved.
+    var next_radius: float = move_toward(radius, preferred_radius, budget * 0.45)
+    var angle: float = minf(0.6, budget * 0.85 / maxf(preferred_radius, radius))
+    var waypoint: Vector2 = opponent + direction.rotated(angle) * next_radius
+    _navigate(ship, waypoint, budget)
+
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
     for i in range((state["planets"] as Array).size()):
@@ -1652,6 +1669,9 @@ static func step(state: Dictionary, dt: float) -> void:
             _allocate_fighters(state, combat_graph, int(player), fleets[player], true)
     _sync_operations(state)
     _dispatch_operations(state, combat_graph)
+    var combat_positions: Dictionary = {}
+    for craft in state["ships"]:
+        combat_positions[int(craft["id"])] = craft["position"]
     for ship in (state["ships"] as Array).duplicate():
         var initial_position: Vector2 = ship["position"]
         if ship.get("kind", "ship") == "colony_ship":
@@ -1663,7 +1683,13 @@ static func step(state: Dictionary, dt: float) -> void:
         elif ship.get("kind", "ship") == "miner":
             _work_miner(state, ship, teams, cache, budgets, dt)
         elif ship.get("kind", "") == "fighter":
-            _move({"map": combat_graph}, ship, dt)
+            var target_id: int = int(ship.get("combat_target", -1))
+            if combat_positions.has(target_id):
+                _maneuver_fighter(ship, combat_positions[target_id], dt)
+                ship["leg"] = _lane_progress(combat_graph["points"], ship)
+            else:
+                ship["combat_target"] = -1
+                _move({"map": combat_graph}, ship, dt)
         var fighter: bool = ship.get("kind", "") == "fighter"
         var idle: bool = (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle"
         idle = idle and (int(ship.get("dest", -1)) < 0 or fighter) and int(ship.get("source", -1)) < 0
