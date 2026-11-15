@@ -149,3 +149,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.14.4 adds asteroid off-screen culling and logistics capacity bars. Dense overlapping traffic indicators and shader spatial caching remain candidates for visual profiling.
 
 - v0.14.5 caches immutable asteroid unit polygons by position and seed; depletion still scales the same polygon each frame. Ship snapshot synchronization now occurs on economy changes rather than repeated pose queries. Actual frame-time savings require profiling.
+
+- v0.14.5 failed both normal ENet scenarios: render targets lagged the live host state between publications. v0.14.6 restores pose-time synchronization (no weakened checks), retains asteroid geometry caching, and adds ownership-sensitive persistent logistics route caching. Mining depot decisions remain tick-local.

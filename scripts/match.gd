@@ -2316,6 +2316,7 @@ func _ship_scale() -> float:
     return SHIP_WORLD_SCALE * _fit() * zoom
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
+    _sync_ship_visuals(state)
     var points: Array = state["map"]["points"]
     var poses: Dictionary = {}
     for ship in state["ships"]:
