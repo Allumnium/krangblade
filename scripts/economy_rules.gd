@@ -660,6 +660,19 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 static func field_limit(field: Dictionary, resource: String) -> float:
     return FIELD_MINING_LIMIT * float(field.get(resource, 0.0)) if MINED_RESOURCES.has(resource) else 0.0
 
+static func field_inventory(field: Dictionary) -> Dictionary:
+    var stock: Dictionary = {"Metals": 0.0, "Crystals": 0.0}
+    for chunk in field.get("chunks", []):
+        var resource: String = str(chunk["resource"])
+        stock[resource] = float(stock[resource]) + float(chunk["remaining"])
+    return stock
+
+static func _find_chunk(field: Dictionary, id: int) -> Dictionary:
+    for chunk in field.get("chunks", []):
+        if int(chunk["id"]) == id:
+            return chunk
+    return {}
+
 static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
     var fields: Array = state["map"].get("fields", [])
     var owner: int = int(ship["owner"])
@@ -667,6 +680,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
     var best: float = INF
     var chosen: int = -1
     var best_path: Array[int] = []
+    var best_chunk: Dictionary = {}
     for i in range(fields.size()):
         var field: Dictionary = fields[i]
         if not discovered(state, owner, "fields", i) or _mining_resources(state, owner, i).is_empty():
@@ -677,13 +691,22 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
         var path: Array[int] = _path(state, teams, team, int(ship["at"]), anchor, cache)
         if path.is_empty():
             continue
-        var distance: float = MAP.route_length(state["map"], path) + (state["map"]["points"][anchor] as Vector2).distance_to(field["position"]) * 2.0
-        if distance < best:
-            best = distance
-            chosen = i
-            best_path = path
+        var resources: Array[String] = _mining_resources(state, owner, i)
+        var approach: Vector2 = state["map"]["points"][anchor]
+        var route_distance: float = MAP.route_length(state["map"], path)
+        for chunk in field.get("chunks", []):
+            if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
+                continue
+            var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0
+            if distance < best:
+                best = distance
+                chosen = i
+                best_path = path
+                best_chunk = chunk
     if chosen >= 0:
         ship["field"] = chosen
+        ship["chunk"] = int(best_chunk["id"])
+        ship["mining_target"] = best_chunk["position"]
         ship["mining_mode"] = "approach"
         _set_route(ship, best_path)
 
@@ -697,31 +720,41 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
     var anchor: int = int(field["anchor"])
     if mode == "approach":
         if _move(state, ship, dt):
+            var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
+            if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
+                ship["mining_mode"] = "idle"
+                ship["field"] = -1
+                return
             ship["mining_mode"] = "outbound"
             ship["field_leg"] = 0.0
         return
-    var distance: float = (state["map"]["points"][anchor] as Vector2).distance_to(field["position"])
+    var distance: float = (state["map"]["points"][anchor] as Vector2).distance_to(ship["mining_target"])
     var travel: float = SHIP_SPEED * dt / maxf(distance, 1.0)
     if mode == "outbound":
+        var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
+        if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
+            ship["mining_mode"] = "return"
+            return
         ship["field_leg"] = minf(1.0, float(ship["field_leg"]) + travel)
         if float(ship["field_leg"]) >= 1.0:
             ship["mining_mode"] = "mining"
         return
     if mode == "mining":
         var resources: Array[String] = _mining_resources(state, int(ship["owner"]), field_index)
-        if resources.is_empty():
+        var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
+        if chunk.is_empty() or not resources.has(str(chunk["resource"])):
             ship["mining_mode"] = "return"
             return
+        var resource: String = str(chunk["resource"])
         var free: float = MINER_CAPACITY - _cargo_total(ship)
-        # Allocate proportional shares of the remaining hold and shared field budget.
-        var richness: float = 0.0
-        for resource in resources:
-            richness += float(field[resource])
-        for resource in resources:
-            var amount: float = minf(free * float(field[resource]) / richness, minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource])))
-            ship["cargo"][resource] = float(ship["cargo"][resource]) + amount
-            budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
-        if _cargo_total(ship) >= MINER_CAPACITY - 0.1:
+        var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource]))))
+        ship["cargo"][resource] = float(ship["cargo"][resource]) + amount
+        chunk["remaining"] = maxf(0.0, float(chunk["remaining"]) - amount)
+        budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
+        if float(chunk["remaining"]) <= EPS:
+            field["chunks"].erase(chunk)
+            ship["mining_mode"] = "return"
+        elif _cargo_total(ship) >= MINER_CAPACITY - 0.1:
             ship["mining_mode"] = "return"
         return
     if mode == "return":

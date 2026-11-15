@@ -113,7 +113,7 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
         if fields.size() >= cluster_count * 2:
             break
         var center: Vector2 = (points[pair[0]] + points[pair[1]]) * 0.5
-        var radius: float = rng.randf_range(38.0, 62.0)
+        var radius: float = rng.randf_range(32.0, 92.0)
         var safe: bool = true
         var anchor: int = -1
         var nearest: float = INF
@@ -168,7 +168,37 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
     for field in fields:
         field["position"] = (field["position"] as Vector2) * distance_scale
         field["radius"] = float(field["radius"]) * distance_scale
+        _populate_field(field, rng)
     return {"seed": seed_value, "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
+
+# Geometry stays inside the conservative obstacle radius used for route checks.
+static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> void:
+    var center: Vector2 = field["position"]
+    var radius: float = float(field["radius"])
+    var rotation: float = rng.randf_range(0.0, TAU)
+    var flatten: float = rng.randf_range(0.45, 0.95)
+    var outline: Array[Vector2] = []
+    for i in range(12):
+        var angle: float = TAU * float(i) / 12.0
+        var length: float = rng.randf_range(0.65, 0.96)
+        outline.append(center + (Vector2.from_angle(angle) * Vector2(1.0, flatten) * radius * length).rotated(rotation))
+    field["outline"] = outline
+    var chunks: Array = []
+    var count: int = clampi(roundi(7.0 + radius / 50.0), 9, 28)
+    var metal_share: float = float(field["Metals"]) / (float(field["Metals"]) + float(field["Crystals"]))
+    for i in range(count):
+        var angle: float = rng.randf_range(0.0, TAU)
+        var distance: float = sqrt(rng.randf()) * 0.52
+        var offset: Vector2 = (Vector2.from_angle(angle) * Vector2(1.0, flatten) * radius * distance).rotated(rotation)
+        var resource: String = "Metals" if i == 0 or (i > 1 and rng.randf() < metal_share) else "Crystals"
+        var amount: float = rng.randf_range(90.0, 260.0) * float(field[resource])
+        var shape: Array[float] = []
+        for vertex in range(7):
+            shape.append(rng.randf_range(0.62, 1.0))
+        chunks.append({"id": i, "position": center + offset, "resource": resource,
+            "remaining": amount, "initial": amount, "radius": radius * rng.randf_range(0.045, 0.085),
+            "rotation": rng.randf_range(0.0, TAU), "shape": shape})
+    field["chunks"] = chunks
 
 static func blocked(a: Vector2, b: Vector2, fields: Array) -> bool:
     for field in fields:
