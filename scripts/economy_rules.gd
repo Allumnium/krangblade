@@ -8,8 +8,10 @@ const ACTIVE_PRODUCTION = ["Metals", "Plastics", "Organics", "Crystals"]
 const HOME_POPULATION: float = 10000.0
 const COLONY_POPULATION: float = 1000.0
 const POPULATION_DOUBLING_YEARS: float = 30.0
-const ORGANICS_PER_LEVEL: float = 8.0
-const POPULATION_PER_ORGANICS_RATE: float = 12500.0
+const PRODUCTION_PER_LEVEL: float = 4.0
+const ORGANICS_PER_LEVEL: float = 4.0
+# Food production and demand both halve; population capacity stays unchanged.
+const POPULATION_PER_ORGANICS_RATE: float = 25000.0
 # Critically damped demographic response (seconds = years).
 const POPULATION_RESPONSE: float = 0.065
 const FARM_VARIATION: float = 0.05
@@ -18,12 +20,13 @@ const START_YEAR: int = 1
 const CARGO_CAPACITY: float = 10.0
 const MINED_RESOURCES = ["Metals", "Crystals"]
 # Provisional per-resource ceilings, independent of unlimited upgrade levels.
-const PLANET_MINING_LIMIT: float = 200.0
-const FIELD_MINING_LIMIT: float = 400.0
+const PLANET_MINING_LIMIT: float = 100.0
+const FIELD_MINING_LIMIT: float = 200.0
 const MINER_CAPACITY: float = 60.0
-const MINER_RATE: float = 12.0
+const MINER_RATE: float = 6.0
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const SHIP_SIZE: int = 1
+const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
 const DEFAULT_FOG_OF_WAR: bool = false
 # Reference stock, not a storage cap; percentage thresholds use these units.
@@ -337,7 +340,7 @@ static func rate(planet: Dictionary, resource: String) -> float:
             return 0.0
         var labor: float = sqrt(clampf(float(planet["population"]) / capacity, 0.0, 1.0))
         return farm_potential(planet) * labor
-    var output: float = 8.0 * level * float(planet["abundance"].get(resource, 0.0)) * bonus * population_multiplier(planet)
+    var output: float = PRODUCTION_PER_LEVEL * level * float(planet["abundance"].get(resource, 0.0)) * bonus * population_multiplier(planet)
     return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func _update_population(planet: Dictionary, dt: float) -> void:
@@ -408,6 +411,14 @@ static func _get_owned(state: Dictionary, player: int, index: int) -> Dictionary
         return {}
     return planets[index]
 
+# Reserve a slot as soon as construction is ordered.
+static func shipyard_count(p: Dictionary) -> int:
+    var count: int = (p.get("yards", []) as Array).size()
+    for item in p.get("queue", []):
+        if item["kind"] == "yard":
+            count += 1
+    return count
+
 static func enqueue(state: Dictionary, player: int, index: int, kind: String, target: String = "") -> bool:
     var p: Dictionary = _get_owned(state, player, index)
     if p.is_empty():
@@ -421,6 +432,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
         "colony_ship", "fighter", "miner":
             target = ""
         "yard":
+            if shipyard_count(p) >= MAX_SHIPYARDS:
+                return false
             target = ""
         "yard_upgrade":
             if not target.is_valid_int():

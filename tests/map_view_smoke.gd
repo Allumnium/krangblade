@@ -177,6 +177,12 @@ func _run() -> void:
     assert(not state["planets"][0]["continuous"]["fighter"])
     var new_yard: Button = view.get("yard_button")
     new_yard.pressed.emit()
+    new_yard.pressed.emit()
+    assert(new_yard.disabled)
+    assert(new_yard.text.ends_with("(2)"))
+    var build_card: Dictionary = view.get("build_cards")["yard"]
+    (build_card["cancel"] as Button).pressed.emit()
+    assert(not new_yard.disabled)
     var yard_job: Dictionary = state["planets"][0]["queue"][0]
     var pending_key: int = -int(yard_job["id"])
     assert(idle_rows.size() == 2 and idle_rows.has(pending_key))

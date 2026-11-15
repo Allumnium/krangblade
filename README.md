@@ -107,3 +107,5 @@ Version 0.1.4: seed-stable unique sci-fi system names, predominantly specialized
 ## Project working instructions
 
 Read [AGENTS.md](AGENTS.md) before contributing or starting a new coding session. It records standing workflow, terminology, UI, and validation conventions; later explicit decisions supersede older notes.
+
+Version 0.1.6: maximum three completed or pending shipyards per system, enforced by the host and reflected in the build button. Halve base production (8 to 4 per level), farm output and food demand (preserves population capacity), planetary metal/crystal ceiling (200 to 100), asteroid field ceiling (400 to 200 times richness), and miner extraction speed (12 to 6 times richness). Starting inventory, deposits, cargo capacity, travel speed and construction costs remain unchanged. Provisional balance tuning.
