@@ -211,6 +211,7 @@ func _initialize() -> void:
     home["levels"]["Organics"] = 1
     home["population"] = capacity
     home["population_velocity"] = 0.0
+    home["stock"]["Metals"] = 1000.0
     assert(ECON.enqueue(demographics, 1, 0, "production", "Organics"))
     ECON.step(demographics, 20.0)
     assert(int(home["levels"]["Organics"]) == 2)
@@ -261,6 +262,26 @@ func _initialize() -> void:
     assert(is_equal_approx(float(p["stock"]["Metals"]), 30.0))
     assert(p["queue"].is_empty())
 
+    # Upgrade costs increase quadratically; all order types refund actual allocations.
+    for kind in ["production", "yard_upgrade"]:
+        assert(float(ECON._cost(kind, 2)["Metals"]) >= 600.0)
+        assert(float(ECON._cost(kind, 3)["Metals"]) > float(ECON._cost(kind, 2)["Metals"]))
+        assert(float(ECON._cost(kind, 4)["Metals"]) > float(ECON._cost(kind, 3)["Metals"]))
+    var refunds: Dictionary = ECON.create(graph, players, ids)
+    var refund_home: Dictionary = refunds["planets"][0]
+    refund_home["levels"]["Metals"] = 0
+    for kind in ["ship", "colony_ship", "fighter", "miner", "yard", "yard_upgrade", "production"]:
+        refund_home["stock"]["Metals"] = 10000.0
+        var target: String = "0" if kind == "yard_upgrade" else ("Organics" if kind == "production" else "")
+        assert(ECON.enqueue(refunds, 1, 0, kind, target))
+        ECON.step(refunds, 1.0)
+        var order: Dictionary = refund_home["queue"][0]
+        assert(float(order["allocated"]["Metals"]) > 0.0)
+        assert(not ECON.cancel(refunds, 2, 0, int(order["id"])))
+        assert(ECON.cancel(refunds, 1, 0, int(order["id"])))
+        assert(refund_home["queue"].is_empty())
+        assert(is_equal_approx(float(refund_home["stock"]["Metals"]), 10000.0))
+        assert(int(refund_home["yards"][0]["job"]) == -1)
     # Yard upgrades wait behind assigned hull production.
     p["stock"]["Metals"] = 5000.0
     p["yards"].append({"level": 1, "job": -1})

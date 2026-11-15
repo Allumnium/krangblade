@@ -23,6 +23,15 @@ func _run() -> void:
     assert(not overview.is_ancestor_of(view.get("inspector_tabs")))
     assert(header.size.y <= 52.0)
     assert(header.get_child_count() == 1 and header.get_child(0) is HBoxContainer)
+    for child in header.get_child(0).get_children():
+        if child is Button:
+            assert(child.text == "MENU")
+    var menu: AcceptDialog = view.get("match_menu")
+    var menu_button: Button = view.get("leave")
+    menu_button.pressed.emit()
+    assert(menu.visible and session.get("phase") == "match")
+    menu.get_ok_button().pressed.emit()
+    assert(not menu.visible and session.get("phase") == "match")
     for tile in view.get("global_resource_tiles").values():
         assert(tile.get_parent() == header.get_child(0))
     var idle_rows: Dictionary = view.get("yard_activity_rows")
@@ -36,7 +45,11 @@ func _run() -> void:
     var queued: Dictionary = setup_state["planets"][0]["queue"][0]
     assert(queued["kind"] == "yard_upgrade" and queued["target"] == "0")
     assert(yard_upgrade.disabled)
-    session.call("request_cancel", 0, int(queued["id"]))
+    var queue_rows: Dictionary = view.get("queue_rows")
+    var cancel_upgrade: Button = queue_rows[int(queued["id"])]["cancel"]
+    assert(not cancel_upgrade.disabled)
+    cancel_upgrade.pressed.emit()
+    assert(setup_state["planets"][0]["queue"].is_empty())
     assert(not yard_upgrade.disabled)
     assert((view.get("info") as Label).text.begins_with("System"))
     assert(header.position.y + header.size.y < canvas.position.y)
@@ -90,7 +103,7 @@ func _run() -> void:
     session.call("_economy_tick")
     session.call("_economy_tick")
     assert((idle_rows[pending_key]["progress"] as ProgressBar).value > 0.0)
-    session.call("request_cancel", 0, int(yard_job["id"]))
+    (queue_rows[int(yard_job["id"])]["cancel"] as Button).pressed.emit()
     assert(idle_rows.size() == 1)
     tabs.current_tab = 0
     var points: Array = state["map"]["points"]
@@ -113,20 +126,23 @@ func _run() -> void:
     session.call("request_operation", 0, "colony_ship")
     view.set("selected", 0)
     view.call("_refresh")
-    var jobs: ItemList = view.get("jobs")
-    assert(jobs.item_count == 1)
+    assert(queue_rows.size() == 1)
+    var colony_job_id: int = int(state["planets"][0]["queue"][0]["id"])
+    assert(not (queue_rows[colony_job_id]["cancel"] as Button).disabled)
     for i in range(10):
         session.call("_economy_tick")
     var active: Dictionary = view.get("yard_activity_rows")
     assert(active.size() == 1)
     assert((active[0]["progress"] as ProgressBar).value > 0.0)
     tabs.current_tab = 2
-    assert(tabs.get_tab_control(2).is_ancestor_of(jobs))
+    assert(tabs.get_tab_control(2).is_ancestor_of(view.get("queue_list")))
     assert(tabs.get_tab_control(1).is_ancestor_of(trade))
-    jobs.select(0)
-    view.call("_refresh")
-    assert((view.get("job_progress") as ProgressBar).visible)
-    assert((view.get("job_cost") as HBoxContainer).get_child_count() > 0)
+    assert((queue_rows[colony_job_id]["progress"] as ProgressBar).value > 0.0)
+    assert((queue_rows[colony_job_id]["cost"] as Label).text.contains("Metals"))
+    # Cancel an active hull through its own row, then rebuild it.
+    (queue_rows[colony_job_id]["cancel"] as Button).pressed.emit()
+    assert(state["planets"][0]["queue"].is_empty())
+    session.call("request_operation", 0, "colony_ship")
     tabs.current_tab = 0
     view.set("selected", neighbor)
     view.call("_refresh")

@@ -376,8 +376,8 @@ static func _cost(kind: String, level: int) -> Dictionary:
         "fighter": return {"Metals": 90.0}
         "miner": return {"Metals": 180.0}
         "yard": return {"Metals": 480.0}
-        "yard_upgrade": return {"Metals": 240.0 * level}
-        "production": return {"Metals": 80.0 * level}
+        "yard_upgrade": return {"Metals": 180.0 * float(level) * float(level)}
+        "production": return {"Metals": 150.0 * float(level) * float(level)}
     return {}
 
 static func _work(kind: String, level: int) -> float:
