@@ -112,7 +112,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
         planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
             "abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
             "yards": yards, "queue": [], "continuous": {}})
-    var state: Dictionary = {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}}
+    var state: Dictionary = {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "outposts": {}, "military": {}}
     update_exploration(state)
     return state
 
@@ -296,6 +296,8 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
     if int(state["planets"][at]["owner"]) == 0:
         var colony: Dictionary = state["planets"][at]
         colony["owner"] = int(ship["owner"])
+        for declarations in state.get("outposts", {}).values():
+            declarations.erase(at)
         colony["population"] = COLONY_POPULATION
         colony["population_velocity"] = 0.0
         colony["levels"]["Organics"] = 1
@@ -873,6 +875,226 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
             ship["mining_mode"] = "idle"
             ship["field"] = -1
 
+# Outposts are player-specific objectives, not ownership or economic buildings.
+static func military_home(state: Dictionary, player: int) -> int:
+    for i in range((state["planets"] as Array).size()):
+        if int(state["planets"][i]["owner"]) == player and bool(state["planets"][i]["home"]):
+            return i
+    return -1
+
+static func military_network(state: Dictionary, player: int) -> Dictionary:
+    var home: int = military_home(state, player)
+    var result: Dictionary = {"home": home, "distance": {}, "parents": {}, "children": {}, "frontiers": [], "outposts": []}
+    if home < 0:
+        return result
+    var team: int = int(state["teams"].get(player, 0))
+    var teams: Array[int] = planet_teams(state)
+    var declarations: Dictionary = state.get("outposts", {}).get(player, {})
+    var allowed: Dictionary = {}
+    for i in range(teams.size()):
+        if teams[i] == team or (teams[i] == 0 and declarations.has(i)):
+            allowed[i] = true
+        if teams[i] == 0 and declarations.has(i):
+            result["outposts"].append(i)
+    var adjacency: Dictionary = {}
+    for edge in state["map"]["edges"]:
+        var a: int = int(edge[0])
+        var b: int = int(edge[1])
+        if allowed.has(a) and allowed.has(b):
+            if not adjacency.has(a):
+                adjacency[a] = []
+            if not adjacency.has(b):
+                adjacency[b] = []
+            adjacency[a].append(b)
+            adjacency[b].append(a)
+    var distances: Dictionary = {home: 0}
+    var parents: Dictionary = {}
+    var order: Array[int] = [home]
+    var cursor: int = 0
+    while cursor < order.size():
+        var current: int = order[cursor]
+        cursor += 1
+        for next in adjacency.get(current, []):
+            var depth: int = int(distances[current]) + 1
+            if not distances.has(next):
+                distances[next] = depth
+                parents[next] = []
+                order.append(next)
+            if int(distances[next]) == depth:
+                parents[next].append(current)
+    # Retain only outward branches that lead to a declared objective.
+    var useful: Dictionary = {}
+    var children: Dictionary = {}
+    var frontiers: Array[int] = []
+    for idx in range(order.size() - 1, -1, -1):
+        var node: int = order[idx]
+        var outward: bool = children.has(node)
+        var objective: bool = declarations.has(node) and teams[node] == 0
+        if objective and not outward:
+            frontiers.append(node)
+        if objective or outward:
+            useful[node] = true
+            for parent in parents.get(node, []):
+                if not children.has(parent):
+                    children[parent] = []
+                children[parent].append(node)
+    frontiers.sort()
+    result["distance"] = distances
+    result["parents"] = parents
+    result["children"] = children
+    result["frontiers"] = frontiers
+    return result
+
+static func can_declare_outpost(state: Dictionary, player: int, index: int) -> bool:
+    if not state["teams"].has(player) or index < 0 or index >= (state["planets"] as Array).size():
+        return false
+    if int(state["planets"][index]["owner"]) != 0 or not discovered(state, player, "planets", index):
+        return false
+    var network: Dictionary = military_network(state, player)
+    for node in network["distance"]:
+        if MAP.linked(state["map"], int(node), index):
+            return true
+    return false
+
+static func set_outpost(state: Dictionary, player: int, index: int, enabled: bool) -> bool:
+    if not state["teams"].has(player):
+        return false
+    if not state["outposts"].has(player):
+        state["outposts"][player] = {}
+    var declarations: Dictionary = state["outposts"][player]
+    if enabled:
+        if not can_declare_outpost(state, player, index):
+            return false
+        declarations[index] = true
+    else:
+        if not declarations.has(index):
+            return false
+        declarations.erase(index)
+    return true
+
+# Exact integer percentages / hull counts via largest remainder, stable tie order.
+static func _apportion(keys: Array, weights: Dictionary, total: int) -> Dictionary:
+    var result: Dictionary = {}
+    if keys.is_empty():
+        return result
+    var sum: float = 0.0
+    for key in keys:
+        sum += maxf(0.0, float(weights.get(key, 0)))
+    var remainder: Dictionary = {}
+    var left: int = total
+    for key in keys:
+        var exact: float = float(total) * (maxf(0.0, float(weights.get(key, 0))) / sum if sum > EPS else 1.0 / float(keys.size()))
+        result[key] = floori(exact)
+        remainder[key] = exact - float(result[key])
+        left -= int(result[key])
+    while left > 0:
+        var best: Variant = keys[0]
+        for key in keys:
+            if float(remainder[key]) > float(remainder[best]):
+                best = key
+        result[best] += 1
+        remainder[best] = -1.0
+        left -= 1
+    return result
+
+static func military_policy(state: Dictionary, player: int, kind: String, network: Dictionary) -> Dictionary:
+    var stored: Dictionary = state.get("military", {}).get(player, {}).get(kind, {})
+    var fronts: Array = network["frontiers"]
+    var old: Dictionary = stored.get("weights", {})
+    var weights: Dictionary = {}
+    for node in fronts:
+        weights[node] = int(old.get(node, roundi(100.0 / maxf(1.0, float(fronts.size())))))
+    return {"frontier": int(stored.get("frontier", 0)), "weights": _apportion(fronts, weights, 100)}
+
+static func set_military(state: Dictionary, player: int, kind: String, node: int, percent: int) -> bool:
+    if not state["teams"].has(player) or kind != "fighter" or percent < 0 or percent > 100:
+        return false
+    var network: Dictionary = military_network(state, player)
+    var policy: Dictionary = military_policy(state, player, kind, network)
+    if node == -1:
+        policy["frontier"] = percent
+    else:
+        var others: Array = network["frontiers"].duplicate()
+        if not others.has(node):
+            return false
+        others.erase(node)
+        var weights: Dictionary = _apportion(others, policy["weights"], 100 - percent)
+        weights[node] = 100 if others.is_empty() else percent
+        policy["weights"] = weights
+    if not state["military"].has(player):
+        state["military"][player] = {}
+    state["military"][player][kind] = policy
+    return true
+
+static func military_assignments(state: Dictionary, player: int, kind: String, network: Dictionary) -> Dictionary:
+    var ids: Array[int] = []
+    for ship in state["ships"]:
+        if int(ship["owner"]) == player and ship.get("kind", "") == kind:
+            ids.append(int(ship["id"]))
+    ids.sort()
+    var policy: Dictionary = military_policy(state, player, kind, network)
+    var stationed: int = 0 if network["frontiers"].is_empty() else roundi(float(ids.size()) * float(policy["frontier"]) / 100.0)
+    var counts: Dictionary = _apportion(network["frontiers"], policy["weights"], stationed)
+    var assignments: Dictionary = {}
+    var offset: int = 0
+    for node in network["frontiers"]:
+        for i in range(int(counts[node])):
+            assignments[ids[offset]] = node
+            offset += 1
+    while offset < ids.size():
+        assignments[ids[offset]] = -1
+        offset += 1
+    return assignments
+
+static func _military_homeward(network: Dictionary, node: int) -> Array[int]:
+    var route: Array[int] = [node]
+    while network["parents"].has(node):
+        var choices: Array = network["parents"][node]
+        node = int(choices[randi_range(0, choices.size() - 1)])
+        route.append(node)
+    if node != int(network["home"]):
+        return []
+    return route
+
+static func _work_fighter(state: Dictionary, ship: Dictionary, network: Dictionary, target: int, dt: float) -> void:
+    if not _move(state, ship, dt):
+        return
+    var here: int = int(ship["at"])
+    var home: int = int(network["home"])
+    if home < 0:
+        return
+    if here != home:
+        if target == here and network["frontiers"].has(here):
+            ship["military_mode"] = "frontier"
+            return
+        var back: Array[int] = _military_homeward(network, here)
+        if back.is_empty():
+            back.assign(ship.get("military_return", []))
+        if not back.is_empty() and back[0] == here and back.back() == home:
+            _set_route(ship, back)
+            ship["military_mode"] = "return"
+        return
+    if network["frontiers"].is_empty():
+        ship["military_mode"] = "idle"
+        return
+    var path: Array[int] = []
+    if target >= 0:
+        path = _military_homeward(network, target)
+        path.reverse()
+    else:
+        path.append(home)
+        var node: int = home
+        while network["children"].has(node):
+            var choices: Array = network["children"][node]
+            node = int(choices[randi_range(0, choices.size() - 1)])
+            path.append(node)
+    if path.size() > 1:
+        var back: Array[int] = path.duplicate()
+        back.reverse()
+        ship["military_return"] = back
+        _set_route(ship, path)
+        ship["military_mode"] = "patrol" if target < 0 else "deploying"
+
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
     for i in range((state["planets"] as Array).size()):
@@ -882,6 +1104,8 @@ static func step(state: Dictionary, dt: float) -> void:
     var budgets: Array = []
     for field in state["map"].get("fields", []):
         budgets.append({"Metals": field_limit(field, "Metals") * dt, "Crystals": field_limit(field, "Crystals") * dt})
+    var military_networks: Dictionary = {}
+    var military_orders: Dictionary = {}
     for ship in (state["ships"] as Array).duplicate():
         if ship.get("kind", "ship") == "colony_ship":
             if _work_colony(state, ship, dt):
@@ -890,5 +1114,10 @@ static func step(state: Dictionary, dt: float) -> void:
             _work_ship(state, ship, teams, cache, dt)
         elif ship.get("kind", "ship") == "miner":
             _work_miner(state, ship, teams, cache, budgets, dt)
-        # Fighters remain in orbit; combat and military orders are not designed yet.
+        elif ship.get("kind", "") == "fighter":
+            var owner: int = int(ship["owner"])
+            if not military_networks.has(owner):
+                military_networks[owner] = military_network(state, owner)
+                military_orders[owner] = military_assignments(state, owner, "fighter", military_networks[owner])
+            _work_fighter(state, ship, military_networks[owner], int(military_orders[owner].get(int(ship["id"]), -1)), dt)
     update_exploration(state)

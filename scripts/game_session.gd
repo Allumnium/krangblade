@@ -490,6 +490,40 @@ func _colonize_for(id: int, ship_id: int, target: int) -> void:
     if _active_player(id) and ECONOMY.send_colony(economy, id, ship_id, target):
         _publish_economy()
 
+func request_outpost(index: int, enabled: bool) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _outpost_for(1, index, enabled)
+    else:
+        _rpc_outpost.rpc_id(1, index, enabled)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_outpost(index: int, enabled: bool) -> void:
+    if multiplayer.is_server():
+        _outpost_for(multiplayer.get_remote_sender_id(), index, enabled)
+
+func _outpost_for(id: int, index: int, enabled: bool) -> void:
+    if _active_player(id) and ECONOMY.set_outpost(economy, id, index, enabled):
+        _publish_economy()
+
+func request_military(kind: String, node: int, percent: int) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _military_for(1, kind, node, percent)
+    else:
+        _rpc_military.rpc_id(1, kind, node, percent)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_military(kind: String, node: int, percent: int) -> void:
+    if multiplayer.is_server():
+        _military_for(multiplayer.get_remote_sender_id(), kind, node, percent)
+
+func _military_for(id: int, kind: String, node: int, percent: int) -> void:
+    if _active_player(id) and ECONOMY.set_military(economy, id, kind, node, percent):
+        _publish_economy()
+
 func _active_player(id: int) -> bool:
     return phase == "match" and players.has(id) and (id == 1 or multiplayer.get_peers().has(id))
 

@@ -33,6 +33,16 @@ var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
 var drag_button: int = 0
 var ship_visuals: Dictionary = {}
+var interaction_panel: VBoxContainer
+var outpost_button: Button
+var military_panel: VBoxContainer
+var military_split: VSlider
+var military_split_label: Label
+var military_lens: CheckBox
+var frontier_list: VBoxContainer
+var frontier_rows: Dictionary = {}
+var military_drag: int = -2
+var military_drag_weights: Dictionary = {}
 var colony_picker: OptionButton
 var send_colony_button: Button
 var colony_button: Button
@@ -306,10 +316,16 @@ func _build_ui() -> void:
     planet_overview.add_child(population_label)
     production_summary = HUD.section(planet_overview, "Resources")
     _build_production_summary()
+    interaction_panel = VBoxContainer.new()
+    interaction_panel.add_theme_constant_override("separation", 8)
+    body.add_child(interaction_panel)
     colony_picker = OptionButton.new()
-    planet_overview.add_child(colony_picker)
-    send_colony_button = _button("SEND COLONY SHIP", _send_colony, planet_overview)
+    interaction_panel.add_child(colony_picker)
+    send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
     HUD.action(send_colony_button, Color("#c7a4ff"))
+    outpost_button = _button("DECLARE OUTPOST", _toggle_outpost, interaction_panel)
+    HUD.action(outpost_button, Color("#e9a276"))
+    _build_military_panel()
     yard_activity = HUD.section(planet_overview, "Shipyards")
     inspector_tabs = TabContainer.new()
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -356,7 +372,7 @@ func _build_ui() -> void:
     HUD.action(colony_button, Color("#c7a4ff"))
     fighter_button = _ship_build_row(shipyards, "BUILD FIGHTER", "fighter")
     HUD.action(fighter_button, Color("#f2b57e"))
-    fighter_button.tooltip_text = "Prototype fighter hull. Combat and military orders are not implemented yet."
+    fighter_button.tooltip_text = "Automatically patrols military outposts or stations at frontiers."
     miner_button = _ship_build_row(shipyards, "BUILD MINING SHIP", "miner")
     HUD.action(miner_button, Color("#d8e58b"))
     miner_button.tooltip_text = "Automatically mines accessible fields from owned service systems."
@@ -636,6 +652,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
     fleet_detail.visible = kind != "fighter"
     fleet_cargo.get_parent().visible = cargo_capable
     if kind == "fighter":
+        if owner == _me():
+            _refresh_military(state, kind)
         return
     var total: int = 0
     var traveling: int = 0
@@ -809,7 +827,10 @@ func _refresh() -> void:
     inspector_panel.visible = not p.is_empty() or other_selected
     overview_panel.visible = inspector_panel.visible
     planet_overview.visible = not other_selected
-    inspector_tabs.visible = not other_selected
+    var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
+    inspector_tabs.visible = not other_selected and own_system
+    interaction_panel.visible = not other_selected and not p.is_empty() and not own_system
+    military_panel.get_parent().hide()
     ship_overview.visible = other_selected
     fleet_scroll.visible = other_selected
     fleet_overview.visible = other_selected
@@ -1013,6 +1034,11 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
     var neutral: bool = not p.is_empty() and int(p.get("owner", -1)) == 0 and phase == "match"
     colony_picker.visible = neutral
     send_colony_button.visible = neutral
+    outpost_button.visible = neutral
+    var declared: bool = state.get("outposts", {}).get(_me(), {}).has(selected)
+    outpost_button.text = "REMOVE OUTPOST" if declared else "DECLARE OUTPOST"
+    outpost_button.disabled = not neutral or (not declared and not ECONOMY.can_declare_outpost(state, _me(), selected))
+    outpost_button.tooltip_text = "Patrol objective; requires a connection to your military network."
     var choices: Array[int] = []
     var labels: Array[String] = []
     if neutral:
@@ -1034,6 +1060,100 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
             colony_picker.select(maxi(0, choices.find(previous)))
     colony_picker.disabled = choices.is_empty()
     send_colony_button.disabled = choices.is_empty()
+
+func _toggle_outpost() -> void:
+    var declared: bool = _state().get("outposts", {}).get(_me(), {}).has(selected)
+    session.call("request_outpost", selected, not declared)
+
+func _build_military_panel() -> void:
+    military_panel = HUD.section(fleet_overview, "Fighters")
+    military_lens = CheckBox.new()
+    military_lens.text = "Combat lens"
+    military_lens.button_pressed = true
+    military_lens.toggled.connect(func(_enabled: bool) -> void: map_canvas.queue_redraw())
+    military_panel.add_child(military_lens)
+    var split_row := HBoxContainer.new()
+    military_panel.add_child(split_row)
+    military_split = VSlider.new()
+    military_split.custom_minimum_size = Vector2(28, 108)
+    military_split.max_value = 100
+    military_split.step = 1
+    military_split.focus_mode = Control.FOCUS_NONE
+    split_row.add_child(military_split)
+    military_split_label = _label("", 13)
+    military_split_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    military_split_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    split_row.add_child(military_split_label)
+    military_split.drag_started.connect(_begin_military_drag.bind(-1))
+    military_split.drag_ended.connect(_end_military_drag.bind(-1))
+    military_split.value_changed.connect(_preview_military.bind(-1))
+    frontier_list = VBoxContainer.new()
+    military_panel.add_child(frontier_list)
+    military_panel.get_parent().hide()
+
+func _begin_military_drag(node: int) -> void:
+    military_drag = node
+    military_drag_weights = {}
+    for index in frontier_rows:
+        military_drag_weights[index] = int(frontier_rows[index]["slider"].value)
+
+func _end_military_drag(changed: bool, node: int) -> void:
+    var value: int = int(military_split.value) if node == -1 else int(frontier_rows[node]["slider"].value) if frontier_rows.has(node) else 0
+    military_drag = -2
+    if changed:
+        session.call("request_military", "fighter", node, value)
+    _refresh()
+
+func _preview_military(value: float, node: int) -> void:
+    if node == -1:
+        military_split_label.text = "Frontier  %d%%\n\nPatrol  %d%%" % [int(value), 100 - int(value)]
+        return
+    if military_drag != node or not frontier_rows.has(node):
+        return
+    var others: Array = frontier_rows.keys()
+    others.erase(node)
+    var weights: Dictionary = ECONOMY._apportion(others, military_drag_weights, 100 - int(value))
+    weights[node] = 100 if others.is_empty() else int(value)
+    for index in weights:
+        frontier_rows[index]["slider"].set_value_no_signal(weights[index])
+        frontier_rows[index]["label"].text = "%s  %d%%" % [_system_name(index), int(weights[index])]
+
+func _refresh_military(state: Dictionary, kind: String) -> void:
+    military_panel.get_parent().show()
+    var network: Dictionary = ECONOMY.military_network(state, _me())
+    var policy: Dictionary = ECONOMY.military_policy(state, _me(), kind, network)
+    var fronts: Array = network["frontiers"]
+    if military_drag != -2:
+        return
+    military_split.editable = not fronts.is_empty()
+    military_split.set_value_no_signal(policy["frontier"] if not fronts.is_empty() else 0)
+    _preview_military(military_split.value, -1)
+    for node in frontier_rows.keys():
+        if not fronts.has(node):
+            var obsolete: Control = frontier_rows[node]["row"]
+            frontier_list.remove_child(obsolete)
+            obsolete.queue_free()
+            frontier_rows.erase(node)
+    for node in fronts:
+        if not frontier_rows.has(node):
+            var row := VBoxContainer.new()
+            frontier_list.add_child(row)
+            var label := _label("", 12)
+            label.autowrap_mode = TextServer.AUTOWRAP_OFF
+            row.add_child(label)
+            var slider := HSlider.new()
+            slider.max_value = 100
+            slider.step = 1
+            slider.focus_mode = Control.FOCUS_NONE
+            slider.custom_minimum_size.y = 24
+            row.add_child(slider)
+            slider.drag_started.connect(_begin_military_drag.bind(int(node)))
+            slider.drag_ended.connect(_end_military_drag.bind(int(node)))
+            slider.value_changed.connect(_preview_military.bind(int(node)))
+            frontier_rows[node] = {"row": row, "label": label, "slider": slider}
+        frontier_rows[node]["slider"].editable = fronts.size() > 1
+        frontier_rows[node]["slider"].set_value_no_signal(policy["weights"][node])
+        frontier_rows[node]["label"].text = "%s  %d%%" % [_system_name(int(node)), int(policy["weights"][node])]
 
 func _send_colony() -> void:
     var index: int = colony_picker.selected
@@ -1363,6 +1483,29 @@ func _ship_poses(state: Dictionary) -> Dictionary:
         poses[int(ship["id"])] = {"point": point, "direction": direction, "mining": mining}
     return poses
 
+func _draw_combat_lens(state: Dictionary, font: Font) -> void:
+    var craft: Dictionary = _selected_ship(state)
+    if craft.is_empty() or craft.get("kind", "") != "fighter" or int(craft["owner"]) != _me() or not military_lens.button_pressed:
+        return
+    var network: Dictionary = ECONOMY.military_network(state, _me())
+    var points: Array = state["map"]["points"]
+    var fronts: Array = network["frontiers"]
+    for node in network["outposts"]:
+        if not ECONOMY.discovered(state, _me(), "planets", int(node)):
+            continue
+        var pos: Vector2 = _screen_point(points[node])
+        var radius: float = _planet_radius(int(node), state)
+        if not get_viewport_rect().grow(radius + 60.0).has_point(pos):
+            continue
+        var frontier: bool = fronts.has(node)
+        var tint: Color = Color("#e9a276") if frontier else HUD.ACCENT if network["distance"].has(node) else HUD.MUTED
+        map_canvas.draw_arc(pos, radius + 8.0, 0.0, TAU, 48, tint, 2.0, true)
+        var tag: String = _system_name(int(node)) + (" · Frontier" if frontier else " · Outpost")
+        var width: float = font.get_string_size(tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+        var anchor: Vector2 = pos + Vector2(-width * 0.5, -radius - 17.0)
+        map_canvas.draw_rect(Rect2(anchor - Vector2(4, 13), Vector2(width + 8, 19)), Color("#0c1928ec"))
+        map_canvas.draw_string(font, anchor, tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
+
 func _draw_map() -> void:
     if session == null:
         return
@@ -1424,6 +1567,7 @@ func _draw_map() -> void:
                 map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
         if i == selected:
             map_canvas.draw_string(font, pos + Vector2(-80, -radius - 8), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff"))
+    _draw_combat_lens(state, font)
     var poses: Dictionary = _ship_poses(state)
     for ship in state["ships"]:
         if not poses.has(int(ship["id"])):
