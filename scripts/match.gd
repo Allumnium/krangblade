@@ -78,6 +78,9 @@ var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
 var global_resource_labels: Dictionary = {}
 var global_resource_tiles: Dictionary = {}
+var resource_hover_panel: PanelContainer
+var resource_hover_label: Label
+var hovered_resource: String = ""
 var global_population_label: Label
 var year_label: Label
 var time_buttons: Dictionary = {}
@@ -195,6 +198,7 @@ func _ready() -> void:
     upgrade_audio.stream = UPGRADE_SOUND
     add_child(upgrade_audio)
     _build_ui()
+    _build_resource_hover()
     _on_economy_changed()
     session.call("match_scene_loaded")
 
@@ -924,7 +928,10 @@ func _refresh_field_panels(state: Dictionary) -> void:
     else:
         var metals: int = roundi(100.0 * float(stock["Metals"]) / total)
         ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, _compact_amount(float(stock["Metals"])), 100 - metals, _compact_amount(float(stock["Crystals"]))]
-    ship_detail.tooltip_text = "%d chunks remaining · %s" % [field["chunks"].size(), _system_name(int(field["anchor"]))]
+    var access_names: PackedStringArray = []
+    for anchor in ECONOMY.field_access_systems(state["map"], field):
+        access_names.append(_system_name(anchor))
+    ship_detail.tooltip_text = "%d chunks remaining · Access: %s" % [field["chunks"].size(), ", ".join(access_names)]
     ship_cargo.get_parent().hide()
     fleet_title.text = "Mining"
     fleet_detail.hide()
@@ -1310,6 +1317,81 @@ func _compact_amount(value: float) -> String:
         return "%.1fK" % (value / 1000.0)
     return "%.0f" % value
 
+func _build_resource_hover() -> void:
+    resource_hover_panel = PanelContainer.new()
+    resource_hover_panel.z_index = 50
+    resource_hover_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#42647e"), 9))
+    add_child(resource_hover_panel)
+    var scroll := ScrollContainer.new()
+    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    resource_hover_panel.add_child(scroll)
+    resource_hover_label = _label("", 12)
+    resource_hover_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    resource_hover_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    scroll.add_child(resource_hover_label)
+    resource_hover_panel.hide()
+
+func _flow_name(category: String) -> String:
+    if category.begins_with("Construction: "):
+        return _job_name(category.trim_prefix("Construction: "))
+    return category
+
+func _resource_breakdown(state: Dictionary, resource: String) -> String:
+    var totals: Dictionary = ECONOMY.empire_totals(state, _me())
+    var lines: PackedStringArray = ["%s  ·  %s stored" % [resource, _tons(float(totals["stock"][resource]))],
+        "%s in transit  /  %s storage" % [_tons(float(totals["cargo"][resource])), _tons(float(totals["storage_reference"][resource]))],
+        "Current local flows (t/yr)"]
+    for i in range((state.get("planets", []) as Array).size()):
+        var p: Dictionary = state["planets"][i]
+        if int(p["owner"]) != _me():
+            continue
+        var parts: PackedStringArray = []
+        var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
+        for category in p.get("flows", {}):
+            if not categories.has(category):
+                categories.append(category)
+        var net: float = 0.0
+        for category in categories:
+            var amount: float = ECONOMY.local_flow(p, category, resource)
+            if amount <= ECONOMY.EPS:
+                continue
+            var sign: float = -1.0 if category == "Population" or category == "Exports" or str(category).begins_with("Construction: ") else 1.0
+            net += sign * amount
+            parts.append("%+.2f %s" % [sign * amount, _flow_name(category)])
+        lines.append("%s  %+.2f" % [_system_name(i), net])
+        if not parts.is_empty():
+            lines.append("  " + " · ".join(parts))
+    if int(state.get("time_speed", 1)) == 0:
+        lines.append("Paused · last simulation step")
+    return "\n".join(lines)
+
+func _update_resource_hover() -> void:
+    if not is_instance_valid(resource_hover_panel):
+        return
+    var mouse: Vector2 = get_global_mouse_position()
+    var resource: String = ""
+    for key in global_resource_tiles:
+        if global_resource_tiles[key].get_global_rect().has_point(mouse):
+            resource = key
+            break
+    if resource.is_empty() and resource_hover_panel.visible and resource_hover_panel.get_global_rect().has_point(mouse):
+        resource = hovered_resource
+    if resource.is_empty() or _state().is_empty():
+        resource_hover_panel.hide()
+        hovered_resource = ""
+        return
+    var state: Dictionary = _state()
+    var value: String = _resource_breakdown(state, resource)
+    if resource_hover_label.text != value:
+        resource_hover_label.text = value
+    hovered_resource = resource
+    var tile_rect: Rect2 = global_resource_tiles[resource].get_global_rect()
+    var viewport: Vector2 = get_viewport_rect().size
+    var width: float = minf(420.0, viewport.x - 16.0)
+    resource_hover_panel.size = Vector2(width, minf(viewport.y - tile_rect.end.y - 12.0, maxf(105.0, 20.0 * float(value.count("\n") + 2))))
+    resource_hover_panel.global_position = Vector2(clampf(tile_rect.position.x, 8.0, viewport.x - width - 8.0), tile_rect.end.y)
+    resource_hover_panel.show()
+
 func _refresh_global_bar(state: Dictionary) -> void:
     year_label.text = "YEAR  %d" % ECONOMY.current_year(state)
     year_label.tooltip_text = "One game year per simulation second"
@@ -1326,8 +1408,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
         global_resource_fills[resource] = clampf(stored / reference, 0.0, 1.0) if reference > 0.0 else 0.0
         var tile: PanelContainer = global_resource_tiles[resource]
         tile.queue_redraw()
-        tile.tooltip_text = "%s: %.1f\nStored: %.1f / %.0f • Cargo: %.1f\nNet: %+.2f/year (last 5 years)\nStorage capacity" % [
-            resource, value, stored, reference, float(totals["cargo"][resource]), rate]
+        tile.tooltip_text = ""
     global_population_label.text = "%s" % _compact_amount(float(totals["population"]))
     global_population_label.tooltip_text = "Population across owned systems: %.0f" % float(totals["population"])
 
@@ -2117,6 +2198,7 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 
 func _process(delta: float) -> void:
     _keyboard_pan(delta)
+    _update_resource_hover()
     visual_clock += delta
     game_visual_clock += delta * float(_state().get("time_speed", 1))
     for visual in ship_visuals.values():

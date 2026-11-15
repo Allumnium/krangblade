@@ -21,6 +21,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [x] Validate baseline population-scaled production, local population gates for production upgrades (first Tech upgrade at 200k), and one-time Economy buildings with resource-specific percentage bonuses.
 - [x] Validate v0.13.3 inline actions, shared population icon, staffed shipyards and neutral-anchor mining delivery.
 - [ ] Validate v0.13.8 solo roster and navigation, metric tons, population layout and per-tab accordion.
+- [ ] Validate v0.13.9 multi-system asteroid access, arrival-only cargo availability, live resource flow hover and population label layout.
 - [ ] Playtest costs, output, trade, AI expansion, population pacing and building choices before choosing final balance.
 - [x] Validate per-resource storage ceilings, three warehouse upgrades, linear consumption by population (all except Crystals), and zero starting Crystal production.
 - v0.11.5 validated and merged via PR #51. Prototype includes finite population-serving industrial capacity (Plastics, Textiles, Tech) so linear demand can catch up even below the storage ceiling; implements the above via existing authority commands and local inventories; Headless validation passed; visual playtesting and longer AI sustainability evaluation remain.

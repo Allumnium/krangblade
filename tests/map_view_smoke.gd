@@ -180,6 +180,12 @@ func _run() -> void:
     assert((view.get("population_label") as Label).get_parent().get_child(0).texture == view.get("population_icon"))
     assert((view.get("population_label") as Label).autowrap_mode == TextServer.AUTOWRAP_OFF)
     assert(view.call("_tons", 1500000.0) == "1.5 Mt")
+    var resource_text: String = view.call("_resource_breakdown", state, "Metals")
+    assert(resource_text.contains("in transit") and resource_text.contains("Current local flows") and resource_text.contains(view.call("_system_name", 0)))
+    var before_hover: String = resource_text
+    state["planets"][0]["stock"]["Metals"] += 1.0
+    assert(view.call("_resource_breakdown", state, "Metals") != before_hover)
+    state["planets"][0]["stock"]["Metals"] -= 1.0
     assert(not (view.get("population_label") as Label).text.contains(" / "))
     assert(not (view.get("population_label") as Label).tooltip_text.contains("supported"))
     assert(not (view.get("population_label") as Label).text.contains("/yr"))

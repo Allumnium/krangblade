@@ -1291,6 +1291,27 @@ func _initialize() -> void:
             break
     assert(is_equal_approx(float(neutral_depot["stock"]["Crystals"]), 20.0))
     assert(ECON.field_inventory(neutral_map["fields"][0])["Crystals"] == 0.0)
+    var multi_access: Dictionary = ECON.create(mineral_map.duplicate(true), players, ids, false)
+    var access_map: Dictionary = multi_access["map"]
+    var access_points: Array = access_map["points"]
+    var access_center: Vector2 = (access_points[0] + access_points[1]) * 0.5
+    var access_field: Dictionary = {"anchor": 1, "position": access_center, "radius": 40.0, "Metals": 1.0, "Crystals": 1.0, "chunks": [{"id": 92001, "position": access_center, "resource": "Crystals", "remaining": 20.0}]}
+    access_map["fields"] = [access_field]
+    var access_home: Dictionary = multi_access["planets"][0]
+    assert(ECON.field_access_systems(access_map, access_field).has(0))
+    ECON._finish(multi_access, 0, access_home, {"id": 92002, "kind": "miner", "population_allocated": 30.0})
+    var access_miner: Dictionary = multi_access["ships"][0]
+    var was_loaded: bool = false
+    for tick in range(1600):
+        ECON.step(multi_access, 0.5)
+        if float(access_miner["cargo"]["Crystals"]) > ECON.EPS:
+            assert(float(access_home["stock"]["Crystals"]) == 0.0)
+            was_loaded = true
+        if float(access_home["stock"]["Crystals"]) >= 20.0 - ECON.EPS:
+            assert(access_miner["position"] == access_points[0])
+            assert(ECON.local_flow(access_home, "Mining deliveries", "Crystals") > 0.0)
+            break
+    assert(was_loaded and is_equal_approx(float(access_home["stock"]["Crystals"]), 20.0))
     var staffed_state: Dictionary = ECON.create(graph, players, ids, false)
     var staffed_home: Dictionary = staffed_state["planets"][0]
     staffed_home["yards"].append({"level": 1, "job": -1})
@@ -1304,6 +1325,8 @@ func _initialize() -> void:
     staffed_home["population"] = 1000.0
     ECON._work_planet(staffed_state, 0, 1.0)
     assert(float(staffed_order["progress"]) > 0.0 and ECON.operational_shipyards(staffed_home) == 1)
+    assert(ECON.local_flow(staffed_home, "Construction: fighter", "Metals") > 0.0)
+    assert(ECON.local_flow(staffed_home, "Population", "Metals") > 0.0)
     staffed_home["population"] = 6000.0
     assert(ECON.operational_shipyards(staffed_home) == 2)
     staffed_home["population"] = 21000.0

@@ -809,6 +809,7 @@ static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> boo
         var used: float = amount * float(item["cost"][resource]) / float(item["work"])
         p["stock"][resource] = maxf(0.0, float(p["stock"][resource]) - used)
         item["allocated"][resource] = float(item["allocated"][resource]) + used
+        _record_flow(p, "Construction: " + str(item["kind"]), resource, used)
     var crew: float = amount * float(item.get("population_cost", 0.0)) / float(item["work"])
     p["population"] = maxf(0.0, float(p["population"]) - crew)
     item["population_allocated"] = float(item.get("population_allocated", 0.0)) + crew
@@ -831,10 +832,29 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
                 "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
     p["queue"].erase(item)
 
+static func _record_flow(p: Dictionary, category: String, resource: String, amount: float) -> void:
+    if amount <= EPS or not p.has("flows"):
+        return
+    var flows: Dictionary = p["flows"]
+    if not flows.has(category):
+        flows[category] = {}
+    flows[category][resource] = float(flows[category].get(resource, 0.0)) + amount
+
+static func local_flow(p: Dictionary, category: String, resource: String) -> float:
+    if not p.has("flows"):
+        if category == "Production":
+            return rate(p, resource)
+        if category == "Population":
+            return consumption(p, resource)
+        return 0.0
+    return float(p["flows"].get(category, {}).get(resource, 0.0)) / maxf(EPS, float(p.get("flow_dt", 1.0)))
+
 static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
     var p: Dictionary = state["planets"][index]
     if int(p["owner"]) == 0:
         return
+    p["flows"] = {}
+    p["flow_dt"] = dt
     var elapsed: float = float(state["elapsed"])
     p["farm_factor"] = 1.0 + FARM_VARIATION * sin(TAU * elapsed / FARM_CYCLE_SECONDS + float(p["farm_phase"]))
     _update_population(p, dt)
@@ -843,7 +863,13 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
     # Refunds may temporarily exceed capacity; never destroy returned materials.
     for resource in ACTIVE_PRODUCTION:
         var stored: float = float(p["stock"][resource])
-        var change: float = (rate(p, resource) - consumption(p, resource)) * dt
+        var potential: float = rate(p, resource) * dt
+        var demand: float = consumption(p, resource) * dt
+        var used: float = minf(demand, stored + potential)
+        var produced: float = minf(potential, used + storage_free(p, resource))
+        _record_flow(p, "Production", resource, produced)
+        _record_flow(p, "Population", resource, used)
+        var change: float = potential - demand
         p["stock"][resource] = maxf(0.0, stored + minf(change, storage_free(p, resource)))
     # New yards and planetary production use infrastructure work, not an existing yard.
     for item in (p["queue"] as Array).duplicate():
@@ -1068,6 +1094,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
             if amount <= EPS:
                 continue
             planets[here]["stock"][resource] = float(planets[here]["stock"][resource]) - amount
+            _record_flow(planets[here], "Exports", resource, amount)
             ship["cargo"][resource] = float(ship["cargo"][resource]) + amount
             free -= amount
         ship["source"] = -1
@@ -1083,6 +1110,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
             var amount: float = minf(float(ship["cargo"][resource]), _need(planets[here], resource))
             ship["cargo"][resource] = float(ship["cargo"][resource]) - amount
             planets[here]["stock"][resource] = float(planets[here]["stock"][resource]) + amount
+            _record_flow(planets[here], "Imports", resource, amount)
         ship["dest"] = -1
     if _cargo_total(ship) > EPS:
         _pick_loaded_destination(state, ship, teams, team, cache)
@@ -1171,6 +1199,17 @@ static func _mining_depot(state: Dictionary, ship: Dictionary, teams: Array[int]
             chosen = i
     return chosen
 
+static func field_access_systems(map_data: Dictionary, field: Dictionary) -> Array[int]:
+    var points: Array = map_data["points"]
+    var center: Vector2 = field["position"]
+    var original: int = int(field["anchor"])
+    var reach: float = center.distance_to(points[original]) * 1.5 + float(field.get("radius", 0.0))
+    var result: Array[int] = []
+    for i in range(points.size()):
+        if i == original or center.distance_to(points[i]) <= reach + EPS:
+            result.append(i)
+    return result
+
 static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
     var fields: Array = state["map"].get("fields", [])
     var owner: int = int(ship["owner"])
@@ -1179,38 +1218,44 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
     var chosen: int = -1
     var best_path: Array[int] = []
     var best_chunk: Dictionary = {}
+    var best_anchor: int = -1
     for i in range(fields.size()):
         var field: Dictionary = fields[i]
         if not discovered(state, owner, "fields", i) or _mining_resources(state, owner, i).is_empty():
             continue
-        var anchor: int = int(field["anchor"])
-        var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor, cache)
-        if path.is_empty():
-            continue
-        var resources: Array[String] = _mining_resources(state, owner, i)
-        var approach: Vector2 = state["map"]["points"][anchor]
-        var route_distance: float = MAP.route_length(state["map"], path)
-        var depots: Dictionary = {}
-        var return_distances: Dictionary = {}
-        for resource in resources:
-            var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache)
-            depots[resource] = depot
-            if depot >= 0:
-                return_distances[resource] = MAP.route_length(state["map"], _mining_path(state, teams, team, depot, anchor, cache))
-        for chunk in field.get("chunks", []):
-            if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
+        var access_key: String = "mine:access:%d" % i
+        if not cache.has(access_key):
+            cache[access_key] = field_access_systems(state["map"], field)
+        for anchor in cache[access_key]:
+            var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor, cache)
+            if path.is_empty():
                 continue
-            var depot: int = int(depots.get(chunk["resource"], -1))
-            if depot < 0:
-                continue
-            var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0 + float(return_distances[chunk["resource"]])
-            if distance < best:
-                best = distance
-                chosen = i
-                best_path = path
-                best_chunk = chunk
+            var resources: Array[String] = _mining_resources(state, owner, i)
+            var approach: Vector2 = state["map"]["points"][anchor]
+            var route_distance: float = MAP.route_length(state["map"], path)
+            var depots: Dictionary = {}
+            var return_distances: Dictionary = {}
+            for resource in resources:
+                var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache)
+                depots[resource] = depot
+                if depot >= 0:
+                    return_distances[resource] = MAP.route_length(state["map"], _mining_path(state, teams, team, depot, anchor, cache))
+            for chunk in field.get("chunks", []):
+                if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
+                    continue
+                var depot: int = int(depots.get(chunk["resource"], -1))
+                if depot < 0:
+                    continue
+                var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0 + float(return_distances[chunk["resource"]])
+                if distance < best:
+                    best = distance
+                    chosen = i
+                    best_path = path
+                    best_chunk = chunk
+                    best_anchor = anchor
     if chosen >= 0:
         ship["field"] = chosen
+        ship["mining_anchor"] = best_anchor
         ship["chunk"] = int(best_chunk["id"])
         ship["mining_target"] = best_chunk["position"]
         ship["mining_mode"] = "approach"
@@ -1231,7 +1276,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
         return
     var field_index: int = int(ship["field"])
     var field: Dictionary = state["map"]["fields"][field_index]
-    var anchor: int = int(field["anchor"])
+    var anchor: int = int(ship.get("mining_anchor", field["anchor"]))
     if mode == "approach":
         if _move(state, ship, dt):
             var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
@@ -1291,6 +1336,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
         for resource in MINED_RESOURCES:
             var amount: float = minf(float(ship["cargo"][resource]), storage_free(local, resource))
             local["stock"][resource] += amount
+            _record_flow(local, "Mining deliveries", resource, amount)
             ship["cargo"][resource] -= amount
     if _cargo_total(ship) <= EPS:
         ship["mining_mode"] = "idle"
@@ -1343,7 +1389,8 @@ static func military_graph(state: Dictionary) -> Dictionary:
     var points: Array = state["map"]["points"].duplicate()
     var edges: Array = state["map"]["edges"].duplicate()
     for field in state["map"].get("fields", []):
-        edges.append([int(field["anchor"]), points.size()])
+        for anchor in field_access_systems(state["map"], field):
+            edges.append([anchor, points.size()])
         points.append(field["position"])
     var adjacent: Array = []
     for i in range(points.size()):
@@ -1795,8 +1842,12 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
             elif int(ship["dest"]) >= 0:
                 reserved[int(ship["dest"])] = true
     for field in state["map"].get("fields", []):
-        if int(planets[int(field["anchor"])]["owner"]) == player and float(field_inventory(field)["Metals"]) > EPS:
-            useful_fields += 1
+        if float(field_inventory(field)["Metals"]) <= EPS:
+            continue
+        for anchor in field_access_systems(state["map"], field):
+            if int(planets[anchor]["owner"]) == player:
+                useful_fields += 1
+                break
     for index in range(planets.size()):
         var p: Dictionary = planets[index]
         if int(p["owner"]) != player:
