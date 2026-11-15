@@ -25,7 +25,9 @@ const MINER_RATE: float = 12.0
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const SHIP_SIZE: int = 1
 const EPS: float = 0.00001
-const MAX_QUEUE: int = 200
+const MAX_QUEUE: int = 5
+const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
+const MINING_STAY: float = 5.0
 
 static func empty_stock() -> Dictionary:
     var result: Dictionary = {}
@@ -71,7 +73,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
         var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
         planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
             "abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
-            "yards": yards, "queue": []})
+            "yards": yards, "queue": [], "continuous": {}})
     var state: Dictionary = {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "explored": {}, "mining_policies": {}}
     update_exploration(state)
     return state
@@ -387,7 +389,6 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
             if _has_job(p, kind, target):
                 return false
             level = int(p["yards"][y]["level"]) + 1
-            p["yards"][y]["job"] = -1
         "production":
             if not RESOURCES.has(target) or _has_job(p, kind, target):
                 return false
@@ -404,6 +405,23 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
         "cost": _cost(kind, level), "work": _work(kind, level),
         "progress": 0.0, "allocated": empty_stock(), "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
     return true
+
+static func set_continuous(state: Dictionary, player: int, index: int, kind: String, enabled: bool) -> bool:
+    var p: Dictionary = _get_owned(state, player, index)
+    if p.is_empty() or not SHIP_KINDS.has(kind) or (kind == "ship" and not bool(p["home"])):
+        return false
+    p["continuous"][kind] = enabled
+    return true
+
+static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> void:
+    if (p["yards"] as Array).is_empty():
+        return
+    for kind in SHIP_KINDS:
+        if (p["queue"] as Array).size() >= MAX_QUEUE:
+            return
+        if not bool(p["continuous"].get(kind, false)) or _has_job(p, kind, ""):
+            continue
+        enqueue(state, int(p["owner"]), index, kind)
 
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
     var p: Dictionary = _get_owned(state, player, index)
@@ -473,48 +491,47 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
     # Consume real local inventory; imported Organics can satisfy demand but
     # cannot permanently raise the local farming plateau.
     p["stock"]["Organics"] = maxf(0.0, float(p["stock"]["Organics"]) - organics_demand(p) * dt)
-    # Upgrades and new infrastructure use fixed durations. Shipyards are not needed.
+    # New yards and planetary production use infrastructure work, not an existing yard.
     for item in (p["queue"] as Array).duplicate():
-        if int(item["size"]) == 0 and _advance(p, item, dt):
+        if int(item["size"]) == 0 and item["kind"] != "yard_upgrade" and _advance(p, item, dt):
             _finish(state, index, p, item)
-    # Preserve active assignments, but release blocked or upgrading yards.
+    _refill_continuous(state, index, p)
     var assigned: Dictionary = {}
+    # Preserve active jobs. A started upgrade remains attached to its own yard even if blocked.
     for y in range((p["yards"] as Array).size()):
         var yard: Dictionary = p["yards"][y]
         var retained: bool = false
-        if not _has_job(p, "yard_upgrade", str(y)):
-            for item in p["queue"]:
-                if int(item["id"]) == int(yard["job"]) and int(item["size"]) <= max_size(int(yard["level"])) and _possible(p, item) > EPS:
-                    assigned[int(item["id"])] = true
-                    retained = true
-                    break
+        for item in p["queue"]:
+            if int(item["id"]) != int(yard["job"]):
+                continue
+            if item["kind"] == "yard_upgrade" or (int(item["size"]) > 0 and _possible(p, item) > EPS):
+                assigned[int(item["id"])] = true
+                retained = true
+                break
         if not retained:
             yard["job"] = -1
     for y in range((p["yards"] as Array).size()):
         var yard: Dictionary = p["yards"][y]
-        if _has_job(p, "yard_upgrade", str(y)):
-            continue
         var chosen: Dictionary = {}
         for item in p["queue"]:
-            if int(item["size"]) == 0 or int(item["size"]) > max_size(int(yard["level"])):
-                continue
-            var id: int = int(item["id"])
-            if id == int(yard["job"]):
-                if _possible(p, item) > EPS:
-                    chosen = item
-                    break
-                assigned.erase(id)
-                yard["job"] = -1
-            if int(yard["job"]) == -1 and not assigned.has(id) and _possible(p, item) > EPS:
+            if int(item["id"]) == int(yard["job"]):
                 chosen = item
                 break
+        if chosen.is_empty():
+            for item in p["queue"]:
+                var upgrade: bool = item["kind"] == "yard_upgrade" and int(item["target"]) == y
+                var hull: bool = int(item["size"]) > 0 and int(item["size"]) <= max_size(int(yard["level"]))
+                if (upgrade or hull) and not assigned.has(int(item["id"])) and _possible(p, item) > EPS:
+                    chosen = item
+                    break
         if chosen.is_empty():
             yard["job"] = -1
             continue
         var id: int = int(chosen["id"])
         yard["job"] = id
         assigned[id] = true
-        if _advance(p, chosen, yard_speed(int(yard["level"])) * dt):
+        var speed: float = 1.0 if chosen["kind"] == "yard_upgrade" else yard_speed(int(yard["level"]))
+        if _advance(p, chosen, speed * dt):
             _finish(state, index, p, chosen)
             yard["job"] = -1
 
@@ -660,6 +677,19 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 static func field_limit(field: Dictionary, resource: String) -> float:
     return FIELD_MINING_LIMIT * float(field.get(resource, 0.0)) if MINED_RESOURCES.has(resource) else 0.0
 
+static func field_inventory(field: Dictionary) -> Dictionary:
+    var stock: Dictionary = {"Metals": 0.0, "Crystals": 0.0}
+    for chunk in field.get("chunks", []):
+        var resource: String = str(chunk["resource"])
+        stock[resource] = float(stock[resource]) + float(chunk["remaining"])
+    return stock
+
+static func _find_chunk(field: Dictionary, id: int) -> Dictionary:
+    for chunk in field.get("chunks", []):
+        if int(chunk["id"]) == id:
+            return chunk
+    return {}
+
 static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
     var fields: Array = state["map"].get("fields", [])
     var owner: int = int(ship["owner"])
@@ -667,6 +697,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
     var best: float = INF
     var chosen: int = -1
     var best_path: Array[int] = []
+    var best_chunk: Dictionary = {}
     for i in range(fields.size()):
         var field: Dictionary = fields[i]
         if not discovered(state, owner, "fields", i) or _mining_resources(state, owner, i).is_empty():
@@ -677,13 +708,22 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
         var path: Array[int] = _path(state, teams, team, int(ship["at"]), anchor, cache)
         if path.is_empty():
             continue
-        var distance: float = MAP.route_length(state["map"], path) + (state["map"]["points"][anchor] as Vector2).distance_to(field["position"]) * 2.0
-        if distance < best:
-            best = distance
-            chosen = i
-            best_path = path
+        var resources: Array[String] = _mining_resources(state, owner, i)
+        var approach: Vector2 = state["map"]["points"][anchor]
+        var route_distance: float = MAP.route_length(state["map"], path)
+        for chunk in field.get("chunks", []):
+            if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
+                continue
+            var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0
+            if distance < best:
+                best = distance
+                chosen = i
+                best_path = path
+                best_chunk = chunk
     if chosen >= 0:
         ship["field"] = chosen
+        ship["chunk"] = int(best_chunk["id"])
+        ship["mining_target"] = best_chunk["position"]
         ship["mining_mode"] = "approach"
         _set_route(ship, best_path)
 
@@ -697,31 +737,42 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
     var anchor: int = int(field["anchor"])
     if mode == "approach":
         if _move(state, ship, dt):
+            var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
+            if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
+                ship["mining_mode"] = "idle"
+                ship["field"] = -1
+                return
             ship["mining_mode"] = "outbound"
             ship["field_leg"] = 0.0
         return
-    var distance: float = (state["map"]["points"][anchor] as Vector2).distance_to(field["position"])
+    var distance: float = (state["map"]["points"][anchor] as Vector2).distance_to(ship["mining_target"])
     var travel: float = SHIP_SPEED * dt / maxf(distance, 1.0)
     if mode == "outbound":
+        var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
+        if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
+            ship["mining_mode"] = "return"
+            return
         ship["field_leg"] = minf(1.0, float(ship["field_leg"]) + travel)
         if float(ship["field_leg"]) >= 1.0:
             ship["mining_mode"] = "mining"
+            ship["mining_years"] = 0.0
         return
     if mode == "mining":
+        ship["mining_years"] = float(ship.get("mining_years", 0.0)) + dt
         var resources: Array[String] = _mining_resources(state, int(ship["owner"]), field_index)
-        if resources.is_empty():
-            ship["mining_mode"] = "return"
-            return
-        var free: float = MINER_CAPACITY - _cargo_total(ship)
-        # Allocate proportional shares of the remaining hold and shared field budget.
-        var richness: float = 0.0
-        for resource in resources:
-            richness += float(field[resource])
-        for resource in resources:
-            var amount: float = minf(free * float(field[resource]) / richness, minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource])))
+        var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
+        var available: bool = not chunk.is_empty() and resources.has(str(chunk["resource"]))
+        if available:
+            var resource: String = str(chunk["resource"])
+            var free: float = MINER_CAPACITY - _cargo_total(ship)
+            var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource]))))
             ship["cargo"][resource] = float(ship["cargo"][resource]) + amount
+            chunk["remaining"] = maxf(0.0, float(chunk["remaining"]) - amount)
             budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
-        if _cargo_total(ship) >= MINER_CAPACITY - 0.1:
+            if float(chunk["remaining"]) <= EPS:
+                field["chunks"].erase(chunk)
+                available = false
+        if float(ship["mining_years"]) >= MINING_STAY - EPS and (not available or _cargo_total(ship) >= MINER_CAPACITY - 0.1):
             ship["mining_mode"] = "return"
         return
     if mode == "return":

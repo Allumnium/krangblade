@@ -62,6 +62,15 @@ func _initialize() -> void:
             assert(ECON.field_limit(field, "Metals") > ECON.PLANET_MINING_LIMIT)
             assert(ECON.field_limit(field, "Crystals") > ECON.PLANET_MINING_LIMIT)
             assert(ECON.field_limit(field, "Organics") == 0.0)
+            assert(field["outline"].size() == 12)
+            assert(field["chunks"].size() >= 9)
+            var chunk_ids: Dictionary = {}
+            for chunk in field["chunks"]:
+                assert(not chunk_ids.has(chunk["id"]))
+                chunk_ids[chunk["id"]] = true
+                assert(ECON.MINED_RESOURCES.has(chunk["resource"]))
+                assert(float(chunk["remaining"]) > 0.0)
+                assert((field["position"] as Vector2).distance_to(chunk["position"]) + float(chunk["radius"]) < float(field["radius"]))
         assert(bridge_distance / bridges > local_distance / locals)
         var seen: Dictionary = {0: true}
         var frontier: Array = [0]
@@ -240,27 +249,56 @@ func _initialize() -> void:
     assert(is_equal_approx(float(p["stock"]["Metals"]), 30.0))
     assert(p["queue"].is_empty())
 
-    # Two yards take two different jobs. Upgrading a yard releases its job.
+    # Yard upgrades wait behind assigned hull production.
     p["stock"]["Metals"] = 5000.0
     p["yards"].append({"level": 1, "job": -1})
     assert(ECON.enqueue(state, 1, 0, "ship"))
     assert(ECON.enqueue(state, 1, 0, "ship"))
     ECON.step(state, 1.0)
     assert(int(p["yards"][0]["job"]) != int(p["yards"][1]["job"]))
-    assert(is_equal_approx(float(p["queue"][0]["progress"]), 6.0))
-    assert(is_equal_approx(float(p["queue"][1]["progress"]), 6.0))
+    var first_job: int = int(p["yards"][0]["job"])
     assert(ECON.enqueue(state, 1, 0, "yard_upgrade", "0"))
-    assert(int(p["yards"][0]["job"]) == -1)
+    assert(int(p["yards"][0]["job"]) == first_job)
     ECON.step(state, 1.0)
-    assert(is_equal_approx(float(p["queue"][0]["progress"]), 6.0))
-    for i in range(25):
+    assert(is_equal_approx(float(p["queue"][0]["progress"]), 12.0))
+    assert(is_zero_approx(float(p["queue"][2]["progress"])))
+    for i in range(6):
         ECON.step(state, 1.0)
     assert(state["ships"].size() == 2)
     assert(p["queue"].size() == 1)
-    for i in range(5):
+    ECON.step(state, 1.0)
+    assert(int(p["yards"][0]["job"]) == int(p["queue"][0]["id"]))
+    assert(is_equal_approx(float(p["queue"][0]["progress"]), 1.0))
+    for i in range(29):
         ECON.step(state, 1.0)
     assert(int(p["yards"][0]["level"]) == 2)
     assert(ECON.max_size(2) > ECON.max_size(1))
+
+    # A five-item shared queue and auto-refill do not bypass ownership or capacity.
+    var repeat_state: Dictionary = ECON.create(graph, players, ids)
+    var repeat_home: Dictionary = repeat_state["planets"][0]
+    repeat_home["stock"]["Metals"] = 5000.0
+    assert(not ECON.set_continuous(repeat_state, 2, 0, "fighter", true))
+    assert(not ECON.set_continuous(repeat_state, 1, 0, "yard", true))
+    assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", true))
+    for i in range(5):
+        assert(ECON.enqueue(repeat_state, 1, 0, "ship"))
+    assert(not ECON.enqueue(repeat_state, 1, 0, "yard"))
+    assert(not ECON.enqueue(repeat_state, 1, 0, "yard_upgrade", "0"))
+    ECON.step(repeat_state, 1.0)
+    assert(repeat_home["queue"].size() == 5)
+    assert(not ECON._has_job(repeat_home, "fighter", ""))
+    for i in range(8):
+        ECON.step(repeat_state, 1.0)
+    assert(ECON._has_job(repeat_home, "fighter", ""))
+    assert(repeat_home["queue"].size() <= 5)
+    for i in range(50):
+        ECON.step(repeat_state, 1.0)
+    assert(ECON.empire_totals(repeat_state, 1)["fighters"] > 1)
+    assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", false))
+    for i in range(12):
+        ECON.step(repeat_state, 1.0)
+    assert(repeat_home["queue"].is_empty())
 
     # Fighters use the shipyard and are counted separately; no logistics behavior.
     var military: Dictionary = ECON.create(graph, players, ids)
@@ -282,7 +320,11 @@ func _initialize() -> void:
     # Deterministic mining round trip; no planetary production or unrelated cargo.
     var mineral_map: Dictionary = MAP.generate(678)
     var mineral_points: Array = mineral_map["points"]
-    mineral_map["fields"] = [{"position": (mineral_points[0] as Vector2) + Vector2(95, 0), "radius": 20.0, "anchor": 0, "Metals": 1.0, "Crystals": 1.0}]
+    var metal_pos: Vector2 = (mineral_points[0] as Vector2) + Vector2(95, 0)
+    var crystal_pos: Vector2 = (mineral_points[0] as Vector2) + Vector2(95, 30)
+    mineral_map["fields"] = [{"position": metal_pos, "radius": 40.0, "anchor": 0, "Metals": 1.0, "Crystals": 1.0,
+        "chunks": [{"id": 7, "position": metal_pos, "resource": "Metals", "remaining": 24.0},
+            {"id": 9, "position": crystal_pos, "resource": "Crystals", "remaining": 36.0}]}]
     var mineral: Dictionary = ECON.create(mineral_map, players, ids)
     assert(ECON.discovered(mineral, 1, "fields", 0))
     assert(not ECON.discovered(mineral, 3, "fields", 0))
@@ -304,15 +346,33 @@ func _initialize() -> void:
     assert(not ECON.send_colony(mineral, 1, int(miner["id"]), 3))
     var after_build: float = float(mine_home["stock"]["Metals"])
     assert(is_equal_approx(after_build, 420.0))
+    ECON.step(mineral, 0.1)
+    assert(miner["mining_target"] == metal_pos)
+    assert(int(miner["chunk"]) == 7)
+    for i in range(20):
+        if miner["mining_mode"] == "mining":
+            break
+        ECON.step(mineral, 1.0)
+    assert(miner["mining_mode"] == "mining")
+    for i in range(4):
+        ECON.step(mineral, 1.0)
+        assert(miner["mining_mode"] == "mining")
+    assert(ECON._find_chunk(mineral["map"]["fields"][0], 7).is_empty())
+    ECON.step(mineral, 1.0)
+    assert(miner["mining_mode"] == "return")
     for i in range(20):
         ECON.step(mineral, 1.0)
-    assert(float(mine_home["stock"]["Metals"]) > after_build)
+    assert(is_equal_approx(float(mine_home["stock"]["Metals"]), after_build + 24.0))
+    assert(ECON._find_chunk(mineral["map"]["fields"][0], 7).is_empty())
+    assert(is_zero_approx(float(ECON.field_inventory(mineral["map"]["fields"][0])["Metals"])))
     assert(is_zero_approx(float(mine_home["stock"]["Crystals"])))
     assert(is_zero_approx(float(miner["cargo"]["Crystals"])))
     assert(ECON.set_mining_policy(mineral, 1, 0, true, false, true))
     for i in range(20):
         ECON.step(mineral, 1.0)
-    assert(float(mine_home["stock"]["Crystals"]) > 0.0)
+    assert(is_equal_approx(float(mine_home["stock"]["Crystals"]), 36.0))
+    assert((mineral["map"]["fields"][0]["chunks"] as Array).is_empty())
+    assert(is_zero_approx(float(ECON.field_inventory(mineral["map"]["fields"][0])["Crystals"])))
     assert(ECON.set_mining_policy(mineral, 1, 0, false, false, true))
     for i in range(10):
         ECON.step(mineral, 1.0)

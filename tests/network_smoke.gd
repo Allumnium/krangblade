@@ -8,6 +8,7 @@ var saw_match: bool = false
 var started: bool = false
 var finishing: bool = false
 var ready_sent: bool = false
+var economy_verified: bool = false
 var saw_loading: bool = false
 var mode: String = "normal"
 const MAP = preload("res://scripts/planet_map.gd")
@@ -79,14 +80,17 @@ func _phase_changed() -> void:
             return
         if mode == "normal":
             call_deferred("_queue_test_ship")
-            create_timer(1.5).timeout.connect(_check_economy_sync)
+            create_timer(0.5).timeout.connect(_check_economy_sync)
         if role == "host":
             if mode == "host-leave":
                 create_timer(1.0).timeout.connect(func() -> void: session.call("leave_session"))
             else:
-                create_timer(2.5).timeout.connect(func() -> void: session.call("return_to_lobby"))
+                create_timer(5.0).timeout.connect(func() -> void: session.call("return_to_lobby"))
     elif phase == "lobby" and saw_loading and not finishing:
         if (mode == "drop-loading" and role == "host") or (mode == "normal" and saw_match):
+            if mode == "normal" and not economy_verified:
+                _fail("Never observed all players’ shipyard progress before return.")
+                return
             finishing = true
             var roster: Dictionary = session.get("players")
             var expected: int = 1 if mode == "drop-loading" else expected_players
@@ -97,7 +101,7 @@ func _phase_changed() -> void:
                 if int(id) != 1 and bool((roster[id] as Dictionary).get("ready", true)):
                     _fail("Guest remained ready after return.")
                     return
-            create_timer(1.0 if role == "host" else 0.35).timeout.connect(_pass)
+            create_timer(3.0 if role == "host" else 0.35).timeout.connect(_pass)
     elif phase == "offline" and not finishing:
         if (mode == "host-leave" and saw_match) or (mode == "drop-loading" and saw_loading and role == "client"):
             finishing = true
@@ -115,20 +119,24 @@ func _queue_test_ship() -> void:
     _fail("No home planet for player.")
 
 func _check_economy_sync() -> void:
+    if economy_verified or str(session.get("phase")) != "match":
+        return
     var state: Dictionary = session.get("economy")
     var homes: int = 0
+    var verified: int = 0
     for planet in state.get("planets", []):
         if bool(planet["home"]):
             homes += 1
-            if (planet["queue"] as Array).size() != 1:
-                _fail("Missing replicated ship queue on a home planet.")
-                return
-            if float(planet["queue"][0]["progress"]) <= 0.0:
-                _fail("Shipyard progress did not synchronize.")
-                return
-    if homes != expected_players:
-        _fail("Wrong home planet count.")
-        return
+            if (planet["queue"] as Array).size() == 1 and float(planet["queue"][0]["progress"]) > 0.0:
+                verified += 1
+            else:
+                for ship in state.get("ships", []):
+                    if int(ship["owner"]) == int(planet["owner"]) and ship.get("kind", "ship") == "ship":
+                        verified += 1
+                        break
+    economy_verified = homes == expected_players and verified == expected_players
+    if not economy_verified:
+        create_timer(0.25).timeout.connect(_check_economy_sync)
 
 func _pass() -> void:
     print("PASS: network %s %d players (%s)" % [role, expected_players, mode])

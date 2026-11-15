@@ -14,7 +14,6 @@ func _run() -> void:
     await process_frame
     assert(view.theme != null)
     var header: PanelContainer = view.get("header_panel")
-    var brand: Label = view.get("brand_label")
     var canvas: Control = view.get("map_canvas")
     var inspector: PanelContainer = view.get("inspector_panel")
     var overview: PanelContainer = view.get("overview_panel")
@@ -22,11 +21,16 @@ func _run() -> void:
     assert(overview.is_ancestor_of(view.get("population_label")))
     assert(inspector.is_ancestor_of(view.get("inspector_tabs")))
     assert(not overview.is_ancestor_of(view.get("inspector_tabs")))
-    assert(header.size.y <= 96.0)
+    assert(header.size.y <= 52.0)
+    assert(header.get_child_count() == 1 and header.get_child(0) is HBoxContainer)
+    for tile in view.get("global_resource_tiles").values():
+        assert(tile.get_parent() == header.get_child(0))
+    var idle_rows: Dictionary = view.get("yard_activity_rows")
+    assert(idle_rows.size() == 1)
+    assert((idle_rows[0]["row"] as Control).is_visible_in_tree())
+    assert((idle_rows[0]["label"] as Label).text.contains("Idle"))
     assert(header.position.y + header.size.y < canvas.position.y)
     assert(header.position.y + header.size.y < inspector.position.y)
-    assert(brand.autowrap_mode == TextServer.AUTOWRAP_OFF)
-    assert(brand.size.x >= brand.get_combined_minimum_size().x)
     var tabs: TabContainer = view.get("inspector_tabs")
     assert(tabs.get_tab_count() == 4)
     assert(tabs.get_tab_title(0) == "Economy" and tabs.get_tab_title(1) == "Trade" and tabs.get_tab_title(2) == "Shipyards" and tabs.get_tab_title(3) == "Upgrades")
@@ -46,7 +50,6 @@ func _run() -> void:
     assert((view.get("global_resource_labels") as Dictionary).size() == 6)
     assert(view.get("global_resource_labels")["Metals"].text.contains("("))
     assert((view.get("global_population_label") as Label).text.begins_with("POP  10."))
-    assert((view.get("global_planet_label") as Label).text == "WORLDS  1")
     var cards: Dictionary = view.get("upgrade_cards")
     assert(cards.size() == 6)
     var farm: Dictionary = cards["Organics"]
@@ -61,6 +64,24 @@ func _run() -> void:
     assert(farm_button.text.contains("CANCEL"))
     farm_button.pressed.emit()
     assert(state["planets"][0]["queue"].is_empty())
+    tabs.current_tab = 2
+    var checks: Dictionary = view.get("continuous_checks")
+    assert(checks.size() == 4)
+    var automatic: CheckBox = checks["fighter"]
+    automatic.button_pressed = true
+    assert(state["planets"][0]["continuous"]["fighter"])
+    automatic.button_pressed = false
+    assert(not state["planets"][0]["continuous"]["fighter"])
+    var new_yard: Button = view.get("yard_button")
+    new_yard.pressed.emit()
+    var yard_job: Dictionary = state["planets"][0]["queue"][0]
+    var pending_key: int = -int(yard_job["id"])
+    assert(idle_rows.size() == 2 and idle_rows.has(pending_key))
+    session.call("_economy_tick")
+    session.call("_economy_tick")
+    assert((idle_rows[pending_key]["progress"] as ProgressBar).value > 0.0)
+    session.call("request_cancel", 0, int(yard_job["id"]))
+    assert(idle_rows.size() == 1)
     tabs.current_tab = 0
     var points: Array = state["map"]["points"]
     var neighbor: int = -1
@@ -159,14 +180,14 @@ func _run() -> void:
     view.call("_map_input", mouse)
     assert(int(view.get("selected")) == 0 and inspector.visible and overview.visible)
     assert((view.call("_screen_point", points[0]) as Vector2).is_equal_approx(fixed_point))
-    assert((view.get("global_planet_label") as Label).text == "WORLDS  2")
 
     session.call("request_operation", 0, "ship")
     for i in range(100):
         session.call("_economy_tick")
     assert(state["ships"].size() == 1)
     assert((view.get("ship_visuals") as Dictionary).size() == 1)
-    assert((view.get("global_craft_label") as Label).text == "CRAFT  1")
+    assert((idle_rows[0]["label"] as Label).text.contains("Idle"))
+    assert((idle_rows[0]["progress"] as ProgressBar).value == 0.0)
     var mineral_button: Button = view.get("miner_button")
     assert(not mineral_button.disabled)
     assert((view.get("environment_label") as Label).text.contains("Manufacturing"))
@@ -183,7 +204,6 @@ func _run() -> void:
         session.call("_economy_tick")
     assert(state["ships"].size() == 2)
     assert(state["ships"][1]["kind"] == "fighter")
-    assert((view.get("global_craft_label") as Label).text == "CRAFT  2")
     view.call("_zoom_at", view.call("_screen_point", points[0]), 4.0)
     var fighter_id: int = int(state["ships"][1]["id"])
     var ship_poses: Dictionary = view.call("_ship_poses", state)

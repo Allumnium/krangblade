@@ -95,7 +95,7 @@ func host_game(wanted_name: String) -> bool:
     if phase != "offline":
         return false
     var peer := ENetMultiplayerPeer.new()
-    var err: int = peer.create_server(PORT, RULES.MAX_PLAYERS - 1)
+    var err: int = peer.create_server(PORT, RULES.MAX_PLAYERS - 1, 2)
     if err != OK:
         _status("Could not host (error %d). Check UDP %d." % [err, PORT])
         return false
@@ -121,7 +121,7 @@ func join_game(wanted_name: String, address: String) -> bool:
         _status("Enter the host IP address.")
         return false
     var peer := ENetMultiplayerPeer.new()
-    var err: int = peer.create_client(ip, PORT)
+    var err: int = peer.create_client(ip, PORT, 2)
     if err != OK:
         _status("Could not connect (error %d)." % err)
         return false
@@ -510,6 +510,23 @@ func _operation_for(id: int, index: int, kind: String, target: String) -> void:
     if _active_player(id) and ECONOMY.enqueue(economy, id, index, kind, target):
         _publish_economy()
 
+func request_continuous(index: int, kind: String, enabled: bool) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _continuous_for(1, index, kind, enabled)
+    else:
+        _rpc_continuous.rpc_id(1, index, kind, enabled)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_continuous(index: int, kind: String, enabled: bool) -> void:
+    if multiplayer.is_server():
+        _continuous_for(multiplayer.get_remote_sender_id(), index, kind, enabled)
+
+func _continuous_for(id: int, index: int, kind: String, enabled: bool) -> void:
+    if _active_player(id) and ECONOMY.set_continuous(economy, id, index, kind, enabled):
+        _publish_economy()
+
 func request_cancel(index: int, job_id: int) -> void:
     if phase != "match":
         return
@@ -574,14 +591,18 @@ func _publish_economy() -> void:
     snapshot_elapsed = 0.0
     owners = ECONOMY.planet_teams(economy)
     if not is_solo:
-        _rpc_economy.rpc(round_id, economy)
+        _rpc_economy.rpc(round_id, var_to_bytes(economy).compress(FileAccess.COMPRESSION_GZIP))
     owners_changed.emit()
     economy_changed.emit()
 
-@rpc("authority", "call_remote", "reliable")
-func _rpc_economy(update_round: int, snapshot: Dictionary) -> void:
+@rpc("authority", "call_remote", "reliable", 1)
+func _rpc_economy(update_round: int, compressed: PackedByteArray) -> void:
     if phase != "match" or update_round != round_id:
         return
+    var decoded: Variant = bytes_to_var(compressed.decompress_dynamic(16777216, FileAccess.COMPRESSION_GZIP))
+    if not decoded is Dictionary:
+        return
+    var snapshot: Dictionary = decoded
     if (snapshot.get("planets", []) as Array).size() != (economy.get("planets", []) as Array).size():
         return
     economy = snapshot

@@ -9,7 +9,7 @@ const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77
     Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
 const PANEL_WIDTH: float = 368.0
 const OVERVIEW_WIDTH: float = 236.0
-const HEADER_HEIGHT: float = 90.0
+const HEADER_HEIGHT: float = 46.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
 const MIN_ZOOM: float = 0.5
@@ -19,7 +19,6 @@ const SNAPSHOT_SECONDS: float = 0.2
 var session: Node
 var map_canvas: Control
 var header_panel: PanelContainer
-var brand_label: Label
 var inspector_panel: PanelContainer
 var overview_panel: PanelContainer
 var yard_activity: VBoxContainer
@@ -57,12 +56,9 @@ var initial_selection_done: bool = false
 var global_resource_labels: Dictionary = {}
 var global_resource_tiles: Dictionary = {}
 var global_population_label: Label
-var global_craft_label: Label
-var global_planet_label: Label
 var year_label: Label
 var trade_picker: OptionButton
 var trade_detail: Label
-var heading: Label
 var info: Label
 var stock_labels: Dictionary = {}
 var level_labels: Dictionary = {}
@@ -77,6 +73,8 @@ var min_stock: SpinBox
 var max_stock: SpinBox
 var threshold_button: Button
 var upgrade_cards: Dictionary = {}
+var continuous_checks: Dictionary = {}
+var queue_title: Label
 var fighter_button: Button
 var miner_button: Button
 var environment_label: Label
@@ -141,30 +139,15 @@ func _build_ui() -> void:
     header_panel.offset_right = -8
     header_panel.offset_top = 8
     header_panel.offset_bottom = 8 + HEADER_HEIGHT
-    var header_body := VBoxContainer.new()
-    header_body.add_theme_constant_override("separation", 5)
-    header_panel.add_child(header_body)
     var row := HBoxContainer.new()
-    row.add_theme_constant_override("separation", 10)
-    header_body.add_child(row)
-    leave = _button("RETURN", _leave, row)
-    brand_label = _label("WARBOUND", 21)
-    brand_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-    brand_label.add_theme_color_override("font_color", HUD.ACCENT)
-    row.add_child(brand_label)
-    heading = _label("EMPIRE", 13)
-    heading.autowrap_mode = TextServer.AUTOWRAP_OFF
-    heading.add_theme_color_override("font_color", HUD.MUTED)
-    heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    heading.clip_text = true
-    heading.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-    row.add_child(heading)
+    row.add_theme_constant_override("separation", 4)
+    header_panel.add_child(row)
+    leave = _button("MENU", _leave, row)
+    _build_global_bar(row)
     global_population_label = _global_stat(row, "POP  0", Color("#b2e2a9"))
-    global_craft_label = _global_stat(row, "CRAFT  0", Color("#c7a4ff"))
-    global_planet_label = _global_stat(row, "WORLDS  0", HUD.ACCENT)
     year_label = _global_stat(row, "YEAR  1", HUD.ACCENT)
-    _button("RESET VIEW", _reset_view, row)
-    _build_global_bar(header_body)
+    var reset: Button = _button("RESET", _reset_view, row)
+    reset.tooltip_text = "Reset camera view"
     inspector_panel = PanelContainer.new()
     add_child(inspector_panel)
     inspector_panel.anchor_left = 1.0
@@ -240,7 +223,7 @@ func _build_ui() -> void:
     planet_overview.add_child(colony_picker)
     send_colony_button = _button("SEND COLONY SHIP", _send_colony, planet_overview)
     HUD.action(send_colony_button, Color("#c7a4ff"))
-    yard_activity = HUD.section(planet_overview, "Active shipyards")
+    yard_activity = HUD.section(planet_overview, "Shipyards")
     inspector_tabs = TabContainer.new()
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
     inspector_tabs.clip_contents = true
@@ -336,19 +319,20 @@ func _build_ui() -> void:
     shipyards.add_child(yard_picker)
     yard_info = _label("")
     shipyards.add_child(yard_info)
-    ship_button = _button("BUILD LOGISTICS SHIP", func() -> void: _operation("ship"), shipyards)
+    ship_button = _ship_build_row(shipyards, "BUILD LOGISTICS SHIP", "ship")
     HUD.action(ship_button)
-    colony_button = _button("BUILD COLONY SHIP", func() -> void: _operation("colony_ship"), shipyards)
+    colony_button = _ship_build_row(shipyards, "BUILD COLONY SHIP", "colony_ship")
     HUD.action(colony_button, Color("#c7a4ff"))
-    fighter_button = _button("BUILD FIGHTER", func() -> void: _operation("fighter"), shipyards)
+    fighter_button = _ship_build_row(shipyards, "BUILD FIGHTER", "fighter")
     HUD.action(fighter_button, Color("#f2b57e"))
     fighter_button.tooltip_text = "Prototype fighter hull. Combat and military orders are not implemented yet."
-    miner_button = _button("BUILD MINING SHIP", func() -> void: _operation("miner"), shipyards)
+    miner_button = _ship_build_row(shipyards, "BUILD MINING SHIP", "miner")
     HUD.action(miner_button, Color("#d8e58b"))
     miner_button.tooltip_text = "Automatically mines accessible fields from owned service planets."
     yard_button = _button("BUILD SHIPYARD", func() -> void: _operation("yard"), shipyards)
     upgrade_yard = _button("UPGRADE SHIPYARD", func() -> void: _operation("yard_upgrade", str(yard_picker.selected)), shipyards)
     var queue: VBoxContainer = HUD.section(shipyard_page, "Queue")
+    queue_title = queue.get_child(0)
     jobs = ItemList.new()
     jobs.custom_minimum_size.y = 130
     jobs.item_selected.connect(func(_i: int) -> void: _refresh())
@@ -361,6 +345,20 @@ func _build_ui() -> void:
     queue.add_child(job_cost)
     cancel_button = _button("CANCEL / REFUND", _cancel, queue)
     HUD.action(cancel_button, Color("#e9a276"))
+
+func _ship_build_row(parent: Container, title_text: String, kind: String) -> Button:
+    var row := HBoxContainer.new()
+    parent.add_child(row)
+    var button: Button = _button(title_text, _operation.bind(kind), row)
+    button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    var check := CheckBox.new()
+    check.text = "Auto"
+    check.tooltip_text = "Continuously replenish this ship type in the queue"
+    row.add_child(check)
+    check.toggled.connect(func(enabled: bool) -> void:
+        session.call("request_continuous", selected, kind, enabled))
+    continuous_checks[kind] = check
+    return button
 
 func _build_upgrade_cards(parent: Container) -> void:
     var labels: Dictionary = {"Metals": "Metal extraction", "Plastics": "Plastic extraction",
@@ -424,7 +422,7 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
         else:
             button.text = "UPGRADE TO LV %d" % (level + 1)
             var available: bool = ECONOMY.ACTIVE_PRODUCTION.has(resource) and (not ECONOMY.EXTRACTED.has(resource) or float(planet["abundance"].get(resource, 0.0)) > 0.0)
-            button.disabled = not owned or not available
+            button.disabled = not owned or not available or (planet["queue"] as Array).size() >= ECONOMY.MAX_QUEUE
             if not ECONOMY.ACTIVE_PRODUCTION.has(resource):
                 detail.text = "Production design pending"
             elif not available:
@@ -468,8 +466,7 @@ func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
     var route: Array = ship["route"]
     var mode: String = ship.get("mining_mode", "idle")
     if mode in ["outbound", "return"]:
-        var field: Dictionary = state["map"]["fields"][int(ship["field"])]
-        var distance: float = (points[int(ship["at"])] as Vector2).distance_to(field["position"])
+        var distance: float = (points[int(ship["at"])] as Vector2).distance_to(ship["mining_target"])
         return distance * (1.0 - float(ship["field_leg"]) if mode == "outbound" else float(ship["field_leg"])) / ECONOMY.SHIP_SPEED
     var path: Array[int] = [int(ship["at"])]
     for index in route:
@@ -483,8 +480,14 @@ func _apply_mining_policy() -> void:
 func _refresh_field_panels(state: Dictionary) -> void:
     var field: Dictionary = state["map"]["fields"][selected_field]
     ship_title.text = "Asteroid field %02d" % (selected_field + 1)
-    var total: float = float(field["Metals"]) + float(field["Crystals"])
-    ship_detail.text = "Metals ~%d%%\nCrystals ~%d%%\n\nService planet %02d" % [roundi(100.0 * float(field["Metals"]) / total), roundi(100.0 * float(field["Crystals"]) / total), int(field["anchor"]) + 1]
+    var stock: Dictionary = ECONOMY.field_inventory(field)
+    var total: float = float(stock["Metals"]) + float(stock["Crystals"])
+    if total <= ECONOMY.EPS:
+        ship_detail.text = "Depleted"
+    else:
+        var metals: int = roundi(100.0 * float(stock["Metals"]) / total)
+        ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, _compact_amount(float(stock["Metals"])), 100 - metals, _compact_amount(float(stock["Crystals"]))]
+    ship_detail.tooltip_text = "%d chunks remaining · Service planet %02d" % [field["chunks"].size(), int(field["anchor"]) + 1]
     ship_cargo.get_parent().hide()
     fleet_title.text = "Mining"
     fleet_detail.hide()
@@ -511,7 +514,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
     elif mode in ["outbound", "return"]:
         status = ("To field" if mode == "outbound" else "Returning") + "\nETA %.1f yr" % _remaining_years(state, ship)
     elif mode == "mining":
-        status = "Mining field %02d" % (int(ship["field"]) + 1)
+        status = "Mining field %02d\n%.1f / 5 yr" % [int(ship["field"]) + 1, minf(5.0, float(ship.get("mining_years", 0.0)))]
     ship_detail.text = "%s\n%s" % [str(roster.get(owner, {}).get("name", "Player")), status]
     var cargo_capable: bool = kind in ["ship", "miner"]
     ship_cargo.get_parent().visible = cargo_capable
@@ -549,10 +552,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
             fleet_cargo_labels[resource].text = "%.1f" % float(cargo[resource])
             fleet_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
 
-func _build_global_bar(parent: Container) -> void:
-    var stats := HBoxContainer.new()
-    stats.add_theme_constant_override("separation", 4)
-    parent.add_child(stats)
+func _build_global_bar(stats: Container) -> void:
     for resource in ECONOMY.RESOURCES:
         var tile := PanelContainer.new()
         tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -613,10 +613,6 @@ func _refresh_global_bar(state: Dictionary) -> void:
             resource, value, float(totals["stock"][resource]), float(totals["cargo"][resource]), rate]
     global_population_label.text = "POP  %s" % _compact_amount(float(totals["population"]))
     global_population_label.tooltip_text = "Population across owned planets: %.0f" % float(totals["population"])
-    global_craft_label.text = "CRAFT  %d" % int(totals["craft"])
-    global_craft_label.tooltip_text = "%d logistics / %d colony / %d fighters / %d miners" % [int(totals["logistics"]), int(totals["colonies"]), int(totals["fighters"]), int(totals["miners"])]
-    global_planet_label.text = "WORLDS  %d" % int(totals["planets"])
-    global_planet_label.tooltip_text = "Owned planets (excludes allied planets)"
 
 func _inspector_page(title_text: String) -> VBoxContainer:
     var scroll := ScrollContainer.new()
@@ -672,15 +668,14 @@ func _cancel() -> void:
 func _refresh() -> void:
     if is_instance_valid(map_canvas):
         map_canvas.queue_redraw()
-    if not is_instance_valid(heading):
+    if not is_instance_valid(year_label):
         return
     var state: Dictionary = _state()
     var phase: String = str(session.get("phase"))
-    heading.text = str(session.get("status")) if phase != "match" else ""
     _refresh_global_bar(state)
-    leave.text = "MENU" if bool(session.get("is_solo")) else ("RETURN TO LOBBY" if multiplayer.is_server() else "LEAVE")
+    leave.text = "MENU" if bool(session.get("is_solo")) else ("LOBBY" if multiplayer.is_server() else "LEAVE")
     if phase == "loading":
-        leave.text = "CANCEL START" if multiplayer.is_server() else "LEAVE"
+        leave.text = "CANCEL" if multiplayer.is_server() else "LEAVE"
     var planets: Array = state.get("planets", [])
     if not initial_selection_done and not planets.is_empty():
         initial_selection_done = true
@@ -711,12 +706,18 @@ func _refresh() -> void:
     _refresh_yard_activity(p)
     var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and phase == "match"
     _refresh_colony_choices(state, p, phase)
-    colony_button.disabled = not owned
+    var full: bool = (p.get("queue", []) as Array).size() >= ECONOMY.MAX_QUEUE
+    for kind in continuous_checks:
+        var check: CheckBox = continuous_checks[kind]
+        check.set_pressed_no_signal(bool(p.get("continuous", {}).get(kind, false)))
+        check.disabled = not owned or (kind == "ship" and not bool(p.get("home", false)))
+    queue_title.text = "Queue  %d/%d" % [(p.get("queue", []) as Array).size(), ECONOMY.MAX_QUEUE]
+    colony_button.disabled = not owned or full
     threshold_button.disabled = not owned
-    fighter_button.disabled = not owned
-    miner_button.disabled = not owned
+    fighter_button.disabled = not owned or full
+    miner_button.disabled = not owned or full
     ship_button.disabled = true
-    yard_button.disabled = not owned
+    yard_button.disabled = not owned or full
     upgrade_yard.disabled = true
     cancel_button.disabled = true
     if p.is_empty():
@@ -765,7 +766,7 @@ func _refresh() -> void:
     var t: Dictionary = p["thresholds"][trade_resource]
     trade_detail.text = "Stock: %.1f\nCurrent import/export: %.0f / %.0f" % [float(p["stock"][trade_resource]), float(t["min"]), float(t["max"])]
     _refresh_upgrade_cards(p, owned)
-    ship_button.disabled = not owned or not bool(p["home"])
+    ship_button.disabled = not owned or full or not bool(p["home"])
     var yards: Array = p["yards"]
     var yard_text: String = str(yards.size())
     for y in yards:
@@ -782,8 +783,12 @@ func _refresh() -> void:
     if y_index >= 0 and y_index < yards.size():
         var y: Dictionary = yards[y_index]
         var upgrading: bool = ECONOMY._has_job(p, "yard_upgrade", str(y_index))
-        yard_info.text = "Work/s: %.1f  •  Max size: %d  •  %s" % [ECONOMY.yard_speed(int(y["level"])), ECONOMY.max_size(int(y["level"])), "Upgrading" if upgrading else ("Idle" if int(y["job"]) < 0 else "Building")]
-        upgrade_yard.disabled = not owned or upgrading
+        var upgrading_now: bool = false
+        for job in p["queue"]:
+            if int(job["id"]) == int(y["job"]) and job["kind"] == "yard_upgrade":
+                upgrading_now = true
+        yard_info.text = "Work/yr: %.1f  •  Max size: %d  •  %s" % [ECONOMY.yard_speed(int(y["level"])), ECONOMY.max_size(int(y["level"])), "Upgrading" if upgrading_now else ("Idle" if int(y["job"]) < 0 else "Building")]
+        upgrade_yard.disabled = not owned or full or upgrading
     else:
         yard_info.text = "No shipyards"
     var selected_job: int = -1
@@ -817,10 +822,14 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         var yards: Array = p["yards"]
         for i in range(yards.size()):
             var yard: Dictionary = yards[i]
+            active[i] = {}
             for job in p["queue"]:
-                if int(job["id"]) == int(yard["job"]) or (job["kind"] == "yard_upgrade" and job["target"] == str(i)):
+                if int(job["id"]) == int(yard["job"]):
                     active[i] = job
                     break
+        for job in p["queue"]:
+            if job["kind"] == "yard":
+                active[-int(job["id"])] = job
     yard_activity.get_parent().visible = not active.is_empty()
     for index in yard_activity_rows.keys():
         if not active.has(index):
@@ -828,8 +837,13 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             yard_activity.remove_child(obsolete)
             obsolete.queue_free()
             yard_activity_rows.erase(index)
+    var pending_number: int = (p.get("yards", []) as Array).size()
     for index in active:
         var job: Dictionary = active[index]
+        var number: int = int(index) + 1
+        if int(index) < 0:
+            pending_number += 1
+            number = pending_number
         if not yard_activity_rows.has(index):
             var row := VBoxContainer.new()
             var title := _label("", 12)
@@ -841,12 +855,21 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             yard_activity_rows[index] = {"row": row, "label": title, "progress": progress}
         var label: Label = yard_activity_rows[index]["label"]
         var bar: ProgressBar = yard_activity_rows[index]["progress"]
+        if job.is_empty():
+            label.text = "%d · Idle" % (int(index) + 1)
+            bar.value = 0.0
+            bar.show_percentage = false
+            bar.tooltip_text = "Shipyard %d" % (int(index) + 1)
+            continue
+        bar.show_percentage = true
         var name_text: String = "Logistics ship" if job["kind"] == "ship" else str(job["kind"]).replace("_", " ").capitalize()
         if job["kind"] == "yard_upgrade":
             name_text = "Upgrade to Lv %d" % int(job["level"])
-        label.text = "%d · %s" % [int(index) + 1, name_text]
+        elif job["kind"] == "yard":
+            name_text = "Construction"
+        label.text = "%d · %s" % [number, name_text]
         bar.value = 100.0 * float(job["progress"]) / float(job["work"])
-        bar.tooltip_text = "Waiting for materials" if ECONOMY._possible(p, job) <= ECONOMY.EPS else "Shipyard %d" % (int(index) + 1)
+        bar.tooltip_text = "Waiting for materials" if ECONOMY._possible(p, job) <= ECONOMY.EPS else "Shipyard %d" % number
 
 func _refresh_selected_job(p: Dictionary) -> void:
     var selection: PackedInt32Array = jobs.get_selected_items()
@@ -1041,8 +1064,7 @@ func _ship_position(ship: Dictionary, points: Array) -> Vector2:
     var pos: Vector2 = points[int(ship["at"])]
     var route: Array = ship["route"]
     if ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]:
-        var field: Dictionary = _state()["map"]["fields"][int(ship["field"])]
-        return pos.lerp(field["position"], float(ship["field_leg"]))
+        return pos.lerp(ship["mining_target"], float(ship["field_leg"]))
     if not route.is_empty():
         var next: Vector2 = points[int(route[0])]
         pos = pos.lerp(next, clampf(float(ship["leg"]) / maxf(1.0, pos.distance_to(next)), 0.0, 1.0))
@@ -1109,7 +1131,6 @@ func _orbit_direction(offset: Vector2) -> Vector2:
 
 func _ship_poses(state: Dictionary) -> Dictionary:
     var points: Array = state["map"]["points"]
-    var fields: Array = state["map"].get("fields", [])
     var docked: Dictionary = {}
     var poses: Dictionary = {}
 
@@ -1124,8 +1145,7 @@ func _ship_poses(state: Dictionary) -> Dictionary:
         var point: Vector2 = _screen_point(pos)
         var mining: bool = ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
         if mining:
-            var field: Dictionary = fields[int(ship["field"])]
-            direction = ((field["position"] as Vector2) - (points[at] as Vector2)).normalized()
+            direction = ((ship["mining_target"] as Vector2) - (points[at] as Vector2)).normalized()
             if ship["mining_mode"] == "return":
                 direction = -direction
             if ship["mining_mode"] == "mining":
@@ -1171,19 +1191,25 @@ func _draw_map() -> void:
         if not ECONOMY.discovered(state, _me(), "fields", field_index):
             map_canvas.draw_string(font, center + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
             continue
-        var radius: float = float(field["radius"]) * _fit() * zoom
-        var anchor: Vector2 = _screen_point(points[int(field["anchor"])])
-        map_canvas.draw_dashed_line(anchor, center, Color("#a9a27675"), 1.0, 4.0)
-        map_canvas.draw_circle(center, radius, Color("#7b79652b"), true)
-        map_canvas.draw_arc(center, radius, 0.0, TAU, 32, HUD.ACCENT if selected_field == field_index else Color("#b9ac776f"), 2.0 if selected_field == field_index else 1.0, true)
-        for j in range(15):
-            var angle: float = float(j) * 2.399963 + float(field_index)
-            var rock_pos: Vector2 = center + Vector2.from_angle(angle) * radius * sqrt(float(j + 1) / 16.0)
-            var rock_radius: float = maxf(1.0, radius * (0.09 + 0.03 * float(j % 3)))
+        var boundary := PackedVector2Array()
+        for vertex in field["outline"]:
+            boundary.append(_screen_point(vertex))
+        if not boundary.is_empty():
+            map_canvas.draw_colored_polygon(boundary, Color("#7b796512"))
+            boundary.append(boundary[0])
+            map_canvas.draw_polyline(boundary, HUD.ACCENT if selected_field == field_index else Color("#b9ac7740"), 1.5, true)
+        for chunk in field["chunks"]:
+            var rock_pos: Vector2 = _screen_point(chunk["position"])
+            var fraction: float = float(chunk["remaining"]) / float(chunk["initial"])
+            var rock_radius: float = maxf(1.3, float(chunk["radius"]) * _fit() * zoom * sqrt(fraction))
             var rock := PackedVector2Array()
-            for k in range(5):
-                rock.append(rock_pos + Vector2.from_angle(float(k) * TAU / 5.0 + angle) * rock_radius)
-            map_canvas.draw_colored_polygon(rock, Color("#9a9479") if j % 3 != 0 else Color("#ba98d4"))
+            for k in range(chunk["shape"].size()):
+                var angle: float = TAU * float(k) / float(chunk["shape"].size()) + float(chunk["rotation"])
+                rock.append(rock_pos + Vector2.from_angle(angle) * rock_radius * float(chunk["shape"][k]))
+            var tint: Color = HUD.COLORS[chunk["resource"]]
+            map_canvas.draw_colored_polygon(rock, tint.darkened(0.25))
+            rock.append(rock[0])
+            map_canvas.draw_polyline(rock, tint, 0.8, true)
     for i in range(points.size()):
         var pos: Vector2 = _screen_point(points[i])
         if not ECONOMY.discovered(state, _me(), "planets", i):
