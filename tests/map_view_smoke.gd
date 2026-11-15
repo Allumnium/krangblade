@@ -23,8 +23,8 @@ func _run() -> void:
     assert(brand.autowrap_mode == TextServer.AUTOWRAP_OFF)
     assert(brand.size.x >= brand.get_combined_minimum_size().x)
     var tabs: TabContainer = view.get("inspector_tabs")
-    assert(tabs.get_tab_count() == 3)
-    assert(tabs.get_tab_title(0) == "Economy" and tabs.get_tab_title(1) == "Trade" and tabs.get_tab_title(2) == "Shipyards")
+    assert(tabs.get_tab_count() == 4)
+    assert(tabs.get_tab_title(0) == "Economy" and tabs.get_tab_title(1) == "Trade" and tabs.get_tab_title(2) == "Shipyards" and tabs.get_tab_title(3) == "Upgrades")
     var trade: OptionButton = view.get("trade_picker")
     assert(trade.item_count == 6)
     trade.select(3)
@@ -41,6 +41,21 @@ func _run() -> void:
     assert((view.get("global_resource_labels") as Dictionary).size() == 6)
     assert((view.get("global_population_label") as Label).text.begins_with("POP"))
     assert((view.get("global_planet_label") as Label).text == "WORLDS  1")
+    var cards: Dictionary = view.get("upgrade_cards")
+    assert(cards.size() == 6)
+    var farm: Dictionary = cards["Organics"]
+    var farm_button: Button = farm["button"]
+    assert(tabs.get_tab_control(3).is_ancestor_of(farm_button))
+    assert(not farm_button.disabled)
+    assert((cards["Tech"]["button"] as Button).disabled)
+    tabs.current_tab = 3
+    farm_button.pressed.emit()
+    assert(state["planets"][0]["queue"].size() == 1)
+    assert((farm["progress"] as ProgressBar).visible)
+    assert(farm_button.text.contains("CANCEL"))
+    farm_button.pressed.emit()
+    assert(state["planets"][0]["queue"].is_empty())
+    tabs.current_tab = 0
     var points: Array = state["map"]["points"]
     var neighbor: int = -1
     for i in range(1, points.size()):
@@ -110,6 +125,7 @@ func _run() -> void:
     assert(is_equal_approx(keyboard_pan.length(), 210.0))
     view.call("_reset_view")
     var prior_width: float = canvas.size.x
+    var fixed_point: Vector2 = view.call("_screen_point", points[0])
     mouse.button_index = MOUSE_BUTTON_LEFT
     mouse.pressed = true
     mouse.position = Vector2(-100, -100)
@@ -120,9 +136,11 @@ func _run() -> void:
     assert(int(view.get("selected")) == -1 and not inspector.visible)
     await process_frame
     assert(canvas.size.x > prior_width)
+    assert((view.call("_screen_point", points[0]) as Vector2).is_equal_approx(fixed_point))
     mouse.position = view.call("_screen_point", points[0])
     view.call("_map_input", mouse)
     assert(int(view.get("selected")) == 0 and inspector.visible)
+    assert((view.call("_screen_point", points[0]) as Vector2).is_equal_approx(fixed_point))
     assert((view.get("global_planet_label") as Label).text == "WORLDS  2")
 
     session.call("request_operation", 0, "ship")
@@ -131,6 +149,17 @@ func _run() -> void:
     assert(state["ships"].size() == 1)
     assert((view.get("ship_visuals") as Dictionary).size() == 1)
     assert((view.get("global_craft_label") as Label).text == "CRAFT  1")
+    var orbit_start: Vector2 = view.call("_orbit_offset", 0, 17.0, 0.0)
+    var orbit_next: Vector2 = view.call("_orbit_offset", 0, 17.0, 1.0)
+    assert(not orbit_start.is_equal_approx(orbit_next))
+    assert(is_equal_approx(orbit_start.length(), orbit_next.length()))
+    var fighter_button: Button = view.get("fighter_button")
+    fighter_button.pressed.emit()
+    for i in range(70):
+        session.call("_economy_tick")
+    assert(state["ships"].size() == 2)
+    assert(state["ships"][1]["kind"] == "fighter")
+    assert((view.get("global_craft_label") as Label).text == "CRAFT  2")
     await process_frame
     await process_frame
     print("PASS: select without capture, colony dispatch and arrival, zoom anchor, pan, reset and ship rendering")
