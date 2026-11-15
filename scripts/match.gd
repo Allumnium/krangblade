@@ -927,7 +927,7 @@ func _refresh_field_panels(state: Dictionary) -> void:
         ship_detail.text = "Depleted"
     else:
         var metals: int = roundi(100.0 * float(stock["Metals"]) / total)
-        ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, _compact_amount(float(stock["Metals"])), 100 - metals, _compact_amount(float(stock["Crystals"]))]
+        ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, _tons(float(stock["Metals"])), 100 - metals, _tons(float(stock["Crystals"]))]
     var access_names: PackedStringArray = []
     for anchor in ECONOMY.field_access_systems(state["map"], field):
         access_names.append(_system_name(anchor))
@@ -1345,8 +1345,8 @@ func _flow_name(category: String) -> String:
 
 func _resource_breakdown(state: Dictionary, resource: String) -> String:
     var totals: Dictionary = ECONOMY.empire_totals(state, _me())
-    var lines: PackedStringArray = ["%s  ·  %s stored" % [resource, _tons(float(totals["stock"][resource]))],
-        "%s in transit  /  %s storage" % [_tons(float(totals["cargo"][resource])), _tons(float(totals["storage_reference"][resource]))],
+    var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
+        "%.2f t in transit  /  %.0f t storage" % [float(totals["cargo"][resource]), float(totals["storage_reference"][resource])],
         "Current local flows (t/yr)"]
     for i in range((state.get("planets", []) as Array).size()):
         var p: Dictionary = state["planets"][i]
