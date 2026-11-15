@@ -12,7 +12,7 @@ func _initialize() -> void:
     for i in range(MAP.COUNT):
         assert(not MAP.path(graph, all_friendly, 1, 0, i).is_empty())
     # Seeded clusters are internally connected and connected by sparse bridges.
-    for seed_value in range(20):
+    for seed_value in range(50):
         var clustered: Dictionary = MAP.generate(seed_value)
         var cluster_ids: Array = clustered["clusters"]
         var cluster_points: Array = clustered["points"]
@@ -21,16 +21,34 @@ func _initialize() -> void:
         var locals: int = 0
         var bridges: int = 0
         var longest: float = 0.0
+        var degrees: Array[int] = []
+        degrees.resize(MAP.COUNT)
+        degrees.fill(0)
         for edge in clustered["edges"]:
             var length: float = cluster_points[edge[0]].distance_to(cluster_points[edge[1]])
             longest = maxf(longest, length)
+            degrees[edge[0]] += 1
+            degrees[edge[1]] += 1
             if cluster_ids[edge[0]] == cluster_ids[edge[1]]:
                 locals += 1
                 local_distance += length
             else:
                 bridges += 1
                 bridge_distance += length
-        assert(bridges >= MAP.CLUSTER_COUNT - 1)
+        assert(bridges == MAP.CLUSTER_COUNT - 1)
+        assert(clustered["edges"].size() >= MAP.COUNT - 1)
+        assert(clustered["edges"].size() <= MAP.COUNT)
+        assert(degrees.count(3) <= MAP.MAX_JUNCTIONS)
+        assert(degrees.count(1) >= 2)
+        for degree in degrees:
+            assert(degree >= 1 and degree <= MAP.MAX_CONNECTIONS)
+        for home in range(8):
+            var neutral_neighbor: bool = false
+            for i in range(8, MAP.COUNT):
+                if MAP.linked(clustered, home, i):
+                    neutral_neighbor = true
+                    break
+            assert(neutral_neighbor)
         assert(is_equal_approx(longest / ECON.SHIP_SPEED, MAP.LONGEST_LINK_YEARS))
         assert(not (clustered["fields"] as Array).is_empty())
         for edge in clustered["edges"]:
