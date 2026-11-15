@@ -40,6 +40,8 @@ var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
 var drag_button: int = 0
 var ship_visuals: Dictionary = {}
+var ship_offsets: Dictionary = {}
+const SHIP_WORLD_SCALE: float = 3.0
 var interaction_panel: VBoxContainer
 var military_lens: Button
 var logistics_lens: Button
@@ -1396,7 +1398,7 @@ func _select_at(point: Vector2) -> void:
     var ship_distance: float = INF
     for id in poses:
         var distance: float = point.distance_to(poses[id]["point"])
-        if distance <= 12.0 and distance < ship_distance:
+        if distance <= maxf(5.0, 12.0 * _ship_scale()) and distance < ship_distance:
             ship_distance = distance
             ship_hit = int(id)
     selected_ship_id = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
@@ -1527,6 +1529,9 @@ func _on_economy_changed() -> void:
             else:
                 updated[id] = previous
     ship_visuals = updated
+    for id in ship_offsets.keys():
+        if not updated.has(id):
+            ship_offsets.erase(id)
     _refresh()
 
 func _keyboard_pan(delta: float) -> void:
@@ -1552,10 +1557,13 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 
 func _process(delta: float) -> void:
     _keyboard_pan(delta)
-    visual_clock = fmod(visual_clock + delta, TAU * 100.0)
+    visual_clock += delta
     for visual in ship_visuals.values():
         if float(visual["age"]) < SNAPSHOT_SECONDS:
             visual["age"] = minf(SNAPSHOT_SECONDS, float(visual["age"]) + delta)
+    var state: Dictionary = _state()
+    if not state.is_empty():
+        _ship_poses(state, delta)
     if is_instance_valid(map_canvas):
         _position_territory()
         map_canvas.queue_redraw()
@@ -1568,9 +1576,11 @@ func _orbit_offset(slot: int, radius: float, time: float) -> Vector2:
 func _orbit_direction(offset: Vector2) -> Vector2:
     return Vector2(-offset.y, offset.x).normalized()
 
-func _ship_poses(state: Dictionary) -> Dictionary:
+func _ship_scale() -> float:
+    return SHIP_WORLD_SCALE * _fit() * zoom
+
+func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
     var points: Array = state["map"]["points"]
-    var docked: Dictionary = {}
     var poses: Dictionary = {}
     var military_points: Array = ECONOMY.military_graph(state)["points"]
 
@@ -1583,7 +1593,7 @@ func _ship_poses(state: Dictionary) -> Dictionary:
         var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
         var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
         var direction: Vector2 = Vector2.UP
-        var point: Vector2 = _screen_point(pos)
+        var offset_world: Vector2 = Vector2.ZERO
         var mining: bool = ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
         if mining:
             direction = ((ship["mining_target"] as Vector2) - (points[at] as Vector2)).normalized()
@@ -1591,21 +1601,27 @@ func _ship_poses(state: Dictionary) -> Dictionary:
                 direction = -direction
             if ship["mining_mode"] == "mining":
                 var mining_offset: Vector2 = Vector2.from_angle(float(int(ship["id"])) * 2.399963 + visual_clock * 0.3) * 6.0
-                point += mining_offset
+                offset_world = mining_offset * SHIP_WORLD_SCALE
                 direction = _orbit_direction(mining_offset)
         elif route.is_empty():
             # All living craft orbit visually, including foreign stationary fighters.
-            var slot: int = int(docked.get(at, 0))
-            docked[at] = slot + 1
-            var orbit_radius: float = maxf(9.0, float(state["map"]["fields"][at - points.size()]["radius"]) * _fit() * zoom) if field_node else _planet_radius(at, state)
+            var slot: int = int(ship["id"]) % 64
+            var orbit_radius: float = float(state["map"]["fields"][at - points.size()]["radius"]) if field_node else float(_system_visual(at, state)["spacing"]) * 0.25
             var offset: Vector2 = _orbit_offset(slot, orbit_radius, visual_clock)
             direction = _orbit_direction(offset)
-            point += offset
+            offset_world = offset
         else:
             var next: Vector2 = travel_points[int(route[0])]
             direction = (next - (travel_points[at] as Vector2)).normalized()
-            point += direction.orthogonal() * (5.0 + float(int(ship["id"]) % 5) * 4.0)
-        poses[int(ship["id"])] = {"point": point, "direction": direction, "mining": mining}
+            offset_world = direction.orthogonal() * (5.0 + float(int(ship["id"]) % 5) * 4.0) * SHIP_WORLD_SCALE
+        var id: int = int(ship["id"])
+        var prior: Dictionary = ship_offsets.get(id, {"offset": offset_world, "angle": direction.angle()})
+        var weight: float = 1.0 - exp(-delta / SNAPSHOT_SECONDS * 3.0)
+        var smooth_offset: Vector2 = (prior["offset"] as Vector2).lerp(offset_world, weight)
+        var angle: float = lerp_angle(float(prior["angle"]), direction.angle(), weight)
+        if delta > 0.0 or not ship_offsets.has(id):
+            ship_offsets[id] = {"offset": smooth_offset, "angle": angle}
+        poses[id] = {"point": _screen_point(pos + smooth_offset), "direction": Vector2.from_angle(angle), "mining": mining}
     return poses
 
 func _combat_slider_rect(state: Dictionary, node: int, points: Array) -> Rect2:
@@ -1782,7 +1798,9 @@ func _draw_map() -> void:
             hull = Color("#f2b57e")
         elif ship.get("kind", "ship") == "miner":
             hull = Color("#d8e58b")
-        var side: Vector2 = direction.orthogonal()
+        var scale: float = _ship_scale()
+        var side: Vector2 = direction.orthogonal() * scale
+        direction *= scale
         var shape := PackedVector2Array([point + direction * 9, point - direction * 6 + side * 5,
             point - direction * 3, point - direction * 6 - side * 5])
         if colony:
@@ -1791,20 +1809,20 @@ func _draw_map() -> void:
             shape = PackedVector2Array([point + direction * 12, point - direction * 7 + side * 8, point - direction * 3, point - direction * 7 - side * 8])
         if ship.get("kind", "ship") == "miner":
             shape = PackedVector2Array([point + direction * 8 + side * 4, point + direction * 8 - side * 4, point - direction * 6 - side * 7, point - direction * 6 + side * 7])
-        if not route.is_empty() or fighter or mining:
+        if scale >= 0.65 and (not route.is_empty() or fighter or mining):
             var engine: Vector2 = point - direction * 9.0
-            map_canvas.draw_circle(engine, 5.0, Color("#43a5ff30"), true)
-            map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0, true)
+            map_canvas.draw_circle(engine, 5.0 * scale, Color("#43a5ff30"), true)
+            map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0 * scale, true)
         if int(ship["id"]) == selected_ship_id:
-            map_canvas.draw_arc(point, 15.0, 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
+            map_canvas.draw_arc(point, maxf(5.0, 15.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
         map_canvas.draw_colored_polygon(shape, hull)
         var outline: PackedVector2Array = shape.duplicate()
         outline.append(shape[0])
-        map_canvas.draw_polyline(outline, Color("#08111b"), 2.5, true)
+        map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)
         # Keep class colors; identify allegiance on every hull, including loaded ships.
-        map_canvas.draw_polyline(outline, COLORS[team].lightened(0.2), 1.0, true)
+        map_canvas.draw_polyline(outline, COLORS[team].lightened(0.2), scale, true)
         var hp: float = clampf(float(ship.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
-        if hp < 1.0:
+        if hp < 1.0 and scale >= 0.65:
             var bar_pos: Vector2 = point + Vector2(-10.0, 13.0)
             map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0, 3.0)), Color("#182333"))
             map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0 * hp, 3.0)), Color("#e9a276"))
