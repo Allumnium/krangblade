@@ -19,6 +19,9 @@ jobs:
           include-templates: false
       - name: Import
         run: godot --headless --path . --import
+      - name: Collect Godot resource sidecars
+        run: |
+          python3 -c 'import json,pathlib; print("GODOT_METADATA="+json.dumps({str(p):p.read_text() for p in pathlib.Path(".").rglob("*") if p.is_file() and ".godot" not in p.parts and ".git" not in p.parts and (p.name.endswith(".uid") or p.name.endswith(".import"))}))'
       - name: Parse scenes and network scripts
         run: |
           godot --headless --path . --check-only --script res://scripts/main.gd
