@@ -63,15 +63,17 @@ func _run() -> void:
     var tabs: TabContainer = view.get("inspector_tabs")
     assert(tabs.get_tab_count() == 4)
     assert(tabs.get_tab_title(0) == "Economy" and tabs.get_tab_title(1) == "Trade" and tabs.get_tab_title(2) == "Shipyards" and tabs.get_tab_title(3) == "Upgrades")
-    var trade: OptionButton = view.get("trade_picker")
-    assert(trade.item_count == 6)
-    trade.select(3)
+    var trade_sliders: Dictionary = view.get("trade_sliders")
+    assert(trade_sliders.size() == 6)
+    for resource in ["Metals", "Plastics", "Textiles", "Organics", "Tech", "Crystals"]:
+        assert(trade_sliders.has(resource))
+        assert(tabs.get_tab_control(1).is_ancestor_of(trade_sliders[resource]))
     view.call("_load_thresholds")
-    assert(view.call("_trade_resource") == "Organics")
     assert(view.call("_resource") == "Metals")
     tabs.current_tab = 1
     await process_frame
-    var slider: Control = view.get("threshold_slider")
+    var slider: Control = trade_sliders["Organics"]
+    var metal_slider: Control = trade_sliders["Metals"]
     var stock_state: Dictionary = session.get("economy")
     var stock_system: Dictionary = stock_state["planets"][0]
     var saved_stock: float = float(stock_system["stock"]["Organics"])
@@ -108,11 +110,9 @@ func _run() -> void:
     slider.call("_gui_input", threshold_mouse)
     assert(is_equal_approx(float(slider.get("lower")), 65.0))
     assert(is_equal_approx(float(threshold_state["planets"][0]["thresholds"]["Organics"]["min"]), 65.0))
-    trade.select(0)
-    view.call("_load_thresholds")
-    assert(is_equal_approx(float(slider.get("lower")), 10.0))
-    assert(is_equal_approx(float(slider.get("upper")), 20.0))
-    trade.select(3)
+    assert(is_equal_approx(float(metal_slider.get("lower")), 10.0))
+    assert(is_equal_approx(float(metal_slider.get("upper")), 20.0))
+    assert(is_equal_approx(float(threshold_state["planets"][0]["thresholds"]["Metals"]["max"]), 20.0))
     view.call("_load_thresholds")
     assert(is_equal_approx(float(slider.get("lower")), 65.0))
     assert(is_equal_approx(float(slider.get("upper")), 65.0))
@@ -216,7 +216,7 @@ func _run() -> void:
     assert((active[0]["progress"] as ProgressBar).value > 0.0)
     tabs.current_tab = 2
     assert(tabs.get_tab_control(2).is_ancestor_of(view.get("queue_list")))
-    assert(tabs.get_tab_control(1).is_ancestor_of(trade))
+    assert(tabs.get_tab_control(1).is_ancestor_of(metal_slider))
     assert((queue_rows[colony_job_id]["progress"] as ProgressBar).value > 0.0)
     assert((queue_rows[colony_job_id]["cost"] as Label).text.contains("Metals"))
     # Cancel an active hull through its own row, then rebuild it.
