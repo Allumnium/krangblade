@@ -63,8 +63,51 @@ func _run() -> void:
     view.call("_load_thresholds")
     assert(view.call("_trade_resource") == "Organics")
     assert(view.call("_resource") == "Metals")
+    tabs.current_tab = 1
+    await process_frame
+    var slider: Control = view.get("threshold_slider")
+    assert(is_equal_approx(float(slider.get("lower")), 10.0))
+    assert(is_equal_approx(float(slider.get("upper")), 20.0))
+    var threshold_mouse := InputEventMouseButton.new()
+    threshold_mouse.button_index = MOUSE_BUTTON_LEFT
+    threshold_mouse.pressed = true
+    threshold_mouse.position = Vector2(float(slider.call("_x", 20.0)), 38)
+    slider.call("_gui_input", threshold_mouse)
+    var drag := InputEventMouseMotion.new()
+    drag.position = Vector2(float(slider.call("_x", 65.0)), 38)
+    slider.call("_gui_input", drag)
+    threshold_mouse.pressed = false
+    threshold_mouse.position = drag.position
+    slider.call("_gui_input", threshold_mouse)
+    var threshold_state: Dictionary = session.get("economy")
+    assert(is_equal_approx(float(threshold_state["planets"][0]["thresholds"]["Organics"]["max"]), 65.0))
+    threshold_mouse.pressed = true
+    threshold_mouse.position = Vector2(float(slider.call("_x", 10.0)), 38)
+    slider.call("_gui_input", threshold_mouse)
+    threshold_mouse.pressed = false
+    threshold_mouse.position = Vector2(float(slider.call("_x", 80.0)), 38)
+    slider.call("_gui_input", threshold_mouse)
+    assert(is_equal_approx(float(slider.get("lower")), 65.0))
+    assert(is_equal_approx(float(threshold_state["planets"][0]["thresholds"]["Organics"]["min"]), 65.0))
+    trade.select(0)
+    view.call("_load_thresholds")
+    assert(is_equal_approx(float(slider.get("lower")), 10.0))
+    assert(is_equal_approx(float(slider.get("upper")), 20.0))
+    trade.select(3)
+    view.call("_load_thresholds")
+    assert(is_equal_approx(float(slider.get("lower")), 65.0))
+    assert(is_equal_approx(float(slider.get("upper")), 65.0))
+    tabs.current_tab = 0
     assert((view.get("year_label") as Label).text.begins_with("YEAR"))
     assert((view.get("population_label") as Label).text.contains("Population"))
+    assert(not (view.get("population_label") as Label).text.contains(" / "))
+    assert(not (view.get("population_label") as Label).tooltip_text.contains("supported"))
+    var econ_picker: OptionButton = view.get("resource_picker")
+    econ_picker.select(3)
+    view.call("_refresh")
+    assert(not (view.get("resource_detail") as Label).text.contains("Supports"))
+    econ_picker.select(0)
+    view.call("_refresh")
     assert((view.get("stock_labels") as Dictionary).size() == 6)
     var resources: OptionButton = view.get("resource_picker")
     for i in range(resources.item_count):

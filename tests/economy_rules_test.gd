@@ -102,7 +102,24 @@ func _initialize() -> void:
     assert(not p["bonuses"].has("Tech"))
     assert(not ECON.enqueue(state, 2, 0, "ship"))
     assert(not ECON.set_thresholds(state, 1, 0, "Metals", 200, 100))
+    assert(not ECON.set_thresholds(state, 1, 0, "Metals", 0, 101))
+    assert(not ECON.set_thresholds(state, 1, 0, "Metals", 80, 20))
+    assert(ECON.set_thresholds(state, 1, 0, "Metals", 10, 20))
+    var trade_test: Dictionary = state["planets"][0]
+    var previous_stock: float = float(trade_test["stock"]["Metals"])
+    trade_test["stock"]["Metals"] = 75.0
+    assert(is_equal_approx(ECON._need(trade_test, "Metals"), 25.0))
+    assert(is_zero_approx(ECON._surplus(trade_test, "Metals")))
+    trade_test["stock"]["Metals"] = 150.0
+    assert(is_zero_approx(ECON._need(trade_test, "Metals")))
+    assert(is_zero_approx(ECON._surplus(trade_test, "Metals")))
+    trade_test["stock"]["Metals"] = 250.0
+    assert(is_equal_approx(ECON._surplus(trade_test, "Metals"), 50.0))
+    trade_test["stock"]["Metals"] = 1250.0
     assert(ECON.set_thresholds(state, 1, 0, "Metals", 0, 100))
+    assert(is_equal_approx(ECON._surplus(trade_test, "Metals"), 250.0))
+    trade_test["stock"]["Metals"] = previous_stock
+    assert(ECON.set_thresholds(state, 1, 0, "Metals", 0, 10))
     assert(not ECON.enqueue(state, 1, 0, "production", "Tech"))
 
     # Empire totals include cargo once and exclude allied/hostile inventories.
@@ -434,9 +451,9 @@ func _initialize() -> void:
             planet["thresholds"][r] = {"min": 0.0, "max": 0.0}
     source["stock"]["Metals"] = 4.0
     source["stock"]["Plastics"] = 6.0
-    ally["thresholds"]["Metals"] = {"min": 100.0, "max": 100.0}
-    ally["thresholds"]["Plastics"] = {"min": 100.0, "max": 100.0}
-    hostile["thresholds"]["Metals"] = {"min": 100.0, "max": 100.0}
+    ally["thresholds"]["Metals"] = {"min": 10.0, "max": 10.0}
+    ally["thresholds"]["Plastics"] = {"min": 10.0, "max": 10.0}
+    hostile["thresholds"]["Metals"] = {"min": 10.0, "max": 10.0}
     for i in range(2):
         transport["ships"].append({"id": i, "owner": 1, "at": 0, "route": [],
             "leg": 0.0, "source": -1, "dest": -1, "cargo": ECON.empty_stock()})

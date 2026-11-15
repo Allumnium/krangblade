@@ -29,7 +29,6 @@ var yard_activity: VBoxContainer
 var yard_activity_rows: Dictionary = {}
 var inspector_tabs: TabContainer
 var population_label: Label
-var population_bar: ProgressBar
 var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
 var drag_button: int = 0
@@ -72,9 +71,7 @@ var system_visuals: Dictionary = {}
 var system_visual_seed: int = -1
 var resource_picker: OptionButton
 var resource_detail: Label
-var min_stock: SpinBox
-var max_stock: SpinBox
-var threshold_button: Button
+var threshold_slider: TradeRange
 var upgrade_cards: Dictionary = {}
 var continuous_checks: Dictionary = {}
 var queue_title: Label
@@ -88,6 +85,79 @@ var match_menu: AcceptDialog
 var menu_exit: Button
 var queue_rows: Dictionary = {}
 var queue_list: VBoxContainer
+
+class TradeRange extends Control:
+    signal committed(minimum: float, maximum: float)
+    var lower: float = 10.0
+    var upper: float = 20.0
+    var enabled: bool = true
+    var active_handle: int = -1
+    const PAD: float = 10.0
+    const TRACK_Y: float = 38.0
+
+    func set_range(minimum: float, maximum: float) -> void:
+        active_handle = -1
+        lower = clampf(minimum, 0.0, 100.0)
+        upper = clampf(maximum, lower, 100.0)
+        queue_redraw()
+
+    func _x(value: float) -> float:
+        return PAD + maxf(1.0, size.x - PAD * 2.0) * value / 100.0
+
+    func _value(x: float) -> float:
+        return roundf(clampf((x - PAD) / maxf(1.0, size.x - PAD * 2.0) * 100.0, 0.0, 100.0))
+
+    func _draw() -> void:
+        var font: Font = ThemeDB.fallback_font
+        var low_color := Color("#67d4a9") if enabled else Color("#667687")
+        var high_color := Color("#e9a276") if enabled else Color("#667687")
+        var left: String = "Import < %d%%" % roundi(lower)
+        var right: String = "Export > %d%%" % roundi(upper)
+        draw_string(font, Vector2(PAD, 17), left, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, low_color)
+        draw_string(font, Vector2(size.x - PAD - font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, 17), right, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, high_color)
+        var lo := Vector2(_x(lower), TRACK_Y)
+        var hi := Vector2(_x(upper), TRACK_Y)
+        draw_line(Vector2(PAD, TRACK_Y), Vector2(size.x - PAD, TRACK_Y), Color("#344960"), 5.0, true)
+        draw_line(Vector2(PAD, TRACK_Y), lo, Color(low_color, 0.55), 5.0, true)
+        draw_line(lo, hi, Color("#8ca1b5"), 5.0, true)
+        draw_line(hi, Vector2(size.x - PAD, TRACK_Y), Color(high_color, 0.55), 5.0, true)
+        # Offset the handles vertically when their values meet, keeping both visible.
+        var overlap: bool = absf(lo.x - hi.x) < 13.0
+        if overlap:
+            lo.y -= 5.0
+            hi.y += 5.0
+        draw_circle(lo, 7.0, low_color)
+        draw_circle(hi, 7.0, high_color)
+        draw_arc(lo, 7.0, 0.0, TAU, 24, Color("#102030"), 1.0, true)
+        draw_arc(hi, 7.0, 0.0, TAU, 24, Color("#102030"), 1.0, true)
+
+    func _move_handle(x: float) -> void:
+        if active_handle == 0:
+            lower = minf(_value(x), upper)
+        elif active_handle == 1:
+            upper = maxf(_value(x), lower)
+        queue_redraw()
+
+    func _gui_input(event: InputEvent) -> void:
+        if not enabled:
+            return
+        if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+            if event.pressed:
+                var lo := Vector2(_x(lower), TRACK_Y)
+                var hi := Vector2(_x(upper), TRACK_Y)
+                if absf(lo.x - hi.x) < 13.0:
+                    lo.y -= 5.0
+                    hi.y += 5.0
+                active_handle = 0 if event.position.distance_to(lo) < event.position.distance_to(hi) else 1
+                _move_handle(event.position.x)
+            elif active_handle >= 0:
+                _move_handle(event.position.x)
+                active_handle = -1
+                committed.emit(lower, upper)
+            accept_event()
+        elif event is InputEventMouseMotion and active_handle >= 0:
+            _move_handle(event.position.x)
+            accept_event()
 
 func _ready() -> void:
     theme = HUD.create()
@@ -223,11 +293,6 @@ func _build_ui() -> void:
     planet_overview.add_child(environment_label)
     population_label = _label("", 13)
     planet_overview.add_child(population_label)
-    population_bar = ProgressBar.new()
-    population_bar.custom_minimum_size.y = 8
-    population_bar.show_percentage = false
-    population_bar.tooltip_text = "Population relative to local Organics-supported capacity"
-    planet_overview.add_child(population_bar)
     colony_picker = OptionButton.new()
     planet_overview.add_child(colony_picker)
     send_colony_button = _button("SEND COLONY SHIP", _send_colony, planet_overview)
@@ -305,23 +370,12 @@ func _build_ui() -> void:
     logistics.add_child(trade_picker)
     trade_detail = _label("")
     logistics.add_child(trade_detail)
-    var thresholds := HBoxContainer.new()
-    logistics.add_child(thresholds)
-    for i in range(2):
-        var col := VBoxContainer.new()
-        col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        thresholds.add_child(col)
-        col.add_child(_label("Import below" if i == 0 else "Export above", 12))
-        var spin := SpinBox.new()
-        spin.max_value = 1000000
-        spin.step = 1
-        spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        col.add_child(spin)
-        if i == 0:
-            min_stock = spin
-        else:
-            max_stock = spin
-    threshold_button = _button("APPLY THRESHOLDS", _apply_thresholds, logistics)
+    threshold_slider = TradeRange.new()
+    threshold_slider.custom_minimum_size.y = 56
+    threshold_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    threshold_slider.tooltip_text = "Import below the left handle; export above the right handle. 100% = %.0f units." % ECONOMY.TRADE_REFERENCE
+    threshold_slider.committed.connect(_apply_thresholds)
+    logistics.add_child(threshold_slider)
     var shipyards: VBoxContainer = HUD.section(shipyard_page, "Build")
     ship_button = _ship_build_row(shipyards, "BUILD LOGISTICS SHIP", "ship")
     HUD.action(ship_button)
@@ -644,13 +698,10 @@ func _load_thresholds() -> void:
     if p.is_empty():
         return
     var t: Dictionary = p["thresholds"][_trade_resource()]
-    min_stock.value = float(t["min"])
-    max_stock.value = float(t["max"])
+    threshold_slider.set_range(float(t["min"]), float(t["max"]))
 
-func _apply_thresholds() -> void:
-    if min_stock.value > max_stock.value:
-        max_stock.value = min_stock.value
-    session.call("request_thresholds", selected, _trade_resource(), min_stock.value, max_stock.value)
+func _apply_thresholds(minimum: float, maximum: float) -> void:
+    session.call("request_thresholds", selected, _trade_resource(), minimum, maximum)
 
 func _operation(kind: String, target: String = "") -> void:
     session.call("request_operation", selected, kind, target)
@@ -706,7 +757,8 @@ func _refresh() -> void:
         check.disabled = not owned or (kind == "ship" and not bool(p.get("home", false)))
     queue_title.text = "Queue  %d/%d" % [(p.get("queue", []) as Array).size(), ECONOMY.MAX_QUEUE]
     colony_button.disabled = not owned or full
-    threshold_button.disabled = not owned
+    threshold_slider.enabled = owned
+    threshold_slider.queue_redraw()
     fighter_button.disabled = not owned or full
     miner_button.disabled = not owned or full
     ship_button.disabled = true
@@ -714,7 +766,6 @@ func _refresh() -> void:
     if p.is_empty():
         info.text = "Select a system."
         population_label.text = ""
-        population_bar.hide()
         resource_detail.text = ""
         trade_detail.text = ""
         _refresh_queue(p, false)
@@ -731,11 +782,8 @@ func _refresh() -> void:
     environment_label.text = "Manufacturing ×%.2f • Fields %d" % [float(p.get("advanced_bonus", 1.0)), fields_here]
     environment_label.tooltip_text = "Independent environmental modifier for future advanced components; not applied to base resources."
     var population: float = float(p["population"])
-    var capacity: float = ECONOMY.population_capacity(p)
-    population_label.text = "Population %s / %s\n%+.0f/yr • Output ×%.2f" % [_compact_amount(population), _compact_amount(capacity), ECONOMY.population_growth(p), ECONOMY.population_multiplier(p)]
-    population_label.tooltip_text = "%.0f people / %.0f supported" % [population, capacity]
-    population_bar.visible = capacity > 0.0
-    population_bar.value = 100.0 * population / maxf(capacity, 1.0)
+    population_label.text = "Population %s\n%+.0f/yr • Output ×%.2f" % [_compact_amount(population), ECONOMY.population_growth(p), ECONOMY.population_multiplier(p)]
+    population_label.tooltip_text = "%.0f people" % population
     inventory.show()
     for r in ECONOMY.RESOURCES:
         stock_labels[r].text = "%.1f" % float(p["stock"][r])
@@ -748,11 +796,10 @@ func _refresh() -> void:
     elif resource == "Organics":
         var output: float = ECONOMY.rate(p, resource)
         var demand: float = ECONOMY.organics_demand(p)
-        detail = "Farming: %.2f/yr  •  Demand: %.2f/yr\nNet: %+.2f/yr  •  Supports %s people" % [output, demand, output - demand, _compact_amount(ECONOMY.population_capacity(p))]
+        detail = "Farming: %.2f/yr  •  Demand: %.2f/yr\nNet: %+.2f/yr" % [output, demand, output - demand]
     resource_detail.text = "%s\nSystem bonus: %.2fx" % [detail, modifier]
     var trade_resource: String = _trade_resource()
-    var t: Dictionary = p["thresholds"][trade_resource]
-    trade_detail.text = "Stock: %.1f\nCurrent import/export: %.0f / %.0f" % [float(p["stock"][trade_resource]), float(t["min"]), float(t["max"])]
+    trade_detail.text = "Stock: %.1f" % float(p["stock"][trade_resource])
     _refresh_upgrade_cards(p, owned)
     ship_button.disabled = not owned or full or not bool(p["home"])
     _refresh_queue(p, owned)

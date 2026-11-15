@@ -79,3 +79,7 @@ Every graph node is a single star system for ownership, population, resources, l
 ## Match menu and upgrade economy
 
 The top bar has no reset button. Menu opens a modal with Resume and an explicit exit action appropriate to the match (main menu, return to lobby, or leave match); simulation continues while open. Every queued order has its own cancel/refund button, progress and allocated/required cost. All allocated resources are refunded on cancellation; continuous orders can be recreated if Auto remains enabled. Upgrade costs scale quadratically by target level: planetary production 150 × level² Metals, shipyard upgrades 180 × level² Metals. Construction durations and progressive allocation are unchanged. Costs are provisional; no unapproved advanced-material dependencies are added.
+
+## Percentage trade thresholds
+
+The Trade tab uses a single range slider per selected resource with import-below and export-above handles. Changes commit on release and are validated by the host. The 0–100% range refers to a fixed provisional 1,000-unit reserve reference, not a storage limit: the default 10%/20% preserves the previous 100/200-unit thresholds. Inventory may exceed 100%; any stock above the chosen export threshold remains eligible for trade. The population display no longer includes carrying capacity or a saturation bar; population and Organics simulation are unchanged.

@@ -26,6 +26,8 @@ const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const SHIP_SIZE: int = 1
 const EPS: float = 0.00001
 const MAX_QUEUE: int = 5
+# Reference stock, not a storage cap; percentage thresholds use these units.
+const TRADE_REFERENCE: float = 1000.0
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
 const MINING_STAY: float = 5.0
 
@@ -84,7 +86,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
                 bonuses[resource] = rng.randf_range(1.1, 1.8)
         var thresholds: Dictionary = {}
         for resource in RESOURCES:
-            thresholds[resource] = {"min": 100.0, "max": 200.0}
+            thresholds[resource] = {"min": 10.0, "max": 20.0}
         for resource in EXTRACTED:
             abundance[resource] = 0.0 if rng.randf() < 0.35 else rng.randf_range(0.5, 2.0)
         var home: bool = i < ordered.size()
@@ -475,7 +477,7 @@ static func set_thresholds(state: Dictionary, player: int, index: int, resource:
     var p: Dictionary = _get_owned(state, player, index)
     if p.is_empty() or not RESOURCES.has(resource):
         return false
-    if not is_finite(minimum) or not is_finite(maximum) or minimum < 0.0 or maximum < minimum or maximum > 1000000.0:
+    if not is_finite(minimum) or not is_finite(maximum) or minimum < 0.0 or maximum < minimum or maximum > 100.0:
         return false
     p["thresholds"][resource] = {"min": minimum, "max": maximum}
     return true
@@ -574,10 +576,10 @@ static func _cargo_total(ship: Dictionary) -> float:
     return total
 
 static func _need(p: Dictionary, resource: String) -> float:
-    return maxf(0.0, float(p["thresholds"][resource]["min"]) - float(p["stock"][resource]))
+    return maxf(0.0, TRADE_REFERENCE * float(p["thresholds"][resource]["min"]) / 100.0 - float(p["stock"][resource]))
 
 static func _surplus(p: Dictionary, resource: String) -> float:
-    return maxf(0.0, float(p["stock"][resource]) - float(p["thresholds"][resource]["max"]))
+    return maxf(0.0, float(p["stock"][resource]) - TRADE_REFERENCE * float(p["thresholds"][resource]["max"]) / 100.0)
 
 static func _opportunity(a: Dictionary, b: Dictionary) -> bool:
     for r in RESOURCES:
