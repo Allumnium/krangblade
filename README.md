@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Development sandbox
 
-Run the project and select **SINGLE PLAYER**, or host/join a multiplayer lobby. Every new match receives a host-generated seed for a connected, irregular 17-planet graph with fixed routes. The planet count remains a prototype setting. Click an adjacent neutral planet to claim it (temporary development-only expansion, not final combat or conquest). Each planet has a player owner and allies share surplus resources; only the owner can change its settings.
+Run the project and select **SINGLE PLAYER**, or host/join a multiplayer lobby. Every new match receives a host-generated seed for a connected, irregular 17-planet graph with fixed routes. The planet count remains a prototype setting. Left-click a planet to inspect it without changing ownership. Select an adjacent neutral planet and click **CLAIM PLANET (DEV ONLY)** to test expansion (not final combat or conquest). Right-drag or middle-drag on the map to pan, scroll to zoom at the pointer, and use RESET VIEW to fit the galaxy again. Cargo ships are directional markers; gold indicates loaded cargo, and docked fleets are counted. Each planet has a player owner and allies share surplus resources; only the owner can change its settings.
 
 Select your home planet to queue a logistics ship. Each Empire player starts with one level-one shipyard. Queue extra shipyards, upgrades, and extraction upgrades in the planetary inspector. Select a queue item to cancel and refund it. Shipyards independently work on eligible ship jobs, release blocked jobs, and cannot construct ships while an upgrade is queued. Progress is proportional to materials allocated and construction work performed.
 
