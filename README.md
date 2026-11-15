@@ -157,3 +157,6 @@ v0.12.3: Production and individual shipyard upgrades use exponential costs, 200 
 
 
 v0.12.4: Inline compact Build buttons and icon costs replace the shared shipyard build control. Only the next vacant slot offers construction. Pending shipyards can progress concurrently but activate in slot order. Cancelling an earlier order fully refunds that order, promotes later orders at their existing completion percentage and refunds their excess allocation at the cheaper slot cost.
+
+
+v0.12.6: Collapsible ship, production, factory, warehouse and shipyard upgrade details, icon recipes and unmet requirements. Population is a gradual hull construction cost (fighter 10, logistics 20, miner 30, colony 1,000), refunded on cancellation. Completed colony ships deliver their settlers to the new system; no crew upkeep or demobilization. Population cannot be spent below one resident.

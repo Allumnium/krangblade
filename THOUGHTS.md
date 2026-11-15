@@ -91,3 +91,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Consider:** Verify the waiting-at-100% case is legible; consider a concise status if it confuses players during resource shortages. Review concurrent infrastructure work during pacing tests.
 
 - v0.12.5 fixes a duplicate local variable name in the new regression fixture, caught by the mandatory parse check.
+
+### T-019 — Crew and demographic pacing
+- **Type:** Balance hypothesis.
+- **Observation:** Ship construction consumes local population proportionally (fighter 10, logistics 20, miner 30, colony 1,000). Cancelled construction returns allocated population. A colony hull delivers its settlers. At least one resident remains to avoid irreversible zero-population growth.
+- **Consider:** Measure expansion and repeated ship construction on small colonies. Crew values are provisional; no crew upkeep, transfer or automatic demobilization has been added.

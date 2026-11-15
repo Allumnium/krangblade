@@ -56,6 +56,7 @@ const WAREHOUSE_COSTS = [
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
 const CIVILIAN_CONSUMPTION = {"Metals": 0.1, "Plastics": 0.25, "Textiles": 0.25, "Tech": 0.25}
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
+const CREW_COSTS = {"ship": 20.0, "colony_ship": COLONY_POPULATION, "fighter": 10.0, "miner": 30.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
 const LASER_DAMAGE: float = 18.0
@@ -341,7 +342,7 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
     if int(state["planets"][at]["owner"]) == 0:
         var colony: Dictionary = state["planets"][at]
         colony["owner"] = int(ship["owner"])
-        colony["population"] = COLONY_POPULATION
+        colony["population"] = float(ship.get("crew", COLONY_POPULATION))
         colony["population_velocity"] = 0.0
         for resource in ["Plastics", "Textiles", "Organics", "Tech"]:
             colony["levels"][resource] = 1
@@ -614,7 +615,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
     state["next_id"] = id + 1
     p["queue"].append({"id": id, "kind": kind, "target": target, "level": level,
         "cost": _cost(kind, level), "work": _work(kind, level),
-        "progress": 0.0, "allocated": empty_stock(), "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
+        "progress": 0.0, "allocated": empty_stock(), "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
     return true
 
 static func production_modifier(system: Dictionary, resource: String) -> float:
@@ -712,6 +713,7 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
             continue
         for resource in RESOURCES:
             p["stock"][resource] = float(p["stock"][resource]) + float(item["allocated"][resource])
+        p["population"] = float(p["population"]) + float(item.get("population_allocated", 0.0))
         for yard in p["yards"]:
             if int(yard["job"]) == job_id:
                 yard["job"] = -1
@@ -742,6 +744,9 @@ static func _possible(p: Dictionary, item: Dictionary) -> float:
         var per_work: float = float(item["cost"][resource]) / work
         if per_work > 0.0:
             possible = minf(possible, float(p["stock"][resource]) / per_work)
+    var people_per_work: float = float(item.get("population_cost", 0.0)) / work
+    if people_per_work > 0.0:
+        possible = minf(possible, maxf(0.0, float(p["population"]) - 1.0) / people_per_work)
     return maxf(0.0, possible)
 
 static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> bool:
@@ -750,6 +755,9 @@ static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> boo
         var used: float = amount * float(item["cost"][resource]) / float(item["work"])
         p["stock"][resource] = maxf(0.0, float(p["stock"][resource]) - used)
         item["allocated"][resource] = float(item["allocated"][resource]) + used
+    var crew: float = amount * float(item.get("population_cost", 0.0)) / float(item["work"])
+    p["population"] = maxf(0.0, float(p["population"]) - crew)
+    item["population_allocated"] = float(item.get("population_allocated", 0.0)) + crew
     item["progress"] = float(item["progress"]) + amount
     return float(item["progress"]) >= float(item["work"]) - EPS
 
@@ -764,7 +772,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
         "ship", "colony_ship", "fighter", "miner":
             state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "at": index,
                 "position": state["map"]["points"][index], "heading": Vector2.UP, "navigation_target": state["map"]["points"][index],
-                "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
+                "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
     p["queue"].erase(item)
 
 static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
@@ -1647,7 +1655,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
         if action.is_empty():
             continue
         var build_level: int = int(p["levels"][target]) + 1 if action == "production" else (next_shipyard_slot(p) if action == "yard" else 1)
-        if not affordable(p, _cost(action, build_level)):
+        if not affordable(p, _cost(action, build_level)) or float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
             continue
         if enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):
             counts[action] += 1

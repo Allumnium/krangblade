@@ -268,7 +268,7 @@ func _check_economy_sync() -> void:
             var repeat_miner: bool = false
             for job in system["queue"]:
                 if job["kind"] == "ship" and float(job["progress"]) > 0.0:
-                    ship_progress = true
+                    ship_progress = is_equal_approx(float(job.get("population_allocated", 0.0)), float(ECON.CREW_COSTS["ship"]) * float(job["progress"]) / float(job["work"]))
                 elif job["kind"] == "fighter":
                     fighter_pending = true
                 elif job["kind"] == "production" and job["target"] == "Organics":
@@ -284,7 +284,7 @@ func _check_economy_sync() -> void:
                     _fail("Replicated hull hit points are invalid.")
                     return
                 if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship":
-                    ship_progress = true
+                    ship_progress = is_equal_approx(float(ship.get("crew", 0.0)), float(ECON.CREW_COSTS["ship"]))
             var military: Dictionary = ECON.military_policy(state, owner, "fighter")
             var field_node: int = (state["planets"] as Array).size()
             var buildings: Dictionary = system.get("buildings", {})

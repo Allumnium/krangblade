@@ -56,6 +56,9 @@ func _run() -> void:
     assert(idle_rows.size() == 3)
     assert((idle_rows[0]["row"] as Control).is_visible_in_tree())
     assert((idle_rows[0]["label"] as Label).text.contains("Idle"))
+    assert(not (idle_rows[0]["body"] as Control).visible)
+    (idle_rows[0]["header"] as Button).pressed.emit()
+    assert((idle_rows[0]["body"] as Control).visible)
     var yard_upgrade: Button = idle_rows[0]["upgrade"]
     assert(yard_upgrade.visible and not yard_upgrade.disabled)
     yard_upgrade.pressed.emit()
@@ -179,6 +182,11 @@ func _run() -> void:
     assert((view.get("global_population_label") as Label).text.begins_with("POP  10."))
     var building_cards: Dictionary = view.get("economy_cards")
     assert(building_cards.size() == 6)
+    assert(not (building_cards["Textiles"]["body"] as Control).visible)
+    (building_cards["Textiles"]["header"] as Button).pressed.emit()
+    assert((building_cards["Textiles"]["body"] as Control).visible)
+    assert(not (building_cards["Textiles"]["detail"] as Label).visible)
+    assert((building_cards["Textiles"]["costs"] as GridContainer).get_child_count() == 3)
     var textile_mill: Button = building_cards["Textiles"]["button"]
     assert(tabs.get_tab_control(1).is_ancestor_of(textile_mill))
     assert(not textile_mill.disabled)
@@ -197,6 +205,11 @@ func _run() -> void:
     var cards: Dictionary = view.get("upgrade_cards")
     assert(cards.size() == 6)
     var farm: Dictionary = cards["Organics"]
+    assert(not (farm["body"] as Control).visible)
+    (farm["header"] as Button).pressed.emit()
+    assert(not (farm["detail"] as Label).text.contains("Requires"))
+    assert((cards["Tech"]["detail"] as Label).text.contains("Requires"))
+    assert((farm["costs"] as GridContainer).get_child_count() == 1)
     var farm_button: Button = farm["button"]
     assert(tabs.get_tab_control(3).is_ancestor_of(farm_button))
     assert(not farm_button.disabled)
@@ -289,6 +302,10 @@ func _run() -> void:
     assert(tabs.current_tab == 0)
     var build: Dictionary = view.get("build_cards")
     var colony_card: Dictionary = build["colony_ship"]
+    assert(not (colony_card["body"] as Control).visible)
+    (colony_card["header"] as Button).pressed.emit()
+    assert((colony_card["costs"] as GridContainer).get_child_count() == 6)
+    assert((colony_card["body"] as Control).visible)
     assert((colony_card["button"] as Button).text.ends_with("(1)"))
     assert(not (colony_card["cancel"] as Button).disabled)
     for i in range(10):
