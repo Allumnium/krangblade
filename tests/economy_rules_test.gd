@@ -1227,17 +1227,17 @@ func _initialize() -> void:
     var opening: Dictionary = ECON.create(graph, players, ids)
     assert(opening["ships"].size() == ids.size() * 5)
     for owner in ids:
-        var home: int = ECON.military_home(opening, owner)
+        var opening_home: int = ECON.military_home(opening, owner)
         var miners: int = 0
         var fighters: int = 0
         for craft in opening["ships"]:
             if int(craft["owner"]) == owner:
-                assert(int(craft["at"]) == home and craft["position"] == graph["points"][home])
+                assert(int(craft["at"]) == opening_home and craft["position"] == graph["points"][opening_home])
                 miners += 1 if craft["kind"] == "miner" else 0
                 fighters += 1 if craft["kind"] == "fighter" else 0
         assert(miners == 3 and fighters == 2)
-        assert(opening["planets"][home]["stock"] == ECON.STARTING_STOCK)
-        assert(opening["planets"][home]["population"] == ECON.HOME_POPULATION)
+        assert(opening["planets"][opening_home]["stock"] == ECON.STARTING_STOCK)
+        assert(opening["planets"][opening_home]["population"] == ECON.HOME_POPULATION)
     var defenses: Dictionary = ECON.create(force_map, players, ids, false)
     var defended: Dictionary = defenses["planets"][0]
     assert(int(defended["planet_count"]) == ECON.system_bodies(defended, int(force_map["seed"]), 0).size())

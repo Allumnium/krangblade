@@ -110,3 +110,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Consider:** Playtest attack waves against multiple defenses. PDS installations are not independently targetable or destructible yet; decide that along with conquest design. Check starter miners' resource throughput and PDS pacing.
 
 - v0.13.1 corrects a duplicate fixture variable found during static review of the PDS test.
+
+- v0.13.2 corrects the starter fleet test's shadowed home index, caught by Godot parsing.
