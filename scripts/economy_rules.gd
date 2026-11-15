@@ -8,14 +8,15 @@ const STARTING_STOCK = {"Metals": 1650.0, "Plastics": 360.0, "Textiles": 240.0, 
 const BASE_INDUSTRIAL_RATE: float = 0.5
 const INDUSTRIAL_POPULATION_PER_LEVEL: float = 100000.0
 const BUILDING_BONUS: float = 0.25
+const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional local permanent improvements. No repeat purchases or upkeep.
 const ECONOMY_BUILDINGS = {
-    "Metals": {"name": "Refinery", "population": 10000, "cost": {"Metals": 120.0, "Plastics": 15.0, "Tech": 10.0}},
-    "Plastics": {"name": "Polymer factory", "population": 10000, "cost": {"Metals": 100.0, "Plastics": 10.0, "Tech": 10.0}},
-    "Textiles": {"name": "Textile mill", "population": 10000, "cost": {"Metals": 100.0, "Plastics": 15.0, "Tech": 5.0}},
-    "Organics": {"name": "Agricultural complex", "population": 10000, "cost": {"Metals": 120.0, "Plastics": 15.0, "Tech": 10.0}},
-    "Tech": {"name": "Electronics factory", "population": 200000, "cost": {"Metals": 300.0, "Plastics": 40.0, "Tech": 30.0}},
-    "Crystals": {"name": "Crystal processor", "population": 10000, "cost": {"Metals": 120.0, "Plastics": 15.0, "Tech": 10.0}}
+    "Metals": {"name": "Refinery", "population": 10000, "cost": {"Metals": 360.0, "Plastics": 45.0, "Tech": 30.0}},
+    "Plastics": {"name": "Polymer factory", "population": 10000, "cost": {"Metals": 300.0, "Plastics": 30.0, "Tech": 30.0}},
+    "Textiles": {"name": "Textile mill", "population": 10000, "cost": {"Metals": 300.0, "Plastics": 45.0, "Tech": 15.0}},
+    "Organics": {"name": "Agricultural complex", "population": 10000, "cost": {"Metals": 360.0, "Plastics": 45.0, "Tech": 30.0}},
+    "Tech": {"name": "Electronics factory", "population": 200000, "cost": {"Metals": 900.0, "Plastics": 120.0, "Tech": 90.0}},
+    "Crystals": {"name": "Crystal processor", "population": 10000, "cost": {"Metals": 360.0, "Plastics": 45.0, "Tech": 30.0}}
 }
 # Population is expressed in people (fractional values retained in simulation).
 const HOME_POPULATION: float = 10000.0
@@ -45,10 +46,12 @@ const DEFAULT_FOG_OF_WAR: bool = false
 # Starting storage capacity per resource; warehouse upgrades increase it.
 const TRADE_REFERENCE: float = 2000.0
 const WAREHOUSE_CAPACITIES = [2000.0, 5000.0, 12000.0, 30000.0]
+# Each tier is 3x the previous one, with each price fitting in the
+# immediately preceding warehouse capacity (instant purchase).
 const WAREHOUSE_COSTS = [
-    {"Metals": 250.0, "Plastics": 40.0, "Tech": 20.0},
-    {"Metals": 900.0, "Plastics": 150.0, "Tech": 80.0},
-    {"Metals": 3200.0, "Plastics": 500.0, "Tech": 300.0}
+    {"Metals": 500.0, "Plastics": 80.0, "Tech": 40.0},
+    {"Metals": 1500.0, "Plastics": 240.0, "Tech": 120.0},
+    {"Metals": 4500.0, "Plastics": 720.0, "Tech": 360.0}
 ]
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
 const CIVILIAN_CONSUMPTION = {"Metals": 0.1, "Plastics": 0.25, "Textiles": 0.25, "Tech": 0.25}
@@ -469,8 +472,8 @@ static func _cost(kind: String, level: int) -> Dictionary:
                 1: return {"Metals": 480.0}
                 2: return {"Metals": 2000.0, "Plastics": 500.0, "Textiles": 500.0, "Organics": 200.0, "Tech": 100.0, "Crystals": 100.0}
                 3: return {"Metals": 6000.0, "Plastics": 1500.0, "Textiles": 1500.0, "Organics": 600.0, "Tech": 300.0, "Crystals": 300.0}
-        "yard_upgrade": return {"Metals": 180.0 * float(level) * float(level)}
-        "production": return {"Metals": 150.0 * float(level) * float(level)}
+        "yard_upgrade": return {"Metals": 240.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
+        "production": return {"Metals": 200.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
     return {}
 
 static func _work(kind: String, level: int) -> float:

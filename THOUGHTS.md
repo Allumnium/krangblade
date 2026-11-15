@@ -83,4 +83,4 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 ### T-017 — More expensive hulls and shipyards
 - **Type:** Balance hypothesis.
 - **Observation:** Triple hull costs with unchanged home stocks reduce the opening budget to about four mixed hulls. Second and third shipyards require Crystals; third costs 6k Metals, requiring sustained construction draws or larger storage. First shipyard retains its inexpensive colony-entry recipe.
-- **Consider:** Assess AI expansion and recovery, early player choices, and resource replenishment before changing other costs or starting inventory.
+- **Consider:** Assess AI expansion and recovery, early player choices, and resource replenishment before changing starting inventory. v0.12.3 adds 3× per-level upgrade pricing; the higher repeat tiers can exceed warehouse inventory but gradual construction remains possible. Instant warehouse purchases fit their previous-tier capacity. One-time building prices triple independently, so purchase order does not affect them.
