@@ -13,6 +13,18 @@ func _run() -> void:
     assert(view != null and view.has_method("_select_at"))
     await process_frame
     assert(view.theme != null)
+    var header: PanelContainer = view.get("header_panel")
+    var brand: Label = view.get("brand_label")
+    var canvas: Control = view.get("map_canvas")
+    var inspector: PanelContainer = view.get("inspector_panel")
+    assert(header.size.y <= 60.0)
+    assert(header.position.y + header.size.y < canvas.position.y)
+    assert(header.position.y + header.size.y < inspector.position.y)
+    assert(brand.autowrap_mode == TextServer.AUTOWRAP_OFF)
+    assert(brand.size.x >= brand.get_combined_minimum_size().x)
+    var tabs: TabContainer = view.get("inspector_tabs")
+    assert(tabs.get_tab_count() == 3)
+    assert((view.get("population_label") as Label).text.contains("Population"))
     assert((view.get("stock_labels") as Dictionary).size() == 6)
     var resources: OptionButton = view.get("resource_picker")
     for i in range(resources.item_count):
@@ -40,10 +52,12 @@ func _run() -> void:
     view.call("_refresh")
     var jobs: ItemList = view.get("jobs")
     assert(jobs.item_count == 1)
+    tabs.current_tab = 2
     jobs.select(0)
     view.call("_refresh")
     assert((view.get("job_progress") as ProgressBar).visible)
     assert((view.get("job_cost") as HBoxContainer).get_child_count() > 0)
+    tabs.current_tab = 0
     view.set("selected", neighbor)
     view.call("_refresh")
     for i in range(125):

@@ -7,7 +7,8 @@ const PLANET = preload("res://assets/ui/planet.svg")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77aafe"),
     Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
-const PANEL_WIDTH: float = 380.0
+const PANEL_WIDTH: float = 392.0
+const HEADER_HEIGHT: float = 54.0
 const RADIUS: float = 17.0
 const MIN_ZOOM: float = 0.5
 const MAX_ZOOM: float = 4.0
@@ -15,6 +16,12 @@ const SNAPSHOT_SECONDS: float = 0.2
 
 var session: Node
 var map_canvas: Control
+var header_panel: PanelContainer
+var brand_label: Label
+var inspector_panel: PanelContainer
+var inspector_tabs: TabContainer
+var population_label: Label
+var population_bar: ProgressBar
 var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
 var drag_button: int = 0
@@ -85,7 +92,7 @@ func _build_ui() -> void:
     add_child(map_canvas)
     map_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     map_canvas.offset_left = 8
-    map_canvas.offset_top = 62
+    map_canvas.offset_top = HEADER_HEIGHT + 16
     map_canvas.offset_right = -PANEL_WIDTH - 8
     map_canvas.offset_bottom = -8
     map_canvas.clip_contents = true
@@ -93,45 +100,52 @@ func _build_ui() -> void:
     map_canvas.gui_input.connect(_map_input)
     map_canvas.draw.connect(_draw_map)
     map_canvas.resized.connect(map_canvas.queue_redraw)
-    var header := PanelContainer.new()
-    add_child(header)
-    header.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-    header.offset_bottom = 54
+    header_panel = PanelContainer.new()
+    add_child(header_panel)
+    header_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928ed"), Color("#284661"), 6))
+    header_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+    header_panel.offset_left = 8
+    header_panel.offset_right = -8
+    header_panel.offset_top = 8
+    header_panel.offset_bottom = 8 + HEADER_HEIGHT
     var row := HBoxContainer.new()
-    header.add_child(row)
+    row.add_theme_constant_override("separation", 10)
+    header_panel.add_child(row)
     leave = _button("RETURN", _leave, row)
-    var brand := _label("WARBOUND", 21)
-    brand.add_theme_color_override("font_color", HUD.ACCENT)
-    row.add_child(brand)
+    brand_label = _label("WARBOUND", 21)
+    brand_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+    brand_label.add_theme_color_override("font_color", HUD.ACCENT)
+    row.add_child(brand_label)
     heading = _label("EMPIRE", 13)
+    heading.autowrap_mode = TextServer.AUTOWRAP_OFF
     heading.add_theme_color_override("font_color", HUD.MUTED)
     heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     heading.clip_text = true
+    heading.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     row.add_child(heading)
     _button("RESET VIEW", _reset_view, row)
-    var panel := PanelContainer.new()
-    add_child(panel)
-    panel.anchor_left = 1.0
-    panel.anchor_right = 1.0
-    panel.anchor_bottom = 1.0
-    panel.offset_left = -PANEL_WIDTH
-    panel.offset_right = -8
-    panel.offset_top = 62
-    panel.offset_bottom = -8
-    var scroll := ScrollContainer.new()
-    panel.add_child(scroll)
-    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    var margin := MarginContainer.new()
-    margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    for side in ["left", "right", "top", "bottom"]:
-        margin.add_theme_constant_override("margin_" + side, 10)
-    scroll.add_child(margin)
+    inspector_panel = PanelContainer.new()
+    add_child(inspector_panel)
+    inspector_panel.anchor_left = 1.0
+    inspector_panel.anchor_right = 1.0
+    inspector_panel.anchor_bottom = 1.0
+    inspector_panel.offset_left = -PANEL_WIDTH
+    inspector_panel.offset_right = -8
+    inspector_panel.offset_top = HEADER_HEIGHT + 16
+    inspector_panel.offset_bottom = -8
     var body := VBoxContainer.new()
-    body.add_theme_constant_override("separation", 10)
-    margin.add_child(body)
+    body.add_theme_constant_override("separation", 8)
+    inspector_panel.add_child(body)
     var overview: VBoxContainer = HUD.section(body, "01  /  PLANETARY COMMAND")
     info = _label("", 19)
     overview.add_child(info)
+    population_label = _label("", 13)
+    overview.add_child(population_label)
+    population_bar = ProgressBar.new()
+    population_bar.custom_minimum_size.y = 8
+    population_bar.show_percentage = false
+    population_bar.tooltip_text = "Population relative to local Organics-supported capacity"
+    overview.add_child(population_bar)
     fleet = _label("", 13)
     fleet.add_theme_color_override("font_color", HUD.MUTED)
     overview.add_child(fleet)
@@ -139,7 +153,14 @@ func _build_ui() -> void:
     overview.add_child(colony_picker)
     send_colony_button = _button("SEND COLONY SHIP", _send_colony, overview)
     HUD.action(send_colony_button, Color("#c7a4ff"))
-    var resources: VBoxContainer = HUD.section(body, "02  /  RESOURCE INVENTORY")
+    inspector_tabs = TabContainer.new()
+    inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    inspector_tabs.clip_contents = true
+    body.add_child(inspector_tabs)
+    var economy_page: VBoxContainer = _inspector_page("Economy")
+    var shipyard_page: VBoxContainer = _inspector_page("Shipyards")
+    var queue_page: VBoxContainer = _inspector_page("Queue")
+    var resources: VBoxContainer = HUD.section(economy_page, "RESOURCE INVENTORY")
     inventory = VBoxContainer.new()
     inventory.add_theme_constant_override("separation", 3)
     resources.add_child(inventory)
@@ -186,7 +207,7 @@ func _build_ui() -> void:
         level_label.add_theme_color_override("font_color", HUD.MUTED)
         line.add_child(level_label)
         level_labels[resource] = level_label
-    var logistics: VBoxContainer = HUD.section(body, "03  /  PRODUCTION & TRADE")
+    var logistics: VBoxContainer = HUD.section(economy_page, "PRODUCTION & TRADE")
     resource_picker = OptionButton.new()
     for resource in ECONOMY.RESOURCES:
         resource_picker.add_icon_item(HUD.ICONS[resource], resource)
@@ -213,7 +234,7 @@ func _build_ui() -> void:
     threshold_button = _button("APPLY THRESHOLDS", _apply_thresholds, logistics)
     upgrade_resource = _button("UPGRADE PRODUCTION", func() -> void: _operation("production", _resource()), logistics)
     HUD.action(upgrade_resource)
-    var shipyards: VBoxContainer = HUD.section(body, "04  /  SHIPYARDS")
+    var shipyards: VBoxContainer = HUD.section(shipyard_page, "SHIPYARDS")
     yard_picker = OptionButton.new()
     yard_picker.item_selected.connect(func(_i: int) -> void: _refresh())
     shipyards.add_child(yard_picker)
@@ -225,7 +246,7 @@ func _build_ui() -> void:
     HUD.action(colony_button, Color("#c7a4ff"))
     yard_button = _button("BUILD SHIPYARD", func() -> void: _operation("yard"), shipyards)
     upgrade_yard = _button("UPGRADE SHIPYARD", func() -> void: _operation("yard_upgrade", str(yard_picker.selected)), shipyards)
-    var queue: VBoxContainer = HUD.section(body, "05  /  CONSTRUCTION QUEUE")
+    var queue: VBoxContainer = HUD.section(queue_page, "CONSTRUCTION QUEUE")
     jobs = ItemList.new()
     jobs.custom_minimum_size.y = 130
     jobs.item_selected.connect(func(_i: int) -> void: _refresh())
@@ -238,6 +259,18 @@ func _build_ui() -> void:
     queue.add_child(job_cost)
     cancel_button = _button("CANCEL SELECTED / REFUND", _cancel, queue)
     HUD.action(cancel_button, Color("#e9a276"))
+
+func _inspector_page(title_text: String) -> VBoxContainer:
+    var scroll := ScrollContainer.new()
+    scroll.name = title_text
+    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    inspector_tabs.add_child(scroll)
+    var page := VBoxContainer.new()
+    page.add_theme_constant_override("separation", 8)
+    page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    scroll.add_child(page)
+    return page
 
 func _state() -> Dictionary:
     return session.get("economy")
@@ -320,6 +353,8 @@ func _refresh() -> void:
     cancel_button.disabled = true
     if p.is_empty():
         info.text = "Select a planet."
+        population_label.text = ""
+        population_bar.hide()
         resource_detail.text = ""
         yard_info.text = ""
         jobs.clear()
@@ -331,16 +366,23 @@ func _refresh() -> void:
     var roster: Dictionary = session.get("players")
     var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
     info.text = "Planet %02d%s\n%s" % [selected + 1, "  /  Home" if bool(p["home"]) else "", name_text]
+    var population: float = float(p["population"])
+    var capacity: float = ECONOMY.population_capacity(p)
+    population_label.text = "Population  %.1f / %.1f M   •   +%.2f M/s\nResource output  ×%.2f" % [population, capacity, ECONOMY.population_growth(p), ECONOMY.population_multiplier(p)]
+    population_bar.visible = capacity > 0.0
+    population_bar.value = 100.0 * population / maxf(capacity, 1.0)
     inventory.show()
     for r in ECONOMY.RESOURCES:
         stock_labels[r].text = "%.1f" % float(p["stock"][r])
         level_labels[r].text = str(int(p["levels"][r]))
     var resource: String = _resource()
-    var available: bool = ECONOMY.EXTRACTED.has(resource) and float(p["abundance"].get(resource, 0.0)) > 0.0
+    var available: bool = ECONOMY.ACTIVE_PRODUCTION.has(resource) and (not ECONOMY.EXTRACTED.has(resource) or float(p["abundance"].get(resource, 0.0)) > 0.0)
     var modifier: float = float(p["bonuses"].get(resource, 1.0))
     var detail: String = "Production rules not defined yet."
     if ECONOMY.EXTRACTED.has(resource):
         detail = "Deposit: %.2fx  •  Output: %.1f/s" % [float(p["abundance"].get(resource, 0.0)), ECONOMY.rate(p, resource)]
+    elif resource == "Organics":
+        detail = "Output: %.1f/s  •  Supports %.1f M people" % [ECONOMY.rate(p, resource), ECONOMY.population_capacity(p)]
     var t: Dictionary = p["thresholds"][resource]
     resource_detail.text = "%s\nPlanet bonus: %.2fx  |  Current min/max: %.0f / %.0f" % [detail, modifier, float(t["min"]), float(t["max"])]
     upgrade_resource.disabled = not owned or not available or ECONOMY._has_job(p, "production", resource)

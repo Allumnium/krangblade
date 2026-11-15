@@ -3,6 +3,13 @@ extends RefCounted
 const MAP = preload("res://scripts/planet_map.gd")
 const RESOURCES = ["Metals", "Plastics", "Textiles", "Organics", "Tech", "Crystals"]
 const EXTRACTED = ["Metals", "Plastics", "Crystals"]
+const ACTIVE_PRODUCTION = ["Metals", "Plastics", "Organics", "Crystals"]
+# Prototype demographic scale; population is expressed in millions.
+const HOME_POPULATION: float = 100.0
+const COLONY_POPULATION: float = 10.0
+const ORGANICS_PER_LEVEL: float = 8.0
+const POPULATION_PER_ORGANICS_RATE: float = 12.5
+const POPULATION_GROWTH_RATE: float = 0.01
 const CARGO_CAPACITY: float = 10.0
 const SHIP_SPEED: float = 95.0
 const SHIP_SIZE: int = 1
@@ -42,9 +49,10 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
             # Bootstrap values are test data, not final economy balance.
             abundance["Metals"] = maxf(1.0, float(abundance["Metals"]))
             levels["Metals"] = 1
+            levels["Organics"] = 1
             stock["Metals"] = 600.0
             yards.append({"level": 1, "job": -1})
-        planets.append({"owner": owner, "home": home, "stock": stock, "levels": levels,
+        planets.append({"owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "stock": stock, "levels": levels,
             "abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
             "yards": yards, "queue": []})
     return {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1}
@@ -101,7 +109,10 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
         return false
     var at: int = int(ship["at"])
     if int(state["planets"][at]["owner"]) == 0:
-        state["planets"][at]["owner"] = int(ship["owner"])
+        var colony: Dictionary = state["planets"][at]
+        colony["owner"] = int(ship["owner"])
+        colony["population"] = COLONY_POPULATION
+        colony["levels"]["Organics"] = 1
         return true # consumed to establish the colony
     # Another ship arrived first. Return to launch without claiming or combat.
     var back: Array[int] = []
@@ -111,11 +122,28 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
     _set_route(ship, back)
     return false
 
+static func population_capacity(planet: Dictionary) -> float:
+    return rate(planet, "Organics") * POPULATION_PER_ORGANICS_RATE
+
+static func population_multiplier(planet: Dictionary) -> float:
+    return float(planet["population"]) / HOME_POPULATION
+
+static func population_growth(planet: Dictionary) -> float:
+    var current: float = float(planet["population"])
+    var capacity: float = population_capacity(planet)
+    if capacity <= current:
+        return 0.0
+    return minf(current * POPULATION_GROWTH_RATE, capacity - current)
+
 static func rate(planet: Dictionary, resource: String) -> float:
-    if not EXTRACTED.has(resource) or int(planet["owner"]) == 0:
+    if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0:
         return 0.0
     var level: int = int(planet["levels"][resource])
-    return 8.0 * level * float(planet["abundance"].get(resource, 0.0)) * float(planet["bonuses"].get(resource, 1.0))
+    var bonus: float = float(planet["bonuses"].get(resource, 1.0))
+    if resource == "Organics":
+        # Independent of population to avoid a circular food/output dependency.
+        return ORGANICS_PER_LEVEL * level * bonus
+    return 8.0 * level * float(planet["abundance"].get(resource, 0.0)) * bonus * population_multiplier(planet)
 
 static func max_size(level: int) -> int:
     return level
@@ -185,7 +213,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
             if EXTRACTED.has(target) and float(p["abundance"].get(target, 0.0)) <= 0.0:
                 return false
             # Non-extraction production rules have not been designed yet.
-            if not EXTRACTED.has(target):
+            if not ACTIVE_PRODUCTION.has(target):
                 return false
             level = int(p["levels"][target]) + 1
         _: return false
@@ -256,7 +284,12 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
     var p: Dictionary = state["planets"][index]
     if int(p["owner"]) == 0:
         return
-    for resource in EXTRACTED:
+    var current: float = float(p["population"])
+    var cap: float = population_capacity(p)
+    # Growth is capped by local Organics output, not stored/imported inventory.
+    if current < cap:
+        p["population"] = minf(cap, current + population_growth(p) * dt)
+    for resource in ACTIVE_PRODUCTION:
         p["stock"][resource] = float(p["stock"][resource]) + rate(p, resource) * dt
     # Upgrades and new infrastructure use fixed durations. Shipyards are not needed.
     for item in (p["queue"] as Array).duplicate():
