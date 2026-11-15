@@ -72,3 +72,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Verified eight-peer lobby-return timeouts; queue pressure is a hypothesis.
 - **Observation:** Full reliable snapshots were broadcast after each order, including bursts from seven guests. v0.11.4 batches remote state at the fixed cadence and allows one unacknowledged snapshot per guest. Local authority UI remains immediate. Test guests explicitly leave after the lobby scene loads; headless peers are capped at 60 FPS to avoid CPU starvation on shared runners.
 - **Consider:** Validate under eight real peers and future internet latency; inspect bandwidth and queue age on large fleets.
+
+- v0.11.5 uses the Node-level rpc_id method to obtain send errors; the callable RPC shorthand returns void in Godot 4.7.2 (caught by CI).

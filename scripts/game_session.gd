@@ -648,7 +648,7 @@ func _flush_economy() -> void:
             payload = var_to_bytes(economy).compress(FileAccess.COMPRESSION_GZIP)
         # At most one reliable full snapshot in flight per guest. A slow guest
         # skips intermediate states, receiving the newest revision after ACK.
-        if _rpc_economy.rpc_id(id, round_id, snapshot_revision, payload) == OK:
+        if rpc_id(id, "_rpc_economy", round_id, snapshot_revision, payload) == OK:
             snapshot_pending[id] = snapshot_revision
             snapshot_sent[id] = snapshot_revision
 
