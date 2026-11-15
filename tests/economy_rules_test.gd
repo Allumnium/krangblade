@@ -20,8 +20,10 @@ func _initialize() -> void:
         var bridge_distance: float = 0.0
         var locals: int = 0
         var bridges: int = 0
+        var longest: float = 0.0
         for edge in clustered["edges"]:
             var length: float = cluster_points[edge[0]].distance_to(cluster_points[edge[1]])
+            longest = maxf(longest, length)
             if cluster_ids[edge[0]] == cluster_ids[edge[1]]:
                 locals += 1
                 local_distance += length
@@ -29,6 +31,7 @@ func _initialize() -> void:
                 bridges += 1
                 bridge_distance += length
         assert(bridges >= MAP.CLUSTER_COUNT - 1)
+        assert(is_equal_approx(longest / ECON.SHIP_SPEED, MAP.LONGEST_LINK_YEARS))
         assert(not (clustered["fields"] as Array).is_empty())
         for edge in clustered["edges"]:
             assert(not MAP.blocked(cluster_points[edge[0]], cluster_points[edge[1]], clustered["fields"]))
