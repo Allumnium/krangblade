@@ -6,6 +6,9 @@ const SIZE := Vector2(2200, 1500)
 const CLUSTER_COUNT: int = 4
 const TRAVEL_SPEED: float = 95.0
 const LONGEST_LINK_YEARS: float = 100.0
+const MAX_CONNECTIONS: int = 3
+const MAX_JUNCTIONS: int = 6
+const EXTRA_LINK_CHANCE: float = 0.35
 
 static func generate(seed_value: int) -> Dictionary:
     var rng := RandomNumberGenerator.new()
@@ -39,29 +42,42 @@ static func generate(seed_value: int) -> Dictionary:
         clusters.append(group)
         groups[group].append(i)
     var edges: Array = []
-    # First connect each cluster internally, then bridge the closest cluster pairs.
+    var degrees: Array[int] = []
+    degrees.resize(COUNT)
+    degrees.fill(0)
+    var junctions: int = 0
+    # Grow each local tree by distance, with at most one local junction.
+    # Prefer extending a chain over branching; avoid linking two home slots
+    # locally so every potential starting world has a neutral neighbor.
     for group in groups:
         var connected: Array = [group[0]]
+        var local_junctions: int = 0
         while connected.size() < group.size():
-            var pair: Array = _closest_pair(points, connected, group, connected)
-            edges.append(pair)
+            var pair: Array = _closest_pair(points, connected, group, connected, degrees, 1 - local_junctions, true)
+            var added: int = _new_junctions(pair, degrees)
+            local_junctions += added
+            junctions += added
+            _add_edge(edges, degrees, pair)
             connected.append(pair[1] if connected.has(pair[0]) else pair[0])
     var joined: Array = [0]
     while joined.size() < CLUSTER_COUNT:
         var best_edge: Array = []
         var next_group: int = -1
-        var best_distance: float = INF
+        var best_score: float = INF
         for i in joined:
             for j in range(CLUSTER_COUNT):
                 if joined.has(j):
                     continue
-                var pair: Array = _closest_pair(points, groups[i], groups[j], [])
-                var distance: float = points[pair[0]].distance_to(points[pair[1]])
-                if distance < best_distance:
-                    best_distance = distance
+                var pair: Array = _closest_pair(points, groups[i], groups[j], [], degrees, MAX_JUNCTIONS - junctions)
+                if pair.is_empty():
+                    continue
+                var score: float = _edge_score(points, pair, degrees)
+                if score < best_score:
+                    best_score = score
                     best_edge = pair
                     next_group = j
-        edges.append(best_edge)
+        junctions += _new_junctions(best_edge, degrees)
+        _add_edge(edges, degrees, best_edge)
         joined.append(next_group)
     # Protect the connected backbone. Fields occupy potential shortcuts, so
     # ordinary routes never cross a field and the galaxy remains connected.
@@ -101,10 +117,26 @@ static func generate(seed_value: int) -> Dictionary:
         if safe:
             fields.append({"position": center, "radius": radius, "anchor": anchor,
                 "Metals": rng.randf_range(1.0, 2.0), "Crystals": rng.randf_range(1.0, 2.0)})
-    # Add clear distance-weighted loops, limiting redundant links.
-    for pair in candidates:
-        if not blocked(points[pair[0]], points[pair[1]], fields) and rng.randf() < 0.8:
-            edges.append(pair)
+    # At most one optional local shortcut, on some maps only. Never
+    # violate the degree/junction limits or cross an asteroid field.
+    if rng.randf() < EXTRA_LINK_CHANCE:
+        var best_extra: Array = []
+        var best_extra_score: float = INF
+        for pair in candidates:
+            if clusters[pair[0]] != clusters[pair[1]]:
+                continue
+            if not _edge_allowed(pair, degrees, MAX_JUNCTIONS - junctions):
+                continue
+            if degrees.count(1) - int(degrees[pair[0]] == 1) - int(degrees[pair[1]] == 1) < 2:
+                continue
+            if blocked(points[pair[0]], points[pair[1]], fields):
+                continue
+            var score: float = _edge_score(points, pair, degrees)
+            if score < best_extra_score:
+                best_extra_score = score
+                best_extra = pair
+        if not best_extra.is_empty():
+            _add_edge(edges, degrees, best_extra)
     # Preserve the topology and obstacle geometry while scaling distances so
     # the longest direct route takes 100 years at the baseline ship speed.
     var longest: float = 0.0
@@ -125,17 +157,34 @@ static func blocked(a: Vector2, b: Vector2, fields: Array) -> bool:
             return true
     return false
 
-static func _closest_pair(points: Array[Vector2], a: Array, b: Array, excluded: Array) -> Array:
+static func _new_junctions(pair: Array, degrees: Array[int]) -> int:
+    return int(degrees[pair[0]] == 2) + int(degrees[pair[1]] == 2)
+
+static func _edge_allowed(pair: Array, degrees: Array[int], budget: int) -> bool:
+    return degrees[pair[0]] < MAX_CONNECTIONS and degrees[pair[1]] < MAX_CONNECTIONS and _new_junctions(pair, degrees) <= budget
+
+static func _edge_score(points: Array[Vector2], pair: Array, degrees: Array[int]) -> float:
+    return points[pair[0]].distance_to(points[pair[1]]) * (1.0 + 0.35 * _new_junctions(pair, degrees))
+
+static func _add_edge(edges: Array, degrees: Array[int], pair: Array) -> void:
+    edges.append(pair)
+    degrees[pair[0]] += 1
+    degrees[pair[1]] += 1
+
+static func _closest_pair(points: Array[Vector2], a: Array, b: Array, excluded: Array, degrees: Array[int], budget: int, avoid_home_pair: bool = false) -> Array:
     var best: float = INF
     var pair: Array = []
     for i in a:
         for j in b:
-            if i == j or excluded.has(j):
+            if i == j or excluded.has(j) or (avoid_home_pair and i < 8 and j < 8):
                 continue
-            var distance: float = points[i].distance_to(points[j])
-            if distance < best:
-                best = distance
-                pair = [mini(i, j), maxi(i, j)]
+            var candidate: Array = [mini(i, j), maxi(i, j)]
+            if not _edge_allowed(candidate, degrees, budget):
+                continue
+            var score: float = _edge_score(points, candidate, degrees)
+            if score < best:
+                best = score
+                pair = candidate
     return pair
 
 static func linked(map_data: Dictionary, a: int, b: int) -> bool:
