@@ -440,22 +440,51 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
         "progress": 0.0, "allocated": empty_stock(), "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
     return true
 
+static func production_modifier(system: Dictionary, resource: String) -> float:
+    var modifier: float = float(system["bonuses"].get(resource, 1.0))
+    if EXTRACTED.has(resource):
+        modifier *= float(system["abundance"].get(resource, 0.0))
+    return modifier
+
+static func _continuous_target(p: Dictionary, key: String) -> Array:
+    if SHIP_KINDS.has(key):
+        return [key, ""] if key != "ship" or bool(p["home"]) else []
+    if key.begins_with("production:"):
+        var resource: String = key.trim_prefix("production:")
+        if ACTIVE_PRODUCTION.has(resource) and (not EXTRACTED.has(resource) or float(p["abundance"].get(resource, 0.0)) > 0.0):
+            return ["production", resource]
+    if key.begins_with("yard_upgrade:"):
+        var target: String = key.trim_prefix("yard_upgrade:")
+        if target.is_valid_int() and int(target) >= 0 and int(target) < (p["yards"] as Array).size() and target == str(int(target)):
+            return ["yard_upgrade", target]
+    return []
+
 static func set_continuous(state: Dictionary, player: int, index: int, kind: String, enabled: bool) -> bool:
     var p: Dictionary = _get_owned(state, player, index)
-    if p.is_empty() or not SHIP_KINDS.has(kind) or (kind == "ship" and not bool(p["home"])):
+    if p.is_empty() or _continuous_target(p, kind).is_empty():
         return false
     p["continuous"][kind] = enabled
     return true
 
 static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> void:
-    if (p["yards"] as Array).is_empty():
+    var keys: Array = p["continuous"].keys()
+    if keys.is_empty():
         return
-    for kind in SHIP_KINDS:
+    var start: int = int(p.get("continuous_cursor", 0)) % keys.size()
+    for offset in range(keys.size()):
         if (p["queue"] as Array).size() >= MAX_QUEUE:
             return
-        if not bool(p["continuous"].get(kind, false)) or _has_job(p, kind, ""):
+        var slot: int = (start + offset) % keys.size()
+        var key: String = str(keys[slot])
+        if not bool(p["continuous"][key]):
             continue
-        enqueue(state, int(p["owner"]), index, kind)
+        var order: Array = _continuous_target(p, key)
+        if order.is_empty() or _has_job(p, order[0], order[1]):
+            continue
+        if SHIP_KINDS.has(order[0]) and (p["yards"] as Array).is_empty():
+            continue
+        if enqueue(state, int(p["owner"]), index, order[0], order[1]):
+            p["continuous_cursor"] = (slot + 1) % keys.size()
 
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
     var p: Dictionary = _get_owned(state, player, index)
