@@ -39,7 +39,7 @@ func _run() -> void:
         assert(resources.get_item_icon(i) != null)
     var state: Dictionary = session.get("economy")
     assert((view.get("global_resource_labels") as Dictionary).size() == 6)
-    assert((view.get("global_population_label") as Label).text.begins_with("POP"))
+    assert((view.get("global_population_label") as Label).text.begins_with("POP  10."))
     assert((view.get("global_planet_label") as Label).text == "WORLDS  1")
     var cards: Dictionary = view.get("upgrade_cards")
     assert(cards.size() == 6)

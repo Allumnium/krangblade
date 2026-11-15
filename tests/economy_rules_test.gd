@@ -58,7 +58,7 @@ func _initialize() -> void:
     # Empire totals include cargo once and exclude allied/hostile inventories.
     var totals_state: Dictionary = ECON.create(graph, players, ids)
     totals_state["planets"][3]["owner"] = 1
-    totals_state["planets"][3]["population"] = 10.0
+    totals_state["planets"][3]["population"] = ECON.COLONY_POPULATION
     totals_state["planets"][3]["stock"]["Metals"] = 25.0
     var own_cargo: Dictionary = ECON.empty_stock()
     own_cargo["Metals"] = 7.0
@@ -68,46 +68,54 @@ func _initialize() -> void:
     var totals: Dictionary = ECON.empire_totals(totals_state, 1)
     assert(totals["planets"] == 2 and totals["craft"] == 2)
     assert(totals["logistics"] == 1 and totals["colonies"] == 1)
-    assert(is_equal_approx(float(totals["population"]), ECON.HOME_POPULATION + 10.0))
+    assert(is_equal_approx(float(totals["population"]), ECON.HOME_POPULATION + ECON.COLONY_POPULATION))
     assert(is_equal_approx(float(totals["stock"]["Metals"]), 625.0))
     assert(is_equal_approx(float(totals["cargo"]["Metals"]), 7.0))
     assert(is_equal_approx(float(totals["resources"]["Metals"]), 632.0))
     assert(ECON.empire_totals({}, 1)["craft"] == 0)
 
-    # A fixed farming target gives a critically damped, non-overshooting step response.
+    # Starting growth is exponential when well below a food-supported plateau.
     var demographics: Dictionary = ECON.create(graph, players, ids)
     var home: Dictionary = demographics["planets"][0]
     home["bonuses"]["Organics"] = 1.0
     home["abundance"]["Metals"] = 1.0
-    assert(is_equal_approx(float(home["population"]), ECON.HOME_POPULATION))
-    assert(is_equal_approx(ECON.population_capacity(home), ECON.HOME_POPULATION))
+    var capacity: float = ECON.population_capacity(home)
+    assert(is_equal_approx(float(home["population"]), 10000.0))
+    assert(is_equal_approx(capacity, 100000.0))
+    assert(is_equal_approx(ECON.population_multiplier(home), 1.0))
     assert(is_zero_approx(ECON.population_growth(home)))
     var baseline: float = ECON.rate(home, "Metals")
     home["population"] = ECON.HOME_POPULATION * 0.5
     assert(is_equal_approx(ECON.rate(home, "Metals"), baseline * 0.5))
+    home["population"] = ECON.HOME_POPULATION
     assert(ECON.rate(home, "Organics") > ECON.organics_demand(home))
-    assert(ECON.rate(home, "Organics") < ECON.ORGANICS_PER_LEVEL)
     home["stock"]["Organics"] = 10000.0
-    assert(is_equal_approx(ECON.population_capacity(home), ECON.HOME_POPULATION))
+    for i in range(300):
+        ECON._update_population(home, 0.1)
+    assert(float(home["population"]) > 19500.0 and float(home["population"]) <= 20000.01)
+    for i in range(300):
+        ECON._update_population(home, 0.1)
+    assert(float(home["population"]) > 39000.0 and float(home["population"]) <= 40000.02)
+    # Convergence is damped from either side; no overshoot for fixed capacity.
     var prior: float = float(home["population"])
-    for i in range(200):
+    for i in range(300):
         ECON._update_population(home, 1.0)
         var next: float = float(home["population"])
-        assert(next >= prior - ECON.EPS and next <= ECON.HOME_POPULATION + ECON.EPS)
+        assert(next >= prior - ECON.EPS and next <= capacity + ECON.EPS)
         prior = next
-    assert(absf(float(home["population"]) - ECON.HOME_POPULATION) < 0.01)
-    home["population"] = ECON.HOME_POPULATION * 1.5
+    assert(absf(float(home["population"]) - capacity) < 0.1)
+    home["population"] = capacity * 1.5
     home["population_velocity"] = 0.0
     prior = float(home["population"])
-    for i in range(200):
+    for i in range(300):
         ECON._update_population(home, 1.0)
         var next: float = float(home["population"])
-        assert(next <= prior + ECON.EPS and next >= ECON.HOME_POPULATION - ECON.EPS)
+        assert(next <= prior + ECON.EPS and next >= capacity - ECON.EPS)
         prior = next
-    assert(absf(float(home["population"]) - ECON.HOME_POPULATION) < 0.01)
+    assert(absf(float(home["population"]) - capacity) < 0.1)
 
     # Actual stock rises or falls by farming output minus consumption.
-    home["population"] = 50.0
+    home["population"] = capacity * 0.5
     home["population_velocity"] = 0.0
     home["stock"]["Organics"] = 100.0
     assert(ECON.current_year(demographics) == 1)
@@ -115,24 +123,31 @@ func _initialize() -> void:
     assert(ECON.current_year(demographics) == 2)
     assert(is_equal_approx(float(home["stock"]["Organics"]), 100.0 + ECON.rate(home, "Organics") - ECON.organics_demand(home)))
     assert(ECON.population_growth(home) > 0.0)
-    home["population"] = 150.0
+    home["population"] = capacity * 1.5
     home["population_velocity"] = 0.0
     home["stock"]["Organics"] = 0.0
     ECON.step(demographics, 1.0)
     assert(is_zero_approx(float(home["stock"]["Organics"])))
     assert(ECON.population_growth(home) < 0.0)
-    home["population"] = 100.0
+    # A farming failure cannot allow positive growth despite prior momentum.
+    home["levels"]["Organics"] = 0
+    home["population"] = ECON.HOME_POPULATION
+    home["population_velocity"] = 1000.0
+    ECON._update_population(home, 0.1)
+    assert(float(home["population"]) <= ECON.HOME_POPULATION)
+    assert(ECON.population_growth(home) <= 0.0)
+    home["levels"]["Organics"] = 1
+    home["population"] = capacity
     home["population_velocity"] = 0.0
     assert(ECON.enqueue(demographics, 1, 0, "production", "Organics"))
     ECON.step(demographics, 20.0)
     assert(int(home["levels"]["Organics"]) == 2)
-    assert(is_equal_approx(ECON.population_capacity(home), 200.0 * float(home["farm_factor"])))
+    assert(is_equal_approx(ECON.population_capacity(home), 200000.0 * float(home["farm_factor"])))
     ECON.step(demographics, 1.0)
-    assert(float(home["population"]) > ECON.HOME_POPULATION)
+    assert(float(home["population"]) > capacity)
     home["bonuses"]["Organics"] = 1.5
-    assert(is_equal_approx(ECON.population_capacity(home), 300.0 * float(home["farm_factor"])))
+    assert(is_equal_approx(ECON.population_capacity(home), 300000.0 * float(home["farm_factor"])))
     assert(is_zero_approx(float(demographics["planets"][3]["population"])))
-    # After settling, the deterministic farm cycle drives gentle ongoing variation.
     for i in range(300):
         ECON.step(demographics, 1.0)
     var smallest: float = INF
@@ -141,10 +156,10 @@ func _initialize() -> void:
         ECON.step(demographics, 1.0)
         smallest = minf(smallest, float(home["population"]))
         largest = maxf(largest, float(home["population"]))
-    assert(largest - smallest > 1.0 and largest - smallest < 30.0)
-    assert(smallest > 270.0 and largest < 330.0)
+    assert(largest - smallest > 1000.0 and largest - smallest < 30000.0)
+    assert(smallest > 270000.0 and largest < 330000.0)
     assert(ECON.current_year(demographics) == 424)
-    print("PASS: critically damped population, consumption, farm upgrades, variation and year clock")
+    print("PASS: 30-year doubling, critically damped population, food shortage, farm upgrades and year clock")
 
     # Construction is proportional, time-dependent and fully refundable.
     p["levels"]["Metals"] = 0
