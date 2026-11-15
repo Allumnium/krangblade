@@ -32,6 +32,10 @@ Read this file and current repository state at the beginning of each coding sess
 
 - Render all living ships for every client, friendly or hostile, at all activity states, even if discovery is restricted. Ship outlines identify team; no hiding foreign ships. Test generated maps for visible early AI construction, not just eventual expansion.
 
-- Always show subtle territory tint/boundaries beneath the map for owned or fighter-held uncontested sectors; use team colors and no internal same-team borders. Contested sectors lack control shading. This is visual only. Hide system and orbital rings unless the system is selected; keep travel lanes thin and faint.
+- Always show clearly visible territory tint/boundaries beneath the map for owned or fighter-held uncontested sectors; use team colors and no internal same-team borders. Contested sectors lack control shading. This is visual only. Hide system and orbital rings unless the system is selected; keep travel lanes thin and faint.
 
 - Bottom-center time controls offer pause, 1×, 2× and 5×. Each match starts at 1×; solo or the multiplayer host controls speed, guests see the active speed without editing it. Pause halts authoritative fixed-step simulation, not the interface, network or accepted player orders. Keep speed replicated with match state.
+
+- Each living ship owns an authoritative world-space position and heading initialized at construction. All subsequent translation advances toward navigation targets at bounded ship speed. Route/POI and mining state are planning metadata, never a source of position changes. Combat, AI proximity, territory and client poses use the same position; clients interpolate snapshots without independent positional offsets. Preserve lane routing and arrival-gated transfers/colonization. Idle hulls navigate to physical station positions; service transfers require docking at their actual waypoint. Do not invent free-flight routing, acceleration, or collision mechanics without agreement.
+
+- Colony ships may target any discovered neutral star system, regardless of adjacency or intermediate ownership. Use shortest existing lane routes through all systems; intermediate systems are not colonized, and ships are exposed to combat. AI uses the same rules.

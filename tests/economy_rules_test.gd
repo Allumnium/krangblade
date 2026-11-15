@@ -627,22 +627,41 @@ func _initialize() -> void:
     var c2: Dictionary = colonization["ships"][1]
     assert(c1["kind"] == "colony_ship" and c2["kind"] == "colony_ship")
     assert(not ECON.send_colony(colonization, 2, int(c1["id"]), 3))
-    assert(not ECON.send_colony(colonization, 1, int(c1["id"]), 4))
+    assert(ECON.colony_path(colonization, 1, c1, 4) == [0, 1, 3, 4])
     assert(not ECON.send_colony(colonization, 1, int(c1["id"]), 2))
     assert(ECON.send_colony(colonization, 1, int(c1["id"]), 3))
     assert(ECON.send_colony(colonization, 3, int(c2["id"]), 3))
     assert(int(colonization["planets"][3]["owner"]) == 0)
-    ECON.step(colonization, 0.5)
+    var distance1: float = (c1["position"] as Vector2).distance_to(cp[1]) + (cp[1] as Vector2).distance_to(cp[3])
+    var distance2: float = (c2["position"] as Vector2).distance_to(cp[3])
+    var first_arrival: float = minf(distance1, distance2) / ECON.SHIP_SPEED
+    var winner: int = 1 if distance1 < distance2 else 3
+    var loser: Dictionary = c2 if winner == 1 else c1
+    var loser_home: int = 2 if winner == 1 else 0
+    ECON.step(colonization, first_arrival * 0.5)
     assert(int(colonization["planets"][3]["owner"]) == 0)
-    ECON.step(colonization, 0.5)
-    assert(int(colonization["planets"][3]["owner"]) == 3)
+    ECON.step(colonization, first_arrival * 0.5 + 0.001)
+    assert(int(colonization["planets"][3]["owner"]) == winner)
     assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION))
     assert(int(colonization["planets"][3]["levels"]["Organics"]) == 1)
-    ECON.step(colonization, 1.0)
     assert(colonization["ships"].size() == 1)
-    assert(int(c1["dest"]) == -1)
-    ECON.step(colonization, 2.0)
-    assert(int(c1["at"]) == 0 and c1["route"].is_empty())
+    for i in range(20):
+        if int(loser["at"]) == loser_home and loser["route"].is_empty():
+            break
+        var before: Vector2 = loser["position"]
+        ECON.step(colonization, 0.5)
+        assert(before.distance_to(loser["position"]) <= ECON.SHIP_SPEED * 0.5 + 0.01)
+    assert(int(loser["dest"]) == -1)
+    assert(int(loser["at"]) == loser_home and loser["route"].is_empty())
+    var distant: Dictionary = ECON.create(colony_map, players, ids)
+    var distant_ship: Dictionary = {"id": 999, "kind": "colony_ship", "owner": 1, "at": 0, "position": cp[0], "route": [], "leg": 0.0, "dest": -1}
+    distant["ships"].append(distant_ship)
+    assert(ECON.send_colony(distant, 1, 999, 4))
+    assert(distant_ship["position"] == cp[0])
+    ECON.step(distant, 2.0)
+    assert(int(distant["planets"][3]["owner"]) == 0 and int(distant["planets"][4]["owner"]) == 0)
+    ECON.step(distant, 1.0)
+    assert(int(distant["planets"][3]["owner"]) == 0 and int(distant["planets"][4]["owner"]) == 1)
     print("PASS: colony construction, permissions, travel, neutral arrival and competing colonies")
     # POI allocations reserve nearest fighters, including field destinations.
     var force_map: Dictionary = MAP.generate(1337)
@@ -681,11 +700,15 @@ func _initialize() -> void:
     assert(force_fleet[1]["route"] == [field_node])
     ECON._move({"map": force_graph}, force_fleet[1], 0.5)
     assert(is_equal_approx(float(force_fleet[1]["leg"]), 47.5))
+    var reversal_position: Vector2 = force_fleet[1]["position"]
     assert(ECON.set_military(force_state, 1, "fighter", 0, 100))
     ECON._allocate_fighters(force_state, force_graph, 1, force_fleet)
     assert(force_fleet[1]["at"] == field_node)
     assert(force_fleet[1]["route"] == [3, 0])
     assert(is_equal_approx(float(force_fleet[1]["leg"]), 52.5))
+    assert(force_fleet[1]["position"] == reversal_position)
+    ECON._move({"map": force_graph}, force_fleet[1], 0.1)
+    assert(is_equal_approx(reversal_position.distance_to(force_fleet[1]["position"]), ECON.SHIP_SPEED * 0.1))
     ECON._move({"map": force_graph}, force_fleet[1], 100.0)
     assert(force_fleet[1]["at"] == 0 and force_fleet[1]["route"].is_empty())
     assert(ECON.set_military(force_state, 1, "fighter", field_node, 100))
@@ -707,6 +730,17 @@ func _initialize() -> void:
     duel["ships"] = [{"id": 1, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0}, {"id": 2, "owner": 2, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0}]
     ECON._combat(duel, duel_graph, 1.0)
     assert(float(duel["ships"][0]["hp"]) == 100.0 and int(duel["ships"][0]["combat_target"]) == -1)
+
+    # Combat depends on actual position, not route, POI or activity metadata.
+    duel["ships"] = [{"id": 11, "owner": 1, "kind": "fighter", "at": 0, "route": [3], "leg": 0.0, "position": Vector2(500, 0), "hp": 100.0}, {"id": 12, "owner": 3, "kind": "ship", "at": 3, "route": [0], "leg": 0.0, "position": Vector2(550, 0), "hp": 100.0}, {"id": 13, "owner": 3, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": Vector2(5000, 0), "hp": 100.0}]
+    ECON._combat(duel, duel_graph, 1.0)
+    assert(int(duel["ships"][0]["combat_target"]) == 12)
+    assert(is_equal_approx(float(duel["ships"][1]["hp"]), 100.0 - ECON.LASER_DAMAGE))
+    assert(is_equal_approx(float(duel["ships"][2]["hp"]), 100.0))
+    for tick in range(20):
+        var before: Vector2 = miner["position"]
+        ECON.step(mineral, 0.1)
+        assert(before.distance_to(miner["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
 
     var ai_map: Dictionary = {"seed": 123, "points": [Vector2(-950, 0), Vector2.ZERO, Vector2(3800, 0), Vector2(950, 0), Vector2(1900, 0)], "edges": [[0, 1], [1, 3], [3, 4], [4, 2]], "fields": []}
     var ai_roster: Dictionary = {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 2}}

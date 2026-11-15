@@ -291,6 +291,14 @@ func _check_economy_sync() -> void:
                 if not poses.has(int(ship["id"])):
                     _fail("A replicated ship was not rendered.")
                     return
+                if not ship.get("position") is Vector2 or not ship.get("navigation_target") is Vector2 or not ship.get("heading") is Vector2:
+                    _fail("Ship is missing replicated physical navigation state.")
+                    return
+                var actual: Vector2 = ship["position"]
+                var visual: Dictionary = view.get("ship_visuals").get(int(ship["id"]), {})
+                if visual.is_empty() or not (visual["to"] as Vector2).is_equal_approx(actual):
+                    _fail("Ship render target differs from authoritative physical position.")
+                    return
             economy_verified = true
             # A normal game command is the completion acknowledgment. Return
             # only after each real peer has independently verified its replica.

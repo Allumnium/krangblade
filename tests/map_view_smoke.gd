@@ -16,6 +16,13 @@ func _run() -> void:
     var territory_layer: Control = view.get("territory_layer")
     var territory_image: TextureRect = view.get("territory_image")
     assert(territory_image.visible and territory_image.texture != null)
+    var territory_pixels: PackedByteArray = territory_image.texture.get_image().get_data()
+    var fill_seen: bool = false
+    var rim_seen: bool = false
+    for i in range(3, territory_pixels.size(), 4):
+        fill_seen = fill_seen or territory_pixels[i] == 36
+        rim_seen = rim_seen or territory_pixels[i] == 195
+    assert(fill_seen and rim_seen)
     assert(territory_image.mouse_filter == Control.MOUSE_FILTER_IGNORE)
     assert(territory_layer.get_index() < (view.get("map_canvas") as Control).get_index())
     assert((view.get("territory_last") as Array)[0] == 1)
@@ -380,7 +387,8 @@ func _run() -> void:
         session.call("_economy_tick")
     assert(state["ships"].size() == 2)
     assert(state["ships"][1]["kind"] == "fighter")
-    view.call("_zoom_at", view.call("_screen_point", points[0]), 4.0)
+    view.call("_process", 0.2)
+    view.call("_zoom_at", view.call("_screen_point", points[0]), 16.0)
     var fighter_id: int = int(state["ships"][1]["id"])
     var ship_poses: Dictionary = view.call("_ship_poses", state)
     mouse.position = ship_poses[fighter_id]["point"]
