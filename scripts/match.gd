@@ -38,6 +38,9 @@ var global_resource_tiles: Dictionary = {}
 var global_population_label: Label
 var global_craft_label: Label
 var global_planet_label: Label
+var year_label: Label
+var trade_picker: OptionButton
+var trade_detail: Label
 var heading: Label
 var info: Label
 var stock_labels: Dictionary = {}
@@ -133,6 +136,7 @@ func _build_ui() -> void:
     heading.clip_text = true
     heading.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
     row.add_child(heading)
+    year_label = _global_stat(row, "YEAR  1", HUD.ACCENT)
     _button("RESET VIEW", _reset_view, row)
     _build_global_bar(header_body)
     inspector_panel = PanelContainer.new()
@@ -169,8 +173,8 @@ func _build_ui() -> void:
     inspector_tabs.clip_contents = true
     body.add_child(inspector_tabs)
     var economy_page: VBoxContainer = _inspector_page("Economy")
+    var trade_page: VBoxContainer = _inspector_page("Trade")
     var shipyard_page: VBoxContainer = _inspector_page("Shipyards")
-    var queue_page: VBoxContainer = _inspector_page("Queue")
     var resources: VBoxContainer = HUD.section(economy_page, "RESOURCE INVENTORY")
     inventory = VBoxContainer.new()
     inventory.add_theme_constant_override("separation", 3)
@@ -218,14 +222,24 @@ func _build_ui() -> void:
         level_label.add_theme_color_override("font_color", HUD.MUTED)
         line.add_child(level_label)
         level_labels[resource] = level_label
-    var logistics: VBoxContainer = HUD.section(economy_page, "PRODUCTION & TRADE")
+    var production: VBoxContainer = HUD.section(economy_page, "PRODUCTION")
     resource_picker = OptionButton.new()
     for resource in ECONOMY.RESOURCES:
         resource_picker.add_icon_item(HUD.ICONS[resource], resource)
-    resource_picker.item_selected.connect(func(_i: int) -> void: _load_thresholds(); _refresh())
-    logistics.add_child(resource_picker)
+    resource_picker.item_selected.connect(func(_i: int) -> void: _refresh())
+    production.add_child(resource_picker)
     resource_detail = _label("")
-    logistics.add_child(resource_detail)
+    production.add_child(resource_detail)
+    upgrade_resource = _button("UPGRADE PRODUCTION", func() -> void: _operation("production", _resource()), production)
+    HUD.action(upgrade_resource)
+    var logistics: VBoxContainer = HUD.section(trade_page, "TRADE THRESHOLDS")
+    trade_picker = OptionButton.new()
+    for resource in ECONOMY.RESOURCES:
+        trade_picker.add_icon_item(HUD.ICONS[resource], resource)
+    trade_picker.item_selected.connect(func(_i: int) -> void: _load_thresholds(); _refresh())
+    logistics.add_child(trade_picker)
+    trade_detail = _label("")
+    logistics.add_child(trade_detail)
     var thresholds := HBoxContainer.new()
     logistics.add_child(thresholds)
     for i in range(2):
@@ -243,8 +257,6 @@ func _build_ui() -> void:
         else:
             max_stock = spin
     threshold_button = _button("APPLY THRESHOLDS", _apply_thresholds, logistics)
-    upgrade_resource = _button("UPGRADE PRODUCTION", func() -> void: _operation("production", _resource()), logistics)
-    HUD.action(upgrade_resource)
     var shipyards: VBoxContainer = HUD.section(shipyard_page, "SHIPYARDS")
     yard_picker = OptionButton.new()
     yard_picker.item_selected.connect(func(_i: int) -> void: _refresh())
@@ -257,7 +269,7 @@ func _build_ui() -> void:
     HUD.action(colony_button, Color("#c7a4ff"))
     yard_button = _button("BUILD SHIPYARD", func() -> void: _operation("yard"), shipyards)
     upgrade_yard = _button("UPGRADE SHIPYARD", func() -> void: _operation("yard_upgrade", str(yard_picker.selected)), shipyards)
-    var queue: VBoxContainer = HUD.section(queue_page, "CONSTRUCTION QUEUE")
+    var queue: VBoxContainer = HUD.section(shipyard_page, "CONSTRUCTION QUEUE")
     jobs = ItemList.new()
     jobs.custom_minimum_size.y = 130
     jobs.item_selected.connect(func(_i: int) -> void: _refresh())
@@ -323,6 +335,8 @@ func _compact_amount(value: float) -> String:
     return "%.0f" % value
 
 func _refresh_global_bar(state: Dictionary) -> void:
+    year_label.text = "YEAR  %d" % ECONOMY.current_year(state)
+    year_label.tooltip_text = "One game year per simulation second"
     var totals: Dictionary = ECONOMY.empire_totals(state, _me())
     for resource in ECONOMY.RESOURCES:
         var value: float = float(totals["resources"][resource])
@@ -363,18 +377,21 @@ func _me() -> int:
 func _resource() -> String:
     return resource_picker.get_item_text(resource_picker.selected)
 
+func _trade_resource() -> String:
+    return trade_picker.get_item_text(trade_picker.selected)
+
 func _load_thresholds() -> void:
     var p: Dictionary = _planet()
     if p.is_empty():
         return
-    var t: Dictionary = p["thresholds"][_resource()]
+    var t: Dictionary = p["thresholds"][_trade_resource()]
     min_stock.value = float(t["min"])
     max_stock.value = float(t["max"])
 
 func _apply_thresholds() -> void:
     if min_stock.value > max_stock.value:
         max_stock.value = min_stock.value
-    session.call("request_thresholds", selected, _resource(), min_stock.value, max_stock.value)
+    session.call("request_thresholds", selected, _trade_resource(), min_stock.value, max_stock.value)
 
 func _operation(kind: String, target: String = "") -> void:
     session.call("request_operation", selected, kind, target)
@@ -436,6 +453,7 @@ func _refresh() -> void:
         population_label.text = ""
         population_bar.hide()
         resource_detail.text = ""
+        trade_detail.text = ""
         yard_info.text = ""
         jobs.clear()
         inventory.hide()
@@ -448,7 +466,7 @@ func _refresh() -> void:
     info.text = "Planet %02d%s\n%s" % [selected + 1, "  /  Home" if bool(p["home"]) else "", name_text]
     var population: float = float(p["population"])
     var capacity: float = ECONOMY.population_capacity(p)
-    population_label.text = "Population  %.1f / %.1f M   •   +%.2f M/s\nResource output  ×%.2f" % [population, capacity, ECONOMY.population_growth(p), ECONOMY.population_multiplier(p)]
+    population_label.text = "Population  %.1f / %.1f M   •   %+.2f M/yr\nResource output  ×%.2f" % [population, capacity, ECONOMY.population_growth(p), ECONOMY.population_multiplier(p)]
     population_bar.visible = capacity > 0.0
     population_bar.value = 100.0 * population / maxf(capacity, 1.0)
     inventory.show()
@@ -462,9 +480,13 @@ func _refresh() -> void:
     if ECONOMY.EXTRACTED.has(resource):
         detail = "Deposit: %.2fx  •  Output: %.1f/s" % [float(p["abundance"].get(resource, 0.0)), ECONOMY.rate(p, resource)]
     elif resource == "Organics":
-        detail = "Output: %.1f/s  •  Supports %.1f M people" % [ECONOMY.rate(p, resource), ECONOMY.population_capacity(p)]
-    var t: Dictionary = p["thresholds"][resource]
-    resource_detail.text = "%s\nPlanet bonus: %.2fx  |  Current min/max: %.0f / %.0f" % [detail, modifier, float(t["min"]), float(t["max"])]
+        var output: float = ECONOMY.rate(p, resource)
+        var demand: float = ECONOMY.organics_demand(p)
+        detail = "Farming: %.2f/yr  •  Demand: %.2f/yr\nNet: %+.2f/yr  •  Supports %.1f M" % [output, demand, output - demand, ECONOMY.population_capacity(p)]
+    resource_detail.text = "%s\nPlanet bonus: %.2fx" % [detail, modifier]
+    var trade_resource: String = _trade_resource()
+    var t: Dictionary = p["thresholds"][trade_resource]
+    trade_detail.text = "Stock: %.1f\nCurrent import/export: %.0f / %.0f" % [float(p["stock"][trade_resource]), float(t["min"]), float(t["max"])]
     upgrade_resource.disabled = not owned or not available or ECONOMY._has_job(p, "production", resource)
     ship_button.disabled = not owned or not bool(p["home"])
     var yards: Array = p["yards"]
@@ -690,7 +712,7 @@ func _keyboard_pan(delta: float) -> void:
     var focus: Control = get_viewport().gui_get_focus_owner()
     if focus is LineEdit or focus is TextEdit:
         return
-    for picker in [resource_picker, yard_picker, colony_picker]:
+    for picker in [resource_picker, trade_picker, yard_picker, colony_picker]:
         if picker.get_popup().visible:
             return
     var direction := Vector2(
