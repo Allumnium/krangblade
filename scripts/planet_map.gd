@@ -1,49 +1,69 @@
 extends RefCounted
 ## Seeded connected planet graph, independent of the rendering layer.
-const COUNT: int = 32
 const SIZE := Vector2(2200, 1500)
 
-const CLUSTER_COUNT: int = 4
 const TRAVEL_SPEED: float = 95.0
 const LONGEST_LINK_YEARS: float = 100.0
 const MAX_CONNECTIONS: int = 3
-const MAX_JUNCTIONS: int = 6
 const EXTRA_LINK_CHANCE: float = 0.35
 
-static func generate(seed_value: int) -> Dictionary:
+static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
     var rng := RandomNumberGenerator.new()
     rng.seed = seed_value
-    var centers: Array[Vector2] = [Vector2(480, 380), Vector2(1720, 380), Vector2(480, 1120), Vector2(1720, 1120)]
+    player_count = clampi(player_count, 1, 8)
+    var cluster_count: int = player_count * 3
+    var columns: int = ceili(sqrt(float(cluster_count)))
+    var rows: int = ceili(float(cluster_count) / columns)
+    var bounds := Vector2(columns * 1250.0, rows * 1050.0)
+    var centers: Array[Vector2] = []
     var groups: Array = []
-    for i in range(CLUSTER_COUNT):
-        centers[i] += Vector2(rng.randf_range(-65, 65), rng.randf_range(-35, 35))
+    var sizes: Array[int] = []
+    # Choose home clusters spread over the grid, then assign the remaining ones.
+    var slots: Array[int] = []
+    for i in range(cluster_count):
+        slots.append(i)
+    for i in range(player_count):
+        var pick: int = i * 3
+        var slot: int = slots[pick]
+        slots[pick] = slots[i]
+        slots[i] = slot
+    for i in range(cluster_count):
+        var slot: int = slots[i]
+        centers.append(Vector2(625.0 + float(slot % columns) * 1250.0, 525.0 + floorf(float(slot) / columns) * 1050.0) + Vector2(rng.randf_range(-90, 90), rng.randf_range(-70, 70)))
         groups.append([])
+        sizes.append(6 if i < player_count else clampi(roundi(rng.randfn(6.0, 1.5)), 3, 9))
     var points: Array[Vector2] = []
     var clusters: Array[int] = []
-    # Interleave indices so the first eight homeworlds are spread across clusters.
-    for i in range(COUNT):
-        var group: int = i % CLUSTER_COUNT
-        var candidate := Vector2.ZERO
-        var best: float = -1.0
-        for attempt in range(160):
-            var offset := Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
-            if offset.length_squared() > 1.0:
-                continue
-            var p: Vector2 = centers[group] + offset * Vector2(340, 285)
-            var nearest: float = SIZE.length()
-            for index in groups[group]:
-                nearest = minf(nearest, p.distance_to(points[index]))
-            if nearest > best:
-                candidate = p
-                best = nearest
-            if nearest >= 190.0:
-                break
-        points.append(candidate)
+    # Indices 0..player_count-1 remain the ordered player homeworlds.
+    for group in range(player_count):
+        points.append(centers[group])
         clusters.append(group)
-        groups[group].append(i)
+        groups[group].append(points.size() - 1)
+    for group in range(cluster_count):
+        while groups[group].size() < sizes[group]:
+            var candidate := centers[group]
+            var best: float = -1.0
+            for attempt in range(160):
+                var offset := Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
+                if offset.length_squared() > 1.0:
+                    continue
+                var p: Vector2 = centers[group] + offset * Vector2(340, 285)
+                var nearest: float = bounds.length()
+                for index in groups[group]:
+                    nearest = minf(nearest, p.distance_to(points[index]))
+                if nearest > best:
+                    candidate = p
+                    best = nearest
+                if nearest >= 190.0:
+                    break
+            points.append(candidate)
+            clusters.append(group)
+            groups[group].append(points.size() - 1)
+    var count: int = points.size()
+    var max_junctions: int = maxi(1, floori(float(count) * 0.18))
     var edges: Array = []
     var degrees: Array[int] = []
-    degrees.resize(COUNT)
+    degrees.resize(count)
     degrees.fill(0)
     var junctions: int = 0
     # Grow each local tree by distance, with at most one local junction.
@@ -53,22 +73,22 @@ static func generate(seed_value: int) -> Dictionary:
         var connected: Array = [group[0]]
         var local_junctions: int = 0
         while connected.size() < group.size():
-            var pair: Array = _closest_pair(points, connected, group, connected, degrees, 1 - local_junctions, true)
+            var pair: Array = _closest_pair(points, connected, group, connected, degrees, mini(1 - local_junctions, max_junctions - junctions))
             var added: int = _new_junctions(pair, degrees)
             local_junctions += added
             junctions += added
             _add_edge(edges, degrees, pair)
             connected.append(pair[1] if connected.has(pair[0]) else pair[0])
     var joined: Array = [0]
-    while joined.size() < CLUSTER_COUNT:
+    while joined.size() < cluster_count:
         var best_edge: Array = []
         var next_group: int = -1
         var best_score: float = INF
         for i in joined:
-            for j in range(CLUSTER_COUNT):
+            for j in range(cluster_count):
                 if joined.has(j):
                     continue
-                var pair: Array = _closest_pair(points, groups[i], groups[j], [], degrees, MAX_JUNCTIONS - junctions)
+                var pair: Array = _closest_pair(points, groups[i], groups[j], [], degrees, max_junctions - junctions)
                 if pair.is_empty():
                     continue
                 var score: float = _edge_score(points, pair, degrees)
@@ -82,22 +102,22 @@ static func generate(seed_value: int) -> Dictionary:
     # Protect the connected backbone. Fields occupy potential shortcuts, so
     # ordinary routes never cross a field and the galaxy remains connected.
     var candidates: Array = []
-    for i in range(COUNT):
-        for j in range(i + 1, COUNT):
+    for i in range(count):
+        for j in range(i + 1, count):
             var distance: float = points[i].distance_to(points[j])
             var limit: float = 410.0 if clusters[i] == clusters[j] else 850.0
             if distance <= limit and not edges.has([i, j]):
                 candidates.append([i, j])
     var fields: Array = []
     for pair in candidates:
-        if fields.size() >= 10:
+        if fields.size() >= cluster_count * 2:
             break
         var center: Vector2 = (points[pair[0]] + points[pair[1]]) * 0.5
         var radius: float = rng.randf_range(38.0, 62.0)
         var safe: bool = true
         var anchor: int = -1
         var nearest: float = INF
-        for i in range(COUNT):
+        for i in range(count):
             var distance: float = center.distance_to(points[i])
             if distance < radius + 45.0:
                 safe = false
@@ -125,7 +145,7 @@ static func generate(seed_value: int) -> Dictionary:
         for pair in candidates:
             if clusters[pair[0]] != clusters[pair[1]]:
                 continue
-            if not _edge_allowed(pair, degrees, MAX_JUNCTIONS - junctions):
+            if not _edge_allowed(pair, degrees, max_junctions - junctions):
                 continue
             if degrees.count(1) - int(degrees[pair[0]] == 1) - int(degrees[pair[1]] == 1) < 2:
                 continue
@@ -148,7 +168,7 @@ static func generate(seed_value: int) -> Dictionary:
     for field in fields:
         field["position"] = (field["position"] as Vector2) * distance_scale
         field["radius"] = float(field["radius"]) * distance_scale
-    return {"seed": seed_value, "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": SIZE * distance_scale}
+    return {"seed": seed_value, "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
 
 static func blocked(a: Vector2, b: Vector2, fields: Array) -> bool:
     for field in fields:
@@ -171,12 +191,12 @@ static func _add_edge(edges: Array, degrees: Array[int], pair: Array) -> void:
     degrees[pair[0]] += 1
     degrees[pair[1]] += 1
 
-static func _closest_pair(points: Array[Vector2], a: Array, b: Array, excluded: Array, degrees: Array[int], budget: int, avoid_home_pair: bool = false) -> Array:
+static func _closest_pair(points: Array[Vector2], a: Array, b: Array, excluded: Array, degrees: Array[int], budget: int) -> Array:
     var best: float = INF
     var pair: Array = []
     for i in a:
         for j in b:
-            if i == j or excluded.has(j) or (avoid_home_pair and i < 8 and j < 8):
+            if i == j or excluded.has(j):
                 continue
             var candidate: Array = [mini(i, j), maxi(i, j)]
             if not _edge_allowed(candidate, degrees, budget):
@@ -191,7 +211,8 @@ static func linked(map_data: Dictionary, a: int, b: int) -> bool:
     return (map_data.get("edges", []) as Array).has([mini(a, b), maxi(a, b)])
 
 static func path(map_data: Dictionary, planet_teams: Array[int], team: int, start: int, goal: int) -> Array[int]:
-    if start < 0 or goal < 0 or start >= COUNT or goal >= COUNT:
+    var count: int = (map_data.get("points", []) as Array).size()
+    if start < 0 or goal < 0 or start >= count or goal >= count:
         return []
     if planet_teams[start] != team or planet_teams[goal] != team:
         return []
@@ -213,7 +234,7 @@ static func path(map_data: Dictionary, planet_teams: Array[int], team: int, star
                 result.push_front(current)
             return result
         visited[current] = true
-        for i in range(COUNT):
+        for i in range(count):
             if visited.has(i) or planet_teams[i] != team or not linked(map_data, current, i):
                 continue
             var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[i])

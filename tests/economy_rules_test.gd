@@ -7,13 +7,14 @@ func _initialize() -> void:
     assert(graph == MAP.generate(2468))
     assert(graph != MAP.generate(2469))
     var all_friendly: Array[int] = []
-    all_friendly.resize(MAP.COUNT)
+    all_friendly.resize(graph["points"].size())
     all_friendly.fill(1)
-    for i in range(MAP.COUNT):
+    for i in range(graph["points"].size()):
         assert(not MAP.path(graph, all_friendly, 1, 0, i).is_empty())
     # Seeded clusters are internally connected and connected by sparse bridges.
-    for seed_value in range(50):
-        var clustered: Dictionary = MAP.generate(seed_value)
+    for seed_value in range(24):
+        var player_count: int = seed_value % 8 + 1
+        var clustered: Dictionary = MAP.generate(seed_value, player_count)
         var cluster_ids: Array = clustered["clusters"]
         var cluster_points: Array = clustered["points"]
         var local_distance: float = 0.0
@@ -22,7 +23,7 @@ func _initialize() -> void:
         var bridges: int = 0
         var longest: float = 0.0
         var degrees: Array[int] = []
-        degrees.resize(MAP.COUNT)
+        degrees.resize(cluster_points.size())
         degrees.fill(0)
         for edge in clustered["edges"]:
             var length: float = cluster_points[edge[0]].distance_to(cluster_points[edge[1]])
@@ -35,16 +36,20 @@ func _initialize() -> void:
             else:
                 bridges += 1
                 bridge_distance += length
-        assert(bridges == MAP.CLUSTER_COUNT - 1)
-        assert(clustered["edges"].size() >= MAP.COUNT - 1)
-        assert(clustered["edges"].size() <= MAP.COUNT)
-        assert(degrees.count(3) <= MAP.MAX_JUNCTIONS)
+        assert(bridges == player_count * 3 - 1)
+        assert(clustered["cluster_sizes"].size() == player_count * 3)
+        for cluster_size in clustered["cluster_sizes"]:
+            assert(cluster_size >= 3 and cluster_size <= 9)
+        assert(clustered["edges"].size() >= cluster_points.size() - 1)
+        assert(clustered["edges"].size() <= cluster_points.size())
+        assert(degrees.count(3) <= int(clustered["max_junctions"]))
         assert(degrees.count(1) >= 2)
         for degree in degrees:
             assert(degree >= 1 and degree <= MAP.MAX_CONNECTIONS)
-        for home in range(8):
+        for home in range(player_count):
+            assert(clustered["cluster_sizes"][cluster_ids[home]] == 6)
             var neutral_neighbor: bool = false
-            for i in range(8, MAP.COUNT):
+            for i in range(player_count, cluster_points.size()):
                 if MAP.linked(clustered, home, i):
                     neutral_neighbor = true
                     break
@@ -58,13 +63,28 @@ func _initialize() -> void:
             assert(ECON.field_limit(field, "Crystals") > ECON.PLANET_MINING_LIMIT)
             assert(ECON.field_limit(field, "Organics") == 0.0)
         assert(bridge_distance / bridges > local_distance / locals)
-        for i in range(MAP.COUNT):
-            assert(not MAP.path(clustered, all_friendly, 1, 0, i).is_empty())
-        for i in range(8):
-            assert(cluster_ids[i] == i % MAP.CLUSTER_COUNT)
+        var seen: Dictionary = {0: true}
+        var frontier: Array = [0]
+        while not frontier.is_empty():
+            var current: int = frontier.pop_back()
+            for edge in clustered["edges"]:
+                var next: int = -1
+                if edge[0] == current:
+                    next = edge[1]
+                elif edge[1] == current:
+                    next = edge[0]
+                if next >= 0 and not seen.has(next):
+                    seen[next] = true
+                    frontier.append(next)
+        assert(seen.size() == cluster_points.size())
+        for i in range(player_count):
+            assert(cluster_ids[i] == i)
     var players: Dictionary = {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}
     var ids: Array[int] = [1, 2, 3]
     var state: Dictionary = ECON.create(graph, players, ids)
+    assert(ECON.discovered(state, 1, "planets", 0))
+    assert(ECON.discovered(state, 2, "planets", 0))
+    assert(not ECON.discovered(state, 3, "planets", 0) or MAP.linked(graph, 0, 2))
     var p: Dictionary = state["planets"][0]
     assert(p["yards"].size() == 1)
     assert(p["levels"].size() == 6)
@@ -264,6 +284,11 @@ func _initialize() -> void:
     var mineral_points: Array = mineral_map["points"]
     mineral_map["fields"] = [{"position": (mineral_points[0] as Vector2) + Vector2(95, 0), "radius": 20.0, "anchor": 0, "Metals": 1.0, "Crystals": 1.0}]
     var mineral: Dictionary = ECON.create(mineral_map, players, ids)
+    assert(ECON.discovered(mineral, 1, "fields", 0))
+    assert(not ECON.discovered(mineral, 3, "fields", 0))
+    assert(not ECON.set_mining_policy(mineral, 3, 0, false, false, false))
+    assert(ECON.set_mining_policy(mineral, 1, 0, true, true, false))
+    assert(ECON.mining_policy(mineral, 2, 0)["Crystals"])
     var mine_home: Dictionary = mineral["planets"][0]
     mine_home["levels"]["Metals"] = 1000
     assert(is_equal_approx(ECON.rate(mine_home, "Metals"), ECON.PLANET_MINING_LIMIT))
@@ -282,7 +307,16 @@ func _initialize() -> void:
     for i in range(20):
         ECON.step(mineral, 1.0)
     assert(float(mine_home["stock"]["Metals"]) > after_build)
+    assert(is_zero_approx(float(mine_home["stock"]["Crystals"])))
+    assert(is_zero_approx(float(miner["cargo"]["Crystals"])))
+    assert(ECON.set_mining_policy(mineral, 1, 0, true, false, true))
+    for i in range(20):
+        ECON.step(mineral, 1.0)
     assert(float(mine_home["stock"]["Crystals"]) > 0.0)
+    assert(ECON.set_mining_policy(mineral, 1, 0, false, false, true))
+    for i in range(10):
+        ECON.step(mineral, 1.0)
+    assert(miner["mining_mode"] == "idle")
     for resource in ["Organics", "Tech", "Textiles", "Plastics"]:
         assert(is_zero_approx(float(miner["cargo"][resource])))
     assert(ECON._cargo_total(miner) <= ECON.MINER_CAPACITY + ECON.EPS)

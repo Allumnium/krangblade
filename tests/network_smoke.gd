@@ -73,7 +73,8 @@ func _phase_changed() -> void:
             _fail("Wrong roster size in match: %d" % roster.size())
             return
         var owners: Array[int] = session.get("owners")
-        if owners.size() != MAP.COUNT:
+        var state: Dictionary = session.get("economy")
+        if owners.size() != state["map"]["points"].size() or state["map"]["cluster_sizes"].size() != expected_players * 3:
             _fail("Wrong territory count.")
             return
         if mode == "normal":

@@ -11,7 +11,8 @@ func _run() -> void:
     assert(session.multiplayer.multiplayer_peer is OfflineMultiplayerPeer)
     var state: Dictionary = session.get("economy")
     var planets: Array = state["planets"]
-    assert(planets.size() == MAP.COUNT)
+    assert(planets.size() == state["map"]["points"].size())
+    assert(state["map"]["cluster_sizes"].size() == 3)
     var neighbor: int = -1
     for i in range(1, planets.size()):
         if MAP.linked(state["map"], 0, i):
@@ -38,5 +39,11 @@ func _run() -> void:
     session.call("leave_solo")
     assert(str(session.get("phase")) == "offline")
     assert((session.get("economy") as Dictionary).is_empty())
+    assert(bool(session.call("start_solo", 3, [3, 2])))
+    var setup: Dictionary = session.get("economy")
+    assert(setup["map"]["cluster_sizes"].size() == 9)
+    assert(setup["teams"][1] == 3 and setup["teams"][2] == 3 and setup["teams"][3] == 2)
+    assert(session.get("players")[2]["ai"])
+    session.call("leave_solo")
     print("PASS: offline solo planetary match, colonization, ship construction, reset")
     quit(0)
