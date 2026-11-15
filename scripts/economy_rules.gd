@@ -1,5 +1,7 @@
 extends RefCounted
 ## Development-only balance configuration. No advanced recipes have been defined.
+static var cached_military_graph: Dictionary = {}
+static var cached_military_map: Dictionary = {}
 const MAP = preload("res://scripts/planet_map.gd")
 const RESOURCES = ["Metals", "Plastics", "Textiles", "Organics", "Tech", "Crystals"]
 const EXTRACTED = ["Metals", "Plastics", "Crystals"]
@@ -1426,8 +1428,11 @@ static func _apportion(keys: Array, weights: Dictionary, total: int) -> Dictiona
 
 # POI identifiers: system indices followed by stable asteroid field indices.
 static func military_graph(state: Dictionary) -> Dictionary:
-    var points: Array = state["map"]["points"].duplicate()
-    var edges: Array = state["map"]["edges"].duplicate()
+    var map_data: Dictionary = state["map"]
+    if not cached_military_graph.is_empty() and cached_military_map.get("points") == map_data["points"] and cached_military_map.get("edges") == map_data["edges"] and cached_military_map.get("field_positions") == _field_positions(map_data):
+        return cached_military_graph
+    var points: Array = map_data["points"].duplicate()
+    var edges: Array = map_data["edges"].duplicate()
     for field in state["map"].get("fields", []):
         for anchor in field_access_systems(state["map"], field):
             edges.append([anchor, points.size()])
@@ -1438,7 +1443,15 @@ static func military_graph(state: Dictionary) -> Dictionary:
     for edge in edges:
         adjacent[edge[0]].append(edge[1])
         adjacent[edge[1]].append(edge[0])
-    return {"points": points, "edges": edges, "adjacent": adjacent}
+    cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data)}
+    cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}}
+    return cached_military_graph
+
+static func _field_positions(map_data: Dictionary) -> Array:
+    var result: Array = []
+    for field in map_data.get("fields", []):
+        result.append([field["position"], field["anchor"], field.get("radius", 0.0)])
+    return result
 
 static func military_pois(state: Dictionary, player: int) -> Array[int]:
     var result: Array[int] = []
@@ -1495,6 +1508,8 @@ static func set_military(state: Dictionary, player: int, kind: String, node: int
 # Dijkstra from the destination: all military ships may traverse star lanes,
 # regardless of ownership. Fields use their existing service-system approach.
 static func _military_paths(graph: Dictionary, goal: int) -> Dictionary:
+    if graph.has("paths") and graph["paths"].has(goal):
+        return graph["paths"][goal]
     var points: Array = graph["points"]
     var distances: Dictionary = {goal: 0.0}
     var next_hop: Dictionary = {}
@@ -1516,7 +1531,10 @@ static func _military_paths(graph: Dictionary, goal: int) -> Dictionary:
                 next_hop[node] = current
                 if not open.has(node):
                     open.append(node)
-    return {"distance": distances, "next": next_hop}
+    var result: Dictionary = {"distance": distances, "next": next_hop}
+    if graph.has("paths"):
+        graph["paths"][goal] = result
+    return result
 
 static func _military_approach(graph: Dictionary, ship: Dictionary, paths: Dictionary) -> Dictionary:
     var points: Array = graph["points"]
