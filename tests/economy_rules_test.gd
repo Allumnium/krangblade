@@ -1048,5 +1048,15 @@ func _initialize() -> void:
         assert(ECON.storage_capacity(depot) == ECON.WAREHOUSE_CAPACITIES[level + 1])
     assert(not ECON.enqueue(warehouse_state, 1, 0, "economy", "warehouse"))
     assert(float(ECON.empire_totals(warehouse_state, 1)["storage_reference"]["Tech"]) == 30000.0)
-    print("PASS: storage caps, three warehouse levels, no baseline crystals, linear consumption")
+    # Industry output reaches installed capacity while demand continues linearly.
+    depot["levels"]["Tech"] = 1
+    depot["population"] = 100000.0
+    var capped_output: float = ECON.rate(depot, "Tech")
+    assert(is_equal_approx(capped_output, 5.0))
+    depot["population"] = 200000.0
+    assert(is_equal_approx(ECON.rate(depot, "Tech"), capped_output))
+    assert(is_equal_approx(ECON.rate(depot, "Tech"), ECON.consumption(depot, "Tech")))
+    depot["population"] = 300000.0
+    assert(ECON.rate(depot, "Tech") < ECON.consumption(depot, "Tech"))
+    print("PASS: storage caps, three warehouse levels, no baseline crystals, linear consumption and industrial equilibrium")
     quit(0)

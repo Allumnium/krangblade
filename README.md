@@ -146,3 +146,5 @@ Home systems begin at level one in the five non-Crystal resources; no initial Cr
 
 
 v0.11.1: 2,000-unit storage per resource; warehouse upgrades raise capacity to 5,000, 12,000 and 30,000. Non-Crystal population demand is linear (Metals 0.1, Plastics/Textiles/Tech 0.25, Organics 0.4 per 10k population per game year). Growth is capped; cargo remains onboard if storage is full. Refunds are preserved even if temporarily above capacity. Crystal deposits remain naturally generated, with no initial production. Numbers provisional.
+
+Industrial labor ceiling (v0.11.3): production of Plastics, Textiles and Tech scales with population until 100k residents per local production level; demand continues scaling linearly, allowing equilibrium below storage capacity.

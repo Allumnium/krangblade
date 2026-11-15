@@ -131,7 +131,7 @@ func _run() -> void:
     view.call("_refresh")
     assert(is_equal_approx(float(slider.get("stock_percent")), 75.0))
     assert((left_resources["Organics"]["stock"] as Label).text == "1.5K")
-    assert((trade_amounts["Organics"] as Label).text == "1.5K / 2K")
+    assert((trade_amounts["Organics"] as Label).text == "1.5K / 2.0K")
     stock_system["stock"]["Organics"] = saved_stock
     view.call("_refresh")
     assert(is_equal_approx(float(slider.get("lower")), 10.0))

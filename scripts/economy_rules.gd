@@ -6,6 +6,7 @@ const EXTRACTED = ["Metals", "Plastics", "Crystals"]
 const ACTIVE_PRODUCTION = RESOURCES
 const STARTING_STOCK = {"Metals": 1650.0, "Plastics": 360.0, "Textiles": 240.0, "Organics": 300.0, "Tech": 240.0, "Crystals": 0.0}
 const BASE_INDUSTRIAL_RATE: float = 0.5
+const INDUSTRIAL_POPULATION_PER_LEVEL: float = 100000.0
 const BUILDING_BONUS: float = 0.25
 # Provisional local permanent improvements. No repeat purchases or upkeep.
 const ECONOMY_BUILDINGS = {
@@ -403,7 +404,12 @@ static func rate(planet: Dictionary, resource: String) -> float:
         # Baseline polymer production is possible even without a deposit.
         base = BASE_INDUSTRIAL_RATE
         material = maxf(1.0, material)
-    var output: float = base * level * material * bonus * population_multiplier(planet) * building_multiplier(planet, resource)
+    var labor: float = population_multiplier(planet)
+    if resource in ["Plastics", "Textiles", "Tech"]:
+        # Installed production capacity limits the number of productive workers.
+        # Population demand continues increasing after this output saturates.
+        labor = minf(labor, INDUSTRIAL_POPULATION_PER_LEVEL * level / HOME_POPULATION)
+    var output: float = base * level * material * bonus * labor * building_multiplier(planet, resource)
     return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func _update_population(planet: Dictionary, dt: float) -> void:

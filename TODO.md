@@ -15,7 +15,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [ ] Validate baseline population-scaled production, local population gates for production upgrades (first Tech upgrade at 200k), and one-time Economy buildings with resource-specific percentage bonuses.
 - [ ] Playtest costs, output, trade, AI expansion, population pacing and building choices before choosing final balance.
 - [ ] Validate per-resource storage ceilings, three warehouse upgrades, linear consumption by population (all except Crystals), and zero starting Crystal production.
-- v0.11.1 prototype implements the above via existing authority commands and local inventories; check off after validation.
+- v0.11.3 prototype includes finite population-serving industrial capacity (Plastics, Textiles, Tech) so linear demand can catch up even below the storage ceiling; implements the above via existing authority commands and local inventories; check off after validation.
 
 ## Phase 1 — Autonomous military foundation
 - [ ] Rework military control into persistent fleet/operation groups shared by human and AI empires.
