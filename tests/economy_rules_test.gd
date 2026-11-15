@@ -278,22 +278,22 @@ func _initialize() -> void:
         assert(float(body["orbit"]) + float(body["size"]) < 1.0)
     # Construction is proportional, time-dependent and fully refundable.
     var saved_population: float = float(p["population"])
-    p["population"] = 0.0
+    p["population"] = saved_population
     p["levels"]["Metals"] = 0
     p["stock"]["Metals"] = 90.0
     assert(ECON.enqueue(state, 1, 0, "ship"))
-    ECON.step(state, 1.0)
+    ECON._advance(p, p["queue"][0], 6.0)
     assert(is_equal_approx(float(p["queue"][0]["progress"]), 6.0))
     assert(is_equal_approx(float(p["stock"]["Metals"]), 45.0))
-    ECON.step(state, 1.0)
+    ECON._advance(p, p["queue"][0], 6.0)
     var item: Dictionary = p["queue"][0]
     assert(is_equal_approx(float(item["progress"]), 12.0))
-    ECON.step(state, 1.0)
+    ECON._advance(p, p["queue"][0], 6.0)
     assert(is_equal_approx(float(item["progress"]), 12.0))
     assert(ECON.cancel(state, 1, 0, int(item["id"])))
     assert(is_equal_approx(float(p["stock"]["Metals"]), 90.0))
     assert(p["queue"].is_empty())
-    p["population"] = saved_population
+    assert(is_equal_approx(float(p["population"]), saved_population))
 
     # Every repeatable upgrade grows geometrically; all order types refund actual allocations.
     for kind in ["production", "yard_upgrade"]:
@@ -586,11 +586,12 @@ func _initialize() -> void:
     assert(is_equal_approx(ECON.rate(mine_home, "Metals"), ECON.PLANET_MINING_LIMIT))
     mine_home["levels"]["Metals"] = 0
     mine_home["levels"]["Crystals"] = 0
-    mine_home["population"] = 0.0
     assert(not ECON.enqueue(mineral, 2, 0, "miner"))
     assert(ECON.enqueue(mineral, 1, 0, "miner"))
-    for i in range(10):
-        ECON.step(mineral, 1.0)
+    var mining_order: Dictionary = mine_home["queue"][0]
+    assert(ECON._advance(mine_home, mining_order, float(mining_order["work"])))
+    ECON._finish(mineral, 0, mine_home, mining_order)
+    mine_home["population"] = 0.0
     assert(mineral["ships"].size() == 1)
     assert(ECON.empire_totals(mineral, 1)["miners"] == 1)
     var miner: Dictionary = mineral["ships"][0]
@@ -1200,4 +1201,27 @@ func _initialize() -> void:
     recovery["ships"].append(hostile_repair)
     assert(not ECON._repair_site_safe(recovery, recovery_graph, 2, 1))
     print("PASS: shared lane pacing, safe individual withdrawal, full repair and rejoining")
+    var crew_state: Dictionary = ECON.create(graph, players, ids)
+    var crew_home: Dictionary = crew_state["planets"][0]
+    for kind in ECON.SHIP_KINDS:
+        var people: float = float(ECON.CREW_COSTS[kind])
+        assert(people > 0.0)
+        assert(ECON.enqueue(crew_state, 1, 0, kind))
+        var crew_job: Dictionary = crew_home["queue"][0]
+        var original_population: float = float(crew_home["population"])
+        ECON._advance(crew_home, crew_job, float(crew_job["work"]) * 0.25)
+        assert(is_equal_approx(float(crew_job["population_allocated"]), people * 0.25))
+        assert(is_equal_approx(float(crew_home["population"]), original_population - people * 0.25))
+        assert(ECON.cancel(crew_state, 1, 0, int(crew_job["id"])))
+        assert(is_equal_approx(float(crew_home["population"]), original_population))
+    crew_home["population"] = 1.0
+    assert(ECON.enqueue(crew_state, 1, 0, "fighter"))
+    assert(is_zero_approx(ECON._possible(crew_home, crew_home["queue"][0])))
+    crew_home["population"] = 100.0
+    var crew_order: Dictionary = crew_home["queue"][0]
+    assert(ECON._advance(crew_home, crew_order, float(crew_order["work"])))
+    ECON._finish(crew_state, 0, crew_home, crew_order)
+    assert(is_equal_approx(float(crew_home["population"]), 90.0))
+    assert(is_equal_approx(float(crew_state["ships"][0]["crew"]), 10.0))
+    print("PASS: proportional crew costs, refunds, population starvation and completed crew")
     quit(0)

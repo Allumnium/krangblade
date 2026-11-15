@@ -8,6 +8,8 @@ var saw_match: bool = false
 var started: bool = false
 var finishing: bool = false
 var ready_sent: bool = false
+var color_requested: bool = false
+var expected_color: int = 0
 var economy_verified: bool = false
 var home_index: int = -1
 var cancel_id: int = -1
@@ -57,13 +59,24 @@ func _roster_changed() -> void:
         return
     var roster: Dictionary = session.get("players")
     if role == "host":
+        if not color_requested:
+            color_requested = true
+            session.call("choose_color", 1, 8)
+            return
         if roster.size() == expected_players and not started and bool(session.call("can_start")):
             started = true
             session.call_deferred("start_match")
     elif role == "client":
         var self_id: int = session.multiplayer.get_unique_id()
         var entry: Dictionary = roster.get(self_id, {})
-        if not entry.is_empty() and not bool(entry.get("ready", false)) and not ready_sent:
+        if not entry.is_empty() and not color_requested:
+            color_requested = true
+            expected_color = 7 if expected_players == 2 else int(entry["color"])
+            session.call("choose_color", self_id, 8) # occupied by host; must reject
+            if expected_players == 2:
+                session.call("choose_color", self_id, 7)
+            return
+        if not entry.is_empty() and int(entry.get("color", 0)) == expected_color and not bool(entry.get("ready", false)) and not ready_sent:
             ready_sent = true
             session.call_deferred("toggle_ready")
 
@@ -83,6 +96,16 @@ func _phase_changed() -> void:
         var roster: Dictionary = session.get("players")
         if roster.size() != expected_players:
             _fail("Wrong roster size in match: %d" % roster.size())
+            return
+        var colors: Dictionary = {}
+        for entry in roster.values():
+            var choice: int = int(entry.get("color", 0))
+            if choice < 1 or choice > 8 or colors.has(choice):
+                _fail("Empire colors must be unique and valid.")
+                return
+            colors[choice] = true
+        if int(roster[1]["color"]) != 8 or (expected_players == 2 and not colors.has(7)):
+            _fail("Selected empire colors did not replicate.")
             return
         var owners: Array[int] = session.get("owners")
         var state: Dictionary = session.get("economy")
@@ -268,7 +291,7 @@ func _check_economy_sync() -> void:
             var repeat_miner: bool = false
             for job in system["queue"]:
                 if job["kind"] == "ship" and float(job["progress"]) > 0.0:
-                    ship_progress = true
+                    ship_progress = is_equal_approx(float(job.get("population_allocated", 0.0)), float(ECON.CREW_COSTS["ship"]) * float(job["progress"]) / float(job["work"]))
                 elif job["kind"] == "fighter":
                     fighter_pending = true
                 elif job["kind"] == "production" and job["target"] == "Organics":
@@ -284,7 +307,7 @@ func _check_economy_sync() -> void:
                     _fail("Replicated hull hit points are invalid.")
                     return
                 if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship":
-                    ship_progress = true
+                    ship_progress = is_equal_approx(float(ship.get("crew", 0.0)), float(ECON.CREW_COSTS["ship"]))
             var military: Dictionary = ECON.military_policy(state, owner, "fighter")
             var field_node: int = (state["planets"] as Array).size()
             var buildings: Dictionary = system.get("buildings", {})
@@ -320,7 +343,10 @@ func _check_economy_sync() -> void:
                 if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.storage_capacity(home) * 100.0, 0.0, 100.0)) or not is_equal_approx(float(slider.get("lower")), float(thresholds["min"])) or not is_equal_approx(float(slider.get("upper")), float(thresholds["max"])):
                     _fail("Replicated inventory or thresholds do not match the trade bars.")
                     return
-            var expected_sectors: Array[int] = ECON.territory_claims(state)
+            var expected_sectors: Array[int] = []
+            var palette_roster: Dictionary = session.get("players")
+            for owner in ECON.territory_empires(state):
+                expected_sectors.append(int(palette_roster.get(owner, {}).get("color", 0)))
             if view.get("territory_last") != expected_sectors:
                 _fail("Territory overlay does not match replicated state.")
                 return

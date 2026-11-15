@@ -269,7 +269,19 @@ func _refresh_roster() -> void:
         var label := _text("%s • %s" % [str(entry.get("name", "Player")), role], 14)
         label.clip_text = true
         label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        label.add_theme_color_override("font_color", RULES.EMPIRE_COLORS[int(entry.get("color", 1))])
         row.add_child(label)
+        var color_selector := OptionButton.new()
+        color_selector.custom_minimum_size.x = 74
+        for choice in range(1, RULES.MAX_PLAYERS + 1):
+            var swatch := Image.create_empty(14, 14, false, Image.FORMAT_RGBA8)
+            swatch.fill(RULES.EMPIRE_COLORS[choice])
+            color_selector.add_icon_item(ImageTexture.create_from_image(swatch), RULES.COLOR_NAMES[choice], choice)
+            color_selector.set_item_disabled(choice - 1, not RULES.color_available(roster_data, int(id), choice))
+        color_selector.select(int(entry.get("color", 1)) - 1)
+        color_selector.disabled = not is_lobby or id != multiplayer.get_unique_id()
+        color_selector.item_selected.connect(_color_selected.bind(int(id)))
+        row.add_child(color_selector)
         var selector := OptionButton.new()
         selector.custom_minimum_size.x = 96
         for team in range(1, RULES.MAX_PLAYERS + 1):
@@ -299,6 +311,9 @@ func _refresh_chat() -> void:
     var messages: Array = network.get("history")
     for item in messages:
         chat_log.add_text(str((item as Dictionary).get("text", "")) + "\n")
+
+func _color_selected(index: int, id: int) -> void:
+    network.call("choose_color", id, index + 1)
 
 func _team_selected(index: int, id: int) -> void:
     network.call("choose_team", id, index + 1)

@@ -78,9 +78,9 @@ func start_solo(team: int = 1, opponent_teams: Array = []) -> bool:
         if not RULES.valid_team(int(opponent_team)):
             return false
     is_solo = true
-    players = {1: {"name": _sanitize_name(display_name), "team": team, "ready": true}}
+    players = {1: {"name": _sanitize_name(display_name), "team": team, "ready": true, "color": 1}}
     for i in range(opponent_teams.size()):
-        players[i + 2] = {"name": "AI %d" % (i + 1), "team": int(opponent_teams[i]), "ready": true, "ai": true}
+        players[i + 2] = {"name": "AI %d" % (i + 1), "team": int(opponent_teams[i]), "ready": true, "ai": true, "color": i + 2}
     history.clear()
     last_message.clear()
     round_id = 1
@@ -106,7 +106,7 @@ func host_game(wanted_name: String) -> bool:
     multiplayer.multiplayer_peer = peer
     is_solo = false
     display_name = _sanitize_name(wanted_name)
-    players = {1: {"name": display_name, "team": 1, "ready": true}}
+    players = {1: {"name": display_name, "team": 1, "ready": true, "color": 1}}
     history.clear()
     last_message.clear()
     round_id = 0
@@ -229,7 +229,7 @@ func _rpc_register(wanted_name: String) -> void:
     while used_teams.has(team) and team < RULES.MAX_PLAYERS:
         team += 1
     var name: String = _sanitize_name(wanted_name)
-    players[sender] = {"name": name, "team": team, "ready": false}
+    players[sender] = {"name": name, "team": team, "ready": false, "color": RULES.free_color(players)}
     _rpc_history.rpc_id(sender, history)
     _send_roster()
     _system_message("%s joined." % name)
@@ -294,6 +294,28 @@ func _change_team(id: int, team: int) -> void:
     RULES.reset_guest_ready(players)
     _send_roster()
     _status("Teams changed; guests must ready up again.")
+
+func choose_color(peer_id: int, choice: int) -> void:
+    if phase != "lobby" or peer_id != multiplayer.get_unique_id():
+        return
+    if multiplayer.is_server():
+        _change_color(peer_id, choice)
+    else:
+        _rpc_color.rpc_id(1, choice)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_color(choice: int) -> void:
+    if multiplayer.is_server() and phase == "lobby":
+        _change_color(multiplayer.get_remote_sender_id(), choice)
+
+func _change_color(id: int, choice: int) -> void:
+    if not players.has(id) or not RULES.color_available(players, id, choice):
+        _send_roster() # Restore the authoritative selection after a racing request.
+        return
+    if int(players[id].get("color", 0)) == choice:
+        return
+    players[id]["color"] = choice
+    _send_roster()
 
 func send_chat(value: String) -> void:
     if phase != "lobby":
