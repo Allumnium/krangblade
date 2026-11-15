@@ -353,6 +353,10 @@ func _check_economy_sync() -> void:
                     return
             var sliders: Dictionary = view.get("trade_sliders")
             var home: Dictionary = state["planets"][home_index]
+            for index in range((home["yards"] as Array).size()):
+                if not ECON.shipyard_operational(home, index) and int(home["yards"][index]["job"]) >= 0:
+                    _fail("Understaffed shipyard is operating on replicated state.")
+                    return
             for resource in ECON.RESOURCES:
                 var slider: Control = sliders[resource]
                 var stock: float = float(home["stock"][resource])

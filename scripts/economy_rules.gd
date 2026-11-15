@@ -799,7 +799,7 @@ static func construction_blockers(p: Dictionary, item: Dictionary) -> Array[Stri
     for resource in item["cost"]:
         if float(item["cost"][resource]) > EPS and float(p["stock"].get(resource, 0.0)) <= EPS:
             missing.append(resource)
-    if float(item.get("population_cost", 0.0)) > 0.0 and float(p["population"]) <= 1.0 + EPS:
+    if (float(item.get("population_cost", 0.0)) > 0.0 and float(p["population"]) <= 1.0 + EPS) or (int(item.get("size", 0)) > 0 and not p["yards"].is_empty() and operational_shipyards(p) == 0) or (item["kind"] == "yard_upgrade" and not shipyard_operational(p, int(item["target"]))):
         missing.append("Population")
     return missing
 
@@ -1147,15 +1147,19 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
         var approach: Vector2 = state["map"]["points"][anchor]
         var route_distance: float = MAP.route_length(state["map"], path)
         var depots: Dictionary = {}
+        var return_distances: Dictionary = {}
         for resource in resources:
-            depots[resource] = _mining_depot(state, ship, teams, team, anchor, resource)
+            var depot: int = _mining_depot(state, ship, teams, team, anchor, resource)
+            depots[resource] = depot
+            if depot >= 0:
+                return_distances[resource] = MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, depot))
         for chunk in field.get("chunks", []):
             if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
                 continue
             var depot: int = int(depots.get(chunk["resource"], -1))
             if depot < 0:
                 continue
-            var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0 + MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, depot))
+            var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0 + float(return_distances[chunk["resource"]])
             if distance < best:
                 best = distance
                 chosen = i
@@ -1806,7 +1810,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
             elif farm < 3 and float(p["population"]) > population_capacity(p) * 0.8:
                 action = "production"
                 target = "Organics"
-            elif not has_yard:
+            elif (p["yards"] as Array).is_empty():
                 action = "yard"
             elif counts["fighter"] < 32:
                 action = "fighter"

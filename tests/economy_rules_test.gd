@@ -1300,6 +1300,7 @@ func _initialize() -> void:
     var staffed_order: Dictionary = staffed_home["queue"][0]
     ECON._work_planet(staffed_state, 0, 1.0)
     assert(float(staffed_order["progress"]) == 0.0 and ECON.operational_shipyards(staffed_home) == 0)
+    assert(ECON.construction_blockers(staffed_home, staffed_order).has("Population"))
     staffed_home["population"] = 1000.0
     ECON._work_planet(staffed_state, 0, 1.0)
     assert(float(staffed_order["progress"]) > 0.0 and ECON.operational_shipyards(staffed_home) == 1)

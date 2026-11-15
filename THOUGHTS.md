@@ -117,3 +117,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Verified code restriction; balance hypothesis.
 - **Observation:** Mining required owned field anchors, so starter miners could idle on generated maps. Neutral/friendly access and owned depot delivery added; slots require 500/5k/20k residents to operate.
 - **Consider:** Playtest mining throughput, full warehouses, and colony staffing. Values provisional.
+
+- v0.13.4 adds offline construction feedback and waiting-miner status, preserves disabled cancel controls even for empty shipyard slots, and avoids redundant per-chunk route calculations. Existing routes are not revalidated on territorial change; revisit once conquest is implemented. Fixed an outdated UI label assertion.

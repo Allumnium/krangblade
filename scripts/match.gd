@@ -645,7 +645,7 @@ func _build_economy_cards(parent: Container) -> void:
     var warehouse_detail: Label = _label("", 12)
     warehouse.add_child(warehouse_detail)
     var warehouse_button: Button = _card_action(warehouse_card, "Upgrade", _operation.bind("economy", "warehouse"))
-    _card_cancel(warehouse_card, func() -> void: pass)
+    warehouse_card["cancel"] = _card_cancel(warehouse_card, func() -> void: pass)
     HUD.action(warehouse_button)
     warehouse_card.merge({"button": warehouse_button, "detail": warehouse_detail, "costs": _cost_grid(warehouse)})
     for resource in ECONOMY.RESOURCES:
@@ -659,7 +659,7 @@ func _build_economy_cards(parent: Container) -> void:
         var detail: Label = _label("", 12)
         card.add_child(detail)
         var button: Button = _card_action(disclosure, "Buy", _operation.bind("economy", resource))
-        _card_cancel(disclosure, func() -> void: pass)
+        disclosure["cancel"] = _card_cancel(disclosure, func() -> void: pass)
         HUD.action(button)
         disclosure.merge({"button": button, "detail": detail, "costs": _cost_grid(card)})
         economy_cards[resource] = disclosure
@@ -919,6 +919,10 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
         status = ("To field" if mode == "outbound" else "Returning") + "\nETA %.1f yr" % _remaining_years(state, ship)
     elif mode == "mining":
         status = "Mining field %02d\n%.1f / 5 yr" % [int(ship["field"]) + 1, minf(5.0, float(ship.get("mining_years", 0.0)))]
+    elif kind == "miner" and mode == "delivery":
+        status = "Waiting for storage"
+    elif kind == "miner" and mode == "idle":
+        status = "Waiting for accessible ore / storage"
     if kind == "fighter":
         status = "Stationed at %s" % _poi_name(int(ship["at"])) if route.is_empty() else "%s\nETA %.1f yr" % [_poi_name(int(route.back())), _remaining_years(state, ship)]
     if bool(ship.get("retreating", false)):
@@ -1503,6 +1507,10 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             var build: Button = _button("Build", _upgrade_yard_at.bind(int(index)), header)
             build.custom_minimum_size = Vector2(48, 22)
             build.add_theme_font_size_override("font_size", 11)
+            var vacant_cancel: Button = _button("×", func() -> void: pass, header)
+            vacant_cancel.custom_minimum_size = Vector2(23, 22)
+            vacant_cancel.disabled = true
+            vacant_cancel.tooltip_text = "No construction to cancel"
             var costs := GridContainer.new()
             costs.columns = 3
             row.add_child(costs)
@@ -1520,7 +1528,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             upgrade.custom_minimum_size.y = 24
             upgrade.add_theme_font_size_override("font_size", 11)
             yard_activity.add_child(row)
-            disclosure.merge({"row": row, "label": title, "progress": progress, "upgrade": upgrade, "cancel": cancel, "repeat": repeat, "build": build, "costs": costs, "upgrade_detail": upgrade_detail, "upgrade_costs": upgrade_costs})
+            disclosure.merge({"row": row, "label": title, "progress": progress, "upgrade": upgrade, "cancel": cancel, "vacant_cancel": vacant_cancel, "repeat": repeat, "build": build, "costs": costs, "upgrade_detail": upgrade_detail, "upgrade_costs": upgrade_costs})
             yard_activity_rows[index] = disclosure
         var label: Label = yard_activity_rows[index]["label"]
         var bar: ProgressBar = yard_activity_rows[index]["progress"]
@@ -1531,6 +1539,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         var costs: GridContainer = yard_activity_rows[index]["costs"]
         var can_build: bool = vacant and number == ECONOMY.next_shipyard_slot(p) and int(p["owner"]) == _me() and str(session.get("phase")) == "match"
         build.visible = can_build
+        yard_activity_rows[index]["vacant_cancel"].visible = vacant
         build.disabled = not can_build
         costs.visible = can_build
         yard_activity_rows[index]["actions"].visible = not vacant
@@ -1541,7 +1550,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             upgrade.visible = false
             repeat.visible = false
             var recipe: Dictionary = ECONOMY._cost("yard", number)
-            label.tooltip_text = _cost_text(recipe)
+            label.tooltip_text = _cost_text(recipe) + " · Requires %s population to operate" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[number - 1]))
             build.tooltip_text = label.tooltip_text
             if costs.get_child_count() == 0:
                 for resource in recipe:
