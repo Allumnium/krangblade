@@ -6,8 +6,17 @@ const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77
     Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
 const PANEL_WIDTH: float = 380.0
 const RADIUS: float = 17.0
+const MIN_ZOOM: float = 0.5
+const MAX_ZOOM: float = 4.0
+const SNAPSHOT_SECONDS: float = 0.5
 
 var session: Node
+var map_canvas: Control
+var zoom: float = 1.0
+var pan: Vector2 = Vector2.ZERO
+var drag_button: int = 0
+var ship_visuals: Dictionary = {}
+var claim_button: Button
 var selected: int = -1
 var heading: Label
 var info: Label
@@ -33,9 +42,9 @@ func _ready() -> void:
     session = get_node("/root/GameSession")
     session.connect("phase_changed", _refresh)
     session.connect("status_changed", _refresh)
-    session.connect("economy_changed", _refresh)
+    session.connect("economy_changed", _on_economy_changed)
     _build_ui()
-    _refresh()
+    _on_economy_changed()
     session.call("match_scene_loaded")
 
 func _label(value: String, font_size: int = 14) -> Label:
@@ -54,6 +63,18 @@ func _button(text: String, action: Callable, parent: Container) -> Button:
     return b
 
 func _build_ui() -> void:
+    map_canvas = Control.new()
+    add_child(map_canvas)
+    map_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    map_canvas.offset_left = 8
+    map_canvas.offset_top = 62
+    map_canvas.offset_right = -PANEL_WIDTH - 8
+    map_canvas.offset_bottom = -8
+    map_canvas.clip_contents = true
+    map_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
+    map_canvas.gui_input.connect(_map_input)
+    map_canvas.draw.connect(_draw_map)
+    map_canvas.resized.connect(map_canvas.queue_redraw)
     var header := PanelContainer.new()
     add_child(header)
     header.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
@@ -64,6 +85,7 @@ func _build_ui() -> void:
     heading = _label("WARBOUND / EMPIRE", 16)
     heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     row.add_child(heading)
+    _button("RESET VIEW", _reset_view, row)
     var panel := PanelContainer.new()
     add_child(panel)
     panel.anchor_left = 1.0
@@ -88,6 +110,7 @@ func _build_ui() -> void:
     body.add_child(fleet)
     info = _label("", 15)
     body.add_child(info)
+    claim_button = _button("CLAIM PLANET (DEV ONLY)", _claim, body)
     body.add_child(HSeparator.new())
     body.add_child(_label("RESOURCE MANAGEMENT", 16))
     resource_picker = OptionButton.new()
@@ -132,7 +155,7 @@ func _build_ui() -> void:
     jobs.item_selected.connect(func(_i: int) -> void: _refresh())
     body.add_child(jobs)
     cancel_button = _button("CANCEL SELECTED / REFUND", _cancel, body)
-    body.add_child(_label("Development values only. Click an adjacent neutral planet to claim it. Cargo ships automatically serve friendly planets.", 12))
+    body.add_child(_label("Development sandbox. Select a planet to inspect it; use the explicit claim button to test expansion. Cargo ships automatically serve friendly planets.", 12))
 
 func _state() -> Dictionary:
     return session.get("economy")
@@ -171,7 +194,8 @@ func _cancel() -> void:
         session.call("request_cancel", selected, int(jobs.get_item_metadata(selection[0])))
 
 func _refresh() -> void:
-    queue_redraw()
+    if is_instance_valid(map_canvas):
+        map_canvas.queue_redraw()
     if not is_instance_valid(heading):
         return
     var state: Dictionary = _state()
@@ -197,6 +221,8 @@ func _refresh() -> void:
                 break
     var p: Dictionary = _planet()
     var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and phase == "match"
+    claim_button.visible = not p.is_empty() and int(p.get("owner", -1)) == 0
+    claim_button.disabled = phase != "match" or not claim_button.visible or not ECONOMY.can_claim(state, _me(), selected)
     threshold_button.disabled = not owned
     upgrade_resource.disabled = true
     ship_button.disabled = true
@@ -277,30 +303,116 @@ func _leave() -> void:
         session.call("leave_session")
         get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
 
-func _screen_point(point: Vector2) -> Vector2:
-    var area := Vector2(maxf(100.0, size.x - PANEL_WIDTH - 24), maxf(100.0, size.y - 90))
-    var factor: float = minf(area.x / MAP.SIZE.x, area.y / MAP.SIZE.y)
-    return Vector2(12, 62) + (area - MAP.SIZE * factor) * 0.5 + point * factor
+func _claim() -> void:
+    if not claim_button.disabled and claim_button.visible:
+        session.call("request_capture", selected)
 
-func _unhandled_input(event: InputEvent) -> void:
-    if str(session.get("phase")) != "match" or not (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed):
-        return
+func _reset_view() -> void:
+    zoom = 1.0
+    pan = Vector2.ZERO
+    map_canvas.queue_redraw()
+
+func _fit() -> float:
+    var area: Vector2 = map_canvas.size - Vector2(24, 52)
+    return maxf(0.01, minf(area.x / MAP.SIZE.x, area.y / MAP.SIZE.y))
+
+func _screen_point(point: Vector2) -> Vector2:
+    return map_canvas.size * 0.5 + pan + (point - MAP.SIZE * 0.5) * _fit() * zoom
+
+func _world_point(point: Vector2) -> Vector2:
+    return MAP.SIZE * 0.5 + (point - map_canvas.size * 0.5 - pan) / (_fit() * zoom)
+
+func _zoom_at(point: Vector2, multiplier: float) -> void:
+    var world: Vector2 = _world_point(point)
+    zoom = clampf(zoom * multiplier, MIN_ZOOM, MAX_ZOOM)
+    pan += point - _screen_point(world)
+    map_canvas.queue_redraw()
+
+func _planet_radius(index: int, state: Dictionary) -> float:
+    return clampf((RADIUS + (3.0 if bool(state["planets"][index]["home"]) else 0.0)) * zoom, 9.0, 48.0)
+
+func _select_at(point: Vector2) -> void:
     var state: Dictionary = _state()
-    if state.is_empty():
+    if state.is_empty() or str(session.get("phase")) != "match":
         return
     var points: Array = state["map"]["points"]
+    var nearest: float = INF
+    var hit: int = -1
     for i in range(points.size()):
-        if get_local_mouse_position().distance_to(_screen_point(points[i])) <= RADIUS + 5:
-            selected = i
-            _load_thresholds()
-            if int(state["planets"][i]["owner"]) == 0:
-                session.call("request_capture", i)
-            _refresh()
-            get_viewport().set_input_as_handled()
-            return
+        var distance: float = point.distance_to(_screen_point(points[i]))
+        if distance <= _planet_radius(i, state) + 4.0 and distance < nearest:
+            nearest = distance
+            hit = i
+    if hit >= 0:
+        selected = hit
+        _load_thresholds()
+        _refresh()
+
+func _map_input(event: InputEvent) -> void:
+    if event is InputEventMouseButton:
+        var mouse: InputEventMouseButton = event
+        if mouse.button_index == MOUSE_BUTTON_MIDDLE or mouse.button_index == MOUSE_BUTTON_RIGHT:
+            if mouse.pressed:
+                drag_button = mouse.button_index
+            elif drag_button == mouse.button_index:
+                drag_button = 0
+        elif mouse.pressed:
+            match mouse.button_index:
+                MOUSE_BUTTON_WHEEL_UP: _zoom_at(mouse.position, 1.15)
+                MOUSE_BUTTON_WHEEL_DOWN: _zoom_at(mouse.position, 1.0 / 1.15)
+                MOUSE_BUTTON_LEFT: _select_at(mouse.position)
+    elif event is InputEventMouseMotion and drag_button != 0:
+        var motion: InputEventMouseMotion = event
+        if motion.button_mask == 0:
+            drag_button = 0
+        else:
+            pan += motion.relative
+            map_canvas.queue_redraw()
+    map_canvas.accept_event()
+
+func _ship_position(ship: Dictionary, points: Array) -> Vector2:
+    var pos: Vector2 = points[int(ship["at"])]
+    var route: Array = ship["route"]
+    if not route.is_empty():
+        var next: Vector2 = points[int(route[0])]
+        pos = pos.lerp(next, clampf(float(ship["leg"]) / maxf(1.0, pos.distance_to(next)), 0.0, 1.0))
+    return pos
+
+func _visual_position(visual: Dictionary) -> Vector2:
+    return (visual["from"] as Vector2).lerp(visual["to"], clampf(float(visual["age"]) / SNAPSHOT_SECONDS, 0.0, 1.0))
+
+func _on_economy_changed() -> void:
+    var state: Dictionary = _state()
+    var updated: Dictionary = {}
+    if not state.is_empty():
+        var points: Array = state["map"]["points"]
+        for ship in state["ships"]:
+            var id: int = int(ship["id"])
+            var target: Vector2 = _ship_position(ship, points)
+            var previous: Dictionary = ship_visuals.get(id, {})
+            if previous.is_empty():
+                updated[id] = {"from": target, "to": target, "age": SNAPSHOT_SECONDS}
+            elif previous["to"] != target:
+                updated[id] = {"from": _visual_position(previous), "to": target, "age": 0.0}
+            else:
+                updated[id] = previous
+    ship_visuals = updated
+    _refresh()
+
+func _process(delta: float) -> void:
+    var animating: bool = false
+    for visual in ship_visuals.values():
+        if float(visual["age"]) < SNAPSHOT_SECONDS:
+            visual["age"] = minf(SNAPSHOT_SECONDS, float(visual["age"]) + delta)
+            animating = true
+    if animating and is_instance_valid(map_canvas):
+        map_canvas.queue_redraw()
 
 func _draw() -> void:
     draw_rect(Rect2(Vector2.ZERO, size), Color("#0b141e"))
+
+func _draw_map() -> void:
+    map_canvas.draw_rect(Rect2(Vector2.ZERO, map_canvas.size), Color("#0b141e"))
     if session == null:
         return
     var state: Dictionary = _state()
@@ -312,28 +424,53 @@ func _draw() -> void:
         var a: int = int(edge[0])
         var b: int = int(edge[1])
         var color: Color = COLORS[teams[a]].darkened(0.3) if teams[a] > 0 and teams[a] == teams[b] else Color("#40566b")
-        draw_line(_screen_point(points[a]), _screen_point(points[b]), color, 2.0, true)
+        map_canvas.draw_line(_screen_point(points[a]), _screen_point(points[b]), color, 2.0, true)
     var font: Font = ThemeDB.fallback_font
     for i in range(points.size()):
         var pos: Vector2 = _screen_point(points[i])
-        var radius: float = RADIUS + (3.0 if bool(state["planets"][i]["home"]) else 0.0)
-        draw_circle(pos, radius + 2, Color("#c5d9e8") if i == selected else Color("#253748"))
-        draw_circle(pos, radius, COLORS[teams[i]])
-        draw_string(font, pos + Vector2(-18, 5), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 36, 14, Color("#09131e"))
+        var radius: float = _planet_radius(i, state)
+        map_canvas.draw_circle(pos, radius + 2, Color("#e2efff") if i == selected else Color("#253748"))
+        map_canvas.draw_circle(pos, radius, COLORS[teams[i]])
+        map_canvas.draw_string(font, pos + Vector2(-18, 5), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 36, 14, Color("#09131e"))
+    var docked: Dictionary = {}
+    var traveling: Dictionary = {}
     for ship in state["ships"]:
         var at: int = int(ship["at"])
-        var pos: Vector2 = points[at]
         var route: Array = ship["route"]
-        if not route.is_empty():
+        var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
+        var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
+        var direction: Vector2 = Vector2.UP
+        var point: Vector2 = _screen_point(pos)
+        if route.is_empty():
+            # Separate idle ships around the planet; count badges handle large fleets.
+            var slot: int = int(docked.get(at, 0))
+            docked[at] = slot + 1
+            if slot >= 8:
+                continue
+            direction = Vector2.from_angle(TAU * slot / 8.0 - PI * 0.5)
+            point += direction * (_planet_radius(at, state) + 12.0)
+        else:
             var next: Vector2 = points[int(route[0])]
-            var factor: float = clampf(float(ship["leg"]) / maxf(1.0, pos.distance_to(next)), 0.0, 1.0)
-            pos = pos.lerp(next, factor)
+            direction = (next - (points[at] as Vector2)).normalized()
+            var edge_key: Vector2i = Vector2i(at, int(route[0]))
+            var lane: int = int(traveling.get(edge_key, 0))
+            traveling[edge_key] = lane + 1
+            point += direction.orthogonal() * (5.0 + float(lane % 5) * 4.0)
         var team: int = int(state["teams"].get(int(ship["owner"]), 0))
-        var point: Vector2 = _screen_point(pos) + Vector2(0, -5)
-        draw_circle(point, 5, Color("#09131e"))
-        draw_circle(point, 3.5, COLORS[team].lightened(0.2))
-    draw_string(font, Vector2(12, size.y - 12), "Fixed routes · Neutral planets in gray · Cargo ships are moving dots", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#b6c4d2"))
-
-func _notification(what: int) -> void:
-    if what == NOTIFICATION_RESIZED:
-        queue_redraw()
+        var loaded: bool = ECONOMY._cargo_total(ship) > ECONOMY.EPS
+        var hull: Color = COLORS[team].lightened(0.35) if not loaded else Color("#f8df8c")
+        var side: Vector2 = direction.orthogonal()
+        var shape := PackedVector2Array([point + direction * 9, point - direction * 6 + side * 5,
+            point - direction * 3, point - direction * 6 - side * 5])
+        map_canvas.draw_colored_polygon(shape, hull)
+        var outline: PackedVector2Array = shape.duplicate()
+        outline.append(shape[0])
+        map_canvas.draw_polyline(outline, Color("#08111b"), 1.5, true)
+    for index in docked:
+        var count: int = int(docked[index])
+        var pos: Vector2 = _screen_point(points[int(index)]) + Vector2(0, _planet_radius(int(index), state) + 29)
+        map_canvas.draw_string(font, pos + Vector2(-36, 0), "%d docked" % count, HORIZONTAL_ALIGNMENT_CENTER, 72, 12, Color("#e0ebf5"))
+    # Overlay legend is fixed to the viewport, not the world.
+    var legend_y: float = map_canvas.size.y - 10.0
+    map_canvas.draw_rect(Rect2(0, legend_y - 20, map_canvas.size.x, 30), Color("#0b141e"))
+    map_canvas.draw_string(font, Vector2(8, legend_y), "Drag MMB/RMB · Scroll to zoom · Gold ships carry cargo", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c5d3e1"))
