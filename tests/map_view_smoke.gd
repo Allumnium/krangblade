@@ -69,9 +69,15 @@ func _run() -> void:
         assert(trade_sliders.has(resource))
         assert(tabs.get_tab_control(1).is_ancestor_of(trade_sliders[resource]))
     view.call("_load_thresholds")
-    assert(view.call("_resource") == "Metals")
     tabs.current_tab = 1
     await process_frame
+    var trade_amounts: Dictionary = view.get("trade_stock_labels")
+    for resource in trade_amounts:
+        var amount_label: Label = trade_amounts[resource]
+        assert(amount_label.autowrap_mode == TextServer.AUTOWRAP_OFF)
+        assert(amount_label.get_line_count() == 1)
+        assert(amount_label.size.x >= amount_label.get_minimum_size().x)
+        assert((amount_label.get_parent() as Control).size.y < 36.0)
     var slider: Control = trade_sliders["Organics"]
     var metal_slider: Control = trade_sliders["Metals"]
     var stock_state: Dictionary = session.get("economy")
@@ -80,9 +86,14 @@ func _run() -> void:
     stock_system["stock"]["Organics"] = 450.0
     view.call("_refresh")
     assert(is_equal_approx(float(slider.get("stock_percent")), 45.0))
+    var left_resources: Dictionary = view.get("production_values")
+    assert(overview.is_ancestor_of(left_resources["Organics"]["stock"]))
+    assert((left_resources["Organics"]["stock"] as Label).text == "450.0")
     stock_system["stock"]["Organics"] = 1500.0
     view.call("_refresh")
     assert(is_equal_approx(float(slider.get("stock_percent")), 100.0))
+    assert((left_resources["Organics"]["stock"] as Label).text == "1.5K")
+    assert((trade_amounts["Organics"] as Label).text == "1.5K / 1000")
     stock_system["stock"]["Organics"] = saved_stock
     view.call("_refresh")
     assert(is_equal_approx(float(slider.get("lower")), 10.0))
@@ -121,16 +132,8 @@ func _run() -> void:
     assert((view.get("population_label") as Label).text.contains("Population"))
     assert(not (view.get("population_label") as Label).text.contains(" / "))
     assert(not (view.get("population_label") as Label).tooltip_text.contains("supported"))
-    var econ_picker: OptionButton = view.get("resource_picker")
-    econ_picker.select(3)
-    view.call("_refresh")
-    assert(not (view.get("resource_detail") as Label).text.contains("Supports"))
-    econ_picker.select(0)
-    view.call("_refresh")
-    assert((view.get("stock_labels") as Dictionary).size() == 6)
-    var resources: OptionButton = view.get("resource_picker")
-    for i in range(resources.item_count):
-        assert(resources.get_item_icon(i) != null)
+    assert(not (view.get("population_label") as Label).text.contains("/yr"))
+    assert(tabs.get_tab_control(0).get_child(0).get_child_count() == 0)
     var state: Dictionary = session.get("economy")
     assert((view.get("global_resource_labels") as Dictionary).size() == 6)
     assert(view.get("global_resource_labels")["Metals"].text.contains("("))
@@ -306,15 +309,15 @@ func _run() -> void:
     var production: Dictionary = view.get("production_values")
     await process_frame
     for resource in production:
-        for key in ["level", "rate"]:
+        for key in ["stock", "level", "rate"]:
             var value: Label = production[resource][key]
             assert(value.autowrap_mode == TextServer.AUTOWRAP_OFF)
             assert(value.get_line_count() == 1)
             assert(value.size.x >= value.get_minimum_size().x)
         assert((production[resource]["level"].get_parent() as Control).size.y < 36.0)
     assert(production.size() == 6)
-    assert((production["Metals"]["level"] as Label).text == "Lv 1")
-    assert((production["Metals"]["rate"] as Label).text.ends_with("/yr"))
+    assert((production["Metals"]["level"] as Label).text == "1")
+    assert((production["Metals"]["rate"] as Label).tooltip_text.ends_with("/yr"))
     assert(view.call("_planet_color", state["planets"][0]) is Color)
     var layout: Dictionary = view.call("_system_visual", 0, state)
     var bodies: Array = layout["bodies"]

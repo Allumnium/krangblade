@@ -9,7 +9,7 @@ const ECONOMY = preload("res://scripts/economy_rules.gd")
 const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77aafe"),
     Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
 const PANEL_WIDTH: float = 368.0
-const OVERVIEW_WIDTH: float = 236.0
+const OVERVIEW_WIDTH: float = 266.0
 const HEADER_HEIGHT: float = 46.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
@@ -62,14 +62,9 @@ var global_resource_tiles: Dictionary = {}
 var global_population_label: Label
 var year_label: Label
 var info: Label
-var stock_labels: Dictionary = {}
-var level_labels: Dictionary = {}
-var inventory: VBoxContainer
 var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
 var system_visual_seed: int = -1
-var resource_picker: OptionButton
-var resource_detail: Label
 var trade_sliders: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var upgrade_cards: Dictionary = {}
@@ -308,7 +303,7 @@ func _build_ui() -> void:
     planet_overview.add_child(environment_label)
     population_label = _label("", 13)
     planet_overview.add_child(population_label)
-    production_summary = HUD.section(planet_overview, "Production")
+    production_summary = HUD.section(planet_overview, "Resources")
     _build_production_summary()
     colony_picker = OptionButton.new()
     planet_overview.add_child(colony_picker)
@@ -319,66 +314,11 @@ func _build_ui() -> void:
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
     inspector_tabs.clip_contents = true
     body.add_child(inspector_tabs)
-    var economy_page: VBoxContainer = _inspector_page("Economy")
+    _inspector_page("Economy")
     var trade_page: VBoxContainer = _inspector_page("Trade")
     var shipyard_page: VBoxContainer = _inspector_page("Shipyards")
     var upgrades_page: VBoxContainer = _inspector_page("Upgrades")
     _build_upgrade_cards(upgrades_page)
-    var resources: VBoxContainer = HUD.section(economy_page, "Inventory")
-    inventory = VBoxContainer.new()
-    inventory.add_theme_constant_override("separation", 3)
-    resources.add_child(inventory)
-    var columns := HBoxContainer.new()
-    inventory.add_child(columns)
-    var resource_header := _label("RESOURCE", 11)
-    resource_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    resource_header.add_theme_color_override("font_color", HUD.MUTED)
-    columns.add_child(resource_header)
-    var stock_header := _label("STOCK", 11)
-    stock_header.custom_minimum_size.x = 72
-    stock_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-    stock_header.add_theme_color_override("font_color", HUD.MUTED)
-    columns.add_child(stock_header)
-    var level_header := _label("LV", 11)
-    level_header.custom_minimum_size.x = 32
-    level_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-    level_header.add_theme_color_override("font_color", HUD.MUTED)
-    columns.add_child(level_header)
-    for resource in ECONOMY.RESOURCES:
-        var tile := PanelContainer.new()
-        tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#1d354b"), 4, 3))
-        inventory.add_child(tile)
-        var line := HBoxContainer.new()
-        tile.add_child(line)
-        var icon := TextureRect.new()
-        icon.texture = HUD.ICONS[resource]
-        icon.custom_minimum_size = Vector2(22, 22)
-        icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-        icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-        line.add_child(icon)
-        var resource_name := _label(resource, 13)
-        resource_name.add_theme_color_override("font_color", HUD.COLORS[resource])
-        resource_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        line.add_child(resource_name)
-        var stock_label := _label("—", 14)
-        stock_label.custom_minimum_size.x = 72
-        stock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-        line.add_child(stock_label)
-        stock_labels[resource] = stock_label
-        var level_label := _label("—", 12)
-        level_label.custom_minimum_size.x = 32
-        level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-        level_label.add_theme_color_override("font_color", HUD.MUTED)
-        line.add_child(level_label)
-        level_labels[resource] = level_label
-    var production: VBoxContainer = HUD.section(economy_page, "Production")
-    resource_picker = OptionButton.new()
-    for resource in ECONOMY.RESOURCES:
-        resource_picker.add_icon_item(HUD.ICONS[resource], resource)
-    resource_picker.item_selected.connect(func(_i: int) -> void: _refresh())
-    production.add_child(resource_picker)
-    resource_detail = _label("")
-    production.add_child(resource_detail)
     for resource in ECONOMY.RESOURCES:
         var logistics: VBoxContainer = HUD.section(trade_page, "")
         logistics.get_child(0).hide()
@@ -391,10 +331,14 @@ func _build_ui() -> void:
         resource_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
         trade_row.add_child(resource_icon)
         var name_label := _label(resource, 13)
+        name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
         name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         name_label.add_theme_color_override("font_color", HUD.COLORS[resource])
         trade_row.add_child(name_label)
         var stock_label := _label("", 12)
+        stock_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+        stock_label.custom_minimum_size.x = 88
+        stock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         trade_row.add_child(stock_label)
         trade_stock_labels[resource] = stock_label
         var slider := TradeRange.new()
@@ -456,9 +400,23 @@ func _sync_repeat(button: Button, p: Dictionary, key: String, available: bool) -
     button.tooltip_text = "Repeat enabled (click to stop)" if button.button_pressed else "Repeat automatically"
 
 func _build_production_summary() -> void:
+    var header := HBoxContainer.new()
+    header.add_theme_constant_override("separation", 3)
+    production_summary.add_child(header)
+    var blank := Control.new()
+    blank.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    header.add_child(blank)
+    for column in [["Stock", 49], ["Lv", 22], ["/yr", 44]]:
+        var title_label := _label(str(column[0]), 10)
+        title_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+        title_label.custom_minimum_size.x = float(column[1])
+        title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        title_label.add_theme_color_override("font_color", HUD.MUTED)
+        header.add_child(title_label)
     for resource in ECONOMY.RESOURCES:
         var row := HBoxContainer.new()
         production_summary.add_child(row)
+        row.add_theme_constant_override("separation", 3)
         var icon := TextureRect.new()
         icon.texture = HUD.ICONS[resource]
         icon.custom_minimum_size = Vector2(16, 16)
@@ -469,17 +427,22 @@ func _build_production_summary() -> void:
         name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
         name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         row.add_child(name_label)
-        var level := _label("", 12)
+        var stock := _label("", 11)
+        stock.autowrap_mode = TextServer.AUTOWRAP_OFF
+        stock.custom_minimum_size.x = 49
+        stock.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        row.add_child(stock)
+        var level := _label("", 11)
         level.autowrap_mode = TextServer.AUTOWRAP_OFF
-        level.custom_minimum_size.x = 32
+        level.custom_minimum_size.x = 22
         level.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(level)
-        var rate_label := _label("", 12)
+        var rate_label := _label("", 11)
         rate_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-        rate_label.custom_minimum_size.x = 55
+        rate_label.custom_minimum_size.x = 44
         rate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(rate_label)
-        production_values[resource] = {"level": level, "rate": rate_label}
+        production_values[resource] = {"stock": stock, "level": level, "rate": rate_label}
 
 func _system_bonus_text(p: Dictionary) -> String:
     var lines: PackedStringArray = []
@@ -784,9 +747,6 @@ func _planet() -> Dictionary:
 func _me() -> int:
     return 1 if bool(session.get("is_solo")) else multiplayer.get_unique_id()
 
-func _resource() -> String:
-    return resource_picker.get_item_text(resource_picker.selected)
-
 func _load_thresholds() -> void:
     var p: Dictionary = _planet()
     if p.is_empty():
@@ -802,7 +762,8 @@ func _update_trade_stock(p: Dictionary) -> void:
         var slider: TradeRange = trade_sliders[resource]
         var stock: float = float(p["stock"][resource])
         slider.set_stock(stock, ECONOMY.TRADE_REFERENCE, HUD.COLORS[resource])
-        trade_stock_labels[resource].text = "%.1f / %.0f" % [stock, ECONOMY.TRADE_REFERENCE]
+        trade_stock_labels[resource].text = ("%s / %.0f" % [_compact_amount(stock), ECONOMY.TRADE_REFERENCE]) if stock >= 1000.0 else ("%.1f / %.0f" % [stock, ECONOMY.TRADE_REFERENCE])
+        trade_stock_labels[resource].tooltip_text = "%.1f / %.0f" % [stock, ECONOMY.TRADE_REFERENCE]
         # Preserve this handle while dragging, even when a snapshot arrives.
         if slider.active_handle < 0:
             var t: Dictionary = p["thresholds"][resource]
@@ -878,9 +839,7 @@ func _refresh() -> void:
     if p.is_empty():
         info.text = "Select a system."
         population_label.text = ""
-        resource_detail.text = ""
         _refresh_queue(p, false)
-        inventory.hide()
         return
     var owner: int = int(p["owner"])
     var roster: Dictionary = session.get("players")
@@ -890,26 +849,16 @@ func _refresh() -> void:
     environment_label.visible = not environment_label.text.is_empty()
     environment_label.tooltip_text = "Natural production modifiers; advanced manufacturing is reserved for future recipes."
     for resource in ECONOMY.RESOURCES:
-        production_values[resource]["level"].text = "Lv %d" % int(p["levels"][resource])
+        var amount: float = float(p["stock"][resource])
+        production_values[resource]["stock"].text = _compact_amount(amount) if amount >= 1000.0 else "%.1f" % amount
+        production_values[resource]["stock"].tooltip_text = "%.1f %s stored" % [amount, resource]
+        production_values[resource]["level"].text = str(int(p["levels"][resource]))
         var annual: float = ECONOMY.rate(p, resource)
-        production_values[resource]["rate"].text = (_compact_amount(annual) if annual >= 1000.0 else "%.1f" % annual) + "/yr"
+        production_values[resource]["rate"].text = _compact_amount(annual) if annual >= 1000.0 else "%.1f" % annual
         production_values[resource]["rate"].tooltip_text = "%.2f/yr" % annual
     var population: float = float(p["population"])
-    population_label.text = "Population %s\n%+.0f/yr" % [_compact_amount(population), ECONOMY.population_growth(p)]
+    population_label.text = "Population %s" % _compact_amount(population)
     population_label.tooltip_text = "%.0f people" % population
-    inventory.show()
-    for r in ECONOMY.RESOURCES:
-        stock_labels[r].text = "%.1f" % float(p["stock"][r])
-        level_labels[r].text = str(int(p["levels"][r]))
-    var resource: String = _resource()
-    var detail: String = "Production rules not defined yet."
-    if ECONOMY.EXTRACTED.has(resource):
-        detail = "Production %.1f/yr" % ECONOMY.rate(p, resource)
-    elif resource == "Organics":
-        var output: float = ECONOMY.rate(p, resource)
-        var demand: float = ECONOMY.organics_demand(p)
-        detail = "Farming: %.2f/yr  •  Demand: %.2f/yr\nNet: %+.2f/yr" % [output, demand, output - demand]
-    resource_detail.text = detail
     _update_trade_stock(p)
     _refresh_upgrade_cards(p, owned)
     ship_button.disabled = not owned or full or not bool(p["home"])
@@ -1358,7 +1307,7 @@ func _keyboard_pan(delta: float) -> void:
     var focus: Control = get_viewport().gui_get_focus_owner()
     if focus is LineEdit or focus is TextEdit:
         return
-    for picker in [resource_picker, colony_picker]:
+    for picker in [colony_picker]:
         if picker.get_popup().visible:
             return
     var direction := Vector2(
