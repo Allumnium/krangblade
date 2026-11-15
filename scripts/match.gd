@@ -8,7 +8,7 @@ const PANEL_WIDTH: float = 380.0
 const RADIUS: float = 17.0
 const MIN_ZOOM: float = 0.5
 const MAX_ZOOM: float = 4.0
-const SNAPSHOT_SECONDS: float = 0.5
+const SNAPSHOT_SECONDS: float = 0.2
 
 var session: Node
 var map_canvas: Control
@@ -16,7 +16,10 @@ var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
 var drag_button: int = 0
 var ship_visuals: Dictionary = {}
-var claim_button: Button
+var colony_picker: OptionButton
+var send_colony_button: Button
+var colony_button: Button
+var colony_choices: Array[int] = []
 var selected: int = -1
 var heading: Label
 var info: Label
@@ -110,7 +113,9 @@ func _build_ui() -> void:
     body.add_child(fleet)
     info = _label("", 15)
     body.add_child(info)
-    claim_button = _button("CLAIM PLANET (DEV ONLY)", _claim, body)
+    colony_picker = OptionButton.new()
+    body.add_child(colony_picker)
+    send_colony_button = _button("SEND COLONY SHIP", _send_colony, body)
     body.add_child(HSeparator.new())
     body.add_child(_label("RESOURCE MANAGEMENT", 16))
     resource_picker = OptionButton.new()
@@ -146,6 +151,7 @@ func _build_ui() -> void:
     yard_info = _label("")
     body.add_child(yard_info)
     ship_button = _button("QUEUE LOGISTICS SHIP", func() -> void: _operation("ship"), body)
+    colony_button = _button("QUEUE COLONY SHIP", func() -> void: _operation("colony_ship"), body)
     yard_button = _button("QUEUE NEW SHIPYARD", func() -> void: _operation("yard"), body)
     upgrade_yard = _button("QUEUE SHIPYARD UPGRADE", func() -> void: _operation("yard_upgrade", str(yard_picker.selected)), body)
     body.add_child(HSeparator.new())
@@ -155,7 +161,7 @@ func _build_ui() -> void:
     jobs.item_selected.connect(func(_i: int) -> void: _refresh())
     body.add_child(jobs)
     cancel_button = _button("CANCEL SELECTED / REFUND", _cancel, body)
-    body.add_child(_label("Development sandbox. Select a planet to inspect it; use the explicit claim button to test expansion. Cargo ships automatically serve friendly planets.", 12))
+    body.add_child(_label("Select a neutral planet and dispatch an available colony ship. Cargo ships automatically serve friendly planets.", 12))
 
 func _state() -> Dictionary:
     return session.get("economy")
@@ -206,12 +212,19 @@ func _refresh() -> void:
         leave.text = "CANCEL START" if multiplayer.is_server() else "LEAVE"
     var count: int = 0
     var moving: int = 0
+    var colonies: int = 0
+    var available_colonies: int = 0
     for ship in state.get("ships", []):
         if int(ship["owner"]) == _me():
+            if ship.get("kind", "ship") == "colony_ship":
+                colonies += 1
+                if (ship["route"] as Array).is_empty():
+                    available_colonies += 1
+                continue
             count += 1
             if not (ship["route"] as Array).is_empty():
                 moving += 1
-    fleet.text = "LOGISTICS FLEET   %d ships  /  %d traveling" % [count, moving]
+    fleet.text = "LOGISTICS   %d ships / %d traveling\nCOLONY   %d ships / %d idle" % [count, moving, colonies, available_colonies]
     var planets: Array = state.get("planets", [])
     if selected < 0 and not planets.is_empty():
         for i in range(planets.size()):
@@ -221,8 +234,8 @@ func _refresh() -> void:
                 break
     var p: Dictionary = _planet()
     var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and phase == "match"
-    claim_button.visible = not p.is_empty() and int(p.get("owner", -1)) == 0
-    claim_button.disabled = phase != "match" or not claim_button.visible or not ECONOMY.can_claim(state, _me(), selected)
+    _refresh_colony_choices(state, p, phase)
+    colony_button.disabled = not owned
     threshold_button.disabled = not owned
     upgrade_resource.disabled = true
     ship_button.disabled = true
@@ -279,7 +292,7 @@ func _refresh() -> void:
     if job_text != last_job_text:
         jobs.clear()
         for item in p["queue"]:
-            var name_value: String = str(item["kind"]).replace("_", " ").capitalize()
+            var name_value: String = "Logistics ship" if item["kind"] == "ship" else str(item["kind"]).replace("_", " ").capitalize()
             var line: String = "%s %s — %.0f%%" % [name_value, str(item["target"]), 100.0 * float(item["progress"]) / float(item["work"])]
             if ECONOMY._possible(p, item) <= ECONOMY.EPS:
                 line += " (waiting for materials)"
@@ -303,9 +316,36 @@ func _leave() -> void:
         session.call("leave_session")
         get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
 
-func _claim() -> void:
-    if not claim_button.disabled and claim_button.visible:
-        session.call("request_capture", selected)
+func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) -> void:
+    var neutral: bool = not p.is_empty() and int(p.get("owner", -1)) == 0 and phase == "match"
+    colony_picker.visible = neutral
+    send_colony_button.visible = neutral
+    var choices: Array[int] = []
+    var labels: Array[String] = []
+    if neutral:
+        for ship in state["ships"]:
+            if not ECONOMY.colony_path(state, _me(), ship, selected).is_empty():
+                choices.append(int(ship["id"]))
+                labels.append("Colony ship #%d • Planet %02d" % [int(ship["id"]), int(ship["at"]) + 1])
+    if choices != colony_choices or colony_picker.item_count == 0:
+        var previous: int = -1
+        if colony_picker.selected >= 0 and colony_picker.selected < colony_choices.size():
+            previous = colony_choices[colony_picker.selected]
+        colony_choices = choices
+        colony_picker.clear()
+        for label_text in labels:
+            colony_picker.add_item(label_text)
+        if choices.is_empty():
+            colony_picker.add_item("No reachable idle colony ships")
+        else:
+            colony_picker.select(maxi(0, choices.find(previous)))
+    colony_picker.disabled = choices.is_empty()
+    send_colony_button.disabled = choices.is_empty()
+
+func _send_colony() -> void:
+    var index: int = colony_picker.selected
+    if not send_colony_button.disabled and index >= 0 and index < colony_choices.size():
+        session.call("request_colonize", colony_choices[index], selected)
 
 func _reset_view() -> void:
     zoom = 1.0
@@ -433,7 +473,7 @@ func _draw_map() -> void:
         map_canvas.draw_circle(pos, radius, COLORS[teams[i]])
         map_canvas.draw_string(font, pos + Vector2(-18, 5), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 36, 14, Color("#09131e"))
     var docked: Dictionary = {}
-    var traveling: Dictionary = {}
+
     for ship in state["ships"]:
         var at: int = int(ship["at"])
         var route: Array = ship["route"]
@@ -452,16 +492,18 @@ func _draw_map() -> void:
         else:
             var next: Vector2 = points[int(route[0])]
             direction = (next - (points[at] as Vector2)).normalized()
-            var edge_key: Vector2i = Vector2i(at, int(route[0]))
-            var lane: int = int(traveling.get(edge_key, 0))
-            traveling[edge_key] = lane + 1
-            point += direction.orthogonal() * (5.0 + float(lane % 5) * 4.0)
+            point += direction.orthogonal() * (5.0 + float(int(ship["id"]) % 5) * 4.0)
         var team: int = int(state["teams"].get(int(ship["owner"]), 0))
         var loaded: bool = ECONOMY._cargo_total(ship) > ECONOMY.EPS
         var hull: Color = COLORS[team].lightened(0.35) if not loaded else Color("#f8df8c")
+        var colony: bool = ship.get("kind", "ship") == "colony_ship"
+        if colony:
+            hull = Color("#c7a4ff")
         var side: Vector2 = direction.orthogonal()
         var shape := PackedVector2Array([point + direction * 9, point - direction * 6 + side * 5,
             point - direction * 3, point - direction * 6 - side * 5])
+        if colony:
+            shape = PackedVector2Array([point + direction * 12, point + side * 7, point - direction * 9, point - side * 7])
         map_canvas.draw_colored_polygon(shape, hull)
         var outline: PackedVector2Array = shape.duplicate()
         outline.append(shape[0])
@@ -473,4 +515,4 @@ func _draw_map() -> void:
     # Overlay legend is fixed to the viewport, not the world.
     var legend_y: float = map_canvas.size.y - 10.0
     map_canvas.draw_rect(Rect2(0, legend_y - 20, map_canvas.size.x, 30), Color("#0b141e"))
-    map_canvas.draw_string(font, Vector2(8, legend_y), "Drag MMB/RMB · Scroll to zoom · Gold ships carry cargo", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c5d3e1"))
+    map_canvas.draw_string(font, Vector2(8, legend_y), "Drag MMB/RMB · Scroll zoom · Gold: cargo · Purple: colony", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c5d3e1"))

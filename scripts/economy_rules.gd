@@ -56,20 +56,60 @@ static func planet_teams(state: Dictionary) -> Array[int]:
         result.append(int(teams.get(int(planet["owner"]), 0)))
     return result
 
-static func can_claim(state: Dictionary, player: int, index: int) -> bool:
+## Colony ships can traverse allied worlds, with one final edge into a neutral world.
+static func colony_path(state: Dictionary, player: int, ship: Dictionary, target: int) -> Array[int]:
     var planets: Array = state.get("planets", [])
-    if index < 0 or index >= planets.size() or int(planets[index]["owner"]) != 0:
-        return false
+    if target < 0 or target >= planets.size() or int(planets[target]["owner"]) != 0:
+        return []
+    if int(ship["owner"]) != player or ship.get("kind", "ship") != "colony_ship" or not (ship["route"] as Array).is_empty():
+        return []
+    var teams: Array[int] = planet_teams(state)
+    var team: int = int(state["teams"].get(player, 0))
+    var start: int = int(ship["at"])
+    if team == 0 or teams[start] != team:
+        return []
+    var best: Array[int] = []
+    var distance: float = INF
     for i in range(planets.size()):
-        if int(planets[i]["owner"]) == player and MAP.linked(state["map"], i, index):
-            return true
+        if teams[i] != team or not MAP.linked(state["map"], i, target):
+            continue
+        var path: Array[int] = MAP.path(state["map"], teams, team, start, i)
+        if path.is_empty():
+            continue
+        path.append(target)
+        var length: float = MAP.route_length(state["map"], path)
+        if length < distance:
+            distance = length
+            best = path
+    return best
+
+static func send_colony(state: Dictionary, player: int, ship_id: int, target: int) -> bool:
+    for ship in state["ships"]:
+        if int(ship["id"]) != ship_id:
+            continue
+        var path: Array[int] = colony_path(state, player, ship, target)
+        if path.is_empty():
+            return false
+        ship["dest"] = target
+        ship["return_path"] = path.duplicate()
+        _set_route(ship, path)
+        return true
     return false
 
-static func claim(state: Dictionary, player: int, index: int) -> bool:
-    if not can_claim(state, player, index):
+static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool:
+    if not _move(state, ship, dt) or int(ship["dest"]) < 0:
         return false
-    state["planets"][index]["owner"] = player
-    return true
+    var at: int = int(ship["at"])
+    if int(state["planets"][at]["owner"]) == 0:
+        state["planets"][at]["owner"] = int(ship["owner"])
+        return true # consumed to establish the colony
+    # Another ship arrived first. Return to launch without claiming or combat.
+    var back: Array[int] = []
+    back.assign(ship["return_path"])
+    back.reverse()
+    ship["dest"] = -1
+    _set_route(ship, back)
+    return false
 
 static func rate(planet: Dictionary, resource: String) -> float:
     if not EXTRACTED.has(resource) or int(planet["owner"]) == 0:
@@ -93,6 +133,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
     # Explicit prototype values; the final costs/recipes are intentionally undefined.
     match kind:
         "ship": return {"Metals": 120.0}
+        "colony_ship": return {"Metals": 240.0}
         "yard": return {"Metals": 480.0}
         "yard_upgrade": return {"Metals": 240.0 * level}
         "production": return {"Metals": 80.0 * level}
@@ -101,6 +142,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
 static func _work(kind: String, level: int) -> float:
     match kind:
         "ship": return 48.0
+        "colony_ship": return 72.0
         "yard": return 30.0
         "yard_upgrade": return 15.0 * level
         "production": return 10.0 * level
@@ -121,6 +163,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
         "ship":
             if not bool(p["home"]):
                 return false
+            target = ""
+        "colony_ship":
             target = ""
         "yard":
             target = ""
@@ -149,7 +193,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
     state["next_id"] = id + 1
     p["queue"].append({"id": id, "kind": kind, "target": target, "level": level,
         "cost": _cost(kind, level), "work": _work(kind, level),
-        "progress": 0.0, "allocated": empty_stock(), "size": SHIP_SIZE if kind == "ship" else 0})
+        "progress": 0.0, "allocated": empty_stock(), "size": SHIP_SIZE if kind in ["ship", "colony_ship"] else 0})
     return true
 
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
@@ -203,8 +247,8 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
             p["yards"].append({"level": 1, "job": -1})
         "yard_upgrade":
             p["yards"][int(item["target"])]["level"] = int(item["level"])
-        "ship":
-            state["ships"].append({"id": int(item["id"]), "owner": int(p["owner"]), "at": index,
+        "ship", "colony_ship":
+            state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "at": index,
                 "route": [], "leg": 0.0, "source": -1, "dest": -1, "cargo": empty_stock()})
     p["queue"].erase(item)
 
@@ -216,7 +260,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
         p["stock"][resource] = float(p["stock"][resource]) + rate(p, resource) * dt
     # Upgrades and new infrastructure use fixed durations. Shipyards are not needed.
     for item in (p["queue"] as Array).duplicate():
-        if item["kind"] != "ship" and _advance(p, item, dt):
+        if int(item["size"]) == 0 and _advance(p, item, dt):
             _finish(state, index, p, item)
     # Preserve active assignments, but release blocked or upgrading yards.
     var assigned: Dictionary = {}
@@ -237,7 +281,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
             continue
         var chosen: Dictionary = {}
         for item in p["queue"]:
-            if item["kind"] != "ship" or int(item["size"]) > max_size(int(yard["level"])):
+            if int(item["size"]) == 0 or int(item["size"]) > max_size(int(yard["level"])):
                 continue
             var id: int = int(item["id"])
             if id == int(yard["job"]):
@@ -403,5 +447,9 @@ static func step(state: Dictionary, dt: float) -> void:
         _work_planet(state, i, dt)
     var teams: Array[int] = planet_teams(state)
     var cache: Dictionary = {}
-    for ship in state["ships"]:
-        _work_ship(state, ship, teams, cache, dt)
+    for ship in (state["ships"] as Array).duplicate():
+        if ship.get("kind", "ship") == "colony_ship":
+            if _work_colony(state, ship, dt):
+                state["ships"].erase(ship)
+        else:
+            _work_ship(state, ship, teams, cache, dt)

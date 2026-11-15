@@ -28,10 +28,20 @@ func _run() -> void:
     view.call("_map_input", mouse)
     assert(int(view.get("selected")) == neighbor)
     assert(int(state["planets"][neighbor]["owner"]) == 0)
-    var claim: Button = view.get("claim_button")
-    assert(claim.visible and not claim.disabled)
-    claim.pressed.emit()
+    var send: Button = view.get("send_colony_button")
+    assert(send.visible and send.disabled)
+    session.call("request_operation", 0, "colony_ship")
+    for i in range(125):
+        session.call("_economy_tick")
+    assert(state["ships"].size() == 1)
+    assert(not send.disabled)
+    send.pressed.emit()
+    assert(int(state["planets"][neighbor]["owner"]) == 0)
+    assert(not (state["ships"][0]["route"] as Array).is_empty())
+    for i in range(200):
+        session.call("_economy_tick")
     assert(int(state["planets"][neighbor]["owner"]) == 1)
+    assert(state["ships"].is_empty())
 
     # Zoom retains the world coordinate at the cursor; pan changes projection.
     var world: Vector2 = view.call("_world_point", screen)
@@ -53,11 +63,11 @@ func _run() -> void:
     assert((view.get("pan") as Vector2).is_zero_approx())
 
     session.call("request_operation", 0, "ship")
-    for i in range(20):
+    for i in range(100):
         session.call("_economy_tick")
     assert(state["ships"].size() == 1)
     assert((view.get("ship_visuals") as Dictionary).size() == 1)
     await process_frame
     await process_frame
-    print("PASS: select without capture, explicit claim, zoom anchor, pan, reset and ship rendering")
+    print("PASS: select without capture, colony dispatch and arrival, zoom anchor, pan, reset and ship rendering")
     quit(0)
