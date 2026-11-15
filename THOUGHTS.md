@@ -43,3 +43,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Gameplay/visual hypothesis.
 - **Observation:** v0.10.1 uses a common orbit direction and a provisional preferred separation of 60% of laser range; dense fleets may overlap or repeatedly lose contacts when chasing fast targets.
 - **Consider:** Inspect real battles before adding separation, target persistence or a turn-rate model; integrate stable formation slots with combat maneuvers without sacrificing speed bounds.
+
+### T-011 — Population and industrial bottlenecks
+- **Type:** Gameplay/balance hypothesis.
+- **Observation:** Multi-resource ship costs make local Plastics, Textiles, Organics and Tech stock actual constraints. Baseline industrial outputs and population gates may make new colonies slow to develop, while Organics also supports residents. The first Tech upgrade requires 200k population and construction costs remain provisional.
+- **Consider:** Measure time to replenish twelve mixed hulls, evaluate trade throughput and whether AI needs more deliberate industrial investment. Preserve local logistics; do not silently grant free resources to colonies.

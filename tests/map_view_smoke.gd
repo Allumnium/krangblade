@@ -176,6 +176,15 @@ func _run() -> void:
     assert((view.get("global_resource_labels") as Dictionary).size() == 6)
     assert(view.get("global_resource_labels")["Metals"].text.contains("("))
     assert((view.get("global_population_label") as Label).text.begins_with("POP  10."))
+    var building_cards: Dictionary = view.get("economy_cards")
+    assert(building_cards.size() == 6)
+    var textile_mill: Button = building_cards["Textiles"]["button"]
+    assert(tabs.get_tab_control(0).is_ancestor_of(textile_mill))
+    assert(not textile_mill.disabled)
+    assert((building_cards["Tech"]["button"] as Button).disabled)
+    textile_mill.pressed.emit()
+    assert(state["planets"][0]["buildings"]["Textiles"])
+    assert(textile_mill.disabled and textile_mill.text == "BUILT")
     var cards: Dictionary = view.get("upgrade_cards")
     assert(cards.size() == 6)
     var farm: Dictionary = cards["Organics"]

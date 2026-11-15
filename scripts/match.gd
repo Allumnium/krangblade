@@ -88,6 +88,7 @@ var system_visual_seed: int = -1
 var trade_sliders: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var upgrade_cards: Dictionary = {}
+var economy_cards: Dictionary = {}
 var continuous_checks: Dictionary = {}
 var repeat_icon: Texture2D
 var production_summary: VBoxContainer
@@ -340,7 +341,8 @@ func _build_ui() -> void:
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
     inspector_tabs.clip_contents = true
     body.add_child(inspector_tabs)
-    _inspector_page("Economy")
+    var economy_page: VBoxContainer = _inspector_page("Economy")
+    _build_economy_cards(economy_page)
     var trade_page: VBoxContainer = _inspector_page("Trade")
     var shipyard_page: VBoxContainer = _inspector_page("Shipyards")
     var upgrades_page: VBoxContainer = _inspector_page("Upgrades")
@@ -473,7 +475,7 @@ func _build_production_summary() -> void:
 
 func _system_bonus_text(p: Dictionary) -> String:
     var lines: PackedStringArray = []
-    var names: Dictionary = {"Metals": "Metal production", "Plastics": "Plastic production", "Crystals": "Crystal production", "Organics": "Organics production"}
+    var names: Dictionary = {"Metals": "Metal production", "Plastics": "Plastic production", "Crystals": "Crystal production", "Organics": "Organics production", "Tech": "Tech production", "Textiles": "Textile production"}
     for resource in ECONOMY.ACTIVE_PRODUCTION:
         var percent: int = roundi(ECONOMY.production_modifier(p, resource) * 100.0)
         if percent != 100:
@@ -483,8 +485,33 @@ func _system_bonus_text(p: Dictionary) -> String:
         lines.append("Advanced manufacturing %d%% (future)" % advanced)
     return "\n".join(lines)
 
+func _build_economy_cards(parent: Container) -> void:
+    for resource in ECONOMY.RESOURCES:
+        var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
+        var card: VBoxContainer = HUD.section(parent, str(definition["name"]))
+        var effect: Label = _label("+25% farm capacity" if resource == "Organics" else "+25% %s output" % resource, 12)
+        card.add_child(effect)
+        var detail: Label = _label("", 12)
+        card.add_child(detail)
+        var button: Button = _button("BUY", _operation.bind("economy", resource), card)
+        HUD.action(button)
+        economy_cards[resource] = {"button": button, "detail": detail}
+
+func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
+    for resource in economy_cards:
+        var card: Dictionary = economy_cards[resource]
+        var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
+        var installed: bool = bool(p.get("buildings", {}).get(resource, false))
+        var button: Button = card["button"]
+        button.text = "BUILT" if installed else "BUY"
+        button.disabled = not owned or not ECONOMY.building_available(p, resource)
+        var cost: String = _cost_text(definition["cost"])
+        var requirement: String = "%s population" % _compact_amount(float(definition["population"]))
+        card["detail"].text = "Installed" if installed else "%s\n%s" % [requirement, cost]
+        button.tooltip_text = "Permanent local improvement" if installed else "%s\n%s" % [requirement, cost]
+
 func _build_upgrade_cards(parent: Container) -> void:
-    var labels: Dictionary = {"Metals": "Metal extraction", "Plastics": "Plastic extraction",
+    var labels: Dictionary = {"Metals": "Metal extraction", "Plastics": "Plastic production",
         "Textiles": "Textile production", "Organics": "Organics farming",
         "Tech": "Tech production", "Crystals": "Crystal extraction"}
     for resource in ECONOMY.RESOURCES:
@@ -541,8 +568,10 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
         var progress: ProgressBar = card["progress"]
         progress.visible = not job.is_empty()
         var detail: Label = card["detail"]
-        var available: bool = not ECONOMY._continuous_target(planet, "production:" + resource).is_empty()
-        _sync_repeat(card["repeat"], planet, "production:" + resource, owned and available)
+        var available: bool = ECONOMY.production_available(planet, resource)
+        var unlocked: bool = ECONOMY.production_unlocked(planet, resource)
+        var repeating: bool = bool(planet["continuous"].get("production:" + resource, false))
+        _sync_repeat(card["repeat"], planet, "production:" + resource, owned and available and (unlocked or repeating))
         if not job.is_empty():
             progress.value = 100.0 * float(job["progress"]) / float(job["work"])
             detail.text = "%s%s" % [_cost_text(job["cost"], job["allocated"]), " • Waiting" if ECONOMY._possible(planet, job) <= ECONOMY.EPS else ""]
@@ -550,13 +579,13 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
             button.disabled = not owned
         else:
             button.text = "UPGRADE TO LV %d" % (level + 1)
-            button.disabled = not owned or not available
-            if not ECONOMY.ACTIVE_PRODUCTION.has(resource):
-                detail.text = "Production design pending"
-            elif not available:
+            button.disabled = not owned or not unlocked
+            if not available:
                 detail.text = "No local deposit"
             else:
-                detail.text = "Output %.2f/yr\n%s · %.0f yr" % [ECONOMY.rate(planet, resource), _cost_text(ECONOMY._cost("production", level + 1)), ECONOMY._work("production", level + 1)]
+                var minimum: int = ECONOMY.production_population(resource, level + 1)
+                detail.text = "Output %.2f/yr\n%s population%s\n%s · %.0f yr" % [ECONOMY.rate(planet, resource), _compact_amount(float(minimum)), " required" if not unlocked else "", _cost_text(ECONOMY._cost("production", level + 1)), ECONOMY._work("production", level + 1)]
+                button.tooltip_text = "Requires %d population" % minimum
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
     for resource in ECONOMY.RESOURCES:
@@ -1125,7 +1154,7 @@ func _refresh() -> void:
     info.text = "%s%s\n%s" % [_system_name(selected), "  /  Home" if bool(p["home"]) else "", name_text]
     environment_label.text = _system_bonus_text(p)
     environment_label.visible = not environment_label.text.is_empty()
-    environment_label.tooltip_text = "Natural production modifiers; advanced manufacturing is reserved for future recipes."
+    environment_label.tooltip_text = "Local production modifiers, including installed economic improvements. Advanced manufacturing remains reserved for future recipes."
     for resource in ECONOMY.RESOURCES:
         var amount: float = float(p["stock"][resource])
         production_values[resource]["stock"].text = _compact_amount(amount) if amount >= 1000.0 else "%.1f" % amount
@@ -1139,6 +1168,7 @@ func _refresh() -> void:
     population_label.tooltip_text = "%.0f people" % population
     _update_trade_stock(p)
     _refresh_upgrade_cards(p, owned)
+    _refresh_economy_cards(p, owned)
     ship_button.disabled = not owned or not bool(p["home"])
     _refresh_build_cards(p, owned)
 
@@ -1259,6 +1289,7 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
         var card: Dictionary = build_cards[kind]
         var count: int = int(counts.get(kind, 0))
         card["button"].text = "%s (%d)" % [card["title"], count] if count > 0 else card["title"]
+        card["button"].tooltip_text = _cost_text(ECONOMY._cost(kind, 1))
         card["cancel"].visible = count > 0
         card["cancel"].disabled = not owned
 
@@ -1580,6 +1611,10 @@ func _on_economy_changed() -> void:
     var state: Dictionary = _state()
     _sync_upgrade_audio(state)
     _refresh_territory(state)
+    _sync_ship_visuals(state)
+    _refresh()
+
+func _sync_ship_visuals(state: Dictionary) -> void:
     var updated: Dictionary = {}
     if not state.is_empty():
         var points: Array = state["map"]["points"]
@@ -1597,7 +1632,6 @@ func _on_economy_changed() -> void:
     for id in ship_offsets.keys():
         if not updated.has(id):
             ship_offsets.erase(id)
-    _refresh()
 
 func _keyboard_pan(delta: float) -> void:
     if str(session.get("phase")) != "match" or match_menu.visible:
@@ -1646,6 +1680,7 @@ func _ship_scale() -> float:
     return SHIP_WORLD_SCALE * _fit() * zoom
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
+    _sync_ship_visuals(state)
     var points: Array = state["map"]["points"]
     var poses: Dictionary = {}
     for ship in state["ships"]:

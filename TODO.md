@@ -10,6 +10,12 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [x] Basic fighters, automatic proximity combat, direct POI allocation and initial AI-only attack waves.
 - [x] Visible territory overlay, time controls and mandatory parallel regression checks.
 
+## Priority — Economy foundation
+- [ ] Validate multi-resource ship costs and a starting stock sufficient for about twelve mixed hulls.
+- [ ] Validate baseline population-scaled production, local population gates for production upgrades (first Tech upgrade at 200k), and one-time Economy buildings with resource-specific percentage bonuses.
+- [ ] Playtest costs, output, trade, AI expansion, population pacing and building choices before choosing final balance.
+- v0.11.0 prototype implements the above via existing authority commands and local inventories; check off after validation.
+
 ## Phase 1 — Autonomous military foundation
 - [ ] Rework military control into persistent fleet/operation groups shared by human and AI empires.
   - Initial v0.9.0 prototype: shared authoritative operation IDs, member lists, objectives and movement/engagement flags derived from existing routing. v0.9.0 validation passed (PR #47). v0.10.0 prototype moves human routing into operation dispatch and preserves identity on group retargeting; AI still uses its existing wave controller. Full unified command model remains outstanding.

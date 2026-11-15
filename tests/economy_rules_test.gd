@@ -143,9 +143,9 @@ func _initialize() -> void:
     assert(totals["planets"] == 2 and totals["craft"] == 2)
     assert(totals["logistics"] == 1 and totals["colonies"] == 1)
     assert(is_equal_approx(float(totals["population"]), ECON.HOME_POPULATION + ECON.COLONY_POPULATION))
-    assert(is_equal_approx(float(totals["stock"]["Metals"]), 625.0))
+    assert(is_equal_approx(float(totals["stock"]["Metals"]), float(ECON.STARTING_STOCK["Metals"]) + 25.0))
     assert(is_equal_approx(float(totals["cargo"]["Metals"]), 7.0))
-    assert(is_equal_approx(float(totals["resources"]["Metals"]), 632.0))
+    assert(is_equal_approx(float(totals["resources"]["Metals"]), float(ECON.STARTING_STOCK["Metals"]) + 32.0))
     assert(ECON.empire_totals({}, 1)["craft"] == 0)
 
     # Rolling window measures net holdings, not internal cargo transfers.
@@ -522,6 +522,7 @@ func _initialize() -> void:
     mine_home["levels"]["Metals"] = 1000
     assert(is_equal_approx(ECON.rate(mine_home, "Metals"), ECON.PLANET_MINING_LIMIT))
     mine_home["levels"]["Metals"] = 0
+    mine_home["levels"]["Crystals"] = 0
     assert(not ECON.enqueue(mineral, 2, 0, "miner"))
     assert(ECON.enqueue(mineral, 1, 0, "miner"))
     for i in range(10):
@@ -532,7 +533,7 @@ func _initialize() -> void:
     assert(miner["kind"] == "miner")
     assert(not ECON.send_colony(mineral, 1, int(miner["id"]), 3))
     var after_build: float = float(mine_home["stock"]["Metals"])
-    assert(is_equal_approx(after_build, 420.0))
+    assert(is_equal_approx(after_build, float(ECON.STARTING_STOCK["Metals"]) - float(ECON._cost("miner", 1)["Metals"])))
     ECON.step(mineral, 0.1)
     assert(miner["mining_target"] == metal_pos)
     assert(int(miner["chunk"]) == 7)
@@ -583,6 +584,7 @@ func _initialize() -> void:
     var hostile: Dictionary = transport["planets"][2]
     for planet in [source, ally, hostile]:
         planet["levels"]["Metals"] = 0
+        planet["levels"]["Plastics"] = 0
         for r in ECON.RESOURCES:
             planet["stock"][r] = 0.0
             planet["thresholds"][r] = {"min": 0.0, "max": 0.0}
@@ -907,4 +909,53 @@ func _initialize() -> void:
     assert((travelling["position"] as Vector2).distance_to(ai_map["points"][3]) < disengaged_position.distance_to(ai_map["points"][3]))
     assert(disengaged_position.distance_to(travelling["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
     print("PASS: coordinated human rally, reinforcements, retargeting, combat circling and route resumption")
+    # Multi-resource bootstrap: all six resources have local baseline
+    # production at home, and the supply funds twelve mixed ships.
+    var bootstrap: Dictionary = ECON.create(graph, players, ids)
+    var industry: Dictionary = bootstrap["planets"][0]
+    for resource in ECON.RESOURCES:
+        assert(ECON.rate(industry, resource) > 0.0)
+    var remaining_stock: Dictionary = industry["stock"].duplicate()
+    for kind in ["fighter", "fighter", "fighter", "fighter", "fighter", "fighter", "ship", "ship", "ship", "colony_ship", "colony_ship", "miner"]:
+        var cost: Dictionary = ECON._cost(kind, 1)
+        assert(cost.size() == 5)
+        for material in cost:
+            remaining_stock[material] -= float(cost[material])
+            assert(float(remaining_stock[material]) >= 0.0)
+    var tech_rate: float = ECON.rate(industry, "Tech")
+    industry["population"] = 20000.0
+    assert(is_equal_approx(ECON.rate(industry, "Tech"), tech_rate * 2.0))
+    assert(not ECON.enqueue(bootstrap, 1, 0, "production", "Tech"))
+    industry["population"] = 199999.0
+    assert(not ECON.enqueue(bootstrap, 1, 0, "production", "Tech"))
+    industry["population"] = 200000.0
+    assert(ECON.enqueue(bootstrap, 1, 0, "production", "Tech"))
+    assert(ECON.cancel(bootstrap, 1, 0, int(industry["queue"][0]["id"])))
+    industry["population"] = ECON.HOME_POPULATION
+    var textile_rate: float = ECON.rate(industry, "Textiles")
+    var before_stock: Dictionary = industry["stock"].duplicate()
+    assert(not ECON.enqueue(bootstrap, 2, 0, "economy", "Textiles"))
+    assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "unknown"))
+    assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Tech"))
+    assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
+    assert(is_equal_approx(ECON.rate(industry, "Textiles"), textile_rate * 1.25))
+    for material in ECON.ECONOMY_BUILDINGS["Textiles"]["cost"]:
+        assert(is_equal_approx(float(industry["stock"][material]), float(before_stock[material]) - float(ECON.ECONOMY_BUILDINGS["Textiles"]["cost"][material])))
+    var purchased_stock: Dictionary = industry["stock"].duplicate()
+    assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
+    assert(industry["stock"] == purchased_stock)
+    industry["stock"]["Tech"] = 0.0
+    assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Organics"))
+    assert(ECON.enqueue(bootstrap, 1, 0, "fighter"))
+    assert(is_zero_approx(ECON._possible(industry, industry["queue"][0])))
+    industry["stock"]["Tech"] = 100.0
+    var preallocation: Dictionary = industry["stock"].duplicate()
+    var build: Dictionary = industry["queue"][0]
+    ECON._advance(industry, build, 6.0)
+    for material in build["cost"]:
+        assert(float(build["allocated"][material]) > 0.0)
+    assert(ECON.cancel(bootstrap, 1, 0, int(build["id"])))
+    for material in preallocation:
+        assert(is_equal_approx(float(industry["stock"][material]), float(preallocation[material])))
+    print("PASS: multi-resource hulls, population gates and permanent local improvements")
     quit(0)

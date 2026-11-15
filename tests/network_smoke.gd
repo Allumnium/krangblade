@@ -193,6 +193,10 @@ func _send_commands() -> void:
     # Invalid and unauthorized threshold requests must not win.
     session.call("request_thresholds", home_index, "Metals", 99.0, 101.0)
     session.call("request_thresholds", (home_index + 1) % expected_players, "Metals", 77.0, 88.0)
+    session.call("request_operation", home_index, "economy", "Textiles")
+    session.call("request_operation", home_index, "economy", "Textiles")
+    session.call("request_operation", home_index, "economy", "Tech")
+    session.call("request_operation", (home_index + 1) % expected_players, "economy", "Metals")
     session.call("request_operation", home_index, "ship")
     session.call("request_operation", home_index, "fighter")
     session.call("request_continuous", home_index, "colony_ship", true)
@@ -263,7 +267,8 @@ func _check_economy_sync() -> void:
                     ship_progress = true
             var military: Dictionary = ECON.military_policy(state, owner, "fighter")
             var field_node: int = (state["planets"] as Array).size()
-            if int(military.get(field_node, 0)) == 70 and int(military.get(ECON.military_home(state, owner), 0)) == 30 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
+            var buildings: Dictionary = system.get("buildings", {})
+            if buildings.size() == 1 and buildings.get("Textiles", false) and int(military.get(field_node, 0)) == 70 and int(military.get(ECON.military_home(state, owner), 0)) == 30 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
                 verified += 1
         var view: Node = current_scene
         if cancel_sent and verified == expected_players and view != null and view.has_method("_update_trade_stock"):
