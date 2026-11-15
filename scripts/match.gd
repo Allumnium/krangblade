@@ -10,7 +10,7 @@ const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77
 const PANEL_WIDTH: float = 392.0
 const HEADER_HEIGHT: float = 90.0
 const KEYBOARD_PAN_SPEED: float = 420.0
-const RADIUS: float = 17.0
+const RADIUS: float = 12.0
 const MIN_ZOOM: float = 0.5
 const MAX_ZOOM: float = 4.0
 const SNAPSHOT_SECONDS: float = 0.2
@@ -58,6 +58,8 @@ var max_stock: SpinBox
 var threshold_button: Button
 var upgrade_cards: Dictionary = {}
 var fighter_button: Button
+var miner_button: Button
+var environment_label: Label
 var ship_button: Button
 var yard_button: Button
 var yard_picker: OptionButton
@@ -155,6 +157,9 @@ func _build_ui() -> void:
     var overview: VBoxContainer = HUD.section(body, "01  /  PLANETARY COMMAND")
     info = _label("", 19)
     overview.add_child(info)
+    environment_label = _label("", 12)
+    environment_label.add_theme_color_override("font_color", HUD.MUTED)
+    overview.add_child(environment_label)
     population_label = _label("", 13)
     overview.add_child(population_label)
     population_bar = ProgressBar.new()
@@ -271,6 +276,9 @@ func _build_ui() -> void:
     fighter_button = _button("BUILD FIGHTER", func() -> void: _operation("fighter"), shipyards)
     HUD.action(fighter_button, Color("#f2b57e"))
     fighter_button.tooltip_text = "Prototype fighter hull. Combat and military orders are not implemented yet."
+    miner_button = _button("BUILD MINING SHIP", func() -> void: _operation("miner"), shipyards)
+    HUD.action(miner_button, Color("#d8e58b"))
+    miner_button.tooltip_text = "Automatically mines accessible fields from owned service planets."
     yard_button = _button("BUILD SHIPYARD", func() -> void: _operation("yard"), shipyards)
     upgrade_yard = _button("UPGRADE SHIPYARD", func() -> void: _operation("yard_upgrade", str(yard_picker.selected)), shipyards)
     var queue: VBoxContainer = HUD.section(shipyard_page, "CONSTRUCTION QUEUE")
@@ -420,7 +428,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
     global_population_label.text = "POP  %s" % _compact_amount(float(totals["population"]) * 1000000.0)
     global_population_label.tooltip_text = "Population across owned planets: %.2f million" % float(totals["population"])
     global_craft_label.text = "CRAFT  %d" % int(totals["craft"])
-    global_craft_label.tooltip_text = "%d logistics / %d colony / %d fighters" % [int(totals["logistics"]), int(totals["colonies"]), int(totals["fighters"])]
+    global_craft_label.tooltip_text = "%d logistics / %d colony / %d fighters / %d miners" % [int(totals["logistics"]), int(totals["colonies"]), int(totals["fighters"]), int(totals["miners"])]
     global_planet_label.text = "WORLDS  %d" % int(totals["planets"])
     global_planet_label.tooltip_text = "Owned planets (excludes allied planets)"
 
@@ -492,8 +500,12 @@ func _refresh() -> void:
     var colonies: int = 0
     var available_colonies: int = 0
     var fighters: int = 0
+    var miners: int = 0
     for ship in state.get("ships", []):
         if int(ship["owner"]) == _me():
+            if ship.get("kind", "ship") == "miner":
+                miners += 1
+                continue
             if ship.get("kind", "ship") == "fighter":
                 fighters += 1
                 continue
@@ -505,7 +517,7 @@ func _refresh() -> void:
             count += 1
             if not (ship["route"] as Array).is_empty():
                 moving += 1
-    fleet.text = "LOGISTICS   %d ships / %d traveling\nCOLONY   %d ships / %d idle  •  FIGHTERS  %d" % [count, moving, colonies, available_colonies, fighters]
+    fleet.text = "LOGISTICS   %d ships / %d traveling\nCOLONY   %d ships / %d idle  •  FIGHTERS  %d  •  MINERS  %d" % [count, moving, colonies, available_colonies, fighters, miners]
     var planets: Array = state.get("planets", [])
     if not initial_selection_done and not planets.is_empty():
         initial_selection_done = true
@@ -522,6 +534,7 @@ func _refresh() -> void:
     colony_button.disabled = not owned
     threshold_button.disabled = not owned
     fighter_button.disabled = not owned
+    miner_button.disabled = not owned
     ship_button.disabled = true
     yard_button.disabled = not owned
     upgrade_yard.disabled = true
@@ -542,6 +555,12 @@ func _refresh() -> void:
     var roster: Dictionary = session.get("players")
     var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
     info.text = "Planet %02d%s\n%s" % [selected + 1, "  /  Home" if bool(p["home"]) else "", name_text]
+    var fields_here: int = 0
+    for field in state["map"].get("fields", []):
+        if int(field["anchor"]) == selected:
+            fields_here += 1
+    environment_label.text = "Advanced manufacturing potential ×%.2f\nNearby mining fields: %d" % [float(p.get("advanced_bonus", 1.0)), fields_here]
+    environment_label.tooltip_text = "Independent environmental modifier for future advanced components; not applied to base resources."
     var population: float = float(p["population"])
     var capacity: float = ECONOMY.population_capacity(p)
     population_label.text = "Population  %.1f / %.1f M   •   %+.2f M/yr\nResource output  ×%.2f" % [population, capacity, ECONOMY.population_growth(p), ECONOMY.population_multiplier(p)]
@@ -712,7 +731,25 @@ func _zoom_at(point: Vector2, multiplier: float) -> void:
     map_canvas.queue_redraw()
 
 func _planet_radius(index: int, state: Dictionary) -> float:
-    return clampf((RADIUS + (3.0 if bool(state["planets"][index]["home"]) else 0.0)) * zoom, 9.0, 48.0)
+    var planet: Dictionary = state["planets"][index]
+    return clampf(RADIUS * float(planet.get("size_factor", 1.0)) * zoom, 5.0, 48.0)
+
+func _planet_color(planet: Dictionary) -> Color:
+    var sum := Vector3.ZERO
+    var weight: float = 0.0
+    for resource in ECONOMY.EXTRACTED:
+        var amount: float = float(planet["abundance"].get(resource, 0.0))
+        var tint: Color = HUD.COLORS[resource]
+        sum += Vector3(tint.r, tint.g, tint.b) * amount
+        weight += amount
+    var organic: float = maxf(0.0, float(planet["bonuses"].get("Organics", 1.0)) - 1.0)
+    var green: Color = HUD.COLORS["Organics"]
+    sum += Vector3(green.r, green.g, green.b) * organic
+    weight += organic
+    if weight <= ECONOMY.EPS:
+        return Color("#617587")
+    var mix: Vector3 = sum / weight
+    return Color(mix.x, mix.y, mix.z)
 
 func _select_at(point: Vector2) -> void:
     var state: Dictionary = _state()
@@ -759,6 +796,9 @@ func _map_input(event: InputEvent) -> void:
 func _ship_position(ship: Dictionary, points: Array) -> Vector2:
     var pos: Vector2 = points[int(ship["at"])]
     var route: Array = ship["route"]
+    if ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]:
+        var field: Dictionary = _state()["map"]["fields"][int(ship["field"])]
+        return pos.lerp(field["position"], float(ship["field_leg"]))
     if not route.is_empty():
         var next: Vector2 = points[int(route[0])]
         pos = pos.lerp(next, clampf(float(ship["leg"]) / maxf(1.0, pos.distance_to(next)), 0.0, 1.0))
@@ -837,13 +877,34 @@ func _draw_map() -> void:
         map_canvas.draw_line(a_pos, b_pos, Color(color, 0.10), 7.0, true)
         map_canvas.draw_line(a_pos, b_pos, Color(color, 0.78), 1.5, true)
     var font: Font = ThemeDB.fallback_font
+    var fields: Array = state["map"].get("fields", [])
+    for field_index in range(fields.size()):
+        var field: Dictionary = fields[field_index]
+        var center: Vector2 = _screen_point(field["position"])
+        var radius: float = float(field["radius"]) * _fit() * zoom
+        var anchor: Vector2 = _screen_point(points[int(field["anchor"])])
+        map_canvas.draw_dashed_line(anchor, center, Color("#a9a27675"), 1.0, 4.0)
+        map_canvas.draw_circle(center, radius, Color("#7b79652b"), true)
+        map_canvas.draw_arc(center, radius, 0.0, TAU, 32, Color("#b9ac776f"), 1.0, true)
+        for j in range(15):
+            var angle: float = float(j) * 2.399963 + float(field_index)
+            var rock_pos: Vector2 = center + Vector2.from_angle(angle) * radius * sqrt(float(j + 1) / 16.0)
+            var rock_radius: float = maxf(1.0, radius * (0.09 + 0.03 * float(j % 3)))
+            var rock := PackedVector2Array()
+            for k in range(5):
+                rock.append(rock_pos + Vector2.from_angle(float(k) * TAU / 5.0 + angle) * rock_radius)
+            map_canvas.draw_colored_polygon(rock, Color("#9a9479") if j % 3 != 0 else Color("#ba98d4"))
+        if zoom >= 1.5:
+            map_canvas.draw_string(font, center + Vector2(-45, radius + 12), "FIELD %02d" % (field_index + 1), HORIZONTAL_ALIGNMENT_CENTER, 90, 10, Color("#d8d1b0"))
     for i in range(points.size()):
         var pos: Vector2 = _screen_point(points[i])
         var radius: float = _planet_radius(i, state)
         var tint: Color = COLORS[teams[i]]
         map_canvas.draw_circle(pos, radius + 7, Color(tint, 0.055), true)
         map_canvas.draw_circle(pos, radius + 4, Color(tint, 0.09), true)
-        map_canvas.draw_texture_rect(PLANET, Rect2(pos - Vector2.ONE * radius, Vector2.ONE * radius * 2.0), false)
+        var resource_color: Color = _planet_color(state["planets"][i])
+        map_canvas.draw_texture_rect(PLANET, Rect2(pos - Vector2.ONE * radius, Vector2.ONE * radius * 2.0), false, Color.WHITE.lerp(resource_color, 0.65))
+        map_canvas.draw_circle(pos, radius * 0.95, Color(resource_color, 0.30), true)
         map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, tint, 2.0, true)
         if bool(state["planets"][i]["home"]):
             map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
@@ -852,7 +913,7 @@ func _draw_map() -> void:
             for angle in range(4):
                 var start: float = float(angle) * TAU / 4.0 + 0.1
                 map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
-        map_canvas.draw_string(font, pos + Vector2(-20, 5), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 40, 14, Color("#f4faff"))
+        map_canvas.draw_string(font, pos + Vector2(-20, 4), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 40, 11, Color("#f4faff"))
     var docked: Dictionary = {}
 
     for ship in state["ships"]:
@@ -862,7 +923,15 @@ func _draw_map() -> void:
         var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
         var direction: Vector2 = Vector2.UP
         var point: Vector2 = _screen_point(pos)
-        if route.is_empty():
+        var mining: bool = ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
+        if mining:
+            var field: Dictionary = fields[int(ship["field"])]
+            direction = ((field["position"] as Vector2) - (points[at] as Vector2)).normalized()
+            if ship["mining_mode"] == "return":
+                direction = -direction
+            if ship["mining_mode"] == "mining":
+                point += Vector2.from_angle(float(int(ship["id"])) * 2.399963 + visual_clock * 0.3) * 6.0
+        elif route.is_empty():
             # Idle craft orbit visually; logistics positions remain authoritative planet nodes.
             var slot: int = int(docked.get(at, 0))
             docked[at] = slot + 1
@@ -882,6 +951,8 @@ func _draw_map() -> void:
             hull = Color("#c7a4ff")
         elif fighter:
             hull = Color("#f2b57e")
+        elif ship.get("kind", "ship") == "miner":
+            hull = Color("#d8e58b")
         var side: Vector2 = direction.orthogonal()
         var shape := PackedVector2Array([point + direction * 9, point - direction * 6 + side * 5,
             point - direction * 3, point - direction * 6 - side * 5])
@@ -889,7 +960,9 @@ func _draw_map() -> void:
             shape = PackedVector2Array([point + direction * 12, point + side * 7, point - direction * 9, point - side * 7])
         if fighter:
             shape = PackedVector2Array([point + direction * 12, point - direction * 7 + side * 8, point - direction * 3, point - direction * 7 - side * 8])
-        if not route.is_empty() or fighter:
+        if ship.get("kind", "ship") == "miner":
+            shape = PackedVector2Array([point + direction * 8 + side * 4, point + direction * 8 - side * 4, point - direction * 6 - side * 7, point - direction * 6 + side * 7])
+        if not route.is_empty() or fighter or mining:
             var engine: Vector2 = point - direction * 9.0
             map_canvas.draw_circle(engine, 5.0, Color("#43a5ff30"), true)
             map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0, true)
@@ -904,4 +977,4 @@ func _draw_map() -> void:
     # Overlay legend is fixed to the viewport, not the world.
     var legend_y: float = map_canvas.size.y - 10.0
     map_canvas.draw_rect(Rect2(0, legend_y - 20, map_canvas.size.x, 30), Color("#091522e8"))
-    map_canvas.draw_string(font, Vector2(8, legend_y), "WASD / drag MMB/RMB · Scroll zoom · Gold: cargo · Purple: colony · Orange: fighter", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c5d3e1"))
+    map_canvas.draw_string(font, Vector2(8, legend_y), "WASD / drag MMB/RMB · Scroll zoom · Gold: cargo · Purple: colony · Lime: miner", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c5d3e1"))

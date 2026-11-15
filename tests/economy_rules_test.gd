@@ -28,7 +28,14 @@ func _initialize() -> void:
             else:
                 bridges += 1
                 bridge_distance += length
-        assert(bridges == MAP.CLUSTER_COUNT - 1)
+        assert(bridges >= MAP.CLUSTER_COUNT - 1)
+        assert(not (clustered["fields"] as Array).is_empty())
+        for edge in clustered["edges"]:
+            assert(not MAP.blocked(cluster_points[edge[0]], cluster_points[edge[1]], clustered["fields"]))
+        for field in clustered["fields"]:
+            assert(ECON.field_limit(field, "Metals") > ECON.PLANET_MINING_LIMIT)
+            assert(ECON.field_limit(field, "Crystals") > ECON.PLANET_MINING_LIMIT)
+            assert(ECON.field_limit(field, "Organics") == 0.0)
         assert(bridge_distance / bridges > local_distance / locals)
         for i in range(MAP.COUNT):
             assert(not MAP.path(clustered, all_friendly, 1, 0, i).is_empty())
@@ -193,6 +200,36 @@ func _initialize() -> void:
         ECON.step(military, 1.0)
     assert(int(fighter["at"]) == 0 and fighter["route"].is_empty())
     print("PASS: clustered map and fighter construction")
+
+    # Deterministic mining round trip; no planetary production or unrelated cargo.
+    var mineral_map: Dictionary = MAP.generate(678)
+    var mineral_points: Array = mineral_map["points"]
+    mineral_map["fields"] = [{"position": (mineral_points[0] as Vector2) + Vector2(95, 0), "radius": 20.0, "anchor": 0, "Metals": 1.0, "Crystals": 1.0}]
+    var mineral: Dictionary = ECON.create(mineral_map, players, ids)
+    var mine_home: Dictionary = mineral["planets"][0]
+    mine_home["levels"]["Metals"] = 1000
+    assert(is_equal_approx(ECON.rate(mine_home, "Metals"), ECON.PLANET_MINING_LIMIT))
+    mine_home["levels"]["Metals"] = 0
+    assert(not ECON.enqueue(mineral, 2, 0, "miner"))
+    assert(ECON.enqueue(mineral, 1, 0, "miner"))
+    for i in range(10):
+        ECON.step(mineral, 1.0)
+    assert(mineral["ships"].size() == 1)
+    assert(ECON.empire_totals(mineral, 1)["miners"] == 1)
+    var miner: Dictionary = mineral["ships"][0]
+    assert(miner["kind"] == "miner")
+    assert(not ECON.send_colony(mineral, 1, int(miner["id"]), 3))
+    var after_build: float = float(mine_home["stock"]["Metals"])
+    assert(is_equal_approx(after_build, 420.0))
+    for i in range(20):
+        ECON.step(mineral, 1.0)
+    assert(float(mine_home["stock"]["Metals"]) > after_build)
+    assert(float(mine_home["stock"]["Crystals"]) > 0.0)
+    for resource in ["Organics", "Tech", "Textiles", "Plastics"]:
+        assert(is_zero_approx(float(miner["cargo"][resource])))
+    assert(ECON._cargo_total(miner) <= ECON.MINER_CAPACITY + ECON.EPS)
+    assert(float(mine_home["size_factor"]) >= 0.86 and float(mine_home["size_factor"]) <= 1.18)
+    print("PASS: asteroid route obstacles, mining ceiling and physical mineral delivery")
 
     # Physical, mixed cargo from an owned planet to an allied one. No hostile transit.
     var test_map: Dictionary = MAP.generate(123)
