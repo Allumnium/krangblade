@@ -19,9 +19,14 @@ jobs:
           include-templates: false
       - name: Import
         run: godot --headless --path . --import
-      - name: Collect Godot resource sidecars
+      - name: Check resource metadata is tracked and stable
         run: |
-          python3 -c 'import json,pathlib; print("GODOT_METADATA="+json.dumps({str(p):p.read_text() for p in pathlib.Path(".").rglob("*") if p.is_file() and ".godot" not in p.parts and ".git" not in p.parts and (p.name.endswith(".uid") or p.name.endswith(".import"))}))'
+          changes="$(git status --porcelain --untracked-files=all -- '*.uid' '*.import')"
+          if [ -n "$changes" ]; then
+            printf '%s\n' "$changes"
+            echo "Commit generated resource .uid and asset .import sidecars."
+            exit 1
+          fi
       - name: Parse scenes and network scripts
         run: |
           godot --headless --path . --check-only --script res://scripts/main.gd
