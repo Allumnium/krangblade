@@ -350,6 +350,31 @@ func _initialize() -> void:
         ECON.step(repeat_state, 1.0)
     assert(repeat_home["queue"].is_empty())
 
+    # Automatic system and shipyard upgrades use the same five-slot queue.
+    var upgrades: Dictionary = ECON.create(graph, players, ids)
+    var upgrade_home: Dictionary = upgrades["planets"][0]
+    upgrade_home["stock"]["Metals"] = 20000.0
+    assert(not ECON.set_continuous(upgrades, 2, 0, "production:Organics", true))
+    assert(not ECON.set_continuous(upgrades, 1, 0, "production:Tech", true))
+    assert(not ECON.set_continuous(upgrades, 1, 0, "yard_upgrade:8", true))
+    assert(ECON.set_continuous(upgrades, 1, 0, "production:Organics", true))
+    assert(ECON.set_continuous(upgrades, 1, 0, "yard_upgrade:0", true))
+    ECON.step(upgrades, 1.0)
+    assert(ECON._has_job(upgrade_home, "production", "Organics"))
+    assert(ECON._has_job(upgrade_home, "yard_upgrade", "0"))
+    for i in range(32):
+        ECON.step(upgrades, 1.0)
+    assert(int(upgrade_home["levels"]["Organics"]) == 2)
+    assert(int(upgrade_home["yards"][0]["level"]) == 2)
+    assert(ECON._has_job(upgrade_home, "production", "Organics"))
+    assert(ECON._has_job(upgrade_home, "yard_upgrade", "0"))
+    assert(ECON.set_continuous(upgrades, 1, 0, "production:Organics", false))
+    assert(ECON.set_continuous(upgrades, 1, 0, "yard_upgrade:0", false))
+    for i in range(50):
+        ECON.step(upgrades, 1.0)
+    assert(upgrade_home["queue"].is_empty())
+    assert(int(upgrade_home["levels"]["Organics"]) == 3)
+    assert(int(upgrade_home["yards"][0]["level"]) == 3)
     # Fighters use the shipyard and are counted separately; no logistics behavior.
     var military: Dictionary = ECON.create(graph, players, ids)
     assert(not ECON.enqueue(military, 2, 0, "fighter"))

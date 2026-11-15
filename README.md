@@ -83,3 +83,7 @@ The top bar has no reset button. Menu opens a modal with Resume and an explicit 
 ## Percentage trade thresholds
 
 The Trade tab uses a single range slider per selected resource with import-below and export-above handles. Changes commit on release and are validated by the host. The 0–100% range refers to a fixed provisional 1,000-unit reserve reference, not a storage limit: the default 10%/20% preserves the previous 100/200-unit thresholds. Inventory may exceed 100%; any stock above the chosen export threshold remains eligible for trade. The population display no longer includes carrying capacity or a saturation bar; population and Organics simulation are unchanged.
+
+## Production overview and repeat controls
+
+The left system inspector shows current levels and gross annual production for all six resources. Only non-default natural production modifiers are listed, combining deposit abundance with resource bonus; 0% indicates no extraction deposit. Advanced manufacturing is identified as a future modifier and omitted at 100%. Repeat icon buttons toggle continuous ship production, system production upgrades and existing shipyard upgrades. Each enabled order maintains at most one corresponding queued job, with round-robin refill and the shared five-item queue. Disabled or unavailable targets are rejected by the authority. Turning repeat off leaves existing orders intact.

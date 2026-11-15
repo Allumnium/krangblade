@@ -74,6 +74,9 @@ var resource_detail: Label
 var threshold_slider: TradeRange
 var upgrade_cards: Dictionary = {}
 var continuous_checks: Dictionary = {}
+var repeat_icon: Texture2D
+var production_summary: VBoxContainer
+var production_values: Dictionary = {}
 var queue_title: Label
 var fighter_button: Button
 var miner_button: Button
@@ -293,6 +296,8 @@ func _build_ui() -> void:
     planet_overview.add_child(environment_label)
     population_label = _label("", 13)
     planet_overview.add_child(population_label)
+    production_summary = HUD.section(planet_overview, "Production")
+    _build_production_summary()
     colony_picker = OptionButton.new()
     planet_overview.add_child(colony_picker)
     send_colony_button = _button("SEND COLONY SHIP", _send_colony, planet_overview)
@@ -400,14 +405,65 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     parent.add_child(row)
     var button: Button = _button(title_text, _operation.bind(kind), row)
     button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    var check := CheckBox.new()
-    check.text = "Auto"
-    check.tooltip_text = "Continuously replenish this ship type in the queue"
-    row.add_child(check)
-    check.toggled.connect(func(enabled: bool) -> void:
-        session.call("request_continuous", selected, kind, enabled))
+    var check: Button = _repeat_button(row, kind)
     continuous_checks[kind] = check
     return button
+
+func _repeat_button(parent: Container, key: String) -> Button:
+    if repeat_icon == null:
+        var image := Image.new()
+        image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#dbeaff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/></svg>')
+        repeat_icon = ImageTexture.create_from_image(image)
+    var button := Button.new()
+    button.icon = repeat_icon
+    button.expand_icon = true
+    button.toggle_mode = true
+    button.custom_minimum_size = Vector2(32, 32)
+    button.add_theme_constant_override("icon_max_width", 20)
+    button.tooltip_text = "Repeat automatically"
+    parent.add_child(button)
+    button.toggled.connect(func(enabled: bool) -> void:
+        session.call("request_continuous", selected, key, enabled))
+    return button
+
+func _sync_repeat(button: Button, p: Dictionary, key: String, available: bool) -> void:
+    button.set_pressed_no_signal(bool(p.get("continuous", {}).get(key, false)))
+    button.disabled = not available
+    button.modulate = HUD.ACCENT if button.button_pressed else Color.WHITE
+    button.tooltip_text = "Repeat enabled (click to stop)" if button.button_pressed else "Repeat automatically"
+
+func _build_production_summary() -> void:
+    for resource in ECONOMY.RESOURCES:
+        var row := HBoxContainer.new()
+        production_summary.add_child(row)
+        var icon := TextureRect.new()
+        icon.texture = HUD.ICONS[resource]
+        icon.custom_minimum_size = Vector2(16, 16)
+        icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+        icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+        row.add_child(icon)
+        var name_label := _label(resource, 12)
+        name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        row.add_child(name_label)
+        var level := _label("", 12)
+        row.add_child(level)
+        var rate_label := _label("", 12)
+        rate_label.custom_minimum_size.x = 55
+        rate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        row.add_child(rate_label)
+        production_values[resource] = {"level": level, "rate": rate_label}
+
+func _system_bonus_text(p: Dictionary) -> String:
+    var lines: PackedStringArray = []
+    var names: Dictionary = {"Metals": "Metal production", "Plastics": "Plastic production", "Crystals": "Crystal production", "Organics": "Organics production"}
+    for resource in ECONOMY.ACTIVE_PRODUCTION:
+        var percent: int = roundi(ECONOMY.production_modifier(p, resource) * 100.0)
+        if percent != 100:
+            lines.append("%s %d%%" % [names[resource], percent])
+    var advanced: int = roundi(float(p.get("advanced_bonus", 1.0)) * 100.0)
+    if advanced != 100:
+        lines.append("Advanced manufacturing %d%% (future)" % advanced)
+    return "\n".join(lines)
 
 func _build_upgrade_cards(parent: Container) -> void:
     var labels: Dictionary = {"Metals": "Metal extraction", "Plastics": "Plastic extraction",
@@ -434,9 +490,13 @@ func _build_upgrade_cards(parent: Container) -> void:
         var progress := ProgressBar.new()
         progress.custom_minimum_size.y = 15
         card.add_child(progress)
-        var action: Button = _button("UPGRADE", _upgrade_card_action.bind(resource), card)
+        var actions := HBoxContainer.new()
+        card.add_child(actions)
+        var action: Button = _button("UPGRADE", _upgrade_card_action.bind(resource), actions)
+        action.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         HUD.action(action)
-        upgrade_cards[resource] = {"title": title, "name": labels[resource], "detail": detail, "progress": progress, "button": action}
+        var repeat: Button = _repeat_button(actions, "production:" + resource)
+        upgrade_cards[resource] = {"title": title, "name": labels[resource], "detail": detail, "progress": progress, "button": action, "repeat": repeat}
 
 func _upgrade_job(planet: Dictionary, resource: String) -> Dictionary:
     for job in planet.get("queue", []):
@@ -463,6 +523,8 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
         var progress: ProgressBar = card["progress"]
         progress.visible = not job.is_empty()
         var detail: Label = card["detail"]
+        var available: bool = not ECONOMY._continuous_target(planet, "production:" + resource).is_empty()
+        _sync_repeat(card["repeat"], planet, "production:" + resource, owned and available)
         if not job.is_empty():
             progress.value = 100.0 * float(job["progress"]) / float(job["work"])
             detail.text = "%s%s" % [_cost_text(job["cost"], job["allocated"]), " • Waiting" if ECONOMY._possible(planet, job) <= ECONOMY.EPS else ""]
@@ -470,7 +532,6 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
             button.disabled = not owned
         else:
             button.text = "UPGRADE TO LV %d" % (level + 1)
-            var available: bool = ECONOMY.ACTIVE_PRODUCTION.has(resource) and (not ECONOMY.EXTRACTED.has(resource) or float(planet["abundance"].get(resource, 0.0)) > 0.0)
             button.disabled = not owned or not available or (planet["queue"] as Array).size() >= ECONOMY.MAX_QUEUE
             if not ECONOMY.ACTIVE_PRODUCTION.has(resource):
                 detail.text = "Production design pending"
@@ -752,9 +813,8 @@ func _refresh() -> void:
     _refresh_colony_choices(state, p, phase)
     var full: bool = (p.get("queue", []) as Array).size() >= ECONOMY.MAX_QUEUE
     for kind in continuous_checks:
-        var check: CheckBox = continuous_checks[kind]
-        check.set_pressed_no_signal(bool(p.get("continuous", {}).get(kind, false)))
-        check.disabled = not owned or (kind == "ship" and not bool(p.get("home", false)))
+        var check: Button = continuous_checks[kind]
+        _sync_repeat(check, p, kind, owned and (kind != "ship" or bool(p.get("home", false))))
     queue_title.text = "Queue  %d/%d" % [(p.get("queue", []) as Array).size(), ECONOMY.MAX_QUEUE]
     colony_button.disabled = not owned or full
     threshold_slider.enabled = owned
@@ -775,29 +835,28 @@ func _refresh() -> void:
     var roster: Dictionary = session.get("players")
     var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
     info.text = "System %02d%s\n%s" % [selected + 1, "  /  Home" if bool(p["home"]) else "", name_text]
-    var fields_here: int = 0
-    for field in state["map"].get("fields", []):
-        if int(field["anchor"]) == selected:
-            fields_here += 1
-    environment_label.text = "Manufacturing ×%.2f • Fields %d" % [float(p.get("advanced_bonus", 1.0)), fields_here]
-    environment_label.tooltip_text = "Independent environmental modifier for future advanced components; not applied to base resources."
+    environment_label.text = _system_bonus_text(p)
+    environment_label.visible = not environment_label.text.is_empty()
+    environment_label.tooltip_text = "Natural production modifiers; advanced manufacturing is reserved for future recipes."
+    for resource in ECONOMY.RESOURCES:
+        production_values[resource]["level"].text = "Lv %d" % int(p["levels"][resource])
+        production_values[resource]["rate"].text = "%.1f/yr" % ECONOMY.rate(p, resource)
     var population: float = float(p["population"])
-    population_label.text = "Population %s\n%+.0f/yr • Output ×%.2f" % [_compact_amount(population), ECONOMY.population_growth(p), ECONOMY.population_multiplier(p)]
+    population_label.text = "Population %s\n%+.0f/yr" % [_compact_amount(population), ECONOMY.population_growth(p)]
     population_label.tooltip_text = "%.0f people" % population
     inventory.show()
     for r in ECONOMY.RESOURCES:
         stock_labels[r].text = "%.1f" % float(p["stock"][r])
         level_labels[r].text = str(int(p["levels"][r]))
     var resource: String = _resource()
-    var modifier: float = float(p["bonuses"].get(resource, 1.0))
     var detail: String = "Production rules not defined yet."
     if ECONOMY.EXTRACTED.has(resource):
-        detail = "Deposit: %.2fx  •  Output: %.1f/s" % [float(p["abundance"].get(resource, 0.0)), ECONOMY.rate(p, resource)]
+        detail = "Production %.1f/yr" % ECONOMY.rate(p, resource)
     elif resource == "Organics":
         var output: float = ECONOMY.rate(p, resource)
         var demand: float = ECONOMY.organics_demand(p)
         detail = "Farming: %.2f/yr  •  Demand: %.2f/yr\nNet: %+.2f/yr" % [output, demand, output - demand]
-    resource_detail.text = "%s\nSystem bonus: %.2fx" % [detail, modifier]
+    resource_detail.text = detail
     var trade_resource: String = _trade_resource()
     trade_detail.text = "Stock: %.1f" % float(p["stock"][trade_resource])
     _refresh_upgrade_cards(p, owned)
@@ -843,11 +902,15 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             var progress := ProgressBar.new()
             progress.custom_minimum_size.y = 16
             row.add_child(progress)
-            var upgrade: Button = _button("UPGRADE", _upgrade_yard_at.bind(int(index)), row)
+            var actions := HBoxContainer.new()
+            row.add_child(actions)
+            var upgrade: Button = _button("UPGRADE", _upgrade_yard_at.bind(int(index)), actions)
+            upgrade.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+            var repeat: Button = _repeat_button(actions, "yard_upgrade:" + str(index))
             upgrade.custom_minimum_size.y = 24
             upgrade.add_theme_font_size_override("font_size", 11)
             yard_activity.add_child(row)
-            yard_activity_rows[index] = {"row": row, "label": title, "progress": progress, "upgrade": upgrade}
+            yard_activity_rows[index] = {"row": row, "label": title, "progress": progress, "upgrade": upgrade, "repeat": repeat}
         var label: Label = yard_activity_rows[index]["label"]
         var bar: ProgressBar = yard_activity_rows[index]["progress"]
         var upgrade: Button = yard_activity_rows[index]["upgrade"]
@@ -855,11 +918,14 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         var level: int = int(p["yards"][index]["level"]) if existing else 1
         var pending: bool = existing and ECONOMY._has_job(p, "yard_upgrade", str(index))
         upgrade.visible = existing and int(p["owner"]) == _me()
+        var repeat: Button = yard_activity_rows[index]["repeat"]
+        repeat.visible = upgrade.visible
+        _sync_repeat(repeat, p, "yard_upgrade:" + str(index), upgrade.visible and str(session.get("phase")) == "match")
         upgrade.disabled = not upgrade.visible or pending or (p["queue"] as Array).size() >= ECONOMY.MAX_QUEUE or str(session.get("phase")) != "match"
         upgrade.text = "UPGRADE QUEUED" if pending else "UPGRADE TO LV %d" % (level + 1)
         upgrade.tooltip_text = "Lv %d • %.0f Metals • %.0f years" % [level, float(ECONOMY._cost("yard_upgrade", level + 1)["Metals"]), ECONOMY._work("yard_upgrade", level + 1)]
         if job.is_empty():
-            label.text = "%d · Lv %d · Idle" % [number, level]
+            label.text = "Shipyard %d · Lv %d · Idle" % [number, level]
             bar.value = 0.0
             bar.show_percentage = false
             bar.tooltip_text = "Shipyard %d" % (int(index) + 1)
@@ -870,7 +936,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             name_text = "Upgrade to Lv %d" % int(job["level"])
         elif job["kind"] == "yard":
             name_text = "Construction"
-        label.text = "%d · Lv %d · %s" % [number, level, name_text] if existing else "%d · %s" % [number, name_text]
+        label.text = "Shipyard %d · Lv %d · %s" % [number, level, name_text] if existing else "Shipyard %d · %s" % [number, name_text]
         bar.value = 100.0 * float(job["progress"]) / float(job["work"])
         bar.tooltip_text = "Waiting for materials" if ECONOMY._possible(p, job) <= ECONOMY.EPS else "Shipyard %d" % number
 

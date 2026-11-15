@@ -51,6 +51,12 @@ func _run() -> void:
     cancel_upgrade.pressed.emit()
     assert(setup_state["planets"][0]["queue"].is_empty())
     assert(not yard_upgrade.disabled)
+    var yard_repeat: Button = idle_rows[0]["repeat"]
+    assert(yard_repeat.icon != null and yard_repeat.text.is_empty())
+    yard_repeat.button_pressed = true
+    assert(setup_state["planets"][0]["continuous"]["yard_upgrade:0"])
+    yard_repeat.button_pressed = false
+    assert(not setup_state["planets"][0]["continuous"]["yard_upgrade:0"])
     assert((view.get("info") as Label).text.begins_with("System"))
     assert(header.position.y + header.size.y < canvas.position.y)
     assert(header.position.y + header.size.y < inspector.position.y)
@@ -122,6 +128,13 @@ func _run() -> void:
     var farm_button: Button = farm["button"]
     assert(tabs.get_tab_control(3).is_ancestor_of(farm_button))
     assert(not farm_button.disabled)
+    var farm_repeat: Button = farm["repeat"]
+    assert(farm_repeat.icon != null and not farm_repeat.disabled)
+    farm_repeat.button_pressed = true
+    assert(state["planets"][0]["continuous"]["production:Organics"])
+    farm_repeat.button_pressed = false
+    assert(not state["planets"][0]["continuous"]["production:Organics"])
+    assert((cards["Tech"]["repeat"] as Button).disabled)
     assert((cards["Tech"]["button"] as Button).disabled)
     tabs.current_tab = 3
     var upgrade_audio: AudioStreamPlayer = view.get("upgrade_audio")
@@ -143,7 +156,8 @@ func _run() -> void:
     tabs.current_tab = 2
     var checks: Dictionary = view.get("continuous_checks")
     assert(checks.size() == 4)
-    var automatic: CheckBox = checks["fighter"]
+    var automatic: Button = checks["fighter"]
+    assert(automatic.icon != null and automatic.text.is_empty() and automatic.toggle_mode)
     automatic.button_pressed = true
     assert(state["planets"][0]["continuous"]["fighter"])
     automatic.button_pressed = false
@@ -269,7 +283,17 @@ func _run() -> void:
     assert((idle_rows[0]["progress"] as ProgressBar).value == 0.0)
     var mineral_button: Button = view.get("miner_button")
     assert(not mineral_button.disabled)
-    assert((view.get("environment_label") as Label).text.contains("Manufacturing"))
+    var bonuses: Label = view.get("environment_label")
+    assert(not bonuses.text.contains("Fields"))
+    assert(not bonuses.text.contains("100%"))
+    var normal: Dictionary = {"abundance": {"Metals": 1.0, "Plastics": 1.0, "Crystals": 1.0}, "bonuses": {"Organics": 1.0}, "advanced_bonus": 1.0}
+    assert(view.call("_system_bonus_text", normal) == "")
+    normal["abundance"]["Metals"] = 1.5
+    assert(view.call("_system_bonus_text", normal) == "Metal production 150%")
+    var production: Dictionary = view.get("production_values")
+    assert(production.size() == 6)
+    assert((production["Metals"]["level"] as Label).text == "Lv 1")
+    assert((production["Metals"]["rate"] as Label).text.ends_with("/yr"))
     assert(view.call("_planet_color", state["planets"][0]) is Color)
     var layout: Dictionary = view.call("_system_visual", 0, state)
     var bodies: Array = layout["bodies"]
