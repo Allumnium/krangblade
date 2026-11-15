@@ -9,7 +9,11 @@ const HOME_POPULATION: float = 100.0
 const COLONY_POPULATION: float = 10.0
 const ORGANICS_PER_LEVEL: float = 8.0
 const POPULATION_PER_ORGANICS_RATE: float = 12.5
-const POPULATION_GROWTH_RATE: float = 0.01
+# Critically damped demographic response (seconds = years).
+const POPULATION_RESPONSE: float = 0.065
+const FARM_VARIATION: float = 0.05
+const FARM_CYCLE_SECONDS: float = 100.0
+const START_YEAR: int = 1
 const CARGO_CAPACITY: float = 10.0
 const SHIP_SPEED: float = 95.0
 const SHIP_SIZE: int = 1
@@ -52,10 +56,10 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
             levels["Organics"] = 1
             stock["Metals"] = 600.0
             yards.append({"level": 1, "job": -1})
-        planets.append({"owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "stock": stock, "levels": levels,
+        planets.append({"owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
             "abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
             "yards": yards, "queue": []})
-    return {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1}
+    return {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0}
 
 ## Read-only player-wide holdings: stock plus the player's own cargo in transit.
 static func empire_totals(state: Dictionary, player: int) -> Dictionary:
@@ -145,6 +149,7 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
         var colony: Dictionary = state["planets"][at]
         colony["owner"] = int(ship["owner"])
         colony["population"] = COLONY_POPULATION
+        colony["population_velocity"] = 0.0
         colony["levels"]["Organics"] = 1
         return true # consumed to establish the colony
     # Another ship arrived first. Return to launch without claiming or combat.
@@ -155,18 +160,25 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
     _set_route(ship, back)
     return false
 
+static func current_year(state: Dictionary) -> int:
+    return START_YEAR + floori(float(state.get("elapsed", 0.0)) + EPS)
+
+static func farm_potential(planet: Dictionary) -> float:
+    if int(planet["owner"]) == 0:
+        return 0.0
+    return ORGANICS_PER_LEVEL * int(planet["levels"]["Organics"]) * float(planet["bonuses"].get("Organics", 1.0)) * float(planet.get("farm_factor", 1.0))
+
 static func population_capacity(planet: Dictionary) -> float:
-    return rate(planet, "Organics") * POPULATION_PER_ORGANICS_RATE
+    return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
 
 static func population_multiplier(planet: Dictionary) -> float:
     return float(planet["population"]) / HOME_POPULATION
 
 static func population_growth(planet: Dictionary) -> float:
-    var current: float = float(planet["population"])
-    var capacity: float = population_capacity(planet)
-    if capacity <= current:
-        return 0.0
-    return minf(current * POPULATION_GROWTH_RATE, capacity - current)
+    return float(planet.get("population_velocity", 0.0))
+
+static func organics_demand(planet: Dictionary) -> float:
+    return float(planet["population"]) / POPULATION_PER_ORGANICS_RATE
 
 static func rate(planet: Dictionary, resource: String) -> float:
     if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0:
@@ -174,9 +186,27 @@ static func rate(planet: Dictionary, resource: String) -> float:
     var level: int = int(planet["levels"][resource])
     var bonus: float = float(planet["bonuses"].get(resource, 1.0))
     if resource == "Organics":
-        # Independent of population to avoid a circular food/output dependency.
-        return ORGANICS_PER_LEVEL * level * bonus
+        # Small populations still produce a surplus; farm capacity limits output.
+        var capacity: float = population_capacity(planet)
+        if capacity <= EPS:
+            return 0.0
+        var labor: float = sqrt(clampf(float(planet["population"]) / capacity, 0.0, 1.0))
+        return farm_potential(planet) * labor
     return 8.0 * level * float(planet["abundance"].get(resource, 0.0)) * bonus * population_multiplier(planet)
+
+static func _update_population(planet: Dictionary, dt: float) -> void:
+    # Exact solution of x'' + 2*w*x' + w*w*(x-target) = 0
+    # for a constant target during this tick. Stable even for large dt.
+    var current: float = float(planet["population"])
+    var target: float = population_capacity(planet)
+    var velocity: float = population_growth(planet)
+    var error: float = current - target
+    var omega: float = POPULATION_RESPONSE
+    var slope: float = velocity + omega * error
+    var decay: float = exp(-omega * dt)
+    var next: float = target + (error + slope * dt) * decay
+    planet["population"] = maxf(0.0, next)
+    planet["population_velocity"] = (velocity - omega * slope * dt) * decay if next > 0.0 else 0.0
 
 static func max_size(level: int) -> int:
     return level
@@ -317,13 +347,14 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
     var p: Dictionary = state["planets"][index]
     if int(p["owner"]) == 0:
         return
-    var current: float = float(p["population"])
-    var cap: float = population_capacity(p)
-    # Growth is capped by local Organics output, not stored/imported inventory.
-    if current < cap:
-        p["population"] = minf(cap, current + population_growth(p) * dt)
+    var elapsed: float = float(state["elapsed"])
+    p["farm_factor"] = 1.0 + FARM_VARIATION * sin(TAU * elapsed / FARM_CYCLE_SECONDS + float(p["farm_phase"]))
+    _update_population(p, dt)
     for resource in ACTIVE_PRODUCTION:
         p["stock"][resource] = float(p["stock"][resource]) + rate(p, resource) * dt
+    # Consume real local inventory; imported Organics can satisfy demand but
+    # cannot permanently raise the local farming plateau.
+    p["stock"]["Organics"] = maxf(0.0, float(p["stock"]["Organics"]) - organics_demand(p) * dt)
     # Upgrades and new infrastructure use fixed durations. Shipyards are not needed.
     for item in (p["queue"] as Array).duplicate():
         if int(item["size"]) == 0 and _advance(p, item, dt):
@@ -509,6 +540,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
         _choose_delivery(state, ship, teams, team, cache)
 
 static func step(state: Dictionary, dt: float) -> void:
+    state["elapsed"] = float(state["elapsed"]) + dt
     for i in range((state["planets"] as Array).size()):
         _work_planet(state, i, dt)
     var teams: Array[int] = planet_teams(state)
