@@ -1582,6 +1582,10 @@ func _on_economy_changed() -> void:
     var state: Dictionary = _state()
     _sync_upgrade_audio(state)
     _refresh_territory(state)
+    _sync_ship_visuals(state)
+    _refresh()
+
+func _sync_ship_visuals(state: Dictionary) -> void:
     var updated: Dictionary = {}
     if not state.is_empty():
         var points: Array = state["map"]["points"]
@@ -1599,7 +1603,6 @@ func _on_economy_changed() -> void:
     for id in ship_offsets.keys():
         if not updated.has(id):
             ship_offsets.erase(id)
-    _refresh()
 
 func _keyboard_pan(delta: float) -> void:
     if str(session.get("phase")) != "match" or match_menu.visible:
@@ -1648,6 +1651,7 @@ func _ship_scale() -> float:
     return SHIP_WORLD_SCALE * _fit() * zoom
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
+    _sync_ship_visuals(state)
     var points: Array = state["map"]["points"]
     var poses: Dictionary = {}
     for ship in state["ships"]:
