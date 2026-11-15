@@ -295,11 +295,20 @@ func _initialize() -> void:
     assert(p["queue"].is_empty())
     p["population"] = saved_population
 
-    # Upgrade costs increase quadratically; all order types refund actual allocations.
+    # Every repeatable upgrade grows geometrically; all order types refund actual allocations.
     for kind in ["production", "yard_upgrade"]:
         assert(float(ECON._cost(kind, 2)["Metals"]) >= 600.0)
-        assert(float(ECON._cost(kind, 3)["Metals"]) > float(ECON._cost(kind, 2)["Metals"]))
-        assert(float(ECON._cost(kind, 4)["Metals"]) > float(ECON._cost(kind, 3)["Metals"]))
+        for level in range(1, 8):
+            assert(is_equal_approx(float(ECON._cost(kind, level + 1)["Metals"]), 3.0 * float(ECON._cost(kind, level)["Metals"])))
+    assert(ECON._cost("production", 3)["Metals"] == 1800.0)
+    assert(ECON._cost("yard_upgrade", 3)["Metals"] == 2160.0)
+    for level in range(3):
+        for material in ECON.WAREHOUSE_COSTS[level]:
+            assert(float(ECON.WAREHOUSE_COSTS[level][material]) <= float(ECON.WAREHOUSE_CAPACITIES[level]))
+            if level > 0:
+                assert(float(ECON.WAREHOUSE_COSTS[level][material]) == 3.0 * float(ECON.WAREHOUSE_COSTS[level - 1][material]))
+    assert(ECON.ECONOMY_BUILDINGS["Textiles"]["cost"] == {"Metals": 300.0, "Plastics": 45.0, "Tech": 15.0})
+    assert(ECON.ECONOMY_BUILDINGS["Tech"]["cost"]["Metals"] == 900.0)
     var refunds: Dictionary = ECON.create(graph, players, ids)
     var refund_home: Dictionary = refunds["planets"][0]
     refund_home["levels"]["Metals"] = 0

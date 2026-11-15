@@ -182,10 +182,13 @@ func _run() -> void:
     var textile_mill: Button = building_cards["Textiles"]["button"]
     assert(tabs.get_tab_control(1).is_ancestor_of(textile_mill))
     assert(not textile_mill.disabled)
+    assert(textile_mill.tooltip_text.contains("300 Metals"))
     assert((building_cards["Tech"]["button"] as Button).disabled)
     var warehouse_button: Button = view.get("warehouse_card")["button"]
     assert(not warehouse_button.disabled)
+    assert(warehouse_button.tooltip_text.contains("500 Metals"))
     warehouse_button.pressed.emit()
+    assert(warehouse_button.tooltip_text.contains("1500 Metals"))
     assert(int(state["planets"][0]["warehouse_level"]) == 1)
     assert(warehouse_button.disabled)
     textile_mill.pressed.emit()
