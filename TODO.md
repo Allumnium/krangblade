@@ -12,7 +12,8 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 
 ## Priority — Economy foundation
 - [x] Verify bounded snapshot replication and eight-peer lobby return (v0.11.5, PR #51; all mandatory checks passed).
-- [x] Validate multi-resource ship costs and a starting stock sufficient for about twelve mixed hulls.
+- [x] Validate initial multi-resource ship recipes (v0.11.5).
+- [ ] Validate v0.12.2 higher hull prices (3×), escalating shipyard slot prices, three always-visible slots and default Shipyards tab. Starting inventory unchanged, supporting roughly four mixed hulls; revisit opening balance.
 - [x] Validate baseline population-scaled production, local population gates for production upgrades (first Tech upgrade at 200k), and one-time Economy buildings with resource-specific percentage bonuses.
 - [ ] Playtest costs, output, trade, AI expansion, population pacing and building choices before choosing final balance.
 - [x] Validate per-resource storage ceilings, three warehouse upgrades, linear consumption by population (all except Crystals), and zero starting Crystal production.

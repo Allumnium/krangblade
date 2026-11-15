@@ -56,6 +56,7 @@ var send_colony_button: Button
 var colony_button: Button
 var colony_choices: Array[int] = []
 var selected: int = -1
+var last_system_tab_selection: int = -1
 var selected_ship_id: int = -1
 var selected_field: int = -1
 var mining_controls: VBoxContainer
@@ -338,14 +339,15 @@ func _build_ui() -> void:
     send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
     HUD.action(send_colony_button, Color("#c7a4ff"))
     yard_activity = HUD.section(planet_overview, "Shipyards")
+    yard_button = _ship_build_row(yard_activity, "BUILD SHIPYARD", "yard")
     inspector_tabs = TabContainer.new()
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
     inspector_tabs.clip_contents = true
     body.add_child(inspector_tabs)
+    var shipyard_page: VBoxContainer = _inspector_page("Shipyards")
     var economy_page: VBoxContainer = _inspector_page("Economy")
     _build_economy_cards(economy_page)
     var trade_page: VBoxContainer = _inspector_page("Trade")
-    var shipyard_page: VBoxContainer = _inspector_page("Shipyards")
     var upgrades_page: VBoxContainer = _inspector_page("Upgrades")
     _build_upgrade_cards(upgrades_page)
     for resource in ECONOMY.RESOURCES:
@@ -388,7 +390,6 @@ func _build_ui() -> void:
     miner_button = _ship_build_row(shipyards, "BUILD MINING SHIP", "miner")
     HUD.action(miner_button, Color("#d8e58b"))
     miner_button.tooltip_text = "Automatically mines accessible fields from owned service systems."
-    yard_button = _ship_build_row(shipyards, "BUILD SHIPYARD", "yard")
     _build_time_controls()
 
 
@@ -1139,6 +1140,11 @@ func _refresh() -> void:
     planet_overview.visible = not other_selected
     var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
     inspector_tabs.visible = not other_selected and own_system
+    var current_system: int = selected if not other_selected and not p.is_empty() else -1
+    if current_system != last_system_tab_selection:
+        if current_system >= 0:
+            inspector_tabs.current_tab = 0
+        last_system_tab_selection = current_system
     interaction_panel.visible = not other_selected and not p.is_empty() and not own_system
     ship_overview.visible = other_selected
     fleet_scroll.visible = other_selected
@@ -1164,8 +1170,7 @@ func _refresh() -> void:
     fighter_button.disabled = not owned
     miner_button.disabled = not owned
     ship_button.disabled = true
-    yard_button.disabled = not owned or ECONOMY.shipyard_count(p) >= ECONOMY.MAX_SHIPYARDS
-    yard_button.tooltip_text = "Maximum 3 shipyards per system" if ECONOMY.shipyard_count(p) >= ECONOMY.MAX_SHIPYARDS else ""
+    yard_button.disabled = not owned or ECONOMY.next_shipyard_slot(p) == 0
     if p.is_empty():
         info.text = "Select a system."
         population_label.text = ""
@@ -1214,23 +1219,27 @@ func _refresh_yard_activity(p: Dictionary) -> void:
                 if int(job["id"]) == int(yard["job"]):
                     active[i] = job
                     break
+        var reserved: Dictionary = {}
         for job in p["queue"]:
             if job["kind"] == "yard":
                 active[-int(job["id"])] = job
-    yard_activity.get_parent().visible = not active.is_empty()
+                reserved[int(job["level"])] = true
+        for slot in range(yards.size() + 1, ECONOMY.MAX_SHIPYARDS + 1):
+            if not reserved.has(slot):
+                active[100 + slot] = {}
+    yard_activity.get_parent().visible = not p.is_empty()
     for index in yard_activity_rows.keys():
         if not active.has(index):
             var obsolete: Control = yard_activity_rows[index]["row"]
             yard_activity.remove_child(obsolete)
             obsolete.queue_free()
             yard_activity_rows.erase(index)
-    var pending_number: int = (p.get("yards", []) as Array).size()
     for index in active:
         var job: Dictionary = active[index]
-        var number: int = int(index) + 1
+        var vacant: bool = int(index) >= 100
+        var number: int = int(index) - 100 if vacant else int(index) + 1
         if int(index) < 0:
-            pending_number += 1
-            number = pending_number
+            number = int(job["level"])
         if not yard_activity_rows.has(index):
             var row := VBoxContainer.new()
             var title := _label("", 12)
@@ -1250,16 +1259,26 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         var label: Label = yard_activity_rows[index]["label"]
         var bar: ProgressBar = yard_activity_rows[index]["progress"]
         var upgrade: Button = yard_activity_rows[index]["upgrade"]
+        yard_activity.move_child(yard_activity_rows[index]["row"], mini(number + 1, yard_activity.get_child_count() - 1))
+        var repeat: Button = yard_activity_rows[index]["repeat"]
+        if vacant:
+            label.text = "Shipyard %d · Empty" % number
+            bar.visible = false
+            upgrade.visible = false
+            repeat.visible = false
+            label.tooltip_text = _cost_text(ECONOMY._cost("yard", number))
+            continue
+        bar.visible = true
+        label.tooltip_text = ""
         var existing: bool = int(index) >= 0
         var level: int = int(p["yards"][index]["level"]) if existing else 1
         var pending: bool = existing and ECONOMY._has_job(p, "yard_upgrade", str(index))
         upgrade.visible = int(p["owner"]) == _me()
-        var repeat: Button = yard_activity_rows[index]["repeat"]
         repeat.visible = existing and upgrade.visible
         _sync_repeat(repeat, p, "yard_upgrade:" + str(index), repeat.visible and str(session.get("phase")) == "match")
         upgrade.disabled = not upgrade.visible or str(session.get("phase")) != "match"
         upgrade.text = "CANCEL" if pending or not existing else "UPGRADE TO LV %d" % (level + 1)
-        upgrade.tooltip_text = "Lv %d • %.0f Metals • %.0f years" % [level, float(ECONOMY._cost("yard_upgrade", level + 1)["Metals"]), ECONOMY._work("yard_upgrade", level + 1)]
+        upgrade.tooltip_text = "Lv %d • %.0f Metals • %.0f years" % [level, float(ECONOMY._cost("yard_upgrade", level + 1)["Metals"]), ECONOMY._work("yard_upgrade", level + 1)] if existing else _cost_text(job["cost"], job["allocated"])
         if job.is_empty():
             label.text = "Shipyard %d · Lv %d · Idle" % [number, level]
             bar.value = 0.0
@@ -1312,7 +1331,8 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
         var card: Dictionary = build_cards[kind]
         var count: int = int(counts.get(kind, 0))
         card["button"].text = "%s (%d)" % [card["title"], count] if count > 0 else card["title"]
-        card["button"].tooltip_text = _cost_text(ECONOMY._cost(kind, 1))
+        var slot: int = ECONOMY.next_shipyard_slot(p) if kind == "yard" else 1
+        card["button"].tooltip_text = "Maximum 3 shipyards per system" if slot == 0 else _cost_text(ECONOMY._cost(kind, slot))
         card["cancel"].visible = count > 0
         card["cancel"].disabled = not owned
 

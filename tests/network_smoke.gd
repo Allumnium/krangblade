@@ -269,7 +269,11 @@ func _check_economy_sync() -> void:
             var military: Dictionary = ECON.military_policy(state, owner, "fighter")
             var field_node: int = (state["planets"] as Array).size()
             var buildings: Dictionary = system.get("buildings", {})
-            if int(system.get("warehouse_level", 0)) == 1 and buildings.size() == 1 and buildings.get("Textiles", false) and int(military.get(field_node, 0)) == 70 and int(military.get(ECON.military_home(state, owner), 0)) == 30 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
+            var priced_slots: Dictionary = {}
+            for job in system["queue"]:
+                if job["kind"] == "yard":
+                    priced_slots[int(job["level"])] = job["cost"]
+            if priced_slots.get(2, {}) == ECON._cost("yard", 2) and priced_slots.get(3, {}) == ECON._cost("yard", 3) and int(system.get("warehouse_level", 0)) == 1 and buildings.size() == 1 and buildings.get("Textiles", false) and int(military.get(field_node, 0)) == 70 and int(military.get(ECON.military_home(state, owner), 0)) == 30 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
                 verified += 1
         var view: Node = current_scene
         if cancel_sent and verified == expected_players and view != null and view.has_method("_update_trade_stock"):

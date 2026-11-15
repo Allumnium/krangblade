@@ -53,7 +53,7 @@ func _run() -> void:
     for tile in view.get("global_resource_tiles").values():
         assert(tile.get_parent() == header.get_child(0))
     var idle_rows: Dictionary = view.get("yard_activity_rows")
-    assert(idle_rows.size() == 1)
+    assert(idle_rows.size() == 3)
     assert((idle_rows[0]["row"] as Control).is_visible_in_tree())
     assert((idle_rows[0]["label"] as Label).text.contains("Idle"))
     var yard_upgrade: Button = idle_rows[0]["upgrade"]
@@ -100,14 +100,15 @@ func _run() -> void:
     assert(header.position.y + header.size.y < inspector.position.y)
     var tabs: TabContainer = view.get("inspector_tabs")
     assert(tabs.get_tab_count() == 4)
-    assert(tabs.get_tab_title(0) == "Economy" and tabs.get_tab_title(1) == "Trade" and tabs.get_tab_title(2) == "Shipyards" and tabs.get_tab_title(3) == "Upgrades")
+    assert(tabs.get_tab_title(0) == "Shipyards" and tabs.get_tab_title(1) == "Economy" and tabs.get_tab_title(2) == "Trade" and tabs.get_tab_title(3) == "Upgrades")
+    assert(tabs.current_tab == 0)
     var trade_sliders: Dictionary = view.get("trade_sliders")
     assert(trade_sliders.size() == 6)
     for resource in ["Metals", "Plastics", "Textiles", "Organics", "Tech", "Crystals"]:
         assert(trade_sliders.has(resource))
-        assert(tabs.get_tab_control(1).is_ancestor_of(trade_sliders[resource]))
+        assert(tabs.get_tab_control(2).is_ancestor_of(trade_sliders[resource]))
     view.call("_load_thresholds")
-    tabs.current_tab = 1
+    tabs.current_tab = 2
     await process_frame
     var trade_amounts: Dictionary = view.get("trade_stock_labels")
     for resource in trade_amounts:
@@ -171,7 +172,7 @@ func _run() -> void:
     assert(not (view.get("population_label") as Label).text.contains(" / "))
     assert(not (view.get("population_label") as Label).tooltip_text.contains("supported"))
     assert(not (view.get("population_label") as Label).text.contains("/yr"))
-    assert(tabs.get_tab_control(0).is_ancestor_of(view.get("warehouse_card")["button"]))
+    assert(tabs.get_tab_control(1).is_ancestor_of(view.get("warehouse_card")["button"]))
     var state: Dictionary = session.get("economy")
     assert((view.get("global_resource_labels") as Dictionary).size() == 6)
     assert(view.get("global_resource_labels")["Metals"].text.contains("("))
@@ -179,7 +180,7 @@ func _run() -> void:
     var building_cards: Dictionary = view.get("economy_cards")
     assert(building_cards.size() == 6)
     var textile_mill: Button = building_cards["Textiles"]["button"]
-    assert(tabs.get_tab_control(0).is_ancestor_of(textile_mill))
+    assert(tabs.get_tab_control(1).is_ancestor_of(textile_mill))
     assert(not textile_mill.disabled)
     assert((building_cards["Tech"]["button"] as Button).disabled)
     var warehouse_button: Button = view.get("warehouse_card")["button"]
@@ -221,7 +222,7 @@ func _run() -> void:
     farm_button.pressed.emit()
     assert(state["planets"][0]["queue"].is_empty())
     assert(not upgrade_audio.playing)
-    tabs.current_tab = 2
+    tabs.current_tab = 0
     var checks: Dictionary = view.get("continuous_checks")
     assert(checks.size() == 4)
     var automatic: Button = checks["fighter"]
@@ -231,7 +232,11 @@ func _run() -> void:
     automatic.button_pressed = false
     assert(not state["planets"][0]["continuous"]["fighter"])
     var new_yard: Button = view.get("yard_button")
+    assert(overview.is_ancestor_of(new_yard) and not tabs.is_ancestor_of(new_yard))
+    assert(new_yard.tooltip_text.contains("2000 Metals"))
+    state["planets"][0]["stock"]["Crystals"] = 100.0
     new_yard.pressed.emit()
+    assert(new_yard.tooltip_text.contains("6000 Metals"))
     new_yard.pressed.emit()
     assert(new_yard.disabled)
     assert(new_yard.text.ends_with("(2)"))
@@ -240,12 +245,12 @@ func _run() -> void:
     assert(not new_yard.disabled)
     var yard_job: Dictionary = state["planets"][0]["queue"][0]
     var pending_key: int = -int(yard_job["id"])
-    assert(idle_rows.size() == 2 and idle_rows.has(pending_key))
+    assert(idle_rows.size() == 3 and idle_rows.has(pending_key))
     session.call("_economy_tick")
     session.call("_economy_tick")
     assert((idle_rows[pending_key]["progress"] as ProgressBar).value > 0.0)
     (idle_rows[pending_key]["upgrade"] as Button).pressed.emit()
-    assert(idle_rows.size() == 1)
+    assert(idle_rows.size() == 3)
     tabs.current_tab = 0
     var points: Array = state["map"]["points"]
     var neighbor: int = -1
@@ -269,6 +274,7 @@ func _run() -> void:
     session.call("request_operation", 0, "colony_ship")
     view.set("selected", 0)
     view.call("_refresh")
+    assert(tabs.current_tab == 0)
     var build: Dictionary = view.get("build_cards")
     var colony_card: Dictionary = build["colony_ship"]
     assert((colony_card["button"] as Button).text.ends_with("(1)"))
@@ -276,11 +282,11 @@ func _run() -> void:
     for i in range(10):
         session.call("_economy_tick")
     var active: Dictionary = view.get("yard_activity_rows")
-    assert(active.size() == 1)
+    assert(active.size() == 3)
     assert((active[0]["progress"] as ProgressBar).value > 0.0)
-    tabs.current_tab = 2
-    assert(tabs.get_tab_control(2).is_ancestor_of(colony_card["button"]))
-    assert(tabs.get_tab_control(1).is_ancestor_of(metal_slider))
+    tabs.current_tab = 0
+    assert(tabs.get_tab_control(0).is_ancestor_of(colony_card["button"]))
+    assert(tabs.get_tab_control(2).is_ancestor_of(metal_slider))
     # Cancel an active hull through its build card, then rebuild it.
     (colony_card["cancel"] as Button).pressed.emit()
     assert(state["planets"][0]["queue"].is_empty())
