@@ -124,15 +124,17 @@ func _prepare_commands() -> void:
     if home_index < 0:
         _fail("No home system for player.")
         return
-    # Reveal one generated field to every team for a deterministic policy round trip.
-    # This is a test-only scenario; the real discovery rules are unchanged.
-    if role == "host":
-        if (state["map"]["fields"] as Array).is_empty():
-            _fail("Generated map has no asteroid field for policy testing.")
+    if bool(state.get("fog_of_war", true)) or (state["map"]["fields"] as Array).is_empty():
+        _fail("Expected fully visible map and at least one asteroid field.")
+        return
+    for i in range((state["planets"] as Array).size()):
+        if not ECON.discovered(state, self_id, "planets", i):
+            _fail("System hidden with fog disabled.")
             return
-        for team in state["explored"]:
-            state["explored"][team]["fields"][0] = true
-        session.call("_publish_economy")
+    for i in range((state["map"]["fields"] as Array).size()):
+        if not ECON.discovered(state, self_id, "fields", i):
+            _fail("Asteroid field hidden with fog disabled.")
+            return
 
 func _send_commands() -> void:
     commands_sent = true

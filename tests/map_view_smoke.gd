@@ -345,9 +345,18 @@ func _run() -> void:
     view.call("_map_input", mouse)
     assert(int(view.get("selected_ship_id")) == logistics_id)
     assert((view.get("fleet_title") as Label).text == "Logistics")
-    assert((view.get("fleet_detail") as Label).text.contains("1 ships"))
+    assert((view.get("fleet_detail") as Label).text.contains("1 ship"))
     assert((view.get("ship_title") as Label).text.contains("Logistics ship"))
     assert((view.get("ship_cargo") as VBoxContainer).get_parent().visible)
+    await process_frame
+    for label_set in [view.get("ship_cargo_labels"), view.get("fleet_cargo_labels")]:
+        for resource in label_set:
+            var amount: Label = label_set[resource]
+            assert(amount.autowrap_mode == TextServer.AUTOWRAP_OFF)
+            assert(amount.size.x >= amount.get_minimum_size().x)
+            assert(amount.get_line_count() == 1)
+            assert((amount.get_parent() as Control).size.y < 36.0)
+    assert((view.get("fleet_scroll") as ScrollContainer).size.y <= inspector.size.y)
     var fixed: Vector2 = view.call("_screen_point", points[0])
     mouse.position = Vector2(-10000, -10000)
     view.call("_map_input", mouse)
@@ -364,12 +373,16 @@ func _run() -> void:
             unknown = i
             break
     assert(unknown >= 0)
+    assert(not state["fog_of_war"])
     mouse.position = view.call("_screen_point", points[unknown])
     view.call("_map_input", mouse)
+    assert(int(view.get("selected")) == unknown)
+    state["fog_of_war"] = true
+    view.call("_map_input", mouse)
     assert(int(view.get("selected")) == -1)
-    # Select a discovered field and change its actual simulation policy.
+    state["fog_of_war"] = false
+    # Select a field without artificially revealing it.
     if not (state["map"]["fields"] as Array).is_empty():
-        explored["fields"][0] = true
         mouse.position = view.call("_screen_point", state["map"]["fields"][0]["position"])
         view.call("_map_input", mouse)
         assert(int(view.get("selected_field")) == 0)

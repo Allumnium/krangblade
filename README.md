@@ -89,3 +89,7 @@ The Trade tab uses a single range slider per selected resource with import-below
 The left system inspector shows current levels and gross annual production for all six resources. Only non-default natural production modifiers are listed, combining deposit abundance with resource bonus; 0% indicates no extraction deposit. Advanced manufacturing is identified as a future modifier and omitted at 100%. Repeat icon buttons toggle continuous ship production, system production upgrades and existing shipyard upgrades. Each enabled order maintains at most one corresponding queued job, with round-robin refill and the shared five-item queue. Disabled or unavailable targets are rejected by the authority. Turning repeat off leaves existing orders intact.
 
 The Trade tab now displays all six resource range sliders together instead of a resource dropdown. Each slider has independent thresholds, a resource-colored live stock fill, and inventory numbers. Existing percentage semantics and host validation are unchanged.
+
+## Cargo layout and exploration default
+
+Cargo inspectors use non-wrapping numeric columns and bounded scrolling, with large fleet totals compacted. Fog of war is disabled in the authoritative match state by default: all systems, routes, fields and ships are visible, and fields can be configured by any participant. Existing ownership, allied path restrictions and mining reachability are unchanged. Discovery still tracks exploration, and the `fog_of_war` match-state flag can be enabled for future game setup options; no settings control yet.

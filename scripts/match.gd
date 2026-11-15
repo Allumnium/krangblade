@@ -50,6 +50,7 @@ var ship_title: Label
 var ship_detail: Label
 var ship_cargo: VBoxContainer
 var ship_cargo_labels: Dictionary = {}
+var fleet_scroll: ScrollContainer
 var fleet_overview: VBoxContainer
 var fleet_title: Label
 var fleet_detail: Label
@@ -273,8 +274,14 @@ func _build_ui() -> void:
     ship_overview.add_child(ship_detail)
     ship_cargo = HUD.section(ship_overview, "Cargo")
     _build_cargo_rows(ship_cargo, ship_cargo_labels)
+    fleet_scroll = ScrollContainer.new()
+    fleet_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    fleet_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    body.add_child(fleet_scroll)
     fleet_overview = VBoxContainer.new()
-    body.add_child(fleet_overview)
+    fleet_overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    fleet_overview.add_theme_constant_override("separation", 8)
+    fleet_scroll.add_child(fleet_overview)
     fleet_title = _label("", 19)
     fleet_overview.add_child(fleet_title)
     fleet_detail = _label("", 14)
@@ -567,9 +574,14 @@ func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
         icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
         row.add_child(icon)
         var title := _label(resource, 12)
+        title.autowrap_mode = TextServer.AUTOWRAP_OFF
         title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         row.add_child(title)
-        var amount := _label("0", 12)
+        var amount := _label("0.0", 12)
+        amount.autowrap_mode = TextServer.AUTOWRAP_OFF
+        amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        amount.custom_minimum_size.x = 54
+        amount.add_theme_color_override("font_color", HUD.COLORS[resource])
         row.add_child(amount)
         labels[resource] = amount
 
@@ -642,6 +654,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
     elif mode == "mining":
         status = "Mining field %02d\n%.1f / 5 yr" % [int(ship["field"]) + 1, minf(5.0, float(ship.get("mining_years", 0.0)))]
     ship_detail.text = "%s\n%s" % [str(roster.get(owner, {}).get("name", "Player")), status]
+    ship_detail.tooltip_text = ""
     var cargo_capable: bool = kind in ["ship", "miner"]
     ship_cargo.get_parent().visible = cargo_capable
     if cargo_capable:
@@ -669,13 +682,15 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
             working += 1
         for resource in ECONOMY.RESOURCES:
             cargo[resource] = float(cargo[resource]) + float(craft["cargo"].get(resource, 0.0))
-    fleet_detail.text = "%d ships\n%d traveling · %d idle" % [total, traveling, total - traveling - working]
+    fleet_detail.text = "%d %s\n%d traveling · %d idle" % [total, "ship" if total == 1 else "ships", traveling, total - traveling - working]
     if kind == "miner":
         fleet_detail.text += "\n%d mining" % working
     fleet_detail.tooltip_text = "Your empire"
     if cargo_capable:
         for resource in ECONOMY.RESOURCES:
-            fleet_cargo_labels[resource].text = "%.1f" % float(cargo[resource])
+            var amount: float = float(cargo[resource])
+            fleet_cargo_labels[resource].text = _compact_amount(amount) if amount >= 1000.0 else "%.1f" % amount
+            fleet_cargo_labels[resource].tooltip_text = "%.1f" % amount
             fleet_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
 
 func _build_global_bar(stats: Container) -> void:
@@ -829,6 +844,7 @@ func _refresh() -> void:
     planet_overview.visible = not other_selected
     inspector_tabs.visible = not other_selected
     ship_overview.visible = other_selected
+    fleet_scroll.visible = other_selected
     fleet_overview.visible = other_selected
     if field_selected:
         _refresh_field_panels(state)
@@ -1194,7 +1210,7 @@ func _select_at(point: Vector2) -> void:
         if distance <= 12.0 and distance < ship_distance:
             ship_distance = distance
             ship_hit = int(id)
-    selected_ship_id = ship_hit if hit < 0 or nearest > 5.0 else -1
+    selected_ship_id = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
     selected_field = -1
     if selected_ship_id < 0 and hit < 0:
         var fields: Array = state["map"].get("fields", [])

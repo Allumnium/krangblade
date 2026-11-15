@@ -91,9 +91,15 @@ func _initialize() -> void:
     var players: Dictionary = {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}
     var ids: Array[int] = [1, 2, 3]
     var state: Dictionary = ECON.create(graph, players, ids)
+    assert(not state["fog_of_war"])
+    for i in range((state["planets"] as Array).size()):
+        assert(ECON.discovered(state, 1, "planets", i))
+        assert(ECON.discovered(state, 3, "planets", i))
+    state["fog_of_war"] = true
     assert(ECON.discovered(state, 1, "planets", 0))
     assert(ECON.discovered(state, 2, "planets", 0))
     assert(not ECON.discovered(state, 3, "planets", 0) or MAP.linked(graph, 0, 2))
+    state["fog_of_war"] = false
     var p: Dictionary = state["planets"][0]
     assert(p["yards"].size() == 1)
     assert(p["levels"].size() == 6)
@@ -401,9 +407,13 @@ func _initialize() -> void:
         "chunks": [{"id": 7, "position": metal_pos, "resource": "Metals", "remaining": 24.0},
             {"id": 9, "position": crystal_pos, "resource": "Crystals", "remaining": 36.0}]}]
     var mineral: Dictionary = ECON.create(mineral_map, players, ids)
+    assert(ECON.discovered(mineral, 3, "fields", 0))
+    assert(ECON.set_mining_policy(mineral, 3, 0, false, false, false))
+    mineral["fog_of_war"] = true
     assert(ECON.discovered(mineral, 1, "fields", 0))
     assert(not ECON.discovered(mineral, 3, "fields", 0))
     assert(not ECON.set_mining_policy(mineral, 3, 0, false, false, false))
+    mineral["fog_of_war"] = false
     assert(ECON.set_mining_policy(mineral, 1, 0, true, true, false))
     assert(ECON.mining_policy(mineral, 2, 0)["Crystals"])
     var mine_home: Dictionary = mineral["planets"][0]

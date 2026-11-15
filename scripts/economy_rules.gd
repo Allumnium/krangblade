@@ -26,6 +26,7 @@ const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const SHIP_SIZE: int = 1
 const EPS: float = 0.00001
 const MAX_QUEUE: int = 5
+const DEFAULT_FOG_OF_WAR: bool = false
 # Reference stock, not a storage cap; percentage thresholds use these units.
 const TRADE_REFERENCE: float = 1000.0
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
@@ -108,12 +109,20 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
         planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
             "abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
             "yards": yards, "queue": [], "continuous": {}})
-    var state: Dictionary = {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "explored": {}, "mining_policies": {}}
+    var state: Dictionary = {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}}
     update_exploration(state)
     return state
 
 static func discovered(state: Dictionary, player: int, kind: String, index: int) -> bool:
     var team: int = int(state.get("teams", {}).get(player, 0))
+    if team <= 0 or index < 0:
+        return false
+    if not bool(state.get("fog_of_war", DEFAULT_FOG_OF_WAR)):
+        if kind == "planets":
+            return index < (state.get("planets", []) as Array).size()
+        if kind == "fields":
+            return index < (state.get("map", {}).get("fields", []) as Array).size()
+        return false
     return bool(state.get("explored", {}).get(team, {}).get(kind, {}).get(index, false))
 
 static func _survey(state: Dictionary, team: int, index: int) -> void:
