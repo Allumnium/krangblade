@@ -63,6 +63,10 @@ const AI_WAVE_MIN: int = 3
 const AI_RALLY_RADIUS: float = 150.0
 const FORMATION_SPACING: float = 28.0
 const FORMATION_RADIUS: float = 105.0
+const FORMATION_TRAVEL_FRACTION: float = 0.8
+const WITHDRAW_HP: float = 46.0
+const REPAIR_PER_YEAR: float = 10.0
+const REPAIR_SAFE_RADIUS: float = LASER_RANGE * 2.0
 
 # Decorative bodies are derived from immutable system data, not simulated entities.
 # Separate RNG keeps the economy's seeded resource generation unchanged.
@@ -1392,6 +1396,12 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
     for ship in ships:
         if ship.get("kind", "") != "fighter":
             continue
+        if bool(ship.get("retreating", false)):
+            ship["combat_target"] = -1
+            ship["pursuit_target"] = -1
+            ship["pursuit_left"] = 0.0
+            ship["laser_until"] = -1.0
+            continue
         var id: int = int(ship["id"])
         var pos: Vector2 = positions[id]
         var team: int = int(state["teams"].get(int(ship["owner"]), 0))
@@ -1648,7 +1658,7 @@ static func _ai_wave_order(state: Dictionary, graph: Dictionary, player: int, ho
     var engaged: bool = false
     for ship in fighters:
         var id: int = int(ship["id"])
-        if not members.has(id):
+        if not members.has(id) or bool(ship.get("retreating", false)):
             continue
         active.append(id)
         all_arrived = all_arrived and int(ship["at"]) == target and (ship["route"] as Array).is_empty()
@@ -1663,7 +1673,7 @@ static func _ai_wave_order(state: Dictionary, graph: Dictionary, player: int, ho
     var rally: Vector2 = points[home]
     var home_paths: Dictionary = _military_paths(graph, home)
     for ship in fighters:
-        if active.has(int(ship["id"])):
+        if active.has(int(ship["id"])) or bool(ship.get("retreating", false)):
             continue
         if int(ship.get("dest", -1)) != home:
             _redirect_fighter(graph, ship, home, home_paths)
@@ -1689,7 +1699,7 @@ static func _sync_operations(state: Dictionary) -> void:
         if ship.get("kind", "") != "fighter":
             continue
         var owner: int = int(ship["owner"])
-        var target: int = int(ship.get("operation_target", ship.get("dest", -1)))
+        var target: int = int(ship.get("operation_target", ship.get("withdrawal_objective", ship.get("dest", -1))))
         if target < 0:
             target = int(ship["at"])
         var role: String = "allocation"
@@ -1804,6 +1814,132 @@ static func _move_formation(graph: Dictionary, ship: Dictionary, dt: float) -> b
         ship["leg"] = 0.0
     return route.is_empty()
 
+# Coordinate only ships with the same operation and current directed lane.
+# Combat, returning reinforcements and independent recovery remain independent.
+# The shared anchor advances from the slowest slot-corrected projection;
+# leading ships wait for stragglers instead of reversing or teleporting.
+static func _formation_lane_groups(state: Dictionary) -> Dictionary:
+    var groups: Dictionary = {}
+    for craft in state["ships"]:
+        if craft.get("kind", "") != "fighter" or _engaged(craft) or bool(craft.get("retreating", false)) or (craft["route"] as Array).is_empty():
+            continue
+        var key: String = "%d:%d:%d:%d" % [int(craft.get("operation_id", 0)), int(craft["at"]), int(craft["route"][0]), int(craft.get("dest", -1))]
+        if not groups.has(key):
+            groups[key] = []
+        groups[key].append(craft)
+    return groups
+
+static func _coordinate_formations(state: Dictionary, graph: Dictionary, dt: float) -> Dictionary:
+    var moved: Dictionary = {}
+    var points: Array = graph["points"]
+    for group in _formation_lane_groups(state).values():
+        if group.size() < 2:
+            continue
+        var first: Dictionary = group[0]
+        var origin: Vector2 = points[int(first["at"])]
+        var endpoint: Vector2 = points[int(first["route"][0])]
+        var axis: Vector2 = (endpoint - origin).normalized()
+        var length: float = origin.distance_to(endpoint)
+        if length <= EPS:
+            continue
+        var progress: float = length
+        for craft in group:
+            var corrected: Vector2 = craft["position"] - _formation_offset(craft, axis)
+            progress = minf(progress, clampf((corrected - origin).dot(axis), 0.0, length))
+        var next_progress: float = minf(length, progress + SHIP_SPEED * FORMATION_TRAVEL_FRACTION * dt)
+        var arrived: bool = true
+        for craft in group:
+            var offset: Vector2 = _formation_offset(craft, axis)
+            var corrected: Vector2 = craft["position"] - offset
+            var own_progress: float = clampf((corrected - origin).dot(axis), 0.0, length)
+            var target: Vector2 = origin + axis * maxf(own_progress, next_progress) + offset
+            _navigate(craft, target, SHIP_SPEED * dt)
+            craft["leg"] = _lane_progress(points, craft)
+            arrived = arrived and (craft["position"] as Vector2).distance_to(endpoint + offset) <= EPS
+            moved[int(craft["id"])] = true
+        if arrived:
+            for craft in group:
+                craft["at"] = int(craft["route"].pop_front())
+                craft["leg"] = 0.0
+    return moved
+
+static func _repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, site: int) -> bool:
+    if site < 0 or site >= (state["planets"] as Array).size():
+        return false
+    var planet: Dictionary = state["planets"][site]
+    if int(planet["owner"]) != owner or (planet["yards"] as Array).is_empty():
+        return false
+    var center: Vector2 = graph["points"][site]
+    var team: int = int(state["teams"].get(owner, 0))
+    for other in state["ships"]:
+        if other.get("kind", "") == "fighter" and int(state["teams"].get(int(other["owner"]), 0)) != team and combat_position(state, graph, other).distance_to(center) <= REPAIR_SAFE_RADIUS:
+            return false
+    return true
+
+static func _nearest_repair_site(state: Dictionary, graph: Dictionary, ship: Dictionary, paths: Dictionary) -> int:
+    var best: int = -1
+    var distance: float = INF
+    for site in range((state["planets"] as Array).size()):
+        if not _repair_site_safe(state, graph, int(ship["owner"]), site):
+            continue
+        if not paths.has(site):
+            paths[site] = _military_paths(graph, site)
+        var approach: float = float(_military_approach(graph, ship, paths[site])["distance"])
+        if approach < distance:
+            best = site
+            distance = approach
+    return best
+
+# Individual withdrawal is a temporary navigation override. Keep the human
+# operation objective distinct from the physical repair destination.
+static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
+    var paths: Dictionary = {}
+    for ship in state["ships"]:
+        if ship.get("kind", "") != "fighter":
+            continue
+        var withdrawing: bool = bool(ship.get("retreating", false))
+        if not withdrawing and float(ship.get("hp", SHIP_HP)) > WITHDRAW_HP:
+            continue
+        var site: int = int(ship.get("repair_site", -1))
+        if not withdrawing or not _repair_site_safe(state, graph, int(ship["owner"]), site):
+            var replacement: int = _nearest_repair_site(state, graph, ship, paths)
+            if replacement < 0:
+                continue
+            site = replacement
+        if not withdrawing:
+            ship["withdrawal_objective"] = int(ship.get("dest", ship["at"]))
+        ship["retreating"] = true
+        ship["repair_site"] = site
+        ship["combat_target"] = -1
+        ship["pursuit_target"] = -1
+        ship["pursuit_left"] = 0.0
+        ship["laser_until"] = -1.0
+        if int(ship.get("dest", -1)) != site:
+            if not paths.has(site):
+                paths[site] = _military_paths(graph, site)
+            _redirect_fighter(graph, ship, site, paths[site])
+
+static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> void:
+    var site: int = int(ship["repair_site"])
+    if not (ship["route"] as Array).is_empty():
+        _move({"map": graph}, ship, dt)
+        return
+    if int(ship["at"]) != site:
+        return
+    var dock: Vector2 = graph["points"][site]
+    var distance: float = _navigate(ship, dock, SHIP_SPEED * dt)
+    if (ship["position"] as Vector2) != dock or not _repair_site_safe(state, graph, int(ship["owner"]), site):
+        return
+    var repair_time: float = maxf(0.0, dt - distance / SHIP_SPEED)
+    ship["hp"] = minf(SHIP_HP, float(ship.get("hp", SHIP_HP)) + REPAIR_PER_YEAR * repair_time)
+    if float(ship["hp"]) >= SHIP_HP - EPS:
+        ship["hp"] = SHIP_HP
+        ship["retreating"] = false
+        ship.erase("repair_site")
+        ship.erase("withdrawal_objective")
+        # Normal dispatch resumes the latest allocation or AI reserve order.
+        ship["dest"] = -1
+
 static func _order_operation_ship(graph: Dictionary, ship: Dictionary, goal: int, paths: Dictionary) -> void:
     if int(ship.get("dest", -1)) == goal:
         return
@@ -1835,17 +1971,20 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
             operation["phase"] = "assigned"
             operation["deployed"] = []
             for member in operation["members"]:
-                _order_operation_ship(graph, by_id[member], target, paths)
+                if not bool(by_id[member].get("retreating", false)):
+                    _order_operation_ship(graph, by_id[member], target, paths)
             continue
         var deployed: Array = []
         for member in operation["deployed"]:
-            if operation["members"].has(member):
+            if operation["members"].has(member) and not bool(by_id[member].get("retreating", false)):
                 deployed.append(member)
         if deployed.size() == 1 and not _engaged(by_id[deployed[0]]):
             deployed.clear()
         var ready: Array = []
         for member in operation["members"]:
             var ship: Dictionary = by_id[member]
+            if bool(ship.get("retreating", false)):
+                continue
             if deployed.has(member):
                 _order_operation_ship(graph, ship, target, paths)
                 continue
@@ -1902,7 +2041,9 @@ static func step(state: Dictionary, dt: float) -> void:
             _ai_turn(state, combat_graph, int(player))
     for craft in state["ships"]:
         _ensure_position(combat_graph["points"] if craft.get("kind", "") == "fighter" else state["map"]["points"], craft)
+    _prepare_withdrawals(state, combat_graph)
     _combat(state, combat_graph, dt)
+    _prepare_withdrawals(state, combat_graph)
     var fleets: Dictionary = {}
     for craft in state["ships"]:
         if craft.get("kind", "") == "fighter":
@@ -1918,6 +2059,7 @@ static func step(state: Dictionary, dt: float) -> void:
     var combat_positions: Dictionary = {}
     for craft in state["ships"]:
         combat_positions[int(craft["id"])] = craft["position"]
+    var coordinated: Dictionary = _coordinate_formations(state, combat_graph, dt)
     for ship in (state["ships"] as Array).duplicate():
         var initial_position: Vector2 = ship["position"]
         if ship.get("kind", "ship") == "colony_ship":
@@ -1931,7 +2073,11 @@ static func step(state: Dictionary, dt: float) -> void:
         elif ship.get("kind", "") == "fighter":
             var target_id: int = int(ship.get("combat_target", -1))
             var pursuit_id: int = int(ship.get("pursuit_target", -1))
-            if combat_positions.has(pursuit_id):
+            if bool(ship.get("retreating", false)):
+                _work_withdrawal(state, combat_graph, ship, dt)
+            elif coordinated.has(int(ship["id"])):
+                pass # Already moved as a group this tick.
+            elif combat_positions.has(pursuit_id):
                 _pursue_fighter(ship, combat_positions[pursuit_id], dt)
                 ship["leg"] = _lane_progress(combat_graph["points"], ship)
             elif combat_positions.has(target_id):
@@ -1947,7 +2093,7 @@ static func step(state: Dictionary, dt: float) -> void:
         var fighter: bool = ship.get("kind", "") == "fighter"
         var idle: bool = (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle"
         idle = idle and (int(ship.get("dest", -1)) < 0 or fighter) and int(ship.get("source", -1)) < 0
-        if idle and not _engaged(ship) and ship["position"] == initial_position and (not fighter or int(ship.get("formation_size", 0)) < 2):
+        if idle and not _engaged(ship) and not bool(ship.get("retreating", false)) and not coordinated.has(int(ship["id"])) and ship["position"] == initial_position and (not fighter or int(ship.get("formation_size", 0)) < 2):
             var points: Array = combat_graph["points"] if fighter else state["map"]["points"]
             var center: Vector2 = points[int(ship["at"])]
             var slot: int = int(ship["id"]) % 64

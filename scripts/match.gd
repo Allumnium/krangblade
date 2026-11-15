@@ -698,7 +698,10 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
         status = "Mining field %02d\n%.1f / 5 yr" % [int(ship["field"]) + 1, minf(5.0, float(ship.get("mining_years", 0.0)))]
     if kind == "fighter":
         status = "Stationed at %s" % _poi_name(int(ship["at"])) if route.is_empty() else "%s\nETA %.1f yr" % [_poi_name(int(route.back())), _remaining_years(state, ship)]
-    if int(ship.get("pursuit_target", -1)) >= 0:
+    if bool(ship.get("retreating", false)):
+        var site: int = int(ship.get("repair_site", -1))
+        status = "Repairing" if route.is_empty() and site >= 0 and (ship["position"] as Vector2).distance_to(state["map"]["points"][site]) <= ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), owner, site) else "Withdrawing"
+    elif int(ship.get("pursuit_target", -1)) >= 0:
         status = "Pursuing"
     elif int(ship.get("combat_target", -1)) >= 0:
         status = "Engaged"

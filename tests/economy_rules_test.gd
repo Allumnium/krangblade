@@ -1096,4 +1096,53 @@ func _initialize() -> void:
     ECON._sync_operations(form)
     assert(form["operations"]["2:wave:3"]["slots"].size() == 4)
     print("PASS: persistent formation slots, casualty/reinforcement, bounded movement and shared AI/human slots")
+    # Shared travel: a leading craft cannot race ahead on the same lane;
+    # everyone crosses the next waypoint together after catching up.
+    var cohesion: Dictionary = ECON.create(ai_map, players, ids)
+    var cohesion_graph: Dictionary = ECON.military_graph(cohesion)
+    var lead: Dictionary = {"id": 1200, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 250.0, "position": Vector2(250, 0), "dest": 3}
+    var lag: Dictionary = {"id": 1201, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 0.0, "position": Vector2.ZERO, "dest": 3}
+    cohesion["ships"] = [lead, lag]
+    ECON._sync_operations(cohesion)
+    for tick in range(200):
+        var before_lead: Vector2 = lead["position"]
+        var before_lag: Vector2 = lag["position"]
+        ECON._coordinate_formations(cohesion, cohesion_graph, 0.1)
+        assert(before_lead.distance_to(lead["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+        assert(before_lag.distance_to(lag["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+        assert(int(lead["at"]) == int(lag["at"]))
+        if tick == 0:
+            assert(lead["position"] == before_lead)
+        if int(lead["at"]) == 3:
+            break
+    assert(int(lead["at"]) == 3 and int(lag["at"]) == 3)
+    assert((lead["position"] as Vector2).distance_to(lag["position"]) < 50.0)
+    # Individual withdrawal: nearest safe owned shipyard, no firing or
+    # repair in transit, full recovery before rejoining the assigned objective.
+    var recovery: Dictionary = ECON.create(ai_map, players, ids)
+    var recovery_graph: Dictionary = ECON.military_graph(recovery)
+    var wounded: Dictionary = {"id": 1210, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 400.0, "position": Vector2(400, 0), "dest": 3, "operation_target": 3, "hp": ECON.WITHDRAW_HP}
+    recovery["ships"] = [wounded]
+    assert(ECON.set_military(recovery, 2, "fighter", 3, 100))
+    ECON._prepare_withdrawals(recovery, recovery_graph)
+    assert(wounded["retreating"] and int(wounded["repair_site"]) == 1)
+    assert(int(wounded["operation_target"]) == 3)
+    var wound_position: Vector2 = wounded["position"]
+    ECON.step(recovery, 0.1)
+    assert((wounded["position"] as Vector2).x < wound_position.x)
+    assert(float(wounded["hp"]) == ECON.WITHDRAW_HP)
+    assert(not ECON._engaged(wounded))
+    for tick in range(200):
+        var before: Vector2 = wounded["position"]
+        ECON.step(recovery, 0.1)
+        assert(before.distance_to(wounded["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+        if not wounded["retreating"]:
+            break
+    assert(not wounded["retreating"] and float(wounded["hp"]) == ECON.SHIP_HP)
+    ECON.step(recovery, 0.1)
+    assert(int(wounded["dest"]) == 3 and not (wounded["route"] as Array).is_empty())
+    var hostile_repair: Dictionary = {"id": 1211, "owner": 3, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "dest": 1, "hp": 100.0}
+    recovery["ships"].append(hostile_repair)
+    assert(not ECON._repair_site_safe(recovery, recovery_graph, 2, 1))
+    print("PASS: shared lane pacing, safe individual withdrawal, full repair and rejoining")
     quit(0)
