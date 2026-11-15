@@ -1143,6 +1143,60 @@ static func combat_position(state: Dictionary, graph: Dictionary, ship: Dictiona
         pos = pos.lerp(next, clampf(float(ship["leg"]) / maxf(EPS, pos.distance_to(next)), 0.0, 1.0))
     return pos
 
+# Territory is derived from ownership and actual fleet presence, not orders.
+# Stationed fighters claim neutral POIs. Hostile presence or combat suppresses
+# the local sector; allied fighters contribute the same team color.
+static func territory_claims(state: Dictionary) -> Array[int]:
+    var graph: Dictionary = military_graph(state)
+    var points: Array = graph["points"]
+    var claims: Array[int] = planet_teams(state)
+    claims.resize(points.size())
+    for i in range((state["planets"] as Array).size(), claims.size()):
+        claims[i] = 0
+    var presence: Dictionary = {}
+    var contested: Dictionary = {}
+    var near_ship: Dictionary = {}
+    for ship in state["ships"]:
+        var kind: String = ship.get("kind", "")
+        var position: Vector2 = combat_position(state, graph, ship)
+        var node: int = -1
+        var nearest: float = INF
+        for i in range(points.size()):
+            var distance: float = position.distance_squared_to(points[i])
+            if distance < nearest:
+                nearest = distance
+                node = i
+        if node < 0:
+            continue
+        near_ship[int(ship["id"])] = node
+        if kind != "fighter":
+            continue
+        var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+        if team <= 0:
+            continue
+        var stationary: bool = (ship["route"] as Array).is_empty()
+        if stationary:
+            node = int(ship["at"])
+            if claims[node] == 0:
+                claims[node] = team
+            elif claims[node] != team:
+                contested[node] = true
+        if stationary or nearest <= LASER_RANGE * LASER_RANGE:
+            if presence.has(node) and int(presence[node]) != team:
+                contested[node] = true
+            presence[node] = team
+    for node in presence:
+        if claims[node] > 0 and claims[node] != int(presence[node]):
+            contested[node] = true
+    for ship in state["ships"]:
+        var target: int = int(ship.get("combat_target", -1))
+        if target >= 0 and near_ship.has(target):
+            contested[near_ship[int(ship["id"])]] = true
+            contested[near_ship[target]] = true
+    for node in contested:
+        claims[node] = 0
+    return claims
+
 static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
     var ships: Array = state["ships"]
     var positions: Dictionary = {}
