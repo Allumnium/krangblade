@@ -693,5 +693,39 @@ func _initialize() -> void:
     ECON._move({"map": force_graph}, force_fleet[0], 100.0)
     assert(force_fleet[0]["at"] == field_node and force_fleet[0]["route"].is_empty())
     print("PASS: normalized POI force allocation, nearest assignments and continuous reversal")
+    # Simultaneous weapon fire: allies cannot be targeted and six hits kill.
+    var duel: Dictionary = ECON.create(force_map, players, ids)
+    var duel_graph: Dictionary = ECON.military_graph(duel)
+    for owner_id in [1, 3]:
+        duel["ships"].append({"id": owner_id, "owner": owner_id, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0, "dest": 0})
+    for shot in range(5):
+        ECON._combat(duel, duel_graph, 1.0)
+    assert(duel["ships"].size() == 2)
+    assert(is_equal_approx(float(duel["ships"][0]["hp"]), 10.0))
+    ECON._combat(duel, duel_graph, 1.0)
+    assert(duel["ships"].is_empty())
+    duel["ships"] = [{"id": 1, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0}, {"id": 2, "owner": 2, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0}]
+    ECON._combat(duel, duel_graph, 1.0)
+    assert(float(duel["ships"][0]["hp"]) == 100.0 and int(duel["ships"][0]["combat_target"]) == -1)
+
+    var ai_map: Dictionary = {"seed": 123, "points": [Vector2(-950, 0), Vector2.ZERO, Vector2(3800, 0), Vector2(950, 0), Vector2(1900, 0)], "edges": [[0, 1], [1, 3], [3, 4], [4, 2]], "fields": []}
+    var ai_roster: Dictionary = {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 2}}
+    var ai_state: Dictionary = ECON.create(ai_map, ai_roster, ids)
+    var saw_attack: bool = false
+    var saw_logistics: bool = false
+    for year in range(500):
+        ECON.step(ai_state, 1.0)
+        for craft in ai_state["ships"]:
+            if int(craft["owner"]) != 2:
+                continue
+            if craft["kind"] == "fighter" and int(craft["dest"]) == 2:
+                saw_attack = true
+            elif craft["kind"] == "ship":
+                saw_logistics = true
+    assert(int(ai_state["planets"][3]["owner"]) == 2)
+    assert(int(ai_state["planets"][4]["owner"]) == 2)
+    assert(ai_state["planets"][0]["queue"].is_empty())
+    assert(saw_attack and saw_logistics)
+    print("PASS: six-hit combat, allied safety, AI expansion, logistics and attack")
     print("PASS: seeded maps, ownership, construction, shipyards, mixed cargo, physical transit, ally sharing")
     quit(0)

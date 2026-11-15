@@ -205,6 +205,9 @@ func _check_economy_sync() -> void:
                 elif job["kind"] == "miner" and bool(job.get("automatic", false)):
                     repeat_miner = true
             for ship in state["ships"]:
+                if not ship.has("hp") or float(ship["hp"]) <= 0.0 or float(ship["hp"]) > ECON.SHIP_HP:
+                    _fail("Replicated hull hit points are invalid.")
+                    return
                 if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship":
                     ship_progress = true
             var military: Dictionary = ECON.military_policy(state, owner, "fighter")
