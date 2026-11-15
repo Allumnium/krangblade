@@ -25,7 +25,6 @@ const MINER_RATE: float = 12.0
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const SHIP_SIZE: int = 1
 const EPS: float = 0.00001
-const MAX_QUEUE: int = 5
 const DEFAULT_FOG_OF_WAR: bool = false
 # Reference stock, not a storage cap; percentage thresholds use these units.
 const TRADE_REFERENCE: float = 1000.0
@@ -411,7 +410,7 @@ static func _get_owned(state: Dictionary, player: int, index: int) -> Dictionary
 
 static func enqueue(state: Dictionary, player: int, index: int, kind: String, target: String = "") -> bool:
     var p: Dictionary = _get_owned(state, player, index)
-    if p.is_empty() or (p["queue"] as Array).size() >= MAX_QUEUE:
+    if p.is_empty():
         return false
     var level: int = 1
     match kind:
@@ -482,8 +481,6 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
         return
     var start: int = int(p.get("continuous_cursor", 0)) % keys.size()
     for offset in range(keys.size()):
-        if (p["queue"] as Array).size() >= MAX_QUEUE:
-            return
         var slot: int = (start + offset) % keys.size()
         var key: String = str(keys[slot])
         if not bool(p["continuous"][key]):
@@ -508,6 +505,11 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
         for yard in p["yards"]:
             if int(yard["job"]) == job_id:
                 yard["job"] = -1
+        var key: String = str(item["kind"])
+        if key == "production" or key == "yard_upgrade":
+            key += ":" + str(item["target"])
+        if p["continuous"].has(key):
+            p["continuous"][key] = false
         p["queue"].erase(item)
         return true
     return false

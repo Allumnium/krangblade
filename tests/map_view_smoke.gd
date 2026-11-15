@@ -44,11 +44,8 @@ func _run() -> void:
     var setup_state: Dictionary = session.get("economy")
     var queued: Dictionary = setup_state["planets"][0]["queue"][0]
     assert(queued["kind"] == "yard_upgrade" and queued["target"] == "0")
-    assert(yard_upgrade.disabled)
-    var queue_rows: Dictionary = view.get("queue_rows")
-    var cancel_upgrade: Button = queue_rows[int(queued["id"])]["cancel"]
-    assert(not cancel_upgrade.disabled)
-    cancel_upgrade.pressed.emit()
+    assert(yard_upgrade.text == "CANCEL")
+    yard_upgrade.pressed.emit()
     assert(setup_state["planets"][0]["queue"].is_empty())
     assert(not yard_upgrade.disabled)
     var yard_repeat: Button = idle_rows[0]["repeat"]
@@ -57,7 +54,7 @@ func _run() -> void:
     assert(setup_state["planets"][0]["continuous"]["yard_upgrade:0"])
     yard_repeat.button_pressed = false
     assert(not setup_state["planets"][0]["continuous"]["yard_upgrade:0"])
-    assert((view.get("info") as Label).text.begins_with("System"))
+    assert((view.get("info") as Label).text.begins_with(str(setup_state["map"]["names"][0])))
     assert(header.position.y + header.size.y < canvas.position.y)
     assert(header.position.y + header.size.y < inspector.position.y)
     var tabs: TabContainer = view.get("inspector_tabs")
@@ -186,7 +183,7 @@ func _run() -> void:
     session.call("_economy_tick")
     session.call("_economy_tick")
     assert((idle_rows[pending_key]["progress"] as ProgressBar).value > 0.0)
-    (queue_rows[int(yard_job["id"])]["cancel"] as Button).pressed.emit()
+    (idle_rows[pending_key]["upgrade"] as Button).pressed.emit()
     assert(idle_rows.size() == 1)
     tabs.current_tab = 0
     var points: Array = state["map"]["points"]
@@ -209,21 +206,20 @@ func _run() -> void:
     session.call("request_operation", 0, "colony_ship")
     view.set("selected", 0)
     view.call("_refresh")
-    assert(queue_rows.size() == 1)
-    var colony_job_id: int = int(state["planets"][0]["queue"][0]["id"])
-    assert(not (queue_rows[colony_job_id]["cancel"] as Button).disabled)
+    var build: Dictionary = view.get("build_cards")
+    var colony_card: Dictionary = build["colony_ship"]
+    assert((colony_card["button"] as Button).text.ends_with("(1)"))
+    assert(not (colony_card["cancel"] as Button).disabled)
     for i in range(10):
         session.call("_economy_tick")
     var active: Dictionary = view.get("yard_activity_rows")
     assert(active.size() == 1)
     assert((active[0]["progress"] as ProgressBar).value > 0.0)
     tabs.current_tab = 2
-    assert(tabs.get_tab_control(2).is_ancestor_of(view.get("queue_list")))
+    assert(tabs.get_tab_control(2).is_ancestor_of(colony_card["button"]))
     assert(tabs.get_tab_control(1).is_ancestor_of(metal_slider))
-    assert((queue_rows[colony_job_id]["progress"] as ProgressBar).value > 0.0)
-    assert((queue_rows[colony_job_id]["cost"] as Label).text.contains("Metals"))
-    # Cancel an active hull through its own row, then rebuild it.
-    (queue_rows[colony_job_id]["cancel"] as Button).pressed.emit()
+    # Cancel an active hull through its build card, then rebuild it.
+    (colony_card["cancel"] as Button).pressed.emit()
     assert(state["planets"][0]["queue"].is_empty())
     session.call("request_operation", 0, "colony_ship")
     tabs.current_tab = 0

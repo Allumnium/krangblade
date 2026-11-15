@@ -59,8 +59,9 @@ func _initialize() -> void:
         for edge in clustered["edges"]:
             assert(not MAP.blocked(cluster_points[edge[0]], cluster_points[edge[1]], clustered["fields"]))
         for field in clustered["fields"]:
-            assert(ECON.field_limit(field, "Metals") > ECON.PLANET_MINING_LIMIT)
-            assert(ECON.field_limit(field, "Crystals") > ECON.PLANET_MINING_LIMIT)
+            var ore: Dictionary = ECON.field_inventory(field)
+            for resource in ECON.MINED_RESOURCES:
+                assert(ECON.field_limit(field, resource) > ECON.PLANET_MINING_LIMIT if float(ore[resource]) > 0.0 else is_zero_approx(ECON.field_limit(field, resource)))
             assert(ECON.field_limit(field, "Organics") == 0.0)
             assert(field["outline"].size() == 12)
             assert(field["chunks"].size() >= 9)
@@ -330,33 +331,32 @@ func _initialize() -> void:
     assert(int(p["yards"][0]["level"]) == 2)
     assert(ECON.max_size(2) > ECON.max_size(1))
 
-    # A five-item shared queue and auto-refill do not bypass ownership or capacity.
+    # Unlimited build orders; repeat stops when one matching order is canceled.
     var repeat_state: Dictionary = ECON.create(graph, players, ids)
     var repeat_home: Dictionary = repeat_state["planets"][0]
     repeat_home["stock"]["Metals"] = 5000.0
     assert(not ECON.set_continuous(repeat_state, 2, 0, "fighter", true))
     assert(not ECON.set_continuous(repeat_state, 1, 0, "yard", true))
     assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", true))
-    for i in range(5):
-        assert(ECON.enqueue(repeat_state, 1, 0, "ship"))
-    assert(not ECON.enqueue(repeat_state, 1, 0, "yard"))
-    assert(not ECON.enqueue(repeat_state, 1, 0, "yard_upgrade", "0"))
-    ECON.step(repeat_state, 1.0)
-    assert(repeat_home["queue"].size() == 5)
-    assert(not ECON._has_job(repeat_home, "fighter", ""))
-    for i in range(8):
-        ECON.step(repeat_state, 1.0)
-    assert(ECON._has_job(repeat_home, "fighter", ""))
-    assert(repeat_home["queue"].size() <= 5)
-    for i in range(50):
-        ECON.step(repeat_state, 1.0)
-    assert(ECON.empire_totals(repeat_state, 1)["fighters"] > 1)
-    assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", false))
     for i in range(12):
-        ECON.step(repeat_state, 1.0)
-    assert(repeat_home["queue"].is_empty())
+        assert(ECON.enqueue(repeat_state, 1, 0, "ship"))
+    ECON.step(repeat_state, 1.0)
+    assert(repeat_home["queue"].size() == 13)
+    var repeat_id: int = int(repeat_home["queue"][-1]["id"])
+    assert(ECON.cancel(repeat_state, 1, 0, repeat_id))
+    assert(not repeat_home["continuous"]["fighter"])
+    ECON.step(repeat_state, 1.0)
+    assert(not ECON._has_job(repeat_home, "fighter", ""))
 
-    # Automatic system and shipyard upgrades use the same five-slot queue.
+    var names: Array = graph["names"]
+    assert(names.size() == graph["points"].size())
+    var unique: Dictionary = {}
+    for system_name in names:
+        assert(not unique.has(system_name))
+        unique[system_name] = true
+    assert(names == MAP.system_names(int(graph["seed"]), names.size()))
+
+    # Automatic system and shipyard upgrades use the shared scheduler.
     var upgrades: Dictionary = ECON.create(graph, players, ids)
     var upgrade_home: Dictionary = upgrades["planets"][0]
     upgrade_home["stock"]["Metals"] = 20000.0
@@ -381,6 +381,15 @@ func _initialize() -> void:
     assert(upgrade_home["queue"].is_empty())
     assert(int(upgrade_home["levels"]["Organics"]) == 3)
     assert(int(upgrade_home["yards"][0]["level"]) == 3)
+    for key in ["production:Organics", "yard_upgrade:0"]:
+        assert(ECON.set_continuous(upgrades, 1, 0, key, true))
+    ECON.step(upgrades, 1.0)
+    for job in (upgrade_home["queue"] as Array).duplicate():
+        assert(ECON.cancel(upgrades, 1, 0, int(job["id"])))
+    assert(not upgrade_home["continuous"]["production:Organics"])
+    assert(not upgrade_home["continuous"]["yard_upgrade:0"])
+    ECON.step(upgrades, 1.0)
+    assert(upgrade_home["queue"].is_empty())
     # Fighters use the shipyard and are counted separately; no logistics behavior.
     var military: Dictionary = ECON.create(graph, players, ids)
     assert(not ECON.enqueue(military, 2, 0, "fighter"))

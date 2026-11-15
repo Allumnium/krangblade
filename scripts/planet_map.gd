@@ -169,7 +169,25 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
         field["position"] = (field["position"] as Vector2) * distance_scale
         field["radius"] = float(field["radius"]) * distance_scale
         _populate_field(field, rng)
-    return {"seed": seed_value, "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
+    return {"seed": seed_value, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
+
+static func system_names(seed_value: int, count: int) -> Array[String]:
+    var prefixes := ["Astra", "Vey", "Kor", "Nyx", "Sol", "Tha", "Zer", "Eri", "Vor", "Ly", "Or", "Kael", "Nex", "Quor", "Vel", "Syr", "Ae", "Tal", "Iri", "Xan", "Dra", "Cyr", "Mer", "Rhy"]
+    var suffixes := ["ion", "aris", "eth", "ora", "axis", "eon", "ara", "os", "ium", "aris", "una", "ath", "yra", "el", "on", "is", "eus", "arae", "ex", "ova"]
+    var pool: Array[String] = []
+    for prefix in prefixes:
+        for suffix in suffixes:
+            var name: String = prefix + suffix
+            if not pool.has(name):
+                pool.append(name)
+    var rng := RandomNumberGenerator.new()
+    rng.seed = seed_value + 81173
+    var names: Array[String] = []
+    for i in range(count):
+        var pick: int = rng.randi_range(0, pool.size() - 1)
+        names.append(pool[pick])
+        pool.remove_at(pick)
+    return names
 
 # Geometry stays inside the conservative obstacle radius used for route checks.
 static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> void:
@@ -185,12 +203,36 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
     field["outline"] = outline
     var chunks: Array = []
     var count: int = clampi(roundi(7.0 + radius / 50.0), 9, 28)
-    var metal_share: float = float(field["Metals"]) / (float(field["Metals"]) + float(field["Crystals"]))
+    var profile: float = rng.randf()
+    var metal_share: float = 0.5
+    if profile < 0.25:
+        metal_share = 1.0
+    elif profile < 0.5:
+        metal_share = 0.0
+    elif profile < 0.7:
+        metal_share = rng.randf_range(0.85, 0.98)
+    elif profile < 0.9:
+        metal_share = rng.randf_range(0.02, 0.15)
+    else:
+        metal_share = rng.randf_range(0.35, 0.65)
+    var metal_count: int = roundi(float(count) * metal_share)
+    var slots: Array[int] = []
+    for i in range(count):
+        slots.append(i)
+    for i in range(count - 1, 0, -1):
+        var j: int = rng.randi_range(0, i)
+        var swap: int = slots[i]
+        slots[i] = slots[j]
+        slots[j] = swap
+    if metal_count == 0:
+        field["Metals"] = 0.0
+    if metal_count == count:
+        field["Crystals"] = 0.0
     for i in range(count):
         var angle: float = rng.randf_range(0.0, TAU)
         var distance: float = sqrt(rng.randf()) * 0.52
         var offset: Vector2 = (Vector2.from_angle(angle) * Vector2(1.0, flatten) * radius * distance).rotated(rotation)
-        var resource: String = "Metals" if i == 0 or (i > 1 and rng.randf() < metal_share) else "Crystals"
+        var resource: String = "Metals" if slots[i] < metal_count else "Crystals"
         var amount: float = rng.randf_range(90.0, 260.0) * float(field[resource])
         var shape: Array[float] = []
         for vertex in range(7):
