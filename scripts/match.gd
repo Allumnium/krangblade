@@ -373,7 +373,7 @@ func _build_ui() -> void:
     threshold_slider = TradeRange.new()
     threshold_slider.custom_minimum_size.y = 56
     threshold_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    threshold_slider.tooltip_text = "Import below the left handle; export above the right handle. 100% = %.0f units." % ECONOMY.TRADE_REFERENCE
+    threshold_slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f units." % ECONOMY.TRADE_REFERENCE
     threshold_slider.committed.connect(_apply_thresholds)
     logistics.add_child(threshold_slider)
     var shipyards: VBoxContainer = HUD.section(shipyard_page, "Build")
