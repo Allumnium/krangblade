@@ -14,21 +14,23 @@ func _run() -> void:
     await process_frame
     assert(view.theme != null)
     var territory_layer: Control = view.get("territory_layer")
-    var territory_image: TextureRect = view.get("territory_image")
-    assert(territory_image.visible and territory_image.texture != null)
-    var territory_pixels: PackedByteArray = territory_image.texture.get_image().get_data()
-    var fill_seen: bool = false
-    var rim_seen: bool = false
-    for i in range(3, territory_pixels.size(), 4):
-        fill_seen = fill_seen or territory_pixels[i] == 36
-        rim_seen = rim_seen or territory_pixels[i] == 195
-    assert(fill_seen and rim_seen)
+    var territory_image: ColorRect = view.get("territory_image")
+    assert(territory_image.visible and territory_image.material is ShaderMaterial)
+    var territory_sites: ImageTexture = view.get("territory_sites")
+    var site_data: Image = territory_sites.get_image()
+    assert(site_data.get_height() == 1 and site_data.get_width() == int(view.get("territory_site_count")))
+    var home_site: Color = site_data.get_pixel(0, 0)
+    assert(is_equal_approx(home_site.b, 1.0) and is_equal_approx(home_site.a, 1.0))
+    assert(float(view.get("territory_radius")) > 0.0)
+    var cached_sites: ImageTexture = view.get("territory_sites")
+    view.call("_refresh_territory", session.get("economy"))
+    assert(view.get("territory_sites") == cached_sites)
     assert(territory_image.mouse_filter == Control.MOUSE_FILTER_IGNORE)
     assert(territory_layer.get_index() < (view.get("map_canvas") as Control).get_index())
     assert((view.get("territory_last") as Array)[0] == 1)
     assert(view.call("_show_system_rings", 0))
     assert(not view.call("_show_system_rings", 1))
-    assert(territory_image.position.is_equal_approx(view.call("_screen_point", Vector2.ZERO)))
+    assert(territory_image.position.is_equal_approx(view.call("_screen_point", -Vector2.ONE * float(view.get("territory_radius")) * 1.5)))
     var header: PanelContainer = view.get("header_panel")
     var canvas: Control = view.get("map_canvas")
     var inspector: PanelContainer = view.get("inspector_panel")
