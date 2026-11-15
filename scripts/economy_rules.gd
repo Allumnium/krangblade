@@ -42,7 +42,7 @@ const SHIP_SIZE: int = 1
 const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
 const DEFAULT_FOG_OF_WAR: bool = false
-# Reference stock, not a storage cap; percentage thresholds use these units.
+# Starting storage capacity per resource; warehouse upgrades increase it.
 const TRADE_REFERENCE: float = 2000.0
 const WAREHOUSE_CAPACITIES = [2000.0, 5000.0, 12000.0, 30000.0]
 const WAREHOUSE_COSTS = [
@@ -61,6 +61,8 @@ const PURSUIT_YEARS: float = 3.0
 const AI_INTERVAL: float = 4.0
 const AI_WAVE_MIN: int = 3
 const AI_RALLY_RADIUS: float = 150.0
+const FORMATION_SPACING: float = 28.0
+const FORMATION_RADIUS: float = 105.0
 
 # Decorative bodies are derived from immutable system data, not simulated entities.
 # Separate RNG keeps the economy's seeded resource generation unchanged.
@@ -1704,6 +1706,9 @@ static func _sync_operations(state: Dictionary) -> void:
         operation["moving"] = bool(operation["moving"]) or not (ship["route"] as Array).is_empty()
         operation["engaged"] = bool(operation["engaged"]) or _engaged(ship)
     var reused: Dictionary = {}
+    var prior_by_id: Dictionary = {}
+    for old_operation in previous.values():
+        prior_by_id[int(old_operation["id"])] = old_operation
     for key in current:
         var operation: Dictionary = current[key]
         operation["members"].sort()
@@ -1735,9 +1740,69 @@ static func _sync_operations(state: Dictionary) -> void:
                 state["next_operation_id"] = best_id + 1
             operation["id"] = best_id
             reused[best_id] = true
+        var old_slots: Dictionary = prior_by_id.get(int(operation["id"]), {}).get("slots", {})
+        var slots: Dictionary = {}
+        var claimed: Dictionary = {}
+        # Retain surviving assignments; reinforcements fill vacant slots.
         for member in operation["members"]:
-            by_id[member]["operation_id"] = int(operation["id"])
+            if old_slots.has(member):
+                var retained: int = int(old_slots[member])
+                slots[member] = retained
+                claimed[retained] = true
+        var free_slot: int = 0
+        var last_slot: int = 0
+        for member in operation["members"]:
+            if not slots.has(member):
+                while claimed.has(free_slot):
+                    free_slot += 1
+                slots[member] = free_slot
+                claimed[free_slot] = true
+            last_slot = maxi(last_slot, int(slots[member]))
+        operation["slots"] = slots
+        for member in operation["members"]:
+            var craft: Dictionary = by_id[member]
+            craft["operation_id"] = int(operation["id"])
+            craft["formation_slot"] = int(slots[member])
+            craft["formation_size"] = (operation["members"] as Array).size()
+            craft["formation_extent"] = last_slot
     state["operations"] = current
+
+# Stable disk slots in a lane-relative coordinate frame. Large groups fit
+# inside the rally radius; movement always uses the authoritative integrator.
+static func _formation_offset(ship: Dictionary, direction: Vector2) -> Vector2:
+    if int(ship.get("formation_size", 0)) < 2:
+        return Vector2.ZERO
+    var slot: int = int(ship.get("formation_slot", 0))
+    var extent: int = int(ship.get("formation_extent", 0))
+    var spacing: float = minf(FORMATION_SPACING, FORMATION_RADIUS / sqrt(maxf(1.0, float(extent))))
+    var local: Vector2 = Vector2.from_angle(float(slot) * 2.399963) * spacing * sqrt(float(slot))
+    return local.rotated(direction.angle())
+
+static func _move_formation(graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+    if int(ship.get("formation_size", 0)) < 2:
+        return _move({"map": graph}, ship, dt)
+    var points: Array = graph["points"]
+    var route: Array = ship["route"]
+    _ensure_position(points, ship)
+    var budget: float = SHIP_SPEED * dt
+    if route.is_empty():
+        # Stationed formations gather around a common point rather than
+        # independently orbiting the star. Keep the full disk in rally range.
+        var station: Vector2 = points[int(ship["at"])] + Vector2(36.0, 0.0) + _formation_offset(ship, Vector2.RIGHT)
+        _navigate(ship, station, budget)
+        return true
+    while not route.is_empty() and budget > EPS:
+        var origin: Vector2 = points[int(ship["at"])]
+        var next: Vector2 = points[int(route[0])]
+        var direction: Vector2 = (next - origin).normalized()
+        var waypoint: Vector2 = next + _formation_offset(ship, direction)
+        budget -= _navigate(ship, waypoint, budget)
+        if (ship["position"] as Vector2) != waypoint:
+            ship["leg"] = _lane_progress(points, ship)
+            return false
+        ship["at"] = int(route.pop_front())
+        ship["leg"] = 0.0
+    return route.is_empty()
 
 static func _order_operation_ship(graph: Dictionary, ship: Dictionary, goal: int, paths: Dictionary) -> void:
     if int(ship.get("dest", -1)) == goal:
@@ -1878,11 +1943,11 @@ static func step(state: Dictionary, dt: float) -> void:
                 ship["combat_target"] = -1
                 ship["pursuit_target"] = -1
                 ship["pursuit_left"] = 0.0
-                _move({"map": combat_graph}, ship, dt)
+                _move_formation(combat_graph, ship, dt)
         var fighter: bool = ship.get("kind", "") == "fighter"
         var idle: bool = (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle"
         idle = idle and (int(ship.get("dest", -1)) < 0 or fighter) and int(ship.get("source", -1)) < 0
-        if idle and not _engaged(ship) and ship["position"] == initial_position:
+        if idle and not _engaged(ship) and ship["position"] == initial_position and (not fighter or int(ship.get("formation_size", 0)) < 2):
             var points: Array = combat_graph["points"] if fighter else state["map"]["points"]
             var center: Vector2 = points[int(ship["at"])]
             var slot: int = int(ship["id"]) % 64

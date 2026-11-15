@@ -11,12 +11,12 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [x] Visible territory overlay, time controls and mandatory parallel regression checks.
 
 ## Priority — Economy foundation
-- [ ] Verify bounded snapshot replication and eight-peer lobby return (v0.11.4 coalesces command snapshots and applies per-peer ACK backpressure).
-- [ ] Validate multi-resource ship costs and a starting stock sufficient for about twelve mixed hulls.
-- [ ] Validate baseline population-scaled production, local population gates for production upgrades (first Tech upgrade at 200k), and one-time Economy buildings with resource-specific percentage bonuses.
+- [x] Verify bounded snapshot replication and eight-peer lobby return (v0.11.5, PR #51; all mandatory checks passed).
+- [x] Validate multi-resource ship costs and a starting stock sufficient for about twelve mixed hulls.
+- [x] Validate baseline population-scaled production, local population gates for production upgrades (first Tech upgrade at 200k), and one-time Economy buildings with resource-specific percentage bonuses.
 - [ ] Playtest costs, output, trade, AI expansion, population pacing and building choices before choosing final balance.
-- [ ] Validate per-resource storage ceilings, three warehouse upgrades, linear consumption by population (all except Crystals), and zero starting Crystal production.
-- v0.11.3 prototype includes finite population-serving industrial capacity (Plastics, Textiles, Tech) so linear demand can catch up even below the storage ceiling; implements the above via existing authority commands and local inventories; check off after validation.
+- [x] Validate per-resource storage ceilings, three warehouse upgrades, linear consumption by population (all except Crystals), and zero starting Crystal production.
+- v0.11.5 validated and merged via PR #51. Prototype includes finite population-serving industrial capacity (Plastics, Textiles, Tech) so linear demand can catch up even below the storage ceiling; implements the above via existing authority commands and local inventories; Headless validation passed; visual playtesting and longer AI sustainability evaluation remain.
 
 ## Phase 1 — Autonomous military foundation
 - [ ] Rework military control into persistent fleet/operation groups shared by human and AI empires.
@@ -24,6 +24,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [ ] Automatically assemble sufficiently strong waves, rally reinforcements, coordinate departure and regroup survivors; extend the existing AI-only rally prototype.
   - v0.10.0 prototype: hostile-owned system allocations rally in groups of three at home, with additional cohorts and lone-survivor regrouping. Neutral and friendly assignments remain immediate; unified AI/human operation lifecycle and playtesting remain outstanding.
 - [ ] Generate formations of varying sizes based on fleet size and ship composition. Assign stable relative positions; smoothly re-form as membership changes without teleportation.
+  - v0.12.0 prototype: operation-level persistent disk slots, lane-relative waypoint offsets and stationary regrouping, shared by human and AI fighters. Combat/pursuit still override navigation. Full synchronized fleet pace, mixed hull roles and visual playtesting remain outstanding.
 - [ ] Allow combat ships to continue physically flying and maneuvering during combat; use authoritative world positions for range and movement, keep lane travel intact.
   - v0.10.1 prototype: fighters temporarily leave their lane to circle live opponents at a preferred engagement distance, then resume queued waypoints from the actual combat position. v0.10.3 pursuit and live render synchronization validated in PR #49. Formation integration and visual playtesting remain outstanding.
 - [ ] Have damaged ships automatically fall back; design safe withdrawal destinations, repair/recovery and rejoining. Decide individual versus fleet retreat triggers and prevent oscillation.

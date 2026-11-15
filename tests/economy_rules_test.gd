@@ -1059,4 +1059,41 @@ func _initialize() -> void:
     depot["population"] = 300000.0
     assert(ECON.rate(depot, "Tech") < ECON.consumption(depot, "Tech"))
     print("PASS: storage caps, three warehouse levels, no baseline crystals, linear consumption and industrial equilibrium")
+    # Formation slots are persistent, shared by AI/human operations, and
+    # actual world-space positions converge without exceeding ship speed.
+    var form: Dictionary = ECON.create(ai_map, players, ids)
+    var form_graph: Dictionary = ECON.military_graph(form)
+    var form_fleet: Array = []
+    for i in range(4):
+        form_fleet.append({"id": 1100 + i, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 0.0, "position": Vector2.ZERO, "dest": 3})
+    form["ships"] = form_fleet
+    ECON._sync_operations(form)
+    var form_key: String = "2:allocation:3"
+    var form_slots: Dictionary = form["operations"][form_key]["slots"].duplicate()
+    assert(form_slots.size() == 4)
+    var former: int = int(form_slots[1101])
+    form_fleet.remove_at(1)
+    ECON._sync_operations(form)
+    assert(int(form_fleet[1]["formation_slot"]) == int(form_slots[1102]))
+    form_fleet.append({"id": 1104, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 0.0, "position": Vector2.ZERO, "dest": 3})
+    ECON._sync_operations(form)
+    assert(int(form_fleet[-1]["formation_slot"]) == former)
+    for tick in range(130):
+        for craft in form_fleet:
+            var before: Vector2 = craft["position"]
+            ECON._move_formation(form_graph, craft, 0.1)
+            assert(before.distance_to(craft["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+    for craft in form_fleet:
+        assert(int(craft["at"]) == 3 and (craft["route"] as Array).is_empty())
+        assert((craft["position"] as Vector2).distance_to(ai_map["points"][3]) <= ECON.AI_RALLY_RADIUS)
+        for other in form_fleet:
+            if craft["id"] != other["id"]:
+                assert((craft["position"] as Vector2).distance_to(other["position"]) > 10.0)
+    var formation_replica: Dictionary = bytes_to_var(var_to_bytes(form))
+    assert(formation_replica["operations"][form_key]["slots"] == form["operations"][form_key]["slots"])
+    form["ai_players"] = [2]
+    form["ai_waves"][2] = {"members": [1100, 1102, 1103, 1104]}
+    ECON._sync_operations(form)
+    assert(form["operations"]["2:wave:3"]["slots"].size() == 4)
+    print("PASS: persistent formation slots, casualty/reinforcement, bounded movement and shared AI/human slots")
     quit(0)
