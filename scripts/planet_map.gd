@@ -127,6 +127,8 @@ static func generate(seed_value: int) -> Dictionary:
                 continue
             if not _edge_allowed(pair, degrees, MAX_JUNCTIONS - junctions):
                 continue
+            if degrees.count(1) - int(degrees[pair[0]] == 1) - int(degrees[pair[1]] == 1) < 2:
+                continue
             if blocked(points[pair[0]], points[pair[1]], fields):
                 continue
             var score: float = _edge_score(points, pair, degrees)
