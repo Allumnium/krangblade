@@ -460,11 +460,15 @@ static func _has_job(planet: Dictionary, kind: String, target: String) -> bool:
 static func _cost(kind: String, level: int) -> Dictionary:
     # Explicit prototype values; the final costs/recipes are intentionally undefined.
     match kind:
-        "ship": return {"Metals": 120.0, "Plastics": 25.0, "Textiles": 15.0, "Organics": 15.0, "Tech": 10.0}
-        "colony_ship": return {"Metals": 240.0, "Plastics": 40.0, "Textiles": 30.0, "Organics": 30.0, "Tech": 30.0}
-        "fighter": return {"Metals": 90.0, "Plastics": 20.0, "Textiles": 10.0, "Organics": 10.0, "Tech": 10.0}
-        "miner": return {"Metals": 180.0, "Plastics": 30.0, "Textiles": 15.0, "Organics": 20.0, "Tech": 20.0}
-        "yard": return {"Metals": 480.0}
+        "ship": return {"Metals": 360.0, "Plastics": 75.0, "Textiles": 45.0, "Organics": 45.0, "Tech": 30.0}
+        "colony_ship": return {"Metals": 720.0, "Plastics": 120.0, "Textiles": 90.0, "Organics": 90.0, "Tech": 90.0}
+        "fighter": return {"Metals": 270.0, "Plastics": 60.0, "Textiles": 30.0, "Organics": 30.0, "Tech": 30.0}
+        "miner": return {"Metals": 540.0, "Plastics": 90.0, "Textiles": 45.0, "Organics": 60.0, "Tech": 60.0}
+        "yard":
+            match level:
+                1: return {"Metals": 480.0}
+                2: return {"Metals": 2000.0, "Plastics": 500.0, "Textiles": 500.0, "Organics": 200.0, "Tech": 100.0, "Crystals": 100.0}
+                3: return {"Metals": 6000.0, "Plastics": 1500.0, "Textiles": 1500.0, "Organics": 600.0, "Tech": 300.0, "Crystals": 300.0}
         "yard_upgrade": return {"Metals": 180.0 * float(level) * float(level)}
         "production": return {"Metals": 150.0 * float(level) * float(level)}
     return {}
@@ -493,6 +497,17 @@ static func shipyard_count(p: Dictionary) -> int:
         if item["kind"] == "yard":
             count += 1
     return count
+
+# Reserve a specific numbered slot, even if an earlier order is cancelled.
+static func next_shipyard_slot(p: Dictionary) -> int:
+    var reserved: Dictionary = {}
+    for item in p.get("queue", []):
+        if item["kind"] == "yard":
+            reserved[int(item["level"])] = true
+    for slot in range((p.get("yards", []) as Array).size() + 1, MAX_SHIPYARDS + 1):
+        if not reserved.has(slot):
+            return slot
+    return 0
 
 # Gates apply to new local production orders, not completed infrastructure.
 # Early farming remains available, so capacity can grow toward the Tech gate.
@@ -557,7 +572,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
         "colony_ship", "fighter", "miner":
             target = ""
         "yard":
-            if shipyard_count(p) >= MAX_SHIPYARDS:
+            level = next_shipyard_slot(p)
+            if level == 0:
                 return false
             target = ""
         "yard_upgrade":
@@ -748,6 +764,8 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
         p["stock"][resource] = maxf(0.0, stored + minf(change, storage_free(p, resource)))
     # New yards and planetary production use infrastructure work, not an existing yard.
     for item in (p["queue"] as Array).duplicate():
+        if item["kind"] == "yard" and int(item["level"]) != (p["yards"] as Array).size() + 1:
+            continue
         if int(item["size"]) == 0 and item["kind"] != "yard_upgrade" and _advance(p, item, dt):
             _finish(state, index, p, item)
     _refill_continuous(state, index, p)
@@ -1608,7 +1626,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
                         break
         if action.is_empty():
             continue
-        var build_level: int = int(p["levels"][target]) + 1 if action == "production" else 1
+        var build_level: int = int(p["levels"][target]) + 1 if action == "production" else (next_shipyard_slot(p) if action == "yard" else 1)
         if not affordable(p, _cost(action, build_level)):
             continue
         if enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):

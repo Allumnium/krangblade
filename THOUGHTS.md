@@ -79,3 +79,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Provisional design / playtesting risk.
 - **Observation:** Individual withdrawal at 46 HP and free repair at 10 HP/year at a safe owned shipyard. Hostile fighters within two laser ranges prevent repair. No new withdrawal without a safe reachable site. Retreating fighters remain vulnerable and can be pursued.
 - **Consider:** Evaluate whether retreat reliably saves ships with equal opponent speed, and whether repair costs or fleet-wide withdrawal are needed. Verify recovered human and AI deployment in real battles.
+
+### T-017 — More expensive hulls and shipyards
+- **Type:** Balance hypothesis.
+- **Observation:** Triple hull costs with unchanged home stocks reduce the opening budget to about four mixed hulls. Second and third shipyards require Crystals; third costs 6k Metals, requiring sustained construction draws or larger storage. First shipyard retains its inexpensive colony-entry recipe.
+- **Consider:** Assess AI expansion and recovery, early player choices, and resource replenishment before changing other costs or starting inventory.
