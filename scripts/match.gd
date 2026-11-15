@@ -4,6 +4,7 @@ const MAP = preload("res://scripts/planet_map.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const PLANET = preload("res://assets/ui/planet.svg")
+const UPGRADE_SOUND = preload("res://assets/sfx/detail.wav")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77aafe"),
     Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
@@ -17,6 +18,9 @@ const MAX_ZOOM: float = 16.0
 const SNAPSHOT_SECONDS: float = 0.2
 
 var session: Node
+var upgrade_audio: AudioStreamPlayer
+var known_upgrade_jobs: Dictionary = {}
+var upgrade_audio_initialized: bool = false
 var map_canvas: Control
 var header_panel: PanelContainer
 var inspector_panel: PanelContainer
@@ -91,6 +95,9 @@ func _ready() -> void:
     session.connect("phase_changed", _refresh)
     session.connect("status_changed", _refresh)
     session.connect("economy_changed", _on_economy_changed)
+    upgrade_audio = AudioStreamPlayer.new()
+    upgrade_audio.stream = UPGRADE_SOUND
+    add_child(upgrade_audio)
     _build_ui()
     _on_economy_changed()
     session.call("match_scene_loaded")
@@ -1101,8 +1108,31 @@ func _ship_position(ship: Dictionary, points: Array) -> Vector2:
 func _visual_position(visual: Dictionary) -> Vector2:
     return (visual["from"] as Vector2).lerp(visual["to"], clampf(float(visual["age"]) / SNAPSHOT_SECONDS, 0.0, 1.0))
 
+# React to accepted orders in authority snapshots, not speculative UI clicks.
+# Only local system-production orders play audio; initial state is silent.
+func _sync_upgrade_audio(state: Dictionary) -> void:
+    if state.is_empty() or str(session.get("phase")) != "match":
+        return
+    var active: Dictionary = {}
+    var added: bool = false
+    for system in state.get("planets", []):
+        if int(system["owner"]) != _me():
+            continue
+        for job in system["queue"]:
+            if job["kind"] != "production":
+                continue
+            var id: int = int(job["id"])
+            active[id] = true
+            if not known_upgrade_jobs.has(id):
+                added = true
+    if upgrade_audio_initialized and added:
+        upgrade_audio.play()
+    known_upgrade_jobs = active
+    upgrade_audio_initialized = true
+
 func _on_economy_changed() -> void:
     var state: Dictionary = _state()
+    _sync_upgrade_audio(state)
     var updated: Dictionary = {}
     if not state.is_empty():
         var points: Array = state["map"]["points"]
