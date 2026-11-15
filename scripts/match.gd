@@ -375,20 +375,20 @@ func _build_ui() -> void:
     for resource in ECONOMY.RESOURCES:
         var logistics: VBoxContainer = HUD.section(trade_page, "")
         logistics.get_child(0).hide()
-        var row := HBoxContainer.new()
-        logistics.add_child(row)
+        var trade_row := HBoxContainer.new()
+        logistics.add_child(trade_row)
         var resource_icon := TextureRect.new()
         resource_icon.texture = HUD.ICONS[resource]
         resource_icon.custom_minimum_size = Vector2(18, 18)
         resource_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
         resource_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-        row.add_child(resource_icon)
+        trade_row.add_child(resource_icon)
         var name_label := _label(resource, 13)
         name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         name_label.add_theme_color_override("font_color", HUD.COLORS[resource])
-        row.add_child(name_label)
+        trade_row.add_child(name_label)
         var stock_label := _label("", 12)
-        row.add_child(stock_label)
+        trade_row.add_child(stock_label)
         trade_stock_labels[resource] = stock_label
         var slider := TradeRange.new()
         slider.custom_minimum_size.y = 56
