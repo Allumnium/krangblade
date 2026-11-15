@@ -653,7 +653,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
         status = "Mining field %02d\n%.1f / 5 yr" % [int(ship["field"]) + 1, minf(5.0, float(ship.get("mining_years", 0.0)))]
     if kind == "fighter":
         status = "Stationed at %s" % _poi_name(int(ship["at"])) if route.is_empty() else "%s\nETA %.1f yr" % [_poi_name(int(route.back())), _remaining_years(state, ship)]
-    if int(ship.get("combat_target", -1)) >= 0:
+    if int(ship.get("pursuit_target", -1)) >= 0:
+        status = "Pursuing"
+    elif int(ship.get("combat_target", -1)) >= 0:
         status = "Engaged"
     ship_detail.text = "%s\n%s\nHP %.0f / %.0f" % [str(roster.get(owner, {}).get("name", "Player")), status, float(ship.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
     ship_detail.tooltip_text = ""
@@ -1580,6 +1582,10 @@ func _on_economy_changed() -> void:
     var state: Dictionary = _state()
     _sync_upgrade_audio(state)
     _refresh_territory(state)
+    _sync_ship_visuals(state)
+    _refresh()
+
+func _sync_ship_visuals(state: Dictionary) -> void:
     var updated: Dictionary = {}
     if not state.is_empty():
         var points: Array = state["map"]["points"]
@@ -1597,7 +1603,6 @@ func _on_economy_changed() -> void:
     for id in ship_offsets.keys():
         if not updated.has(id):
             ship_offsets.erase(id)
-    _refresh()
 
 func _keyboard_pan(delta: float) -> void:
     if str(session.get("phase")) != "match" or match_menu.visible:
@@ -1646,6 +1651,7 @@ func _ship_scale() -> float:
     return SHIP_WORLD_SCALE * _fit() * zoom
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
+    _sync_ship_visuals(state)
     var points: Array = state["map"]["points"]
     var poses: Dictionary = {}
     for ship in state["ships"]:
@@ -1849,7 +1855,7 @@ func _draw_map() -> void:
             shape = PackedVector2Array([point + direction * 8 + side * 4, point + direction * 8 - side * 4, point - direction * 6 - side * 7, point - direction * 6 + side * 7])
         var physical: Vector2 = ship.get("position", Vector2.ZERO)
         var target: Vector2 = ship.get("navigation_target", physical)
-        if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (int(ship.get("combat_target", -1)) < 0) and physical.distance_to(target) > ECONOMY.EPS:
+        if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not ECONOMY._engaged(ship)) and physical.distance_to(target) > ECONOMY.EPS:
             var engine: Vector2 = point - direction * 9.0
             map_canvas.draw_circle(engine, 5.0 * scale, Color("#43a5ff30"), true)
             map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0 * scale, true)
