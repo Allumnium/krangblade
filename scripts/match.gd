@@ -2395,27 +2395,42 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
         if not get_viewport_rect().grow(radius + 80.0).has_point(pos):
             continue
         var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * zoom
-        var detailed: bool = spacing >= 150.0
-        if detailed:
-            var origin: Vector2 = pos + Vector2(-69, radius + 9)
-            map_canvas.draw_rect(Rect2(origin - Vector2(3, 3), Vector2(144, 38)), Color("#0c1928ec"))
-            for r in range(ECONOMY.RESOURCES.size()):
-                var resource: String = ECONOMY.RESOURCES[r]
-                var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 18.0)
-                map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13)), false)
-                map_canvas.draw_string(font, cell + Vector2(15, 11), _tons(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, HUD.COLORS[resource])
-        else:
-            # At wide zoom, compact resource-colored bars avoid dense labels.
-            var bar_width: float = clampf(spacing / 8.0, 2.0, 8.0)
-            var width: float = 6.0 * (bar_width + 1.0) - 1.0
-            var origin: Vector2 = pos + Vector2(-width * 0.5, radius + 5.0)
-            for r in range(ECONOMY.RESOURCES.size()):
-                var resource: String = ECONOMY.RESOURCES[r]
-                var fraction: float = clampf(float(system["stock"][resource]) / ECONOMY.storage_capacity(system), 0.0, 1.0)
-                var cell: Vector2 = origin + Vector2(float(r) * (bar_width + 1.0), 0)
-                map_canvas.draw_rect(Rect2(cell, Vector2(bar_width, 4)), Color("#263b50"))
-                if fraction > 0.0:
-                    map_canvas.draw_rect(Rect2(cell, Vector2(bar_width * fraction, 4)), HUD.COLORS[resource])
+        var scale: float = clampf(spacing / 150.0, 0.22, 1.0)
+        var origin: Vector2 = pos + Vector2(-69.0 * scale, radius + 5.0 * scale)
+        map_canvas.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(144, 38) * scale), Color("#0c1928ec"))
+        for r in range(ECONOMY.RESOURCES.size()):
+            var resource: String = ECONOMY.RESOURCES[r]
+            var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 18.0) * scale
+            var fraction: float = clampf(float(system["stock"][resource]) / ECONOMY.storage_capacity(system), 0.0, 1.0)
+            map_canvas.draw_rect(Rect2(cell, Vector2(44, 14) * scale), Color("#263b50"))
+            map_canvas.draw_rect(Rect2(cell, Vector2(44.0 * fraction, 14) * scale), HUD.COLORS[resource].darkened(0.4))
+            map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13) * scale), false)
+            if scale >= 0.8:
+                map_canvas.draw_string(font, cell + Vector2(15, 11) * scale, _tons(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+    # Loaded logistics hulls indicate traffic direction on the actual current leg.
+    for ship in state["ships"]:
+        if ship["kind"] != "ship" or (ship["route"] as Array).is_empty():
+            continue
+        var from: Vector2 = _screen_point(points[int(ship["at"])])
+        var toward: Vector2 = _screen_point(points[int(ship["route"][0])])
+        var axis: Vector2 = (toward - from).normalized()
+        var normal: Vector2 = Vector2(-axis.y, axis.x)
+        var center: Vector2 = _screen_point(ship["position"])
+        if not get_viewport_rect().grow(80.0).has_point(center):
+            continue
+        var row: int = 0
+        for resource in ECONOMY.RESOURCES:
+            var cargo: float = float(ship["cargo"][resource])
+            if cargo <= ECONOMY.EPS:
+                continue
+            var count: int = clampi(ceili(3.0 * cargo / ECONOMY.CARGO_CAPACITY), 1, 3)
+            var base: Vector2 = center + normal * (15.0 + 13.0 * row)
+            map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(base - axis * 17.0 - Vector2(5, 5), Vector2(10, 10)), false)
+            for k in range(count):
+                var tip: Vector2 = base + axis * float(k * 7)
+                map_canvas.draw_line(tip - axis * 5.0 + normal * 4.0, tip, HUD.COLORS[resource], 1.5, true)
+                map_canvas.draw_line(tip - axis * 5.0 - normal * 4.0, tip, HUD.COLORS[resource], 1.5, true)
+            row += 1
 
 func _draw_map() -> void:
     if session == null:
@@ -2451,6 +2466,8 @@ func _draw_map() -> void:
             map_canvas.draw_polyline(boundary, HUD.ACCENT if selected_field == field_index else Color("#b9ac7740"), 1.5, true)
         for chunk in field["chunks"]:
             var rock_pos: Vector2 = _screen_point(chunk["position"])
+            if not get_viewport_rect().grow(maxf(4.0, float(chunk["radius"]) * _fit() * zoom * 2.0)).has_point(rock_pos):
+                continue
             var fraction: float = float(chunk["remaining"]) / float(chunk["initial"])
             var rock_radius: float = maxf(1.3, float(chunk["radius"]) * _fit() * zoom * sqrt(fraction))
             var rock := PackedVector2Array()

@@ -71,3 +71,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Ship cards retain unlimited repeat and add finite origin-system maintain targets. Count living hulls plus queued work for replenishment; manual orders may exceed the target. Cancelling an order disables both automatic modes.
 
 - Local overview shows signed latest-step population change including crew allocation, with a live hover explaining demographic change, food equilibrium and crew costs. Resource rows share the live hover panel with local production, consumption, construction and physical deliveries.
+
+- Logistics lens uses consistent 3-by-2 stock/capacity bars at every zoom, with resource icons and directional one-to-three carets beside loaded logistics hulls based on cargo fraction.

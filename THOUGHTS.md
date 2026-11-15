@@ -145,3 +145,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-026 — Large match performance
 - Cached static military graph and lazy destination-indexed Dijkstra trees retain existing tie breaking without transmitting caches. Sparse graph makes this a practical alternative to Floyd–Warshall; profile before prewarming every destination. Civilian paths still require ownership-sensitive invalidation.
+
+- v0.14.4 adds asteroid off-screen culling and logistics capacity bars. Dense overlapping traffic indicators and shader spatial caching remain candidates for visual profiling.
