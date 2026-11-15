@@ -38,7 +38,10 @@ var outpost_button: Button
 var military_panel: VBoxContainer
 var military_split: VSlider
 var military_split_label: Label
-var military_lens: CheckBox
+var military_lens: Button
+var logistics_lens: Button
+var active_lens: String = ""
+var global_resource_fills: Dictionary = {}
 var frontier_list: VBoxContainer
 var frontier_rows: Dictionary = {}
 var military_drag: int = -2
@@ -231,6 +234,7 @@ func _build_ui() -> void:
     _build_global_bar(row)
     global_population_label = _global_stat(row, "POP  0", Color("#b2e2a9"))
     year_label = _global_stat(row, "YEAR  1", HUD.ACCENT)
+    _build_lens_buttons()
     match_menu = AcceptDialog.new()
     match_menu.title = "Menu"
     match_menu.theme = theme
@@ -680,6 +684,37 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
             fleet_cargo_labels[resource].tooltip_text = "%.1f" % amount
             fleet_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
 
+func _build_lens_buttons() -> void:
+    var lens_row := HBoxContainer.new()
+    add_child(lens_row)
+    lens_row.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+    lens_row.offset_left = -112
+    lens_row.offset_right = 112
+    lens_row.offset_top = HEADER_HEIGHT + 16
+    lens_row.offset_bottom = HEADER_HEIGHT + 48
+    lens_row.add_theme_constant_override("separation", 6)
+    military_lens = _button("MILITARY", _toggle_lens.bind("military"), lens_row)
+    logistics_lens = _button("LOGISTICS", _toggle_lens.bind("logistics"), lens_row)
+    for button in [military_lens, logistics_lens]:
+        button.toggle_mode = true
+        button.focus_mode = Control.FOCUS_NONE
+        button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    military_lens.tooltip_text = "Military outposts and frontiers"
+    logistics_lens.tooltip_text = "System resource storage"
+
+func _toggle_lens(kind: String) -> void:
+    active_lens = "" if active_lens == kind else kind
+    military_lens.set_pressed_no_signal(active_lens == "military")
+    logistics_lens.set_pressed_no_signal(active_lens == "logistics")
+    map_canvas.queue_redraw()
+
+func _draw_resource_fill(tile: PanelContainer, resource: String) -> void:
+    var fraction: float = float(global_resource_fills.get(resource, 0.0))
+    if fraction <= 0.0:
+        return
+    var inner: Vector2 = tile.size - Vector2(2.0, 2.0)
+    tile.draw_rect(Rect2(Vector2.ONE, Vector2(maxf(0.0, inner.x * fraction), maxf(0.0, inner.y))), Color(HUD.COLORS[resource], 0.18))
+
 func _build_global_bar(stats: Container) -> void:
     for resource in ECONOMY.RESOURCES:
         var tile := PanelContainer.new()
@@ -705,6 +740,8 @@ func _build_global_bar(stats: Container) -> void:
         line.add_child(value)
         global_resource_labels[resource] = value
         global_resource_tiles[resource] = tile
+        global_resource_fills[resource] = 0.0
+        tile.draw.connect(_draw_resource_fill.bind(tile, resource))
 
 func _global_stat(parent: Container, value: String, tint: Color) -> Label:
     var tile := PanelContainer.new()
@@ -737,8 +774,13 @@ func _refresh_global_bar(state: Dictionary) -> void:
         var magnitude: String = "%.1f" % absf(rate) if absf(rate) < 1000.0 else _compact_amount(absf(rate))
         var rate_text: String = ("-" if rate < -0.05 else "+") + magnitude
         global_resource_labels[resource].text = "%s (%s)" % [_compact_amount(value), rate_text]
-        global_resource_tiles[resource].tooltip_text = "%s: %.1f\nSystems: %.1f • Cargo: %.1f\nNet: %+.2f/year (last 5 years)" % [
-            resource, value, float(totals["stock"][resource]), float(totals["cargo"][resource]), rate]
+        var stored: float = float(totals["stock"][resource])
+        var reference: float = float(totals["storage_reference"][resource])
+        global_resource_fills[resource] = clampf(stored / reference, 0.0, 1.0) if reference > 0.0 else 0.0
+        var tile: PanelContainer = global_resource_tiles[resource]
+        tile.queue_redraw()
+        tile.tooltip_text = "%s: %.1f\nStored: %.1f / %.0f • Cargo: %.1f\nNet: %+.2f/year (last 5 years)\nStorage reference; not a hard capacity" % [
+            resource, value, stored, reference, float(totals["cargo"][resource]), rate]
     global_population_label.text = "POP  %s" % _compact_amount(float(totals["population"]))
     global_population_label.tooltip_text = "Population across owned systems: %.0f" % float(totals["population"])
 
@@ -1038,7 +1080,7 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
     var declared: bool = state.get("outposts", {}).get(_me(), {}).has(selected)
     outpost_button.text = "REMOVE OUTPOST" if declared else "DECLARE OUTPOST"
     outpost_button.disabled = not neutral or (not declared and not ECONOMY.can_declare_outpost(state, _me(), selected))
-    outpost_button.tooltip_text = "Patrol objective; requires a connection to your military network."
+    outpost_button.tooltip_text = "Patrol objective. Ships can visit once a route connects it to your military network."
     var choices: Array[int] = []
     var labels: Array[String] = []
     if neutral:
@@ -1067,11 +1109,6 @@ func _toggle_outpost() -> void:
 
 func _build_military_panel() -> void:
     military_panel = HUD.section(fleet_overview, "Fighters")
-    military_lens = CheckBox.new()
-    military_lens.text = "Combat lens"
-    military_lens.button_pressed = true
-    military_lens.toggled.connect(func(_enabled: bool) -> void: map_canvas.queue_redraw())
-    military_panel.add_child(military_lens)
     var split_row := HBoxContainer.new()
     military_panel.add_child(split_row)
     military_split = VSlider.new()
@@ -1484,8 +1521,7 @@ func _ship_poses(state: Dictionary) -> Dictionary:
     return poses
 
 func _draw_combat_lens(state: Dictionary, font: Font) -> void:
-    var craft: Dictionary = _selected_ship(state)
-    if craft.is_empty() or craft.get("kind", "") != "fighter" or int(craft["owner"]) != _me() or not military_lens.button_pressed:
+    if active_lens != "military":
         return
     var network: Dictionary = ECONOMY.military_network(state, _me())
     var points: Array = state["map"]["points"]
@@ -1500,11 +1536,46 @@ func _draw_combat_lens(state: Dictionary, font: Font) -> void:
         var frontier: bool = fronts.has(node)
         var tint: Color = Color("#e9a276") if frontier else HUD.ACCENT if network["distance"].has(node) else HUD.MUTED
         map_canvas.draw_arc(pos, radius + 8.0, 0.0, TAU, 48, tint, 2.0, true)
-        var tag: String = _system_name(int(node)) + (" · Frontier" if frontier else " · Outpost")
+        var tag: String = _system_name(int(node)) + (" · Frontier" if frontier else (" · Outpost" if network["distance"].has(node) else " · Unconnected"))
         var width: float = font.get_string_size(tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
         var anchor: Vector2 = pos + Vector2(-width * 0.5, -radius - 17.0)
         map_canvas.draw_rect(Rect2(anchor - Vector2(4, 13), Vector2(width + 8, 19)), Color("#0c1928ec"))
         map_canvas.draw_string(font, anchor, tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
+
+func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
+    if active_lens != "logistics":
+        return
+    var points: Array = state["map"]["points"]
+    for i in range(points.size()):
+        var system: Dictionary = state["planets"][i]
+        if int(system["owner"]) == 0 or not ECONOMY.discovered(state, _me(), "planets", i):
+            continue
+        var pos: Vector2 = _screen_point(points[i])
+        var radius: float = _planet_radius(i, state)
+        if not get_viewport_rect().grow(radius + 80.0).has_point(pos):
+            continue
+        var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * zoom
+        var detailed: bool = spacing >= 150.0
+        if detailed:
+            var origin: Vector2 = pos + Vector2(-69, radius + 9)
+            map_canvas.draw_rect(Rect2(origin - Vector2(3, 3), Vector2(144, 38)), Color("#0c1928ec"))
+            for r in range(ECONOMY.RESOURCES.size()):
+                var resource: String = ECONOMY.RESOURCES[r]
+                var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 18.0)
+                map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13)), false)
+                map_canvas.draw_string(font, cell + Vector2(15, 11), _compact_amount(float(system["stock"][resource])), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, HUD.COLORS[resource])
+        else:
+            # At wide zoom, compact resource-colored bars avoid dense labels.
+            var bar_width: float = clampf(spacing / 8.0, 2.0, 8.0)
+            var width: float = 6.0 * (bar_width + 1.0) - 1.0
+            var origin: Vector2 = pos + Vector2(-width * 0.5, radius + 5.0)
+            for r in range(ECONOMY.RESOURCES.size()):
+                var resource: String = ECONOMY.RESOURCES[r]
+                var fraction: float = clampf(float(system["stock"][resource]) / ECONOMY.TRADE_REFERENCE, 0.0, 1.0)
+                var cell: Vector2 = origin + Vector2(float(r) * (bar_width + 1.0), 0)
+                map_canvas.draw_rect(Rect2(cell, Vector2(bar_width, 4)), Color("#263b50"))
+                if fraction > 0.0:
+                    map_canvas.draw_rect(Rect2(cell, Vector2(bar_width * fraction, 4)), HUD.COLORS[resource])
 
 func _draw_map() -> void:
     if session == null:
@@ -1568,6 +1639,7 @@ func _draw_map() -> void:
         if i == selected:
             map_canvas.draw_string(font, pos + Vector2(-80, -radius - 8), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff"))
     _draw_combat_lens(state, font)
+    _draw_logistics_lens(state, font)
     var poses: Dictionary = _ship_poses(state)
     for ship in state["ships"]:
         if not poses.has(int(ship["id"])):
