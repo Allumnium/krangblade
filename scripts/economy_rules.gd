@@ -1107,27 +1107,36 @@ static func _find_chunk(field: Dictionary, id: int) -> Dictionary:
             return chunk
     return {}
 
-static func _mining_path(state: Dictionary, teams: Array[int], team: int, start: int, goal: int) -> Array[int]:
-    var accessible: Array[int] = teams.duplicate()
-    for i in range(accessible.size()):
-        if accessible[i] == 0:
-            accessible[i] = team
-    return MAP.path(state["map"], accessible, team, start, goal)
+static func _mining_path(state: Dictionary, teams: Array[int], team: int, start: int, goal: int, cache: Dictionary) -> Array[int]:
+    var key: String = "mine:%d:%d:%d" % [team, start, goal]
+    if not cache.has(key):
+        var accessible: Array[int] = teams.duplicate()
+        for i in range(accessible.size()):
+            if accessible[i] == 0:
+                accessible[i] = team
+        cache[key] = MAP.path(state["map"], accessible, team, start, goal)
+        var reverse: Array[int] = []
+        reverse.assign(cache[key])
+        reverse.reverse()
+        cache["mine:%d:%d:%d" % [team, goal, start]] = reverse
+    var path: Array[int] = []
+    path.assign(cache[key])
+    return path
 
-static func _mining_depot(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, anchor: int, resource: String) -> int:
+static func _mining_depot(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, anchor: int, resource: String, cache: Dictionary) -> int:
     var best: float = INF
     var chosen: int = -1
     for i in range((state["planets"] as Array).size()):
         var p: Dictionary = state["planets"][i]
         if int(p["owner"]) != int(ship["owner"]) or storage_free(p, resource) <= EPS:
             continue
-        var distance: float = MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, i))
+        var distance: float = MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, i, cache))
         if distance < best:
             best = distance
             chosen = i
     return chosen
 
-static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], _cache: Dictionary) -> void:
+static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
     var fields: Array = state["map"].get("fields", [])
     var owner: int = int(ship["owner"])
     var team: int = int(state["teams"].get(owner, 0))
@@ -1140,7 +1149,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
         if not discovered(state, owner, "fields", i) or _mining_resources(state, owner, i).is_empty():
             continue
         var anchor: int = int(field["anchor"])
-        var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor)
+        var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor, cache)
         if path.is_empty():
             continue
         var resources: Array[String] = _mining_resources(state, owner, i)
@@ -1149,10 +1158,10 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
         var depots: Dictionary = {}
         var return_distances: Dictionary = {}
         for resource in resources:
-            var depot: int = _mining_depot(state, ship, teams, team, anchor, resource)
+            var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache)
             depots[resource] = depot
             if depot >= 0:
-                return_distances[resource] = MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, depot))
+                return_distances[resource] = MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, depot, cache))
         for chunk in field.get("chunks", []):
             if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
                 continue
@@ -1175,11 +1184,15 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, budgets: Array, dt: float) -> void:
     var mode: String = str(ship.get("mining_mode", "idle"))
     if mode == "idle":
-        _choose_field(state, ship, teams, cache)
+        if float(state["elapsed"]) + EPS >= float(ship.get("next_mining_search", 0.0)):
+            _choose_field(state, ship, teams, cache)
+            # Idle fleets retry twice per game year instead of every tick.
+            ship["next_mining_search"] = float(state["elapsed"]) + 0.5
         return
     if mode == "delivery":
-        if _move(state, ship, dt):
-            _unload_miner(state, ship, teams)
+        if _move(state, ship, dt) and float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
+            _unload_miner(state, ship, teams, cache)
+            ship["next_unload_search"] = float(state["elapsed"]) + 0.5
         return
     var field_index: int = int(ship["field"])
     var field: Dictionary = state["map"]["fields"][field_index]
@@ -1232,9 +1245,9 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
         ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
         if (ship["position"] as Vector2) == origin:
             ship["mining_mode"] = "delivery"
-            _unload_miner(state, ship, teams)
+            _unload_miner(state, ship, teams, cache)
 
-static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]) -> void:
+static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
     var here: int = int(ship["at"])
     var owner: int = int(ship["owner"])
     var team: int = int(state["teams"].get(owner, 0))
@@ -1252,10 +1265,10 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
     for resource in MINED_RESOURCES:
         if float(ship["cargo"][resource]) <= EPS:
             continue
-        var depot: int = _mining_depot(state, ship, teams, team, here, resource)
+        var depot: int = _mining_depot(state, ship, teams, team, here, resource, cache)
         if depot >= 0 and depot != here:
             ship["dest"] = depot
-            _set_route(ship, _mining_path(state, teams, team, here, depot))
+            _set_route(ship, _mining_path(state, teams, team, here, depot, cache))
             return
     ship["dest"] = here
 
