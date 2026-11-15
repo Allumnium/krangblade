@@ -651,14 +651,14 @@ func _cancel() -> void:
 func _refresh() -> void:
     if is_instance_valid(map_canvas):
         map_canvas.queue_redraw()
-    if not is_instance_valid(heading):
+    if not is_instance_valid(year_label):
         return
     var state: Dictionary = _state()
     var phase: String = str(session.get("phase"))
     _refresh_global_bar(state)
-    leave.text = "MENU" if bool(session.get("is_solo")) else ("RETURN TO LOBBY" if multiplayer.is_server() else "LEAVE")
+    leave.text = "MENU" if bool(session.get("is_solo")) else ("LOBBY" if multiplayer.is_server() else "LEAVE")
     if phase == "loading":
-        leave.text = "CANCEL START" if multiplayer.is_server() else "LEAVE"
+        leave.text = "CANCEL" if multiplayer.is_server() else "LEAVE"
     var planets: Array = state.get("planets", [])
     if not initial_selection_done and not planets.is_empty():
         initial_selection_done = true
