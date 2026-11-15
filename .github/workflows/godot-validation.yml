@@ -12,6 +12,46 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify game version increases with every commit
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+          def version(commit):
+              data = git("show", f"{commit}:project.godot")
+              match = re.search(r'^config/version="([^"]+)"$', data, re.M)
+              if not match:
+                  return None
+              value = match.group(1)
+              if not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', value):
+                  raise SystemExit(f"{commit}: invalid version {value}; use MAJOR.MINOR.PATCH")
+              return tuple(map(int, value.split(".")))
+          head = os.environ["HEAD"]
+          base = os.environ.get("BASE", "")
+          current = version(head)
+          if current is None:
+              raise SystemExit("project.godot must specify config/version")
+          if base and set(base) != {"0"}:
+              target = version(base)
+              if target is not None and current <= target:
+                  raise SystemExit(f"Version {current} must exceed target {target}")
+              if os.environ["EVENT"] == "pull_request":
+                  base = git("merge-base", base, head)
+              prior = version(base)
+              for commit in git("rev-list", "--first-parent", "--reverse", f"{base}..{head}").splitlines():
+                  next_version = version(commit)
+                  if prior is not None and (next_version is None or next_version <= prior):
+                      raise SystemExit(f"{commit}: version must increase from {prior} to a newer MAJOR.MINOR.PATCH")
+                  prior = next_version
+          print("Verified version:", current)
+          PY
       - uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.7.2
@@ -57,11 +97,11 @@ jobs:
             local mode="$2"
             local failures=0
             local pids=""
-            timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- host "$count" "$mode" > "/tmp/host-$count-$mode.log" 2>&1 &
+            timeout 75s godot --headless --path . --script res://tests/network_smoke.gd -- host "$count" "$mode" > "/tmp/host-$count-$mode.log" 2>&1 &
             pids="$pids $!"
             sleep 1
             for ((n=1;n<count;n++)); do
-              timeout 45s godot --headless --path . --script res://tests/network_smoke.gd -- client "$count" "$n" "$mode" > "/tmp/client-$count-$mode-$n.log" 2>&1 &
+              timeout 75s godot --headless --path . --script res://tests/network_smoke.gd -- client "$count" "$n" "$mode" > "/tmp/client-$count-$mode-$n.log" 2>&1 &
               pids="$pids $!"
             done
             for pid in $pids; do

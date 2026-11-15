@@ -14,7 +14,7 @@ const HEADER_HEIGHT: float = 46.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
 const MIN_ZOOM: float = 0.5
-const MAX_ZOOM: float = 16.0
+const MAX_ZOOM: float = 64.0
 const SNAPSHOT_SECONDS: float = 0.2
 
 var session: Node
@@ -50,6 +50,7 @@ var ship_title: Label
 var ship_detail: Label
 var ship_cargo: VBoxContainer
 var ship_cargo_labels: Dictionary = {}
+var fleet_scroll: ScrollContainer
 var fleet_overview: VBoxContainer
 var fleet_title: Label
 var fleet_detail: Label
@@ -273,8 +274,14 @@ func _build_ui() -> void:
     ship_overview.add_child(ship_detail)
     ship_cargo = HUD.section(ship_overview, "Cargo")
     _build_cargo_rows(ship_cargo, ship_cargo_labels)
+    fleet_scroll = ScrollContainer.new()
+    fleet_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    fleet_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    body.add_child(fleet_scroll)
     fleet_overview = VBoxContainer.new()
-    body.add_child(fleet_overview)
+    fleet_overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    fleet_overview.add_theme_constant_override("separation", 8)
+    fleet_scroll.add_child(fleet_overview)
     fleet_title = _label("", 19)
     fleet_overview.add_child(fleet_title)
     fleet_detail = _label("", 14)
@@ -459,11 +466,16 @@ func _build_production_summary() -> void:
         icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
         row.add_child(icon)
         var name_label := _label(resource, 12)
+        name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
         name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         row.add_child(name_label)
         var level := _label("", 12)
+        level.autowrap_mode = TextServer.AUTOWRAP_OFF
+        level.custom_minimum_size.x = 32
+        level.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(level)
         var rate_label := _label("", 12)
+        rate_label.autowrap_mode = TextServer.AUTOWRAP_OFF
         rate_label.custom_minimum_size.x = 55
         rate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(rate_label)
@@ -567,9 +579,14 @@ func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
         icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
         row.add_child(icon)
         var title := _label(resource, 12)
+        title.autowrap_mode = TextServer.AUTOWRAP_OFF
         title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         row.add_child(title)
-        var amount := _label("0", 12)
+        var amount := _label("0.0", 12)
+        amount.autowrap_mode = TextServer.AUTOWRAP_OFF
+        amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        amount.custom_minimum_size.x = 54
+        amount.add_theme_color_override("font_color", HUD.COLORS[resource])
         row.add_child(amount)
         labels[resource] = amount
 
@@ -642,6 +659,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
     elif mode == "mining":
         status = "Mining field %02d\n%.1f / 5 yr" % [int(ship["field"]) + 1, minf(5.0, float(ship.get("mining_years", 0.0)))]
     ship_detail.text = "%s\n%s" % [str(roster.get(owner, {}).get("name", "Player")), status]
+    ship_detail.tooltip_text = ""
     var cargo_capable: bool = kind in ["ship", "miner"]
     ship_cargo.get_parent().visible = cargo_capable
     if cargo_capable:
@@ -669,13 +687,15 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
             working += 1
         for resource in ECONOMY.RESOURCES:
             cargo[resource] = float(cargo[resource]) + float(craft["cargo"].get(resource, 0.0))
-    fleet_detail.text = "%d ships\n%d traveling · %d idle" % [total, traveling, total - traveling - working]
+    fleet_detail.text = "%d %s\n%d traveling · %d idle" % [total, "ship" if total == 1 else "ships", traveling, total - traveling - working]
     if kind == "miner":
         fleet_detail.text += "\n%d mining" % working
     fleet_detail.tooltip_text = "Your empire"
     if cargo_capable:
         for resource in ECONOMY.RESOURCES:
-            fleet_cargo_labels[resource].text = "%.1f" % float(cargo[resource])
+            var amount: float = float(cargo[resource])
+            fleet_cargo_labels[resource].text = _compact_amount(amount) if amount >= 1000.0 else "%.1f" % amount
+            fleet_cargo_labels[resource].tooltip_text = "%.1f" % amount
             fleet_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
 
 func _build_global_bar(stats: Container) -> void:
@@ -829,6 +849,7 @@ func _refresh() -> void:
     planet_overview.visible = not other_selected
     inspector_tabs.visible = not other_selected
     ship_overview.visible = other_selected
+    fleet_scroll.visible = other_selected
     fleet_overview.visible = other_selected
     if field_selected:
         _refresh_field_panels(state)
@@ -870,7 +891,9 @@ func _refresh() -> void:
     environment_label.tooltip_text = "Natural production modifiers; advanced manufacturing is reserved for future recipes."
     for resource in ECONOMY.RESOURCES:
         production_values[resource]["level"].text = "Lv %d" % int(p["levels"][resource])
-        production_values[resource]["rate"].text = "%.1f/yr" % ECONOMY.rate(p, resource)
+        var annual: float = ECONOMY.rate(p, resource)
+        production_values[resource]["rate"].text = (_compact_amount(annual) if annual >= 1000.0 else "%.1f" % annual) + "/yr"
+        production_values[resource]["rate"].tooltip_text = "%.2f/yr" % annual
     var population: float = float(p["population"])
     population_label.text = "Population %s\n%+.0f/yr" % [_compact_amount(population), ECONOMY.population_growth(p)]
     population_label.tooltip_text = "%.0f people" % population
@@ -1126,12 +1149,48 @@ func _planet_radius(index: int, state: Dictionary) -> float:
     var system: Dictionary = state["planets"][index]
     var ideal: float = RADIUS * float(system.get("size_factor", 1.0)) * zoom
     var spacing: float = float(_system_visual(index, state)["spacing"]) * _fit() * zoom
-    return clampf(minf(ideal, spacing * 0.39), 4.0, 200.0)
+    return clampf(minf(ideal, spacing * 0.39), 4.0, 720.0)
 
 func _body_position(body: Dictionary, radius: float, time: float) -> Vector2:
     return Vector2.from_angle(float(body["phase"]) + time * float(body["speed"]) * 0.22) * radius * float(body["orbit"])
 
+# Generate a unique shaded surface once per visible body; no separate highlight dot.
+func _body_texture(body: Dictionary) -> Texture2D:
+    if body.has("texture"):
+        return body["texture"]
+    var noise := FastNoiseLite.new()
+    noise.seed = int(body["surface_seed"])
+    noise.frequency = 0.065
+    noise.fractal_octaves = 3
+    var image := Image.create(96, 96, false, Image.FORMAT_RGBA8)
+    var material: String = body["resource"]
+    var base: Color = HUD.COLORS.get(material, Color("#7d8b9b"))
+    base = base.lerp(Color("#7b8790"), float(body["muted"]))
+    var light := Vector3(-0.55, -0.45, 0.70).normalized()
+    var angle: float = float(body["surface_angle"])
+    var bands: bool = bool(body["bands"])
+    for y in range(96):
+        for x in range(96):
+            var q := (Vector2(x + 0.5, y + 0.5) - Vector2(48, 48)) / 47.0
+            var rr: float = q.length_squared()
+            if rr >= 1.0:
+                continue
+            var z: float = sqrt(1.0 - rr)
+            var uv: Vector2 = q.rotated(angle)
+            var grain: float = noise.get_noise_2d(uv.x * 90.0 + 300.0 * z, uv.y * 90.0)
+            var terrain: float = grain * 0.7
+            if bands:
+                terrain = sin(uv.y * 29.0 + grain * 2.0) * 0.24 + grain * 0.2
+            var diffuse: float = maxf(0.0, Vector3(q.x, q.y, z).dot(light))
+            var color: Color = base.lerp(Color("#d6e1e9"), maxf(0.0, terrain) * 0.7).darkened(clampf(0.74 - diffuse * 0.64 - terrain * 0.18, 0.0, 0.85))
+            color.a = clampf((1.0 - sqrt(rr)) * 47.0, 0.0, 1.0)
+            image.set_pixel(x, y, color)
+    body["texture"] = ImageTexture.create_from_image(image)
+    return body["texture"]
+
 func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
+    if not get_viewport_rect().grow(radius + 32.0).has_point(pos):
+        return
     var system: Dictionary = state["planets"][index]
     var color: Color = _planet_color(system)
     var star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
@@ -1141,12 +1200,12 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
             var orbit: float = radius * float(body["orbit"])
             map_canvas.draw_arc(pos, orbit, 0.0, TAU, 48, Color(tint, 0.24), 0.8, true)
             var point: Vector2 = pos + _body_position(body, radius, visual_clock)
-            var material: String = body["resource"]
-            var body_color: Color = HUD.COLORS.get(material, Color("#7d8b9b"))
             var body_radius: float = maxf(2.1, radius * float(body["size"]))
-            map_canvas.draw_circle(point, body_radius, body_color.darkened(0.4), true)
-            map_canvas.draw_texture_rect(PLANET, Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(body_color.lightened(0.45), 0.8))
-            map_canvas.draw_circle(point - (point - pos).normalized() * body_radius * 0.27, body_radius * 0.35, Color(body_color.lightened(0.4), 0.55), true)
+            if get_viewport_rect().grow(body_radius).has_point(point):
+                if body_radius >= 5.0:
+                    map_canvas.draw_texture_rect(_body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false)
+                else:
+                    map_canvas.draw_circle(point, body_radius, HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), true)
     var pulse: float = 0.96 + 0.04 * sin(visual_clock * 1.2 + float(index))
     for layer in range(5, 0, -1):
         map_canvas.draw_circle(pos, star_radius * (1.0 + float(layer) * 0.33) * pulse, Color(star_color, 0.05), true)
@@ -1194,7 +1253,7 @@ func _select_at(point: Vector2) -> void:
         if distance <= 12.0 and distance < ship_distance:
             ship_distance = distance
             ship_hit = int(id)
-    selected_ship_id = ship_hit if hit < 0 or nearest > 5.0 else -1
+    selected_ship_id = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
     selected_field = -1
     if selected_ship_id < 0 and hit < 0:
         var fields: Array = state["map"].get("fields", [])
