@@ -492,23 +492,59 @@ static func set_continuous(state: Dictionary, player: int, index: int, kind: Str
 
 static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> void:
     var keys: Array = p["continuous"].keys()
-    if keys.is_empty():
-        return
-    var start: int = int(p.get("continuous_cursor", 0)) % keys.size()
-    for offset in range(keys.size()):
-        var slot: int = (start + offset) % keys.size()
-        var key: String = str(keys[slot])
+    # Shipyards share one repeat cycle. Once every turn has started, the next
+    # cycle may start on any idle shipyard, even while a slower hull is active.
+    # Independent infrastructure upgrades must not consume turns in this cycle.
+    var active: Dictionary = {}
+    var idle: bool = false
+    for yard in p["yards"]:
+        var id: int = int(yard["job"])
+        if id < 0:
+            idle = true
+        else:
+            active[id] = true
+    var waiting: bool = false
+    var manual_hulls: Dictionary = {}
+    for item in p["queue"]:
+        if int(item["size"]) <= 0:
+            continue
+        if bool(item.get("automatic", false)):
+            if not active.has(int(item["id"])):
+                waiting = true
+        else:
+            manual_hulls[item["kind"]] = true
+    var cycle: Dictionary = p.get("repeat_cycle", {})
+    if not waiting and idle:
+        cycle.clear()
+    for key in cycle.keys():
+        if not bool(p["continuous"].get(key, false)):
+            cycle.erase(key)
+    for key in keys:
         if not bool(p["continuous"][key]):
             continue
-        var order: Array = _continuous_target(p, key)
-        if order.is_empty() or _has_job(p, order[0], order[1]):
+        var order: Array = _continuous_target(p, str(key))
+        if order.is_empty():
             continue
-        if SHIP_KINDS.has(order[0]) and (p["yards"] as Array).is_empty():
+        if SHIP_KINDS.has(order[0]):
+            if (p["yards"] as Array).is_empty() or cycle.has(key) or manual_hulls.has(key):
+                continue
+            # Do not duplicate a waiting order if its repeat toggle was
+            # switched off and on during the same cycle.
+            var existing: bool = false
+            for item in p["queue"]:
+                if item["kind"] == key and not active.has(int(item["id"])):
+                    existing = true
+                    break
+            if existing:
+                cycle[key] = true
+                continue
+        elif _has_job(p, order[0], order[1]):
             continue
         if enqueue(state, int(p["owner"]), index, order[0], order[1]):
-            # Each repeated order joins the tail, after every existing turn.
             p["queue"][-1]["automatic"] = true
-            p["continuous_cursor"] = (slot + 1) % keys.size()
+            if SHIP_KINDS.has(order[0]):
+                cycle[key] = true
+    p["repeat_cycle"] = cycle
 
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
     var p: Dictionary = _get_owned(state, player, index)

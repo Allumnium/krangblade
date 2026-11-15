@@ -429,6 +429,25 @@ func _initialize() -> void:
     assert(parallel_home["yards"][0]["job"] != parallel_home["yards"][1]["job"])
     assert(float(parallel_home["queue"][0]["progress"]) > 0.0)
     assert(float(parallel_home["queue"][1]["progress"]) > 0.0)
+    # Different shipyard speeds and build durations must not give the faster
+    # hull type extra starts. Observe assigned jobs, not completion order.
+    parallel_home["yards"][0]["level"] = 3
+    var started_ids: Dictionary = {}
+    var starts: Array[String] = []
+    for tick in range(60):
+        for yard in parallel_home["yards"]:
+            var id: int = int(yard["job"])
+            if id < 0 or started_ids.has(id):
+                continue
+            for job in parallel_home["queue"]:
+                if int(job["id"]) == id:
+                    started_ids[id] = true
+                    starts.append(str(job["kind"]))
+                    break
+        ECON.step(parallel_repeat, 0.1)
+    assert(starts.size() >= 4)
+    for i in range(starts.size()):
+        assert(starts[i] == ["fighter", "miner"][i % 2])
 
     # Automatic system and shipyard upgrades use the shared scheduler.
     var upgrades: Dictionary = ECON.create(graph, players, ids)
