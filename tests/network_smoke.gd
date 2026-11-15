@@ -89,8 +89,8 @@ func _phase_changed() -> void:
         if role == "host":
             if mode == "host-leave":
                 create_timer(1.0).timeout.connect(func() -> void: session.call("leave_session"))
-            else:
-                create_timer(12.0).timeout.connect(func() -> void: session.call("return_to_lobby"))
+            elif mode == "normal":
+                create_timer(0.25).timeout.connect(_return_after_all_verified)
     elif phase == "lobby" and saw_loading and not finishing:
         if (mode == "drop-loading" and role == "host") or (mode == "normal" and saw_match):
             if mode == "normal" and not economy_verified:
@@ -229,8 +229,27 @@ func _check_economy_sync() -> void:
                     _fail("Replicated inventory or thresholds do not match the trade bars.")
                     return
             economy_verified = true
+            # A normal game command is the completion acknowledgment. Return
+            # only after each real peer has independently verified its replica.
+            session.call("request_thresholds", home_index, "Plastics", 11.0, 22.0)
     if not economy_verified:
         create_timer(0.25).timeout.connect(_check_economy_sync)
+
+func _return_after_all_verified() -> void:
+    if str(session.get("phase")) != "match":
+        return
+    var state: Dictionary = session.get("economy")
+    var confirmed: int = 0
+    for system in state.get("planets", []):
+        if not bool(system["home"]):
+            continue
+        var ack: Dictionary = system["thresholds"]["Plastics"]
+        if is_equal_approx(float(ack["min"]), 11.0) and is_equal_approx(float(ack["max"]), 22.0):
+            confirmed += 1
+    if economy_verified and confirmed == expected_players:
+        session.call("return_to_lobby")
+    else:
+        create_timer(0.25).timeout.connect(_return_after_all_verified)
 
 # Do not close the host while guests are still receiving the lobby transition.
 # Every guest must independently pass its own checks before exiting.
