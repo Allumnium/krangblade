@@ -37,6 +37,11 @@ var colony_button: Button
 var colony_choices: Array[int] = []
 var selected: int = -1
 var selected_ship_id: int = -1
+var selected_field: int = -1
+var mining_controls: VBoxContainer
+var mining_enabled: CheckBox
+var mining_metals: CheckBox
+var mining_crystals: CheckBox
 var planet_overview: VBoxContainer
 var ship_overview: VBoxContainer
 var ship_title: Label
@@ -206,6 +211,19 @@ func _build_ui() -> void:
     fleet_overview.add_child(fleet_detail)
     fleet_cargo = HUD.section(fleet_overview, "Cargo")
     _build_cargo_rows(fleet_cargo, fleet_cargo_labels)
+    mining_controls = HUD.section(fleet_overview, "Mine")
+    mining_enabled = CheckBox.new()
+    mining_enabled.text = "Enabled"
+    mining_controls.add_child(mining_enabled)
+    mining_metals = CheckBox.new()
+    mining_metals.text = "Metals"
+    mining_controls.add_child(mining_metals)
+    mining_crystals = CheckBox.new()
+    mining_crystals.text = "Crystals"
+    mining_controls.add_child(mining_crystals)
+    for check in [mining_enabled, mining_metals, mining_crystals]:
+        check.toggled.connect(func(_value: bool) -> void: _apply_mining_policy())
+    mining_controls.get_parent().hide()
     info = _label("", 19)
     planet_overview.add_child(info)
     environment_label = _label("", 12)
@@ -458,7 +476,29 @@ func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
         path.append(int(index))
     return maxf(0.0, MAP.route_length(state["map"], path) - float(ship["leg"])) / ECONOMY.SHIP_SPEED
 
+func _apply_mining_policy() -> void:
+    if selected_field >= 0:
+        session.call("request_mining_policy", selected_field, mining_enabled.button_pressed, mining_metals.button_pressed, mining_crystals.button_pressed)
+
+func _refresh_field_panels(state: Dictionary) -> void:
+    var field: Dictionary = state["map"]["fields"][selected_field]
+    ship_title.text = "Asteroid field %02d" % (selected_field + 1)
+    var total: float = float(field["Metals"]) + float(field["Crystals"])
+    ship_detail.text = "Metals ~%d%%\nCrystals ~%d%%\n\nService planet %02d" % [roundi(100.0 * float(field["Metals"]) / total), roundi(100.0 * float(field["Crystals"]) / total), int(field["anchor"]) + 1]
+    ship_cargo.get_parent().hide()
+    fleet_title.text = "Mining"
+    fleet_detail.hide()
+    fleet_cargo.get_parent().hide()
+    mining_controls.get_parent().show()
+    var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field)
+    mining_enabled.set_pressed_no_signal(bool(policy["enabled"]))
+    mining_metals.set_pressed_no_signal(bool(policy["Metals"]))
+    mining_crystals.set_pressed_no_signal(bool(policy["Crystals"]))
+    mining_metals.disabled = not mining_enabled.button_pressed
+    mining_crystals.disabled = not mining_enabled.button_pressed
+
 func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
+    mining_controls.get_parent().hide()
     var kind: String = ship.get("kind", "ship")
     var owner: int = int(ship["owner"])
     var roster: Dictionary = session.get("players")
@@ -653,13 +693,18 @@ func _refresh() -> void:
     if ship.is_empty():
         selected_ship_id = -1
     var p: Dictionary = _planet()
+    var field_selected: bool = selected_field >= 0 and ECONOMY.discovered(state, _me(), "fields", selected_field)
     var ship_selected: bool = not ship.is_empty()
-    inspector_panel.visible = not p.is_empty() or ship_selected
+    var other_selected: bool = ship_selected or field_selected
+    inspector_panel.visible = not p.is_empty() or other_selected
     overview_panel.visible = inspector_panel.visible
-    planet_overview.visible = not ship_selected
-    inspector_tabs.visible = not ship_selected
-    ship_overview.visible = ship_selected
-    fleet_overview.visible = ship_selected
+    planet_overview.visible = not other_selected
+    inspector_tabs.visible = not other_selected
+    ship_overview.visible = other_selected
+    fleet_overview.visible = other_selected
+    if field_selected:
+        _refresh_field_panels(state)
+        return
     if ship_selected:
         _refresh_ship_panels(state, ship)
         return
@@ -936,6 +981,8 @@ func _select_at(point: Vector2) -> void:
     var nearest: float = INF
     var hit: int = -1
     for i in range(points.size()):
+        if not ECONOMY.discovered(state, _me(), "planets", i):
+            continue
         var distance: float = point.distance_to(_screen_point(points[i]))
         if distance <= _planet_radius(i, state) + 4.0 and distance < nearest:
             nearest = distance
@@ -950,7 +997,17 @@ func _select_at(point: Vector2) -> void:
             ship_distance = distance
             ship_hit = int(id)
     selected_ship_id = ship_hit if hit < 0 or nearest > 5.0 else -1
-    selected = -1 if selected_ship_id >= 0 else hit
+    selected_field = -1
+    if selected_ship_id < 0 and hit < 0:
+        var fields: Array = state["map"].get("fields", [])
+        for i in range(fields.size()):
+            if not ECONOMY.discovered(state, _me(), "fields", i):
+                continue
+            var distance: float = point.distance_to(_screen_point(fields[i]["position"]))
+            if distance <= maxf(9.0, float(fields[i]["radius"]) * _fit() * zoom):
+                selected_field = i
+                break
+    selected = -1 if selected_ship_id >= 0 or selected_field >= 0 else hit
     var focused: Control = get_viewport().gui_get_focus_owner()
     if is_instance_valid(focused):
         focused.release_focus()
@@ -1058,6 +1115,8 @@ func _ship_poses(state: Dictionary) -> Dictionary:
 
     for ship in state["ships"]:
         var at: int = int(ship["at"])
+        if int(ship["owner"]) != _me() and not ECONOMY.discovered(state, _me(), "planets", at):
+            continue
         var route: Array = ship["route"]
         var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
         var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
@@ -1098,7 +1157,8 @@ func _draw_map() -> void:
     for edge in state["map"]["edges"]:
         var a: int = int(edge[0])
         var b: int = int(edge[1])
-        var color: Color = COLORS[teams[a]].darkened(0.3) if teams[a] > 0 and teams[a] == teams[b] else Color("#40566b")
+        var known: bool = ECONOMY.discovered(state, _me(), "planets", a) and ECONOMY.discovered(state, _me(), "planets", b)
+        var color: Color = COLORS[teams[a]].darkened(0.3) if known and teams[a] > 0 and teams[a] == teams[b] else Color("#40566b")
         var a_pos: Vector2 = _screen_point(points[a])
         var b_pos: Vector2 = _screen_point(points[b])
         map_canvas.draw_line(a_pos, b_pos, Color(color, 0.10), 7.0, true)
@@ -1108,11 +1168,14 @@ func _draw_map() -> void:
     for field_index in range(fields.size()):
         var field: Dictionary = fields[field_index]
         var center: Vector2 = _screen_point(field["position"])
+        if not ECONOMY.discovered(state, _me(), "fields", field_index):
+            map_canvas.draw_string(font, center + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
+            continue
         var radius: float = float(field["radius"]) * _fit() * zoom
         var anchor: Vector2 = _screen_point(points[int(field["anchor"])])
         map_canvas.draw_dashed_line(anchor, center, Color("#a9a27675"), 1.0, 4.0)
         map_canvas.draw_circle(center, radius, Color("#7b79652b"), true)
-        map_canvas.draw_arc(center, radius, 0.0, TAU, 32, Color("#b9ac776f"), 1.0, true)
+        map_canvas.draw_arc(center, radius, 0.0, TAU, 32, HUD.ACCENT if selected_field == field_index else Color("#b9ac776f"), 2.0 if selected_field == field_index else 1.0, true)
         for j in range(15):
             var angle: float = float(j) * 2.399963 + float(field_index)
             var rock_pos: Vector2 = center + Vector2.from_angle(angle) * radius * sqrt(float(j + 1) / 16.0)
@@ -1123,6 +1186,9 @@ func _draw_map() -> void:
             map_canvas.draw_colored_polygon(rock, Color("#9a9479") if j % 3 != 0 else Color("#ba98d4"))
     for i in range(points.size()):
         var pos: Vector2 = _screen_point(points[i])
+        if not ECONOMY.discovered(state, _me(), "planets", i):
+            map_canvas.draw_string(font, pos + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
+            continue
         var radius: float = _planet_radius(i, state)
         var tint: Color = COLORS[teams[i]]
         map_canvas.draw_circle(pos, radius + 7, Color(tint, 0.055), true)
@@ -1142,6 +1208,8 @@ func _draw_map() -> void:
             map_canvas.draw_string(font, pos + Vector2(-20, 4), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 40, 11, Color("#f4faff"))
     var poses: Dictionary = _ship_poses(state)
     for ship in state["ships"]:
+        if not poses.has(int(ship["id"])):
+            continue
         var pose: Dictionary = poses[int(ship["id"])]
         var point: Vector2 = pose["point"]
         var direction: Vector2 = pose["direction"]

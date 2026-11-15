@@ -544,6 +544,23 @@ func _thresholds_for(id: int, index: int, resource: String, minimum: float, maxi
     if _active_player(id) and ECONOMY.set_thresholds(economy, id, index, resource, minimum, maximum):
         _publish_economy()
 
+func request_mining_policy(index: int, enabled: bool, metals: bool, crystals: bool) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _mining_policy_for(1, index, enabled, metals, crystals)
+    else:
+        _rpc_mining_policy.rpc_id(1, index, enabled, metals, crystals)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_mining_policy(index: int, enabled: bool, metals: bool, crystals: bool) -> void:
+    if multiplayer.is_server():
+        _mining_policy_for(multiplayer.get_remote_sender_id(), index, enabled, metals, crystals)
+
+func _mining_policy_for(id: int, index: int, enabled: bool, metals: bool, crystals: bool) -> void:
+    if _active_player(id) and ECONOMY.set_mining_policy(economy, id, index, enabled, metals, crystals):
+        _publish_economy()
+
 func _economy_tick() -> void:
     if phase != "match" or not (is_solo or multiplayer.is_server()):
         return

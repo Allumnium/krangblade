@@ -213,6 +213,28 @@ func _run() -> void:
     mouse.position = view.call("_screen_point", points[0])
     view.call("_map_input", mouse)
     assert(int(view.get("selected")) == 0 and tabs.visible)
+    var explored: Dictionary = state["explored"][1]
+    var unknown: int = -1
+    for i in range(points.size()):
+        if not explored["planets"].has(i):
+            unknown = i
+            break
+    assert(unknown >= 0)
+    mouse.position = view.call("_screen_point", points[unknown])
+    view.call("_map_input", mouse)
+    assert(int(view.get("selected")) == -1)
+    # Select a discovered field and change its actual simulation policy.
+    if not (state["map"]["fields"] as Array).is_empty():
+        explored["fields"][0] = true
+        mouse.position = view.call("_screen_point", state["map"]["fields"][0]["position"])
+        view.call("_map_input", mouse)
+        assert(int(view.get("selected_field")) == 0)
+        var metals: CheckBox = view.get("mining_metals")
+        assert(metals.button_pressed)
+        metals.button_pressed = false
+        assert(not state["mining_policies"][1][0]["Metals"])
+        mouse.position = Vector2(-10000, -10000)
+        view.call("_map_input", mouse)
     # A consumed/disappearing ship clears its selection, rather than leaving stale details.
     view.set("selected", -1)
     view.set("selected_ship_id", logistics_id)

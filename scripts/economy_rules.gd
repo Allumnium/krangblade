@@ -40,7 +40,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
     var teams: Dictionary = {}
     for id in ordered:
         teams[id] = int(players[id]["team"])
-    for i in range(MAP.COUNT):
+    for i in range((map_data["points"] as Array).size()):
         var stock: Dictionary = empty_stock()
         var levels: Dictionary = empty_stock()
         var abundance: Dictionary = {}
@@ -72,7 +72,59 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
         planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
             "abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
             "yards": yards, "queue": []})
-    return {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0}
+    var state: Dictionary = {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "explored": {}, "mining_policies": {}}
+    update_exploration(state)
+    return state
+
+static func discovered(state: Dictionary, player: int, kind: String, index: int) -> bool:
+    var team: int = int(state.get("teams", {}).get(player, 0))
+    return bool(state.get("explored", {}).get(team, {}).get(kind, {}).get(index, false))
+
+static func _survey(state: Dictionary, team: int, index: int) -> void:
+    if team <= 0:
+        return
+    var explored: Dictionary = state["explored"]
+    if not explored.has(team):
+        explored[team] = {"planets": {}, "fields": {}}
+    var knowledge: Dictionary = explored[team]
+    knowledge["planets"][index] = true
+    # Local surveys reveal neighboring worlds from the route endpoint.
+    for edge in state["map"]["edges"]:
+        if int(edge[0]) == index:
+            knowledge["planets"][edge[1]] = true
+        elif int(edge[1]) == index:
+            knowledge["planets"][edge[0]] = true
+    var fields: Array = state["map"].get("fields", [])
+    for i in range(fields.size()):
+        if int(fields[i]["anchor"]) == index:
+            knowledge["fields"][i] = true
+
+static func update_exploration(state: Dictionary) -> void:
+    for i in range((state["planets"] as Array).size()):
+        var team: int = int(state["teams"].get(int(state["planets"][i]["owner"]), 0))
+        if team > 0:
+            _survey(state, team, i)
+
+static func mining_policy(state: Dictionary, player: int, index: int) -> Dictionary:
+    return state.get("mining_policies", {}).get(player, {}).get(index, {"enabled": true, "Metals": true, "Crystals": true})
+
+static func set_mining_policy(state: Dictionary, player: int, index: int, enabled: bool, metals: bool, crystals: bool) -> bool:
+    if not state["teams"].has(player) or index < 0 or index >= (state["map"].get("fields", []) as Array).size() or not discovered(state, player, "fields", index):
+        return false
+    var policies: Dictionary = state["mining_policies"]
+    if not policies.has(player):
+        policies[player] = {}
+    policies[player][index] = {"enabled": enabled, "Metals": metals, "Crystals": crystals}
+    return true
+
+static func _mining_resources(state: Dictionary, player: int, index: int) -> Array[String]:
+    var policy: Dictionary = mining_policy(state, player, index)
+    var resources: Array[String] = []
+    if bool(policy["enabled"]):
+        for resource in MINED_RESOURCES:
+            if bool(policy[resource]):
+                resources.append(resource)
+    return resources
 
 ## Read-only player-wide holdings: stock plus the player's own cargo in transit.
 static func empire_totals(state: Dictionary, player: int) -> Dictionary:
@@ -617,6 +669,8 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
     var best_path: Array[int] = []
     for i in range(fields.size()):
         var field: Dictionary = fields[i]
+        if not discovered(state, owner, "fields", i) or _mining_resources(state, owner, i).is_empty():
+            continue
         var anchor: int = int(field["anchor"])
         if int(state["planets"][anchor]["owner"]) != owner:
             continue
@@ -654,10 +708,16 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
             ship["mining_mode"] = "mining"
         return
     if mode == "mining":
+        var resources: Array[String] = _mining_resources(state, int(ship["owner"]), field_index)
+        if resources.is_empty():
+            ship["mining_mode"] = "return"
+            return
         var free: float = MINER_CAPACITY - _cargo_total(ship)
         # Allocate proportional shares of the remaining hold and shared field budget.
-        var richness: float = float(field["Metals"]) + float(field["Crystals"])
-        for resource in MINED_RESOURCES:
+        var richness: float = 0.0
+        for resource in resources:
+            richness += float(field[resource])
+        for resource in resources:
             var amount: float = minf(free * float(field[resource]) / richness, minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource])))
             ship["cargo"][resource] = float(ship["cargo"][resource]) + amount
             budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
@@ -692,3 +752,4 @@ static func step(state: Dictionary, dt: float) -> void:
         elif ship.get("kind", "ship") == "miner":
             _work_miner(state, ship, teams, cache, budgets, dt)
         # Fighters remain in orbit; combat and military orders are not designed yet.
+    update_exploration(state)
