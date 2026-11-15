@@ -234,26 +234,35 @@ func _run() -> void:
     assert(state["planets"][0]["continuous"]["fighter"])
     automatic.button_pressed = false
     assert(not state["planets"][0]["continuous"]["fighter"])
-    var new_yard: Button = view.get("yard_button")
+    var new_yard: Button = idle_rows[102]["build"]
     assert(overview.is_ancestor_of(new_yard) and not tabs.is_ancestor_of(new_yard))
+    assert(new_yard.text == "Build" and new_yard.visible and not new_yard.disabled)
     assert(new_yard.tooltip_text.contains("2000 Metals"))
+    assert((idle_rows[102]["costs"] as GridContainer).get_child_count() == 6)
+    assert(not (idle_rows[103]["build"] as Button).visible)
     state["planets"][0]["stock"]["Crystals"] = 100.0
     new_yard.pressed.emit()
-    assert(new_yard.tooltip_text.contains("6000 Metals"))
-    new_yard.pressed.emit()
-    assert(new_yard.disabled)
-    assert(new_yard.text.ends_with("(2)"))
-    var build_card: Dictionary = view.get("build_cards")["yard"]
-    (build_card["cancel"] as Button).pressed.emit()
-    assert(not new_yard.disabled)
-    var yard_job: Dictionary = state["planets"][0]["queue"][0]
-    var pending_key: int = -int(yard_job["id"])
-    assert(idle_rows.size() == 3 and idle_rows.has(pending_key))
+    var third_build: Button = idle_rows[103]["build"]
+    assert(third_build.visible and third_build.tooltip_text.contains("6000 Metals"))
+    third_build.pressed.emit()
+    assert(idle_rows.size() == 3 and not idle_rows.has(102) and not idle_rows.has(103))
+    var second_job: Dictionary = state["planets"][0]["queue"][0]
+    var third_job: Dictionary = state["planets"][0]["queue"][1]
+    var second_key: int = -int(second_job["id"])
+    var third_key: int = -int(third_job["id"])
     session.call("_economy_tick")
     session.call("_economy_tick")
-    assert((idle_rows[pending_key]["progress"] as ProgressBar).value > 0.0)
-    (idle_rows[pending_key]["upgrade"] as Button).pressed.emit()
-    assert(idle_rows.size() == 3)
+    assert((idle_rows[second_key]["progress"] as ProgressBar).value > 0.0)
+    assert((idle_rows[third_key]["progress"] as ProgressBar).value > 0.0)
+    var third_progress: float = (idle_rows[third_key]["progress"] as ProgressBar).value
+    (idle_rows[second_key]["upgrade"] as Button).pressed.emit()
+    assert(not idle_rows.has(second_key))
+    assert(idle_rows.has(third_key) and idle_rows.has(103))
+    assert((idle_rows[third_key]["label"] as Label).text.begins_with("Shipyard 2"))
+    assert(is_equal_approx((idle_rows[third_key]["progress"] as ProgressBar).value, third_progress))
+    (idle_rows[third_key]["upgrade"] as Button).pressed.emit()
+    assert(idle_rows.size() == 3 and (idle_rows[102]["build"] as Button).visible)
+    assert(not (idle_rows[103]["build"] as Button).visible)
     tabs.current_tab = 0
     var points: Array = state["map"]["points"]
     var neighbor: int = -1

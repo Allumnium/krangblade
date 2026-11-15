@@ -501,16 +501,30 @@ static func shipyard_count(p: Dictionary) -> int:
             count += 1
     return count
 
-# Reserve a specific numbered slot, even if an earlier order is cancelled.
+# Completed and queued construction slots form one contiguous stack.
 static func next_shipyard_slot(p: Dictionary) -> int:
-    var reserved: Dictionary = {}
-    for item in p.get("queue", []):
-        if item["kind"] == "yard":
-            reserved[int(item["level"])] = true
-    for slot in range((p.get("yards", []) as Array).size() + 1, MAX_SHIPYARDS + 1):
-        if not reserved.has(slot):
-            return slot
-    return 0
+    var count: int = shipyard_count(p)
+    return count + 1 if count < MAX_SHIPYARDS else 0
+
+# Move later construction down one slot when an earlier job is cancelled.
+# Preserve its fractional work, but retain only the cheaper recipe's
+# proportional allocation; return the difference to local stock.
+static func _compact_shipyard_orders(p: Dictionary, removed_level: int) -> void:
+    for item in p["queue"]:
+        if item["kind"] != "yard" or int(item["level"]) <= removed_level:
+            continue
+        var fraction: float = clampf(float(item["progress"]) / float(item["work"]), 0.0, 1.0)
+        var level: int = int(item["level"]) - 1
+        var cost: Dictionary = _cost("yard", level)
+        var allocated: Dictionary = empty_stock()
+        for resource in RESOURCES:
+            allocated[resource] = float(cost.get(resource, 0.0)) * fraction
+            p["stock"][resource] += float(item["allocated"][resource]) - float(allocated[resource])
+        item["level"] = level
+        item["cost"] = cost
+        item["work"] = _work("yard", level)
+        item["progress"] = fraction * float(item["work"])
+        item["allocated"] = allocated
 
 # Gates apply to new local production orders, not completed infrastructure.
 # Early farming remains available, so capacity can grow toward the Tech gate.
@@ -576,7 +590,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
             target = ""
         "yard":
             level = next_shipyard_slot(p)
-            if level == 0:
+            if level == 0 or (not target.is_empty() and target != str(level)):
                 return false
             target = ""
         "yard_upgrade":
@@ -707,6 +721,8 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
         if p["continuous"].has(key):
             p["continuous"][key] = false
         p["queue"].erase(item)
+        if item["kind"] == "yard":
+            _compact_shipyard_orders(p, int(item["level"]))
         return true
     return false
 
@@ -767,10 +783,11 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
         p["stock"][resource] = maxf(0.0, stored + minf(change, storage_free(p, resource)))
     # New yards and planetary production use infrastructure work, not an existing yard.
     for item in (p["queue"] as Array).duplicate():
-        if item["kind"] == "yard" and int(item["level"]) != (p["yards"] as Array).size() + 1:
-            continue
         if int(item["size"]) == 0 and item["kind"] != "yard_upgrade" and _advance(p, item, dt):
-            _finish(state, index, p, item)
+            # Construction may advance concurrently, but completed shipyards
+            # join the active array only in contiguous slot order.
+            if item["kind"] != "yard" or int(item["level"]) == (p["yards"] as Array).size() + 1:
+                _finish(state, index, p, item)
     _refill_continuous(state, index, p)
     var assigned: Dictionary = {}
     # Preserve active jobs. A started upgrade remains attached to its own yard even if blocked.

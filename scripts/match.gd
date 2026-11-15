@@ -99,7 +99,6 @@ var fighter_button: Button
 var miner_button: Button
 var environment_label: Label
 var ship_button: Button
-var yard_button: Button
 var leave: Button
 var match_menu: AcceptDialog
 var menu_exit: Button
@@ -339,7 +338,6 @@ func _build_ui() -> void:
     send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
     HUD.action(send_colony_button, Color("#c7a4ff"))
     yard_activity = HUD.section(planet_overview, "Shipyards")
-    yard_button = _ship_build_row(yard_activity, "BUILD SHIPYARD", "yard")
     inspector_tabs = TabContainer.new()
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
     inspector_tabs.clip_contents = true
@@ -1170,7 +1168,6 @@ func _refresh() -> void:
     fighter_button.disabled = not owned
     miner_button.disabled = not owned
     ship_button.disabled = true
-    yard_button.disabled = not owned or ECONOMY.next_shipyard_slot(p) == 0
     if p.is_empty():
         info.text = "Select a system."
         population_label.text = ""
@@ -1203,6 +1200,8 @@ func _refresh() -> void:
 func _upgrade_yard_at(index: int) -> void:
     if index < 0:
         _cancel_job(-index)
+    elif index >= 100:
+        _operation("yard", str(index - 100))
     elif ECONOMY._has_job(_planet(), "yard_upgrade", str(index)):
         _cancel_kind("yard_upgrade", str(index))
     else:
@@ -1242,8 +1241,17 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             number = int(job["level"])
         if not yard_activity_rows.has(index):
             var row := VBoxContainer.new()
+            var header := HBoxContainer.new()
+            row.add_child(header)
             var title := _label("", 12)
-            row.add_child(title)
+            title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+            header.add_child(title)
+            var build: Button = _button("Build", _upgrade_yard_at.bind(int(index)), header)
+            build.custom_minimum_size = Vector2(48, 22)
+            build.add_theme_font_size_override("font_size", 11)
+            var costs := GridContainer.new()
+            costs.columns = 3
+            row.add_child(costs)
             var progress := ProgressBar.new()
             progress.custom_minimum_size.y = 16
             row.add_child(progress)
@@ -1255,18 +1263,41 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             upgrade.custom_minimum_size.y = 24
             upgrade.add_theme_font_size_override("font_size", 11)
             yard_activity.add_child(row)
-            yard_activity_rows[index] = {"row": row, "label": title, "progress": progress, "upgrade": upgrade, "repeat": repeat}
+            yard_activity_rows[index] = {"row": row, "label": title, "progress": progress, "upgrade": upgrade, "repeat": repeat, "build": build, "costs": costs}
         var label: Label = yard_activity_rows[index]["label"]
         var bar: ProgressBar = yard_activity_rows[index]["progress"]
         var upgrade: Button = yard_activity_rows[index]["upgrade"]
-        yard_activity.move_child(yard_activity_rows[index]["row"], mini(number + 1, yard_activity.get_child_count() - 1))
+        yard_activity.move_child(yard_activity_rows[index]["row"], mini(number, yard_activity.get_child_count() - 1))
         var repeat: Button = yard_activity_rows[index]["repeat"]
+        var build: Button = yard_activity_rows[index]["build"]
+        var costs: GridContainer = yard_activity_rows[index]["costs"]
+        var can_build: bool = vacant and number == ECONOMY.next_shipyard_slot(p) and int(p["owner"]) == _me() and str(session.get("phase")) == "match"
+        build.visible = can_build
+        build.disabled = not can_build
+        costs.visible = can_build
         if vacant:
-            label.text = "Shipyard %d · Empty" % number
+            label.text = "Shipyard %d" % number
             bar.visible = false
             upgrade.visible = false
             repeat.visible = false
-            label.tooltip_text = _cost_text(ECONOMY._cost("yard", number))
+            var recipe: Dictionary = ECONOMY._cost("yard", number)
+            label.tooltip_text = _cost_text(recipe)
+            build.tooltip_text = label.tooltip_text
+            if costs.get_child_count() == 0:
+                for resource in recipe:
+                    var pair := HBoxContainer.new()
+                    pair.add_theme_constant_override("separation", 3)
+                    costs.add_child(pair)
+                    var symbol := TextureRect.new()
+                    symbol.texture = HUD.ICONS[resource]
+                    symbol.custom_minimum_size = Vector2(12, 12)
+                    symbol.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+                    symbol.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+                    pair.add_child(symbol)
+                    var amount: Label = _label(_compact_amount(float(recipe[resource])) if float(recipe[resource]) >= 1000.0 else "%.0f" % float(recipe[resource]), 11)
+                    amount.autowrap_mode = TextServer.AUTOWRAP_OFF
+                    pair.add_child(amount)
+                    pair.tooltip_text = "%.0f %s" % [float(recipe[resource]), resource]
             continue
         bar.visible = true
         label.tooltip_text = ""
@@ -1331,8 +1362,7 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
         var card: Dictionary = build_cards[kind]
         var count: int = int(counts.get(kind, 0))
         card["button"].text = "%s (%d)" % [card["title"], count] if count > 0 else card["title"]
-        var slot: int = ECONOMY.next_shipyard_slot(p) if kind == "yard" else 1
-        card["button"].tooltip_text = "Maximum 3 shipyards per system" if slot == 0 else _cost_text(ECONOMY._cost(kind, slot))
+        card["button"].tooltip_text = _cost_text(ECONOMY._cost(kind, 1))
         card["cancel"].visible = count > 0
         card["cancel"].disabled = not owned
 

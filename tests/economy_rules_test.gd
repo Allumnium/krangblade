@@ -350,13 +350,41 @@ func _initialize() -> void:
     assert(ECON.enqueue(capped, 1, 0, "yard_upgrade", "0"))
     var gap_state: Dictionary = ECON.create(graph, players, ids)
     var gap_home: Dictionary = gap_state["planets"][0]
-    assert(ECON.enqueue(gap_state, 1, 0, "yard"))
-    assert(ECON.enqueue(gap_state, 1, 0, "yard"))
-    assert(ECON.cancel(gap_state, 1, 0, int(gap_home["queue"][0]["id"])))
-    assert(ECON.next_shipyard_slot(gap_home) == 2)
-    assert(ECON.enqueue(gap_state, 1, 0, "yard"))
-    assert(int(gap_home["queue"][0]["level"]) == 3 and int(gap_home["queue"][1]["level"]) == 2)
+    gap_home["warehouse_level"] = 3
+    for material in ECON.RESOURCES:
+        gap_home["stock"][material] = 10000.0
+    assert(not ECON.enqueue(gap_state, 1, 0, "yard", "3"))
+    assert(ECON.enqueue(gap_state, 1, 0, "yard", "2"))
+    assert(ECON.enqueue(gap_state, 1, 0, "yard", "3"))
+    var stack_second: Dictionary = gap_home["queue"][0]
+    var stack_third: Dictionary = gap_home["queue"][1]
+    ECON._work_planet(gap_state, 0, 6.0)
+    assert(float(stack_second["progress"]) > 0.0 and float(stack_third["progress"]) > 0.0)
+    ECON._advance(gap_home, stack_third, 3.0)
+    var fraction: float = float(stack_third["progress"]) / float(stack_third["work"])
+    var total_material: Dictionary = ECON.empty_stock()
+    for material in ECON.RESOURCES:
+        total_material[material] = float(gap_home["stock"][material]) + float(stack_second["allocated"][material]) + float(stack_third["allocated"][material])
+    assert(not ECON.cancel(gap_state, 2, 0, int(stack_second["id"])))
+    assert(ECON.cancel(gap_state, 1, 0, int(stack_second["id"])))
+    assert(gap_home["queue"].size() == 1 and int(stack_third["level"]) == 2)
+    assert(stack_third["cost"] == ECON._cost("yard", 2))
+    assert(is_equal_approx(float(stack_third["progress"]) / float(stack_third["work"]), fraction))
+    for material in ECON.RESOURCES:
+        assert(is_equal_approx(float(stack_third["allocated"][material]), float(stack_third["cost"].get(material, 0.0)) * fraction))
+        assert(is_equal_approx(float(gap_home["stock"][material]) + float(stack_third["allocated"][material]), float(total_material[material])))
+    assert(ECON.next_shipyard_slot(gap_home) == 3)
+    assert(ECON.enqueue(gap_state, 1, 0, "yard", "3"))
     assert(ECON.shipyard_count(gap_home) == 3)
+    assert(not ECON.enqueue(gap_state, 1, 0, "yard", "3"))
+    # Later construction can reach 100% but cannot become an active slot early.
+    var latest: Dictionary = gap_home["queue"][-1]
+    ECON._advance(gap_home, latest, float(latest["work"]))
+    ECON._work_planet(gap_state, 0, 0.0)
+    assert(gap_home["yards"].size() == 1)
+    ECON._advance(gap_home, stack_third, float(stack_third["work"]))
+    ECON._work_planet(gap_state, 0, 0.0)
+    assert(gap_home["yards"].size() == 3)
 
     # Yard upgrades wait behind assigned hull production.
     p["warehouse_level"] = 3
