@@ -53,11 +53,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Observation:** Fighters and civilian hulls currently share the same maximum flight speed. A straight-line chase can maintain contact but cannot reliably catch a ship already pulling away. The three-year cap limits detours; targets still in range at expiry cannot immediately restart the same chase.
 - **Consider:** Playtest escapes and interception before altering relative ship speeds or introducing retreat-specific movement; inspect pursuit and re-engagement near fleet objectives.
 
-### T-010 — Host visual target between snapshots
-- **Type:** Verified regression (PR #49 eight-peer host check).
-- **Observation:** Authority advances simulation at 10 Hz while snapshot notifications are 5 Hz. Render target could lag a current authoritative position.
-- **Consider:** v0.10.3 synchronizes render destinations when poses are sampled, preserving interpolation; verify mandatory ENet checks before archiving.
-
 ### T-012 — Full warehouses and construction refunds
 - **Type:** Gameplay/UX balancing risk.
 - **Observation:** Production and deliveries respect storage space; miners wait with undelivered cargo. Full refunds may temporarily place stock above capacity to avoid resource loss. No positive growth occurs in that state.
@@ -74,3 +69,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Consider:** Validate under eight real peers and future internet latency; inspect bandwidth and queue age on large fleets.
 
 - v0.11.5 uses the Node-level rpc_id method to obtain send errors; the callable RPC shorthand returns void in Godot 4.7.2 (caught by CI).
+
+### T-015 — Formation pacing and visual density
+- **Type:** Prototype limitation.
+- **Observation:** v0.12.0 assigns stable disk slots and steers each hull toward offset waypoints; shared lane pace and explicit cohesive travel anchors are not yet implemented. Route metadata advances at offset waypoints. Large groups compress spacing to stay within rally radius.
+- **Consider:** Verify visual fleet silhouettes and actual cohesion on long routes and after combat; introduce shared pace only after measuring lagging/rejoining hull behavior. See TODO phase 1.
