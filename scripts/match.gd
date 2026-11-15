@@ -93,6 +93,8 @@ class TradeRange extends Control:
     signal committed(minimum: float, maximum: float)
     var lower: float = 10.0
     var upper: float = 20.0
+    var stock_percent: float = 0.0
+    var stock_color: Color = Color.WHITE
     var enabled: bool = true
     var active_handle: int = -1
     const PAD: float = 10.0
@@ -102,6 +104,11 @@ class TradeRange extends Control:
         active_handle = -1
         lower = clampf(minimum, 0.0, 100.0)
         upper = clampf(maximum, lower, 100.0)
+        queue_redraw()
+
+    func set_stock(amount: float, maximum: float, tint: Color) -> void:
+        stock_percent = clampf(100.0 * amount / maxf(maximum, 1.0), 0.0, 100.0)
+        stock_color = tint
         queue_redraw()
 
     func _x(value: float) -> float:
@@ -121,9 +128,8 @@ class TradeRange extends Control:
         var lo := Vector2(_x(lower), TRACK_Y)
         var hi := Vector2(_x(upper), TRACK_Y)
         draw_line(Vector2(PAD, TRACK_Y), Vector2(size.x - PAD, TRACK_Y), Color("#344960"), 5.0, true)
-        draw_line(Vector2(PAD, TRACK_Y), lo, Color(low_color, 0.55), 5.0, true)
-        draw_line(lo, hi, Color("#8ca1b5"), 5.0, true)
-        draw_line(hi, Vector2(size.x - PAD, TRACK_Y), Color(high_color, 0.55), 5.0, true)
+        if stock_percent > 0.0:
+            draw_line(Vector2(PAD, TRACK_Y), Vector2(_x(stock_percent), TRACK_Y), stock_color, 7.0, true)
         # Offset the handles vertically when their values meet, keeping both visible.
         var overlap: bool = absf(lo.x - hi.x) < 13.0
         if overlap:
@@ -760,6 +766,18 @@ func _load_thresholds() -> void:
         return
     var t: Dictionary = p["thresholds"][_trade_resource()]
     threshold_slider.set_range(float(t["min"]), float(t["max"]))
+    _update_trade_stock(p)
+
+func _update_trade_stock(p: Dictionary) -> void:
+    var resource: String = _trade_resource()
+    var stock: float = float(p["stock"][resource])
+    threshold_slider.set_stock(stock, ECONOMY.TRADE_REFERENCE, HUD.COLORS[resource])
+    trade_detail.text = "Stock: %.1f / %.0f" % [stock, ECONOMY.TRADE_REFERENCE]
+    # Do not overwrite handles during a drag, even if a network snapshot arrives.
+    if threshold_slider.active_handle < 0:
+        var t: Dictionary = p["thresholds"][resource]
+        if not is_equal_approx(threshold_slider.lower, float(t["min"])) or not is_equal_approx(threshold_slider.upper, float(t["max"])):
+            threshold_slider.set_range(float(t["min"]), float(t["max"]))
 
 func _apply_thresholds(minimum: float, maximum: float) -> void:
     session.call("request_thresholds", selected, _trade_resource(), minimum, maximum)
@@ -857,8 +875,7 @@ func _refresh() -> void:
         var demand: float = ECONOMY.organics_demand(p)
         detail = "Farming: %.2f/yr  •  Demand: %.2f/yr\nNet: %+.2f/yr" % [output, demand, output - demand]
     resource_detail.text = detail
-    var trade_resource: String = _trade_resource()
-    trade_detail.text = "Stock: %.1f" % float(p["stock"][trade_resource])
+    _update_trade_stock(p)
     _refresh_upgrade_cards(p, owned)
     ship_button.disabled = not owned or full or not bool(p["home"])
     _refresh_queue(p, owned)
