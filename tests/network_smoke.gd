@@ -192,15 +192,17 @@ func _check_economy_sync() -> void:
         var view: Node = current_scene
         if cancel_sent and verified == expected_players and view != null and view.has_method("_update_trade_stock"):
             view.set("selected", home_index)
-            var picker: OptionButton = view.get("trade_picker")
-            picker.select(0)
             view.call("_load_thresholds")
             view.call("_refresh")
-            var slider: Control = view.get("threshold_slider")
-            var stock: float = float(state["planets"][home_index]["stock"]["Metals"])
-            if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.TRADE_REFERENCE * 100.0, 0.0, 100.0)):
-                _fail("Replicated inventory does not match the trade bar.")
-                return
+            var sliders: Dictionary = view.get("trade_sliders")
+            var home: Dictionary = state["planets"][home_index]
+            for resource in ECON.RESOURCES:
+                var slider: Control = sliders[resource]
+                var stock: float = float(home["stock"][resource])
+                var thresholds: Dictionary = home["thresholds"][resource]
+                if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.TRADE_REFERENCE * 100.0, 0.0, 100.0)) or not is_equal_approx(float(slider.get("lower")), float(thresholds["min"])) or not is_equal_approx(float(slider.get("upper")), float(thresholds["max"])):
+                    _fail("Replicated inventory or thresholds do not match the trade bars.")
+                    return
             economy_verified = true
     if not economy_verified:
         create_timer(0.25).timeout.connect(_check_economy_sync)

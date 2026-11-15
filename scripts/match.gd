@@ -60,8 +60,6 @@ var global_resource_labels: Dictionary = {}
 var global_resource_tiles: Dictionary = {}
 var global_population_label: Label
 var year_label: Label
-var trade_picker: OptionButton
-var trade_detail: Label
 var info: Label
 var stock_labels: Dictionary = {}
 var level_labels: Dictionary = {}
@@ -71,7 +69,8 @@ var system_visuals: Dictionary = {}
 var system_visual_seed: int = -1
 var resource_picker: OptionButton
 var resource_detail: Label
-var threshold_slider: TradeRange
+var trade_sliders: Dictionary = {}
+var trade_stock_labels: Dictionary = {}
 var upgrade_cards: Dictionary = {}
 var continuous_checks: Dictionary = {}
 var repeat_icon: Texture2D
@@ -373,20 +372,31 @@ func _build_ui() -> void:
     production.add_child(resource_picker)
     resource_detail = _label("")
     production.add_child(resource_detail)
-    var logistics: VBoxContainer = HUD.section(trade_page, "Thresholds")
-    trade_picker = OptionButton.new()
     for resource in ECONOMY.RESOURCES:
-        trade_picker.add_icon_item(HUD.ICONS[resource], resource)
-    trade_picker.item_selected.connect(func(_i: int) -> void: _load_thresholds(); _refresh())
-    logistics.add_child(trade_picker)
-    trade_detail = _label("")
-    logistics.add_child(trade_detail)
-    threshold_slider = TradeRange.new()
-    threshold_slider.custom_minimum_size.y = 56
-    threshold_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    threshold_slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f units." % ECONOMY.TRADE_REFERENCE
-    threshold_slider.committed.connect(_apply_thresholds)
-    logistics.add_child(threshold_slider)
+        var logistics: VBoxContainer = HUD.section(trade_page, "")
+        logistics.get_child(0).hide()
+        var trade_row := HBoxContainer.new()
+        logistics.add_child(trade_row)
+        var resource_icon := TextureRect.new()
+        resource_icon.texture = HUD.ICONS[resource]
+        resource_icon.custom_minimum_size = Vector2(18, 18)
+        resource_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+        resource_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+        trade_row.add_child(resource_icon)
+        var name_label := _label(resource, 13)
+        name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        name_label.add_theme_color_override("font_color", HUD.COLORS[resource])
+        trade_row.add_child(name_label)
+        var stock_label := _label("", 12)
+        trade_row.add_child(stock_label)
+        trade_stock_labels[resource] = stock_label
+        var slider := TradeRange.new()
+        slider.custom_minimum_size.y = 56
+        slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f units." % ECONOMY.TRADE_REFERENCE
+        slider.committed.connect(_apply_thresholds.bind(resource))
+        logistics.add_child(slider)
+        trade_sliders[resource] = slider
     var shipyards: VBoxContainer = HUD.section(shipyard_page, "Build")
     ship_button = _ship_build_row(shipyards, "BUILD LOGISTICS SHIP", "ship")
     HUD.action(ship_button)
@@ -757,30 +767,30 @@ func _me() -> int:
 func _resource() -> String:
     return resource_picker.get_item_text(resource_picker.selected)
 
-func _trade_resource() -> String:
-    return trade_picker.get_item_text(trade_picker.selected)
-
 func _load_thresholds() -> void:
     var p: Dictionary = _planet()
     if p.is_empty():
         return
-    var t: Dictionary = p["thresholds"][_trade_resource()]
-    threshold_slider.set_range(float(t["min"]), float(t["max"]))
+    for resource in ECONOMY.RESOURCES:
+        var t: Dictionary = p["thresholds"][resource]
+        var slider: TradeRange = trade_sliders[resource]
+        slider.set_range(float(t["min"]), float(t["max"]))
     _update_trade_stock(p)
 
 func _update_trade_stock(p: Dictionary) -> void:
-    var resource: String = _trade_resource()
-    var stock: float = float(p["stock"][resource])
-    threshold_slider.set_stock(stock, ECONOMY.TRADE_REFERENCE, HUD.COLORS[resource])
-    trade_detail.text = "Stock: %.1f / %.0f" % [stock, ECONOMY.TRADE_REFERENCE]
-    # Do not overwrite handles during a drag, even if a network snapshot arrives.
-    if threshold_slider.active_handle < 0:
-        var t: Dictionary = p["thresholds"][resource]
-        if not is_equal_approx(threshold_slider.lower, float(t["min"])) or not is_equal_approx(threshold_slider.upper, float(t["max"])):
-            threshold_slider.set_range(float(t["min"]), float(t["max"]))
+    for resource in ECONOMY.RESOURCES:
+        var slider: TradeRange = trade_sliders[resource]
+        var stock: float = float(p["stock"][resource])
+        slider.set_stock(stock, ECONOMY.TRADE_REFERENCE, HUD.COLORS[resource])
+        trade_stock_labels[resource].text = "%.1f / %.0f" % [stock, ECONOMY.TRADE_REFERENCE]
+        # Preserve this handle while dragging, even when a snapshot arrives.
+        if slider.active_handle < 0:
+            var t: Dictionary = p["thresholds"][resource]
+            if not is_equal_approx(slider.lower, float(t["min"])) or not is_equal_approx(slider.upper, float(t["max"])):
+                slider.set_range(float(t["min"]), float(t["max"]))
 
-func _apply_thresholds(minimum: float, maximum: float) -> void:
-    session.call("request_thresholds", selected, _trade_resource(), minimum, maximum)
+func _apply_thresholds(minimum: float, maximum: float, resource: String) -> void:
+    session.call("request_thresholds", selected, resource, minimum, maximum)
 
 func _operation(kind: String, target: String = "") -> void:
     session.call("request_operation", selected, kind, target)
@@ -835,8 +845,11 @@ func _refresh() -> void:
         _sync_repeat(check, p, kind, owned and (kind != "ship" or bool(p.get("home", false))))
     queue_title.text = "Queue  %d/%d" % [(p.get("queue", []) as Array).size(), ECONOMY.MAX_QUEUE]
     colony_button.disabled = not owned or full
-    threshold_slider.enabled = owned
-    threshold_slider.queue_redraw()
+    for slider in trade_sliders.values():
+        slider.enabled = owned
+        if not owned:
+            slider.active_handle = -1
+        slider.queue_redraw()
     fighter_button.disabled = not owned or full
     miner_button.disabled = not owned or full
     ship_button.disabled = true
@@ -845,7 +858,6 @@ func _refresh() -> void:
         info.text = "Select a system."
         population_label.text = ""
         resource_detail.text = ""
-        trade_detail.text = ""
         _refresh_queue(p, false)
         inventory.hide()
         return
@@ -1287,7 +1299,7 @@ func _keyboard_pan(delta: float) -> void:
     var focus: Control = get_viewport().gui_get_focus_owner()
     if focus is LineEdit or focus is TextEdit:
         return
-    for picker in [resource_picker, trade_picker, colony_picker]:
+    for picker in [resource_picker, colony_picker]:
         if picker.get_popup().visible:
             return
     var direction := Vector2(
