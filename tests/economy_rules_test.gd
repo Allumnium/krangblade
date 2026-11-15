@@ -576,5 +576,48 @@ func _initialize() -> void:
     ECON.step(colonization, 2.0)
     assert(int(c1["at"]) == 0 and c1["route"].is_empty())
     print("PASS: colony construction, permissions, travel, neutral arrival and competing colonies")
+    # Diamond routes exercise equal-probability choices and branching frontiers.
+    var patrol_map: Dictionary = MAP.generate(1337)
+    patrol_map["edges"] = [[0, 3], [0, 4], [3, 5], [4, 5], [5, 6], [3, 7]]
+    var military: Dictionary = ECON.create(patrol_map, players, ids)
+    assert(not ECON.set_outpost(military, 1, 6, true))
+    assert(not ECON.set_outpost(military, 1, 1, true))
+    for index in [3, 4, 5, 6, 7]:
+        assert(ECON.set_outpost(military, 1, index, true))
+        assert(int(military["planets"][index]["owner"]) == 0)
+    var network: Dictionary = ECON.military_network(military, 1)
+    assert(network["frontiers"] == [6, 7])
+    assert(not ECON.set_military(military, 1, "ship", -1, 50))
+    assert(not ECON.set_military(military, 1, "fighter", 5, 50))
+    assert(not ECON.set_military(military, 1, "fighter", -1, 101))
+    assert(ECON.set_military(military, 1, "fighter", -1, 60))
+    assert(ECON.set_military(military, 1, "fighter", 6, 75))
+    var policy: Dictionary = ECON.military_policy(military, 1, "fighter", network)
+    assert(policy["weights"][6] == 75 and policy["weights"][7] == 25)
+    for i in range(20):
+        military["ships"].append({"id": i + 1, "kind": "fighter", "owner": 1, "at": 0, "route": [], "leg": 0.0, "cargo": ECON.empty_stock()})
+    var assignments: Dictionary = ECON.military_assignments(military, 1, "fighter", network)
+    assert(assignments.values().count(6) == 9)
+    assert(assignments.values().count(7) == 3)
+    assert(assignments.values().count(-1) == 8)
+    var branches: Dictionary = {}
+    for i in range(64):
+        var path: Array[int] = ECON._military_homeward(network, 6)
+        branches[path[2]] = true
+    assert(branches.has(3) and branches.has(4))
+    var fighter: Dictionary = military["ships"][0]
+    ECON._work_fighter(military, fighter, network, 6, 0.1)
+    assert(fighter["route"].back() == 6)
+    ECON._work_fighter(military, fighter, network, 6, 100000.0)
+    assert(fighter["at"] == 6 and fighter["military_mode"] == "frontier")
+    ECON._work_fighter(military, fighter, network, -1, 0.1)
+    assert(fighter["route"].back() == 0)
+    ECON._work_fighter(military, fighter, network, -1, 100000.0)
+    assert(fighter["at"] == 0 and fighter["route"].back() in [6, 7])
+    assert(ECON.set_outpost(military, 1, 5, false))
+    network = ECON.military_network(military, 1)
+    assert(not network["frontiers"].has(6))
+    assert(network["outposts"].has(6))
+    print("PASS: declared military network, randomized routes, frontier allocation, patrol return")
     print("PASS: seeded maps, ownership, construction, shipyards, mixed cargo, physical transit, ally sharing")
     quit(0)

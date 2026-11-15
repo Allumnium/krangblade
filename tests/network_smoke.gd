@@ -152,6 +152,12 @@ func _send_commands() -> void:
     session.call("request_mining_policy", 0, true, false, true)
     for i in range(3):
         session.call("request_operation", home_index, "yard")
+    var state: Dictionary = session.get("economy")
+    for index in range((state["planets"] as Array).size()):
+        if int(state["planets"][index]["owner"]) == 0 and MAP.linked(state["map"], home_index, index):
+            session.call("request_outpost", index, true)
+            session.call("request_military", "fighter", -1, 70)
+            break
 
 func _check_economy_sync() -> void:
     if economy_verified or str(session.get("phase")) != "match":
@@ -194,7 +200,9 @@ func _check_economy_sync() -> void:
             for ship in state["ships"]:
                 if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship":
                     ship_progress = true
-            if is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
+            var network: Dictionary = ECON.military_network(state, owner)
+            var military: Dictionary = ECON.military_policy(state, owner, "fighter", network)
+            if not network["frontiers"].is_empty() and int(military["frontier"]) == 70 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
                 verified += 1
         var view: Node = current_scene
         if cancel_sent and verified == expected_players and view != null and view.has_method("_update_trade_stock"):
