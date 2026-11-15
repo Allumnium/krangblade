@@ -154,3 +154,6 @@ v0.12.2: Shipyards is the default first tab; all three shipyard slots and constr
 
 
 v0.12.3: Production and individual shipyard upgrades use exponential costs, 200 × 3^(level−1) and 240 × 3^(level−1) Metals respectively. Warehouse upgrades cost 500/1,500/4,500 Metals plus proportional Plastics (80/240/720) and Tech (40/120/360). One-time economy buildings cost three times their previous prices; they are still independent and purchasable only once per system. Construction durations, population gates, starting inventory, hull and new shipyard recipes are unchanged.
+
+
+v0.12.4: Inline compact Build buttons and icon costs replace the shared shipyard build control. Only the next vacant slot offers construction. Pending shipyards can progress concurrently but activate in slot order. Cancelling an earlier order fully refunds that order, promotes later orders at their existing completion percentage and refunds their excess allocation at the cheaper slot cost.
