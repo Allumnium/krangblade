@@ -427,7 +427,9 @@ func _collapse_card(card: Dictionary) -> void:
         _disclosure_title(card, str(card["header"].get_meta("caption")))
 
 func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
-    var blocked: Array[String] = [] if job.is_empty() else ECONOMY.construction_blockers(p, job)
+    var blocked: Array[String] = []
+    if not job.is_empty():
+        blocked = ECONOMY.construction_blockers(p, job)
     bar.set_meta("blocked", not blocked.is_empty())
     if blocked.is_empty():
         bar.remove_theme_stylebox_override("fill")

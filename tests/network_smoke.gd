@@ -343,7 +343,10 @@ func _check_economy_sync() -> void:
                 if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.storage_capacity(home) * 100.0, 0.0, 100.0)) or not is_equal_approx(float(slider.get("lower")), float(thresholds["min"])) or not is_equal_approx(float(slider.get("upper")), float(thresholds["max"])):
                     _fail("Replicated inventory or thresholds do not match the trade bars.")
                     return
-            var expected_sectors: Array[int] = ECON.territory_claims(state)
+            var expected_sectors: Array[int] = []
+            var palette_roster: Dictionary = session.get("players")
+            for owner in ECON.territory_empires(state):
+                expected_sectors.append(int(palette_roster.get(owner, {}).get("color", 0)))
             if view.get("territory_last") != expected_sectors:
                 _fail("Territory overlay does not match replicated state.")
                 return
