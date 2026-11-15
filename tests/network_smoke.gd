@@ -10,6 +10,7 @@ var finishing: bool = false
 var ready_sent: bool = false
 var saw_loading: bool = false
 var mode: String = "normal"
+const MAP = preload("res://scripts/planet_map.gd")
 
 func _initialize() -> void:
     call_deferred("_begin")
@@ -72,14 +73,17 @@ func _phase_changed() -> void:
             _fail("Wrong roster size in match: %d" % roster.size())
             return
         var owners: Array[int] = session.get("owners")
-        if owners.size() != 17:
+        if owners.size() != MAP.COUNT:
             _fail("Wrong territory count.")
             return
+        if mode == "normal":
+            call_deferred("_queue_test_ship")
+            create_timer(1.5).timeout.connect(_check_economy_sync)
         if role == "host":
             if mode == "host-leave":
                 create_timer(1.0).timeout.connect(func() -> void: session.call("leave_session"))
             else:
-                create_timer(1.0).timeout.connect(func() -> void: session.call("return_to_lobby"))
+                create_timer(2.5).timeout.connect(func() -> void: session.call("return_to_lobby"))
     elif phase == "lobby" and saw_loading and not finishing:
         if (mode == "drop-loading" and role == "host") or (mode == "normal" and saw_match):
             finishing = true
@@ -99,6 +103,31 @@ func _phase_changed() -> void:
             create_timer(0.8 if role == "host" else 0.2).timeout.connect(_pass)
         else:
             _fail("Connection closed before expected transition.")
+
+func _queue_test_ship() -> void:
+    var state: Dictionary = session.get("economy")
+    var self_id: int = session.multiplayer.get_unique_id()
+    for i in range((state["planets"] as Array).size()):
+        if int(state["planets"][i]["owner"]) == self_id:
+            session.call("request_operation", i, "ship")
+            return
+    _fail("No home planet for player.")
+
+func _check_economy_sync() -> void:
+    var state: Dictionary = session.get("economy")
+    var homes: int = 0
+    for planet in state.get("planets", []):
+        if bool(planet["home"]):
+            homes += 1
+            if (planet["queue"] as Array).size() != 1:
+                _fail("Missing replicated ship queue on a home planet.")
+                return
+            if float(planet["queue"][0]["progress"]) <= 0.0:
+                _fail("Shipyard progress did not synchronize.")
+                return
+    if homes != expected_players:
+        _fail("Wrong home planet count.")
+        return
 
 func _pass() -> void:
     print("PASS: network %s %d players (%s)" % [role, expected_players, mode])

@@ -26,7 +26,10 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
         var stock: Dictionary = empty_stock()
         var levels: Dictionary = empty_stock()
         var abundance: Dictionary = {}
-        var bonuses: Dictionary = {"Organics": rng.randf_range(1.0, 1.8), "Crystals": rng.randf_range(1.0, 1.8)}
+        var bonuses: Dictionary = {"Organics": 1.0, "Crystals": 1.0}
+        for resource in ["Organics", "Crystals"]:
+            if rng.randf() < 0.5:
+                bonuses[resource] = rng.randf_range(1.1, 1.8)
         var thresholds: Dictionary = {}
         for resource in RESOURCES:
             thresholds[resource] = {"min": 100.0, "max": 200.0}
@@ -238,8 +241,11 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
                 continue
             var id: int = int(item["id"])
             if id == int(yard["job"]):
-                chosen = item
-                break
+                if _possible(p, item) > EPS:
+                    chosen = item
+                    break
+                assigned.erase(id)
+                yard["job"] = -1
             if int(yard["job"]) == -1 and not assigned.has(id) and _possible(p, item) > EPS:
                 chosen = item
                 break
