@@ -691,8 +691,42 @@ static func set_continuous(state: Dictionary, player: int, index: int, kind: Str
     p["continuous"][kind] = enabled
     return true
 
+static func origin_count(state: Dictionary, index: int, kind: String) -> int:
+    var count: int = 0
+    for ship in state.get("ships", []):
+        if ship["kind"] == kind and int(ship.get("origin", -1)) == index and int(ship["owner"]) == int(state["planets"][index]["owner"]):
+            count += 1
+    return count
+
+static func set_maintain(state: Dictionary, player: int, index: int, kind: String, amount: int) -> bool:
+    var p: Dictionary = _get_owned(state, player, index)
+    if p.is_empty() or not SHIP_KINDS.has(kind) or _continuous_target(p, kind).is_empty() or amount < 0 or amount > 9999:
+        return false
+    if not p.has("maintain"):
+        p["maintain"] = {}
+    p["maintain"][kind] = amount
+    p["continuous"][kind] = false
+    return true
+
+static func _maintain_needed(state: Dictionary, index: int, p: Dictionary, key: String) -> bool:
+    if bool(p["continuous"].get(key, false)):
+        return true
+    if not SHIP_KINDS.has(key):
+        return false
+    var target: int = int(p.get("maintain", {}).get(key, 0))
+    if target <= 0:
+        return false
+    var count: int = origin_count(state, index, key)
+    for item in p["queue"]:
+        if item["kind"] == key:
+            count += 1
+    return count < target
+
 static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> void:
     var keys: Array = p["continuous"].keys()
+    for key in p.get("maintain", {}):
+        if not keys.has(key):
+            keys.append(key)
     # Shipyards share one repeat cycle. Once every turn has started, the next
     # cycle may start on any idle shipyard, even while a slower hull is active.
     # Independent infrastructure upgrades must not consume turns in this cycle.
@@ -718,10 +752,10 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
     if not waiting and idle:
         cycle.clear()
     for key in cycle.keys():
-        if not bool(p["continuous"].get(key, false)):
+        if not _maintain_needed(state, index, p, str(key)):
             cycle.erase(key)
     for key in keys:
-        if not bool(p["continuous"][key]):
+        if not _maintain_needed(state, index, p, str(key)):
             continue
         var order: Array = _continuous_target(p, str(key))
         if order.is_empty():
@@ -765,6 +799,8 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
             key += ":" + str(item["target"])
         if p["continuous"].has(key):
             p["continuous"][key] = false
+        if SHIP_KINDS.has(key) and p.has("maintain"):
+            p["maintain"][key] = 0
         p["queue"].erase(item)
         if item["kind"] == "yard":
             _compact_shipyard_orders(p, int(item["level"]))
@@ -812,6 +848,7 @@ static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> boo
         _record_flow(p, "Construction: " + str(item["kind"]), resource, used)
     var crew: float = amount * float(item.get("population_cost", 0.0)) / float(item["work"])
     p["population"] = maxf(0.0, float(p["population"]) - crew)
+    p["crew_rate"] = float(p.get("crew_rate", 0.0)) + crew / maxf(EPS, float(p.get("flow_dt", 1.0)))
     item["population_allocated"] = float(item.get("population_allocated", 0.0)) + crew
     item["progress"] = float(item["progress"]) + amount
     return float(item["progress"]) >= float(item["work"]) - EPS
@@ -827,7 +864,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
         "yard_upgrade":
             p["yards"][int(item["target"])]["level"] = int(item["level"])
         "ship", "colony_ship", "fighter", "miner":
-            state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "at": index,
+            state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
                 "position": state["map"]["points"][index], "heading": Vector2.UP, "navigation_target": state["map"]["points"][index],
                 "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
     p["queue"].erase(item)
@@ -855,9 +892,12 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
         return
     p["flows"] = {}
     p["flow_dt"] = dt
+    p["crew_rate"] = 0.0
+    var before_population: float = float(p["population"])
     var elapsed: float = float(state["elapsed"])
     p["farm_factor"] = 1.0 + FARM_VARIATION * sin(TAU * elapsed / FARM_CYCLE_SECONDS + float(p["farm_phase"]))
     _update_population(p, dt)
+    p["demographic_rate"] = (float(p["population"]) - before_population) / maxf(EPS, dt)
     # Residents consume all non-crystal resources. Only net surplus can occupy
     # free storage. At capacity production covers demand but stores no excess.
     # Refunds may temporarily exceed capacity; never destroy returned materials.

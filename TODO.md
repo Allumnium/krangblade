@@ -84,3 +84,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - Steam integration remains a future goal; preserve direct-IP multiplayer.
 
 See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not yet been resolved.
+
+- [ ] Validate finite origin-system ship maintain targets, unlimited repeat and replacement scheduling (v0.14.0).
+
+- [ ] Validate local population growth and live local resource breakdowns (v0.14.1).
