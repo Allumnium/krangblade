@@ -13,6 +13,7 @@ const RULES = preload("res://scripts/lobby_rules.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 const SIM_STEP: float = 0.1
+const MATCH_SPEEDS: Array[int] = [0, 1, 2, 5]
 const SNAPSHOT_INTERVAL: float = 0.2
 const PORT: int = 24567
 const MAX_CHAT: int = 250
@@ -416,6 +417,7 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
     players = snapshot.duplicate(true)
     snapshot_elapsed = 0.0
     economy = ECONOMY.create(MAP.generate(map_seed, players.size()), players, RULES.ordered_peers(players))
+    economy["time_speed"] = 1
     resource_history.clear()
     ECONOMY.sample_resource_rates(economy, resource_history)
     owners = ECONOMY.planet_teams(economy)
@@ -595,11 +597,27 @@ func _mining_policy_for(id: int, index: int, enabled: bool, metals: bool, crysta
     if _active_player(id) and ECONOMY.set_mining_policy(economy, id, index, enabled, metals, crystals):
         _publish_economy()
 
+# Only the local authority may change the shared speed. Guests receive it in
+# the same round-scoped authoritative snapshots as the simulation state.
+func request_time_speed(speed: int) -> void:
+    if phase != "match" or not (is_solo or multiplayer.is_server()):
+        return
+    if not MATCH_SPEEDS.has(speed) or int(economy.get("time_speed", 1)) == speed:
+        return
+    economy["time_speed"] = speed
+    _publish_economy()
+
 func _economy_tick() -> void:
     if phase != "match" or not (is_solo or multiplayer.is_server()):
         return
-    ECONOMY.step(economy, SIM_STEP)
-    ECONOMY.sample_resource_rates(economy, resource_history)
+    var speed: int = int(economy.get("time_speed", 1))
+    if speed == 0:
+        return
+    # Keep movement, AI, combat and economy integration at the existing step.
+    # Snapshot cadence and network/UI timers remain on the real-time clock.
+    for i in range(speed):
+        ECONOMY.step(economy, SIM_STEP)
+        ECONOMY.sample_resource_rates(economy, resource_history)
     snapshot_elapsed += SIM_STEP
     if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
         _publish_economy()

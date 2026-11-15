@@ -13,6 +13,9 @@ var home_index: int = -1
 var cancel_id: int = -1
 var cancel_sent: bool = false
 var commands_sent: bool = false
+var speed_stage: int = 0
+var paused_elapsed: float = -1.0
+const TEST_SPEEDS: Array[int] = [0, 2, 5, 1]
 const ECON = preload("res://scripts/economy_rules.gd")
 var saw_loading: bool = false
 var mode: String = "normal"
@@ -139,6 +142,51 @@ func _prepare_commands() -> void:
             _fail("Asteroid field hidden with fog disabled.")
             return
 
+    if role == "host":
+        session.call("request_time_speed", 0)
+
+# Each real peer acknowledges the observed speed before the host advances.
+# Reuse otherwise untouched local Plastics thresholds as test acknowledgments.
+func _check_time_controls(state: Dictionary) -> bool:
+    if speed_stage >= TEST_SPEEDS.size():
+        return true
+    var expected: int = TEST_SPEEDS[speed_stage]
+    var current: int = int(state.get("time_speed", -1))
+    if current != expected:
+        if role == "host" and speed_stage > 0:
+            var confirmed: int = 0
+            for system in state["planets"]:
+                if bool(system["home"]) and is_equal_approx(float(system["thresholds"]["Plastics"]["min"]), 12.0 + float(speed_stage - 1)):
+                    confirmed += 1
+            if confirmed == expected_players:
+                session.call("request_time_speed", expected)
+        return false
+    var view: Node = current_scene
+    if view == null or not view.has_method("_refresh_time_controls"):
+        return false
+    var buttons: Dictionary = view.get("time_buttons")
+    if buttons.size() != 4:
+        _fail("Time controls missing.")
+        return false
+    for speed in TEST_SPEEDS:
+        var button: Button = buttons[speed]
+        if button.button_pressed != (speed == current) or button.disabled != (role != "host"):
+            _fail("Time control selection or authority does not match replicated speed.")
+            return false
+    if speed_stage == 0:
+        if paused_elapsed < 0.0:
+            paused_elapsed = float(state["elapsed"])
+            # Host rejects invalid values; guests cannot change the speed.
+            session.call("request_time_speed", 3 if role == "host" else 5)
+            return false
+        if not is_equal_approx(float(state["elapsed"]), paused_elapsed):
+            _fail("Clock advanced while paused.")
+            return false
+    if speed_stage < TEST_SPEEDS.size() - 1:
+        session.call("request_thresholds", home_index, "Plastics", 12.0 + float(speed_stage), 25.0)
+    speed_stage += 1
+    return speed_stage >= TEST_SPEEDS.size()
+
 func _send_commands() -> void:
     commands_sent = true
     session.call("request_thresholds", home_index, "Metals", 15.0, 65.0)
@@ -164,6 +212,9 @@ func _check_economy_sync() -> void:
     if economy_verified or str(session.get("phase")) != "match":
         return
     var state: Dictionary = session.get("economy")
+    if home_index < 0 or not _check_time_controls(state):
+        create_timer(0.25).timeout.connect(_check_economy_sync)
+        return
     var self_id: int = session.multiplayer.get_unique_id()
     if not commands_sent and home_index >= 0 and ECON.discovered(state, self_id, "fields", 0):
         _send_commands()
