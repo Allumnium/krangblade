@@ -13,6 +13,12 @@ func _run() -> void:
     assert(view != null and view.has_method("_select_at"))
     await process_frame
     assert(view.theme != null)
+    var opening_state: Dictionary = session.get("economy")
+    assert(opening_state["ships"].size() == 5)
+    assert((view.call("_ship_poses", opening_state) as Dictionary).size() == 5)
+    # Isolate the subsequent construction/selection UI scenarios from autonomous starter ships.
+    opening_state["ships"].clear()
+    view.call("_sync_ship_visuals", opening_state)
     var territory_layer: Control = view.get("territory_layer")
     var territory_image: ColorRect = view.get("territory_image")
     assert(territory_image.visible and territory_image.material is ShaderMaterial)
@@ -204,6 +210,14 @@ func _run() -> void:
     assert(textile_mill.disabled and textile_mill.text == "BUILT")
     var cards: Dictionary = view.get("upgrade_cards")
     assert(cards.size() == 6)
+    var defense_card: Dictionary = view.get("pds_card")
+    assert(not (defense_card["body"] as Control).visible)
+    (defense_card["header"] as Button).pressed.emit()
+    assert((defense_card["costs"] as GridContainer).get_child_count() == 5)
+    (defense_card["button"] as Button).pressed.emit()
+    assert((defense_card["progress"] as ProgressBar).visible)
+    (defense_card["button"] as Button).pressed.emit()
+    assert(not (defense_card["progress"] as ProgressBar).visible)
     var farm: Dictionary = cards["Organics"]
     assert(not (farm["body"] as Control).visible)
     (farm["header"] as Button).pressed.emit()
