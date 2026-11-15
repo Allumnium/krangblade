@@ -12,6 +12,11 @@ func _run() -> void:
     var view: Control = current_scene
     assert(view != null and view.has_method("_select_at"))
     await process_frame
+    assert(view.theme != null)
+    assert((view.get("stock_labels") as Dictionary).size() == 6)
+    var resources: OptionButton = view.get("resource_picker")
+    for i in range(resources.item_count):
+        assert(resources.get_item_icon(i) != null)
     var state: Dictionary = session.get("economy")
     var points: Array = state["map"]["points"]
     var neighbor: int = -1
@@ -31,6 +36,16 @@ func _run() -> void:
     var send: Button = view.get("send_colony_button")
     assert(send.visible and send.disabled)
     session.call("request_operation", 0, "colony_ship")
+    view.set("selected", 0)
+    view.call("_refresh")
+    var jobs: ItemList = view.get("jobs")
+    assert(jobs.item_count == 1)
+    jobs.select(0)
+    view.call("_refresh")
+    assert((view.get("job_progress") as ProgressBar).visible)
+    assert((view.get("job_cost") as HBoxContainer).get_child_count() > 0)
+    view.set("selected", neighbor)
+    view.call("_refresh")
     for i in range(125):
         session.call("_economy_tick")
     assert(state["ships"].size() == 1)
