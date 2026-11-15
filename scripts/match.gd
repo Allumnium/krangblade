@@ -63,9 +63,6 @@ var info: Label
 var stock_labels: Dictionary = {}
 var level_labels: Dictionary = {}
 var inventory: VBoxContainer
-var job_progress: ProgressBar
-var job_cost: HBoxContainer
-var job_cost_key: String = ""
 var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
 var system_visual_seed: int = -1
@@ -82,10 +79,11 @@ var miner_button: Button
 var environment_label: Label
 var ship_button: Button
 var yard_button: Button
-var jobs: ItemList
-var cancel_button: Button
 var leave: Button
-var last_job_text: String = ""
+var match_menu: AcceptDialog
+var menu_exit: Button
+var queue_rows: Dictionary = {}
+var queue_list: VBoxContainer
 
 func _ready() -> void:
     theme = HUD.create()
@@ -140,12 +138,18 @@ func _build_ui() -> void:
     var row := HBoxContainer.new()
     row.add_theme_constant_override("separation", 4)
     header_panel.add_child(row)
-    leave = _button("MENU", _leave, row)
+    leave = _button("MENU", _open_menu, row)
     _build_global_bar(row)
     global_population_label = _global_stat(row, "POP  0", Color("#b2e2a9"))
     year_label = _global_stat(row, "YEAR  1", HUD.ACCENT)
-    var reset: Button = _button("RESET", _reset_view, row)
-    reset.tooltip_text = "Reset camera view"
+    match_menu = AcceptDialog.new()
+    match_menu.title = "Menu"
+    match_menu.exclusive = true
+    match_menu.unresizable = true
+    match_menu.ok_button_text = "Resume"
+    add_child(match_menu)
+    menu_exit = match_menu.add_button("Leave match", false, "leave")
+    match_menu.custom_action.connect(_menu_action)
     inspector_panel = PanelContainer.new()
     add_child(inspector_panel)
     inspector_panel.anchor_left = 1.0
@@ -325,18 +329,10 @@ func _build_ui() -> void:
     yard_button = _button("BUILD SHIPYARD", func() -> void: _operation("yard"), shipyards)
     var queue: VBoxContainer = HUD.section(shipyard_page, "Queue")
     queue_title = queue.get_child(0)
-    jobs = ItemList.new()
-    jobs.custom_minimum_size.y = 130
-    jobs.item_selected.connect(func(_i: int) -> void: _refresh())
-    queue.add_child(jobs)
-    job_progress = ProgressBar.new()
-    job_progress.custom_minimum_size.y = 20
-    job_progress.show_percentage = true
-    queue.add_child(job_progress)
-    job_cost = HBoxContainer.new()
-    queue.add_child(job_cost)
-    cancel_button = _button("CANCEL / REFUND", _cancel, queue)
-    HUD.action(cancel_button, Color("#e9a276"))
+    queue_list = VBoxContainer.new()
+    queue_list.add_theme_constant_override("separation", 6)
+    queue.add_child(queue_list)
+
 
 func _ship_build_row(parent: Container, title_text: String, kind: String) -> Button:
     var row := HBoxContainer.new()
@@ -408,7 +404,7 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
         var detail: Label = card["detail"]
         if not job.is_empty():
             progress.value = 100.0 * float(job["progress"]) / float(job["work"])
-            detail.text = "Upgrading to Lv %d%s" % [int(job["level"]), " • Waiting for materials" if ECONOMY._possible(planet, job) <= ECONOMY.EPS else ""]
+            detail.text = "%s%s" % [_cost_text(job["cost"], job["allocated"]), " • Waiting" if ECONOMY._possible(planet, job) <= ECONOMY.EPS else ""]
             button.text = "CANCEL / REFUND"
             button.disabled = not owned
         else:
@@ -420,7 +416,7 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
             elif not available:
                 detail.text = "No local deposit"
             else:
-                detail.text = "Output %.2f/yr  •  %.0f Metals  •  %.0f years" % [ECONOMY.rate(planet, resource), float(ECONOMY._cost("production", level + 1)["Metals"]), ECONOMY._work("production", level + 1)]
+                detail.text = "Output %.2f/yr\n%s · %.0f yr" % [ECONOMY.rate(planet, resource), _cost_text(ECONOMY._cost("production", level + 1)), ECONOMY._work("production", level + 1)]
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
     for resource in ECONOMY.RESOURCES:
@@ -652,10 +648,8 @@ func _apply_thresholds() -> void:
 func _operation(kind: String, target: String = "") -> void:
     session.call("request_operation", selected, kind, target)
 
-func _cancel() -> void:
-    var selection: PackedInt32Array = jobs.get_selected_items()
-    if not selection.is_empty():
-        session.call("request_cancel", selected, int(jobs.get_item_metadata(selection[0])))
+func _cancel_job(id: int) -> void:
+    session.call("request_cancel", selected, id)
 
 func _refresh() -> void:
     if is_instance_valid(map_canvas):
@@ -665,9 +659,9 @@ func _refresh() -> void:
     var state: Dictionary = _state()
     var phase: String = str(session.get("phase"))
     _refresh_global_bar(state)
-    leave.text = "MENU" if bool(session.get("is_solo")) else ("LOBBY" if multiplayer.is_server() else "LEAVE")
-    if phase == "loading":
-        leave.text = "CANCEL" if multiplayer.is_server() else "LEAVE"
+    menu_exit.text = "Main menu" if bool(session.get("is_solo")) else ("Return to lobby" if multiplayer.is_server() else "Leave match")
+    if phase == "loading" and multiplayer.is_server():
+        menu_exit.text = "Cancel start"
     var planets: Array = state.get("planets", [])
     if not initial_selection_done and not planets.is_empty():
         initial_selection_done = true
@@ -710,17 +704,14 @@ func _refresh() -> void:
     miner_button.disabled = not owned or full
     ship_button.disabled = true
     yard_button.disabled = not owned or full
-    cancel_button.disabled = true
     if p.is_empty():
         info.text = "Select a system."
         population_label.text = ""
         population_bar.hide()
         resource_detail.text = ""
         trade_detail.text = ""
-        jobs.clear()
+        _refresh_queue(p, false)
         inventory.hide()
-        job_progress.hide()
-        job_cost.hide()
         return
     var owner: int = int(p["owner"])
     var roster: Dictionary = session.get("players")
@@ -757,34 +748,7 @@ func _refresh() -> void:
     trade_detail.text = "Stock: %.1f\nCurrent import/export: %.0f / %.0f" % [float(p["stock"][trade_resource]), float(t["min"]), float(t["max"])]
     _refresh_upgrade_cards(p, owned)
     ship_button.disabled = not owned or full or not bool(p["home"])
-    var selected_job: int = -1
-    var old: PackedInt32Array = jobs.get_selected_items()
-    if not old.is_empty():
-        selected_job = int(jobs.get_item_metadata(old[0]))
-    var job_text: String = str(selected) + str(p["queue"])
-    if job_text != last_job_text:
-        jobs.clear()
-        for item in p["queue"]:
-            var name_value: String = "Logistics ship" if item["kind"] == "ship" else str(item["kind"]).replace("_", " ").capitalize()
-            var target_text: String = str(item["target"])
-            if item["kind"] == "yard_upgrade":
-                name_value = "Shipyard %d upgrade" % (int(item["target"]) + 1)
-                target_text = ""
-            var line: String = "%s %s — %.0f%%" % [name_value, target_text, 100.0 * float(item["progress"]) / float(item["work"])]
-            if ECONOMY._possible(p, item) <= ECONOMY.EPS:
-                line += " (waiting for materials)"
-            jobs.add_item(line)
-            if item["kind"] == "production":
-                jobs.set_item_icon(jobs.item_count - 1, HUD.ICONS[item["target"]])
-            if ECONOMY._possible(p, item) <= ECONOMY.EPS:
-                jobs.set_item_custom_fg_color(jobs.item_count - 1, Color("#e9a276"))
-            var i: int = jobs.item_count - 1
-            jobs.set_item_metadata(i, int(item["id"]))
-            if int(item["id"]) == selected_job:
-                jobs.select(i)
-        last_job_text = job_text
-    cancel_button.disabled = not owned or jobs.get_selected_items().is_empty()
-    _refresh_selected_job(p)
+    _refresh_queue(p, owned)
 
 func _upgrade_yard_at(index: int) -> void:
     if index >= 0:
@@ -856,37 +820,72 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         bar.value = 100.0 * float(job["progress"]) / float(job["work"])
         bar.tooltip_text = "Waiting for materials" if ECONOMY._possible(p, job) <= ECONOMY.EPS else "Shipyard %d" % number
 
-func _refresh_selected_job(p: Dictionary) -> void:
-    var selection: PackedInt32Array = jobs.get_selected_items()
-    var item: Dictionary = {}
-    if not selection.is_empty():
-        var id: int = int(jobs.get_item_metadata(selection[0]))
-        for entry in p["queue"]:
-            if int(entry["id"]) == id:
-                item = entry
-                break
-    job_progress.visible = not item.is_empty()
-    job_cost.visible = not item.is_empty()
-    if item.is_empty():
-        return
-    job_progress.value = 100.0 * float(item["progress"]) / float(item["work"])
-    var cost: String = str(item["allocated"]) + str(item["cost"])
-    if cost == job_cost_key:
-        return
-    job_cost_key = cost
-    for child in job_cost.get_children():
-        job_cost.remove_child(child)
-        child.queue_free()
-    for r in item["cost"]:
-        var icon := TextureRect.new()
-        icon.texture = HUD.ICONS[r]
-        icon.custom_minimum_size = Vector2(20, 20)
-        icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-        icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-        job_cost.add_child(icon)
-        var label := _label("%.0f / %.0f" % [float(item["allocated"][r]), float(item["cost"][r])], 12)
-        label.add_theme_color_override("font_color", HUD.COLORS[r])
-        job_cost.add_child(label)
+func _job_name(item: Dictionary) -> String:
+    match str(item["kind"]):
+        "ship": return "Logistics ship"
+        "yard": return "New shipyard"
+        "yard_upgrade": return "Shipyard %d → Lv %d" % [int(item["target"]) + 1, int(item["level"])]
+        "production": return "%s → Lv %d" % [str(item["target"]), int(item["level"])]
+        _: return str(item["kind"]).replace("_", " ").capitalize()
+
+func _cost_text(cost: Dictionary, allocated: Dictionary = {}) -> String:
+    var parts: PackedStringArray = []
+    for resource in cost:
+        if allocated.is_empty():
+            parts.append("%.0f %s" % [float(cost[resource]), resource])
+        else:
+            parts.append("%.0f / %.0f %s" % [float(allocated.get(resource, 0.0)), float(cost[resource]), resource])
+    return " · ".join(parts)
+
+func _refresh_queue(p: Dictionary, owned: bool) -> void:
+    var entries: Array = p.get("queue", [])
+    var ids: Dictionary = {}
+    for item in entries:
+        ids[int(item["id"])] = true
+    for id in queue_rows.keys():
+        if not ids.has(id):
+            var obsolete: Control = queue_rows[id]["row"]
+            queue_list.remove_child(obsolete)
+            obsolete.queue_free()
+            queue_rows.erase(id)
+    for item in entries:
+        var id: int = int(item["id"])
+        if not queue_rows.has(id):
+            var row := VBoxContainer.new()
+            var top := HBoxContainer.new()
+            row.add_child(top)
+            var name_label := _label("", 12)
+            name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+            top.add_child(name_label)
+            var cancel: Button = _button("×", _cancel_job.bind(id), top)
+            cancel.custom_minimum_size = Vector2(28, 24)
+            cancel.tooltip_text = "Cancel and refund allocated materials"
+            HUD.action(cancel, Color("#e9a276"))
+            var progress := ProgressBar.new()
+            progress.custom_minimum_size.y = 15
+            row.add_child(progress)
+            var cost_label := _label("", 11)
+            cost_label.add_theme_color_override("font_color", HUD.MUTED)
+            row.add_child(cost_label)
+            queue_list.add_child(row)
+            queue_rows[id] = {"row": row, "title": name_label, "cancel": cancel, "progress": progress, "cost": cost_label}
+        var card: Dictionary = queue_rows[id]
+        card["title"].text = _job_name(item)
+        card["cancel"].disabled = not owned
+        card["progress"].value = 100.0 * float(item["progress"]) / float(item["work"])
+        card["cost"].text = _cost_text(item["cost"], item["allocated"])
+        var blocked: bool = ECONOMY._possible(p, item) <= ECONOMY.EPS
+        card["progress"].tooltip_text = "Waiting for materials" if blocked else ""
+        card["cost"].add_theme_color_override("font_color", Color("#e9a276") if blocked else HUD.MUTED)
+
+func _open_menu() -> void:
+    drag_button = 0
+    match_menu.popup_centered(Vector2i(330, 100))
+
+func _menu_action(action: StringName) -> void:
+    if action == &"leave":
+        match_menu.hide()
+        _leave()
 
 func _leave() -> void:
     if bool(session.get("is_solo")):
@@ -1066,6 +1065,8 @@ func _select_at(point: Vector2) -> void:
     _refresh()
 
 func _map_input(event: InputEvent) -> void:
+    if match_menu.visible:
+        return
     if event is InputEventMouseButton:
         var mouse: InputEventMouseButton = event
         if mouse.button_index == MOUSE_BUTTON_MIDDLE or mouse.button_index == MOUSE_BUTTON_RIGHT:
@@ -1119,7 +1120,7 @@ func _on_economy_changed() -> void:
     _refresh()
 
 func _keyboard_pan(delta: float) -> void:
-    if str(session.get("phase")) != "match":
+    if str(session.get("phase")) != "match" or match_menu.visible:
         return
     if not get_window().has_focus():
         return
