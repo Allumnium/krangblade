@@ -1,8 +1,12 @@
-# Godot 4 cache and imported assets
+# Godot generated cache and imported binaries
 .godot/
-
-# Optional generated and local files
 .import/
+*.translation
+
+# Keep resource UID sidecars (*.uid) and asset import settings (*.import)
+# in version control; these are stable resource metadata, not caches.
+
+# Local editor and OS files
 .DS_Store
 Thumbs.db
 .vscode/
