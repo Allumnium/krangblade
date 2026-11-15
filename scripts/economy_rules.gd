@@ -57,6 +57,39 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
             "yards": yards, "queue": []})
     return {"map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1}
 
+## Read-only player-wide holdings: stock plus the player's own cargo in transit.
+static func empire_totals(state: Dictionary, player: int) -> Dictionary:
+    var stock: Dictionary = empty_stock()
+    var cargo: Dictionary = empty_stock()
+    var total: Dictionary = empty_stock()
+    var population: float = 0.0
+    var planets: int = 0
+    var craft: int = 0
+    var logistics: int = 0
+    var colonies: int = 0
+    for planet in state.get("planets", []):
+        if int(planet["owner"]) != player:
+            continue
+        planets += 1
+        population += float(planet["population"])
+        for resource in RESOURCES:
+            stock[resource] = float(stock[resource]) + float(planet["stock"].get(resource, 0.0))
+    for ship in state.get("ships", []):
+        if int(ship["owner"]) != player:
+            continue
+        craft += 1
+        if ship.get("kind", "ship") == "colony_ship":
+            colonies += 1
+        else:
+            logistics += 1
+        var contents: Dictionary = ship.get("cargo", {})
+        for resource in RESOURCES:
+            cargo[resource] = float(cargo[resource]) + float(contents.get(resource, 0.0))
+    for resource in RESOURCES:
+        total[resource] = float(stock[resource]) + float(cargo[resource])
+    return {"stock": stock, "cargo": cargo, "resources": total, "population": population,
+        "planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies}
+
 static func planet_teams(state: Dictionary) -> Array[int]:
     var result: Array[int] = []
     var teams: Dictionary = state["teams"]
