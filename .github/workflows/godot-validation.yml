@@ -137,11 +137,11 @@ jobs:
             local mode="$2"
             local failures=0
             local pids=""
-            timeout 75s godot --headless --path . --script res://tests/network_smoke.gd -- host "$count" "$mode" > "/tmp/host-$count-$mode.log" 2>&1 &
+            timeout 75s godot --headless --max-fps 60 --path . --script res://tests/network_smoke.gd -- host "$count" "$mode" > "/tmp/host-$count-$mode.log" 2>&1 &
             pids="$pids $!"
             sleep 1
             for ((n=1;n<count;n++)); do
-              timeout 75s godot --headless --path . --script res://tests/network_smoke.gd -- client "$count" "$n" "$mode" > "/tmp/client-$count-$mode-$n.log" 2>&1 &
+              timeout 75s godot --headless --max-fps 60 --path . --script res://tests/network_smoke.gd -- client "$count" "$n" "$mode" > "/tmp/client-$count-$mode-$n.log" 2>&1 &
               pids="$pids $!"
             done
             for pid in $pids; do

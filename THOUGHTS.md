@@ -67,3 +67,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Balance hypothesis.
 - **Observation:** Installed industrial capacity now supports 100k productive residents per level, while linear demand continues increasing. At level one, Tech/Textiles output reaches 5 units/year and demand catches up at 200k population (before economic bonuses).
 - **Consider:** Playtest whether industry upgrades are timely and accessible, particularly for AI and colonies. Adjust provisional rates if stockouts routinely stall construction.
+
+### T-014 — Snapshot pressure during lobby return
+- **Type:** Verified eight-peer lobby-return timeouts; queue pressure is a hypothesis.
+- **Observation:** Full reliable snapshots were broadcast after each order, including bursts from seven guests. v0.11.4 batches remote state at the fixed cadence and allows one unacknowledged snapshot per guest. Local authority UI remains immediate. Test guests explicitly leave after the lobby scene loads; headless peers are capped at 60 FPS to avoid CPU starvation on shared runners.
+- **Consider:** Validate under eight real peers and future internet latency; inspect bandwidth and queue age on large fleets.

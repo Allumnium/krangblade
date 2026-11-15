@@ -112,7 +112,7 @@ func _phase_changed() -> void:
             if role == "host" and mode == "normal":
                 _wait_for_guest_completion()
             else:
-                create_timer(0.35).timeout.connect(_pass)
+                call_deferred("_finish_guest_return")
     elif phase == "offline" and not finishing:
         if (mode == "host-leave" and saw_match) or (mode == "drop-loading" and saw_loading and role == "client"):
             finishing = true
@@ -324,9 +324,23 @@ func _return_after_all_verified() -> void:
         if is_equal_approx(float(ack["min"]), 11.0) and is_equal_approx(float(ack["max"]), 22.0):
             confirmed += 1
     if economy_verified and confirmed == expected_players:
+        var pending: Dictionary = session.get("snapshot_pending")
+        if pending.size() > expected_players - 1:
+            _fail("More than one in-flight snapshot per guest.")
+            return
         session.call("return_to_lobby")
     else:
         create_timer(0.25).timeout.connect(_return_after_all_verified)
+
+# Verify the actual lobby scene, then explicitly disconnect rather than
+# relying on process teardown to propagate an ENet disconnect.
+func _finish_guest_return() -> void:
+    if current_scene == null or not current_scene.has_method("_refresh_roster"):
+        create_timer(0.1).timeout.connect(_finish_guest_return)
+        return
+    if role == "client":
+        session.call("leave_session")
+    _pass()
 
 # Do not close the host while guests are still receiving the lobby transition.
 # Every guest must independently pass its own checks before exiting.

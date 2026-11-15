@@ -11,6 +11,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [x] Visible territory overlay, time controls and mandatory parallel regression checks.
 
 ## Priority — Economy foundation
+- [ ] Verify bounded snapshot replication and eight-peer lobby return (v0.11.4 coalesces command snapshots and applies per-peer ACK backpressure).
 - [ ] Validate multi-resource ship costs and a starting stock sufficient for about twelve mixed hulls.
 - [ ] Validate baseline population-scaled production, local population gates for production upgrades (first Tech upgrade at 200k), and one-time Economy buildings with resource-specific percentage bonuses.
 - [ ] Playtest costs, output, trade, AI expansion, population pacing and building choices before choosing final balance.
