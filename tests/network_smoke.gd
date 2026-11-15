@@ -35,7 +35,7 @@ func _begin() -> void:
         return
     session.connect("phase_changed", _phase_changed)
     session.connect("roster_changed", _roster_changed)
-    create_timer(35.0).timeout.connect(func() -> void: _fail("Network smoke test timed out."))
+    create_timer(65.0).timeout.connect(func() -> void: _fail("Network smoke test timed out."))
     if role == "host":
         if not bool(session.call("host_game", "TestHost")):
             _fail("Could not host.")
@@ -106,7 +106,10 @@ func _phase_changed() -> void:
                 if int(id) != 1 and bool((roster[id] as Dictionary).get("ready", true)):
                     _fail("Guest remained ready after return.")
                     return
-            create_timer(3.0 if role == "host" else 0.35).timeout.connect(_pass)
+            if role == "host" and mode == "normal":
+                _wait_for_guest_completion()
+            else:
+                create_timer(0.35).timeout.connect(_pass)
     elif phase == "offline" and not finishing:
         if (mode == "host-leave" and saw_match) or (mode == "drop-loading" and saw_loading and role == "client"):
             finishing = true
@@ -208,6 +211,14 @@ func _check_economy_sync() -> void:
             economy_verified = true
     if not economy_verified:
         create_timer(0.25).timeout.connect(_check_economy_sync)
+
+# Do not close the host while guests are still receiving the lobby transition.
+# Every guest must independently pass its own checks before exiting.
+func _wait_for_guest_completion() -> void:
+    if (session.get("players") as Dictionary).size() == 1 and session.multiplayer.get_peers().is_empty():
+        _pass()
+    else:
+        create_timer(0.25).timeout.connect(_wait_for_guest_completion)
 
 func _pass() -> void:
     print("PASS: network %s %d players (%s)" % [role, expected_players, mode])

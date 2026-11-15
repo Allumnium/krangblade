@@ -100,6 +100,10 @@ func _show_menu() -> void:
     actions.add_child(_button("MULTIPLAYER", _show_multiplayer))
     actions.add_child(_button("QUIT", func() -> void: get_tree().quit()))
     col.add_spacer(false)
+    var version_label := _text("v%s" % str(ProjectSettings.get_setting("application/config/version")), 12, MUTED)
+    version_label.name = "GameVersion"
+    version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    col.add_child(version_label)
 
 func _show_solo_setup() -> void:
     screen = "solo_setup"

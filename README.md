@@ -93,3 +93,7 @@ The Trade tab now displays all six resource range sliders together instead of a 
 ## Cargo layout and exploration default
 
 Cargo inspectors use non-wrapping numeric columns and bounded scrolling, with large fleet totals compacted. Fog of war is disabled in the authoritative match state by default: all systems, routes, fields and ships are visible, and fields can be configured by any participant. Existing ownership, allied path restrictions and mining reachability are unchanged. Discovery still tracks exploration, and the `fog_of_war` match-state flag can be enabled for future game setup options; no settings control yet.
+
+## Versioning
+
+The main menu displays the game version directly from `project.godot` (`application/config/version`). Starting at 0.1.0, every subsequent commit must increment MAJOR.MINOR.PATCH: patch for fixes and small changes, minor for new features, major for breaking milestones. Reset lower components when bumping a higher component. The validation workflow checks numeric ordering for every first-parent commit since the version was introduced (and verifies the current value on manual runs). Update `config/version` in the same commit; do not use a separate bump commit. Squash merges retain the branch's final version. CI reports failure if a subsequent commit omits a bump. The multiplayer regression host waits for all tested guests to finish and disconnect rather than exiting after an arbitrary delay.
