@@ -56,6 +56,7 @@ const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
 const LASER_DAMAGE: float = 18.0
 const LASER_RANGE: float = 180.0
+const PURSUIT_YEARS: float = 3.0
 const AI_INTERVAL: float = 4.0
 const AI_WAVE_MIN: int = 3
 const AI_RALLY_RADIUS: float = 150.0
