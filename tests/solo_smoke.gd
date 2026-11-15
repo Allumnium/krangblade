@@ -49,6 +49,10 @@ func _run() -> void:
     assert(not setup["planets"][1]["queue"].is_empty())
     assert(not setup["planets"][2]["queue"].is_empty())
     assert(setup["planets"][0]["queue"].is_empty())
+    for i in range(150):
+        session.call("_economy_tick")
+    for player in [2, 3]:
+        assert(setup["ships"].any(func(ship: Dictionary) -> bool: return int(ship["owner"]) == player and ship["kind"] == "colony_ship"))
     session.call("leave_solo")
     print("PASS: offline solo planetary match, colonization, ship construction, reset")
     quit(0)

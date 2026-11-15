@@ -1433,8 +1433,6 @@ func _ship_poses(state: Dictionary) -> Dictionary:
         var at: int = int(ship["at"])
         var fighter: bool = ship.get("kind", "") == "fighter"
         var field_node: bool = fighter and at >= points.size()
-        if int(ship["owner"]) != _me() and not ECONOMY.discovered(state, _me(), "fields" if field_node else "planets", at - points.size() if field_node else at):
-            continue
         var travel_points: Array = military_points if fighter else points
         var route: Array = ship["route"]
         var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
@@ -1451,7 +1449,7 @@ func _ship_poses(state: Dictionary) -> Dictionary:
                 point += mining_offset
                 direction = _orbit_direction(mining_offset)
         elif route.is_empty():
-            # Idle craft orbit visually; logistics positions remain authoritative planet nodes.
+            # All living craft orbit visually, including foreign stationary fighters.
             var slot: int = int(docked.get(at, 0))
             docked[at] = slot + 1
             var orbit_radius: float = maxf(9.0, float(state["map"]["fields"][at - points.size()]["radius"]) * _fit() * zoom) if field_node else _planet_radius(at, state)
@@ -1658,7 +1656,9 @@ func _draw_map() -> void:
         map_canvas.draw_colored_polygon(shape, hull)
         var outline: PackedVector2Array = shape.duplicate()
         outline.append(shape[0])
-        map_canvas.draw_polyline(outline, Color("#08111b"), 1.5, true)
+        map_canvas.draw_polyline(outline, Color("#08111b"), 2.5, true)
+        # Keep class colors; identify allegiance on every hull, including loaded ships.
+        map_canvas.draw_polyline(outline, COLORS[team].lightened(0.2), 1.0, true)
         var hp: float = clampf(float(ship.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
         if hp < 1.0:
             var bar_pos: Vector2 = point + Vector2(-10.0, 13.0)
