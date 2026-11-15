@@ -11,6 +11,29 @@ func _initialize() -> void:
     all_friendly.fill(1)
     for i in range(MAP.COUNT):
         assert(not MAP.path(graph, all_friendly, 1, 0, i).is_empty())
+    # Seeded clusters are internally connected and connected by sparse bridges.
+    for seed_value in range(20):
+        var clustered: Dictionary = MAP.generate(seed_value)
+        var cluster_ids: Array = clustered["clusters"]
+        var cluster_points: Array = clustered["points"]
+        var local_distance: float = 0.0
+        var bridge_distance: float = 0.0
+        var locals: int = 0
+        var bridges: int = 0
+        for edge in clustered["edges"]:
+            var length: float = cluster_points[edge[0]].distance_to(cluster_points[edge[1]])
+            if cluster_ids[edge[0]] == cluster_ids[edge[1]]:
+                locals += 1
+                local_distance += length
+            else:
+                bridges += 1
+                bridge_distance += length
+        assert(bridges == MAP.CLUSTER_COUNT - 1)
+        assert(bridge_distance / bridges > local_distance / locals)
+        for i in range(MAP.COUNT):
+            assert(not MAP.path(clustered, all_friendly, 1, 0, i).is_empty())
+        for i in range(8):
+            assert(cluster_ids[i] == i % MAP.CLUSTER_COUNT)
     var players: Dictionary = {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}
     var ids: Array[int] = [1, 2, 3]
     var state: Dictionary = ECON.create(graph, players, ids)
@@ -153,6 +176,23 @@ func _initialize() -> void:
         ECON.step(state, 1.0)
     assert(int(p["yards"][0]["level"]) == 2)
     assert(ECON.max_size(2) > ECON.max_size(1))
+
+    # Fighters use the shipyard and are counted separately; no logistics behavior.
+    var military: Dictionary = ECON.create(graph, players, ids)
+    assert(not ECON.enqueue(military, 2, 0, "fighter"))
+    assert(ECON.enqueue(military, 1, 0, "fighter"))
+    for i in range(6):
+        ECON.step(military, 1.0)
+    assert(military["ships"].size() == 1)
+    var fighter: Dictionary = military["ships"][0]
+    assert(fighter["kind"] == "fighter" and fighter["route"].is_empty())
+    assert(ECON.empire_totals(military, 1)["fighters"] == 1)
+    assert(ECON.empire_totals(military, 1)["logistics"] == 0)
+    assert(not ECON.send_colony(military, 1, int(fighter["id"]), 3))
+    for i in range(20):
+        ECON.step(military, 1.0)
+    assert(int(fighter["at"]) == 0 and fighter["route"].is_empty())
+    print("PASS: clustered map and fighter construction")
 
     # Physical, mixed cargo from an owned planet to an allied one. No hostile transit.
     var test_map: Dictionary = MAP.generate(123)

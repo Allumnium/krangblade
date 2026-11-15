@@ -71,6 +71,7 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
     var craft: int = 0
     var logistics: int = 0
     var colonies: int = 0
+    var fighters: int = 0
     for planet in state.get("planets", []):
         if int(planet["owner"]) != player:
             continue
@@ -84,6 +85,8 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
         craft += 1
         if ship.get("kind", "ship") == "colony_ship":
             colonies += 1
+        elif ship.get("kind", "ship") == "fighter":
+            fighters += 1
         else:
             logistics += 1
         var contents: Dictionary = ship.get("cargo", {})
@@ -92,7 +95,7 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
     for resource in RESOURCES:
         total[resource] = float(stock[resource]) + float(cargo[resource])
     return {"stock": stock, "cargo": cargo, "resources": total, "population": population,
-        "planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies}
+        "planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters}
 
 static func planet_teams(state: Dictionary) -> Array[int]:
     var result: Array[int] = []
@@ -225,6 +228,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
     match kind:
         "ship": return {"Metals": 120.0}
         "colony_ship": return {"Metals": 240.0}
+        "fighter": return {"Metals": 90.0}
         "yard": return {"Metals": 480.0}
         "yard_upgrade": return {"Metals": 240.0 * level}
         "production": return {"Metals": 80.0 * level}
@@ -234,6 +238,7 @@ static func _work(kind: String, level: int) -> float:
     match kind:
         "ship": return 48.0
         "colony_ship": return 72.0
+        "fighter": return 36.0
         "yard": return 30.0
         "yard_upgrade": return 15.0 * level
         "production": return 10.0 * level
@@ -255,7 +260,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
             if not bool(p["home"]):
                 return false
             target = ""
-        "colony_ship":
+        "colony_ship", "fighter":
             target = ""
         "yard":
             target = ""
@@ -284,7 +289,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
     state["next_id"] = id + 1
     p["queue"].append({"id": id, "kind": kind, "target": target, "level": level,
         "cost": _cost(kind, level), "work": _work(kind, level),
-        "progress": 0.0, "allocated": empty_stock(), "size": SHIP_SIZE if kind in ["ship", "colony_ship"] else 0})
+        "progress": 0.0, "allocated": empty_stock(), "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter"] else 0})
     return true
 
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
@@ -338,7 +343,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
             p["yards"].append({"level": 1, "job": -1})
         "yard_upgrade":
             p["yards"][int(item["target"])]["level"] = int(item["level"])
-        "ship", "colony_ship":
+        "ship", "colony_ship", "fighter":
             state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "at": index,
                 "route": [], "leg": 0.0, "source": -1, "dest": -1, "cargo": empty_stock()})
     p["queue"].erase(item)
@@ -549,5 +554,6 @@ static func step(state: Dictionary, dt: float) -> void:
         if ship.get("kind", "ship") == "colony_ship":
             if _work_colony(state, ship, dt):
                 state["ships"].erase(ship)
-        else:
+        elif ship.get("kind", "ship") == "ship":
             _work_ship(state, ship, teams, cache, dt)
+        # Fighters remain in orbit; combat and military orders are not designed yet.

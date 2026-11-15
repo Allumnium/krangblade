@@ -1,50 +1,84 @@
 extends RefCounted
 ## Seeded connected planet graph, independent of the rendering layer.
 const COUNT: int = 17
-const SIZE := Vector2(1000, 700)
+const SIZE := Vector2(1600, 1100)
+
+const CLUSTER_COUNT: int = 4
 
 static func generate(seed_value: int) -> Dictionary:
     var rng := RandomNumberGenerator.new()
     rng.seed = seed_value
+    var centers: Array[Vector2] = [Vector2(350, 275), Vector2(1240, 270), Vector2(360, 825), Vector2(1230, 820)]
+    var groups: Array = []
+    for i in range(CLUSTER_COUNT):
+        centers[i] += Vector2(rng.randf_range(-65, 65), rng.randf_range(-35, 35))
+        groups.append([])
     var points: Array[Vector2] = []
+    var clusters: Array[int] = []
+    # Interleave indices so the first eight homeworlds are spread across clusters.
     for i in range(COUNT):
+        var group: int = i % CLUSTER_COUNT
         var candidate := Vector2.ZERO
-        var best_distance: float = -1.0
-        for attempt in range(100):
-            var p := Vector2(rng.randf_range(55, SIZE.x - 55), rng.randf_range(55, SIZE.y - 55))
+        var best: float = -1.0
+        for attempt in range(160):
+            var offset := Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
+            if offset.length_squared() > 1.0:
+                continue
+            var p: Vector2 = centers[group] + offset * Vector2(195, 180)
             var nearest: float = SIZE.length()
-            for other in points:
-                nearest = minf(nearest, p.distance_to(other))
-            if nearest > best_distance:
+            for index in groups[group]:
+                nearest = minf(nearest, p.distance_to(points[index]))
+            if nearest > best:
                 candidate = p
-                best_distance = nearest
-            if nearest >= 120.0:
+                best = nearest
+            if nearest >= 155.0:
                 break
         points.append(candidate)
-    # A minimum spanning tree guarantees connectivity; extra short routes add loops.
+        clusters.append(group)
+        groups[group].append(i)
     var edges: Array = []
-    var connected: Array[int] = [0]
-    while connected.size() < COUNT:
-        var a: int = -1
-        var b: int = -1
-        var distance: float = INF
-        for i in connected:
-            for j in range(COUNT):
-                if connected.has(j):
-                    continue
-                var d: float = points[i].distance_to(points[j])
-                if d < distance:
-                    a = i
-                    b = j
-                    distance = d
-        edges.append([mini(a, b), maxi(a, b)])
-        connected.append(b)
-    for i in range(COUNT):
-        for j in range(i + 1, COUNT):
-            if not edges.has([i, j]) and points[i].distance_to(points[j]) < 225.0:
-                if rng.randf() < 0.75:
+    # First connect each cluster internally, then bridge the closest cluster pairs.
+    for group in groups:
+        var connected: Array = [group[0]]
+        while connected.size() < group.size():
+            var pair: Array = _closest_pair(points, connected, group, connected)
+            edges.append(pair)
+            connected.append(pair[1] if connected.has(pair[0]) else pair[0])
+        for i in group:
+            for j in group:
+                if i < j and not edges.has([i, j]) and points[i].distance_to(points[j]) < 255.0 and rng.randf() < 0.7:
                     edges.append([i, j])
-    return {"seed": seed_value, "points": points, "edges": edges}
+    var joined: Array = [0]
+    while joined.size() < CLUSTER_COUNT:
+        var best_edge: Array = []
+        var next_group: int = -1
+        var best_distance: float = INF
+        for i in joined:
+            for j in range(CLUSTER_COUNT):
+                if joined.has(j):
+                    continue
+                var pair: Array = _closest_pair(points, groups[i], groups[j], [])
+                var distance: float = points[pair[0]].distance_to(points[pair[1]])
+                if distance < best_distance:
+                    best_distance = distance
+                    best_edge = pair
+                    next_group = j
+        edges.append(best_edge)
+        joined.append(next_group)
+    return {"seed": seed_value, "points": points, "edges": edges, "clusters": clusters}
+
+static func _closest_pair(points: Array[Vector2], a: Array, b: Array, excluded: Array) -> Array:
+    var best: float = INF
+    var pair: Array = []
+    for i in a:
+        for j in b:
+            if i == j or excluded.has(j):
+                continue
+            var distance: float = points[i].distance_to(points[j])
+            if distance < best:
+                best = distance
+                pair = [mini(i, j), maxi(i, j)]
+    return pair
 
 static func linked(map_data: Dictionary, a: int, b: int) -> bool:
     return (map_data.get("edges", []) as Array).has([mini(a, b), maxi(a, b)])
