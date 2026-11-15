@@ -147,6 +147,8 @@ func _send_commands() -> void:
     session.call("request_thresholds", (home_index + 1) % expected_players, "Metals", 77.0, 88.0)
     session.call("request_operation", home_index, "ship")
     session.call("request_operation", home_index, "fighter")
+    session.call("request_continuous", home_index, "colony_ship", true)
+    session.call("request_continuous", home_index, "miner", true)
     session.call("request_continuous", home_index, "production:Organics", true)
     session.call("request_continuous", home_index, "yard_upgrade:0", true)
     session.call("request_mining_policy", 0, true, false, true)
@@ -188,6 +190,8 @@ func _check_economy_sync() -> void:
             var fighter_pending: bool = false
             var upgrade_pending: bool = false
             var yard_pending: bool = false
+            var repeat_colony: bool = false
+            var repeat_miner: bool = false
             for job in system["queue"]:
                 if job["kind"] == "ship" and float(job["progress"]) > 0.0:
                     ship_progress = true
@@ -197,12 +201,16 @@ func _check_economy_sync() -> void:
                     upgrade_pending = true
                 elif job["kind"] == "yard_upgrade":
                     yard_pending = true
+                elif job["kind"] == "colony_ship" and bool(job.get("automatic", false)):
+                    repeat_colony = true
+                elif job["kind"] == "miner" and bool(job.get("automatic", false)):
+                    repeat_miner = true
             for ship in state["ships"]:
                 if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship":
                     ship_progress = true
             var network: Dictionary = ECON.military_network(state, owner)
             var military: Dictionary = ECON.military_policy(state, owner, "fighter", network)
-            if not network["frontiers"].is_empty() and int(military["frontier"]) == 70 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
+            if not network["frontiers"].is_empty() and int(military["frontier"]) == 70 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
                 verified += 1
         var view: Node = current_scene
         if cancel_sent and verified == expected_players and view != null and view.has_method("_update_trade_stock"):
