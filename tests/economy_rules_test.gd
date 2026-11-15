@@ -648,7 +648,10 @@ func _initialize() -> void:
     var patrol_map: Dictionary = MAP.generate(1337)
     patrol_map["edges"] = [[0, 3], [0, 4], [3, 5], [4, 5], [5, 6], [3, 7]]
     var patrol_state: Dictionary = ECON.create(patrol_map, players, ids)
-    assert(not ECON.set_outpost(patrol_state, 1, 6, true))
+    assert(ECON.set_outpost(patrol_state, 1, 6, true))
+    var disconnected: Dictionary = ECON.military_network(patrol_state, 1)
+    assert(disconnected["outposts"].has(6))
+    assert(not disconnected["frontiers"].has(6))
     assert(not ECON.set_outpost(patrol_state, 1, 1, true))
     for index in [3, 4, 5, 6, 7]:
         assert(ECON.set_outpost(patrol_state, 1, index, true))

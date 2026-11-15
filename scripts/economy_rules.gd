@@ -210,7 +210,10 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
             cargo[resource] = float(cargo[resource]) + float(contents.get(resource, 0.0))
     for resource in RESOURCES:
         total[resource] = float(stock[resource]) + float(cargo[resource])
-    return {"stock": stock, "cargo": cargo, "resources": total, "population": population,
+    var storage_reference: Dictionary = empty_stock()
+    for resource in RESOURCES:
+        storage_reference[resource] = float(planets) * TRADE_REFERENCE
+    return {"stock": stock, "cargo": cargo, "resources": total, "storage_reference": storage_reference, "population": population,
         "planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters, "miners": miners}
 
 ## Host-only sample history; only the derived rates are replicated.
@@ -999,11 +1002,7 @@ static func can_declare_outpost(state: Dictionary, player: int, index: int) -> b
         return false
     if int(state["planets"][index]["owner"]) != 0 or not discovered(state, player, "planets", index):
         return false
-    var network: Dictionary = military_network(state, player)
-    for node in network["distance"]:
-        if MAP.linked(state["map"], int(node), index):
-            return true
-    return false
+    return true
 
 static func set_outpost(state: Dictionary, player: int, index: int, enabled: bool) -> bool:
     if not state["teams"].has(player):

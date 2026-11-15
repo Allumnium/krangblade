@@ -56,6 +56,29 @@ func _run() -> void:
     assert(not setup_state["planets"][0]["continuous"]["yard_upgrade:0"])
     assert((view.get("info") as Label).text.begins_with(str(setup_state["map"]["names"][0])))
     assert(header.position.y + header.size.y < canvas.position.y)
+    var military_toggle: Button = view.get("military_lens")
+    var logistics_toggle: Button = view.get("logistics_lens")
+    assert(not military_toggle.button_pressed and not logistics_toggle.button_pressed)
+    assert(military_toggle.global_position.y >= header.global_position.y + header.size.y)
+    military_toggle.pressed.emit()
+    assert(military_toggle.button_pressed and not logistics_toggle.button_pressed)
+    logistics_toggle.pressed.emit()
+    assert(not military_toggle.button_pressed and logistics_toggle.button_pressed)
+    logistics_toggle.pressed.emit()
+    assert(not logistics_toggle.button_pressed and view.get("active_lens") == "")
+    var fill_state: Dictionary = session.get("economy")
+    var fill_home: Dictionary = fill_state["planets"][0]
+    var prefill: float = float(fill_home["stock"]["Metals"])
+    fill_home["stock"]["Metals"] = 500.0
+    view.call("_refresh_global_bar", fill_state)
+    assert(is_equal_approx(float(view.get("global_resource_fills")["Metals"]), 0.5))
+    fill_home["stock"]["Metals"] = 1500.0
+    view.call("_refresh_global_bar", fill_state)
+    assert(is_equal_approx(float(view.get("global_resource_fills")["Metals"]), 1.0))
+    view.call("_refresh_global_bar", {})
+    assert(is_zero_approx(float(view.get("global_resource_fills")["Metals"])))
+    fill_home["stock"]["Metals"] = prefill
+    view.call("_refresh_global_bar", fill_state)
     assert(header.position.y + header.size.y < inspector.position.y)
     var tabs: TabContainer = view.get("inspector_tabs")
     assert(tabs.get_tab_count() == 4)
@@ -367,7 +390,7 @@ func _run() -> void:
     assert((view.get("fleet_title") as Label).text == "Military")
     assert(not (view.get("fleet_detail") as Label).visible)
     assert((view.get("military_panel") as VBoxContainer).visible)
-    assert((view.get("military_lens") as CheckBox).button_pressed)
+    assert((view.get("military_lens") as Button).button_pressed == false)
     var logistics_id: int = int(state["ships"][0]["id"])
     ship_poses = view.call("_ship_poses", state)
     mouse.position = ship_poses[logistics_id]["point"]
