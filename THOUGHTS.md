@@ -140,3 +140,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - Finite targets are provisionally capped at 9,999. Validate snapshot-safe editing and unlimited-to-finite drag behavior; cancellation stops automatic replacement to prevent immediate requeue.
 
 - v0.14.1 adds local hover detail and latest-step demographic and crew rates; verify constrained layouts and infinity dragging under snapshot latency.
+
+- v0.14.2: fix maintain row wrapping by enforcing single-line labels and compact input dimensions; verify actual window rendering.

@@ -589,14 +589,20 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     row.add_child(maintained)
     var maintain_row := HBoxContainer.new()
     body.add_child(maintain_row)
-    maintain_row.add_child(_label("Maintain", 12))
+    var maintain_caption := _label("Maintain", 12)
+    maintain_caption.autowrap_mode = TextServer.AUTOWRAP_OFF
+    maintain_row.add_child(maintain_caption)
     var amount := SpinBox.new()
     amount.min_value = 0
     amount.max_value = 9999
     amount.step = 1
-    amount.custom_minimum_size.x = 85
+    amount.custom_minimum_size = Vector2(72, 28)
+    amount.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+    amount.get_line_edit().add_theme_font_size_override("font_size", 12)
     maintain_row.add_child(amount)
-    maintain_row.add_child(_label("ships", 12))
+    var ships_caption := _label("ships", 12)
+    ships_caption.autowrap_mode = TextServer.AUTOWRAP_OFF
+    maintain_row.add_child(ships_caption)
     amount.value_changed.connect(func(value: float) -> void:
         session.call("request_maintain", selected, kind, int(value)))
     var infinity := _label("∞", 14)
