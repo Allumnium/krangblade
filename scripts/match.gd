@@ -1,243 +1,338 @@
 extends Control
-## Shared solo/multiplayer economy sandbox: click neutral neighbors to claim,
-## then select a friendly territory to choose its building.
-
-const RULES = preload("res://scripts/lobby_rules.gd")
+## Planet map and inspector. Host/solo session owns all simulation mutations.
+const MAP = preload("res://scripts/planet_map.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
-const RADIUS: float = 25.0
-const TEAM_COLORS = [
-    Color("#526374"), Color("#67d4a9"), Color("#f4a46a"),
-    Color("#77aafe"), Color("#ce91ed"), Color("#eed16b"),
-    Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")
-]
-const IRON_COLOR := Color("#b5c9d6")
-const COPPER_COLOR := Color("#e5a46f")
+const COLORS = [Color("#607286"), Color("#67d4a9"), Color("#f4a46a"), Color("#77aafe"),
+    Color("#ce91ed"), Color("#eed16b"), Color("#f084a6"), Color("#6bcbd4"), Color("#ed7577")]
+const PANEL_WIDTH: float = 380.0
+const RADIUS: float = 17.0
 
-var network: Node
-var status_label: Label
-var leave_button: Button
-var summary_label: Label
-var selection_label: Label
-var mine_button: Button
-var smelter_button: Button
-var factory_button: Button
-var clear_button: Button
-var selected_index: int = -1
+var session: Node
+var selected: int = -1
+var heading: Label
+var info: Label
+var fleet: Label
+var resource_picker: OptionButton
+var resource_detail: Label
+var min_stock: SpinBox
+var max_stock: SpinBox
+var threshold_button: Button
+var upgrade_resource: Button
+var ship_button: Button
+var yard_button: Button
+var yard_picker: OptionButton
+var yard_info: Label
+var upgrade_yard: Button
+var jobs: ItemList
+var cancel_button: Button
+var leave: Button
+var last_job_text: String = ""
+var last_yard_text: String = ""
 
 func _ready() -> void:
-    network = get_node("/root/GameSession")
-    network.connect("phase_changed", _refresh_ui)
-    network.connect("status_changed", _refresh_ui)
-    network.connect("owners_changed", _refresh_economy)
-    network.connect("economy_changed", _refresh_economy)
-    _create_ui()
-    _refresh_ui()
-    _refresh_economy()
-    network.call("match_scene_loaded")
+    session = get_node("/root/GameSession")
+    session.connect("phase_changed", _refresh)
+    session.connect("status_changed", _refresh)
+    session.connect("economy_changed", _refresh)
+    _build_ui()
+    _refresh()
+    session.call("match_scene_loaded")
 
-func _create_ui() -> void:
+func _label(value: String, font_size: int = 14) -> Label:
+    var label := Label.new()
+    label.text = value
+    label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    label.add_theme_font_size_override("font_size", font_size)
+    return label
+
+func _button(text: String, action: Callable, parent: Container) -> Button:
+    var b := Button.new()
+    b.text = text
+    b.pressed.connect(action)
+    b.custom_minimum_size.y = 32
+    parent.add_child(b)
+    return b
+
+func _build_ui() -> void:
     var header := PanelContainer.new()
-    header.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-    header.offset_bottom = 76
     add_child(header)
-    var header_row := HBoxContainer.new()
-    header.add_child(header_row)
-    leave_button = Button.new()
-    leave_button.custom_minimum_size.x = 158
-    leave_button.pressed.connect(_leave)
-    header_row.add_child(leave_button)
-    status_label = Label.new()
-    status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    header_row.add_child(status_label)
-
-    var sidebar := PanelContainer.new()
-    add_child(sidebar)
-    sidebar.anchor_left = 1.0
-    sidebar.anchor_right = 1.0
-    sidebar.anchor_top = 0.0
-    sidebar.anchor_bottom = 1.0
-    sidebar.offset_left = -300
-    sidebar.offset_right = -8
-    sidebar.offset_top = 84
-    sidebar.offset_bottom = -12
-    var margins := MarginContainer.new()
-    for edge in ["left", "right", "top", "bottom"]:
-        margins.add_theme_constant_override("margin_" + edge, 12)
-    sidebar.add_child(margins)
+    header.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+    header.offset_bottom = 54
+    var row := HBoxContainer.new()
+    header.add_child(row)
+    leave = _button("RETURN", _leave, row)
+    heading = _label("WARBOUND / EMPIRE", 16)
+    heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    row.add_child(heading)
+    var panel := PanelContainer.new()
+    add_child(panel)
+    panel.anchor_left = 1.0
+    panel.anchor_right = 1.0
+    panel.anchor_bottom = 1.0
+    panel.offset_left = -PANEL_WIDTH
+    panel.offset_right = -8
+    panel.offset_top = 62
+    panel.offset_bottom = -8
+    var scroll := ScrollContainer.new()
+    panel.add_child(scroll)
+    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    var margin := MarginContainer.new()
+    margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    for side in ["left", "right", "top", "bottom"]:
+        margin.add_theme_constant_override("margin_" + side, 10)
+    scroll.add_child(margin)
     var body := VBoxContainer.new()
-    body.add_theme_constant_override("separation", 10)
-    margins.add_child(body)
-    body.add_child(_label("ECONOMY NETWORK", 19))
-    body.add_child(_label("Connected friendly territories transport goods at up to 3 units per edge per second.", 12))
-    summary_label = _label("", 14)
-    body.add_child(summary_label)
+    body.add_theme_constant_override("separation", 6)
+    margin.add_child(body)
+    fleet = _label("", 14)
+    body.add_child(fleet)
+    info = _label("", 15)
+    body.add_child(info)
     body.add_child(HSeparator.new())
-    body.add_child(_label("SELECTED TERRITORY", 18))
-    selection_label = _label("", 14)
-    body.add_child(selection_label)
-    mine_button = _build_button("BUILD MINE  •  2 raw/s", "mine", body)
-    smelter_button = _build_button("BUILD SMELTER  •  2 iron → 1 steel", "smelter", body)
-    factory_button = _build_button("BUILD FACTORY  •  steel + copper → supplies", "factory", body)
-    clear_button = _build_button("CLEAR BUILDING", "", body)
-    body.add_spacer(false)
-    body.add_child(_label("Click a gray territory adjacent to your team to capture it. Click an owned territory to build. Goods route automatically to consumers and supplies return to HQ.", 12))
+    body.add_child(_label("RESOURCE MANAGEMENT", 16))
+    resource_picker = OptionButton.new()
+    for resource in ECONOMY.RESOURCES:
+        resource_picker.add_item(resource)
+    resource_picker.item_selected.connect(func(_i: int) -> void: _load_thresholds(); _refresh())
+    body.add_child(resource_picker)
+    resource_detail = _label("")
+    body.add_child(resource_detail)
+    var thresholds := HBoxContainer.new()
+    body.add_child(thresholds)
+    for i in range(2):
+        var col := VBoxContainer.new()
+        col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        thresholds.add_child(col)
+        col.add_child(_label("Import below" if i == 0 else "Export above", 12))
+        var spin := SpinBox.new()
+        spin.max_value = 1000000
+        spin.step = 1
+        spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        col.add_child(spin)
+        if i == 0:
+            min_stock = spin
+        else:
+            max_stock = spin
+    threshold_button = _button("APPLY THRESHOLDS", _apply_thresholds, body)
+    upgrade_resource = _button("QUEUE PRODUCTION UPGRADE", func() -> void: _operation("production", _resource()), body)
+    body.add_child(HSeparator.new())
+    body.add_child(_label("SHIPYARDS", 16))
+    yard_picker = OptionButton.new()
+    yard_picker.item_selected.connect(func(_i: int) -> void: _refresh())
+    body.add_child(yard_picker)
+    yard_info = _label("")
+    body.add_child(yard_info)
+    ship_button = _button("QUEUE LOGISTICS SHIP", func() -> void: _operation("ship"), body)
+    yard_button = _button("QUEUE NEW SHIPYARD", func() -> void: _operation("yard"), body)
+    upgrade_yard = _button("QUEUE SHIPYARD UPGRADE", func() -> void: _operation("yard_upgrade", str(yard_picker.selected)), body)
+    body.add_child(HSeparator.new())
+    body.add_child(_label("CONSTRUCTION QUEUE", 16))
+    jobs = ItemList.new()
+    jobs.custom_minimum_size.y = 130
+    jobs.item_selected.connect(func(_i: int) -> void: _refresh())
+    body.add_child(jobs)
+    cancel_button = _button("CANCEL SELECTED / REFUND", _cancel, body)
+    body.add_child(_label("Development values only. Click an adjacent neutral planet to claim it. Cargo ships automatically serve friendly planets.", 12))
 
-func _label(value: String, font_size: int) -> Label:
-    var result := Label.new()
-    result.text = value
-    result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    result.add_theme_font_size_override("font_size", font_size)
-    return result
+func _state() -> Dictionary:
+    return session.get("economy")
 
-func _build_button(title: String, kind: String, container: VBoxContainer) -> Button:
-    var button := Button.new()
-    button.text = title
-    button.custom_minimum_size.y = 35
-    button.pressed.connect(_build.bind(kind))
-    container.add_child(button)
-    return button
+func _planet() -> Dictionary:
+    var planets: Array = _state().get("planets", [])
+    if selected < 0 or selected >= planets.size():
+        return {}
+    return planets[selected]
 
-func _my_team() -> int:
-    if bool(network.get("is_solo")):
-        return 1
-    var roster: Dictionary = network.get("players")
-    var mine: Dictionary = roster.get(multiplayer.get_unique_id(), {})
-    return int(mine.get("team", 0))
+func _me() -> int:
+    return 1 if bool(session.get("is_solo")) else multiplayer.get_unique_id()
 
-func _refresh_ui() -> void:
-    if not is_instance_valid(status_label):
+func _resource() -> String:
+    return resource_picker.get_item_text(resource_picker.selected)
+
+func _load_thresholds() -> void:
+    var p: Dictionary = _planet()
+    if p.is_empty():
         return
-    var phase: String = str(network.get("phase"))
-    var team: int = _my_team()
-    if phase == "loading":
-        leave_button.text = "CANCEL START" if multiplayer.is_server() else "LEAVE SESSION"
-        status_label.text = "Team %d | Loading match — waiting for every player..." % team
-    else:
-        leave_button.text = "RETURN TO MENU" if bool(network.get("is_solo"))             else ("RETURN TO LOBBY" if multiplayer.is_server() else "LEAVE SESSION")
-        status_label.text = "Team %d | %s" % [team, str(network.get("status"))]
+    var t: Dictionary = p["thresholds"][_resource()]
+    min_stock.value = float(t["min"])
+    max_stock.value = float(t["max"])
 
-func _refresh_economy() -> void:
+func _apply_thresholds() -> void:
+    if min_stock.value > max_stock.value:
+        max_stock.value = min_stock.value
+    session.call("request_thresholds", selected, _resource(), min_stock.value, max_stock.value)
+
+func _operation(kind: String, target: String = "") -> void:
+    session.call("request_operation", selected, kind, target)
+
+func _cancel() -> void:
+    var selection: PackedInt32Array = jobs.get_selected_items()
+    if not selection.is_empty():
+        session.call("request_cancel", selected, int(jobs.get_item_metadata(selection[0])))
+
+func _refresh() -> void:
     queue_redraw()
-    if not is_instance_valid(summary_label):
+    if not is_instance_valid(heading):
         return
-    var owners: Array[int] = network.get("owners")
-    var buildings: Array[String] = network.get("buildings")
-    var stocks: Array[Dictionary] = network.get("stocks")
-    var team: int = _my_team()
-    var total: Dictionary = ECONOMY.total_for_team(owners, stocks, team)
-    summary_label.text = "TEAM %d  •  STOCK ON NETWORK\nIron: %d    Copper: %d\nSteel: %d    Supplies: %d" % [
-        team, int(total["iron"]), int(total["copper"]),
-        int(total["steel"]), int(total["supplies"])]
-    if selected_index < 0 or selected_index >= owners.size()             or selected_index >= buildings.size() or selected_index >= stocks.size():
-        selection_label.text = "Select a node on the map."
+    var state: Dictionary = _state()
+    var phase: String = str(session.get("phase"))
+    heading.text = "EMPIRE  /  " + str(session.get("status"))
+    leave.text = "MENU" if bool(session.get("is_solo")) else ("RETURN TO LOBBY" if multiplayer.is_server() else "LEAVE")
+    if phase == "loading":
+        leave.text = "CANCEL START" if multiplayer.is_server() else "LEAVE"
+    var count: int = 0
+    var moving: int = 0
+    for ship in state.get("ships", []):
+        if int(ship["owner"]) == _me():
+            count += 1
+            if not (ship["route"] as Array).is_empty():
+                moving += 1
+    fleet.text = "LOGISTICS FLEET   %d ships  /  %d traveling" % [count, moving]
+    var planets: Array = state.get("planets", [])
+    if selected < 0 and not planets.is_empty():
+        for i in range(planets.size()):
+            if int(planets[i]["owner"]) == _me():
+                selected = i
+                _load_thresholds()
+                break
+    var p: Dictionary = _planet()
+    var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and phase == "match"
+    threshold_button.disabled = not owned
+    upgrade_resource.disabled = true
+    ship_button.disabled = true
+    yard_button.disabled = not owned
+    upgrade_yard.disabled = true
+    cancel_button.disabled = true
+    if p.is_empty():
+        info.text = "Select a planet."
+        resource_detail.text = ""
+        yard_info.text = ""
+        jobs.clear()
+        return
+    var owner: int = int(p["owner"])
+    var roster: Dictionary = session.get("players")
+    var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
+    info.text = "PLANET %02d%s  •  %s\n" % [selected + 1, " / HOME" if bool(p["home"]) else "", name_text]
+    for r in ECONOMY.RESOURCES:
+        info.text += "%s  %.1f   |  Lv %d\n" % [r, float(p["stock"][r]), int(p["levels"][r])]
+    var resource: String = _resource()
+    var available: bool = ECONOMY.EXTRACTED.has(resource) and float(p["abundance"].get(resource, 0.0)) > 0.0
+    var modifier: float = float(p["bonuses"].get(resource, 1.0))
+    var detail: String = "Production rules not defined yet."
+    if ECONOMY.EXTRACTED.has(resource):
+        detail = "Deposit: %.2fx  •  Output: %.1f/s" % [float(p["abundance"].get(resource, 0.0)), ECONOMY.rate(p, resource)]
+    var t: Dictionary = p["thresholds"][resource]
+    resource_detail.text = "%s\nPlanet bonus: %.2fx  |  Current min/max: %.0f / %.0f" % [detail, modifier, float(t["min"]), float(t["max"])]
+    upgrade_resource.disabled = not owned or not available or ECONOMY._has_job(p, "production", resource)
+    ship_button.disabled = not owned or not bool(p["home"])
+    var yards: Array = p["yards"]
+    var yard_text: String = str(yards.size())
+    for y in yards:
+        yard_text += ":" + str(y["level"])
+    if yard_text != last_yard_text:
+        var previous: int = yard_picker.selected
+        yard_picker.clear()
+        for i in range(yards.size()):
+            yard_picker.add_item("Shipyard %d / Level %d" % [i + 1, int(yards[i]["level"])])
+        if not yards.is_empty():
+            yard_picker.select(clampi(previous, 0, yards.size() - 1))
+        last_yard_text = yard_text
+    var y_index: int = yard_picker.selected
+    if y_index >= 0 and y_index < yards.size():
+        var y: Dictionary = yards[y_index]
+        var upgrading: bool = ECONOMY._has_job(p, "yard_upgrade", str(y_index))
+        yard_info.text = "Work/s: %.1f  •  Max size: %d  •  %s" % [ECONOMY.yard_speed(int(y["level"])), ECONOMY.max_size(int(y["level"])), "Upgrading" if upgrading else ("Idle" if int(y["job"]) < 0 else "Building")]
+        upgrade_yard.disabled = not owned or upgrading
     else:
-        var owner: int = owners[selected_index]
-        var d: String = ECONOMY.deposit(selected_index)
-        var building: String = buildings[selected_index]
-        var stock: Dictionary = stocks[selected_index]
-        var owner_text: String = "Neutral" if owner == 0 else "Team %d" % owner
-        selection_label.text = "NODE %d  •  %s\nDeposit: %s\nBuilding: %s\n\nLocal inventory\nIron: %d    Copper: %d\nSteel: %d    Supplies: %d" % [
-            selected_index + 1, owner_text,
-            d.capitalize() if not d.is_empty() else "None",
-            building.capitalize() if not building.is_empty() else "Empty",
-            int(stock.get("iron", 0)), int(stock.get("copper", 0)),
-            int(stock.get("steel", 0)), int(stock.get("supplies", 0))]
-    mine_button.disabled = not ECONOMY.can_build(owners, buildings, team, selected_index, "mine")
-    smelter_button.disabled = not ECONOMY.can_build(owners, buildings, team, selected_index, "smelter")
-    factory_button.disabled = not ECONOMY.can_build(owners, buildings, team, selected_index, "factory")
-    clear_button.disabled = not ECONOMY.can_build(owners, buildings, team, selected_index, "")
-
-func _build(kind: String) -> void:
-    if selected_index >= 0:
-        network.call("request_build", selected_index, kind)
+        yard_info.text = "No shipyards"
+    var selected_job: int = -1
+    var old: PackedInt32Array = jobs.get_selected_items()
+    if not old.is_empty():
+        selected_job = int(jobs.get_item_metadata(old[0]))
+    var job_text: String = str(selected) + str(p["queue"])
+    if job_text != last_job_text:
+        jobs.clear()
+        for item in p["queue"]:
+            var name_value: String = str(item["kind"]).replace("_", " ").capitalize()
+            var line: String = "%s %s — %.0f%%" % [name_value, str(item["target"]), 100.0 * float(item["progress"]) / float(item["work"])]
+            if ECONOMY._possible(p, item) <= ECONOMY.EPS:
+                line += " (waiting for materials)"
+            jobs.add_item(line)
+            var i: int = jobs.item_count - 1
+            jobs.set_item_metadata(i, int(item["id"]))
+            if int(item["id"]) == selected_job:
+                jobs.select(i)
+        last_job_text = job_text
+    cancel_button.disabled = not owned or jobs.get_selected_items().is_empty()
 
 func _leave() -> void:
-    var phase: String = str(network.get("phase"))
-    if bool(network.get("is_solo")):
-        network.call("leave_solo")
+    if bool(session.get("is_solo")):
+        session.call("leave_solo")
     elif multiplayer.is_server():
-        if phase == "loading":
-            network.call("cancel_loading")
-        elif phase == "match":
-            network.call("return_to_lobby")
+        if str(session.get("phase")) == "loading":
+            session.call("cancel_loading")
+        else:
+            session.call("return_to_lobby")
     else:
-        network.call("leave_session")
+        session.call("leave_session")
         get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
 
-func _positions() -> Array[Vector2]:
-    var result: Array[Vector2] = []
-    var map_width: float = maxf(300.0, size.x - 310.0)
-    var outer_radius: float = minf(map_width * 0.39, size.y * 0.31)
-    var center := Vector2(map_width * 0.5, size.y * 0.55)
-    for ring in range(2):
-        var radius: float = outer_radius if ring == 0 else outer_radius * 0.5
-        for index in range(8):
-            var angle: float = float(index) * TAU / 8.0 - PI * 0.5
-            result.append(center + Vector2.from_angle(angle) * radius)
-    result.append(center)
-    return result
+func _screen_point(point: Vector2) -> Vector2:
+    var area := Vector2(maxf(100.0, size.x - PANEL_WIDTH - 24), maxf(100.0, size.y - 90))
+    var factor: float = minf(area.x / MAP.SIZE.x, area.y / MAP.SIZE.y)
+    return Vector2(12, 62) + (area - MAP.SIZE * factor) * 0.5 + point * factor
 
 func _unhandled_input(event: InputEvent) -> void:
-    if str(network.get("phase")) != "match":
+    if str(session.get("phase")) != "match" or not (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed):
         return
-    if not (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed):
+    var state: Dictionary = _state()
+    if state.is_empty():
         return
-    var point: Vector2 = get_local_mouse_position()
-    var positions: Array[Vector2] = _positions()
-    for index in range(positions.size()):
-        if point.distance_to(positions[index]) <= RADIUS:
-            selected_index = index
-            var owners: Array[int] = network.get("owners")
-            if owners.size() == RULES.MAP_NODE_COUNT and owners[index] == 0:
-                network.call("request_capture", index)
-            _refresh_economy()
+    var points: Array = state["map"]["points"]
+    for i in range(points.size()):
+        if get_local_mouse_position().distance_to(_screen_point(points[i])) <= RADIUS + 5:
+            selected = i
+            _load_thresholds()
+            if int(state["planets"][i]["owner"]) == 0:
+                session.call("request_capture", i)
+            _refresh()
             get_viewport().set_input_as_handled()
             return
 
 func _draw() -> void:
-    draw_rect(Rect2(Vector2.ZERO, size), Color("#14232f"))
-    if network == null:
+    draw_rect(Rect2(Vector2.ZERO, size), Color("#0b141e"))
+    if session == null:
         return
-    var positions: Array[Vector2] = _positions()
-    var owners: Array[int] = network.get("owners")
-    var buildings: Array[String] = network.get("buildings")
-    for a in range(RULES.MAP_NODE_COUNT):
-        for b in range(a + 1, RULES.MAP_NODE_COUNT):
-            if not RULES.linked(a, b):
-                continue
-            draw_line(positions[a], positions[b], Color("#415565"), 3.0, true)
-            if owners.size() == RULES.MAP_NODE_COUNT and owners[a] > 0                     and owners[a] == owners[b]:
-                draw_line(positions[a], positions[b],
-                    TEAM_COLORS[clampi(owners[a], 0, 8)].darkened(0.24), 5.0, true)
+    var state: Dictionary = _state()
+    if state.is_empty():
+        return
+    var points: Array = state["map"]["points"]
+    var teams: Array[int] = ECONOMY.planet_teams(state)
+    for edge in state["map"]["edges"]:
+        var a: int = int(edge[0])
+        var b: int = int(edge[1])
+        var color: Color = COLORS[teams[a]].darkened(0.3) if teams[a] > 0 and teams[a] == teams[b] else Color("#40566b")
+        draw_line(_screen_point(points[a]), _screen_point(points[b]), color, 2.0, true)
     var font: Font = ThemeDB.fallback_font
-    for index in range(RULES.MAP_NODE_COUNT):
-        var point: Vector2 = positions[index]
-        var raw: String = ECONOMY.deposit(index)
-        var outline: Color = IRON_COLOR if raw == "iron" else (
-            COPPER_COLOR if raw == "copper" else Color("#78899a"))
-        if buildings.size() == RULES.MAP_NODE_COUNT and buildings[index] == "hq":
-            outline = Color("#f4dc77")
-        draw_circle(point, RADIUS + 4.0, outline)
-        draw_circle(point, RADIUS, TEAM_COLORS[clampi(
-            owners[index] if owners.size() == RULES.MAP_NODE_COUNT else 0, 0, 8)])
-        if index == selected_index:
-            draw_arc(point, RADIUS + 9.0, 0.0, TAU, 48, Color.WHITE, 2.5, true)
-        draw_string(font, point + Vector2(-17, 6), str(index + 1),
-            HORIZONTAL_ALIGNMENT_CENTER, 34, 16, Color("#101e2a"))
-        var marker: String = ""
-        if buildings.size() == RULES.MAP_NODE_COUNT:
-            match buildings[index]:
-                "hq": marker = "HQ"
-                "mine": marker = "M"
-                "smelter": marker = "S"
-                "factory": marker = "F"
-        if not marker.is_empty():
-            draw_string(font, point + Vector2(-16, RADIUS + 17), marker,
-                HORIZONTAL_ALIGNMENT_CENTER, 32, 13, Color("#eaf3f8"))
-    draw_string(font, Vector2(16, size.y - 20),
-        "Silver rim: Iron   •   Orange rim: Copper   •   M: Mine   S: Smelter   F: Factory",
-        HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#d4e3eb"))
+    for i in range(points.size()):
+        var pos: Vector2 = _screen_point(points[i])
+        var radius: float = RADIUS + (3.0 if bool(state["planets"][i]["home"]) else 0.0)
+        draw_circle(pos, radius + 2, Color("#c5d9e8") if i == selected else Color("#253748"))
+        draw_circle(pos, radius, COLORS[teams[i]])
+        draw_string(font, pos + Vector2(-18, 5), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 36, 14, Color("#09131e"))
+    for ship in state["ships"]:
+        var at: int = int(ship["at"])
+        var pos: Vector2 = points[at]
+        var route: Array = ship["route"]
+        if not route.is_empty():
+            var next: Vector2 = points[int(route[0])]
+            var factor: float = clampf(float(ship["leg"]) / maxf(1.0, pos.distance_to(next)), 0.0, 1.0)
+            pos = pos.lerp(next, factor)
+        var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+        var point: Vector2 = _screen_point(pos) + Vector2(0, -5)
+        draw_circle(point, 5, Color("#09131e"))
+        draw_circle(point, 3.5, COLORS[team].lightened(0.2))
+    draw_string(font, Vector2(12, size.y - 12), "Fixed routes · Neutral planets in gray · Cargo ships are moving dots", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#b6c4d2"))
 
 func _notification(what: int) -> void:
     if what == NOTIFICATION_RESIZED:
