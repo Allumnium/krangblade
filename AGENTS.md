@@ -33,3 +33,5 @@ Read this file and current repository state at the beginning of each coding sess
 - Render all living ships for every client, friendly or hostile, at all activity states, even if discovery is restricted. Ship outlines identify team; no hiding foreign ships. Test generated maps for visible early AI construction, not just eventual expansion.
 
 - Always show subtle territory tint/boundaries beneath the map for owned or fighter-held uncontested sectors; use team colors and no internal same-team borders. Contested sectors lack control shading. This is visual only. Hide system and orbital rings unless the system is selected; keep travel lanes thin and faint.
+
+- Bottom-center time controls offer pause, 1×, 2× and 5×. Each match starts at 1×; solo or the multiplayer host controls speed, guests see the active speed without editing it. Pause halts authoritative fixed-step simulation, not the interface, network or accepted player orders. Keep speed replicated with match state.

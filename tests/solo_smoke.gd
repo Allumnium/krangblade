@@ -10,6 +10,20 @@ func _run() -> void:
     assert(bool(session.get("is_solo")))
     assert(session.multiplayer.multiplayer_peer is OfflineMultiplayerPeer)
     var state: Dictionary = session.get("economy")
+    assert(int(state["time_speed"]) == 1)
+    session.call("request_time_speed", 0)
+    var frozen: Dictionary = state.duplicate(true)
+    for i in range(4):
+        session.call("_economy_tick")
+    assert(state == frozen)
+    session.call("request_time_speed", 3)
+    assert(int(state["time_speed"]) == 0)
+    for speed in [1, 2, 5]:
+        session.call("request_time_speed", speed)
+        var before: float = float(state["elapsed"])
+        session.call("_economy_tick")
+        assert(is_equal_approx(float(state["elapsed"]) - before, 0.1 * float(speed)))
+    session.call("request_time_speed", 1)
     var planets: Array = state["planets"]
     assert(planets.size() == state["map"]["points"].size())
     assert(state["map"]["cluster_sizes"].size() == 3)
@@ -41,6 +55,7 @@ func _run() -> void:
     assert((session.get("economy") as Dictionary).is_empty())
     assert(bool(session.call("start_solo", 3, [3, 2])))
     var setup: Dictionary = session.get("economy")
+    assert(int(setup["time_speed"]) == 1)
     assert(setup["map"]["cluster_sizes"].size() == 9)
     assert(setup["teams"][1] == 3 and setup["teams"][2] == 3 and setup["teams"][3] == 2)
     assert(session.get("players")[2]["ai"])

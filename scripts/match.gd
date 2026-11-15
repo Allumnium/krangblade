@@ -78,6 +78,8 @@ var global_resource_labels: Dictionary = {}
 var global_resource_tiles: Dictionary = {}
 var global_population_label: Label
 var year_label: Label
+var time_buttons: Dictionary = {}
+var game_visual_clock: float = 0.0
 var info: Label
 var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
@@ -259,7 +261,7 @@ func _build_ui() -> void:
     inspector_panel.offset_left = -PANEL_WIDTH
     inspector_panel.offset_right = -8
     inspector_panel.offset_top = HEADER_HEIGHT + 16
-    inspector_panel.offset_bottom = -8
+    inspector_panel.offset_bottom = -52
     var body := VBoxContainer.new()
     body.add_theme_constant_override("separation", 8)
     inspector_panel.add_child(body)
@@ -269,7 +271,7 @@ func _build_ui() -> void:
     overview_panel.offset_left = 8
     overview_panel.offset_right = OVERVIEW_WIDTH + 8
     overview_panel.offset_top = HEADER_HEIGHT + 16
-    overview_panel.offset_bottom = -8
+    overview_panel.offset_bottom = -52
     var overview_scroll := ScrollContainer.new()
     overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
     overview_panel.add_child(overview_scroll)
@@ -383,6 +385,7 @@ func _build_ui() -> void:
     HUD.action(miner_button, Color("#d8e58b"))
     miner_button.tooltip_text = "Automatically mines accessible fields from owned service systems."
     yard_button = _ship_build_row(shipyards, "BUILD SHIPYARD", "yard")
+    _build_time_controls()
 
 
 func _ship_build_row(parent: Container, title_text: String, kind: String) -> Button:
@@ -711,6 +714,47 @@ func _build_lens_buttons() -> void:
     military_lens.tooltip_text = "Fleet allocation at systems and asteroid fields"
     logistics_lens.tooltip_text = "System resource storage"
 
+func _build_time_controls() -> void:
+    var panel := PanelContainer.new()
+    add_child(panel)
+    panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928ed"), Color("#284661"), 4))
+    panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+    panel.offset_left = -116
+    panel.offset_right = 116
+    panel.offset_top = -48
+    panel.offset_bottom = -8
+    var row := HBoxContainer.new()
+    row.add_theme_constant_override("separation", 4)
+    panel.add_child(row)
+    for speed in [0, 1, 2, 5]:
+        var label: String = "Ⅱ" if speed == 0 else "%d×" % speed
+        var button: Button = _button(label, _set_time_speed.bind(int(speed)), row)
+        button.toggle_mode = true
+        button.focus_mode = Control.FOCUS_NONE
+        button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        time_buttons[speed] = button
+
+func _set_time_speed(speed: int) -> void:
+    session.call("request_time_speed", speed)
+    _refresh_time_controls(_state())
+
+func _refresh_time_controls(state: Dictionary) -> void:
+    var current: int = int(state.get("time_speed", 1))
+    var can_change: bool = str(session.get("phase")) == "match" and (bool(session.get("is_solo")) or multiplayer.is_server())
+    for speed in time_buttons:
+        var button: Button = time_buttons[speed]
+        var active: bool = int(speed) == current
+        button.disabled = not can_change
+        button.set_pressed_no_signal(active)
+        # Disabled guest buttons must still show which speed the host selected.
+        if active:
+            button.add_theme_stylebox_override("disabled", button.get_theme_stylebox("pressed"))
+            button.add_theme_color_override("font_disabled_color", HUD.ACCENT)
+        else:
+            button.remove_theme_stylebox_override("disabled")
+            button.remove_theme_color_override("font_disabled_color")
+        button.tooltip_text = ("Pause simulation" if int(speed) == 0 else "%d× simulation speed" % int(speed)) + ("" if can_change else " (host controlled)")
+
 func _toggle_lens(kind: String) -> void:
     military_drag = -1
     military_preview.clear()
@@ -992,6 +1036,7 @@ func _refresh() -> void:
     var state: Dictionary = _state()
     var phase: String = str(session.get("phase"))
     _refresh_global_bar(state)
+    _refresh_time_controls(state)
     menu_exit.text = "Main menu" if bool(session.get("is_solo")) else ("Return to lobby" if multiplayer.is_server() else "Leave match")
     if phase == "loading" and multiplayer.is_server():
         menu_exit.text = "Cancel start"
@@ -1346,7 +1391,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
             var orbit: float = radius * float(body["orbit"])
             if _show_system_rings(index):
                 map_canvas.draw_arc(pos, orbit, 0.0, TAU, 48, Color(tint, 0.24), 0.8, true)
-            var point: Vector2 = pos + _body_position(body, radius, visual_clock)
+            var point: Vector2 = pos + _body_position(body, radius, game_visual_clock)
             var body_radius: float = maxf(2.1, radius * float(body["size"]))
             if get_viewport_rect().grow(body_radius).has_point(point):
                 if body_radius >= 5.0:
@@ -1558,6 +1603,7 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 func _process(delta: float) -> void:
     _keyboard_pan(delta)
     visual_clock += delta
+    game_visual_clock += delta * float(_state().get("time_speed", 1))
     for visual in ship_visuals.values():
         if float(visual["age"]) < SNAPSHOT_SECONDS:
             visual["age"] = minf(SNAPSHOT_SECONDS, float(visual["age"]) + delta)
@@ -1600,14 +1646,14 @@ func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
             if ship["mining_mode"] == "return":
                 direction = -direction
             if ship["mining_mode"] == "mining":
-                var mining_offset: Vector2 = Vector2.from_angle(float(int(ship["id"])) * 2.399963 + visual_clock * 0.3) * 6.0
+                var mining_offset: Vector2 = Vector2.from_angle(float(int(ship["id"])) * 2.399963 + game_visual_clock * 0.3) * 6.0
                 offset_world = mining_offset * SHIP_WORLD_SCALE
                 direction = _orbit_direction(mining_offset)
         elif route.is_empty():
             # All living craft orbit visually, including foreign stationary fighters.
             var slot: int = int(ship["id"]) % 64
             var orbit_radius: float = float(state["map"]["fields"][at - points.size()]["radius"]) if field_node else float(_system_visual(at, state)["spacing"]) * 0.25
-            var offset: Vector2 = _orbit_offset(slot, orbit_radius, visual_clock)
+            var offset: Vector2 = _orbit_offset(slot, orbit_radius, game_visual_clock)
             direction = _orbit_direction(offset)
             offset_world = offset
         else:
@@ -1809,7 +1855,7 @@ func _draw_map() -> void:
             shape = PackedVector2Array([point + direction * 12, point - direction * 7 + side * 8, point - direction * 3, point - direction * 7 - side * 8])
         if ship.get("kind", "ship") == "miner":
             shape = PackedVector2Array([point + direction * 8 + side * 4, point + direction * 8 - side * 4, point - direction * 6 - side * 7, point - direction * 6 + side * 7])
-        if scale >= 0.65 and (not route.is_empty() or fighter or mining):
+        if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not route.is_empty() or fighter or mining):
             var engine: Vector2 = point - direction * 9.0
             map_canvas.draw_circle(engine, 5.0 * scale, Color("#43a5ff30"), true)
             map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0 * scale, true)
