@@ -4,6 +4,8 @@ const COUNT: int = 32
 const SIZE := Vector2(2200, 1500)
 
 const CLUSTER_COUNT: int = 4
+const TRAVEL_SPEED: float = 95.0
+const LONGEST_LINK_YEARS: float = 100.0
 
 static func generate(seed_value: int) -> Dictionary:
     var rng := RandomNumberGenerator.new()
@@ -103,7 +105,18 @@ static func generate(seed_value: int) -> Dictionary:
     for pair in candidates:
         if not blocked(points[pair[0]], points[pair[1]], fields) and rng.randf() < 0.8:
             edges.append(pair)
-    return {"seed": seed_value, "points": points, "edges": edges, "clusters": clusters, "fields": fields}
+    # Preserve the topology and obstacle geometry while scaling distances so
+    # the longest direct route takes 100 years at the baseline ship speed.
+    var longest: float = 0.0
+    for edge in edges:
+        longest = maxf(longest, points[edge[0]].distance_to(points[edge[1]]))
+    var distance_scale: float = LONGEST_LINK_YEARS * TRAVEL_SPEED / maxf(longest, 1.0)
+    for i in range(points.size()):
+        points[i] *= distance_scale
+    for field in fields:
+        field["position"] = (field["position"] as Vector2) * distance_scale
+        field["radius"] = float(field["radius"]) * distance_scale
+    return {"seed": seed_value, "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": SIZE * distance_scale}
 
 static func blocked(a: Vector2, b: Vector2, fields: Array) -> bool:
     for field in fields:

@@ -107,8 +107,10 @@ func _run() -> void:
     send.pressed.emit()
     assert(int(state["planets"][neighbor]["owner"]) == 0)
     assert(not (state["ships"][0]["route"] as Array).is_empty())
-    for i in range(200):
+    for i in range(1020):
         session.call("_economy_tick")
+        if int(state["planets"][neighbor]["owner"]) == 1:
+            break
     assert(int(state["planets"][neighbor]["owner"]) == 1)
     assert(state["ships"].is_empty())
 
@@ -117,6 +119,10 @@ func _run() -> void:
     view.call("_zoom_at", screen, 2.0)
     assert((view.call("_world_point", screen) as Vector2).is_equal_approx(world))
     assert(is_equal_approx(float(view.get("zoom")), 2.0))
+    view.call("_zoom_at", screen, 100.0)
+    assert(is_equal_approx(float(view.get("zoom")), 16.0))
+    assert((view.call("_world_point", screen) as Vector2).is_equal_approx(world))
+    view.call("_zoom_at", screen, 0.125)
     mouse.button_index = MOUSE_BUTTON_RIGHT
     view.call("_map_input", mouse)
     var motion := InputEventMouseMotion.new()
@@ -178,6 +184,41 @@ func _run() -> void:
     assert(state["ships"].size() == 2)
     assert(state["ships"][1]["kind"] == "fighter")
     assert((view.get("global_craft_label") as Label).text == "CRAFT  2")
+    view.call("_zoom_at", view.call("_screen_point", points[0]), 4.0)
+    var fighter_id: int = int(state["ships"][1]["id"])
+    var ship_poses: Dictionary = view.call("_ship_poses", state)
+    mouse.position = ship_poses[fighter_id]["point"]
+    view.call("_map_input", mouse)
+    assert(int(view.get("selected_ship_id")) == fighter_id)
+    assert(int(view.get("selected")) == -1)
+    assert((view.get("ship_overview") as VBoxContainer).visible)
+    assert(not tabs.visible)
+    assert((view.get("fleet_title") as Label).text == "Military")
+    assert(not (view.get("fleet_detail") as Label).visible)
+    var logistics_id: int = int(state["ships"][0]["id"])
+    ship_poses = view.call("_ship_poses", state)
+    mouse.position = ship_poses[logistics_id]["point"]
+    view.call("_map_input", mouse)
+    assert(int(view.get("selected_ship_id")) == logistics_id)
+    assert((view.get("fleet_title") as Label).text == "Logistics")
+    assert((view.get("fleet_detail") as Label).text.contains("1 ships"))
+    assert((view.get("ship_title") as Label).text.contains("Logistics ship"))
+    assert((view.get("ship_cargo") as VBoxContainer).get_parent().visible)
+    var fixed: Vector2 = view.call("_screen_point", points[0])
+    mouse.position = Vector2(-10000, -10000)
+    view.call("_map_input", mouse)
+    assert(int(view.get("selected_ship_id")) == -1)
+    assert(not inspector.visible and not overview.visible)
+    assert((view.call("_screen_point", points[0]) as Vector2).is_equal_approx(fixed))
+    mouse.position = view.call("_screen_point", points[0])
+    view.call("_map_input", mouse)
+    assert(int(view.get("selected")) == 0 and tabs.visible)
+    # A consumed/disappearing ship clears its selection, rather than leaving stale details.
+    view.set("selected", -1)
+    view.set("selected_ship_id", logistics_id)
+    state["ships"].remove_at(0)
+    view.call("_refresh")
+    assert(int(view.get("selected_ship_id")) == -1 and not inspector.visible)
     await process_frame
     await process_frame
     print("PASS: select without capture, colony dispatch and arrival, zoom anchor, pan, reset and ship rendering")

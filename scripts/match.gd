@@ -13,7 +13,7 @@ const HEADER_HEIGHT: float = 90.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
 const MIN_ZOOM: float = 0.5
-const MAX_ZOOM: float = 4.0
+const MAX_ZOOM: float = 16.0
 const SNAPSHOT_SECONDS: float = 0.2
 
 var session: Node
@@ -36,6 +36,18 @@ var send_colony_button: Button
 var colony_button: Button
 var colony_choices: Array[int] = []
 var selected: int = -1
+var selected_ship_id: int = -1
+var planet_overview: VBoxContainer
+var ship_overview: VBoxContainer
+var ship_title: Label
+var ship_detail: Label
+var ship_cargo: VBoxContainer
+var ship_cargo_labels: Dictionary = {}
+var fleet_overview: VBoxContainer
+var fleet_title: Label
+var fleet_detail: Label
+var fleet_cargo: VBoxContainer
+var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
 var global_resource_labels: Dictionary = {}
 var global_resource_tiles: Dictionary = {}
@@ -174,23 +186,43 @@ func _build_ui() -> void:
     overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     overview.add_theme_constant_override("separation", 8)
     overview_scroll.add_child(overview)
+    planet_overview = VBoxContainer.new()
+    planet_overview.add_theme_constant_override("separation", 8)
+    overview.add_child(planet_overview)
+    ship_overview = VBoxContainer.new()
+    ship_overview.add_theme_constant_override("separation", 8)
+    overview.add_child(ship_overview)
+    ship_title = _label("", 19)
+    ship_overview.add_child(ship_title)
+    ship_detail = _label("", 13)
+    ship_overview.add_child(ship_detail)
+    ship_cargo = HUD.section(ship_overview, "Cargo")
+    _build_cargo_rows(ship_cargo, ship_cargo_labels)
+    fleet_overview = VBoxContainer.new()
+    body.add_child(fleet_overview)
+    fleet_title = _label("", 19)
+    fleet_overview.add_child(fleet_title)
+    fleet_detail = _label("", 14)
+    fleet_overview.add_child(fleet_detail)
+    fleet_cargo = HUD.section(fleet_overview, "Cargo")
+    _build_cargo_rows(fleet_cargo, fleet_cargo_labels)
     info = _label("", 19)
-    overview.add_child(info)
+    planet_overview.add_child(info)
     environment_label = _label("", 12)
     environment_label.add_theme_color_override("font_color", HUD.MUTED)
-    overview.add_child(environment_label)
+    planet_overview.add_child(environment_label)
     population_label = _label("", 13)
-    overview.add_child(population_label)
+    planet_overview.add_child(population_label)
     population_bar = ProgressBar.new()
     population_bar.custom_minimum_size.y = 8
     population_bar.show_percentage = false
     population_bar.tooltip_text = "Population relative to local Organics-supported capacity"
-    overview.add_child(population_bar)
+    planet_overview.add_child(population_bar)
     colony_picker = OptionButton.new()
-    overview.add_child(colony_picker)
-    send_colony_button = _button("SEND COLONY SHIP", _send_colony, overview)
+    planet_overview.add_child(colony_picker)
+    send_colony_button = _button("SEND COLONY SHIP", _send_colony, planet_overview)
     HUD.action(send_colony_button, Color("#c7a4ff"))
-    yard_activity = HUD.section(overview, "Active shipyards")
+    yard_activity = HUD.section(planet_overview, "Active shipyards")
     inspector_tabs = TabContainer.new()
     inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
     inspector_tabs.clip_contents = true
@@ -382,6 +414,101 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
             else:
                 detail.text = "Output %.2f/yr  •  %.0f Metals  •  %.0f years" % [ECONOMY.rate(planet, resource), float(ECONOMY._cost("production", level + 1)["Metals"]), ECONOMY._work("production", level + 1)]
 
+func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
+    for resource in ECONOMY.RESOURCES:
+        var row := HBoxContainer.new()
+        parent.add_child(row)
+        var icon := TextureRect.new()
+        icon.texture = HUD.ICONS[resource]
+        icon.custom_minimum_size = Vector2(18, 18)
+        icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+        icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+        row.add_child(icon)
+        var title := _label(resource, 12)
+        title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        row.add_child(title)
+        var amount := _label("0", 12)
+        row.add_child(amount)
+        labels[resource] = amount
+
+func _selected_ship(state: Dictionary) -> Dictionary:
+    if selected_ship_id < 0:
+        return {}
+    for ship in state.get("ships", []):
+        if int(ship["id"]) == selected_ship_id:
+            return ship
+    return {}
+
+func _ship_kind_name(kind: String) -> String:
+    return "Logistics ship" if kind == "ship" else ("Mining ship" if kind == "miner" else kind.replace("_", " ").capitalize())
+
+func _ship_is_moving(ship: Dictionary) -> bool:
+    return not (ship["route"] as Array).is_empty() or ship.get("mining_mode", "idle") in ["outbound", "return"]
+
+func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
+    var points: Array = state["map"]["points"]
+    var route: Array = ship["route"]
+    var mode: String = ship.get("mining_mode", "idle")
+    if mode in ["outbound", "return"]:
+        var field: Dictionary = state["map"]["fields"][int(ship["field"])]
+        var distance: float = (points[int(ship["at"])] as Vector2).distance_to(field["position"])
+        return distance * (1.0 - float(ship["field_leg"]) if mode == "outbound" else float(ship["field_leg"])) / ECONOMY.SHIP_SPEED
+    var path: Array[int] = [int(ship["at"])]
+    for index in route:
+        path.append(int(index))
+    return maxf(0.0, MAP.route_length(state["map"], path) - float(ship["leg"])) / ECONOMY.SHIP_SPEED
+
+func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
+    var kind: String = ship.get("kind", "ship")
+    var owner: int = int(ship["owner"])
+    var roster: Dictionary = session.get("players")
+    ship_title.text = "%s #%d" % [_ship_kind_name(kind), int(ship["id"])]
+    var route: Array = ship["route"]
+    var mode: String = ship.get("mining_mode", "idle")
+    var status: String = "Orbiting planet %02d" % (int(ship["at"]) + 1)
+    if not route.is_empty():
+        status = "Planet %02d → %02d\nETA %.1f yr" % [int(ship["at"]) + 1, int(route.back()) + 1, _remaining_years(state, ship)]
+    elif mode in ["outbound", "return"]:
+        status = ("To field" if mode == "outbound" else "Returning") + "\nETA %.1f yr" % _remaining_years(state, ship)
+    elif mode == "mining":
+        status = "Mining field %02d" % (int(ship["field"]) + 1)
+    ship_detail.text = "%s\n%s" % [str(roster.get(owner, {}).get("name", "Player")), status]
+    var cargo_capable: bool = kind in ["ship", "miner"]
+    ship_cargo.get_parent().visible = cargo_capable
+    if cargo_capable:
+        var cargo_capacity: float = ECONOMY.CARGO_CAPACITY if kind == "ship" else ECONOMY.MINER_CAPACITY
+        ship_cargo.get_child(0).text = "Cargo %.1f / %.0f" % [ECONOMY._cargo_total(ship), cargo_capacity]
+        for resource in ECONOMY.RESOURCES:
+            ship_cargo_labels[resource].text = "%.1f" % float(ship["cargo"].get(resource, 0.0))
+            ship_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
+    fleet_title.text = {"ship": "Logistics", "fighter": "Military", "miner": "Mining", "colony_ship": "Colonization"}.get(kind, "Fleet")
+    fleet_detail.visible = kind != "fighter"
+    fleet_cargo.get_parent().visible = cargo_capable
+    if kind == "fighter":
+        return
+    var total: int = 0
+    var traveling: int = 0
+    var working: int = 0
+    var cargo: Dictionary = ECONOMY.empty_stock()
+    for craft in state["ships"]:
+        if int(craft["owner"]) != _me() or craft.get("kind", "ship") != kind:
+            continue
+        total += 1
+        if _ship_is_moving(craft):
+            traveling += 1
+        elif craft.get("mining_mode", "idle") == "mining":
+            working += 1
+        for resource in ECONOMY.RESOURCES:
+            cargo[resource] = float(cargo[resource]) + float(craft["cargo"].get(resource, 0.0))
+    fleet_detail.text = "%d ships\n%d traveling · %d idle" % [total, traveling, total - traveling - working]
+    if kind == "miner":
+        fleet_detail.text += "\n%d mining" % working
+    fleet_detail.tooltip_text = "Your empire"
+    if cargo_capable:
+        for resource in ECONOMY.RESOURCES:
+            fleet_cargo_labels[resource].text = "%.1f" % float(cargo[resource])
+            fleet_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
+
 func _build_global_bar(parent: Container) -> void:
     var stats := HBoxContainer.new()
     stats.add_theme_constant_override("separation", 4)
@@ -522,9 +649,20 @@ func _refresh() -> void:
                 selected = i
                 _load_thresholds()
                 break
+    var ship: Dictionary = _selected_ship(state)
+    if ship.is_empty():
+        selected_ship_id = -1
     var p: Dictionary = _planet()
-    inspector_panel.visible = not p.is_empty()
+    var ship_selected: bool = not ship.is_empty()
+    inspector_panel.visible = not p.is_empty() or ship_selected
     overview_panel.visible = inspector_panel.visible
+    planet_overview.visible = not ship_selected
+    inspector_tabs.visible = not ship_selected
+    ship_overview.visible = ship_selected
+    fleet_overview.visible = ship_selected
+    if ship_selected:
+        _refresh_ship_panels(state, ship)
+        return
     _refresh_yard_activity(p)
     var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and phase == "match"
     _refresh_colony_choices(state, p, phase)
@@ -749,15 +887,19 @@ func _reset_view() -> void:
 func _projection_size() -> Vector2:
     return Vector2(maxf(1.0, size.x - PANEL_WIDTH - OVERVIEW_WIDTH - 32.0), map_canvas.size.y)
 
+func _map_size() -> Vector2:
+    return _state().get("map", {}).get("size", MAP.SIZE)
+
 func _fit() -> float:
     var area: Vector2 = _projection_size() - Vector2(24, 52)
-    return maxf(0.01, minf(area.x / MAP.SIZE.x, area.y / MAP.SIZE.y))
+    var bounds: Vector2 = _map_size()
+    return maxf(0.0001, minf(area.x / bounds.x, area.y / bounds.y))
 
 func _screen_point(point: Vector2) -> Vector2:
-    return Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5 + pan + (point - MAP.SIZE * 0.5) * _fit() * zoom
+    return Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5 + pan + (point - _map_size() * 0.5) * _fit() * zoom
 
 func _world_point(point: Vector2) -> Vector2:
-    return MAP.SIZE * 0.5 + (point - Vector2(OVERVIEW_WIDTH + 8.0, 0.0) - _projection_size() * 0.5 - pan) / (_fit() * zoom)
+    return _map_size() * 0.5 + (point - Vector2(OVERVIEW_WIDTH + 8.0, 0.0) - _projection_size() * 0.5 - pan) / (_fit() * zoom)
 
 func _zoom_at(point: Vector2, multiplier: float) -> void:
     var world: Vector2 = _world_point(point)
@@ -767,7 +909,7 @@ func _zoom_at(point: Vector2, multiplier: float) -> void:
 
 func _planet_radius(index: int, state: Dictionary) -> float:
     var planet: Dictionary = state["planets"][index]
-    return clampf(RADIUS * float(planet.get("size_factor", 1.0)) * zoom, 5.0, 48.0)
+    return clampf(RADIUS * float(planet.get("size_factor", 1.0)) * zoom, 5.0, 200.0)
 
 func _planet_color(planet: Dictionary) -> Color:
     var sum := Vector3.ZERO
@@ -798,11 +940,21 @@ func _select_at(point: Vector2) -> void:
         if distance <= _planet_radius(i, state) + 4.0 and distance < nearest:
             nearest = distance
             hit = i
-    selected = hit
+    # Use the same rendered pose (including orbital offsets) for hit testing.
+    var poses: Dictionary = _ship_poses(state)
+    var ship_hit: int = -1
+    var ship_distance: float = INF
+    for id in poses:
+        var distance: float = point.distance_to(poses[id]["point"])
+        if distance <= 12.0 and distance < ship_distance:
+            ship_distance = distance
+            ship_hit = int(id)
+    selected_ship_id = ship_hit if hit < 0 or nearest > 5.0 else -1
+    selected = -1 if selected_ship_id >= 0 else hit
     var focused: Control = get_viewport().gui_get_focus_owner()
     if is_instance_valid(focused):
         focused.release_focus()
-    if hit >= 0:
+    if selected >= 0:
         _load_thresholds()
     _refresh()
 
@@ -898,6 +1050,43 @@ func _orbit_offset(slot: int, radius: float, time: float) -> Vector2:
 func _orbit_direction(offset: Vector2) -> Vector2:
     return Vector2(-offset.y, offset.x).normalized()
 
+func _ship_poses(state: Dictionary) -> Dictionary:
+    var points: Array = state["map"]["points"]
+    var fields: Array = state["map"].get("fields", [])
+    var docked: Dictionary = {}
+    var poses: Dictionary = {}
+
+    for ship in state["ships"]:
+        var at: int = int(ship["at"])
+        var route: Array = ship["route"]
+        var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
+        var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
+        var direction: Vector2 = Vector2.UP
+        var point: Vector2 = _screen_point(pos)
+        var mining: bool = ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
+        if mining:
+            var field: Dictionary = fields[int(ship["field"])]
+            direction = ((field["position"] as Vector2) - (points[at] as Vector2)).normalized()
+            if ship["mining_mode"] == "return":
+                direction = -direction
+            if ship["mining_mode"] == "mining":
+                var mining_offset: Vector2 = Vector2.from_angle(float(int(ship["id"])) * 2.399963 + visual_clock * 0.3) * 6.0
+                point += mining_offset
+                direction = _orbit_direction(mining_offset)
+        elif route.is_empty():
+            # Idle craft orbit visually; logistics positions remain authoritative planet nodes.
+            var slot: int = int(docked.get(at, 0))
+            docked[at] = slot + 1
+            var offset: Vector2 = _orbit_offset(slot, _planet_radius(at, state), visual_clock)
+            direction = _orbit_direction(offset)
+            point += offset
+        else:
+            var next: Vector2 = points[int(route[0])]
+            direction = (next - (points[at] as Vector2)).normalized()
+            point += direction.orthogonal() * (5.0 + float(int(ship["id"]) % 5) * 4.0)
+        poses[int(ship["id"])] = {"point": point, "direction": direction, "mining": mining}
+    return poses
+
 func _draw_map() -> void:
     if session == null:
         return
@@ -951,36 +1140,13 @@ func _draw_map() -> void:
                 map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
         if i == selected or zoom >= 2.0:
             map_canvas.draw_string(font, pos + Vector2(-20, 4), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 40, 11, Color("#f4faff"))
-    var docked: Dictionary = {}
-
+    var poses: Dictionary = _ship_poses(state)
     for ship in state["ships"]:
-        var at: int = int(ship["at"])
+        var pose: Dictionary = poses[int(ship["id"])]
+        var point: Vector2 = pose["point"]
+        var direction: Vector2 = pose["direction"]
+        var mining: bool = pose["mining"]
         var route: Array = ship["route"]
-        var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
-        var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
-        var direction: Vector2 = Vector2.UP
-        var point: Vector2 = _screen_point(pos)
-        var mining: bool = ship.get("kind", "ship") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
-        if mining:
-            var field: Dictionary = fields[int(ship["field"])]
-            direction = ((field["position"] as Vector2) - (points[at] as Vector2)).normalized()
-            if ship["mining_mode"] == "return":
-                direction = -direction
-            if ship["mining_mode"] == "mining":
-                var mining_offset: Vector2 = Vector2.from_angle(float(int(ship["id"])) * 2.399963 + visual_clock * 0.3) * 6.0
-                point += mining_offset
-                direction = _orbit_direction(mining_offset)
-        elif route.is_empty():
-            # Idle craft orbit visually; logistics positions remain authoritative planet nodes.
-            var slot: int = int(docked.get(at, 0))
-            docked[at] = slot + 1
-            var offset: Vector2 = _orbit_offset(slot, _planet_radius(at, state), visual_clock)
-            direction = _orbit_direction(offset)
-            point += offset
-        else:
-            var next: Vector2 = points[int(route[0])]
-            direction = (next - (points[at] as Vector2)).normalized()
-            point += direction.orthogonal() * (5.0 + float(int(ship["id"]) % 5) * 4.0)
         var team: int = int(state["teams"].get(int(ship["owner"]), 0))
         var loaded: bool = ECONOMY._cargo_total(ship) > ECONOMY.EPS
         var hull: Color = COLORS[team].lightened(0.35) if not loaded else Color("#f8df8c")
@@ -1005,6 +1171,8 @@ func _draw_map() -> void:
             var engine: Vector2 = point - direction * 9.0
             map_canvas.draw_circle(engine, 5.0, Color("#43a5ff30"), true)
             map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0, true)
+        if int(ship["id"]) == selected_ship_id:
+            map_canvas.draw_arc(point, 15.0, 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
         map_canvas.draw_colored_polygon(shape, hull)
         var outline: PackedVector2Array = shape.duplicate()
         outline.append(shape[0])

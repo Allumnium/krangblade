@@ -24,8 +24,10 @@ func _run() -> void:
     assert(state["ships"].size() == 1)
     session.call("request_colonize", int(state["ships"][0]["id"]), neighbor)
     assert(int(planets[neighbor]["owner"]) == 0)
-    for i in range(200):
+    for i in range(1020):
         session.call("_economy_tick")
+        if int(planets[neighbor]["owner"]) == 1:
+            break
     assert(int(planets[neighbor]["owner"]) == 1)
     assert(state["ships"].is_empty())
     session.call("request_operation", 0, "ship")
