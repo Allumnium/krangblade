@@ -907,4 +907,46 @@ func _initialize() -> void:
     assert((travelling["position"] as Vector2).distance_to(ai_map["points"][3]) < disengaged_position.distance_to(ai_map["points"][3]))
     assert(disengaged_position.distance_to(travelling["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
     print("PASS: coordinated human rally, reinforcements, retargeting, combat circling and route resumption")
+    # Pursuit retains a fleeing civilian beyond laser range, obeys the speed
+    # budget and expires after three years even while the target remains nearby.
+    var chase: Dictionary = ECON.create(ai_map, players, ids)
+    var hunter: Dictionary = {"id": 980, "owner": 2, "kind": "fighter", "at": 1, "route": [0], "leg": 0.0, "position": Vector2(50, 0), "dest": 0, "hp": 100.0}
+    var prey: Dictionary = {"id": 981, "owner": 3, "kind": "colony_ship", "at": 1, "route": [3], "leg": 200.0, "position": Vector2(200, 0), "dest": 3, "hp": 100.0}
+    chase["ships"] = [hunter, prey]
+    assert(ECON.set_military(chase, 2, "fighter", 0, 100))
+    for tick in range(30):
+        var before: Vector2 = hunter["position"]
+        ECON.step(chase, 0.1)
+        assert(int(hunter["pursuit_target"]) == 981)
+        assert(hunter["route"] == [0])
+        assert(before.distance_to(hunter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+        assert((hunter["position"] as Vector2).x > before.x)
+    assert(float(hunter["pursuit_left"]) <= ECON.EPS)
+    var expired_at: Vector2 = hunter["position"]
+    ECON.step(chase, 0.1)
+    assert(int(hunter["pursuit_target"]) == -1)
+    assert((hunter["position"] as Vector2).x < expired_at.x)
+    assert(hunter["pursuit_blocked"].has(981))
+    ECON.step(chase, 0.1)
+    assert(int(hunter["pursuit_target"]) == -1)
+    # Separate scenario: a live target leaves range, pursuit persists but
+    # laser damage does not. Explicitly reposition the fixture to model escape.
+    var distant_chase: Dictionary = ECON.create(ai_map, players, ids)
+    var distant_hunter: Dictionary = {"id": 982, "owner": 2, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "dest": 1, "hp": 100.0}
+    var fleeing: Dictionary = {"id": 983, "owner": 3, "kind": "fighter", "at": 1, "route": [3], "leg": 0.0, "position": Vector2(150, 0), "heading": Vector2.RIGHT, "dest": 3, "hp": 100.0, "retreating": true}
+    distant_chase["ships"] = [distant_hunter, fleeing]
+    var distant_graph: Dictionary = ECON.military_graph(distant_chase)
+    ECON._combat(distant_chase, distant_graph, 0.1)
+    assert(int(distant_hunter["pursuit_target"]) == 983)
+    fleeing["position"] = Vector2(300, 0)
+    var hp_before: float = float(fleeing["hp"])
+    ECON._combat(distant_chase, distant_graph, 1.0)
+    assert(int(distant_hunter["pursuit_target"]) == 983 and int(distant_hunter["combat_target"]) == -1)
+    assert(float(fleeing["hp"]) == hp_before)
+    ECON._pursue_fighter(distant_hunter, fleeing["position"], 0.1)
+    assert(is_equal_approx((distant_hunter["position"] as Vector2).length(), ECON.SHIP_SPEED * 0.1))
+    distant_chase["ships"].erase(fleeing)
+    ECON._combat(distant_chase, distant_graph, 0.1)
+    assert(int(distant_hunter["pursuit_target"]) == -1)
+    print("PASS: bounded pursuit, escaping fighters, weapon range and route resumption")
     quit(0)
