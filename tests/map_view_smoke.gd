@@ -71,8 +71,8 @@ func _run() -> void:
     var setup_state: Dictionary = session.get("economy")
     var queued: Dictionary = setup_state["planets"][0]["queue"][0]
     assert(queued["kind"] == "yard_upgrade" and queued["target"] == "0")
-    assert(yard_upgrade.text == "CANCEL")
-    yard_upgrade.pressed.emit()
+    assert(yard_upgrade.disabled)
+    (idle_rows[0]["cancel"] as Button).pressed.emit()
     assert(setup_state["planets"][0]["queue"].is_empty())
     assert(not yard_upgrade.disabled)
     var yard_repeat: Button = idle_rows[0]["repeat"]
@@ -177,7 +177,7 @@ func _run() -> void:
     assert(is_equal_approx(float(slider.get("upper")), 65.0))
     tabs.current_tab = 0
     assert((view.get("year_label") as Label).text.begins_with("YEAR"))
-    assert((view.get("population_label") as Label).text.contains("Population"))
+    assert((view.get("population_label") as Label).get_parent().get_child(0).texture == view.get("population_icon"))
     assert(not (view.get("population_label") as Label).text.contains(" / "))
     assert(not (view.get("population_label") as Label).tooltip_text.contains("supported"))
     assert(not (view.get("population_label") as Label).text.contains("/yr"))
@@ -185,7 +185,8 @@ func _run() -> void:
     var state: Dictionary = session.get("economy")
     assert((view.get("global_resource_labels") as Dictionary).size() == 6)
     assert(view.get("global_resource_labels")["Metals"].text.contains("("))
-    assert((view.get("global_population_label") as Label).text.begins_with("POP  10."))
+    assert((view.get("global_population_label") as Label).text.begins_with("10."))
+    assert((view.get("global_population_label") as Label).get_parent().get_child(0).texture == view.get("population_icon"))
     var building_cards: Dictionary = view.get("economy_cards")
     assert(building_cards.size() == 6)
     assert(not (building_cards["Textiles"]["body"] as Control).visible)
@@ -216,7 +217,7 @@ func _run() -> void:
     assert((defense_card["costs"] as GridContainer).get_child_count() == 5)
     (defense_card["button"] as Button).pressed.emit()
     assert((defense_card["progress"] as ProgressBar).visible)
-    (defense_card["button"] as Button).pressed.emit()
+    (defense_card["cancel"] as Button).pressed.emit()
     assert(not (defense_card["progress"] as ProgressBar).visible)
     var farm: Dictionary = cards["Organics"]
     assert(not (farm["body"] as Control).visible)
@@ -248,8 +249,8 @@ func _run() -> void:
     assert(not upgrade_audio.playing)
     assert(state["planets"][0]["queue"].size() == 1)
     assert((farm["progress"] as ProgressBar).visible)
-    assert(farm_button.text.contains("CANCEL"))
-    farm_button.pressed.emit()
+    assert(farm_button.disabled)
+    (farm["cancel"] as Button).pressed.emit()
     assert(state["planets"][0]["queue"].is_empty())
     assert(not upgrade_audio.playing)
     tabs.current_tab = 0
@@ -282,12 +283,12 @@ func _run() -> void:
     assert((idle_rows[second_key]["progress"] as ProgressBar).value > 0.0)
     assert((idle_rows[third_key]["progress"] as ProgressBar).value > 0.0)
     var third_progress: float = (idle_rows[third_key]["progress"] as ProgressBar).value
-    (idle_rows[second_key]["upgrade"] as Button).pressed.emit()
+    (idle_rows[second_key]["cancel"] as Button).pressed.emit()
     assert(not idle_rows.has(second_key))
     assert(idle_rows.has(third_key) and idle_rows.has(103))
     assert((idle_rows[third_key]["label"] as Label).text.begins_with("Shipyard 2"))
     assert(is_equal_approx((idle_rows[third_key]["progress"] as ProgressBar).value, third_progress))
-    (idle_rows[third_key]["upgrade"] as Button).pressed.emit()
+    (idle_rows[third_key]["cancel"] as Button).pressed.emit()
     assert(idle_rows.size() == 3 and (idle_rows[102]["build"] as Button).visible)
     assert(not (idle_rows[103]["build"] as Button).visible)
     tabs.current_tab = 0
@@ -320,7 +321,10 @@ func _run() -> void:
     (colony_card["header"] as Button).pressed.emit()
     assert((colony_card["costs"] as GridContainer).get_child_count() == 6)
     assert((colony_card["body"] as Control).visible)
-    assert((colony_card["button"] as Button).text.ends_with("(1)"))
+    assert((colony_card["header"] as Button).text.ends_with("(1)"))
+    assert((colony_card["button"] as Button).get_parent() == (colony_card["header"] as Button).get_parent())
+    (colony_card["header"] as Button).pressed.emit()
+    assert(not (colony_card["body"] as Control).visible and (colony_card["button"] as Button).is_visible_in_tree())
     assert(not (colony_card["cancel"] as Button).disabled)
     for i in range(10):
         session.call("_economy_tick")

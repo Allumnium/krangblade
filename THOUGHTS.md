@@ -112,3 +112,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.13.1 corrects a duplicate fixture variable found during static review of the PDS test.
 
 - v0.13.2 corrects the starter fleet test's shadowed home index, caught by Godot parsing.
+
+### T-022 — Starter mining and shipyard staffing
+- **Type:** Verified code restriction; balance hypothesis.
+- **Observation:** Mining required owned field anchors, so starter miners could idle on generated maps. Neutral/friendly access and owned depot delivery added; slots require 500/5k/20k residents to operate.
+- **Consider:** Playtest mining throughput, full warehouses, and colony staffing. Values provisional.

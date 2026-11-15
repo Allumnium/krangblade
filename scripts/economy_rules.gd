@@ -508,6 +508,18 @@ static func _get_owned(state: Dictionary, player: int, index: int) -> Dictionary
     return planets[index]
 
 # Reserve a slot as soon as construction is ordered.
+const SHIPYARD_POPULATION = [500.0, 5000.0, 20000.0]
+
+static func shipyard_operational(p: Dictionary, index: int) -> bool:
+    return index >= 0 and index < (p.get("yards", []) as Array).size() and float(p["population"]) + EPS >= float(SHIPYARD_POPULATION[index])
+
+static func operational_shipyards(p: Dictionary) -> int:
+    var count: int = 0
+    for index in range((p.get("yards", []) as Array).size()):
+        if shipyard_operational(p, index):
+            count += 1
+    return count
+
 static func shipyard_count(p: Dictionary) -> int:
     var count: int = (p.get("yards", []) as Array).size()
     for item in p.get("queue", []):
@@ -845,6 +857,9 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
     # Preserve active jobs. A started upgrade remains attached to its own yard even if blocked.
     for y in range((p["yards"] as Array).size()):
         var yard: Dictionary = p["yards"][y]
+        if not shipyard_operational(p, y):
+            yard["job"] = -1
+            continue
         var retained: bool = false
         for item in p["queue"]:
             if int(item["id"]) != int(yard["job"]):
@@ -856,6 +871,8 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
         if not retained:
             yard["job"] = -1
     for y in range((p["yards"] as Array).size()):
+        if not shipyard_operational(p, y):
+            continue
         var yard: Dictionary = p["yards"][y]
         var chosen: Dictionary = {}
         for item in p["queue"]:
@@ -1090,7 +1107,27 @@ static func _find_chunk(field: Dictionary, id: int) -> Dictionary:
             return chunk
     return {}
 
-static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
+static func _mining_path(state: Dictionary, teams: Array[int], team: int, start: int, goal: int) -> Array[int]:
+    var accessible: Array[int] = teams.duplicate()
+    for i in range(accessible.size()):
+        if accessible[i] == 0:
+            accessible[i] = team
+    return MAP.path(state["map"], accessible, team, start, goal)
+
+static func _mining_depot(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, anchor: int, resource: String) -> int:
+    var best: float = INF
+    var chosen: int = -1
+    for i in range((state["planets"] as Array).size()):
+        var p: Dictionary = state["planets"][i]
+        if int(p["owner"]) != int(ship["owner"]) or storage_free(p, resource) <= EPS:
+            continue
+        var distance: float = MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, i))
+        if distance < best:
+            best = distance
+            chosen = i
+    return chosen
+
+static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], _cache: Dictionary) -> void:
     var fields: Array = state["map"].get("fields", [])
     var owner: int = int(ship["owner"])
     var team: int = int(state["teams"].get(owner, 0))
@@ -1103,18 +1140,22 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
         if not discovered(state, owner, "fields", i) or _mining_resources(state, owner, i).is_empty():
             continue
         var anchor: int = int(field["anchor"])
-        if int(state["planets"][anchor]["owner"]) != owner:
-            continue
-        var path: Array[int] = _path(state, teams, team, int(ship["at"]), anchor, cache)
+        var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor)
         if path.is_empty():
             continue
         var resources: Array[String] = _mining_resources(state, owner, i)
         var approach: Vector2 = state["map"]["points"][anchor]
         var route_distance: float = MAP.route_length(state["map"], path)
+        var depots: Dictionary = {}
+        for resource in resources:
+            depots[resource] = _mining_depot(state, ship, teams, team, anchor, resource)
         for chunk in field.get("chunks", []):
             if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
                 continue
-            var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0
+            var depot: int = int(depots.get(chunk["resource"], -1))
+            if depot < 0:
+                continue
+            var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0 + MAP.route_length(state["map"], _mining_path(state, teams, team, anchor, depot))
             if distance < best:
                 best = distance
                 chosen = i
@@ -1131,6 +1172,10 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
     var mode: String = str(ship.get("mining_mode", "idle"))
     if mode == "idle":
         _choose_field(state, ship, teams, cache)
+        return
+    if mode == "delivery":
+        if _move(state, ship, dt):
+            _unload_miner(state, ship, teams)
         return
     var field_index: int = int(ship["field"])
     var field: Dictionary = state["map"]["fields"][field_index]
@@ -1182,16 +1227,33 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
         _navigate(ship, origin, SHIP_SPEED * dt)
         ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
         if (ship["position"] as Vector2) == origin:
-            var depot: Dictionary = state["planets"][anchor]
-            for resource in MINED_RESOURCES:
-                var amount: float = minf(float(ship["cargo"][resource]), storage_free(depot, resource))
-                depot["stock"][resource] += amount
-                ship["cargo"][resource] -= amount
-            # Full warehouses cannot destroy cargo. Wait at the delivery
-            # waypoint until local consumption/exports/builds make room.
-            if _cargo_total(ship) <= EPS:
-                ship["mining_mode"] = "idle"
-                ship["field"] = -1
+            ship["mining_mode"] = "delivery"
+            _unload_miner(state, ship, teams)
+
+static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]) -> void:
+    var here: int = int(ship["at"])
+    var owner: int = int(ship["owner"])
+    var team: int = int(state["teams"].get(owner, 0))
+    var local: Dictionary = state["planets"][here]
+    if int(local["owner"]) == owner:
+        for resource in MINED_RESOURCES:
+            var amount: float = minf(float(ship["cargo"][resource]), storage_free(local, resource))
+            local["stock"][resource] += amount
+            ship["cargo"][resource] -= amount
+    if _cargo_total(ship) <= EPS:
+        ship["mining_mode"] = "idle"
+        ship["field"] = -1
+        ship["dest"] = -1
+        return
+    for resource in MINED_RESOURCES:
+        if float(ship["cargo"][resource]) <= EPS:
+            continue
+        var depot: int = _mining_depot(state, ship, teams, team, here, resource)
+        if depot >= 0 and depot != here:
+            ship["dest"] = depot
+            _set_route(ship, _mining_path(state, teams, team, here, depot))
+            return
+    ship["dest"] = here
 
 static func military_home(state: Dictionary, player: int) -> int:
     for i in range((state["planets"] as Array).size()):
@@ -1708,7 +1770,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
         var farm: int = int(p["levels"]["Organics"])
         var action: String = ""
         var target: String = ""
-        var has_yard: bool = not (p["yards"] as Array).is_empty()
+        var has_yard: bool = operational_shipyards(p) > 0
         # Select the next goal before checking funding. Save for that goal
         # rather than continually buying cheaper ships or secondary upgrades.
         if abundance > 0.0 and level == 0:
@@ -2015,7 +2077,7 @@ static func _repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, 
     if site < 0 or site >= (state["planets"] as Array).size():
         return false
     var planet: Dictionary = state["planets"][site]
-    if int(planet["owner"]) != owner or (planet["yards"] as Array).is_empty():
+    if int(planet["owner"]) != owner or operational_shipyards(planet) == 0:
         return false
     var center: Vector2 = graph["points"][site]
     var team: int = int(state["teams"].get(owner, 0))
