@@ -6,8 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: godot-validation-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  validate:
+  core:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -88,8 +92,44 @@ jobs:
         run: timeout 30s godot --headless --path . --script res://tests/map_view_smoke.gd
       - name: Startup smoke test
         run: godot --headless --path . --quit-after 3
-      - name: Real ENet multiplayer round trips and disconnect recovery
+  network:
+    name: ENet ${{ matrix.count }} players / ${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - count: 2
+            mode: normal
+          - count: 8
+            mode: normal
+          - count: 2
+            mode: drop-loading
+          - count: 2
+            mode: host-leave
+    steps:
+      - uses: actions/checkout@v4
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+      - name: Import
+        run: godot --headless --path . --import
+      - name: Check resource metadata is tracked and stable
+        run: |
+          changes="$(git status --porcelain --untracked-files=all -- '*.uid' '*.import')"
+          if [ -n "$changes" ]; then
+            printf '%s\n' "$changes"
+            echo "Commit generated resource .uid and asset .import sidecars."
+            exit 1
+          fi
+      - name: Real ENet multiplayer round trip or disconnect recovery
         shell: bash
+        env:
+          PLAYER_COUNT: ${{ matrix.count }}
+          CASE_MODE: ${{ matrix.mode }}
         run: |
           set -euo pipefail
           run_case() {
@@ -114,7 +154,19 @@ jobs:
             done
             test "$failures" -eq 0
           }
-          run_case 2 normal
-          run_case 8 normal
-          run_case 2 drop-loading
-          run_case 2 host-leave
+          run_case "$PLAYER_COUNT" "$CASE_MODE"
+
+  # Keep the existing aggregate check name. A skipped, cancelled or failed
+  # prerequisite cannot produce a successful validation result.
+  validate:
+    runs-on: ubuntu-latest
+    needs: [core, network]
+    if: ${{ always() }}
+    steps:
+      - name: Require every validation job to pass
+        env:
+          CORE: ${{ needs.core.result }}
+          NETWORK: ${{ needs.network.result }}
+        run: |
+          test "$CORE" = success
+          test "$NETWORK" = success
