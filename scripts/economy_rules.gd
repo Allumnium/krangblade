@@ -3,7 +3,19 @@ extends RefCounted
 const MAP = preload("res://scripts/planet_map.gd")
 const RESOURCES = ["Metals", "Plastics", "Textiles", "Organics", "Tech", "Crystals"]
 const EXTRACTED = ["Metals", "Plastics", "Crystals"]
-const ACTIVE_PRODUCTION = ["Metals", "Plastics", "Organics", "Crystals"]
+const ACTIVE_PRODUCTION = RESOURCES
+const STARTING_STOCK = {"Metals": 1650.0, "Plastics": 360.0, "Textiles": 240.0, "Organics": 300.0, "Tech": 240.0, "Crystals": 0.0}
+const BASE_INDUSTRIAL_RATE: float = 0.5
+const BUILDING_BONUS: float = 0.25
+# Provisional local permanent improvements. No repeat purchases or upkeep.
+const ECONOMY_BUILDINGS = {
+    "Metals": {"name": "Refinery", "population": 10000, "cost": {"Metals": 120.0, "Plastics": 15.0, "Tech": 10.0}},
+    "Plastics": {"name": "Polymer factory", "population": 10000, "cost": {"Metals": 100.0, "Plastics": 10.0, "Tech": 10.0}},
+    "Textiles": {"name": "Textile mill", "population": 10000, "cost": {"Metals": 100.0, "Plastics": 15.0, "Tech": 5.0}},
+    "Organics": {"name": "Agricultural complex", "population": 10000, "cost": {"Metals": 120.0, "Plastics": 15.0, "Tech": 10.0}},
+    "Tech": {"name": "Electronics factory", "population": 200000, "cost": {"Metals": 300.0, "Plastics": 40.0, "Tech": 30.0}},
+    "Crystals": {"name": "Crystal processor", "population": 10000, "cost": {"Metals": 120.0, "Plastics": 15.0, "Tech": 10.0}}
+}
 # Population is expressed in people (fractional values retained in simulation).
 const HOME_POPULATION: float = 10000.0
 const COLONY_POPULATION: float = 1000.0
@@ -30,13 +42,20 @@ const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
 const DEFAULT_FOG_OF_WAR: bool = false
 # Reference stock, not a storage cap; percentage thresholds use these units.
-const TRADE_REFERENCE: float = 1000.0
+const TRADE_REFERENCE: float = 2000.0
+const WAREHOUSE_CAPACITIES = [2000.0, 5000.0, 12000.0, 30000.0]
+const WAREHOUSE_COSTS = [
+    {"Metals": 250.0, "Plastics": 40.0, "Tech": 20.0},
+    {"Metals": 900.0, "Plastics": 150.0, "Tech": 80.0},
+    {"Metals": 3200.0, "Plastics": 500.0, "Tech": 300.0}
+]
+const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
+const CIVILIAN_CONSUMPTION = {"Metals": 0.1, "Plastics": 0.25, "Textiles": 0.25, "Tech": 0.25}
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
 const LASER_DAMAGE: float = 18.0
 const LASER_RANGE: float = 180.0
-const PURSUIT_YEARS: float = 3.0
 const AI_INTERVAL: float = 4.0
 const AI_WAVE_MIN: int = 3
 const AI_RALLY_RADIUS: float = 150.0
@@ -106,9 +125,10 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
         if home:
             # Bootstrap values are test data, not final economy balance.
             abundance["Metals"] = maxf(1.0, float(abundance["Metals"]))
-            levels["Metals"] = 1
-            levels["Organics"] = 1
-            stock["Metals"] = 600.0
+            for resource in RESOURCES:
+                if resource != "Crystals":
+                    levels[resource] = 1
+            stock = STARTING_STOCK.duplicate()
             yards.append({"level": 1, "job": -1})
         var richness: float = 0.0
         for resource in EXTRACTED:
@@ -118,7 +138,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
         var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
         planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
             "abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
-            "yards": yards, "queue": [], "continuous": {}})
+            "yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0})
     var ai_players: Array[int] = []
     for id in ordered:
         if bool(players[id].get("ai", false)):
@@ -186,11 +206,18 @@ static func _mining_resources(state: Dictionary, player: int, index: int) -> Arr
     return resources
 
 ## Read-only player-wide holdings: stock plus the player's own cargo in transit.
+static func storage_capacity(p: Dictionary) -> float:
+    return float(WAREHOUSE_CAPACITIES[clampi(int(p.get("warehouse_level", 0)), 0, 3)])
+
+static func storage_free(p: Dictionary, resource: String) -> float:
+    return maxf(0.0, storage_capacity(p) - float(p["stock"][resource]))
+
 static func empire_totals(state: Dictionary, player: int) -> Dictionary:
     var stock: Dictionary = empty_stock()
     var cargo: Dictionary = empty_stock()
     var total: Dictionary = empty_stock()
     var population: float = 0.0
+    var capacity: float = 0.0
     var planets: int = 0
     var craft: int = 0
     var logistics: int = 0
@@ -201,6 +228,7 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
         if int(planet["owner"]) != player:
             continue
         planets += 1
+        capacity += storage_capacity(planet)
         population += float(planet["population"])
         for resource in RESOURCES:
             stock[resource] = float(stock[resource]) + float(planet["stock"].get(resource, 0.0))
@@ -223,7 +251,7 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
         total[resource] = float(stock[resource]) + float(cargo[resource])
     var storage_reference: Dictionary = empty_stock()
     for resource in RESOURCES:
-        storage_reference[resource] = float(planets) * TRADE_REFERENCE
+        storage_reference[resource] = capacity
     return {"stock": stock, "cargo": cargo, "resources": total, "storage_reference": storage_reference, "population": population,
         "planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters, "miners": miners}
 
@@ -304,7 +332,8 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
         colony["owner"] = int(ship["owner"])
         colony["population"] = COLONY_POPULATION
         colony["population_velocity"] = 0.0
-        colony["levels"]["Organics"] = 1
+        for resource in ["Plastics", "Textiles", "Organics", "Tech"]:
+            colony["levels"][resource] = 1
         return true # consumed to establish the colony
     # Another ship arrived first. Return to launch without claiming or combat.
     var back: Array[int] = []
@@ -317,10 +346,13 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 static func current_year(state: Dictionary) -> int:
     return START_YEAR + floori(float(state.get("elapsed", 0.0)) + EPS)
 
+static func building_multiplier(planet: Dictionary, resource: String) -> float:
+    return 1.0 + BUILDING_BONUS if bool(planet.get("buildings", {}).get(resource, false)) else 1.0
+
 static func farm_potential(planet: Dictionary) -> float:
     if int(planet["owner"]) == 0:
         return 0.0
-    return ORGANICS_PER_LEVEL * int(planet["levels"]["Organics"]) * float(planet["bonuses"].get("Organics", 1.0)) * float(planet.get("farm_factor", 1.0))
+    return ORGANICS_PER_LEVEL * int(planet["levels"]["Organics"]) * float(planet["bonuses"].get("Organics", 1.0)) * float(planet.get("farm_factor", 1.0)) * building_multiplier(planet, "Organics")
 
 static func population_capacity(planet: Dictionary) -> float:
     return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
@@ -334,6 +366,21 @@ static func population_growth(planet: Dictionary) -> float:
 static func organics_demand(planet: Dictionary) -> float:
     return float(planet["population"]) / POPULATION_PER_ORGANICS_RATE
 
+static func consumption(planet: Dictionary, resource: String) -> float:
+    if int(planet["owner"]) == 0:
+        return 0.0
+    if resource == "Organics":
+        return organics_demand(planet)
+    return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * population_multiplier(planet)
+
+static func net_rate(planet: Dictionary, resource: String) -> float:
+    var net: float = rate(planet, resource) - consumption(planet, resource)
+    if net > 0.0 and storage_free(planet, resource) <= EPS:
+        return 0.0
+    if net < 0.0 and float(planet["stock"][resource]) <= EPS:
+        return 0.0
+    return net
+
 static func rate(planet: Dictionary, resource: String) -> float:
     if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0:
         return 0.0
@@ -346,7 +393,16 @@ static func rate(planet: Dictionary, resource: String) -> float:
             return 0.0
         var labor: float = sqrt(clampf(float(planet["population"]) / capacity, 0.0, 1.0))
         return farm_potential(planet) * labor
-    var output: float = PRODUCTION_PER_LEVEL * level * float(planet["abundance"].get(resource, 0.0)) * bonus * population_multiplier(planet)
+    var base: float = PRODUCTION_PER_LEVEL
+    var material: float = float(planet["abundance"].get(resource, 0.0))
+    if resource in ["Textiles", "Tech"]:
+        base = BASE_INDUSTRIAL_RATE
+        material = 1.0
+    elif resource == "Plastics":
+        # Baseline polymer production is possible even without a deposit.
+        base = BASE_INDUSTRIAL_RATE
+        material = maxf(1.0, material)
+    var output: float = base * level * material * bonus * population_multiplier(planet) * building_multiplier(planet, resource)
     return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func _update_population(planet: Dictionary, dt: float) -> void:
@@ -391,10 +447,10 @@ static func _has_job(planet: Dictionary, kind: String, target: String) -> bool:
 static func _cost(kind: String, level: int) -> Dictionary:
     # Explicit prototype values; the final costs/recipes are intentionally undefined.
     match kind:
-        "ship": return {"Metals": 120.0}
-        "colony_ship": return {"Metals": 240.0}
-        "fighter": return {"Metals": 90.0}
-        "miner": return {"Metals": 180.0}
+        "ship": return {"Metals": 120.0, "Plastics": 25.0, "Textiles": 15.0, "Organics": 15.0, "Tech": 10.0}
+        "colony_ship": return {"Metals": 240.0, "Plastics": 40.0, "Textiles": 30.0, "Organics": 30.0, "Tech": 30.0}
+        "fighter": return {"Metals": 90.0, "Plastics": 20.0, "Textiles": 10.0, "Organics": 10.0, "Tech": 10.0}
+        "miner": return {"Metals": 180.0, "Plastics": 30.0, "Textiles": 15.0, "Organics": 20.0, "Tech": 20.0}
         "yard": return {"Metals": 480.0}
         "yard_upgrade": return {"Metals": 180.0 * float(level) * float(level)}
         "production": return {"Metals": 150.0 * float(level) * float(level)}
@@ -425,6 +481,56 @@ static func shipyard_count(p: Dictionary) -> int:
             count += 1
     return count
 
+# Gates apply to new local production orders, not completed infrastructure.
+# Early farming remains available, so capacity can grow toward the Tech gate.
+static func production_population(resource: String, level: int) -> int:
+    if resource == "Tech":
+        return maxi(1000, 200000 * (level - 1))
+    return maxi(1000, 10000 * (level - 1))
+
+static func production_available(p: Dictionary, resource: String) -> bool:
+    return RESOURCES.has(resource) and (not MINED_RESOURCES.has(resource) or float(p["abundance"].get(resource, 0.0)) > 0.0)
+
+static func production_unlocked(p: Dictionary, resource: String) -> bool:
+    return production_available(p, resource) and float(p["population"]) + EPS >= float(production_population(resource, int(p["levels"][resource]) + 1))
+
+static func affordable(p: Dictionary, cost: Dictionary) -> bool:
+    if cost.is_empty():
+        return false
+    for resource in cost:
+        if float(p["stock"].get(resource, 0.0)) + EPS < float(cost[resource]):
+            return false
+    return true
+
+static func building_available(p: Dictionary, resource: String) -> bool:
+    if not ECONOMY_BUILDINGS.has(resource) or bool(p.get("buildings", {}).get(resource, false)) or not production_available(p, resource):
+        return false
+    var definition: Dictionary = ECONOMY_BUILDINGS[resource]
+    return float(p["population"]) + EPS >= float(definition["population"]) and affordable(p, definition["cost"])
+
+static func warehouse_available(p: Dictionary) -> bool:
+    var level: int = int(p.get("warehouse_level", 0))
+    return level < 3 and float(p["population"]) + EPS >= float(WAREHOUSE_POPULATIONS[level]) and affordable(p, WAREHOUSE_COSTS[level])
+
+static func _buy_warehouse(p: Dictionary) -> bool:
+    if not warehouse_available(p):
+        return false
+    var level: int = int(p.get("warehouse_level", 0))
+    for material in WAREHOUSE_COSTS[level]:
+        p["stock"][material] -= float(WAREHOUSE_COSTS[level][material])
+    p["warehouse_level"] = level + 1
+    return true
+
+static func _buy_building(p: Dictionary, resource: String) -> bool:
+    if not building_available(p, resource):
+        return false
+    for material in ECONOMY_BUILDINGS[resource]["cost"]:
+        p["stock"][material] = maxf(0.0, float(p["stock"][material]) - float(ECONOMY_BUILDINGS[resource]["cost"][material]))
+    if not p.has("buildings"):
+        p["buildings"] = {}
+    p["buildings"][resource] = true
+    return true
+
 static func enqueue(state: Dictionary, player: int, index: int, kind: String, target: String = "") -> bool:
     var p: Dictionary = _get_owned(state, player, index)
     if p.is_empty():
@@ -451,13 +557,10 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
             if _has_job(p, kind, target):
                 return false
             level = int(p["yards"][y]["level"]) + 1
+        "economy":
+            return _buy_warehouse(p) if target == "warehouse" else _buy_building(p, target)
         "production":
-            if not RESOURCES.has(target) or _has_job(p, kind, target):
-                return false
-            if EXTRACTED.has(target) and float(p["abundance"].get(target, 0.0)) <= 0.0:
-                return false
-            # Non-extraction production rules have not been designed yet.
-            if not ACTIVE_PRODUCTION.has(target):
+            if not production_unlocked(p, target) or _has_job(p, kind, target):
                 return false
             level = int(p["levels"][target]) + 1
         _: return false
@@ -470,16 +573,18 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 
 static func production_modifier(system: Dictionary, resource: String) -> float:
     var modifier: float = float(system["bonuses"].get(resource, 1.0))
-    if EXTRACTED.has(resource):
+    if MINED_RESOURCES.has(resource):
         modifier *= float(system["abundance"].get(resource, 0.0))
-    return modifier
+    elif resource == "Plastics":
+        modifier *= maxf(1.0, float(system["abundance"].get(resource, 0.0)))
+    return modifier * building_multiplier(system, resource)
 
 static func _continuous_target(p: Dictionary, key: String) -> Array:
     if SHIP_KINDS.has(key):
         return [key, ""] if key != "ship" or bool(p["home"]) else []
     if key.begins_with("production:"):
         var resource: String = key.trim_prefix("production:")
-        if ACTIVE_PRODUCTION.has(resource) and (not EXTRACTED.has(resource) or float(p["abundance"].get(resource, 0.0)) > 0.0):
+        if production_available(p, resource):
             return ["production", resource]
     if key.begins_with("yard_upgrade:"):
         var target: String = key.trim_prefix("yard_upgrade:")
@@ -490,6 +595,8 @@ static func _continuous_target(p: Dictionary, key: String) -> Array:
 static func set_continuous(state: Dictionary, player: int, index: int, kind: String, enabled: bool) -> bool:
     var p: Dictionary = _get_owned(state, player, index)
     if p.is_empty() or _continuous_target(p, kind).is_empty():
+        return false
+    if enabled and kind.begins_with("production:") and not production_unlocked(p, kind.trim_prefix("production:")):
         return false
     p["continuous"][kind] = enabled
     return true
@@ -619,11 +726,13 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
     var elapsed: float = float(state["elapsed"])
     p["farm_factor"] = 1.0 + FARM_VARIATION * sin(TAU * elapsed / FARM_CYCLE_SECONDS + float(p["farm_phase"]))
     _update_population(p, dt)
+    # Residents consume all non-crystal resources. Only net surplus can occupy
+    # free storage. At capacity production covers demand but stores no excess.
+    # Refunds may temporarily exceed capacity; never destroy returned materials.
     for resource in ACTIVE_PRODUCTION:
-        p["stock"][resource] = float(p["stock"][resource]) + rate(p, resource) * dt
-    # Consume real local inventory; imported Organics can satisfy demand but
-    # cannot permanently raise the local farming plateau.
-    p["stock"]["Organics"] = maxf(0.0, float(p["stock"]["Organics"]) - organics_demand(p) * dt)
+        var stored: float = float(p["stock"][resource])
+        var change: float = (rate(p, resource) - consumption(p, resource)) * dt
+        p["stock"][resource] = maxf(0.0, stored + minf(change, storage_free(p, resource)))
     # New yards and planetary production use infrastructure work, not an existing yard.
     for item in (p["queue"] as Array).duplicate():
         if int(item["size"]) == 0 and item["kind"] != "yard_upgrade" and _advance(p, item, dt):
@@ -686,10 +795,10 @@ static func _cargo_total(ship: Dictionary) -> float:
     return total
 
 static func _need(p: Dictionary, resource: String) -> float:
-    return maxf(0.0, TRADE_REFERENCE * float(p["thresholds"][resource]["min"]) / 100.0 - float(p["stock"][resource]))
+    return maxf(0.0, storage_capacity(p) * float(p["thresholds"][resource]["min"]) / 100.0 - float(p["stock"][resource]))
 
 static func _surplus(p: Dictionary, resource: String) -> float:
-    return maxf(0.0, float(p["stock"][resource]) - TRADE_REFERENCE * float(p["thresholds"][resource]["max"]) / 100.0)
+    return maxf(0.0, float(p["stock"][resource]) - storage_capacity(p) * float(p["thresholds"][resource]["max"]) / 100.0)
 
 static func _opportunity(a: Dictionary, b: Dictionary) -> bool:
     for r in RESOURCES:
@@ -970,12 +1079,16 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
         _navigate(ship, origin, SHIP_SPEED * dt)
         ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
         if (ship["position"] as Vector2) == origin:
-            var stock: Dictionary = state["planets"][anchor]["stock"]
+            var depot: Dictionary = state["planets"][anchor]
             for resource in MINED_RESOURCES:
-                stock[resource] = float(stock[resource]) + float(ship["cargo"][resource])
-                ship["cargo"][resource] = 0.0
-            ship["mining_mode"] = "idle"
-            ship["field"] = -1
+                var amount: float = minf(float(ship["cargo"][resource]), storage_free(depot, resource))
+                depot["stock"][resource] += amount
+                ship["cargo"][resource] -= amount
+            # Full warehouses cannot destroy cargo. Wait at the delivery
+            # waypoint until local consumption/exports/builds make room.
+            if _cargo_total(ship) <= EPS:
+                ship["mining_mode"] = "idle"
+                ship["field"] = -1
 
 static func military_home(state: Dictionary, player: int) -> int:
     for i in range((state["planets"] as Array).size()):
@@ -1423,7 +1536,6 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
         var p: Dictionary = planets[index]
         if not (p["queue"] as Array).is_empty():
             continue
-        var metal: float = float(p["stock"]["Metals"])
         var level: int = int(p["levels"]["Metals"])
         var abundance: float = float(p["abundance"].get("Metals", 0.0))
         var farm: int = int(p["levels"]["Organics"])
@@ -1478,7 +1590,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
         if action.is_empty():
             continue
         var build_level: int = int(p["levels"][target]) + 1 if action == "production" else 1
-        if metal + EPS < float(_cost(action, build_level)["Metals"]):
+        if not affordable(p, _cost(action, build_level)):
             continue
         if enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):
             counts[action] += 1

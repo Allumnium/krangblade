@@ -10,6 +10,13 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [x] Basic fighters, automatic proximity combat, direct POI allocation and initial AI-only attack waves.
 - [x] Visible territory overlay, time controls and mandatory parallel regression checks.
 
+## Priority — Economy foundation
+- [ ] Validate multi-resource ship costs and a starting stock sufficient for about twelve mixed hulls.
+- [ ] Validate baseline population-scaled production, local population gates for production upgrades (first Tech upgrade at 200k), and one-time Economy buildings with resource-specific percentage bonuses.
+- [ ] Playtest costs, output, trade, AI expansion, population pacing and building choices before choosing final balance.
+- [ ] Validate per-resource storage ceilings, three warehouse upgrades, linear consumption by population (all except Crystals), and zero starting Crystal production.
+- v0.11.1 prototype implements the above via existing authority commands and local inventories; check off after validation.
+
 ## Phase 1 — Autonomous military foundation
 - [ ] Rework military control into persistent fleet/operation groups shared by human and AI empires.
   - Initial v0.9.0 prototype: shared authoritative operation IDs, member lists, objectives and movement/engagement flags derived from existing routing. v0.9.0 validation passed (PR #47). v0.10.0 prototype moves human routing into operation dispatch and preserves identity on group retargeting; AI still uses its existing wave controller. Full unified command model remains outstanding.
@@ -17,7 +24,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
   - v0.10.0 prototype: hostile-owned system allocations rally in groups of three at home, with additional cohorts and lone-survivor regrouping. Neutral and friendly assignments remain immediate; unified AI/human operation lifecycle and playtesting remain outstanding.
 - [ ] Generate formations of varying sizes based on fleet size and ship composition. Assign stable relative positions; smoothly re-form as membership changes without teleportation.
 - [ ] Allow combat ships to continue physically flying and maneuvering during combat; use authoritative world positions for range and movement, keep lane travel intact.
-  - v0.10.1 prototype: fighters temporarily leave their lane to circle live opponents at a preferred engagement distance, then resume queued waypoints from the actual combat position. v0.10.2 adds a three-game-year pursuit budget for non-fighters and fleeing fighters, including out-of-range continuation without firing and timeout/reacquisition handling. Formation integration and visual playtesting remain outstanding.
+  - v0.10.1 prototype: fighters temporarily leave their lane to circle live opponents at a preferred engagement distance, then resume queued waypoints from the actual combat position. v0.10.3 pursuit and live render synchronization validated in PR #49. Formation integration and visual playtesting remain outstanding.
 - [ ] Have damaged ships automatically fall back; design safe withdrawal destinations, repair/recovery and rejoining. Decide individual versus fleet retreat triggers and prevent oscillation.
 - [ ] Establish clear fleet state feedback and regression coverage for assembly, combat movement, withdrawal, reinforcement, speed bounds and replicated positions.
 

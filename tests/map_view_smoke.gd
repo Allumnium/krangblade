@@ -89,8 +89,8 @@ func _run() -> void:
     var prefill: float = float(fill_home["stock"]["Metals"])
     fill_home["stock"]["Metals"] = 500.0
     view.call("_refresh_global_bar", fill_state)
-    assert(is_equal_approx(float(view.get("global_resource_fills")["Metals"]), 0.5))
-    fill_home["stock"]["Metals"] = 1500.0
+    assert(is_equal_approx(float(view.get("global_resource_fills")["Metals"]), 0.25))
+    fill_home["stock"]["Metals"] = 2000.0
     view.call("_refresh_global_bar", fill_state)
     assert(is_equal_approx(float(view.get("global_resource_fills")["Metals"]), 1.0))
     view.call("_refresh_global_bar", {})
@@ -123,15 +123,15 @@ func _run() -> void:
     var saved_stock: float = float(stock_system["stock"]["Organics"])
     stock_system["stock"]["Organics"] = 450.0
     view.call("_refresh")
-    assert(is_equal_approx(float(slider.get("stock_percent")), 45.0))
+    assert(is_equal_approx(float(slider.get("stock_percent")), 22.5))
     var left_resources: Dictionary = view.get("production_values")
     assert(overview.is_ancestor_of(left_resources["Organics"]["stock"]))
     assert((left_resources["Organics"]["stock"] as Label).text == "450.0")
     stock_system["stock"]["Organics"] = 1500.0
     view.call("_refresh")
-    assert(is_equal_approx(float(slider.get("stock_percent")), 100.0))
+    assert(is_equal_approx(float(slider.get("stock_percent")), 75.0))
     assert((left_resources["Organics"]["stock"] as Label).text == "1.5K")
-    assert((trade_amounts["Organics"] as Label).text == "1.5K / 1000")
+    assert((trade_amounts["Organics"] as Label).text == "1.5K / 2K")
     stock_system["stock"]["Organics"] = saved_stock
     view.call("_refresh")
     assert(is_equal_approx(float(slider.get("lower")), 10.0))
@@ -171,11 +171,25 @@ func _run() -> void:
     assert(not (view.get("population_label") as Label).text.contains(" / "))
     assert(not (view.get("population_label") as Label).tooltip_text.contains("supported"))
     assert(not (view.get("population_label") as Label).text.contains("/yr"))
-    assert(tabs.get_tab_control(0).get_child(0).get_child_count() == 0)
+    assert(tabs.get_tab_control(0).is_ancestor_of(view.get("warehouse_card")["button"]))
     var state: Dictionary = session.get("economy")
     assert((view.get("global_resource_labels") as Dictionary).size() == 6)
     assert(view.get("global_resource_labels")["Metals"].text.contains("("))
     assert((view.get("global_population_label") as Label).text.begins_with("POP  10."))
+    var building_cards: Dictionary = view.get("economy_cards")
+    assert(building_cards.size() == 6)
+    var textile_mill: Button = building_cards["Textiles"]["button"]
+    assert(tabs.get_tab_control(0).is_ancestor_of(textile_mill))
+    assert(not textile_mill.disabled)
+    assert((building_cards["Tech"]["button"] as Button).disabled)
+    var warehouse_button: Button = view.get("warehouse_card")["button"]
+    assert(not warehouse_button.disabled)
+    warehouse_button.pressed.emit()
+    assert(int(state["planets"][0]["warehouse_level"]) == 1)
+    assert(warehouse_button.disabled)
+    textile_mill.pressed.emit()
+    assert(state["planets"][0]["buildings"]["Textiles"])
+    assert(textile_mill.disabled and textile_mill.text == "BUILT")
     var cards: Dictionary = view.get("upgrade_cards")
     assert(cards.size() == 6)
     var farm: Dictionary = cards["Organics"]
