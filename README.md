@@ -10,7 +10,7 @@ Select your home planet to queue a logistics ship. Each Empire player starts wit
 
 ## Resources and logistics
 
-The six universal resources are Metals, Plastics, Textiles, Organics, Tech, and Crystals. Metals, Plastics and Crystals have mixed planetary deposit availability, while Organics and Crystals have planetary bonus data. Each planet has one production level per resource. Only deposit extraction production is active; Tech, Textiles and Organics acquisition and advanced component recipes remain deliberately unspecified.
+The six universal resources are Metals, Plastics, Textiles, Organics, Tech, and Crystals. Metals, Plastics and Crystals have mixed planetary deposit availability, while Organics and Crystals have planetary bonus data. Each planet has one production level per resource. Deposit extraction and provisional Organics production are active; Tech, Textiles and advanced component recipes remain deliberately unspecified.
 
 Inventories are planetary. Each resource has adjustable minimum import and maximum export targets, shared for own and allied traffic. Generic cargo ships carry mixed resources, choose a short reachable delivery greedily, travel physically along friendly fixed routes and collect surplus on arrival (no reservations or owner priority). Ships may have to reassess a delivery or wait while loaded if demand disappears. They never move goods through hostile or unclaimed planets. Ship production is currently queued at the home world.
 
@@ -31,3 +31,7 @@ No military combat, AI opponents, advanced recipes, other races, manual trade-ro
 ## Presentation
 
 Menu, lobby and match share the Godot Theme in `scripts/ui_theme.gd`. Six original SVG resource icons identify stock, levels, resource selection and construction material costs. The inspector groups activities into separate panels and displays the selected construction job's progress and material allocation. `assets/ui/starfield.gdshader` animates distant star layers independently of the simulation; the galaxy uses shaded planet discs, team-colored rings, a selection pulse, softly lit connections and ship engine trails. These are presentation-only and do not alter simulation or network rules.
+
+## Population (prototype)
+
+Population is stored per planet in millions and simulated by the host/offline authority. Home worlds start at 100 M and new colonies at 10 M, with level-one Organics production. Local Organics output establishes carrying capacity (12.5 M per unit/s); population grows toward that cap at 1% per second. Active non-Organics production scales linearly with population (100 M = 1x). Organics output is independent of population and generates stock; imports and inventory do not alter carrying capacity. Organics production upgrades use the normal timed material queue and planetary bonuses. Textiles and Tech production remain undefined. Demographic values, starting conditions and Organics production inputs are provisional; no mortality or migration rules yet. The inspector keeps population and fleet overview visible and separates economy, shipyards and queue into independently scrollable tabs.

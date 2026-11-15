@@ -25,6 +25,37 @@ func _initialize() -> void:
     assert(ECON.set_thresholds(state, 1, 0, "Metals", 0, 100))
     assert(not ECON.enqueue(state, 1, 0, "production", "Tech"))
 
+    # Population and local Organics production are independent of stored food.
+    var demographics: Dictionary = ECON.create(graph, players, ids)
+    var home: Dictionary = demographics["planets"][0]
+    home["bonuses"]["Organics"] = 1.0
+    home["abundance"]["Metals"] = 1.0
+    assert(is_equal_approx(float(home["population"]), ECON.HOME_POPULATION))
+    assert(is_equal_approx(ECON.population_capacity(home), ECON.HOME_POPULATION))
+    assert(is_zero_approx(ECON.population_growth(home)))
+    var baseline: float = ECON.rate(home, "Metals")
+    home["population"] = ECON.HOME_POPULATION * 0.5
+    assert(is_equal_approx(ECON.rate(home, "Metals"), baseline * 0.5))
+    var food: float = ECON.rate(home, "Organics")
+    home["stock"]["Organics"] = 10000.0
+    assert(is_equal_approx(ECON.population_capacity(home), ECON.HOME_POPULATION))
+    assert(is_equal_approx(food, ECON.ORGANICS_PER_LEVEL))
+    ECON.step(demographics, 1.0)
+    assert(float(home["population"]) > ECON.HOME_POPULATION * 0.5)
+    assert(is_equal_approx(float(home["stock"]["Organics"]), 10000.0 + food))
+    home["population"] = ECON.HOME_POPULATION
+    ECON.step(demographics, 1.0)
+    assert(is_equal_approx(float(home["population"]), ECON.HOME_POPULATION))
+    assert(ECON.enqueue(demographics, 1, 0, "production", "Organics"))
+    ECON.step(demographics, 20.0)
+    assert(int(home["levels"]["Organics"]) == 2)
+    assert(is_equal_approx(ECON.population_capacity(home), ECON.HOME_POPULATION * 2.0))
+    ECON.step(demographics, 1.0)
+    assert(float(home["population"]) > ECON.HOME_POPULATION)
+    home["bonuses"]["Organics"] = 1.5
+    assert(is_equal_approx(ECON.population_capacity(home), ECON.HOME_POPULATION * 3.0))
+    assert(is_zero_approx(float(demographics["planets"][3]["population"])))
+
     # Construction is proportional, time-dependent and fully refundable.
     p["levels"]["Metals"] = 0
     p["stock"]["Metals"] = 30.0
@@ -129,6 +160,8 @@ func _initialize() -> void:
     assert(int(colonization["planets"][3]["owner"]) == 0)
     ECON.step(colonization, 0.5)
     assert(int(colonization["planets"][3]["owner"]) == 3)
+    assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION))
+    assert(int(colonization["planets"][3]["levels"]["Organics"]) == 1)
     ECON.step(colonization, 1.0)
     assert(colonization["ships"].size() == 1)
     assert(int(c1["dest"]) == -1)
