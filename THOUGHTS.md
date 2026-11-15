@@ -138,3 +138,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-025 — Maintain target input
 - Finite targets are provisionally capped at 9,999. Validate snapshot-safe editing and unlimited-to-finite drag behavior; cancellation stops automatic replacement to prevent immediate requeue.
+
+- v0.14.1 adds local hover detail and latest-step demographic and crew rates; verify constrained layouts and infinity dragging under snapshot latency.

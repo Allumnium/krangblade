@@ -848,6 +848,7 @@ static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> boo
         _record_flow(p, "Construction: " + str(item["kind"]), resource, used)
     var crew: float = amount * float(item.get("population_cost", 0.0)) / float(item["work"])
     p["population"] = maxf(0.0, float(p["population"]) - crew)
+    p["crew_rate"] = float(p.get("crew_rate", 0.0)) + crew / maxf(EPS, float(p.get("flow_dt", 1.0)))
     item["population_allocated"] = float(item.get("population_allocated", 0.0)) + crew
     item["progress"] = float(item["progress"]) + amount
     return float(item["progress"]) >= float(item["work"]) - EPS
@@ -891,9 +892,12 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
         return
     p["flows"] = {}
     p["flow_dt"] = dt
+    p["crew_rate"] = 0.0
+    var before_population: float = float(p["population"])
     var elapsed: float = float(state["elapsed"])
     p["farm_factor"] = 1.0 + FARM_VARIATION * sin(TAU * elapsed / FARM_CYCLE_SECONDS + float(p["farm_phase"]))
     _update_population(p, dt)
+    p["demographic_rate"] = (float(p["population"]) - before_population) / maxf(EPS, dt)
     # Residents consume all non-crystal resources. Only net surplus can occupy
     # free storage. At capacity production covers demand but stores no excess.
     # Refunds may temporarily exceed capacity; never destroy returned materials.

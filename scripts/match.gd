@@ -37,6 +37,7 @@ var yard_activity: VBoxContainer
 var yard_activity_rows: Dictionary = {}
 var inspector_tabs: TabContainer
 var population_label: Label
+var population_delta_label: Label
 var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
 var drag_button: int = 0
@@ -344,7 +345,11 @@ func _build_ui() -> void:
     population_label.autowrap_mode = TextServer.AUTOWRAP_OFF
     population_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     population_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-    _population_row(planet_overview).add_child(population_label)
+    var population_row: HBoxContainer = _population_row(planet_overview)
+    population_row.add_child(population_label)
+    population_delta_label = _label("", 11)
+    population_delta_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+    population_row.add_child(population_delta_label)
     production_summary = HUD.section(planet_overview, "Resources")
     _build_production_summary()
     interaction_panel = VBoxContainer.new()
@@ -597,6 +602,10 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     var infinity := _label("∞", 14)
     maintain_row.add_child(infinity)
     infinity.hide()
+    infinity.mouse_filter = Control.MOUSE_FILTER_STOP
+    infinity.gui_input.connect(func(event: InputEvent) -> void:
+        if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0 and event.relative.y > 0.0:
+            session.call("request_maintain", selected, kind, maxi(0, int(amount.value) - maxi(1, roundi(event.relative.y / 4.0)))))
     var button: Button = _card_action(disclosure, "Build", _operation.bind(kind))
     if kind != "yard":
         var check: Button = _repeat_button(row, kind)
@@ -678,7 +687,7 @@ func _build_production_summary() -> void:
         bonus.custom_minimum_size.x = 46
         bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         row.add_child(bonus)
-        production_values[resource] = {"stock": stock, "level": level, "rate": rate_label, "bonus": bonus}
+        production_values[resource] = {"row": row, "stock": stock, "level": level, "rate": rate_label, "bonus": bonus}
 
 func _system_bonus_text(p: Dictionary) -> String:
     var lines: PackedStringArray = []
@@ -1390,6 +1399,26 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
         lines.append("Paused · last simulation step")
     return "\n".join(lines)
 
+func _local_breakdown(p: Dictionary, resource: String) -> String:
+    if resource == "population":
+        var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
+        var crew: float = float(p.get("crew_rate", 0.0))
+        return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nFood-supported equilibrium: %.0f\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, ECONOMY.population_capacity(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
+    var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Latest local flows (t/yr)"]
+    var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
+    for category in p.get("flows", {}):
+        if not categories.has(category):
+            categories.append(category)
+    var net: float = 0.0
+    for category in categories:
+        var amount: float = ECONOMY.local_flow(p, category, resource)
+        var sign: float = -1.0 if category == "Population" or category == "Exports" or str(category).begins_with("Construction: ") else 1.0
+        net += sign * amount
+        if amount > ECONOMY.EPS:
+            lines.append("%+.2f %s" % [sign * amount, _flow_name(category)])
+    lines.append("%+.2f net" % net)
+    return "\n".join(lines)
+
 func _update_resource_hover() -> void:
     if not is_instance_valid(resource_hover_panel):
         return
@@ -1399,6 +1428,14 @@ func _update_resource_hover() -> void:
         if global_resource_tiles[key].get_global_rect().has_point(mouse):
             resource = key
             break
+    if resource.is_empty() and planet_overview.is_visible_in_tree() and not _planet().is_empty():
+        if population_label.get_parent().get_global_rect().has_point(mouse):
+            resource = "local:population"
+        else:
+            for key in production_values:
+                if production_values[key]["row"].get_global_rect().has_point(mouse):
+                    resource = "local:" + str(key)
+                    break
     if resource.is_empty() and resource_hover_panel.visible and resource_hover_panel.get_global_rect().has_point(mouse):
         resource = hovered_resource
     if resource.is_empty() or _state().is_empty():
@@ -1406,11 +1443,20 @@ func _update_resource_hover() -> void:
         hovered_resource = ""
         return
     var state: Dictionary = _state()
-    var value: String = _resource_breakdown(state, resource)
+    var local: bool = resource.begins_with("local:")
+    if local and (_planet().is_empty() or not planet_overview.is_visible_in_tree()):
+        resource_hover_panel.hide()
+        hovered_resource = ""
+        return
+    var value: String = _local_breakdown(_planet(), resource.trim_prefix("local:")) if local else _resource_breakdown(state, resource)
     if resource_hover_label.text != value:
         resource_hover_label.text = value
     hovered_resource = resource
-    var tile_rect: Rect2 = global_resource_tiles[resource].get_global_rect()
+    var tile_rect: Rect2
+    if local:
+        tile_rect = population_label.get_parent().get_global_rect() if resource == "local:population" else production_values[resource.trim_prefix("local:")]["row"].get_global_rect()
+    else:
+        tile_rect = global_resource_tiles[resource].get_global_rect()
     var viewport: Vector2 = get_viewport_rect().size
     var width: float = minf(420.0, viewport.x - 16.0)
     resource_hover_panel.size = Vector2(width, minf(viewport.y - tile_rect.end.y - 12.0, maxf(105.0, 20.0 * float(value.count("\n") + 2))))
@@ -1562,6 +1608,7 @@ func _refresh() -> void:
         info.text = "Select a system."
         system_owner_label.text = ""
         population_label.text = ""
+        population_delta_label.text = ""
         _refresh_build_cards(p, false)
         return
     var owner: int = int(p["owner"])
@@ -1587,7 +1634,10 @@ func _refresh() -> void:
         production_values[resource]["rate"].tooltip_text = "Production %.2f t/yr · Consumption %.2f t/yr · Net %.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
     var population: float = float(p["population"])
     population_label.text = "%s" % _compact_amount(population)
-    population_label.tooltip_text = "%.0f people" % population
+    var change: float = float(p.get("demographic_rate", ECONOMY.population_growth(p))) - float(p.get("crew_rate", 0.0))
+    population_delta_label.text = "(%s%s/yr)" % ["+" if change >= 0.0 else "-", _compact_amount(absf(change))]
+    population_delta_label.add_theme_color_override("font_color", Color("#7cdb9b") if change >= 0.0 else Color("#eb8585"))
+    population_label.tooltip_text = ""
     _update_trade_stock(p)
     _refresh_upgrade_cards(p, owned)
     _refresh_pds(p, owned)
@@ -1813,6 +1863,7 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
         if not amount.get_line_edit().has_focus():
             amount.set_value_no_signal(finite)
         card["infinity"].visible = unlimited
+        amount.visible = not unlimited
         _disclosure_title(card, card["title"].trim_prefix("BUILD ").capitalize() + (" (%d)" % count if count > 0 else ""))
         card["button"].tooltip_text = _cost_text(ECONOMY._cost(kind, 1)) + " · %.0f population" % float(ECONOMY.CREW_COSTS[kind])
         var requirements: PackedStringArray = []

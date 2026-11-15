@@ -2,7 +2,23 @@ extends SceneTree
 const MAP = preload("res://scripts/planet_map.gd")
 const ECON = preload("res://scripts/economy_rules.gd")
 
+func _test_maintain_targets() -> void:
+    var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1])
+    var p: Dictionary = state["planets"][0]
+    assert(ECON.origin_count(state, 0, "fighter") == 2)
+    assert(not ECON.set_maintain(state, 2, 0, "fighter", 3))
+    assert(ECON.set_maintain(state, 1, 0, "fighter", 3))
+    ECON._refill_continuous(state, 0, p)
+    assert(p["queue"].size() == 1)
+    ECON._refill_continuous(state, 0, p)
+    assert(p["queue"].size() == 1)
+    assert(ECON.set_continuous(state, 1, 0, "fighter", true))
+    assert(int(p["maintain"]["fighter"]) == 3)
+    assert(ECON.set_maintain(state, 1, 0, "fighter", 2))
+    assert(not bool(p["continuous"]["fighter"]))
+
 func _initialize() -> void:
+    _test_maintain_targets()
     var graph: Dictionary = MAP.generate(2468)
     assert(graph == MAP.generate(2468))
     assert(graph != MAP.generate(2469))
