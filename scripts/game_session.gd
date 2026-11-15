@@ -12,7 +12,8 @@ signal economy_changed
 const RULES = preload("res://scripts/lobby_rules.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
-const SIM_STEP: float = 0.5
+const SIM_STEP: float = 0.1
+const SNAPSHOT_INTERVAL: float = 0.2
 const PORT: int = 24567
 const MAX_CHAT: int = 250
 const CHAT_HISTORY: int = 100
@@ -31,6 +32,7 @@ var round_id: int = 0
 var loaded: Dictionary = {}
 var load_timer: Timer
 var economy_timer: Timer
+var snapshot_elapsed: float = 0.0
 
 func _ready() -> void:
     multiplayer.peer_connected.connect(_peer_connected)
@@ -404,10 +406,11 @@ func _rpc_begin(begin_round: int, snapshot: Dictionary, map_seed: int) -> void:
 
 func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
     players = snapshot.duplicate(true)
+    snapshot_elapsed = 0.0
     economy = ECONOMY.create(MAP.generate(map_seed), players, RULES.ordered_peers(players))
     owners = ECONOMY.planet_teams(economy)
     _set_phase("match")
-    _status("Empire development sandbox. Claim adjacent neutral planets and develop your economy.")
+    _status("Empire development sandbox. Build colony ships to settle neutral planets and develop your economy.")
     if is_solo or multiplayer.is_server():
         economy_timer.start()
     roster_changed.emit()
@@ -460,26 +463,22 @@ func _back_to_lobby(snapshot: Dictionary, reason: String) -> void:
     economy_changed.emit()
     get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
 
-func request_capture(index: int) -> void:
+func request_colonize(ship_id: int, target: int) -> void:
     if phase != "match":
         return
-    if multiplayer.is_server():
-        _capture_for(1, index)
+    if is_solo or multiplayer.is_server():
+        _colonize_for(1, ship_id, target)
     else:
-        _rpc_capture.rpc_id(1, index)
+        _rpc_colonize.rpc_id(1, ship_id, target)
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_capture(index: int) -> void:
-    if not multiplayer.is_server() or phase != "match":
-        return
-    _capture_for(multiplayer.get_remote_sender_id(), index)
+func _rpc_colonize(ship_id: int, target: int) -> void:
+    if multiplayer.is_server():
+        _colonize_for(multiplayer.get_remote_sender_id(), ship_id, target)
 
-func _capture_for(id: int, index: int) -> void:
-    if not _active_player(id):
-        return
-    if ECONOMY.claim(economy, id, index):
+func _colonize_for(id: int, ship_id: int, target: int) -> void:
+    if _active_player(id) and ECONOMY.send_colony(economy, id, ship_id, target):
         _publish_economy()
-        _status("Planet %d claimed." % [index + 1])
 
 func _active_player(id: int) -> bool:
     return phase == "match" and players.has(id) and (id == 1 or multiplayer.get_peers().has(id))
@@ -539,9 +538,12 @@ func _economy_tick() -> void:
     if phase != "match" or not (is_solo or multiplayer.is_server()):
         return
     ECONOMY.step(economy, SIM_STEP)
-    _publish_economy()
+    snapshot_elapsed += SIM_STEP
+    if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
+        _publish_economy()
 
 func _publish_economy() -> void:
+    snapshot_elapsed = 0.0
     owners = ECONOMY.planet_teams(economy)
     if not is_solo:
         _rpc_economy.rpc(round_id, economy)
