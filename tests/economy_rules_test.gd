@@ -16,6 +16,12 @@ func _test_maintain_targets() -> void:
     assert(int(p["maintain"]["fighter"]) == 3)
     assert(ECON.set_maintain(state, 1, 0, "fighter", 2))
     assert(not bool(p["continuous"]["fighter"]))
+    p["home"] = false
+    p["yards"].clear()
+    assert(ECON.set_maintain(state, 1, 0, "ship", 7))
+    assert(ECON.set_maintain(state, 1, 0, "miner", 9))
+    ECON._refill_continuous(state, 0, p)
+    assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
     _test_maintain_targets()

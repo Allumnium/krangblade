@@ -104,3 +104,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate freighter compartments, perimeter indicators and habitation technology (v0.15.0).
 
 - [ ] Validate contextual construction cancellation rows (v0.15.1).
+
+- [ ] Validate maintain targets persist when production is unavailable (v0.15.2).

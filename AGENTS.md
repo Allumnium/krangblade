@@ -85,3 +85,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Habitation limits positive demographic growth independently of food, with a size-based soft capacity and three economy technology upgrades doubling capacity each. Values provisional.
 
 - Cancel buttons sit immediately to the right of active construction progress bars and are hidden when idle or on instant purchases. This supersedes earlier always-visible cancel instructions. Shipyard progress cancellation targets the displayed job.
+
+- Finite maintain targets are desired quantities and can be set independently of current build eligibility, including missing shipyards and home-system restrictions. Actual production still respects eligibility. Only explicit target changes or intentional cancellation reset targets.
