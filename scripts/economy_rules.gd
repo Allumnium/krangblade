@@ -894,6 +894,13 @@ static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> boo
     item["progress"] = float(item["progress"]) + amount
     return float(item["progress"]) >= float(item["work"]) - EPS
 
+static func shipyard_position(state: Dictionary, index: int, slot: int, elapsed: float) -> Vector2:
+    var yard: Dictionary = state["planets"][index]["yards"][slot]
+    var center: Vector2 = state["map"]["points"][index]
+    var angle: float = float(slot) * TAU / 3.0 + elapsed * 0.008
+    var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
+    return center + Vector2.from_angle(angle) * 95.0 * smoothstep(0.0, 1.0, conversion)
+
 static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictionary) -> void:
     match str(item["kind"]):
         "economy_building":
@@ -908,8 +915,13 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
             p["yards"][int(item["target"])]["level"] = int(item["level"])
             p["yards"][int(item["target"])]["hp"] = SHIP_HP * 10.0 * int(item["level"])
         "ship", "colony_ship", "fighter", "miner":
+            var launch: Vector2 = state["map"]["points"][index]
+            for slot in range(p["yards"].size()):
+                if int(p["yards"][slot]["job"]) == int(item["id"]):
+                    launch = shipyard_position(state, index, slot, float(state["elapsed"]))
+                    break
             state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
-                "position": state["map"]["points"][index], "heading": Vector2.UP, "navigation_target": state["map"]["points"][index],
+                "position": launch, "heading": Vector2.UP, "navigation_target": state["map"]["points"][index],
                 "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
     p["queue"].erase(item)
 
@@ -1784,6 +1796,18 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
         if not cells.has(cell):
             cells[cell] = []
         cells[cell].append(ship)
+    var yard_targets: Dictionary = {}
+    for index in range(state["planets"].size()):
+        var system: Dictionary = state["planets"][index]
+        for slot in range(system["yards"].size()):
+            var target_id: int = -2 - index * 3 - slot
+            var pos: Vector2 = shipyard_position(state, index, slot, float(state["elapsed"]))
+            yard_targets[target_id] = Vector2i(index, slot)
+            positions[target_id] = pos
+            var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+            if not cells.has(cell):
+                cells[cell] = []
+            cells[cell].append({"id": target_id, "owner": system["owner"], "kind": "shipyard"})
     var damage: Dictionary = {}
     for ship in ships:
         if ship.get("kind", "") != "fighter":
@@ -1822,6 +1846,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
                     if int(state["teams"].get(int(other["owner"]), 0)) == team or team == 0:
                         continue
                     var other_id: int = int(other["id"])
+                    if other_id < 0:
+                        continue
                     var distance: float = pos.distance_squared_to(positions[other_id])
                     if blocked.has(other_id) and _fleeing(other, positions[other_id] - pos, int(previous_targets[other_id])):
                         continue
@@ -1853,6 +1879,24 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
             cooldown = 1.0
             ship["laser_until"] = float(state["elapsed"]) + 0.2
         ship["laser_cooldown"] = cooldown
+        ship["yard_target"] = -1
+        if target < 0 and pursuit < 0:
+            var nearest: float = LASER_RANGE * LASER_RANGE
+            for x in range(-1, 2):
+                for y in range(-1, 2):
+                    for other in cells.get(cell + Vector2i(x, y), []):
+                        var yard_id: int = int(other["id"])
+                        if yard_id >= 0 or team == 0 or int(state["teams"].get(int(other["owner"]), 0)) == team:
+                            continue
+                        var distance: float = pos.distance_squared_to(positions[yard_id])
+                        if distance < nearest:
+                            nearest = distance
+                            ship["yard_target"] = yard_id
+            var yard_id: int = int(ship["yard_target"])
+            if yard_id < -1 and cooldown <= EPS:
+                damage[yard_id] = float(damage.get(yard_id, 0.0)) + LASER_DAMAGE
+                ship["laser_cooldown"] = 1.0
+                ship["yard_laser_until"] = float(state["elapsed"]) + 0.2
     # Planets are visual orbits around a shared authoritative system waypoint.
     # Use that waypoint for range; each installed battery fires independently.
     for index in range((state["planets"] as Array).size()):
@@ -1873,6 +1917,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
                     if int(state["teams"].get(int(other["owner"]), 0)) == team:
                         continue
                     var other_id: int = int(other["id"])
+                    if other_id < 0:
+                        continue
                     var distance: float = origin.distance_squared_to(positions[other_id])
                     if distance < best or (distance <= best and (target < 0 or other_id < target)):
                         target = other_id
@@ -1893,6 +1939,30 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
             ship["hp"] = maxf(0.0, float(ship.get("hp", SHIP_HP)) - float(damage[id]))
             if float(ship["hp"]) <= EPS:
                 ships.erase(ship)
+    # Remove in reverse slot order to preserve indices during compaction.
+    var destroyed: Array[int] = []
+    for id in yard_targets:
+        if not damage.has(id):
+            continue
+        var location: Vector2i = yard_targets[id]
+        var yard: Dictionary = state["planets"][location.x]["yards"][location.y]
+        yard["hp"] = maxf(0.0, float(yard.get("hp", SHIP_HP * 10.0 * int(yard["level"]))) - float(damage[id]))
+        if float(yard["hp"]) <= EPS:
+            destroyed.append(id)
+    destroyed.sort()
+    for id in destroyed:
+        var location: Vector2i = yard_targets[id]
+        var planet: Dictionary = state["planets"][location.x]
+        var job_id: int = int(planet["yards"][location.y]["job"])
+        for item in planet["queue"].duplicate():
+            if int(item["id"]) == job_id or (item["kind"] == "yard_upgrade" and int(item["target"]) == location.y):
+                planet["queue"].erase(item)
+            elif item["kind"] == "yard_upgrade" and int(item["target"]) > location.y:
+                item["target"] = str(int(item["target"]) - 1)
+        planet["yards"].remove_at(location.y)
+        _compact_shipyard_orders(planet, location.y + 1)
+        for slot in range(3):
+            planet["continuous"].erase("yard_upgrade:%d" % slot)
 
 static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, reserved: Dictionary) -> int:
     var points: Array = state["map"]["points"]

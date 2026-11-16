@@ -127,7 +127,7 @@ class TradeRange extends Control:
     var export_enabled: bool = true
     var active_handle: int = -1
     const PAD: float = 10.0
-    const TRACK_Y: float = 38.0
+    const TRACK_Y: float = 14.0
 
     func set_range(minimum: float, maximum: float) -> void:
         active_handle = -1
@@ -152,8 +152,7 @@ class TradeRange extends Control:
         var high_color := Color("#e9a276") if enabled else Color("#667687")
         var left: String = "Import < %d%%" % roundi(lower)
         var right: String = "Export > %d%%" % roundi(upper)
-        draw_string(font, Vector2(PAD, 17), left, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, low_color)
-        draw_string(font, Vector2(size.x - PAD - font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, 17), right, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, high_color)
+
         var lo := Vector2(_x(lower), TRACK_Y)
         var hi := Vector2(_x(upper), TRACK_Y)
         draw_line(Vector2(PAD, TRACK_Y), Vector2(size.x - PAD, TRACK_Y), Color("#344960"), 5.0, true)
@@ -411,7 +410,7 @@ func _build_ui() -> void:
         trade_row.add_child(stock_label)
         trade_stock_labels[resource] = stock_label
         var slider := TradeRange.new()
-        slider.custom_minimum_size.y = 56
+        slider.custom_minimum_size.y = 28
         slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f t." % ECONOMY.TRADE_REFERENCE
         slider.committed.connect(_apply_thresholds.bind(resource))
@@ -419,6 +418,7 @@ func _build_ui() -> void:
         trade_sliders[resource] = slider
         var switches := HBoxContainer.new()
         logistics.add_child(switches)
+        logistics.move_child(switches, slider.get_index())
         var incoming := CheckBox.new()
         incoming.text = "Import"
         incoming.button_pressed = true
@@ -426,6 +426,8 @@ func _build_ui() -> void:
         var outgoing := CheckBox.new()
         outgoing.text = "Export"
         outgoing.button_pressed = true
+        incoming.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        outgoing.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         switches.add_child(outgoing)
         trade_checks[resource] = [incoming, outgoing]
         incoming.toggled.connect(_trade_toggle.bind(resource))
@@ -1752,6 +1754,8 @@ func _update_trade_stock(p: Dictionary) -> void:
             slider.export_enabled = bool(t.get("export", true))
             trade_checks[resource][0].set_pressed_no_signal(slider.import_enabled)
             trade_checks[resource][1].set_pressed_no_signal(slider.export_enabled)
+            trade_checks[resource][0].text = "Import %d%%" % roundi(float(t["min"]))
+            trade_checks[resource][1].text = "Export %d%%" % roundi(float(t["max"]))
             slider.queue_redraw()
             if not is_equal_approx(slider.lower, float(t["min"])) or not is_equal_approx(slider.upper, float(t["max"])):
                 slider.set_range(float(t["min"]), float(t["max"]))
@@ -1832,6 +1836,9 @@ func _refresh() -> void:
     colony_button.disabled = not owned
     for slider in trade_sliders.values():
         slider.enabled = owned
+        for resource in trade_checks:
+            for check in trade_checks[resource]:
+                check.disabled = not owned
         if not owned:
             slider.active_handle = -1
         slider.queue_redraw()
@@ -2735,17 +2742,17 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
                     var tip: Vector2 = base + axis * float(j * 5)
                     map_canvas.draw_polyline(PackedVector2Array([tip - axis * 4.0 + normal * 3.0, tip, tip - axis * 4.0 - normal * 3.0]), HUD.COLORS[resource], 1.5, true)
 
-func _draw_shipyards(planet: Dictionary, center: Vector2, radius: float, tint: Color, elapsed: float) -> void:
+func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
+    var planet: Dictionary = state["planets"][index]
+    var center: Vector2 = _screen_point(state["map"]["points"][index])
     var scale: float = _ship_scale()
     for slot in range(planet["yards"].size()):
         var yard: Dictionary = planet["yards"][slot]
         var angle: float = float(slot) * TAU / 3.0 + elapsed * 0.008
         var axis: Vector2 = Vector2.from_angle(angle)
         var side: Vector2 = axis.orthogonal()
-        var point: Vector2 = center + axis * (radius + 22.0 * scale)
+        var point: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
         var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
-        if conversion < 1.0:
-            point = center.lerp(point, smoothstep(0.0, 1.0, conversion))
         var frame: PackedVector2Array = PackedVector2Array([point - axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale + side * 17.0 * scale, point - axis * 11.0 * scale + side * 17.0 * scale])
         if conversion < 1.0:
             var heading: Vector2 = yard.get("colony_heading", Vector2.UP)
@@ -2759,6 +2766,10 @@ func _draw_shipyards(planet: Dictionary, center: Vector2, radius: float, tint: C
         for k in [-1.0, 1.0]:
             var rail: Vector2 = point + axis * k * 11.0 * scale
             map_canvas.draw_line(rail - side * 17.0 * scale, rail + side * 17.0 * scale, Color(Color("#8da2b6"), conversion), 4.0 * scale, true)
+        var health: float = float(yard.get("hp", ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))) / (ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))
+        if health < 0.999:
+            map_canvas.draw_rect(Rect2(point + Vector2(-12, -22) * scale, Vector2(24, 3) * scale), Color("#283748"))
+            map_canvas.draw_rect(Rect2(point + Vector2(-12, -22) * scale, Vector2(24 * health, 3) * scale), tint)
         for job in planet["queue"]:
             if int(job["id"]) != int(yard["job"]) or not ECONOMY.SHIP_KINDS.has(job["kind"]):
                 continue
@@ -2845,7 +2856,7 @@ func _draw_map() -> void:
         var radius: float = _planet_radius(i, state)
         var tint: Color = _empire_color(int(state["planets"][i]["owner"]))
         _draw_system(i, state, pos, radius, tint)
-        _draw_shipyards(state["planets"][i], pos, radius, tint, float(state["elapsed"]))
+        _draw_shipyards(state, i, tint, float(state["elapsed"]))
         if i == selected and bool(state["planets"][i]["home"]):
             map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
         if i == selected:
@@ -2877,6 +2888,12 @@ func _draw_map() -> void:
     for ship in state["ships"]:
         var shooter: int = int(ship["id"])
         var target: int = int(ship.get("combat_target", -1))
+        var yard_target: int = int(ship.get("yard_target", -1))
+        if poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
+            var index: int = floori(float(-2 - yard_target) / 3.0)
+            var slot: int = posmod(-2 - yard_target, 3)
+            if index < state["planets"].size() and slot < state["planets"][index]["yards"].size():
+                map_canvas.draw_line(poses[shooter]["point"], _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), Color("#ffbf96"), 1.5, true)
         if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
             map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ff6f6060"), 4.0, true)
             map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ffbf96"), 1.0, true)

@@ -111,3 +111,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Q/E cycle previous/next owned systems in stable map-index order, wrapping around; focus camera and fit selected system in the playable map area. Ignore shortcuts while editing text or in match menu.
 
 - All discovered systems display their names even when unselected; unselected names use subdued translucent lettering, selected names remain bright. Undiscovered systems remain anonymous.
+
+- Shipyard orbits use authoritative world positions; completed hulls spawn at their assigned frame. Fighters target hostile shipyards when no ship is in range; damage accumulates and destruction removes the frame and assigned construction without refunds. Remaining slots compact. Trade checkboxes share a compact threshold row above the track.

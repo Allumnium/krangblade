@@ -122,3 +122,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate miner stand-off, extraction beams and thrust particles; profile hundreds of visible hulls (v0.16.4).
 
 - [ ] Validate colony-to-shipyard conversion, revised recipe and orbital morph (v0.16.5).
+
+- [ ] Validate shipyard combat/destruction and launch positions, compact trade toggles and latest HUD changes (v0.16.9).
