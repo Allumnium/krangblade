@@ -11,6 +11,7 @@ var ready_sent: bool = false
 var color_requested: bool = false
 var expected_color: int = 0
 var economy_verified: bool = false
+var observed_commands: Dictionary = {}
 var home_index: int = -1
 var cancel_id: int = -1
 var cancel_sent: bool = false
@@ -347,7 +348,48 @@ func _check_economy_sync() -> void:
             var pds_jobs: Array = system["queue"].filter(func(order: Dictionary) -> bool: return order["kind"] == "pds")
             var defense_ok: bool = pds_jobs.size() == 1 and pds_jobs[0]["target"] == "0" and pds_jobs[0]["cost"] == ECON._cost("pds", 1)
             defense_ok = defense_ok or (pds_jobs.is_empty() and system.get("pds", {}).has(0) and system["pds"].size() == 1)
-            if defense_ok and correct_upgrade_costs and priced_slots.get(2, {}) == ECON._cost("yard", 2) and priced_slots.get(3, {}) == ECON._cost("yard", 3) and int(system.get("warehouse_level", 0)) == 1 and buildings.size() == 1 and buildings.get("Textiles", false) and int(military.get(field_node, 0)) == 70 and int(military.get(ECON.military_home(state, owner), 0)) == 30 and is_equal_approx(float(thresholds["min"]), 15.0) and is_equal_approx(float(thresholds["max"]), 65.0) and flags.get("production:Organics", false) and flags.get("yard_upgrade:0", false) and flags.get("colony_ship", false) and flags.get("miner", false) and repeat_colony and repeat_miner and upgrade_pending and yard_pending and not fighter_pending and ship_progress and ECON.shipyard_count(system) == 3 and policy["enabled"] and not policy["Metals"] and policy["Crystals"]:
+            # Commands complete at different times on different systems. Record
+            # each replicated condition when observed, rather than requiring
+            # every transient queue state to coexist in one snapshot.
+            var checks: Dictionary = {
+                "0": defense_ok,
+                "1": correct_upgrade_costs,
+                "2": priced_slots.get(2, {}) == ECON._cost("yard", 2),
+                "3": priced_slots.get(3, {}) == ECON._cost("yard", 3),
+                "4": int(system.get("warehouse_level", 0)) == 1,
+                "5": buildings.size() == 1,
+                "6": buildings.get("Textiles", false),
+                "7": int(military.get(field_node, 0)) == 70,
+                "8": int(military.get(ECON.military_home(state, owner), 0)) == 30,
+                "9": is_equal_approx(float(thresholds["min"]), 15.0),
+                "10": is_equal_approx(float(thresholds["max"]), 65.0),
+                "11": flags.get("production:Organics", false),
+                "12": flags.get("yard_upgrade:0", false),
+                "13": flags.get("colony_ship", false),
+                "14": flags.get("miner", false),
+                "15": repeat_colony,
+                "16": repeat_miner,
+                "17": upgrade_pending,
+                "18": yard_pending,
+                "19": not fighter_pending,
+                "20": ship_progress,
+                "21": ECON.shipyard_count(system) == 3,
+                "22": policy["enabled"],
+                "23": not policy["Metals"],
+                "24": policy["Crystals"]
+            }
+            var observed: Dictionary = observed_commands.get(owner, {})
+            for check in checks:
+                if checks[check]:
+                    observed[check] = true
+            observed_commands[owner] = observed
+            if role == "host" and float(state["elapsed"]) >= next_diagnostic:
+                var missing: Array = []
+                for check in checks:
+                    if not observed.has(check):
+                        missing.append(check)
+                print("DEBUG: owner=", owner, " missing checks=", missing, " population=", system["population"])
+            if observed.size() == checks.size() and not fighter_pending and correct_upgrade_costs and ECON.shipyard_count(system) == 3:
                 verified += 1
         if role == "host" and float(state["elapsed"]) >= next_diagnostic:
             next_diagnostic = float(state["elapsed"]) + 10.0
