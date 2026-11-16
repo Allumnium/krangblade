@@ -129,3 +129,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate v0.16.17 local UI scaling, saved audio settings, economy card consistency, neutral trade sliders and sequential shipyard row visibility.
 
 - [ ] Manually validate map interactions, economy panels, shipyard visibility and settings; detailed automated UI assertions retired by explicit project decision in v0.16.20. Maintain gameplay coverage through authoritative rules and session tests.
+
+- v0.16.21: shared authoritative cohort dispatch for human and AI rally, reinforcement and routing; existing AI exclusive-wave and human multi-cohort behavior retained. Full operation ownership and policy integration remain outstanding; validation pending.

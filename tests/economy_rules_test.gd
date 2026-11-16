@@ -863,6 +863,7 @@ func _initialize() -> void:
     wave_fleet.append({"id": 103, "owner": 2, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": ai_map["points"][1], "dest": -1})
     ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
     assert(wave_fleet[3]["dest"] == 1 and wave_state["ai_waves"][2]["members"].size() == 3)
+    assert(int(wave_state["ai_waves"][2]["target"]) == 2)
     for i in range(3):
         ECON._move({"map": wave_graph}, wave_fleet[i], 100.0)
     ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
