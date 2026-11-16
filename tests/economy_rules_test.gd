@@ -24,6 +24,8 @@ func _test_maintain_targets() -> void:
     assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
+    assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
+    assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
     var bounds: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1])
     var world: Dictionary = bounds["planets"][0]
     world["abundance"]["Metals"] = 0.1

@@ -384,7 +384,7 @@ static func population_capacity(planet: Dictionary) -> float:
     return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
 
 static func habitation_capacity(planet: Dictionary) -> float:
-    return 10000000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0)))
+    return 5000000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0)))
 
 static func population_multiplier(planet: Dictionary) -> float:
     return float(planet["population"]) / HOME_POPULATION

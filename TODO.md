@@ -147,3 +147,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.16.30: persistent AI attack operation ID survives regrouping and subsequent launches; reserve group remains separate. Validation pending. Unified command model and policy integration remain outstanding.
 
 - [ ] Verify v0.16.31 construction card sizing, inline progress and economy automation, including multiplayer command validation and manual UI inspection.
+
+- v0.16.32: baseline housing growth ceiling reduced to 5 million at normal system size; retain size scaling and doubling per habitation upgrade. Playtest demographic pacing.
