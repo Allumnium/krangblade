@@ -732,7 +732,7 @@ static func origin_count(state: Dictionary, index: int, kind: String) -> int:
 
 static func set_maintain(state: Dictionary, player: int, index: int, kind: String, amount: int) -> bool:
     var p: Dictionary = _get_owned(state, player, index)
-    if p.is_empty() or not SHIP_KINDS.has(kind) or _continuous_target(p, kind).is_empty() or amount < 0 or amount > 9999:
+    if p.is_empty() or not SHIP_KINDS.has(kind) or amount < 0 or amount > 9999:
         return false
     if not p.has("maintain"):
         p["maintain"] = {}

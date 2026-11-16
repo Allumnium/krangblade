@@ -163,3 +163,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.15.0: provisional habitation starting capacity 10M × system size factor, three doubling upgrades with tripling recipes. Food equilibrium remains separate. Check pacing and visual density of perimeter indicators.
 
 - v0.15.1 moves cancellation beside active progress, including shipyard assignments; verify visual layout and matching job refunds.
+
+- v0.15.2 removes current construction eligibility from finite target validation. Existing queue scheduling still enforces eligibility; test unavailable shipyards and non-home logistics targets.
