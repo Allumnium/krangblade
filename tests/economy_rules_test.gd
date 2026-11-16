@@ -867,6 +867,7 @@ func _initialize() -> void:
     wave_state["ships"] = wave_fleet
     ECON._sync_operations(wave_state)
     var wave_id: int = int(wave_state["operations"]["2:wave:2"]["id"])
+    assert(wave_id == int(wave_state["ai_waves"][2]["operation_id"]))
     var saved_dest: int = int(wave_fleet[0]["dest"])
     wave_fleet[0]["dest"] = 1
     wave_fleet[0]["retreating"] = true
@@ -882,6 +883,13 @@ func _initialize() -> void:
     assert(wave_state["ai_waves"][2]["members"].is_empty())
     for craft in wave_fleet:
         assert(craft["dest"] == 1)
+    ECON._sync_operations(wave_state)
+    assert(int(wave_state["ai_waves"][2]["operation_id"]) == wave_id)
+    for craft in wave_fleet:
+        ECON._move({"map": wave_graph}, craft, 100.0)
+    ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
+    ECON._sync_operations(wave_state)
+    assert(int(wave_state["operations"]["2:wave:2"]["id"]) == wave_id)
     var ai_state: Dictionary = ECON.create(ai_map, ai_roster, ids, false)
     var saw_attack: bool = false
     var saw_logistics: bool = false

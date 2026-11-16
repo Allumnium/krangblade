@@ -227,3 +227,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.28 replaces routine eight-peer ENet with three peers while retaining the eight-peer scenario on manual workflow dispatch. This reduces concurrent peer load but does not prove eight-player scalability on every PR.
 
 - v0.16.29 fixes AI operation fragmentation when a member temporarily changes destination. Wave completion and regroup policy are unchanged; test covers retreat snapshot identity. Validation pending.
+
+- v0.16.30 retains AI attack operation identity across successive cohorts without changing wave size or strategy. Regression exercises completion, return and relaunch. Formation slot continuity across an entirely empty wave is not guaranteed.
