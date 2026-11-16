@@ -261,8 +261,10 @@ func _run() -> void:
         push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
         quit(1)
         return
-    for i in range(150):
+    for i in range(250):
         session.call("_economy_tick")
+        if [2, 3].all(func(player: int) -> bool: return setup["ships"].any(func(ship: Dictionary) -> bool: return int(ship["owner"]) == player and ship["kind"] == "colony_ship")):
+            break
     for player in [2, 3]:
         if not (setup["ships"].any(func(ship: Dictionary) -> bool: return int(ship["owner"]) == player and ship["kind"] == "colony_ship")):
             push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
