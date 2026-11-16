@@ -155,3 +155,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.16.34: logistics crews 2,000, mining crews 750, fighters 500, colony settlers 100,000; assess early economic and AI pacing.
 
 - [ ] Raiding: small fighter cargo inventory, recover hostile cargo and deliver to owned systems. Escort: bounded civilian convoy waiting and fighter escort. Expansion: automatic neutral settlement without flags. Public policy/warmup visibility for warning; future diplomacy uses unique card instances.
+
+- v0.17.0 policy foundation: replicated optional slots, unique card IDs, locked wildcard, warmup timestamps, validated friendly/hostile targets and normalized weight command. UI, actual fleet dispatch, research and economy effects remain separate follow-ups.

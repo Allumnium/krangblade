@@ -169,6 +169,9 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
                 var id: int = int(state["next_id"])
                 state["next_id"] = id + 1
                 _finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind]})
+    state["policies"] = {}
+    for player in ordered:
+        state["policies"][player] = {}
     update_exploration(state)
     return state
 
@@ -2665,3 +2668,88 @@ static func step(state: Dictionary, dt: float) -> void:
             _navigate(ship, station, SHIP_SPEED * dt)
     _sync_operations(state)
     update_exploration(state)
+
+# Policy card identity is the pair (empire, definition ID); slots never duplicate cards.
+const POLICY_SLOTS = ["offense", "defense", "economy", "technology", "wildcard"]
+const POLICY_CARDS = {
+    "invasion": {"slot": "offense", "name": "Invasion", "warmup": 20.0, "military": true, "target": "hostile"},
+    "guard": {"slot": "defense", "name": "Guard", "warmup": 0.0, "military": true, "target": "friendly"},
+    "expansion": {"slot": "economy", "name": "Expansion", "warmup": 0.0},
+    "military_research": {"slot": "technology", "name": "Military research", "warmup": 0.0}
+}
+
+static func policy_eligible(state: Dictionary, player: int, slot: String, card: String) -> bool:
+    if not state.get("policies", {}).has(player) or not POLICY_SLOTS.has(slot):
+        return false
+    if slot == "wildcard" and not state.get("unlocks", {}).get(player, {}).get("communications", false):
+        return false
+    if card.is_empty():
+        return true
+    var definition: Dictionary = POLICY_CARDS.get(card, {})
+    if definition.is_empty() or (slot != "wildcard" and definition["slot"] != slot):
+        return false
+    var equipped: Dictionary = state["policies"][player]
+    for other in equipped:
+        if other != slot and equipped[other]["card"] == card:
+            return false
+    return true
+
+static func equip_policy(state: Dictionary, player: int, slot: String, card: String) -> bool:
+    if not policy_eligible(state, player, slot, card):
+        return false
+    var equipped: Dictionary = state["policies"][player]
+    if equipped.get(slot, {}).get("card", "") == card:
+        return false
+    if card.is_empty():
+        equipped.erase(slot)
+    else:
+        equipped[slot] = {"card": card, "ready_at": float(state["elapsed"]) + float(POLICY_CARDS[card]["warmup"]), "targets": [], "weight": 100}
+    return true
+
+static func policy_active(state: Dictionary, entry: Dictionary) -> bool:
+    return not entry.is_empty() and float(state["elapsed"]) >= float(entry["ready_at"])
+
+static func policy_target_valid(state: Dictionary, player: int, card: String, node: int) -> bool:
+    if not discovered(state, player, "planets", node):
+        return false
+    var owner: int = int(state["planets"][node]["owner"])
+    var friendly: bool = owner != 0 and state["teams"].get(owner, -1) == state["teams"].get(player, 0)
+    match POLICY_CARDS.get(card, {}).get("target", ""):
+        "hostile": return owner != 0 and not friendly
+        "friendly": return friendly
+    return false
+
+static func set_policy_target(state: Dictionary, player: int, slot: String, node: int, enabled: bool) -> bool:
+    var entry: Dictionary = state.get("policies", {}).get(player, {}).get(slot, {})
+    if entry.is_empty() or (enabled and not policy_target_valid(state, player, entry["card"], node)):
+        return false
+    var targets: Array = entry["targets"]
+    if enabled and not targets.has(node):
+        targets.append(node)
+        return true
+    if not enabled and targets.has(node):
+        targets.erase(node)
+        return true
+    return false
+
+static func set_policy_weight(state: Dictionary, player: int, slot: String, percent: int) -> bool:
+    var equipped: Dictionary = state.get("policies", {}).get(player, {})
+    if not equipped.has(slot) or not POLICY_CARDS[equipped[slot]["card"]].get("military", false) or percent < 0 or percent > 100:
+        return false
+    var weights: Dictionary = {}
+    for key in POLICY_SLOTS:
+        if equipped.has(key) and POLICY_CARDS[equipped[key]["card"]].get("military", false):
+            weights[POLICY_SLOTS.find(key)] = int(equipped[key]["weight"])
+    var index: int = POLICY_SLOTS.find(slot)
+    if weights.size() == 1:
+        equipped[slot]["weight"] = 100
+        return true
+    var fallback: int = index
+    for key in weights:
+        if key != index:
+            fallback = key
+            break
+    weights = change_military_weights(weights, fallback, index, percent)
+    for key in weights:
+        equipped[POLICY_SLOTS[key]]["weight"] = weights[key]
+    return true

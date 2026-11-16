@@ -234,6 +234,9 @@ func _check_time_controls(state: Dictionary) -> bool:
 
 func _send_commands() -> void:
     commands_sent = true
+    session.call("request_policy", "defense", "guard")
+    session.call("request_policy_target", "defense", home_index, true)
+    session.call("request_policy", "wildcard", "guard")
     session.call("request_thresholds", home_index, "Metals", 15.0, 65.0)
     # Invalid and unauthorized threshold requests must not win.
     session.call("request_thresholds", home_index, "Metals", 99.0, 101.0)
@@ -351,7 +354,9 @@ func _check_economy_sync() -> void:
             # Commands complete at different times on different systems. Record
             # each replicated condition when observed, rather than requiring
             # every transient queue state to coexist in one snapshot.
+            var equipped: Dictionary = state.get("policies", {}).get(owner, {})
             var checks: Dictionary = {
+                "policy": equipped.get("defense", {}).get("card", "") == "guard" and equipped.get("defense", {}).get("targets", []).has(state["planets"].find(system)) and not equipped.has("wildcard"),
                 "0": defense_ok,
                 "1": correct_upgrade_costs,
                 "2": priced_slots.get(2, {}) == ECON._cost("yard", 2),
