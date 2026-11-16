@@ -249,3 +249,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.0: initial policy definitions are intentionally inert with respect to fleet dispatch and economic output until the interface and behavior are wired. Warmup uses simulation elapsed time. Validate normalization upon equip/remove and invalidate targets during ownership changes in the integration stage.
 
 - v0.17.1: card strip uses clipped bottom-edge buttons and a modal drop target with click fallback. Verify scaling, keyboard focus, right-panel overlap and drag experience manually. Policy allocation currently remains separate from fleet orders.
+
+- v0.17.2: warming/targetless military policy shares rally at home; manual POI allocation retained when no military card is equipped. Existing allocator rounds target percentages before ship quotas; inspect small fleet rounding and overlapping targets. AI retains legacy orders.

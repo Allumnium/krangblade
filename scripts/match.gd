@@ -3218,6 +3218,7 @@ func _open_policy_catalog(slot: String) -> void:
 func _equip_selected_policy(card: String) -> void:
     session.call("request_policy", policy_choice_slot, card)
     policy_modal.hide()
+    policy_selected = ""
     _inspect_policy(policy_choice_slot)
 
 func _inspect_policy(slot: String) -> void:

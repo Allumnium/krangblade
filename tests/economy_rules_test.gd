@@ -1444,6 +1444,7 @@ func _test_policy_cards() -> void:
     assert(ECON.equip_policy(state, 1, "offense", "invasion"))
     var entry: Dictionary = state["policies"][1]["offense"]
     assert(not ECON.policy_active(state, entry))
+    assert(ECON.policy_fleet_weights(state, 1).get(0, 0) == 100)
     assert(not ECON.set_policy_target(state, 1, "offense", 0, true))
     assert(ECON.set_policy_target(state, 1, "offense", 1, true))
     state["elapsed"] = 20.0
@@ -1451,6 +1452,8 @@ func _test_policy_cards() -> void:
     assert(ECON.equip_policy(state, 1, "defense", "guard"))
     assert(ECON.set_policy_weight(state, 1, "offense", 70))
     assert(state["policies"][1]["defense"]["weight"] == 30)
+    assert(ECON.set_policy_target(state, 1, "defense", 0, true))
+    assert(ECON.policy_fleet_weights(state, 1) == {0: 30, 1: 70})
     assert(ECON.equip_policy(state, 1, "offense", ""))
     assert(ECON.equip_policy(state, 1, "offense", "invasion"))
     assert(state["policies"][1]["offense"]["targets"].is_empty())

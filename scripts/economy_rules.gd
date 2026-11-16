@@ -1659,7 +1659,9 @@ static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, 
     ship["dest"] = target
 
 static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array, defer_routes: bool = false) -> void:
-    var weights: Dictionary = military_policy(state, player, "fighter")
+    var weights: Dictionary = policy_fleet_weights(state, player)
+    if weights.is_empty():
+        weights = military_policy(state, player, "fighter")
     var counts: Dictionary = _apportion(weights.keys(), weights, fleet.size())
     var actual: Dictionary = {}
     for ship in fleet:
@@ -2594,6 +2596,11 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
+    for player in state.get("policies", {}):
+        for entry in state["policies"][player].values():
+            for node in entry["targets"].duplicate():
+                if not policy_target_valid(state, int(player), entry["card"], int(node)):
+                    entry["targets"].erase(node)
     for i in range((state["planets"] as Array).size()):
         _work_planet(state, i, dt)
     var teams: Array[int] = planet_teams(state)
@@ -2704,6 +2711,7 @@ static func equip_policy(state: Dictionary, player: int, slot: String, card: Str
         equipped.erase(slot)
     else:
         equipped[slot] = {"card": card, "ready_at": float(state["elapsed"]) + float(POLICY_CARDS[card]["warmup"]), "targets": [], "weight": 100}
+    normalize_policy_weights(equipped)
     return true
 
 static func policy_active(state: Dictionary, entry: Dictionary) -> bool:
@@ -2753,3 +2761,43 @@ static func set_policy_weight(state: Dictionary, player: int, slot: String, perc
     for key in weights:
         equipped[POLICY_SLOTS[key]]["weight"] = weights[key]
     return true
+
+static func normalize_policy_weights(equipped: Dictionary) -> void:
+    var weights: Dictionary = {}
+    for slot in POLICY_SLOTS:
+        if equipped.has(slot) and POLICY_CARDS[equipped[slot]["card"]].get("military", false):
+            weights[slot] = int(equipped[slot]["weight"])
+    if weights.is_empty():
+        return
+    if weights.values().max() == 0:
+        for slot in weights:
+            weights[slot] = 1
+    var normalized: Dictionary = _apportion(weights.keys(), weights, 100)
+    for slot in normalized:
+        equipped[slot]["weight"] = normalized[slot]
+
+# Preserve manual orders for empires without military cards. Preparing or
+# targetless cards hold their forces at home until an objective becomes valid.
+static func policy_fleet_weights(state: Dictionary, player: int) -> Dictionary:
+    var result: Dictionary = {}
+    var home: int = military_home(state, player)
+    for entry in state.get("policies", {}).get(player, {}).values():
+        if not POLICY_CARDS[entry["card"]].get("military", false):
+            continue
+        var weight: int = int(entry["weight"])
+        var targets: Array = []
+        if policy_active(state, entry):
+            for node in entry["targets"]:
+                if policy_target_valid(state, player, entry["card"], int(node)):
+                    targets.append(node)
+        if targets.is_empty():
+            if home >= 0:
+                result[home] = int(result.get(home, 0)) + weight
+            continue
+        var equal: Dictionary = {}
+        for node in targets:
+            equal[node] = 1
+        var shares: Dictionary = _apportion(targets, equal, weight)
+        for node in shares:
+            result[node] = int(result.get(node, 0)) + int(shares[node])
+    return result
