@@ -3,6 +3,7 @@
 Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current repository state, and outstanding pull requests at the beginning of every Warbound development chat/session. Later explicit user directions take precedence over these notes and older README sections.
 
 ## Workflow
+- Apply the `skip-ci-docs` PR label for documentation-only changes to README.md, AGENTS.md, TODO.md, THOUGHTS.md or THOUGHTS_ARCHIVE.md. CI verifies the entire diff is limited to these files and the mandatory version-only bump in project.godot; any other change runs full validation. The required `validate` check and version checks are never skipped. Do not use commit-message CI skip directives.
 - Default to GitHub auto-merge for completed, non-draft PRs after work is finished, only when the aggregate validate check is required on main and repository auto-merge is enabled. Preserve versioned squash titles. Otherwise merge directly after verifying all checks passed; never bypass validation. Report configuration blockers.
 - Every Warbound project conversation is a development-enabled session. Use the GitHub connector directly; discover and attempt its tools before claiming a limitation. Never ask the user to switch sessions merely to access the repository.
 - The game is **Warbound**. The repository is Allumnium/krangblade; the integration branch is main.

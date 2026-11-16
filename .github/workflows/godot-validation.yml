@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
 
 concurrency:
@@ -11,7 +12,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  core:
+  gate:
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -56,6 +59,43 @@ jobs:
                   prior = next_version
           print("Verified version:", current)
           PY
+      - name: Verify documentation-only scope
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'skip-ci-docs') }}
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          def git(*args):
+              return subprocess.check_output(["git", *args])
+          base, head = os.environ["BASE"], os.environ["HEAD"]
+          eligible = False
+          # Only explicitly labeled PRs qualify. Main pushes and manual runs
+          # continue to run every test.
+          if os.environ["EVENT"] == "pull_request" and os.environ["LABEL"] == "true":
+              base = git("merge-base", base, head).decode().strip()
+              paths = git("diff", "--name-only", "--no-renames", "-z", base, head).decode().split("\\0")
+              paths = [p for p in paths if p]
+              docs = {"README.md", "AGENTS.md", "TODO.md", "THOUGHTS.md", "THOUGHTS_ARCHIVE.md"}
+              eligible = bool(set(paths) & docs) and set(paths) <= docs | {"project.godot"}
+              if eligible and "project.godot" in paths:
+                  def without_version(ref):
+                      return re.sub(rb'^config/version="[^"]+"$', b'config/version="VERSION"', git("show", ref + ":project.godot"), flags=re.M)
+                  eligible = without_version(base) == without_version(head)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print("docs_only=" + str(eligible).lower(), file=output)
+          print("Documentation-only shortcut:", eligible)
+          PY
+  core:
+    needs: gate
+    if: needs.gate.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
       - uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.7.2
@@ -91,6 +131,8 @@ jobs:
       - name: Startup smoke test
         run: godot --headless --path . --quit-after 3
   network:
+    needs: gate
+    if: needs.gate.outputs.docs_only != 'true'
     name: ENet ${{ matrix.count }} players / ${{ matrix.mode }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -154,17 +196,24 @@ jobs:
           }
           run_case "$PLAYER_COUNT" "$CASE_MODE"
 
-  # Keep the existing aggregate check name. A skipped, cancelled or failed
-  # prerequisite cannot produce a successful validation result.
+  # Keep the aggregate check required. Only the verified docs gate may skip tests.
   validate:
     runs-on: ubuntu-latest
-    needs: [core, network]
+    needs: [gate, core, network]
     if: ${{ always() }}
     steps:
       - name: Require every validation job to pass
         env:
+          GATE: ${{ needs.gate.result }}
+          DOCS: ${{ needs.gate.outputs.docs_only }}
           CORE: ${{ needs.core.result }}
           NETWORK: ${{ needs.network.result }}
         run: |
-          test "$CORE" = success
-          test "$NETWORK" = success
+          test "$GATE" = success
+          if [ "$DOCS" = true ]; then
+            test "$CORE" = skipped
+            test "$NETWORK" = skipped
+          else
+            test "$CORE" = success
+            test "$NETWORK" = success
+          fi
