@@ -1098,6 +1098,13 @@ func _initialize() -> void:
         depot["population"] = ECON.HOME_POPULATION * 2.0
         assert(is_equal_approx(ECON.consumption(depot, resource), demand * 2.0))
         depot["population"] = ECON.HOME_POPULATION
+    for resource in ["Metals", "Plastics", "Textiles", "Organics", "Tech"]:
+        var original: Dictionary = depot["thresholds"][resource].duplicate()
+        depot["thresholds"][resource]["min"] = 0.0
+        assert(is_zero_approx(ECON.civilian_stock_access(depot, resource)))
+        depot["thresholds"][resource]["min"] = 1.0
+        assert(ECON.civilian_stock_access(depot, resource) <= 20.0 + ECON.EPS)
+        depot["thresholds"][resource] = original
     var limit: float = ECON.storage_capacity(depot)
     depot["stock"]["Metals"] = limit - 0.01
     ECON._work_planet(warehouse_state, 0, 1.0)

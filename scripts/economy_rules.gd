@@ -398,11 +398,17 @@ static func consumption(planet: Dictionary, resource: String) -> float:
         return organics_demand(planet)
     return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * population_multiplier(planet)
 
+static func civilian_stock_access(planet: Dictionary, resource: String) -> float:
+    # Stock above the import target is reserved for trade and construction.
+    var threshold: float = float(planet["thresholds"][resource]["min"])
+    var reserve: float = storage_capacity(planet) * threshold / 100.0
+    return minf(maxf(0.0, float(planet["stock"][resource])), reserve)
+
 static func net_rate(planet: Dictionary, resource: String) -> float:
     var net: float = rate(planet, resource) - consumption(planet, resource)
     if net > 0.0 and storage_free(planet, resource) <= EPS:
         return 0.0
-    if net < 0.0 and float(planet["stock"][resource]) <= EPS:
+    if net < 0.0 and civilian_stock_access(planet, resource) <= EPS:
         return 0.0
     return net
 
@@ -455,7 +461,7 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
         next = growth_ceiling
         next_velocity = growth_constant * next
     # A food shortfall prevents positive growth even with demographic momentum.
-    var food_available: float = float(planet["stock"]["Organics"]) + rate(planet, "Organics") * dt
+    var food_available: float = civilian_stock_access(planet, "Organics") + rate(planet, "Organics") * dt
     if food_available + EPS < organics_demand(planet) * dt:
         next = minf(next, current)
         next_velocity = minf(next_velocity, 0.0)
@@ -907,12 +913,11 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
         var stored: float = float(p["stock"][resource])
         var potential: float = rate(p, resource) * dt
         var demand: float = consumption(p, resource) * dt
-        var used: float = minf(demand, stored + potential)
+        var used: float = minf(demand, civilian_stock_access(p, resource) + potential)
         var produced: float = minf(potential, used + storage_free(p, resource))
         _record_flow(p, "Production", resource, produced)
         _record_flow(p, "Population", resource, used)
-        var change: float = potential - demand
-        p["stock"][resource] = maxf(0.0, stored + minf(change, storage_free(p, resource)))
+        p["stock"][resource] = maxf(0.0, stored + produced - used)
     # New yards and planetary production use infrastructure work, not an existing yard.
     for item in (p["queue"] as Array).duplicate():
         if int(item["size"]) == 0 and item["kind"] != "yard_upgrade" and _advance(p, item, dt):

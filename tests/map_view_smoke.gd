@@ -256,7 +256,7 @@ func _run() -> void:
     assert(state["planets"][0]["continuous"]["production:Organics"])
     farm_repeat.button_pressed = false
     assert(not state["planets"][0]["continuous"]["production:Organics"])
-    assert((cards["Tech"]["repeat"] as Button).disabled)
+    assert(not (cards["Tech"]["repeat"] as Button).disabled)
     assert((cards["Tech"]["button"] as Button).disabled)
     tabs.current_tab = 3
     var upgrade_audio: AudioStreamPlayer = view.get("upgrade_audio")

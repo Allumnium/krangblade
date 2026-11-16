@@ -77,3 +77,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Time controls include 10× for stress testing; the same fixed steps and host-only authority apply. Mining path trees share the local topology/team-invalidated civilian cache; dynamic cargo and depot decisions remain tick-local.
 
 - Repeat production upgrades can be armed before population or resources are sufficient, provided the system supports that resource; actual construction gates remain unchanged. Finite ship target text accepts only decimal digits; unlimited repeat remains separate.
+
+- Civilian consumption uses freshly produced resources plus at most the local import-target quantity of existing stock per simulation step, across all consumed resources. A zero import target prevents civilian inventory draws. Construction remains unrestricted by this limit.

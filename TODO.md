@@ -98,3 +98,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate 10× time controls and persistent mining route trees (v0.14.8); benchmark five-, six- and eight-player stress matches.
 
 - [ ] Validate pre-arming repeat upgrades and numeric-only ship limits (v0.14.9).
+
+- [ ] Validate civilian stock access caps for all consumed resources (v0.14.10).
