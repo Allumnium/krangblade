@@ -109,3 +109,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Segmented top-bar labels fall back from full system name to two letters, then one letter, then blank as space decreases. Single-contributor strips remain unlabeled.
 
 - Q/E cycle previous/next owned systems in stable map-index order, wrapping around; focus camera and fit selected system in the playable map area. Ignore shortcuts while editing text or in match menu.
+
+- All discovered systems display their names even when unselected; unselected names use subdued translucent lettering, selected names remain bright. Undiscovered systems remain anonymous.

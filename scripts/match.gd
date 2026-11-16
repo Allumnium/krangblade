@@ -2853,8 +2853,7 @@ func _draw_map() -> void:
             for angle in range(4):
                 var start: float = float(angle) * TAU / 4.0 + 0.1
                 map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
-        if i == selected:
-            map_canvas.draw_string(font, pos + Vector2(-80, -radius - 8), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff"))
+        map_canvas.draw_string(font, pos + Vector2(-80, -radius - 8), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
     _draw_combat_lens(state, font)
     _draw_logistics_lens(state, font)
     var poses: Dictionary = _ship_poses(state)

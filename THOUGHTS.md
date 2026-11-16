@@ -189,3 +189,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.6 adds font-measured abbreviated system labels in resource and population strips; verify small-segment readability visually.
 
 - v0.16.7 adds Q/E owned-system camera focus. Uses a provisional 27% viewport radius for framing; verify at varied window sizes.
+
+- v0.16.8 enables persistent discovered-system labels at 65% opacity when unselected. Check wide-zoom readability and label overlap visually.
