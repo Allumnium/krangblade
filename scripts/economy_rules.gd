@@ -135,7 +135,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
         for resource in RESOURCES:
             thresholds[resource] = {"min": 10.0, "max": 20.0}
         for resource in EXTRACTED:
-            abundance[resource] = 0.0 if rng.randf() < 0.35 else rng.randf_range(0.5, 2.0)
+            abundance[resource] = 0.1 if rng.randf() < 0.35 else rng.randf_range(0.5, 4.0)
         var home: bool = i < ordered.size()
         var owner: int = ordered[i] if home else 0
         var yards: Array = []
@@ -377,7 +377,7 @@ static func building_multiplier(planet: Dictionary, resource: String) -> float:
 static func farm_potential(planet: Dictionary) -> float:
     if int(planet["owner"]) == 0:
         return 0.0
-    return ORGANICS_PER_LEVEL * int(planet["levels"]["Organics"]) * float(planet["bonuses"].get("Organics", 1.0)) * float(planet.get("farm_factor", 1.0)) * building_multiplier(planet, "Organics")
+    return ORGANICS_PER_LEVEL * int(planet["levels"]["Organics"]) * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0))
 
 static func population_capacity(planet: Dictionary) -> float:
     return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
@@ -419,7 +419,6 @@ static func rate(planet: Dictionary, resource: String) -> float:
     if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0:
         return 0.0
     var level: int = int(planet["levels"][resource])
-    var bonus: float = float(planet["bonuses"].get(resource, 1.0))
     if resource == "Organics":
         # Small populations still produce a surplus; farm capacity limits output.
         var capacity: float = population_capacity(planet)
@@ -428,20 +427,17 @@ static func rate(planet: Dictionary, resource: String) -> float:
         var labor: float = sqrt(clampf(float(planet["population"]) / capacity, 0.0, 1.0))
         return farm_potential(planet) * labor
     var base: float = PRODUCTION_PER_LEVEL
-    var material: float = float(planet["abundance"].get(resource, 0.0))
     if resource in ["Textiles", "Tech"]:
         base = BASE_INDUSTRIAL_RATE
-        material = 1.0
     elif resource == "Plastics":
         # Baseline polymer production is possible even without a deposit.
         base = BASE_INDUSTRIAL_RATE
-        material = maxf(1.0, material)
     var labor: float = population_multiplier(planet)
     if resource in ["Plastics", "Textiles", "Tech"]:
         # Installed production capacity limits the number of productive workers.
         # Population demand continues increasing after this output saturates.
         labor = minf(labor, INDUSTRIAL_POPULATION_PER_LEVEL * level / HOME_POPULATION)
-    var output: float = base * level * material * bonus * labor * building_multiplier(planet, resource)
+    var output: float = base * level * production_modifier(planet, resource) * labor
     return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func _update_population(planet: Dictionary, dt: float) -> void:
@@ -701,7 +697,7 @@ static func production_modifier(system: Dictionary, resource: String) -> float:
         modifier *= float(system["abundance"].get(resource, 0.0))
     elif resource == "Plastics":
         modifier *= maxf(1.0, float(system["abundance"].get(resource, 0.0)))
-    return modifier * building_multiplier(system, resource)
+    return clampf(modifier * building_multiplier(system, resource), 0.1, 4.0)
 
 static func _continuous_target(p: Dictionary, key: String) -> Array:
     if SHIP_KINDS.has(key):

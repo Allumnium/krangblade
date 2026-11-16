@@ -87,3 +87,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Cancel buttons sit immediately to the right of active construction progress bars and are hidden when idle or on instant purchases. This supersedes earlier always-visible cancel instructions. Shipyard progress cancellation targets the displayed job.
 
 - Finite maintain targets are desired quantities and can be set independently of current build eligibility, including missing shipyards and home-system restrictions. Actual production still respects eligibility. Only explicit target changes or intentional cancellation reset targets.
+
+- Generated system production modifiers range from −90% to +300% (0.1× to 4×), including the effective building multiplier. Poor deposits permit extraction; zero population or unbuilt production levels still yield zero output.
