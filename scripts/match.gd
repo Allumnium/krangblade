@@ -1107,6 +1107,10 @@ func _build_lens_buttons() -> void:
     military_lens.tooltip_text = "Fleet allocation at systems and asteroid fields"
     logistics_lens.tooltip_text = "System resource storage"
 
+var diagnostic_label: Label
+var diagnostic_elapsed: float = 0.0
+var diagnostic_last_bytes: int = -1
+
 func _build_time_controls() -> void:
     var panel := PanelContainer.new()
     add_child(panel)
@@ -1126,6 +1130,18 @@ func _build_time_controls() -> void:
         button.focus_mode = Control.FOCUS_NONE
         button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         time_buttons[speed] = button
+    var diagnostics: Button = _button("Perf", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, row)
+    diagnostics.tooltip_text = "Toggle local performance diagnostics"
+    diagnostic_label = _label("", 11)
+    add_child(diagnostic_label)
+    diagnostic_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+    diagnostic_label.offset_left = -220
+    diagnostic_label.offset_right = 220
+    diagnostic_label.offset_top = -76
+    diagnostic_label.offset_bottom = -52
+    diagnostic_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    diagnostic_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    diagnostic_label.hide()
 
 func _set_time_speed(speed: int) -> void:
     session.call("request_time_speed", speed)
@@ -2376,6 +2392,17 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 func _process(delta: float) -> void:
     _keyboard_pan(delta)
     _update_resource_hover()
+    if is_instance_valid(diagnostic_label):
+        diagnostic_elapsed += delta
+        if diagnostic_elapsed >= 1.0:
+            var authority: bool = bool(session.get("is_solo")) or multiplayer.is_server()
+            var bytes: int = int(session.get("diagnostic_sent_bytes" if authority else "diagnostic_received_bytes"))
+            var throughput: float = float(maxi(0, bytes - diagnostic_last_bytes)) / diagnostic_elapsed / 1024.0 if diagnostic_last_bytes >= 0 else 0.0
+            diagnostic_last_bytes = bytes
+            if diagnostic_label.visible:
+                var timing: String = " · sim %.2f ms · encode %.2f ms" % [float(session.get("diagnostic_sim_ms")), float(session.get("diagnostic_encode_ms"))] if authority else ""
+                diagnostic_label.text = "%d FPS%s · %.1f KiB snapshot · %.1f KiB/s payload" % [Engine.get_frames_per_second(), timing, float(session.get("diagnostic_snapshot_bytes")) / 1024.0, throughput]
+            diagnostic_elapsed = 0.0
     visual_clock += delta
     game_visual_clock += delta * float(_state().get("time_speed", 1))
     for visual in ship_visuals.values():

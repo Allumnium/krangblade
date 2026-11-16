@@ -108,3 +108,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate maintain targets persist when production is unavailable (v0.15.2).
 
 - [ ] Validate production modifier bounds and extraction balance (v0.15.3).
+
+- [ ] Validate optional performance overlay (v0.15.4) and record sustained fleet-heavy 10× measurements before deeper snapshot optimization.
