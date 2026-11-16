@@ -403,7 +403,7 @@ static func consumption(planet: Dictionary, resource: String) -> float:
         return 0.0
     if resource == "Organics":
         return organics_demand(planet)
-    return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * population_multiplier(planet)
+    return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * population_multiplier(planet) * float(planet.get("policy_consumption", 1.0))
 
 static func civilian_stock_access(planet: Dictionary, resource: String) -> float:
     # Stock above the import target is reserved for trade and construction.
@@ -713,7 +713,7 @@ static func production_modifier(system: Dictionary, resource: String) -> float:
         modifier *= float(system["abundance"].get(resource, 0.0))
     elif resource == "Plastics":
         modifier *= maxf(1.0, float(system["abundance"].get(resource, 0.0)))
-    return clampf(modifier * building_multiplier(system, resource), 0.1, 4.0)
+    return clampf(modifier * building_multiplier(system, resource), 0.1, 4.0) * float(system.get("policy_output", {}).get(resource, 1.0))
 
 static func _continuous_target(p: Dictionary, key: String) -> Array:
     if SHIP_KINDS.has(key):
@@ -2601,8 +2601,10 @@ static func step(state: Dictionary, dt: float) -> void:
             for node in entry["targets"].duplicate():
                 if not policy_target_valid(state, int(player), entry["card"], int(node)):
                     entry["targets"].erase(node)
+    apply_economy_policies(state)
     for i in range((state["planets"] as Array).size()):
         _work_planet(state, i, dt)
+    dispatch_expansion_policies(state)
     var teams: Array[int] = planet_teams(state)
     var cache: Dictionary = {}
     var budgets: Array = []
@@ -2681,7 +2683,10 @@ const POLICY_SLOTS = ["offense", "defense", "economy", "technology", "wildcard"]
 const POLICY_CARDS = {
     "invasion": {"slot": "offense", "name": "Invasion", "warmup": 20.0, "military": true, "target": "hostile"},
     "guard": {"slot": "defense", "name": "Guard", "warmup": 0.0, "military": true, "target": "friendly"},
-    "expansion": {"slot": "economy", "name": "Expansion", "warmup": 0.0},
+    "expansion": {"slot": "economy", "name": "Expansion", "warmup": 0.0, "description": "Dispatch idle colony ships to neutral systems automatically."},
+    "industry": {"slot": "economy", "name": "Industrial specialization", "warmup": 0.0, "description": "+20% manufactured output."},
+    "conservation": {"slot": "economy", "name": "Resource conservation", "warmup": 0.0, "description": "-15% non-food civilian consumption."},
+    "agriculture": {"slot": "economy", "name": "Agricultural development", "warmup": 0.0, "description": "+20% farm output."},
     "military_research": {"slot": "technology", "name": "Military research", "warmup": 0.0}
 }
 
@@ -2801,3 +2806,36 @@ static func policy_fleet_weights(state: Dictionary, player: int) -> Dictionary:
         for node in shares:
             result[node] = int(result.get(node, 0)) + int(shares[node])
     return result
+
+static func active_card(state: Dictionary, player: int, card: String) -> bool:
+    for entry in state.get("policies", {}).get(player, {}).values():
+        if entry["card"] == card and policy_active(state, entry):
+            return true
+    return false
+
+static func apply_economy_policies(state: Dictionary) -> void:
+    for system in state["planets"]:
+        var owner: int = int(system["owner"])
+        var modifiers: Dictionary = {}
+        if active_card(state, owner, "industry"):
+            for resource in ["Plastics", "Textiles", "Tech"]:
+                modifiers[resource] = 1.2
+        if active_card(state, owner, "agriculture"):
+            modifiers["Organics"] = 1.2
+        system["policy_output"] = modifiers
+        system["policy_consumption"] = 0.85 if active_card(state, owner, "conservation") else 1.0
+
+static func dispatch_expansion_policies(state: Dictionary) -> void:
+    var reserved: Dictionary = {}
+    for ship in state["ships"]:
+        if ship["kind"] == "colony_ship" and not (ship["route"] as Array).is_empty():
+            reserved[int(ship["dest"])] = true
+    for ship in state["ships"]:
+        if ship["kind"] != "colony_ship" or not (ship["route"] as Array).is_empty():
+            continue
+        var player: int = int(ship["owner"])
+        if not active_card(state, player, "expansion"):
+            continue
+        var target: int = _ai_colony_target(state, player, ship, reserved)
+        if target >= 0 and send_colony(state, player, int(ship["id"]), target):
+            reserved[target] = true

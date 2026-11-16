@@ -3208,12 +3208,13 @@ func _open_policy_catalog(slot: String) -> void:
         tile.card_id = card
         tile.slot_id = slot
         tile.text = str(ECONOMY.POLICY_CARDS[card]["name"]) + "\n\nDrag to slot"
+        tile.tooltip_text = str(ECONOMY.POLICY_CARDS[card].get("description", ""))
         tile.custom_minimum_size = Vector2(148, 210)
         tile.pressed.connect(_equip_selected_policy.bind(card))
         policy_catalog.add_child(tile)
     _button("Empty slot", _equip_selected_policy.bind(""), policy_catalog)
     policy_modal.title = "Change " + slot.capitalize()
-    policy_modal.popup_centered(Vector2i(560, 350))
+    policy_modal.popup_centered(Vector2i(820 if slot == "economy" else 560, 350))
 
 func _equip_selected_policy(card: String) -> void:
     session.call("request_policy", policy_choice_slot, card)
@@ -3261,7 +3262,7 @@ func _refresh_policy_ui(state: Dictionary) -> void:
             policy_slider.set_value_no_signal(float(selected_entry["weight"]))
         policy_info.text = "Army: %d%%\nClick systems to toggle flags.\n%d targets" % [int(selected_entry["weight"]), selected_entry["targets"].size()]
     else:
-        policy_info.text = "Policy effects pending"
+        policy_info.text = str(definition.get("description", "Policy effects pending"))
     if not ECONOMY.policy_active(state, selected_entry):
         policy_info.text += "\nPreparing: %ds" % ceili(float(selected_entry["ready_at"]) - float(state["elapsed"]))
 
