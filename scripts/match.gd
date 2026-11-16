@@ -1145,6 +1145,8 @@ shader_type canvas_item;
 render_mode unshaded;
 uniform sampler2D site_data : filter_nearest, repeat_disable;
 uniform int site_count = 0;
+uniform sampler2D occupied_tiles : filter_nearest, repeat_disable;
+uniform vec2 tile_grid = vec2(1.0);
 uniform vec2 world_extent = vec2(1.0);
 uniform float padding = 1.0;
 
@@ -1163,6 +1165,10 @@ vec3 team_color(int team) {
     return vec3(0.929, 0.459, 0.467);
 }
 void fragment() {
+    ivec2 tile = ivec2(clamp(floor(UV * tile_grid), vec2(0.0), tile_grid - vec2(1.0)));
+    if (texelFetch(occupied_tiles, tile, 0).r < 0.5) {
+        discard;
+    }
     vec2 p = UV * world_extent - vec2(padding);
     float fields[8];
     for (int j = 0; j < 8; j++) { fields[j] = 10000.0; }
@@ -1272,10 +1278,38 @@ func _refresh_territory(state: Dictionary) -> void:
     territory_sites = ImageTexture.create_from_image(data)
     territory_material.set_shader_parameter("site_data", territory_sites)
     territory_material.set_shader_parameter("site_count", territory_site_count)
-    territory_material.set_shader_parameter("world_extent", _map_size() / territory_radius + Vector2.ONE * 3.0)
+    var extent: Vector2 = _map_size() / territory_radius + Vector2.ONE * 3.0
+    _cache_territory_tiles(sites, extent)
+    territory_material.set_shader_parameter("world_extent", extent)
     territory_material.set_shader_parameter("padding", 1.5)
     territory_image.show()
     _position_territory()
+
+# Conservative tile mask: a smooth-min operation can lower the distance
+# by at most k/4 per site. Leave additional room for antialiasing.
+# Occupied pixels still evaluate the original continuous shader exactly.
+func _cache_territory_tiles(sites: Array[Color], extent: Vector2) -> void:
+    var dimensions := Vector2i(maxi(1, ceili(extent.x)), maxi(1, ceili(extent.y)))
+    var cell: Vector2 = extent / Vector2(dimensions)
+    var mask: Image = Image.create_empty(dimensions.x, dimensions.y, false, Image.FORMAT_R8)
+    mask.fill(Color.BLACK)
+    var counts: Dictionary = {}
+    for site in sites:
+        if site.a > 0.0:
+            var team: int = roundi(site.a)
+            counts[team] = int(counts.get(team, 0)) + 1
+    for site in sites:
+        if site.a <= 0.0:
+            continue
+        var reach: float = site.b + 0.12 * float(counts[roundi(site.a)]) + 2.0
+        var center := Vector2(site.r, site.g) + Vector2.ONE * 1.5
+        var low: Vector2 = (center - Vector2.ONE * reach) / cell
+        var high: Vector2 = (center + Vector2.ONE * reach) / cell
+        for y in range(maxi(0, floori(low.y)), mini(dimensions.y - 1, floori(high.y)) + 1):
+            for x in range(maxi(0, floori(low.x)), mini(dimensions.x - 1, floori(high.x)) + 1):
+                mask.set_pixel(x, y, Color.WHITE)
+    territory_material.set_shader_parameter("occupied_tiles", ImageTexture.create_from_image(mask))
+    territory_material.set_shader_parameter("tile_grid", Vector2(dimensions))
 
 func _position_territory() -> void:
     var padding: Vector2 = Vector2.ONE * territory_radius * 1.5

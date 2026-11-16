@@ -151,3 +151,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.14.5 caches immutable asteroid unit polygons by position and seed; depletion still scales the same polygon each frame. Ship snapshot synchronization now occurs on economy changes rather than repeated pose queries. Actual frame-time savings require profiling.
 
 - v0.14.5 failed both normal ENet scenarios: render targets lagged the live host state between publications. v0.14.6 restores pose-time synchronization (no weakened checks), retains asteroid geometry caching, and adds ownership-sensitive persistent logistics route caching. Mining depot decisions remain tick-local.
+
+- v0.14.7 caches a conservative occupancy tile mask when claims change. Empty tiles skip the per-site shader loop; occupied tiles retain the same full-resolution continuous distance calculations. Dense territories may limit savings; GPU profiler and visual comparison outstanding.
