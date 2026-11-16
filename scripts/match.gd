@@ -36,6 +36,8 @@ var overview_panel: PanelContainer
 var yard_activity: VBoxContainer
 var yard_activity_rows: Dictionary = {}
 var inspector_tabs: TabContainer
+var asteroid_shape_cache: Dictionary = {}
+var asteroid_cache_seed: int = -1
 var population_label: Label
 var population_delta_label: Label
 var zoom: float = 1.0
@@ -2438,6 +2440,12 @@ func _draw_map() -> void:
     var state: Dictionary = _state()
     if state.is_empty():
         return
+    var seed_value: int = int(state["map"]["seed"])
+    if asteroid_cache_seed != seed_value:
+        asteroid_shape_cache.clear()
+        asteroid_cache_seed = seed_value
+    var viewport_bounds: Rect2 = get_viewport_rect()
+    var render_scale: float = _fit() * zoom
     var points: Array = state["map"]["points"]
     for edge in state["map"]["edges"]:
         var a: int = int(edge[0])
@@ -2466,14 +2474,20 @@ func _draw_map() -> void:
             map_canvas.draw_polyline(boundary, HUD.ACCENT if selected_field == field_index else Color("#b9ac7740"), 1.5, true)
         for chunk in field["chunks"]:
             var rock_pos: Vector2 = _screen_point(chunk["position"])
-            if not get_viewport_rect().grow(maxf(4.0, float(chunk["radius"]) * _fit() * zoom * 2.0)).has_point(rock_pos):
+            if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
                 continue
             var fraction: float = float(chunk["remaining"]) / float(chunk["initial"])
-            var rock_radius: float = maxf(1.3, float(chunk["radius"]) * _fit() * zoom * sqrt(fraction))
+            var rock_radius: float = maxf(1.3, float(chunk["radius"]) * render_scale * sqrt(fraction))
+            var shape_key: Vector2 = chunk["position"]
+            if not asteroid_shape_cache.has(shape_key):
+                var unit_shape := PackedVector2Array()
+                for k in range(chunk["shape"].size()):
+                    var angle: float = TAU * float(k) / float(chunk["shape"].size()) + float(chunk["rotation"])
+                    unit_shape.append(Vector2.from_angle(angle) * float(chunk["shape"][k]))
+                asteroid_shape_cache[shape_key] = unit_shape
             var rock := PackedVector2Array()
-            for k in range(chunk["shape"].size()):
-                var angle: float = TAU * float(k) / float(chunk["shape"].size()) + float(chunk["rotation"])
-                rock.append(rock_pos + Vector2.from_angle(angle) * rock_radius * float(chunk["shape"][k]))
+            for vertex in asteroid_shape_cache[shape_key]:
+                rock.append(rock_pos + vertex * rock_radius)
             var tint: Color = HUD.COLORS[chunk["resource"]]
             map_canvas.draw_colored_polygon(rock, tint.darkened(0.25))
             rock.append(rock[0])

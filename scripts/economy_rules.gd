@@ -1,5 +1,7 @@
 extends RefCounted
 ## Development-only balance configuration. No advanced recipes have been defined.
+static var cached_civilian_routes: Dictionary = {}
+static var cached_route_topology: Dictionary = {}
 static var cached_military_graph: Dictionary = {}
 static var cached_military_map: Dictionary = {}
 const MAP = preload("res://scripts/planet_map.gd")
@@ -994,13 +996,21 @@ static func _opportunity(a: Dictionary, b: Dictionary) -> bool:
             return true
     return false
 
-static func _path(state: Dictionary, teams: Array[int], team: int, a: int, b: int, cache: Dictionary) -> Array[int]:
+static func _path(state: Dictionary, teams: Array[int], team: int, a: int, b: int, _cache: Dictionary) -> Array[int]:
+    var routes: Dictionary = _civilian_route_cache(state, teams)
     var key: String = "%d:%d:%d" % [team, a, b]
-    if not cache.has(key):
-        cache[key] = MAP.path(state["map"], teams, team, a, b)
+    if not routes.has(key):
+        routes[key] = MAP.path(state["map"], teams, team, a, b)
     var result: Array[int] = []
-    result.assign(cache[key])
+    result.assign(routes[key])
     return result
+
+static func _civilian_route_cache(state: Dictionary, teams: Array[int]) -> Dictionary:
+    var map_data: Dictionary = state["map"]
+    if cached_route_topology.get("points") != map_data["points"] or cached_route_topology.get("edges") != map_data["edges"] or cached_route_topology.get("teams") != teams:
+        cached_civilian_routes.clear()
+        cached_route_topology = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "teams": teams.duplicate()}
+    return cached_civilian_routes
 
 static func _set_route(ship: Dictionary, path: Array[int]) -> void:
     ship["route"] = path.slice(1)
