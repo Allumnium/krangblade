@@ -662,14 +662,22 @@ func request_time_speed(speed: int) -> void:
     economy["time_speed"] = speed
     _publish_economy()
 
+var diagnostic_sim_ms: float = 0.0
+var diagnostic_encode_ms: float = 0.0
+var diagnostic_snapshot_bytes: int = 0
+var diagnostic_sent_bytes: int = 0
+var diagnostic_received_bytes: int = 0
+
 func _economy_tick() -> void:
     if phase != "match" or not (is_solo or multiplayer.is_server()):
         return
     var speed: int = int(economy.get("time_speed", 1))
     # Pause stops the simulation, but not accepted orders or replication.
+    var started: int = Time.get_ticks_usec()
     for i in range(speed):
         ECONOMY.step(economy, SIM_STEP)
         ECONOMY.sample_resource_rates(economy, resource_history)
+    diagnostic_sim_ms = float(Time.get_ticks_usec() - started) / 1000.0
     snapshot_elapsed += SIM_STEP
     if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
         snapshot_elapsed = 0.0
@@ -692,10 +700,14 @@ func _flush_economy() -> void:
         if snapshot_pending.has(id) or int(snapshot_sent.get(id, -1)) == snapshot_revision:
             continue
         if payload.is_empty():
+            var encode_start: int = Time.get_ticks_usec()
             payload = var_to_bytes(economy).compress(FileAccess.COMPRESSION_GZIP)
+            diagnostic_encode_ms = float(Time.get_ticks_usec() - encode_start) / 1000.0
+            diagnostic_snapshot_bytes = payload.size()
         # At most one reliable full snapshot in flight per guest. A slow guest
         # skips intermediate states, receiving the newest revision after ACK.
         if rpc_id(id, "_rpc_economy", round_id, snapshot_revision, payload) == OK:
+            diagnostic_sent_bytes += payload.size()
             snapshot_pending[id] = snapshot_revision
             snapshot_sent[id] = snapshot_revision
 
@@ -711,6 +723,8 @@ func _rpc_snapshot_ack(ack_round: int, revision: int) -> void:
 func _rpc_economy(update_round: int, revision: int, compressed: PackedByteArray) -> void:
     if phase != "match" or update_round != round_id:
         return
+    diagnostic_received_bytes += compressed.size()
+    diagnostic_snapshot_bytes = compressed.size()
     var decoded: Variant = bytes_to_var(compressed.decompress_dynamic(16777216, FileAccess.COMPRESSION_GZIP))
     if not decoded is Dictionary:
         return
