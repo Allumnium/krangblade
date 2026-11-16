@@ -21,7 +21,7 @@ var commands_sent: bool = false
 var next_diagnostic: float = 10.0
 var speed_stage: int = 0
 var paused_elapsed: float = -1.0
-const TEST_SPEEDS: Array[int] = [0, 2, 5, 1]
+const TEST_SPEEDS: Array[int] = [0, 2, 5, 10, 1]
 const ECON = preload("res://scripts/economy_rules.gd")
 var saw_loading: bool = false
 var mode: String = "normal"
@@ -202,7 +202,7 @@ func _check_time_controls(state: Dictionary) -> bool:
     if view == null or not view.has_method("_refresh_time_controls"):
         return false
     var buttons: Dictionary = view.get("time_buttons")
-    if buttons.size() != 4:
+    if buttons.size() != TEST_SPEEDS.size():
         _fail("Time controls missing.")
         return false
     for speed in TEST_SPEEDS:
