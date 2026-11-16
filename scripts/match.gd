@@ -2190,10 +2190,13 @@ func _save_settings() -> void:
 
 func _build_settings_menu() -> void:
     var options := VBoxContainer.new()
+    options.add_theme_constant_override("separation", 12)
+    options.custom_minimum_size.x = 340
     match_menu.add_child(options)
     var scale_row := HBoxContainer.new()
     options.add_child(scale_row)
     var title := _label("UI scale", 14)
+    title.autowrap_mode = TextServer.AUTOWRAP_OFF
     title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     scale_row.add_child(title)
     var scale_value := OptionButton.new()
@@ -2207,15 +2210,24 @@ func _build_settings_menu() -> void:
     for channel in ["Music", "SFX"]:
         var row := HBoxContainer.new()
         options.add_child(row)
-        row.add_child(_label(channel, 14))
+        row.add_theme_constant_override("separation", 10)
+        var channel_label := _label(channel, 14)
+        channel_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+        channel_label.custom_minimum_size.x = 64
+        channel_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+        row.add_child(channel_label)
         var volume := HSlider.new()
         volume.max_value = 100.0
         volume.step = 1.0
         volume.value = music_volume if channel == "Music" else sfx_volume
         volume.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        volume.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+        volume.custom_minimum_size = Vector2(120, 24)
         row.add_child(volume)
         var mute := CheckBox.new()
         mute.text = "Mute"
+        mute.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+        mute.custom_minimum_size.y = 30
         mute.button_pressed = music_muted if channel == "Music" else sfx_muted
         row.add_child(mute)
         volume.value_changed.connect(_audio_volume_changed.bind(channel))
@@ -2239,7 +2251,7 @@ func _open_menu() -> void:
     drag_button = 0
     military_drag = -1
     military_preview.clear()
-    match_menu.popup_centered(Vector2i(420, 300))
+    match_menu.popup_centered(Vector2i(420, 190))
 
 func _menu_action(action: StringName) -> void:
     if action == &"leave":
