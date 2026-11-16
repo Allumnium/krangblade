@@ -93,3 +93,23 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Global resource tiles place icon, total and rate above a storage-capacity strip. Filled portions are subdivided by owned system stock, largest first, with full system names only where they fit; cargo is excluded from the strip.
 
 - Population HUD uses sorted proportional system segments and the same live hover as resources. Show signed habitation growth modifier rather than capacity or food equilibrium figures, including upgrade previews.
+
+- Resource economy buildings are repeatable timed construction, adding 25% per completed building subject to the existing production bounds. Trade import/export switches are independent and default enabled; disabled thresholds persist, and dragging either enabled handle pushes the other when crossing.
+
+- Logistics traffic indicators lie on the corresponding first/last route lane at the system endpoint, grouped by resource, lane and direction.
+
+- Completed shipyards have replicated HP (1,000 at level one, 1,000 per level) and slow orbital construction frames. Assigned hulls show outline segments snapping into place then progressive fill using actual job progress. Combat targeting/destruction of shipyards requires further integration.
+
+- Single-system global HUD strips omit system names; population uses the same expanding width as resource tiles. Use “Overpopulation penalty” in demographic and habitation upgrade descriptions.
+
+- Miners approach a physical stand-off point beside the target rock; dual short extraction beams and sparse impact sparks are local presentation. Ship thrust uses bounded procedural particles, culled offscreen and reduced at low zoom. No particle nodes or replicated particle state.
+
+- On successful colonization the colony hull converts into the first level-one shipyard; no duplicate initial shipyard purchase. Colony recipe includes an additional 480 Metals and 30 work. A three-game-year local morph transitions the hull outline into the orbital frame.
+
+- Segmented top-bar labels fall back from full system name to two letters, then one letter, then blank as space decreases. Single-contributor strips remain unlabeled.
+
+- Q/E cycle previous/next owned systems in stable map-index order, wrapping around; focus camera and fit selected system in the playable map area. Ignore shortcuts while editing text or in match menu.
+
+- All discovered systems display their names even when unselected; unselected names use subdued translucent lettering, selected names remain bright. Undiscovered systems remain anonymous.
+
+- Shipyard orbits use authoritative world positions; completed hulls spawn at their assigned frame. Fighters target hostile shipyards when no ship is in range; damage accumulates and destruction removes the frame and assigned construction without refunds. Remaining slots compact. Trade checkboxes share a compact threshold row above the track.

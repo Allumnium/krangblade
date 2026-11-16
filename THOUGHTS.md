@@ -173,3 +173,33 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.15.5 adds sorted stock-share segments to each resource storage strip; tiny shares may be subpixel, and names are hidden when they do not fit. The numeric holdings/rates and live hover remain intact.
 
 - v0.15.6 adapts header height regression to the two-row HUD and adds population distribution without revealing capacity. Visual validation remains outstanding.
+
+- v0.16.0 uses 30 work per economy building, tripling successive recipes, one pending per resource. Warehouse and habitation retain their distinct upgrade rules. Trade switches require multiplayer and UI regression verification.
+
+- v0.16.1 corrects perimeter carets to align with actual planned approach/departure lanes. Dense multi-resource routes need visual spacing checks.
+
+- v0.16.2 introduces orbital construction frame visuals and replicated health values. Orbit is presentation-only in this prototype; damage, destruction and physical launch integration remain outstanding.
+
+- v0.16.3 simplifies single-system HUD strips, equalizes population tile sizing and clarifies the overpopulation penalty label. Visual verification remains outstanding.
+
+- v0.16.4 adds physical miner stand-off and deterministic local particle visuals with fixed per-hull limits. GPU/CPU cost and appearance still require fleet-heavy playtesting.
+
+- v0.16.5 includes the first shipyard price and work in the colony hull. The conversion is immediately operational subject to existing population staffing; visual morph lasts three game years. Full combat integration remains outstanding.
+
+- v0.16.6 adds font-measured abbreviated system labels in resource and population strips; verify small-segment readability visually.
+
+- v0.16.7 adds Q/E owned-system camera focus. Uses a provisional 27% viewport radius for framing; verify at varied window sizes.
+
+- v0.16.8 enables persistent discovered-system labels at 65% opacity when unselected. Check wide-zoom readability and label overlap visually.
+
+- v0.16.9 implements hostile fighter attacks on shipyards, destruction and physical launches. Provisional 95-unit orbit, stationary targets lower priority than ships, no refund for destroyed work. Validate combat, compacted slots, and visual performance.
+
+- v0.16.10 fixes missing optional chunk radius in synthetic mining fixtures and tests the stand-off distance instead of exact asteroid-center arrival. Extraction and delivery assertions remain intact.
+
+- v0.16.12 derives the solo colony construction test window from recipe work and shipyard speed, checks the conversion, and exits promptly on failed assertions.
+
+- v0.16.14 fixes HUD clearing with an empty state and updates map-view smoke assertions for bidirectional handle pushing and timed repeatable building cancellation. Earlier assertions expected superseded instant purchases and clamped handles.
+
+- v0.16.15 updates the map-view colony fixture for the revised recipe and makes its assertions fail promptly. Existing assertions remain mandatory.
+
+- v0.16.16 makes shipyard progress bars continuous rather than quantized and checks both authoritative and displayed work fractions across cancellation/compaction. CI required.

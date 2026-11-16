@@ -96,6 +96,7 @@ var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
 var system_visual_seed: int = -1
 var trade_sliders: Dictionary = {}
+var trade_checks: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var upgrade_cards: Dictionary = {}
 var pds_card: Dictionary = {}
@@ -122,14 +123,16 @@ class TradeRange extends Control:
     var stock_percent: float = 0.0
     var stock_color: Color = Color.WHITE
     var enabled: bool = true
+    var import_enabled: bool = true
+    var export_enabled: bool = true
     var active_handle: int = -1
     const PAD: float = 10.0
-    const TRACK_Y: float = 38.0
+    const TRACK_Y: float = 14.0
 
     func set_range(minimum: float, maximum: float) -> void:
         active_handle = -1
         lower = clampf(minimum, 0.0, 100.0)
-        upper = clampf(maximum, lower, 100.0)
+        upper = clampf(maximum, 0.0, 100.0)
         queue_redraw()
 
     func set_stock(amount: float, maximum: float, tint: Color) -> void:
@@ -149,8 +152,7 @@ class TradeRange extends Control:
         var high_color := Color("#e9a276") if enabled else Color("#667687")
         var left: String = "Import < %d%%" % roundi(lower)
         var right: String = "Export > %d%%" % roundi(upper)
-        draw_string(font, Vector2(PAD, 17), left, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, low_color)
-        draw_string(font, Vector2(size.x - PAD - font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, 17), right, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, high_color)
+
         var lo := Vector2(_x(lower), TRACK_Y)
         var hi := Vector2(_x(upper), TRACK_Y)
         draw_line(Vector2(PAD, TRACK_Y), Vector2(size.x - PAD, TRACK_Y), Color("#344960"), 5.0, true)
@@ -161,16 +163,20 @@ class TradeRange extends Control:
         if overlap:
             lo.y -= 5.0
             hi.y += 5.0
-        draw_circle(lo, 7.0, low_color)
-        draw_circle(hi, 7.0, high_color)
-        draw_arc(lo, 7.0, 0.0, TAU, 24, Color("#102030"), 1.0, true)
-        draw_arc(hi, 7.0, 0.0, TAU, 24, Color("#102030"), 1.0, true)
+        if import_enabled:
+            draw_circle(lo, 7.0, low_color)
+        if export_enabled:
+            draw_circle(hi, 7.0, high_color)
 
     func _move_handle(x: float) -> void:
         if active_handle == 0:
-            lower = minf(_value(x), upper)
+            lower = _value(x)
+            if export_enabled:
+                upper = maxf(upper, lower)
         elif active_handle == 1:
-            upper = maxf(_value(x), lower)
+            upper = _value(x)
+            if import_enabled:
+                lower = minf(lower, upper)
         queue_redraw()
 
     func _gui_input(event: InputEvent) -> void:
@@ -183,7 +189,9 @@ class TradeRange extends Control:
                 if absf(lo.x - hi.x) < 13.0:
                     lo.y -= 5.0
                     hi.y += 5.0
-                active_handle = 0 if event.position.distance_to(lo) < event.position.distance_to(hi) else 1
+                if not import_enabled and not export_enabled:
+                    return
+                active_handle = 0 if import_enabled and (not export_enabled or event.position.distance_to(lo) < event.position.distance_to(hi)) else 1
                 _move_handle(event.position.x)
             elif active_handle >= 0:
                 _move_handle(event.position.x)
@@ -402,12 +410,28 @@ func _build_ui() -> void:
         trade_row.add_child(stock_label)
         trade_stock_labels[resource] = stock_label
         var slider := TradeRange.new()
-        slider.custom_minimum_size.y = 56
+        slider.custom_minimum_size.y = 28
         slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f t." % ECONOMY.TRADE_REFERENCE
         slider.committed.connect(_apply_thresholds.bind(resource))
         logistics.add_child(slider)
         trade_sliders[resource] = slider
+        var switches := HBoxContainer.new()
+        logistics.add_child(switches)
+        logistics.move_child(switches, slider.get_index())
+        var incoming := CheckBox.new()
+        incoming.text = "Import"
+        incoming.button_pressed = true
+        switches.add_child(incoming)
+        var outgoing := CheckBox.new()
+        outgoing.text = "Export"
+        outgoing.button_pressed = true
+        incoming.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        outgoing.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        switches.add_child(outgoing)
+        trade_checks[resource] = [incoming, outgoing]
+        incoming.toggled.connect(_trade_toggle.bind(resource))
+        outgoing.toggled.connect(_trade_toggle.bind(resource))
     var shipyards := VBoxContainer.new()
     shipyard_page.add_child(shipyards)
     ship_button = _ship_build_row(shipyards, "BUILD LOGISTICS SHIP", "ship")
@@ -762,8 +786,13 @@ func _build_economy_cards(parent: Container) -> void:
         card.add_child(effect)
         var detail: Label = _label("", 12)
         card.add_child(detail)
-        var button: Button = _card_action(disclosure, "Buy", _operation.bind("economy", resource))
-        disclosure["cancel"] = _card_cancel(disclosure, func() -> void: pass)
+        var button: Button = _card_action(disclosure, "Build", _operation.bind("economy", resource))
+        var progress := ProgressBar.new()
+        section.add_child(progress)
+        section.move_child(progress, card.get_index())
+        progress.hide()
+        disclosure["progress"] = progress
+        disclosure["cancel"] = _card_cancel(disclosure, _cancel_kind.bind("economy_building", resource), progress)
         HUD.action(button)
         disclosure.merge({"button": button, "detail": detail, "costs": _cost_grid(card)})
         economy_cards[resource] = disclosure
@@ -773,7 +802,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
     _disclosure_title(habitation_card, "Habitation technology · Lv %d" % habitat_level)
     var penalty: float = -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)
     var next_penalty: float = -100.0 * clampf(float(p["population"]) / (2.0 * ECONOMY.habitation_capacity(p)), 0.0, 1.0)
-    habitation_card["detail"].text = "Growth modifier %+.1f%%" % penalty
+    habitation_card["detail"].text = "Overpopulation penalty %+.1f%%" % penalty
     if habitat_level < 3:
         habitation_card["detail"].text += " → %+.1f%%" % next_penalty
     habitation_card["button"].disabled = not owned or not ECONOMY.habitation_available(p)
@@ -799,14 +828,25 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
     for resource in economy_cards:
         var card: Dictionary = economy_cards[resource]
         var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
-        var installed: bool = bool(p.get("buildings", {}).get(resource, false))
+        var installed: int = int(p.get("buildings", {}).get(resource, 0))
+        var job: Dictionary = {}
+        for item in p["queue"]:
+            if item["kind"] == "economy_building" and item["target"] == resource:
+                job = item
+                break
+        card["progress"].visible = not job.is_empty()
+        card["cancel"].visible = not job.is_empty()
+        card["cancel"].disabled = not owned or job.is_empty()
+        if not job.is_empty():
+            card["progress"].value = 100.0 * float(job["progress"]) / float(job["work"])
+            _style_progress(card["progress"], p, job)
         var button: Button = card["button"]
-        button.text = "Built" if installed else "Buy"
+        button.text = "Build"
         button.disabled = not owned or not ECONOMY.building_available(p, resource)
-        var cost: String = _cost_text(definition["cost"])
+        var cost: String = _cost_text(ECONOMY.building_cost(p, resource))
         var requirement: String = "%s population" % _compact_amount(float(definition["population"]))
         var unmet: PackedStringArray = []
-        if not installed:
+        if job.is_empty():
             if float(p["population"]) + ECONOMY.EPS < float(definition["population"]):
                 unmet.append("Requires " + requirement)
             if not ECONOMY.production_available(p, resource):
@@ -815,10 +855,10 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
                 unmet.append("Insufficient local materials")
         card["detail"].text = "\n".join(unmet)
         card["detail"].visible = not unmet.is_empty()
-        card["costs"].visible = not installed
-        _show_cost(card["costs"], definition["cost"])
-        _disclosure_title(card, str(definition["name"]) + (" · Built" if installed else ""))
-        button.tooltip_text = "Permanent local improvement" if installed else "%s\n%s" % [requirement, cost]
+        card["costs"].visible = true
+        _show_cost(card["costs"], ECONOMY.building_cost(p, resource))
+        _disclosure_title(card, str(definition["name"]) + " · %d" % installed)
+        button.tooltip_text = "%s\n%s" % [requirement, cost]
 
 func _build_upgrade_cards(parent: Container) -> void:
     var labels: Dictionary = {"Metals": "Metal extraction", "Plastics": "Plastic production",
@@ -1195,7 +1235,13 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
             strip.draw_line(Vector2(x, 0), Vector2(x, strip.size.y), Color("#081421"), 1.0)
         var name_text: String = segment["name"]
         var text_width: float = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-        if text_width + 6.0 <= w:
+        if text_width + 6.0 > w:
+            name_text = name_text.left(2)
+            text_width = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+        if text_width + 6.0 > w:
+            name_text = name_text.left(1)
+            text_width = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+        if segments.size() > 1 and text_width + 6.0 <= w:
             strip.draw_string(font, Vector2(x + (w - text_width) * 0.5, (strip.size.y - font.get_height(10)) * 0.5 + font.get_ascent(10)), name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#e3edf7"))
         x += w
 
@@ -1440,12 +1486,15 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
     label.add_theme_color_override("font_color", tint)
     label.mouse_filter = Control.MOUSE_FILTER_PASS
     if population:
+        tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        label.clip_text = true
+        label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         var stack := VBoxContainer.new()
         stack.add_theme_constant_override("separation", 2)
         tile.add_child(stack)
         _population_row(stack).add_child(label)
         var strip := Control.new()
-        strip.custom_minimum_size = Vector2(80, 14)
+        strip.custom_minimum_size = Vector2(0, 14)
         strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
         stack.add_child(strip)
         global_resource_tiles["population"] = tile
@@ -1515,7 +1564,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
                 continue
             var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
             var crew: float = float(p.get("crew_rate", 0.0))
-            lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% habitation" % [_system_name(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)])
+            lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% overpopulation penalty" % [_system_name(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)])
         return "\n".join(lines)
     var totals: Dictionary = ECONOMY.empire_totals(state, _me())
     var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
@@ -1549,7 +1598,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
     if resource == "population":
         var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
         var crew: float = float(p.get("crew_rate", 0.0))
-        return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nHabitation growth modifier: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
+        return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
     var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Latest local flows (t/yr)"]
     var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
     for category in p.get("flows", {}):
@@ -1626,7 +1675,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
         var tile: PanelContainer = global_resource_tiles[resource]
         var segments: Array = []
         if stored > ECONOMY.EPS:
-            for i in range(state["planets"].size()):
+            for i in range(state.get("planets", []).size()):
                 var planet: Dictionary = state["planets"][i]
                 if int(planet["owner"]) != _me():
                     continue
@@ -1641,7 +1690,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
     var population_total: float = float(totals["population"])
     var population_segments: Array = []
     var population_net: float = 0.0
-    for i in range(state["planets"].size()):
+    for i in range(state.get("planets", []).size()):
         var p: Dictionary = state["planets"][i]
         if int(p["owner"]) != _me():
             continue
@@ -1701,11 +1750,28 @@ func _update_trade_stock(p: Dictionary) -> void:
         # Preserve this handle while dragging, even when a snapshot arrives.
         if slider.active_handle < 0:
             var t: Dictionary = p["thresholds"][resource]
+            slider.import_enabled = bool(t.get("import", true))
+            slider.export_enabled = bool(t.get("export", true))
+            trade_checks[resource][0].set_pressed_no_signal(slider.import_enabled)
+            trade_checks[resource][1].set_pressed_no_signal(slider.export_enabled)
+            trade_checks[resource][0].text = "Import %d%%" % roundi(float(t["min"]))
+            trade_checks[resource][1].text = "Export %d%%" % roundi(float(t["max"]))
+            slider.queue_redraw()
             if not is_equal_approx(slider.lower, float(t["min"])) or not is_equal_approx(slider.upper, float(t["max"])):
                 slider.set_range(float(t["min"]), float(t["max"]))
 
 func _apply_thresholds(minimum: float, maximum: float, resource: String) -> void:
-    session.call("request_thresholds", selected, resource, minimum, maximum)
+    var slider: TradeRange = trade_sliders[resource]
+    session.call("request_thresholds", selected, resource, minimum, maximum, slider.import_enabled, slider.export_enabled)
+
+func _trade_toggle(_pressed: bool, resource: String) -> void:
+    var slider: TradeRange = trade_sliders[resource]
+    slider.import_enabled = trade_checks[resource][0].button_pressed
+    slider.export_enabled = trade_checks[resource][1].button_pressed
+    if slider.import_enabled and slider.export_enabled and slider.lower > slider.upper:
+        slider.upper = slider.lower
+    slider.queue_redraw()
+    _apply_thresholds(slider.lower, slider.upper, resource)
 
 func _operation(kind: String, target: String = "") -> void:
     session.call("request_operation", selected, kind, target)
@@ -1770,6 +1836,9 @@ func _refresh() -> void:
     colony_button.disabled = not owned
     for slider in trade_sliders.values():
         slider.enabled = owned
+        for resource in trade_checks:
+            for check in trade_checks[resource]:
+                check.disabled = not owned
         if not owned:
             slider.active_handle = -1
         slider.queue_redraw()
@@ -1891,6 +1960,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             costs.columns = 3
             row.add_child(costs)
             var progress := ProgressBar.new()
+            progress.step = 0.0
             progress.custom_minimum_size.y = 16
             row.add_child(progress)
             var disclosure: Dictionary = _make_disclosure(row, "Upgrade")
@@ -2443,6 +2513,42 @@ func _sync_ship_visuals(state: Dictionary) -> void:
         if not updated.has(id):
             ship_offsets.erase(id)
 
+func _unhandled_key_input(event: InputEvent) -> void:
+    if not event is InputEventKey or not event.pressed or event.echo:
+        return
+    if event.physical_keycode not in [KEY_Q, KEY_E]:
+        return
+    if not is_instance_valid(match_menu) or match_menu.visible or str(session.get("phase")) != "match":
+        return
+    var focus: Control = get_viewport().gui_get_focus_owner()
+    if focus is LineEdit or focus is TextEdit or colony_picker.get_popup().visible:
+        return
+    _cycle_owned_system(-1 if event.physical_keycode == KEY_Q else 1)
+    get_viewport().set_input_as_handled()
+
+func _cycle_owned_system(direction: int) -> void:
+    var state: Dictionary = _state()
+    if state.is_empty():
+        return
+    var owned: Array[int] = []
+    for i in range(state["planets"].size()):
+        if int(state["planets"][i]["owner"]) == _me():
+            owned.append(i)
+    if owned.is_empty():
+        return
+    var current: int = owned.find(selected)
+    selected = owned[(0 if direction > 0 else owned.size() - 1) if current < 0 else posmod(current + direction, owned.size())]
+    selected_ship_id = -1
+    selected_field = -1
+    var world: Vector2 = state["map"]["points"][selected]
+    var desired_radius: float = minf(_projection_size().x, _projection_size().y) * 0.27
+    var radius_per_zoom: float = minf(RADIUS * float(state["planets"][selected].get("size_factor", 1.0)), float(_system_visual(selected, state)["spacing"]) * _fit() * 0.39)
+    zoom = clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, MAX_ZOOM)
+    var center: Vector2 = Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5
+    pan += center - _screen_point(world)
+    _load_thresholds()
+    _refresh()
+
 func _keyboard_pan(delta: float) -> void:
     if str(session.get("phase")) != "match" or match_menu.visible:
         return
@@ -2604,30 +2710,86 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
             var node: int = int(ship.get(endpoint, -1))
             if node < 0 or node >= points.size():
                 continue
+            var lane: Array[int] = ECONOMY._path(state, ECONOMY.planet_teams(state), int(state["planets"][node]["team"]) if state["planets"][node].has("team") else int(ECONOMY.planet_teams(state)[node]), int(ship["source"]), int(ship["dest"]), {})
+            if lane.size() < 2:
+                continue
+            var neighbor: int = lane[1] if endpoint == "source" else lane[lane.size() - 2]
             if not traffic.has(node):
-                traffic[node] = {"source": ECONOMY.empty_stock(), "dest": ECONOMY.empty_stock()}
+                traffic[node] = {}
+            var key: Vector2i = Vector2i(neighbor, 0 if endpoint == "source" else 1)
+            if not traffic[node].has(key):
+                traffic[node][key] = ECONOMY.empty_stock()
             for resource in ECONOMY.RESOURCES:
-                traffic[node][endpoint][resource] += float(ship["cargo"][resource])
+                traffic[node][key][resource] += float(ship["cargo"][resource])
     for node in traffic:
         if not ECONOMY.discovered(state, _me(), "planets", node):
             continue
         var center: Vector2 = _screen_point(points[node])
         var radius: float = _planet_radius(node, state)
-        for endpoint in ["source", "dest"]:
+        for key in traffic[node]:
+            var endpoint: String = "source" if key.y == 0 else "dest"
             for k in range(ECONOMY.RESOURCES.size()):
                 var resource: String = ECONOMY.RESOURCES[k]
-                var cargo: float = traffic[node][endpoint][resource]
+                var cargo: float = traffic[node][key][resource]
                 if cargo <= ECONOMY.EPS:
                     continue
-                var radial: Vector2 = Vector2.from_angle((-PI if endpoint == "source" else 0.0) + (float(k) - 2.5) * 0.25)
+                var radial: Vector2 = (_screen_point(points[key.x]) - center).normalized()
                 var axis: Vector2 = radial if endpoint == "source" else -radial
                 var normal: Vector2 = axis.orthogonal()
-                var base: Vector2 = center + radial * (radius + 24.0)
+                var base: Vector2 = center + radial * minf(radius + 24.0 + float(k) * 13.0, center.distance_to(_screen_point(points[key.x])) * 0.48)
                 var count: int = clampi(ceili(3.0 * cargo / ECONOMY.CARGO_CAPACITY), 1, 3)
                 map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(base + radial * 14.0 - Vector2(5, 5), Vector2(10, 10)), false)
                 for j in range(count):
                     var tip: Vector2 = base + axis * float(j * 5)
                     map_canvas.draw_polyline(PackedVector2Array([tip - axis * 4.0 + normal * 3.0, tip, tip - axis * 4.0 - normal * 3.0]), HUD.COLORS[resource], 1.5, true)
+
+func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
+    var planet: Dictionary = state["planets"][index]
+    var center: Vector2 = _screen_point(state["map"]["points"][index])
+    var scale: float = _ship_scale()
+    for slot in range(planet["yards"].size()):
+        var yard: Dictionary = planet["yards"][slot]
+        var angle: float = float(slot) * TAU / 3.0 + elapsed * 0.008
+        var axis: Vector2 = Vector2.from_angle(angle)
+        var side: Vector2 = axis.orthogonal()
+        var point: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
+        var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
+        var frame: PackedVector2Array = PackedVector2Array([point - axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale + side * 17.0 * scale, point - axis * 11.0 * scale + side * 17.0 * scale])
+        if conversion < 1.0:
+            var heading: Vector2 = yard.get("colony_heading", Vector2.UP)
+            var cross: Vector2 = heading.orthogonal()
+            var original := PackedVector2Array([point + heading * 12.0 * scale, point + cross * 7.0 * scale, point - heading * 9.0 * scale, point - cross * 7.0 * scale])
+            for k in range(4):
+                frame[k] = original[k].lerp(frame[k], smoothstep(0.0, 1.0, conversion))
+            map_canvas.draw_colored_polygon(frame, Color(tint.lightened(0.35), 1.0 - conversion))
+        for k in range(4):
+            map_canvas.draw_line(frame[k], frame[(k + 1) % 4], tint, 2.5 * scale, true)
+        for k in [-1.0, 1.0]:
+            var rail: Vector2 = point + axis * k * 11.0 * scale
+            map_canvas.draw_line(rail - side * 17.0 * scale, rail + side * 17.0 * scale, Color(Color("#8da2b6"), conversion), 4.0 * scale, true)
+        var health: float = float(yard.get("hp", ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))) / (ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))
+        if health < 0.999:
+            map_canvas.draw_rect(Rect2(point + Vector2(-12, -22) * scale, Vector2(24, 3) * scale), Color("#283748"))
+            map_canvas.draw_rect(Rect2(point + Vector2(-12, -22) * scale, Vector2(24 * health, 3) * scale), tint)
+        for job in planet["queue"]:
+            if int(job["id"]) != int(yard["job"]) or not ECONOMY.SHIP_KINDS.has(job["kind"]):
+                continue
+            var u: float = clampf(float(job["progress"]) / float(job["work"]), 0.0, 1.0)
+            var shape: PackedVector2Array
+            match str(job["kind"]):
+                "fighter": shape = PackedVector2Array([Vector2(12, 0), Vector2(-7, 8), Vector2(-3, 0), Vector2(-7, -8)])
+                "colony_ship": shape = PackedVector2Array([Vector2(12, 0), Vector2(0, 7), Vector2(-9, 0), Vector2(0, -7)])
+                "miner": shape = PackedVector2Array([Vector2(8, 4), Vector2(8, -4), Vector2(-6, -7), Vector2(-6, 7)])
+                _: shape = PackedVector2Array([Vector2(14, 4), Vector2(10, 8), Vector2(-13, 8), Vector2(-13, -8), Vector2(10, -8), Vector2(14, -4)])
+            var hull := PackedVector2Array()
+            for vertex in shape:
+                hull.append(point + side * vertex.x * scale + axis * vertex.y * scale)
+            var edges: int = mini(hull.size(), floori(u * 2.0 * hull.size()))
+            for k in range(edges):
+                map_canvas.draw_line(hull[k], hull[(k + 1) % hull.size()], tint.lightened(0.4), 1.5 * scale, true)
+            if u > 0.5:
+                map_canvas.draw_colored_polygon(hull, Color(tint.lightened(0.4), (u - 0.5) * 2.0))
+            break
 
 func _draw_map() -> void:
     if session == null:
@@ -2695,6 +2857,7 @@ func _draw_map() -> void:
         var radius: float = _planet_radius(i, state)
         var tint: Color = _empire_color(int(state["planets"][i]["owner"]))
         _draw_system(i, state, pos, radius, tint)
+        _draw_shipyards(state, i, tint, float(state["elapsed"]))
         if i == selected and bool(state["planets"][i]["home"]):
             map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
         if i == selected:
@@ -2702,8 +2865,7 @@ func _draw_map() -> void:
             for angle in range(4):
                 var start: float = float(angle) * TAU / 4.0 + 0.1
                 map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
-        if i == selected:
-            map_canvas.draw_string(font, pos + Vector2(-80, -radius - 8), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff"))
+        map_canvas.draw_string(font, pos + Vector2(-80, -radius - 8), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
     _draw_combat_lens(state, font)
     _draw_logistics_lens(state, font)
     var poses: Dictionary = _ship_poses(state)
@@ -2727,6 +2889,12 @@ func _draw_map() -> void:
     for ship in state["ships"]:
         var shooter: int = int(ship["id"])
         var target: int = int(ship.get("combat_target", -1))
+        var yard_target: int = int(ship.get("yard_target", -1))
+        if poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
+            var index: int = floori(float(-2 - yard_target) / 3.0)
+            var slot: int = posmod(-2 - yard_target, 3)
+            if index < state["planets"].size() and slot < state["planets"][index]["yards"].size():
+                map_canvas.draw_line(poses[shooter]["point"], _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), Color("#ffbf96"), 1.5, true)
         if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
             map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ff6f6060"), 4.0, true)
             map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ffbf96"), 1.0, true)
@@ -2737,6 +2905,10 @@ func _draw_map() -> void:
         var point: Vector2 = pose["point"]
         var direction: Vector2 = pose["direction"]
         var mining: bool = pose["mining"]
+        if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock"):
+            var aim: Vector2 = _screen_point(ship["mining_rock"]) - point
+            if not aim.is_zero_approx():
+                direction = aim.normalized()
         var route: Array = ship["route"]
         var empire: Color = _empire_color(int(ship["owner"]))
         var loaded: bool = ECONOMY._cargo_total(ship) > ECONOMY.EPS
@@ -2767,8 +2939,23 @@ func _draw_map() -> void:
         var target: Vector2 = ship.get("navigation_target", physical)
         if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not ECONOMY._engaged(ship)) and physical.distance_to(target) > ECONOMY.EPS:
             var engine: Vector2 = point - direction * 9.0
-            map_canvas.draw_circle(engine, 5.0 * scale, Color("#43a5ff30"), true)
-            map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0 * scale, true)
+            if viewport_bounds.grow(24.0).has_point(engine):
+                var particle_count: int = 5 if scale >= 1.0 else 2
+                for k in range(particle_count):
+                    var age: float = fposmod(visual_clock * 3.5 + float(k) / float(particle_count) + float(ship["id"]) * 0.173, 1.0)
+                    var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * age * 2.5
+                    var spark: Vector2 = engine - direction * (2.0 + age * 12.0) + side * offset
+                    map_canvas.draw_circle(spark, maxf(0.75, (2.0 - age) * scale), Color(0.45, 0.85, 1.0, (1.0 - age) * 0.85), false)
+        if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and viewport_bounds.grow(32.0).has_point(point) and scale >= 0.65:
+            var rock: Vector2 = _screen_point(ship["mining_rock"])
+            for sign in [-1.0, 1.0]:
+                var emitter: Vector2 = point + direction * 7.0 + side * sign * 3.0
+                var impact: Vector2 = rock + side * sign * 2.0
+                map_canvas.draw_line(emitter, impact, Color("#9af6b8"), maxf(0.8, scale), true)
+                for k in range(3 if scale >= 1.0 else 1):
+                    var age: float = fposmod(visual_clock * 4.0 + float(k) * 0.33 + sign * 0.12, 1.0)
+                    var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
+                    map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
         if int(ship["id"]) == selected_ship_id:
             map_canvas.draw_arc(point, maxf(5.0, 15.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
         map_canvas.draw_colored_polygon(shape, hull)

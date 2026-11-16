@@ -630,7 +630,8 @@ func _initialize() -> void:
     var after_build: float = float(mine_home["stock"]["Metals"])
     assert(is_equal_approx(after_build, float(ECON.STARTING_STOCK["Metals"]) - float(ECON._cost("miner", 1)["Metals"])))
     ECON.step(mineral, 0.1)
-    assert(miner["mining_target"] == metal_pos)
+    assert(miner["mining_rock"] == metal_pos)
+    assert((miner["mining_target"] as Vector2).distance_to(metal_pos) >= 12.0 - ECON.EPS)
     assert(int(miner["chunk"]) == 7)
     for i in range(20):
         if miner["mining_mode"] == "mining":
@@ -718,7 +719,7 @@ func _initialize() -> void:
     var colonization: Dictionary = ECON.create(colony_map, players, ids, false)
     assert(ECON.enqueue(colonization, 1, 0, "colony_ship"))
     assert(ECON.enqueue(colonization, 3, 2, "colony_ship"))
-    for i in range(12):
+    for i in range(ceili(ECON._work("colony_ship", 1) / ECON.yard_speed(1))):
         ECON.step(colonization, 1.0)
     assert(colonization["ships"].size() == 2)
     var c1: Dictionary = colonization["ships"][0]
@@ -1057,7 +1058,7 @@ func _initialize() -> void:
         else:
             assert(ECON.rate(industry, resource) > 0.0)
     var remaining_stock: Dictionary = industry["stock"].duplicate()
-    for kind in ["fighter", "fighter", "ship", "colony_ship"]:
+    for kind in ["fighter", "fighter", "ship", "miner"]:
         var cost: Dictionary = ECON._cost(kind, 1)
         assert(cost.size() == 5)
         for material in cost:
@@ -1081,14 +1082,24 @@ func _initialize() -> void:
     assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "unknown"))
     assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Tech"))
     assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
+    var building: Dictionary = industry["queue"][0]
+    assert(is_equal_approx(ECON.rate(industry, "Textiles"), textile_rate))
+    assert(industry["stock"] == before_stock)
+    assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
+    assert(ECON._advance(industry, building, float(building["work"])))
+    ECON._finish(bootstrap, 0, industry, building)
     assert(is_equal_approx(ECON.rate(industry, "Textiles"), textile_rate * 1.25))
     for material in ECON.ECONOMY_BUILDINGS["Textiles"]["cost"]:
         assert(is_equal_approx(float(industry["stock"][material]), float(before_stock[material]) - float(ECON.ECONOMY_BUILDINGS["Textiles"]["cost"][material])))
-    var purchased_stock: Dictionary = industry["stock"].duplicate()
-    assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
-    assert(industry["stock"] == purchased_stock)
+    assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
+    var next_building: Dictionary = industry["queue"][0]
+    for material in ECON.ECONOMY_BUILDINGS["Textiles"]["cost"]:
+        assert(is_equal_approx(float(next_building["cost"][material]), 3.0 * float(ECON.ECONOMY_BUILDINGS["Textiles"]["cost"][material])))
+    assert(ECON.cancel(bootstrap, 1, 0, int(next_building["id"])))
     industry["stock"]["Tech"] = 0.0
-    assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Organics"))
+    assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Organics"))
+    assert(is_zero_approx(ECON._possible(industry, industry["queue"][0])))
+    assert(ECON.cancel(bootstrap, 1, 0, int(industry["queue"][0]["id"])))
     assert(ECON.enqueue(bootstrap, 1, 0, "fighter"))
     assert(is_zero_approx(ECON._possible(industry, industry["queue"][0])))
     industry["stock"]["Tech"] = 100.0
@@ -1100,6 +1111,17 @@ func _initialize() -> void:
     assert(ECON.cancel(bootstrap, 1, 0, int(build["id"])))
     for material in preallocation:
         assert(is_equal_approx(float(industry["stock"][material]), float(preallocation[material])))
+    var timed_state: Dictionary = ECON.create(graph, players, ids, false)
+    var timed_home: Dictionary = timed_state["planets"][0]
+    assert(ECON.enqueue(timed_state, 1, 0, "economy", "Textiles"))
+    var timed_building: Dictionary = timed_home["queue"][0]
+    assert(is_equal_approx(float(timed_building["work"]), 30.0))
+    ECON._work_planet(timed_state, 0, 29.0)
+    assert(is_equal_approx(float(timed_building["progress"]), 29.0))
+    assert(int(timed_home["buildings"].get("Textiles", 0)) == 0)
+    ECON._work_planet(timed_state, 0, 1.0)
+    assert(int(timed_home["buildings"]["Textiles"]) == 1)
+    assert(timed_home["queue"].is_empty())
     print("PASS: multi-resource hulls, population gates and permanent local improvements")
     var warehouse_state: Dictionary = ECON.create(graph, players, ids, false)
     var depot: Dictionary = warehouse_state["planets"][0]

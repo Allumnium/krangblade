@@ -114,3 +114,13 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Visually validate segmented global resource strips at constrained widths (v0.15.5).
 
 - [ ] Validate population segments, live growth breakdown and modifier-only habitation descriptions (v0.15.6).
+
+- [ ] Validate timed repeatable economy buildings and independent trade switches (v0.16.0).
+
+- [ ] Integrate orbital shipyard combat targeting, destruction and docking; validate assembly visuals (v0.16.2 prototype).
+
+- [ ] Validate miner stand-off, extraction beams and thrust particles; profile hundreds of visible hulls (v0.16.4).
+
+- [ ] Validate colony-to-shipyard conversion, revised recipe and orbital morph (v0.16.5).
+
+- [ ] Validate shipyard combat/destruction and launch positions, compact trade toggles and latest HUD changes (v0.16.9).
