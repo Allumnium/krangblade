@@ -2836,6 +2836,10 @@ func _draw_map() -> void:
         var point: Vector2 = pose["point"]
         var direction: Vector2 = pose["direction"]
         var mining: bool = pose["mining"]
+        if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock"):
+            var aim: Vector2 = _screen_point(ship["mining_rock"]) - point
+            if not aim.is_zero_approx():
+                direction = aim.normalized()
         var route: Array = ship["route"]
         var empire: Color = _empire_color(int(ship["owner"]))
         var loaded: bool = ECONOMY._cargo_total(ship) > ECONOMY.EPS
@@ -2866,8 +2870,23 @@ func _draw_map() -> void:
         var target: Vector2 = ship.get("navigation_target", physical)
         if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not ECONOMY._engaged(ship)) and physical.distance_to(target) > ECONOMY.EPS:
             var engine: Vector2 = point - direction * 9.0
-            map_canvas.draw_circle(engine, 5.0 * scale, Color("#43a5ff30"), true)
-            map_canvas.draw_line(engine, engine - direction * (5.0 + 2.0 * sin(visual_clock * 9.0)), Color("#79dfff"), 2.0 * scale, true)
+            if viewport_bounds.grow(24.0).has_point(engine):
+                var particle_count: int = 5 if scale >= 1.0 else 2
+                for k in range(particle_count):
+                    var age: float = fposmod(visual_clock * 3.5 + float(k) / float(particle_count) + float(ship["id"]) * 0.173, 1.0)
+                    var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * age * 2.5
+                    var spark: Vector2 = engine - direction * (2.0 + age * 12.0) + side * offset
+                    map_canvas.draw_circle(spark, maxf(0.75, (2.0 - age) * scale), Color(0.45, 0.85, 1.0, (1.0 - age) * 0.85), false)
+        if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and viewport_bounds.grow(32.0).has_point(point) and scale >= 0.65:
+            var rock: Vector2 = _screen_point(ship["mining_rock"])
+            for sign in [-1.0, 1.0]:
+                var emitter: Vector2 = point + direction * 7.0 + side * sign * 3.0
+                var impact: Vector2 = rock + side * sign * 2.0
+                map_canvas.draw_line(emitter, impact, Color("#9af6b8"), maxf(0.8, scale), true)
+                for k in range(3 if scale >= 1.0 else 1):
+                    var age: float = fposmod(visual_clock * 4.0 + float(k) * 0.33 + sign * 0.12, 1.0)
+                    var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
+                    map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
         if int(ship["id"]) == selected_ship_id:
             map_canvas.draw_arc(point, maxf(5.0, 15.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
         map_canvas.draw_colored_polygon(shape, hull)

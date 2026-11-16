@@ -101,3 +101,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Completed shipyards have replicated HP (1,000 at level one, 1,000 per level) and slow orbital construction frames. Assigned hulls show outline segments snapping into place then progressive fill using actual job progress. Combat targeting/destruction of shipyards requires further integration.
 
 - Single-system global HUD strips omit system names; population uses the same expanding width as resource tiles. Use “Overpopulation penalty” in demographic and habitation upgrade descriptions.
+
+- Miners approach a physical stand-off point beside the target rock; dual short extraction beams and sparse impact sparks are local presentation. Ship thrust uses bounded procedural particles, culled offscreen and reduced at low zoom. No particle nodes or replicated particle state.
