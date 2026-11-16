@@ -2169,7 +2169,15 @@ static func _ai_wave_order(state: Dictionary, graph: Dictionary, player: int, ho
         active.clear()
         target = -1
     active = _dispatch_cohorts(state, graph, home, target if not active.is_empty() else goal, fighters, active, true)
-    waves[player] = {"target": (target if target >= 0 else goal) if not active.is_empty() else -1, "members": active}
+    var next_target: int = (target if target >= 0 else goal) if not active.is_empty() else -1
+    waves[player] = {"target": next_target, "members": active, "home": home}
+    # Store strategic objectives separately from temporary movement destinations.
+    # Recovery and regroup routes must not split an active wave's formation.
+    for ship in fighters:
+        if active.has(int(ship["id"])):
+            ship["operation_target"] = next_target
+        else:
+            ship["operation_target"] = home
 
 # Shared authoritative rally and deployment mechanics. AI keeps one active
 # wave; human allocations may launch additional assembled cohorts.
@@ -2213,6 +2221,12 @@ static func _sync_operations(state: Dictionary) -> void:
         if state.get("ai_players", []).has(owner):
             var wave: Dictionary = state.get("ai_waves", {}).get(owner, {})
             role = "wave" if wave.get("members", []).has(int(ship["id"])) else "reserve"
+            # An explicitly assigned objective remains stable while the craft
+            # pursues enemies or takes a detour to repair.
+            if role == "wave" and int(wave.get("target", -1)) >= 0:
+                target = int(wave["target"])
+            elif role == "reserve" and int(wave.get("home", -1)) >= 0:
+                target = int(wave["home"])
         var key: String = "%d:%s:%d" % [owner, role, target]
         if not current.has(key):
             current[key] = {"id": 0, "owner": owner, "target": target, "role": role, "members": [], "moving": false, "engaged": false, "phase": "assigned", "deployed": []}
