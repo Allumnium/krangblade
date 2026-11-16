@@ -2701,12 +2701,22 @@ func _draw_shipyards(planet: Dictionary, center: Vector2, radius: float, tint: C
         var axis: Vector2 = Vector2.from_angle(angle)
         var side: Vector2 = axis.orthogonal()
         var point: Vector2 = center + axis * (radius + 22.0 * scale)
+        var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
+        if conversion < 1.0:
+            point = center.lerp(point, smoothstep(0.0, 1.0, conversion))
         var frame: PackedVector2Array = PackedVector2Array([point - axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale + side * 17.0 * scale, point - axis * 11.0 * scale + side * 17.0 * scale])
+        if conversion < 1.0:
+            var heading: Vector2 = yard.get("colony_heading", Vector2.UP)
+            var cross: Vector2 = heading.orthogonal()
+            var original := PackedVector2Array([point + heading * 12.0 * scale, point + cross * 7.0 * scale, point - heading * 9.0 * scale, point - cross * 7.0 * scale])
+            for k in range(4):
+                frame[k] = original[k].lerp(frame[k], smoothstep(0.0, 1.0, conversion))
+            map_canvas.draw_colored_polygon(frame, Color(tint.lightened(0.35), 1.0 - conversion))
         for k in range(4):
             map_canvas.draw_line(frame[k], frame[(k + 1) % 4], tint, 2.5 * scale, true)
         for k in [-1.0, 1.0]:
             var rail: Vector2 = point + axis * k * 11.0 * scale
-            map_canvas.draw_line(rail - side * 17.0 * scale, rail + side * 17.0 * scale, Color("#8da2b6"), 4.0 * scale, true)
+            map_canvas.draw_line(rail - side * 17.0 * scale, rail + side * 17.0 * scale, Color(Color("#8da2b6"), conversion), 4.0 * scale, true)
         for job in planet["queue"]:
             if int(job["id"]) != int(yard["job"]) or not ECONOMY.SHIP_KINDS.has(job["kind"]):
                 continue

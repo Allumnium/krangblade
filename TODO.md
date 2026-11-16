@@ -120,3 +120,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Integrate orbital shipyard combat targeting, destruction and docking; validate assembly visuals (v0.16.2 prototype).
 
 - [ ] Validate miner stand-off, extraction beams and thrust particles; profile hundreds of visible hulls (v0.16.4).
+
+- [ ] Validate colony-to-shipyard conversion, revised recipe and orbital morph (v0.16.5).

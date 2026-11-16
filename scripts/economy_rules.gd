@@ -357,6 +357,7 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
         colony["owner"] = int(ship["owner"])
         colony["population"] = float(ship.get("crew", COLONY_POPULATION))
         colony["population_velocity"] = 0.0
+        colony["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
         for resource in ["Plastics", "Textiles", "Organics", "Tech"]:
             colony["levels"][resource] = 1
         return true # consumed to establish the colony
@@ -487,7 +488,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
     # Explicit prototype values; the final costs/recipes are intentionally undefined.
     match kind:
         "ship": return {"Metals": 360.0, "Plastics": 75.0, "Textiles": 45.0, "Organics": 45.0, "Tech": 30.0}
-        "colony_ship": return {"Metals": 720.0, "Plastics": 120.0, "Textiles": 90.0, "Organics": 90.0, "Tech": 90.0}
+        "colony_ship": return {"Metals": 1200.0, "Plastics": 120.0, "Textiles": 90.0, "Organics": 90.0, "Tech": 90.0}
         "fighter": return {"Metals": 270.0, "Plastics": 60.0, "Textiles": 30.0, "Organics": 30.0, "Tech": 30.0}
         "miner": return {"Metals": 540.0, "Plastics": 90.0, "Textiles": 45.0, "Organics": 60.0, "Tech": 60.0}
         "yard":
@@ -505,7 +506,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
 static func _work(kind: String, level: int) -> float:
     match kind:
         "ship": return 48.0
-        "colony_ship": return 72.0
+        "colony_ship": return 102.0
         "fighter": return 36.0
         "miner": return 60.0
         "yard": return 30.0
