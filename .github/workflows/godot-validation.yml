@@ -93,7 +93,9 @@ jobs:
                   fast = fast and same_config
           cases = [{"count": 2, "mode": "normal"}]
           if not fast:
-              cases += [{"count": 8, "mode": "normal"}, {"count": 2, "mode": "drop-loading"}, {"count": 2, "mode": "host-leave"}]
+              cases += [{"count": 3, "mode": "normal"}, {"count": 2, "mode": "drop-loading"}, {"count": 2, "mode": "host-leave"}]
+          if os.environ["EVENT"] == "workflow_dispatch":
+              cases.append({"count": 8, "mode": "normal"})
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               print("cases=" + json.dumps({"include": cases}, separators=(",", ":")), file=output)
               print("docs_only=" + str(eligible).lower(), file=output)

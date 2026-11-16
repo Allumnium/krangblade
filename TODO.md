@@ -77,7 +77,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [ ] Playtest the full loop at 1× for 1v1, four-player and larger team matches. Balance travel, economy, construction, conflict, negotiation, and antimatter timing toward typical 10–30 minute matches.
 - [ ] Assess strategic variety, meaningful decisions per minute, runaway leaders, comeback options and AI competence.
 - [ ] Audit policy readability, map targeting, formation visuals, economy feedback, constrained-window layout and multiplayer behavior.
-- [ ] Keep existing two-/eight-peer ENet, disconnect, simulation, parsing and startup regressions mandatory; validate UI manually and real internet behavior separately.
+- [ ] Keep existing two-/three-peer ENet, disconnect, simulation, parsing and startup regressions mandatory; validate UI manually and real internet behavior separately.
 
 ## Deferred / not yet agreed
 - Formal galactic votes, complex treaties, elaborate tech trees, additional playable races, ship customization and campaigns.
@@ -139,3 +139,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.16.26: operation snapshots track deployed, rallying, recovering and in-transit membership; persistent AI wave ownership remains outstanding. Validation pending.
 
 - [ ] Measure CI runtime after scoped multiplayer matrix and import cache (v0.16.27). Evaluate safe reuse of validated identical merge trees separately.
+
+- [ ] Run eight-peer stress validation manually before major releases; routine extended CI uses three peers (v0.16.28).
