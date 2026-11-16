@@ -27,6 +27,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - v0.11.5 validated and merged via PR #51. Prototype includes finite population-serving industrial capacity (Plastics, Textiles, Tech) so linear demand can catch up even below the storage ceiling; implements the above via existing authority commands and local inventories; Headless validation passed; visual playtesting and longer AI sustainability evaluation remain.
 
 ## Phase 1 — Autonomous military foundation
+- [ ] First integration step: consolidate human and AI operation dispatch and lifecycle while keeping current POI allocations, rally rules and retreat behavior. Keep existing regressions and add shared-operation coverage before policy work.
 - [x] Validate v0.13.0 starting fleets (3 miners, 2 fighters per empire) and planet-limited PDS construction, refunds, combat, replication and overlays. Visual playtesting and balance outstanding.
 - [ ] Rework military control into persistent fleet/operation groups shared by human and AI empires.
   - Initial v0.9.0 prototype: shared authoritative operation IDs, member lists, objectives and movement/engagement flags derived from existing routing. v0.9.0 validation passed (PR #47). v0.10.0 prototype moves human routing into operation dispatch and preserves identity on group retargeting; AI still uses its existing wave controller. Full unified command model remains outstanding.

@@ -781,9 +781,11 @@ func _run() -> void:
         push_error("Map smoke assertion failed at line %d" % get_stack()[0]["line"])
         quit(1)
         return
+    # Compare the inspector against the same authoritative publication, not an intermediate tick.
+    session.call("_publish_economy")
     var third_progress: float = 100.0 * float(third_job["progress"]) / float(third_job["work"])
     if not is_equal_approx((idle_rows[third_key]["progress"] as ProgressBar).value, third_progress):
-        push_error("Shipyard progress bar disagrees with authoritative work fraction")
+        push_error("Shipyard progress bar disagrees with authoritative work fraction: displayed=%s expected=%s" % [(idle_rows[third_key]["progress"] as ProgressBar).value, third_progress])
         quit(1)
         return
     (idle_rows[second_key]["cancel"] as Button).pressed.emit()
