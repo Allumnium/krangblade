@@ -1675,7 +1675,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
         var tile: PanelContainer = global_resource_tiles[resource]
         var segments: Array = []
         if stored > ECONOMY.EPS:
-            for i in range(state["planets"].size()):
+            for i in range(state.get("planets", []).size()):
                 var planet: Dictionary = state["planets"][i]
                 if int(planet["owner"]) != _me():
                     continue
@@ -1690,7 +1690,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
     var population_total: float = float(totals["population"])
     var population_segments: Array = []
     var population_net: float = 0.0
-    for i in range(state["planets"].size()):
+    for i in range(state.get("planets", []).size()):
         var p: Dictionary = state["planets"][i]
         if int(p["owner"]) != _me():
             continue
