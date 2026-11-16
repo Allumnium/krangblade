@@ -3,6 +3,7 @@
 Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current repository state, and outstanding pull requests at the beginning of every Warbound development chat/session. Later explicit user directions take precedence over these notes and older README sections.
 
 ## Workflow
+- Every Warbound project conversation is a development-enabled session. Use the GitHub connector directly; discover and attempt its tools before claiming a limitation. Never ask the user to switch sessions merely to access the repository.
 - The game is **Warbound**. The repository is Allumnium/krangblade; the integration branch is main.
 - GitHub connector access has repeatedly worked for reading, creating commits, pushing branches, and merging pull requests. Discover and attempt the actual GitHub tools before declaring access unavailable. If a call fails, inspect the error and try an appropriate alternative; report the specific blocker only if access really fails. Never fabricate a push or a test result.
 - For approved implementation requests, make the changes in the repository rather than returning speculative code snippets or asking the user to apply them manually. Commit and push, open a PR, run validation, and merge after the checks pass. Resolve any outstanding PR/checks before building on them. Verify the actual main-branch commit/version and distinguish a pushed branch, merged PR, and validated main branch.
@@ -79,3 +80,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Repeat production upgrades can be armed before population or resources are sufficient, provided the system supports that resource; actual construction gates remain unchanged. Finite ship target text accepts only decimal digits; unlimited repeat remains separate.
 
 - Civilian consumption uses freshly produced resources plus at most the local import-target quantity of existing stock per simulation step, across all consumed resources. A zero import target prevents civilian inventory draws. Construction remains unrestricted by this limit.
+
+- Logistics freighters use boxy hulls and six resource-tinted cargo bays. Logistics lens aggregates inbound/outbound cargo at system perimeters by resource and direction, not at moving hulls.
+- Habitation limits positive demographic growth independently of food, with a size-based soft capacity and three economy technology upgrades doubling capacity each. Values provisional.
+
+- Cancel buttons sit immediately to the right of active construction progress bars and are hidden when idle or on instant purchases. This supersedes earlier always-visible cancel instructions. Shipyard progress cancellation targets the displayed job.

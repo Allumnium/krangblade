@@ -224,8 +224,8 @@ func _run() -> void:
     textile_mill.pressed.emit()
     assert(state["planets"][0]["buildings"]["Textiles"])
     assert(textile_mill.disabled and textile_mill.text == "Built")
-    assert((building_cards["Textiles"]["cancel"] as Button).visible and (building_cards["Textiles"]["cancel"] as Button).disabled)
-    assert((view.get("warehouse_card")["cancel"] as Button).disabled)
+    assert(not (building_cards["Textiles"]["cancel"] as Button).visible)
+    assert(not (view.get("warehouse_card")["cancel"] as Button).visible)
     tabs.current_tab = 3
     assert(not (building_cards["Textiles"]["body"] as Control).visible)
     var cards: Dictionary = view.get("upgrade_cards")

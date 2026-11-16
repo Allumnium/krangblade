@@ -38,6 +38,7 @@ var yard_activity_rows: Dictionary = {}
 var inspector_tabs: TabContainer
 var asteroid_shape_cache: Dictionary = {}
 var asteroid_cache_seed: int = -1
+var habitation_card: Dictionary = {}
 var population_label: Label
 var population_delta_label: Label
 var zoom: float = 1.0
@@ -473,8 +474,18 @@ func _card_action(card: Dictionary, caption: String, callback: Callable) -> Butt
     button.add_theme_font_size_override("font_size", 10)
     return button
 
-func _card_cancel(card: Dictionary, callback: Callable) -> Button:
+func _card_cancel(card: Dictionary, callback: Callable, progress: ProgressBar = null) -> Button:
     var button: Button = _card_action(card, "×", callback)
+    if progress != null:
+        var parent: Node = progress.get_parent()
+        var index: int = progress.get_index()
+        var line := HBoxContainer.new()
+        parent.add_child(line)
+        parent.move_child(line, index)
+        progress.reparent(line, false)
+        progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        button.reparent(line, false)
+    button.hide()
     button.custom_minimum_size.x = 23
     button.tooltip_text = "Cancel / refund"
     button.disabled = true
@@ -619,7 +630,7 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     if kind != "yard":
         var check: Button = _repeat_button(row, kind)
         continuous_checks[kind] = check
-    var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind(kind, ""))
+    var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind(kind, ""), build_progress)
     cancel.tooltip_text = "Cancel one order and stop repeat"
     disclosure.merge({"maintained": maintained, "maintain_amount": amount, "infinity": infinity, "button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
     build_cards[kind] = disclosure
@@ -734,6 +745,11 @@ func _build_economy_cards(parent: Container) -> void:
     warehouse_card["cancel"] = _card_cancel(warehouse_card, func() -> void: pass)
     HUD.action(warehouse_button)
     warehouse_card.merge({"button": warehouse_button, "detail": warehouse_detail, "costs": _cost_grid(warehouse)})
+    habitation_card = _make_disclosure(parent, "Habitation technology")
+    var habitat_body: VBoxContainer = habitation_card["body"]
+    var habitat_detail: Label = _label("", 12)
+    habitat_body.add_child(habitat_detail)
+    habitation_card.merge({"button": _card_action(habitation_card, "Upgrade", _operation.bind("economy", "habitation")), "detail": habitat_detail, "costs": _cost_grid(habitat_body)})
     for resource in ECONOMY.RESOURCES:
         var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
         var section: VBoxContainer = HUD.section(parent, "")
@@ -751,6 +767,13 @@ func _build_economy_cards(parent: Container) -> void:
         economy_cards[resource] = disclosure
 
 func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
+    var habitat_level: int = int(p.get("habitation_level", 0))
+    _disclosure_title(habitation_card, "Habitation technology · Lv %d" % habitat_level)
+    habitation_card["detail"].text = "%s capacity%s" % [_compact_amount(ECONOMY.habitation_capacity(p)), " · next level doubles capacity" if habitat_level < 3 else ""]
+    habitation_card["button"].disabled = not owned or not ECONOMY.habitation_available(p)
+    habitation_card["button"].text = "Max" if habitat_level >= 3 else "Upgrade"
+    habitation_card["costs"].visible = habitat_level < 3
+    _show_cost(habitation_card["costs"], ECONOMY.habitation_cost(p))
     var level: int = int(p.get("warehouse_level", 0))
     var warehouse_button: Button = warehouse_card["button"]
     warehouse_button.disabled = not owned or not ECONOMY.warehouse_available(p)
@@ -808,7 +831,7 @@ func _build_upgrade_cards(parent: Container) -> void:
         section.move_child(progress, card.get_index())
         var actions: HBoxContainer = disclosure["actions"]
         var action: Button = _card_action(disclosure, "Upgrade", _operation.bind("production", resource))
-        var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind("production", resource))
+        var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind("production", resource), progress)
         HUD.action(action)
         var repeat: Button = _repeat_button(actions, "production:" + resource)
         disclosure.merge({"title": disclosure["header"], "name": labels[resource], "detail": detail, "progress": progress, "button": action, "cancel": cancel, "repeat": repeat, "costs": _cost_grid(card)})
@@ -825,7 +848,7 @@ func _build_upgrade_cards(parent: Container) -> void:
     section.move_child(progress, body.get_index())
     var costs: GridContainer = _cost_grid(body)
     var action: Button = _card_action(pds_card, "Build", func() -> void: _operation("pds", str(ECONOMY.next_pds(_planet()))))
-    var cancel: Button = _card_cancel(pds_card, _pds_action)
+    var cancel: Button = _card_cancel(pds_card, _pds_action, progress)
     HUD.action(action)
     pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel})
 
@@ -847,6 +870,7 @@ func _refresh_pds(planet: Dictionary, owned: bool) -> void:
     var action: Button = pds_card["button"]
     action.text = "Build" if slot >= 0 else "Complete"
     action.disabled = not owned or slot < 0 or not job.is_empty()
+    pds_card["cancel"].visible = not job.is_empty()
     pds_card["cancel"].disabled = not owned or job.is_empty()
     pds_card["detail"].text = "One battery per planet · %.0f damage / shot · Range %.0f · Fires once/yr" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
     pds_card["costs"].visible = slot >= 0 or not job.is_empty()
@@ -894,10 +918,12 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
             _show_cost(card["costs"], job["cost"])
             button.text = "Upgrade"
             button.disabled = true
+            card["cancel"].show()
             card["cancel"].disabled = not owned
         else:
             button.text = "Upgrade"
             button.disabled = not owned or not unlocked
+            card["cancel"].hide()
             card["cancel"].disabled = true
             if not available:
                 detail.text = "No local deposit"
@@ -1458,7 +1484,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
     if resource == "population":
         var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
         var crew: float = float(p.get("crew_rate", 0.0))
-        return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nFood-supported equilibrium: %.0f\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, ECONOMY.population_capacity(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
+        return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nHabitation capacity: %.0f\nFood-supported equilibrium: %.0f\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, ECONOMY.habitation_capacity(p), ECONOMY.population_capacity(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
     var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Latest local flows (t/yr)"]
     var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
     for category in p.get("flows", {}):
@@ -1782,7 +1808,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             var upgrade_costs: GridContainer = _cost_grid(disclosure["body"])
             var actions: HBoxContainer = disclosure["actions"]
             var upgrade: Button = _card_action(disclosure, "Upgrade", _upgrade_yard_at.bind(int(index)))
-            var cancel: Button = _card_cancel(disclosure, _cancel_yard_at.bind(int(index)))
+            var cancel: Button = _card_cancel(disclosure, _cancel_yard_at.bind(int(index)), progress)
             var repeat: Button = _repeat_button(actions, "yard_upgrade:" + str(index))
             upgrade.custom_minimum_size.y = 24
             upgrade.add_theme_font_size_override("font_size", 11)
@@ -1798,7 +1824,9 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         var costs: GridContainer = yard_activity_rows[index]["costs"]
         var can_build: bool = vacant and number == ECONOMY.next_shipyard_slot(p) and int(p["owner"]) == _me() and str(session.get("phase")) == "match"
         build.visible = can_build
-        yard_activity_rows[index]["vacant_cancel"].visible = vacant
+        yard_activity_rows[index]["vacant_cancel"].hide()
+        if vacant:
+            yard_activity_rows[index]["cancel"].hide()
         build.disabled = not can_build
         costs.visible = can_build
         yard_activity_rows[index]["actions"].visible = not vacant
@@ -1837,7 +1865,16 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         var cancelling: Button = yard_activity_rows[index]["cancel"]
         upgrade.visible = existing
         repeat.visible = existing
-        cancelling.disabled = not owned or (existing and not pending)
+        cancelling.visible = not job.is_empty()
+        cancelling.disabled = not owned or job.is_empty()
+        if not job.is_empty():
+            if cancelling.pressed.is_connected(_cancel_yard_at.bind(int(index))):
+                cancelling.pressed.disconnect(_cancel_yard_at.bind(int(index)))
+            if cancelling.has_meta("job_callback"):
+                cancelling.pressed.disconnect(cancelling.get_meta("job_callback"))
+            var callback: Callable = _cancel_job.bind(int(job["id"]))
+            cancelling.set_meta("job_callback", callback)
+            cancelling.pressed.connect(callback)
         _sync_repeat(repeat, p, "yard_upgrade:" + str(index), repeat.visible and str(session.get("phase")) == "match")
         upgrade.disabled = not owned or not existing or pending or not operating
         upgrade.text = "Upgrade"
@@ -1940,7 +1977,7 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
             progress.value = 100.0 * float(job["progress"]) / float(job["work"])
             progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
             _style_progress(progress, p, job)
-        card["cancel"].visible = true
+        card["cancel"].visible = not job.is_empty()
         card["cancel"].disabled = not owned or count == 0
 
 func _system_name(index: int) -> String:
@@ -2456,30 +2493,39 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
             map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13) * scale), false)
             if scale >= 0.8:
                 map_canvas.draw_string(font, cell + Vector2(15, 11) * scale, _tons(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
-    # Loaded logistics hulls indicate traffic direction on the actual current leg.
+    # Aggregate loaded shipments at their origin and final destination.
+    var traffic: Dictionary = {}
     for ship in state["ships"]:
-        if ship["kind"] != "ship" or (ship["route"] as Array).is_empty():
+        if ship["kind"] != "ship" or ECONOMY._cargo_total(ship) <= ECONOMY.EPS:
             continue
-        var from: Vector2 = _screen_point(points[int(ship["at"])])
-        var toward: Vector2 = _screen_point(points[int(ship["route"][0])])
-        var axis: Vector2 = (toward - from).normalized()
-        var normal: Vector2 = Vector2(-axis.y, axis.x)
-        var center: Vector2 = _screen_point(ship["position"])
-        if not get_viewport_rect().grow(80.0).has_point(center):
-            continue
-        var row: int = 0
-        for resource in ECONOMY.RESOURCES:
-            var cargo: float = float(ship["cargo"][resource])
-            if cargo <= ECONOMY.EPS:
+        for endpoint in ["source", "dest"]:
+            var node: int = int(ship.get(endpoint, -1))
+            if node < 0 or node >= points.size():
                 continue
-            var count: int = clampi(ceili(3.0 * cargo / ECONOMY.CARGO_CAPACITY), 1, 3)
-            var base: Vector2 = center + normal * (15.0 + 13.0 * row)
-            map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(base - axis * 17.0 - Vector2(5, 5), Vector2(10, 10)), false)
-            for k in range(count):
-                var tip: Vector2 = base + axis * float(k * 7)
-                map_canvas.draw_line(tip - axis * 5.0 + normal * 4.0, tip, HUD.COLORS[resource], 1.5, true)
-                map_canvas.draw_line(tip - axis * 5.0 - normal * 4.0, tip, HUD.COLORS[resource], 1.5, true)
-            row += 1
+            if not traffic.has(node):
+                traffic[node] = {"source": ECONOMY.empty_stock(), "dest": ECONOMY.empty_stock()}
+            for resource in ECONOMY.RESOURCES:
+                traffic[node][endpoint][resource] += float(ship["cargo"][resource])
+    for node in traffic:
+        if not ECONOMY.discovered(state, _me(), "planets", node):
+            continue
+        var center: Vector2 = _screen_point(points[node])
+        var radius: float = _planet_radius(node, state)
+        for endpoint in ["source", "dest"]:
+            for k in range(ECONOMY.RESOURCES.size()):
+                var resource: String = ECONOMY.RESOURCES[k]
+                var cargo: float = traffic[node][endpoint][resource]
+                if cargo <= ECONOMY.EPS:
+                    continue
+                var radial: Vector2 = Vector2.from_angle((-PI if endpoint == "source" else 0.0) + (float(k) - 2.5) * 0.25)
+                var axis: Vector2 = radial if endpoint == "source" else -radial
+                var normal: Vector2 = axis.orthogonal()
+                var base: Vector2 = center + radial * (radius + 24.0)
+                var count: int = clampi(ceili(3.0 * cargo / ECONOMY.CARGO_CAPACITY), 1, 3)
+                map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(base + radial * 14.0 - Vector2(5, 5), Vector2(10, 10)), false)
+                for j in range(count):
+                    var tip: Vector2 = base + axis * float(j * 5)
+                    map_canvas.draw_polyline(PackedVector2Array([tip - axis * 4.0 + normal * 3.0, tip, tip - axis * 4.0 - normal * 3.0]), HUD.COLORS[resource], 1.5, true)
 
 func _draw_map() -> void:
     if session == null:
@@ -2606,6 +2652,9 @@ func _draw_map() -> void:
         direction *= scale
         var shape := PackedVector2Array([point + direction * 9, point - direction * 6 + side * 5,
             point - direction * 3, point - direction * 6 - side * 5])
+        if ship["kind"] == "ship":
+            hull = Color("#788ca0")
+            shape = PackedVector2Array([point + direction * 14 + side * 4, point + direction * 10 + side * 8, point - direction * 13 + side * 8, point - direction * 13 - side * 8, point + direction * 10 - side * 8, point + direction * 14 - side * 4])
         if colony:
             shape = PackedVector2Array([point + direction * 12, point + side * 7, point - direction * 9, point - side * 7])
         if fighter:
@@ -2621,6 +2670,13 @@ func _draw_map() -> void:
         if int(ship["id"]) == selected_ship_id:
             map_canvas.draw_arc(point, maxf(5.0, 15.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
         map_canvas.draw_colored_polygon(shape, hull)
+        if ship["kind"] == "ship":
+            for k in range(ECONOMY.RESOURCES.size()):
+                var resource: String = ECONOMY.RESOURCES[k]
+                var fraction: float = clampf(float(ship["cargo"][resource]) / ECONOMY.CARGO_CAPACITY, 0.0, 1.0)
+                var module: Vector2 = point + direction * (5.0 - float(k % 3) * 7.0) + side * (-3.5 if k < 3 else 3.5)
+                var corners := PackedVector2Array([module + direction * 3 + side * 3, module - direction * 3 + side * 3, module - direction * 3 - side * 3, module + direction * 3 - side * 3])
+                map_canvas.draw_colored_polygon(corners, Color("#182333").lerp(HUD.COLORS[resource], clampf(fraction * 6.0, 0.0, 1.0)))
         var outline: PackedVector2Array = shape.duplicate()
         outline.append(shape[0])
         map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)

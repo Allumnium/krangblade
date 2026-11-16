@@ -159,3 +159,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.14.9 fixes outdated four-button assertion caught by normal ENet 10× tests; allows repeat upgrades before population gates and filters finite ship limit input to digits. Verify pasted text and drag interaction visually.
 
 - v0.14.10 updates stale Tech repeat UI assertion and limits civilian stock access by import target. This is a per-step access ceiling, not a permanent reserved stock floor; evaluate sustained shortages and whether a stronger reserve is needed.
+
+- v0.15.0: provisional habitation starting capacity 10M × system size factor, three doubling upgrades with tripling recipes. Food equilibrium remains separate. Check pacing and visual density of perimeter indicators.
+
+- v0.15.1 moves cancellation beside active progress, including shipyard assignments; verify visual layout and matching job refunds.
