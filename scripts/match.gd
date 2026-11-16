@@ -1080,7 +1080,7 @@ func _build_time_controls() -> void:
     var row := HBoxContainer.new()
     row.add_theme_constant_override("separation", 4)
     panel.add_child(row)
-    for speed in [0, 1, 2, 5]:
+    for speed in [0, 1, 2, 5, 10]:
         var label: String = "Ⅱ" if speed == 0 else "%d×" % speed
         var button: Button = _button(label, _set_time_speed.bind(int(speed)), row)
         button.toggle_mode = true

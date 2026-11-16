@@ -1189,11 +1189,12 @@ static func _find_chunk(field: Dictionary, id: int) -> Dictionary:
 
 # One shortest-path tree per source/team per tick. Sparse adjacency avoids
 # scanning every lane for every candidate node and every asteroid field.
-static func _mining_path(state: Dictionary, teams: Array[int], team: int, start: int, goal: int, cache: Dictionary) -> Array[int]:
+static func _mining_path(state: Dictionary, teams: Array[int], team: int, start: int, goal: int, _cache: Dictionary) -> Array[int]:
     if start < 0 or goal < 0 or start >= teams.size() or goal >= teams.size():
         return []
     if teams[start] not in [0, team] or teams[goal] not in [0, team]:
         return []
+    var cache: Dictionary = _civilian_route_cache(state, teams)
     var points: Array = state["map"]["points"]
     if not cache.has("mine:adj"):
         var adjacency: Array = []

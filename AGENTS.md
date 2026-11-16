@@ -73,3 +73,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Local overview shows signed latest-step population change including crew allocation, with a live hover explaining demographic change, food equilibrium and crew costs. Resource rows share the live hover panel with local production, consumption, construction and physical deliveries.
 
 - Logistics lens uses consistent 3-by-2 stock/capacity bars at every zoom, with resource icons and directional one-to-three carets beside loaded logistics hulls based on cargo fraction.
+
+- Time controls include 10× for stress testing; the same fixed steps and host-only authority apply. Mining path trees share the local topology/team-invalidated civilian cache; dynamic cargo and depot decisions remain tick-local.
