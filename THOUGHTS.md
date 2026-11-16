@@ -185,3 +185,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.4 adds physical miner stand-off and deterministic local particle visuals with fixed per-hull limits. GPU/CPU cost and appearance still require fleet-heavy playtesting.
 
 - v0.16.5 includes the first shipyard price and work in the colony hull. The conversion is immediately operational subject to existing population staffing; visual morph lasts three game years. Full combat integration remains outstanding.
+
+- v0.16.6 adds font-measured abbreviated system labels in resource and population strips; verify small-segment readability visually.

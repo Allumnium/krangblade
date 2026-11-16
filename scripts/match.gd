@@ -1233,6 +1233,12 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
             strip.draw_line(Vector2(x, 0), Vector2(x, strip.size.y), Color("#081421"), 1.0)
         var name_text: String = segment["name"]
         var text_width: float = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+        if text_width + 6.0 > w:
+            name_text = name_text.left(2)
+            text_width = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+        if text_width + 6.0 > w:
+            name_text = name_text.left(1)
+            text_width = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
         if segments.size() > 1 and text_width + 6.0 <= w:
             strip.draw_string(font, Vector2(x + (w - text_width) * 0.5, (strip.size.y - font.get_height(10)) * 0.5 + font.get_ascent(10)), name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#e3edf7"))
         x += w
