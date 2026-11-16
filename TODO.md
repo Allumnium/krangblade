@@ -110,3 +110,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate production modifier bounds and extraction balance (v0.15.3).
 
 - [ ] Validate optional performance overlay (v0.15.4) and record sustained fleet-heavy 10× measurements before deeper snapshot optimization.
+
+- [ ] Visually validate segmented global resource strips at constrained widths (v0.15.5).

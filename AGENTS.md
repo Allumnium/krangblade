@@ -89,3 +89,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Finite maintain targets are desired quantities and can be set independently of current build eligibility, including missing shipyards and home-system restrictions. Actual production still respects eligibility. Only explicit target changes or intentional cancellation reset targets.
 
 - Generated system production modifiers range from −90% to +300% (0.1× to 4×), including the effective building multiplier. Poor deposits permit extraction; zero population or unbuilt production levels still yield zero output.
+
+- Global resource tiles place icon, total and rate above a storage-capacity strip. Filled portions are subdivided by owned system stock, largest first, with full system names only where they fit; cargo is excluded from the strip.
