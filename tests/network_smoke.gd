@@ -124,6 +124,13 @@ func _phase_changed() -> void:
             _fail("Wrong territory count.")
             return
         if mode == "normal":
+            if role == "host":
+                for system in state["planets"]:
+                    if bool(system["home"]):
+                        system["population"] = 150000.0
+                        system["levels"]["Organics"] = 3
+                        for resource in ECON.RESOURCES:
+                            system["stock"][resource] = maxf(float(system["stock"][resource]), 2000.0)
             call_deferred("_prepare_commands")
             create_timer(0.5).timeout.connect(_check_economy_sync)
         if role == "host":

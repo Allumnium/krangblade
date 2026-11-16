@@ -720,7 +720,7 @@ static func _continuous_target(p: Dictionary, key: String) -> Array:
     if key.begins_with("economy_building:"):
         var resource: String = key.trim_prefix("economy_building:")
         if ECONOMY_BUILDINGS.has(resource) and production_available(p, resource):
-            return ["economy_building", resource]
+            return ["economy", resource]
     if key.begins_with("production:"):
         var resource: String = key.trim_prefix("production:")
         if production_available(p, resource):
@@ -828,7 +828,7 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
             if existing:
                 cycle[key] = true
                 continue
-        elif _has_job(p, order[0], order[1]):
+        elif _has_job(p, "economy_building" if order[0] == "economy" else order[0], order[1]):
             continue
         if enqueue(state, int(p["owner"]), index, order[0], order[1]):
             p["queue"][-1]["automatic"] = true
@@ -2081,7 +2081,11 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
             action = "production"
             target = "Metals"
         elif index == home and expansion and counts["colony_ship"] == 0:
-            action = "colony_ship"
+            if float(p["population"]) >= CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
+                action = "colony_ship"
+            elif population_capacity(p) < CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
+                action = "production"
+                target = "Organics"
         elif has_yard and counts["fighter"] == 0:
             action = "fighter"
         elif index == home and owned.size() > 1 and counts["ship"] == 0:

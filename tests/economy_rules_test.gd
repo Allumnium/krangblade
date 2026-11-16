@@ -473,6 +473,8 @@ func _initialize() -> void:
     # Repeating hulls cycle in order, including under material starvation.
     var rotation: Dictionary = ECON.create(graph, players, ids, false)
     var rotation_home: Dictionary = rotation["planets"][0]
+    rotation_home["population"] = 450000.0
+    rotation_home["levels"]["Organics"] = 10
     rotation_home["levels"]["Metals"] = 0
     rotation_home["stock"]["Metals"] = 0.0
     for kind in ["colony_ship", "fighter", "miner"]:
@@ -895,6 +897,8 @@ func _initialize() -> void:
     ECON._sync_operations(wave_state)
     assert(int(wave_state["operations"]["2:wave:2"]["id"]) == wave_id)
     var ai_state: Dictionary = ECON.create(ai_map, ai_roster, ids, false)
+    ai_state["planets"][1]["population"] = 350000.0
+    ai_state["planets"][1]["levels"]["Organics"] = 8
     var saw_attack: bool = false
     var saw_logistics: bool = false
     for year in range(500):
@@ -914,6 +918,9 @@ func _initialize() -> void:
     for seed_value in [11, 83, 470, 1337]:
         var startup_map: Dictionary = MAP.generate(seed_value, 3)
         var startup_state: Dictionary = ECON.create(startup_map, {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 1, "ai": true}}, ids, false)
+        for index in [1, 2]:
+            startup_state["planets"][index]["population"] = 150000.0
+            startup_state["planets"][index]["levels"]["Organics"] = 3
         var built: Dictionary = {2: {}, 3: {}}
         for year in range(36):
             ECON.step(startup_state, 1.0)
