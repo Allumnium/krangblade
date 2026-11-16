@@ -124,3 +124,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate colony-to-shipyard conversion, revised recipe and orbital morph (v0.16.5).
 
 - [ ] Validate shipyard combat/destruction and launch positions, compact trade toggles and latest HUD changes (v0.16.9).
+
+- [ ] Validate v0.16.17 local UI scaling, saved audio settings, economy card consistency, neutral trade sliders and sequential shipyard row visibility.

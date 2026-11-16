@@ -138,6 +138,10 @@ func _run() -> void:
             quit(1)
             return
     var idle_rows: Dictionary = view.get("yard_activity_rows")
+    if (idle_rows[103]["row"] as Control).visible:
+        push_error("Future shipyard slot should be hidden")
+        quit(1)
+        return
     if not (idle_rows.size() == 3):
         push_error("Map smoke assertion failed at line %d" % get_stack()[0]["line"])
         quit(1)
@@ -754,7 +758,7 @@ func _run() -> void:
     state["planets"][0]["stock"]["Crystals"] = 100.0
     new_yard.pressed.emit()
     var third_build: Button = idle_rows[103]["build"]
-    if not (third_build.visible and third_build.tooltip_text.contains("6000 t Metals")):
+    if not (not third_build.is_visible_in_tree() and third_build.tooltip_text.contains("6000 t Metals")):
         push_error("Map smoke assertion failed at line %d" % get_stack()[0]["line"])
         quit(1)
         return

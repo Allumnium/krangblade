@@ -203,3 +203,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.15 updates the map-view colony fixture for the revised recipe and makes its assertions fail promptly. Existing assertions remain mandatory.
 
 - v0.16.16 makes shipyard progress bars continuous rather than quantized and checks both authoritative and displayed work fractions across cancellation/compaction. CI required.
+
+- v0.16.17 uses window content scale for compact UI (also affects map rendering); verify camera and modal sizing at all scales. Music bus is ready for future assets; existing upgrade effect uses SFX. Future shipyard rows hidden while existing concurrent orders remain supported by authority.
