@@ -736,3 +736,54 @@ func _rpc_economy(update_round: int, revision: int, compressed: PackedByteArray)
     owners_changed.emit()
     economy_changed.emit()
     _rpc_snapshot_ack.rpc_id(1, update_round, revision)
+
+func request_policy(slot: String, card: String) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _policy_for(1, slot, card)
+    else:
+        _rpc_policy.rpc_id(1, slot, card)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_policy(slot: String, card: String) -> void:
+    if multiplayer.is_server():
+        _policy_for(multiplayer.get_remote_sender_id(), slot, card)
+
+func _policy_for(id: int, slot: String, card: String) -> void:
+    if _active_player(id) and ECONOMY.equip_policy(economy, id, slot, card):
+        _publish_economy()
+
+func request_policy_target(slot: String, node: int, enabled: bool) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _policy_target_for(1, slot, node, enabled)
+    else:
+        _rpc_policy_target.rpc_id(1, slot, node, enabled)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_policy_target(slot: String, node: int, enabled: bool) -> void:
+    if multiplayer.is_server():
+        _policy_target_for(multiplayer.get_remote_sender_id(), slot, node, enabled)
+
+func _policy_target_for(id: int, slot: String, node: int, enabled: bool) -> void:
+    if _active_player(id) and ECONOMY.set_policy_target(economy, id, slot, node, enabled):
+        _publish_economy()
+
+func request_policy_weight(slot: String, percent: int) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _policy_weight_for(1, slot, percent)
+    else:
+        _rpc_policy_weight.rpc_id(1, slot, percent)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_policy_weight(slot: String, percent: int) -> void:
+    if multiplayer.is_server():
+        _policy_weight_for(multiplayer.get_remote_sender_id(), slot, percent)
+
+func _policy_weight_for(id: int, slot: String, percent: int) -> void:
+    if _active_player(id) and ECONOMY.set_policy_weight(economy, id, slot, percent):
+        _publish_economy()

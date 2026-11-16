@@ -24,6 +24,7 @@ func _test_maintain_targets() -> void:
     assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
+    _test_policy_cards()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
     var bounds: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1])
@@ -1434,3 +1435,24 @@ func _initialize() -> void:
     assert(ECON.operational_shipyards(staffed_home) == 3)
     print("PASS: neutral mining delivery and population-gated shipyards")
     quit(0)
+
+func _test_policy_cards() -> void:
+    var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+    assert(not ECON.equip_policy(state, 99, "offense", "invasion"))
+    assert(not ECON.equip_policy(state, 1, "wildcard", "invasion"))
+    assert(not ECON.equip_policy(state, 1, "defense", "invasion"))
+    assert(ECON.equip_policy(state, 1, "offense", "invasion"))
+    var entry: Dictionary = state["policies"][1]["offense"]
+    assert(not ECON.policy_active(state, entry))
+    assert(not ECON.set_policy_target(state, 1, "offense", 0, true))
+    assert(ECON.set_policy_target(state, 1, "offense", 1, true))
+    state["elapsed"] = 20.0
+    assert(ECON.policy_active(state, entry))
+    assert(ECON.equip_policy(state, 1, "defense", "guard"))
+    assert(ECON.set_policy_weight(state, 1, "offense", 70))
+    assert(state["policies"][1]["defense"]["weight"] == 30)
+    assert(ECON.equip_policy(state, 1, "offense", ""))
+    assert(ECON.equip_policy(state, 1, "offense", "invasion"))
+    assert(state["policies"][1]["offense"]["targets"].is_empty())
+    assert(not ECON.policy_active(state, state["policies"][1]["offense"]))
+    print("PASS: policy eligibility, warmup, target restrictions and replacement")
