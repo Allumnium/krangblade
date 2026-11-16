@@ -114,3 +114,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Visually validate segmented global resource strips at constrained widths (v0.15.5).
 
 - [ ] Validate population segments, live growth breakdown and modifier-only habitation descriptions (v0.15.6).
+
+- [ ] Validate timed repeatable economy buildings and independent trade switches (v0.16.0).

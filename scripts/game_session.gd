@@ -618,21 +618,21 @@ func _cancel_for(id: int, index: int, job_id: int) -> void:
     if _active_player(id) and ECONOMY.cancel(economy, id, index, job_id):
         _publish_economy()
 
-func request_thresholds(index: int, resource: String, minimum: float, maximum: float) -> void:
+func request_thresholds(index: int, resource: String, minimum: float, maximum: float, importing: bool = true, exporting: bool = true) -> void:
     if phase != "match":
         return
     if is_solo or multiplayer.is_server():
-        _thresholds_for(1, index, resource, minimum, maximum)
+        _thresholds_for(1, index, resource, minimum, maximum, importing, exporting)
     else:
-        _rpc_thresholds.rpc_id(1, index, resource, minimum, maximum)
+        _rpc_thresholds.rpc_id(1, index, resource, minimum, maximum, importing, exporting)
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_thresholds(index: int, resource: String, minimum: float, maximum: float) -> void:
+func _rpc_thresholds(index: int, resource: String, minimum: float, maximum: float, importing: bool = true, exporting: bool = true) -> void:
     if multiplayer.is_server():
-        _thresholds_for(multiplayer.get_remote_sender_id(), index, resource, minimum, maximum)
+        _thresholds_for(multiplayer.get_remote_sender_id(), index, resource, minimum, maximum, importing, exporting)
 
-func _thresholds_for(id: int, index: int, resource: String, minimum: float, maximum: float) -> void:
-    if _active_player(id) and ECONOMY.set_thresholds(economy, id, index, resource, minimum, maximum):
+func _thresholds_for(id: int, index: int, resource: String, minimum: float, maximum: float, importing: bool = true, exporting: bool = true) -> void:
+    if _active_player(id) and ECONOMY.set_thresholds(economy, id, index, resource, minimum, maximum, importing, exporting):
         _publish_economy()
 
 func request_mining_policy(index: int, enabled: bool, metals: bool, crystals: bool) -> void:

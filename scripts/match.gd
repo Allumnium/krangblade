@@ -96,6 +96,7 @@ var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
 var system_visual_seed: int = -1
 var trade_sliders: Dictionary = {}
+var trade_checks: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var upgrade_cards: Dictionary = {}
 var pds_card: Dictionary = {}
@@ -122,6 +123,8 @@ class TradeRange extends Control:
     var stock_percent: float = 0.0
     var stock_color: Color = Color.WHITE
     var enabled: bool = true
+    var import_enabled: bool = true
+    var export_enabled: bool = true
     var active_handle: int = -1
     const PAD: float = 10.0
     const TRACK_Y: float = 38.0
@@ -129,7 +132,7 @@ class TradeRange extends Control:
     func set_range(minimum: float, maximum: float) -> void:
         active_handle = -1
         lower = clampf(minimum, 0.0, 100.0)
-        upper = clampf(maximum, lower, 100.0)
+        upper = clampf(maximum, 0.0, 100.0)
         queue_redraw()
 
     func set_stock(amount: float, maximum: float, tint: Color) -> void:
@@ -161,16 +164,20 @@ class TradeRange extends Control:
         if overlap:
             lo.y -= 5.0
             hi.y += 5.0
-        draw_circle(lo, 7.0, low_color)
-        draw_circle(hi, 7.0, high_color)
-        draw_arc(lo, 7.0, 0.0, TAU, 24, Color("#102030"), 1.0, true)
-        draw_arc(hi, 7.0, 0.0, TAU, 24, Color("#102030"), 1.0, true)
+        if import_enabled:
+            draw_circle(lo, 7.0, low_color)
+        if export_enabled:
+            draw_circle(hi, 7.0, high_color)
 
     func _move_handle(x: float) -> void:
         if active_handle == 0:
-            lower = minf(_value(x), upper)
+            lower = _value(x)
+            if export_enabled:
+                upper = maxf(upper, lower)
         elif active_handle == 1:
-            upper = maxf(_value(x), lower)
+            upper = _value(x)
+            if import_enabled:
+                lower = minf(lower, upper)
         queue_redraw()
 
     func _gui_input(event: InputEvent) -> void:
@@ -183,7 +190,9 @@ class TradeRange extends Control:
                 if absf(lo.x - hi.x) < 13.0:
                     lo.y -= 5.0
                     hi.y += 5.0
-                active_handle = 0 if event.position.distance_to(lo) < event.position.distance_to(hi) else 1
+                if not import_enabled and not export_enabled:
+                    return
+                active_handle = 0 if import_enabled and (not export_enabled or event.position.distance_to(lo) < event.position.distance_to(hi)) else 1
                 _move_handle(event.position.x)
             elif active_handle >= 0:
                 _move_handle(event.position.x)
@@ -408,6 +417,19 @@ func _build_ui() -> void:
         slider.committed.connect(_apply_thresholds.bind(resource))
         logistics.add_child(slider)
         trade_sliders[resource] = slider
+        var switches := HBoxContainer.new()
+        logistics.add_child(switches)
+        var incoming := CheckBox.new()
+        incoming.text = "Import"
+        incoming.button_pressed = true
+        switches.add_child(incoming)
+        var outgoing := CheckBox.new()
+        outgoing.text = "Export"
+        outgoing.button_pressed = true
+        switches.add_child(outgoing)
+        trade_checks[resource] = [incoming, outgoing]
+        incoming.toggled.connect(_trade_toggle.bind(resource))
+        outgoing.toggled.connect(_trade_toggle.bind(resource))
     var shipyards := VBoxContainer.new()
     shipyard_page.add_child(shipyards)
     ship_button = _ship_build_row(shipyards, "BUILD LOGISTICS SHIP", "ship")
@@ -762,8 +784,13 @@ func _build_economy_cards(parent: Container) -> void:
         card.add_child(effect)
         var detail: Label = _label("", 12)
         card.add_child(detail)
-        var button: Button = _card_action(disclosure, "Buy", _operation.bind("economy", resource))
-        disclosure["cancel"] = _card_cancel(disclosure, func() -> void: pass)
+        var button: Button = _card_action(disclosure, "Build", _operation.bind("economy", resource))
+        var progress := ProgressBar.new()
+        section.add_child(progress)
+        section.move_child(progress, card.get_index())
+        progress.hide()
+        disclosure["progress"] = progress
+        disclosure["cancel"] = _card_cancel(disclosure, _cancel_kind.bind("economy_building", resource), progress)
         HUD.action(button)
         disclosure.merge({"button": button, "detail": detail, "costs": _cost_grid(card)})
         economy_cards[resource] = disclosure
@@ -799,14 +826,25 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
     for resource in economy_cards:
         var card: Dictionary = economy_cards[resource]
         var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
-        var installed: bool = bool(p.get("buildings", {}).get(resource, false))
+        var installed: int = int(p.get("buildings", {}).get(resource, 0))
+        var job: Dictionary = {}
+        for item in p["queue"]:
+            if item["kind"] == "economy_building" and item["target"] == resource:
+                job = item
+                break
+        card["progress"].visible = not job.is_empty()
+        card["cancel"].visible = not job.is_empty()
+        card["cancel"].disabled = not owned or job.is_empty()
+        if not job.is_empty():
+            card["progress"].value = 100.0 * float(job["progress"]) / float(job["work"])
+            _style_progress(card["progress"], p, job)
         var button: Button = card["button"]
-        button.text = "Built" if installed else "Buy"
+        button.text = "Build"
         button.disabled = not owned or not ECONOMY.building_available(p, resource)
-        var cost: String = _cost_text(definition["cost"])
+        var cost: String = _cost_text(ECONOMY.building_cost(p, resource))
         var requirement: String = "%s population" % _compact_amount(float(definition["population"]))
         var unmet: PackedStringArray = []
-        if not installed:
+        if job.is_empty():
             if float(p["population"]) + ECONOMY.EPS < float(definition["population"]):
                 unmet.append("Requires " + requirement)
             if not ECONOMY.production_available(p, resource):
@@ -815,10 +853,10 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
                 unmet.append("Insufficient local materials")
         card["detail"].text = "\n".join(unmet)
         card["detail"].visible = not unmet.is_empty()
-        card["costs"].visible = not installed
-        _show_cost(card["costs"], definition["cost"])
-        _disclosure_title(card, str(definition["name"]) + (" · Built" if installed else ""))
-        button.tooltip_text = "Permanent local improvement" if installed else "%s\n%s" % [requirement, cost]
+        card["costs"].visible = true
+        _show_cost(card["costs"], ECONOMY.building_cost(p, resource))
+        _disclosure_title(card, str(definition["name"]) + " · %d" % installed)
+        button.tooltip_text = "%s\n%s" % [requirement, cost]
 
 func _build_upgrade_cards(parent: Container) -> void:
     var labels: Dictionary = {"Metals": "Metal extraction", "Plastics": "Plastic production",
@@ -1701,11 +1739,26 @@ func _update_trade_stock(p: Dictionary) -> void:
         # Preserve this handle while dragging, even when a snapshot arrives.
         if slider.active_handle < 0:
             var t: Dictionary = p["thresholds"][resource]
+            slider.import_enabled = bool(t.get("import", true))
+            slider.export_enabled = bool(t.get("export", true))
+            trade_checks[resource][0].set_pressed_no_signal(slider.import_enabled)
+            trade_checks[resource][1].set_pressed_no_signal(slider.export_enabled)
+            slider.queue_redraw()
             if not is_equal_approx(slider.lower, float(t["min"])) or not is_equal_approx(slider.upper, float(t["max"])):
                 slider.set_range(float(t["min"]), float(t["max"]))
 
 func _apply_thresholds(minimum: float, maximum: float, resource: String) -> void:
-    session.call("request_thresholds", selected, resource, minimum, maximum)
+    var slider: TradeRange = trade_sliders[resource]
+    session.call("request_thresholds", selected, resource, minimum, maximum, slider.import_enabled, slider.export_enabled)
+
+func _trade_toggle(_pressed: bool, resource: String) -> void:
+    var slider: TradeRange = trade_sliders[resource]
+    slider.import_enabled = trade_checks[resource][0].button_pressed
+    slider.export_enabled = trade_checks[resource][1].button_pressed
+    if slider.import_enabled and slider.export_enabled and slider.lower > slider.upper:
+        slider.upper = slider.lower
+    slider.queue_redraw()
+    _apply_thresholds(slider.lower, slider.upper, resource)
 
 func _operation(kind: String, target: String = "") -> void:
     session.call("request_operation", selected, kind, target)

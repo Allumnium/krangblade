@@ -372,7 +372,7 @@ static func current_year(state: Dictionary) -> int:
     return START_YEAR + floori(float(state.get("elapsed", 0.0)) + EPS)
 
 static func building_multiplier(planet: Dictionary, resource: String) -> float:
-    return 1.0 + BUILDING_BONUS if bool(planet.get("buildings", {}).get(resource, false)) else 1.0
+    return 1.0 + BUILDING_BONUS * int(planet.get("buildings", {}).get(resource, 0))
 
 static func farm_potential(planet: Dictionary) -> float:
     if int(planet["owner"]) == 0:
@@ -587,10 +587,10 @@ static func affordable(p: Dictionary, cost: Dictionary) -> bool:
     return true
 
 static func building_available(p: Dictionary, resource: String) -> bool:
-    if not ECONOMY_BUILDINGS.has(resource) or bool(p.get("buildings", {}).get(resource, false)) or not production_available(p, resource):
+    if not ECONOMY_BUILDINGS.has(resource) or _has_job(p, "economy_building", resource) or not production_available(p, resource):
         return false
     var definition: Dictionary = ECONOMY_BUILDINGS[resource]
-    return float(p["population"]) + EPS >= float(definition["population"]) and affordable(p, definition["cost"])
+    return float(p["population"]) + EPS >= float(definition["population"]) and not _has_job(p, "economy_building", resource)
 
 static func warehouse_available(p: Dictionary) -> bool:
     var level: int = int(p.get("warehouse_level", 0))
@@ -619,6 +619,13 @@ static func _buy_warehouse(p: Dictionary) -> bool:
         p["stock"][material] -= float(WAREHOUSE_COSTS[level][material])
     p["warehouse_level"] = level + 1
     return true
+
+static func building_cost(p: Dictionary, resource: String) -> Dictionary:
+    var cost: Dictionary = ECONOMY_BUILDINGS[resource]["cost"].duplicate()
+    var factor: float = pow(3.0, int(p.get("buildings", {}).get(resource, 0)))
+    for material in cost:
+        cost[material] *= factor
+    return cost
 
 static func _buy_building(p: Dictionary, resource: String) -> bool:
     if not building_available(p, resource):
@@ -678,7 +685,12 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
         "economy":
             if target == "habitation":
                 return _buy_habitation(p)
-            return _buy_warehouse(p) if target == "warehouse" else _buy_building(p, target)
+            if target == "warehouse":
+                return _buy_warehouse(p)
+            if not building_available(p, target):
+                return false
+            kind = "economy_building"
+            level = int(p.get("buildings", {}).get(target, 0)) + 1
         "production":
             if not production_unlocked(p, target) or _has_job(p, kind, target):
                 return false
@@ -687,7 +699,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
     var id: int = int(state["next_id"])
     state["next_id"] = id + 1
     p["queue"].append({"id": id, "kind": kind, "target": target, "level": level,
-        "cost": _cost(kind, level), "work": _work(kind, level),
+        "cost": building_cost(p, target) if kind == "economy_building" else _cost(kind, level), "work": 30.0 if kind == "economy_building" else _work(kind, level),
         "progress": 0.0, "allocated": empty_stock(), "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
     return true
 
@@ -835,13 +847,13 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
         return true
     return false
 
-static func set_thresholds(state: Dictionary, player: int, index: int, resource: String, minimum: float, maximum: float) -> bool:
+static func set_thresholds(state: Dictionary, player: int, index: int, resource: String, minimum: float, maximum: float, importing: bool = true, exporting: bool = true) -> bool:
     var p: Dictionary = _get_owned(state, player, index)
     if p.is_empty() or not RESOURCES.has(resource):
         return false
-    if not is_finite(minimum) or not is_finite(maximum) or minimum < 0.0 or maximum < minimum or maximum > 100.0:
+    if not is_finite(minimum) or not is_finite(maximum) or minimum < 0.0 or maximum < 0.0 or minimum > 100.0 or (importing and exporting and maximum < minimum) or maximum > 100.0:
         return false
-    p["thresholds"][resource] = {"min": minimum, "max": maximum}
+    p["thresholds"][resource] = {"min": minimum, "max": maximum, "import": importing, "export": exporting}
     return true
 
 static func _possible(p: Dictionary, item: Dictionary) -> float:
@@ -883,6 +895,8 @@ static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> boo
 
 static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictionary) -> void:
     match str(item["kind"]):
+        "economy_building":
+            p["buildings"][item["target"]] = int(p["buildings"].get(item["target"], 0)) + 1
         "production":
             p["levels"][item["target"]] = int(item["level"])
         "pds":
@@ -1008,9 +1022,13 @@ static func _cargo_total(ship: Dictionary) -> float:
     return total
 
 static func _need(p: Dictionary, resource: String) -> float:
+    if not bool(p["thresholds"][resource].get("import", true)):
+        return 0.0
     return maxf(0.0, storage_capacity(p) * float(p["thresholds"][resource]["min"]) / 100.0 - float(p["stock"][resource]))
 
 static func _surplus(p: Dictionary, resource: String) -> float:
+    if not bool(p["thresholds"][resource].get("export", true)):
+        return 0.0
     return maxf(0.0, float(p["stock"][resource]) - storage_capacity(p) * float(p["thresholds"][resource]["max"]) / 100.0)
 
 static func _opportunity(a: Dictionary, b: Dictionary) -> bool:

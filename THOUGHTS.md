@@ -173,3 +173,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.15.5 adds sorted stock-share segments to each resource storage strip; tiny shares may be subpixel, and names are hidden when they do not fit. The numeric holdings/rates and live hover remain intact.
 
 - v0.15.6 adapts header height regression to the two-row HUD and adds population distribution without revealing capacity. Visual validation remains outstanding.
+
+- v0.16.0 uses 30 work per economy building, tripling successive recipes, one pending per resource. Warehouse and habitation retain their distinct upgrade rules. Trade switches require multiplayer and UI regression verification.

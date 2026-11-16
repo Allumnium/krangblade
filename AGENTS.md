@@ -93,3 +93,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Global resource tiles place icon, total and rate above a storage-capacity strip. Filled portions are subdivided by owned system stock, largest first, with full system names only where they fit; cargo is excluded from the strip.
 
 - Population HUD uses sorted proportional system segments and the same live hover as resources. Show signed habitation growth modifier rather than capacity or food equilibrium figures, including upgrade previews.
+
+- Resource economy buildings are repeatable timed construction, adding 25% per completed building subject to the existing production bounds. Trade import/export switches are independent and default enabled; disabled thresholds persist, and dragging either enabled handle pushes the other when crossing.
