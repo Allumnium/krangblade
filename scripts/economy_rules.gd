@@ -2826,15 +2826,21 @@ static func apply_economy_policies(state: Dictionary) -> void:
         system["policy_consumption"] = 0.85 if active_card(state, owner, "conservation") else 1.0
 
 static func dispatch_expansion_policies(state: Dictionary) -> void:
+    var expanding: Dictionary = {}
+    for player in state.get("policies", {}):
+        if active_card(state, int(player), "expansion"):
+            expanding[player] = true
+    if expanding.is_empty():
+        return
     var reserved: Dictionary = {}
     for ship in state["ships"]:
-        if ship["kind"] == "colony_ship" and not (ship["route"] as Array).is_empty():
+        if ship.get("kind", "ship") == "colony_ship" and not (ship.get("route", []) as Array).is_empty():
             reserved[int(ship["dest"])] = true
     for ship in state["ships"]:
-        if ship["kind"] != "colony_ship" or not (ship["route"] as Array).is_empty():
+        if ship.get("kind", "ship") != "colony_ship" or not (ship.get("route", []) as Array).is_empty():
             continue
         var player: int = int(ship["owner"])
-        if not active_card(state, player, "expansion"):
+        if not expanding.has(player):
             continue
         var target: int = _ai_colony_target(state, player, ship, reserved)
         if target >= 0 and send_colony(state, player, int(ship["id"]), target):
