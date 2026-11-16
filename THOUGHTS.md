@@ -215,3 +215,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.21 extracts shared cohort dispatch while preserving distinct objective selection and wave completion rules. Existing simulation fixtures exercise both paths; visual playtesting and unified persistent lifecycle remain outstanding.
 
 - v0.16.23 adds guarded documentation-only PR validation via skip-ci-docs. Main pushes still run full validation; the workflow change itself is not eligible for the shortcut.
+
+- v0.16.24 fixes wrapping in match audio settings by using non-wrapping labels, minimum column widths and compact vertically centered controls. Manual verification at all UI scales remains outstanding.
