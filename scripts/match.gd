@@ -800,7 +800,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
     _disclosure_title(habitation_card, "Habitation technology · Lv %d" % habitat_level)
     var penalty: float = -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)
     var next_penalty: float = -100.0 * clampf(float(p["population"]) / (2.0 * ECONOMY.habitation_capacity(p)), 0.0, 1.0)
-    habitation_card["detail"].text = "Growth modifier %+.1f%%" % penalty
+    habitation_card["detail"].text = "Overpopulation penalty %+.1f%%" % penalty
     if habitat_level < 3:
         habitation_card["detail"].text += " → %+.1f%%" % next_penalty
     habitation_card["button"].disabled = not owned or not ECONOMY.habitation_available(p)
@@ -1233,7 +1233,7 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
             strip.draw_line(Vector2(x, 0), Vector2(x, strip.size.y), Color("#081421"), 1.0)
         var name_text: String = segment["name"]
         var text_width: float = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-        if text_width + 6.0 <= w:
+        if segments.size() > 1 and text_width + 6.0 <= w:
             strip.draw_string(font, Vector2(x + (w - text_width) * 0.5, (strip.size.y - font.get_height(10)) * 0.5 + font.get_ascent(10)), name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#e3edf7"))
         x += w
 
@@ -1478,12 +1478,15 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
     label.add_theme_color_override("font_color", tint)
     label.mouse_filter = Control.MOUSE_FILTER_PASS
     if population:
+        tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        label.clip_text = true
+        label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         var stack := VBoxContainer.new()
         stack.add_theme_constant_override("separation", 2)
         tile.add_child(stack)
         _population_row(stack).add_child(label)
         var strip := Control.new()
-        strip.custom_minimum_size = Vector2(80, 14)
+        strip.custom_minimum_size = Vector2(0, 14)
         strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
         stack.add_child(strip)
         global_resource_tiles["population"] = tile
@@ -1553,7 +1556,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
                 continue
             var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
             var crew: float = float(p.get("crew_rate", 0.0))
-            lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% habitation" % [_system_name(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)])
+            lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% overpopulation penalty" % [_system_name(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)])
         return "\n".join(lines)
     var totals: Dictionary = ECONOMY.empire_totals(state, _me())
     var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
@@ -1587,7 +1590,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
     if resource == "population":
         var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
         var crew: float = float(p.get("crew_rate", 0.0))
-        return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nHabitation growth modifier: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
+        return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
     var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Latest local flows (t/yr)"]
     var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
     for category in p.get("flows", {}):

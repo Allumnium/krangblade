@@ -99,3 +99,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Logistics traffic indicators lie on the corresponding first/last route lane at the system endpoint, grouped by resource, lane and direction.
 
 - Completed shipyards have replicated HP (1,000 at level one, 1,000 per level) and slow orbital construction frames. Assigned hulls show outline segments snapping into place then progressive fill using actual job progress. Combat targeting/destruction of shipyards requires further integration.
+
+- Single-system global HUD strips omit system names; population uses the same expanding width as resource tiles. Use “Overpopulation penalty” in demographic and habitation upgrade descriptions.
