@@ -141,3 +141,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Measure CI runtime after scoped multiplayer matrix and import cache (v0.16.27). Evaluate safe reuse of validated identical merge trees separately.
 
 - [ ] Run eight-peer stress validation manually before major releases; routine extended CI uses three peers (v0.16.28).
+
+- v0.16.29: AI wave objectives and reserve rally anchors are independent of movement destinations; verify stable operation identity during withdrawal. Full persistent ownership across wave completion remains outstanding.

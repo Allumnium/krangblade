@@ -864,6 +864,18 @@ func _initialize() -> void:
     ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
     assert(wave_fleet[3]["dest"] == 1 and wave_state["ai_waves"][2]["members"].size() == 3)
     assert(int(wave_state["ai_waves"][2]["target"]) == 2)
+    wave_state["ships"] = wave_fleet
+    ECON._sync_operations(wave_state)
+    var wave_id: int = int(wave_state["operations"]["2:wave:2"]["id"])
+    var saved_dest: int = int(wave_fleet[0]["dest"])
+    wave_fleet[0]["dest"] = 1
+    wave_fleet[0]["retreating"] = true
+    ECON._sync_operations(wave_state)
+    assert(int(wave_state["operations"]["2:wave:2"]["id"]) == wave_id)
+    assert(wave_state["operations"]["2:wave:2"]["recovering"] == [100])
+    assert(wave_state["operations"]["2:wave:2"]["members"].size() == 3)
+    wave_fleet[0]["dest"] = saved_dest
+    wave_fleet[0]["retreating"] = false
     for i in range(3):
         ECON._move({"map": wave_graph}, wave_fleet[i], 100.0)
     ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)

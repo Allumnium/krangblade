@@ -225,3 +225,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.27: scope-select multiplayer matrix for presentation-only PRs; cache imported assets while retaining imports and metadata checks. Main pushes remain full coverage until safe identical-tree validation reuse is implemented. Measure actual CI savings before further changes.
 
 - v0.16.28 replaces routine eight-peer ENet with three peers while retaining the eight-peer scenario on manual workflow dispatch. This reduces concurrent peer load but does not prove eight-player scalability on every PR.
+
+- v0.16.29 fixes AI operation fragmentation when a member temporarily changes destination. Wave completion and regroup policy are unchanged; test covers retreat snapshot identity. Validation pending.
