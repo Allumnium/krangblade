@@ -1960,6 +1960,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             costs.columns = 3
             row.add_child(costs)
             var progress := ProgressBar.new()
+            progress.step = 0.0
             progress.custom_minimum_size.y = 16
             row.add_child(progress)
             var disclosure: Dictionary = _make_disclosure(row, "Upgrade")

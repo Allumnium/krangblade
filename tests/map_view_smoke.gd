@@ -777,7 +777,11 @@ func _run() -> void:
         push_error("Map smoke assertion failed at line %d" % get_stack()[0]["line"])
         quit(1)
         return
-    var third_progress: float = (idle_rows[third_key]["progress"] as ProgressBar).value
+    var third_progress: float = 100.0 * float(third_job["progress"]) / float(third_job["work"])
+    if not is_equal_approx((idle_rows[third_key]["progress"] as ProgressBar).value, third_progress):
+        push_error("Shipyard progress bar disagrees with authoritative work fraction")
+        quit(1)
+        return
     (idle_rows[second_key]["cancel"] as Button).pressed.emit()
     if not (not idle_rows.has(second_key)):
         push_error("Map smoke assertion failed at line %d" % get_stack()[0]["line"])
@@ -791,7 +795,7 @@ func _run() -> void:
         push_error("Map smoke assertion failed at line %d" % get_stack()[0]["line"])
         quit(1)
         return
-    if not (is_equal_approx((idle_rows[third_key]["progress"] as ProgressBar).value, third_progress)):
+    if not (is_equal_approx(100.0 * float(third_job["progress"]) / float(third_job["work"]), third_progress) and is_equal_approx((idle_rows[third_key]["progress"] as ProgressBar).value, third_progress)):
         push_error("Map smoke assertion failed at line %d" % get_stack()[0]["line"])
         quit(1)
         return
