@@ -24,6 +24,8 @@ func _test_maintain_targets() -> void:
     assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
+    assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
+    assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
     var bounds: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1])
     var world: Dictionary = bounds["planets"][0]
     world["abundance"]["Metals"] = 0.1
@@ -471,6 +473,8 @@ func _initialize() -> void:
     # Repeating hulls cycle in order, including under material starvation.
     var rotation: Dictionary = ECON.create(graph, players, ids, false)
     var rotation_home: Dictionary = rotation["planets"][0]
+    rotation_home["population"] = 450000.0
+    rotation_home["levels"]["Organics"] = 10
     rotation_home["levels"]["Metals"] = 0
     rotation_home["stock"]["Metals"] = 0.0
     for kind in ["colony_ship", "fighter", "miner"]:
@@ -717,6 +721,8 @@ func _initialize() -> void:
     cp[3] = Vector2(190, 0)
     cp[4] = Vector2(190, 95)
     var colonization: Dictionary = ECON.create(colony_map, players, ids, false)
+    for index in [0, 2]:
+        colonization["planets"][index]["population"] = 150000.0
     assert(ECON.enqueue(colonization, 1, 0, "colony_ship"))
     assert(ECON.enqueue(colonization, 3, 2, "colony_ship"))
     for i in range(ceili(ECON._work("colony_ship", 1) / ECON.yard_speed(1))):
@@ -891,6 +897,13 @@ func _initialize() -> void:
     ECON._sync_operations(wave_state)
     assert(int(wave_state["operations"]["2:wave:2"]["id"]) == wave_id)
     var ai_state: Dictionary = ECON.create(ai_map, ai_roster, ids, false)
+    # Mature empire fixture: test expansion and combat, not opening demographics.
+    var ai_home: Dictionary = ai_state["planets"][1]
+    ai_home["population"] = 350000.0
+    ai_home["levels"]["Organics"] = 8
+    ai_home["warehouse_level"] = 3
+    for resource in ECON.RESOURCES:
+        ai_home["stock"][resource] = 10000.0
     var saw_attack: bool = false
     var saw_logistics: bool = false
     for year in range(500):
@@ -910,6 +923,11 @@ func _initialize() -> void:
     for seed_value in [11, 83, 470, 1337]:
         var startup_map: Dictionary = MAP.generate(seed_value, 3)
         var startup_state: Dictionary = ECON.create(startup_map, {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 1, "ai": true}}, ids, false)
+        for index in [1, 2]:
+            startup_state["planets"][index]["population"] = 150000.0
+            startup_state["planets"][index]["levels"]["Organics"] = 3
+            for resource in ECON.RESOURCES:
+                startup_state["planets"][index]["stock"][resource] = 2000.0
         var built: Dictionary = {2: {}, 3: {}}
         for year in range(36):
             ECON.step(startup_state, 1.0)
@@ -1285,9 +1303,10 @@ func _initialize() -> void:
     print("PASS: shared lane pacing, safe individual withdrawal, full repair and rejoining")
     var crew_state: Dictionary = ECON.create(graph, players, ids, false)
     var crew_home: Dictionary = crew_state["planets"][0]
+    crew_home["population"] = 150000.0
     for kind in ECON.SHIP_KINDS:
         var people: float = float(ECON.CREW_COSTS[kind])
-        assert(people > 0.0)
+        assert(people == float({"colony_ship": 100000.0, "ship": 2000.0, "fighter": 500.0, "miner": 750.0}[kind]))
         assert(ECON.enqueue(crew_state, 1, 0, kind))
         var crew_job: Dictionary = crew_home["queue"][0]
         var original_population: float = float(crew_home["population"])
@@ -1299,12 +1318,12 @@ func _initialize() -> void:
     crew_home["population"] = 1.0
     assert(ECON.enqueue(crew_state, 1, 0, "fighter"))
     assert(is_zero_approx(ECON._possible(crew_home, crew_home["queue"][0])))
-    crew_home["population"] = 100.0
+    crew_home["population"] = 1000.0
     var crew_order: Dictionary = crew_home["queue"][0]
     assert(ECON._advance(crew_home, crew_order, float(crew_order["work"])))
     ECON._finish(crew_state, 0, crew_home, crew_order)
-    assert(is_equal_approx(float(crew_home["population"]), 90.0))
-    assert(is_equal_approx(float(crew_state["ships"][0]["crew"]), 10.0))
+    assert(is_equal_approx(float(crew_home["population"]), 500.0))
+    assert(is_equal_approx(float(crew_state["ships"][0]["crew"]), 500.0))
     print("PASS: proportional crew costs, refunds, population starvation and completed crew")
     var opening: Dictionary = ECON.create(graph, players, ids)
     assert(opening["ships"].size() == ids.size() * 5)

@@ -43,8 +43,8 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 
 ## Phase 2 — Empire policies and regional commands
 - [ ] Define a shared, host-authoritative policy model with four initial slots: Offense, Defense, Economy, Technology; a fifth Wildcard slot starts locked.
-- [ ] Define policies as behavioral instructions with specific targets where relevant, rather than passive stat bonuses. Design policy changes, cooldowns and validation.
-- [ ] Prototype regional attack/invasion and defense objectives selected on the galaxy map (systems or groups of systems). Decide target selection UX, priority arbitration and allocation of scarce forces.
+- [ ] Define policies as unique per-empire cards, optional slots, warmup only (invasion 20 seconds at 1x), no cooldown; clear flags on replacement. Hidden until technology unlock; population/system eligibility. Economy policies can modify production/consumption, not duplicate existing automation.
+- [ ] Prototype regional attack/invasion and defense objectives selected on the galaxy map (systems or groups of systems). Bottom-edge partially exposed cards, Change modal with drag-to-slot, contextual right inspector and colored map flags. Reject owned/allied offense targets. Normalize military policy sliders proportionally; split each policy share equally among valid flags.
 - [ ] Connect policies to fleet assembly, deployment, reinforcement and defense. Reconsider direct POI fighter sliders; preserve existing behavior until a replacement is agreed and functional.
 - [ ] Allow the unlocked Wildcard to host an additional policy, including a second military objective. Define eligible policy types and conflict handling.
 - [ ] Let AI empires select policies using the same automation and restrictions as human players.
@@ -63,7 +63,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [ ] Test opportunities for comebacks and alternative industrial/territorial strategies; decide if later extraction opportunities are helpful.
 
 ## Phase 5 — Technology, economy and Wildcard
-- [ ] Design meaningful research and technology progression, including improved communications research that unlocks the Wildcard policy slot.
+- [ ] Activity-driven independent research branches (military, logistics, industry, extraction, habitation, exploration, communications); points accrue without policies, technology cards multiply relevant gains. Improved communications unlocks Wildcard. Exact rates and thresholds provisional.
 - [ ] Define Economy and Technology policy choices and their concrete effects. Consider optional star-system specialization and automated development without removing existing local controls.
 - [ ] Design missing manufacturing recipes and distinct combat ship roles only as needed by the core loop.
 
@@ -145,3 +145,13 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.16.29: AI wave objectives and reserve rally anchors are independent of movement destinations; verify stable operation identity during withdrawal. Full persistent ownership across wave completion remains outstanding.
 
 - v0.16.30: persistent AI attack operation ID survives regrouping and subsequent launches; reserve group remains separate. Validation pending. Unified command model and policy integration remain outstanding.
+
+- [ ] Verify v0.16.31 construction card sizing, inline progress and economy automation, including multiplayer command validation and manual UI inspection.
+
+- v0.16.32: baseline housing growth ceiling reduced to 5 million at normal system size; retain size scaling and doubling per habitation upgrade. Playtest demographic pacing.
+
+- v0.16.33: basic hulls cost 500 people each; colony hulls transfer 100,000 settlers. Review opening growth and colony viability with unchanged starting population and food supply.
+
+- v0.16.34: logistics crews 2,000, mining crews 750, fighters 500, colony settlers 100,000; assess early economic and AI pacing.
+
+- [ ] Raiding: small fighter cargo inventory, recover hostile cargo and deliver to owned systems. Escort: bounded civilian convoy waiting and fighter escort. Expansion: automatic neutral settlement without flags. Public policy/warmup visibility for warning; future diplomacy uses unique card instances.

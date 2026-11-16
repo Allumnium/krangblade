@@ -24,7 +24,7 @@ const ECONOMY_BUILDINGS = {
 }
 # Population is expressed in people (fractional values retained in simulation).
 const HOME_POPULATION: float = 10000.0
-const COLONY_POPULATION: float = 1000.0
+const COLONY_POPULATION: float = 100000.0
 const POPULATION_DOUBLING_YEARS: float = 30.0
 const PRODUCTION_PER_LEVEL: float = 4.0
 const ORGANICS_PER_LEVEL: float = 4.0
@@ -60,7 +60,7 @@ const WAREHOUSE_COSTS = [
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
 const CIVILIAN_CONSUMPTION = {"Metals": 0.1, "Plastics": 0.25, "Textiles": 0.25, "Tech": 0.25}
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
-const CREW_COSTS = {"ship": 20.0, "colony_ship": COLONY_POPULATION, "fighter": 10.0, "miner": 30.0}
+const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 750.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
 const LASER_DAMAGE: float = 18.0
@@ -384,7 +384,7 @@ static func population_capacity(planet: Dictionary) -> float:
     return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
 
 static func habitation_capacity(planet: Dictionary) -> float:
-    return 10000000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0)))
+    return 5000000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0)))
 
 static func population_multiplier(planet: Dictionary) -> float:
     return float(planet["population"]) / HOME_POPULATION
@@ -715,6 +715,12 @@ static func production_modifier(system: Dictionary, resource: String) -> float:
 static func _continuous_target(p: Dictionary, key: String) -> Array:
     if SHIP_KINDS.has(key):
         return [key, ""] if key != "ship" or bool(p["home"]) else []
+    if key in ["warehouse", "habitation"]:
+        return [key, ""]
+    if key.begins_with("economy_building:"):
+        var resource: String = key.trim_prefix("economy_building:")
+        if ECONOMY_BUILDINGS.has(resource) and production_available(p, resource):
+            return ["economy", resource]
     if key.begins_with("production:"):
         var resource: String = key.trim_prefix("production:")
         if production_available(p, resource):
@@ -801,6 +807,14 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
         var order: Array = _continuous_target(p, str(key))
         if order.is_empty():
             continue
+        if order[0] in ["warehouse", "habitation"]:
+            if order[0] == "warehouse":
+                _buy_warehouse(p)
+            else:
+                _buy_habitation(p)
+            if int(p.get(str(order[0]) + "_level", 0)) >= 3:
+                p["continuous"][key] = false
+            continue
         if SHIP_KINDS.has(order[0]):
             if (p["yards"] as Array).is_empty() or cycle.has(key) or manual_hulls.has(key):
                 continue
@@ -814,7 +828,7 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
             if existing:
                 cycle[key] = true
                 continue
-        elif _has_job(p, order[0], order[1]):
+        elif _has_job(p, "economy_building" if order[0] == "economy" else order[0], order[1]):
             continue
         if enqueue(state, int(p["owner"]), index, order[0], order[1]):
             p["queue"][-1]["automatic"] = true
@@ -836,7 +850,7 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
             if int(yard["job"]) == job_id:
                 yard["job"] = -1
         var key: String = str(item["kind"])
-        if key == "production" or key == "yard_upgrade":
+        if key == "production" or key == "yard_upgrade" or key == "economy_building":
             key += ":" + str(item["target"])
         if p["continuous"].has(key):
             p["continuous"][key] = false
@@ -2067,7 +2081,11 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
             action = "production"
             target = "Metals"
         elif index == home and expansion and counts["colony_ship"] == 0:
-            action = "colony_ship"
+            if float(p["population"]) >= CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
+                action = "colony_ship"
+            elif population_capacity(p) < CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
+                action = "production"
+                target = "Organics"
         elif has_yard and counts["fighter"] == 0:
             action = "fighter"
         elif index == home and owned.size() > 1 and counts["ship"] == 0:
@@ -2081,7 +2099,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
             action = "fighter"
         elif index == home and counts["ship"] < mini(12, owned.size() * 2) and owned.size() > 1:
             action = "ship"
-        elif has_yard and expansion and counts["colony_ship"] < 3:
+        elif has_yard and expansion and counts["colony_ship"] < 3 and float(p["population"]) >= CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
             var local_probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": index, "route": []}
             if _ai_colony_target(state, player, local_probe, reserved) >= 0:
                 action = "colony_ship"

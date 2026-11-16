@@ -141,11 +141,17 @@ jobs:
           godot --headless --path . --check-only --script res://tests/solo_smoke.gd
           godot --headless --path . --check-only --script res://tests/network_smoke.gd
       - name: Lobby and territory rules
-        run: godot --headless --path . --script res://tests/lobby_rules_test.gd
+        run: |
+          set -o pipefail
+          timeout 90s godot --headless --path . --script res://tests/lobby_rules_test.gd 2>&1 | awk '{ print; fflush(); if ($0 ~ /SCRIPT ERROR:|Assertion failed/) exit 1 }'
       - name: Economy and logistics rules
-        run: godot --headless --path . --script res://tests/economy_rules_test.gd
+        run: |
+          set -o pipefail
+          timeout 90s godot --headless --path . --script res://tests/economy_rules_test.gd 2>&1 | awk '{ print; fflush(); if ($0 ~ /SCRIPT ERROR:|Assertion failed/) exit 1 }'
       - name: Solo match smoke test
-        run: godot --headless --path . --script res://tests/solo_smoke.gd
+        run: |
+          set -o pipefail
+          timeout 90s godot --headless --path . --script res://tests/solo_smoke.gd 2>&1 | awk '{ print; fflush(); if ($0 ~ /SCRIPT ERROR:|Assertion failed/) exit 1 }'
       - name: Startup smoke test
         run: godot --headless --path . --quit-after 3
   network:

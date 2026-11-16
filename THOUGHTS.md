@@ -229,3 +229,19 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.29 fixes AI operation fragmentation when a member temporarily changes destination. Wave completion and regroup policy are unchanged; test covers retreat snapshot identity. Validation pending.
 
 - v0.16.30 retains AI attack operation identity across successive cohorts without changing wave size or strategy. Regression exercises completion, return and relaunch. Formation slot continuity across an entirely empty wave is not guaranteed.
+
+- v0.16.31 moves shared construction progress into the action row; economy repeat uses existing escalating building recipes and stops capped instant upgrades at level 3. Visual verification remains outstanding.
+
+- v0.16.32 doubles the housing growth penalty at a given population below the new 5-million baseline ceiling. Food and demographic momentum remain independent; no hard population deletion or production penalty introduced.
+
+- v0.16.33 increases crew costs using existing proportional construction deductions and refunds. Starting granted fleets and 10k home population unchanged; colony expansion now requires substantial demographic growth. Adjusted construction fixtures to supply people; food and early AI pacing need playtesting.
+
+- v0.16.34 differentiates basic hull crew costs; logistics ships now consume 20% of initial home population if built before growth. Playtest early trade viability.
+
+- v0.16.35 anchors system names to the drawn star radius instead of the full orbital extent. Check overlap with orbiting bodies and ships during manual zoom testing.
+
+- v0.16.36: PR #79 failed economy repeat rotation with larger crews and timed out normal ENet checks. Fund population/materials in construction-specific fixtures; avoid AI saving indefinitely for a colony ship when food capacity cannot support it. Fix economy automatic building enqueue kind. Keep all assertions. Record agreed policy design in TODO before implementation.
+
+- v0.16.37: three-peer regression timed out while two-peer passed. Record independently observed replicated command conditions across snapshots rather than requiring simultaneous transient queue states; retain final cancellation and shipyard count checks. Log missing condition IDs to isolate remaining failures.
+
+- v0.16.38: all ENet cases passed on v0.16.37; economy assertion at second AI neutral colony hung the process. Fund mature AI expansion test explicitly and prevent secondary colony orders from consuming populations below crew requirements. CI unit scripts fail on script errors and have a 90-second hard bound; no removal of gameplay assertions. Actual opening AI balance remains a playtest concern.
