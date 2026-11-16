@@ -75,3 +75,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Logistics lens uses consistent 3-by-2 stock/capacity bars at every zoom, with resource icons and directional one-to-three carets beside loaded logistics hulls based on cargo fraction.
 
 - Time controls include 10× for stress testing; the same fixed steps and host-only authority apply. Mining path trees share the local topology/team-invalidated civilian cache; dynamic cargo and depot decisions remain tick-local.
+
+- Repeat production upgrades can be armed before population or resources are sufficient, provided the system supports that resource; actual construction gates remain unchanged. Finite ship target text accepts only decimal digits; unlimited repeat remains separate.

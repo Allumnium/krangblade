@@ -690,8 +690,6 @@ static func set_continuous(state: Dictionary, player: int, index: int, kind: Str
     var p: Dictionary = _get_owned(state, player, index)
     if p.is_empty() or _continuous_target(p, kind).is_empty():
         return false
-    if enabled and kind.begins_with("production:") and not production_unlocked(p, kind.trim_prefix("production:")):
-        return false
     p["continuous"][kind] = enabled
     return true
 

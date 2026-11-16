@@ -601,6 +601,7 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     amount.custom_minimum_size = Vector2(72, 28)
     amount.size_flags_vertical = Control.SIZE_SHRINK_CENTER
     amount.get_line_edit().add_theme_font_size_override("font_size", 12)
+    amount.get_line_edit().text_changed.connect(_filter_ship_limit.bind(amount.get_line_edit()))
     maintain_row.add_child(amount)
     var ships_caption := _label("ships", 12)
     ships_caption.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -623,6 +624,19 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     disclosure.merge({"maintained": maintained, "maintain_amount": amount, "infinity": infinity, "button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
     build_cards[kind] = disclosure
     return button
+
+func _filter_ship_limit(value: String, field: LineEdit) -> void:
+    var digits: String = ""
+    var caret: int = 0
+    for i in range(value.length()):
+        var character: String = value.substr(i, 1)
+        if character >= "0" and character <= "9" and digits.length() < 4:
+            digits += character
+            if i < field.caret_column:
+                caret += 1
+    if digits != value:
+        field.text = digits
+        field.caret_column = caret
 
 func _repeat_button(parent: Container, key: String) -> Button:
     if repeat_icon == null:
@@ -871,8 +885,7 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
         var detail: Label = card["detail"]
         var available: bool = ECONOMY.production_available(planet, resource)
         var unlocked: bool = ECONOMY.production_unlocked(planet, resource)
-        var repeating: bool = bool(planet["continuous"].get("production:" + resource, false))
-        _sync_repeat(card["repeat"], planet, "production:" + resource, owned and available and (unlocked or repeating))
+        _sync_repeat(card["repeat"], planet, "production:" + resource, owned and available)
         if not job.is_empty():
             progress.value = 100.0 * float(job["progress"]) / float(job["work"])
             progress.tooltip_text = _cost_text(job["cost"], job["allocated"])

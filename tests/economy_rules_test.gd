@@ -533,7 +533,8 @@ func _initialize() -> void:
     upgrade_home["warehouse_level"] = 3
     upgrade_home["stock"]["Metals"] = 20000.0
     assert(not ECON.set_continuous(upgrades, 2, 0, "production:Organics", true))
-    assert(not ECON.set_continuous(upgrades, 1, 0, "production:Tech", true))
+    assert(ECON.set_continuous(upgrades, 1, 0, "production:Tech", true))
+    assert(ECON.set_continuous(upgrades, 1, 0, "production:Tech", false))
     assert(not ECON.set_continuous(upgrades, 1, 0, "yard_upgrade:8", true))
     assert(ECON.set_continuous(upgrades, 1, 0, "production:Organics", true))
     assert(ECON.set_continuous(upgrades, 1, 0, "yard_upgrade:0", true))

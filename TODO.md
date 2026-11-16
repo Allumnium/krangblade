@@ -96,3 +96,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Benchmark conservative territory tile rejection and visually compare boundaries at all zoom levels (v0.14.7).
 
 - [ ] Validate 10× time controls and persistent mining route trees (v0.14.8); benchmark five-, six- and eight-player stress matches.
+
+- [ ] Validate pre-arming repeat upgrades and numeric-only ship limits (v0.14.9).

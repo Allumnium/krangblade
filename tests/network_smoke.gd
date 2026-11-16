@@ -202,7 +202,7 @@ func _check_time_controls(state: Dictionary) -> bool:
     if view == null or not view.has_method("_refresh_time_controls"):
         return false
     var buttons: Dictionary = view.get("time_buttons")
-    if buttons.size() != 4:
+    if buttons.size() != TEST_SPEEDS.size():
         _fail("Time controls missing.")
         return false
     for speed in TEST_SPEEDS:
