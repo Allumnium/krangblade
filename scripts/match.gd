@@ -10,7 +10,7 @@ const RULES = preload("res://scripts/lobby_rules.gd")
 const COLORS = RULES.EMPIRE_COLORS
 const PANEL_WIDTH: float = 368.0
 const OVERVIEW_WIDTH: float = 340.0
-const HEADER_HEIGHT: float = 46.0
+const HEADER_HEIGHT: float = 54.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
 const MIN_ZOOM: float = 0.5
@@ -55,6 +55,8 @@ var military_drag: int = -1
 var military_drag_weights: Dictionary = {}
 var military_preview: Dictionary = {}
 var global_resource_fills: Dictionary = {}
+var global_resource_segments: Dictionary = {}
+var global_resource_strips: Dictionary = {}
 var colony_picker: OptionButton
 var send_colony_button: Button
 var colony_button: Button
@@ -769,7 +771,11 @@ func _build_economy_cards(parent: Container) -> void:
 func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
     var habitat_level: int = int(p.get("habitation_level", 0))
     _disclosure_title(habitation_card, "Habitation technology · Lv %d" % habitat_level)
-    habitation_card["detail"].text = "%s capacity%s" % [_compact_amount(ECONOMY.habitation_capacity(p)), " · next level doubles capacity" if habitat_level < 3 else ""]
+    var penalty: float = -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)
+    var next_penalty: float = -100.0 * clampf(float(p["population"]) / (2.0 * ECONOMY.habitation_capacity(p)), 0.0, 1.0)
+    habitation_card["detail"].text = "Growth modifier %+.1f%%" % penalty
+    if habitat_level < 3:
+        habitation_card["detail"].text += " → %+.1f%%" % next_penalty
     habitation_card["button"].disabled = not owned or not ECONOMY.habitation_available(p)
     habitation_card["button"].text = "Max" if habitat_level >= 3 else "Upgrade"
     habitation_card["costs"].visible = habitat_level < 3
@@ -1172,12 +1178,26 @@ func _toggle_lens(kind: String) -> void:
     logistics_lens.set_pressed_no_signal(active_lens == "logistics")
     map_canvas.queue_redraw()
 
-func _draw_resource_fill(tile: PanelContainer, resource: String) -> void:
+func _draw_resource_fill(strip: Control, resource: String) -> void:
     var fraction: float = float(global_resource_fills.get(resource, 0.0))
-    if fraction <= 0.0:
+    var segments: Array = global_resource_segments.get(resource, [])
+    strip.draw_rect(Rect2(Vector2.ZERO, strip.size), Color("#081421"))
+    if fraction <= 0.0 or segments.is_empty():
         return
-    var inner: Vector2 = tile.size - Vector2(2.0, 2.0)
-    tile.draw_rect(Rect2(Vector2.ONE, Vector2(maxf(0.0, inner.x * fraction), maxf(0.0, inner.y))), Color(HUD.COLORS[resource], 0.18))
+    var width: float = strip.size.x * fraction
+    strip.draw_rect(Rect2(Vector2.ZERO, Vector2(width, strip.size.y)), Color(HUD.COLORS.get(resource, Color("#b9d9ed")), 0.38))
+    var font: Font = ThemeDB.fallback_font
+    var x: float = 0.0
+    for i in range(segments.size()):
+        var segment: Dictionary = segments[i]
+        var w: float = width * float(segment["share"])
+        if i > 0:
+            strip.draw_line(Vector2(x, 0), Vector2(x, strip.size.y), Color("#081421"), 1.0)
+        var name_text: String = segment["name"]
+        var text_width: float = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+        if text_width + 6.0 <= w:
+            strip.draw_string(font, Vector2(x + (w - text_width) * 0.5, (strip.size.y - font.get_height(10)) * 0.5 + font.get_ascent(10)), name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#e3edf7"))
+        x += w
 
 func _build_territory_layer() -> void:
     territory_layer = Control.new()
@@ -1380,8 +1400,11 @@ func _build_global_bar(stats: Container) -> void:
         tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#284661"), 4, 3))
         stats.add_child(tile)
+        var stack := VBoxContainer.new()
+        stack.add_theme_constant_override("separation", 2)
+        tile.add_child(stack)
         var line := HBoxContainer.new()
-        tile.add_child(line)
+        stack.add_child(line)
         var icon := TextureRect.new()
         icon.texture = HUD.ICONS[resource]
         icon.custom_minimum_size = Vector2(18, 18)
@@ -1400,7 +1423,13 @@ func _build_global_bar(stats: Container) -> void:
         global_resource_labels[resource] = value
         global_resource_tiles[resource] = tile
         global_resource_fills[resource] = 0.0
-        tile.draw.connect(_draw_resource_fill.bind(tile, resource))
+        var strip := Control.new()
+        strip.custom_minimum_size.y = 14.0
+        strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+        stack.add_child(strip)
+        global_resource_strips[resource] = strip
+        global_resource_segments[resource] = []
+        strip.draw.connect(_draw_resource_fill.bind(strip, resource))
 
 func _global_stat(parent: Container, value: String, tint: Color, population: bool = false) -> Label:
     var tile := PanelContainer.new()
@@ -1411,7 +1440,17 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
     label.add_theme_color_override("font_color", tint)
     label.mouse_filter = Control.MOUSE_FILTER_PASS
     if population:
-        _population_row(tile).add_child(label)
+        var stack := VBoxContainer.new()
+        stack.add_theme_constant_override("separation", 2)
+        tile.add_child(stack)
+        _population_row(stack).add_child(label)
+        var strip := Control.new()
+        strip.custom_minimum_size = Vector2(80, 14)
+        strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+        stack.add_child(strip)
+        global_resource_tiles["population"] = tile
+        global_resource_strips["population"] = strip
+        strip.draw.connect(_draw_resource_fill.bind(strip, "population"))
     else:
         tile.add_child(label)
     return label
@@ -1468,6 +1507,16 @@ func _flow_name(category: String) -> String:
     return category
 
 func _resource_breakdown(state: Dictionary, resource: String) -> String:
+    if resource == "population":
+        var lines: PackedStringArray = ["Population · %.0f people" % float(ECONOMY.empire_totals(state, _me())["population"]), "Current local growth (people/yr)"]
+        for i in range(state["planets"].size()):
+            var p: Dictionary = state["planets"][i]
+            if int(p["owner"]) != _me():
+                continue
+            var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
+            var crew: float = float(p.get("crew_rate", 0.0))
+            lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% habitation" % [_system_name(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)])
+        return "\n".join(lines)
     var totals: Dictionary = ECONOMY.empire_totals(state, _me())
     var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
         "%.2f t in transit  /  %.0f t storage" % [float(totals["cargo"][resource]), float(totals["storage_reference"][resource])],
@@ -1500,7 +1549,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
     if resource == "population":
         var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
         var crew: float = float(p.get("crew_rate", 0.0))
-        return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nHabitation capacity: %.0f\nFood-supported equilibrium: %.0f\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, ECONOMY.habitation_capacity(p), ECONOMY.population_capacity(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
+        return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nHabitation growth modifier: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
     var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Latest local flows (t/yr)"]
     var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
     for category in p.get("flows", {}):
@@ -1575,10 +1624,36 @@ func _refresh_global_bar(state: Dictionary) -> void:
         var reference: float = float(totals["storage_reference"][resource])
         global_resource_fills[resource] = clampf(stored / reference, 0.0, 1.0) if reference > 0.0 else 0.0
         var tile: PanelContainer = global_resource_tiles[resource]
-        tile.queue_redraw()
+        var segments: Array = []
+        if stored > ECONOMY.EPS:
+            for i in range(state["planets"].size()):
+                var planet: Dictionary = state["planets"][i]
+                if int(planet["owner"]) != _me():
+                    continue
+                var quantity: float = float(planet["stock"][resource])
+                if quantity > 0.0:
+                    segments.append({"name": _system_name(i), "share": quantity / stored, "index": i})
+            segments.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["share"] > b["share"] if a["share"] != b["share"] else a["index"] < b["index"])
+        global_resource_segments[resource] = segments
+        global_resource_strips[resource].queue_redraw()
         tile.tooltip_text = ""
     global_population_label.text = "%s" % _compact_amount(float(totals["population"]))
-    global_population_label.tooltip_text = "Population across owned systems: %.0f" % float(totals["population"])
+    var population_total: float = float(totals["population"])
+    var population_segments: Array = []
+    var population_net: float = 0.0
+    for i in range(state["planets"].size()):
+        var p: Dictionary = state["planets"][i]
+        if int(p["owner"]) != _me():
+            continue
+        population_net += float(p.get("demographic_rate", ECONOMY.population_growth(p))) - float(p.get("crew_rate", 0.0))
+        if population_total > 0.0 and float(p["population"]) > 0.0:
+            population_segments.append({"name": _system_name(i), "share": float(p["population"]) / population_total, "index": i})
+    population_segments.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["share"] > b["share"] if a["share"] != b["share"] else a["index"] < b["index"])
+    global_population_label.text = "%s (%+.0f/yr)" % [_compact_amount(population_total), population_net]
+    global_population_label.tooltip_text = ""
+    global_resource_segments["population"] = population_segments
+    global_resource_fills["population"] = 1.0 if population_total > 0.0 else 0.0
+    global_resource_strips["population"].queue_redraw()
 
 func _inspector_page(title_text: String) -> VBoxContainer:
     var scroll := ScrollContainer.new()
