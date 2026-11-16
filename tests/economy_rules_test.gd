@@ -719,6 +719,8 @@ func _initialize() -> void:
     cp[3] = Vector2(190, 0)
     cp[4] = Vector2(190, 95)
     var colonization: Dictionary = ECON.create(colony_map, players, ids, false)
+    for index in [0, 2]:
+        colonization["planets"][index]["population"] = 150000.0
     assert(ECON.enqueue(colonization, 1, 0, "colony_ship"))
     assert(ECON.enqueue(colonization, 3, 2, "colony_ship"))
     for i in range(ceili(ECON._work("colony_ship", 1) / ECON.yard_speed(1))):
@@ -1287,9 +1289,10 @@ func _initialize() -> void:
     print("PASS: shared lane pacing, safe individual withdrawal, full repair and rejoining")
     var crew_state: Dictionary = ECON.create(graph, players, ids, false)
     var crew_home: Dictionary = crew_state["planets"][0]
+    crew_home["population"] = 150000.0
     for kind in ECON.SHIP_KINDS:
         var people: float = float(ECON.CREW_COSTS[kind])
-        assert(people > 0.0)
+        assert(people == (100000.0 if kind == "colony_ship" else 500.0))
         assert(ECON.enqueue(crew_state, 1, 0, kind))
         var crew_job: Dictionary = crew_home["queue"][0]
         var original_population: float = float(crew_home["population"])
@@ -1301,12 +1304,12 @@ func _initialize() -> void:
     crew_home["population"] = 1.0
     assert(ECON.enqueue(crew_state, 1, 0, "fighter"))
     assert(is_zero_approx(ECON._possible(crew_home, crew_home["queue"][0])))
-    crew_home["population"] = 100.0
+    crew_home["population"] = 1000.0
     var crew_order: Dictionary = crew_home["queue"][0]
     assert(ECON._advance(crew_home, crew_order, float(crew_order["work"])))
     ECON._finish(crew_state, 0, crew_home, crew_order)
-    assert(is_equal_approx(float(crew_home["population"]), 90.0))
-    assert(is_equal_approx(float(crew_state["ships"][0]["crew"]), 10.0))
+    assert(is_equal_approx(float(crew_home["population"]), 500.0))
+    assert(is_equal_approx(float(crew_state["ships"][0]["crew"]), 500.0))
     print("PASS: proportional crew costs, refunds, population starvation and completed crew")
     var opening: Dictionary = ECON.create(graph, players, ids)
     assert(opening["ships"].size() == ids.size() * 5)

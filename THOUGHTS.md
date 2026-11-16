@@ -233,3 +233,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.31 moves shared construction progress into the action row; economy repeat uses existing escalating building recipes and stops capped instant upgrades at level 3. Visual verification remains outstanding.
 
 - v0.16.32 doubles the housing growth penalty at a given population below the new 5-million baseline ceiling. Food and demographic momentum remain independent; no hard population deletion or production penalty introduced.
+
+- v0.16.33 increases crew costs using existing proportional construction deductions and refunds. Starting granted fleets and 10k home population unchanged; colony expansion now requires substantial demographic growth. Adjusted construction fixtures to supply people; food and early AI pacing need playtesting.

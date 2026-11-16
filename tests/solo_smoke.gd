@@ -167,6 +167,7 @@ func _run() -> void:
         push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
         quit(1)
         return
+    planets[0]["population"] = 150000.0
     session.call("request_operation", 0, "colony_ship")
     for i in range(ceili(ECON._work("colony_ship", 1) / ECON.yard_speed(1) / 0.1) + 1):
         session.call("_economy_tick")
@@ -248,6 +249,8 @@ func _run() -> void:
         push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
         quit(1)
         return
+    for index in [1, 2]:
+        setup["planets"][index]["population"] = 150000.0
     session.call("_economy_tick")
     if not (not setup["planets"][1]["queue"].is_empty()):
         push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))

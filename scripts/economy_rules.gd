@@ -24,7 +24,7 @@ const ECONOMY_BUILDINGS = {
 }
 # Population is expressed in people (fractional values retained in simulation).
 const HOME_POPULATION: float = 10000.0
-const COLONY_POPULATION: float = 1000.0
+const COLONY_POPULATION: float = 100000.0
 const POPULATION_DOUBLING_YEARS: float = 30.0
 const PRODUCTION_PER_LEVEL: float = 4.0
 const ORGANICS_PER_LEVEL: float = 4.0
@@ -60,7 +60,7 @@ const WAREHOUSE_COSTS = [
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
 const CIVILIAN_CONSUMPTION = {"Metals": 0.1, "Plastics": 0.25, "Textiles": 0.25, "Tech": 0.25}
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
-const CREW_COSTS = {"ship": 20.0, "colony_ship": COLONY_POPULATION, "fighter": 10.0, "miner": 30.0}
+const CREW_COSTS = {"ship": 500.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 500.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
 const LASER_DAMAGE: float = 18.0
