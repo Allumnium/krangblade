@@ -2657,25 +2657,33 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
             var node: int = int(ship.get(endpoint, -1))
             if node < 0 or node >= points.size():
                 continue
+            var lane: Array[int] = ECONOMY._path(state, ECONOMY.planet_teams(state), int(state["planets"][node]["team"]) if state["planets"][node].has("team") else int(ECONOMY.planet_teams(state)[node]), int(ship["source"]), int(ship["dest"]), {})
+            if lane.size() < 2:
+                continue
+            var neighbor: int = lane[1] if endpoint == "source" else lane[lane.size() - 2]
             if not traffic.has(node):
-                traffic[node] = {"source": ECONOMY.empty_stock(), "dest": ECONOMY.empty_stock()}
+                traffic[node] = {}
+            var key: Vector2i = Vector2i(neighbor, 0 if endpoint == "source" else 1)
+            if not traffic[node].has(key):
+                traffic[node][key] = ECONOMY.empty_stock()
             for resource in ECONOMY.RESOURCES:
-                traffic[node][endpoint][resource] += float(ship["cargo"][resource])
+                traffic[node][key][resource] += float(ship["cargo"][resource])
     for node in traffic:
         if not ECONOMY.discovered(state, _me(), "planets", node):
             continue
         var center: Vector2 = _screen_point(points[node])
         var radius: float = _planet_radius(node, state)
-        for endpoint in ["source", "dest"]:
+        for key in traffic[node]:
+            var endpoint: String = "source" if key.y == 0 else "dest"
             for k in range(ECONOMY.RESOURCES.size()):
                 var resource: String = ECONOMY.RESOURCES[k]
-                var cargo: float = traffic[node][endpoint][resource]
+                var cargo: float = traffic[node][key][resource]
                 if cargo <= ECONOMY.EPS:
                     continue
-                var radial: Vector2 = Vector2.from_angle((-PI if endpoint == "source" else 0.0) + (float(k) - 2.5) * 0.25)
+                var radial: Vector2 = (_screen_point(points[key.x]) - center).normalized()
                 var axis: Vector2 = radial if endpoint == "source" else -radial
                 var normal: Vector2 = axis.orthogonal()
-                var base: Vector2 = center + radial * (radius + 24.0)
+                var base: Vector2 = center + radial * minf(radius + 24.0 + float(k) * 13.0, center.distance_to(_screen_point(points[key.x])) * 0.48)
                 var count: int = clampi(ceili(3.0 * cargo / ECONOMY.CARGO_CAPACITY), 1, 3)
                 map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(base + radial * 14.0 - Vector2(5, 5), Vector2(10, 10)), false)
                 for j in range(count):

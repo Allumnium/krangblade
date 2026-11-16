@@ -95,3 +95,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Population HUD uses sorted proportional system segments and the same live hover as resources. Show signed habitation growth modifier rather than capacity or food equilibrium figures, including upgrade previews.
 
 - Resource economy buildings are repeatable timed construction, adding 25% per completed building subject to the existing production bounds. Trade import/export switches are independent and default enabled; disabled thresholds persist, and dragging either enabled handle pushes the other when crossing.
+
+- Logistics traffic indicators lie on the corresponding first/last route lane at the system endpoint, grouped by resource, lane and direction.
