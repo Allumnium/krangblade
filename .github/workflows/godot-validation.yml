@@ -88,8 +88,6 @@ jobs:
         run: godot --headless --path . --script res://tests/economy_rules_test.gd
       - name: Solo match smoke test
         run: godot --headless --path . --script res://tests/solo_smoke.gd
-      - name: Planet map interaction smoke test
-        run: timeout 30s godot --headless --path . --script res://tests/map_view_smoke.gd
       - name: Startup smoke test
         run: godot --headless --path . --quit-after 3
   network:

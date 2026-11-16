@@ -18,6 +18,8 @@ All rates, costs, sizes, durations, starting inventory, bonus distributions and 
 
 ## Architecture and validation
 
+Automated validation targets gameplay rules, authority, parsing, startup and session lifecycle, not widget layout or appearance. UI changes are verified through manual playtesting. The detailed map-view smoke test was retired in v0.16.20.
+
 - scripts/planet_map.gd: seeded map, fixed edges and weighted pathfinding.
 - scripts/economy_rules.gd: pure planetary ownership, resource production, thresholds, refundable construction, shipyard scheduling and physical cargo simulation.
 - scripts/game_session.gd: shared offline/host-authoritative simulation and multiplayer snapshots, lobby/chat and synchronized load barrier.

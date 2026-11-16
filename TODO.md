@@ -77,7 +77,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [ ] Playtest the full loop at 1× for 1v1, four-player and larger team matches. Balance travel, economy, construction, conflict, negotiation, and antimatter timing toward typical 10–30 minute matches.
 - [ ] Assess strategic variety, meaningful decisions per minute, runaway leaders, comeback options and AI competence.
 - [ ] Audit policy readability, map targeting, formation visuals, economy feedback, constrained-window layout and multiplayer behavior.
-- [ ] Keep existing two-/eight-peer ENet, disconnect, simulation and UI regressions mandatory; validate real visual/internet behavior separately.
+- [ ] Keep existing two-/eight-peer ENet, disconnect, simulation, parsing and startup regressions mandatory; validate UI manually and real internet behavior separately.
 
 ## Deferred / not yet agreed
 - Formal galactic votes, complex treaties, elaborate tech trees, additional playable races, ship customization and campaigns.
@@ -128,4 +128,4 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 
 - [ ] Validate v0.16.17 local UI scaling, saved audio settings, economy card consistency, neutral trade sliders and sequential shipyard row visibility.
 
-- [ ] Split ordered map UI regression scenarios into independently seeded fixtures; v0.16.19 first extracts named scenario functions and keeps all assertions mandatory. Existing cross-scenario fixture dependencies remain explicit.
+- [ ] Manually validate map interactions, economy panels, shipyard visibility and settings; detailed automated UI assertions retired by explicit project decision in v0.16.20. Maintain gameplay coverage through authoritative rules and session tests.

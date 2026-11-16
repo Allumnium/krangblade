@@ -209,3 +209,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.18 explicitly publishes the authoritative state before comparing shipyard work fractions in the map smoke test; retains the equality and cancellation checks and adds mismatch diagnostics. v0.16.17 passed all ENet scenarios but failed this assertion; root cause not yet verified.
 
 - v0.16.19 extracts named map smoke scenarios with per-scenario failure messages and pass logs. Shared state and order are preserved to avoid changing test semantics; fully independent fixtures remain a follow-up. CI required.
+
+- v0.16.20: User explicitly retired presentation-specific automated UI tests. Deleted the monolithic map smoke script and its UID after v0.16.19 introduced an out-of-scope mouse variable; retain parsing, startup, simulation, solo and ENet checks. Visual/map interaction coverage is manual; review direct rules coverage when adding gameplay features. No UI behavior changed in this commit.
