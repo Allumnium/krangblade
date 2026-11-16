@@ -145,3 +145,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.16.29: AI wave objectives and reserve rally anchors are independent of movement destinations; verify stable operation identity during withdrawal. Full persistent ownership across wave completion remains outstanding.
 
 - v0.16.30: persistent AI attack operation ID survives regrouping and subsequent launches; reserve group remains separate. Validation pending. Unified command model and policy integration remain outstanding.
+
+- [ ] Verify v0.16.31 construction card sizing, inline progress and economy automation, including multiplayer command validation and manual UI inspection.

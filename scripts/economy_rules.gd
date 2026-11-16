@@ -715,6 +715,12 @@ static func production_modifier(system: Dictionary, resource: String) -> float:
 static func _continuous_target(p: Dictionary, key: String) -> Array:
     if SHIP_KINDS.has(key):
         return [key, ""] if key != "ship" or bool(p["home"]) else []
+    if key in ["warehouse", "habitation"]:
+        return [key, ""]
+    if key.begins_with("economy_building:"):
+        var resource: String = key.trim_prefix("economy_building:")
+        if ECONOMY_BUILDINGS.has(resource) and production_available(p, resource):
+            return ["economy_building", resource]
     if key.begins_with("production:"):
         var resource: String = key.trim_prefix("production:")
         if production_available(p, resource):
@@ -801,6 +807,14 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
         var order: Array = _continuous_target(p, str(key))
         if order.is_empty():
             continue
+        if order[0] in ["warehouse", "habitation"]:
+            if order[0] == "warehouse":
+                _buy_warehouse(p)
+            else:
+                _buy_habitation(p)
+            if int(p.get(str(order[0]) + "_level", 0)) >= 3:
+                p["continuous"][key] = false
+            continue
         if SHIP_KINDS.has(order[0]):
             if (p["yards"] as Array).is_empty() or cycle.has(key) or manual_hulls.has(key):
                 continue
@@ -836,7 +850,7 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
             if int(yard["job"]) == job_id:
                 yard["job"] = -1
         var key: String = str(item["kind"])
-        if key == "production" or key == "yard_upgrade":
+        if key == "production" or key == "yard_upgrade" or key == "economy_building":
             key += ":" + str(item["target"])
         if p["continuous"].has(key):
             p["continuous"][key] = false

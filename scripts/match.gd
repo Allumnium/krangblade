@@ -473,7 +473,7 @@ func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
     parent.add_child(body)
     body.hide()
     header.set_meta("caption", title_text)
-    header.text = "▸ " + title_text
+    header.text = title_text
     var card: Dictionary = {"header": header, "body": body, "actions": line}
     header.pressed.connect(_toggle_disclosure.bind(card))
     return card
@@ -511,15 +511,19 @@ func _card_action(card: Dictionary, caption: String, callback: Callable) -> Butt
 
 func _card_cancel(card: Dictionary, callback: Callable, progress: ProgressBar = null) -> Button:
     var button: Button = _card_action(card, "×", callback)
+    var line: HBoxContainer = card["actions"]
+    line.move_child(button, 1)
     if progress != null:
-        var parent: Node = progress.get_parent()
-        var index: int = progress.get_index()
-        var line := HBoxContainer.new()
-        parent.add_child(line)
-        parent.move_child(line, index)
         progress.reparent(line, false)
-        progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        button.reparent(line, false)
+        line.move_child(progress, 0)
+        progress.custom_minimum_size = Vector2(5, 0)
+        progress.show_percentage = false
+        progress.fill_mode = ProgressBar.FILL_BOTTOM_TO_TOP
+        progress.step = 0.0
+        progress.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+        progress.size_flags_vertical = Control.SIZE_FILL
+        progress.add_theme_stylebox_override("background", HUD.surface(Color("#14283a"), Color("#14283a"), 0, 0))
+        progress.add_theme_stylebox_override("fill", HUD.surface(HUD.ACCENT, HUD.ACCENT, 0, 0))
     button.hide()
     button.custom_minimum_size.x = 23
     button.tooltip_text = "Cancel / refund"
@@ -551,7 +555,7 @@ func _population_row(parent: Container) -> HBoxContainer:
 func _disclosure_title(card: Dictionary, caption: String) -> void:
     var header: Button = card["header"]
     header.set_meta("caption", caption)
-    header.text = ("▾ " if card["body"].visible else "▸ ") + caption
+    header.text = caption
 
 func _collapse_card(card: Dictionary) -> void:
     if card.has("body"):
@@ -788,6 +792,8 @@ func _build_economy_cards(parent: Container) -> void:
     habitat_body.add_child(habitat_detail)
     habitation_card.merge({"button": _card_action(habitation_card, "Upgrade", _operation.bind("economy", "habitation")), "detail": habitat_detail, "costs": _cost_grid(habitat_body)})
     HUD.action(habitation_card["button"])
+    habitation_card["repeat"] = _repeat_button(habitation_card["actions"], "habitation")
+    warehouse_card["repeat"] = _repeat_button(warehouse_card["actions"], "warehouse")
     for resource in ECONOMY.RESOURCES:
         var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
         var section: VBoxContainer = HUD.section(parent, "")
@@ -805,6 +811,7 @@ func _build_economy_cards(parent: Container) -> void:
         progress.hide()
         disclosure["progress"] = progress
         disclosure["cancel"] = _card_cancel(disclosure, _cancel_kind.bind("economy_building", resource), progress)
+        disclosure["repeat"] = _repeat_button(disclosure["actions"], "economy_building:" + resource)
         HUD.action(button)
         disclosure.merge({"button": button, "detail": detail, "costs": _cost_grid(card)})
         economy_cards[resource] = disclosure
@@ -817,12 +824,14 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
     habitation_card["detail"].text = "Overpopulation penalty %+.1f%%" % penalty
     if habitat_level < 3:
         habitation_card["detail"].text += " → %+.1f%%" % next_penalty
+    _sync_repeat(habitation_card["repeat"], p, "habitation", owned and habitat_level < 3)
     habitation_card["button"].disabled = not owned or not ECONOMY.habitation_available(p)
     habitation_card["button"].text = "Max" if habitat_level >= 3 else "Upgrade"
     habitation_card["costs"].visible = habitat_level < 3
     _show_cost(habitation_card["costs"], ECONOMY.habitation_cost(p))
     var level: int = int(p.get("warehouse_level", 0))
     var warehouse_button: Button = warehouse_card["button"]
+    _sync_repeat(warehouse_card["repeat"], p, "warehouse", owned and level < 3)
     warehouse_button.disabled = not owned or not ECONOMY.warehouse_available(p)
     warehouse_button.text = "Max" if level >= 3 else "Upgrade"
     var warehouse_detail: String = "%s / resource" % _tons(ECONOMY.storage_capacity(p), 0)
@@ -853,6 +862,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
             card["progress"].value = 100.0 * float(job["progress"]) / float(job["work"])
             _style_progress(card["progress"], p, job)
         var button: Button = card["button"]
+        _sync_repeat(card["repeat"], p, "economy_building:" + resource, owned and ECONOMY.production_available(p, resource))
         button.text = "Build"
         button.disabled = not owned or not ECONOMY.building_available(p, resource)
         var cost: String = _cost_text(ECONOMY.building_cost(p, resource))
