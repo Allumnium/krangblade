@@ -165,3 +165,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.15.1 moves cancellation beside active progress, including shipyard assignments; verify visual layout and matching job refunds.
 
 - v0.15.2 removes current construction eligibility from finite target validation. Existing queue scheduling still enforces eligibility; test unavailable shipyards and non-home logistics targets.
+
+- v0.15.3 replaces absent procedural deposits with low-yield deposits and bounds site production modifiers. Explicitly unbuilt production and asteroid depletion remain unchanged.

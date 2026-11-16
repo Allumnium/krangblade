@@ -24,6 +24,13 @@ func _test_maintain_targets() -> void:
     assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
+    var bounds: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1])
+    var world: Dictionary = bounds["planets"][0]
+    world["abundance"]["Metals"] = 0.1
+    assert(is_equal_approx(ECON.production_modifier(world, "Metals"), 0.1))
+    assert(ECON.rate(world, "Metals") > 0.0)
+    world["abundance"]["Metals"] = 10.0
+    assert(is_equal_approx(ECON.production_modifier(world, "Metals"), 4.0))
     _test_maintain_targets()
     var graph: Dictionary = MAP.generate(2468)
     assert(graph == MAP.generate(2468))
