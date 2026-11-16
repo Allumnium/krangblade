@@ -100,3 +100,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate pre-arming repeat upgrades and numeric-only ship limits (v0.14.9).
 
 - [ ] Validate civilian stock access caps for all consumed resources (v0.14.10).
+
+- [ ] Validate freighter compartments, perimeter indicators and habitation technology (v0.15.0).

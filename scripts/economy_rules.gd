@@ -382,6 +382,9 @@ static func farm_potential(planet: Dictionary) -> float:
 static func population_capacity(planet: Dictionary) -> float:
     return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
 
+static func habitation_capacity(planet: Dictionary) -> float:
+    return 10000000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0)))
+
 static func population_multiplier(planet: Dictionary) -> float:
     return float(planet["population"]) / HOME_POPULATION
 
@@ -456,6 +459,10 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
     # Far below equilibrium, limit positive growth to a 30-year doubling.
     # Near capacity the damped response takes over without a hard population cap.
     var growth_constant: float = log(2.0) / POPULATION_DOUBLING_YEARS
+    if current < habitation_capacity(planet):
+        growth_constant *= clampf(1.0 - current / habitation_capacity(planet), 0.0, 1.0)
+    else:
+        growth_constant = 0.0
     var growth_ceiling: float = current * exp(growth_constant * dt)
     if next > growth_ceiling:
         next = growth_ceiling
@@ -593,6 +600,21 @@ static func warehouse_available(p: Dictionary) -> bool:
     var level: int = int(p.get("warehouse_level", 0))
     return level < 3 and float(p["population"]) + EPS >= float(WAREHOUSE_POPULATIONS[level]) and affordable(p, WAREHOUSE_COSTS[level])
 
+static func habitation_cost(p: Dictionary) -> Dictionary:
+    var factor: float = pow(3.0, int(p.get("habitation_level", 0)))
+    return {"Metals": 600.0 * factor, "Tech": 100.0 * factor, "Plastics": 150.0 * factor}
+
+static func habitation_available(p: Dictionary) -> bool:
+    return int(p.get("habitation_level", 0)) < 3 and affordable(p, habitation_cost(p))
+
+static func _buy_habitation(p: Dictionary) -> bool:
+    if not habitation_available(p):
+        return false
+    for resource in habitation_cost(p):
+        p["stock"][resource] -= habitation_cost(p)[resource]
+    p["habitation_level"] = int(p.get("habitation_level", 0)) + 1
+    return true
+
 static func _buy_warehouse(p: Dictionary) -> bool:
     if not warehouse_available(p):
         return false
@@ -658,6 +680,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
             target = str(slot)
             level = slot + 1
         "economy":
+            if target == "habitation":
+                return _buy_habitation(p)
             return _buy_warehouse(p) if target == "warehouse" else _buy_building(p, target)
         "production":
             if not production_unlocked(p, target) or _has_job(p, kind, target):
