@@ -45,7 +45,7 @@ func _run() -> void:
     assert(overview.is_ancestor_of(view.get("population_label")))
     assert(inspector.is_ancestor_of(view.get("inspector_tabs")))
     assert(not overview.is_ancestor_of(view.get("inspector_tabs")))
-    assert(header.size.y <= 52.0)
+    assert(header.size.y <= 60.0)
     assert(header.get_child_count() == 1 and header.get_child(0) is HBoxContainer)
     for child in header.get_child(0).get_children():
         if child is Button:

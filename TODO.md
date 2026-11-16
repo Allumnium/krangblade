@@ -112,3 +112,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate optional performance overlay (v0.15.4) and record sustained fleet-heavy 10× measurements before deeper snapshot optimization.
 
 - [ ] Visually validate segmented global resource strips at constrained widths (v0.15.5).
+
+- [ ] Validate population segments, live growth breakdown and modifier-only habitation descriptions (v0.15.6).
