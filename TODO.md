@@ -116,3 +116,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate population segments, live growth breakdown and modifier-only habitation descriptions (v0.15.6).
 
 - [ ] Validate timed repeatable economy buildings and independent trade switches (v0.16.0).
+
+- [ ] Integrate orbital shipyard combat targeting, destruction and docking; validate assembly visuals (v0.16.2 prototype).

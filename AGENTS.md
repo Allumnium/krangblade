@@ -97,3 +97,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Resource economy buildings are repeatable timed construction, adding 25% per completed building subject to the existing production bounds. Trade import/export switches are independent and default enabled; disabled thresholds persist, and dragging either enabled handle pushes the other when crossing.
 
 - Logistics traffic indicators lie on the corresponding first/last route lane at the system endpoint, grouped by resource, lane and direction.
+
+- Completed shipyards have replicated HP (1,000 at level one, 1,000 per level) and slow orbital construction frames. Assigned hulls show outline segments snapping into place then progressive fill using actual job progress. Combat targeting/destruction of shipyards requires further integration.

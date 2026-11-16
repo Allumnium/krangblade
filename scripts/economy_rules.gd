@@ -146,7 +146,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
                 if resource != "Crystals":
                     levels[resource] = 1
             stock = STARTING_STOCK.duplicate()
-            yards.append({"level": 1, "job": -1})
+            yards.append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0})
         var richness: float = 0.0
         for resource in EXTRACTED:
             richness += float(abundance[resource])
@@ -902,9 +902,10 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
         "pds":
             p["pds"][int(item["target"])] = {"cooldown": 0.0, "target": -1, "laser_until": -1.0}
         "yard":
-            p["yards"].append({"level": 1, "job": -1})
+            p["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0})
         "yard_upgrade":
             p["yards"][int(item["target"])]["level"] = int(item["level"])
+            p["yards"][int(item["target"])]["hp"] = SHIP_HP * 10.0 * int(item["level"])
         "ship", "colony_ship", "fighter", "miner":
             state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
                 "position": state["map"]["points"][index], "heading": Vector2.UP, "navigation_target": state["map"]["points"][index],

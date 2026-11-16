@@ -2690,6 +2690,40 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
                     var tip: Vector2 = base + axis * float(j * 5)
                     map_canvas.draw_polyline(PackedVector2Array([tip - axis * 4.0 + normal * 3.0, tip, tip - axis * 4.0 - normal * 3.0]), HUD.COLORS[resource], 1.5, true)
 
+func _draw_shipyards(planet: Dictionary, center: Vector2, radius: float, tint: Color, elapsed: float) -> void:
+    var scale: float = _ship_scale()
+    for slot in range(planet["yards"].size()):
+        var yard: Dictionary = planet["yards"][slot]
+        var angle: float = float(slot) * TAU / 3.0 + elapsed * 0.008
+        var axis: Vector2 = Vector2.from_angle(angle)
+        var side: Vector2 = axis.orthogonal()
+        var point: Vector2 = center + axis * (radius + 22.0 * scale)
+        var frame: PackedVector2Array = PackedVector2Array([point - axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale + side * 17.0 * scale, point - axis * 11.0 * scale + side * 17.0 * scale])
+        for k in range(4):
+            map_canvas.draw_line(frame[k], frame[(k + 1) % 4], tint, 2.5 * scale, true)
+        for k in [-1.0, 1.0]:
+            var rail: Vector2 = point + axis * k * 11.0 * scale
+            map_canvas.draw_line(rail - side * 17.0 * scale, rail + side * 17.0 * scale, Color("#8da2b6"), 4.0 * scale, true)
+        for job in planet["queue"]:
+            if int(job["id"]) != int(yard["job"]) or not ECONOMY.SHIP_KINDS.has(job["kind"]):
+                continue
+            var u: float = clampf(float(job["progress"]) / float(job["work"]), 0.0, 1.0)
+            var shape: PackedVector2Array
+            match str(job["kind"]):
+                "fighter": shape = PackedVector2Array([Vector2(12, 0), Vector2(-7, 8), Vector2(-3, 0), Vector2(-7, -8)])
+                "colony_ship": shape = PackedVector2Array([Vector2(12, 0), Vector2(0, 7), Vector2(-9, 0), Vector2(0, -7)])
+                "miner": shape = PackedVector2Array([Vector2(8, 4), Vector2(8, -4), Vector2(-6, -7), Vector2(-6, 7)])
+                _: shape = PackedVector2Array([Vector2(14, 4), Vector2(10, 8), Vector2(-13, 8), Vector2(-13, -8), Vector2(10, -8), Vector2(14, -4)])
+            var hull := PackedVector2Array()
+            for vertex in shape:
+                hull.append(point + side * vertex.x * scale + axis * vertex.y * scale)
+            var edges: int = mini(hull.size(), floori(u * 2.0 * hull.size()))
+            for k in range(edges):
+                map_canvas.draw_line(hull[k], hull[(k + 1) % hull.size()], tint.lightened(0.4), 1.5 * scale, true)
+            if u > 0.5:
+                map_canvas.draw_colored_polygon(hull, Color(tint.lightened(0.4), (u - 0.5) * 2.0))
+            break
+
 func _draw_map() -> void:
     if session == null:
         return
@@ -2756,6 +2790,7 @@ func _draw_map() -> void:
         var radius: float = _planet_radius(i, state)
         var tint: Color = _empire_color(int(state["planets"][i]["owner"]))
         _draw_system(i, state, pos, radius, tint)
+        _draw_shipyards(state["planets"][i], pos, radius, tint, float(state["elapsed"]))
         if i == selected and bool(state["planets"][i]["home"]):
             map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
         if i == selected:
