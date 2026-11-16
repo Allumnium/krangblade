@@ -292,8 +292,8 @@ func _build_ui() -> void:
     inspector_panel.anchor_bottom = 1.0
     inspector_panel.offset_left = -PANEL_WIDTH
     inspector_panel.offset_right = -8
-    inspector_panel.offset_top = HEADER_HEIGHT + 16
-    inspector_panel.offset_bottom = -52
+    inspector_panel.offset_top = HEADER_HEIGHT + 64
+    inspector_panel.offset_bottom = -78
     var body := VBoxContainer.new()
     body.add_theme_constant_override("separation", 8)
     inspector_panel.add_child(body)
@@ -1235,7 +1235,7 @@ func _refresh_time_controls(state: Dictionary) -> void:
 
 func _toggle_lens(kind: String) -> void:
     policy_selected = ""
-    _refresh_policy_ui(_state())
+    _refresh()
     military_drag = -1
     military_preview.clear()
     active_lens = "" if active_lens == kind else kind
@@ -1832,8 +1832,8 @@ func _refresh() -> void:
     var field_selected: bool = selected_field >= 0 and ECONOMY.discovered(state, _me(), "fields", selected_field)
     var ship_selected: bool = not ship.is_empty()
     var other_selected: bool = ship_selected or field_selected
-    inspector_panel.visible = not p.is_empty() or other_selected
-    overview_panel.visible = inspector_panel.visible
+    inspector_panel.visible = policy_selected.is_empty() and (not p.is_empty() or other_selected)
+    overview_panel.visible = not p.is_empty() or other_selected
     planet_overview.visible = not other_selected
     var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
     inspector_tabs.visible = not other_selected and own_system
@@ -2525,7 +2525,7 @@ func _select_at(point: Vector2) -> void:
     _refresh()
 
 func _map_input(event: InputEvent) -> void:
-    if match_menu.visible:
+    if match_menu.visible or (is_instance_valid(policy_modal) and policy_modal.visible):
         return
     if event is InputEventMouseButton:
         var mouse: InputEventMouseButton = event
@@ -3108,10 +3108,11 @@ var policy_inspector: PanelContainer
 var policy_title: Label
 var policy_info: Label
 var policy_slider: HSlider
-var policy_modal: AcceptDialog
+var policy_modal: Control
 var policy_catalog: HBoxContainer
 var policy_choice_slot: String = ""
 var policy_drop: PolicyDrop
+var policy_modal_panel: PanelContainer
 
 class PolicyCard extends Button:
     var card_id: String = ""
@@ -3127,7 +3128,7 @@ class PolicyDrop extends Button:
     signal card_dropped(card: String)
     var slot_id: String = ""
     func _can_drop_data(_position: Vector2, data: Variant) -> bool:
-        return data is Dictionary and data.get("slot", "") == slot_id and data.has("card")
+        return not disabled and data is Dictionary and data.get("slot", "") == slot_id and data.has("card")
     func _drop_data(_position: Vector2, data: Variant) -> void:
         card_dropped.emit(str(data["card"]))
 
@@ -3137,8 +3138,8 @@ func _build_policy_ui() -> void:
     strip.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
     strip.offset_left = -350
     strip.offset_right = 350
-    strip.offset_top = -70
-    strip.offset_bottom = 90
+    strip.offset_top = -72
+    strip.offset_bottom = -4
     strip.add_theme_constant_override("separation", 5)
     for slot in ECONOMY.POLICY_SLOTS:
         var column := VBoxContainer.new()
@@ -3147,20 +3148,25 @@ func _build_policy_ui() -> void:
         var change: Button = _button("Change", _open_policy_catalog.bind(slot), column)
         change.custom_minimum_size.y = 24
         policy_changes[slot] = change
-        var card := Button.new()
-        card.custom_minimum_size = Vector2(128, 128)
+        var card := PolicyDrop.new()
+        card.slot_id = slot
+        card.card_dropped.connect(_equip_selected_policy)
+        card.custom_minimum_size = Vector2(128, 42)
+        card.add_theme_font_size_override("font_size", 12)
+        card.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
         card.alignment = HORIZONTAL_ALIGNMENT_CENTER
+        card.toggle_mode = true
         card.pressed.connect(_inspect_policy.bind(slot))
         column.add_child(card)
         policy_buttons[slot] = card
     policy_inspector = PanelContainer.new()
     add_child(policy_inspector)
     policy_inspector.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
-    policy_inspector.offset_left = -PANEL_WIDTH
+    policy_inspector.offset_left = -310
     policy_inspector.offset_right = -8
     policy_inspector.offset_top = HEADER_HEIGHT + 64
     policy_inspector.offset_bottom = -82
-    policy_inspector.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928ed"), Color("#284661"), 8))
+    policy_inspector.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#284661"), 8))
     var body := VBoxContainer.new()
     policy_inspector.add_child(body)
     var title_row := HBoxContainer.new()
@@ -3179,24 +3185,35 @@ func _build_policy_ui() -> void:
         if changed and not policy_selected.is_empty():
             session.call("request_policy_weight", policy_selected, roundi(policy_slider.value)))
     policy_inspector.hide()
-    policy_modal = AcceptDialog.new()
-    policy_modal.title = "Change policy"
-    policy_modal.exclusive = true
-    policy_modal.ok_button_text = "Close"
+    # In-scene overlay leaves the actual bottom slots reachable for GUI drag/drop.
+    policy_modal = Control.new()
     add_child(policy_modal)
+    policy_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    policy_modal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    policy_modal_panel = PanelContainer.new()
+    policy_modal.add_child(policy_modal_panel)
+    policy_modal_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+    policy_modal_panel.offset_left = -280
+    policy_modal_panel.offset_right = 280
+    policy_modal_panel.offset_top = -140
+    policy_modal_panel.offset_bottom = 140
+    policy_modal_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#42647e"), 12))
     var contents := VBoxContainer.new()
-    policy_modal.add_child(contents)
+    policy_modal_panel.add_child(contents)
+    var tools_row := HBoxContainer.new()
+    contents.add_child(tools_row)
+    var hint := _label("Choose or drag a card to its slot", 13)
+    hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    tools_row.add_child(hint)
+    _button("Empty", _equip_selected_policy.bind(""), tools_row)
+    _button("×", policy_modal.hide, tools_row)
     policy_catalog = HBoxContainer.new()
     contents.add_child(policy_catalog)
-    policy_drop = PolicyDrop.new()
-    policy_drop.text = "Drop card here"
-    policy_drop.custom_minimum_size = Vector2(360, 60)
-    contents.add_child(policy_drop)
-    policy_drop.card_dropped.connect(_equip_selected_policy)
+    policy_modal.hide()
 
 func _open_policy_catalog(slot: String) -> void:
     policy_choice_slot = slot
-    policy_drop.slot_id = slot
+
     for child in policy_catalog.get_children():
         policy_catalog.remove_child(child)
         child.queue_free()
@@ -3207,14 +3224,16 @@ func _open_policy_catalog(slot: String) -> void:
         var tile := PolicyCard.new()
         tile.card_id = card
         tile.slot_id = slot
-        tile.text = str(ECONOMY.POLICY_CARDS[card]["name"]) + "\n\nDrag to slot"
+        tile.text = str(ECONOMY.POLICY_CARDS[card]["name"])
         tile.tooltip_text = str(ECONOMY.POLICY_CARDS[card].get("description", ""))
-        tile.custom_minimum_size = Vector2(148, 210)
+        tile.custom_minimum_size = Vector2(132, 155)
+        tile.add_theme_font_size_override("font_size", 12)
+        tile.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
         tile.pressed.connect(_equip_selected_policy.bind(card))
         policy_catalog.add_child(tile)
-    _button("Empty slot", _equip_selected_policy.bind(""), policy_catalog)
-    policy_modal.title = "Change " + slot.capitalize()
-    policy_modal.popup_centered(Vector2i(820 if slot == "economy" else 560, 350))
+    policy_modal_panel.offset_left = -maxf(160.0, float(policy_catalog.get_child_count()) * 72.0 + 16.0)
+    policy_modal_panel.offset_right = -policy_modal_panel.offset_left
+    policy_modal.show()
 
 func _equip_selected_policy(card: String) -> void:
     session.call("request_policy", policy_choice_slot, card)
@@ -3227,7 +3246,7 @@ func _inspect_policy(slot: String) -> void:
     active_lens = ""
     military_lens.set_pressed_no_signal(false)
     logistics_lens.set_pressed_no_signal(false)
-    _refresh_policy_ui(_state())
+    _refresh()
     map_canvas.queue_redraw()
 
 func _refresh_policy_ui(state: Dictionary) -> void:
@@ -3243,7 +3262,9 @@ func _refresh_policy_ui(state: Dictionary) -> void:
         var name_text: String = "Locked" if not available else ("Empty" if entry.is_empty() else str(ECONOMY.POLICY_CARDS[entry["card"]]["name"]))
         if not entry.is_empty() and not ECONOMY.policy_active(state, entry):
             name_text += " · %ds" % ceili(float(entry["ready_at"]) - float(state["elapsed"]))
-        card.text = slot.capitalize() + "\n" + name_text + "\n\n\n\n\n\n"
+        card.text = slot.capitalize() + "\n" + name_text
+        card.tooltip_text = name_text
+        card.set_pressed_no_signal(policy_selected == slot)
     policy_inspector.visible = not policy_selected.is_empty()
     if not policy_inspector.visible:
         return
