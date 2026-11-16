@@ -151,3 +151,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.16.32: baseline housing growth ceiling reduced to 5 million at normal system size; retain size scaling and doubling per habitation upgrade. Playtest demographic pacing.
 
 - v0.16.33: basic hulls cost 500 people each; colony hulls transfer 100,000 settlers. Review opening growth and colony viability with unchanged starting population and food supply.
+
+- v0.16.34: logistics crews 2,000, mining crews 750, fighters 500, colony settlers 100,000; assess early economic and AI pacing.

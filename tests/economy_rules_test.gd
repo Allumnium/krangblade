@@ -1292,7 +1292,7 @@ func _initialize() -> void:
     crew_home["population"] = 150000.0
     for kind in ECON.SHIP_KINDS:
         var people: float = float(ECON.CREW_COSTS[kind])
-        assert(people == (100000.0 if kind == "colony_ship" else 500.0))
+        assert(people == float({"colony_ship": 100000.0, "ship": 2000.0, "fighter": 500.0, "miner": 750.0}[kind]))
         assert(ECON.enqueue(crew_state, 1, 0, kind))
         var crew_job: Dictionary = crew_home["queue"][0]
         var original_population: float = float(crew_home["population"])
