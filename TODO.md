@@ -163,3 +163,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.2: human Invasion/Guard objectives feed existing fleet allocation and cohort dispatcher; weights normalize on equip/remove, invalid targets are cleared each tick. AI migration and distinct policy operations remain outstanding.
 
 - v0.17.3: first economy effects and automatic idle colony dispatch. Existing local build controls supply colony ships. Research, additional modifiers and balancing pending.
+
+- v0.17.4: compact visible slot headers, actual-slot drag/drop, compact in-scene card picker, exclusive right inspector and separated time controls. Defer deeper technology progression per user direction. Manual visual/drag validation pending.

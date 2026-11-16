@@ -253,3 +253,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.2: warming/targetless military policy shares rally at home; manual POI allocation retained when no military card is equipped. Existing allocator rounds target percentages before ship quotas; inspect small fleet rounding and overlapping targets. AI retains legacy orders.
 
 - v0.17.3: provisional +20% manufactured output/farm output and -15% non-food consumption. Expansion dispatches existing colony hulls, does not enqueue duplicate autonomous builds. Verify compact card catalog at high UI scale and expansion under competing claims.
+
+- v0.17.4: screenshot showed clipped titles, overlapping time controls and two simultaneous right panels. Use visible compact headers, opaque contextual inspector replacing regular right panel, and a centered in-scene picker permitting direct slot drops. Verify at all UI scales; no visual tests run locally.
