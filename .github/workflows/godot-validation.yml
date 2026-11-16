@@ -15,6 +15,7 @@ jobs:
   gate:
     outputs:
       docs_only: ${{ steps.scope.outputs.docs_only }}
+      cases: ${{ steps.scope.outputs.cases }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -68,24 +69,33 @@ jobs:
           LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'skip-ci-docs') }}
         run: |
           python3 - <<'PY'
-          import os, re, subprocess
+          import os, re, subprocess, json
           def git(*args):
               return subprocess.check_output(["git", *args])
           base, head = os.environ["BASE"], os.environ["HEAD"]
           eligible = False
+          fast = False
           # Only explicitly labeled PRs qualify. Main pushes and manual runs
           # continue to run every test.
-          if os.environ["EVENT"] == "pull_request" and os.environ["LABEL"] == "true":
+          if os.environ["EVENT"] == "pull_request":
               base = git("merge-base", base, head).decode().strip()
               paths = git("diff", "--name-only", "--no-renames", "-z", base, head).decode().split("\\0")
               paths = [p for p in paths if p]
               docs = {"README.md", "AGENTS.md", "TODO.md", "THOUGHTS.md", "THOUGHTS_ARCHIVE.md"}
-              eligible = bool(set(paths) & docs) and set(paths) <= docs | {"project.godot"}
-              if eligible and "project.godot" in paths:
+              eligible = os.environ["LABEL"] == "true" and bool(set(paths) & docs) and set(paths) <= docs | {"project.godot"}
+              presentation = {"scripts/main.gd", "scripts/match.gd", "scripts/ui_theme.gd", "scripts/space_background.gd"}
+              fast = bool(set(paths) & presentation) and set(paths) <= docs | presentation | {"project.godot"}
+              if (eligible or fast) and "project.godot" in paths:
                   def without_version(ref):
                       return re.sub(rb'^config/version="[^"]+"$', b'config/version="VERSION"', git("show", ref + ":project.godot"), flags=re.M)
-                  eligible = without_version(base) == without_version(head)
+                  same_config = without_version(base) == without_version(head)
+                  eligible = eligible and same_config
+                  fast = fast and same_config
+          cases = [{"count": 2, "mode": "normal"}]
+          if not fast:
+              cases += [{"count": 8, "mode": "normal"}, {"count": 2, "mode": "drop-loading"}, {"count": 2, "mode": "host-leave"}]
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print("cases=" + json.dumps({"include": cases}, separators=(",", ":")), file=output)
               print("docs_only=" + str(eligible).lower(), file=output)
           print("Documentation-only shortcut:", eligible)
           PY
@@ -101,6 +111,12 @@ jobs:
           version: 4.7.2
           use-dotnet: false
           include-templates: false
+      - uses: actions/cache@v4
+        with:
+          path: .godot/imported
+          key: godot-4.7.2-${{ runner.os }}-imports-${{ hashFiles('assets/**', '**/*.import', 'project.godot') }}
+          restore-keys: |
+            godot-4.7.2-${{ runner.os }}-imports-
       - name: Import
         run: godot --headless --path . --import
       - name: Check resource metadata is tracked and stable
@@ -138,16 +154,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - count: 2
-            mode: normal
-          - count: 8
-            mode: normal
-          - count: 2
-            mode: drop-loading
-          - count: 2
-            mode: host-leave
+      matrix: ${{ fromJSON(needs.gate.outputs.cases || '{"include":[{"count":2,"mode":"normal"}]}') }}
     steps:
       - uses: actions/checkout@v4
       - uses: chickensoft-games/setup-godot@v2
@@ -155,6 +162,12 @@ jobs:
           version: 4.7.2
           use-dotnet: false
           include-templates: false
+      - uses: actions/cache@v4
+        with:
+          path: .godot/imported
+          key: godot-4.7.2-${{ runner.os }}-imports-${{ hashFiles('assets/**', '**/*.import', 'project.godot') }}
+          restore-keys: |
+            godot-4.7.2-${{ runner.os }}-imports-
       - name: Import
         run: godot --headless --path . --import
       - name: Check resource metadata is tracked and stable

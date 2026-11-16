@@ -137,3 +137,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Manually verify two-column solo setup, roster scrolling with eight players, and optional seeded galaxy (v0.16.25).
 
 - v0.16.26: operation snapshots track deployed, rallying, recovering and in-transit membership; persistent AI wave ownership remains outstanding. Validation pending.
+
+- [ ] Measure CI runtime after scoped multiplayer matrix and import cache (v0.16.27). Evaluate safe reuse of validated identical merge trees separately.

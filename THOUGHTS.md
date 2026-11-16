@@ -221,3 +221,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.25 introduces a right-hand solo setup settings panel with optional integer map seed (random by default), aligned roster columns and bottom-right Start Match. Verify constrained widths manually; existing solo and multiplayer tests remain mandatory.
 
 - v0.16.26 exposes operation lifecycle membership for future policy feedback; no UI changes. Validation pending.
+
+- v0.16.27: scope-select multiplayer matrix for presentation-only PRs; cache imported assets while retaining imports and metadata checks. Main pushes remain full coverage until safe identical-tree validation reuse is implemented. Measure actual CI savings before further changes.
