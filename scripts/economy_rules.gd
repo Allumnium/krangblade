@@ -403,7 +403,7 @@ static func consumption(planet: Dictionary, resource: String) -> float:
         return 0.0
     if resource == "Organics":
         return organics_demand(planet)
-    return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * population_multiplier(planet)
+    return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * population_multiplier(planet) * float(planet.get("policy_consumption", 1.0))
 
 static func civilian_stock_access(planet: Dictionary, resource: String) -> float:
     # Stock above the import target is reserved for trade and construction.
@@ -713,7 +713,7 @@ static func production_modifier(system: Dictionary, resource: String) -> float:
         modifier *= float(system["abundance"].get(resource, 0.0))
     elif resource == "Plastics":
         modifier *= maxf(1.0, float(system["abundance"].get(resource, 0.0)))
-    return clampf(modifier * building_multiplier(system, resource), 0.1, 4.0)
+    return clampf(modifier * building_multiplier(system, resource), 0.1, 4.0) * float(system.get("policy_output", {}).get(resource, 1.0))
 
 static func _continuous_target(p: Dictionary, key: String) -> Array:
     if SHIP_KINDS.has(key):
@@ -1659,7 +1659,9 @@ static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, 
     ship["dest"] = target
 
 static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array, defer_routes: bool = false) -> void:
-    var weights: Dictionary = military_policy(state, player, "fighter")
+    var weights: Dictionary = policy_fleet_weights(state, player)
+    if weights.is_empty():
+        weights = military_policy(state, player, "fighter")
     var counts: Dictionary = _apportion(weights.keys(), weights, fleet.size())
     var actual: Dictionary = {}
     for ship in fleet:
@@ -2594,8 +2596,15 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
+    for player in state.get("policies", {}):
+        for entry in state["policies"][player].values():
+            for node in entry["targets"].duplicate():
+                if not policy_target_valid(state, int(player), entry["card"], int(node)):
+                    entry["targets"].erase(node)
+    apply_economy_policies(state)
     for i in range((state["planets"] as Array).size()):
         _work_planet(state, i, dt)
+    dispatch_expansion_policies(state)
     var teams: Array[int] = planet_teams(state)
     var cache: Dictionary = {}
     var budgets: Array = []
@@ -2674,7 +2683,10 @@ const POLICY_SLOTS = ["offense", "defense", "economy", "technology", "wildcard"]
 const POLICY_CARDS = {
     "invasion": {"slot": "offense", "name": "Invasion", "warmup": 20.0, "military": true, "target": "hostile"},
     "guard": {"slot": "defense", "name": "Guard", "warmup": 0.0, "military": true, "target": "friendly"},
-    "expansion": {"slot": "economy", "name": "Expansion", "warmup": 0.0},
+    "expansion": {"slot": "economy", "name": "Expansion", "warmup": 0.0, "description": "Dispatch idle colony ships to neutral systems automatically."},
+    "industry": {"slot": "economy", "name": "Industrial specialization", "warmup": 0.0, "description": "+20% manufactured output."},
+    "conservation": {"slot": "economy", "name": "Resource conservation", "warmup": 0.0, "description": "-15% non-food civilian consumption."},
+    "agriculture": {"slot": "economy", "name": "Agricultural development", "warmup": 0.0, "description": "+20% farm output."},
     "military_research": {"slot": "technology", "name": "Military research", "warmup": 0.0}
 }
 
@@ -2704,6 +2716,7 @@ static func equip_policy(state: Dictionary, player: int, slot: String, card: Str
         equipped.erase(slot)
     else:
         equipped[slot] = {"card": card, "ready_at": float(state["elapsed"]) + float(POLICY_CARDS[card]["warmup"]), "targets": [], "weight": 100}
+    normalize_policy_weights(equipped)
     return true
 
 static func policy_active(state: Dictionary, entry: Dictionary) -> bool:
@@ -2753,3 +2766,76 @@ static func set_policy_weight(state: Dictionary, player: int, slot: String, perc
     for key in weights:
         equipped[POLICY_SLOTS[key]]["weight"] = weights[key]
     return true
+
+static func normalize_policy_weights(equipped: Dictionary) -> void:
+    var weights: Dictionary = {}
+    for slot in POLICY_SLOTS:
+        if equipped.has(slot) and POLICY_CARDS[equipped[slot]["card"]].get("military", false):
+            weights[slot] = int(equipped[slot]["weight"])
+    if weights.is_empty():
+        return
+    if weights.values().max() == 0:
+        for slot in weights:
+            weights[slot] = 1
+    var normalized: Dictionary = _apportion(weights.keys(), weights, 100)
+    for slot in normalized:
+        equipped[slot]["weight"] = normalized[slot]
+
+# Preserve manual orders for empires without military cards. Preparing or
+# targetless cards hold their forces at home until an objective becomes valid.
+static func policy_fleet_weights(state: Dictionary, player: int) -> Dictionary:
+    var result: Dictionary = {}
+    var home: int = military_home(state, player)
+    for entry in state.get("policies", {}).get(player, {}).values():
+        if not POLICY_CARDS[entry["card"]].get("military", false):
+            continue
+        var weight: int = int(entry["weight"])
+        var targets: Array = []
+        if policy_active(state, entry):
+            for node in entry["targets"]:
+                if policy_target_valid(state, player, entry["card"], int(node)):
+                    targets.append(node)
+        if targets.is_empty():
+            if home >= 0:
+                result[home] = int(result.get(home, 0)) + weight
+            continue
+        var equal: Dictionary = {}
+        for node in targets:
+            equal[node] = 1
+        var shares: Dictionary = _apportion(targets, equal, weight)
+        for node in shares:
+            result[node] = int(result.get(node, 0)) + int(shares[node])
+    return result
+
+static func active_card(state: Dictionary, player: int, card: String) -> bool:
+    for entry in state.get("policies", {}).get(player, {}).values():
+        if entry["card"] == card and policy_active(state, entry):
+            return true
+    return false
+
+static func apply_economy_policies(state: Dictionary) -> void:
+    for system in state["planets"]:
+        var owner: int = int(system["owner"])
+        var modifiers: Dictionary = {}
+        if active_card(state, owner, "industry"):
+            for resource in ["Plastics", "Textiles", "Tech"]:
+                modifiers[resource] = 1.2
+        if active_card(state, owner, "agriculture"):
+            modifiers["Organics"] = 1.2
+        system["policy_output"] = modifiers
+        system["policy_consumption"] = 0.85 if active_card(state, owner, "conservation") else 1.0
+
+static func dispatch_expansion_policies(state: Dictionary) -> void:
+    var reserved: Dictionary = {}
+    for ship in state["ships"]:
+        if ship["kind"] == "colony_ship" and not (ship["route"] as Array).is_empty():
+            reserved[int(ship["dest"])] = true
+    for ship in state["ships"]:
+        if ship["kind"] != "colony_ship" or not (ship["route"] as Array).is_empty():
+            continue
+        var player: int = int(ship["owner"])
+        if not active_card(state, player, "expansion"):
+            continue
+        var target: int = _ai_colony_target(state, player, ship, reserved)
+        if target >= 0 and send_colony(state, player, int(ship["id"]), target):
+            reserved[target] = true

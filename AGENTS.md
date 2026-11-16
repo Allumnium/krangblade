@@ -127,3 +127,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Batch related approved work into coherent versioned PRs to reduce CI churn. CI may use the fast tier only for presentation scripts (main, match, ui_theme, space_background) plus approved docs and a version-only bump; unknown paths and substantive project settings changes require full validation. Main pushes and manual runs retain full validation. Imported resources may be cached, but import and metadata checks still run.
 
 - Construction cards use inline vertical progress and no disclosure caret; cancel precedes build/upgrade. Economy repeat toggles use authoritative continuous orders and existing costs/population gates.
+
+- Policy cards use fixed bottom-edge slots, Change modal with drag/drop, right contextual inspector and colored target flags; time controls moved upper right. Existing military lens remains during migration. Warmup only, no cooldown.

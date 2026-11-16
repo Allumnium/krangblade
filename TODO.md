@@ -157,3 +157,9 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Raiding: small fighter cargo inventory, recover hostile cargo and deliver to owned systems. Escort: bounded civilian convoy waiting and fighter escort. Expansion: automatic neutral settlement without flags. Public policy/warmup visibility for warning; future diplomacy uses unique card instances.
 
 - v0.17.0 policy foundation: replicated optional slots, unique card IDs, locked wildcard, warmup timestamps, validated friendly/hostile targets and normalized weight command. UI, actual fleet dispatch, research and economy effects remain separate follow-ups.
+
+- v0.17.1: prototype bottom card strip, modal card selection and drag to matching modal slot, contextual right panel, warmup countdown, army slider and map flag interaction. Manual verification and actual military dispatch pending.
+
+- v0.17.2: human Invasion/Guard objectives feed existing fleet allocation and cohort dispatcher; weights normalize on equip/remove, invalid targets are cleared each tick. AI migration and distinct policy operations remain outstanding.
+
+- v0.17.3: first economy effects and automatic idle colony dispatch. Existing local build controls supply colony ships. Research, additional modifiers and balancing pending.

@@ -25,6 +25,7 @@ func _test_maintain_targets() -> void:
 
 func _initialize() -> void:
     _test_policy_cards()
+    _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
     var bounds: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1])
@@ -1444,6 +1445,7 @@ func _test_policy_cards() -> void:
     assert(ECON.equip_policy(state, 1, "offense", "invasion"))
     var entry: Dictionary = state["policies"][1]["offense"]
     assert(not ECON.policy_active(state, entry))
+    assert(ECON.policy_fleet_weights(state, 1).get(0, 0) == 100)
     assert(not ECON.set_policy_target(state, 1, "offense", 0, true))
     assert(ECON.set_policy_target(state, 1, "offense", 1, true))
     state["elapsed"] = 20.0
@@ -1451,8 +1453,27 @@ func _test_policy_cards() -> void:
     assert(ECON.equip_policy(state, 1, "defense", "guard"))
     assert(ECON.set_policy_weight(state, 1, "offense", 70))
     assert(state["policies"][1]["defense"]["weight"] == 30)
+    assert(ECON.set_policy_target(state, 1, "defense", 0, true))
+    assert(ECON.policy_fleet_weights(state, 1) == {0: 30, 1: 70})
     assert(ECON.equip_policy(state, 1, "offense", ""))
     assert(ECON.equip_policy(state, 1, "offense", "invasion"))
     assert(state["policies"][1]["offense"]["targets"].is_empty())
     assert(not ECON.policy_active(state, state["policies"][1]["offense"]))
     print("PASS: policy eligibility, warmup, target restrictions and replacement")
+
+func _test_economy_policies() -> void:
+    var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+    var home: Dictionary = state["planets"][0]
+    var base: float = ECON.rate(home, "Plastics")
+    var demand: float = ECON.consumption(home, "Plastics")
+    assert(ECON.equip_policy(state, 1, "economy", "industry"))
+    ECON.apply_economy_policies(state)
+    assert(is_equal_approx(ECON.rate(home, "Plastics"), base * 1.2))
+    assert(ECON.equip_policy(state, 1, "economy", "conservation"))
+    ECON.apply_economy_policies(state)
+    assert(is_equal_approx(ECON.rate(home, "Plastics"), base))
+    assert(is_equal_approx(ECON.consumption(home, "Plastics"), demand * 0.85))
+    assert(ECON.equip_policy(state, 1, "economy", ""))
+    ECON.apply_economy_policies(state)
+    assert(is_equal_approx(ECON.consumption(home, "Plastics"), demand))
+    print("PASS: economy policy modifiers and removal")
