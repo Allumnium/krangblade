@@ -2276,6 +2276,28 @@ static func _sync_operations(state: Dictionary) -> void:
                 claimed[free_slot] = true
             last_slot = maxi(last_slot, int(slots[member]))
         operation["slots"] = slots
+        var deployed: Array = []
+        var recovering: Array = []
+        var rallying: Array = []
+        var in_transit: Array = []
+        for member in operation["members"]:
+            var craft: Dictionary = by_id[member]
+            if bool(craft.get("retreating", false)):
+                recovering.append(member)
+            elif operation["role"] == "wave" or operation["deployed"].has(member):
+                deployed.append(member)
+            elif operation["role"] == "reserve" or operation["phase"] in ["rallying", "deployed"]:
+                rallying.append(member)
+            if not (craft["route"] as Array).is_empty():
+                in_transit.append(member)
+        operation["deployed"] = deployed
+        operation["recovering"] = recovering
+        operation["rallying"] = rallying
+        operation["in_transit"] = in_transit
+        if operation["role"] == "wave":
+            operation["phase"] = "deployed"
+        elif operation["role"] == "reserve":
+            operation["phase"] = "rallying"
         for member in operation["members"]:
             var craft: Dictionary = by_id[member]
             craft["operation_id"] = int(operation["id"])

@@ -1211,6 +1211,8 @@ func _initialize() -> void:
     form["ai_waves"][2] = {"members": [1100, 1102, 1103, 1104]}
     ECON._sync_operations(form)
     assert(form["operations"]["2:wave:3"]["slots"].size() == 4)
+    assert(form["operations"]["2:wave:3"]["phase"] == "deployed")
+    assert(form["operations"]["2:wave:3"]["deployed"].size() == 4)
     print("PASS: persistent formation slots, casualty/reinforcement, bounded movement and shared AI/human slots")
     # Shared travel: a leading craft cannot race ahead on the same lane;
     # everyone crosses the next waypoint together after catching up.
