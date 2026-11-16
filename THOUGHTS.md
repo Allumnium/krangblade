@@ -187,3 +187,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.5 includes the first shipyard price and work in the colony hull. The conversion is immediately operational subject to existing population staffing; visual morph lasts three game years. Full combat integration remains outstanding.
 
 - v0.16.6 adds font-measured abbreviated system labels in resource and population strips; verify small-segment readability visually.
+
+- v0.16.7 adds Q/E owned-system camera focus. Uses a provisional 27% viewport radius for framing; verify at varied window sizes.

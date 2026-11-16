@@ -107,3 +107,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - On successful colonization the colony hull converts into the first level-one shipyard; no duplicate initial shipyard purchase. Colony recipe includes an additional 480 Metals and 30 work. A three-game-year local morph transitions the hull outline into the orbital frame.
 
 - Segmented top-bar labels fall back from full system name to two letters, then one letter, then blank as space decreases. Single-contributor strips remain unlabeled.
+
+- Q/E cycle previous/next owned systems in stable map-index order, wrapping around; focus camera and fit selected system in the playable map area. Ignore shortcuts while editing text or in match menu.

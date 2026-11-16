@@ -2505,6 +2505,42 @@ func _sync_ship_visuals(state: Dictionary) -> void:
         if not updated.has(id):
             ship_offsets.erase(id)
 
+func _unhandled_key_input(event: InputEvent) -> void:
+    if not event is InputEventKey or not event.pressed or event.echo:
+        return
+    if event.physical_keycode not in [KEY_Q, KEY_E]:
+        return
+    if not is_instance_valid(match_menu) or match_menu.visible or str(session.get("phase")) != "match":
+        return
+    var focus: Control = get_viewport().gui_get_focus_owner()
+    if focus is LineEdit or focus is TextEdit or colony_picker.get_popup().visible:
+        return
+    _cycle_owned_system(-1 if event.physical_keycode == KEY_Q else 1)
+    get_viewport().set_input_as_handled()
+
+func _cycle_owned_system(direction: int) -> void:
+    var state: Dictionary = _state()
+    if state.is_empty():
+        return
+    var owned: Array[int] = []
+    for i in range(state["planets"].size()):
+        if int(state["planets"][i]["owner"]) == _me():
+            owned.append(i)
+    if owned.is_empty():
+        return
+    var current: int = owned.find(selected)
+    selected = owned[(0 if direction > 0 else owned.size() - 1) if current < 0 else posmod(current + direction, owned.size())]
+    selected_ship_id = -1
+    selected_field = -1
+    var world: Vector2 = state["map"]["points"][selected]
+    var desired_radius: float = minf(_projection_size().x, _projection_size().y) * 0.27
+    var radius_per_zoom: float = minf(RADIUS * float(state["planets"][selected].get("size_factor", 1.0)), float(_system_visual(selected, state)["spacing"]) * _fit() * 0.39)
+    zoom = clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, MAX_ZOOM)
+    var center: Vector2 = Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5
+    pan += center - _screen_point(world)
+    _load_thresholds()
+    _refresh()
+
 func _keyboard_pan(delta: float) -> void:
     if str(session.get("phase")) != "match" or match_menu.visible:
         return
