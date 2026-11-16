@@ -897,8 +897,13 @@ func _initialize() -> void:
     ECON._sync_operations(wave_state)
     assert(int(wave_state["operations"]["2:wave:2"]["id"]) == wave_id)
     var ai_state: Dictionary = ECON.create(ai_map, ai_roster, ids, false)
-    ai_state["planets"][1]["population"] = 350000.0
-    ai_state["planets"][1]["levels"]["Organics"] = 8
+    # Mature empire fixture: test expansion and combat, not opening demographics.
+    var ai_home: Dictionary = ai_state["planets"][1]
+    ai_home["population"] = 350000.0
+    ai_home["levels"]["Organics"] = 8
+    ai_home["warehouse_level"] = 3
+    for resource in ECON.RESOURCES:
+        ai_home["stock"][resource] = 10000.0
     var saw_attack: bool = false
     var saw_logistics: bool = false
     for year in range(500):
@@ -921,6 +926,8 @@ func _initialize() -> void:
         for index in [1, 2]:
             startup_state["planets"][index]["population"] = 150000.0
             startup_state["planets"][index]["levels"]["Organics"] = 3
+            for resource in ECON.RESOURCES:
+                startup_state["planets"][index]["stock"][resource] = 2000.0
         var built: Dictionary = {2: {}, 3: {}}
         for year in range(36):
             ECON.step(startup_state, 1.0)

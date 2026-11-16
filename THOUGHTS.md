@@ -243,3 +243,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.16.36: PR #79 failed economy repeat rotation with larger crews and timed out normal ENet checks. Fund population/materials in construction-specific fixtures; avoid AI saving indefinitely for a colony ship when food capacity cannot support it. Fix economy automatic building enqueue kind. Keep all assertions. Record agreed policy design in TODO before implementation.
 
 - v0.16.37: three-peer regression timed out while two-peer passed. Record independently observed replicated command conditions across snapshots rather than requiring simultaneous transient queue states; retain final cancellation and shipyard count checks. Log missing condition IDs to isolate remaining failures.
+
+- v0.16.38: all ENet cases passed on v0.16.37; economy assertion at second AI neutral colony hung the process. Fund mature AI expansion test explicitly and prevent secondary colony orders from consuming populations below crew requirements. CI unit scripts fail on script errors and have a 90-second hard bound; no removal of gameplay assertions. Actual opening AI balance remains a playtest concern.

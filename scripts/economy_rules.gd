@@ -2099,7 +2099,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
             action = "fighter"
         elif index == home and counts["ship"] < mini(12, owned.size() * 2) and owned.size() > 1:
             action = "ship"
-        elif has_yard and expansion and counts["colony_ship"] < 3:
+        elif has_yard and expansion and counts["colony_ship"] < 3 and float(p["population"]) >= CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
             var local_probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": index, "route": []}
             if _ai_colony_target(state, player, local_probe, reserved) >= 0:
                 action = "colony_ship"
