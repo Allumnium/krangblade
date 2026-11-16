@@ -474,8 +474,18 @@ func _card_action(card: Dictionary, caption: String, callback: Callable) -> Butt
     button.add_theme_font_size_override("font_size", 10)
     return button
 
-func _card_cancel(card: Dictionary, callback: Callable) -> Button:
+func _card_cancel(card: Dictionary, callback: Callable, progress: ProgressBar = null) -> Button:
     var button: Button = _card_action(card, "×", callback)
+    if progress != null:
+        var parent: Node = progress.get_parent()
+        var index: int = progress.get_index()
+        var line := HBoxContainer.new()
+        parent.add_child(line)
+        parent.move_child(line, index)
+        progress.reparent(line, false)
+        progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        button.reparent(line, false)
+    button.hide()
     button.custom_minimum_size.x = 23
     button.tooltip_text = "Cancel / refund"
     button.disabled = true
@@ -620,7 +630,7 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
     if kind != "yard":
         var check: Button = _repeat_button(row, kind)
         continuous_checks[kind] = check
-    var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind(kind, ""))
+    var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind(kind, ""), build_progress)
     cancel.tooltip_text = "Cancel one order and stop repeat"
     disclosure.merge({"maintained": maintained, "maintain_amount": amount, "infinity": infinity, "button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
     build_cards[kind] = disclosure
@@ -821,7 +831,7 @@ func _build_upgrade_cards(parent: Container) -> void:
         section.move_child(progress, card.get_index())
         var actions: HBoxContainer = disclosure["actions"]
         var action: Button = _card_action(disclosure, "Upgrade", _operation.bind("production", resource))
-        var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind("production", resource))
+        var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind("production", resource), progress)
         HUD.action(action)
         var repeat: Button = _repeat_button(actions, "production:" + resource)
         disclosure.merge({"title": disclosure["header"], "name": labels[resource], "detail": detail, "progress": progress, "button": action, "cancel": cancel, "repeat": repeat, "costs": _cost_grid(card)})
@@ -838,7 +848,7 @@ func _build_upgrade_cards(parent: Container) -> void:
     section.move_child(progress, body.get_index())
     var costs: GridContainer = _cost_grid(body)
     var action: Button = _card_action(pds_card, "Build", func() -> void: _operation("pds", str(ECONOMY.next_pds(_planet()))))
-    var cancel: Button = _card_cancel(pds_card, _pds_action)
+    var cancel: Button = _card_cancel(pds_card, _pds_action, progress)
     HUD.action(action)
     pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel})
 
@@ -860,6 +870,7 @@ func _refresh_pds(planet: Dictionary, owned: bool) -> void:
     var action: Button = pds_card["button"]
     action.text = "Build" if slot >= 0 else "Complete"
     action.disabled = not owned or slot < 0 or not job.is_empty()
+    pds_card["cancel"].visible = not job.is_empty()
     pds_card["cancel"].disabled = not owned or job.is_empty()
     pds_card["detail"].text = "One battery per planet · %.0f damage / shot · Range %.0f · Fires once/yr" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
     pds_card["costs"].visible = slot >= 0 or not job.is_empty()
@@ -907,10 +918,12 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
             _show_cost(card["costs"], job["cost"])
             button.text = "Upgrade"
             button.disabled = true
+            card["cancel"].show()
             card["cancel"].disabled = not owned
         else:
             button.text = "Upgrade"
             button.disabled = not owned or not unlocked
+            card["cancel"].hide()
             card["cancel"].disabled = true
             if not available:
                 detail.text = "No local deposit"
@@ -1795,7 +1808,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
             var upgrade_costs: GridContainer = _cost_grid(disclosure["body"])
             var actions: HBoxContainer = disclosure["actions"]
             var upgrade: Button = _card_action(disclosure, "Upgrade", _upgrade_yard_at.bind(int(index)))
-            var cancel: Button = _card_cancel(disclosure, _cancel_yard_at.bind(int(index)))
+            var cancel: Button = _card_cancel(disclosure, _cancel_yard_at.bind(int(index)), progress)
             var repeat: Button = _repeat_button(actions, "yard_upgrade:" + str(index))
             upgrade.custom_minimum_size.y = 24
             upgrade.add_theme_font_size_override("font_size", 11)
@@ -1811,7 +1824,9 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         var costs: GridContainer = yard_activity_rows[index]["costs"]
         var can_build: bool = vacant and number == ECONOMY.next_shipyard_slot(p) and int(p["owner"]) == _me() and str(session.get("phase")) == "match"
         build.visible = can_build
-        yard_activity_rows[index]["vacant_cancel"].visible = vacant
+        yard_activity_rows[index]["vacant_cancel"].hide()
+        if vacant:
+            yard_activity_rows[index]["cancel"].hide()
         build.disabled = not can_build
         costs.visible = can_build
         yard_activity_rows[index]["actions"].visible = not vacant
@@ -1850,7 +1865,16 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         var cancelling: Button = yard_activity_rows[index]["cancel"]
         upgrade.visible = existing
         repeat.visible = existing
-        cancelling.disabled = not owned or (existing and not pending)
+        cancelling.visible = not job.is_empty()
+        cancelling.disabled = not owned or job.is_empty()
+        if not job.is_empty():
+            if cancelling.pressed.is_connected(_cancel_yard_at.bind(int(index))):
+                cancelling.pressed.disconnect(_cancel_yard_at.bind(int(index)))
+            if cancelling.has_meta("job_callback"):
+                cancelling.pressed.disconnect(cancelling.get_meta("job_callback"))
+            var callback: Callable = _cancel_job.bind(int(job["id"]))
+            cancelling.set_meta("job_callback", callback)
+            cancelling.pressed.connect(callback)
         _sync_repeat(repeat, p, "yard_upgrade:" + str(index), repeat.visible and str(session.get("phase")) == "match")
         upgrade.disabled = not owned or not existing or pending or not operating
         upgrade.text = "Upgrade"
@@ -1953,7 +1977,7 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
             progress.value = 100.0 * float(job["progress"]) / float(job["work"])
             progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
             _style_progress(progress, p, job)
-        card["cancel"].visible = true
+        card["cancel"].visible = not job.is_empty()
         card["cancel"].disabled = not owned or count == 0
 
 func _system_name(index: int) -> String:

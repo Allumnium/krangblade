@@ -83,3 +83,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - Logistics freighters use boxy hulls and six resource-tinted cargo bays. Logistics lens aggregates inbound/outbound cargo at system perimeters by resource and direction, not at moving hulls.
 - Habitation limits positive demographic growth independently of food, with a size-based soft capacity and three economy technology upgrades doubling capacity each. Values provisional.
+
+- Cancel buttons sit immediately to the right of active construction progress bars and are hidden when idle or on instant purchases. This supersedes earlier always-visible cancel instructions. Shipyard progress cancellation targets the displayed job.

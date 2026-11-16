@@ -102,3 +102,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate civilian stock access caps for all consumed resources (v0.14.10).
 
 - [ ] Validate freighter compartments, perimeter indicators and habitation technology (v0.15.0).
+
+- [ ] Validate contextual construction cancellation rows (v0.15.1).
