@@ -18,6 +18,12 @@ const MAX_ZOOM: float = 64.0
 const SNAPSHOT_SECONDS: float = 0.2
 
 var session: Node
+var settings := ConfigFile.new()
+var ui_percent: int = 90
+var music_volume: float = 100.0
+var sfx_volume: float = 100.0
+var music_muted: bool = false
+var sfx_muted: bool = false
 var upgrade_audio: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
@@ -137,7 +143,7 @@ class TradeRange extends Control:
 
     func set_stock(amount: float, maximum: float, tint: Color) -> void:
         stock_percent = clampf(100.0 * amount / maxf(maximum, 1.0), 0.0, 100.0)
-        stock_color = tint
+        stock_color = Color("#b9c8d6")
         queue_redraw()
 
     func _x(value: float) -> float:
@@ -148,8 +154,8 @@ class TradeRange extends Control:
 
     func _draw() -> void:
         var font: Font = ThemeDB.fallback_font
-        var low_color := Color("#67d4a9") if enabled else Color("#667687")
-        var high_color := Color("#e9a276") if enabled else Color("#667687")
+        var low_color := Color("#c9d6e2") if enabled else Color("#667687")
+        var high_color := Color("#c9d6e2") if enabled else Color("#667687")
         var left: String = "Import < %d%%" % roundi(lower)
         var right: String = "Export > %d%%" % roundi(upper)
 
@@ -211,8 +217,10 @@ func _ready() -> void:
     upgrade_audio = AudioStreamPlayer.new()
     upgrade_audio.stream = UPGRADE_SOUND
     add_child(upgrade_audio)
+    _load_settings()
     _build_ui()
     _build_resource_hover()
+    _apply_settings()
     _on_economy_changed()
     session.call("match_scene_loaded")
 
@@ -276,6 +284,7 @@ func _build_ui() -> void:
     HUD.action(match_menu.get_ok_button())
     HUD.action(menu_exit, Color("#e9a276"))
     match_menu.custom_action.connect(_menu_action)
+    _build_settings_menu()
     inspector_panel = PanelContainer.new()
     add_child(inspector_panel)
     inspector_panel.anchor_left = 1.0
@@ -470,7 +479,7 @@ func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
     return card
 
 func _detail_cards() -> Array:
-    return build_cards.values() + economy_cards.values() + upgrade_cards.values() + yard_activity_rows.values() + [warehouse_card, pds_card]
+    return build_cards.values() + economy_cards.values() + upgrade_cards.values() + yard_activity_rows.values() + [warehouse_card, habitation_card, pds_card]
 
 func _card_tab(card: Dictionary) -> Node:
     var node: Node = card["header"]
@@ -771,11 +780,14 @@ func _build_economy_cards(parent: Container) -> void:
     warehouse_card["cancel"] = _card_cancel(warehouse_card, func() -> void: pass)
     HUD.action(warehouse_button)
     warehouse_card.merge({"button": warehouse_button, "detail": warehouse_detail, "costs": _cost_grid(warehouse)})
-    habitation_card = _make_disclosure(parent, "Habitation technology")
+    var habitat_section: VBoxContainer = HUD.section(parent, "")
+    habitat_section.get_child(0).hide()
+    habitation_card = _make_disclosure(habitat_section, "Habitation technology")
     var habitat_body: VBoxContainer = habitation_card["body"]
     var habitat_detail: Label = _label("", 12)
     habitat_body.add_child(habitat_detail)
     habitation_card.merge({"button": _card_action(habitation_card, "Upgrade", _operation.bind("economy", "habitation")), "detail": habitat_detail, "costs": _cost_grid(habitat_body)})
+    HUD.action(habitation_card["button"])
     for resource in ECONOMY.RESOURCES:
         var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
         var section: VBoxContainer = HUD.section(parent, "")
@@ -1991,6 +2003,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
         build.disabled = not can_build
         costs.visible = can_build
         yard_activity_rows[index]["actions"].visible = not vacant
+        yard_activity_rows[index]["row"].visible = number <= p["yards"].size() + 1 if not p.is_empty() else false
         if vacant:
             _collapse_card(yard_activity_rows[index])
             label.text = "Shipyard %d" % number
@@ -2145,11 +2158,88 @@ func _system_name(index: int) -> String:
     var names: Array = _state().get("map", {}).get("names", [])
     return str(names[index]) if index >= 0 and index < names.size() else "Unknown"
 
+func _load_settings() -> void:
+    settings.load("user://warbound_settings.cfg")
+    ui_percent = clampi(int(settings.get_value("interface", "scale", 90)), 70, 130)
+    music_volume = clampf(float(settings.get_value("audio", "music", 100.0)), 0.0, 100.0)
+    sfx_volume = clampf(float(settings.get_value("audio", "sfx", 100.0)), 0.0, 100.0)
+    music_muted = bool(settings.get_value("audio", "music_muted", false))
+    sfx_muted = bool(settings.get_value("audio", "sfx_muted", false))
+
+func _apply_settings() -> void:
+    get_window().content_scale_factor = float(ui_percent) / 100.0
+    for bus_name in ["Music", "SFX"]:
+        var index: int = AudioServer.get_bus_index(bus_name)
+        if index < 0:
+            AudioServer.add_bus()
+            index = AudioServer.bus_count - 1
+            AudioServer.set_bus_name(index, bus_name)
+        var volume: float = music_volume if bus_name == "Music" else sfx_volume
+        AudioServer.set_bus_volume_db(index, linear_to_db(maxf(0.0001, volume / 100.0)))
+        AudioServer.set_bus_mute(index, music_muted if bus_name == "Music" else sfx_muted)
+    upgrade_audio.bus = "SFX"
+
+func _save_settings() -> void:
+    settings.set_value("interface", "scale", ui_percent)
+    settings.set_value("audio", "music", music_volume)
+    settings.set_value("audio", "sfx", sfx_volume)
+    settings.set_value("audio", "music_muted", music_muted)
+    settings.set_value("audio", "sfx_muted", sfx_muted)
+    settings.save("user://warbound_settings.cfg")
+    _apply_settings()
+
+func _build_settings_menu() -> void:
+    var options := VBoxContainer.new()
+    match_menu.add_child(options)
+    var scale_row := HBoxContainer.new()
+    options.add_child(scale_row)
+    var title := _label("UI scale", 14)
+    title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    scale_row.add_child(title)
+    var scale_value := OptionButton.new()
+    scale_row.add_child(scale_value)
+    for percent in range(70, 131, 10):
+        scale_value.add_item("%d%%" % percent, percent)
+    scale_value.select((ui_percent - 70) / 10)
+    scale_value.item_selected.connect(func(index: int) -> void:
+        ui_percent = scale_value.get_item_id(index)
+        _save_settings())
+    for channel in ["Music", "SFX"]:
+        var row := HBoxContainer.new()
+        options.add_child(row)
+        row.add_child(_label(channel, 14))
+        var volume := HSlider.new()
+        volume.max_value = 100.0
+        volume.step = 1.0
+        volume.value = music_volume if channel == "Music" else sfx_volume
+        volume.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        row.add_child(volume)
+        var mute := CheckBox.new()
+        mute.text = "Mute"
+        mute.button_pressed = music_muted if channel == "Music" else sfx_muted
+        row.add_child(mute)
+        volume.value_changed.connect(_audio_volume_changed.bind(channel))
+        mute.toggled.connect(_audio_mute_changed.bind(channel))
+
+func _audio_volume_changed(value: float, channel: String) -> void:
+    if channel == "Music":
+        music_volume = value
+    else:
+        sfx_volume = value
+    _save_settings()
+
+func _audio_mute_changed(value: bool, channel: String) -> void:
+    if channel == "Music":
+        music_muted = value
+    else:
+        sfx_muted = value
+    _save_settings()
+
 func _open_menu() -> void:
     drag_button = 0
     military_drag = -1
     military_preview.clear()
-    match_menu.popup_centered(Vector2i(330, 100))
+    match_menu.popup_centered(Vector2i(420, 300))
 
 func _menu_action(action: StringName) -> void:
     if action == &"leave":

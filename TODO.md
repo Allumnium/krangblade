@@ -27,6 +27,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - v0.11.5 validated and merged via PR #51. Prototype includes finite population-serving industrial capacity (Plastics, Textiles, Tech) so linear demand can catch up even below the storage ceiling; implements the above via existing authority commands and local inventories; Headless validation passed; visual playtesting and longer AI sustainability evaluation remain.
 
 ## Phase 1 — Autonomous military foundation
+- [ ] First integration step: consolidate human and AI operation dispatch and lifecycle while keeping current POI allocations, rally rules and retreat behavior. Keep existing regressions and add shared-operation coverage before policy work.
 - [x] Validate v0.13.0 starting fleets (3 miners, 2 fighters per empire) and planet-limited PDS construction, refunds, combat, replication and overlays. Visual playtesting and balance outstanding.
 - [ ] Rework military control into persistent fleet/operation groups shared by human and AI empires.
   - Initial v0.9.0 prototype: shared authoritative operation IDs, member lists, objectives and movement/engagement flags derived from existing routing. v0.9.0 validation passed (PR #47). v0.10.0 prototype moves human routing into operation dispatch and preserves identity on group retargeting; AI still uses its existing wave controller. Full unified command model remains outstanding.
@@ -76,7 +77,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 - [ ] Playtest the full loop at 1× for 1v1, four-player and larger team matches. Balance travel, economy, construction, conflict, negotiation, and antimatter timing toward typical 10–30 minute matches.
 - [ ] Assess strategic variety, meaningful decisions per minute, runaway leaders, comeback options and AI competence.
 - [ ] Audit policy readability, map targeting, formation visuals, economy feedback, constrained-window layout and multiplayer behavior.
-- [ ] Keep existing two-/eight-peer ENet, disconnect, simulation and UI regressions mandatory; validate real visual/internet behavior separately.
+- [ ] Keep existing two-/eight-peer ENet, disconnect, simulation, parsing and startup regressions mandatory; validate UI manually and real internet behavior separately.
 
 ## Deferred / not yet agreed
 - Formal galactic votes, complex treaties, elaborate tech trees, additional playable races, ship customization and campaigns.
@@ -124,3 +125,7 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Validate colony-to-shipyard conversion, revised recipe and orbital morph (v0.16.5).
 
 - [ ] Validate shipyard combat/destruction and launch positions, compact trade toggles and latest HUD changes (v0.16.9).
+
+- [ ] Validate v0.16.17 local UI scaling, saved audio settings, economy card consistency, neutral trade sliders and sequential shipyard row visibility.
+
+- [ ] Manually validate map interactions, economy panels, shipyard visibility and settings; detailed automated UI assertions retired by explicit project decision in v0.16.20. Maintain gameplay coverage through authoritative rules and session tests.
