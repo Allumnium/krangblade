@@ -24,6 +24,7 @@ var solo_roster: VBoxContainer
 var solo_rows: Dictionary = {}
 var solo_add_button: Button
 var solo_start_button: Button
+var solo_seed_edit: LineEdit
 
 func _ready() -> void:
     theme = HUD.create()
@@ -137,9 +138,15 @@ func _show_solo_setup() -> void:
         solo_players[id] = {"team": id, "color": id}
     var col := _root()
     _setup_header(col, "Single player")
+    var content := HBoxContainer.new()
+    content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    content.add_theme_constant_override("separation", 12)
+    col.add_child(content)
     var panel := _panel()
+    panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    panel.size_flags_stretch_ratio = 2.3
     panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    col.add_child(panel)
+    content.add_child(panel)
     var scroll := ScrollContainer.new()
     scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
     panel.add_child(scroll)
@@ -149,17 +156,39 @@ func _show_solo_setup() -> void:
     scroll.add_child(rows)
     solo_roster = rows
     _refresh_solo_roster()
+    var settings_panel := _panel()
+    settings_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    settings_panel.custom_minimum_size.x = 240
+    content.add_child(settings_panel)
+    var settings := VBoxContainer.new()
+    settings.add_theme_constant_override("separation", 10)
+    settings_panel.add_child(settings)
+    settings.add_child(_text("Game settings", 20))
+    settings.add_child(_text("Map seed", 14, MUTED))
+    solo_seed_edit = LineEdit.new()
+    solo_seed_edit.placeholder_text = "Random"
+    solo_seed_edit.tooltip_text = "Leave blank for a random galaxy, or enter an integer seed."
+    settings.add_child(solo_seed_edit)
     var footer := HBoxContainer.new()
     col.add_child(footer)
     solo_start_button = _button("START MATCH", _start_solo_from_setup)
-    footer.add_child(solo_start_button)
     footer.add_spacer(false)
+    footer.add_child(solo_start_button)
 
 func _refresh_solo_roster() -> void:
     for child in solo_roster.get_children():
         solo_roster.remove_child(child)
         child.queue_free()
     solo_rows.clear()
+    var headings := HBoxContainer.new()
+    solo_roster.add_child(headings)
+    var player_heading := _text("Player", 13, MUTED)
+    player_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    headings.add_child(player_heading)
+    for heading in ["Color", "Team", ""]:
+        var label := _text(heading, 13, MUTED)
+        label.custom_minimum_size.x = 32 if heading.is_empty() else 110
+        headings.add_child(label)
     for id in RULES.ordered_peers(solo_players):
         var entry: Dictionary = solo_players[id]
         var row := HBoxContainer.new()
@@ -169,17 +198,18 @@ func _refresh_solo_roster() -> void:
         title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         row.add_child(title)
         var color := _color_selector(solo_players, id)
+        color.custom_minimum_size.x = 110
         color.item_selected.connect(_solo_color_selected.bind(id))
         row.add_child(color)
         var team := OptionButton.new()
-        team.custom_minimum_size.x = 100
+        team.custom_minimum_size.x = 110
         for choice in range(1, solo_players.size() + 1):
             team.add_item("Team %d" % choice)
         team.select(int(entry["team"]) - 1)
         team.item_selected.connect(_solo_team_selected.bind(id))
         row.add_child(team)
         var remove: Button = _button("×", _remove_solo_player.bind(id))
-        remove.custom_minimum_size = Vector2(36, 32)
+        remove.custom_minimum_size = Vector2(32, 32)
         remove.disabled = id == 1
         remove.tooltip_text = "Remove AI player"
         row.add_child(remove)
@@ -187,7 +217,7 @@ func _refresh_solo_roster() -> void:
     var add_row := HBoxContainer.new()
     solo_roster.add_child(add_row)
     solo_add_button = _button("+ Add player", _add_solo_player)
-    solo_add_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    solo_add_button.custom_minimum_size = Vector2(140, 32)
     solo_add_button.disabled = solo_players.size() >= RULES.MAX_PLAYERS
     add_row.add_child(solo_add_button)
 
@@ -241,7 +271,12 @@ func _start_solo_from_setup() -> void:
         colors.append(int(solo_players[id]["color"]))
         if id != 1:
             opponents.append(int(solo_players[id]["team"]))
-    network.call("start_solo", int(solo_players[1]["team"]), opponents, colors)
+    var seed_text: String = solo_seed_edit.text.strip_edges()
+    if not seed_text.is_empty() and not seed_text.is_valid_int():
+        solo_seed_edit.grab_focus()
+        return
+    var map_seed: int = int(randi()) if seed_text.is_empty() else seed_text.to_int()
+    network.call("start_solo", int(solo_players[1]["team"]), opponents, colors, map_seed)
 
 func _show_multiplayer() -> void:
     screen = "multiplayer"

@@ -69,7 +69,7 @@ func _sanitize_name(value: String) -> String:
     return clean if not clean.is_empty() else "Player"
 
 ## Solo runs the same authoritative match simulation as a host, with no ENet peer.
-func start_solo(team: int = 1, opponent_teams: Array = [], colors: Array = []) -> bool:
+func start_solo(team: int = 1, opponent_teams: Array = [], colors: Array = [], map_seed: Variant = null) -> bool:
     if phase != "offline":
         return false
     if not RULES.valid_team(team) or opponent_teams.size() > RULES.MAX_PLAYERS - 1:
@@ -92,7 +92,7 @@ func start_solo(team: int = 1, opponent_teams: Array = [], colors: Array = []) -
     history.clear()
     last_message.clear()
     round_id = 1
-    _activate_match(players, int(randi()))
+    _activate_match(players, int(randi()) if map_seed == null else int(map_seed))
     get_tree().call_deferred("change_scene_to_file", "res://scenes/match.tscn")
     return true
 

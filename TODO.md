@@ -133,3 +133,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.16.21: shared authoritative cohort dispatch for human and AI rally, reinforcement and routing; existing AI exclusive-wave and human multi-cohort behavior retained. Full operation ownership and policy integration remain outstanding; validation pending.
 
 - [ ] Manually verify compact menu settings rows and non-wrapping Music/SFX labels at every supported UI scale (v0.16.24).
+
+- [ ] Manually verify two-column solo setup, roster scrolling with eight players, and optional seeded galaxy (v0.16.25).
