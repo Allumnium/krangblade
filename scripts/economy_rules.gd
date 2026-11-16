@@ -2170,7 +2170,11 @@ static func _ai_wave_order(state: Dictionary, graph: Dictionary, player: int, ho
         target = -1
     active = _dispatch_cohorts(state, graph, home, target if not active.is_empty() else goal, fighters, active, true)
     var next_target: int = (target if target >= 0 else goal) if not active.is_empty() else -1
-    waves[player] = {"target": next_target, "members": active, "home": home}
+    var operation_id: int = int(wave.get("operation_id", 0))
+    if operation_id == 0:
+        operation_id = int(state.get("next_operation_id", 1))
+        state["next_operation_id"] = operation_id + 1
+    waves[player] = {"target": next_target, "members": active, "home": home, "operation_id": operation_id}
     # Store strategic objectives separately from temporary movement destinations.
     # Recovery and regroup routes must not split an active wave's formation.
     for ship in fighters:
@@ -2240,10 +2244,22 @@ static func _sync_operations(state: Dictionary) -> void:
     var prior_by_id: Dictionary = {}
     for old_operation in previous.values():
         prior_by_id[int(old_operation["id"])] = old_operation
+    # Reserve persistent wave identities before matching transient groups.
+    for wave_record in state.get("ai_waves", {}).values():
+        var persistent_id: int = int(wave_record.get("operation_id", 0))
+        if persistent_id > 0:
+            reused[persistent_id] = true
     for key in current:
         var operation: Dictionary = current[key]
         operation["members"].sort()
         var old: Dictionary = previous.get(key, {})
+        if operation["role"] == "wave":
+            var wave_record: Dictionary = state.get("ai_waves", {}).get(int(operation["owner"]), {})
+            var persistent_id: int = int(wave_record.get("operation_id", 0))
+            if persistent_id > 0:
+                operation["id"] = persistent_id
+                reused[persistent_id] = true
+                continue
         if not old.is_empty():
             operation["id"] = int(old["id"])
             operation["phase"] = old.get("phase", "assigned")
