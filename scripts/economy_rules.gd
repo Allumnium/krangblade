@@ -1370,7 +1370,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
         if radial.is_zero_approx():
             radial = Vector2.RIGHT
         ship["mining_rock"] = rock
-        ship["mining_target"] = rock + radial * (float(best_chunk["radius"]) + 12.0)
+        ship["mining_target"] = rock + radial * (float(best_chunk.get("radius", 0.0)) + 12.0)
         ship["mining_mode"] = "approach"
         _set_route(ship, best_path)
 

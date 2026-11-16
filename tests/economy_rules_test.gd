@@ -630,7 +630,8 @@ func _initialize() -> void:
     var after_build: float = float(mine_home["stock"]["Metals"])
     assert(is_equal_approx(after_build, float(ECON.STARTING_STOCK["Metals"]) - float(ECON._cost("miner", 1)["Metals"])))
     ECON.step(mineral, 0.1)
-    assert(miner["mining_target"] == metal_pos)
+    assert(miner["mining_rock"] == metal_pos)
+    assert((miner["mining_target"] as Vector2).distance_to(metal_pos) >= 12.0 - ECON.EPS)
     assert(int(miner["chunk"]) == 7)
     for i in range(20):
         if miner["mining_mode"] == "mining":
