@@ -2168,25 +2168,32 @@ static func _ai_wave_order(state: Dictionary, graph: Dictionary, player: int, ho
     if active.is_empty() or (not engaged and (all_arrived or active.size() < 2)):
         active.clear()
         target = -1
+    active = _dispatch_cohorts(state, graph, home, target if not active.is_empty() else goal, fighters, active, true)
+    waves[player] = {"target": (target if target >= 0 else goal) if not active.is_empty() else -1, "members": active}
+
+# Shared authoritative rally and deployment mechanics. AI keeps one active
+# wave; human allocations may launch additional assembled cohorts.
+static func _dispatch_cohorts(state: Dictionary, graph: Dictionary, home: int, goal: int, fighters: Array, deployed: Array[int], exclusive_wave: bool) -> Array[int]:
     var ready: Array = []
-    var points: Array = graph["points"]
-    var rally: Vector2 = points[home]
-    var home_paths: Dictionary = _military_paths(graph, home)
+    var paths: Dictionary = {}
     for ship in fighters:
-        if active.has(int(ship["id"])) or bool(ship.get("retreating", false)):
+        var member: int = int(ship["id"])
+        if bool(ship.get("retreating", false)):
             continue
-        if int(ship.get("dest", -1)) != home:
-            _redirect_fighter(graph, ship, home, home_paths)
-        if int(ship["at"]) == home and (ship["route"] as Array).is_empty() and combat_position(state, graph, ship).distance_to(rally) <= AI_RALLY_RADIUS and not _engaged(ship):
+        if deployed.has(member):
+            _order_operation_ship(graph, ship, goal, paths)
+            continue
+        _order_operation_ship(graph, ship, home, paths)
+        if int(ship["at"]) == home and (ship["route"] as Array).is_empty() and combat_position(state, graph, ship).distance_to(graph["points"][home]) <= AI_RALLY_RADIUS and not _engaged(ship):
             ready.append(ship)
-    if active.is_empty() and ready.size() >= AI_WAVE_MIN and goal >= 0 and goal != home:
-        var attack_paths: Dictionary = _military_paths(graph, goal)
-        if attack_paths["distance"].has(home):
-            target = goal
+    if ready.size() >= AI_WAVE_MIN and goal >= 0 and goal != home and (not exclusive_wave or deployed.is_empty()):
+        if not paths.has(goal):
+            paths[goal] = _military_paths(graph, goal)
+        if paths[goal]["distance"].has(home):
             for ship in ready:
-                _redirect_fighter(graph, ship, target, attack_paths)
-                active.append(int(ship["id"]))
-    waves[player] = {"target": target, "members": active}
+                _order_operation_ship(graph, ship, goal, paths)
+                deployed.append(int(ship["id"]))
+    return deployed
 
 # Operations own human deployment; quotas choose membership rather than routes.
 # Keep exact group identities first, then preserve a disappearing group's ID
@@ -2456,7 +2463,6 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
         if ship.get("kind", "") == "fighter":
             by_id[int(ship["id"])] = ship
     var paths: Dictionary = {}
-    var points: Array = graph["points"]
     for operation in state["operations"].values():
         if operation["role"] != "allocation":
             continue
@@ -2474,27 +2480,15 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
                 if not bool(by_id[member].get("retreating", false)):
                     _order_operation_ship(graph, by_id[member], target, paths)
             continue
-        var deployed: Array = []
-        for member in operation["deployed"]:
-            if operation["members"].has(member) and not bool(by_id[member].get("retreating", false)):
+        var deployed: Array[int] = []
+        var fighters: Array = []
+        for member in operation["members"]:
+            fighters.append(by_id[member])
+            if operation["deployed"].has(member) and not bool(by_id[member].get("retreating", false)):
                 deployed.append(member)
         if deployed.size() == 1 and not _engaged(by_id[deployed[0]]):
             deployed.clear()
-        var ready: Array = []
-        for member in operation["members"]:
-            var ship: Dictionary = by_id[member]
-            if bool(ship.get("retreating", false)):
-                continue
-            if deployed.has(member):
-                _order_operation_ship(graph, ship, target, paths)
-                continue
-            _order_operation_ship(graph, ship, home, paths)
-            if int(ship["at"]) == home and (ship["route"] as Array).is_empty() and combat_position(state, graph, ship).distance_to(points[home]) <= AI_RALLY_RADIUS and not _engaged(ship):
-                ready.append(member)
-        if ready.size() >= AI_WAVE_MIN:
-            for member in ready:
-                _order_operation_ship(graph, by_id[member], target, paths)
-                deployed.append(member)
+        deployed = _dispatch_cohorts(state, graph, home, target, fighters, deployed, false)
         operation["deployed"] = deployed
         operation["phase"] = "rallying" if deployed.is_empty() else "deployed"
 
