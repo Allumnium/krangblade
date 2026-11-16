@@ -92,3 +92,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - [ ] Profile large matches; cache military graph and shortest-path trees locally (v0.14.3); consider all-pairs prewarming, civilian routing and GPU territory optimization after benchmarking.
 
 - [ ] Validate logistics lens capacity bars and cargo direction indicators at wide and close zoom (v0.14.4).
+
+- [ ] Benchmark conservative territory tile rejection and visually compare boundaries at all zoom levels (v0.14.7).
