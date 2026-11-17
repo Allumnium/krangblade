@@ -119,6 +119,7 @@ var trade_sliders: Dictionary = {}
 var trade_checks: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var pds_card: Dictionary = {}
+var pds_system: int = -1
 var economy_cards: Dictionary = {}
 var warehouse_card: Dictionary = {}
 var continuous_checks: Dictionary = {}
@@ -1039,45 +1040,89 @@ func _build_pds_card(parent: Container) -> void:
 	var body: VBoxContainer = pds_card["body"]
 	var detail := _label("", 12)
 	body.add_child(detail)
+	var summary: VBoxContainer = pds_card["summary"]
+	var picker := OptionButton.new()
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	picker.add_theme_font_size_override("font_size", 12)
+	picker.fit_to_longest_item = false
+	summary.add_child(picker)
+	var status := _label("", 11)
+	summary.add_child(status)
 	var progress := ProgressBar.new()
 	progress.custom_minimum_size.y = 15
 	section.add_child(progress)
 	section.move_child(progress, body.get_index())
-	var costs: GridContainer = _cost_grid(pds_card["summary"])
-	var action: Button = _card_action(pds_card, "Build", func() -> void: _operation("pds", str(ECONOMY.next_pds(_planet()))))
+	var costs: GridContainer = _cost_grid(summary)
+	var action: Button = _card_action(pds_card, "Build", func() -> void:
+		var slot: int = _system_pds_slot()
+		if slot >= 0:
+			_operation("pds", str(slot)))
 	var cancel: Button = _card_cancel(pds_card, _pds_action, progress)
 	HUD.action(action)
-	pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel})
+	pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel, "picker": picker, "status": status})
+	picker.item_selected.connect(func(_index: int) -> void:
+		var system: Dictionary = _planet()
+		if not system.is_empty():
+			_refresh_pds(system, int(system["owner"]) == _me() and str(session.get("phase")) == "match"))
+
+func _system_pds_slot() -> int:
+	var picker: OptionButton = pds_card["picker"]
+	return picker.get_selected_id() if picker.selected >= 0 else -1
 
 func _pds_action() -> void:
 	var job: Dictionary = ECONOMY.pds_job(_planet())
-	if job.is_empty():
-		_operation("pds", str(ECONOMY.next_pds(_planet())))
-	else:
-		session.call("request_cancel", selected, int(job["id"]))
+	if not job.is_empty() and int(job["target"]) == _system_pds_slot():
+		_cancel_job(int(job["id"]))
 
 func _refresh_pds(planet: Dictionary, owned: bool) -> void:
-	var count: int = planet.get("pds", {}).size()
+	var defenses: Dictionary = planet.get("pds", {})
+	var count: int = defenses.size()
 	var limit: int = int(planet["planet_count"])
-	var slot: int = ECONOMY.next_pds(planet)
 	var job: Dictionary = ECONOMY.pds_job(planet)
+	var picker: OptionButton = pds_card["picker"]
+	var slot: int = _system_pds_slot()
+	var changed_system: bool = selected != pds_system
+	if changed_system or slot < 0 or slot >= limit:
+		slot = int(job["target"]) if not job.is_empty() else maxi(0, ECONOMY.next_pds(planet))
+	if changed_system or picker.item_count != limit:
+		picker.clear()
+		for i in range(limit):
+			picker.add_item(_body_name(selected, i), i)
+		pds_system = selected
+	for i in range(limit):
+		var suffix: String = " · PDS" if defenses.has(i) else (" · Building" if not job.is_empty() and int(job["target"]) == i else "")
+		var caption: String = _body_name(selected, i) + suffix
+		if picker.get_item_text(i) != caption:
+			picker.set_item_text(i, caption)
+	if picker.selected != slot:
+		picker.select(slot)
 	_disclosure_title(pds_card, "Planetary defense · %d/%d" % [count, limit])
+	var installed: bool = defenses.has(slot)
+	var building: bool = not job.is_empty() and int(job["target"]) == slot
+	var cost: Dictionary = ECONOMY._cost("pds", slot + 1)
 	var progress: ProgressBar = pds_card["progress"]
-	progress.visible = not job.is_empty()
+	progress.visible = building
 	var action: Button = pds_card["button"]
-	_set_timed_action(action, "Build" if slot >= 0 or not job.is_empty() else "Complete", float(job["work"]) if not job.is_empty() else (ECONOMY._work("pds", slot + 1) if slot >= 0 else -1.0))
-	action.disabled = not owned or slot < 0 or not job.is_empty() or not ECONOMY.affordable(planet, ECONOMY._cost("pds", slot + 1))
-	pds_card["cancel"].visible = not job.is_empty()
-	pds_card["cancel"].disabled = not owned or job.is_empty()
+	_set_timed_action(action, "Complete" if installed else "Build", -1.0 if installed else ECONOMY._work("pds", slot + 1))
+	action.disabled = not owned or installed or not job.is_empty() or not ECONOMY.affordable(planet, cost)
+	pds_card["cancel"].visible = building
+	pds_card["cancel"].disabled = not owned or not building
+	var status_text: String = "Operational · %.0f / %.0f HP" % [float(defenses[slot].get("hp", 0.0)), ECONOMY.PDS_HP] if installed else ("Under construction" if building else "Undefended")
+	if not installed and not building:
+		if not job.is_empty():
+			status_text += " · Another defense is being built"
+		elif not ECONOMY.affordable(planet, cost):
+			status_text += " · Insufficient local materials"
+	pds_card["status"].text = status_text
 	pds_card["detail"].text = "One battery per planet · %.0f damage / shot · Range %.0f · Fires once/yr" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
-	pds_card["costs"].visible = slot >= 0 or not job.is_empty()
-	if not job.is_empty():
+	pds_card["costs"].visible = not installed
+	if building:
 		progress.value = 100.0 * float(job["progress"]) / float(job["work"])
 		progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
 		_style_progress(progress, planet, job)
 		_show_cost(pds_card["costs"], job["cost"])
-	elif slot >= 0:
-		_show_cost(pds_card["costs"], ECONOMY._cost("pds", slot + 1))
+	elif not installed:
+		_show_cost(pds_card["costs"], cost)
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
