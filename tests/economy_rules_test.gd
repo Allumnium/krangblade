@@ -34,6 +34,7 @@ func _initialize() -> void:
     _test_conquest()
     _test_conquest_resistance_and_evacuation()
     _test_match_elimination()
+    _test_antimatter_extraction()
     _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -102,7 +103,7 @@ func _initialize() -> void:
             assert(not MAP.blocked(cluster_points[edge[0]], cluster_points[edge[1]], clustered["fields"]))
         for field in clustered["fields"]:
             var ore: Dictionary = ECON.field_inventory(field)
-            for resource in ECON.MINED_RESOURCES:
+            for resource in ECON.FIELD_RESOURCES:
                 assert(ECON.field_limit(field, resource) > ECON.PLANET_MINING_LIMIT if float(ore[resource]) > 0.0 else is_zero_approx(ECON.field_limit(field, resource)))
             assert(ECON.field_limit(field, "Organics") == 0.0)
             assert(field["outline"].size() == 12)
@@ -111,7 +112,8 @@ func _initialize() -> void:
             for chunk in field["chunks"]:
                 assert(not chunk_ids.has(chunk["id"]))
                 chunk_ids[chunk["id"]] = true
-                assert(ECON.MINED_RESOURCES.has(chunk["resource"]))
+                assert(ECON.FIELD_RESOURCES.has(chunk["resource"]))
+                assert((chunk["resource"] == ECON.ANTIMATTER) == bool(field.get("antimatter", false)))
                 assert(float(chunk["remaining"]) > 0.0)
                 assert((field["position"] as Vector2).distance_to(chunk["position"]) + float(chunk["radius"]) < float(field["radius"]))
         assert(bridge_distance / bridges > local_distance / locals)
@@ -1754,6 +1756,61 @@ func _test_conquest_resistance_and_evacuation() -> void:
     assert(before.distance_to(freighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
     assert((freighter["position"] as Vector2).x > before.x)
     print("PASS: planetary defense resistance and simultaneous destruction, safe cargo-preserving conquest reroute")
+
+func _test_antimatter_extraction() -> void:
+    for player_count in range(1, 9):
+        var galaxy: Dictionary = MAP.generate(7021, player_count)
+        var center: Vector2 = galaxy["size"] * 0.5
+        var furthest_special: float = 0.0
+        var nearest_ordinary: float = INF
+        var special_count: int = 0
+        for field in galaxy["fields"]:
+            var distance: float = center.distance_to(field["position"])
+            if bool(field.get("antimatter", false)):
+                special_count += 1
+                furthest_special = maxf(furthest_special, distance)
+                assert(ECON.field_inventory(field)[ECON.ANTIMATTER] > 0.0)
+                assert(ECON.field_inventory(field)["Metals"] == 0.0)
+                assert(ECON.field_inventory(field)["Crystals"] == 0.0)
+            else:
+                nearest_ordinary = minf(nearest_ordinary, distance)
+                assert(ECON.field_inventory(field)[ECON.ANTIMATTER] == 0.0)
+        assert(special_count == (1 if player_count <= 2 else 2))
+        assert(furthest_special <= nearest_ordinary)
+    var map_data: Dictionary = MAP.generate(7021, 2)
+    var points: Array = map_data["points"]
+    var deposit: Vector2 = points[0] + Vector2(400.0, 0.0)
+    map_data["fields"] = [{"anchor": 0, "position": deposit, "radius": 50.0, "antimatter": true,
+        "Metals": 0.0, "Crystals": 0.0, ECON.ANTIMATTER: 1.0,
+        "chunks": [{"id": 0, "position": deposit, "resource": ECON.ANTIMATTER, "remaining": 30.0}]}]
+    var state: Dictionary = ECON.create(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+    var home: Dictionary = state["planets"][0]
+    ECON._finish(state, 0, home, {"id": 900, "kind": "miner"})
+    var miner: Dictionary = state["ships"][0]
+    assert(not ECON.mining_policy(state, 1, 0)["enabled"])
+    assert(not ECON.set_mining_policy(state, 3, 0, true, false, false))
+    ECON.step(state, 1.0)
+    assert(miner["mining_mode"] == "idle")
+    assert(ECON.set_mining_policy(state, 1, 0, true, false, false))
+    var loaded: bool = false
+    for tick in range(200):
+        ECON.step(state, 0.5)
+        var totals: Dictionary = ECON.raw_antimatter_totals(state, 1)
+        var remaining: float = ECON.field_inventory(map_data["fields"][0])[ECON.ANTIMATTER]
+        assert(is_equal_approx(remaining + float(totals["stock"]) + float(totals["cargo"]), 30.0))
+        if float(totals["cargo"]) > ECON.EPS:
+            loaded = true
+            assert(totals["stock"] == 0.0)
+            assert(ECON._cargo_total(miner) <= ECON.MINER_CAPACITY)
+        if float(totals["stock"]) >= 30.0 - ECON.EPS:
+            assert(miner["position"] == points[0])
+            break
+    assert(loaded and is_equal_approx(float(home["stock"][ECON.ANTIMATTER]), 30.0))
+    assert(ECON.raw_antimatter_totals(bytes_to_var(var_to_bytes(state)), 1)["stock"] == 30.0)
+    ECON._capture_system(state, 0, 2)
+    assert(ECON.raw_antimatter_totals(state, 1)["stock"] == 0.0)
+    assert(ECON.raw_antimatter_totals(state, 2)["stock"] == 30.0)
+    print("PASS: central antimatter generation, opt-in extraction, physical delivery, conservation and capture")
 
 func _test_match_elimination() -> void:
     var state: Dictionary = ECON.create(MAP.generate(827, 3), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 2}}, [1, 2, 3], false)

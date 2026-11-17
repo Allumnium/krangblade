@@ -37,6 +37,8 @@ const FARM_CYCLE_SECONDS: float = 100.0
 const START_YEAR: int = 1
 const CARGO_CAPACITY: float = 10.0
 const MINED_RESOURCES = ["Metals", "Crystals"]
+const ANTIMATTER = MAP.ANTIMATTER
+const FIELD_RESOURCES = ["Metals", "Crystals", ANTIMATTER]
 # Provisional per-resource ceilings, independent of unlimited upgrade levels.
 const PLANET_MINING_LIMIT: float = 100.0
 const FIELD_MINING_LIMIT: float = 200.0
@@ -214,7 +216,9 @@ static func update_exploration(state: Dictionary) -> void:
             _survey(state, team, i)
 
 static func mining_policy(state: Dictionary, player: int, index: int) -> Dictionary:
-    return state.get("mining_policies", {}).get(player, {}).get(index, {"enabled": true, "Metals": true, "Crystals": true})
+    var fields: Array = state.get("map", {}).get("fields", [])
+    var special: bool = index >= 0 and index < fields.size() and bool(fields[index].get("antimatter", false))
+    return state.get("mining_policies", {}).get(player, {}).get(index, {"enabled": not special, "Metals": true, "Crystals": true})
 
 static func set_mining_policy(state: Dictionary, player: int, index: int, enabled: bool, metals: bool, crystals: bool) -> bool:
     if not state["teams"].has(player) or index < 0 or index >= (state["map"].get("fields", []) as Array).size() or not discovered(state, player, "fields", index):
@@ -229,6 +233,8 @@ static func _mining_resources(state: Dictionary, player: int, index: int) -> Arr
     var policy: Dictionary = mining_policy(state, player, index)
     var resources: Array[String] = []
     if bool(policy["enabled"]):
+        if bool(state["map"]["fields"][index].get("antimatter", false)):
+            return [ANTIMATTER]
         for resource in MINED_RESOURCES:
             if bool(policy[resource]):
                 resources.append(resource)
@@ -239,7 +245,18 @@ static func storage_capacity(p: Dictionary) -> float:
     return float(WAREHOUSE_CAPACITIES[clampi(int(p.get("warehouse_level", 0)), 0, 3)])
 
 static func storage_free(p: Dictionary, resource: String) -> float:
-    return maxf(0.0, storage_capacity(p) - float(p["stock"][resource]))
+    return maxf(0.0, storage_capacity(p) - float(p["stock"].get(resource, 0.0)))
+
+static func raw_antimatter_totals(state: Dictionary, player: int) -> Dictionary:
+    var stock: float = 0.0
+    var cargo: float = 0.0
+    for planet in state["planets"]:
+        if int(planet["owner"]) == player:
+            stock += float(planet["stock"].get(ANTIMATTER, 0.0))
+    for ship in state["ships"]:
+        if int(ship["owner"]) == player:
+            cargo += float(ship.get("cargo", {}).get(ANTIMATTER, 0.0))
+    return {"stock": stock, "cargo": cargo}
 
 static func empire_totals(state: Dictionary, player: int) -> Dictionary:
     var stock: Dictionary = empty_stock()
@@ -1051,7 +1068,7 @@ static func _cargo_total(ship: Dictionary) -> float:
     var total: float = 0.0
     for r in RESOURCES:
         total += float(ship["cargo"][r])
-    return total
+    return total + float(ship["cargo"].get(ANTIMATTER, 0.0))
 
 static func _need(p: Dictionary, resource: String) -> float:
     if not bool(p["thresholds"][resource].get("import", true)):
@@ -1248,10 +1265,10 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
         _choose_delivery(state, ship, teams, team, cache)
 
 static func field_limit(field: Dictionary, resource: String) -> float:
-    return FIELD_MINING_LIMIT * float(field.get(resource, 0.0)) if MINED_RESOURCES.has(resource) else 0.0
+    return FIELD_MINING_LIMIT * float(field.get(resource, 0.0)) if FIELD_RESOURCES.has(resource) else 0.0
 
 static func field_inventory(field: Dictionary) -> Dictionary:
-    var stock: Dictionary = {"Metals": 0.0, "Crystals": 0.0}
+    var stock: Dictionary = {"Metals": 0.0, "Crystals": 0.0, ANTIMATTER: 0.0}
     for chunk in field.get("chunks", []):
         var resource: String = str(chunk["resource"])
         stock[resource] = float(stock[resource]) + float(chunk["remaining"])
@@ -1445,7 +1462,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
             var resource: String = str(chunk["resource"])
             var free: float = MINER_CAPACITY - _cargo_total(ship)
             var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource]))))
-            ship["cargo"][resource] = float(ship["cargo"][resource]) + amount
+            ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
             chunk["remaining"] = maxf(0.0, float(chunk["remaining"]) - amount)
             budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
             if float(chunk["remaining"]) <= EPS:
@@ -1470,9 +1487,11 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
         _evacuate_civilian(state, ship, teams)
         return
     if int(local["owner"]) == owner:
-        for resource in MINED_RESOURCES:
-            var amount: float = minf(float(ship["cargo"][resource]), storage_free(local, resource))
-            local["stock"][resource] += amount
+        for resource in FIELD_RESOURCES:
+            var amount: float = minf(float(ship["cargo"].get(resource, 0.0)), storage_free(local, resource))
+            if amount <= 0.0:
+                continue
+            local["stock"][resource] = float(local["stock"].get(resource, 0.0)) + amount
             _record_flow(local, "Mining deliveries", resource, amount)
             ship["cargo"][resource] -= amount
     if _cargo_total(ship) <= EPS:
@@ -1480,8 +1499,8 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
         ship["field"] = -1
         ship["dest"] = -1
         return
-    for resource in MINED_RESOURCES:
-        if float(ship["cargo"][resource]) <= EPS:
+    for resource in FIELD_RESOURCES:
+        if float(ship["cargo"].get(resource, 0.0)) <= EPS:
             continue
         var depot: int = _mining_depot(state, ship, teams, team, here, resource, cache)
         if depot >= 0 and depot != here:
@@ -2994,7 +3013,7 @@ static func step(state: Dictionary, dt: float) -> void:
     var cache: Dictionary = {}
     var budgets: Array = []
     for field in state["map"].get("fields", []):
-        budgets.append({"Metals": field_limit(field, "Metals") * dt, "Crystals": field_limit(field, "Crystals") * dt})
+        budgets.append({"Metals": field_limit(field, "Metals") * dt, "Crystals": field_limit(field, "Crystals") * dt, ANTIMATTER: field_limit(field, ANTIMATTER) * dt})
     var combat_graph: Dictionary = military_graph(state)
     if float(state["elapsed"]) >= float(state.get("next_ai", 0.0)) and not state.get("ai_players", []).is_empty():
         state["next_ai"] = float(state["elapsed"]) + AI_INTERVAL

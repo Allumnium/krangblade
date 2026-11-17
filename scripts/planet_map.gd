@@ -6,6 +6,7 @@ const TRAVEL_SPEED: float = 95.0
 const LONGEST_LINK_YEARS: float = 100.0
 const MAX_CONNECTIONS: int = 3
 const EXTRA_LINK_CHANCE: float = 0.35
+const ANTIMATTER := "Raw antimatter"
 
 static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
     var rng := RandomNumberGenerator.new()
@@ -169,6 +170,20 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
         field["position"] = (field["position"] as Vector2) * distance_scale
         field["radius"] = float(field["radius"]) * distance_scale
         _populate_field(field, rng)
+    # Reclassify the innermost obstacle fields after generation so the
+    # existing safe lane geometry, access points and seed remain unchanged.
+    var inner: Array = fields.duplicate()
+    var galaxy_center: Vector2 = bounds * distance_scale * 0.5
+    inner.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+        return (a["position"] as Vector2).distance_squared_to(galaxy_center) < (b["position"] as Vector2).distance_squared_to(galaxy_center))
+    for i in range(mini(inner.size(), 1 if player_count <= 2 else 2)):
+        var field: Dictionary = inner[i]
+        field["antimatter"] = true
+        field["Metals"] = 0.0
+        field["Crystals"] = 0.0
+        field[ANTIMATTER] = 1.0
+        for chunk in field["chunks"]:
+            chunk["resource"] = ANTIMATTER
     return {"seed": seed_value, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
 
 static func system_names(seed_value: int, count: int) -> Array[String]:
