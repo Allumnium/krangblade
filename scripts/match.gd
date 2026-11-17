@@ -3560,6 +3560,23 @@ func _policy_components() -> Array:
     return groups
 
 
+# Clamp draft allocations to the capacity left by non-voided policies.
+# Stable zone ordering makes reductions predictable after merging/splitting.
+func _limit_policy_zone_allocations() -> void:
+    var reserved: int = 0
+    var equipped: Dictionary = _state().get("policies", {}).get(_me(), {})
+    for slot in equipped:
+        if slot == policy_draft_slot or bool(policy_voids.get(slot, false)):
+            continue
+        if ECONOMY.POLICY_CARDS[equipped[slot]["card"]].get("military", false):
+            reserved += ECONOMY.policy_allocation(equipped[slot])
+    var remaining: int = maxi(0, 100 - reserved)
+    for group in _policy_components():
+        var key: int = int(group["key"])
+        var amount: int = clampi(int(policy_zone_weights.get(key, 0)), 0, remaining)
+        policy_zone_weights[key] = amount
+        remaining -= amount
+
 func _update_policy_editor() -> void:
     if policy_draft_card.is_empty():
         return
@@ -3567,11 +3584,14 @@ func _update_policy_editor() -> void:
         policy_editor_rows.remove_child(child)
         child.queue_free()
     var groups: Array = _policy_components()
+    if policy_zone_weights.is_empty() and not groups.is_empty():
+        policy_zone_weights[int(groups[0]["key"])] = 100
+    _limit_policy_zone_allocations()
     var total: int = 0
     for i in range(groups.size()):
         var group: Dictionary = groups[i]
         var key: int = int(group["key"])
-        var weight: int = int(policy_zone_weights.get(key, 100 if i == 0 and policy_zone_weights.is_empty() else 0))
+        var weight: int = int(policy_zone_weights.get(key, 0))
         policy_zone_weights[key] = weight
         total += weight
         var label_text: String = "Zone %s · %d systems · %d%%" % [char(65 + i), (group["targets"] as Array).size(), weight]
@@ -3584,8 +3604,22 @@ func _update_policy_editor() -> void:
         slider.value = weight
         policy_editor_rows.add_child(slider)
         slider.value_changed.connect(func(value: float) -> void:
-            policy_zone_weights[key] = roundi(value)
-            zone_label.text = "Zone %s · %d systems · %d%%" % [char(65 + i), (group["targets"] as Array).size(), roundi(value)]
+            var others: int = 0
+            for other_group in _policy_components():
+                var other_key: int = int(other_group["key"])
+                if other_key != key:
+                    others += int(policy_zone_weights.get(other_key, 0))
+            var reserved: int = 0
+            var committed: Dictionary = _state().get("policies", {}).get(_me(), {})
+            for other_slot in committed:
+                if other_slot == policy_draft_slot or bool(policy_voids.get(other_slot, false)):
+                    continue
+                if ECONOMY.POLICY_CARDS[committed[other_slot]["card"]].get("military", false):
+                    reserved += ECONOMY.policy_allocation(committed[other_slot])
+            var bounded: int = clampi(roundi(value), 0, maxi(0, 100 - reserved - others))
+            policy_zone_weights[key] = bounded
+            slider.set_value_no_signal(bounded)
+            zone_label.text = "Zone %s · %d systems · %d%%" % [char(65 + i), (group["targets"] as Array).size(), bounded]
             _update_policy_editor_status())
     policy_editor_rows.add_child(_label("Other committed policies", 14))
     var equipped: Dictionary = _state().get("policies", {}).get(_me(), {})
@@ -3604,7 +3638,7 @@ func _update_policy_editor() -> void:
         row.add_child(check)
         check.toggled.connect(func(value: bool) -> void:
             policy_voids[slot] = value
-            _update_policy_editor_status())
+            _update_policy_editor())
         var readonly := HSlider.new()
         readonly.max_value = 100
         readonly.value = amount
