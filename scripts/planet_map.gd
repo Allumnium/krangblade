@@ -7,8 +7,18 @@ const LONGEST_LINK_YEARS: float = 100.0
 const MAX_CONNECTIONS: int = 3
 const EXTRA_LINK_CHANCE: float = 0.35
 const ANTIMATTER := "Raw antimatter"
+const LAYOUTS: Array[String] = ["Clustered", "Radial", "Grid", "Scramble"]
+const DEFAULT_LAYOUT: String = "Clustered"
+const LAYOUT_DESCRIPTIONS = {
+	"Clustered": "Local clusters connected by sparse bridges.",
+	"Radial": "Outer homeworlds with inward spokes and a connected inner ring.",
+	"Grid": "Regular clusters linked in rows and columns, with alternate routes.",
+	"Scramble": "Irregularly scattered clusters with varied bridge connections."
+}
 
-static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
+static func generate(seed_value: int, player_count: int = 3, layout: String = DEFAULT_LAYOUT) -> Dictionary:
+	if not LAYOUTS.has(layout):
+		layout = DEFAULT_LAYOUT
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	player_count = clampi(player_count, 1, 8)
@@ -28,11 +38,35 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
 		var slot: int = slots[pick]
 		slots[pick] = slots[i]
 		slots[i] = slot
+	var radial_inner: float = maxf(950.0, float(player_count) * 1250.0 / TAU)
+	var radial_extent: float = radial_inner + 2500.0 + 625.0
+	if layout == "Radial":
+		bounds = Vector2.ONE * radial_extent * 2.0
 	for i in range(cluster_count):
 		var slot: int = slots[i]
-		centers.append(Vector2(625.0 + float(slot % columns) * 1250.0, 525.0 + floorf(float(slot) / columns) * 1050.0) + Vector2(rng.randf_range(-90, 90), rng.randf_range(-70, 70)))
+		var center := Vector2(625.0 + float(slot % columns) * 1250.0, 525.0 + floorf(float(slot) / columns) * 1050.0)
+		var offset := Vector2(rng.randf_range(-90, 90), rng.randf_range(-70, 70))
+		if layout == "Radial":
+			var ring: int = floori(float(i) / float(player_count))
+			var angle: float = TAU * float(i % player_count) / float(player_count) - PI * 0.5
+			center = bounds * 0.5 + Vector2.from_angle(angle) * (radial_inner + float(2 - ring) * 1250.0)
+		elif layout == "Grid":
+			offset *= 0.12
+		elif layout == "Scramble":
+			offset *= 3.0
+		centers.append(center + offset)
 		groups.append([])
 		sizes.append(6 if i < player_count else clampi(roundi(rng.randfn(6.0, 1.5)), 3, 9))
+	if layout == "Radial":
+		# Tight frame for small player counts; leave room for local systems.
+		var low: Vector2 = centers[0]
+		var high: Vector2 = centers[0]
+		for center in centers:
+			low = low.min(center)
+			high = high.max(center)
+		bounds = high - low + Vector2(1250.0, 1050.0)
+		for i in range(centers.size()):
+			centers[i] += Vector2(625.0, 525.0) - low
 	var points: Array[Vector2] = []
 	var clusters: Array[int] = []
 	# Indices 0..player_count-1 remain the ordered player homeworlds.
@@ -42,6 +76,13 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
 		groups[group].append(points.size() - 1)
 	for group in range(cluster_count):
 		while groups[group].size() < sizes[group]:
+			if layout == "Grid":
+				var offsets: Array[Vector2] = [Vector2.ZERO, Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1), Vector2(-1, -1), Vector2(1, 1), Vector2(1, -1), Vector2(-1, 1)]
+				var position: Vector2 = centers[group] + offsets[groups[group].size()] * 220.0
+				points.append(position)
+				clusters.append(group)
+				groups[group].append(points.size() - 1)
+				continue
 			var candidate := centers[group]
 			var best: float = -1.0
 			for attempt in range(160):
@@ -74,32 +115,70 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
 		var connected: Array = [group[0]]
 		var local_junctions: int = 0
 		while connected.size() < group.size():
-			var pair: Array = _closest_pair(points, connected, group, connected, degrees, mini(1 - local_junctions, max_junctions - junctions))
+			var local_budget: int = 0 if layout in ["Radial", "Grid"] else 1 - local_junctions
+			var pair: Array = _closest_pair(points, connected, group, connected, degrees, mini(local_budget, max_junctions - junctions))
 			var added: int = _new_junctions(pair, degrees)
 			local_junctions += added
 			junctions += added
 			_add_edge(edges, degrees, pair)
 			connected.append(pair[1] if connected.has(pair[0]) else pair[0])
-	var joined: Array = [0]
-	while joined.size() < cluster_count:
-		var best_edge: Array = []
-		var next_group: int = -1
-		var best_score: float = INF
-		for i in joined:
-			for j in range(cluster_count):
-				if joined.has(j):
-					continue
-				var pair: Array = _closest_pair(points, groups[i], groups[j], [], degrees, max_junctions - junctions)
-				if pair.is_empty():
-					continue
-				var score: float = _edge_score(points, pair, degrees)
-				if score < best_score:
-					best_score = score
-					best_edge = pair
-					next_group = j
-		junctions += _new_junctions(best_edge, degrees)
-		_add_edge(edges, degrees, best_edge)
-		joined.append(next_group)
+	if layout in ["Radial", "Grid"]:
+		var bridges: Array = []
+		var optional: Array = []
+		if layout == "Radial":
+			# One inward spoke per home cluster and a connected inner chain.
+			for i in range(player_count):
+				bridges.append([i, i + player_count])
+				bridges.append([i + player_count, i + 2 * player_count])
+			for i in range(player_count - 1):
+				bridges.append([i + 2 * player_count, i + 2 * player_count + 1])
+			if player_count > 2:
+				optional.append([2 * player_count, cluster_count - 1])
+		else:
+			# Horizontal rows plus a vertical spine form the connected backbone.
+			for slot in range(cluster_count):
+				if slot % columns > 0:
+					bridges.append([slots.find(slot - 1), slots.find(slot)])
+				if slot >= columns:
+					var pair: Array = [slots.find(slot - columns), slots.find(slot)]
+					if slot % columns == 0:
+						bridges.append(pair)
+					else:
+						optional.append(pair)
+		for bridge in bridges + optional:
+			var pair: Array = _closest_pair(points, groups[bridge[0]], groups[bridge[1]], [], degrees, max_junctions - junctions)
+			if pair.is_empty():
+				# Optional loops are skipped when the junction budget is exhausted.
+				# Required bridges have at most three per path cluster and reserve
+				# enough junctions by keeping the local trees unbranched.
+				continue
+			junctions += _new_junctions(pair, degrees)
+			_add_edge(edges, degrees, pair)
+	else:
+		var joined: Array = [0]
+		while joined.size() < cluster_count:
+			var best_edge: Array = []
+			var next_group: int = -1
+			var best_score: float = INF
+			for i in joined:
+				for j in range(cluster_count):
+					if joined.has(j):
+						continue
+					var pair: Array = _closest_pair(points, groups[i], groups[j], [], degrees, max_junctions - junctions)
+					if pair.is_empty():
+						continue
+					var score: float = _edge_score(points, pair, degrees)
+					if layout == "Scramble":
+						# Stable per-cluster-pair weighting, not random on each iteration.
+						var mix: int = posmod(seed_value % 10007 + mini(i, j) * 7919 + maxi(i, j) * 31013, 10007)
+						score *= 0.65 + 0.7 * float(mix) / 10006.0
+					if score < best_score:
+						best_score = score
+						best_edge = pair
+						next_group = j
+			junctions += _new_junctions(best_edge, degrees)
+			_add_edge(edges, degrees, best_edge)
+			joined.append(next_group)
 	# Protect the connected backbone. Fields occupy potential shortcuts, so
 	# ordinary routes never cross a field and the galaxy remains connected.
 	var candidates: Array = []
@@ -184,7 +263,7 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
 		field[ANTIMATTER] = 1.0
 		for chunk in field["chunks"]:
 			chunk["resource"] = ANTIMATTER
-	return {"seed": seed_value, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
+	return {"seed": seed_value, "layout": layout, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
 
 static func system_names(seed_value: int, count: int) -> Array[String]:
 	var prefixes := ["Astra", "Vey", "Kor", "Nyx", "Sol", "Tha", "Zer", "Eri", "Vor", "Ly", "Or", "Kael", "Nex", "Quor", "Vel", "Syr", "Ae", "Tal", "Iri", "Xan", "Dra", "Cyr", "Mer", "Rhy"]

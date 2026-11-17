@@ -23,6 +23,7 @@ var phase: String = "offline" # offline / connecting / lobby / loading / match
 var status: String = ""
 var display_name: String = "Player"
 var players: Dictionary = {}
+var map_layout: String = MAP.DEFAULT_LAYOUT
 var history: Array[Dictionary] = []
 var last_message: Dictionary = {}
 var owners: Array[int] = []
@@ -67,8 +68,8 @@ func _sanitize_name(value: String) -> String:
 	return clean if not clean.is_empty() else "Player"
 
 ## Solo runs the same authoritative match simulation as a host, with no ENet peer.
-func start_solo(team: int = 1, opponent_teams: Array = [], colors: Array = [], map_seed: Variant = null) -> bool:
-	if phase != "offline":
+func start_solo(team: int = 1, opponent_teams: Array = [], colors: Array = [], map_seed: Variant = null, layout: String = MAP.DEFAULT_LAYOUT) -> bool:
+	if phase != "offline" or not MAP.LAYOUTS.has(layout):
 		return false
 	if not RULES.valid_team(team) or opponent_teams.size() > RULES.MAX_PLAYERS - 1:
 		return false
@@ -84,13 +85,14 @@ func start_solo(team: int = 1, opponent_teams: Array = [], colors: Array = [], m
 				return false
 			used[choice] = true
 	is_solo = true
+	map_layout = layout
 	players = {1: {"name": _sanitize_name(display_name), "team": team, "ready": true, "color": 1 if colors.is_empty() else int(colors[0])}}
 	for i in range(opponent_teams.size()):
 		players[i + 2] = {"name": "AI %d" % (i + 1), "team": int(opponent_teams[i]), "ready": true, "ai": true, "color": i + 2 if colors.is_empty() else int(colors[i + 1])}
 	history.clear()
 	last_message.clear()
 	round_id = 1
-	_activate_match(players, int(randi()) if map_seed == null else int(map_seed))
+	_activate_match(players, int(randi()) if map_seed == null else int(map_seed), map_layout)
 	get_tree().call_deferred("change_scene_to_file", "res://scenes/match.tscn")
 	return true
 
@@ -111,6 +113,7 @@ func host_game(wanted_name: String) -> bool:
 		return false
 	multiplayer.multiplayer_peer = peer
 	is_solo = false
+	map_layout = MAP.DEFAULT_LAYOUT
 	display_name = _sanitize_name(wanted_name)
 	players = {1: {"name": display_name, "team": 1, "ready": true, "color": 1}}
 	history.clear()
@@ -137,6 +140,7 @@ func join_game(wanted_name: String, address: String) -> bool:
 		return false
 	multiplayer.multiplayer_peer = peer
 	is_solo = false
+	map_layout = MAP.DEFAULT_LAYOUT
 	display_name = _sanitize_name(wanted_name)
 	players.clear()
 	history.clear()
@@ -157,6 +161,7 @@ func _reset_network() -> void:
 	load_timer.stop()
 	economy_timer.stop()
 	is_solo = false
+	map_layout = MAP.DEFAULT_LAYOUT
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	players.clear()
 	history.clear()
@@ -241,16 +246,26 @@ func _rpc_register(wanted_name: String) -> void:
 	_system_message("%s joined." % name)
 	_status("Waiting for players to ready up.")
 
+func choose_map_layout(layout: String) -> bool:
+	if phase != "lobby" or not multiplayer.is_server() or not MAP.LAYOUTS.has(layout):
+		return false
+	if layout != map_layout:
+		map_layout = layout
+		RULES.reset_guest_ready(players)
+		_send_roster()
+	return true
+
 func _send_roster() -> void:
 	if not multiplayer.is_server():
 		return
-	_rpc_roster.rpc(players.duplicate(true))
+	_rpc_roster.rpc(players.duplicate(true), map_layout)
 	roster_changed.emit()
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_roster(snapshot: Dictionary) -> void:
-	if phase == "offline":
+func _rpc_roster(snapshot: Dictionary, layout: String) -> void:
+	if phase == "offline" or not MAP.LAYOUTS.has(layout):
 		return
+	map_layout = layout
 	players = snapshot.duplicate(true)
 	if phase == "connecting":
 		_set_phase("lobby")
@@ -466,24 +481,25 @@ func _maybe_start_match() -> void:
 	load_timer.stop()
 	var snapshot: Dictionary = players.duplicate(true)
 	var map_seed: int = int(randi())
-	_rpc_begin.rpc(round_id, snapshot, map_seed)
-	_activate_match(snapshot, map_seed)
+	_rpc_begin.rpc(round_id, snapshot, map_seed, map_layout)
+	_activate_match(snapshot, map_seed, map_layout)
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_begin(begin_round: int, snapshot: Dictionary, map_seed: int) -> void:
-	if phase != "loading" or begin_round != round_id:
+func _rpc_begin(begin_round: int, snapshot: Dictionary, map_seed: int, layout: String) -> void:
+	if phase != "loading" or begin_round != round_id or not MAP.LAYOUTS.has(layout):
 		return
 	if not snapshot.has(multiplayer.get_unique_id()):
 		return
-	_activate_match(snapshot, map_seed)
+	_activate_match(snapshot, map_seed, layout)
 
-func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
+func _activate_match(snapshot: Dictionary, map_seed: int, layout: String) -> void:
+	map_layout = layout
 	players = snapshot.duplicate(true)
 	snapshot_elapsed = 0.0
 	snapshot_revision = 0
 	snapshot_sent.clear()
 	snapshot_pending.clear()
-	economy = ECONOMY.create(MAP.generate(map_seed, players.size()), players, RULES.ordered_peers(players))
+	economy = ECONOMY.create(MAP.generate(map_seed, players.size(), map_layout), players, RULES.ordered_peers(players))
 	economy["time_speed"] = 1
 	economy["eliminated"] = []
 	economy["match_result"] = {}

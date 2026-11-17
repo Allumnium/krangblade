@@ -46,6 +46,7 @@ func _initialize() -> void:
 	world["abundance"]["Metals"] = 10.0
 	assert(is_equal_approx(ECON.production_modifier(world, "Metals"), 4.0))
 	_test_maintain_targets()
+	_test_map_layouts()
 	var graph: Dictionary = MAP.generate(2468)
 	assert(graph == MAP.generate(2468))
 	assert(graph != MAP.generate(2469))
@@ -1932,3 +1933,55 @@ func _test_opening_pacing() -> void:
 		assert(first_colony > 0 and first_colony <= 180)
 		assert(owned >= 4 and fighters >= 8 and freighters >= 1)
 		print("PASS pacing seed %d: first colony %d years, %d worlds, %d fighters, %d freighters at year 360" % [seed_value, first_colony, owned, fighters, freighters])
+
+func _test_map_layouts() -> void:
+	for players_count in range(1, 9):
+		for layout in MAP.LAYOUTS:
+			if layout == MAP.DEFAULT_LAYOUT:
+				continue
+			for seed_value in [2468, 7021]:
+				var graph: Dictionary = MAP.generate(seed_value, players_count, layout)
+				assert(graph["layout"] == layout)
+				assert(graph["clusters"].size() == graph["points"].size())
+				assert(graph["cluster_sizes"].size() == players_count * 3)
+				if players_count == 3:
+					assert(graph == MAP.generate(seed_value, players_count, layout))
+					assert(graph["points"] != MAP.generate(seed_value, players_count)["points"])
+				var adjacency: Array = []
+				for point in graph["points"]:
+					adjacency.append([])
+					assert(point.x >= 0.0 and point.y >= 0.0 and point.x <= graph["size"].x and point.y <= graph["size"].y)
+				var cluster_links: Dictionary = {}
+				var longest: float = 0.0
+				for edge in graph["edges"]:
+					assert(not adjacency[edge[0]].has(edge[1]))
+					adjacency[edge[0]].append(edge[1])
+					adjacency[edge[1]].append(edge[0])
+					var a: Vector2 = graph["points"][edge[0]]
+					var b: Vector2 = graph["points"][edge[1]]
+					longest = maxf(longest, a.distance_to(b))
+					assert(not MAP.blocked(a, b, graph["fields"]))
+					var first: int = int(graph["clusters"][edge[0]])
+					var second: int = int(graph["clusters"][edge[1]])
+					if first != second:
+						cluster_links[Vector2i(mini(first, second), maxi(first, second))] = true
+				assert(is_equal_approx(longest / MAP.TRAVEL_SPEED, MAP.LONGEST_LINK_YEARS))
+				for neighbors in adjacency:
+					assert(neighbors.size() > 0 and neighbors.size() <= MAP.MAX_CONNECTIONS)
+				var seen: Dictionary = {0: true}
+				var frontier: Array = [0]
+				while not frontier.is_empty():
+					var current: int = frontier.pop_back()
+					for neighbor in adjacency[current]:
+						if not seen.has(neighbor):
+							seen[neighbor] = true
+							frontier.append(neighbor)
+				assert(seen.size() == adjacency.size())
+				for home in range(players_count):
+					assert(int(graph["clusters"][home]) == home)
+					assert(adjacency[home].any(func(neighbor: int) -> bool: return neighbor >= players_count))
+					if layout == "Radial":
+						assert(cluster_links.has(Vector2i(home, home + players_count)))
+						assert(cluster_links.has(Vector2i(home + players_count, home + 2 * players_count)))
+				assert(not graph["fields"].is_empty())
+	print("PASS: seeded radial, grid and scramble layouts, connected lanes and asteroid safety")

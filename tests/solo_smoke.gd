@@ -219,7 +219,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (bool(session.call("start_solo", 3, [3, 2], [8, 4, 6]))):
+	if not (bool(session.call("start_solo", 3, [3, 2], [8, 4, 6], 7021, "Scramble"))):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
@@ -228,6 +228,10 @@ func _run() -> void:
 		quit(1)
 		return
 	var setup: Dictionary = session.get("economy")
+	if setup["map"]["layout"] != "Scramble" or int(setup["map"]["seed"]) != 7021:
+		push_error("Solo map layout/seed was not applied.")
+		quit(1)
+		return
 	if not (int(setup["time_speed"]) == 1):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)

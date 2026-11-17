@@ -56,6 +56,9 @@ func _begin() -> void:
 	else:
 		_fail("Unrecognized role.")
 
+func _expected_layout() -> String:
+	return "Grid" if expected_players >= 3 else ("Radial" if mode != "normal" else MAP.DEFAULT_LAYOUT)
+
 func _roster_changed() -> void:
 	if session == null or str(session.get("phase")) != "lobby" or saw_match:
 		return
@@ -63,6 +66,9 @@ func _roster_changed() -> void:
 	if role == "host":
 		if not color_requested:
 			color_requested = true
+			if bool(session.call("choose_map_layout", "Invalid")) or not bool(session.call("choose_map_layout", _expected_layout())):
+				_fail("Host map layout validation failed.")
+				return
 			session.call("choose_color", 1, 8)
 			return
 		if roster.size() == expected_players and not started and bool(session.call("can_start")):
@@ -73,6 +79,9 @@ func _roster_changed() -> void:
 		var entry: Dictionary = roster.get(self_id, {})
 		if not entry.is_empty() and not color_requested:
 			color_requested = true
+			if str(session.get("map_layout")) != _expected_layout() or bool(session.call("choose_map_layout", "Scramble")):
+				_fail("Lobby layout did not replicate or guest could edit it.")
+				return
 			expected_color = 7 if expected_players == 2 else int(entry["color"])
 			session.call("choose_color", self_id, 8) # occupied by host; must reject
 			if expected_players == 2:
@@ -111,6 +120,9 @@ func _phase_changed() -> void:
 			return
 		var owners: Array[int] = session.get("owners")
 		var state: Dictionary = session.get("economy")
+		if state["map"]["layout"] != _expected_layout() or state["map"] != MAP.generate(int(state["map"]["seed"]), expected_players, _expected_layout()):
+			_fail("Match map layout or seeded geometry did not replicate.")
+			return
 		for owner in roster:
 			var miners: int = 0
 			var fighters: int = 0
@@ -145,6 +157,9 @@ func _phase_changed() -> void:
 				_fail("Never verified all multiplayer command and replication checks before return.")
 				return
 			finishing = true
+			if str(session.get("map_layout")) != _expected_layout():
+				_fail("Lobby layout was lost after return.")
+				return
 			var roster: Dictionary = session.get("players")
 			var expected: int = 1 if mode == "drop-loading" else expected_players
 			if roster.size() != expected:
