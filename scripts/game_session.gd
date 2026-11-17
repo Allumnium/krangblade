@@ -7,6 +7,7 @@ signal chat_changed
 signal status_changed
 signal owners_changed
 signal economy_changed
+signal lobbies_changed
 
 const RULES = preload("res://scripts/lobby_rules.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
@@ -15,6 +16,9 @@ const SIM_STEP: float = 0.1
 const MATCH_SPEEDS: Array[int] = [0, 1, 2, 5, 10]
 const SNAPSHOT_INTERVAL: float = 0.2
 const PORT: int = 24567
+const DISCOVERY_PORT: int = 24568
+const DISCOVERY_QUERY: String = "WARBOUND_DISCOVER_1:"
+const DISCOVERY_TTL_MS: int = 6500
 const MAX_CHAT: int = 250
 const CHAT_HISTORY: int = 100
 const LOAD_TIMEOUT_SECONDS: float = 20.0
@@ -30,6 +34,12 @@ var economy: Dictionary = {}
 var is_solo: bool = false
 var map_layout: String = MAP.DEFAULT_LAYOUT
 var lobby_map_seed: int = 0
+var discovered_lobbies: Dictionary = {}
+var discovery_host: PacketPeerUDP
+var discovery_browser: PacketPeerUDP
+var discovery_nonce: String = ""
+var discovery_target: String = ""
+var discovery_next: int = 0
 var round_id: int = 0
 var loaded: Dictionary = {}
 var load_timer: Timer
@@ -54,6 +64,11 @@ func _ready() -> void:
 	economy_timer.wait_time = SIM_STEP
 	economy_timer.timeout.connect(_economy_tick)
 	add_child(economy_timer)
+	var discovery_timer := Timer.new()
+	discovery_timer.wait_time = 0.25
+	discovery_timer.timeout.connect(_poll_discovery)
+	add_child(discovery_timer)
+	discovery_timer.start()
 
 func _set_phase(value: String) -> void:
 	if phase != value:
@@ -122,6 +137,10 @@ func host_game(wanted_name: String) -> bool:
 	last_message.clear()
 	round_id = 0
 	owners.clear()
+	stop_lobby_browser()
+	discovery_host = PacketPeerUDP.new()
+	if discovery_host.bind(DISCOVERY_PORT, "0.0.0.0") != OK:
+		discovery_host = null
 	_set_phase("lobby")
 	_status("Waiting for players (2–8 required to start).")
 	roster_changed.emit()
@@ -141,6 +160,7 @@ func join_game(wanted_name: String, address: String) -> bool:
 		_status("Could not connect (error %d)." % err)
 		return false
 	multiplayer.multiplayer_peer = peer
+	stop_lobby_browser()
 	is_solo = false
 	display_name = _sanitize_name(wanted_name)
 	players.clear()
@@ -159,6 +179,10 @@ func leave_session() -> void:
 	_status("Disconnected.")
 
 func _reset_network() -> void:
+	stop_lobby_browser()
+	if discovery_host != null:
+		discovery_host.close()
+		discovery_host = null
 	load_timer.stop()
 	economy_timer.stop()
 	is_solo = false
@@ -274,6 +298,14 @@ func choose_map_layout(layout: String) -> void:
 	_send_roster()
 	_status("Map layout changed; guests must ready up again.")
 
+func choose_lobby_seed(seed_value: int) -> void:
+	if phase != "lobby" or not multiplayer.is_server() or seed_value == lobby_map_seed:
+		return
+	lobby_map_seed = seed_value
+	RULES.reset_guest_ready(players)
+	_send_roster()
+	_status("Map seed changed; guests must ready up again.")
+
 func reroll_lobby_map() -> void:
 	if phase != "lobby" or not multiplayer.is_server():
 		return
@@ -284,6 +316,89 @@ func reroll_lobby_map() -> void:
 	RULES.reset_guest_ready(players)
 	_send_roster()
 	_status("Map rerolled; guests must ready up again.")
+
+# LAN broadcast plus a direct probe of the explicitly entered IPv4 address.
+# This is not an internet matchmaking directory. Gameplay remains ENet.
+func start_lobby_browser(address: String = "") -> void:
+	if phase != "offline":
+		return
+	discovery_target = address.strip_edges()
+	if discovery_browser == null:
+		discovery_browser = PacketPeerUDP.new()
+		if discovery_browser.bind(0, "0.0.0.0") != OK:
+			discovery_browser = null
+			return
+		discovery_browser.set_broadcast_enabled(true)
+		discovery_nonce = str(randi())
+	discovery_next = 0
+	_poll_discovery()
+
+func stop_lobby_browser() -> void:
+	if discovery_browser != null:
+		discovery_browser.close()
+		discovery_browser = null
+	if not discovered_lobbies.is_empty():
+		discovered_lobbies.clear()
+		lobbies_changed.emit()
+
+func _poll_discovery() -> void:
+	if discovery_host != null:
+		for i in range(mini(32, discovery_host.get_available_packet_count())):
+			var packet: PackedByteArray = discovery_host.get_packet()
+			if phase != "lobby" or players.size() >= RULES.MAX_PLAYERS or packet.size() > 64:
+				continue
+			var query: String = packet.get_string_from_utf8()
+			if not query.begins_with(DISCOVERY_QUERY):
+				continue
+			var nonce: String = query.trim_prefix(DISCOVERY_QUERY)
+			if not nonce.is_valid_int():
+				continue
+			var response: Dictionary = {"nonce": nonce, "version": str(ProjectSettings.get_setting("application/config/version")), "name": str(players.get(1, {}).get("name", "Host")), "players": players.size(), "layout": map_layout}
+			if discovery_host.set_dest_address(discovery_host.get_packet_ip(), discovery_host.get_packet_port()) == OK:
+				discovery_host.put_packet(JSON.stringify(response).to_utf8_buffer())
+	if discovery_browser == null or phase != "offline":
+		return
+	var now: int = Time.get_ticks_msec()
+	if now >= discovery_next:
+		discovery_next = now + 2000
+		var query: PackedByteArray = (DISCOVERY_QUERY + discovery_nonce).to_utf8_buffer()
+		var targets: Array[String] = ["255.255.255.255", "127.0.0.1"]
+		if discovery_target.is_valid_ip_address() and not discovery_target.contains(":") and not targets.has(discovery_target):
+			targets.append(discovery_target)
+		for target in targets:
+			if discovery_browser.set_dest_address(target, DISCOVERY_PORT) == OK:
+				discovery_browser.put_packet(query)
+	var changed: bool = false
+	for i in range(mini(64, discovery_browser.get_available_packet_count())):
+		var packet: PackedByteArray = discovery_browser.get_packet()
+		var address: String = discovery_browser.get_packet_ip()
+		if packet.size() > 1024 or discovery_browser.get_packet_port() != DISCOVERY_PORT:
+			continue
+		var decoded: Variant = JSON.parse_string(packet.get_string_from_utf8())
+		if not decoded is Dictionary:
+			continue
+		var info: Dictionary = decoded
+		if str(info.get("nonce", "")) != discovery_nonce or str(info.get("version", "")) != str(ProjectSettings.get_setting("application/config/version")):
+			continue
+		var count_value: Variant = info.get("players")
+		if not (count_value is float or count_value is int):
+			continue
+		var count: int = int(count_value)
+		var layout: String = str(info.get("layout", ""))
+		if count < 1 or count >= RULES.MAX_PLAYERS or not MAP.valid_layout(layout):
+			continue
+		if discovered_lobbies.size() >= 128 and not discovered_lobbies.has(address):
+			continue
+		var name: String = _sanitize_name(str(info.get("name", "Host")))
+		var previous: Dictionary = discovered_lobbies.get(address, {})
+		changed = changed or previous.is_empty() or previous.get("name") != name or previous.get("players") != count or previous.get("layout") != layout
+		discovered_lobbies[address] = {"name": name, "players": count, "layout": layout, "last_seen": now}
+	for address in discovered_lobbies.keys():
+		if now - int(discovered_lobbies[address]["last_seen"]) > DISCOVERY_TTL_MS:
+			discovered_lobbies.erase(address)
+			changed = true
+	if changed:
+		lobbies_changed.emit()
 
 func toggle_ready() -> void:
 	if phase != "lobby" or multiplayer.is_server():
