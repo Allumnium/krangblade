@@ -1210,7 +1210,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
     var here: int = int(ship["at"])
     var source: int = int(ship["source"])
     var dest: int = int(ship["dest"])
-    if source == here and dest >= 0 and teams[dest] == team:
+    if source == here and dest >= 0 and teams[here] == team and teams[dest] == team:
         # No reservations: actual arrival decides which surplus remains.
         var free: float = CARGO_CAPACITY - _cargo_total(ship)
         for resource in RESOURCES:
@@ -1229,7 +1229,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
     elif source >= 0:
         ship["source"] = -1
         ship["dest"] = -1
-    if int(ship["dest"]) == here and _cargo_total(ship) > EPS:
+    if int(ship["dest"]) == here and teams[here] == team and _cargo_total(ship) > EPS:
         for resource in RESOURCES:
             var amount: float = minf(float(ship["cargo"][resource]), _need(planets[here], resource))
             ship["cargo"][resource] = float(ship["cargo"][resource]) - amount
@@ -1484,10 +1484,15 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
     ship["dest"] = here
 
 static func military_home(state: Dictionary, player: int) -> int:
+    var fallback: int = -1
     for i in range((state["planets"] as Array).size()):
-        if int(state["planets"][i]["owner"]) == player and bool(state["planets"][i]["home"]):
+        if int(state["planets"][i]["owner"]) != player:
+            continue
+        if bool(state["planets"][i]["home"]):
             return i
-    return -1
+        if fallback < 0:
+            fallback = i
+    return fallback
 
 # Exact integer percentages / hull counts via largest remainder, stable tie order.
 static func _apportion(keys: Array, weights: Dictionary, total: int) -> Dictionary:
@@ -2725,6 +2730,90 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
                 targets[int(group[i]["id"])] = anchor + formation
     return targets
 
+# Prototype conquest: only an active invasion can transfer a colony.
+# Surviving shipyards and nearby hostile fighters prevent occupation.
+const CAPTURE_YEARS: float = 20.0
+
+static func _invasion_objectives(state: Dictionary, player: int) -> Dictionary:
+    var objectives: Dictionary = {}
+    for entry in state.get("policies", {}).get(player, {}).values():
+        if entry.get("card", "") != "invasion" or not policy_active(state, entry):
+            continue
+        var zones: Array = entry.get("zones", [{"targets": entry.get("targets", []), "weight": entry.get("weight", 0)}])
+        for zone in zones:
+            var shares: Dictionary = policy_zone_shares(zone["targets"], int(zone["weight"]))
+            for node in shares:
+                if int(shares[node]) > 0:
+                    objectives[node] = true
+    return objectives
+
+static func _capture_system(state: Dictionary, index: int, player: int) -> void:
+    var planet: Dictionary = state["planets"][index]
+    var former: int = int(planet["owner"])
+    # Refund surviving unfinished work to the local colony before transfer;
+    # completed infrastructure and population stay with the system.
+    for job in planet["queue"].duplicate():
+        cancel(state, former, index, int(job["id"]))
+    planet["continuous"].clear()
+    planet["maintain"] = {}
+    planet["repeat_cycle"] = {}
+    planet["pds"].clear()
+    planet["home"] = false
+    planet["owner"] = player
+    planet["capture"] = {}
+
+static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> void:
+    var planets: Array = state["planets"]
+    var points: Array = graph["points"]
+    var objectives: Dictionary = {}
+    var occupiers: Dictionary = {}
+    var fighters: Array = []
+    for ship in state["ships"]:
+        if ship.get("kind", "") != "fighter" or bool(ship.get("retreating", false)):
+            continue
+        fighters.append(ship)
+        var player: int = int(ship["owner"])
+        if not objectives.has(player):
+            objectives[player] = _invasion_objectives(state, player)
+        var node: int = int(ship["at"])
+        if node < 0 or node >= planets.size() or not objectives[player].has(node) or not (ship["route"] as Array).is_empty() or int(ship.get("operation_target", ship.get("dest", -1))) != node:
+            continue
+        if combat_position(state, graph, ship).distance_to(points[node]) > AI_RALLY_RADIUS:
+            continue
+        var owner: int = int(planets[node]["owner"])
+        if owner == 0 or state["teams"].get(owner, 0) == state["teams"].get(player, 0):
+            continue
+        if not occupiers.has(node):
+            occupiers[node] = {}
+        occupiers[node][player] = int(occupiers[node].get(player, 0)) + 1
+    for node in range(planets.size()):
+        var planet: Dictionary = planets[node]
+        if not occupiers.has(node) or not (planet["yards"] as Array).is_empty():
+            if planet.has("capture"):
+                planet.erase("capture")
+            continue
+        var candidates: Dictionary = occupiers[node]
+        var winner: int = -1
+        for player in candidates:
+            if winner < 0 or int(candidates[player]) > int(candidates[winner]) or (int(candidates[player]) == int(candidates[winner]) and int(player) < winner):
+                winner = int(player)
+        var team: int = int(state["teams"].get(winner, 0))
+        var contested: bool = false
+        for ship in fighters:
+            if int(state["teams"].get(int(ship["owner"]), 0)) != team and combat_position(state, graph, ship).distance_to(points[node]) <= LASER_RANGE:
+                contested = true
+                break
+        if contested:
+            planet.erase("capture")
+            continue
+        var progress: Dictionary = planet.get("capture", {})
+        var held: float = float(progress.get("held", 0.0)) if int(progress.get("player", -1)) == winner else 0.0
+        held += dt
+        if held + EPS >= CAPTURE_YEARS:
+            _capture_system(state, node, winner)
+        else:
+            planet["capture"] = {"player": winner, "held": held}
+
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
     for player in state.get("policies", {}):
@@ -2809,6 +2898,7 @@ static func step(state: Dictionary, dt: float) -> void:
         # work idle and did not already move this tick.
         if idle_targets.has(ship_id) and _is_idle_ship(ship) and not coordinated.has(ship_id) and ship["position"] == initial_position:
             _navigate(ship, idle_targets[ship_id], SHIP_SPEED * dt)
+    _step_conquest(state, combat_graph, dt)
     _sync_operations(state)
     update_exploration(state)
 

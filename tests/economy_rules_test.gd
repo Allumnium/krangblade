@@ -31,6 +31,7 @@ func _initialize() -> void:
     _test_neutral_policy_occupation()
     _test_idle_formations()
     _test_ai_defensive_policies()
+    _test_conquest()
     _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -1688,3 +1689,35 @@ func _test_ai_defensive_policies() -> void:
     assert(float(policies["offense"]["ready_at"]) == ready_at)
     assert(not state["ai_waves"].has(2))
     print("PASS: AI shared regional policies, threat response, fleet budget, stable warmup and recovery")
+
+func _test_conquest() -> void:
+    var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+    var graph: Dictionary = ECON.military_graph(state)
+    var planet: Dictionary = state["planets"][1]
+    var attacker: Dictionary = {"id": 9900, "owner": 1, "kind": "fighter", "at": 1, "dest": 1, "operation_target": 1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP}
+    state["ships"] = [attacker]
+    assert(ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [1], "weight": 100}], []))
+    ECON._step_conquest(state, graph, 20.0)
+    assert(not planet.has("capture"))
+    state["elapsed"] = 20.0
+    ECON._step_conquest(state, graph, 20.0)
+    assert(not planet.has("capture"))
+    planet["yards"].clear()
+    ECON._step_conquest(state, graph, 10.0)
+    assert(float(planet["capture"]["held"]) == 10.0)
+    var defender: Dictionary = {"id": 9901, "owner": 2, "kind": "fighter", "at": 1, "dest": 1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP}
+    state["ships"].append(defender)
+    ECON._step_conquest(state, graph, 10.0)
+    assert(not planet.has("capture") and int(planet["owner"]) == 2)
+    state["ships"].erase(defender)
+    ECON._step_conquest(state, graph, 19.0)
+    assert(int(planet["owner"]) == 2)
+    var stock: Dictionary = planet["stock"].duplicate()
+    var population: float = float(planet["population"])
+    ECON._step_conquest(state, graph, 1.0)
+    assert(int(planet["owner"]) == 1 and planet["stock"] == stock and float(planet["population"]) == population)
+    assert(not planet["home"] and ECON.military_home(state, 1) == 0)
+    assert(not ECON.set_thresholds(state, 2, 1, "Metals", 10.0, 20.0))
+    assert(ECON.set_thresholds(state, 1, 1, "Metals", 10.0, 20.0))
+    assert(int(bytes_to_var(var_to_bytes(state))["planets"][1]["owner"]) == 1)
+    print("PASS: invasion warmup, resistance, interrupted capture, ownership and authority transfer")
