@@ -3582,6 +3582,11 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 		var axis: Vector2 = Vector2.from_angle(angle)
 		var side: Vector2 = axis.orthogonal()
 		var point: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
+		if scale < 0.15:
+			map_canvas.draw_rect(Rect2(point - Vector2.ONE, Vector2(2.0, 2.0)), tint.lightened(0.25))
+			if selected == index and selected_yard == slot:
+				map_canvas.draw_arc(point, 9.0, 0.0, TAU, 32, HUD.ACCENT, 1.5, true)
+			continue
 		var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
 		var frame: PackedVector2Array = PackedVector2Array([point - axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale + side * 17.0 * scale, point - axis * 11.0 * scale + side * 17.0 * scale])
 		if conversion < 1.0:
@@ -3590,7 +3595,8 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			var original := PackedVector2Array([point + heading * 12.0 * scale, point + cross * 7.0 * scale, point - heading * 9.0 * scale, point - cross * 7.0 * scale])
 			for k in range(4):
 				frame[k] = original[k].lerp(frame[k], smoothstep(0.0, 1.0, conversion))
-			map_canvas.draw_colored_polygon(frame, Color(tint.lightened(0.35), 1.0 - conversion))
+			if not Geometry2D.triangulate_polygon(frame).is_empty():
+				map_canvas.draw_colored_polygon(frame, Color(tint.lightened(0.35), 1.0 - conversion))
 		if conversion < 1.0:
 			for k in range(4):
 				map_canvas.draw_line(frame[k], frame[(k + 1) % 4], tint, maxf(0.8, 2.0 * scale), true)
@@ -3640,7 +3646,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			var edges: int = mini(hull.size(), floori(u * 2.0 * hull.size()))
 			for k in range(edges):
 				map_canvas.draw_line(hull[k], hull[(k + 1) % hull.size()], tint.lightened(0.4), 1.5 * scale, true)
-			if u > 0.5:
+			if u > 0.5 and not Geometry2D.triangulate_polygon(hull).is_empty():
 				map_canvas.draw_colored_polygon(hull, Color(tint.lightened(0.4), (u - 0.5) * 2.0))
 			break
 
