@@ -189,3 +189,5 @@ Version 0.20.2: top-bar resource deltas now sum theoretical production minus ful
 Version 0.20.3: construction and upgrade recipes and nominal build times are always visible on collapsed cards. Ship estimates use the fastest operational eligible shipyard (level-one baseline when none is operational); actual queue and staffing delays are excluded. Immediate habitation and warehouse purchases show Instant.
 
 Version 0.20.4: remove unused runtime rolling-rate sampling and validate civilian path topology once per simulation substep. The Perf overlay reports the largest measured simulation stage; hover the Perf button for all stages. These timings are totals across the latest speed-scaled callback, not frame time or averaged FPS. No simulation timestep, economy rules, ship movement rules, or snapshot cadence changed.
+
+Version 0.20.6: construction cards show all icon costs (including crew) in a single compact row; build/upgrade durations appear inside the action buttons beside an analog clock icon. Exact material tonnage is retained in tooltips. Construction rules and duration estimates are unchanged.
