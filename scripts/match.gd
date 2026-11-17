@@ -1560,7 +1560,9 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 		var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 		var crew: float = float(p.get("crew_rate", 0.0))
 		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
-	var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Latest local flows (t/yr)"]
+	var potential: float = ECONOMY.rate(p, resource)
+	var demand: float = ECONOMY.consumption(p, resource)
+	var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Theoretical: %.2f production − %.2f demand = %+.2f t/yr" % [potential, demand, potential - demand], "Latest actual flows (t/yr)"]
 	var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
 	for category in p.get("flows", {}):
 		if not categories.has(category):
@@ -1843,9 +1845,12 @@ func _refresh() -> void:
 		bonus.text = "—" if percent == 100 else "%d%%" % (percent - 100) if percent < 100 else "+%d%%" % (percent - 100)
 		bonus.add_theme_color_override("font_color", HUD.ACCENT if percent > 100 else (Color("#e4a479") if percent < 100 else HUD.MUTED))
 		bonus.tooltip_text = "%.1f%% of baseline output" % (100.0 * ECONOMY.production_modifier(p, resource))
-		var annual: float = ECONOMY.net_rate(p, resource)
-		production_values[resource]["rate"].text = _tons(annual, 1, true)
-		production_values[resource]["rate"].tooltip_text = "Production %.2f t/yr · Consumption %.2f t/yr · Net %.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
+		var annual: float = ECONOMY.rate(p, resource) - ECONOMY.consumption(p, resource)
+		var displayed: float = 0.0 if absf(annual) < 0.05 else annual
+		var delta_label: Label = production_values[resource]["rate"]
+		delta_label.text = ("+" if displayed > 0.0 else "") + _tons(displayed, 1, true)
+		delta_label.add_theme_color_override("font_color", Color("#7cdb9b") if displayed > 0.0 else (Color("#eb8585") if displayed < 0.0 else Color.WHITE))
+		delta_label.tooltip_text = "Potential production %.2f t/yr · Demand %.2f t/yr · Theoretical net %+.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
 	var population: float = float(p["population"])
 	var raw: float = float(p["stock"].get(ECONOMY.ANTIMATTER, 0.0))
 	raw_antimatter_label.visible = raw > ECONOMY.EPS

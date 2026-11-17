@@ -181,3 +181,5 @@ v0.13.8: Solo roster defaults to four, unique selectable colors, add/remove AI, 
 
 
 v0.13.9: Multiple nearby system approaches to asteroid fields, physical arrival-only cargo delivery, live per-system resource hover with last-step actual production/consumption/construction/dock transfers; cargo and stored quantities separated. Population indicator no longer wraps. Access distance heuristic provisional.
+
+Version 0.20.1: selected-system resource rows show theoretical production less civilian demand per year, color-coded green/red/white. Local hover distinguishes this projection from actual latest-step production, consumption, delivery and spending. This is display-only; global rates and economy rules are unchanged.
