@@ -33,6 +33,7 @@ func _initialize() -> void:
     _test_ai_defensive_policies()
     _test_conquest()
     _test_conquest_resistance_and_evacuation()
+    _test_match_elimination()
     _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -1753,3 +1754,25 @@ func _test_conquest_resistance_and_evacuation() -> void:
     assert(before.distance_to(freighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
     assert((freighter["position"] as Vector2).x > before.x)
     print("PASS: planetary defense resistance and simultaneous destruction, safe cargo-preserving conquest reroute")
+
+func _test_match_elimination() -> void:
+    var state: Dictionary = ECON.create(MAP.generate(827, 3), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 2}}, [1, 2, 3], false)
+    state["planets"][1]["owner"] = 1
+    var colony: Dictionary = {"id": 11000, "kind": "colony_ship", "owner": 2, "at": 1, "route": [], "dest": -1}
+    state["ships"].append(colony)
+    assert(not ECON.update_match_outcome(state))
+    assert(not state.get("eliminated", []).has(2))
+    var target: int = 3
+    assert(not ECON.colony_path(state, 2, colony, target).is_empty())
+    assert(ECON.send_colony(state, 2, 11000, target))
+    state["ships"].erase(colony)
+    assert(ECON.update_match_outcome(state))
+    assert(state["eliminated"].has(2) and state.get("match_result", {}).is_empty())
+    state["planets"][2]["owner"] = 1
+    assert(ECON.update_match_outcome(state))
+    assert(state["match_result"]["team"] == 1 and int(state["time_speed"]) == 0)
+    assert(not ECON.update_match_outcome(state))
+    assert(bytes_to_var(var_to_bytes(state))["match_result"] == state["match_result"])
+    var solo: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
+    assert(not ECON.update_match_outcome(solo) and solo.get("match_result", {}).is_empty())
+    print("PASS: colony recovery, allied survival, elimination, conquest victory and sandbox")

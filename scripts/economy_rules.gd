@@ -330,7 +330,7 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
     var teams: Array[int] = planet_teams(state)
     var team: int = int(state["teams"].get(player, 0))
     var start: int = int(ship["at"])
-    if team == 0 or teams[start] != team:
+    if team == 0 or (teams[start] != team and military_home(state, player) >= 0):
         return []
     if not discovered(state, player, "planets", target):
         return []
@@ -2025,7 +2025,7 @@ static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, 
     var teams: Array[int] = planet_teams(state)
     var team: int = int(state["teams"].get(player, 0))
     var here: int = int(ship["at"])
-    if team == 0 or teams[here] != team:
+    if team == 0 or (teams[here] != team and military_home(state, player) >= 0):
         return -1
     var adjacency: Array = []
     for i in range(points.size()):
@@ -2063,6 +2063,18 @@ static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, 
 static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
     var home: int = military_home(state, player)
     if home < 0:
+        # A surviving colony hull can establish a new home even after the
+        # empire loses its last owned system.
+        var reserved: Dictionary = {}
+        for ship in state["ships"]:
+            if int(ship["owner"]) == player and ship.get("kind", "") == "colony_ship" and not (ship["route"] as Array).is_empty():
+                reserved[int(ship["dest"])] = true
+        for ship in state["ships"]:
+            if int(ship["owner"]) != player or ship.get("kind", "") != "colony_ship" or not (ship["route"] as Array).is_empty():
+                continue
+            var target: int = _ai_colony_target(state, player, ship, reserved)
+            if target >= 0 and send_colony(state, player, int(ship["id"]), target):
+                reserved[target] = true
         return
     var planets: Array = state["planets"]
     var team: int = int(state["teams"][player])
@@ -2909,6 +2921,58 @@ static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> v
             _capture_system(state, node, winner)
         else:
             planet["capture"] = {"player": winner, "held": held}
+
+# Match-only outcome evaluation, invoked by the authoritative session.
+# A colony ship permits recovery while a neutral system remains. Eliminate
+# only empires with neither a colony nor a viable colonization opportunity.
+# Teams win together; sandbox matches with one starting team never auto-end.
+static func update_match_outcome(state: Dictionary) -> bool:
+    if not state.get("match_result", {}).is_empty():
+        return false
+    var starting_teams: Dictionary = {}
+    for team in state["teams"].values():
+        starting_teams[team] = true
+    var viable: Dictionary = {}
+    var neutral_exists: bool = false
+    for planet in state["planets"]:
+        var owner: int = int(planet["owner"])
+        if owner == 0:
+            neutral_exists = true
+        else:
+            viable[owner] = true
+    if neutral_exists:
+        for ship in state["ships"]:
+            if ship.get("kind", "") == "colony_ship":
+                viable[int(ship["owner"])] = true
+    var eliminated: Array = state.get("eliminated", [])
+    var changed: bool = false
+    for player in state["teams"]:
+        if viable.has(player) or eliminated.has(player):
+            continue
+        eliminated.append(player)
+        changed = true
+        state["policies"][player].clear()
+        state["ai_waves"].erase(player)
+        state["ai_players"].erase(player)
+    state["eliminated"] = eliminated
+    if changed:
+        # Surviving non-colony hulls of defeated empires stand down.
+        for ship in state["ships"].duplicate():
+            if eliminated.has(int(ship["owner"])):
+                state["ships"].erase(ship)
+        _sync_operations(state)
+    if starting_teams.size() < 2:
+        return changed
+    var remaining_teams: Dictionary = {}
+    for player in viable:
+        if not eliminated.has(player) and state["teams"].has(player):
+            remaining_teams[state["teams"][player]] = true
+    if remaining_teams.size() <= 1:
+        var winner: int = int(remaining_teams.keys()[0]) if remaining_teams.size() == 1 else 0
+        state["match_result"] = {"team": winner, "reason": "conquest", "elapsed": float(state["elapsed"])}
+        state["time_speed"] = 0
+        changed = true
+    return changed
 
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
