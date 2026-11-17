@@ -2939,6 +2939,12 @@ func _draw_map() -> void:
         var tint: Color = _empire_color(int(state["planets"][i]["owner"]))
         _draw_system(i, state, pos, radius, tint)
         _draw_shipyards(state, i, tint, float(state["elapsed"]))
+        var capture: Dictionary = state["planets"][i].get("capture", {})
+        if not capture.is_empty():
+            var progress: float = clampf(float(capture["held"]) / ECONOMY.CAPTURE_YEARS, 0.0, 1.0)
+            var captor: Color = _empire_color(int(capture["player"]))
+            map_canvas.draw_arc(pos, radius + 12.0, -PI * 0.5, -PI * 0.5 + TAU * progress, 48, captor, 3.0, true)
+            map_canvas.draw_string(font, pos + Vector2(-60, radius + 26.0), "Capture %d%%" % roundi(progress * 100.0), HORIZONTAL_ALIGNMENT_CENTER, 120, 12, captor)
         if i == selected and bool(state["planets"][i]["home"]):
             map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
         if i == selected:

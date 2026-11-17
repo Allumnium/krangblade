@@ -271,3 +271,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.28: Idle groups use deterministic local V formations with a shared rotating anchor inside rally range. Membership can change on new orders or casualties; bounded movement rather than teleporting handles reassignment. Check visual cohesion and crowding with large stationed fleets.
 
 - v0.17.29: AI threat heuristic is deliberately simple: nearby hostile fighters trigger a prioritized owned-system guard order, with coarse fleet-size thresholds to preserve attack cohorts. Potential oscillation near the threat radius and distant colonies competing for protection need playtesting. Reweighting a stable objective preserves invasion warmup.
+
+- v0.17.30: Conquest changes local ownership, and civilian routes may already be in flight through newly hostile systems. Prevent hostile loading/unloading immediately; planned-route evacuation and rerouting, last-home recovery, and PDS resistance balance need review. Capture timing/coalition tie-break are provisional.
