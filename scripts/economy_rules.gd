@@ -1392,6 +1392,10 @@ static func _mining_depot(state: Dictionary, ship: Dictionary, teams: Array[int]
 	return chosen
 
 static func field_access_systems(map_data: Dictionary, field: Dictionary) -> Array[int]:
+	if field.has("access"):
+		var access: Array[int] = []
+		access.assign(field["access"])
+		return access
 	var points: Array = map_data["points"]
 	var center: Vector2 = field["position"]
 	var original: int = int(field["anchor"])
@@ -1400,6 +1404,8 @@ static func field_access_systems(map_data: Dictionary, field: Dictionary) -> Arr
 	for i in range(points.size()):
 		if i == original or center.distance_to(points[i]) <= reach + EPS:
 			result.append(i)
+	result.sort_custom(func(a: int, b: int) -> bool: return center.distance_squared_to(points[a]) < center.distance_squared_to(points[b]))
+	result.resize(mini(result.size(), MAP.MAX_CONNECTIONS))
 	return result
 
 static func command_miners(state: Dictionary, player: int, ids: Array, field_index: int, chunk_id: int = -1) -> bool:
@@ -1740,7 +1746,7 @@ static func military_graph(state: Dictionary) -> Dictionary:
 static func _field_positions(map_data: Dictionary) -> Array:
 	var result: Array = []
 	for field in map_data.get("fields", []):
-		result.append([field["position"], field["anchor"], field.get("radius", 0.0)])
+		result.append([field["position"], field["anchor"], field.get("radius", 0.0), field.get("access", [])])
 	return result
 
 static func military_pois(state: Dictionary, player: int) -> Array[int]:

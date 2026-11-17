@@ -28,6 +28,8 @@ class MapPreview:
 			var special: bool = bool(asteroid.get("antimatter", false))
 			var radius: float = maxf(4.0 if special else 2.0, float(asteroid["radius"]) * scale_factor)
 			var tint: Color = Color("#c295ff") if special else Color("#9b8566")
+			for anchor in asteroid.get("access", []):
+				draw_line(offset + points[anchor] * scale_factor, center, Color("#52677c"), 1.0, true)
 			draw_circle(center, radius, tint)
 			if special:
 				draw_arc(center, radius + 2.0, 0.0, TAU, 24, tint, 1.0, true)
@@ -574,7 +576,7 @@ func _map_layout_picker() -> OptionButton:
 	for layout in MAP.LAYOUTS:
 		picker.add_item(layout)
 	picker.select(0)
-	picker.tooltip_text = "Radial: connected outer and inner rings, inward spokes, central antimatter. Grid: lattice clusters. Hex Grid: small honeycomb cells between individual systems. Scramble: irregular clusters. All layouts keep antimatter away from starting systems."
+	picker.tooltip_text = "Radial: connected outer and inner rings, inward spokes, central antimatter. Grid: lattice clusters. Hex Grid: small hex cells in separated clusters. Scramble: irregular clusters. All layouts keep antimatter away from starting systems."
 	return picker
 
 func _refresh_roster() -> void:
