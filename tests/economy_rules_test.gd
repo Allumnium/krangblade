@@ -30,6 +30,7 @@ func _initialize() -> void:
     _test_lasso_small_fleet()
     _test_neutral_policy_occupation()
     _test_idle_formations()
+    _test_ai_defensive_policies()
     _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -1656,3 +1657,34 @@ func _test_idle_formations() -> void:
     for i in range(3):
         assert(int(squad[i]["dest"]) == objective and not (squad[i]["route"] as Array).is_empty())
     print("PASS: authoritative idle formations wander, preserve bounds and resume policy navigation")
+
+func _test_ai_defensive_policies() -> void:
+    var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
+    var graph: Dictionary = ECON.military_graph(state)
+    var owned: Array[int] = [1]
+    var fighters: Array = []
+    for i in range(8):
+        fighters.append({"id": 9700 + i, "owner": 2, "kind": "fighter", "at": 1, "dest": 1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP})
+    state["ships"] = fighters.duplicate()
+    ECON._ai_military_policies(state, graph, 2, 1, owned, fighters)
+    var policies: Dictionary = state["policies"][2]
+    assert(ECON.policy_allocation(policies["offense"]) == 75)
+    assert(ECON.policy_allocation(policies["defense"]) == 25)
+    var ready_at: float = float(policies["offense"]["ready_at"])
+    state["elapsed"] = ready_at
+    assert(ECON.policy_fleet_weights(state, 2) == {0: 75, 1: 25})
+    var intruder: Dictionary = {"id": 9800, "owner": 1, "kind": "fighter", "at": 1, "dest": 1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP}
+    state["ships"].append(intruder)
+    ECON._ai_military_policies(state, graph, 2, 1, owned, fighters)
+    assert(ECON.policy_fleet_weights(state, 2) == {0: 40, 1: 60})
+    assert(float(policies["offense"]["ready_at"]) == ready_at)
+    var small: Array = fighters.slice(0, 2)
+    ECON._ai_military_policies(state, graph, 2, 1, owned, small)
+    assert(ECON.policy_fleet_weights(state, 2).get(1) == 100)
+    assert(float(policies["offense"]["ready_at"]) == ready_at)
+    state["ships"].erase(intruder)
+    ECON._ai_military_policies(state, graph, 2, 1, owned, fighters)
+    assert(ECON.policy_fleet_weights(state, 2) == {0: 75, 1: 25})
+    assert(float(policies["offense"]["ready_at"]) == ready_at)
+    assert(not state["ai_waves"].has(2))
+    print("PASS: AI shared regional policies, threat response, fleet budget, stable warmup and recovery")

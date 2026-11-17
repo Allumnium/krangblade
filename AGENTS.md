@@ -129,3 +129,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - Construction cards use inline vertical progress and no disclosure caret; cancel precedes build/upgrade. Economy repeat toggles use authoritative continuous orders and existing costs/population gates.
 
 - Policy cards use fixed bottom-edge slots, Change modal with drag/drop, right contextual inspector and colored target flags; time controls moved upper right. The legacy military allocation lens is removed; players allocate fighters through policy cards. Keep the logistics lens. Warmup only, no cooldown.
+
+- AI uses the same committed Invasion and Guard zones as humans. Provisional weights: 25% home guard when at least four fighters are available, 60% guard at the most threatened owned system during attacks with at least seven fighters, otherwise commit the small fleet to defense while threatened. Retain attack targets through weight changes and rally AI invasion cohorts of three. No conquest or technology changes in this milestone.
