@@ -27,6 +27,7 @@ func _initialize() -> void:
     _test_policy_cards()
     _test_policy_zone_commitments()
     _test_policy_zone_fleet_dispatch()
+    _test_lasso_small_fleet()
     _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -1485,7 +1486,9 @@ func _test_policy_zone_commitments() -> void:
     assert(ECON.policy_fleet_weights(state, 1).is_empty())
     var invasion: Array = [{"targets": [1], "weight": 35}]
     assert(not ECON.commit_military_policy(state, 1, "offense", "invasion", [], []))
-    assert(not ECON.commit_military_policy(state, 2, "offense", "invasion", invasion, []))
+    assert(not ECON.commit_military_policy(state, 2, "offense", "invasion", [{"targets": [-1], "weight": 35}], []))
+    assert(ECON.policy_zone_target_valid(state, 2, "invasion", 1))
+    assert(not ECON.policy_target_valid(state, 2, "invasion", 1))
     assert(ECON.commit_military_policy(state, 1, "offense", "invasion", invasion, []))
     var entry: Dictionary = state["policies"][1]["offense"]
     assert(ECON.policy_allocation(entry) == 35)
@@ -1558,3 +1561,29 @@ func _test_policy_zone_fleet_dispatch() -> void:
     bot_state["elapsed"] = ready_at
     assert(ECON.policy_fleet_weights(bot_state, 2) == {0: 100})
     print("PASS: painted policy warmup, fleet quotas, cohort dispatch, zone cap, reserve and AI commitment")
+
+func _test_lasso_small_fleet() -> void:
+    var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+    var graph: Dictionary = ECON.military_graph(state)
+    var fleet: Array = state["ships"]
+    var field_node: int = (state["planets"] as Array).size()
+    for i in range(2):
+        fleet.append({"id": 9300 + i, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": graph["points"][0], "dest": 0, "hp": ECON.SHIP_HP})
+    var zones: Array = [{"targets": [1, field_node], "weight": 100}]
+    assert(ECON.commit_military_policy(state, 1, "offense", "invasion", zones, []))
+    assert(ECON.policy_zone_shares([1, field_node], 100) == {1: 50, field_node: 50})
+    assert(not ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [graph["points"].size()], "weight": 100}], []))
+    assert(not ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [1, field_node], "weight": 60}, {"targets": [field_node], "weight": 40}], []))
+    state["elapsed"] = 20.0
+    ECON._allocate_fighters(state, graph, 1, fleet, true)
+    ECON._sync_operations(state)
+    ECON._dispatch_operations(state, graph)
+    assert(state["operations"]["1:allocation:1"]["deployed"].size() == 1)
+    assert(state["operations"]["1:allocation:%d" % field_node]["members"].size() == 1)
+    for craft in fleet:
+        assert(craft["dest"] == craft["operation_target"] and not craft["route"].is_empty())
+    ECON.step(state, 0.1)
+    assert(state["policies"][1]["offense"]["targets"].has(field_node))
+    for craft in fleet:
+        assert(craft["dest"] == craft["operation_target"])
+    print("PASS: lasso mixed POIs and small invasion allocations deploy without minimum-three deadlock")
