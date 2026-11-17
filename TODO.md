@@ -183,3 +183,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.16: World-space policy brush shader projection now uses the map's inverse projection on every zoom change; validate zoom anchoring visually.
 
 - v0.17.24: Human painted-zone commitments and eligible AI system invasions use the shared fleet allocation/cohort dispatcher. Authoritative maximum five zones, locked committed weights, explicit voids remove only the chosen policy on acceptance, warmup holds forces at home, and unused allocation remains reserve. Add fleet counts to the existing inspector and actual zone RPC coverage to the ENet tests. Legacy AI pursuit of hostile ships outside eligible systems is retained; AI defensive policy selection and manual gameplay/visual validation remain outstanding. Multiplayer AI empire IDs are positive and outside the ENet ID space; bots remain ready when teams change.
+
+- v0.17.25: Fix stale zone label indices during erasure by caching world-space label positions, hiding labels while erasing, and finalizing drags released outside the map. Manually verify erasing the last zone, drawing again, and clearing one of multiple zones.
