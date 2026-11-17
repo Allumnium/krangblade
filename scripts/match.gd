@@ -1408,6 +1408,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Collecting salvage" if bool(ship.get("tractor_active", false)) else "Approaching salvage"
 	elif bool(ship.get("salvage_delivery", false)):
 		status = "Delivering salvage" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for salvage storage"
+	elif int(ship.get("auto_salvage_target", -1)) >= 0:
+		status += " · Salvaging" if bool(ship.get("tractor_active", false)) else " · Approaching debris"
 	ship_detail.text = "%s\n%s\nHP %.0f / %.0f" % [str(roster.get(owner, {}).get("name", "Player")), status, float(ship.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
 	ship_detail.tooltip_text = ""
 	ship_cargo.get_parent().show()
@@ -1440,7 +1442,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		fleet_detail.text += "\n%d owned · %d foreign" % [owned_count, selected_units.size() - owned_count]
 	fleet_detail.tooltip_text = "Foreign ships are read-only. Commands affect only your own ships. Ctrl+1–9 assigns a selection group, 1–9 recalls it."
 	if owned_count > 0:
-		fleet_detail.tooltip_text += " Right-click a hostile ship to focus attack, or a sector to attack-move. Shift-right-click a sector to patrol. Right-click floating salvage to claim; U unloads cargo. Right-click empty space to position and hold; Alt-right-click forces a local position. H holds/releases."
+		fleet_detail.tooltip_text += " Right-click a hostile ship to focus attack, or a sector to attack-move. Shift-right-click a sector to patrol. Ships collect nearby salvage when safe; right-click to claim manually; U unloads cargo. Right-click empty space to position and hold; Alt-right-click forces a local position. H holds/releases."
 	fleet_cargo.get_parent().show()
 	fleet_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total({"cargo": cargo}), capacity]
 	if fleet_cargo.get_parent().visible:
@@ -3697,7 +3699,8 @@ func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2,
 			elif selected_units.has(claimant):
 				map_canvas.draw_line(poses[claimant]["point"], point, Color(color, 0.45), 1.0, true)
 		if int(pile["id"]) == hovered:
-			map_canvas.draw_string(font, point + Vector2(9, -9), "%s · %.1f t%s" % [pile["resource"], float(pile["amount"]), " · Claimed" if claimant >= 0 else ""], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint.lightened(0.35))
+			var remaining: float = maxf(0.0, float(pile.get("expires_at", float(pile["born"]) + ECONOMY.SALVAGE_MAX_LIFETIME)) - float(state["elapsed"]))
+			map_canvas.draw_string(font, point + Vector2(9, -9), "%s · %.1f t · %ds%s" % [pile["resource"], float(pile["amount"]), ceili(remaining), " · Claimed" if claimant >= 0 else ""], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint.lightened(0.35))
 
 # All bays represent equal tonnage, with partial, resource-colored fills.
 # Smaller combat holds get fewer bays, larger mining holds get more.

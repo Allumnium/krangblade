@@ -56,6 +56,9 @@ const TRACTOR_RANGE: float = 90.0
 const TRACTOR_RATE: float = 12.0
 const SALVAGE_CHANCE: float = 0.75
 const SALVAGE_FRACTION: float = 0.20
+const SALVAGE_MIN_LIFETIME: float = 90.0
+const SALVAGE_MAX_LIFETIME: float = 120.0
+const SALVAGE_APPROACH_RANGE: float = TRACTOR_RANGE * 2.0
 const MINER_RATE: float = 6.0
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const SHIP_SIZE: int = 1
@@ -2421,6 +2424,8 @@ static func _record_ship_destruction(state: Dictionary, graph: Dictionary, ship:
 static func _drop_salvage(state: Dictionary, ship: Dictionary, position: Vector2, sequence: int) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(state["map"].get("seed", 0)) + sequence * 104729
+	var decay_rng := RandomNumberGenerator.new()
+	decay_rng.seed = int(state["map"].get("seed", 0)) + sequence * 15485863 + 32452843
 	var recipe: Dictionary = _cost(str(ship["kind"]), 1)
 	var cargo: Dictionary = ship.get("cargo", {})
 	var piles: Dictionary = state.get("salvage", {})
@@ -2434,7 +2439,8 @@ static func _drop_salvage(state: Dictionary, ship: Dictionary, position: Vector2
 		state["next_salvage_id"] = id + 1
 		var angle: float = rng.randf_range(0.0, TAU)
 		var origin: Vector2 = position + Vector2.from_angle(angle) * rng.randf_range(10.0, 36.0)
-		piles[id] = {"id": id, "resource": resource, "amount": tons, "origin": origin, "position": origin, "drift": Vector2.from_angle(angle + PI * 0.5) * rng.randf_range(4.0, 10.0), "born": float(state["elapsed"]), "claim": -1}
+		var born: float = float(state["elapsed"])
+		piles[id] = {"id": id, "resource": resource, "amount": tons, "origin": origin, "position": origin, "drift": Vector2.from_angle(angle + PI * 0.5) * rng.randf_range(4.0, 10.0), "born": born, "expires_at": born + decay_rng.randf_range(SALVAGE_MIN_LIFETIME, SALVAGE_MAX_LIFETIME), "claim": -1}
 	state["salvage"] = piles
 
 static func _salvage_active(ship: Dictionary) -> bool:
@@ -2442,6 +2448,7 @@ static func _salvage_active(ship: Dictionary) -> bool:
 
 static func _cancel_salvage_order(ship: Dictionary) -> void:
 	ship.erase("salvage_target")
+	ship.erase("auto_salvage_target")
 	ship.erase("tractor_active")
 	if bool(ship.get("salvage_delivery", false)):
 		ship["route"] = []
@@ -2462,13 +2469,109 @@ static func _update_salvage(state: Dictionary) -> void:
 		return
 	var claims: Dictionary = {}
 	for ship in state["ships"]:
-		if int(ship.get("salvage_target", -1)) >= 0 and not bool(ship.get("retreating", false)):
-			claims[int(ship["id"])] = int(ship["salvage_target"])
-	for id in piles:
+		var target: int = int(ship.get("salvage_target", ship.get("auto_salvage_target", -1)))
+		if target >= 0 and not bool(ship.get("retreating", false)):
+			claims[int(ship["id"])] = target
+	var elapsed: float = float(state["elapsed"])
+	for id in piles.keys():
 		var pile: Dictionary = piles[id]
+		if elapsed >= float(pile.get("expires_at", float(pile["born"]) + SALVAGE_MAX_LIFETIME)):
+			piles.erase(id)
+			continue
 		if claims.get(int(pile["claim"]), -1) != int(id):
 			pile["claim"] = -1
-		pile["position"] = (pile["origin"] as Vector2) + (pile["drift"] as Vector2) * sin(maxf(0.0, float(state["elapsed"]) - float(pile["born"])) * 0.2)
+		pile["position"] = (pile["origin"] as Vector2) + (pile["drift"] as Vector2) * sin(maxf(0.0, elapsed - float(pile["born"])) * 0.2)
+
+static func _salvage_combat_busy(state: Dictionary) -> Dictionary:
+	var busy: Dictionary = {}
+	for craft in state["ships"]:
+		if bool(craft.get("retreating", false)) or _engaged(craft) or int(craft.get("yard_target", -1)) < -1:
+			busy[int(craft["id"])] = true
+		for key in ["combat_target", "pursuit_target"]:
+			var target: int = int(craft.get(key, -1))
+			if target >= 0:
+				busy[target] = true
+	for system in state["planets"]:
+		for battery in system.get("pds", {}).values():
+			var target: int = int(battery.get("target", -1))
+			if target >= 0:
+				busy[target] = true
+	return busy
+
+static func _salvage_cells(piles: Dictionary) -> Dictionary:
+	var cells: Dictionary = {}
+	for id in piles:
+		var point: Vector2 = piles[id]["position"]
+		var cell := Vector2i(floori(point.x / SALVAGE_APPROACH_RANGE), floori(point.y / SALVAGE_APPROACH_RANGE))
+		if not cells.has(cell):
+			cells[cell] = []
+		cells[cell].append(id)
+	return cells
+
+static func _release_auto_salvage(ship: Dictionary, piles: Dictionary) -> void:
+	var id: int = int(ship.get("auto_salvage_target", -1))
+	if id < 0:
+		return
+	if piles.has(id) and int(piles[id]["claim"]) == int(ship["id"]):
+		piles[id]["claim"] = -1
+	ship.erase("auto_salvage_target")
+	ship.erase("tractor_active")
+
+# Combat and existing orders always take precedence. An idle craft can make
+# a short sector-local detour; a working/held/transiting craft may tractor
+# only resources within beam range without changing its route or hold.
+static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, busy: Dictionary, cells: Dictionary, coordinated: bool) -> bool:
+	var piles: Dictionary = state.get("salvage", {})
+	_release_auto_salvage(ship, piles)
+	if piles.is_empty() or _salvage_active(ship) or busy.has(int(ship["id"])) or cargo_free(ship) <= EPS:
+		return false
+	var pos: Vector2 = ship["position"]
+	var idle: bool = not coordinated and _is_idle_ship(ship) and not ship.has("attack_order") and not ship.has("patrol_from")
+	var limit: float = SALVAGE_APPROACH_RANGE if idle else TRACTOR_RANGE
+	var nearest: float = limit * limit + EPS
+	var best: int = -1
+	var cell := Vector2i(floori(pos.x / SALVAGE_APPROACH_RANGE), floori(pos.y / SALVAGE_APPROACH_RANGE))
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			for candidate in cells.get(cell + Vector2i(x, y), []):
+				if not piles.has(candidate) or int(piles[candidate]["claim"]) >= 0:
+					continue
+				var point: Vector2 = piles[candidate]["position"]
+				var distance: float = pos.distance_squared_to(point)
+				if distance > nearest or (is_equal_approx(distance, nearest) and best >= 0 and int(candidate) > best):
+					continue
+				if not _salvage_reachable(graph, ship, point):
+					continue
+				best = int(candidate)
+				nearest = distance
+	if best < 0:
+		return false
+	var pile: Dictionary = piles[best]
+	pile["claim"] = int(ship["id"])
+	ship["auto_salvage_target"] = best
+	var point: Vector2 = pile["position"]
+	if pos.distance_to(point) > TRACTOR_RANGE:
+		_navigate(ship, point, minf(SHIP_SPEED * dt, pos.distance_to(point) - TRACTOR_RANGE * 0.85))
+		return true
+	_collect_salvage(ship, pile, dt)
+	if ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") == "idle" and (ship["route"] as Array).is_empty() and not bool(ship.get("holding", false)):
+		ship["mining_mode"] = "delivery"
+	if float(pile["amount"]) <= EPS or cargo_free(ship) <= EPS:
+		_release_auto_salvage(ship, piles)
+		if float(pile["amount"]) <= EPS:
+			piles.erase(best)
+	return false
+
+static func _collect_salvage(ship: Dictionary, pile: Dictionary, dt: float) -> void:
+	var amount: float = minf(cargo_free(ship), minf(float(pile["amount"]), TRACTOR_RATE * dt))
+	if amount <= EPS:
+		return
+	if not ship.has("cargo"):
+		ship["cargo"] = empty_stock()
+	var resource: String = pile["resource"]
+	ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
+	pile["amount"] -= amount
+	ship["tractor_active"] = true
 
 static func _salvage_reachable(graph: Dictionary, ship: Dictionary, point: Vector2) -> bool:
 	var pos: Vector2 = ship.get("position", Vector2.INF)
@@ -2487,6 +2590,8 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 	if units.is_empty() or not piles.has(target):
 		return false
 	_update_salvage(state)
+	if not piles.has(target):
+		return false
 	var center: Vector2 = piles[target]["position"]
 	var graph: Dictionary = military_graph(state)
 	var options: Array = [target]
@@ -2497,7 +2602,13 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 	# The explicitly clicked resource is always considered first.
 	for id in options:
 		var pile: Dictionary = piles[id]
+		var automatic: Dictionary = {}
 		if int(pile["claim"]) >= 0:
+			for craft in state["ships"]:
+				if int(craft["id"]) == int(pile["claim"]) and int(craft.get("auto_salvage_target", -1)) == int(id) and int(craft["owner"]) == player:
+					automatic = craft
+					break
+		if int(pile["claim"]) >= 0 and automatic.is_empty():
 			continue
 		var best: Dictionary = {}
 		var distance: float = INF
@@ -2511,9 +2622,12 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		if best.is_empty():
 			continue
 		units.erase(best)
+		if not automatic.is_empty():
+			_release_auto_salvage(automatic, piles)
 		var old: int = int(best.get("salvage_target", -1))
 		if piles.has(old) and int(piles[old]["claim"]) == int(best["id"]):
 			piles[old]["claim"] = -1
+		_release_auto_salvage(best, piles)
 		_cancel_salvage_order(best)
 		_clear_tactical_order(best)
 		_clear_local_hold(best)
@@ -2594,7 +2708,7 @@ static func _salvage_depot_route(state: Dictionary, graph: Dictionary, ship: Dic
 		ship["field"] = -1
 	return true
 
-static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, busy: bool = false) -> bool:
 	if not _salvage_active(ship):
 		return false
 	ship["tractor_active"] = false
@@ -2611,20 +2725,15 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 			ship.erase("salvage_target")
 			if _cargo_total(ship) > EPS:
 				ship["salvage_delivery"] = true
-			return true
+			return not busy
+		if busy:
+			return false
 		var point: Vector2 = pile["position"]
 		var pos: Vector2 = ship["position"]
 		if pos.distance_to(point) > TRACTOR_RANGE:
 			_navigate(ship, point, minf(SHIP_SPEED * dt, pos.distance_to(point) - TRACTOR_RANGE * 0.85))
 			return true
-		var amount: float = minf(cargo_free(ship), minf(float(pile["amount"]), TRACTOR_RATE * dt))
-		if amount > EPS:
-			if not ship.has("cargo"):
-				ship["cargo"] = empty_stock()
-			var resource: String = pile["resource"]
-			ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
-			pile["amount"] -= amount
-			ship["tractor_active"] = true
+		_collect_salvage(ship, pile, dt)
 		if float(pile["amount"]) <= EPS or cargo_free(ship) <= EPS:
 			pile["claim"] = -1
 			if float(pile["amount"]) <= EPS:
@@ -2648,6 +2757,8 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 			ship["salvage_delivery"] = _cargo_total(ship) > EPS
 		return true
 	# Deliver physically to an owned warehouse, respecting storage limits.
+	if busy and ship.get("kind", "") == "fighter":
+		return false
 	if _cargo_total(ship) <= EPS:
 		_cancel_salvage_order(ship)
 		return false
@@ -3928,6 +4039,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_combat(state, combat_graph, dt)
 	_prepare_withdrawals(state, combat_graph)
 	_update_salvage(state)
+	var salvage_busy: Dictionary = _salvage_combat_busy(state)
+	var salvage_cells: Dictionary = _salvage_cells(state.get("salvage", {}))
 	started = _profile_stage(profile, "Combat / repair", started)
 	var fleets: Dictionary = {}
 	for craft in state["ships"]:
@@ -3956,7 +4069,10 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var civilian_usec: int = 0
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
-		if _work_salvage(state, combat_graph, ship, dt):
+		var salvage_ship_id: int = int(ship["id"])
+		if _work_salvage(state, combat_graph, ship, dt, salvage_busy.has(salvage_ship_id)):
+			continue
+		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id)):
 			continue
 		if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
 			_work_local_hold(combat_graph, ship, dt)
