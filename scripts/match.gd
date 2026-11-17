@@ -92,6 +92,7 @@ var fleet_cargo: VBoxContainer
 var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
 var global_resource_labels: Dictionary = {}
+var global_resource_delta_labels: Dictionary = {}
 var global_resource_tiles: Dictionary = {}
 var resource_hover_panel: PanelContainer
 var resource_hover_label: Label
@@ -1428,6 +1429,12 @@ func _build_global_bar(stats: Container) -> void:
 		value.add_theme_color_override("font_color", HUD.COLORS[resource])
 		line.add_child(value)
 		global_resource_labels[resource] = value
+		var delta := _label("0.0t", 12)
+		delta.autowrap_mode = TextServer.AUTOWRAP_OFF
+		delta.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		delta.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		line.add_child(delta)
+		global_resource_delta_labels[resource] = delta
 		global_resource_tiles[resource] = tile
 		global_resource_fills[resource] = 0.0
 		var strip := Control.new()
@@ -1481,6 +1488,22 @@ func _tons(value: float, decimals: int = 1, compact: bool = false) -> String:
 	var number: String = "%.1f" % (value / scale) if scale > 1.0 or decimals == 1 else "%.0f" % value
 	return number + ("" if compact else " ") + unit
 
+func _theoretical_delta(p: Dictionary, resource: String) -> float:
+	return ECONOMY.rate(p, resource) - ECONOMY.consumption(p, resource)
+
+func _empire_theoretical_delta(state: Dictionary, resource: String) -> float:
+	var total: float = 0.0
+	for p in state.get("planets", []):
+		if int(p["owner"]) == _me():
+			total += _theoretical_delta(p, resource)
+	return total
+
+func _set_resource_delta(label: Label, annual: float, parentheses: bool = false) -> void:
+	var displayed: float = 0.0 if absf(annual) < 0.05 else annual
+	var amount: String = ("+" if displayed > 0.0 else "") + _tons(displayed, 1, true)
+	label.text = "(%s)" % amount if parentheses else amount
+	label.add_theme_color_override("font_color", Color("#7cdb9b") if displayed > 0.0 else (Color("#eb8585") if displayed < 0.0 else Color.WHITE))
+
 func _compact_amount(value: float) -> String:
 	if value >= 1000000000.0:
 		return "%.1fB" % (value / 1000000000.0)
@@ -1530,7 +1553,8 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
 	var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
 		"%.2f t in transit  /  %.0f t storage" % [float(totals["cargo"][resource]), float(totals["storage_reference"][resource])],
-		"Current local flows (t/yr)"]
+		"Theoretical empire net: %+.2f t/yr (production − demand)" % _empire_theoretical_delta(state, resource),
+		"Latest actual local flows (t/yr)"]
 	for i in range((state.get("planets", []) as Array).size()):
 		var p: Dictionary = state["planets"][i]
 		if int(p["owner"]) != _me():
@@ -1548,7 +1572,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 			var sign: float = -1.0 if category == "Population" or category == "Exports" or str(category).begins_with("Construction: ") else 1.0
 			net += sign * amount
 			parts.append("%+.2f %s" % [sign * amount, _flow_name(category)])
-		lines.append("%s  %+.2f" % [_system_name(i), net])
+		lines.append("%s  %+.2f theoretical · %+.2f actual" % [_system_name(i), _theoretical_delta(p, resource), net])
 		if not parts.is_empty():
 			lines.append("  " + " · ".join(parts))
 	if int(state.get("time_speed", 1)) == 0:
@@ -1560,7 +1584,9 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 		var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 		var crew: float = float(p.get("crew_rate", 0.0))
 		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
-	var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Latest local flows (t/yr)"]
+	var potential: float = ECONOMY.rate(p, resource)
+	var demand: float = ECONOMY.consumption(p, resource)
+	var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Theoretical: %.2f production − %.2f demand = %+.2f t/yr" % [potential, demand, potential - demand], "Latest actual flows (t/yr)"]
 	var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
 	for category in p.get("flows", {}):
 		if not categories.has(category):
@@ -1623,13 +1649,11 @@ func _refresh_global_bar(state: Dictionary) -> void:
 	year_label.text = "YEAR  %d" % ECONOMY.current_year(state)
 	year_label.tooltip_text = "One game year per simulation second"
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
-	var rates: Dictionary = state.get("resource_rates", {}).get(_me(), {})
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])
-		var rate: float = float(rates.get(resource, 0.0))
-		var magnitude: String = _tons(absf(rate), 1, true)
-		var rate_text: String = ("-" if rate < -0.05 else "+") + magnitude
-		global_resource_labels[resource].text = "%s (%s)" % [_tons(value, 0, true), rate_text]
+		var annual: float = _empire_theoretical_delta(state, resource)
+		global_resource_labels[resource].text = _tons(value, 0, true)
+		_set_resource_delta(global_resource_delta_labels[resource], annual, true)
 		var stored: float = float(totals["stock"][resource])
 		var reference: float = float(totals["storage_reference"][resource])
 		global_resource_fills[resource] = clampf(stored / reference, 0.0, 1.0) if reference > 0.0 else 0.0
@@ -1843,9 +1867,10 @@ func _refresh() -> void:
 		bonus.text = "—" if percent == 100 else "%d%%" % (percent - 100) if percent < 100 else "+%d%%" % (percent - 100)
 		bonus.add_theme_color_override("font_color", HUD.ACCENT if percent > 100 else (Color("#e4a479") if percent < 100 else HUD.MUTED))
 		bonus.tooltip_text = "%.1f%% of baseline output" % (100.0 * ECONOMY.production_modifier(p, resource))
-		var annual: float = ECONOMY.net_rate(p, resource)
-		production_values[resource]["rate"].text = _tons(annual, 1, true)
-		production_values[resource]["rate"].tooltip_text = "Production %.2f t/yr · Consumption %.2f t/yr · Net %.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
+		var annual: float = _theoretical_delta(p, resource)
+		var delta_label: Label = production_values[resource]["rate"]
+		_set_resource_delta(delta_label, annual)
+		delta_label.tooltip_text = "Potential production %.2f t/yr · Demand %.2f t/yr · Theoretical net %+.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
 	var population: float = float(p["population"])
 	var raw: float = float(p["stock"].get(ECONOMY.ANTIMATTER, 0.0))
 	raw_antimatter_label.visible = raw > ECONOMY.EPS
