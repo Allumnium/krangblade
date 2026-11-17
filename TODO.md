@@ -50,3 +50,5 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 See THOUGHTS.md for active observations and THOUGHTS_ARCHIVE.md for resolved or superseded history.
 
 - [ ] Playtest v0.24.2 compact variable-spacing galaxies across all layouts and roster sizes, especially initial mining access, travel pacing, smaller hulls at zoom levels, and automatic flat-price PDS construction/cancellation. Later expose map size as a setup parameter.
+
+- [ ] Visually inspect v0.24.3 fighter/miner/colony art at overview, selection and close zoom; check silhouette clarity, ownership outlines, small-size legibility and fleet-heavy render time.
