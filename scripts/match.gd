@@ -115,6 +115,9 @@ var system_owner_label: Label
 var ship_button: Button
 var leave: Button
 var match_menu: AcceptDialog
+var match_result_dialog: AcceptDialog
+var match_result_shown: bool = false
+var defeated_shown: bool = false
 var menu_exit: Button
 var build_cards: Dictionary = {}
 
@@ -282,6 +285,16 @@ func _build_ui() -> void:
     HUD.action(menu_exit, Color("#e9a276"))
     match_menu.custom_action.connect(_menu_action)
     _build_settings_menu()
+    match_result_dialog = AcceptDialog.new()
+    match_result_dialog.theme = theme
+    match_result_dialog.unresizable = true
+    match_result_dialog.ok_button_text = "Review map"
+    add_child(match_result_dialog)
+    match_result_dialog.add_button("Leave match", false, "leave")
+    match_result_dialog.custom_action.connect(func(action: StringName) -> void:
+        if action == &"leave":
+            match_result_dialog.hide()
+            _leave())
     inspector_panel = PanelContainer.new()
     add_child(inspector_panel)
     inspector_panel.anchor_left = 1.0
@@ -1212,7 +1225,7 @@ func _set_time_speed(speed: int) -> void:
 
 func _refresh_time_controls(state: Dictionary) -> void:
     var current: int = int(state.get("time_speed", 1))
-    var can_change: bool = str(session.get("phase")) == "match" and (bool(session.get("is_solo")) or multiplayer.is_server())
+    var can_change: bool = str(session.get("phase")) == "match" and state.get("match_result", {}).is_empty() and (bool(session.get("is_solo")) or multiplayer.is_server())
     for speed in time_buttons:
         var button: Button = time_buttons[speed]
         var active: bool = int(speed) == current
@@ -1803,6 +1816,7 @@ func _refresh() -> void:
     var state: Dictionary = _state()
     var phase: String = str(session.get("phase"))
     _refresh_global_bar(state)
+    _refresh_match_result(state)
     _refresh_time_controls(state)
     _refresh_policy_ui(state)
     if not policy_draft_card.is_empty():
@@ -2259,6 +2273,25 @@ func _audio_mute_changed(value: bool, channel: String) -> void:
     else:
         sfx_muted = value
     _save_settings()
+
+func _refresh_match_result(state: Dictionary) -> void:
+    if not is_instance_valid(match_result_dialog):
+        return
+    var result: Dictionary = state.get("match_result", {})
+    if not result.is_empty() and not match_result_shown:
+        match_result_shown = true
+        var team: int = int(result["team"])
+        var mine: int = int(state.get("teams", {}).get(_me(), 0))
+        match_result_dialog.title = "Draw" if team == 0 else ("Victory" if mine == team else "Defeat")
+        match_result_dialog.dialog_text = "No surviving teams." if team == 0 else "Team %d wins by conquest." % team
+        match_result_dialog.ok_button_text = "Review map"
+        match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
+    elif result.is_empty() and state.get("eliminated", []).has(_me()) and not defeated_shown:
+        defeated_shown = true
+        match_result_dialog.title = "Empire defeated"
+        match_result_dialog.dialog_text = "Your empire has no remaining colony or colony ship."
+        match_result_dialog.ok_button_text = "Observe match"
+        match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
 
 func _open_menu() -> void:
     drag_button = 0

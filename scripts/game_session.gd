@@ -487,6 +487,8 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
     snapshot_pending.clear()
     economy = ECONOMY.create(MAP.generate(map_seed, players.size()), players, RULES.ordered_peers(players))
     economy["time_speed"] = 1
+    economy["eliminated"] = []
+    economy["match_result"] = {}
     resource_history.clear()
     ECONOMY.sample_resource_rates(economy, resource_history)
     owners = ECONOMY.planet_teams(economy)
@@ -579,6 +581,9 @@ func _military_for(id: int, kind: String, node: int, percent: int) -> void:
         _publish_economy()
 
 func _active_player(id: int) -> bool:
+    return _match_peer(id) and economy.get("match_result", {}).is_empty() and not economy.get("eliminated", []).has(id)
+
+func _match_peer(id: int) -> bool:
     return phase == "match" and players.has(id) and (id == 1 or multiplayer.get_peers().has(id))
 
 func request_operation(index: int, kind: String, target: String = "") -> void:
@@ -688,7 +693,7 @@ func _mining_policy_for(id: int, index: int, enabled: bool, metals: bool, crysta
 func request_time_speed(speed: int) -> void:
     if phase != "match" or not (is_solo or multiplayer.is_server()):
         return
-    if not MATCH_SPEEDS.has(speed) or int(economy.get("time_speed", 1)) == speed:
+    if not economy.get("match_result", {}).is_empty() or not MATCH_SPEEDS.has(speed) or int(economy.get("time_speed", 1)) == speed:
         return
     economy["time_speed"] = speed
     _publish_economy()
@@ -708,6 +713,10 @@ func _economy_tick() -> void:
     for i in range(speed):
         ECONOMY.step(economy, SIM_STEP)
         ECONOMY.sample_resource_rates(economy, resource_history)
+        if ECONOMY.update_match_outcome(economy):
+            _publish_economy()
+            if not economy["match_result"].is_empty():
+                break
     diagnostic_sim_ms = float(Time.get_ticks_usec() - started) / 1000.0
     snapshot_elapsed += SIM_STEP
     if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
@@ -747,7 +756,7 @@ func _rpc_snapshot_ack(ack_round: int, revision: int) -> void:
     if not multiplayer.is_server() or phase != "match" or ack_round != round_id:
         return
     var id: int = multiplayer.get_remote_sender_id()
-    if _active_player(id) and int(snapshot_pending.get(id, -1)) == revision:
+    if _match_peer(id) and int(snapshot_pending.get(id, -1)) == revision:
         snapshot_pending.erase(id)
 
 @rpc("authority", "call_remote", "reliable", 1)
