@@ -2537,9 +2537,12 @@ func _map_input(event: InputEvent) -> void:
             if brush_button.button_index == MOUSE_BUTTON_LEFT or brush_button.button_index == MOUSE_BUTTON_RIGHT:
                 policy_brush_mode = (1 if brush_button.button_index == MOUSE_BUTTON_LEFT else -1) if brush_button.pressed else 0
                 if brush_button.pressed:
+                    policy_stroke_snapshot = policy_brush_strokes.duplicate()
+                    policy_stroke_weights = policy_zone_weights.duplicate()
                     policy_brush_last_point = brush_button.position
                     _paint_policy_brush(brush_button.position, policy_brush_mode)
                 else:
+                    _finish_policy_brush_stroke()
                     policy_brush_last_point = Vector2(INF, INF)
                 map_canvas.accept_event()
                 return
@@ -2552,12 +2555,13 @@ func _map_input(event: InputEvent) -> void:
             if policy_brush_mode != 0:
                 if policy_brush_last_point.x != INF:
                     var delta: Vector2 = event.position - policy_brush_last_point
-                    var segments: int = maxi(1, ceili(delta.length() / (policy_brush_radius * 0.4)))
+                    var segments: int = maxi(1, ceili(delta.length() / (policy_brush_radius * 0.85)))
                     for index in range(1, segments + 1):
                         _paint_policy_brush(policy_brush_last_point.lerp(event.position, float(index) / float(segments)), policy_brush_mode)
                 else:
                     _paint_policy_brush(event.position, policy_brush_mode)
                 policy_brush_last_point = event.position
+                _update_policy_zone_overlay()
         map_canvas.queue_redraw()
         map_canvas.accept_event()
         return
@@ -3145,8 +3149,12 @@ var policy_brush_size_label: Label
 var policy_brush_strokes: Array[Vector3] = []
 var policy_zone_overlay: ColorRect
 var policy_zone_material: ShaderMaterial
+var policy_brush_dirty: bool = true
 var policy_zone_groups: Array = []
-const POLICY_MAX_STAMPS: int = 128
+const POLICY_MAX_STAMPS: int = 256
+const POLICY_MAX_ZONES: int = 5
+var policy_stroke_snapshot: Array[Vector3] = []
+var policy_stroke_weights: Dictionary = {}
 var policy_brush_last_point: Vector2 = Vector2(INF, INF)
 var policy_painted: Dictionary = {}
 var policy_zone_weights: Dictionary = {}
@@ -3201,7 +3209,7 @@ func _build_policy_zone_overlay() -> void:
 shader_type canvas_item;
 render_mode unshaded;
 uniform int stamp_count = 0;
-uniform vec3 stamps[128];
+uniform vec3 stamps[256];
 uniform vec2 canvas_size = vec2(1.0);
 uniform vec2 world_center = vec2(0.0);
 uniform vec2 screen_center = vec2(0.0);
@@ -3213,7 +3221,7 @@ void fragment() {
     vec2 pixel = UV * canvas_size;
     vec2 world = world_center + (pixel - screen_center) / max(world_scale, 0.0001);
     float signed_distance = 100000.0;
-    for (int i = 0; i < 128; i++) {
+    for (int i = 0; i < 256; i++) {
         if (i >= stamp_count) { break; }
         signed_distance = min(signed_distance, length(world - stamps[i].xy) - stamps[i].z);
     }
@@ -3233,13 +3241,15 @@ func _update_policy_zone_overlay() -> void:
     policy_zone_overlay.visible = not policy_draft_card.is_empty() and not policy_brush_strokes.is_empty()
     if not policy_zone_overlay.visible:
         return
-    var stamps := PackedVector3Array()
-    for mark in policy_brush_strokes:
-        stamps.append(mark)
-    while stamps.size() < POLICY_MAX_STAMPS:
-        stamps.append(Vector3.ZERO)
-    policy_zone_material.set_shader_parameter("stamps", stamps)
-    policy_zone_material.set_shader_parameter("stamp_count", policy_brush_strokes.size())
+    if policy_brush_dirty:
+        var stamps := PackedVector3Array()
+        for mark in policy_brush_strokes:
+            stamps.append(mark)
+        while stamps.size() < POLICY_MAX_STAMPS:
+            stamps.append(Vector3.ZERO)
+        policy_zone_material.set_shader_parameter("stamps", stamps)
+        policy_zone_material.set_shader_parameter("stamp_count", policy_brush_strokes.size())
+        policy_brush_dirty = false
     policy_zone_material.set_shader_parameter("canvas_size", map_canvas.size)
     policy_zone_material.set_shader_parameter("world_center", _map_size() * 0.5)
     policy_zone_material.set_shader_parameter("screen_center", Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5 + pan)
@@ -3338,7 +3348,7 @@ func _build_policy_ui() -> void:
     editor_scroll.add_child(editor_body)
     policy_editor_card = _label("", 18)
     editor_body.add_child(policy_editor_card)
-    editor_body.add_child(_label("Left: paint   Right: erase", 13))
+    editor_body.add_child(_label("Left: paint   Right: erase · Maximum 5 zones", 13))
     var brush_row := HBoxContainer.new()
     editor_body.add_child(brush_row)
     policy_brush_size_label = _label("Brush size: 28", 13)
@@ -3452,6 +3462,9 @@ func _begin_policy_draft(slot: String, card: String) -> void:
     policy_brush_mode = 0
     policy_painted.clear()
     policy_brush_strokes.clear()
+    policy_brush_dirty = true
+    policy_stroke_snapshot.clear()
+    policy_stroke_weights.clear()
     policy_zone_groups.clear()
     policy_brush_last_point = Vector2(INF, INF)
     policy_zone_weights.clear()
@@ -3501,93 +3514,58 @@ func _cancel_policy_draft() -> void:
     _refresh()
     map_canvas.queue_redraw()
 
-# Keep a bounded GPU stamp buffer without ever locking the paint tool.
-# When full, combine the closest pair into their enclosing circle. This
-# preserves all previously painted area (with a small possible expansion).
-func _compact_policy_brush_strokes() -> void:
-    if policy_brush_strokes.size() < POLICY_MAX_STAMPS:
+# Rebuild allocations only once per drag, not for every interpolated stamp.
+# Reject an erase that splits the painted territory into more than five zones.
+func _finish_policy_brush_stroke() -> void:
+    if policy_brush_strokes == policy_stroke_snapshot:
         return
-    var first: int = 0
-    var second: int = 1
-    var best: float = INF
-    for i in range(policy_brush_strokes.size()):
-        var a: Vector3 = policy_brush_strokes[i]
-        for j in range(i + 1, policy_brush_strokes.size()):
-            var b: Vector3 = policy_brush_strokes[j]
-            var distance: float = Vector2(a.x, a.y).distance_to(Vector2(b.x, b.y))
-            var excess: float = maxf(0.0, distance - absf(a.z - b.z))
-            if excess < best:
-                best = excess
-                first = i
-                second = j
-                if is_zero_approx(best):
-                    break
-        if is_zero_approx(best):
-            break
-    var a: Vector3 = policy_brush_strokes[first]
-    var b: Vector3 = policy_brush_strokes[second]
-    var center_a := Vector2(a.x, a.y)
-    var center_b := Vector2(b.x, b.y)
-    var distance: float = center_a.distance_to(center_b)
-    var merged_center: Vector2
-    var merged_radius: float
-    if a.z >= distance + b.z:
-        merged_center = center_a
-        merged_radius = a.z
-    elif b.z >= distance + a.z:
-        merged_center = center_b
-        merged_radius = b.z
+    var groups: Array = _policy_components()
+    if groups.size() > POLICY_MAX_ZONES:
+        policy_brush_strokes = policy_stroke_snapshot.duplicate()
+        policy_brush_dirty = true
+        policy_zone_weights = policy_stroke_weights.duplicate()
     else:
-        merged_radius = (distance + a.z + b.z) * 0.5
-        merged_center = center_a + (center_b - center_a) * ((merged_radius - a.z) / maxf(distance, 0.0001))
-    policy_brush_strokes[first] = Vector3(merged_center.x, merged_center.y, merged_radius)
-    policy_brush_strokes.remove_at(second)
+        var old_weights: Dictionary = policy_stroke_weights.duplicate()
+        var next_weights: Dictionary = {}
+        for group in groups:
+            var key: int = int(group["key"])
+            if old_weights.has(key):
+                next_weights[key] = old_weights[key]
+        if next_weights.is_empty() and not old_weights.is_empty() and not groups.is_empty():
+            next_weights[int(groups[0]["key"])] = int(old_weights.values()[0])
+        policy_zone_weights = next_weights
+    policy_zone_groups = _policy_components()
+    _update_policy_editor()
+    _update_policy_zone_overlay()
+    map_canvas.queue_redraw()
 
 func _paint_policy_brush(point: Vector2, mode: int) -> void:
-    var state: Dictionary = _state()
-    if state.is_empty():
+    if _state().is_empty():
         return
     var world: Vector2 = _world_point(point)
     var radius: float = policy_brush_radius / (_fit() * zoom)
-    var before: Array = _policy_components()
-    var previous_weights: Dictionary = policy_zone_weights.duplicate()
-    var changed: bool = false
     if mode > 0:
-        var near: bool = false
+        var touches_existing: bool = false
         for stamp in policy_brush_strokes:
-            if Vector2(stamp.x, stamp.y).distance_to(world) < radius * 0.35:
-                near = true
-                break
-        if not near:
-            _compact_policy_brush_strokes()
-            policy_brush_strokes.append(Vector3(world.x, world.y, radius))
-            changed = true
+            var distance: float = Vector2(stamp.x, stamp.y).distance_to(world)
+            if distance < radius * 0.75:
+                return
+            if distance <= radius + stamp.z:
+                touches_existing = true
+        if not touches_existing and _policy_components().size() >= POLICY_MAX_ZONES:
+            return
+        # Never enlarge earlier circles to free slots: that was the source of
+        # spontaneous zone growth. Keep the existing geometry unchanged.
+        if policy_brush_strokes.size() >= POLICY_MAX_STAMPS:
+            return
+        policy_brush_strokes.append(Vector3(world.x, world.y, radius))
+        policy_brush_dirty = true
     else:
         for index in range(policy_brush_strokes.size() - 1, -1, -1):
             var stamp: Vector3 = policy_brush_strokes[index]
             if Vector2(stamp.x, stamp.y).distance_to(world) < radius + stamp.z * 0.35:
                 policy_brush_strokes.remove_at(index)
-                changed = true
-    if changed:
-        var next: Array = _policy_components()
-        var remapped: Dictionary = {}
-        for group in next:
-            var best_overlap: int = 0
-            var inherited: int = 0
-            for old_group in before:
-                var overlap: int = 0
-                for stamp in group["stamps"]:
-                    if (old_group["stamps"] as Array).has(stamp):
-                        overlap += 1
-                if overlap > best_overlap:
-                    best_overlap = overlap
-                    inherited = int(previous_weights.get(int(old_group["key"]), 0))
-            if best_overlap > 0:
-                remapped[int(group["key"])] = inherited
-        policy_zone_weights = remapped
-        _update_policy_editor()
-    _update_policy_zone_overlay()
-    map_canvas.queue_redraw()
+                policy_brush_dirty = true
 
 # Components are based on the actual painted geometry, not map lane links.
 # Each star belongs to the painted component containing its world position.
@@ -3651,6 +3629,7 @@ func _update_policy_editor() -> void:
         policy_editor_rows.remove_child(child)
         child.queue_free()
     var groups: Array = _policy_components()
+    policy_zone_groups = groups
     if policy_zone_weights.is_empty() and not groups.is_empty():
         policy_zone_weights[int(groups[0]["key"])] = 100
     _limit_policy_zone_allocations()
@@ -3772,7 +3751,7 @@ func _draw_policy_zones(state: Dictionary) -> void:
         return
     var draft_tint: Color = Color("#e99c77") if policy_draft_card == "invasion" else Color("#83b5eb")
     _update_policy_zone_overlay()
-    var components: Array = _policy_components()
+    var components: Array = policy_zone_groups
     for index in range(components.size()):
         var group: Dictionary = components[index]
         var stamps: Array = group["stamps"]
