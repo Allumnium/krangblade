@@ -1648,17 +1648,20 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 		# waiting for storage. Reacquire a reachable depot before docking;
 		# never transfer cargo from an idle formation's position.
 		if (ship["route"] as Array).is_empty() and int(ship.get("dest", -1)) < 0:
+			var here: int = int(ship["at"])
+			var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+			# Even empty miners must keep retrying escape from hostile space.
+			if teams[here] not in [0, team]:
+				if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
+					ship["next_unload_search"] = float(state["elapsed"]) + 0.5
+					_evacuate_civilian(state, ship, teams)
+				return
 			if _cargo_total(ship) <= EPS:
 				ship["mining_mode"] = "idle"
 				ship["field"] = -1
 				return
 			if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
 				ship["next_unload_search"] = float(state["elapsed"]) + 0.5
-				var here: int = int(ship["at"])
-				var team: int = int(state["teams"].get(int(ship["owner"]), 0))
-				if teams[here] not in [0, team]:
-					_evacuate_civilian(state, ship, teams)
-					return
 				for resource in FIELD_RESOURCES:
 					if float(ship["cargo"].get(resource, 0.0)) <= EPS:
 						continue

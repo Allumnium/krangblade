@@ -2780,7 +2780,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 					map_canvas.draw_circle(point, body_radius, HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), true)
 				if system.get("pds", {}).has(slot):
 					_draw_pds_frame(point, body_radius)
-				if selected_body == slot:
+				if index == selected and selected_body == slot:
 					map_canvas.draw_arc(point, body_radius + 4.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, HUD.TEXT)
 	var pulse: float = 0.96 + 0.04 * sin(visual_clock * 1.2 + float(index))
