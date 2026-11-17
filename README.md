@@ -185,3 +185,5 @@ v0.13.9: Multiple nearby system approaches to asteroid fields, physical arrival-
 Version 0.20.1: selected-system resource rows show theoretical production less civilian demand per year, color-coded green/red/white. Local hover distinguishes this projection from actual latest-step production, consumption, delivery and spending. This is display-only; economy rules are unchanged.
 
 Version 0.20.2: top-bar resource deltas now sum theoretical production minus full civilian demand across owned systems using the same sign colors. Holdings and storage strips remain actual values. Hover distinguishes theoretical net from recent actual flows, including irregular mining deliveries and construction spending.
+
+Version 0.20.3: construction and upgrade recipes and nominal build times are always visible on collapsed cards. Ship estimates use the fastest operational eligible shipyard (level-one baseline when none is operational); actual queue and staffing delays are excluded. Immediate habitation and warehouse purchases show Instant.
