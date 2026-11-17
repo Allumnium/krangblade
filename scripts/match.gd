@@ -14,7 +14,9 @@ const HEADER_HEIGHT: float = 54.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
 const MIN_ZOOM: float = 0.5
-const MAX_ZOOM: float = 64.0
+const OVERVIEW_MAX_ZOOM: float = 64.0
+const FIGHTER_HULL_LENGTH: float = 22.0
+const CLOSEUP_SCREEN_FRACTION: float = 0.6
 const SNAPSHOT_SECONDS: float = 0.2
 
 var session: Node
@@ -51,6 +53,7 @@ var raw_antimatter_label: Label
 var population_delta_label: Label
 var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
+var follow_units: bool = false
 var drag_button: int = 0
 var ship_visuals: Dictionary = {}
 var ship_offsets: Dictionary = {}
@@ -2110,7 +2113,7 @@ func _refresh() -> void:
 			if int(planets[i]["owner"]) == _me():
 				selected = i
 				# Center the initial camera on the player's home system.
-				zoom = clampf(2.4, MIN_ZOOM, MAX_ZOOM)
+				zoom = clampf(2.4, MIN_ZOOM, _max_zoom())
 				pan = (_map_size() * 0.5 - state["map"]["points"][i]) * _fit() * zoom
 				_position_territory()
 				_load_thresholds()
@@ -2124,6 +2127,8 @@ func _refresh() -> void:
 	if ship.is_empty():
 		selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 		ship = _selected_ship(state)
+	if ship.is_empty() and selected_units.is_empty():
+		follow_units = false
 	var p: Dictionary = _planet()
 	var field_selected: bool = selected_field >= 0 and ECONOMY.discovered(state, _me(), "fields", selected_field)
 	var ship_selected: bool = not ship.is_empty()
@@ -2644,6 +2649,7 @@ func _send_colony() -> void:
 		session.call("request_colonize", colony_choices[index], selected)
 
 func _reset_view() -> void:
+	follow_units = false
 	zoom = 1.0
 	pan = Vector2.ZERO
 	map_canvas.queue_redraw()
@@ -2666,10 +2672,21 @@ func _screen_point(point: Vector2) -> Vector2:
 func _world_point(point: Vector2) -> Vector2:
 	return _map_size() * 0.5 + (point - Vector2(OVERVIEW_WIDTH + 8.0, 0.0) - _projection_size() * 0.5 - pan) / (_fit() * zoom)
 
+func _camera_center() -> Vector2:
+	return Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5
+
+func _max_zoom() -> float:
+	# Scale the close-up ceiling to the actual viewport and map fit. At
+	# maximum zoom a fighter is 60% of the full viewport width long.
+	var base_scale: float = maxf(0.0001, minf(SHIP_WORLD_SCALE * _fit() * OVERVIEW_MAX_ZOOM, 1.25))
+	var target_scale: float = size.x * CLOSEUP_SCREEN_FRACTION / FIGHTER_HULL_LENGTH
+	return OVERVIEW_MAX_ZOOM * maxf(1.0, target_scale / base_scale)
+
 func _zoom_at(point: Vector2, multiplier: float) -> void:
-	var world: Vector2 = _world_point(point)
-	zoom = clampf(zoom * multiplier, MIN_ZOOM, MAX_ZOOM)
-	pan += point - _screen_point(world)
+	var anchor: Vector2 = _camera_center() if follow_units else point
+	var world: Vector2 = _world_point(anchor)
+	zoom = clampf(zoom * multiplier, MIN_ZOOM, _max_zoom())
+	pan += anchor - _screen_point(world)
 	map_canvas.queue_redraw()
 
 func _system_visual(index: int, state: Dictionary) -> Dictionary:
@@ -2948,6 +2965,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 				selected_field = i
 				break
 	selected = -1 if selected_ship_id >= 0 or selected_field >= 0 else hit
+	follow_units = selected_ship_id >= 0 or not selected_units.is_empty()
 	var focused: Control = get_viewport().gui_get_focus_owner()
 	if is_instance_valid(focused):
 		focused.release_focus()
@@ -2965,6 +2983,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 		if int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship", "miner"] and poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
 			selected_units.append(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
+	follow_units = not selected_units.is_empty()
 	selected = -1
 	selected_body = -1
 	selected_yard = -1
@@ -3043,6 +3062,8 @@ func _map_input(event: InputEvent) -> void:
 		var mouse: InputEventMouseButton = event
 		match mouse.button_index:
 			MOUSE_BUTTON_MIDDLE:
+				if mouse.pressed:
+					follow_units = false
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
@@ -3171,6 +3192,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				if int(craft["owner"]) == _me() and id in group and not selected_units.has(id):
 					selected_units.append(id)
 			selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
+			follow_units = not selected_units.is_empty()
 			selected = -1
 			selected_body = -1
 			selected_yard = -1
@@ -3200,7 +3222,7 @@ func _cycle_owned_system(direction: int) -> void:
 	var world: Vector2 = state["map"]["points"][selected]
 	var desired_radius: float = minf(_projection_size().x, _projection_size().y) * 0.27
 	var radius_per_zoom: float = minf(RADIUS * float(state["planets"][selected].get("size_factor", 1.0)), float(_system_visual(selected, state)["spacing"]) * _fit() * 0.39)
-	zoom = clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, MAX_ZOOM)
+	zoom = clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, OVERVIEW_MAX_ZOOM)
 	var center: Vector2 = Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5
 	pan += center - _screen_point(world)
 	_load_thresholds()
@@ -3224,6 +3246,7 @@ func _keyboard_pan(delta: float) -> void:
 
 func _pan_camera(direction: Vector2, delta: float) -> void:
 	if not direction.is_zero_approx():
+		follow_units = false
 		pan -= direction.normalized() * KEYBOARD_PAN_SPEED * delta
 		map_canvas.queue_redraw()
 
@@ -3259,9 +3282,11 @@ func _process(delta: float) -> void:
 			visual["age"] = minf(SNAPSHOT_SECONDS, float(visual["age"]) + delta)
 	var state: Dictionary = _state()
 	if not state.is_empty():
-		_ship_poses(state, delta)
+		var poses: Dictionary = _ship_poses(state, delta)
+		_follow_selected_units(poses)
 		_sync_destruction_effects(state)
 	else:
+		follow_units = false
 		ship_destructions.clear()
 		last_destruction_sequence = 0
 	if is_instance_valid(map_canvas):
@@ -3335,7 +3360,7 @@ func _draw_ship_destructions(viewport_bounds: Rect2) -> void:
 	var scale: float = maxf(0.2, _ship_scale())
 	for effect in ship_destructions:
 		var point: Vector2 = _screen_point(effect["position"])
-		if not viewport_bounds.grow(80.0).has_point(point):
+		if not viewport_bounds.grow(maxf(80.0, 44.0 * scale)).has_point(point):
 			continue
 		var age: float = visual_clock - float(effect["started"])
 		var fade: float = clampf(1.0 - age / DESTRUCTION_LIFETIME, 0.0, 1.0)
@@ -3375,7 +3400,29 @@ func _hull_polygon(origin: Vector2, forward: Vector2, lateral: Vector2, vertices
 	return polygon
 
 func _ship_scale() -> float:
-	return minf(SHIP_WORLD_SCALE * _fit() * zoom, 1.25)
+	# Preserve the previous overview dimensions. Beyond the old ceiling,
+	# scale the actual authored hull geometry continuously with the camera.
+	return minf(SHIP_WORLD_SCALE * _fit() * minf(zoom, OVERVIEW_MAX_ZOOM), 1.25) * maxf(1.0, zoom / OVERVIEW_MAX_ZOOM)
+
+func _follow_selected_units(poses: Dictionary) -> void:
+	if not follow_units or selecting_units or drag_button != 0 or str(session.get("phase")) != "match":
+		return
+	var center: Vector2 = Vector2.ZERO
+	var count: int = 0
+	# Use exactly the interpolated positions that the renderer shows,
+	# so the tracked hull stays stationary even between network snapshots.
+	if not selected_units.is_empty():
+		for id in selected_units:
+			if poses.has(id):
+				center += poses[id]["point"]
+				count += 1
+	elif poses.has(selected_ship_id):
+		center = poses[selected_ship_id]["point"]
+		count = 1
+	if count == 0:
+		follow_units = false
+		return
+	pan += _camera_center() - center / float(count)
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 	_sync_ship_visuals(state)
@@ -3732,14 +3779,14 @@ func _draw_map() -> void:
 		var target: Vector2 = ship.get("navigation_target", physical)
 		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not ECONOMY._engaged(ship)) and physical.distance_to(target) > ECONOMY.EPS:
 			var engine: Vector2 = point - direction * 9.0
-			if viewport_bounds.grow(24.0).has_point(engine):
+			if viewport_bounds.grow(maxf(24.0, 16.0 * scale)).has_point(engine):
 				var particle_count: int = 5 if scale >= 1.0 else 2
 				for k in range(particle_count):
 					var age: float = fposmod(visual_clock * 3.5 + float(k) / float(particle_count) + float(ship["id"]) * 0.173, 1.0)
 					var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * age * 2.5
 					var spark: Vector2 = engine - direction * (2.0 + age * 12.0) + side * offset
 					map_canvas.draw_circle(spark, maxf(0.75, (2.0 - age) * scale), Color(0.45, 0.85, 1.0, (1.0 - age) * 0.85), false)
-		if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and viewport_bounds.grow(32.0).has_point(point) and scale >= 0.65:
+		if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
 				var emitter: Vector2 = point + direction * MINER_MUZZLE.x + side * sign * MINER_MUZZLE.y
@@ -3749,6 +3796,8 @@ func _draw_map() -> void:
 					var age: float = fposmod(visual_clock * 4.0 + float(k) * 0.33 + sign * 0.12, 1.0)
 					var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
 					map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
+		if not viewport_bounds.grow(maxf(24.0, 18.0 * scale)).has_point(point):
+			continue
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
 			map_canvas.draw_arc(point, maxf(5.0, 15.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
 		map_canvas.draw_colored_polygon(shape, hull)
@@ -3767,7 +3816,7 @@ func _draw_map() -> void:
 					var filled := PackedVector2Array([module + direction * end + side * 3, module + direction * start + side * 3, module + direction * start - side * 3, module + direction * end - side * 3])
 					map_canvas.draw_colored_polygon(filled, HUD.COLORS[segment["resource"]])
 					start = end
-		elif scale >= 0.42 and HULL_PANELS.has(ship["kind"]) and viewport_bounds.grow(24.0).has_point(point):
+		elif scale >= 0.42 and HULL_PANELS.has(ship["kind"]) and viewport_bounds.grow(maxf(24.0, 14.0 * scale)).has_point(point):
 			# At distant zoom levels the silhouette and allegiance outline are
 			# enough. Draw layered panels only when they can actually be seen.
 			for panel in HULL_PANELS[ship["kind"]]:
@@ -3779,9 +3828,10 @@ func _draw_map() -> void:
 		map_canvas.draw_polyline(outline, empire.lightened(0.2), scale, true)
 		var hp: float = clampf(float(ship.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
 		if hp < 1.0 and scale >= 0.65:
-			var bar_pos: Vector2 = point + Vector2(-10.0, 13.0)
-			map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0, 3.0)), Color("#182333"))
-			map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0 * hp, 3.0)), Color("#e9a276"))
+			var width: float = clampf(20.0 * scale, 20.0, 100.0)
+			var bar_pos: Vector2 = point + Vector2(-width * 0.5, maxf(13.0, 15.0 * scale))
+			map_canvas.draw_rect(Rect2(bar_pos, Vector2(width, 3.0)), Color("#182333"))
+			map_canvas.draw_rect(Rect2(bar_pos, Vector2(width * hp, 3.0)), Color("#e9a276"))
 	_draw_ship_destructions(viewport_bounds)
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
