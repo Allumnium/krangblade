@@ -32,6 +32,7 @@ func _initialize() -> void:
     _test_idle_formations()
     _test_ai_defensive_policies()
     _test_conquest()
+    _test_conquest_resistance_and_evacuation()
     _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -1721,3 +1722,34 @@ func _test_conquest() -> void:
     assert(ECON.set_thresholds(state, 1, 1, "Metals", 10.0, 20.0))
     assert(int(bytes_to_var(var_to_bytes(state))["planets"][1]["owner"]) == 1)
     print("PASS: invasion warmup, resistance, interrupted capture, ownership and authority transfer")
+
+func _test_conquest_resistance_and_evacuation() -> void:
+    var map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(1200, 0), Vector2(600, 0), Vector2(600, 600)], "edges": [[0, 2], [1, 2], [1, 3], [2, 3]], "fields": []}
+    var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+    var graph: Dictionary = ECON.military_graph(state)
+    var colony: Dictionary = state["planets"][2]
+    colony["owner"] = 2
+    colony["population"] = 10000.0
+    colony["pds"][0] = {"hp": ECON.LASER_DAMAGE, "cooldown": 0.0, "target": -1, "laser_until": -1.0}
+    var attacker: Dictionary = {"id": 10001, "owner": 1, "kind": "fighter", "at": 2, "dest": 2, "operation_target": 2, "route": [], "position": map["points"][2], "hp": ECON.SHIP_HP}
+    state["ships"] = [attacker]
+    assert(ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [2], "weight": 100}], []))
+    state["elapsed"] = 20.0
+    ECON._step_conquest(state, graph, ECON.CAPTURE_YEARS)
+    assert(int(colony["owner"]) == 2 and not colony.has("capture"))
+    ECON._combat(state, graph, 1.0)
+    assert(colony["pds"].is_empty())
+    assert(float(attacker["hp"]) == ECON.SHIP_HP - ECON.PDS_DAMAGE)
+    var freighter: Dictionary = {"id": 10002, "owner": 2, "kind": "ship", "at": 1, "route": [2], "leg": 100.0, "position": Vector2(1100, 0), "source": -1, "dest": 2, "cargo": ECON.empty_stock()}
+    freighter["cargo"]["Metals"] = 50.0
+    state["ships"].append(freighter)
+    var before: Vector2 = freighter["position"]
+    ECON._step_conquest(state, graph, ECON.CAPTURE_YEARS)
+    assert(int(colony["owner"]) == 1)
+    assert(freighter["position"] == before and int(freighter["dest"]) == 1)
+    assert(freighter["cargo"]["Metals"] == 50.0)
+    assert(not (freighter["route"] as Array).has(2))
+    ECON._work_ship(state, freighter, ECON.planet_teams(state), {}, 0.1)
+    assert(before.distance_to(freighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+    assert((freighter["position"] as Vector2).x > before.x)
+    print("PASS: planetary defense resistance and simultaneous destruction, safe cargo-preserving conquest reroute")

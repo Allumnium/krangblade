@@ -273,3 +273,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.29: AI threat heuristic is deliberately simple: nearby hostile fighters trigger a prioritized owned-system guard order, with coarse fleet-size thresholds to preserve attack cohorts. Potential oscillation near the threat radius and distant colonies competing for protection need playtesting. Reweighting a stable objective preserves invasion warmup.
 
 - v0.17.30: Conquest changes local ownership, and civilian routes may already be in flight through newly hostile systems. Prevent hostile loading/unloading immediately; planned-route evacuation and rerouting, last-home recovery, and PDS resistance balance need review. Capture timing/coalition tie-break are provisional.
+
+- v0.17.31: Fixed hostile civilian route endpoints on capture and made PDS destroyable. Evacuation prefers a reachable friendly destination using either end of the current lane; disconnected civilian hulls may remain stranded until territory changes. PDS HP and repair-loss behavior need playtesting. No automatic elimination of surviving ships or colonies; decide win/loss with match objective.
