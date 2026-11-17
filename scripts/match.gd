@@ -3340,8 +3340,11 @@ func _build_policy_ui() -> void:
     policy_editor.offset_top = 12
     policy_editor.offset_bottom = 520
     policy_editor.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#42647e"), 8))
+    var editor_layout := VBoxContainer.new()
+    policy_editor.add_child(editor_layout)
     var editor_scroll := ScrollContainer.new()
-    policy_editor.add_child(editor_scroll)
+    editor_layout.add_child(editor_scroll)
+    editor_layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
     editor_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
     var editor_body := VBoxContainer.new()
     editor_body.custom_minimum_size.x = 305
@@ -3367,10 +3370,12 @@ func _build_policy_ui() -> void:
         map_canvas.queue_redraw())
     policy_editor_rows = VBoxContainer.new()
     editor_body.add_child(policy_editor_rows)
+    # Keep status and confirmation visible even with five zone sliders.
     policy_editor_status = _label("", 13)
-    editor_body.add_child(policy_editor_status)
+    policy_editor_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    editor_layout.add_child(policy_editor_status)
     var action_row := HBoxContainer.new()
-    editor_body.add_child(action_row)
+    editor_layout.add_child(action_row)
     _button("Cancel", _cancel_policy_draft, action_row)
     policy_editor_accept = _button("Accept", _commit_policy_draft, action_row)
     policy_editor.hide()
@@ -3714,7 +3719,7 @@ func _update_policy_editor_status() -> void:
     policy_editor_accept.disabled = not has_zone or used > 100
     policy_editor_status.text = "%d%% committed · %d%% available" % [used, maxi(0, 100 - used)] if used <= 100 else "%d%% — overallocated" % used
     if not has_zone:
-        policy_editor_status.text = "Paint a zone containing an eligible %s system." % ("enemy" if policy_draft_card == "invasion" else "friendly")
+        policy_editor_status.text = "Accept unavailable: paint over an eligible %s system." % ("enemy or neutral" if policy_draft_card == "invasion" else "friendly")
 
 func _commit_policy_draft() -> void:
     var zones: Array = []
