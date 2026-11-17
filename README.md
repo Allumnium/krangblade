@@ -221,3 +221,5 @@ Version 0.24.2: smaller varied maps, at most eight systems per roster member; ir
 Version 0.24.3: refined fighter, mining and colony hulls with distinct silhouettes, shaded structural panels, cockpits, emitters, habitat modules and engines. Fine detail renders at useful zoom levels only. The logistics freighter and its cargo display are unchanged.
 
 Version 0.24.4: combat destruction produces colored hull-panel particles and tumbling detached outline segments. Clients consume the same bounded combat event history without exploding ships that settle colonies. Fighter fire originates at the nose and mining beams at both arm tips. Visual only; logistics hull art and combat economics are unchanged.
+
+Version 0.24.5: detailed open-berth shipyard art and selectable completed shipyards. The inspector displays ownership, HP, level, staffing, work progress, numeric upgrade effects, costs and existing upgrade/cancel actions. Existing system cards remain available. Combat and mining beams now use the source player color. Visual only; simulation and authority commands are unchanged.
