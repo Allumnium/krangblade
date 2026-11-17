@@ -2826,7 +2826,15 @@ func _process(delta: float) -> void:
 			diagnostic_last_bytes = bytes
 			if diagnostic_label.visible:
 				var timing: String = " · sim %.2f ms · encode %.2f ms" % [float(session.get("diagnostic_sim_ms")), float(session.get("diagnostic_encode_ms"))] if authority else ""
-				diagnostic_label.text = "%d FPS%s · %.1f KiB snapshot · %.1f KiB/s payload" % [Engine.get_frames_per_second(), timing, float(session.get("diagnostic_snapshot_bytes")) / 1024.0, throughput]
+				var phases: Dictionary = session.get("diagnostic_sim_phases") if authority else {}
+				var ranked: Array = phases.keys()
+				ranked.sort_custom(func(a: String, b: String) -> bool: return int(phases[a]) > int(phases[b]))
+				var summary: PackedStringArray = []
+				for stage in ranked:
+					summary.append("%s %.1fms" % [stage, float(phases[stage]) / 1000.0])
+				var hotspot: String = (" · " + summary[0]) if not summary.is_empty() else ""
+				diagnostic_label.text = "%d FPS%s%s · %.1f KiB snapshot · %.1f KiB/s payload" % [Engine.get_frames_per_second(), timing, hotspot, float(session.get("diagnostic_snapshot_bytes")) / 1024.0, throughput]
+				diagnostic_label.tooltip_text = "\n".join(summary)
 			diagnostic_elapsed = 0.0
 	visual_clock += delta
 	game_visual_clock += delta * float(_state().get("time_speed", 1))

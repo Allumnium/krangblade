@@ -37,7 +37,7 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 ## Ongoing validation and deferred work
 
 - [ ] Keep gameplay rules, startup, parsing, imports/metadata, solo, two-/three-peer ENet and disconnect regressions mandatory; verify real internet behavior and visuals separately.
-- [ ] Benchmark path caching, territory rendering, snapshot efficiency, resource hover and large-map performance.
+- [ ] Profile late-game 8-player and fleet-heavy 10× matches using the v0.20.4 simulation-phase diagnostics; compare 1×, 5× and 10×. Remove redundant work first, then investigate trade matching, miner search, repair safety, discovery scans and frame-budgeted fixed steps. Preserve host authority, gameplay and network behavior. Benchmark path caching, territory rendering, snapshot efficiency, resource hover and large-map performance.
 - [ ] Steam integration, additional races, elaborate technology trees, ship customization and campaigns remain deferred.
 
 See THOUGHTS.md for active observations and THOUGHTS_ARCHIVE.md for resolved or superseded history.
