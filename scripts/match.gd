@@ -8,8 +8,9 @@ const UPGRADE_SOUND = preload("res://assets/sfx/detail.wav")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
 const COLORS = RULES.EMPIRE_COLORS
-const PANEL_WIDTH: float = 368.0
-const OVERVIEW_WIDTH: float = 340.0
+const CONSOLE_WIDE_WIDTH: float = 1200.0
+const OVERVIEW_WIDTH: float = 350.0
+const YARD_WIDTH: float = 322.0
 const HEADER_HEIGHT: float = 54.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
@@ -41,6 +42,13 @@ var territory_seed: int = -1
 var header_panel: PanelContainer
 var inspector_panel: PanelContainer
 var overview_panel: PanelContainer
+var console_panel: PanelContainer
+var console_columns: HBoxContainer
+var yard_panel: PanelContainer
+var yard_column: VBoxContainer
+var empty_selection: Label
+var command_grids: Dictionary = {}
+var cargo_grids: Array[GridContainer] = []
 var yard_activity: VBoxContainer
 var yard_activity_rows: Dictionary = {}
 var inspector_tabs: TabContainer
@@ -53,6 +61,7 @@ var raw_antimatter_label: Label
 var population_delta_label: Label
 var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
+var previous_map_fit: float = 0.0
 var follow_units: bool = false
 var drag_button: int = 0
 var ship_visuals: Dictionary = {}
@@ -345,7 +354,7 @@ func _build_ui() -> void:
 	map_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	map_canvas.gui_input.connect(_map_input)
 	map_canvas.draw.connect(_draw_map)
-	map_canvas.resized.connect(map_canvas.queue_redraw)
+	map_canvas.resized.connect(_map_resized)
 	header_panel = PanelContainer.new()
 	add_child(header_panel)
 	header_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928ed"), Color("#284661"), 6))
@@ -361,7 +370,6 @@ func _build_ui() -> void:
 	_build_global_bar(row)
 	global_population_label = _global_stat(row, "0", Color("#b9d9ed"), true)
 	leave = _button("MENU", _open_menu, row)
-	_build_lens_buttons()
 	match_menu = AcceptDialog.new()
 	match_menu.title = "Menu"
 	match_menu.theme = theme
@@ -384,39 +392,62 @@ func _build_ui() -> void:
 		if action == &"leave":
 			match_result_dialog.hide()
 			_leave())
+	# One reserved, bottom-anchored command deck. The camera uses the map
+	# rectangle above it regardless of selection or visible inspector content.
+	console_panel = PanelContainer.new()
+	add_child(console_panel)
+	console_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	console_panel.offset_left = 8
+	console_panel.offset_right = -8
+	console_panel.offset_bottom = -8
+	console_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0b1624"), Color("#345570"), 6, 5))
+	var console := VBoxContainer.new()
+	console.add_theme_constant_override("separation", 5)
+	console_panel.add_child(console)
+	var toolbar := HBoxContainer.new()
+	toolbar.add_theme_constant_override("separation", 5)
+	console.add_child(toolbar)
+	_build_lens_buttons(toolbar)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toolbar.add_child(spacer)
+	_build_time_controls(toolbar)
+	console_columns = HBoxContainer.new()
+	console_columns.add_theme_constant_override("separation", 6)
+	console_columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	console.add_child(console_columns)
+	empty_selection = _label("Select a system, ship or asteroid field", 14)
+	empty_selection.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	empty_selection.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	empty_selection.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	empty_selection.add_theme_color_override("font_color", HUD.MUTED)
+	console_columns.add_child(empty_selection)
 	inspector_panel = PanelContainer.new()
-	add_child(inspector_panel)
-	inspector_panel.anchor_left = 1.0
-	inspector_panel.anchor_right = 1.0
-	inspector_panel.anchor_bottom = 1.0
-	inspector_panel.offset_left = -PANEL_WIDTH
-	inspector_panel.offset_right = -8
-	inspector_panel.offset_top = HEADER_HEIGHT + 64
-	inspector_panel.offset_bottom = -78
+	console_columns.add_child(inspector_panel)
+	inspector_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 6, 3))
 	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 8)
+	body.add_theme_constant_override("separation", 5)
 	inspector_panel.add_child(body)
 	overview_panel = PanelContainer.new()
-	add_child(overview_panel)
-	overview_panel.anchor_bottom = 1.0
-	overview_panel.offset_left = 8
-	overview_panel.offset_right = OVERVIEW_WIDTH + 8
-	overview_panel.offset_top = HEADER_HEIGHT + 16
-	overview_panel.offset_bottom = -52
+	console_columns.add_child(overview_panel)
+	console_columns.move_child(overview_panel, 0)
+	overview_panel.custom_minimum_size.x = OVERVIEW_WIDTH
+	overview_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 6, 3))
 	var overview_scroll := ScrollContainer.new()
-	overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	overview_panel.add_child(overview_scroll)
 	var overview := VBoxContainer.new()
 	overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	overview.add_theme_constant_override("separation", 8)
+	overview.add_theme_constant_override("separation", 5)
 	overview_scroll.add_child(overview)
 	planet_overview = VBoxContainer.new()
-	planet_overview.add_theme_constant_override("separation", 8)
+	planet_overview.add_theme_constant_override("separation", 3)
 	overview.add_child(planet_overview)
 	_build_body_overview(overview)
 	_build_yard_overview(overview)
 	ship_overview = VBoxContainer.new()
-	ship_overview.add_theme_constant_override("separation", 8)
+	ship_overview.add_theme_constant_override("separation", 4)
 	overview.add_child(ship_overview)
 	ship_title = _label("", 19)
 	ship_overview.add_child(ship_title)
@@ -425,12 +456,12 @@ func _build_ui() -> void:
 	ship_cargo = HUD.section(ship_overview, "Cargo")
 	_build_cargo_rows(ship_cargo, ship_cargo_labels)
 	fleet_scroll = ScrollContainer.new()
-	fleet_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	fleet_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	fleet_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_child(fleet_scroll)
 	fleet_overview = VBoxContainer.new()
 	fleet_overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fleet_overview.add_theme_constant_override("separation", 8)
+	fleet_overview.add_theme_constant_override("separation", 5)
 	fleet_scroll.add_child(fleet_overview)
 	fleet_title = _label("", 19)
 	fleet_overview.add_child(fleet_title)
@@ -439,8 +470,10 @@ func _build_ui() -> void:
 	hold_button = Button.new()
 	hold_button.text = "Hold position [H]"
 	hold_button.pressed.connect(_hold_selected)
-	fleet_overview.add_child(hold_button)
-	unload_button = _button("Unload cargo [U]", _unload_selected, fleet_overview)
+	var orders := HBoxContainer.new()
+	fleet_overview.add_child(orders)
+	orders.add_child(hold_button)
+	unload_button = _button("Unload cargo [U]", _unload_selected, orders)
 	fleet_cargo = HUD.section(fleet_overview, "Cargo")
 	_build_cargo_rows(fleet_cargo, fleet_cargo_labels)
 	mining_controls = HUD.section(fleet_overview, "Mine")
@@ -479,6 +512,8 @@ func _build_ui() -> void:
 	population_delta_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	population_row.add_child(population_delta_label)
 	production_summary = HUD.section(planet_overview, "Resources")
+	production_summary.add_theme_constant_override("separation", 3)
+	production_summary.get_parent().add_theme_stylebox_override("panel", HUD.surface(Color("#0a1726ed"), Color("#233e56"), 5))
 	_build_production_summary()
 	raw_antimatter_label = _label("", 12)
 	raw_antimatter_label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -492,7 +527,18 @@ func _build_ui() -> void:
 	interaction_panel.add_child(colony_picker)
 	send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
 	HUD.action(send_colony_button, Color("#c7a4ff"))
-	yard_activity = HUD.section(planet_overview, "Shipyards")
+	yard_panel = PanelContainer.new()
+	console_columns.add_child(yard_panel)
+	console_columns.move_child(yard_panel, 1)
+	yard_panel.custom_minimum_size.x = YARD_WIDTH
+	yard_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 5, 3))
+	var yard_scroll := ScrollContainer.new()
+	yard_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	yard_panel.add_child(yard_scroll)
+	yard_column = VBoxContainer.new()
+	yard_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	yard_scroll.add_child(yard_column)
+	yard_activity = HUD.section(yard_column, "Shipyards")
 	inspector_tabs = TabContainer.new()
 	inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_tabs.clip_contents = true
@@ -501,10 +547,10 @@ func _build_ui() -> void:
 	inspector_tabs.visibility_changed.connect(func() -> void:
 		if not inspector_tabs.is_visible_in_tree():
 			_collapse_details())
-	var shipyard_page: VBoxContainer = _inspector_page("Shipyards")
-	var economy_page: VBoxContainer = _inspector_page("Economy")
+	var shipyard_page: GridContainer = _inspector_page("Shipyards")
+	var economy_page: GridContainer = _inspector_page("Economy")
 	_build_economy_cards(economy_page)
-	var trade_page: VBoxContainer = _inspector_page("Trade")
+	var trade_page: GridContainer = _inspector_page("Trade")
 	_build_pds_card(economy_page)
 	for resource in ECONOMY.RESOURCES:
 		var logistics: VBoxContainer = HUD.section(trade_page, "")
@@ -524,7 +570,7 @@ func _build_ui() -> void:
 		trade_row.add_child(name_label)
 		var stock_label := _label("", 12)
 		stock_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-		stock_label.custom_minimum_size.x = 120
+		stock_label.custom_minimum_size.x = 90
 		stock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		trade_row.add_child(stock_label)
 		trade_stock_labels[resource] = stock_label
@@ -551,19 +597,50 @@ func _build_ui() -> void:
 		trade_checks[resource] = [incoming, outgoing]
 		incoming.toggled.connect(_trade_toggle.bind(resource))
 		outgoing.toggled.connect(_trade_toggle.bind(resource))
-	var shipyards := VBoxContainer.new()
-	shipyard_page.add_child(shipyards)
-	ship_button = _ship_build_row(shipyards, "BUILD LOGISTICS SHIP", "ship")
+	ship_button = _ship_build_row(shipyard_page, "BUILD LOGISTICS SHIP", "ship")
 	HUD.action(ship_button)
-	colony_button = _ship_build_row(shipyards, "BUILD COLONY SHIP", "colony_ship")
+	colony_button = _ship_build_row(shipyard_page, "BUILD COLONY SHIP", "colony_ship")
 	HUD.action(colony_button, Color("#c7a4ff"))
-	fighter_button = _ship_build_row(shipyards, "BUILD FIGHTER", "fighter")
+	fighter_button = _ship_build_row(shipyard_page, "BUILD FIGHTER", "fighter")
 	HUD.action(fighter_button, Color("#f2b57e"))
-	fighter_button.tooltip_text = "Assign fighters to points of interest using the military lens."
-	miner_button = _ship_build_row(shipyards, "BUILD MINING SHIP", "miner")
+	fighter_button.tooltip_text = "Select fighters and right-click a destination or hostile ship."
+	miner_button = _ship_build_row(shipyard_page, "BUILD MINING SHIP", "miner")
 	HUD.action(miner_button, Color("#d8e58b"))
 	miner_button.tooltip_text = "Automatically mines accessible fields from owned service systems."
-	_build_time_controls()
+	for grid in command_grids.values():
+		for card in grid.get_children():
+			card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	resized.connect(_layout_console)
+	inspector_panel.resized.connect(_layout_command_grids)
+	_layout_console()
+
+func _layout_console() -> void:
+	if not is_instance_valid(console_panel) or not is_instance_valid(yard_activity):
+		return
+	# Keep a stable, useful map at both normal and small window sizes.
+	var height: float = minf(clampf(size.y * 0.43, 250.0, 360.0), maxf(150.0, size.y - HEADER_HEIGHT - 160.0))
+	console_panel.offset_top = -8.0 - height
+	map_canvas.offset_bottom = -16.0 - height
+	territory_layer.offset_bottom = map_canvas.offset_bottom
+	diagnostic_label.offset_bottom = -20.0 - height
+	diagnostic_label.offset_top = -44.0 - height
+	overview_panel.custom_minimum_size.x = minf(OVERVIEW_WIDTH, maxf(220.0, size.x * 0.40))
+	var wide: bool = size.x >= CONSOLE_WIDE_WIDTH
+	var yard_parent: Control = yard_column if wide else planet_overview
+	if yard_activity.get_parent().get_parent() != yard_parent:
+		yard_activity.get_parent().reparent(yard_parent, false)
+	yard_panel.visible = wide and planet_overview.visible and overview_panel.visible
+	_layout_command_grids()
+
+func _layout_command_grids() -> void:
+	var width: float = inspector_panel.size.x - 34.0
+	for title in command_grids:
+		var grid: GridContainer = command_grids[title]
+		var cell_width: float = 250.0 if title == "Trade" else 260.0
+		grid.columns = clampi(floori(width / cell_width), 1, 3)
+	for grid in cargo_grids:
+		grid.columns = 2 if grid.get_parent() == ship_cargo else clampi(floori(width / 180.0), 1, 4)
 
 
 func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
@@ -1285,23 +1362,31 @@ func _refresh_pds(planet: Dictionary, owned: bool) -> void:
 		_show_cost(pds_card["costs"], cost)
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 3)
+	parent.add_child(grid)
+	cargo_grids.append(grid)
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 		var row := HBoxContainer.new()
-		parent.add_child(row)
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.tooltip_text = resource
+		grid.add_child(row)
 		var icon := TextureRect.new()
 		icon.texture = HUD.ICONS.get(resource)
 		icon.custom_minimum_size = Vector2(18, 18)
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		row.add_child(icon)
-		var title := _label(resource, 12)
+		var title := _label("Antimatter" if resource == ECONOMY.ANTIMATTER else resource, 11)
 		title.autowrap_mode = TextServer.AUTOWRAP_OFF
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(title)
 		var amount := _label("0.0", 12)
 		amount.autowrap_mode = TextServer.AUTOWRAP_OFF
 		amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		amount.custom_minimum_size.x = 54
+		amount.custom_minimum_size.x = 42
 		amount.add_theme_color_override("font_color", HUD.COLORS[resource])
 		row.add_child(amount)
 		labels[resource] = amount
@@ -1452,19 +1537,10 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			fleet_cargo_labels[resource].tooltip_text = "%.1f t" % amount
 			fleet_cargo_labels[resource].get_parent().visible = true
 
-func _build_lens_buttons() -> void:
-	var lens_row := HBoxContainer.new()
-	add_child(lens_row)
-	lens_row.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	lens_row.offset_left = -112
-	lens_row.offset_right = 112
-	lens_row.offset_top = HEADER_HEIGHT + 16
-	lens_row.offset_bottom = HEADER_HEIGHT + 48
-	lens_row.add_theme_constant_override("separation", 6)
-	logistics_lens = _button("LOGISTICS", _toggle_lens.bind("logistics"), lens_row)
+func _build_lens_buttons(parent: Container) -> void:
+	logistics_lens = _button("Logistics", _toggle_lens.bind("logistics"), parent)
 	logistics_lens.toggle_mode = true
 	logistics_lens.focus_mode = Control.FOCUS_NONE
-	logistics_lens.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	logistics_lens.tooltip_text = "System resource storage"
 
 var diagnostic_label: Label
@@ -1472,24 +1548,16 @@ var diagnostic_button: Button
 var diagnostic_elapsed: float = 0.0
 var diagnostic_last_bytes: int = -1
 
-func _build_time_controls() -> void:
-	var panel := PanelContainer.new()
-	add_child(panel)
-	panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928ed"), Color("#284661"), 4))
-	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	panel.offset_left = -260
-	panel.offset_right = -8
-	panel.offset_top = HEADER_HEIGHT + 16
-	panel.offset_bottom = HEADER_HEIGHT + 56
+func _build_time_controls(parent: Container) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 4)
-	panel.add_child(row)
+	parent.add_child(row)
 	for speed in [0, 1, 2, 5, 10]:
 		var label: String = "Ⅱ" if speed == 0 else "%d×" % speed
 		var button: Button = _button(label, _set_time_speed.bind(int(speed)), row)
 		button.toggle_mode = true
 		button.focus_mode = Control.FOCUS_NONE
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.custom_minimum_size.x = 42
 		time_buttons[speed] = button
 	diagnostic_button = _button("Perf", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, row)
 	diagnostic_button.tooltip_text = "Toggle local performance diagnostics"
@@ -1945,7 +2013,7 @@ func _update_resource_hover() -> void:
 		if global_resource_tiles[key].get_global_rect().has_point(mouse):
 			resource = key
 			break
-	if resource.is_empty() and planet_overview.is_visible_in_tree() and not _planet().is_empty():
+	if resource.is_empty() and planet_overview.is_visible_in_tree() and overview_panel.get_global_rect().has_point(mouse) and not _planet().is_empty():
 		if population_label.get_parent().get_global_rect().has_point(mouse):
 			resource = "local:population"
 		else:
@@ -1976,8 +2044,11 @@ func _update_resource_hover() -> void:
 		tile_rect = global_resource_tiles[resource].get_global_rect()
 	var viewport: Vector2 = get_viewport_rect().size
 	var width: float = minf(420.0, viewport.x - 16.0)
-	resource_hover_panel.size = Vector2(width, minf(viewport.y - tile_rect.end.y - 12.0, maxf(105.0, 20.0 * float(value.count("\n") + 2))))
-	resource_hover_panel.global_position = Vector2(clampf(tile_rect.position.x, 8.0, viewport.x - width - 8.0), tile_rect.end.y)
+	var available: float = tile_rect.position.y - 8.0 if local else viewport.y - tile_rect.end.y - 8.0
+	var height: float = minf(maxf(40.0, available), maxf(105.0, 20.0 * float(value.count("\n") + 2)))
+	resource_hover_panel.size = Vector2(width, height)
+	var popup_y: float = tile_rect.position.y - height if local else tile_rect.end.y
+	resource_hover_panel.global_position = Vector2(clampf(tile_rect.position.x, 8.0, viewport.x - width - 8.0), clampf(popup_y, 8.0, maxf(8.0, viewport.y - height - 8.0)))
 	resource_hover_panel.show()
 
 func _refresh_global_bar(state: Dictionary) -> void:
@@ -2024,16 +2095,18 @@ func _refresh_global_bar(state: Dictionary) -> void:
 	global_resource_fills["population"] = 1.0 if population_total > 0.0 else 0.0
 	global_resource_strips["population"].queue_redraw()
 
-func _inspector_page(title_text: String) -> VBoxContainer:
+func _inspector_page(title_text: String) -> GridContainer:
 	var scroll := ScrollContainer.new()
 	scroll.name = title_text
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_tabs.add_child(scroll)
-	var page := VBoxContainer.new()
-	page.add_theme_constant_override("separation", 8)
+	var page := GridContainer.new()
+	page.add_theme_constant_override("h_separation", 5)
+	page.add_theme_constant_override("v_separation", 5)
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(page)
+	command_grids[title_text] = page
 	return page
 
 func _state() -> Dictionary:
@@ -2149,7 +2222,10 @@ func _refresh() -> void:
 		selected_yard = -1
 	inspector_panel.visible = (not p.is_empty() or other_selected) and not body_selected and not yard_selected
 	overview_panel.visible = (not p.is_empty() or other_selected)
+	empty_selection.visible = not overview_panel.visible
+	overview_panel.size_flags_horizontal = Control.SIZE_FILL if inspector_panel.visible else Control.SIZE_EXPAND_FILL
 	planet_overview.visible = not other_selected and not body_selected and not yard_selected
+	yard_panel.visible = size.x >= CONSOLE_WIDE_WIDTH and overview_panel.visible and planet_overview.visible
 	body_overview.visible = body_selected
 	yard_overview.visible = yard_selected
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
@@ -2660,9 +2736,20 @@ func _reset_view() -> void:
 	pan = Vector2.ZERO
 	map_canvas.queue_redraw()
 
-# Fixed reference viewport: opening or closing the inspector only changes clipping.
+# The bottom console reserves a fixed viewport, independent of selection.
 func _projection_size() -> Vector2:
-	return Vector2(maxf(1.0, size.x - PANEL_WIDTH - OVERVIEW_WIDTH - 32.0), map_canvas.size.y)
+	return map_canvas.size.max(Vector2.ONE)
+
+func _map_resized() -> void:
+	var fit: float = _fit()
+	# Preserve the world position at the camera center as UI scale or
+	# window dimensions change, rather than retaining an old pixel offset.
+	if previous_map_fit > 0.0:
+		var next_zoom: float = minf(zoom, _max_zoom())
+		pan *= fit * next_zoom / (previous_map_fit * zoom)
+		zoom = next_zoom
+	previous_map_fit = fit
+	map_canvas.queue_redraw()
 
 func _map_size() -> Vector2:
 	return _state().get("map", {}).get("size", MAP.SIZE)
@@ -2673,13 +2760,13 @@ func _fit() -> float:
 	return maxf(0.0001, minf(area.x / bounds.x, area.y / bounds.y))
 
 func _screen_point(point: Vector2) -> Vector2:
-	return Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5 + pan + (point - _map_size() * 0.5) * _fit() * zoom
+	return _camera_center() + pan + (point - _map_size() * 0.5) * _fit() * zoom
 
 func _world_point(point: Vector2) -> Vector2:
-	return _map_size() * 0.5 + (point - Vector2(OVERVIEW_WIDTH + 8.0, 0.0) - _projection_size() * 0.5 - pan) / (_fit() * zoom)
+	return _map_size() * 0.5 + (point - _camera_center() - pan) / (_fit() * zoom)
 
 func _camera_center() -> Vector2:
-	return Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5
+	return _projection_size() * 0.5
 
 func _max_zoom() -> float:
 	# Scale the close-up ceiling to the actual viewport and map fit. At
@@ -2762,7 +2849,7 @@ func _body_texture(body: Dictionary) -> Texture2D:
 	return body["texture"]
 
 func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
-	if not get_viewport_rect().grow(radius + 32.0).has_point(pos):
+	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(pos):
 		return
 	var system: Dictionary = state["planets"][index]
 	var color: Color = _planet_color(system)
@@ -2779,7 +2866,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 				_draw_elliptical_orbit(pos, orbit, Color(tint, 0.20))
 			var point: Vector2 = pos + _body_position(body, radius, game_visual_clock)
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
-			if get_viewport_rect().grow(body_radius).has_point(point):
+			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
 					map_canvas.draw_texture_rect(_body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false)
 				else:
@@ -2849,7 +2936,7 @@ func _body_hit(point: Vector2, state: Dictionary) -> int:
 	if zoom < 2.0 or radius < 18.0:
 		return -1
 	var center: Vector2 = _screen_point(state["map"]["points"][selected])
-	if not get_viewport_rect().grow(radius + 32.0).has_point(center):
+	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(center):
 		return -1
 	var bodies: Array = _system_visual(selected, state)["bodies"]
 	var hit: int = -1
@@ -3286,7 +3373,7 @@ func _cycle_owned_system(direction: int) -> void:
 	var desired_radius: float = minf(_projection_size().x, _projection_size().y) * 0.27
 	var radius_per_zoom: float = minf(RADIUS * float(state["planets"][selected].get("size_factor", 1.0)), float(_system_visual(selected, state)["spacing"]) * _fit() * 0.39)
 	zoom = clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, OVERVIEW_MAX_ZOOM)
-	var center: Vector2 = Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5
+	var center: Vector2 = _camera_center()
 	pan += center - _screen_point(world)
 	_load_thresholds()
 	_refresh()
@@ -3518,7 +3605,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 			continue
 		var pos: Vector2 = _screen_point(points[i])
 		var radius: float = _planet_radius(i, state)
-		if not get_viewport_rect().grow(radius + 80.0).has_point(pos):
+		if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 80.0).has_point(pos):
 			continue
 		var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * zoom
 		var scale: float = clampf(spacing / 150.0, 0.22, 1.0)
@@ -3744,7 +3831,7 @@ func _draw_map() -> void:
 	if asteroid_cache_seed != seed_value:
 		asteroid_shape_cache.clear()
 		asteroid_cache_seed = seed_value
-	var viewport_bounds: Rect2 = get_viewport_rect()
+	var viewport_bounds := Rect2(Vector2.ZERO, map_canvas.size)
 	var render_scale: float = _fit() * zoom
 	var points: Array = state["map"]["points"]
 	for edge in state["map"]["edges"]:
