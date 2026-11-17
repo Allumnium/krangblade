@@ -45,6 +45,7 @@ var inspector_tabs: TabContainer
 var asteroid_shape_cache: Dictionary = {}
 var asteroid_cache_seed: int = -1
 var habitation_card: Dictionary = {}
+var orbital_card: Dictionary = {}
 var population_label: Label
 var raw_antimatter_label: Label
 var population_delta_label: Label
@@ -520,7 +521,7 @@ func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
 	return card
 
 func _detail_cards() -> Array:
-	return build_cards.values() + economy_cards.values() + yard_activity_rows.values() + [warehouse_card, habitation_card, pds_card]
+	return build_cards.values() + economy_cards.values() + yard_activity_rows.values() + [warehouse_card, habitation_card, orbital_card, pds_card]
 
 func _card_tab(card: Dictionary) -> Node:
 	var node: Node = card["header"]
@@ -861,6 +862,13 @@ func _build_economy_cards(parent: Container) -> void:
 	HUD.action(habitation_card["button"])
 	habitation_card["repeat"] = _repeat_button(habitation_card["actions"], "habitation")
 	warehouse_card["repeat"] = _repeat_button(warehouse_card["actions"], "warehouse")
+	var orbital_section: VBoxContainer = HUD.section(parent, "")
+	orbital_section.get_child(0).hide()
+	orbital_card = _make_disclosure(orbital_section, "Orbital Eco-Housing")
+	var orbital_detail: Label = _label("", 12)
+	orbital_card["body"].add_child(orbital_detail)
+	orbital_card.merge({"section": orbital_section, "button": _card_action(orbital_card, "Build", _operation.bind("economy", "orbital_housing")), "detail": orbital_detail, "costs": _cost_grid(orbital_card["summary"])})
+	HUD.action(orbital_card["button"])
 	for resource in ECONOMY.RESOURCES:
 		var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
 		var section: VBoxContainer = HUD.section(parent, "")
@@ -919,6 +927,16 @@ func _economy_building_effect(p: Dictionary, resource: String) -> String:
 	return "\n".join(lines)
 
 func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
+	var has_planets: bool = ECONOMY.has_planets(p)
+	habitation_card["header"].get_parent().get_parent().visible = has_planets
+	orbital_card["section"].visible = not has_planets
+	if not has_planets:
+		var residents: float = float(p["population"])
+		_disclosure_title(orbital_card, "Orbital Eco-Housing · %d" % int(p.get("orbital_housing", 0)))
+		orbital_card["detail"].text = "Population: %s → %s (+5,000)\nCivilian consumption: 0 t/yr (all resources)\nNo natural growth or habitation limit. Repeatable." % [_compact_amount(residents), _compact_amount(residents + ECONOMY.ORBITAL_HOUSING_POPULATION)]
+		orbital_card["button"].disabled = not owned or not ECONOMY.orbital_housing_available(p)
+		_set_timed_action(orbital_card["button"], "Build", 0.0)
+		_show_cost(orbital_card["costs"], ECONOMY.ORBITAL_HOUSING_COST)
 	var habitat_level: int = int(p.get("habitation_level", 0))
 	_disclosure_title(habitation_card, "Habitation technology · Lv %d" % habitat_level)
 	var penalty: float = -100.0 * ECONOMY.overpopulation_penalty(p)
@@ -958,6 +976,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 	for resource in economy_cards:
 		var card: Dictionary = economy_cards[resource]
 		var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
+		card["header"].get_parent().get_parent().visible = has_planets or ECONOMY.production_available(p, resource)
 		var installed: int = int(p.get("buildings", {}).get(resource, 0))
 		card["effect"].text = _economy_building_effect(p, resource)
 		var job: Dictionary = {}
@@ -1115,6 +1134,10 @@ func _pds_action() -> void:
 		_cancel_job(int(job["id"]))
 
 func _refresh_pds(planet: Dictionary, owned: bool) -> void:
+	var has_planets: bool = ECONOMY.has_planets(planet)
+	pds_card["header"].get_parent().get_parent().visible = has_planets
+	if not has_planets:
+		return
 	var defenses: Dictionary = planet.get("pds", {})
 	var count: int = defenses.size()
 	var limit: int = int(planet["planet_count"])
@@ -2070,7 +2093,7 @@ func _refresh() -> void:
 	var owner: int = int(p["owner"])
 	var roster: Dictionary = session.get("players")
 	var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
-	info.text = _system_name(selected)
+	info.text = _system_name(selected) + (" · No planets" if not ECONOMY.has_planets(p) else "")
 	info.tooltip_text = info.text + (" · Home" if bool(p["home"]) else "")
 	system_owner_label.text = name_text
 	system_owner_label.tooltip_text = name_text
@@ -2487,8 +2510,10 @@ func _leave() -> void:
 
 func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) -> void:
 	var neutral: bool = not p.is_empty() and int(p.get("owner", -1)) == 0 and phase == "match"
-	colony_picker.visible = neutral
+	var empty_system: bool = neutral and not ECONOMY.has_planets(p)
+	colony_picker.visible = neutral and not empty_system
 	send_colony_button.visible = neutral
+	send_colony_button.text = "CAPTURE WITH FIGHTERS" if empty_system else "SEND COLONY SHIP"
 	var choices: Array[int] = []
 	var labels: Array[String] = []
 	if neutral:
@@ -2617,7 +2642,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 	var system: Dictionary = state["planets"][index]
 	var color: Color = _planet_color(system)
 	var star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
-	var star_color: Color = Color("#fff0c4").lerp(color.lightened(0.25), 0.30)
+	var star_color: Color = Color("#fff0c4").lerp(color.lightened(0.25), 0.30) if ECONOMY.has_planets(system) else Color("#8ea2bc")
 	if index == selected and zoom >= 2.0 and radius >= 18.0:
 		var bodies: Array = _system_visual(index, state)["bodies"]
 		for slot in range(bodies.size()):

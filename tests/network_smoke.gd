@@ -28,6 +28,7 @@ var saw_loading: bool = false
 var preview_seed: int = 0
 var mode: String = "normal"
 const MAP = preload("res://scripts/planet_map.gd")
+const RULES = preload("res://scripts/lobby_rules.gd")
 
 func _expected_layout() -> String:
 	return ("Grid" if expected_players == 2 else "Hex Grid") if mode == "normal" else MAP.DEFAULT_LAYOUT
@@ -159,6 +160,12 @@ func _phase_changed() -> void:
 			return
 		if mode == "normal":
 			if role == "host":
+				var ordered: Array[int] = RULES.ordered_peers(roster)
+				for index in range(ordered.size()):
+					var outpost: Dictionary = state["planets"][int(state["map"]["planetless"][index])]
+					outpost["owner"] = ordered[index]
+					for resource in ECON.ORBITAL_HOUSING_COST:
+						outpost["stock"][resource] = ECON.ORBITAL_HOUSING_COST[resource]
 				for system in state["planets"]:
 					if bool(system["home"]):
 						system["population"] = 150000.0
@@ -359,6 +366,11 @@ func _check_economy_sync() -> void:
 		create_timer(0.25).timeout.connect(_check_economy_sync)
 		return
 	var self_id: int = session.multiplayer.get_unique_id()
+	var outpost_index: int = int(state["map"]["planetless"][home_index])
+	if not bool(get_meta("orbital_sent", false)) and int(state["planets"][outpost_index]["owner"]) == self_id:
+		set_meta("orbital_sent", true)
+		session.call("request_operation", outpost_index, "economy", "orbital_housing")
+		session.call("request_operation", int(state["map"]["planetless"][(home_index + 1) % expected_players]), "economy", "orbital_housing")
 	if not commands_sent and home_index >= 0 and ECON.discovered(state, self_id, "fields", 0):
 		_send_commands()
 		state = session.get("economy")
@@ -509,7 +521,11 @@ func _check_economy_sync() -> void:
 			next_diagnostic = float(state["elapsed"]) + 10.0
 			print("DEBUG: economy elapsed=", state["elapsed"], " verified=", verified, "/", expected_players, " cancel=", cancel_sent, " stack=", yard_rebuilt, " ships=", state["ships"].size())
 		var view: Node = current_scene
-		if cancel_sent and yard_rebuilt and verified == expected_players and view != null and view.has_method("_update_trade_stock"):
+		var orbital_verified: bool = true
+		for index in range(expected_players):
+			var outpost: Dictionary = state["planets"][int(state["map"]["planetless"][index])]
+			orbital_verified = orbital_verified and int(outpost.get("orbital_housing", 0)) == 1 and float(outpost["population"]) == ECON.ORBITAL_HOUSING_POPULATION
+		if cancel_sent and yard_rebuilt and verified == expected_players and orbital_verified and view != null and view.has_method("_update_trade_stock"):
 			view.set("selected", home_index)
 			view.call("_load_thresholds")
 			view.call("_refresh")

@@ -29,6 +29,30 @@ static func cluster_count_for(player_count: int, layout: String) -> int:
 		return floori(float(dimensions.x * dimensions.y) / 8.0)
 	return maxi(3, player_count) * 3 if layout == "Radial" else player_count * 3
 
+static func planetless_systems(seed_value: int, count: int, edges: Array, homes: int) -> Array[int]:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value + 176911
+	var protected: Dictionary = {}
+	for home in range(homes):
+		protected[home] = true
+		for edge in edges:
+			var neighbor: int = edge[1] if edge[0] == home else (edge[0] if edge[1] == home else -1)
+			if neighbor >= homes:
+				protected[neighbor] = true
+				break
+	var candidates: Array[int] = []
+	for index in range(homes, count):
+		if not protected.has(index):
+			candidates.append(index)
+	for index in range(candidates.size() - 1, 0, -1):
+		var other: int = rng.randi_range(0, index)
+		var swap: int = candidates[index]
+		candidates[index] = candidates[other]
+		candidates[other] = swap
+	candidates.resize(mini(candidates.size(), floori(float(count) * 0.5)))
+	candidates.sort()
+	return candidates
+
 static func generate(seed_value: int, player_count: int = 3, layout: String = DEFAULT_LAYOUT) -> Dictionary:
 	if not valid_layout(layout):
 		layout = DEFAULT_LAYOUT
@@ -322,7 +346,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 				chunk["resource"] = ANTIMATTER
 	_insert_standalone_systems(points, clusters, edges, fields, distance_scale)
 	_assign_field_lanes(points, edges, fields, player_count)
-	return {"seed": seed_value, "layout": layout, "hex_slots": [], "antimatter_home_clearance": ANTIMATTER_CLEARANCE * distance_scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
+	return {"seed": seed_value, "layout": layout, "planetless": planetless_systems(seed_value, points.size(), edges, player_count), "hex_slots": [], "antimatter_home_clearance": ANTIMATTER_CLEARANCE * distance_scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
 
 # Insert neutral systems along the existing bridge routes. Preserve the
 # longest original lane and all existing home indices, fields and paths.
@@ -525,7 +549,7 @@ static func _generate_hex(seed_value: int, player_count: int, rng: RandomNumberG
 			for chunk in field["chunks"]:
 				chunk["resource"] = ANTIMATTER
 	_assign_field_lanes(points, edges, fields, player_count)
-	return {"seed": seed_value, "layout": "Hex Grid", "hex_slots": slots, "antimatter_home_clearance": ANTIMATTER_CLEARANCE * scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": degrees.count(3)}
+	return {"seed": seed_value, "layout": "Hex Grid", "planetless": planetless_systems(seed_value, points.size(), edges, player_count), "hex_slots": slots, "antimatter_home_clearance": ANTIMATTER_CLEARANCE * scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": degrees.count(3)}
 
 # Asteroids and stars share a single degree budget. Reserve one lane per
 # special field first, then ordinary fields, then add nearby spare links

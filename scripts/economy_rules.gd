@@ -26,6 +26,8 @@ const CONSTRUCTION_RESERVE: float = 500.0
 const CONSTRUCTION_PRODUCTION_SHARE: float = 0.1
 # Population is expressed in people (fractional values retained in simulation).
 const HOME_POPULATION: float = 10000.0
+const ORBITAL_HOUSING_POPULATION: float = 5000.0
+const ORBITAL_HOUSING_COST: Dictionary = {"Metals": 180.0, "Plastics": 80.0, "Textiles": 40.0, "Tech": 40.0}
 const COLONY_POPULATION: float = 40000.0
 const POPULATION_DOUBLING_YEARS: float = 30.0
 const PRODUCTION_PER_LEVEL: float = 4.0
@@ -86,6 +88,8 @@ const REPAIR_SAFE_RADIUS: float = LASER_RANGE * 2.0
 # Decorative bodies are derived from immutable system data, not simulated entities.
 # Separate RNG keeps the economy's seeded resource generation unchanged.
 static func system_bodies(system: Dictionary, seed_value: int, index: int) -> Array:
+	if not has_planets(system):
+		return []
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value + 31013 + index * 7919
 	var weights: Dictionary = {}
@@ -168,6 +172,14 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 			ai_players.append(id)
 	var state: Dictionary = {"ai_players": ai_players, "ai_waves": {}, "operations": {}, "next_operation_id": 1, "next_ai": 0.0, "map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "military": {}}
 	for index in range(planets.size()):
+		var system: Dictionary = planets[index]
+		system["planetless"] = not bool(system["home"]) and map_data.get("planetless", []).has(index)
+		system["orbital_housing"] = 0
+		if not has_planets(system):
+			for resource in EXTRACTED:
+				system["abundance"][resource] = 0.0
+			system["bonuses"]["Organics"] = 1.0
+			system["bonuses"]["Crystals"] = 1.0
 		planets[index]["planet_count"] = system_bodies(planets[index], int(map_data["seed"]), index).size()
 	if starting_fleet:
 		for index in range(ordered.size()):
@@ -340,7 +352,7 @@ static func planet_teams(state: Dictionary) -> Array[int]:
 ## Colony ships can traverse allied worlds, with one final edge into a neutral world.
 static func colony_path(state: Dictionary, player: int, ship: Dictionary, target: int) -> Array[int]:
 	var planets: Array = state.get("planets", [])
-	if target < 0 or target >= planets.size() or int(planets[target]["owner"]) != 0:
+	if target < 0 or target >= planets.size() or int(planets[target]["owner"]) != 0 or not has_planets(planets[target]):
 		return []
 	if int(ship["owner"]) != player or ship.get("kind", "ship") != "colony_ship" or not (ship["route"] as Array).is_empty():
 		return []
@@ -373,7 +385,7 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 	if not _move(state, ship, dt) or int(ship["dest"]) < 0:
 		return false
 	var at: int = int(ship["at"])
-	if int(state["planets"][at]["owner"]) == 0:
+	if int(state["planets"][at]["owner"]) == 0 and has_planets(state["planets"][at]):
 		var colony: Dictionary = state["planets"][at]
 		colony["owner"] = int(ship["owner"])
 		colony["population"] = float(ship.get("crew", COLONY_POPULATION))
@@ -399,12 +411,30 @@ static func building_multiplier(planet: Dictionary, resource: String) -> float:
 static func production_level(planet: Dictionary, resource: String) -> int:
 	return maxi(int(planet["levels"][resource]), 1 if int(planet.get("buildings", {}).get(resource, 0)) > 0 else 0)
 
+static func has_planets(system: Dictionary) -> bool:
+	return not bool(system.get("planetless", false))
+
+static func orbital_housing_available(p: Dictionary) -> bool:
+	return not has_planets(p) and int(p.get("owner", 0)) != 0 and affordable(p, ORBITAL_HOUSING_COST)
+
+static func _buy_orbital_housing(p: Dictionary) -> bool:
+	if not orbital_housing_available(p):
+		return false
+	for resource in ORBITAL_HOUSING_COST:
+		_spend_material(p, "Construction: orbital housing", resource, float(ORBITAL_HOUSING_COST[resource]))
+	p["orbital_housing"] = int(p.get("orbital_housing", 0)) + 1
+	p["population"] = float(p["population"]) + ORBITAL_HOUSING_POPULATION
+	p["population_velocity"] = 0.0
+	return true
+
 static func overpopulation_penalty(planet: Dictionary, capacity_factor: float = 1.0) -> float:
+	if not has_planets(planet):
+		return 0.0
 	var fraction: float = clampf(float(planet["population"]) / (habitation_capacity(planet) * capacity_factor), 0.0, 1.0)
 	return 1.0 - pow(1.0 - fraction, 3.0)
 
 static func farm_potential(planet: Dictionary) -> float:
-	if int(planet["owner"]) == 0:
+	if int(planet["owner"]) == 0 or not has_planets(planet):
 		return 0.0
 	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0))
 
@@ -412,6 +442,8 @@ static func population_capacity(planet: Dictionary) -> float:
 	return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
 
 static func habitation_capacity(planet: Dictionary) -> float:
+	if not has_planets(planet):
+		return 0.0
 	return 5000000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0)))
 
 static func population_multiplier(planet: Dictionary) -> float:
@@ -421,10 +453,12 @@ static func population_growth(planet: Dictionary) -> float:
 	return float(planet.get("population_velocity", 0.0))
 
 static func organics_demand(planet: Dictionary) -> float:
+	if not has_planets(planet):
+		return 0.0
 	return float(planet["population"]) / POPULATION_PER_ORGANICS_RATE
 
 static func consumption(planet: Dictionary, resource: String) -> float:
-	if int(planet["owner"]) == 0:
+	if int(planet["owner"]) == 0 or not has_planets(planet):
 		return 0.0
 	if resource == "Organics":
 		return organics_demand(planet)
@@ -453,7 +487,7 @@ static func net_rate(planet: Dictionary, resource: String) -> float:
 	return net
 
 static func rate(planet: Dictionary, resource: String) -> float:
-	if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0:
+	if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0 or (not has_planets(planet) and resource in ["Metals", "Crystals", "Organics"]):
 		return 0.0
 	var level: int = production_level(planet, resource)
 	if resource == "Organics":
@@ -478,6 +512,9 @@ static func rate(planet: Dictionary, resource: String) -> float:
 	return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func _update_population(planet: Dictionary, dt: float) -> void:
+	if not has_planets(planet):
+		planet["population_velocity"] = 0.0
+		return
 	# Exact solution of x'' + 2*w*x' + w*w*(x-target) = 0
 	# for a constant target during this tick. Stable even for large dt.
 	var current: float = float(planet["population"])
@@ -610,6 +647,8 @@ static func production_population(resource: String, level: int) -> int:
 	return maxi(1000, 10000 * (level - 1))
 
 static func production_available(p: Dictionary, resource: String) -> bool:
+	if not has_planets(p) and resource in ["Metals", "Crystals", "Organics"]:
+		return false
 	return RESOURCES.has(resource) and (not MINED_RESOURCES.has(resource) or float(p["abundance"].get(resource, 0.0)) > 0.0)
 
 static func production_unlocked(p: Dictionary, resource: String) -> bool:
@@ -638,7 +677,7 @@ static func habitation_cost(p: Dictionary) -> Dictionary:
 	return {"Metals": 600.0 * factor, "Tech": 100.0 * factor, "Plastics": 150.0 * factor}
 
 static func habitation_available(p: Dictionary) -> bool:
-	return int(p.get("habitation_level", 0)) < 3 and affordable(p, habitation_cost(p))
+	return has_planets(p) and int(p.get("habitation_level", 0)) < 3 and affordable(p, habitation_cost(p))
 
 static func _buy_habitation(p: Dictionary) -> bool:
 	if not habitation_available(p):
@@ -711,6 +750,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 			target = str(slot)
 			level = slot + 1
 		"economy":
+			if target == "orbital_housing":
+				return _buy_orbital_housing(p)
 			if target == "habitation":
 				return _buy_habitation(p)
 			if target == "warehouse":
@@ -750,7 +791,7 @@ static func _continuous_target(p: Dictionary, key: String) -> Array:
 	if SHIP_KINDS.has(key):
 		return [key, ""] if key != "ship" or bool(p["home"]) else []
 	if key in ["warehouse", "habitation"]:
-		return [key, ""]
+		return [key, ""] if key != "habitation" or has_planets(p) else []
 	if key.begins_with("economy_building:"):
 		var resource: String = key.trim_prefix("economy_building:")
 		if ECONOMY_BUILDINGS.has(resource) and production_available(p, resource):
@@ -2296,7 +2337,7 @@ static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, 
 		for node in adjacency[current]:
 			var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[node])
 			if teams[node] == 0:
-				if not reserved.has(node) and discovered(state, player, "planets", int(node)):
+				if has_planets(state["planets"][node]) and not reserved.has(node) and discovered(state, player, "planets", int(node)):
 					var richness: float = float(state["planets"][node]["abundance"].get("Metals", 0.0))
 					var score: float = distance / (1.0 + minf(richness, 2.0) * 0.15)
 					if score < best:
@@ -2371,6 +2412,9 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		var p: Dictionary = planets[index]
 		if not (p["queue"] as Array).is_empty():
 			continue
+		if not has_planets(p) and float(p["population"]) < ORBITAL_HOUSING_POPULATION:
+			_buy_orbital_housing(p)
+			continue
 		var level: int = production_level(p, "Metals") + int(p.get("buildings", {}).get("Metals", 0))
 		var abundance: float = float(p["abundance"].get("Metals", 0.0))
 		var farm: int = production_level(p, "Organics") + int(p.get("buildings", {}).get("Organics", 0))
@@ -2415,7 +2459,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 			elif abundance > 0.0 and level < 4 and rate(p, "Metals") < PLANET_MINING_LIMIT:
 				action = "economy"
 				target = "Metals"
-			elif farm < 3 and float(p["population"]) > population_capacity(p) * 0.8:
+			elif has_planets(p) and farm < 3 and float(p["population"]) > population_capacity(p) * 0.8:
 				action = "economy"
 				target = "Organics"
 			elif (p["yards"] as Array).is_empty():
@@ -2511,6 +2555,15 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 			if distance < nearest:
 				goal = node
 				nearest = distance
+	if goal < 0:
+		var nearest_empty: float = INF
+		for node in pois:
+			if node >= planets.size() or int(planets[node]["owner"]) != 0 or has_planets(planets[node]):
+				continue
+			var distance: float = center.distance_squared_to(points[node])
+			if distance < nearest_empty:
+				goal = node
+				nearest_empty = distance
 	# Keep a three-fighter attack cohort affordable. Small empires attack
 	# together in peace and defend together when threatened.
 	var defense_weight: int = 100 if goal < 0 else 0
@@ -3138,7 +3191,7 @@ static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> v
 		if combat_position(state, graph, ship).distance_to(points[node]) > AI_RALLY_RADIUS:
 			continue
 		var owner: int = int(planets[node]["owner"])
-		if owner == 0 or state["teams"].get(owner, 0) == state["teams"].get(player, 0):
+		if (owner == 0 and has_planets(planets[node])) or (owner != 0 and state["teams"].get(owner, 0) == state["teams"].get(player, 0)):
 			continue
 		if not occupiers.has(node):
 			occupiers[node] = {}
@@ -3188,7 +3241,7 @@ static func update_match_outcome(state: Dictionary) -> bool:
 	for planet in state["planets"]:
 		var owner: int = int(planet["owner"])
 		if owner == 0:
-			neutral_exists = true
+			neutral_exists = neutral_exists or has_planets(planet)
 		else:
 			viable[owner] = true
 	if neutral_exists:
