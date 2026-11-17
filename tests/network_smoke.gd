@@ -249,6 +249,8 @@ func _send_commands() -> void:
 	session.call("request_fighter_move", [own_fighters[0]], field_node)
 	session.call("request_fighter_move", [own_fighters[0]], -1)
 	session.call("request_fighter_move", [own_fighters[0], enemy_fighter], home_index)
+	session.call("request_fighter_hold", [own_fighters[1]])
+	session.call("request_fighter_hold", [own_fighters[0], enemy_fighter])
 	session.call("request_thresholds", home_index, "Metals", 15.0, 65.0)
 	# Invalid and unauthorized threshold requests must not win.
 	session.call("request_thresholds", home_index, "Metals", 99.0, 101.0)
@@ -382,7 +384,7 @@ func _check_economy_sync() -> void:
 				if int(craft["owner"]) == owner and craft["kind"] == "fighter":
 					if craft.get("operation_target", -1) == field_node and craft.get("direct_order", false):
 						ordered += 1
-					elif not craft.get("direct_order", false):
+					elif craft.get("holding", false) and state["planets"][int(craft["at"])]["owner"] == owner and (craft["route"] as Array).is_empty():
 						idle += 1
 			var checks: Dictionary = {
 				"no_policies": not state.has("policies") && not flags.has("production:Organics"),

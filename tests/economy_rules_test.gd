@@ -26,6 +26,7 @@ func _test_maintain_targets() -> void:
 func _initialize() -> void:
 	_test_freighter_bays()
 	_test_recovery_economy()
+	_test_opening_pacing()
 	_test_neutral_direct_occupation()
 	_test_idle_formations()
 	_test_depleted_field_routes()
@@ -357,6 +358,7 @@ func _initialize() -> void:
 	refund_home["levels"]["Metals"] = 0
 	refund_home["warehouse_level"] = 3
 	for kind in ["ship", "colony_ship", "fighter", "miner", "yard", "yard_upgrade", "production"]:
+		refund_home["population"] = 150000.0 if kind == "colony_ship" else ECON.HOME_POPULATION
 		for material in ECON.RESOURCES:
 			refund_home["stock"][material] = 10000.0
 		var target: String = "0" if kind == "yard_upgrade" else ("Organics" if kind == "production" else "")
@@ -1124,7 +1126,7 @@ func _initialize() -> void:
 			remaining_stock[material] -= float(cost[material])
 			assert(float(remaining_stock[material]) >= 0.0)
 	assert(float(remaining_stock["Metals"]) < float(ECON._cost("fighter", 1)["Metals"]))
-	assert(ECON._cost("fighter", 1) == {"Metals": 270.0, "Plastics": 60.0, "Textiles": 30.0, "Organics": 30.0, "Tech": 30.0})
+	assert(ECON._cost("fighter", 1) == {"Metals": 270.0, "Plastics": 60.0, "Textiles": 30.0, "Organics": 10.0, "Tech": 30.0})
 	var tech_rate: float = ECON.rate(industry, "Tech")
 	industry["population"] = 20000.0
 	assert(is_equal_approx(ECON.rate(industry, "Tech"), tech_rate * 2.0))
@@ -1226,11 +1228,11 @@ func _initialize() -> void:
 	depot["levels"]["Tech"] = 1
 	depot["population"] = 100000.0
 	var capped_output: float = ECON.rate(depot, "Tech")
-	assert(is_equal_approx(capped_output, 5.0))
-	depot["population"] = 200000.0
+	assert(is_equal_approx(capped_output, 10.0))
+	depot["population"] = 400000.0
 	assert(is_equal_approx(ECON.rate(depot, "Tech"), capped_output))
 	assert(is_equal_approx(ECON.rate(depot, "Tech"), ECON.consumption(depot, "Tech")))
-	depot["population"] = 300000.0
+	depot["population"] = 500000.0
 	assert(ECON.rate(depot, "Tech") < ECON.consumption(depot, "Tech"))
 	print("PASS: storage caps, three warehouse levels, no baseline crystals, linear consumption and industrial equilibrium")
 	# Formation slots are persistent, shared by AI/human operations, and
@@ -1326,7 +1328,7 @@ func _initialize() -> void:
 	crew_home["population"] = 150000.0
 	for kind in ECON.SHIP_KINDS:
 		var people: float = float(ECON.CREW_COSTS[kind])
-		assert(people == float({"colony_ship": 100000.0, "ship": 2000.0, "fighter": 500.0, "miner": 750.0}[kind]))
+		assert(people == float({"colony_ship": 40000.0, "ship": 2000.0, "fighter": 500.0, "miner": 750.0}[kind]))
 		assert(ECON.enqueue(crew_state, 1, 0, kind))
 		var crew_job: Dictionary = crew_home["queue"][0]
 		var original_population: float = float(crew_home["population"])
@@ -1484,6 +1486,19 @@ func _test_neutral_direct_occupation() -> void:
 	state["ships"].pop_back()
 	assert(ECON.command_fighters(state, 1, [9400], neutral))
 	assert(ECON.command_fighters(state, 1, [9401], field))
+	ECON.step(state, 0.1)
+	var held: Dictionary = state["ships"][0]
+	var halted: Vector2 = held["position"]
+	assert(not ECON.hold_fighters(state, 1, [9400, 9999]))
+	assert(not ECON.hold_fighters(state, 1, [9400, 9400]))
+	assert(not ECON.hold_fighters(state, 2, [9400]))
+	assert(not held.get("holding", false))
+	assert(ECON.hold_fighters(state, 1, [9400]))
+	for tick in range(20):
+		ECON.step(state, 0.1)
+		assert(held["position"] == halted)
+	assert(ECON.command_fighters(state, 1, [9400], neutral))
+	assert(not held["holding"])
 	for tick in range(300):
 		ECON.step(state, 1.0)
 		if state["ships"][0]["route"].is_empty() and state["ships"][1]["route"].is_empty():
@@ -1691,8 +1706,8 @@ func _test_freighter_bays() -> void:
 	for bay in bays:
 		assert(bay.size() == 1 and bay[0]["resource"] == "Metals")
 		assert(is_equal_approx(float(bay[0]["amount"]), ECON.FREIGHTER_BAY_CAPACITY))
-	cargo["Metals"] = 4.0
-	cargo["Plastics"] = 6.0
+	cargo["Metals"] = 12.0
+	cargo["Plastics"] = 18.0
 	var totals: Dictionary = ECON.empty_stock()
 	for bay in ECON.freighter_cargo_bays(cargo):
 		var bay_total: float = 0.0
@@ -1700,8 +1715,8 @@ func _test_freighter_bays() -> void:
 			totals[segment["resource"]] += float(segment["amount"])
 			bay_total += float(segment["amount"])
 		assert(is_equal_approx(bay_total, ECON.FREIGHTER_BAY_CAPACITY))
-	assert(is_equal_approx(float(totals["Metals"]), 4.0))
-	assert(is_equal_approx(float(totals["Plastics"]), 6.0))
+	assert(is_equal_approx(float(totals["Metals"]), 12.0))
+	assert(is_equal_approx(float(totals["Plastics"]), 18.0))
 	cargo = ECON.empty_stock()
 	cargo["Tech"] = 0.5
 	bays = ECON.freighter_cargo_bays(cargo)
@@ -1809,6 +1824,21 @@ func _test_recovery_economy() -> void:
 	for resource in ECON.RESOURCES:
 		assert(not ECON.building_cost(p, resource).has(resource))
 		assert(ECON.building_available(p, resource))
+	assert(ECON.enqueue(state, 1, 0, "colony_ship"))
+	var colony_job: Dictionary = p["queue"][0]
+	var starting: float = float(p["population"])
+	assert("Population" in ECON.construction_blockers(p, colony_job))
+	assert(not ECON._advance(p, colony_job, 6.0))
+	assert(float(p["population"]) == starting and float(colony_job["progress"]) == 0.0)
+	p["population"] = ECON.COLONY_POPULATION + ECON.SHIPYARD_POPULATION[0]
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = ECON.storage_capacity(p)
+	assert(ECON._advance(p, colony_job, float(colony_job["work"])))
+	assert(is_equal_approx(float(p["population"]), ECON.SHIPYARD_POPULATION[0]))
+	assert(ECON.cancel(state, 1, 0, int(colony_job["id"])))
+	p["warehouse_level"] = 2
+	assert(ECON.construction_reserve(p, "Metals") == 4500.0)
+	p["warehouse_level"] = 0
 	p["population"] = 1000000.0
 	p["stock"] = ECON.empty_stock()
 	for resource in ["Metals", "Plastics", "Textiles", "Tech"]:
@@ -1836,3 +1866,28 @@ func _test_recovery_economy() -> void:
 	ECON._finish(state, 0, p, job)
 	assert(ECON.rate(p, "Crystals") > 0.0)
 	print("PASS: no self-cost recipes, depleted stock recovery, crystal bootstrap, overpopulation curve")
+
+func _test_opening_pacing() -> void:
+	# Allied AI isolates economic pacing from variable battle casualties.
+	# Use a one-year coarse tick for a fast repeatable balance smoke test.
+	for seed_value in [827, 123, 2468]:
+		var state: Dictionary = ECON.create(MAP.generate(seed_value, 2), {1: {"team": 1, "ai": true}, 2: {"team": 1, "ai": true}}, [1, 2])
+		var first_colony: int = -1
+		var owned: int = 0
+		var fighters: int = 0
+		var freighters: int = 0
+		for year in range(1, 361):
+			ECON.step(state, 1.0)
+			owned = 0
+			for p in state["planets"]:
+				if int(p["owner"]) == 1:
+					owned += 1
+			if owned > 1 and first_colony < 0:
+				first_colony = year
+		for ship in state["ships"]:
+			if int(ship["owner"]) == 1:
+				fighters += int(ship["kind"] == "fighter")
+				freighters += int(ship["kind"] == "ship")
+		assert(first_colony > 0 and first_colony <= 180)
+		assert(owned >= 4 and fighters >= 8 and freighters >= 1)
+		print("PASS pacing seed %d: first colony %d years, %d worlds, %d fighters, %d freighters at year 360" % [seed_value, first_colony, owned, fighters, freighters])
