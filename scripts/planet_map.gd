@@ -7,7 +7,7 @@ const LONGEST_LINK_YEARS: float = 100.0
 const MAX_CONNECTIONS: int = 3
 const EXTRA_LINK_CHANCE: float = 0.35
 const ANTIMATTER := "Raw antimatter"
-const LAYOUTS: Array[String] = ["Radial", "Grid", "Scramble"]
+const LAYOUTS: Array[String] = ["Radial", "Grid", "Hex Grid", "Scramble"]
 const DEFAULT_LAYOUT: String = "Radial"
 # Clearance from a starting system to the edge of a special field, before
 # the map's common travel-distance normalization.
@@ -16,7 +16,16 @@ const ANTIMATTER_CLEARANCE: float = 700.0
 static func valid_layout(layout: String) -> bool:
 	return LAYOUTS.has(layout)
 
+# A full, even-width patch of honeycomb vertices has closed hexagonal cells
+# even for small rosters. Round up rather than clipping the last row.
+static func hex_dimensions(player_count: int) -> Vector2i:
+	var columns: int = maxi(4, ceili(sqrt(float(player_count * 3)) / 2.0) * 2)
+	return Vector2i(columns, maxi(2, ceili(float(player_count * 3) / columns)))
+
 static func cluster_count_for(player_count: int, layout: String) -> int:
+	if layout == "Hex Grid":
+		var dimensions: Vector2i = hex_dimensions(player_count)
+		return dimensions.x * dimensions.y
 	return maxi(3, player_count) * 3 if layout == "Radial" else player_count * 3
 
 static func generate(seed_value: int, player_count: int = 3, layout: String = DEFAULT_LAYOUT) -> Dictionary:
@@ -65,6 +74,37 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			for sector in range(radial_sectors):
 				var angle: float = rotation + TAU * float(sector) / radial_sectors
 				centers.append(center + Vector2.from_angle(angle) * float(radius))
+	elif layout == "Hex Grid":
+		var dimensions: Vector2i = hex_dimensions(player_count)
+		var spacing: float = 1250.0
+		var lattice: Array[Vector2] = []
+		for row in range(dimensions.y):
+			for column in range(dimensions.x):
+				lattice.append(Vector2(650.0 + float(column) * sqrt(3.0) * spacing * 0.5, 650.0 + (float(row) * 1.5 + float((column + row) % 2) * 0.5) * spacing))
+		bounds = Vector2(1300.0 + float(dimensions.x - 1) * sqrt(3.0) * spacing * 0.5, 1300.0 + (float(dimensions.y - 1) * 1.5 + 0.5) * spacing)
+		# Seeded first corner, then maximize separation of successive homes.
+		var corners: Array[int] = [0, dimensions.x - 1, (dimensions.y - 1) * dimensions.x, lattice.size() - 1]
+		slots.clear()
+		slots.append(corners[layout_rng.randi_range(0, corners.size() - 1)])
+		while slots.size() < player_count:
+			var best_slot: int = -1
+			var best_distance: float = -1.0
+			for candidate in range(lattice.size()):
+				if slots.has(candidate):
+					continue
+				var separation: float = INF
+				for home in slots:
+					separation = minf(separation, lattice[candidate].distance_squared_to(lattice[home]))
+				if separation > best_distance:
+					best_slot = candidate
+					best_distance = separation
+			slots.append(best_slot)
+		for slot in range(lattice.size()):
+			if not slots.has(slot):
+				slots.append(slot)
+		centers.clear()
+		for slot in slots:
+			centers.append(lattice[slot])
 	elif layout == "Scramble":
 		var scattered_bounds := Vector2(columns * 1750.0, rows * 1600.0)
 		var scattered: Array[Vector2] = []
@@ -133,6 +173,8 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	var max_junctions: int = maxi(1, floori(float(count) * 0.18))
 	if layout == "Radial":
 		max_junctions = maxi(max_junctions, radial_sectors * 2)
+	elif layout == "Hex Grid":
+		max_junctions = maxi(max_junctions, cluster_count)
 	var edges: Array = []
 	var degrees: Array[int] = []
 	degrees.resize(count)
@@ -145,23 +187,35 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 		var connected: Array = [group[0]]
 		var local_junctions: int = 0
 		while connected.size() < group.size():
-			var local_budget: int = 0 if layout == "Radial" else 1 - local_junctions
+			var local_budget: int = 0 if layout in ["Radial", "Hex Grid"] else 1 - local_junctions
 			var pair: Array = _closest_pair(points, connected, group, connected, degrees, mini(local_budget, max_junctions - junctions))
 			var added: int = _new_junctions(pair, degrees)
 			local_junctions += added
 			junctions += added
 			_add_edge(edges, degrees, pair)
 			connected.append(pair[1] if connected.has(pair[0]) else pair[0])
-	if layout == "Radial":
+	if layout in ["Radial", "Hex Grid"]:
 		var bridges: Array = []
 		# Both rings are real closed travel cycles, with one independent
 		# spoke per sector. No connection crosses the central deposit.
-		for sector in range(radial_sectors):
-			bridges.append([sector, sector + radial_sectors])
-			bridges.append([sector + radial_sectors, sector + 2 * radial_sectors])
-		for ring in [0, 2]:
+		if layout == "Radial":
 			for sector in range(radial_sectors):
-				bridges.append([ring * radial_sectors + sector, ring * radial_sectors + (sector + 1) % radial_sectors])
+				bridges.append([sector, sector + radial_sectors])
+				bridges.append([sector + radial_sectors, sector + 2 * radial_sectors])
+			for ring in [0, 2]:
+				for sector in range(radial_sectors):
+					bridges.append([ring * radial_sectors + sector, ring * radial_sectors + (sector + 1) % radial_sectors])
+		else:
+			var dimensions: Vector2i = hex_dimensions(player_count)
+			# Equal-length zigzag rows and alternating vertical bonds form
+			# genuine hexagonal cycles; each cluster has at most three ports.
+			for row in range(dimensions.y):
+				for column in range(dimensions.x):
+					var slot: int = row * dimensions.x + column
+					if column + 1 < dimensions.x:
+						bridges.append([slots.find(slot), slots.find(slot + 1)])
+					if row + 1 < dimensions.y and (column + row) % 2 == 1:
+						bridges.append([slots.find(slot), slots.find(slot + dimensions.x)])
 		for bridge in bridges:
 			# Prefer unused path endpoints, then spend at most one junction
 			# on each ring cluster's third bridge.
@@ -310,7 +364,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			field[ANTIMATTER] = 1.0
 			for chunk in field["chunks"]:
 				chunk["resource"] = ANTIMATTER
-	return {"seed": seed_value, "layout": layout, "antimatter_home_clearance": ANTIMATTER_CLEARANCE * distance_scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
+	return {"seed": seed_value, "layout": layout, "hex_slots": slots if layout == "Hex Grid" else [], "antimatter_home_clearance": ANTIMATTER_CLEARANCE * distance_scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
 
 static func _safe_field(center: Vector2, radius: float, points: Array[Vector2], edges: Array, fields: Array) -> Dictionary:
 	var anchor: int = -1
