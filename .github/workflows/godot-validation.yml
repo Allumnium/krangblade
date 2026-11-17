@@ -60,6 +60,21 @@ jobs:
                   prior = next_version
           print("Verified version:", current)
           PY
+      - name: Verify Godot script and shader indentation
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, subprocess
+          paths = subprocess.check_output(["git", "ls-files", "-z", "--", "*.gd", "*.gdshader"]).decode().split("\0")
+          errors = []
+          for path in filter(None, paths):
+              for line_number, line in enumerate(pathlib.Path(path).read_text(encoding="utf-8").splitlines(), 1):
+                  if re.match(r"^[\t ]* ", line):
+                      errors.append(f"{path}:{line_number}: use tabs for indentation")
+          if errors:
+              print("\n".join(errors))
+              raise SystemExit(1)
+          print("Verified tab indentation in tracked Godot scripts and shaders")
+          PY
       - name: Verify documentation-only scope
         id: scope
         env:

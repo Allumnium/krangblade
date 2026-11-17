@@ -202,3 +202,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.32: Evaluate elimination and last-team conquest victory on authority; colony ships preserve recovery opportunity when neutral systems remain, including AI in exile. Replicate eliminated roster and immutable outcome, freeze simulation, allow spectator snapshots/return, block further gameplay commands. Single-team sandbox exempt. Provisional elimination and result modal pending visual validation; antimatter victory still undefined.
 
 - v0.17.33: Prototype central antimatter deposits, opt-in autonomous mining, physical cargo and local raw stock, and transfer of stored material on conquest. Processing, technology use, AI objectives and victory scoring are not implemented yet.
+
+- v0.17.34: Standardize Godot scripts and shaders on tab indentation, add EditorConfig and a mandatory CI indentation gate. No gameplay changes.
