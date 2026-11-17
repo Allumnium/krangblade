@@ -54,12 +54,8 @@ var ship_visuals: Dictionary = {}
 var ship_offsets: Dictionary = {}
 const SHIP_WORLD_SCALE: float = 3.0
 var interaction_panel: VBoxContainer
-var military_lens: Button
 var logistics_lens: Button
 var active_lens: String = ""
-var military_drag: int = -1
-var military_drag_weights: Dictionary = {}
-var military_preview: Dictionary = {}
 var global_resource_fills: Dictionary = {}
 var global_resource_segments: Dictionary = {}
 var global_resource_strips: Dictionary = {}
@@ -1168,13 +1164,10 @@ func _build_lens_buttons() -> void:
     lens_row.offset_top = HEADER_HEIGHT + 16
     lens_row.offset_bottom = HEADER_HEIGHT + 48
     lens_row.add_theme_constant_override("separation", 6)
-    military_lens = _button("MILITARY", _toggle_lens.bind("military"), lens_row)
     logistics_lens = _button("LOGISTICS", _toggle_lens.bind("logistics"), lens_row)
-    for button in [military_lens, logistics_lens]:
-        button.toggle_mode = true
-        button.focus_mode = Control.FOCUS_NONE
-        button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    military_lens.tooltip_text = "Fleet allocation at systems and asteroid fields"
+    logistics_lens.toggle_mode = true
+    logistics_lens.focus_mode = Control.FOCUS_NONE
+    logistics_lens.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     logistics_lens.tooltip_text = "System resource storage"
 
 var diagnostic_label: Label
@@ -1237,10 +1230,7 @@ func _refresh_time_controls(state: Dictionary) -> void:
 func _toggle_lens(kind: String) -> void:
     policy_selected = ""
     _refresh()
-    military_drag = -1
-    military_preview.clear()
     active_lens = "" if active_lens == kind else kind
-    military_lens.set_pressed_no_signal(active_lens == "military")
     logistics_lens.set_pressed_no_signal(active_lens == "logistics")
     map_canvas.queue_redraw()
 
@@ -2272,8 +2262,6 @@ func _audio_mute_changed(value: bool, channel: String) -> void:
 
 func _open_menu() -> void:
     drag_button = 0
-    military_drag = -1
-    military_preview.clear()
     match_menu.popup_centered(Vector2i(420, 190))
 
 func _menu_action(action: StringName) -> void:
@@ -2567,24 +2555,6 @@ func _map_input(event: InputEvent) -> void:
         return
     if event is InputEventMouseButton:
         var mouse: InputEventMouseButton = event
-        if mouse.button_index == MOUSE_BUTTON_LEFT and active_lens == "military":
-            if mouse.pressed:
-                military_drag = _combat_slider_at(mouse.position)
-                if military_drag >= 0:
-                    military_drag_weights = ECONOMY.military_policy(_state(), _me(), "fighter")
-                    _update_combat_drag(mouse.position)
-                    map_canvas.accept_event()
-                    return
-            elif military_drag >= 0:
-                _update_combat_drag(mouse.position)
-                var node: int = military_drag
-                var percent: int = int(military_preview[node])
-                military_drag = -1
-                military_preview.clear()
-                session.call("request_military", "fighter", node, percent)
-                map_canvas.queue_redraw()
-                map_canvas.accept_event()
-                return
         if mouse.button_index == MOUSE_BUTTON_MIDDLE or mouse.button_index == MOUSE_BUTTON_RIGHT:
             if mouse.pressed:
                 drag_button = mouse.button_index
@@ -2595,8 +2565,6 @@ func _map_input(event: InputEvent) -> void:
                 MOUSE_BUTTON_WHEEL_UP: _zoom_at(mouse.position, 1.15)
                 MOUSE_BUTTON_WHEEL_DOWN: _zoom_at(mouse.position, 1.0 / 1.15)
                 MOUSE_BUTTON_LEFT: _select_at(mouse.position)
-    elif event is InputEventMouseMotion and military_drag >= 0:
-        _update_combat_drag(event.position)
     elif event is InputEventMouseMotion and drag_button != 0:
         var motion: InputEventMouseMotion = event
         if motion.button_mask == 0:
@@ -2788,57 +2756,6 @@ func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
         var mining: bool = ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
         poses[id] = {"point": _screen_point(pos), "direction": Vector2.from_angle(angle), "mining": mining}
     return poses
-
-func _combat_slider_rect(state: Dictionary, node: int, points: Array) -> Rect2:
-    var count: int = (state["planets"] as Array).size()
-    var radius: float = _planet_radius(node, state) if node < count else maxf(9.0, float(state["map"]["fields"][node - count]["radius"]) * _fit() * zoom)
-    var pos: Vector2 = _screen_point(points[node])
-    return Rect2(pos + Vector2(-27.0, -radius - 22.0), Vector2(54.0, 18.0))
-
-func _combat_slider_at(point: Vector2) -> int:
-    if active_lens != "military":
-        return -1
-    var state: Dictionary = _state()
-    if state.is_empty():
-        return -1
-    var points: Array = ECONOMY.military_graph(state)["points"]
-    var best: float = INF
-    var result: int = -1
-    for node in ECONOMY.military_pois(state, _me()):
-        var rect: Rect2 = _combat_slider_rect(state, node, points)
-        if rect.has_point(point):
-            var distance: float = rect.get_center().distance_to(point)
-            if distance < best:
-                best = distance
-                result = node
-    return result
-
-func _update_combat_drag(point: Vector2) -> void:
-    var state: Dictionary = _state()
-    var points: Array = ECONOMY.military_graph(state)["points"]
-    var rect: Rect2 = _combat_slider_rect(state, military_drag, points)
-    var percent: int = roundi(clampf((point.x - rect.position.x - 4.0) / (rect.size.x - 8.0), 0.0, 1.0) * 100.0)
-    military_preview = ECONOMY.change_military_weights(military_drag_weights, ECONOMY.military_home(state, _me()), military_drag, percent)
-    map_canvas.queue_redraw()
-
-func _draw_combat_lens(state: Dictionary, font: Font) -> void:
-    if active_lens != "military":
-        return
-    var points: Array = ECONOMY.military_graph(state)["points"]
-    var weights: Dictionary = military_preview if military_drag >= 0 else ECONOMY.military_policy(state, _me(), "fighter")
-    for node in ECONOMY.military_pois(state, _me()):
-        var rect: Rect2 = _combat_slider_rect(state, node, points)
-        if not Rect2(Vector2.ZERO, map_canvas.size).intersects(rect):
-            continue
-        var percent: int = int(weights.get(node, 0))
-        var tint: Color = Color("#e9a276") if percent > 0 else HUD.MUTED
-        map_canvas.draw_rect(rect, Color("#0c1928ed"))
-        map_canvas.draw_rect(rect, Color(tint, 0.6), false, 1.0)
-        var track := Rect2(rect.position + Vector2(4.0, 12.0), Vector2(rect.size.x - 8.0, 3.0))
-        map_canvas.draw_rect(track, Color("#344960"))
-        map_canvas.draw_rect(Rect2(track.position, Vector2(track.size.x * float(percent) / 100.0, 3.0)), tint)
-        map_canvas.draw_circle(track.position + Vector2(track.size.x * float(percent) / 100.0, 1.5), 3.0, tint)
-        map_canvas.draw_string(font, rect.position + Vector2(0, 10), "%d%%" % percent, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 10, tint)
 
 func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
     if active_lens != "logistics":
@@ -3032,7 +2949,6 @@ func _draw_map() -> void:
         var name_star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
         map_canvas.draw_string(font, pos + Vector2(-80, -name_star_radius - 7), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
     _draw_policy_zones(state)
-    _draw_combat_lens(state, font)
     _draw_logistics_lens(state, font)
     var poses: Dictionary = _ship_poses(state)
     for index in range(points.size()):
@@ -3339,7 +3255,6 @@ func _equip_selected_policy(card: String) -> void:
 func _inspect_policy(slot: String) -> void:
     policy_selected = "" if policy_selected == slot else slot
     active_lens = ""
-    military_lens.set_pressed_no_signal(false)
     logistics_lens.set_pressed_no_signal(false)
     _refresh()
     map_canvas.queue_redraw()

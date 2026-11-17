@@ -267,3 +267,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.16: User screenshots revealed policy zone mask drift under zoom. Render shader now compares world-space stamps against inverse-projected pixels, with explicit refresh when zooming. Check under pan and UI scaling too.
 
 - v0.17.26: Reported invasion forces not moving; likely minimum-three cohort rule deadlocked small per-POI allocations even with warmup complete. Explicit human zone orders now rally up to three available assigned ships rather than requiring three regardless of quota. Existing AI and legacy rally rules stay unchanged. Lasso eliminates stamp limit and stale erase indices; manual interaction and actual deployment observations still needed.
+
+- v0.17.28: Idle groups use deterministic local V formations with a shared rotating anchor inside rally range. Membership can change on new orders or casualties; bounded movement rather than teleporting handles reassignment. Check visual cohesion and crowding with large stationed fleets.

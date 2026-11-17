@@ -29,6 +29,7 @@ func _initialize() -> void:
     _test_policy_zone_fleet_dispatch()
     _test_lasso_small_fleet()
     _test_neutral_policy_occupation()
+    _test_idle_formations()
     _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -1623,3 +1624,35 @@ func _test_neutral_policy_occupation() -> void:
         assert(claims[neutral] == 1 and claims[field] == 1)
         assert(int(state["planets"][neutral]["owner"]) == 0)
     print("PASS: both Invasion and Guard occupy and hold empty systems and asteroid fields")
+
+func _test_idle_formations() -> void:
+    var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
+    var graph: Dictionary = ECON.military_graph(state)
+    var center: Vector2 = graph["points"][0]
+    for i in range(3):
+        state["ships"].append({"id": 9500 + i, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": center, "dest": 0, "hp": ECON.SHIP_HP})
+    for i in range(2):
+        state["ships"].append({"id": 9510 + i, "owner": 1, "kind": "colony_ship", "at": 0, "route": [], "leg": 0.0, "position": center, "dest": -1, "hp": ECON.SHIP_HP})
+    for tick in range(70):
+        var before: Dictionary = {}
+        for craft in state["ships"]:
+            before[craft["id"]] = craft["position"]
+        ECON.step(state, 0.1)
+        for craft in state["ships"]:
+            assert((craft["position"] as Vector2).distance_to(before[craft["id"]]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+            assert(int(craft["at"]) == 0 and (craft["route"] as Array).is_empty())
+            assert((craft["position"] as Vector2).distance_to(center) <= ECON.AI_RALLY_RADIUS)
+    var squad: Array = state["ships"]
+    var old_position: Vector2 = squad[0]["position"]
+    for tick in range(10):
+        ECON.step(state, 0.1)
+    assert((squad[0]["position"] as Vector2).distance_to(old_position) > 5.0)
+    assert((squad[0]["position"] as Vector2).distance_to(squad[1]["position"]) > 10.0)
+    assert((squad[0]["position"] as Vector2).distance_to(squad[1]["position"]) < 45.0)
+    assert((squad[3]["position"] as Vector2).distance_to(squad[4]["position"]) < 45.0)
+    var objective: int = int(graph["adjacent"][0][0])
+    assert(ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [objective], "weight": 100}], []))
+    ECON.step(state, 0.1)
+    for i in range(3):
+        assert(int(squad[i]["dest"]) == objective and not (squad[i]["route"] as Array).is_empty())
+    print("PASS: authoritative idle formations wander, preserve bounds and resume policy navigation")

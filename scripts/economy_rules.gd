@@ -2627,6 +2627,42 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
     _navigate(ship, position + separation.normalized() * travel, SHIP_SPEED * duration)
     ship["pursuit_left"] = maxf(0.0, float(ship["pursuit_left"]) - duration)
 
+# Idle ships remain in their current sector. Up to three same-owner,
+# same-kind hulls share a moving local anchor and tangent-relative V slots.
+# Routing, docking, mining, combat and withdrawal always take precedence.
+static func _is_idle_ship(ship: Dictionary) -> bool:
+    var fighter: bool = ship.get("kind", "") == "fighter"
+    return (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle" and (fighter or int(ship.get("dest", -1)) < 0) and int(ship.get("source", -1)) < 0 and not _engaged(ship) and not bool(ship.get("retreating", false))
+
+static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dictionary:
+    var groups: Dictionary = {}
+    for ship in state["ships"]:
+        if not _is_idle_ship(ship):
+            continue
+        var key: String = "%d:%s:%d:%d" % [int(ship["owner"]), str(ship.get("kind", "ship")), int(ship["at"]), int(ship.get("operation_id", 0))]
+        if not groups.has(key):
+            groups[key] = []
+        groups[key].append(ship)
+    var targets: Dictionary = {}
+    for group in groups.values():
+        group.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["id"]) < int(b["id"]))
+        for first in range(0, group.size(), 3):
+            var leader: Dictionary = group[first]
+            var points: Array = graph["points"] if leader.get("kind", "") == "fighter" else state["map"]["points"]
+            var center: Vector2 = points[int(leader["at"])]
+            var seed: int = int(leader["id"]) % 97
+            var angle: float = float(seed) * 2.399963 + float(state["elapsed"]) * 0.32
+            var radial: Vector2 = Vector2.from_angle(angle)
+            var direction: Vector2 = radial.orthogonal()
+            var anchor: Vector2 = center + radial * (58.0 + 12.0 * float(seed % 3))
+            for i in range(first, mini(first + 3, group.size())):
+                var offset: int = i - first
+                var formation: Vector2 = Vector2.ZERO
+                if offset > 0:
+                    formation = -direction * 22.0 + radial * (16.0 if offset == 1 else -16.0)
+                targets[int(group[i]["id"])] = anchor + formation
+    return targets
+
 static func step(state: Dictionary, dt: float) -> void:
     state["elapsed"] = float(state["elapsed"]) + dt
     for player in state.get("policies", {}):
@@ -2673,6 +2709,7 @@ static func step(state: Dictionary, dt: float) -> void:
     var combat_positions: Dictionary = {}
     for craft in state["ships"]:
         combat_positions[int(craft["id"])] = craft["position"]
+    var idle_targets: Dictionary = _idle_formation_targets(state, combat_graph)
     var coordinated: Dictionary = _coordinate_formations(state, combat_graph, dt)
     for ship in (state["ships"] as Array).duplicate():
         var initial_position: Vector2 = ship["position"]
@@ -2703,16 +2740,13 @@ static func step(state: Dictionary, dt: float) -> void:
                 ship["combat_target"] = -1
                 ship["pursuit_target"] = -1
                 ship["pursuit_left"] = 0.0
-                _move_formation(combat_graph, ship, dt)
-        var fighter: bool = ship.get("kind", "") == "fighter"
-        var idle: bool = (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle"
-        idle = idle and (int(ship.get("dest", -1)) < 0 or fighter) and int(ship.get("source", -1)) < 0
-        if idle and not _engaged(ship) and not bool(ship.get("retreating", false)) and not coordinated.has(int(ship["id"])) and ship["position"] == initial_position and (not fighter or int(ship.get("formation_size", 0)) < 2):
-            var points: Array = combat_graph["points"] if fighter else state["map"]["points"]
-            var center: Vector2 = points[int(ship["at"])]
-            var slot: int = int(ship["id"]) % 64
-            var station: Vector2 = center + Vector2.from_angle(float(slot) * 2.399963) * (64.0 + 20.0 * float(slot % 4))
-            _navigate(ship, station, SHIP_SPEED * dt)
+                if not (ship["route"] as Array).is_empty():
+                    _move_formation(combat_graph, ship, dt)
+        var ship_id: int = int(ship["id"])
+        # Only use the idle budget if the ship started and finished its
+        # work idle and did not already move this tick.
+        if idle_targets.has(ship_id) and _is_idle_ship(ship) and not coordinated.has(ship_id) and ship["position"] == initial_position:
+            _navigate(ship, idle_targets[ship_id], SHIP_SPEED * dt)
     _sync_operations(state)
     update_exploration(state)
 
