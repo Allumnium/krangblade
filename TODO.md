@@ -179,3 +179,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.14: Fix painting mode visual feedback, persistent brush marks, stroke interpolation, panel hiding, and eligible-target feedback. Manual visual validation still required.
 
 - v0.17.15: Replace stacked brush circles with shader-rendered union and derive disconnected zones from overlapping painted geometry rather than star-lane links; initial allocation defaults to 100% and sliders update labels. Pending visual verification.
+
+- v0.17.16: World-space policy brush shader projection now uses the map's inverse projection on every zoom change; validate zoom anchoring visually.

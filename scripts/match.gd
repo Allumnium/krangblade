@@ -2348,6 +2348,7 @@ func _zoom_at(point: Vector2, multiplier: float) -> void:
     var world: Vector2 = _world_point(point)
     zoom = clampf(zoom * multiplier, MIN_ZOOM, MAX_ZOOM)
     pan += point - _screen_point(world)
+    _update_policy_zone_overlay()
     map_canvas.queue_redraw()
 
 func _system_visual(index: int, state: Dictionary) -> Dictionary:
@@ -3201,16 +3202,23 @@ render_mode unshaded;
 uniform int stamp_count = 0;
 uniform vec3 stamps[128];
 uniform vec2 canvas_size = vec2(1.0);
+uniform vec2 world_center = vec2(0.0);
+uniform vec2 screen_center = vec2(0.0);
+uniform float world_scale = 1.0;
 uniform vec4 tint : source_color = vec4(0.91, 0.58, 0.43, 1.0);
 void fragment() {
+    // Evaluate the same inverse projection as _world_point. Both the map
+    // and painted mask therefore remain anchored to immutable world space.
     vec2 pixel = UV * canvas_size;
+    vec2 world = world_center + (pixel - screen_center) / max(world_scale, 0.0001);
     float signed_distance = 100000.0;
     for (int i = 0; i < 128; i++) {
         if (i >= stamp_count) { break; }
-        signed_distance = min(signed_distance, length(pixel - stamps[i].xy) - stamps[i].z);
+        signed_distance = min(signed_distance, length(world - stamps[i].xy) - stamps[i].z);
     }
-    float fill = 1.0 - smoothstep(-1.5, 1.5, signed_distance);
-    float edge = 1.0 - smoothstep(0.0, 2.5, abs(signed_distance));
+    float pixel_distance = signed_distance * world_scale;
+    float fill = 1.0 - smoothstep(-1.5, 1.5, pixel_distance);
+    float edge = 1.0 - smoothstep(0.0, 2.5, abs(pixel_distance));
     COLOR = vec4(tint.rgb, 0.19 * fill + 0.42 * edge);
 }
 """
@@ -3226,13 +3234,15 @@ func _update_policy_zone_overlay() -> void:
         return
     var stamps := PackedVector3Array()
     for mark in policy_brush_strokes:
-        var center: Vector2 = _screen_point(Vector2(mark.x, mark.y))
-        stamps.append(Vector3(center.x, center.y, mark.z * _fit() * zoom))
+        stamps.append(mark)
     while stamps.size() < POLICY_MAX_STAMPS:
         stamps.append(Vector3.ZERO)
     policy_zone_material.set_shader_parameter("stamps", stamps)
     policy_zone_material.set_shader_parameter("stamp_count", policy_brush_strokes.size())
     policy_zone_material.set_shader_parameter("canvas_size", map_canvas.size)
+    policy_zone_material.set_shader_parameter("world_center", _map_size() * 0.5)
+    policy_zone_material.set_shader_parameter("screen_center", Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5 + pan)
+    policy_zone_material.set_shader_parameter("world_scale", _fit() * zoom)
     policy_zone_material.set_shader_parameter("tint", Color("#e99c77") if policy_draft_card == "invasion" else Color("#83b5eb"))
 
 func _build_policy_ui() -> void:
