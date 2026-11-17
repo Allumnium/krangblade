@@ -321,6 +321,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			for chunk in field["chunks"]:
 				chunk["resource"] = ANTIMATTER
 	_insert_standalone_systems(points, clusters, edges, fields, distance_scale)
+	_assign_field_lanes(points, edges, fields, player_count)
 	return {"seed": seed_value, "layout": layout, "hex_slots": [], "antimatter_home_clearance": ANTIMATTER_CLEARANCE * distance_scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
 
 # Insert neutral systems along the existing bridge routes. Preserve the
@@ -368,13 +369,14 @@ static func _insert_standalone_systems(points: Array[Vector2], clusters: Array[i
 static func _generate_hex(seed_value: int, player_count: int, rng: RandomNumberGenerator) -> Dictionary:
 	var dimensions: Vector2i = hex_dimensions(player_count)
 	var spacing: float = 460.0
+	var gap: Vector2 = Vector2(700.0, 850.0)
 	var lattice: Array[Vector2] = []
 	var slot_groups: Array[int] = []
 	var groups: Array = []
 	var centers: Array[Vector2] = []
 	for row in range(dimensions.y):
 		for column in range(dimensions.x):
-			lattice.append(Vector2(650.0 + float(column) * sqrt(3.0) * spacing * 0.5, 650.0 + (float(row) * 1.5 + float((column + row) % 2) * 0.5) * spacing))
+			lattice.append(Vector2(650.0 + float(column) * sqrt(3.0) * spacing * 0.5, 650.0 + (float(row) * 1.5 + float((column + row) % 2) * 0.5) * spacing) + Vector2(floorf(float(column) / 4.0), floorf(float(row) / 2.0)) * gap)
 			slot_groups.append(-1)
 	for row in range(0, dimensions.y, 2):
 		for column in range(0, dimensions.x, 4):
@@ -441,19 +443,33 @@ static func _generate_hex(seed_value: int, player_count: int, rng: RandomNumberG
 	var degrees: Array[int] = []
 	degrees.resize(points.size())
 	degrees.fill(0)
+	var bridges: Dictionary = {}
 	for row in range(dimensions.y):
 		for column in range(dimensions.x):
 			var slot: int = row * dimensions.x + column
+			var neighbors: Array[int] = []
 			if column + 1 < dimensions.x:
-				_add_edge(edges, degrees, [slots.find(slot), slots.find(slot + 1)])
+				neighbors.append(slot + 1)
 			if row + 1 < dimensions.y and (column + row) % 2 == 1:
-				_add_edge(edges, degrees, [slots.find(slot), slots.find(slot + dimensions.x)])
+				neighbors.append(slot + dimensions.x)
+			for other in neighbors:
+				var first: Vector2i = Vector2i(floori(float(column) / 4.0), floori(float(row) / 2.0))
+				var second: Vector2i = Vector2i(floori(float(other % dimensions.x) / 4.0), floori(float(other) / dimensions.x / 2.0))
+				var pair: Array = [mini(slots.find(slot), slots.find(other)), maxi(slots.find(slot), slots.find(other))]
+				if first == second:
+					_add_edge(edges, degrees, pair)
+				else:
+					var key: Vector4i = Vector4i(first.x, first.y, second.x, second.y)
+					if not bridges.has(key) or points[pair[0]].distance_squared_to(points[pair[1]]) < points[bridges[key][0]].distance_squared_to(points[bridges[key][1]]):
+						bridges[key] = pair
+	for pair in bridges.values():
+		_add_edge(edges, degrees, pair)
 	# Use actual hex interiors for safe mining fields. Reserve special
 	# sites first, away from every home, then populate ordinary deposits.
 	var sites: Array[Vector2] = []
 	for row in range(dimensions.y - 1):
 		for column in range(dimensions.x - 2):
-			if (column + row) % 2 != 1:
+			if (column + row) % 2 != 1 or row % 2 != 0 or column % 4 != 1:
 				continue
 			var center: Vector2 = Vector2.ZERO
 			for y in range(row, row + 2):
@@ -495,7 +511,7 @@ static func _generate_hex(seed_value: int, player_count: int, rng: RandomNumberG
 	# Retain the macro-map reference length rather than stretching every
 	# fine hex lane into a 100-year journey.
 	var scale: float = LONGEST_LINK_YEARS * TRAVEL_SPEED / 1250.0
-	var bounds := Vector2(1300.0 + float(dimensions.x - 1) * sqrt(3.0) * spacing * 0.5, 1300.0 + (float(dimensions.y - 1) * 1.5 + 0.5) * spacing)
+	var bounds := Vector2(1300.0 + float(dimensions.x - 1) * sqrt(3.0) * spacing * 0.5, 1300.0 + (float(dimensions.y - 1) * 1.5 + 0.5) * spacing) + Vector2(floorf(float(dimensions.x - 1) / 4.0), floorf(float(dimensions.y - 1) / 2.0)) * gap
 	for index in range(points.size()):
 		points[index] *= scale
 	for field in fields:
@@ -508,7 +524,73 @@ static func _generate_hex(seed_value: int, player_count: int, rng: RandomNumberG
 			field[ANTIMATTER] = 1.0
 			for chunk in field["chunks"]:
 				chunk["resource"] = ANTIMATTER
+	_assign_field_lanes(points, edges, fields, player_count)
 	return {"seed": seed_value, "layout": "Hex Grid", "hex_slots": slots, "antimatter_home_clearance": ANTIMATTER_CLEARANCE * scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": degrees.count(3)}
+
+# Asteroids and stars share a single degree budget. Reserve one lane per
+# special field first, then ordinary fields, then add nearby spare links
+# in increasing distance order. Persist the exact links in the map.
+static func _assign_field_lanes(points: Array[Vector2], edges: Array, fields: Array, homes: int) -> void:
+	var degrees: Array[int] = []
+	degrees.resize(points.size())
+	degrees.fill(0)
+	for edge in edges:
+		degrees[edge[0]] += 1
+		degrees[edge[1]] += 1
+	var options: Array = []
+	var ordered: Array = []
+	for index in range(fields.size()):
+		var field: Dictionary = fields[index]
+		field["access"] = []
+		var center: Vector2 = field["position"]
+		var reach: float = center.distance_to(points[int(field["anchor"])]) * 1.5 + float(field["radius"])
+		var special: bool = bool(field.get("antimatter", false))
+		for node in range(points.size()):
+			var distance: float = center.distance_to(points[node])
+			if special and node < homes:
+				continue
+			if distance > reach and not special:
+				continue
+			var clear: bool = true
+			for other in range(fields.size()):
+				if other == index:
+					continue
+				var obstacle: Dictionary = fields[other]
+				var obstacle_pos: Vector2 = obstacle["position"]
+				if Geometry2D.get_closest_point_to_segment(obstacle_pos, center, points[node]).distance_to(obstacle_pos) <= float(obstacle["radius"]):
+					clear = false
+					break
+			if clear:
+				options.append({"field": index, "node": node, "distance": distance, "nearby": distance <= reach})
+		ordered.append(index)
+	options.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if a["distance"] == b["distance"]:
+			return a["field"] < b["field"] if a["field"] != b["field"] else a["node"] < b["node"]
+		return a["distance"] < b["distance"])
+	ordered.sort_custom(func(a: int, b: int) -> bool:
+		var first: bool = bool(fields[a].get("antimatter", false))
+		var second: bool = bool(fields[b].get("antimatter", false))
+		return first if first != second else a < b)
+	for index in ordered:
+		for option in options:
+			var node: int = option["node"]
+			if option["field"] != index or degrees[node] >= MAX_CONNECTIONS:
+				continue
+			fields[index]["access"].append(node)
+			fields[index]["anchor"] = node
+			degrees[node] += 1
+			break
+	for option in options:
+		var index: int = option["field"]
+		var node: int = option["node"]
+		var access: Array = fields[index]["access"]
+		if access.is_empty() or access.size() >= MAX_CONNECTIONS or degrees[node] >= MAX_CONNECTIONS or access.has(node) or not bool(option["nearby"]):
+			continue
+		access.append(node)
+		degrees[node] += 1
+	for index in range(fields.size() - 1, -1, -1):
+		if fields[index]["access"].is_empty():
+			fields.remove_at(index)
 
 static func _safe_field(center: Vector2, radius: float, points: Array[Vector2], edges: Array, fields: Array) -> Dictionary:
 	var anchor: int = -1
@@ -616,8 +698,8 @@ static func _new_junctions(pair: Array, degrees: Array[int]) -> int:
 static func _edge_allowed(pair: Array, degrees: Array[int], budget: int) -> bool:
 	return degrees[pair[0]] < MAX_CONNECTIONS and degrees[pair[1]] < MAX_CONNECTIONS and _new_junctions(pair, degrees) <= budget
 
-static func _edge_score(points: Array[Vector2], pair: Array, degrees: Array[int]) -> float:
-	return points[pair[0]].distance_to(points[pair[1]]) * (1.0 + 0.35 * _new_junctions(pair, degrees))
+static func _edge_score(points: Array[Vector2], pair: Array, _degrees: Array[int]) -> float:
+	return points[pair[0]].distance_to(points[pair[1]])
 
 static func _add_edge(edges: Array, degrees: Array[int], pair: Array) -> void:
 	edges.append(pair)

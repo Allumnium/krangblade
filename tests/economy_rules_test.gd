@@ -1843,8 +1843,15 @@ func _test_map_layouts() -> void:
 						var b: int = slots[edge[1]]
 						if a != b:
 							actual_bridges[Vector2i(mini(a, b), maxi(a, b))] = true
-					assert(actual_bridges == expected_bridges)
-					assert(actual_bridges.size() >= slots.size()) # at least one closed cycle
+					for pair in actual_bridges:
+						assert(expected_bridges.has(pair))
+					for pair in expected_bridges:
+						var block_a := Vector2i(floori(float(pair.x % dimensions.x) / 4.0), floori(float(pair.x) / dimensions.x / 2.0))
+						var block_b := Vector2i(floori(float(pair.y % dimensions.x) / 4.0), floori(float(pair.y) / dimensions.x / 2.0))
+						if block_a == block_b:
+							assert(actual_bridges.has(pair))
+					assert(actual_bridges.size() >= slots.size()) # closed local cycles
+					assert(actual_bridges.size() < expected_bridges.size()) # gaps
 					assert(slots.size() == galaxy["points"].size())
 				var points: Array = galaxy["points"]
 				var degrees: Array[int] = []
@@ -1862,7 +1869,11 @@ func _test_map_layouts() -> void:
 					assert(not MAP.blocked(points[edge[0]], points[edge[1]], galaxy["fields"]))
 					longest = maxf(longest, (points[edge[0]] as Vector2).distance_to(points[edge[1]]))
 				if layout == "Hex Grid":
-					assert(longest / MAP.TRAVEL_SPEED < MAP.LONGEST_LINK_YEARS * 0.6)
+					assert(longest / MAP.TRAVEL_SPEED < MAP.LONGEST_LINK_YEARS * 1.3)
+					var shortest: float = INF
+					for edge in galaxy["edges"]:
+						shortest = minf(shortest, (points[edge[0]] as Vector2).distance_to(points[edge[1]]))
+					assert(longest > shortest * 2.0)
 				else:
 					assert(is_equal_approx(longest / MAP.TRAVEL_SPEED, MAP.LONGEST_LINK_YEARS))
 				var clustered_count: int = 0
@@ -1887,6 +1898,15 @@ func _test_map_layouts() -> void:
 				for home in range(player_count):
 					assert(galaxy["clusters"][home] == home)
 					assert(adjacency[home].any(func(node: int) -> bool: return node >= player_count))
+				var total_degrees: Array[int] = degrees.duplicate()
+				for field in galaxy["fields"]:
+					var links: Array[int] = ECON.field_access_systems(galaxy, field)
+					assert(links.size() >= 1 and links.size() <= MAP.MAX_CONNECTIONS)
+					assert(links.has(int(field["anchor"])))
+					for anchor in links:
+						total_degrees[anchor] += 1
+				for degree in total_degrees:
+					assert(degree <= MAP.MAX_CONNECTIONS)
 				var deposits: int = 0
 				for field in galaxy["fields"]:
 					if not bool(field.get("antimatter", false)):
