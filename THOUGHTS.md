@@ -288,3 +288,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.20.1: Theoretical local resource deltas expose production surplus at full storage and deficits at zero stock, instead of presenting capacity/consumption-limited rates as expected growth. Actual flow detail remains available on hover. Check sign readability, narrow columns and full/empty warehouses manually; small magnitudes rounding to 0.0 use neutral white. No economic behavior change.
 
 - v0.20.2: The global resource HUD uses the sum of owned-system theoretical deltas, matching the local rows rather than rolling holdings changes. One-off purchases and variable external cargo flows are intentionally omitted from the forecast and remain in actual breakdowns; population rates unchanged. Verify top-bar widths and sign colors manually.
+
+- v0.20.3: Collapsed cards now expose the cost and nominal duration before ordering. Actual completion can vary with queue position, assigned yard and crew/population availability. Verify grid height and readability at all UI scales, including the left shipyard stack; no rule changes or local visual verification.
