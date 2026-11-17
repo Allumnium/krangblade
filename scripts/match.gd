@@ -258,7 +258,6 @@ func _build_ui() -> void:
     map_canvas.gui_input.connect(_map_input)
     map_canvas.draw.connect(_draw_map)
     map_canvas.resized.connect(map_canvas.queue_redraw)
-    _build_policy_zone_overlay()
     header_panel = PanelContainer.new()
     add_child(header_panel)
     header_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928ed"), Color("#284661"), 6))
@@ -2352,7 +2351,6 @@ func _zoom_at(point: Vector2, multiplier: float) -> void:
     var world: Vector2 = _world_point(point)
     zoom = clampf(zoom * multiplier, MIN_ZOOM, MAX_ZOOM)
     pan += point - _screen_point(world)
-    _update_policy_zone_overlay()
     map_canvas.queue_redraw()
 
 func _system_visual(index: int, state: Dictionary) -> Dictionary:
@@ -2546,36 +2544,24 @@ func _map_input(event: InputEvent) -> void:
         return
     if not policy_draft_card.is_empty():
         if event is InputEventMouseButton:
-            var brush_button: InputEventMouseButton = event
-            if brush_button.button_index == MOUSE_BUTTON_LEFT or brush_button.button_index == MOUSE_BUTTON_RIGHT:
-                if brush_button.pressed:
-                    if policy_brush_mode != 0:
-                        _end_policy_brush_drag()
-                    policy_brush_mode = 1 if brush_button.button_index == MOUSE_BUTTON_LEFT else -1
-                    policy_stroke_snapshot = policy_brush_strokes.duplicate()
-                    policy_stroke_weights = policy_zone_weights.duplicate()
-                    policy_brush_last_point = brush_button.position
-                    _paint_policy_brush(brush_button.position, policy_brush_mode)
-                elif policy_brush_mode == (1 if brush_button.button_index == MOUSE_BUTTON_LEFT else -1):
-                    _end_policy_brush_drag()
-                map_canvas.accept_event()
-                return
-            if brush_button.pressed and brush_button.button_index == MOUSE_BUTTON_WHEEL_UP:
-                _zoom_at(brush_button.position, 1.15)
-            elif brush_button.pressed and brush_button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-                _zoom_at(brush_button.position, 1.0 / 1.15)
-        elif event is InputEventMouseMotion:
-            policy_brush_cursor = event.position
-            if policy_brush_mode != 0:
-                if policy_brush_last_point.x != INF:
-                    var delta: Vector2 = event.position - policy_brush_last_point
-                    var segments: int = maxi(1, ceili(delta.length() / (policy_brush_radius * 0.85)))
-                    for index in range(1, segments + 1):
-                        _paint_policy_brush(policy_brush_last_point.lerp(event.position, float(index) / float(segments)), policy_brush_mode)
-                else:
-                    _paint_policy_brush(event.position, policy_brush_mode)
-                policy_brush_last_point = event.position
-                _update_policy_zone_overlay()
+            var gesture: InputEventMouseButton = event
+            if gesture.button_index == MOUSE_BUTTON_LEFT or gesture.button_index == MOUSE_BUTTON_RIGHT:
+                var mode: int = 1 if gesture.button_index == MOUSE_BUTTON_LEFT else -1
+                if gesture.pressed:
+                    if policy_lasso_mode != 0:
+                        _finish_policy_lasso()
+                    policy_lasso_mode = mode
+                    policy_lasso_path = PackedVector2Array([_world_point(gesture.position)])
+                elif policy_lasso_mode == mode:
+                    _sample_policy_lasso(gesture.position)
+                    _finish_policy_lasso()
+            elif policy_lasso_mode == 0 and gesture.pressed:
+                if gesture.button_index == MOUSE_BUTTON_WHEEL_UP:
+                    _zoom_at(gesture.position, 1.15)
+                elif gesture.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+                    _zoom_at(gesture.position, 1.0 / 1.15)
+        elif event is InputEventMouseMotion and policy_lasso_mode != 0:
+            _sample_policy_lasso(event.position)
         map_canvas.queue_redraw()
         map_canvas.accept_event()
         return
@@ -2744,11 +2730,11 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
         map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
-    # A release over the editor or outside the map must still finish the drag.
-    if not policy_draft_card.is_empty() and policy_brush_mode != 0:
-        var held_button: int = MOUSE_BUTTON_LEFT if policy_brush_mode > 0 else MOUSE_BUTTON_RIGHT
+    # Finish a lasso even if the button is released outside the map.
+    if not policy_draft_card.is_empty() and policy_lasso_mode != 0:
+        var held_button: int = MOUSE_BUTTON_LEFT if policy_lasso_mode > 0 else MOUSE_BUTTON_RIGHT
         if not Input.is_mouse_button_pressed(held_button):
-            _end_policy_brush_drag()
+            _finish_policy_lasso()
     _keyboard_pan(delta)
     _update_resource_hover()
     if is_instance_valid(diagnostic_label):
@@ -3161,21 +3147,12 @@ func _draw_map() -> void:
 var policy_selected: String = ""
 var policy_draft_card: String = ""
 var policy_draft_slot: String = ""
-var policy_brush_mode: int = 0
-var policy_brush_cursor: Vector2 = Vector2.ZERO
-var policy_brush_radius: float = 28.0
-var policy_brush_size_label: Label
-var policy_brush_strokes: Array[Vector3] = []
-var policy_zone_overlay: ColorRect
-var policy_zone_material: ShaderMaterial
-var policy_brush_dirty: bool = true
+var policy_lasso_mode: int = 0
+var policy_lasso_path := PackedVector2Array()
 var policy_zone_groups: Array = []
-const POLICY_MAX_STAMPS: int = 256
+var policy_next_zone_key: int = 0
+var policy_hover_slot: String = ""
 const POLICY_MAX_ZONES: int = 5
-var policy_stroke_snapshot: Array[Vector3] = []
-var policy_stroke_weights: Dictionary = {}
-var policy_brush_last_point: Vector2 = Vector2(INF, INF)
-var policy_painted: Dictionary = {}
 var policy_zone_weights: Dictionary = {}
 var policy_voids: Dictionary = {}
 var policy_editor: PanelContainer
@@ -3215,66 +3192,6 @@ class PolicyDrop extends Button:
     func _drop_data(_position: Vector2, data: Variant) -> void:
         card_dropped.emit(str(data["card"]))
 
-# One signed-distance union produces a uniform translucent fill and a single
-# boundary, instead of stacking opaque circles at each brush position.
-func _build_policy_zone_overlay() -> void:
-    policy_zone_overlay = ColorRect.new()
-    map_canvas.add_child(policy_zone_overlay)
-    policy_zone_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-    policy_zone_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    policy_zone_overlay.visible = false
-    var shader := Shader.new()
-    shader.code = """
-shader_type canvas_item;
-render_mode unshaded;
-uniform int stamp_count = 0;
-uniform vec3 stamps[256];
-uniform vec2 canvas_size = vec2(1.0);
-uniform vec2 world_center = vec2(0.0);
-uniform vec2 screen_center = vec2(0.0);
-uniform float world_scale = 1.0;
-uniform vec4 tint : source_color = vec4(0.91, 0.58, 0.43, 1.0);
-void fragment() {
-    // Evaluate the same inverse projection as _world_point. Both the map
-    // and painted mask therefore remain anchored to immutable world space.
-    vec2 pixel = UV * canvas_size;
-    vec2 world = world_center + (pixel - screen_center) / max(world_scale, 0.0001);
-    float signed_distance = 100000.0;
-    for (int i = 0; i < 256; i++) {
-        if (i >= stamp_count) { break; }
-        signed_distance = min(signed_distance, length(world - stamps[i].xy) - stamps[i].z);
-    }
-    float pixel_distance = signed_distance * world_scale;
-    float fill = 1.0 - smoothstep(-1.5, 1.5, pixel_distance);
-    float edge = 1.0 - smoothstep(0.0, 2.5, abs(pixel_distance));
-    COLOR = vec4(tint.rgb, 0.19 * fill + 0.42 * edge);
-}
-"""
-    policy_zone_material = ShaderMaterial.new()
-    policy_zone_material.shader = shader
-    policy_zone_overlay.material = policy_zone_material
-
-func _update_policy_zone_overlay() -> void:
-    if not is_instance_valid(policy_zone_overlay):
-        return
-    policy_zone_overlay.visible = not policy_draft_card.is_empty() and not policy_brush_strokes.is_empty()
-    if not policy_zone_overlay.visible:
-        return
-    if policy_brush_dirty:
-        var stamps := PackedVector3Array()
-        for mark in policy_brush_strokes:
-            stamps.append(mark)
-        while stamps.size() < POLICY_MAX_STAMPS:
-            stamps.append(Vector3.ZERO)
-        policy_zone_material.set_shader_parameter("stamps", stamps)
-        policy_zone_material.set_shader_parameter("stamp_count", policy_brush_strokes.size())
-        policy_brush_dirty = false
-    policy_zone_material.set_shader_parameter("canvas_size", map_canvas.size)
-    policy_zone_material.set_shader_parameter("world_center", _map_size() * 0.5)
-    policy_zone_material.set_shader_parameter("screen_center", Vector2(OVERVIEW_WIDTH + 8.0, 0.0) + _projection_size() * 0.5 + pan)
-    policy_zone_material.set_shader_parameter("world_scale", _fit() * zoom)
-    policy_zone_material.set_shader_parameter("tint", Color("#e99c77") if policy_draft_card == "invasion" else Color("#83b5eb"))
-
 func _build_policy_ui() -> void:
     var strip := HBoxContainer.new()
     add_child(strip)
@@ -3300,6 +3217,8 @@ func _build_policy_ui() -> void:
         card.alignment = HORIZONTAL_ALIGNMENT_CENTER
         card.toggle_mode = true
         card.pressed.connect(_inspect_policy.bind(slot))
+        card.mouse_entered.connect(_hover_policy.bind(slot))
+        card.mouse_exited.connect(_hover_policy.bind(""))
         column.add_child(card)
         policy_buttons[slot] = card
     policy_inspector = PanelContainer.new()
@@ -3370,23 +3289,8 @@ func _build_policy_ui() -> void:
     editor_scroll.add_child(editor_body)
     policy_editor_card = _label("", 18)
     editor_body.add_child(policy_editor_card)
-    editor_body.add_child(_label("Left: paint   Right: erase · Maximum 5 zones", 13))
-    var brush_row := HBoxContainer.new()
-    editor_body.add_child(brush_row)
-    policy_brush_size_label = _label("Brush size: 28", 13)
-    policy_brush_size_label.custom_minimum_size.x = 112
-    brush_row.add_child(policy_brush_size_label)
-    var brush_slider := HSlider.new()
-    brush_slider.min_value = 10
-    brush_slider.max_value = 80
-    brush_slider.step = 1
-    brush_slider.value = policy_brush_radius
-    brush_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    brush_row.add_child(brush_slider)
-    brush_slider.value_changed.connect(func(value: float) -> void:
-        policy_brush_radius = value
-        policy_brush_size_label.text = "Brush size: %d" % roundi(value)
-        map_canvas.queue_redraw())
+    editor_body.add_child(_label("Left drag: lasso a zone. Right drag: remove POIs. Maximum 5 zones.", 13))
+    editor_body.add_child(_label("Click to select or remove a single POI.", 13))
     policy_editor_rows = VBoxContainer.new()
     editor_body.add_child(policy_editor_rows)
     # Keep status and confirmation visible even with five zone sliders.
@@ -3486,7 +3390,7 @@ func _refresh_policy_ui(state: Dictionary) -> void:
                 rallying += (operation.get("rallying", []) as Array).size()
                 recovering += (operation.get("recovering", []) as Array).size()
             policy_info.text += "\nFleet at objectives: %d assigned\n%d traveling · %d rallying · %d repairing" % [assigned, traveling, rallying, recovering]
-        policy_info.text += "\nReplace the card to redraw its zones."
+        policy_info.text += "\nReplace the card to lasso its zones."
     else:
         policy_info.text = str(definition.get("description", "Policy effects pending"))
     if not ECONOMY.policy_active(state, selected_entry):
@@ -3497,25 +3401,23 @@ func _begin_policy_draft(slot: String, card: String) -> void:
     policy_draft_slot = slot
     policy_draft_card = card
     policy_selected = ""
-    policy_brush_mode = 0
-    policy_painted.clear()
-    policy_brush_strokes.clear()
-    policy_brush_dirty = true
-    policy_stroke_snapshot.clear()
-    policy_stroke_weights.clear()
+    policy_hover_slot = ""
+    policy_lasso_mode = 0
+    policy_lasso_path.clear()
     policy_zone_groups.clear()
-    policy_brush_last_point = Vector2(INF, INF)
+    policy_next_zone_key = 0
     policy_zone_weights.clear()
     policy_voids.clear()
     var entry: Dictionary = _state().get("policies", {}).get(_me(), {}).get(slot, {})
     if entry.get("card", "") == card:
-        var map_points: Array = _state().get("map", {}).get("points", [])
-        for zone in entry.get("zones", []):
-            for node in zone["targets"]:
-                policy_painted[int(node)] = true
-                if int(node) >= 0 and int(node) < map_points.size() and policy_brush_strokes.size() < POLICY_MAX_STAMPS:
-                    var position: Vector2 = map_points[int(node)]
-                    policy_brush_strokes.append(Vector3(position.x, position.y, policy_brush_radius / (_fit() * zoom)))
+        var zones: Array = entry.get("zones", [{"targets": entry.get("targets", []), "weight": entry.get("weight", 100)}])
+        for zone in zones:
+            if (zone["targets"] as Array).is_empty():
+                continue
+            var key: int = policy_next_zone_key
+            policy_next_zone_key += 1
+            policy_zone_groups.append({"key": key, "targets": zone["targets"].duplicate()})
+            policy_zone_weights[key] = int(zone["weight"])
     policy_editor_card.text = str(ECONOMY.POLICY_CARDS[card]["name"])
     policy_original_map_top = map_canvas.offset_top
     map_canvas.offset_top = 8
@@ -3531,20 +3433,15 @@ func _begin_policy_draft(slot: String, card: String) -> void:
             child.hide()
     policy_editor.show()
     _position_territory()
-    _update_policy_zone_overlay()
     _update_policy_editor()
     map_canvas.queue_redraw()
 
 func _cancel_policy_draft() -> void:
     policy_draft_card = ""
-    policy_brush_mode = 0
-    policy_brush_last_point = Vector2(INF, INF)
-    policy_brush_strokes.clear()
-    policy_brush_dirty = true
-    policy_stroke_snapshot.clear()
-    policy_stroke_weights.clear()
+    policy_lasso_mode = 0
+    policy_lasso_path.clear()
     policy_zone_groups.clear()
-    _update_policy_zone_overlay()
+    policy_zone_weights.clear()
     policy_editor.hide()
     map_canvas.offset_top = policy_original_map_top
     territory_layer.offset_top = map_canvas.offset_top
@@ -3556,102 +3453,60 @@ func _cancel_policy_draft() -> void:
     _refresh()
     map_canvas.queue_redraw()
 
-func _end_policy_brush_drag() -> void:
-    policy_brush_mode = 0
-    policy_brush_last_point = Vector2(INF, INF)
-    _finish_policy_brush_stroke()
-
-# Rebuild allocations only once per drag, not for every interpolated stamp.
-# Reject an erase that splits the painted territory into more than five zones.
-func _finish_policy_brush_stroke() -> void:
-    if policy_brush_strokes == policy_stroke_snapshot:
-        return
-    var groups: Array = _policy_components()
-    if groups.size() > POLICY_MAX_ZONES:
-        policy_brush_strokes = policy_stroke_snapshot.duplicate()
-        policy_brush_dirty = true
-        policy_zone_weights = policy_stroke_weights.duplicate()
-    else:
-        var old_weights: Dictionary = policy_stroke_weights.duplicate()
-        var next_weights: Dictionary = {}
-        for group in groups:
-            var key: int = int(group["key"])
-            if old_weights.has(key):
-                next_weights[key] = old_weights[key]
-        if next_weights.is_empty() and not old_weights.is_empty() and not groups.is_empty():
-            next_weights[int(groups[0]["key"])] = int(old_weights.values()[0])
-        policy_zone_weights = next_weights
-    policy_zone_groups = _policy_components()
-    _update_policy_editor()
-    _update_policy_zone_overlay()
+func _hover_policy(slot: String) -> void:
+    policy_hover_slot = slot
     map_canvas.queue_redraw()
 
-func _paint_policy_brush(point: Vector2, mode: int) -> void:
-    if _state().is_empty():
-        return
+func _sample_policy_lasso(point: Vector2) -> void:
     var world: Vector2 = _world_point(point)
-    var radius: float = policy_brush_radius / (_fit() * zoom)
-    if mode > 0:
-        var touches_existing: bool = false
-        for stamp in policy_brush_strokes:
-            var distance: float = Vector2(stamp.x, stamp.y).distance_to(world)
-            if distance < radius * 0.75:
-                return
-            if distance <= radius + stamp.z:
-                touches_existing = true
-        if not touches_existing and _policy_components().size() >= POLICY_MAX_ZONES:
-            return
-        # Never enlarge earlier circles to free slots: that was the source of
-        # spontaneous zone growth. Keep the existing geometry unchanged.
-        if policy_brush_strokes.size() >= POLICY_MAX_STAMPS:
-            return
-        policy_brush_strokes.append(Vector3(world.x, world.y, radius))
-        policy_brush_dirty = true
-    else:
-        for index in range(policy_brush_strokes.size() - 1, -1, -1):
-            var stamp: Vector3 = policy_brush_strokes[index]
-            if Vector2(stamp.x, stamp.y).distance_to(world) < radius + stamp.z * 0.35:
-                policy_brush_strokes.remove_at(index)
-                policy_brush_dirty = true
+    if policy_lasso_path.is_empty() or _screen_point(policy_lasso_path[-1]).distance_to(point) >= 3.0:
+        policy_lasso_path.append(world)
 
-# Components are based on the actual painted geometry, not map lane links.
-# Each star belongs to the painted component containing its world position.
-func _policy_components() -> Array:
+func _finish_policy_lasso() -> void:
+    var mode: int = policy_lasso_mode
+    policy_lasso_mode = 0
+    var path: PackedVector2Array = policy_lasso_path.duplicate()
+    policy_lasso_path.clear()
+    if path.is_empty() or _state().is_empty():
+        return
     var state: Dictionary = _state()
-    var pending: Dictionary = {}
-    for index in range(policy_brush_strokes.size()):
-        pending[index] = true
-    var groups: Array = []
-    while not pending.is_empty():
-        var seed: int = int(pending.keys()[0])
-        pending.erase(seed)
-        var component: Array = [seed]
-        var queue: Array = [seed]
-        while not queue.is_empty():
-            var current: int = int(queue.pop_back())
-            var a: Vector3 = policy_brush_strokes[current]
-            for other in pending.keys():
-                var b: Vector3 = policy_brush_strokes[int(other)]
-                if Vector2(a.x, a.y).distance_to(Vector2(b.x, b.y)) <= a.z + b.z:
-                    pending.erase(other)
-                    component.append(other)
-                    queue.append(other)
-        var targets: Array = []
-        for node in range((state.get("planets", []) as Array).size()):
-            if not ECONOMY.discovered(state, _me(), "planets", node):
-                continue
-            var location: Vector2 = state["map"]["points"][node]
-            for index in component:
-                var mark: Vector3 = policy_brush_strokes[int(index)]
-                if location.distance_to(Vector2(mark.x, mark.y)) <= mark.z:
-                    targets.append(node)
-                    break
-        targets.sort()
-        var anchor: Vector3 = policy_brush_strokes[seed]
-        groups.append({"stamps": component, "targets": targets, "key": seed, "anchor": Vector2(anchor.x, anchor.y)})
-    groups.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["key"]) < int(b["key"]))
-    return groups
+    var points: Array = ECONOMY.military_graph(state)["points"]
+    var hits: Array = []
+    var nearest: int = -1
+    var distance: float = 22.0
+    for node in ECONOMY.military_pois(state, _me()):
+        var point: Vector2 = points[node]
+        if path.size() >= 3 and Geometry2D.is_point_in_polygon(point, path):
+            hits.append(node)
+        elif path.size() < 3:
+            var d: float = _screen_point(point).distance_to(_screen_point(path[0]))
+            if d < distance:
+                distance = d
+                nearest = node
+    if nearest >= 0:
+        hits.append(nearest)
+    if mode < 0:
+        for group in policy_zone_groups.duplicate():
+            for node in hits:
+                group["targets"].erase(node)
+            if (group["targets"] as Array).is_empty():
+                policy_zone_weights.erase(group["key"])
+                policy_zone_groups.erase(group)
+    elif policy_zone_groups.size() < POLICY_MAX_ZONES:
+        # Existing assignments retain their identity and percentage.
+        for group in policy_zone_groups:
+            for node in group["targets"]:
+                hits.erase(node)
+        if not hits.is_empty():
+            hits.sort()
+            var key: int = policy_next_zone_key
+            policy_next_zone_key += 1
+            policy_zone_groups.append({"key": key, "targets": hits})
+    _update_policy_editor()
+    map_canvas.queue_redraw()
 
+func _policy_components() -> Array:
+    return policy_zone_groups
 
 # Clamp draft allocations to the capacity left by non-voided policies.
 # Stable zone ordering makes reductions predictable after merging/splitting.
@@ -3688,7 +3543,7 @@ func _update_policy_editor() -> void:
         var weight: int = int(policy_zone_weights.get(key, 0))
         policy_zone_weights[key] = weight
         total += weight
-        var label_text: String = "Zone %s · %d systems · %d%%" % [char(65 + i), (group["targets"] as Array).size(), weight]
+        var label_text: String = "Zone %s · %d POIs · %d%%" % [char(65 + i), (group["targets"] as Array).size(), weight]
         var zone_label: Label = _label(label_text, 13)
         policy_editor_rows.add_child(zone_label)
         var slider := HSlider.new()
@@ -3713,7 +3568,7 @@ func _update_policy_editor() -> void:
             var bounded: int = clampi(roundi(value), 0, maxi(0, 100 - reserved - others))
             policy_zone_weights[key] = bounded
             slider.set_value_no_signal(bounded)
-            zone_label.text = "Zone %s · %d systems · %d%%" % [char(65 + i), (group["targets"] as Array).size(), bounded]
+            zone_label.text = "Zone %s · %d POIs · %d%%" % [char(65 + i), (group["targets"] as Array).size(), bounded]
             _update_policy_editor_status())
     policy_editor_rows.add_child(_label("Other committed policies", 14))
     var equipped: Dictionary = _state().get("policies", {}).get(_me(), {})
@@ -3754,7 +3609,7 @@ func _update_policy_editor_status() -> void:
     var state: Dictionary = _state()
     for group in _policy_components():
         for node in group["targets"]:
-            if ECONOMY.policy_target_valid(state, _me(), policy_draft_card, int(node)):
+            if ECONOMY.policy_zone_target_valid(state, _me(), policy_draft_card, int(node)):
                 has_zone = true
                 break
         if has_zone:
@@ -3762,15 +3617,17 @@ func _update_policy_editor_status() -> void:
     policy_editor_accept.disabled = not has_zone or used > 100
     policy_editor_status.text = "%d%% committed · %d%% available" % [used, maxi(0, 100 - used)] if used <= 100 else "%d%% — overallocated" % used
     if not has_zone:
-        policy_editor_status.text = "Accept unavailable: paint over an eligible %s system." % ("enemy-owned" if policy_draft_card == "invasion" else "friendly")
+        policy_editor_status.text = "Accept unavailable: lasso a system or asteroid field."
 
 func _commit_policy_draft() -> void:
+    if policy_lasso_mode != 0:
+        _finish_policy_lasso()
     var zones: Array = []
     var state: Dictionary = _state()
     for group in _policy_components():
         var valid: Array = []
         for node in group["targets"]:
-            if ECONOMY.policy_target_valid(state, _me(), policy_draft_card, int(node)):
+            if ECONOMY.policy_zone_target_valid(state, _me(), policy_draft_card, int(node)):
                 valid.append(node)
         if valid.is_empty():
             continue
@@ -3784,28 +3641,43 @@ func _commit_policy_draft() -> void:
     session.call("request_policy_zones", policy_draft_slot, policy_draft_card, zones, voided)
     _cancel_policy_draft()
 
+func _draw_policy_zone_markers(state: Dictionary, zones: Array, tint: Color) -> void:
+    var points: Array = ECONOMY.military_graph(state)["points"]
+    var font: Font = ThemeDB.fallback_font
+    for index in range(zones.size()):
+        var zone: Dictionary = zones[index]
+        var targets: Array = zone.get("targets", [])
+        var shares: Dictionary = ECONOMY.policy_zone_shares(targets, int(zone["weight"]))
+        for node in targets:
+            if int(node) < 0 or int(node) >= points.size():
+                continue
+            var pos: Vector2 = _screen_point(points[int(node)])
+            var r: float = 20.0
+            if int(node) < (state["planets"] as Array).size():
+                r = clampf(_planet_radius(int(node), state) + 6.0, 20.0, 80.0)
+            map_canvas.draw_circle(pos, r, Color(tint, 0.09))
+            map_canvas.draw_arc(pos, r, 0.0, TAU, 48, tint, 1.5, true)
+            var label: String = "%s · %d%%" % [char(65 + index), int(shares.get(node, 0))]
+            map_canvas.draw_string(font, pos + Vector2(-60.0, r + 15.0), label, HORIZONTAL_ALIGNMENT_CENTER, 120, 13, tint)
+
 func _draw_policy_zones(state: Dictionary) -> void:
-    var equipped: Dictionary = state.get("policies", {}).get(_me(), {})
-    for slot in equipped:
-        var entry: Dictionary = equipped[slot]
-        if not ECONOMY.POLICY_CARDS[entry["card"]].get("military", false):
-            continue
-        var tint: Color = Color("#df7777") if entry["card"] == "invasion" else Color("#83b5eb")
-        for node in entry.get("targets", []):
-            var pos: Vector2 = _screen_point(state["map"]["points"][int(node)])
-            map_canvas.draw_circle(pos, policy_brush_radius * 0.7, Color(tint, 0.10))
-            map_canvas.draw_arc(pos, policy_brush_radius * 0.7, 0, TAU, 32, Color(tint, 0.45), 1.0, true)
     if policy_draft_card.is_empty():
+        var slot: String = policy_hover_slot if not policy_hover_slot.is_empty() else policy_selected
+        var entry: Dictionary = state.get("policies", {}).get(_me(), {}).get(slot, {})
+        if not entry.is_empty() and ECONOMY.POLICY_CARDS[entry["card"]].get("military", false):
+            var tint: Color = Color("#df7777") if entry["card"] == "invasion" else Color("#83b5eb")
+            var zones: Array = entry.get("zones", [{"targets": entry.get("targets", []), "weight": entry.get("weight", 100)}])
+            _draw_policy_zone_markers(state, zones, tint)
         return
     var draft_tint: Color = Color("#e99c77") if policy_draft_card == "invasion" else Color("#83b5eb")
-    _update_policy_zone_overlay()
-    # Cached groups describe the last completed stroke. Their indices are
-    # invalid as soon as an erase removes a stamp. Use immutable positions,
-    # and suppress stale labels during erasure until the groups are rebuilt.
-    if policy_brush_mode >= 0 and not policy_brush_strokes.is_empty():
-        var components: Array = policy_zone_groups
-        for index in range(components.size()):
-            var group: Dictionary = components[index]
-            var label_pos: Vector2 = _screen_point(group["anchor"])
-            map_canvas.draw_string(ThemeDB.fallback_font, label_pos + Vector2(10, -12), "Zone %s" % char(65 + index), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, draft_tint)
-    map_canvas.draw_arc(policy_brush_cursor, policy_brush_radius, 0, TAU, 32, Color(draft_tint, 0.8), 1.0, true)
+    var zones: Array = []
+    for group in policy_zone_groups:
+        zones.append({"targets": group["targets"], "weight": int(policy_zone_weights.get(group["key"], 0))})
+    _draw_policy_zone_markers(state, zones, draft_tint)
+    if policy_lasso_path.size() >= 2:
+        var line := PackedVector2Array()
+        for point in policy_lasso_path:
+            line.append(_screen_point(point))
+        map_canvas.draw_polyline(line, draft_tint if policy_lasso_mode > 0 else Color("#ea7777"), 2.0, true)
+        if line.size() > 2:
+            map_canvas.draw_line(line[-1], line[0], Color(draft_tint, 0.45), 1.0, true)

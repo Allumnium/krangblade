@@ -2223,7 +2223,7 @@ static func _ai_wave_order(state: Dictionary, graph: Dictionary, player: int, ho
 
 # Shared authoritative rally and deployment mechanics. AI keeps one active
 # wave; human allocations may launch additional assembled cohorts.
-static func _dispatch_cohorts(state: Dictionary, graph: Dictionary, home: int, goal: int, fighters: Array, deployed: Array[int], exclusive_wave: bool) -> Array[int]:
+static func _dispatch_cohorts(state: Dictionary, graph: Dictionary, home: int, goal: int, fighters: Array, deployed: Array[int], exclusive_wave: bool, minimum: int = AI_WAVE_MIN) -> Array[int]:
     var ready: Array = []
     var paths: Dictionary = {}
     for ship in fighters:
@@ -2236,7 +2236,7 @@ static func _dispatch_cohorts(state: Dictionary, graph: Dictionary, home: int, g
         _order_operation_ship(graph, ship, home, paths)
         if int(ship["at"]) == home and (ship["route"] as Array).is_empty() and combat_position(state, graph, ship).distance_to(graph["points"][home]) <= AI_RALLY_RADIUS and not _engaged(ship):
             ready.append(ship)
-    if ready.size() >= AI_WAVE_MIN and goal >= 0 and goal != home and (not exclusive_wave or deployed.is_empty()):
+    if ready.size() >= minimum and goal >= 0 and goal != home and (not exclusive_wave or deployed.is_empty()):
         if not paths.has(goal):
             paths[goal] = _military_paths(graph, goal)
         if paths[goal]["distance"].has(home):
@@ -2579,9 +2579,24 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
             fighters.append(by_id[member])
             if operation["deployed"].has(member) and not bool(by_id[member].get("retreating", false)):
                 deployed.append(member)
-        if deployed.size() == 1 and not _engaged(by_id[deployed[0]]):
+        var explicit_zone: bool = false
+        if not state.get("ai_players", []).has(owner):
+            for entry in state.get("policies", {}).get(owner, {}).values():
+                if entry.has("zones") and policy_active(state, entry) and entry.get("targets", []).has(target):
+                    explicit_zone = true
+                    break
+        if not explicit_zone and deployed.size() == 1 and not _engaged(by_id[deployed[0]]):
             deployed.clear()
-        deployed = _dispatch_cohorts(state, graph, home, target, fighters, deployed, false)
+        # A deliberately allocated one- or two-fighter group must deploy.
+        # Rally a full cohort whenever the assignment can support one.
+        var minimum: int = AI_WAVE_MIN
+        if explicit_zone:
+            var available: int = 0
+            for fighter in fighters:
+                if not bool(fighter.get("retreating", false)) and not deployed.has(int(fighter["id"])):
+                    available += 1
+            minimum = clampi(available, 1, AI_WAVE_MIN)
+        deployed = _dispatch_cohorts(state, graph, home, target, fighters, deployed, false, minimum)
         operation["deployed"] = deployed
         operation["phase"] = "rallying" if deployed.is_empty() else "deployed"
 
@@ -2617,11 +2632,12 @@ static func step(state: Dictionary, dt: float) -> void:
     for player in state.get("policies", {}):
         for entry in state["policies"][player].values():
             for node in entry["targets"].duplicate():
-                if not policy_target_valid(state, int(player), entry["card"], int(node)):
+                var valid: bool = policy_zone_target_valid(state, int(player), entry["card"], int(node)) if entry.has("zones") else policy_target_valid(state, int(player), entry["card"], int(node))
+                if not valid:
                     entry["targets"].erase(node)
             for zone in entry.get("zones", []):
                 for node in zone["targets"].duplicate():
-                    if not policy_target_valid(state, int(player), entry["card"], int(node)):
+                    if not policy_zone_target_valid(state, int(player), entry["card"], int(node)):
                         zone["targets"].erase(node)
     apply_economy_policies(state)
     for i in range((state["planets"] as Array).size()):
@@ -2766,7 +2782,7 @@ static func commit_military_policy(state: Dictionary, player: int, slot: String,
             if not raw_node is int:
                 return false
             var node: int = int(raw_node)
-            if seen.has(node) or not policy_target_valid(state, player, card, node):
+            if seen.has(node) or not policy_zone_target_valid(state, player, card, node):
                 return false
             seen[node] = true
             clean.append(node)
@@ -2808,6 +2824,21 @@ static func policy_allocation(entry: Dictionary) -> int:
 
 static func policy_active(state: Dictionary, entry: Dictionary) -> bool:
     return not entry.is_empty() and float(state["elapsed"]) >= float(entry["ready_at"])
+
+# A regional order selects every discovered POI within the lasso. Friendly
+# staging and neutral occupation do not change the automatic hostile-only
+# combat rules. Legacy flags and AI hostile goal selection retain their rules.
+static func policy_zone_target_valid(state: Dictionary, player: int, card: String, node: int) -> bool:
+    if not bool(POLICY_CARDS.get(card, {}).get("military", false)) or node < 0:
+        return false
+    var count: int = (state["planets"] as Array).size()
+    return discovered(state, player, "planets", node) if node < count else discovered(state, player, "fields", node - count)
+
+static func policy_zone_shares(targets: Array, weight: int) -> Dictionary:
+    var equal: Dictionary = {}
+    for node in targets:
+        equal[node] = 1
+    return _apportion(targets, equal, weight)
 
 static func policy_target_valid(state: Dictionary, player: int, card: String, node: int) -> bool:
     if not discovered(state, player, "planets", node):
@@ -2906,16 +2937,14 @@ static func policy_fleet_weights(state: Dictionary, player: int) -> Dictionary:
             var targets: Array = []
             if policy_active(state, entry):
                 for node in zone["targets"]:
-                    if policy_target_valid(state, player, entry["card"], int(node)):
+                    var valid: bool = policy_zone_target_valid(state, player, entry["card"], int(node)) if entry.has("zones") else policy_target_valid(state, player, entry["card"], int(node))
+                    if valid:
                         targets.append(node)
             if targets.is_empty():
                 if home >= 0:
                     result[home] = int(result.get(home, 0)) + weight
                 continue
-            var equal: Dictionary = {}
-            for node in targets:
-                equal[node] = 1
-            var shares: Dictionary = _apportion(targets, equal, weight)
+            var shares: Dictionary = policy_zone_shares(targets, weight)
             for node in shares:
                 result[node] = int(result.get(node, 0)) + int(shares[node])
     # Unallocated capacity is held at home rather than redistributed across
