@@ -1663,6 +1663,12 @@ func _test_local_position_orders() -> void:
 	assert(ECON.command_local_position(state, 1, [100], 0, point))
 	assert(ECON.command_fighters(state, 1, [100], 1))
 	assert(not fighter.get("holding", false) and not fighter.has("hold_position") and fighter["route"].has(1))
+	# The hull has reached the destination sector through its lane, but
+	# has not yet docked at the waypoint. It can already be positioned.
+	fighter["position"] = Vector2(4000, 0)
+	assert(ECON.local_sector(ECON.military_graph(state), fighter) == 1)
+	assert(ECON.command_local_position(state, 1, [100], 1, Vector2(4500, 0)))
+	assert(fighter["at"] == 1 and fighter["route"].is_empty() and fighter["position"] == Vector2(4000, 0))
 	# Emergency repair can temporarily leave the held sector, but the
 	# original position must be recovered through the actual lane.
 	var repair_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(1000, 0)], "edges": [[0, 2], [1, 2]], "fields": []}

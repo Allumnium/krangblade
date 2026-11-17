@@ -2049,6 +2049,13 @@ static func local_sector(graph: Dictionary, ship: Dictionary) -> int:
 		var field_node: int = int(graph["system_count"]) + int(ship.get("field", -1))
 		if field_node >= int(graph["system_count"]) and field_node < graph["points"].size() and sector_contains(graph, field_node, pos):
 			return field_node
+	# An entering hull is already in the next sector once it crosses its
+	# boundary along a real lane, even before reaching the central waypoint.
+	var route: Array = ship.get("route", [])
+	if not route.is_empty():
+		var next: int = int(route[0])
+		if next >= 0 and next < graph["points"].size() and sector_contains(graph, next, pos):
+			return next
 	return node if node >= 0 and node < graph["points"].size() and sector_contains(graph, node, pos) else -1
 
 static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
@@ -2092,6 +2099,7 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 		ship["navigation_target"] = point
 		if ship.get("kind", "") == "fighter":
 			ship["direct_order"] = true
+			ship["at"] = node
 			ship["operation_target"] = node
 			ship["dest"] = node
 			ship["route"] = []
