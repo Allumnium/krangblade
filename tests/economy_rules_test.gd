@@ -39,6 +39,7 @@ func _initialize() -> void:
 	_test_local_position_orders()
 	_test_tactical_orders()
 	_test_salvage()
+	_test_opportunistic_salvage()
 	_test_civilian_waiting_movement()
 	_test_depleted_field_routes()
 	_test_wide_patrol_rally_and_conquest()
@@ -1758,7 +1759,11 @@ func _test_salvage() -> void:
 	ECON._record_ship_destruction(state, graph, wreck)
 	var recipe: Dictionary = ECON._cost("ship", 1)
 	var recovered: Dictionary = ECON.empty_stock()
+	var expirations: Dictionary = {}
 	for pile in state["salvage"].values():
+		var lifetime: float = float(pile["expires_at"]) - float(pile["born"])
+		assert(lifetime >= 90.0 and lifetime <= 120.0)
+		expirations[lifetime] = true
 		var resource: String = pile["resource"]
 		recovered[resource] = float(pile["amount"])
 		assert(float(pile["amount"]) <= float(wreck["cargo"].get(resource, 0.0)) + float(recipe.get(resource, 0.0)) * 0.2 + 0.0001)
@@ -1768,6 +1773,17 @@ func _test_salvage() -> void:
 	state["elapsed"] = 2.0
 	ECON._update_salvage(state)
 	assert(first_pile["position"] != initial_point)
+	assert(expirations.size() > 1)
+	state["elapsed"] = 90.0
+	ECON._update_salvage(state)
+	assert(state["salvage"].size() == expirations.size())
+	state["elapsed"] = float(first_pile["expires_at"])
+	ECON._update_salvage(state)
+	assert(not state["salvage"].has(first_pile["id"]))
+	state["elapsed"] = 120.0
+	ECON._update_salvage(state)
+	assert(state["salvage"].is_empty())
+	state["elapsed"] = 2.0
 	state["salvage"].clear()
 	var fighter: Dictionary = {"id": 100, "owner": 1, "kind": "fighter", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(200, 0), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"}
 	fighter["cargo"]["Metals"] = 8.0
@@ -1808,6 +1824,63 @@ func _test_salvage() -> void:
 		assert(is_equal_approx(ECON.cargo_free(craft), capacity * 0.5))
 		assert(ECON.cargo_bays(craft["cargo"], capacity, 4)[0][0]["amount"] > 0.0)
 	print("PASS: wreck recovery, drift, ownership, exclusive claim, partial pickup, physical delivery, all hull cargo")
+
+func _test_opportunistic_salvage() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	state["ships"].clear()
+	for kind in ["fighter", "miner", "ship", "colony_ship"]:
+		var id: int = 100 + state["ships"].size()
+		var pos := Vector2(250.0 * float(id - 100), 0.0)
+		var ship: Dictionary = {"id": id, "owner": 1, "kind": kind, "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": pos, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle", "holding": true}
+		state["ships"].append(ship)
+		state["salvage"][id] = {"id": id, "resource": "Metals", "amount": 50.0, "origin": pos, "position": pos, "drift": Vector2.ZERO, "born": 0.0, "expires_at": 100.0, "claim": -1}
+	ECON.step(state, 0.1)
+	for ship in state["ships"]:
+		assert(is_equal_approx(ECON._cargo_total(ship), 1.2))
+		assert(ship["holding"] and ship["route"].is_empty())
+		assert(int(state["salvage"][ship["id"]]["claim"]) == int(ship["id"]))
+	var fighter: Dictionary = state["ships"][0]
+	var miner: Dictionary = state["ships"][1]
+	var piles: Dictionary = state["salvage"]
+	fighter["combat_target"] = int(miner["id"])
+	var busy: Dictionary = ECON._salvage_combat_busy(state)
+	assert(busy.has(fighter["id"]) and busy.has(miner["id"]))
+	for ship in [fighter, miner]:
+		assert(not ECON._work_opportunistic_salvage(state, graph, ship, 0.1, busy, ECON._salvage_cells(piles), false))
+		assert(is_equal_approx(ECON._cargo_total(ship), 1.2))
+		assert(piles[ship["id"]]["claim"] == -1)
+	fighter["combat_target"] = -1
+	assert(not ECON._work_opportunistic_salvage(state, graph, fighter, 0.1, {}, ECON._salvage_cells(piles), false))
+	assert(ECON.command_salvage(state, 1, [fighter["id"]], fighter["id"]))
+	assert(fighter.has("salvage_target") and not fighter.has("auto_salvage_target"))
+	state["elapsed"] = 100.0
+	ECON._update_salvage(state)
+	assert(piles.is_empty())
+	ECON._work_salvage(state, graph, fighter, 0.1, true)
+	assert(not fighter.has("salvage_target"))
+	# Beam-range pickup does not displace a routed craft; an idle craft
+	# may approach nearby debris without violating its movement budget.
+	var craft: Dictionary = state["ships"][2]
+	craft["holding"] = false
+	craft["route"] = [0, 1]
+	craft["dest"] = 1
+	var pos: Vector2 = craft["position"]
+	var point: Vector2 = pos + Vector2(20, 0)
+	piles[200] = {"id": 200, "resource": "Crystals", "amount": 50.0, "position": point, "claim": -1}
+	var route: Array = craft["route"].duplicate()
+	assert(not ECON._work_opportunistic_salvage(state, graph, craft, 0.1, {}, ECON._salvage_cells(piles), false))
+	assert(craft["route"] == route and craft["position"] == pos and is_equal_approx(craft["cargo"]["Crystals"], 1.2))
+	craft["route"] = []
+	craft["dest"] = -1
+	piles[200]["position"] = pos + Vector2(ECON.TRACTOR_RANGE * 1.5, 0)
+	assert(ECON._work_opportunistic_salvage(state, graph, craft, 0.1, {}, ECON._salvage_cells(piles), false))
+	assert(pos.distance_to(craft["position"]) > 0.0 and pos.distance_to(craft["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+	craft["cargo"]["Metals"] = ECON.cargo_capacity("ship") - float(craft["cargo"]["Crystals"])
+	assert(not ECON._work_opportunistic_salvage(state, graph, craft, 0.1, {}, ECON._salvage_cells(piles), false))
+	assert(piles[200]["claim"] == -1 and is_zero_approx(ECON.cargo_free(craft)))
+	print("PASS: randomized expiry, all hull automatic pickup, combat priority, manual override, route and capacity preservation")
 
 func _test_civilian_waiting_movement() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)

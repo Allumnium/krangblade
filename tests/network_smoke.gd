@@ -184,6 +184,16 @@ func _phase_changed() -> void:
 						var point: Vector2 = graph["points"][index] + Vector2.RIGHT * minf(150.0, ECON.sector_limit(graph, index, Vector2.RIGHT) * 0.5)
 						var pile_id: int = 910000 + index
 						state["salvage"][pile_id] = {"id": pile_id, "resource": ECON.ANTIMATTER, "amount": 12.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
+						# A separate held hull passively collects a local pile, without RPCs.
+						ECON._finish(state, index, system, {"id": 930000 + index, "kind": "colony_ship", "population_allocated": ECON.CREW_COSTS["colony_ship"]})
+						var auto_craft: Dictionary = state["ships"].back()
+						auto_craft["holding"] = true
+						var auto_point: Vector2 = graph["points"][index] + Vector2.LEFT * ECON.sector_limit(graph, index, Vector2.LEFT) * 0.8
+						auto_craft["position"] = auto_point
+						auto_craft["hold_position"] = auto_point
+						auto_craft["hold_sector"] = index
+						var auto_pile_id: int = 940000 + index
+						state["salvage"][auto_pile_id] = {"id": auto_pile_id, "resource": "Crystals", "amount": 2.0, "origin": auto_point, "position": auto_point, "drift": Vector2.ZERO, "born": 0.0, "expires_at": 105.0, "claim": -1}
 						# Separate focus-fire hull so the existing movement and hold
 						# scenarios remain independent of this command.
 						ECON._finish(state, index, system, {"id": 920000 + index, "kind": "fighter", "population_allocated": 0.0})
@@ -283,6 +293,12 @@ func _check_time_controls(state: Dictionary) -> bool:
 		if not is_equal_approx(float(state["elapsed"]), paused_elapsed):
 			_fail("Clock advanced while paused.")
 			return false
+		# Explicit salvage is tested while paused, before automatic collection
+		# can sweep the same fixture. Guest commands use the actual RPC path.
+		var other: int = 900000 + (home_index + 1) % expected_players
+		session.call("request_salvage", [900000 + home_index, other], 910000 + home_index)
+		session.call("request_unload_cargo", [other])
+		session.call("request_salvage", [900000 + home_index], 910000 + home_index)
 	if speed_stage < TEST_SPEEDS.size() - 1:
 		session.call("request_thresholds", home_index, "Plastics", 12.0 + float(speed_stage), 25.0)
 	speed_stage += 1
@@ -406,12 +422,6 @@ func _check_economy_sync() -> void:
 	if not commands_sent and home_index >= 0 and ECON.discovered(state, self_id, "fields", 0):
 		_send_commands()
 		state = session.get("economy")
-	if not bool(get_meta("salvage_sent", false)) and state.get("salvage", {}).has(910000 + home_index):
-		set_meta("salvage_sent", true)
-		var other: int = 900000 + (home_index + 1) % expected_players
-		session.call("request_salvage", [900000 + home_index, other], 910000 + home_index)
-		session.call("request_unload_cargo", [other])
-		session.call("request_salvage", [900000 + home_index], 910000 + home_index)
 	if commands_sent:
 		for craft in state["ships"]:
 			if int(craft["id"]) != hold_release_id:
@@ -526,13 +536,17 @@ func _check_economy_sync() -> void:
 						idle += 1
 						local_held = local_held or (craft.get("hold_position", Vector2.INF) as Vector2).is_equal_approx(local_point) and (craft["position"] as Vector2).is_equal_approx(local_point)
 			var assigned_miners: int = 0
+			var auto_salvage: bool = false
 			for craft in state["ships"]:
 				if int(craft["owner"]) == owner and craft["kind"] == "miner" and int(craft.get("assigned_field", -1)) >= 0:
 					assigned_miners += 1
+				if int(craft["id"]) == 930000 + owner_home:
+					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
 			var checks: Dictionary = {
 				"patrol": patrol_verified,
 				"attack_target": attack_verified,
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
+				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
 				"local_position": local_held,
 				"miner_assignment": assigned_miners == 1,
 				"no_policies": not state.has("policies") && not flags.has("production:Organics"),
