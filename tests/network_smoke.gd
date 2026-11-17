@@ -55,6 +55,16 @@ func _begin() -> void:
 			_fail("Could not host.")
 	elif role == "client":
 		var index: int = int(args[2]) if args.size() >= 3 else 1
+		if mode == "normal":
+			session.call("start_lobby_browser", "127.0.0.1")
+			var deadline: int = Time.get_ticks_msec() + 8000
+			while not session.get("discovered_lobbies").has("127.0.0.1") and Time.get_ticks_msec() < deadline:
+				await process_frame
+			var games: Dictionary = session.get("discovered_lobbies")
+			if not games.has("127.0.0.1") or games["127.0.0.1"]["name"] != "TestHost" or games["127.0.0.1"]["layout"] != _expected_layout():
+				_fail("LAN host discovery did not return the actual lobby.")
+				return
+			session.call("stop_lobby_browser")
 		if not bool(session.call("join_game", "Guest%d" % index, "127.0.0.1")):
 			_fail("Could not join.")
 	else:

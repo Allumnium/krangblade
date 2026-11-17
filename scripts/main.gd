@@ -8,6 +8,36 @@ const BACKDROP = preload("res://scripts/space_background.gd")
 const TEXT := HUD.TEXT
 const MUTED := HUD.MUTED
 
+class MapPreview:
+	extends Control
+	func _draw() -> void:
+		draw_rect(Rect2(Vector2.ZERO, size), Color("#091522"))
+		var graph: Dictionary = get_meta("map", {})
+		if graph.is_empty():
+			return
+		var points: Array = graph["points"]
+		var bounds: Vector2 = graph["size"]
+		var available: Vector2 = (size - Vector2(24, 24)).max(Vector2.ONE)
+		var scale_factor: float = minf(available.x / bounds.x, available.y / bounds.y)
+		var offset: Vector2 = (size - bounds * scale_factor) * 0.5
+		var colors: Array = get_meta("colors", [])
+		for edge in graph["edges"]:
+			draw_line(offset + points[edge[0]] * scale_factor, offset + points[edge[1]] * scale_factor, Color("#8299b3"), 1.3, true)
+		for asteroid in graph["fields"]:
+			var center: Vector2 = offset + asteroid["position"] * scale_factor
+			var special: bool = bool(asteroid.get("antimatter", false))
+			var radius: float = maxf(4.0 if special else 2.0, float(asteroid["radius"]) * scale_factor)
+			var tint: Color = Color("#c295ff") if special else Color("#9b8566")
+			draw_circle(center, radius, tint)
+			if special:
+				draw_arc(center, radius + 2.0, 0.0, TAU, 24, tint, 1.0, true)
+		for index in range(points.size()):
+			var position: Vector2 = offset + points[index] * scale_factor
+			var home: bool = index < colors.size()
+			draw_circle(position, 5.0 if home else 2.5, colors[index] if home else Color("#b0c1d2"))
+			if home:
+				draw_arc(position, 6.0, 0.0, TAU, 20, colors[index], 1.0, true)
+
 var network: Node
 var screen: String = ""
 var saved_ip: String = "127.0.0.1"
@@ -30,7 +60,8 @@ var solo_layout_picker: OptionButton
 var lobby_layout_picker: OptionButton
 var solo_preview: Control
 var lobby_preview: Control
-var lobby_seed_label: Label
+var lobby_seed_edit: LineEdit
+var browser_list: VBoxContainer
 var lobby_reroll: Button
 var solo_random_seed: int = 0
 
@@ -41,9 +72,12 @@ func _ready() -> void:
 	network.connect("roster_changed", _refresh_roster)
 	network.connect("chat_changed", _refresh_chat)
 	network.connect("status_changed", _refresh_status)
+	network.connect("lobbies_changed", _refresh_browser)
 	_on_phase_changed()
 
 func _root() -> VBoxContainer:
+	if screen != "multiplayer":
+		network.call("stop_lobby_browser")
 	for child in get_children():
 		remove_child(child)
 		child.queue_free()
@@ -146,102 +180,195 @@ func _show_solo_setup() -> void:
 	solo_players.clear()
 	for id in range(1, 5):
 		solo_players[id] = {"team": id, "color": id}
+	_build_match_setup(true)
+
+# Both modes use the same layout, roster, map settings and preview.
+func _build_match_setup(solo: bool) -> void:
 	var col := _root()
-	_setup_header(col, "Single player")
+	var header := HBoxContainer.new()
+	col.add_child(header)
+	var title := _text("Single player" if solo else "Multiplayer lobby", 28)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	header.add_child(_button("BACK" if solo else "LEAVE", _show_menu if solo else _leave))
+	if not solo:
+		status_label = _text("", 13, MUTED)
+		col.add_child(status_label)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(scroll)
 	var content := HBoxContainer.new()
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 12)
-	col.add_child(content)
-	var panel := _panel()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_stretch_ratio = 2.3
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content.add_child(panel)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	panel.add_child(scroll)
+	scroll.add_child(content)
+	var left := _panel()
+	left.custom_minimum_size.x = 420
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_child(left)
+	var left_col := VBoxContainer.new()
+	left_col.add_theme_constant_override("separation", 8)
+	left.add_child(left_col)
+	left_col.add_child(_text("Players", 20))
+	var roster_scroll := ScrollContainer.new()
+	roster_scroll.custom_minimum_size.y = 300
+	roster_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	roster_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	left_col.add_child(roster_scroll)
 	var rows := VBoxContainer.new()
-	rows.add_theme_constant_override("separation", 4)
 	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(rows)
-	solo_roster = rows
-	_refresh_solo_roster()
-	var settings_panel := _panel()
-	settings_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	settings_panel.custom_minimum_size.x = 240
-	content.add_child(settings_panel)
+	rows.add_theme_constant_override("separation", 4)
+	roster_scroll.add_child(rows)
+	if solo:
+		solo_roster = rows
+	else:
+		roster = rows
+		_build_lobby_chat(left_col)
+	var right := _panel()
+	right.custom_minimum_size.x = 380
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.size_flags_stretch_ratio = 1.25
+	content.add_child(right)
 	var settings := VBoxContainer.new()
-	settings.add_theme_constant_override("separation", 10)
-	settings_panel.add_child(settings)
+	settings.add_theme_constant_override("separation", 8)
+	right.add_child(settings)
 	settings.add_child(_text("Game settings", 20))
-	settings.add_child(_text("Map layout", 14, MUTED))
-	solo_layout_picker = _map_layout_picker()
-	settings.add_child(solo_layout_picker)
-	settings.add_child(_text("Map seed", 14, MUTED))
-	solo_seed_edit = LineEdit.new()
-	solo_seed_edit.placeholder_text = str(solo_random_seed)
-	solo_seed_edit.tooltip_text = "Enter an integer seed, or leave blank to use the displayed random seed."
+	settings.add_child(_text("Map layout", 13, MUTED))
+	var picker := _map_layout_picker()
+	settings.add_child(picker)
+	settings.add_child(_text("Map seed", 13, MUTED))
 	var seed_row := HBoxContainer.new()
 	settings.add_child(seed_row)
-	solo_seed_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	seed_row.add_child(solo_seed_edit)
-	seed_row.add_child(_button("Reroll", _reroll_solo_map))
-	solo_preview = _new_map_preview(settings)
-	solo_layout_picker.item_selected.connect(func(_index: int) -> void: _refresh_solo_preview())
-	solo_seed_edit.text_changed.connect(func(_value: String) -> void: _refresh_solo_preview())
-	_refresh_solo_preview()
+	var seed_edit := LineEdit.new()
+	seed_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	seed_row.add_child(seed_edit)
+	var reroll := _button("Reroll", _reroll_solo_map if solo else func() -> void: network.call("reroll_lobby_map"))
+	seed_row.add_child(reroll)
+	var preview := _new_map_preview(settings)
 	var footer := HBoxContainer.new()
 	col.add_child(footer)
-	solo_start_button = _button("START MATCH", _start_solo_from_setup)
 	footer.add_spacer(false)
-	footer.add_child(solo_start_button)
+	if solo:
+		solo_layout_picker = picker
+		solo_seed_edit = seed_edit
+		solo_preview = preview
+		seed_edit.placeholder_text = str(solo_random_seed)
+		seed_edit.tooltip_text = "Enter an integer seed, or leave blank to use the displayed random seed."
+		picker.item_selected.connect(func(_index: int) -> void: _refresh_solo_preview())
+		seed_edit.text_changed.connect(func(_value: String) -> void: _refresh_solo_preview())
+		solo_start_button = _button("START MATCH", _start_solo_from_setup)
+		footer.add_child(solo_start_button)
+		_refresh_solo_roster()
+	else:
+		lobby_layout_picker = picker
+		lobby_seed_edit = seed_edit
+		lobby_reroll = reroll
+		lobby_preview = preview
+		picker.item_selected.connect(func(index: int) -> void: network.call("choose_map_layout", MAP.LAYOUTS[index]))
+		seed_edit.text_submitted.connect(func(_value: String) -> void: _apply_lobby_seed())
+		seed_edit.focus_exited.connect(_apply_lobby_seed)
+		ready_button = _button("READY", _toggle_ready)
+		start_button = _button("START MATCH", _start_match)
+		footer.add_child(ready_button)
+		footer.add_child(start_button)
+		_refresh_status()
+		_refresh_roster()
+		_refresh_chat()
+
+func _apply_lobby_seed() -> void:
+	if screen != "lobby" or not multiplayer.is_server() or not is_instance_valid(lobby_seed_edit):
+		return
+	var value: String = lobby_seed_edit.text.strip_edges()
+	if value.is_valid_int():
+		network.call("choose_lobby_seed", value.to_int())
+	lobby_seed_edit.text = str(network.get("lobby_map_seed"))
+
+func _build_lobby_chat(parent: Container) -> void:
+	parent.add_child(_text("Chat", 20))
+	chat_log = RichTextLabel.new()
+	chat_log.custom_minimum_size.y = 120
+	chat_log.scroll_following = true
+	parent.add_child(chat_log)
+	var chat_row := HBoxContainer.new()
+	parent.add_child(chat_row)
+	chat_edit = LineEdit.new()
+	chat_edit.max_length = 250
+	chat_edit.placeholder_text = "Type message..."
+	chat_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chat_edit.text_submitted.connect(func(_v: String) -> void: _send_chat())
+	chat_row.add_child(chat_edit)
+	chat_row.add_child(_button("SEND", _send_chat))
 
 func _refresh_solo_roster() -> void:
-	for child in solo_roster.get_children():
-		solo_roster.remove_child(child)
+	_build_roster_rows(solo_roster, solo_players, true)
+	_refresh_solo_preview()
+
+func _build_roster_rows(parent: VBoxContainer, entries: Dictionary, solo: bool) -> void:
+	for child in parent.get_children():
+		parent.remove_child(child)
 		child.queue_free()
-	solo_rows.clear()
+	if solo:
+		solo_rows.clear()
+	var is_host: bool = solo or multiplayer.is_server()
+	var editable: bool = solo or str(network.get("phase")) == "lobby"
 	var headings := HBoxContainer.new()
-	solo_roster.add_child(headings)
+	parent.add_child(headings)
 	var player_heading := _text("Player", 13, MUTED)
 	player_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	headings.add_child(player_heading)
-	for heading in ["Color", "Team", ""]:
+	for heading in ["Color", "Team"]:
 		var label := _text(heading, 13, MUTED)
-		label.custom_minimum_size.x = 32 if heading.is_empty() else 110
+		label.custom_minimum_size.x = 100
 		headings.add_child(label)
-	for id in RULES.ordered_peers(solo_players):
-		var entry: Dictionary = solo_players[id]
+	var spacer := Control.new()
+	spacer.custom_minimum_size.x = 40
+	headings.add_child(spacer)
+	for id in RULES.ordered_peers(entries):
+		var entry: Dictionary = entries[id]
+		var ai: bool = id != 1 if solo else bool(entry.get("ai", false))
 		var row := HBoxContainer.new()
 		row.custom_minimum_size.y = 36
-		solo_roster.add_child(row)
-		var title := _text("Player" if id == 1 else "AI %d" % (id - 1), 15, RULES.EMPIRE_COLORS[int(entry["color"])])
+		row.add_theme_constant_override("separation", 4)
+		parent.add_child(row)
+		var name_text: String = ("Player" if id == 1 else "AI %d" % (id - 1)) if solo else str(entry.get("name", "Player"))
+		var title := _text(name_text, 14, RULES.EMPIRE_COLORS[int(entry.get("color", 1))])
+		title.clip_text = true
+		title.tooltip_text = name_text
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(title)
-		var color := _color_selector(solo_players, id)
-		color.custom_minimum_size.x = 110
-		color.item_selected.connect(_solo_color_selected.bind(id))
+		var color := _color_selector(entries, id)
+		color.disabled = not editable or (not solo and id != multiplayer.get_unique_id() and not (is_host and ai))
+		color.item_selected.connect(_solo_color_selected.bind(id) if solo else _color_selected.bind(id))
 		row.add_child(color)
 		var team := OptionButton.new()
-		team.custom_minimum_size.x = 110
-		for choice in range(1, solo_players.size() + 1):
+		team.custom_minimum_size.x = 100
+		for choice in range(1, (entries.size() if solo else RULES.MAX_PLAYERS) + 1):
 			team.add_item("Team %d" % choice)
 		team.select(int(entry["team"]) - 1)
-		team.item_selected.connect(_solo_team_selected.bind(id))
+		team.disabled = not editable or (not is_host and id != multiplayer.get_unique_id())
+		team.item_selected.connect(_solo_team_selected.bind(id) if solo else _team_selected.bind(id))
 		row.add_child(team)
-		var remove: Button = _button("×", _remove_solo_player.bind(id))
-		remove.custom_minimum_size = Vector2(32, 32)
-		remove.disabled = id == 1
-		remove.tooltip_text = "Remove AI player"
-		row.add_child(remove)
-		solo_rows[id] = {"color": color, "team": team, "remove": remove}
-	var add_row := HBoxContainer.new()
-	solo_roster.add_child(add_row)
-	solo_add_button = _button("+ Add player", _add_solo_player)
-	solo_add_button.custom_minimum_size = Vector2(140, 32)
-	solo_add_button.disabled = solo_players.size() >= RULES.MAX_PLAYERS
-	add_row.add_child(solo_add_button)
-	_refresh_solo_preview()
+		if not solo and not ai:
+			var ready := _text("✓" if bool(entry.get("ready", false)) else "…", 14, MUTED)
+			ready.custom_minimum_size.x = 40
+			ready.tooltip_text = "Ready" if bool(entry.get("ready", false)) else "Waiting"
+			row.add_child(ready)
+		else:
+			var remove := _button("×", _remove_solo_player.bind(id) if solo else Callable(network, "remove_lobby_ai").bind(id))
+			remove.custom_minimum_size = Vector2(40, 32)
+			remove.disabled = not editable or not is_host or not ai
+			remove.tooltip_text = "Remove AI player"
+			row.add_child(remove)
+			if solo:
+				solo_rows[id] = {"color": color, "team": team, "remove": remove}
+	if is_host:
+		var add_row := HBoxContainer.new()
+		parent.add_child(add_row)
+		var add_button := _button("+ Add player", _add_solo_player if solo else Callable(network, "add_lobby_ai"))
+		add_button.disabled = not editable or entries.size() >= RULES.MAX_PLAYERS
+		add_row.add_child(add_button)
+		if solo:
+			solo_add_button = add_button
 
 func _solo_color_selected(index: int, id: int) -> void:
 	if solo_players.has(id) and RULES.color_available(solo_players, id, index + 1):
@@ -324,6 +451,56 @@ func _show_multiplayer() -> void:
 	buttons.add_child(_button("JOIN GAME", _join))
 	multiplayer_status_label = _text(str(network.get("status")), 14, MUTED)
 	form.add_child(multiplayer_status_label)
+	var browser_panel := _panel()
+	browser_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(browser_panel)
+	var browser := VBoxContainer.new()
+	browser_panel.add_child(browser)
+	var browser_header := HBoxContainer.new()
+	browser.add_child(browser_header)
+	var browser_title := _text("Available games (LAN)", 20)
+	browser_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	browser_header.add_child(browser_title)
+	browser_header.add_child(_button("REFRESH", func() -> void: network.call("start_lobby_browser", address_edit.text)))
+	var browser_scroll := ScrollContainer.new()
+	browser_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	browser_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	browser.add_child(browser_scroll)
+	browser_list = VBoxContainer.new()
+	browser_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	browser_scroll.add_child(browser_list)
+	network.call("start_lobby_browser", address_edit.text)
+	_refresh_browser()
+
+func _refresh_browser() -> void:
+	if screen != "multiplayer" or not is_instance_valid(browser_list):
+		return
+	for child in browser_list.get_children():
+		browser_list.remove_child(child)
+		child.queue_free()
+	var available: Dictionary = network.get("discovered_lobbies")
+	if available.is_empty():
+		var empty := _text("No games discovered. Direct IP joining is still available.", 14, MUTED)
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		browser_list.add_child(empty)
+		return
+	var addresses: Array = available.keys()
+	addresses.sort()
+	for address in addresses:
+		var info: Dictionary = available[address]
+		var row := HBoxContainer.new()
+		browser_list.add_child(row)
+		var label := _text("%s · %d/8 · %s · %s" % [info["name"], int(info["players"]), info["layout"], address], 14)
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.clip_text = true
+		label.tooltip_text = label.text
+		row.add_child(label)
+		var join_button := _button("JOIN GAME", _join_discovered.bind(str(address)))
+		row.add_child(join_button)
+
+func _join_discovered(address: String) -> void:
+	address_edit.text = address
+	_join()
 
 func _host() -> void:
 	saved_ip = address_edit.text
@@ -337,97 +514,7 @@ func _join() -> void:
 
 func _show_lobby() -> void:
 	screen = "lobby"
-	var col := _root()
-	var header := HBoxContainer.new()
-	col.add_child(header)
-	header.add_child(_text("Lobby", 28))
-	header.add_spacer(false)
-	header.add_child(_button("LEAVE", _leave))
-	status_label = _text("", 14, MUTED)
-	col.add_child(status_label)
-
-	# Flow-wrap panels at narrow widths; scroll the whole body if stacked.
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	col.add_child(scroll)
-	var flow := HFlowContainer.new()
-	flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	flow.add_theme_constant_override("h_separation", 12)
-	flow.add_theme_constant_override("v_separation", 12)
-	scroll.add_child(flow)
-
-	var left := _panel()
-	left.custom_minimum_size = Vector2(430, 370)
-	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	flow.add_child(left)
-	var left_col := VBoxContainer.new()
-	left_col.add_theme_constant_override("separation", 8)
-	left.add_child(left_col)
-	var players_header := HBoxContainer.new()
-	left_col.add_child(players_header)
-	var players_title := _text("Players", 20)
-	players_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	players_header.add_child(players_title)
-	var add_ai_button := _button("+ Add AI", func() -> void: network.call("add_lobby_ai"))
-	add_ai_button.name = "AddLobbyAI"
-	players_header.add_child(add_ai_button)
-	var roster_scroll := ScrollContainer.new()
-	roster_scroll.custom_minimum_size.y = 230
-	roster_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	roster_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	left_col.add_child(roster_scroll)
-	roster = VBoxContainer.new()
-	roster.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	roster.add_theme_constant_override("separation", 3)
-	roster_scroll.add_child(roster)
-	var layout_row := HBoxContainer.new()
-	left_col.add_child(layout_row)
-	layout_row.add_child(_text("Map layout", 14, MUTED))
-	lobby_layout_picker = _map_layout_picker()
-	lobby_layout_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	layout_row.add_child(lobby_layout_picker)
-	lobby_layout_picker.item_selected.connect(func(index: int) -> void: network.call("choose_map_layout", MAP.LAYOUTS[index]))
-	var seed_row := HBoxContainer.new()
-	left_col.add_child(seed_row)
-	lobby_seed_label = _text("", 12, MUTED)
-	lobby_seed_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	seed_row.add_child(lobby_seed_label)
-	lobby_reroll = _button("Reroll", func() -> void: network.call("reroll_lobby_map"))
-	seed_row.add_child(lobby_reroll)
-	lobby_preview = _new_map_preview(left_col)
-	var buttons := HBoxContainer.new()
-	left_col.add_child(buttons)
-	ready_button = _button("READY", _toggle_ready)
-	buttons.add_child(ready_button)
-	start_button = _button("START MATCH", _start_match)
-	buttons.add_child(start_button)
-
-	var right := _panel()
-	right.custom_minimum_size = Vector2(430, 370)
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	flow.add_child(right)
-	var right_col := VBoxContainer.new()
-	right_col.add_theme_constant_override("separation", 8)
-	right.add_child(right_col)
-	right_col.add_child(_text("Chat", 20))
-	chat_log = RichTextLabel.new()
-	chat_log.custom_minimum_size.y = 230
-	chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	chat_log.scroll_following = true
-	right_col.add_child(chat_log)
-	var chat_row := HBoxContainer.new()
-	right_col.add_child(chat_row)
-	chat_edit = LineEdit.new()
-	chat_edit.max_length = 250
-	chat_edit.placeholder_text = "Type message..."
-	chat_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	chat_edit.text_submitted.connect(func(_v: String) -> void: _send_chat())
-	chat_row.add_child(chat_edit)
-	chat_row.add_child(_button("SEND", _send_chat))
-	_refresh_status()
-	_refresh_roster()
-	_refresh_chat()
+	_build_match_setup(false)
 
 func _refresh_status() -> void:
 	if screen == "lobby" and is_instance_valid(status_label):
@@ -454,20 +541,23 @@ func _refresh_solo_preview() -> void:
 	_update_map_preview(solo_preview, solo_players, seed_value, MAP.LAYOUTS[solo_layout_picker.selected])
 
 func _new_map_preview(parent: Container) -> Control:
-	var preview := Control.new()
-	preview.custom_minimum_size = Vector2(200, 230)
+	var preview := MapPreview.new()
+	preview.custom_minimum_size = Vector2(340, 320)
 	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(preview)
-	preview.draw.connect(_draw_map_preview.bind(preview))
 	preview.resized.connect(preview.queue_redraw)
-	var legend := _text("Colored: starts  ·  Grey: systems  ·  Violet: antimatter", 11, MUTED)
+	var legend := _text("Colored: starts  ·  Grey: systems  ·  Brown: asteroids  ·  Violet: antimatter", 11, MUTED)
 	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	parent.add_child(legend)
 	return preview
 
 func _update_map_preview(preview: Control, entries: Dictionary, seed_value: int, layout: String) -> void:
 	if entries.is_empty():
+		preview.set_meta("map", {})
+		preview.set_meta("signature", [])
+		preview.queue_redraw()
 		return
 	var signature: Array = [seed_value, entries.size(), layout]
 	if preview.get_meta("signature", []) != signature:
@@ -478,34 +568,6 @@ func _update_map_preview(preview: Control, entries: Dictionary, seed_value: int,
 		colors.append(RULES.EMPIRE_COLORS[int(entries[id]["color"])])
 	preview.set_meta("colors", colors)
 	preview.queue_redraw()
-
-func _draw_map_preview(preview: Control) -> void:
-	preview.draw_rect(Rect2(Vector2.ZERO, preview.size), Color("#091522"))
-	var graph: Dictionary = preview.get_meta("map", {})
-	if graph.is_empty():
-		return
-	var points: Array = graph["points"]
-	var bounds: Vector2 = graph["size"]
-	var available: Vector2 = (preview.size - Vector2(24, 24)).max(Vector2.ONE)
-	var scale_factor: float = minf(available.x / bounds.x, available.y / bounds.y)
-	var offset: Vector2 = (preview.size - bounds * scale_factor) * 0.5
-	var colors: Array = preview.get_meta("colors", [])
-	for edge in graph["edges"]:
-		preview.draw_line(offset + points[edge[0]] * scale_factor, offset + points[edge[1]] * scale_factor, Color("#526982"), 1.0, true)
-	for asteroid in graph["fields"]:
-		var center: Vector2 = offset + asteroid["position"] * scale_factor
-		var special: bool = bool(asteroid.get("antimatter", false))
-		var radius: float = maxf(3.0 if special else 1.5, float(asteroid["radius"]) * scale_factor)
-		var tint: Color = Color("#c295ff") if special else Color("#7e6951")
-		preview.draw_circle(center, radius, tint)
-		if special:
-			preview.draw_arc(center, radius + 2.0, 0.0, TAU, 24, tint, 1.0, true)
-	for index in range(points.size()):
-		var position: Vector2 = offset + points[index] * scale_factor
-		var home: bool = index < colors.size()
-		preview.draw_circle(position, 4.0 if home else 2.0, colors[index] if home else Color("#b0c1d2"))
-		if home:
-			preview.draw_arc(position, 6.0, 0.0, TAU, 20, colors[index], 1.0, true)
 
 func _map_layout_picker() -> OptionButton:
 	var picker := OptionButton.new()
@@ -518,70 +580,26 @@ func _map_layout_picker() -> OptionButton:
 func _refresh_roster() -> void:
 	if screen != "lobby" or not is_instance_valid(roster):
 		return
-	for child in roster.get_children():
-		roster.remove_child(child)
-		child.queue_free()
 	var roster_data: Dictionary = network.get("players")
 	var is_host: bool = multiplayer.is_server()
 	var is_lobby: bool = str(network.get("phase")) == "lobby"
-	if is_instance_valid(lobby_layout_picker):
-		lobby_layout_picker.select(maxi(0, MAP.LAYOUTS.find(str(network.get("map_layout")))))
-		lobby_layout_picker.disabled = not is_lobby or not is_host
-	if is_instance_valid(lobby_preview):
-		var seed_value: int = int(network.get("lobby_map_seed"))
-		lobby_seed_label.text = "Seed: %d" % seed_value
-		lobby_reroll.visible = is_host
-		lobby_reroll.disabled = not is_lobby
-		_update_map_preview(lobby_preview, roster_data, seed_value, str(network.get("map_layout")))
-	# The header button is a descendant of the lobby's content panel.
-	var add_ai_buttons: Array = find_children("AddLobbyAI", "Button", true, false)
-	if not add_ai_buttons.is_empty():
-		var add_ai_button: Button = add_ai_buttons[0]
-		add_ai_button.visible = is_host
-		add_ai_button.disabled = not is_lobby or roster_data.size() >= RULES.MAX_PLAYERS
-	for id in RULES.ordered_peers(roster_data):
-		var entry: Dictionary = roster_data[id]
-		var row := HBoxContainer.new()
-		row.custom_minimum_size.y = 32
-		row.add_theme_constant_override("separation", 8)
-		roster.add_child(row)
-		var ai: bool = bool(entry.get("ai", false))
-		var role: String = "AI" if ai else ("HOST" if id == 1 else "GUEST")
-		var label := _text("%s • %s" % [str(entry.get("name", "Player")), role], 14)
-		label.clip_text = true
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		label.add_theme_color_override("font_color", RULES.EMPIRE_COLORS[int(entry.get("color", 1))])
-		row.add_child(label)
-		var color_selector := _color_selector(roster_data, int(id))
-		color_selector.disabled = not is_lobby or (id != multiplayer.get_unique_id() and not (is_host and ai))
-		color_selector.item_selected.connect(_color_selected.bind(int(id)))
-		row.add_child(color_selector)
-		var selector := OptionButton.new()
-		selector.custom_minimum_size.x = 96
-		for team in range(1, RULES.MAX_PLAYERS + 1):
-			selector.add_item("Team %d" % team)
-		selector.select(clampi(int(entry.get("team", 1)) - 1, 0, RULES.MAX_PLAYERS - 1))
-		selector.disabled = not is_lobby or (not is_host and id != multiplayer.get_unique_id())
-		selector.item_selected.connect(_team_selected.bind(id))
-		row.add_child(selector)
-		var ready := _text("READY" if bool(entry.get("ready", false)) else "WAITING", 12, MUTED)
-		ready.custom_minimum_size.x = 68
-		row.add_child(ready)
-		if ai and is_host:
-			var remove_ai := _button("×", Callable(network, "remove_lobby_ai").bind(id))
-			remove_ai.tooltip_text = "Remove AI player"
-			remove_ai.disabled = not is_lobby
-			row.add_child(remove_ai)
-	for _index in range(RULES.MAX_PLAYERS - roster_data.size()):
-		roster.add_child(_text("EMPTY SLOT", 13, MUTED))
+	_build_roster_rows(roster, roster_data, false)
+	lobby_layout_picker.select(maxi(0, MAP.LAYOUTS.find(str(network.get("map_layout")))))
+	lobby_layout_picker.disabled = not is_lobby or not is_host
+	var seed_value: int = int(network.get("lobby_map_seed"))
+	if not lobby_seed_edit.has_focus():
+		lobby_seed_edit.text = str(seed_value)
+	lobby_seed_edit.editable = is_lobby and is_host
+	lobby_reroll.visible = is_host
+	lobby_reroll.disabled = not is_lobby
+	_update_map_preview(lobby_preview, roster_data, seed_value, str(network.get("map_layout")))
 	ready_button.visible = not is_host
 	ready_button.disabled = not is_lobby or not roster_data.has(multiplayer.get_unique_id())
 	var my_entry: Dictionary = roster_data.get(multiplayer.get_unique_id(), {})
 	ready_button.text = "UNREADY" if bool(my_entry.get("ready", false)) else "READY"
 	start_button.visible = is_host
 	start_button.disabled = not bool(network.call("can_start"))
-	if is_instance_valid(chat_edit):
-		chat_edit.editable = is_lobby
+	chat_edit.editable = is_lobby
 
 func _refresh_chat() -> void:
 	if screen != "lobby" or not is_instance_valid(chat_log):
@@ -601,6 +619,7 @@ func _toggle_ready() -> void:
 	network.call("toggle_ready")
 
 func _start_match() -> void:
+	_apply_lobby_seed()
 	network.call("start_match")
 
 func _send_chat() -> void:
