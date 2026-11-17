@@ -25,6 +25,7 @@ func _test_maintain_targets() -> void:
 
 func _initialize() -> void:
     _test_policy_cards()
+    _test_policy_zone_commitments()
     _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -1477,3 +1478,27 @@ func _test_economy_policies() -> void:
     ECON.apply_economy_policies(state)
     assert(is_equal_approx(ECON.consumption(home, "Plastics"), demand))
     print("PASS: economy policy modifiers and removal")
+
+func _test_policy_zone_commitments() -> void:
+    var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+    assert(ECON.policy_fleet_weights(state, 1).is_empty())
+    var invasion: Array = [{"targets": [1], "weight": 35}]
+    assert(not ECON.commit_military_policy(state, 1, "offense", "invasion", [], []))
+    assert(not ECON.commit_military_policy(state, 2, "offense", "invasion", invasion, []))
+    assert(ECON.commit_military_policy(state, 1, "offense", "invasion", invasion, []))
+    var entry: Dictionary = state["policies"][1]["offense"]
+    assert(ECON.policy_allocation(entry) == 35)
+    assert(not ECON.set_policy_target(state, 1, "offense", 1, false))
+    assert(not ECON.set_policy_weight(state, 1, "offense", 80))
+    assert(ECON.policy_fleet_weights(state, 1).get(0, 0) == 100)
+    state["elapsed"] = 20.0
+    assert(ECON.policy_fleet_weights(state, 1) == {0: 65, 1: 35})
+    assert(ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [0], "weight": 25}], []))
+    assert(ECON.policy_fleet_weights(state, 1) == {0: 65, 1: 35})
+    assert(not ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [0], "weight": 80}], []))
+    assert(ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [0], "weight": 40}], ["offense"]))
+    assert(ECON.policy_fleet_weights(state, 1) == {0: 100})
+    assert(ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [1], "weight": 20}], ["defense"]))
+    assert(not ECON.policy_active(state, state["policies"][1]["offense"]))
+    assert(ECON.policy_allocation(state["policies"][1]["offense"]) == 20)
+    print("PASS: atomic zone policies, overrides, locked weights and warmup replacement")

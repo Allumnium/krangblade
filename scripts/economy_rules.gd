@@ -2601,6 +2601,10 @@ static func step(state: Dictionary, dt: float) -> void:
             for node in entry["targets"].duplicate():
                 if not policy_target_valid(state, int(player), entry["card"], int(node)):
                     entry["targets"].erase(node)
+            for zone in entry.get("zones", []):
+                for node in zone["targets"].duplicate():
+                    if not policy_target_valid(state, int(player), entry["card"], int(node)):
+                        zone["targets"].erase(node)
     apply_economy_policies(state)
     for i in range((state["planets"] as Array).size()):
         _work_planet(state, i, dt)
@@ -2719,6 +2723,62 @@ static func equip_policy(state: Dictionary, player: int, slot: String, card: Str
     normalize_policy_weights(equipped)
     return true
 
+# Commit a fully configured military policy atomically. Replacing the same card
+# is intentional: the previous assignment remains active until this succeeds.
+# Each zone contains a set of discovered system IDs and its own force share.
+static func commit_military_policy(state: Dictionary, player: int, slot: String, card: String, zones: Array, void_slots: Array) -> bool:
+    if not policy_eligible(state, player, slot, card) or not bool(POLICY_CARDS.get(card, {}).get("military", false)):
+        return false
+    if zones.is_empty() or zones.size() > 26:
+        return false
+    var total: int = 0
+    var seen: Dictionary = {}
+    var configured: Array = []
+    for zone in zones:
+        if not zone is Dictionary:
+            return false
+        var weight: int = int(zone.get("weight", -1))
+        var nodes: Array = zone.get("targets", [])
+        if weight < 0 or weight > 100 or nodes.is_empty():
+            return false
+        var clean: Array = []
+        for raw_node in nodes:
+            var node: int = int(raw_node)
+            if seen.has(node) or not policy_target_valid(state, player, card, node):
+                return false
+            seen[node] = true
+            clean.append(node)
+        configured.append({"targets": clean, "weight": weight})
+        total += weight
+    var voided: Array = []
+    var equipped: Dictionary = state["policies"][player]
+    for other in void_slots:
+        if not other is String or other == slot or not POLICY_SLOTS.has(other) or voided.has(other):
+            return false
+        if not equipped.has(other) or not POLICY_CARDS[equipped[other]["card"]].get("military", false):
+            return false
+        voided.append(other)
+    for other in equipped:
+        if other == slot or voided.has(other):
+            continue
+        if POLICY_CARDS[equipped[other]["card"]].get("military", false):
+            total += policy_allocation(equipped[other])
+    if total > 100:
+        return false
+    var committed_weight: int = 0
+    for zone in configured:
+        committed_weight += int(zone["weight"])
+    equipped[slot] = {"card": card, "ready_at": float(state["elapsed"]) + float(POLICY_CARDS[card]["warmup"]), "targets": seen.keys(), "weight": committed_weight, "zones": configured, "void_slots": voided}
+    return true
+
+static func policy_allocation(entry: Dictionary) -> int:
+    if entry.has("zones"):
+        var total: int = 0
+        for zone in entry["zones"]:
+            total += int(zone["weight"])
+        return total
+    return int(entry.get("weight", 0))
+
 static func policy_active(state: Dictionary, entry: Dictionary) -> bool:
     return not entry.is_empty() and float(state["elapsed"]) >= float(entry["ready_at"])
 
@@ -2734,7 +2794,7 @@ static func policy_target_valid(state: Dictionary, player: int, card: String, no
 
 static func set_policy_target(state: Dictionary, player: int, slot: String, node: int, enabled: bool) -> bool:
     var entry: Dictionary = state.get("policies", {}).get(player, {}).get(slot, {})
-    if entry.is_empty() or (enabled and not policy_target_valid(state, player, entry["card"], node)):
+    if entry.is_empty() or entry.has("zones") or (enabled and not policy_target_valid(state, player, entry["card"], node)):
         return false
     var targets: Array = entry["targets"]
     if enabled and not targets.has(node):
@@ -2747,7 +2807,7 @@ static func set_policy_target(state: Dictionary, player: int, slot: String, node
 
 static func set_policy_weight(state: Dictionary, player: int, slot: String, percent: int) -> bool:
     var equipped: Dictionary = state.get("policies", {}).get(player, {})
-    if not equipped.has(slot) or not POLICY_CARDS[equipped[slot]["card"]].get("military", false) or percent < 0 or percent > 100:
+    if not equipped.has(slot) or equipped[slot].has("zones") or not POLICY_CARDS[equipped[slot]["card"]].get("military", false) or percent < 0 or percent > 100:
         return false
     var weights: Dictionary = {}
     for key in POLICY_SLOTS:
@@ -2770,7 +2830,7 @@ static func set_policy_weight(state: Dictionary, player: int, slot: String, perc
 static func normalize_policy_weights(equipped: Dictionary) -> void:
     var weights: Dictionary = {}
     for slot in POLICY_SLOTS:
-        if equipped.has(slot) and POLICY_CARDS[equipped[slot]["card"]].get("military", false):
+        if equipped.has(slot) and not equipped[slot].has("zones") and POLICY_CARDS[equipped[slot]["card"]].get("military", false):
             weights[slot] = int(equipped[slot]["weight"])
     if weights.is_empty():
         return
@@ -2786,25 +2846,53 @@ static func normalize_policy_weights(equipped: Dictionary) -> void:
 static func policy_fleet_weights(state: Dictionary, player: int) -> Dictionary:
     var result: Dictionary = {}
     var home: int = military_home(state, player)
-    for entry in state.get("policies", {}).get(player, {}).values():
+    var equipped: Dictionary = state.get("policies", {}).get(player, {})
+    var has_military: bool = false
+    for slot in equipped:
+        if POLICY_CARDS[equipped[slot]["card"]].get("military", false):
+            has_military = true
+            break
+    if not has_military:
+        return result
+    var voided: Dictionary = {}
+    for slot in equipped:
+        var entry: Dictionary = equipped[slot]
+        if POLICY_CARDS[entry["card"]].get("military", false) and policy_active(state, entry):
+            for other in entry.get("void_slots", []):
+                voided[other] = true
+    for slot in equipped:
+        if voided.has(slot):
+            continue
+        var entry: Dictionary = equipped[slot]
         if not POLICY_CARDS[entry["card"]].get("military", false):
             continue
-        var weight: int = int(entry["weight"])
-        var targets: Array = []
-        if policy_active(state, entry):
-            for node in entry["targets"]:
-                if policy_target_valid(state, player, entry["card"], int(node)):
-                    targets.append(node)
-        if targets.is_empty():
-            if home >= 0:
-                result[home] = int(result.get(home, 0)) + weight
-            continue
-        var equal: Dictionary = {}
-        for node in targets:
-            equal[node] = 1
-        var shares: Dictionary = _apportion(targets, equal, weight)
-        for node in shares:
-            result[node] = int(result.get(node, 0)) + int(shares[node])
+        var zones: Array = entry.get("zones", [])
+        if zones.is_empty():
+            zones = [{"targets": entry.get("targets", []), "weight": entry.get("weight", 100)}]
+        for zone in zones:
+            var weight: int = int(zone["weight"])
+            var targets: Array = []
+            if policy_active(state, entry):
+                for node in zone["targets"]:
+                    if policy_target_valid(state, player, entry["card"], int(node)):
+                        targets.append(node)
+            if targets.is_empty():
+                if home >= 0:
+                    result[home] = int(result.get(home, 0)) + weight
+                continue
+            var equal: Dictionary = {}
+            for node in targets:
+                equal[node] = 1
+            var shares: Dictionary = _apportion(targets, equal, weight)
+            for node in shares:
+                result[node] = int(result.get(node, 0)) + int(shares[node])
+    # Unallocated capacity is held at home rather than redistributed across
+    # configured zones by the fighter quota apportionment.
+    var assigned: int = 0
+    for amount in result.values():
+        assigned += int(amount)
+    if assigned < 100 and home >= 0:
+        result[home] = int(result.get(home, 0)) + 100 - assigned
     return result
 
 static func active_card(state: Dictionary, player: int, card: String) -> bool:

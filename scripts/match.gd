@@ -1814,6 +1814,10 @@ func _refresh() -> void:
     _refresh_global_bar(state)
     _refresh_time_controls(state)
     _refresh_policy_ui(state)
+    if not policy_draft_card.is_empty():
+        for child in policy_hidden_ui:
+            if is_instance_valid(child):
+                child.hide()
     menu_exit.text = "Main menu" if bool(session.get("is_solo")) else ("Return to lobby" if multiplayer.is_server() else "Leave match")
     if phase == "loading" and multiplayer.is_server():
         menu_exit.text = "Cancel start"
@@ -2491,10 +2495,7 @@ func _select_at(point: Vector2) -> void:
         if distance <= _planet_radius(i, state) + 4.0 and distance < nearest:
             nearest = distance
             hit = i
-    if not policy_selected.is_empty():
-        var entry: Dictionary = state.get("policies", {}).get(_me(), {}).get(policy_selected, {})
-        if hit >= 0 and not entry.is_empty():
-            session.call("request_policy_target", policy_selected, hit, not entry["targets"].has(hit))
+    if not policy_selected.is_empty() and policy_draft_card.is_empty():
         return
     # Use the same interpolated physical pose for selection and rendering.
     var poses: Dictionary = _ship_poses(state)
@@ -2526,6 +2527,26 @@ func _select_at(point: Vector2) -> void:
 
 func _map_input(event: InputEvent) -> void:
     if match_menu.visible or (is_instance_valid(policy_modal) and policy_modal.visible):
+        return
+    if not policy_draft_card.is_empty():
+        if event is InputEventMouseButton:
+            var brush_button: InputEventMouseButton = event
+            if brush_button.button_index == MOUSE_BUTTON_LEFT or brush_button.button_index == MOUSE_BUTTON_RIGHT:
+                policy_brush_mode = (1 if brush_button.button_index == MOUSE_BUTTON_LEFT else -1) if brush_button.pressed else 0
+                if brush_button.pressed:
+                    _paint_policy_brush(brush_button.position, policy_brush_mode)
+                map_canvas.accept_event()
+                return
+            if brush_button.pressed and brush_button.button_index == MOUSE_BUTTON_WHEEL_UP:
+                _zoom_at(brush_button.position, 1.15)
+            elif brush_button.pressed and brush_button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+                _zoom_at(brush_button.position, 1.0 / 1.15)
+        elif event is InputEventMouseMotion:
+            policy_brush_cursor = event.position
+            if policy_brush_mode != 0:
+                _paint_policy_brush(event.position, policy_brush_mode)
+        map_canvas.queue_redraw()
+        map_canvas.accept_event()
         return
     if event is InputEventMouseButton:
         var mouse: InputEventMouseButton = event
@@ -2988,7 +3009,7 @@ func _draw_map() -> void:
                 map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
         var name_star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
         map_canvas.draw_string(font, pos + Vector2(-80, -name_star_radius - 7), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
-    _draw_policy_flags(state)
+    _draw_policy_zones(state)
     _draw_combat_lens(state, font)
     _draw_logistics_lens(state, font)
     var poses: Dictionary = _ship_poses(state)
@@ -3102,6 +3123,21 @@ func _draw_map() -> void:
 
 # Policy cards are clipped by the bottom edge; the full cards appear in a modal.
 var policy_selected: String = ""
+var policy_draft_card: String = ""
+var policy_draft_slot: String = ""
+var policy_brush_mode: int = 0
+var policy_brush_cursor: Vector2 = Vector2.ZERO
+var policy_brush_radius: float = 32.0
+var policy_painted: Dictionary = {}
+var policy_zone_weights: Dictionary = {}
+var policy_voids: Dictionary = {}
+var policy_editor: PanelContainer
+var policy_editor_rows: VBoxContainer
+var policy_editor_status: Label
+var policy_editor_card: Label
+var policy_editor_accept: Button
+var policy_hidden_ui: Dictionary = {}
+var policy_original_map_top: float = 0.0
 var policy_buttons: Dictionary = {}
 var policy_changes: Dictionary = {}
 var policy_inspector: PanelContainer
@@ -3180,10 +3216,8 @@ func _build_policy_ui() -> void:
     policy_slider = HSlider.new()
     policy_slider.max_value = 100
     policy_slider.step = 1
+    policy_slider.editable = false
     body.add_child(policy_slider)
-    policy_slider.drag_ended.connect(func(changed: bool) -> void:
-        if changed and not policy_selected.is_empty():
-            session.call("request_policy_weight", policy_selected, roundi(policy_slider.value)))
     policy_inspector.hide()
     # In-scene overlay leaves the actual bottom slots reachable for GUI drag/drop.
     policy_modal = Control.new()
@@ -3210,6 +3244,32 @@ func _build_policy_ui() -> void:
     policy_catalog = HBoxContainer.new()
     contents.add_child(policy_catalog)
     policy_modal.hide()
+    policy_editor = PanelContainer.new()
+    add_child(policy_editor)
+    policy_editor.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+    policy_editor.offset_left = 12
+    policy_editor.offset_right = 348
+    policy_editor.offset_top = 12
+    policy_editor.offset_bottom = 520
+    policy_editor.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#42647e"), 8))
+    var editor_scroll := ScrollContainer.new()
+    policy_editor.add_child(editor_scroll)
+    editor_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    var editor_body := VBoxContainer.new()
+    editor_body.custom_minimum_size.x = 305
+    editor_scroll.add_child(editor_body)
+    policy_editor_card = _label("", 18)
+    editor_body.add_child(policy_editor_card)
+    editor_body.add_child(_label("Left: paint   Right: erase", 13))
+    policy_editor_rows = VBoxContainer.new()
+    editor_body.add_child(policy_editor_rows)
+    policy_editor_status = _label("", 13)
+    editor_body.add_child(policy_editor_status)
+    var action_row := HBoxContainer.new()
+    editor_body.add_child(action_row)
+    _button("Cancel", _cancel_policy_draft, action_row)
+    policy_editor_accept = _button("Accept", _commit_policy_draft, action_row)
+    policy_editor.hide()
 
 func _open_policy_catalog(slot: String) -> void:
     policy_choice_slot = slot
@@ -3236,8 +3296,11 @@ func _open_policy_catalog(slot: String) -> void:
     policy_modal.show()
 
 func _equip_selected_policy(card: String) -> void:
-    session.call("request_policy", policy_choice_slot, card)
     policy_modal.hide()
+    if not card.is_empty() and ECONOMY.POLICY_CARDS[card].get("military", false):
+        _begin_policy_draft(policy_choice_slot, card)
+        return
+    session.call("request_policy", policy_choice_slot, card)
     policy_selected = ""
     _inspect_policy(policy_choice_slot)
 
@@ -3265,7 +3328,7 @@ func _refresh_policy_ui(state: Dictionary) -> void:
         card.text = slot.capitalize() + "\n" + name_text
         card.tooltip_text = name_text
         card.set_pressed_no_signal(policy_selected == slot)
-    policy_inspector.visible = not policy_selected.is_empty()
+    policy_inspector.visible = not policy_selected.is_empty() and policy_draft_card.is_empty()
     if not policy_inspector.visible:
         return
     var selected_entry: Dictionary = equipped.get(policy_selected, {})
@@ -3281,22 +3344,204 @@ func _refresh_policy_ui(state: Dictionary) -> void:
     if military:
         if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
             policy_slider.set_value_no_signal(float(selected_entry["weight"]))
-        policy_info.text = "Army: %d%%\nClick systems to toggle flags.\n%d targets" % [int(selected_entry["weight"]), selected_entry["targets"].size()]
+        policy_info.text = "Committed: %d%%\nReplace the card to redraw its zones." % ECONOMY.policy_allocation(selected_entry)
     else:
         policy_info.text = str(definition.get("description", "Policy effects pending"))
     if not ECONOMY.policy_active(state, selected_entry):
         policy_info.text += "\nPreparing: %ds" % ceili(float(selected_entry["ready_at"]) - float(state["elapsed"]))
 
-func _draw_policy_flags(state: Dictionary) -> void:
-    if policy_selected.is_empty():
-        return
-    var entry: Dictionary = state.get("policies", {}).get(_me(), {}).get(policy_selected, {})
-    if entry.is_empty():
-        return
-    var tint := Color("#df7777") if ECONOMY.POLICY_CARDS[entry["card"]].get("target", "") == "hostile" else Color("#83b5eb")
-    for index in entry["targets"]:
-        if not ECONOMY.policy_target_valid(state, _me(), entry["card"], int(index)):
+# Painting is a local draft; committed policy data is only changed by Confirm.
+func _begin_policy_draft(slot: String, card: String) -> void:
+    policy_draft_slot = slot
+    policy_draft_card = card
+    policy_selected = ""
+    policy_brush_mode = 0
+    policy_painted.clear()
+    policy_zone_weights.clear()
+    policy_voids.clear()
+    var entry: Dictionary = _state().get("policies", {}).get(_me(), {}).get(slot, {})
+    if entry.get("card", "") == card:
+        for zone in entry.get("zones", []):
+            for node in zone["targets"]:
+                policy_painted[int(node)] = true
+    policy_editor_card.text = str(ECONOMY.POLICY_CARDS[card]["name"])
+    policy_original_map_top = map_canvas.offset_top
+    map_canvas.offset_top = 8
+    policy_hidden_ui.clear()
+    for child in get_children():
+        if child == map_canvas or child == policy_editor or child == policy_modal or child == match_menu:
             continue
-        var pos: Vector2 = _screen_point(state["map"]["points"][index]) + Vector2(12, -8)
-        map_canvas.draw_line(pos, pos + Vector2(0, -23), tint, 2.0, true)
-        map_canvas.draw_colored_polygon(PackedVector2Array([pos + Vector2(0, -23), pos + Vector2(15, -19), pos + Vector2(0, -13)]), tint)
+        if child is CanvasItem:
+            policy_hidden_ui[child] = child.visible
+            child.hide()
+    policy_editor.show()
+    _update_policy_editor()
+    map_canvas.queue_redraw()
+
+func _cancel_policy_draft() -> void:
+    policy_draft_card = ""
+    policy_brush_mode = 0
+    policy_editor.hide()
+    map_canvas.offset_top = policy_original_map_top
+    for child in policy_hidden_ui:
+        if is_instance_valid(child):
+            child.visible = bool(policy_hidden_ui[child])
+    policy_hidden_ui.clear()
+    _refresh()
+    map_canvas.queue_redraw()
+
+func _paint_policy_brush(point: Vector2, mode: int) -> void:
+    var state: Dictionary = _state()
+    if state.is_empty():
+        return
+    var changed: bool = false
+    for node in range((state["planets"] as Array).size()):
+        if not ECONOMY.discovered(state, _me(), "planets", node):
+            continue
+        if mode > 0 and not ECONOMY.policy_target_valid(state, _me(), policy_draft_card, node):
+            continue
+        if point.distance_to(_screen_point(state["map"]["points"][node])) > policy_brush_radius:
+            continue
+        var exists: bool = policy_painted.has(node)
+        if mode > 0 and not exists:
+            policy_painted[node] = true
+            changed = true
+        elif mode < 0 and exists:
+            policy_painted.erase(node)
+            changed = true
+    if changed:
+        _update_policy_editor()
+
+# Graph connectivity uses the map's established system lanes.
+func _policy_components() -> Array:
+    var state: Dictionary = _state()
+    var pending: Dictionary = policy_painted.duplicate()
+    var groups: Array = []
+    var links: Array = state.get("map", {}).get("edges", [])
+    while not pending.is_empty():
+        var seed: int = int(pending.keys()[0])
+        pending.erase(seed)
+        var group: Array = [seed]
+        var frontier: Array = [seed]
+        while not frontier.is_empty():
+            var node: int = int(frontier.pop_back())
+            for edge in links:
+                var a: int = int(edge[0])
+                var b: int = int(edge[1])
+                var neighbor: int = b if a == node else (a if b == node else -1)
+                if pending.has(neighbor):
+                    pending.erase(neighbor)
+                    group.append(neighbor)
+                    frontier.append(neighbor)
+        group.sort()
+        groups.append(group)
+    groups.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) < int(b[0]))
+    return groups
+
+func _update_policy_editor() -> void:
+    if policy_draft_card.is_empty():
+        return
+    for child in policy_editor_rows.get_children():
+        policy_editor_rows.remove_child(child)
+        child.queue_free()
+    var groups: Array = _policy_components()
+    var total: int = 0
+    for i in range(groups.size()):
+        var group: Array = groups[i]
+        var key: int = int(group[0])
+        var weight: int = int(policy_zone_weights.get(key, 0))
+        total += weight
+        var label_text: String = "Zone %s · %d systems · %d%%" % [char(65 + i), group.size(), weight]
+        policy_editor_rows.add_child(_label(label_text, 13))
+        var slider := HSlider.new()
+        slider.min_value = 0
+        slider.max_value = 100
+        slider.step = 1
+        slider.value = weight
+        policy_editor_rows.add_child(slider)
+        slider.value_changed.connect(func(value: float) -> void:
+            policy_zone_weights[key] = roundi(value)
+            _update_policy_editor_status())
+    policy_editor_rows.add_child(_label("Other committed policies", 14))
+    var equipped: Dictionary = _state().get("policies", {}).get(_me(), {})
+    for slot in equipped:
+        if slot == policy_draft_slot:
+            continue
+        var entry: Dictionary = equipped[slot]
+        if not ECONOMY.POLICY_CARDS[entry["card"]].get("military", false):
+            continue
+        var row := HBoxContainer.new()
+        policy_editor_rows.add_child(row)
+        var amount: int = ECONOMY.policy_allocation(entry)
+        var check := CheckBox.new()
+        check.text = "%s · %d%% — Void" % [slot.capitalize(), amount]
+        check.button_pressed = bool(policy_voids.get(slot, false))
+        row.add_child(check)
+        check.toggled.connect(func(value: bool) -> void:
+            policy_voids[slot] = value
+            _update_policy_editor_status())
+        var readonly := HSlider.new()
+        readonly.max_value = 100
+        readonly.value = amount
+        readonly.editable = false
+        policy_editor_rows.add_child(readonly)
+    _update_policy_editor_status()
+
+func _update_policy_editor_status() -> void:
+    var used: int = 0
+    for group in _policy_components():
+        used += int(policy_zone_weights.get(int(group[0]), 0))
+    var equipped: Dictionary = _state().get("policies", {}).get(_me(), {})
+    for slot in equipped:
+        if slot == policy_draft_slot or bool(policy_voids.get(slot, false)):
+            continue
+        if ECONOMY.POLICY_CARDS[equipped[slot]["card"]].get("military", false):
+            used += ECONOMY.policy_allocation(equipped[slot])
+    var has_zone: bool = not _policy_components().is_empty()
+    policy_editor_accept.disabled = not has_zone or used > 100
+    policy_editor_status.text = "%d%% committed · %d%% available" % [used, maxi(0, 100 - used)] if used <= 100 else "%d%% — overallocated" % used
+    if not has_zone:
+        policy_editor_status.text = "Draw at least one zone to accept."
+
+func _commit_policy_draft() -> void:
+    var zones: Array = []
+    var state: Dictionary = _state()
+    for group in _policy_components():
+        var valid: Array = []
+        for node in group:
+            if ECONOMY.policy_target_valid(state, _me(), policy_draft_card, int(node)):
+                valid.append(node)
+        if valid.is_empty():
+            return
+        zones.append({"targets": valid, "weight": int(policy_zone_weights.get(int(group[0]), 0))})
+    if zones.is_empty() or policy_editor_accept.disabled:
+        return
+    var voided: Array = []
+    for slot in policy_voids:
+        if bool(policy_voids[slot]):
+            voided.append(slot)
+    session.call("request_policy_zones", policy_draft_slot, policy_draft_card, zones, voided)
+    _cancel_policy_draft()
+
+func _draw_policy_zones(state: Dictionary) -> void:
+    var equipped: Dictionary = state.get("policies", {}).get(_me(), {})
+    for slot in equipped:
+        var entry: Dictionary = equipped[slot]
+        if not ECONOMY.POLICY_CARDS[entry["card"]].get("military", false):
+            continue
+        var tint: Color = Color("#df7777") if entry["card"] == "invasion" else Color("#83b5eb")
+        for node in entry.get("targets", []):
+            var pos: Vector2 = _screen_point(state["map"]["points"][int(node)])
+            map_canvas.draw_circle(pos, policy_brush_radius * 0.7, Color(tint, 0.10))
+            map_canvas.draw_arc(pos, policy_brush_radius * 0.7, 0, TAU, 32, Color(tint, 0.45), 1.0, true)
+    if policy_draft_card.is_empty():
+        return
+    var draft_tint: Color = Color("#e99c77") if policy_draft_card == "invasion" else Color("#83b5eb")
+    for group_index in range(_policy_components().size()):
+        var group: Array = _policy_components()[group_index]
+        for node in group:
+            var pos: Vector2 = _screen_point(state["map"]["points"][int(node)])
+            map_canvas.draw_circle(pos, policy_brush_radius * 0.7, Color(draft_tint, 0.22))
+            map_canvas.draw_arc(pos, policy_brush_radius * 0.7, 0, TAU, 32, draft_tint, 2.0, true)
+        map_canvas.draw_string(ThemeDB.fallback_font, _screen_point(state["map"]["points"][int(group[0])]) + Vector2(15, -15), "Zone %s" % char(65 + group_index), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, draft_tint)
+    map_canvas.draw_arc(policy_brush_cursor, policy_brush_radius, 0, TAU, 32, Color(draft_tint, 0.8), 1.0, true)
