@@ -2762,9 +2762,11 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 	var color: Color = _planet_color(system)
 	var star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
 	var star_color: Color = Color("#fff0c4").lerp(color.lightened(0.25), 0.30) if ECONOMY.has_planets(system) else Color("#8ea2bc")
-	if index == selected and zoom >= 2.0 and radius >= 18.0:
+	if zoom >= 2.0 and radius >= 18.0 and (index == selected or not system.get("pds", {}).is_empty()):
 		var bodies: Array = _system_visual(index, state)["bodies"]
 		for slot in range(bodies.size()):
+			if index != selected and not system.get("pds", {}).has(slot):
+				continue
 			var body: Dictionary = bodies[slot]
 			var orbit: float = radius * float(body["orbit"])
 			if _show_system_rings(index):
@@ -2778,7 +2780,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 					map_canvas.draw_circle(point, body_radius, HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), true)
 				if system.get("pds", {}).has(slot):
 					_draw_pds_frame(point, body_radius)
-				if selected_body == slot:
+				if index == selected and selected_body == slot:
 					map_canvas.draw_arc(point, body_radius + 4.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, HUD.TEXT)
 	var pulse: float = 0.96 + 0.04 * sin(visual_clock * 1.2 + float(index))
@@ -3301,6 +3303,12 @@ func _orbit_offset(slot: int, radius: float, time: float) -> Vector2:
 func _orbit_direction(offset: Vector2) -> Vector2:
 	return Vector2(-offset.y, offset.x).normalized()
 
+func _hull_panel_color(empire: Color, original: Color) -> Color:
+	# Use the original value contrast as a shading template, not its class
+	# hue; keep the dark cockpit and bright lights readable on every color.
+	var value: float = original.get_luminance()
+	return empire.darkened(0.72).lerp(empire.lightened(0.75), clampf(value, 0.0, 1.0))
+
 func _sync_destruction_effects(state: Dictionary) -> void:
 	while not ship_destructions.is_empty() and visual_clock - float(ship_destructions[0]["started"]) >= DESTRUCTION_LIFETIME:
 		ship_destructions.pop_front()
@@ -3312,11 +3320,8 @@ func _sync_destruction_effects(state: Dictionary) -> void:
 		var kind: String = event["kind"]
 		var heading: Vector2 = event["heading"]
 		var angle: float = heading.angle() if not heading.is_zero_approx() else -PI * 0.5
-		var hull: Color = Color("#788ca0")
-		match kind:
-			"fighter": hull = Color("#f2b57e")
-			"miner": hull = Color("#d8e58b")
-			"colony_ship": hull = Color("#c7a4ff")
+		var empire: Color = _empire_color(int(event["owner"]))
+		var hull: Color = empire.lightened(0.35)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = sequence * 7919 + int(event["ship"])
 		var vertices: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE)
@@ -3338,7 +3343,7 @@ func _sync_destruction_effects(state: Dictionary) -> void:
 				center += vertex
 			center /= float(polygon.size())
 			for index in range(2):
-				sparks.append(_destruction_spark(center, panel[0], rng))
+				sparks.append(_destruction_spark(center, _hull_panel_color(empire, panel[0]), rng))
 		if panels.is_empty():
 			# The unchanged logistics ship has dark cargo wells and resource-colored bays.
 			for index in range(8):
@@ -3737,7 +3742,7 @@ func _draw_map() -> void:
 				if state["planets"][pds_index].get("pds", {}).has(pds_slot):
 					var endpoint: Vector2 = _screen_point(points[pds_index])
 					var pds_radius: float = _planet_radius(pds_index, state)
-					if pds_index == selected and zoom >= 2.0 and pds_radius >= 18.0:
+					if zoom >= 2.0 and pds_radius >= 18.0:
 						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, game_visual_clock)
 					_draw_owned_laser(_fighter_beam_origin(poses[shooter]), endpoint, int(ship["owner"]), 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
@@ -3755,23 +3760,13 @@ func _draw_map() -> void:
 				direction = aim.normalized()
 		var route: Array = ship["route"]
 		var empire: Color = _empire_color(int(ship["owner"]))
-		var loaded: bool = ECONOMY._cargo_total(ship) > ECONOMY.EPS
-		var hull: Color = empire.lightened(0.35) if not loaded else Color("#f8df8c")
-		var colony: bool = ship.get("kind", "ship") == "colony_ship"
-		var fighter: bool = ship.get("kind", "ship") == "fighter"
-		if colony:
-			hull = Color("#c7a4ff")
-		elif fighter:
-			hull = Color("#f2b57e")
-		elif ship.get("kind", "ship") == "miner":
-			hull = Color("#d8e58b")
+		var hull: Color = empire.lightened(0.35)
 		var scale: float = _ship_scale()
 		var side: Vector2 = direction.orthogonal() * scale
 		direction *= scale
 		var shape := PackedVector2Array([point + direction * 9, point - direction * 6 + side * 5,
 			point - direction * 3, point - direction * 6 - side * 5])
 		if ship["kind"] == "ship":
-			hull = Color("#788ca0")
 			shape = _hull_polygon(point, direction, side, FREIGHTER_OUTLINE)
 		elif HULL_OUTLINES.has(ship["kind"]):
 			shape = _hull_polygon(point, direction, side, HULL_OUTLINES[ship["kind"]])
@@ -3820,11 +3815,11 @@ func _draw_map() -> void:
 			# At distant zoom levels the silhouette and allegiance outline are
 			# enough. Draw layered panels only when they can actually be seen.
 			for panel in HULL_PANELS[ship["kind"]]:
-				map_canvas.draw_colored_polygon(_hull_polygon(point, direction, side, panel[1]), panel[0])
+				map_canvas.draw_colored_polygon(_hull_polygon(point, direction, side, panel[1]), _hull_panel_color(empire, panel[0]))
 		var outline: PackedVector2Array = shape.duplicate()
 		outline.append(shape[0])
 		map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)
-		# Keep class colors; identify allegiance on every hull, including loaded ships.
+		# Identify allegiance on every hull, including loaded ships.
 		map_canvas.draw_polyline(outline, empire.lightened(0.2), scale, true)
 		var hp: float = clampf(float(ship.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
 		if hp < 1.0 and scale >= 0.65:

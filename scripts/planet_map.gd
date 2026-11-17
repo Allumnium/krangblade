@@ -158,15 +158,13 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 				_add_edge(edges, degrees, pair)
 				connected.append(pair[1] if connected.has(pair[0]) else pair[0])
 	if radial:
+		var bridges: Array = []
 		for sector in range(sectors):
-			var bridges: Array = [[sector, (sector + 1) % sectors], [sector + sectors, (sector + 1) % sectors + sectors]]
+			bridges.append([sector, (sector + 1) % sectors])
+			bridges.append([sector + sectors, (sector + 1) % sectors + sectors])
 			if player_count > 1 or sector < 2:
 				bridges.append([sector, sector + sectors])
-			for bridge in bridges:
-				var pair: Array = _closest_pair(points, groups[bridge[0]], groups[bridge[1]], [], degrees, 0)
-				if pair.is_empty():
-					pair = _closest_pair(points, groups[bridge[0]], groups[bridge[1]], [], degrees, points.size())
-				_add_edge(edges, degrees, pair)
+		_connect_radial_bridges(points, groups, bridges, edges, degrees)
 	else:
 		var joined: Array = [0]
 		while joined.size() < group_count:
@@ -480,6 +478,46 @@ static func _add_edge(edges: Array, degrees: Array[int], pair: Array) -> void:
 	edges.append(pair)
 	degrees[pair[0]] += 1
 	degrees[pair[1]] += 1
+
+# Preserve the required ring and spoke connections, but grant the shortest
+# eligible bridge first instead of preferring nodes with fewer than two lanes.
+# Every cluster has enough spare ports for its required bridges. Revisit the
+# chosen endpoints once all bridges exist to remove avoidable long links.
+static func _connect_radial_bridges(points: Array[Vector2], groups: Array, bridges: Array, edges: Array, degrees: Array[int]) -> void:
+	var pending: Array = bridges.duplicate()
+	var chosen: Array = []
+	while not pending.is_empty():
+		var best: float = INF
+		var best_index: int = -1
+		var best_pair: Array = []
+		for index in range(pending.size()):
+			var bridge: Array = pending[index]
+			var pair: Array = _closest_pair(points, groups[bridge[0]], groups[bridge[1]], [], degrees, points.size())
+			if pair.is_empty():
+				continue
+			var distance: float = _edge_score(points, pair, degrees)
+			if distance < best:
+				best = distance
+				best_index = index
+				best_pair = pair
+		chosen.append({"bridge": pending.pop_at(best_index), "edge": edges.size()})
+		_add_edge(edges, degrees, best_pair)
+	var improved: bool = true
+	while improved:
+		improved = false
+		for entry in chosen:
+			var index: int = entry["edge"]
+			var bridge: Array = entry["bridge"]
+			var old: Array = edges[index]
+			degrees[old[0]] -= 1
+			degrees[old[1]] -= 1
+			var pair: Array = _closest_pair(points, groups[bridge[0]], groups[bridge[1]], [], degrees, points.size())
+			if _edge_score(points, pair, degrees) < _edge_score(points, old, degrees) - 0.001:
+				edges[index] = pair
+				improved = true
+			var current: Array = edges[index]
+			degrees[current[0]] += 1
+			degrees[current[1]] += 1
 
 static func _closest_pair(points: Array[Vector2], a: Array, b: Array, excluded: Array, degrees: Array[int], budget: int) -> Array:
 	var best: float = INF
