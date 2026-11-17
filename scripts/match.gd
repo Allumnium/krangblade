@@ -3290,7 +3290,7 @@ func _build_policy_ui() -> void:
     policy_editor_card = _label("", 18)
     editor_body.add_child(policy_editor_card)
     editor_body.add_child(_label("Left drag: lasso a zone. Right drag: remove POIs. Maximum 5 zones.", 13))
-    editor_body.add_child(_label("Click to select or remove a single POI.", 13))
+    editor_body.add_child(_label("Click a single POI to select or remove it. Neutral and empty sectors are valid.", 13))
     policy_editor_rows = VBoxContainer.new()
     editor_body.add_child(policy_editor_rows)
     # Keep status and confirmation visible even with five zone sliders.
