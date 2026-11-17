@@ -2136,53 +2136,109 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
             continue
         if enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):
             counts[action] += 1
-    if fighters.is_empty():
-        return
-    var center: Vector2 = Vector2.ZERO
-    for ship in fighters:
-        center += combat_position(state, graph, ship)
-    center /= float(fighters.size())
-    var goal: int = -1
-    var nearest: float = INF
+    _ai_military_policies(state, graph, player, home, owned, fighters)
+
+# Choose strategic objectives on the policy clock, not every movement tick.
+# Local hostile fighters determine defensive urgency; friendly systems and
+# allied ships never count as invasion targets or threats.
+static func _ai_military_policies(state: Dictionary, graph: Dictionary, player: int, home: int, owned: Array[int], fighters: Array) -> void:
+    var team: int = int(state["teams"][player])
+    var planets: Array = state["planets"]
+    var points: Array = graph["points"]
     var pois: Array[int] = military_pois(state, player)
+    var center: Vector2 = points[home]
+    if not fighters.is_empty():
+        center = Vector2.ZERO
+        for ship in fighters:
+            center += combat_position(state, graph, ship)
+        center /= float(fighters.size())
+    var threats: Dictionary = {}
+    var opportunities: Dictionary = {}
     for ship in state["ships"]:
-        if int(state["teams"].get(int(ship["owner"]), 0)) == team:
+        var enemy_team: int = int(state["teams"].get(int(ship["owner"]), 0))
+        if enemy_team <= 0 or enemy_team == team:
             continue
+        var position: Vector2 = combat_position(state, graph, ship)
+        if ship.get("kind", "") == "fighter" and not bool(ship.get("retreating", false)):
+            for node in owned:
+                if position.distance_squared_to(points[node]) <= REPAIR_SAFE_RADIUS * REPAIR_SAFE_RADIUS:
+                    threats[node] = int(threats.get(node, 0)) + 1
         var node: int = int(ship["at"])
+        if not (ship["route"] as Array).is_empty():
+            node = int(ship["route"][0])
+        if ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
+            node = planets.size() + int(ship["field"])
         if not pois.has(node):
             continue
-        var distance: float = center.distance_squared_to(combat_position(state, graph, ship))
-        if distance < nearest:
-            nearest = distance
-            goal = node if (ship["route"] as Array).is_empty() else int(ship["route"][0])
-            if ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
-                goal = planets.size() + int(ship["field"])
-    if goal < 0 or not pois.has(goal):
-        goal = -1
-        nearest = INF
+        if node < planets.size() and int(state["teams"].get(int(planets[node]["owner"]), 0)) == team:
+            continue
+        var distance: float = center.distance_squared_to(position)
+        opportunities[node] = minf(distance, float(opportunities.get(node, INF)))
+    var defense: int = home
+    var danger: int = 0
+    for node in owned:
+        var pressure: int = int(threats.get(node, 0))
+        if pressure > danger:
+            defense = node
+            danger = pressure
+    # Prefer a persistent hostile objective; only change it when the
+    # opportunity disappears. Neutral/field targets require enemy presence.
+    var equipped: Dictionary = state["policies"][player]
+    var previous: Dictionary = equipped.get("offense", {})
+    var goal: int = -1
+    for node in previous.get("targets", []):
+        if pois.has(int(node)) and (policy_target_valid(state, player, "invasion", int(node)) or opportunities.has(node)):
+            goal = int(node)
+            break
+    if goal < 0:
+        var nearest: float = INF
         for node in pois:
-            if node >= planets.size() or int(planets[node]["owner"]) == 0 or int(state["teams"].get(int(planets[node]["owner"]), 0)) == team:
+            if not opportunities.has(node) and not policy_target_valid(state, player, "invasion", node):
                 continue
-            var distance: float = center.distance_squared_to(graph["points"][node])
+            var distance: float = float(opportunities.get(node, center.distance_squared_to(points[node])))
             if distance < nearest:
-                nearest = distance
                 goal = node
-    # Preserve an accepted invasion objective instead of resetting its warmup
-    # whenever another enemy ship becomes nearer. System invasions now use
-    # the same zone commitment and allocation dispatcher as human empires.
-    var current: Dictionary = state["policies"][player].get("offense", {})
-    if current.get("card", "") == "invasion":
-        for node in current.get("targets", []):
-            if policy_target_valid(state, player, "invasion", int(node)):
-                return
-        state["policies"][player].erase("offense")
-    if state.get("ai_waves", {}).get(player, {}).get("members", []).is_empty() and policy_target_valid(state, player, "invasion", goal):
-        if commit_military_policy(state, player, "offense", "invasion", [{"targets": [goal], "weight": 100}], []):
-            state["ai_waves"].erase(player)
-            return
-    # Legacy pursuit of hostile ships outside eligible owned systems remains
-    # available until a non-system military policy is defined.
-    _ai_wave_order(state, graph, player, home, goal, fighters)
+                nearest = distance
+    # Keep a three-fighter attack cohort affordable. Small empires attack
+    # together in peace and defend together when threatened.
+    var defense_weight: int = 100 if goal < 0 else 0
+    if goal >= 0:
+        if danger > 0:
+            defense_weight = 100 if fighters.size() < 7 else 60
+        elif fighters.size() >= 4:
+            defense_weight = 25
+    var offense_weight: int = 100 - defense_weight
+    _ai_commit_military_plan(state, player, goal, offense_weight, defense, defense_weight)
+
+# Update both slots transactionally, through the same validated commitment
+# function as human players. Reweighting the same objective must not restart
+# its preparation timer; a genuinely new invasion objective does.
+static func _ai_commit_military_plan(state: Dictionary, player: int, goal: int, offense_weight: int, defense: int, defense_weight: int) -> void:
+    var equipped: Dictionary = state["policies"][player]
+    var old_offense: Dictionary = equipped.get("offense", {})
+    var old_defense: Dictionary = equipped.get("defense", {})
+    var offense_zones: Array = [{"targets": [goal], "weight": offense_weight}] if goal >= 0 else []
+    var defense_zones: Array = [{"targets": [defense], "weight": defense_weight}] if defense_weight > 0 else []
+    if old_offense.get("zones", []) == offense_zones and old_defense.get("zones", []) == defense_zones:
+        return
+    equipped.erase("offense")
+    equipped.erase("defense")
+    var valid: bool = true
+    if not offense_zones.is_empty():
+        valid = commit_military_policy(state, player, "offense", "invasion", offense_zones, [])
+        if valid and old_offense.get("targets", []) == [goal]:
+            equipped["offense"]["ready_at"] = old_offense["ready_at"]
+    if valid and not defense_zones.is_empty():
+        valid = commit_military_policy(state, player, "defense", "guard", defense_zones, [])
+    if not valid:
+        equipped.erase("offense")
+        equipped.erase("defense")
+        if not old_offense.is_empty():
+            equipped["offense"] = old_offense
+        if not old_defense.is_empty():
+            equipped["defense"] = old_defense
+        return
+    state["ai_waves"].erase(player)
 
 # Launch only assembled cohorts; newly built fighters are held in reserve
 # until the next wave. Existing human allocation behavior is unaffected.
@@ -2566,6 +2622,12 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
         if target >= 0 and target < (state["planets"] as Array).size():
             var defender: int = int(state["planets"][target]["owner"])
             attack = defender != 0 and state["teams"].get(defender, 0) != state["teams"].get(owner, 0)
+        # AI invasions also rally for neutral systems and asteroid fields
+        # containing hostile ships. Guard orders deploy directly as before.
+        if state.get("ai_players", []).has(owner):
+            var offense: Dictionary = state.get("policies", {}).get(owner, {}).get("offense", {})
+            if not offense.is_empty() and policy_active(state, offense) and policy_allocation(offense) > 0 and offense.get("targets", []).has(target):
+                attack = true
         if not attack or home < 0:
             operation["phase"] = "assigned"
             operation["deployed"] = []

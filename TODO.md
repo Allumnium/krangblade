@@ -191,3 +191,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.27: Clarify that both Invasion and Guard accept empty/neutral objectives. Add full simulation arrival, holding, and territory regression for both policies at an unowned system and asteroid field; no automatic colonization or conquest.
 
 - v0.17.28: Remove legacy direct troop slider lens and its input handlers; retain logistics and policy controls. Idle same-owner, same-kind ships share local moving formations of up to three, with authoritative bounded movement and existing task/combat/withdrawal priorities. Legacy allocation rules/RPC retained for compatibility; manual visual validation outstanding.
+
+- v0.17.29: AI chooses Invasion and Guard through the shared policy commitment path. Provisional home reserve and local hostile-fighter threat weighting, stable objectives/warmup on reallocation, neutral/field enemy objectives, actual shared fleet dispatch. Legacy wave helpers remain for prior regression fixtures; AI invasion rally minimum stays three. Playtest defense response, expansion and attack balance before conquest.
