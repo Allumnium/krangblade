@@ -54,7 +54,7 @@ var pan: Vector2 = Vector2.ZERO
 var drag_button: int = 0
 var ship_visuals: Dictionary = {}
 var ship_offsets: Dictionary = {}
-const SHIP_WORLD_SCALE: float = 3.0
+const SHIP_WORLD_SCALE: float = 1.5
 var interaction_panel: VBoxContainer
 var logistics_lens: Button
 var active_lens: String = ""
@@ -120,7 +120,6 @@ var trade_sliders: Dictionary = {}
 var trade_checks: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var pds_card: Dictionary = {}
-var pds_system: int = -1
 var economy_cards: Dictionary = {}
 var warehouse_card: Dictionary = {}
 var continuous_checks: Dictionary = {}
@@ -1050,13 +1049,13 @@ func _build_body_overview(parent: Container) -> void:
 
 func _upgrade_selected_body() -> void:
 	if selected >= 0 and selected_body >= 0:
-		_operation("pds", str(selected_body))
+		_operation("pds", "")
 
 func _cancel_selected_body() -> void:
 	if selected_body < 0:
 		return
 	var job: Dictionary = ECONOMY.pds_job(_planet())
-	if not job.is_empty() and int(job["target"]) == selected_body:
+	if not job.is_empty():
 		_cancel_job(int(job["id"]))
 
 func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
@@ -1068,28 +1067,21 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	var defenses: Dictionary = system.get("pds", {})
 	var battery: Dictionary = defenses.get(selected_body, {})
 	var job: Dictionary = ECONOMY.pds_job(system)
-	var building: bool = not job.is_empty() and int(job["target"]) == selected_body
-	var cost: Dictionary = ECONOMY._cost("pds", selected_body + 1)
-	var installed: bool = not battery.is_empty()
+	var building: bool = not job.is_empty()
+	var cost: Dictionary = ECONOMY._cost("pds", 1)
+	var full: bool = ECONOMY.next_pds(system) < 0
 	body_defense.text = "Battery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
-	body_status.text = "Operational · %.0f / %.0f HP" % [float(battery.get("hp", 0.0)), ECONOMY.PDS_HP] if installed else ("Under construction" if building else "Undefended")
-	if not installed and not building:
-		if not owned:
-			body_status.text += " · Not owned"
-		elif not job.is_empty():
-			body_status.text += " · Another defense is being built"
-		elif not ECONOMY.affordable(system, cost):
-			body_status.text += " · Insufficient local materials"
-	body_costs.visible = not installed
-	if not installed:
+	body_status.text = ("Operational · %.0f / %.0f HP" % [float(battery.get("hp", 0.0)), ECONOMY.PDS_HP] if not battery.is_empty() else "Undefended") + "\nSystem defenses: %d/%d" % [defenses.size(), int(system["planet_count"])]
+	body_costs.visible = not full
+	if not full:
 		_show_cost(body_costs, job["cost"] if building else cost)
 	body_progress.visible = building
 	if building:
 		body_progress.value = 100.0 * float(job["progress"]) / float(job["work"])
 		_style_progress(body_progress, system, job)
-	body_upgrade.visible = not installed
-	body_upgrade.disabled = not owned or not job.is_empty() or installed or not ECONOMY.affordable(system, cost)
-	_set_timed_action(body_upgrade, "Build PDS", ECONOMY._work("pds", selected_body + 1))
+	body_upgrade.visible = not full
+	body_upgrade.disabled = not owned or building or full or not ECONOMY.affordable(system, cost)
+	_set_timed_action(body_upgrade, "Build system PDS", ECONOMY._work("pds", 1))
 	body_cancel.visible = building
 	body_cancel.disabled = not owned or not building
 
@@ -1101,11 +1093,6 @@ func _build_pds_card(parent: Container) -> void:
 	var detail := _label("", 12)
 	body.add_child(detail)
 	var summary: VBoxContainer = pds_card["summary"]
-	var picker := OptionButton.new()
-	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	picker.add_theme_font_size_override("font_size", 12)
-	picker.fit_to_longest_item = false
-	summary.add_child(picker)
 	var status := _label("", 11)
 	summary.add_child(status)
 	var progress := ProgressBar.new()
@@ -1113,79 +1100,43 @@ func _build_pds_card(parent: Container) -> void:
 	section.add_child(progress)
 	section.move_child(progress, body.get_index())
 	var costs: GridContainer = _cost_grid(summary)
-	var action: Button = _card_action(pds_card, "Build", func() -> void:
-		var slot: int = _system_pds_slot()
-		if slot >= 0:
-			_operation("pds", str(slot)))
+	var action: Button = _card_action(pds_card, "Build", _operation.bind("pds", ""))
 	var cancel: Button = _card_cancel(pds_card, _pds_action, progress)
 	HUD.action(action)
-	pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel, "picker": picker, "status": status})
-	picker.item_selected.connect(func(_index: int) -> void:
-		var system: Dictionary = _planet()
-		if not system.is_empty():
-			_refresh_pds(system, int(system["owner"]) == _me() and str(session.get("phase")) == "match"))
-
-func _system_pds_slot() -> int:
-	var picker: OptionButton = pds_card["picker"]
-	return picker.get_selected_id() if picker.selected >= 0 else -1
+	pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel, "status": status})
 
 func _pds_action() -> void:
 	var job: Dictionary = ECONOMY.pds_job(_planet())
-	if not job.is_empty() and int(job["target"]) == _system_pds_slot():
+	if not job.is_empty():
 		_cancel_job(int(job["id"]))
 
 func _refresh_pds(planet: Dictionary, owned: bool) -> void:
-	var has_planets: bool = ECONOMY.has_planets(planet)
-	pds_card["header"].get_parent().get_parent().visible = has_planets
-	if not has_planets:
+	pds_card["header"].get_parent().get_parent().visible = ECONOMY.has_planets(planet)
+	if not ECONOMY.has_planets(planet):
 		return
-	var defenses: Dictionary = planet.get("pds", {})
-	var count: int = defenses.size()
+	var count: int = planet.get("pds", {}).size()
 	var limit: int = int(planet["planet_count"])
 	var job: Dictionary = ECONOMY.pds_job(planet)
-	var picker: OptionButton = pds_card["picker"]
-	var slot: int = _system_pds_slot()
-	var changed_system: bool = selected != pds_system
-	if changed_system or slot < 0 or slot >= limit:
-		slot = int(job["target"]) if not job.is_empty() else maxi(0, ECONOMY.next_pds(planet))
-	if changed_system or picker.item_count != limit:
-		picker.clear()
-		for i in range(limit):
-			picker.add_item(_body_name(selected, i), i)
-		pds_system = selected
-	for i in range(limit):
-		var suffix: String = " · PDS" if defenses.has(i) else (" · Building" if not job.is_empty() and int(job["target"]) == i else "")
-		var caption: String = _body_name(selected, i) + suffix
-		if picker.get_item_text(i) != caption:
-			picker.set_item_text(i, caption)
-	if picker.selected != slot:
-		picker.select(slot)
+	var building: bool = not job.is_empty()
+	var full: bool = count >= limit
+	var cost: Dictionary = ECONOMY._cost("pds", 1)
 	_disclosure_title(pds_card, "Planetary defense · %d/%d" % [count, limit])
-	var installed: bool = defenses.has(slot)
-	var building: bool = not job.is_empty() and int(job["target"]) == slot
-	var cost: Dictionary = ECONOMY._cost("pds", slot + 1)
 	var progress: ProgressBar = pds_card["progress"]
 	progress.visible = building
 	var action: Button = pds_card["button"]
-	_set_timed_action(action, "Complete" if installed else "Build", -1.0 if installed else ECONOMY._work("pds", slot + 1))
-	action.disabled = not owned or installed or not job.is_empty() or not ECONOMY.affordable(planet, cost)
+	_set_timed_action(action, "Complete" if full else "Build", -1.0 if full else ECONOMY._work("pds", 1))
+	action.disabled = not owned or full or building or not ECONOMY.affordable(planet, cost)
 	pds_card["cancel"].visible = building
 	pds_card["cancel"].disabled = not owned or not building
-	var status_text: String = "Operational · %.0f / %.0f HP" % [float(defenses[slot].get("hp", 0.0)), ECONOMY.PDS_HP] if installed else ("Under construction" if building else "Undefended")
-	if not installed and not building:
-		if not job.is_empty():
-			status_text += " · Another defense is being built"
-		elif not ECONOMY.affordable(planet, cost):
-			status_text += " · Insufficient local materials"
-	pds_card["status"].text = status_text
-	pds_card["detail"].text = "One battery per planet\nBattery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f\nSystem defenses: %d%s / %d" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE, count, "" if installed else " → %d" % (count + 1), limit]
-	pds_card["costs"].visible = not installed
+	pds_card["status"].text = "Fully defended" if full else ("Under construction" if building else ("Insufficient local materials" if not ECONOMY.affordable(planet, cost) else ""))
+	pds_card["detail"].text = "One battery per planet, assigned automatically\nBattery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f\nSystem defenses: %d%s / %d" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE, count, "" if full else " → %d" % (count + 1), limit]
+	pds_card["costs"].visible = not full
 	if building:
 		progress.value = 100.0 * float(job["progress"]) / float(job["work"])
 		progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
 		_style_progress(progress, planet, job)
 		_show_cost(pds_card["costs"], job["cost"])
-	elif not installed:
+	elif not full:
 		_show_cost(pds_card["costs"], cost)
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
@@ -2759,7 +2710,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 	var ship_distance: float = INF
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance <= maxf(5.0, 12.0 * _ship_scale()) and distance < ship_distance:
+		if distance <= maxf(5.0, 14.0 * _ship_scale()) and distance < ship_distance:
 			ship_distance = distance
 			ship_hit = int(id)
 	var next_ship: int = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
@@ -3127,7 +3078,7 @@ func _orbit_direction(offset: Vector2) -> Vector2:
 	return Vector2(-offset.y, offset.x).normalized()
 
 func _ship_scale() -> float:
-	return SHIP_WORLD_SCALE * _fit() * zoom
+	return minf(SHIP_WORLD_SCALE * _fit() * zoom, 1.25)
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 	_sync_ship_visuals(state)

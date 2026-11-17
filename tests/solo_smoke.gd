@@ -249,7 +249,7 @@ func _run() -> void:
 		push_error("Explicit solo map layout not applied")
 		quit(1)
 		return
-	if not (setup["map"]["cluster_sizes"].size() == 9):
+	if not (setup["map"]["cluster_sizes"].size() == MAP.cluster_count_for(3, "Grid")):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return

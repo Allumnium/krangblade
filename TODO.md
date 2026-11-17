@@ -48,3 +48,5 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 - [ ] Steam integration, additional races, elaborate technology trees, ship customization and campaigns remain deferred.
 
 See THOUGHTS.md for active observations and THOUGHTS_ARCHIVE.md for resolved or superseded history.
+
+- [ ] Playtest v0.24.2 compact variable-spacing galaxies across all layouts and roster sizes, especially initial mining access, travel pacing, smaller hulls at zoom levels, and automatic flat-price PDS construction/cancellation. Later expose map size as a setup parameter.

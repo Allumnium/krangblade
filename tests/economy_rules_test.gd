@@ -89,10 +89,11 @@ func _initialize() -> void:
 			else:
 				bridges += 1
 				bridge_distance += length
-		assert(bridges == player_count * 3 - 1 + cluster_ids.count(-1))
-		assert(clustered["cluster_sizes"].size() == player_count * 3)
+		assert(bridges == MAP.cluster_count_for(player_count, "Grid") - 1 + cluster_ids.count(-1))
+		assert(clustered["cluster_sizes"].size() == MAP.cluster_count_for(player_count, "Grid"))
+		assert(cluster_points.size() <= player_count * MAP.SYSTEMS_PER_PLAYER)
 		for cluster_size in clustered["cluster_sizes"]:
-			assert(cluster_size >= 3 and cluster_size <= 9)
+			assert(cluster_size >= 2 and cluster_size <= 4)
 		assert(clustered["edges"].size() >= cluster_points.size() - 1)
 		assert(clustered["edges"].size() <= cluster_points.size())
 		assert(degrees.count(3) <= int(clustered["max_junctions"]))
@@ -100,7 +101,7 @@ func _initialize() -> void:
 		for degree in degrees:
 			assert(degree >= 1 and degree <= MAP.MAX_CONNECTIONS)
 		for home in range(player_count):
-			assert(clustered["cluster_sizes"][cluster_ids[home]] == 6)
+			assert(clustered["cluster_sizes"][cluster_ids[home]] >= 2)
 			var neutral_neighbor: bool = false
 			for i in range(player_count, cluster_points.size()):
 				if MAP.linked(clustered, home, i):
@@ -1400,7 +1401,7 @@ func _initialize() -> void:
 	var defended: Dictionary = defenses["planets"][0]
 	assert(int(defended["planet_count"]) == ECON.system_bodies(defended, int(force_map["seed"]), 0).size())
 	assert(not ECON.enqueue(defenses, 1, 0, "pds", "0"))
-	# Explicit planet targeting works even when an earlier slot is undefended.
+	# System commands choose the first undefended slot and charge a flat recipe.
 	var targeted: Dictionary = ECON.create(force_map, players, ids, false)
 	var target_home: Dictionary = targeted["planets"][0]
 	target_home["pds"].clear()
@@ -1410,33 +1411,35 @@ func _initialize() -> void:
 	assert(not ECON.enqueue(targeted, 2, 0, "pds", "1"))
 	assert(not ECON.enqueue(targeted, 1, 0, "pds", "invalid"))
 	assert(not ECON.enqueue(targeted, 1, 0, "pds", "-1"))
-	assert(ECON.enqueue(targeted, 1, 0, "pds", "1"))
+	assert(not ECON.enqueue(targeted, 1, 0, "pds", "1"))
+	assert(ECON.enqueue(targeted, 1, 0, "pds"))
 	var target_job: Dictionary = ECON.pds_job(target_home)
-	assert(target_job["target"] == "1" and target_job["cost"] == target_recipe)
+	assert(target_job["target"] == "0" and target_job["cost"] == target_recipe)
 	assert(not ECON.enqueue(targeted, 1, 0, "pds", "0"))
 	for material in target_recipe:
 		assert(is_zero_approx(float(target_home["stock"][material])))
 	assert(ECON.cancel(targeted, 1, 0, int(target_job["id"])))
 	for material in target_recipe:
 		assert(is_equal_approx(float(target_home["stock"][material]), float(target_recipe[material])))
-	assert(ECON.enqueue(targeted, 1, 0, "pds", "1"))
+	assert(ECON.enqueue(targeted, 1, 0, "pds"))
 	target_job = ECON.pds_job(target_home)
 	assert(ECON._advance(target_home, target_job, float(target_job["work"])))
 	ECON._finish(targeted, 0, target_home, target_job)
-	assert(target_home["pds"].has(1) and not target_home["pds"].has(0))
+	assert(target_home["pds"].has(0) and not target_home["pds"].has(1))
+	assert(ECON._cost("pds", 1) == ECON._cost("pds", 3))
 	assert(not ECON.enqueue(targeted, 1, 0, "pds", "1"))
 	# Test construction of a destroyed battery in its original slot.
 	defended["pds"].clear()
 	assert(not ECON.enqueue(defenses, 2, 0, "pds", "0"))
 	assert(not ECON.enqueue(defenses, 1, 0, "pds", "99"))
-	assert(ECON.enqueue(defenses, 1, 0, "pds", "0"))
+	assert(ECON.enqueue(defenses, 1, 0, "pds"))
 	assert(not ECON.enqueue(defenses, 1, 0, "pds", "0"))
 	var first_defense: Dictionary = ECON.pds_job(defended)
 	ECON._advance(defended, first_defense, 1.0)
 	var refund: float = float(defended["stock"]["Metals"]) + float(first_defense["allocated"]["Metals"])
 	assert(ECON.cancel(defenses, 1, 0, int(first_defense["id"])))
 	assert(is_equal_approx(float(defended["stock"]["Metals"]), refund))
-	assert(ECON.enqueue(defenses, 1, 0, "pds", "0"))
+	assert(ECON.enqueue(defenses, 1, 0, "pds"))
 	first_defense = ECON.pds_job(defended)
 	assert(ECON._advance(defended, first_defense, float(first_defense["work"])))
 	ECON._finish(defenses, 0, defended, first_defense)
@@ -1455,7 +1458,7 @@ func _initialize() -> void:
 	for slot in range(1, int(defended["planet_count"])):
 		for material in ECON._cost("pds", slot + 1):
 			defended["stock"][material] = ECON._cost("pds", slot + 1)[material]
-		assert(ECON.enqueue(defenses, 1, 0, "pds", str(slot)))
+		assert(ECON.enqueue(defenses, 1, 0, "pds"))
 		var battery_order: Dictionary = ECON.pds_job(defended)
 		assert(ECON._advance(defended, battery_order, float(battery_order["work"])))
 		ECON._finish(defenses, 0, defended, battery_order)
@@ -1837,42 +1840,28 @@ func _test_map_layouts() -> void:
 				for home in range(player_count):
 					assert(not galaxy["planetless"].has(home))
 				assert(galaxy["cluster_sizes"].size() == MAP.cluster_count_for(player_count, layout))
-				if layout == "Radial":
+				assert(galaxy["points"].size() <= player_count * MAP.SYSTEMS_PER_PLAYER)
+				if layout == "Radial" and player_count > 1:
 					var sectors: int = maxi(3, player_count)
 					var bridges: Dictionary = _cluster_links(galaxy)
 					for sector in range(sectors):
 						var next: int = (sector + 1) % sectors
 						assert(bridges.has(Vector2i(mini(sector, next), maxi(sector, next))))
-						assert(bridges.has(Vector2i(2 * sectors + mini(sector, next), 2 * sectors + maxi(sector, next))))
+						assert(bridges.has(Vector2i(sectors + mini(sector, next), sectors + maxi(sector, next))))
 						assert(bridges.has(Vector2i(sector, sector + sectors)))
-						assert(bridges.has(Vector2i(sector + sectors, sector + 2 * sectors)))
 				if layout == "Hex Grid":
-					var dimensions: Vector2i = MAP.hex_dimensions(player_count)
-					var slots: Array = galaxy["hex_slots"]
-					var expected_bridges: Dictionary = {}
-					for row in range(dimensions.y):
-						for column in range(dimensions.x):
-							var slot: int = row * dimensions.x + column
-							if column + 1 < dimensions.x:
-								expected_bridges[Vector2i(slot, slot + 1)] = true
-							if row + 1 < dimensions.y and (column + row) % 2 == 1:
-								expected_bridges[Vector2i(slot, slot + dimensions.x)] = true
-					var actual_bridges: Dictionary = {}
-					for edge in galaxy["edges"]:
-						var a: int = slots[edge[0]]
-						var b: int = slots[edge[1]]
-						if a != b:
-							actual_bridges[Vector2i(mini(a, b), maxi(a, b))] = true
-					for pair in actual_bridges:
-						assert(expected_bridges.has(pair))
-					for pair in expected_bridges:
-						var block_a := Vector2i(floori(float(pair.x % dimensions.x) / 4.0), floori(float(pair.x) / dimensions.x / 2.0))
-						var block_b := Vector2i(floori(float(pair.y % dimensions.x) / 4.0), floori(float(pair.y) / dimensions.x / 2.0))
-						if block_a == block_b:
-							assert(actual_bridges.has(pair))
-					assert(actual_bridges.size() >= slots.size()) # closed local cycles
-					assert(actual_bridges.size() < expected_bridges.size()) # gaps
-					assert(slots.size() == galaxy["points"].size())
+					for group in range(galaxy["cluster_sizes"].size()):
+						var local_degrees: Dictionary = {}
+						for node in range(galaxy["points"].size()):
+							if galaxy["clusters"][node] == group:
+								local_degrees[node] = 0
+						assert(local_degrees.size() == 6)
+						for edge in galaxy["edges"]:
+							if local_degrees.has(edge[0]) and local_degrees.has(edge[1]):
+								local_degrees[edge[0]] += 1
+								local_degrees[edge[1]] += 1
+						for degree in local_degrees.values():
+							assert(degree == 2)
 				var points: Array = galaxy["points"]
 				var degrees: Array[int] = []
 				degrees.resize(points.size())
@@ -1888,21 +1877,14 @@ func _test_map_layouts() -> void:
 					adjacency[edge[1]].append(edge[0])
 					assert(not MAP.blocked(points[edge[0]], points[edge[1]], galaxy["fields"]))
 					longest = maxf(longest, (points[edge[0]] as Vector2).distance_to(points[edge[1]]))
-				if layout == "Hex Grid":
-					assert(longest / MAP.TRAVEL_SPEED < MAP.LONGEST_LINK_YEARS * 1.3)
-					var shortest: float = INF
-					for edge in galaxy["edges"]:
-						shortest = minf(shortest, (points[edge[0]] as Vector2).distance_to(points[edge[1]]))
-					assert(longest > shortest * 2.0)
-				else:
-					assert(is_equal_approx(longest / MAP.TRAVEL_SPEED, MAP.LONGEST_LINK_YEARS))
+				assert(is_equal_approx(longest / MAP.TRAVEL_SPEED, MAP.LONGEST_LINK_YEARS))
 				var clustered_count: int = 0
 				for group in range(galaxy["cluster_sizes"].size()):
 					var members: int = galaxy["clusters"].count(group)
-					assert(members == int(galaxy["cluster_sizes"][group]) and members >= 3)
+					assert(members == int(galaxy["cluster_sizes"][group]) and members >= 2)
 					clustered_count += members
 				assert(clustered_count + galaxy["clusters"].count(-1) == points.size())
-				assert(absf(float(galaxy["clusters"].count(-1)) / points.size() - 0.2) <= 0.04)
+				assert(absi(galaxy["clusters"].count(-1) - roundi(float(points.size()) * 0.2)) <= 1)
 				assert(degrees.count(3) <= int(galaxy["max_junctions"]))
 				for degree in degrees:
 					assert(degree > 0 and degree <= MAP.MAX_CONNECTIONS)
