@@ -28,6 +28,9 @@ var saw_loading: bool = false
 var mode: String = "normal"
 const MAP = preload("res://scripts/planet_map.gd")
 
+func _expected_layout() -> String:
+	return ("Grid" if expected_players == 2 else "Scramble") if mode == "normal" else MAP.DEFAULT_LAYOUT
+
 func _initialize() -> void:
 	call_deferred("_begin")
 
@@ -63,6 +66,8 @@ func _roster_changed() -> void:
 	if role == "host":
 		if not color_requested:
 			color_requested = true
+			session.call("choose_map_layout", _expected_layout())
+			session.call("choose_map_layout", "invalid")
 			session.call("choose_color", 1, 8)
 			return
 		if roster.size() == expected_players and not started and bool(session.call("can_start")):
@@ -73,6 +78,10 @@ func _roster_changed() -> void:
 		var entry: Dictionary = roster.get(self_id, {})
 		if not entry.is_empty() and not color_requested:
 			color_requested = true
+			if str(session.get("map_layout")) != _expected_layout():
+				_fail("Host map layout did not replicate to lobby guest.")
+				return
+			session.call("choose_map_layout", "Radial" if _expected_layout() != "Radial" else "Grid")
 			expected_color = 7 if expected_players == 2 else int(entry["color"])
 			session.call("choose_color", self_id, 8) # occupied by host; must reject
 			if expected_players == 2:
@@ -111,6 +120,12 @@ func _phase_changed() -> void:
 			return
 		var owners: Array[int] = session.get("owners")
 		var state: Dictionary = session.get("economy")
+		if str(session.get("map_layout")) != _expected_layout() or state["map"].get("layout") != _expected_layout():
+			_fail("Match map layout did not match host setting.")
+			return
+		if state["map"] != MAP.generate(int(state["map"]["seed"]), expected_players, _expected_layout()):
+			_fail("Generated map does not match authoritative seed and layout.")
+			return
 		for owner in roster:
 			var miners: int = 0
 			var fighters: int = 0
@@ -260,7 +275,20 @@ func _send_commands() -> void:
 			mining_field = i
 			break
 	if mining_field < 0:
-		_fail("No nearby regular mining field for command test.")
+		var teams: Array[int] = ECON.planet_teams(initial)
+		var team: int = int(initial["teams"][self_id])
+		for i in range(1, initial["map"]["fields"].size()):
+			var field: Dictionary = initial["map"]["fields"][i]
+			if bool(field.get("antimatter", false)) or field["chunks"].is_empty():
+				continue
+			for anchor in ECON.field_access_systems(initial["map"], field):
+				if not ECON._mining_path(initial, teams, team, home_index, anchor, {}).is_empty():
+					mining_field = i
+					break
+			if mining_field >= 0:
+				break
+	if mining_field < 0:
+		_fail("No reachable regular mining field for command test.")
 		return
 	session.call("request_miner_assignment", [own_miners[0]], mining_field)
 	session.call("request_miner_assignment", [own_miners[0], enemy_miner], -1)

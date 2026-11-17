@@ -3,7 +3,7 @@ const MAP = preload("res://scripts/planet_map.gd")
 const ECON = preload("res://scripts/economy_rules.gd")
 
 func _test_maintain_targets() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1])
+	var state: Dictionary = ECON.create(MAP.generate(827, 1, "Grid"), {1: {"team": 1}}, [1])
 	var p: Dictionary = state["planets"][0]
 	assert(ECON.origin_count(state, 0, "fighter") == 2)
 	assert(not ECON.set_maintain(state, 2, 0, "fighter", 3))
@@ -35,10 +35,11 @@ func _initialize() -> void:
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
 	_test_match_elimination()
+	_test_map_layouts()
 	_test_antimatter_extraction()
 	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
 	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
-	var bounds: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1])
+	var bounds: Dictionary = ECON.create(MAP.generate(827, 1, "Grid"), {1: {"team": 1}}, [1])
 	var world: Dictionary = bounds["planets"][0]
 	world["abundance"]["Metals"] = 0.1
 	assert(is_equal_approx(ECON.production_modifier(world, "Metals"), 0.1))
@@ -46,9 +47,9 @@ func _initialize() -> void:
 	world["abundance"]["Metals"] = 10.0
 	assert(is_equal_approx(ECON.production_modifier(world, "Metals"), 4.0))
 	_test_maintain_targets()
-	var graph: Dictionary = MAP.generate(2468)
-	assert(graph == MAP.generate(2468))
-	assert(graph != MAP.generate(2469))
+	var graph: Dictionary = MAP.generate(2468, 3, "Grid")
+	assert(graph == MAP.generate(2468, 3, "Grid"))
+	assert(graph != MAP.generate(2469, 3, "Grid"))
 	var all_friendly: Array[int] = []
 	all_friendly.resize(graph["points"].size())
 	all_friendly.fill(1)
@@ -57,7 +58,7 @@ func _initialize() -> void:
 	# Seeded clusters are internally connected and connected by sparse bridges.
 	for seed_value in range(24):
 		var player_count: int = seed_value % 8 + 1
-		var clustered: Dictionary = MAP.generate(seed_value, player_count)
+		var clustered: Dictionary = MAP.generate(seed_value, player_count, "Grid")
 		var cluster_ids: Array = clustered["clusters"]
 		var cluster_points: Array = clustered["points"]
 		var local_distance: float = 0.0
@@ -614,7 +615,7 @@ func _initialize() -> void:
 	print("PASS: clustered map and fighter construction")
 
 	# Deterministic mining round trip; no planetary production or unrelated cargo.
-	var mineral_map: Dictionary = MAP.generate(678)
+	var mineral_map: Dictionary = MAP.generate(678, 3, "Grid")
 	var mineral_points: Array = mineral_map["points"]
 	var metal_pos: Vector2 = (mineral_points[0] as Vector2) + Vector2(95, 0)
 	var crystal_pos: Vector2 = (mineral_points[0] as Vector2) + Vector2(95, 30)
@@ -701,7 +702,7 @@ func _initialize() -> void:
 	print("PASS: asteroid route obstacles, mining ceiling and physical mineral delivery")
 
 	# Physical, mixed cargo from an owned planet to an allied one. No hostile transit.
-	var test_map: Dictionary = MAP.generate(123)
+	var test_map: Dictionary = MAP.generate(123, 3, "Grid")
 	test_map["edges"] = [[0, 1], [1, 2]]
 	var points: Array = test_map["points"]
 	points[0] = Vector2(0, 0)
@@ -741,7 +742,7 @@ func _initialize() -> void:
 	assert(is_equal_approx(float(ally["stock"]["Plastics"]), 6.0))
 	assert(is_equal_approx(float(hostile["stock"]["Metals"]), 0.0))
 	# Colony hulls use shipyards, travel before ownership changes, and cannot be stolen.
-	var colony_map: Dictionary = MAP.generate(12)
+	var colony_map: Dictionary = MAP.generate(12, 3, "Grid")
 	colony_map["edges"] = [[0, 1], [1, 3], [2, 3], [3, 4]]
 	var cp: Array = colony_map["points"]
 	cp[0] = Vector2(0, 0)
@@ -798,7 +799,7 @@ func _initialize() -> void:
 	assert(int(distant["planets"][3]["owner"]) == 0 and int(distant["planets"][4]["owner"]) == 1)
 	print("PASS: colony construction, permissions, travel, neutral arrival and competing colonies")
 	# POI allocations reserve nearest fighters, including field destinations.
-	var force_map: Dictionary = MAP.generate(1337)
+	var force_map: Dictionary = MAP.generate(1337, 3, "Grid")
 	var force_points: Array = force_map["points"]
 	force_points[0] = Vector2(0, 0)
 	force_points[3] = Vector2(1000, 0)
@@ -953,7 +954,7 @@ func _initialize() -> void:
 	assert(saw_attack and saw_logistics)
 	# Generated maps, not only a toy graph: each AI builds real ships early.
 	for seed_value in [11, 83, 470, 1337]:
-		var startup_map: Dictionary = MAP.generate(seed_value, 3)
+		var startup_map: Dictionary = MAP.generate(seed_value, 3, "Grid")
 		var startup_state: Dictionary = ECON.create(startup_map, {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 1, "ai": true}}, ids, false)
 		for index in [1, 2]:
 			startup_state["planets"][index]["population"] = 150000.0
@@ -1504,7 +1505,7 @@ func _initialize() -> void:
 	quit(0)
 
 func _test_neutral_direct_occupation() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = ECON.create(MAP.generate(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var neutral: int = -1
 	for node in graph["adjacent"][0]:
@@ -1549,7 +1550,7 @@ func _test_neutral_direct_occupation() -> void:
 	print("PASS: direct individual and group orders, atomic ownership, neutral occupation and retargeting")
 
 func _test_idle_formations() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = ECON.create(MAP.generate(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var center: Vector2 = graph["points"][0]
 	for i in range(3):
@@ -1584,7 +1585,7 @@ func _test_idle_formations() -> void:
 	print("PASS: authoritative idle formations wander, preserve bounds and resume direct navigation")
 
 func _test_depleted_field_routes() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = ECON.create(MAP.generate(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var count: int = state["planets"].size()
 	for index in range(state["map"]["fields"].size()):
@@ -1649,7 +1650,7 @@ func _test_wide_patrol_rally_and_conquest() -> void:
 	print("PASS: wide patrol returns to physical rally and defenders contest their sector")
 
 func _test_ai_defensive_orders() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
+	var state: Dictionary = ECON.create(MAP.generate(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var owned: Array[int] = [1]
 	var fighters: Array = []
@@ -1668,7 +1669,7 @@ func _test_ai_defensive_orders() -> void:
 	print("PASS: AI direct orders and defense allocation")
 
 func _test_conquest() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = ECON.create(MAP.generate(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var planet: Dictionary = state["planets"][1]
 	var attacker: Dictionary = {"id": 9900, "owner": 1, "kind": "fighter", "at": 1, "dest": 1, "operation_target": 1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP}
@@ -1778,9 +1779,66 @@ func _test_freighter_bays() -> void:
 	assert(is_zero_approx(ECON._cargo_total(ship)))
 	print("PASS: seven shared tonnage bays, full single-resource and mixed loads, partial and empty cargo")
 
+func _test_map_layouts() -> void:
+	assert(MAP.generate(7021, 3)["layout"] == MAP.DEFAULT_LAYOUT)
+	assert(not MAP.valid_layout("invalid"))
+	for layout in MAP.LAYOUTS:
+		for player_count in range(1, 9):
+			for seed_value in [31, 7021]:
+				var galaxy: Dictionary = MAP.generate(seed_value, player_count, layout)
+				assert(galaxy == MAP.generate(seed_value, player_count, layout))
+				assert(galaxy["layout"] == layout)
+				var points: Array = galaxy["points"]
+				var degrees: Array[int] = []
+				degrees.resize(points.size())
+				degrees.fill(0)
+				var adjacency: Array = []
+				for point in points:
+					adjacency.append([])
+				var longest: float = 0.0
+				for edge in galaxy["edges"]:
+					degrees[edge[0]] += 1
+					degrees[edge[1]] += 1
+					adjacency[edge[0]].append(edge[1])
+					adjacency[edge[1]].append(edge[0])
+					assert(not MAP.blocked(points[edge[0]], points[edge[1]], galaxy["fields"]))
+					longest = maxf(longest, (points[edge[0]] as Vector2).distance_to(points[edge[1]]))
+				assert(is_equal_approx(longest / MAP.TRAVEL_SPEED, MAP.LONGEST_LINK_YEARS))
+				assert(degrees.count(3) <= int(galaxy["max_junctions"]))
+				for degree in degrees:
+					assert(degree > 0 and degree <= MAP.MAX_CONNECTIONS)
+				var seen: Dictionary = {0: true}
+				var frontier: Array = [0]
+				while not frontier.is_empty():
+					var node: int = frontier.pop_back()
+					for neighbor in adjacency[node]:
+						if not seen.has(neighbor):
+							seen[neighbor] = true
+							frontier.append(neighbor)
+				assert(seen.size() == points.size())
+				for home in range(player_count):
+					assert(galaxy["clusters"][home] == home)
+					assert(adjacency[home].any(func(node: int) -> bool: return node >= player_count))
+				var deposits: int = 0
+				for field in galaxy["fields"]:
+					if not bool(field.get("antimatter", false)):
+						continue
+					deposits += 1
+					var access: Array[int] = ECON.field_access_systems(galaxy, field)
+					var center: Vector2 = field["position"]
+					for home in range(player_count):
+						assert(not access.has(home))
+						assert(center.distance_to(points[home]) - float(field["radius"]) + 0.01 >= float(galaxy["antimatter_home_clearance"]))
+						if layout == "Radial":
+							assert(center.distance_to(galaxy["size"] * 0.5) < (points[home] as Vector2).distance_to(galaxy["size"] * 0.5) * 0.3)
+				assert(deposits == (1 if player_count <= 2 else 2))
+	assert(MAP.generate(7021, 4, "Radial")["points"] != MAP.generate(7021, 4, "Grid")["points"])
+	assert(MAP.generate(7021, 4, "Grid")["points"] != MAP.generate(7021, 4, "Scramble")["points"])
+	print("PASS: all map layouts, seed reproducibility, connected routes and protected antimatter")
+
 func _test_antimatter_extraction() -> void:
 	for player_count in range(1, 9):
-		var galaxy: Dictionary = MAP.generate(7021, player_count)
+		var galaxy: Dictionary = MAP.generate(7021, player_count, "Radial")
 		var center: Vector2 = galaxy["size"] * 0.5
 		var furthest_special: float = 0.0
 		var nearest_ordinary: float = INF
@@ -1798,7 +1856,7 @@ func _test_antimatter_extraction() -> void:
 				assert(ECON.field_inventory(field)[ECON.ANTIMATTER] == 0.0)
 		assert(special_count == (1 if player_count <= 2 else 2))
 		assert(furthest_special <= nearest_ordinary)
-	var map_data: Dictionary = MAP.generate(7021, 2)
+	var map_data: Dictionary = MAP.generate(7021, 2, "Grid")
 	var points: Array = map_data["points"]
 	var deposit: Vector2 = points[0] + Vector2(400.0, 0.0)
 	map_data["fields"] = [{"anchor": 0, "position": deposit, "radius": 50.0, "antimatter": true,
@@ -1834,7 +1892,7 @@ func _test_antimatter_extraction() -> void:
 	print("PASS: central antimatter generation, opt-in extraction, physical delivery, conservation and capture")
 
 func _test_match_elimination() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 3), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 2}}, [1, 2, 3], false)
+	var state: Dictionary = ECON.create(MAP.generate(827, 3, "Grid"), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 2}}, [1, 2, 3], false)
 	state["planets"][1]["owner"] = 1
 	var colony: Dictionary = {"id": 11000, "kind": "colony_ship", "owner": 2, "at": 1, "route": [], "dest": -1}
 	state["ships"].append(colony)
@@ -1851,12 +1909,12 @@ func _test_match_elimination() -> void:
 	assert(state["match_result"]["team"] == 1 and int(state["time_speed"]) == 0)
 	assert(not ECON.update_match_outcome(state))
 	assert(bytes_to_var(var_to_bytes(state))["match_result"] == state["match_result"])
-	var solo: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
+	var solo: Dictionary = ECON.create(MAP.generate(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	assert(not ECON.update_match_outcome(solo) and solo.get("match_result", {}).is_empty())
 	print("PASS: colony recovery, allied survival, elimination, conquest victory and sandbox")
 
 func _test_recovery_economy() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = ECON.create(MAP.generate(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
 	for resource in ECON.RESOURCES:
 		assert(not ECON.building_cost(p, resource).has(resource))
@@ -1912,7 +1970,7 @@ func _test_opening_pacing() -> void:
 	# Allied AI isolates economic pacing from variable battle casualties.
 	# Use a one-year coarse tick for a fast repeatable balance smoke test.
 	for seed_value in [827, 123, 2468]:
-		var state: Dictionary = ECON.create(MAP.generate(seed_value, 2), {1: {"team": 1, "ai": true}, 2: {"team": 1, "ai": true}}, [1, 2])
+		var state: Dictionary = ECON.create(MAP.generate(seed_value, 2, "Grid"), {1: {"team": 1, "ai": true}, 2: {"team": 1, "ai": true}}, [1, 2])
 		var first_colony: int = -1
 		var owned: int = 0
 		var fighters: int = 0
