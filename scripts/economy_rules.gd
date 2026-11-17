@@ -2028,6 +2028,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 			return false
 	for ship in selected:
 		_cancel_salvage_order(ship)
+		_clear_tactical_order(ship)
 		ship["direct_order"] = true
 		_clear_local_hold(ship)
 		ship["operation_target"] = target
@@ -2035,6 +2036,94 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 		if not bool(ship.get("retreating", false)):
 			_redirect_fighter(graph, ship, target, paths)
 	return true
+
+# Both orders use the normal military graph and the same automatic combat
+# and repair rules as attack-move. The target is a stable hull ID, not a slot.
+static func _clear_tactical_order(ship: Dictionary) -> void:
+	ship.erase("attack_order")
+	ship.erase("attack_local")
+	ship.erase("patrol_from")
+	ship.erase("patrol_to")
+
+static func _hostile_hull(state: Dictionary, player: int, target: Dictionary) -> bool:
+	var team: int = int(state["teams"].get(player, 0))
+	var enemy_team: int = int(state["teams"].get(int(target.get("owner", 0)), 0))
+	return team > 0 and enemy_team > 0 and enemy_team != team
+
+static func _attack_destination(graph: Dictionary, target: Dictionary) -> int:
+	var sector: int = local_sector(graph, target)
+	if sector >= 0:
+		return sector
+	var route: Array = target.get("route", [])
+	return int(route[0]) if not route.is_empty() else int(target.get("at", -1))
+
+static func command_attack(state: Dictionary, player: int, ids: Array, target_id: int) -> bool:
+	var target: Dictionary = {}
+	for craft in state["ships"]:
+		if int(craft["id"]) == target_id:
+			target = craft
+			break
+	if target.is_empty() or not _hostile_hull(state, player, target):
+		return false
+	var node: int = _attack_destination(military_graph(state), target)
+	if not command_fighters(state, player, ids, node):
+		return false
+	for craft in _owned_fighters(state, player, ids):
+		craft["attack_order"] = target_id
+	return true
+
+static func command_patrol(state: Dictionary, player: int, ids: Array, target: int) -> bool:
+	var selected: Array = _owned_fighters(state, player, ids)
+	var origins: Dictionary = {}
+	for craft in selected:
+		var origin: int = int(craft["at"])
+		if origin == target or not military_pois(state, player).has(origin):
+			return false
+		origins[int(craft["id"])] = origin
+	if not command_fighters(state, player, ids, target):
+		return false
+	for craft in selected:
+		craft["patrol_from"] = origins[int(craft["id"])]
+		craft["patrol_to"] = target
+	return true
+
+static func _update_tactical_orders(state: Dictionary, graph: Dictionary) -> void:
+	var by_id: Dictionary = {}
+	var paths: Dictionary = {}
+	for craft in state["ships"]:
+		by_id[int(craft["id"])] = craft
+	for craft in state["ships"]:
+		if craft.get("kind", "") != "fighter" or bool(craft.get("retreating", false)):
+			continue
+		var goal: int = -1
+		var attack: int = int(craft.get("attack_order", -1))
+		craft.erase("attack_local")
+		if attack >= 0:
+			var victim: Dictionary = by_id.get(attack, {})
+			if victim.is_empty() or not _hostile_hull(state, int(craft["owner"]), victim):
+				_clear_tactical_order(craft)
+				# Finish the last legal lane, then fall back to normal attack-move.
+				continue
+			goal = _attack_destination(graph, victim)
+			if goal < 0 or goal >= graph["points"].size():
+				_clear_tactical_order(craft)
+				continue
+			if local_sector(graph, craft) == goal and local_sector(graph, victim) == goal:
+				craft["attack_local"] = true
+				craft["at"] = goal
+				craft["route"] = []
+				craft["leg"] = 0.0
+				craft["dest"] = goal
+		elif craft.has("patrol_from") and (craft["route"] as Array).is_empty() and not _engaged(craft):
+			var current: int = int(craft.get("operation_target", -1))
+			if int(craft["at"]) == current:
+				goal = int(craft["patrol_from"]) if current == int(craft["patrol_to"]) else int(craft["patrol_to"])
+		if goal >= 0:
+			craft["operation_target"] = goal
+			if int(craft.get("dest", -1)) != goal:
+				if not paths.has(goal):
+					paths[goal] = _military_paths(graph, goal)
+				_redirect_fighter(graph, craft, goal, paths[goal])
 
 static func _owned_fighters(state: Dictionary, player: int, ids: Array) -> Array:
 	var requested: Dictionary = {}
@@ -2058,6 +2147,7 @@ static func hold_fighters(state: Dictionary, player: int, ids: Array) -> bool:
 		return false
 	for ship in selected:
 		_cancel_salvage_order(ship)
+		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
 		ship["direct_order"] = true
 		ship["holding"] = true
@@ -2126,6 +2216,7 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 			return false
 	for ship in units:
 		_cancel_salvage_order(ship)
+		_clear_tactical_order(ship)
 		ship["hold_position"] = point
 		ship["hold_sector"] = node
 		ship["holding"] = true
@@ -2424,6 +2515,7 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		if piles.has(old) and int(piles[old]["claim"]) == int(best["id"]):
 			piles[old]["claim"] = -1
 		_cancel_salvage_order(best)
+		_clear_tactical_order(best)
 		_clear_local_hold(best)
 		best["salvage_target"] = id
 		pile["claim"] = int(best["id"])
@@ -2439,6 +2531,7 @@ static func command_unload_cargo(state: Dictionary, player: int, ids: Array) -> 
 		if _cargo_total(ship) <= EPS or bool(ship.get("retreating", false)):
 			continue
 		_cancel_salvage_order(ship)
+		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
 		ship["salvage_delivery"] = true
 		changed = true
@@ -2697,6 +2790,15 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			target = pursuit if pos.distance_squared_to(positions[pursuit]) <= LASER_RANGE * LASER_RANGE else -1
 		else:
 			remaining = 0.0
+		var ordered_target: int = int(ship.get("attack_order", -1))
+		if by_id.has(ordered_target) and _hostile_hull(state, int(ship["owner"]), by_id[ordered_target]):
+			if pos.distance_squared_to(positions[ordered_target]) <= LASER_RANGE * LASER_RANGE:
+				target = ordered_target
+				pursuit = -1
+				remaining = 0.0
+			elif bool(ship.get("attack_local", false)):
+				pursuit = -1
+				remaining = 0.0
 		ship["pursuit_target"] = pursuit
 		ship["pursuit_left"] = remaining
 		ship["pursuit_blocked"] = blocked
@@ -3006,12 +3108,22 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 	var planets: Array = state["planets"]
 	var points: Array = graph["points"]
 	var pois: Array[int] = military_pois(state, player)
+	# Repairing hulls cannot defend or form an attack cohort yet. Count
+	# only combat-ready ships until they return to the normal order loop.
+	var ready: Array = fighters.filter(func(craft: Dictionary) -> bool: return not bool(craft.get("retreating", false)))
 	var center: Vector2 = points[home]
-	if not fighters.is_empty():
+	if not ready.is_empty():
 		center = Vector2.ZERO
-		for ship in fighters:
+		for ship in ready:
 			center += combat_position(state, graph, ship)
-		center /= float(fighters.size())
+		center /= float(ready.size())
+	var reference: Dictionary = {"at": home, "route": [], "position": points[home]}
+	var reference_distance: float = INF
+	for craft in ready:
+		var distance: float = combat_position(state, graph, craft).distance_squared_to(center)
+		if distance < reference_distance:
+			reference = craft
+			reference_distance = distance
 	var threats: Dictionary = {}
 	var opportunities: Dictionary = {}
 	for ship in state["ships"]:
@@ -3032,8 +3144,7 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 			continue
 		if node < planets.size() and int(state["teams"].get(int(planets[node]["owner"]), 0)) == team:
 			continue
-		var distance: float = center.distance_squared_to(position)
-		opportunities[node] = minf(distance, float(opportunities.get(node, INF)))
+		opportunities[node] = true
 	var defense: int = home
 	var danger: int = 0
 	for node in owned:
@@ -3052,7 +3163,7 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 		for node in pois:
 			if not opportunities.has(node) and not _hostile_system(state, player, node):
 				continue
-			var distance: float = float(opportunities.get(node, center.distance_squared_to(points[node])))
+			var distance: float = float(_military_approach(graph, reference, _military_paths(graph, node))["distance"])
 			if distance < nearest:
 				goal = node
 				nearest = distance
@@ -3061,7 +3172,7 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 		for node in pois:
 			if node >= planets.size() or int(planets[node]["owner"]) != 0 or has_planets(planets[node]):
 				continue
-			var distance: float = center.distance_squared_to(points[node])
+			var distance: float = float(_military_approach(graph, reference, _military_paths(graph, node))["distance"])
 			if distance < nearest_empty:
 				goal = node
 				nearest_empty = distance
@@ -3070,21 +3181,25 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 	var defense_weight: int = 100 if goal < 0 else 0
 	if goal >= 0:
 		if danger > 0:
-			defense_weight = 100 if fighters.size() < 7 else 60
-		elif fighters.size() >= 4:
+			defense_weight = 100 if ready.size() < 7 else 60
+		elif ready.size() >= 4:
 			defense_weight = 25
 	if not state.has("ai_objectives"):
 		state["ai_objectives"] = {}
 	state["ai_objectives"][player] = goal
-	var defenders: int = ceili(float(fighters.size()) * defense_weight / 100.0)
-	if fighters.size() - defenders < AI_WAVE_MIN:
-		defenders = fighters.size()
+	var defenders: int = ceili(float(ready.size()) * defense_weight / 100.0)
+	if ready.size() - defenders < AI_WAVE_MIN:
+		defenders = ready.size()
 	# Select defenders closest to the threatened POI. Keep already assigned
 	# hulls stable where possible; every order uses the same authority path.
-	var ranked: Array = fighters.duplicate()
+	var ranked: Array = ready.duplicate()
+	var distances: Dictionary = {}
+	var defense_paths: Dictionary = _military_paths(graph, defense)
+	for craft in ranked:
+		distances[int(craft["id"])] = float(_military_approach(graph, craft, defense_paths)["distance"])
 	ranked.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		var da: float = combat_position(state, graph, a).distance_squared_to(points[defense])
-		var db: float = combat_position(state, graph, b).distance_squared_to(points[defense])
+		var da: float = distances[int(a["id"])]
+		var db: float = distances[int(b["id"])]
 		return da < db if not is_equal_approx(da, db) else int(a["id"]) < int(b["id"]))
 	for i in range(ranked.size()):
 		var craft: Dictionary = ranked[i]
@@ -3809,6 +3924,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	for craft in state["ships"]:
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") == "fighter" else state["map"]["points"], craft)
 	_prepare_withdrawals(state, combat_graph)
+	_update_tactical_orders(state, combat_graph)
 	_combat(state, combat_graph, dt)
 	_prepare_withdrawals(state, combat_graph)
 	_update_salvage(state)
@@ -3866,6 +3982,12 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 				_work_withdrawal(state, combat_graph, ship, dt)
 			elif bool(ship.get("holding", false)):
 				ship["navigation_target"] = ship["position"]
+			elif bool(ship.get("attack_local", false)) and combat_positions.has(int(ship.get("attack_order", -1))):
+				var opponent: Vector2 = combat_positions[int(ship["attack_order"])]
+				if (ship["position"] as Vector2).distance_to(opponent) <= LASER_RANGE:
+					_maneuver_fighter(ship, opponent, dt)
+				else:
+					_navigate(ship, opponent, SHIP_SPEED * dt)
 			elif coordinated.has(int(ship["id"])):
 				pass # Already moved as a group this tick.
 			elif combat_positions.has(pursuit_id):

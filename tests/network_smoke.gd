@@ -184,6 +184,9 @@ func _phase_changed() -> void:
 						var point: Vector2 = graph["points"][index] + Vector2.RIGHT * minf(150.0, ECON.sector_limit(graph, index, Vector2.RIGHT) * 0.5)
 						var pile_id: int = 910000 + index
 						state["salvage"][pile_id] = {"id": pile_id, "resource": ECON.ANTIMATTER, "amount": 12.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
+						# Separate focus-fire hull so the existing movement and hold
+						# scenarios remain independent of this command.
+						ECON._finish(state, index, system, {"id": 920000 + index, "kind": "fighter", "population_allocated": 0.0})
 				session.call("_publish_economy")
 			call_deferred("_prepare_commands")
 			create_timer(0.5).timeout.connect(_check_economy_sync)
@@ -332,6 +335,15 @@ func _send_commands() -> void:
 	session.call("request_miner_assignment", [own_miners[0], enemy_miner], -1)
 	session.call("request_miner_assignment", [own_miners[0]], 999999)
 	session.call("request_fighter_move", [own_fighters[0]], field_node)
+	session.call("request_tactical_order", [own_fighters[0]], "patrol", field_node)
+	session.call("request_tactical_order", [own_fighters[0], enemy_fighter], "patrol", home_index)
+	session.call("request_tactical_order", [own_fighters[0]], "patrol", -1)
+	var attack_id: int = 920000 + home_index
+	var victim_id: int = 920000 + (home_index + 1) % expected_players
+	session.call("request_tactical_order", [attack_id], "attack", victim_id)
+	session.call("request_tactical_order", [attack_id], "attack", own_fighters[0])
+	session.call("request_tactical_order", [attack_id, victim_id], "patrol", field_node)
+	session.call("request_tactical_order", [attack_id], "invalid", home_index)
 	session.call("request_fighter_move", [own_fighters[0]], -1)
 	session.call("request_fighter_move", [own_fighters[0], enemy_fighter], home_index)
 	session.call("request_fighter_hold", [own_fighters[1]])
@@ -499,12 +511,16 @@ func _check_economy_sync() -> void:
 			var ordered: int = 0
 			var idle: int = 0
 			var local_held: bool = false
+			var patrol_verified: bool = false
+			var attack_verified: bool = false
 			var graph: Dictionary = ECON.military_graph(state)
 			var owner_home: int = state["planets"].find(system)
 			var local_point: Vector2 = graph["points"][owner_home] + Vector2.RIGHT * ECON.sector_limit(graph, owner_home, Vector2.RIGHT) * 0.25
 			for craft in state["ships"]:
 				if int(craft["owner"]) == owner and craft["kind"] == "fighter":
-					if craft.get("operation_target", -1) == field_node and craft.get("direct_order", false):
+					patrol_verified = patrol_verified or (int(craft.get("patrol_from", -1)) == owner_home and int(craft.get("patrol_to", -1)) == field_node)
+					attack_verified = attack_verified or (int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) == 920000 + (owner_home + 1) % expected_players)
+					if craft.get("patrol_to", -1) == field_node and craft.get("direct_order", false):
 						ordered += 1
 					elif craft.get("holding", false) and state["planets"][int(craft["at"])]["owner"] == owner and (craft["route"] as Array).is_empty():
 						idle += 1
@@ -514,6 +530,8 @@ func _check_economy_sync() -> void:
 				if int(craft["owner"]) == owner and craft["kind"] == "miner" and int(craft.get("assigned_field", -1)) >= 0:
 					assigned_miners += 1
 			var checks: Dictionary = {
+				"patrol": patrol_verified,
+				"attack_target": attack_verified,
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
 				"local_position": local_held,
 				"miner_assignment": assigned_miners == 1,

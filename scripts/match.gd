@@ -1399,6 +1399,11 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Moving to hold position" if ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > ECONOMY.EPS else "Holding position"
 	elif int(ship.get("combat_target", -1)) >= 0:
 		status = "Engaged"
+	if not bool(ship.get("retreating", false)):
+		if int(ship.get("attack_order", -1)) >= 0:
+			status = "Attacking #%d" % int(ship["attack_order"])
+		elif ship.has("patrol_from"):
+			status = "Patrolling → %s" % _poi_name(int(ship["operation_target"]))
 	if int(ship.get("salvage_target", -1)) >= 0:
 		status = "Collecting salvage" if bool(ship.get("tractor_active", false)) else "Approaching salvage"
 	elif bool(ship.get("salvage_delivery", false)):
@@ -1435,7 +1440,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		fleet_detail.text += "\n%d owned · %d foreign" % [owned_count, selected_units.size() - owned_count]
 	fleet_detail.tooltip_text = "Foreign ships are read-only. Commands affect only your own ships. Ctrl+1–9 assigns a selection group, 1–9 recalls it."
 	if owned_count > 0:
-		fleet_detail.tooltip_text += " Right-click floating salvage to claim nearby resources; U unloads cargo. Right-click empty space to position and hold; Alt-right-click forces a local position. H holds/releases."
+		fleet_detail.tooltip_text += " Right-click a hostile ship to focus attack, or a sector to attack-move. Shift-right-click a sector to patrol. Right-click floating salvage to claim; U unloads cargo. Right-click empty space to position and hold; Alt-right-click forces a local position. H holds/releases."
 	fleet_cargo.get_parent().show()
 	fleet_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total({"cargo": cargo}), capacity]
 	if fleet_cargo.get_parent().visible:
@@ -2987,12 +2992,30 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	selected_field = -1
 	_refresh()
 
-func _command_at(point: Vector2, force_position: bool = false) -> void:
+func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false) -> void:
 	var state: Dictionary = _state()
 	var owned: Array[int] = _selected_owned_units(state)
 	if state.is_empty() or owned.is_empty():
 		return
-	if not force_position:
+	var fighters: Array[int] = []
+	for craft in state["ships"]:
+		if owned.has(int(craft["id"])) and craft["kind"] == "fighter":
+			fighters.append(int(craft["id"]))
+	if not force_position and not patrol:
+		var poses: Dictionary = _ship_poses(state)
+		var target: int = -1
+		var nearest: float = maxf(5.0, 14.0 * _ship_scale())
+		if not fighters.is_empty():
+			for craft in state["ships"]:
+				var id: int = int(craft["id"])
+				if poses.has(id) and ECONOMY._hostile_hull(state, _me(), craft):
+					var d: float = point.distance_to(poses[id]["point"])
+					if d < nearest:
+						target = id
+						nearest = d
+		if target >= 0:
+			session.call("request_tactical_order", fighters, "attack", target)
+			return
 		var wreck: int = _salvage_hit(state, point)
 		if wreck >= 0:
 			session.call("request_salvage", owned, wreck)
@@ -3015,6 +3038,10 @@ func _command_at(point: Vector2, force_position: bool = false) -> void:
 		hit_radius = maxf(9.0, radius * (0.13 if zoom >= 2.0 and radius >= 18.0 else 0.48))
 	else:
 		hit_radius = maxf(9.0, float(state["map"]["fields"][node - system_count]["radius"]) * _fit() * zoom)
+	if patrol and not force_position:
+		if not fighters.is_empty() and distance <= hit_radius * hit_radius:
+			session.call("request_tactical_order", fighters, "patrol", node)
+		return
 	if force_position or distance > hit_radius * hit_radius:
 		if ECONOMY.sector_contains(graph, node, world):
 			var local: Array[int] = []
@@ -3046,15 +3073,12 @@ func _command_at(point: Vector2, force_position: bool = false) -> void:
 		if field_index < 0:
 			field_index = -1
 		session.call("request_miner_assignment", miners, field_index, rock_id)
-	var fighters: Array[int] = []
 	var colony_sent: bool = false
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
 		if not selected_units.has(id) or int(craft["owner"]) != _me():
 			continue
-		if craft["kind"] == "fighter":
-			fighters.append(id)
-		elif craft["kind"] == "colony_ship" and not colony_sent and node < state["planets"].size() and not ECONOMY.colony_path(state, _me(), craft, node).is_empty():
+		if craft["kind"] == "colony_ship" and not colony_sent and node < state["planets"].size() and not ECONOMY.colony_path(state, _me(), craft, node).is_empty():
 			session.call("request_colonize", id, node)
 			colony_sent = true
 	if not fighters.is_empty():
@@ -3102,7 +3126,7 @@ func _map_input(event: InputEvent) -> void:
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
-					_command_at(mouse.position, mouse.alt_pressed)
+					_command_at(mouse.position, mouse.alt_pressed, mouse.shift_pressed)
 			MOUSE_BUTTON_LEFT:
 				if mouse.pressed:
 					selecting_units = true
@@ -3695,8 +3719,10 @@ func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, later
 		var start: float = -half_length
 		for segment in bays[k]:
 			var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / per_bay)
-			var fill := PackedVector2Array([module + forward * end + lateral * half_width, module + forward * start + lateral * half_width, module + forward * start - lateral * half_width, module + forward * end - lateral * half_width])
-			map_canvas.draw_colored_polygon(fill, HUD.COLORS[segment["resource"]])
+			# Fractional tonnes can project to a degenerate polygon.
+			if (end - start) * forward.length() >= 0.1:
+				var fill := PackedVector2Array([module + forward * end + lateral * half_width, module + forward * start + lateral * half_width, module + forward * start - lateral * half_width, module + forward * end - lateral * half_width])
+				map_canvas.draw_colored_polygon(fill, HUD.COLORS[segment["resource"]])
 			start = end
 
 func _draw_map() -> void:
@@ -3804,6 +3830,14 @@ func _draw_map() -> void:
 		if not selected_units.has(id) or not poses.has(id):
 			continue
 		var start: Vector2 = poses[id]["point"]
+		var attack_target: int = int(craft.get("attack_order", -1))
+		if poses.has(attack_target):
+			var marker: Vector2 = poses[attack_target]["point"]
+			map_canvas.draw_line(start, marker, Color("#ff816b80"), 1.5, true)
+			map_canvas.draw_arc(marker, maxf(9.0, 15.0 * _ship_scale()), 0.0, TAU, 24, Color("#ff816b"), 1.5, true)
+		if craft.has("patrol_from"):
+			for endpoint in [craft["patrol_from"], craft["patrol_to"]]:
+				map_canvas.draw_arc(_screen_point(order_points[int(endpoint)]), 10.0, 0.0, TAU, 24, Color(HUD.ACCENT, 0.7), 1.5, true)
 		if bool(craft.get("holding", false)) and not bool(craft.get("retreating", false)):
 			if craft.has("hold_position"):
 				var target: Vector2 = _screen_point(craft["hold_position"])
@@ -3916,8 +3950,14 @@ func _draw_map() -> void:
 			continue
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
 			map_canvas.draw_arc(point, maxf(5.0, 15.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
+		# At a distant galaxy overview, the smallest authored edges can
+		# collapse into an invalid polygon after projection. Keep the hull
+		# visible and owner-colored rather than drawing degenerate geometry.
+		if scale < 0.15 or (scale < 0.42 and Geometry2D.triangulate_polygon(shape).is_empty()):
+			map_canvas.draw_circle(point, maxf(0.8, 6.0 * scale), hull, true, -1.0, true)
+			continue
 		map_canvas.draw_colored_polygon(shape, hull)
-		if ship["kind"] == "ship":
+		if ship["kind"] == "ship" and scale >= 0.42:
 			var bays: Array = ECONOMY.freighter_cargo_bays(ship["cargo"])
 			for k in range(bays.size()):
 				var row: int = floori(float(k - 1) / 2.0)
@@ -3929,8 +3969,9 @@ func _draw_map() -> void:
 				var start: float = -half_length
 				for segment in bays[k]:
 					var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / ECONOMY.FREIGHTER_BAY_CAPACITY)
-					var filled := PackedVector2Array([module + direction * end + side * 3, module + direction * start + side * 3, module + direction * start - side * 3, module + direction * end - side * 3])
-					map_canvas.draw_colored_polygon(filled, HUD.COLORS[segment["resource"]])
+					if (end - start) * scale >= 0.1:
+						var filled := PackedVector2Array([module + direction * end + side * 3, module + direction * start + side * 3, module + direction * start - side * 3, module + direction * end - side * 3])
+						map_canvas.draw_colored_polygon(filled, HUD.COLORS[segment["resource"]])
 					start = end
 		elif scale >= 0.42 and HULL_PANELS.has(ship["kind"]) and viewport_bounds.grow(maxf(24.0, 14.0 * scale)).has_point(point):
 			# At distant zoom levels the silhouette and allegiance outline are
