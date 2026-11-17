@@ -1829,6 +1829,10 @@ func _refresh() -> void:
         for i in range(planets.size()):
             if int(planets[i]["owner"]) == _me():
                 selected = i
+                # Center the initial camera on the player's home system.
+                zoom = clampf(2.4, MIN_ZOOM, MAX_ZOOM)
+                pan = (_map_size() * 0.5 - state["map"]["points"][i]) * _fit() * zoom
+                _position_territory()
                 _load_thresholds()
                 break
     var ship: Dictionary = _selected_ship(state)
@@ -2372,7 +2376,16 @@ func _planet_radius(index: int, state: Dictionary) -> float:
     return clampf(minf(ideal, spacing * 0.39), 4.0, 720.0)
 
 func _body_position(body: Dictionary, radius: float, time: float) -> Vector2:
-    return Vector2.from_angle(float(body["phase"]) + time * float(body["speed"]) * 0.22) * radius * float(body["orbit"])
+    var angle: float = float(body["phase"]) + time * float(body["speed"]) * 0.22
+    var orbit_radius: float = radius * float(body["orbit"])
+    return Vector2(cos(angle) * orbit_radius, sin(angle) * orbit_radius * 0.65)
+
+func _draw_elliptical_orbit(center: Vector2, radius: float, tint: Color) -> void:
+    var points := PackedVector2Array()
+    for step in range(65):
+        var angle: float = TAU * float(step) / 64.0
+        points.append(center + Vector2(cos(angle) * radius, sin(angle) * radius * 0.65))
+    map_canvas.draw_polyline(points, tint, 0.8, true)
 
 # Generate a unique shaded surface once per visible body; no separate highlight dot.
 func _body_texture(body: Dictionary) -> Texture2D:
@@ -2415,15 +2428,15 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
     var color: Color = _planet_color(system)
     var star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
     var star_color: Color = Color("#fff0c4").lerp(color.lightened(0.25), 0.30)
-    if zoom >= 2.0 and radius >= 18.0:
+    if index == selected and zoom >= 2.0 and radius >= 18.0:
         var bodies: Array = _system_visual(index, state)["bodies"]
         for slot in range(bodies.size()):
             var body: Dictionary = bodies[slot]
             var orbit: float = radius * float(body["orbit"])
             if _show_system_rings(index):
-                map_canvas.draw_arc(pos, orbit, 0.0, TAU, 48, Color(tint, 0.24), 0.8, true)
+                _draw_elliptical_orbit(pos, orbit, Color(tint, 0.20))
             var point: Vector2 = pos + _body_position(body, radius, game_visual_clock)
-            var body_radius: float = maxf(2.1, radius * float(body["size"]))
+            var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
             if get_viewport_rect().grow(body_radius).has_point(point):
                 if body_radius >= 5.0:
                     map_canvas.draw_texture_rect(_body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false)

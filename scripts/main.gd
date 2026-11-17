@@ -342,7 +342,14 @@ func _show_lobby() -> void:
     var left_col := VBoxContainer.new()
     left_col.add_theme_constant_override("separation", 8)
     left.add_child(left_col)
-    left_col.add_child(_text("Players", 20))
+    var players_header := HBoxContainer.new()
+    left_col.add_child(players_header)
+    var players_title := _text("Players", 20)
+    players_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    players_header.add_child(players_title)
+    var add_ai_button := _button("+ Add AI", func() -> void: network.call("add_lobby_ai"))
+    add_ai_button.name = "AddLobbyAI"
+    players_header.add_child(add_ai_button)
     var roster_scroll := ScrollContainer.new()
     roster_scroll.custom_minimum_size.y = 230
     roster_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -400,20 +407,27 @@ func _refresh_roster() -> void:
     var roster_data: Dictionary = network.get("players")
     var is_host: bool = multiplayer.is_server()
     var is_lobby: bool = str(network.get("phase")) == "lobby"
+    # The header button is a descendant of the lobby's content panel.
+    var add_ai_buttons: Array = find_children("AddLobbyAI", "Button", true, false)
+    if not add_ai_buttons.is_empty():
+        var add_ai_button: Button = add_ai_buttons[0]
+        add_ai_button.visible = is_host
+        add_ai_button.disabled = not is_lobby or roster_data.size() >= RULES.MAX_PLAYERS
     for id in RULES.ordered_peers(roster_data):
         var entry: Dictionary = roster_data[id]
         var row := HBoxContainer.new()
         row.custom_minimum_size.y = 32
         row.add_theme_constant_override("separation", 8)
         roster.add_child(row)
-        var role: String = "HOST" if id == 1 else "GUEST"
+        var ai: bool = bool(entry.get("ai", false))
+        var role: String = "AI" if ai else ("HOST" if id == 1 else "GUEST")
         var label := _text("%s • %s" % [str(entry.get("name", "Player")), role], 14)
         label.clip_text = true
         label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         label.add_theme_color_override("font_color", RULES.EMPIRE_COLORS[int(entry.get("color", 1))])
         row.add_child(label)
         var color_selector := _color_selector(roster_data, int(id))
-        color_selector.disabled = not is_lobby or id != multiplayer.get_unique_id()
+        color_selector.disabled = not is_lobby or (id != multiplayer.get_unique_id() and not (is_host and ai))
         color_selector.item_selected.connect(_color_selected.bind(int(id)))
         row.add_child(color_selector)
         var selector := OptionButton.new()
@@ -427,6 +441,11 @@ func _refresh_roster() -> void:
         var ready := _text("READY" if bool(entry.get("ready", false)) else "WAITING", 12, MUTED)
         ready.custom_minimum_size.x = 68
         row.add_child(ready)
+        if ai and is_host:
+            var remove_ai := _button("×", Callable(network, "remove_lobby_ai").bind(id))
+            remove_ai.tooltip_text = "Remove AI player"
+            remove_ai.disabled = not is_lobby
+            row.add_child(remove_ai)
     for _index in range(RULES.MAX_PLAYERS - roster_data.size()):
         roster.add_child(_text("EMPTY SLOT", 13, MUTED))
     ready_button.visible = not is_host
