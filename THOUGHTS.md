@@ -283,3 +283,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.34: Godot's convert-indent-on-save setting was rewriting space-indented scripts into tabs on the user's machine. Standardize on Godot's native tabs and enforce the format with the gate; check that whitespace-normalized script/shader diffs are empty.
 
 - v0.17.35: Wider sector patrols can pull idle fighters beyond the rally and capture radius. Keep pending rally, hostile-system occupation and contested-sector groups compact; defenders physically patrolling the same sector contest conquest. Verify visual patrol paths and response times at different zooms.
+
+- v0.17.36: Fixed-resource bay coloring implied a cargo allocation limit that did not exist. Pack the displayed bays by actual tonnage, including single-resource full loads. A free starting home PDS strengthens early defense without spending stock; validate rush balance before changing combat values.
