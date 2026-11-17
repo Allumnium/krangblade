@@ -197,3 +197,5 @@ Version 0.21.0: select a zoomed-in star system, then left-click an orbiting plan
 Version 0.21.1: the star-system Economy defense card offers a named planet selector with PDS status, HP, upfront costs, time, progress and cancellation. Selecting orbital planets on the map is optional; every planet upgrade/action must also be accessible at star-system level. No gameplay changes.
 
 Version 0.21.2: expanded Economy cards report live numeric before/after effects for one completion. Production previews use current population and modifiers, actual production formulas and theoretical net after civilian demand (not warehouse-limited changes). Industrial worker limits, food capacity, extraction limits, warehouse capacity, habitation penalty/capacity and PDS HP/damage/range are explicit. No balance changes.
+
+Version 0.21.3: ship card titles show living origin-system hull counts directly after the ship name, using (3), (3 / 5), or (3 / ∞) for no target, finite maintenance, or continuous production. Pending orders are counted separately on the Build button. No gameplay changes.
