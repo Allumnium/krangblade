@@ -165,3 +165,13 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.3: first economy effects and automatic idle colony dispatch. Existing local build controls supply colony ships. Research, additional modifiers and balancing pending.
 
 - v0.17.4: compact visible slot headers, actual-slot drag/drop, compact in-scene card picker, exclusive right inspector and separated time controls. Defer deeper technology progression per user direction. Manual visual/drag validation pending.
+
+## Policy brush-zone replacement (approved; implementation in progress)
+- [x] Initial pre-commit left-paint/right-erase brush editing and graph-connected A/B/C zone labeling (v0.17.8; visual validation pending).
+- [x] Initial per-zone editable military allocation sliders, read-only sliders for other committed military policies, and individually unchecked-by-default void toggles (v0.17.8; validation pending).
+- [x] Initial atomic zone commitment with draft preservation, same-card replacement, warmup reset and locked inspector (v0.17.8; validation pending).
+- [ ] Preserve unallocated fleet reserves (totals may be below 100%), enforce cross-policy limits, reconcile overriding policy lifecycle, and migrate AI fleet orders to the same policy system.
+- [ ] Validate multiplayer RPCs, authority, connectivity, splitting/merging zones, replacement, resource allocation and manual map UX.
+- v0.17.7 branch groundwork: authoritative atomic zone commitment, stored zone weights and void selections, fleet policy weight aggregation. UI and full allocation/validation behavior are not complete.
+
+- v0.17.9: zone draft brush, graph-connected component list, per-zone sliders, per-policy void checkboxes, host RPC and home reserve fallback pushed to draft PR #83. Remaining: correct stable allocation preservation across merge/split, paint geometry/visuals, AI migration, tests and CI.

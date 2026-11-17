@@ -754,6 +754,25 @@ func _policy_for(id: int, slot: String, card: String) -> void:
     if _active_player(id) and ECONOMY.equip_policy(economy, id, slot, card):
         _publish_economy()
 
+# Submit all painted zones and per-policy overrides as one authoritative
+# commitment. No partially configured policy is ever published.
+func request_policy_zones(slot: String, card: String, zones: Array, void_slots: Array) -> void:
+    if phase != "match":
+        return
+    if is_solo or multiplayer.is_server():
+        _policy_zones_for(1, slot, card, zones, void_slots)
+    else:
+        _rpc_policy_zones.rpc_id(1, slot, card, zones, void_slots)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_policy_zones(slot: String, card: String, zones: Array, void_slots: Array) -> void:
+    if multiplayer.is_server():
+        _policy_zones_for(multiplayer.get_remote_sender_id(), slot, card, zones, void_slots)
+
+func _policy_zones_for(id: int, slot: String, card: String, zones: Array, void_slots: Array) -> void:
+    if _active_player(id) and ECONOMY.commit_military_policy(economy, id, slot, card, zones, void_slots):
+        _publish_economy()
+
 func request_policy_target(slot: String, node: int, enabled: bool) -> void:
     if phase != "match":
         return
