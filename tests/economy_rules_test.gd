@@ -37,6 +37,7 @@ func _initialize() -> void:
 	_test_neutral_direct_occupation()
 	_test_idle_formations()
 	_test_local_position_orders()
+	_test_tactical_orders()
 	_test_salvage()
 	_test_civilian_waiting_movement()
 	_test_depleted_field_routes()
@@ -1693,6 +1694,60 @@ func _test_local_position_orders() -> void:
 	assert(repaired and damaged["position"] == post and damaged["holding"])
 	print("PASS: position and hold all hull classes, bounded travel, ownership/sector validation, release and lane orders")
 
+func _test_tactical_orders() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(1000, 0)], "edges": [[0, 2], [1, 2]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var f: Dictionary = {"id": 100, "owner": 1, "kind": "fighter", "origin": 0, "at": 2, "dest": 2, "source": -1, "route": [], "leg": 0.0, "position": Vector2(1000, 0), "heading": Vector2.RIGHT, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
+	var enemy: Dictionary = f.duplicate(true)
+	enemy.merge({"id": 101, "owner": 2, "kind": "ship", "position": Vector2(1100, 0), "holding": true}, true)
+	var decoy: Dictionary = enemy.duplicate(true)
+	decoy.merge({"id": 102, "position": Vector2(1010, 0)}, true)
+	state["ships"] = [f, enemy, decoy]
+	assert(not ECON.command_attack(state, 2, [100], 101))
+	assert(not ECON.command_attack(state, 1, [100], 100))
+	assert(not ECON.command_attack(state, 1, [100, 101], 102))
+	assert(not ECON.command_attack(state, 1, [100], 999))
+	assert(ECON.command_attack(state, 1, [100], 101))
+	ECON.step(state, 0.1)
+	assert(f["combat_target"] == 101 and enemy["hp"] < ECON.SHIP_HP and decoy["hp"] == ECON.SHIP_HP)
+	assert(f["attack_order"] == 101)
+	# Retarget the live hull when it changes sectors, without teleporting
+	# the attacker onto a different lane or changing its target identity.
+	enemy["at"] = 1
+	enemy["position"] = map["points"][1]
+	var before: Vector2 = f["position"]
+	ECON.step(state, 0.1)
+	assert(f["attack_order"] == 101 and f["operation_target"] == 1 and (f["route"] as Array).has(1))
+	assert(before.distance_to(f["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+	assert(ECON.command_hold_units(state, 1, [100], false))
+	assert(not f.has("attack_order"))
+	assert(ECON.command_attack(state, 1, [100], 101))
+	state["ships"].erase(enemy)
+	state["ships"].erase(decoy)
+	ECON.step(state, 0.1)
+	assert(not f.has("attack_order"))
+	assert(not ECON.command_patrol(state, 2, [100], 0))
+	assert(not ECON.command_patrol(state, 1, [100], 2))
+	assert(ECON.command_patrol(state, 1, [100], 0))
+	f["hp"] = ECON.WITHDRAW_HP
+	var reached_home: bool = false
+	var returned: bool = false
+	var restored: bool = false
+	for tick in range(1000):
+		var previous: Vector2 = f["position"]
+		ECON.step(state, 0.25)
+		assert(previous.distance_to(f["position"]) <= ECON.SHIP_SPEED * 0.25 + 0.01)
+		assert(f["patrol_from"] == 2 and f["patrol_to"] == 0)
+		restored = restored or (not bool(f.get("retreating", false)) and is_equal_approx(float(f["hp"]), ECON.SHIP_HP))
+		reached_home = reached_home or int(f["at"]) == 0
+		if reached_home and restored and int(f["at"]) == 2:
+			returned = true
+			break
+	assert(reached_home and returned and restored and f["patrol_from"] == 2 and f["patrol_to"] == 0)
+	assert(ECON.command_fighters(state, 1, [100], 0))
+	assert(not f.has("patrol_from") and not f.has("patrol_to"))
+	print("PASS: explicit hostile targeting, priority fire, cancellation, bounded lane patrol and return")
+
 func _test_salvage() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -1911,6 +1966,14 @@ func _test_ai_defensive_orders() -> void:
 	state["ships"].append(intruder)
 	ECON._ai_military_orders(state, graph, 2, 1, owned, fighters)
 	assert(fighters.filter(func(ship: Dictionary) -> bool: return ship.get("operation_target", -1) == 1).size() == 5)
+	# Four hulls in repair aren't available to cover a defensive response.
+	for i in range(4):
+		fighters[i]["retreating"] = true
+	ECON._ai_military_orders(state, graph, 2, 1, owned, fighters)
+	for i in range(4, 8):
+		assert(fighters[i]["operation_target"] == 1)
+	for craft in fighters:
+		craft["retreating"] = false
 	state["ships"].erase(intruder)
 	ECON._ai_military_orders(state, graph, 2, 1, owned, fighters)
 	assert(fighters.filter(func(ship: Dictionary) -> bool: return ship.get("operation_target", -1) == 0).size() == 6)

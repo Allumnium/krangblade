@@ -272,10 +272,25 @@ func _rpc_register(wanted_name: String) -> void:
 	_system_message("%s joined." % name)
 	_status("Waiting for players to ready up.")
 
+func _connected_guests() -> Array[int]:
+	var ids: Array[int] = []
+	var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if peer == null:
+		return ids
+	for id in multiplayer.get_peers():
+		if not players.has(id):
+			continue
+		var connection: ENetPacketPeer = peer.get_peer(id)
+		if connection != null and connection.get_state() == ENetPacketPeer.STATE_CONNECTED:
+			ids.append(id)
+	return ids
+
 func _send_roster() -> void:
 	if not multiplayer.is_server():
 		return
-	_rpc_roster.rpc(players.duplicate(true), map_layout, lobby_map_seed)
+	var snapshot: Dictionary = players.duplicate(true)
+	for id in _connected_guests():
+		_rpc_roster.rpc_id(id, snapshot, map_layout, lobby_map_seed)
 	roster_changed.emit()
 
 @rpc("authority", "call_remote", "reliable")
@@ -500,7 +515,8 @@ func _system_message(message: String) -> void:
 func _add_chat(message: String) -> void:
 	var item: Dictionary = {"text": message}
 	_store_chat(item)
-	_rpc_chat_item.rpc(item)
+	for id in _connected_guests():
+		_rpc_chat_item.rpc_id(id, item)
 
 func _store_chat(item: Dictionary) -> void:
 	history.append(item.duplicate(true))
@@ -719,6 +735,31 @@ func _rpc_fighter_move(ids: Array, target: int) -> void:
 
 func _fighter_move_for(id: int, ids: Array, target: int) -> void:
 	if _active_player(id) and ECONOMY.command_fighters(economy, id, ids, target):
+		_publish_economy()
+
+func request_tactical_order(ids: Array, kind: String, target: int) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_tactical_order_for(1, ids, kind, target)
+	else:
+		_rpc_tactical_order.rpc_id(1, ids, kind, target)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_tactical_order(ids: Array, kind: String, target: int) -> void:
+	if multiplayer.is_server():
+		_tactical_order_for(multiplayer.get_remote_sender_id(), ids, kind, target)
+
+func _tactical_order_for(id: int, ids: Array, kind: String, target: int) -> void:
+	if not _active_player(id):
+		return
+	var accepted: bool = false
+	match kind:
+		"attack":
+			accepted = ECONOMY.command_attack(economy, id, ids, target)
+		"patrol":
+			accepted = ECONOMY.command_patrol(economy, id, ids, target)
+	if accepted:
 		_publish_economy()
 
 func request_miner_assignment(ids: Array, field: int, chunk: int = -1) -> void:
@@ -985,7 +1026,7 @@ func _flush_economy() -> void:
 	if is_solo:
 		return
 	var payload: PackedByteArray = PackedByteArray()
-	for id in multiplayer.get_peers():
+	for id in _connected_guests():
 		if snapshot_pending.has(id) or int(snapshot_sent.get(id, -1)) == snapshot_revision:
 			continue
 		if payload.is_empty():
