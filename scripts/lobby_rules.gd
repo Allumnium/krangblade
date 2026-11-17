@@ -26,7 +26,14 @@ static func ordered_peers(players: Dictionary) -> Array[int]:
     var ids: Array[int] = []
     for id in players.keys():
         ids.append(int(id))
-    ids.sort()
+    ids.sort_custom(func(a: int, b: int) -> bool:
+        if a == 1:
+            return true
+        if b == 1:
+            return false
+        if (a < 0) != (b < 0):
+            return a > 0
+        return a < b)
     return ids
 
 static func can_start(players: Dictionary) -> bool:

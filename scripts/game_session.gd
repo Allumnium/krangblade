@@ -294,6 +294,8 @@ func _rpc_team(team: int) -> void:
 func _change_team(id: int, team: int) -> void:
     if not players.has(id) or not RULES.valid_team(team):
         return
+    if bool(players[id].get("ai", false)) and not multiplayer.is_server():
+        return
     var entry: Dictionary = players[id]
     if int(entry.get("team", 0)) == team:
         return
@@ -304,7 +306,7 @@ func _change_team(id: int, team: int) -> void:
     _status("Teams changed; guests must ready up again.")
 
 func choose_color(peer_id: int, choice: int) -> void:
-    if phase != "lobby" or peer_id != multiplayer.get_unique_id():
+    if phase != "lobby" or (peer_id != multiplayer.get_unique_id() and not (multiplayer.is_server() and bool(players.get(peer_id, {}).get("ai", false)))):
         return
     if multiplayer.is_server():
         _change_color(peer_id, choice)
@@ -382,6 +384,30 @@ func _rpc_history(items: Array) -> void:
         history.pop_front()
     chat_changed.emit()
 
+# AI slots are host-owned roster entries, never ENet peer IDs.
+func add_lobby_ai() -> void:
+    if not multiplayer.is_server() or phase != "lobby" or players.size() >= RULES.MAX_PLAYERS:
+        return
+    var id: int = -1
+    while players.has(id):
+        id -= 1
+    var team: int = 1
+    var used: Dictionary = {}
+    for entry in players.values():
+        used[int(entry.get("team", 1))] = true
+    while used.has(team) and team < RULES.MAX_PLAYERS:
+        team += 1
+    players[id] = {"name": "AI %d" % abs(id), "team": team, "ready": true, "ai": true, "color": RULES.free_color(players)}
+    _send_roster()
+
+func remove_lobby_ai(id: int) -> void:
+    if not multiplayer.is_server() or phase != "lobby" or not players.has(id):
+        return
+    if not bool(players[id].get("ai", false)):
+        return
+    players.erase(id)
+    _send_roster()
+
 func can_start() -> bool:
     return phase == "lobby" and multiplayer.is_server() and RULES.can_start(players)
 
@@ -395,6 +421,9 @@ func start_match() -> void:
     _status("Loading match. Waiting for all players...")
     load_timer.start()
     _rpc_prepare.rpc(round_id, snapshot)
+    for id in snapshot:
+        if bool(snapshot[id].get("ai", false)):
+            loaded[id] = true
     get_tree().call_deferred("change_scene_to_file", "res://scenes/match.tscn")
 
 @rpc("authority", "call_remote", "reliable")
