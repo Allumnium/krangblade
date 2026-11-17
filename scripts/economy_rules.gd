@@ -378,6 +378,7 @@ static func send_colony(state: Dictionary, player: int, ship_id: int, target: in
 			return false
 		ship["dest"] = target
 		ship["return_path"] = path.duplicate()
+		_clear_local_hold(ship)
 		_set_route(ship, path)
 		return true
 	return false
@@ -1540,6 +1541,7 @@ static func command_miners(state: Dictionary, player: int, ids: Array, field_ind
 			if not reachable:
 				return false
 	for ship in selected:
+		_clear_local_hold(ship)
 		ship["assigned_field"] = field_index
 		ship["assigned_chunk"] = chunk_id
 		ship["next_mining_search"] = 0.0
@@ -1855,7 +1857,7 @@ static func military_graph(state: Dictionary) -> Dictionary:
 				neighbors.append(delta)
 		sector_neighbors.append(neighbors)
 	cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data)}
-	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors}
+	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors, "system_count": map_data["points"].size()}
 	return cached_military_graph
 
 static func _field_positions(map_data: Dictionary) -> Array:
@@ -1996,7 +1998,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 			return false
 	for ship in selected:
 		ship["direct_order"] = true
-		ship["holding"] = false
+		_clear_local_hold(ship)
 		ship["operation_target"] = target
 		ship.erase("rally_pending")
 		if not bool(ship.get("retreating", false)):
@@ -2024,6 +2026,7 @@ static func hold_fighters(state: Dictionary, player: int, ids: Array) -> bool:
 	if selected.is_empty():
 		return false
 	for ship in selected:
+		_clear_local_hold(ship)
 		ship["direct_order"] = true
 		ship["holding"] = true
 		ship["operation_target"] = int(ship["at"])
@@ -2034,6 +2037,115 @@ static func hold_fighters(state: Dictionary, player: int, ids: Array) -> bool:
 		if not bool(ship.get("retreating", false)) and ship.has("position"):
 			ship["navigation_target"] = ship["position"]
 	return true
+
+# A local point is legal only within the hull's current physical sector.
+# A miner at a field uses that field's sector, not its system anchor.
+static func local_sector(graph: Dictionary, ship: Dictionary) -> int:
+	var node: int = int(ship.get("at", -1))
+	var pos: Vector2 = ship.get("position", Vector2.INF)
+	if not pos.is_finite():
+		return -1
+	if ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
+		var field_node: int = int(graph["system_count"]) + int(ship.get("field", -1))
+		if field_node >= int(graph["system_count"]) and field_node < graph["points"].size() and sector_contains(graph, field_node, pos):
+			return field_node
+	# An entering hull is already in the next sector once it crosses its
+	# boundary along a real lane, even before reaching the central waypoint.
+	var route: Array = ship.get("route", [])
+	if not route.is_empty():
+		var next: int = int(route[0])
+		if next >= 0 and next < graph["points"].size() and sector_contains(graph, next, pos):
+			return next
+	return node if node >= 0 and node < graph["points"].size() and sector_contains(graph, node, pos) else -1
+
+static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
+	var requested: Dictionary = {}
+	for id in ids:
+		if not id is int or requested.has(id):
+			return []
+		requested[id] = true
+	var units: Array = []
+	for ship in state["ships"]:
+		if requested.has(ship["id"]):
+			if int(ship["owner"]) != player:
+				return []
+			units.append(ship)
+	return units if units.size() == requested.size() else []
+
+static func _clear_local_hold(ship: Dictionary) -> void:
+	if bool(ship.get("holding", false)) and ship.get("kind", "") == "miner" and ship.get("mining_mode", "") == "mining":
+		# Resume extraction only after physically returning to the rock.
+		ship["mining_mode"] = "outbound"
+	ship["holding"] = false
+	ship.erase("hold_position")
+	ship.erase("hold_sector")
+
+static func command_local_position(state: Dictionary, player: int, ids: Array, node: int, point: Vector2) -> bool:
+	if not point.is_finite() or not military_pois(state, player).has(node):
+		return false
+	var graph: Dictionary = military_graph(state)
+	if not sector_contains(graph, node, point):
+		return false
+	var units: Array = _owned_units(state, player, ids)
+	if units.is_empty():
+		return false
+	for ship in units:
+		if local_sector(graph, ship) != node or bool(ship.get("retreating", false)):
+			return false
+	for ship in units:
+		ship["hold_position"] = point
+		ship["hold_sector"] = node
+		ship["holding"] = true
+		ship["navigation_target"] = point
+		if ship.get("kind", "") == "fighter":
+			ship["direct_order"] = true
+			ship["at"] = node
+			ship["operation_target"] = node
+			ship["dest"] = node
+			ship["route"] = []
+			ship["leg"] = 0.0
+			ship["pursuit_target"] = -1
+			ship["pursuit_left"] = 0.0
+			ship.erase("rally_pending")
+			ship.erase("pursuit_blocked")
+	return true
+
+static func command_hold_units(state: Dictionary, player: int, ids: Array, release: bool) -> bool:
+	var units: Array = _owned_units(state, player, ids)
+	if units.is_empty():
+		return false
+	for ship in units:
+		if release:
+			if not bool(ship.get("holding", false)):
+				continue
+			_clear_local_hold(ship)
+			if ship.get("kind", "") == "fighter":
+				ship["operation_target"] = int(ship["at"])
+				if not bool(ship.get("retreating", false)):
+					ship["dest"] = -1
+		elif ship.get("kind", "") == "fighter":
+			hold_fighters(state, player, [ship["id"]])
+		else:
+			ship.erase("hold_position")
+			ship.erase("hold_sector")
+			ship["holding"] = true
+	return true
+
+static func _work_local_hold(graph: Dictionary, ship: Dictionary, dt: float) -> void:
+	if not ship.has("hold_position"):
+		ship["navigation_target"] = ship["position"]
+		return
+	var node: int = int(ship["hold_sector"])
+	# Repair may have taken a fighter to another sector. Return by lanes.
+	if ship.get("kind", "") == "fighter" and (int(ship["at"]) != node or not sector_contains(graph, node, ship["position"])):
+		if int(ship.get("dest", -1)) != node:
+			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
+		if (ship["route"] as Array).is_empty():
+			_navigate(ship, graph["points"][node], SHIP_SPEED * dt)
+		else:
+			_move({"map": graph}, ship, dt)
+		return
+	_navigate(ship, ship["hold_position"], SHIP_SPEED * dt)
 
 static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array, defer_routes: bool = false) -> void:
 	var weights: Dictionary = military_policy(state, player, "fighter")
@@ -3042,7 +3154,7 @@ static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Diction
 		# Normal dispatch resumes the latest allocation or AI reserve order.
 		ship["dest"] = -1
 		if bool(ship.get("holding", false)):
-			ship["operation_target"] = site
+			ship["operation_target"] = int(ship.get("hold_sector", site))
 
 static func _order_operation_ship(graph: Dictionary, ship: Dictionary, goal: int, paths: Dictionary) -> void:
 	if int(ship.get("dest", -1)) == goal:
@@ -3419,6 +3531,9 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var civilian_usec: int = 0
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
+		if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
+			_work_local_hold(combat_graph, ship, dt)
+			continue
 		if ship.get("kind", "ship") == "colony_ship":
 			if _work_colony(state, ship, dt):
 				state["ships"].erase(ship)

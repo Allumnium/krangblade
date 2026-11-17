@@ -231,3 +231,7 @@ Version 0.24.7: territory requires local residents or a completed shipyard (not 
 Version 0.24.8: radial ring and spoke endpoints use shortest available connections rather than reserving the third port artificially, then recheck earlier assignments for shorter feasible links. Connected rings and the three-lane cap remain. Empty stranded miners retry evacuation even with no cargo; PDS planet highlights are restricted to the selected system.
 
 Version 0.24.9: solo regression selects an adjacent planetary system rather than assuming the lowest-index neighbor can be colonized; gameplay unchanged from v0.24.8.
+
+Version 0.25.0: right-click empty space inside a selected ship's current sector to fly there and hold. Alt-right-click forces precise local positioning near POIs; normal system/field clicks retain lane and specialized orders. All owned hulls can be selected; H toggles hold/release. Civilian work and cargo are preserved while holding, and emergency fighter withdrawal retains the saved hold objective. Authority validates location, ownership and sector; selected ships display their destination marker.
+
+Version 0.25.1: local positioning becomes available on physically entering a destination sector along a lane, even before reaching its center. No shortcuts through unrelated sectors.

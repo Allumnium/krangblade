@@ -1316,6 +1316,8 @@ func _ship_kind_name(kind: String) -> String:
 	return "Logistics ship" if kind == "ship" else ("Mining ship" if kind == "miner" else kind.replace("_", " ").capitalize())
 
 func _ship_is_moving(ship: Dictionary) -> bool:
+	if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
+		return ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > ECONOMY.EPS
 	return not (ship["route"] as Array).is_empty() or ship.get("mining_mode", "idle") in ["outbound", "return"]
 
 func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
@@ -1396,7 +1398,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	elif int(ship.get("pursuit_target", -1)) >= 0:
 		status = "Pursuing"
 	elif bool(ship.get("holding", false)):
-		status = "Holding position"
+		status = "Moving to hold position" if ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > ECONOMY.EPS else "Holding position"
 	elif int(ship.get("combat_target", -1)) >= 0:
 		status = "Engaged"
 	ship_detail.text = "%s\n%s\nHP %.0f / %.0f" % [str(roster.get(owner, {}).get("name", "Player")), status, float(ship.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
@@ -1413,13 +1415,20 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	fleet_detail.visible = kind != "fighter"
 	fleet_cargo.get_parent().visible = cargo_capable
 	var fighters: Array[int] = _selected_fighters()
-	hold_button.visible = not fighters.is_empty()
+	hold_button.visible = not selected_units.is_empty()
+	hold_button.text = "Release hold [H]" if _any_selected_holding() else "Hold position [H]"
 	if not selected_units.is_empty():
 		fleet_detail.visible = true
 		fleet_title.text = "Fleet"
 		var miners: Array[int] = _selected_miners()
-		fleet_detail.text = "%d fighters · %d colony ships · %d miners" % [fighters.size(), selected_units.size() - fighters.size() - miners.size(), miners.size()]
-		fleet_detail.tooltip_text = "Shift-click toggles selection; right-click a field or rock to assign miners; right-click a system to restore autonomous mining. H holds fighters. Ctrl+1–9 assigns a group, 1–9 recalls it."
+		var colony_count: int = 0
+		var logistics_count: int = 0
+		for craft in state["ships"]:
+			if selected_units.has(int(craft["id"])):
+				colony_count += int(craft["kind"] == "colony_ship")
+				logistics_count += int(craft["kind"] == "ship")
+		fleet_detail.text = "%d fighters · %d colony ships · %d miners · %d logistics" % [fighters.size(), colony_count, miners.size(), logistics_count]
+		fleet_detail.tooltip_text = "Right-click empty space in the current sector to position and hold; right-click a system/field to travel or assign. Alt-right-click forces a local position. H holds/releases. Ctrl+1–9 assigns a group, 1–9 recalls it."
 		return
 	var total: int = 0
 	var traveling: int = 0
@@ -2938,7 +2947,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 	if additive and not selected_units.is_empty():
 		var valid: bool = false
 		for craft in state["ships"]:
-			if int(craft["id"]) == next_ship and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship", "miner"]:
+			if int(craft["id"]) == next_ship and int(craft["owner"]) == _me():
 				valid = true
 				break
 		if not valid:
@@ -2949,7 +2958,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 	if not additive:
 		selected_units.clear()
 	for craft in state["ships"]:
-		if int(craft["id"]) == selected_ship_id and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship", "miner"]:
+		if int(craft["id"]) == selected_ship_id and int(craft["owner"]) == _me():
 			if additive and selected_units.has(selected_ship_id):
 				selected_units.erase(selected_ship_id)
 				selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
@@ -2982,7 +2991,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	var poses: Dictionary = _ship_poses(state)
 	for craft in state.get("ships", []):
 		var id: int = int(craft["id"])
-		if int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship", "miner"] and poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
+		if int(craft["owner"]) == _me() and poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
 			selected_units.append(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 	follow_units = not selected_units.is_empty()
@@ -2992,7 +3001,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	selected_field = -1
 	_refresh()
 
-func _command_at(point: Vector2) -> void:
+func _command_at(point: Vector2, force_position: bool = false) -> void:
 	var state: Dictionary = _state()
 	if selected_units.is_empty() or state.is_empty():
 		return
@@ -3006,6 +3015,27 @@ func _command_at(point: Vector2) -> void:
 			distance = d
 	if node < 0:
 		return
+	var world: Vector2 = _world_point(point)
+	var system_count: int = state["planets"].size()
+	var hit_radius: float = 9.0
+	if node < system_count:
+		var radius: float = _planet_radius(node, state)
+		hit_radius = maxf(9.0, radius * (0.13 if zoom >= 2.0 and radius >= 18.0 else 0.48))
+	else:
+		hit_radius = maxf(9.0, float(state["map"]["fields"][node - system_count]["radius"]) * _fit() * zoom)
+	if force_position or distance > hit_radius * hit_radius:
+		if ECONOMY.sector_contains(graph, node, world):
+			var local: Array[int] = []
+			for craft in state["ships"]:
+				if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])) and ECONOMY.local_sector(graph, craft) == node and not bool(craft.get("retreating", false)):
+					local.append(int(craft["id"]))
+			if not local.is_empty():
+				session.call("request_local_position", local, node, world)
+				return
+		else:
+			return
+		if force_position:
+			return
 	var miners: Array[int] = _selected_miners()
 	if not miners.is_empty():
 		var field_index: int = node - state["planets"].size()
@@ -3052,10 +3082,15 @@ func _selected_fighters() -> Array[int]:
 			fighters.append(int(craft["id"]))
 	return fighters
 
+func _any_selected_holding() -> bool:
+	for craft in _state().get("ships", []):
+		if selected_units.has(int(craft["id"])) and bool(craft.get("holding", false)):
+			return true
+	return false
+
 func _hold_selected() -> void:
-	var fighters: Array[int] = _selected_fighters()
-	if not fighters.is_empty():
-		session.call("request_fighter_hold", fighters)
+	if not selected_units.is_empty():
+		session.call("request_unit_hold", selected_units, _any_selected_holding())
 
 func _map_input(event: InputEvent) -> void:
 	if match_menu.visible:
@@ -3069,7 +3104,7 @@ func _map_input(event: InputEvent) -> void:
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
-					_command_at(mouse.position)
+					_command_at(mouse.position, mouse.alt_pressed)
 			MOUSE_BUTTON_LEFT:
 				if mouse.pressed:
 					selecting_units = true
@@ -3686,9 +3721,15 @@ func _draw_map() -> void:
 	var order_points: Array = ECONOMY.military_graph(state)["points"]
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
-		if not selected_units.has(id) or not poses.has(id) or (bool(craft.get("holding", false)) and not bool(craft.get("retreating", false))):
+		if not selected_units.has(id) or not poses.has(id):
 			continue
 		var start: Vector2 = poses[id]["point"]
+		if bool(craft.get("holding", false)) and not bool(craft.get("retreating", false)):
+			if craft.has("hold_position"):
+				var target: Vector2 = _screen_point(craft["hold_position"])
+				map_canvas.draw_line(start, target, Color(HUD.ACCENT, 0.5), 1.5, true)
+				map_canvas.draw_arc(target, 7.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
+			continue
 		for node in craft["route"]:
 			var finish: Vector2 = _screen_point(order_points[int(node)])
 			map_canvas.draw_line(start, finish, Color(HUD.ACCENT, 0.5), 1.5, true)
@@ -3781,7 +3822,7 @@ func _draw_map() -> void:
 					var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * age * 2.5
 					var spark: Vector2 = engine - direction * (2.0 + age * 12.0) + side * offset
 					map_canvas.draw_circle(spark, maxf(0.75, (2.0 - age) * scale), Color(0.45, 0.85, 1.0, (1.0 - age) * 0.85), false)
-		if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
+		if ship.get("mining_mode", "") == "mining" and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
 				var emitter: Vector2 = point + direction * MINER_MUZZLE.x + side * sign * MINER_MUZZLE.y
