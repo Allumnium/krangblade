@@ -171,7 +171,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 	for id in ordered:
 		if bool(players[id].get("ai", false)):
 			ai_players.append(id)
-	var state: Dictionary = {"ai_players": ai_players, "ai_waves": {}, "operations": {}, "next_operation_id": 1, "next_ai": 0.0, "map": map_data, "planets": planets, "ships": [], "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "military": {}}
+	var state: Dictionary = {"ai_players": ai_players, "ai_waves": {}, "operations": {}, "next_operation_id": 1, "next_ai": 0.0, "map": map_data, "planets": planets, "ships": [], "ship_destructions": [], "next_destruction_id": 1, "teams": teams, "next_id": 1, "elapsed": 0.0, "fog_of_war": DEFAULT_FOG_OF_WAR, "explored": {}, "mining_policies": {}, "military": {}}
 	for index in range(planets.size()):
 		var system: Dictionary = planets[index]
 		system["planetless"] = not bool(system["home"]) and map_data.get("planetless", []).has(index)
@@ -2144,6 +2144,22 @@ static func _fleeing(other: Dictionary, away: Vector2, previous_target: int) -> 
 	var heading: Vector2 = other.get("heading", Vector2.ZERO)
 	return previous_target < 0 and not (other["route"] as Array).is_empty() and heading.dot(away.normalized()) > 0.25
 
+# Bounded, round-scoped combat event history travels in existing reliable
+# snapshots. Never infer a kill from a disappearing colony or eliminated fleet.
+static func _record_ship_destruction(state: Dictionary, graph: Dictionary, ship: Dictionary) -> void:
+	var sequence: int = int(state.get("next_destruction_id", 1))
+	state["next_destruction_id"] = sequence + 1
+	var cargo: Dictionary = ship.get("cargo", {})
+	var materials: Array[String] = []
+	for resource in RESOURCES + [ANTIMATTER]:
+		if float(cargo.get(resource, 0.0)) > EPS:
+			materials.append(resource)
+	var events: Array = state.get("ship_destructions", [])
+	events.append({"sequence": sequence, "ship": int(ship["id"]), "kind": str(ship["kind"]), "owner": int(ship["owner"]), "position": combat_position(state, graph, ship), "heading": ship.get("heading", Vector2.UP), "materials": materials})
+	if events.size() > 128:
+		events.pop_front()
+	state["ship_destructions"] = events
+
 static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	var ships: Array = state["ships"]
 	var positions: Dictionary = {}
@@ -2317,6 +2333,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		if damage.has(id):
 			ship["hp"] = maxf(0.0, float(ship.get("hp", SHIP_HP)) - float(damage[id]))
 			if float(ship["hp"]) <= EPS:
+				_record_ship_destruction(state, graph, ship)
 				ships.erase(ship)
 	# Fixed batteries and shipyards participate in simultaneous damage.
 	for id in pds_targets:

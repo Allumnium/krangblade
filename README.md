@@ -219,3 +219,5 @@ Version 0.24.1: each completed shipyard and purchased Orbital Eco-Housing module
 Version 0.24.2: smaller varied maps, at most eight systems per roster member; irregular spacing across all layouts, small separated hex rings and compact radial rings. Star counts exclude asteroid fields. Reduced hull rendering scale without changing movement/combat. Planetary defenses automatically occupy the first free planet, always using the same 540 Metals/120 Plastics/60 Textiles/60 Organics/60 Tech recipe and existing battle stats.
 
 Version 0.24.3: refined fighter, mining and colony hulls with distinct silhouettes, shaded structural panels, cockpits, emitters, habitat modules and engines. Fine detail renders at useful zoom levels only. The logistics freighter and its cargo display are unchanged.
+
+Version 0.24.4: combat destruction produces colored hull-panel particles and tumbling detached outline segments. Clients consume the same bounded combat event history without exploding ships that settle colonies. Fighter fire originates at the nose and mining beams at both arm tips. Visual only; logistics hull art and combat economics are unchanged.

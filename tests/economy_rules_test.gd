@@ -794,6 +794,7 @@ func _initialize() -> void:
 	assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION + ECON.ORBITAL_HOUSING_POPULATION))
 	assert(int(colonization["planets"][3]["levels"]["Organics"]) == 1)
 	assert(colonization["ships"].size() == 1)
+	assert(colonization["ship_destructions"].is_empty())
 	for i in range(20):
 		if int(loser["at"]) == loser_home and loser["route"].is_empty():
 			break
@@ -876,9 +877,14 @@ func _initialize() -> void:
 	for shot in range(5):
 		ECON._combat(duel, duel_graph, 1.0)
 	assert(duel["ships"].size() == 2)
+	assert(duel["ship_destructions"].is_empty())
 	assert(is_equal_approx(float(duel["ships"][0]["hp"]), 10.0))
 	ECON._combat(duel, duel_graph, 1.0)
 	assert(duel["ships"].is_empty())
+	assert(duel["ship_destructions"].size() == 2)
+	assert(duel["ship_destructions"][0]["sequence"] == 1 and duel["ship_destructions"][1]["sequence"] == 2)
+	assert(duel["ship_destructions"][0]["ship"] == 1 and duel["ship_destructions"][0]["kind"] == "fighter")
+	assert(duel["ship_destructions"][0]["position"] == duel_graph["points"][0])
 	duel["ships"] = [{"id": 1, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0}, {"id": 2, "owner": 2, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0}]
 	ECON._combat(duel, duel_graph, 1.0)
 	assert(float(duel["ships"][0]["hp"]) == 100.0 and int(duel["ships"][0]["combat_target"]) == -1)

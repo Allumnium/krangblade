@@ -55,6 +55,13 @@ var drag_button: int = 0
 var ship_visuals: Dictionary = {}
 var ship_offsets: Dictionary = {}
 const SHIP_WORLD_SCALE: float = 1.5
+const FIGHTER_MUZZLE: float = 12.0
+const MINER_MUZZLE: Vector2 = Vector2(10.0, 3.75)
+const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(14, 4), Vector2(10, 8), Vector2(-13, 8), Vector2(-13, -8), Vector2(10, -8), Vector2(14, -4)]
+const DESTRUCTION_LIFETIME: float = 1.35
+const MAX_VISIBLE_DESTRUCTIONS: int = 32
+var last_destruction_sequence: int = 0
+var ship_destructions: Array = []
 # Authored top-down silhouette and interior panel geometry in hull-local
 # coordinates (forward, lateral). Logistics keeps its original cargo bays.
 const HULL_OUTLINES: Dictionary = {
@@ -3113,6 +3120,10 @@ func _process(delta: float) -> void:
 	var state: Dictionary = _state()
 	if not state.is_empty():
 		_ship_poses(state, delta)
+		_sync_destruction_effects(state)
+	else:
+		ship_destructions.clear()
+		last_destruction_sequence = 0
 	if is_instance_valid(map_canvas):
 		_position_territory()
 		map_canvas.queue_redraw()
@@ -3124,6 +3135,91 @@ func _orbit_offset(slot: int, radius: float, time: float) -> Vector2:
 
 func _orbit_direction(offset: Vector2) -> Vector2:
 	return Vector2(-offset.y, offset.x).normalized()
+
+func _sync_destruction_effects(state: Dictionary) -> void:
+	while not ship_destructions.is_empty() and visual_clock - float(ship_destructions[0]["started"]) >= DESTRUCTION_LIFETIME:
+		ship_destructions.pop_front()
+	for event in state.get("ship_destructions", []):
+		var sequence: int = int(event["sequence"])
+		if sequence <= last_destruction_sequence:
+			continue
+		last_destruction_sequence = sequence
+		var kind: String = event["kind"]
+		var heading: Vector2 = event["heading"]
+		var angle: float = heading.angle() if not heading.is_zero_approx() else -PI * 0.5
+		var hull: Color = Color("#788ca0")
+		match kind:
+			"fighter": hull = Color("#f2b57e")
+			"miner": hull = Color("#d8e58b")
+			"colony_ship": hull = Color("#c7a4ff")
+		var rng := RandomNumberGenerator.new()
+		rng.seed = sequence * 7919 + int(event["ship"])
+		var vertices: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE)
+		var panels: Array = HULL_PANELS.get(kind, [])
+		var edge_color: Color = _empire_color(int(event["owner"])).lightened(0.2)
+		var fragments: Array = []
+		for index in range(vertices.size()):
+			var a: Vector2 = vertices[index]
+			var b: Vector2 = vertices[(index + 1) % vertices.size()]
+			var center: Vector2 = (a + b) * 0.5
+			var velocity: Vector2 = center.normalized().rotated(rng.randf_range(-0.45, 0.45)) * rng.randf_range(12.0, 30.0)
+			fragments.append({"offset": center, "half": (b - a) * 0.5, "velocity": velocity, "spin": rng.randf_range(-5.0, 5.0), "color": edge_color, "hull": hull})
+		var sparks: Array = []
+		# Emit from the actual interior panels rather than a generic fire palette.
+		for panel in panels:
+			var center: Vector2 = Vector2.ZERO
+			var polygon: Array = panel[1]
+			for vertex in polygon:
+				center += vertex
+			center /= float(polygon.size())
+			for index in range(2):
+				sparks.append(_destruction_spark(center, panel[0], rng))
+		if panels.is_empty():
+			# The unchanged logistics ship has dark cargo wells and resource-colored bays.
+			for index in range(8):
+				sparks.append(_destruction_spark(Vector2(rng.randf_range(-8.0, 8.0), rng.randf_range(-5.0, 5.0)), Color("#182333"), rng))
+			for resource in event.get("materials", []):
+				for index in range(3):
+					sparks.append(_destruction_spark(Vector2(rng.randf_range(-8.0, 8.0), rng.randf_range(-5.0, 5.0)), HUD.COLORS.get(resource, hull), rng))
+		for index in range(5):
+			sparks.append(_destruction_spark(Vector2.ZERO, hull, rng))
+		ship_destructions.append({"position": event["position"], "angle": angle, "started": visual_clock, "fragments": fragments, "sparks": sparks})
+		if ship_destructions.size() > MAX_VISIBLE_DESTRUCTIONS:
+			ship_destructions.pop_front()
+
+func _destruction_spark(offset: Vector2, color: Color, rng: RandomNumberGenerator) -> Dictionary:
+	var direction: Vector2 = Vector2.from_angle(rng.randf_range(0.0, TAU))
+	return {"offset": offset, "velocity": direction * rng.randf_range(18.0, 42.0), "size": rng.randf_range(0.65, 1.65), "color": color}
+
+func _draw_ship_destructions(viewport_bounds: Rect2) -> void:
+	var scale: float = maxf(0.2, _ship_scale())
+	for effect in ship_destructions:
+		var point: Vector2 = _screen_point(effect["position"])
+		if not viewport_bounds.grow(80.0).has_point(point):
+			continue
+		var age: float = visual_clock - float(effect["started"])
+		var fade: float = clampf(1.0 - age / DESTRUCTION_LIFETIME, 0.0, 1.0)
+		if fade <= 0.0:
+			continue
+		# Local forward and lateral match the original hull transform.
+		var forward: Vector2 = Vector2.from_angle(float(effect["angle"])) * scale
+		var lateral: Vector2 = forward.orthogonal()
+		var travel: float = (1.0 - exp(-2.2 * age)) / 2.2
+		for particle in effect["sparks"]:
+			var offset: Vector2 = particle["offset"] + particle["velocity"] * travel
+			var position: Vector2 = point + forward * offset.x + lateral * offset.y
+			map_canvas.draw_circle(position, maxf(0.65, float(particle["size"]) * scale * (0.55 + fade * 0.45)), Color(particle["color"], fade))
+		# Each original outline segment detaches, drifts and tumbles.
+		for fragment in effect["fragments"]:
+			var offset: Vector2 = fragment["offset"] + fragment["velocity"] * travel
+			var half: Vector2 = (fragment["half"] as Vector2).rotated(float(fragment["spin"]) * age)
+			var center: Vector2 = point + forward * offset.x + lateral * offset.y
+			var edge: Vector2 = forward * half.x + lateral * half.y
+			map_canvas.draw_line(center - edge, center + edge, Color(fragment["hull"], fade), maxf(1.0, 2.0 * scale), true)
+			map_canvas.draw_line(center - edge, center + edge, Color(fragment["color"], fade), maxf(0.6, scale), true)
+
+func _fighter_beam_origin(pose: Dictionary) -> Vector2:
+	return (pose["point"] as Vector2) + (pose["direction"] as Vector2) * FIGHTER_MUZZLE * _ship_scale()
 
 func _hull_polygon(origin: Vector2, forward: Vector2, lateral: Vector2, vertices: Array) -> PackedVector2Array:
 	var polygon := PackedVector2Array()
@@ -3418,7 +3514,7 @@ func _draw_map() -> void:
 				var index: int = floori(float(encoded) / 3.0)
 				var slot: int = posmod(encoded, 3)
 				if slot < state["planets"][index]["yards"].size():
-					map_canvas.draw_line(poses[shooter]["point"], _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), Color("#ffbf96"), 1.5, true)
+					map_canvas.draw_line(_fighter_beam_origin(poses[shooter]), _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), Color("#ffbf96"), 1.5, true)
 			else:
 				var pds_index: int = posmod(encoded - count * 3, count)
 				var pds_slot: int = floori(float(encoded - count * 3) / float(count))
@@ -3427,10 +3523,10 @@ func _draw_map() -> void:
 					var pds_radius: float = _planet_radius(pds_index, state)
 					if pds_index == selected and zoom >= 2.0 and pds_radius >= 18.0:
 						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, game_visual_clock)
-					map_canvas.draw_line(poses[shooter]["point"], endpoint, Color("#ffbf96"), 1.5, true)
+					map_canvas.draw_line(_fighter_beam_origin(poses[shooter]), endpoint, Color("#ffbf96"), 1.5, true)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
-			map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ff6f6060"), 4.0, true)
-			map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ffbf96"), 1.0, true)
+			map_canvas.draw_line(_fighter_beam_origin(poses[shooter]), poses[target]["point"], Color("#ff6f6060"), 4.0, true)
+			map_canvas.draw_line(_fighter_beam_origin(poses[shooter]), poses[target]["point"], Color("#ffbf96"), 1.0, true)
 	for ship in state["ships"]:
 		if not poses.has(int(ship["id"])):
 			continue
@@ -3461,7 +3557,7 @@ func _draw_map() -> void:
 			point - direction * 3, point - direction * 6 - side * 5])
 		if ship["kind"] == "ship":
 			hull = Color("#788ca0")
-			shape = PackedVector2Array([point + direction * 14 + side * 4, point + direction * 10 + side * 8, point - direction * 13 + side * 8, point - direction * 13 - side * 8, point + direction * 10 - side * 8, point + direction * 14 - side * 4])
+			shape = _hull_polygon(point, direction, side, FREIGHTER_OUTLINE)
 		elif HULL_OUTLINES.has(ship["kind"]):
 			shape = _hull_polygon(point, direction, side, HULL_OUTLINES[ship["kind"]])
 		var physical: Vector2 = ship.get("position", Vector2.ZERO)
@@ -3478,7 +3574,7 @@ func _draw_map() -> void:
 		if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and viewport_bounds.grow(32.0).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
-				var emitter: Vector2 = point + direction * 7.0 + side * sign * 3.0
+				var emitter: Vector2 = point + direction * MINER_MUZZLE.x + side * sign * MINER_MUZZLE.y
 				var impact: Vector2 = rock + side * sign * 2.0
 				map_canvas.draw_line(emitter, impact, Color("#9af6b8"), maxf(0.8, scale), true)
 				for k in range(3 if scale >= 1.0 else 1):
@@ -3518,6 +3614,7 @@ func _draw_map() -> void:
 			var bar_pos: Vector2 = point + Vector2(-10.0, 13.0)
 			map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0, 3.0)), Color("#182333"))
 			map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0 * hp, 3.0)), Color("#e9a276"))
+	_draw_ship_destructions(viewport_bounds)
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
 		map_canvas.draw_rect(rect, Color(HUD.ACCENT, 0.12))
