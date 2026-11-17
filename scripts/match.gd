@@ -870,7 +870,7 @@ func _build_economy_cards(parent: Container) -> void:
 		section.get_child(0).hide()
 		var disclosure: Dictionary = _make_disclosure(section, str(definition["name"]))
 		var card: VBoxContainer = disclosure["body"]
-		var effect: Label = _label("Expands farm capacity" if resource == "Organics" else "Expands %s production" % resource, 12)
+		var effect: Label = _label("", 12)
 		card.add_child(effect)
 		var detail: Label = _label("", 12)
 		card.add_child(detail)
@@ -883,17 +883,57 @@ func _build_economy_cards(parent: Container) -> void:
 		disclosure["cancel"] = _card_cancel(disclosure, _cancel_kind.bind("economy_building", resource), progress)
 		disclosure["repeat"] = _repeat_button(disclosure["actions"], "economy_building:" + resource)
 		HUD.action(button)
-		disclosure.merge({"button": button, "detail": detail, "costs": _cost_grid(disclosure["summary"])})
+		disclosure.merge({"button": button, "detail": detail, "effect": effect, "costs": _cost_grid(disclosure["summary"])})
 		economy_cards[resource] = disclosure
+
+# Project exactly one completed building without touching authoritative state.
+# Only the buildings dictionary is changed; all other inputs remain current.
+func _economy_building_effect(p: Dictionary, resource: String) -> String:
+	var preview: Dictionary = p.duplicate()
+	var buildings: Dictionary = p.get("buildings", {}).duplicate()
+	buildings[resource] = int(buildings.get(resource, 0)) + 1
+	preview["buildings"] = buildings
+	var before_multiplier: float = ECONOMY.building_multiplier(p, resource)
+	var after_multiplier: float = ECONOMY.building_multiplier(preview, resource)
+	var lines: PackedStringArray = ["Building output multiplier: %.2f× → %.2f× (+%.2f× baseline)" % [before_multiplier, after_multiplier, ECONOMY.BUILDING_BONUS]]
+	if not ECONOMY.production_available(p, resource):
+		lines.append("Unavailable: no local deposit")
+		return "\n".join(lines)
+	var before: float = ECONOMY.rate(p, resource)
+	var after: float = ECONOMY.rate(preview, resource)
+	var demand: float = ECONOMY.consumption(p, resource)
+	var delta: float = after - before
+	lines.append("Production: %.2f → %.2f t/yr (%+.2f)" % [before, after, delta])
+	lines.append("Net after %.2f t/yr demand: %+.2f → %+.2f t/yr" % [demand, before - demand, after - demand])
+	if ECONOMY.production_level(p, resource) == 0 and ECONOMY.production_level(preview, resource) > 0:
+		lines.append("Unlocks local production (level 0 → 1)")
+	if resource in ["Plastics", "Textiles", "Tech"]:
+		var capacity_before: float = ECONOMY.INDUSTRIAL_POPULATION_PER_LEVEL * (ECONOMY.production_level(p, resource) + int(p.get("buildings", {}).get(resource, 0)))
+		var capacity_after: float = ECONOMY.INDUSTRIAL_POPULATION_PER_LEVEL * (ECONOMY.production_level(preview, resource) + int(buildings[resource]))
+		lines.append("Productive population: %s → %s max" % [_compact_amount(capacity_before), _compact_amount(capacity_after)])
+	elif resource == "Organics":
+		lines.append("Maximum farm output: %.2f → %.2f t/yr" % [ECONOMY.farm_potential(p), ECONOMY.farm_potential(preview)])
+		lines.append("Food capacity: %s → %s people" % [_compact_amount(ECONOMY.population_capacity(p)), _compact_amount(ECONOMY.population_capacity(preview))])
+	elif ECONOMY.MINED_RESOURCES.has(resource):
+		lines.append("Local extraction limit: %.0f t/yr" % ECONOMY.PLANET_MINING_LIMIT)
+		if after >= ECONOMY.PLANET_MINING_LIMIT - ECONOMY.EPS:
+			lines.append("Output capped at the extraction limit")
+	lines.append("At current population and modifiers; before storage limits.")
+	return "\n".join(lines)
 
 func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 	var habitat_level: int = int(p.get("habitation_level", 0))
 	_disclosure_title(habitation_card, "Habitation technology · Lv %d" % habitat_level)
 	var penalty: float = -100.0 * ECONOMY.overpopulation_penalty(p)
 	var next_penalty: float = -100.0 * ECONOMY.overpopulation_penalty(p, 2.0)
-	habitation_card["detail"].text = "Overpopulation penalty %+.1f%%" % penalty
+	habitation_card["detail"].text = "Overpopulation penalty: %+.2f%%" % penalty
+	var habitat_capacity: float = ECONOMY.habitation_capacity(p)
 	if habitat_level < 3:
-		habitation_card["detail"].text += " → %+.1f%%" % next_penalty
+		habitation_card["detail"].text += " → %+.2f%% (%+.2f pp)" % [next_penalty, next_penalty - penalty]
+		habitation_card["detail"].text += "\nHabitation capacity: %s → %s people (2×)" % [_compact_amount(habitat_capacity), _compact_amount(habitat_capacity * 2.0)]
+	else:
+		habitation_card["detail"].text += "\nHabitation capacity: %s people · Max level" % _compact_amount(habitat_capacity)
+	habitation_card["detail"].text += "\nPenalty applies to positive population growth, at current population."
 	_sync_repeat(habitation_card["repeat"], p, "habitation", owned and habitat_level < 3)
 	habitation_card["button"].disabled = not owned or not ECONOMY.habitation_available(p)
 	_set_timed_action(habitation_card["button"], "Max" if habitat_level >= 3 else "Upgrade", -1.0 if habitat_level >= 3 else 0.0)
@@ -904,11 +944,13 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 	_sync_repeat(warehouse_card["repeat"], p, "warehouse", owned and level < 3)
 	warehouse_button.disabled = not owned or not ECONOMY.warehouse_available(p)
 	_set_timed_action(warehouse_button, "Max" if level >= 3 else "Upgrade", -1.0 if level >= 3 else 0.0)
-	var warehouse_detail: String = "%s / resource" % _tons(ECONOMY.storage_capacity(p), 0)
+	var current_capacity: float = ECONOMY.storage_capacity(p)
+	var warehouse_detail: String = "Storage per resource: %s" % _tons(current_capacity, 0)
 	if level < 3:
-		warehouse_detail += " → %s" % _tons(float(ECONOMY.WAREHOUSE_CAPACITIES[level + 1]), 0)
-		if float(p["population"]) + ECONOMY.EPS < float(ECONOMY.WAREHOUSE_POPULATIONS[level]):
-			warehouse_detail += "\nRequires %s population" % _compact_amount(float(ECONOMY.WAREHOUSE_POPULATIONS[level]))
+		var next_capacity: float = float(ECONOMY.WAREHOUSE_CAPACITIES[level + 1])
+		warehouse_detail += " → %s (+%s)" % [_tons(next_capacity, 0), _tons(next_capacity - current_capacity, 0)]
+		warehouse_detail += "\nCapacity: %.1f× current" % (next_capacity / current_capacity)
+		warehouse_detail += "\nRequired population: %s" % _compact_amount(float(ECONOMY.WAREHOUSE_POPULATIONS[level]))
 		if not ECONOMY.affordable(p, ECONOMY.WAREHOUSE_COSTS[level]):
 			warehouse_detail += "\nInsufficient local materials"
 		_show_cost(warehouse_card["costs"], ECONOMY.WAREHOUSE_COSTS[level])
@@ -920,6 +962,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 		var card: Dictionary = economy_cards[resource]
 		var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
 		var installed: int = int(p.get("buildings", {}).get(resource, 0))
+		card["effect"].text = _economy_building_effect(p, resource)
 		var job: Dictionary = {}
 		for item in p["queue"]:
 			if item["kind"] == "economy_building" and item["target"] == resource:
@@ -1011,7 +1054,7 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	var building: bool = not job.is_empty() and int(job["target"]) == selected_body
 	var cost: Dictionary = ECONOMY._cost("pds", selected_body + 1)
 	var installed: bool = not battery.is_empty()
-	body_defense.text = "%.0f damage / shot · Range %.0f · Fires once/yr" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
+	body_defense.text = "Battery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
 	body_status.text = "Operational · %.0f / %.0f HP" % [float(battery.get("hp", 0.0)), ECONOMY.PDS_HP] if installed else ("Under construction" if building else "Undefended")
 	if not installed and not building:
 		if not owned:
@@ -1114,7 +1157,7 @@ func _refresh_pds(planet: Dictionary, owned: bool) -> void:
 		elif not ECONOMY.affordable(planet, cost):
 			status_text += " · Insufficient local materials"
 	pds_card["status"].text = status_text
-	pds_card["detail"].text = "One battery per planet · %.0f damage / shot · Range %.0f · Fires once/yr" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
+	pds_card["detail"].text = "One battery per planet\nBattery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f\nSystem defenses: %d%s / %d" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE, count, "" if installed else " → %d" % (count + 1), limit]
 	pds_card["costs"].visible = not installed
 	if building:
 		progress.value = 100.0 * float(job["progress"]) / float(job["work"])
