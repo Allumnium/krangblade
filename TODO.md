@@ -68,3 +68,5 @@ See THOUGHTS.md for active observations and THOUGHTS_ARCHIVE.md for resolved or 
 - [ ] Visually playtest v0.25.2 finer Grid/Hex Grid at all roster sizes; compare cell recognition, preview legibility, alternate paths, ordinary mining access and travel pacing. Check seed rerolls and balance on real matches.
 
 - [ ] Manually verify v0.25.3 foreign-only and mixed-empire box selections, Shift-add/toggle, group recall, selection loss on destruction, fleet cargo totals and camera tracking. Confirm commands and hold/release affect only the owned subset. Check 2850 A.D. and the rightmost Menu at constrained HUD widths.
+
+- [ ] Playtest v0.26.0 salvage after mixed fleet battles: debris motion and zoom readability, group claims, competing empires, partial tractor collection, full depots, cancellation, lane delivery, cargo racks and unload controls. Evaluate recovery rates and long-match debris accumulation before changing balance or adding automation.

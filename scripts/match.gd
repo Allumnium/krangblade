@@ -168,6 +168,7 @@ var fleet_overview: VBoxContainer
 var fleet_title: Label
 var fleet_detail: Label
 var hold_button: Button
+var unload_button: Button
 var fleet_cargo: VBoxContainer
 var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
@@ -439,6 +440,7 @@ func _build_ui() -> void:
 	hold_button.text = "Hold position [H]"
 	hold_button.pressed.connect(_hold_selected)
 	fleet_overview.add_child(hold_button)
+	unload_button = _button("Unload cargo [U]", _unload_selected, fleet_overview)
 	fleet_cargo = HUD.section(fleet_overview, "Cargo")
 	_build_cargo_rows(fleet_cargo, fleet_cargo_labels)
 	mining_controls = HUD.section(fleet_overview, "Mine")
@@ -754,8 +756,8 @@ func _ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
-		"colony_ship": details = "Settles a neutral system · %.0f settlers" % ECONOMY.COLONY_POPULATION
-		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
+		"colony_ship": details = "Settles a neutral system · %.0f settlers · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_CAPACITY]
+		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f · Cargo %.0f t" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.FIGHTER_CAPACITY]
 		"miner": details = "Extracts asteroids · Cargo %.0f t · Mining %.0f t/yr" % [ECONOMY.MINER_CAPACITY, ECONOMY.MINER_RATE]
 	return "%s\nHP %.0f · Speed %.0f/yr · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
 
@@ -1355,6 +1357,7 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	fleet_title.text = "Mining"
 	fleet_detail.hide()
 	hold_button.hide()
+	unload_button.hide()
 	fleet_cargo.get_parent().hide()
 	mining_controls.get_parent().show()
 	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field)
@@ -1396,43 +1399,51 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Moving to hold position" if ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > ECONOMY.EPS else "Holding position"
 	elif int(ship.get("combat_target", -1)) >= 0:
 		status = "Engaged"
+	if int(ship.get("salvage_target", -1)) >= 0:
+		status = "Collecting salvage" if bool(ship.get("tractor_active", false)) else "Approaching salvage"
+	elif bool(ship.get("salvage_delivery", false)):
+		status = "Delivering salvage" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for salvage storage"
 	ship_detail.text = "%s\n%s\nHP %.0f / %.0f" % [str(roster.get(owner, {}).get("name", "Player")), status, float(ship.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
 	ship_detail.tooltip_text = ""
-	var cargo_capable: bool = kind in ["ship", "miner"]
-	ship_cargo.get_parent().visible = cargo_capable
-	if cargo_capable:
-		var cargo_capacity: float = ECONOMY.CARGO_CAPACITY if kind == "ship" else ECONOMY.MINER_CAPACITY
-		ship_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total(ship), cargo_capacity]
-		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
-			ship_cargo_labels[resource].text = _tons(float(ship["cargo"].get(resource, 0.0)))
-			ship_cargo_labels[resource].get_parent().visible = kind == "miner" if resource == ECONOMY.ANTIMATTER else kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
+	ship_cargo.get_parent().show()
+	ship_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total(ship), ECONOMY.cargo_capacity(kind)]
+	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
+		var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
+		ship_cargo_labels[resource].text = _tons(amount)
+		ship_cargo_labels[resource].get_parent().visible = true
 	fleet_title.text = "Fleet"
 	fleet_detail.visible = true
 	var counts: Dictionary = {"fighter": 0, "colony_ship": 0, "miner": 0, "ship": 0}
 	var owned_count: int = 0
+	var loaded_owned: bool = false
+	var capacity: float = 0.0
 	var cargo: Dictionary = ECONOMY.empty_stock()
 	for craft in state["ships"]:
 		if not selected_units.has(int(craft["id"])):
 			continue
 		counts[craft["kind"]] += 1
 		owned_count += int(int(craft["owner"]) == _me())
+		loaded_owned = loaded_owned or (int(craft["owner"]) == _me() and ECONOMY._cargo_total(craft) > ECONOMY.EPS)
+		capacity += ECONOMY.cargo_capacity(str(craft["kind"]))
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft.get("cargo", {}).get(resource, 0.0))
 	hold_button.visible = owned_count > 0
+	unload_button.visible = loaded_owned
 	hold_button.text = "Release hold [H]" if _any_selected_holding() else "Hold position [H]"
 	fleet_detail.text = "%d fighters · %d colony ships · %d miners · %d logistics" % [counts["fighter"], counts["colony_ship"], counts["miner"], counts["ship"]]
 	if owned_count < selected_units.size():
 		fleet_detail.text += "\n%d owned · %d foreign" % [owned_count, selected_units.size() - owned_count]
 	fleet_detail.tooltip_text = "Foreign ships are read-only. Commands affect only your own ships. Ctrl+1–9 assigns a selection group, 1–9 recalls it."
 	if owned_count > 0:
-		fleet_detail.tooltip_text += " Right-click empty space in the current sector to position and hold; right-click a system/field to travel or assign. Alt-right-click forces a local position. H holds/releases."
-	fleet_cargo.get_parent().visible = counts["ship"] > 0 or counts["miner"] > 0
+		fleet_detail.tooltip_text += " Right-click floating salvage to claim nearby resources; U unloads cargo. Right-click empty space to position and hold; Alt-right-click forces a local position. H holds/releases."
+	fleet_cargo.get_parent().show()
+	fleet_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total({"cargo": cargo}), capacity]
 	if fleet_cargo.get_parent().visible:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			var amount: float = float(cargo.get(resource, 0.0))
 			fleet_cargo_labels[resource].text = _tons(amount)
 			fleet_cargo_labels[resource].tooltip_text = "%.1f t" % amount
-			fleet_cargo_labels[resource].get_parent().visible = counts["miner"] > 0 if resource == ECONOMY.ANTIMATTER else counts["ship"] > 0 or ECONOMY.MINED_RESOURCES.has(resource)
+			fleet_cargo_labels[resource].get_parent().visible = true
 
 func _build_lens_buttons() -> void:
 	var lens_row := HBoxContainer.new()
@@ -1877,7 +1888,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 		if int(p["owner"]) != _me():
 			continue
 		var parts: PackedStringArray = []
-		var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
+		var categories: Array = ["Production", "Population", "Mining deliveries", "Salvage deliveries", "Imports", "Exports"]
 		for category in p.get("flows", {}):
 			if not categories.has(category):
 				categories.append(category)
@@ -1904,7 +1915,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 	var potential: float = ECONOMY.rate(p, resource)
 	var demand: float = ECONOMY.consumption(p, resource)
 	var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Theoretical: %.2f production − %.2f demand = %+.2f t/yr" % [potential, demand, potential - demand], "Latest actual flows (t/yr)"]
-	var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
+	var categories: Array = ["Production", "Population", "Mining deliveries", "Salvage deliveries", "Imports", "Exports"]
 	for category in p.get("flows", {}):
 		if not categories.has(category):
 			categories.append(category)
@@ -2978,8 +2989,14 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 
 func _command_at(point: Vector2, force_position: bool = false) -> void:
 	var state: Dictionary = _state()
-	if state.is_empty() or _selected_owned_units(state).is_empty():
+	var owned: Array[int] = _selected_owned_units(state)
+	if state.is_empty() or owned.is_empty():
 		return
+	if not force_position:
+		var wreck: int = _salvage_hit(state, point)
+		if wreck >= 0:
+			session.call("request_salvage", owned, wreck)
+			return
 	var node: int = -1
 	var distance: float = INF
 	var graph: Dictionary = ECONOMY.military_graph(state)
@@ -3067,6 +3084,11 @@ func _hold_selected() -> void:
 	var owned: Array[int] = _selected_owned_units(_state())
 	if not owned.is_empty():
 		session.call("request_unit_hold", owned, _any_selected_holding())
+
+func _unload_selected() -> void:
+	var owned: Array[int] = _selected_owned_units(_state())
+	if not owned.is_empty():
+		session.call("request_unload_cargo", owned)
 
 func _map_input(event: InputEvent) -> void:
 	if match_menu.visible:
@@ -3193,6 +3215,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_cycle_owned_system(-1 if key == KEY_Q else 1)
 	elif key == KEY_H:
 		_hold_selected()
+	elif key == KEY_U:
+		_unload_selected()
 	elif key >= KEY_1 and key <= KEY_9:
 		if event.ctrl_pressed:
 			control_groups[key] = selected_units.duplicate()
@@ -3596,6 +3620,85 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 				map_canvas.draw_colored_polygon(hull, Color(tint.lightened(0.4), (u - 0.5) * 2.0))
 			break
 
+func _salvage_radius(pile: Dictionary) -> float:
+	return maxf(3.0, sqrt(float(pile["amount"])) * 1.6 * _fit() * zoom)
+
+func _salvage_hit(state: Dictionary, point: Vector2) -> int:
+	var hit: int = -1
+	var nearest: float = INF
+	for pile in state.get("salvage", {}).values():
+		var distance: float = point.distance_to(_screen_point(pile["position"]))
+		if distance <= maxf(7.0, _salvage_radius(pile) + 3.0) and distance < nearest:
+			nearest = distance
+			hit = int(pile["id"])
+	return hit
+
+func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2, font: Font) -> void:
+	if state.get("salvage", {}).is_empty():
+		return
+	var hovered: int = _salvage_hit(state, map_canvas.get_local_mouse_position())
+	var ships_by_id: Dictionary = {}
+	for ship in state["ships"]:
+		ships_by_id[int(ship["id"])] = ship
+	for pile in state.get("salvage", {}).values():
+		var point: Vector2 = _screen_point(pile["position"])
+		var radius: float = _salvage_radius(pile)
+		if not viewport_bounds.grow(radius + 24.0).has_point(point):
+			continue
+		var tint: Color = HUD.COLORS[pile["resource"]]
+		var rotation: float = float(pile["id"]) * 2.4 + game_visual_clock * 0.08
+		var axis: Vector2 = Vector2.from_angle(rotation) * radius
+		var side: Vector2 = axis.orthogonal() * 0.68
+		var shape := PackedVector2Array([point + axis, point + side, point - axis, point - side])
+		map_canvas.draw_colored_polygon(shape, tint.darkened(0.25))
+		shape.append(shape[0])
+		map_canvas.draw_polyline(shape, tint.lightened(0.3), 1.0, true)
+		var claimant: int = int(pile["claim"])
+		if ships_by_id.has(claimant) and poses.has(claimant):
+			var craft: Dictionary = ships_by_id[claimant]
+			var color: Color = _empire_color(int(craft["owner"]))
+			map_canvas.draw_arc(point, radius + 3.0, 0.0, TAU, 20, Color(color, 0.8), 1.0, true)
+			if bool(craft.get("tractor_active", false)):
+				var start: Vector2 = poses[claimant]["point"]
+				map_canvas.draw_line(start, point, Color(color, 0.22), 5.0, true)
+				map_canvas.draw_line(start, point, color.lightened(0.45), 1.5, true)
+				var pulse: float = fposmod(visual_clock * 1.8, 1.0)
+				map_canvas.draw_circle(point.lerp(start, pulse), 2.0, tint.lightened(0.5))
+			elif selected_units.has(claimant):
+				map_canvas.draw_line(poses[claimant]["point"], point, Color(color, 0.45), 1.0, true)
+		if int(pile["id"]) == hovered:
+			map_canvas.draw_string(font, point + Vector2(9, -9), "%s · %.1f t%s" % [pile["resource"], float(pile["amount"]), " · Claimed" if claimant >= 0 else ""], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint.lightened(0.35))
+
+# All bays represent equal tonnage, with partial, resource-colored fills.
+# Smaller combat holds get fewer bays, larger mining holds get more.
+func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, lateral: Vector2) -> void:
+	var kind: String = str(ship["kind"])
+	var capacity: float = ECONOMY.cargo_capacity(kind)
+	var count: int = ceili(capacity / ECONOMY.FREIGHTER_BAY_CAPACITY)
+	var bays: Array = ECONOMY.cargo_bays(ship.get("cargo", {}), capacity, count)
+	var per_bay: float = capacity / float(count)
+	for k in range(count):
+		var center: Vector2
+		var half_length: float = 1.05
+		var half_width: float = 1.35
+		if kind == "miner":
+			center = Vector2(5.7 - float(k % 7) * 1.9, -4.8 if k < 7 else 4.8)
+			half_length = 0.85
+		elif kind == "colony_ship":
+			center = Vector2(4.0 - float(k) * 2.65, 0.0)
+			half_length = 1.15
+		else:
+			center = [Vector2(-4.4, 4.7), Vector2(-4.4, -4.7), Vector2(-7.0, 0.0)][k]
+		var module: Vector2 = point + forward * center.x + lateral * center.y
+		var corners := PackedVector2Array([module + forward * half_length + lateral * half_width, module - forward * half_length + lateral * half_width, module - forward * half_length - lateral * half_width, module + forward * half_length - lateral * half_width])
+		map_canvas.draw_colored_polygon(corners, Color("#182333"))
+		var start: float = -half_length
+		for segment in bays[k]:
+			var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / per_bay)
+			var fill := PackedVector2Array([module + forward * end + lateral * half_width, module + forward * start + lateral * half_width, module + forward * start - lateral * half_width, module + forward * end - lateral * half_width])
+			map_canvas.draw_colored_polygon(fill, HUD.COLORS[segment["resource"]])
+			start = end
+
 func _draw_map() -> void:
 	if session == null:
 		return
@@ -3694,6 +3797,7 @@ func _draw_map() -> void:
 		map_canvas.draw_string(font, pos + Vector2(-80, -name_star_radius - 7), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
 	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
+	_draw_salvage(state, poses, viewport_bounds, font)
 	var order_points: Array = ECONOMY.military_graph(state)["points"]
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
@@ -3798,7 +3902,7 @@ func _draw_map() -> void:
 					var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * age * 2.5
 					var spark: Vector2 = engine - direction * (2.0 + age * 12.0) + side * offset
 					map_canvas.draw_circle(spark, maxf(0.75, (2.0 - age) * scale), Color(0.45, 0.85, 1.0, (1.0 - age) * 0.85), false)
-		if ship.get("mining_mode", "") == "mining" and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
+		if ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
 				var emitter: Vector2 = point + direction * MINER_MUZZLE.x + side * sign * MINER_MUZZLE.y
@@ -3833,6 +3937,7 @@ func _draw_map() -> void:
 			# enough. Draw layered panels only when they can actually be seen.
 			for panel in HULL_PANELS[ship["kind"]]:
 				map_canvas.draw_colored_polygon(_hull_polygon(point, direction, side, panel[1]), _hull_panel_color(empire, panel[0]))
+			_draw_other_cargo(ship, point, direction, side)
 		var outline: PackedVector2Array = shape.duplicate()
 		outline.append(shape[0])
 		map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)

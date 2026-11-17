@@ -175,6 +175,16 @@ func _phase_changed() -> void:
 						system["levels"]["Organics"] = 3
 						for resource in ECON.RESOURCES:
 							system["stock"][resource] = maxf(float(system["stock"][resource]), 25000.0)
+						# Dedicated held hull and salvage pile for the real RPC test.
+						var index: int = state["planets"].find(system)
+						ECON._finish(state, index, system, {"id": 900000 + index, "kind": "colony_ship", "population_allocated": ECON.CREW_COSTS["colony_ship"]})
+						var craft: Dictionary = state["ships"].back()
+						craft["holding"] = true
+						var graph: Dictionary = ECON.military_graph(state)
+						var point: Vector2 = graph["points"][index] + Vector2.RIGHT * minf(150.0, ECON.sector_limit(graph, index, Vector2.RIGHT) * 0.5)
+						var pile_id: int = 910000 + index
+						state["salvage"][pile_id] = {"id": pile_id, "resource": ECON.ANTIMATTER, "amount": 12.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
+				session.call("_publish_economy")
 			call_deferred("_prepare_commands")
 			create_timer(0.5).timeout.connect(_check_economy_sync)
 		if role == "host":
@@ -384,6 +394,12 @@ func _check_economy_sync() -> void:
 	if not commands_sent and home_index >= 0 and ECON.discovered(state, self_id, "fields", 0):
 		_send_commands()
 		state = session.get("economy")
+	if not bool(get_meta("salvage_sent", false)) and state.get("salvage", {}).has(910000 + home_index):
+		set_meta("salvage_sent", true)
+		var other: int = 900000 + (home_index + 1) % expected_players
+		session.call("request_salvage", [900000 + home_index, other], 910000 + home_index)
+		session.call("request_unload_cargo", [other])
+		session.call("request_salvage", [900000 + home_index], 910000 + home_index)
 	if commands_sent:
 		for craft in state["ships"]:
 			if int(craft["id"]) != hold_release_id:
@@ -498,6 +514,7 @@ func _check_economy_sync() -> void:
 				if int(craft["owner"]) == owner and craft["kind"] == "miner" and int(craft.get("assigned_field", -1)) >= 0:
 					assigned_miners += 1
 			var checks: Dictionary = {
+				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
 				"local_position": local_held,
 				"miner_assignment": assigned_miners == 1,
 				"no_policies": not state.has("policies") && not flags.has("production:Organics"),

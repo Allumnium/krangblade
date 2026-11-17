@@ -772,6 +772,40 @@ func _local_position_for(id: int, ids: Array, node: int, point: Vector2) -> void
 	if _active_player(id) and ECONOMY.command_local_position(economy, id, ids, node, point):
 		_publish_economy()
 
+func request_salvage(ids: Array, target: int) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_salvage_for(1, ids, target)
+	else:
+		_rpc_salvage.rpc_id(1, ids, target)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_salvage(ids: Array, target: int) -> void:
+	if multiplayer.is_server():
+		_salvage_for(multiplayer.get_remote_sender_id(), ids, target)
+
+func _salvage_for(id: int, ids: Array, target: int) -> void:
+	if _active_player(id) and ECONOMY.command_salvage(economy, id, ids, target):
+		_publish_economy()
+
+func request_unload_cargo(ids: Array) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_unload_cargo_for(1, ids)
+	else:
+		_rpc_unload_cargo.rpc_id(1, ids)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_unload_cargo(ids: Array) -> void:
+	if multiplayer.is_server():
+		_unload_cargo_for(multiplayer.get_remote_sender_id(), ids)
+
+func _unload_cargo_for(id: int, ids: Array) -> void:
+	if _active_player(id) and ECONOMY.command_unload_cargo(economy, id, ids):
+		_publish_economy()
+
 func request_unit_hold(ids: Array, release: bool) -> void:
 	if phase != "match":
 		return
