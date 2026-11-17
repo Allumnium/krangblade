@@ -1151,6 +1151,7 @@ func _build_lens_buttons() -> void:
 	logistics_lens.tooltip_text = "System resource storage"
 
 var diagnostic_label: Label
+var diagnostic_button: Button
 var diagnostic_elapsed: float = 0.0
 var diagnostic_last_bytes: int = -1
 
@@ -1173,8 +1174,8 @@ func _build_time_controls() -> void:
 		button.focus_mode = Control.FOCUS_NONE
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		time_buttons[speed] = button
-	var diagnostics: Button = _button("Perf", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, row)
-	diagnostics.tooltip_text = "Toggle local performance diagnostics"
+	diagnostic_button = _button("Perf", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, row)
+	diagnostic_button.tooltip_text = "Toggle local performance diagnostics"
 	diagnostic_label = _label("", 11)
 	add_child(diagnostic_label)
 	diagnostic_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
@@ -2834,7 +2835,7 @@ func _process(delta: float) -> void:
 					summary.append("%s %.1fms" % [stage, float(phases[stage]) / 1000.0])
 				var hotspot: String = (" · " + summary[0]) if not summary.is_empty() else ""
 				diagnostic_label.text = "%d FPS%s%s · %.1f KiB snapshot · %.1f KiB/s payload" % [Engine.get_frames_per_second(), timing, hotspot, float(session.get("diagnostic_snapshot_bytes")) / 1024.0, throughput]
-				diagnostic_label.tooltip_text = "\n".join(summary)
+				diagnostic_button.tooltip_text = "Toggle local performance diagnostics\n" + "\n".join(summary)
 			diagnostic_elapsed = 0.0
 	visual_clock += delta
 	game_visual_clock += delta * float(_state().get("time_speed", 1))
