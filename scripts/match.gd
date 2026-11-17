@@ -8,9 +8,9 @@ const UPGRADE_SOUND = preload("res://assets/sfx/detail.wav")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
 const COLORS = RULES.EMPIRE_COLORS
-const CONSOLE_WIDE_WIDTH: float = 1200.0
-const OVERVIEW_WIDTH: float = 350.0
-const YARD_WIDTH: float = 322.0
+const CONSOLE_WIDE_WIDTH: float = 1240.0
+const OVERVIEW_WIDTH: float = 286.0
+const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
@@ -43,6 +43,7 @@ var header_panel: PanelContainer
 var inspector_panel: PanelContainer
 var overview_panel: PanelContainer
 var console_panel: PanelContainer
+var minimap: Control
 var console_columns: HBoxContainer
 var yard_panel: PanelContainer
 var yard_column: VBoxContainer
@@ -230,7 +231,7 @@ class TradeRange extends Control:
 	var export_enabled: bool = true
 	var active_handle: int = -1
 	const PAD: float = 10.0
-	const TRACK_Y: float = 14.0
+	const TRACK_Y: float = 13.0
 
 	func set_range(minimum: float, maximum: float) -> void:
 		active_handle = -1
@@ -332,7 +333,7 @@ func _button(text: String, action: Callable, parent: Container) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.pressed.connect(action)
-	b.custom_minimum_size.y = 32
+	b.custom_minimum_size.y = 23 if is_instance_valid(console_panel) and console_panel.is_ancestor_of(parent) else 32
 	parent.add_child(b)
 	return b
 
@@ -400,12 +401,26 @@ func _build_ui() -> void:
 	console_panel.offset_left = 8
 	console_panel.offset_right = -8
 	console_panel.offset_bottom = -8
-	console_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0b1624"), Color("#345570"), 6, 5))
+	console_panel.theme = HUD.compact()
+	console_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0b1624"), Color("#345570"), 4, 3))
+	var deck := HBoxContainer.new()
+	deck.add_theme_constant_override("separation", 4)
+	console_panel.add_child(deck)
+	minimap = Control.new()
+	minimap.mouse_filter = Control.MOUSE_FILTER_STOP
+	minimap.focus_mode = Control.FOCUS_NONE
+	minimap.tooltip_text = "Click or drag to move the camera"
+	minimap.clip_contents = true
+	deck.add_child(minimap)
+	minimap.draw.connect(_draw_minimap)
+	minimap.gui_input.connect(_minimap_input)
+	minimap.resized.connect(minimap.queue_redraw)
 	var console := VBoxContainer.new()
-	console.add_theme_constant_override("separation", 5)
-	console_panel.add_child(console)
+	console.add_theme_constant_override("separation", 3)
+	console.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	deck.add_child(console)
 	var toolbar := HBoxContainer.new()
-	toolbar.add_theme_constant_override("separation", 5)
+	toolbar.add_theme_constant_override("separation", 3)
 	console.add_child(toolbar)
 	_build_lens_buttons(toolbar)
 	var spacer := Control.new()
@@ -413,7 +428,7 @@ func _build_ui() -> void:
 	toolbar.add_child(spacer)
 	_build_time_controls(toolbar)
 	console_columns = HBoxContainer.new()
-	console_columns.add_theme_constant_override("separation", 6)
+	console_columns.add_theme_constant_override("separation", 4)
 	console_columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	console.add_child(console_columns)
 	empty_selection = _label("Select a system, ship or asteroid field", 14)
@@ -425,21 +440,21 @@ func _build_ui() -> void:
 	inspector_panel = PanelContainer.new()
 	console_columns.add_child(inspector_panel)
 	inspector_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 6, 3))
+	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
 	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 5)
+	body.add_theme_constant_override("separation", 3)
 	inspector_panel.add_child(body)
 	overview_panel = PanelContainer.new()
 	console_columns.add_child(overview_panel)
 	console_columns.move_child(overview_panel, 0)
 	overview_panel.custom_minimum_size.x = OVERVIEW_WIDTH
-	overview_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 6, 3))
+	overview_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
 	var overview_scroll := ScrollContainer.new()
 	overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	overview_panel.add_child(overview_scroll)
 	var overview := VBoxContainer.new()
 	overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	overview.add_theme_constant_override("separation", 5)
+	overview.add_theme_constant_override("separation", 3)
 	overview_scroll.add_child(overview)
 	planet_overview = VBoxContainer.new()
 	planet_overview.add_theme_constant_override("separation", 3)
@@ -449,11 +464,11 @@ func _build_ui() -> void:
 	ship_overview = VBoxContainer.new()
 	ship_overview.add_theme_constant_override("separation", 4)
 	overview.add_child(ship_overview)
-	ship_title = _label("", 19)
+	ship_title = _label("", 16)
 	ship_overview.add_child(ship_title)
 	ship_detail = _label("", 13)
 	ship_overview.add_child(ship_detail)
-	ship_cargo = HUD.section(ship_overview, "Cargo")
+	ship_cargo = HUD.section(ship_overview, "Cargo", true)
 	_build_cargo_rows(ship_cargo, ship_cargo_labels)
 	fleet_scroll = ScrollContainer.new()
 	fleet_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
@@ -461,9 +476,9 @@ func _build_ui() -> void:
 	body.add_child(fleet_scroll)
 	fleet_overview = VBoxContainer.new()
 	fleet_overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fleet_overview.add_theme_constant_override("separation", 5)
+	fleet_overview.add_theme_constant_override("separation", 3)
 	fleet_scroll.add_child(fleet_overview)
-	fleet_title = _label("", 19)
+	fleet_title = _label("", 16)
 	fleet_overview.add_child(fleet_title)
 	fleet_detail = _label("", 14)
 	fleet_overview.add_child(fleet_detail)
@@ -474,9 +489,9 @@ func _build_ui() -> void:
 	fleet_overview.add_child(orders)
 	orders.add_child(hold_button)
 	unload_button = _button("Unload cargo [U]", _unload_selected, orders)
-	fleet_cargo = HUD.section(fleet_overview, "Cargo")
+	fleet_cargo = HUD.section(fleet_overview, "Cargo", true)
 	_build_cargo_rows(fleet_cargo, fleet_cargo_labels)
-	mining_controls = HUD.section(fleet_overview, "Mine")
+	mining_controls = HUD.section(fleet_overview, "Mine", true)
 	mining_enabled = CheckBox.new()
 	mining_enabled.text = "Enabled"
 	mining_controls.add_child(mining_enabled)
@@ -491,7 +506,7 @@ func _build_ui() -> void:
 	mining_controls.get_parent().hide()
 	var system_header := HBoxContainer.new()
 	planet_overview.add_child(system_header)
-	info = _label("", 16)
+	info = _label("", 14)
 	info.clip_text = true
 	info.autowrap_mode = TextServer.AUTOWRAP_OFF
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -499,7 +514,7 @@ func _build_ui() -> void:
 	system_owner_label = _label("", 11)
 	system_owner_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	system_owner_label.clip_text = true
-	system_owner_label.custom_minimum_size.x = 90
+	system_owner_label.custom_minimum_size.x = 72
 	system_owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	system_header.add_child(system_owner_label)
 	population_label = _label("", 13)
@@ -511,9 +526,9 @@ func _build_ui() -> void:
 	population_delta_label = _label("", 11)
 	population_delta_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	population_row.add_child(population_delta_label)
-	production_summary = HUD.section(planet_overview, "Resources")
-	production_summary.add_theme_constant_override("separation", 3)
-	production_summary.get_parent().add_theme_stylebox_override("panel", HUD.surface(Color("#0a1726ed"), Color("#233e56"), 5))
+	production_summary = HUD.section(planet_overview, "Resources", true)
+	production_summary.get_child(0).hide()
+	production_summary.add_theme_constant_override("separation", 1)
 	_build_production_summary()
 	raw_antimatter_label = _label("", 12)
 	raw_antimatter_label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -526,19 +541,19 @@ func _build_ui() -> void:
 	colony_picker = OptionButton.new()
 	interaction_panel.add_child(colony_picker)
 	send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
-	HUD.action(send_colony_button, Color("#c7a4ff"))
+	HUD.action(send_colony_button, Color("#c7a4ff"), true)
 	yard_panel = PanelContainer.new()
 	console_columns.add_child(yard_panel)
 	console_columns.move_child(yard_panel, 1)
 	yard_panel.custom_minimum_size.x = YARD_WIDTH
-	yard_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 5, 3))
+	yard_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
 	var yard_scroll := ScrollContainer.new()
 	yard_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	yard_panel.add_child(yard_scroll)
 	yard_column = VBoxContainer.new()
 	yard_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	yard_scroll.add_child(yard_column)
-	yard_activity = HUD.section(yard_column, "Shipyards")
+	yard_activity = HUD.section(yard_column, "Shipyards", true)
 	inspector_tabs = TabContainer.new()
 	inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_tabs.clip_contents = true
@@ -553,29 +568,29 @@ func _build_ui() -> void:
 	var trade_page: GridContainer = _inspector_page("Trade")
 	_build_pds_card(economy_page)
 	for resource in ECONOMY.RESOURCES:
-		var logistics: VBoxContainer = HUD.section(trade_page, "")
+		var logistics: VBoxContainer = HUD.section(trade_page, "", true)
 		logistics.get_child(0).hide()
 		var trade_row := HBoxContainer.new()
 		logistics.add_child(trade_row)
 		var resource_icon := TextureRect.new()
 		resource_icon.texture = HUD.ICONS[resource]
-		resource_icon.custom_minimum_size = Vector2(18, 18)
+		resource_icon.custom_minimum_size = Vector2(14, 14)
 		resource_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		resource_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		trade_row.add_child(resource_icon)
-		var name_label := _label(resource, 13)
+		var name_label := _label(resource, 11)
 		name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		name_label.add_theme_color_override("font_color", HUD.COLORS[resource])
 		trade_row.add_child(name_label)
-		var stock_label := _label("", 12)
+		var stock_label := _label("", 10)
 		stock_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-		stock_label.custom_minimum_size.x = 90
+		stock_label.custom_minimum_size.x = 64
 		stock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		trade_row.add_child(stock_label)
 		trade_stock_labels[resource] = stock_label
 		var slider := TradeRange.new()
-		slider.custom_minimum_size.y = 28
+		slider.custom_minimum_size.y = 26
 		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f t." % ECONOMY.TRADE_REFERENCE
 		slider.committed.connect(_apply_thresholds.bind(resource))
@@ -585,11 +600,15 @@ func _build_ui() -> void:
 		logistics.add_child(switches)
 		logistics.move_child(switches, slider.get_index())
 		var incoming := CheckBox.new()
-		incoming.text = "Import"
+		incoming.text = "In"
+		incoming.tooltip_text = "Enable imports below the left threshold"
+		incoming.add_theme_font_size_override("font_size", 10)
 		incoming.button_pressed = true
 		switches.add_child(incoming)
 		var outgoing := CheckBox.new()
-		outgoing.text = "Export"
+		outgoing.text = "Out"
+		outgoing.tooltip_text = "Enable exports above the right threshold"
+		outgoing.add_theme_font_size_override("font_size", 10)
 		outgoing.button_pressed = true
 		incoming.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		outgoing.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -598,14 +617,14 @@ func _build_ui() -> void:
 		incoming.toggled.connect(_trade_toggle.bind(resource))
 		outgoing.toggled.connect(_trade_toggle.bind(resource))
 	ship_button = _ship_build_row(shipyard_page, "BUILD LOGISTICS SHIP", "ship")
-	HUD.action(ship_button)
+	HUD.action(ship_button, HUD.ACCENT, true)
 	colony_button = _ship_build_row(shipyard_page, "BUILD COLONY SHIP", "colony_ship")
-	HUD.action(colony_button, Color("#c7a4ff"))
+	HUD.action(colony_button, Color("#c7a4ff"), true)
 	fighter_button = _ship_build_row(shipyard_page, "BUILD FIGHTER", "fighter")
-	HUD.action(fighter_button, Color("#f2b57e"))
+	HUD.action(fighter_button, Color("#f2b57e"), true)
 	fighter_button.tooltip_text = "Select fighters and right-click a destination or hostile ship."
 	miner_button = _ship_build_row(shipyard_page, "BUILD MINING SHIP", "miner")
-	HUD.action(miner_button, Color("#d8e58b"))
+	HUD.action(miner_button, Color("#d8e58b"), true)
 	miner_button.tooltip_text = "Automatically mines accessible fields from owned service systems."
 	for grid in command_grids.values():
 		for card in grid.get_children():
@@ -619,13 +638,14 @@ func _layout_console() -> void:
 	if not is_instance_valid(console_panel) or not is_instance_valid(yard_activity):
 		return
 	# Keep a stable, useful map at both normal and small window sizes.
-	var height: float = minf(clampf(size.y * 0.43, 250.0, 360.0), maxf(150.0, size.y - HEADER_HEIGHT - 160.0))
+	var height: float = minf(clampf(size.y * 0.32, 195.0, 285.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0))
 	console_panel.offset_top = -8.0 - height
 	map_canvas.offset_bottom = -16.0 - height
 	territory_layer.offset_bottom = map_canvas.offset_bottom
 	diagnostic_label.offset_bottom = -20.0 - height
 	diagnostic_label.offset_top = -44.0 - height
-	overview_panel.custom_minimum_size.x = minf(OVERVIEW_WIDTH, maxf(220.0, size.x * 0.40))
+	minimap.custom_minimum_size.x = minf(220.0, minf(height * 0.87, size.x * 0.19))
+	overview_panel.custom_minimum_size.x = minf(OVERVIEW_WIDTH, maxf(190.0, size.x * 0.31))
 	var wide: bool = size.x >= CONSOLE_WIDE_WIDTH
 	var yard_parent: Control = yard_column if wide else planet_overview
 	if yard_activity.get_parent().get_parent() != yard_parent:
@@ -634,13 +654,106 @@ func _layout_console() -> void:
 	_layout_command_grids()
 
 func _layout_command_grids() -> void:
-	var width: float = inspector_panel.size.x - 34.0
+	var width: float = inspector_panel.size.x - 22.0
 	for title in command_grids:
 		var grid: GridContainer = command_grids[title]
-		var cell_width: float = 250.0 if title == "Trade" else 260.0
+		var cell_width: float = 160.0 if title == "Trade" else 222.0
 		grid.columns = clampi(floori(width / cell_width), 1, 3)
 	for grid in cargo_grids:
 		grid.columns = 2 if grid.get_parent() == ship_cargo else clampi(floori(width / 180.0), 1, 4)
+
+func _minimap_area() -> Rect2:
+	var bounds: Vector2 = _map_size().max(Vector2.ONE)
+	var available: Vector2 = (minimap.size - Vector2(12, 12)).max(Vector2.ONE)
+	var scale: float = minf(available.x / bounds.x, available.y / bounds.y)
+	var extent: Vector2 = bounds * scale
+	return Rect2((minimap.size - extent) * 0.5, extent)
+
+func _minimap_point(point: Vector2, area: Rect2) -> Vector2:
+	return area.position + point / _map_size().max(Vector2.ONE) * area.size
+
+func _minimap_input(event: InputEvent) -> void:
+	var move_camera: bool = false
+	if event is InputEventMouseButton:
+		move_camera = event.button_index == MOUSE_BUTTON_LEFT and event.pressed
+	elif event is InputEventMouseMotion:
+		move_camera = (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0
+	if move_camera and not _state().is_empty():
+		var area: Rect2 = _minimap_area()
+		var fraction: Vector2 = ((event.position - area.position) / area.size).clamp(Vector2.ZERO, Vector2.ONE)
+		var world: Vector2 = fraction * _map_size()
+		follow_units = false
+		pan = (_map_size() * 0.5 - world) * _fit() * zoom
+		_position_territory()
+		map_canvas.queue_redraw()
+		minimap.queue_redraw()
+	minimap.accept_event()
+
+func _draw_minimap() -> void:
+	var surface := Rect2(Vector2.ZERO, minimap.size)
+	minimap.draw_rect(surface, Color("#070e19"))
+	minimap.draw_rect(surface.grow(-0.5), Color("#345570"), false, 1.0)
+	var state: Dictionary = _state()
+	if state.is_empty() or minimap.size.x < 12.0 or minimap.size.y < 12.0:
+		return
+	var area: Rect2 = _minimap_area()
+	minimap.draw_rect(area, Color("#0b1928"))
+	for i in range(1, 5):
+		var x: float = area.position.x + area.size.x * float(i) / 5.0
+		var y: float = area.position.y + area.size.y * float(i) / 5.0
+		minimap.draw_line(Vector2(x, area.position.y), Vector2(x, area.end.y), Color("#142437"))
+		minimap.draw_line(Vector2(area.position.x, y), Vector2(area.end.x, y), Color("#142437"))
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var points: Array = graph["points"]
+	var count: int = state["planets"].size()
+	var viewer: int = _me()
+	var locations: Array[Vector2] = []
+	var known: Array[bool] = []
+	for i in range(points.size()):
+		locations.append(_minimap_point(points[i], area))
+		known.append(ECONOMY.discovered(state, viewer, "planets" if i < count else "fields", i if i < count else i - count))
+		if known[i] and i < territory_last.size() and territory_last[i] > 0:
+			var radius: float = clampf(territory_radius * area.size.x / _map_size().x, 3.0, 12.0) * (1.0 if i < count else 0.68)
+			minimap.draw_circle(locations[i], radius, Color(COLORS[territory_last[i]], 0.20))
+	for edge in graph["edges"]:
+		var a: int = int(edge[0])
+		var b: int = int(edge[1])
+		minimap.draw_line(locations[a], locations[b], Color("#39546c") if known[a] and known[b] else Color("#182b3b"), 1.0, true)
+	for i in range(points.size()):
+		var tint := Color("#34485a")
+		if i < count:
+			var owner: int = int(state["planets"][i]["owner"])
+			if known[i]:
+				tint = _empire_color(owner) if owner > 0 else Color("#a3b0bb")
+			minimap.draw_circle(locations[i], 2.4 if owner > 0 and known[i] else 1.8, tint)
+		elif known[i]:
+			var special: bool = bool(state["map"]["fields"][i - count].get("antimatter", false))
+			tint = HUD.COLORS[ECONOMY.ANTIMATTER] if special else Color("#b8a87a")
+			minimap.draw_rect(Rect2(locations[i] - Vector2.ONE * 1.8, Vector2.ONE * 3.6), tint, false, 1.0)
+		if (i < count and i == selected and selected_units.is_empty() and selected_field < 0) or (i >= count and i - count == selected_field):
+			minimap.draw_arc(locations[i], 4.5, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
+	# Mirror the main map's live hull visibility and interpolation; do not
+	# reveal undiscovered system ownership or apply any simulation commands.
+	for ship in state["ships"]:
+		var id: int = int(ship["id"])
+		var visual: Dictionary = ship_visuals.get(id, {})
+		var world: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
+		var point: Vector2 = _minimap_point(world, area)
+		if area.has_point(point):
+			minimap.draw_circle(point, 1.5, _empire_color(int(ship["owner"])))
+			if selected_units.has(id):
+				minimap.draw_arc(point, 2.6, 0.0, TAU, 10, Color.WHITE, 1.0, true)
+	var corner: Vector2 = _minimap_point(_world_point(Vector2.ZERO), area)
+	var end: Vector2 = _minimap_point(_world_point(_projection_size()), area)
+	var camera_rect := Rect2(corner, end - corner)
+	# Preserve a visible indicator at extreme close-up zoom levels.
+	var visible_extent: Vector2 = camera_rect.size.max(Vector2(3, 3))
+	var visible_rect := Rect2(camera_rect.get_center() - visible_extent * 0.5, visible_extent)
+	minimap.draw_rect(area, Color("#35536a"), false, 1.0)
+	var clipped: Rect2 = visible_rect.intersection(area)
+	if clipped.has_area():
+		minimap.draw_rect(clipped, Color(HUD.ACCENT, 0.08))
+		minimap.draw_rect(clipped, HUD.ACCENT, false, 1.2)
 
 
 func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
@@ -652,7 +765,7 @@ func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
 	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.clip_text = true
 	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	header.custom_minimum_size.y = 28
+	header.custom_minimum_size.y = 21
 	header.add_theme_font_size_override("font_size", 12)
 	line.add_child(header)
 	var summary := VBoxContainer.new()
@@ -695,7 +808,7 @@ func _collapse_details() -> void:
 
 func _card_action(card: Dictionary, caption: String, callback: Callable) -> Button:
 	var button: Button = _button(caption, callback, card["actions"])
-	button.custom_minimum_size = Vector2(0, 26)
+	button.custom_minimum_size = Vector2(0, 20)
 	button.add_theme_font_size_override("font_size", 10)
 	return button
 
@@ -786,7 +899,7 @@ func _set_timed_action(button: Button, caption: String, years: float = -1.0) -> 
 
 func _cost_grid(parent: Container) -> GridContainer:
 	var grid := GridContainer.new()
-	grid.add_theme_constant_override("h_separation", 5)
+	grid.add_theme_constant_override("h_separation", 3)
 	parent.add_child(grid)
 	return grid
 
@@ -839,7 +952,7 @@ func _ship_stats(kind: String) -> String:
 	return "%s\nHP %.0f · Speed %.0f/yr · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
 
 func _ship_build_row(parent: Container, title_text: String, kind: String) -> Button:
-	var section: VBoxContainer = HUD.section(parent, "")
+	var section: VBoxContainer = HUD.section(parent, "", true)
 	section.get_child(0).hide()
 	var disclosure: Dictionary = _make_disclosure(section, title_text.trim_prefix("BUILD ").capitalize() + " (0)")
 	var body: VBoxContainer = disclosure["body"]
@@ -913,8 +1026,8 @@ func _repeat_button(parent: Container, key: String) -> Button:
 	button.icon = repeat_icon
 	button.expand_icon = true
 	button.toggle_mode = true
-	button.custom_minimum_size = Vector2(24, 26)
-	button.add_theme_constant_override("icon_max_width", 20)
+	button.custom_minimum_size = Vector2(22, 20)
+	button.add_theme_constant_override("icon_max_width", 16)
 	button.tooltip_text = "Repeat automatically"
 	parent.add_child(button)
 	button.toggled.connect(func(enabled: bool) -> void:
@@ -929,12 +1042,12 @@ func _sync_repeat(button: Button, p: Dictionary, key: String, available: bool) -
 
 func _build_production_summary() -> void:
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 3)
+	header.add_theme_constant_override("separation", 2)
 	production_summary.add_child(header)
 	var blank := Control.new()
 	blank.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(blank)
-	for column in [["Stock", 62], ["Lv", 22], ["/yr", 55], ["Bonus", 46]]:
+	for column in [["Stock", 54], ["Lv", 20], ["/yr", 50], ["Bonus", 42]]:
 		var title_label := _label(str(column[0]), 10)
 		title_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 		title_label.custom_minimum_size.x = float(column[1])
@@ -944,7 +1057,7 @@ func _build_production_summary() -> void:
 	for resource in ECONOMY.RESOURCES:
 		var row := HBoxContainer.new()
 		production_summary.add_child(row)
-		row.add_theme_constant_override("separation", 3)
+		row.add_theme_constant_override("separation", 2)
 		var icon := TextureRect.new()
 		icon.texture = HUD.ICONS[resource]
 		icon.custom_minimum_size = Vector2(16, 16)
@@ -957,22 +1070,22 @@ func _build_production_summary() -> void:
 		row.add_child(name_label)
 		var stock := _label("", 11)
 		stock.autowrap_mode = TextServer.AUTOWRAP_OFF
-		stock.custom_minimum_size.x = 62
+		stock.custom_minimum_size.x = 54
 		stock.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(stock)
 		var level := _label("", 11)
 		level.autowrap_mode = TextServer.AUTOWRAP_OFF
-		level.custom_minimum_size.x = 22
+		level.custom_minimum_size.x = 20
 		level.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(level)
 		var rate_label := _label("", 11)
 		rate_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-		rate_label.custom_minimum_size.x = 55
+		rate_label.custom_minimum_size.x = 50
 		rate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(rate_label)
 		var bonus := _label("", 11)
 		bonus.autowrap_mode = TextServer.AUTOWRAP_OFF
-		bonus.custom_minimum_size.x = 46
+		bonus.custom_minimum_size.x = 42
 		bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(bonus)
 		production_values[resource] = {"row": row, "stock": stock, "level": level, "rate": rate_label, "bonus": bonus}
@@ -990,7 +1103,7 @@ func _system_bonus_text(p: Dictionary) -> String:
 	return "\n".join(lines)
 
 func _build_economy_cards(parent: Container) -> void:
-	var warehouse_section: VBoxContainer = HUD.section(parent, "")
+	var warehouse_section: VBoxContainer = HUD.section(parent, "", true)
 	warehouse_section.get_child(0).hide()
 	warehouse_card = _make_disclosure(warehouse_section, "Warehouse logistics")
 	var warehouse: VBoxContainer = warehouse_card["body"]
@@ -998,28 +1111,28 @@ func _build_economy_cards(parent: Container) -> void:
 	warehouse.add_child(warehouse_detail)
 	var warehouse_button: Button = _card_action(warehouse_card, "Upgrade", _operation.bind("economy", "warehouse"))
 	warehouse_card["cancel"] = _card_cancel(warehouse_card, func() -> void: pass)
-	HUD.action(warehouse_button)
+	HUD.action(warehouse_button, HUD.ACCENT, true)
 	warehouse_card.merge({"button": warehouse_button, "detail": warehouse_detail, "costs": _cost_grid(warehouse_card["summary"])})
-	var habitat_section: VBoxContainer = HUD.section(parent, "")
+	var habitat_section: VBoxContainer = HUD.section(parent, "", true)
 	habitat_section.get_child(0).hide()
 	habitation_card = _make_disclosure(habitat_section, "Habitation technology")
 	var habitat_body: VBoxContainer = habitation_card["body"]
 	var habitat_detail: Label = _label("", 12)
 	habitat_body.add_child(habitat_detail)
 	habitation_card.merge({"button": _card_action(habitation_card, "Upgrade", _operation.bind("economy", "habitation")), "detail": habitat_detail, "costs": _cost_grid(habitation_card["summary"])})
-	HUD.action(habitation_card["button"])
+	HUD.action(habitation_card["button"], HUD.ACCENT, true)
 	habitation_card["repeat"] = _repeat_button(habitation_card["actions"], "habitation")
 	warehouse_card["repeat"] = _repeat_button(warehouse_card["actions"], "warehouse")
-	var orbital_section: VBoxContainer = HUD.section(parent, "")
+	var orbital_section: VBoxContainer = HUD.section(parent, "", true)
 	orbital_section.get_child(0).hide()
 	orbital_card = _make_disclosure(orbital_section, "Orbital Eco-Housing")
 	var orbital_detail: Label = _label("", 12)
 	orbital_card["body"].add_child(orbital_detail)
 	orbital_card.merge({"section": orbital_section, "button": _card_action(orbital_card, "Build", _operation.bind("economy", "orbital_housing")), "detail": orbital_detail, "costs": _cost_grid(orbital_card["summary"])})
-	HUD.action(orbital_card["button"])
+	HUD.action(orbital_card["button"], HUD.ACCENT, true)
 	for resource in ECONOMY.RESOURCES:
 		var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
-		var section: VBoxContainer = HUD.section(parent, "")
+		var section: VBoxContainer = HUD.section(parent, "", true)
 		section.get_child(0).hide()
 		var disclosure: Dictionary = _make_disclosure(section, str(definition["name"]))
 		var card: VBoxContainer = disclosure["body"]
@@ -1035,7 +1148,7 @@ func _build_economy_cards(parent: Container) -> void:
 		disclosure["progress"] = progress
 		disclosure["cancel"] = _card_cancel(disclosure, _cancel_kind.bind("economy_building", resource), progress)
 		disclosure["repeat"] = _repeat_button(disclosure["actions"], "economy_building:" + resource)
-		HUD.action(button)
+		HUD.action(button, HUD.ACCENT, true)
 		disclosure.merge({"button": button, "detail": detail, "effect": effect, "costs": _cost_grid(disclosure["summary"])})
 		economy_cards[resource] = disclosure
 
@@ -1179,7 +1292,7 @@ func _build_yard_overview(parent: Container) -> void:
 		_refresh(), yard_overview)
 	yard_status = _label("", 12)
 	yard_overview.add_child(yard_status)
-	var section: VBoxContainer = HUD.section(yard_overview, "Upgrade")
+	var section: VBoxContainer = HUD.section(yard_overview, "Upgrade", true)
 	yard_detail = _label("", 12)
 	section.add_child(yard_detail)
 	yard_costs = _cost_grid(section)
@@ -1193,7 +1306,7 @@ func _build_yard_overview(parent: Container) -> void:
 		if selected_yard >= 0:
 			_operation("yard_upgrade", str(selected_yard)), actions)
 	yard_upgrade.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	HUD.action(yard_upgrade)
+	HUD.action(yard_upgrade, HUD.ACCENT, true)
 	yard_cancel = _button("×", func() -> void:
 		if selected_yard >= 0:
 			_cancel_kind("yard_upgrade", str(selected_yard)), actions)
@@ -1250,7 +1363,7 @@ func _build_body_overview(parent: Container) -> void:
 		selected_body = -1
 		_load_thresholds()
 		_refresh(), body_overview)
-	var section: VBoxContainer = HUD.section(body_overview, "Planetary defense")
+	var section: VBoxContainer = HUD.section(body_overview, "Planetary defense", true)
 	body_defense = _label("", 12)
 	section.add_child(body_defense)
 	body_status = _label("", 12)
@@ -1264,7 +1377,7 @@ func _build_body_overview(parent: Container) -> void:
 	section.add_child(actions)
 	body_upgrade = _button("Build PDS", _upgrade_selected_body, actions)
 	body_upgrade.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	HUD.action(body_upgrade)
+	HUD.action(body_upgrade, HUD.ACCENT, true)
 	body_cancel = _button("×", _cancel_selected_body, actions)
 	body_cancel.tooltip_text = "Cancel construction and refund"
 	body_overview.hide()
@@ -1308,7 +1421,7 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	body_cancel.disabled = not owned or not building
 
 func _build_pds_card(parent: Container) -> void:
-	var section: VBoxContainer = HUD.section(parent, "")
+	var section: VBoxContainer = HUD.section(parent, "", true)
 	section.get_child(0).hide()
 	pds_card = _make_disclosure(section, "Planetary defense")
 	var body: VBoxContainer = pds_card["body"]
@@ -1324,7 +1437,7 @@ func _build_pds_card(parent: Container) -> void:
 	var costs: GridContainer = _cost_grid(summary)
 	var action: Button = _card_action(pds_card, "Build", _operation.bind("pds", ""))
 	var cancel: Button = _card_cancel(pds_card, _pds_action, progress)
-	HUD.action(action)
+	HUD.action(action, HUD.ACCENT, true)
 	pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel, "status": status})
 
 func _pds_action() -> void:
@@ -1557,7 +1670,7 @@ func _build_time_controls(parent: Container) -> void:
 		var button: Button = _button(label, _set_time_speed.bind(int(speed)), row)
 		button.toggle_mode = true
 		button.focus_mode = Control.FOCUS_NONE
-		button.custom_minimum_size.x = 42
+		button.custom_minimum_size.x = 33
 		time_buttons[speed] = button
 	diagnostic_button = _button("Perf", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, row)
 	diagnostic_button.tooltip_text = "Toggle local performance diagnostics"
@@ -2137,7 +2250,7 @@ func _update_trade_stock(p: Dictionary) -> void:
 		var stock: float = float(p["stock"][resource])
 		var capacity: float = ECONOMY.storage_capacity(p)
 		slider.set_stock(stock, capacity, HUD.COLORS[resource])
-		trade_stock_labels[resource].text = "%s / %s" % [_tons(stock), _tons(capacity, 0)]
+		trade_stock_labels[resource].text = "%s / %s" % [_tons(stock, 1, true), _tons(capacity, 0, true)]
 		trade_stock_labels[resource].tooltip_text = "%.1f / %.0f t" % [stock, capacity]
 		slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f units." % capacity
 		# Preserve this handle while dragging, even when a snapshot arrives.
@@ -2147,8 +2260,8 @@ func _update_trade_stock(p: Dictionary) -> void:
 			slider.export_enabled = bool(t.get("export", true))
 			trade_checks[resource][0].set_pressed_no_signal(slider.import_enabled)
 			trade_checks[resource][1].set_pressed_no_signal(slider.export_enabled)
-			trade_checks[resource][0].text = "Import %d%%" % roundi(float(t["min"]))
-			trade_checks[resource][1].text = "Export %d%%" % roundi(float(t["max"]))
+			trade_checks[resource][0].text = "In %d%%" % roundi(float(t["min"]))
+			trade_checks[resource][1].text = "Out %d%%" % roundi(float(t["max"]))
 			slider.queue_redraw()
 			if not is_equal_approx(slider.lower, float(t["min"])) or not is_equal_approx(slider.upper, float(t["max"])):
 				slider.set_range(float(t["min"]), float(t["max"]))
@@ -3442,6 +3555,8 @@ func _process(delta: float) -> void:
 	if is_instance_valid(map_canvas):
 		_position_territory()
 		map_canvas.queue_redraw()
+	if is_instance_valid(minimap):
+		minimap.queue_redraw()
 
 func _orbit_offset(slot: int, radius: float, time: float) -> Vector2:
 	var ring: int = floori(float(slot) / 8.0)

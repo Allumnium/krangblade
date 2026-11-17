@@ -83,17 +83,35 @@ static func create() -> Theme:
 	result.set_stylebox("hover", "PopupMenu", hover)
 	return result
 
-static func action(button: Button, accent: Color = ACCENT) -> void:
-	button.add_theme_stylebox_override("normal", surface(Color("#193448"), accent.darkened(0.35), 7))
-	button.add_theme_stylebox_override("hover", surface(Color("#285268"), accent, 7))
+static func compact() -> Theme:
+	var result: Theme = create()
+	result.default_font_size = 12
+	for type in ["HBoxContainer", "VBoxContainer"]:
+		result.set_constant("separation", type, 3)
+	for type in ["Button", "OptionButton", "LineEdit"]:
+		for name in ["normal", "hover", "pressed", "disabled", "read_only"]:
+			if result.has_stylebox(name, type):
+				var style: StyleBox = result.get_stylebox(name, type).duplicate()
+				style.set_content_margin_all(3)
+				result.set_stylebox(name, type, style)
+	for name in ["panel", "tab_selected", "tab_unselected", "tab_hovered"]:
+		var style: StyleBox = result.get_stylebox(name, "TabContainer").duplicate()
+		style.set_content_margin_all(3)
+		result.set_stylebox(name, "TabContainer", style)
+	return result
+
+static func action(button: Button, accent: Color = ACCENT, dense: bool = false) -> void:
+	var margin: int = 3 if dense else 7
+	button.add_theme_stylebox_override("normal", surface(Color("#193448"), accent.darkened(0.35), margin, 3 if dense else 5))
+	button.add_theme_stylebox_override("hover", surface(Color("#285268"), accent, margin, 3 if dense else 5))
 	button.add_theme_color_override("font_color", accent.lightened(0.25))
 
-static func section(parent: Container, title_text: String) -> VBoxContainer:
+static func section(parent: Container, title_text: String, dense: bool = false) -> VBoxContainer:
 	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", surface(Color("#0a1726ed"), Color("#233e56"), 9))
+	panel.add_theme_stylebox_override("panel", surface(Color("#0a1726ed"), Color("#233e56"), 3 if dense else 9, 3 if dense else 5))
 	parent.add_child(panel)
 	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 6)
+	body.add_theme_constant_override("separation", 2 if dense else 6)
 	panel.add_child(body)
 	var title := Label.new()
 	title.text = title_text
