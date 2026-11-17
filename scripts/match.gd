@@ -356,10 +356,10 @@ func _build_ui() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 4)
 	header_panel.add_child(row)
-	leave = _button("MENU", _open_menu, row)
+	year_label = _global_stat(row, "%d A.D." % ECONOMY.START_YEAR, HUD.ACCENT)
 	_build_global_bar(row)
 	global_population_label = _global_stat(row, "0", Color("#b9d9ed"), true)
-	year_label = _global_stat(row, "YEAR  1", HUD.ACCENT)
+	leave = _button("MENU", _open_menu, row)
 	_build_lens_buttons()
 	match_menu = AcceptDialog.new()
 	match_menu.title = "Menu"
@@ -1315,11 +1315,6 @@ func _selected_ship(state: Dictionary) -> Dictionary:
 func _ship_kind_name(kind: String) -> String:
 	return "Logistics ship" if kind == "ship" else ("Mining ship" if kind == "miner" else kind.replace("_", " ").capitalize())
 
-func _ship_is_moving(ship: Dictionary) -> bool:
-	if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
-		return ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > ECONOMY.EPS
-	return not (ship["route"] as Array).is_empty() or ship.get("mining_mode", "idle") in ["outbound", "return"]
-
 func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
 	var points: Array = ECONOMY.military_graph(state)["points"] if ship.get("kind", "") == "fighter" else state["map"]["points"]
 	var pos: Vector2 = ECONOMY.combat_position(state, ECONOMY.military_graph(state), ship)
@@ -1411,49 +1406,33 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			ship_cargo_labels[resource].text = _tons(float(ship["cargo"].get(resource, 0.0)))
 			ship_cargo_labels[resource].get_parent().visible = kind == "miner" if resource == ECONOMY.ANTIMATTER else kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
-	fleet_title.text = {"ship": "Logistics", "fighter": "Military", "miner": "Mining", "colony_ship": "Colonization"}.get(kind, "Fleet")
-	fleet_detail.visible = kind != "fighter"
-	fleet_cargo.get_parent().visible = cargo_capable
-	var fighters: Array[int] = _selected_fighters()
-	hold_button.visible = not selected_units.is_empty()
-	hold_button.text = "Release hold [H]" if _any_selected_holding() else "Hold position [H]"
-	if not selected_units.is_empty():
-		fleet_detail.visible = true
-		fleet_title.text = "Fleet"
-		var miners: Array[int] = _selected_miners()
-		var colony_count: int = 0
-		var logistics_count: int = 0
-		for craft in state["ships"]:
-			if selected_units.has(int(craft["id"])):
-				colony_count += int(craft["kind"] == "colony_ship")
-				logistics_count += int(craft["kind"] == "ship")
-		fleet_detail.text = "%d fighters · %d colony ships · %d miners · %d logistics" % [fighters.size(), colony_count, miners.size(), logistics_count]
-		fleet_detail.tooltip_text = "Right-click empty space in the current sector to position and hold; right-click a system/field to travel or assign. Alt-right-click forces a local position. H holds/releases. Ctrl+1–9 assigns a group, 1–9 recalls it."
-		return
-	var total: int = 0
-	var traveling: int = 0
-	var working: int = 0
+	fleet_title.text = "Fleet"
+	fleet_detail.visible = true
+	var counts: Dictionary = {"fighter": 0, "colony_ship": 0, "miner": 0, "ship": 0}
+	var owned_count: int = 0
 	var cargo: Dictionary = ECONOMY.empty_stock()
 	for craft in state["ships"]:
-		if int(craft["owner"]) != _me() or craft.get("kind", "ship") != kind:
+		if not selected_units.has(int(craft["id"])):
 			continue
-		total += 1
-		if _ship_is_moving(craft):
-			traveling += 1
-		elif craft.get("mining_mode", "idle") == "mining":
-			working += 1
+		counts[craft["kind"]] += 1
+		owned_count += int(int(craft["owner"]) == _me())
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
-			cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft["cargo"].get(resource, 0.0))
-	fleet_detail.text = "%d %s\n%d traveling · %d idle" % [total, "ship" if total == 1 else "ships", traveling, total - traveling - working]
-	if kind == "miner":
-		fleet_detail.text += "\n%d mining" % working
-	fleet_detail.tooltip_text = "Your empire"
-	if cargo_capable:
+			cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft.get("cargo", {}).get(resource, 0.0))
+	hold_button.visible = owned_count > 0
+	hold_button.text = "Release hold [H]" if _any_selected_holding() else "Hold position [H]"
+	fleet_detail.text = "%d fighters · %d colony ships · %d miners · %d logistics" % [counts["fighter"], counts["colony_ship"], counts["miner"], counts["ship"]]
+	if owned_count < selected_units.size():
+		fleet_detail.text += "\n%d owned · %d foreign" % [owned_count, selected_units.size() - owned_count]
+	fleet_detail.tooltip_text = "Foreign ships are read-only. Commands affect only your own ships. Ctrl+1–9 assigns a selection group, 1–9 recalls it."
+	if owned_count > 0:
+		fleet_detail.tooltip_text += " Right-click empty space in the current sector to position and hold; right-click a system/field to travel or assign. Alt-right-click forces a local position. H holds/releases."
+	fleet_cargo.get_parent().visible = counts["ship"] > 0 or counts["miner"] > 0
+	if fleet_cargo.get_parent().visible:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			var amount: float = float(cargo.get(resource, 0.0))
 			fleet_cargo_labels[resource].text = _tons(amount)
 			fleet_cargo_labels[resource].tooltip_text = "%.1f t" % amount
-			fleet_cargo_labels[resource].get_parent().visible = kind == "miner" if resource == ECONOMY.ANTIMATTER else kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
+			fleet_cargo_labels[resource].get_parent().visible = counts["miner"] > 0 if resource == ECONOMY.ANTIMATTER else counts["ship"] > 0 or ECONOMY.MINED_RESOURCES.has(resource)
 
 func _build_lens_buttons() -> void:
 	var lens_row := HBoxContainer.new()
@@ -1984,7 +1963,7 @@ func _update_resource_hover() -> void:
 	resource_hover_panel.show()
 
 func _refresh_global_bar(state: Dictionary) -> void:
-	year_label.text = "YEAR  %d" % ECONOMY.current_year(state)
+	year_label.text = "%d A.D." % ECONOMY.current_year(state)
 	year_label.tooltip_text = "One game year per simulation second"
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
 	for resource in ECONOMY.RESOURCES:
@@ -2130,7 +2109,7 @@ func _refresh() -> void:
 	var ship: Dictionary = _selected_ship(state)
 	var living: Array[int] = []
 	for craft in state.get("ships", []):
-		if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])):
+		if selected_units.has(int(craft["id"])):
 			living.append(int(craft["id"]))
 	selected_units = living
 	if ship.is_empty():
@@ -2944,21 +2923,15 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 			focus.release_focus()
 		_refresh()
 		return
-	if additive and not selected_units.is_empty():
-		var valid: bool = false
-		for craft in state["ships"]:
-			if int(craft["id"]) == next_ship and int(craft["owner"]) == _me():
-				valid = true
-				break
-		if not valid:
-			return
+	if additive and not selected_units.is_empty() and next_ship < 0:
+		return
 	selected_body = -1
 	selected_yard = -1
 	selected_ship_id = next_ship
 	if not additive:
 		selected_units.clear()
 	for craft in state["ships"]:
-		if int(craft["id"]) == selected_ship_id and int(craft["owner"]) == _me():
+		if int(craft["id"]) == selected_ship_id:
 			if additive and selected_units.has(selected_ship_id):
 				selected_units.erase(selected_ship_id)
 				selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
@@ -2986,12 +2959,14 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 
 func _select_box(rect: Rect2, additive: bool) -> void:
 	var state: Dictionary = _state()
+	if state.is_empty() or str(session.get("phase")) != "match":
+		return
 	if not additive:
 		selected_units.clear()
 	var poses: Dictionary = _ship_poses(state)
 	for craft in state.get("ships", []):
 		var id: int = int(craft["id"])
-		if int(craft["owner"]) == _me() and poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
+		if poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
 			selected_units.append(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 	follow_units = not selected_units.is_empty()
@@ -3003,7 +2978,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 
 func _command_at(point: Vector2, force_position: bool = false) -> void:
 	var state: Dictionary = _state()
-	if selected_units.is_empty() or state.is_empty():
+	if state.is_empty() or _selected_owned_units(state).is_empty():
 		return
 	var node: int = -1
 	var distance: float = INF
@@ -3075,22 +3050,23 @@ func _selected_miners() -> Array[int]:
 			miners.append(int(craft["id"]))
 	return miners
 
-func _selected_fighters() -> Array[int]:
-	var fighters: Array[int] = []
-	for craft in _state().get("ships", []):
-		if int(craft["owner"]) == _me() and craft["kind"] == "fighter" and selected_units.has(int(craft["id"])):
-			fighters.append(int(craft["id"]))
-	return fighters
+func _selected_owned_units(state: Dictionary) -> Array[int]:
+	var owned: Array[int] = []
+	for craft in state.get("ships", []):
+		if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])):
+			owned.append(int(craft["id"]))
+	return owned
 
 func _any_selected_holding() -> bool:
 	for craft in _state().get("ships", []):
-		if selected_units.has(int(craft["id"])) and bool(craft.get("holding", false)):
+		if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])) and bool(craft.get("holding", false)):
 			return true
 	return false
 
 func _hold_selected() -> void:
-	if not selected_units.is_empty():
-		session.call("request_unit_hold", selected_units, _any_selected_holding())
+	var owned: Array[int] = _selected_owned_units(_state())
+	if not owned.is_empty():
+		session.call("request_unit_hold", owned, _any_selected_holding())
 
 func _map_input(event: InputEvent) -> void:
 	if match_menu.visible:
@@ -3226,7 +3202,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				selected_units.clear()
 			for craft in _state().get("ships", []):
 				var id: int = int(craft["id"])
-				if int(craft["owner"]) == _me() and id in group and not selected_units.has(id):
+				if id in group and not selected_units.has(id):
 					selected_units.append(id)
 			selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 			follow_units = not selected_units.is_empty()
