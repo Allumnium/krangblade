@@ -2719,8 +2719,8 @@ static func step(state: Dictionary, dt: float) -> void:
 # Policy card identity is the pair (empire, definition ID); slots never duplicate cards.
 const POLICY_SLOTS = ["offense", "defense", "economy", "technology", "wildcard"]
 const POLICY_CARDS = {
-    "invasion": {"slot": "offense", "name": "Invasion", "warmup": 20.0, "military": true, "target": "hostile"},
-    "guard": {"slot": "defense", "name": "Guard", "warmup": 0.0, "military": true, "target": "friendly"},
+    "invasion": {"slot": "offense", "name": "Invasion", "warmup": 20.0, "military": true, "target": "hostile", "description": "Deploy fighters to selected systems and asteroid fields after warmup, including unoccupied sectors."},
+    "guard": {"slot": "defense", "name": "Guard", "warmup": 0.0, "military": true, "target": "friendly", "description": "Station fighters at selected systems and asteroid fields, including unoccupied sectors."},
     "expansion": {"slot": "economy", "name": "Expansion", "warmup": 0.0, "description": "Dispatch idle colony ships to neutral systems automatically."},
     "industry": {"slot": "economy", "name": "Industrial specialization", "warmup": 0.0, "description": "+20% manufactured output."},
     "conservation": {"slot": "economy", "name": "Resource conservation", "warmup": 0.0, "description": "-15% non-food civilian consumption."},

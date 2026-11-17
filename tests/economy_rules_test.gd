@@ -28,6 +28,7 @@ func _initialize() -> void:
     _test_policy_zone_commitments()
     _test_policy_zone_fleet_dispatch()
     _test_lasso_small_fleet()
+    _test_neutral_policy_occupation()
     _test_economy_policies()
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
     assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -1587,3 +1588,38 @@ func _test_lasso_small_fleet() -> void:
     for craft in fleet:
         assert(craft["dest"] == craft["operation_target"])
     print("PASS: lasso mixed POIs and small invasion allocations deploy without minimum-three deadlock")
+
+# Empty objectives remain valid without enemy ships or colonial ownership.
+func _test_neutral_policy_occupation() -> void:
+    for card in ["invasion", "guard"]:
+        var slot: String = "offense" if card == "invasion" else "defense"
+        var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
+        var graph: Dictionary = ECON.military_graph(state)
+        var neutral: int = int(graph["adjacent"][0][0])
+        var field: int = (state["planets"] as Array).size()
+        assert(neutral > 0 and neutral < field)
+        assert(int(state["planets"][neutral]["owner"]) == 0)
+        for i in range(2):
+            state["ships"].append({"id": 9400 + i, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": graph["points"][0], "dest": 0, "hp": ECON.SHIP_HP})
+        var targets: Array = [neutral, field]
+        assert(ECON.commit_military_policy(state, 1, slot, card, [{"targets": targets, "weight": 100}], []))
+        var arrived: bool = false
+        for tick in range(300):
+            ECON.step(state, 1.0)
+            var stationed: Array = []
+            for craft in state["ships"]:
+                if (craft["route"] as Array).is_empty() and targets.has(int(craft["at"])):
+                    stationed.append(int(craft["at"]))
+            if stationed.has(neutral) and stationed.has(field):
+                arrived = true
+                break
+        assert(arrived)
+        for tick in range(5):
+            ECON.step(state, 1.0)
+        assert(ECON.policy_fleet_weights(state, 1) == {neutral: 50, field: 50})
+        for craft in state["ships"]:
+            assert(targets.has(int(craft["at"])) and craft["at"] == craft["dest"] and (craft["route"] as Array).is_empty())
+        var claims: Array[int] = ECON.territory_claims(state)
+        assert(claims[neutral] == 1 and claims[field] == 1)
+        assert(int(state["planets"][neutral]["owner"]) == 0)
+    print("PASS: both Invasion and Guard occupy and hold empty systems and asteroid fields")
