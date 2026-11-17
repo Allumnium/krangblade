@@ -692,7 +692,7 @@ func _ship_stats(kind: String) -> String:
 func _ship_build_row(parent: Container, title_text: String, kind: String) -> Button:
 	var section: VBoxContainer = HUD.section(parent, "")
 	section.get_child(0).hide()
-	var disclosure: Dictionary = _make_disclosure(section, title_text.trim_prefix("BUILD ").capitalize())
+	var disclosure: Dictionary = _make_disclosure(section, title_text.trim_prefix("BUILD ").capitalize() + " (0)")
 	var body: VBoxContainer = disclosure["body"]
 	var build_progress := ProgressBar.new()
 	build_progress.custom_minimum_size.y = 12
@@ -705,9 +705,6 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
 	var costs: GridContainer = _cost_grid(disclosure["summary"])
 	_show_cost(costs, ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]))
 	var row: HBoxContainer = disclosure["actions"]
-	var maintained := _label("(0 / 0)", 11)
-	maintained.autowrap_mode = TextServer.AUTOWRAP_OFF
-	row.add_child(maintained)
 	var maintain_row := HBoxContainer.new()
 	body.add_child(maintain_row)
 	var maintain_caption := _label("Maintain", 12)
@@ -741,7 +738,7 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
 		continuous_checks[kind] = check
 	var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind(kind, ""), build_progress)
 	cancel.tooltip_text = "Cancel one order and stop repeat"
-	disclosure.merge({"maintained": maintained, "maintain_amount": amount, "infinity": infinity, "button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
+	disclosure.merge({"maintain_amount": amount, "infinity": infinity, "button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
 	build_cards[kind] = disclosure
 	return button
 
@@ -2315,20 +2312,23 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
 	for kind in build_cards:
 		var card: Dictionary = build_cards[kind]
 		var count: int = int(counts.get(kind, 0))
-		_set_timed_action(card["button"], "Build", _ship_build_years(p, kind))
+		_set_timed_action(card["button"], "Build (%d)" % count if count > 0 else "Build", _ship_build_years(p, kind))
 		_show_cost(card["costs"], ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]))
 		var finite: int = int(p.get("maintain", {}).get(kind, 0))
 		var unlimited: bool = bool(p.get("continuous", {}).get(kind, false))
 		var living: int = ECONOMY.origin_count(_state(), selected, kind) if not p.is_empty() else 0
-		card["maintained"].text = "(%d / %s)" % [living, "∞" if unlimited else str(finite)]
+		var count_text: String = "(%d / ∞)" % living if unlimited else ("(%d / %d)" % [living, finite] if finite > 0 else "(%d)" % living)
 		var amount: SpinBox = card["maintain_amount"]
 		amount.editable = owned
 		if not amount.get_line_edit().has_focus():
 			amount.set_value_no_signal(finite)
 		card["infinity"].visible = unlimited
 		amount.visible = not unlimited
-		_disclosure_title(card, card["title"].trim_prefix("BUILD ").capitalize() + (" (%d)" % count if count > 0 else ""))
-		card["button"].tooltip_text = _cost_text(ECONOMY._cost(kind, 1)) + " · %.0f population" % float(ECONOMY.CREW_COSTS[kind])
+		var caption: String = card["title"].trim_prefix("BUILD ").capitalize() + " " + count_text
+		_disclosure_title(card, caption)
+		var header: Button = card["header"]
+		header.tooltip_text = caption + "\nLiving ships originating at this system"
+		card["button"].tooltip_text = _cost_text(ECONOMY._cost(kind, 1)) + " · %.0f population" % float(ECONOMY.CREW_COSTS[kind]) + ("\n%d queued" % count if count > 0 else "")
 		var requirements: PackedStringArray = []
 		if not p.is_empty():
 			if ECONOMY.operational_shipyards(p) == 0:
