@@ -24,6 +24,7 @@ func _test_maintain_targets() -> void:
 	assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
+	_test_freighter_bays()
 	_test_policy_cards()
 	_test_policy_zone_commitments()
 	_test_policy_zone_fleet_dispatch()
@@ -843,6 +844,9 @@ func _initialize() -> void:
 	print("PASS: normalized POI force allocation, nearest assignments and continuous reversal")
 	# Simultaneous weapon fire: allies cannot be targeted and six hits kill.
 	var duel: Dictionary = ECON.create(force_map, players, ids, false)
+	# Isolate fighter-v-fighter combat from the starting planetary batteries.
+	for planet in duel["planets"]:
+		planet["pds"].clear()
 	var duel_graph: Dictionary = ECON.military_graph(duel)
 	for owner_id in [1, 3]:
 		duel["ships"].append({"id": owner_id, "owner": owner_id, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0, "dest": 0})
@@ -1359,9 +1363,18 @@ func _initialize() -> void:
 		assert(miners == 3 and fighters == 2)
 		assert(opening["planets"][opening_home]["stock"] == ECON.STARTING_STOCK)
 		assert(opening["planets"][opening_home]["population"] == ECON.HOME_POPULATION)
+		var starting_defenses: Dictionary = opening["planets"][opening_home]["pds"]
+		assert(starting_defenses.size() == 1 and starting_defenses.has(0))
+		assert(float(starting_defenses[0]["hp"]) == ECON.PDS_HP)
+	for planet in opening["planets"]:
+		if not planet["home"]:
+			assert(planet["pds"].is_empty())
 	var defenses: Dictionary = ECON.create(force_map, players, ids, false)
 	var defended: Dictionary = defenses["planets"][0]
 	assert(int(defended["planet_count"]) == ECON.system_bodies(defended, int(force_map["seed"]), 0).size())
+	assert(not ECON.enqueue(defenses, 1, 0, "pds", "0"))
+	# Test construction of a destroyed battery in its original slot.
+	defended["pds"].clear()
 	assert(not ECON.enqueue(defenses, 2, 0, "pds", "0"))
 	assert(not ECON.enqueue(defenses, 1, 0, "pds", "99"))
 	assert(ECON.enqueue(defenses, 1, 0, "pds", "0"))
@@ -1725,6 +1738,7 @@ func _test_wide_patrol_rally_and_conquest() -> void:
 	# A physical local defender wandering beyond laser range still contests
 	# the sector; widening patrols must not grant uncontested conquest.
 	state["planets"][1]["yards"].clear()
+	state["planets"][1]["pds"].clear()
 	var attacker: Dictionary = {"id": 9530, "owner": 1, "kind": "fighter", "at": 1, "dest": 1, "operation_target": 1, "route": [], "position": Vector2(2000, 0), "hp": ECON.SHIP_HP}
 	var defender: Dictionary = {"id": 9531, "owner": 2, "kind": "fighter", "at": 1, "dest": 1, "route": [], "position": Vector2(2500, 0), "hp": ECON.SHIP_HP}
 	state["ships"] = [attacker, defender]
@@ -1781,6 +1795,9 @@ func _test_conquest() -> void:
 	ECON._step_conquest(state, graph, 20.0)
 	assert(not planet.has("capture"))
 	planet["yards"].clear()
+	ECON._step_conquest(state, graph, ECON.CAPTURE_YEARS)
+	assert(not planet.has("capture"))
+	planet["pds"].clear()
 	ECON._step_conquest(state, graph, 10.0)
 	assert(float(planet["capture"]["held"]) == 10.0)
 	var defender: Dictionary = {"id": 9901, "owner": 2, "kind": "fighter", "at": 1, "dest": 1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP}
@@ -1830,6 +1847,51 @@ func _test_conquest_resistance_and_evacuation() -> void:
 	assert(before.distance_to(freighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
 	assert((freighter["position"] as Vector2).x > before.x)
 	print("PASS: planetary defense resistance and simultaneous destruction, safe cargo-preserving conquest reroute")
+
+func _test_freighter_bays() -> void:
+	var cargo: Dictionary = ECON.empty_stock()
+	for bay in ECON.freighter_cargo_bays(cargo):
+		assert(bay.is_empty())
+	cargo["Metals"] = ECON.CARGO_CAPACITY
+	var bays: Array = ECON.freighter_cargo_bays(cargo)
+	assert(bays.size() == 7)
+	for bay in bays:
+		assert(bay.size() == 1 and bay[0]["resource"] == "Metals")
+		assert(is_equal_approx(float(bay[0]["amount"]), ECON.FREIGHTER_BAY_CAPACITY))
+	cargo["Metals"] = 4.0
+	cargo["Plastics"] = 6.0
+	var totals: Dictionary = ECON.empty_stock()
+	for bay in ECON.freighter_cargo_bays(cargo):
+		var bay_total: float = 0.0
+		for segment in bay:
+			totals[segment["resource"]] += float(segment["amount"])
+			bay_total += float(segment["amount"])
+		assert(is_equal_approx(bay_total, ECON.FREIGHTER_BAY_CAPACITY))
+	assert(is_equal_approx(float(totals["Metals"]), 4.0))
+	assert(is_equal_approx(float(totals["Plastics"]), 6.0))
+	cargo = ECON.empty_stock()
+	cargo["Tech"] = 0.5
+	bays = ECON.freighter_cargo_bays(cargo)
+	assert(is_equal_approx(float(bays[0][0]["amount"]), 0.5))
+	for index in range(1, bays.size()):
+		assert(bays[index].is_empty())
+	# An actual freight trip can load and deliver all ten tons of one resource.
+	var map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(190.0, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 1}}, [1, 2], false)
+	var source: Dictionary = state["planets"][0]
+	var destination: Dictionary = state["planets"][1]
+	source["stock"]["Metals"] = 1000.0
+	destination["stock"]["Metals"] = 0.0
+	var ship: Dictionary = {"id": 1, "kind": "ship", "owner": 1, "at": 0, "route": [], "leg": 0.0, "position": Vector2.ZERO, "source": 0, "dest": 1, "cargo": ECON.empty_stock()}
+	ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 0.1)
+	assert(is_equal_approx(float(ship["cargo"]["Metals"]), ECON.CARGO_CAPACITY))
+	assert(is_equal_approx(ECON._cargo_total(ship), ECON.CARGO_CAPACITY))
+	assert(is_equal_approx(float(source["stock"]["Metals"]), 1000.0 - ECON.CARGO_CAPACITY))
+	assert(float(destination["stock"]["Metals"]) == 0.0)
+	ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 10.0)
+	assert(is_equal_approx(float(destination["stock"]["Metals"]), ECON.CARGO_CAPACITY))
+	assert(is_zero_approx(ECON._cargo_total(ship)))
+	print("PASS: seven shared tonnage bays, full single-resource and mixed loads, partial and empty cargo")
 
 func _test_antimatter_extraction() -> void:
 	for player_count in range(1, 9):

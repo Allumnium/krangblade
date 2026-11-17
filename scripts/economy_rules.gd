@@ -36,6 +36,8 @@ const FARM_VARIATION: float = 0.05
 const FARM_CYCLE_SECONDS: float = 100.0
 const START_YEAR: int = 1
 const CARGO_CAPACITY: float = 10.0
+const FREIGHTER_BAY_COUNT: int = 7
+const FREIGHTER_BAY_CAPACITY: float = CARGO_CAPACITY / FREIGHTER_BAY_COUNT
 const MINED_RESOURCES = ["Metals", "Crystals"]
 const ANTIMATTER = MAP.ANTIMATTER
 const FIELD_RESOURCES = ["Metals", "Crystals", ANTIMATTER]
@@ -158,7 +160,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 		var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
 		planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
 			"abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
-			"yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {}})
+			"yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {0: _new_pds()} if home else {}})
 	var ai_players: Array[int] = []
 	for id in ordered:
 		if bool(players[id].get("ai", false)):
@@ -665,6 +667,9 @@ static func pds_job(p: Dictionary) -> Dictionary:
 			return item
 	return {}
 
+static func _new_pds() -> Dictionary:
+	return {"hp": PDS_HP, "cooldown": 0.0, "target": -1, "laser_until": -1.0}
+
 static func next_pds(p: Dictionary) -> int:
 	for slot in range(int(p.get("planet_count", 0))):
 		if not p.get("pds", {}).has(slot):
@@ -943,7 +948,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 		"production":
 			p["levels"][item["target"]] = int(item["level"])
 		"pds":
-			p["pds"][int(item["target"])] = {"hp": PDS_HP, "cooldown": 0.0, "target": -1, "laser_until": -1.0}
+			p["pds"][int(item["target"])] = _new_pds()
 		"yard":
 			p["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0})
 		"yard_upgrade":
@@ -1069,6 +1074,25 @@ static func _cargo_total(ship: Dictionary) -> float:
 	for r in RESOURCES:
 		total += float(ship["cargo"][r])
 	return total + float(ship["cargo"].get(ANTIMATTER, 0.0))
+
+# Pack the shared tonnage into equal display bays, not resource-specific limits.
+static func freighter_cargo_bays(cargo: Dictionary) -> Array:
+	var bays: Array = []
+	var occupied: float = 0.0
+	for index in range(FREIGHTER_BAY_COUNT):
+		bays.append([])
+	var bay: int = 0
+	for resource in RESOURCES + [ANTIMATTER]:
+		var remaining: float = maxf(0.0, float(cargo.get(resource, 0.0)))
+		while remaining > EPS and bay < FREIGHTER_BAY_COUNT:
+			var amount: float = minf(remaining, FREIGHTER_BAY_CAPACITY - occupied)
+			bays[bay].append({"resource": resource, "amount": amount})
+			remaining -= amount
+			occupied += amount
+			if occupied >= FREIGHTER_BAY_CAPACITY - EPS:
+				bay += 1
+				occupied = 0.0
+	return bays
 
 static func _need(p: Dictionary, resource: String) -> float:
 	if not bool(p["thresholds"][resource].get("import", true)):

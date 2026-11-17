@@ -3111,12 +3111,20 @@ func _draw_map() -> void:
 			map_canvas.draw_arc(point, maxf(5.0, 15.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
 		map_canvas.draw_colored_polygon(shape, hull)
 		if ship["kind"] == "ship":
-			for k in range(ECONOMY.RESOURCES.size()):
-				var resource: String = ECONOMY.RESOURCES[k]
-				var fraction: float = clampf(float(ship["cargo"][resource]) / ECONOMY.CARGO_CAPACITY, 0.0, 1.0)
-				var module: Vector2 = point + direction * (5.0 - float(k % 3) * 7.0) + side * (-3.5 if k < 3 else 3.5)
-				var corners := PackedVector2Array([module + direction * 3 + side * 3, module - direction * 3 + side * 3, module - direction * 3 - side * 3, module + direction * 3 - side * 3])
-				map_canvas.draw_colored_polygon(corners, Color("#182333").lerp(HUD.COLORS[resource], clampf(fraction * 6.0, 0.0, 1.0)))
+			var bays: Array = ECONOMY.freighter_cargo_bays(ship["cargo"])
+			for k in range(bays.size()):
+				var row: int = floori(float(k - 1) / 2.0)
+				var module: Vector2 = point + direction * 11.5 if k == 0 else point + direction * (5.0 - float(row) * 7.0) + side * (-3.5 if k % 2 == 1 else 3.5)
+				# The nose bay is slightly shorter to fit within the hull.
+				var half_length: float = 2.5 if k == 0 else 3.0
+				var corners := PackedVector2Array([module + direction * half_length + side * 3, module - direction * half_length + side * 3, module - direction * half_length - side * 3, module + direction * half_length - side * 3])
+				map_canvas.draw_colored_polygon(corners, Color("#182333"))
+				var start: float = -half_length
+				for segment in bays[k]:
+					var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / ECONOMY.FREIGHTER_BAY_CAPACITY)
+					var filled := PackedVector2Array([module + direction * end + side * 3, module + direction * start + side * 3, module + direction * start - side * 3, module + direction * end - side * 3])
+					map_canvas.draw_colored_polygon(filled, HUD.COLORS[segment["resource"]])
+					start = end
 		var outline: PackedVector2Array = shape.duplicate()
 		outline.append(shape[0])
 		map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)

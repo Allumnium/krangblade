@@ -206,3 +206,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.34: Standardize Godot scripts and shaders on tab indentation, add EditorConfig and a mandatory CI indentation gate. No gameplay changes.
 
 - v0.17.35: Draw existing asteroid field access lanes even when depleted. Idle formations use variable-radius paths clipped to their local sector, with compact rally and engagement approach for military groups; no route topology changes. Verify visually and in larger matches.
+
+- v0.17.36: Seven flexible freighter display bays share the existing 10-ton cargo capacity. All empires start with one operational home planetary defense; neutral systems still have none. Playtest opening defense strength and loaded hull readability.
