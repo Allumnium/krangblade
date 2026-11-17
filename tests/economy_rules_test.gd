@@ -30,6 +30,8 @@ func _initialize() -> void:
 	_test_lasso_small_fleet()
 	_test_neutral_policy_occupation()
 	_test_idle_formations()
+	_test_depleted_field_routes()
+	_test_wide_patrol_rally_and_conquest()
 	_test_ai_defensive_policies()
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
@@ -669,8 +671,13 @@ func _initialize() -> void:
 	assert(is_zero_approx(float(mine_home["stock"]["Crystals"])))
 	assert(is_zero_approx(float(miner["cargo"]["Crystals"])))
 	assert(ECON.set_mining_policy(mineral, 1, 0, true, false, true))
-	for i in range(20):
+	# The ship may have been wandering away from its dock while no ore
+	# was enabled; allow the actual additional return-to-anchor travel.
+	var approach_years: int = ceili((miner["position"] as Vector2).distance_to(mineral_points[0]) / ECON.SHIP_SPEED)
+	for i in range(20 + approach_years):
 		ECON.step(mineral, 1.0)
+		if float(mine_home["stock"]["Crystals"]) >= 36.0 - ECON.EPS:
+			break
 	assert(is_equal_approx(float(mine_home["stock"]["Crystals"]), 36.0))
 	assert((mineral["map"]["fields"][0]["chunks"] as Array).is_empty())
 	assert(is_zero_approx(float(ECON.field_inventory(mineral["map"]["fields"][0])["Crystals"])))
@@ -1639,7 +1646,8 @@ func _test_idle_formations() -> void:
 		state["ships"].append({"id": 9500 + i, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": center, "dest": 0, "hp": ECON.SHIP_HP})
 	for i in range(2):
 		state["ships"].append({"id": 9510 + i, "owner": 1, "kind": "colony_ship", "at": 0, "route": [], "leg": 0.0, "position": center, "dest": -1, "hp": ECON.SHIP_HP})
-	for tick in range(70):
+	var furthest: float = 0.0
+	for tick in range(500):
 		var before: Dictionary = {}
 		for craft in state["ships"]:
 			before[craft["id"]] = craft["position"]
@@ -1647,7 +1655,9 @@ func _test_idle_formations() -> void:
 		for craft in state["ships"]:
 			assert((craft["position"] as Vector2).distance_to(before[craft["id"]]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
 			assert(int(craft["at"]) == 0 and (craft["route"] as Array).is_empty())
-			assert((craft["position"] as Vector2).distance_to(center) <= ECON.AI_RALLY_RADIUS)
+			assert(ECON.sector_contains(graph, 0, craft["position"]))
+			furthest = maxf(furthest, (craft["position"] as Vector2).distance_to(center))
+	assert(furthest > ECON.AI_RALLY_RADIUS * 2.0)
 	var squad: Array = state["ships"]
 	var old_position: Vector2 = squad[0]["position"]
 	for tick in range(10):
@@ -1662,6 +1672,70 @@ func _test_idle_formations() -> void:
 	for i in range(3):
 		assert(int(squad[i]["dest"]) == objective and not (squad[i]["route"] as Array).is_empty())
 	print("PASS: authoritative idle formations wander, preserve bounds and resume policy navigation")
+
+func _test_depleted_field_routes() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var count: int = state["planets"].size()
+	for index in range(state["map"]["fields"].size()):
+		var field: Dictionary = state["map"]["fields"][index]
+		var node: int = count + index
+		var anchors: Array[int] = ECON.field_access_systems(state["map"], field)
+		assert(not anchors.is_empty())
+		for anchor in anchors:
+			assert(graph["edges"].has([anchor, node]))
+		field["chunks"].clear()
+		assert(ECON.military_graph(state)["adjacent"][node] == anchors)
+		for anchor in anchors:
+			assert(ECON.military_graph(state)["edges"].has([anchor, node]))
+	var field_pos: Vector2 = graph["points"][count]
+	var fighter: Dictionary = {"id": 9515, "owner": 1, "kind": "fighter", "at": count, "route": [], "position": field_pos, "dest": count, "hp": ECON.SHIP_HP}
+	state["ships"] = [fighter]
+	assert(ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [count], "weight": 100}], []))
+	var max_distance: float = 0.0
+	for tick in range(100):
+		var before: Vector2 = fighter["position"]
+		ECON.step(state, 0.5)
+		assert(fighter["at"] == count and fighter["route"].is_empty())
+		assert(ECON.sector_contains(graph, count, fighter["position"]))
+		assert(before.distance_to(fighter["position"]) <= ECON.SHIP_SPEED * 0.5 + 0.01)
+		max_distance = maxf(max_distance, field_pos.distance_to(fighter["position"]))
+	assert(max_distance > ECON.AI_RALLY_RADIUS)
+	print("PASS: depleted asteroid access routes and sector-bounded patrol")
+
+func _test_wide_patrol_rally_and_conquest() -> void:
+	var map_data: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(2000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	for i in range(3):
+		state["ships"].append({"id": 9520 + i, "owner": 1, "kind": "fighter", "at": 0, "dest": 0, "route": [], "position": Vector2(-600.0, 20.0 * i), "hp": ECON.SHIP_HP})
+	assert(ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [1], "weight": 100}], []))
+	state["elapsed"] = 20.0
+	var launched: bool = false
+	for tick in range(80):
+		var before: Vector2 = state["ships"][0]["position"]
+		ECON.step(state, 0.5)
+		assert(before.distance_to(state["ships"][0]["position"]) <= ECON.SHIP_SPEED * 0.5 + 0.01)
+		if int(state["ships"][0]["dest"]) == 1:
+			launched = true
+			break
+	assert(launched)
+	for ship in state["ships"]:
+		assert(ship["dest"] == 1 and not ship["route"].is_empty())
+	# A physical local defender wandering beyond laser range still contests
+	# the sector; widening patrols must not grant uncontested conquest.
+	state["planets"][1]["yards"].clear()
+	var attacker: Dictionary = {"id": 9530, "owner": 1, "kind": "fighter", "at": 1, "dest": 1, "operation_target": 1, "route": [], "position": Vector2(2000, 0), "hp": ECON.SHIP_HP}
+	var defender: Dictionary = {"id": 9531, "owner": 2, "kind": "fighter", "at": 1, "dest": 1, "route": [], "position": Vector2(2500, 0), "hp": ECON.SHIP_HP}
+	state["ships"] = [attacker, defender]
+	assert(ECON.sector_contains(graph, 1, defender["position"]))
+	assert((defender["position"] as Vector2).distance_to(attacker["position"]) > ECON.LASER_RANGE)
+	ECON._step_conquest(state, graph, ECON.CAPTURE_YEARS)
+	assert(state["planets"][1]["owner"] == 2 and not state["planets"][1].has("capture"))
+	state["ships"].erase(defender)
+	ECON._step_conquest(state, graph, ECON.CAPTURE_YEARS)
+	assert(state["planets"][1]["owner"] == 1)
+	print("PASS: wide patrol returns to physical rally and defenders contest their sector")
 
 func _test_ai_defensive_policies() -> void:
 	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
