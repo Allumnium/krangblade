@@ -1803,6 +1803,25 @@ func _test_map_layouts() -> void:
 						assert(bridges.has(Vector2i(2 * sectors + mini(sector, next), 2 * sectors + maxi(sector, next))))
 						assert(bridges.has(Vector2i(sector, sector + sectors)))
 						assert(bridges.has(Vector2i(sector + sectors, sector + 2 * sectors)))
+				if layout == "Hex Grid":
+					var dimensions: Vector2i = MAP.hex_dimensions(player_count)
+					var slots: Array = galaxy["hex_slots"]
+					var expected_bridges: Dictionary = {}
+					for row in range(dimensions.y):
+						for column in range(dimensions.x):
+							var slot: int = row * dimensions.x + column
+							if column + 1 < dimensions.x:
+								expected_bridges[Vector2i(slot, slot + 1)] = true
+							if row + 1 < dimensions.y and (column + row) % 2 == 1:
+								expected_bridges[Vector2i(slot, slot + dimensions.x)] = true
+					var actual_bridges: Dictionary = {}
+					for edge in galaxy["edges"]:
+						var a: int = slots[int(galaxy["clusters"][edge[0]])]
+						var b: int = slots[int(galaxy["clusters"][edge[1]])]
+						if a != b:
+							actual_bridges[Vector2i(mini(a, b), maxi(a, b))] = true
+					assert(actual_bridges == expected_bridges)
+					assert(actual_bridges.size() >= slots.size()) # at least one closed cycle
 				var points: Array = galaxy["points"]
 				var degrees: Array[int] = []
 				degrees.resize(points.size())
@@ -1849,6 +1868,7 @@ func _test_map_layouts() -> void:
 				assert(deposits == (1 if player_count <= 2 else 2))
 	assert(MAP.generate(7021, 4, "Radial")["points"] != MAP.generate(7021, 4, "Grid")["points"])
 	assert(MAP.generate(7021, 4, "Grid")["points"] != MAP.generate(7021, 4, "Scramble")["points"])
+	assert(MAP.generate(7021, 4, "Grid")["points"] != MAP.generate(7021, 4, "Hex Grid")["points"])
 	print("PASS: all map layouts, seed reproducibility, connected routes and protected antimatter")
 
 func _test_antimatter_extraction() -> void:
