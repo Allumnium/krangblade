@@ -2,6 +2,7 @@ extends Control
 ## Warbound menu and lobby view; networking is owned by /root/GameSession.
 
 const RULES = preload("res://scripts/lobby_rules.gd")
+const MAP = preload("res://scripts/planet_map.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const TEXT := HUD.TEXT
@@ -25,6 +26,8 @@ var solo_rows: Dictionary = {}
 var solo_add_button: Button
 var solo_start_button: Button
 var solo_seed_edit: LineEdit
+var solo_layout_picker: OptionButton
+var lobby_layout_picker: OptionButton
 
 func _ready() -> void:
 	theme = HUD.create()
@@ -164,6 +167,9 @@ func _show_solo_setup() -> void:
 	settings.add_theme_constant_override("separation", 10)
 	settings_panel.add_child(settings)
 	settings.add_child(_text("Game settings", 20))
+	settings.add_child(_text("Map layout", 14, MUTED))
+	solo_layout_picker = _map_layout_picker()
+	settings.add_child(solo_layout_picker)
 	settings.add_child(_text("Map seed", 14, MUTED))
 	solo_seed_edit = LineEdit.new()
 	solo_seed_edit.placeholder_text = "Random"
@@ -276,7 +282,7 @@ func _start_solo_from_setup() -> void:
 		solo_seed_edit.grab_focus()
 		return
 	var map_seed: int = int(randi()) if seed_text.is_empty() else seed_text.to_int()
-	network.call("start_solo", int(solo_players[1]["team"]), opponents, colors, map_seed)
+	network.call("start_solo", int(solo_players[1]["team"]), opponents, colors, map_seed, MAP.LAYOUTS[solo_layout_picker.selected])
 
 func _show_multiplayer() -> void:
 	screen = "multiplayer"
@@ -359,6 +365,13 @@ func _show_lobby() -> void:
 	roster.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	roster.add_theme_constant_override("separation", 3)
 	roster_scroll.add_child(roster)
+	var layout_row := HBoxContainer.new()
+	left_col.add_child(layout_row)
+	layout_row.add_child(_text("Map layout", 14, MUTED))
+	lobby_layout_picker = _map_layout_picker()
+	lobby_layout_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	layout_row.add_child(lobby_layout_picker)
+	lobby_layout_picker.item_selected.connect(func(index: int) -> void: network.call("choose_map_layout", MAP.LAYOUTS[index]))
 	var buttons := HBoxContainer.new()
 	left_col.add_child(buttons)
 	ready_button = _button("READY", _toggle_ready)
@@ -398,6 +411,14 @@ func _refresh_status() -> void:
 	elif screen == "multiplayer" and is_instance_valid(multiplayer_status_label):
 		multiplayer_status_label.text = str(network.get("status"))
 
+func _map_layout_picker() -> OptionButton:
+	var picker := OptionButton.new()
+	for layout in MAP.LAYOUTS:
+		picker.add_item(layout)
+	picker.select(0)
+	picker.tooltip_text = "Radial: outer starts, central antimatter. Grid: lattice clusters. Scramble: irregular clusters. All layouts keep antimatter away from starting systems."
+	return picker
+
 func _refresh_roster() -> void:
 	if screen != "lobby" or not is_instance_valid(roster):
 		return
@@ -407,6 +428,9 @@ func _refresh_roster() -> void:
 	var roster_data: Dictionary = network.get("players")
 	var is_host: bool = multiplayer.is_server()
 	var is_lobby: bool = str(network.get("phase")) == "lobby"
+	if is_instance_valid(lobby_layout_picker):
+		lobby_layout_picker.select(maxi(0, MAP.LAYOUTS.find(str(network.get("map_layout")))))
+		lobby_layout_picker.disabled = not is_lobby or not is_host
 	# The header button is a descendant of the lobby's content panel.
 	var add_ai_buttons: Array = find_children("AddLobbyAI", "Button", true, false)
 	if not add_ai_buttons.is_empty():

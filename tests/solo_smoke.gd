@@ -7,6 +7,10 @@ func _initialize() -> void:
 
 func _run() -> void:
 	var session: Node = root.get_node("GameSession")
+	if bool(session.call("start_solo", 1, [], [], 827, "invalid")):
+		push_error("Invalid solo map layout accepted")
+		quit(1)
+		return
 	if not (not bool(session.call("start_solo", 1, [2], [1, 1]))):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
@@ -113,6 +117,10 @@ func _run() -> void:
 		quit(1)
 		return
 	var state: Dictionary = session.get("economy")
+	if state["map"].get("layout") != MAP.DEFAULT_LAYOUT:
+		push_error("Default solo layout is not Radial")
+		quit(1)
+		return
 	if not (int(state["time_speed"]) == 1):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
@@ -219,7 +227,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (bool(session.call("start_solo", 3, [3, 2], [8, 4, 6]))):
+	if not (bool(session.call("start_solo", 3, [3, 2], [8, 4, 6], 827, "Grid"))):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
@@ -230,6 +238,10 @@ func _run() -> void:
 	var setup: Dictionary = session.get("economy")
 	if not (int(setup["time_speed"]) == 1):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
+		quit(1)
+		return
+	if setup["map"].get("layout") != "Grid":
+		push_error("Explicit solo map layout not applied")
 		quit(1)
 		return
 	if not (setup["map"]["cluster_sizes"].size() == 9):

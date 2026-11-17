@@ -7,8 +7,18 @@ const LONGEST_LINK_YEARS: float = 100.0
 const MAX_CONNECTIONS: int = 3
 const EXTRA_LINK_CHANCE: float = 0.35
 const ANTIMATTER := "Raw antimatter"
+const LAYOUTS: Array[String] = ["Radial", "Grid", "Scramble"]
+const DEFAULT_LAYOUT: String = "Radial"
+# Clearance from a starting system to the edge of a special field, before
+# the map's common travel-distance normalization.
+const ANTIMATTER_CLEARANCE: float = 700.0
 
-static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
+static func valid_layout(layout: String) -> bool:
+	return LAYOUTS.has(layout)
+
+static func generate(seed_value: int, player_count: int = 3, layout: String = DEFAULT_LAYOUT) -> Dictionary:
+	if not valid_layout(layout):
+		layout = DEFAULT_LAYOUT
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	player_count = clampi(player_count, 1, 8)
@@ -33,6 +43,67 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
 		centers.append(Vector2(625.0 + float(slot % columns) * 1250.0, 525.0 + floorf(float(slot) / columns) * 1050.0) + Vector2(rng.randf_range(-90, 90), rng.randf_range(-70, 70)))
 		groups.append([])
 		sizes.append(6 if i < player_count else clampi(roundi(rng.randfn(6.0, 1.5)), 3, 9))
+	# The original clustered lattice supplies Grid and a deterministic fallback.
+	# Keep the geometry RNG separate from local system/resource generation.
+	var layout_rng := RandomNumberGenerator.new()
+	layout_rng.seed = seed_value + 49717
+	if layout == "Radial":
+		var inner_count: int = player_count - 1
+		var inner_radius: float = 1250.0 if inner_count <= 2 else maxf(1250.0, 1250.0 / (2.0 * sin(PI / float(inner_count))))
+		var middle_radius: float = inner_radius + 1250.0
+		var outer_radius: float = middle_radius + 1250.0
+		if player_count == 1:
+			middle_radius = 1250.0
+			outer_radius = 2500.0
+		bounds = Vector2.ONE * (outer_radius + 650.0) * 2.0
+		var center: Vector2 = bounds * 0.5
+		var rotation: float = layout_rng.randf_range(0.0, TAU)
+		centers.clear()
+		for ring in range(2):
+			for i in range(player_count):
+				var angle: float = rotation + TAU * float(i) / player_count
+				centers.append(center + Vector2.from_angle(angle) * (outer_radius if ring == 0 else middle_radius))
+		centers.append(center)
+		for i in range(inner_count):
+			var angle: float = rotation + TAU * (float(i) + 0.5) / maxf(1.0, float(inner_count))
+			centers.append(center + Vector2.from_angle(angle) * inner_radius)
+	elif layout == "Scramble":
+		var scattered_bounds := Vector2(columns * 1750.0, rows * 1600.0)
+		var scattered: Array[Vector2] = []
+		for i in range(cluster_count):
+			for attempt in range(400):
+				var candidate := Vector2(layout_rng.randf_range(550.0, scattered_bounds.x - 550.0), layout_rng.randf_range(550.0, scattered_bounds.y - 550.0))
+				var separated: bool = true
+				for other in scattered:
+					if candidate.distance_to(other) < 1050.0:
+						separated = false
+						break
+				if separated:
+					scattered.append(candidate)
+					break
+			if scattered.size() != i + 1:
+				break
+		if scattered.size() == cluster_count:
+			bounds = scattered_bounds
+			centers.clear()
+			# Farthest-first home selection avoids packing starts into one region.
+			centers.append(scattered.pop_at(0))
+			while centers.size() < player_count:
+				var best_index: int = 0
+				var best_distance: float = -1.0
+				for i in range(scattered.size()):
+					var nearest_home: float = INF
+					for home in centers:
+						nearest_home = minf(nearest_home, scattered[i].distance_to(home))
+					if nearest_home > best_distance:
+						best_distance = nearest_home
+						best_index = i
+				centers.append(scattered.pop_at(best_index))
+			centers.append_array(scattered)
+		else:
+			# Bounded fallback: jitter the spaced lattice, not an unbounded retry.
+			for i in range(centers.size()):
+				centers[i] += Vector2(layout_rng.randf_range(-100.0, 100.0), layout_rng.randf_range(-80.0, 80.0))
 	var points: Array[Vector2] = []
 	var clusters: Array[int] = []
 	# Indices 0..player_count-1 remain the ordered player homeworlds.
@@ -85,18 +156,24 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
 		var best_edge: Array = []
 		var next_group: int = -1
 		var best_score: float = INF
-		for i in joined:
-			for j in range(cluster_count):
-				if joined.has(j):
-					continue
-				var pair: Array = _closest_pair(points, groups[i], groups[j], [], degrees, max_junctions - junctions)
-				if pair.is_empty():
-					continue
-				var score: float = _edge_score(points, pair, degrees)
-				if score < best_score:
-					best_score = score
-					best_edge = pair
-					next_group = j
+		for pass_index in range(2):
+			for i in joined:
+				for j in range(cluster_count):
+					if joined.has(j):
+						continue
+					if pass_index == 0 and layout == "Radial":
+						if (i < player_count and j != i + player_count) or (j < player_count and i != j + player_count):
+							continue
+					var pair: Array = _closest_pair(points, groups[i], groups[j], [], degrees, max_junctions - junctions)
+					if pair.is_empty():
+						continue
+					var score: float = _edge_score(points, pair, degrees)
+					if score < best_score:
+						best_score = score
+						best_edge = pair
+						next_group = j
+			if not best_edge.is_empty():
+				break
 		junctions += _new_junctions(best_edge, degrees)
 		_add_edge(edges, degrees, best_edge)
 		joined.append(next_group)
@@ -109,35 +186,67 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
 			var limit: float = 410.0 if clusters[i] == clusters[j] else 850.0
 			if distance <= limit and not edges.has([i, j]):
 				candidates.append([i, j])
+	# Reserve remote special deposits before ordinary fields occupy their space.
+	# Use the central neutral cluster in Radial, and seeded shuffled neutral
+	# sites in Grid/Scramble. Every special field must clear every home.
+	var special_sites: Array[Vector2] = []
+	for group in range(player_count, cluster_count):
+		if layout == "Radial" and group != player_count * 2:
+			continue
+		for y in range(-5, 6):
+			for x in range(-5, 6):
+				special_sites.append(centers[group] + Vector2(x * 80.0, y * 80.0))
+	var galaxy_center: Vector2 = bounds * 0.5
+	if layout == "Radial":
+		special_sites.sort_custom(func(a: Vector2, b: Vector2) -> bool: return a.distance_squared_to(galaxy_center) < b.distance_squared_to(galaxy_center))
+	else:
+		for i in range(special_sites.size() - 1, 0, -1):
+			var j: int = layout_rng.randi_range(0, i)
+			var swap: Vector2 = special_sites[i]
+			special_sites[i] = special_sites[j]
+			special_sites[j] = swap
+	var special: Array = []
+	var needed: int = 1 if player_count <= 2 else 2
+	var special_extent: float = 0.0
+	for center in special_sites:
+		if special.size() >= needed:
+			break
+		var radius: float = 48.0
+		var field: Dictionary = _safe_field(center, radius, points, edges, special)
+		if field.is_empty():
+			continue
+		var remote: bool = true
+		var anchor: int = int(field["anchor"])
+		var access: float = center.distance_to(points[anchor]) * 1.5 + radius
+		for home in range(player_count):
+			if center.distance_to(points[home]) < maxf(ANTIMATTER_CLEARANCE + radius, access + 1.0):
+				remote = false
+				break
+		if not remote:
+			continue
+		field["Metals"] = 1.0
+		field["Crystals"] = 1.0
+		field["antimatter"] = true
+		special.append(field)
+		special_extent = maxf(special_extent, center.distance_to(galaxy_center))
+	# Keep ordinary starting access intact; special deposits never consume
+	# ordinary field slots or occupy an ordinary lane.
 	var fields: Array = []
+	var occupied: Array = special.duplicate()
 	for pair in candidates:
 		if fields.size() >= cluster_count * 2:
 			break
 		var center: Vector2 = (points[pair[0]] + points[pair[1]]) * 0.5
 		var radius: float = rng.randf_range(32.0, 92.0)
-		var safe: bool = true
-		var anchor: int = -1
-		var nearest: float = INF
-		for i in range(count):
-			var distance: float = center.distance_to(points[i])
-			if distance < radius + 45.0:
-				safe = false
-			if distance < nearest:
-				nearest = distance
-				anchor = i
-		for edge in edges:
-			if Geometry2D.get_closest_point_to_segment(center, points[edge[0]], points[edge[1]]).distance_to(center) <= radius:
-				safe = false
-		for field in fields:
-			if center.distance_to(field["position"]) < radius + float(field["radius"]) + 30.0:
-				safe = false
-			if Geometry2D.get_closest_point_to_segment(field["position"], points[anchor], center).distance_to(field["position"]) <= float(field["radius"]):
-				safe = false
-			if Geometry2D.get_closest_point_to_segment(center, points[int(field["anchor"])], field["position"]).distance_to(center) <= radius:
-				safe = false
-		if safe:
-			fields.append({"position": center, "radius": radius, "anchor": anchor,
-				"Metals": rng.randf_range(1.0, 2.0), "Crystals": rng.randf_range(1.0, 2.0)})
+		if layout == "Radial" and center.distance_to(galaxy_center) < special_extent:
+			continue
+		var field: Dictionary = _safe_field(center, radius, points, edges, occupied)
+		if not field.is_empty():
+			field["Metals"] = rng.randf_range(1.0, 2.0)
+			field["Crystals"] = rng.randf_range(1.0, 2.0)
+			fields.append(field)
+			occupied.append(field)
+	fields.append_array(special)
 	# At most one optional local shortcut, on some maps only. Never
 	# violate the degree/junction limits or cross an asteroid field.
 	if rng.randf() < EXTRA_LINK_CHANCE:
@@ -170,21 +279,35 @@ static func generate(seed_value: int, player_count: int = 3) -> Dictionary:
 		field["position"] = (field["position"] as Vector2) * distance_scale
 		field["radius"] = float(field["radius"]) * distance_scale
 		_populate_field(field, rng)
-	# Reclassify the innermost obstacle fields after generation so the
-	# existing safe lane geometry, access points and seed remain unchanged.
-	var inner: Array = fields.duplicate()
-	var galaxy_center: Vector2 = bounds * distance_scale * 0.5
-	inner.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return (a["position"] as Vector2).distance_squared_to(galaxy_center) < (b["position"] as Vector2).distance_squared_to(galaxy_center))
-	for i in range(mini(inner.size(), 1 if player_count <= 2 else 2)):
-		var field: Dictionary = inner[i]
-		field["antimatter"] = true
-		field["Metals"] = 0.0
-		field["Crystals"] = 0.0
-		field[ANTIMATTER] = 1.0
-		for chunk in field["chunks"]:
-			chunk["resource"] = ANTIMATTER
-	return {"seed": seed_value, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
+		if bool(field.get("antimatter", false)):
+			field["Metals"] = 0.0
+			field["Crystals"] = 0.0
+			field[ANTIMATTER] = 1.0
+			for chunk in field["chunks"]:
+				chunk["resource"] = ANTIMATTER
+	return {"seed": seed_value, "layout": layout, "antimatter_home_clearance": ANTIMATTER_CLEARANCE * distance_scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * distance_scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": max_junctions}
+
+static func _safe_field(center: Vector2, radius: float, points: Array[Vector2], edges: Array, fields: Array) -> Dictionary:
+	var anchor: int = -1
+	var nearest: float = INF
+	for i in range(points.size()):
+		var distance: float = center.distance_to(points[i])
+		if distance < radius + 45.0:
+			return {}
+		if distance < nearest:
+			nearest = distance
+			anchor = i
+	for edge in edges:
+		if Geometry2D.get_closest_point_to_segment(center, points[edge[0]], points[edge[1]]).distance_to(center) <= radius:
+			return {}
+	for field in fields:
+		if center.distance_to(field["position"]) < radius + float(field["radius"]) + 30.0:
+			return {}
+		if Geometry2D.get_closest_point_to_segment(field["position"], points[anchor], center).distance_to(field["position"]) <= float(field["radius"]):
+			return {}
+		if Geometry2D.get_closest_point_to_segment(center, points[int(field["anchor"])], field["position"]).distance_to(center) <= radius:
+			return {}
+	return {"position": center, "radius": radius, "anchor": anchor}
 
 static func system_names(seed_value: int, count: int) -> Array[String]:
 	var prefixes := ["Astra", "Vey", "Kor", "Nyx", "Sol", "Tha", "Zer", "Eri", "Vor", "Ly", "Or", "Kael", "Nex", "Quor", "Vel", "Syr", "Ae", "Tal", "Iri", "Xan", "Dra", "Cyr", "Mer", "Rhy"]
