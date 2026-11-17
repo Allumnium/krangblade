@@ -3140,7 +3140,8 @@ var policy_draft_card: String = ""
 var policy_draft_slot: String = ""
 var policy_brush_mode: int = 0
 var policy_brush_cursor: Vector2 = Vector2.ZERO
-var policy_brush_radius: float = 55.0
+var policy_brush_radius: float = 28.0
+var policy_brush_size_label: Label
 var policy_brush_strokes: Array[Vector3] = []
 var policy_zone_overlay: ColorRect
 var policy_zone_material: ShaderMaterial
@@ -3338,6 +3339,22 @@ func _build_policy_ui() -> void:
     policy_editor_card = _label("", 18)
     editor_body.add_child(policy_editor_card)
     editor_body.add_child(_label("Left: paint   Right: erase", 13))
+    var brush_row := HBoxContainer.new()
+    editor_body.add_child(brush_row)
+    policy_brush_size_label = _label("Brush size: 28", 13)
+    policy_brush_size_label.custom_minimum_size.x = 112
+    brush_row.add_child(policy_brush_size_label)
+    var brush_slider := HSlider.new()
+    brush_slider.min_value = 10
+    brush_slider.max_value = 80
+    brush_slider.step = 1
+    brush_slider.value = policy_brush_radius
+    brush_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    brush_row.add_child(brush_slider)
+    brush_slider.value_changed.connect(func(value: float) -> void:
+        policy_brush_radius = value
+        policy_brush_size_label.text = "Brush size: %d" % roundi(value)
+        map_canvas.queue_redraw())
     policy_editor_rows = VBoxContainer.new()
     editor_body.add_child(policy_editor_rows)
     policy_editor_status = _label("", 13)
