@@ -36,7 +36,11 @@ class MapPreview:
 		for index in range(points.size()):
 			var position: Vector2 = offset + points[index] * scale_factor
 			var home: bool = index < colors.size()
-			draw_circle(position, 5.0 if home else 2.5, colors[index] if home else Color("#b0c1d2"))
+			var empty: bool = graph.get("planetless", []).has(index)
+			if empty:
+				draw_arc(position, 2.5, 0.0, TAU, 12, Color("#8197ac"), 1.0, true)
+			else:
+				draw_circle(position, 5.0 if home else 2.5, colors[index] if home else Color("#b0c1d2"))
 			if home:
 				draw_arc(position, 6.0, 0.0, TAU, 20, colors[index], 1.0, true)
 
@@ -550,7 +554,7 @@ func _new_map_preview(parent: Container) -> Control:
 	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(preview)
 	preview.resized.connect(preview.queue_redraw)
-	var legend := _text("Colored: starts  ·  Grey: systems  ·  Brown: asteroids  ·  Violet: antimatter", 11, MUTED)
+	var legend := _text("Colored: starts  ·  Solid: planetary systems  ·  Hollow: planetless  ·  Brown: asteroids  ·  Violet: antimatter", 11, MUTED)
 	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	parent.add_child(legend)
 	return preview
