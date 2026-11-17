@@ -56,6 +56,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var radial: bool = layout == "Radial"
+	var grid: bool = layout == "Grid"
 	var hex: bool = layout == "Hex Grid"
 	var sectors: int = maxi(3, player_count)
 	var group_count: int = sectors * 2 if radial else cluster_count_for(player_count, layout)
@@ -64,8 +65,10 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	var groups: Array = []
 	var columns: int = ceili(sqrt(float(group_count)))
 	var rows: int = ceili(float(group_count) / columns)
-	var spacing: float = 3100.0 if hex else 2100.0
+	var spacing: float = 1600.0 if hex else (1400.0 if grid else 2100.0)
 	var bounds: Vector2 = Vector2(columns, rows) * spacing
+	if hex:
+		bounds = Vector2(columns + 0.5, 1.0 + (rows - 1) * sqrt(3.0) * 0.5) * spacing
 	var rotation: float = rng.randf_range(0.0, TAU)
 	if radial:
 		var inner: float = maxf(1600.0, 1800.0 / (2.0 * sin(PI / float(sectors))))
@@ -79,8 +82,12 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	else:
 		var candidates: Array[Vector2] = []
 		for index in range(group_count):
-			var jitter: float = 0.25 if layout == "Scramble" else 0.17
-			candidates.append(Vector2(float(index % columns) + 0.5, floorf(float(index) / columns) + 0.5) * spacing + Vector2(rng.randf_range(-jitter, jitter), rng.randf_range(-jitter, jitter)) * spacing)
+			var row: int = index / columns
+			var lattice: Vector2 = Vector2(float(index % columns) + 0.5, float(row) + 0.5)
+			if hex:
+				lattice = Vector2(lattice.x + float(row % 2) * 0.5, 0.5 + float(row) * sqrt(3.0) * 0.5)
+			var jitter: float = 0.0 if grid or hex else 0.25
+			candidates.append(lattice * spacing + Vector2(rng.randf_range(-jitter, jitter), rng.randf_range(-jitter, jitter)) * spacing)
 		centers.append(candidates.pop_at(rng.randi_range(0, candidates.size() - 1)))
 		while centers.size() < player_count:
 			var best: int = 0
@@ -99,7 +106,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 		sizes.append(6 if hex else (1 if radial and player_count == 1 else (2 if radial and player_count == 2 else 3)))
 	if not radial and not hex:
 		for group in range(0, group_count - 1, 2):
-			if rng.randf() < 0.65:
+			if rng.randf() < 0.65 or grid:
 				var shift: int = 1 if rng.randf() < 0.5 else -1
 				sizes[group] += shift
 				sizes[group + 1] -= shift
@@ -111,10 +118,16 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 		var center: Vector2 = centers[group]
 		var angle: float = rng.randf_range(0.0, TAU)
 		if hex:
-			var radius: float = rng.randf_range(480.0, 650.0)
+			var radius: float = 460.0
 			for index in range(6):
-				var direction: float = angle + TAU * float(index) / 6.0 + rng.randf_range(-0.12, 0.12)
-				positions.append(center + Vector2.from_angle(direction) * radius * rng.randf_range(0.8, 1.2))
+				var direction: float = TAU * float(index) / 6.0
+				positions.append(center + Vector2.from_angle(direction) * radius)
+		elif grid:
+			# Each cluster occupies a two-by-two patch on the finer square lattice.
+			var offsets: Array[Vector2] = [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]
+			var start: int = rng.randi_range(0, 3)
+			for index in range(sizes[group]):
+				positions.append(center + offsets[(start + index) % 4] * spacing * 0.15)
 		else:
 			positions.append(center)
 			for index in range(1, sizes[group]):
@@ -146,10 +159,10 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	degrees.resize(points.size())
 	degrees.fill(0)
 	for group in groups:
-		if hex:
-			for index in range(6):
+		if hex or (grid and group.size() == 4):
+			for index in range(group.size()):
 				var first: int = group[index]
-				var second: int = group[(index + 1) % 6]
+				var second: int = group[(index + 1) % group.size()]
 				_add_edge(edges, degrees, [mini(first, second), maxi(first, second)])
 		else:
 			var connected: Array = [group[0]]
@@ -167,9 +180,11 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 		_connect_radial_bridges(points, groups, bridges, edges, degrees)
 	else:
 		var joined: Array = [0]
+		var connected_groups: Dictionary = {}
 		while joined.size() < group_count:
 			var best_pair: Array = []
 			var best_group: int = -1
+			var best_from: int = -1
 			var best_distance: float = INF
 			for first in joined:
 				for second in range(group_count):
@@ -179,12 +194,19 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 					if pair.is_empty():
 						continue
 					var distance: float = points[pair[0]].distance_squared_to(points[pair[1]])
+					# Prefer lattice neighbors over diagonal or skipping links.
+					if (grid or hex) and centers[first].distance_to(centers[second]) > spacing * 1.05:
+						distance += bounds.length_squared()
 					if distance < best_distance:
 						best_distance = distance
 						best_pair = pair
 						best_group = second
+						best_from = first
 			_add_edge(edges, degrees, best_pair)
+			connected_groups[Vector2i(mini(best_from, best_group), maxi(best_from, best_group))] = true
 			joined.append(best_group)
+		if grid or hex:
+			_add_lattice_bridges(points, centers, groups, spacing, connected_groups, edges, degrees, player_count)
 	if radial and player_count == 1:
 		for index in range(clusters.size()):
 			clusters[index] = 0 if clusters[index] < sectors else 1
@@ -203,7 +225,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 				best_edge = index
 		if best_edge >= 0:
 			var edge: Array = edges[best_edge]
-			var point: Vector2 = points[edge[0]].lerp(points[edge[1]], rng.randf_range(0.36, 0.64))
+			var point: Vector2 = points[edge[0]].lerp(points[edge[1]], 0.5 if grid or hex else rng.randf_range(0.36, 0.64))
 			var node: int = points.size()
 			points.append(point)
 			clusters.append(-1)
@@ -478,6 +500,48 @@ static func _add_edge(edges: Array, degrees: Array[int], pair: Array) -> void:
 	edges.append(pair)
 	degrees[pair[0]] += 1
 	degrees[pair[1]] += 1
+
+# Complete nearby lattice loops wherever spare ports permit. Keep at least
+# one port in each cluster and avoid spending a home's final port on an
+# optional bridge, so ordinary and protected deposits still have access.
+static func _add_lattice_bridges(points: Array[Vector2], centers: Array[Vector2], groups: Array, spacing: float, connected: Dictionary, edges: Array, degrees: Array[int], homes: int) -> void:
+	var candidates: Array[Vector2i] = []
+	var spare: Array[int] = []
+	for group in groups:
+		var ports: int = 0
+		for node in group:
+			ports += MAX_CONNECTIONS - degrees[node]
+		spare.append(ports)
+	for a in range(groups.size()):
+		for b in range(a + 1, groups.size()):
+			var key := Vector2i(a, b)
+			if not connected.has(key) and centers[a].distance_to(centers[b]) <= spacing * 1.05:
+				candidates.append(key)
+	while not candidates.is_empty():
+		var best_index: int = -1
+		var best_pair: Array = []
+		var best_distance: float = INF
+		for index in range(candidates.size()):
+			var key: Vector2i = candidates[index]
+			if spare[key.x] <= 1 or spare[key.y] <= 1:
+				continue
+			for a in groups[key.x]:
+				if degrees[a] >= MAX_CONNECTIONS - int(a < homes):
+					continue
+				for b in groups[key.y]:
+					if degrees[b] >= MAX_CONNECTIONS - int(b < homes):
+						continue
+					var distance: float = points[a].distance_squared_to(points[b])
+					if distance < best_distance:
+						best_distance = distance
+						best_index = index
+						best_pair = [mini(a, b), maxi(a, b)]
+		if best_index < 0:
+			break
+		var chosen: Vector2i = candidates.pop_at(best_index)
+		_add_edge(edges, degrees, best_pair)
+		spare[chosen.x] -= 1
+		spare[chosen.y] -= 1
 
 # Preserve the required ring and spoke connections, but grant the shortest
 # eligible bridge first instead of preferring nodes with fewer than two lanes.

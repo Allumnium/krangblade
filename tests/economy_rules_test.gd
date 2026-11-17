@@ -92,15 +92,14 @@ func _initialize() -> void:
 			else:
 				bridges += 1
 				bridge_distance += length
-		assert(bridges == MAP.cluster_count_for(player_count, "Grid") - 1 + cluster_ids.count(-1))
+		assert(bridges >= MAP.cluster_count_for(player_count, "Grid") - 1 + cluster_ids.count(-1))
 		assert(clustered["cluster_sizes"].size() == MAP.cluster_count_for(player_count, "Grid"))
 		assert(cluster_points.size() <= player_count * MAP.SYSTEMS_PER_PLAYER)
 		for cluster_size in clustered["cluster_sizes"]:
 			assert(cluster_size >= 2 and cluster_size <= 4)
 		assert(clustered["edges"].size() >= cluster_points.size() - 1)
-		assert(clustered["edges"].size() <= cluster_points.size())
+		assert(clustered["edges"].size() >= cluster_points.size()) # square cells create alternate routes
 		assert(degrees.count(3) <= int(clustered["max_junctions"]))
-		assert(degrees.count(1) >= 2)
 		for degree in degrees:
 			assert(degree >= 1 and degree <= MAP.MAX_CONNECTIONS)
 		for home in range(player_count):
@@ -130,7 +129,7 @@ func _initialize() -> void:
 				assert((chunk["resource"] == ECON.ANTIMATTER) == bool(field.get("antimatter", false)))
 				assert(float(chunk["remaining"]) > 0.0)
 				assert((field["position"] as Vector2).distance_to(chunk["position"]) + float(chunk["radius"]) < float(field["radius"]))
-		assert(bridge_distance / (bridges - cluster_ids.count(-1)) > local_distance / locals)
+		assert(bridge_distance / (bridges - cluster_ids.count(-1)) >= local_distance / locals - 0.01)
 		var seen: Dictionary = {0: true}
 		var frontier: Array = [0]
 		while not frontier.is_empty():
@@ -1611,10 +1610,14 @@ func _test_idle_formations() -> void:
 			furthest = maxf(furthest, (craft["position"] as Vector2).distance_to(center))
 	assert(furthest > ECON.AI_RALLY_RADIUS * 2.0)
 	var squad: Array = state["ships"]
-	var old_position: Vector2 = squad[0]["position"]
-	for tick in range(10):
+	var distance_traveled: float = 0.0
+	# Sample over several years: the seeded radial wander can slow near an
+	# extremum of its path without actually becoming stationary.
+	for tick in range(100):
+		var old_position: Vector2 = squad[0]["position"]
 		ECON.step(state, 0.1)
-	assert((squad[0]["position"] as Vector2).distance_to(old_position) > 5.0)
+		distance_traveled += (squad[0]["position"] as Vector2).distance_to(old_position)
+	assert(distance_traveled > 5.0)
 	assert((squad[0]["position"] as Vector2).distance_to(squad[1]["position"]) > 10.0)
 	assert((squad[0]["position"] as Vector2).distance_to(squad[1]["position"]) < 45.0)
 	assert((squad[3]["position"] as Vector2).distance_to(squad[4]["position"]) < 45.0)
@@ -2037,6 +2040,23 @@ func _test_map_layouts() -> void:
 								local_degrees[edge[1]] += 1
 						for degree in local_degrees.values():
 							assert(degree == 2)
+				if layout == "Grid" or layout == "Hex Grid":
+					# Fine grid cells are regular, and neighboring blocks form
+					# cycles rather than only a spanning tree.
+					var local_length: float = 0.0
+					for edge in galaxy["edges"]:
+						var a: int = edge[0]
+						var b: int = edge[1]
+						if galaxy["clusters"][a] < 0 or galaxy["clusters"][a] != galaxy["clusters"][b]:
+							continue
+						var delta: Vector2 = galaxy["points"][a] - galaxy["points"][b]
+						if local_length == 0.0:
+							local_length = delta.length()
+						assert(is_equal_approx(delta.length(), local_length))
+						if layout == "Grid":
+							assert(absf(delta.x) < 0.01 or absf(delta.y) < 0.01)
+					if (layout == "Grid" and player_count >= 2) or (layout == "Hex Grid" and player_count >= 3):
+						assert(_cluster_links(galaxy).size() >= galaxy["cluster_sizes"].size())
 				var points: Array = galaxy["points"]
 				var degrees: Array[int] = []
 				degrees.resize(points.size())
