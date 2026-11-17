@@ -93,7 +93,12 @@ func _run() -> void:
 		return
 	menu.call("_show_solo_setup")
 	menu.call("_solo_color_selected", 6, 1)
+	var expected_seed: int = int(menu.get("solo_random_seed"))
 	menu.call("_start_solo_from_setup")
+	if int(session.get("economy")["map"]["seed"]) != expected_seed:
+		push_error("Solo start did not retain the preview seed.")
+		quit(1)
+		return
 	if not (session.get("players").size() == 4 and session.get("players")[1]["color"] == 7):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
@@ -162,7 +167,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (state["map"]["cluster_sizes"].size() == 3):
+	if not (state["map"]["cluster_sizes"].size() == MAP.cluster_count_for(1, MAP.DEFAULT_LAYOUT)):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return

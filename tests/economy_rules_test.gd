@@ -1788,6 +1788,21 @@ func _test_map_layouts() -> void:
 				var galaxy: Dictionary = MAP.generate(seed_value, player_count, layout)
 				assert(galaxy == MAP.generate(seed_value, player_count, layout))
 				assert(galaxy["layout"] == layout)
+				assert(galaxy["cluster_sizes"].size() == MAP.cluster_count_for(player_count, layout))
+				if layout == "Radial":
+					var sectors: int = maxi(3, player_count)
+					var bridges: Dictionary = {}
+					for edge in galaxy["edges"]:
+						var a: int = int(galaxy["clusters"][edge[0]])
+						var b: int = int(galaxy["clusters"][edge[1]])
+						if a != b:
+							bridges[Vector2i(mini(a, b), maxi(a, b))] = true
+					for sector in range(sectors):
+						var next: int = (sector + 1) % sectors
+						assert(bridges.has(Vector2i(mini(sector, next), maxi(sector, next))))
+						assert(bridges.has(Vector2i(2 * sectors + mini(sector, next), 2 * sectors + maxi(sector, next))))
+						assert(bridges.has(Vector2i(sector, sector + sectors)))
+						assert(bridges.has(Vector2i(sector + sectors, sector + 2 * sectors)))
 				var points: Array = galaxy["points"]
 				var degrees: Array[int] = []
 				degrees.resize(points.size())
