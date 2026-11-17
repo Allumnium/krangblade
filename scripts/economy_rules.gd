@@ -2167,6 +2167,21 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
             if distance < nearest:
                 nearest = distance
                 goal = node
+    # Preserve an accepted invasion objective instead of resetting its warmup
+    # whenever another enemy ship becomes nearer. System invasions now use
+    # the same zone commitment and allocation dispatcher as human empires.
+    var current: Dictionary = state["policies"][player].get("offense", {})
+    if current.get("card", "") == "invasion":
+        for node in current.get("targets", []):
+            if policy_target_valid(state, player, "invasion", int(node)):
+                return
+        state["policies"][player].erase("offense")
+    if state.get("ai_waves", {}).get(player, {}).get("members", []).is_empty() and policy_target_valid(state, player, "invasion", goal):
+        if commit_military_policy(state, player, "offense", "invasion", [{"targets": [goal], "weight": 100}], []):
+            state["ai_waves"].erase(player)
+            return
+    # Legacy pursuit of hostile ships outside eligible owned systems remains
+    # available until a non-system military policy is defined.
     _ai_wave_order(state, graph, player, home, goal, fighters)
 
 # Launch only assembled cohorts; newly built fighters are held in reserve
@@ -2237,6 +2252,7 @@ static func _sync_operations(state: Dictionary) -> void:
     var previous: Dictionary = state.get("operations", {})
     var current: Dictionary = {}
     var by_id: Dictionary = {}
+    var policy_driven: Dictionary = {}
     for ship in state["ships"]:
         if ship.get("kind", "") != "fighter":
             continue
@@ -2245,7 +2261,9 @@ static func _sync_operations(state: Dictionary) -> void:
         if target < 0:
             target = int(ship["at"])
         var role: String = "allocation"
-        if state.get("ai_players", []).has(owner):
+        if not policy_driven.has(owner):
+            policy_driven[owner] = not policy_fleet_weights(state, owner).is_empty()
+        if state.get("ai_players", []).has(owner) and not bool(policy_driven[owner]):
             var wave: Dictionary = state.get("ai_waves", {}).get(owner, {})
             role = "wave" if wave.get("members", []).has(int(ship["id"])) else "reserve"
             # An explicitly assigned objective remains stable while the craft
@@ -2632,7 +2650,7 @@ static func step(state: Dictionary, dt: float) -> void:
                 fleets[player] = []
             fleets[player].append(craft)
     for player in fleets:
-        if not state["ai_players"].has(player):
+        if not state["ai_players"].has(player) or not policy_fleet_weights(state, int(player)).is_empty():
             _allocate_fighters(state, combat_graph, int(player), fleets[player], true)
     _sync_operations(state)
     _dispatch_operations(state, combat_graph)
@@ -2729,7 +2747,7 @@ static func equip_policy(state: Dictionary, player: int, slot: String, card: Str
 static func commit_military_policy(state: Dictionary, player: int, slot: String, card: String, zones: Array, void_slots: Array) -> bool:
     if not policy_eligible(state, player, slot, card) or not bool(POLICY_CARDS.get(card, {}).get("military", false)):
         return false
-    if zones.is_empty() or zones.size() > 26:
+    if zones.is_empty() or zones.size() > 5:
         return false
     var total: int = 0
     var seen: Dictionary = {}
@@ -2737,12 +2755,16 @@ static func commit_military_policy(state: Dictionary, player: int, slot: String,
     for zone in zones:
         if not zone is Dictionary:
             return false
-        var weight: int = int(zone.get("weight", -1))
-        var nodes: Array = zone.get("targets", [])
+        if not zone.get("weight") is int or not zone.get("targets") is Array:
+            return false
+        var weight: int = int(zone["weight"])
+        var nodes: Array = zone["targets"]
         if weight < 0 or weight > 100 or nodes.is_empty():
             return false
         var clean: Array = []
         for raw_node in nodes:
+            if not raw_node is int:
+                return false
             var node: int = int(raw_node)
             if seen.has(node) or not policy_target_valid(state, player, card, node):
                 return false
@@ -2768,7 +2790,12 @@ static func commit_military_policy(state: Dictionary, player: int, slot: String,
     var committed_weight: int = 0
     for zone in configured:
         committed_weight += int(zone["weight"])
-    equipped[slot] = {"card": card, "ready_at": float(state["elapsed"]) + float(POLICY_CARDS[card]["warmup"]), "targets": seen.keys(), "weight": committed_weight, "zones": configured, "void_slots": voided}
+    # Explicitly void the selected previous policies at acceptance.  Keeping
+    # their stale allocations alive leads to cycles and over-allocation when
+    # a replacement is warming up or removed.
+    for other in voided:
+        equipped.erase(other)
+    equipped[slot] = {"card": card, "ready_at": float(state["elapsed"]) + float(POLICY_CARDS[card]["warmup"]), "targets": seen.keys(), "weight": committed_weight, "zones": configured}
     return true
 
 static func policy_allocation(entry: Dictionary) -> int:
@@ -2810,34 +2837,39 @@ static func set_policy_weight(state: Dictionary, player: int, slot: String, perc
     if not equipped.has(slot) or equipped[slot].has("zones") or not POLICY_CARDS[equipped[slot]["card"]].get("military", false) or percent < 0 or percent > 100:
         return false
     var weights: Dictionary = {}
+    var available: int = 100
     for key in POLICY_SLOTS:
         if equipped.has(key) and POLICY_CARDS[equipped[key]["card"]].get("military", false):
-            weights[POLICY_SLOTS.find(key)] = int(equipped[key]["weight"])
-    var index: int = POLICY_SLOTS.find(slot)
-    if weights.size() == 1:
-        equipped[slot]["weight"] = 100
+            if equipped[key].has("zones"):
+                available -= policy_allocation(equipped[key])
+            else:
+                weights[key] = int(equipped[key]["weight"])
+    available = maxi(0, available)
+    if percent > available:
+        return false
+    var others: Array = weights.keys()
+    others.erase(slot)
+    if others.is_empty():
+        equipped[slot]["weight"] = available
         return true
-    var fallback: int = index
-    for key in weights:
-        if key != index:
-            fallback = key
-            break
-    weights = change_military_weights(weights, fallback, index, percent)
-    for key in weights:
-        equipped[POLICY_SLOTS[key]]["weight"] = weights[key]
+    var redistributed: Dictionary = _apportion(others, weights, available - percent)
+    for key in redistributed:
+        equipped[key]["weight"] = redistributed[key]
+    equipped[slot]["weight"] = percent
     return true
 
 static func normalize_policy_weights(equipped: Dictionary) -> void:
     var weights: Dictionary = {}
+    var available: int = 100
     for slot in POLICY_SLOTS:
-        if equipped.has(slot) and not equipped[slot].has("zones") and POLICY_CARDS[equipped[slot]["card"]].get("military", false):
-            weights[slot] = int(equipped[slot]["weight"])
+        if equipped.has(slot) and POLICY_CARDS[equipped[slot]["card"]].get("military", false):
+            if equipped[slot].has("zones"):
+                available -= policy_allocation(equipped[slot])
+            else:
+                weights[slot] = int(equipped[slot]["weight"])
     if weights.is_empty():
         return
-    if weights.values().max() == 0:
-        for slot in weights:
-            weights[slot] = 1
-    var normalized: Dictionary = _apportion(weights.keys(), weights, 100)
+    var normalized: Dictionary = _apportion(weights.keys(), weights, maxi(0, available))
     for slot in normalized:
         equipped[slot]["weight"] = normalized[slot]
 

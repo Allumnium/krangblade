@@ -3466,7 +3466,21 @@ func _refresh_policy_ui(state: Dictionary) -> void:
     if military:
         if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
             policy_slider.set_value_no_signal(float(selected_entry["weight"]))
-        policy_info.text = "Committed: %d%%\nReplace the card to redraw its zones." % ECONOMY.policy_allocation(selected_entry)
+        policy_info.text = "Committed: %d%%" % ECONOMY.policy_allocation(selected_entry)
+        if ECONOMY.policy_active(state, selected_entry):
+            var assigned: int = 0
+            var traveling: int = 0
+            var rallying: int = 0
+            var recovering: int = 0
+            for operation in state.get("operations", {}).values():
+                if int(operation["owner"]) != _me() or not selected_entry.get("targets", []).has(operation["target"]):
+                    continue
+                assigned += (operation.get("members", []) as Array).size()
+                traveling += (operation.get("in_transit", []) as Array).size()
+                rallying += (operation.get("rallying", []) as Array).size()
+                recovering += (operation.get("recovering", []) as Array).size()
+            policy_info.text += "\nFleet at objectives: %d assigned\n%d traveling · %d rallying · %d repairing" % [assigned, traveling, rallying, recovering]
+        policy_info.text += "\nReplace the card to redraw its zones."
     else:
         policy_info.text = str(definition.get("description", "Policy effects pending"))
     if not ECONOMY.policy_active(state, selected_entry):
@@ -3732,7 +3746,7 @@ func _update_policy_editor_status() -> void:
     policy_editor_accept.disabled = not has_zone or used > 100
     policy_editor_status.text = "%d%% committed · %d%% available" % [used, maxi(0, 100 - used)] if used <= 100 else "%d%% — overallocated" % used
     if not has_zone:
-        policy_editor_status.text = "Accept unavailable: paint over an eligible %s system." % ("enemy or neutral" if policy_draft_card == "invasion" else "friendly")
+        policy_editor_status.text = "Accept unavailable: paint over an eligible %s system." % ("enemy-owned" if policy_draft_card == "invasion" else "friendly")
 
 func _commit_policy_draft() -> void:
     var zones: Array = []

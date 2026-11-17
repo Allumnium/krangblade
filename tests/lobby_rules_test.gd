@@ -30,5 +30,14 @@ func _initialize() -> void:
     var coop: Dictionary = {1: {"ready": true, "team": 1}, 5: {"ready": true, "team": 1}}
     assert(RULES.can_start(coop))
     assert(RULES.ordered_peers(coop) == [1, 5])
-    print("PASS: 2–8 teams, readiness and load barrier")
+    var bot_id: int = RULES.FIRST_AI_ID
+    var mixed: Dictionary = {1: {"ready": true, "team": 1}, 5: {"ready": true, "team": 2}, bot_id: {"ready": true, "team": 3, "ai": true}}
+    assert(bot_id > 2147483647)
+    assert(RULES.ordered_peers(mixed) == [1, 5, bot_id])
+    assert(RULES.can_start(mixed))
+    assert(RULES.all_loaded(mixed, {1: true, 5: true}))
+    RULES.reset_guest_ready(mixed)
+    assert(mixed[bot_id]["ready"] and not mixed[5]["ready"])
+    assert(not RULES.can_start(mixed))
+    print("PASS: 2–8 teams, mixed AI readiness and load barrier")
     quit(0)
