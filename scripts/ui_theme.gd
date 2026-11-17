@@ -6,7 +6,7 @@ const ACCENT := Color("#62cbe8")
 const COLORS = {
     "Metals": Color("#c1cedc"), "Plastics": Color("#f6a45b"),
     "Textiles": Color("#48d6c1"), "Organics": Color("#8ed779"),
-    "Tech": Color("#5dbdff"), "Crystals": Color("#c8a2ff")
+    "Tech": Color("#5dbdff"), "Crystals": Color("#c8a2ff"), "Raw antimatter": Color("#f279d7")
 }
 const ICONS = {
     "Metals": preload("res://assets/ui/metals.svg"),

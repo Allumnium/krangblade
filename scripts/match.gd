@@ -46,6 +46,7 @@ var asteroid_shape_cache: Dictionary = {}
 var asteroid_cache_seed: int = -1
 var habitation_card: Dictionary = {}
 var population_label: Label
+var raw_antimatter_label: Label
 var population_delta_label: Label
 var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
@@ -384,6 +385,11 @@ func _build_ui() -> void:
     population_row.add_child(population_delta_label)
     production_summary = HUD.section(planet_overview, "Resources")
     _build_production_summary()
+    raw_antimatter_label = _label("", 12)
+    raw_antimatter_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+    raw_antimatter_label.add_theme_color_override("font_color", HUD.COLORS[ECONOMY.ANTIMATTER])
+    production_summary.add_child(raw_antimatter_label)
+    raw_antimatter_label.hide()
     interaction_panel = VBoxContainer.new()
     interaction_panel.add_theme_constant_override("separation", 8)
     body.add_child(interaction_panel)
@@ -1017,11 +1023,11 @@ func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
             _show_cost(card["costs"], ECONOMY._cost("production", level + 1))
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
-    for resource in ECONOMY.RESOURCES:
+    for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
         var row := HBoxContainer.new()
         parent.add_child(row)
         var icon := TextureRect.new()
-        icon.texture = HUD.ICONS[resource]
+        icon.texture = HUD.ICONS.get(resource)
         icon.custom_minimum_size = Vector2(18, 18)
         icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
         icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -1073,10 +1079,13 @@ func _apply_mining_policy() -> void:
 
 func _refresh_field_panels(state: Dictionary) -> void:
     var field: Dictionary = state["map"]["fields"][selected_field]
-    ship_title.text = "Asteroid field %02d" % (selected_field + 1)
+    var special: bool = bool(field.get("antimatter", false))
+    ship_title.text = _poi_name(state["planets"].size() + selected_field)
     var stock: Dictionary = ECONOMY.field_inventory(field)
     var total: float = float(stock["Metals"]) + float(stock["Crystals"])
-    if total <= ECONOMY.EPS:
+    if special:
+        ship_detail.text = "Raw antimatter · %s" % _tons(float(stock[ECONOMY.ANTIMATTER])) if float(stock[ECONOMY.ANTIMATTER]) > ECONOMY.EPS else "Depleted"
+    elif total <= ECONOMY.EPS:
         ship_detail.text = "Depleted"
     else:
         var metals: int = roundi(100.0 * float(stock["Metals"]) / total)
@@ -1092,6 +1101,8 @@ func _refresh_field_panels(state: Dictionary) -> void:
     mining_controls.get_parent().show()
     var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field)
     mining_enabled.set_pressed_no_signal(bool(policy["enabled"]))
+    mining_metals.visible = not special
+    mining_crystals.visible = not special
     mining_metals.set_pressed_no_signal(bool(policy["Metals"]))
     mining_crystals.set_pressed_no_signal(bool(policy["Crystals"]))
     mining_metals.disabled = not mining_enabled.button_pressed
@@ -1132,9 +1143,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
     if cargo_capable:
         var cargo_capacity: float = ECONOMY.CARGO_CAPACITY if kind == "ship" else ECONOMY.MINER_CAPACITY
         ship_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total(ship), cargo_capacity]
-        for resource in ECONOMY.RESOURCES:
+        for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
             ship_cargo_labels[resource].text = _tons(float(ship["cargo"].get(resource, 0.0)))
-            ship_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
+            ship_cargo_labels[resource].get_parent().visible = kind == "miner" if resource == ECONOMY.ANTIMATTER else kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
     fleet_title.text = {"ship": "Logistics", "fighter": "Military", "miner": "Mining", "colony_ship": "Colonization"}.get(kind, "Fleet")
     fleet_detail.visible = kind != "fighter"
     fleet_cargo.get_parent().visible = cargo_capable
@@ -1155,18 +1166,18 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
             traveling += 1
         elif craft.get("mining_mode", "idle") == "mining":
             working += 1
-        for resource in ECONOMY.RESOURCES:
-            cargo[resource] = float(cargo[resource]) + float(craft["cargo"].get(resource, 0.0))
+        for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
+            cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft["cargo"].get(resource, 0.0))
     fleet_detail.text = "%d %s\n%d traveling · %d idle" % [total, "ship" if total == 1 else "ships", traveling, total - traveling - working]
     if kind == "miner":
         fleet_detail.text += "\n%d mining" % working
     fleet_detail.tooltip_text = "Your empire"
     if cargo_capable:
-        for resource in ECONOMY.RESOURCES:
-            var amount: float = float(cargo[resource])
+        for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
+            var amount: float = float(cargo.get(resource, 0.0))
             fleet_cargo_labels[resource].text = _tons(amount)
             fleet_cargo_labels[resource].tooltip_text = "%.1f t" % amount
-            fleet_cargo_labels[resource].get_parent().visible = kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
+            fleet_cargo_labels[resource].get_parent().visible = kind == "miner" if resource == ECONOMY.ANTIMATTER else kind == "ship" or ECONOMY.MINED_RESOURCES.has(resource)
 
 func _build_lens_buttons() -> void:
     var lens_row := HBoxContainer.new()
@@ -1886,6 +1897,7 @@ func _refresh() -> void:
     ship_button.disabled = true
     if p.is_empty():
         info.text = "Select a system."
+        raw_antimatter_label.hide()
         system_owner_label.text = ""
         population_label.text = ""
         population_delta_label.text = ""
@@ -1913,6 +1925,10 @@ func _refresh() -> void:
         production_values[resource]["rate"].text = _tons(annual, 1, true)
         production_values[resource]["rate"].tooltip_text = "Production %.2f t/yr · Consumption %.2f t/yr · Net %.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
     var population: float = float(p["population"])
+    var raw: float = float(p["stock"].get(ECONOMY.ANTIMATTER, 0.0))
+    raw_antimatter_label.visible = raw > ECONOMY.EPS
+    raw_antimatter_label.text = "Raw antimatter · %s" % _tons(raw)
+    raw_antimatter_label.tooltip_text = "%.1f t stored locally" % raw
     population_label.text = "%s" % _compact_amount(population)
     var change: float = float(p.get("demographic_rate", ECONOMY.population_growth(p))) - float(p.get("crew_rate", 0.0))
     population_delta_label.text = "(%s%s/yr)" % ["+" if change >= 0.0 else "-", _compact_amount(absf(change))]
@@ -2615,7 +2631,11 @@ func _fighter_path(ship: Dictionary) -> Array[int]:
 
 func _poi_name(node: int) -> String:
     var count: int = (_state().get("planets", []) as Array).size()
-    return _system_name(node) if node < count else "Asteroid field %02d" % (node - count + 1)
+    if node < count:
+        return _system_name(node)
+    var index: int = node - count
+    var fields: Array = _state().get("map", {}).get("fields", [])
+    return ("Antimatter deposit %02d" if index < fields.size() and bool(fields[index].get("antimatter", false)) else "Asteroid field %02d") % (index + 1)
 
 func _ship_position(ship: Dictionary, _points: Array) -> Vector2:
     if ship.has("position"):
@@ -2940,9 +2960,13 @@ func _draw_map() -> void:
         for vertex in field["outline"]:
             boundary.append(_screen_point(vertex))
         if not boundary.is_empty():
-            map_canvas.draw_colored_polygon(boundary, Color("#7b796512"))
+            var special: bool = bool(field.get("antimatter", false))
+            var edge_tint: Color = HUD.COLORS[ECONOMY.ANTIMATTER] if special else Color("#b9ac77")
+            map_canvas.draw_colored_polygon(boundary, Color(edge_tint, 0.09))
             boundary.append(boundary[0])
-            map_canvas.draw_polyline(boundary, HUD.ACCENT if selected_field == field_index else Color("#b9ac7740"), 1.5, true)
+            map_canvas.draw_polyline(boundary, HUD.ACCENT if selected_field == field_index else Color(edge_tint, 0.8 if special else 0.25), 1.5, true)
+            if special:
+                map_canvas.draw_string(font, center + Vector2(-60, float(field["radius"]) * render_scale + 14.0), "Antimatter", HORIZONTAL_ALIGNMENT_CENTER, 120, 12, edge_tint)
         for chunk in field["chunks"]:
             var rock_pos: Vector2 = _screen_point(chunk["position"])
             if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):

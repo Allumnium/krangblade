@@ -277,3 +277,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.31: Fixed hostile civilian route endpoints on capture and made PDS destroyable. Evacuation prefers a reachable friendly destination using either end of the current lane; disconnected civilian hulls may remain stranded until territory changes. PDS HP and repair-loss behavior need playtesting. No automatic elimination of surviving ships or colonies; decide win/loss with match objective.
 
 - v0.17.32: Exiled empires can settle neutral systems with colony ships; elimination disbands other hulls when no recovery is possible. A surviving colony ship may prolong a losing position, particularly with obstructed or long routes. Review playtest pacing and result UI before finalizing rules.
+
+- v0.17.33: Reuse innermost existing field geometry for one (1–2 players) or two (3–8 players) finite raw-antimatter deposits. Check seed fairness, depletion and raw storage saturation before balancing processing and victory. Extraction is initially opt-in so existing opening economy is not automatically diverted; AI extraction policy awaits the objective design.

@@ -58,6 +58,7 @@ Review AGENTS.md before work. This is a prioritized design/development backlog, 
 
 ## Phase 4 — Antimatter and match objectives
 - [ ] Specify antimatter geography, extraction, transport, local storage and processing; consider scarce contested deposits near the galactic center.
+  - v0.17.33 prototype: finite antimatter in the innermost existing asteroid fields, opt-in extraction by existing miners, physical delivery to owned storage. Raw stock/cargo is separate from the six normal economy resources. Processing infrastructure and victory scoring remain undecided.
 - [ ] Define victory condition (stockpiled processed antimatter, cumulative production or sustained rate are options), team scoring and end-of-match handling.
 - [ ] Prototype the smallest functioning antimatter economy and victory loop. Decide whether and how antimatter is consumed for military technology.
 - [ ] Test opportunities for comebacks and alternative industrial/territorial strategies; decide if later extraction opportunities are helpful.
@@ -199,3 +200,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.31: Planetary defenses have provisional 100 HP, can be destroyed by fighter fire with simultaneous damage, and block conquest until cleared. Captured-system trade/mining routes are rerouted to reachable friendly destinations without teleportation or cargo loss; off-lane miners return to their physical anchor before evacuation. Fighters whose repair destination is lost resume orders when no safe replacement exists. Colony ships retain existing all-territory routing. Elimination and victory rules remain separate design work.
 
 - v0.17.32: Evaluate elimination and last-team conquest victory on authority; colony ships preserve recovery opportunity when neutral systems remain, including AI in exile. Replicate eliminated roster and immutable outcome, freeze simulation, allow spectator snapshots/return, block further gameplay commands. Single-team sandbox exempt. Provisional elimination and result modal pending visual validation; antimatter victory still undefined.
+
+- v0.17.33: Prototype central antimatter deposits, opt-in autonomous mining, physical cargo and local raw stock, and transfer of stored material on conquest. Processing, technology use, AI objectives and victory scoring are not implemented yet.

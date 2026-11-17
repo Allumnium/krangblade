@@ -264,6 +264,9 @@ func _send_commands() -> void:
     session.call("request_continuous", home_index, "production:Organics", true)
     session.call("request_continuous", home_index, "yard_upgrade:0", true)
     session.call("request_mining_policy", 0, true, false, true)
+    for index in range(session.get("economy")["map"]["fields"].size()):
+        if bool(session.get("economy")["map"]["fields"][index].get("antimatter", false)):
+            session.call("request_mining_policy", index, true, false, true)
     session.call("request_operation", home_index, "yard", "3") # invalid gap
     session.call("request_operation", home_index, "yard", "2")
     session.call("request_operation", home_index, "yard", "3")
@@ -319,6 +322,17 @@ func _check_economy_sync() -> void:
             var thresholds: Dictionary = system["thresholds"]["Metals"]
             var flags: Dictionary = system["continuous"]
             var policy: Dictionary = ECON.mining_policy(state, owner, 0)
+            var raw_policy_ok: bool = false
+            var raw_fields: int = 0
+            for field_index in range(state["map"]["fields"].size()):
+                var field: Dictionary = state["map"]["fields"][field_index]
+                if bool(field.get("antimatter", false)):
+                    raw_fields += 1
+                    var raw_policy: Dictionary = ECON.mining_policy(state, owner, field_index)
+                    if not raw_policy["enabled"]:
+                        raw_fields = -1
+                        break
+            raw_policy_ok = raw_fields > 0
             var ship_progress: bool = false
             var fighter_pending: bool = false
             var upgrade_pending: bool = false
@@ -387,6 +401,7 @@ func _check_economy_sync() -> void:
                 "20": ship_progress,
                 "21": ECON.shipyard_count(system) == 3,
                 "22": policy["enabled"],
+                "raw_policy": raw_policy_ok,
                 "23": not policy["Metals"],
                 "24": policy["Crystals"]
             }
