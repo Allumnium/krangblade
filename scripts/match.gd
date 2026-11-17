@@ -65,6 +65,7 @@ var send_colony_button: Button
 var colony_button: Button
 var colony_choices: Array[int] = []
 var selected: int = -1
+var selected_body: int = -1
 var last_system_tab_selection: int = -1
 var selected_ship_id: int = -1
 var selected_units: Array[int] = []
@@ -78,6 +79,15 @@ var mining_enabled: CheckBox
 var mining_metals: CheckBox
 var mining_crystals: CheckBox
 var planet_overview: VBoxContainer
+var body_overview: VBoxContainer
+var body_title: Label
+var body_context: Label
+var body_defense: Label
+var body_status: Label
+var body_costs: GridContainer
+var body_upgrade: Button
+var body_cancel: Button
+var body_progress: ProgressBar
 var ship_overview: VBoxContainer
 var ship_title: Label
 var ship_detail: Label
@@ -332,6 +342,7 @@ func _build_ui() -> void:
 	planet_overview = VBoxContainer.new()
 	planet_overview.add_theme_constant_override("separation", 8)
 	overview.add_child(planet_overview)
+	_build_body_overview(overview)
 	ship_overview = VBoxContainer.new()
 	ship_overview.add_theme_constant_override("separation", 8)
 	overview.add_child(ship_overview)
@@ -939,6 +950,87 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 		_show_cost(card["costs"], ECONOMY.building_cost(p, resource))
 		_disclosure_title(card, str(definition["name"]) + " · %d" % installed)
 		button.tooltip_text = "%s\n%s" % [requirement, cost]
+
+func _body_name(system_index: int, slot: int) -> String:
+	var suffixes: Array[String] = ["I", "II", "III", "IV", "V", "VI"]
+	return _system_name(system_index) + " " + suffixes[slot]
+
+func _build_body_overview(parent: Container) -> void:
+	body_overview = VBoxContainer.new()
+	body_overview.add_theme_constant_override("separation", 8)
+	parent.add_child(body_overview)
+	body_title = _label("", 19)
+	body_overview.add_child(body_title)
+	body_context = _label("", 12)
+	body_context.add_theme_color_override("font_color", HUD.MUTED)
+	body_overview.add_child(body_context)
+	_button("Back to system", func() -> void:
+		selected_body = -1
+		_load_thresholds()
+		_refresh(), body_overview)
+	var section: VBoxContainer = HUD.section(body_overview, "Planetary defense")
+	body_defense = _label("", 12)
+	section.add_child(body_defense)
+	body_status = _label("", 12)
+	section.add_child(body_status)
+	body_costs = _cost_grid(section)
+	body_progress = ProgressBar.new()
+	body_progress.custom_minimum_size.y = 14
+	body_progress.step = 0.0
+	section.add_child(body_progress)
+	var actions := HBoxContainer.new()
+	section.add_child(actions)
+	body_upgrade = _button("Build PDS", _upgrade_selected_body, actions)
+	body_upgrade.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	HUD.action(body_upgrade)
+	body_cancel = _button("×", _cancel_selected_body, actions)
+	body_cancel.tooltip_text = "Cancel construction and refund"
+	body_overview.hide()
+
+func _upgrade_selected_body() -> void:
+	if selected >= 0 and selected_body >= 0:
+		_operation("pds", str(selected_body))
+
+func _cancel_selected_body() -> void:
+	if selected_body < 0:
+		return
+	var job: Dictionary = ECONOMY.pds_job(_planet())
+	if not job.is_empty() and int(job["target"]) == selected_body:
+		_cancel_job(int(job["id"]))
+
+func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
+	var owner: int = int(system["owner"])
+	var roster: Dictionary = session.get("players")
+	var owner_name: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
+	body_title.text = _body_name(selected, selected_body)
+	body_context.text = "%s · %s" % [_system_name(selected), owner_name]
+	var defenses: Dictionary = system.get("pds", {})
+	var battery: Dictionary = defenses.get(selected_body, {})
+	var job: Dictionary = ECONOMY.pds_job(system)
+	var building: bool = not job.is_empty() and int(job["target"]) == selected_body
+	var cost: Dictionary = ECONOMY._cost("pds", selected_body + 1)
+	var installed: bool = not battery.is_empty()
+	body_defense.text = "%.0f damage / shot · Range %.0f · Fires once/yr" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
+	body_status.text = "Operational · %.0f / %.0f HP" % [float(battery.get("hp", 0.0)), ECONOMY.PDS_HP] if installed else ("Under construction" if building else "Undefended")
+	if not installed and not building:
+		if not owned:
+			body_status.text += " · Not owned"
+		elif not job.is_empty():
+			body_status.text += " · Another defense is being built"
+		elif not ECONOMY.affordable(system, cost):
+			body_status.text += " · Insufficient local materials"
+	body_costs.visible = not installed
+	if not installed:
+		_show_cost(body_costs, job["cost"] if building else cost)
+	body_progress.visible = building
+	if building:
+		body_progress.value = 100.0 * float(job["progress"]) / float(job["work"])
+		_style_progress(body_progress, system, job)
+	body_upgrade.visible = not installed
+	body_upgrade.disabled = not owned or not job.is_empty() or installed or not ECONOMY.affordable(system, cost)
+	_set_timed_action(body_upgrade, "Build PDS", ECONOMY._work("pds", selected_body + 1))
+	body_cancel.visible = building
+	body_cancel.disabled = not owned or not building
 
 func _build_pds_card(parent: Container) -> void:
 	var section: VBoxContainer = HUD.section(parent, "")
@@ -1836,9 +1928,13 @@ func _refresh() -> void:
 	var field_selected: bool = selected_field >= 0 and ECONOMY.discovered(state, _me(), "fields", selected_field)
 	var ship_selected: bool = not ship.is_empty()
 	var other_selected: bool = ship_selected or field_selected
-	inspector_panel.visible = (not p.is_empty() or other_selected)
+	var body_selected: bool = not other_selected and not p.is_empty() and selected_body >= 0 and selected_body < int(p.get("planet_count", 0))
+	if not body_selected:
+		selected_body = -1
+	inspector_panel.visible = (not p.is_empty() or other_selected) and not body_selected
 	overview_panel.visible = (not p.is_empty() or other_selected)
-	planet_overview.visible = not other_selected
+	planet_overview.visible = not other_selected and not body_selected
+	body_overview.visible = body_selected
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
 	inspector_tabs.visible = not other_selected and own_system
 	var current_system: int = selected if not other_selected and not p.is_empty() else -1
@@ -1851,6 +1947,9 @@ func _refresh() -> void:
 	ship_overview.visible = other_selected
 	fleet_scroll.visible = other_selected
 	fleet_overview.visible = other_selected
+	if body_selected:
+		_refresh_body_overview(p, own_system and phase == "match")
+		return
 	if field_selected:
 		_refresh_field_panels(state)
 		return
@@ -2447,6 +2546,9 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 					map_canvas.draw_circle(point, body_radius, HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), true)
 				if system.get("pds", {}).has(slot):
 					_draw_pds_frame(point, body_radius)
+				if selected_body == slot:
+					map_canvas.draw_arc(point, body_radius + 4.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
+					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, HUD.TEXT)
 	var pulse: float = 0.96 + 0.04 * sin(visual_clock * 1.2 + float(index))
 	for layer in range(5, 0, -1):
 		map_canvas.draw_circle(pos, star_radius * (1.0 + float(layer) * 0.33) * pulse, Color(star_color, 0.05), true)
@@ -2500,6 +2602,28 @@ func _planet_color(planet: Dictionary) -> Color:
 	var mix: Vector3 = sum / weight
 	return Color(mix.x, mix.y, mix.z)
 
+func _body_hit(point: Vector2, state: Dictionary) -> int:
+	if selected < 0 or selected >= state["planets"].size() or not ECONOMY.discovered(state, _me(), "planets", selected):
+		return -1
+	var radius: float = _planet_radius(selected, state)
+	if zoom < 2.0 or radius < 18.0:
+		return -1
+	var center: Vector2 = _screen_point(state["map"]["points"][selected])
+	if not get_viewport_rect().grow(radius + 32.0).has_point(center):
+		return -1
+	var bodies: Array = _system_visual(selected, state)["bodies"]
+	var hit: int = -1
+	var nearest: float = INF
+	for slot in range(bodies.size()):
+		var body: Dictionary = bodies[slot]
+		var position: Vector2 = center + _body_position(body, radius, game_visual_clock)
+		var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
+		var distance: float = point.distance_to(position)
+		if distance <= body_radius + 3.0 and distance < nearest:
+			hit = slot
+			nearest = distance
+	return hit
+
 func _select_at(point: Vector2, additive: bool = false) -> void:
 	var state: Dictionary = _state()
 	if state.is_empty() or str(session.get("phase")) != "match":
@@ -2524,6 +2648,17 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 			ship_distance = distance
 			ship_hit = int(id)
 	var next_ship: int = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
+	var body_slot: int = _body_hit(point, state) if not additive else -1
+	if body_slot >= 0:
+		selected_body = body_slot
+		selected_ship_id = -1
+		selected_units.clear()
+		selected_field = -1
+		var focus: Control = get_viewport().gui_get_focus_owner()
+		if is_instance_valid(focus):
+			focus.release_focus()
+		_refresh()
+		return
 	if additive and not selected_units.is_empty():
 		var valid: bool = false
 		for craft in state["ships"]:
@@ -2532,6 +2667,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 				break
 		if not valid:
 			return
+	selected_body = -1
 	selected_ship_id = next_ship
 	if not additive:
 		selected_units.clear()
@@ -2572,6 +2708,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 			selected_units.append(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 	selected = -1
+	selected_body = -1
 	selected_field = -1
 	_refresh()
 
@@ -2776,6 +2913,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 					selected_units.append(id)
 			selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 			selected = -1
+			selected_body = -1
 			selected_field = -1
 			_refresh()
 	else:
@@ -2794,6 +2932,7 @@ func _cycle_owned_system(direction: int) -> void:
 		return
 	var current: int = owned.find(selected)
 	selected = owned[(0 if direction > 0 else owned.size() - 1) if current < 0 else posmod(current + direction, owned.size())]
+	selected_body = -1
 	selected_ship_id = -1
 	selected_units.clear()
 	selected_field = -1

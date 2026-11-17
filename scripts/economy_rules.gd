@@ -703,8 +703,10 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 				return false
 			level = int(p["yards"][y]["level"]) + 1
 		"pds":
-			var slot: int = next_pds(p)
-			if slot < 0 or not pds_job(p).is_empty() or (not target.is_empty() and target != str(slot)):
+			if not target.is_empty() and not target.is_valid_int():
+				return false
+			var slot: int = next_pds(p) if target.is_empty() else int(target)
+			if slot < 0 or slot >= int(p.get("planet_count", 0)) or p.get("pds", {}).has(slot) or not pds_job(p).is_empty():
 				return false
 			target = str(slot)
 			level = slot + 1

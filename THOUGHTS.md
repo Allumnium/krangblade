@@ -296,3 +296,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.20.5: Put timing details on the Perf button tooltip rather than the mouse-transparent overlay so the map retains normal input.
 
 - v0.20.6: Replaced multi-row recipe grids with a single compact icon/amount row, removing repeated tonnage suffixes in favor of exact tooltips. Button time estimates use a runtime-generated monochrome analog clock. Check title truncation, six-input recipes and narrow inspector scaling visually; no local visual test.
+
+- v0.21.0: Planet selection reuses the visible orbit/body coordinates and existing authoritative defense slot indices. Names are stable system name plus Roman orbital number. Any undefended slot may be selected, retaining slot-indexed pricing and one pending defense per system. Outer slots can be significantly more expensive; review PDS price curve separately. Manual visual verification of small moving bodies, ship overlap and panel scaling remains.
