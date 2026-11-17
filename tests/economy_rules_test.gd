@@ -25,20 +25,16 @@ func _test_maintain_targets() -> void:
 
 func _initialize() -> void:
 	_test_freighter_bays()
-	_test_policy_cards()
-	_test_policy_zone_commitments()
-	_test_policy_zone_fleet_dispatch()
-	_test_lasso_small_fleet()
-	_test_neutral_policy_occupation()
+	_test_recovery_economy()
+	_test_neutral_direct_occupation()
 	_test_idle_formations()
 	_test_depleted_field_routes()
 	_test_wide_patrol_rally_and_conquest()
-	_test_ai_defensive_policies()
+	_test_ai_defensive_orders()
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
 	_test_match_elimination()
 	_test_antimatter_extraction()
-	_test_economy_policies()
 	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
 	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
 	var bounds: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1])
@@ -354,8 +350,8 @@ func _initialize() -> void:
 			assert(float(ECON.WAREHOUSE_COSTS[level][material]) <= float(ECON.WAREHOUSE_CAPACITIES[level]))
 			if level > 0:
 				assert(float(ECON.WAREHOUSE_COSTS[level][material]) == 3.0 * float(ECON.WAREHOUSE_COSTS[level - 1][material]))
-	assert(ECON.ECONOMY_BUILDINGS["Textiles"]["cost"] == {"Metals": 300.0, "Plastics": 45.0, "Tech": 15.0})
-	assert(ECON.ECONOMY_BUILDINGS["Tech"]["cost"]["Metals"] == 900.0)
+	assert(ECON.ECONOMY_BUILDINGS["Textiles"]["cost"] == {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0})
+	assert(ECON.ECONOMY_BUILDINGS["Tech"]["cost"]["Metals"] == 300.0)
 	var refunds: Dictionary = ECON.create(graph, players, ids, false)
 	var refund_home: Dictionary = refunds["planets"][0]
 	refund_home["levels"]["Metals"] = 0
@@ -1143,7 +1139,7 @@ func _initialize() -> void:
 	var before_stock: Dictionary = industry["stock"].duplicate()
 	assert(not ECON.enqueue(bootstrap, 2, 0, "economy", "Textiles"))
 	assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "unknown"))
-	assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Tech"))
+	assert(ECON.building_available(industry, "Tech"))
 	assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
 	var building: Dictionary = industry["queue"][0]
 	assert(is_equal_approx(ECON.rate(industry, "Textiles"), textile_rate))
@@ -1157,7 +1153,7 @@ func _initialize() -> void:
 	assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
 	var next_building: Dictionary = industry["queue"][0]
 	for material in ECON.ECONOMY_BUILDINGS["Textiles"]["cost"]:
-		assert(is_equal_approx(float(next_building["cost"][material]), 3.0 * float(ECON.ECONOMY_BUILDINGS["Textiles"]["cost"][material])))
+		assert(is_equal_approx(float(next_building["cost"][material]), float(ECON.ECONOMY_BUILDINGS["Textiles"]["cost"][material])))
 	assert(ECON.cancel(bootstrap, 1, 0, int(next_building["id"])))
 	industry["stock"]["Tech"] = 0.0
 	assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Organics"))
@@ -1468,188 +1464,37 @@ func _initialize() -> void:
 	print("PASS: neutral mining delivery and population-gated shipyards")
 	quit(0)
 
-func _test_policy_cards() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
-	assert(not ECON.equip_policy(state, 99, "offense", "invasion"))
-	assert(not ECON.equip_policy(state, 1, "wildcard", "invasion"))
-	assert(not ECON.equip_policy(state, 1, "defense", "invasion"))
-	assert(ECON.equip_policy(state, 1, "offense", "invasion"))
-	var entry: Dictionary = state["policies"][1]["offense"]
-	assert(not ECON.policy_active(state, entry))
-	assert(ECON.policy_fleet_weights(state, 1).get(0, 0) == 100)
-	assert(not ECON.set_policy_target(state, 1, "offense", 0, true))
-	assert(ECON.set_policy_target(state, 1, "offense", 1, true))
-	state["elapsed"] = 20.0
-	assert(ECON.policy_active(state, entry))
-	assert(ECON.equip_policy(state, 1, "defense", "guard"))
-	assert(ECON.set_policy_weight(state, 1, "offense", 70))
-	assert(state["policies"][1]["defense"]["weight"] == 30)
-	assert(ECON.set_policy_target(state, 1, "defense", 0, true))
-	assert(ECON.policy_fleet_weights(state, 1) == {0: 30, 1: 70})
-	assert(ECON.equip_policy(state, 1, "offense", ""))
-	assert(ECON.equip_policy(state, 1, "offense", "invasion"))
-	assert(state["policies"][1]["offense"]["targets"].is_empty())
-	assert(not ECON.policy_active(state, state["policies"][1]["offense"]))
-	print("PASS: policy eligibility, warmup, target restrictions and replacement")
-
-func _test_economy_policies() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
-	var home: Dictionary = state["planets"][0]
-	var base: float = ECON.rate(home, "Plastics")
-	var demand: float = ECON.consumption(home, "Plastics")
-	assert(ECON.equip_policy(state, 1, "economy", "industry"))
-	ECON.apply_economy_policies(state)
-	assert(is_equal_approx(ECON.rate(home, "Plastics"), base * 1.2))
-	assert(ECON.equip_policy(state, 1, "economy", "conservation"))
-	ECON.apply_economy_policies(state)
-	assert(is_equal_approx(ECON.rate(home, "Plastics"), base))
-	assert(is_equal_approx(ECON.consumption(home, "Plastics"), demand * 0.85))
-	assert(ECON.equip_policy(state, 1, "economy", ""))
-	ECON.apply_economy_policies(state)
-	assert(is_equal_approx(ECON.consumption(home, "Plastics"), demand))
-	print("PASS: economy policy modifiers and removal")
-
-func _test_policy_zone_commitments() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
-	assert(ECON.policy_fleet_weights(state, 1).is_empty())
-	var invasion: Array = [{"targets": [1], "weight": 35}]
-	assert(not ECON.commit_military_policy(state, 1, "offense", "invasion", [], []))
-	assert(not ECON.commit_military_policy(state, 2, "offense", "invasion", [{"targets": [-1], "weight": 35}], []))
-	assert(ECON.policy_zone_target_valid(state, 2, "invasion", 1))
-	assert(not ECON.policy_target_valid(state, 2, "invasion", 1))
-	assert(ECON.commit_military_policy(state, 1, "offense", "invasion", invasion, []))
-	var entry: Dictionary = state["policies"][1]["offense"]
-	assert(ECON.policy_allocation(entry) == 35)
-	assert(not ECON.set_policy_target(state, 1, "offense", 1, false))
-	assert(not ECON.set_policy_weight(state, 1, "offense", 80))
-	assert(ECON.policy_fleet_weights(state, 1).get(0, 0) == 100)
-	state["elapsed"] = 20.0
-	assert(ECON.policy_fleet_weights(state, 1) == {0: 65, 1: 35})
-	assert(ECON.equip_policy(state, 1, "defense", "guard"))
-	assert(ECON.policy_allocation(state["policies"][1]["defense"]) == 65)
-	assert(not ECON.set_policy_weight(state, 1, "defense", 66))
-	assert(ECON.equip_policy(state, 1, "defense", ""))
-	assert(ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [0], "weight": 25}], []))
-	assert(ECON.policy_fleet_weights(state, 1) == {0: 65, 1: 35})
-	assert(not ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [0], "weight": 80}], []))
-	assert(ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [0], "weight": 40}], ["offense"]))
-	assert(ECON.policy_fleet_weights(state, 1) == {0: 100})
-	assert(not state["policies"][1].has("offense"))
-	assert(ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [1], "weight": 20}], ["defense"]))
-	assert(not state["policies"][1].has("defense"))
-	assert(not ECON.policy_active(state, state["policies"][1]["offense"]))
-	assert(ECON.policy_allocation(state["policies"][1]["offense"]) == 20)
-	print("PASS: atomic zone policies, overrides, locked weights and warmup replacement")
-
-func _test_policy_zone_fleet_dispatch() -> void:
+func _test_neutral_direct_occupation() -> void:
 	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
-	var fleet: Array = state["ships"]
-	var home: Vector2 = state["map"]["points"][0]
-	for i in range(5):
-		fleet.append({"id": 9100 + i, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": home, "dest": 0, "hp": ECON.SHIP_HP})
-	assert(ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [1], "weight": 60}], []))
-	ECON._allocate_fighters(state, graph, 1, fleet, true)
-	ECON._sync_operations(state)
-	ECON._dispatch_operations(state, graph)
-	assert(state["operations"]["1:allocation:0"]["members"].size() == 5)
-	state["elapsed"] = 20.0
-	ECON._allocate_fighters(state, graph, 1, fleet, true)
-	ECON._sync_operations(state)
-	ECON._dispatch_operations(state, graph)
-	assert(state["operations"]["1:allocation:0"]["members"].size() == 2)
-	assert(state["operations"]["1:allocation:1"]["deployed"].size() == 3)
-	for craft in fleet:
-		assert(craft["dest"] == craft["operation_target"])
-	# Invalid requests cannot modify the existing commitment.
-	var before: Dictionary = state["policies"][1].duplicate(true)
-	var excessive: Array = []
-	for i in range(6):
-		state["planets"][i]["owner"] = 1
-		excessive.append({"targets": [i], "weight": 10})
-	assert(not ECON.commit_military_policy(state, 1, "defense", "guard", excessive, []))
-	assert(state["policies"][1] == before)
-	state["planets"][1]["owner"] = 2
-	# A void accepted alongside a guard order returns all ships to reserve.
-	assert(ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [0], "weight": 40}], ["offense"]))
-	ECON._allocate_fighters(state, graph, 1, fleet, true)
-	ECON._sync_operations(state)
-	ECON._dispatch_operations(state, graph)
-	assert(not state["operations"].has("1:allocation:1"))
-	assert(state["operations"]["1:allocation:0"]["members"].size() == 5)
-	assert(not state["policies"][1].has("offense"))
-	var bot_state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2])
-	var bot_graph: Dictionary = ECON.military_graph(bot_state)
-	ECON._ai_turn(bot_state, bot_graph, 2)
-	assert(bot_state["policies"][2]["offense"]["card"] == "invasion")
-	var ready_at: float = float(bot_state["policies"][2]["offense"]["ready_at"])
-	ECON._ai_turn(bot_state, bot_graph, 2)
-	assert(float(bot_state["policies"][2]["offense"]["ready_at"]) == ready_at)
-	assert(ECON.policy_fleet_weights(bot_state, 2) == {1: 100})
-	bot_state["elapsed"] = ready_at
-	assert(ECON.policy_fleet_weights(bot_state, 2) == {0: 100})
-	print("PASS: painted policy warmup, fleet quotas, cohort dispatch, zone cap, reserve and AI commitment")
-
-func _test_lasso_small_fleet() -> void:
-	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
-	var graph: Dictionary = ECON.military_graph(state)
-	var fleet: Array = state["ships"]
-	var field_node: int = (state["planets"] as Array).size()
-	for i in range(2):
-		fleet.append({"id": 9300 + i, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": graph["points"][0], "dest": 0, "hp": ECON.SHIP_HP})
-	var zones: Array = [{"targets": [1, field_node], "weight": 100}]
-	assert(ECON.commit_military_policy(state, 1, "offense", "invasion", zones, []))
-	assert(ECON.policy_zone_shares([1, field_node], 100) == {1: 50, field_node: 50})
-	assert(not ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [graph["points"].size()], "weight": 100}], []))
-	assert(not ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [1, field_node], "weight": 60}, {"targets": [field_node], "weight": 40}], []))
-	state["elapsed"] = 20.0
-	ECON._allocate_fighters(state, graph, 1, fleet, true)
-	ECON._sync_operations(state)
-	ECON._dispatch_operations(state, graph)
-	assert(state["operations"]["1:allocation:1"]["deployed"].size() == 1)
-	assert(state["operations"]["1:allocation:%d" % field_node]["members"].size() == 1)
-	for craft in fleet:
-		assert(craft["dest"] == craft["operation_target"] and not craft["route"].is_empty())
-	ECON.step(state, 0.1)
-	assert(state["policies"][1]["offense"]["targets"].has(field_node))
-	for craft in fleet:
-		assert(craft["dest"] == craft["operation_target"])
-	print("PASS: lasso mixed POIs and small invasion allocations deploy without minimum-three deadlock")
-
-# Empty objectives remain valid without enemy ships or colonial ownership.
-func _test_neutral_policy_occupation() -> void:
-	for card in ["invasion", "guard"]:
-		var slot: String = "offense" if card == "invasion" else "defense"
-		var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
-		var graph: Dictionary = ECON.military_graph(state)
-		var neutral: int = int(graph["adjacent"][0][0])
-		var field: int = (state["planets"] as Array).size()
-		assert(neutral > 0 and neutral < field)
-		assert(int(state["planets"][neutral]["owner"]) == 0)
-		for i in range(2):
-			state["ships"].append({"id": 9400 + i, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": graph["points"][0], "dest": 0, "hp": ECON.SHIP_HP})
-		var targets: Array = [neutral, field]
-		assert(ECON.commit_military_policy(state, 1, slot, card, [{"targets": targets, "weight": 100}], []))
-		var arrived: bool = false
-		for tick in range(300):
-			ECON.step(state, 1.0)
-			var stationed: Array = []
-			for craft in state["ships"]:
-				if (craft["route"] as Array).is_empty() and targets.has(int(craft["at"])):
-					stationed.append(int(craft["at"]))
-			if stationed.has(neutral) and stationed.has(field):
-				arrived = true
-				break
-		assert(arrived)
-		for tick in range(5):
-			ECON.step(state, 1.0)
-		assert(ECON.policy_fleet_weights(state, 1) == {neutral: 50, field: 50})
-		for craft in state["ships"]:
-			assert(targets.has(int(craft["at"])) and craft["at"] == craft["dest"] and (craft["route"] as Array).is_empty())
-		var claims: Array[int] = ECON.territory_claims(state)
-		assert(claims[neutral] == 1 and claims[field] == 1)
-		assert(int(state["planets"][neutral]["owner"]) == 0)
-	print("PASS: both Invasion and Guard occupy and hold empty systems and asteroid fields")
+	var neutral: int = -1
+	for node in graph["adjacent"][0]:
+		if node >= 2 and node < state["planets"].size():
+			neutral = node
+			break
+	assert(neutral >= 0)
+	var field: int = state["planets"].size()
+	for i in range(3):
+		state["ships"].append({"id": 9400 + i, "owner": 2 if i == 2 else 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": graph["points"][0], "dest": 0, "hp": ECON.SHIP_HP})
+	assert(not ECON.command_fighters(state, 1, [9400, 9402], neutral))
+	assert(not ECON.command_fighters(state, 1, [9400, 9400], neutral))
+	assert(not ECON.command_fighters(state, 1, [9400], -1))
+	assert(not ECON.command_fighters(state, 1, [9999], field))
+	assert(state["ships"][0]["dest"] == 0)
+	state["ships"].pop_back()
+	assert(ECON.command_fighters(state, 1, [9400], neutral))
+	assert(ECON.command_fighters(state, 1, [9401], field))
+	for tick in range(300):
+		ECON.step(state, 1.0)
+		if state["ships"][0]["route"].is_empty() and state["ships"][1]["route"].is_empty():
+			break
+	assert(state["ships"][0]["at"] == neutral and state["ships"][1]["at"] == field)
+	var claims: Array[int] = ECON.territory_claims(state)
+	assert(claims[neutral] == 1 and claims[field] == 1)
+	assert(int(state["planets"][neutral]["owner"]) == 0)
+	assert(ECON.command_fighters(state, 1, [9400, 9401], 0))
+	assert(state["ships"][0]["dest"] == 0 and state["ships"][1]["dest"] == 0)
+	print("PASS: direct individual and group orders, atomic ownership, neutral occupation and retargeting")
 
 func _test_idle_formations() -> void:
 	var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
@@ -1680,11 +1525,11 @@ func _test_idle_formations() -> void:
 	assert((squad[0]["position"] as Vector2).distance_to(squad[1]["position"]) < 45.0)
 	assert((squad[3]["position"] as Vector2).distance_to(squad[4]["position"]) < 45.0)
 	var objective: int = int(graph["adjacent"][0][0])
-	assert(ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [objective], "weight": 100}], []))
+	assert(ECON.command_fighters(state, 1, [9500, 9501, 9502], objective))
 	ECON.step(state, 0.1)
 	for i in range(3):
 		assert(int(squad[i]["dest"]) == objective and not (squad[i]["route"] as Array).is_empty())
-	print("PASS: authoritative idle formations wander, preserve bounds and resume policy navigation")
+	print("PASS: authoritative idle formations wander, preserve bounds and resume direct navigation")
 
 func _test_depleted_field_routes() -> void:
 	var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
@@ -1704,7 +1549,7 @@ func _test_depleted_field_routes() -> void:
 	var field_pos: Vector2 = graph["points"][count]
 	var fighter: Dictionary = {"id": 9515, "owner": 1, "kind": "fighter", "at": count, "route": [], "position": field_pos, "dest": count, "hp": ECON.SHIP_HP}
 	state["ships"] = [fighter]
-	assert(ECON.commit_military_policy(state, 1, "defense", "guard", [{"targets": [count], "weight": 100}], []))
+	assert(ECON.command_fighters(state, 1, [9515], count))
 	var max_distance: float = 0.0
 	for tick in range(100):
 		var before: Vector2 = fighter["position"]
@@ -1722,7 +1567,7 @@ func _test_wide_patrol_rally_and_conquest() -> void:
 	var graph: Dictionary = ECON.military_graph(state)
 	for i in range(3):
 		state["ships"].append({"id": 9520 + i, "owner": 1, "kind": "fighter", "at": 0, "dest": 0, "route": [], "position": Vector2(-600.0, 20.0 * i), "hp": ECON.SHIP_HP})
-	assert(ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [1], "weight": 100}], []))
+	assert(ECON.command_fighters(state, 1, [9520, 9521, 9522], 1))
 	state["elapsed"] = 20.0
 	var launched: bool = false
 	for tick in range(80):
@@ -1751,7 +1596,7 @@ func _test_wide_patrol_rally_and_conquest() -> void:
 	assert(state["planets"][1]["owner"] == 1)
 	print("PASS: wide patrol returns to physical rally and defenders contest their sector")
 
-func _test_ai_defensive_policies() -> void:
+func _test_ai_defensive_orders() -> void:
 	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var owned: Array[int] = [1]
@@ -1759,28 +1604,16 @@ func _test_ai_defensive_policies() -> void:
 	for i in range(8):
 		fighters.append({"id": 9700 + i, "owner": 2, "kind": "fighter", "at": 1, "dest": 1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP})
 	state["ships"] = fighters.duplicate()
-	ECON._ai_military_policies(state, graph, 2, 1, owned, fighters)
-	var policies: Dictionary = state["policies"][2]
-	assert(ECON.policy_allocation(policies["offense"]) == 75)
-	assert(ECON.policy_allocation(policies["defense"]) == 25)
-	var ready_at: float = float(policies["offense"]["ready_at"])
-	state["elapsed"] = ready_at
-	assert(ECON.policy_fleet_weights(state, 2) == {0: 75, 1: 25})
+	ECON._ai_military_orders(state, graph, 2, 1, owned, fighters)
+	assert(fighters.filter(func(ship: Dictionary) -> bool: return ship.get("operation_target", -1) == 0).size() == 6)
 	var intruder: Dictionary = {"id": 9800, "owner": 1, "kind": "fighter", "at": 1, "dest": 1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP}
 	state["ships"].append(intruder)
-	ECON._ai_military_policies(state, graph, 2, 1, owned, fighters)
-	assert(ECON.policy_fleet_weights(state, 2) == {0: 40, 1: 60})
-	assert(float(policies["offense"]["ready_at"]) == ready_at)
-	var small: Array = fighters.slice(0, 2)
-	ECON._ai_military_policies(state, graph, 2, 1, owned, small)
-	assert(ECON.policy_fleet_weights(state, 2).get(1) == 100)
-	assert(float(policies["offense"]["ready_at"]) == ready_at)
+	ECON._ai_military_orders(state, graph, 2, 1, owned, fighters)
+	assert(fighters.filter(func(ship: Dictionary) -> bool: return ship.get("operation_target", -1) == 1).size() == 5)
 	state["ships"].erase(intruder)
-	ECON._ai_military_policies(state, graph, 2, 1, owned, fighters)
-	assert(ECON.policy_fleet_weights(state, 2) == {0: 75, 1: 25})
-	assert(float(policies["offense"]["ready_at"]) == ready_at)
-	assert(not state["ai_waves"].has(2))
-	print("PASS: AI shared regional policies, threat response, fleet budget, stable warmup and recovery")
+	ECON._ai_military_orders(state, graph, 2, 1, owned, fighters)
+	assert(fighters.filter(func(ship: Dictionary) -> bool: return ship.get("operation_target", -1) == 0).size() == 6)
+	print("PASS: AI direct orders and defense allocation")
 
 func _test_conquest() -> void:
 	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -1788,7 +1621,7 @@ func _test_conquest() -> void:
 	var planet: Dictionary = state["planets"][1]
 	var attacker: Dictionary = {"id": 9900, "owner": 1, "kind": "fighter", "at": 1, "dest": 1, "operation_target": 1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP}
 	state["ships"] = [attacker]
-	assert(ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [1], "weight": 100}], []))
+	assert(ECON.command_fighters(state, 1, [9900], 1))
 	ECON._step_conquest(state, graph, 20.0)
 	assert(not planet.has("capture"))
 	state["elapsed"] = 20.0
@@ -1815,7 +1648,7 @@ func _test_conquest() -> void:
 	assert(not ECON.set_thresholds(state, 2, 1, "Metals", 10.0, 20.0))
 	assert(ECON.set_thresholds(state, 1, 1, "Metals", 10.0, 20.0))
 	assert(int(bytes_to_var(var_to_bytes(state))["planets"][1]["owner"]) == 1)
-	print("PASS: invasion warmup, resistance, interrupted capture, ownership and authority transfer")
+	print("PASS: direct occupation, resistance, interrupted capture, ownership and authority transfer")
 
 func _test_conquest_resistance_and_evacuation() -> void:
 	var map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(1200, 0), Vector2(600, 0), Vector2(600, 600)], "edges": [[0, 2], [1, 2], [1, 3], [2, 3]], "fields": []}
@@ -1827,7 +1660,7 @@ func _test_conquest_resistance_and_evacuation() -> void:
 	colony["pds"][0] = {"hp": ECON.LASER_DAMAGE, "cooldown": 0.0, "target": -1, "laser_until": -1.0}
 	var attacker: Dictionary = {"id": 10001, "owner": 1, "kind": "fighter", "at": 2, "dest": 2, "operation_target": 2, "route": [], "position": map["points"][2], "hp": ECON.SHIP_HP}
 	state["ships"] = [attacker]
-	assert(ECON.commit_military_policy(state, 1, "offense", "invasion", [{"targets": [2], "weight": 100}], []))
+	assert(ECON.command_fighters(state, 1, [10001], 2))
 	state["elapsed"] = 20.0
 	ECON._step_conquest(state, graph, ECON.CAPTURE_YEARS)
 	assert(int(colony["owner"]) == 2 and not colony.has("capture"))
@@ -1969,3 +1802,37 @@ func _test_match_elimination() -> void:
 	var solo: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
 	assert(not ECON.update_match_outcome(solo) and solo.get("match_result", {}).is_empty())
 	print("PASS: colony recovery, allied survival, elimination, conquest victory and sandbox")
+
+func _test_recovery_economy() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(827, 1), {1: {"team": 1}}, [1], false)
+	var p: Dictionary = state["planets"][0]
+	for resource in ECON.RESOURCES:
+		assert(not ECON.building_cost(p, resource).has(resource))
+		assert(ECON.building_available(p, resource))
+	p["population"] = 1000000.0
+	p["stock"] = ECON.empty_stock()
+	for resource in ["Metals", "Plastics", "Textiles", "Tech"]:
+		assert(ECON.rate(p, resource) > 0.0)
+	for i in range(120):
+		ECON._work_planet(state, 0, 1.0)
+	for resource in ["Metals", "Plastics", "Textiles", "Tech"]:
+		assert(float(p["stock"][resource]) > 0.0)
+	assert(ECON.overpopulation_penalty(p) > float(p["population"]) / ECON.habitation_capacity(p))
+	# A depleted economy can actually fund a queued building.
+	assert(ECON.enqueue(state, 1, 0, "economy", "Tech"))
+	for i in range(1200):
+		ECON._work_planet(state, 0, 1.0)
+		if int(p["buildings"].get("Tech", 0)) > 0:
+			break
+	assert(int(p["buildings"].get("Tech", 0)) == 1)
+	p["population"] = ECON.habitation_capacity(p)
+	assert(is_equal_approx(ECON.overpopulation_penalty(p), 1.0))
+	p["population"] = 10000.0
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 500.0
+	assert(ECON.enqueue(state, 1, 0, "economy", "Crystals"))
+	var job: Dictionary = p["queue"][0]
+	assert(ECON._advance(p, job, float(job["work"])))
+	ECON._finish(state, 0, p, job)
+	assert(ECON.rate(p, "Crystals") > 0.0)
+	print("PASS: no self-cost recipes, depleted stock recovery, crystal bootstrap, overpopulation curve")
