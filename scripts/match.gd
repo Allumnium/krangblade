@@ -932,8 +932,9 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 	orbital_card["section"].visible = not has_planets
 	if not has_planets:
 		var residents: float = float(p["population"])
+		var housing_capacity: float = ECONOMY.eco_capacity(p)
 		_disclosure_title(orbital_card, "Orbital Eco-Housing · %d" % int(p.get("orbital_housing", 0)))
-		orbital_card["detail"].text = "Population: %s → %s (+5,000)\nCivilian consumption: 0 t/yr (all resources)\nNo natural growth or habitation limit. Repeatable." % [_compact_amount(residents), _compact_amount(residents + ECONOMY.ORBITAL_HOUSING_POPULATION)]
+		orbital_card["detail"].text = "Population: %s → %s (+5,000)\nEco-Housing capacity: %s → %s\nOrganics surplus: %.2f → %.2f t/yr\nCivilian consumption: 0 t/yr\nResidents serve as crew and regrow (30-year doubling) to housing capacity, independent of planetary limits." % [_compact_amount(residents), _compact_amount(residents + ECONOMY.ORBITAL_HOUSING_POPULATION), _compact_amount(housing_capacity), _compact_amount(housing_capacity + ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(p), ECONOMY.eco_organics(p) + ECONOMY.ECO_HOUSING_ORGANICS]
 		orbital_card["button"].disabled = not owned or not ECONOMY.orbital_housing_available(p)
 		_set_timed_action(orbital_card["button"], "Build", 0.0)
 		_show_cost(orbital_card["costs"], ECONOMY.ORBITAL_HOUSING_COST)
@@ -1817,7 +1818,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 	if resource == "population":
 		var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 		var crew: float = float(p.get("crew_rate", 0.0))
-		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
+		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year\nEco-Housing: %.0f / %.0f residents · +%.2f t/yr Organics" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics"), ECONOMY.eco_population(p), ECONOMY.eco_capacity(p), ECONOMY.eco_organics(p)]
 	var potential: float = ECONOMY.rate(p, resource)
 	var demand: float = ECONOMY.consumption(p, resource)
 	var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Theoretical: %.2f production − %.2f demand = %+.2f t/yr" % [potential, demand, potential - demand], "Latest actual flows (t/yr)"]
@@ -2240,7 +2241,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 			upgrade.visible = false
 			repeat.visible = false
 			var recipe: Dictionary = ECONOMY._cost("yard", number)
-			label.tooltip_text = _cost_text(recipe) + " · Requires %s population to operate" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[number - 1]))
+			label.tooltip_text = _cost_text(recipe) + " · +5,000 Eco-Housing residents · +0.2 t/yr Organics · Requires %s population to operate" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[number - 1]))
 			build.tooltip_text = label.tooltip_text
 			_set_timed_action(build, "Build", ECONOMY._work("yard", number))
 			_show_cost(costs, recipe)
@@ -2270,6 +2271,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 		_set_timed_action(upgrade, "Upgrade", ECONOMY._work("yard_upgrade", level + 1) if existing else -1.0)
 		_disclosure_title(yard_activity_rows[index], "Upgrade to Lv %d" % (level + 1) if existing and not pending else ("Upgrade pending" if existing else "Construction · " + _duration_text(float(job["work"]))))
 		yard_activity_rows[index]["upgrade_detail"].text = "Build speed %.0f → %.0f work/yr · Max size %d → %d" % [ECONOMY.yard_speed(level), ECONOMY.yard_speed(level + 1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1)] if existing else "Adds a shipyard"
+		yard_activity_rows[index]["upgrade_detail"].text += "\nEco-Housing: 5,000 residents per completed shipyard · +0.2 t/yr Organics\nSelf-sustaining crew population regenerates to capacity. Upgrading the shipyard does not add another habitat."
 		if existing and not operating:
 			yard_activity_rows[index]["upgrade_detail"].text += "\nRequires %s population" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[index]))
 		_show_cost(yard_activity_rows[index]["upgrade_costs"], ECONOMY._cost("yard_upgrade", level + 1) if existing else job["cost"])

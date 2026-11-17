@@ -44,6 +44,7 @@ func _initialize() -> void:
 	_test_match_elimination()
 	_test_map_layouts()
 	_test_orbital_housing()
+	_test_eco_regrowth()
 	_test_antimatter_extraction()
 	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
 	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
@@ -195,7 +196,7 @@ func _initialize() -> void:
 	var totals: Dictionary = ECON.empire_totals(totals_state, 1)
 	assert(totals["planets"] == 2 and totals["craft"] == 2)
 	assert(totals["logistics"] == 1 and totals["colonies"] == 1)
-	assert(is_equal_approx(float(totals["population"]), ECON.HOME_POPULATION + ECON.COLONY_POPULATION))
+	assert(is_equal_approx(float(totals["population"]), ECON.HOME_POPULATION + ECON.ORBITAL_HOUSING_POPULATION + ECON.COLONY_POPULATION))
 	assert(is_equal_approx(float(totals["stock"]["Metals"]), float(ECON.STARTING_STOCK["Metals"]) + 25.0))
 	assert(is_equal_approx(float(totals["cargo"]["Metals"]), 7.0))
 	assert(is_equal_approx(float(totals["resources"]["Metals"]), float(ECON.STARTING_STOCK["Metals"]) + 32.0))
@@ -226,6 +227,10 @@ func _initialize() -> void:
 	# Starting growth is exponential when well below a food-supported plateau.
 	var demographics: Dictionary = ECON.create(graph, players, ids, false)
 	var home: Dictionary = demographics["planets"][0]
+	# Isolate terrestrial demographic formulas from independent orbital habitats.
+	home["yards"].clear()
+	home["eco_population"] = 0.0
+	home["population"] = ECON.HOME_POPULATION
 	home["bonuses"]["Organics"] = 1.0
 	home["abundance"]["Metals"] = 1.0
 	var capacity: float = ECON.population_capacity(home)
@@ -785,7 +790,7 @@ func _initialize() -> void:
 	assert(int(colonization["planets"][3]["owner"]) == 0)
 	ECON.step(colonization, first_arrival * 0.5 + 0.001)
 	assert(int(colonization["planets"][3]["owner"]) == winner)
-	assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION))
+	assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION + ECON.ORBITAL_HOUSING_POPULATION))
 	assert(int(colonization["planets"][3]["levels"]["Organics"]) == 1)
 	assert(colonization["ships"].size() == 1)
 	for i in range(20):
@@ -1147,7 +1152,7 @@ func _initialize() -> void:
 	assert(float(remaining_stock["Metals"]) < float(ECON._cost("fighter", 1)["Metals"]))
 	assert(ECON._cost("fighter", 1) == {"Metals": 270.0, "Plastics": 60.0, "Textiles": 30.0, "Organics": 10.0, "Tech": 30.0})
 	var tech_rate: float = ECON.rate(industry, "Tech")
-	industry["population"] = 20000.0
+	industry["population"] = 2.0 * (ECON.HOME_POPULATION + ECON.ORBITAL_HOUSING_POPULATION)
 	assert(is_equal_approx(ECON.rate(industry, "Tech"), tech_rate * 2.0))
 	assert(not ECON.enqueue(bootstrap, 1, 0, "production", "Tech"))
 	industry["population"] = 199999.0
@@ -1206,6 +1211,10 @@ func _initialize() -> void:
 	print("PASS: multi-resource hulls, population gates and permanent local improvements")
 	var warehouse_state: Dictionary = ECON.create(graph, players, ids, false)
 	var depot: Dictionary = warehouse_state["planets"][0]
+	# Isolate legacy linear planetary demand from exempt housing residents.
+	depot["yards"].clear()
+	depot["eco_population"] = 0.0
+	depot["population"] = ECON.HOME_POPULATION
 	assert(ECON.storage_capacity(depot) == 2000.0)
 	assert(ECON.rate(depot, "Crystals") == 0.0 and ECON.consumption(depot, "Crystals") == 0.0)
 	for resource in ["Metals", "Plastics", "Textiles", "Organics", "Tech"]:
@@ -1380,7 +1389,7 @@ func _initialize() -> void:
 				fighters += 1 if craft["kind"] == "fighter" else 0
 		assert(miners == 3 and fighters == 2)
 		assert(opening["planets"][opening_home]["stock"] == ECON.STARTING_STOCK)
-		assert(opening["planets"][opening_home]["population"] == ECON.HOME_POPULATION)
+		assert(opening["planets"][opening_home]["population"] == ECON.HOME_POPULATION + ECON.ORBITAL_HOUSING_POPULATION)
 		var starting_defenses: Dictionary = opening["planets"][opening_home]["pds"]
 		assert(starting_defenses.size() == 1 and starting_defenses.has(0))
 		assert(float(starting_defenses[0]["hp"]) == ECON.PDS_HP)
@@ -1968,13 +1977,60 @@ func _test_orbital_housing() -> void:
 	var stock: Dictionary = p["stock"].duplicate()
 	for tick in range(30):
 		ECON._work_planet(state, index, 1.0)
-	assert(p["stock"] == stock and float(p["population"]) == 10000.0)
+	assert(float(p["population"]) == 10000.0)
+	for resource in ECON.RESOURCES:
+		var expected: float = float(stock[resource]) + (2.0 * ECON.ECO_HOUSING_ORGANICS * 30.0 if resource == "Organics" else 0.0)
+		assert(is_equal_approx(float(p["stock"][resource]), expected))
 	for resource in ECON.RESOURCES:
 		assert(ECON.consumption(p, resource) == 0.0)
 		assert(ECON.local_flow(p, "Population", resource) == 0.0)
 	var colony: Dictionary = {"owner": 1, "kind": "colony_ship", "at": 0, "route": []}
 	assert(ECON.colony_path(state, 1, colony, galaxy["planetless"][1]).is_empty())
 	print("PASS: mixed planetary systems, neutral fighter capture, prepaid repeatable self-sufficient orbital housing")
+
+func _test_eco_regrowth() -> void:
+	var galaxy: Dictionary = MAP.generate(827, 1, "Grid")
+	var state: Dictionary = ECON.create(galaxy, {1: {"team": 1}}, [1], false)
+	var home: Dictionary = state["planets"][0]
+	assert(ECON.eco_capacity(home) == 5000.0)
+	assert(ECON.eco_population(home) == 5000.0 and ECON.planetary_population(home) == ECON.HOME_POPULATION)
+	assert(is_equal_approx(ECON.eco_organics(home), 0.2))
+	assert(is_equal_approx(ECON.organics_demand(home), ECON.HOME_POPULATION / ECON.POPULATION_PER_ORGANICS_RATE))
+	assert(not ECON.enqueue(state, 1, 0, "economy", "orbital_housing"))
+	var index: int = galaxy["planetless"][0]
+	var p: Dictionary = state["planets"][index]
+	p["owner"] = 1
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 2000.0
+	assert(ECON.enqueue(state, 1, index, "yard"))
+	var job: Dictionary = p["queue"][0]
+	assert(ECON.eco_capacity(p) == 0.0 and float(p["population"]) == 0.0)
+	assert(ECON._advance(p, job, float(job["work"])))
+	ECON._finish(state, index, p, job)
+	assert(ECON.eco_population(p) == 5000.0 and ECON.eco_capacity(p) == 5000.0)
+	assert(ECON.shipyard_operational(p, 0))
+	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.2))
+	assert(ECON.enqueue(state, 1, index, "economy", "orbital_housing"))
+	assert(ECON.eco_capacity(p) == 10000.0 and float(p["population"]) == 10000.0)
+	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.4))
+	assert(ECON.enqueue(state, 1, index, "fighter"))
+	job = p["queue"][0]
+	assert(ECON._advance(p, job, float(job["work"])))
+	assert(float(p["population"]) == 9500.0 and float(job["eco_allocated"]) == 500.0)
+	ECON._finish(state, index, p, job)
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 0.0
+	ECON._update_population(p, 1.0)
+	assert(float(p["population"]) > 9500.0 and float(p["population"]) < 10000.0)
+	ECON._update_population(p, 30.0)
+	assert(float(p["population"]) == 10000.0)
+	assert(ECON.consumption(p, "Organics") == 0.0)
+	assert(ECON.overpopulation_penalty(p) == 0.0)
+	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.4))
+	# Level upgrades do not create another housing module.
+	ECON._finish(state, index, p, {"kind": "yard_upgrade", "target": "0", "level": 2})
+	assert(ECON.eco_capacity(p) == 10000.0 and float(p["population"]) == 10000.0)
+	print("PASS: shipyard and orbital housing, shared crew, independent regeneration, net organic surplus")
 
 func _test_antimatter_extraction() -> void:
 	for player_count in range(1, 9):
@@ -2082,7 +2138,7 @@ func _test_recovery_economy() -> void:
 		ECON._work_planet(state, 0, 1.0)
 	for resource in ["Metals", "Plastics", "Textiles", "Tech"]:
 		assert(float(p["stock"][resource]) > 0.0)
-	assert(ECON.overpopulation_penalty(p) > float(p["population"]) / ECON.habitation_capacity(p))
+	assert(ECON.overpopulation_penalty(p) > ECON.planetary_population(p) / ECON.habitation_capacity(p))
 	# A depleted economy can recover enough to prepay a building.
 	for i in range(1200):
 		if ECON.affordable(p, ECON.building_cost(p, "Tech")):
@@ -2094,7 +2150,7 @@ func _test_recovery_economy() -> void:
 		if int(p["buildings"].get("Tech", 0)) > 0:
 			break
 	assert(int(p["buildings"].get("Tech", 0)) == 1)
-	p["population"] = ECON.habitation_capacity(p)
+	p["population"] = ECON.habitation_capacity(p) + ECON.eco_population(p)
 	assert(is_equal_approx(ECON.overpopulation_penalty(p), 1.0))
 	p["population"] = 10000.0
 	for resource in ECON.RESOURCES:
