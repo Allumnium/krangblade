@@ -175,3 +175,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.7 branch groundwork: authoritative atomic zone commitment, stored zone weights and void selections, fleet policy weight aggregation. UI and full allocation/validation behavior are not complete.
 
 - v0.17.9: zone draft brush, graph-connected component list, per-zone sliders, per-policy void checkboxes, host RPC and home reserve fallback pushed to draft PR #83. Remaining: correct stable allocation preservation across merge/split, paint geometry/visuals, AI migration, tests and CI.
+
+- v0.17.14: Fix painting mode visual feedback, persistent brush marks, stroke interpolation, panel hiding, and eligible-target feedback. Manual visual validation still required.

@@ -242,6 +242,7 @@ func _button(text: String, action: Callable, parent: Container) -> Button:
 func _build_ui() -> void:
     var background := ColorRect.new()
     background.set_script(BACKDROP)
+    background.name = "SpaceBackdrop"
     add_child(background)
     background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     _build_territory_layer()
@@ -1836,8 +1837,8 @@ func _refresh() -> void:
     var field_selected: bool = selected_field >= 0 and ECONOMY.discovered(state, _me(), "fields", selected_field)
     var ship_selected: bool = not ship.is_empty()
     var other_selected: bool = ship_selected or field_selected
-    inspector_panel.visible = policy_selected.is_empty() and (not p.is_empty() or other_selected)
-    overview_panel.visible = not p.is_empty() or other_selected
+    inspector_panel.visible = policy_draft_card.is_empty() and policy_selected.is_empty() and (not p.is_empty() or other_selected)
+    overview_panel.visible = policy_draft_card.is_empty() and (not p.is_empty() or other_selected)
     planet_overview.visible = not other_selected
     var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
     inspector_tabs.visible = not other_selected and own_system
@@ -2534,7 +2535,10 @@ func _map_input(event: InputEvent) -> void:
             if brush_button.button_index == MOUSE_BUTTON_LEFT or brush_button.button_index == MOUSE_BUTTON_RIGHT:
                 policy_brush_mode = (1 if brush_button.button_index == MOUSE_BUTTON_LEFT else -1) if brush_button.pressed else 0
                 if brush_button.pressed:
+                    policy_brush_last_point = brush_button.position
                     _paint_policy_brush(brush_button.position, policy_brush_mode)
+                else:
+                    policy_brush_last_point = Vector2(INF, INF)
                 map_canvas.accept_event()
                 return
             if brush_button.pressed and brush_button.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -2544,7 +2548,14 @@ func _map_input(event: InputEvent) -> void:
         elif event is InputEventMouseMotion:
             policy_brush_cursor = event.position
             if policy_brush_mode != 0:
-                _paint_policy_brush(event.position, policy_brush_mode)
+                if policy_brush_last_point.x != INF:
+                    var delta: Vector2 = event.position - policy_brush_last_point
+                    var segments: int = maxi(1, ceili(delta.length() / (policy_brush_radius * 0.4)))
+                    for index in range(1, segments + 1):
+                        _paint_policy_brush(policy_brush_last_point.lerp(event.position, float(index) / float(segments)), policy_brush_mode)
+                else:
+                    _paint_policy_brush(event.position, policy_brush_mode)
+                policy_brush_last_point = event.position
         map_canvas.queue_redraw()
         map_canvas.accept_event()
         return
@@ -3127,7 +3138,9 @@ var policy_draft_card: String = ""
 var policy_draft_slot: String = ""
 var policy_brush_mode: int = 0
 var policy_brush_cursor: Vector2 = Vector2.ZERO
-var policy_brush_radius: float = 32.0
+var policy_brush_radius: float = 55.0
+var policy_brush_strokes: Array[Vector2] = []
+var policy_brush_last_point: Vector2 = Vector2(INF, INF)
 var policy_painted: Dictionary = {}
 var policy_zone_weights: Dictionary = {}
 var policy_voids: Dictionary = {}
@@ -3357,6 +3370,8 @@ func _begin_policy_draft(slot: String, card: String) -> void:
     policy_selected = ""
     policy_brush_mode = 0
     policy_painted.clear()
+    policy_brush_strokes.clear()
+    policy_brush_last_point = Vector2(INF, INF)
     policy_zone_weights.clear()
     policy_voids.clear()
     var entry: Dictionary = _state().get("policies", {}).get(_me(), {}).get(slot, {})
@@ -3369,7 +3384,7 @@ func _begin_policy_draft(slot: String, card: String) -> void:
     map_canvas.offset_top = 8
     policy_hidden_ui.clear()
     for child in get_children():
-        if child == map_canvas or child == policy_editor or child == policy_modal or child == match_menu:
+        if child.name == "SpaceBackdrop" or child == territory_layer or child == map_canvas or child == policy_editor or child == policy_modal or child == match_menu:
             continue
         if child is CanvasItem:
             policy_hidden_ui[child] = child.visible
@@ -3381,6 +3396,7 @@ func _begin_policy_draft(slot: String, card: String) -> void:
 func _cancel_policy_draft() -> void:
     policy_draft_card = ""
     policy_brush_mode = 0
+    policy_brush_strokes.clear()
     policy_editor.hide()
     map_canvas.offset_top = policy_original_map_top
     for child in policy_hidden_ui:
@@ -3394,12 +3410,28 @@ func _paint_policy_brush(point: Vector2, mode: int) -> void:
     var state: Dictionary = _state()
     if state.is_empty():
         return
+    # Store brush marks in world coordinates so painting stays visible while
+    # panning or zooming. Drawing must work even between system centers.
+    var world: Vector2 = _world_point(point)
+    var world_radius: float = policy_brush_radius / (_fit() * zoom)
+    if mode > 0:
+        var nearby: bool = false
+        for mark in policy_brush_strokes:
+            if mark.distance_to(world) < world_radius * 0.35:
+                nearby = true
+                break
+        if not nearby:
+            policy_brush_strokes.append(world)
+    else:
+        for index in range(policy_brush_strokes.size() - 1, -1, -1):
+            if policy_brush_strokes[index].distance_to(world) <= world_radius:
+                policy_brush_strokes.remove_at(index)
     var changed: bool = false
     for node in range((state["planets"] as Array).size()):
         if not ECONOMY.discovered(state, _me(), "planets", node):
             continue
-        if mode > 0 and not ECONOMY.policy_target_valid(state, _me(), policy_draft_card, node):
-            continue
+        # The visible paint area selects discovered systems; ineligible
+        # invasion/defense targets are filtered when the policy is committed.
         if point.distance_to(_screen_point(state["map"]["points"][node])) > policy_brush_radius:
             continue
         var exists: bool = policy_painted.has(node)
@@ -3411,6 +3443,7 @@ func _paint_policy_brush(point: Vector2, mode: int) -> void:
             changed = true
     if changed:
         _update_policy_editor()
+    map_canvas.queue_redraw()
 
 # Graph connectivity uses the map's established system lanes.
 func _policy_components() -> Array:
@@ -3497,11 +3530,19 @@ func _update_policy_editor_status() -> void:
             continue
         if ECONOMY.POLICY_CARDS[equipped[slot]["card"]].get("military", false):
             used += ECONOMY.policy_allocation(equipped[slot])
-    var has_zone: bool = not _policy_components().is_empty()
+    var has_zone: bool = false
+    var state: Dictionary = _state()
+    for group in _policy_components():
+        for node in group:
+            if ECONOMY.policy_target_valid(state, _me(), policy_draft_card, int(node)):
+                has_zone = true
+                break
+        if has_zone:
+            break
     policy_editor_accept.disabled = not has_zone or used > 100
     policy_editor_status.text = "%d%% committed · %d%% available" % [used, maxi(0, 100 - used)] if used <= 100 else "%d%% — overallocated" % used
     if not has_zone:
-        policy_editor_status.text = "Draw at least one zone to accept."
+        policy_editor_status.text = "Paint a zone containing an eligible %s system." % ("enemy" if policy_draft_card == "invasion" else "friendly")
 
 func _commit_policy_draft() -> void:
     var zones: Array = []
@@ -3512,7 +3553,7 @@ func _commit_policy_draft() -> void:
             if ECONOMY.policy_target_valid(state, _me(), policy_draft_card, int(node)):
                 valid.append(node)
         if valid.is_empty():
-            return
+            continue
         zones.append({"targets": valid, "weight": int(policy_zone_weights.get(int(group[0]), 0))})
     if zones.is_empty() or policy_editor_accept.disabled:
         return
@@ -3537,6 +3578,9 @@ func _draw_policy_zones(state: Dictionary) -> void:
     if policy_draft_card.is_empty():
         return
     var draft_tint: Color = Color("#e99c77") if policy_draft_card == "invasion" else Color("#83b5eb")
+    for mark in policy_brush_strokes:
+        var mark_screen: Vector2 = _screen_point(mark)
+        map_canvas.draw_circle(mark_screen, policy_brush_radius, Color(draft_tint, 0.20))
     for group_index in range(_policy_components().size()):
         var group: Array = _policy_components()[group_index]
         for node in group:
