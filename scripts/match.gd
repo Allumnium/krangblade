@@ -114,6 +114,7 @@ var warehouse_card: Dictionary = {}
 var continuous_checks: Dictionary = {}
 var repeat_icon: Texture2D
 var population_icon: Texture2D
+var build_clock_icon: Texture2D
 var production_summary: VBoxContainer
 var production_values: Dictionary = {}
 var fighter_button: Button
@@ -603,14 +604,33 @@ func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
 		bar.add_theme_stylebox_override("fill", HUD.surface(Color("#b56b35"), Color("#f2b57e"), 0, 3))
 		bar.tooltip_text = "Blocked: " + ", ".join(blocked)
 
+func _clock_texture() -> Texture2D:
+	if build_clock_icon == null:
+		var image := Image.new()
+		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dbeaff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>')
+		build_clock_icon = ImageTexture.create_from_image(image)
+	return build_clock_icon
+
+func _duration_text(years: float) -> String:
+	if is_zero_approx(years):
+		return "Instant"
+	return "%.0fyr" % years if is_equal_approx(years, roundf(years)) else "%.1fyr" % years
+
+func _set_timed_action(button: Button, caption: String, years: float = -1.0) -> void:
+	button.text = caption if years < 0.0 else "%s · %s" % [caption, _duration_text(years)]
+	button.icon = _clock_texture() if years > 0.0 else null
+	button.icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	button.expand_icon = true
+	button.add_theme_constant_override("icon_max_width", 12)
+
 func _cost_grid(parent: Container) -> GridContainer:
 	var grid := GridContainer.new()
-	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 5)
 	parent.add_child(grid)
 	return grid
 
-func _show_cost(grid: GridContainer, cost: Dictionary, crew: float = 0.0, years: float = -1.0) -> void:
-	var signature: Array = [cost, crew, years]
+func _show_cost(grid: GridContainer, cost: Dictionary, crew: float = 0.0) -> void:
+	var signature: Array = [cost, crew]
 	if grid.get_meta("recipe", []) == signature:
 		return
 	grid.set_meta("recipe", signature.duplicate(true))
@@ -620,30 +640,25 @@ func _show_cost(grid: GridContainer, cost: Dictionary, crew: float = 0.0, years:
 	var entries: Dictionary = cost.duplicate()
 	if crew > 0.0:
 		entries["Population"] = crew
+	grid.columns = maxi(1, entries.size())
 	for resource in entries:
 		var pair := HBoxContainer.new()
-		pair.add_theme_constant_override("separation", 3)
+		pair.add_theme_constant_override("separation", 2)
 		grid.add_child(pair)
 		var symbol := TextureRect.new()
 		if resource == "Population":
 			symbol.texture = _population_texture()
 		else:
 			symbol.texture = HUD.ICONS[resource]
-		symbol.custom_minimum_size = Vector2(14, 14)
+		symbol.custom_minimum_size = Vector2(12, 12)
 		symbol.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		symbol.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		pair.add_child(symbol)
 		var value: float = float(entries[resource])
-		var amount := _label(_compact_amount(value) if resource == "Population" else _tons(value, 0), 11)
+		var amount := _label(_compact_amount(value), 11)
 		amount.autowrap_mode = TextServer.AUTOWRAP_OFF
 		pair.add_child(amount)
 		pair.tooltip_text = ("%.0f people" % value) if resource == "Population" else "%.0f t %s" % [value, resource]
-	if years >= 0.0:
-		var duration := _label("Instant" if is_zero_approx(years) else ("%.0f yr" % years if is_equal_approx(years, roundf(years)) else "%.1f yr" % years), 11)
-		duration.autowrap_mode = TextServer.AUTOWRAP_OFF
-		duration.add_theme_color_override("font_color", HUD.MUTED)
-		duration.tooltip_text = "Estimated construction time in game years, excluding queue and staffing delays" if years > 0.0 else "Immediate purchase"
-		grid.add_child(duration)
 
 func _ship_build_years(p: Dictionary, kind: String) -> float:
 	var speed: float = ECONOMY.yard_speed(1)
@@ -676,7 +691,7 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
 	var requirements := _label("", 12)
 	body.add_child(requirements)
 	var costs: GridContainer = _cost_grid(disclosure["summary"])
-	_show_cost(costs, ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]), _ship_build_years({}, kind))
+	_show_cost(costs, ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]))
 	var row: HBoxContainer = disclosure["actions"]
 	var maintained := _label("(0 / 0)", 11)
 	maintained.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -708,6 +723,7 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
 		if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0 and event.relative.y > 0.0:
 			session.call("request_maintain", selected, kind, maxi(0, int(amount.value) - maxi(1, roundi(event.relative.y / 4.0)))))
 	var button: Button = _card_action(disclosure, "Build", _operation.bind(kind))
+	_set_timed_action(button, "Build", _ship_build_years({}, kind))
 	if kind != "yard":
 		var check: Button = _repeat_button(row, kind)
 		continuous_checks[kind] = check
@@ -868,14 +884,14 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 		habitation_card["detail"].text += " → %+.1f%%" % next_penalty
 	_sync_repeat(habitation_card["repeat"], p, "habitation", owned and habitat_level < 3)
 	habitation_card["button"].disabled = not owned or not ECONOMY.habitation_available(p)
-	habitation_card["button"].text = "Max" if habitat_level >= 3 else "Upgrade"
+	_set_timed_action(habitation_card["button"], "Max" if habitat_level >= 3 else "Upgrade", -1.0 if habitat_level >= 3 else 0.0)
 	habitation_card["costs"].visible = habitat_level < 3
-	_show_cost(habitation_card["costs"], ECONOMY.habitation_cost(p), 0.0, 0.0)
+	_show_cost(habitation_card["costs"], ECONOMY.habitation_cost(p))
 	var level: int = int(p.get("warehouse_level", 0))
 	var warehouse_button: Button = warehouse_card["button"]
 	_sync_repeat(warehouse_card["repeat"], p, "warehouse", owned and level < 3)
 	warehouse_button.disabled = not owned or not ECONOMY.warehouse_available(p)
-	warehouse_button.text = "Max" if level >= 3 else "Upgrade"
+	_set_timed_action(warehouse_button, "Max" if level >= 3 else "Upgrade", -1.0 if level >= 3 else 0.0)
 	var warehouse_detail: String = "%s / resource" % _tons(ECONOMY.storage_capacity(p), 0)
 	if level < 3:
 		warehouse_detail += " → %s" % _tons(float(ECONOMY.WAREHOUSE_CAPACITIES[level + 1]), 0)
@@ -883,7 +899,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 			warehouse_detail += "\nRequires %s population" % _compact_amount(float(ECONOMY.WAREHOUSE_POPULATIONS[level]))
 		if not ECONOMY.affordable(p, ECONOMY.WAREHOUSE_COSTS[level]):
 			warehouse_detail += "\nInsufficient local materials"
-		_show_cost(warehouse_card["costs"], ECONOMY.WAREHOUSE_COSTS[level], 0.0, 0.0)
+		_show_cost(warehouse_card["costs"], ECONOMY.WAREHOUSE_COSTS[level])
 	warehouse_card["costs"].visible = level < 3
 	_disclosure_title(warehouse_card, "Warehouse logistics · Lv %d" % level)
 	warehouse_card["detail"].text = warehouse_detail
@@ -905,7 +921,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 			_style_progress(card["progress"], p, job)
 		var button: Button = card["button"]
 		_sync_repeat(card["repeat"], p, "economy_building:" + resource, owned and ECONOMY.production_available(p, resource))
-		button.text = "Build"
+		_set_timed_action(button, "Build", 30.0 if job.is_empty() else float(job["work"]))
 		button.disabled = not owned or not ECONOMY.building_available(p, resource) or not ECONOMY.affordable(p, ECONOMY.building_cost(p, resource))
 		var cost: String = _cost_text(ECONOMY.building_cost(p, resource))
 		var requirement: String = "%s population" % _compact_amount(float(definition["population"]))
@@ -920,7 +936,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 		card["detail"].text = "\n".join(unmet)
 		card["detail"].visible = not unmet.is_empty()
 		card["costs"].visible = true
-		_show_cost(card["costs"], ECONOMY.building_cost(p, resource), 0.0, 30.0)
+		_show_cost(card["costs"], ECONOMY.building_cost(p, resource))
 		_disclosure_title(card, str(definition["name"]) + " · %d" % installed)
 		button.tooltip_text = "%s\n%s" % [requirement, cost]
 
@@ -957,7 +973,7 @@ func _refresh_pds(planet: Dictionary, owned: bool) -> void:
 	var progress: ProgressBar = pds_card["progress"]
 	progress.visible = not job.is_empty()
 	var action: Button = pds_card["button"]
-	action.text = "Build" if slot >= 0 else "Complete"
+	_set_timed_action(action, "Build" if slot >= 0 or not job.is_empty() else "Complete", float(job["work"]) if not job.is_empty() else (ECONOMY._work("pds", slot + 1) if slot >= 0 else -1.0))
 	action.disabled = not owned or slot < 0 or not job.is_empty() or not ECONOMY.affordable(planet, ECONOMY._cost("pds", slot + 1))
 	pds_card["cancel"].visible = not job.is_empty()
 	pds_card["cancel"].disabled = not owned or job.is_empty()
@@ -967,9 +983,9 @@ func _refresh_pds(planet: Dictionary, owned: bool) -> void:
 		progress.value = 100.0 * float(job["progress"]) / float(job["work"])
 		progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
 		_style_progress(progress, planet, job)
-		_show_cost(pds_card["costs"], job["cost"], 0.0, float(job["work"]))
+		_show_cost(pds_card["costs"], job["cost"])
 	elif slot >= 0:
-		_show_cost(pds_card["costs"], ECONOMY._cost("pds", slot + 1), 0.0, ECONOMY._work("pds", slot + 1))
+		_show_cost(pds_card["costs"], ECONOMY._cost("pds", slot + 1))
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
@@ -1975,9 +1991,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 			vacant_cancel.custom_minimum_size = Vector2(23, 22)
 			vacant_cancel.disabled = true
 			vacant_cancel.tooltip_text = "No construction to cancel"
-			var costs := GridContainer.new()
-			costs.columns = 3
-			row.add_child(costs)
+			var costs: GridContainer = _cost_grid(row)
 			var progress := ProgressBar.new()
 			progress.step = 0.0
 			progress.custom_minimum_size.y = 16
@@ -2021,7 +2035,8 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 			var recipe: Dictionary = ECONOMY._cost("yard", number)
 			label.tooltip_text = _cost_text(recipe) + " · Requires %s population to operate" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[number - 1]))
 			build.tooltip_text = label.tooltip_text
-			_show_cost(costs, recipe, 0.0, ECONOMY._work("yard", number))
+			_set_timed_action(build, "Build", ECONOMY._work("yard", number))
+			_show_cost(costs, recipe)
 			continue
 		bar.visible = true
 		label.tooltip_text = ""
@@ -2045,12 +2060,12 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 			cancelling.pressed.connect(callback)
 		_sync_repeat(repeat, p, "yard_upgrade:" + str(index), repeat.visible and str(session.get("phase")) == "match")
 		upgrade.disabled = not owned or not existing or pending or not operating or not ECONOMY.affordable(p, ECONOMY._cost("yard_upgrade", level + 1))
-		upgrade.text = "Upgrade"
-		_disclosure_title(yard_activity_rows[index], "Upgrade to Lv %d" % (level + 1) if existing and not pending else ("Upgrade pending" if existing else "Construction details"))
+		_set_timed_action(upgrade, "Upgrade", ECONOMY._work("yard_upgrade", level + 1) if existing else -1.0)
+		_disclosure_title(yard_activity_rows[index], "Upgrade to Lv %d" % (level + 1) if existing and not pending else ("Upgrade pending" if existing else "Construction · " + _duration_text(float(job["work"]))))
 		yard_activity_rows[index]["upgrade_detail"].text = "Build speed %.0f → %.0f work/yr · Max size %d → %d" % [ECONOMY.yard_speed(level), ECONOMY.yard_speed(level + 1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1)] if existing else "Adds a shipyard"
 		if existing and not operating:
 			yard_activity_rows[index]["upgrade_detail"].text += "\nRequires %s population" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[index]))
-		_show_cost(yard_activity_rows[index]["upgrade_costs"], ECONOMY._cost("yard_upgrade", level + 1) if existing else job["cost"], 0.0, ECONOMY._work("yard_upgrade", level + 1) if existing else float(job["work"]))
+		_show_cost(yard_activity_rows[index]["upgrade_costs"], ECONOMY._cost("yard_upgrade", level + 1) if existing else job["cost"])
 		upgrade.tooltip_text = "Lv %d • %.0f t Metals • %.0f years" % [level, float(ECONOMY._cost("yard_upgrade", level + 1)["Metals"]), ECONOMY._work("yard_upgrade", level + 1)] if existing else _cost_text(job["cost"], job["allocated"])
 		if job.is_empty():
 			label.text = "Shipyard %d · Lv %d · %s" % [number, level, "Idle" if operating else "Offline"]
@@ -2113,8 +2128,8 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
 	for kind in build_cards:
 		var card: Dictionary = build_cards[kind]
 		var count: int = int(counts.get(kind, 0))
-		card["button"].text = "Build"
-		_show_cost(card["costs"], ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]), _ship_build_years(p, kind))
+		_set_timed_action(card["button"], "Build", _ship_build_years(p, kind))
+		_show_cost(card["costs"], ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]))
 		var finite: int = int(p.get("maintain", {}).get(kind, 0))
 		var unlimited: bool = bool(p.get("continuous", {}).get(kind, false))
 		var living: int = ECONOMY.origin_count(_state(), selected, kind) if not p.is_empty() else 0
