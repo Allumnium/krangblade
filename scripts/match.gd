@@ -122,6 +122,17 @@ var colony_button: Button
 var colony_choices: Array[int] = []
 var selected: int = -1
 var selected_body: int = -1
+var selected_yard: int = -1
+var selected_yard_count: int = 0
+var yard_overview: VBoxContainer
+var yard_title: Label
+var yard_context: Label
+var yard_status: Label
+var yard_detail: Label
+var yard_costs: GridContainer
+var yard_progress: ProgressBar
+var yard_upgrade: Button
+var yard_cancel: Button
 var last_system_tab_selection: int = -1
 var selected_ship_id: int = -1
 var selected_units: Array[int] = []
@@ -399,6 +410,7 @@ func _build_ui() -> void:
 	planet_overview.add_theme_constant_override("separation", 8)
 	overview.add_child(planet_overview)
 	_build_body_overview(overview)
+	_build_yard_overview(overview)
 	ship_overview = VBoxContainer.new()
 	ship_overview.add_theme_constant_override("separation", 8)
 	overview.add_child(ship_overview)
@@ -1069,6 +1081,79 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 func _body_name(system_index: int, slot: int) -> String:
 	var suffixes: Array[String] = ["I", "II", "III", "IV", "V", "VI"]
 	return _system_name(system_index) + " " + suffixes[slot]
+
+func _build_yard_overview(parent: Container) -> void:
+	yard_overview = VBoxContainer.new()
+	yard_overview.add_theme_constant_override("separation", 8)
+	parent.add_child(yard_overview)
+	yard_title = _label("", 19)
+	yard_overview.add_child(yard_title)
+	yard_context = _label("", 12)
+	yard_context.add_theme_color_override("font_color", HUD.MUTED)
+	yard_overview.add_child(yard_context)
+	_button("Back to system", func() -> void:
+		selected_yard = -1
+		_load_thresholds()
+		_refresh(), yard_overview)
+	yard_status = _label("", 12)
+	yard_overview.add_child(yard_status)
+	var section: VBoxContainer = HUD.section(yard_overview, "Upgrade")
+	yard_detail = _label("", 12)
+	section.add_child(yard_detail)
+	yard_costs = _cost_grid(section)
+	yard_progress = ProgressBar.new()
+	yard_progress.custom_minimum_size.y = 15
+	yard_progress.step = 0.0
+	section.add_child(yard_progress)
+	var actions := HBoxContainer.new()
+	section.add_child(actions)
+	yard_upgrade = _button("Upgrade", func() -> void:
+		if selected_yard >= 0:
+			_operation("yard_upgrade", str(selected_yard)), actions)
+	yard_upgrade.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	HUD.action(yard_upgrade)
+	yard_cancel = _button("×", func() -> void:
+		if selected_yard >= 0:
+			_cancel_kind("yard_upgrade", str(selected_yard)), actions)
+	yard_cancel.tooltip_text = "Cancel upgrade and refund"
+	yard_overview.hide()
+
+func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
+	var yard: Dictionary = system["yards"][selected_yard]
+	var level: int = int(yard["level"])
+	var owner: int = int(system["owner"])
+	var roster: Dictionary = session.get("players")
+	var owner_name: String = str(roster.get(owner, {}).get("name", "Player"))
+	var operating: bool = ECONOMY.shipyard_operational(system, selected_yard)
+	var active: Dictionary = {}
+	var pending: Dictionary = {}
+	for job in system["queue"]:
+		if int(job["id"]) == int(yard["job"]):
+			active = job
+		if job["kind"] == "yard_upgrade" and job["target"] == str(selected_yard):
+			pending = job
+	yard_title.text = "Shipyard %d · Lv %d" % [selected_yard + 1, level]
+	yard_context.text = "%s · %s" % [_system_name(selected), owner_name]
+	yard_context.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
+	var max_hp: float = ECONOMY.SHIP_HP * 10.0 * level
+	yard_status.text = "%.0f / %.0f HP\n%s" % [float(yard.get("hp", max_hp)), max_hp, "Offline · Requires %s population" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[selected_yard])) if not operating else ("Idle" if active.is_empty() else _job_name(active))]
+	yard_detail.text = "Build speed: %.0f → %.0f work/yr\nMaximum ship size: %d → %d\nMaximum HP: %.0f → %.0f\nEco-Housing: 5,000 capacity · +0.2 t/yr Organics (unchanged)" % [ECONOMY.yard_speed(level), ECONOMY.yard_speed(level + 1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1), max_hp, ECONOMY.SHIP_HP * 10.0 * (level + 1)]
+	var recipe: Dictionary = ECONOMY._cost("yard_upgrade", level + 1) if pending.is_empty() else pending["cost"]
+	_show_cost(yard_costs, recipe)
+	_set_timed_action(yard_upgrade, "Upgrade to Lv %d" % (level + 1), ECONOMY._work("yard_upgrade", level + 1))
+	yard_upgrade.disabled = not owned or not operating or not pending.is_empty() or not ECONOMY.affordable(system, recipe)
+	yard_cancel.visible = not pending.is_empty()
+	yard_cancel.disabled = not owned or pending.is_empty()
+	var display_job: Dictionary = pending if not pending.is_empty() else active
+	yard_progress.visible = not display_job.is_empty()
+	if not display_job.is_empty():
+		yard_progress.value = 100.0 * float(display_job["progress"]) / float(display_job["work"])
+		yard_progress.tooltip_text = _job_name(display_job)
+		_style_progress(yard_progress, system, display_job)
+	if not pending.is_empty():
+		yard_status.text += "\nUpgrade pending"
+	elif not ECONOMY.affordable(system, recipe):
+		yard_status.text += "\nInsufficient local materials"
 
 func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
@@ -2046,10 +2131,16 @@ func _refresh() -> void:
 	var body_selected: bool = not other_selected and not p.is_empty() and selected_body >= 0 and selected_body < int(p.get("planet_count", 0))
 	if not body_selected:
 		selected_body = -1
-	inspector_panel.visible = (not p.is_empty() or other_selected) and not body_selected
+	# Slot indices compact after destruction. Return to the system rather
+	# than silently retargeting an upgrade at a different shipyard.
+	var yard_selected: bool = not other_selected and not body_selected and not p.is_empty() and selected_yard >= 0 and selected_yard < p.get("yards", []).size() and selected_yard_count == p.get("yards", []).size()
+	if not yard_selected:
+		selected_yard = -1
+	inspector_panel.visible = (not p.is_empty() or other_selected) and not body_selected and not yard_selected
 	overview_panel.visible = (not p.is_empty() or other_selected)
-	planet_overview.visible = not other_selected and not body_selected
+	planet_overview.visible = not other_selected and not body_selected and not yard_selected
 	body_overview.visible = body_selected
+	yard_overview.visible = yard_selected
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
 	inspector_tabs.visible = not other_selected and own_system
 	var current_system: int = selected if not other_selected and not p.is_empty() else -1
@@ -2062,6 +2153,9 @@ func _refresh() -> void:
 	ship_overview.visible = other_selected
 	fleet_scroll.visible = other_selected
 	fleet_overview.visible = other_selected
+	if yard_selected:
+		_refresh_yard_overview(p, own_system and phase == "match")
+		return
 	if body_selected:
 		_refresh_body_overview(p, own_system and phase == "match")
 		return
@@ -2745,6 +2839,30 @@ func _body_hit(point: Vector2, state: Dictionary) -> int:
 			nearest = distance
 	return hit
 
+func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
+	var hit := Vector2i(-1, -1)
+	var nearest: float = INF
+	var scale: float = _ship_scale()
+	if scale < 0.2:
+		return hit
+	var elapsed: float = float(state["elapsed"])
+	for index in range(state["planets"].size()):
+		if not ECONOMY.discovered(state, _me(), "planets", index):
+			continue
+		var star: Vector2 = _screen_point(state["map"]["points"][index])
+		for slot in range(state["planets"][index]["yards"].size()):
+			var center: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
+			# Do not steal star selection when a dock overlaps its star.
+			if center.distance_to(star) < 8.0 or point.distance_to(star) < 5.0:
+				continue
+			var axis: Vector2 = Vector2.from_angle(float(slot) * TAU / 3.0 + elapsed * 0.008)
+			var offset: Vector2 = point - center
+			var distance: float = offset.length_squared()
+			if absf(offset.dot(axis)) <= 14.0 * scale + 3.0 and absf(offset.dot(axis.orthogonal())) <= 17.0 * scale + 3.0 and distance < nearest:
+				nearest = distance
+				hit = Vector2i(index, slot)
+	return hit
+
 func _select_at(point: Vector2, additive: bool = false) -> void:
 	var state: Dictionary = _state()
 	if state.is_empty() or str(session.get("phase")) != "match":
@@ -2770,7 +2888,25 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 			ship_hit = int(id)
 	var next_ship: int = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
 	var body_slot: int = _body_hit(point, state) if not additive else -1
+	var yard_hit: Vector2i = _yard_hit(point, state) if not additive else Vector2i(-1, -1)
+	if yard_hit.x >= 0:
+		var yard_distance: float = point.distance_to(_screen_point(ECONOMY.shipyard_position(state, yard_hit.x, yard_hit.y, float(state["elapsed"]))))
+		if yard_distance <= ship_distance or next_ship < 0:
+			selected = yard_hit.x
+			selected_yard = yard_hit.y
+			selected_yard_count = state["planets"][selected]["yards"].size()
+			selected_body = -1
+			selected_ship_id = -1
+			selected_units.clear()
+			selected_field = -1
+			var focus: Control = get_viewport().gui_get_focus_owner()
+			if is_instance_valid(focus):
+				focus.release_focus()
+			_load_thresholds()
+			_refresh()
+			return
 	if body_slot >= 0:
+		selected_yard = -1
 		selected_body = body_slot
 		selected_ship_id = -1
 		selected_units.clear()
@@ -2789,6 +2925,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 		if not valid:
 			return
 	selected_body = -1
+	selected_yard = -1
 	selected_ship_id = next_ship
 	if not additive:
 		selected_units.clear()
@@ -2830,6 +2967,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 	selected = -1
 	selected_body = -1
+	selected_yard = -1
 	selected_field = -1
 	_refresh()
 
@@ -3035,6 +3173,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 			selected = -1
 			selected_body = -1
+			selected_yard = -1
 			selected_field = -1
 			_refresh()
 	else:
@@ -3054,6 +3193,7 @@ func _cycle_owned_system(direction: int) -> void:
 	var current: int = owned.find(selected)
 	selected = owned[(0 if direction > 0 else owned.size() - 1) if current < 0 else posmod(current + direction, owned.size())]
 	selected_body = -1
+	selected_yard = -1
 	selected_ship_id = -1
 	selected_units.clear()
 	selected_field = -1
@@ -3218,6 +3358,13 @@ func _draw_ship_destructions(viewport_bounds: Rect2) -> void:
 			map_canvas.draw_line(center - edge, center + edge, Color(fragment["hull"], fade), maxf(1.0, 2.0 * scale), true)
 			map_canvas.draw_line(center - edge, center + edge, Color(fragment["color"], fade), maxf(0.6, scale), true)
 
+# Same source-player hue for every beam. The wider translucent halo
+# and brighter core retain readability without changing the allegiance.
+func _draw_owned_laser(origin: Vector2, target: Vector2, owner: int, width: float) -> void:
+	var tint: Color = _empire_color(owner)
+	map_canvas.draw_line(origin, target, Color(tint, 0.28), width * 3.0, true)
+	map_canvas.draw_line(origin, target, tint.lightened(0.28), width, true)
+
 func _fighter_beam_origin(pose: Dictionary) -> Vector2:
 	return (pose["point"] as Vector2) + (pose["direction"] as Vector2) * FIGHTER_MUZZLE * _ship_scale()
 
@@ -3317,7 +3464,6 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 
 func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
 	var planet: Dictionary = state["planets"][index]
-	var center: Vector2 = _screen_point(state["map"]["points"][index])
 	var scale: float = _ship_scale()
 	for slot in range(planet["yards"].size()):
 		var yard: Dictionary = planet["yards"][slot]
@@ -3334,11 +3480,40 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			for k in range(4):
 				frame[k] = original[k].lerp(frame[k], smoothstep(0.0, 1.0, conversion))
 			map_canvas.draw_colored_polygon(frame, Color(tint.lightened(0.35), 1.0 - conversion))
-		for k in range(4):
-			map_canvas.draw_line(frame[k], frame[(k + 1) % 4], tint, 2.5 * scale, true)
-		for k in [-1.0, 1.0]:
-			var rail: Vector2 = point + axis * k * 11.0 * scale
-			map_canvas.draw_line(rail - side * 17.0 * scale, rail + side * 17.0 * scale, Color(Color("#8da2b6"), conversion), 4.0 * scale, true)
+		if conversion < 1.0:
+			for k in range(4):
+				map_canvas.draw_line(frame[k], frame[(k + 1) % 4], tint, maxf(0.8, 2.0 * scale), true)
+		else:
+			# Industrial drydock: open central berth, two reinforced gantries,
+			# habitat pods, end clamps and work lights. Draw the large
+			# silhouette at every zoom, the finer hardware only up close.
+			var forward: Vector2 = side * scale
+			var lateral: Vector2 = axis * scale
+			for sign in [-1.0, 1.0]:
+				var rail: Array = [Vector2(-17, sign * 8), Vector2(-15, sign * 13), Vector2(-10, sign * 14), Vector2(10, sign * 14), Vector2(15, sign * 13), Vector2(17, sign * 8), Vector2(12, sign * 7), Vector2(-12, sign * 7)]
+				var hull: PackedVector2Array = _hull_polygon(point, forward, lateral, rail)
+				map_canvas.draw_colored_polygon(hull, Color("#607387"))
+				hull.append(hull[0])
+				map_canvas.draw_polyline(hull, tint, maxf(0.65, scale), true)
+				if scale >= 0.42:
+					for longitudinal in [-8.0, 1.0, 9.0]:
+						var module: Vector2 = point + forward * longitudinal + lateral * sign * 10.5
+						var panel: PackedVector2Array = _hull_polygon(module, forward, lateral, [Vector2(-3.5, -2), Vector2(3.5, -2), Vector2(3.5, 2), Vector2(-3.5, 2)])
+						map_canvas.draw_colored_polygon(panel, Color("#23384b"))
+						map_canvas.draw_line(module - forward * 2.4, module + forward * 2.4, Color("#b0d5e6"), maxf(0.65, scale), true)
+					for end in [-1.0, 1.0]:
+						var clamp_origin: Vector2 = point + forward * end * 14.0 + lateral * sign * 8.0
+						map_canvas.draw_line(clamp_origin, clamp_origin - lateral * sign * 3.0, Color("#d6a965"), maxf(1.0, 2.0 * scale), true)
+						map_canvas.draw_circle(clamp_origin, maxf(0.75, scale), tint.lightened(0.45))
+			for end in [-1.0, 1.0]:
+				var bridge: Vector2 = point + forward * end * 16.0
+				map_canvas.draw_line(bridge - lateral * 8.5, bridge + lateral * 8.5, Color("#829aad"), maxf(0.8, 2.0 * scale), true)
+			if scale >= 0.42:
+				for end in [-1.0, 1.0]:
+					var light: Vector2 = point + forward * end * 16.0
+					map_canvas.draw_line(light - lateral * 3.0, light + lateral * 3.0, tint.lightened(0.4), maxf(0.7, scale), true)
+		if selected == index and selected_yard == slot:
+			map_canvas.draw_arc(point, maxf(9.0, 23.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 1.5, true)
 		var health: float = float(yard.get("hp", ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))) / (ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))
 		if health < 0.999:
 			map_canvas.draw_rect(Rect2(point + Vector2(-12, -22) * scale, Vector2(24, 3) * scale), Color("#283748"))
@@ -3347,12 +3522,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			if int(job["id"]) != int(yard["job"]) or not ECONOMY.SHIP_KINDS.has(job["kind"]):
 				continue
 			var u: float = clampf(float(job["progress"]) / float(job["work"]), 0.0, 1.0)
-			var shape: PackedVector2Array
-			match str(job["kind"]):
-				"fighter": shape = PackedVector2Array([Vector2(12, 0), Vector2(-7, 8), Vector2(-3, 0), Vector2(-7, -8)])
-				"colony_ship": shape = PackedVector2Array([Vector2(12, 0), Vector2(0, 7), Vector2(-9, 0), Vector2(0, -7)])
-				"miner": shape = PackedVector2Array([Vector2(8, 4), Vector2(8, -4), Vector2(-6, -7), Vector2(-6, 7)])
-				_: shape = PackedVector2Array([Vector2(14, 4), Vector2(10, 8), Vector2(-13, 8), Vector2(-13, -8), Vector2(10, -8), Vector2(14, -4)])
+			var shape: Array = HULL_OUTLINES.get(str(job["kind"]), FREIGHTER_OUTLINE)
 			var hull := PackedVector2Array()
 			for vertex in shape:
 				hull.append(point + side * vertex.x * scale + axis * vertex.y * scale)
@@ -3501,8 +3671,7 @@ func _draw_map() -> void:
 			var origin: Vector2 = _screen_point(points[index])
 			if zoom >= 2.0 and radius >= 18.0:
 				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, game_visual_clock)
-			map_canvas.draw_line(origin, poses[target]["point"], Color("#ff6f6080"), 6.0, true)
-			map_canvas.draw_line(origin, poses[target]["point"], Color("#ffddab"), 2.0, true)
+			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
 		var shooter: int = int(ship["id"])
 		var target: int = int(ship.get("combat_target", -1))
@@ -3514,7 +3683,7 @@ func _draw_map() -> void:
 				var index: int = floori(float(encoded) / 3.0)
 				var slot: int = posmod(encoded, 3)
 				if slot < state["planets"][index]["yards"].size():
-					map_canvas.draw_line(_fighter_beam_origin(poses[shooter]), _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), Color("#ffbf96"), 1.5, true)
+					_draw_owned_laser(_fighter_beam_origin(poses[shooter]), _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), int(ship["owner"]), 1.5)
 			else:
 				var pds_index: int = posmod(encoded - count * 3, count)
 				var pds_slot: int = floori(float(encoded - count * 3) / float(count))
@@ -3523,10 +3692,9 @@ func _draw_map() -> void:
 					var pds_radius: float = _planet_radius(pds_index, state)
 					if pds_index == selected and zoom >= 2.0 and pds_radius >= 18.0:
 						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, game_visual_clock)
-					map_canvas.draw_line(_fighter_beam_origin(poses[shooter]), endpoint, Color("#ffbf96"), 1.5, true)
+					_draw_owned_laser(_fighter_beam_origin(poses[shooter]), endpoint, int(ship["owner"]), 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
-			map_canvas.draw_line(_fighter_beam_origin(poses[shooter]), poses[target]["point"], Color("#ff6f6060"), 4.0, true)
-			map_canvas.draw_line(_fighter_beam_origin(poses[shooter]), poses[target]["point"], Color("#ffbf96"), 1.0, true)
+			_draw_owned_laser(_fighter_beam_origin(poses[shooter]), poses[target]["point"], int(ship["owner"]), 1.0)
 	for ship in state["ships"]:
 		if not poses.has(int(ship["id"])):
 			continue
@@ -3576,7 +3744,7 @@ func _draw_map() -> void:
 			for sign in [-1.0, 1.0]:
 				var emitter: Vector2 = point + direction * MINER_MUZZLE.x + side * sign * MINER_MUZZLE.y
 				var impact: Vector2 = rock + side * sign * 2.0
-				map_canvas.draw_line(emitter, impact, Color("#9af6b8"), maxf(0.8, scale), true)
+				_draw_owned_laser(emitter, impact, int(ship["owner"]), maxf(0.8, scale))
 				for k in range(3 if scale >= 1.0 else 1):
 					var age: float = fposmod(visual_clock * 4.0 + float(k) * 0.33 + sign * 0.12, 1.0)
 					var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
