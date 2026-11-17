@@ -3501,6 +3501,48 @@ func _cancel_policy_draft() -> void:
     _refresh()
     map_canvas.queue_redraw()
 
+# Keep a bounded GPU stamp buffer without ever locking the paint tool.
+# When full, combine the closest pair into their enclosing circle. This
+# preserves all previously painted area (with a small possible expansion).
+func _compact_policy_brush_strokes() -> void:
+    if policy_brush_strokes.size() < POLICY_MAX_STAMPS:
+        return
+    var first: int = 0
+    var second: int = 1
+    var best: float = INF
+    for i in range(policy_brush_strokes.size()):
+        var a: Vector3 = policy_brush_strokes[i]
+        for j in range(i + 1, policy_brush_strokes.size()):
+            var b: Vector3 = policy_brush_strokes[j]
+            var distance: float = Vector2(a.x, a.y).distance_to(Vector2(b.x, b.y))
+            var excess: float = maxf(0.0, distance - absf(a.z - b.z))
+            if excess < best:
+                best = excess
+                first = i
+                second = j
+                if is_zero_approx(best):
+                    break
+        if is_zero_approx(best):
+            break
+    var a: Vector3 = policy_brush_strokes[first]
+    var b: Vector3 = policy_brush_strokes[second]
+    var center_a := Vector2(a.x, a.y)
+    var center_b := Vector2(b.x, b.y)
+    var distance: float = center_a.distance_to(center_b)
+    var merged_center: Vector2
+    var merged_radius: float
+    if a.z >= distance + b.z:
+        merged_center = center_a
+        merged_radius = a.z
+    elif b.z >= distance + a.z:
+        merged_center = center_b
+        merged_radius = b.z
+    else:
+        merged_radius = (distance + a.z + b.z) * 0.5
+        merged_center = center_a + (center_b - center_a) * ((merged_radius - a.z) / maxf(distance, 0.0001))
+    policy_brush_strokes[first] = Vector3(merged_center.x, merged_center.y, merged_radius)
+    policy_brush_strokes.remove_at(second)
+
 func _paint_policy_brush(point: Vector2, mode: int) -> void:
     var state: Dictionary = _state()
     if state.is_empty():
@@ -3516,7 +3558,8 @@ func _paint_policy_brush(point: Vector2, mode: int) -> void:
             if Vector2(stamp.x, stamp.y).distance_to(world) < radius * 0.35:
                 near = true
                 break
-        if not near and policy_brush_strokes.size() < POLICY_MAX_STAMPS:
+        if not near:
+            _compact_policy_brush_strokes()
             policy_brush_strokes.append(Vector3(world.x, world.y, radius))
             changed = true
     else:
