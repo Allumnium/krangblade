@@ -25,6 +25,7 @@ var paused_elapsed: float = -1.0
 const TEST_SPEEDS: Array[int] = [0, 2, 5, 10, 1]
 const ECON = preload("res://scripts/economy_rules.gd")
 var saw_loading: bool = false
+var preview_seed: int = 0
 var mode: String = "normal"
 const MAP = preload("res://scripts/planet_map.gd")
 
@@ -66,6 +67,7 @@ func _roster_changed() -> void:
 	if role == "host":
 		if not color_requested:
 			color_requested = true
+			session.call("reroll_lobby_map")
 			session.call("choose_map_layout", _expected_layout())
 			session.call("choose_map_layout", "invalid")
 			session.call("choose_color", 1, 8)
@@ -80,6 +82,11 @@ func _roster_changed() -> void:
 			color_requested = true
 			if str(session.get("map_layout")) != _expected_layout():
 				_fail("Host map layout did not replicate to lobby guest.")
+				return
+			var seed_before: int = int(session.get("lobby_map_seed"))
+			session.call("reroll_lobby_map")
+			if int(session.get("lobby_map_seed")) != seed_before:
+				_fail("Guest was able to reroll the map.")
 				return
 			session.call("choose_map_layout", "Radial" if _expected_layout() != "Radial" else "Grid")
 			expected_color = 7 if expected_players == 2 else int(entry["color"])
@@ -96,6 +103,7 @@ func _phase_changed() -> void:
 		return
 	var phase: String = str(session.get("phase"))
 	if phase == "loading":
+		preview_seed = int(session.get("lobby_map_seed"))
 		saw_loading = true
 		if mode == "drop-loading" and role == "client":
 			session.call_deferred("leave_session")
@@ -123,7 +131,7 @@ func _phase_changed() -> void:
 		if str(session.get("map_layout")) != _expected_layout() or state["map"].get("layout") != _expected_layout():
 			_fail("Match map layout did not match host setting.")
 			return
-		if state["map"] != MAP.generate(int(state["map"]["seed"]), expected_players, _expected_layout()):
+		if int(state["map"]["seed"]) != preview_seed or state["map"] != MAP.generate(preview_seed, expected_players, _expected_layout()):
 			_fail("Generated map does not match authoritative seed and layout.")
 			return
 		for owner in roster:
@@ -136,7 +144,7 @@ func _phase_changed() -> void:
 			if miners != 3 or fighters != 2:
 				_fail("Starting fleet did not replicate.")
 				return
-		if owners.size() != state["map"]["points"].size() or state["map"]["cluster_sizes"].size() != expected_players * 3:
+		if owners.size() != state["map"]["points"].size() or state["map"]["cluster_sizes"].size() != MAP.cluster_count_for(expected_players, _expected_layout()):
 			_fail("Wrong territory count.")
 			return
 		if mode == "normal":

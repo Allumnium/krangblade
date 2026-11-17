@@ -16,13 +16,17 @@ const ANTIMATTER_CLEARANCE: float = 700.0
 static func valid_layout(layout: String) -> bool:
 	return LAYOUTS.has(layout)
 
+static func cluster_count_for(player_count: int, layout: String) -> int:
+	return maxi(3, player_count) * 3 if layout == "Radial" else player_count * 3
+
 static func generate(seed_value: int, player_count: int = 3, layout: String = DEFAULT_LAYOUT) -> Dictionary:
 	if not valid_layout(layout):
 		layout = DEFAULT_LAYOUT
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	player_count = clampi(player_count, 1, 8)
-	var cluster_count: int = player_count * 3
+	var radial_sectors: int = maxi(3, player_count)
+	var cluster_count: int = cluster_count_for(player_count, layout)
 	var columns: int = ceili(sqrt(float(cluster_count)))
 	var rows: int = ceili(float(cluster_count) / columns)
 	var bounds := Vector2(columns * 1250.0, rows * 1050.0)
@@ -48,25 +52,19 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	var layout_rng := RandomNumberGenerator.new()
 	layout_rng.seed = seed_value + 49717
 	if layout == "Radial":
-		var inner_count: int = player_count - 1
-		var inner_radius: float = 1250.0 if inner_count <= 2 else maxf(1250.0, 1250.0 / (2.0 * sin(PI / float(inner_count))))
-		var middle_radius: float = inner_radius + 1250.0
-		var outer_radius: float = middle_radius + 1250.0
-		if player_count == 1:
-			middle_radius = 1250.0
-			outer_radius = 2500.0
+		# Three concentric rows: outer and inner cycles, with middle
+		# clusters forming spokes. Leave the actual center unoccupied.
+		var inner_radius: float = maxf(1250.0, 1250.0 / (2.0 * sin(PI / float(radial_sectors))))
+		var middle_radius: float = inner_radius + 1100.0
+		var outer_radius: float = middle_radius + 1100.0
 		bounds = Vector2.ONE * (outer_radius + 650.0) * 2.0
 		var center: Vector2 = bounds * 0.5
 		var rotation: float = layout_rng.randf_range(0.0, TAU)
 		centers.clear()
-		for ring in range(2):
-			for i in range(player_count):
-				var angle: float = rotation + TAU * float(i) / player_count
-				centers.append(center + Vector2.from_angle(angle) * (outer_radius if ring == 0 else middle_radius))
-		centers.append(center)
-		for i in range(inner_count):
-			var angle: float = rotation + TAU * (float(i) + 0.5) / maxf(1.0, float(inner_count))
-			centers.append(center + Vector2.from_angle(angle) * inner_radius)
+		for radius in [outer_radius, middle_radius, inner_radius]:
+			for sector in range(radial_sectors):
+				var angle: float = rotation + TAU * float(sector) / radial_sectors
+				centers.append(center + Vector2.from_angle(angle) * float(radius))
 	elif layout == "Scramble":
 		var scattered_bounds := Vector2(columns * 1750.0, rows * 1600.0)
 		var scattered: Array[Vector2] = []
@@ -133,6 +131,8 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			groups[group].append(points.size() - 1)
 	var count: int = points.size()
 	var max_junctions: int = maxi(1, floori(float(count) * 0.18))
+	if layout == "Radial":
+		max_junctions = maxi(max_junctions, radial_sectors * 2)
 	var edges: Array = []
 	var degrees: Array[int] = []
 	degrees.resize(count)
@@ -145,38 +145,60 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 		var connected: Array = [group[0]]
 		var local_junctions: int = 0
 		while connected.size() < group.size():
-			var pair: Array = _closest_pair(points, connected, group, connected, degrees, mini(1 - local_junctions, max_junctions - junctions))
+			var local_budget: int = 0 if layout == "Radial" else 1 - local_junctions
+			var pair: Array = _closest_pair(points, connected, group, connected, degrees, mini(local_budget, max_junctions - junctions))
 			var added: int = _new_junctions(pair, degrees)
 			local_junctions += added
 			junctions += added
 			_add_edge(edges, degrees, pair)
 			connected.append(pair[1] if connected.has(pair[0]) else pair[0])
-	var joined: Array = [0]
-	while joined.size() < cluster_count:
-		var best_edge: Array = []
-		var next_group: int = -1
-		var best_score: float = INF
-		for pass_index in range(2):
-			for i in joined:
-				for j in range(cluster_count):
-					if joined.has(j):
-						continue
-					if pass_index == 0 and layout == "Radial":
-						if (i < player_count and j != i + player_count) or (j < player_count and i != j + player_count):
+	if layout == "Radial":
+		var bridges: Array = []
+		# Both rings are real closed travel cycles, with one independent
+		# spoke per sector. No connection crosses the central deposit.
+		for sector in range(radial_sectors):
+			bridges.append([sector, sector + radial_sectors])
+			bridges.append([sector + radial_sectors, sector + 2 * radial_sectors])
+		for ring in [0, 2]:
+			for sector in range(radial_sectors):
+				bridges.append([ring * radial_sectors + sector, ring * radial_sectors + (sector + 1) % radial_sectors])
+		for bridge in bridges:
+			# Prefer unused path endpoints, then spend at most one junction
+			# on each ring cluster's third bridge.
+			var pair: Array = _closest_pair(points, groups[bridge[0]], groups[bridge[1]], [], degrees, 0)
+			if pair.is_empty():
+				pair = _closest_pair(points, groups[bridge[0]], groups[bridge[1]], [], degrees, mini(1, max_junctions - junctions))
+			if pair.is_empty():
+				pair = _closest_pair(points, groups[bridge[0]], groups[bridge[1]], [], degrees, max_junctions - junctions)
+			junctions += _new_junctions(pair, degrees)
+			_add_edge(edges, degrees, pair)
+	else:
+		var joined: Array = [0]
+		while joined.size() < cluster_count:
+			var best_edge: Array = []
+			var next_group: int = -1
+			var best_score: float = INF
+			for pass_index in range(2):
+				for i in joined:
+					for j in range(cluster_count):
+						if joined.has(j):
 							continue
-					var pair: Array = _closest_pair(points, groups[i], groups[j], [], degrees, max_junctions - junctions)
-					if pair.is_empty():
-						continue
-					var score: float = _edge_score(points, pair, degrees)
-					if score < best_score:
-						best_score = score
-						best_edge = pair
-						next_group = j
-			if not best_edge.is_empty():
-				break
-		junctions += _new_junctions(best_edge, degrees)
-		_add_edge(edges, degrees, best_edge)
-		joined.append(next_group)
+						if pass_index == 0 and layout == "Radial":
+							if (i < player_count and j != i + player_count) or (j < player_count and i != j + player_count):
+								continue
+						var pair: Array = _closest_pair(points, groups[i], groups[j], [], degrees, max_junctions - junctions)
+						if pair.is_empty():
+							continue
+						var score: float = _edge_score(points, pair, degrees)
+						if score < best_score:
+							best_score = score
+							best_edge = pair
+							next_group = j
+				if not best_edge.is_empty():
+					break
+			junctions += _new_junctions(best_edge, degrees)
+			_add_edge(edges, degrees, best_edge)
+			joined.append(next_group)
 	# Protect the connected backbone. Fields occupy potential shortcuts, so
 	# ordinary routes never cross a field and the galaxy remains connected.
 	var candidates: Array = []
@@ -187,16 +209,19 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			if distance <= limit and not edges.has([i, j]):
 				candidates.append([i, j])
 	# Reserve remote special deposits before ordinary fields occupy their space.
-	# Use the central neutral cluster in Radial, and seeded shuffled neutral
+	# Use the empty central region in Radial, and seeded shuffled neutral
 	# sites in Grid/Scramble. Every special field must clear every home.
 	var special_sites: Array[Vector2] = []
-	for group in range(player_count, cluster_count):
-		if layout == "Radial" and group != player_count * 2:
-			continue
+	var galaxy_center: Vector2 = bounds * 0.5
+	if layout == "Radial":
 		for y in range(-5, 6):
 			for x in range(-5, 6):
-				special_sites.append(centers[group] + Vector2(x * 80.0, y * 80.0))
-	var galaxy_center: Vector2 = bounds * 0.5
+				special_sites.append(galaxy_center + Vector2(x * 80.0, y * 80.0))
+	else:
+		for group in range(player_count, cluster_count):
+			for y in range(-5, 6):
+				for x in range(-5, 6):
+					special_sites.append(centers[group] + Vector2(x * 80.0, y * 80.0))
 	if layout == "Radial":
 		special_sites.sort_custom(func(a: Vector2, b: Vector2) -> bool: return a.distance_squared_to(galaxy_center) < b.distance_squared_to(galaxy_center))
 	else:

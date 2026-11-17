@@ -28,6 +28,11 @@ var solo_start_button: Button
 var solo_seed_edit: LineEdit
 var solo_layout_picker: OptionButton
 var lobby_layout_picker: OptionButton
+var solo_preview: Control
+var lobby_preview: Control
+var lobby_seed_label: Label
+var lobby_reroll: Button
+var solo_random_seed: int = 0
 
 func _ready() -> void:
 	theme = HUD.create()
@@ -136,6 +141,8 @@ func _color_selector(players: Dictionary, id: int) -> OptionButton:
 
 func _show_solo_setup() -> void:
 	screen = "solo_setup"
+	solo_preview = null
+	solo_random_seed = int(randi())
 	solo_players.clear()
 	for id in range(1, 5):
 		solo_players[id] = {"team": id, "color": id}
@@ -172,9 +179,17 @@ func _show_solo_setup() -> void:
 	settings.add_child(solo_layout_picker)
 	settings.add_child(_text("Map seed", 14, MUTED))
 	solo_seed_edit = LineEdit.new()
-	solo_seed_edit.placeholder_text = "Random"
-	solo_seed_edit.tooltip_text = "Leave blank for a random galaxy, or enter an integer seed."
-	settings.add_child(solo_seed_edit)
+	solo_seed_edit.placeholder_text = str(solo_random_seed)
+	solo_seed_edit.tooltip_text = "Enter an integer seed, or leave blank to use the displayed random seed."
+	var seed_row := HBoxContainer.new()
+	settings.add_child(seed_row)
+	solo_seed_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	seed_row.add_child(solo_seed_edit)
+	seed_row.add_child(_button("Reroll", _reroll_solo_map))
+	solo_preview = _new_map_preview(settings)
+	solo_layout_picker.item_selected.connect(func(_index: int) -> void: _refresh_solo_preview())
+	solo_seed_edit.text_changed.connect(func(_value: String) -> void: _refresh_solo_preview())
+	_refresh_solo_preview()
 	var footer := HBoxContainer.new()
 	col.add_child(footer)
 	solo_start_button = _button("START MATCH", _start_solo_from_setup)
@@ -226,6 +241,7 @@ func _refresh_solo_roster() -> void:
 	solo_add_button.custom_minimum_size = Vector2(140, 32)
 	solo_add_button.disabled = solo_players.size() >= RULES.MAX_PLAYERS
 	add_row.add_child(solo_add_button)
+	_refresh_solo_preview()
 
 func _solo_color_selected(index: int, id: int) -> void:
 	if solo_players.has(id) and RULES.color_available(solo_players, id, index + 1):
@@ -281,7 +297,7 @@ func _start_solo_from_setup() -> void:
 	if not seed_text.is_empty() and not seed_text.is_valid_int():
 		solo_seed_edit.grab_focus()
 		return
-	var map_seed: int = int(randi()) if seed_text.is_empty() else seed_text.to_int()
+	var map_seed: int = solo_random_seed if seed_text.is_empty() else seed_text.to_int()
 	network.call("start_solo", int(solo_players[1]["team"]), opponents, colors, map_seed, MAP.LAYOUTS[solo_layout_picker.selected])
 
 func _show_multiplayer() -> void:
@@ -372,6 +388,14 @@ func _show_lobby() -> void:
 	lobby_layout_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	layout_row.add_child(lobby_layout_picker)
 	lobby_layout_picker.item_selected.connect(func(index: int) -> void: network.call("choose_map_layout", MAP.LAYOUTS[index]))
+	var seed_row := HBoxContainer.new()
+	left_col.add_child(seed_row)
+	lobby_seed_label = _text("", 12, MUTED)
+	lobby_seed_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	seed_row.add_child(lobby_seed_label)
+	lobby_reroll = _button("Reroll", func() -> void: network.call("reroll_lobby_map"))
+	seed_row.add_child(lobby_reroll)
+	lobby_preview = _new_map_preview(left_col)
 	var buttons := HBoxContainer.new()
 	left_col.add_child(buttons)
 	ready_button = _button("READY", _toggle_ready)
@@ -411,12 +435,84 @@ func _refresh_status() -> void:
 	elif screen == "multiplayer" and is_instance_valid(multiplayer_status_label):
 		multiplayer_status_label.text = str(network.get("status"))
 
+func _reroll_solo_map() -> void:
+	solo_random_seed = int(randi())
+	solo_seed_edit.text = ""
+	solo_seed_edit.placeholder_text = str(solo_random_seed)
+	_refresh_solo_preview()
+
+func _refresh_solo_preview() -> void:
+	if not is_instance_valid(solo_preview) or not is_instance_valid(solo_seed_edit):
+		return
+	var value: String = solo_seed_edit.text.strip_edges()
+	if not value.is_empty() and not value.is_valid_int():
+		solo_preview.set_meta("map", {})
+		solo_preview.set_meta("signature", [])
+		solo_preview.queue_redraw()
+		return
+	var seed_value: int = solo_random_seed if value.is_empty() else value.to_int()
+	_update_map_preview(solo_preview, solo_players, seed_value, MAP.LAYOUTS[solo_layout_picker.selected])
+
+func _new_map_preview(parent: Container) -> Control:
+	var preview := Control.new()
+	preview.custom_minimum_size = Vector2(200, 230)
+	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(preview)
+	preview.draw.connect(_draw_map_preview.bind(preview))
+	preview.resized.connect(preview.queue_redraw)
+	var legend := _text("Colored: starts  ·  Grey: systems  ·  Violet: antimatter", 11, MUTED)
+	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(legend)
+	return preview
+
+func _update_map_preview(preview: Control, entries: Dictionary, seed_value: int, layout: String) -> void:
+	if entries.is_empty():
+		return
+	var signature: Array = [seed_value, entries.size(), layout]
+	if preview.get_meta("signature", []) != signature:
+		preview.set_meta("map", MAP.generate(seed_value, entries.size(), layout))
+		preview.set_meta("signature", signature)
+	var colors: Array[Color] = []
+	for id in RULES.ordered_peers(entries):
+		colors.append(RULES.EMPIRE_COLORS[int(entries[id]["color"])])
+	preview.set_meta("colors", colors)
+	preview.queue_redraw()
+
+func _draw_map_preview(preview: Control) -> void:
+	preview.draw_rect(Rect2(Vector2.ZERO, preview.size), Color("#091522"))
+	var graph: Dictionary = preview.get_meta("map", {})
+	if graph.is_empty():
+		return
+	var points: Array = graph["points"]
+	var bounds: Vector2 = graph["size"]
+	var available: Vector2 = (preview.size - Vector2(24, 24)).max(Vector2.ONE)
+	var scale_factor: float = minf(available.x / bounds.x, available.y / bounds.y)
+	var offset: Vector2 = (preview.size - bounds * scale_factor) * 0.5
+	var colors: Array = preview.get_meta("colors", [])
+	for edge in graph["edges"]:
+		preview.draw_line(offset + points[edge[0]] * scale_factor, offset + points[edge[1]] * scale_factor, Color("#526982"), 1.0, true)
+	for asteroid in graph["fields"]:
+		var center: Vector2 = offset + asteroid["position"] * scale_factor
+		var special: bool = bool(asteroid.get("antimatter", false))
+		var radius: float = maxf(3.0 if special else 1.5, float(asteroid["radius"]) * scale_factor)
+		var tint: Color = Color("#c295ff") if special else Color("#7e6951")
+		preview.draw_circle(center, radius, tint)
+		if special:
+			preview.draw_arc(center, radius + 2.0, 0.0, TAU, 24, tint, 1.0, true)
+	for index in range(points.size()):
+		var position: Vector2 = offset + points[index] * scale_factor
+		var home: bool = index < colors.size()
+		preview.draw_circle(position, 4.0 if home else 2.0, colors[index] if home else Color("#b0c1d2"))
+		if home:
+			preview.draw_arc(position, 6.0, 0.0, TAU, 20, colors[index], 1.0, true)
+
 func _map_layout_picker() -> OptionButton:
 	var picker := OptionButton.new()
 	for layout in MAP.LAYOUTS:
 		picker.add_item(layout)
 	picker.select(0)
-	picker.tooltip_text = "Radial: outer starts, central antimatter. Grid: lattice clusters. Scramble: irregular clusters. All layouts keep antimatter away from starting systems."
+	picker.tooltip_text = "Radial: connected outer and inner rings, inward spokes, central antimatter. Grid: lattice clusters. Scramble: irregular clusters. All layouts keep antimatter away from starting systems."
 	return picker
 
 func _refresh_roster() -> void:
@@ -431,6 +527,12 @@ func _refresh_roster() -> void:
 	if is_instance_valid(lobby_layout_picker):
 		lobby_layout_picker.select(maxi(0, MAP.LAYOUTS.find(str(network.get("map_layout")))))
 		lobby_layout_picker.disabled = not is_lobby or not is_host
+	if is_instance_valid(lobby_preview):
+		var seed_value: int = int(network.get("lobby_map_seed"))
+		lobby_seed_label.text = "Seed: %d" % seed_value
+		lobby_reroll.visible = is_host
+		lobby_reroll.disabled = not is_lobby
+		_update_map_preview(lobby_preview, roster_data, seed_value, str(network.get("map_layout")))
 	# The header button is a descendant of the lobby's content panel.
 	var add_ai_buttons: Array = find_children("AddLobbyAI", "Button", true, false)
 	if not add_ai_buttons.is_empty():

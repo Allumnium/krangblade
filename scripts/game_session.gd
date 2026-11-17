@@ -29,6 +29,7 @@ var owners: Array[int] = []
 var economy: Dictionary = {}
 var is_solo: bool = false
 var map_layout: String = MAP.DEFAULT_LAYOUT
+var lobby_map_seed: int = 0
 var round_id: int = 0
 var loaded: Dictionary = {}
 var load_timer: Timer
@@ -113,6 +114,8 @@ func host_game(wanted_name: String) -> bool:
 		return false
 	multiplayer.multiplayer_peer = peer
 	is_solo = false
+	map_layout = MAP.DEFAULT_LAYOUT
+	lobby_map_seed = int(randi())
 	display_name = _sanitize_name(wanted_name)
 	players = {1: {"name": display_name, "team": 1, "ready": true, "color": 1}}
 	history.clear()
@@ -167,6 +170,7 @@ func _reset_network() -> void:
 	owners.clear()
 	economy.clear()
 	map_layout = MAP.DEFAULT_LAYOUT
+	lobby_map_seed = 0
 	round_id = 0
 	_set_phase("offline")
 	roster_changed.emit()
@@ -247,14 +251,15 @@ func _rpc_register(wanted_name: String) -> void:
 func _send_roster() -> void:
 	if not multiplayer.is_server():
 		return
-	_rpc_roster.rpc(players.duplicate(true), map_layout)
+	_rpc_roster.rpc(players.duplicate(true), map_layout, lobby_map_seed)
 	roster_changed.emit()
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_roster(snapshot: Dictionary, layout: String) -> void:
+func _rpc_roster(snapshot: Dictionary, layout: String, seed_value: int) -> void:
 	if phase == "offline" or not MAP.valid_layout(layout):
 		return
 	map_layout = layout
+	lobby_map_seed = seed_value
 	players = snapshot.duplicate(true)
 	if phase == "connecting":
 		_set_phase("lobby")
@@ -268,6 +273,17 @@ func choose_map_layout(layout: String) -> void:
 	RULES.reset_guest_ready(players)
 	_send_roster()
 	_status("Map layout changed; guests must ready up again.")
+
+func reroll_lobby_map() -> void:
+	if phase != "lobby" or not multiplayer.is_server():
+		return
+	var new_seed: int = int(randi())
+	if new_seed == lobby_map_seed:
+		new_seed += 1
+	lobby_map_seed = new_seed
+	RULES.reset_guest_ready(players)
+	_send_roster()
+	_status("Map rerolled; guests must ready up again.")
 
 func toggle_ready() -> void:
 	if phase != "lobby" or multiplayer.is_server():
@@ -477,7 +493,7 @@ func _maybe_start_match() -> void:
 		return
 	load_timer.stop()
 	var snapshot: Dictionary = players.duplicate(true)
-	var map_seed: int = int(randi())
+	var map_seed: int = lobby_map_seed
 	_rpc_begin.rpc(round_id, snapshot, map_seed, map_layout)
 	_activate_match(snapshot, map_seed)
 
@@ -491,6 +507,7 @@ func _rpc_begin(begin_round: int, snapshot: Dictionary, map_seed: int, layout: S
 	_activate_match(snapshot, map_seed)
 
 func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
+	lobby_map_seed = map_seed
 	players = snapshot.duplicate(true)
 	snapshot_elapsed = 0.0
 	snapshot_revision = 0
