@@ -2,7 +2,11 @@
 
 Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three intended playable races. Only Empire is implemented. ENet multiplayer uses UDP 24567 (LAN/Tailscale); no Steam dependency.
 
-## Development sandbox
+## Current gameplay — v0.18.0
+
+Select owned fighters or colony ships by clicking or dragging a box; Shift adds units. Right-click a discovered system or asteroid field to order fighter movement along the lanes. Fighters automatically engage nearby hostiles and repair when safe, and direct occupation can capture hostile systems after their defenses are destroyed. Right-click a neutral system to send selected idle colony ships. Middle-drag pans; scroll zooms. Miners and freighters remain autonomous. Policy cards, regional allocation, warmup and the separate Upgrades tab are removed. Repeatable Economy buildings expand output, can bootstrap Crystal production, never cost their own output, and use fixed local recipes. The Economy tab also contains PDS, habitation and warehouse development. Nonfood construction reserve and a stronger early habitation penalty protect recovery. Earlier version notes below describe historical behavior, not current controls.
+
+## Development sandbox (historical)
 
 Run the project and select **SINGLE PLAYER**, or host/join a multiplayer lobby. Every new match receives a host-generated seed for a connected, irregular 32-planet graph with fixed routes. The planet count remains a prototype setting. Left-click a planet to inspect it without changing ownership. Build a **colony ship** at an owned planet's shipyard, select a reachable neutral planet, pick an idle colony ship, and click **SEND COLONY SHIP**. It follows friendly routes with a final leg to the neutral world; on arrival it is consumed to establish ownership. If another ship settles the destination first, the losing ship returns to its launch planet. No direct claim or hostile conquest is available. Right-drag or middle-drag on the map to pan, scroll to zoom at the pointer, and use RESET VIEW to fit the galaxy again. Cargo ships are directional markers; gold indicates loaded cargo, purple indicates colony ships, and docked fleets are counted. Each planet has a player owner and allies share surplus resources; only the owner can change its settings.
 

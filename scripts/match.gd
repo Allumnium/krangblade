@@ -67,6 +67,10 @@ var colony_choices: Array[int] = []
 var selected: int = -1
 var last_system_tab_selection: int = -1
 var selected_ship_id: int = -1
+var selected_units: Array[int] = []
+var selection_start: Vector2 = Vector2.ZERO
+var selection_end: Vector2 = Vector2.ZERO
+var selecting_units: bool = false
 var selected_field: int = -1
 var mining_controls: VBoxContainer
 var mining_enabled: CheckBox
@@ -101,7 +105,6 @@ var system_visual_seed: int = -1
 var trade_sliders: Dictionary = {}
 var trade_checks: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
-var upgrade_cards: Dictionary = {}
 var pds_card: Dictionary = {}
 var economy_cards: Dictionary = {}
 var warehouse_card: Dictionary = {}
@@ -410,8 +413,7 @@ func _build_ui() -> void:
 	var economy_page: VBoxContainer = _inspector_page("Economy")
 	_build_economy_cards(economy_page)
 	var trade_page: VBoxContainer = _inspector_page("Trade")
-	var upgrades_page: VBoxContainer = _inspector_page("Upgrades")
-	_build_upgrade_cards(upgrades_page)
+	_build_pds_card(economy_page)
 	for resource in ECONOMY.RESOURCES:
 		var logistics: VBoxContainer = HUD.section(trade_page, "")
 		logistics.get_child(0).hide()
@@ -470,7 +472,6 @@ func _build_ui() -> void:
 	HUD.action(miner_button, Color("#d8e58b"))
 	miner_button.tooltip_text = "Automatically mines accessible fields from owned service systems."
 	_build_time_controls()
-	_build_policy_ui()
 
 
 func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
@@ -496,7 +497,7 @@ func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
 	return card
 
 func _detail_cards() -> Array:
-	return build_cards.values() + economy_cards.values() + upgrade_cards.values() + yard_activity_rows.values() + [warehouse_card, habitation_card, pds_card]
+	return build_cards.values() + economy_cards.values() + yard_activity_rows.values() + [warehouse_card, habitation_card, pds_card]
 
 func _card_tab(card: Dictionary) -> Node:
 	var node: Node = card["header"]
@@ -817,7 +818,7 @@ func _build_economy_cards(parent: Container) -> void:
 		section.get_child(0).hide()
 		var disclosure: Dictionary = _make_disclosure(section, str(definition["name"]))
 		var card: VBoxContainer = disclosure["body"]
-		var effect: Label = _label("+25% farm capacity" if resource == "Organics" else "+25%% %s output" % resource, 12)
+		var effect: Label = _label("Expands farm capacity" if resource == "Organics" else "Expands %s production" % resource, 12)
 		card.add_child(effect)
 		var detail: Label = _label("", 12)
 		card.add_child(detail)
@@ -836,8 +837,8 @@ func _build_economy_cards(parent: Container) -> void:
 func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 	var habitat_level: int = int(p.get("habitation_level", 0))
 	_disclosure_title(habitation_card, "Habitation technology · Lv %d" % habitat_level)
-	var penalty: float = -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)
-	var next_penalty: float = -100.0 * clampf(float(p["population"]) / (2.0 * ECONOMY.habitation_capacity(p)), 0.0, 1.0)
+	var penalty: float = -100.0 * ECONOMY.overpopulation_penalty(p)
+	var next_penalty: float = -100.0 * ECONOMY.overpopulation_penalty(p, 2.0)
 	habitation_card["detail"].text = "Overpopulation penalty %+.1f%%" % penalty
 	if habitat_level < 3:
 		habitation_card["detail"].text += " → %+.1f%%" % next_penalty
@@ -890,7 +891,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 				unmet.append("Requires " + requirement)
 			if not ECONOMY.production_available(p, resource):
 				unmet.append("No local deposit")
-			if not ECONOMY.affordable(p, definition["cost"]):
+			if not ECONOMY.affordable(p, ECONOMY.building_cost(p, resource)):
 				unmet.append("Insufficient local materials")
 		card["detail"].text = "\n".join(unmet)
 		card["detail"].visible = not unmet.is_empty()
@@ -899,28 +900,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 		_disclosure_title(card, str(definition["name"]) + " · %d" % installed)
 		button.tooltip_text = "%s\n%s" % [requirement, cost]
 
-func _build_upgrade_cards(parent: Container) -> void:
-	var labels: Dictionary = {"Metals": "Metal extraction", "Plastics": "Plastic production",
-		"Textiles": "Textile production", "Organics": "Organics farming",
-		"Tech": "Tech production", "Crystals": "Crystal extraction"}
-	for resource in ECONOMY.RESOURCES:
-		var section: VBoxContainer = HUD.section(parent, "")
-		section.get_child(0).hide()
-		var disclosure: Dictionary = _make_disclosure(section, labels[resource])
-		var card: VBoxContainer = disclosure["body"]
-		var detail := _label("", 12)
-		card.add_child(detail)
-		var progress := ProgressBar.new()
-		progress.custom_minimum_size.y = 15
-		section.add_child(progress)
-		section.move_child(progress, card.get_index())
-		var actions: HBoxContainer = disclosure["actions"]
-		var action: Button = _card_action(disclosure, "Upgrade", _operation.bind("production", resource))
-		var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind("production", resource), progress)
-		HUD.action(action)
-		var repeat: Button = _repeat_button(actions, "production:" + resource)
-		disclosure.merge({"title": disclosure["header"], "name": labels[resource], "detail": detail, "progress": progress, "button": action, "cancel": cancel, "repeat": repeat, "costs": _cost_grid(card)})
-		upgrade_cards[resource] = disclosure
+func _build_pds_card(parent: Container) -> void:
 	var section: VBoxContainer = HUD.section(parent, "")
 	section.get_child(0).hide()
 	pds_card = _make_disclosure(section, "Planetary defense")
@@ -966,61 +946,6 @@ func _refresh_pds(planet: Dictionary, owned: bool) -> void:
 		_show_cost(pds_card["costs"], job["cost"])
 	elif slot >= 0:
 		_show_cost(pds_card["costs"], ECONOMY._cost("pds", slot + 1))
-
-func _upgrade_job(planet: Dictionary, resource: String) -> Dictionary:
-	for job in planet.get("queue", []):
-		if job["kind"] == "production" and job["target"] == resource:
-			return job
-	return {}
-
-func _upgrade_card_action(resource: String) -> void:
-	var job: Dictionary = _upgrade_job(_planet(), resource)
-	if job.is_empty():
-		_operation("production", resource)
-	else:
-		session.call("request_cancel", selected, int(job["id"]))
-
-func _refresh_upgrade_cards(planet: Dictionary, owned: bool) -> void:
-	if planet.is_empty():
-		return
-	for resource in ECONOMY.RESOURCES:
-		var card: Dictionary = upgrade_cards[resource]
-		var level: int = int(planet["levels"][resource])
-		_disclosure_title(card, "%s · Lv %d" % [card["name"], level])
-		var job: Dictionary = _upgrade_job(planet, resource)
-		var button: Button = card["button"]
-		var progress: ProgressBar = card["progress"]
-		progress.visible = not job.is_empty()
-		var detail: Label = card["detail"]
-		var available: bool = ECONOMY.production_available(planet, resource)
-		var unlocked: bool = ECONOMY.production_unlocked(planet, resource)
-		_sync_repeat(card["repeat"], planet, "production:" + resource, owned and available)
-		if not job.is_empty():
-			progress.value = 100.0 * float(job["progress"]) / float(job["work"])
-			progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
-			_style_progress(progress, planet, job)
-			detail.text = "+1 production level · %.0f work\n%.0f%% complete%s" % [float(job["work"]), progress.value, " · Waiting" if ECONOMY._possible(planet, job) <= ECONOMY.EPS else ""]
-			_show_cost(card["costs"], job["cost"])
-			button.text = "Upgrade"
-			button.disabled = true
-			card["cancel"].show()
-			card["cancel"].disabled = not owned
-		else:
-			button.text = "Upgrade"
-			button.disabled = not owned or not unlocked
-			card["cancel"].hide()
-			card["cancel"].disabled = true
-			if not available:
-				detail.text = "No local deposit"
-			else:
-				var minimum: int = ECONOMY.production_population(resource, level + 1)
-				var upgraded: Dictionary = planet.duplicate(true)
-				upgraded["levels"][resource] = level + 1
-				detail.text = "Output %.2f → %.2f t/yr · %.0f yr" % [ECONOMY.rate(planet, resource), ECONOMY.rate(upgraded, resource), ECONOMY._work("production", level + 1)]
-				if not unlocked:
-					detail.text += "\nRequires %s population" % _compact_amount(float(minimum))
-				button.tooltip_text = _cost_text(ECONOMY._cost("production", level + 1))
-			_show_cost(card["costs"], ECONOMY._cost("production", level + 1))
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
@@ -1151,8 +1076,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	fleet_cargo.get_parent().visible = cargo_capable
 	if kind == "fighter":
 		fleet_detail.visible = true
-		fleet_detail.text = "%d fighters" % int(ECONOMY.empire_totals(state, _me())["fighters"])
-		fleet_detail.tooltip_text = "Assign forces using the Military lens."
+		fleet_detail.text = "%d selected · %d fighters" % [selected_units.size(), int(ECONOMY.empire_totals(state, _me())["fighters"])]
+		fleet_detail.tooltip_text = "Left click or drag to select; Shift adds; right click orders movement to a sector."
 		return
 	var total: int = 0
 	var traveling: int = 0
@@ -1252,7 +1177,6 @@ func _refresh_time_controls(state: Dictionary) -> void:
 		button.tooltip_text = ("Pause simulation" if int(speed) == 0 else "%d× simulation speed" % int(speed)) + ("" if can_change else " (host controlled)")
 
 func _toggle_lens(kind: String) -> void:
-	policy_selected = ""
 	_refresh()
 	active_lens = "" if active_lens == kind else kind
 	logistics_lens.set_pressed_no_signal(active_lens == "logistics")
@@ -1588,7 +1512,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 				continue
 			var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 			var crew: float = float(p.get("crew_rate", 0.0))
-			lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% overpopulation penalty" % [_system_name(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0)])
+			lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% overpopulation penalty" % [_system_name(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p)])
 		return "\n".join(lines)
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
 	var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
@@ -1622,7 +1546,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 	if resource == "population":
 		var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 		var crew: float = float(p.get("crew_rate", 0.0))
-		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * clampf(float(p["population"]) / ECONOMY.habitation_capacity(p), 0.0, 1.0), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
+		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics")]
 	var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Latest local flows (t/yr)"]
 	var categories: Array = ["Production", "Population", "Mining deliveries", "Imports", "Exports"]
 	for category in p.get("flows", {}):
@@ -1813,11 +1737,6 @@ func _refresh() -> void:
 	_refresh_global_bar(state)
 	_refresh_match_result(state)
 	_refresh_time_controls(state)
-	_refresh_policy_ui(state)
-	if not policy_draft_card.is_empty():
-		for child in policy_hidden_ui:
-			if is_instance_valid(child):
-				child.hide()
 	menu_exit.text = "Main menu" if bool(session.get("is_solo")) else ("Return to lobby" if multiplayer.is_server() else "Leave match")
 	if phase == "loading" and multiplayer.is_server():
 		menu_exit.text = "Cancel start"
@@ -1834,14 +1753,20 @@ func _refresh() -> void:
 				_load_thresholds()
 				break
 	var ship: Dictionary = _selected_ship(state)
+	var living: Array[int] = []
+	for craft in state.get("ships", []):
+		if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])):
+			living.append(int(craft["id"]))
+	selected_units = living
 	if ship.is_empty():
-		selected_ship_id = -1
+		selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
+		ship = _selected_ship(state)
 	var p: Dictionary = _planet()
 	var field_selected: bool = selected_field >= 0 and ECONOMY.discovered(state, _me(), "fields", selected_field)
 	var ship_selected: bool = not ship.is_empty()
 	var other_selected: bool = ship_selected or field_selected
-	inspector_panel.visible = policy_draft_card.is_empty() and policy_selected.is_empty() and (not p.is_empty() or other_selected)
-	overview_panel.visible = policy_draft_card.is_empty() and (not p.is_empty() or other_selected)
+	inspector_panel.visible = (not p.is_empty() or other_selected)
+	overview_panel.visible = (not p.is_empty() or other_selected)
 	planet_overview.visible = not other_selected
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
 	inspector_tabs.visible = not other_selected and own_system
@@ -1899,7 +1824,7 @@ func _refresh() -> void:
 		var amount: float = float(p["stock"][resource])
 		production_values[resource]["stock"].text = _tons(amount)
 		production_values[resource]["stock"].tooltip_text = "%.1f t %s stored" % [amount, resource]
-		production_values[resource]["level"].text = str(int(p["levels"][resource]))
+		production_values[resource]["level"].text = str(int(p["levels"][resource]) + int(p.get("buildings", {}).get(resource, 0)))
 		var percent: int = roundi(100.0 * ECONOMY.production_modifier(p, resource))
 		var bonus: Label = production_values[resource]["bonus"]
 		bonus.text = "—" if percent == 100 else "%d%%" % (percent - 100) if percent < 100 else "+%d%%" % (percent - 100)
@@ -1919,7 +1844,6 @@ func _refresh() -> void:
 	population_delta_label.add_theme_color_override("font_color", Color("#7cdb9b") if change >= 0.0 else Color("#eb8585"))
 	population_label.tooltip_text = ""
 	_update_trade_stock(p)
-	_refresh_upgrade_cards(p, owned)
 	_refresh_pds(p, owned)
 	_refresh_economy_cards(p, owned)
 	ship_button.disabled = not owned or not bool(p["home"])
@@ -2516,7 +2440,7 @@ func _planet_color(planet: Dictionary) -> Color:
 	var mix: Vector3 = sum / weight
 	return Color(mix.x, mix.y, mix.z)
 
-func _select_at(point: Vector2) -> void:
+func _select_at(point: Vector2, additive: bool = false) -> void:
 	var state: Dictionary = _state()
 	if state.is_empty() or str(session.get("phase")) != "match":
 		return
@@ -2530,8 +2454,6 @@ func _select_at(point: Vector2) -> void:
 		if distance <= _planet_radius(i, state) + 4.0 and distance < nearest:
 			nearest = distance
 			hit = i
-	if not policy_selected.is_empty() and policy_draft_card.is_empty():
-		return
 	# Use the same interpolated physical pose for selection and rendering.
 	var poses: Dictionary = _ship_poses(state)
 	var ship_hit: int = -1
@@ -2541,7 +2463,23 @@ func _select_at(point: Vector2) -> void:
 		if distance <= maxf(5.0, 12.0 * _ship_scale()) and distance < ship_distance:
 			ship_distance = distance
 			ship_hit = int(id)
-	selected_ship_id = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
+	var next_ship: int = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
+	if additive and not selected_units.is_empty():
+		var valid: bool = false
+		for craft in state["ships"]:
+			if int(craft["id"]) == next_ship and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship"]:
+				valid = true
+				break
+		if not valid:
+			return
+	selected_ship_id = next_ship
+	if not additive:
+		selected_units.clear()
+	for craft in state["ships"]:
+		if int(craft["id"]) == selected_ship_id and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship"]:
+			if not selected_units.has(selected_ship_id):
+				selected_units.append(selected_ship_id)
+			break
 	selected_field = -1
 	if selected_ship_id < 0 and hit < 0:
 		var fields: Array = state["map"].get("fields", [])
@@ -2560,51 +2498,84 @@ func _select_at(point: Vector2) -> void:
 		_load_thresholds()
 	_refresh()
 
-func _map_input(event: InputEvent) -> void:
-	if match_menu.visible or (is_instance_valid(policy_modal) and policy_modal.visible):
+func _select_box(rect: Rect2, additive: bool) -> void:
+	var state: Dictionary = _state()
+	if not additive:
+		selected_units.clear()
+	var poses: Dictionary = _ship_poses(state)
+	for craft in state.get("ships", []):
+		var id: int = int(craft["id"])
+		if int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship"] and poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
+			selected_units.append(id)
+	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
+	selected = -1
+	selected_field = -1
+	_refresh()
+
+func _command_at(point: Vector2) -> void:
+	var state: Dictionary = _state()
+	if selected_units.is_empty() or state.is_empty():
 		return
-	if not policy_draft_card.is_empty():
-		if event is InputEventMouseButton:
-			var gesture: InputEventMouseButton = event
-			if gesture.button_index == MOUSE_BUTTON_LEFT or gesture.button_index == MOUSE_BUTTON_RIGHT:
-				var mode: int = 1 if gesture.button_index == MOUSE_BUTTON_LEFT else -1
-				if gesture.pressed:
-					if policy_lasso_mode != 0:
-						_finish_policy_lasso()
-					policy_lasso_mode = mode
-					policy_lasso_path = PackedVector2Array([_world_point(gesture.position)])
-				elif policy_lasso_mode == mode:
-					_sample_policy_lasso(gesture.position)
-					_finish_policy_lasso()
-			elif policy_lasso_mode == 0 and gesture.pressed:
-				if gesture.button_index == MOUSE_BUTTON_WHEEL_UP:
-					_zoom_at(gesture.position, 1.15)
-				elif gesture.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-					_zoom_at(gesture.position, 1.0 / 1.15)
-		elif event is InputEventMouseMotion and policy_lasso_mode != 0:
-			_sample_policy_lasso(event.position)
-		map_canvas.queue_redraw()
-		map_canvas.accept_event()
+	var node: int = -1
+	var distance: float = INF
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	for candidate in ECONOMY.military_pois(state, _me()):
+		var d: float = point.distance_squared_to(_screen_point(graph["points"][candidate]))
+		if d < distance:
+			node = candidate
+			distance = d
+	if node < 0:
+		return
+	var fighters: Array[int] = []
+	for craft in state["ships"]:
+		var id: int = int(craft["id"])
+		if not selected_units.has(id) or int(craft["owner"]) != _me():
+			continue
+		if craft["kind"] == "fighter":
+			fighters.append(id)
+		elif craft["kind"] == "colony_ship" and node < state["planets"].size():
+			session.call("request_colonize", id, node)
+	if not fighters.is_empty():
+		session.call("request_fighter_move", fighters, node)
+
+func _map_input(event: InputEvent) -> void:
+	if match_menu.visible:
 		return
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
-		if mouse.button_index == MOUSE_BUTTON_MIDDLE or mouse.button_index == MOUSE_BUTTON_RIGHT:
-			if mouse.pressed:
-				drag_button = mouse.button_index
-			elif drag_button == mouse.button_index:
-				drag_button = 0
-		elif mouse.pressed:
-			match mouse.button_index:
-				MOUSE_BUTTON_WHEEL_UP: _zoom_at(mouse.position, 1.15)
-				MOUSE_BUTTON_WHEEL_DOWN: _zoom_at(mouse.position, 1.0 / 1.15)
-				MOUSE_BUTTON_LEFT: _select_at(mouse.position)
-	elif event is InputEventMouseMotion and drag_button != 0:
+		match mouse.button_index:
+			MOUSE_BUTTON_MIDDLE:
+				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
+			MOUSE_BUTTON_RIGHT:
+				if mouse.pressed:
+					_command_at(mouse.position)
+			MOUSE_BUTTON_LEFT:
+				if mouse.pressed:
+					selecting_units = true
+					selection_start = mouse.position
+					selection_end = mouse.position
+				elif selecting_units:
+					selecting_units = false
+					if selection_start.distance_to(mouse.position) > 5.0:
+						_select_box(Rect2(selection_start, mouse.position - selection_start).abs(), mouse.shift_pressed)
+					else:
+						_select_at(mouse.position, mouse.shift_pressed)
+			MOUSE_BUTTON_WHEEL_UP:
+				if mouse.pressed:
+					_zoom_at(mouse.position, 1.15)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				if mouse.pressed:
+					_zoom_at(mouse.position, 1.0 / 1.15)
+	elif event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event
-		if motion.button_mask == 0:
-			drag_button = 0
-		else:
-			pan += motion.relative
-			map_canvas.queue_redraw()
+		if selecting_units:
+			selection_end = motion.position
+		elif drag_button != 0:
+			if motion.button_mask == 0:
+				drag_button = 0
+			else:
+				pan += motion.relative
+	map_canvas.queue_redraw()
 	map_canvas.accept_event()
 
 func _fighter_path(ship: Dictionary) -> Array[int]:
@@ -2640,7 +2611,7 @@ func _sync_upgrade_audio(state: Dictionary) -> void:
 		if int(system["owner"]) != _me():
 			continue
 		for job in system["queue"]:
-			if job["kind"] != "production":
+			if job["kind"] != "economy_building":
 				continue
 			var id: int = int(job["id"])
 			active[id] = true
@@ -2703,6 +2674,7 @@ func _cycle_owned_system(direction: int) -> void:
 	var current: int = owned.find(selected)
 	selected = owned[(0 if direction > 0 else owned.size() - 1) if current < 0 else posmod(current + direction, owned.size())]
 	selected_ship_id = -1
+	selected_units.clear()
 	selected_field = -1
 	var world: Vector2 = state["map"]["points"][selected]
 	var desired_radius: float = minf(_projection_size().x, _projection_size().y) * 0.27
@@ -2735,11 +2707,9 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 		map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
-	# Finish a lasso even if the button is released outside the map.
-	if not policy_draft_card.is_empty() and policy_lasso_mode != 0:
-		var held_button: int = MOUSE_BUTTON_LEFT if policy_lasso_mode > 0 else MOUSE_BUTTON_RIGHT
-		if not Input.is_mouse_button_pressed(held_button):
-			_finish_policy_lasso()
+	if selecting_units and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		selecting_units = false
+		map_canvas.queue_redraw()
 	_keyboard_pan(delta)
 	_update_resource_hover()
 	if is_instance_valid(diagnostic_label):
@@ -3005,7 +2975,6 @@ func _draw_map() -> void:
 				map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
 		var name_star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
 		map_canvas.draw_string(font, pos + Vector2(-80, -name_star_radius - 7), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
-	_draw_policy_zones(state)
 	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
 	for index in range(points.size()):
@@ -3107,7 +3076,7 @@ func _draw_map() -> void:
 					var age: float = fposmod(visual_clock * 4.0 + float(k) * 0.33 + sign * 0.12, 1.0)
 					var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
 					map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
-		if int(ship["id"]) == selected_ship_id:
+		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
 			map_canvas.draw_arc(point, maxf(5.0, 15.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
 		map_canvas.draw_colored_polygon(shape, hull)
 		if ship["kind"] == "ship":
@@ -3135,541 +3104,7 @@ func _draw_map() -> void:
 			var bar_pos: Vector2 = point + Vector2(-10.0, 13.0)
 			map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0, 3.0)), Color("#182333"))
 			map_canvas.draw_rect(Rect2(bar_pos, Vector2(20.0 * hp, 3.0)), Color("#e9a276"))
-
-# Policy cards are clipped by the bottom edge; the full cards appear in a modal.
-var policy_selected: String = ""
-var policy_draft_card: String = ""
-var policy_draft_slot: String = ""
-var policy_lasso_mode: int = 0
-var policy_lasso_path := PackedVector2Array()
-var policy_zone_groups: Array = []
-var policy_next_zone_key: int = 0
-var policy_hover_slot: String = ""
-const POLICY_MAX_ZONES: int = 5
-var policy_zone_weights: Dictionary = {}
-var policy_voids: Dictionary = {}
-var policy_editor: PanelContainer
-var policy_editor_rows: VBoxContainer
-var policy_editor_status: Label
-var policy_editor_card: Label
-var policy_editor_accept: Button
-var policy_hidden_ui: Dictionary = {}
-var policy_original_map_top: float = 0.0
-var policy_buttons: Dictionary = {}
-var policy_changes: Dictionary = {}
-var policy_inspector: PanelContainer
-var policy_title: Label
-var policy_info: Label
-var policy_slider: HSlider
-var policy_modal: Control
-var policy_catalog: HBoxContainer
-var policy_choice_slot: String = ""
-var policy_drop: PolicyDrop
-var policy_modal_panel: PanelContainer
-
-class PolicyCard extends Button:
-	var card_id: String = ""
-	var slot_id: String = ""
-	func _get_drag_data(_position: Vector2) -> Variant:
-		var preview := Label.new()
-		preview.text = text
-		preview.add_theme_font_size_override("font_size", 18)
-		set_drag_preview(preview)
-		return {"card": card_id, "slot": slot_id}
-
-class PolicyDrop extends Button:
-	signal card_dropped(card: String)
-	var slot_id: String = ""
-	func _can_drop_data(_position: Vector2, data: Variant) -> bool:
-		return not disabled and data is Dictionary and data.get("slot", "") == slot_id and data.has("card")
-	func _drop_data(_position: Vector2, data: Variant) -> void:
-		card_dropped.emit(str(data["card"]))
-
-func _build_policy_ui() -> void:
-	var strip := HBoxContainer.new()
-	add_child(strip)
-	strip.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	strip.offset_left = -350
-	strip.offset_right = 350
-	strip.offset_top = -72
-	strip.offset_bottom = -4
-	strip.add_theme_constant_override("separation", 5)
-	for slot in ECONOMY.POLICY_SLOTS:
-		var column := VBoxContainer.new()
-		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		strip.add_child(column)
-		var change: Button = _button("Change", _open_policy_catalog.bind(slot), column)
-		change.custom_minimum_size.y = 24
-		policy_changes[slot] = change
-		var card := PolicyDrop.new()
-		card.slot_id = slot
-		card.card_dropped.connect(_equip_selected_policy)
-		card.custom_minimum_size = Vector2(128, 42)
-		card.add_theme_font_size_override("font_size", 12)
-		card.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		card.alignment = HORIZONTAL_ALIGNMENT_CENTER
-		card.toggle_mode = true
-		card.pressed.connect(_inspect_policy.bind(slot))
-		card.mouse_entered.connect(_hover_policy.bind(slot))
-		card.mouse_exited.connect(_hover_policy.bind(""))
-		column.add_child(card)
-		policy_buttons[slot] = card
-	policy_inspector = PanelContainer.new()
-	add_child(policy_inspector)
-	policy_inspector.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
-	policy_inspector.offset_left = -310
-	policy_inspector.offset_right = -8
-	policy_inspector.offset_top = HEADER_HEIGHT + 64
-	policy_inspector.offset_bottom = -82
-	policy_inspector.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#284661"), 8))
-	var body := VBoxContainer.new()
-	policy_inspector.add_child(body)
-	var title_row := HBoxContainer.new()
-	body.add_child(title_row)
-	policy_title = _label("", 18)
-	policy_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_row.add_child(policy_title)
-	_button("×", _inspect_policy.bind(""), title_row)
-	policy_info = _label("", 14)
-	body.add_child(policy_info)
-	policy_slider = HSlider.new()
-	policy_slider.max_value = 100
-	policy_slider.step = 1
-	policy_slider.editable = false
-	body.add_child(policy_slider)
-	policy_inspector.hide()
-	# In-scene overlay leaves the actual bottom slots reachable for GUI drag/drop.
-	policy_modal = Control.new()
-	add_child(policy_modal)
-	policy_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	policy_modal.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	policy_modal_panel = PanelContainer.new()
-	policy_modal.add_child(policy_modal_panel)
-	policy_modal_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	policy_modal_panel.offset_left = -280
-	policy_modal_panel.offset_right = 280
-	policy_modal_panel.offset_top = -140
-	policy_modal_panel.offset_bottom = 140
-	policy_modal_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#42647e"), 12))
-	var contents := VBoxContainer.new()
-	policy_modal_panel.add_child(contents)
-	var tools_row := HBoxContainer.new()
-	contents.add_child(tools_row)
-	var hint := _label("Choose or drag a card to its slot", 13)
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	tools_row.add_child(hint)
-	_button("Empty", _equip_selected_policy.bind(""), tools_row)
-	_button("×", policy_modal.hide, tools_row)
-	policy_catalog = HBoxContainer.new()
-	contents.add_child(policy_catalog)
-	policy_modal.hide()
-	policy_editor = PanelContainer.new()
-	add_child(policy_editor)
-	policy_editor.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	policy_editor.offset_left = 12
-	policy_editor.offset_right = 348
-	policy_editor.offset_top = 12
-	policy_editor.offset_bottom = 520
-	policy_editor.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#42647e"), 8))
-	var editor_layout := VBoxContainer.new()
-	policy_editor.add_child(editor_layout)
-	var editor_scroll := ScrollContainer.new()
-	editor_layout.add_child(editor_scroll)
-	editor_layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	editor_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var editor_body := VBoxContainer.new()
-	editor_body.custom_minimum_size.x = 305
-	editor_scroll.add_child(editor_body)
-	policy_editor_card = _label("", 18)
-	editor_body.add_child(policy_editor_card)
-	editor_body.add_child(_label("Left drag: lasso a zone. Right drag: remove POIs. Maximum 5 zones.", 13))
-	editor_body.add_child(_label("Click a single POI to select or remove it. Neutral and empty sectors are valid.", 13))
-	policy_editor_rows = VBoxContainer.new()
-	editor_body.add_child(policy_editor_rows)
-	# Keep status and confirmation visible even with five zone sliders.
-	policy_editor_status = _label("", 13)
-	policy_editor_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	editor_layout.add_child(policy_editor_status)
-	var action_row := HBoxContainer.new()
-	editor_layout.add_child(action_row)
-	_button("Cancel", _cancel_policy_draft, action_row)
-	policy_editor_accept = _button("Accept", _commit_policy_draft, action_row)
-	policy_editor.hide()
-
-func _open_policy_catalog(slot: String) -> void:
-	policy_choice_slot = slot
-
-	for child in policy_catalog.get_children():
-		policy_catalog.remove_child(child)
-		child.queue_free()
-	var state: Dictionary = _state()
-	for card in ECONOMY.POLICY_CARDS:
-		if not ECONOMY.policy_eligible(state, _me(), slot, card):
-			continue
-		var tile := PolicyCard.new()
-		tile.card_id = card
-		tile.slot_id = slot
-		tile.text = str(ECONOMY.POLICY_CARDS[card]["name"])
-		tile.tooltip_text = str(ECONOMY.POLICY_CARDS[card].get("description", ""))
-		tile.custom_minimum_size = Vector2(132, 155)
-		tile.add_theme_font_size_override("font_size", 12)
-		tile.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		tile.pressed.connect(_equip_selected_policy.bind(card))
-		policy_catalog.add_child(tile)
-	policy_modal_panel.offset_left = -maxf(160.0, float(policy_catalog.get_child_count()) * 72.0 + 16.0)
-	policy_modal_panel.offset_right = -policy_modal_panel.offset_left
-	policy_modal.show()
-
-func _equip_selected_policy(card: String) -> void:
-	policy_modal.hide()
-	if not card.is_empty() and ECONOMY.POLICY_CARDS[card].get("military", false):
-		_begin_policy_draft(policy_choice_slot, card)
-		return
-	session.call("request_policy", policy_choice_slot, card)
-	policy_selected = ""
-	_inspect_policy(policy_choice_slot)
-
-func _inspect_policy(slot: String) -> void:
-	policy_selected = "" if policy_selected == slot else slot
-	active_lens = ""
-	logistics_lens.set_pressed_no_signal(false)
-	_refresh()
-	map_canvas.queue_redraw()
-
-func _refresh_policy_ui(state: Dictionary) -> void:
-	if not is_instance_valid(policy_inspector):
-		return
-	var equipped: Dictionary = state.get("policies", {}).get(_me(), {})
-	for slot in policy_buttons:
-		var entry: Dictionary = equipped.get(slot, {})
-		var card: Button = policy_buttons[slot]
-		var available: bool = ECONOMY.policy_eligible(state, _me(), slot, "")
-		card.disabled = not available
-		policy_changes[slot].disabled = not available
-		var name_text: String = "Locked" if not available else ("Empty" if entry.is_empty() else str(ECONOMY.POLICY_CARDS[entry["card"]]["name"]))
-		if not entry.is_empty() and not ECONOMY.policy_active(state, entry):
-			name_text += " · %ds" % ceili(float(entry["ready_at"]) - float(state["elapsed"]))
-		card.text = slot.capitalize() + "\n" + name_text
-		card.tooltip_text = name_text
-		card.set_pressed_no_signal(policy_selected == slot)
-	policy_inspector.visible = not policy_selected.is_empty() and policy_draft_card.is_empty()
-	if not policy_inspector.visible:
-		return
-	var selected_entry: Dictionary = equipped.get(policy_selected, {})
-	policy_title.text = policy_selected.capitalize()
-	policy_slider.visible = false
-	if selected_entry.is_empty():
-		policy_info.text = "Empty slot"
-		return
-	var definition: Dictionary = ECONOMY.POLICY_CARDS[selected_entry["card"]]
-	policy_title.text = definition["name"]
-	var military: bool = definition.get("military", false)
-	policy_slider.visible = military
-	if military:
-		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-			policy_slider.set_value_no_signal(float(selected_entry["weight"]))
-		policy_info.text = "Committed: %d%%" % ECONOMY.policy_allocation(selected_entry)
-		if ECONOMY.policy_active(state, selected_entry):
-			var assigned: int = 0
-			var traveling: int = 0
-			var rallying: int = 0
-			var recovering: int = 0
-			for operation in state.get("operations", {}).values():
-				if int(operation["owner"]) != _me() or not selected_entry.get("targets", []).has(operation["target"]):
-					continue
-				assigned += (operation.get("members", []) as Array).size()
-				traveling += (operation.get("in_transit", []) as Array).size()
-				rallying += (operation.get("rallying", []) as Array).size()
-				recovering += (operation.get("recovering", []) as Array).size()
-			policy_info.text += "\nFleet at objectives: %d assigned\n%d traveling · %d rallying · %d repairing" % [assigned, traveling, rallying, recovering]
-		policy_info.text += "\nReplace the card to lasso its zones."
-	else:
-		policy_info.text = str(definition.get("description", "Policy effects pending"))
-	if not ECONOMY.policy_active(state, selected_entry):
-		policy_info.text += "\nPreparing: %ds" % ceili(float(selected_entry["ready_at"]) - float(state["elapsed"]))
-
-# Painting is a local draft; committed policy data is only changed by Confirm.
-func _begin_policy_draft(slot: String, card: String) -> void:
-	policy_draft_slot = slot
-	policy_draft_card = card
-	policy_selected = ""
-	policy_hover_slot = ""
-	policy_lasso_mode = 0
-	policy_lasso_path.clear()
-	policy_zone_groups.clear()
-	policy_next_zone_key = 0
-	policy_zone_weights.clear()
-	policy_voids.clear()
-	var entry: Dictionary = _state().get("policies", {}).get(_me(), {}).get(slot, {})
-	if entry.get("card", "") == card:
-		var zones: Array = entry.get("zones", [{"targets": entry.get("targets", []), "weight": entry.get("weight", 100)}])
-		for zone in zones:
-			if (zone["targets"] as Array).is_empty():
-				continue
-			var key: int = policy_next_zone_key
-			policy_next_zone_key += 1
-			policy_zone_groups.append({"key": key, "targets": zone["targets"].duplicate()})
-			policy_zone_weights[key] = int(zone["weight"])
-	policy_editor_card.text = str(ECONOMY.POLICY_CARDS[card]["name"])
-	policy_original_map_top = map_canvas.offset_top
-	map_canvas.offset_top = 8
-	# Territory and map share the same local projection. Keep their parent
-	# rectangles identical when the map expands in focused draft mode.
-	territory_layer.offset_top = map_canvas.offset_top
-	policy_hidden_ui.clear()
-	for child in get_children():
-		if child.name == "SpaceBackdrop" or child == territory_layer or child == map_canvas or child == policy_editor or child == policy_modal or child == match_menu:
-			continue
-		if child is CanvasItem:
-			policy_hidden_ui[child] = child.visible
-			child.hide()
-	policy_editor.show()
-	_position_territory()
-	_update_policy_editor()
-	map_canvas.queue_redraw()
-
-func _cancel_policy_draft() -> void:
-	policy_draft_card = ""
-	policy_lasso_mode = 0
-	policy_lasso_path.clear()
-	policy_zone_groups.clear()
-	policy_zone_weights.clear()
-	policy_editor.hide()
-	map_canvas.offset_top = policy_original_map_top
-	territory_layer.offset_top = map_canvas.offset_top
-	_position_territory()
-	for child in policy_hidden_ui:
-		if is_instance_valid(child):
-			child.visible = bool(policy_hidden_ui[child])
-	policy_hidden_ui.clear()
-	_refresh()
-	map_canvas.queue_redraw()
-
-func _hover_policy(slot: String) -> void:
-	policy_hover_slot = slot
-	map_canvas.queue_redraw()
-
-func _sample_policy_lasso(point: Vector2) -> void:
-	var world: Vector2 = _world_point(point)
-	if policy_lasso_path.is_empty() or _screen_point(policy_lasso_path[-1]).distance_to(point) >= 3.0:
-		policy_lasso_path.append(world)
-
-func _finish_policy_lasso() -> void:
-	var mode: int = policy_lasso_mode
-	policy_lasso_mode = 0
-	var path: PackedVector2Array = policy_lasso_path.duplicate()
-	policy_lasso_path.clear()
-	if path.is_empty() or _state().is_empty():
-		return
-	var state: Dictionary = _state()
-	var points: Array = ECONOMY.military_graph(state)["points"]
-	var hits: Array = []
-	var nearest: int = -1
-	var distance: float = 22.0
-	for node in ECONOMY.military_pois(state, _me()):
-		var point: Vector2 = points[node]
-		if path.size() >= 3 and Geometry2D.is_point_in_polygon(point, path):
-			hits.append(node)
-		elif path.size() < 3:
-			var d: float = _screen_point(point).distance_to(_screen_point(path[0]))
-			if d < distance:
-				distance = d
-				nearest = node
-	if nearest >= 0:
-		hits.append(nearest)
-	if mode < 0:
-		for group in policy_zone_groups.duplicate():
-			for node in hits:
-				group["targets"].erase(node)
-			if (group["targets"] as Array).is_empty():
-				policy_zone_weights.erase(group["key"])
-				policy_zone_groups.erase(group)
-	elif policy_zone_groups.size() < POLICY_MAX_ZONES:
-		# Existing assignments retain their identity and percentage.
-		for group in policy_zone_groups:
-			for node in group["targets"]:
-				hits.erase(node)
-		if not hits.is_empty():
-			hits.sort()
-			var key: int = policy_next_zone_key
-			policy_next_zone_key += 1
-			policy_zone_groups.append({"key": key, "targets": hits})
-	_update_policy_editor()
-	map_canvas.queue_redraw()
-
-func _policy_components() -> Array:
-	return policy_zone_groups
-
-# Clamp draft allocations to the capacity left by non-voided policies.
-# Stable zone ordering makes reductions predictable after merging/splitting.
-func _limit_policy_zone_allocations() -> void:
-	var reserved: int = 0
-	var equipped: Dictionary = _state().get("policies", {}).get(_me(), {})
-	for slot in equipped:
-		if slot == policy_draft_slot or bool(policy_voids.get(slot, false)):
-			continue
-		if ECONOMY.POLICY_CARDS[equipped[slot]["card"]].get("military", false):
-			reserved += ECONOMY.policy_allocation(equipped[slot])
-	var remaining: int = maxi(0, 100 - reserved)
-	for group in _policy_components():
-		var key: int = int(group["key"])
-		var amount: int = clampi(int(policy_zone_weights.get(key, 0)), 0, remaining)
-		policy_zone_weights[key] = amount
-		remaining -= amount
-
-func _update_policy_editor() -> void:
-	if policy_draft_card.is_empty():
-		return
-	for child in policy_editor_rows.get_children():
-		policy_editor_rows.remove_child(child)
-		child.queue_free()
-	var groups: Array = _policy_components()
-	policy_zone_groups = groups
-	if policy_zone_weights.is_empty() and not groups.is_empty():
-		policy_zone_weights[int(groups[0]["key"])] = 100
-	_limit_policy_zone_allocations()
-	var total: int = 0
-	for i in range(groups.size()):
-		var group: Dictionary = groups[i]
-		var key: int = int(group["key"])
-		var weight: int = int(policy_zone_weights.get(key, 0))
-		policy_zone_weights[key] = weight
-		total += weight
-		var label_text: String = "Zone %s · %d POIs · %d%%" % [char(65 + i), (group["targets"] as Array).size(), weight]
-		var zone_label: Label = _label(label_text, 13)
-		policy_editor_rows.add_child(zone_label)
-		var slider := HSlider.new()
-		slider.min_value = 0
-		slider.max_value = 100
-		slider.step = 1
-		slider.value = weight
-		policy_editor_rows.add_child(slider)
-		slider.value_changed.connect(func(value: float) -> void:
-			var others: int = 0
-			for other_group in _policy_components():
-				var other_key: int = int(other_group["key"])
-				if other_key != key:
-					others += int(policy_zone_weights.get(other_key, 0))
-			var reserved: int = 0
-			var committed: Dictionary = _state().get("policies", {}).get(_me(), {})
-			for other_slot in committed:
-				if other_slot == policy_draft_slot or bool(policy_voids.get(other_slot, false)):
-					continue
-				if ECONOMY.POLICY_CARDS[committed[other_slot]["card"]].get("military", false):
-					reserved += ECONOMY.policy_allocation(committed[other_slot])
-			var bounded: int = clampi(roundi(value), 0, maxi(0, 100 - reserved - others))
-			policy_zone_weights[key] = bounded
-			slider.set_value_no_signal(bounded)
-			zone_label.text = "Zone %s · %d POIs · %d%%" % [char(65 + i), (group["targets"] as Array).size(), bounded]
-			_update_policy_editor_status())
-	policy_editor_rows.add_child(_label("Other committed policies", 14))
-	var equipped: Dictionary = _state().get("policies", {}).get(_me(), {})
-	for slot in equipped:
-		if slot == policy_draft_slot:
-			continue
-		var entry: Dictionary = equipped[slot]
-		if not ECONOMY.POLICY_CARDS[entry["card"]].get("military", false):
-			continue
-		var row := HBoxContainer.new()
-		policy_editor_rows.add_child(row)
-		var amount: int = ECONOMY.policy_allocation(entry)
-		var check := CheckBox.new()
-		check.text = "%s · %d%% — Void" % [slot.capitalize(), amount]
-		check.button_pressed = bool(policy_voids.get(slot, false))
-		row.add_child(check)
-		check.toggled.connect(func(value: bool) -> void:
-			policy_voids[slot] = value
-			_update_policy_editor())
-		var readonly := HSlider.new()
-		readonly.max_value = 100
-		readonly.value = amount
-		readonly.editable = false
-		policy_editor_rows.add_child(readonly)
-	_update_policy_editor_status()
-
-func _update_policy_editor_status() -> void:
-	var used: int = 0
-	for group in _policy_components():
-		used += int(policy_zone_weights.get(int(group["key"]), 0))
-	var equipped: Dictionary = _state().get("policies", {}).get(_me(), {})
-	for slot in equipped:
-		if slot == policy_draft_slot or bool(policy_voids.get(slot, false)):
-			continue
-		if ECONOMY.POLICY_CARDS[equipped[slot]["card"]].get("military", false):
-			used += ECONOMY.policy_allocation(equipped[slot])
-	var has_zone: bool = false
-	var state: Dictionary = _state()
-	for group in _policy_components():
-		for node in group["targets"]:
-			if ECONOMY.policy_zone_target_valid(state, _me(), policy_draft_card, int(node)):
-				has_zone = true
-				break
-		if has_zone:
-			break
-	policy_editor_accept.disabled = not has_zone or used > 100
-	policy_editor_status.text = "%d%% committed · %d%% available" % [used, maxi(0, 100 - used)] if used <= 100 else "%d%% — overallocated" % used
-	if not has_zone:
-		policy_editor_status.text = "Accept unavailable: lasso a system or asteroid field."
-
-func _commit_policy_draft() -> void:
-	if policy_lasso_mode != 0:
-		_finish_policy_lasso()
-	var zones: Array = []
-	var state: Dictionary = _state()
-	for group in _policy_components():
-		var valid: Array = []
-		for node in group["targets"]:
-			if ECONOMY.policy_zone_target_valid(state, _me(), policy_draft_card, int(node)):
-				valid.append(node)
-		if valid.is_empty():
-			continue
-		zones.append({"targets": valid, "weight": int(policy_zone_weights.get(int(group["key"]), 0))})
-	if zones.is_empty() or policy_editor_accept.disabled:
-		return
-	var voided: Array = []
-	for slot in policy_voids:
-		if bool(policy_voids[slot]):
-			voided.append(slot)
-	session.call("request_policy_zones", policy_draft_slot, policy_draft_card, zones, voided)
-	_cancel_policy_draft()
-
-func _draw_policy_zone_markers(state: Dictionary, zones: Array, tint: Color) -> void:
-	var points: Array = ECONOMY.military_graph(state)["points"]
-	var font: Font = ThemeDB.fallback_font
-	for index in range(zones.size()):
-		var zone: Dictionary = zones[index]
-		var targets: Array = zone.get("targets", [])
-		var shares: Dictionary = ECONOMY.policy_zone_shares(targets, int(zone["weight"]))
-		for node in targets:
-			if int(node) < 0 or int(node) >= points.size():
-				continue
-			var pos: Vector2 = _screen_point(points[int(node)])
-			var r: float = 20.0
-			if int(node) < (state["planets"] as Array).size():
-				r = clampf(_planet_radius(int(node), state) + 6.0, 20.0, 80.0)
-			map_canvas.draw_circle(pos, r, Color(tint, 0.09))
-			map_canvas.draw_arc(pos, r, 0.0, TAU, 48, tint, 1.5, true)
-			var label: String = "%s · %d%%" % [char(65 + index), int(shares.get(node, 0))]
-			map_canvas.draw_string(font, pos + Vector2(-60.0, r + 15.0), label, HORIZONTAL_ALIGNMENT_CENTER, 120, 13, tint)
-
-func _draw_policy_zones(state: Dictionary) -> void:
-	if policy_draft_card.is_empty():
-		var slot: String = policy_hover_slot if not policy_hover_slot.is_empty() else policy_selected
-		var entry: Dictionary = state.get("policies", {}).get(_me(), {}).get(slot, {})
-		if not entry.is_empty() and ECONOMY.POLICY_CARDS[entry["card"]].get("military", false):
-			var tint: Color = Color("#df7777") if entry["card"] == "invasion" else Color("#83b5eb")
-			var zones: Array = entry.get("zones", [{"targets": entry.get("targets", []), "weight": entry.get("weight", 100)}])
-			_draw_policy_zone_markers(state, zones, tint)
-		return
-	var draft_tint: Color = Color("#e99c77") if policy_draft_card == "invasion" else Color("#83b5eb")
-	var zones: Array = []
-	for group in policy_zone_groups:
-		zones.append({"targets": group["targets"], "weight": int(policy_zone_weights.get(group["key"], 0))})
-	_draw_policy_zone_markers(state, zones, draft_tint)
-	if policy_lasso_path.size() >= 2:
-		var line := PackedVector2Array()
-		for point in policy_lasso_path:
-			line.append(_screen_point(point))
-		map_canvas.draw_polyline(line, draft_tint if policy_lasso_mode > 0 else Color("#ea7777"), 2.0, true)
-		if line.size() > 2:
-			map_canvas.draw_line(line[-1], line[0], Color(draft_tint, 0.45), 1.0, true)
+	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
+		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
+		map_canvas.draw_rect(rect, Color(HUD.ACCENT, 0.12))
+		map_canvas.draw_rect(rect, HUD.ACCENT, false, 1.0)

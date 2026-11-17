@@ -234,16 +234,21 @@ func _check_time_controls(state: Dictionary) -> bool:
 
 func _send_commands() -> void:
 	commands_sent = true
-	session.call("request_policy", "defense", "guard")
-	session.call("request_policy_target", "defense", home_index, true)
-	session.call("request_policy", "wildcard", "guard")
-	var field_node: int = (session.get("economy")["planets"] as Array).size()
-	session.call("request_policy_zones", "defense", "guard", [{"targets": [home_index, field_node], "weight": 45}], [])
-	# Invalid POIs, over-limit weights and locked wildcard must not
-	# replace the valid atomic commitment on the host.
-	session.call("request_policy_zones", "defense", "guard", [{"targets": [home_index], "weight": 101}], [])
-	session.call("request_policy_zones", "offense", "invasion", [{"targets": [-1], "weight": 100}], [])
-	session.call("request_policy_zones", "wildcard", "invasion", [{"targets": [home_index], "weight": 1}], [])
+	var initial: Dictionary = session.get("economy")
+	var field_node: int = initial["planets"].size()
+	var own_fighters: Array[int] = []
+	var enemy_fighter: int = -1
+	var self_id: int = session.multiplayer.get_unique_id()
+	for craft in initial["ships"]:
+		if craft["kind"] != "fighter":
+			continue
+		if int(craft["owner"]) == self_id:
+			own_fighters.append(int(craft["id"]))
+		else:
+			enemy_fighter = int(craft["id"])
+	session.call("request_fighter_move", [own_fighters[0]], field_node)
+	session.call("request_fighter_move", [own_fighters[0]], -1)
+	session.call("request_fighter_move", [own_fighters[0], enemy_fighter], home_index)
 	session.call("request_thresholds", home_index, "Metals", 15.0, 65.0)
 	# Invalid and unauthorized threshold requests must not win.
 	session.call("request_thresholds", home_index, "Metals", 99.0, 101.0)
@@ -251,7 +256,7 @@ func _send_commands() -> void:
 	session.call("request_operation", home_index, "economy", "warehouse")
 	session.call("request_operation", home_index, "economy", "Textiles")
 	session.call("request_operation", home_index, "economy", "Textiles")
-	session.call("request_operation", home_index, "economy", "Tech")
+	session.call("request_operation", home_index, "economy", "invalid")
 	session.call("request_operation", (home_index + 1) % expected_players, "economy", "Metals")
 	session.call("request_operation", home_index, "pds", "999")
 	session.call("request_operation", (home_index + 1) % expected_players, "pds", "1")
@@ -261,7 +266,9 @@ func _send_commands() -> void:
 	session.call("request_operation", home_index, "fighter")
 	session.call("request_continuous", home_index, "colony_ship", true)
 	session.call("request_continuous", home_index, "miner", true)
+	session.call("request_continuous", home_index, "economy_building:Organics", true)
 	session.call("request_continuous", home_index, "production:Organics", true)
+	session.call("request_operation", home_index, "production", "Organics")
 	session.call("request_continuous", home_index, "yard_upgrade:0", true)
 	session.call("request_mining_policy", 0, true, false, true)
 	for index in range(session.get("economy")["map"]["fields"].size()):
@@ -271,11 +278,6 @@ func _send_commands() -> void:
 	session.call("request_operation", home_index, "yard", "2")
 	session.call("request_operation", home_index, "yard", "3")
 	session.call("request_operation", home_index, "yard", "3") # duplicate
-	var state: Dictionary = session.get("economy")
-	var node: int = (state["planets"] as Array).size()
-	session.call("request_military", "fighter", node, 70)
-	session.call("request_military", "fighter", -1, 100)
-	session.call("request_military", "fighter", node, 101)
 
 func _check_economy_sync() -> void:
 	if economy_verified or str(session.get("phase")) != "match":
@@ -344,7 +346,7 @@ func _check_economy_sync() -> void:
 					ship_progress = is_equal_approx(float(job.get("population_allocated", 0.0)), float(ECON.CREW_COSTS["ship"]) * float(job["progress"]) / float(job["work"]))
 				elif job["kind"] == "fighter":
 					fighter_pending = true
-				elif job["kind"] == "production" and job["target"] == "Organics":
+				elif job["kind"] == "economy_building" and job["target"] == "Organics":
 					upgrade_pending = true
 				elif job["kind"] == "yard_upgrade":
 					yard_pending = true
@@ -358,7 +360,6 @@ func _check_economy_sync() -> void:
 					return
 				if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship":
 					ship_progress = is_equal_approx(float(ship.get("crew", 0.0)), float(ECON.CREW_COSTS["ship"]))
-			var military: Dictionary = ECON.military_policy(state, owner, "fighter")
 			var field_node: int = (state["planets"] as Array).size()
 			var buildings: Dictionary = system.get("buildings", {})
 			var priced_slots: Dictionary = {}
@@ -375,21 +376,28 @@ func _check_economy_sync() -> void:
 			# Commands complete at different times on different systems. Record
 			# each replicated condition when observed, rather than requiring
 			# every transient queue state to coexist in one snapshot.
-			var equipped: Dictionary = state.get("policies", {}).get(owner, {})
+			var ordered: int = 0
+			var idle: int = 0
+			for craft in state["ships"]:
+				if int(craft["owner"]) == owner and craft["kind"] == "fighter":
+					if craft.get("operation_target", -1) == field_node and craft.get("direct_order", false):
+						ordered += 1
+					elif not craft.get("direct_order", false):
+						idle += 1
 			var checks: Dictionary = {
-				"policy": equipped.get("defense", {}).get("card", "") == "guard" and equipped.get("defense", {}).get("targets", []).has(state["planets"].find(system)) and not equipped.has("wildcard") and not equipped.has("offense") and equipped.get("defense", {}).get("zones", []) == [{"targets": [state["planets"].find(system), field_node], "weight": 45}],
+				"no_policies": not state.has("policies") && not flags.has("production:Organics"),
 				"0": defense_ok,
 				"1": correct_upgrade_costs,
 				"2": priced_slots.get(2, {}) == ECON._cost("yard", 2),
 				"3": priced_slots.get(3, {}) == ECON._cost("yard", 3),
 				"4": int(system.get("warehouse_level", 0)) == 1,
-				"5": buildings.size() == 1,
+				"5": not buildings.has("invalid"),
 				"6": buildings.get("Textiles", false),
-				"7": int(military.get(field_node, 0)) == 70,
-				"8": int(military.get(ECON.military_home(state, owner), 0)) == 30,
+				"7": ordered == 1,
+				"8": idle >= 1,
 				"9": is_equal_approx(float(thresholds["min"]), 15.0),
 				"10": is_equal_approx(float(thresholds["max"]), 65.0),
-				"11": flags.get("production:Organics", false),
+				"11": flags.get("economy_building:Organics", false),
 				"12": flags.get("yard_upgrade:0", false),
 				"13": flags.get("colony_ship", false),
 				"14": flags.get("miner", false),

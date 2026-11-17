@@ -11,7 +11,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-002 — Make autonomous decisions legible
 - **Type:** UX proposal.
-- **Observation:** Policies and autonomous fleets may leave players unsure why an operation stalls or diverts.
+- **Observation:** Direct fleet orders and autonomous repairs may leave players unsure why an operation diverts.
 - **Consider:** Compact fleet state indicators and tooltips for rallying, travel, retreat, repair, and supply/resource bottlenecks. Avoid extra panel text. See TODO phases 1–2.
 
 ### T-003 — Retreat and formation feedback loops
@@ -26,18 +26,13 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-005 — Treaty loopholes
 - **Type:** Design/authority risk.
-- **Observation:** A Wildcard slot or legacy military commands could bypass a restricted offensive policy.
-- **Consider:** Authority-level restrictions on behavior across every slot and command path, including clear treatment of ongoing operations. See TODO phase 6.
+- **Observation:** Future promissory notes may become unenforceable if direct commands bypass obligations.
+- **Consider:** Authority-level restrictions on behavior across every relevant direct command path, including clear treatment of ongoing operations. See TODO phase 6.
 
 ### T-006 — Operation identity and retargeting
 - **Type:** Technical/design risk.
 - **Observation:** v0.10.0 preserves operation IDs on retargeting if an old group disappears and its members transfer to a new objective; splits and merges retain exact surviving groups first. Stable formation slots across these changes still need design and validation.
 - **Consider:** Test complex splits/merges and membership churn before committing to formation-slot geometry. See TODO phase 1.
-
-### T-007 — Small allocations can stall attacks
-- **Type:** Gameplay/UX hypothesis.
-- **Observation:** A hostile-system allocation below three hulls now rallies rather than trickling into battle; splitting a small fleet across several hostile objectives can stall all of them.
-- **Consider:** Show requested versus deployed hull counts and rally status; review cohort size and priority arbitration during policy design. See TODO phases 1–2.
 
 ### T-008 — Orbiting combat and concentrated fleets
 - **Type:** Gameplay/visual hypothesis.
@@ -46,7 +41,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-011 — Population and industrial bottlenecks
 - **Type:** Gameplay/balance hypothesis.
-- **Observation:** Multi-resource ship costs make local Plastics, Textiles, Organics and Tech stock actual constraints. Baseline industrial outputs and population gates may make new colonies slow to develop, while Organics also supports residents. The first Tech upgrade requires 200k population and construction costs remain provisional.
+- **Observation:** Multi-resource ship costs make local Plastics, Textiles, Organics and Tech stock actual constraints. Baseline industrial outputs and population gates may make new colonies slow to develop, while Organics also supports residents. The former 200k Tech gate has been removed; building costs and reserve-production recovery remain provisional.
 - **Consider:** Measure time to replenish twelve mixed hulls, evaluate trade throughput and whether AI needs more deliberate industrial investment. Preserve local logistics; do not silently grant free resources to colonies.
 ### T-009 — Pursuit speed and disengagement
 - **Type:** Gameplay/balance hypothesis.
@@ -285,3 +280,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.35: Wider sector patrols can pull idle fighters beyond the rally and capture radius. Keep pending rally, hostile-system occupation and contested-sector groups compact; defenders physically patrolling the same sector contest conquest. Verify visual patrol paths and response times at different zooms.
 
 - v0.17.36: Fixed-resource bay coloring implied a cargo allocation limit that did not exist. Pack the displayed bays by actual tonnage, including single-resource full loads. A free starting home PDS strengthens early defense without spending stock; validate rush balance before changing combat values.
+
+- v0.18.0: Policy cards and individual production upgrades removed by explicit design decision. Direct POI movement preserves lane constraints and auto-combat; manually verify selection at dense zoom, mixed selections, right-click destinations, and mid-flight retargeting. Free-flight and explicit attack targeting are not implemented. Check AI fleet reassignment and stock recovery after losses; the fixed building recipes and cubic habitation penalty require pacing playtests.

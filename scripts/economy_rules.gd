@@ -13,15 +13,17 @@ const BASE_INDUSTRIAL_RATE: float = 0.5
 const INDUSTRIAL_POPULATION_PER_LEVEL: float = 100000.0
 const BUILDING_BONUS: float = 0.25
 const UPGRADE_COST_FACTOR: float = 3.0
-# Provisional local permanent improvements. No repeat purchases or upkeep.
+# Provisional repeatable local production infrastructure; no self-input recipes.
 const ECONOMY_BUILDINGS = {
-	"Metals": {"name": "Refinery", "population": 10000, "cost": {"Metals": 360.0, "Plastics": 45.0, "Tech": 30.0}},
-	"Plastics": {"name": "Polymer factory", "population": 10000, "cost": {"Metals": 300.0, "Plastics": 30.0, "Tech": 30.0}},
-	"Textiles": {"name": "Textile mill", "population": 10000, "cost": {"Metals": 300.0, "Plastics": 45.0, "Tech": 15.0}},
-	"Organics": {"name": "Agricultural complex", "population": 10000, "cost": {"Metals": 360.0, "Plastics": 45.0, "Tech": 30.0}},
-	"Tech": {"name": "Electronics factory", "population": 200000, "cost": {"Metals": 900.0, "Plastics": 120.0, "Tech": 90.0}},
-	"Crystals": {"name": "Crystal processor", "population": 10000, "cost": {"Metals": 360.0, "Plastics": 45.0, "Tech": 30.0}}
+	"Metals": {"name": "Refinery", "population": 500, "cost": {"Plastics": 90.0, "Textiles": 60.0, "Tech": 45.0}},
+	"Plastics": {"name": "Polymer factory", "population": 500, "cost": {"Metals": 240.0, "Textiles": 45.0, "Tech": 30.0}},
+	"Textiles": {"name": "Textile mill", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}},
+	"Organics": {"name": "Agricultural complex", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}},
+	"Tech": {"name": "Electronics factory", "population": 500, "cost": {"Metals": 300.0, "Plastics": 90.0, "Textiles": 60.0}},
+	"Crystals": {"name": "Crystal processor", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}}
 }
+const CONSTRUCTION_RESERVE: float = 500.0
+const CONSTRUCTION_PRODUCTION_SHARE: float = 0.1
 # Population is expressed in people (fractional values retained in simulation).
 const HOME_POPULATION: float = 10000.0
 const COLONY_POPULATION: float = 100000.0
@@ -81,7 +83,6 @@ const FORMATION_TRAVEL_FRACTION: float = 0.8
 const WITHDRAW_HP: float = 46.0
 const REPAIR_PER_YEAR: float = 10.0
 const REPAIR_SAFE_RADIUS: float = LASER_RANGE * 2.0
-
 # Decorative bodies are derived from immutable system data, not simulated entities.
 # Separate RNG keeps the economy's seeded resource generation unchanged.
 static func system_bodies(system: Dictionary, seed_value: int, index: int) -> Array:
@@ -174,9 +175,6 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 				var id: int = int(state["next_id"])
 				state["next_id"] = id + 1
 				_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind]})
-	state["policies"] = {}
-	for player in ordered:
-		state["policies"][player] = {}
 	update_exploration(state)
 	return state
 
@@ -381,7 +379,7 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 		colony["population"] = float(ship.get("crew", COLONY_POPULATION))
 		colony["population_velocity"] = 0.0
 		colony["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
-		for resource in ["Plastics", "Textiles", "Organics", "Tech"]:
+		for resource in ["Metals", "Plastics", "Textiles", "Organics", "Tech"]:
 			colony["levels"][resource] = 1
 		return true # consumed to establish the colony
 	# Another ship arrived first. Return to launch without claiming or combat.
@@ -398,10 +396,17 @@ static func current_year(state: Dictionary) -> int:
 static func building_multiplier(planet: Dictionary, resource: String) -> float:
 	return 1.0 + BUILDING_BONUS * int(planet.get("buildings", {}).get(resource, 0))
 
+static func production_level(planet: Dictionary, resource: String) -> int:
+	return maxi(int(planet["levels"][resource]), 1 if int(planet.get("buildings", {}).get(resource, 0)) > 0 else 0)
+
+static func overpopulation_penalty(planet: Dictionary, capacity_factor: float = 1.0) -> float:
+	var fraction: float = clampf(float(planet["population"]) / (habitation_capacity(planet) * capacity_factor), 0.0, 1.0)
+	return 1.0 - pow(1.0 - fraction, 3.0)
+
 static func farm_potential(planet: Dictionary) -> float:
 	if int(planet["owner"]) == 0:
 		return 0.0
-	return ORGANICS_PER_LEVEL * int(planet["levels"]["Organics"]) * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0))
+	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0))
 
 static func population_capacity(planet: Dictionary) -> float:
 	return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
@@ -423,7 +428,7 @@ static func consumption(planet: Dictionary, resource: String) -> float:
 		return 0.0
 	if resource == "Organics":
 		return organics_demand(planet)
-	return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * population_multiplier(planet) * float(planet.get("policy_consumption", 1.0))
+	return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * population_multiplier(planet)
 
 static func civilian_stock_access(planet: Dictionary, resource: String) -> float:
 	# Stock above the import target is reserved for trade and construction.
@@ -435,6 +440,8 @@ static func net_rate(planet: Dictionary, resource: String) -> float:
 	var net: float = rate(planet, resource) - consumption(planet, resource)
 	if net > 0.0 and storage_free(planet, resource) <= EPS:
 		return 0.0
+	if net < 0.0 and resource != "Organics" and rate(planet, resource) > EPS and float(planet["stock"][resource]) < CONSTRUCTION_RESERVE:
+		return rate(planet, resource) * CONSTRUCTION_PRODUCTION_SHARE
 	if net < 0.0 and civilian_stock_access(planet, resource) <= EPS:
 		return 0.0
 	return net
@@ -442,7 +449,7 @@ static func net_rate(planet: Dictionary, resource: String) -> float:
 static func rate(planet: Dictionary, resource: String) -> float:
 	if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0:
 		return 0.0
-	var level: int = int(planet["levels"][resource])
+	var level: int = production_level(planet, resource)
 	if resource == "Organics":
 		# Small populations still produce a surplus; farm capacity limits output.
 		var capacity: float = population_capacity(planet)
@@ -460,7 +467,7 @@ static func rate(planet: Dictionary, resource: String) -> float:
 	if resource in ["Plastics", "Textiles", "Tech"]:
 		# Installed production capacity limits the number of productive workers.
 		# Population demand continues increasing after this output saturates.
-		labor = minf(labor, INDUSTRIAL_POPULATION_PER_LEVEL * level / HOME_POPULATION)
+		labor = minf(labor, INDUSTRIAL_POPULATION_PER_LEVEL * (level + int(planet.get("buildings", {}).get(resource, 0))) / HOME_POPULATION)
 	var output: float = base * level * production_modifier(planet, resource) * labor
 	return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
@@ -480,7 +487,7 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 	# Near capacity the damped response takes over without a hard population cap.
 	var growth_constant: float = log(2.0) / POPULATION_DOUBLING_YEARS
 	if current < habitation_capacity(planet):
-		growth_constant *= clampf(1.0 - current / habitation_capacity(planet), 0.0, 1.0)
+		growth_constant *= 1.0 - overpopulation_penalty(planet)
 	else:
 		growth_constant = 0.0
 	var growth_ceiling: float = current * exp(growth_constant * dt)
@@ -614,7 +621,7 @@ static func building_available(p: Dictionary, resource: String) -> bool:
 	if not ECONOMY_BUILDINGS.has(resource) or _has_job(p, "economy_building", resource) or not production_available(p, resource):
 		return false
 	var definition: Dictionary = ECONOMY_BUILDINGS[resource]
-	return float(p["population"]) + EPS >= float(definition["population"]) and not _has_job(p, "economy_building", resource)
+	return float(p["population"]) + EPS >= float(definition["population"])
 
 static func warehouse_available(p: Dictionary) -> bool:
 	var level: int = int(p.get("warehouse_level", 0))
@@ -644,22 +651,8 @@ static func _buy_warehouse(p: Dictionary) -> bool:
 	p["warehouse_level"] = level + 1
 	return true
 
-static func building_cost(p: Dictionary, resource: String) -> Dictionary:
-	var cost: Dictionary = ECONOMY_BUILDINGS[resource]["cost"].duplicate()
-	var factor: float = pow(3.0, int(p.get("buildings", {}).get(resource, 0)))
-	for material in cost:
-		cost[material] *= factor
-	return cost
-
-static func _buy_building(p: Dictionary, resource: String) -> bool:
-	if not building_available(p, resource):
-		return false
-	for material in ECONOMY_BUILDINGS[resource]["cost"]:
-		p["stock"][material] = maxf(0.0, float(p["stock"][material]) - float(ECONOMY_BUILDINGS[resource]["cost"][material]))
-	if not p.has("buildings"):
-		p["buildings"] = {}
-	p["buildings"][resource] = true
-	return true
+static func building_cost(_p: Dictionary, resource: String) -> Dictionary:
+	return ECONOMY_BUILDINGS[resource]["cost"].duplicate()
 
 static func pds_job(p: Dictionary) -> Dictionary:
 	for item in p.get("queue", []):
@@ -736,7 +729,7 @@ static func production_modifier(system: Dictionary, resource: String) -> float:
 		modifier *= float(system["abundance"].get(resource, 0.0))
 	elif resource == "Plastics":
 		modifier *= maxf(1.0, float(system["abundance"].get(resource, 0.0)))
-	return clampf(modifier * building_multiplier(system, resource), 0.1, 4.0) * float(system.get("policy_output", {}).get(resource, 1.0))
+	return clampf(modifier, 0.1, 4.0) * building_multiplier(system, resource)
 
 static func _continuous_target(p: Dictionary, key: String) -> Array:
 	if SHIP_KINDS.has(key):
@@ -1002,6 +995,8 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		var potential: float = rate(p, resource) * dt
 		var demand: float = consumption(p, resource) * dt
 		var used: float = minf(demand, civilian_stock_access(p, resource) + potential)
+		if resource != "Organics" and potential > EPS and demand > potential and stored < CONSTRUCTION_RESERVE:
+			used = minf(used, potential * (1.0 - CONSTRUCTION_PRODUCTION_SHARE))
 		var produced: float = minf(potential, used + storage_free(p, resource))
 		_record_flow(p, "Production", resource, produced)
 		_record_flow(p, "Population", resource, used)
@@ -1754,10 +1749,39 @@ static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, 
 	ship["leg"] = _lane_progress(graph["points"], ship)
 	ship["dest"] = target
 
+# Validate the entire selection before changing any order. Only owned fighters
+# can receive military movement orders, including during automatic repairs.
+static func command_fighters(state: Dictionary, player: int, ids: Array, target: int) -> bool:
+	if ids.is_empty() or not military_pois(state, player).has(target):
+		return false
+	var requested: Dictionary = {}
+	for id in ids:
+		if not id is int or requested.has(id):
+			return false
+		requested[id] = true
+	var selected: Array = []
+	for ship in state["ships"]:
+		if requested.has(ship["id"]):
+			if int(ship["owner"]) != player or ship.get("kind", "") != "fighter":
+				return false
+			selected.append(ship)
+	if selected.size() != requested.size():
+		return false
+	var graph: Dictionary = military_graph(state)
+	var paths: Dictionary = _military_paths(graph, target)
+	for ship in selected:
+		if not paths["distance"].has(int(ship["at"])):
+			return false
+	for ship in selected:
+		ship["direct_order"] = true
+		ship["operation_target"] = target
+		ship.erase("rally_pending")
+		if not bool(ship.get("retreating", false)):
+			_redirect_fighter(graph, ship, target, paths)
+	return true
+
 static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array, defer_routes: bool = false) -> void:
-	var weights: Dictionary = policy_fleet_weights(state, player)
-	if weights.is_empty():
-		weights = military_policy(state, player, "fighter")
+	var weights: Dictionary = military_policy(state, player, "fighter")
 	var counts: Dictionary = _apportion(weights.keys(), weights, fleet.size())
 	var actual: Dictionary = {}
 	for ship in fleet:
@@ -2207,22 +2231,22 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		var p: Dictionary = planets[index]
 		if not (p["queue"] as Array).is_empty():
 			continue
-		var level: int = int(p["levels"]["Metals"])
+		var level: int = production_level(p, "Metals") + int(p.get("buildings", {}).get("Metals", 0))
 		var abundance: float = float(p["abundance"].get("Metals", 0.0))
-		var farm: int = int(p["levels"]["Organics"])
+		var farm: int = production_level(p, "Organics") + int(p.get("buildings", {}).get("Organics", 0))
 		var action: String = ""
 		var target: String = ""
 		var has_yard: bool = operational_shipyards(p) > 0
 		# Select the next goal before checking funding. Save for that goal
 		# rather than continually buying cheaper ships or secondary upgrades.
 		if abundance > 0.0 and level == 0:
-			action = "production"
+			action = "economy"
 			target = "Metals"
 		elif index == home and expansion and counts["colony_ship"] == 0:
 			if float(p["population"]) >= CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
 				action = "colony_ship"
 			elif population_capacity(p) < CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
-				action = "production"
+				action = "economy"
 				target = "Organics"
 		elif has_yard and counts["fighter"] == 0:
 			action = "fighter"
@@ -2231,7 +2255,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		elif has_yard and useful_fields > 0 and counts["miner"] == 0:
 			action = "miner"
 		elif index == home and level < 2 and abundance > 0.0:
-			action = "production"
+			action = "economy"
 			target = "Metals"
 		elif has_yard and counts["fighter"] < AI_WAVE_MIN:
 			action = "fighter"
@@ -2247,10 +2271,10 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 			elif has_yard and useful_fields > 0 and counts["miner"] < mini(6, useful_fields * 2):
 				action = "miner"
 			elif abundance > 0.0 and level < 4 and rate(p, "Metals") < PLANET_MINING_LIMIT:
-				action = "production"
+				action = "economy"
 				target = "Metals"
 			elif farm < 3 and float(p["population"]) > population_capacity(p) * 0.8:
-				action = "production"
+				action = "economy"
 				target = "Organics"
 			elif (p["yards"] as Array).is_empty():
 				action = "yard"
@@ -2258,23 +2282,23 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 				action = "fighter"
 			else:
 				for resource in ["Plastics", "Crystals"]:
-					if float(p["abundance"].get(resource, 0.0)) > 0.0 and int(p["levels"][resource]) == 0:
-						action = "production"
+					if float(p["abundance"].get(resource, 0.0)) > 0.0 and production_level(p, resource) == 0:
+						action = "economy"
 						target = resource
 						break
 		if action.is_empty():
 			continue
-		var build_level: int = int(p["levels"][target]) + 1 if action == "production" else (next_shipyard_slot(p) if action == "yard" else 1)
-		if not affordable(p, _cost(action, build_level)) or float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
+		var build_level: int = next_shipyard_slot(p) if action == "yard" else 1
+		if not affordable(p, building_cost(p, target) if action == "economy" else _cost(action, build_level)) or float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
 			continue
 		if enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):
 			counts[action] += 1
-	_ai_military_policies(state, graph, player, home, owned, fighters)
+	_ai_military_orders(state, graph, player, home, owned, fighters)
 
-# Choose strategic objectives on the policy clock, not every movement tick.
+# Choose strategic objectives on the AI clock, not every movement tick.
 # Local hostile fighters determine defensive urgency; friendly systems and
 # allied ships never count as invasion targets or threats.
-static func _ai_military_policies(state: Dictionary, graph: Dictionary, player: int, home: int, owned: Array[int], fighters: Array) -> void:
+static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: int, home: int, owned: Array[int], fighters: Array) -> void:
 	var team: int = int(state["teams"][player])
 	var planets: Array = state["planets"]
 	var points: Array = graph["points"]
@@ -2316,17 +2340,14 @@ static func _ai_military_policies(state: Dictionary, graph: Dictionary, player: 
 			danger = pressure
 	# Prefer a persistent hostile objective; only change it when the
 	# opportunity disappears. Neutral/field targets require enemy presence.
-	var equipped: Dictionary = state["policies"][player]
-	var previous: Dictionary = equipped.get("offense", {})
 	var goal: int = -1
-	for node in previous.get("targets", []):
-		if pois.has(int(node)) and (policy_target_valid(state, player, "invasion", int(node)) or opportunities.has(node)):
-			goal = int(node)
-			break
+	var previous: int = int(state.get("ai_objectives", {}).get(player, -1))
+	if pois.has(previous) and (_hostile_system(state, player, previous) or opportunities.has(previous)):
+		goal = previous
 	if goal < 0:
 		var nearest: float = INF
 		for node in pois:
-			if not opportunities.has(node) and not policy_target_valid(state, player, "invasion", node):
+			if not opportunities.has(node) and not _hostile_system(state, player, node):
 				continue
 			var distance: float = float(opportunities.get(node, center.distance_squared_to(points[node])))
 			if distance < nearest:
@@ -2340,38 +2361,30 @@ static func _ai_military_policies(state: Dictionary, graph: Dictionary, player: 
 			defense_weight = 100 if fighters.size() < 7 else 60
 		elif fighters.size() >= 4:
 			defense_weight = 25
-	var offense_weight: int = 100 - defense_weight
-	_ai_commit_military_plan(state, player, goal, offense_weight, defense, defense_weight)
+	if not state.has("ai_objectives"):
+		state["ai_objectives"] = {}
+	state["ai_objectives"][player] = goal
+	var defenders: int = ceili(float(fighters.size()) * defense_weight / 100.0)
+	if fighters.size() - defenders < AI_WAVE_MIN:
+		defenders = fighters.size()
+	# Select defenders closest to the threatened POI. Keep already assigned
+	# hulls stable where possible; every order uses the same authority path.
+	var ranked: Array = fighters.duplicate()
+	ranked.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var da: float = combat_position(state, graph, a).distance_squared_to(points[defense])
+		var db: float = combat_position(state, graph, b).distance_squared_to(points[defense])
+		return da < db if not is_equal_approx(da, db) else int(a["id"]) < int(b["id"]))
+	for i in range(ranked.size()):
+		var craft: Dictionary = ranked[i]
+		var target: int = defense if i < defenders else goal
+		if target >= 0 and (not bool(craft.get("direct_order", false)) or int(craft.get("operation_target", -1)) != target):
+			command_fighters(state, player, [int(craft["id"])], target)
 
-# Update both slots transactionally, through the same validated commitment
-# function as human players. Reweighting the same objective must not restart
-# its preparation timer; a genuinely new invasion objective does.
-static func _ai_commit_military_plan(state: Dictionary, player: int, goal: int, offense_weight: int, defense: int, defense_weight: int) -> void:
-	var equipped: Dictionary = state["policies"][player]
-	var old_offense: Dictionary = equipped.get("offense", {})
-	var old_defense: Dictionary = equipped.get("defense", {})
-	var offense_zones: Array = [{"targets": [goal], "weight": offense_weight}] if goal >= 0 else []
-	var defense_zones: Array = [{"targets": [defense], "weight": defense_weight}] if defense_weight > 0 else []
-	if old_offense.get("zones", []) == offense_zones and old_defense.get("zones", []) == defense_zones:
-		return
-	equipped.erase("offense")
-	equipped.erase("defense")
-	var valid: bool = true
-	if not offense_zones.is_empty():
-		valid = commit_military_policy(state, player, "offense", "invasion", offense_zones, [])
-		if valid and old_offense.get("targets", []) == [goal]:
-			equipped["offense"]["ready_at"] = old_offense["ready_at"]
-	if valid and not defense_zones.is_empty():
-		valid = commit_military_policy(state, player, "defense", "guard", defense_zones, [])
-	if not valid:
-		equipped.erase("offense")
-		equipped.erase("defense")
-		if not old_offense.is_empty():
-			equipped["offense"] = old_offense
-		if not old_defense.is_empty():
-			equipped["defense"] = old_defense
-		return
-	state["ai_waves"].erase(player)
+static func _hostile_system(state: Dictionary, player: int, node: int) -> bool:
+	if node < 0 or node >= state["planets"].size():
+		return false
+	var owner: int = int(state["planets"][node]["owner"])
+	return owner != 0 and state["teams"].get(owner, 0) != state["teams"].get(player, 0)
 
 # Launch only assembled cohorts; newly built fighters are held in reserve
 # until the next wave. Existing human allocation behavior is unaffected.
@@ -2444,7 +2457,6 @@ static func _sync_operations(state: Dictionary) -> void:
 	var previous: Dictionary = state.get("operations", {})
 	var current: Dictionary = {}
 	var by_id: Dictionary = {}
-	var policy_driven: Dictionary = {}
 	for ship in state["ships"]:
 		if ship.get("kind", "") != "fighter":
 			continue
@@ -2453,9 +2465,7 @@ static func _sync_operations(state: Dictionary) -> void:
 		if target < 0:
 			target = int(ship["at"])
 		var role: String = "allocation"
-		if not policy_driven.has(owner):
-			policy_driven[owner] = not policy_fleet_weights(state, owner).is_empty()
-		if state.get("ai_players", []).has(owner) and not bool(policy_driven[owner]):
+		if state.get("ai_players", []).has(owner) and not bool(ship.get("direct_order", false)):
 			var wave: Dictionary = state.get("ai_waves", {}).get(owner, {})
 			role = "wave" if wave.get("members", []).has(int(ship["id"])) else "reserve"
 			# An explicitly assigned objective remains stable while the craft
@@ -2763,12 +2773,11 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
 		if target >= 0 and target < (state["planets"] as Array).size():
 			var defender: int = int(state["planets"][target]["owner"])
 			attack = defender != 0 and state["teams"].get(defender, 0) != state["teams"].get(owner, 0)
-		# AI invasions also rally for neutral systems and asteroid fields
-		# containing hostile ships. Guard orders deploy directly as before.
-		if state.get("ai_players", []).has(owner):
-			var offense: Dictionary = state.get("policies", {}).get(owner, {}).get("offense", {})
-			if not offense.is_empty() and policy_active(state, offense) and policy_allocation(offense) > 0 and offense.get("targets", []).has(target):
-				attack = true
+		# Explicit RTS orders depart immediately, without requiring a cohort.
+		for member in operation["members"]:
+			if bool(by_id[member].get("direct_order", false)):
+				attack = false
+				break
 		if not attack or home < 0:
 			operation["phase"] = "assigned"
 			operation["deployed"] = []
@@ -2783,24 +2792,9 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
 			fighters.append(by_id[member])
 			if operation["deployed"].has(member) and not bool(by_id[member].get("retreating", false)):
 				deployed.append(member)
-		var explicit_zone: bool = false
-		if not state.get("ai_players", []).has(owner):
-			for entry in state.get("policies", {}).get(owner, {}).values():
-				if entry.has("zones") and policy_active(state, entry) and entry.get("targets", []).has(target):
-					explicit_zone = true
-					break
-		if not explicit_zone and deployed.size() == 1 and not _engaged(by_id[deployed[0]]):
+		if deployed.size() == 1 and not _engaged(by_id[deployed[0]]):
 			deployed.clear()
-		# A deliberately allocated one- or two-fighter group must deploy.
-		# Rally a full cohort whenever the assignment can support one.
-		var minimum: int = AI_WAVE_MIN
-		if explicit_zone:
-			var available: int = 0
-			for fighter in fighters:
-				if not bool(fighter.get("retreating", false)) and not deployed.has(int(fighter["id"])):
-					available += 1
-			minimum = clampi(available, 1, AI_WAVE_MIN)
-		deployed = _dispatch_cohorts(state, graph, home, target, fighters, deployed, false, minimum)
+		deployed = _dispatch_cohorts(state, graph, home, target, fighters, deployed, false)
 		operation["deployed"] = deployed
 		operation["phase"] = "rallying" if deployed.is_empty() else "deployed"
 
@@ -2890,22 +2884,9 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 				targets[int(group[i]["id"])] = center + relative.limit_length(maxf(0.0, bound - 1.0))
 	return targets
 
-# Prototype conquest: only an active invasion can transfer a colony.
+# Directly ordered fighters occupying a hostile system can transfer it.
 # Surviving shipyards and nearby hostile fighters prevent occupation.
 const CAPTURE_YEARS: float = 20.0
-
-static func _invasion_objectives(state: Dictionary, player: int) -> Dictionary:
-	var objectives: Dictionary = {}
-	for entry in state.get("policies", {}).get(player, {}).values():
-		if entry.get("card", "") != "invasion" or not policy_active(state, entry):
-			continue
-		var zones: Array = entry.get("zones", [{"targets": entry.get("targets", []), "weight": entry.get("weight", 0)}])
-		for zone in zones:
-			var shares: Dictionary = policy_zone_shares(zone["targets"], int(zone["weight"]))
-			for node in shares:
-				if int(shares[node]) > 0:
-					objectives[node] = true
-	return objectives
 
 # Find a safe escape route after a civilian's planned route becomes
 # hostile. Consider both ends of its existing leg without moving the hull.
@@ -2984,7 +2965,6 @@ static func _capture_system(state: Dictionary, index: int, player: int) -> void:
 static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	var planets: Array = state["planets"]
 	var points: Array = graph["points"]
-	var objectives: Dictionary = {}
 	var occupiers: Dictionary = {}
 	var fighters: Array = []
 	for ship in state["ships"]:
@@ -2992,10 +2972,8 @@ static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> v
 			continue
 		fighters.append(ship)
 		var player: int = int(ship["owner"])
-		if not objectives.has(player):
-			objectives[player] = _invasion_objectives(state, player)
 		var node: int = int(ship["at"])
-		if node < 0 or node >= planets.size() or not objectives[player].has(node) or not (ship["route"] as Array).is_empty() or int(ship.get("operation_target", ship.get("dest", -1))) != node:
+		if node < 0 or node >= planets.size() or not (ship["route"] as Array).is_empty() or int(ship.get("operation_target", ship.get("dest", -1))) != node:
 			continue
 		if combat_position(state, graph, ship).distance_to(points[node]) > AI_RALLY_RADIUS:
 			continue
@@ -3064,7 +3042,6 @@ static func update_match_outcome(state: Dictionary) -> bool:
 			continue
 		eliminated.append(player)
 		changed = true
-		state["policies"][player].clear()
 		state["ai_waves"].erase(player)
 		state["ai_players"].erase(player)
 	state["eliminated"] = eliminated
@@ -3089,20 +3066,8 @@ static func update_match_outcome(state: Dictionary) -> bool:
 
 static func step(state: Dictionary, dt: float) -> void:
 	state["elapsed"] = float(state["elapsed"]) + dt
-	for player in state.get("policies", {}):
-		for entry in state["policies"][player].values():
-			for node in entry["targets"].duplicate():
-				var valid: bool = policy_zone_target_valid(state, int(player), entry["card"], int(node)) if entry.has("zones") else policy_target_valid(state, int(player), entry["card"], int(node))
-				if not valid:
-					entry["targets"].erase(node)
-			for zone in entry.get("zones", []):
-				for node in zone["targets"].duplicate():
-					if not policy_zone_target_valid(state, int(player), entry["card"], int(node)):
-						zone["targets"].erase(node)
-	apply_economy_policies(state)
 	for i in range((state["planets"] as Array).size()):
 		_work_planet(state, i, dt)
-	dispatch_expansion_policies(state)
 	var teams: Array[int] = planet_teams(state)
 	var cache: Dictionary = {}
 	var budgets: Array = []
@@ -3126,8 +3091,14 @@ static func step(state: Dictionary, dt: float) -> void:
 				fleets[player] = []
 			fleets[player].append(craft)
 	for player in fleets:
-		if not state["ai_players"].has(player) or not policy_fleet_weights(state, int(player)).is_empty():
+		# Legacy allocation fixtures still exercise routing; live games use
+		# individual commands. Unordered reinforcements stay at their origin.
+		if state.get("military", {}).has(player):
 			_allocate_fighters(state, combat_graph, int(player), fleets[player], true)
+		else:
+			for fighter in fleets[player]:
+				if not fighter.has("operation_target"):
+					fighter["operation_target"] = int(fighter.get("at", 0))
 	_sync_operations(state)
 	_dispatch_operations(state, combat_graph)
 	var combat_positions: Dictionary = {}
@@ -3174,282 +3145,3 @@ static func step(state: Dictionary, dt: float) -> void:
 	_step_conquest(state, combat_graph, dt)
 	_sync_operations(state)
 	update_exploration(state)
-
-# Policy card identity is the pair (empire, definition ID); slots never duplicate cards.
-const POLICY_SLOTS = ["offense", "defense", "economy", "technology", "wildcard"]
-const POLICY_CARDS = {
-	"invasion": {"slot": "offense", "name": "Invasion", "warmup": 20.0, "military": true, "target": "hostile", "description": "Deploy fighters to selected systems and asteroid fields after warmup, including unoccupied sectors."},
-	"guard": {"slot": "defense", "name": "Guard", "warmup": 0.0, "military": true, "target": "friendly", "description": "Station fighters at selected systems and asteroid fields, including unoccupied sectors."},
-	"expansion": {"slot": "economy", "name": "Expansion", "warmup": 0.0, "description": "Dispatch idle colony ships to neutral systems automatically."},
-	"industry": {"slot": "economy", "name": "Industrial specialization", "warmup": 0.0, "description": "+20% manufactured output."},
-	"conservation": {"slot": "economy", "name": "Resource conservation", "warmup": 0.0, "description": "-15% non-food civilian consumption."},
-	"agriculture": {"slot": "economy", "name": "Agricultural development", "warmup": 0.0, "description": "+20% farm output."},
-	"military_research": {"slot": "technology", "name": "Military research", "warmup": 0.0}
-}
-
-static func policy_eligible(state: Dictionary, player: int, slot: String, card: String) -> bool:
-	if not state.get("policies", {}).has(player) or not POLICY_SLOTS.has(slot):
-		return false
-	if slot == "wildcard" and not state.get("unlocks", {}).get(player, {}).get("communications", false):
-		return false
-	if card.is_empty():
-		return true
-	var definition: Dictionary = POLICY_CARDS.get(card, {})
-	if definition.is_empty() or (slot != "wildcard" and definition["slot"] != slot):
-		return false
-	var equipped: Dictionary = state["policies"][player]
-	for other in equipped:
-		if other != slot and equipped[other]["card"] == card:
-			return false
-	return true
-
-static func equip_policy(state: Dictionary, player: int, slot: String, card: String) -> bool:
-	if not policy_eligible(state, player, slot, card):
-		return false
-	var equipped: Dictionary = state["policies"][player]
-	if equipped.get(slot, {}).get("card", "") == card:
-		return false
-	if card.is_empty():
-		equipped.erase(slot)
-	else:
-		equipped[slot] = {"card": card, "ready_at": float(state["elapsed"]) + float(POLICY_CARDS[card]["warmup"]), "targets": [], "weight": 100}
-	normalize_policy_weights(equipped)
-	return true
-
-# Commit a fully configured military policy atomically. Replacing the same card
-# is intentional: the previous assignment remains active until this succeeds.
-# Each zone contains a set of discovered system IDs and its own force share.
-static func commit_military_policy(state: Dictionary, player: int, slot: String, card: String, zones: Array, void_slots: Array) -> bool:
-	if not policy_eligible(state, player, slot, card) or not bool(POLICY_CARDS.get(card, {}).get("military", false)):
-		return false
-	if zones.is_empty() or zones.size() > 5:
-		return false
-	var total: int = 0
-	var seen: Dictionary = {}
-	var configured: Array = []
-	for zone in zones:
-		if not zone is Dictionary:
-			return false
-		if not zone.get("weight") is int or not zone.get("targets") is Array:
-			return false
-		var weight: int = int(zone["weight"])
-		var nodes: Array = zone["targets"]
-		if weight < 0 or weight > 100 or nodes.is_empty():
-			return false
-		var clean: Array = []
-		for raw_node in nodes:
-			if not raw_node is int:
-				return false
-			var node: int = int(raw_node)
-			if seen.has(node) or not policy_zone_target_valid(state, player, card, node):
-				return false
-			seen[node] = true
-			clean.append(node)
-		configured.append({"targets": clean, "weight": weight})
-		total += weight
-	var voided: Array = []
-	var equipped: Dictionary = state["policies"][player]
-	for other in void_slots:
-		if not other is String or other == slot or not POLICY_SLOTS.has(other) or voided.has(other):
-			return false
-		if not equipped.has(other) or not POLICY_CARDS[equipped[other]["card"]].get("military", false):
-			return false
-		voided.append(other)
-	for other in equipped:
-		if other == slot or voided.has(other):
-			continue
-		if POLICY_CARDS[equipped[other]["card"]].get("military", false):
-			total += policy_allocation(equipped[other])
-	if total > 100:
-		return false
-	var committed_weight: int = 0
-	for zone in configured:
-		committed_weight += int(zone["weight"])
-	# Explicitly void the selected previous policies at acceptance.  Keeping
-	# their stale allocations alive leads to cycles and over-allocation when
-	# a replacement is warming up or removed.
-	for other in voided:
-		equipped.erase(other)
-	equipped[slot] = {"card": card, "ready_at": float(state["elapsed"]) + float(POLICY_CARDS[card]["warmup"]), "targets": seen.keys(), "weight": committed_weight, "zones": configured}
-	return true
-
-static func policy_allocation(entry: Dictionary) -> int:
-	if entry.has("zones"):
-		var total: int = 0
-		for zone in entry["zones"]:
-			total += int(zone["weight"])
-		return total
-	return int(entry.get("weight", 0))
-
-static func policy_active(state: Dictionary, entry: Dictionary) -> bool:
-	return not entry.is_empty() and float(state["elapsed"]) >= float(entry["ready_at"])
-
-# A regional order selects every discovered POI within the lasso. Friendly
-# staging and neutral occupation do not change the automatic hostile-only
-# combat rules. Legacy flags and AI hostile goal selection retain their rules.
-static func policy_zone_target_valid(state: Dictionary, player: int, card: String, node: int) -> bool:
-	if not bool(POLICY_CARDS.get(card, {}).get("military", false)) or node < 0:
-		return false
-	var count: int = (state["planets"] as Array).size()
-	return discovered(state, player, "planets", node) if node < count else discovered(state, player, "fields", node - count)
-
-static func policy_zone_shares(targets: Array, weight: int) -> Dictionary:
-	var equal: Dictionary = {}
-	for node in targets:
-		equal[node] = 1
-	return _apportion(targets, equal, weight)
-
-static func policy_target_valid(state: Dictionary, player: int, card: String, node: int) -> bool:
-	if not discovered(state, player, "planets", node):
-		return false
-	var owner: int = int(state["planets"][node]["owner"])
-	var friendly: bool = owner != 0 and state["teams"].get(owner, -1) == state["teams"].get(player, 0)
-	match POLICY_CARDS.get(card, {}).get("target", ""):
-		"hostile": return owner != 0 and not friendly
-		"friendly": return friendly
-	return false
-
-static func set_policy_target(state: Dictionary, player: int, slot: String, node: int, enabled: bool) -> bool:
-	var entry: Dictionary = state.get("policies", {}).get(player, {}).get(slot, {})
-	if entry.is_empty() or entry.has("zones") or (enabled and not policy_target_valid(state, player, entry["card"], node)):
-		return false
-	var targets: Array = entry["targets"]
-	if enabled and not targets.has(node):
-		targets.append(node)
-		return true
-	if not enabled and targets.has(node):
-		targets.erase(node)
-		return true
-	return false
-
-static func set_policy_weight(state: Dictionary, player: int, slot: String, percent: int) -> bool:
-	var equipped: Dictionary = state.get("policies", {}).get(player, {})
-	if not equipped.has(slot) or equipped[slot].has("zones") or not POLICY_CARDS[equipped[slot]["card"]].get("military", false) or percent < 0 or percent > 100:
-		return false
-	var weights: Dictionary = {}
-	var available: int = 100
-	for key in POLICY_SLOTS:
-		if equipped.has(key) and POLICY_CARDS[equipped[key]["card"]].get("military", false):
-			if equipped[key].has("zones"):
-				available -= policy_allocation(equipped[key])
-			else:
-				weights[key] = int(equipped[key]["weight"])
-	available = maxi(0, available)
-	if percent > available:
-		return false
-	var others: Array = weights.keys()
-	others.erase(slot)
-	if others.is_empty():
-		equipped[slot]["weight"] = available
-		return true
-	var redistributed: Dictionary = _apportion(others, weights, available - percent)
-	for key in redistributed:
-		equipped[key]["weight"] = redistributed[key]
-	equipped[slot]["weight"] = percent
-	return true
-
-static func normalize_policy_weights(equipped: Dictionary) -> void:
-	var weights: Dictionary = {}
-	var available: int = 100
-	for slot in POLICY_SLOTS:
-		if equipped.has(slot) and POLICY_CARDS[equipped[slot]["card"]].get("military", false):
-			if equipped[slot].has("zones"):
-				available -= policy_allocation(equipped[slot])
-			else:
-				weights[slot] = int(equipped[slot]["weight"])
-	if weights.is_empty():
-		return
-	var normalized: Dictionary = _apportion(weights.keys(), weights, maxi(0, available))
-	for slot in normalized:
-		equipped[slot]["weight"] = normalized[slot]
-
-# Preserve manual orders for empires without military cards. Preparing or
-# targetless cards hold their forces at home until an objective becomes valid.
-static func policy_fleet_weights(state: Dictionary, player: int) -> Dictionary:
-	var result: Dictionary = {}
-	var home: int = military_home(state, player)
-	var equipped: Dictionary = state.get("policies", {}).get(player, {})
-	var has_military: bool = false
-	for slot in equipped:
-		if POLICY_CARDS[equipped[slot]["card"]].get("military", false):
-			has_military = true
-			break
-	if not has_military:
-		return result
-	var voided: Dictionary = {}
-	for slot in equipped:
-		var entry: Dictionary = equipped[slot]
-		if POLICY_CARDS[entry["card"]].get("military", false) and policy_active(state, entry):
-			for other in entry.get("void_slots", []):
-				voided[other] = true
-	for slot in equipped:
-		if voided.has(slot):
-			continue
-		var entry: Dictionary = equipped[slot]
-		if not POLICY_CARDS[entry["card"]].get("military", false):
-			continue
-		var zones: Array = entry.get("zones", [])
-		if zones.is_empty():
-			zones = [{"targets": entry.get("targets", []), "weight": entry.get("weight", 100)}]
-		for zone in zones:
-			var weight: int = int(zone["weight"])
-			var targets: Array = []
-			if policy_active(state, entry):
-				for node in zone["targets"]:
-					var valid: bool = policy_zone_target_valid(state, player, entry["card"], int(node)) if entry.has("zones") else policy_target_valid(state, player, entry["card"], int(node))
-					if valid:
-						targets.append(node)
-			if targets.is_empty():
-				if home >= 0:
-					result[home] = int(result.get(home, 0)) + weight
-				continue
-			var shares: Dictionary = policy_zone_shares(targets, weight)
-			for node in shares:
-				result[node] = int(result.get(node, 0)) + int(shares[node])
-	# Unallocated capacity is held at home rather than redistributed across
-	# configured zones by the fighter quota apportionment.
-	var assigned: int = 0
-	for amount in result.values():
-		assigned += int(amount)
-	if assigned < 100 and home >= 0:
-		result[home] = int(result.get(home, 0)) + 100 - assigned
-	return result
-
-static func active_card(state: Dictionary, player: int, card: String) -> bool:
-	for entry in state.get("policies", {}).get(player, {}).values():
-		if entry["card"] == card and policy_active(state, entry):
-			return true
-	return false
-
-static func apply_economy_policies(state: Dictionary) -> void:
-	for system in state["planets"]:
-		var owner: int = int(system["owner"])
-		var modifiers: Dictionary = {}
-		if active_card(state, owner, "industry"):
-			for resource in ["Plastics", "Textiles", "Tech"]:
-				modifiers[resource] = 1.2
-		if active_card(state, owner, "agriculture"):
-			modifiers["Organics"] = 1.2
-		system["policy_output"] = modifiers
-		system["policy_consumption"] = 0.85 if active_card(state, owner, "conservation") else 1.0
-
-static func dispatch_expansion_policies(state: Dictionary) -> void:
-	var expanding: Dictionary = {}
-	for player in state.get("policies", {}):
-		if active_card(state, int(player), "expansion"):
-			expanding[player] = true
-	if expanding.is_empty():
-		return
-	var reserved: Dictionary = {}
-	for ship in state["ships"]:
-		if ship.get("kind", "ship") == "colony_ship" and not (ship.get("route", []) as Array).is_empty():
-			reserved[int(ship["dest"])] = true
-	for ship in state["ships"]:
-		if ship.get("kind", "ship") != "colony_ship" or not (ship.get("route", []) as Array).is_empty():
-			continue
-		var player: int = int(ship["owner"])
-		if not expanding.has(player):
-			continue
-		var target: int = _ai_colony_target(state, player, ship, reserved)
-		if target >= 0 and send_colony(state, player, int(ship["id"]), target):
-			reserved[target] = true

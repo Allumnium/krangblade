@@ -1,7 +1,6 @@
 extends Node
 ## Persistent ENet session. All RPC endpoints live here, not on changing scenes.
 ## The host is authoritative for lobby, load barrier, and territory ownership.
-
 signal phase_changed
 signal roster_changed
 signal chat_changed
@@ -563,21 +562,21 @@ func _colonize_for(id: int, ship_id: int, target: int) -> void:
 	if _active_player(id) and ECONOMY.send_colony(economy, id, ship_id, target):
 		_publish_economy()
 
-func request_military(kind: String, node: int, percent: int) -> void:
+func request_fighter_move(ids: Array, target: int) -> void:
 	if phase != "match":
 		return
 	if is_solo or multiplayer.is_server():
-		_military_for(1, kind, node, percent)
+		_fighter_move_for(1, ids, target)
 	else:
-		_rpc_military.rpc_id(1, kind, node, percent)
+		_rpc_fighter_move.rpc_id(1, ids, target)
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_military(kind: String, node: int, percent: int) -> void:
+func _rpc_fighter_move(ids: Array, target: int) -> void:
 	if multiplayer.is_server():
-		_military_for(multiplayer.get_remote_sender_id(), kind, node, percent)
+		_fighter_move_for(multiplayer.get_remote_sender_id(), ids, target)
 
-func _military_for(id: int, kind: String, node: int, percent: int) -> void:
-	if _active_player(id) and ECONOMY.set_military(economy, id, kind, node, percent):
+func _fighter_move_for(id: int, ids: Array, target: int) -> void:
+	if _active_player(id) and ECONOMY.command_fighters(economy, id, ids, target):
 		_publish_economy()
 
 func _active_player(id: int) -> bool:
@@ -600,7 +599,7 @@ func _rpc_operation(index: int, kind: String, target: String) -> void:
 		_operation_for(multiplayer.get_remote_sender_id(), index, kind, target)
 
 func _operation_for(id: int, index: int, kind: String, target: String) -> void:
-	if _active_player(id) and ECONOMY.enqueue(economy, id, index, kind, target):
+	if kind != "production" and _active_player(id) and ECONOMY.enqueue(economy, id, index, kind, target):
 		_publish_economy()
 
 func request_maintain(index: int, kind: String, amount: int) -> void:
@@ -634,7 +633,7 @@ func _rpc_continuous(index: int, kind: String, enabled: bool) -> void:
 		_continuous_for(multiplayer.get_remote_sender_id(), index, kind, enabled)
 
 func _continuous_for(id: int, index: int, kind: String, enabled: bool) -> void:
-	if _active_player(id) and ECONOMY.set_continuous(economy, id, index, kind, enabled):
+	if not kind.begins_with("production:") and _active_player(id) and ECONOMY.set_continuous(economy, id, index, kind, enabled):
 		_publish_economy()
 
 func request_cancel(index: int, job_id: int) -> void:
@@ -776,73 +775,3 @@ func _rpc_economy(update_round: int, revision: int, compressed: PackedByteArray)
 	owners_changed.emit()
 	economy_changed.emit()
 	_rpc_snapshot_ack.rpc_id(1, update_round, revision)
-
-func request_policy(slot: String, card: String) -> void:
-	if phase != "match":
-		return
-	if is_solo or multiplayer.is_server():
-		_policy_for(1, slot, card)
-	else:
-		_rpc_policy.rpc_id(1, slot, card)
-
-@rpc("any_peer", "call_remote", "reliable")
-func _rpc_policy(slot: String, card: String) -> void:
-	if multiplayer.is_server():
-		_policy_for(multiplayer.get_remote_sender_id(), slot, card)
-
-func _policy_for(id: int, slot: String, card: String) -> void:
-	if _active_player(id) and ECONOMY.equip_policy(economy, id, slot, card):
-		_publish_economy()
-
-# Submit all painted zones and per-policy overrides as one authoritative
-# commitment. No partially configured policy is ever published.
-func request_policy_zones(slot: String, card: String, zones: Array, void_slots: Array) -> void:
-	if phase != "match":
-		return
-	if is_solo or multiplayer.is_server():
-		_policy_zones_for(1, slot, card, zones, void_slots)
-	else:
-		_rpc_policy_zones.rpc_id(1, slot, card, zones, void_slots)
-
-@rpc("any_peer", "call_remote", "reliable")
-func _rpc_policy_zones(slot: String, card: String, zones: Array, void_slots: Array) -> void:
-	if multiplayer.is_server():
-		_policy_zones_for(multiplayer.get_remote_sender_id(), slot, card, zones, void_slots)
-
-func _policy_zones_for(id: int, slot: String, card: String, zones: Array, void_slots: Array) -> void:
-	if _active_player(id) and ECONOMY.commit_military_policy(economy, id, slot, card, zones, void_slots):
-		_publish_economy()
-
-func request_policy_target(slot: String, node: int, enabled: bool) -> void:
-	if phase != "match":
-		return
-	if is_solo or multiplayer.is_server():
-		_policy_target_for(1, slot, node, enabled)
-	else:
-		_rpc_policy_target.rpc_id(1, slot, node, enabled)
-
-@rpc("any_peer", "call_remote", "reliable")
-func _rpc_policy_target(slot: String, node: int, enabled: bool) -> void:
-	if multiplayer.is_server():
-		_policy_target_for(multiplayer.get_remote_sender_id(), slot, node, enabled)
-
-func _policy_target_for(id: int, slot: String, node: int, enabled: bool) -> void:
-	if _active_player(id) and ECONOMY.set_policy_target(economy, id, slot, node, enabled):
-		_publish_economy()
-
-func request_policy_weight(slot: String, percent: int) -> void:
-	if phase != "match":
-		return
-	if is_solo or multiplayer.is_server():
-		_policy_weight_for(1, slot, percent)
-	else:
-		_rpc_policy_weight.rpc_id(1, slot, percent)
-
-@rpc("any_peer", "call_remote", "reliable")
-func _rpc_policy_weight(slot: String, percent: int) -> void:
-	if multiplayer.is_server():
-		_policy_weight_for(multiplayer.get_remote_sender_id(), slot, percent)
-
-func _policy_weight_for(id: int, slot: String, percent: int) -> void:
-	if _active_player(id) and ECONOMY.set_policy_weight(economy, id, slot, percent):
-		_publish_economy()

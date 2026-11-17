@@ -1,5 +1,9 @@
 # Warbound — thoughts archive
 
+### T-007 — Small allocations can stall attacks (superseded 2026-11-17)
+- **Original observation:** Hostile-system allocations below three hulls rallied instead of deploying; splitting a small fleet could stall every attack.
+- **Disposition:** v0.18.0 design replaces policy allocations with direct commands that depart immediately regardless of size. No regional allocation or mandatory human rally remains. Retest direct movement instead.
+
 Completed or otherwise resolved entries moved from THOUGHTS.md. Preserve the original identifier and observation, then record the resolution date, outcome (implemented, rejected, superseded, etc.), and version/PR or relevant evidence. Do not treat rejected or superseded ideas as implemented.
 
 
