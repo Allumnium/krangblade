@@ -1464,7 +1464,7 @@ func _initialize() -> void:
 	var access_map: Dictionary = multi_access["map"]
 	var access_points: Array = access_map["points"]
 	var access_center: Vector2 = (access_points[0] + access_points[1]) * 0.5
-	var access_field: Dictionary = {"anchor": 1, "position": access_center, "radius": 40.0, "Metals": 1.0, "Crystals": 1.0, "chunks": [{"id": 92001, "position": access_center, "resource": "Crystals", "remaining": 20.0}]}
+	var access_field: Dictionary = {"anchor": 1, "access": [0, 1], "position": access_center, "radius": 40.0, "Metals": 1.0, "Crystals": 1.0, "chunks": [{"id": 92001, "position": access_center, "resource": "Crystals", "remaining": 20.0}]}
 	access_map["fields"] = [access_field]
 	var access_home: Dictionary = multi_access["planets"][0]
 	assert(ECON.field_access_systems(access_map, access_field).has(0))
