@@ -1131,7 +1131,7 @@ static func _opportunity(a: Dictionary, b: Dictionary) -> bool:
 	return false
 
 static func _path(state: Dictionary, teams: Array[int], team: int, a: int, b: int, _cache: Dictionary) -> Array[int]:
-	var routes: Dictionary = _civilian_route_cache(state, teams)
+	var routes: Dictionary = _cache["civilian_routes"] if _cache.has("civilian_routes") else _civilian_route_cache(state, teams)
 	var key: String = "%d:%d:%d" % [team, a, b]
 	if not routes.has(key):
 		routes[key] = MAP.path(state["map"], teams, team, a, b)
@@ -1142,7 +1142,7 @@ static func _path(state: Dictionary, teams: Array[int], team: int, a: int, b: in
 static func _civilian_route_cache(state: Dictionary, teams: Array[int]) -> Dictionary:
 	var map_data: Dictionary = state["map"]
 	if cached_route_topology.get("points") != map_data["points"] or cached_route_topology.get("edges") != map_data["edges"] or cached_route_topology.get("teams") != teams:
-		cached_civilian_routes.clear()
+		cached_civilian_routes = {}
 		cached_route_topology = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "teams": teams.duplicate()}
 	return cached_civilian_routes
 
@@ -1331,7 +1331,7 @@ static func _mining_path(state: Dictionary, teams: Array[int], team: int, start:
 		return []
 	if teams[start] not in [0, team] or teams[goal] not in [0, team]:
 		return []
-	var cache: Dictionary = _civilian_route_cache(state, teams)
+	var cache: Dictionary = _cache["civilian_routes"] if _cache.has("civilian_routes") else _civilian_route_cache(state, teams)
 	var points: Array = state["map"]["points"]
 	if not cache.has("mine:adj"):
 		var adjacency: Array = []
@@ -3216,12 +3216,22 @@ static func update_match_outcome(state: Dictionary) -> bool:
 		changed = true
 	return changed
 
-static func step(state: Dictionary, dt: float) -> void:
+static func _profile_stage(profile: Dictionary, stage: String, started: int) -> int:
+	if profile.is_empty():
+		return 0
+	var now: int = Time.get_ticks_usec()
+	profile[stage] = int(profile.get(stage, 0)) + now - started
+	return now
+
+static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
+	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	state["elapsed"] = float(state["elapsed"]) + dt
 	for i in range((state["planets"] as Array).size()):
 		_work_planet(state, i, dt)
+	started = _profile_stage(profile, "Economy", started)
 	var teams: Array[int] = planet_teams(state)
-	var cache: Dictionary = {}
+	# Validate the static map and territory once per substep, not on each search.
+	var cache: Dictionary = {"civilian_routes": _civilian_route_cache(state, teams)}
 	var budgets: Array = []
 	for field in state["map"].get("fields", []):
 		budgets.append({"Metals": field_limit(field, "Metals") * dt, "Crystals": field_limit(field, "Crystals") * dt, ANTIMATTER: field_limit(field, ANTIMATTER) * dt})
@@ -3230,11 +3240,13 @@ static func step(state: Dictionary, dt: float) -> void:
 		state["next_ai"] = float(state["elapsed"]) + AI_INTERVAL
 		for player in state["ai_players"]:
 			_ai_turn(state, combat_graph, int(player))
+	started = _profile_stage(profile, "AI / routing setup", started)
 	for craft in state["ships"]:
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") == "fighter" else state["map"]["points"], craft)
 	_prepare_withdrawals(state, combat_graph)
 	_combat(state, combat_graph, dt)
 	_prepare_withdrawals(state, combat_graph)
+	started = _profile_stage(profile, "Combat / repair", started)
 	var fleets: Dictionary = {}
 	for craft in state["ships"]:
 		if craft.get("kind", "") == "fighter":
@@ -3258,6 +3270,8 @@ static func step(state: Dictionary, dt: float) -> void:
 		combat_positions[int(craft["id"])] = craft["position"]
 	var idle_targets: Dictionary = _idle_formation_targets(state, combat_graph)
 	var coordinated: Dictionary = _coordinate_formations(state, combat_graph, dt)
+	started = _profile_stage(profile, "Formations / orders", started)
+	var civilian_usec: int = 0
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
 		if ship.get("kind", "ship") == "colony_ship":
@@ -3265,9 +3279,15 @@ static func step(state: Dictionary, dt: float) -> void:
 				state["ships"].erase(ship)
 				continue
 		elif ship.get("kind", "ship") == "ship":
+			var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 			_work_ship(state, ship, teams, cache, dt)
+			if not profile.is_empty():
+				civilian_usec += Time.get_ticks_usec() - before
 		elif ship.get("kind", "ship") == "miner":
+			var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 			_work_miner(state, ship, teams, cache, budgets, dt)
+			if not profile.is_empty():
+				civilian_usec += Time.get_ticks_usec() - before
 		elif ship.get("kind", "") == "fighter":
 			var target_id: int = int(ship.get("combat_target", -1))
 			var pursuit_id: int = int(ship.get("pursuit_target", -1))
@@ -3296,6 +3316,12 @@ static func step(state: Dictionary, dt: float) -> void:
 		# work idle and did not already move this tick.
 		if idle_targets.has(ship_id) and _is_idle_ship(ship) and not coordinated.has(ship_id) and ship["position"] == initial_position:
 			_navigate(ship, idle_targets[ship_id], SHIP_SPEED * dt)
+	if not profile.is_empty():
+		var now: int = Time.get_ticks_usec()
+		profile["Civilian logistics"] = int(profile.get("Civilian logistics", 0)) + civilian_usec
+		profile["Other movement"] = int(profile.get("Other movement", 0)) + maxi(0, now - started - civilian_usec)
+		started = now
 	_step_conquest(state, combat_graph, dt)
 	_sync_operations(state)
 	update_exploration(state)
+	_profile_stage(profile, "Conquest / exploration", started)

@@ -36,7 +36,6 @@ var snapshot_elapsed: float = 0.0
 var snapshot_revision: int = 0
 var snapshot_sent: Dictionary = {}
 var snapshot_pending: Dictionary = {}
-var resource_history: Dictionary = {}
 
 func _ready() -> void:
 	multiplayer.peer_connected.connect(_peer_connected)
@@ -488,8 +487,6 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 	economy["time_speed"] = 1
 	economy["eliminated"] = []
 	economy["match_result"] = {}
-	resource_history.clear()
-	ECONOMY.sample_resource_rates(economy, resource_history)
 	owners = ECONOMY.planet_teams(economy)
 	_set_phase("match")
 	_status("Match in progress")
@@ -732,6 +729,7 @@ func request_time_speed(speed: int) -> void:
 	_publish_economy()
 
 var diagnostic_sim_ms: float = 0.0
+var diagnostic_sim_phases: Dictionary = {}
 var diagnostic_encode_ms: float = 0.0
 var diagnostic_snapshot_bytes: int = 0
 var diagnostic_sent_bytes: int = 0
@@ -743,14 +741,19 @@ func _economy_tick() -> void:
 	var speed: int = int(economy.get("time_speed", 1))
 	# Pause stops the simulation, but not accepted orders or replication.
 	var started: int = Time.get_ticks_usec()
+	var profile: Dictionary = {"enabled": true}
 	for i in range(speed):
-		ECONOMY.step(economy, SIM_STEP)
-		ECONOMY.sample_resource_rates(economy, resource_history)
-		if ECONOMY.update_match_outcome(economy):
+		ECONOMY.step(economy, SIM_STEP, profile)
+		var outcome_started: int = Time.get_ticks_usec()
+		var changed: bool = ECONOMY.update_match_outcome(economy)
+		profile["Match outcome"] = int(profile.get("Match outcome", 0)) + Time.get_ticks_usec() - outcome_started
+		if changed:
 			_publish_economy()
 			if not economy["match_result"].is_empty():
 				break
 	diagnostic_sim_ms = float(Time.get_ticks_usec() - started) / 1000.0
+	profile.erase("enabled")
+	diagnostic_sim_phases = profile
 	snapshot_elapsed += SIM_STEP
 	if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
 		snapshot_elapsed = 0.0
