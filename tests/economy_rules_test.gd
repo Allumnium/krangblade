@@ -74,13 +74,13 @@ func _initialize() -> void:
 			longest = maxf(longest, length)
 			degrees[edge[0]] += 1
 			degrees[edge[1]] += 1
-			if cluster_ids[edge[0]] == cluster_ids[edge[1]]:
+			if cluster_ids[edge[0]] >= 0 and cluster_ids[edge[0]] == cluster_ids[edge[1]]:
 				locals += 1
 				local_distance += length
 			else:
 				bridges += 1
 				bridge_distance += length
-		assert(bridges == player_count * 3 - 1)
+		assert(bridges == player_count * 3 - 1 + cluster_ids.count(-1))
 		assert(clustered["cluster_sizes"].size() == player_count * 3)
 		for cluster_size in clustered["cluster_sizes"]:
 			assert(cluster_size >= 3 and cluster_size <= 9)
@@ -117,7 +117,7 @@ func _initialize() -> void:
 				assert((chunk["resource"] == ECON.ANTIMATTER) == bool(field.get("antimatter", false)))
 				assert(float(chunk["remaining"]) > 0.0)
 				assert((field["position"] as Vector2).distance_to(chunk["position"]) + float(chunk["radius"]) < float(field["radius"]))
-		assert(bridge_distance / bridges > local_distance / locals)
+		assert(bridge_distance / (bridges - cluster_ids.count(-1)) > local_distance / locals)
 		var seen: Dictionary = {0: true}
 		var frontier: Array = [0]
 		while not frontier.is_empty():
@@ -1779,6 +1779,34 @@ func _test_freighter_bays() -> void:
 	assert(is_zero_approx(ECON._cargo_total(ship)))
 	print("PASS: seven shared tonnage bays, full single-resource and mixed loads, partial and empty cargo")
 
+# Contract only degree-two standalone connectors to inspect the original
+# cluster-level topology without pretending they are a single cluster.
+func _cluster_links(galaxy: Dictionary) -> Dictionary:
+	var clusters: Array = galaxy["clusters"]
+	var adjacency: Array = []
+	for point in galaxy["points"]:
+		adjacency.append([])
+	for edge in galaxy["edges"]:
+		adjacency[edge[0]].append(edge[1])
+		adjacency[edge[1]].append(edge[0])
+	var links: Dictionary = {}
+	for node in range(clusters.size()):
+		var a: int = clusters[node]
+		if a < 0:
+			assert(adjacency[node].size() == 2)
+			continue
+		for neighbor in adjacency[node]:
+			var previous: int = node
+			var current: int = neighbor
+			while int(clusters[current]) < 0:
+				var next: int = adjacency[current][0] if adjacency[current][1] == previous else adjacency[current][1]
+				previous = current
+				current = next
+			var b: int = clusters[current]
+			if a != b:
+				links[Vector2i(mini(a, b), maxi(a, b))] = true
+	return links
+
 func _test_map_layouts() -> void:
 	assert(MAP.generate(7021, 3)["layout"] == MAP.DEFAULT_LAYOUT)
 	assert(not MAP.valid_layout("invalid"))
@@ -1791,12 +1819,7 @@ func _test_map_layouts() -> void:
 				assert(galaxy["cluster_sizes"].size() == MAP.cluster_count_for(player_count, layout))
 				if layout == "Radial":
 					var sectors: int = maxi(3, player_count)
-					var bridges: Dictionary = {}
-					for edge in galaxy["edges"]:
-						var a: int = int(galaxy["clusters"][edge[0]])
-						var b: int = int(galaxy["clusters"][edge[1]])
-						if a != b:
-							bridges[Vector2i(mini(a, b), maxi(a, b))] = true
+					var bridges: Dictionary = _cluster_links(galaxy)
 					for sector in range(sectors):
 						var next: int = (sector + 1) % sectors
 						assert(bridges.has(Vector2i(mini(sector, next), maxi(sector, next))))
@@ -1816,12 +1839,13 @@ func _test_map_layouts() -> void:
 								expected_bridges[Vector2i(slot, slot + dimensions.x)] = true
 					var actual_bridges: Dictionary = {}
 					for edge in galaxy["edges"]:
-						var a: int = slots[int(galaxy["clusters"][edge[0]])]
-						var b: int = slots[int(galaxy["clusters"][edge[1]])]
+						var a: int = slots[edge[0]]
+						var b: int = slots[edge[1]]
 						if a != b:
 							actual_bridges[Vector2i(mini(a, b), maxi(a, b))] = true
 					assert(actual_bridges == expected_bridges)
 					assert(actual_bridges.size() >= slots.size()) # at least one closed cycle
+					assert(slots.size() == galaxy["points"].size())
 				var points: Array = galaxy["points"]
 				var degrees: Array[int] = []
 				degrees.resize(points.size())
@@ -1837,7 +1861,17 @@ func _test_map_layouts() -> void:
 					adjacency[edge[1]].append(edge[0])
 					assert(not MAP.blocked(points[edge[0]], points[edge[1]], galaxy["fields"]))
 					longest = maxf(longest, (points[edge[0]] as Vector2).distance_to(points[edge[1]]))
-				assert(is_equal_approx(longest / MAP.TRAVEL_SPEED, MAP.LONGEST_LINK_YEARS))
+				if layout == "Hex Grid":
+					assert(longest / MAP.TRAVEL_SPEED < MAP.LONGEST_LINK_YEARS * 0.6)
+				else:
+					assert(is_equal_approx(longest / MAP.TRAVEL_SPEED, MAP.LONGEST_LINK_YEARS))
+				var clustered_count: int = 0
+				for group in range(galaxy["cluster_sizes"].size()):
+					var members: int = galaxy["clusters"].count(group)
+					assert(members == int(galaxy["cluster_sizes"][group]) and members >= 3)
+					clustered_count += members
+				assert(clustered_count + galaxy["clusters"].count(-1) == points.size())
+				assert(absf(float(galaxy["clusters"].count(-1)) / points.size() - 0.2) <= 0.04)
 				assert(degrees.count(3) <= int(galaxy["max_junctions"]))
 				for degree in degrees:
 					assert(degree > 0 and degree <= MAP.MAX_CONNECTIONS)
