@@ -2548,15 +2548,16 @@ func _map_input(event: InputEvent) -> void:
         if event is InputEventMouseButton:
             var brush_button: InputEventMouseButton = event
             if brush_button.button_index == MOUSE_BUTTON_LEFT or brush_button.button_index == MOUSE_BUTTON_RIGHT:
-                policy_brush_mode = (1 if brush_button.button_index == MOUSE_BUTTON_LEFT else -1) if brush_button.pressed else 0
                 if brush_button.pressed:
+                    if policy_brush_mode != 0:
+                        _end_policy_brush_drag()
+                    policy_brush_mode = 1 if brush_button.button_index == MOUSE_BUTTON_LEFT else -1
                     policy_stroke_snapshot = policy_brush_strokes.duplicate()
                     policy_stroke_weights = policy_zone_weights.duplicate()
                     policy_brush_last_point = brush_button.position
                     _paint_policy_brush(brush_button.position, policy_brush_mode)
-                else:
-                    _finish_policy_brush_stroke()
-                    policy_brush_last_point = Vector2(INF, INF)
+                elif policy_brush_mode == (1 if brush_button.button_index == MOUSE_BUTTON_LEFT else -1):
+                    _end_policy_brush_drag()
                 map_canvas.accept_event()
                 return
             if brush_button.pressed and brush_button.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -2743,6 +2744,11 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
         map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
+    # A release over the editor or outside the map must still finish the drag.
+    if not policy_draft_card.is_empty() and policy_brush_mode != 0:
+        var held_button: int = MOUSE_BUTTON_LEFT if policy_brush_mode > 0 else MOUSE_BUTTON_RIGHT
+        if not Input.is_mouse_button_pressed(held_button):
+            _end_policy_brush_drag()
     _keyboard_pan(delta)
     _update_resource_hover()
     if is_instance_valid(diagnostic_label):
@@ -3532,7 +3538,11 @@ func _begin_policy_draft(slot: String, card: String) -> void:
 func _cancel_policy_draft() -> void:
     policy_draft_card = ""
     policy_brush_mode = 0
+    policy_brush_last_point = Vector2(INF, INF)
     policy_brush_strokes.clear()
+    policy_brush_dirty = true
+    policy_stroke_snapshot.clear()
+    policy_stroke_weights.clear()
     policy_zone_groups.clear()
     _update_policy_zone_overlay()
     policy_editor.hide()
@@ -3545,6 +3555,11 @@ func _cancel_policy_draft() -> void:
     policy_hidden_ui.clear()
     _refresh()
     map_canvas.queue_redraw()
+
+func _end_policy_brush_drag() -> void:
+    policy_brush_mode = 0
+    policy_brush_last_point = Vector2(INF, INF)
+    _finish_policy_brush_stroke()
 
 # Rebuild allocations only once per drag, not for every interpolated stamp.
 # Reject an erase that splits the painted territory into more than five zones.
@@ -3632,7 +3647,8 @@ func _policy_components() -> Array:
                     targets.append(node)
                     break
         targets.sort()
-        groups.append({"stamps": component, "targets": targets, "key": seed})
+        var anchor: Vector3 = policy_brush_strokes[seed]
+        groups.append({"stamps": component, "targets": targets, "key": seed, "anchor": Vector2(anchor.x, anchor.y)})
     groups.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["key"]) < int(b["key"]))
     return groups
 
@@ -3783,13 +3799,13 @@ func _draw_policy_zones(state: Dictionary) -> void:
         return
     var draft_tint: Color = Color("#e99c77") if policy_draft_card == "invasion" else Color("#83b5eb")
     _update_policy_zone_overlay()
-    var components: Array = policy_zone_groups
-    for index in range(components.size()):
-        var group: Dictionary = components[index]
-        var stamps: Array = group["stamps"]
-        if stamps.is_empty():
-            continue
-        var mark: Vector3 = policy_brush_strokes[int(stamps[0])]
-        var label_pos: Vector2 = _screen_point(Vector2(mark.x, mark.y))
-        map_canvas.draw_string(ThemeDB.fallback_font, label_pos + Vector2(10, -12), "Zone %s" % char(65 + index), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, draft_tint)
+    # Cached groups describe the last completed stroke. Their indices are
+    # invalid as soon as an erase removes a stamp. Use immutable positions,
+    # and suppress stale labels during erasure until the groups are rebuilt.
+    if policy_brush_mode >= 0 and not policy_brush_strokes.is_empty():
+        var components: Array = policy_zone_groups
+        for index in range(components.size()):
+            var group: Dictionary = components[index]
+            var label_pos: Vector2 = _screen_point(group["anchor"])
+            map_canvas.draw_string(ThemeDB.fallback_font, label_pos + Vector2(10, -12), "Zone %s" % char(65 + index), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, draft_tint)
     map_canvas.draw_arc(policy_brush_cursor, policy_brush_radius, 0, TAU, 32, Color(draft_tint, 0.8), 1.0, true)
