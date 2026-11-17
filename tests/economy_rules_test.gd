@@ -1382,6 +1382,31 @@ func _initialize() -> void:
 	var defended: Dictionary = defenses["planets"][0]
 	assert(int(defended["planet_count"]) == ECON.system_bodies(defended, int(force_map["seed"]), 0).size())
 	assert(not ECON.enqueue(defenses, 1, 0, "pds", "0"))
+	# Explicit planet targeting works even when an earlier slot is undefended.
+	var targeted: Dictionary = ECON.create(force_map, players, ids, false)
+	var target_home: Dictionary = targeted["planets"][0]
+	target_home["pds"].clear()
+	var target_recipe: Dictionary = ECON._cost("pds", 2)
+	for material in target_recipe:
+		target_home["stock"][material] = target_recipe[material]
+	assert(not ECON.enqueue(targeted, 2, 0, "pds", "1"))
+	assert(not ECON.enqueue(targeted, 1, 0, "pds", "invalid"))
+	assert(not ECON.enqueue(targeted, 1, 0, "pds", "-1"))
+	assert(ECON.enqueue(targeted, 1, 0, "pds", "1"))
+	var target_job: Dictionary = ECON.pds_job(target_home)
+	assert(target_job["target"] == "1" and target_job["cost"] == target_recipe)
+	assert(not ECON.enqueue(targeted, 1, 0, "pds", "0"))
+	for material in target_recipe:
+		assert(is_zero_approx(float(target_home["stock"][material])))
+	assert(ECON.cancel(targeted, 1, 0, int(target_job["id"])))
+	for material in target_recipe:
+		assert(is_equal_approx(float(target_home["stock"][material]), float(target_recipe[material])))
+	assert(ECON.enqueue(targeted, 1, 0, "pds", "1"))
+	target_job = ECON.pds_job(target_home)
+	assert(ECON._advance(target_home, target_job, float(target_job["work"])))
+	ECON._finish(targeted, 0, target_home, target_job)
+	assert(target_home["pds"].has(1) and not target_home["pds"].has(0))
+	assert(not ECON.enqueue(targeted, 1, 0, "pds", "1"))
 	# Test construction of a destroyed battery in its original slot.
 	defended["pds"].clear()
 	assert(not ECON.enqueue(defenses, 2, 0, "pds", "0"))

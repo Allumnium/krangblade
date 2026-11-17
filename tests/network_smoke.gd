@@ -281,8 +281,10 @@ func _send_commands() -> void:
 	session.call("request_operation", (home_index + 1) % expected_players, "economy", "Metals")
 	session.call("request_operation", home_index, "pds", "999")
 	session.call("request_operation", (home_index + 1) % expected_players, "pds", "1")
-	session.call("request_operation", home_index, "pds", "0")
-	session.call("request_operation", home_index, "pds", "0")
+	session.call("request_operation", home_index, "pds", "0") # already defended
+	var target_slot: int = mini(2, int(initial["planets"][home_index]["planet_count"]) - 1)
+	session.call("request_operation", home_index, "pds", str(target_slot))
+	session.call("request_operation", home_index, "pds", str(target_slot))
 	session.call("request_operation", home_index, "ship")
 	session.call("request_operation", home_index, "fighter")
 	session.call("request_continuous", home_index, "colony_ship", true)
@@ -396,8 +398,9 @@ func _check_economy_sync() -> void:
 				if job["kind"] in ["production", "yard_upgrade"]:
 					correct_upgrade_costs = correct_upgrade_costs and job["cost"] == ECON._cost(job["kind"], int(job["level"]))
 			var pds_jobs: Array = system["queue"].filter(func(order: Dictionary) -> bool: return order["kind"] == "pds")
-			var defense_ok: bool = pds_jobs.size() == 1 and pds_jobs[0]["target"] == "0" and pds_jobs[0]["cost"] == ECON._cost("pds", 1)
-			defense_ok = defense_ok or (pds_jobs.is_empty() and system.get("pds", {}).has(0) and system["pds"].size() == 1)
+			var target_slot: int = mini(2, int(system["planet_count"]) - 1)
+			var defense_ok: bool = pds_jobs.size() == 1 and pds_jobs[0]["target"] == str(target_slot) and pds_jobs[0]["cost"] == ECON._cost("pds", target_slot + 1)
+			defense_ok = defense_ok or (pds_jobs.is_empty() and system.get("pds", {}).has(0) and system["pds"].has(target_slot) and system["pds"].size() == 2)
 			# Commands complete at different times on different systems. Record
 			# each replicated condition when observed, rather than requiring
 			# every transient queue state to coexist in one snapshot.
