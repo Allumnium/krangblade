@@ -1546,6 +1546,33 @@ static func _apportion(keys: Array, weights: Dictionary, total: int) -> Dictiona
 	return result
 
 # POI identifiers: system indices followed by stable asteroid field indices.
+static func sector_base_radius(map_data: Dictionary) -> float:
+	var points: Array = map_data["points"]
+	var spacings: Array[float] = []
+	for i in range(points.size()):
+		var shortest: float = INF
+		for j in range(points.size()):
+			if i != j:
+				shortest = minf(shortest, (points[i] as Vector2).distance_to(points[j]))
+		if is_finite(shortest) and shortest > 0.0:
+			spacings.append(shortest)
+	spacings.sort()
+	return 300.0 if spacings.is_empty() else maxf(100.0, spacings[floori(float(spacings.size()) * 0.5)] * 0.73)
+
+static func sector_limit(graph: Dictionary, node: int, direction: Vector2) -> float:
+	# A sector is the local territory disk clipped by the nearest-POI
+	# bisectors. Its convex bounds also contain straight-line idle movement.
+	var limit: float = float(graph["sector_radii"][node])
+	for delta in graph["sector_neighbors"][node]:
+		var projection: float = direction.dot(delta)
+		if projection > EPS:
+			limit = minf(limit, (delta as Vector2).length_squared() / (2.0 * projection))
+	return limit
+
+static func sector_contains(graph: Dictionary, node: int, position: Vector2) -> bool:
+	var offset: Vector2 = position - (graph["points"][node] as Vector2)
+	return offset.length() <= sector_limit(graph, node, offset.normalized()) + EPS
+
 static func military_graph(state: Dictionary) -> Dictionary:
 	var map_data: Dictionary = state["map"]
 	if not cached_military_graph.is_empty() and cached_military_map.get("points") == map_data["points"] and cached_military_map.get("edges") == map_data["edges"] and cached_military_map.get("field_positions") == _field_positions(map_data):
@@ -1562,8 +1589,22 @@ static func military_graph(state: Dictionary) -> Dictionary:
 	for edge in edges:
 		adjacent[edge[0]].append(edge[1])
 		adjacent[edge[1]].append(edge[0])
+	var base_radius: float = sector_base_radius(map_data)
+	var sector_radii: Array[float] = []
+	var sector_neighbors: Array = []
+	for i in range(points.size()):
+		var radius: float = base_radius if i < (map_data["points"] as Array).size() else base_radius * 0.68
+		sector_radii.append(radius)
+		var neighbors: Array[Vector2] = []
+		for j in range(points.size()):
+			if i == j:
+				continue
+			var delta: Vector2 = points[j] - points[i]
+			if delta.length_squared() < 4.0 * radius * radius and delta.length_squared() > EPS:
+				neighbors.append(delta)
+		sector_neighbors.append(neighbors)
 	cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data)}
-	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}}
+	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors}
 	return cached_military_graph
 
 static func _field_positions(map_data: Dictionary) -> Array:
@@ -2355,8 +2396,10 @@ static func _dispatch_cohorts(state: Dictionary, graph: Dictionary, home: int, g
 		if bool(ship.get("retreating", false)):
 			continue
 		if deployed.has(member):
+			ship.erase("rally_pending")
 			_order_operation_ship(graph, ship, goal, paths)
 			continue
+		ship["rally_pending"] = goal >= 0 and goal != home
 		_order_operation_ship(graph, ship, home, paths)
 		if int(ship["at"]) == home and (ship["route"] as Array).is_empty() and combat_position(state, graph, ship).distance_to(graph["points"][home]) <= AI_RALLY_RADIUS and not _engaged(ship):
 			ready.append(ship)
@@ -2365,6 +2408,7 @@ static func _dispatch_cohorts(state: Dictionary, graph: Dictionary, home: int, g
 			paths[goal] = _military_paths(graph, goal)
 		if paths[goal]["distance"].has(home):
 			for ship in ready:
+				ship.erase("rally_pending")
 				_order_operation_ship(graph, ship, goal, paths)
 				deployed.append(int(ship["id"]))
 	return deployed
@@ -2705,6 +2749,7 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
 			operation["phase"] = "assigned"
 			operation["deployed"] = []
 			for member in operation["members"]:
+				by_id[member].erase("rally_pending")
 				if not bool(by_id[member].get("retreating", false)):
 					_order_operation_ship(graph, by_id[member], target, paths)
 			continue
@@ -2771,7 +2816,13 @@ static func _is_idle_ship(ship: Dictionary) -> bool:
 
 static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
+	var stationary_teams: Dictionary = {}
 	for ship in state["ships"]:
+		if ship.get("kind", "") == "fighter" and (ship["route"] as Array).is_empty() and not bool(ship.get("retreating", false)):
+			var node: int = int(ship["at"])
+			if not stationary_teams.has(node):
+				stationary_teams[node] = {}
+			stationary_teams[node][int(state["teams"].get(int(ship["owner"]), 0))] = true
 		if not _is_idle_ship(ship):
 			continue
 		var key: String = "%d:%s:%d:%d" % [int(ship["owner"]), str(ship.get("kind", "ship")), int(ship["at"]), int(ship.get("operation_id", 0))]
@@ -2783,19 +2834,36 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 		group.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["id"]) < int(b["id"]))
 		for first in range(0, group.size(), 3):
 			var leader: Dictionary = group[first]
-			var points: Array = graph["points"] if leader.get("kind", "") == "fighter" else state["map"]["points"]
-			var center: Vector2 = points[int(leader["at"])]
+			var node: int = int(leader["at"])
+			var center: Vector2 = graph["points"][node]
 			var seed: int = int(leader["id"]) % 97
-			var angle: float = float(seed) * 2.399963 + float(state["elapsed"]) * 0.32
+			var radius: float = float(graph["sector_radii"][node])
+			var compact: bool = false
+			if leader.get("kind", "") == "fighter":
+				var team: int = int(state["teams"].get(int(leader["owner"]), 0))
+				var owner: int = int(state["planets"][node]["owner"]) if node < (state["planets"] as Array).size() else 0
+				var hostile_system: bool = owner != 0 and int(state["teams"].get(owner, 0)) != team
+				compact = bool(leader.get("rally_pending", false)) or hostile_system or (stationary_teams.get(node, {}) as Dictionary).size() > 1
+			var phase: float = float(state["elapsed"]) * SHIP_SPEED / maxf(radius, 100.0)
+			var angle: float = float(seed) * 2.399963 + (float(state["elapsed"]) * 0.32 if compact else phase * 0.55)
 			var radial: Vector2 = Vector2.from_angle(angle)
 			var direction: Vector2 = radial.orthogonal()
-			var anchor: Vector2 = center + radial * (58.0 + 12.0 * float(seed % 3))
+			var extent: float = sector_limit(graph, node, radial)
+			var range_fraction: float = 0.52 + 0.43 * sin(phase * 0.41 + float(seed) * 1.713)
+			var distance: float = maxf(0.0, extent - 30.0) * range_fraction
+			if compact:
+				distance = minf(distance, 58.0 + 12.0 * float(seed % 3))
+			var anchor: Vector2 = radial * distance
 			for i in range(first, mini(first + 3, group.size())):
 				var offset: int = i - first
 				var formation: Vector2 = Vector2.ZERO
 				if offset > 0:
 					formation = -direction * 22.0 + radial * (16.0 if offset == 1 else -16.0)
-				targets[int(group[i]["id"])] = anchor + formation
+				var relative: Vector2 = anchor + formation
+				var bound: float = sector_limit(graph, node, relative.normalized())
+				if compact:
+					bound = minf(bound, AI_RALLY_RADIUS - 10.0)
+				targets[int(group[i]["id"])] = center + relative.limit_length(maxf(0.0, bound - 1.0))
 	return targets
 
 # Prototype conquest: only an active invasion can transfer a colony.
@@ -2927,7 +2995,9 @@ static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> v
 		var team: int = int(state["teams"].get(winner, 0))
 		var contested: bool = false
 		for ship in fighters:
-			if int(state["teams"].get(int(ship["owner"]), 0)) != team and combat_position(state, graph, ship).distance_to(points[node]) <= LASER_RANGE:
+			var position: Vector2 = combat_position(state, graph, ship)
+			var local_patrol: bool = int(ship["at"]) == node and (ship["route"] as Array).is_empty() and sector_contains(graph, node, position)
+			if int(state["teams"].get(int(ship["owner"]), 0)) != team and (position.distance_to(points[node]) <= LASER_RANGE or local_patrol):
 				contested = true
 				break
 		if contested:

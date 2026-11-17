@@ -1374,22 +1374,6 @@ void fragment() {
 
 # One consistent radius per galaxy, based on median nearest-system spacing.
 # Outlier systems cannot create enormous wedges; asteroid fields are smaller.
-func _territory_base_radius(state: Dictionary) -> float:
-	var points: Array = state["map"]["points"]
-	var spacings: Array[float] = []
-	for i in range(points.size()):
-		var point: Vector2 = points[i]
-		var shortest: float = INF
-		for j in range(points.size()):
-			if i != j:
-				shortest = minf(shortest, point.distance_to(points[j]))
-		if is_finite(shortest) and shortest > 0.0:
-			spacings.append(shortest)
-	spacings.sort()
-	if spacings.is_empty():
-		return 300.0
-	return maxf(100.0, spacings[floori(float(spacings.size()) * 0.5)] * 0.73)
-
 func _refresh_territory(state: Dictionary) -> void:
 	if state.is_empty():
 		territory_image.hide()
@@ -1398,7 +1382,7 @@ func _refresh_territory(state: Dictionary) -> void:
 		return
 	var seed_value: int = int(state["map"]["seed"])
 	if territory_seed != seed_value:
-		territory_radius = _territory_base_radius(state)
+		territory_radius = ECONOMY.sector_base_radius(state["map"])
 		territory_seed = seed_value
 		territory_last.clear()
 	var empires: Array[int] = ECONOMY.territory_empires(state)
@@ -2948,6 +2932,16 @@ func _draw_map() -> void:
 		var a_pos: Vector2 = _screen_point(points[a])
 		var b_pos: Vector2 = _screen_point(points[b])
 		map_canvas.draw_line(a_pos, b_pos, Color(color, 0.30), 1.0, true)
+	# Draw the actual system-to-field routes used by military navigation.
+	# A depleted field retains its stable POI and access edges.
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	for edge in graph["edges"]:
+		var a: int = int(edge[0])
+		var b: int = int(edge[1])
+		if b < points.size():
+			continue
+		var known: bool = ECONOMY.discovered(state, _me(), "planets", a) and ECONOMY.discovered(state, _me(), "fields", b - points.size())
+		map_canvas.draw_line(_screen_point(graph["points"][a]), _screen_point(graph["points"][b]), Color(Color("#40566b"), 0.30 if known else 0.15), 1.0, true)
 	var font: Font = ThemeDB.fallback_font
 	var fields: Array = state["map"].get("fields", [])
 	for field_index in range(fields.size()):

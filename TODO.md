@@ -204,3 +204,5 @@ See [THOUGHTS.md](THOUGHTS.md) for observations and suggestions that have not ye
 - v0.17.33: Prototype central antimatter deposits, opt-in autonomous mining, physical cargo and local raw stock, and transfer of stored material on conquest. Processing, technology use, AI objectives and victory scoring are not implemented yet.
 
 - v0.17.34: Standardize Godot scripts and shaders on tab indentation, add EditorConfig and a mandatory CI indentation gate. No gameplay changes.
+
+- v0.17.35: Draw existing asteroid field access lanes even when depleted. Idle formations use variable-radius paths clipped to their local sector, with compact rally and engagement approach for military groups; no route topology changes. Verify visually and in larger matches.

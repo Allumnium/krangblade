@@ -281,3 +281,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.33: Reuse innermost existing field geometry for one (1–2 players) or two (3–8 players) finite raw-antimatter deposits. Check seed fairness, depletion and raw storage saturation before balancing processing and victory. Extraction is initially opt-in so existing opening economy is not automatically diverted; AI extraction policy awaits the objective design.
 
 - v0.17.34: Godot's convert-indent-on-save setting was rewriting space-indented scripts into tabs on the user's machine. Standardize on Godot's native tabs and enforce the format with the gate; check that whitespace-normalized script/shader diffs are empty.
+
+- v0.17.35: Wider sector patrols can pull idle fighters beyond the rally and capture radius. Keep pending rally, hostile-system occupation and contested-sector groups compact; defenders physically patrolling the same sector contest conquest. Verify visual patrol paths and response times at different zooms.
