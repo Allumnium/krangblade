@@ -3468,6 +3468,9 @@ func _begin_policy_draft(slot: String, card: String) -> void:
     policy_editor_card.text = str(ECONOMY.POLICY_CARDS[card]["name"])
     policy_original_map_top = map_canvas.offset_top
     map_canvas.offset_top = 8
+    # Territory and map share the same local projection. Keep their parent
+    # rectangles identical when the map expands in focused draft mode.
+    territory_layer.offset_top = map_canvas.offset_top
     policy_hidden_ui.clear()
     for child in get_children():
         if child.name == "SpaceBackdrop" or child == territory_layer or child == map_canvas or child == policy_editor or child == policy_modal or child == match_menu:
@@ -3476,6 +3479,8 @@ func _begin_policy_draft(slot: String, card: String) -> void:
             policy_hidden_ui[child] = child.visible
             child.hide()
     policy_editor.show()
+    _position_territory()
+    _update_policy_zone_overlay()
     _update_policy_editor()
     map_canvas.queue_redraw()
 
@@ -3487,6 +3492,8 @@ func _cancel_policy_draft() -> void:
     _update_policy_zone_overlay()
     policy_editor.hide()
     map_canvas.offset_top = policy_original_map_top
+    territory_layer.offset_top = map_canvas.offset_top
+    _position_territory()
     for child in policy_hidden_ui:
         if is_instance_valid(child):
             child.visible = bool(policy_hidden_ui[child])
