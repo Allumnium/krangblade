@@ -279,3 +279,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.17.32: Exiled empires can settle neutral systems with colony ships; elimination disbands other hulls when no recovery is possible. A surviving colony ship may prolong a losing position, particularly with obstructed or long routes. Review playtest pacing and result UI before finalizing rules.
 
 - v0.17.33: Reuse innermost existing field geometry for one (1–2 players) or two (3–8 players) finite raw-antimatter deposits. Check seed fairness, depletion and raw storage saturation before balancing processing and victory. Extraction is initially opt-in so existing opening economy is not automatically diverted; AI extraction policy awaits the objective design.
+
+- v0.17.34: Godot's convert-indent-on-save setting was rewriting space-indented scripts into tabs on the user's machine. Standardize on Godot's native tabs and enforce the format with the gate; check that whitespace-normalized script/shader diffs are empty.

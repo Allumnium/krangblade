@@ -3,4 +3,4 @@ extends Node
 var roster: Dictionary = {}
 
 func clear_roster() -> void:
-    roster.clear()
+	roster.clear()
