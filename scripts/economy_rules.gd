@@ -1635,12 +1635,39 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, budgets: Array, dt: float) -> void:
 	var mode: String = str(ship.get("mining_mode", "idle"))
 	if mode == "idle":
+		if (ship["route"] as Array).is_empty():
+			ship["dest"] = -1
+			ship["source"] = -1
 		if float(state["elapsed"]) + EPS >= float(ship.get("next_mining_search", 0.0)):
 			_choose_field(state, ship, teams, cache)
 			# Idle fleets retry twice per game year instead of every tick.
 			ship["next_mining_search"] = float(state["elapsed"]) + 0.5
 		return
 	if mode == "delivery":
+		# A loaded miner with nowhere to unload can fly locally while
+		# waiting for storage. Reacquire a reachable depot before docking;
+		# never transfer cargo from an idle formation's position.
+		if (ship["route"] as Array).is_empty() and int(ship.get("dest", -1)) < 0:
+			if _cargo_total(ship) <= EPS:
+				ship["mining_mode"] = "idle"
+				ship["field"] = -1
+				return
+			if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
+				ship["next_unload_search"] = float(state["elapsed"]) + 0.5
+				var here: int = int(ship["at"])
+				var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+				if teams[here] not in [0, team]:
+					_evacuate_civilian(state, ship, teams)
+					return
+				for resource in FIELD_RESOURCES:
+					if float(ship["cargo"].get(resource, 0.0)) <= EPS:
+						continue
+					var depot: int = _mining_depot(state, ship, teams, team, here, resource, cache)
+					if depot >= 0:
+						ship["dest"] = depot
+						_set_route(ship, _mining_path(state, teams, team, here, depot, cache))
+						break
+			return
 		if _move(state, ship, dt) and float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
 			_unload_miner(state, ship, teams, cache)
 			ship["next_unload_search"] = float(state["elapsed"]) + 0.5
@@ -1728,7 +1755,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 			ship["dest"] = depot
 			_set_route(ship, _mining_path(state, teams, team, here, depot, cache))
 			return
-	ship["dest"] = here
+	ship["dest"] = -1
 
 static func military_home(state: Dictionary, player: int) -> int:
 	var fallback: int = -1
@@ -2055,13 +2082,16 @@ static func combat_position(state: Dictionary, graph: Dictionary, ship: Dictiona
 	var points: Array = graph["points"] if ship.get("kind", "") == "fighter" else state["map"]["points"]
 	return ship.get("position", _initial_position(points, ship))
 
-# Territory is derived from ownership and actual fleet presence, not orders.
-# Stationed fighters claim neutral POIs. Hostile presence or combat suppresses
-# the local sector; allied fighters contribute the same team color.
+# Only settled infrastructure or resident population creates territory.
+# Hostile presence or combat can still suppress existing territory.
 static func territory_claims(state: Dictionary) -> Array[int]:
 	var graph: Dictionary = military_graph(state)
 	var points: Array = graph["points"]
 	var claims: Array[int] = planet_teams(state)
+	for i in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][i]
+		if float(system.get("population", 0.0)) <= 0.0 and system.get("yards", []).is_empty():
+			claims[i] = 0
 	claims.resize(points.size())
 	for i in range((state["planets"] as Array).size(), claims.size()):
 		claims[i] = 0
@@ -2089,9 +2119,7 @@ static func territory_claims(state: Dictionary) -> Array[int]:
 		var stationary: bool = (ship["route"] as Array).is_empty() and not _engaged(ship)
 		if stationary:
 			node = int(ship["at"])
-			if claims[node] == 0:
-				claims[node] = team
-			elif claims[node] != team:
+			if claims[node] != 0 and claims[node] != team:
 				contested[node] = true
 		if stationary or nearest <= LASER_RANGE * LASER_RANGE:
 			if presence.has(node) and int(presence[node]) != team:
@@ -2109,9 +2137,7 @@ static func territory_claims(state: Dictionary) -> Array[int]:
 		claims[node] = 0
 	return claims
 
-# Visual owner identity is separate from team control and contested logic.
-# An owned system uses its owner's color; a neutral claim uses the lowest
-# ID of its stationary friendly fighters for a deterministic tie.
+# Empire color derives from the system's actual owner, never a ship.
 static func territory_empires(state: Dictionary) -> Array[int]:
 	var claims: Array[int] = territory_claims(state)
 	var owners: Array[int] = []
@@ -2120,17 +2146,6 @@ static func territory_empires(state: Dictionary) -> Array[int]:
 	for i in range((state["planets"] as Array).size()):
 		if claims[i] > 0:
 			owners[i] = int(state["planets"][i]["owner"])
-	for craft in state["ships"]:
-		if craft.get("kind", "") != "fighter" or not (craft["route"] as Array).is_empty() or _engaged(craft):
-			continue
-		var node: int = int(craft["at"])
-		var owner: int = int(craft["owner"])
-		if node < 0 or node >= claims.size() or claims[node] <= 0 or claims[node] != int(state["teams"].get(owner, 0)):
-			continue
-		if node < (state["planets"] as Array).size() and int(state["planets"][node]["owner"]) != 0:
-			continue
-		if owners[node] == 0 or owner < owners[node]:
-			owners[node] = owner
 	return owners
 
 static func _engaged(ship: Dictionary) -> bool:
@@ -3109,7 +3124,9 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 # Routing, docking, mining, combat and withdrawal always take precedence.
 static func _is_idle_ship(ship: Dictionary) -> bool:
 	var fighter: bool = ship.get("kind", "") == "fighter"
-	return (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle" and (fighter or int(ship.get("dest", -1)) < 0) and int(ship.get("source", -1)) < 0 and not _engaged(ship) and not bool(ship.get("retreating", false)) and not bool(ship.get("holding", false))
+	var mode: String = str(ship.get("mining_mode", "idle"))
+	var waiting_miner: bool = ship.get("kind", "") == "miner" and mode == "delivery" and int(ship.get("dest", -1)) < 0
+	return (ship["route"] as Array).is_empty() and (mode == "idle" or waiting_miner) and (fighter or int(ship.get("dest", -1)) < 0) and int(ship.get("source", -1)) < 0 and not _engaged(ship) and not bool(ship.get("retreating", false)) and not bool(ship.get("holding", false))
 
 static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
@@ -3203,8 +3220,6 @@ static func _evacuate_civilian(state: Dictionary, ship: Dictionary, teams: Array
 	if miner:
 		ship["mining_mode"] = "delivery"
 		ship["field"] = -1
-		if destination < 0:
-			ship["dest"] = here
 	return destination >= 0
 
 static func _reroute_after_capture(state: Dictionary, index: int) -> void:

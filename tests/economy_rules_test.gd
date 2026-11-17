@@ -36,6 +36,7 @@ func _initialize() -> void:
 	_test_opening_pacing()
 	_test_neutral_direct_occupation()
 	_test_idle_formations()
+	_test_civilian_waiting_movement()
 	_test_depleted_field_routes()
 	_test_wide_patrol_rally_and_conquest()
 	_test_ai_defensive_orders()
@@ -991,24 +992,36 @@ func _initialize() -> void:
 			assert(built[player].has("colony_ship"))
 			assert(built[player].has("fighter"))
 	print("PASS: six-hit combat, allied safety, AI expansion, logistics and attack")
-	# Territory: owners and stationed fighters claim; contest removes tint.
+	# Territory: residents or shipyards claim; fighters alone do not.
 	var territory: Dictionary = ECON.create(force_map, players, ids, false)
 	var sectors: Array[int] = ECON.territory_claims(territory)
 	assert(sectors[0] == 1 and sectors[1] == 1 and sectors[2] == 2 and sectors[3] == 0)
 	territory["ships"].append({"id": 100, "owner": 1, "kind": "fighter", "at": 3, "route": [], "leg": 0.0})
 	territory["ships"].append({"id": 101, "owner": 2, "kind": "fighter", "at": field_node, "route": [], "leg": 0.0})
 	sectors = ECON.territory_claims(territory)
-	assert(sectors[3] == 1 and sectors[field_node] == 1)
+	assert(sectors[3] == 0 and sectors[field_node] == 0)
+	var empty: Dictionary = territory["planets"][3]
+	empty["owner"] = 1
+	territory["ships"][territory["ships"].size() - 2]["crew"] = 40000.0
+	assert(ECON.territory_claims(territory)[3] == 0)
+	empty["population"] = 1.0
+	assert(ECON.territory_claims(territory)[3] == 1)
+	empty["population"] = 0.0
+	empty["yards"].append({"level": 1})
+	assert(ECON.territory_claims(territory)[3] == 1)
+	empty["yards"].clear()
+	assert(ECON.territory_empires(territory)[3] == 0)
+	empty["owner"] = 0
 	territory["ships"].append({"id": 102, "owner": 3, "kind": "fighter", "at": 3, "route": [], "leg": 0.0})
 	territory["ships"].append({"id": 103, "owner": 3, "kind": "fighter", "at": 0, "route": [], "leg": 0.0})
 	sectors = ECON.territory_claims(territory)
-	assert(sectors[3] == 0 and sectors[0] == 0 and sectors[field_node] == 1)
+	assert(sectors[3] == 0 and sectors[0] == 0 and sectors[field_node] == 0)
 	territory["ships"].pop_back()
 	territory["ships"].pop_back()
 	assert(ECON.territory_claims(territory)[0] == 1)
 	territory["ships"][0]["route"] = [4]
 	assert(ECON.territory_claims(territory)[3] == 0)
-	print("PASS: neutral, allied and contested territory including asteroid fields")
+	print("PASS: resident and shipyard territory, no ship-only claims, contested suppression")
 	print("PASS: seeded maps, ownership, construction, shipyards, mixed cargo, physical transit, ally sharing")
 	# Shared operations retain identity across reinforcement and casualties,
 	# distinguish owners, and remove empty groups without recycling IDs.
@@ -1569,7 +1582,7 @@ func _test_neutral_direct_occupation() -> void:
 			break
 	assert(state["ships"][0]["at"] == neutral and state["ships"][1]["at"] == field)
 	var claims: Array[int] = ECON.territory_claims(state)
-	assert(claims[neutral] == 1 and claims[field] == 1)
+	assert(claims[neutral] == 0 and claims[field] == 0)
 	assert(int(state["planets"][neutral]["owner"]) == 0)
 	assert(ECON.command_fighters(state, 1, [9400, 9401], 0))
 	assert(state["ships"][0]["dest"] == 0 and state["ships"][1]["dest"] == 0)
@@ -1609,6 +1622,48 @@ func _test_idle_formations() -> void:
 	for i in range(3):
 		assert(int(squad[i]["dest"]) == objective and not (squad[i]["route"] as Array).is_empty())
 	print("PASS: authoritative idle formations wander, preserve bounds and resume direct navigation")
+
+func _test_civilian_waiting_movement() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var center: Vector2 = state["map"]["points"][0]
+	var home: Dictionary = state["planets"][0]
+	state["ships"].clear()
+	for kind in ["ship", "colony_ship", "miner"]:
+		var craft: Dictionary = {"id": 9800 + state["ships"].size(), "owner": 1, "kind": kind, "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": center, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"}
+		state["ships"].append(craft)
+	var miner: Dictionary = state["ships"][2]
+	miner["cargo"]["Crystals"] = 10.0
+	miner["mining_mode"] = "delivery"
+	home["stock"]["Crystals"] = ECON.storage_capacity(home)
+	# Block all mineral pickups by removing chunks; isolate local
+	# movement while the existing loaded miner waits on a full warehouse.
+	for field in state["map"]["fields"]:
+		field["chunks"].clear()
+	var moved: Dictionary = {}
+	for tick in range(30):
+		for craft in state["ships"]:
+			var previous: Vector2 = craft["position"]
+			craft["test_before"] = previous
+		ECON.step(state, 0.1)
+		for craft in state["ships"]:
+			var distance: float = (craft["position"] as Vector2).distance_to(craft["test_before"])
+			assert(distance <= ECON.SHIP_SPEED * 0.1 + 0.01)
+			if distance > ECON.EPS:
+				moved[craft["id"]] = true
+	assert(moved.size() == 3)
+	assert(is_equal_approx(float(miner["cargo"]["Crystals"]), 10.0))
+	var away: float = (miner["position"] as Vector2).distance_to(center)
+	assert(away > 1.0)
+	home["stock"]["Crystals"] = 0.0
+	# Once storage opens, the miner must physically return before delivery.
+	for tick in range(500):
+		ECON.step(state, 0.1)
+		if float(miner["cargo"]["Crystals"]) < 10.0 - ECON.EPS:
+			assert((miner["position"] as Vector2).distance_to(center) <= ECON.EPS)
+			break
+	assert(float(miner["cargo"]["Crystals"]) <= ECON.EPS)
+	assert(is_equal_approx(float(home["stock"]["Crystals"]), 10.0))
+	print("PASS: idle civilian flight and waiting-miner physical delivery")
 
 func _test_depleted_field_routes() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
