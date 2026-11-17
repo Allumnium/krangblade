@@ -388,16 +388,18 @@ func _rpc_history(items: Array) -> void:
 func add_lobby_ai() -> void:
     if not multiplayer.is_server() or phase != "lobby" or players.size() >= RULES.MAX_PLAYERS:
         return
-    var id: int = -1
+    # ENet peer IDs are positive signed 32-bit integers. Allocate bots
+    # above that range so they are positive empire IDs, but never peers.
+    var id: int = RULES.FIRST_AI_ID
     while players.has(id):
-        id -= 1
+        id += 1
     var team: int = 1
     var used: Dictionary = {}
     for entry in players.values():
         used[int(entry.get("team", 1))] = true
     while used.has(team) and team < RULES.MAX_PLAYERS:
         team += 1
-    players[id] = {"name": "AI %d" % abs(id), "team": team, "ready": true, "ai": true, "color": RULES.free_color(players)}
+    players[id] = {"name": "AI %d" % (id - RULES.FIRST_AI_ID + 1), "team": team, "ready": true, "ai": true, "color": RULES.free_color(players)}
     _send_roster()
 
 func remove_lobby_ai(id: int) -> void:

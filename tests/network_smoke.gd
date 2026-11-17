@@ -237,6 +237,12 @@ func _send_commands() -> void:
     session.call("request_policy", "defense", "guard")
     session.call("request_policy_target", "defense", home_index, true)
     session.call("request_policy", "wildcard", "guard")
+    session.call("request_policy_zones", "defense", "guard", [{"targets": [home_index], "weight": 45}], [])
+    # Invalid ownership, over-limit weights and locked wildcard must not
+    # replace the valid atomic commitment on the host.
+    session.call("request_policy_zones", "defense", "guard", [{"targets": [home_index], "weight": 101}], [])
+    session.call("request_policy_zones", "offense", "invasion", [{"targets": [home_index], "weight": 100}], [])
+    session.call("request_policy_zones", "wildcard", "invasion", [{"targets": [home_index], "weight": 1}], [])
     session.call("request_thresholds", home_index, "Metals", 15.0, 65.0)
     # Invalid and unauthorized threshold requests must not win.
     session.call("request_thresholds", home_index, "Metals", 99.0, 101.0)
@@ -356,7 +362,7 @@ func _check_economy_sync() -> void:
             # every transient queue state to coexist in one snapshot.
             var equipped: Dictionary = state.get("policies", {}).get(owner, {})
             var checks: Dictionary = {
-                "policy": equipped.get("defense", {}).get("card", "") == "guard" and equipped.get("defense", {}).get("targets", []).has(state["planets"].find(system)) and not equipped.has("wildcard"),
+                "policy": equipped.get("defense", {}).get("card", "") == "guard" and equipped.get("defense", {}).get("targets", []).has(state["planets"].find(system)) and not equipped.has("wildcard") and not equipped.has("offense") and equipped.get("defense", {}).get("zones", []) == [{"targets": [state["planets"].find(system)], "weight": 45}],
                 "0": defense_ok,
                 "1": correct_upgrade_costs,
                 "2": priced_slots.get(2, {}) == ECON._cost("yard", 2),
