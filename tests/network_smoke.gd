@@ -131,7 +131,7 @@ func _phase_changed() -> void:
 						system["population"] = 150000.0
 						system["levels"]["Organics"] = 3
 						for resource in ECON.RESOURCES:
-							system["stock"][resource] = maxf(float(system["stock"][resource]), 2000.0)
+							system["stock"][resource] = maxf(float(system["stock"][resource]), 25000.0)
 			call_deferred("_prepare_commands")
 			create_timer(0.5).timeout.connect(_check_economy_sync)
 		if role == "host":
@@ -237,15 +237,34 @@ func _send_commands() -> void:
 	var initial: Dictionary = session.get("economy")
 	var field_node: int = initial["planets"].size()
 	var own_fighters: Array[int] = []
+	var own_miners: Array[int] = []
+	var enemy_miner: int = -1
 	var enemy_fighter: int = -1
 	var self_id: int = session.multiplayer.get_unique_id()
 	for craft in initial["ships"]:
+		if craft["kind"] == "miner":
+			if int(craft["owner"]) == self_id:
+				own_miners.append(int(craft["id"]))
+			else:
+				enemy_miner = int(craft["id"])
 		if craft["kind"] != "fighter":
 			continue
 		if int(craft["owner"]) == self_id:
 			own_fighters.append(int(craft["id"]))
 		else:
 			enemy_fighter = int(craft["id"])
+	var mining_field: int = -1
+	for i in range(initial["map"]["fields"].size()):
+		var field: Dictionary = initial["map"]["fields"][i]
+		if i != 0 and not bool(field.get("antimatter", false)) and ECON.field_access_systems(initial["map"], field).has(home_index) and not field["chunks"].is_empty():
+			mining_field = i
+			break
+	if mining_field < 0:
+		_fail("No nearby regular mining field for command test.")
+		return
+	session.call("request_miner_assignment", [own_miners[0]], mining_field)
+	session.call("request_miner_assignment", [own_miners[0], enemy_miner], -1)
+	session.call("request_miner_assignment", [own_miners[0]], 999999)
 	session.call("request_fighter_move", [own_fighters[0]], field_node)
 	session.call("request_fighter_move", [own_fighters[0]], -1)
 	session.call("request_fighter_move", [own_fighters[0], enemy_fighter], home_index)
@@ -370,6 +389,10 @@ func _check_economy_sync() -> void:
 					priced_slots[int(job["level"])] = job["cost"]
 			var correct_upgrade_costs: bool = true
 			for job in system["queue"]:
+				for material in job["cost"]:
+					if not is_equal_approx(float(job["allocated"][material]), float(job["cost"][material])):
+						_fail("Replicated construction was not prepaid.")
+						return
 				if job["kind"] in ["production", "yard_upgrade"]:
 					correct_upgrade_costs = correct_upgrade_costs and job["cost"] == ECON._cost(job["kind"], int(job["level"]))
 			var pds_jobs: Array = system["queue"].filter(func(order: Dictionary) -> bool: return order["kind"] == "pds")
@@ -386,7 +409,12 @@ func _check_economy_sync() -> void:
 						ordered += 1
 					elif craft.get("holding", false) and state["planets"][int(craft["at"])]["owner"] == owner and (craft["route"] as Array).is_empty():
 						idle += 1
+			var assigned_miners: int = 0
+			for craft in state["ships"]:
+				if int(craft["owner"]) == owner and craft["kind"] == "miner" and int(craft.get("assigned_field", -1)) >= 0:
+					assigned_miners += 1
 			var checks: Dictionary = {
+				"miner_assignment": assigned_miners == 1,
 				"no_policies": not state.has("policies") && not flags.has("production:Organics"),
 				"0": defense_ok,
 				"1": correct_upgrade_costs,

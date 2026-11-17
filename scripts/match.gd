@@ -888,7 +888,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 		var button: Button = card["button"]
 		_sync_repeat(card["repeat"], p, "economy_building:" + resource, owned and ECONOMY.production_available(p, resource))
 		button.text = "Build"
-		button.disabled = not owned or not ECONOMY.building_available(p, resource)
+		button.disabled = not owned or not ECONOMY.building_available(p, resource) or not ECONOMY.affordable(p, ECONOMY.building_cost(p, resource))
 		var cost: String = _cost_text(ECONOMY.building_cost(p, resource))
 		var requirement: String = "%s population" % _compact_amount(float(definition["population"]))
 		var unmet: PackedStringArray = []
@@ -940,7 +940,7 @@ func _refresh_pds(planet: Dictionary, owned: bool) -> void:
 	progress.visible = not job.is_empty()
 	var action: Button = pds_card["button"]
 	action.text = "Build" if slot >= 0 else "Complete"
-	action.disabled = not owned or slot < 0 or not job.is_empty()
+	action.disabled = not owned or slot < 0 or not job.is_empty() or not ECONOMY.affordable(planet, ECONOMY._cost("pds", slot + 1))
 	pds_card["cancel"].visible = not job.is_empty()
 	pds_card["cancel"].disabled = not owned or job.is_empty()
 	pds_card["detail"].text = "One battery per planet · %.0f damage / shot · Range %.0f · Fires once/yr" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
@@ -1088,8 +1088,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	if not selected_units.is_empty():
 		fleet_detail.visible = true
 		fleet_title.text = "Fleet"
-		fleet_detail.text = "%d fighters · %d colony ships" % [fighters.size(), selected_units.size() - fighters.size()]
-		fleet_detail.tooltip_text = "Shift-click toggles selection; right click orders movement; H holds fighters. Ctrl+1–9 assigns a group, 1–9 recalls it."
+		var miners: Array[int] = _selected_miners()
+		fleet_detail.text = "%d fighters · %d colony ships · %d miners" % [fighters.size(), selected_units.size() - fighters.size() - miners.size(), miners.size()]
+		fleet_detail.tooltip_text = "Shift-click toggles selection; right-click a field or rock to assign miners; right-click a system to restore autonomous mining. H holds fighters. Ctrl+1–9 assigns a group, 1–9 recalls it."
 		return
 	var total: int = 0
 	var traveling: int = 0
@@ -1963,7 +1964,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 		yard_activity_rows[index]["vacant_cancel"].hide()
 		if vacant:
 			yard_activity_rows[index]["cancel"].hide()
-		build.disabled = not can_build
+		build.disabled = not can_build or not ECONOMY.affordable(p, ECONOMY._cost("yard", number))
 		costs.visible = can_build
 		yard_activity_rows[index]["actions"].visible = not vacant
 		yard_activity_rows[index]["row"].visible = number <= p["yards"].size() + 1 if not p.is_empty() else false
@@ -2013,7 +2014,7 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 			cancelling.set_meta("job_callback", callback)
 			cancelling.pressed.connect(callback)
 		_sync_repeat(repeat, p, "yard_upgrade:" + str(index), repeat.visible and str(session.get("phase")) == "match")
-		upgrade.disabled = not owned or not existing or pending or not operating
+		upgrade.disabled = not owned or not existing or pending or not operating or not ECONOMY.affordable(p, ECONOMY._cost("yard_upgrade", level + 1))
 		upgrade.text = "Upgrade"
 		_disclosure_title(yard_activity_rows[index], "Upgrade to Lv %d" % (level + 1) if existing and not pending else ("Upgrade pending" if existing else "Construction details"))
 		yard_activity_rows[index]["upgrade_detail"].text = "Build speed %.0f → %.0f work/yr · Max size %d → %d" % [ECONOMY.yard_speed(level), ECONOMY.yard_speed(level + 1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1)] if existing else "Adds a shipyard · %.0f yr" % float(job["work"])
@@ -2104,7 +2105,8 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
 			if float(p["population"]) < float(ECONOMY.CREW_COSTS[kind]) + 1.0:
 				requirements.append("Insufficient population")
 			if not ECONOMY.affordable(p, ECONOMY._cost(kind, 1)):
-				requirements.append("Insufficient local materials · construction waits")
+				requirements.append("Insufficient local materials")
+		card["button"].disabled = not owned or p.is_empty() or not ECONOMY.affordable(p, ECONOMY._cost(kind, 1)) or (kind == "ship" and not bool(p.get("home", false)))
 		card["requirements"].text = "\n".join(requirements)
 		card["requirements"].visible = not requirements.is_empty()
 		var job: Dictionary = first_jobs.get(kind, {})
@@ -2479,7 +2481,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 	if additive and not selected_units.is_empty():
 		var valid: bool = false
 		for craft in state["ships"]:
-			if int(craft["id"]) == next_ship and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship"]:
+			if int(craft["id"]) == next_ship and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship", "miner"]:
 				valid = true
 				break
 		if not valid:
@@ -2488,7 +2490,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 	if not additive:
 		selected_units.clear()
 	for craft in state["ships"]:
-		if int(craft["id"]) == selected_ship_id and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship"]:
+		if int(craft["id"]) == selected_ship_id and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship", "miner"]:
 			if additive and selected_units.has(selected_ship_id):
 				selected_units.erase(selected_ship_id)
 				selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
@@ -2520,7 +2522,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	var poses: Dictionary = _ship_poses(state)
 	for craft in state.get("ships", []):
 		var id: int = int(craft["id"])
-		if int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship"] and poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
+		if int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship", "miner"] and poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
 			selected_units.append(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 	selected = -1
@@ -2541,6 +2543,24 @@ func _command_at(point: Vector2) -> void:
 			distance = d
 	if node < 0:
 		return
+	var miners: Array[int] = _selected_miners()
+	if not miners.is_empty():
+		var field_index: int = node - state["planets"].size()
+		var rock_id: int = -1
+		var rock_distance: float = INF
+		var fields: Array = state["map"].get("fields", [])
+		for i in range(fields.size()):
+			if not ECONOMY.discovered(state, _me(), "fields", i):
+				continue
+			for rock in fields[i].get("chunks", []):
+				var d: float = point.distance_to(_screen_point(rock["position"]))
+				if d < rock_distance and d <= maxf(5.0, float(rock.get("radius", 0.0)) * _fit() * zoom):
+					rock_distance = d
+					field_index = i
+					rock_id = int(rock["id"])
+		if field_index < 0:
+			field_index = -1
+		session.call("request_miner_assignment", miners, field_index, rock_id)
 	var fighters: Array[int] = []
 	var colony_sent: bool = false
 	for craft in state["ships"]:
@@ -2554,6 +2574,13 @@ func _command_at(point: Vector2) -> void:
 			colony_sent = true
 	if not fighters.is_empty():
 		session.call("request_fighter_move", fighters, node)
+
+func _selected_miners() -> Array[int]:
+	var miners: Array[int] = []
+	for craft in _state().get("ships", []):
+		if int(craft["owner"]) == _me() and craft["kind"] == "miner" and selected_units.has(int(craft["id"])):
+			miners.append(int(craft["id"]))
+	return miners
 
 func _selected_fighters() -> Array[int]:
 	var fighters: Array[int] = []
@@ -3035,6 +3062,19 @@ func _draw_map() -> void:
 			var finish: Vector2 = _screen_point(order_points[int(node)])
 			map_canvas.draw_line(start, finish, Color(HUD.ACCENT, 0.5), 1.5, true)
 			start = finish
+		if craft["kind"] == "miner":
+			var assigned: int = int(craft.get("assigned_field", -1))
+			if assigned >= 0:
+				var field: Dictionary = state["map"]["fields"][assigned]
+				var target: Vector2 = field["position"]
+				for rock in field.get("chunks", []):
+					if int(rock["id"]) == int(craft.get("assigned_chunk", -1)):
+						target = rock["position"]
+						break
+				var marker: Vector2 = _screen_point(target)
+				map_canvas.draw_arc(marker, 9.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
+			if craft.get("mining_mode", "") in ["approach", "outbound", "mining"] and craft.has("mining_target"):
+				map_canvas.draw_line(start, _screen_point(craft["mining_target"]), Color(HUD.ACCENT, 0.5), 1.5, true)
 		if not (craft["route"] as Array).is_empty():
 			map_canvas.draw_arc(start, 7.0, 0.0, TAU, 20, HUD.ACCENT, 1.5, true)
 	for index in range(points.size()):

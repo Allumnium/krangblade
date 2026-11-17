@@ -584,7 +584,7 @@ static func next_shipyard_slot(p: Dictionary) -> int:
 
 # Move later construction down one slot when an earlier job is cancelled.
 # Preserve its fractional work, but retain only the cheaper recipe's
-# proportional allocation; return the difference to local stock.
+# full prepaid allocation; return the difference to local stock.
 static func _compact_shipyard_orders(p: Dictionary, removed_level: int) -> void:
 	for item in p["queue"]:
 		if item["kind"] != "yard" or int(item["level"]) <= removed_level:
@@ -594,7 +594,7 @@ static func _compact_shipyard_orders(p: Dictionary, removed_level: int) -> void:
 		var cost: Dictionary = _cost("yard", level)
 		var allocated: Dictionary = empty_stock()
 		for resource in RESOURCES:
-			allocated[resource] = float(cost.get(resource, 0.0)) * fraction
+			allocated[resource] = float(cost.get(resource, 0.0))
 			p["stock"][resource] += float(item["allocated"][resource]) - float(allocated[resource])
 		item["level"] = level
 		item["cost"] = cost
@@ -644,7 +644,7 @@ static func _buy_habitation(p: Dictionary) -> bool:
 	if not habitation_available(p):
 		return false
 	for resource in habitation_cost(p):
-		p["stock"][resource] -= habitation_cost(p)[resource]
+		_spend_material(p, "Construction: habitation", resource, float(habitation_cost(p)[resource]))
 	p["habitation_level"] = int(p.get("habitation_level", 0)) + 1
 	return true
 
@@ -653,7 +653,7 @@ static func _buy_warehouse(p: Dictionary) -> bool:
 		return false
 	var level: int = int(p.get("warehouse_level", 0))
 	for material in WAREHOUSE_COSTS[level]:
-		p["stock"][material] -= float(WAREHOUSE_COSTS[level][material])
+		_spend_material(p, "Construction: warehouse", material, float(WAREHOUSE_COSTS[level][material]))
 	p["warehouse_level"] = level + 1
 	return true
 
@@ -722,11 +722,18 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 				return false
 			level = int(p["levels"][target]) + 1
 		_: return false
+	var cost: Dictionary = building_cost(p, target) if kind == "economy_building" else _cost(kind, level)
+	if not affordable(p, cost):
+		return false
+	var paid: Dictionary = empty_stock()
+	for material in cost:
+		paid[material] = float(cost[material])
+		_spend_material(p, "Construction: " + kind, material, float(cost[material]))
 	var id: int = int(state["next_id"])
 	state["next_id"] = id + 1
 	p["queue"].append({"id": id, "kind": kind, "target": target, "level": level,
-		"cost": building_cost(p, target) if kind == "economy_building" else _cost(kind, level), "work": 30.0 if kind == "economy_building" else _work(kind, level),
-		"progress": 0.0, "allocated": empty_stock(), "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
+		"cost": cost, "work": 30.0 if kind == "economy_building" else _work(kind, level),
+		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
 	return true
 
 static func production_modifier(system: Dictionary, resource: String) -> float:
@@ -821,11 +828,16 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 		else:
 			manual_hulls[item["kind"]] = true
 	var cycle: Dictionary = p.get("repeat_cycle", {})
-	if not waiting and idle:
+	var all_turns: bool = true
+	for key in keys:
+		if SHIP_KINDS.has(key) and _maintain_needed(state, index, p, str(key)) and not manual_hulls.has(key) and not cycle.has(key):
+			all_turns = false
+	if not waiting and idle and all_turns:
 		cycle.clear()
 	for key in cycle.keys():
 		if not _maintain_needed(state, index, p, str(key)):
 			cycle.erase(key)
+	var hull_waiting_for_funds: bool = false
 	for key in keys:
 		if not _maintain_needed(state, index, p, str(key)):
 			continue
@@ -841,7 +853,7 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 				p["continuous"][key] = false
 			continue
 		if SHIP_KINDS.has(order[0]):
-			if (p["yards"] as Array).is_empty() or cycle.has(key) or manual_hulls.has(key):
+			if hull_waiting_for_funds or (p["yards"] as Array).is_empty() or cycle.has(key) or manual_hulls.has(key):
 				continue
 			# Do not duplicate a waiting order if its repeat toggle was
 			# switched off and on during the same cycle.
@@ -859,6 +871,8 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 			p["queue"][-1]["automatic"] = true
 			if SHIP_KINDS.has(order[0]):
 				cycle[key] = true
+		elif SHIP_KINDS.has(order[0]):
+			hull_waiting_for_funds = true
 	p["repeat_cycle"] = cycle
 
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
@@ -896,15 +910,19 @@ static func set_thresholds(state: Dictionary, player: int, index: int, resource:
 	p["thresholds"][resource] = {"min": minimum, "max": maximum, "import": importing, "export": exporting}
 	return true
 
+static func _spend_material(p: Dictionary, category: String, resource: String, amount: float) -> void:
+	p["stock"][resource] = maxf(0.0, float(p["stock"][resource]) - amount)
+	var pending: Dictionary = p.get("pending_spending", {})
+	if not pending.has(category):
+		pending[category] = {}
+	pending[category][resource] = float(pending[category].get(resource, 0.0)) + amount
+	p["pending_spending"] = pending
+
 static func _possible(p: Dictionary, item: Dictionary) -> float:
 	var work: float = float(item["work"])
 	var possible: float = work - float(item["progress"])
 	if item["kind"] == "colony_ship" and float(p["population"]) + EPS < _remaining_colony_crew(item) + SHIPYARD_POPULATION[0]:
 		return 0.0
-	for resource in item["cost"]:
-		var per_work: float = float(item["cost"][resource]) / work
-		if per_work > 0.0:
-			possible = minf(possible, float(p["stock"][resource]) / per_work)
 	var people_per_work: float = float(item.get("population_cost", 0.0)) / work
 	if people_per_work > 0.0:
 		possible = minf(possible, maxf(0.0, float(p["population"]) - 1.0) / people_per_work)
@@ -917,20 +935,12 @@ static func construction_blockers(p: Dictionary, item: Dictionary) -> Array[Stri
 	var missing: Array[String] = []
 	if float(item["work"]) - float(item["progress"]) <= EPS:
 		return missing
-	for resource in item["cost"]:
-		if float(item["cost"][resource]) > EPS and float(p["stock"].get(resource, 0.0)) <= EPS:
-			missing.append(resource)
 	if (item["kind"] == "colony_ship" and float(p["population"]) + EPS < _remaining_colony_crew(item) + SHIPYARD_POPULATION[0]) or (float(item.get("population_cost", 0.0)) > 0.0 and float(p["population"]) <= 1.0 + EPS) or (int(item.get("size", 0)) > 0 and not p["yards"].is_empty() and operational_shipyards(p) == 0) or (item["kind"] == "yard_upgrade" and not shipyard_operational(p, int(item["target"]))):
 		missing.append("Population")
 	return missing
 
 static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> bool:
 	var amount: float = minf(work_budget, _possible(p, item))
-	for resource in item["cost"]:
-		var used: float = amount * float(item["cost"][resource]) / float(item["work"])
-		p["stock"][resource] = maxf(0.0, float(p["stock"][resource]) - used)
-		item["allocated"][resource] = float(item["allocated"][resource]) + used
-		_record_flow(p, "Construction: " + str(item["kind"]), resource, used)
 	var crew: float = amount * float(item.get("population_cost", 0.0)) / float(item["work"])
 	p["population"] = maxf(0.0, float(p["population"]) - crew)
 	p["crew_rate"] = float(p.get("crew_rate", 0.0)) + crew / maxf(EPS, float(p.get("flow_dt", 1.0)))
@@ -1020,6 +1030,10 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 			if item["kind"] != "yard" or int(item["level"]) == (p["yards"] as Array).size() + 1:
 				_finish(state, index, p, item)
 	_refill_continuous(state, index, p)
+	for category in p.get("pending_spending", {}):
+		for material in p["pending_spending"][category]:
+			_record_flow(p, str(category), str(material), float(p["pending_spending"][category][material]))
+	p.erase("pending_spending")
 	var assigned: Dictionary = {}
 	# Preserve active jobs. A started upgrade remains attached to its own yard even if blocked.
 	for y in range((p["yards"] as Array).size()):
@@ -1386,6 +1400,69 @@ static func field_access_systems(map_data: Dictionary, field: Dictionary) -> Arr
 			result.append(i)
 	return result
 
+static func command_miners(state: Dictionary, player: int, ids: Array, field_index: int, chunk_id: int = -1) -> bool:
+	if ids.is_empty() or not state["teams"].has(player) or field_index < -1 or chunk_id < -1 or (field_index == -1 and chunk_id != -1):
+		return false
+	var fields: Array = state["map"].get("fields", [])
+	if field_index >= fields.size():
+		return false
+	var requested: Dictionary = {}
+	for id in ids:
+		if not id is int or requested.has(id):
+			return false
+		requested[id] = true
+	var selected: Array = []
+	for ship in state["ships"]:
+		if requested.has(ship["id"]):
+			if int(ship["owner"]) != player or ship.get("kind", "") != "miner":
+				return false
+			selected.append(ship)
+	if selected.size() != requested.size():
+		return false
+	if field_index >= 0:
+		if not discovered(state, player, "fields", field_index):
+			return false
+		var field: Dictionary = fields[field_index]
+		var resources: Array[String] = _mining_resources(state, player, field_index)
+		var useful: bool = false
+		for chunk in field.get("chunks", []):
+			if (chunk_id < 0 or int(chunk["id"]) == chunk_id) and resources.has(str(chunk["resource"])) and float(chunk["remaining"]) > EPS:
+				useful = true
+				break
+		if not useful:
+			return false
+		var teams: Array[int] = planet_teams(state)
+		var team: int = int(state["teams"][player])
+		for ship in selected:
+			var reachable: bool = false
+			for anchor in field_access_systems(state["map"], field):
+				if _mining_path(state, teams, team, int(ship["at"]), anchor, {}).is_empty():
+					continue
+				for depot in range(state["planets"].size()):
+					if int(state["planets"][depot]["owner"]) == player and not _mining_path(state, teams, team, anchor, depot, {}).is_empty():
+						reachable = true
+						break
+				if reachable:
+					break
+			if not reachable:
+				return false
+	for ship in selected:
+		ship["assigned_field"] = field_index
+		ship["assigned_chunk"] = chunk_id
+		ship["next_mining_search"] = 0.0
+		# Preserve physical position, carried ore and the minimum extraction stay.
+		if field_index >= 0 and (int(ship.get("field", -1)) != field_index or (chunk_id >= 0 and int(ship.get("chunk", -1)) != chunk_id)):
+			var mode: String = str(ship.get("mining_mode", "idle"))
+			if mode == "approach":
+				var route: Array = ship["route"]
+				if not route.is_empty():
+					ship["route"] = route.slice(0, 1)
+				ship["mining_mode"] = "delivery"
+				ship["field"] = -1
+			elif mode == "outbound":
+				ship["mining_mode"] = "return"
+	return true
+
 static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
 	var fields: Array = state["map"].get("fields", [])
 	var owner: int = int(ship["owner"])
@@ -1395,7 +1472,25 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 	var best_path: Array[int] = []
 	var best_chunk: Dictionary = {}
 	var best_anchor: int = -1
+	var assigned: int = int(ship.get("assigned_field", -1))
+	var preferred: int = int(ship.get("assigned_chunk", -1))
+	if assigned >= 0:
+		var usable: bool = false
+		var preferred_usable: bool = false
+		for chunk in fields[assigned].get("chunks", []):
+			if float(chunk["remaining"]) > EPS and _mining_resources(state, owner, assigned).has(str(chunk["resource"])):
+				usable = true
+				if int(chunk["id"]) == preferred:
+					preferred_usable = true
+		if not usable:
+			assigned = -1
+			ship["assigned_field"] = -1
+		if not preferred_usable:
+			preferred = -1
+			ship["assigned_chunk"] = -1
 	for i in range(fields.size()):
+		if assigned >= 0 and i != assigned:
+			continue
 		var field: Dictionary = fields[i]
 		if not discovered(state, owner, "fields", i) or _mining_resources(state, owner, i).is_empty():
 			continue
@@ -1417,6 +1512,8 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 				if depot >= 0:
 					return_distances[resource] = MAP.route_length(state["map"], _mining_path(state, teams, team, depot, anchor, cache))
 			for chunk in field.get("chunks", []):
+				if preferred >= 0 and int(chunk["id"]) != preferred:
+					continue
 				if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
 					continue
 				var depot: int = int(depots.get(chunk["resource"], -1))
@@ -1498,7 +1595,8 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			if float(chunk["remaining"]) <= EPS:
 				field["chunks"].erase(chunk)
 				available = false
-		if float(ship["mining_years"]) >= MINING_STAY - EPS and (not available or _cargo_total(ship) >= MINER_CAPACITY - 0.1):
+		var reassigned: bool = int(ship.get("assigned_field", -1)) >= 0 and (int(ship["assigned_field"]) != field_index or (int(ship.get("assigned_chunk", -1)) >= 0 and int(ship["assigned_chunk"]) != int(ship["chunk"])))
+		if float(ship["mining_years"]) >= MINING_STAY - EPS and (reassigned or not available or _cargo_total(ship) >= MINER_CAPACITY - 0.1):
 			ship["mining_mode"] = "return"
 		return
 	if mode == "return":

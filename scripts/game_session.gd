@@ -579,6 +579,23 @@ func _fighter_move_for(id: int, ids: Array, target: int) -> void:
 	if _active_player(id) and ECONOMY.command_fighters(economy, id, ids, target):
 		_publish_economy()
 
+func request_miner_assignment(ids: Array, field: int, chunk: int = -1) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_miner_assignment_for(1, ids, field, chunk)
+	else:
+		_rpc_miner_assignment.rpc_id(1, ids, field, chunk)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_miner_assignment(ids: Array, field: int, chunk: int) -> void:
+	if multiplayer.is_server():
+		_miner_assignment_for(multiplayer.get_remote_sender_id(), ids, field, chunk)
+
+func _miner_assignment_for(id: int, ids: Array, field: int, chunk: int) -> void:
+	if _active_player(id) and ECONOMY.command_miners(economy, id, ids, field, chunk):
+		_publish_economy()
+
 func request_fighter_hold(ids: Array) -> void:
 	if phase != "match":
 		return
