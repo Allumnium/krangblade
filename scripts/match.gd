@@ -54,7 +54,55 @@ var pan: Vector2 = Vector2.ZERO
 var drag_button: int = 0
 var ship_visuals: Dictionary = {}
 var ship_offsets: Dictionary = {}
-const SHIP_WORLD_SCALE: float = 3.0
+const SHIP_WORLD_SCALE: float = 1.5
+# Authored top-down silhouette and interior panel geometry in hull-local
+# coordinates (forward, lateral). Logistics keeps its original cargo bays.
+const HULL_OUTLINES: Dictionary = {
+	"fighter": [Vector2(12, 0), Vector2(6, 2.5), Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-6, 3), Vector2(-10, 2.5), Vector2(-10, -2.5), Vector2(-6, -3), Vector2(-7, -7.5), Vector2(-3, -8), Vector2(2.5, -3), Vector2(6, -2.5)],
+	"miner": [Vector2(10, 5), Vector2(6, 5), Vector2(3, 7), Vector2(-5, 7), Vector2(-8, 4), Vector2(-8, -4), Vector2(-5, -7), Vector2(3, -7), Vector2(6, -5), Vector2(10, -5), Vector2(10, -2.5), Vector2(5, -2.5), Vector2(4, 0), Vector2(5, 2.5), Vector2(10, 2.5)],
+	"colony_ship": [Vector2(13, 0), Vector2(8, 3), Vector2(5, 3.5), Vector2(3, 6.5), Vector2(-5, 7), Vector2(-9, 4), Vector2(-11, 3), Vector2(-11, -3), Vector2(-9, -4), Vector2(-5, -7), Vector2(3, -6.5), Vector2(5, -3.5), Vector2(8, -3)]
+}
+const HULL_PANELS: Dictionary = {
+	"fighter": [
+		[Color("#6b493e"), [Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-5, 3)]],
+		[Color("#6b493e"), [Vector2(2.5, -3), Vector2(-3, -8), Vector2(-7, -7.5), Vector2(-5, -3)]],
+		[Color("#ffcb9f"), [Vector2(11, 0), Vector2(5, 1.4), Vector2(-4, 1.5), Vector2(-7, 0), Vector2(-4, -1.5), Vector2(5, -1.4)]],
+		[Color("#203b52"), [Vector2(6, 0), Vector2(2, 1.7), Vector2(-1, 1.2), Vector2(-1, -1.2), Vector2(2, -1.7)]],
+		[Color("#e4a26f"), [Vector2(-3, 6), Vector2(-4.8, 7), Vector2(-6, 6), Vector2(-5, 4.5)]],
+		[Color("#e4a26f"), [Vector2(-3, -6), Vector2(-4.8, -7), Vector2(-6, -6), Vector2(-5, -4.5)]],
+		[Color("#263746"), [Vector2(-7, 2.2), Vector2(-10, 2.2), Vector2(-10, 0.4), Vector2(-7, 0.4)]],
+		[Color("#263746"), [Vector2(-7, -2.2), Vector2(-10, -2.2), Vector2(-10, -0.4), Vector2(-7, -0.4)]],
+		[Color("#a0eaff"), [Vector2(-9.3, 2), Vector2(-10, 2), Vector2(-10, 0.7), Vector2(-9.3, 0.7)]],
+		[Color("#a0eaff"), [Vector2(-9.3, -2), Vector2(-10, -2), Vector2(-10, -0.7), Vector2(-9.3, -0.7)]]
+	],
+	"miner": [
+		[Color("#66753e"), [Vector2(3, 6), Vector2(-4, 6), Vector2(-7, 3), Vector2(-3, 3), Vector2(2, 3)]],
+		[Color("#66753e"), [Vector2(3, -6), Vector2(-4, -6), Vector2(-7, -3), Vector2(-3, -3), Vector2(2, -3)]],
+		[Color("#dfe6ba"), [Vector2(4, 0), Vector2(2, 3), Vector2(-2, 3), Vector2(-4, 0), Vector2(-2, -3), Vector2(2, -3)]],
+		[Color("#203b52"), [Vector2(3, 0), Vector2(1, 1.7), Vector2(-1, 1.7), Vector2(-1, -1.7), Vector2(1, -1.7)]],
+		[Color("#344435"), [Vector2(-3, 5.5), Vector2(-5.5, 5.2), Vector2(-6, 3.4), Vector2(-3, 3.4)]],
+		[Color("#344435"), [Vector2(-3, -5.5), Vector2(-5.5, -5.2), Vector2(-6, -3.4), Vector2(-3, -3.4)]],
+		[Color("#b0f4a8"), [Vector2(9.5, 4.6), Vector2(7, 4.6), Vector2(7, 2.9), Vector2(9.5, 2.9)]],
+		[Color("#b0f4a8"), [Vector2(9.5, -4.6), Vector2(7, -4.6), Vector2(7, -2.9), Vector2(9.5, -2.9)]],
+		[Color("#9de6ff"), [Vector2(-7, 2.5), Vector2(-8, 2.5), Vector2(-8, -2.5), Vector2(-7, -2.5)]]
+	],
+	"colony_ship": [
+		[Color("#695a88"), [Vector2(3, 6.5), Vector2(-5, 7), Vector2(-8, 4), Vector2(-4, 3), Vector2(3, 3)]],
+		[Color("#695a88"), [Vector2(3, -6.5), Vector2(-5, -7), Vector2(-8, -4), Vector2(-4, -3), Vector2(3, -3)]],
+		[Color("#e0d5f5"), [Vector2(12, 0), Vector2(7, 2.4), Vector2(-7, 2.4), Vector2(-9, 0), Vector2(-7, -2.4), Vector2(7, -2.4)]],
+		[Color("#35465f"), [Vector2(9, 0), Vector2(5, 1.6), Vector2(3, 1.3), Vector2(3, -1.3), Vector2(5, -1.6)]],
+		[Color("#35465f"), [Vector2(2, 5.7), Vector2(-1, 5.7), Vector2(-1, 3.8), Vector2(2, 3.8)]],
+		[Color("#35465f"), [Vector2(-2, 5.8), Vector2(-5, 5.8), Vector2(-5, 3.8), Vector2(-2, 3.8)]],
+		[Color("#35465f"), [Vector2(2, -5.7), Vector2(-1, -5.7), Vector2(-1, -3.8), Vector2(2, -3.8)]],
+		[Color("#35465f"), [Vector2(-2, -5.8), Vector2(-5, -5.8), Vector2(-5, -3.8), Vector2(-2, -3.8)]],
+		[Color("#a9e5f2"), [Vector2(1.6, 5.3), Vector2(-0.6, 5.3), Vector2(-0.6, 4.5), Vector2(1.6, 4.5)]],
+		[Color("#a9e5f2"), [Vector2(-2.4, 5.3), Vector2(-4.6, 5.3), Vector2(-4.6, 4.5), Vector2(-2.4, 4.5)]],
+		[Color("#a9e5f2"), [Vector2(1.6, -5.3), Vector2(-0.6, -5.3), Vector2(-0.6, -4.5), Vector2(1.6, -4.5)]],
+		[Color("#a9e5f2"), [Vector2(-2.4, -5.3), Vector2(-4.6, -5.3), Vector2(-4.6, -4.5), Vector2(-2.4, -4.5)]],
+		[Color("#293b54"), [Vector2(-7, 2.8), Vector2(-11, 2.8), Vector2(-11, -2.8), Vector2(-7, -2.8)]],
+		[Color("#9de6ff"), [Vector2(-10, 2), Vector2(-11, 2), Vector2(-11, -2), Vector2(-10, -2)]]
+	]
+}
 var interaction_panel: VBoxContainer
 var logistics_lens: Button
 var active_lens: String = ""
@@ -120,7 +168,6 @@ var trade_sliders: Dictionary = {}
 var trade_checks: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var pds_card: Dictionary = {}
-var pds_system: int = -1
 var economy_cards: Dictionary = {}
 var warehouse_card: Dictionary = {}
 var continuous_checks: Dictionary = {}
@@ -1050,13 +1097,13 @@ func _build_body_overview(parent: Container) -> void:
 
 func _upgrade_selected_body() -> void:
 	if selected >= 0 and selected_body >= 0:
-		_operation("pds", str(selected_body))
+		_operation("pds", "")
 
 func _cancel_selected_body() -> void:
 	if selected_body < 0:
 		return
 	var job: Dictionary = ECONOMY.pds_job(_planet())
-	if not job.is_empty() and int(job["target"]) == selected_body:
+	if not job.is_empty():
 		_cancel_job(int(job["id"]))
 
 func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
@@ -1068,28 +1115,21 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	var defenses: Dictionary = system.get("pds", {})
 	var battery: Dictionary = defenses.get(selected_body, {})
 	var job: Dictionary = ECONOMY.pds_job(system)
-	var building: bool = not job.is_empty() and int(job["target"]) == selected_body
-	var cost: Dictionary = ECONOMY._cost("pds", selected_body + 1)
-	var installed: bool = not battery.is_empty()
+	var building: bool = not job.is_empty()
+	var cost: Dictionary = ECONOMY._cost("pds", 1)
+	var full: bool = ECONOMY.next_pds(system) < 0
 	body_defense.text = "Battery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
-	body_status.text = "Operational · %.0f / %.0f HP" % [float(battery.get("hp", 0.0)), ECONOMY.PDS_HP] if installed else ("Under construction" if building else "Undefended")
-	if not installed and not building:
-		if not owned:
-			body_status.text += " · Not owned"
-		elif not job.is_empty():
-			body_status.text += " · Another defense is being built"
-		elif not ECONOMY.affordable(system, cost):
-			body_status.text += " · Insufficient local materials"
-	body_costs.visible = not installed
-	if not installed:
+	body_status.text = ("Operational · %.0f / %.0f HP" % [float(battery.get("hp", 0.0)), ECONOMY.PDS_HP] if not battery.is_empty() else "Undefended") + "\nSystem defenses: %d/%d" % [defenses.size(), int(system["planet_count"])]
+	body_costs.visible = not full
+	if not full:
 		_show_cost(body_costs, job["cost"] if building else cost)
 	body_progress.visible = building
 	if building:
 		body_progress.value = 100.0 * float(job["progress"]) / float(job["work"])
 		_style_progress(body_progress, system, job)
-	body_upgrade.visible = not installed
-	body_upgrade.disabled = not owned or not job.is_empty() or installed or not ECONOMY.affordable(system, cost)
-	_set_timed_action(body_upgrade, "Build PDS", ECONOMY._work("pds", selected_body + 1))
+	body_upgrade.visible = not full
+	body_upgrade.disabled = not owned or building or full or not ECONOMY.affordable(system, cost)
+	_set_timed_action(body_upgrade, "Build system PDS", ECONOMY._work("pds", 1))
 	body_cancel.visible = building
 	body_cancel.disabled = not owned or not building
 
@@ -1101,11 +1141,6 @@ func _build_pds_card(parent: Container) -> void:
 	var detail := _label("", 12)
 	body.add_child(detail)
 	var summary: VBoxContainer = pds_card["summary"]
-	var picker := OptionButton.new()
-	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	picker.add_theme_font_size_override("font_size", 12)
-	picker.fit_to_longest_item = false
-	summary.add_child(picker)
 	var status := _label("", 11)
 	summary.add_child(status)
 	var progress := ProgressBar.new()
@@ -1113,79 +1148,43 @@ func _build_pds_card(parent: Container) -> void:
 	section.add_child(progress)
 	section.move_child(progress, body.get_index())
 	var costs: GridContainer = _cost_grid(summary)
-	var action: Button = _card_action(pds_card, "Build", func() -> void:
-		var slot: int = _system_pds_slot()
-		if slot >= 0:
-			_operation("pds", str(slot)))
+	var action: Button = _card_action(pds_card, "Build", _operation.bind("pds", ""))
 	var cancel: Button = _card_cancel(pds_card, _pds_action, progress)
 	HUD.action(action)
-	pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel, "picker": picker, "status": status})
-	picker.item_selected.connect(func(_index: int) -> void:
-		var system: Dictionary = _planet()
-		if not system.is_empty():
-			_refresh_pds(system, int(system["owner"]) == _me() and str(session.get("phase")) == "match"))
-
-func _system_pds_slot() -> int:
-	var picker: OptionButton = pds_card["picker"]
-	return picker.get_selected_id() if picker.selected >= 0 else -1
+	pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel, "status": status})
 
 func _pds_action() -> void:
 	var job: Dictionary = ECONOMY.pds_job(_planet())
-	if not job.is_empty() and int(job["target"]) == _system_pds_slot():
+	if not job.is_empty():
 		_cancel_job(int(job["id"]))
 
 func _refresh_pds(planet: Dictionary, owned: bool) -> void:
-	var has_planets: bool = ECONOMY.has_planets(planet)
-	pds_card["header"].get_parent().get_parent().visible = has_planets
-	if not has_planets:
+	pds_card["header"].get_parent().get_parent().visible = ECONOMY.has_planets(planet)
+	if not ECONOMY.has_planets(planet):
 		return
-	var defenses: Dictionary = planet.get("pds", {})
-	var count: int = defenses.size()
+	var count: int = planet.get("pds", {}).size()
 	var limit: int = int(planet["planet_count"])
 	var job: Dictionary = ECONOMY.pds_job(planet)
-	var picker: OptionButton = pds_card["picker"]
-	var slot: int = _system_pds_slot()
-	var changed_system: bool = selected != pds_system
-	if changed_system or slot < 0 or slot >= limit:
-		slot = int(job["target"]) if not job.is_empty() else maxi(0, ECONOMY.next_pds(planet))
-	if changed_system or picker.item_count != limit:
-		picker.clear()
-		for i in range(limit):
-			picker.add_item(_body_name(selected, i), i)
-		pds_system = selected
-	for i in range(limit):
-		var suffix: String = " · PDS" if defenses.has(i) else (" · Building" if not job.is_empty() and int(job["target"]) == i else "")
-		var caption: String = _body_name(selected, i) + suffix
-		if picker.get_item_text(i) != caption:
-			picker.set_item_text(i, caption)
-	if picker.selected != slot:
-		picker.select(slot)
+	var building: bool = not job.is_empty()
+	var full: bool = count >= limit
+	var cost: Dictionary = ECONOMY._cost("pds", 1)
 	_disclosure_title(pds_card, "Planetary defense · %d/%d" % [count, limit])
-	var installed: bool = defenses.has(slot)
-	var building: bool = not job.is_empty() and int(job["target"]) == slot
-	var cost: Dictionary = ECONOMY._cost("pds", slot + 1)
 	var progress: ProgressBar = pds_card["progress"]
 	progress.visible = building
 	var action: Button = pds_card["button"]
-	_set_timed_action(action, "Complete" if installed else "Build", -1.0 if installed else ECONOMY._work("pds", slot + 1))
-	action.disabled = not owned or installed or not job.is_empty() or not ECONOMY.affordable(planet, cost)
+	_set_timed_action(action, "Complete" if full else "Build", -1.0 if full else ECONOMY._work("pds", 1))
+	action.disabled = not owned or full or building or not ECONOMY.affordable(planet, cost)
 	pds_card["cancel"].visible = building
 	pds_card["cancel"].disabled = not owned or not building
-	var status_text: String = "Operational · %.0f / %.0f HP" % [float(defenses[slot].get("hp", 0.0)), ECONOMY.PDS_HP] if installed else ("Under construction" if building else "Undefended")
-	if not installed and not building:
-		if not job.is_empty():
-			status_text += " · Another defense is being built"
-		elif not ECONOMY.affordable(planet, cost):
-			status_text += " · Insufficient local materials"
-	pds_card["status"].text = status_text
-	pds_card["detail"].text = "One battery per planet\nBattery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f\nSystem defenses: %d%s / %d" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE, count, "" if installed else " → %d" % (count + 1), limit]
-	pds_card["costs"].visible = not installed
+	pds_card["status"].text = "Fully defended" if full else ("Under construction" if building else ("Insufficient local materials" if not ECONOMY.affordable(planet, cost) else ""))
+	pds_card["detail"].text = "One battery per planet, assigned automatically\nBattery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f\nSystem defenses: %d%s / %d" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE, count, "" if full else " → %d" % (count + 1), limit]
+	pds_card["costs"].visible = not full
 	if building:
 		progress.value = 100.0 * float(job["progress"]) / float(job["work"])
 		progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
 		_style_progress(progress, planet, job)
 		_show_cost(pds_card["costs"], job["cost"])
-	elif not installed:
+	elif not full:
 		_show_cost(pds_card["costs"], cost)
 
 func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
@@ -2759,7 +2758,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 	var ship_distance: float = INF
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance <= maxf(5.0, 12.0 * _ship_scale()) and distance < ship_distance:
+		if distance <= maxf(5.0, 14.0 * _ship_scale()) and distance < ship_distance:
 			ship_distance = distance
 			ship_hit = int(id)
 	var next_ship: int = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
@@ -3126,8 +3125,14 @@ func _orbit_offset(slot: int, radius: float, time: float) -> Vector2:
 func _orbit_direction(offset: Vector2) -> Vector2:
 	return Vector2(-offset.y, offset.x).normalized()
 
+func _hull_polygon(origin: Vector2, forward: Vector2, lateral: Vector2, vertices: Array) -> PackedVector2Array:
+	var polygon := PackedVector2Array()
+	for vertex in vertices:
+		polygon.append(origin + forward * vertex.x + lateral * vertex.y)
+	return polygon
+
 func _ship_scale() -> float:
-	return SHIP_WORLD_SCALE * _fit() * zoom
+	return minf(SHIP_WORLD_SCALE * _fit() * zoom, 1.25)
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 	_sync_ship_visuals(state)
@@ -3457,12 +3462,8 @@ func _draw_map() -> void:
 		if ship["kind"] == "ship":
 			hull = Color("#788ca0")
 			shape = PackedVector2Array([point + direction * 14 + side * 4, point + direction * 10 + side * 8, point - direction * 13 + side * 8, point - direction * 13 - side * 8, point + direction * 10 - side * 8, point + direction * 14 - side * 4])
-		if colony:
-			shape = PackedVector2Array([point + direction * 12, point + side * 7, point - direction * 9, point - side * 7])
-		if fighter:
-			shape = PackedVector2Array([point + direction * 12, point - direction * 7 + side * 8, point - direction * 3, point - direction * 7 - side * 8])
-		if ship.get("kind", "ship") == "miner":
-			shape = PackedVector2Array([point + direction * 8 + side * 4, point + direction * 8 - side * 4, point - direction * 6 - side * 7, point - direction * 6 + side * 7])
+		elif HULL_OUTLINES.has(ship["kind"]):
+			shape = _hull_polygon(point, direction, side, HULL_OUTLINES[ship["kind"]])
 		var physical: Vector2 = ship.get("position", Vector2.ZERO)
 		var target: Vector2 = ship.get("navigation_target", physical)
 		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not ECONOMY._engaged(ship)) and physical.distance_to(target) > ECONOMY.EPS:
@@ -3502,6 +3503,11 @@ func _draw_map() -> void:
 					var filled := PackedVector2Array([module + direction * end + side * 3, module + direction * start + side * 3, module + direction * start - side * 3, module + direction * end - side * 3])
 					map_canvas.draw_colored_polygon(filled, HUD.COLORS[segment["resource"]])
 					start = end
+		elif scale >= 0.42 and HULL_PANELS.has(ship["kind"]) and viewport_bounds.grow(24.0).has_point(point):
+			# At distant zoom levels the silhouette and allegiance outline are
+			# enough. Draw layered panels only when they can actually be seen.
+			for panel in HULL_PANELS[ship["kind"]]:
+				map_canvas.draw_colored_polygon(_hull_polygon(point, direction, side, panel[1]), panel[0])
 		var outline: PackedVector2Array = shape.duplicate()
 		outline.append(shape[0])
 		map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)

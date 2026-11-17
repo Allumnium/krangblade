@@ -607,9 +607,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
 				1: return {"Metals": 480.0}
 				2: return {"Metals": 2000.0, "Plastics": 500.0, "Textiles": 500.0, "Organics": 200.0, "Tech": 100.0, "Crystals": 100.0}
 				3: return {"Metals": 6000.0, "Plastics": 1500.0, "Textiles": 1500.0, "Organics": 600.0, "Tech": 300.0, "Crystals": 300.0}
-		"pds":
-			var factor: float = pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))
-			return {"Metals": 540.0 * factor, "Plastics": 120.0 * factor, "Textiles": 60.0 * factor, "Organics": 60.0 * factor, "Tech": 60.0 * factor}
+		"pds": return {"Metals": 540.0, "Plastics": 120.0, "Textiles": 60.0, "Organics": 60.0, "Tech": 60.0}
 		"yard_upgrade": return {"Metals": 240.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"production": return {"Metals": 200.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 	return {}
@@ -780,13 +778,13 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 				return false
 			level = int(p["yards"][y]["level"]) + 1
 		"pds":
-			if not target.is_empty() and not target.is_valid_int():
+			if not target.is_empty():
 				return false
-			var slot: int = next_pds(p) if target.is_empty() else int(target)
+			var slot: int = next_pds(p)
 			if slot < 0 or slot >= int(p.get("planet_count", 0)) or p.get("pds", {}).has(slot) or not pds_job(p).is_empty():
 				return false
 			target = str(slot)
-			level = slot + 1
+			level = 1
 		"economy":
 			if target == "orbital_housing":
 				return _buy_orbital_housing(p)
