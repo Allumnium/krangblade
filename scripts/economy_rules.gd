@@ -65,6 +65,7 @@ const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
 const LASER_DAMAGE: float = 18.0
 const PDS_DAMAGE: float = LASER_DAMAGE * 2.0
+const PDS_HP: float = SHIP_HP
 const LASER_RANGE: float = 180.0
 const PURSUIT_YEARS: float = 3.0
 const AI_INTERVAL: float = 4.0
@@ -925,7 +926,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
         "production":
             p["levels"][item["target"]] = int(item["level"])
         "pds":
-            p["pds"][int(item["target"])] = {"cooldown": 0.0, "target": -1, "laser_until": -1.0}
+            p["pds"][int(item["target"])] = {"hp": PDS_HP, "cooldown": 0.0, "target": -1, "laser_until": -1.0}
         "yard":
             p["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0})
         "yard_upgrade":
@@ -1208,6 +1209,9 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
         return
     var planets: Array = state["planets"]
     var here: int = int(ship["at"])
+    if teams[here] != team:
+        _evacuate_civilian(state, ship, teams)
+        return
     var source: int = int(ship["source"])
     var dest: int = int(ship["dest"])
     if source == here and dest >= 0 and teams[here] == team and teams[dest] == team:
@@ -1462,6 +1466,9 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
     var owner: int = int(ship["owner"])
     var team: int = int(state["teams"].get(owner, 0))
     var local: Dictionary = state["planets"][here]
+    if teams[here] not in [0, team]:
+        _evacuate_civilian(state, ship, teams)
+        return
     if int(local["owner"]) == owner:
         for resource in MINED_RESOURCES:
             var amount: float = minf(float(ship["cargo"][resource]), storage_free(local, resource))
@@ -1821,7 +1828,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
             cells[cell] = []
         cells[cell].append(ship)
     var yard_targets: Dictionary = {}
-    for index in range(state["planets"].size()):
+    var pds_targets: Dictionary = {}
+    var system_count: int = (state["planets"] as Array).size()
+    for index in range(system_count):
         var system: Dictionary = state["planets"][index]
         for slot in range(system["yards"].size()):
             var target_id: int = -2 - index * 3 - slot
@@ -1832,6 +1841,17 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
             if not cells.has(cell):
                 cells[cell] = []
             cells[cell].append({"id": target_id, "owner": system["owner"], "kind": "shipyard"})
+        for slot in system.get("pds", {}):
+            # Disjoint negative ID range; all batteries use the same
+            # authoritative fire/range origin as their defensive shots.
+            var target_id: int = -2 - system_count * 3 - int(slot) * system_count - index
+            var pos: Vector2 = graph["points"][index]
+            pds_targets[target_id] = Vector2i(index, int(slot))
+            positions[target_id] = pos
+            var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+            if not cells.has(cell):
+                cells[cell] = []
+            cells[cell].append({"id": target_id, "owner": system["owner"], "kind": "pds"})
     var damage: Dictionary = {}
     for ship in ships:
         if ship.get("kind", "") != "fighter":
@@ -1841,6 +1861,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
             ship["pursuit_target"] = -1
             ship["pursuit_left"] = 0.0
             ship["laser_until"] = -1.0
+            ship["yard_target"] = -1
+            ship["yard_laser_until"] = -1.0
             continue
         var id: int = int(ship["id"])
         var pos: Vector2 = positions[id]
@@ -1963,6 +1985,16 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
             ship["hp"] = maxf(0.0, float(ship.get("hp", SHIP_HP)) - float(damage[id]))
             if float(ship["hp"]) <= EPS:
                 ships.erase(ship)
+    # Fixed batteries and shipyards participate in simultaneous damage.
+    for id in pds_targets:
+        if not damage.has(id):
+            continue
+        var location: Vector2i = pds_targets[id]
+        var defenses: Dictionary = state["planets"][location.x]["pds"]
+        var battery: Dictionary = defenses[location.y]
+        battery["hp"] = maxf(0.0, float(battery.get("hp", PDS_HP)) - float(damage[id]))
+        if float(battery["hp"]) <= EPS:
+            defenses.erase(location.y)
     # Remove in reverse slot order to preserve indices during compaction.
     var destroyed: Array[int] = []
     for id in yard_targets:
@@ -2565,6 +2597,11 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
         if not withdrawing or not _repair_site_safe(state, graph, int(ship["owner"]), site):
             var replacement: int = _nearest_repair_site(state, graph, ship, paths)
             if replacement < 0:
+                if withdrawing:
+                    ship["retreating"] = false
+                    ship.erase("repair_site")
+                    ship.erase("withdrawal_objective")
+                    ship["dest"] = -1
                 continue
             site = replacement
         if not withdrawing:
@@ -2747,6 +2784,64 @@ static func _invasion_objectives(state: Dictionary, player: int) -> Dictionary:
                     objectives[node] = true
     return objectives
 
+# Find a safe escape route after a civilian's planned route becomes
+# hostile. Consider both ends of its existing leg without moving the hull.
+# Only the initial hostile waypoint may be used to leave hostile territory.
+static func _evacuate_civilian(state: Dictionary, ship: Dictionary, teams: Array[int]) -> bool:
+    var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+    var miner: bool = ship.get("kind", "") == "miner"
+    var points: Array = state["map"]["points"]
+    _ensure_position(points, ship)
+    var here: int = int(ship["at"])
+    var origins: Array[int] = [here]
+    if not (ship["route"] as Array).is_empty():
+        origins.append(int(ship["route"][0]))
+    var best: float = INF
+    var chosen: Array[int] = []
+    var destination: int = -1
+    for origin in origins:
+        var allowed: Array[int] = teams.duplicate()
+        allowed[origin] = team
+        for node in range(teams.size()):
+            if teams[node] != team or (miner and int(state["planets"][node]["owner"]) != int(ship["owner"])):
+                continue
+            var path: Array[int] = _mining_path(state, allowed, team, origin, node, {}) if miner else MAP.path(state["map"], allowed, team, origin, node)
+            if path.is_empty():
+                continue
+            var distance: float = (ship["position"] as Vector2).distance_to(points[origin]) + MAP.route_length(state["map"], path)
+            if distance < best:
+                best = distance
+                chosen = path
+                destination = node
+    ship["route"] = chosen
+    ship["leg"] = _lane_progress(points, ship)
+    ship["source"] = -1
+    ship["dest"] = destination
+    if miner:
+        ship["mining_mode"] = "delivery"
+        ship["field"] = -1
+        if destination < 0:
+            ship["dest"] = here
+    return destination >= 0
+
+static func _reroute_after_capture(state: Dictionary, index: int) -> void:
+    var teams: Array[int] = planet_teams(state)
+    for ship in state["ships"]:
+        var kind: String = str(ship.get("kind", ""))
+        if kind not in ["ship", "miner"]:
+            continue
+        var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+        if teams[index] == team:
+            continue
+        if int(ship["at"]) != index and int(ship.get("source", -1)) != index and int(ship.get("dest", -1)) != index and not (ship["route"] as Array).has(index):
+            continue
+        # Off-lane miners must first fly back to their former approach
+        # waypoint, then escape rather than unload into hostile stocks.
+        if kind == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
+            ship["mining_mode"] = "return"
+            continue
+        _evacuate_civilian(state, ship, teams)
+
 static func _capture_system(state: Dictionary, index: int, player: int) -> void:
     var planet: Dictionary = state["planets"][index]
     var former: int = int(planet["owner"])
@@ -2761,6 +2856,7 @@ static func _capture_system(state: Dictionary, index: int, player: int) -> void:
     planet["home"] = false
     planet["owner"] = player
     planet["capture"] = {}
+    _reroute_after_capture(state, index)
 
 static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> void:
     var planets: Array = state["planets"]
@@ -2788,7 +2884,7 @@ static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> v
         occupiers[node][player] = int(occupiers[node].get(player, 0)) + 1
     for node in range(planets.size()):
         var planet: Dictionary = planets[node]
-        if not occupiers.has(node) or not (planet["yards"] as Array).is_empty():
+        if not occupiers.has(node) or not (planet["yards"] as Array).is_empty() or not planet.get("pds", {}).is_empty():
             if planet.has("capture"):
                 planet.erase("capture")
             continue

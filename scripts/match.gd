@@ -2979,10 +2979,22 @@ func _draw_map() -> void:
         var target: int = int(ship.get("combat_target", -1))
         var yard_target: int = int(ship.get("yard_target", -1))
         if poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
-            var index: int = floori(float(-2 - yard_target) / 3.0)
-            var slot: int = posmod(-2 - yard_target, 3)
-            if index < state["planets"].size() and slot < state["planets"][index]["yards"].size():
-                map_canvas.draw_line(poses[shooter]["point"], _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), Color("#ffbf96"), 1.5, true)
+            var encoded: int = -2 - yard_target
+            var count: int = (state["planets"] as Array).size()
+            if encoded < count * 3:
+                var index: int = floori(float(encoded) / 3.0)
+                var slot: int = posmod(encoded, 3)
+                if slot < state["planets"][index]["yards"].size():
+                    map_canvas.draw_line(poses[shooter]["point"], _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), Color("#ffbf96"), 1.5, true)
+            else:
+                var pds_index: int = posmod(encoded - count * 3, count)
+                var pds_slot: int = floori(float(encoded - count * 3) / float(count))
+                if state["planets"][pds_index].get("pds", {}).has(pds_slot):
+                    var endpoint: Vector2 = _screen_point(points[pds_index])
+                    var pds_radius: float = _planet_radius(pds_index, state)
+                    if pds_index == selected and zoom >= 2.0 and pds_radius >= 18.0:
+                        endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, game_visual_clock)
+                    map_canvas.draw_line(poses[shooter]["point"], endpoint, Color("#ffbf96"), 1.5, true)
         if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
             map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ff6f6060"), 4.0, true)
             map_canvas.draw_line(poses[shooter]["point"], poses[target]["point"], Color("#ffbf96"), 1.0, true)
