@@ -19,6 +19,9 @@ var cancelled_yard_id: int = -1
 var promoted_yard_id: int = -1
 var yard_rebuilt: bool = false
 var commands_sent: bool = false
+var hold_release_id: int = -1
+var hold_release_sent: bool = false
+var hold_release_verified: bool = false
 var next_diagnostic: float = 10.0
 var speed_stage: int = 0
 var paused_elapsed: float = -1.0
@@ -323,6 +326,14 @@ func _send_commands() -> void:
 	session.call("request_fighter_move", [own_fighters[0], enemy_fighter], home_index)
 	session.call("request_fighter_hold", [own_fighters[1]])
 	session.call("request_fighter_hold", [own_fighters[0], enemy_fighter])
+	var graph: Dictionary = ECON.military_graph(initial)
+	var local_point: Vector2 = graph["points"][home_index] + Vector2.RIGHT * ECON.sector_limit(graph, home_index, Vector2.RIGHT) * 0.25
+	session.call("request_local_position", [own_fighters[1]], home_index, local_point)
+	session.call("request_local_position", [own_fighters[1], enemy_fighter], home_index, local_point)
+	session.call("request_local_position", [own_fighters[1]], home_index, graph["points"][(home_index + 1) % expected_players])
+	session.call("request_unit_hold", [own_fighters[1], enemy_fighter], true)
+	hold_release_id = own_miners[1]
+	session.call("request_unit_hold", [hold_release_id], false)
 	session.call("request_thresholds", home_index, "Metals", 15.0, 65.0)
 	# Invalid and unauthorized threshold requests must not win.
 	session.call("request_thresholds", home_index, "Metals", 99.0, 101.0)
@@ -374,6 +385,14 @@ func _check_economy_sync() -> void:
 		_send_commands()
 		state = session.get("economy")
 	if commands_sent:
+		for craft in state["ships"]:
+			if int(craft["id"]) != hold_release_id:
+				continue
+			if not hold_release_sent and bool(craft.get("holding", false)):
+				hold_release_sent = true
+				session.call("request_unit_hold", [hold_release_id], true)
+			elif hold_release_sent and not bool(craft.get("holding", false)):
+				hold_release_verified = true
 		var own: Dictionary = state["planets"][home_index]
 		if not cancel_sent:
 			for item in own["queue"]:
@@ -463,17 +482,23 @@ func _check_economy_sync() -> void:
 			# every transient queue state to coexist in one snapshot.
 			var ordered: int = 0
 			var idle: int = 0
+			var local_held: bool = false
+			var graph: Dictionary = ECON.military_graph(state)
+			var owner_home: int = state["planets"].find(system)
+			var local_point: Vector2 = graph["points"][owner_home] + Vector2.RIGHT * ECON.sector_limit(graph, owner_home, Vector2.RIGHT) * 0.25
 			for craft in state["ships"]:
 				if int(craft["owner"]) == owner and craft["kind"] == "fighter":
 					if craft.get("operation_target", -1) == field_node and craft.get("direct_order", false):
 						ordered += 1
 					elif craft.get("holding", false) and state["planets"][int(craft["at"])]["owner"] == owner and (craft["route"] as Array).is_empty():
 						idle += 1
+						local_held = local_held or (craft.get("hold_position", Vector2.INF) as Vector2).is_equal_approx(local_point) and (craft["position"] as Vector2).is_equal_approx(local_point)
 			var assigned_miners: int = 0
 			for craft in state["ships"]:
 				if int(craft["owner"]) == owner and craft["kind"] == "miner" and int(craft.get("assigned_field", -1)) >= 0:
 					assigned_miners += 1
 			var checks: Dictionary = {
+				"local_position": local_held,
 				"miner_assignment": assigned_miners == 1,
 				"no_policies": not state.has("policies") && not flags.has("production:Organics"),
 				"0": defense_ok,
@@ -524,7 +549,7 @@ func _check_economy_sync() -> void:
 		for index in range(expected_players):
 			var outpost: Dictionary = state["planets"][int(state["map"]["planetless"][index])]
 			orbital_verified = orbital_verified and int(outpost.get("orbital_housing", 0)) == 1 and float(outpost["population"]) == ECON.ORBITAL_HOUSING_POPULATION
-		if cancel_sent and yard_rebuilt and verified == expected_players and orbital_verified and view != null and view.has_method("_update_trade_stock"):
+		if cancel_sent and yard_rebuilt and hold_release_verified and verified == expected_players and orbital_verified and view != null and view.has_method("_update_trade_stock"):
 			view.set("selected", home_index)
 			view.call("_load_thresholds")
 			view.call("_refresh")

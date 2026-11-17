@@ -36,6 +36,7 @@ func _initialize() -> void:
 	_test_opening_pacing()
 	_test_neutral_direct_occupation()
 	_test_idle_formations()
+	_test_local_position_orders()
 	_test_civilian_waiting_movement()
 	_test_depleted_field_routes()
 	_test_wide_patrol_rally_and_conquest()
@@ -1623,6 +1624,64 @@ func _test_idle_formations() -> void:
 	for i in range(3):
 		assert(int(squad[i]["dest"]) == objective and not (squad[i]["route"] as Array).is_empty())
 	print("PASS: authoritative idle formations wander, preserve bounds and resume direct navigation")
+
+func _test_local_position_orders() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	for kind in ["fighter", "ship", "miner", "colony_ship"]:
+		var id: int = state["ships"].size() + 100
+		state["ships"].append({"id": id, "owner": 1, "kind": kind, "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"})
+	var fighter: Dictionary = state["ships"][0]
+	var freighter: Dictionary = state["ships"][1]
+	freighter["cargo"]["Metals"] = 10.0
+	var point := Vector2(150, 200)
+	var selection: Array = [100, 101, 102, 103]
+	assert(not ECON.command_local_position(state, 2, selection, 0, point))
+	assert(not ECON.command_local_position(state, 1, [100, 999], 0, point))
+	assert(not ECON.command_local_position(state, 1, [100, 100], 0, point))
+	assert(not ECON.command_local_position(state, 1, selection, 1, map["points"][1]))
+	assert(not ECON.command_local_position(state, 1, selection, 0, map["points"][1]))
+	assert(not ECON.command_local_position(state, 1, selection, 0, Vector2.INF))
+	assert(ECON.command_local_position(state, 1, selection, 0, point))
+	for craft in state["ships"]:
+		assert(craft["position"] == Vector2.ZERO and craft["holding"])
+	for tick in range(50):
+		var previous: Vector2 = fighter["position"]
+		ECON.step(state, 0.1)
+		assert(previous.distance_to(fighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		for ship in state["ships"]:
+			assert(ECON.sector_contains(ECON.military_graph(state), 0, ship["position"]))
+	for craft in state["ships"]:
+		assert(craft["position"] == point and craft["holding"])
+	assert(freighter["cargo"]["Metals"] == 10.0)
+	assert(ECON.command_hold_units(state, 1, selection, true))
+	for tick in range(20):
+		ECON.step(state, 0.1)
+	for craft in state["ships"]:
+		assert(not craft.get("holding", false) and not craft.has("hold_position"))
+	assert(fighter["position"] != point)
+	assert(ECON.command_local_position(state, 1, [100], 0, point))
+	assert(ECON.command_fighters(state, 1, [100], 1))
+	assert(not fighter.get("holding", false) and not fighter.has("hold_position") and fighter["route"].has(1))
+	# Emergency repair can temporarily leave the held sector, but the
+	# original position must be recovered through the actual lane.
+	var repair_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(1000, 0)], "edges": [[0, 2], [1, 2]], "fields": []}
+	var repair: Dictionary = ECON.create(repair_map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var damaged: Dictionary = {"id": 200, "owner": 1, "kind": "fighter", "at": 2, "origin": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(1000, 0), "heading": Vector2.UP, "hp": ECON.SHIP_HP}
+	repair["ships"] = [damaged]
+	var post := Vector2(1000, 25)
+	assert(ECON.command_local_position(repair, 1, [200], 2, post))
+	damaged["hp"] = ECON.WITHDRAW_HP
+	var repaired: bool = false
+	for tick in range(500):
+		var previous: Vector2 = damaged["position"]
+		ECON.step(repair, 0.1)
+		assert(previous.distance_to(damaged["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		repaired = repaired or (damaged["at"] == 0 and is_equal_approx(float(damaged["hp"]), ECON.SHIP_HP))
+		if repaired and damaged["at"] == 2 and damaged["position"] == post:
+			break
+	assert(repaired and damaged["position"] == post and damaged["holding"])
+	print("PASS: position and hold all hull classes, bounded travel, ownership/sector validation, release and lane orders")
 
 func _test_civilian_waiting_movement() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)

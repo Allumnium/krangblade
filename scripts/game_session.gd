@@ -755,6 +755,40 @@ func _fighter_hold_for(id: int, ids: Array) -> void:
 	if _active_player(id) and ECONOMY.hold_fighters(economy, id, ids):
 		_publish_economy()
 
+func request_local_position(ids: Array, node: int, point: Vector2) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_local_position_for(1, ids, node, point)
+	else:
+		_rpc_local_position.rpc_id(1, ids, node, point)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_local_position(ids: Array, node: int, point: Vector2) -> void:
+	if multiplayer.is_server():
+		_local_position_for(multiplayer.get_remote_sender_id(), ids, node, point)
+
+func _local_position_for(id: int, ids: Array, node: int, point: Vector2) -> void:
+	if _active_player(id) and ECONOMY.command_local_position(economy, id, ids, node, point):
+		_publish_economy()
+
+func request_unit_hold(ids: Array, release: bool) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_unit_hold_for(1, ids, release)
+	else:
+		_rpc_unit_hold.rpc_id(1, ids, release)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_unit_hold(ids: Array, release: bool) -> void:
+	if multiplayer.is_server():
+		_unit_hold_for(multiplayer.get_remote_sender_id(), ids, release)
+
+func _unit_hold_for(id: int, ids: Array, release: bool) -> void:
+	if _active_player(id) and ECONOMY.command_hold_units(economy, id, ids, release):
+		_publish_economy()
+
 func _active_player(id: int) -> bool:
 	return _match_peer(id) and economy.get("match_result", {}).is_empty() and not economy.get("eliminated", []).has(id)
 
