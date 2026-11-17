@@ -579,6 +579,23 @@ func _fighter_move_for(id: int, ids: Array, target: int) -> void:
 	if _active_player(id) and ECONOMY.command_fighters(economy, id, ids, target):
 		_publish_economy()
 
+func request_fighter_hold(ids: Array) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_fighter_hold_for(1, ids)
+	else:
+		_rpc_fighter_hold.rpc_id(1, ids)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_fighter_hold(ids: Array) -> void:
+	if multiplayer.is_server():
+		_fighter_hold_for(multiplayer.get_remote_sender_id(), ids)
+
+func _fighter_hold_for(id: int, ids: Array) -> void:
+	if _active_player(id) and ECONOMY.hold_fighters(economy, id, ids):
+		_publish_economy()
+
 func _active_player(id: int) -> bool:
 	return _match_peer(id) and economy.get("match_result", {}).is_empty() and not economy.get("eliminated", []).has(id)
 

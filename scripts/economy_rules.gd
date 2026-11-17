@@ -9,7 +9,7 @@ const RESOURCES = ["Metals", "Plastics", "Textiles", "Organics", "Tech", "Crysta
 const EXTRACTED = ["Metals", "Plastics", "Crystals"]
 const ACTIVE_PRODUCTION = RESOURCES
 const STARTING_STOCK = {"Metals": 1650.0, "Plastics": 360.0, "Textiles": 240.0, "Organics": 300.0, "Tech": 240.0, "Crystals": 0.0}
-const BASE_INDUSTRIAL_RATE: float = 0.5
+const BASE_INDUSTRIAL_RATE: float = 1.0
 const INDUSTRIAL_POPULATION_PER_LEVEL: float = 100000.0
 const BUILDING_BONUS: float = 0.25
 const UPGRADE_COST_FACTOR: float = 3.0
@@ -26,7 +26,7 @@ const CONSTRUCTION_RESERVE: float = 500.0
 const CONSTRUCTION_PRODUCTION_SHARE: float = 0.1
 # Population is expressed in people (fractional values retained in simulation).
 const HOME_POPULATION: float = 10000.0
-const COLONY_POPULATION: float = 100000.0
+const COLONY_POPULATION: float = 40000.0
 const POPULATION_DOUBLING_YEARS: float = 30.0
 const PRODUCTION_PER_LEVEL: float = 4.0
 const ORGANICS_PER_LEVEL: float = 4.0
@@ -37,7 +37,7 @@ const POPULATION_RESPONSE: float = 0.065
 const FARM_VARIATION: float = 0.05
 const FARM_CYCLE_SECONDS: float = 100.0
 const START_YEAR: int = 1
-const CARGO_CAPACITY: float = 10.0
+const CARGO_CAPACITY: float = 30.0
 const FREIGHTER_BAY_COUNT: int = 7
 const FREIGHTER_BAY_CAPACITY: float = CARGO_CAPACITY / FREIGHTER_BAY_COUNT
 const MINED_RESOURCES = ["Metals", "Crystals"]
@@ -436,11 +436,17 @@ static func civilian_stock_access(planet: Dictionary, resource: String) -> float
 	var reserve: float = storage_capacity(planet) * threshold / 100.0
 	return minf(maxf(0.0, float(planet["stock"][resource])), reserve)
 
+static func construction_reserve(planet: Dictionary, resource: String) -> float:
+	# A shortage should not prevent saving for the next storage tier.
+	var tier: int = int(planet.get("warehouse_level", 0))
+	var next_cost: float = float(WAREHOUSE_COSTS[tier].get(resource, 0.0)) if tier < WAREHOUSE_COSTS.size() else 0.0
+	return minf(storage_capacity(planet), maxf(CONSTRUCTION_RESERVE, next_cost))
+
 static func net_rate(planet: Dictionary, resource: String) -> float:
 	var net: float = rate(planet, resource) - consumption(planet, resource)
 	if net > 0.0 and storage_free(planet, resource) <= EPS:
 		return 0.0
-	if net < 0.0 and resource != "Organics" and rate(planet, resource) > EPS and float(planet["stock"][resource]) < CONSTRUCTION_RESERVE:
+	if net < 0.0 and resource != "Organics" and rate(planet, resource) > EPS and float(planet["stock"][resource]) < construction_reserve(planet, resource):
 		return rate(planet, resource) * CONSTRUCTION_PRODUCTION_SHARE
 	if net < 0.0 and civilian_stock_access(planet, resource) <= EPS:
 		return 0.0
@@ -517,10 +523,10 @@ static func _has_job(planet: Dictionary, kind: String, target: String) -> bool:
 static func _cost(kind: String, level: int) -> Dictionary:
 	# Explicit prototype values; the final costs/recipes are intentionally undefined.
 	match kind:
-		"ship": return {"Metals": 360.0, "Plastics": 75.0, "Textiles": 45.0, "Organics": 45.0, "Tech": 30.0}
-		"colony_ship": return {"Metals": 1200.0, "Plastics": 120.0, "Textiles": 90.0, "Organics": 90.0, "Tech": 90.0}
-		"fighter": return {"Metals": 270.0, "Plastics": 60.0, "Textiles": 30.0, "Organics": 30.0, "Tech": 30.0}
-		"miner": return {"Metals": 540.0, "Plastics": 90.0, "Textiles": 45.0, "Organics": 60.0, "Tech": 60.0}
+		"ship": return {"Metals": 360.0, "Plastics": 75.0, "Textiles": 45.0, "Organics": 15.0, "Tech": 30.0}
+		"colony_ship": return {"Metals": 1200.0, "Plastics": 120.0, "Textiles": 90.0, "Organics": 30.0, "Tech": 90.0}
+		"fighter": return {"Metals": 270.0, "Plastics": 60.0, "Textiles": 30.0, "Organics": 10.0, "Tech": 30.0}
+		"miner": return {"Metals": 540.0, "Plastics": 90.0, "Textiles": 45.0, "Organics": 20.0, "Tech": 60.0}
 		"yard":
 			match level:
 				1: return {"Metals": 480.0}
@@ -893,6 +899,8 @@ static func set_thresholds(state: Dictionary, player: int, index: int, resource:
 static func _possible(p: Dictionary, item: Dictionary) -> float:
 	var work: float = float(item["work"])
 	var possible: float = work - float(item["progress"])
+	if item["kind"] == "colony_ship" and float(p["population"]) + EPS < _remaining_colony_crew(item) + SHIPYARD_POPULATION[0]:
+		return 0.0
 	for resource in item["cost"]:
 		var per_work: float = float(item["cost"][resource]) / work
 		if per_work > 0.0:
@@ -902,6 +910,9 @@ static func _possible(p: Dictionary, item: Dictionary) -> float:
 		possible = minf(possible, maxf(0.0, float(p["population"]) - 1.0) / people_per_work)
 	return maxf(0.0, possible)
 
+static func _remaining_colony_crew(item: Dictionary) -> float:
+	return maxf(0.0, float(item.get("population_cost", 0.0)) - float(item.get("population_allocated", 0.0)))
+
 static func construction_blockers(p: Dictionary, item: Dictionary) -> Array[String]:
 	var missing: Array[String] = []
 	if float(item["work"]) - float(item["progress"]) <= EPS:
@@ -909,7 +920,7 @@ static func construction_blockers(p: Dictionary, item: Dictionary) -> Array[Stri
 	for resource in item["cost"]:
 		if float(item["cost"][resource]) > EPS and float(p["stock"].get(resource, 0.0)) <= EPS:
 			missing.append(resource)
-	if (float(item.get("population_cost", 0.0)) > 0.0 and float(p["population"]) <= 1.0 + EPS) or (int(item.get("size", 0)) > 0 and not p["yards"].is_empty() and operational_shipyards(p) == 0) or (item["kind"] == "yard_upgrade" and not shipyard_operational(p, int(item["target"]))):
+	if (item["kind"] == "colony_ship" and float(p["population"]) + EPS < _remaining_colony_crew(item) + SHIPYARD_POPULATION[0]) or (float(item.get("population_cost", 0.0)) > 0.0 and float(p["population"]) <= 1.0 + EPS) or (int(item.get("size", 0)) > 0 and not p["yards"].is_empty() and operational_shipyards(p) == 0) or (item["kind"] == "yard_upgrade" and not shipyard_operational(p, int(item["target"]))):
 		missing.append("Population")
 	return missing
 
@@ -995,7 +1006,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		var potential: float = rate(p, resource) * dt
 		var demand: float = consumption(p, resource) * dt
 		var used: float = minf(demand, civilian_stock_access(p, resource) + potential)
-		if resource != "Organics" and potential > EPS and demand > potential and stored < CONSTRUCTION_RESERVE:
+		if resource != "Organics" and potential > EPS and demand > potential and stored < construction_reserve(p, resource):
 			used = minf(used, potential * (1.0 - CONSTRUCTION_PRODUCTION_SHARE))
 		var produced: float = minf(potential, used + storage_free(p, resource))
 		_record_flow(p, "Production", resource, produced)
@@ -1754,18 +1765,8 @@ static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, 
 static func command_fighters(state: Dictionary, player: int, ids: Array, target: int) -> bool:
 	if ids.is_empty() or not military_pois(state, player).has(target):
 		return false
-	var requested: Dictionary = {}
-	for id in ids:
-		if not id is int or requested.has(id):
-			return false
-		requested[id] = true
-	var selected: Array = []
-	for ship in state["ships"]:
-		if requested.has(ship["id"]):
-			if int(ship["owner"]) != player or ship.get("kind", "") != "fighter":
-				return false
-			selected.append(ship)
-	if selected.size() != requested.size():
+	var selected: Array = _owned_fighters(state, player, ids)
+	if selected.is_empty():
 		return false
 	var graph: Dictionary = military_graph(state)
 	var paths: Dictionary = _military_paths(graph, target)
@@ -1774,10 +1775,43 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 			return false
 	for ship in selected:
 		ship["direct_order"] = true
+		ship["holding"] = false
 		ship["operation_target"] = target
 		ship.erase("rally_pending")
 		if not bool(ship.get("retreating", false)):
 			_redirect_fighter(graph, ship, target, paths)
+	return true
+
+static func _owned_fighters(state: Dictionary, player: int, ids: Array) -> Array:
+	var requested: Dictionary = {}
+	for id in ids:
+		if not id is int or requested.has(id):
+			return []
+		requested[id] = true
+	var selected: Array = []
+	for ship in state["ships"]:
+		if requested.has(ship["id"]):
+			if int(ship["owner"]) != player or ship.get("kind", "") != "fighter":
+				return []
+			selected.append(ship)
+	if selected.size() != requested.size():
+		return []
+	return selected
+
+static func hold_fighters(state: Dictionary, player: int, ids: Array) -> bool:
+	var selected: Array = _owned_fighters(state, player, ids)
+	if selected.is_empty():
+		return false
+	for ship in selected:
+		ship["direct_order"] = true
+		ship["holding"] = true
+		ship["operation_target"] = int(ship["at"])
+		ship["pursuit_target"] = -1
+		ship["pursuit_left"] = 0.0
+		ship.erase("pursuit_blocked")
+		ship.erase("rally_pending")
+		if not bool(ship.get("retreating", false)) and ship.has("position"):
+			ship["navigation_target"] = ship["position"]
 	return true
 
 static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array, defer_routes: bool = false) -> void:
@@ -2008,13 +2042,13 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 					if distance < best or (is_equal_approx(distance, best) and (target < 0 or other_id < target)):
 						best = distance
 						target = other_id
-		if pursuit < 0 and target >= 0 and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[target])):
+		if not bool(ship.get("holding", false)) and pursuit < 0 and target >= 0 and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[target])):
 			pursuit = target
 			remaining = PURSUIT_YEARS
 		# A previously engaged fighter may escape the firing envelope before
 		# the next scan; its departure is still a valid pursuit trigger.
 		var prior: int = int(previous_targets[id])
-		if pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[prior])):
+		if not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[prior])):
 			pursuit = prior
 			remaining = PURSUIT_YEARS
 		if pursuit >= 0:
@@ -2242,6 +2276,10 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		if abundance > 0.0 and level == 0:
 			action = "economy"
 			target = "Metals"
+		elif index == home and owned.size() > 1 and counts["ship"] == 0:
+			action = "ship"
+		elif has_yard and owned.size() > 1 and counts["fighter"] < mini(12, owned.size() * 2):
+			action = "fighter"
 		elif index == home and expansion and counts["colony_ship"] == 0:
 			if float(p["population"]) >= CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
 				action = "colony_ship"
@@ -2250,8 +2288,6 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 				target = "Organics"
 		elif has_yard and counts["fighter"] == 0:
 			action = "fighter"
-		elif index == home and owned.size() > 1 and counts["ship"] == 0:
-			action = "ship"
 		elif has_yard and useful_fields > 0 and counts["miner"] == 0:
 			action = "miner"
 		elif index == home and level < 2 and abundance > 0.0:
@@ -2289,7 +2325,23 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		if action.is_empty():
 			continue
 		var build_level: int = next_shipyard_slot(p) if action == "yard" else 1
-		if not affordable(p, building_cost(p, target) if action == "economy" else _cost(action, build_level)) or float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
+		var price: Dictionary = building_cost(p, target) if action == "economy" else _cost(action, build_level)
+		if not affordable(p, price):
+			# Saving for an unaffordable hull must not leave mature systems
+			# waiting indefinitely for food or saturated industrial output.
+			for resource in price:
+				if float(p["stock"][resource]) >= float(price[resource]) or not ECONOMY_BUILDINGS.has(resource):
+					continue
+				if resource == "Metals" and abundance <= EPS:
+					continue
+				if rate(p, resource) - consumption(p, resource) >= 0.5:
+					continue
+				if int(p.get("buildings", {}).get(resource, 0)) >= 3:
+					continue
+				if affordable(p, building_cost(p, resource)) and enqueue(state, player, index, "economy", resource):
+					break
+			continue
+		if float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
 			continue
 		if enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):
 			counts[action] += 1
@@ -2464,7 +2516,7 @@ static func _sync_operations(state: Dictionary) -> void:
 		var target: int = int(ship.get("operation_target", ship.get("withdrawal_objective", ship.get("dest", -1))))
 		if target < 0:
 			target = int(ship["at"])
-		var role: String = "allocation"
+		var role: String = "hold" if bool(ship.get("holding", false)) else "allocation"
 		if state.get("ai_players", []).has(owner) and not bool(ship.get("direct_order", false)):
 			var wave: Dictionary = state.get("ai_waves", {}).get(owner, {})
 			role = "wave" if wave.get("members", []).has(int(ship["id"])) else "reserve"
@@ -2481,7 +2533,7 @@ static func _sync_operations(state: Dictionary) -> void:
 		var ship_id: int = int(ship["id"])
 		by_id[ship_id] = ship
 		operation["members"].append(ship_id)
-		operation["moving"] = bool(operation["moving"]) or not (ship["route"] as Array).is_empty()
+		operation["moving"] = bool(operation["moving"]) or (not (ship["route"] as Array).is_empty() and (not bool(ship.get("holding", false)) or bool(ship.get("retreating", false))))
 		operation["engaged"] = bool(operation["engaged"]) or _engaged(ship)
 	var reused: Dictionary = {}
 	var prior_by_id: Dictionary = {}
@@ -2623,7 +2675,7 @@ static func _move_formation(graph: Dictionary, ship: Dictionary, dt: float) -> b
 static func _formation_lane_groups(state: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
 	for craft in state["ships"]:
-		if craft.get("kind", "") != "fighter" or _engaged(craft) or bool(craft.get("retreating", false)) or (craft["route"] as Array).is_empty():
+		if craft.get("kind", "") != "fighter" or _engaged(craft) or bool(craft.get("retreating", false)) or bool(craft.get("holding", false)) or (craft["route"] as Array).is_empty():
 			continue
 		var key: String = "%d:%d:%d:%d" % [int(craft.get("operation_id", 0)), int(craft["at"]), int(craft["route"][0]), int(craft.get("dest", -1))]
 		if not groups.has(key):
@@ -2746,6 +2798,8 @@ static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Diction
 		ship.erase("withdrawal_objective")
 		# Normal dispatch resumes the latest allocation or AI reserve order.
 		ship["dest"] = -1
+		if bool(ship.get("holding", false)):
+			ship["operation_target"] = site
 
 static func _order_operation_ship(graph: Dictionary, ship: Dictionary, goal: int, paths: Dictionary) -> void:
 	if int(ship.get("dest", -1)) == goal:
@@ -2830,7 +2884,7 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 # Routing, docking, mining, combat and withdrawal always take precedence.
 static func _is_idle_ship(ship: Dictionary) -> bool:
 	var fighter: bool = ship.get("kind", "") == "fighter"
-	return (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle" and (fighter or int(ship.get("dest", -1)) < 0) and int(ship.get("source", -1)) < 0 and not _engaged(ship) and not bool(ship.get("retreating", false))
+	return (ship["route"] as Array).is_empty() and ship.get("mining_mode", "idle") == "idle" and (fighter or int(ship.get("dest", -1)) < 0) and int(ship.get("source", -1)) < 0 and not _engaged(ship) and not bool(ship.get("retreating", false)) and not bool(ship.get("holding", false))
 
 static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
@@ -3121,6 +3175,8 @@ static func step(state: Dictionary, dt: float) -> void:
 			var pursuit_id: int = int(ship.get("pursuit_target", -1))
 			if bool(ship.get("retreating", false)):
 				_work_withdrawal(state, combat_graph, ship, dt)
+			elif bool(ship.get("holding", false)):
+				ship["navigation_target"] = ship["position"]
 			elif coordinated.has(int(ship["id"])):
 				pass # Already moved as a group this tick.
 			elif combat_positions.has(pursuit_id):

@@ -68,6 +68,7 @@ var selected: int = -1
 var last_system_tab_selection: int = -1
 var selected_ship_id: int = -1
 var selected_units: Array[int] = []
+var control_groups: Dictionary = {}
 var selection_start: Vector2 = Vector2.ZERO
 var selection_end: Vector2 = Vector2.ZERO
 var selecting_units: bool = false
@@ -86,6 +87,7 @@ var fleet_scroll: ScrollContainer
 var fleet_overview: VBoxContainer
 var fleet_title: Label
 var fleet_detail: Label
+var hold_button: Button
 var fleet_cargo: VBoxContainer
 var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
@@ -349,6 +351,10 @@ func _build_ui() -> void:
 	fleet_overview.add_child(fleet_title)
 	fleet_detail = _label("", 14)
 	fleet_overview.add_child(fleet_detail)
+	hold_button = Button.new()
+	hold_button.text = "Hold position [H]"
+	hold_button.pressed.connect(_hold_selected)
+	fleet_overview.add_child(hold_button)
 	fleet_cargo = HUD.section(fleet_overview, "Cargo")
 	_build_cargo_rows(fleet_cargo, fleet_cargo_labels)
 	mining_controls = HUD.section(fleet_overview, "Mine")
@@ -1022,6 +1028,7 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	ship_cargo.get_parent().hide()
 	fleet_title.text = "Mining"
 	fleet_detail.hide()
+	hold_button.hide()
 	fleet_cargo.get_parent().hide()
 	mining_controls.get_parent().show()
 	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field)
@@ -1059,6 +1066,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Repairing" if route.is_empty() and site >= 0 and (ship["position"] as Vector2).distance_to(state["map"]["points"][site]) <= ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), owner, site) else "Withdrawing"
 	elif int(ship.get("pursuit_target", -1)) >= 0:
 		status = "Pursuing"
+	elif bool(ship.get("holding", false)):
+		status = "Holding position"
 	elif int(ship.get("combat_target", -1)) >= 0:
 		status = "Engaged"
 	ship_detail.text = "%s\n%s\nHP %.0f / %.0f" % [str(roster.get(owner, {}).get("name", "Player")), status, float(ship.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
@@ -1074,10 +1083,13 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	fleet_title.text = {"ship": "Logistics", "fighter": "Military", "miner": "Mining", "colony_ship": "Colonization"}.get(kind, "Fleet")
 	fleet_detail.visible = kind != "fighter"
 	fleet_cargo.get_parent().visible = cargo_capable
-	if kind == "fighter":
+	var fighters: Array[int] = _selected_fighters()
+	hold_button.visible = not fighters.is_empty()
+	if not selected_units.is_empty():
 		fleet_detail.visible = true
-		fleet_detail.text = "%d selected · %d fighters" % [selected_units.size(), int(ECONOMY.empire_totals(state, _me())["fighters"])]
-		fleet_detail.tooltip_text = "Left click or drag to select; Shift adds; right click orders movement to a sector."
+		fleet_title.text = "Fleet"
+		fleet_detail.text = "%d fighters · %d colony ships" % [fighters.size(), selected_units.size() - fighters.size()]
+		fleet_detail.tooltip_text = "Shift-click toggles selection; right click orders movement; H holds fighters. Ctrl+1–9 assigns a group, 1–9 recalls it."
 		return
 	var total: int = 0
 	var traveling: int = 0
@@ -2477,7 +2489,10 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 		selected_units.clear()
 	for craft in state["ships"]:
 		if int(craft["id"]) == selected_ship_id and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "colony_ship"]:
-			if not selected_units.has(selected_ship_id):
+			if additive and selected_units.has(selected_ship_id):
+				selected_units.erase(selected_ship_id)
+				selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
+			elif not selected_units.has(selected_ship_id):
 				selected_units.append(selected_ship_id)
 			break
 	selected_field = -1
@@ -2527,16 +2542,30 @@ func _command_at(point: Vector2) -> void:
 	if node < 0:
 		return
 	var fighters: Array[int] = []
+	var colony_sent: bool = false
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
 		if not selected_units.has(id) or int(craft["owner"]) != _me():
 			continue
 		if craft["kind"] == "fighter":
 			fighters.append(id)
-		elif craft["kind"] == "colony_ship" and node < state["planets"].size():
+		elif craft["kind"] == "colony_ship" and not colony_sent and node < state["planets"].size() and not ECONOMY.colony_path(state, _me(), craft, node).is_empty():
 			session.call("request_colonize", id, node)
+			colony_sent = true
 	if not fighters.is_empty():
 		session.call("request_fighter_move", fighters, node)
+
+func _selected_fighters() -> Array[int]:
+	var fighters: Array[int] = []
+	for craft in _state().get("ships", []):
+		if int(craft["owner"]) == _me() and craft["kind"] == "fighter" and selected_units.has(int(craft["id"])):
+			fighters.append(int(craft["id"]))
+	return fighters
+
+func _hold_selected() -> void:
+	var fighters: Array[int] = _selected_fighters()
+	if not fighters.is_empty():
+		session.call("request_fighter_hold", fighters)
 
 func _map_input(event: InputEvent) -> void:
 	if match_menu.visible:
@@ -2651,14 +2680,33 @@ func _sync_ship_visuals(state: Dictionary) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
-	if event.physical_keycode not in [KEY_Q, KEY_E]:
-		return
 	if not is_instance_valid(match_menu) or match_menu.visible or str(session.get("phase")) != "match":
 		return
 	var focus: Control = get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit or colony_picker.get_popup().visible:
 		return
-	_cycle_owned_system(-1 if event.physical_keycode == KEY_Q else 1)
+	var key: int = event.physical_keycode
+	if key in [KEY_Q, KEY_E]:
+		_cycle_owned_system(-1 if key == KEY_Q else 1)
+	elif key == KEY_H:
+		_hold_selected()
+	elif key >= KEY_1 and key <= KEY_9:
+		if event.ctrl_pressed:
+			control_groups[key] = selected_units.duplicate()
+		else:
+			var group: Array = control_groups.get(key, [])
+			if not event.shift_pressed:
+				selected_units.clear()
+			for craft in _state().get("ships", []):
+				var id: int = int(craft["id"])
+				if int(craft["owner"]) == _me() and id in group and not selected_units.has(id):
+					selected_units.append(id)
+			selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
+			selected = -1
+			selected_field = -1
+			_refresh()
+	else:
+		return
 	get_viewport().set_input_as_handled()
 
 func _cycle_owned_system(direction: int) -> void:
@@ -2977,6 +3025,18 @@ func _draw_map() -> void:
 		map_canvas.draw_string(font, pos + Vector2(-80, -name_star_radius - 7), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
 	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
+	var order_points: Array = ECONOMY.military_graph(state)["points"]
+	for craft in state["ships"]:
+		var id: int = int(craft["id"])
+		if not selected_units.has(id) or not poses.has(id) or (bool(craft.get("holding", false)) and not bool(craft.get("retreating", false))):
+			continue
+		var start: Vector2 = poses[id]["point"]
+		for node in craft["route"]:
+			var finish: Vector2 = _screen_point(order_points[int(node)])
+			map_canvas.draw_line(start, finish, Color(HUD.ACCENT, 0.5), 1.5, true)
+			start = finish
+		if not (craft["route"] as Array).is_empty():
+			map_canvas.draw_arc(start, 7.0, 0.0, TAU, 20, HUD.ACCENT, 1.5, true)
 	for index in range(points.size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
