@@ -37,6 +37,7 @@ func _initialize() -> void:
 	_test_neutral_direct_occupation()
 	_test_idle_formations()
 	_test_local_position_orders()
+	_test_salvage()
 	_test_civilian_waiting_movement()
 	_test_depleted_field_routes()
 	_test_wide_patrol_rally_and_conquest()
@@ -1691,6 +1692,67 @@ func _test_local_position_orders() -> void:
 			break
 	assert(repaired and damaged["position"] == post and damaged["holding"])
 	print("PASS: position and hold all hull classes, bounded travel, ownership/sector validation, release and lane orders")
+
+func _test_salvage() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var wreck: Dictionary = {"id": 99, "owner": 2, "kind": "ship", "at": 0, "position": Vector2.ZERO, "route": [], "leg": 0.0, "cargo": ECON.empty_stock()}
+	wreck["cargo"][ECON.ANTIMATTER] = 1.25
+	wreck["cargo"]["Metals"] = 5.0
+	ECON._record_ship_destruction(state, graph, wreck)
+	var recipe: Dictionary = ECON._cost("ship", 1)
+	var recovered: Dictionary = ECON.empty_stock()
+	for pile in state["salvage"].values():
+		var resource: String = pile["resource"]
+		recovered[resource] = float(pile["amount"])
+		assert(float(pile["amount"]) <= float(wreck["cargo"].get(resource, 0.0)) + float(recipe.get(resource, 0.0)) * 0.2 + 0.0001)
+	assert(is_equal_approx(recovered[ECON.ANTIMATTER], 1.25) and recovered["Metals"] >= 5.0)
+	var first_pile: Dictionary = state["salvage"].values()[0]
+	var initial_point: Vector2 = first_pile["position"]
+	state["elapsed"] = 2.0
+	ECON._update_salvage(state)
+	assert(first_pile["position"] != initial_point)
+	state["salvage"].clear()
+	var fighter: Dictionary = {"id": 100, "owner": 1, "kind": "fighter", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(200, 0), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"}
+	fighter["cargo"]["Metals"] = 8.0
+	var second: Dictionary = fighter.duplicate(true)
+	second["id"] = 101
+	state["ships"] = [fighter, second]
+	var point := Vector2(500, 0)
+	var pile: Dictionary = {"id": 1000, "resource": "Plastics", "amount": 25.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
+	state["salvage"][1000] = pile
+	assert(not ECON.command_salvage(state, 2, [100], 1000))
+	assert(not ECON.command_salvage(state, 1, [100, 999], 1000))
+	assert(ECON.command_salvage(state, 1, [100], 1000))
+	assert(not ECON.command_salvage(state, 1, [101], 1000))
+	assert(pile["claim"] == 100)
+	var home: Dictionary = state["planets"][0]
+	var original: Dictionary = home["stock"].duplicate()
+	ECON._work_salvage(state, graph, fighter, 0.1)
+	assert(fighter["position"].distance_to(Vector2(200, 0)) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+	assert(ECON._cargo_total(fighter) == 8.0)
+	for tick in range(200):
+		state["elapsed"] += 0.1
+		var previous: Vector2 = fighter["position"]
+		ECON._work_salvage(state, graph, fighter, 0.1)
+		assert(previous.distance_to(fighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(ECON._cargo_total(fighter) <= ECON.FIGHTER_CAPACITY + 0.0001)
+		if not ECON._salvage_active(fighter):
+			break
+	assert(not ECON._salvage_active(fighter) and ECON._cargo_total(fighter) < 0.001)
+	assert(is_equal_approx(pile["amount"], 23.0) and pile["claim"] == -1)
+	assert(is_equal_approx(home["stock"]["Metals"], original["Metals"] + 8.0))
+	assert(is_equal_approx(home["stock"]["Plastics"], original["Plastics"] + 2.0))
+	assert(not ECON.command_unload_cargo(state, 2, [101]))
+	assert(ECON.command_unload_cargo(state, 1, [101]))
+	for kind in ["fighter", "ship", "miner", "colony_ship"]:
+		var craft: Dictionary = {"kind": kind, "cargo": ECON.empty_stock()}
+		var capacity: float = ECON.cargo_capacity(kind)
+		craft["cargo"]["Metals"] = capacity * 0.5
+		assert(is_equal_approx(ECON.cargo_free(craft), capacity * 0.5))
+		assert(ECON.cargo_bays(craft["cargo"], capacity, 4)[0][0]["amount"] > 0.0)
+	print("PASS: wreck recovery, drift, ownership, exclusive claim, partial pickup, physical delivery, all hull cargo")
 
 func _test_civilian_waiting_movement() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
