@@ -173,7 +173,7 @@ func _run() -> void:
 		return
 	var neighbor: int = -1
 	for i in range(1, planets.size()):
-		if MAP.linked(state["map"], 0, i):
+		if MAP.linked(state["map"], 0, i) and ECON.has_planets(planets[i]):
 			neighbor = i
 			break
 	if not (neighbor >= 0):

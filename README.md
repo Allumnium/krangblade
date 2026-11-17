@@ -229,3 +229,5 @@ Version 0.24.6: zoom well past the old maximum to inspect the detailed hulls (fi
 Version 0.24.7: territory requires local residents or a completed shipyard (not ship crew or military presence); empty claims and fields no longer generate territory shading. Waiting loaded miners can fly locally until a depot becomes available and must dock before unloading. Hull structure and panels use owner colors, including breakup effects; freight cargo retains resource colors. Defended planets render even without system selection, with a PDS overview cue at distant zoom.
 
 Version 0.24.8: radial ring and spoke endpoints use shortest available connections rather than reserving the third port artificially, then recheck earlier assignments for shorter feasible links. Connected rings and the three-lane cap remain. Empty stranded miners retry evacuation even with no cargo; PDS planet highlights are restricted to the selected system.
+
+Version 0.24.9: solo regression selects an adjacent planetary system rather than assuming the lowest-index neighbor can be colonized; gameplay unchanged from v0.24.8.
