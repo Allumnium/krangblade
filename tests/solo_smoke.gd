@@ -197,6 +197,8 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
+	for material in ECON._cost("ship", 1):
+		planets[0]["stock"][material] = maxf(float(planets[0]["stock"][material]), float(ECON._cost("ship", 1)[material]))
 	session.call("request_operation", 0, "ship")
 	if not (planets[0]["queue"].size() == 1):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))

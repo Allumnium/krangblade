@@ -320,22 +320,29 @@ func _initialize() -> void:
 		assert(body["resource"] == "")
 	for body in rich_bodies:
 		assert(float(body["orbit"]) + float(body["size"]) < 1.0)
-	# Construction is proportional, time-dependent and fully refundable.
+	# Materials are prepaid atomically; work and crew remain time-dependent.
 	var saved_population: float = float(p["population"])
 	p["population"] = saved_population
 	p["levels"]["Metals"] = 0
 	p["stock"]["Metals"] = 90.0
+	var failed_stock: Dictionary = p["stock"].duplicate()
+	var failed_id: int = int(state["next_id"])
+	assert(not ECON.enqueue(state, 1, 0, "ship"))
+	assert(p["stock"] == failed_stock and p["queue"].is_empty() and int(state["next_id"]) == failed_id)
+	for material in ECON._cost("ship", 1):
+		p["stock"][material] = ECON._cost("ship", 1)[material]
 	assert(ECON.enqueue(state, 1, 0, "ship"))
+	assert(is_zero_approx(float(p["stock"]["Metals"])))
 	ECON._advance(p, p["queue"][0], 6.0)
 	assert(is_equal_approx(float(p["queue"][0]["progress"]), 6.0))
-	assert(is_equal_approx(float(p["stock"]["Metals"]), 45.0))
+	assert(is_zero_approx(float(p["stock"]["Metals"])))
 	ECON._advance(p, p["queue"][0], 6.0)
 	var item: Dictionary = p["queue"][0]
 	assert(is_equal_approx(float(item["progress"]), 12.0))
 	ECON._advance(p, p["queue"][0], 6.0)
-	assert(is_equal_approx(float(item["progress"]), 12.0))
+	assert(is_equal_approx(float(item["progress"]), 18.0))
 	assert(ECON.cancel(state, 1, 0, int(item["id"])))
-	assert(is_equal_approx(float(p["stock"]["Metals"]), 90.0))
+	assert(is_equal_approx(float(p["stock"]["Metals"]), 360.0))
 	assert(p["queue"].is_empty())
 	assert(is_equal_approx(float(p["population"]), saved_population))
 
@@ -416,7 +423,7 @@ func _initialize() -> void:
 	assert(stack_third["cost"] == ECON._cost("yard", 2))
 	assert(is_equal_approx(float(stack_third["progress"]) / float(stack_third["work"]), fraction))
 	for material in ECON.RESOURCES:
-		assert(is_equal_approx(float(stack_third["allocated"][material]), float(stack_third["cost"].get(material, 0.0)) * fraction))
+		assert(is_equal_approx(float(stack_third["allocated"][material]), float(stack_third["cost"].get(material, 0.0))))
 		assert(is_equal_approx(float(gap_home["stock"][material]) + float(stack_third["allocated"][material]), float(total_material[material])))
 	assert(ECON.next_shipyard_slot(gap_home) == 3)
 	assert(ECON.enqueue(gap_state, 1, 0, "yard", "3"))
@@ -462,7 +469,8 @@ func _initialize() -> void:
 	var repeat_state: Dictionary = ECON.create(graph, players, ids, false)
 	var repeat_home: Dictionary = repeat_state["planets"][0]
 	repeat_home["warehouse_level"] = 3
-	repeat_home["stock"]["Metals"] = 5000.0
+	for material in ECON.RESOURCES:
+		repeat_home["stock"][material] = 5000.0
 	assert(not ECON.set_continuous(repeat_state, 2, 0, "fighter", true))
 	assert(not ECON.set_continuous(repeat_state, 1, 0, "yard", true))
 	assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", true))
@@ -494,17 +502,11 @@ func _initialize() -> void:
 	for kind in ["colony_ship", "fighter", "miner"]:
 		assert(ECON.set_continuous(rotation, 1, 0, kind, true))
 	ECON.step(rotation, 1.0)
-	assert(rotation_home["queue"].size() == 3)
-	for job in rotation_home["queue"]:
-		assert(job["automatic"])
-	assert(rotation_home["queue"][0]["kind"] == "colony_ship")
-	# Partial funding must go to the first turn, not a cheaper fighter.
-	for i in range(12):
-		rotation_home["stock"]["Metals"] += 10.0
-		ECON.step(rotation, 1.0)
-	assert(rotation["ships"].is_empty())
-	assert(float(rotation_home["queue"][0]["progress"]) > 0.0)
-	assert(is_zero_approx(float(rotation_home["queue"][1]["progress"])))
+	assert(rotation_home["queue"].is_empty())
+	# Save for the first turn rather than leapfrogging with a cheaper fighter.
+	rotation_home["stock"]["Metals"] = 500.0
+	ECON.step(rotation, 1.0)
+	assert(rotation["ships"].is_empty() and rotation_home["queue"].is_empty())
 	rotation_home["warehouse_level"] = 3
 	for material in ECON.RESOURCES:
 		rotation_home["stock"][material] = 10000.0
@@ -643,6 +645,14 @@ func _initialize() -> void:
 	assert(mineral["ships"].size() == 1)
 	assert(ECON.empire_totals(mineral, 1)["miners"] == 1)
 	var miner: Dictionary = mineral["ships"][0]
+	assert(not ECON.command_miners(mineral, 2, [int(miner["id"])], 0, 7))
+	assert(not ECON.command_miners(mineral, 1, [int(miner["id"])], 0, 999))
+	assert(not ECON.command_miners(mineral, 1, [int(miner["id"])], 0, 9))
+	assert(ECON.command_miners(mineral, 1, [int(miner["id"])], 0, 7))
+	assert(int(miner["assigned_field"]) == 0 and int(miner["assigned_chunk"]) == 7)
+	assert(ECON.command_miners(mineral, 1, [int(miner["id"])], -1))
+	assert(int(miner["assigned_field"]) == -1)
+	assert(ECON.command_miners(mineral, 1, [int(miner["id"])], 0, 7))
 	assert(miner["kind"] == "miner")
 	assert(not ECON.send_colony(mineral, 1, int(miner["id"]), 3))
 	var after_build: float = float(mine_home["stock"]["Metals"])
@@ -1145,7 +1155,8 @@ func _initialize() -> void:
 	assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
 	var building: Dictionary = industry["queue"][0]
 	assert(is_equal_approx(ECON.rate(industry, "Textiles"), textile_rate))
-	assert(industry["stock"] == before_stock)
+	for material in building["cost"]:
+		assert(is_equal_approx(float(industry["stock"][material]), float(before_stock[material]) - float(building["cost"][material])))
 	assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Textiles"))
 	assert(ECON._advance(industry, building, float(building["work"])))
 	ECON._finish(bootstrap, 0, industry, building)
@@ -1158,13 +1169,13 @@ func _initialize() -> void:
 		assert(is_equal_approx(float(next_building["cost"][material]), float(ECON.ECONOMY_BUILDINGS["Textiles"]["cost"][material])))
 	assert(ECON.cancel(bootstrap, 1, 0, int(next_building["id"])))
 	industry["stock"]["Tech"] = 0.0
-	assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Organics"))
-	assert(is_zero_approx(ECON._possible(industry, industry["queue"][0])))
-	assert(ECON.cancel(bootstrap, 1, 0, int(industry["queue"][0]["id"])))
-	assert(ECON.enqueue(bootstrap, 1, 0, "fighter"))
-	assert(is_zero_approx(ECON._possible(industry, industry["queue"][0])))
-	industry["stock"]["Tech"] = 100.0
+	assert(not ECON.enqueue(bootstrap, 1, 0, "economy", "Organics"))
+	assert(not ECON.enqueue(bootstrap, 1, 0, "fighter"))
+	assert(industry["queue"].is_empty())
+	for material in ECON._cost("fighter", 1):
+		industry["stock"][material] = maxf(float(industry["stock"][material]), float(ECON._cost("fighter", 1)[material]))
 	var preallocation: Dictionary = industry["stock"].duplicate()
+	assert(ECON.enqueue(bootstrap, 1, 0, "fighter"))
 	var build: Dictionary = industry["queue"][0]
 	ECON._advance(industry, build, 6.0)
 	for material in build["cost"]:
@@ -1399,10 +1410,10 @@ func _initialize() -> void:
 	ECON._combat(defenses, defense_graph, 1.0)
 	assert(float(defense_enemy["hp"]) == 64.0)
 	for slot in range(1, int(defended["planet_count"])):
+		for material in ECON._cost("pds", slot + 1):
+			defended["stock"][material] = ECON._cost("pds", slot + 1)[material]
 		assert(ECON.enqueue(defenses, 1, 0, "pds", str(slot)))
 		var battery_order: Dictionary = ECON.pds_job(defended)
-		for material in battery_order["cost"]:
-			defended["stock"][material] = battery_order["cost"][material]
 		assert(ECON._advance(defended, battery_order, float(battery_order["work"])))
 		ECON._finish(defenses, 0, defended, battery_order)
 	assert(not ECON.enqueue(defenses, 1, 0, "pds"))
@@ -1454,10 +1465,11 @@ func _initialize() -> void:
 	ECON._work_planet(staffed_state, 0, 1.0)
 	assert(float(staffed_order["progress"]) == 0.0 and ECON.operational_shipyards(staffed_home) == 0)
 	assert(ECON.construction_blockers(staffed_home, staffed_order).has("Population"))
+	assert(ECON.local_flow(staffed_home, "Construction: fighter", "Metals") > 0.0)
 	staffed_home["population"] = 1000.0
 	ECON._work_planet(staffed_state, 0, 1.0)
 	assert(float(staffed_order["progress"]) > 0.0 and ECON.operational_shipyards(staffed_home) == 1)
-	assert(ECON.local_flow(staffed_home, "Construction: fighter", "Metals") > 0.0)
+	assert(is_zero_approx(ECON.local_flow(staffed_home, "Construction: fighter", "Metals")))
 	assert(ECON.local_flow(staffed_home, "Population", "Metals") > 0.0)
 	staffed_home["population"] = 6000.0
 	assert(ECON.operational_shipyards(staffed_home) == 2)
@@ -1848,7 +1860,11 @@ func _test_recovery_economy() -> void:
 	for resource in ["Metals", "Plastics", "Textiles", "Tech"]:
 		assert(float(p["stock"][resource]) > 0.0)
 	assert(ECON.overpopulation_penalty(p) > float(p["population"]) / ECON.habitation_capacity(p))
-	# A depleted economy can actually fund a queued building.
+	# A depleted economy can recover enough to prepay a building.
+	for i in range(1200):
+		if ECON.affordable(p, ECON.building_cost(p, "Tech")):
+			break
+		ECON._work_planet(state, 0, 1.0)
 	assert(ECON.enqueue(state, 1, 0, "economy", "Tech"))
 	for i in range(1200):
 		ECON._work_planet(state, 0, 1.0)
