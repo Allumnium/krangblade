@@ -281,9 +281,9 @@ func _initialize() -> void:
 	home["population"] = capacity * 0.5
 	home["population_velocity"] = 0.0
 	home["stock"]["Organics"] = 100.0
-	assert(ECON.current_year(demographics) == 1)
+	assert(ECON.current_year(demographics) == 2850)
 	ECON.step(demographics, 1.0)
-	assert(ECON.current_year(demographics) == 2)
+	assert(ECON.current_year(demographics) == 2851)
 	assert(is_equal_approx(float(home["stock"]["Organics"]), 100.0 + ECON.rate(home, "Organics") - ECON.organics_demand(home)))
 	assert(ECON.population_growth(home) > 0.0)
 	home["population"] = capacity * 1.5
@@ -322,7 +322,7 @@ func _initialize() -> void:
 		largest = maxf(largest, float(home["population"]))
 	assert(largest - smallest > 1000.0 and largest - smallest < 30000.0)
 	assert(smallest > 270000.0 and largest < 330000.0)
-	assert(ECON.current_year(demographics) == 424)
+	assert(ECON.current_year(demographics) == 3273)
 	print("PASS: 30-year doubling, critically damped population, food shortage, farm upgrades and year clock")
 
 	# Visual planet count loosely follows system richness, without modifying state.
