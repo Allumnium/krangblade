@@ -45,6 +45,8 @@ var overview_panel: PanelContainer
 var console_panel: PanelContainer
 var minimap: Control
 var console_columns: HBoxContainer
+var console_center: VBoxContainer
+var console_center_spacer: Control
 var yard_panel: PanelContainer
 var yard_column: VBoxContainer
 var empty_selection: Label
@@ -436,7 +438,13 @@ func _build_ui() -> void:
 	empty_selection.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	empty_selection.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	empty_selection.add_theme_color_override("font_color", HUD.MUTED)
-	console_columns.add_child(empty_selection)
+	console_center = VBoxContainer.new()
+	console_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	console_center.size_flags_stretch_ratio = 1.15
+	console_columns.add_child(console_center)
+	console_center_spacer = Control.new()
+	console_center.add_child(console_center_spacer)
+	console_center.add_child(empty_selection)
 	inspector_panel = PanelContainer.new()
 	console_columns.add_child(inspector_panel)
 	inspector_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -445,8 +453,7 @@ func _build_ui() -> void:
 	body.add_theme_constant_override("separation", 3)
 	inspector_panel.add_child(body)
 	overview_panel = PanelContainer.new()
-	console_columns.add_child(overview_panel)
-	console_columns.move_child(overview_panel, 0)
+	console_center.add_child(overview_panel)
 	overview_panel.custom_minimum_size.x = OVERVIEW_WIDTH
 	overview_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
 	var overview_scroll := ScrollContainer.new()
@@ -479,9 +486,9 @@ func _build_ui() -> void:
 	fleet_overview.add_theme_constant_override("separation", 3)
 	fleet_scroll.add_child(fleet_overview)
 	fleet_title = _label("", 16)
-	fleet_overview.add_child(fleet_title)
+	ship_overview.add_child(fleet_title)
 	fleet_detail = _label("", 14)
-	fleet_overview.add_child(fleet_detail)
+	ship_overview.add_child(fleet_detail)
 	hold_button = Button.new()
 	hold_button.text = "Hold position [H]"
 	hold_button.pressed.connect(_hold_selected)
@@ -489,7 +496,7 @@ func _build_ui() -> void:
 	fleet_overview.add_child(orders)
 	orders.add_child(hold_button)
 	unload_button = _button("Unload cargo [U]", _unload_selected, orders)
-	fleet_cargo = HUD.section(fleet_overview, "Cargo", true)
+	fleet_cargo = HUD.section(ship_overview, "Fleet cargo", true)
 	_build_cargo_rows(fleet_cargo, fleet_cargo_labels)
 	mining_controls = HUD.section(fleet_overview, "Mine", true)
 	mining_enabled = CheckBox.new()
@@ -544,7 +551,7 @@ func _build_ui() -> void:
 	HUD.action(send_colony_button, Color("#c7a4ff"), true)
 	yard_panel = PanelContainer.new()
 	console_columns.add_child(yard_panel)
-	console_columns.move_child(yard_panel, 1)
+	yard_panel.hide()
 	yard_panel.custom_minimum_size.x = YARD_WIDTH
 	yard_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
 	var yard_scroll := ScrollContainer.new()
@@ -562,6 +569,9 @@ func _build_ui() -> void:
 	inspector_tabs.visibility_changed.connect(func() -> void:
 		if not inspector_tabs.is_visible_in_tree():
 			_collapse_details())
+	# The right column owns all contextual commands, including shipyard activity.
+	yard_column.reparent(body, false)
+	body.move_child(yard_column, 0)
 	var shipyard_page: GridContainer = _inspector_page("Shipyards")
 	var economy_page: GridContainer = _inspector_page("Economy")
 	_build_economy_cards(economy_page)
@@ -645,12 +655,11 @@ func _layout_console() -> void:
 	diagnostic_label.offset_bottom = -20.0 - height
 	diagnostic_label.offset_top = -44.0 - height
 	minimap.custom_minimum_size.x = minf(220.0, minf(height * 0.87, size.x * 0.19))
+	# SC2-style raised wings: minimap and commands use the full deck height;
+	# selection details begin 20% lower, leaving more map visible centrally.
+	console_center_spacer.custom_minimum_size.y = height * 0.20
 	overview_panel.custom_minimum_size.x = minf(OVERVIEW_WIDTH, maxf(190.0, size.x * 0.31))
-	var wide: bool = size.x >= CONSOLE_WIDE_WIDTH
-	var yard_parent: Control = yard_column if wide else planet_overview
-	if yard_activity.get_parent().get_parent() != yard_parent:
-		yard_activity.get_parent().reparent(yard_parent, false)
-	yard_panel.visible = wide and planet_overview.visible and overview_panel.visible
+	yard_panel.hide()
 	_layout_command_grids()
 
 func _layout_command_grids() -> void:
@@ -2333,12 +2342,12 @@ func _refresh() -> void:
 	var yard_selected: bool = not other_selected and not body_selected and not p.is_empty() and selected_yard >= 0 and selected_yard < p.get("yards", []).size() and selected_yard_count == p.get("yards", []).size()
 	if not yard_selected:
 		selected_yard = -1
-	inspector_panel.visible = (not p.is_empty() or other_selected) and not body_selected and not yard_selected
+	inspector_panel.visible = not p.is_empty() or other_selected
 	overview_panel.visible = (not p.is_empty() or other_selected)
 	empty_selection.visible = not overview_panel.visible
-	overview_panel.size_flags_horizontal = Control.SIZE_FILL if inspector_panel.visible else Control.SIZE_EXPAND_FILL
+	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	planet_overview.visible = not other_selected and not body_selected and not yard_selected
-	yard_panel.visible = size.x >= CONSOLE_WIDE_WIDTH and overview_panel.visible and planet_overview.visible
+	yard_column.visible = planet_overview.visible and overview_panel.visible
 	body_overview.visible = body_selected
 	yard_overview.visible = yard_selected
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
@@ -2353,6 +2362,9 @@ func _refresh() -> void:
 	ship_overview.visible = other_selected
 	fleet_scroll.visible = other_selected
 	fleet_overview.visible = other_selected
+	fleet_title.visible = other_selected
+	fleet_detail.visible = other_selected
+	fleet_cargo.visible = other_selected
 	if yard_selected:
 		_refresh_yard_overview(p, own_system and phase == "match")
 		return
