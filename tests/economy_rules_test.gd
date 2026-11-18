@@ -112,7 +112,43 @@ func _test_maintain_targets() -> void:
 	ECON._refill_continuous(state, 0, p)
 	assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
+func _test_yard_autobuild_and_station_approach() -> void:
+	var map: Dictionary = {"seed": 426, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var p: Dictionary = state["planets"][0]
+	p["population"] = 100000.0
+	p["yards"].append({"level": 1, "job": -1, "hp": ECON.SHIP_HP * 10.0})
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 100000.0
+	assert(not ECON.set_yard_autobuild(state, 2, 0, 0, "fighter", true))
+	assert(not ECON.set_yard_autobuild(state, 1, 0, 99, "fighter", true))
+	assert(ECON.set_yard_autobuild(state, 1, 0, 0, "fighter", true))
+	assert(ECON.set_yard_autobuild(state, 1, 0, 0, "miner", true))
+	ECON._refill_yard_autobuild(state, 0, p)
+	ECON._refill_yard_autobuild(state, 0, p)
+	assert(p["queue"].size() == 2 and p["queue"][0]["kind"] == "fighter" and p["queue"][1]["kind"] == "miner")
+	ECON._finish(state, 0, p, p["queue"][0])
+	ECON._refill_yard_autobuild(state, 0, p)
+	assert(p["queue"].size() == 2 and p["queue"][0]["kind"] == "miner" and p["queue"][1]["kind"] == "fighter")
+	assert(ECON.set_yard_autobuild(state, 1, 0, 0, "miner", false))
+	assert(ECON.cancel(state, 1, 0, int(p["queue"][1]["id"])))
+	assert(p["yards"][0]["autobuild"].is_empty())
+	for i in range(7):
+		assert(ECON.enqueue(state, 1, 0, "fighter", "", 0))
+	assert(ECON.shipyard_queue_count(p, 0) == 8 and not ECON.enqueue(state, 1, 0, "fighter", "", 0))
+	assert(ECON.enqueue(state, 1, 0, "fighter", "", 1))
+	p["yards"][1]["level"] = 3
+	assert(not ECON.enqueue(state, 1, 0, "yard_upgrade", "1"))
+	var dock: Vector2 = ECON.station_position(state, 0, float(state["elapsed"]))
+	var miner: Dictionary = {"kind": "miner", "owner": 1, "at": 1, "dest": 0, "route": [0], "position": Vector2(300, 0), "leg": 0.0, "cargo": ECON.empty_stock()}
+	assert(not ECON._move(state, miner, 0.1) and miner["navigation_target"] == dock)
+	assert(ECON._move(state, miner, 100.0) and miner["position"] == dock and miner["navigation_target"] == dock)
+	var fighter: Dictionary = {"kind": "fighter", "owner": 1, "at": 1, "route": [0], "position": Vector2(300, 0), "leg": 0.0}
+	assert(ECON._move({"map": map}, fighter, 100.0, dock, 0) and fighter["position"] == dock)
+	print("PASS: per-shipyard round robin, capacity, cancellation, upgrade cap and direct station approach")
+
 func _initialize() -> void:
+	_test_yard_autobuild_and_station_approach()
 	_test_unit_order_queue()
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
@@ -573,7 +609,7 @@ func _initialize() -> void:
 	assert(int(p["yards"][0]["level"]) == 2)
 	assert(ECON.max_size(2) > ECON.max_size(1))
 
-	# Unlimited build orders; repeat stops when one matching order is canceled.
+	# Eight shipyard orders including the active job; repeat waits for space.
 	var repeat_state: Dictionary = ECON.create(graph, players, ids, false)
 	var repeat_home: Dictionary = repeat_state["planets"][0]
 	repeat_home["warehouse_level"] = 3
@@ -582,10 +618,12 @@ func _initialize() -> void:
 	assert(not ECON.set_continuous(repeat_state, 2, 0, "fighter", true))
 	assert(not ECON.set_continuous(repeat_state, 1, 0, "yard", true))
 	assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", true))
-	for i in range(12):
+	for i in range(8):
 		assert(ECON.enqueue(repeat_state, 1, 0, "ship"))
+	assert(not ECON.enqueue(repeat_state, 1, 0, "ship"))
+	assert(ECON.cancel(repeat_state, 1, 0, int(repeat_home["queue"][-1]["id"])))
 	ECON.step(repeat_state, 1.0)
-	assert(repeat_home["queue"].size() == 13)
+	assert(repeat_home["queue"].size() == 8)
 	var repeat_id: int = int(repeat_home["queue"][-1]["id"])
 	assert(ECON.cancel(repeat_state, 1, 0, repeat_id))
 	assert(not repeat_home["continuous"]["fighter"])
@@ -695,8 +733,8 @@ func _initialize() -> void:
 	assert(upgrade_home["queue"].is_empty())
 	assert(int(upgrade_home["levels"]["Organics"]) == 3)
 	assert(int(upgrade_home["yards"][0]["level"]) == 3)
-	for key in ["production:Organics", "yard_upgrade:0"]:
-		assert(ECON.set_continuous(upgrades, 1, 0, key, true))
+	assert(ECON.set_continuous(upgrades, 1, 0, "production:Organics", true))
+	assert(not ECON.set_continuous(upgrades, 1, 0, "yard_upgrade:0", true))
 	ECON.step(upgrades, 1.0)
 	for job in (upgrade_home["queue"] as Array).duplicate():
 		assert(ECON.cancel(upgrades, 1, 0, int(job["id"])))
@@ -1735,6 +1773,9 @@ func _test_idle_formations() -> void:
 	print("PASS: authoritative idle formations wander, preserve bounds and resume direct navigation")
 
 func _test_unit_order_queue() -> void:
+	var curve: Array = ECON.polyline_formation_slots({1: Vector2(0, -50), 2: Vector2(80, -50), 3: Vector2(100, 150)}, PackedVector2Array([Vector2.ZERO, Vector2(100, 0), Vector2(100, 100)]))
+	assert(curve.size() == 3 and curve[0]["point"] == Vector2.ZERO and curve[1]["point"] == Vector2(100, 0) and curve[2]["point"] == Vector2(100, 100))
+	assert(absf((curve[2]["heading"] as Vector2).dot(Vector2.DOWN)) < ECON.EPS)
 	var slots: Array = ECON.line_formation_slots({1: Vector2(100, 0), 2: Vector2(-100, 0), 3: Vector2.ZERO}, Vector2(-200, 100), Vector2(200, 100))
 	assert(slots.size() == 3 and slots[0]["id"] == 2 and slots[1]["id"] == 3 and slots[2]["id"] == 1)
 	assert(slots[0]["point"] == Vector2(-200, 100) and slots[1]["point"] == Vector2(0, 100) and slots[2]["point"] == Vector2(200, 100))
@@ -2362,7 +2403,8 @@ func _test_conquest_resistance_and_evacuation() -> void:
 	assert(not (freighter["route"] as Array).has(2))
 	ECON._work_ship(state, freighter, ECON.planet_teams(state), {}, 0.1)
 	assert(before.distance_to(freighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
-	assert((freighter["position"] as Vector2).x > before.x)
+	var dock: Vector2 = ECON.station_position(state, 1, float(state["elapsed"]))
+	assert((freighter["position"] as Vector2).distance_to(dock) < before.distance_to(dock))
 	print("PASS: planetary defense simultaneous damage and safe cargo-preserving station-loss reroute")
 
 func _test_freighter_bays() -> void:

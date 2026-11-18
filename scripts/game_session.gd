@@ -914,6 +914,11 @@ func _operation_for(id: int, index: int, kind: String, target: String) -> void:
 		if parts.size() == 2 and parts[0].is_valid_int() and int(parts[0]) >= 0 and ECONOMY.SHIP_KINDS.has(parts[1]) and ECONOMY.enqueue(economy, id, index, parts[1], "", int(parts[0])):
 			_publish_economy()
 		return
+	if kind == "shipyard_autobuild":
+		var parts: PackedStringArray = target.split(":")
+		if parts.size() == 3 and parts[0].is_valid_int() and parts[2] in ["0", "1"] and ECONOMY.set_yard_autobuild(economy, id, index, int(parts[0]), parts[1], parts[2] == "1"):
+			_publish_economy()
+		return
 	if ECONOMY.enqueue(economy, id, index, kind, target):
 		_publish_economy()
 
