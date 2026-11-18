@@ -50,7 +50,6 @@ var console_center: VBoxContainer
 var console_center_spacer: Control
 var console_right_body: VBoxContainer
 var console_profile: Control
-var yard_panel: PanelContainer
 var yard_column: VBoxContainer
 var empty_selection: Label
 var command_grids: Dictionary = {}
@@ -453,21 +452,27 @@ func _build_ui() -> void:
 	inspector_panel.size_flags_stretch_ratio = 1.3
 	inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
-	var right_column := VBoxContainer.new()
-	right_column.add_theme_constant_override("separation", 3)
-	inspector_panel.add_child(right_column)
-	var right_toolbar := HBoxContainer.new()
-	right_toolbar.alignment = BoxContainer.ALIGNMENT_END
-	right_column.add_child(right_toolbar)
-	_build_time_controls(right_toolbar)
-	var command_scroll := ScrollContainer.new()
-	command_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	command_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	right_column.add_child(command_scroll)
+	# Simulation controls are global, not contextual commands.
+	var time_panel := PanelContainer.new()
+	add_child(time_panel)
+	time_panel.theme = HUD.compact()
+	time_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0b1624"), Color("#345570"), 4, 3))
+	time_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	time_panel.offset_left = -280
+	time_panel.offset_right = -8
+	time_panel.offset_top = HEADER_HEIGHT + 14
+	time_panel.offset_bottom = HEADER_HEIGHT + 48
+	var time_toolbar := HBoxContainer.new()
+	time_toolbar.alignment = BoxContainer.ALIGNMENT_END
+	time_panel.add_child(time_toolbar)
+	_build_time_controls(time_toolbar)
+	# Tabs and fleet commands each own a bounded scroll viewport. A
+	# ScrollContainer around a TabContainer collapses its page to zero height.
 	var body := VBoxContainer.new()
 	body.add_theme_constant_override("separation", 3)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	command_scroll.add_child(body)
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	inspector_panel.add_child(body)
 	console_right_body = body
 	overview_panel = PanelContainer.new()
 	console_center.add_child(overview_panel)
@@ -568,30 +573,20 @@ func _build_ui() -> void:
 	interaction_panel.add_child(colony_picker)
 	send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
 	HUD.action(send_colony_button, Color("#c7a4ff"), true)
-	yard_panel = PanelContainer.new()
-	console_columns.add_child(yard_panel)
-	yard_panel.hide()
-	yard_panel.custom_minimum_size.x = YARD_WIDTH
-	yard_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
-	var yard_scroll := ScrollContainer.new()
-	yard_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	yard_panel.add_child(yard_scroll)
-	yard_column = VBoxContainer.new()
-	yard_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	yard_scroll.add_child(yard_column)
-	yard_activity = HUD.section(yard_column, "Shipyards", true)
 	inspector_tabs = TabContainer.new()
-	inspector_tabs.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_tabs.clip_contents = true
 	inspector_tabs.tab_changed.connect(func(_tab: int) -> void: _collapse_details())
 	body.add_child(inspector_tabs)
 	inspector_tabs.visibility_changed.connect(func() -> void:
 		if not inspector_tabs.is_visible_in_tree():
 			_collapse_details())
-	# The right column owns all contextual commands, including shipyard activity.
-	yard_column.reparent(body, false)
-	body.move_child(yard_column, 0)
 	var shipyard_page: GridContainer = _inspector_page("Shipyards")
+	# Keep building cards first and yard activity below them in one scroll.
+	yard_column = VBoxContainer.new()
+	yard_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	shipyard_page.get_parent().add_child(yard_column)
+	yard_activity = HUD.section(yard_column, "Shipyards", true)
 	var economy_page: GridContainer = _inspector_page("Economy")
 	_build_economy_cards(economy_page)
 	var trade_page: GridContainer = _inspector_page("Trade")
@@ -670,7 +665,7 @@ func _layout_console() -> void:
 	if not is_instance_valid(console_panel) or not is_instance_valid(yard_activity):
 		return
 	# Keep a stable, useful map at both normal and small window sizes.
-	var height: float = minf(clampf(size.y * 0.32, 195.0, 285.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0))
+	var height: float = minf(clampf(size.y * 0.36, 220.0, 320.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0))
 	console_panel.offset_top = -8.0 - height
 	# Draw the space scene behind the HUD rather than clipping it at a
 	# horizontal line. Camera framing still uses the unobstructed play area.
@@ -685,7 +680,6 @@ func _layout_console() -> void:
 	console_profile.queue_redraw()
 	# Do not force the center wider than its allotted column.
 	overview_panel.custom_minimum_size.x = 0.0
-	yard_panel.hide()
 	_layout_command_grids()
 
 func _draw_console_profile() -> void:
@@ -1840,6 +1834,7 @@ void fragment() {
 	// All POIs participate, including neutral and undiscovered neighbors.
 	float best_sq = 1e20;
 	float second_sq = 1e20;
+	vec2 second_center = vec2(0.0);
 	vec4 site = vec4(0.0);
 	for (int i = 0; i < site_count; i++) {
 		vec4 candidate = texelFetch(site_data, ivec2(i, 0), 0);
@@ -1847,22 +1842,27 @@ void fragment() {
 		float distance_sq = dot(offset, offset);
 		if (distance_sq < best_sq) {
 			second_sq = best_sq;
+			second_center = site.xy;
 			best_sq = distance_sq;
 			site = candidate;
-		} else {
-			second_sq = min(second_sq, distance_sq);
+		} else if (distance_sq < second_sq) {
+			second_sq = distance_sq;
+			second_center = candidate.xy;
 		}
 	}
 	int winner = int(site.w + 0.5);
-	if (winner == 0) {
-		discard;
+	// The nearest-site decision is discontinuous across bisectors. Use
+	// world-coordinate pixel width instead of derivatives of that decision.
+	float aa = max(length(fwidth(p)), 0.00001);
+	float bisector = -1e10;
+	if (second_sq < 1e19) {
+		bisector = (best_sq - second_sq) / max(2.0 * length(site.xy - second_center), 0.00001);
 	}
-	float distance_to_center = sqrt(best_sq);
-	float d = max(distance_to_center - site.z, (distance_to_center - sqrt(second_sq)) * 0.5);
-	float aa = max(fwidth(d), 0.00001);
-	float inside = 1.0 - smoothstep(-aa * 0.65, aa * 0.65, d);
-	float border = 1.0 - smoothstep(aa * 0.45, aa * 1.45, abs(d));
-	COLOR = vec4(team_color(winner), inside * 0.12 + border * 0.52);
+	float d = max(sqrt(best_sq) - site.z, bisector);
+	// Draw a smooth inward edge, including where the neighboring sector is neutral.
+	float inside = 1.0 - smoothstep(-aa, 0.0, d);
+	float border = inside * smoothstep(-aa * 2.8, -aa * 1.1, d);
+	COLOR = vec4(team_color(winner), winner > 0 ? inside * 0.12 + border * 0.52 : 0.0);
 }
 """
 	territory_material = ShaderMaterial.new()
@@ -2274,11 +2274,15 @@ func _inspector_page(title_text: String) -> GridContainer:
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_tabs.add_child(scroll)
+	var page_content := VBoxContainer.new()
+	page_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page_content.add_theme_constant_override("separation", 5)
+	scroll.add_child(page_content)
 	var page := GridContainer.new()
 	page.add_theme_constant_override("h_separation", 5)
 	page.add_theme_constant_override("v_separation", 5)
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(page)
+	page_content.add_child(page)
 	command_grids[title_text] = page
 	return page
 
@@ -2400,7 +2404,7 @@ func _refresh() -> void:
 	overview_panel.visible = true
 	empty_selection.visible = false
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	planet_overview.visible = not other_selected and not body_selected and not yard_selected
+	planet_overview.visible = not p.is_empty() and not other_selected and not body_selected and not yard_selected
 	yard_column.visible = planet_overview.visible and overview_panel.visible
 	body_overview.visible = body_selected
 	yard_overview.visible = yard_selected
