@@ -29,6 +29,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.42.2: UI is fixed at native 100%, with no settings slider/selector or fractional viewport stretching. Use pixel-snapped controls, whole-pixel font positioning and hinted text; fixed-size HUD resource icons use native-sized textures while world art retains smooth continuous zoom. Canonical building names are Metal Refinery, Plastics Factory, Textile Mill, Farms, Tech Fabs and Crystal Incubator, shared between command captions, tooltips and queue labels.
+
 - v0.42.1: Camera focus uses the rendered entity center at current zoom, including a station-position fallback for claimed systems; cancel large world-space translations before adding the map viewport center. Center in the unobstructed map above the bottom console, not the full window. Construction tooltips use an opaque framed popup and graphical resource/crew amounts, retaining timing, effects and requirements.
 
 - v0.42.0: All manual and AI station infrastructure uses timed, prepaid cancellable construction; Warehouse levels take 20/30/40 years, Habitation 24/36/48, and Orbital Eco-Housing 30. Resource tooltips show production, demand and net only (no actual-versus-theoretical terminology). Building groups use compact health-colored wireframe tiles matching unit groups; the control-group strip is directly below the top HUD, left aligned. Selected ships display target circles around actual attack/pursuit/service/resource targets, blue for allies, red for enemies and white for neutral objects.
@@ -145,7 +147,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - Shipyard orbits use authoritative world positions; completed hulls spawn at their assigned frame. Fighters target hostile shipyards when no ship is in range; damage accumulates and destruction removes the frame and assigned construction without refunds. Remaining slots compact. Trade checkboxes share a compact threshold row above the track.
 
-- Always implement approved changes, commit and push. Habitation uses the shared economy section and accordion. Trade sliders use neutral fill and identical handles. In-game menu includes persistent local UI scale (70–130%, 10-point steps, default 90%) and independent Music/SFX volume and mute. Hide future shipyard rows until the previous slot is completed, preserving authoritative construction rules.
+- Always implement approved changes, commit and push. Habitation uses the shared economy section and accordion. Trade sliders use neutral fill and identical handles. In-game menu includes independent Music/SFX volume and mute; UI stays at native 100%. Hide future shipyard rows until the previous slot is completed, preserving authoritative construction rules.
 
 - Solo setup uses a compact roster panel and a right-hand game settings panel with optional map seed; Start Match is bottom right.
 

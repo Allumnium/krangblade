@@ -15,12 +15,12 @@ const BUILDING_BONUS: float = 0.25
 const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional repeatable local production infrastructure; no self-input recipes.
 const ECONOMY_BUILDINGS = {
-	"Metals": {"name": "Refinery", "population": 500, "cost": {"Plastics": 90.0, "Textiles": 60.0, "Tech": 45.0}},
-	"Plastics": {"name": "Polymer factory", "population": 500, "cost": {"Metals": 240.0, "Textiles": 45.0, "Tech": 30.0}},
-	"Textiles": {"name": "Textile mill", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}},
-	"Organics": {"name": "Agricultural complex", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}},
-	"Tech": {"name": "Electronics factory", "population": 500, "cost": {"Metals": 300.0, "Plastics": 90.0, "Textiles": 60.0}},
-	"Crystals": {"name": "Crystal processor", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}}
+	"Metals": {"name": "Metal Refinery", "population": 500, "cost": {"Plastics": 90.0, "Textiles": 60.0, "Tech": 45.0}},
+	"Plastics": {"name": "Plastics Factory", "population": 500, "cost": {"Metals": 240.0, "Textiles": 45.0, "Tech": 30.0}},
+	"Textiles": {"name": "Textile Mill", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}},
+	"Organics": {"name": "Farms", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}},
+	"Tech": {"name": "Tech Fabs", "population": 500, "cost": {"Metals": 300.0, "Plastics": 90.0, "Textiles": 60.0}},
+	"Crystals": {"name": "Crystal Incubator", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}}
 }
 const CONSTRUCTION_RESERVE: float = 500.0
 const CONSTRUCTION_PRODUCTION_SHARE: float = 0.1
