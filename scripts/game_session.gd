@@ -13,7 +13,7 @@ const RULES = preload("res://scripts/lobby_rules.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 const SIM_STEP: float = 0.1
-const MATCH_SPEEDS: Array[int] = [0, 1, 2, 5, 10]
+const MATCH_SPEEDS: Array[int] = [0, 1, 2, 5]
 const SNAPSHOT_INTERVAL: float = 0.2
 const PORT: int = 24567
 const DISCOVERY_PORT: int = 24568
@@ -1041,10 +1041,23 @@ func _mining_policy_for(id: int, index: int, enabled: bool, metals: bool, crysta
 	if _active_player(id) and ECONOMY.set_mining_policy(economy, id, index, enabled, metals, crystals):
 		_publish_economy()
 
-# Only the local authority may change the shared speed. Guests receive it in
-# the same round-scoped authoritative snapshots as the simulation state.
+# Any connected player may request a shared speed; the host validates and
+# publishes the canonical value.
 func request_time_speed(speed: int) -> void:
-	if phase != "match" or not (is_solo or multiplayer.is_server()):
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_time_speed_for(1, speed)
+	else:
+		_rpc_time_speed.rpc_id(1, speed)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_time_speed(speed: int) -> void:
+	if multiplayer.is_server():
+		_time_speed_for(multiplayer.get_remote_sender_id(), speed)
+
+func _time_speed_for(id: int, speed: int) -> void:
+	if not _match_peer(id):
 		return
 	if not economy.get("match_result", {}).is_empty() or not MATCH_SPEEDS.has(speed) or int(economy.get("time_speed", 1)) == speed:
 		return

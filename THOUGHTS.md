@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.39.0: Exact rally convergence combined with persistent Hold Position caused crowding; release nearby hulls into idle formation flight or autonomous work. Check rally points at sector edges and very large fleets, and verify that empty console panels expose both map rendering and map input. Shared multiplayer speed changes are last-authoritative-request wins; assess player coordination during live matches.
+
 - v0.36.3: Armed movement commands use the same gesture handler for either mouse button; the initiating button owns its release to avoid accidental orders during a two-button gesture. Check cancellation when releasing over the console (TODO phase 1).
 
 - v0.36.2: Single-selection portraits reuse hull silhouette and panel geometry. The opening camera uses clipped sector extents rather than a fixed galaxy zoom. Check portrait width and camera framing on dense layouts and high UI scaling (TODO phase 1).

@@ -101,6 +101,7 @@ const AI_WAVE_MIN: int = 3
 const AI_RALLY_RADIUS: float = 150.0
 const FORMATION_SPACING: float = 28.0
 const SHIP_SEPARATION_RADIUS: float = 45.0
+const RALLY_ARRIVAL_RADIUS: float = SHIP_SEPARATION_RADIUS * 2.0
 const SHIP_SEPARATION_STRENGTH: float = 0.65
 const FORMATION_RADIUS: float = 105.0
 const FORMATION_TRAVEL_FRACTION: float = 0.8
@@ -1195,21 +1196,21 @@ static func _work_launch_rally(state: Dictionary, ship: Dictionary, dt: float) -
 	elif not (ship["route"] as Array).is_empty():
 		_move(state, ship, dt)
 		return true
-	_navigate(ship, rally["point"], SHIP_SPEED * dt)
-	if (ship["position"] as Vector2).distance_to(rally["point"]) <= EPS:
+	# Arrive in the vicinity, not at a shared exact coordinate. Separation
+	# can otherwise keep a crowded fleet fighting the same arrival target.
+	var distance: float = (ship["position"] as Vector2).distance_to(rally["point"])
+	if distance > RALLY_ARRIVAL_RADIUS:
+		_navigate(ship, rally["point"], minf(SHIP_SPEED * dt, distance - RALLY_ARRIVAL_RADIUS * 0.9))
+	if (ship["position"] as Vector2).distance_to(rally["point"]) <= RALLY_ARRIVAL_RADIUS:
 		ship.erase("launch_rally")
 		ship.erase("move_only")
-		if ship["kind"] in ["fighter", "colony_ship"]:
-			if fighter:
-				ship["at"] = int(rally["node"])
-				ship["dest"] = int(rally["node"])
-				ship["leg"] = 0.0
-			ship["holding"] = true
-			ship["hold_position"] = rally["point"]
-			ship["hold_sector"] = int(rally["node"])
-		else:
-			ship["dest"] = -1
-			ship["source"] = -1
+		ship.erase("holding")
+		ship.erase("hold_position")
+		ship.erase("hold_sector")
+		ship["at"] = int(rally["node"])
+		ship["leg"] = 0.0
+		ship["dest"] = int(rally["node"]) if fighter else -1
+		ship["source"] = -1
 	return true
 
 static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictionary) -> void:

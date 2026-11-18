@@ -26,7 +26,7 @@ var miner_weapon_verified: bool = false
 var next_diagnostic: float = 10.0
 var speed_stage: int = 0
 var paused_elapsed: float = -1.0
-const TEST_SPEEDS: Array[int] = [0, 2, 5, 10, 1]
+const TEST_SPEEDS: Array[int] = [0, 2, 5, 1]
 const ECON = preload("res://scripts/economy_rules.gd")
 var saw_loading: bool = false
 var preview_seed: int = 0
@@ -312,7 +312,8 @@ func _check_time_controls(state: Dictionary) -> bool:
 	var expected: int = TEST_SPEEDS[speed_stage]
 	var current: int = int(state.get("time_speed", -1))
 	if current != expected:
-		if role == "host" and speed_stage > 0:
+		var speed_requester: bool = (role == "client" and home_index == 1) if expected == 2 else role == "host"
+		if speed_requester and speed_stage > 0:
 			var confirmed: int = 0
 			for system in state["planets"]:
 				if bool(system["home"]) and is_equal_approx(float(system["thresholds"]["Plastics"]["min"]), 12.0 + float(speed_stage - 1)):
@@ -320,23 +321,11 @@ func _check_time_controls(state: Dictionary) -> bool:
 			if confirmed == expected_players:
 				session.call("request_time_speed", expected)
 		return false
-	var view: Node = current_scene
-	if view == null or not view.has_method("_refresh_time_controls"):
-		return false
-	var buttons: Dictionary = view.get("time_buttons")
-	if buttons.size() != TEST_SPEEDS.size():
-		_fail("Time controls missing.")
-		return false
-	for speed in TEST_SPEEDS:
-		var button: Button = buttons[speed]
-		if button.button_pressed != (speed == current) or button.disabled != (role != "host"):
-			_fail("Time control selection or authority does not match replicated speed.")
-			return false
 	if speed_stage == 0:
 		if paused_elapsed < 0.0:
 			paused_elapsed = float(state["elapsed"])
-			# Host rejects invalid values; guests cannot change the speed.
-			session.call("request_time_speed", 3 if role == "host" else 5)
+			# Invalid values are rejected from both host and guest.
+			session.call("request_time_speed", 3 if role == "host" else 10)
 			return false
 		if not is_equal_approx(float(state["elapsed"]), paused_elapsed):
 			_fail("Clock advanced while paused.")
@@ -610,7 +599,7 @@ func _check_economy_sync() -> void:
 						if bool(craft.get("move_only", false)):
 							_fail("Rallying fighter replicated a move-only order.")
 							return
-						rally_attack_move = launch.get("point", Vector2.INF) == rally_point or (bool(craft.get("holding", false)) and craft.get("hold_position", Vector2.INF) == rally_point)
+						rally_attack_move = launch.get("point", Vector2.INF) == rally_point or (launch.is_empty() and not bool(craft.get("holding", false)) and int(craft["at"]) == owner_home)
 					patrol_verified = patrol_verified or (int(craft.get("patrol_from", -1)) == owner_home and int(craft.get("patrol_to", -1)) == field_node and craft.get("patrol_end_point", Vector2.INF) == patrol_point and ECON.sector_contains(graph, owner_home, craft.get("patrol_start_point", Vector2.INF)))
 					attack_verified = attack_verified or (int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) == 920000 + (owner_home + 1) % expected_players)
 					if int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) >= 0:

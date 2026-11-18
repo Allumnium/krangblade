@@ -165,6 +165,8 @@ var last_system_tab_selection: int = -1
 var selected_ship_id: int = -1
 var selected_units: Array[int] = []
 var control_groups: Dictionary = {}
+var last_control_group_recall: int = -1
+var last_control_group_recall_ms: int = -1000
 var control_group_strip: HBoxContainer
 var control_group_buttons: Dictionary = {}
 var selection_start: Vector2 = Vector2.ZERO
@@ -411,6 +413,7 @@ func _build_ui() -> void:
 	match_menu.title = "Menu"
 	match_menu.theme = theme
 	match_menu.exclusive = true
+	match_menu.dialog_close_on_escape = true
 	match_menu.unresizable = true
 	match_menu.ok_button_text = "Resume"
 	add_child(match_menu)
@@ -432,6 +435,7 @@ func _build_ui() -> void:
 	# One reserved, bottom-anchored command deck. The camera uses the map
 	# rectangle above it regardless of selection or visible inspector content.
 	console_panel = PanelContainer.new()
+	console_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(console_panel)
 	console_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	console_panel.offset_left = 8
@@ -447,6 +451,7 @@ func _build_ui() -> void:
 	console_profile.draw.connect(_draw_console_profile)
 	console_profile.resized.connect(console_profile.queue_redraw)
 	var deck := HBoxContainer.new()
+	deck.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	deck.add_theme_constant_override("separation", 4)
 	console_panel.add_child(deck)
 	minimap = Control.new()
@@ -480,6 +485,7 @@ func _build_ui() -> void:
 	empty_selection.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	empty_selection.add_theme_color_override("font_color", HUD.MUTED)
 	console_center = VBoxContainer.new()
+	console_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	console_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	console_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	console_columns.add_child(console_center)
@@ -764,7 +770,12 @@ func _draw_console_profile() -> void:
 	var left_rect := Rect2(Vector2.ZERO, Vector2(left_width, bounds.size.y))
 	var center_rect := Rect2(Vector2(center_left, center_top), Vector2(console_center.size.x, maxf(0.0, bounds.size.y - center_top)))
 	var right_rect := Rect2(Vector2(right_left, 0.0), Vector2(maxf(0.0, bounds.size.x - right_left), bounds.size.y))
-	for rect in [left_rect, center_rect, right_rect]:
+	var rects: Array[Rect2] = [left_rect]
+	if overview_panel.visible:
+		rects.append(center_rect)
+	if console_right_body.visible:
+		rects.append(right_rect)
+	for rect in rects:
 		if rect.has_area():
 			console_profile.draw_rect(rect, fill)
 			console_profile.draw_rect(rect.grow(-0.5), edge, false, 1.0)
@@ -889,7 +900,7 @@ func _draw_minimap() -> void:
 			if selected_units.has(id):
 				minimap.draw_arc(point, 2.6, 0.0, TAU, 10, Color.WHITE, 1.0, true)
 	var corner: Vector2 = _minimap_point(_world_point(Vector2.ZERO), area)
-	var end: Vector2 = _minimap_point(_world_point(_projection_size()), area)
+	var end: Vector2 = _minimap_point(_world_point(map_canvas.size), area)
 	var camera_rect := Rect2(corner, end - corner)
 	# Preserve a visible indicator at extreme close-up zoom levels.
 	var visible_extent: Vector2 = camera_rect.size.max(Vector2(3, 3))
@@ -2172,7 +2183,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	elif mode in ["outbound", "return"]:
 		status = ("To field" if mode == "outbound" else "Returning") + "\nETA %.1f yr" % _remaining_years(state, ship)
 	elif mode == "mining":
-		status = "Mining field %02d\n%.1f / 5 yr" % [int(ship["field"]) + 1, minf(5.0, float(ship.get("mining_years", 0.0)))]
+		status = "Mining %s\n%.1f / 5 yr" % [_poi_name(state["planets"].size() + int(ship["field"])), minf(5.0, float(ship.get("mining_years", 0.0)))]
 	elif kind == "miner" and mode == "delivery":
 		status = "Waiting for storage"
 	elif kind == "miner" and mode == "idle":
@@ -2267,7 +2278,7 @@ func _build_time_controls(parent: Container) -> void:
 	row.add_theme_constant_override("separation", 2)
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(row)
-	for speed in [0, 1, 2, 5, 10]:
+	for speed in [0, 1, 2, 5]:
 		var label: String = "Ⅱ" if speed == 0 else "%d×" % speed
 		var button: Button = _button(label, _set_time_speed.bind(int(speed)), row)
 		button.toggle_mode = true
@@ -2296,20 +2307,20 @@ func _set_time_speed(speed: int) -> void:
 
 func _refresh_time_controls(state: Dictionary) -> void:
 	var current: int = int(state.get("time_speed", 1))
-	var can_change: bool = str(session.get("phase")) == "match" and state.get("match_result", {}).is_empty() and (bool(session.get("is_solo")) or multiplayer.is_server())
+	var can_change: bool = str(session.get("phase")) == "match" and state.get("match_result", {}).is_empty()
 	for speed in time_buttons:
 		var button: Button = time_buttons[speed]
 		var active: bool = int(speed) == current
 		button.disabled = not can_change
 		button.set_pressed_no_signal(active)
-		# Disabled guest buttons must still show which speed the host selected.
+		# Keep the replicated speed visible even after the match ends.
 		if active:
 			button.add_theme_stylebox_override("disabled", button.get_theme_stylebox("pressed"))
 			button.add_theme_color_override("font_disabled_color", HUD.ACCENT)
 		else:
 			button.remove_theme_stylebox_override("disabled")
 			button.remove_theme_color_override("font_disabled_color")
-		button.tooltip_text = ("Pause simulation" if int(speed) == 0 else "%d× simulation speed" % int(speed)) + ("" if can_change else " (host controlled)")
+		button.tooltip_text = "Pause simulation" if int(speed) == 0 else "%d× simulation speed" % int(speed)
 
 func _toggle_lens(kind: String) -> void:
 	_refresh()
@@ -2547,7 +2558,10 @@ func _position_territory() -> void:
 	territory_image.size = (_map_size() + padding * 2.0) * _fit() * zoom
 
 func _show_system_rings(index: int) -> bool:
-	return index == selected
+	if index != selected or selected_body >= 0 or selected_yard >= 0 or not building_selection_kind.is_empty():
+		return false
+	var p: Dictionary = _planet()
+	return not p.is_empty() and int(p["owner"]) == 0 and not ECONOMY.has_station(p)
 
 func _build_global_bar(stats: Container) -> void:
 	for resource in ECONOMY.RESOURCES:
@@ -2921,6 +2935,9 @@ func _cancel_job(id: int) -> void:
 	session.call("request_cancel", selected, id)
 
 func _refresh() -> void:
+	# A disconnect notification can arrive while the match scene exits.
+	if not is_inside_tree() or multiplayer == null:
+		return
 	if is_instance_valid(map_canvas):
 		map_canvas.queue_redraw()
 	if not is_instance_valid(year_label):
@@ -2973,11 +2990,17 @@ func _refresh() -> void:
 		if selected_yard >= 0:
 			follow_units = false
 		selected_yard = -1
+	# A claimed sector is represented by its station, not a second selectable
+	# sector entity. Keep explicit planet, yard and grouped selections intact.
+	if not other_selected and not body_selected and not yard_selected and not p.is_empty() and building_selection_kind.is_empty():
+		if ECONOMY.has_station(p):
+			building_selection_kind = "station"
+			selected_buildings[Vector2i(selected, 0)] = 0
+		elif int(p["owner"]) != 0:
+			selected = -1
+			p = {}
 	inspector_panel.visible = true
-	console_right_body.visible = not p.is_empty() or other_selected
-	# Keep the center panel mounted even when there is no selection;
-	# only its contents disappear, leaving a stable blank HUD surface.
-	overview_panel.visible = true
+	overview_panel.visible = not p.is_empty() or other_selected
 	empty_selection.visible = false
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	planet_overview.visible = not p.is_empty() and not other_selected and not body_selected and not yard_selected and selected_buildings.size() <= 1
@@ -2987,6 +3010,11 @@ func _refresh() -> void:
 	yard_overview.visible = yard_selected and not grouped_buildings
 	_refresh_building_group(state)
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
+	var right_needed: bool = field_selected or (ship_selected and state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())) or (yard_selected and not _selected_yards(state, true).is_empty()) or (not other_selected and not yard_selected and not grouped_buildings and (own_system or (not p.is_empty() and int(p["owner"]) == 0 and not body_selected)))
+	console_right_body.visible = right_needed
+	inspector_panel.self_modulate.a = 1.0 if right_needed else 0.0
+	inspector_panel.mouse_filter = Control.MOUSE_FILTER_STOP if right_needed else Control.MOUSE_FILTER_IGNORE
+	console_profile.queue_redraw()
 	inspector_tabs.visible = not other_selected and own_system and not yard_selected and not grouped_buildings
 	yard_command_scroll.visible = yard_selected
 	var current_system: int = selected if not other_selected and not p.is_empty() else -1
@@ -3692,6 +3720,7 @@ func _current_control_group(state: Dictionary) -> Dictionary:
 	return _prune_control_group(state, {"kind": kind, "refs": {ref: selected_yard_count if kind == "shipyard" else 0}})
 
 func _assign_control_group(number: int) -> void:
+	last_control_group_recall = -1
 	var state: Dictionary = _state()
 	var group: Dictionary = _current_control_group(state)
 	if not group.is_empty():
@@ -3721,7 +3750,7 @@ func _refresh_control_groups(state: Dictionary) -> void:
 		button.text = "%d·%d" % [number, count] if button.size.x >= 34.0 else str(number)
 		button.icon = _selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
 		button.disabled = false
-		button.tooltip_text = "Group %d · %d %s\nClick or press %d to select · Ctrl+%d to replace" % [number, count, "ships" if kind == "units" else "structures", number, number]
+		button.tooltip_text = "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace" % [number, count, "ships" if kind == "units" else "structures", number, number]
 
 func _recall_control_group(number: int, additive: bool = false) -> void:
 	var state: Dictionary = _state()
@@ -3729,6 +3758,10 @@ func _recall_control_group(number: int, additive: bool = false) -> void:
 	if group.is_empty():
 		_refresh_control_groups(state)
 		return
+	var now: int = Time.get_ticks_msec()
+	var center_group: bool = not additive and last_control_group_recall == number and now - last_control_group_recall_ms <= 400
+	last_control_group_recall = number if not additive and not center_group else -1
+	last_control_group_recall_ms = now
 	var kind: String = group["kind"]
 	var previous: Dictionary = _current_control_group(state) if additive else {}
 	_clear_building_selection()
@@ -3762,6 +3795,11 @@ func _recall_control_group(number: int, additive: bool = false) -> void:
 		_load_thresholds()
 	_refresh_command_mode()
 	_refresh()
+	if center_group:
+		# Center once at the existing zoom without enabling persistent follow.
+		_follow_selection(state, _ship_poses(state), false, true)
+		_position_territory()
+		map_canvas.queue_redraw()
 
 func _building_valid(state: Dictionary, ref: Vector2i, kind: String, expected_count: int = -1) -> bool:
 	var planets: Array = state.get("planets", [])
@@ -3840,7 +3878,12 @@ func _in_visible_playfield(point: Vector2) -> bool:
 		return false
 	if is_instance_valid(control_group_strip) and control_group_strip.get_global_rect().has_point(global_point):
 		return false
-	return Rect2(Vector2.ZERO, _projection_size()).has_point(point) or console_center_spacer.get_global_rect().has_point(global_point)
+	for panel in [minimap, lens_column, overview_panel, inspector_panel]:
+		if panel == inspector_panel and not console_right_body.visible:
+			continue
+		if panel.visible and panel.get_global_rect().has_point(global_point):
+			return false
+	return Rect2(Vector2.ZERO, map_canvas.size).has_point(point)
 
 func _prune_building_selection(state: Dictionary) -> void:
 	if building_selection_kind.is_empty():
@@ -3920,6 +3963,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	var state: Dictionary = _state()
 	if state.is_empty() or str(session.get("phase")) != "match":
 		return
+	last_control_group_recall = -1
 	_clear_building_selection()
 	if double_click:
 		additive = false
@@ -4030,6 +4074,8 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	if is_instance_valid(focused):
 		focused.release_focus()
 	if selected >= 0:
+		if double_click and ECONOMY.has_station(state["planets"][selected]):
+			_select_visible_buildings(state, Vector2i(selected, 0), "station")
 		_load_thresholds()
 	_refresh()
 
@@ -4037,6 +4083,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	var state: Dictionary = _state()
 	if state.is_empty() or str(session.get("phase")) != "match":
 		return
+	last_control_group_recall = -1
 	_clear_building_selection()
 	if not additive:
 		selected_units.clear()
@@ -4356,7 +4403,7 @@ func _poi_name(node: int) -> String:
 		return _system_name(node)
 	var index: int = node - count
 	var fields: Array = _state().get("map", {}).get("fields", [])
-	return ("Antimatter deposit %02d" if index < fields.size() and bool(fields[index].get("antimatter", false)) else "Asteroid field %02d") % (index + 1)
+	return "Antimatter Field" if index < fields.size() and bool(fields[index].get("antimatter", false)) else "Asteroid Field"
 
 func _ship_position(ship: Dictionary, _points: Array) -> Vector2:
 	if ship.has("position"):
@@ -4417,17 +4464,25 @@ func _sync_ship_visuals(state: Dictionary) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
-	if not is_instance_valid(match_menu) or match_menu.visible or str(session.get("phase")) != "match":
+	if not is_instance_valid(match_menu) or str(session.get("phase")) != "match":
+		return
+	var key: int = event.physical_keycode
+	if key == KEY_ESCAPE:
+		formation_button = 0
+		pending_command = ""
+		_refresh_command_mode()
+		if match_menu.visible:
+			match_menu.hide()
+		else:
+			_open_menu()
+		get_viewport().set_input_as_handled()
+		return
+	if match_menu.visible:
 		return
 	var focus: Control = get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit or colony_picker.get_popup().visible:
 		return
-	var key: int = event.physical_keycode
-	if key == KEY_ESCAPE and (not pending_command.is_empty() or formation_button != 0):
-		formation_button = 0
-		pending_command = ""
-		_refresh_command_mode()
-	elif key in [KEY_Q, KEY_E]:
+	if key in [KEY_Q, KEY_E]:
 		_cycle_owned_system(-1 if key == KEY_Q else 1)
 	elif key == KEY_F:
 		_focus_selection()
@@ -4722,7 +4777,7 @@ func _center_world(point: Vector2) -> void:
 
 func _frame_starting_sector(index: int) -> void:
 	var state: Dictionary = _state()
-	if selected != index or index < 0 or index >= state.get("planets", []).size() or selected_ship_id >= 0 or selected_yard >= 0 or selected_body >= 0 or not selected_buildings.is_empty():
+	if selected != index or index < 0 or index >= state.get("planets", []).size() or selected_ship_id >= 0 or selected_yard >= 0 or selected_body >= 0 or selected_buildings.size() > 1:
 		return
 	# The same clipped command-sector boundary used for local navigation.
 	var graph: Dictionary = ECONOMY.military_graph(state)
@@ -4739,8 +4794,8 @@ func _system_focus_zoom(index: int, state: Dictionary, desired_radius: float) ->
 	var radius_per_zoom: float = _system_world_radius(index, state) * _fit()
 	return clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, _max_zoom())
 
-func _follow_selection(state: Dictionary, poses: Dictionary, reframe: bool = false) -> void:
-	if not follow_units or selecting_units or drag_button != 0 or str(session.get("phase")) != "match":
+func _follow_selection(state: Dictionary, poses: Dictionary, reframe: bool = false, center_only: bool = false) -> void:
+	if (not follow_units and not center_only) or selecting_units or drag_button != 0 or str(session.get("phase")) != "match":
 		return
 	var ids: Array = selected_units if not selected_units.is_empty() else [selected_ship_id]
 	var positions: Array[Vector2] = []
@@ -4757,7 +4812,7 @@ func _follow_selection(state: Dictionary, poses: Dictionary, reframe: bool = fal
 		var fit_zoom: float = _bounds_zoom(bounds.grow(45.0))
 		if reframe:
 			zoom = fit_zoom
-		elif positions.size() > 1:
+		elif positions.size() > 1 and not center_only:
 			# Follow spread-out fleets without fighting a user's manual zoom-out.
 			zoom = minf(zoom, fit_zoom)
 		_center_world(bounds.get_center())
@@ -4772,7 +4827,8 @@ func _follow_selection(state: Dictionary, poses: Dictionary, reframe: bool = fal
 			for point in positions:
 				bounds = bounds.expand(point)
 			var fit_zoom: float = _bounds_zoom(bounds.grow(70.0))
-			zoom = fit_zoom if reframe else minf(zoom, fit_zoom)
+			if not center_only:
+				zoom = fit_zoom if reframe else minf(zoom, fit_zoom)
 			# Orbital planets are render-scaled, so recalculate after zooming.
 			if kind == "pds":
 				var first: Vector2i = selected_buildings.keys()[0]
@@ -5129,11 +5185,8 @@ func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary,
 			continue
 		var finish: Vector2 = _screen_point(endpoint)
 		var tint: Color = _order_color(ship, pending)
-		map_canvas.draw_line(start, finish, Color(tint, 0.65), 1.5, true)
-		if pending["kind"] in ["position", "sector", "patrol"]:
+		if pending["kind"] in ["position", "sector"]:
 			_draw_destination_ghost(ship["kind"], finish, pending.get("heading", finish - start), tint)
-		else:
-			map_canvas.draw_arc(finish, 7.0, 0.0, TAU, 20, tint, 1.0, true)
 		start = finish
 
 func _draw_map() -> void:
@@ -5187,7 +5240,7 @@ func _draw_map() -> void:
 			boundary.append(boundary[0])
 			map_canvas.draw_polyline(boundary, HUD.ACCENT if selected_field == field_index else Color(edge_tint, 0.8 if special else 0.25), 1.5, true)
 			if special:
-				map_canvas.draw_string(font, center + Vector2(-60, float(field["radius"]) * render_scale + 14.0), "Antimatter", HORIZONTAL_ALIGNMENT_CENTER, 120, 12, edge_tint)
+				map_canvas.draw_string(font, center + Vector2(-60, float(field["radius"]) * render_scale + 14.0), "Antimatter Field", HORIZONTAL_ALIGNMENT_CENTER, 120, 12, edge_tint)
 		for chunk in field["chunks"]:
 			var rock_pos: Vector2 = _screen_point(chunk["position"])
 			if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
@@ -5218,9 +5271,7 @@ func _draw_map() -> void:
 		_draw_system(i, state, pos, radius, tint)
 		_draw_station(state, i, tint, float(state["elapsed"]))
 		_draw_shipyards(state, i, tint, float(state["elapsed"]))
-		if i == selected and bool(state["planets"][i]["home"]):
-			map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
-		if i == selected:
+		if _show_system_rings(i):
 			var phase: float = 0.6 + 0.35 * sin(visual_clock * 3.0)
 			for angle in range(4):
 				var start: float = float(angle) * TAU / 4.0 + 0.1
@@ -5232,14 +5283,14 @@ func _draw_map() -> void:
 		if not rally.is_empty():
 			var start: Vector2 = _screen_point(ECONOMY.shipyard_position(state, ref.x, ref.y, float(state["elapsed"])))
 			var target: Vector2 = _screen_point(rally["point"])
-			map_canvas.draw_line(start, target, Color(HUD.ACCENT, 0.65), 1.5, true)
-			map_canvas.draw_arc(target, 7.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
-			map_canvas.draw_line(target + Vector2(0, -6), target + Vector2(0, -22), HUD.ACCENT, 1.5, true)
+			var rally_tint := Color("#ff605c")
+			map_canvas.draw_line(start, target, Color(rally_tint, 0.65), 1.5, true)
+			map_canvas.draw_arc(target, 7.0, 0.0, TAU, 24, rally_tint, 1.5, true)
+			map_canvas.draw_line(target + Vector2(0, -6), target + Vector2(0, -22), rally_tint, 1.5, true)
 	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
 	_draw_salvage(state, poses, viewport_bounds, font)
 	var order_graph: Dictionary = ECONOMY.military_graph(state)
-	var order_points: Array = order_graph["points"]
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
 		if not selected_units.has(id) or not poses.has(id):
@@ -5248,77 +5299,23 @@ func _draw_map() -> void:
 		_draw_queued_orders(state, order_graph, craft, start)
 		var active_order: Dictionary = craft.get("unit_order", {})
 		var order_tint: Color = _order_color(craft, active_order)
-		if craft.get("retreating", false) and active_order.get("kind", "") in ["position", "sector"]:
+		if craft.has("patrol_from"):
+			var from: Vector2 = _screen_point(craft["patrol_start_point"])
+			var to: Vector2 = _screen_point(craft["patrol_end_point"])
+			map_canvas.draw_dashed_line(from, to, Color("#b880fa"), 1.5, 4.0, true, true)
+		elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
+			var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
+			var rally_tint := Color("#ff605c")
+			map_canvas.draw_line(start, destination, Color(rally_tint, 0.65), 1.5, true)
+			_draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
+		elif active_order.get("kind", "") in ["position", "sector"] and ECONOMY._unit_order_running(craft):
 			var endpoint: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
 			if endpoint.is_finite():
 				var destination: Vector2 = _screen_point(endpoint)
 				_draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
-		if active_order.is_empty() and craft["kind"] == "fighter" and not bool(craft.get("move_only", false)):
-			order_tint = Color("#ff605c")
-		if active_order.get("kind", "") in ["attack", "repair", "deposit", "drop"]:
-			var target_point: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
-			if target_point.is_finite():
-				var marker: Vector2 = _screen_point(target_point)
-				map_canvas.draw_line(start, marker, Color(order_tint, 0.65), 1.5, true)
-				map_canvas.draw_arc(marker, maxf(9.0, 15.0 * _ship_scale()), 0.0, TAU, 24, order_tint, 1.5, true)
-			continue
-		if craft.has("patrol_from"):
-			var from: Vector2 = _screen_point(craft["patrol_start_point"])
-			var to: Vector2 = _screen_point(craft["patrol_end_point"])
-			map_canvas.draw_line(from, to, Color(order_tint, 0.4), 1.0, true)
-			_draw_destination_ghost(craft["kind"], from, from - to, order_tint)
-			_draw_destination_ghost(craft["kind"], to, active_order.get("heading", to - from), order_tint)
-		if bool(craft.get("holding", false)) and not bool(craft.get("retreating", false)):
-			if craft.has("hold_position"):
-				var target: Vector2 = _screen_point(craft["hold_position"])
-				map_canvas.draw_line(start, target, Color(HUD.ACCENT, 0.5), 1.5, true)
-				map_canvas.draw_arc(target, 7.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
-			continue
-		for node in craft["route"]:
-			var world: Vector2 = order_points[int(node)]
-			if node == craft["route"][-1] and int(node) < state["planets"].size():
-				if bool(craft.get("retreating", false)) or bool(craft.get("salvage_delivery", false)):
-					world = ECONOMY.station_position(state, int(node), float(state["elapsed"]))
-				elif craft["kind"] != "fighter" and (int(craft.get("dest", -1)) == int(node) or int(craft.get("source", -1)) == int(node) or craft.get("mining_mode", "") == "approach"):
-					world = ECONOMY._service_point(state, craft, int(node))
-			var finish: Vector2 = _screen_point(world)
-			map_canvas.draw_line(start, finish, Color(order_tint, 0.65), 1.5, true)
-			start = finish
-		if craft.has("patrol_from") and not craft.get("retreating", false):
-			var endpoint: Vector2 = craft["patrol_start_point"] if craft["patrol_returning"] else craft["patrol_end_point"]
-			map_canvas.draw_line(start, _screen_point(endpoint), Color(order_tint, 0.65), 1.5, true)
-			continue
-		if craft.has("local_move_target") and not bool(craft.get("retreating", false)):
+		elif craft.has("local_move_target") and not bool(craft.get("retreating", false)):
 			var destination: Vector2 = _screen_point(craft["local_move_target"])
-			map_canvas.draw_line(start, destination, Color(order_tint, 0.65), 1.5, true)
-			_draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start if destination != start else craft.get("heading", Vector2.UP)), order_tint)
-			continue
-		if craft.has("launch_rally") and not bool(craft.get("retreating", false)):
-			var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
-			map_canvas.draw_line(start, destination, Color(order_tint, 0.65), 1.5, true)
-			_draw_destination_ghost(craft["kind"], destination, destination - start, order_tint)
-			continue
-		if craft["kind"] == "miner":
-			var assigned: int = int(craft.get("assigned_field", -1))
-			if assigned >= 0:
-				var field: Dictionary = state["map"]["fields"][assigned]
-				var target: Vector2 = field["position"]
-				for rock in field.get("chunks", []):
-					if int(rock["id"]) == int(craft.get("assigned_chunk", -1)):
-						target = rock["position"]
-						break
-				var marker: Vector2 = _screen_point(target)
-				map_canvas.draw_arc(marker, 9.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
-			if craft.get("mining_mode", "") in ["approach", "outbound", "mining"] and craft.has("mining_target"):
-				map_canvas.draw_line(start, _screen_point(craft["mining_target"]), Color(HUD.ACCENT, 0.5), 1.5, true)
-			elif craft.get("mining_mode", "") == "return":
-				var dock: Vector2 = _screen_point(ECONOMY._service_point(state, craft, int(craft["at"])))
-				map_canvas.draw_line(start, dock, Color(HUD.ACCENT, 0.5), 1.5, true)
-		if not (craft["route"] as Array).is_empty():
-			if active_order.get("kind", "") in ["position", "sector"] and not craft.get("retreating", false):
-				_draw_destination_ghost(craft["kind"], start, active_order.get("heading", start - poses[id]["point"]), order_tint)
-			else:
-				map_canvas.draw_arc(start, 7.0, 0.0, TAU, 20, order_tint, 1.5, true)
+			_draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
 	for index in range(points.size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
