@@ -52,6 +52,29 @@ func _test_rounded_sector_limits() -> void:
 	assert(not ECON.sector_contains(graph, 0, diagonal * (rounded + 0.1)))
 	assert(not ECON.sector_contains(graph, 0, Vector2(60.1, 0)))
 
+func _test_soft_separation() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var point := Vector2(100.0, 200.0)
+	var a: Dictionary = {"id": 501, "kind": "fighter", "owner": 1, "at": 0, "route": [], "position": point, "holding": true, "hold_position": point, "hold_sector": 0}
+	var b: Dictionary = a.duplicate(true)
+	b["id"] = 502
+	state["ships"] = [a, b]
+	var graph: Dictionary = ECON.military_graph(state)
+	var previous: Dictionary = {501: point, 502: point}
+	ECON._separate_ships(state, graph, previous, 0.1)
+	assert((a["position"] as Vector2).distance_to(b["position"]) > 0.0)
+	assert((a["position"] as Vector2).distance_to(point) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+	assert((b["position"] as Vector2).distance_to(point) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+	assert(((a["position"] as Vector2) + (b["position"] as Vector2)).is_equal_approx(point * 2.0))
+	assert(a["hold_position"] == point and b["hold_position"] == point)
+	assert(ECON.sector_contains(graph, 0, a["position"]) and ECON.sector_contains(graph, 0, b["position"]))
+	state["ships"] = [a]
+	previous = {501: a["position"]}
+	var unchanged: Vector2 = a["position"]
+	ECON._separate_ships(state, graph, previous, 0.1)
+	assert(a["position"] == unchanged)
+
 func _test_maintain_targets() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1])
 	var p: Dictionary = state["planets"][0]
@@ -74,6 +97,7 @@ func _test_maintain_targets() -> void:
 	assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
+	_test_soft_separation()
 	_test_rounded_sector_limits()
 	_test_shipyard_rally()
 	_test_freighter_bays()
@@ -1716,7 +1740,11 @@ func _test_local_position_orders() -> void:
 		for ship in state["ships"]:
 			assert(ECON.sector_contains(ECON.military_graph(state), 0, ship["position"]))
 	for craft in state["ships"]:
-		assert(craft["position"] == point and craft["holding"])
+		assert(craft["holding"] and craft["hold_position"] == point)
+		assert((craft["position"] as Vector2).distance_to(point) <= ECON.SHIP_SEPARATION_RADIUS * 2.0)
+	for i in range(state["ships"].size()):
+		for j in range(i + 1, state["ships"].size()):
+			assert((state["ships"][i]["position"] as Vector2).distance_to(state["ships"][j]["position"]) > ECON.SHIP_SEPARATION_RADIUS * 0.1)
 	assert(freighter["cargo"]["Metals"] == 10.0)
 	assert(ECON.command_hold_units(state, 1, selection, true))
 	for tick in range(20):
