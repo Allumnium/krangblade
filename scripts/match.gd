@@ -12,6 +12,7 @@ const CONSOLE_WIDE_WIDTH: float = 1240.0
 const OVERVIEW_WIDTH: float = 286.0
 const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
+const LENS_STRIP_WIDTH: float = 32.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const RADIUS: float = 12.0
 const MIN_ZOOM: float = 0.5
@@ -49,6 +50,7 @@ var inspector_panel: PanelContainer
 var overview_panel: PanelContainer
 var console_panel: PanelContainer
 var minimap: Control
+var lens_column: VBoxContainer
 var console_columns: HBoxContainer
 var console_center: VBoxContainer
 var console_center_spacer: Control
@@ -444,7 +446,18 @@ func _build_ui() -> void:
 	minimap.draw.connect(_draw_minimap)
 	minimap.gui_input.connect(_minimap_input)
 	minimap.resized.connect(minimap.queue_redraw)
-	# Three actual columns; controls are owned by their corresponding wing.
+	# A persistent vertical lens strip belongs immediately beside the minimap.
+	lens_column = VBoxContainer.new()
+	lens_column.custom_minimum_size.x = LENS_STRIP_WIDTH
+	lens_column.size_flags_horizontal = Control.SIZE_FILL
+	lens_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	lens_column.add_theme_constant_override("separation", 3)
+	deck.add_child(lens_column)
+	lens_column.draw.connect(func() -> void:
+		lens_column.draw_rect(Rect2(Vector2.ZERO, lens_column.size), HUD.CONSOLE_BACKGROUND))
+	lens_column.resized.connect(lens_column.queue_redraw)
+	_build_lens_buttons(lens_column)
+	# The center and contextual command panel remain independent of selection.
 	console_columns = deck
 	console_columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	empty_selection = _label("Select a system, ship or asteroid field", 14)
@@ -458,17 +471,13 @@ func _build_ui() -> void:
 	console_columns.add_child(console_center)
 	console_center_spacer = Control.new()
 	console_center.add_child(console_center_spacer)
-	var center_toolbar := HBoxContainer.new()
-	center_toolbar.add_theme_constant_override("separation", 3)
-	console_center.add_child(center_toolbar)
-	_build_lens_buttons(center_toolbar)
 	console_center.add_child(empty_selection)
 	inspector_panel = PanelContainer.new()
 	console_columns.add_child(inspector_panel)
 	# Both wings use the same fixed width; only the center expands.
 	inspector_panel.size_flags_horizontal = Control.SIZE_FILL
 	inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
+	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
 	# Simulation controls are global, not contextual commands.
 	var time_panel := PanelContainer.new()
 	add_child(time_panel)
@@ -495,7 +504,7 @@ func _build_ui() -> void:
 	console_center.add_child(overview_panel)
 	overview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	overview_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
+	overview_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
 	var overview_scroll := ScrollContainer.new()
 	overview_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
@@ -671,6 +680,7 @@ func _build_ui() -> void:
 	inspector_panel.resized.connect(console_profile.queue_redraw)
 	console_center.resized.connect(console_profile.queue_redraw)
 	console_center.resized.connect(_layout_command_grids)
+	lens_column.resized.connect(console_profile.queue_redraw)
 	console_columns.resized.connect(console_profile.queue_redraw)
 	_layout_console()
 
@@ -688,7 +698,7 @@ func _layout_console() -> void:
 	diagnostic_label.offset_top = -44.0 - height
 	# Symmetric wings occupy at most 48% of the deck together at the
 	# usual window sizes. The center receives all remaining width.
-	var wing_width: float = clampf(floorf((size.x - 24.0) * 0.24), 180.0, 320.0)
+	var wing_width: float = clampf(floorf((size.x - 28.0 - LENS_STRIP_WIDTH) * 0.24), 180.0, 320.0)
 	minimap.custom_minimum_size.x = wing_width
 	inspector_panel.custom_minimum_size.x = wing_width
 	# SC2-style raised wings: minimap and commands use the full deck height;
@@ -709,9 +719,10 @@ func _draw_console_profile() -> void:
 	var center_left: float = console_center.global_position.x - console_profile.global_position.x
 	var right_left: float = inspector_panel.global_position.x - console_profile.global_position.x
 	var center_top: float = console_center_spacer.global_position.y + console_center_spacer.size.y - console_profile.global_position.y
-	var fill := Color("#0b1624")
+	var fill: Color = HUD.CONSOLE_BACKGROUND
 	var edge := Color("#345570")
-	var left_rect := Rect2(Vector2.ZERO, Vector2(minimap.size.x, bounds.size.y))
+	var left_width: float = lens_column.global_position.x + lens_column.size.x - console_profile.global_position.x
+	var left_rect := Rect2(Vector2.ZERO, Vector2(left_width, bounds.size.y))
 	var center_rect := Rect2(Vector2(center_left, center_top), Vector2(console_center.size.x, maxf(0.0, bounds.size.y - center_top)))
 	var right_rect := Rect2(Vector2(right_left, 0.0), Vector2(maxf(0.0, bounds.size.x - right_left), bounds.size.y))
 	for rect in [left_rect, center_rect, right_rect]:
@@ -770,13 +781,13 @@ func _minimap_input(event: InputEvent) -> void:
 
 func _draw_minimap() -> void:
 	var surface := Rect2(Vector2.ZERO, minimap.size)
-	minimap.draw_rect(surface, Color("#070e19"))
+	minimap.draw_rect(surface, HUD.CONSOLE_BACKGROUND)
 	minimap.draw_rect(surface.grow(-0.5), Color("#345570"), false, 1.0)
 	var state: Dictionary = _state()
 	if state.is_empty() or minimap.size.x < 12.0 or minimap.size.y < 12.0:
 		return
 	var area: Rect2 = _minimap_area()
-	minimap.draw_rect(area, Color("#0b1928"))
+	minimap.draw_rect(area, Color("#090f17"))
 	for i in range(1, 5):
 		var x: float = area.position.x + area.size.x * float(i) / 5.0
 		var y: float = area.position.y + area.size.y * float(i) / 5.0
@@ -1779,17 +1790,18 @@ func _set_rally_at(point: Vector2) -> void:
 	if node >= 0:
 		session.call("request_shipyard_rally", selected, selected_yard, node, world)
 
-func _selection_icon(kind: String) -> Texture2D:
-	if not selection_icons.has(kind):
+func _selection_icon(kind: String, tint: Color) -> Texture2D:
+	var key: String = kind + ":" + tint.to_html(false)
+	if not selection_icons.has(key):
 		var points: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE)
 		var coords: PackedStringArray = []
 		for vertex in points:
 			var v: Vector2 = vertex
 			coords.append("%.2f,%.2f" % [16.0 + v.y, 16.0 - v.x])
 		var image := Image.new()
-		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><polygon points="' + " ".join(coords) + '" fill="#101f30" stroke="#eaf6ff" stroke-width="1.25" stroke-linejoin="round"/></svg>')
-		selection_icons[kind] = ImageTexture.create_from_image(image)
-	return selection_icons[kind]
+		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><polygon points="%s" fill="none" stroke="#%s" stroke-width="1.8" stroke-linejoin="round"/></svg>' % [" ".join(coords), tint.to_html(false)])
+		selection_icons[key] = ImageTexture.create_from_image(image)
+	return selection_icons[key]
 
 func _select_tile(id: int) -> void:
 	selected_units.assign([id])
@@ -1816,8 +1828,10 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 			tile = Button.new()
 			tile.custom_minimum_size = Vector2(38, 38)
 			tile.focus_mode = Control.FOCUS_NONE
-			tile.icon = _selection_icon(str(craft["kind"]))
 			tile.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			tile.add_theme_stylebox_override("normal", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 2, 2))
+			tile.add_theme_stylebox_override("hover", HUD.surface(HUD.CONSOLE_BACKGROUND.lightened(0.06), HUD.ACCENT, 2, 2))
+			tile.add_theme_stylebox_override("pressed", HUD.surface(HUD.CONSOLE_BACKGROUND.lightened(0.10), Color.WHITE, 2, 2))
 			tile.pressed.connect(_select_tile.bind(id))
 			selection_grid.add_child(tile)
 			selection_tiles[id] = tile
@@ -1825,9 +1839,7 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 		var tint: Color = Color("#d94b52") if hp < 0.2 else (Color("#e99e45") if hp < 0.5 else Color("#55b987"))
 		if tile.get_meta("health_color", Color.TRANSPARENT) != tint:
 			tile.set_meta("health_color", tint)
-			tile.add_theme_stylebox_override("normal", HUD.surface(tint.darkened(0.40), tint, 2, 2))
-			tile.add_theme_stylebox_override("hover", HUD.surface(tint.darkened(0.18), Color.WHITE, 2, 2))
-			tile.add_theme_stylebox_override("pressed", HUD.surface(tint, Color.WHITE, 2, 2))
+			tile.icon = _selection_icon(str(craft["kind"]), tint)
 		tile.tooltip_text = "%s #%d · HP %.0f / %.0f" % [_ship_kind_name(str(craft["kind"])), id, float(craft.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
 	for id in selection_tiles.keys():
 		if not living.has(id):
@@ -1967,10 +1979,16 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			fleet_cargo_labels[resource].get_parent().visible = true
 
 func _build_lens_buttons(parent: Container) -> void:
-	logistics_lens = _button("Logistics", _toggle_lens.bind("logistics"), parent)
+	logistics_lens = _button("", _toggle_lens.bind("logistics"), parent)
+	# Linked cargo crates suggest the resource storage / logistics overlay.
+	logistics_lens.icon = _command_icon('<rect x="3" y="3" width="10" height="10" rx="1"/><rect x="19" y="19" width="10" height="10" rx="1"/><path d="M13 8H24V19M20 15L24 19L28 15M8 3V7M24 24V29"/>')
+	logistics_lens.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	logistics_lens.expand_icon = true
+	logistics_lens.add_theme_constant_override("icon_max_width", 24)
+	logistics_lens.custom_minimum_size = Vector2.ONE * LENS_STRIP_WIDTH
 	logistics_lens.toggle_mode = true
 	logistics_lens.focus_mode = Control.FOCUS_NONE
-	logistics_lens.tooltip_text = "System resource storage"
+	logistics_lens.tooltip_text = "Logistics lens · System resource storage"
 
 var diagnostic_label: Label
 var diagnostic_button: Button
@@ -2665,11 +2683,11 @@ func _refresh() -> void:
 	if ship.is_empty():
 		selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 		ship = _selected_ship(state)
-	if ship.is_empty() and selected_units.is_empty():
-		follow_units = false
 	var p: Dictionary = _planet()
 	var field_selected: bool = selected_field >= 0 and ECONOMY.discovered(state, _me(), "fields", selected_field)
 	var ship_selected: bool = not ship.is_empty()
+	if not ship_selected and not field_selected and p.is_empty():
+		follow_units = false
 	var other_selected: bool = ship_selected or field_selected
 	var body_selected: bool = not other_selected and not p.is_empty() and selected_body >= 0 and selected_body < int(p.get("planet_count", 0))
 	if not body_selected:
@@ -2678,6 +2696,8 @@ func _refresh() -> void:
 	# than silently retargeting an upgrade at a different shipyard.
 	var yard_selected: bool = not other_selected and not body_selected and not p.is_empty() and selected_yard >= 0 and selected_yard < p.get("yards", []).size() and selected_yard_count == p.get("yards", []).size()
 	if not yard_selected:
+		if selected_yard >= 0:
+			follow_units = false
 		selected_yard = -1
 	inspector_panel.visible = true
 	console_right_body.visible = not p.is_empty() or other_selected
@@ -3445,6 +3465,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 			selected_ship_id = -1
 			selected_units.clear()
 			selected_field = -1
+			follow_units = false
 			var focus: Control = get_viewport().gui_get_focus_owner()
 			if is_instance_valid(focus):
 				focus.release_focus()
@@ -3818,10 +3839,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	elif key in [KEY_Q, KEY_E]:
 		_cycle_owned_system(-1 if key == KEY_Q else 1)
 	elif key == KEY_F:
-		# Explicit camera follow: selection changes never move the camera.
-		if not selected_units.is_empty() or selected_ship_id >= 0:
-			follow_units = true
-			_follow_selected_units(_ship_poses(_state()))
+		_focus_selection()
 	elif key == KEY_H:
 		_hold_selected()
 	elif key == KEY_U:
@@ -3869,6 +3887,7 @@ func _cycle_owned_system(direction: int) -> void:
 	selected_ship_id = -1
 	selected_units.clear()
 	selected_field = -1
+	follow_units = false
 	var world: Vector2 = state["map"]["points"][selected]
 	var desired_radius: float = minf(_projection_size().x, _projection_size().y) * 0.27
 	var radius_per_zoom: float = minf(RADIUS * float(state["planets"][selected].get("size_factor", 1.0)), float(_system_visual(selected, state)["spacing"]) * _fit() * 0.39)
@@ -3938,7 +3957,7 @@ func _process(delta: float) -> void:
 	if not state.is_empty():
 		_update_planet_detail(state, delta)
 		var poses: Dictionary = _ship_poses(state, delta)
-		_follow_selected_units(poses)
+		_follow_selection(state, poses)
 		_sync_destruction_effects(state)
 	else:
 		planet_detail_alpha.clear()
@@ -4066,25 +4085,87 @@ func _ship_scale() -> float:
 	# scale the actual authored hull geometry continuously with the camera.
 	return minf(SHIP_WORLD_SCALE * _fit() * minf(zoom, OVERVIEW_MAX_ZOOM), 1.25) * maxf(1.0, zoom / OVERVIEW_MAX_ZOOM)
 
-func _follow_selected_units(poses: Dictionary) -> void:
+func _focus_selection() -> void:
+	var state: Dictionary = _state()
+	if state.is_empty():
+		return
+	follow_units = true
+	_follow_selection(state, _ship_poses(state), true)
+	map_canvas.queue_redraw()
+
+func _bounds_zoom(bounds: Rect2) -> float:
+	# Fit the selection into the unobstructed play area with breathing room
+	# around silhouettes and selection indicators.
+	var available: Vector2 = _projection_size() * 0.78
+	var extent: Vector2 = bounds.size.max(Vector2.ONE)
+	return clampf(minf(available.x / extent.x, available.y / extent.y) / _fit(), MIN_ZOOM, _max_zoom())
+
+func _center_world(point: Vector2) -> void:
+	pan = (_map_size() * 0.5 - point) * _fit() * zoom
+
+func _system_focus_zoom(index: int, state: Dictionary, desired_radius: float) -> float:
+	var radius_per_zoom: float = minf(RADIUS * float(state["planets"][index].get("size_factor", 1.0)), float(_system_visual(index, state)["spacing"]) * _fit() * 0.39)
+	return clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, _max_zoom())
+
+func _follow_selection(state: Dictionary, poses: Dictionary, reframe: bool = false) -> void:
 	if not follow_units or selecting_units or drag_button != 0 or str(session.get("phase")) != "match":
 		return
-	var center: Vector2 = Vector2.ZERO
-	var count: int = 0
-	# Use exactly the interpolated positions that the renderer shows,
-	# so the tracked hull stays stationary even between network snapshots.
-	if not selected_units.is_empty():
-		for id in selected_units:
-			if poses.has(id):
-				center += poses[id]["point"]
-				count += 1
-	elif poses.has(selected_ship_id):
-		center = poses[selected_ship_id]["point"]
-		count = 1
-	if count == 0:
-		follow_units = false
+	var ids: Array = selected_units if not selected_units.is_empty() else [selected_ship_id]
+	var positions: Array[Vector2] = []
+	for id in ids:
+		if poses.has(id):
+			positions.append(poses[id]["world"])
+	if not positions.is_empty():
+		# The bounding-box center (rather than the arithmetic centroid) keeps
+		# distant or unevenly distributed ships inside the view. Use the same
+		# interpolated world poses as the renderer, including foreign ships.
+		var bounds := Rect2(positions[0], Vector2.ZERO)
+		for point in positions:
+			bounds = bounds.expand(point)
+		var fit_zoom: float = _bounds_zoom(bounds.grow(45.0))
+		if reframe:
+			zoom = fit_zoom
+		elif positions.size() > 1:
+			# Follow spread-out fleets without fighting a user's manual zoom-out.
+			zoom = minf(zoom, fit_zoom)
+		_center_world(bounds.get_center())
 		return
-	pan += _camera_center() - center / float(count)
+	var fields: Array = state["map"].get("fields", [])
+	if selected_field >= 0 and selected_field < fields.size() and ECONOMY.discovered(state, _me(), "fields", selected_field):
+		var field: Dictionary = fields[selected_field]
+		var center: Vector2 = field["position"]
+		var radius: float = float(field["radius"])
+		var bounds := Rect2(center - Vector2.ONE * radius, Vector2.ONE * radius * 2.0)
+		if reframe:
+			zoom = _bounds_zoom(bounds)
+		_center_world(center)
+		return
+	if selected >= 0 and selected < state["planets"].size() and ECONOMY.discovered(state, _me(), "planets", selected):
+		var system: Dictionary = state["planets"][selected]
+		var center: Vector2 = state["map"]["points"][selected]
+		var available: float = minf(_projection_size().x, _projection_size().y)
+		if selected_yard >= 0 and selected_yard < system["yards"].size():
+			if reframe:
+				zoom = _bounds_zoom(Rect2(Vector2.ZERO, Vector2.ONE * 140.0))
+			_center_world(ECONOMY.shipyard_position(state, selected, selected_yard, float(state["elapsed"])))
+		elif selected_body >= 0 and selected_body < int(system.get("planet_count", 0)):
+			var body: Dictionary = _system_visual(selected, state)["bodies"][selected_body]
+			if reframe:
+				var desired_radius: float = clampf(available * 0.15 / maxf(0.01, float(body["size"]) * 0.55), PLANET_FADE_FULL, 720.0)
+				zoom = _system_focus_zoom(selected, state, desired_radius)
+			# Orbital drawing is screen-scaled; center the precise rendered body,
+			# including its animated orbit, rather than its parent star.
+			_center_world(center)
+			pan -= _body_position(body, _planet_radius(selected, state), game_visual_clock)
+		else:
+			if reframe:
+				# A selected system represents its whole command sector, not just
+				# the central star; keep its entire local area visible.
+				var sector_radius: float = float(ECONOMY.military_graph(state)["sector_radii"][selected])
+				zoom = _bounds_zoom(Rect2(Vector2.ZERO, Vector2.ONE * sector_radius * 2.0))
+			_center_world(center)
+		return
+	follow_units = false
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 	_sync_ship_visuals(state)
@@ -4101,7 +4182,7 @@ func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 		if delta > 0.0 or not ship_offsets.has(id):
 			ship_offsets[id] = {"angle": angle}
 		var mining: bool = ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
-		poses[id] = {"point": _screen_point(pos), "direction": Vector2.from_angle(angle), "mining": mining}
+		poses[id] = {"point": _screen_point(pos), "world": pos, "direction": Vector2.from_angle(angle), "mining": mining}
 	return poses
 
 func _draw_logistics_lens(state: Dictionary, font: Font) -> void:

@@ -3,6 +3,7 @@ extends RefCounted
 const TEXT := Color("#e2f0ff")
 const MUTED := Color("#8ca5be")
 const ACCENT := Color("#62cbe8")
+const CONSOLE_BACKGROUND := Color("#080c12")
 const COLORS = {
 	"Metals": Color("#c1cedc"), "Plastics": Color("#f6a45b"),
 	"Textiles": Color("#48d6c1"), "Organics": Color("#8ed779"),
@@ -86,6 +87,8 @@ static func create() -> Theme:
 static func compact() -> Theme:
 	var result: Theme = create()
 	result.default_font_size = 12
+	result.set_stylebox("panel", "PanelContainer", surface(CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
+	result.set_stylebox("panel", "TabContainer", surface(CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
 	for type in ["HBoxContainer", "VBoxContainer"]:
 		result.set_constant("separation", type, 3)
 	for type in ["Button", "OptionButton", "LineEdit"]:
@@ -108,7 +111,7 @@ static func action(button: Button, accent: Color = ACCENT, dense: bool = false) 
 
 static func section(parent: Container, title_text: String, dense: bool = false) -> VBoxContainer:
 	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", surface(Color("#0a1726ed"), Color("#233e56"), 3 if dense else 9, 3 if dense else 5))
+	panel.add_theme_stylebox_override("panel", surface(CONSOLE_BACKGROUND if dense else Color("#0a1726ed"), Color("#233e56"), 3 if dense else 9, 3 if dense else 5))
 	parent.add_child(panel)
 	var body := VBoxContainer.new()
 	body.add_theme_constant_override("separation", 2 if dense else 6)
