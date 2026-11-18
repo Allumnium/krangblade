@@ -116,14 +116,19 @@ var station_selected_index: int = -1
 var station_queue: HFlowContainer
 var station_queue_rows: Dictionary = {}
 var station_details: VBoxContainer
+var station_detail_tabs: HBoxContainer
+var station_resources_tab: Button
+var station_queue_tab: Button
+var station_detail_system: int = -1
+var station_detail_page: String = "resources"
+var station_has_queue: bool = false
 var asteroid_shape_cache: Dictionary = {}
 var asteroid_cache_seed: int = -1
 var population_label: Label
 var raw_antimatter_label: Label
 var population_delta_label: Label
 var zoom: float = 1.0
-var pan: Vector2 = Vector2.ZERO
-var previous_map_fit: float = 0.0
+var camera_world: Vector2 = Vector2.INF
 var follow_units: bool = false
 var drag_button: int = 0
 var ship_visuals: Dictionary = {}
@@ -682,6 +687,17 @@ func _build_ui() -> void:
 	system_owner_label.custom_minimum_size.x = 72
 	system_owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	system_header.add_child(system_owner_label)
+	station_detail_tabs = HBoxContainer.new()
+	station_detail_tabs.add_theme_constant_override("separation", 3)
+	planet_overview.add_child(station_detail_tabs)
+	station_resources_tab = _button("Resources", _set_station_detail_page.bind("resources"), station_detail_tabs)
+	station_queue_tab = _button("Queue", _set_station_detail_page.bind("queue"), station_detail_tabs)
+	for tab in [station_resources_tab, station_queue_tab]:
+		tab.toggle_mode = true
+		tab.focus_mode = Control.FOCUS_NONE
+		tab.add_theme_font_size_override("font_size", 11)
+		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	station_detail_tabs.hide()
 	population_label = _label("", 13)
 	population_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	population_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -889,7 +905,7 @@ func _layout_command_grids() -> void:
 		var slot_width: float = maxf(36.0, floorf((inspector_panel.custom_minimum_size.x - padding - 9.0) / 4.0))
 		var slot_height: float = clampf(slot_width, 40.0, 52.0)
 		for grid in [station_primary_grid, station_build_grid]:
-			var row_height: float = minf(slot_height, floorf((inspector_slot.size.y - padding - 9.0) / 4.0)) if grid == station_build_grid and inspector_slot.size.y > 0.0 else slot_height
+			var row_height: float = minf(slot_height, floorf((inspector_slot.size.y - padding - 9.0) / 4.0)) if inspector_slot.size.y > 0.0 else slot_height
 			for button in grid.get_children():
 				button.custom_minimum_size = Vector2(slot_width, maxf(32.0, row_height))
 				if not button is Button:
@@ -940,7 +956,7 @@ func _minimap_input(event: InputEvent) -> void:
 		var fraction: Vector2 = ((event.position - area.position) / area.size).clamp(Vector2.ZERO, Vector2.ONE)
 		var world: Vector2 = fraction * _map_size()
 		follow_units = false
-		pan = (_map_size() * 0.5 - world) * _fit() * zoom
+		_center_world(world)
 		_position_territory()
 		map_canvas.queue_redraw()
 		minimap.queue_redraw()
@@ -1091,7 +1107,6 @@ func _population_row(parent: Container) -> HBoxContainer:
 	var icon := TextureRect.new()
 	HUD.fixed_icon(icon, _population_texture(14), 14)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.tooltip_text = "Population"
 	row.add_child(icon)
 	return row
 
@@ -1456,8 +1471,10 @@ func _build_station_command_card(parent: Container) -> void:
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
-	_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")).tooltip_text = "Build"
-	_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")).tooltip_text = "Trade"
+	for i in range(4):
+		_station_spacer(station_primary_grid)
+	_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build"))
+	_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade"))
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
 	station_build_grid = _station_grid(station_commands)
@@ -1482,7 +1499,7 @@ func _build_station_command_card(parent: Container) -> void:
 	# Build actions sit one row above Return, which stays at the bottom right.
 	for i in range(3):
 		_station_spacer(station_build_grid)
-	_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")).tooltip_text = "Return"
+	_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary"))
 	station_trade = VBoxContainer.new()
 	station_trade.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	station_commands.add_child(station_trade)
@@ -1541,14 +1558,14 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		if slot < 0 and pending.is_empty() and tier > 0:
 			_set_cost_tooltip(button, hint + " · %.0f yr" % ECONOMY._work("yard", tier), cost)
 		else:
-			_set_cost_tooltip(button, hint)
+			_set_cost_tooltip(button, "" if slot >= 0 else hint)
 		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled else Color.WHITE
 	for kind in station_upgrade_buttons:
 		var button: Button = station_upgrade_buttons[kind]
 		var installed: bool = bool(p["station"].get(kind, false))
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not ECONOMY.station_upgrade_available(p, kind)
-		var hint: String = "Reinforced Plating · %.0f yr\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix · %.0f yr\n2 defensive lasers · 18 damage each · 1 shot/yr · range 180"
+		var hint: String = "Reinforced Plating · %.0f yr\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix · %.0f yr\n2 defensive lasers · 18 damage each · 1 shot/s (1×) · range 180"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {})
 		if installed or pending:
 			button.tooltip_text += "\n" + ("Installed" if installed else "Building")
@@ -1765,7 +1782,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	if level >= ECONOMY.MAX_SHIPYARD_LEVEL:
 		_set_cost_tooltip(yard_upgrade, "Maximum level")
 	else:
-		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f yr" % [level + 1, ECONOMY._work("yard_upgrade", level + 1)], upgrade_recipe)
+		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f yr\nBuild speed: %.1f× → %.1f×\nMax ship size: %d → %d\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe)
 
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
@@ -1780,9 +1797,25 @@ func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
 	for job in system["queue"]:
 		if int(job["size"]) == 0 and job["kind"] != "yard_upgrade":
 			jobs.append(job)
-	station_queue.visible = not jobs.is_empty()
-	station_details.visible = jobs.is_empty()
+	var has_jobs: bool = not jobs.is_empty()
+	if selected != station_detail_system or (has_jobs and not station_has_queue):
+		station_detail_page = "queue" if has_jobs else "resources"
+	station_detail_system = selected
+	station_has_queue = has_jobs
+	station_queue_tab.text = "Queue (%d)" % jobs.size()
+	_set_station_detail_page(station_detail_page)
 	_refresh_queue_tiles(station_queue, station_queue_rows, system, jobs, owned, -1, true)
+
+func _set_station_detail_page(page: String) -> void:
+	station_detail_page = page if station_has_queue else "resources"
+	station_detail_tabs.visible = station_has_queue
+	station_queue.visible = station_has_queue and station_detail_page == "queue"
+	station_details.visible = not station_queue.visible
+	station_resources_tab.set_pressed_no_signal(station_detail_page == "resources")
+	station_queue_tab.set_pressed_no_signal(station_detail_page == "queue")
+	if not station_details.visible and hovered_resource.begins_with("local:"):
+		resource_hover_panel.hide()
+		hovered_resource = ""
 
 func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dictionary, jobs: Array, owned: bool, active_id: int, station_jobs: bool = false) -> void:
 	for id in rows.keys():
@@ -1886,7 +1919,6 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	var owner_name: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
 	body_title.text = _body_name(selected, selected_body)
 	body_context.text = "%s\n%s" % [_system_name(selected), owner_name]
-	body_context.tooltip_text = body_context.text
 	var defenses: Dictionary = system.get("pds", {})
 	var battery: Dictionary = defenses.get(selected_body, {})
 	var job: Dictionary = ECONOMY.pds_job(system)
@@ -2200,17 +2232,17 @@ func _refresh_weapon_details(ship: Dictionary, system: Dictionary, body_selected
 			parent = ship_overview
 			at = ship_detail.get_index() + 1
 			match str(ship["kind"]):
-				"fighter": details = "Laser\n%.0f damage · 1 shot/yr · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
-				"miner": details = "Mining laser ×2\n%.0f damage each · 1 shot/yr · Range %.0f\n+200%% vs asteroids · %.0f t/yr nominal" % [ECONOMY.MINER_LASER_DAMAGE / 2.0, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE]
+				"fighter": details = "Laser\n%.0f damage · 1 shot/s (1×) · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
+				"miner": details = "Mining laser ×2\n%.0f damage each · 1 shot/s (1×) · Range %.0f\n+200%% vs asteroids · %.0f t/yr nominal" % [ECONOMY.MINER_LASER_DAMAGE / 2.0, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE]
 		elif not system.is_empty() and not yard_selected:
 			if body_selected and system.get("pds", {}).has(selected_body):
 				parent = body_status.get_parent()
 				at = body_status.get_index() + 1
-				details = "Planetary defense laser\n%.0f damage · 1 shot/yr · Range %.0f" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
+				details = "Planetary defense laser\n%.0f damage · 1 shot/s (1×) · Range %.0f" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
 			elif not body_selected and building_selection_kind == "station" and bool(system.get("station", {}).get("laser_matrix", false)):
 				parent = planet_overview
 				at = 1
-				details = "Laser Matrix ×%d\n%.0f damage each · 1 shot/yr · Range %.0f" % [ECONOMY.STATION_LASER_COUNT, ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
+				details = "Laser Matrix ×%d\n%.0f damage each · 1 shot/s (1×) · Range %.0f" % [ECONOMY.STATION_LASER_COUNT, ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 	if weapon_details.get_parent() != parent:
 		weapon_details.reparent(parent, false)
 		parent.move_child(weapon_details, at)
@@ -2483,7 +2515,6 @@ func _refresh_time_controls(state: Dictionary) -> void:
 		else:
 			button.remove_theme_stylebox_override("disabled")
 			button.remove_theme_color_override("font_disabled_color")
-		button.tooltip_text = "Pause simulation" if int(speed) == 0 else "%d× simulation speed" % int(speed)
 
 func _toggle_lens(kind: String) -> void:
 	_refresh()
@@ -2877,7 +2908,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year\nEco-Housing: %.0f / %.0f residents · +%.2f t/yr Organics" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics"), ECONOMY.eco_population(p), ECONOMY.eco_capacity(p), ECONOMY.eco_organics(p)]
 	var potential: float = ECONOMY.rate(p, resource)
 	var demand: float = ECONOMY.consumption(p, resource)
-	return "%s · %.2f t stored\nProduction: %.2f t/yr\nDemand: %.2f t/yr\nNet: %+.2f t/yr" % [resource, float(p["stock"][resource]), potential, demand, potential - demand]
+	return "%s · %.2f t stored\nProduction: %.2f t/yr\nDemand: %.2f t/yr\nNet: %+.2f t/yr\nOutput: %.1f%% of baseline" % [resource, float(p["stock"][resource]), potential, demand, potential - demand, 100.0 * ECONOMY.production_modifier(p, resource)]
 
 func _update_resource_hover() -> void:
 	if not is_instance_valid(resource_hover_panel):
@@ -2888,12 +2919,13 @@ func _update_resource_hover() -> void:
 		if global_resource_tiles[key].get_global_rect().has_point(mouse):
 			resource = key
 			break
-	if resource.is_empty() and planet_overview.is_visible_in_tree() and overview_panel.get_global_rect().has_point(mouse) and not _planet().is_empty():
-		if population_label.get_parent().get_global_rect().has_point(mouse):
+	var local_visible: bool = station_details.is_visible_in_tree() and overview_panel.get_global_rect().has_point(mouse) and not _planet().is_empty()
+	if resource.is_empty() and local_visible:
+		if population_label.is_visible_in_tree() and population_label.get_parent().get_global_rect().has_point(mouse):
 			resource = "local:population"
 		else:
 			for key in production_values:
-				if production_values[key]["row"].get_global_rect().has_point(mouse):
+				if production_values[key]["row"].is_visible_in_tree() and production_values[key]["row"].get_global_rect().has_point(mouse):
 					resource = "local:" + str(key)
 					break
 	if resource.is_empty() and resource_hover_panel.visible and resource_hover_panel.get_global_rect().has_point(mouse):
@@ -2904,7 +2936,7 @@ func _update_resource_hover() -> void:
 		return
 	var state: Dictionary = _state()
 	var local: bool = resource.begins_with("local:")
-	if local and (_planet().is_empty() or not planet_overview.is_visible_in_tree()):
+	if local and (_planet().is_empty() or not station_details.is_visible_in_tree()):
 		resource_hover_panel.hide()
 		hovered_resource = ""
 		return
@@ -2928,7 +2960,6 @@ func _update_resource_hover() -> void:
 
 func _refresh_global_bar(state: Dictionary) -> void:
 	year_label.text = "%d A.D." % ECONOMY.current_year(state)
-	year_label.tooltip_text = "One game year per simulation second"
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])
@@ -3167,7 +3198,12 @@ func _refresh() -> void:
 	fleet_detail.visible = other_selected
 	fleet_cargo_footer.hide()
 	station_queue.hide()
+	station_detail_tabs.hide()
 	station_details.show()
+	if not planet_overview.visible or building_selection_kind != "station":
+		station_detail_system = -1
+		station_has_queue = false
+		station_detail_page = "resources"
 	if yard_selected:
 		_refresh_yard_overview(p, own_system and phase == "match")
 		if grouped_buildings:
@@ -3213,17 +3249,14 @@ func _refresh() -> void:
 	for resource in ECONOMY.RESOURCES:
 		var amount: float = float(p["stock"][resource])
 		production_values[resource]["stock"].text = _tons(amount)
-		production_values[resource]["stock"].tooltip_text = "%.1f t %s stored" % [amount, resource]
 		production_values[resource]["level"].text = str(int(p["levels"][resource]) + int(p.get("buildings", {}).get(resource, 0)))
 		var percent: int = roundi(100.0 * ECONOMY.production_modifier(p, resource))
 		var bonus: Label = production_values[resource]["bonus"]
 		bonus.text = "—" if percent == 100 else "%d%%" % (percent - 100) if percent < 100 else "+%d%%" % (percent - 100)
 		bonus.add_theme_color_override("font_color", HUD.ACCENT if percent > 100 else (Color("#e4a479") if percent < 100 else HUD.MUTED))
-		bonus.tooltip_text = "%.1f%% of baseline output" % (100.0 * ECONOMY.production_modifier(p, resource))
 		var annual: float = _resource_delta(p, resource)
 		var delta_label: Label = production_values[resource]["rate"]
 		_set_resource_delta(delta_label, annual)
-		delta_label.tooltip_text = "Production %.2f t/yr · Demand %.2f t/yr · Net %+.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
 	var population: float = float(p["population"])
 	var raw: float = float(p["stock"].get(ECONOMY.ANTIMATTER, 0.0))
 	raw_antimatter_label.visible = raw > ECONOMY.EPS
@@ -3410,7 +3443,7 @@ func _send_colony() -> void:
 func _reset_view() -> void:
 	follow_units = false
 	zoom = 1.0
-	pan = Vector2.ZERO
+	camera_world = Vector2.INF
 	map_canvas.queue_redraw()
 
 # The bottom console reserves a fixed viewport, independent of selection.
@@ -3421,14 +3454,8 @@ func _projection_size() -> Vector2:
 	return Vector2(map_canvas.size.x, maxf(1.0, map_canvas.size.y - hud_height))
 
 func _map_resized() -> void:
-	var fit: float = _fit()
-	# Preserve the world position at the camera center as window dimensions
-	# change, rather than retaining an old pixel offset.
-	if previous_map_fit > 0.0:
-		var next_zoom: float = minf(zoom, _max_zoom())
-		pan *= fit * next_zoom / (previous_map_fit * zoom)
-		zoom = next_zoom
-	previous_map_fit = fit
+	# The world-space center is independent of screen dimensions.
+	zoom = minf(zoom, _max_zoom())
 	map_canvas.queue_redraw()
 
 func _map_size() -> Vector2:
@@ -3440,12 +3467,13 @@ func _fit() -> float:
 	return maxf(0.0001, minf(area.x / bounds.x, area.y / bounds.y))
 
 func _screen_point(point: Vector2) -> Vector2:
-	# Cancel the large world translation before adding the viewport center;
-	# otherwise close zooms lose screen-space precision to cancellation.
-	return _camera_center() + (pan + (point - _map_size() * 0.5) * _fit() * zoom)
+	return _camera_center() + (point - _camera_world_center()) * _fit() * zoom
 
 func _world_point(point: Vector2) -> Vector2:
-	return _map_size() * 0.5 + (point - _camera_center() - pan) / (_fit() * zoom)
+	return _camera_world_center() + (point - _camera_center()) / (_fit() * zoom)
+
+func _camera_world_center() -> Vector2:
+	return camera_world if camera_world.is_finite() else _map_size() * 0.5
 
 func _camera_center() -> Vector2:
 	return _projection_size() * 0.5
@@ -3469,7 +3497,7 @@ func _zoom_at(point: Vector2, direction: float) -> void:
 	var limit: float = 0.25 / rate
 	var next_log: float = limit - (limit - log_zoom) * exp(-rate * direction)
 	zoom = clampf(MIN_ZOOM * exp(next_log), MIN_ZOOM, maximum)
-	pan += anchor - _screen_point(world)
+	camera_world = world - (anchor - _camera_center()) / (_fit() * zoom)
 	map_canvas.queue_redraw()
 
 func _system_visual(index: int, state: Dictionary) -> Dictionary:
@@ -3879,7 +3907,7 @@ func _building_world(state: Dictionary, ref: Vector2i, kind: String) -> Vector2:
 	if kind == "station":
 		return ECONOMY.station_position(state, ref.x, float(state["elapsed"]))
 	var body: Dictionary = _system_visual(ref.x, state)["bodies"][ref.y]
-	return _world_point(_screen_point(state["map"]["points"][ref.x]) + _body_position(body, _planet_radius(ref.x, state), game_visual_clock))
+	return (state["map"]["points"][ref.x] as Vector2) + _body_position(body, _system_world_radius(ref.x, state), game_visual_clock)
 
 func _selected_yards(state: Dictionary, owned_only: bool = false) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
@@ -4030,7 +4058,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		can_upgrade = can_upgrade or _yard_can_upgrade(system, ref.y)
 		can_clear = can_clear or not system["yards"][ref.y].get("rally", {}).is_empty()
 	yard_upgrade.disabled = not can_upgrade
-	_set_cost_tooltip(yard_upgrade, "Upgrade every eligible owned shipyard")
+	_set_cost_tooltip(yard_upgrade, "Upgrade every eligible owned shipyard\nEach level adds 1× base build speed, +1 maximum ship size and +1,000 maximum HP. Restores full health.")
 	yard_commands["rally"].disabled = refs.is_empty()
 	yard_commands["clear"].disabled = not can_clear
 
@@ -4265,6 +4293,13 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			order = {"kind": "mine", "target": field, "chunk": rock_id}
 		else:
 			var endpoint: Vector2 = ref.get("position", world)
+			# PDS combat references are attached to the sector star. A
+			# non-attack move must instead reach the clicked orbital body.
+			if ref.get("kind") == "pds":
+				var count: int = state["planets"].size()
+				var pds_node: int = int(ref["node"])
+				var slot: int = floori(float(-2 - count * 3 - target - pds_node) / float(count))
+				endpoint = _building_world(state, Vector2i(pds_node, slot), "pds")
 			var destination: int = ECONOMY.sector_at(graph, endpoint, ECONOMY.military_pois(state, _me()))
 			if destination < 0:
 				continue
@@ -4486,7 +4521,7 @@ func _map_input(event: InputEvent) -> void:
 			if motion.button_mask == 0:
 				drag_button = 0
 			else:
-				pan += motion.relative
+				camera_world = _camera_world_center() - motion.relative / (_fit() * zoom)
 	map_canvas.queue_redraw()
 	map_canvas.accept_event()
 
@@ -4615,13 +4650,20 @@ func _select_all_military() -> void:
 		if craft["kind"] == "fighter" and int(craft["owner"]) == _me():
 			selected_units.append(int(craft["id"]))
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
-	last_control_group_recall = -1
+	var now: int = Time.get_ticks_msec()
+	var center_army: bool = last_control_group_recall == -2 and now - last_control_group_recall_ms <= 400
+	last_control_group_recall = -1 if center_army else -2
+	last_control_group_recall_ms = now
 	follow_units = false
 	pending_command = ""
 	formation_button = 0
 	selecting_units = false
 	_refresh_command_mode()
 	_refresh()
+	if center_army and not selected_units.is_empty():
+		_follow_selection(state, _ship_poses(state), true)
+		_position_territory()
+		map_canvas.queue_redraw()
 
 func _cycle_owned_system(direction: int) -> void:
 	pending_command = ""
@@ -4667,7 +4709,7 @@ func _keyboard_pan(delta: float) -> void:
 func _pan_camera(direction: Vector2, delta: float) -> void:
 	if not direction.is_zero_approx():
 		follow_units = false
-		pan -= direction.normalized() * KEYBOARD_PAN_SPEED * delta
+		camera_world = _camera_world_center() + direction.normalized() * KEYBOARD_PAN_SPEED * delta / (_fit() * zoom)
 		map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
@@ -4976,7 +5018,7 @@ func _bounds_zoom(bounds: Rect2) -> float:
 	return clampf(minf(available.x / extent.x, available.y / extent.y) / _fit(), MIN_ZOOM, _max_zoom())
 
 func _center_world(point: Vector2) -> void:
-	pan = (_map_size() * 0.5 - point) * _fit() * zoom
+	camera_world = point
 
 func _frame_starting_sector(index: int) -> void:
 	var state: Dictionary = _state()
@@ -5022,9 +5064,7 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 		if selected_yard >= 0 and selected_yard < system["yards"].size():
 			_center_world(ECONOMY.shipyard_position(state, selected, selected_yard, float(state["elapsed"])))
 		elif selected_body >= 0 and selected_body < int(system.get("planet_count", 0)):
-			var body: Dictionary = _system_visual(selected, state)["bodies"][selected_body]
-			_center_world(center)
-			pan -= _body_position(body, _planet_radius(selected, state), game_visual_clock)
+			_center_world(_building_world(state, Vector2i(selected, selected_body), "pds"))
 		elif ECONOMY.has_station(system):
 			_center_world(ECONOMY.station_position(state, selected, float(state["elapsed"])))
 		else:
