@@ -25,6 +25,52 @@ const PLANET_FADE_START: float = 40.0
 const PLANET_FADE_FULL: float = 100.0
 const PLANET_FADE_SECONDS: float = 0.22
 
+# Keep construction recipes graphical even in the engine's native tooltip
+# popup. Non-construction buttons still use the standard text tooltip.
+class CostButton extends Button:
+	var recipe: Dictionary = {}
+	var crew_icon: Texture2D
+
+	func _make_custom_tooltip(for_text: String) -> Object:
+		if recipe.is_empty():
+			return null
+		var panel := PanelContainer.new()
+		panel.theme = HUD.compact()
+		panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101b29"), Color("#6385a4"), 8, 3))
+		var body := VBoxContainer.new()
+		body.add_theme_constant_override("separation", 6)
+		panel.add_child(body)
+		var lines: PackedStringArray = for_text.split("\n", true, 1)
+		var title := Label.new()
+		title.text = lines[0]
+		title.add_theme_color_override("font_color", HUD.ACCENT)
+		title.add_theme_font_size_override("font_size", 14)
+		body.add_child(title)
+		var costs := GridContainer.new()
+		costs.columns = mini(3, recipe.size())
+		costs.add_theme_constant_override("h_separation", 12)
+		costs.add_theme_constant_override("v_separation", 4)
+		body.add_child(costs)
+		for resource in recipe:
+			var pair := HBoxContainer.new()
+			pair.add_theme_constant_override("separation", 4)
+			costs.add_child(pair)
+			var symbol := TextureRect.new()
+			symbol.texture = crew_icon if resource == "Population" else HUD.ICONS.get(resource)
+			symbol.custom_minimum_size = Vector2(16, 16)
+			symbol.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			symbol.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			symbol.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			pair.add_child(symbol)
+			var amount := Label.new()
+			amount.text = "%.0f%s" % [float(recipe[resource]), "" if resource == "Population" else " t"]
+			pair.add_child(amount)
+		if lines.size() > 1 and not lines[1].is_empty():
+			var details := Label.new()
+			details.text = lines[1]
+			body.add_child(details)
+		return panel
+
 var session: Node
 var settings := ConfigFile.new()
 var ui_percent: int = 90
@@ -373,8 +419,8 @@ func _label(value: String, font_size: int = 14) -> Label:
 	label.add_theme_font_size_override("font_size", font_size)
 	return label
 
-func _button(text: String, action: Callable, parent: Container) -> Button:
-	var b := Button.new()
+func _button(text: String, action: Callable, parent: Container, with_recipe: bool = false) -> Button:
+	var b: Button = CostButton.new() if with_recipe else Button.new()
 	b.text = text
 	b.pressed.connect(action)
 	b.custom_minimum_size.y = 23 if is_instance_valid(console_panel) and console_panel.is_ancestor_of(parent) else 32
@@ -1034,6 +1080,14 @@ func _show_cost(grid: GridContainer, cost: Dictionary, crew: float = 0.0) -> voi
 		pair.add_child(amount)
 		pair.tooltip_text = ("%.0f people" % value) if resource == "Population" else "%.0f t %s" % [value, resource]
 
+func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {}, crew: float = 0.0) -> void:
+	var cost_button: CostButton = button as CostButton
+	cost_button.recipe = cost.duplicate()
+	if crew > 0.0:
+		cost_button.recipe["Population"] = crew
+		cost_button.crew_icon = _population_texture()
+	button.tooltip_text = description
+
 func _ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
@@ -1235,7 +1289,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	grid.add_theme_constant_override("v_separation", 3)
 	yard_command_card.add_child(grid)
 	for kind in ECONOMY.SHIP_KINDS:
-		var button := Button.new()
+		var button := CostButton.new()
 		var caption: String = {"ship": "Logistics\nship", "colony_ship": "Colony\nship", "fighter": "Fighter", "miner": "Mining\nship"}[kind]
 		var art: TextureRect = _yard_ability_face(button, caption, _production_icon(kind, HUD.ACCENT))
 		button.set_meta("portrait", art)
@@ -1251,7 +1305,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		grid.add_child(button)
 		yard_commands[kind] = button
 	# Bottom row: Upgrade, empty slot, Clear Rally, Rally.
-	yard_upgrade = _button("", _upgrade_selected_yards, grid)
+	yard_upgrade = _button("", _upgrade_selected_yards, grid, true)
 	_yard_ability_face(yard_upgrade, "Upgrade", _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>'))
 	var empty_slot := Control.new()
 	empty_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1309,7 +1363,7 @@ func _station_spacer(grid: GridContainer) -> void:
 	grid.add_child(slot)
 
 func _station_button(grid: GridContainer, caption: String, key: String, action: Callable) -> Button:
-	var button: Button = _button("", action, grid)
+	var button: Button = _button("", action, grid, true)
 	var art: TextureRect = _yard_ability_face(button, caption, _station_command_icon(key))
 	button.set_meta("portrait", art)
 	return button
@@ -1401,16 +1455,19 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		var label: Label = button.get_meta("caption")
 		label.text = ("Select" if slot >= 0 else "Building" if not pending.is_empty() else "Build") + "\nShipyard %d" % port
 		button.disabled = not owned or (slot < 0 and (not pending.is_empty() or tier <= 0 or not ECONOMY.affordable(p, cost)))
-		button.tooltip_text = label.text.replace("\n", " ")
+		var hint: String = label.text.replace("\n", " ")
 		if slot < 0 and pending.is_empty() and tier > 0:
-			button.tooltip_text += "\n%s · %.0f yr" % [_cost_text(cost), ECONOMY._work("yard", tier)]
+			_set_cost_tooltip(button, hint + " · %.0f yr" % ECONOMY._work("yard", tier), cost)
+		else:
+			_set_cost_tooltip(button, hint)
 		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled else Color.WHITE
 	for kind in station_upgrade_buttons:
 		var button: Button = station_upgrade_buttons[kind]
 		var installed: bool = bool(p["station"].get(kind, false))
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not ECONOMY.station_upgrade_available(p, kind)
-		button.tooltip_text = ("Reinforced Plating\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix\n2 defensive lasers · 18 damage each · 1 shot/yr · range 180") + "\n%s · %.0f yr" % [_cost_text(ECONOMY._cost(kind, 1)), ECONOMY._work(kind, 1)]
+		var hint: String = "Reinforced Plating · %.0f yr\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix · %.0f yr\n2 defensive lasers · 18 damage each · 1 shot/yr · range 180"
+		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {})
 		if installed or pending:
 			button.tooltip_text += "\n" + ("Installed" if installed else "Building")
 		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled and not installed else Color.WHITE
@@ -1501,9 +1558,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		if button.has_meta("auto_border"):
 			(button.get_meta("auto_border") as Control).visible = auto
-		button.tooltip_text = name_text + "\n" + description
-		if not recipe.is_empty():
-			button.tooltip_text += "\n%s · %.1f yr" % [_cost_text(recipe), work]
+		_set_cost_tooltip(button, name_text + (" · %.1f yr" % work if not recipe.is_empty() else "") + "\n" + description, recipe)
 		if not eligible:
 			button.tooltip_text += "\nUnavailable"
 		elif not available:
@@ -1603,7 +1658,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = _production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
-		button.tooltip_text = "%s · %.1f yr\n%s\n%.0f population\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _cost_text(recipe), float(ECONOMY.CREW_COSTS[kind]), _ship_stats(kind)]
+		_set_cost_tooltip(button, "%s · %.1f yr\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]))
 		if not operating:
 			button.tooltip_text += "\nShipyard offline"
 		elif not ECONOMY.affordable(system, recipe):
@@ -1620,9 +1675,10 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	yard_commands["clear"].disabled = not owned or rally.is_empty()
 	var upgrade_recipe: Dictionary = ECONOMY._cost("yard_upgrade", level + 1)
 	yard_upgrade.disabled = not owned or not _yard_can_upgrade(system, selected_yard)
-	yard_upgrade.tooltip_text = "Upgrade to Lv %d · %.0f yr\n%s" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), _cost_text(upgrade_recipe)]
 	if level >= ECONOMY.MAX_SHIPYARD_LEVEL:
-		yard_upgrade.tooltip_text = "Maximum level"
+		_set_cost_tooltip(yard_upgrade, "Maximum level")
+	else:
+		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f yr" % [level + 1, ECONOMY._work("yard_upgrade", level + 1)], upgrade_recipe)
 
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
@@ -1719,7 +1775,7 @@ func _build_body_overview(parent: Container) -> void:
 	section.add_child(body_progress)
 	var actions := HBoxContainer.new()
 	section.add_child(actions)
-	body_upgrade = _button("Build PDS", _upgrade_selected_body, actions)
+	body_upgrade = _button("Build PDS", _upgrade_selected_body, actions, true)
 	body_upgrade.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	HUD.action(body_upgrade, HUD.ACCENT, true)
 	body_cancel = _button("×", _cancel_selected_body, actions)
@@ -1763,6 +1819,7 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	body_upgrade.visible = not full
 	body_upgrade.disabled = not owned or building or full or not ECONOMY.affordable(system, cost)
 	_set_timed_action(body_upgrade, "Build system PDS", ECONOMY._work("pds", 1))
+	_set_cost_tooltip(body_upgrade, "Build system PDS · %.0f yr" % ECONOMY._work("pds", 1), cost if not full and not building else {})
 	body_cancel.visible = building
 	body_cancel.disabled = not owned or not building
 
@@ -3109,15 +3166,6 @@ func _job_name(item: Dictionary) -> String:
 		"production": return "%s → Lv %d" % [str(item["target"]), int(item["level"])]
 		_: return str(item["kind"]).replace("_", " ").capitalize()
 
-func _cost_text(cost: Dictionary, allocated: Dictionary = {}) -> String:
-	var parts: PackedStringArray = []
-	for resource in cost:
-		if allocated.is_empty():
-			parts.append("%.0f t %s" % [float(cost[resource]), resource])
-		else:
-			parts.append("%.0f / %.0f t %s" % [float(allocated.get(resource, 0.0)), float(cost[resource]), resource])
-	return " · ".join(parts)
-
 func _system_name(index: int) -> String:
 	var names: Array = _state().get("map", {}).get("names", [])
 	return str(names[index]) if index >= 0 and index < names.size() else "Unknown"
@@ -3316,7 +3364,9 @@ func _fit() -> float:
 	return maxf(0.0001, minf(area.x / bounds.x, area.y / bounds.y))
 
 func _screen_point(point: Vector2) -> Vector2:
-	return _camera_center() + pan + (point - _map_size() * 0.5) * _fit() * zoom
+	# Cancel the large world translation before adding the viewport center;
+	# otherwise close zooms lose screen-space precision to cancellation.
+	return _camera_center() + (pan + (point - _map_size() * 0.5) * _fit() * zoom)
 
 func _world_point(point: Vector2) -> Vector2:
 	return _map_size() * 0.5 + (point - _camera_center() - pan) / (_fit() * zoom)
@@ -3896,7 +3946,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = _production_icon(kind, _empire_color(_me()))
 		portrait.modulate = Color.WHITE if eligible else Color(0.55, 0.55, 0.55)
-		button.tooltip_text = "%s · Queue one at every eligible owned shipyard\n%s\n%s\nRight-click: toggle autobuild" % [_ship_kind_name(kind), _cost_text(ECONOMY._cost(kind, 1)), _ship_stats(kind)]
+		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [_ship_kind_name(kind), _ship_stats(kind)], ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]))
 	var can_upgrade: bool = false
 	var can_clear: bool = false
 	for ref in refs:
@@ -3904,7 +3954,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		can_upgrade = can_upgrade or _yard_can_upgrade(system, ref.y)
 		can_clear = can_clear or not system["yards"][ref.y].get("rally", {}).is_empty()
 	yard_upgrade.disabled = not can_upgrade
-	yard_upgrade.tooltip_text = "Upgrade every eligible owned shipyard"
+	_set_cost_tooltip(yard_upgrade, "Upgrade every eligible owned shipyard")
 	yard_commands["rally"].disabled = refs.is_empty()
 	yard_commands["clear"].disabled = not can_clear
 
@@ -4851,6 +4901,8 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 			var body: Dictionary = _system_visual(selected, state)["bodies"][selected_body]
 			_center_world(center)
 			pan -= _body_position(body, _planet_radius(selected, state), game_visual_clock)
+		elif ECONOMY.has_station(system):
+			_center_world(ECONOMY.station_position(state, selected, float(state["elapsed"])))
 		else:
 			_center_world(center)
 		return

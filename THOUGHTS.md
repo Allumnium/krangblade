@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.42.1: The reported station screenshots place the hub at the center of the reserved map viewport, rather than the entire window; fallback to the rendered station position and preserve projection precision at extreme zoom. Recheck camera feel with the stepped console and tooltip readability near screen edges during play.
+
 - v0.42.0: Removed AI's instant orbital housing bypass and timed previously quick warehouse/habitation jobs. Review construction pacing with limited colony materials; preserve prepaid refunds. Target rings deduplicate shared targets and follow interpolated ship/structure poses; check dense overlapping hulls and planet-detail transitions during play.
 
 - v0.41.0: Stable physical shipyard ports are independent of compact production indices and price tiers; rebuilding a lost numbered port retains existing count-based prices. Station plating and matrix require larger warehouse capacity than the starter 2,000 t; review affordability, construction duration and defense strength during contested play. Old selection references still invalidate on shipyard-count changes for safety.
