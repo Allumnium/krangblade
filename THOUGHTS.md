@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.43.3: Planetary defense combat references intentionally retain sector-star simulation positions; movement clicks now use rendered orbital coordinates. Review whether a future shared authoritative orbital model should also move combat/repair range origins to individual bodies. Camera focus now has a world-space source of truth; check apparent centering against the usable viewport (not the central star when a separate shipyard is selected).
+
 - v0.43.2: Population-starved pinned jobs previously occupied active shipyard slots. Releasing them preserves queued investment and lets eligible work proceed; review prolonged colony-ship wait times with continuous cheap-hull production. Single-ship facing preview reuses the existing authority-validated arrival heading; ordinary idle flight may turn again after arrival.
 
 - v0.43.1: Larger ore deposits extend useful mining lifetimes without increasing throughput; crystal scarcity is now a cap on initial tonnage, not on the number of rocks. Watch bootstrap crystal availability and prolonged salvage clutter. The Trade wing extends independently of the console footprint, preserving the existing camera and other HUD panels.
