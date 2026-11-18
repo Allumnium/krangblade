@@ -29,6 +29,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.43.6: Center station infrastructure and shipyard production queue tiles horizontally and vertically within the middle panel's remaining detail area. Preserve headings, portrait, tabs, wrapping and progress/cancellation behavior.
+
 - v0.43.5: Use a shared top-aligned four-column, four-row command card grid for station, shipyard and units, keeping vacant slots stable. Resources use unscaled tons with useful small-value precision; unaffordable recipe numbers are red instead of generic shortage text. Fighters have no cargo or cargo actions; miners prioritize reachable safe salvage over asteroid extraction, retain mining assignments, and physically deliver salvage. Play peaceful3.mp3 on the Music bus during matches, looping; settings mute toggles use speaker/slashed speaker icons.
 
 - v0.43.4: Station construction and improvements share one FIFO production lane; existing shipyards remain independent. Preserve prepaid costs, cancellation and repeat, with only the active station job progressing. PDS is built through the station Build card only; ordinary planets show no defense status, controls or construction progress. Installed PDS weapons have twice the standard laser range. Trade checkboxes have a visible unchecked outline; shorten the expanded wing by 90 pixels, preserving scrolling and the fixed Return button.

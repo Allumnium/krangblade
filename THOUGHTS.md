@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.43.6: Center queue tile blocks within the remaining detail area; check long wrapped queues on small windows and maintain access by scrolling if needed.
+
 - v0.43.5: Removing fighter holds simplifies combat and prevents salvage distraction; check that miners prefer nearby safe debris without monopolizing mining time. Tons are now displayed consistently without changing authoritative resource values; check large stockpile text at small resolutions before any balance rescaling.
 
 - v0.43.4: Sequential station construction prevents buying parallel build time with a large stockpile. Check build-order pacing (including AI), repeat queue ordering and whether twice-range PDS makes nearby approaches overly costly. The shorter Trade wing may require scrolling at smaller resolutions.

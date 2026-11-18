@@ -606,9 +606,11 @@ func _build_ui() -> void:
 	selection_row.add_child(overview_scroll)
 	var overview := VBoxContainer.new()
 	overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	overview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	overview.add_theme_constant_override("separation", 3)
 	overview_scroll.add_child(overview)
 	planet_overview = VBoxContainer.new()
+	planet_overview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	planet_overview.add_theme_constant_override("separation", 3)
 	overview.add_child(planet_overview)
 	_build_body_overview(overview)
@@ -726,11 +728,7 @@ func _build_ui() -> void:
 	raw_antimatter_label.add_theme_color_override("font_color", HUD.COLORS[ECONOMY.ANTIMATTER])
 	production_summary.add_child(raw_antimatter_label)
 	raw_antimatter_label.hide()
-	station_queue = HFlowContainer.new()
-	station_queue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	station_queue.add_theme_constant_override("h_separation", 4)
-	station_queue.add_theme_constant_override("v_separation", 4)
-	planet_overview.add_child(station_queue)
+	station_queue = _build_centered_queue(planet_overview)
 	station_queue.hide()
 	interaction_scroll = ScrollContainer.new()
 	interaction_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
@@ -1233,6 +1231,7 @@ func _body_name(system_index: int, slot: int) -> String:
 
 func _build_yard_overview(parent: Container) -> void:
 	yard_overview = VBoxContainer.new()
+	yard_overview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	yard_overview.add_theme_constant_override("separation", 3)
 	parent.add_child(yard_overview)
 	yard_title = _label("", 16)
@@ -1242,12 +1241,20 @@ func _build_yard_overview(parent: Container) -> void:
 	yard_overview.add_child(yard_context)
 	yard_status = _label("", 12)
 	yard_overview.add_child(yard_status)
-	yard_queue = HFlowContainer.new()
-	yard_queue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	yard_queue.add_theme_constant_override("h_separation", 4)
-	yard_queue.add_theme_constant_override("v_separation", 4)
-	yard_overview.add_child(yard_queue)
+	yard_queue = _build_centered_queue(yard_overview)
 	yard_overview.hide()
+
+func _build_centered_queue(parent: Container) -> HFlowContainer:
+	var queue := HFlowContainer.new()
+	queue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Center the flow's minimum-height block in the space below the header.
+	# Filling the width lets each wrapped line stay centered independently.
+	queue.size_flags_vertical = Control.SIZE_EXPAND | Control.SIZE_SHRINK_CENTER
+	queue.alignment = FlowContainer.ALIGNMENT_CENTER
+	queue.add_theme_constant_override("h_separation", 4)
+	queue.add_theme_constant_override("v_separation", 4)
+	parent.add_child(queue)
+	return queue
 
 func _portrait_points(vertices: Array) -> String:
 	var coordinates: PackedStringArray = []
