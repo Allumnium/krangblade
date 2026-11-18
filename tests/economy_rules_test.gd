@@ -49,10 +49,23 @@ func _test_shipyard_rally() -> void:
 	for tick in range(200):
 		if not ECON._work_launch_rally(state, craft, 0.5):
 			break
-	assert(not craft.has("launch_rally") and craft["position"] == point and craft["holding"])
+	assert(not craft.has("launch_rally") and (craft["position"] as Vector2).distance_to(point) <= ECON.RALLY_ARRIVAL_RADIUS and ECON._is_idle_ship(craft))
+	var arrived: Vector2 = craft["position"]
+	ECON.step(state, 0.1)
+	assert(craft["position"] != arrived and not craft.get("holding", false))
+	# Multiple hulls within the arrival neighborhood must release even
+	# when mutual separation prevents occupying the exact target point.
+	for i in range(12):
+		var extra: Dictionary = craft.duplicate(true)
+		extra["id"] = 990010 + i
+		extra["position"] = point + Vector2.from_angle(TAU * i / 12.0) * ECON.SHIP_SEPARATION_RADIUS
+		ECON._launch_to_rally(state, extra, {"node": 0, "point": point})
+		assert(ECON._work_launch_rally(state, extra, 0.1))
+		assert(not extra.has("launch_rally") and ECON._is_idle_ship(extra))
+		state["ships"].append(extra)
 	assert(ECON.set_shipyard_rally(state, 1, 0, 1, -1, Vector2.ZERO))
 	assert(not system["yards"][1].has("rally"))
-	print("PASS: shipyard rally attack-move combat, repair destination retention and exact arrival")
+	print("PASS: shipyard rally attack-move combat, repair destination retention and relaxed fleet arrival")
 
 func _test_rounded_sector_limits() -> void:
 	# Equal perpendicular bisectors used to form a sharp corner. The

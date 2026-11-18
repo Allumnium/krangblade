@@ -29,6 +29,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.39.0: Select the station instead of a claimed sector; only neutral sectors show sector selection rings. Field names are generic Asteroid Field and Antimatter Field. Minimap viewport includes the full map behind the console; empty middle/right panels leave the map exposed. Escape toggles the match menu, and double recall of a control group centers without follow. Hide persistent order lines except red rally and selected purple dashed patrol; retain destination ghosts and drag previews. All connected players can request shared pause/1×/2×/5×; the authority validates and replicates. Rally arrivals release into autonomous work or idle flight within two separation radii rather than holding at a shared coordinate.
+
 - v0.38.0: Miner Repair is manually targetable at friendly damaged ships, stations, shipyards and PDS. Right-click the command icon toggles default-on autocast; repair 5 HP/year within laser range, seek nearby damaged allies within two laser ranges before mining, and preserve explicit orders and emergency withdrawal priority. Miners share the fighter low-HP withdrawal threshold and station repair rules. Direct hostile clicks issue specific-target attacks for armed hulls (no incidental fire), including hostile buildings; explicit Attack Move still fires opportunistically. Civilian move orders route to any discovered sector and finish at the actual point before resuming work. Explicit salvage is available for any cargo-capable hull with room. Drop Cargo targets a point (exact carried cargo becomes drifting salvage), friendly station or ship (capacity-limited transfer); a contextual click on a friendly station deposits fitting resources or moves if none fit. Double-click single selection wireframe focuses the camera like F. Render stars with fixed world-space size and smoothly fade to 60% opacity at maximum zoom.
 
 - v0.37.0: Armed Move, Attack and Patrol are right-click/right-drag only; left click cancels the mode and returns to normal selection. Use thin, longer dashed selection rings rather than individual dots. Planet selection shows parent system and owner/neutral in the upper-right header. Miners' twin lasers deal 2 total damage per year to hostile entities, with 3× asteroid bonus (6 nominal t/yr, existing field concentration and budget), and do not pursue enemies or extract simultaneously with combat. Fighters cannot mine.
@@ -62,7 +64,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - Always show clearly visible territory tint/boundaries beneath the map for owned or fighter-held uncontested sectors; use smooth, consistently sized circular influences with rounded same-team blends, smaller asteroid-field influences, antialiased screen-space outlines and no internal same-team borders. Do not render an enlarged low-resolution spatial raster. Contested sectors lack control shading. This is visual only. Hide system and orbital rings unless the system is selected; keep travel lanes thin and faint.
 
-- Bottom-center time controls offer pause, 1×, 2× and 5×. Each match starts at 1×; solo or the multiplayer host controls speed, guests see the active speed without editing it. Pause halts authoritative fixed-step simulation, not the interface, network or accepted player orders. Keep speed replicated with match state.
+- Time controls above the minimap offer pause, 1×, 2× and 5×. Each match starts at 1×; any connected player may request changes to the authoritative shared speed. Pause halts authoritative fixed-step simulation, not the interface, network or accepted player orders. Keep speed replicated with match state.
 
 - Each living ship owns an authoritative world-space position and heading initialized at construction. All subsequent translation advances toward navigation targets at bounded ship speed. Route/POI and mining state are planning metadata, never a source of position changes. Combat, AI proximity, territory and client poses use the same position; clients interpolate snapshots without independent positional offsets. Preserve lane routing and arrival-gated transfers/colonization. Idle hulls wander locally in same-owner, same-kind formations of up to three ships at their current POI; service transfers require docking at their actual waypoint. Do not invent free-flight routing, acceleration, or collision mechanics without agreement.
 
@@ -96,7 +98,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - Logistics lens uses consistent 3-by-2 stock/capacity bars at every zoom, with resource icons and directional one-to-three carets beside loaded logistics hulls based on cargo fraction.
 
-- Time controls include 10× for stress testing; the same fixed steps and host-only authority apply. Mining path trees share the local topology/team-invalidated civilian cache; dynamic cargo and depot decisions remain tick-local.
+- Mining path trees share the local topology/team-invalidated civilian cache; dynamic cargo and depot decisions remain tick-local.
 
 - Economy building repeat orders can be armed when the resource is supported. Finite ship target text accepts only decimal digits; preserve authoritative maintain/repeat semantics.
 
