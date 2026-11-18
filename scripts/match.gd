@@ -3281,14 +3281,27 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	var node: int = -1
 	var distance: float = INF
 	var graph: Dictionary = ECONOMY.military_graph(state)
+	var world: Vector2 = _world_point(point)
+	# Command sectors use their simulation boundaries, not the nearest POI
+	# center. In particular, clicking across a shared boundary must not
+	# silently snap to the adjacent sector's center.
+	var nearest_node: int = -1
+	var nearest_distance: float = INF
 	for candidate in ECONOMY.military_pois(state, _me()):
 		var d: float = point.distance_squared_to(_screen_point(graph["points"][candidate]))
-		if d < distance:
+		if d < nearest_distance:
+			nearest_node = candidate
+			nearest_distance = d
+		if ECONOMY.sector_contains(graph, candidate, world) and d < distance:
 			node = candidate
 			distance = d
 	if node < 0:
+		# Preserve direct clicks on a visible POI even if its icon extends
+		# slightly outside the mathematical sector boundary.
+		node = nearest_node
+		distance = nearest_distance
+	if node < 0:
 		return
-	var world: Vector2 = _world_point(point)
 	var system_count: int = state["planets"].size()
 	var hit_radius: float = 9.0
 	if node < system_count:
