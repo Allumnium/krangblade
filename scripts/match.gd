@@ -3319,6 +3319,36 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	var distance: float = INF
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var world: Vector2 = _world_point(point)
+	# A command inside the selected fighters' present sector is a local
+	# position order, even when the cursor is close to a POI icon. Never
+	# reroute those fighters through a neighboring sector just to move
+	# a short distance within the sector they already occupy.
+	if not patrol and not fighters.is_empty():
+		var local_groups: Dictionary = {}
+		for craft in state["ships"]:
+			var id: int = int(craft["id"])
+			if not fighters.has(id) or bool(craft.get("retreating", false)):
+				continue
+			var current: int = ECONOMY.local_sector(graph, craft)
+			if current >= 0 and ECONOMY.sector_contains(graph, current, world):
+				if not local_groups.has(current):
+					local_groups[current] = []
+				(local_groups[current] as Array).append(id)
+		for current in local_groups:
+			session.call("request_local_position", local_groups[current], int(current), world)
+		if not local_groups.is_empty():
+			var remaining: Array[int] = []
+			for id in fighters:
+				var handled: bool = false
+				for group in local_groups.values():
+					if (group as Array).has(id):
+						handled = true
+						break
+				if not handled:
+					remaining.append(id)
+			fighters = remaining
+			if fighters.is_empty() and owned.size() == _selected_owned_units(state).size() and _selected_miners().is_empty():
+				return
 	# Command sectors use their simulation boundaries, not the nearest POI
 	# center. In particular, clicking across a shared boundary must not
 	# silently snap to the adjacent sector's center.

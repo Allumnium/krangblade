@@ -395,3 +395,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 ### T-29h — Contested territory colors
 - **Type:** Territory feedback.
 - **Observation:** Contested territory disappeared when claims were neutralized. The renderer now alternates the colors of players with hostile fighter presence while retaining the simulation's contested-state logic; allies do not trigger color cycling.
+
+### T-29i — Prefer local fighter commands
+- **Type:** Command reliability.
+- **Observation:** Right-click near a POI could still resolve as a sector move even when the cursor was inside the fighter's current sector. Prioritize local-position orders for fighters physically in the clicked sector before resolving cross-sector moves.
