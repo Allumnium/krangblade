@@ -2143,6 +2143,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 # Both orders use the normal military graph and the same automatic combat
 # and repair rules as attack-move. The target is a stable hull ID, not a slot.
 static func _clear_tactical_order(ship: Dictionary) -> void:
+	_clear_local_move(ship)
 	ship.erase("launch_rally")
 	ship.erase("move_only")
 	ship.erase("attack_order")
@@ -2299,7 +2300,12 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 			units.append(ship)
 	return units if units.size() == requested.size() else []
 
+static func _clear_local_move(ship: Dictionary) -> void:
+	ship.erase("local_move_target")
+	ship.erase("local_move_sector")
+
 static func _clear_local_hold(ship: Dictionary) -> void:
+	_clear_local_move(ship)
 	ship.erase("launch_rally")
 	ship.erase("move_only")
 	if bool(ship.get("holding", false)) and ship.get("kind", "") == "miner" and ship.get("mining_mode", "") == "mining":
@@ -2324,11 +2330,14 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 	for ship in units:
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
-		ship["hold_position"] = point
+		_clear_local_hold(ship)
+		ship["local_move_target"] = point
+		ship["local_move_sector"] = node
 		ship["move_only"] = move_only
-		ship["hold_sector"] = node
-		ship["holding"] = true
 		ship["navigation_target"] = point
+		# Extraction must resume by returning to the actual rock.
+		if ship.get("kind", "") == "miner" and ship.get("mining_mode", "") == "mining":
+			ship["mining_mode"] = "outbound"
 		if ship.get("kind", "") == "fighter":
 			ship["direct_order"] = true
 			# Once physical containment is validated, normalize the stale lane
@@ -2362,9 +2371,39 @@ static func command_hold_units(state: Dictionary, player: int, ids: Array, relea
 		elif ship.get("kind", "") == "fighter":
 			hold_fighters(state, player, [ship["id"]])
 		else:
-			ship.erase("hold_position")
-			ship.erase("hold_sector")
+			_clear_local_hold(ship)
 			ship["holding"] = true
+	return true
+
+# A local move is a one-shot order, not a persistent hold. Keep the
+# destination through a repair detour, and resume the normal idle/working
+# behavior as soon as the point is physically reached.
+static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+	if not ship.has("local_move_target") or bool(ship.get("retreating", false)):
+		return false
+	var fighter: bool = ship.get("kind", "") == "fighter"
+	if fighter and _engaged(ship) and not bool(ship.get("move_only", false)):
+		return false
+	var node: int = int(ship["local_move_sector"])
+	if fighter and not sector_contains(graph, node, ship["position"]):
+		if int(ship.get("dest", -1)) != node:
+			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
+		if (ship["route"] as Array).is_empty():
+			_navigate(ship, graph["points"][node], SHIP_SPEED * dt)
+		else:
+			_move({"map": graph}, ship, dt)
+		return true
+	var point: Vector2 = ship["local_move_target"]
+	_navigate(ship, point, SHIP_SPEED * dt)
+	if (ship["position"] as Vector2).distance_to(point) <= EPS:
+		_clear_local_move(ship)
+		ship.erase("move_only")
+		if fighter:
+			ship["at"] = node
+			ship["dest"] = node
+			ship["operation_target"] = node
+			ship["route"] = []
+			ship["leg"] = 0.0
 	return true
 
 static func _work_local_hold(graph: Dictionary, ship: Dictionary, dt: float) -> void:
@@ -2954,7 +2993,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	for ship in ships:
 		if ship.get("kind", "") != "fighter":
 			continue
-		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
+		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
 		if bool(ship.get("retreating", false)) or moving_only:
@@ -3676,7 +3715,7 @@ static func _move_formation(graph: Dictionary, ship: Dictionary, dt: float) -> b
 static func _formation_lane_groups(state: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
 	for craft in state["ships"]:
-		if craft.get("kind", "") != "fighter" or craft.has("launch_rally") or _salvage_active(craft) or _engaged(craft) or bool(craft.get("retreating", false)) or bool(craft.get("holding", false)) or (craft["route"] as Array).is_empty():
+		if craft.get("kind", "") != "fighter" or craft.has("launch_rally") or craft.has("local_move_target") or _salvage_active(craft) or _engaged(craft) or bool(craft.get("retreating", false)) or bool(craft.get("holding", false)) or (craft["route"] as Array).is_empty():
 			continue
 		var key: String = "%d:%d:%d:%d" % [int(craft.get("operation_id", 0)), int(craft["at"]), int(craft["route"][0]), int(craft.get("dest", -1))]
 		if not groups.has(key):
@@ -3885,7 +3924,7 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 # same-kind hulls share a moving local anchor and tangent-relative V slots.
 # Routing, docking, mining, combat and withdrawal always take precedence.
 static func _is_idle_ship(ship: Dictionary) -> bool:
-	if _salvage_active(ship):
+	if _salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally"):
 		return false
 	var fighter: bool = ship.get("kind", "") == "fighter"
 	var mode: String = str(ship.get("mining_mode", "idle"))
@@ -4158,12 +4197,17 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		var before: Vector2 = previous[id]
 		var planned: Vector2 = ship["position"]
 		var held: bool = bool(ship.get("holding", false))
+		var local_moving: bool = ship.has("local_move_target")
+		# Do not let repulsion prevent completion of a shared point order.
+		# The newly idle ships spread naturally after arrival.
+		if local_moving and planned.distance_to(ship["local_move_target"]) < reach * 2.0:
+			continue
 		var route: Array = ship["route"]
 		# Exact arrival at a waypoint is required by service and lane logic.
 		# Do not push docking or extracting civilian ships off their targets.
 		if not held:
 			if route.is_empty():
-				if not _is_idle_ship(ship) and not _engaged(ship):
+				if not local_moving and not _is_idle_ship(ship) and not _engaged(ship):
 					continue
 				var at: int = int(ship["at"])
 				if at >= 0 and at < graph["points"].size() and planned.distance_to(graph["points"][at]) <= EPS:
@@ -4207,7 +4251,7 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 			movement *= 0.25
 		var push: Vector2 = force.limit_length(1.0) * budget * SHIP_SEPARATION_STRENGTH
 		var candidate: Vector2 = before + (movement + push).limit_length(budget)
-		var sector: int = int(ship.get("hold_sector", -1)) if held else local_sector(graph, ship)
+		var sector: int = int(ship.get("local_move_sector", -1)) if local_moving else (int(ship.get("hold_sector", -1)) if held else local_sector(graph, ship))
 		if sector >= 0 and sector < graph["points"].size() and sector_contains(graph, sector, planned) and not sector_contains(graph, sector, candidate):
 			# Keep local orders and stationary ships inside their legal sector.
 			var lower: float = 0.0
@@ -4287,6 +4331,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if _work_salvage(state, combat_graph, ship, dt, salvage_busy.has(salvage_ship_id)):
 			continue
 		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id)):
+			continue
+		if _work_local_move(combat_graph, ship, dt):
 			continue
 		if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
 			_work_local_hold(combat_graph, ship, dt)

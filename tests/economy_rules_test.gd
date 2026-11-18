@@ -1721,7 +1721,7 @@ func _test_local_position_orders() -> void:
 	assert(ECON.sector_at(boundary_graph, Vector2(2500, 0), candidates, 1) == 1)
 	assert(ECON.command_local_position(state, 1, [100], 0, Vector2(2499, 0), true))
 	assert(fighter.get("move_only", false))
-	assert(fighter["route"].is_empty() and fighter["dest"] == 0 and fighter["hold_position"] == Vector2(2499, 0))
+	assert(fighter["route"].is_empty() and fighter["dest"] == 0 and fighter["local_move_target"] == Vector2(2499, 0) and not fighter.get("holding", false))
 	assert(not ECON.command_local_position(state, 1, [100], 0, Vector2(2501, 0)))
 	assert(not ECON.command_local_position(state, 2, selection, 0, point))
 	assert(not ECON.command_local_position(state, 1, [100, 999], 0, point))
@@ -1732,20 +1732,28 @@ func _test_local_position_orders() -> void:
 	assert(ECON.command_local_position(state, 1, selection, 0, point))
 	assert(not fighter.get("move_only", false))
 	for craft in state["ships"]:
-		assert(craft["position"] == Vector2.ZERO and craft["holding"])
-	for tick in range(50):
+		assert(craft["position"] == Vector2.ZERO and not craft.get("holding", false) and craft["local_move_target"] == point)
+	assert(freighter["cargo"]["Metals"] == 10.0)
+	var arrivals: Dictionary = {}
+	for tick in range(100):
 		var previous: Vector2 = fighter["position"]
 		ECON.step(state, 0.1)
 		assert(previous.distance_to(fighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
 		for ship in state["ships"]:
-			assert(ECON.sector_contains(ECON.military_graph(state), 0, ship["position"]))
+			var ship_id: int = int(ship["id"])
+			if not arrivals.has(ship_id):
+				assert(ECON.sector_contains(ECON.military_graph(state), 0, ship["position"]))
+				if not ship.has("local_move_target"):
+					assert(not ship.get("holding", false))
+					assert((ship["position"] as Vector2).distance_to(point) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+					arrivals[ship_id] = true
+		if arrivals.size() == selection.size():
+			break
+	assert(arrivals.size() == selection.size())
+	assert(ECON._is_idle_ship(fighter))
+	assert(ECON.command_hold_units(state, 1, selection, false))
 	for craft in state["ships"]:
-		assert(craft["holding"] and craft["hold_position"] == point)
-		assert((craft["position"] as Vector2).distance_to(point) <= ECON.SHIP_SEPARATION_RADIUS * 2.0)
-	for i in range(state["ships"].size()):
-		for j in range(i + 1, state["ships"].size()):
-			assert((state["ships"][i]["position"] as Vector2).distance_to(state["ships"][j]["position"]) > ECON.SHIP_SEPARATION_RADIUS * 0.1)
-	assert(freighter["cargo"]["Metals"] == 10.0)
+		assert(craft.get("holding", false) and not craft.has("local_move_target"))
 	assert(ECON.command_hold_units(state, 1, selection, true))
 	for tick in range(20):
 		ECON.step(state, 0.1)
@@ -1754,7 +1762,7 @@ func _test_local_position_orders() -> void:
 	assert(fighter["position"] != point)
 	assert(ECON.command_local_position(state, 1, [100], 0, point))
 	assert(ECON.command_fighters(state, 1, [100], 1))
-	assert(not fighter.get("holding", false) and not fighter.has("hold_position") and fighter["route"].has(1))
+	assert(not fighter.get("holding", false) and not fighter.has("local_move_target") and fighter["route"].has(1))
 	# The hull has reached the destination sector through its lane, but
 	# has not yet docked at the waypoint. It can already be positioned.
 	fighter["position"] = Vector2(4000, 0)
@@ -1778,8 +1786,8 @@ func _test_local_position_orders() -> void:
 		repaired = repaired or (damaged["at"] == 0 and is_equal_approx(float(damaged["hp"]), ECON.SHIP_HP))
 		if repaired and damaged["at"] == 2 and damaged["position"] == post:
 			break
-	assert(repaired and damaged["position"] == post and damaged["holding"])
-	print("PASS: position and hold all hull classes, bounded travel, ownership/sector validation, release and lane orders")
+	assert(repaired and damaged["position"] == post and not damaged.get("holding", false) and not damaged.has("local_move_target"))
+	print("PASS: one-shot local movement, idle arrival, explicit hold, bounded travel, ownership/sector validation and repair")
 
 func _test_tactical_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(1000, 0)], "edges": [[0, 2], [1, 2]], "fields": []}
