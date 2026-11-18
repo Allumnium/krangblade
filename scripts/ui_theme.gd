@@ -31,6 +31,9 @@ static func create() -> Theme:
 	var result := Theme.new()
 	result.default_font_size = 14
 	result.set_color("font_color", "Label", TEXT)
+	result.set_stylebox("panel", "TooltipPanel", surface(Color("#101b29"), Color("#6385a4"), 7, 3))
+	result.set_color("font_color", "TooltipLabel", Color.WHITE)
+	result.set_font_size("font_size", "TooltipLabel", 14)
 	result.set_color("default_color", "RichTextLabel", TEXT)
 	result.set_stylebox("panel", "PanelContainer", surface(Color("#0c1928ed"), Color("#284661"), 10))
 	result.set_stylebox("panel", "TabContainer", surface(Color("#091624"), Color("#284661"), 6))
