@@ -29,6 +29,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- Single ships, shipyards, space stations and planets show a large wireframe portrait in the leftmost column of the central selection panel. Use green/yellow/red health tiers with current/max HP immediately below; undefended planets lack HP, so use a neutral outline. Multi-selections retain compact tiles without the single portrait. Start each player's camera centered on and framed to their home command sector.
+
 - Keep command grids free of explanatory/status labels; use button faces, pressed states, cursors and tooltips. Shipyard grid has four fixed columns: four hulls in the top row, Upgrade / empty / Clear Rally / Rally in the bottom row. Scale button width rather than wrapping. Do not append planetless status to system names.
 - Minimal, consistent dark sci-fi UI. No unnecessary headings, explanations, duplicate data, filler text, default/normal modifiers, or decorative text. Prefer familiar icons and concise numbers, with exact values and optional details in tooltips.
 - Use "star system" (or system) for the gameplay node and "shipyard" in all player-facing wording, never "yard". Procedurally named systems are unique and seed-stable; visible orbiting planets are selectable by click in a zoomed selected system; names use the system name plus Roman orbital number. They are individual PDS slots but do not have separate economies or populations.
