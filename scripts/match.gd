@@ -183,6 +183,13 @@ var fleet_title: Label
 var fleet_detail: Label
 var hold_button: Button
 var unload_button: Button
+var command_card: GridContainer
+var command_hint: Label
+var command_buttons: Dictionary = {}
+var pending_command: String = ""
+var selection_grid: GridContainer
+var selection_tiles: Dictionary = {}
+var selection_icons: Dictionary = {}
 var fleet_cargo: VBoxContainer
 var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
@@ -497,6 +504,11 @@ func _build_ui() -> void:
 	overview.add_child(ship_overview)
 	ship_title = _label("", 16)
 	ship_overview.add_child(ship_title)
+	selection_grid = GridContainer.new()
+	selection_grid.columns = 6
+	selection_grid.add_theme_constant_override("h_separation", 3)
+	selection_grid.add_theme_constant_override("v_separation", 3)
+	ship_overview.add_child(selection_grid)
 	ship_detail = _label("", 13)
 	ship_overview.add_child(ship_detail)
 	ship_cargo = HUD.section(ship_overview, "Cargo", true)
@@ -513,13 +525,7 @@ func _build_ui() -> void:
 	ship_overview.add_child(fleet_title)
 	fleet_detail = _label("", 14)
 	ship_overview.add_child(fleet_detail)
-	hold_button = Button.new()
-	hold_button.text = "Hold position [H]"
-	hold_button.pressed.connect(_hold_selected)
-	var orders := HBoxContainer.new()
-	fleet_overview.add_child(orders)
-	orders.add_child(hold_button)
-	unload_button = _button("Unload cargo [U]", _unload_selected, orders)
+	_build_command_card(fleet_overview)
 	fleet_cargo = HUD.section(ship_overview, "Fleet cargo", true)
 	_build_cargo_rows(fleet_cargo, fleet_cargo_labels)
 	mining_controls = HUD.section(fleet_overview, "Mine", true)
@@ -658,6 +664,7 @@ func _build_ui() -> void:
 	inspector_panel.resized.connect(_layout_command_grids)
 	inspector_panel.resized.connect(console_profile.queue_redraw)
 	console_center.resized.connect(console_profile.queue_redraw)
+	console_center.resized.connect(_layout_command_grids)
 	console_columns.resized.connect(console_profile.queue_redraw)
 	_layout_console()
 
@@ -704,6 +711,8 @@ func _draw_console_profile() -> void:
 
 func _layout_command_grids() -> void:
 	var width: float = inspector_panel.size.x - 34.0
+	if is_instance_valid(selection_grid):
+		selection_grid.columns = maxi(1, floori(maxf(38.0, console_center.size.x - 20.0) / 41.0))
 	for title in command_grids:
 		var grid: GridContainer = command_grids[title]
 		var cell_width: float = 160.0 if title == "Trade" else 222.0
@@ -1583,6 +1592,139 @@ func _apply_mining_policy() -> void:
 	if selected_field >= 0:
 		session.call("request_mining_policy", selected_field, mining_enabled.button_pressed, mining_metals.button_pressed, mining_crystals.button_pressed)
 
+func _command_icon(path: String) -> Texture2D:
+	var image := Image.new()
+	var svg: String = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g fill="none" stroke="#c5e5f5" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">' + path + '</g></svg>'
+	image.load_svg_from_string(svg)
+	return ImageTexture.create_from_image(image)
+
+func _command_slot(id: String, hint: String, art: String, action: Callable) -> Button:
+	var button := Button.new()
+	button.custom_minimum_size = Vector2(48, 48)
+	button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	button.focus_mode = Control.FOCUS_NONE
+	button.icon = _command_icon(art)
+	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	button.tooltip_text = hint
+	button.toggle_mode = true
+	button.pressed.connect(action)
+	command_card.add_child(button)
+	command_buttons[id] = button
+	return button
+
+func _build_command_card(parent: VBoxContainer) -> void:
+	command_card = GridContainer.new()
+	command_card.columns = 5
+	command_card.add_theme_constant_override("h_separation", 3)
+	command_card.add_theme_constant_override("v_separation", 3)
+	parent.add_child(command_card)
+	_command_slot("move", "Move · click a destination. Fighters travel without engaging until arrival.", '<path d="M5 16H26M17 7L26 16L17 25"/>', _arm_command.bind("move"))
+	_command_slot("stop", "Stop · cancel the order and stop in place.", '<rect x="8" y="8" width="16" height="16" fill="#c5e5f5"/>', _stop_selected)
+	hold_button = _command_slot("hold", "Hold position [H] · toggle holding position.", '<path d="M9 6V26M23 6V26M5 10L9 6L13 10M19 10L23 6L27 10M9 16H23"/>', _hold_selected)
+	_command_slot("patrol", "Patrol · click another sector or asteroid field.", '<path d="M7 12A10 10 0 0 1 25 10M25 10V4M25 10H19M25 20A10 10 0 0 1 7 22M7 22V28M7 22H13"/>', _arm_command.bind("patrol"))
+	_command_slot("attack", "Attack move · click a sector or hostile ship.", '<circle cx="16" cy="16" r="9"/><path d="M16 3V11M16 21V29M3 16H11M21 16H29"/>', _arm_command.bind("attack"))
+	_command_slot("load", "Load cargo · click salvage debris to collect it.", '<rect x="7" y="17" width="18" height="10"/><path d="M16 4V20M10 14L16 20L22 14"/>', _arm_command.bind("load"))
+	unload_button = _command_slot("unload", "Unload cargo [U] · return cargo to storage.", '<rect x="7" y="17" width="18" height="10"/><path d="M16 20V4M10 10L16 4L22 10"/>', _unload_selected)
+	command_hint = _label("", 12)
+	parent.add_child(command_hint)
+	command_hint.hide()
+
+func _arm_command(mode: String) -> void:
+	pending_command = mode if pending_command != mode else ""
+	_refresh_command_mode()
+
+func _refresh_command_mode() -> void:
+	if not is_instance_valid(command_card):
+		return
+	for id in command_buttons:
+		var button: Button = command_buttons[id]
+		button.set_pressed_no_signal(id == pending_command or (id == "hold" and _any_selected_holding()))
+	command_hint.visible = not pending_command.is_empty()
+	command_hint.text = "Choose %s · Esc / right-click cancels" % ("salvage" if pending_command == "load" else ("patrol destination" if pending_command == "patrol" else "destination"))
+	map_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS if not pending_command.is_empty() else Control.CURSOR_ARROW
+
+func _stop_selected() -> void:
+	pending_command = ""
+	var owned: Array[int] = _selected_owned_units(_state())
+	if not owned.is_empty():
+		session.call("request_unit_hold", owned, false)
+	_refresh_command_mode()
+
+func _execute_pending_command(point: Vector2) -> void:
+	var mode: String = pending_command
+	pending_command = ""
+	_refresh_command_mode()
+	if mode == "load":
+		var state: Dictionary = _state()
+		var wreck: int = _salvage_hit(state, point)
+		if wreck >= 0:
+			session.call("request_salvage", _selected_owned_units(state), wreck)
+	elif mode == "patrol":
+		_command_at(point, false, true)
+	elif mode == "move":
+		_command_at(point, false, false, true)
+	elif mode == "attack":
+		_command_at(point)
+
+func _selection_icon(kind: String) -> Texture2D:
+	if not selection_icons.has(kind):
+		var points: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE)
+		var coords: PackedStringArray = []
+		for vertex in points:
+			var v: Vector2 = vertex
+			coords.append("%.2f,%.2f" % [16.0 + v.y, 16.0 - v.x])
+		var image := Image.new()
+		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><polygon points="' + " ".join(coords) + '" fill="#101f30" stroke="#eaf6ff" stroke-width="1.25" stroke-linejoin="round"/></svg>')
+		selection_icons[kind] = ImageTexture.create_from_image(image)
+	return selection_icons[kind]
+
+func _select_tile(id: int) -> void:
+	selected_units.assign([id])
+	selected_ship_id = id
+	selected = -1
+	selected_body = -1
+	selected_yard = -1
+	selected_field = -1
+	follow_units = false
+	pending_command = ""
+	_refresh()
+
+func _refresh_selection_tiles(state: Dictionary) -> void:
+	var living: Dictionary = {}
+	for craft in state.get("ships", []):
+		var id: int = int(craft["id"])
+		if not selected_units.has(id) and id != selected_ship_id:
+			continue
+		living[id] = true
+		var tile: Button
+		if selection_tiles.has(id):
+			tile = selection_tiles[id]
+		else:
+			tile = Button.new()
+			tile.custom_minimum_size = Vector2(38, 38)
+			tile.focus_mode = Control.FOCUS_NONE
+			tile.icon = _selection_icon(str(craft["kind"]))
+			tile.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			tile.pressed.connect(_select_tile.bind(id))
+			selection_grid.add_child(tile)
+			selection_tiles[id] = tile
+		var hp: float = clampf(float(craft.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
+		var tint: Color = Color("#d94b52") if hp < 0.2 else (Color("#e99e45") if hp < 0.5 else Color("#55b987"))
+		if tile.get_meta("health_color", Color.TRANSPARENT) != tint:
+			tile.set_meta("health_color", tint)
+			tile.add_theme_stylebox_override("normal", HUD.surface(tint.darkened(0.40), tint, 2, 2))
+			tile.add_theme_stylebox_override("hover", HUD.surface(tint.darkened(0.18), Color.WHITE, 2, 2))
+			tile.add_theme_stylebox_override("pressed", HUD.surface(tint, Color.WHITE, 2, 2))
+		tile.tooltip_text = "%s #%d · HP %.0f / %.0f" % [_ship_kind_name(str(craft["kind"])), id, float(craft.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
+	for id in selection_tiles.keys():
+		if not living.has(id):
+			var tile: Button = selection_tiles[id]
+			selection_grid.remove_child(tile)
+			tile.queue_free()
+			selection_tiles.erase(id)
+	selection_grid.visible = not living.is_empty()
+
 func _refresh_field_panels(state: Dictionary) -> void:
 	var field: Dictionary = state["map"]["fields"][selected_field]
 	var special: bool = bool(field.get("antimatter", false))
@@ -1603,8 +1745,9 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	ship_cargo.get_parent().hide()
 	fleet_title.text = "Mining"
 	fleet_detail.hide()
-	hold_button.hide()
-	unload_button.hide()
+	command_card.hide()
+	pending_command = ""
+	_refresh_command_mode()
 	fleet_cargo.get_parent().hide()
 	mining_controls.get_parent().show()
 	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field)
@@ -1681,9 +1824,19 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		capacity += ECONOMY.cargo_capacity(str(craft["kind"]))
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft.get("cargo", {}).get(resource, 0.0))
-	hold_button.visible = owned_count > 0
-	unload_button.visible = loaded_owned
-	hold_button.text = "Release hold [H]" if _any_selected_holding() else "Hold position [H]"
+	command_card.show()
+	var combat_owned: bool = false
+	var can_load: bool = false
+	for craft in state["ships"]:
+		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me():
+			combat_owned = combat_owned or craft["kind"] == "fighter"
+			can_load = can_load or ECONOMY.cargo_free(craft) > ECONOMY.EPS
+	for id in command_buttons:
+		var button: Button = command_buttons[id]
+		button.disabled = owned_count == 0 or (id in ["patrol", "attack"] and not combat_owned) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
+		pending_command = ""
+	_refresh_command_mode()
 	fleet_detail.text = "%d fighters · %d colony ships · %d miners · %d logistics" % [counts["fighter"], counts["colony_ship"], counts["miner"], counts["ship"]]
 	if owned_count < selected_units.size():
 		fleet_detail.text += "\n%d owned · %d foreign" % [owned_count, selected_units.size() - owned_count]
@@ -2418,6 +2571,10 @@ func _refresh() -> void:
 		last_system_tab_selection = current_system
 	interaction_panel.visible = not other_selected and not p.is_empty() and not own_system
 	ship_overview.visible = other_selected
+	_refresh_selection_tiles(state)
+	if not ship_selected:
+		pending_command = ""
+		_refresh_command_mode()
 	fleet_scroll.visible = other_selected
 	fleet_overview.visible = other_selected
 	fleet_title.visible = other_selected
@@ -3267,7 +3424,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	selected_field = -1
 	_refresh()
 
-func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false) -> void:
+func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = false) -> void:
 	var state: Dictionary = _state()
 	var owned: Array[int] = _selected_owned_units(state)
 	if state.is_empty() or owned.is_empty():
@@ -3276,7 +3433,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	for craft in state["ships"]:
 		if owned.has(int(craft["id"])) and craft["kind"] == "fighter":
 			fighters.append(int(craft["id"]))
-	if not force_position and not patrol:
+	if not force_position and not patrol and not move_only:
 		var poses: Dictionary = _ship_poses(state)
 		var target: int = -1
 		var nearest: float = maxf(5.0, 14.0 * _ship_scale())
@@ -3317,7 +3474,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			(local_groups[current] as Array).append(id)
 			handled_fighters[id] = true
 		for current in local_groups:
-			session.call("request_local_position", local_groups[current], int(current), world)
+			session.call("request_local_position", local_groups[current], int(current), world, move_only)
 		var remaining: Array[int] = []
 		for id in fighters:
 			if not handled_fighters.has(id):
@@ -3349,7 +3506,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	else:
 		hit_radius = maxf(9.0, float(state["map"]["fields"][node - system_count]["radius"]) * _fit() * zoom)
 	if patrol and not force_position:
-		if not fighters.is_empty() and distance <= hit_radius * hit_radius:
+		if not fighters.is_empty() and (ECONOMY.sector_contains(graph, node, world) or distance <= hit_radius * hit_radius):
 			session.call("request_tactical_order", fighters, "patrol", node)
 		return
 	if force_position or distance > hit_radius * hit_radius:
@@ -3359,7 +3516,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 				if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])) and not handled_fighters.has(int(craft["id"])) and ECONOMY.sector_contains(graph, node, craft["position"]) and not bool(craft.get("retreating", false)):
 					local.append(int(craft["id"]))
 			if not local.is_empty():
-				session.call("request_local_position", local, node, world)
+				session.call("request_local_position", local, node, world, move_only)
 				return
 		else:
 			return
@@ -3392,7 +3549,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			session.call("request_colonize", id, node)
 			colony_sent = true
 	if not fighters.is_empty():
-		session.call("request_fighter_move", fighters, node)
+		session.call("request_fighter_move", fighters, node, move_only)
 
 func _selected_miners() -> Array[int]:
 	var miners: Array[int] = []
@@ -3415,14 +3572,18 @@ func _any_selected_holding() -> bool:
 	return false
 
 func _hold_selected() -> void:
+	pending_command = ""
 	var owned: Array[int] = _selected_owned_units(_state())
 	if not owned.is_empty():
 		session.call("request_unit_hold", owned, _any_selected_holding())
+	_refresh_command_mode()
 
 func _unload_selected() -> void:
+	pending_command = ""
 	var owned: Array[int] = _selected_owned_units(_state())
 	if not owned.is_empty():
 		session.call("request_unload_cargo", owned)
+	_refresh_command_mode()
 
 func _map_input(event: InputEvent) -> void:
 	if match_menu.visible:
@@ -3436,8 +3597,17 @@ func _map_input(event: InputEvent) -> void:
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
-					_command_at(mouse.position, mouse.alt_pressed, mouse.shift_pressed)
+					if not pending_command.is_empty():
+						pending_command = ""
+						_refresh_command_mode()
+					else:
+						_command_at(mouse.position, mouse.alt_pressed, mouse.shift_pressed)
 			MOUSE_BUTTON_LEFT:
+				if not pending_command.is_empty():
+					if mouse.pressed:
+						_execute_pending_command(mouse.position)
+					map_canvas.accept_event()
+					return
 				if mouse.pressed:
 					selecting_units = true
 					selection_start = mouse.position
@@ -3545,7 +3715,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if focus is LineEdit or focus is TextEdit or colony_picker.get_popup().visible:
 		return
 	var key: int = event.physical_keycode
-	if key in [KEY_Q, KEY_E]:
+	if key == KEY_ESCAPE and not pending_command.is_empty():
+		pending_command = ""
+		_refresh_command_mode()
+	elif key in [KEY_Q, KEY_E]:
 		_cycle_owned_system(-1 if key == KEY_Q else 1)
 	elif key == KEY_F:
 		# Explicit camera follow: selection changes never move the camera.

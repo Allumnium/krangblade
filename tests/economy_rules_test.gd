@@ -1650,7 +1650,8 @@ func _test_local_position_orders() -> void:
 	assert(ECON.sector_at(boundary_graph, Vector2(2501, 0), candidates) == 1)
 	assert(ECON.sector_at(boundary_graph, Vector2(2500, 0), candidates, 0) == 0)
 	assert(ECON.sector_at(boundary_graph, Vector2(2500, 0), candidates, 1) == 1)
-	assert(ECON.command_local_position(state, 1, [100], 0, Vector2(2499, 0)))
+	assert(ECON.command_local_position(state, 1, [100], 0, Vector2(2499, 0), true))
+	assert(fighter.get("move_only", false))
 	assert(fighter["route"].is_empty() and fighter["dest"] == 0 and fighter["hold_position"] == Vector2(2499, 0))
 	assert(not ECON.command_local_position(state, 1, [100], 0, Vector2(2501, 0)))
 	assert(not ECON.command_local_position(state, 2, selection, 0, point))
@@ -1660,6 +1661,7 @@ func _test_local_position_orders() -> void:
 	assert(not ECON.command_local_position(state, 1, selection, 0, map["points"][1]))
 	assert(not ECON.command_local_position(state, 1, selection, 0, Vector2.INF))
 	assert(ECON.command_local_position(state, 1, selection, 0, point))
+	assert(not fighter.get("move_only", false))
 	for craft in state["ships"]:
 		assert(craft["position"] == Vector2.ZERO and craft["holding"])
 	for tick in range(50):
