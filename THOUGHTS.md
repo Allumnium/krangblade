@@ -412,3 +412,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 ### T-29l — Shared sector geometry
 - **Type:** Movement and territory consistency.
 - **Finding:** Ownership shader used smooth unions and smaller neutral exclusions while the simulation used nearest-POI clipped disks. This allowed visibly claimed points to belong to a different command sector. Render the actual clipped disks using every POI center, prioritize the occupied sector at shared boundaries, and remove the 64px workaround. This intentionally trades merged/blobby territory silhouettes for accurate command boundaries.
+
+### T-29m — Bounded command tabs and territory edges
+- **Finding:** A scroll viewport containing a vertically shrinking tab container left only tab headers visible. Make the tab container fill the command wing, with a single scroll per page; put ship build cards before yard activity. Move time controls below the upper-right resource bar and use an inward antialiased territory edge to avoid hard clipped neutral bisectors.
