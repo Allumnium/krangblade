@@ -436,3 +436,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-31d — One-shot local movement
 - Local point commands previously reused permanent hold state, preventing autonomous pursuit and nearby salvage approach. Transient local move targets now clear on arrival. Retain explicit hold and existing shipyard rally behavior; avoid separation preventing completion of crowded point orders. Verify civilian service resumption and multiplayer arrival.
+
+### T-31e — Symmetric console wings
+- The right wing previously expanded with the center, despite the fixed narrow minimap. Give both side panels the same responsive width (24% each, bounded 180–320 logical pixels), with only the middle expanding. Preserve square tactical slots and reflow production portraits; scroll narrow contextual content rather than allowing it to widen the wing. Verify small window and high UI scale manually.

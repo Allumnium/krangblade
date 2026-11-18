@@ -131,6 +131,7 @@ const HULL_PANELS: Dictionary = {
 		[Color("#9de6ff"), [Vector2(-10, 2), Vector2(-11, 2), Vector2(-11, -2), Vector2(-10, -2)]]
 	]
 }
+var interaction_scroll: ScrollContainer
 var interaction_panel: VBoxContainer
 var logistics_lens: Button
 var active_lens: String = ""
@@ -186,7 +187,9 @@ var fleet_title: Label
 var fleet_detail: Label
 var hold_button: Button
 var unload_button: Button
+var yard_command_scroll: ScrollContainer
 var yard_command_card: VBoxContainer
+var yard_command_grid: GridContainer
 var yard_commands: Dictionary = {}
 var production_icons: Dictionary = {}
 var yard_queue: VBoxContainer
@@ -435,6 +438,8 @@ func _build_ui() -> void:
 	minimap.focus_mode = Control.FOCUS_NONE
 	minimap.tooltip_text = "Click or drag to move the camera"
 	minimap.clip_contents = true
+	minimap.size_flags_horizontal = Control.SIZE_FILL
+	minimap.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	deck.add_child(minimap)
 	minimap.draw.connect(_draw_minimap)
 	minimap.gui_input.connect(_minimap_input)
@@ -449,7 +454,6 @@ func _build_ui() -> void:
 	empty_selection.add_theme_color_override("font_color", HUD.MUTED)
 	console_center = VBoxContainer.new()
 	console_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	console_center.size_flags_stretch_ratio = 1.2
 	console_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	console_columns.add_child(console_center)
 	console_center_spacer = Control.new()
@@ -461,8 +465,8 @@ func _build_ui() -> void:
 	console_center.add_child(empty_selection)
 	inspector_panel = PanelContainer.new()
 	console_columns.add_child(inspector_panel)
-	inspector_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	inspector_panel.size_flags_stretch_ratio = 1.3
+	# Both wings use the same fixed width; only the center expands.
+	inspector_panel.size_flags_horizontal = Control.SIZE_FILL
 	inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
 	# Simulation controls are global, not contextual commands.
@@ -494,7 +498,7 @@ func _build_ui() -> void:
 	overview_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
 	var overview_scroll := ScrollContainer.new()
 	overview_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	overview_panel.add_child(overview_scroll)
 	var overview := VBoxContainer.new()
 	overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -579,9 +583,14 @@ func _build_ui() -> void:
 	raw_antimatter_label.add_theme_color_override("font_color", HUD.COLORS[ECONOMY.ANTIMATTER])
 	production_summary.add_child(raw_antimatter_label)
 	raw_antimatter_label.hide()
+	interaction_scroll = ScrollContainer.new()
+	interaction_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	interaction_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(interaction_scroll)
 	interaction_panel = VBoxContainer.new()
+	interaction_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	interaction_panel.add_theme_constant_override("separation", 8)
-	body.add_child(interaction_panel)
+	interaction_scroll.add_child(interaction_panel)
 	colony_picker = OptionButton.new()
 	interaction_panel.add_child(colony_picker)
 	send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
@@ -677,7 +686,11 @@ func _layout_console() -> void:
 	territory_layer.offset_bottom = map_canvas.offset_bottom
 	diagnostic_label.offset_bottom = -20.0 - height
 	diagnostic_label.offset_top = -44.0 - height
-	minimap.custom_minimum_size.x = minf(220.0, minf(height * 0.87, size.x * 0.19))
+	# Symmetric wings occupy at most 48% of the deck together at the
+	# usual window sizes. The center receives all remaining width.
+	var wing_width: float = clampf(floorf((size.x - 24.0) * 0.24), 180.0, 320.0)
+	minimap.custom_minimum_size.x = wing_width
+	inspector_panel.custom_minimum_size.x = wing_width
 	# SC2-style raised wings: minimap and commands use the full deck height;
 	# selection details begin 20% lower, leaving more map visible centrally.
 	console_center_spacer.custom_minimum_size.y = height * 0.20
@@ -698,8 +711,8 @@ func _draw_console_profile() -> void:
 	var center_top: float = console_center_spacer.global_position.y + console_center_spacer.size.y - console_profile.global_position.y
 	var fill := Color("#0b1624")
 	var edge := Color("#345570")
-	var left_rect := Rect2(Vector2.ZERO, Vector2(maxf(0.0, center_left), bounds.size.y))
-	var center_rect := Rect2(Vector2(center_left, center_top), Vector2(maxf(0.0, right_left - center_left), maxf(0.0, bounds.size.y - center_top)))
+	var left_rect := Rect2(Vector2.ZERO, Vector2(minimap.size.x, bounds.size.y))
+	var center_rect := Rect2(Vector2(center_left, center_top), Vector2(console_center.size.x, maxf(0.0, bounds.size.y - center_top)))
 	var right_rect := Rect2(Vector2(right_left, 0.0), Vector2(maxf(0.0, bounds.size.x - right_left), bounds.size.y))
 	for rect in [left_rect, center_rect, right_rect]:
 		if rect.has_area():
@@ -708,6 +721,17 @@ func _draw_console_profile() -> void:
 
 func _layout_command_grids() -> void:
 	var width: float = inspector_panel.size.x - 34.0
+	# Leave space for panel padding and a vertical scrollbar. Keep the
+	# five tactical actions on one row wherever their minimum size fits.
+	var command_width: float = maxf(0.0, inspector_panel.size.x - 22.0)
+	if is_instance_valid(command_card):
+		var slot_size: float = clampf(floorf((command_width - 12.0) / 5.0), 38.0, 48.0)
+		for button in command_buttons.values():
+			button.custom_minimum_size = Vector2.ONE * slot_size
+	if is_instance_valid(yard_command_grid):
+		# Production portraits retain their readable two-line captions.
+		# Reflow their columns rather than squeezing the art and text.
+		yard_command_grid.columns = clampi(floori((command_width + 3.0) / 63.0), 1, 5)
 	if is_instance_valid(selection_grid):
 		selection_grid.columns = maxi(1, floori(maxf(38.0, console_center.size.x - 20.0) / 41.0))
 	for title in command_grids:
@@ -1347,10 +1371,15 @@ func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> 
 	return art
 
 func _build_yard_command_card(parent: VBoxContainer) -> void:
+	yard_command_scroll = ScrollContainer.new()
+	yard_command_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	yard_command_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	parent.add_child(yard_command_scroll)
 	yard_command_card = VBoxContainer.new()
-	yard_command_card.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	parent.add_child(yard_command_card)
+	yard_command_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	yard_command_scroll.add_child(yard_command_card)
 	var grid := GridContainer.new()
+	yard_command_grid = grid
 	grid.columns = 5
 	grid.add_theme_constant_override("h_separation", 3)
 	grid.add_theme_constant_override("v_separation", 3)
@@ -1382,7 +1411,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	_yard_ability_face(clear, "Clear", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12M18 19L28 29M28 19L18 29"/>'))
 	clear.tooltip_text = "Clear rally point"
 	yard_commands["clear"] = clear
-	yard_command_card.hide()
+	yard_command_scroll.hide()
 
 func _build_at_yard(kind: String) -> void:
 	if selected_yard >= 0:
@@ -2663,14 +2692,14 @@ func _refresh() -> void:
 	yard_overview.visible = yard_selected
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
 	inspector_tabs.visible = not other_selected and own_system and not yard_selected
-	yard_command_card.visible = yard_selected
+	yard_command_scroll.visible = yard_selected
 	var current_system: int = selected if not other_selected and not p.is_empty() else -1
 	if current_system != last_system_tab_selection:
 		if current_system >= 0:
 			inspector_tabs.current_tab = 0
 		_collapse_details()
 		last_system_tab_selection = current_system
-	interaction_panel.visible = not other_selected and not yard_selected and not p.is_empty() and not own_system
+	interaction_scroll.visible = not other_selected and not yard_selected and not p.is_empty() and not own_system
 	ship_overview.visible = other_selected
 	_refresh_selection_tiles(state)
 	if not ship_selected and not (yard_selected and own_system and pending_command == "rally"):

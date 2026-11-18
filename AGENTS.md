@@ -202,3 +202,5 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 - From v0.31.5: no Back to system buttons or Fleet policy tab. Manual production is selected-shipyard-only; preserve underlying AI/legacy automatic production state. Shipyard visual dimensions and selection bounds are doubled while ship scale, physical orbital position, construction and combat stats stay unchanged.
 
 - v0.31.7: Local move orders use transient destinations, not Hold Position. On arrival fighters and idle colony ships resume autonomous behavior; civilian service automation resumes naturally, including physical mining/docking. Only explicit Hold/Stop commands persist as holds. Existing shipyard rally semantics are unchanged. Emergency repair can interrupt and resume an unfinished local move.
+
+- v0.31.8: The minimap and contextual command wing have matching fixed widths and full raised deck height, with the center consuming the remaining width. Keep tactical commands in five columns, wrap shipyard abilities at narrow widths, and give content its own scroll viewport so selection changes cannot force a wider command wing.
