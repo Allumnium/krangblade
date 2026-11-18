@@ -209,9 +209,7 @@ var yard_commands: Dictionary = {}
 var production_icons: Dictionary = {}
 var yard_queue: HFlowContainer
 var yard_queue_rows: Dictionary = {}
-var yard_rally_hint: Label
 var command_card: GridContainer
-var command_hint: Label
 var command_buttons: Dictionary = {}
 var pending_command: String = ""
 var selection_grid: GridContainer
@@ -761,9 +759,23 @@ func _layout_command_grids() -> void:
 		for button in command_buttons.values():
 			button.custom_minimum_size = Vector2.ONE * slot_size
 	if is_instance_valid(yard_command_grid):
-		# Production portraits retain their readable two-line captions.
-		# Reflow their columns rather than squeezing the art and text.
-		yard_command_grid.columns = clampi(floori((command_width + 3.0) / 63.0), 1, 5)
+		# Preserve the four command columns even on a narrow console. Use
+		# the panel's real padding rather than reserving an unused column.
+		var padding: float = inspector_panel.get_theme_stylebox("panel").get_minimum_size().x
+		var yard_width: float = inspector_panel.custom_minimum_size.x - padding
+		var slot_width: float = maxf(36.0, floorf((yard_width - 9.0) / 4.0))
+		var slot_height: float = clampf(slot_width, 46.0, 60.0)
+		for button in yard_command_grid.get_children():
+			if not button is Button:
+				continue
+			button.custom_minimum_size = Vector2(slot_width, slot_height)
+			var caption: Label = button.get_meta("caption")
+			var font: Font = caption.get_theme_font("font")
+			var font_size: int = 11
+			for line in caption.text.split("\n"):
+				while font_size > 8 and font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > slot_width - 4.0:
+					font_size -= 1
+			caption.add_theme_font_size_override("font_size", font_size)
 	if is_instance_valid(selection_grid):
 		selection_grid.columns = maxi(1, floori(maxf(38.0, console_center.size.x - 20.0) / 41.0))
 	for title in command_grids:
@@ -1376,6 +1388,7 @@ func _production_icon(kind: String, tint: Color) -> Texture2D:
 
 func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> TextureRect:
 	button.custom_minimum_size = Vector2(60, 60)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.focus_mode = Control.FOCUS_NONE
 	button.icon = null
 	button.text = ""
@@ -1390,7 +1403,7 @@ func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> 
 	content.offset_bottom = -2.0
 	var art := TextureRect.new()
 	art.texture = picture
-	art.custom_minimum_size = Vector2(0, 25)
+	art.custom_minimum_size = Vector2(0, 16)
 	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	art.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1403,11 +1416,12 @@ func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> 
 	name_label.add_theme_color_override("font_color", Color.WHITE)
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(name_label)
+	button.set_meta("caption", name_label)
 	return art
 
 func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_scroll = ScrollContainer.new()
-	yard_command_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	yard_command_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	yard_command_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	parent.add_child(yard_command_scroll)
 	yard_command_card = VBoxContainer.new()
@@ -1415,7 +1429,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_scroll.add_child(yard_command_card)
 	var grid := GridContainer.new()
 	yard_command_grid = grid
-	grid.columns = 5
+	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 3)
 	grid.add_theme_constant_override("v_separation", 3)
 	yard_command_card.add_child(grid)
@@ -1435,18 +1449,12 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 		grid.add_child(button)
 		yard_commands[kind] = button
-	var rally_button := Button.new()
-	_yard_ability_face(rally_button, "Rally", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12"/>'))
-	rally_button.toggle_mode = true
-	rally_button.focus_mode = Control.FOCUS_NONE
-	rally_button.tooltip_text = "Set Rally Point"
-	rally_button.pressed.connect(_arm_command.bind("rally"))
-	grid.add_child(rally_button)
-	yard_commands["rally"] = rally_button
+	# Bottom row: Upgrade, empty slot, Clear Rally, Rally.
 	yard_upgrade = _button("", _upgrade_selected_yards, grid)
 	_yard_ability_face(yard_upgrade, "Upgrade", _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>'))
-	yard_rally_hint = _label("", 12)
-	yard_command_card.add_child(yard_rally_hint)
+	var empty_slot := Control.new()
+	empty_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grid.add_child(empty_slot)
 	var clear := _button("", func() -> void:
 		pending_command = ""
 		_refresh_command_mode()
@@ -1455,6 +1463,13 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	_yard_ability_face(clear, "Clear", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12M18 19L28 29M28 19L18 29"/>'))
 	clear.tooltip_text = "Clear rally point"
 	yard_commands["clear"] = clear
+	var rally_button := Button.new()
+	_yard_ability_face(rally_button, "Rally", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12"/>'))
+	rally_button.toggle_mode = true
+	rally_button.tooltip_text = "Set Rally Point"
+	rally_button.pressed.connect(_arm_command.bind("rally"))
+	grid.add_child(rally_button)
+	yard_commands["rally"] = rally_button
 	yard_command_scroll.hide()
 
 func _draw_autobuild_border(border: Control) -> void:
@@ -1610,7 +1625,6 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	rally_button.disabled = not owned
 	rally_button.set_pressed_no_signal(pending_command == "rally")
 	yard_commands["clear"].disabled = not owned or rally.is_empty()
-	yard_rally_hint.text = "Choose rally destination" if pending_command == "rally" else ("Rally: " + _system_name(int(rally["node"])) if not rally.is_empty() else "Rally: not set")
 	var upgrade_recipe: Dictionary = ECONOMY._cost("yard_upgrade", level + 1)
 	yard_upgrade.disabled = not owned or not _yard_can_upgrade(system, selected_yard)
 	yard_upgrade.tooltip_text = "Upgrade to Lv %d · %.0f yr\n%s" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), _cost_text(upgrade_recipe)]
@@ -1853,9 +1867,6 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	_command_slot("attack", "Attack Move", '<circle cx="16" cy="16" r="9"/><path d="M16 3V11M16 21V29M3 16H11M21 16H29"/>', _arm_command.bind("attack"))
 	_command_slot("load", "Load Cargo", '<rect x="7" y="17" width="18" height="10"/><path d="M16 4V20M10 14L16 20L22 14"/>', _arm_command.bind("load"))
 	unload_button = _command_slot("unload", "Unload Cargo", '<rect x="7" y="17" width="18" height="10"/><path d="M16 20V4M10 10L16 4L22 10"/>', _unload_selected)
-	command_hint = _label("", 12)
-	parent.add_child(command_hint)
-	command_hint.hide()
 
 func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""
@@ -1869,10 +1880,6 @@ func _refresh_command_mode() -> void:
 		button.set_pressed_no_signal(id == pending_command or (id == "hold" and _any_selected_holding()))
 	if is_instance_valid(yard_command_card):
 		yard_commands["rally"].set_pressed_no_signal(pending_command == "rally")
-		if pending_command == "rally":
-			yard_rally_hint.text = "Choose rally destination"
-	command_hint.visible = not pending_command.is_empty()
-	command_hint.text = "Choose destination · Right-drag formation · Esc cancels" if pending_command in ["move", "attack", "patrol"] else "Choose destination · Esc / right-click cancels"
 	map_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS if not pending_command.is_empty() else Control.CURSOR_ARROW
 
 func _stop_selected() -> void:
@@ -2919,7 +2926,7 @@ func _refresh() -> void:
 	var owner: int = int(p["owner"])
 	var roster: Dictionary = session.get("players")
 	var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
-	info.text = ("Space Station · " if building_selection_kind == "station" else "") + _system_name(selected) + (" · No planets" if not ECONOMY.has_planets(p) else "")
+	info.text = ("Space Station · " if building_selection_kind == "station" else "") + _system_name(selected)
 	info.tooltip_text = info.text + (" · Home" if bool(p["home"]) else "")
 	if ECONOMY.has_station(p):
 		info.tooltip_text += "\nSpace Station · %.0f / %.0f HP" % [float(p["station"]["hp"]), ECONOMY.STATION_HP]
@@ -3768,7 +3775,6 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 	yard_upgrade.tooltip_text = "Upgrade every eligible owned shipyard"
 	yard_commands["rally"].disabled = refs.is_empty()
 	yard_commands["clear"].disabled = not can_clear
-	yard_rally_hint.text = "Choose rally destination" if pending_command == "rally" else "%d owned shipyards selected" % refs.size()
 
 func _select_at(point: Vector2, additive: bool = false, double_click: bool = false) -> void:
 	var state: Dictionary = _state()
