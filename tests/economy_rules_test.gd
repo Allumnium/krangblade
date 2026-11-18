@@ -179,7 +179,79 @@ func _test_mining_lasers() -> void:
 	assert(is_equal_approx(budgets[0]["Metals"], 100.0 - mined))
 	print("PASS: weak miner fire, friendly safety, no pursuit, move-only suppression, asteroid bonus and conserved ore")
 
+func _test_miner_service_orders() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(10000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var miner: Dictionary = {"id": 100, "owner": 1, "kind": "miner", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(500, 0), "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "delivery", "field": -1}
+	var ally: Dictionary = miner.duplicate(true)
+	ally.merge({"id": 101, "kind": "ship", "hp": 70.0, "position": Vector2(550, 0)}, true)
+	var foe: Dictionary = ally.duplicate(true)
+	foe.merge({"id": 102, "owner": 2, "position": Vector2(800, 0)}, true)
+	state["ships"] = [miner, ally, foe]
+	assert(ECON._work_miner_repair(state, graph, miner, ECON.service_targets(state), 1.0))
+	assert(ally["hp"] == 70.0 + ECON.MINER_REPAIR_RATE and foe["hp"] == 70.0 and miner["repair_target"] == 101)
+	assert(not ECON.set_repair_auto(state, 2, [100], false))
+	assert(ECON.set_repair_auto(state, 1, [100], false))
+	assert(not ECON._work_miner_repair(state, graph, miner, ECON.service_targets(state), 1.0))
+	assert(not ECON.issue_unit_order(state, 1, [100], {"kind": "repair", "target": 102}, false))
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "repair", "target": 101}, false))
+	assert(ECON._work_miner_repair(state, graph, miner, ECON.service_targets(state), 1.0))
+	assert(ally["hp"] == 70.0 + 2.0 * ECON.MINER_REPAIR_RATE)
+	var station: Dictionary = state["planets"][0]["station"]
+	station["hp"] = ECON.STATION_HP - 10.0
+	miner["position"] = ECON.station_position(state, 0, 0.0)
+	var station_id: int = ECON.station_target_id(state, 0)
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "repair", "target": station_id}, false))
+	assert(ECON._work_miner_repair(state, graph, miner, ECON.service_targets(state), 1.0))
+	assert(station["hp"] == ECON.STATION_HP - 5.0)
+	miner["hp"] = ECON.WITHDRAW_HP
+	ECON._prepare_withdrawals(state, graph)
+	assert(miner.get("retreating", false))
+	miner["hp"] = ECON.SHIP_HP
+	miner["retreating"] = false
+	miner["cargo"]["Metals"] = 20.0
+	# A loaded miner waiting on a full warehouse can travel and dump its
+	# exact cargo at an arbitrary point, without creating structural loot.
+	var remote := Vector2(10000, 100)
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "position", "target": 2, "point": remote, "move_only": true}, false))
+	assert(miner.has("local_move_target") and not miner.has("repair_order"))
+	for tick in range(200):
+		if not miner.has("local_move_target"):
+			break
+		ECON._work_local_move(graph, miner, 1.0, state)
+	assert(miner["position"] == remote and miner["at"] == 2 and miner["cargo"]["Metals"] == 20.0)
+	var drop := remote + Vector2(40, 40)
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "drop", "point": drop}, false))
+	assert(ECON._work_cargo_order(state, graph, miner, ECON.service_targets(state), 1.0))
+	assert(miner["position"] == drop and ECON._cargo_total(miner) == 0.0 and state["salvage"].size() == 1)
+	var pile: Dictionary = state["salvage"].values()[0]
+	assert(pile["amount"] == 20.0 and pile["position"] == drop)
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "salvage", "target": pile["id"]}, false))
+	assert(ECON._work_salvage(state, graph, miner, 10.0))
+	assert(is_equal_approx(miner["cargo"]["Metals"], 20.0))
+	var depot: Dictionary = state["planets"][0]
+	depot["stock"]["Metals"] = ECON.storage_capacity(depot) - 3.0
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "deposit", "target": station_id}, false))
+	miner["position"] = ECON.station_position(state, 0, 0.0)
+	assert(ECON._work_cargo_order(state, graph, miner, ECON.service_targets(state), 1.0))
+	assert(miner["cargo"]["Metals"] == 17.0 and depot["stock"]["Metals"] == ECON.storage_capacity(depot))
+	assert(not ECON.can_deposit(state, miner, station_id))
+	assert(not ECON.can_deposit(state, miner, ECON.station_target_id(state, 1)))
+	# A focused attack ignores a closer hostile; focus can be a structure.
+	miner["position"] = Vector2(500, 0)
+	foe["position"] = Vector2(550, 0)
+	var far: Dictionary = foe.duplicate(true)
+	far.merge({"id": 103, "position": Vector2(1000, 0)}, true)
+	state["ships"].append(far)
+	assert(ECON.command_attack(state, 1, [100], 103))
+	ECON._combat(state, graph, 1.0)
+	assert(foe["hp"] == 70.0 and far["hp"] == 70.0)
+	assert(ECON.command_attack(state, 1, [100], ECON.station_target_id(state, 1)))
+	print("PASS: miner repair/autocast, withdrawal priority, remote orders, targeted cargo conservation and focused attacks")
+
 func _initialize() -> void:
+	_test_miner_service_orders()
 	_test_mining_lasers()
 	_test_yard_autobuild_and_station_approach()
 	_test_unit_order_queue()

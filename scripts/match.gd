@@ -14,7 +14,7 @@ const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
 const KEYBOARD_PAN_SPEED: float = 420.0
-const RADIUS: float = 12.0
+const SYSTEM_WORLD_RADIUS: float = 600.0
 const MIN_ZOOM: float = 0.5
 const OVERVIEW_MAX_ZOOM: float = 64.0
 const FIGHTER_HULL_LENGTH: float = 22.0
@@ -1851,7 +1851,29 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	_command_slot("patrol", "Patrol", '<path d="M7 12A10 10 0 0 1 25 10M25 10V4M25 10H19M25 20A10 10 0 0 1 7 22M7 22V28M7 22H13"/>', _arm_command.bind("patrol"))
 	_command_slot("attack", "Attack Move", '<circle cx="16" cy="16" r="9"/><path d="M16 3V11M16 21V29M3 16H11M21 16H29"/>', _arm_command.bind("attack"))
 	_command_slot("load", "Load Cargo", '<rect x="7" y="17" width="18" height="10"/><path d="M16 4V20M10 14L16 20L22 14"/>', _arm_command.bind("load"))
-	unload_button = _command_slot("unload", "Unload Cargo", '<rect x="7" y="17" width="18" height="10"/><path d="M16 20V4M10 10L16 4L22 10"/>', _unload_selected)
+	unload_button = _command_slot("unload", "Drop Cargo", '<rect x="7" y="17" width="18" height="10"/><path d="M16 20V4M10 10L16 4L22 10"/>', _arm_command.bind("unload"))
+	var repair: Button = _command_slot("repair", "Repair (right-click: autocast)", '<path d="M13 5H19V13H27V19H19V27H13V19H5V13H13Z"/>', _arm_command.bind("repair"))
+	repair.gui_input.connect(_repair_button_input)
+	var border := Control.new()
+	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	repair.add_child(border)
+	border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	border.draw.connect(_draw_autobuild_border.bind(border))
+	repair.set_meta("auto_border", border)
+
+func _repair_button_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not command_buttons["repair"].disabled:
+		var miners: Array[int] = _selected_miners()
+		if not miners.is_empty():
+			session.call("request_repair_auto", miners, not _repair_auto_enabled())
+			command_buttons["repair"].accept_event()
+
+func _repair_auto_enabled() -> bool:
+	var miners: Array[int] = _selected_miners()
+	for ship in _state().get("ships", []):
+		if miners.has(int(ship["id"])) and bool(ship.get("repair_auto", true)):
+			return true
+	return false
 
 func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""
@@ -1863,6 +1885,10 @@ func _refresh_command_mode() -> void:
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.set_pressed_no_signal(id == pending_command or (id == "hold" and _any_selected_holding()))
+	if command_buttons.has("repair"):
+		var border: Control = command_buttons["repair"].get_meta("auto_border")
+		border.visible = not command_buttons["repair"].disabled and _repair_auto_enabled()
+		border.queue_redraw()
 	if is_instance_valid(yard_command_card):
 		yard_commands["rally"].set_pressed_no_signal(pending_command == "rally")
 	map_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS if not pending_command.is_empty() else Control.CURSOR_ARROW
@@ -1889,6 +1915,28 @@ func _execute_pending_command(point: Vector2, append: bool = false) -> void:
 		var wreck: int = _salvage_hit(state, point)
 		if wreck >= 0:
 			_issue_order(_selected_owned_units(state), {"kind": "salvage", "target": wreck}, append)
+	elif mode == "repair":
+		var target: int = _entity_hit(_state(), point)
+		if target != -1:
+			var miners: Array[int] = _selected_miners()
+			miners.erase(target)
+			_issue_order(miners, {"kind": "repair", "target": target}, append)
+	elif mode == "unload":
+		var state: Dictionary = _state()
+		var target: int = _entity_hit(state, point)
+		var ref: Dictionary = ECONOMY.service_targets(state).get(target, {})
+		var owned: Array[int] = _selected_owned_units(state)
+		var orders: Array = []
+		for ship in state["ships"]:
+			if not owned.has(int(ship["id"])) or ECONOMY._cargo_total(ship) <= ECONOMY.EPS:
+				continue
+			if ECONOMY._friendly_target(state, _me(), ref):
+				if ECONOMY.can_deposit(state, ship, target):
+					orders.append({"ids": [ship["id"]], "order": {"kind": "deposit", "target": target}})
+			else:
+				orders.append({"ids": [ship["id"]], "order": {"kind": "drop", "point": _world_point(point)}})
+		if not orders.is_empty():
+			session.call("request_unit_orders", orders, append)
 	if append and mode != "rally":
 		pending_command = mode
 		_refresh_command_mode()
@@ -1919,7 +1967,11 @@ func _build_selection_portrait(parent: Container) -> void:
 	selection_portrait_art.custom_minimum_size.y = 90.0
 	selection_portrait_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	selection_portrait_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	selection_portrait_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	selection_portrait_art.mouse_filter = Control.MOUSE_FILTER_STOP
+	selection_portrait_art.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and event.double_click:
+			_focus_selection()
+			selection_portrait_art.accept_event())
 	selection_portrait.add_child(selection_portrait_art)
 	selection_portrait_health = _label("", 12)
 	selection_portrait_health.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -2139,8 +2191,12 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	elif ship.has("local_move_target"):
 		status = "Moving · ETA %.1f yr" % ((ship["position"] as Vector2).distance_to(ship["local_move_target"]) / ECONOMY.SHIP_SPEED)
 	if not bool(ship.get("retreating", false)):
-		if int(ship.get("attack_order", -1)) >= 0:
-			status = "Attacking #%d" % int(ship["attack_order"])
+		if ship.has("attack_order"):
+			status = "Attacking target"
+		elif ship.has("repair_target") or ship.has("repair_order"):
+			status = "Repairing" if ship.has("repair_target") else "Approaching repair target"
+		elif ship.has("cargo_order"):
+			status = "Dropping cargo" if ship["cargo_order"]["kind"] == "drop" else "Delivering cargo"
 		elif ship.has("patrol_from"):
 			status = "Patrolling → %s" % _poi_name(int(ship["operation_target"]))
 	if int(ship.get("salvage_target", -1)) >= 0:
@@ -2171,11 +2227,11 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	var can_load: bool = false
 	for craft in state["ships"]:
 		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me():
-			combat_owned = combat_owned or craft["kind"] == "fighter"
+			combat_owned = combat_owned or ECONOMY.armed(craft)
 			can_load = can_load or ECONOMY.cargo_free(craft) > ECONOMY.EPS
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
-		button.disabled = owned_count == 0 or (id in ["patrol", "attack"] and not combat_owned) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] == "fighter")) or (id == "repair" and _selected_miners().is_empty()) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
 		pending_command = ""
 	_refresh_command_mode()
@@ -2651,7 +2707,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 		if int(p["owner"]) != _me():
 			continue
 		var parts: PackedStringArray = []
-		var categories: Array = ["Production", "Population", "Mining deliveries", "Salvage deliveries", "Imports", "Exports"]
+		var categories: Array = ["Production", "Population", "Mining deliveries", "Salvage deliveries", "Manual deliveries", "Imports", "Exports"]
 		for category in p.get("flows", {}):
 			if not categories.has(category):
 				categories.append(category)
@@ -2678,7 +2734,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 	var potential: float = ECONOMY.rate(p, resource)
 	var demand: float = ECONOMY.consumption(p, resource)
 	var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Theoretical: %.2f production − %.2f demand = %+.2f t/yr" % [potential, demand, potential - demand], "Latest actual flows (t/yr)"]
-	var categories: Array = ["Production", "Population", "Mining deliveries", "Salvage deliveries", "Imports", "Exports"]
+	var categories: Array = ["Production", "Population", "Mining deliveries", "Salvage deliveries", "Manual deliveries", "Imports", "Exports"]
 	for category in p.get("flows", {}):
 		if not categories.has(category):
 			categories.append(category)
@@ -3349,10 +3405,11 @@ func _system_visual(index: int, state: Dictionary) -> Dictionary:
 	return system_visuals[index]
 
 func _planet_radius(index: int, state: Dictionary) -> float:
-	var system: Dictionary = state["planets"][index]
-	var ideal: float = RADIUS * float(system.get("size_factor", 1.0)) * zoom
-	var spacing: float = float(_system_visual(index, state)["spacing"]) * _fit() * zoom
-	return clampf(minf(ideal, spacing * 0.39), 4.0, 720.0)
+	return _system_world_radius(index, state) * _fit() * zoom
+
+func _system_world_radius(index: int, state: Dictionary) -> float:
+	var ideal: float = SYSTEM_WORLD_RADIUS * float(state["planets"][index].get("size_factor", 1.0))
+	return minf(ideal, float(_system_visual(index, state)["spacing"]) * 0.39)
 
 func _planet_detail_target(radius: float) -> float:
 	return smoothstep(PLANET_FADE_START, PLANET_FADE_FULL, radius)
@@ -3371,8 +3428,8 @@ func _update_planet_detail(state: Dictionary, delta: float) -> void:
 		planet_detail_alpha[index] = move_toward(previous, target, delta / PLANET_FADE_SECONDS)
 
 func _star_draw_radius(radius: float) -> float:
-	# Keep the overview star-to-close-up transition continuous as well.
-	return lerpf(radius * 0.48, maxf(3.0, radius * 0.13), smoothstep(14.0, 32.0, radius))
+	# Constant world-space ratio; camera zoom is the only size multiplier.
+	return radius * 0.13
 
 func _body_position(body: Dictionary, radius: float, time: float) -> Vector2:
 	var angle: float = float(body["phase"]) + time * float(body["speed"]) * 0.22
@@ -3447,11 +3504,11 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 				if (index == selected and selected_body == slot) or (building_selection_kind == "pds" and selected_buildings.has(Vector2i(index, slot))):
 					_draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
-	var pulse: float = 0.96 + 0.04 * sin(visual_clock * 1.2 + float(index))
+	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
 	for layer in range(5, 0, -1):
-		map_canvas.draw_circle(pos, star_radius * (1.0 + float(layer) * 0.33) * pulse, Color(star_color, 0.05), true)
-	map_canvas.draw_circle(pos, star_radius * pulse, star_color, true)
-	map_canvas.draw_circle(pos, star_radius * 0.55 * pulse, Color("#fffdf1"), true)
+		map_canvas.draw_circle(pos, star_radius * (1.0 + float(layer) * 0.33), Color(star_color, 0.05 * opacity), true)
+	map_canvas.draw_circle(pos, star_radius, Color(star_color, opacity), true)
+	map_canvas.draw_circle(pos, star_radius * 0.55, Color(Color("#fffdf1"), clampf((opacity - 0.6) / 0.4, 0.0, 1.0)), true)
 	if detail < 0.999 and not system.get("pds", {}).is_empty():
 		map_canvas.draw_arc(pos, star_radius + 3.0, -PI * 0.8, PI * 0.8, 18, Color(Color("#bdcbd6"), 1.0 - detail), 1.5, true)
 	if detail < 0.3 and building_selection_kind == "pds":
@@ -3996,136 +4053,103 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	selected_field = -1
 	_refresh()
 
+func _entity_hit(state: Dictionary, point: Vector2) -> int:
+	# Docked ships can overlap the station; its central face must remain a
+	# usable deposit/attack/repair target even when a hull is docked there.
+	var station: int = _station_hit(point, state)
+	if station >= 0:
+		var center: Vector2 = _screen_point(ECONOMY.station_position(state, station, float(state["elapsed"])))
+		if point.distance_to(center) <= maxf(5.0, _station_radius() * 0.55):
+			return ECONOMY.station_target_id(state, station)
+	var nearest: float = maxf(5.0, 14.0 * _ship_scale())
+	var target: int = -1
+	var poses: Dictionary = _ship_poses(state)
+	for id in poses:
+		var distance: float = point.distance_to(poses[id]["point"])
+		if distance < nearest:
+			nearest = distance
+			target = int(id)
+	if target != -1:
+		return target
+	var yard: Vector2i = _yard_hit(point, state)
+	if yard.x >= 0:
+		return -2 - yard.x * 3 - yard.y
+	if station >= 0:
+		return ECONOMY.station_target_id(state, station)
+	var body: Vector2i = _body_hit(point, state)
+	if body.x >= 0 and state["planets"][body.x].get("pds", {}).has(body.y):
+		return -2 - state["planets"].size() * 3 - body.y * state["planets"].size() - body.x
+	return -1
+
 func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = true, explicit_attack: bool = false, append: bool = false, contextual: bool = false) -> void:
 	var state: Dictionary = _state()
 	var owned: Array[int] = _selected_owned_units(state)
 	if state.is_empty() or owned.is_empty():
 		return
-	var fighters: Array[int] = []
-	for craft in state["ships"]:
-		if owned.has(int(craft["id"])) and craft["kind"] == "fighter":
-			fighters.append(int(craft["id"]))
-	if not force_position and not patrol and explicit_attack:
-		var poses: Dictionary = _ship_poses(state)
-		var target: int = -1
-		var nearest: float = maxf(5.0, 14.0 * _ship_scale())
-		if not fighters.is_empty():
-			for craft in state["ships"]:
-				var id: int = int(craft["id"])
-				if poses.has(id) and ECONOMY._hostile_hull(state, _me(), craft):
-					var d: float = point.distance_to(poses[id]["point"])
-					if d < nearest:
-						target = id
-						nearest = d
-		if target >= 0:
-			_issue_order(fighters, {"kind": "attack", "target": target}, append)
-			return
-	if contextual and not force_position and fighters.is_empty():
-		var wreck: int = _salvage_hit(state, point)
-		if wreck >= 0:
-			_issue_order(owned, {"kind": "salvage", "target": wreck}, append)
-			return
-	var node: int = -1
-	var distance: float = INF
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var world: Vector2 = _world_point(point)
+	var node: int = ECONOMY.sector_at(graph, world, ECONOMY.military_pois(state, _me()))
 	if patrol:
 		var anchor: int = ECONOMY.patrol_node(state, graph, _me(), world)
-		if anchor >= 0 and not fighters.is_empty():
+		var fighters: Array[int] = []
+		for craft in state["ships"]:
+			if owned.has(int(craft["id"])) and craft["kind"] == "fighter":
+				fighters.append(int(craft["id"]))
+		if anchor >= 0:
 			_issue_order(fighters, {"kind": "patrol", "target": anchor, "point": world}, append)
 		return
-	var candidates: Array[int] = ECONOMY.military_pois(state, _me())
-	var handled_fighters: Dictionary = {}
-	# Resolve each fighter's actual current sector first. The same exact
-	# geometry drives the visible territory, cursor hit and host validation.
-	if not patrol and not fighters.is_empty():
-		var local_groups: Dictionary = {}
-		for craft in state["ships"]:
-			var id: int = int(craft["id"])
-			if not fighters.has(id) or bool(craft.get("retreating", false)):
-				continue
-			var origin: Vector2 = ECONOMY.unit_order_origin(state, graph, craft) if append else craft["position"]
-			var current: int = ECONOMY.sector_at(graph, origin, candidates, ECONOMY.local_sector(graph, craft))
-			if current < 0 or not ECONOMY.sector_contains(graph, current, world):
-				continue
-			if not local_groups.has(current):
-				local_groups[current] = []
-			(local_groups[current] as Array).append(id)
-			handled_fighters[id] = true
-		for current in local_groups:
-			_issue_order(local_groups[current], {"kind": "position", "target": int(current), "point": world, "move_only": move_only}, append)
-		var remaining: Array[int] = []
-		for id in fighters:
-			if not handled_fighters.has(id):
-				remaining.append(id)
-		fighters = remaining
-		if handled_fighters.size() == owned.size():
-			return
-	# Command sectors use their simulation boundaries, not the nearest POI
-	# center. In particular, clicking across a shared boundary must not
-	# silently snap to the adjacent sector's center.
-	node = ECONOMY.sector_at(graph, world, candidates)
-	if node >= 0:
-		distance = point.distance_squared_to(_screen_point(graph["points"][node]))
-	else:
-		# A direct icon click remains valid; empty space must not become
-		# a sector-to-sector move merely because a POI is nearest.
-		for candidate in candidates:
-			var d: float = point.distance_squared_to(_screen_point(graph["points"][candidate]))
-			if d < distance:
-				node = candidate
-				distance = d
-	if node < 0:
-		return
-	var system_count: int = state["planets"].size()
-	var hit_radius: float = 9.0
-	if node < system_count:
-		var radius: float = _planet_radius(node, state)
-		hit_radius = maxf(9.0, _star_draw_radius(radius))
-	else:
-		hit_radius = maxf(9.0, float(state["map"]["fields"][node - system_count]["radius"]) * _fit() * zoom)
-	if force_position or distance > hit_radius * hit_radius:
-		if ECONOMY.sector_contains(graph, node, world):
-			var local: Array[int] = []
-			for craft in state["ships"]:
-				var origin: Vector2 = ECONOMY.unit_order_origin(state, graph, craft) if append else craft["position"]
-				if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])) and not handled_fighters.has(int(craft["id"])) and ECONOMY.sector_contains(graph, node, origin) and not bool(craft.get("retreating", false)):
-					local.append(int(craft["id"]))
-			if not local.is_empty():
-				_issue_order(local, {"kind": "position", "target": node, "point": world, "move_only": move_only}, append)
-				return
-		else:
-			return
-		if force_position:
-			return
-	var miners: Array[int] = _selected_miners()
-	if not miners.is_empty():
-		var field_index: int = node - state["planets"].size()
-		var rock_id: int = -1
-		var rock_distance: float = INF
-		var fields: Array = state["map"].get("fields", [])
-		for i in range(fields.size()):
-			if not ECONOMY.discovered(state, _me(), "fields", i):
-				continue
-			for rock in fields[i].get("chunks", []):
+	var target: int = _entity_hit(state, point) if not force_position and (contextual or explicit_attack) else -1
+	var ref: Dictionary = ECONOMY.service_targets(state).get(target, {})
+	var wreck: int = _salvage_hit(state, point) if contextual and not force_position else -1
+	var field: int = -1
+	var rock_id: int = -1
+	if contextual and not force_position and node >= state["planets"].size():
+		var candidate: int = node - state["planets"].size()
+		var data: Dictionary = state["map"]["fields"][candidate]
+		var distance: float = point.distance_to(_screen_point(data["position"]))
+		if distance <= maxf(9.0, float(data["radius"]) * _fit() * zoom):
+			field = candidate
+			var best: float = INF
+			for rock in data.get("chunks", []):
 				var d: float = point.distance_to(_screen_point(rock["position"]))
-				if d < rock_distance and d <= maxf(5.0, float(rock.get("radius", 0.0)) * _fit() * zoom):
-					rock_distance = d
-					field_index = i
+				if d < best and d <= maxf(5.0, float(rock.get("radius", 0.0)) * _fit() * zoom):
+					best = d
 					rock_id = int(rock["id"])
-		if field_index < 0:
-			field_index = -1
-		_issue_order(miners, {"kind": "mine", "target": field_index, "chunk": rock_id}, append)
+	var entries: Array = []
+	var salvage_ids: Array[int] = []
 	var colony_sent: bool = false
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
-		if not selected_units.has(id) or int(craft["owner"]) != _me():
+		if not owned.has(id):
 			continue
-		if craft["kind"] == "colony_ship" and not colony_sent and node < state["planets"].size() and not ECONOMY.colony_path(state, _me(), craft, node).is_empty():
-			_issue_order([id], {"kind": "colonize", "target": node}, append)
-			colony_sent = true
-	if not fighters.is_empty():
-		_issue_order(fighters, {"kind": "sector", "target": node, "move_only": move_only}, append)
+		var order: Dictionary = {}
+		var armed: bool = ECONOMY.armed(craft)
+		if explicit_attack and not armed:
+			continue
+		if not ref.is_empty() and armed and ECONOMY._hostile_hull(state, _me(), ref):
+			order = {"kind": "attack", "target": target}
+		elif contextual and ref.get("kind") == "station" and ECONOMY.can_deposit(state, craft, target):
+			order = {"kind": "deposit", "target": target}
+		elif wreck >= 0 and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
+			salvage_ids.append(id)
+			continue
+		elif field >= 0 and craft["kind"] == "miner":
+			order = {"kind": "mine", "target": field, "chunk": rock_id}
+		else:
+			var endpoint: Vector2 = ref.get("position", world)
+			var destination: int = ECONOMY.sector_at(graph, endpoint, ECONOMY.military_pois(state, _me()))
+			if destination < 0:
+				continue
+			if contextual and not force_position and ref.is_empty() and craft["kind"] == "colony_ship" and not colony_sent and destination < state["planets"].size() and point.distance_to(_screen_point(graph["points"][destination])) <= maxf(9.0, _star_draw_radius(_planet_radius(destination, state))) and not ECONOMY.colony_path(state, _me(), craft, destination).is_empty():
+				order = {"kind": "colonize", "target": destination}
+				colony_sent = true
+			else:
+				order = {"kind": "position", "target": destination, "point": endpoint, "move_only": move_only}
+		entries.append({"ids": [id], "order": order})
+	if not salvage_ids.is_empty():
+		entries.append({"ids": salvage_ids, "order": {"kind": "salvage", "target": wreck}})
+	if not entries.is_empty():
+		session.call("request_unit_orders", entries, append)
 
 func _selected_miners() -> Array[int]:
 	var miners: Array[int] = []
@@ -4155,11 +4179,7 @@ func _hold_selected() -> void:
 	_refresh_command_mode()
 
 func _unload_selected() -> void:
-	pending_command = ""
-	var owned: Array[int] = _selected_owned_units(_state())
-	if not owned.is_empty():
-		_issue_order(owned, {"kind": "unload"}, Input.is_physical_key_pressed(KEY_SHIFT))
-	_refresh_command_mode()
+	_arm_command("unload")
 
 func _formation_orders(state: Dictionary) -> Array:
 	var entries: Array = []
@@ -4173,7 +4193,7 @@ func _formation_orders(state: Dictionary) -> Array:
 	var ships: Dictionary = {}
 	var origins: Dictionary = {}
 	for ship in state["ships"]:
-		if owned.has(int(ship["id"])) and not bool(ship.get("retreating", false)) and (formation_mode not in ["attack", "patrol"] or ship["kind"] == "fighter"):
+		if owned.has(int(ship["id"])) and not bool(ship.get("retreating", false)) and (formation_mode != "attack" or ECONOMY.armed(ship)) and (formation_mode != "patrol" or ship["kind"] == "fighter"):
 			var origin: Vector2 = ECONOMY.unit_order_origin(state, graph, ship) if formation_append else ship["position"]
 			ships[ship["id"]] = ship
 			origins[ship["id"]] = origin
@@ -4276,13 +4296,15 @@ func _map_input(event: InputEvent) -> void:
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
-					if not pending_command.is_empty() and pending_command not in ["move", "attack", "patrol"]:
+					if pending_command in ["repair", "unload", "load"]:
+						_execute_pending_command(mouse.position, mouse.shift_pressed)
+					elif not pending_command.is_empty() and pending_command not in ["move", "attack", "patrol"]:
 						pending_command = ""
 						_refresh_command_mode()
 					elif selected_yard >= 0:
 						_set_rally_at(mouse.position)
 			MOUSE_BUTTON_LEFT:
-				if pending_command in ["move", "attack", "patrol"]:
+				if pending_command in ["move", "attack", "patrol", "repair", "unload"]:
 					pending_command = ""
 					_refresh_command_mode()
 				elif not pending_command.is_empty():
@@ -4446,7 +4468,7 @@ func _cycle_owned_system(direction: int) -> void:
 	follow_units = false
 	var world: Vector2 = state["map"]["points"][selected]
 	var desired_radius: float = minf(_projection_size().x, _projection_size().y) * 0.27
-	var radius_per_zoom: float = minf(RADIUS * float(state["planets"][selected].get("size_factor", 1.0)), float(_system_visual(selected, state)["spacing"]) * _fit() * 0.39)
+	var radius_per_zoom: float = _system_world_radius(selected, state) * _fit()
 	zoom = clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, OVERVIEW_MAX_ZOOM)
 	var center: Vector2 = _camera_center()
 	pan += center - _screen_point(world)
@@ -4513,6 +4535,10 @@ func _process(delta: float) -> void:
 			var border: Control = yard_commands[kind].get_meta("auto_border")
 			if border.is_visible_in_tree():
 				border.queue_redraw()
+	if command_buttons.has("repair"):
+		var border: Control = command_buttons["repair"].get_meta("auto_border")
+		if border.is_visible_in_tree():
+			border.queue_redraw()
 	game_visual_clock += delta * float(_state().get("time_speed", 1))
 	for visual in ship_visuals.values():
 		if float(visual["age"]) < SNAPSHOT_SECONDS:
@@ -4710,7 +4736,7 @@ func _frame_starting_sector(index: int) -> void:
 	map_canvas.queue_redraw()
 
 func _system_focus_zoom(index: int, state: Dictionary, desired_radius: float) -> float:
-	var radius_per_zoom: float = minf(RADIUS * float(state["planets"][index].get("size_factor", 1.0)), float(_system_visual(index, state)["spacing"]) * _fit() * 0.39)
+	var radius_per_zoom: float = _system_world_radius(index, state) * _fit()
 	return clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, _max_zoom())
 
 func _follow_selection(state: Dictionary, poses: Dictionary, reframe: bool = false) -> void:
@@ -5082,8 +5108,10 @@ func _order_color(ship: Dictionary, order: Dictionary) -> Color:
 	var kind: String = str(order.get("kind", ""))
 	if kind == "patrol":
 		return Color("#b880fa")
-	if ship["kind"] == "fighter" and (kind == "attack" or (kind in ["sector", "position"] and not bool(order.get("move_only", false)))):
+	if ECONOMY.armed(ship) and (kind == "attack" or (kind in ["sector", "position"] and not bool(order.get("move_only", false)))):
 		return Color("#ff605c")
+	if kind == "repair":
+		return Color("#55c88b")
 	return HUD.ACCENT
 
 func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2) -> void:
@@ -5227,11 +5255,13 @@ func _draw_map() -> void:
 				_draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
 		if active_order.is_empty() and craft["kind"] == "fighter" and not bool(craft.get("move_only", false)):
 			order_tint = Color("#ff605c")
-		var attack_target: int = int(craft.get("attack_order", -1))
-		if poses.has(attack_target):
-			var marker: Vector2 = poses[attack_target]["point"]
-			map_canvas.draw_line(start, marker, Color(order_tint, 0.65), 1.5, true)
-			map_canvas.draw_arc(marker, maxf(9.0, 15.0 * _ship_scale()), 0.0, TAU, 24, order_tint, 1.5, true)
+		if active_order.get("kind", "") in ["attack", "repair", "deposit", "drop"]:
+			var target_point: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
+			if target_point.is_finite():
+				var marker: Vector2 = _screen_point(target_point)
+				map_canvas.draw_line(start, marker, Color(order_tint, 0.65), 1.5, true)
+				map_canvas.draw_arc(marker, maxf(9.0, 15.0 * _ship_scale()), 0.0, TAU, 24, order_tint, 1.5, true)
+			continue
 		if craft.has("patrol_from"):
 			var from: Vector2 = _screen_point(craft["patrol_start_point"])
 			var to: Vector2 = _screen_point(craft["patrol_end_point"])
@@ -5305,6 +5335,7 @@ func _draw_map() -> void:
 			if _planet_detail_opacity(index, radius) >= 0.5:
 				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, game_visual_clock)
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
+	var service_refs: Dictionary = ECONOMY.service_targets(state)
 	for ship in state["ships"]:
 		var shooter: int = int(ship["id"])
 		var target: int = int(ship.get("combat_target", -1))
@@ -5332,6 +5363,16 @@ func _draw_map() -> void:
 					_draw_ship_laser(ship, poses[shooter], endpoint, 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
 			_draw_ship_laser(ship, poses[shooter], poses[target]["point"], 1.0)
+		var repair: int = int(ship.get("repair_target", -1))
+		if poses.has(shooter) and service_refs.has(repair):
+			var origin: Vector2 = poses[shooter]["point"]
+			var endpoint: Vector2 = poses[repair]["point"] if poses.has(repair) else _screen_point(service_refs[repair]["position"])
+			var axis: Vector2 = origin.direction_to(endpoint)
+			if not axis.is_zero_approx():
+				poses[shooter]["direction"] = axis
+				for side in [-1.0, 1.0]:
+					var muzzle: Vector2 = origin + (axis * MINER_MUZZLE.x + axis.orthogonal() * side * MINER_MUZZLE.y) * _ship_scale()
+					map_canvas.draw_line(muzzle, endpoint, Color("#59e8a4"), 1.4, true)
 	for ship in state["ships"]:
 		if not poses.has(int(ship["id"])):
 			continue
