@@ -433,3 +433,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-31c — Soft separation and inspector cleanup
 - Remove Back to system buttons and the sector Fleet policy UI; keep existing automatic simulation policies for AI and compatibility. Double shipyard art/hit scale without changing ship dimensions or balance. A spatial-hash separation pass steers nearby hulls apart within the ordinary travel budget, avoids exact docking/mining/repair, and softens attraction to a shared local hold anchor. Radius 45 world units and strength 0.65 are provisional; verify dense-fleet motion and cost.
+
+### T-31d — One-shot local movement
+- Local point commands previously reused permanent hold state, preventing autonomous pursuit and nearby salvage approach. Transient local move targets now clear on arrival. Retain explicit hold and existing shipyard rally behavior; avoid separation preventing completion of crowded point orders. Verify civilian service resumption and multiplayer arrival.

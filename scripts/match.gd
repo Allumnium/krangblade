@@ -1872,6 +1872,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Moving to hold position" if ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > ECONOMY.EPS else "Holding position"
 	elif int(ship.get("combat_target", -1)) >= 0:
 		status = "Engaged"
+	elif ship.has("local_move_target"):
+		status = "Moving · ETA %.1f yr" % ((ship["position"] as Vector2).distance_to(ship["local_move_target"]) / ECONOMY.SHIP_SPEED)
 	if not bool(ship.get("retreating", false)):
 		if int(ship.get("attack_order", -1)) >= 0:
 			status = "Attacking #%d" % int(ship["attack_order"])
@@ -4430,6 +4432,11 @@ func _draw_map() -> void:
 			var finish: Vector2 = _screen_point(order_points[int(node)])
 			map_canvas.draw_line(start, finish, Color(HUD.ACCENT, 0.5), 1.5, true)
 			start = finish
+		if craft.has("local_move_target") and not bool(craft.get("retreating", false)):
+			var destination: Vector2 = _screen_point(craft["local_move_target"])
+			map_canvas.draw_line(start, destination, Color(HUD.ACCENT, 0.5), 1.5, true)
+			map_canvas.draw_arc(destination, 7.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
+			continue
 		if craft["kind"] == "miner":
 			var assigned: int = int(craft.get("assigned_field", -1))
 			if assigned >= 0:

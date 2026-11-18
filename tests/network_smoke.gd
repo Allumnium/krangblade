@@ -522,7 +522,8 @@ func _check_economy_sync() -> void:
 			# every transient queue state to coexist in one snapshot.
 			var ordered: int = 0
 			var idle: int = 0
-			var local_held: bool = false
+			var local_arrived: bool = false
+			var local_moving: bool = false
 			var patrol_verified: bool = false
 			var attack_verified: bool = false
 			var graph: Dictionary = ECON.military_graph(state)
@@ -534,9 +535,12 @@ func _check_economy_sync() -> void:
 					attack_verified = attack_verified or (int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) == 920000 + (owner_home + 1) % expected_players)
 					if craft.get("patrol_to", -1) == field_node and craft.get("direct_order", false):
 						ordered += 1
-					elif craft.get("holding", false) and state["planets"][int(craft["at"])]["owner"] == owner and (craft["route"] as Array).is_empty():
-						idle += 1
-						local_held = local_held or (craft.get("hold_position", Vector2.INF) as Vector2).is_equal_approx(local_point) and (craft["position"] as Vector2).is_equal_approx(local_point)
+					elif int(craft["at"]) == owner_home and (craft["route"] as Array).is_empty():
+						if craft.get("holding", false) or ECON._is_idle_ship(craft):
+							idle += 1
+						if not craft.get("holding", false):
+							local_moving = local_moving or (craft.get("local_move_target", Vector2.INF) as Vector2).is_equal_approx(local_point)
+							local_arrived = local_arrived or (not craft.has("local_move_target") and int(craft.get("operation_target", -1)) == owner_home and (craft["position"] as Vector2).distance_to(local_point) <= ECON.SHIP_SEPARATION_RADIUS * 2.0)
 			var assigned_miners: int = 0
 			var auto_salvage: bool = false
 			for craft in state["ships"]:
@@ -550,7 +554,8 @@ func _check_economy_sync() -> void:
 				"attack_target": attack_verified,
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
-				"local_position": local_held,
+				"local_move_order": local_moving,
+				"local_position": local_arrived,
 				"miner_assignment": assigned_miners == 1,
 				"no_policies": not state.has("policies") && not flags.has("production:Organics"),
 				"0": defense_ok,
