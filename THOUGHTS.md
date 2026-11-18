@@ -445,3 +445,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-31g — Focus all selections
 - F previously followed only ships at the existing zoom and centered the mean of their positions, potentially leaving distant group members offscreen. Frame the bounding box of interpolated ships, fit static sectors/fields and focus precise rendered planet and orbital shipyard positions. Expand the view when a following fleet spreads; manual zoom-out is respected. Manual camera pan and new selections still release focus. Check close-up readability and fit at narrow windows.
+
+### T-32a — Attack-move rally and visible type selection
+- Fighter launch rallies previously suppressed fire and overrode combat maneuvering. Preserve the physical destination while ordinary combat and repair temporarily take precedence. Double-click now groups visible matching ships or selectable completed structures, with a building group list, shared owned shipyard commands and F framing. Validate dense and mixed-empire views; numbered yard identities cannot survive slot compaction, so invalidate affected systems' selected slots.

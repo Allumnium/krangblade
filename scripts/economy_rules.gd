@@ -1093,16 +1093,29 @@ static func _launch_to_rally(state: Dictionary, ship: Dictionary, rally: Diction
 		ship["direct_order"] = true
 		ship["operation_target"] = target
 		ship["dest"] = target
-		ship["move_only"] = true
+		ship.erase("move_only")
 
 static func _work_launch_rally(state: Dictionary, ship: Dictionary, dt: float) -> bool:
 	if not ship.has("launch_rally"):
 		return false
-	if bool(ship.get("retreating", false)):
-		ship.erase("launch_rally")
-		return false
 	var rally: Dictionary = ship["launch_rally"]
-	if not (ship["route"] as Array).is_empty():
+	var fighter: bool = ship["kind"] == "fighter"
+	if fighter:
+		# Combat and emergency repair use the normal fighter movement branch.
+		# Retain the exact rally destination through these temporary detours.
+		if bool(ship.get("retreating", false)) or _engaged(ship):
+			return false
+		var graph: Dictionary = military_graph(state)
+		var node: int = int(rally["node"])
+		if int(ship.get("dest", -1)) != node:
+			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
+		if not (ship["route"] as Array).is_empty():
+			_move({"map": graph}, ship, dt)
+			return true
+		if not sector_contains(graph, node, ship["position"]):
+			_navigate(ship, graph["points"][node], SHIP_SPEED * dt)
+			return true
+	elif not (ship["route"] as Array).is_empty():
 		_move(state, ship, dt)
 		return true
 	_navigate(ship, rally["point"], SHIP_SPEED * dt)
@@ -1110,6 +1123,10 @@ static func _work_launch_rally(state: Dictionary, ship: Dictionary, dt: float) -
 		ship.erase("launch_rally")
 		ship.erase("move_only")
 		if ship["kind"] in ["fighter", "colony_ship"]:
+			if fighter:
+				ship["at"] = int(rally["node"])
+				ship["dest"] = int(rally["node"])
+				ship["leg"] = 0.0
 			ship["holding"] = true
 			ship["hold_position"] = rally["point"]
 			ship["hold_sector"] = int(rally["node"])

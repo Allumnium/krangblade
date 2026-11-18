@@ -30,13 +30,29 @@ func _test_shipyard_rally() -> void:
 	assert(int(system["yards"][1]["job"]) == int(job["id"]))
 	ECON._finish(state, 0, system, job)
 	var craft: Dictionary = state["ships"].back()
-	assert(craft.has("launch_rally"))
+	assert(craft.has("launch_rally") and not bool(craft.get("move_only", false)))
+	var graph: Dictionary = ECON.military_graph(state)
+	var enemy: Dictionary = {"id": 990001, "kind": "fighter", "owner": 2, "origin": 1, "at": 0, "position": (craft["position"] as Vector2) + Vector2.RIGHT * ECON.LASER_RANGE * 0.85, "route": [], "leg": 0.0, "dest": 0, "hp": ECON.SHIP_HP}
+	state["ships"] = [craft, enemy]
+	ECON._combat(state, graph, 0.1)
+	assert(int(craft.get("combat_target", -1)) == 990001 and float(enemy["hp"]) < ECON.SHIP_HP)
+	assert(not ECON._work_launch_rally(state, craft, 0.1) and craft.has("launch_rally"))
+	var before_combat: Vector2 = craft["position"]
+	ECON.step(state, 0.1)
+	assert(craft.has("launch_rally") and craft["position"] != before_combat and ECON._engaged(craft), "Fighter state after rally engagement: %s, prior position: %s" % [craft, before_combat])
+	state["ships"] = [craft]
+	ECON._combat(state, graph, 0.1)
+	craft["retreating"] = true
+	assert(not ECON._work_launch_rally(state, craft, 0.1) and craft.has("launch_rally"))
+	craft["retreating"] = false
+	craft["dest"] = -1 # Repair clears the current destination.
 	for tick in range(200):
 		if not ECON._work_launch_rally(state, craft, 0.5):
 			break
 	assert(not craft.has("launch_rally") and craft["position"] == point and craft["holding"])
 	assert(ECON.set_shipyard_rally(state, 1, 0, 1, -1, Vector2.ZERO))
 	assert(not system["yards"][1].has("rally"))
+	print("PASS: shipyard rally attack-move combat, repair destination retention and exact arrival")
 
 func _test_rounded_sector_limits() -> void:
 	# Equal perpendicular bisectors used to form a sharp corner. The

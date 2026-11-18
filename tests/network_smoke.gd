@@ -197,6 +197,15 @@ func _phase_changed() -> void:
 						# Separate focus-fire hull so the existing movement and hold
 						# scenarios remain independent of this command.
 						ECON._finish(state, index, system, {"id": 920000 + index, "kind": "fighter", "population_allocated": 0.0})
+						# The queued fighter in this scenario is deliberately canceled;
+						# supply a distinct completed launch to validate rally replication.
+						var rally_point: Vector2 = graph["points"][index] + Vector2.UP * ECON.sector_limit(graph, index, Vector2.UP) * 0.65
+						ECON.set_shipyard_rally(state, int(system["owner"]), index, 0, index, rally_point)
+						var launch_id: int = 950000 + index
+						system["yards"][0]["job"] = launch_id
+						ECON._finish(state, index, system, {"id": launch_id, "kind": "fighter", "population_allocated": 0.0})
+						system["yards"][0]["job"] = -1
+						ECON.set_shipyard_rally(state, int(system["owner"]), index, 0, -1, Vector2.ZERO)
 				session.call("_publish_economy")
 			call_deferred("_prepare_commands")
 			create_timer(0.5).timeout.connect(_check_economy_sync)
@@ -526,11 +535,19 @@ func _check_economy_sync() -> void:
 			var local_moving: bool = false
 			var patrol_verified: bool = false
 			var attack_verified: bool = false
+			var rally_attack_move: bool = false
 			var graph: Dictionary = ECON.military_graph(state)
 			var owner_home: int = state["planets"].find(system)
 			var local_point: Vector2 = graph["points"][owner_home] + Vector2.RIGHT * ECON.sector_limit(graph, owner_home, Vector2.RIGHT) * 0.25
+			var rally_point: Vector2 = graph["points"][owner_home] + Vector2.UP * ECON.sector_limit(graph, owner_home, Vector2.UP) * 0.65
 			for craft in state["ships"]:
 				if int(craft["owner"]) == owner and craft["kind"] == "fighter":
+					if int(craft["id"]) == 950000 + owner_home:
+						var launch: Dictionary = craft.get("launch_rally", {})
+						if bool(craft.get("move_only", false)):
+							_fail("Rallying fighter replicated a move-only order.")
+							return
+						rally_attack_move = launch.get("point", Vector2.INF) == rally_point or (bool(craft.get("holding", false)) and craft.get("hold_position", Vector2.INF) == rally_point)
 					patrol_verified = patrol_verified or (int(craft.get("patrol_from", -1)) == owner_home and int(craft.get("patrol_to", -1)) == field_node)
 					attack_verified = attack_verified or (int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) == 920000 + (owner_home + 1) % expected_players)
 					if craft.get("patrol_to", -1) == field_node and craft.get("direct_order", false):
@@ -550,6 +567,7 @@ func _check_economy_sync() -> void:
 					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
 			var checks: Dictionary = {
 				"rally": int(system["yards"][0].get("rally", {}).get("node", -1)) == owner_home and system["yards"][0].get("rally", {}).get("point", Vector2.INF) == graph["points"][owner_home],
+				"rally_attack_move": rally_attack_move,
 				"patrol": patrol_verified,
 				"attack_target": attack_verified,
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
