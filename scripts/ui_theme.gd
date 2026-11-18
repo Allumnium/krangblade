@@ -18,6 +18,28 @@ const ICONS = {
 	"Crystals": preload("res://assets/ui/crystals.svg")
 }
 
+# Rasterize fixed-size resource icons once at their actual HUD dimensions.
+# World overlays and scalable portraits still use their original textures.
+static var pixel_icons: Dictionary = {}
+
+static func resource_icon(resource: String, pixels: int) -> Texture2D:
+	var source: Texture2D = ICONS.get(resource)
+	if source == null or source.get_width() == pixels:
+		return source
+	var key: String = "%s:%d" % [resource, pixels]
+	if not pixel_icons.has(key):
+		var image: Image = source.get_image()
+		image.resize(pixels, pixels, Image.INTERPOLATE_LANCZOS)
+		pixel_icons[key] = ImageTexture.create_from_image(image)
+	return pixel_icons[key]
+
+static func fixed_icon(control: TextureRect, texture: Texture2D, pixels: int) -> void:
+	control.texture = texture
+	control.custom_minimum_size = Vector2(pixels, pixels)
+	control.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	control.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	control.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
 static func surface(bg: Color, edge: Color, margin: int = 8, radius: int = 5) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = bg

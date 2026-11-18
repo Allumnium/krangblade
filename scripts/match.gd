@@ -56,11 +56,7 @@ class CostButton extends Button:
 			pair.add_theme_constant_override("separation", 4)
 			costs.add_child(pair)
 			var symbol := TextureRect.new()
-			symbol.texture = crew_icon if resource == "Population" else HUD.ICONS.get(resource)
-			symbol.custom_minimum_size = Vector2(16, 16)
-			symbol.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			symbol.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			symbol.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			HUD.fixed_icon(symbol, crew_icon if resource == "Population" else HUD.resource_icon(resource, 24), 24)
 			pair.add_child(symbol)
 			var amount := Label.new()
 			amount.text = "%.0f%s" % [float(recipe[resource]), "" if resource == "Population" else " t"]
@@ -73,7 +69,6 @@ class CostButton extends Button:
 
 var session: Node
 var settings := ConfigFile.new()
-var ui_percent: int = 90
 var music_volume: float = 100.0
 var sfx_volume: float = 100.0
 var music_muted: bool = false
@@ -298,7 +293,7 @@ var planet_detail_seed: int = -1
 var trade_sliders: Dictionary = {}
 var trade_checks: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
-var population_icon: Texture2D
+var population_icons: Dictionary = {}
 var build_clock_icon: Texture2D
 var production_summary: VBoxContainer
 var production_values: Dictionary = {}
@@ -724,10 +719,7 @@ func _build_ui() -> void:
 		var trade_row := HBoxContainer.new()
 		logistics.add_child(trade_row)
 		var resource_icon := TextureRect.new()
-		resource_icon.texture = HUD.ICONS[resource]
-		resource_icon.custom_minimum_size = Vector2(14, 14)
-		resource_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		resource_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		HUD.fixed_icon(resource_icon, HUD.resource_icon(resource, 14), 14)
 		trade_row.add_child(resource_icon)
 		var name_label := _label(resource, 11)
 		name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -784,7 +776,7 @@ func _layout_console() -> void:
 	if not is_instance_valid(console_panel) or not is_instance_valid(station_commands):
 		return
 	# Keep a stable, useful map at both normal and small window sizes.
-	var height: float = minf(clampf(size.y * 0.36, 220.0, 320.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0))
+	var height: float = roundf(minf(clampf(size.y * 0.36, 220.0, 320.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0)))
 	console_panel.offset_top = -8.0 - height
 	# Draw the space scene behind the HUD rather than clipping it at a
 	# horizontal line. Camera framing still uses the unobstructed play area.
@@ -806,7 +798,7 @@ func _layout_console() -> void:
 		_layout_control_group_strip()
 	# SC2-style raised wings: minimap and commands use the full deck height;
 	# selection details begin 20% lower, leaving more map visible centrally.
-	console_center_spacer.custom_minimum_size.y = height * 0.20
+	console_center_spacer.custom_minimum_size.y = roundf(height * 0.20)
 	console_profile.queue_redraw()
 	# Do not force the center wider than its allotted column.
 	overview_panel.custom_minimum_size.x = 0.0
@@ -989,23 +981,19 @@ func _draw_minimap() -> void:
 		minimap.draw_rect(clipped, HUD.ACCENT, false, 1.2)
 
 
-func _population_texture() -> Texture2D:
-	if population_icon == null:
+func _population_texture(pixels: int = 24) -> Texture2D:
+	if not population_icons.has(pixels):
 		var image := Image.new()
-		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#b9d9ed"><circle cx="12" cy="6" r="4"/><path d="M4 22v-4a8 8 0 0 1 16 0v4z"/></svg>')
-		population_icon = ImageTexture.create_from_image(image)
-	return population_icon
+		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 24 24" fill="#b9d9ed"><circle cx="12" cy="6" r="4"/><path d="M4 22v-4a8 8 0 0 1 16 0v4z"/></svg>' % [pixels, pixels])
+		population_icons[pixels] = ImageTexture.create_from_image(image)
+	return population_icons[pixels]
 
 func _population_row(parent: Container) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 4)
 	parent.add_child(row)
 	var icon := TextureRect.new()
-	icon.texture = _population_texture()
-	icon.custom_minimum_size = Vector2(14, 14)
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	HUD.fixed_icon(icon, _population_texture(14), 14)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	icon.tooltip_text = "Population"
 	row.add_child(icon)
@@ -1066,13 +1054,7 @@ func _show_cost(grid: GridContainer, cost: Dictionary, crew: float = 0.0) -> voi
 		pair.add_theme_constant_override("separation", 2)
 		grid.add_child(pair)
 		var symbol := TextureRect.new()
-		if resource == "Population":
-			symbol.texture = _population_texture()
-		else:
-			symbol.texture = HUD.ICONS[resource]
-		symbol.custom_minimum_size = Vector2(12, 12)
-		symbol.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		symbol.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		HUD.fixed_icon(symbol, _population_texture(12) if resource == "Population" else HUD.resource_icon(resource, 12), 12)
 		pair.add_child(symbol)
 		var value: float = float(entries[resource])
 		var amount := _label(_compact_amount(value), 11)
@@ -1116,10 +1098,7 @@ func _build_production_summary() -> void:
 		production_summary.add_child(row)
 		row.add_theme_constant_override("separation", 2)
 		var icon := TextureRect.new()
-		icon.texture = HUD.ICONS[resource]
-		icon.custom_minimum_size = Vector2(16, 16)
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		HUD.fixed_icon(icon, HUD.resource_icon(resource, 16), 16)
 		row.add_child(icon)
 		var name_label := _label(resource, 12)
 		name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -1386,7 +1365,9 @@ func _build_station_command_card(parent: Container) -> void:
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
 	station_build_grid = _station_grid(station_commands)
-	var captions: Dictionary = {"Metals": "Refinery", "Plastics": "Polymer\nfactory", "Textiles": "Textile\nmill", "Organics": "Agriculture", "Tech": "Electronics", "Crystals": "Crystal\nprocessor", "warehouse": "Warehouse", "housing": "Habitation", "yard": "Shipyard", "pds": "Planetary\ndefense"}
+	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "Planetary\ndefense"}
+	for resource in ECONOMY.RESOURCES:
+		captions[resource] = str(ECONOMY.ECONOMY_BUILDINGS[resource]["name"]).replace(" ", "\n")
 	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds"]:
 		var button: Button = _station_button(station_build_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
 		station_build_buttons[key] = button
@@ -1829,14 +1810,12 @@ func _build_fleet_cargo_row() -> void:
 		pair.tooltip_text = resource
 		fleet_cargo.add_child(pair)
 		var icon := TextureRect.new()
-		icon.texture = HUD.ICONS.get(resource)
+		var texture: Texture2D = HUD.resource_icon(resource, 16)
 		if resource == ECONOMY.ANTIMATTER:
 			var image := Image.new()
-			image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path fill="#f279d7" d="M12 1L22 12L12 23L2 12Z"/><path fill="#4e2356" d="M12 5L17 12L12 19L7 12Z"/></svg>')
-			icon.texture = ImageTexture.create_from_image(image)
-		icon.custom_minimum_size = Vector2(16, 16)
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="#f279d7" d="M12 1L22 12L12 23L2 12Z"/><path fill="#4e2356" d="M12 5L17 12L12 19L7 12Z"/></svg>')
+			texture = ImageTexture.create_from_image(image)
+		HUD.fixed_icon(icon, texture, 16)
 		pair.add_child(icon)
 		var amount := _label("", 12)
 		amount.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -2651,10 +2630,7 @@ func _build_global_bar(stats: Container) -> void:
 		var line := HBoxContainer.new()
 		stack.add_child(line)
 		var icon := TextureRect.new()
-		icon.texture = HUD.ICONS[resource]
-		icon.custom_minimum_size = Vector2(18, 18)
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		HUD.fixed_icon(icon, HUD.resource_icon(resource, 18), 18)
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		line.add_child(icon)
 		var value := _label("0", 13)
@@ -2837,9 +2813,9 @@ func _update_resource_hover() -> void:
 	var width: float = minf(420.0, viewport.x - 16.0)
 	var available: float = tile_rect.position.y - 8.0 if local else viewport.y - tile_rect.end.y - 8.0
 	var height: float = minf(maxf(40.0, available), maxf(105.0, 20.0 * float(value.count("\n") + 2)))
-	resource_hover_panel.size = Vector2(width, height)
+	resource_hover_panel.size = Vector2(width, height).round()
 	var popup_y: float = tile_rect.position.y - height if local else tile_rect.end.y
-	resource_hover_panel.global_position = Vector2(clampf(tile_rect.position.x, 8.0, viewport.x - width - 8.0), clampf(popup_y, 8.0, maxf(8.0, viewport.y - height - 8.0)))
+	resource_hover_panel.global_position = Vector2(clampf(tile_rect.position.x, 8.0, viewport.x - width - 8.0), clampf(popup_y, 8.0, maxf(8.0, viewport.y - height - 8.0))).round()
 	resource_hover_panel.show()
 
 func _refresh_global_bar(state: Dictionary) -> void:
@@ -3172,14 +3148,15 @@ func _system_name(index: int) -> String:
 
 func _load_settings() -> void:
 	settings.load("user://warbound_settings.cfg")
-	ui_percent = clampi(int(settings.get_value("interface", "scale", 90)), 70, 130)
+	# Ignore obsolete scaling preferences from earlier releases.
+	if settings.has_section_key("interface", "scale"):
+		settings.erase_section_key("interface", "scale")
 	music_volume = clampf(float(settings.get_value("audio", "music", 100.0)), 0.0, 100.0)
 	sfx_volume = clampf(float(settings.get_value("audio", "sfx", 100.0)), 0.0, 100.0)
 	music_muted = bool(settings.get_value("audio", "music_muted", false))
 	sfx_muted = bool(settings.get_value("audio", "sfx_muted", false))
 
 func _apply_settings() -> void:
-	get_window().content_scale_factor = float(ui_percent) / 100.0
 	for bus_name in ["Music", "SFX"]:
 		var index: int = AudioServer.get_bus_index(bus_name)
 		if index < 0:
@@ -3192,7 +3169,6 @@ func _apply_settings() -> void:
 	upgrade_audio.bus = "SFX"
 
 func _save_settings() -> void:
-	settings.set_value("interface", "scale", ui_percent)
 	settings.set_value("audio", "music", music_volume)
 	settings.set_value("audio", "sfx", sfx_volume)
 	settings.set_value("audio", "music_muted", music_muted)
@@ -3205,20 +3181,6 @@ func _build_settings_menu() -> void:
 	options.add_theme_constant_override("separation", 12)
 	options.custom_minimum_size.x = 340
 	match_menu.add_child(options)
-	var scale_row := HBoxContainer.new()
-	options.add_child(scale_row)
-	var title := _label("UI scale", 14)
-	title.autowrap_mode = TextServer.AUTOWRAP_OFF
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scale_row.add_child(title)
-	var scale_value := OptionButton.new()
-	scale_row.add_child(scale_value)
-	for percent in range(70, 131, 10):
-		scale_value.add_item("%d%%" % percent, percent)
-	scale_value.select((ui_percent - 70) / 10)
-	scale_value.item_selected.connect(func(index: int) -> void:
-		ui_percent = scale_value.get_item_id(index)
-		_save_settings())
 	for channel in ["Music", "SFX"]:
 		var row := HBoxContainer.new()
 		options.add_child(row)
@@ -3346,8 +3308,8 @@ func _projection_size() -> Vector2:
 
 func _map_resized() -> void:
 	var fit: float = _fit()
-	# Preserve the world position at the camera center as UI scale or
-	# window dimensions change, rather than retaining an old pixel offset.
+	# Preserve the world position at the camera center as window dimensions
+	# change, rather than retaining an old pixel offset.
 	if previous_map_fit > 0.0:
 		var next_zoom: float = minf(zoom, _max_zoom())
 		pan *= fit * next_zoom / (previous_map_fit * zoom)
