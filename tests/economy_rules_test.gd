@@ -1642,6 +1642,17 @@ func _test_local_position_orders() -> void:
 	freighter["cargo"]["Metals"] = 10.0
 	var point := Vector2(150, 200)
 	var selection: Array = [100, 101, 102, 103]
+	# A neutral neighboring POI must clip the sector at its bisector,
+	# not at a much smaller ownership-dependent exclusion circle.
+	var boundary_graph: Dictionary = ECON.military_graph(state)
+	var candidates: Array = [0, 1]
+	assert(ECON.sector_at(boundary_graph, Vector2(2499, 0), candidates) == 0)
+	assert(ECON.sector_at(boundary_graph, Vector2(2501, 0), candidates) == 1)
+	assert(ECON.sector_at(boundary_graph, Vector2(2500, 0), candidates, 0) == 0)
+	assert(ECON.sector_at(boundary_graph, Vector2(2500, 0), candidates, 1) == 1)
+	assert(ECON.command_local_position(state, 1, [100], 0, Vector2(2499, 0)))
+	assert(fighter["route"].is_empty() and fighter["dest"] == 0 and fighter["hold_position"] == Vector2(2499, 0))
+	assert(not ECON.command_local_position(state, 1, [100], 0, Vector2(2501, 0)))
 	assert(not ECON.command_local_position(state, 2, selection, 0, point))
 	assert(not ECON.command_local_position(state, 1, [100, 999], 0, point))
 	assert(not ECON.command_local_position(state, 1, [100, 100], 0, point))

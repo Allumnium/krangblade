@@ -1820,10 +1820,6 @@ uniform vec2 tile_grid = vec2(1.0);
 uniform vec2 world_extent = vec2(1.0);
 uniform float padding = 1.0;
 
-float smooth_min(float a, float b, float k) {
-	float h = max(k - abs(a - b), 0.0) / k;
-	return min(a, b) - h * h * k * 0.25;
-}
 vec3 team_color(int team) {
 	if (team == 1) return vec3(0.404, 0.831, 0.663);
 	if (team == 2) return vec3(0.957, 0.643, 0.416);
@@ -1840,36 +1836,29 @@ void fragment() {
 		discard;
 	}
 	vec2 p = UV * world_extent - vec2(padding);
-	float fields[8];
-	for (int j = 0; j < 8; j++) { fields[j] = 10000.0; }
-	float neutral = 10000.0;
+	// Match ECONOMY.sector_limit: nearest center, clipped by its radius.
+	// All POIs participate, including neutral and undiscovered neighbors.
+	float best_sq = 1e20;
+	float second_sq = 1e20;
+	vec4 site = vec4(0.0);
 	for (int i = 0; i < site_count; i++) {
-		vec4 site = texelFetch(site_data, ivec2(i, 0), 0);
-		float d = length(p - site.xy) - site.z;
-		int team = int(site.w + 0.5);
-		if (team == 0) {
-			neutral = smooth_min(neutral, d, 0.16);
+		vec4 candidate = texelFetch(site_data, ivec2(i, 0), 0);
+		vec2 offset = p - candidate.xy;
+		float distance_sq = dot(offset, offset);
+		if (distance_sq < best_sq) {
+			second_sq = best_sq;
+			best_sq = distance_sq;
+			site = candidate;
 		} else {
-			fields[team - 1] = smooth_min(fields[team - 1], d, 0.48);
+			second_sq = min(second_sq, distance_sq);
 		}
 	}
-	float best = 10000.0;
-	float other = 10000.0;
-	int winner = 1;
-	for (int j = 0; j < 8; j++) {
-		float d = fields[j];
-		if (d < best) {
-			other = best;
-			best = d;
-			winner = j + 1;
-		} else {
-			other = min(other, d);
-		}
+	int winner = int(site.w + 0.5);
+	if (winner == 0) {
+		discard;
 	}
-	// Rival fields never overlap; keep a narrow neutral seam. Neutral and
-	// contested sites are excluded with a rounded subtraction.
-	float d = max(best, 0.045 + (best - other) * 0.5);
-	d = -smooth_min(-d, neutral, 0.12);
+	float distance_to_center = sqrt(best_sq);
+	float d = max(distance_to_center - site.z, (distance_to_center - sqrt(second_sq)) * 0.5);
 	float aa = max(fwidth(d), 0.00001);
 	float inside = 1.0 - smoothstep(-aa * 0.65, aa * 0.65, d);
 	float border = 1.0 - smoothstep(aa * 0.45, aa * 1.45, abs(d));
@@ -1931,28 +1920,16 @@ func _refresh_territory(state: Dictionary) -> void:
 		return
 	territory_last = claims
 	var points: Array = ECONOMY.military_graph(state)["points"]
-	var system_count: int = (state["planets"] as Array).size()
-	var sources: Array[int] = []
-	for i in range(points.size()):
-		if claims[i] > 0:
-			sources.append(i)
 	var sites: Array[Color] = []
+	var has_claim: bool = false
 	for i in range(points.size()):
 		var point: Vector2 = points[i]
-		var radius: float = 1.0 if i < system_count else 0.68
-		if claims[i] <= 0:
-			# Only nearby neutral sites need exclusion, bounding shader work.
-			var nearest: float = INF
-			for source in sources:
-				nearest = minf(nearest, point.distance_to(points[source]) / territory_radius)
-			if nearest > 1.65:
-				continue
-			radius = minf(radius * 0.36, nearest * 0.38)
-			if radius <= 0.01:
-				continue
+		var radius: float = float(graph["sector_radii"][i]) / territory_radius
+		has_claim = has_claim or claims[i] > 0
+		# Neutral centers clip their neighbors exactly like the simulation.
 		sites.append(Color(point.x / territory_radius, point.y / territory_radius, radius, float(claims[i])))
 	territory_site_count = sites.size()
-	if sources.is_empty():
+	if not has_claim:
 		territory_image.hide()
 		return
 	var data: Image = Image.create_empty(sites.size(), 1, false, Image.FORMAT_RGBAF)
@@ -1968,9 +1945,8 @@ func _refresh_territory(state: Dictionary) -> void:
 	territory_image.show()
 	_position_territory()
 
-# Conservative tile mask: a smooth-min operation can lower the distance
-# by at most k/4 per site. Leave additional room for antialiasing.
-# Occupied pixels still evaluate the original continuous shader exactly.
+# Conservative tile mask: only tiles near a claimed sector disk need
+# shading. All POI centers still participate in the nearest-site test.
 func _cache_territory_tiles(sites: Array[Color], extent: Vector2) -> void:
 	var dimensions := Vector2i(maxi(1, ceili(extent.x)), maxi(1, ceili(extent.y)))
 	var cell: Vector2 = extent / Vector2(dimensions)
@@ -3319,75 +3295,46 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	var distance: float = INF
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var world: Vector2 = _world_point(point)
-	# A command inside the selected fighters' present sector is a local
-	# position order, even when the cursor is close to a POI icon. Never
-	# reroute those fighters through a neighboring sector just to move
-	# a short distance within the sector they already occupy.
+	var candidates: Array[int] = ECONOMY.military_pois(state, _me())
+	var handled_fighters: Dictionary = {}
+	# Resolve each fighter's actual current sector first. The same exact
+	# geometry drives the visible territory, cursor hit and host validation.
 	if not patrol and not fighters.is_empty():
 		var local_groups: Dictionary = {}
 		for craft in state["ships"]:
 			var id: int = int(craft["id"])
 			if not fighters.has(id) or bool(craft.get("retreating", false)):
 				continue
-			var current: int = ECONOMY.local_sector(graph, craft)
-			# A fighter can physically enter a sector before its lane waypoint
-			# updates `at`. Prefer the actual sector under the fighter.
-			if current < 0:
-				for candidate in ECONOMY.military_pois(state, _me()):
-					if ECONOMY.sector_contains(graph, candidate, craft["position"]):
-						current = candidate
-						break
-			if current < 0:
+			var current: int = ECONOMY.sector_at(graph, craft["position"], candidates, ECONOMY.local_sector(graph, craft))
+			if current < 0 or not ECONOMY.sector_contains(graph, current, world):
 				continue
-			var local_point: Vector2 = world
-			if not ECONOMY.sector_contains(graph, current, local_point):
-				# A small cursor movement near a selected fighter must not snap
-				# its command to the next POI. Keep the order in its current
-				# sector and clamp it to the actual sector edge.
-				var ship_screen: Vector2 = _screen_point(craft["position"])
-				if point.distance_to(ship_screen) > 64.0:
-					continue
-				var center: Vector2 = graph["points"][current]
-				var offset: Vector2 = world - center
-				if offset.length_squared() > 0.0001:
-					local_point = center + offset.normalized() * maxf(0.0, ECONOMY.sector_limit(graph, current, offset.normalized()) - 0.5)
 			if not local_groups.has(current):
-				local_groups[current] = {"ids": [], "point": local_point}
-			(local_groups[current]["ids"] as Array).append(id)
+				local_groups[current] = []
+			(local_groups[current] as Array).append(id)
+			handled_fighters[id] = true
 		for current in local_groups:
-			var group: Dictionary = local_groups[current]
-			session.call("request_local_position", group["ids"], int(current), group["point"])
-		if not local_groups.is_empty():
-			var remaining: Array[int] = []
-			for id in fighters:
-				var handled: bool = false
-				for group in local_groups.values():
-					if (group["ids"] as Array).has(id):
-						handled = true
-						break
-				if not handled:
-					remaining.append(id)
-			fighters = remaining
-			if fighters.is_empty() and owned.size() == _selected_owned_units(state).size() and _selected_miners().is_empty():
-				return
+			session.call("request_local_position", local_groups[current], int(current), world)
+		var remaining: Array[int] = []
+		for id in fighters:
+			if not handled_fighters.has(id):
+				remaining.append(id)
+		fighters = remaining
+		if handled_fighters.size() == owned.size():
+			return
 	# Command sectors use their simulation boundaries, not the nearest POI
 	# center. In particular, clicking across a shared boundary must not
 	# silently snap to the adjacent sector's center.
-	var nearest_node: int = -1
-	var nearest_distance: float = INF
-	for candidate in ECONOMY.military_pois(state, _me()):
-		var d: float = point.distance_squared_to(_screen_point(graph["points"][candidate]))
-		if d < nearest_distance:
-			nearest_node = candidate
-			nearest_distance = d
-		if ECONOMY.sector_contains(graph, candidate, world) and d < distance:
-			node = candidate
-			distance = d
-	if node < 0:
-		# Preserve direct clicks on a visible POI even if its icon extends
-		# slightly outside the mathematical sector boundary.
-		node = nearest_node
-		distance = nearest_distance
+	node = ECONOMY.sector_at(graph, world, candidates)
+	if node >= 0:
+		distance = point.distance_squared_to(_screen_point(graph["points"][node]))
+	else:
+		# A direct icon click remains valid; empty space must not become
+		# a sector-to-sector move merely because a POI is nearest.
+		for candidate in candidates:
+			var d: float = point.distance_squared_to(_screen_point(graph["points"][candidate]))
+			if d < distance:
+				node = candidate
+				distance = d
 	if node < 0:
 		return
 	var system_count: int = state["planets"].size()
@@ -3405,7 +3352,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		if ECONOMY.sector_contains(graph, node, world):
 			var local: Array[int] = []
 			for craft in state["ships"]:
-				if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])) and ECONOMY.local_sector(graph, craft) == node and not bool(craft.get("retreating", false)):
+				if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])) and not handled_fighters.has(int(craft["id"])) and ECONOMY.sector_contains(graph, node, craft["position"]) and not bool(craft.get("retreating", false)):
 					local.append(int(craft["id"]))
 			if not local.is_empty():
 				session.call("request_local_position", local, node, world)

@@ -408,3 +408,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Movement UX.
 - **Observation:** Even with physical-sector validation, a click just beyond the mathematical sector edge fell back to nearest-POI routing. The command handler now uses a 64px proximity guard for selected fighters and clamps local destinations to their current sector boundary.
 - **Consider:** Render the actual command sector boundary distinctly from territorial ownership, and add a regression test for near-edge clicks.
+
+### T-29l — Shared sector geometry
+- **Type:** Movement and territory consistency.
+- **Finding:** Ownership shader used smooth unions and smaller neutral exclusions while the simulation used nearest-POI clipped disks. This allowed visibly claimed points to belong to a different command sector. Render the actual clipped disks using every POI center, prioritize the occupied sector at shared boundaries, and remove the 64px workaround. This intentionally trades merged/blobby territory silhouettes for accurate command boundaries.
