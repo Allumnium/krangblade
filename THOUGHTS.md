@@ -427,3 +427,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-31a — Shipyard command card and rally
 - Manual build orders pin to the selected completed shipyard. Preserve system maintenance policies and AI scheduling; show active and pinned jobs in center queue with refund cancellation. Rally uses a discovered system and an exact local point, with normal physical travel. Civilian automation resumes after rally; fighters and colony ships wait. Asteroid-field rally destinations are intentionally deferred because civilian routes use system indices.
+
+### T-31b — Territory corners and production portraits
+- Wedge-like outlines are caused by hard circle/bisector intersections, not random ownership corruption. Round intersections inward using the same two tightest radial constraints in simulation and shader; straight shared boundaries remain intentional. Production icons now use the actual hull/panel art, empire tint and readable captions; hover provides full cost, build time and unit stats. Check rendering performance on dense maps; shader now evaluates the rounded radius for claimed pixels.

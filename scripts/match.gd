@@ -189,6 +189,7 @@ var hold_button: Button
 var unload_button: Button
 var yard_command_card: VBoxContainer
 var yard_commands: Dictionary = {}
+var production_icons: Dictionary = {}
 var yard_queue: VBoxContainer
 var yard_queue_rows: Dictionary = {}
 var yard_rally_hint: Label
@@ -1383,6 +1384,65 @@ func _select_yard_slot(slot: int) -> void:
 	pending_command = ""
 	_refresh()
 
+func _portrait_points(vertices: Array) -> String:
+	var coordinates: PackedStringArray = []
+	for vertex in vertices:
+		var v: Vector2 = vertex
+		coordinates.append("%.2f,%.2f" % [32.0 + v.y * 1.85, 32.0 - v.x * 1.85])
+	return " ".join(coordinates)
+
+func _production_icon(kind: String, tint: Color) -> Texture2D:
+	var key: String = kind + ":" + tint.to_html(false)
+	if not production_icons.has(key):
+		var outline: String = _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE))
+		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">'
+		art += '<polygon points="%s" fill="#18283c" stroke="#%s" stroke-width="1.8" stroke-linejoin="round"/>' % [outline, tint.lightened(0.35).to_html(false)]
+		for panel in HULL_PANELS.get(kind, []):
+			var color: Color = _hull_panel_color(tint, panel[0])
+			art += '<polygon points="%s" fill="#%s"/>' % [_portrait_points(panel[1]), color.to_html(false)]
+		if kind == "ship":
+			art += '<rect x="21" y="11" width="22" height="8" rx="2" fill="#%s"/>' % tint.lightened(0.35).to_html(false)
+			for row in range(3):
+				for column in range(2):
+					art += '<rect x="%d" y="%d" width="11" height="9" rx="1" fill="#32465c" stroke="#9bb6cb" stroke-width="0.8"/>' % [20 + column * 13, 22 + row * 11]
+		art += '<polygon points="%s" fill="none" stroke="#%s" stroke-width="1.25" stroke-linejoin="round"/></svg>' % [outline, tint.lightened(0.50).to_html(false)]
+		var image := Image.new()
+		image.load_svg_from_string(art)
+		production_icons[key] = ImageTexture.create_from_image(image)
+	return production_icons[key]
+
+func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> TextureRect:
+	button.custom_minimum_size = Vector2(60, 60)
+	button.focus_mode = Control.FOCUS_NONE
+	button.icon = null
+	button.text = ""
+	var content := VBoxContainer.new()
+	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_theme_constant_override("separation", 0)
+	button.add_child(content)
+	content.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	content.offset_left = 2.0
+	content.offset_right = -2.0
+	content.offset_top = 2.0
+	content.offset_bottom = -2.0
+	var art := TextureRect.new()
+	art.texture = picture
+	art.custom_minimum_size = Vector2(0, 29)
+	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	art.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(art)
+	var name_label := Label.new()
+	name_label.text = caption
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.add_theme_font_size_override("font_size", 11)
+	name_label.add_theme_color_override("font_color", Color.WHITE)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(name_label)
+	return art
+
 func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_card = VBoxContainer.new()
 	yard_command_card.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1394,17 +1454,14 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_card.add_child(grid)
 	for kind in ECONOMY.SHIP_KINDS:
 		var button := Button.new()
-		button.custom_minimum_size = Vector2(48, 48)
-		button.focus_mode = Control.FOCUS_NONE
-		button.icon = _selection_icon(kind)
-		button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		var caption: String = {"ship": "Logistics", "colony_ship": "Colony ship", "fighter": "Fighter", "miner": "Mining ship"}[kind]
+		var art: TextureRect = _yard_ability_face(button, caption, _production_icon(kind, HUD.ACCENT))
+		button.set_meta("portrait", art)
 		button.pressed.connect(_build_at_yard.bind(kind))
 		grid.add_child(button)
 		yard_commands[kind] = button
 	var rally_button := Button.new()
-	rally_button.custom_minimum_size = Vector2(48, 48)
-	rally_button.icon = _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12"/>')
-	rally_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_yard_ability_face(rally_button, "Rally", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12"/>'))
 	rally_button.toggle_mode = true
 	rally_button.focus_mode = Control.FOCUS_NONE
 	rally_button.tooltip_text = "Set rally point · click a discovered star system or a position within it"
@@ -1412,20 +1469,14 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
 	yard_upgrade = _button("", func() -> void: _operation("yard_upgrade", str(selected_yard)), grid)
-	yard_upgrade.custom_minimum_size = Vector2(48, 48)
-	yard_upgrade.focus_mode = Control.FOCUS_NONE
-	yard_upgrade.icon = _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
-	yard_upgrade.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_yard_ability_face(yard_upgrade, "Upgrade", _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>'))
 	yard_rally_hint = _label("", 12)
 	yard_command_card.add_child(yard_rally_hint)
 	var clear := _button("", func() -> void:
 		pending_command = ""
 		_refresh_command_mode()
 		session.call("request_shipyard_rally", selected, selected_yard, -1, Vector2.ZERO), grid)
-	clear.custom_minimum_size = Vector2(48, 48)
-	clear.focus_mode = Control.FOCUS_NONE
-	clear.icon = _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12M18 19L28 29M28 19L18 29"/>')
-	clear.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_yard_ability_face(clear, "Clear", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12M18 19L28 29M28 19L18 29"/>'))
 	clear.tooltip_text = "Clear rally point"
 	yard_commands["clear"] = clear
 	yard_command_card.hide()
@@ -1473,7 +1524,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 			icon.custom_minimum_size = Vector2(28, 28)
 			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			icon.texture = _selection_icon(str(job["kind"])) if ECONOMY.SHIP_KINDS.has(job["kind"]) else _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
+			icon.texture = _production_icon(str(job["kind"]), _empire_color(int(system["owner"]))) if ECONOMY.SHIP_KINDS.has(job["kind"]) else _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
 			row.add_child(icon)
 			var stack := VBoxContainer.new()
 			stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1499,7 +1550,16 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var button: Button = yard_commands[kind]
 		var recipe: Dictionary = ECONOMY._cost(kind, 1)
 		button.disabled = not owned or not operating or not ECONOMY.affordable(system, recipe) or (kind == "ship" and not bool(system["home"]))
-		button.tooltip_text = "%s · %.0f yr\n%s · %.0f population" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _cost_text(recipe), float(ECONOMY.CREW_COSTS[kind])]
+		var portrait: TextureRect = button.get_meta("portrait")
+		portrait.texture = _production_icon(kind, _empire_color(int(system["owner"])))
+		portrait.modulate = Color(0.55, 0.55, 0.55) if button.disabled else Color.WHITE
+		button.tooltip_text = "%s · %.1f yr\n%s\n%.0f population\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _cost_text(recipe), float(ECONOMY.CREW_COSTS[kind]), _ship_stats(kind)]
+		if not operating:
+			button.tooltip_text += "\nShipyard offline"
+		elif not ECONOMY.affordable(system, recipe):
+			button.tooltip_text += "\nInsufficient local materials"
+		if kind == "ship" and not bool(system["home"]):
+			button.tooltip_text += "\nRequires home system"
 	var rally: Dictionary = yard.get("rally", {})
 	var rally_button: Button = yard_commands["rally"]
 	rally_button.disabled = not owned
@@ -2090,6 +2150,7 @@ uniform sampler2D occupied_tiles : filter_nearest, repeat_disable;
 uniform vec2 tile_grid = vec2(1.0);
 uniform vec2 world_extent = vec2(1.0);
 uniform float padding = 1.0;
+uniform float corner_rounding = 0.32;
 
 vec3 team_color(int team) {
 	if (team == 1) return vec3(0.404, 0.831, 0.663);
@@ -2107,36 +2168,49 @@ void fragment() {
 		discard;
 	}
 	vec2 p = UV * world_extent - vec2(padding);
-	// Match ECONOMY.sector_limit: nearest center, clipped by its radius.
-	// All POIs participate, including neutral and undiscovered neighbors.
+	// First identify the nearest POI (including neutral fields).
 	float best_sq = 1e20;
-	float second_sq = 1e20;
-	vec2 second_center = vec2(0.0);
+	int site_index = -1;
 	vec4 site = vec4(0.0);
 	for (int i = 0; i < site_count; i++) {
 		vec4 candidate = texelFetch(site_data, ivec2(i, 0), 0);
 		vec2 offset = p - candidate.xy;
 		float distance_sq = dot(offset, offset);
 		if (distance_sq < best_sq) {
-			second_sq = best_sq;
-			second_center = site.xy;
 			best_sq = distance_sq;
+			site_index = i;
 			site = candidate;
-		} else if (distance_sq < second_sq) {
-			second_sq = distance_sq;
-			second_center = candidate.xy;
 		}
 	}
+	float aa = max(length(fwidth(p)), 0.000001);
 	int winner = int(site.w + 0.5);
-	// The nearest-site decision is discontinuous across bisectors. Use
-	// world-coordinate pixel width instead of derivatives of that decision.
-	float aa = max(length(fwidth(p)), 0.00001);
-	float bisector = -1e10;
-	if (second_sq < 1e19) {
-		bisector = (best_sq - second_sq) / max(2.0 * length(site.xy - second_center), 0.00001);
+	float distance_to_center = sqrt(best_sq);
+	float d = distance_to_center - site.z;
+	if (winner > 0 && d <= 0.0 && site_index >= 0) {
+		// Same two smallest radial bounds as ECONOMY.sector_limit.
+		vec2 ray = (p - site.xy) / max(distance_to_center, 0.0000001);
+		float limit = site.z;
+		float second = 1e20;
+		for (int i = 0; i < site_count; i++) {
+			if (i == site_index) { continue; }
+			vec2 delta = texelFetch(site_data, ivec2(i, 0), 0).xy - site.xy;
+			float length_sq = dot(delta, delta);
+			float projection = dot(ray, delta);
+			if (length_sq > 0.000000000001 && length_sq < 4.0 * site.z * site.z && projection > 0.000000001) {
+				float bound = length_sq / (2.0 * projection);
+				if (bound < limit) {
+					second = limit;
+					limit = bound;
+				} else {
+					second = min(second, bound);
+				}
+			}
+		}
+		float width = max(0.000000001, limit * corner_rounding);
+		float overlap = max(0.0, width - (second - limit));
+		limit -= overlap * overlap / (4.0 * width);
+		d = distance_to_center - limit;
 	}
-	float d = max(sqrt(best_sq) - site.z, bisector);
-	// Draw a smooth inward edge, including where the neighboring sector is neutral.
 	float inside = 1.0 - smoothstep(-aa, 0.0, d);
 	float border = inside * smoothstep(-aa * 2.8, -aa * 1.1, d);
 	COLOR = vec4(team_color(winner), winner > 0 ? inside * 0.12 + border * 0.52 : 0.0);
@@ -2144,6 +2218,7 @@ void fragment() {
 """
 	territory_material = ShaderMaterial.new()
 	territory_material.shader = shader
+	territory_material.set_shader_parameter("corner_rounding", ECONOMY.SECTOR_CORNER_ROUNDING)
 	territory_image.material = territory_material
 	territory_image.hide()
 
