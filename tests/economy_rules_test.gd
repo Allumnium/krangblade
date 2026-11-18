@@ -310,14 +310,22 @@ func _test_station_construction_queue() -> void:
 	assert(ECON.enqueue(state, 1, 0, "economy", "Metals"))
 	assert(ECON.enqueue(state, 1, 0, "fighter", "", 0))
 	assert(ECON.shipyard_queue_count(p, 0) == 1)
+	var active: Dictionary = ECON.station_construction_job(p)
+	var queued: Dictionary = p["queue"][1]
+	var fighter: Dictionary = p["queue"][2]
 	var duration: float = ECON._work("habitation", 1)
 	assert(duration > 1.0)
 	ECON._work_planet(state, 0, 0.1)
+	assert(is_equal_approx(float(active["progress"]), 0.1))
+	assert(float(queued["progress"]) == 0.0 and float(fighter["progress"]) > 0.0)
 	assert(int(p.get("habitation_level", 0)) == 0 and ECON._has_job(p, "habitation", ""))
 	assert(ECON._has_job(p, "economy_building", "Metals") and ECON.shipyard_queue_count(p, 0) == 1)
 	ECON._work_planet(state, 0, duration - 0.1)
 	assert(int(p["habitation_level"]) == 1 and not ECON._has_job(p, "habitation", ""))
 	assert(ECON._has_job(p, "economy_building", "Metals") and ECON.shipyard_queue_count(p, 0) == 0)
+	assert(ECON.station_construction_job(p) == queued and float(queued["progress"]) < ECON.EPS)
+	ECON._work_planet(state, 0, 1.0)
+	assert(is_equal_approx(float(queued["progress"]), 1.0))
 	assert(ECON.set_continuous(state, 1, 0, "habitation", true))
 	ECON._refill_continuous(state, 0, p)
 	assert(ECON._has_job(p, "habitation", ""))
@@ -326,7 +334,11 @@ func _test_station_construction_queue() -> void:
 	for item in p["queue"]:
 		repeat_count += int(item["kind"] == "habitation")
 	assert(repeat_count == 1)
-	print("PASS: independent station construction, prepaid cancellation, upgrade completion and repeat")
+	ECON._work_station_queue(state, 0, p, float(queued["work"]) - float(queued["progress"]) + 0.5)
+	assert(not ECON._has_job(p, "economy_building", "Metals"))
+	assert(ECON.station_construction_job(p)["kind"] == "habitation")
+	assert(is_equal_approx(float(ECON.station_construction_job(p)["progress"]), 0.5))
+	print("PASS: sequential station FIFO, independent shipyards, carryover time, refunds and repeat")
 
 func _test_ai_timed_orbital_housing() -> void:
 	var galaxy: Dictionary = MAP.generate(827, 2, "Grid")
@@ -371,9 +383,16 @@ func _test_station_defense_and_ports() -> void:
 	assert(ECON.enqueue(state, 1, 0, "laser_matrix"))
 	assert(not ECON.enqueue(state, 1, 0, "laser_matrix"))
 	p["station"]["hp"] = 900.0
-	ECON._work_planet(state, 0, 60.0)
+	ECON._work_planet(state, 0, ECON._work("yard", 2))
+	assert(ECON.shipyard_at_port(p, 3) == 1 and ECON.shipyard_at_port(p, 2) == -1)
+	assert(float(ECON.station_construction_job(p)["progress"]) == 0.0)
+	ECON._work_planet(state, 0, ECON._work("yard", 3))
+	assert(ECON.shipyard_at_port(p, 2) == 2 and ECON.station_max_hp(p) == 1000.0)
+	ECON._work_planet(state, 0, ECON._work("reinforced_plating", 1))
 	assert(ECON.station_max_hp(p) == 3000.0 and p["station"]["hp"] == 2900.0)
 	assert(ECON.service_targets(state)[ECON.station_target_id(state, 0)]["max_hp"] == 3000.0)
+	assert(p["station"].get("weapons", []).is_empty())
+	ECON._work_planet(state, 0, ECON._work("laser_matrix", 1))
 	assert(p["station"]["weapons"].size() == 2)
 	assert(not ECON.enqueue(state, 1, 0, "reinforced_plating"))
 	assert(not ECON.enqueue(state, 1, 0, "laser_matrix"))
@@ -803,7 +822,10 @@ func _initialize() -> void:
 	assert(ECON.cancel(capped, 1, 0, int(cap_home["queue"][-1]["id"])))
 	assert(ECON.shipyard_count(cap_home) == 2)
 	assert(ECON.enqueue(capped, 1, 0, "yard"))
-	ECON.step(capped, 30.0)
+	ECON.step(capped, ECON._work("yard", 2))
+	assert(cap_home["yards"].size() == 2)
+	assert(float(ECON.station_construction_job(cap_home)["progress"]) == 0.0)
+	ECON.step(capped, ECON._work("yard", 3))
 	assert(cap_home["yards"].size() == 3)
 	assert(ECON.shipyard_count(cap_home) == 3)
 	assert(not ECON.enqueue(capped, 1, 0, "yard"))
@@ -819,7 +841,8 @@ func _initialize() -> void:
 	var stack_second: Dictionary = gap_home["queue"][0]
 	var stack_third: Dictionary = gap_home["queue"][1]
 	ECON._work_planet(gap_state, 0, 6.0)
-	assert(float(stack_second["progress"]) > 0.0 and float(stack_third["progress"]) > 0.0)
+	assert(float(stack_second["progress"]) > 0.0 and float(stack_third["progress"]) == 0.0)
+	# Emulate retained progress from a formerly concurrent construction save.
 	ECON._advance(gap_home, stack_third, 3.0)
 	var fraction: float = float(stack_third["progress"]) / float(stack_third["work"])
 	var total_material: Dictionary = ECON.empty_stock()
@@ -837,13 +860,14 @@ func _initialize() -> void:
 	assert(ECON.enqueue(gap_state, 1, 0, "yard", "3"))
 	assert(ECON.shipyard_count(gap_home) == 3)
 	assert(not ECON.enqueue(gap_state, 1, 0, "yard", "3"))
-	# Later construction can reach 100% but cannot become an active slot early.
+	# A queued yard waits, even when the previous yard is partially completed.
 	var latest: Dictionary = gap_home["queue"][-1]
-	ECON._advance(gap_home, latest, float(latest["work"]))
-	ECON._work_planet(gap_state, 0, 0.0)
+	ECON._work_planet(gap_state, 0, 1.0)
 	assert(gap_home["yards"].size() == 1)
-	ECON._advance(gap_home, stack_third, float(stack_third["work"]))
-	ECON._work_planet(gap_state, 0, 0.0)
+	assert(float(latest["progress"]) == 0.0)
+	ECON._work_planet(gap_state, 0, float(stack_third["work"]) - float(stack_third["progress"]))
+	assert(gap_home["yards"].size() == 2 and float(latest["progress"]) == 0.0)
+	ECON._work_planet(gap_state, 0, float(latest["work"]))
 	assert(gap_home["yards"].size() == 3)
 
 	# Yard upgrades wait behind assigned hull production.
@@ -1169,6 +1193,10 @@ func _initialize() -> void:
 	cp[3] = Vector2(190, 0)
 	cp[4] = Vector2(190, 95)
 	var colonization: Dictionary = ECON.create(colony_map, players, ids, false)
+	# This compressed travel/race fixture tests colonization, not overlapping
+	# defensive ranges. Disable home batteries so the competing hulls survive.
+	for system in colonization["planets"]:
+		system["pds"].clear()
 	for index in [0, 2]:
 		colonization["planets"][index]["population"] = 150000.0
 	assert(ECON.enqueue(colonization, 1, 0, "colony_ship"))
@@ -1208,6 +1236,8 @@ func _initialize() -> void:
 	assert(int(loser["dest"]) == -1)
 	assert(int(loser["at"]) == loser_home and loser["route"].is_empty())
 	var distant: Dictionary = ECON.create(colony_map, players, ids, false)
+	for system in distant["planets"]:
+		system["pds"].clear()
 	var distant_ship: Dictionary = {"id": 999, "kind": "colony_ship", "owner": 1, "at": 0, "position": cp[0], "route": [], "leg": 0.0, "dest": -1}
 	distant["ships"].append(distant_ship)
 	assert(ECON.send_colony(distant, 1, 999, 4))
@@ -1521,6 +1551,9 @@ func _initialize() -> void:
 	# Pursuit retains a fleeing civilian beyond laser range, obeys the speed
 	# budget and expires after three years even while the target remains nearby.
 	var chase: Dictionary = ECON.create(ai_map, players, ids, false)
+	# Isolate fighter pursuit behavior from longer-range fixed batteries.
+	for system in chase["planets"]:
+		system["pds"].clear()
 	var hunter: Dictionary = {"id": 980, "owner": 2, "kind": "fighter", "at": 1, "route": [0], "leg": 0.0, "position": Vector2(50, 0), "dest": 0, "hp": 100.0}
 	var prey: Dictionary = {"id": 981, "owner": 3, "kind": "colony_ship", "at": 1, "route": [3], "leg": 200.0, "position": Vector2(200, 0), "dest": 3, "hp": 100.0}
 	chase["ships"] = [hunter, prey]
@@ -1543,6 +1576,8 @@ func _initialize() -> void:
 	# Separate scenario: a live target leaves range, pursuit persists but
 	# laser damage does not. Explicitly reposition the fixture to model escape.
 	var distant_chase: Dictionary = ECON.create(ai_map, players, ids, false)
+	for system in distant_chase["planets"]:
+		system["pds"].clear()
 	var distant_hunter: Dictionary = {"id": 982, "owner": 2, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "dest": 1, "hp": 100.0}
 	var fleeing: Dictionary = {"id": 983, "owner": 3, "kind": "fighter", "at": 1, "route": [3], "leg": 0.0, "position": Vector2(150, 0), "heading": Vector2.RIGHT, "dest": 3, "hp": 100.0, "retreating": true}
 	distant_chase["ships"] = [distant_hunter, fleeing]
@@ -1884,9 +1919,13 @@ func _initialize() -> void:
 	assert(float(defense_enemy["hp"]) == 100.0 - 2.0 * ECON.LASER_DAMAGE and float(friendly["hp"]) == 100.0)
 	ECON._combat(defenses, defense_graph, 0.1)
 	assert(float(defense_enemy["hp"]) == 64.0)
-	defense_enemy["position"] = center + Vector2(ECON.LASER_RANGE + 1.0, 0)
+	assert(ECON.PDS_RANGE == 2.0 * ECON.LASER_RANGE)
+	defense_enemy["position"] = center + Vector2(ECON.PDS_RANGE - 1.0, 0)
 	ECON._combat(defenses, defense_graph, 1.0)
-	assert(float(defense_enemy["hp"]) == 64.0)
+	assert(float(defense_enemy["hp"]) == 28.0 and float(friendly["hp"]) == 100.0)
+	defense_enemy["position"] = center + Vector2(ECON.PDS_RANGE + 1.0, 0)
+	ECON._combat(defenses, defense_graph, 1.0)
+	assert(float(defense_enemy["hp"]) == 28.0)
 	for slot in range(1, int(defended["planet_count"])):
 		for material in ECON._cost("pds", slot + 1):
 			defended["stock"][material] = ECON._cost("pds", slot + 1)[material]

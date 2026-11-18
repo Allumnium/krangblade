@@ -98,6 +98,7 @@ const LASER_DAMAGE: float = 18.0
 const PDS_DAMAGE: float = LASER_DAMAGE * 2.0
 const PDS_HP: float = SHIP_HP
 const LASER_RANGE: float = 180.0
+const PDS_RANGE: float = LASER_RANGE * 2.0
 const PURSUIT_YEARS: float = 3.0
 const AI_INTERVAL: float = 4.0
 const AI_WAVE_MIN: int = 3
@@ -1319,6 +1320,28 @@ static func local_flow(p: Dictionary, category: String, resource: String) -> flo
 		return 0.0
 	return float(p["flows"].get(category, {}).get(resource, 0.0)) / maxf(EPS, float(p.get("flow_dt", 1.0)))
 
+static func station_construction_job(p: Dictionary) -> Dictionary:
+	for item in p["queue"]:
+		if int(item["size"]) == 0 and item["kind"] != "yard_upgrade":
+			return item
+	return {}
+
+static func _work_station_queue(state: Dictionary, index: int, p: Dictionary, dt: float) -> void:
+	# Infrastructure shares one FIFO production lane per station, separate
+	# from its shipyards. Spend only unused time on the next job.
+	var remaining: float = dt
+	while remaining > EPS:
+		var item: Dictionary = station_construction_job(p)
+		if item.is_empty():
+			break
+		var before: float = float(item["progress"])
+		if not _advance(p, item, remaining):
+			break
+		remaining = maxf(0.0, remaining - (float(item["progress"]) - before))
+		if item["kind"] == "yard" and int(item["level"]) != (p["yards"] as Array).size() + 1:
+			break
+		_finish(state, index, p, item)
+
 static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	var p: Dictionary = state["planets"][index]
 	if int(p["owner"]) == 0 or not has_station(p):
@@ -1345,13 +1368,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		_record_flow(p, "Production", resource, produced)
 		_record_flow(p, "Population", resource, used)
 		p["stock"][resource] = maxf(0.0, stored + produced - used)
-	# New yards and planetary production use infrastructure work, not an existing yard.
-	for item in (p["queue"] as Array).duplicate():
-		if int(item["size"]) == 0 and item["kind"] != "yard_upgrade" and _advance(p, item, dt):
-			# Construction may advance concurrently, but completed shipyards
-			# join the active array only in contiguous slot order.
-			if item["kind"] != "yard" or int(item["level"]) == (p["yards"] as Array).size() + 1:
-				_finish(state, index, p, item)
+	_work_station_queue(state, index, p, dt)
 	_refill_yard_autobuild(state, index, p)
 	_refill_continuous(state, index, p)
 	for category in p.get("pending_spending", {}):
@@ -4101,9 +4118,10 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var origin: Vector2 = graph["points"][index]
 		var cell := Vector2i(floori(origin.x / LASER_RANGE), floori(origin.y / LASER_RANGE))
 		var target: int = -1
-		var best: float = LASER_RANGE * LASER_RANGE
-		for x in range(-1, 2):
-			for y in range(-1, 2):
+		var best: float = PDS_RANGE * PDS_RANGE
+		var reach: int = ceili(PDS_RANGE / LASER_RANGE)
+		for x in range(-reach, reach + 1):
+			for y in range(-reach, reach + 1):
 				for other in cells.get(cell + Vector2i(x, y), []):
 					if int(state["teams"].get(int(other["owner"]), 0)) == team:
 						continue
