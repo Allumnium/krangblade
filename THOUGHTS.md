@@ -439,3 +439,9 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-31e — Symmetric console wings
 - The right wing previously expanded with the center, despite the fixed narrow minimap. Give both side panels the same responsive width (24% each, bounded 180–320 logical pixels), with only the middle expanding. Preserve square tactical slots and reflow production portraits; scroll narrow contextual content rather than allowing it to widen the wing. Verify small window and high UI scale manually.
+
+### T-31f — SC2-inspired console contrast and lens strip
+- Use a near-black console interior, relocate Logistics from the center toolbar to a persistent vertical icon strip beside the minimap, and move unit health color from the entire tile to the hull outline. Keep matched minimap/command widths and the original health thresholds. Check dark-background legibility and click/hover behavior in live play.
+
+### T-31g — Focus all selections
+- F previously followed only ships at the existing zoom and centered the mean of their positions, potentially leaving distant group members offscreen. Frame the bounding box of interpolated ships, fit static sectors/fields and focus precise rendered planet and orbital shipyard positions. Expand the view when a following fleet spreads; manual zoom-out is respected. Manual camera pan and new selections still release focus. Check close-up readability and fit at narrow windows.
