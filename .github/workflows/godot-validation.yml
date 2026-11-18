@@ -1,10 +1,8 @@
 name: Godot validation
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+  # Temporarily manual-only for rapid iteration. Restore push/PR triggers
+  # when automated validation is re-enabled.
   workflow_dispatch:
 
 concurrency:
