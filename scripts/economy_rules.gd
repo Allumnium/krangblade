@@ -59,7 +59,11 @@ const SALVAGE_FRACTION: float = 0.20
 const SALVAGE_MIN_LIFETIME: float = 90.0
 const SALVAGE_MAX_LIFETIME: float = 120.0
 const SALVAGE_APPROACH_RANGE: float = TRACTOR_RANGE * 2.0
-const MINER_RATE: float = 6.0
+# The pair of mining lasers deals one combined volley per year. One point
+# of damage to a resource chunk removes one ton, subject to field limits.
+const MINER_LASER_DAMAGE: float = 2.0
+const MINER_ASTEROID_MULTIPLIER: float = 3.0
+const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const SHIP_SIZE: int = 1
 const MAX_SHIPYARDS: int = 3
@@ -1845,6 +1849,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 		_set_route(ship, best_path)
 
 static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, budgets: Array, dt: float) -> void:
+	ship["mining_active"] = false
 	var mode: String = str(ship.get("mining_mode", "idle"))
 	if mode == "idle":
 		if (ship["route"] as Array).is_empty():
@@ -1917,6 +1922,10 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 		return
 	if mode == "mining":
 		ship["mining_years"] = float(ship.get("mining_years", 0.0)) + dt
+		# The same emitters cannot fire at a rock and a hostile hull at once.
+		# Keep the assignment and resume extraction when the threat is gone.
+		if _engaged(ship) or int(ship.get("yard_target", -1)) < -1:
+			return
 		var resources: Array[String] = _mining_resources(state, int(ship["owner"]), field_index)
 		var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
 		var available: bool = not chunk.is_empty() and resources.has(str(chunk["resource"]))
@@ -1924,6 +1933,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			var resource: String = str(chunk["resource"])
 			var free: float = MINER_CAPACITY - _cargo_total(ship)
 			var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource]))))
+			ship["mining_active"] = amount > EPS
 			ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
 			chunk["remaining"] = maxf(0.0, float(chunk["remaining"]) - amount)
 			budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
@@ -2954,7 +2964,7 @@ static func territory_empires(state: Dictionary) -> Array[int]:
 static func _engaged(ship: Dictionary) -> bool:
 	return int(ship.get("combat_target", -1)) >= 0 or int(ship.get("pursuit_target", -1)) >= 0
 
-# Unarmed hulls are pursuit targets. A fighter fleeing along a route (or
+# Civilian hulls do not pursue, even if armed. A fighter fleeing along a route (or
 # explicitly withdrawing in a future retreat system) is also eligible.
 static func _fleeing(other: Dictionary, away: Vector2, previous_target: int) -> bool:
 	if other.get("kind", "") != "fighter" or bool(other.get("retreating", false)):
@@ -3459,8 +3469,13 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			cells[cell].append({"id": target_id, "owner": system["owner"], "kind": "pds"})
 	var damage: Dictionary = {}
 	for ship in ships:
-		if ship.get("kind", "") != "fighter":
+		var fighter: bool = ship.get("kind", "") == "fighter"
+		var miner: bool = ship.get("kind", "") == "miner"
+		if not fighter and not miner:
 			continue
+		if miner:
+			ship["mining_active"] = false
+		var weapon_damage: float = LASER_DAMAGE if fighter else MINER_LASER_DAMAGE
 		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
@@ -3477,7 +3492,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var team: int = int(state["teams"].get(int(ship["owner"]), 0))
 		var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 		var target: int = -1
-		var pursuit: int = int(ship.get("pursuit_target", -1))
+		var pursuit: int = int(ship.get("pursuit_target", -1)) if fighter else -1
 		var remaining: float = float(ship.get("pursuit_left", 0.0))
 		var blocked: Dictionary = ship.get("pursuit_blocked", {})
 		for blocked_id in blocked.keys():
@@ -3508,13 +3523,13 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 					if distance < best or (is_equal_approx(distance, best) and (target < 0 or other_id < target)):
 						best = distance
 						target = other_id
-		if not bool(ship.get("holding", false)) and pursuit < 0 and target >= 0 and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[target])):
+		if fighter and not bool(ship.get("holding", false)) and pursuit < 0 and target >= 0 and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[target])):
 			pursuit = target
 			remaining = PURSUIT_YEARS
 		# A previously engaged fighter may escape the firing envelope before
 		# the next scan; its departure is still a valid pursuit trigger.
 		var prior: int = int(previous_targets[id])
-		if not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[prior])):
+		if fighter and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[prior])):
 			pursuit = prior
 			remaining = PURSUIT_YEARS
 		if pursuit >= 0:
@@ -3538,7 +3553,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		ship["combat_target"] = target
 		var cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
 		if target >= 0 and cooldown <= EPS:
-			damage[target] = float(damage.get(target, 0.0)) + LASER_DAMAGE
+			damage[target] = float(damage.get(target, 0.0)) + weapon_damage
 			cooldown = 1.0
 			ship["laser_until"] = float(state["elapsed"]) + 0.2
 		ship["laser_cooldown"] = cooldown
@@ -3557,7 +3572,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 							ship["yard_target"] = yard_id
 			var yard_id: int = int(ship["yard_target"])
 			if yard_id < -1 and cooldown <= EPS:
-				damage[yard_id] = float(damage.get(yard_id, 0.0)) + LASER_DAMAGE
+				damage[yard_id] = float(damage.get(yard_id, 0.0)) + weapon_damage
 				ship["laser_cooldown"] = 1.0
 				ship["yard_laser_until"] = float(state["elapsed"]) + 0.2
 	# Planets are visual orbits around a shared authoritative system waypoint.
