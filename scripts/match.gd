@@ -1261,8 +1261,8 @@ func _build_centered_queue(parent: Container) -> HFlowContainer:
 	# Filling the width lets each wrapped line stay centered independently.
 	queue.size_flags_vertical = Control.SIZE_EXPAND | Control.SIZE_SHRINK_CENTER
 	queue.alignment = FlowContainer.ALIGNMENT_CENTER
-	queue.add_theme_constant_override("h_separation", 4)
-	queue.add_theme_constant_override("v_separation", 4)
+	queue.add_theme_constant_override("h_separation", 12)
+	queue.add_theme_constant_override("v_separation", 12)
 	parent.add_child(queue)
 	return queue
 
@@ -1273,8 +1273,8 @@ func _portrait_points(vertices: Array) -> String:
 		coordinates.append("%.2f,%.2f" % [32.0 + v.y * 1.85, 32.0 - v.x * 1.85])
 	return " ".join(coordinates)
 
-func _production_icon(kind: String, tint: Color) -> Texture2D:
-	var key: String = kind + ":" + tint.to_html(false)
+func _production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
+	var key: String = "%s:%s:%d" % [kind, tint.to_html(false), pixels]
 	if not production_icons.has(key):
 		var outline: String = _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE))
 		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">'
@@ -1289,7 +1289,7 @@ func _production_icon(kind: String, tint: Color) -> Texture2D:
 					art += '<rect x="%d" y="%d" width="11" height="9" rx="1" fill="#32465c" stroke="#9bb6cb" stroke-width="0.8"/>' % [20 + column * 13, 22 + row * 11]
 		art += '<polygon points="%s" fill="none" stroke="#%s" stroke-width="1.25" stroke-linejoin="round"/></svg>' % [outline, tint.lightened(0.50).to_html(false)]
 		var image := Image.new()
-		image.load_svg_from_string(art)
+		image.load_svg_from_string(art, float(pixels) / 64.0)
 		production_icons[key] = ImageTexture.create_from_image(image)
 	return production_icons[key]
 
@@ -1375,11 +1375,12 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	_fill_ability_grid(grid)
 	yard_command_scroll.hide()
 
-func _station_command_icon(kind: String) -> Texture2D:
+func _station_command_icon(kind: String, pixels: int = 32) -> Texture2D:
 	if HUD.ICONS.has(kind):
-		return HUD.ICONS[kind]
-	if station_icons.has(kind):
-		return station_icons[kind]
+		return HUD.resource_icon(kind, 24 if pixels == 32 else pixels)
+	var key: String = "%s:%d" % [kind, pixels]
+	if station_icons.has(key):
+		return station_icons[key]
 	var paths: Dictionary = {
 		"build": '<path d="M4 27L17 14M12 5L17 2L29 14L25 18L19 12L8 23"/><path d="M3 25L7 29"/>',
 		"trade": '<path d="M4 10H28L21 3M28 10L21 17M28 22H4L11 15M4 22L11 29"/>',
@@ -1392,8 +1393,8 @@ func _station_command_icon(kind: String) -> Texture2D:
 		"laser_matrix": '<path d="M4 26L26 4M10 28L28 10M3 19L13 29M19 3L29 13"/>',
 		"pds": '<path d="M16 3L27 8V18Q24 26 16 30Q8 26 5 18V8Z M11 17H21M16 12V22"/>'
 	}
-	station_icons[kind] = _command_icon(paths.get(kind, paths["build"]))
-	return station_icons[kind]
+	station_icons[key] = _command_icon(paths.get(kind, paths["build"]), pixels)
+	return station_icons[key]
 
 func _ability_grid(parent: Container) -> GridContainer:
 	var grid := GridContainer.new()
@@ -1749,10 +1750,10 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
 	if ECONOMY.SHIP_KINDS.has(job["kind"]):
-		return _production_icon(str(job["kind"]), _empire_color(owner))
+		return _production_icon(str(job["kind"]), _empire_color(owner), 88)
 	if job["kind"] == "yard_upgrade":
-		return _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
-	return _station_command_icon(str(job["target"]) if job["kind"] in ["economy_building", "production"] else str(job["kind"]))
+		return _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>', 88)
+	return _station_command_icon(str(job["target"]) if job["kind"] in ["economy_building", "production"] else str(job["kind"]), 88)
 
 func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
 	var jobs: Array = []
@@ -1798,15 +1799,16 @@ func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dicti
 		var id: int = int(job["id"])
 		if not rows.has(id):
 			var row := VBoxContainer.new()
-			row.add_theme_constant_override("separation", 2)
+			row.add_theme_constant_override("separation", 6)
 			var cancel := _button("", _cancel_job.bind(id), row)
 			cancel.focus_mode = Control.FOCUS_NONE
-			cancel.custom_minimum_size = Vector2(38, 38)
+			cancel.custom_minimum_size = Vector2(114, 114)
 			cancel.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			cancel.expand_icon = true
+			cancel.add_theme_constant_override("icon_max_width", 88)
 			cancel.icon = _job_icon(job, int(system["owner"]))
 			var bar := ProgressBar.new()
-			bar.custom_minimum_size.y = 4
+			bar.custom_minimum_size.y = 12
 			bar.show_percentage = false
 			bar.step = 0.0
 			bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1909,10 +1911,10 @@ func _apply_mining_policy() -> void:
 	if selected_field >= 0:
 		session.call("request_mining_policy", selected_field, mining_enabled.button_pressed, mining_metals.button_pressed, mining_crystals.button_pressed)
 
-func _command_icon(path: String) -> Texture2D:
+func _command_icon(path: String, pixels: int = 32) -> Texture2D:
 	var image := Image.new()
 	var svg: String = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g fill="none" stroke="#c5e5f5" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">' + path + '</g></svg>'
-	image.load_svg_from_string(svg)
+	image.load_svg_from_string(svg, float(pixels) / 32.0)
 	return ImageTexture.create_from_image(image)
 
 func _command_slot(id: String, hint: String, art: String, action: Callable) -> Button:

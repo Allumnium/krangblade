@@ -29,6 +29,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.43.8: Enlarge the shared station and shipyard queue tiles to 114 pixels, with 88-pixel artwork, 12-pixel progress bars and spacing. Retain centered wrapping and scrolling; leave command cards unchanged.
+
 - v0.43.7: Left-align the station population and resource breakdown in a compact 360-pixel detail column, shrinking on narrow middle panels. Leave header, tabs, and centered queue unchanged.
 
 - v0.43.6: Center station infrastructure and shipyard production queue tiles horizontally and vertically within the middle panel's remaining detail area. Preserve headings, portrait, tabs, wrapping and progress/cancellation behavior.
