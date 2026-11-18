@@ -215,6 +215,10 @@ var pending_command: String = ""
 var selection_grid: GridContainer
 var selection_tiles: Dictionary = {}
 var selection_icons: Dictionary = {}
+var selection_portrait: VBoxContainer
+var selection_portrait_art: TextureRect
+var selection_portrait_health: Label
+var selection_portrait_icons: Dictionary = {}
 var fleet_cargo: HBoxContainer
 var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
@@ -512,10 +516,15 @@ func _build_ui() -> void:
 	overview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	overview_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
+	var selection_row := HBoxContainer.new()
+	selection_row.add_theme_constant_override("separation", 8)
+	overview_panel.add_child(selection_row)
+	_build_selection_portrait(selection_row)
 	var overview_scroll := ScrollContainer.new()
+	overview_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	overview_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	overview_panel.add_child(overview_scroll)
+	selection_row.add_child(overview_scroll)
 	var overview := VBoxContainer.new()
 	overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	overview.add_theme_constant_override("separation", 3)
@@ -778,6 +787,10 @@ func _layout_command_grids() -> void:
 			caption.add_theme_font_size_override("font_size", font_size)
 	if is_instance_valid(selection_grid):
 		selection_grid.columns = maxi(1, floori(maxf(38.0, console_center.size.x - 20.0) / 41.0))
+	if is_instance_valid(selection_portrait):
+		var portrait_width: float = clampf(floorf(console_center.size.x * 0.22), 70.0, 108.0)
+		selection_portrait.custom_minimum_size.x = portrait_width
+		selection_portrait_art.custom_minimum_size.y = minf(portrait_width, 90.0)
 	for title in command_grids:
 		var grid: GridContainer = command_grids[title]
 		var cell_width: float = 160.0 if title == "Trade" else 222.0
@@ -1544,8 +1557,6 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	var operating: bool = ECONOMY.shipyard_operational(system, selected_yard)
 	yard_title.text = "Shipyard %d · Lv %d" % [selected_yard + 1, level]
 	yard_context.text = _system_name(selected)
-	var max_hp: float = ECONOMY.SHIP_HP * 10.0 * level
-	yard_status.text = "%.0f / %.0f HP" % [float(yard.get("hp", max_hp)), max_hp]
 	var jobs: Array = []
 	var active_id: int = int(yard["job"])
 	for job in system["queue"]:
@@ -1565,7 +1576,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 			yard_queue.remove_child(row)
 			row.queue_free()
 			yard_queue_rows.erase(id)
-	yard_status.text += " · " + ("Offline" if not operating else ("Idle" if jobs.is_empty() else "%d queued" % jobs.size()))
+	yard_status.text = "Offline" if not operating else ("Idle" if jobs.is_empty() else "%d queued" % jobs.size())
 	for idx in range(jobs.size()):
 		var job: Dictionary = jobs[idx]
 		var id: int = int(job["id"])
@@ -1683,8 +1694,8 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	var building: bool = not job.is_empty()
 	var cost: Dictionary = ECONOMY._cost("pds", 1)
 	var full: bool = ECONOMY.next_pds(system) < 0
-	body_defense.text = "Battery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
-	body_status.text = ("Operational · %.0f / %.0f HP" % [float(battery.get("hp", 0.0)), ECONOMY.PDS_HP] if not battery.is_empty() else "Undefended") + "\nSystem defenses: %d/%d" % [defenses.size(), int(system["planet_count"])]
+	body_defense.text = ("Battery HP: %.0f\n" % ECONOMY.PDS_HP if battery.is_empty() else "") + "Damage: %.0f per shot · 1 shot/yr\nRange: %.0f" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
+	body_status.text = ("Operational" if not battery.is_empty() else "Undefended") + "\nSystem defenses: %d/%d" % [defenses.size(), int(system["planet_count"])]
 	body_costs.visible = not full
 	if not full:
 		_show_cost(body_costs, job["cost"] if building else cost)
@@ -1930,6 +1941,95 @@ func _set_rally_at(point: Vector2) -> void:
 		for ref in yards:
 			session.call("request_shipyard_rally", ref.x, ref.y, node, world)
 
+func _build_selection_portrait(parent: Container) -> void:
+	selection_portrait = VBoxContainer.new()
+	selection_portrait.custom_minimum_size.x = 90.0
+	selection_portrait.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	selection_portrait.add_theme_constant_override("separation", 1)
+	parent.add_child(selection_portrait)
+	selection_portrait_art = TextureRect.new()
+	selection_portrait_art.custom_minimum_size.y = 90.0
+	selection_portrait_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	selection_portrait_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	selection_portrait_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	selection_portrait.add_child(selection_portrait_art)
+	selection_portrait_health = _label("", 12)
+	selection_portrait_health.autowrap_mode = TextServer.AUTOWRAP_OFF
+	selection_portrait_health.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	selection_portrait.add_child(selection_portrait_health)
+	selection_portrait.hide()
+
+func _health_color(fraction: float) -> Color:
+	return Color("#e45b60") if fraction < 0.2 else (Color("#eac64a") if fraction < 0.5 else Color("#55c88b"))
+
+func _selection_portrait_icon(kind: String) -> Texture2D:
+	if not selection_portrait_icons.has(kind):
+		# White wireframe art is tinted at runtime by current health, without
+		# recreating textures as combat snapshots arrive.
+		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64"><g fill="none" stroke="#ffffff" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">'
+		if kind == "station":
+			art += '<circle cx="32" cy="32" r="25"/><circle cx="32" cy="32" r="19"/><circle cx="32" cy="32" r="9"/>'
+			for slot in range(3):
+				art += '<g transform="rotate(%d 32 32)"><path d="M28 23V13H36V23M27 7V3H37V7"/></g>' % (120 * slot)
+			for segment in range(12):
+				art += '<path transform="rotate(%d 32 32)" d="M32 7V13" stroke-width="0.7"/>' % (30 * segment)
+		elif kind == "shipyard":
+			# Open berth, paired gantries and cross braces match the map art.
+			art += '<path d="M12 5L7 10V54L12 59H22L25 51V13L22 5ZM52 5L57 10V54L52 59H42L39 51V13L42 5ZM22 8H42M22 56H42M22 13H42M22 51H42"/>'
+			for y in [19, 32, 45]:
+				art += '<rect x="10" y="%d" width="11" height="7"/><rect x="43" y="%d" width="11" height="7"/>' % [y - 3, y - 3]
+		elif kind in ["planet", "pds"]:
+			art += '<circle cx="32" cy="32" r="25"/><ellipse cx="32" cy="32" rx="11" ry="25" stroke-width="0.8"/><path d="M12 17Q32 26 52 17M7 32H57M12 47Q32 38 52 47" stroke-width="0.8"/>'
+			if kind == "pds":
+				art += '<circle cx="32" cy="32" r="28"/><path d="M32 1V7M32 57V63M1 32H7M57 32H63"/>'
+		else:
+			art += '<polygon points="%s"/>' % _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE))
+			for panel in HULL_PANELS.get(kind, []):
+				art += '<polygon points="%s" stroke-width="0.55" opacity="0.68"/>' % _portrait_points(panel[1])
+			if kind == "ship":
+				art += '<rect x="21" y="11" width="22" height="8" rx="2" stroke-width="0.7"/>'
+				for row in range(3):
+					for column in range(2):
+						art += '<rect x="%d" y="%d" width="11" height="9" rx="1" stroke-width="0.7"/>' % [20 + column * 13, 22 + row * 11]
+		var image := Image.new()
+		image.load_svg_from_string(art + '</g></svg>')
+		selection_portrait_icons[kind] = ImageTexture.create_from_image(image)
+	return selection_portrait_icons[kind]
+
+func _refresh_selection_portrait(ship: Dictionary, system: Dictionary, body_selected: bool, yard_selected: bool, grouped: bool) -> void:
+	var kind: String = ""
+	var hp: float = 0.0
+	var maximum: float = 0.0
+	if not ship.is_empty() and selected_units.size() <= 1:
+		kind = str(ship["kind"])
+		maximum = ECONOMY.SHIP_HP
+		hp = float(ship.get("hp", maximum))
+	elif not grouped and not system.is_empty():
+		if yard_selected:
+			var yard: Dictionary = system["yards"][selected_yard]
+			kind = "shipyard"
+			maximum = ECONOMY.SHIP_HP * 10.0 * int(yard["level"])
+			hp = float(yard.get("hp", maximum))
+		elif body_selected:
+			var battery: Dictionary = system.get("pds", {}).get(selected_body, {})
+			kind = "planet" if battery.is_empty() else "pds"
+			if not battery.is_empty():
+				maximum = ECONOMY.PDS_HP
+				hp = float(battery.get("hp", maximum))
+		elif building_selection_kind == "station" and ECONOMY.has_station(system):
+			kind = "station"
+			maximum = ECONOMY.STATION_HP
+			hp = float(system["station"].get("hp", maximum))
+	selection_portrait.visible = not kind.is_empty()
+	if kind.is_empty():
+		return
+	var tint: Color = _health_color(clampf(hp / maximum, 0.0, 1.0)) if maximum > 0.0 else HUD.MUTED
+	selection_portrait_art.texture = _selection_portrait_icon(kind)
+	selection_portrait_art.modulate = tint
+	selection_portrait_health.visible = maximum > 0.0
+	selection_portrait_health.text = "%.0f / %.0f" % [hp, maximum] if maximum > 0.0 else ""
+	selection_portrait_health.add_theme_color_override("font_color", tint)
+
 func _selection_icon(kind: String, tint: Color) -> Texture2D:
 	var key: String = kind + ":" + tint.to_html(false)
 	if not selection_icons.has(key):
@@ -1992,7 +2092,7 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 			selection_grid.add_child(tile)
 			selection_tiles[id] = tile
 		var hp: float = clampf(float(craft.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
-		var tint: Color = Color("#d94b52") if hp < 0.2 else (Color("#e99e45") if hp < 0.5 else Color("#55b987"))
+		var tint: Color = _health_color(hp)
 		if tile.get_meta("health_color", Color.TRANSPARENT) != tint:
 			tile.set_meta("health_color", tint)
 			tile.icon = _selection_icon(str(craft["kind"]), tint)
@@ -2003,7 +2103,7 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 			selection_grid.remove_child(tile)
 			tile.queue_free()
 			selection_tiles.erase(id)
-	selection_grid.visible = not living.is_empty()
+	selection_grid.visible = living.size() > 1
 
 func _refresh_field_panels(state: Dictionary) -> void:
 	var field: Dictionary = state["map"]["fields"][selected_field]
@@ -2083,7 +2183,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Delivering salvage" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for salvage storage"
 	elif int(ship.get("auto_salvage_target", -1)) >= 0:
 		status += " · Salvaging" if bool(ship.get("tractor_active", false)) else " · Approaching debris"
-	ship_detail.text = "%s\n%s\nHP %.0f / %.0f" % [str(roster.get(owner, {}).get("name", "Player")), status, float(ship.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
+	ship_detail.text = "%s\n%s" % [str(roster.get(owner, {}).get("name", "Player")), status]
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
 	ship_title.visible = not multiple
@@ -2819,14 +2919,15 @@ func _refresh() -> void:
 		menu_exit.text = "Cancel start"
 	var planets: Array = state.get("planets", [])
 	if not initial_selection_done and not planets.is_empty():
-		initial_selection_done = true
 		for i in range(planets.size()):
-			if int(planets[i]["owner"]) == _me():
+			if int(planets[i]["owner"]) == _me() and bool(planets[i].get("home", false)):
+				initial_selection_done = true
 				selected = i
 				# Center the initial camera on the player's home system.
-				zoom = clampf(2.4, MIN_ZOOM, _max_zoom())
-				pan = (_map_size() * 0.5 - state["map"]["points"][i]) * _fit() * zoom
-				_position_territory()
+				_frame_starting_sector(i)
+				# The first snapshot can arrive before the HUD containers have
+				# settled; frame again using the final unobstructed viewport.
+				call_deferred("_frame_starting_sector", i)
 				_load_thresholds()
 				break
 	var ship: Dictionary = _selected_ship(state)
@@ -2865,6 +2966,7 @@ func _refresh() -> void:
 	planet_overview.visible = not p.is_empty() and not other_selected and not body_selected and not yard_selected and selected_buildings.size() <= 1
 	yard_column.visible = planet_overview.visible and overview_panel.visible
 	var grouped_buildings: bool = selected_buildings.size() > 1
+	_refresh_selection_portrait(ship, p, body_selected, yard_selected, grouped_buildings)
 	body_overview.visible = body_selected and not grouped_buildings
 	yard_overview.visible = yard_selected and not grouped_buildings
 	_refresh_building_group(state)
@@ -4579,6 +4681,21 @@ func _bounds_zoom(bounds: Rect2) -> float:
 
 func _center_world(point: Vector2) -> void:
 	pan = (_map_size() * 0.5 - point) * _fit() * zoom
+
+func _frame_starting_sector(index: int) -> void:
+	var state: Dictionary = _state()
+	if selected != index or index < 0 or index >= state.get("planets", []).size() or selected_ship_id >= 0 or selected_yard >= 0 or selected_body >= 0 or not selected_buildings.is_empty():
+		return
+	# The same clipped command-sector boundary used for local navigation.
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var extent := Vector2.ZERO
+	for i in range(64):
+		var direction: Vector2 = Vector2.from_angle(TAU * float(i) / 64.0)
+		extent = extent.max((direction * ECONOMY.sector_limit(graph, index, direction)).abs())
+	zoom = _bounds_zoom(Rect2(-extent, extent * 2.0))
+	_center_world(state["map"]["points"][index])
+	_position_territory()
+	map_canvas.queue_redraw()
 
 func _system_focus_zoom(index: int, state: Dictionary, desired_radius: float) -> float:
 	var radius_per_zoom: float = minf(RADIUS * float(state["planets"][index].get("size_factor", 1.0)), float(_system_visual(index, state)["spacing"]) * _fit() * 0.39)
