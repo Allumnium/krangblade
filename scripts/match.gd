@@ -57,7 +57,6 @@ var console_center: VBoxContainer
 var console_center_spacer: Control
 var console_right_body: VBoxContainer
 var console_profile: Control
-var yard_column: VBoxContainer
 var empty_selection: Label
 var command_grids: Dictionary = {}
 var yard_activity: VBoxContainer
@@ -166,6 +165,8 @@ var last_system_tab_selection: int = -1
 var selected_ship_id: int = -1
 var selected_units: Array[int] = []
 var control_groups: Dictionary = {}
+var control_group_strip: HBoxContainer
+var control_group_buttons: Dictionary = {}
 var selection_start: Vector2 = Vector2.ZERO
 var selection_end: Vector2 = Vector2.ZERO
 var selecting_units: bool = false
@@ -217,6 +218,7 @@ var selection_portrait_art: TextureRect
 var selection_portrait_health: Label
 var selection_portrait_icons: Dictionary = {}
 var fleet_cargo: HBoxContainer
+var fleet_cargo_footer: HBoxContainer
 var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
 var global_resource_labels: Dictionary = {}
@@ -482,7 +484,9 @@ func _build_ui() -> void:
 	console_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	console_columns.add_child(console_center)
 	console_center_spacer = Control.new()
+	console_center_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	console_center.add_child(console_center_spacer)
+	_build_control_group_strip()
 	console_center.add_child(empty_selection)
 	inspector_panel = PanelContainer.new()
 	console_columns.add_child(inspector_panel)
@@ -513,9 +517,12 @@ func _build_ui() -> void:
 	overview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	overview_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
+	var selection_content := VBoxContainer.new()
+	overview_panel.add_child(selection_content)
 	var selection_row := HBoxContainer.new()
+	selection_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	selection_row.add_theme_constant_override("separation", 8)
-	overview_panel.add_child(selection_row)
+	selection_content.add_child(selection_row)
 	_build_selection_portrait(selection_row)
 	var overview_scroll := ScrollContainer.new()
 	overview_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -562,10 +569,22 @@ func _build_ui() -> void:
 	ship_overview.add_child(fleet_detail)
 	_build_command_card(fleet_overview)
 	_build_yard_command_card(body)
+	fleet_cargo_footer = HBoxContainer.new()
+	selection_content.add_child(fleet_cargo_footer)
+	var cargo_title: Label = _label("CARGO", 11)
+	cargo_title.add_theme_color_override("font_color", HUD.MUTED)
+	cargo_title.autowrap_mode = TextServer.AUTOWRAP_OFF
+	fleet_cargo_footer.add_child(cargo_title)
+	var cargo_scroll := ScrollContainer.new()
+	cargo_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cargo_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	cargo_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	fleet_cargo_footer.add_child(cargo_scroll)
 	fleet_cargo = HBoxContainer.new()
-	fleet_cargo.add_theme_constant_override("separation", 10)
-	ship_overview.add_child(fleet_cargo)
+	fleet_cargo.add_theme_constant_override("separation", 7)
+	cargo_scroll.add_child(fleet_cargo)
 	_build_fleet_cargo_row()
+	fleet_cargo_footer.hide()
 	mining_controls = HUD.section(fleet_overview, "Mine", true)
 	mining_enabled = CheckBox.new()
 	mining_enabled.text = "Enabled"
@@ -630,13 +649,10 @@ func _build_ui() -> void:
 	inspector_tabs.visibility_changed.connect(func() -> void:
 		if not inspector_tabs.is_visible_in_tree():
 			_collapse_details())
-	var shipyard_page: GridContainer = _inspector_page("Shipyards")
-	# Keep building cards first and yard activity below them in one scroll.
-	yard_column = VBoxContainer.new()
-	yard_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	shipyard_page.get_parent().add_child(yard_column)
-	yard_activity = HUD.section(yard_column, "Shipyards", true)
 	var economy_page: GridContainer = _inspector_page("Economy")
+	# Only construction of new attached modules belongs to the station.
+	yard_activity = HUD.section(economy_page.get_parent(), "Shipyard construction", true)
+	economy_page.get_parent().move_child(yard_activity.get_parent(), 0)
 	_build_economy_cards(economy_page)
 	var trade_page: GridContainer = _inspector_page("Trade")
 	_build_pds_card(economy_page)
@@ -911,7 +927,7 @@ func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
 	return card
 
 func _detail_cards() -> Array:
-	return economy_cards.values() + yard_activity_rows.values() + [warehouse_card, habitation_card, orbital_card, pds_card]
+	return economy_cards.values() + [warehouse_card, habitation_card, orbital_card, pds_card]
 
 func _card_tab(card: Dictionary) -> Node:
 	var node: Node = card["header"]
@@ -1349,21 +1365,6 @@ func _build_yard_overview(parent: Container) -> void:
 	yard_queue.add_theme_constant_override("v_separation", 4)
 	yard_overview.add_child(yard_queue)
 	yard_overview.hide()
-
-func _select_yard_slot(slot: int) -> void:
-	var system: Dictionary = _planet()
-	if slot < 0 or slot >= system.get("yards", []).size():
-		return
-	_clear_building_selection()
-	selected_yard = slot
-	selected_yard_count = system["yards"].size()
-	selected_body = -1
-	selected_units.clear()
-	selected_ship_id = -1
-	selected_field = -1
-	follow_units = false
-	pending_command = ""
-	_refresh()
 
 func _portrait_points(vertices: Array) -> String:
 	var coordinates: PackedStringArray = []
@@ -2085,7 +2086,7 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	command_card.hide()
 	pending_command = ""
 	_refresh_command_mode()
-	fleet_cargo.hide()
+	fleet_cargo_footer.hide()
 	mining_controls.get_parent().show()
 	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field)
 	mining_enabled.set_pressed_no_signal(bool(policy["enabled"]))
@@ -2170,11 +2171,11 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	_refresh_command_mode()
 	fleet_title.visible = false
 	fleet_detail.visible = false
-	fleet_cargo.visible = ECONOMY._cargo_total({"cargo": cargo}) > ECONOMY.EPS
-	if fleet_cargo.visible:
+	fleet_cargo_footer.visible = ECONOMY._cargo_total({"cargo": cargo}) > ECONOMY.EPS
+	if fleet_cargo_footer.visible:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			var amount: float = float(cargo.get(resource, 0.0))
-			fleet_cargo_labels[resource].text = _compact_amount(amount) if amount >= 1000.0 else ("%.1f" % amount).trim_suffix(".0") if amount >= 0.1 else "%.2f" % amount
+			fleet_cargo_labels[resource].text = _tons(amount, 1, true) if amount >= 1000.0 else (("%.1f" % amount).trim_suffix(".0") if amount >= 0.1 else "%.2f" % amount) + "t"
 			fleet_cargo_labels[resource].tooltip_text = "%.1f t" % amount
 			fleet_cargo_labels[resource].get_parent().visible = amount > ECONOMY.EPS
 
@@ -2885,6 +2886,7 @@ func _refresh() -> void:
 		if selected_units.has(int(craft["id"])):
 			living.append(int(craft["id"]))
 	selected_units = living
+	_refresh_control_groups(state)
 	if ship.is_empty():
 		selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 		ship = _selected_ship(state)
@@ -2913,7 +2915,6 @@ func _refresh() -> void:
 	empty_selection.visible = false
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	planet_overview.visible = not p.is_empty() and not other_selected and not body_selected and not yard_selected and selected_buildings.size() <= 1
-	yard_column.visible = planet_overview.visible and overview_panel.visible
 	var grouped_buildings: bool = selected_buildings.size() > 1
 	_refresh_selection_portrait(ship, p, body_selected, yard_selected, grouped_buildings)
 	body_overview.visible = body_selected and not grouped_buildings
@@ -2940,7 +2941,8 @@ func _refresh() -> void:
 	fleet_overview.visible = other_selected
 	fleet_title.visible = other_selected
 	fleet_detail.visible = other_selected
-	fleet_cargo.visible = other_selected
+	fleet_cargo_footer.hide()
+	yard_activity.get_parent().hide()
 	if yard_selected:
 		_refresh_yard_overview(p, own_system and phase == "match")
 		if grouped_buildings:
@@ -3012,50 +3014,17 @@ func _refresh() -> void:
 	_refresh_pds(p, owned)
 	_refresh_economy_cards(p, owned)
 
-func _upgrade_yard_at(index: int) -> void:
-	if index < 0:
-		_cancel_job(-index)
-	elif index >= 100:
-		_operation("yard", str(index - 100))
-	elif ECONOMY._has_job(_planet(), "yard_upgrade", str(index)):
-		_cancel_kind("yard_upgrade", str(index))
-	else:
-		_operation("yard_upgrade", str(index))
-
-func _cancel_yard_at(index: int) -> void:
-	if index < 0:
-		_cancel_job(-index)
-	elif index < 100:
-		_cancel_kind("yard_upgrade", str(index))
-
 func _refresh_yard_activity(p: Dictionary) -> void:
 	var active: Dictionary = {}
-	if not p.is_empty():
-		var yards: Array = p["yards"]
-		for i in range(yards.size()):
-			var yard: Dictionary = yards[i]
-			active[i] = {}
-			for job in p["queue"]:
-				if int(job["id"]) == int(yard["job"]):
-					active[i] = job
-					break
-		# A queued upgrade with no materials may be unassigned; keep its bar visible.
-		for i in range(yards.size()):
-			if not active[i].is_empty():
-				continue
-			for queued in p["queue"]:
-				if queued["kind"] == "yard_upgrade" and int(queued["target"]) == i:
-					active[i] = queued
-					break
-		var reserved: Dictionary = {}
+	var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and str(session.get("phase")) == "match"
+	if owned:
 		for job in p["queue"]:
 			if job["kind"] == "yard":
 				active[-int(job["id"])] = job
-				reserved[int(job["level"])] = true
-		for slot in range(yards.size() + 1, ECONOMY.MAX_SHIPYARDS + 1):
-			if not reserved.has(slot):
-				active[100 + slot] = {}
-	yard_activity.get_parent().visible = not p.is_empty()
+		var slot: int = ECONOMY.next_shipyard_slot(p)
+		if slot > 0:
+			active[slot] = {}
+	yard_activity.get_parent().visible = not active.is_empty()
 	for index in yard_activity_rows.keys():
 		if not active.has(index):
 			var obsolete: Control = yard_activity_rows[index]["row"]
@@ -3064,10 +3033,8 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 			yard_activity_rows.erase(index)
 	for index in active:
 		var job: Dictionary = active[index]
-		var vacant: bool = int(index) >= 100
-		var number: int = int(index) - 100 if vacant else int(index) + 1
-		if int(index) < 0:
-			number = int(job["level"])
+		var vacant: bool = job.is_empty()
+		var number: int = int(index) if vacant else int(job["level"])
 		if not yard_activity_rows.has(index):
 			var row := VBoxContainer.new()
 			var header := HBoxContainer.new()
@@ -3075,116 +3042,31 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 			var title := _label("", 12)
 			title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			header.add_child(title)
-			var select_button: Button = _button("Select", _select_yard_slot.bind(int(index)), header)
-			select_button.visible = int(index) >= 0 and int(index) < ECONOMY.MAX_SHIPYARDS
-			var build: Button = _button("Build", _upgrade_yard_at.bind(int(index)), header)
-			build.custom_minimum_size = Vector2(48, 22)
-			build.add_theme_font_size_override("font_size", 11)
-			var vacant_cancel: Button = _button("×", func() -> void: pass, header)
-			vacant_cancel.custom_minimum_size = Vector2(23, 22)
-			vacant_cancel.disabled = true
-			vacant_cancel.tooltip_text = "No construction to cancel"
+			var action: Button = _button("Build" if vacant else "×", _operation.bind("yard", str(number)) if vacant else _cancel_job.bind(-int(index)), header)
+			action.add_theme_font_size_override("font_size", 11)
 			var costs: GridContainer = _cost_grid(row)
 			var progress := ProgressBar.new()
 			progress.step = 0.0
-			progress.custom_minimum_size.y = 16
+			progress.custom_minimum_size.y = 14
 			row.add_child(progress)
-			var disclosure: Dictionary = _make_disclosure(row, "Upgrade")
-			var upgrade_detail := _label("", 11)
-			disclosure["body"].add_child(upgrade_detail)
-			var upgrade_costs: GridContainer = _cost_grid(disclosure["summary"])
-			var actions: HBoxContainer = disclosure["actions"]
-			var upgrade: Button = _card_action(disclosure, "Upgrade", _upgrade_yard_at.bind(int(index)))
-			var cancel: Button = _card_cancel(disclosure, _cancel_yard_at.bind(int(index)), progress)
-			var repeat: Button = _repeat_button(actions, "yard_upgrade:" + str(index))
-			upgrade.custom_minimum_size.y = 24
-			upgrade.add_theme_font_size_override("font_size", 11)
 			yard_activity.add_child(row)
-			disclosure.merge({"row": row, "label": title, "progress": progress, "upgrade": upgrade, "cancel": cancel, "vacant_cancel": vacant_cancel, "repeat": repeat, "build": build, "costs": costs, "upgrade_detail": upgrade_detail, "upgrade_costs": upgrade_costs})
-			yard_activity_rows[index] = disclosure
-		var label: Label = yard_activity_rows[index]["label"]
-		var bar: ProgressBar = yard_activity_rows[index]["progress"]
-		var upgrade: Button = yard_activity_rows[index]["upgrade"]
-		yard_activity.move_child(yard_activity_rows[index]["row"], mini(number, yard_activity.get_child_count() - 1))
-		var repeat: Button = yard_activity_rows[index]["repeat"]
-		var build: Button = yard_activity_rows[index]["build"]
-		var costs: GridContainer = yard_activity_rows[index]["costs"]
-		var can_build: bool = vacant and number == ECONOMY.next_shipyard_slot(p) and int(p["owner"]) == _me() and str(session.get("phase")) == "match"
-		build.visible = can_build
-		yard_activity_rows[index]["vacant_cancel"].hide()
+			yard_activity_rows[index] = {"row": row, "label": title, "action": action, "costs": costs, "progress": progress}
+		var card: Dictionary = yard_activity_rows[index]
+		var label: Label = card["label"]
+		var button: Button = card["action"]
+		var bar: ProgressBar = card["progress"]
+		var recipe: Dictionary = ECONOMY._cost("yard", number) if vacant else job["cost"]
+		label.text = "Shipyard %d" % number if vacant else "Shipyard %d · Under construction" % number
+		button.disabled = vacant and not ECONOMY.affordable(p, recipe)
+		button.tooltip_text = _cost_text(recipe) if vacant else "Cancel construction"
+		card["costs"].visible = vacant
+		bar.visible = not vacant
 		if vacant:
-			yard_activity_rows[index]["cancel"].hide()
-		build.disabled = not can_build or not ECONOMY.affordable(p, ECONOMY._cost("yard", number))
-		costs.visible = can_build
-		yard_activity_rows[index]["actions"].visible = not vacant
-		yard_activity_rows[index]["summary"].visible = not vacant
-		yard_activity_rows[index]["row"].visible = number <= p["yards"].size() + 1 if not p.is_empty() else false
-		if vacant:
-			_collapse_card(yard_activity_rows[index])
-			label.text = "Shipyard %d" % number
-			bar.visible = false
-			upgrade.visible = false
-			repeat.visible = false
-			var recipe: Dictionary = ECONOMY._cost("yard", number)
-			label.tooltip_text = _cost_text(recipe) + " · +5,000 Eco-Housing residents · +0.2 t/yr Organics · Requires %s population to operate" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[number - 1]))
-			build.tooltip_text = label.tooltip_text
-			_set_timed_action(build, "Build", ECONOMY._work("yard", number))
-			_show_cost(costs, recipe)
-			continue
-		bar.visible = true
-		label.tooltip_text = ""
-		var existing: bool = int(index) >= 0
-		var level: int = int(p["yards"][index]["level"]) if existing else 1
-		var pending: bool = existing and ECONOMY._has_job(p, "yard_upgrade", str(index))
-		var owned: bool = int(p["owner"]) == _me() and str(session.get("phase")) == "match"
-		var operating: bool = existing and ECONOMY.shipyard_operational(p, int(index))
-		var cancelling: Button = yard_activity_rows[index]["cancel"]
-		upgrade.visible = existing
-		repeat.visible = existing
-		cancelling.visible = not job.is_empty()
-		cancelling.disabled = not owned or job.is_empty()
-		if not job.is_empty():
-			if cancelling.pressed.is_connected(_cancel_yard_at.bind(int(index))):
-				cancelling.pressed.disconnect(_cancel_yard_at.bind(int(index)))
-			if cancelling.has_meta("job_callback"):
-				cancelling.pressed.disconnect(cancelling.get_meta("job_callback"))
-			var callback: Callable = _cancel_job.bind(int(job["id"]))
-			cancelling.set_meta("job_callback", callback)
-			cancelling.pressed.connect(callback)
-		_sync_repeat(repeat, p, "yard_upgrade:" + str(index), repeat.visible and level < ECONOMY.MAX_SHIPYARD_LEVEL and str(session.get("phase")) == "match")
-		upgrade.disabled = not owned or not existing or not _yard_can_upgrade(p, index)
-		_set_timed_action(upgrade, "Upgrade", ECONOMY._work("yard_upgrade", level + 1) if existing else -1.0)
-		_disclosure_title(yard_activity_rows[index], "Upgrade to Lv %d" % (level + 1) if existing and not pending else ("Upgrade pending" if existing else "Construction · " + _duration_text(float(job["work"]))))
-		yard_activity_rows[index]["upgrade_detail"].text = "Build speed %.0f → %.0f work/yr · Max size %d → %d" % [ECONOMY.yard_speed(level), ECONOMY.yard_speed(level + 1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1)] if existing else "Adds a shipyard"
-		yard_activity_rows[index]["upgrade_detail"].text += "\nEco-Housing: 5,000 residents per completed shipyard · +0.2 t/yr Organics\nSelf-sustaining crew population regenerates to capacity. Upgrading the shipyard does not add another habitat."
-		if existing and not operating:
-			yard_activity_rows[index]["upgrade_detail"].text += "\nRequires %s population" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[index]))
-		_show_cost(yard_activity_rows[index]["upgrade_costs"], ECONOMY._cost("yard_upgrade", level + 1) if existing else job["cost"])
-		upgrade.tooltip_text = "Lv %d • %.0f t Metals • %.0f years" % [level, float(ECONOMY._cost("yard_upgrade", level + 1)["Metals"]), ECONOMY._work("yard_upgrade", level + 1)] if existing else _cost_text(job["cost"], job["allocated"])
-		if existing and level >= ECONOMY.MAX_SHIPYARD_LEVEL:
-			_disclosure_title(yard_activity_rows[index], "Maximum level")
-			upgrade.tooltip_text = "Maximum level"
-		if job.is_empty():
-			label.text = "Shipyard %d · Lv %d · %s" % [number, level, "Idle" if operating else "Offline"]
-			bar.value = 0.0
-			bar.show_percentage = false
-			bar.tooltip_text = "Shipyard %d" % (int(index) + 1)
-			_style_progress(bar, p, {})
-			continue
-		bar.show_percentage = true
-		var name_text: String = "Logistics ship" if job["kind"] == "ship" else str(job["kind"]).replace("_", " ").capitalize()
-		if job["kind"] == "yard_upgrade":
-			name_text = "Upgrade to Lv %d" % int(job["level"])
-		elif job["kind"] == "yard":
-			name_text = "Construction"
-		label.text = "Shipyard %d · Lv %d · %s" % [number, level, name_text] if existing else "Shipyard %d · %s" % [number, name_text]
-		bar.value = 100.0 * float(job["progress"]) / float(job["work"])
-		bar.tooltip_text = "Shipyard %d" % number
-		_style_progress(bar, p, job)
-		if existing and not operating:
-			bar.add_theme_stylebox_override("background", HUD.surface(Color("#33251a"), Color("#db9b54"), 0, 3))
-			bar.set_meta("blocked", true)
-			bar.tooltip_text = "Blocked: requires %s population" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[index]))
+			_set_timed_action(button, "Build", ECONOMY._work("yard", number))
+			_show_cost(card["costs"], recipe)
+		else:
+			bar.value = 100.0 * float(job["progress"]) / float(job["work"])
+			_style_progress(bar, p, job)
 
 func _job_name(item: Dictionary) -> String:
 	match str(item["kind"]):
@@ -3684,6 +3566,136 @@ func _clear_building_selection() -> void:
 	selected_buildings.clear()
 	building_selection_kind = ""
 
+func _build_control_group_strip() -> void:
+	control_group_strip = HBoxContainer.new()
+	control_group_strip.add_theme_constant_override("separation", 2)
+	console_center_spacer.add_child(control_group_strip)
+	control_group_strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	control_group_strip.offset_top = -26.0
+	control_group_strip.offset_bottom = -2.0
+	console_center_spacer.clip_contents = true
+	for number in [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]:
+		var button := _button(str(number), _recall_control_group.bind(number), control_group_strip)
+		button.focus_mode = Control.FOCUS_NONE
+		button.custom_minimum_size = Vector2(20, 24)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.clip_text = true
+		button.expand_icon = true
+		button.add_theme_constant_override("icon_max_width", 14)
+		button.add_theme_font_size_override("font_size", 11)
+		button.disabled = true
+		control_group_buttons[number] = button
+	control_group_strip.resized.connect(func() -> void: _refresh_control_groups(_state()))
+
+func _control_ref_valid(state: Dictionary, ref: Vector2i, kind: String, expected_count: int) -> bool:
+	var planets: Array = state.get("planets", [])
+	if ref.x < 0 or ref.x >= planets.size() or int(planets[ref.x]["owner"]) != _me():
+		return false
+	if kind == "system":
+		return ECONOMY.has_station(planets[ref.x])
+	if kind == "planet":
+		return ref.y >= 0 and ref.y < int(planets[ref.x].get("planet_count", 0))
+	return _building_valid(state, ref, kind, expected_count)
+
+func _prune_control_group(state: Dictionary, group: Dictionary) -> Dictionary:
+	var kind: String = group.get("kind", "")
+	if kind == "units":
+		var ids: Array[int] = []
+		for craft in state.get("ships", []):
+			if int(craft["owner"]) == _me() and group["ids"].has(int(craft["id"])):
+				ids.append(int(craft["id"]))
+		return {} if ids.is_empty() else {"kind": kind, "ids": ids}
+	if kind.is_empty():
+		return {}
+	var refs: Dictionary = {}
+	for ref in group["refs"]:
+		if _control_ref_valid(state, ref, kind, int(group["refs"][ref])):
+			refs[ref] = group["refs"][ref]
+	return {} if refs.is_empty() else {"kind": kind, "refs": refs}
+
+func _current_control_group(state: Dictionary) -> Dictionary:
+	if not selected_units.is_empty():
+		return _prune_control_group(state, {"kind": "units", "ids": selected_units})
+	if not selected_buildings.is_empty():
+		return _prune_control_group(state, {"kind": building_selection_kind, "refs": selected_buildings})
+	if selected < 0 or selected >= state.get("planets", []).size():
+		return {}
+	var kind: String = "shipyard" if selected_yard >= 0 else "planet" if selected_body >= 0 else "system"
+	var ref := Vector2i(selected, selected_yard if selected_yard >= 0 else selected_body if selected_body >= 0 else 0)
+	return _prune_control_group(state, {"kind": kind, "refs": {ref: selected_yard_count if kind == "shipyard" else 0}})
+
+func _assign_control_group(number: int) -> void:
+	var state: Dictionary = _state()
+	var group: Dictionary = _current_control_group(state)
+	if not group.is_empty():
+		control_groups[number] = group
+	_refresh_control_groups(state)
+
+func _refresh_control_groups(state: Dictionary) -> void:
+	for number in control_group_buttons:
+		var button: Button = control_group_buttons[number]
+		var group: Dictionary = _prune_control_group(state, control_groups.get(number, {}))
+		if group.is_empty():
+			control_groups.erase(number)
+			button.text = str(number)
+			button.icon = null
+			button.disabled = true
+			button.tooltip_text = "Ctrl+%d to assign a selection" % number
+			continue
+		control_groups[number] = group
+		var kind: String = group["kind"]
+		var count: int = group["ids"].size() if kind == "units" else group["refs"].size()
+		var icon_kind: String = "station" if kind == "system" else kind
+		if kind == "units":
+			for craft in state["ships"]:
+				if group["ids"].has(int(craft["id"])):
+					icon_kind = craft["kind"]
+					break
+		button.text = "%d·%d" % [number, count] if button.size.x >= 34.0 else str(number)
+		button.icon = _selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
+		button.disabled = false
+		button.tooltip_text = "Group %d · %d %s\nClick or press %d to select · Ctrl+%d to replace" % [number, count, "ships" if kind == "units" else "structures", number, number]
+
+func _recall_control_group(number: int, additive: bool = false) -> void:
+	var state: Dictionary = _state()
+	var group: Dictionary = _prune_control_group(state, control_groups.get(number, {}))
+	if group.is_empty():
+		_refresh_control_groups(state)
+		return
+	var kind: String = group["kind"]
+	var previous: Dictionary = _current_control_group(state) if additive else {}
+	_clear_building_selection()
+	selected = -1
+	selected_body = -1
+	selected_yard = -1
+	selected_field = -1
+	selected_ship_id = -1
+	selected_units.clear()
+	follow_units = false
+	pending_command = ""
+	formation_button = 0
+	if kind == "units":
+		if previous.get("kind", "") == kind:
+			selected_units.assign(previous["ids"])
+		for id in group["ids"]:
+			if not selected_units.has(id):
+				selected_units.append(id)
+		selected_ship_id = selected_units[0]
+	else:
+		var refs: Dictionary = group["refs"].duplicate()
+		if previous.get("kind", "") == kind and kind in ["shipyard", "station", "pds"]:
+			refs.merge(previous["refs"])
+		var first: Vector2i = refs.keys()[0]
+		_set_building_primary(state, first, kind)
+		if kind == "planet":
+			selected_body = first.y
+		elif kind in ["shipyard", "station", "pds"]:
+			building_selection_kind = kind
+			selected_buildings = refs
+		_load_thresholds()
+	_refresh_command_mode()
+	_refresh()
+
 func _building_valid(state: Dictionary, ref: Vector2i, kind: String, expected_count: int = -1) -> bool:
 	var planets: Array = state.get("planets", [])
 	if ref.x < 0 or ref.x >= planets.size() or ref.y < 0 or not ECONOMY.discovered(state, _me(), "planets", ref.x):
@@ -3758,6 +3770,8 @@ func _in_visible_playfield(point: Vector2) -> bool:
 	# viewport. Include that space but not objects obscured by the console.
 	var global_point: Vector2 = map_canvas.get_global_transform() * point
 	if is_instance_valid(time_panel) and time_panel.get_global_rect().has_point(global_point):
+		return false
+	if is_instance_valid(control_group_strip) and control_group_strip.get_global_rect().has_point(global_point):
 		return false
 	return Rect2(Vector2.ZERO, _projection_size()).has_point(point) or console_center_spacer.get_global_rect().has_point(global_point)
 
@@ -4381,27 +4395,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_hold_selected()
 	elif key == KEY_U:
 		_unload_selected()
-	elif key >= KEY_1 and key <= KEY_9:
+	elif key >= KEY_0 and key <= KEY_9:
+		var number: int = key - KEY_0
 		if event.ctrl_pressed:
-			control_groups[key] = selected_units.duplicate()
+			_assign_control_group(number)
 		else:
-			var group: Array = control_groups.get(key, [])
-			_clear_building_selection()
-			pending_command = ""
-			_refresh_command_mode()
-			if not event.shift_pressed:
-				selected_units.clear()
-			for craft in _state().get("ships", []):
-				var id: int = int(craft["id"])
-				if id in group and not selected_units.has(id):
-					selected_units.append(id)
-			selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
-			follow_units = false
-			selected = -1
-			selected_body = -1
-			selected_yard = -1
-			selected_field = -1
-			_refresh()
+			_recall_control_group(number, event.shift_pressed)
 	else:
 		return
 	get_viewport().set_input_as_handled()
