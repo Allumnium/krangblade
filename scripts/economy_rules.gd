@@ -2037,7 +2037,7 @@ static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, 
 
 # Validate the entire selection before changing any order. Only owned fighters
 # can receive military movement orders, including during automatic repairs.
-static func command_fighters(state: Dictionary, player: int, ids: Array, target: int) -> bool:
+static func command_fighters(state: Dictionary, player: int, ids: Array, target: int, move_only: bool = false) -> bool:
 	if ids.is_empty() or not military_pois(state, player).has(target):
 		return false
 	var selected: Array = _owned_fighters(state, player, ids)
@@ -2054,6 +2054,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 		ship["direct_order"] = true
 		_clear_local_hold(ship)
 		ship["operation_target"] = target
+		ship["move_only"] = move_only
 		ship.erase("rally_pending")
 		if not bool(ship.get("retreating", false)):
 			_redirect_fighter(graph, ship, target, paths)
@@ -2062,6 +2063,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 # Both orders use the normal military graph and the same automatic combat
 # and repair rules as attack-move. The target is a stable hull ID, not a slot.
 static func _clear_tactical_order(ship: Dictionary) -> void:
+	ship.erase("move_only")
 	ship.erase("attack_order")
 	ship.erase("attack_local")
 	ship.erase("patrol_from")
@@ -2217,6 +2219,7 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 	return units if units.size() == requested.size() else []
 
 static func _clear_local_hold(ship: Dictionary) -> void:
+	ship.erase("move_only")
 	if bool(ship.get("holding", false)) and ship.get("kind", "") == "miner" and ship.get("mining_mode", "") == "mining":
 		# Resume extraction only after physically returning to the rock.
 		ship["mining_mode"] = "outbound"
@@ -2224,7 +2227,7 @@ static func _clear_local_hold(ship: Dictionary) -> void:
 	ship.erase("hold_position")
 	ship.erase("hold_sector")
 
-static func command_local_position(state: Dictionary, player: int, ids: Array, node: int, point: Vector2) -> bool:
+static func command_local_position(state: Dictionary, player: int, ids: Array, node: int, point: Vector2, move_only: bool = false) -> bool:
 	if not point.is_finite() or not military_pois(state, player).has(node):
 		return false
 	var graph: Dictionary = military_graph(state)
@@ -2240,6 +2243,7 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
 		ship["hold_position"] = point
+		ship["move_only"] = move_only
 		ship["hold_sector"] = node
 		ship["holding"] = true
 		ship["navigation_target"] = point
@@ -2295,6 +2299,8 @@ static func _work_local_hold(graph: Dictionary, ship: Dictionary, dt: float) -> 
 			_move({"map": graph}, ship, dt)
 		return
 	_navigate(ship, ship["hold_position"], SHIP_SPEED * dt)
+	if (ship["position"] as Vector2).distance_to(ship["hold_position"]) <= EPS:
+		ship.erase("move_only")
 
 static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array, defer_routes: bool = false) -> void:
 	var weights: Dictionary = military_policy(state, player, "fighter")
@@ -2544,7 +2550,7 @@ static func _release_auto_salvage(ship: Dictionary, piles: Dictionary) -> void:
 static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, busy: Dictionary, cells: Dictionary, coordinated: bool) -> bool:
 	var piles: Dictionary = state.get("salvage", {})
 	_release_auto_salvage(ship, piles)
-	if piles.is_empty() or _salvage_active(ship) or busy.has(int(ship["id"])) or cargo_free(ship) <= EPS:
+	if piles.is_empty() or _salvage_active(ship) or bool(ship.get("move_only", false)) or busy.has(int(ship["id"])) or cargo_free(ship) <= EPS:
 		return false
 	var pos: Vector2 = ship["position"]
 	var idle: bool = not coordinated and _is_idle_ship(ship) and not ship.has("attack_order") and not ship.has("patrol_from")
@@ -2865,7 +2871,10 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	for ship in ships:
 		if ship.get("kind", "") != "fighter":
 			continue
-		if bool(ship.get("retreating", false)):
+		var moving_only: bool = bool(ship.get("move_only", false)) and (not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
+		if not moving_only:
+			ship.erase("move_only")
+		if bool(ship.get("retreating", false)) or moving_only:
 			ship["combat_target"] = -1
 			ship["pursuit_target"] = -1
 			ship["pursuit_left"] = 0.0

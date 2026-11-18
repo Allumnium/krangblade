@@ -350,7 +350,7 @@ func _send_commands() -> void:
 	session.call("request_miner_assignment", [own_miners[0]], mining_field)
 	session.call("request_miner_assignment", [own_miners[0], enemy_miner], -1)
 	session.call("request_miner_assignment", [own_miners[0]], 999999)
-	session.call("request_fighter_move", [own_fighters[0]], field_node)
+	session.call("request_fighter_move", [own_fighters[0]], field_node, true)
 	session.call("request_tactical_order", [own_fighters[0]], "patrol", field_node)
 	session.call("request_tactical_order", [own_fighters[0], enemy_fighter], "patrol", home_index)
 	session.call("request_tactical_order", [own_fighters[0]], "patrol", -1)
@@ -366,8 +366,8 @@ func _send_commands() -> void:
 	session.call("request_fighter_hold", [own_fighters[0], enemy_fighter])
 	var graph: Dictionary = ECON.military_graph(initial)
 	var local_point: Vector2 = graph["points"][home_index] + Vector2.RIGHT * ECON.sector_limit(graph, home_index, Vector2.RIGHT) * 0.25
-	session.call("request_local_position", [own_fighters[1]], home_index, local_point)
-	session.call("request_local_position", [own_fighters[1], enemy_fighter], home_index, local_point)
+	session.call("request_local_position", [own_fighters[1]], home_index, local_point, true)
+	session.call("request_local_position", [own_fighters[1], enemy_fighter], home_index, local_point, true)
 	session.call("request_local_position", [own_fighters[1]], home_index, graph["points"][(home_index + 1) % expected_players])
 	session.call("request_unit_hold", [own_fighters[1], enemy_fighter], true)
 	hold_release_id = own_miners[1]

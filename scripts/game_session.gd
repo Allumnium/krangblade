@@ -720,21 +720,21 @@ func _colonize_for(id: int, ship_id: int, target: int) -> void:
 	if _active_player(id) and ECONOMY.send_colony(economy, id, ship_id, target):
 		_publish_economy()
 
-func request_fighter_move(ids: Array, target: int) -> void:
+func request_fighter_move(ids: Array, target: int, move_only: bool = false) -> void:
 	if phase != "match":
 		return
 	if is_solo or multiplayer.is_server():
-		_fighter_move_for(1, ids, target)
+		_fighter_move_for(1, ids, target, move_only)
 	else:
-		_rpc_fighter_move.rpc_id(1, ids, target)
+		_rpc_fighter_move.rpc_id(1, ids, target, move_only)
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_fighter_move(ids: Array, target: int) -> void:
+func _rpc_fighter_move(ids: Array, target: int, move_only: bool = false) -> void:
 	if multiplayer.is_server():
-		_fighter_move_for(multiplayer.get_remote_sender_id(), ids, target)
+		_fighter_move_for(multiplayer.get_remote_sender_id(), ids, target, move_only)
 
-func _fighter_move_for(id: int, ids: Array, target: int) -> void:
-	if _active_player(id) and ECONOMY.command_fighters(economy, id, ids, target):
+func _fighter_move_for(id: int, ids: Array, target: int, move_only: bool = false) -> void:
+	if _active_player(id) and ECONOMY.command_fighters(economy, id, ids, target, move_only):
 		_publish_economy()
 
 func request_tactical_order(ids: Array, kind: String, target: int) -> void:
@@ -796,21 +796,21 @@ func _fighter_hold_for(id: int, ids: Array) -> void:
 	if _active_player(id) and ECONOMY.hold_fighters(economy, id, ids):
 		_publish_economy()
 
-func request_local_position(ids: Array, node: int, point: Vector2) -> void:
+func request_local_position(ids: Array, node: int, point: Vector2, move_only: bool = false) -> void:
 	if phase != "match":
 		return
 	if is_solo or multiplayer.is_server():
-		_local_position_for(1, ids, node, point)
+		_local_position_for(1, ids, node, point, move_only)
 	else:
-		_rpc_local_position.rpc_id(1, ids, node, point)
+		_rpc_local_position.rpc_id(1, ids, node, point, move_only)
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_local_position(ids: Array, node: int, point: Vector2) -> void:
+func _rpc_local_position(ids: Array, node: int, point: Vector2, move_only: bool = false) -> void:
 	if multiplayer.is_server():
-		_local_position_for(multiplayer.get_remote_sender_id(), ids, node, point)
+		_local_position_for(multiplayer.get_remote_sender_id(), ids, node, point, move_only)
 
-func _local_position_for(id: int, ids: Array, node: int, point: Vector2) -> void:
-	if _active_player(id) and ECONOMY.command_local_position(economy, id, ids, node, point):
+func _local_position_for(id: int, ids: Array, node: int, point: Vector2, move_only: bool = false) -> void:
+	if _active_player(id) and ECONOMY.command_local_position(economy, id, ids, node, point, move_only):
 		_publish_economy()
 
 func request_salvage(ids: Array, target: int) -> void:
