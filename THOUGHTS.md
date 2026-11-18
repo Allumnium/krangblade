@@ -368,3 +368,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** UX correction.
 - **Observation:** The prior full-width console backdrop concealed the 20% center recess; v0.29.2 draws independent left, center and right panel silhouettes.
 - **Consider:** Visually check border joins and map occlusion with and without a selection.
+
+### T-Console-29c — Three-zone console structure
+- **Type:** UX stabilization.
+- **Observation:** The previous layout nested both content columns under a shared toolbar and left the right commands without independent scrolling. v0.29.4 places the minimap, center, and command wing as peers, gives the center a filling detail viewport, and scrolls the right commands beneath their toolbar.
+- **Consider:** Manual visual regression at 1024×576 and larger, plus multiple UI scales.
