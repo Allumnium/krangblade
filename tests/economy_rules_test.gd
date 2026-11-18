@@ -38,6 +38,20 @@ func _test_shipyard_rally() -> void:
 	assert(ECON.set_shipyard_rally(state, 1, 0, 1, -1, Vector2.ZERO))
 	assert(not system["yards"][1].has("rally"))
 
+func _test_rounded_sector_limits() -> void:
+	# Equal perpendicular bisectors used to form a sharp corner. The
+	# rounded corner must stay inside both constraints while the middle
+	# of an isolated straight boundary remains unchanged.
+	var graph: Dictionary = {"points": [Vector2.ZERO, Vector2(120, 0), Vector2(0, 120)], "sector_radii": [100.0, 100.0, 100.0], "sector_neighbors": [[Vector2(120, 0), Vector2(0, 120)], [], []]}
+	var diagonal: Vector2 = Vector2.ONE.normalized()
+	var hard_corner: float = 60.0 / diagonal.x
+	var rounded: float = ECON.sector_limit(graph, 0, diagonal)
+	assert(is_equal_approx(ECON.sector_limit(graph, 0, Vector2.RIGHT), 60.0))
+	assert(rounded < hard_corner and rounded > hard_corner * 0.8)
+	assert(ECON.sector_contains(graph, 0, diagonal * (rounded - 0.1)))
+	assert(not ECON.sector_contains(graph, 0, diagonal * (rounded + 0.1)))
+	assert(not ECON.sector_contains(graph, 0, Vector2(60.1, 0)))
+
 func _test_maintain_targets() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1])
 	var p: Dictionary = state["planets"][0]
@@ -60,6 +74,7 @@ func _test_maintain_targets() -> void:
 	assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
+	_test_rounded_sector_limits()
 	_test_shipyard_rally()
 	_test_freighter_bays()
 	_test_recovery_economy()

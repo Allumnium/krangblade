@@ -1427,7 +1427,7 @@ func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> 
 	content.offset_bottom = -2.0
 	var art := TextureRect.new()
 	art.texture = picture
-	art.custom_minimum_size = Vector2(0, 29)
+	art.custom_minimum_size = Vector2(0, 25)
 	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	art.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1435,7 +1435,6 @@ func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> 
 	content.add_child(art)
 	var name_label := Label.new()
 	name_label.text = caption
-	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_label.add_theme_font_size_override("font_size", 11)
 	name_label.add_theme_color_override("font_color", Color.WHITE)
@@ -1454,7 +1453,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_card.add_child(grid)
 	for kind in ECONOMY.SHIP_KINDS:
 		var button := Button.new()
-		var caption: String = {"ship": "Logistics", "colony_ship": "Colony ship", "fighter": "Fighter", "miner": "Mining ship"}[kind]
+		var caption: String = {"ship": "Logistics\nship", "colony_ship": "Colony\nship", "fighter": "Fighter", "miner": "Mining\nship"}[kind]
 		var art: TextureRect = _yard_ability_face(button, caption, _production_icon(kind, HUD.ACCENT))
 		button.set_meta("portrait", art)
 		button.pressed.connect(_build_at_yard.bind(kind))
