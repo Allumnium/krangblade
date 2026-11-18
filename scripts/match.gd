@@ -2389,8 +2389,10 @@ func _refresh() -> void:
 		selected_yard = -1
 	inspector_panel.visible = true
 	console_right_body.visible = not p.is_empty() or other_selected
-	overview_panel.visible = (not p.is_empty() or other_selected)
-	empty_selection.visible = not overview_panel.visible
+	# Keep the center panel mounted even when there is no selection;
+	# only its contents disappear, leaving a stable blank HUD surface.
+	overview_panel.visible = true
+	empty_selection.visible = false
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	planet_overview.visible = not other_selected and not body_selected and not yard_selected
 	yard_column.visible = planet_overview.visible and overview_panel.visible

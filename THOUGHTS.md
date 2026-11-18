@@ -387,3 +387,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 ### T-29f — Explicit camera follow
 - **Type:** Camera UX.
 - **Observation:** Unit selection and control-group recall automatically enabled camera follow. v0.29.7 requires F to enable follow for the selected ship or fleet; selection changes and manual camera movement disable it.
+
+### T-29g — Persistent center HUD
+- **Type:** UI consistency.
+- **Observation:** The center details panel was hidden when selection cleared, exposing the starfield and leaving an instruction label floating in its place. Keep the panel visible and blank instead.
