@@ -50,7 +50,7 @@ const FIELD_RESOURCES = ["Metals", "Crystals", ANTIMATTER]
 const PLANET_MINING_LIMIT: float = 100.0
 const FIELD_MINING_LIMIT: float = 200.0
 const MINER_CAPACITY: float = 60.0
-const FIGHTER_CAPACITY: float = 10.0
+const FIGHTER_CAPACITY: float = 0.0
 const COLONY_CAPACITY: float = 20.0
 const TRACTOR_RANGE: float = 90.0
 const TRACTOR_RATE: float = 12.0
@@ -2414,7 +2414,7 @@ static func _damaged(target: Dictionary) -> bool:
 
 static func can_deposit(state: Dictionary, ship: Dictionary, target_id: int) -> bool:
 	var ref: Dictionary = service_targets(state).get(target_id, {})
-	if target_id == int(ship["id"]) or not _friendly_target(state, int(ship["owner"]), ref) or _cargo_total(ship) <= EPS:
+	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or target_id == int(ship["id"]) or not _friendly_target(state, int(ship["owner"]), ref) or _cargo_total(ship) <= EPS:
 		return false
 	if ref["kind"] == "ship":
 		return cargo_free(ref["entity"]) > EPS
@@ -2968,9 +2968,9 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var owner: int = int(ship["owner"])
 	var fighter: bool = ship["kind"] == "fighter"
 	if kind == "unload":
-		return true
+		return cargo_capacity(str(ship["kind"])) > EPS
 	if kind == "drop":
-		return order.get("point") is Vector2 and patrol_node(state, graph, owner, order["point"]) >= 0
+		return cargo_capacity(str(ship["kind"])) > EPS and order.get("point") is Vector2 and patrol_node(state, graph, owner, order["point"]) >= 0
 	if not order.get("target", null) is int:
 		return false
 	var target: int = order["target"]
@@ -2997,7 +2997,7 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		"deposit":
 			return can_deposit(state, ship, target)
 		"salvage":
-			return state.get("salvage", {}).has(target)
+			return cargo_capacity(str(ship["kind"])) > EPS and state.get("salvage", {}).has(target)
 		"colonize":
 			return ship["kind"] == "colony_ship" and target >= 0 and target < state["planets"].size() and discovered(state, owner, "planets", target)
 		"mine":
@@ -3581,12 +3581,17 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 	var piles: Dictionary = state.get("salvage", {})
 	var previously_collecting: bool = ship.has("auto_salvage_target")
 	_release_auto_salvage(ship, piles)
-	if _salvage_active(ship) or bool(ship.get("move_only", false)) or busy.has(int(ship["id"])):
+	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or _salvage_active(ship) or bool(ship.get("move_only", false)) or busy.has(int(ship["id"])):
 		return false
 	if piles.is_empty() and not previously_collecting:
 		return false
 	var pos: Vector2 = ship["position"]
 	var idle: bool = not coordinated and _is_idle_ship(ship) and not _unit_order_running(ship) and ship.get("order_queue", []).is_empty()
+	# A mining assignment is a work preference, not a reason to ignore
+	# valuable nearby debris. Only detour within the local sector, never
+	# abandon a lane crossing, explicit movement, or loaded delivery.
+	var mining_detour: bool = ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") in ["idle", "approach", "outbound", "mining"] and ship["route"].is_empty() and not bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)) and (not _unit_order_running(ship) or ship.get("unit_order", {}).get("kind") == "mine")
+	idle = idle or mining_detour or (ship.get("kind", "") == "miner" and previously_collecting and not bool(ship.get("holding", false)) and ship["route"].is_empty() and ship.get("unit_order", {}).get("kind", "mine") == "mine")
 	var civilian: bool = ship.get("kind", "") in ["miner", "ship"]
 	var sector: int = local_sector(graph, ship)
 	if civilian:
@@ -3627,6 +3632,9 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 			return true
 		return false
 	var pile: Dictionary = piles[best]
+	if mining_detour:
+		_interrupt_work(ship)
+		ship["mining_active"] = false
 	pile["claim"] = int(ship["id"])
 	ship["auto_salvage_target"] = best
 	var point: Vector2 = pile["position"]
@@ -3732,7 +3740,7 @@ static func command_unload_cargo(state: Dictionary, player: int, ids: Array) -> 
 	var units: Array = _owned_units(state, player, ids)
 	var changed: bool = false
 	for ship in units:
-		if _cargo_total(ship) <= EPS or bool(ship.get("retreating", false)):
+		if cargo_capacity(str(ship["kind"])) <= EPS or _cargo_total(ship) <= EPS or bool(ship.get("retreating", false)):
 			continue
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
@@ -3803,7 +3811,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 	if not _salvage_active(ship):
 		return false
 	ship["tractor_active"] = false
-	if bool(ship.get("retreating", false)):
+	if cargo_capacity(str(ship["kind"])) <= EPS or bool(ship.get("retreating", false)):
 		_cancel_salvage_order(ship)
 		return false
 	var id: int = int(ship.get("salvage_target", -1))

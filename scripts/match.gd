@@ -30,6 +30,7 @@ const PLANET_FADE_SECONDS: float = 0.22
 # popup. Non-construction buttons still use the standard text tooltip.
 class CostButton extends Button:
 	var recipe: Dictionary = {}
+	var missing: Array[String] = []
 	var crew_icon: Texture2D
 
 	func _make_custom_tooltip(for_text: String) -> Object:
@@ -60,7 +61,9 @@ class CostButton extends Button:
 			HUD.fixed_icon(symbol, crew_icon if resource == "Population" else HUD.resource_icon(resource, 24), 24)
 			pair.add_child(symbol)
 			var amount := Label.new()
-			amount.text = "%.0f%s" % [float(recipe[resource]), "" if resource == "Population" else " t"]
+			amount.text = "%.0f%s" % [float(recipe[resource]), "" if resource == "Population" else "t"]
+			if missing.has(resource):
+				amount.add_theme_color_override("font_color", Color("#ff7777"))
 			pair.add_child(amount)
 		if lines.size() > 1 and not lines[1].is_empty():
 			var details := Label.new()
@@ -75,6 +78,7 @@ var sfx_volume: float = 100.0
 var music_muted: bool = false
 var sfx_muted: bool = false
 var upgrade_audio: AudioStreamPlayer
+var background_music: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
 var map_canvas: Control
@@ -255,7 +259,7 @@ var fleet_title: Label
 var fleet_detail: Label
 var hold_button: Button
 var unload_button: Button
-var yard_command_scroll: ScrollContainer
+var yard_command_scroll: VBoxContainer
 var yard_command_card: VBoxContainer
 var yard_command_grid: GridContainer
 var yard_commands: Dictionary = {}
@@ -402,12 +406,19 @@ func _ready() -> void:
 	upgrade_audio = AudioStreamPlayer.new()
 	upgrade_audio.stream = UPGRADE_SOUND
 	add_child(upgrade_audio)
+	background_music = AudioStreamPlayer.new()
+	background_music.stream = preload("res://assets/music/peaceful3.mp3")
+	add_child(background_music)
 	_load_settings()
 	_build_ui()
 	_build_resource_hover()
 	_apply_settings()
 	_on_economy_changed()
 	session.call("match_scene_loaded")
+
+func _exit_tree() -> void:
+	if is_instance_valid(background_music):
+		background_music.stop()
 
 func _label(value: String, font_size: int = 14) -> Label:
 	var label := Label.new()
@@ -791,6 +802,7 @@ func _build_ui() -> void:
 			card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	resized.connect(_layout_console)
 	inspector_panel.resized.connect(_layout_command_grids)
+	inspector_slot.resized.connect(_layout_command_grids)
 	inspector_panel.resized.connect(console_profile.queue_redraw)
 	console_center.resized.connect(console_profile.queue_redraw)
 	console_center.resized.connect(_layout_command_grids)
@@ -871,50 +883,26 @@ func _draw_console_profile() -> void:
 
 func _layout_command_grids() -> void:
 	var width: float = inspector_panel.size.x - 34.0
-	# Leave space for panel padding and a vertical scrollbar. Keep the
-	# five tactical actions on one row wherever their minimum size fits.
-	var command_width: float = maxf(0.0, inspector_panel.size.x - 22.0)
-	if is_instance_valid(command_card):
-		var slot_size: float = clampf(floorf((command_width - 12.0) / 5.0), 38.0, 48.0)
-		for button in command_buttons.values():
-			button.custom_minimum_size = Vector2.ONE * slot_size
-	if is_instance_valid(yard_command_grid):
-		# Preserve the four command columns even on a narrow console. Use
-		# the panel's real padding rather than reserving an unused column.
-		var padding: float = inspector_panel.get_theme_stylebox("panel").get_minimum_size().x
-		var yard_width: float = inspector_panel.custom_minimum_size.x - padding
-		var slot_width: float = maxf(36.0, floorf((yard_width - 9.0) / 4.0))
-		var slot_height: float = clampf(slot_width, 46.0, 60.0)
-		for button in yard_command_grid.get_children():
-			if not button is Button:
+	var padding: Vector2 = inspector_panel.get_theme_stylebox("panel").get_minimum_size()
+	var slot_width: float = maxf(36.0, floorf((inspector_panel.custom_minimum_size.x - padding.x - 9.0) / 4.0))
+	var slot_height: float = floorf((inspector_slot.size.y - padding.y - 9.0) / 4.0) if inspector_slot.size.y > 0.0 else 52.0
+	var slot_size := Vector2(slot_width, maxf(32.0, slot_height))
+	for grid in [command_card, yard_command_grid, station_primary_grid, station_build_grid]:
+		if not is_instance_valid(grid):
+			continue
+		for slot in grid.get_children():
+			slot.custom_minimum_size = slot_size
+			if not slot is Button or not slot.has_meta("caption"):
 				continue
-			button.custom_minimum_size = Vector2(slot_width, slot_height)
-			var caption: Label = button.get_meta("caption")
+			var caption: Label = slot.get_meta("caption")
 			var font: Font = caption.get_theme_font("font")
 			var font_size: int = 11
 			for line in caption.text.split("\n"):
 				while font_size > 8 and font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > slot_width - 4.0:
 					font_size -= 1
 			caption.add_theme_font_size_override("font_size", font_size)
-	if is_instance_valid(station_primary_grid):
-		var padding: float = inspector_panel.get_theme_stylebox("panel").get_minimum_size().x
-		var slot_width: float = maxf(36.0, floorf((inspector_panel.custom_minimum_size.x - padding - 9.0) / 4.0))
-		var slot_height: float = clampf(slot_width, 40.0, 52.0)
-		for grid in [station_primary_grid, station_build_grid]:
-			var row_height: float = minf(slot_height, floorf((inspector_slot.size.y - padding - 9.0) / 4.0)) if inspector_slot.size.y > 0.0 else slot_height
-			for button in grid.get_children():
-				button.custom_minimum_size = Vector2(slot_width, maxf(32.0, row_height))
-				if not button is Button:
-					continue
-				var caption: Label = button.get_meta("caption")
-				var font: Font = caption.get_theme_font("font")
-				var font_size: int = 11
-				for line in caption.text.split("\n"):
-					while font_size > 8 and font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > slot_width - 4.0:
-						font_size -= 1
-				caption.add_theme_font_size_override("font_size", font_size)
-		if is_instance_valid(station_trade_back):
-			station_trade_back.custom_minimum_size = Vector2(slot_width, 36.0)
+	if is_instance_valid(station_trade_back):
+		station_trade_back.custom_minimum_size = Vector2(slot_width, 36.0)
 	if is_instance_valid(selection_grid):
 		selection_grid.columns = maxi(1, floori(maxf(38.0, console_center.size.x - 20.0) / 41.0))
 		building_group_grid.columns = selection_grid.columns
@@ -1119,20 +1107,31 @@ func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
 		bar.add_theme_stylebox_override("fill", HUD.surface(Color("#b56b35"), Color("#f2b57e"), 0, 3))
 		bar.tooltip_text = "Blocked: " + ", ".join(blocked)
 
-func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {}, crew: float = 0.0) -> void:
+func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {}, crew: float = 0.0, available: Dictionary = {}) -> void:
 	var cost_button: CostButton = button as CostButton
 	cost_button.recipe = cost.duplicate()
+	cost_button.missing.clear()
 	if crew > 0.0:
 		cost_button.recipe["Population"] = crew
 		cost_button.crew_icon = _population_texture()
+	if not available.is_empty():
+		for resource in cost_button.recipe:
+			if float(available.get(resource, 0.0)) + ECONOMY.EPS < float(cost_button.recipe[resource]):
+				cost_button.missing.append(resource)
 	button.tooltip_text = description
+
+func _available_cost_resources(p: Dictionary, yard: int = -1) -> Dictionary:
+	var available: Dictionary = p["stock"].duplicate()
+	var reserve: float = ECONOMY.SHIPYARD_POPULATION[yard] if yard >= 0 else 0.0
+	available["Population"] = maxf(0.0, float(p["population"]) - reserve)
+	return available
 
 func _ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
 		"colony_ship": details = "Settles a neutral system · %.0f settlers · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_CAPACITY]
-		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f · Cargo %.0f t" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.FIGHTER_CAPACITY]
+		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/yr · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 	return "%s\nHP %.0f · Speed %.0f/yr · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
 
@@ -1311,19 +1310,14 @@ func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> 
 	return art
 
 func _build_yard_command_card(parent: VBoxContainer) -> void:
-	yard_command_scroll = ScrollContainer.new()
-	yard_command_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	yard_command_scroll = VBoxContainer.new()
 	yard_command_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	parent.add_child(yard_command_scroll)
 	yard_command_card = VBoxContainer.new()
 	yard_command_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	yard_command_scroll.add_child(yard_command_card)
-	var grid := GridContainer.new()
+	var grid: GridContainer = _ability_grid(yard_command_card)
 	yard_command_grid = grid
-	grid.columns = 4
-	grid.add_theme_constant_override("h_separation", 3)
-	grid.add_theme_constant_override("v_separation", 3)
-	yard_command_card.add_child(grid)
 	for kind in ECONOMY.SHIP_KINDS:
 		var button := CostButton.new()
 		var caption: String = {"ship": "Logistics\nship", "colony_ship": "Colony\nship", "fighter": "Fighter", "miner": "Mining\nship"}[kind]
@@ -1361,6 +1355,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
+	_fill_ability_grid(grid)
 	yard_command_scroll.hide()
 
 func _station_command_icon(kind: String) -> Texture2D:
@@ -1383,20 +1378,26 @@ func _station_command_icon(kind: String) -> Texture2D:
 	station_icons[kind] = _command_icon(paths.get(kind, paths["build"]))
 	return station_icons[kind]
 
-func _station_grid(parent: Container) -> GridContainer:
+func _ability_grid(parent: Container) -> GridContainer:
 	var grid := GridContainer.new()
 	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 3)
 	grid.add_theme_constant_override("v_separation", 3)
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	grid.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	parent.add_child(grid)
 	return grid
 
-func _station_spacer(grid: GridContainer) -> void:
+func _station_spacer(grid: GridContainer) -> Control:
 	var slot := Control.new()
 	slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_child(slot)
+	return slot
+
+func _fill_ability_grid(grid: GridContainer) -> void:
+	while grid.get_child_count() < 16:
+		_station_spacer(grid)
 
 func _station_button(grid: GridContainer, caption: String, key: String, action: Callable) -> Button:
 	var button: Button = _button("", action, grid, true)
@@ -1407,9 +1408,9 @@ func _station_button(grid: GridContainer, caption: String, key: String, action: 
 func _build_station_command_card(parent: Container) -> void:
 	station_commands = VBoxContainer.new()
 	station_commands.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	station_commands.alignment = BoxContainer.ALIGNMENT_END
+	station_commands.alignment = BoxContainer.ALIGNMENT_BEGIN
 	parent.add_child(station_commands)
-	station_primary_grid = _station_grid(station_commands)
+	station_primary_grid = _ability_grid(station_commands)
 	for port in range(1, ECONOMY.MAX_SHIPYARDS + 1):
 		station_port_buttons[port] = _station_button(station_primary_grid, "Build\nShipyard %d" % port, "yard", _station_port_pressed.bind(port))
 	_station_spacer(station_primary_grid)
@@ -1423,7 +1424,7 @@ func _build_station_command_card(parent: Container) -> void:
 	_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade"))
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
-	station_build_grid = _station_grid(station_commands)
+	station_build_grid = _ability_grid(station_commands)
 	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "Planetary\ndefense"}
 	for resource in ECONOMY.RESOURCES:
 		captions[resource] = str(ECONOMY.ECONOMY_BUILDINGS[resource]["name"]).replace(" ", "\n")
@@ -1502,7 +1503,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		button.disabled = not owned or (slot < 0 and (not pending.is_empty() or tier <= 0 or not ECONOMY.affordable(p, cost)))
 		var hint: String = label.text.replace("\n", " ")
 		if slot < 0 and pending.is_empty() and tier > 0:
-			_set_cost_tooltip(button, hint + " · %.0f yr" % ECONOMY._work("yard", tier), cost)
+			_set_cost_tooltip(button, hint + " · %.0f yr" % ECONOMY._work("yard", tier), cost, 0.0, _available_cost_resources(p))
 		else:
 			_set_cost_tooltip(button, "" if slot >= 0 else hint)
 		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled else Color.WHITE
@@ -1512,7 +1513,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not ECONOMY.station_upgrade_available(p, kind)
 		var hint: String = "Reinforced Plating · %.0f yr\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix · %.0f yr\n2 defensive lasers · 18 damage each · 1 shot/s (1×) · range 180"
-		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {})
+		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
 			button.tooltip_text += "\n" + ("Installed" if installed else "Building")
 		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled and not installed else Color.WHITE
@@ -1603,10 +1604,10 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		if button.has_meta("auto_border"):
 			(button.get_meta("auto_border") as Control).visible = auto
-		_set_cost_tooltip(button, name_text + (" · %.1f yr" % work if not recipe.is_empty() else "") + "\n" + description, recipe)
+		_set_cost_tooltip(button, name_text + (" · %.1f yr" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
 		if not eligible:
 			button.tooltip_text += "\nUnavailable"
-		elif not available:
+		elif not available and ECONOMY.affordable(p, recipe):
 			button.tooltip_text += "\nRequirements not met or already queued"
 		if not repeat_key.is_empty() and eligible:
 			button.tooltip_text += "\nRight-click: %s repeat" % ("Disable" if auto else "Enable")
@@ -1708,11 +1709,9 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = _production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · %.1f yr\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]))
+		_set_cost_tooltip(button, "%s · %.1f yr\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
 		if not operating:
 			button.tooltip_text += "\nShipyard offline"
-		elif not ECONOMY.affordable(system, recipe):
-			button.tooltip_text += "\nInsufficient local materials"
 		if kind == "ship" and not bool(system["home"]):
 			button.tooltip_text += "\nRequires home system"
 		elif ECONOMY.shipyard_queue_count(system, selected_yard) >= ECONOMY.SHIPYARD_QUEUE_LIMIT:
@@ -1728,7 +1727,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	if level >= ECONOMY.MAX_SHIPYARD_LEVEL:
 		_set_cost_tooltip(yard_upgrade, "Maximum level")
 	else:
-		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f yr\nBuild speed: %.1f× → %.1f×\nMax ship size: %d → %d\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe)
+		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f yr\nBuild speed: %.1f× → %.1f×\nMax ship size: %d → %d\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe, 0.0, _available_cost_resources(system, selected_yard))
 
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
@@ -1901,25 +1900,22 @@ func _command_icon(path: String) -> Texture2D:
 
 func _command_slot(id: String, hint: String, art: String, action: Callable) -> Button:
 	var button := Button.new()
-	button.custom_minimum_size = Vector2(48, 48)
-	button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	button.expand_icon = true
+	button.add_theme_constant_override("icon_max_width", 32)
 	button.focus_mode = Control.FOCUS_NONE
 	button.icon = _command_icon(art)
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	button.tooltip_text = hint
 	button.toggle_mode = true
 	button.pressed.connect(action)
-	command_card.add_child(button)
+	var slot: Control = _station_spacer(command_card)
+	slot.add_child(button)
+	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_buttons[id] = button
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
-	command_card = GridContainer.new()
-	command_card.columns = 5
-	command_card.add_theme_constant_override("h_separation", 3)
-	command_card.add_theme_constant_override("v_separation", 3)
-	parent.add_child(command_card)
+	command_card = _ability_grid(parent)
 	_command_slot("move", "Move", '<path d="M5 16H26M17 7L26 16L17 25"/>', _arm_command.bind("move"))
 	_command_slot("stop", "Stop", '<rect x="8" y="6" width="5" height="20" fill="#c5e5f5"/><rect x="19" y="6" width="5" height="20" fill="#c5e5f5"/>', _stop_selected)
 	hold_button = _command_slot("hold", "Hold Position", '<rect x="8" y="8" width="16" height="16" fill="#c5e5f5"/>', _hold_selected)
@@ -1935,6 +1931,7 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	border.draw.connect(_draw_autobuild_border.bind(border))
 	repair.set_meta("auto_border", border)
+	_fill_ability_grid(command_card)
 
 func _repair_button_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not command_buttons["repair"].disabled:
@@ -1989,7 +1986,11 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 		var state: Dictionary = _state()
 		var wreck: int = _salvage_hit(state, point) if minimap_hint.is_empty() else int(minimap_hint["wreck"])
 		if wreck >= 0:
-			_issue_order(_selected_owned_units(state), {"kind": "salvage", "target": wreck}, append)
+			var eligible: Array[int] = []
+			for craft in state["ships"]:
+				if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
+					eligible.append(int(craft["id"]))
+			_issue_order(eligible, {"kind": "salvage", "target": wreck}, append)
 	elif mode == "repair":
 		var target: int = _entity_hit(_state(), point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
 		if target != -1:
@@ -2331,14 +2332,16 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	command_card.show()
 	var combat_owned: bool = false
 	var can_load: bool = false
+	var has_cargo_hold: bool = false
 	var has_miners: bool = not _selected_miners().is_empty()
 	for craft in state["ships"]:
 		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me():
 			combat_owned = combat_owned or ECONOMY.armed(craft)
 			can_load = can_load or ECONOMY.cargo_free(craft) > ECONOMY.EPS
+			has_cargo_hold = has_cargo_hold or ECONOMY.cargo_capacity(str(craft["kind"])) > ECONOMY.EPS
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
-		button.visible = id != "repair" or has_miners
+		button.visible = (id != "repair" or has_miners) and (id not in ["load", "unload"] or has_cargo_hold)
 		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] == "fighter")) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
 		pending_command = ""
@@ -2727,20 +2730,9 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
 	return label
 
 func _tons(value: float, decimals: int = 1, compact: bool = false) -> String:
-	var magnitude: float = absf(value)
-	var scale: float = 1.0
-	var unit: String = "t"
-	if magnitude >= 1000000000.0:
-		scale = 1000000000.0
-		unit = "Gt"
-	elif magnitude >= 1000000.0:
-		scale = 1000000.0
-		unit = "Mt"
-	elif magnitude >= 1000.0:
-		scale = 1000.0
-		unit = "kt"
-	var number: String = "%.1f" % (value / scale) if scale > 1.0 or decimals == 1 else "%.0f" % value
-	return number + ("" if compact else " ") + unit
+	# Stocks and prices share one unit; preserve fractional small values.
+	var number: String = ("%.1f" % value).trim_suffix(".0") if decimals == 1 and absf(value) < 1000.0 else "%.0f" % value
+	return number + ("" if compact else " ") + "t"
 
 func _resource_delta(p: Dictionary, resource: String) -> float:
 	return ECONOMY.rate(p, resource) - ECONOMY.consumption(p, resource)
@@ -3021,6 +3013,10 @@ func _refresh() -> void:
 		return
 	var state: Dictionary = _state()
 	var phase: String = str(session.get("phase"))
+	if phase == "match" and not background_music.playing:
+		background_music.play()
+	elif phase != "match" and background_music.playing:
+		background_music.stop()
 	_refresh_global_bar(state)
 	_refresh_match_result(state)
 	_refresh_time_controls(state)
@@ -3231,6 +3227,7 @@ func _apply_settings() -> void:
 		AudioServer.set_bus_volume_db(index, linear_to_db(maxf(0.0001, volume / 100.0)))
 		AudioServer.set_bus_mute(index, music_muted if bus_name == "Music" else sfx_muted)
 	upgrade_audio.bus = "SFX"
+	background_music.bus = "Music"
 
 func _save_settings() -> void:
 	settings.set_value("audio", "music", music_volume)
@@ -3262,14 +3259,24 @@ func _build_settings_menu() -> void:
 		volume.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		volume.custom_minimum_size = Vector2(120, 24)
 		row.add_child(volume)
-		var mute := CheckBox.new()
-		mute.text = "Mute"
+		var mute := Button.new()
+		mute.toggle_mode = true
 		mute.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		mute.custom_minimum_size.y = 30
+		mute.custom_minimum_size = Vector2(36, 30)
 		mute.button_pressed = music_muted if channel == "Music" else sfx_muted
+		_set_mute_icon(mute, mute.button_pressed)
 		row.add_child(mute)
 		volume.value_changed.connect(_audio_volume_changed.bind(channel))
-		mute.toggled.connect(_audio_mute_changed.bind(channel))
+		mute.toggled.connect(func(value: bool) -> void:
+			_set_mute_icon(mute, value)
+			_audio_mute_changed(value, channel))
+
+func _set_mute_icon(button: Button, muted: bool) -> void:
+	var speaker: String = '<path d="M4 12H10L17 6V26L10 20H4Z"/>'
+	button.icon = _command_icon(speaker + ('<path d="M4 29L29 4"/>' if muted else '<path d="M21 11Q27 16 21 21M25 7Q32 16 25 25"/>'))
+	button.tooltip_text = "Unmute" if muted else "Mute"
+	button.expand_icon = true
+	button.add_theme_constant_override("icon_max_width", 24)
 
 func _audio_volume_changed(value: float, channel: String) -> void:
 	if channel == "Music":
@@ -3952,6 +3959,11 @@ func _select_building_tile(ref: Vector2i, kind: String) -> void:
 
 func _refresh_group_yard_commands(state: Dictionary) -> void:
 	var refs: Array[Vector2i] = _selected_yards(state, true)
+	var available: Dictionary = {}
+	for ref in refs:
+		var local: Dictionary = _available_cost_resources(state["planets"][ref.x], ref.y)
+		for resource in local:
+			available[resource] = maxf(float(available.get(resource, 0.0)), float(local[resource]))
 	for kind in ECONOMY.SHIP_KINDS:
 		var eligible: bool = false
 		var can_toggle: bool = false
@@ -3967,7 +3979,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = _production_icon(kind, _empire_color(_me()))
 		portrait.modulate = Color.WHITE if eligible else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [_ship_kind_name(kind), _ship_stats(kind)], ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]))
+		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [_ship_kind_name(kind), _ship_stats(kind)], ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]), available)
 	var can_upgrade: bool = false
 	var can_clear: bool = false
 	for ref in refs:
@@ -5249,6 +5261,8 @@ func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2,
 func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, lateral: Vector2) -> void:
 	var kind: String = str(ship["kind"])
 	var capacity: float = ECONOMY.cargo_capacity(kind)
+	if capacity <= ECONOMY.EPS:
+		return
 	var count: int = ceili(capacity / ECONOMY.FREIGHTER_BAY_CAPACITY)
 	var bays: Array = ECONOMY.cargo_bays(ship.get("cargo", {}), capacity, count)
 	var per_bay: float = capacity / float(count)
