@@ -2215,7 +2215,7 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 	if units.is_empty():
 		return false
 	for ship in units:
-		if local_sector(graph, ship) != node or bool(ship.get("retreating", false)):
+		if not sector_contains(graph, node, ship["position"]) or bool(ship.get("retreating", false)):
 			return false
 	for ship in units:
 		_cancel_salvage_order(ship)
@@ -2226,7 +2226,8 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 		ship["navigation_target"] = point
 		if ship.get("kind", "") == "fighter":
 			ship["direct_order"] = true
-			ship["at"] = node
+			# Preserve the actual lane anchor until normal navigation reaches
+			# a waypoint. Overwriting `at` here caused jumps on later orders.
 			ship["operation_target"] = node
 			ship["dest"] = node
 			ship["route"] = []
@@ -2265,7 +2266,7 @@ static func _work_local_hold(graph: Dictionary, ship: Dictionary, dt: float) -> 
 		return
 	var node: int = int(ship["hold_sector"])
 	# Repair may have taken a fighter to another sector. Return by lanes.
-	if ship.get("kind", "") == "fighter" and (int(ship["at"]) != node or not sector_contains(graph, node, ship["position"])):
+	if ship.get("kind", "") == "fighter" and not sector_contains(graph, node, ship["position"]):
 		if int(ship.get("dest", -1)) != node:
 			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
 		if (ship["route"] as Array).is_empty():
