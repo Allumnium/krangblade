@@ -139,7 +139,6 @@ var global_resource_segments: Dictionary = {}
 var global_resource_strips: Dictionary = {}
 var colony_picker: OptionButton
 var send_colony_button: Button
-var colony_button: Button
 var colony_choices: Array[int] = []
 var selected: int = -1
 var selected_body: int = -1
@@ -225,23 +224,18 @@ var trade_stock_labels: Dictionary = {}
 var pds_card: Dictionary = {}
 var economy_cards: Dictionary = {}
 var warehouse_card: Dictionary = {}
-var continuous_checks: Dictionary = {}
 var repeat_icon: Texture2D
 var population_icon: Texture2D
 var build_clock_icon: Texture2D
 var production_summary: VBoxContainer
 var production_values: Dictionary = {}
-var fighter_button: Button
-var miner_button: Button
 var system_owner_label: Label
-var ship_button: Button
 var leave: Button
 var match_menu: AcceptDialog
 var match_result_dialog: AcceptDialog
 var match_result_shown: bool = false
 var defeated_shown: bool = false
 var menu_exit: Button
-var build_cards: Dictionary = {}
 
 class TradeRange extends Control:
 	signal committed(minimum: float, maximum: float)
@@ -601,7 +595,6 @@ func _build_ui() -> void:
 		if not inspector_tabs.is_visible_in_tree():
 			_collapse_details())
 	var shipyard_page: GridContainer = _inspector_page("Shipyards")
-	var policy_page: GridContainer = _inspector_page("Fleet policy")
 	# Keep building cards first and yard activity below them in one scroll.
 	yard_column = VBoxContainer.new()
 	yard_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -660,16 +653,6 @@ func _build_ui() -> void:
 		trade_checks[resource] = [incoming, outgoing]
 		incoming.toggled.connect(_trade_toggle.bind(resource))
 		outgoing.toggled.connect(_trade_toggle.bind(resource))
-	ship_button = _ship_build_row(policy_page, "BUILD LOGISTICS SHIP", "ship")
-	HUD.action(ship_button, HUD.ACCENT, true)
-	colony_button = _ship_build_row(policy_page, "BUILD COLONY SHIP", "colony_ship")
-	HUD.action(colony_button, Color("#c7a4ff"), true)
-	fighter_button = _ship_build_row(policy_page, "BUILD FIGHTER", "fighter")
-	HUD.action(fighter_button, Color("#f2b57e"), true)
-	fighter_button.tooltip_text = "Select fighters and right-click a destination or hostile ship."
-	miner_button = _ship_build_row(policy_page, "BUILD MINING SHIP", "miner")
-	HUD.action(miner_button, Color("#d8e58b"), true)
-	miner_button.tooltip_text = "Automatically mines accessible fields from owned service systems."
 	for grid in command_grids.values():
 		for card in grid.get_children():
 			card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -854,7 +837,7 @@ func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
 	return card
 
 func _detail_cards() -> Array:
-	return build_cards.values() + economy_cards.values() + yard_activity_rows.values() + [warehouse_card, habitation_card, orbital_card, pds_card]
+	return economy_cards.values() + yard_activity_rows.values() + [warehouse_card, habitation_card, orbital_card, pds_card]
 
 func _card_tab(card: Dictionary) -> Node:
 	var node: Node = card["header"]
@@ -1006,14 +989,6 @@ func _show_cost(grid: GridContainer, cost: Dictionary, crew: float = 0.0) -> voi
 		pair.add_child(amount)
 		pair.tooltip_text = ("%.0f people" % value) if resource == "Population" else "%.0f t %s" % [value, resource]
 
-func _ship_build_years(p: Dictionary, kind: String) -> float:
-	var speed: float = ECONOMY.yard_speed(1)
-	for index in range(p.get("yards", []).size()):
-		var level: int = int(p["yards"][index]["level"])
-		if ECONOMY.shipyard_operational(p, index) and ECONOMY.max_size(level) >= ECONOMY.SHIP_SIZE:
-			speed = maxf(speed, ECONOMY.yard_speed(level))
-	return ECONOMY._work(kind, 1) / speed
-
 func _ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
@@ -1022,73 +997,6 @@ func _ship_stats(kind: String) -> String:
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f · Cargo %.0f t" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.FIGHTER_CAPACITY]
 		"miner": details = "Extracts asteroids · Cargo %.0f t · Mining %.0f t/yr" % [ECONOMY.MINER_CAPACITY, ECONOMY.MINER_RATE]
 	return "%s\nHP %.0f · Speed %.0f/yr · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
-
-func _ship_build_row(parent: Container, title_text: String, kind: String) -> Button:
-	var section: VBoxContainer = HUD.section(parent, "", true)
-	section.get_child(0).hide()
-	var disclosure: Dictionary = _make_disclosure(section, title_text.trim_prefix("BUILD ").capitalize() + " (0)")
-	var body: VBoxContainer = disclosure["body"]
-	var build_progress := ProgressBar.new()
-	build_progress.custom_minimum_size.y = 12
-	section.add_child(build_progress)
-	section.move_child(build_progress, body.get_index())
-	build_progress.hide()
-	body.add_child(_label(_ship_stats(kind), 12))
-	var requirements := _label("", 12)
-	body.add_child(requirements)
-	var costs: GridContainer = _cost_grid(disclosure["summary"])
-	_show_cost(costs, ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]))
-	var row: HBoxContainer = disclosure["actions"]
-	var maintain_row := HBoxContainer.new()
-	body.add_child(maintain_row)
-	var maintain_caption := _label("Maintain", 12)
-	maintain_caption.autowrap_mode = TextServer.AUTOWRAP_OFF
-	maintain_row.add_child(maintain_caption)
-	var amount := SpinBox.new()
-	amount.min_value = 0
-	amount.max_value = 9999
-	amount.step = 1
-	amount.custom_minimum_size = Vector2(72, 28)
-	amount.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	amount.get_line_edit().add_theme_font_size_override("font_size", 12)
-	amount.get_line_edit().text_changed.connect(_filter_ship_limit.bind(amount.get_line_edit()))
-	maintain_row.add_child(amount)
-	var ships_caption := _label("ships", 12)
-	ships_caption.autowrap_mode = TextServer.AUTOWRAP_OFF
-	maintain_row.add_child(ships_caption)
-	amount.value_changed.connect(func(value: float) -> void:
-		session.call("request_maintain", selected, kind, int(value)))
-	var infinity := _label("∞", 14)
-	maintain_row.add_child(infinity)
-	infinity.hide()
-	infinity.mouse_filter = Control.MOUSE_FILTER_STOP
-	infinity.gui_input.connect(func(event: InputEvent) -> void:
-		if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0 and event.relative.y > 0.0:
-			session.call("request_maintain", selected, kind, maxi(0, int(amount.value) - maxi(1, roundi(event.relative.y / 4.0)))))
-	var button: Button = _card_action(disclosure, "Build", _operation.bind(kind))
-	_set_timed_action(button, "Build", _ship_build_years({}, kind))
-	if kind != "yard":
-		var check: Button = _repeat_button(row, kind)
-		continuous_checks[kind] = check
-	var cancel: Button = _card_cancel(disclosure, _cancel_kind.bind(kind, ""), build_progress)
-	cancel.tooltip_text = "Cancel one order and stop repeat"
-	disclosure.merge({"maintain_amount": amount, "infinity": infinity, "button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
-	build_cards[kind] = disclosure
-	button.hide()
-	return button
-
-func _filter_ship_limit(value: String, field: LineEdit) -> void:
-	var digits: String = ""
-	var caret: int = 0
-	for i in range(value.length()):
-		var character: String = value.substr(i, 1)
-		if character >= "0" and character <= "9" and digits.length() < 4:
-			digits += character
-			if i < field.caret_column:
-				caret += 1
-	if digits != value:
-		field.text = digits
-		field.caret_column = caret
 
 func _repeat_button(parent: Container, key: String) -> Button:
 	if repeat_icon == null:
@@ -1359,10 +1267,6 @@ func _build_yard_overview(parent: Container) -> void:
 	yard_context = _label("", 12)
 	yard_context.add_theme_color_override("font_color", HUD.MUTED)
 	yard_overview.add_child(yard_context)
-	_button("Back to system", func() -> void:
-		selected_yard = -1
-		_load_thresholds()
-		_refresh(), yard_overview)
 	yard_status = _label("", 12)
 	yard_overview.add_child(yard_status)
 	yard_queue = VBoxContainer.new()
@@ -1579,10 +1483,6 @@ func _build_body_overview(parent: Container) -> void:
 	body_context = _label("", 12)
 	body_context.add_theme_color_override("font_color", HUD.MUTED)
 	body_overview.add_child(body_context)
-	_button("Back to system", func() -> void:
-		selected_body = -1
-		_load_thresholds()
-		_refresh(), body_overview)
 	var section: VBoxContainer = HUD.section(body_overview, "Planetary defense", true)
 	body_defense = _label("", 12)
 	section.add_child(body_defense)
@@ -2794,10 +2694,6 @@ func _refresh() -> void:
 	_refresh_yard_activity(p)
 	var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and phase == "match"
 	_refresh_colony_choices(state, p, phase)
-	for kind in continuous_checks:
-		var check: Button = continuous_checks[kind]
-		_sync_repeat(check, p, kind, owned and (kind != "ship" or bool(p.get("home", false))))
-	colony_button.disabled = not owned
 	for slider in trade_sliders.values():
 		slider.enabled = owned
 		for resource in trade_checks:
@@ -2806,16 +2702,12 @@ func _refresh() -> void:
 		if not owned:
 			slider.active_handle = -1
 		slider.queue_redraw()
-	fighter_button.disabled = not owned
-	miner_button.disabled = not owned
-	ship_button.disabled = true
 	if p.is_empty():
 		info.text = "Select a system."
 		raw_antimatter_label.hide()
 		system_owner_label.text = ""
 		population_label.text = ""
 		population_delta_label.text = ""
-		_refresh_build_cards(p, false)
 		return
 	var owner: int = int(p["owner"])
 	var roster: Dictionary = session.get("players")
@@ -2852,8 +2744,6 @@ func _refresh() -> void:
 	_update_trade_stock(p)
 	_refresh_pds(p, owned)
 	_refresh_economy_cards(p, owned)
-	ship_button.disabled = not owned or not bool(p["home"])
-	_refresh_build_cards(p, owned)
 
 func _upgrade_yard_at(index: int) -> void:
 	if index < 0:
@@ -3053,57 +2943,6 @@ func _cancel_kind(kind: String, target: String) -> void:
 		if job["kind"] == kind and job["target"] == target:
 			_cancel_job(int(job["id"]))
 			return
-
-func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
-	var counts: Dictionary = {}
-	var first_jobs: Dictionary = {}
-	for order in p.get("queue", []):
-		var kind: String = order["kind"]
-		counts[kind] = int(counts.get(kind, 0)) + 1
-		if not first_jobs.has(kind):
-			first_jobs[kind] = order
-	for kind in build_cards:
-		var card: Dictionary = build_cards[kind]
-		var count: int = int(counts.get(kind, 0))
-		_set_timed_action(card["button"], "Build (%d)" % count if count > 0 else "Build", _ship_build_years(p, kind))
-		_show_cost(card["costs"], ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]))
-		var finite: int = int(p.get("maintain", {}).get(kind, 0))
-		var unlimited: bool = bool(p.get("continuous", {}).get(kind, false))
-		var living: int = ECONOMY.origin_count(_state(), selected, kind) if not p.is_empty() else 0
-		var count_text: String = "(%d / ∞)" % living if unlimited else ("(%d / %d)" % [living, finite] if finite > 0 else "(%d)" % living)
-		var amount: SpinBox = card["maintain_amount"]
-		amount.editable = owned
-		if not amount.get_line_edit().has_focus():
-			amount.set_value_no_signal(finite)
-		card["infinity"].visible = unlimited
-		amount.visible = not unlimited
-		var caption: String = card["title"].trim_prefix("BUILD ").capitalize() + " " + count_text
-		_disclosure_title(card, caption)
-		var header: Button = card["header"]
-		header.tooltip_text = caption + "\nLiving ships originating at this system"
-		card["button"].tooltip_text = _cost_text(ECONOMY._cost(kind, 1)) + " · %.0f population" % float(ECONOMY.CREW_COSTS[kind]) + ("\n%d queued" % count if count > 0 else "")
-		var requirements: PackedStringArray = []
-		if not p.is_empty():
-			if ECONOMY.operational_shipyards(p) == 0:
-				requirements.append("Requires an operational shipyard")
-			if kind == "ship" and not bool(p.get("home", false)):
-				requirements.append("Requires home system")
-			if float(p["population"]) < float(ECONOMY.CREW_COSTS[kind]) + 1.0:
-				requirements.append("Insufficient population")
-			if not ECONOMY.affordable(p, ECONOMY._cost(kind, 1)):
-				requirements.append("Insufficient local materials")
-		card["button"].disabled = not owned or p.is_empty() or not ECONOMY.affordable(p, ECONOMY._cost(kind, 1)) or (kind == "ship" and not bool(p.get("home", false)))
-		card["requirements"].text = "\n".join(requirements)
-		card["requirements"].visible = not requirements.is_empty()
-		var job: Dictionary = first_jobs.get(kind, {})
-		var progress: ProgressBar = card["build_progress"]
-		progress.visible = false
-		if not job.is_empty():
-			progress.value = 100.0 * float(job["progress"]) / float(job["work"])
-			progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
-			_style_progress(progress, p, job)
-		card["cancel"].visible = not job.is_empty()
-		card["cancel"].disabled = not owned or count == 0
 
 func _system_name(index: int) -> String:
 	var names: Array = _state().get("map", {}).get("names", [])
@@ -3518,7 +3357,7 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 	var hit := Vector2i(-1, -1)
 	var nearest: float = INF
-	var scale: float = _ship_scale()
+	var scale: float = _ship_scale() * 2.0
 	if scale < 0.2:
 		return hit
 	var elapsed: float = float(state["elapsed"])
@@ -4303,7 +4142,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 
 func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
 	var planet: Dictionary = state["planets"][index]
-	var scale: float = _ship_scale()
+	var scale: float = _ship_scale() * 2.0
 	for slot in range(planet["yards"].size()):
 		var yard: Dictionary = planet["yards"][slot]
 		var angle: float = float(slot) * TAU / 3.0 + elapsed * 0.008
@@ -4320,7 +4159,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 		if conversion < 1.0:
 			var heading: Vector2 = yard.get("colony_heading", Vector2.UP)
 			var cross: Vector2 = heading.orthogonal()
-			var original := PackedVector2Array([point + heading * 12.0 * scale, point + cross * 7.0 * scale, point - heading * 9.0 * scale, point - cross * 7.0 * scale])
+			var original := PackedVector2Array([point + heading * 6.0 * scale, point + cross * 3.5 * scale, point - heading * 4.5 * scale, point - cross * 3.5 * scale])
 			for k in range(4):
 				frame[k] = original[k].lerp(frame[k], smoothstep(0.0, 1.0, conversion))
 			if not Geometry2D.triangulate_polygon(frame).is_empty():
@@ -4370,10 +4209,10 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			var shape: Array = HULL_OUTLINES.get(str(job["kind"]), FREIGHTER_OUTLINE)
 			var hull := PackedVector2Array()
 			for vertex in shape:
-				hull.append(point + side * vertex.x * scale + axis * vertex.y * scale)
+				hull.append(point + side * vertex.x * scale * 0.5 + axis * vertex.y * scale * 0.5)
 			var edges: int = mini(hull.size(), floori(u * 2.0 * hull.size()))
 			for k in range(edges):
-				map_canvas.draw_line(hull[k], hull[(k + 1) % hull.size()], tint.lightened(0.4), 1.5 * scale, true)
+				map_canvas.draw_line(hull[k], hull[(k + 1) % hull.size()], tint.lightened(0.4), 0.75 * scale, true)
 			if u > 0.5 and not Geometry2D.triangulate_polygon(hull).is_empty():
 				map_canvas.draw_colored_polygon(hull, Color(tint.lightened(0.4), (u - 0.5) * 2.0))
 			break

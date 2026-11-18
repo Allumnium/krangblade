@@ -430,3 +430,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-31b — Territory corners and production portraits
 - Wedge-like outlines are caused by hard circle/bisector intersections, not random ownership corruption. Round intersections inward using the same two tightest radial constraints in simulation and shader; straight shared boundaries remain intentional. Production icons now use the actual hull/panel art, empire tint and readable captions; hover provides full cost, build time and unit stats. Check rendering performance on dense maps; shader now evaluates the rounded radius for claimed pixels.
+
+### T-31c — Soft separation and inspector cleanup
+- Remove Back to system buttons and the sector Fleet policy UI; keep existing automatic simulation policies for AI and compatibility. Double shipyard art/hit scale without changing ship dimensions or balance. A spatial-hash separation pass steers nearby hulls apart within the ordinary travel budget, avoids exact docking/mining/repair, and softens attraction to a shared local hold anchor. Radius 45 world units and strength 0.65 are provisional; verify dense-fleet motion and cost.

@@ -90,6 +90,8 @@ const AI_INTERVAL: float = 4.0
 const AI_WAVE_MIN: int = 3
 const AI_RALLY_RADIUS: float = 150.0
 const FORMATION_SPACING: float = 28.0
+const SHIP_SEPARATION_RADIUS: float = 45.0
+const SHIP_SEPARATION_STRENGTH: float = 0.65
 const FORMATION_RADIUS: float = 105.0
 const FORMATION_TRAVEL_FRACTION: float = 0.8
 const WITHDRAW_HP: float = 46.0
@@ -4131,6 +4133,99 @@ static func _profile_stage(profile: Dictionary, stage: String, started: int) -> 
 	profile[stage] = int(profile.get(stage, 0)) + now - started
 	return now
 
+# Gentle neighborhood steering, not rigid collision or additional travel.
+# All hulls are obstacles; ships performing precise service actions are
+# not displaced. Use the same pre-movement snapshot for every pair.
+static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float) -> void:
+	if dt <= 0.0:
+		return
+	var cells: Dictionary = {}
+	var reach: float = SHIP_SEPARATION_RADIUS
+	for ship in state["ships"]:
+		var id: int = int(ship["id"])
+		if not previous.has(id):
+			continue
+		var pos: Vector2 = previous[id]
+		var cell := Vector2i(floori(pos.x / reach), floori(pos.y / reach))
+		if not cells.has(cell):
+			cells[cell] = []
+		cells[cell].append(id)
+	var budget: float = SHIP_SPEED * dt
+	for ship in state["ships"]:
+		var id: int = int(ship["id"])
+		if not previous.has(id) or bool(ship.get("retreating", false)) or _salvage_active(ship):
+			continue
+		var before: Vector2 = previous[id]
+		var planned: Vector2 = ship["position"]
+		var held: bool = bool(ship.get("holding", false))
+		var route: Array = ship["route"]
+		# Exact arrival at a waypoint is required by service and lane logic.
+		# Do not push docking or extracting civilian ships off their targets.
+		if not held:
+			if route.is_empty():
+				if not _is_idle_ship(ship) and not _engaged(ship):
+					continue
+				var at: int = int(ship["at"])
+				if at >= 0 and at < graph["points"].size() and planned.distance_to(graph["points"][at]) <= EPS:
+					continue
+			else:
+				var waypoint: Vector2 = graph["points"][int(route[0])]
+				if planned.distance_to(waypoint) < reach * 2.0 + budget:
+					continue
+		if not held and ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
+			continue
+		var force: Vector2 = Vector2.ZERO
+		var cell := Vector2i(floori(before.x / reach), floori(before.y / reach))
+		for x in range(-1, 2):
+			for y in range(-1, 2):
+				for other_id in cells.get(cell + Vector2i(x, y), []):
+					if int(other_id) == id:
+						continue
+					var offset: Vector2 = before - (previous[other_id] as Vector2)
+					var distance: float = offset.length()
+					if distance >= reach:
+						continue
+					var direction: Vector2
+					if distance <= EPS:
+						# Stable opposite directions even for exactly coincident hulls.
+						var low: int = mini(id, int(other_id))
+						var high: int = maxi(id, int(other_id))
+						direction = Vector2.from_angle(float(posmod(low * 97 + high * 193, 360)) * PI / 180.0)
+						if id > int(other_id):
+							direction = -direction
+					else:
+						direction = offset / distance
+					force += direction * (1.0 - distance / reach)
+		if force.is_zero_approx():
+			continue
+		var movement: Vector2 = planned - before
+		if movement.length() > budget + EPS:
+			continue
+		# A shared hold point is a group anchor. Ease attraction near it
+		# so repulsion does not fight a full-speed return to the same pixel.
+		if held and ship.has("hold_position") and before.distance_to(ship["hold_position"]) < reach * 2.0:
+			movement *= 0.25
+		var push: Vector2 = force.limit_length(1.0) * budget * SHIP_SEPARATION_STRENGTH
+		var candidate: Vector2 = before + (movement + push).limit_length(budget)
+		var sector: int = int(ship.get("hold_sector", -1)) if held else local_sector(graph, ship)
+		if sector >= 0 and sector < graph["points"].size() and sector_contains(graph, sector, planned) and not sector_contains(graph, sector, candidate):
+			# Keep local orders and stationary ships inside their legal sector.
+			var lower: float = 0.0
+			var upper: float = 1.0
+			for iteration in range(12):
+				var fraction: float = (lower + upper) * 0.5
+				if sector_contains(graph, sector, planned.lerp(candidate, fraction)):
+					lower = fraction
+				else:
+					upper = fraction
+			candidate = planned.lerp(candidate, lower)
+		var displacement: Vector2 = candidate - before
+		ship["position"] = candidate
+		if not displacement.is_zero_approx():
+			ship["heading"] = displacement.normalized()
+		if not route.is_empty():
+			ship["leg"] = _lane_progress(graph["points"], ship)
+
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	state["elapsed"] = float(state["elapsed"]) + dt
@@ -4244,6 +4339,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		# work idle and did not already move this tick.
 		if idle_targets.has(ship_id) and _is_idle_ship(ship) and not coordinated.has(ship_id) and ship["position"] == initial_position:
 			_navigate(ship, idle_targets[ship_id], SHIP_SPEED * dt)
+	_separate_ships(state, combat_graph, combat_positions, dt)
 	if not profile.is_empty():
 		var now: int = Time.get_ticks_usec()
 		profile["Civilian logistics"] = int(profile.get("Civilian logistics", 0)) + civilian_usec
