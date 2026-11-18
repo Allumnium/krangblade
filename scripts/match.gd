@@ -3228,7 +3228,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 				selected_field = i
 				break
 	selected = -1 if selected_ship_id >= 0 or selected_field >= 0 else hit
-	follow_units = selected_ship_id >= 0 or not selected_units.is_empty()
+	follow_units = false
 	var focused: Control = get_viewport().gui_get_focus_owner()
 	if is_instance_valid(focused):
 		focused.release_focus()
@@ -3248,7 +3248,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 		if poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
 			selected_units.append(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
-	follow_units = not selected_units.is_empty()
+	follow_units = false
 	selected = -1
 	selected_body = -1
 	selected_yard = -1
@@ -3513,6 +3513,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key: int = event.physical_keycode
 	if key in [KEY_Q, KEY_E]:
 		_cycle_owned_system(-1 if key == KEY_Q else 1)
+	elif key == KEY_F:
+		# Explicit camera follow: selection changes never move the camera.
+		if not selected_units.is_empty() or selected_ship_id >= 0:
+			follow_units = true
+			_follow_selected_units(_ship_poses(_state()))
 	elif key == KEY_H:
 		_hold_selected()
 	elif key == KEY_U:
@@ -3529,7 +3534,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				if id in group and not selected_units.has(id):
 					selected_units.append(id)
 			selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
-			follow_units = not selected_units.is_empty()
+			follow_units = false
 			selected = -1
 			selected_body = -1
 			selected_yard = -1

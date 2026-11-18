@@ -383,3 +383,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Gameplay state clarity.
 - **Observation:** Conquest could change `owner` for a population-free, yard-free system even though `territory_claims` correctly rendered it unclaimed. v0.29.6 prevents conquest of such systems; colonization is required for lasting territorial control.
 - **Consider:** Follow-up audit of `owner` versus `territory_claims` in AI and colonization permissions, especially legacy saves.
+
+### T-29f — Explicit camera follow
+- **Type:** Camera UX.
+- **Observation:** Unit selection and control-group recall automatically enabled camera follow. v0.29.7 requires F to enable follow for the selected ship or fleet; selection changes and manual camera movement disable it.
