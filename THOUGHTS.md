@@ -391,3 +391,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 ### T-29g — Persistent center HUD
 - **Type:** UI consistency.
 - **Observation:** The center details panel was hidden when selection cleared, exposing the starfield and leaving an instruction label floating in its place. Keep the panel visible and blank instead.
+
+### T-29h — Contested territory colors
+- **Type:** Territory feedback.
+- **Observation:** Contested territory disappeared when claims were neutralized. The renderer now alternates the colors of players with hostile fighter presence while retaining the simulation's contested-state logic; allies do not trigger color cycling.

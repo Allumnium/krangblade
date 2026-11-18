@@ -38,6 +38,7 @@ var territory_sites: ImageTexture
 var territory_site_count: int = 0
 var territory_radius: float = 1.0
 var territory_last: Array[int] = []
+var territory_cycle_elapsed: float = 0.0
 var territory_seed: int = -1
 var header_panel: PanelContainer
 var inspector_panel: PanelContainer
@@ -1894,9 +1895,38 @@ func _refresh_territory(state: Dictionary) -> void:
 		territory_seed = seed_value
 		territory_last.clear()
 	var empires: Array[int] = ECONOMY.territory_empires(state)
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var contenders: Dictionary = {}
+	# The simulation's territory claims can be neutralized by combat. Keep
+	# the visual footprint and cycle through hostile players instead.
+	for i in range((state["planets"] as Array).size()):
+		var planet: Dictionary = state["planets"][i]
+		var owner: int = int(planet["owner"])
+		if owner > 0 and (float(planet.get("population", 0.0)) > 0.0 or not (planet.get("yards", []) as Array).is_empty()):
+			contenders[i] = [owner]
+	for ship in state["ships"]:
+		if ship.get("kind", "") != "fighter" or bool(ship.get("retreating", false)):
+			continue
+		var node: int = ECONOMY.local_sector(graph, ship)
+		if node < 0:
+			continue
+		var player: int = int(ship["owner"])
+		if not contenders.has(node):
+			contenders[node] = []
+		if not (contenders[node] as Array).has(player):
+			contenders[node].append(player)
 	var claims: Array[int] = []
-	for owner in empires:
-		claims.append(_empire_color_index(owner))
+	var cycle: int = floori(territory_cycle_elapsed / 0.85)
+	for i in range(empires.size()):
+		var players: Array = contenders.get(i, [])
+		players.sort()
+		var teams: Dictionary = {}
+		for player in players:
+			teams[int(state["teams"].get(int(player), 0))] = true
+		if teams.size() > 1:
+			claims.append(_empire_color_index(int(players[cycle % players.size()])))
+		else:
+			claims.append(_empire_color_index(empires[i]))
 	if claims == territory_last:
 		return
 	territory_last = claims
@@ -3599,6 +3629,10 @@ func _process(delta: float) -> void:
 		selecting_units = false
 		map_canvas.queue_redraw()
 	_keyboard_pan(delta)
+	territory_cycle_elapsed += delta
+	if territory_cycle_elapsed >= 0.85:
+		territory_cycle_elapsed = fmod(territory_cycle_elapsed, 1020.0)
+		_refresh_territory(_state())
 	_update_resource_hover()
 	if is_instance_valid(diagnostic_label):
 		diagnostic_elapsed += delta
