@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.36.3: Armed movement commands use the same gesture handler for either mouse button; the initiating button owns its release to avoid accidental orders during a two-button gesture. Check cancellation when releasing over the console (TODO phase 1).
+
 - v0.36.2: Single-selection portraits reuse hull silhouette and panel geometry. The opening camera uses clipped sector extents rather than a fixed galaxy zoom. Check portrait width and camera framing on dense layouts and high UI scaling (TODO phase 1).
 
 - v0.36.1: Shipyard command placement now preserves fixed spatial muscle memory across widths. Recheck compact caption legibility and command highlight/crosshair feedback in playtests (TODO phase 1).

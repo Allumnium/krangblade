@@ -170,7 +170,7 @@ var control_groups: Dictionary = {}
 var selection_start: Vector2 = Vector2.ZERO
 var selection_end: Vector2 = Vector2.ZERO
 var selecting_units: bool = false
-var formation_drag: bool = false
+var formation_button: int = 0
 var formation_path := PackedVector2Array()
 var formation_length: float = 0.0
 var formation_mode: String = ""
@@ -1915,12 +1915,6 @@ func _execute_pending_command(point: Vector2, append: bool = false) -> void:
 		var wreck: int = _salvage_hit(state, point)
 		if wreck >= 0:
 			_issue_order(_selected_owned_units(state), {"kind": "salvage", "target": wreck}, append)
-	elif mode == "patrol":
-		_command_at(point, false, true, false, false, append)
-	elif mode == "move":
-		_command_at(point, false, false, true, false, append)
-	elif mode == "attack":
-		_command_at(point, false, false, false, true, append)
 	if append and mode != "rally":
 		pending_command = mode
 		_refresh_command_mode()
@@ -4224,7 +4218,7 @@ func _draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tin
 	map_canvas.draw_polyline(shape, Color(tint, 0.85), 1.0, true)
 
 func _draw_formation_preview(state: Dictionary) -> void:
-	if not formation_drag or formation_length <= 5.0:
+	if formation_button == 0 or formation_length <= 5.0:
 		return
 	var entries: Array = _formation_orders(state)
 	if entries.is_empty():
@@ -4237,11 +4231,52 @@ func _draw_formation_preview(state: Dictionary) -> void:
 		var heading: Vector2 = order["heading"]
 		_draw_destination_ghost(entry["hull"], point, heading, color if entry["valid"] else Color("#a88b83"))
 
+func _begin_formation(mouse: InputEventMouseButton) -> void:
+	formation_button = mouse.button_index
+	formation_path = PackedVector2Array([mouse.position])
+	formation_length = 0.0
+	formation_mode = pending_command
+	formation_append = mouse.shift_pressed
+	formation_force_position = mouse.alt_pressed
+	selecting_units = false
+	follow_units = false
+
+func _finish_formation(point: Vector2) -> void:
+	_append_formation_point(point, true)
+	var entries: Array = _formation_orders(_state())
+	formation_button = 0
+	if entries.is_empty():
+		_command_at(point, formation_force_position, formation_mode == "patrol", formation_mode not in ["attack", "patrol"], formation_mode == "attack", formation_append, formation_mode.is_empty())
+	else:
+		var valid: Array = []
+		for entry in entries:
+			if entry["valid"]:
+				valid.append({"ids": entry["ids"], "order": entry["order"]})
+		if not valid.is_empty():
+			session.call("request_unit_orders", valid, formation_append)
+	if not formation_append:
+		pending_command = ""
+		_refresh_command_mode()
+
 func _map_input(event: InputEvent) -> void:
 	if match_menu.visible:
 		return
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
+		if mouse.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+			# Both buttons place the armed movement command. Without one,
+			# only the right button places orders; left still selects.
+			if formation_button != 0:
+				if mouse.button_index == formation_button and not mouse.pressed:
+					_finish_formation(mouse.position)
+				map_canvas.queue_redraw()
+				map_canvas.accept_event()
+				return
+			if mouse.pressed and (pending_command in ["move", "attack", "patrol"] or (mouse.button_index == MOUSE_BUTTON_RIGHT and pending_command.is_empty() and selected_yard < 0)):
+				_begin_formation(mouse)
+				map_canvas.queue_redraw()
+				map_canvas.accept_event()
+				return
 		match mouse.button_index:
 			MOUSE_BUTTON_MIDDLE:
 				if mouse.pressed:
@@ -4254,30 +4289,6 @@ func _map_input(event: InputEvent) -> void:
 						_refresh_command_mode()
 					elif selected_yard >= 0:
 						_set_rally_at(mouse.position)
-					else:
-						formation_drag = true
-						formation_path = PackedVector2Array([mouse.position])
-						formation_length = 0.0
-						formation_mode = pending_command
-						formation_append = mouse.shift_pressed
-						formation_force_position = mouse.alt_pressed
-						follow_units = false
-				elif formation_drag:
-					_append_formation_point(mouse.position, true)
-					var entries: Array = _formation_orders(_state())
-					formation_drag = false
-					if entries.is_empty():
-						_command_at(mouse.position, formation_force_position, formation_mode == "patrol", formation_mode not in ["attack", "patrol"], formation_mode == "attack", formation_append, formation_mode.is_empty())
-					else:
-						var valid: Array = []
-						for entry in entries:
-							if entry["valid"]:
-								valid.append({"ids": entry["ids"], "order": entry["order"]})
-						if not valid.is_empty():
-							session.call("request_unit_orders", valid, formation_append)
-					if not formation_append:
-						pending_command = ""
-						_refresh_command_mode()
 			MOUSE_BUTTON_LEFT:
 				if not pending_command.is_empty():
 					if mouse.pressed:
@@ -4304,7 +4315,7 @@ func _map_input(event: InputEvent) -> void:
 					_zoom_at(mouse.position, 1.0 / 1.15)
 	elif event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event
-		if formation_drag:
+		if formation_button != 0:
 			_append_formation_point(motion.position)
 		elif selecting_units:
 			selection_end = motion.position
@@ -4395,8 +4406,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if focus is LineEdit or focus is TextEdit or colony_picker.get_popup().visible:
 		return
 	var key: int = event.physical_keycode
-	if key == KEY_ESCAPE and (not pending_command.is_empty() or formation_drag):
-		formation_drag = false
+	if key == KEY_ESCAPE and (not pending_command.is_empty() or formation_button != 0):
+		formation_button = 0
 		pending_command = ""
 		_refresh_command_mode()
 	elif key in [KEY_Q, KEY_E]:
@@ -4485,8 +4496,8 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 		map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
-	if formation_drag and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
-		formation_drag = false
+	if formation_button != 0 and not Input.is_mouse_button_pressed(formation_button):
+		formation_button = 0
 		map_canvas.queue_redraw()
 	if selecting_units and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		selecting_units = false
