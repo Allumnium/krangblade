@@ -373,3 +373,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** UX stabilization.
 - **Observation:** The previous layout nested both content columns under a shared toolbar and left the right commands without independent scrolling. v0.29.4 places the minimap, center, and command wing as peers, gives the center a filling detail viewport, and scrolls the right commands beneath their toolbar.
 - **Consider:** Manual visual regression at 1024×576 and larger, plus multiple UI scales.
+
+### T-Sector-29d — Cursor-to-sector targeting
+- **Type:** Command UX.
+- **Observation:** Right-click commands previously chose the nearest POI center before checking sector containment, potentially snapping to an adjacent sector. v0.29.5 prioritizes the simulation's sector boundary and retains direct POI click fallback.
+- **Consider:** A distinct hover outline for command sectors; ownership territory outlines are not equivalent to command-sector boundaries.
