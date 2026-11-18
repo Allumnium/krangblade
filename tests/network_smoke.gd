@@ -213,6 +213,13 @@ func _phase_changed() -> void:
 						var craft: Dictionary = state["ships"].back()
 						craft["holding"] = true
 						var graph: Dictionary = ECON.military_graph(state)
+						var repair_point: Vector2 = graph["points"][index] + Vector2.DOWN * minf(350.0, ECON.sector_limit(graph, index, Vector2.DOWN) * 0.5)
+						var repairer: Dictionary = {"id": 980000 + index, "kind": "miner", "owner": system["owner"], "origin": index, "at": index, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": repair_point, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock(), "mining_mode": "delivery", "field": -1}
+						repairer["cargo"][ECON.ANTIMATTER] = 3.0
+						var repair_victim: Dictionary = repairer.duplicate(true)
+						repair_victim.merge({"id": 990000 + index, "kind": "ship", "position": repair_point + Vector2.RIGHT * 40, "hp": ECON.SHIP_HP - 12.0, "cargo": ECON.empty_stock()}, true)
+						state["ships"].append(repairer)
+						state["ships"].append(repair_victim)
 						var point: Vector2 = graph["points"][index] + Vector2.RIGHT * minf(150.0, ECON.sector_limit(graph, index, Vector2.RIGHT) * 0.5)
 						var pile_id: int = 910000 + index
 						state["salvage"][pile_id] = {"id": pile_id, "resource": ECON.ANTIMATTER, "amount": 12.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
@@ -399,6 +406,11 @@ func _send_commands() -> void:
 	session.call("request_tactical_order", [own_fighters[0], enemy_fighter], "patrol", home_index)
 	session.call("request_tactical_order", [own_fighters[0]], "patrol", -1)
 	var attack_id: int = 920000 + home_index
+	var service_id: int = 980000 + home_index
+	session.call("request_repair_auto", [service_id], false)
+	session.call("request_repair_auto", [980000 + (home_index + 1) % expected_players], false)
+	session.call("request_unit_orders", [{"ids": [service_id], "order": {"kind": "repair", "target": 990000 + home_index}}], false)
+	session.call("request_unit_orders", [{"ids": [service_id], "order": {"kind": "deposit", "target": ECON.station_target_id(initial, home_index)}}], true)
 	var victim_id: int = 920000 + (home_index + 1) % expected_players
 	session.call("request_tactical_order", [attack_id], "attack", victim_id)
 	session.call("request_unit_orders", [{"ids": [attack_id], "order": {"kind": "sector", "target": home_index, "move_only": true}}], true)
@@ -614,11 +626,19 @@ func _check_economy_sync() -> void:
 							local_arrived = local_arrived or (not craft.has("local_move_target") and int(craft.get("operation_target", -1)) == owner_home and (craft["position"] as Vector2).distance_to(local_point) <= ECON.SHIP_SEPARATION_RADIUS * 2.0 and ECON._idle_formation_targets(state, graph).has(int(craft["id"])))
 			var assigned_miners: int = 0
 			var auto_salvage: bool = false
+			var repair_toggled: bool = false
+			var repaired: bool = false
+			var deposited: bool = false
 			for craft in state["ships"]:
 				if int(craft["owner"]) == owner and craft["kind"] == "miner" and int(craft.get("assigned_field", -1)) >= 0:
 					assigned_miners += 1
 				if int(craft["id"]) == 930000 + owner_home:
 					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
+				if int(craft["id"]) == 980000 + owner_home:
+					repair_toggled = not bool(craft.get("repair_auto", true))
+					deposited = float(craft["cargo"].get(ECON.ANTIMATTER, 0.0)) <= ECON.EPS and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 15.0 - ECON.EPS
+				if int(craft["id"]) == 990000 + owner_home:
+					repaired = float(craft["hp"]) >= ECON.SHIP_HP - ECON.EPS
 			var checks: Dictionary = {
 				"autobuild": system["yards"][0].get("autobuild", []).has("ship"),
 				"rally": int(system["yards"][0].get("rally", {}).get("node", -1)) == owner_home and system["yards"][0].get("rally", {}).get("point", Vector2.INF) == graph["points"][owner_home],
@@ -628,6 +648,9 @@ func _check_economy_sync() -> void:
 				"unit_order_queue": order_queue_verified,
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
+				"miner_repair_toggle": repair_toggled,
+				"miner_repaired": repaired,
+				"miner_deposited": deposited,
 				"local_move_order": local_moving,
 				"local_position": local_arrived,
 				"miner_assignment": assigned_miners == 1,

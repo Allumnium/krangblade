@@ -63,6 +63,8 @@ const SALVAGE_APPROACH_RANGE: float = TRACTOR_RANGE * 2.0
 # of damage to a resource chunk removes one ton, subject to field limits.
 const MINER_LASER_DAMAGE: float = 2.0
 const MINER_ASTEROID_MULTIPLIER: float = 3.0
+const MINER_REPAIR_RATE: float = 5.0
+const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
 const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const SHIP_SIZE: int = 1
@@ -399,6 +401,7 @@ static func send_colony(state: Dictionary, player: int, ship_id: int, target: in
 		if path.is_empty():
 			return false
 		_cancel_salvage_order(ship)
+		_clear_tactical_order(ship)
 		_set_unit_order(ship, {"kind": "colonize", "target": target})
 		ship["dest"] = target
 		ship["return_path"] = path.duplicate()
@@ -1754,6 +1757,7 @@ static func command_miners(state: Dictionary, player: int, ids: Array, field_ind
 				return false
 	for ship in selected:
 		_cancel_salvage_order(ship)
+		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
 		_set_unit_order(ship, {"kind": "mine", "target": field_index, "chunk": chunk_id})
 		ship["assigned_field"] = field_index
@@ -2273,6 +2277,9 @@ static func _clear_tactical_order(ship: Dictionary) -> void:
 	ship.erase("move_only")
 	ship.erase("attack_order")
 	ship.erase("attack_local")
+	ship.erase("repair_order")
+	ship.erase("repair_target")
+	ship.erase("cargo_order")
 	ship.erase("patrol_from")
 	ship.erase("patrol_to")
 	ship.erase("patrol_start_point")
@@ -2292,18 +2299,282 @@ static func _attack_destination(graph: Dictionary, target: Dictionary) -> int:
 	var route: Array = target.get("route", [])
 	return int(route[0]) if not route.is_empty() else int(target.get("at", -1))
 
+static func armed(ship: Dictionary) -> bool:
+	return ship.get("kind", "") in ["fighter", "miner"]
+
+# Stable hull IDs and the existing disjoint structure target IDs. HP lives
+# in the actual entity dictionary, so repair never creates a new entity.
+static func service_targets(state: Dictionary) -> Dictionary:
+	var targets: Dictionary = {}
+	for ship in state["ships"]:
+		var position: Vector2 = ship.get("position", Vector2.INF)
+		if not position.is_finite():
+			continue
+		targets[ship["id"]] = {"owner": ship["owner"], "entity": ship, "position": position, "max_hp": SHIP_HP, "node": -1, "kind": "ship"}
+	var count: int = state["planets"].size()
+	for node in range(count):
+		var p: Dictionary = state["planets"][node]
+		if has_station(p):
+			targets[station_target_id(state, node)] = {"owner": p["owner"], "entity": p["station"], "position": station_position(state, node, float(state["elapsed"])), "max_hp": STATION_HP, "node": node, "kind": "station"}
+		for slot in range(p["yards"].size()):
+			var yard: Dictionary = p["yards"][slot]
+			targets[-2 - node * 3 - slot] = {"owner": p["owner"], "entity": yard, "position": shipyard_position(state, node, slot, float(state["elapsed"])), "max_hp": SHIP_HP * 10.0 * int(yard["level"]), "node": node, "kind": "yard"}
+		for slot in p.get("pds", {}):
+			targets[-2 - count * 3 - int(slot) * count - node] = {"owner": p["owner"], "entity": p["pds"][slot], "position": state["map"]["points"][node], "max_hp": PDS_HP, "node": node, "kind": "pds"}
+	return targets
+
+static func _friendly_target(state: Dictionary, owner: int, target: Dictionary) -> bool:
+	return not target.is_empty() and int(target.get("owner", 0)) > 0 and int(state["teams"].get(owner, 0)) == int(state["teams"].get(int(target["owner"]), -1))
+
+static func _damaged(target: Dictionary) -> bool:
+	return not target.is_empty() and float(target["entity"].get("hp", target["max_hp"])) < float(target["max_hp"]) - EPS
+
+static func can_deposit(state: Dictionary, ship: Dictionary, target_id: int) -> bool:
+	var ref: Dictionary = service_targets(state).get(target_id, {})
+	if target_id == int(ship["id"]) or not _friendly_target(state, int(ship["owner"]), ref) or _cargo_total(ship) <= EPS:
+		return false
+	if ref["kind"] == "ship":
+		return cargo_free(ref["entity"]) > EPS
+	if ref["kind"] != "station":
+		return false
+	var p: Dictionary = state["planets"][ref["node"]]
+	for resource in RESOURCES + [ANTIMATTER]:
+		if float(ship["cargo"].get(resource, 0.0)) > EPS and storage_free(p, resource) > EPS:
+			return true
+	return false
+
+static func command_service(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
+	var units: Array = _owned_units(state, player, ids)
+	var graph: Dictionary = military_graph(state)
+	if units.is_empty():
+		return false
+	for ship in units:
+		if not _valid_unit_order(state, graph, ship, order, false):
+			return false
+	for ship in units:
+		_cancel_salvage_order(ship)
+		_clear_tactical_order(ship)
+		_clear_local_hold(ship)
+		_interrupt_work(ship)
+		_set_unit_order(ship, order.duplicate(true))
+		if order["kind"] == "repair":
+			ship["repair_order"] = order["target"]
+		else:
+			ship["cargo_order"] = order.duplicate(true)
+			ship["move_only"] = true
+	return true
+
+static func set_repair_auto(state: Dictionary, player: int, ids: Array, enabled: bool) -> bool:
+	var units: Array = _owned_units(state, player, ids)
+	if units.is_empty() or units.any(func(ship: Dictionary) -> bool: return ship["kind"] != "miner"):
+		return false
+	for ship in units:
+		ship["repair_auto"] = enabled
+		if not enabled and not ship.has("repair_order"):
+			ship.erase("repair_target")
+	return true
+
+static func _drop_carried(state: Dictionary, ship: Dictionary) -> void:
+	var pos: Vector2 = ship["position"]
+	var born: float = float(state["elapsed"])
+	var piles: Dictionary = state.get("salvage", {})
+	for resource in RESOURCES + [ANTIMATTER]:
+		var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
+		if amount <= EPS:
+			continue
+		var id: int = int(state.get("next_salvage_id", 1))
+		state["next_salvage_id"] = id + 1
+		var rng := RandomNumberGenerator.new()
+		rng.seed = int(state["map"].get("seed", 0)) + id * 15485863
+		var angle: float = rng.randf_range(0.0, TAU)
+		piles[id] = {"id": id, "resource": resource, "amount": amount, "origin": pos, "position": pos, "drift": Vector2.from_angle(angle) * rng.randf_range(4.0, 10.0), "born": born, "expires_at": born + rng.randf_range(SALVAGE_MIN_LIFETIME, SALVAGE_MAX_LIFETIME), "claim": -1, "dropped_by": ship["id"]}
+		ship["cargo"][resource] = 0.0
+	state["salvage"] = piles
+
+static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float) -> bool:
+	if not ship.has("cargo_order"):
+		return false
+	var order: Dictionary = ship["cargo_order"]
+	var ref: Dictionary = targets.get(int(order.get("target", -1)), {})
+	var drop: bool = order["kind"] == "drop"
+	if not drop and not _friendly_target(state, int(ship["owner"]), ref):
+		ship.erase("cargo_order")
+		_finish_manual(ship)
+		return false
+	var point: Vector2 = order["point"] if drop else ref["position"]
+	var node: int = patrol_node(state, graph, int(ship["owner"]), point)
+	if node < 0:
+		ship.erase("cargo_order")
+		_finish_manual(ship)
+		return false
+	if not _manual_travel(state, graph, ship, node, point, dt, 0.0 if drop or ref.get("kind") == "station" else TRACTOR_RANGE * 0.5):
+		return true
+	if drop:
+		_drop_carried(state, ship)
+	elif ref["kind"] in ["station", "ship"]:
+		var depot: Dictionary = state["planets"][ref["node"]] if ref["kind"] == "station" else ref["entity"]
+		var stock: Dictionary = depot["stock"] if ref["kind"] == "station" else depot["cargo"]
+		for resource in RESOURCES + [ANTIMATTER]:
+			var free: float = storage_free(depot, resource) if ref["kind"] == "station" else cargo_free(depot)
+			var amount: float = minf(float(ship["cargo"].get(resource, 0.0)), free)
+			if amount <= EPS:
+				continue
+			ship["cargo"][resource] -= amount
+			stock[resource] = float(stock.get(resource, 0.0)) + amount
+			if ref["kind"] == "station":
+				_record_flow(depot, "Manual deliveries", resource, amount)
+	ship.erase("cargo_order")
+	_finish_manual(ship)
+	return true
+
+static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float, damaged_ids: Variant = null) -> bool:
+	if ship["kind"] != "miner":
+		return false
+	ship.erase("repair_target")
+	var explicit: bool = ship.has("repair_order")
+	if not explicit and (not bool(ship.get("repair_auto", true)) or (_unit_order_running(ship) and ship.get("unit_order", {}).get("kind", "") != "mine") or bool(ship.get("holding", false)) or _salvage_active(ship)):
+		return false
+	var target_id: int = int(ship.get("repair_order", -1))
+	var ref: Dictionary = targets.get(target_id, {})
+	if explicit and (not _friendly_target(state, int(ship["owner"]), ref) or not _damaged(ref)):
+		ship.erase("repair_order")
+		_finish_manual(ship)
+		return false
+	var pos: Vector2 = ship["position"]
+	if not explicit:
+		var best: float = MINER_REPAIR_SEARCH * MINER_REPAIR_SEARCH
+		for id in (targets.keys() if damaged_ids == null else damaged_ids):
+			if id == ship["id"]:
+				continue
+			var candidate: Dictionary = targets[id]
+			if not _friendly_target(state, int(ship["owner"]), candidate) or not _damaged(candidate):
+				continue
+			var distance: float = pos.distance_squared_to(candidate["position"])
+			if distance < best:
+				best = distance
+				target_id = id
+				ref = candidate
+	if ref.is_empty():
+		return false
+	var point: Vector2 = ref["position"]
+	if pos.distance_to(point) > LASER_RANGE:
+		if explicit:
+			var node: int = patrol_node(state, graph, int(ship["owner"]), point)
+			if node < 0:
+				ship.erase("repair_order")
+				return false
+			_manual_travel(state, graph, ship, node, point, dt, LASER_RANGE * 0.8)
+		else:
+			_navigate(ship, point, minf(SHIP_SPEED * dt, pos.distance_to(point) - LASER_RANGE * 0.8))
+	else:
+		var entity: Dictionary = ref["entity"]
+		entity["hp"] = minf(float(ref["max_hp"]), float(entity.get("hp", ref["max_hp"])) + MINER_REPAIR_RATE * dt)
+		ship["repair_target"] = target_id
+		ship["mining_active"] = false
+		ship["navigation_target"] = ship["position"]
+	if not explicit and ship.get("mining_mode", "") == "mining":
+		ship["mining_mode"] = "outbound"
+	return true
+
+# A manual command interrupts civilian work, retaining cargo and player
+# mining preferences. On completion automation chooses a fresh legal job.
+static func _interrupt_work(ship: Dictionary) -> void:
+	if ship["kind"] == "fighter":
+		ship["direct_order"] = true
+		ship["operation_target"] = int(ship["at"])
+		ship.erase("rally_pending")
+	else:
+		ship["source"] = -1
+		ship["dest"] = -1
+		if ship["kind"] == "miner":
+			ship["mining_mode"] = "delivery" if _cargo_total(ship) > EPS else "idle"
+			ship["field"] = -1
+			ship["next_mining_search"] = 0.0
+			ship["next_unload_search"] = 0.0
+
+static func _manual_nav(state: Dictionary, graph: Dictionary, ship: Dictionary, node: int) -> Dictionary:
+	if ship["kind"] == "fighter":
+		return {"graph": graph, "node": node}
+	# Civilian work stores star indices; use star lanes for manual travel,
+	# then fly from the field's access star to the exact requested point.
+	var count: int = state["planets"].size()
+	if node >= count:
+		node = int(state["map"]["fields"][node - count]["anchor"])
+	if not graph.has("civilian_manual_nav"):
+		var adjacent: Array = []
+		for index in range(count):
+			adjacent.append(graph["adjacent"][index].filter(func(other: int) -> bool: return other < count))
+		graph["civilian_manual_nav"] = {"points": state["map"]["points"], "adjacent": adjacent, "paths": {}}
+	return {"graph": graph["civilian_manual_nav"], "node": node}
+
+static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionary, node: int, point: Vector2, dt: float, reach: float = 0.0) -> bool:
+	var pos: Vector2 = ship["position"]
+	var nav: Dictionary = _manual_nav(state, graph, ship, node)
+	var goal: int = nav["node"]
+	if pos.distance_to(point) <= reach + EPS:
+		if sector_contains(graph, node, pos):
+			ship["at"] = goal
+			ship["route"] = []
+			ship["leg"] = 0.0
+		return true
+	if sector_contains(graph, node, pos):
+		ship["route"] = []
+		ship["at"] = goal
+		ship["leg"] = 0.0
+	elif int(ship.get("dest", -1)) != goal:
+		var paths: Dictionary = _military_paths(nav["graph"], goal)
+		if not paths["distance"].has(int(ship["at"])):
+			return false
+		_redirect_fighter(nav["graph"], ship, goal, paths)
+	if ship["kind"] == "fighter":
+		ship["operation_target"] = goal
+	if not (ship["route"] as Array).is_empty():
+		_move({"map": nav["graph"]}, ship, dt, point, goal)
+		return (ship["position"] as Vector2).distance_to(point) <= reach + EPS
+	_navigate(ship, point, minf(SHIP_SPEED * dt, maxf(0.0, pos.distance_to(point) - reach)))
+	return (ship["position"] as Vector2).distance_to(point) <= reach + EPS
+
+static func _finish_manual(ship: Dictionary) -> void:
+	ship["route"] = []
+	ship["leg"] = 0.0
+	ship["dest"] = -1 if ship["kind"] != "fighter" else int(ship["at"])
+	ship.erase("move_only")
+	if ship["kind"] == "fighter":
+		ship["operation_target"] = int(ship["at"])
+
+static func _shift_yard_targets(state: Dictionary, node: int, slot: int) -> void:
+	var removed: int = -2 - node * 3 - slot
+	var last: int = -2 - node * 3 - 2
+	for ship in state["ships"]:
+		for key in ["attack_order", "repair_order", "repair_target"]:
+			var target: int = int(ship.get(key, -1))
+			if target == removed:
+				ship.erase(key)
+				if key != "repair_target":
+					_finish_manual(ship)
+			elif target < removed and target >= last:
+				ship[key] = target + 1
+		for order in [ship.get("unit_order", {})] + ship.get("order_queue", []):
+			if order.get("kind", "") not in ["attack", "repair"]:
+				continue
+			var target: int = int(order.get("target", -1))
+			if target == removed:
+				order["target"] = -1
+			elif target < removed and target >= last:
+				order["target"] = target + 1
+
 static func command_attack(state: Dictionary, player: int, ids: Array, target_id: int) -> bool:
-	var target: Dictionary = {}
-	for craft in state["ships"]:
-		if int(craft["id"]) == target_id:
-			target = craft
-			break
+	var target: Dictionary = service_targets(state).get(target_id, {})
 	if target.is_empty() or not _hostile_hull(state, player, target):
 		return false
-	var node: int = _attack_destination(military_graph(state), target)
-	if not command_fighters(state, player, ids, node):
+	var units: Array = _owned_units(state, player, ids)
+	if units.is_empty() or units.any(func(craft: Dictionary) -> bool: return not armed(craft)):
 		return false
-	for craft in _owned_fighters(state, player, ids):
+	for craft in units:
+		_cancel_salvage_order(craft)
+		_clear_tactical_order(craft)
+		_clear_local_hold(craft)
+		_interrupt_work(craft)
 		craft["attack_order"] = target_id
 		_set_unit_order(craft, {"kind": "attack", "target": target_id})
 	return true
@@ -2364,29 +2635,35 @@ static func _update_tactical_orders(state: Dictionary, graph: Dictionary) -> voi
 	var by_id: Dictionary = {}
 	var paths: Dictionary = {}
 	for craft in state["ships"]:
-		by_id[int(craft["id"])] = craft
-	for craft in state["ships"]:
-		if craft.get("kind", "") != "fighter" or bool(craft.get("retreating", false)):
+		if not armed(craft) or bool(craft.get("retreating", false)):
 			continue
 		var goal: int = -1
 		var attack: int = int(craft.get("attack_order", -1))
 		craft.erase("attack_local")
-		if attack >= 0:
+		if attack != -1:
+			if by_id.is_empty():
+				by_id = service_targets(state)
 			var victim: Dictionary = by_id.get(attack, {})
 			if victim.is_empty() or not _hostile_hull(state, int(craft["owner"]), victim):
 				_clear_tactical_order(craft)
-				# Finish the last legal lane, then fall back to normal attack-move.
+				_finish_manual(craft)
 				continue
-			goal = _attack_destination(graph, victim)
+			goal = int(victim["node"]) if int(victim["node"]) >= 0 else _attack_destination(graph, victim["entity"])
 			if goal < 0 or goal >= graph["points"].size():
 				_clear_tactical_order(craft)
 				continue
-			if local_sector(graph, craft) == goal and local_sector(graph, victim) == goal:
+			var nav: Dictionary = _manual_nav(state, graph, craft, goal)
+			if local_sector(graph, craft) == goal:
 				craft["attack_local"] = true
-				craft["at"] = goal
+				craft["at"] = nav["node"]
 				craft["route"] = []
 				craft["leg"] = 0.0
-				craft["dest"] = goal
+				craft["dest"] = nav["node"]
+			elif int(craft.get("dest", -1)) != int(nav["node"]):
+				_redirect_fighter(nav["graph"], craft, nav["node"], _military_paths(nav["graph"], nav["node"]))
+			if craft["kind"] == "fighter":
+				craft["operation_target"] = goal
+			continue
 		elif craft.has("patrol_from") and craft.get("patrol_arrived", false) and not _engaged(craft):
 			craft["patrol_returning"] = not bool(craft.get("patrol_returning", false))
 			craft["patrol_arrived"] = false
@@ -2542,9 +2819,11 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 			if target >= 0 and target < graph["points"].size():
 				return graph["points"][target]
 		"attack":
-			for victim in state["ships"]:
-				if int(victim["id"]) == target:
-					return victim["position"]
+			return service_targets(state).get(target, {}).get("position", Vector2.INF)
+		"repair", "deposit":
+			return service_targets(state).get(target, {}).get("position", Vector2.INF)
+		"drop":
+			return order.get("point", Vector2.INF)
 		"salvage":
 			return state.get("salvage", {}).get(target, {}).get("position", Vector2.INF)
 		"mine":
@@ -2584,6 +2863,10 @@ static func _unit_order_running(ship: Dictionary) -> bool:
 			return not (ship["route"] as Array).is_empty() or (not bool(order.get("move_only", false)) and _engaged(ship))
 		"attack":
 			return ship.has("attack_order")
+		"repair":
+			return ship.has("repair_order")
+		"deposit", "drop":
+			return ship.has("cargo_order")
 		"patrol":
 			return ship.has("patrol_from") and ((ship.get("order_queue", []) as Array).is_empty() or not ship.get("patrol_arrived", false) or _engaged(ship))
 		"salvage":
@@ -2603,6 +2886,8 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var fighter: bool = ship["kind"] == "fighter"
 	if kind == "unload":
 		return true
+	if kind == "drop":
+		return order.get("point") is Vector2 and patrol_node(state, graph, owner, order["point"]) >= 0
 	if not order.get("target", null) is int:
 		return false
 	var target: int = order["target"]
@@ -2613,17 +2898,21 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			if order.has("heading") and (not order["heading"] is Vector2 or not (order["heading"] as Vector2).is_finite() or (order["heading"] as Vector2).is_zero_approx()):
 				return false
 			var origin: Vector2 = unit_order_origin(state, graph, ship) if append else ship["position"]
-			return sector_contains(graph, target, origin) or (fighter and order.has("heading") and _military_paths(graph, target)["distance"].has(int(ship["at"])))
+			var nav: Dictionary = _manual_nav(state, graph, ship, target)
+			return sector_contains(graph, target, origin) or _military_paths(nav["graph"], nav["node"])["distance"].has(int(ship["at"]))
 		"patrol":
 			if order.has("heading") and (not order["heading"] is Vector2 or not (order["heading"] as Vector2).is_finite() or (order["heading"] as Vector2).is_zero_approx()):
 				return false
 			return fighter and military_pois(state, owner).has(target) and (not order.has("point") or (order["point"] is Vector2 and patrol_node(state, graph, owner, order["point"]) == target))
 		"sector":
-			return fighter and military_pois(state, owner).has(target)
+			return military_pois(state, owner).has(target)
 		"attack":
-			for victim in state["ships"]:
-				if int(victim["id"]) == target:
-					return fighter and _hostile_hull(state, owner, victim)
+			return armed(ship) and _hostile_hull(state, owner, service_targets(state).get(target, {}))
+		"repair":
+			var ref: Dictionary = service_targets(state).get(target, {})
+			return ship["kind"] == "miner" and target != int(ship["id"]) and _friendly_target(state, owner, ref) and _damaged(ref)
+		"deposit":
+			return can_deposit(state, ship, target)
 		"salvage":
 			return state.get("salvage", {}).has(target)
 		"colonize":
@@ -2636,7 +2925,10 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
 		"sector":
-			return command_fighters(state, player, ids, target, bool(order.get("move_only", false)))
+			if _owned_fighters(state, player, ids).size() == ids.size():
+				return command_fighters(state, player, ids, target, bool(order.get("move_only", false)))
+			var graph: Dictionary = military_graph(state)
+			return _execute_unit_order(state, player, ids, {"kind": "position", "target": target, "point": graph["points"][target], "move_only": order.get("move_only", false)})
 		"attack":
 			return command_attack(state, player, ids, target)
 		"patrol":
@@ -2651,17 +2943,14 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 			return command_salvage(state, player, ids, target)
 		"unload":
 			return command_unload_cargo(state, player, ids)
+		"repair", "deposit", "drop":
+			return command_service(state, player, ids, order)
 		"colonize":
 			return ids.size() == 1 and send_colony(state, player, ids[0], target)
 		"position":
 			var accepted: bool = command_local_position(state, player, ids, target, order["point"], bool(order.get("move_only", false)))
-			# A formation can be placed in another discovered sector by fighters;
-			# use normal lane travel before the final precise positioning leg.
-			if not accepted and order.has("heading") and command_fighters(state, player, ids, target, bool(order.get("move_only", false))):
-				accepted = true
-				for ship in _owned_units(state, player, ids):
-					ship["local_move_target"] = order["point"]
-					ship["local_move_sector"] = target
+			if not accepted:
+				accepted = command_remote_position(state, player, ids, target, order["point"], bool(order.get("move_only", false)))
 			if accepted:
 				for ship in _owned_units(state, player, ids):
 					ship["unit_order"] = order.duplicate(true)
@@ -2746,6 +3035,7 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
+		_interrupt_work(ship)
 		_set_unit_order(ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
 		ship["local_move_target"] = point
 		ship["local_move_sector"] = node
@@ -2769,6 +3059,30 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 			ship.erase("pursuit_blocked")
 	return true
 
+static func command_remote_position(state: Dictionary, player: int, ids: Array, node: int, point: Vector2, move_only: bool) -> bool:
+	var units: Array = _owned_units(state, player, ids)
+	var graph: Dictionary = military_graph(state)
+	if units.is_empty() or not military_pois(state, player).has(node) or not sector_contains(graph, node, point):
+		return false
+	for ship in units:
+		var nav: Dictionary = _manual_nav(state, graph, ship, node)
+		if not _military_paths(nav["graph"], nav["node"])["distance"].has(int(ship["at"])) or bool(ship.get("retreating", false)):
+			return false
+	for ship in units:
+		_cancel_salvage_order(ship)
+		_clear_tactical_order(ship)
+		_clear_local_hold(ship)
+		_interrupt_work(ship)
+		var nav: Dictionary = _manual_nav(state, graph, ship, node)
+		_redirect_fighter(nav["graph"], ship, nav["node"], _military_paths(nav["graph"], nav["node"]))
+		if ship["kind"] == "fighter":
+			ship["operation_target"] = node
+		ship["local_move_target"] = point
+		ship["local_move_sector"] = node
+		ship["move_only"] = move_only
+		_set_unit_order(ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
+	return true
+
 static func command_hold_units(state: Dictionary, player: int, ids: Array, release: bool) -> bool:
 	var units: Array = _owned_units(state, player, ids)
 	if units.is_empty():
@@ -2788,6 +3102,7 @@ static func command_hold_units(state: Dictionary, player: int, ids: Array, relea
 		elif ship.get("kind", "") == "fighter":
 			hold_fighters(state, player, [ship["id"]])
 		else:
+			_clear_tactical_order(ship)
 			_clear_local_hold(ship)
 			ship["holding"] = true
 	return true
@@ -2795,13 +3110,20 @@ static func command_hold_units(state: Dictionary, player: int, ids: Array, relea
 # A local move is a one-shot order, not a persistent hold. Keep the
 # destination through a repair detour, and resume the normal idle/working
 # behavior as soon as the point is physically reached.
-static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, state: Dictionary = {}) -> bool:
 	if not ship.has("local_move_target") or bool(ship.get("retreating", false)):
 		return false
 	var fighter: bool = ship.get("kind", "") == "fighter"
 	if fighter and _engaged(ship) and not bool(ship.get("move_only", false)):
 		return false
 	var node: int = int(ship["local_move_sector"])
+	if not fighter and not state.is_empty():
+		if _manual_travel(state, graph, ship, node, ship["local_move_target"], dt):
+			if ship.has("arrival_heading"):
+				ship["heading"] = ship["arrival_heading"]
+			_clear_local_move(ship)
+			_finish_manual(ship)
+		return true
 	if fighter and not sector_contains(graph, node, ship["position"]):
 		if int(ship.get("dest", -1)) != node:
 			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
@@ -3150,6 +3472,8 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 				if not piles.has(candidate) or int(piles[candidate]["claim"]) >= 0:
 					continue
 				var point: Vector2 = piles[candidate]["position"]
+				if piles[candidate].has("dropped_by") and (int(piles[candidate]["dropped_by"]) == int(ship["id"]) or float(state["elapsed"]) - float(piles[candidate]["born"]) < 2.0):
+					continue
 				var distance: float = pos.distance_squared_to(point)
 				if distance > nearest or (is_equal_approx(distance, nearest) and best >= 0 and int(candidate) > best):
 					continue
@@ -3226,7 +3550,7 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		var best: Dictionary = {}
 		var distance: float = INF
 		for ship in units:
-			if cargo_free(ship) <= EPS or bool(ship.get("retreating", false)) or not _salvage_reachable(graph, ship, pile["position"]):
+			if cargo_free(ship) <= EPS or bool(ship.get("retreating", false)) or patrol_node(state, graph, player, pile["position"]) < 0:
 				continue
 			var d: float = (ship["position"] as Vector2).distance_squared_to(pile["position"])
 			if d < distance:
@@ -3244,6 +3568,7 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		_cancel_salvage_order(best)
 		_clear_tactical_order(best)
 		_clear_local_hold(best)
+		_interrupt_work(best)
 		_set_unit_order(best, {"kind": "salvage", "target": id})
 		best["salvage_target"] = id
 		pile["claim"] = int(best["id"])
@@ -3334,7 +3659,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 	if id >= 0:
 		var piles: Dictionary = state.get("salvage", {})
 		var pile: Dictionary = piles.get(id, {})
-		if pile.is_empty() or int(pile["claim"]) != int(ship["id"]) or not _salvage_reachable(graph, ship, pile["position"]):
+		if pile.is_empty() or int(pile["claim"]) != int(ship["id"]):
 			if not pile.is_empty() and int(pile["claim"]) == int(ship["id"]):
 				pile["claim"] = -1
 			ship.erase("salvage_target")
@@ -3346,7 +3671,11 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		var point: Vector2 = pile["position"]
 		var pos: Vector2 = ship["position"]
 		if pos.distance_to(point) > TRACTOR_RANGE:
-			_navigate(ship, point, minf(SHIP_SPEED * dt, pos.distance_to(point) - TRACTOR_RANGE * 0.85))
+			var node: int = patrol_node(state, graph, int(ship["owner"]), point)
+			if node < 0:
+				_cancel_salvage_order(ship)
+				return false
+			_manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE * 0.85)
 			return true
 		_collect_salvage(ship, pile, dt)
 		if float(pile["amount"]) <= EPS or cargo_free(ship) <= EPS:
@@ -3479,7 +3808,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
-		if bool(ship.get("retreating", false)) or moving_only:
+		if bool(ship.get("retreating", false)) or moving_only or ship.has("cargo_order") or ship.has("repair_order"):
 			ship["combat_target"] = -1
 			ship["pursuit_target"] = -1
 			ship["pursuit_left"] = 0.0
@@ -3489,6 +3818,23 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			continue
 		var id: int = int(ship["id"])
 		var pos: Vector2 = positions[id]
+		# Explicit attack is focus fire, never attack-move: even when another
+		# hostile is closer, only the ordered entity may receive damage.
+		if ship.has("attack_order"):
+			var focus: int = int(ship["attack_order"])
+			var in_range: bool = positions.has(focus) and pos.distance_to(positions[focus]) <= LASER_RANGE
+			ship["combat_target"] = focus if in_range and focus >= 0 else -1
+			ship["yard_target"] = focus if in_range and focus < -1 else -1
+			ship["pursuit_target"] = -1
+			ship["pursuit_left"] = 0.0
+			ship["laser_until"] = -1.0 if int(previous_targets[id]) != int(ship["combat_target"]) else ship.get("laser_until", -1.0)
+			var focus_cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
+			if in_range and focus_cooldown <= EPS:
+				damage[focus] = float(damage.get(focus, 0.0)) + weapon_damage
+				focus_cooldown = 1.0
+				ship["laser_until" if focus >= 0 else "yard_laser_until"] = float(state["elapsed"]) + 0.2
+			ship["laser_cooldown"] = focus_cooldown
+			continue
 		var team: int = int(state["teams"].get(int(ship["owner"]), 0))
 		var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 		var target: int = -1
@@ -3655,6 +4001,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var eco: float = eco_population(planet)
 		var lost: float = minf(eco, eco / maxf(1.0, float(eco_housing_count(planet))))
 		planet["yards"].remove_at(location.y)
+		_shift_yard_targets(state, location.x, location.y)
 		planet["population"] = maxf(0.0, float(planet["population"]) - lost)
 		planet["eco_population"] = maxf(0.0, eco - lost)
 		_compact_shipyard_orders(planet, location.y + 1)
@@ -4198,7 +4545,7 @@ static func _move_formation(graph: Dictionary, ship: Dictionary, dt: float) -> b
 static func _formation_lane_groups(state: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
 	for craft in state["ships"]:
-		if craft.get("kind", "") != "fighter" or craft.has("launch_rally") or craft.has("local_move_target") or _salvage_active(craft) or _engaged(craft) or bool(craft.get("retreating", false)) or bool(craft.get("holding", false)) or (craft["route"] as Array).is_empty():
+		if craft.get("kind", "") != "fighter" or craft.has("launch_rally") or craft.has("local_move_target") or craft.has("attack_order") or craft.has("cargo_order") or _salvage_active(craft) or _engaged(craft) or bool(craft.get("retreating", false)) or bool(craft.get("holding", false)) or (craft["route"] as Array).is_empty():
 			continue
 		var key: String = "%d:%d:%d:%d" % [int(craft.get("operation_id", 0)), int(craft["at"]), int(craft["route"][0]), int(craft.get("dest", -1))]
 		if not groups.has(key):
@@ -4272,7 +4619,7 @@ static func _nearest_repair_site(state: Dictionary, graph: Dictionary, ship: Dic
 static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 	var paths: Dictionary = {}
 	for ship in state["ships"]:
-		if ship.get("kind", "") != "fighter":
+		if not armed(ship):
 			continue
 		var withdrawing: bool = bool(ship.get("retreating", false))
 		if not withdrawing and float(ship.get("hp", SHIP_HP)) > WITHDRAW_HP:
@@ -4291,6 +4638,9 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 		if not withdrawing:
 			ship["withdrawal_objective"] = int(ship.get("dest", ship["at"]))
 			_cancel_salvage_order(ship)
+			ship.erase("repair_target")
+			if ship["kind"] == "miner":
+				_interrupt_work(ship)
 		ship["retreating"] = true
 		ship["repair_site"] = site
 		ship["combat_target"] = -1
@@ -4300,7 +4650,8 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 		if int(ship.get("dest", -1)) != site:
 			if not paths.has(site):
 				paths[site] = _military_paths(graph, site)
-			_redirect_fighter(graph, ship, site, paths[site])
+			var nav: Dictionary = _manual_nav(state, graph, ship, site)
+			_redirect_fighter(nav["graph"], ship, site, _military_paths(nav["graph"], site))
 
 static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> void:
 	var site: int = int(ship["repair_site"])
@@ -4326,7 +4677,7 @@ static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Diction
 			ship["operation_target"] = int(ship.get("hold_sector", site))
 
 static func _order_operation_ship(graph: Dictionary, ship: Dictionary, goal: int, paths: Dictionary) -> void:
-	if _salvage_active(ship) or int(ship.get("dest", -1)) == goal:
+	if _salvage_active(ship) or ship.has("cargo_order") or ship.has("attack_order") or int(ship.get("dest", -1)) == goal:
 		return
 	if not paths.has(goal):
 		paths[goal] = _military_paths(graph, goal)
@@ -4407,7 +4758,7 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 # same-kind hulls share a moving local anchor and tangent-relative V slots.
 # Routing, docking, mining, combat and withdrawal always take precedence.
 static func _is_idle_ship(ship: Dictionary) -> bool:
-	if _salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally") or ship.has("patrol_from"):
+	if _salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally") or ship.has("patrol_from") or ship.has("attack_order") or ship.has("cargo_order") or ship.has("repair_order") or ship.has("repair_target"):
 		return false
 	var fighter: bool = ship.get("kind", "") == "fighter"
 	var mode: String = str(ship.get("mining_mode", "idle"))
@@ -4743,18 +5094,42 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		combat_positions[int(craft["id"])] = craft["position"]
 	var idle_targets: Dictionary = _idle_formation_targets(state, combat_graph)
 	var coordinated: Dictionary = _coordinate_formations(state, combat_graph, dt)
+	var service_refs: Dictionary = service_targets(state)
+	var damaged_ids: Array = service_refs.keys().filter(func(id: int) -> bool: return _damaged(service_refs[id]))
 	started = _profile_stage(profile, "Formations / orders", started)
 	var civilian_usec: int = 0
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
 		var salvage_ship_id: int = int(ship["id"])
+		if bool(ship.get("retreating", false)) and armed(ship):
+			ship.erase("repair_target")
+			_work_withdrawal(state, combat_graph, ship, dt)
+			continue
+		if ship.has("attack_order"):
+			var ref: Dictionary = service_refs.get(int(ship["attack_order"]), {})
+			if ref.is_empty() or not _hostile_hull(state, int(ship["owner"]), ref):
+				_clear_tactical_order(ship)
+				_finish_manual(ship)
+			else:
+				var point: Vector2 = ref["position"]
+				var node: int = int(ref["node"]) if int(ref["node"]) >= 0 else _attack_destination(combat_graph, ref["entity"])
+				if ship["kind"] == "fighter" and (ship["position"] as Vector2).distance_to(point) <= LASER_RANGE:
+					_maneuver_fighter(ship, point, dt)
+				elif node >= 0:
+					_manual_travel(state, combat_graph, ship, node, point, dt, LASER_RANGE * 0.8)
+				continue
+		if _work_cargo_order(state, combat_graph, ship, service_refs, dt):
+			continue
 		if _work_launch_rally(state, ship, dt):
+			continue
+		if _work_local_move(combat_graph, ship, dt, state):
 			continue
 		if _work_salvage(state, combat_graph, ship, dt, salvage_busy.has(salvage_ship_id)):
 			continue
-		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id)):
+		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_ids):
 			continue
-		if _work_local_move(combat_graph, ship, dt):
+		ship.erase("repair_target")
+		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id)):
 			continue
 		if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
 			_work_local_hold(combat_graph, ship, dt)

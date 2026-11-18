@@ -887,6 +887,23 @@ func _unit_orders_for(id: int, orders: Array, append: bool) -> void:
 	if changed:
 		_publish_economy()
 
+func request_repair_auto(ids: Array, enabled: bool) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_repair_auto_for(1, ids, enabled)
+	else:
+		_rpc_repair_auto.rpc_id(1, ids, enabled)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_repair_auto(ids: Array, enabled: bool) -> void:
+	if multiplayer.is_server():
+		_repair_auto_for(multiplayer.get_remote_sender_id(), ids, enabled)
+
+func _repair_auto_for(id: int, ids: Array, enabled: bool) -> void:
+	if _active_player(id) and ECONOMY.set_repair_auto(economy, id, ids, enabled):
+		_publish_economy()
+
 func _active_player(id: int) -> bool:
 	return _match_peer(id) and economy.get("match_result", {}).is_empty() and not economy.get("eliminated", []).has(id)
 
