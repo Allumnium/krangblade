@@ -1411,11 +1411,22 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
-	yard_upgrade = _button("Upgrade", func() -> void: _operation("yard_upgrade", str(selected_yard)), yard_command_card)
+	yard_upgrade = _button("", func() -> void: _operation("yard_upgrade", str(selected_yard)), grid)
+	yard_upgrade.custom_minimum_size = Vector2(48, 48)
+	yard_upgrade.focus_mode = Control.FOCUS_NONE
+	yard_upgrade.icon = _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
+	yard_upgrade.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	yard_rally_hint = _label("", 12)
 	yard_command_card.add_child(yard_rally_hint)
-	var clear := _button("Clear rally", func() -> void:
-		session.call("request_shipyard_rally", selected, selected_yard, -1, Vector2.ZERO), yard_command_card)
+	var clear := _button("", func() -> void:
+		pending_command = ""
+		_refresh_command_mode()
+		session.call("request_shipyard_rally", selected, selected_yard, -1, Vector2.ZERO), grid)
+	clear.custom_minimum_size = Vector2(48, 48)
+	clear.focus_mode = Control.FOCUS_NONE
+	clear.icon = _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12M18 19L28 29M28 19L18 29"/>')
+	clear.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	clear.tooltip_text = "Clear rally point"
 	yard_commands["clear"] = clear
 	yard_command_card.hide()
 
@@ -1481,6 +1492,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		yard_queue.move_child(widgets["row"], idx)
 		widgets["title"].text = _job_name(job) + (" · Building" if id == active_id else " · Queued")
 		widgets["bar"].value = 100.0 * float(job["progress"]) / maxf(1.0, float(job["work"]))
+		widgets["bar"].tooltip_text = _job_name(job)
 		_style_progress(widgets["bar"], system, job)
 		widgets["cancel"].disabled = not owned
 	for kind in ECONOMY.SHIP_KINDS:
@@ -1496,8 +1508,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	yard_rally_hint.text = "Choose rally destination" if pending_command == "rally" else ("Rally: " + _system_name(int(rally["node"])) if not rally.is_empty() else "Rally: not set")
 	var upgrade_recipe: Dictionary = ECONOMY._cost("yard_upgrade", level + 1)
 	yard_upgrade.disabled = not owned or not operating or pending_upgrade or not ECONOMY.affordable(system, upgrade_recipe)
-	_set_timed_action(yard_upgrade, "Upgrade to Lv %d" % (level + 1), ECONOMY._work("yard_upgrade", level + 1))
-	yard_upgrade.tooltip_text = _cost_text(upgrade_recipe)
+	yard_upgrade.tooltip_text = "Upgrade to Lv %d · %.0f yr\n%s" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), _cost_text(upgrade_recipe)]
 
 
 func _build_body_overview(parent: Container) -> void:
