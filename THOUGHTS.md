@@ -378,3 +378,20 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Command UX.
 - **Observation:** Right-click commands previously chose the nearest POI center before checking sector containment, potentially snapping to an adjacent sector. v0.29.5 prioritizes the simulation's sector boundary and retains direct POI click fallback.
 - **Consider:** A distinct hover outline for command sectors; ownership territory outlines are not equivalent to command-sector boundaries.
+
+### T-29e — Separate occupation from territorial ownership
+- **Type:** Gameplay state clarity.
+- **Observation:** Conquest could change `owner` for a population-free, yard-free system even though `territory_claims` correctly rendered it unclaimed. v0.29.6 prevents conquest of such systems; colonization is required for lasting territorial control.
+- **Consider:** Follow-up audit of `owner` versus `territory_claims` in AI and colonization permissions, especially legacy saves.
+
+### T-29f — Explicit camera follow
+- **Type:** Camera UX.
+- **Observation:** Unit selection and control-group recall automatically enabled camera follow. v0.29.7 requires F to enable follow for the selected ship or fleet; selection changes and manual camera movement disable it.
+
+### T-29g — Persistent center HUD
+- **Type:** UI consistency.
+- **Observation:** The center details panel was hidden when selection cleared, exposing the starfield and leaving an instruction label floating in its place. Keep the panel visible and blank instead.
+
+### T-29h — Contested territory colors
+- **Type:** Territory feedback.
+- **Observation:** Contested territory disappeared when claims were neutralized. The renderer now alternates the colors of players with hostile fighter presence while retaining the simulation's contested-state logic; allies do not trigger color cycling.

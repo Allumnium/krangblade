@@ -38,6 +38,7 @@ var territory_sites: ImageTexture
 var territory_site_count: int = 0
 var territory_radius: float = 1.0
 var territory_last: Array[int] = []
+var territory_cycle_elapsed: float = 0.0
 var territory_seed: int = -1
 var header_panel: PanelContainer
 var inspector_panel: PanelContainer
@@ -355,7 +356,7 @@ func _build_ui() -> void:
 	map_canvas.offset_top = HEADER_HEIGHT + 16
 	map_canvas.offset_right = -8
 	map_canvas.offset_bottom = -8
-	map_canvas.clip_contents = true
+	map_canvas.clip_contents = false
 	map_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	map_canvas.gui_input.connect(_map_input)
 	map_canvas.draw.connect(_draw_map)
@@ -436,7 +437,7 @@ func _build_ui() -> void:
 	empty_selection.add_theme_color_override("font_color", HUD.MUTED)
 	console_center = VBoxContainer.new()
 	console_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	console_center.size_flags_stretch_ratio = 1.0
+	console_center.size_flags_stretch_ratio = 1.2
 	console_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	console_columns.add_child(console_center)
 	console_center_spacer = Control.new()
@@ -671,7 +672,9 @@ func _layout_console() -> void:
 	# Keep a stable, useful map at both normal and small window sizes.
 	var height: float = minf(clampf(size.y * 0.32, 195.0, 285.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0))
 	console_panel.offset_top = -8.0 - height
-	map_canvas.offset_bottom = -16.0 - height
+	# Draw the space scene behind the HUD rather than clipping it at a
+	# horizontal line. Camera framing still uses the unobstructed play area.
+	map_canvas.offset_bottom = -8.0
 	territory_layer.offset_bottom = map_canvas.offset_bottom
 	diagnostic_label.offset_bottom = -20.0 - height
 	diagnostic_label.offset_top = -44.0 - height
@@ -1892,9 +1895,38 @@ func _refresh_territory(state: Dictionary) -> void:
 		territory_seed = seed_value
 		territory_last.clear()
 	var empires: Array[int] = ECONOMY.territory_empires(state)
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var contenders: Dictionary = {}
+	# The simulation's territory claims can be neutralized by combat. Keep
+	# the visual footprint and cycle through hostile players instead.
+	for i in range((state["planets"] as Array).size()):
+		var planet: Dictionary = state["planets"][i]
+		var owner: int = int(planet["owner"])
+		if owner > 0 and (float(planet.get("population", 0.0)) > 0.0 or not (planet.get("yards", []) as Array).is_empty()):
+			contenders[i] = [owner]
+	for ship in state["ships"]:
+		if ship.get("kind", "") != "fighter" or bool(ship.get("retreating", false)):
+			continue
+		var node: int = ECONOMY.local_sector(graph, ship)
+		if node < 0:
+			continue
+		var player: int = int(ship["owner"])
+		if not contenders.has(node):
+			contenders[node] = []
+		if not (contenders[node] as Array).has(player):
+			contenders[node].append(player)
 	var claims: Array[int] = []
-	for owner in empires:
-		claims.append(_empire_color_index(owner))
+	var cycle: int = floori(territory_cycle_elapsed / 0.85)
+	for i in range(empires.size()):
+		var players: Array = contenders.get(i, [])
+		players.sort()
+		var teams: Dictionary = {}
+		for player in players:
+			teams[int(state["teams"].get(int(player), 0))] = true
+		if teams.size() > 1:
+			claims.append(_empire_color_index(int(players[cycle % players.size()])))
+		else:
+			claims.append(_empire_color_index(empires[i]))
 	if claims == territory_last:
 		return
 	territory_last = claims
@@ -2387,8 +2419,10 @@ func _refresh() -> void:
 		selected_yard = -1
 	inspector_panel.visible = true
 	console_right_body.visible = not p.is_empty() or other_selected
-	overview_panel.visible = (not p.is_empty() or other_selected)
-	empty_selection.visible = not overview_panel.visible
+	# Keep the center panel mounted even when there is no selection;
+	# only its contents disappear, leaving a stable blank HUD surface.
+	overview_panel.visible = true
+	empty_selection.visible = false
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	planet_overview.visible = not other_selected and not body_selected and not yard_selected
 	yard_column.visible = planet_overview.visible and overview_panel.visible
@@ -2907,7 +2941,10 @@ func _reset_view() -> void:
 
 # The bottom console reserves a fixed viewport, independent of selection.
 func _projection_size() -> Vector2:
-	return map_canvas.size.max(Vector2.ONE)
+	# Reserve the console footprint for camera framing, but let stars and
+	# planets continue rendering underneath its opaque stepped panels.
+	var hud_height: float = console_panel.size.y + 8.0 if is_instance_valid(console_panel) else 0.0
+	return Vector2(map_canvas.size.x, maxf(1.0, map_canvas.size.y - hud_height))
 
 func _map_resized() -> void:
 	var fit: float = _fit()
@@ -3223,7 +3260,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 				selected_field = i
 				break
 	selected = -1 if selected_ship_id >= 0 or selected_field >= 0 else hit
-	follow_units = selected_ship_id >= 0 or not selected_units.is_empty()
+	follow_units = false
 	var focused: Control = get_viewport().gui_get_focus_owner()
 	if is_instance_valid(focused):
 		focused.release_focus()
@@ -3243,7 +3280,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 		if poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
 			selected_units.append(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
-	follow_units = not selected_units.is_empty()
+	follow_units = false
 	selected = -1
 	selected_body = -1
 	selected_yard = -1
@@ -3508,6 +3545,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key: int = event.physical_keycode
 	if key in [KEY_Q, KEY_E]:
 		_cycle_owned_system(-1 if key == KEY_Q else 1)
+	elif key == KEY_F:
+		# Explicit camera follow: selection changes never move the camera.
+		if not selected_units.is_empty() or selected_ship_id >= 0:
+			follow_units = true
+			_follow_selected_units(_ship_poses(_state()))
 	elif key == KEY_H:
 		_hold_selected()
 	elif key == KEY_U:
@@ -3524,7 +3566,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				if id in group and not selected_units.has(id):
 					selected_units.append(id)
 			selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
-			follow_units = not selected_units.is_empty()
+			follow_units = false
 			selected = -1
 			selected_body = -1
 			selected_yard = -1
@@ -3587,6 +3629,10 @@ func _process(delta: float) -> void:
 		selecting_units = false
 		map_canvas.queue_redraw()
 	_keyboard_pan(delta)
+	territory_cycle_elapsed += delta
+	if territory_cycle_elapsed >= 0.85:
+		territory_cycle_elapsed = fmod(territory_cycle_elapsed, 1020.0)
+		_refresh_territory(_state())
 	_update_resource_hover()
 	if is_instance_valid(diagnostic_label):
 		diagnostic_elapsed += delta
