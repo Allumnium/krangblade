@@ -47,6 +47,7 @@ var minimap: Control
 var console_columns: HBoxContainer
 var console_center: VBoxContainer
 var console_center_spacer: Control
+var console_profile: Control
 var yard_panel: PanelContainer
 var yard_column: VBoxContainer
 var empty_selection: Label
@@ -404,7 +405,14 @@ func _build_ui() -> void:
 	console_panel.offset_right = -8
 	console_panel.offset_bottom = -8
 	console_panel.theme = HUD.compact()
-	console_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0b1624"), Color("#345570"), 4, 3))
+	console_panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	console_profile = Control.new()
+	console_profile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	console_profile.z_index = -1
+	console_panel.add_child(console_profile)
+	console_profile.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	console_profile.draw.connect(_draw_console_profile)
+	console_profile.resized.connect(console_profile.queue_redraw)
 	var deck := HBoxContainer.new()
 	deck.add_theme_constant_override("separation", 4)
 	console_panel.add_child(deck)
@@ -642,6 +650,8 @@ func _build_ui() -> void:
 			card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	resized.connect(_layout_console)
 	inspector_panel.resized.connect(_layout_command_grids)
+	inspector_panel.resized.connect(console_profile.queue_redraw)
+	console_center.resized.connect(console_profile.queue_redraw)
 	_layout_console()
 
 func _layout_console() -> void:
@@ -658,9 +668,30 @@ func _layout_console() -> void:
 	# SC2-style raised wings: minimap and commands use the full deck height;
 	# selection details begin 20% lower, leaving more map visible centrally.
 	console_center_spacer.custom_minimum_size.y = height * 0.20
+	console_profile.queue_redraw()
 	overview_panel.custom_minimum_size.x = minf(OVERVIEW_WIDTH, maxf(190.0, size.x * 0.31))
 	yard_panel.hide()
 	_layout_command_grids()
+
+func _draw_console_profile() -> void:
+	# The three physical panel silhouettes are drawn independently. The
+	# center starts lower; the left minimap and right commands extend into
+	# the map instead of sharing a rectangular full-width background.
+	if not is_instance_valid(console_center) or not is_instance_valid(inspector_panel):
+		return
+	var bounds: Rect2 = Rect2(Vector2.ZERO, console_profile.size)
+	var center_left: float = console_center.global_position.x - console_profile.global_position.x
+	var right_left: float = inspector_panel.global_position.x - console_profile.global_position.x
+	var center_top: float = console_center_spacer.global_position.y + console_center_spacer.size.y - console_profile.global_position.y
+	var fill := Color("#0b1624")
+	var edge := Color("#345570")
+	var left_rect := Rect2(Vector2.ZERO, Vector2(maxf(0.0, center_left), bounds.size.y))
+	var center_rect := Rect2(Vector2(center_left, center_top), Vector2(maxf(0.0, right_left - center_left), maxf(0.0, bounds.size.y - center_top)))
+	var right_rect := Rect2(Vector2(right_left, 0.0), Vector2(maxf(0.0, bounds.size.x - right_left), bounds.size.y))
+	for rect in [left_rect, center_rect, right_rect]:
+		if rect.has_area():
+			console_profile.draw_rect(rect, fill)
+			console_profile.draw_rect(rect.grow(-0.5), edge, false, 1.0)
 
 func _layout_command_grids() -> void:
 	var width: float = inspector_panel.size.x - 22.0
