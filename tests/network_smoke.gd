@@ -178,7 +178,6 @@ func _phase_changed() -> void:
 				target["station"] = {"hp": ECON.LASER_DAMAGE}
 				target["stock"]["Metals"] = 100.0
 				var assault: Dictionary = {"id": 960000, "kind": "fighter", "owner": ordered[0], "origin": 0, "at": target_index, "dest": target_index, "operation_target": target_index, "route": [], "leg": 0.0, "position": ECON.station_position(state, target_index, 0.0), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock()}
-				assault["cargo"]["Metals"] = ECON.CARGO_CAPACITY
 				state["ships"].append(assault)
 				# A separate neutral system isolates mining-laser combat from
 				# the home command fixtures and station assault.
