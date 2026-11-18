@@ -50,6 +50,7 @@ var inspector_panel: PanelContainer
 var overview_panel: PanelContainer
 var console_panel: PanelContainer
 var minimap: Control
+var time_panel: PanelContainer
 var lens_column: VBoxContainer
 var console_columns: HBoxContainer
 var console_center: VBoxContainer
@@ -205,7 +206,7 @@ var yard_command_card: VBoxContainer
 var yard_command_grid: GridContainer
 var yard_commands: Dictionary = {}
 var production_icons: Dictionary = {}
-var yard_queue: VBoxContainer
+var yard_queue: HFlowContainer
 var yard_queue_rows: Dictionary = {}
 var yard_rally_hint: Label
 var command_card: GridContainer
@@ -490,17 +491,13 @@ func _build_ui() -> void:
 	inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
 	# Simulation controls are global, not contextual commands.
-	var time_panel := PanelContainer.new()
+	time_panel = PanelContainer.new()
 	add_child(time_panel)
 	time_panel.theme = HUD.compact()
 	time_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0b1624"), Color("#345570"), 4, 3))
-	time_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	time_panel.offset_left = -280
-	time_panel.offset_right = -8
-	time_panel.offset_top = HEADER_HEIGHT + 14
-	time_panel.offset_bottom = HEADER_HEIGHT + 48
+	time_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	var time_toolbar := HBoxContainer.new()
-	time_toolbar.alignment = BoxContainer.ALIGNMENT_END
+	time_toolbar.alignment = BoxContainer.ALIGNMENT_BEGIN
 	time_panel.add_child(time_toolbar)
 	_build_time_controls(time_toolbar)
 	# Tabs and fleet commands each own a bounded scroll viewport. A
@@ -717,6 +714,11 @@ func _layout_console() -> void:
 	var wing_width: float = clampf(floorf((size.x - 28.0 - LENS_STRIP_WIDTH) * 0.24), 180.0, 320.0)
 	minimap.custom_minimum_size.x = wing_width
 	inspector_panel.custom_minimum_size.x = wing_width
+	if is_instance_valid(time_panel):
+		time_panel.offset_left = 8.0
+		time_panel.offset_right = 8.0 + wing_width
+		time_panel.offset_bottom = console_panel.offset_top - 3.0
+		time_panel.offset_top = time_panel.offset_bottom - 31.0
 	# SC2-style raised wings: minimap and commands use the full deck height;
 	# selection details begin 20% lower, leaving more map visible centrally.
 	console_center_spacer.custom_minimum_size.y = height * 0.20
@@ -1311,17 +1313,19 @@ func _body_name(system_index: int, slot: int) -> String:
 
 func _build_yard_overview(parent: Container) -> void:
 	yard_overview = VBoxContainer.new()
-	yard_overview.add_theme_constant_override("separation", 8)
+	yard_overview.add_theme_constant_override("separation", 3)
 	parent.add_child(yard_overview)
-	yard_title = _label("", 19)
+	yard_title = _label("", 16)
 	yard_overview.add_child(yard_title)
 	yard_context = _label("", 12)
 	yard_context.add_theme_color_override("font_color", HUD.MUTED)
 	yard_overview.add_child(yard_context)
 	yard_status = _label("", 12)
 	yard_overview.add_child(yard_status)
-	yard_queue = VBoxContainer.new()
-	yard_queue.add_theme_constant_override("separation", 4)
+	yard_queue = HFlowContainer.new()
+	yard_queue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	yard_queue.add_theme_constant_override("h_separation", 4)
+	yard_queue.add_theme_constant_override("v_separation", 4)
 	yard_overview.add_child(yard_queue)
 	yard_overview.hide()
 
@@ -1498,33 +1502,36 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var job: Dictionary = jobs[idx]
 		var id: int = int(job["id"])
 		if not yard_queue_rows.has(id):
-			var row := HBoxContainer.new()
-			var icon := TextureRect.new()
-			icon.custom_minimum_size = Vector2(28, 28)
-			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			icon.texture = _production_icon(str(job["kind"]), _empire_color(int(system["owner"]))) if ECONOMY.SHIP_KINDS.has(job["kind"]) else _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
-			row.add_child(icon)
-			var stack := VBoxContainer.new()
-			stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			row.add_child(stack)
-			var title := _label("", 12)
-			stack.add_child(title)
+			var row := VBoxContainer.new()
+			row.add_theme_constant_override("separation", 2)
+			var cancel := _button("", _cancel_job.bind(id), row)
+			cancel.focus_mode = Control.FOCUS_NONE
+			cancel.custom_minimum_size = Vector2(38, 38)
+			cancel.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cancel.expand_icon = true
+			cancel.icon = _production_icon(str(job["kind"]), _empire_color(int(system["owner"]))) if ECONOMY.SHIP_KINDS.has(job["kind"]) else _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
 			var bar := ProgressBar.new()
-			bar.custom_minimum_size.y = 12
+			bar.custom_minimum_size.y = 4
+			bar.show_percentage = false
 			bar.step = 0.0
-			stack.add_child(bar)
-			var cancel := _button("×", _cancel_job.bind(id), row)
-			cancel.tooltip_text = "Cancel order and refund"
+			bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.add_child(bar)
 			yard_queue.add_child(row)
-			yard_queue_rows[id] = {"row": row, "title": title, "bar": bar, "cancel": cancel}
+			yard_queue_rows[id] = {"row": row, "bar": bar, "cancel": cancel}
 		var widgets: Dictionary = yard_queue_rows[id]
 		yard_queue.move_child(widgets["row"], idx)
-		widgets["title"].text = _job_name(job) + (" · Building" if id == active_id else " · Queued")
-		widgets["bar"].value = 100.0 * float(job["progress"]) / maxf(1.0, float(job["work"]))
-		widgets["bar"].tooltip_text = _job_name(job)
+		var percent: float = 100.0 * float(job["progress"]) / maxf(1.0, float(job["work"]))
+		widgets["bar"].value = percent
+		widgets["bar"].visible = id == active_id or percent > 0.0
 		_style_progress(widgets["bar"], system, job)
-		widgets["cancel"].disabled = not owned
+		var tile: Button = widgets["cancel"]
+		tile.disabled = not owned
+		var blocked: bool = bool(widgets["bar"].get_meta("blocked"))
+		if id == active_id:
+			tile.add_theme_stylebox_override("normal", HUD.surface(Color("#172c3b"), Color("#db9b54") if blocked else HUD.ACCENT, 3, 3))
+		else:
+			tile.remove_theme_stylebox_override("normal")
+		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), "Building" if id == active_id else "Queued", percent, "\n" + widgets["bar"].tooltip_text if blocked else "", "\nClick to cancel and refund" if owned else ""]
 	for kind in ECONOMY.SHIP_KINDS:
 		var button: Button = yard_commands[kind]
 		var recipe: Dictionary = ECONOMY._cost(kind, 1)
@@ -2042,16 +2049,20 @@ var diagnostic_last_bytes: int = -1
 
 func _build_time_controls(parent: Container) -> void:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
+	row.add_theme_constant_override("separation", 2)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(row)
 	for speed in [0, 1, 2, 5, 10]:
 		var label: String = "Ⅱ" if speed == 0 else "%d×" % speed
 		var button: Button = _button(label, _set_time_speed.bind(int(speed)), row)
 		button.toggle_mode = true
 		button.focus_mode = Control.FOCUS_NONE
-		button.custom_minimum_size.x = 33
+		button.custom_minimum_size = Vector2(26, 23)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		time_buttons[speed] = button
 	diagnostic_button = _button("Perf", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, row)
+	diagnostic_button.custom_minimum_size.y = 23
+	diagnostic_button.focus_mode = Control.FOCUS_NONE
 	diagnostic_button.tooltip_text = "Toggle local performance diagnostics"
 	diagnostic_label = _label("", 11)
 	add_child(diagnostic_label)
@@ -3557,7 +3568,10 @@ func _select_visible_buildings(state: Dictionary, first: Vector2i, kind: String)
 func _in_visible_playfield(point: Vector2) -> bool:
 	# The center recess exposes a little more map than the reserved camera
 	# viewport. Include that space but not objects obscured by the console.
-	return Rect2(Vector2.ZERO, _projection_size()).has_point(point) or console_center_spacer.get_global_rect().has_point(map_canvas.get_global_transform() * point)
+	var global_point: Vector2 = map_canvas.get_global_transform() * point
+	if is_instance_valid(time_panel) and time_panel.get_global_rect().has_point(global_point):
+		return false
+	return Rect2(Vector2.ZERO, _projection_size()).has_point(point) or console_center_spacer.get_global_rect().has_point(global_point)
 
 func _prune_building_selection(state: Dictionary) -> void:
 	if building_selection_kind.is_empty():
