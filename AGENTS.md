@@ -29,6 +29,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.43.7: Left-align the station population and resource breakdown in a compact 360-pixel detail column, shrinking on narrow middle panels. Leave header, tabs, and centered queue unchanged.
+
 - v0.43.6: Center station infrastructure and shipyard production queue tiles horizontally and vertically within the middle panel's remaining detail area. Preserve headings, portrait, tabs, wrapping and progress/cancellation behavior.
 
 - v0.43.5: Use a shared top-aligned four-column, four-row command card grid for station, shipyard and units, keeping vacant slots stable. Resources use unscaled tons with useful small-value precision; unaffordable recipe numbers are red instead of generic shortage text. Fighters have no cargo or cargo actions; miners prioritize reachable safe salvage over asteroid extraction, retain mining assignments, and physically deliver salvage. Play peaceful3.mp3 on the Music bus during matches, looping; settings mute toggles use speaker/slashed speaker icons.

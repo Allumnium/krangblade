@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] Playtest v0.43.7 compact station resource table, local hover boundaries and narrow-window resizing without affecting queue centering.
+
 - [ ] Playtest v0.43.6 centered station and shipyard queue tiles, including single orders, wrapping, resizing and switching station tabs.
 
 - [ ] Playtest v0.43.5 shared command slot alignment at different window sizes, resource readability and per-resource cost shortage colors, looping match music and mute/volume settings, and safe mining-to-salvage detours without cargo on fighters.
