@@ -19,6 +19,10 @@ const OVERVIEW_MAX_ZOOM: float = 64.0
 const FIGHTER_HULL_LENGTH: float = 22.0
 const CLOSEUP_SCREEN_FRACTION: float = 0.6
 const SNAPSHOT_SECONDS: float = 0.2
+# Projected system radius in logical screen pixels, independent of selection.
+const PLANET_FADE_START: float = 40.0
+const PLANET_FADE_FULL: float = 100.0
+const PLANET_FADE_SECONDS: float = 0.22
 
 var session: Node
 var settings := ConfigFile.new()
@@ -207,6 +211,8 @@ var info: Label
 var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
 var system_visual_seed: int = -1
+var planet_detail_alpha: Dictionary = {}
+var planet_detail_seed: int = -1
 var trade_sliders: Dictionary = {}
 var trade_checks: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
@@ -3145,6 +3151,26 @@ func _planet_radius(index: int, state: Dictionary) -> float:
 	var spacing: float = float(_system_visual(index, state)["spacing"]) * _fit() * zoom
 	return clampf(minf(ideal, spacing * 0.39), 4.0, 720.0)
 
+func _planet_detail_target(radius: float) -> float:
+	return smoothstep(PLANET_FADE_START, PLANET_FADE_FULL, radius)
+
+func _planet_detail_opacity(index: int, radius: float) -> float:
+	return float(planet_detail_alpha.get(index, _planet_detail_target(radius)))
+
+func _update_planet_detail(state: Dictionary, delta: float) -> void:
+	var seed_value: int = int(state["map"]["seed"])
+	if planet_detail_seed != seed_value:
+		planet_detail_alpha.clear()
+		planet_detail_seed = seed_value
+	for index in range(state["planets"].size()):
+		var target: float = _planet_detail_target(_planet_radius(index, state))
+		var previous: float = float(planet_detail_alpha.get(index, 0.0))
+		planet_detail_alpha[index] = move_toward(previous, target, delta / PLANET_FADE_SECONDS)
+
+func _star_draw_radius(radius: float) -> float:
+	# Keep the overview star-to-close-up transition continuous as well.
+	return lerpf(radius * 0.48, maxf(3.0, radius * 0.13), smoothstep(14.0, 32.0, radius))
+
 func _body_position(body: Dictionary, radius: float, time: float) -> Vector2:
 	var angle: float = float(body["phase"]) + time * float(body["speed"]) * 0.22
 	var orbit_radius: float = radius * float(body["orbit"])
@@ -3196,44 +3222,43 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		return
 	var system: Dictionary = state["planets"][index]
 	var color: Color = _planet_color(system)
-	var star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
+	var star_radius: float = _star_draw_radius(radius)
 	var star_color: Color = Color("#fff0c4").lerp(color.lightened(0.25), 0.30) if ECONOMY.has_planets(system) else Color("#8ea2bc")
-	if zoom >= 2.0 and radius >= 18.0 and (index == selected or not system.get("pds", {}).is_empty()):
+	var detail: float = _planet_detail_opacity(index, radius)
+	if detail > 0.001:
 		var bodies: Array = _system_visual(index, state)["bodies"]
 		for slot in range(bodies.size()):
-			if index != selected and not system.get("pds", {}).has(slot):
-				continue
 			var body: Dictionary = bodies[slot]
 			var orbit: float = radius * float(body["orbit"])
 			if _show_system_rings(index):
-				_draw_elliptical_orbit(pos, orbit, Color(tint, 0.20))
+				_draw_elliptical_orbit(pos, orbit, Color(tint, 0.20 * detail))
 			var point: Vector2 = pos + _body_position(body, radius, game_visual_clock)
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
-					map_canvas.draw_texture_rect(_body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false)
+					map_canvas.draw_texture_rect(_body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(1.0, 1.0, 1.0, detail))
 				else:
-					map_canvas.draw_circle(point, body_radius, HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), true)
+					map_canvas.draw_circle(point, body_radius, Color(HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), detail), true)
 				if system.get("pds", {}).has(slot):
-					_draw_pds_frame(point, body_radius)
+					_draw_pds_frame(point, body_radius, detail)
 				if index == selected and selected_body == slot:
-					map_canvas.draw_arc(point, body_radius + 4.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
-					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, HUD.TEXT)
+					map_canvas.draw_arc(point, body_radius + 4.0, 0.0, TAU, 24, Color(HUD.ACCENT, detail), 1.5, true)
+					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
 	var pulse: float = 0.96 + 0.04 * sin(visual_clock * 1.2 + float(index))
 	for layer in range(5, 0, -1):
 		map_canvas.draw_circle(pos, star_radius * (1.0 + float(layer) * 0.33) * pulse, Color(star_color, 0.05), true)
 	map_canvas.draw_circle(pos, star_radius * pulse, star_color, true)
 	map_canvas.draw_circle(pos, star_radius * 0.55 * pulse, Color("#fffdf1"), true)
-	if (zoom < 2.0 or radius < 18.0) and not system.get("pds", {}).is_empty():
-		map_canvas.draw_arc(pos, star_radius + 3.0, -PI * 0.8, PI * 0.8, 18, Color("#bdcbd6"), 1.5, true)
+	if detail < 0.999 and not system.get("pds", {}).is_empty():
+		map_canvas.draw_arc(pos, star_radius + 3.0, -PI * 0.8, PI * 0.8, 18, Color(Color("#bdcbd6"), 1.0 - detail), 1.5, true)
 	if _show_system_rings(index):
 		map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
 
 # Thin metallic latitude/longitude ribs, clipped to the planet silhouette.
-func _draw_pds_frame(center: Vector2, radius: float) -> void:
+func _draw_pds_frame(center: Vector2, radius: float, opacity: float) -> void:
 	var r: float = radius * 1.08
-	var steel := Color("#c4d1dc")
-	var shadow := Color("#344655")
+	var steel := Color(Color("#c4d1dc"), opacity)
+	var shadow := Color(Color("#344655"), opacity)
 	map_canvas.draw_arc(center, r, 0.0, TAU, 32, shadow, 2.0, true)
 	map_canvas.draw_arc(center, r, 0.0, TAU, 32, steel, 1.0, true)
 	if radius < 4.0:
@@ -3272,26 +3297,27 @@ func _planet_color(planet: Dictionary) -> Color:
 	var mix: Vector3 = sum / weight
 	return Color(mix.x, mix.y, mix.z)
 
-func _body_hit(point: Vector2, state: Dictionary) -> int:
-	if selected < 0 or selected >= state["planets"].size() or not ECONOMY.discovered(state, _me(), "planets", selected):
-		return -1
-	var radius: float = _planet_radius(selected, state)
-	if zoom < 2.0 or radius < 18.0:
-		return -1
-	var center: Vector2 = _screen_point(state["map"]["points"][selected])
-	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(center):
-		return -1
-	var bodies: Array = _system_visual(selected, state)["bodies"]
-	var hit: int = -1
+func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
+	var hit := Vector2i(-1, -1)
 	var nearest: float = INF
-	for slot in range(bodies.size()):
-		var body: Dictionary = bodies[slot]
-		var position: Vector2 = center + _body_position(body, radius, game_visual_clock)
-		var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
-		var distance: float = point.distance_to(position)
-		if distance <= body_radius + 3.0 and distance < nearest:
-			hit = slot
-			nearest = distance
+	for index in range(state["planets"].size()):
+		if not ECONOMY.discovered(state, _me(), "planets", index):
+			continue
+		var radius: float = _planet_radius(index, state)
+		if _planet_detail_opacity(index, radius) < 0.3:
+			continue
+		var center: Vector2 = _screen_point(state["map"]["points"][index])
+		if point.distance_to(center) > radius + 32.0 or point.distance_to(center) <= _star_draw_radius(radius):
+			continue
+		var bodies: Array = _system_visual(index, state)["bodies"]
+		for slot in range(bodies.size()):
+			var body: Dictionary = bodies[slot]
+			var position: Vector2 = center + _body_position(body, radius, game_visual_clock)
+			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
+			var distance: float = point.distance_to(position)
+			if distance <= body_radius + 3.0 and distance < nearest:
+				hit = Vector2i(index, slot)
+				nearest = distance
 	return hit
 
 func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
@@ -3342,7 +3368,7 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 			ship_distance = distance
 			ship_hit = int(id)
 	var next_ship: int = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
-	var body_slot: int = _body_hit(point, state) if not additive else -1
+	var body_hit: Vector2i = _body_hit(point, state) if not additive else Vector2i(-1, -1)
 	var yard_hit: Vector2i = _yard_hit(point, state) if not additive else Vector2i(-1, -1)
 	if yard_hit.x >= 0:
 		var yard_distance: float = point.distance_to(_screen_point(ECONOMY.shipyard_position(state, yard_hit.x, yard_hit.y, float(state["elapsed"]))))
@@ -3360,15 +3386,18 @@ func _select_at(point: Vector2, additive: bool = false) -> void:
 			_load_thresholds()
 			_refresh()
 			return
-	if body_slot >= 0:
+	if body_hit.x >= 0:
+		selected = body_hit.x
 		selected_yard = -1
-		selected_body = body_slot
+		selected_body = body_hit.y
+		follow_units = false
 		selected_ship_id = -1
 		selected_units.clear()
 		selected_field = -1
 		var focus: Control = get_viewport().gui_get_focus_owner()
 		if is_instance_valid(focus):
 			focus.release_focus()
+		_load_thresholds()
 		_refresh()
 		return
 	if additive and not selected_units.is_empty() and next_ship < 0:
@@ -3503,7 +3532,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	var hit_radius: float = 9.0
 	if node < system_count:
 		var radius: float = _planet_radius(node, state)
-		hit_radius = maxf(9.0, radius * (0.13 if zoom >= 2.0 and radius >= 18.0 else 0.48))
+		hit_radius = maxf(9.0, _star_draw_radius(radius))
 	else:
 		hit_radius = maxf(9.0, float(state["map"]["fields"][node - system_count]["radius"]) * _fit() * zoom)
 	if patrol and not force_position:
@@ -3840,10 +3869,13 @@ func _process(delta: float) -> void:
 			visual["age"] = minf(SNAPSHOT_SECONDS, float(visual["age"]) + delta)
 	var state: Dictionary = _state()
 	if not state.is_empty():
+		_update_planet_detail(state, delta)
 		var poses: Dictionary = _ship_poses(state, delta)
 		_follow_selected_units(poses)
 		_sync_destruction_effects(state)
 	else:
+		planet_detail_alpha.clear()
+		planet_detail_seed = -1
 		follow_units = false
 		ship_destructions.clear()
 		last_destruction_sequence = 0
@@ -4325,7 +4357,7 @@ func _draw_map() -> void:
 			for angle in range(4):
 				var start: float = float(angle) * TAU / 4.0 + 0.1
 				map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
-		var name_star_radius: float = maxf(3.0, radius * 0.13) if zoom >= 2.0 and radius >= 18.0 else radius * 0.48
+		var name_star_radius: float = _star_draw_radius(radius)
 		map_canvas.draw_string(font, pos + Vector2(-80, -name_star_radius - 7), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
 	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
@@ -4382,7 +4414,7 @@ func _draw_map() -> void:
 			if not poses.has(target) or float(battery["laser_until"]) < float(state["elapsed"]):
 				continue
 			var origin: Vector2 = _screen_point(points[index])
-			if zoom >= 2.0 and radius >= 18.0:
+			if _planet_detail_opacity(index, radius) >= 0.5:
 				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, game_visual_clock)
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
@@ -4403,7 +4435,7 @@ func _draw_map() -> void:
 				if state["planets"][pds_index].get("pds", {}).has(pds_slot):
 					var endpoint: Vector2 = _screen_point(points[pds_index])
 					var pds_radius: float = _planet_radius(pds_index, state)
-					if zoom >= 2.0 and pds_radius >= 18.0:
+					if _planet_detail_opacity(pds_index, pds_radius) >= 0.5:
 						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, game_visual_clock)
 					_draw_owned_laser(_fighter_beam_origin(poses[shooter]), endpoint, int(ship["owner"]), 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
