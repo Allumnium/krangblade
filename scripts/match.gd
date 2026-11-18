@@ -169,6 +169,11 @@ var control_groups: Dictionary = {}
 var selection_start: Vector2 = Vector2.ZERO
 var selection_end: Vector2 = Vector2.ZERO
 var selecting_units: bool = false
+var formation_drag: bool = false
+var formation_start: Vector2 = Vector2.ZERO
+var formation_end: Vector2 = Vector2.ZERO
+var formation_append: bool = false
+var formation_force_position: bool = false
 var selected_field: int = -1
 var mining_controls: VBoxContainer
 var mining_enabled: CheckBox
@@ -1788,7 +1793,11 @@ func _stop_selected() -> void:
 		session.call("request_unit_hold", owned, false)
 	_refresh_command_mode()
 
-func _execute_pending_command(point: Vector2) -> void:
+func _issue_order(ids: Array, order: Dictionary, append: bool = false) -> void:
+	if not ids.is_empty():
+		session.call("request_unit_orders", [{"ids": ids, "order": order}], append)
+
+func _execute_pending_command(point: Vector2, append: bool = false) -> void:
 	var mode: String = pending_command
 	pending_command = ""
 	_refresh_command_mode()
@@ -1798,13 +1807,16 @@ func _execute_pending_command(point: Vector2) -> void:
 		var state: Dictionary = _state()
 		var wreck: int = _salvage_hit(state, point)
 		if wreck >= 0:
-			session.call("request_salvage", _selected_owned_units(state), wreck)
+			_issue_order(_selected_owned_units(state), {"kind": "salvage", "target": wreck}, append)
 	elif mode == "patrol":
-		_command_at(point, false, true)
+		_command_at(point, false, true, false, false, append)
 	elif mode == "move":
-		_command_at(point, false, false, true)
+		_command_at(point, false, false, true, false, append)
 	elif mode == "attack":
-		_command_at(point, false, false, false, true)
+		_command_at(point, false, false, false, true, append)
+	if append and mode != "rally":
+		pending_command = mode
+		_refresh_command_mode()
 
 func _set_rally_at(point: Vector2) -> void:
 	var state: Dictionary = _state()
@@ -2001,7 +2013,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		fleet_detail.text += "\n%d owned · %d foreign" % [owned_count, selected_units.size() - owned_count]
 	fleet_detail.tooltip_text = "Foreign ships are read-only. Commands affect only your own ships. Ctrl+1–9 assigns a selection group, 1–9 recalls it."
 	if owned_count > 0:
-		fleet_detail.tooltip_text += " Right-click a hostile ship to focus attack, or a sector to attack-move. Shift-right-click a sector to patrol. Ships collect nearby salvage when safe; right-click to claim manually; U unloads cargo. Right-click empty space to position and hold; Alt-right-click forces a local position. H holds/releases."
+		fleet_detail.tooltip_text += " Right-click a hostile ship to focus attack, or a sector to attack-move. Hold Shift to queue up to 30 commands. Drag right-click to place a formation. Patrol is on the command card. Ships collect nearby salvage when safe; right-click to claim manually; U unloads cargo. Alt-right-click forces a local position. H holds/releases."
 	fleet_cargo.get_parent().show()
 	fleet_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total({"cargo": cargo}), capacity]
 	if fleet_cargo.get_parent().visible:
@@ -3741,7 +3753,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	selected_field = -1
 	_refresh()
 
-func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = false, explicit_attack: bool = false) -> void:
+func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = false, explicit_attack: bool = false, append: bool = false) -> void:
 	var state: Dictionary = _state()
 	var owned: Array[int] = _selected_owned_units(state)
 	if state.is_empty() or owned.is_empty():
@@ -3763,12 +3775,12 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 						target = id
 						nearest = d
 		if target >= 0:
-			session.call("request_tactical_order", fighters, "attack", target)
+			_issue_order(fighters, {"kind": "attack", "target": target}, append)
 			return
 		if not explicit_attack:
 			var wreck: int = _salvage_hit(state, point)
 			if wreck >= 0:
-				session.call("request_salvage", owned, wreck)
+				_issue_order(owned, {"kind": "salvage", "target": wreck}, append)
 				return
 	var node: int = -1
 	var distance: float = INF
@@ -3784,7 +3796,8 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			var id: int = int(craft["id"])
 			if not fighters.has(id) or bool(craft.get("retreating", false)):
 				continue
-			var current: int = ECONOMY.sector_at(graph, craft["position"], candidates, ECONOMY.local_sector(graph, craft))
+			var origin: Vector2 = ECONOMY.unit_order_origin(state, graph, craft) if append else craft["position"]
+			var current: int = ECONOMY.sector_at(graph, origin, candidates, ECONOMY.local_sector(graph, craft))
 			if current < 0 or not ECONOMY.sector_contains(graph, current, world):
 				continue
 			if not local_groups.has(current):
@@ -3792,7 +3805,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			(local_groups[current] as Array).append(id)
 			handled_fighters[id] = true
 		for current in local_groups:
-			session.call("request_local_position", local_groups[current], int(current), world, move_only)
+			_issue_order(local_groups[current], {"kind": "position", "target": int(current), "point": world, "move_only": move_only}, append)
 		var remaining: Array[int] = []
 		for id in fighters:
 			if not handled_fighters.has(id):
@@ -3825,16 +3838,17 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		hit_radius = maxf(9.0, float(state["map"]["fields"][node - system_count]["radius"]) * _fit() * zoom)
 	if patrol and not force_position:
 		if not fighters.is_empty() and (ECONOMY.sector_contains(graph, node, world) or distance <= hit_radius * hit_radius):
-			session.call("request_tactical_order", fighters, "patrol", node)
+			_issue_order(fighters, {"kind": "patrol", "target": node}, append)
 		return
 	if force_position or distance > hit_radius * hit_radius:
 		if ECONOMY.sector_contains(graph, node, world):
 			var local: Array[int] = []
 			for craft in state["ships"]:
-				if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])) and not handled_fighters.has(int(craft["id"])) and ECONOMY.sector_contains(graph, node, craft["position"]) and not bool(craft.get("retreating", false)):
+				var origin: Vector2 = ECONOMY.unit_order_origin(state, graph, craft) if append else craft["position"]
+				if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])) and not handled_fighters.has(int(craft["id"])) and ECONOMY.sector_contains(graph, node, origin) and not bool(craft.get("retreating", false)):
 					local.append(int(craft["id"]))
 			if not local.is_empty():
-				session.call("request_local_position", local, node, world, move_only)
+				_issue_order(local, {"kind": "position", "target": node, "point": world, "move_only": move_only}, append)
 				return
 		else:
 			return
@@ -3857,17 +3871,17 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 					rock_id = int(rock["id"])
 		if field_index < 0:
 			field_index = -1
-		session.call("request_miner_assignment", miners, field_index, rock_id)
+		_issue_order(miners, {"kind": "mine", "target": field_index, "chunk": rock_id}, append)
 	var colony_sent: bool = false
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
 		if not selected_units.has(id) or int(craft["owner"]) != _me():
 			continue
 		if craft["kind"] == "colony_ship" and not colony_sent and node < state["planets"].size() and not ECONOMY.colony_path(state, _me(), craft, node).is_empty():
-			session.call("request_colonize", id, node)
+			_issue_order([id], {"kind": "colonize", "target": node}, append)
 			colony_sent = true
 	if not fighters.is_empty():
-		session.call("request_fighter_move", fighters, node, move_only)
+		_issue_order(fighters, {"kind": "sector", "target": node, "move_only": move_only}, append)
 
 func _selected_miners() -> Array[int]:
 	var miners: Array[int] = []
@@ -3900,8 +3914,51 @@ func _unload_selected() -> void:
 	pending_command = ""
 	var owned: Array[int] = _selected_owned_units(_state())
 	if not owned.is_empty():
-		session.call("request_unload_cargo", owned)
+		_issue_order(owned, {"kind": "unload"}, Input.is_physical_key_pressed(KEY_SHIFT))
 	_refresh_command_mode()
+
+func _formation_orders(state: Dictionary) -> Array:
+	var entries: Array = []
+	var owned: Array[int] = _selected_owned_units(state)
+	if owned.size() < 2 or formation_start.distance_to(formation_end) <= 5.0:
+		return entries
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var from: Vector2 = _world_point(formation_start)
+	var to: Vector2 = _world_point(formation_end)
+	var ships: Dictionary = {}
+	var origins: Dictionary = {}
+	for ship in state["ships"]:
+		if owned.has(int(ship["id"])) and not bool(ship.get("retreating", false)):
+			var origin: Vector2 = ECONOMY.unit_order_origin(state, graph, ship) if formation_append else ship["position"]
+			ships[ship["id"]] = ship
+			origins[ship["id"]] = origin
+	var candidates: Array[int] = ECONOMY.military_pois(state, _me())
+	for slot in ECONOMY.line_formation_slots(origins, from, to):
+		var ship: Dictionary = ships[slot["id"]]
+		var point: Vector2 = slot["point"]
+		var node: int = ECONOMY.sector_at(graph, point, candidates)
+		var order: Dictionary = {"kind": "position", "target": node, "point": point, "move_only": true, "heading": slot["heading"]}
+		entries.append({"ids": [ship["id"]], "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
+	return entries
+
+func _draw_formation_preview(state: Dictionary) -> void:
+	if not formation_drag or formation_start.distance_to(formation_end) <= 5.0:
+		return
+	var entries: Array = _formation_orders(state)
+	if entries.is_empty():
+		return
+	map_canvas.draw_line(formation_start, formation_end, HUD.ACCENT, 1.5, true)
+	for entry in entries:
+		var order: Dictionary = entry["order"]
+		var point: Vector2 = _screen_point(order["point"])
+		var heading: Vector2 = order["heading"]
+		var scale: float = maxf(0.42, _ship_scale())
+		var shape: PackedVector2Array = _hull_polygon(point, heading * scale, heading.orthogonal() * scale, HULL_OUTLINES.get(entry["hull"], FREIGHTER_OUTLINE))
+		var tint: Color = HUD.ACCENT if entry["valid"] else Color("#ff816b")
+		if not Geometry2D.triangulate_polygon(shape).is_empty():
+			map_canvas.draw_colored_polygon(shape, Color(tint, 0.24))
+		shape.append(shape[0])
+		map_canvas.draw_polyline(shape, Color(tint, 0.85), 1.0, true)
 
 func _map_input(event: InputEvent) -> void:
 	if match_menu.visible:
@@ -3921,11 +3978,29 @@ func _map_input(event: InputEvent) -> void:
 					elif selected_yard >= 0:
 						_set_rally_at(mouse.position)
 					else:
-						_command_at(mouse.position, mouse.alt_pressed, mouse.shift_pressed)
+						formation_drag = true
+						formation_start = mouse.position
+						formation_end = mouse.position
+						formation_append = mouse.shift_pressed
+						formation_force_position = mouse.alt_pressed
+						follow_units = false
+				elif formation_drag:
+					formation_end = mouse.position
+					var entries: Array = _formation_orders(_state())
+					formation_drag = false
+					if entries.is_empty():
+						_command_at(mouse.position, formation_force_position, false, false, false, formation_append)
+					else:
+						var valid: Array = []
+						for entry in entries:
+							if entry["valid"]:
+								valid.append({"ids": entry["ids"], "order": entry["order"]})
+						if not valid.is_empty():
+							session.call("request_unit_orders", valid, formation_append)
 			MOUSE_BUTTON_LEFT:
 				if not pending_command.is_empty():
 					if mouse.pressed:
-						_execute_pending_command(mouse.position)
+						_execute_pending_command(mouse.position, mouse.shift_pressed)
 					map_canvas.accept_event()
 					return
 				if mouse.pressed:
@@ -3948,7 +4023,9 @@ func _map_input(event: InputEvent) -> void:
 					_zoom_at(mouse.position, 1.0 / 1.15)
 	elif event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event
-		if selecting_units:
+		if formation_drag:
+			formation_end = motion.position
+		elif selecting_units:
 			selection_end = motion.position
 		elif drag_button != 0:
 			if motion.button_mask == 0:
@@ -4126,6 +4203,9 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 		map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
+	if formation_drag and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		formation_drag = false
+		map_canvas.queue_redraw()
 	if selecting_units and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		selecting_units = false
 		map_canvas.queue_redraw()
@@ -4636,6 +4716,29 @@ func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, later
 				map_canvas.draw_colored_polygon(fill, HUD.COLORS[segment["resource"]])
 			start = end
 
+func _order_color(ship: Dictionary, order: Dictionary) -> Color:
+	var kind: String = str(order.get("kind", ""))
+	if ship["kind"] == "fighter" and (kind in ["attack", "patrol"] or (kind in ["sector", "position"] and not bool(order.get("move_only", false)))):
+		return Color("#ff605c")
+	return HUD.ACCENT
+
+func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2) -> void:
+	var order: Dictionary = ship.get("unit_order", {})
+	var endpoint: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
+	if endpoint.is_finite():
+		start = _screen_point(endpoint)
+	elif ship.has("launch_rally"):
+		start = _screen_point(ship["launch_rally"]["point"])
+	for pending in ship.get("order_queue", []):
+		endpoint = ECONOMY.unit_order_point(state, graph, ship, pending)
+		if not endpoint.is_finite():
+			continue
+		var finish: Vector2 = _screen_point(endpoint)
+		var tint: Color = _order_color(ship, pending)
+		map_canvas.draw_line(start, finish, Color(tint, 0.65), 1.5, true)
+		map_canvas.draw_arc(finish, 7.0, 0.0, TAU, 20, tint, 1.0, true)
+		start = finish
+
 func _draw_map() -> void:
 	if session == null:
 		return
@@ -4743,17 +4846,23 @@ func _draw_map() -> void:
 	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
 	_draw_salvage(state, poses, viewport_bounds, font)
-	var order_points: Array = ECONOMY.military_graph(state)["points"]
+	var order_graph: Dictionary = ECONOMY.military_graph(state)
+	var order_points: Array = order_graph["points"]
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
 		if not selected_units.has(id) or not poses.has(id):
 			continue
 		var start: Vector2 = poses[id]["point"]
+		_draw_queued_orders(state, order_graph, craft, start)
+		var active_order: Dictionary = craft.get("unit_order", {})
+		var order_tint: Color = _order_color(craft, active_order)
+		if active_order.is_empty() and craft["kind"] == "fighter" and not bool(craft.get("move_only", false)):
+			order_tint = Color("#ff605c")
 		var attack_target: int = int(craft.get("attack_order", -1))
 		if poses.has(attack_target):
 			var marker: Vector2 = poses[attack_target]["point"]
-			map_canvas.draw_line(start, marker, Color("#ff816b80"), 1.5, true)
-			map_canvas.draw_arc(marker, maxf(9.0, 15.0 * _ship_scale()), 0.0, TAU, 24, Color("#ff816b"), 1.5, true)
+			map_canvas.draw_line(start, marker, Color(order_tint, 0.65), 1.5, true)
+			map_canvas.draw_arc(marker, maxf(9.0, 15.0 * _ship_scale()), 0.0, TAU, 24, order_tint, 1.5, true)
 		if craft.has("patrol_from"):
 			for endpoint in [craft["patrol_from"], craft["patrol_to"]]:
 				map_canvas.draw_arc(_screen_point(order_points[int(endpoint)]), 10.0, 0.0, TAU, 24, Color(HUD.ACCENT, 0.7), 1.5, true)
@@ -4765,12 +4874,12 @@ func _draw_map() -> void:
 			continue
 		for node in craft["route"]:
 			var finish: Vector2 = _screen_point(order_points[int(node)])
-			map_canvas.draw_line(start, finish, Color(HUD.ACCENT, 0.5), 1.5, true)
+			map_canvas.draw_line(start, finish, Color(order_tint, 0.65), 1.5, true)
 			start = finish
 		if craft.has("local_move_target") and not bool(craft.get("retreating", false)):
 			var destination: Vector2 = _screen_point(craft["local_move_target"])
-			map_canvas.draw_line(start, destination, Color(HUD.ACCENT, 0.5), 1.5, true)
-			map_canvas.draw_arc(destination, 7.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
+			map_canvas.draw_line(start, destination, Color(order_tint, 0.65), 1.5, true)
+			map_canvas.draw_arc(destination, 7.0, 0.0, TAU, 24, order_tint, 1.5, true)
 			continue
 		if craft["kind"] == "miner":
 			var assigned: int = int(craft.get("assigned_field", -1))
@@ -4786,7 +4895,7 @@ func _draw_map() -> void:
 			if craft.get("mining_mode", "") in ["approach", "outbound", "mining"] and craft.has("mining_target"):
 				map_canvas.draw_line(start, _screen_point(craft["mining_target"]), Color(HUD.ACCENT, 0.5), 1.5, true)
 		if not (craft["route"] as Array).is_empty():
-			map_canvas.draw_arc(start, 7.0, 0.0, TAU, 20, HUD.ACCENT, 1.5, true)
+			map_canvas.draw_arc(start, 7.0, 0.0, TAU, 20, order_tint, 1.5, true)
 	for index in range(points.size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
@@ -4873,7 +4982,10 @@ func _draw_map() -> void:
 		if not viewport_bounds.grow(maxf(24.0, 18.0 * scale)).has_point(point):
 			continue
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
-			map_canvas.draw_arc(point, maxf(5.0, 15.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 2.0, true)
+			var radius: float = maxf(5.0, 15.0 * scale)
+			var dots: int = maxi(12, roundi(TAU * radius / 5.0))
+			for dot in range(dots):
+				map_canvas.draw_circle(point + Vector2.from_angle(TAU * float(dot) / dots) * radius, 0.65, HUD.ACCENT, true, -1.0, true)
 		# At a distant galaxy overview, the smallest authored edges can
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
@@ -4915,6 +5027,7 @@ func _draw_map() -> void:
 			map_canvas.draw_rect(Rect2(bar_pos, Vector2(width, 3.0)), Color("#182333"))
 			map_canvas.draw_rect(Rect2(bar_pos, Vector2(width * hp, 3.0)), Color("#e9a276"))
 	_draw_ship_destructions(viewport_bounds)
+	_draw_formation_preview(state)
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
 		map_canvas.draw_rect(rect, Color(HUD.ACCENT, 0.12))

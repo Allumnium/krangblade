@@ -388,6 +388,7 @@ static func send_colony(state: Dictionary, player: int, ship_id: int, target: in
 		if path.is_empty():
 			return false
 		_cancel_salvage_order(ship)
+		_set_unit_order(ship, {"kind": "colonize", "target": target})
 		ship["dest"] = target
 		ship["return_path"] = path.duplicate()
 		_clear_local_hold(ship)
@@ -1662,6 +1663,7 @@ static func command_miners(state: Dictionary, player: int, ids: Array, field_ind
 	for ship in selected:
 		_cancel_salvage_order(ship)
 		_clear_local_hold(ship)
+		_set_unit_order(ship, {"kind": "mine", "target": field_index, "chunk": chunk_id})
 		ship["assigned_field"] = field_index
 		ship["assigned_chunk"] = chunk_id
 		ship["next_mining_search"] = 0.0
@@ -2148,6 +2150,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 	for ship in selected:
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
+		_set_unit_order(ship, {"kind": "sector", "target": target, "move_only": move_only})
 		ship["direct_order"] = true
 		_clear_local_hold(ship)
 		ship["operation_target"] = target
@@ -2193,6 +2196,7 @@ static func command_attack(state: Dictionary, player: int, ids: Array, target_id
 		return false
 	for craft in _owned_fighters(state, player, ids):
 		craft["attack_order"] = target_id
+		_set_unit_order(craft, {"kind": "attack", "target": target_id})
 	return true
 
 static func command_patrol(state: Dictionary, player: int, ids: Array, target: int) -> bool:
@@ -2208,6 +2212,7 @@ static func command_patrol(state: Dictionary, player: int, ids: Array, target: i
 	for craft in selected:
 		craft["patrol_from"] = origins[int(craft["id"])]
 		craft["patrol_to"] = target
+		_set_unit_order(craft, {"kind": "patrol", "target": target})
 	return true
 
 static func _update_tactical_orders(state: Dictionary, graph: Dictionary) -> void:
@@ -2272,6 +2277,7 @@ static func hold_fighters(state: Dictionary, player: int, ids: Array) -> bool:
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
+		_set_unit_order(ship, {})
 		ship["direct_order"] = true
 		ship["holding"] = true
 		ship["operation_target"] = int(ship["at"])
@@ -2317,9 +2323,216 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 			units.append(ship)
 	return units if units.size() == requested.size() else []
 
+const MAX_UNIT_ORDERS: int = 30
+
+# Project previous ship/command origins onto the dragged axis to minimize
+# crossing, and choose the perpendicular closest to the group's travel.
+static func line_formation_slots(origins: Dictionary, from: Vector2, to: Vector2) -> Array:
+	var slots: Array = []
+	if origins.size() < 2 or from.is_equal_approx(to):
+		return slots
+	var axis: Vector2 = (to - from).normalized()
+	var centroid: Vector2 = Vector2.ZERO
+	var ids: Array = origins.keys()
+	for id in ids:
+		centroid += origins[id]
+	centroid /= ids.size()
+	ids.sort_custom(func(a: int, b: int) -> bool:
+		var first: float = (origins[a] as Vector2).dot(axis)
+		var second: float = (origins[b] as Vector2).dot(axis)
+		return a < b if is_equal_approx(first, second) else first < second)
+	var heading: Vector2 = axis.orthogonal()
+	if heading.dot((from + to) * 0.5 - centroid) < 0.0:
+		heading = -heading
+	for i in range(ids.size()):
+		slots.append({"id": ids[i], "point": from.lerp(to, float(i) / float(ids.size() - 1)), "heading": heading})
+	return slots
+
+static func _set_unit_order(ship: Dictionary, order: Dictionary) -> void:
+	ship.erase("order_queue")
+	ship.erase("formation_stationary")
+	if order.is_empty():
+		ship.erase("unit_order")
+	else:
+		ship["unit_order"] = order
+
+# Resolve stable command destinations for validation, formation assignment and
+# the selected order overlay. Missing moving targets have no valid endpoint.
+static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Dictionary, order: Dictionary) -> Vector2:
+	var target: int = int(order.get("target", -1))
+	match order.get("kind", ""):
+		"position":
+			return order.get("point", Vector2.INF)
+		"sector", "patrol", "colonize":
+			if target >= 0 and target < graph["points"].size():
+				return graph["points"][target]
+		"attack":
+			for victim in state["ships"]:
+				if int(victim["id"]) == target:
+					return victim["position"]
+		"salvage":
+			return state.get("salvage", {}).get(target, {}).get("position", Vector2.INF)
+		"mine":
+			if target >= 0 and target < state["map"].get("fields", []).size():
+				var field: Dictionary = state["map"]["fields"][target]
+				for rock in field.get("chunks", []):
+					if int(rock["id"]) == int(order.get("chunk", -1)):
+						return rock["position"]
+				return field["position"]
+		"unload":
+			var destination: int = int(ship.get("dest", -1))
+			if destination >= 0 and destination < state["planets"].size():
+				return graph["points"][destination]
+	return Vector2.INF
+
+static func unit_order_origin(state: Dictionary, graph: Dictionary, ship: Dictionary) -> Vector2:
+	var orders: Array = ship.get("order_queue", [])
+	for i in range(orders.size() - 1, -1, -1):
+		var point: Vector2 = unit_order_point(state, graph, ship, orders[i])
+		if point.is_finite():
+			return point
+	var active: Vector2 = unit_order_point(state, graph, ship, ship.get("unit_order", {})) if _unit_order_running(ship) else Vector2.INF
+	if not active.is_finite() and ship.has("launch_rally"):
+		active = ship["launch_rally"]["point"]
+	return active if active.is_finite() else ship["position"]
+
+static func _unit_order_running(ship: Dictionary) -> bool:
+	if bool(ship.get("retreating", false)):
+		return true
+	var order: Dictionary = ship.get("unit_order", {})
+	match order.get("kind", ""):
+		"position":
+			return ship.has("local_move_target")
+		"sector":
+			return not (ship["route"] as Array).is_empty() or (not bool(order.get("move_only", false)) and _engaged(ship))
+		"attack":
+			return ship.has("attack_order")
+		"patrol":
+			return ship.has("patrol_from") and ((ship.get("order_queue", []) as Array).is_empty() or not (ship["route"] as Array).is_empty() or _engaged(ship))
+		"salvage":
+			return int(ship.get("salvage_target", -1)) >= 0
+		"unload":
+			return bool(ship.get("salvage_delivery", false))
+		"colonize":
+			return int(ship.get("dest", -1)) >= 0
+		"mine":
+			var target: int = int(order["target"])
+			return target >= 0 and int(ship.get("assigned_field", -1)) == target and (int(ship.get("field", -1)) != target or ship.get("mining_mode", "") != "mining")
+	return ship.has("launch_rally")
+
+static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictionary, order: Dictionary, append: bool) -> bool:
+	var kind: String = str(order.get("kind", ""))
+	var owner: int = int(ship["owner"])
+	var fighter: bool = ship["kind"] == "fighter"
+	if kind == "unload":
+		return true
+	if not order.get("target", null) is int:
+		return false
+	var target: int = order["target"]
+	match kind:
+		"position":
+			if not order.get("point", null) is Vector2 or not (order["point"] as Vector2).is_finite() or not military_pois(state, owner).has(target) or not sector_contains(graph, target, order["point"]):
+				return false
+			if order.has("heading") and (not order["heading"] is Vector2 or not (order["heading"] as Vector2).is_finite() or (order["heading"] as Vector2).is_zero_approx()):
+				return false
+			var origin: Vector2 = unit_order_origin(state, graph, ship) if append else ship["position"]
+			return sector_contains(graph, target, origin) or (fighter and order.has("heading") and _military_paths(graph, target)["distance"].has(int(ship["at"])))
+		"sector", "patrol":
+			return fighter and military_pois(state, owner).has(target)
+		"attack":
+			for victim in state["ships"]:
+				if int(victim["id"]) == target:
+					return fighter and _hostile_hull(state, owner, victim)
+		"salvage":
+			return state.get("salvage", {}).has(target)
+		"colonize":
+			return ship["kind"] == "colony_ship" and target >= 0 and target < state["planets"].size() and discovered(state, owner, "planets", target)
+		"mine":
+			return ship["kind"] == "miner" and order.get("chunk", -1) is int and (target == -1 or (target >= 0 and target < state["map"].get("fields", []).size() and discovered(state, owner, "fields", target)))
+	return false
+
+static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
+	var target: int = int(order.get("target", -1))
+	match order["kind"]:
+		"sector":
+			return command_fighters(state, player, ids, target, bool(order.get("move_only", false)))
+		"attack":
+			return command_attack(state, player, ids, target)
+		"patrol":
+			return command_patrol(state, player, ids, target)
+		"mine":
+			return command_miners(state, player, ids, target, int(order.get("chunk", -1)))
+		"salvage":
+			return command_salvage(state, player, ids, target)
+		"unload":
+			return command_unload_cargo(state, player, ids)
+		"colonize":
+			return ids.size() == 1 and send_colony(state, player, ids[0], target)
+		"position":
+			var accepted: bool = command_local_position(state, player, ids, target, order["point"], bool(order.get("move_only", false)))
+			# A formation can be placed in another discovered sector by fighters;
+			# use normal lane travel before the final precise positioning leg.
+			if not accepted and order.has("heading") and command_fighters(state, player, ids, target, bool(order.get("move_only", false))):
+				accepted = true
+				for ship in _owned_units(state, player, ids):
+					ship["local_move_target"] = order["point"]
+					ship["local_move_sector"] = target
+			if accepted:
+				for ship in _owned_units(state, player, ids):
+					ship["unit_order"] = order.duplicate(true)
+					if order.has("heading"):
+						ship["arrival_heading"] = (order["heading"] as Vector2).normalized()
+			return accepted
+	return false
+
+# All mutation takes place on the authority. A pending command never reserves
+# salvage or changes the current route until it actually starts.
+static func issue_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary, append: bool) -> bool:
+	var units: Array = _owned_units(state, player, ids)
+	if units.is_empty():
+		return false
+	var graph: Dictionary = military_graph(state)
+	for ship in units:
+		if not _valid_unit_order(state, graph, ship, order, append):
+			return false
+	if not append:
+		return _execute_unit_order(state, player, ids, order)
+	var all_idle: bool = true
+	for ship in units:
+		if _unit_order_running(ship) or not (ship.get("order_queue", []) as Array).is_empty():
+			all_idle = false
+			break
+	if all_idle:
+		return _execute_unit_order(state, player, ids, order)
+	var accepted: bool = false
+	for ship in units:
+		var queue: Array = ship.get("order_queue", [])
+		if queue.size() + int(_unit_order_running(ship)) >= MAX_UNIT_ORDERS:
+			continue
+		queue.append(order.duplicate(true))
+		ship["order_queue"] = queue
+		accepted = true
+	return accepted
+
+static func _advance_unit_orders(state: Dictionary, graph: Dictionary) -> void:
+	for ship in state["ships"]:
+		if _unit_order_running(ship):
+			continue
+		ship.erase("unit_order")
+		var queue: Array = ship.get("order_queue", [])
+		while not queue.is_empty():
+			var order: Dictionary = queue.pop_front()
+			if _valid_unit_order(state, graph, ship, order, false) and _execute_unit_order(state, int(ship["owner"]), [ship["id"]], order):
+				break
+		if queue.is_empty():
+			ship.erase("order_queue")
+		else:
+			ship["order_queue"] = queue
+
 static func _clear_local_move(ship: Dictionary) -> void:
 	ship.erase("local_move_target")
 	ship.erase("local_move_sector")
+	ship.erase("arrival_heading")
 
 static func _clear_local_hold(ship: Dictionary) -> void:
 	_clear_local_move(ship)
@@ -2348,6 +2561,7 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
+		_set_unit_order(ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
 		ship["local_move_target"] = point
 		ship["local_move_sector"] = node
 		ship["move_only"] = move_only
@@ -2375,6 +2589,7 @@ static func command_hold_units(state: Dictionary, player: int, ids: Array, relea
 	if units.is_empty():
 		return false
 	for ship in units:
+		_set_unit_order(ship, {})
 		ship.erase("launch_rally")
 		_cancel_salvage_order(ship)
 		if release:
@@ -2413,6 +2628,11 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float) -> 
 	var point: Vector2 = ship["local_move_target"]
 	_navigate(ship, point, SHIP_SPEED * dt)
 	if (ship["position"] as Vector2).distance_to(point) <= EPS:
+		if ship.has("arrival_heading"):
+			ship["heading"] = ship["arrival_heading"]
+			# Preserve the player's line while idle, without suppressing
+			# combat, pursuit, salvage, or civilian work as Hold would.
+			ship["formation_stationary"] = true
 		_clear_local_move(ship)
 		ship.erase("move_only")
 		if fighter:
@@ -2797,6 +3017,7 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		_cancel_salvage_order(best)
 		_clear_tactical_order(best)
 		_clear_local_hold(best)
+		_set_unit_order(best, {"kind": "salvage", "target": id})
 		best["salvage_target"] = id
 		pile["claim"] = int(best["id"])
 		changed = true
@@ -2813,6 +3034,7 @@ static func command_unload_cargo(state: Dictionary, player: int, ids: Array) -> 
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
+		_set_unit_order(ship, {"kind": "unload"})
 		ship["salvage_delivery"] = true
 		changed = true
 	return changed
@@ -3957,7 +4179,7 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 			if not stationary_teams.has(node):
 				stationary_teams[node] = {}
 			stationary_teams[node][int(state["teams"].get(int(ship["owner"]), 0))] = true
-		if not _is_idle_ship(ship):
+		if not _is_idle_ship(ship) or bool(ship.get("formation_stationary", false)):
 			continue
 		var key: String = "%d:%s:%d:%d" % [int(ship["owner"]), str(ship.get("kind", "ship")), int(ship["at"]), int(ship.get("operation_id", 0))]
 		if not groups.has(key):
@@ -4215,6 +4437,8 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		var planned: Vector2 = ship["position"]
 		var held: bool = bool(ship.get("holding", false))
 		var local_moving: bool = ship.has("local_move_target")
+		if bool(ship.get("formation_stationary", false)) and _is_idle_ship(ship):
+			continue
 		# Do not let repulsion prevent completion of a shared point order.
 		# The newly idle ships spread naturally after arrival.
 		if local_moving and planned.distance_to(ship["local_move_target"]) < reach * 2.0:
@@ -4308,6 +4532,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	for craft in state["ships"]:
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") == "fighter" else state["map"]["points"], craft)
 	_prepare_withdrawals(state, combat_graph)
+	_advance_unit_orders(state, combat_graph)
 	_update_tactical_orders(state, combat_graph)
 	_combat(state, combat_graph, dt)
 	_prepare_withdrawals(state, combat_graph)
