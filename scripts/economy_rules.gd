@@ -764,9 +764,11 @@ static func next_pds(p: Dictionary) -> int:
 			return slot
 	return -1
 
-static func enqueue(state: Dictionary, player: int, index: int, kind: String, target: String = "") -> bool:
+static func enqueue(state: Dictionary, player: int, index: int, kind: String, target: String = "", yard_slot: int = -1) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
 	if p.is_empty():
+		return false
+	if yard_slot != -1 and (not SHIP_KINDS.has(kind) or not shipyard_operational(p, yard_slot) or max_size(int(p["yards"][yard_slot]["level"])) < SHIP_SIZE):
 		return false
 	var level: int = 1
 	match kind:
@@ -824,7 +826,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 		_spend_material(p, "Construction: " + kind, material, float(cost[material]))
 	var id: int = int(state["next_id"])
 	state["next_id"] = id + 1
-	p["queue"].append({"id": id, "kind": kind, "target": target, "level": level,
+	p["queue"].append({"id": id, "kind": kind, "target": target, "yard_slot": yard_slot, "level": level,
 		"cost": cost, "work": 30.0 if kind == "economy_building" else _work(kind, level),
 		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
 	return true
@@ -1055,6 +1057,65 @@ static func shipyard_position(state: Dictionary, index: int, slot: int, elapsed:
 	var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
 	return center + Vector2.from_angle(angle) * 95.0 * smoothstep(0.0, 1.0, conversion)
 
+static func _rally_path(state: Dictionary, index: int, target: int) -> Array[int]:
+	var access: Array[int] = []
+	access.resize(state["map"]["points"].size())
+	access.fill(1)
+	return MAP.path(state["map"], access, 1, index, target)
+
+static func set_shipyard_rally(state: Dictionary, player: int, index: int, slot: int, target: int, point: Vector2) -> bool:
+	var p: Dictionary = _get_owned(state, player, index)
+	if p.is_empty() or slot < 0 or slot >= p["yards"].size():
+		return false
+	if target == -1:
+		p["yards"][slot].erase("rally")
+		return true
+	if not point.is_finite() or target < 0 or target >= state["planets"].size() or not discovered(state, player, "planets", target):
+		return false
+	if not sector_contains(military_graph(state), target, point) or _rally_path(state, index, target).is_empty():
+		return false
+	p["yards"][slot]["rally"] = {"node": target, "point": point}
+	return true
+
+static func _launch_to_rally(state: Dictionary, ship: Dictionary, rally: Dictionary) -> void:
+	if rally.is_empty():
+		return
+	var target: int = int(rally["node"])
+	var path: Array[int] = _rally_path(state, int(ship["at"]), target)
+	if path.is_empty():
+		return
+	_set_route(ship, path)
+	ship["launch_rally"] = rally.duplicate()
+	ship["navigation_target"] = rally["point"]
+	if ship["kind"] == "fighter":
+		ship["direct_order"] = true
+		ship["operation_target"] = target
+		ship["dest"] = target
+		ship["move_only"] = true
+
+static func _work_launch_rally(state: Dictionary, ship: Dictionary, dt: float) -> bool:
+	if not ship.has("launch_rally"):
+		return false
+	if bool(ship.get("retreating", false)):
+		ship.erase("launch_rally")
+		return false
+	var rally: Dictionary = ship["launch_rally"]
+	if not (ship["route"] as Array).is_empty():
+		_move(state, ship, dt)
+		return true
+	_navigate(ship, rally["point"], SHIP_SPEED * dt)
+	if (ship["position"] as Vector2).distance_to(rally["point"]) <= EPS:
+		ship.erase("launch_rally")
+		ship.erase("move_only")
+		if ship["kind"] in ["fighter", "colony_ship"]:
+			ship["holding"] = true
+			ship["hold_position"] = rally["point"]
+			ship["hold_sector"] = int(rally["node"])
+		else:
+			ship["dest"] = -1
+			ship["source"] = -1
+	return true
+
 static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictionary) -> void:
 	match str(item["kind"]):
 		"economy_building":
@@ -1071,13 +1132,16 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			p["yards"][int(item["target"])]["hp"] = SHIP_HP * 10.0 * int(item["level"])
 		"ship", "colony_ship", "fighter", "miner":
 			var launch: Vector2 = state["map"]["points"][index]
+			var rally: Dictionary = {}
 			for slot in range(p["yards"].size()):
 				if int(p["yards"][slot]["job"]) == int(item["id"]):
 					launch = shipyard_position(state, index, slot, float(state["elapsed"]))
+					rally = p["yards"][slot].get("rally", {})
 					break
 			state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
 				"position": launch, "heading": Vector2.UP, "navigation_target": state["map"]["points"][index],
 				"route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
+			_launch_to_rally(state, state["ships"].back(), rally)
 	p["queue"].erase(item)
 
 static func _record_flow(p: Dictionary, category: String, resource: String, amount: float) -> void:
@@ -1146,7 +1210,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		for item in p["queue"]:
 			if int(item["id"]) != int(yard["job"]):
 				continue
-			if item["kind"] == "yard_upgrade" or (int(item["size"]) > 0 and _possible(p, item) > EPS):
+			if item["kind"] == "yard_upgrade" or int(item.get("yard_slot", -1)) == y or (int(item["size"]) > 0 and _possible(p, item) > EPS):
 				assigned[int(item["id"])] = true
 				retained = true
 				break
@@ -1171,7 +1235,11 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 				if assigned.has(int(item["id"])):
 					continue
 				var upgrade: bool = item["kind"] == "yard_upgrade" and int(item["target"]) == y
-				var hull: bool = int(item["size"]) > 0 and int(item["size"]) <= max_size(int(yard["level"]))
+				var pinned: int = int(item.get("yard_slot", -1))
+				var hull: bool = int(item["size"]) > 0 and int(item["size"]) <= max_size(int(yard["level"])) and (pinned < 0 or pinned == y)
+				if hull and pinned == y:
+					chosen = item
+					break
 				if hull and bool(item.get("automatic", false)):
 					if repeat_seen:
 						continue
@@ -2063,6 +2131,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 # Both orders use the normal military graph and the same automatic combat
 # and repair rules as attack-move. The target is a stable hull ID, not a slot.
 static func _clear_tactical_order(ship: Dictionary) -> void:
+	ship.erase("launch_rally")
 	ship.erase("move_only")
 	ship.erase("attack_order")
 	ship.erase("attack_local")
@@ -2219,6 +2288,7 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 	return units if units.size() == requested.size() else []
 
 static func _clear_local_hold(ship: Dictionary) -> void:
+	ship.erase("launch_rally")
 	ship.erase("move_only")
 	if bool(ship.get("holding", false)) and ship.get("kind", "") == "miner" and ship.get("mining_mode", "") == "mining":
 		# Resume extraction only after physically returning to the rock.
@@ -2267,6 +2337,7 @@ static func command_hold_units(state: Dictionary, player: int, ids: Array, relea
 	if units.is_empty():
 		return false
 	for ship in units:
+		ship.erase("launch_rally")
 		_cancel_salvage_order(ship)
 		if release:
 			if not bool(ship.get("holding", false)):
@@ -2871,7 +2942,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	for ship in ships:
 		if ship.get("kind", "") != "fighter":
 			continue
-		var moving_only: bool = bool(ship.get("move_only", false)) and (not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
+		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
 		if bool(ship.get("retreating", false)) or moving_only:
@@ -3039,10 +3110,12 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var planet: Dictionary = state["planets"][location.x]
 		var job_id: int = int(planet["yards"][location.y]["job"])
 		for item in planet["queue"].duplicate():
-			if int(item["id"]) == job_id or (item["kind"] == "yard_upgrade" and int(item["target"]) == location.y):
+			if int(item["id"]) == job_id or int(item.get("yard_slot", -1)) == location.y or (item["kind"] == "yard_upgrade" and int(item["target"]) == location.y):
 				planet["queue"].erase(item)
 			elif item["kind"] == "yard_upgrade" and int(item["target"]) > location.y:
 				item["target"] = str(int(item["target"]) - 1)
+			elif int(item.get("yard_slot", -1)) > location.y:
+				item["yard_slot"] = int(item["yard_slot"]) - 1
 		# Residents are lost proportionally when their housing is destroyed.
 		var eco: float = eco_population(planet)
 		var lost: float = minf(eco, eco / maxf(1.0, float(eco_housing_count(planet))))
@@ -3591,7 +3664,7 @@ static func _move_formation(graph: Dictionary, ship: Dictionary, dt: float) -> b
 static func _formation_lane_groups(state: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
 	for craft in state["ships"]:
-		if craft.get("kind", "") != "fighter" or _salvage_active(craft) or _engaged(craft) or bool(craft.get("retreating", false)) or bool(craft.get("holding", false)) or (craft["route"] as Array).is_empty():
+		if craft.get("kind", "") != "fighter" or craft.has("launch_rally") or _salvage_active(craft) or _engaged(craft) or bool(craft.get("retreating", false)) or bool(craft.get("holding", false)) or (craft["route"] as Array).is_empty():
 			continue
 		var key: String = "%d:%d:%d:%d" % [int(craft.get("operation_id", 0)), int(craft["at"]), int(craft["route"][0]), int(craft.get("dest", -1))]
 		if not groups.has(key):
@@ -4104,6 +4177,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
 		var salvage_ship_id: int = int(ship["id"])
+		if _work_launch_rally(state, ship, dt):
+			continue
 		if _work_salvage(state, combat_graph, ship, dt, salvage_busy.has(salvage_ship_id)):
 			continue
 		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id)):

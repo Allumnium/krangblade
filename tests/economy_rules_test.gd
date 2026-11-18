@@ -9,6 +9,35 @@ func _planetary_fixture(seed_value: int, players: int = 3, layout: String = "Gri
 	map_data["planetless"] = []
 	return map_data
 
+func _test_shipyard_rally() -> void:
+	var map: Dictionary = {"seed": 426, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var system: Dictionary = state["planets"][0]
+	system["population"] = 100000.0
+	system["yards"].append({"level": 1, "job": -1, "hp": ECON.SHIP_HP * 10.0})
+	for resource in ECON.RESOURCES:
+		system["stock"][resource] = 10000.0
+	var point := Vector2(100, 100)
+	assert(not ECON.set_shipyard_rally(state, 2, 0, 1, 0, point))
+	assert(not ECON.set_shipyard_rally(state, 1, 0, 99, 0, point))
+	assert(not ECON.set_shipyard_rally(state, 1, 0, 1, 0, Vector2.INF))
+	assert(ECON.set_shipyard_rally(state, 1, 0, 1, 0, point))
+	assert(not ECON.enqueue(state, 1, 0, "fighter", "", 99))
+	assert(ECON.enqueue(state, 1, 0, "fighter", "", 1))
+	var job: Dictionary = system["queue"].back()
+	ECON._work_planet(state, 0, 0.1)
+	assert(int(system["yards"][0]["job"]) != int(job["id"]))
+	assert(int(system["yards"][1]["job"]) == int(job["id"]))
+	ECON._finish(state, 0, system, job)
+	var craft: Dictionary = state["ships"].back()
+	assert(craft.has("launch_rally"))
+	for tick in range(200):
+		if not ECON._work_launch_rally(state, craft, 0.5):
+			break
+	assert(not craft.has("launch_rally") and craft["position"] == point and craft["holding"])
+	assert(ECON.set_shipyard_rally(state, 1, 0, 1, -1, Vector2.ZERO))
+	assert(not system["yards"][1].has("rally"))
+
 func _test_maintain_targets() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1])
 	var p: Dictionary = state["planets"][0]
@@ -31,6 +60,7 @@ func _test_maintain_targets() -> void:
 	assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
+	_test_shipyard_rally()
 	_test_freighter_bays()
 	_test_recovery_economy()
 	_test_opening_pacing()

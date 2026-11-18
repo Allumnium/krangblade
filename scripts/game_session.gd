@@ -884,7 +884,31 @@ func _rpc_operation(index: int, kind: String, target: String) -> void:
 		_operation_for(multiplayer.get_remote_sender_id(), index, kind, target)
 
 func _operation_for(id: int, index: int, kind: String, target: String) -> void:
-	if kind != "production" and _active_player(id) and ECONOMY.enqueue(economy, id, index, kind, target):
+	if not _active_player(id) or kind == "production":
+		return
+	if kind == "shipyard_build":
+		var parts: PackedStringArray = target.split(":")
+		if parts.size() == 2 and parts[0].is_valid_int() and int(parts[0]) >= 0 and ECONOMY.SHIP_KINDS.has(parts[1]) and ECONOMY.enqueue(economy, id, index, parts[1], "", int(parts[0])):
+			_publish_economy()
+		return
+	if ECONOMY.enqueue(economy, id, index, kind, target):
+		_publish_economy()
+
+func request_shipyard_rally(index: int, slot: int, target: int, point: Vector2) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_shipyard_rally_for(1, index, slot, target, point)
+	else:
+		_rpc_shipyard_rally.rpc_id(1, index, slot, target, point)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_shipyard_rally(index: int, slot: int, target: int, point: Vector2) -> void:
+	if multiplayer.is_server():
+		_shipyard_rally_for(multiplayer.get_remote_sender_id(), index, slot, target, point)
+
+func _shipyard_rally_for(id: int, index: int, slot: int, target: int, point: Vector2) -> void:
+	if _active_player(id) and ECONOMY.set_shipyard_rally(economy, id, index, slot, target, point):
 		_publish_economy()
 
 func request_maintain(index: int, kind: String, amount: int) -> void:

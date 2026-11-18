@@ -386,8 +386,11 @@ func _send_commands() -> void:
 	session.call("request_operation", home_index, "pds", "0") # already defended
 	session.call("request_operation", home_index, "pds")
 	session.call("request_operation", home_index, "pds")
-	session.call("request_operation", home_index, "ship")
-	session.call("request_operation", home_index, "fighter")
+	session.call("request_operation", home_index, "shipyard_build", "0:ship")
+	session.call("request_operation", home_index, "shipyard_build", "0:fighter")
+	session.call("request_shipyard_rally", home_index, 0, home_index, graph["points"][home_index])
+	session.call("request_shipyard_rally", (home_index + 1) % expected_players, 0, home_index, graph["points"][home_index])
+	session.call("request_shipyard_rally", home_index, 0, -1, Vector2.ZERO)
 	session.call("request_continuous", home_index, "colony_ship", true)
 	session.call("request_continuous", home_index, "miner", true)
 	session.call("request_continuous", home_index, "economy_building:Organics", true)
