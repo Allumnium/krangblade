@@ -419,6 +419,7 @@ func _initialize() -> void:
 	for i in range(graph["points"].size()):
 		assert(not MAP.path(graph, all_friendly, 1, 0, i).is_empty())
 	# Seeded clusters are internally connected and connected by sparse bridges.
+	var crystal_shares: Dictionary = {}
 	for seed_value in range(24):
 		var player_count: int = seed_value % 8 + 1
 		var clustered: Dictionary = _planetary_fixture(seed_value, player_count, "Grid")
@@ -467,6 +468,12 @@ func _initialize() -> void:
 			assert(not MAP.blocked(cluster_points[edge[0]], cluster_points[edge[1]], clustered["fields"]))
 		for field in clustered["fields"]:
 			var ore: Dictionary = ECON.field_inventory(field)
+			if not bool(field.get("antimatter", false)):
+				var total: float = float(ore["Metals"]) + float(ore["Crystals"])
+				var crystal_share: float = float(ore["Crystals"]) / total
+				assert(total >= field["chunks"].size() * 900.0 and total <= field["chunks"].size() * 5200.0)
+				assert(crystal_share <= MAP.MAX_CRYSTAL_SHARE + ECON.EPS and float(ore["Metals"]) > 0.0)
+				crystal_shares[roundi(crystal_share * 100.0)] = true
 			for resource in ECON.FIELD_RESOURCES:
 				assert(ECON.field_limit(field, resource) > ECON.PLANET_MINING_LIMIT if float(ore[resource]) > 0.0 else is_zero_approx(ECON.field_limit(field, resource)))
 			assert(ECON.field_limit(field, "Organics") == 0.0)
@@ -497,6 +504,8 @@ func _initialize() -> void:
 		assert(seen.size() == cluster_points.size())
 		for i in range(player_count):
 			assert(cluster_ids[i] == i)
+	assert(crystal_shares.has(0) and crystal_shares.size() >= 5)
+	print("PASS: tenfold asteroid inventory, seeded metal-rich fields and crystal tonnage cap")
 	var players: Dictionary = {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}
 	var ids: Array[int] = [1, 2, 3]
 	var state: Dictionary = ECON.create(graph, players, ids, false)
@@ -2284,7 +2293,7 @@ func _test_salvage() -> void:
 	var expirations: Dictionary = {}
 	for pile in state["salvage"].values():
 		var lifetime: float = float(pile["expires_at"]) - float(pile["born"])
-		assert(lifetime >= 90.0 and lifetime <= 120.0)
+		assert(lifetime >= ECON.SALVAGE_MIN_LIFETIME and lifetime <= ECON.SALVAGE_MAX_LIFETIME)
 		expirations[lifetime] = true
 		var resource: String = pile["resource"]
 		recovered[resource] = float(pile["amount"])
@@ -2302,7 +2311,7 @@ func _test_salvage() -> void:
 	state["elapsed"] = float(first_pile["expires_at"])
 	ECON._update_salvage(state)
 	assert(not state["salvage"].has(first_pile["id"]))
-	state["elapsed"] = 120.0
+	state["elapsed"] = ECON.SALVAGE_MAX_LIFETIME
 	ECON._update_salvage(state)
 	assert(state["salvage"].is_empty())
 	state["elapsed"] = 2.0
