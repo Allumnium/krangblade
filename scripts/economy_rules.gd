@@ -1913,15 +1913,25 @@ static func sector_base_radius(map_data: Dictionary) -> float:
 	spacings.sort()
 	return 300.0 if spacings.is_empty() else maxf(100.0, spacings[floori(float(spacings.size()) * 0.5)] * 0.73)
 
+const SECTOR_CORNER_ROUNDING: float = 0.32
+
 static func sector_limit(graph: Dictionary, node: int, direction: Vector2) -> float:
-	# A sector is the local territory disk clipped by the nearest-POI
-	# bisectors. Its convex bounds also contain straight-line idle movement.
+	# Round the junction between the two tightest radial bounds inward.
+	# Never expand beyond the nearest-POI bisector or the original disk.
 	var limit: float = float(graph["sector_radii"][node])
+	var second: float = INF
 	for delta in graph["sector_neighbors"][node]:
 		var projection: float = direction.dot(delta)
 		if projection > EPS:
-			limit = minf(limit, (delta as Vector2).length_squared() / (2.0 * projection))
-	return limit
+			var bound: float = (delta as Vector2).length_squared() / (2.0 * projection)
+			if bound < limit:
+				second = limit
+				limit = bound
+			else:
+				second = minf(second, bound)
+	var width: float = maxf(EPS, limit * SECTOR_CORNER_ROUNDING)
+	var overlap: float = maxf(0.0, width - (second - limit))
+	return limit - overlap * overlap / (4.0 * width)
 
 static func sector_contains(graph: Dictionary, node: int, position: Vector2) -> bool:
 	var offset: Vector2 = position - (graph["points"][node] as Vector2)
