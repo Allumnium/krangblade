@@ -412,6 +412,8 @@ func _send_commands() -> void:
 	session.call("request_operation", home_index, "pds")
 	session.call("request_operation", home_index, "shipyard_build", "0:ship")
 	session.call("request_operation", home_index, "shipyard_build", "0:fighter")
+	session.call("request_operation", home_index, "shipyard_autobuild", "0:ship:1")
+	session.call("request_operation", (home_index + 1) % expected_players, "shipyard_autobuild", "0:ship:0")
 	session.call("request_shipyard_rally", home_index, 0, home_index, graph["points"][home_index])
 	session.call("request_shipyard_rally", (home_index + 1) % expected_players, 0, home_index, graph["points"][home_index])
 	session.call("request_continuous", home_index, "colony_ship", true)
@@ -586,6 +588,7 @@ func _check_economy_sync() -> void:
 				if int(craft["id"]) == 930000 + owner_home:
 					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
 			var checks: Dictionary = {
+				"autobuild": system["yards"][0].get("autobuild", []).has("ship"),
 				"rally": int(system["yards"][0].get("rally", {}).get("node", -1)) == owner_home and system["yards"][0].get("rally", {}).get("point", Vector2.INF) == graph["points"][owner_home],
 				"rally_attack_move": rally_attack_move,
 				"patrol": patrol_verified,

@@ -78,6 +78,8 @@ const WAREHOUSE_COSTS = [
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
 const CIVILIAN_CONSUMPTION = {"Metals": 0.1, "Plastics": 0.25, "Textiles": 0.25, "Tech": 0.25}
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
+const SHIPYARD_QUEUE_LIMIT = 8
+const MAX_SHIPYARD_LEVEL = 3
 const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 750.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
@@ -774,12 +776,27 @@ static func next_pds(p: Dictionary) -> int:
 			return slot
 	return -1
 
+static func shipyard_queue_count(p: Dictionary, slot: int) -> int:
+	var count: int = 0
+	var active: int = int(p["yards"][slot]["job"])
+	for item in p["queue"]:
+		if (item["kind"] == "yard_upgrade" and int(item["target"]) == slot) or (int(item["size"]) > 0 and (int(item.get("yard_slot", -1)) == slot or int(item["id"]) == active)):
+			count += 1
+	return count
+
 static func enqueue(state: Dictionary, player: int, index: int, kind: String, target: String = "", yard_slot: int = -1) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
 	if p.is_empty():
 		return false
 	if yard_slot != -1 and (not SHIP_KINDS.has(kind) or not shipyard_operational(p, yard_slot) or max_size(int(p["yards"][yard_slot]["level"])) < SHIP_SIZE):
 		return false
+	if SHIP_KINDS.has(kind) or kind == "yard_upgrade":
+		var total: int = 0
+		for item in p["queue"]:
+			if int(item["size"]) > 0 or item["kind"] == "yard_upgrade":
+				total += 1
+		if total >= maxi(1, p["yards"].size()) * SHIPYARD_QUEUE_LIMIT or (yard_slot >= 0 and shipyard_queue_count(p, yard_slot) >= SHIPYARD_QUEUE_LIMIT):
+			return false
 	var level: int = 1
 	match kind:
 		"ship":
@@ -798,6 +815,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 				return false
 			var y: int = int(target)
 			if y < 0 or y >= (p["yards"] as Array).size():
+				return false
+			if int(p["yards"][y]["level"]) >= MAX_SHIPYARD_LEVEL or shipyard_queue_count(p, y) >= SHIPYARD_QUEUE_LIMIT:
 				return false
 			target = str(y)
 			if _has_job(p, kind, target):
@@ -871,6 +890,8 @@ static func _continuous_target(p: Dictionary, key: String) -> Array:
 static func set_continuous(state: Dictionary, player: int, index: int, kind: String, enabled: bool) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
 	if p.is_empty() or _continuous_target(p, kind).is_empty():
+		return false
+	if enabled and kind.begins_with("yard_upgrade:") and int(p["yards"][int(kind.trim_prefix("yard_upgrade:"))]["level"]) >= MAX_SHIPYARD_LEVEL:
 		return false
 	p["continuous"][kind] = enabled
 	return true
@@ -980,6 +1001,34 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 			hull_waiting_for_funds = true
 	p["repeat_cycle"] = cycle
 
+static func set_yard_autobuild(state: Dictionary, player: int, index: int, slot: int, kind: String, enabled: bool) -> bool:
+	var p: Dictionary = _get_owned(state, player, index)
+	if p.is_empty() or slot < 0 or slot >= p["yards"].size() or not SHIP_KINDS.has(kind) or (kind == "ship" and not bool(p["home"])):
+		return false
+	var modes: Array = p["yards"][slot].get("autobuild", [])
+	if enabled and not modes.has(kind):
+		modes.append(kind)
+	elif not enabled:
+		modes.erase(kind)
+	p["yards"][slot]["autobuild"] = modes
+	return true
+
+static func _refill_yard_autobuild(state: Dictionary, index: int, p: Dictionary) -> void:
+	for slot in range(p["yards"].size()):
+		if not shipyard_operational(p, slot):
+			continue
+		var yard: Dictionary = p["yards"][slot]
+		for kind in yard.get("autobuild", []):
+			var exists: bool = false
+			for item in p["queue"]:
+				if item["kind"] == kind and (int(item.get("yard_slot", -1)) == slot or int(item["id"]) == int(yard["job"])):
+					exists = true
+					break
+			if not exists:
+				if not enqueue(state, int(p["owner"]), index, kind, "", slot):
+					break
+				p["queue"][-1]["yard_auto"] = true
+
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
 	if p.is_empty():
@@ -995,7 +1044,12 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
 		p["eco_population"] = eco + eco_refund
 		for yard in p["yards"]:
 			if int(yard["job"]) == job_id:
+				if SHIP_KINDS.has(item["kind"]):
+					yard.get("autobuild", []).erase(item["kind"])
 				yard["job"] = -1
+		var slot: int = int(item.get("yard_slot", -1))
+		if slot >= 0 and slot < p["yards"].size():
+			p["yards"][slot].get("autobuild", []).erase(item["kind"])
 		var key: String = str(item["kind"])
 		if key == "production" or key == "yard_upgrade" or key == "economy_building":
 			key += ":" + str(item["target"])
@@ -1165,6 +1219,8 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 		"yard_upgrade":
 			p["yards"][int(item["target"])]["level"] = int(item["level"])
 			p["yards"][int(item["target"])]["hp"] = SHIP_HP * 10.0 * int(item["level"])
+			if int(item["level"]) >= MAX_SHIPYARD_LEVEL:
+				p["continuous"]["yard_upgrade:" + str(item["target"])] = false
 		"ship", "colony_ship", "fighter", "miner":
 			var launch: Vector2 = station_position(state, index, float(state["elapsed"]))
 			var rally: Dictionary = {}
@@ -1229,6 +1285,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 			# join the active array only in contiguous slot order.
 			if item["kind"] != "yard" or int(item["level"]) == (p["yards"] as Array).size() + 1:
 				_finish(state, index, p, item)
+	_refill_yard_autobuild(state, index, p)
 	_refill_continuous(state, index, p)
 	for category in p.get("pending_spending", {}):
 		for material in p["pending_spending"][category]:
@@ -1272,6 +1329,8 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 				var upgrade: bool = item["kind"] == "yard_upgrade" and int(item["target"]) == y
 				var pinned: int = int(item.get("yard_slot", -1))
 				var hull: bool = int(item["size"]) > 0 and int(item["size"]) <= max_size(int(yard["level"])) and (pinned < 0 or pinned == y)
+				if hull and pinned < 0 and shipyard_queue_count(p, y) >= SHIPYARD_QUEUE_LIMIT:
+					continue
 				if hull and pinned == y:
 					chosen = item
 					break
@@ -1406,13 +1465,26 @@ static func _lane_progress(points: Array, ship: Dictionary) -> float:
 	var edge: Vector2 = (points[int(route[0])] as Vector2) - origin
 	return clampf(((ship["position"] as Vector2) - origin).dot(edge.normalized()), 0.0, edge.length())
 
-static func _move(state: Dictionary, ship: Dictionary, dt: float) -> bool:
+static func _service_point(state: Dictionary, ship: Dictionary, index: int) -> Vector2:
+	if state.has("planets") and has_station(state["planets"][index]):
+		var owner: int = int(state["planets"][index]["owner"])
+		if owner == int(ship["owner"]) or (owner != 0 and state["teams"].get(owner, 0) == state["teams"].get(int(ship["owner"]), -1)):
+			return station_position(state, index, float(state["elapsed"]))
+	return state["map"]["points"][index]
+
+static func _move(state: Dictionary, ship: Dictionary, dt: float, explicit_dock: Vector2 = Vector2.INF, dock_index: int = -1) -> bool:
 	var route: Array = ship["route"]
 	var points: Array = state["map"]["points"]
 	_ensure_position(points, ship)
 	var distance: float = SHIP_SPEED * dt
 	while not route.is_empty() and distance > EPS:
-		var next: Vector2 = points[int(route[0])]
+		var node: int = int(route[0])
+		var next: Vector2 = points[node]
+		if route.size() == 1:
+			if explicit_dock.is_finite() and node == dock_index:
+				next = explicit_dock
+			elif ship.get("kind", "") != "fighter" and (int(ship.get("source", -1)) == node or int(ship.get("dest", -1)) == node or ship.get("mining_mode", "") == "approach"):
+				next = _service_point(state, ship, node)
 		distance -= _navigate(ship, next, distance)
 		if (ship["position"] as Vector2) != next:
 			ship["leg"] = _lane_progress(points, ship)
@@ -1425,9 +1497,7 @@ static func _move(state: Dictionary, ship: Dictionary, dt: float) -> bool:
 	var approach: bool = ship.get("mining_mode", "") == "approach"
 	var dock_required: bool = int(ship.get("source", -1)) == here or int(ship.get("dest", -1)) == here or approach
 	if dock_required and ship.get("kind", "") != "fighter":
-		var dock: Vector2 = points[here]
-		if not approach and ship.get("kind", "") != "colony_ship" and state.has("planets") and has_station(state["planets"][here]):
-			dock = station_position(state, here, float(state["elapsed"]))
+		var dock: Vector2 = explicit_dock if explicit_dock.is_finite() and here == dock_index else _service_point(state, ship, here)
 		_navigate(ship, dock, distance)
 		return (ship["position"] as Vector2).distance_to(dock) <= EPS
 	return true
@@ -1737,7 +1807,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 			if path.is_empty():
 				continue
 			var resources: Array[String] = _mining_resources(state, owner, i)
-			var approach: Vector2 = state["map"]["points"][anchor]
+			var approach: Vector2 = _service_point(state, ship, anchor)
 			var route_distance: float = MAP.route_length(state["map"], path)
 			var depots: Dictionary = {}
 			var return_distances: Dictionary = {}
@@ -1766,7 +1836,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 		ship["mining_anchor"] = best_anchor
 		ship["chunk"] = int(best_chunk["id"])
 		var rock: Vector2 = best_chunk["position"]
-		var radial: Vector2 = (state["map"]["points"][best_anchor] - rock).normalized()
+		var radial: Vector2 = (_service_point(state, ship, best_anchor) - rock).normalized()
 		if radial.is_zero_approx():
 			radial = Vector2.RIGHT
 		ship["mining_rock"] = rock
@@ -1830,7 +1900,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			ship["mining_mode"] = "outbound"
 			ship["field_leg"] = 0.0
 		return
-	var origin: Vector2 = state["map"]["points"][anchor]
+	var origin: Vector2 = _service_point(state, ship, anchor)
 	var target: Vector2 = ship["mining_target"]
 	var span: Vector2 = target - origin
 	_ensure_position(state["map"]["points"], ship)
@@ -2393,24 +2463,50 @@ const MAX_UNIT_ORDERS: int = 30
 # Project previous ship/command origins onto the dragged axis to minimize
 # crossing, and choose the perpendicular closest to the group's travel.
 static func line_formation_slots(origins: Dictionary, from: Vector2, to: Vector2) -> Array:
+	return polyline_formation_slots(origins, PackedVector2Array([from, to]))
+
+static func polyline_formation_slots(origins: Dictionary, stroke: PackedVector2Array) -> Array:
 	var slots: Array = []
-	if origins.size() < 2 or from.is_equal_approx(to):
+	if origins.size() < 2 or stroke.size() < 2:
 		return slots
-	var axis: Vector2 = (to - from).normalized()
+	var points := PackedVector2Array([stroke[0]])
+	var lengths: Array[float] = [0.0]
+	for i in range(1, stroke.size()):
+		var span: float = points[-1].distance_to(stroke[i])
+		if span > EPS:
+			points.append(stroke[i])
+			lengths.append(lengths[-1] + span)
+	if points.size() < 2:
+		return slots
 	var centroid: Vector2 = Vector2.ZERO
 	var ids: Array = origins.keys()
+	var projections: Dictionary = {}
 	for id in ids:
 		centroid += origins[id]
+		var nearest: float = INF
+		for i in range(points.size() - 1):
+			var delta: Vector2 = points[i + 1] - points[i]
+			var t: float = ((origins[id] as Vector2) - points[i]).dot(delta) / delta.length_squared()
+			var clamped: float = clampf(t, 0.0, 1.0)
+			var distance: float = (origins[id] as Vector2).distance_squared_to(points[i].lerp(points[i + 1], clamped))
+			if distance < nearest:
+				nearest = distance
+				projections[id] = lengths[i] + (t if points.size() == 2 else clamped) * delta.length()
 	centroid /= ids.size()
 	ids.sort_custom(func(a: int, b: int) -> bool:
-		var first: float = (origins[a] as Vector2).dot(axis)
-		var second: float = (origins[b] as Vector2).dot(axis)
+		var first: float = projections[a]
+		var second: float = projections[b]
 		return a < b if is_equal_approx(first, second) else first < second)
-	var heading: Vector2 = axis.orthogonal()
-	if heading.dot((from + to) * 0.5 - centroid) < 0.0:
-		heading = -heading
+	var segment: int = 0
 	for i in range(ids.size()):
-		slots.append({"id": ids[i], "point": from.lerp(to, float(i) / float(ids.size() - 1)), "heading": heading})
+		var distance: float = lengths[-1] * float(i) / float(ids.size() - 1)
+		while segment < points.size() - 2 and distance > lengths[segment + 1]:
+			segment += 1
+		var point: Vector2 = points[segment].lerp(points[segment + 1], (distance - lengths[segment]) / (lengths[segment + 1] - lengths[segment]))
+		var heading: Vector2 = (points[segment + 1] - points[segment]).normalized().orthogonal()
+		if heading.dot(point - centroid) < 0.0:
+			heading = -heading
+		slots.append({"id": ids[i], "point": point, "heading": heading})
 	return slots
 
 static func _set_unit_order(ship: Dictionary, order: Dictionary) -> void:
@@ -2510,6 +2606,8 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			var origin: Vector2 = unit_order_origin(state, graph, ship) if append else ship["position"]
 			return sector_contains(graph, target, origin) or (fighter and order.has("heading") and _military_paths(graph, target)["distance"].has(int(ship["at"])))
 		"patrol":
+			if order.has("heading") and (not order["heading"] is Vector2 or not (order["heading"] as Vector2).is_finite() or (order["heading"] as Vector2).is_zero_approx()):
+				return false
 			return fighter and military_pois(state, owner).has(target) and (not order.has("point") or (order["point"] is Vector2 and patrol_node(state, graph, owner, order["point"]) == target))
 		"sector":
 			return fighter and military_pois(state, owner).has(target)
@@ -2533,7 +2631,11 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 		"attack":
 			return command_attack(state, player, ids, target)
 		"patrol":
-			return command_patrol(state, player, ids, target, order.get("point", Vector2.INF))
+			var accepted: bool = command_patrol(state, player, ids, target, order.get("point", Vector2.INF))
+			if accepted and order.has("heading"):
+				for ship in _owned_units(state, player, ids):
+					ship["unit_order"]["heading"] = order["heading"]
+			return accepted
 		"mine":
 			return command_miners(state, player, ids, target, int(order.get("chunk", -1)))
 		"salvage":
@@ -3289,7 +3391,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		depot = int(ship["salvage_depot"])
 	var nav: Dictionary = graph if ship["kind"] == "fighter" else state["map"]
 	if not (ship["route"] as Array).is_empty():
-		_move({"map": nav}, ship, dt)
+		_move({"map": nav}, ship, dt, station_position(state, depot, float(state["elapsed"])), depot)
 		return true
 	var dock: Vector2 = station_position(state, depot, float(state["elapsed"]))
 	_navigate(ship, dock, SHIP_SPEED * dt)
@@ -4192,7 +4294,7 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> void:
 	var site: int = int(ship["repair_site"])
 	if not (ship["route"] as Array).is_empty():
-		_move({"map": graph}, ship, dt)
+		_move({"map": graph}, ship, dt, station_position(state, site, float(state["elapsed"])), site)
 		return
 	if int(ship["at"]) != site:
 		return

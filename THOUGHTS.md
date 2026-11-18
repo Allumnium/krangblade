@@ -4,6 +4,11 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+### T-041 — Curved formation feedback and docking routes
+- **Type:** UX/playtest risk.
+- **Observation:** v0.36.0 places slots by arc length along the player's stroke; closely overlapping loops can place ships near each other, and station navigation offsets final lane endpoints from stars. Check dense curves and the visible station approach at multiple zooms.
+- **Consider:** Review actual input feel before imposing additional spacing or simplifying the player's stroke.
+
 ### T-001 — Long routes may conflict with short matches
 - **Type:** Gameplay/pacing hypothesis.
 - **Observation:** The prototype's longest direct lane takes 100 game years at baseline speed; multileg journeys may consume a substantial portion of a 10–30 minute match at 1×.
