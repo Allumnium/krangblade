@@ -363,3 +363,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** UX hypothesis.
 - **Observation:** v0.29.1 places selection details in a lower center zone and commands on the raised right wing, with a persistent raised minimap on the left.
 - **Consider:** Verify legibility and scrolling at 1152×648, ultrawide and increased UI scale; evaluate whether the 20% center recess leaves sufficient selection detail space.
+
+### T-Console-29b — True stepped console outline
+- **Type:** UX correction.
+- **Observation:** The prior full-width console backdrop concealed the 20% center recess; v0.29.2 draws independent left, center and right panel silhouettes.
+- **Consider:** Visually check border joins and map occlusion with and without a selection.
