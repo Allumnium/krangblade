@@ -61,6 +61,9 @@ var empty_selection: Label
 var command_grids: Dictionary = {}
 var station_commands: VBoxContainer
 var station_primary_grid: GridContainer
+var station_port_buttons: Dictionary = {}
+var station_upgrade_buttons: Dictionary = {}
+var weapon_details: Label
 var station_build_grid: GridContainer
 var station_trade: VBoxContainer
 var station_trade_back: Button
@@ -563,6 +566,9 @@ func _build_ui() -> void:
 	ship_overview.add_child(selection_grid)
 	ship_detail = _label("", 13)
 	ship_overview.add_child(ship_detail)
+	weapon_details = _label("", 12)
+	overview.add_child(weapon_details)
+	weapon_details.hide()
 	fleet_scroll = ScrollContainer.new()
 	fleet_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	fleet_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1271,6 +1277,8 @@ func _station_command_icon(kind: String) -> Texture2D:
 		"habitation": '<path d="M3 28V13H12V4H22V28M22 14H29V28M7 18H9M7 23H9M16 9H18M16 15H18M16 21H18"/>',
 		"orbital_housing": '<circle cx="16" cy="16" r="12"/><path d="M8 23V14L16 8L24 14V23H8M13 23V17H19V23"/>',
 		"yard": '<path d="M4 4H28V28H4Z M4 9H28M4 23H28M12 23L16 10L20 23Z"/>',
+		"reinforced_plating": '<path d="M16 3L28 8V18Q25 26 16 30Q7 26 4 18V8Z M16 8L23 11V18Q21 23 16 26Q11 23 9 18V11Z"/>',
+		"laser_matrix": '<path d="M4 26L26 4M10 28L28 10M3 19L13 29M19 3L29 13"/>',
 		"pds": '<path d="M16 3L27 8V18Q24 26 16 30Q8 26 5 18V8Z M11 17H21M16 12V22"/>'
 	}
 	station_icons[kind] = _command_icon(paths.get(kind, paths["build"]))
@@ -1303,13 +1311,20 @@ func _build_station_command_card(parent: Container) -> void:
 	station_commands.alignment = BoxContainer.ALIGNMENT_END
 	parent.add_child(station_commands)
 	station_primary_grid = _station_grid(station_commands)
+	for port in range(1, ECONOMY.MAX_SHIPYARDS + 1):
+		station_port_buttons[port] = _station_button(station_primary_grid, "Build\nShipyard %d" % port, "yard", _station_port_pressed.bind(port))
+	_station_spacer(station_primary_grid)
+	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Reinforced\nPlating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
+	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
+	_station_spacer(station_primary_grid)
+	_station_spacer(station_primary_grid)
 	_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")).tooltip_text = "Build"
 	_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")).tooltip_text = "Trade"
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
 	station_build_grid = _station_grid(station_commands)
 	var captions: Dictionary = {"Metals": "Refinery", "Plastics": "Polymer\nfactory", "Textiles": "Textile\nmill", "Organics": "Agriculture", "Tech": "Electronics", "Crystals": "Crystal\nprocessor", "warehouse": "Warehouse", "housing": "Habitation", "yard": "Shipyard", "pds": "Planetary\ndefense"}
-	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "yard", "pds"]:
+	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds"]:
 		var button: Button = _station_button(station_build_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
 		station_build_buttons[key] = button
 		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing"]:
@@ -1321,6 +1336,7 @@ func _build_station_command_card(parent: Container) -> void:
 			border.draw.connect(_draw_autobuild_border.bind(border))
 			border.hide()
 			button.set_meta("auto_border", border)
+	_station_spacer(station_build_grid)
 	_station_spacer(station_build_grid)
 	_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")).tooltip_text = "Return"
 	station_trade = VBoxContainer.new()
@@ -1348,6 +1364,44 @@ func _station_build(key: String) -> void:
 		_operation(key)
 	else:
 		_operation("economy", key)
+
+func _station_port_pressed(port: int) -> void:
+	var p: Dictionary = _planet()
+	if p.is_empty() or int(p["owner"]) != _me() or station_selected_index != selected:
+		return
+	var slot: int = ECONOMY.shipyard_at_port(p, port)
+	if slot >= 0:
+		_select_building_ref(Vector2i(selected, slot), "shipyard")
+	else:
+		_operation("yard", "port:%d" % port)
+
+func _station_upgrade_pressed(kind: String) -> void:
+	if station_selected_index == selected:
+		_operation(kind)
+
+func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
+	for port in station_port_buttons:
+		var button: Button = station_port_buttons[port]
+		var slot: int = ECONOMY.shipyard_at_port(p, port)
+		var pending: Dictionary = ECONOMY.shipyard_port_job(p, port)
+		var tier: int = ECONOMY.next_shipyard_slot(p)
+		var cost: Dictionary = ECONOMY._cost("yard", tier)
+		var label: Label = button.get_meta("caption")
+		label.text = ("Select" if slot >= 0 else "Building" if not pending.is_empty() else "Build") + "\nShipyard %d" % port
+		button.disabled = not owned or (slot < 0 and (not pending.is_empty() or tier <= 0 or not ECONOMY.affordable(p, cost)))
+		button.tooltip_text = label.text.replace("\n", " ")
+		if slot < 0 and pending.is_empty() and tier > 0:
+			button.tooltip_text += "\n%s · %.0f yr" % [_cost_text(cost), ECONOMY._work("yard", tier)]
+		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled else Color.WHITE
+	for kind in station_upgrade_buttons:
+		var button: Button = station_upgrade_buttons[kind]
+		var installed: bool = bool(p["station"].get(kind, false))
+		var pending: bool = ECONOMY._has_job(p, kind, "")
+		button.disabled = not owned or not ECONOMY.station_upgrade_available(p, kind)
+		button.tooltip_text = ("Reinforced Plating\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix\n2 defensive lasers · 18 damage each · 1 shot/yr · range 180") + "\n%s · %.0f yr" % [_cost_text(ECONOMY._cost(kind, 1)), ECONOMY._work(kind, 1)]
+		if installed or pending:
+			button.tooltip_text += "\n" + ("Installed" if installed else "Building")
+		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled and not installed else Color.WHITE
 
 func _station_repeat_key(p: Dictionary, key: String) -> String:
 	if key in ECONOMY.RESOURCES:
@@ -1514,7 +1568,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	var yard: Dictionary = system["yards"][selected_yard]
 	var level: int = int(yard["level"])
 	var operating: bool = ECONOMY.shipyard_operational(system, selected_yard)
-	yard_title.text = "Shipyard %d · Lv %d" % [selected_yard + 1, level]
+	yard_title.text = "Shipyard %d · Lv %d" % [ECONOMY.shipyard_port(system, selected_yard), level]
 	yard_context.text = _system_name(selected)
 	var jobs: Array = []
 	var active_id: int = int(yard["job"])
@@ -1683,7 +1737,8 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	var building: bool = not job.is_empty()
 	var cost: Dictionary = ECONOMY._cost("pds", 1)
 	var full: bool = ECONOMY.next_pds(system) < 0
-	body_defense.text = ("Battery HP: %.0f\n" % ECONOMY.PDS_HP if battery.is_empty() else "") + "Damage: %.0f per shot · 1 shot/yr\nRange: %.0f" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
+	body_defense.text = "Battery HP: %.0f" % ECONOMY.PDS_HP if battery.is_empty() else ""
+	body_defense.visible = battery.is_empty()
 	body_status.text = ("Operational" if not battery.is_empty() else "Undefended") + "\nSystem defenses: %d/%d" % [defenses.size(), int(system["planet_count"])]
 	body_costs.visible = not full
 	if not full:
@@ -1969,7 +2024,7 @@ func _refresh_selection_portrait(ship: Dictionary, system: Dictionary, body_sele
 				hp = float(battery.get("hp", maximum))
 		elif building_selection_kind == "station" and ECONOMY.has_station(system):
 			kind = "station"
-			maximum = ECONOMY.STATION_HP
+			maximum = ECONOMY.station_max_hp(system)
 			hp = float(system["station"].get("hp", maximum))
 	selection_portrait.visible = not kind.is_empty()
 	if kind.is_empty():
@@ -1980,6 +2035,32 @@ func _refresh_selection_portrait(ship: Dictionary, system: Dictionary, body_sele
 	selection_portrait_health.visible = maximum > 0.0
 	selection_portrait_health.text = "%.0f / %.0f" % [hp, maximum] if maximum > 0.0 else ""
 	selection_portrait_health.add_theme_color_override("font_color", tint)
+
+func _refresh_weapon_details(ship: Dictionary, system: Dictionary, body_selected: bool, yard_selected: bool, grouped: bool) -> void:
+	var details: String = ""
+	var parent: Control = weapon_details.get_parent()
+	var at: int = -1
+	if not grouped:
+		if not ship.is_empty() and selected_units.size() == 1:
+			parent = ship_overview
+			at = ship_detail.get_index() + 1
+			match str(ship["kind"]):
+				"fighter": details = "Laser\n%.0f damage · 1 shot/yr · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
+				"miner": details = "Mining laser ×2\n%.0f damage each · 1 shot/yr · Range %.0f\n+200%% vs asteroids · %.0f t/yr nominal" % [ECONOMY.MINER_LASER_DAMAGE / 2.0, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE]
+		elif not system.is_empty() and not yard_selected:
+			if body_selected and system.get("pds", {}).has(selected_body):
+				parent = body_status.get_parent()
+				at = body_status.get_index() + 1
+				details = "Planetary defense laser\n%.0f damage · 1 shot/yr · Range %.0f" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
+			elif not body_selected and building_selection_kind == "station" and bool(system.get("station", {}).get("laser_matrix", false)):
+				parent = planet_overview
+				at = 1
+				details = "Laser Matrix ×%d\n%.0f damage each · 1 shot/yr · Range %.0f" % [ECONOMY.STATION_LASER_COUNT, ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
+	if weapon_details.get_parent() != parent:
+		weapon_details.reparent(parent, false)
+		parent.move_child(weapon_details, at)
+	weapon_details.text = details
+	weapon_details.visible = not details.is_empty()
 
 func _selection_icon(kind: String, tint: Color) -> Texture2D:
 	var key: String = kind + ":" + tint.to_html(false)
@@ -2932,6 +3013,7 @@ func _refresh() -> void:
 	planet_overview.visible = not p.is_empty() and not other_selected and not body_selected and not yard_selected and selected_buildings.size() <= 1
 	var grouped_buildings: bool = selected_buildings.size() > 1
 	_refresh_selection_portrait(ship, p, body_selected, yard_selected, grouped_buildings)
+	_refresh_weapon_details(ship, p, body_selected, yard_selected, grouped_buildings)
 	body_overview.visible = body_selected and not grouped_buildings
 	yard_overview.visible = yard_selected and not grouped_buildings
 	_refresh_building_group(state)
@@ -3002,7 +3084,7 @@ func _refresh() -> void:
 	info.text = ("Space Station · " if building_selection_kind == "station" else "") + _system_name(selected)
 	info.tooltip_text = info.text + (" · Home" if bool(p["home"]) else "")
 	if ECONOMY.has_station(p):
-		info.tooltip_text += "\nSpace Station · %.0f / %.0f HP" % [float(p["station"]["hp"]), ECONOMY.STATION_HP]
+		info.tooltip_text += "\nSpace Station · %.0f / %.0f HP" % [float(p["station"]["hp"]), ECONOMY.station_max_hp(p)]
 	system_owner_label.text = name_text
 	system_owner_label.tooltip_text = name_text
 	system_owner_label.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
@@ -3034,6 +3116,7 @@ func _refresh() -> void:
 	if building_selection_kind == "station" and not grouped_buildings:
 		_refresh_station_queue(p, owned)
 	if owned_station:
+		_refresh_station_primary(p, owned)
 		_refresh_station_build(p, owned)
 
 func _job_name(item: Dictionary) -> String:
@@ -3044,8 +3127,10 @@ func _job_name(item: Dictionary) -> String:
 		"habitation": return "Habitation technology → Lv %d" % int(item["level"])
 		"orbital_housing": return "Orbital Eco-Housing"
 		"pds": return "Planetary defense"
-		"yard": return "New shipyard"
-		"yard_upgrade": return "Shipyard %d → Lv %d" % [int(item["target"]) + 1, int(item["level"])]
+		"yard": return "Build Shipyard %d" % int(item.get("station_slot", item["level"]))
+		"yard_upgrade": return "Shipyard %d → Lv %d" % [ECONOMY.shipyard_port(_planet(), int(item["target"])), int(item["level"])]
+		"reinforced_plating": return "Reinforced Plating"
+		"laser_matrix": return "Laser Matrix"
 		"production": return "%s → Lv %d" % [str(item["target"]), int(item["level"])]
 		_: return str(item["kind"]).replace("_", " ").capitalize()
 
@@ -3794,7 +3879,7 @@ func _refresh_building_group(state: Dictionary) -> void:
 			row.set_meta("kind", kind)
 			building_group_rows[ref] = row
 		var button: Button = building_group_rows[ref]
-		var name_text: String = "%s · Shipyard %d · Lv %d" % [_system_name(ref.x), ref.y + 1, int(system["yards"][ref.y]["level"])] if kind == "shipyard" else _system_name(ref.x) + " · Space Station" if kind == "station" else _body_name(ref.x, ref.y)
+		var name_text: String = "%s · Shipyard %d · Lv %d" % [_system_name(ref.x), ECONOMY.shipyard_port(system, ref.y), int(system["yards"][ref.y]["level"])] if kind == "shipyard" else _system_name(ref.x) + " · Space Station" if kind == "station" else _body_name(ref.x, ref.y)
 		button.text = name_text + ("" if int(system["owner"]) == _me() else " · Foreign")
 		button.tooltip_text = "Select this building"
 
@@ -4804,8 +4889,9 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 		map_canvas.draw_line(center + axis * radius * 0.35, center + axis * radius * 0.87, frame.darkened(0.3), maxf(1.0, radius * 0.13), true)
 		var port: Vector2 = center + axis * radius
 		map_canvas.draw_line(port - side * radius * 0.18, port + side * radius * 0.18, tint.lightened(0.4), maxf(1.0, radius * 0.07), true)
-		if slot < system["yards"].size():
-			var dock: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
+		var yard_index: int = ECONOMY.shipyard_at_port(system, slot + 1)
+		if yard_index >= 0:
+			var dock: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, yard_index, elapsed))
 			map_canvas.draw_line(port, dock, frame, maxf(1.0, radius * 0.12), true)
 	if radius >= 12.0:
 		for segment in range(12):
@@ -4815,7 +4901,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 			map_canvas.draw_circle(center + direction * radius * 0.88, maxf(0.8, radius * 0.035), tint.lightened(0.4))
 	if selected_station:
 		_draw_selection_ring(center, radius + 4.0)
-	var hp: float = float(system["station"]["hp"]) / ECONOMY.STATION_HP
+	var hp: float = float(system["station"]["hp"]) / ECONOMY.station_max_hp(system)
 	if hp < 0.999:
 		var base: Vector2 = center + Vector2(-radius, -radius - 6.0)
 		map_canvas.draw_rect(Rect2(base, Vector2(radius * 2.0, 3.0)), Color("#283748"))
@@ -4826,7 +4912,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 	for slot in range(planet["yards"].size()):
 		var yard: Dictionary = planet["yards"][slot]
 		var scale: float = _ship_scale() * pow(1.2, int(yard["level"]) - 1)
-		var angle: float = float(slot) * TAU / 3.0 + elapsed * 0.008
+		var angle: float = float(ECONOMY.shipyard_port(planet, slot) - 1) * TAU / 3.0 + elapsed * 0.008
 		var axis: Vector2 = Vector2.from_angle(angle)
 		var side: Vector2 = axis.orthogonal()
 		var point: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
@@ -5139,6 +5225,17 @@ func _draw_map() -> void:
 	for index in range(points.size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
+		var system: Dictionary = state["planets"][index]
+		var weapons: Array = system.get("station", {}).get("weapons", [])
+		for emitter in range(weapons.size()):
+			var weapon: Dictionary = weapons[emitter]
+			var target: int = int(weapon["target"])
+			if not poses.has(target) or float(weapon["laser_until"]) < float(state["elapsed"]):
+				continue
+			var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, float(state["elapsed"])))
+			var endpoint: Vector2 = poses[target]["point"]
+			var offset: Vector2 = center.direction_to(endpoint).orthogonal() * (float(emitter) * 2.0 - 1.0) * 4.0 * _ship_scale()
+			_draw_owned_laser(center + offset, endpoint, int(system["owner"]), 1.5)
 		var defenses: Dictionary = state["planets"][index].get("pds", {})
 		if defenses.is_empty():
 			continue

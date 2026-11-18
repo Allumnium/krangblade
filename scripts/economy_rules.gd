@@ -91,6 +91,9 @@ const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter":
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
 const STATION_HP: float = SHIP_HP * 10.0
+const REINFORCED_STATION_HP: float = 3000.0
+const STATION_LASER_COUNT: int = 2
+const STATION_UPGRADES = ["reinforced_plating", "laser_matrix"]
 const STATION_SALVAGE_FRACTION: float = 0.20
 const LASER_DAMAGE: float = 18.0
 const PDS_DAMAGE: float = LASER_DAMAGE * 2.0
@@ -180,7 +183,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 				if resource != "Crystals":
 					levels[resource] = 1
 			stock = STARTING_STOCK.duplicate()
-			yards.append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0})
+			yards.append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "station_slot": 1})
 		var richness: float = 0.0
 		for resource in EXTRACTED:
 			richness += float(abundance[resource])
@@ -423,7 +426,7 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 		colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION if has_planets(colony) else ORBITAL_HOUSING_POPULATION
 		colony["eco_population"] = ORBITAL_HOUSING_POPULATION
 		colony["population_velocity"] = 0.0
-		colony["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
+		colony["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "station_slot": 1, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
 		if has_planets(colony):
 			for resource in ["Metals", "Plastics", "Textiles", "Organics", "Tech"]:
 				colony["levels"][resource] = 1
@@ -643,6 +646,8 @@ static func _cost(kind: String, level: int) -> Dictionary:
 				2: return {"Metals": 2000.0, "Plastics": 500.0, "Textiles": 500.0, "Organics": 200.0, "Tech": 100.0, "Crystals": 100.0}
 				3: return {"Metals": 6000.0, "Plastics": 1500.0, "Textiles": 1500.0, "Organics": 600.0, "Tech": 300.0, "Crystals": 300.0}
 		"pds": return {"Metals": 540.0, "Plastics": 120.0, "Textiles": 60.0, "Organics": 60.0, "Tech": 60.0}
+		"reinforced_plating": return {"Metals": 4000.0}
+		"laser_matrix": return {"Metals": 2500.0, "Tech": 600.0, "Crystals": 200.0}
 		"yard_upgrade": return {"Metals": 240.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"production": return {"Metals": 200.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"warehouse": return WAREHOUSE_COSTS[level - 1].duplicate()
@@ -660,6 +665,7 @@ static func _work(kind: String, level: int) -> float:
 		"miner": return 60.0
 		"yard": return 30.0
 		"pds": return 36.0
+		"reinforced_plating", "laser_matrix": return 60.0
 		"yard_upgrade": return 15.0 * level
 		"production": return 10.0 * level
 		"warehouse", "habitation", "orbital_housing": return QUICK_STATION_WORK
@@ -695,6 +701,29 @@ static func shipyard_count(p: Dictionary) -> int:
 static func next_shipyard_slot(p: Dictionary) -> int:
 	var count: int = shipyard_count(p)
 	return count + 1 if count < MAX_SHIPYARDS else 0
+
+# Numbered attachment ports are stable; production indices and price tiers
+# retain their existing contiguous-array and refund semantics.
+static func shipyard_port(p: Dictionary, index: int) -> int:
+	return int(p["yards"][index].get("station_slot", index + 1))
+
+static func shipyard_at_port(p: Dictionary, port: int) -> int:
+	for index in range(p["yards"].size()):
+		if shipyard_port(p, index) == port:
+			return index
+	return -1
+
+static func shipyard_port_job(p: Dictionary, port: int) -> Dictionary:
+	for item in p["queue"]:
+		if item["kind"] == "yard" and int(item.get("station_slot", item["level"])) == port:
+			return item
+	return {}
+
+static func station_max_hp(p: Dictionary) -> float:
+	return REINFORCED_STATION_HP if bool(p.get("station", {}).get("reinforced_plating", false)) else STATION_HP
+
+static func station_upgrade_available(p: Dictionary, kind: String) -> bool:
+	return STATION_UPGRADES.has(kind) and has_station(p) and not bool(p["station"].get(kind, false)) and not _has_job(p, kind, "") and affordable(p, _cost(kind, 1))
 
 # Move later construction down one slot when an earlier job is cancelled.
 # Preserve its fractional work, but retain only the cheaper recipe's
@@ -796,6 +825,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 		if total >= maxi(1, p["yards"].size()) * SHIPYARD_QUEUE_LIMIT or (yard_slot >= 0 and shipyard_queue_count(p, yard_slot) >= SHIPYARD_QUEUE_LIMIT):
 			return false
 	var level: int = 1
+	var station_slot: int = 0
 	match kind:
 		"ship":
 			if not bool(p["home"]):
@@ -805,9 +835,28 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 			target = ""
 		"yard":
 			level = next_shipyard_slot(p)
-			if level == 0 or (not target.is_empty() and target != str(level)):
+			if level == 0:
 				return false
+			if target.begins_with("port:"):
+				var requested: String = target.trim_prefix("port:")
+				if not requested.is_valid_int():
+					return false
+				station_slot = int(requested)
+				if station_slot < 1 or station_slot > MAX_SHIPYARDS or shipyard_at_port(p, station_slot) >= 0 or not shipyard_port_job(p, station_slot).is_empty():
+					return false
+			else:
+				if not target.is_empty() and target != str(level):
+					return false
+				for port in range(1, MAX_SHIPYARDS + 1):
+					if shipyard_at_port(p, port) < 0 and shipyard_port_job(p, port).is_empty():
+						station_slot = port
+						break
+				if station_slot == 0:
+					return false
 			target = ""
+		"reinforced_plating", "laser_matrix":
+			if not target.is_empty() or not station_upgrade_available(p, kind):
+				return false
 		"yard_upgrade":
 			if not target.is_valid_int():
 				return false
@@ -863,6 +912,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 	p["queue"].append({"id": id, "kind": kind, "target": target, "yard_slot": yard_slot, "level": level,
 		"cost": cost, "work": 30.0 if kind == "economy_building" else _work(kind, level),
 		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
+	if kind == "yard":
+		p["queue"][-1]["station_slot"] = station_slot
 	return true
 
 static func production_modifier(system: Dictionary, resource: String) -> float:
@@ -1129,7 +1180,7 @@ static func station_position(state: Dictionary, index: int, elapsed: float) -> V
 	return center + axis * radius * smoothstep(0.0, 1.0, conversion)
 
 static func shipyard_position(state: Dictionary, index: int, slot: int, elapsed: float) -> Vector2:
-	var angle: float = float(slot) * TAU / 3.0 + elapsed * 0.008
+	var angle: float = float(shipyard_port(state["planets"][index], slot) - 1) * TAU / 3.0 + elapsed * 0.008
 	return station_position(state, index, elapsed) + Vector2.from_angle(angle) * 90.0
 
 static func _rally_path(state: Dictionary, index: int, target: int) -> Array[int]:
@@ -1226,8 +1277,14 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 		"pds":
 			p["pds"][int(item["target"])] = _new_pds()
 		"yard":
-			p["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0})
+			p["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "station_slot": int(item.get("station_slot", item["level"]))})
 			_add_eco_residents(p, ORBITAL_HOUSING_POPULATION)
+		"reinforced_plating":
+			p["station"]["reinforced_plating"] = true
+			p["station"]["hp"] = minf(REINFORCED_STATION_HP, float(p["station"]["hp"]) + REINFORCED_STATION_HP - STATION_HP)
+		"laser_matrix":
+			p["station"]["laser_matrix"] = true
+			p["station"]["weapons"] = [_new_pds(), _new_pds()]
 		"yard_upgrade":
 			p["yards"][int(item["target"])]["level"] = int(item["level"])
 			p["yards"][int(item["target"])]["hp"] = SHIP_HP * 10.0 * int(item["level"])
@@ -2320,7 +2377,7 @@ static func service_targets(state: Dictionary) -> Dictionary:
 	for node in range(count):
 		var p: Dictionary = state["planets"][node]
 		if has_station(p):
-			targets[station_target_id(state, node)] = {"owner": p["owner"], "entity": p["station"], "position": station_position(state, node, float(state["elapsed"])), "max_hp": STATION_HP, "node": node, "kind": "station"}
+			targets[station_target_id(state, node)] = {"owner": p["owner"], "entity": p["station"], "position": station_position(state, node, float(state["elapsed"])), "max_hp": station_max_hp(p), "node": node, "kind": "station"}
 		for slot in range(p["yards"].size()):
 			var yard: Dictionary = p["yards"][slot]
 			targets[-2 - node * 3 - slot] = {"owner": p["owner"], "entity": yard, "position": shipyard_position(state, node, slot, float(state["elapsed"])), "max_hp": SHIP_HP * 10.0 * int(yard["level"]), "node": node, "kind": "yard"}
@@ -3926,6 +3983,39 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 				damage[yard_id] = float(damage.get(yard_id, 0.0)) + weapon_damage
 				ship["laser_cooldown"] = 1.0
 				ship["yard_laser_until"] = float(state["elapsed"]) + 0.2
+	# Each matrix emitter has its own cooldown and fires from the station.
+	for index in range(system_count):
+		var system: Dictionary = state["planets"][index]
+		var weapons: Array = system.get("station", {}).get("weapons", [])
+		if weapons.is_empty():
+			continue
+		var team: int = int(state["teams"].get(int(system["owner"]), 0))
+		if team <= 0:
+			continue
+		var origin: Vector2 = station_position(state, index, float(state["elapsed"]))
+		var cell := Vector2i(floori(origin.x / LASER_RANGE), floori(origin.y / LASER_RANGE))
+		var target: int = -1
+		var best: float = LASER_RANGE * LASER_RANGE
+		for x in range(-1, 2):
+			for y in range(-1, 2):
+				for other in cells.get(cell + Vector2i(x, y), []):
+					var other_id: int = int(other["id"])
+					if other_id < 0 or int(state["teams"].get(int(other["owner"]), 0)) == team:
+						continue
+					var distance: float = origin.distance_squared_to(positions[other_id])
+					if distance < best or (distance <= best and (target < 0 or other_id < target)):
+						target = other_id
+						best = distance
+		for weapon in weapons:
+			if int(weapon["target"]) != target:
+				weapon["laser_until"] = -1.0
+			weapon["target"] = target
+			var cooldown: float = maxf(0.0, float(weapon["cooldown"]) - dt)
+			if target >= 0 and cooldown <= EPS:
+				damage[target] = float(damage.get(target, 0.0)) + LASER_DAMAGE
+				cooldown = 1.0
+				weapon["laser_until"] = float(state["elapsed"]) + 0.2
+			weapon["cooldown"] = cooldown
 	# Planets are visual orbits around a shared authoritative system waypoint.
 	# Use that waypoint for range; each installed battery fires independently.
 	for index in range((state["planets"] as Array).size()):
@@ -4005,6 +4095,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		# Residents are lost proportionally when their housing is destroyed.
 		var eco: float = eco_population(planet)
 		var lost: float = minf(eco, eco / maxf(1.0, float(eco_housing_count(planet))))
+		for y in range(planet["yards"].size()):
+			planet["yards"][y]["station_slot"] = shipyard_port(planet, y)
 		planet["yards"].remove_at(location.y)
 		_shift_yard_targets(state, location.x, location.y)
 		planet["population"] = maxf(0.0, float(planet["population"]) - lost)
