@@ -294,7 +294,57 @@ func _test_station_construction_queue() -> void:
 	assert(repeat_count == 1)
 	print("PASS: independent station construction, prepaid cancellation, upgrade completion and repeat")
 
+func _test_station_defense_and_ports() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var p: Dictionary = state["planets"][0]
+	p["warehouse_level"] = 3
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 20000.0
+	var before: Dictionary = p["stock"].duplicate()
+	assert(not ECON.enqueue(state, 2, 0, "reinforced_plating"))
+	assert(not ECON.enqueue(state, 1, 0, "yard", "port:1"))
+	assert(not ECON.enqueue(state, 1, 0, "yard", "port:4"))
+	assert(ECON.enqueue(state, 1, 0, "yard", "port:3"))
+	assert(not ECON.enqueue(state, 1, 0, "yard", "port:3"))
+	assert(ECON.shipyard_port_job(p, 3)["level"] == 2)
+	assert(ECON.enqueue(state, 1, 0, "yard", "port:2"))
+	assert(ECON.enqueue(state, 1, 0, "reinforced_plating"))
+	var plating: Dictionary = p["queue"].back()
+	assert(not ECON.enqueue(state, 1, 0, "reinforced_plating"))
+	assert(not ECON.cancel(state, 2, 0, plating["id"]))
+	assert(ECON.cancel(state, 1, 0, plating["id"]))
+	assert(is_equal_approx(float(p["stock"]["Metals"]), float(before["Metals"]) - 8000.0))
+	assert(ECON.enqueue(state, 1, 0, "reinforced_plating"))
+	assert(ECON.enqueue(state, 1, 0, "laser_matrix"))
+	assert(not ECON.enqueue(state, 1, 0, "laser_matrix"))
+	p["station"]["hp"] = 900.0
+	ECON._work_planet(state, 0, 60.0)
+	assert(ECON.station_max_hp(p) == 3000.0 and p["station"]["hp"] == 2900.0)
+	assert(ECON.service_targets(state)[ECON.station_target_id(state, 0)]["max_hp"] == 3000.0)
+	assert(p["station"]["weapons"].size() == 2)
+	assert(not ECON.enqueue(state, 1, 0, "reinforced_plating"))
+	assert(not ECON.enqueue(state, 1, 0, "laser_matrix"))
+	assert(ECON.shipyard_at_port(p, 3) == 1 and ECON.shipyard_at_port(p, 2) == 2)
+	var graph: Dictionary = ECON.military_graph(state)
+	var origin: Vector2 = ECON.station_position(state, 0, 0.0)
+	p["pds"].clear()
+	state["ships"] = [
+		{"id": 9900, "owner": 2, "kind": "ship", "at": 0, "route": [], "position": origin, "hp": 100.0},
+		{"id": 9901, "owner": 1, "kind": "ship", "at": 0, "route": [], "position": origin, "hp": 100.0}]
+	ECON._combat(state, graph, 0.1)
+	assert(state["ships"][0]["hp"] == 64.0 and state["ships"][1]["hp"] == 100.0)
+	ECON._combat(state, graph, 0.1)
+	assert(state["ships"][0]["hp"] == 64.0)
+	# Existing physical port survives array compaction and can be rebuilt independently.
+	var retained: Vector2 = ECON.shipyard_position(state, 0, 1, 0.0)
+	p["yards"].remove_at(0)
+	assert(ECON.shipyard_at_port(p, 3) == 0 and ECON.shipyard_position(state, 0, 0, 0.0) == retained)
+	assert(ECON.shipyard_at_port(p, 1) == -1)
+	assert(ECON.enqueue(state, 1, 0, "yard", "port:1"))
+	print("PASS: stable station ports, one-time prepaid upgrades, increased repair cap and twin defensive lasers")
+
 func _initialize() -> void:
+	_test_station_defense_and_ports()
 	_test_station_construction_queue()
 	_test_miner_service_orders()
 	_test_mining_lasers()

@@ -475,9 +475,12 @@ func _send_commands() -> void:
 		if bool(session.get("economy")["map"]["fields"][index].get("antimatter", false)):
 			session.call("request_mining_policy", index, true, false, true)
 	session.call("request_operation", home_index, "yard", "3") # invalid gap
-	session.call("request_operation", home_index, "yard", "2")
-	session.call("request_operation", home_index, "yard", "3")
-	session.call("request_operation", home_index, "yard", "3") # duplicate
+	session.call("request_operation", home_index, "yard", "port:2")
+	session.call("request_operation", home_index, "yard", "port:3")
+	session.call("request_operation", home_index, "yard", "port:3") # duplicate
+	session.call("request_operation", home_index, "reinforced_plating")
+	session.call("request_operation", home_index, "laser_matrix")
+	session.call("request_operation", home_index, "laser_matrix") # duplicate
 
 func _check_economy_sync() -> void:
 	if economy_verified or str(session.get("phase")) != "match":
@@ -533,11 +536,11 @@ func _check_economy_sync() -> void:
 			promoted_yard_id = int(own_yard_jobs[3]["id"])
 			session.call("request_cancel", home_index, cancelled_yard_id)
 		elif cancelled_yard_id >= 0 and not yard_rebuilt and own_yard_jobs.has(2) and not own_yard_jobs.has(3):
-			if int(own_yard_jobs[2]["id"]) != promoted_yard_id or own_yard_jobs[2]["cost"] != ECON._cost("yard", 2):
+			if int(own_yard_jobs[2]["id"]) != promoted_yard_id or own_yard_jobs[2]["cost"] != ECON._cost("yard", 2) or int(own_yard_jobs[2].get("station_slot", 0)) != 3:
 				_fail("Shipyard stack did not retain and reprice later construction.")
 				return
 			yard_rebuilt = true
-			session.call("request_operation", home_index, "yard", "3")
+			session.call("request_operation", home_index, "yard", "port:2")
 		var verified: int = 0
 		for system in state["planets"]:
 			if not bool(system["home"]):
@@ -653,6 +656,9 @@ func _check_economy_sync() -> void:
 				if int(craft["id"]) == 990000 + owner_home:
 					repaired = float(craft["hp"]) >= ECON.SHIP_HP - ECON.EPS
 			var checks: Dictionary = {
+				"station_plating": ECON._has_job(system, "reinforced_plating", "") or ECON.station_max_hp(system) == ECON.REINFORCED_STATION_HP,
+				"station_matrix": ECON._has_job(system, "laser_matrix", "") or system["station"].get("weapons", []).size() == ECON.STATION_LASER_COUNT,
+				"station_port_three": ECON.shipyard_at_port(system, 3) >= 0 or not ECON.shipyard_port_job(system, 3).is_empty(),
 				"autobuild": system["yards"][0].get("autobuild", []).has("ship"),
 				"rally": int(system["yards"][0].get("rally", {}).get("node", -1)) == owner_home and system["yards"][0].get("rally", {}).get("point", Vector2.INF) == graph["points"][owner_home],
 				"rally_attack_move": rally_attack_move,
