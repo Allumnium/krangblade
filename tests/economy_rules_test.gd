@@ -113,6 +113,7 @@ func _test_maintain_targets() -> void:
 	assert(int(p["maintain"]["ship"]) == 7 and int(p["maintain"]["miner"]) == 9)
 
 func _initialize() -> void:
+	_test_unit_order_queue()
 	_test_soft_separation()
 	_test_rounded_sector_limits()
 	_test_shipyard_rally()
@@ -1715,6 +1716,63 @@ func _test_idle_formations() -> void:
 	for i in range(3):
 		assert(int(squad[i]["dest"]) == objective and not (squad[i]["route"] as Array).is_empty())
 	print("PASS: authoritative idle formations wander, preserve bounds and resume direct navigation")
+
+func _test_unit_order_queue() -> void:
+	var slots: Array = ECON.line_formation_slots({1: Vector2(100, 0), 2: Vector2(-100, 0), 3: Vector2.ZERO}, Vector2(-200, 100), Vector2(200, 100))
+	assert(slots.size() == 3 and slots[0]["id"] == 2 and slots[1]["id"] == 3 and slots[2]["id"] == 1)
+	assert(slots[0]["point"] == Vector2(-200, 100) and slots[1]["point"] == Vector2(0, 100) and slots[2]["point"] == Vector2(200, 100))
+	assert(slots[0]["heading"] == Vector2.DOWN and slots[1]["heading"] == Vector2.DOWN and slots[2]["heading"] == Vector2.DOWN)
+	var reversed: Array = ECON.line_formation_slots({1: Vector2(100, 0), 2: Vector2(-100, 0)}, Vector2(200, 100), Vector2(-200, 100))
+	assert(reversed[0]["id"] == 1 and reversed[0]["heading"] == Vector2.DOWN)
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var ship: Dictionary = {"id": 100, "owner": 1, "kind": "fighter", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
+	state["ships"] = [ship]
+	var graph: Dictionary = ECON.military_graph(state)
+	var first: Dictionary = {"kind": "position", "target": 0, "point": Vector2(100, 100), "move_only": true}
+	var second: Dictionary = {"kind": "position", "target": 0, "point": Vector2(200, 100), "move_only": false}
+	var third: Dictionary = {"kind": "position", "target": 0, "point": Vector2(200, 200), "move_only": true, "heading": Vector2.LEFT}
+	assert(ECON.issue_unit_order(state, 1, [100], first, false))
+	assert(ECON.issue_unit_order(state, 1, [100], second, true))
+	assert(ECON.issue_unit_order(state, 1, [100], third, true))
+	assert(not ECON.issue_unit_order(state, 2, [100], first, true))
+	assert(not ECON.issue_unit_order(state, 1, [100], {"kind": "position", "target": 0, "point": Vector2.INF}, true))
+	assert(ship["local_move_target"] == first["point"] and ship["order_queue"].size() == 2)
+	assert(ECON.unit_order_origin(state, graph, ship) == third["point"])
+	var visited: Array = []
+	for tick in range(500):
+		var previous: Vector2 = ship["position"]
+		ECON.step(state, 0.1)
+		assert(previous.distance_to(ship["position"]) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+		if not ship.has("local_move_target") and ship["position"] in [first["point"], second["point"], third["point"]] and not visited.has(ship["position"]):
+			visited.append(ship["position"])
+		if visited.size() == 3:
+			break
+	assert(visited == [first["point"], second["point"], third["point"]])
+	for tick in range(10):
+		ECON.step(state, 0.1)
+	assert(ship["position"] == third["point"] and ship["heading"] == Vector2.LEFT and not ship.get("holding", false))
+	assert(ECON.issue_unit_order(state, 1, [100], first, false))
+	for i in range(ECON.MAX_UNIT_ORDERS - 1):
+		assert(ECON.issue_unit_order(state, 1, [100], second, true))
+	assert(not ECON.issue_unit_order(state, 1, [100], third, true))
+	assert(ship["order_queue"].size() == ECON.MAX_UNIT_ORDERS - 1)
+	assert(ECON.issue_unit_order(state, 1, [100], third, false))
+	assert(not ship.has("order_queue"))
+	assert(ECON.issue_unit_order(state, 1, [100], first, true))
+	assert(ECON.command_hold_units(state, 1, [100], false))
+	assert(not ship.has("order_queue") and not ship.has("unit_order") and ship["holding"])
+	# A queued precise move can be validated against the preceding sector
+	# destination, rather than the ship's current physical location.
+	assert(ECON.command_fighters(state, 1, [100], 1, true))
+	var remote: Dictionary = {"kind": "position", "target": 1, "point": Vector2(2000, 100), "move_only": true, "heading": Vector2.DOWN}
+	assert(ECON.issue_unit_order(state, 1, [100], remote, true))
+	for tick in range(1000):
+		ECON.step(state, 0.1)
+		if ship["position"] == remote["point"] and not ship.has("local_move_target"):
+			break
+	assert(ship["position"] == remote["point"] and ship["heading"] == Vector2.DOWN and ship["at"] == 1)
+	print("PASS: sequential unit orders, ownership, queue limit, direct/hold cancellation and lane-routed formation facing")
 
 func _test_local_position_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}

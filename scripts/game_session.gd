@@ -864,6 +864,29 @@ func _unit_hold_for(id: int, ids: Array, release: bool) -> void:
 	if _active_player(id) and ECONOMY.command_hold_units(economy, id, ids, release):
 		_publish_economy()
 
+func request_unit_orders(orders: Array, append: bool = false) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_unit_orders_for(1, orders, append)
+	else:
+		_rpc_unit_orders.rpc_id(1, orders, append)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_unit_orders(orders: Array, append: bool) -> void:
+	if multiplayer.is_server():
+		_unit_orders_for(multiplayer.get_remote_sender_id(), orders, append)
+
+func _unit_orders_for(id: int, orders: Array, append: bool) -> void:
+	if not _active_player(id) or orders.size() > economy["ships"].size():
+		return
+	var changed: bool = false
+	for entry in orders:
+		if entry is Dictionary and entry.get("ids") is Array and entry.get("order") is Dictionary:
+			changed = ECONOMY.issue_unit_order(economy, id, entry["ids"], entry["order"], append) or changed
+	if changed:
+		_publish_economy()
+
 func _active_player(id: int) -> bool:
 	return _match_peer(id) and economy.get("match_result", {}).is_empty() and not economy.get("eliminated", []).has(id)
 

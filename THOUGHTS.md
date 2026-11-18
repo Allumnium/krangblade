@@ -448,3 +448,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-32a — Attack-move rally and visible type selection
 - Fighter launch rallies previously suppressed fire and overrode combat maneuvering. Preserve the physical destination while ordinary combat and repair temporarily take precedence. Double-click now groups visible matching ships or selectable completed structures, with a building group list, shared owned shipyard commands and F framing. Validate dense and mixed-empire views; numbered yard identities cannot survive slot compaction, so invalidate affected systems' selected slots.
+
+### T-33a — Order queues and painted lines
+- Shift is now a queue modifier; patrol moved entirely to the command card. Authoritative per-unit FIFO is revalidated as orders become active; transient targets may expire before execution. Right-drag distributes orders with matching projected hull origins and common perpendicular facing. Verify very short lines and mixed fleets at sector boundaries; auto salvage and civilian work still take precedence after precise arrival.

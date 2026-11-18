@@ -366,6 +366,8 @@ func _send_commands() -> void:
 	var attack_id: int = 920000 + home_index
 	var victim_id: int = 920000 + (home_index + 1) % expected_players
 	session.call("request_tactical_order", [attack_id], "attack", victim_id)
+	session.call("request_unit_orders", [{"ids": [attack_id], "order": {"kind": "sector", "target": home_index, "move_only": true}}], true)
+	session.call("request_unit_orders", [{"ids": [attack_id, victim_id], "order": {"kind": "sector", "target": field_node}}], true)
 	session.call("request_tactical_order", [attack_id], "attack", own_fighters[0])
 	session.call("request_tactical_order", [attack_id, victim_id], "patrol", field_node)
 	session.call("request_tactical_order", [attack_id], "invalid", home_index)
@@ -535,6 +537,7 @@ func _check_economy_sync() -> void:
 			var local_moving: bool = false
 			var patrol_verified: bool = false
 			var attack_verified: bool = false
+			var order_queue_verified: bool = false
 			var rally_attack_move: bool = false
 			var graph: Dictionary = ECON.military_graph(state)
 			var owner_home: int = state["planets"].find(system)
@@ -550,6 +553,9 @@ func _check_economy_sync() -> void:
 						rally_attack_move = launch.get("point", Vector2.INF) == rally_point or (bool(craft.get("holding", false)) and craft.get("hold_position", Vector2.INF) == rally_point)
 					patrol_verified = patrol_verified or (int(craft.get("patrol_from", -1)) == owner_home and int(craft.get("patrol_to", -1)) == field_node)
 					attack_verified = attack_verified or (int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) == 920000 + (owner_home + 1) % expected_players)
+					if int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) >= 0:
+						var queue: Array = craft.get("order_queue", [])
+						order_queue_verified = queue.size() == 1 and queue[0].get("kind") == "sector" and queue[0].get("target") == owner_home and queue[0].get("move_only", false)
 					if craft.get("patrol_to", -1) == field_node and craft.get("direct_order", false):
 						ordered += 1
 					elif int(craft["at"]) == owner_home and (craft["route"] as Array).is_empty():
@@ -570,6 +576,7 @@ func _check_economy_sync() -> void:
 				"rally_attack_move": rally_attack_move,
 				"patrol": patrol_verified,
 				"attack_target": attack_verified,
+				"unit_order_queue": order_queue_verified,
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
 				"local_move_order": local_moving,
