@@ -2550,7 +2550,7 @@ static func _release_auto_salvage(ship: Dictionary, piles: Dictionary) -> void:
 static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, busy: Dictionary, cells: Dictionary, coordinated: bool) -> bool:
 	var piles: Dictionary = state.get("salvage", {})
 	_release_auto_salvage(ship, piles)
-	if piles.is_empty() or _salvage_active(ship) or bool(ship.get("move_only", false)) or bool(ship.get("holding", false)) or busy.has(int(ship["id"])) or cargo_free(ship) <= EPS:
+	if piles.is_empty() or _salvage_active(ship) or bool(ship.get("move_only", false)) or busy.has(int(ship["id"])) or cargo_free(ship) <= EPS:
 		return false
 	var pos: Vector2 = ship["position"]
 	var idle: bool = not coordinated and _is_idle_ship(ship) and not ship.has("attack_order") and not ship.has("patrol_from")

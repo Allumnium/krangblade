@@ -419,3 +419,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 ### T-30a — RTS command card and selected-unit tiles
 - **Implemented:** Five-column square command card with two-step targeting; cached per-unit ship silhouettes and green/orange/red health tiles in selection area. Existing cargo loading is salvage pickup, not arbitrary resource transfer. Move-only suppresses combat diversions during fighter travel; right-click retains contextual attack-move.
 - **Verify:** Small viewport/UI scales, multi-unit selection, command cancellation, and networked commands. Consider distinct stop/resume-idle semantics and general cargo transfer later.
+
+- v0.30.1: Preserve opportunistic salvage for held units as covered by ENet smoke tests; explicit Attack Move cannot issue a salvage-click order. Exercise move-only RPC payloads in the existing network smoke scenario.

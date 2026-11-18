@@ -1665,7 +1665,7 @@ func _execute_pending_command(point: Vector2) -> void:
 	elif mode == "move":
 		_command_at(point, false, false, true)
 	elif mode == "attack":
-		_command_at(point)
+		_command_at(point, false, false, false, true)
 
 func _selection_icon(kind: String) -> Texture2D:
 	if not selection_icons.has(kind):
@@ -3424,7 +3424,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	selected_field = -1
 	_refresh()
 
-func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = false) -> void:
+func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = false, explicit_attack: bool = false) -> void:
 	var state: Dictionary = _state()
 	var owned: Array[int] = _selected_owned_units(state)
 	if state.is_empty() or owned.is_empty():
@@ -3448,10 +3448,11 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		if target >= 0:
 			session.call("request_tactical_order", fighters, "attack", target)
 			return
-		var wreck: int = _salvage_hit(state, point)
-		if wreck >= 0:
-			session.call("request_salvage", owned, wreck)
-			return
+		if not explicit_attack:
+			var wreck: int = _salvage_hit(state, point)
+			if wreck >= 0:
+				session.call("request_salvage", owned, wreck)
+				return
 	var node: int = -1
 	var distance: float = INF
 	var graph: Dictionary = ECONOMY.military_graph(state)
@@ -3734,6 +3735,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			control_groups[key] = selected_units.duplicate()
 		else:
 			var group: Array = control_groups.get(key, [])
+			pending_command = ""
+			_refresh_command_mode()
 			if not event.shift_pressed:
 				selected_units.clear()
 			for craft in _state().get("ships", []):
@@ -3752,6 +3755,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 func _cycle_owned_system(direction: int) -> void:
+	pending_command = ""
+	_refresh_command_mode()
 	var state: Dictionary = _state()
 	if state.is_empty():
 		return
