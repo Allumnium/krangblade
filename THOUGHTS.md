@@ -378,3 +378,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Type:** Command UX.
 - **Observation:** Right-click commands previously chose the nearest POI center before checking sector containment, potentially snapping to an adjacent sector. v0.29.5 prioritizes the simulation's sector boundary and retains direct POI click fallback.
 - **Consider:** A distinct hover outline for command sectors; ownership territory outlines are not equivalent to command-sector boundaries.
+
+### T-29e — Separate occupation from territorial ownership
+- **Type:** Gameplay state clarity.
+- **Observation:** Conquest could change `owner` for a population-free, yard-free system even though `territory_claims` correctly rendered it unclaimed. v0.29.6 prevents conquest of such systems; colonization is required for lasting territorial control.
+- **Consider:** Follow-up audit of `owner` versus `territory_claims` in AI and colonization permissions, especially legacy saves.

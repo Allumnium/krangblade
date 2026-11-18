@@ -355,7 +355,7 @@ func _build_ui() -> void:
 	map_canvas.offset_top = HEADER_HEIGHT + 16
 	map_canvas.offset_right = -8
 	map_canvas.offset_bottom = -8
-	map_canvas.clip_contents = true
+	map_canvas.clip_contents = false
 	map_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	map_canvas.gui_input.connect(_map_input)
 	map_canvas.draw.connect(_draw_map)
@@ -436,7 +436,7 @@ func _build_ui() -> void:
 	empty_selection.add_theme_color_override("font_color", HUD.MUTED)
 	console_center = VBoxContainer.new()
 	console_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	console_center.size_flags_stretch_ratio = 1.0
+	console_center.size_flags_stretch_ratio = 1.2
 	console_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	console_columns.add_child(console_center)
 	console_center_spacer = Control.new()
@@ -671,7 +671,9 @@ func _layout_console() -> void:
 	# Keep a stable, useful map at both normal and small window sizes.
 	var height: float = minf(clampf(size.y * 0.32, 195.0, 285.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0))
 	console_panel.offset_top = -8.0 - height
-	map_canvas.offset_bottom = -16.0 - height
+	# Draw the space scene behind the HUD rather than clipping it at a
+	# horizontal line. Camera framing still uses the unobstructed play area.
+	map_canvas.offset_bottom = -8.0
 	territory_layer.offset_bottom = map_canvas.offset_bottom
 	diagnostic_label.offset_bottom = -20.0 - height
 	diagnostic_label.offset_top = -44.0 - height
@@ -2907,7 +2909,10 @@ func _reset_view() -> void:
 
 # The bottom console reserves a fixed viewport, independent of selection.
 func _projection_size() -> Vector2:
-	return map_canvas.size.max(Vector2.ONE)
+	# Reserve the console footprint for camera framing, but let stars and
+	# planets continue rendering underneath its opaque stepped panels.
+	var hud_height: float = console_panel.size.y + 8.0 if is_instance_valid(console_panel) else 0.0
+	return Vector2(map_canvas.size.x, maxf(1.0, map_canvas.size.y - hud_height))
 
 func _map_resized() -> void:
 	var fit: float = _fit()

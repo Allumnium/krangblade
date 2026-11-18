@@ -3928,7 +3928,11 @@ static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> v
 		occupiers[node][player] = int(occupiers[node].get(player, 0)) + 1
 	for node in range(planets.size()):
 		var planet: Dictionary = planets[node]
-		if not occupiers.has(node) or not (planet["yards"] as Array).is_empty() or not planet.get("pds", {}).is_empty():
+		# Only established territory can be militarily captured. An empty
+		# system without population or a shipyard must be colonized instead;
+		# its owner field alone does not constitute a territorial claim.
+		var established: bool = float(planet.get("population", 0.0)) > 0.0 or not (planet["yards"] as Array).is_empty()
+		if not established or not occupiers.has(node) or not (planet["yards"] as Array).is_empty() or not planet.get("pds", {}).is_empty():
 			if planet.has("capture"):
 				planet.erase("capture")
 			continue
