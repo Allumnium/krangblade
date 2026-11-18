@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.43.4: Sequential station construction prevents buying parallel build time with a large stockpile. Check build-order pacing (including AI), repeat queue ordering and whether twice-range PDS makes nearby approaches overly costly. The shorter Trade wing may require scrolling at smaller resolutions.
+
 - v0.43.3: Planetary defense combat references intentionally retain sector-star simulation positions; movement clicks now use rendered orbital coordinates. Review whether a future shared authoritative orbital model should also move combat/repair range origins to individual bodies. Camera focus now has a world-space source of truth; check apparent centering against the usable viewport (not the central star when a separate shipyard is selected).
 
 - v0.43.2: Population-starved pinned jobs previously occupied active shipyard slots. Releasing them preserves queued investment and lets eligible work proceed; review prolonged colony-ship wait times with continuous cheap-hull production. Single-ship facing preview reuses the existing authority-validated arrival heading; ordinary idle flight may turn again after arrival.
@@ -109,10 +111,10 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Observation:** Triple hull costs with unchanged home stocks reduce the opening budget to about four mixed hulls. Second and third shipyards require Crystals; third costs 6k Metals, requiring sustained construction draws or larger storage. First shipyard retains its inexpensive colony-entry recipe.
 - **Consider:** Assess AI expansion and recovery, early player choices, and resource replenishment before changing starting inventory. v0.12.3 adds 3× per-level upgrade pricing; the higher repeat tiers can exceed warehouse inventory but gradual construction remains possible. Instant warehouse purchases fit their previous-tier capacity. One-time building prices triple independently, so purchase order does not affect them.
 
-### T-018 — Concurrent shipyard construction
+### T-018 — Shipyard construction order (superseded in v0.43.4)
 - **Type:** Gameplay/UX hypothesis.
 - **Observation:** v0.12.4 permits concurrent infrastructure construction; a later shipyard can reach full progress before an earlier one and waits for the preceding slot to complete. Cancelling an earlier slot retains the later job’s percentage at the cheaper recipe and refunds the difference.
-- **Consider:** Verify the waiting-at-100% case is legible; consider a concise status if it confuses players during resource shortages. Review concurrent infrastructure work during pacing tests.
+- **Consider:** Concurrent station construction was removed in v0.43.4. Check retained queue progress and cancellation refunds when later jobs are shifted down a slot.
 
 - v0.12.5 fixes a duplicate local variable name in the new regression fixture, caught by the mandatory parse check.
 

@@ -20,6 +20,7 @@ const OVERVIEW_MAX_ZOOM: float = 64.0
 const FIGHTER_HULL_LENGTH: float = 22.0
 const CLOSEUP_SCREEN_FRACTION: float = 0.6
 const SNAPSHOT_SECONDS: float = 0.2
+const TRADE_HEIGHT_REDUCTION: float = 90.0
 # Projected system radius in logical screen pixels, independent of selection.
 const PLANET_FADE_START: float = 40.0
 const PLANET_FADE_FULL: float = 100.0
@@ -244,12 +245,7 @@ var planet_overview: VBoxContainer
 var body_overview: VBoxContainer
 var body_title: Label
 var body_context: Label
-var body_defense: Label
 var body_status: Label
-var body_costs: GridContainer
-var body_upgrade: Button
-var body_cancel: Button
-var body_progress: ProgressBar
 var ship_overview: VBoxContainer
 var ship_title: Label
 var ship_detail: Label
@@ -298,9 +294,9 @@ var planet_detail_alpha: Dictionary = {}
 var planet_detail_seed: int = -1
 var trade_sliders: Dictionary = {}
 var trade_checks: Dictionary = {}
+var trade_check_icons: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
 var population_icons: Dictionary = {}
-var build_clock_icon: Texture2D
 var production_summary: VBoxContainer
 var production_values: Dictionary = {}
 var system_owner_label: Label
@@ -842,7 +838,7 @@ func _layout_right_panel() -> void:
 	var extra: float = 0.0
 	if station_card == "trade" and station_selected_index >= 0 and is_instance_valid(station_commands) and station_commands.visible:
 		var top_limit: float = header_panel.global_position.y + header_panel.size.y + 4.0
-		extra = roundf(minf(inspector_slot.size.y, maxf(0.0, inspector_slot.global_position.y - top_limit)))
+		extra = roundf(maxf(0.0, minf(inspector_slot.size.y, inspector_slot.global_position.y - top_limit) - TRADE_HEIGHT_REDUCTION))
 	inspector_panel.offset_top = -extra
 	console_profile.queue_redraw()
 
@@ -1122,56 +1118,6 @@ func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
 		bar.add_theme_stylebox_override("background", HUD.surface(Color("#33251a"), Color("#db9b54"), 0, 3))
 		bar.add_theme_stylebox_override("fill", HUD.surface(Color("#b56b35"), Color("#f2b57e"), 0, 3))
 		bar.tooltip_text = "Blocked: " + ", ".join(blocked)
-
-func _clock_texture() -> Texture2D:
-	if build_clock_icon == null:
-		var image := Image.new()
-		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dbeaff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>')
-		build_clock_icon = ImageTexture.create_from_image(image)
-	return build_clock_icon
-
-func _duration_text(years: float) -> String:
-	if is_zero_approx(years):
-		return "Instant"
-	return "%.0fyr" % years if is_equal_approx(years, roundf(years)) else "%.1fyr" % years
-
-func _set_timed_action(button: Button, caption: String, years: float = -1.0) -> void:
-	button.text = caption if years < 0.0 else "%s · %s" % [caption, _duration_text(years)]
-	button.icon = _clock_texture() if years > 0.0 else null
-	button.icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	button.expand_icon = true
-	button.add_theme_constant_override("icon_max_width", 12)
-
-func _cost_grid(parent: Container) -> GridContainer:
-	var grid := GridContainer.new()
-	grid.add_theme_constant_override("h_separation", 3)
-	parent.add_child(grid)
-	return grid
-
-func _show_cost(grid: GridContainer, cost: Dictionary, crew: float = 0.0) -> void:
-	var signature: Array = [cost, crew]
-	if grid.get_meta("recipe", []) == signature:
-		return
-	grid.set_meta("recipe", signature.duplicate(true))
-	for child in grid.get_children():
-		grid.remove_child(child)
-		child.queue_free()
-	var entries: Dictionary = cost.duplicate()
-	if crew > 0.0:
-		entries["Population"] = crew
-	grid.columns = maxi(1, entries.size())
-	for resource in entries:
-		var pair := HBoxContainer.new()
-		pair.add_theme_constant_override("separation", 2)
-		grid.add_child(pair)
-		var symbol := TextureRect.new()
-		HUD.fixed_icon(symbol, _population_texture(12) if resource == "Population" else HUD.resource_icon(resource, 12), 12)
-		pair.add_child(symbol)
-		var value: float = float(entries[resource])
-		var amount := _label(_compact_amount(value), 11)
-		amount.autowrap_mode = TextServer.AUTOWRAP_OFF
-		pair.add_child(amount)
-		pair.tooltip_text = ("%.0f people" % value) if resource == "Population" else "%.0f t %s" % [value, resource]
 
 func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {}, crew: float = 0.0) -> void:
 	var cost_button: CostButton = button as CostButton
@@ -1649,7 +1595,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			available = eligible and ECONOMY.pds_job(p).is_empty()
 			recipe = ECONOMY._cost("pds", 1)
 			work = ECONOMY._work("pds", 1)
-			description = "%d / %d defended · %.0f HP · %.0f damage" % [p.get("pds", {}).size(), int(p["planet_count"]), ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE]
+			description = "%d / %d defended · %.0f HP · %.0f damage · Range %.0f" % [p.get("pds", {}).size(), int(p["planet_count"]), ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
 		var repeat_key: String = _station_repeat_key(p, key)
 		var auto: bool = not repeat_key.is_empty() and bool(p.get("continuous", {}).get(repeat_key, false))
 		available = owned and available and ECONOMY.affordable(p, recipe)
@@ -1804,7 +1750,8 @@ func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
 	station_has_queue = has_jobs
 	station_queue_tab.text = "Queue (%d)" % jobs.size()
 	_set_station_detail_page(station_detail_page)
-	_refresh_queue_tiles(station_queue, station_queue_rows, system, jobs, owned, -1, true)
+	var active_id: int = int(jobs[0]["id"]) if has_jobs else -1
+	_refresh_queue_tiles(station_queue, station_queue_rows, system, jobs, owned, active_id)
 
 func _set_station_detail_page(page: String) -> void:
 	station_detail_page = page if station_has_queue else "resources"
@@ -1817,7 +1764,7 @@ func _set_station_detail_page(page: String) -> void:
 		resource_hover_panel.hide()
 		hovered_resource = ""
 
-func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dictionary, jobs: Array, owned: bool, active_id: int, station_jobs: bool = false) -> void:
+func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dictionary, jobs: Array, owned: bool, active_id: int) -> void:
 	for id in rows.keys():
 		var keep: bool = false
 		for job in jobs:
@@ -1854,16 +1801,16 @@ func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dicti
 		queue.move_child(widgets["row"], idx)
 		var percent: float = 100.0 * float(job["progress"]) / maxf(ECONOMY.EPS, float(job["work"]))
 		widgets["bar"].value = percent
-		widgets["bar"].visible = station_jobs or id == active_id or percent > 0.0
+		widgets["bar"].visible = id == active_id or percent > 0.0
 		_style_progress(widgets["bar"], system, job)
 		var tile: Button = widgets["cancel"]
 		tile.disabled = not owned
 		var blocked: bool = bool(widgets["bar"].get_meta("blocked"))
-		if station_jobs or id == active_id:
+		if id == active_id:
 			tile.add_theme_stylebox_override("normal", HUD.surface(Color("#172c3b"), Color("#db9b54") if blocked else HUD.ACCENT, 3, 3))
 		else:
 			tile.remove_theme_stylebox_override("normal")
-		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), "Building" if station_jobs or id == active_id else "Queued", percent, "\n" + widgets["bar"].tooltip_text if blocked else "", "\nClick to cancel and refund" if owned else ""]
+		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), "Building" if id == active_id else "Queued", percent, "\n" + widgets["bar"].tooltip_text if blocked else "", "\nClick to cancel and refund" if owned else ""]
 
 func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
@@ -1883,64 +1830,19 @@ func _build_body_overview(parent: Container) -> void:
 	body_context.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body_context.add_theme_color_override("font_color", HUD.MUTED)
 	header.add_child(body_context)
-	var section: VBoxContainer = HUD.section(body_overview, "Planetary defense", true)
-	body_defense = _label("", 12)
-	section.add_child(body_defense)
 	body_status = _label("", 12)
-	section.add_child(body_status)
-	body_costs = _cost_grid(section)
-	body_progress = ProgressBar.new()
-	body_progress.custom_minimum_size.y = 14
-	body_progress.step = 0.0
-	section.add_child(body_progress)
-	var actions := HBoxContainer.new()
-	section.add_child(actions)
-	body_upgrade = _button("Build PDS", _upgrade_selected_body, actions, true)
-	body_upgrade.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	HUD.action(body_upgrade, HUD.ACCENT, true)
-	body_cancel = _button("×", _cancel_selected_body, actions)
-	body_cancel.tooltip_text = "Cancel construction and refund"
+	body_overview.add_child(body_status)
 	body_overview.hide()
 
-func _upgrade_selected_body() -> void:
-	if selected >= 0 and selected_body >= 0:
-		_operation("pds", "")
-
-func _cancel_selected_body() -> void:
-	if selected_body < 0:
-		return
-	var job: Dictionary = ECONOMY.pds_job(_planet())
-	if not job.is_empty():
-		_cancel_job(int(job["id"]))
-
-func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
+func _refresh_body_overview(system: Dictionary) -> void:
 	var owner: int = int(system["owner"])
 	var roster: Dictionary = session.get("players")
 	var owner_name: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
 	body_title.text = _body_name(selected, selected_body)
 	body_context.text = "%s\n%s" % [_system_name(selected), owner_name]
-	var defenses: Dictionary = system.get("pds", {})
-	var battery: Dictionary = defenses.get(selected_body, {})
-	var job: Dictionary = ECONOMY.pds_job(system)
-	var building: bool = not job.is_empty()
-	var cost: Dictionary = ECONOMY._cost("pds", 1)
-	var full: bool = ECONOMY.next_pds(system) < 0
-	body_defense.text = "Battery HP: %.0f" % ECONOMY.PDS_HP if battery.is_empty() else ""
-	body_defense.visible = battery.is_empty()
-	body_status.text = ("Operational" if not battery.is_empty() else "Undefended") + "\nSystem defenses: %d/%d" % [defenses.size(), int(system["planet_count"])]
-	body_costs.visible = not full
-	if not full:
-		_show_cost(body_costs, job["cost"] if building else cost)
-	body_progress.visible = building
-	if building:
-		body_progress.value = 100.0 * float(job["progress"]) / float(job["work"])
-		_style_progress(body_progress, system, job)
-	body_upgrade.visible = not full
-	body_upgrade.disabled = not owned or building or full or not ECONOMY.affordable(system, cost)
-	_set_timed_action(body_upgrade, "Build system PDS", ECONOMY._work("pds", 1))
-	_set_cost_tooltip(body_upgrade, "Build system PDS · %.0f yr" % ECONOMY._work("pds", 1), cost if not full and not building else {})
-	body_cancel.visible = building
-	body_cancel.disabled = not owned or not building
+	var has_battery: bool = system.get("pds", {}).has(selected_body)
+	body_status.text = "Planetary defense · Operational" if has_battery else ""
+	body_status.visible = has_battery
 
 func _build_fleet_cargo_row() -> void:
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
@@ -2238,7 +2140,7 @@ func _refresh_weapon_details(ship: Dictionary, system: Dictionary, body_selected
 			if body_selected and system.get("pds", {}).has(selected_body):
 				parent = body_status.get_parent()
 				at = body_status.get_index() + 1
-				details = "Planetary defense laser\n%.0f damage · 1 shot/s (1×) · Range %.0f" % [ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE]
+				details = "Planetary defense laser\n%.0f damage · 1 shot/s (1×) · Range %.0f" % [ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
 			elif not body_selected and building_selection_kind == "station" and bool(system.get("station", {}).get("laser_matrix", false)):
 				parent = planet_overview
 				at = 1
@@ -3030,6 +2932,21 @@ func _compact_trade_check(check: CheckBox) -> void:
 		var style: StyleBox = check.get_theme_stylebox(style_name).duplicate()
 		style.set_content_margin_all(0)
 		check.add_theme_stylebox_override(style_name, style)
+	# Native-size boxes with a high-contrast empty outline on the dark HUD.
+	if trade_check_icons.is_empty():
+		for state_name in ["checked", "unchecked", "checked_disabled", "unchecked_disabled"]:
+			var checked: bool = state_name.begins_with("checked")
+			var disabled: bool = state_name.ends_with("disabled")
+			var fill: String = "#b9c8d6" if checked else "#122536"
+			var edge: String = "#a3cce4" if not disabled else "#677f90"
+			if disabled and checked:
+				fill = "#677f90"
+			var mark: String = '<path d="M3.5 7L6 9.5L10.5 4.5" fill="none" stroke="#102335" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' if checked else ""
+			var image := Image.new()
+			image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" rx="1.5" fill="%s" stroke="%s" stroke-width="1.5"/>%s</svg>' % [fill, edge, mark])
+			trade_check_icons[state_name] = ImageTexture.create_from_image(image)
+	for state_name in trade_check_icons:
+		check.add_theme_icon_override(state_name, trade_check_icons[state_name])
 
 func _state() -> Dictionary:
 	return session.get("economy")
@@ -3211,7 +3128,7 @@ func _refresh() -> void:
 		return
 	if body_selected:
 		if not grouped_buildings:
-			_refresh_body_overview(p, own_system and phase == "match")
+			_refresh_body_overview(p)
 		return
 	if field_selected:
 		_refresh_field_panels(state)
