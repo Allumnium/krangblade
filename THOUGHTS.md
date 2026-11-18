@@ -403,3 +403,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 ### T-29j — Geometric local orders versus stale lane anchors
 - **Type:** Movement correctness.
 - **Observation:** Local movement validation depended on `at`, which can lag the fighter's physical position. Successful local orders also overwrote `at`, corrupting subsequent lane routing. Validate physical containment and preserve lane anchor, and avoid redirecting local holds solely because `at` differs.
+
+### T-29k — Fighter near-boundary click tolerance
+- **Type:** Movement UX.
+- **Observation:** Even with physical-sector validation, a click just beyond the mathematical sector edge fell back to nearest-POI routing. The command handler now uses a 64px proximity guard for selected fighters and clamps local destinations to their current sector boundary.
+- **Consider:** Render the actual command sector boundary distinctly from territorial ownership, and add a regression test for near-edge clicks.

@@ -3337,18 +3337,32 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 					if ECONOMY.sector_contains(graph, candidate, craft["position"]):
 						current = candidate
 						break
-			if current >= 0 and ECONOMY.sector_contains(graph, current, world):
-				if not local_groups.has(current):
-					local_groups[current] = []
-				(local_groups[current] as Array).append(id)
+			if current < 0:
+				continue
+			var local_point: Vector2 = world
+			if not ECONOMY.sector_contains(graph, current, local_point):
+				# A small cursor movement near a selected fighter must not snap
+				# its command to the next POI. Keep the order in its current
+				# sector and clamp it to the actual sector edge.
+				var ship_screen: Vector2 = _screen_point(craft["position"])
+				if point.distance_to(ship_screen) > 64.0:
+					continue
+				var center: Vector2 = graph["points"][current]
+				var offset: Vector2 = world - center
+				if offset.length_squared() > 0.0001:
+					local_point = center + offset.normalized() * maxf(0.0, ECONOMY.sector_limit(graph, current, offset.normalized()) - 0.5)
+			if not local_groups.has(current):
+				local_groups[current] = {"ids": [], "point": local_point}
+			(local_groups[current]["ids"] as Array).append(id)
 		for current in local_groups:
-			session.call("request_local_position", local_groups[current], int(current), world)
+			var group: Dictionary = local_groups[current]
+			session.call("request_local_position", group["ids"], int(current), group["point"])
 		if not local_groups.is_empty():
 			var remaining: Array[int] = []
 			for id in fighters:
 				var handled: bool = false
 				for group in local_groups.values():
-					if (group as Array).has(id):
+					if (group["ids"] as Array).has(id):
 						handled = true
 						break
 				if not handled:
