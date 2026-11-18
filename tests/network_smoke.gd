@@ -167,8 +167,18 @@ func _phase_changed() -> void:
 				for index in range(ordered.size()):
 					var outpost: Dictionary = state["planets"][int(state["map"]["planetless"][index])]
 					outpost["owner"] = ordered[index]
+					outpost["station"] = {"hp": ECON.STATION_HP}
 					for resource in ECON.ORBITAL_HOUSING_COST:
 						outpost["stock"][resource] = ECON.ORBITAL_HOUSING_COST[resource]
+				# Isolate station destruction from the home-system RPC scenarios.
+				var target_index: int = int(state["map"]["planetless"][expected_players])
+				var target: Dictionary = state["planets"][target_index]
+				target["owner"] = ordered[1]
+				target["station"] = {"hp": ECON.LASER_DAMAGE}
+				target["stock"]["Metals"] = 100.0
+				var assault: Dictionary = {"id": 960000, "kind": "fighter", "owner": ordered[0], "origin": 0, "at": target_index, "dest": target_index, "operation_target": target_index, "route": [], "leg": 0.0, "position": ECON.station_position(state, target_index, 0.0), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock()}
+				assault["cargo"]["Metals"] = ECON.CARGO_CAPACITY
+				state["ships"].append(assault)
 				for system in state["planets"]:
 					if bool(system["home"]):
 						system["population"] = 150000.0
@@ -630,8 +640,15 @@ func _check_economy_sync() -> void:
 		var orbital_verified: bool = true
 		for index in range(expected_players):
 			var outpost: Dictionary = state["planets"][int(state["map"]["planetless"][index])]
-			orbital_verified = orbital_verified and int(outpost.get("orbital_housing", 0)) == 1 and float(outpost["population"]) == ECON.ORBITAL_HOUSING_POPULATION
-		if cancel_sent and yard_rebuilt and hold_release_verified and verified == expected_players and orbital_verified and view != null and view.has_method("_update_trade_stock"):
+			orbital_verified = orbital_verified and int(outpost.get("orbital_housing", 0)) == 1 and float(outpost["population"]) == ECON.ORBITAL_HOUSING_POPULATION and ECON.has_station(outpost)
+		var target_index: int = int(state["map"]["planetless"][expected_players])
+		var target: Dictionary = state["planets"][target_index]
+		var station_destroyed: bool = false
+		for event in state.get("ship_destructions", []):
+			if event["kind"] == "station" and int(event["ship"]) == ECON.station_target_id(state, target_index):
+				station_destroyed = true
+		var station_verified: bool = station_destroyed and int(target["owner"]) == 0 and not ECON.has_station(target)
+		if cancel_sent and yard_rebuilt and hold_release_verified and verified == expected_players and orbital_verified and station_verified and view != null and view.has_method("_update_trade_stock"):
 			view.set("selected", home_index)
 			view.call("_load_thresholds")
 			view.call("_refresh")

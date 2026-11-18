@@ -81,6 +81,8 @@ const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
 const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 750.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
+const STATION_HP: float = SHIP_HP * 10.0
+const STATION_SALVAGE_FRACTION: float = 0.20
 const LASER_DAMAGE: float = 18.0
 const PDS_DAMAGE: float = LASER_DAMAGE * 2.0
 const PDS_HP: float = SHIP_HP
@@ -177,7 +179,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 		var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
 		planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION + ORBITAL_HOUSING_POPULATION if home else 0.0, "eco_population": ORBITAL_HOUSING_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
 			"abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
-			"yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {0: _new_pds()} if home else {}})
+			"station": {"hp": STATION_HP} if home else {}, "yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {0: _new_pds()} if home else {}})
 	var ai_players: Array[int] = []
 	for id in ordered:
 		if bool(players[id].get("ai", false)):
@@ -358,20 +360,23 @@ static func planet_teams(state: Dictionary) -> Array[int]:
 	var result: Array[int] = []
 	var teams: Dictionary = state["teams"]
 	for planet in state["planets"]:
-		result.append(int(teams.get(int(planet["owner"]), 0)))
+		result.append(int(teams.get(int(planet["owner"]), 0)) if has_station(planet) else 0)
 	return result
 
 ## Colony ships can traverse allied worlds, with one final edge into a neutral world.
+static func has_station(system: Dictionary) -> bool:
+	return not system.get("station", {}).is_empty()
+
 static func colony_path(state: Dictionary, player: int, ship: Dictionary, target: int) -> Array[int]:
 	var planets: Array = state.get("planets", [])
-	if target < 0 or target >= planets.size() or int(planets[target]["owner"]) != 0 or not has_planets(planets[target]):
+	if target < 0 or target >= planets.size() or int(planets[target]["owner"]) != 0 or has_station(planets[target]):
 		return []
 	if int(ship["owner"]) != player or ship.get("kind", "ship") != "colony_ship" or not (ship["route"] as Array).is_empty():
 		return []
 	var teams: Array[int] = planet_teams(state)
 	var team: int = int(state["teams"].get(player, 0))
 	var start: int = int(ship["at"])
-	if team == 0 or (teams[start] != team and military_home(state, player) >= 0):
+	if team == 0 or (teams[start] not in [0, team] and military_home(state, player) >= 0):
 		return []
 	if not discovered(state, player, "planets", target):
 		return []
@@ -400,15 +405,17 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 	if not _move(state, ship, dt) or int(ship["dest"]) < 0:
 		return false
 	var at: int = int(ship["at"])
-	if int(state["planets"][at]["owner"]) == 0 and has_planets(state["planets"][at]):
+	if int(state["planets"][at]["owner"]) == 0 and not has_station(state["planets"][at]):
 		var colony: Dictionary = state["planets"][at]
 		colony["owner"] = int(ship["owner"])
-		colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION
+		colony["station"] = {"hp": STATION_HP, "converted_at": float(state["elapsed"])}
+		colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION if has_planets(colony) else ORBITAL_HOUSING_POPULATION
 		colony["eco_population"] = ORBITAL_HOUSING_POPULATION
 		colony["population_velocity"] = 0.0
 		colony["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
-		for resource in ["Metals", "Plastics", "Textiles", "Organics", "Tech"]:
-			colony["levels"][resource] = 1
+		if has_planets(colony):
+			for resource in ["Metals", "Plastics", "Textiles", "Organics", "Tech"]:
+				colony["levels"][resource] = 1
 		for resource in RESOURCES + [ANTIMATTER]:
 			var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
 			colony["stock"][resource] = float(colony["stock"].get(resource, 0.0)) + amount
@@ -643,7 +650,7 @@ static func _work(kind: String, level: int) -> float:
 
 static func _get_owned(state: Dictionary, player: int, index: int) -> Dictionary:
 	var planets: Array = state.get("planets", [])
-	if index < 0 or index >= planets.size() or int(planets[index]["owner"]) != player:
+	if index < 0 or index >= planets.size() or int(planets[index]["owner"]) != player or not has_station(planets[index]):
 		return {}
 	return planets[index]
 
@@ -1053,12 +1060,20 @@ static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> boo
 	item["progress"] = float(item["progress"]) + amount
 	return float(item["progress"]) >= float(item["work"]) - EPS
 
-static func shipyard_position(state: Dictionary, index: int, slot: int, elapsed: float) -> Vector2:
-	var yard: Dictionary = state["planets"][index]["yards"][slot]
+static func station_position(state: Dictionary, index: int, elapsed: float) -> Vector2:
 	var center: Vector2 = state["map"]["points"][index]
+	var station: Dictionary = state["planets"][index].get("station", {})
+	if station.is_empty():
+		return center
+	var axis: Vector2 = Vector2.from_angle(float(index) * 2.399963 + elapsed * 0.008)
+	var graph: Dictionary = military_graph(state)
+	var radius: float = minf(145.0, sector_limit(graph, index, axis) * 0.5)
+	var conversion: float = clampf((elapsed - float(station.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
+	return center + axis * radius * smoothstep(0.0, 1.0, conversion)
+
+static func shipyard_position(state: Dictionary, index: int, slot: int, elapsed: float) -> Vector2:
 	var angle: float = float(slot) * TAU / 3.0 + elapsed * 0.008
-	var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
-	return center + Vector2.from_angle(angle) * 95.0 * smoothstep(0.0, 1.0, conversion)
+	return station_position(state, index, elapsed) + Vector2.from_angle(angle) * 90.0
 
 static func _rally_path(state: Dictionary, index: int, target: int) -> Array[int]:
 	var access: Array[int] = []
@@ -1151,7 +1166,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			p["yards"][int(item["target"])]["level"] = int(item["level"])
 			p["yards"][int(item["target"])]["hp"] = SHIP_HP * 10.0 * int(item["level"])
 		"ship", "colony_ship", "fighter", "miner":
-			var launch: Vector2 = state["map"]["points"][index]
+			var launch: Vector2 = station_position(state, index, float(state["elapsed"]))
 			var rally: Dictionary = {}
 			for slot in range(p["yards"].size()):
 				if int(p["yards"][slot]["job"]) == int(item["id"]):
@@ -1183,7 +1198,7 @@ static func local_flow(p: Dictionary, category: String, resource: String) -> flo
 
 static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	var p: Dictionary = state["planets"][index]
-	if int(p["owner"]) == 0:
+	if int(p["owner"]) == 0 or not has_station(p):
 		return
 	p["flows"] = {}
 	p["flow_dt"] = dt
@@ -1396,14 +1411,6 @@ static func _move(state: Dictionary, ship: Dictionary, dt: float) -> bool:
 	var points: Array = state["map"]["points"]
 	_ensure_position(points, ship)
 	var distance: float = SHIP_SPEED * dt
-	if route.is_empty():
-		var here: int = int(ship["at"])
-		var dock_required: bool = int(ship.get("source", -1)) == here or int(ship.get("dest", -1)) == here or ship.get("mining_mode", "") == "approach"
-		if dock_required and ship.get("kind", "") != "fighter":
-			var dock: Vector2 = points[here]
-			_navigate(ship, dock, distance)
-			return (ship["position"] as Vector2) == dock
-		return true
 	while not route.is_empty() and distance > EPS:
 		var next: Vector2 = points[int(route[0])]
 		distance -= _navigate(ship, next, distance)
@@ -1412,7 +1419,18 @@ static func _move(state: Dictionary, ship: Dictionary, dt: float) -> bool:
 			return false
 		ship["at"] = int(route.pop_front())
 		ship["leg"] = 0.0
-	return route.is_empty()
+	if not route.is_empty():
+		return false
+	var here: int = int(ship["at"])
+	var approach: bool = ship.get("mining_mode", "") == "approach"
+	var dock_required: bool = int(ship.get("source", -1)) == here or int(ship.get("dest", -1)) == here or approach
+	if dock_required and ship.get("kind", "") != "fighter":
+		var dock: Vector2 = points[here]
+		if not approach and ship.get("kind", "") != "colony_ship" and state.has("planets") and has_station(state["planets"][here]):
+			dock = station_position(state, here, float(state["elapsed"]))
+		_navigate(ship, dock, distance)
+		return (ship["position"] as Vector2).distance_to(dock) <= EPS
+	return true
 
 static func _choose_delivery(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, cache: Dictionary) -> void:
 	var planets: Array = state["planets"]
@@ -1861,7 +1879,11 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 	if teams[here] not in [0, team]:
 		_evacuate_civilian(state, ship, teams)
 		return
-	if int(local["owner"]) == owner:
+	if int(local["owner"]) == owner and has_station(local):
+		var dock: Vector2 = station_position(state, here, float(state["elapsed"]))
+		if _cargo_total(ship) > EPS and (ship["position"] as Vector2).distance_to(dock) > EPS:
+			ship["dest"] = here
+			return
 		for resource in RESOURCES + [ANTIMATTER]:
 			var amount: float = minf(float(ship["cargo"].get(resource, 0.0)), storage_free(local, resource))
 			if amount <= 0.0:
@@ -1887,7 +1909,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 static func military_home(state: Dictionary, player: int) -> int:
 	var fallback: int = -1
 	for i in range((state["planets"] as Array).size()):
-		if int(state["planets"][i]["owner"]) != player:
+		if int(state["planets"][i]["owner"]) != player or not has_station(state["planets"][i]):
 			continue
 		if bool(state["planets"][i]["home"]):
 			return i
@@ -2708,8 +2730,10 @@ static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int
 		remaining.erase(best_ship)
 
 static func combat_position(state: Dictionary, graph: Dictionary, ship: Dictionary) -> Vector2:
+	if ship.has("position"):
+		return ship["position"]
 	var points: Array = graph["points"] if ship.get("kind", "") == "fighter" else state["map"]["points"]
-	return ship.get("position", _initial_position(points, ship))
+	return _initial_position(points, ship)
 
 # Only settled infrastructure or resident population creates territory.
 # Hostile presence or combat can still suppress existing territory.
@@ -2719,7 +2743,7 @@ static func territory_claims(state: Dictionary) -> Array[int]:
 	var claims: Array[int] = planet_teams(state)
 	for i in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][i]
-		if float(system.get("population", 0.0)) <= 0.0 and system.get("yards", []).is_empty():
+		if not has_station(system):
 			claims[i] = 0
 	claims.resize(points.size())
 	for i in range((state["planets"] as Array).size(), claims.size()):
@@ -2828,6 +2852,49 @@ static func _drop_salvage(state: Dictionary, ship: Dictionary, position: Vector2
 		var born: float = float(state["elapsed"])
 		piles[id] = {"id": id, "resource": resource, "amount": tons, "origin": origin, "position": origin, "drift": Vector2.from_angle(angle + PI * 0.5) * rng.randf_range(4.0, 10.0), "born": born, "expires_at": born + decay_rng.randf_range(SALVAGE_MIN_LIFETIME, SALVAGE_MAX_LIFETIME), "claim": -1}
 	state["salvage"] = piles
+
+# The station is the sole ownership anchor. Its stock is physically lost:
+# exactly 20% of each stored resource becomes normal drifting salvage.
+static func _destroy_station(state: Dictionary, graph: Dictionary, index: int) -> void:
+	var p: Dictionary = state["planets"][index]
+	if not has_station(p):
+		return
+	var owner: int = int(p["owner"])
+	var point: Vector2 = station_position(state, index, float(state["elapsed"]))
+	var salvage: Dictionary = empty_stock()
+	for resource in RESOURCES + [ANTIMATTER]:
+		salvage[resource] = float(p["stock"].get(resource, 0.0)) * STATION_SALVAGE_FRACTION
+		p["stock"][resource] = 0.0
+	_record_ship_destruction(state, graph, {"id": station_target_id(state, index), "kind": "station", "owner": owner, "position": point, "heading": Vector2.UP, "cargo": salvage})
+	for slot in range(p["yards"].size()):
+		_record_ship_destruction(state, graph, {"id": -2 - index * 3 - slot, "kind": "shipyard", "owner": owner, "position": shipyard_position(state, index, slot, float(state["elapsed"])), "heading": Vector2.UP})
+	p["station"] = {}
+	p["owner"] = 0
+	p["home"] = false
+	p["population"] = 0.0
+	p["eco_population"] = 0.0
+	p["population_velocity"] = 0.0
+	p["demographic_rate"] = 0.0
+	p["crew_rate"] = 0.0
+	p["orbital_housing"] = 0
+	p["warehouse_level"] = 0
+	p["levels"] = empty_stock()
+	p["buildings"] = {}
+	p["yards"] = []
+	p["pds"] = {}
+	p["queue"] = []
+	p["continuous"] = {}
+	p["maintain"] = {}
+	p["repeat_cycle"] = {}
+	p["flows"] = {}
+	p.erase("capture")
+	for resource in RESOURCES:
+		p["thresholds"][resource] = {"min": 10.0, "max": 20.0}
+	_reroute_after_capture(state, index)
+
+static func station_target_id(state: Dictionary, index: int) -> int:
+	# Three yard IDs plus six possible PDS IDs per system precede stations.
+	return -2 - state["planets"].size() * 9 - index
 
 static func _salvage_active(ship: Dictionary) -> bool:
 	return int(ship.get("salvage_target", -1)) >= 0 or bool(ship.get("salvage_delivery", false))
@@ -3067,7 +3134,7 @@ static func _salvage_depot_route(state: Dictionary, graph: Dictionary, ship: Dic
 		access[origin] = team
 		for node in range(state["planets"].size()):
 			var p: Dictionary = state["planets"][node]
-			if int(p["owner"]) != owner:
+			if int(p["owner"]) != owner or not has_station(p):
 				continue
 			var useful: bool = false
 			for resource in RESOURCES + [ANTIMATTER]:
@@ -3160,7 +3227,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		if waypoint_team != 0 and waypoint_team != team:
 			depot = -1
 			break
-	if depot < 0 or int(state["planets"][depot]["owner"]) != owner:
+	if depot < 0 or int(state["planets"][depot]["owner"]) != owner or not has_station(state["planets"][depot]):
 		ship.erase("salvage_depot")
 		if float(state["elapsed"]) + EPS < float(ship.get("next_salvage_search", 0.0)):
 			return true
@@ -3169,9 +3236,11 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 			return true
 		depot = int(ship["salvage_depot"])
 	var nav: Dictionary = graph if ship["kind"] == "fighter" else state["map"]
-	if not _move({"map": nav}, ship, dt):
+	if not (ship["route"] as Array).is_empty():
+		_move({"map": nav}, ship, dt)
 		return true
-	var dock: Vector2 = nav["points"][depot]
+	var dock: Vector2 = station_position(state, depot, float(state["elapsed"]))
+	_navigate(ship, dock, SHIP_SPEED * dt)
 	if (ship["position"] as Vector2).distance_to(dock) > EPS:
 		return true
 	var p: Dictionary = state["planets"][depot]
@@ -3205,9 +3274,19 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		cells[cell].append(ship)
 	var yard_targets: Dictionary = {}
 	var pds_targets: Dictionary = {}
+	var station_targets: Dictionary = {}
 	var system_count: int = (state["planets"] as Array).size()
 	for index in range(system_count):
 		var system: Dictionary = state["planets"][index]
+		if has_station(system):
+			var target_id: int = station_target_id(state, index)
+			var pos: Vector2 = station_position(state, index, float(state["elapsed"]))
+			station_targets[target_id] = index
+			positions[target_id] = pos
+			var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+			if not cells.has(cell):
+				cells[cell] = []
+			cells[cell].append({"id": target_id, "owner": system["owner"], "kind": "station"})
 		for slot in range(system["yards"].size()):
 			var target_id: int = -2 - index * 3 - slot
 			var pos: Vector2 = shipyard_position(state, index, slot, float(state["elapsed"]))
@@ -3398,6 +3477,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	for id in destroyed:
 		var location: Vector2i = yard_targets[id]
 		var planet: Dictionary = state["planets"][location.x]
+		_record_ship_destruction(state, graph, {"id": id, "kind": "shipyard", "owner": planet["owner"], "position": shipyard_position(state, location.x, location.y, float(state["elapsed"])), "heading": Vector2.UP})
 		var job_id: int = int(planet["yards"][location.y]["job"])
 		for item in planet["queue"].duplicate():
 			if int(item["id"]) == job_id or int(item.get("yard_slot", -1)) == location.y or (item["kind"] == "yard_upgrade" and int(item["target"]) == location.y):
@@ -3415,6 +3495,14 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		_compact_shipyard_orders(planet, location.y + 1)
 		for slot in range(3):
 			planet["continuous"].erase("yard_upgrade:%d" % slot)
+	for id in station_targets:
+		if not damage.has(id):
+			continue
+		var index: int = station_targets[id]
+		var station: Dictionary = state["planets"][index]["station"]
+		station["hp"] = maxf(0.0, float(station["hp"]) - float(damage[id]))
+		if float(station["hp"]) <= EPS:
+			_destroy_station(state, graph, index)
 
 static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, reserved: Dictionary) -> int:
 	var points: Array = state["map"]["points"]
@@ -3444,9 +3532,9 @@ static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, 
 		for node in adjacency[current]:
 			var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[node])
 			if teams[node] == 0:
-				if has_planets(state["planets"][node]) and not reserved.has(node) and discovered(state, player, "planets", int(node)):
+				if not reserved.has(node) and discovered(state, player, "planets", int(node)):
 					var richness: float = float(state["planets"][node]["abundance"].get("Metals", 0.0))
-					var score: float = distance / (1.0 + minf(richness, 2.0) * 0.15)
+					var score: float = distance / (1.0 + minf(richness, 2.0) * 0.15) * (1.0 if has_planets(state["planets"][node]) else 1.6)
 					if score < best:
 						best = score
 						target = int(node)
@@ -3671,15 +3759,6 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 			if distance < nearest:
 				goal = node
 				nearest = distance
-	if goal < 0:
-		var nearest_empty: float = INF
-		for node in pois:
-			if node >= planets.size() or int(planets[node]["owner"]) != 0 or has_planets(planets[node]):
-				continue
-			var distance: float = float(_military_approach(graph, reference, _military_paths(graph, node))["distance"])
-			if distance < nearest_empty:
-				goal = node
-				nearest_empty = distance
 	# Keep a three-fighter attack cohort affordable. Small empires attack
 	# together in peace and defend together when threatened.
 	var defense_weight: int = 100 if goal < 0 else 0
@@ -4000,9 +4079,9 @@ static func _repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, 
 	if site < 0 or site >= (state["planets"] as Array).size():
 		return false
 	var planet: Dictionary = state["planets"][site]
-	if int(planet["owner"]) != owner or operational_shipyards(planet) == 0:
+	if int(planet["owner"]) != owner or not has_station(planet):
 		return false
-	var center: Vector2 = graph["points"][site]
+	var center: Vector2 = station_position(state, site, float(state["elapsed"]))
 	var team: int = int(state["teams"].get(owner, 0))
 	for other in state["ships"]:
 		if other.get("kind", "") == "fighter" and int(state["teams"].get(int(other["owner"]), 0)) != team and combat_position(state, graph, other).distance_to(center) <= REPAIR_SAFE_RADIUS:
@@ -4065,7 +4144,7 @@ static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Diction
 		return
 	if int(ship["at"]) != site:
 		return
-	var dock: Vector2 = graph["points"][site]
+	var dock: Vector2 = station_position(state, site, float(state["elapsed"]))
 	var distance: float = _navigate(ship, dock, SHIP_SPEED * dt)
 	if (ship["position"] as Vector2) != dock or not _repair_site_safe(state, graph, int(ship["owner"]), site):
 		return
@@ -4224,8 +4303,6 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 
 # Directly ordered fighters occupying a hostile system can transfer it.
 # Surviving shipyards and nearby hostile fighters prevent occupation.
-const CAPTURE_YEARS: float = 20.0
-
 # Find a safe escape route after a civilian's planned route becomes
 # hostile. Consider both ends of its existing leg without moving the hull.
 # Only the initial hostile waypoint may be used to leave hostile territory.
@@ -4282,77 +4359,6 @@ static func _reroute_after_capture(state: Dictionary, index: int) -> void:
 			continue
 		_evacuate_civilian(state, ship, teams)
 
-static func _capture_system(state: Dictionary, index: int, player: int) -> void:
-	var planet: Dictionary = state["planets"][index]
-	var former: int = int(planet["owner"])
-	# Refund surviving unfinished work to the local colony before transfer;
-	# completed infrastructure and population stay with the system.
-	for job in planet["queue"].duplicate():
-		cancel(state, former, index, int(job["id"]))
-	planet["continuous"].clear()
-	planet["maintain"] = {}
-	planet["repeat_cycle"] = {}
-	planet["pds"].clear()
-	planet["home"] = false
-	planet["owner"] = player
-	planet["capture"] = {}
-	_reroute_after_capture(state, index)
-
-static func _step_conquest(state: Dictionary, graph: Dictionary, dt: float) -> void:
-	var planets: Array = state["planets"]
-	var points: Array = graph["points"]
-	var occupiers: Dictionary = {}
-	var fighters: Array = []
-	for ship in state["ships"]:
-		if ship.get("kind", "") != "fighter" or bool(ship.get("retreating", false)):
-			continue
-		fighters.append(ship)
-		var player: int = int(ship["owner"])
-		var node: int = int(ship["at"])
-		if node < 0 or node >= planets.size() or not (ship["route"] as Array).is_empty() or int(ship.get("operation_target", ship.get("dest", -1))) != node:
-			continue
-		if combat_position(state, graph, ship).distance_to(points[node]) > AI_RALLY_RADIUS:
-			continue
-		var owner: int = int(planets[node]["owner"])
-		if (owner == 0 and has_planets(planets[node])) or (owner != 0 and state["teams"].get(owner, 0) == state["teams"].get(player, 0)):
-			continue
-		if not occupiers.has(node):
-			occupiers[node] = {}
-		occupiers[node][player] = int(occupiers[node].get(player, 0)) + 1
-	for node in range(planets.size()):
-		var planet: Dictionary = planets[node]
-		# Only established territory can be militarily captured. An empty
-		# system without population or a shipyard must be colonized instead;
-		# its owner field alone does not constitute a territorial claim.
-		var established: bool = float(planet.get("population", 0.0)) > 0.0 or not (planet["yards"] as Array).is_empty()
-		if not established or not occupiers.has(node) or not (planet["yards"] as Array).is_empty() or not planet.get("pds", {}).is_empty():
-			if planet.has("capture"):
-				planet.erase("capture")
-			continue
-		var candidates: Dictionary = occupiers[node]
-		var winner: int = -1
-		for player in candidates:
-			if winner < 0 or int(candidates[player]) > int(candidates[winner]) or (int(candidates[player]) == int(candidates[winner]) and int(player) < winner):
-				winner = int(player)
-		var team: int = int(state["teams"].get(winner, 0))
-		var contested: bool = false
-		for ship in fighters:
-			var position: Vector2 = combat_position(state, graph, ship)
-			var local_patrol: bool = int(ship["at"]) == node and (ship["route"] as Array).is_empty() and sector_contains(graph, node, position)
-			if int(state["teams"].get(int(ship["owner"]), 0)) != team and (position.distance_to(points[node]) <= LASER_RANGE or local_patrol):
-				contested = true
-				break
-		if contested:
-			planet.erase("capture")
-			continue
-		var progress: Dictionary = planet.get("capture", {})
-		var held: float = float(progress.get("held", 0.0)) if int(progress.get("player", -1)) == winner else 0.0
-		held += dt
-		if held + EPS >= CAPTURE_YEARS:
-			_capture_system(state, node, winner)
-		else:
-			planet["capture"] = {"player": winner, "held": held}
-
 # Match-only outcome evaluation, invoked by the authoritative session.
 # A colony ship permits recovery while a neutral system remains. Eliminate
 # only empires with neither a colony nor a viable colonization opportunity.
@@ -4367,8 +4373,8 @@ static func update_match_outcome(state: Dictionary) -> bool:
 	var neutral_exists: bool = false
 	for planet in state["planets"]:
 		var owner: int = int(planet["owner"])
-		if owner == 0:
-			neutral_exists = neutral_exists or has_planets(planet)
+		if owner == 0 or not has_station(planet):
+			neutral_exists = true
 		else:
 			viable[owner] = true
 	if neutral_exists:
@@ -4535,6 +4541,12 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_advance_unit_orders(state, combat_graph)
 	_update_tactical_orders(state, combat_graph)
 	_combat(state, combat_graph, dt)
+	# Station destruction changes ownership during combat. Never use stale
+	# allied routes or permit a delivery into the destroyed stockpile.
+	var surviving_teams: Array[int] = planet_teams(state)
+	if surviving_teams != teams:
+		teams = surviving_teams
+		cache = {"civilian_routes": _civilian_route_cache(state, teams)}
 	_prepare_withdrawals(state, combat_graph)
 	_update_salvage(state)
 	var salvage_busy: Dictionary = _salvage_combat_busy(state)
@@ -4633,7 +4645,6 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		profile["Civilian logistics"] = int(profile.get("Civilian logistics", 0)) + civilian_usec
 		profile["Other movement"] = int(profile.get("Other movement", 0)) + maxi(0, now - started - civilian_usec)
 		started = now
-	_step_conquest(state, combat_graph, dt)
 	_sync_operations(state)
 	update_exploration(state)
 	_profile_stage(profile, "Conquest / exploration", started)
