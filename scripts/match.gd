@@ -1371,6 +1371,9 @@ func _station_port_pressed(port: int) -> void:
 		return
 	var slot: int = ECONOMY.shipyard_at_port(p, port)
 	if slot >= 0:
+		# Station and first yard share a local reference key; discard the
+		# station's selection metadata before validating a different entity.
+		_clear_building_selection()
 		_select_building_ref(Vector2i(selected, slot), "shipyard")
 	else:
 		_operation("yard", "port:%d" % port)
