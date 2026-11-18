@@ -12,6 +12,7 @@ const STARTING_STOCK = {"Metals": 1650.0, "Plastics": 360.0, "Textiles": 240.0, 
 const BASE_INDUSTRIAL_RATE: float = 1.0
 const INDUSTRIAL_POPULATION_PER_LEVEL: float = 100000.0
 const BUILDING_BONUS: float = 0.25
+const QUICK_STATION_WORK: float = 0.1
 const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional repeatable local production infrastructure; no self-input recipes.
 const ECONOMY_BUILDINGS = {
@@ -644,6 +645,11 @@ static func _cost(kind: String, level: int) -> Dictionary:
 		"pds": return {"Metals": 540.0, "Plastics": 120.0, "Textiles": 60.0, "Organics": 60.0, "Tech": 60.0}
 		"yard_upgrade": return {"Metals": 240.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"production": return {"Metals": 200.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
+		"warehouse": return WAREHOUSE_COSTS[level - 1].duplicate()
+		"habitation":
+			var factor: float = pow(3.0, level - 1)
+			return {"Metals": 600.0 * factor, "Tech": 100.0 * factor, "Plastics": 150.0 * factor}
+		"orbital_housing": return ORBITAL_HOUSING_COST.duplicate()
 	return {}
 
 static func _work(kind: String, level: int) -> float:
@@ -656,6 +662,7 @@ static func _work(kind: String, level: int) -> float:
 		"pds": return 36.0
 		"yard_upgrade": return 15.0 * level
 		"production": return 10.0 * level
+		"warehouse", "habitation", "orbital_housing": return QUICK_STATION_WORK
 	return 1.0
 
 static func _get_owned(state: Dictionary, player: int, index: int) -> Dictionary:
@@ -740,31 +747,14 @@ static func building_available(p: Dictionary, resource: String) -> bool:
 
 static func warehouse_available(p: Dictionary) -> bool:
 	var level: int = int(p.get("warehouse_level", 0))
-	return level < 3 and float(p["population"]) + EPS >= float(WAREHOUSE_POPULATIONS[level]) and affordable(p, WAREHOUSE_COSTS[level])
+	return level < 3 and not _has_job(p, "warehouse", "") and float(p["population"]) + EPS >= float(WAREHOUSE_POPULATIONS[level]) and affordable(p, WAREHOUSE_COSTS[level])
 
 static func habitation_cost(p: Dictionary) -> Dictionary:
 	var factor: float = pow(3.0, int(p.get("habitation_level", 0)))
 	return {"Metals": 600.0 * factor, "Tech": 100.0 * factor, "Plastics": 150.0 * factor}
 
 static func habitation_available(p: Dictionary) -> bool:
-	return has_planets(p) and int(p.get("habitation_level", 0)) < 3 and affordable(p, habitation_cost(p))
-
-static func _buy_habitation(p: Dictionary) -> bool:
-	if not habitation_available(p):
-		return false
-	for resource in habitation_cost(p):
-		_spend_material(p, "Construction: habitation", resource, float(habitation_cost(p)[resource]))
-	p["habitation_level"] = int(p.get("habitation_level", 0)) + 1
-	return true
-
-static func _buy_warehouse(p: Dictionary) -> bool:
-	if not warehouse_available(p):
-		return false
-	var level: int = int(p.get("warehouse_level", 0))
-	for material in WAREHOUSE_COSTS[level]:
-		_spend_material(p, "Construction: warehouse", material, float(WAREHOUSE_COSTS[level][material]))
-	p["warehouse_level"] = level + 1
-	return true
+	return has_planets(p) and int(p.get("habitation_level", 0)) < 3 and not _has_job(p, "habitation", "") and affordable(p, habitation_cost(p))
 
 static func building_cost(_p: Dictionary, resource: String) -> Dictionary:
 	return ECONOMY_BUILDINGS[resource]["cost"].duplicate()
@@ -839,16 +829,23 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 			target = str(slot)
 			level = 1
 		"economy":
-			if target == "orbital_housing":
-				return _buy_orbital_housing(p)
-			if target == "habitation":
-				return _buy_habitation(p)
-			if target == "warehouse":
-				return _buy_warehouse(p)
-			if not building_available(p, target):
-				return false
-			kind = "economy_building"
-			level = int(p.get("buildings", {}).get(target, 0)) + 1
+			match target:
+				"orbital_housing":
+					if not orbital_housing_available(p):
+						return false
+					kind = target
+					target = ""
+				"habitation", "warehouse":
+					if not (habitation_available(p) if target == "habitation" else warehouse_available(p)):
+						return false
+					kind = target
+					level = int(p.get(kind + "_level", 0)) + 1
+					target = ""
+				_:
+					if not building_available(p, target):
+						return false
+					kind = "economy_building"
+					level = int(p.get("buildings", {}).get(target, 0)) + 1
 		"production":
 			if not production_unlocked(p, target) or _has_job(p, kind, target):
 				return false
@@ -979,12 +976,10 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 		if order.is_empty():
 			continue
 		if order[0] in ["warehouse", "habitation"]:
-			if order[0] == "warehouse":
-				_buy_warehouse(p)
-			else:
-				_buy_habitation(p)
 			if int(p.get(str(order[0]) + "_level", 0)) >= 3:
 				p["continuous"][key] = false
+			elif enqueue(state, int(p["owner"]), index, "economy", order[0]):
+				p["queue"][-1]["automatic"] = true
 			continue
 		if SHIP_KINDS.has(order[0]):
 			if hull_waiting_for_funds or (p["yards"] as Array).is_empty() or cycle.has(key) or manual_hulls.has(key):
@@ -1217,6 +1212,15 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 	match str(item["kind"]):
 		"economy_building":
 			p["buildings"][item["target"]] = int(p["buildings"].get(item["target"], 0)) + 1
+		"warehouse", "habitation":
+			var kind: String = item["kind"]
+			p[kind + "_level"] = int(item["level"])
+			if int(item["level"]) >= 3:
+				p["continuous"][kind] = false
+		"orbital_housing":
+			p["orbital_housing"] = int(p.get("orbital_housing", 0)) + 1
+			_add_eco_residents(p, ORBITAL_HOUSING_POPULATION)
+			p["population_velocity"] = 0.0
 		"production":
 			p["levels"][item["target"]] = int(item["level"])
 		"pds":

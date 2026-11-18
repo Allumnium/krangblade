@@ -59,13 +59,20 @@ var console_right_body: VBoxContainer
 var console_profile: Control
 var empty_selection: Label
 var command_grids: Dictionary = {}
-var yard_activity: VBoxContainer
-var yard_activity_rows: Dictionary = {}
-var inspector_tabs: TabContainer
+var station_commands: VBoxContainer
+var station_primary_grid: GridContainer
+var station_build_grid: GridContainer
+var station_trade: VBoxContainer
+var station_trade_back: Button
+var station_build_buttons: Dictionary = {}
+var station_icons: Dictionary = {}
+var station_card: String = "primary"
+var station_selected_index: int = -1
+var station_queue: HFlowContainer
+var station_queue_rows: Dictionary = {}
+var station_details: VBoxContainer
 var asteroid_shape_cache: Dictionary = {}
 var asteroid_cache_seed: int = -1
-var habitation_card: Dictionary = {}
-var orbital_card: Dictionary = {}
 var population_label: Label
 var raw_antimatter_label: Label
 var population_delta_label: Label
@@ -161,7 +168,6 @@ var yard_costs: GridContainer
 var yard_progress: ProgressBar
 var yard_upgrade: Button
 var yard_cancel: Button
-var last_system_tab_selection: int = -1
 var selected_ship_id: int = -1
 var selected_units: Array[int] = []
 var control_groups: Dictionary = {}
@@ -242,10 +248,6 @@ var planet_detail_seed: int = -1
 var trade_sliders: Dictionary = {}
 var trade_checks: Dictionary = {}
 var trade_stock_labels: Dictionary = {}
-var pds_card: Dictionary = {}
-var economy_cards: Dictionary = {}
-var warehouse_card: Dictionary = {}
-var repeat_icon: Texture2D
 var population_icon: Texture2D
 var build_clock_icon: Texture2D
 var production_summary: VBoxContainer
@@ -621,12 +623,15 @@ func _build_ui() -> void:
 	population_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	population_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	population_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var population_row: HBoxContainer = _population_row(planet_overview)
+	station_details = VBoxContainer.new()
+	station_details.add_theme_constant_override("separation", 3)
+	planet_overview.add_child(station_details)
+	var population_row: HBoxContainer = _population_row(station_details)
 	population_row.add_child(population_label)
 	population_delta_label = _label("", 11)
 	population_delta_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	population_row.add_child(population_delta_label)
-	production_summary = HUD.section(planet_overview, "Resources", true)
+	production_summary = HUD.section(station_details, "Resources", true)
 	production_summary.get_child(0).hide()
 	production_summary.add_theme_constant_override("separation", 1)
 	_build_production_summary()
@@ -635,6 +640,12 @@ func _build_ui() -> void:
 	raw_antimatter_label.add_theme_color_override("font_color", HUD.COLORS[ECONOMY.ANTIMATTER])
 	production_summary.add_child(raw_antimatter_label)
 	raw_antimatter_label.hide()
+	station_queue = HFlowContainer.new()
+	station_queue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	station_queue.add_theme_constant_override("h_separation", 4)
+	station_queue.add_theme_constant_override("v_separation", 4)
+	planet_overview.add_child(station_queue)
+	station_queue.hide()
 	interaction_scroll = ScrollContainer.new()
 	interaction_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	interaction_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -647,21 +658,8 @@ func _build_ui() -> void:
 	interaction_panel.add_child(colony_picker)
 	send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
 	HUD.action(send_colony_button, Color("#c7a4ff"), true)
-	inspector_tabs = TabContainer.new()
-	inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	inspector_tabs.clip_contents = true
-	inspector_tabs.tab_changed.connect(func(_tab: int) -> void: _collapse_details())
-	body.add_child(inspector_tabs)
-	inspector_tabs.visibility_changed.connect(func() -> void:
-		if not inspector_tabs.is_visible_in_tree():
-			_collapse_details())
-	var economy_page: GridContainer = _inspector_page("Economy")
-	# Only construction of new attached modules belongs to the station.
-	yard_activity = HUD.section(economy_page.get_parent(), "Shipyard construction", true)
-	economy_page.get_parent().move_child(yard_activity.get_parent(), 0)
-	_build_economy_cards(economy_page)
+	_build_station_command_card(body)
 	var trade_page: GridContainer = _inspector_page("Trade")
-	_build_pds_card(economy_page)
 	for resource in ECONOMY.RESOURCES:
 		var logistics: VBoxContainer = HUD.section(trade_page, "", true)
 		logistics.get_child(0).hide()
@@ -725,7 +723,7 @@ func _build_ui() -> void:
 	_layout_console()
 
 func _layout_console() -> void:
-	if not is_instance_valid(console_panel) or not is_instance_valid(yard_activity):
+	if not is_instance_valid(console_panel) or not is_instance_valid(station_commands):
 		return
 	# Keep a stable, useful map at both normal and small window sizes.
 	var height: float = minf(clampf(size.y * 0.36, 220.0, 320.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0))
@@ -807,6 +805,24 @@ func _layout_command_grids() -> void:
 				while font_size > 8 and font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > slot_width - 4.0:
 					font_size -= 1
 			caption.add_theme_font_size_override("font_size", font_size)
+	if is_instance_valid(station_primary_grid):
+		var padding: float = inspector_panel.get_theme_stylebox("panel").get_minimum_size().x
+		var slot_width: float = maxf(36.0, floorf((inspector_panel.custom_minimum_size.x - padding - 9.0) / 4.0))
+		var slot_height: float = clampf(slot_width, 40.0, 52.0)
+		for grid in [station_primary_grid, station_build_grid]:
+			for button in grid.get_children():
+				button.custom_minimum_size = Vector2(slot_width, slot_height)
+				if not button is Button:
+					continue
+				var caption: Label = button.get_meta("caption")
+				var font: Font = caption.get_theme_font("font")
+				var font_size: int = 11
+				for line in caption.text.split("\n"):
+					while font_size > 8 and font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > slot_width - 4.0:
+						font_size -= 1
+				caption.add_theme_font_size_override("font_size", font_size)
+		if is_instance_valid(station_trade_back):
+			station_trade_back.custom_minimum_size = Vector2(slot_width, slot_height)
 	if is_instance_valid(selection_grid):
 		selection_grid.columns = maxi(1, floori(maxf(38.0, console_center.size.x - 20.0) / 41.0))
 	if is_instance_valid(selection_portrait):
@@ -912,83 +928,6 @@ func _draw_minimap() -> void:
 		minimap.draw_rect(clipped, HUD.ACCENT, false, 1.2)
 
 
-func _make_disclosure(parent: Container, title_text: String) -> Dictionary:
-	var line := HBoxContainer.new()
-	line.add_theme_constant_override("separation", 3)
-	parent.add_child(line)
-	var header := Button.new()
-	header.flat = true
-	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.clip_text = true
-	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	header.custom_minimum_size.y = 21
-	header.add_theme_font_size_override("font_size", 12)
-	line.add_child(header)
-	var summary := VBoxContainer.new()
-	summary.add_theme_constant_override("separation", 2)
-	parent.add_child(summary)
-	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 4)
-	parent.add_child(body)
-	body.hide()
-	header.set_meta("caption", title_text)
-	header.text = title_text
-	var card: Dictionary = {"header": header, "summary": summary, "body": body, "actions": line}
-	header.pressed.connect(_toggle_disclosure.bind(card))
-	return card
-
-func _detail_cards() -> Array:
-	return economy_cards.values() + [warehouse_card, habitation_card, orbital_card, pds_card]
-
-func _card_tab(card: Dictionary) -> Node:
-	var node: Node = card["header"]
-	while node.get_parent() != null:
-		if node.get_parent() == inspector_tabs:
-			return node
-		node = node.get_parent()
-	return null
-
-func _toggle_disclosure(card: Dictionary) -> void:
-	var expanded: bool = not card["body"].visible
-	if expanded:
-		var tab: Node = _card_tab(card)
-		for other in _detail_cards():
-			if other.has("body") and other["body"] != card["body"] and _card_tab(other) == tab:
-				_collapse_card(other)
-	card["body"].visible = expanded
-	_disclosure_title(card, str(card["header"].get_meta("caption")))
-
-func _collapse_details() -> void:
-	for card in _detail_cards():
-		_collapse_card(card)
-
-func _card_action(card: Dictionary, caption: String, callback: Callable) -> Button:
-	var button: Button = _button(caption, callback, card["actions"])
-	button.custom_minimum_size = Vector2(0, 20)
-	button.add_theme_font_size_override("font_size", 10)
-	return button
-
-func _card_cancel(card: Dictionary, callback: Callable, progress: ProgressBar = null) -> Button:
-	var button: Button = _card_action(card, "×", callback)
-	var line: HBoxContainer = card["actions"]
-	line.move_child(button, 1)
-	if progress != null:
-		progress.reparent(line, false)
-		line.move_child(progress, 0)
-		progress.custom_minimum_size = Vector2(5, 0)
-		progress.show_percentage = false
-		progress.fill_mode = ProgressBar.FILL_BOTTOM_TO_TOP
-		progress.step = 0.0
-		progress.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-		progress.size_flags_vertical = Control.SIZE_FILL
-		progress.add_theme_stylebox_override("background", HUD.surface(Color("#14283a"), Color("#14283a"), 0, 0))
-		progress.add_theme_stylebox_override("fill", HUD.surface(HUD.ACCENT, HUD.ACCENT, 0, 0))
-	button.hide()
-	button.custom_minimum_size.x = 23
-	button.tooltip_text = "Cancel / refund"
-	button.disabled = true
-	return button
-
 func _population_texture() -> Texture2D:
 	if population_icon == null:
 		var image := Image.new()
@@ -1010,16 +949,6 @@ func _population_row(parent: Container) -> HBoxContainer:
 	icon.tooltip_text = "Population"
 	row.add_child(icon)
 	return row
-
-func _disclosure_title(card: Dictionary, caption: String) -> void:
-	var header: Button = card["header"]
-	header.set_meta("caption", caption)
-	header.text = caption
-
-func _collapse_card(card: Dictionary) -> void:
-	if card.has("body"):
-		card["body"].hide()
-		_disclosure_title(card, str(card["header"].get_meta("caption")))
 
 func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
 	var blocked: Array[String] = []
@@ -1099,29 +1028,6 @@ func _ship_stats(kind: String) -> String:
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/yr · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 	return "%s\nHP %.0f · Speed %.0f/yr · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
 
-func _repeat_button(parent: Container, key: String) -> Button:
-	if repeat_icon == null:
-		var image := Image.new()
-		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#dbeaff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/></svg>')
-		repeat_icon = ImageTexture.create_from_image(image)
-	var button := Button.new()
-	button.icon = repeat_icon
-	button.expand_icon = true
-	button.toggle_mode = true
-	button.custom_minimum_size = Vector2(22, 20)
-	button.add_theme_constant_override("icon_max_width", 16)
-	button.tooltip_text = "Repeat automatically"
-	parent.add_child(button)
-	button.toggled.connect(func(enabled: bool) -> void:
-		session.call("request_continuous", selected, key, enabled))
-	return button
-
-func _sync_repeat(button: Button, p: Dictionary, key: String, available: bool) -> void:
-	button.set_pressed_no_signal(bool(p.get("continuous", {}).get(key, false)))
-	button.disabled = not available
-	button.modulate = HUD.ACCENT if button.button_pressed else Color.WHITE
-	button.tooltip_text = "Repeat enabled (click to stop)" if button.button_pressed else "Repeat automatically"
-
 func _build_production_summary() -> void:
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override("separation", 2)
@@ -1184,58 +1090,6 @@ func _system_bonus_text(p: Dictionary) -> String:
 		lines.append("Advanced manufacturing %d%% (future)" % advanced)
 	return "\n".join(lines)
 
-func _build_economy_cards(parent: Container) -> void:
-	var warehouse_section: VBoxContainer = HUD.section(parent, "", true)
-	warehouse_section.get_child(0).hide()
-	warehouse_card = _make_disclosure(warehouse_section, "Warehouse logistics")
-	var warehouse: VBoxContainer = warehouse_card["body"]
-	var warehouse_detail: Label = _label("", 12)
-	warehouse.add_child(warehouse_detail)
-	var warehouse_button: Button = _card_action(warehouse_card, "Upgrade", _operation.bind("economy", "warehouse"))
-	warehouse_card["cancel"] = _card_cancel(warehouse_card, func() -> void: pass)
-	HUD.action(warehouse_button, HUD.ACCENT, true)
-	warehouse_card.merge({"button": warehouse_button, "detail": warehouse_detail, "costs": _cost_grid(warehouse_card["summary"])})
-	var habitat_section: VBoxContainer = HUD.section(parent, "", true)
-	habitat_section.get_child(0).hide()
-	habitation_card = _make_disclosure(habitat_section, "Habitation technology")
-	var habitat_body: VBoxContainer = habitation_card["body"]
-	var habitat_detail: Label = _label("", 12)
-	habitat_body.add_child(habitat_detail)
-	habitation_card.merge({"button": _card_action(habitation_card, "Upgrade", _operation.bind("economy", "habitation")), "detail": habitat_detail, "costs": _cost_grid(habitation_card["summary"])})
-	HUD.action(habitation_card["button"], HUD.ACCENT, true)
-	habitation_card["repeat"] = _repeat_button(habitation_card["actions"], "habitation")
-	warehouse_card["repeat"] = _repeat_button(warehouse_card["actions"], "warehouse")
-	var orbital_section: VBoxContainer = HUD.section(parent, "", true)
-	orbital_section.get_child(0).hide()
-	orbital_card = _make_disclosure(orbital_section, "Orbital Eco-Housing")
-	var orbital_detail: Label = _label("", 12)
-	orbital_card["body"].add_child(orbital_detail)
-	orbital_card.merge({"section": orbital_section, "button": _card_action(orbital_card, "Build", _operation.bind("economy", "orbital_housing")), "detail": orbital_detail, "costs": _cost_grid(orbital_card["summary"])})
-	HUD.action(orbital_card["button"], HUD.ACCENT, true)
-	for resource in ECONOMY.RESOURCES:
-		var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
-		var section: VBoxContainer = HUD.section(parent, "", true)
-		section.get_child(0).hide()
-		var disclosure: Dictionary = _make_disclosure(section, str(definition["name"]))
-		var card: VBoxContainer = disclosure["body"]
-		var effect: Label = _label("", 12)
-		card.add_child(effect)
-		var detail: Label = _label("", 12)
-		card.add_child(detail)
-		var button: Button = _card_action(disclosure, "Build", _operation.bind("economy", resource))
-		var progress := ProgressBar.new()
-		section.add_child(progress)
-		section.move_child(progress, card.get_index())
-		progress.hide()
-		disclosure["progress"] = progress
-		disclosure["cancel"] = _card_cancel(disclosure, _cancel_kind.bind("economy_building", resource), progress)
-		disclosure["repeat"] = _repeat_button(disclosure["actions"], "economy_building:" + resource)
-		HUD.action(button, HUD.ACCENT, true)
-		disclosure.merge({"button": button, "detail": detail, "effect": effect, "costs": _cost_grid(disclosure["summary"])})
-		economy_cards[resource] = disclosure
-
-# Project exactly one completed building without touching authoritative state.
-# Only the buildings dictionary is changed; all other inputs remain current.
 func _economy_building_effect(p: Dictionary, resource: String) -> String:
 	var preview: Dictionary = p.duplicate()
 	var buildings: Dictionary = p.get("buildings", {}).duplicate()
@@ -1268,92 +1122,6 @@ func _economy_building_effect(p: Dictionary, resource: String) -> String:
 			lines.append("Output capped at the extraction limit")
 	lines.append("At current population and modifiers; before storage limits.")
 	return "\n".join(lines)
-
-func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
-	var has_planets: bool = ECONOMY.has_planets(p)
-	habitation_card["header"].get_parent().get_parent().visible = has_planets
-	orbital_card["section"].visible = not has_planets
-	if not has_planets:
-		var residents: float = float(p["population"])
-		var housing_capacity: float = ECONOMY.eco_capacity(p)
-		_disclosure_title(orbital_card, "Orbital Eco-Housing · %d" % int(p.get("orbital_housing", 0)))
-		orbital_card["detail"].text = "Population: %s → %s (+5,000)\nEco-Housing capacity: %s → %s\nOrganics surplus: %.2f → %.2f t/yr\nCivilian consumption: 0 t/yr\nResidents serve as crew and regrow (30-year doubling) to housing capacity, independent of planetary limits." % [_compact_amount(residents), _compact_amount(residents + ECONOMY.ORBITAL_HOUSING_POPULATION), _compact_amount(housing_capacity), _compact_amount(housing_capacity + ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(p), ECONOMY.eco_organics(p) + ECONOMY.ECO_HOUSING_ORGANICS]
-		orbital_card["button"].disabled = not owned or not ECONOMY.orbital_housing_available(p)
-		_set_timed_action(orbital_card["button"], "Build", 0.0)
-		_show_cost(orbital_card["costs"], ECONOMY.ORBITAL_HOUSING_COST)
-	var habitat_level: int = int(p.get("habitation_level", 0))
-	_disclosure_title(habitation_card, "Habitation technology · Lv %d" % habitat_level)
-	var penalty: float = -100.0 * ECONOMY.overpopulation_penalty(p)
-	var next_penalty: float = -100.0 * ECONOMY.overpopulation_penalty(p, 2.0)
-	habitation_card["detail"].text = "Overpopulation penalty: %+.2f%%" % penalty
-	var habitat_capacity: float = ECONOMY.habitation_capacity(p)
-	if habitat_level < 3:
-		habitation_card["detail"].text += " → %+.2f%% (%+.2f pp)" % [next_penalty, next_penalty - penalty]
-		habitation_card["detail"].text += "\nHabitation capacity: %s → %s people (2×)" % [_compact_amount(habitat_capacity), _compact_amount(habitat_capacity * 2.0)]
-	else:
-		habitation_card["detail"].text += "\nHabitation capacity: %s people · Max level" % _compact_amount(habitat_capacity)
-	habitation_card["detail"].text += "\nPenalty applies to positive population growth, at current population."
-	_sync_repeat(habitation_card["repeat"], p, "habitation", owned and habitat_level < 3)
-	habitation_card["button"].disabled = not owned or not ECONOMY.habitation_available(p)
-	_set_timed_action(habitation_card["button"], "Max" if habitat_level >= 3 else "Upgrade", -1.0 if habitat_level >= 3 else 0.0)
-	habitation_card["costs"].visible = habitat_level < 3
-	_show_cost(habitation_card["costs"], ECONOMY.habitation_cost(p))
-	var level: int = int(p.get("warehouse_level", 0))
-	var warehouse_button: Button = warehouse_card["button"]
-	_sync_repeat(warehouse_card["repeat"], p, "warehouse", owned and level < 3)
-	warehouse_button.disabled = not owned or not ECONOMY.warehouse_available(p)
-	_set_timed_action(warehouse_button, "Max" if level >= 3 else "Upgrade", -1.0 if level >= 3 else 0.0)
-	var current_capacity: float = ECONOMY.storage_capacity(p)
-	var warehouse_detail: String = "Storage per resource: %s" % _tons(current_capacity, 0)
-	if level < 3:
-		var next_capacity: float = float(ECONOMY.WAREHOUSE_CAPACITIES[level + 1])
-		warehouse_detail += " → %s (+%s)" % [_tons(next_capacity, 0), _tons(next_capacity - current_capacity, 0)]
-		warehouse_detail += "\nCapacity: %.1f× current" % (next_capacity / current_capacity)
-		warehouse_detail += "\nRequired population: %s" % _compact_amount(float(ECONOMY.WAREHOUSE_POPULATIONS[level]))
-		if not ECONOMY.affordable(p, ECONOMY.WAREHOUSE_COSTS[level]):
-			warehouse_detail += "\nInsufficient local materials"
-		_show_cost(warehouse_card["costs"], ECONOMY.WAREHOUSE_COSTS[level])
-	warehouse_card["costs"].visible = level < 3
-	_disclosure_title(warehouse_card, "Warehouse logistics · Lv %d" % level)
-	warehouse_card["detail"].text = warehouse_detail
-	warehouse_button.tooltip_text = warehouse_detail + ("\n" + _cost_text(ECONOMY.WAREHOUSE_COSTS[level]) if level < 3 else "")
-	for resource in economy_cards:
-		var card: Dictionary = economy_cards[resource]
-		var definition: Dictionary = ECONOMY.ECONOMY_BUILDINGS[resource]
-		card["header"].get_parent().get_parent().visible = has_planets or ECONOMY.production_available(p, resource)
-		var installed: int = int(p.get("buildings", {}).get(resource, 0))
-		card["effect"].text = _economy_building_effect(p, resource)
-		var job: Dictionary = {}
-		for item in p["queue"]:
-			if item["kind"] == "economy_building" and item["target"] == resource:
-				job = item
-				break
-		card["progress"].visible = not job.is_empty()
-		card["cancel"].visible = false
-		card["cancel"].disabled = not owned or job.is_empty()
-		if not job.is_empty():
-			card["progress"].value = 100.0 * float(job["progress"]) / float(job["work"])
-			_style_progress(card["progress"], p, job)
-		var button: Button = card["button"]
-		_sync_repeat(card["repeat"], p, "economy_building:" + resource, owned and ECONOMY.production_available(p, resource))
-		_set_timed_action(button, "Build", 30.0 if job.is_empty() else float(job["work"]))
-		button.disabled = not owned or not ECONOMY.building_available(p, resource) or not ECONOMY.affordable(p, ECONOMY.building_cost(p, resource))
-		var cost: String = _cost_text(ECONOMY.building_cost(p, resource))
-		var requirement: String = "%s population" % _compact_amount(float(definition["population"]))
-		var unmet: PackedStringArray = []
-		if job.is_empty():
-			if float(p["population"]) + ECONOMY.EPS < float(definition["population"]):
-				unmet.append("Requires " + requirement)
-			if not ECONOMY.production_available(p, resource):
-				unmet.append("No local deposit")
-			if not ECONOMY.affordable(p, ECONOMY.building_cost(p, resource)):
-				unmet.append("Insufficient local materials")
-		card["detail"].text = "\n".join(unmet)
-		card["detail"].visible = not unmet.is_empty()
-		card["costs"].visible = true
-		_show_cost(card["costs"], ECONOMY.building_cost(p, resource))
-		_disclosure_title(card, str(definition["name"]) + " · %d" % installed)
-		button.tooltip_text = "%s\n%s" % [requirement, cost]
 
 func _body_name(system_index: int, slot: int) -> String:
 	var suffixes: Array[String] = ["I", "II", "III", "IV", "V", "VI"]
@@ -1490,6 +1258,192 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_commands["rally"] = rally_button
 	yard_command_scroll.hide()
 
+func _station_command_icon(kind: String) -> Texture2D:
+	if HUD.ICONS.has(kind):
+		return HUD.ICONS[kind]
+	if station_icons.has(kind):
+		return station_icons[kind]
+	var paths: Dictionary = {
+		"build": '<path d="M4 27L17 14M12 5L17 2L29 14L25 18L19 12L8 23"/><path d="M3 25L7 29"/>',
+		"trade": '<path d="M4 10H28L21 3M28 10L21 17M28 22H4L11 15M4 22L11 29"/>',
+		"return": '<path d="M7 8L2 16L7 24M2 16H22Q28 16 28 22V27"/>',
+		"warehouse": '<path d="M3 12L16 4L29 12V28H3Z M9 28V17H23V28M9 21H23M9 25H23"/>',
+		"habitation": '<path d="M3 28V13H12V4H22V28M22 14H29V28M7 18H9M7 23H9M16 9H18M16 15H18M16 21H18"/>',
+		"orbital_housing": '<circle cx="16" cy="16" r="12"/><path d="M8 23V14L16 8L24 14V23H8M13 23V17H19V23"/>',
+		"yard": '<path d="M4 4H28V28H4Z M4 9H28M4 23H28M12 23L16 10L20 23Z"/>',
+		"pds": '<path d="M16 3L27 8V18Q24 26 16 30Q8 26 5 18V8Z M11 17H21M16 12V22"/>'
+	}
+	station_icons[kind] = _command_icon(paths.get(kind, paths["build"]))
+	return station_icons[kind]
+
+func _station_grid(parent: Container) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 3)
+	grid.add_theme_constant_override("v_separation", 3)
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(grid)
+	return grid
+
+func _station_spacer(grid: GridContainer) -> void:
+	var slot := Control.new()
+	slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_child(slot)
+
+func _station_button(grid: GridContainer, caption: String, key: String, action: Callable) -> Button:
+	var button: Button = _button("", action, grid)
+	var art: TextureRect = _yard_ability_face(button, caption, _station_command_icon(key))
+	button.set_meta("portrait", art)
+	return button
+
+func _build_station_command_card(parent: Container) -> void:
+	station_commands = VBoxContainer.new()
+	station_commands.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	station_commands.alignment = BoxContainer.ALIGNMENT_END
+	parent.add_child(station_commands)
+	station_primary_grid = _station_grid(station_commands)
+	_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")).tooltip_text = "Build"
+	_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")).tooltip_text = "Trade"
+	_station_spacer(station_primary_grid)
+	_station_spacer(station_primary_grid)
+	station_build_grid = _station_grid(station_commands)
+	var captions: Dictionary = {"Metals": "Refinery", "Plastics": "Polymer\nfactory", "Textiles": "Textile\nmill", "Organics": "Agriculture", "Tech": "Electronics", "Crystals": "Crystal\nprocessor", "warehouse": "Warehouse", "housing": "Habitation", "yard": "Shipyard", "pds": "Planetary\ndefense"}
+	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "yard", "pds"]:
+		var button: Button = _station_button(station_build_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
+		station_build_buttons[key] = button
+		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing"]:
+			button.gui_input.connect(_station_repeat_input.bind(key, button))
+			var border := Control.new()
+			border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			button.add_child(border)
+			border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			border.draw.connect(_draw_autobuild_border.bind(border))
+			border.hide()
+			button.set_meta("auto_border", border)
+	_station_spacer(station_build_grid)
+	_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")).tooltip_text = "Return"
+	station_trade = VBoxContainer.new()
+	station_trade.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	station_commands.add_child(station_trade)
+	_sync_station_card()
+	station_commands.hide()
+
+func _station_card_to(card: String) -> void:
+	station_card = card
+	_sync_station_card()
+
+func _sync_station_card() -> void:
+	station_primary_grid.visible = station_card == "primary"
+	station_build_grid.visible = station_card == "build"
+	station_trade.visible = station_card == "trade"
+
+func _station_build(key: String) -> void:
+	var p: Dictionary = _planet()
+	if p.is_empty() or int(p["owner"]) != _me() or station_selected_index != selected:
+		return
+	if key == "housing":
+		key = "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
+	if key in ["yard", "pds"]:
+		_operation(key)
+	else:
+		_operation("economy", key)
+
+func _station_repeat_key(p: Dictionary, key: String) -> String:
+	if key in ECONOMY.RESOURCES:
+		return "economy_building:" + key
+	if key == "warehouse":
+		return key
+	return "habitation" if key == "housing" and ECONOMY.has_planets(p) else ""
+
+func _station_repeat_input(event: InputEvent, key: String, button: Button) -> void:
+	if not event is InputEventMouseButton or event.button_index != MOUSE_BUTTON_RIGHT or not event.pressed or button.disabled:
+		return
+	var p: Dictionary = _planet()
+	if p.is_empty() or int(p["owner"]) != _me() or station_selected_index != selected:
+		return
+	var repeat_key: String = _station_repeat_key(p, key)
+	if not repeat_key.is_empty():
+		session.call("request_continuous", selected, repeat_key, not bool(p.get("continuous", {}).get(repeat_key, false)))
+	button.accept_event()
+
+func _refresh_station_build(p: Dictionary, owned: bool) -> void:
+	for key in station_build_buttons:
+		var button: Button = station_build_buttons[key]
+		var kind: String = key
+		var recipe: Dictionary = {}
+		var name_text: String = ""
+		var description: String = ""
+		var work: float = 30.0
+		var eligible: bool = true
+		var available: bool = false
+		if key in ECONOMY.RESOURCES:
+			name_text = str(ECONOMY.ECONOMY_BUILDINGS[key]["name"])
+			recipe = ECONOMY.building_cost(p, key)
+			eligible = ECONOMY.production_available(p, key)
+			available = ECONOMY.building_available(p, key)
+			description = "%s installed · Requires %s population\n%s" % [int(p.get("buildings", {}).get(key, 0)), _compact_amount(float(ECONOMY.ECONOMY_BUILDINGS[key]["population"])), _economy_building_effect(p, key)]
+		elif key == "warehouse":
+			var level: int = int(p.get("warehouse_level", 0))
+			name_text = "Warehouse logistics · Lv %d" % level
+			eligible = level < 3
+			available = ECONOMY.warehouse_available(p)
+			work = ECONOMY.QUICK_STATION_WORK
+			description = "Storage: %s per resource" % _tons(ECONOMY.storage_capacity(p), 0)
+			if eligible:
+				recipe = ECONOMY.WAREHOUSE_COSTS[level]
+				description += " → %s\nRequires %s population" % [_tons(ECONOMY.WAREHOUSE_CAPACITIES[level + 1], 0), _compact_amount(ECONOMY.WAREHOUSE_POPULATIONS[level])]
+		elif key == "housing":
+			kind = "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
+			var caption: Label = button.get_meta("caption")
+			caption.text = "Habitation" if kind == "habitation" else "Orbital\nhousing"
+			(button.get_meta("portrait") as TextureRect).texture = _station_command_icon(kind)
+			work = ECONOMY.QUICK_STATION_WORK
+			if kind == "habitation":
+				var level: int = int(p.get("habitation_level", 0))
+				name_text = "Habitation technology · Lv %d" % level
+				eligible = level < 3
+				available = ECONOMY.habitation_available(p)
+				recipe = ECONOMY.habitation_cost(p) if eligible else {}
+				description = "Habitation capacity: %s → %s" % [_compact_amount(ECONOMY.habitation_capacity(p)), _compact_amount(ECONOMY.habitation_capacity(p) * (2.0 if eligible else 1.0))]
+			else:
+				name_text = "Orbital Eco-Housing"
+				recipe = ECONOMY.ORBITAL_HOUSING_COST
+				available = ECONOMY.orbital_housing_available(p)
+				description = "%d installed · +5,000 crew capacity · +%.1f t/yr Organics" % [int(p.get("orbital_housing", 0)), ECONOMY.ECO_HOUSING_ORGANICS]
+		elif key == "yard":
+			var slot: int = ECONOMY.next_shipyard_slot(p)
+			name_text = "Shipyard"
+			eligible = slot > 0
+			if eligible:
+				recipe = ECONOMY._cost("yard", slot)
+				work = ECONOMY._work("yard", slot)
+			available = eligible
+			description = "%d / %d completed or queued" % [ECONOMY.shipyard_count(p), ECONOMY.MAX_SHIPYARDS]
+		elif key == "pds":
+			name_text = "Planetary defense"
+			eligible = ECONOMY.next_pds(p) >= 0
+			available = eligible and ECONOMY.pds_job(p).is_empty()
+			recipe = ECONOMY._cost("pds", 1)
+			work = ECONOMY._work("pds", 1)
+			description = "%d / %d defended · %.0f HP · %.0f damage" % [p.get("pds", {}).size(), int(p["planet_count"]), ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE]
+		var repeat_key: String = _station_repeat_key(p, key)
+		var auto: bool = not repeat_key.is_empty() and bool(p.get("continuous", {}).get(repeat_key, false))
+		available = owned and available and ECONOMY.affordable(p, recipe)
+		button.disabled = not owned or not eligible or (repeat_key.is_empty() and not available)
+		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
+		if button.has_meta("auto_border"):
+			(button.get_meta("auto_border") as Control).visible = auto
+		button.tooltip_text = name_text + "\n" + description
+		if not recipe.is_empty():
+			button.tooltip_text += "\n%s · %.1f yr" % [_cost_text(recipe), work]
+		if not eligible:
+			button.tooltip_text += "\nUnavailable"
+		elif not available:
+			button.tooltip_text += "\nRequirements not met or already queued"
+		if not repeat_key.is_empty() and eligible:
+			button.tooltip_text += "\nRight-click: %s repeat" % ("Disable" if auto else "Enable")
+
 func _draw_autobuild_border(border: Control) -> void:
 	var bounds := Rect2(Vector2.ONE * 2.0, border.size - Vector2.ONE * 4.0)
 	var pulse: float = 0.55 + 0.25 * sin(visual_clock * 4.0)
@@ -1570,52 +1524,8 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 			jobs.push_front(job)
 		elif upgrade or int(job.get("yard_slot", -1)) == selected_yard:
 			jobs.append(job)
-	for id in yard_queue_rows.keys():
-		var keep: bool = false
-		for job in jobs:
-			if int(job["id"]) == id:
-				keep = true
-				break
-		if not keep:
-			var row: Control = yard_queue_rows[id]["row"]
-			yard_queue.remove_child(row)
-			row.queue_free()
-			yard_queue_rows.erase(id)
 	yard_status.text = "Offline" if not operating else ("Idle" if jobs.is_empty() else "%d queued" % jobs.size())
-	for idx in range(jobs.size()):
-		var job: Dictionary = jobs[idx]
-		var id: int = int(job["id"])
-		if not yard_queue_rows.has(id):
-			var row := VBoxContainer.new()
-			row.add_theme_constant_override("separation", 2)
-			var cancel := _button("", _cancel_job.bind(id), row)
-			cancel.focus_mode = Control.FOCUS_NONE
-			cancel.custom_minimum_size = Vector2(38, 38)
-			cancel.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			cancel.expand_icon = true
-			cancel.icon = _production_icon(str(job["kind"]), _empire_color(int(system["owner"]))) if ECONOMY.SHIP_KINDS.has(job["kind"]) else _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
-			var bar := ProgressBar.new()
-			bar.custom_minimum_size.y = 4
-			bar.show_percentage = false
-			bar.step = 0.0
-			bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			row.add_child(bar)
-			yard_queue.add_child(row)
-			yard_queue_rows[id] = {"row": row, "bar": bar, "cancel": cancel}
-		var widgets: Dictionary = yard_queue_rows[id]
-		yard_queue.move_child(widgets["row"], idx)
-		var percent: float = 100.0 * float(job["progress"]) / maxf(1.0, float(job["work"]))
-		widgets["bar"].value = percent
-		widgets["bar"].visible = id == active_id or percent > 0.0
-		_style_progress(widgets["bar"], system, job)
-		var tile: Button = widgets["cancel"]
-		tile.disabled = not owned
-		var blocked: bool = bool(widgets["bar"].get_meta("blocked"))
-		if id == active_id:
-			tile.add_theme_stylebox_override("normal", HUD.surface(Color("#172c3b"), Color("#db9b54") if blocked else HUD.ACCENT, 3, 3))
-		else:
-			tile.remove_theme_stylebox_override("normal")
-		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), "Building" if id == active_id else "Queued", percent, "\n" + widgets["bar"].tooltip_text if blocked else "", "\nClick to cancel and refund" if owned else ""]
+	_refresh_queue_tiles(yard_queue, yard_queue_rows, system, jobs, owned, active_id)
 	for kind in ECONOMY.SHIP_KINDS:
 		var button: Button = yard_commands[kind]
 		var recipe: Dictionary = ECONOMY._cost(kind, 1)
@@ -1647,6 +1557,70 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	if level >= ECONOMY.MAX_SHIPYARD_LEVEL:
 		yard_upgrade.tooltip_text = "Maximum level"
 
+
+func _job_icon(job: Dictionary, owner: int) -> Texture2D:
+	if ECONOMY.SHIP_KINDS.has(job["kind"]):
+		return _production_icon(str(job["kind"]), _empire_color(owner))
+	if job["kind"] == "yard_upgrade":
+		return _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
+	return _station_command_icon(str(job["target"]) if job["kind"] in ["economy_building", "production"] else str(job["kind"]))
+
+func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
+	var jobs: Array = []
+	for job in system["queue"]:
+		if int(job["size"]) == 0 and job["kind"] != "yard_upgrade":
+			jobs.append(job)
+	station_queue.visible = not jobs.is_empty()
+	station_details.visible = jobs.is_empty()
+	_refresh_queue_tiles(station_queue, station_queue_rows, system, jobs, owned, -1, true)
+
+func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dictionary, jobs: Array, owned: bool, active_id: int, station_jobs: bool = false) -> void:
+	for id in rows.keys():
+		var keep: bool = false
+		for job in jobs:
+			if int(job["id"]) == id:
+				keep = true
+				break
+		if not keep:
+			var row: Control = rows[id]["row"]
+			queue.remove_child(row)
+			row.queue_free()
+			rows.erase(id)
+
+	for idx in range(jobs.size()):
+		var job: Dictionary = jobs[idx]
+		var id: int = int(job["id"])
+		if not rows.has(id):
+			var row := VBoxContainer.new()
+			row.add_theme_constant_override("separation", 2)
+			var cancel := _button("", _cancel_job.bind(id), row)
+			cancel.focus_mode = Control.FOCUS_NONE
+			cancel.custom_minimum_size = Vector2(38, 38)
+			cancel.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cancel.expand_icon = true
+			cancel.icon = _job_icon(job, int(system["owner"]))
+			var bar := ProgressBar.new()
+			bar.custom_minimum_size.y = 4
+			bar.show_percentage = false
+			bar.step = 0.0
+			bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.add_child(bar)
+			queue.add_child(row)
+			rows[id] = {"row": row, "bar": bar, "cancel": cancel}
+		var widgets: Dictionary = rows[id]
+		queue.move_child(widgets["row"], idx)
+		var percent: float = 100.0 * float(job["progress"]) / maxf(ECONOMY.EPS, float(job["work"]))
+		widgets["bar"].value = percent
+		widgets["bar"].visible = station_jobs or id == active_id or percent > 0.0
+		_style_progress(widgets["bar"], system, job)
+		var tile: Button = widgets["cancel"]
+		tile.disabled = not owned
+		var blocked: bool = bool(widgets["bar"].get_meta("blocked"))
+		if station_jobs or id == active_id:
+			tile.add_theme_stylebox_override("normal", HUD.surface(Color("#172c3b"), Color("#db9b54") if blocked else HUD.ACCENT, 3, 3))
+		else:
+			tile.remove_theme_stylebox_override("normal")
+		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), "Building" if station_jobs or id == active_id else "Queued", percent, "\n" + widgets["bar"].tooltip_text if blocked else "", "\nClick to cancel and refund" if owned else ""]
 
 func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
@@ -1723,60 +1697,6 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	_set_timed_action(body_upgrade, "Build system PDS", ECONOMY._work("pds", 1))
 	body_cancel.visible = building
 	body_cancel.disabled = not owned or not building
-
-func _build_pds_card(parent: Container) -> void:
-	var section: VBoxContainer = HUD.section(parent, "", true)
-	section.get_child(0).hide()
-	pds_card = _make_disclosure(section, "Planetary defense")
-	var body: VBoxContainer = pds_card["body"]
-	var detail := _label("", 12)
-	body.add_child(detail)
-	var summary: VBoxContainer = pds_card["summary"]
-	var status := _label("", 11)
-	summary.add_child(status)
-	var progress := ProgressBar.new()
-	progress.custom_minimum_size.y = 15
-	section.add_child(progress)
-	section.move_child(progress, body.get_index())
-	var costs: GridContainer = _cost_grid(summary)
-	var action: Button = _card_action(pds_card, "Build", _operation.bind("pds", ""))
-	var cancel: Button = _card_cancel(pds_card, _pds_action, progress)
-	HUD.action(action, HUD.ACCENT, true)
-	pds_card.merge({"detail": detail, "progress": progress, "costs": costs, "button": action, "cancel": cancel, "status": status})
-
-func _pds_action() -> void:
-	var job: Dictionary = ECONOMY.pds_job(_planet())
-	if not job.is_empty():
-		_cancel_job(int(job["id"]))
-
-func _refresh_pds(planet: Dictionary, owned: bool) -> void:
-	pds_card["header"].get_parent().get_parent().visible = ECONOMY.has_planets(planet)
-	if not ECONOMY.has_planets(planet):
-		return
-	var count: int = planet.get("pds", {}).size()
-	var limit: int = int(planet["planet_count"])
-	var job: Dictionary = ECONOMY.pds_job(planet)
-	var building: bool = not job.is_empty()
-	var full: bool = count >= limit
-	var cost: Dictionary = ECONOMY._cost("pds", 1)
-	_disclosure_title(pds_card, "Planetary defense · %d/%d" % [count, limit])
-	var progress: ProgressBar = pds_card["progress"]
-	progress.visible = building
-	var action: Button = pds_card["button"]
-	_set_timed_action(action, "Complete" if full else "Build", -1.0 if full else ECONOMY._work("pds", 1))
-	action.disabled = not owned or full or building or not ECONOMY.affordable(planet, cost)
-	pds_card["cancel"].visible = building
-	pds_card["cancel"].disabled = not owned or not building
-	pds_card["status"].text = "Fully defended" if full else ("Under construction" if building else ("Insufficient local materials" if not ECONOMY.affordable(planet, cost) else ""))
-	pds_card["detail"].text = "One battery per planet, assigned automatically\nBattery HP: %.0f\nDamage: %.0f per shot · 1 shot/yr\nRange: %.0f\nSystem defenses: %d%s / %d" % [ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.LASER_RANGE, count, "" if full else " → %d" % (count + 1), limit]
-	pds_card["costs"].visible = not full
-	if building:
-		progress.value = 100.0 * float(job["progress"]) / float(job["work"])
-		progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
-		_style_progress(progress, planet, job)
-		_show_cost(pds_card["costs"], job["cost"])
-	elif not full:
-		_show_cost(pds_card["costs"], cost)
 
 func _build_fleet_cargo_row() -> void:
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
@@ -2858,7 +2778,7 @@ func _inspector_page(title_text: String) -> GridContainer:
 	scroll.name = title_text
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	inspector_tabs.add_child(scroll)
+	station_trade.add_child(scroll)
 	var page_content := VBoxContainer.new()
 	page_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page_content.add_theme_constant_override("separation", 5)
@@ -2869,6 +2789,12 @@ func _inspector_page(title_text: String) -> GridContainer:
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page_content.add_child(page)
 	command_grids[title_text] = page
+	var footer := HBoxContainer.new()
+	footer.alignment = BoxContainer.ALIGNMENT_END
+	station_trade.add_child(footer)
+	station_trade_back = _button("", _station_card_to.bind("primary"), footer)
+	_yard_ability_face(station_trade_back, "Return", _station_command_icon("return"))
+	station_trade_back.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return page
 
 func _state() -> Dictionary:
@@ -3010,19 +2936,19 @@ func _refresh() -> void:
 	yard_overview.visible = yard_selected and not grouped_buildings
 	_refresh_building_group(state)
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
-	var right_needed: bool = field_selected or (ship_selected and state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())) or (yard_selected and not _selected_yards(state, true).is_empty()) or (not other_selected and not yard_selected and not grouped_buildings and (own_system or (not p.is_empty() and int(p["owner"]) == 0 and not body_selected)))
+	var owned_station: bool = not other_selected and not body_selected and not yard_selected and not grouped_buildings and own_system and ECONOMY.has_station(p)
+	var right_needed: bool = field_selected or (ship_selected and state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())) or (yard_selected and not _selected_yards(state, true).is_empty()) or owned_station or (not other_selected and not yard_selected and not body_selected and not grouped_buildings and not p.is_empty() and int(p["owner"]) == 0)
 	console_right_body.visible = right_needed
 	inspector_panel.self_modulate.a = 1.0 if right_needed else 0.0
 	inspector_panel.mouse_filter = Control.MOUSE_FILTER_STOP if right_needed else Control.MOUSE_FILTER_IGNORE
 	console_profile.queue_redraw()
-	inspector_tabs.visible = not other_selected and own_system and not yard_selected and not grouped_buildings
+	station_commands.visible = owned_station
+	var station_index: int = selected if owned_station else -1
+	if station_index != station_selected_index:
+		station_selected_index = station_index
+		station_card = "primary"
+	_sync_station_card()
 	yard_command_scroll.visible = yard_selected
-	var current_system: int = selected if not other_selected and not p.is_empty() else -1
-	if current_system != last_system_tab_selection:
-		if current_system >= 0:
-			inspector_tabs.current_tab = 0
-		_collapse_details()
-		last_system_tab_selection = current_system
 	interaction_scroll.visible = not other_selected and not yard_selected and not p.is_empty() and not own_system and not grouped_buildings
 	ship_overview.visible = other_selected
 	ship_title.visible = other_selected
@@ -3036,7 +2962,8 @@ func _refresh() -> void:
 	fleet_title.visible = other_selected
 	fleet_detail.visible = other_selected
 	fleet_cargo_footer.hide()
-	yard_activity.get_parent().hide()
+	station_queue.hide()
+	station_details.show()
 	if yard_selected:
 		_refresh_yard_overview(p, own_system and phase == "match")
 		if grouped_buildings:
@@ -3052,7 +2979,6 @@ func _refresh() -> void:
 	if ship_selected:
 		_refresh_ship_panels(state, ship)
 		return
-	_refresh_yard_activity(p)
 	var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and phase == "match"
 	_refresh_colony_choices(state, p, phase)
 	for slider in trade_sliders.values():
@@ -3105,66 +3031,18 @@ func _refresh() -> void:
 	population_delta_label.add_theme_color_override("font_color", Color("#7cdb9b") if change >= 0.0 else Color("#eb8585"))
 	population_label.tooltip_text = ""
 	_update_trade_stock(p)
-	_refresh_pds(p, owned)
-	_refresh_economy_cards(p, owned)
-
-func _refresh_yard_activity(p: Dictionary) -> void:
-	var active: Dictionary = {}
-	var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and str(session.get("phase")) == "match"
-	if owned:
-		for job in p["queue"]:
-			if job["kind"] == "yard":
-				active[-int(job["id"])] = job
-		var slot: int = ECONOMY.next_shipyard_slot(p)
-		if slot > 0:
-			active[slot] = {}
-	yard_activity.get_parent().visible = not active.is_empty()
-	for index in yard_activity_rows.keys():
-		if not active.has(index):
-			var obsolete: Control = yard_activity_rows[index]["row"]
-			yard_activity.remove_child(obsolete)
-			obsolete.queue_free()
-			yard_activity_rows.erase(index)
-	for index in active:
-		var job: Dictionary = active[index]
-		var vacant: bool = job.is_empty()
-		var number: int = int(index) if vacant else int(job["level"])
-		if not yard_activity_rows.has(index):
-			var row := VBoxContainer.new()
-			var header := HBoxContainer.new()
-			row.add_child(header)
-			var title := _label("", 12)
-			title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			header.add_child(title)
-			var action: Button = _button("Build" if vacant else "×", _operation.bind("yard", str(number)) if vacant else _cancel_job.bind(-int(index)), header)
-			action.add_theme_font_size_override("font_size", 11)
-			var costs: GridContainer = _cost_grid(row)
-			var progress := ProgressBar.new()
-			progress.step = 0.0
-			progress.custom_minimum_size.y = 14
-			row.add_child(progress)
-			yard_activity.add_child(row)
-			yard_activity_rows[index] = {"row": row, "label": title, "action": action, "costs": costs, "progress": progress}
-		var card: Dictionary = yard_activity_rows[index]
-		var label: Label = card["label"]
-		var button: Button = card["action"]
-		var bar: ProgressBar = card["progress"]
-		var recipe: Dictionary = ECONOMY._cost("yard", number) if vacant else job["cost"]
-		label.text = "Shipyard %d" % number if vacant else "Shipyard %d · Under construction" % number
-		button.disabled = vacant and not ECONOMY.affordable(p, recipe)
-		button.tooltip_text = _cost_text(recipe) if vacant else "Cancel construction"
-		card["costs"].visible = vacant
-		bar.visible = not vacant
-		if vacant:
-			_set_timed_action(button, "Build", ECONOMY._work("yard", number))
-			_show_cost(card["costs"], recipe)
-		else:
-			bar.value = 100.0 * float(job["progress"]) / float(job["work"])
-			_style_progress(bar, p, job)
+	if building_selection_kind == "station" and not grouped_buildings:
+		_refresh_station_queue(p, owned)
+	if owned_station:
+		_refresh_station_build(p, owned)
 
 func _job_name(item: Dictionary) -> String:
 	match str(item["kind"]):
 		"ship": return "Logistics ship"
+		"economy_building": return str(ECONOMY.ECONOMY_BUILDINGS[item["target"]]["name"])
+		"warehouse": return "Warehouse logistics → Lv %d" % int(item["level"])
+		"habitation": return "Habitation technology → Lv %d" % int(item["level"])
+		"orbital_housing": return "Orbital Eco-Housing"
 		"pds": return "Planetary defense"
 		"yard": return "New shipyard"
 		"yard_upgrade": return "Shipyard %d → Lv %d" % [int(item["target"]) + 1, int(item["level"])]
@@ -3179,16 +3057,6 @@ func _cost_text(cost: Dictionary, allocated: Dictionary = {}) -> String:
 		else:
 			parts.append("%.0f / %.0f t %s" % [float(allocated.get(resource, 0.0)), float(cost[resource]), resource])
 	return " · ".join(parts)
-
-func _cancel_kind(kind: String, target: String) -> void:
-	var p: Dictionary = _planet()
-	# Cancel the newest matching order first, preserving earlier work.
-	var orders: Array = p.get("queue", [])
-	for i in range(orders.size() - 1, -1, -1):
-		var job: Dictionary = orders[i]
-		if job["kind"] == kind and job["target"] == target:
-			_cancel_job(int(job["id"]))
-			return
 
 func _system_name(index: int) -> String:
 	var names: Array = _state().get("map", {}).get("names", [])
@@ -3797,7 +3665,7 @@ func _recall_control_group(number: int, additive: bool = false) -> void:
 	_refresh()
 	if center_group:
 		# Center once at the existing zoom without enabling persistent follow.
-		_follow_selection(state, _ship_poses(state), false, true)
+		_follow_selection(state, _ship_poses(state), true)
 		_position_territory()
 		map_canvas.queue_redraw()
 
@@ -4521,12 +4389,7 @@ func _cycle_owned_system(direction: int) -> void:
 	selected_units.clear()
 	selected_field = -1
 	follow_units = false
-	var world: Vector2 = state["map"]["points"][selected]
-	var desired_radius: float = minf(_projection_size().x, _projection_size().y) * 0.27
-	var radius_per_zoom: float = _system_world_radius(selected, state) * _fit()
-	zoom = clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, OVERVIEW_MAX_ZOOM)
-	var center: Vector2 = _camera_center()
-	pan += center - _screen_point(world)
+	_center_world(ECONOMY.station_position(state, selected, float(state["elapsed"])))
 	_load_thresholds()
 	_refresh()
 
@@ -4588,6 +4451,11 @@ func _process(delta: float) -> void:
 	for kind in ECONOMY.SHIP_KINDS:
 		if yard_commands.has(kind):
 			var border: Control = yard_commands[kind].get_meta("auto_border")
+			if border.is_visible_in_tree():
+				border.queue_redraw()
+	for button in station_build_buttons.values():
+		if button.has_meta("auto_border"):
+			var border: Control = button.get_meta("auto_border")
 			if border.is_visible_in_tree():
 				border.queue_redraw()
 	if command_buttons.has("repair"):
@@ -4762,7 +4630,8 @@ func _focus_selection() -> void:
 	if state.is_empty():
 		return
 	follow_units = true
-	_follow_selection(state, _ship_poses(state), true)
+	_follow_selection(state, _ship_poses(state))
+	_position_territory()
 	map_canvas.queue_redraw()
 
 func _bounds_zoom(bounds: Rect2) -> float:
@@ -4790,11 +4659,7 @@ func _frame_starting_sector(index: int) -> void:
 	_position_territory()
 	map_canvas.queue_redraw()
 
-func _system_focus_zoom(index: int, state: Dictionary, desired_radius: float) -> float:
-	var radius_per_zoom: float = _system_world_radius(index, state) * _fit()
-	return clampf(desired_radius / maxf(0.001, radius_per_zoom), MIN_ZOOM, _max_zoom())
-
-func _follow_selection(state: Dictionary, poses: Dictionary, reframe: bool = false, center_only: bool = false) -> void:
+func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool = false) -> void:
 	if (not follow_units and not center_only) or selecting_units or drag_button != 0 or str(session.get("phase")) != "match":
 		return
 	var ids: Array = selected_units if not selected_units.is_empty() else [selected_ship_id]
@@ -4802,78 +4667,31 @@ func _follow_selection(state: Dictionary, poses: Dictionary, reframe: bool = fal
 	for id in ids:
 		if poses.has(id):
 			positions.append(poses[id]["world"])
+	if positions.is_empty():
+		for ref in selected_buildings:
+			if _building_valid(state, ref, building_selection_kind, int(selected_buildings[ref])):
+				positions.append(_building_world(state, ref, building_selection_kind))
 	if not positions.is_empty():
-		# The bounding-box center (rather than the arithmetic centroid) keeps
-		# distant or unevenly distributed ships inside the view. Use the same
-		# interpolated world poses as the renderer, including foreign ships.
+		# Follow the selection's bounding-box center without changing zoom.
 		var bounds := Rect2(positions[0], Vector2.ZERO)
 		for point in positions:
 			bounds = bounds.expand(point)
-		var fit_zoom: float = _bounds_zoom(bounds.grow(45.0))
-		if reframe:
-			zoom = fit_zoom
-		elif positions.size() > 1 and not center_only:
-			# Follow spread-out fleets without fighting a user's manual zoom-out.
-			zoom = minf(zoom, fit_zoom)
 		_center_world(bounds.get_center())
 		return
-	if selected_buildings.size() > 1:
-		var kind: String = building_selection_kind
-		for ref in selected_buildings:
-			if _building_valid(state, ref, kind, int(selected_buildings[ref])):
-				positions.append(_building_world(state, ref, kind))
-		if not positions.is_empty():
-			var bounds := Rect2(positions[0], Vector2.ZERO)
-			for point in positions:
-				bounds = bounds.expand(point)
-			var fit_zoom: float = _bounds_zoom(bounds.grow(70.0))
-			if not center_only:
-				zoom = fit_zoom if reframe else minf(zoom, fit_zoom)
-			# Orbital planets are render-scaled, so recalculate after zooming.
-			if kind == "pds":
-				var first: Vector2i = selected_buildings.keys()[0]
-				bounds = Rect2(_building_world(state, first, kind), Vector2.ZERO)
-				for ref in selected_buildings:
-					bounds = bounds.expand(_building_world(state, ref, kind))
-			_center_world(bounds.get_center())
-			return
 	var fields: Array = state["map"].get("fields", [])
 	if selected_field >= 0 and selected_field < fields.size() and ECONOMY.discovered(state, _me(), "fields", selected_field):
-		var field: Dictionary = fields[selected_field]
-		var center: Vector2 = field["position"]
-		var radius: float = float(field["radius"])
-		var bounds := Rect2(center - Vector2.ONE * radius, Vector2.ONE * radius * 2.0)
-		if reframe:
-			zoom = _bounds_zoom(bounds)
-		_center_world(center)
+		_center_world(fields[selected_field]["position"])
 		return
 	if selected >= 0 and selected < state["planets"].size() and ECONOMY.discovered(state, _me(), "planets", selected):
 		var system: Dictionary = state["planets"][selected]
 		var center: Vector2 = state["map"]["points"][selected]
-		var available: float = minf(_projection_size().x, _projection_size().y)
 		if selected_yard >= 0 and selected_yard < system["yards"].size():
-			if reframe:
-				zoom = _bounds_zoom(Rect2(Vector2.ZERO, Vector2.ONE * 140.0))
 			_center_world(ECONOMY.shipyard_position(state, selected, selected_yard, float(state["elapsed"])))
-		elif building_selection_kind == "station" and ECONOMY.has_station(system):
-			if reframe:
-				zoom = _bounds_zoom(Rect2(Vector2.ZERO, Vector2.ONE * 270.0))
-			_center_world(ECONOMY.station_position(state, selected, float(state["elapsed"])))
 		elif selected_body >= 0 and selected_body < int(system.get("planet_count", 0)):
 			var body: Dictionary = _system_visual(selected, state)["bodies"][selected_body]
-			if reframe:
-				var desired_radius: float = clampf(available * 0.15 / maxf(0.01, float(body["size"]) * 0.55), PLANET_FADE_FULL, 720.0)
-				zoom = _system_focus_zoom(selected, state, desired_radius)
-			# Orbital drawing is screen-scaled; center the precise rendered body,
-			# including its animated orbit, rather than its parent star.
 			_center_world(center)
 			pan -= _body_position(body, _planet_radius(selected, state), game_visual_clock)
 		else:
-			if reframe:
-				# A selected system represents its whole command sector, not just
-				# the central star; keep its entire local area visible.
-				var sector_radius: float = float(ECONOMY.military_graph(state)["sector_radii"][selected])
-				zoom = _bounds_zoom(Rect2(Vector2.ZERO, Vector2.ONE * sector_radius * 2.0))
 			_center_world(center)
 		return
 	follow_units = false
@@ -4904,8 +4722,10 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 		var system: Dictionary = state["planets"][i]
 		if int(system["owner"]) == 0 or not ECONOMY.discovered(state, _me(), "planets", i):
 			continue
-		var pos: Vector2 = _screen_point(points[i])
-		var radius: float = _planet_radius(i, state)
+		if not ECONOMY.has_station(system):
+			continue
+		var pos: Vector2 = _screen_point(ECONOMY.station_position(state, i, float(state["elapsed"])))
+		var radius: float = _station_radius()
 		if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 80.0).has_point(pos):
 			continue
 		var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * zoom
@@ -4942,10 +4762,10 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 			for resource in ECONOMY.RESOURCES:
 				traffic[node][key][resource] += float(ship["cargo"][resource])
 	for node in traffic:
-		if not ECONOMY.discovered(state, _me(), "planets", node):
+		if not ECONOMY.has_station(state["planets"][node]) or not ECONOMY.discovered(state, _me(), "planets", node):
 			continue
-		var center: Vector2 = _screen_point(points[node])
-		var radius: float = _planet_radius(node, state)
+		var center: Vector2 = _screen_point(ECONOMY.station_position(state, node, float(state["elapsed"])))
+		var radius: float = _station_radius()
 		for key in traffic[node]:
 			var endpoint: String = "source" if key.y == 0 else "dest"
 			for k in range(ECONOMY.RESOURCES.size()):
