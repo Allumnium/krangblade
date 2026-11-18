@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.43.1: Larger ore deposits extend useful mining lifetimes without increasing throughput; crystal scarcity is now a cap on initial tonnage, not on the number of rocks. Watch bootstrap crystal availability and prolonged salvage clutter. The Trade wing extends independently of the console footprint, preserving the existing camera and other HUD panels.
+
 - v0.43.0: Civilian salvage search is conservative around hostile sectors/armed patrols, and idle collectors now finish gathering before normal logistics resumes. Check pickup versus mining/freight priority and crowded neutral lanes; minimap marker hit radius may warrant tuning in dense systems.
 
 - v0.42.2: Removed fractional viewport stretch and saved UI scale, both possible sources of fuzzy tooltips. Pixel-aligned controls/font glyphs and native-size resource textures retain antialiasing without scaling the world camera. Check native-resolution HUD capacity on the smallest supported windows; OS/display compositor scaling remains external to the game.

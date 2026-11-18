@@ -88,6 +88,7 @@ var territory_cycle_elapsed: float = 0.0
 var territory_seed: int = -1
 var header_panel: PanelContainer
 var inspector_panel: PanelContainer
+var inspector_slot: Control
 var overview_panel: PanelContainer
 var console_panel: PanelContainer
 var minimap: Control
@@ -541,8 +542,17 @@ func _build_ui() -> void:
 	console_center.add_child(console_center_spacer)
 	_build_control_group_strip()
 	console_center.add_child(empty_selection)
+	# Keep the right wing's footprint in the normal deck; its actual panel
+	# may extend upward for Trade without resizing the minimap or camera.
+	inspector_slot = Control.new()
+	inspector_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inspector_slot.size_flags_horizontal = Control.SIZE_FILL
+	inspector_slot.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	console_columns.add_child(inspector_slot)
 	inspector_panel = PanelContainer.new()
-	console_columns.add_child(inspector_panel)
+	inspector_slot.add_child(inspector_panel)
+	inspector_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	inspector_slot.resized.connect(_layout_right_panel)
 	# Both wings use the same fixed width; only the center expands.
 	inspector_panel.size_flags_horizontal = Control.SIZE_FILL
 	inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -716,6 +726,8 @@ func _build_ui() -> void:
 	for resource in ECONOMY.RESOURCES:
 		var logistics: VBoxContainer = HUD.section(trade_page, "", true)
 		logistics.get_child(0).hide()
+		logistics.add_theme_constant_override("separation", 0)
+		logistics.get_parent().add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#233e56"), 1, 3))
 		var trade_row := HBoxContainer.new()
 		logistics.add_child(trade_row)
 		var resource_icon := TextureRect.new()
@@ -746,12 +758,14 @@ func _build_ui() -> void:
 		incoming.text = "In"
 		incoming.tooltip_text = "Enable imports below the left threshold"
 		incoming.add_theme_font_size_override("font_size", 10)
+		_compact_trade_check(incoming)
 		incoming.button_pressed = true
 		switches.add_child(incoming)
 		var outgoing := CheckBox.new()
 		outgoing.text = "Out"
 		outgoing.tooltip_text = "Enable exports above the right threshold"
 		outgoing.add_theme_font_size_override("font_size", 10)
+		_compact_trade_check(outgoing)
 		outgoing.button_pressed = true
 		incoming.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		outgoing.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -788,6 +802,7 @@ func _layout_console() -> void:
 	# usual window sizes. The center receives all remaining width.
 	var wing_width: float = clampf(floorf((size.x - 28.0 - LENS_STRIP_WIDTH) * 0.24), 180.0, 320.0)
 	minimap.custom_minimum_size.x = wing_width
+	inspector_slot.custom_minimum_size.x = wing_width
 	inspector_panel.custom_minimum_size.x = wing_width
 	if is_instance_valid(time_panel):
 		time_panel.offset_left = 8.0
@@ -802,7 +817,18 @@ func _layout_console() -> void:
 	console_profile.queue_redraw()
 	# Do not force the center wider than its allotted column.
 	overview_panel.custom_minimum_size.x = 0.0
+	_layout_right_panel()
 	_layout_command_grids()
+
+func _layout_right_panel() -> void:
+	if not is_instance_valid(inspector_slot) or not is_instance_valid(inspector_panel):
+		return
+	var extra: float = 0.0
+	if station_card == "trade" and station_selected_index >= 0 and is_instance_valid(station_commands) and station_commands.visible:
+		var top_limit: float = header_panel.global_position.y + header_panel.size.y + 4.0
+		extra = roundf(minf(inspector_slot.size.y, maxf(0.0, inspector_slot.global_position.y - top_limit)))
+	inspector_panel.offset_top = -extra
+	console_profile.queue_redraw()
 
 func _draw_console_profile() -> void:
 	# The three physical panel silhouettes are drawn independently. The
@@ -819,7 +845,8 @@ func _draw_console_profile() -> void:
 	var left_width: float = lens_column.global_position.x + lens_column.size.x - console_profile.global_position.x
 	var left_rect := Rect2(Vector2.ZERO, Vector2(left_width, bounds.size.y))
 	var center_rect := Rect2(Vector2(center_left, center_top), Vector2(console_center.size.x, maxf(0.0, bounds.size.y - center_top)))
-	var right_rect := Rect2(Vector2(right_left, 0.0), Vector2(maxf(0.0, bounds.size.x - right_left), bounds.size.y))
+	var right_top: float = inspector_panel.global_position.y - console_profile.global_position.y
+	var right_rect := Rect2(Vector2(right_left, right_top), Vector2(maxf(0.0, bounds.size.x - right_left), maxf(0.0, bounds.size.y - right_top)))
 	var rects: Array[Rect2] = [left_rect]
 	if overview_panel.visible:
 		rects.append(center_rect)
@@ -874,7 +901,7 @@ func _layout_command_grids() -> void:
 						font_size -= 1
 				caption.add_theme_font_size_override("font_size", font_size)
 		if is_instance_valid(station_trade_back):
-			station_trade_back.custom_minimum_size = Vector2(slot_width, slot_height)
+			station_trade_back.custom_minimum_size = Vector2(slot_width, 36.0)
 	if is_instance_valid(selection_grid):
 		selection_grid.columns = maxi(1, floori(maxf(38.0, console_center.size.x - 20.0) / 41.0))
 		building_group_grid.columns = selection_grid.columns
@@ -1465,6 +1492,7 @@ func _sync_station_card() -> void:
 	station_primary_grid.visible = station_card == "primary"
 	station_build_grid.visible = station_card == "build"
 	station_trade.visible = station_card == "trade"
+	_layout_right_panel()
 
 func _station_build(key: String) -> void:
 	var p: Dictionary = _planet()
@@ -2359,13 +2387,15 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	command_card.show()
 	var combat_owned: bool = false
 	var can_load: bool = false
+	var has_miners: bool = not _selected_miners().is_empty()
 	for craft in state["ships"]:
 		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me():
 			combat_owned = combat_owned or ECONOMY.armed(craft)
 			can_load = can_load or ECONOMY.cargo_free(craft) > ECONOMY.EPS
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
-		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] == "fighter")) or (id == "repair" and _selected_miners().is_empty()) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+		button.visible = id != "repair" or has_miners
+		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] == "fighter")) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
 		pending_command = ""
 	_refresh_command_mode()
@@ -2942,7 +2972,7 @@ func _inspector_page(title_text: String) -> GridContainer:
 	scroll.add_child(page_content)
 	var page := GridContainer.new()
 	page.add_theme_constant_override("h_separation", 5)
-	page.add_theme_constant_override("v_separation", 5)
+	page.add_theme_constant_override("v_separation", 2)
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page_content.add_child(page)
 	command_grids[title_text] = page
@@ -2953,6 +2983,12 @@ func _inspector_page(title_text: String) -> GridContainer:
 	_yard_ability_face(station_trade_back, "Return", _station_command_icon("return"))
 	station_trade_back.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return page
+
+func _compact_trade_check(check: CheckBox) -> void:
+	for style_name in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
+		var style: StyleBox = check.get_theme_stylebox(style_name).duplicate()
+		style.set_content_margin_all(0)
+		check.add_theme_stylebox_override(style_name, style)
 
 func _state() -> Dictionary:
 	return session.get("economy")

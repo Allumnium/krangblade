@@ -12,6 +12,8 @@ const DEFAULT_LAYOUT: String = "Radial"
 # Clearance from a starting system to the edge of a special field, before
 # the map's common travel-distance normalization.
 const ANTIMATTER_CLEARANCE: float = 700.0
+const ASTEROID_INVENTORY_MULTIPLIER: float = 10.0
+const MAX_CRYSTAL_SHARE: float = 0.2
 
 static func valid_layout(layout: String) -> bool:
 	return LAYOUTS.has(layout)
@@ -475,18 +477,13 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 	var chunks: Array = []
 	var count: int = clampi(roundi(7.0 + radius / 50.0), 9, 28)
 	var profile: float = rng.randf()
-	var metal_share: float = 0.5
-	if profile < 0.25:
-		metal_share = 1.0
-	elif profile < 0.5:
-		metal_share = 0.0
-	elif profile < 0.7:
-		metal_share = rng.randf_range(0.85, 0.98)
-	elif profile < 0.9:
-		metal_share = rng.randf_range(0.02, 0.15)
-	else:
-		metal_share = rng.randf_range(0.35, 0.65)
-	var metal_count: int = roundi(float(count) * metal_share)
+	var special: bool = bool(field.get("antimatter", false))
+	# Seeded variety: some pure-metal fields, and other fields containing
+	# between 3% and 20% crystals by initial tonnage (not just rock count).
+	# Antimatter keeps its separate inventory and concentration.
+	var crystal_share: float = 0.0 if profile < 0.15 or special else rng.randf_range(0.03, MAX_CRYSTAL_SHARE)
+	var crystal_count: int = ceili(count * crystal_share)
+	var metal_count: int = count - crystal_count
 	var slots: Array[int] = []
 	for i in range(count):
 		slots.append(i)
@@ -495,22 +492,32 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		var swap: int = slots[i]
 		slots[i] = slots[j]
 		slots[j] = swap
-	if metal_count == 0:
-		field["Metals"] = 0.0
 	if metal_count == count:
 		field["Crystals"] = 0.0
+	var totals: Dictionary = {"Metals": 0.0, "Crystals": 0.0}
 	for i in range(count):
 		var angle: float = rng.randf_range(0.0, TAU)
 		var distance: float = sqrt(rng.randf()) * 0.52
 		var offset: Vector2 = (Vector2.from_angle(angle) * Vector2(1.0, flatten) * radius * distance).rotated(rotation)
 		var resource: String = "Metals" if slots[i] < metal_count else "Crystals"
-		var amount: float = rng.randf_range(90.0, 260.0) * float(field[resource])
+		var amount: float = rng.randf_range(90.0, 260.0) * float(field[resource]) * (1.0 if special else ASTEROID_INVENTORY_MULTIPLIER)
+		totals[resource] += amount
 		var shape: Array[float] = []
 		for vertex in range(7):
 			shape.append(rng.randf_range(0.62, 1.0))
 		chunks.append({"id": i, "position": center + offset, "resource": resource,
 			"remaining": amount, "initial": amount, "radius": radius * rng.randf_range(0.045, 0.085),
 			"rotation": rng.randf_range(0.0, TAU), "shape": shape})
+	# Preserve the generated total while normalizing individual ore amounts.
+	# Otherwise random rock sizes and concentration can exceed the cap.
+	if crystal_count > 0:
+		var total: float = float(totals["Metals"]) + float(totals["Crystals"])
+		for chunk in chunks:
+			var ore: String = chunk["resource"]
+			var share: float = crystal_share if ore == "Crystals" else 1.0 - crystal_share
+			var amount: float = float(chunk["initial"]) * total * share / float(totals[ore])
+			chunk["initial"] = amount
+			chunk["remaining"] = amount
 	field["chunks"] = chunks
 
 static func blocked(a: Vector2, b: Vector2, fields: Array) -> bool:

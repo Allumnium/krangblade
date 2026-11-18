@@ -57,7 +57,7 @@ const TRACTOR_RATE: float = 12.0
 const SALVAGE_CHANCE: float = 0.75
 const SALVAGE_FRACTION: float = 0.20
 const SALVAGE_MIN_LIFETIME: float = 90.0
-const SALVAGE_MAX_LIFETIME: float = 120.0
+const SALVAGE_MAX_LIFETIME: float = 180.0
 const SALVAGE_APPROACH_RANGE: float = TRACTOR_RANGE * 2.0
 # The pair of mining lasers deals one combined volley per year. One point
 # of damage to a resource chunk removes one ton, subject to field limits.
