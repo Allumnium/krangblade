@@ -29,6 +29,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.43.0: F2 selects all owned fighters regardless of viewport, excluding civilians and foreign ships. Minimap right-click issues the same authoritative contextual orders as the main map, with minimap-scale hit testing, Ctrl/Shift semantics unchanged, Alt exact positions and Shift queued orders; left-click/drag still pans. Idle mining and logistics ships approach salvage within 360 world units in their current sector; reject hostile-owned or hostile-armed sectors and nearby hostile armed hulls (360 units), release unsafe claims and deliver collected cargo via the existing salvage route. Working ships retain safe beam-range pickup without changing orders.
+
 - v0.42.2: UI is fixed at native 100%, with no settings slider/selector or fractional viewport stretching. Use pixel-snapped controls, whole-pixel font positioning and hinted text; fixed-size HUD resource icons use native-sized textures while world art retains smooth continuous zoom. Canonical building names are Metal Refinery, Plastics Factory, Textile Mill, Farms, Tech Fabs and Crystal Incubator, shared between command captions, tooltips and queue labels.
 
 - v0.42.1: Camera focus uses the rendered entity center at current zoom, including a station-position fallback for claimed systems; cancel large world-space translations before adding the map viewport center. Center in the unobstructed map above the bottom console, not the full window. Construction tooltips use an opaque framed popup and graphical resource/crew amounts, retaining timing, effects and requirements.

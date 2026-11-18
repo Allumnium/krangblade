@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.43.0: Civilian salvage search is conservative around hostile sectors/armed patrols, and idle collectors now finish gathering before normal logistics resumes. Check pickup versus mining/freight priority and crowded neutral lanes; minimap marker hit radius may warrant tuning in dense systems.
+
 - v0.42.2: Removed fractional viewport stretch and saved UI scale, both possible sources of fuzzy tooltips. Pixel-aligned controls/font glyphs and native-size resource textures retain antialiasing without scaling the world camera. Check native-resolution HUD capacity on the smallest supported windows; OS/display compositor scaling remains external to the game.
 
 - v0.42.1: The reported station screenshots place the hub at the center of the reserved map viewport, rather than the entire window; fallback to the rendered station position and preserve projection precision at extreme zoom. Recheck camera feel with the stepped console and tooltip readability near screen edges during play.

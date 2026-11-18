@@ -3505,22 +3505,77 @@ static func _release_auto_salvage(ship: Dictionary, piles: Dictionary) -> void:
 	ship.erase("auto_salvage_target")
 	ship.erase("tractor_active")
 
+# Cache threat locations for the tick rather than searching every fleet for
+# each civilian and each pile. Hostile armed hulls threaten their sector and
+# nearby space, including a lane or the far side of a sector boundary.
+static func _salvage_threats(state: Dictionary, graph: Dictionary) -> Dictionary:
+	var sectors: Dictionary = {}
+	var cells: Dictionary = {}
+	for craft in state["ships"]:
+		if not armed(craft) or not craft.get("position", Vector2.INF).is_finite():
+			continue
+		var team: int = int(state["teams"].get(int(craft["owner"]), 0))
+		var point: Vector2 = craft["position"]
+		var sector: int = local_sector(graph, craft)
+		if sector >= 0:
+			if not sectors.has(sector):
+				sectors[sector] = {}
+			sectors[sector][team] = true
+		var cell := Vector2i(floori(point.x / REPAIR_SAFE_RADIUS), floori(point.y / REPAIR_SAFE_RADIUS))
+		if not cells.has(cell):
+			cells[cell] = []
+		cells[cell].append([team, point])
+	return {"sectors": sectors, "cells": cells}
+
+static func _salvage_safe(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, sector: int, threats: Dictionary) -> bool:
+	if sector < 0 or not sector_contains(graph, sector, point):
+		sector = sector_at(graph, point, range(graph["points"].size()))
+	if _hostile_system(state, owner, sector):
+		return false
+	var team: int = int(state["teams"].get(owner, 0))
+	for other_team in threats["sectors"].get(sector, {}):
+		if int(other_team) != team:
+			return false
+	var cell := Vector2i(floori(point.x / REPAIR_SAFE_RADIUS), floori(point.y / REPAIR_SAFE_RADIUS))
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			for threat in threats["cells"].get(cell + Vector2i(x, y), []):
+				if int(threat[0]) != team and point.distance_squared_to(threat[1]) <= REPAIR_SAFE_RADIUS * REPAIR_SAFE_RADIUS:
+					return false
+	return true
+
 # Combat and existing orders always take precedence. An idle craft can make
 # a short sector-local detour; a working/held/transiting craft may tractor
 # only resources within beam range without changing its route or hold.
-static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, busy: Dictionary, cells: Dictionary, coordinated: bool) -> bool:
+static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, busy: Dictionary, cells: Dictionary, coordinated: bool, threats: Dictionary = {}) -> bool:
 	var piles: Dictionary = state.get("salvage", {})
+	var previously_collecting: bool = ship.has("auto_salvage_target")
 	_release_auto_salvage(ship, piles)
-	if piles.is_empty() or _salvage_active(ship) or bool(ship.get("move_only", false)) or busy.has(int(ship["id"])) or cargo_free(ship) <= EPS:
+	if _salvage_active(ship) or bool(ship.get("move_only", false)) or busy.has(int(ship["id"])):
+		return false
+	if piles.is_empty() and not previously_collecting:
 		return false
 	var pos: Vector2 = ship["position"]
-	var idle: bool = not coordinated and _is_idle_ship(ship) and not ship.has("attack_order") and not ship.has("patrol_from")
-	var limit: float = SALVAGE_APPROACH_RANGE if idle else TRACTOR_RANGE
+	var idle: bool = not coordinated and _is_idle_ship(ship) and not _unit_order_running(ship) and ship.get("order_queue", []).is_empty()
+	var civilian: bool = ship.get("kind", "") in ["miner", "ship"]
+	var sector: int = local_sector(graph, ship)
+	if civilian:
+		if threats.is_empty():
+			threats = _salvage_threats(state, graph)
+		if not _salvage_safe(state, graph, int(ship["owner"]), pos, sector, threats):
+			return false
+	if piles.is_empty() or cargo_free(ship) <= EPS:
+		if civilian and idle and previously_collecting and _cargo_total(ship) > EPS:
+			ship["salvage_delivery"] = true
+			return true
+		return false
+	var limit: float = (SALVAGE_APPROACH_RANGE * 2.0 if civilian else SALVAGE_APPROACH_RANGE) if idle else TRACTOR_RANGE
 	var nearest: float = limit * limit + EPS
 	var best: int = -1
 	var cell := Vector2i(floori(pos.x / SALVAGE_APPROACH_RANGE), floori(pos.y / SALVAGE_APPROACH_RANGE))
-	for x in range(-1, 2):
-		for y in range(-1, 2):
+	var reach: int = ceili(limit / SALVAGE_APPROACH_RANGE)
+	for x in range(-reach, reach + 1):
+		for y in range(-reach, reach + 1):
 			for candidate in cells.get(cell + Vector2i(x, y), []):
 				if not piles.has(candidate) or int(piles[candidate]["claim"]) >= 0:
 					continue
@@ -3532,9 +3587,14 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 					continue
 				if not _salvage_reachable(graph, ship, point):
 					continue
+				if civilian and not _salvage_safe(state, graph, int(ship["owner"]), point, sector, threats):
+					continue
 				best = int(candidate)
 				nearest = distance
 	if best < 0:
+		if civilian and idle and previously_collecting and _cargo_total(ship) > EPS:
+			ship["salvage_delivery"] = true
+			return true
 		return false
 	var pile: Dictionary = piles[best]
 	pile["claim"] = int(ship["id"])
@@ -3544,6 +3604,14 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 		_navigate(ship, point, minf(SHIP_SPEED * dt, pos.distance_to(point) - TRACTOR_RANGE * 0.85))
 		return true
 	_collect_salvage(ship, pile, dt)
+	if civilian and idle:
+		if float(pile["amount"]) > EPS and cargo_free(ship) > EPS:
+			return true
+		_release_auto_salvage(ship, piles)
+		if float(pile["amount"]) <= EPS:
+			piles.erase(best)
+		ship["salvage_delivery"] = _cargo_total(ship) > EPS
+		return true
 	if ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") == "idle" and (ship["route"] as Array).is_empty() and not bool(ship.get("holding", false)):
 		ship["mining_mode"] = "delivery"
 	if float(pile["amount"]) <= EPS or cargo_free(ship) <= EPS:
@@ -5158,6 +5226,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_update_salvage(state)
 	var salvage_busy: Dictionary = _salvage_combat_busy(state)
 	var salvage_cells: Dictionary = _salvage_cells(state.get("salvage", {}))
+	var salvage_threats: Dictionary = _salvage_threats(state, combat_graph) if not salvage_cells.is_empty() else {}
 	started = _profile_stage(profile, "Combat / repair", started)
 	var fleets: Dictionary = {}
 	for craft in state["ships"]:
@@ -5217,7 +5286,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_ids):
 			continue
 		ship.erase("repair_target")
-		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id)):
+		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id), salvage_threats):
 			continue
 		if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
 			_work_local_hold(combat_graph, ship, dt)

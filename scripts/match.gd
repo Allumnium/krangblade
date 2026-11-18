@@ -504,7 +504,7 @@ func _build_ui() -> void:
 	minimap = Control.new()
 	minimap.mouse_filter = Control.MOUSE_FILTER_STOP
 	minimap.focus_mode = Control.FOCUS_NONE
-	minimap.tooltip_text = "Click or drag to move the camera"
+	minimap.tooltip_text = "Left click or drag: camera · Right click: command · Shift: queue"
 	minimap.clip_contents = true
 	minimap.size_flags_horizontal = Control.SIZE_FILL
 	minimap.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -898,9 +898,13 @@ func _minimap_point(point: Vector2, area: Rect2) -> Vector2:
 	return area.position + point / _map_size().max(Vector2.ONE) * area.size
 
 func _minimap_input(event: InputEvent) -> void:
+	if match_menu.visible:
+		return
 	var move_camera: bool = false
 	if event is InputEventMouseButton:
 		move_camera = event.button_index == MOUSE_BUTTON_LEFT and event.pressed
+		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not _state().is_empty():
+			_minimap_order(event)
 	elif event is InputEventMouseMotion:
 		move_camera = (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0
 	if move_camera and not _state().is_empty():
@@ -913,6 +917,66 @@ func _minimap_input(event: InputEvent) -> void:
 		map_canvas.queue_redraw()
 		minimap.queue_redraw()
 	minimap.accept_event()
+
+func _minimap_order(mouse: InputEventMouseButton) -> void:
+	var state: Dictionary = _state()
+	var area: Rect2 = _minimap_area()
+	if not area.has_point(mouse.position):
+		return
+	var world: Vector2 = (mouse.position - area.position) / area.size * _map_size()
+	var hint: Dictionary = {"world": world, "entity": -1, "field": -1, "system": -1, "wreck": -1}
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var count: int = state["planets"].size()
+	var nearest: float = 5.0
+	var node_hit: int = -1
+	# Minimap markers have their own pixel hit radius and show systems, not
+	# orbital structures. Never use the main map's current zoom to hit them.
+	if not mouse.alt_pressed:
+		for node in ECONOMY.military_pois(state, _me()):
+			var distance: float = mouse.position.distance_to(_minimap_point(graph["points"][node], area))
+			if distance < nearest:
+				nearest = distance
+				node_hit = node
+		if node_hit >= 0:
+			hint["world"] = graph["points"][node_hit]
+			if node_hit < count:
+				hint["system"] = node_hit
+				if ECONOMY.has_station(state["planets"][node_hit]):
+					hint["entity"] = ECONOMY.station_target_id(state, node_hit)
+					hint["world"] = ECONOMY.station_position(state, node_hit, float(state["elapsed"]))
+			else:
+				hint["field"] = node_hit - count
+		else:
+			nearest = 3.0
+			var poses: Dictionary = _ship_poses(state)
+			for id in poses:
+				var ship_point: Vector2 = poses[id]["world"]
+				var distance: float = mouse.position.distance_to(_minimap_point(ship_point, area))
+				if distance < nearest:
+					nearest = distance
+					hint["entity"] = id
+					hint["world"] = ship_point
+		if pending_command == "load" or (node_hit < 0 and int(hint["entity"]) == -1):
+			nearest = 3.0
+			for pile in state.get("salvage", {}).values():
+				var distance: float = mouse.position.distance_to(_minimap_point(pile["position"], area))
+				if distance < nearest:
+					nearest = distance
+					hint["wreck"] = int(pile["id"])
+					hint["world"] = pile["position"]
+	var point: Vector2 = _screen_point(hint["world"])
+	var mode: String = pending_command
+	if mode in ["repair", "unload", "load"]:
+		_execute_pending_command(point, mouse.shift_pressed, hint)
+	elif mode == "rally" or (mode.is_empty() and selected_yard >= 0):
+		_set_rally_at(point)
+		pending_command = ""
+		_refresh_command_mode()
+	else:
+		_command_at(point, mouse.alt_pressed, mode == "patrol", mode not in ["attack", "patrol"], mode == "attack", mouse.shift_pressed, mode.is_empty(), hint)
+		if not mouse.shift_pressed:
+			pending_command = ""
+			_refresh_command_mode()
 
 func _draw_minimap() -> void:
 	var surface := Rect2(Vector2.ZERO, minimap.size)
@@ -957,8 +1021,12 @@ func _draw_minimap() -> void:
 			minimap.draw_rect(Rect2(locations[i] - Vector2.ONE * 1.8, Vector2.ONE * 3.6), tint, false, 1.0)
 		if (i < count and i == selected and selected_units.is_empty() and selected_field < 0) or (i >= count and i - count == selected_field):
 			minimap.draw_arc(locations[i], 4.5, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
+	for pile in state.get("salvage", {}).values():
+		var point: Vector2 = _minimap_point(pile["position"], area)
+		if area.has_point(point):
+			minimap.draw_circle(point, 1.0, HUD.COLORS[pile["resource"]])
 	# Mirror the main map's live hull visibility and interpolation; do not
-	# reveal undiscovered system ownership or apply any simulation commands.
+	# reveal undiscovered system ownership.
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
 		var visual: Dictionary = ship_visuals.get(id, {})
@@ -1939,7 +2007,7 @@ func _issue_order(ids: Array, order: Dictionary, append: bool = false) -> void:
 	if not ids.is_empty():
 		session.call("request_unit_orders", [{"ids": ids, "order": order}], append)
 
-func _execute_pending_command(point: Vector2, append: bool = false) -> void:
+func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint: Dictionary = {}) -> void:
 	var mode: String = pending_command
 	pending_command = ""
 	_refresh_command_mode()
@@ -1947,18 +2015,18 @@ func _execute_pending_command(point: Vector2, append: bool = false) -> void:
 		_set_rally_at(point)
 	elif mode == "load":
 		var state: Dictionary = _state()
-		var wreck: int = _salvage_hit(state, point)
+		var wreck: int = _salvage_hit(state, point) if minimap_hint.is_empty() else int(minimap_hint["wreck"])
 		if wreck >= 0:
 			_issue_order(_selected_owned_units(state), {"kind": "salvage", "target": wreck}, append)
 	elif mode == "repair":
-		var target: int = _entity_hit(_state(), point)
+		var target: int = _entity_hit(_state(), point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
 		if target != -1:
 			var miners: Array[int] = _selected_miners()
 			miners.erase(target)
 			_issue_order(miners, {"kind": "repair", "target": target}, append)
 	elif mode == "unload":
 		var state: Dictionary = _state()
-		var target: int = _entity_hit(state, point)
+		var target: int = _entity_hit(state, point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
 		var ref: Dictionary = ECONOMY.service_targets(state).get(target, {})
 		var owned: Array[int] = _selected_owned_units(state)
 		var orders: Array = []
@@ -1969,7 +2037,7 @@ func _execute_pending_command(point: Vector2, append: bool = false) -> void:
 				if ECONOMY.can_deposit(state, ship, target):
 					orders.append({"ids": [ship["id"]], "order": {"kind": "deposit", "target": target}})
 			else:
-				orders.append({"ids": [ship["id"]], "order": {"kind": "drop", "point": _world_point(point)}})
+				orders.append({"ids": [ship["id"]], "order": {"kind": "drop", "point": minimap_hint.get("world", _world_point(point))}})
 		if not orders.is_empty():
 			session.call("request_unit_orders", orders, append)
 	if append and mode != "rally":
@@ -4089,13 +4157,13 @@ func _entity_hit(state: Dictionary, point: Vector2) -> int:
 		return -2 - state["planets"].size() * 3 - body.y * state["planets"].size() - body.x
 	return -1
 
-func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = true, explicit_attack: bool = false, append: bool = false, contextual: bool = false) -> void:
+func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = true, explicit_attack: bool = false, append: bool = false, contextual: bool = false, minimap_hint: Dictionary = {}) -> void:
 	var state: Dictionary = _state()
 	var owned: Array[int] = _selected_owned_units(state)
 	if state.is_empty() or owned.is_empty():
 		return
 	var graph: Dictionary = ECONOMY.military_graph(state)
-	var world: Vector2 = _world_point(point)
+	var world: Vector2 = minimap_hint.get("world", _world_point(point))
 	var node: int = ECONOMY.sector_at(graph, world, ECONOMY.military_pois(state, _me()))
 	if patrol:
 		var anchor: int = ECONOMY.patrol_node(state, graph, _me(), world)
@@ -4106,12 +4174,18 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		if anchor >= 0:
 			_issue_order(fighters, {"kind": "patrol", "target": anchor, "point": world}, append)
 		return
-	var target: int = _entity_hit(state, point) if not force_position and (contextual or explicit_attack) else -1
+	var target: int = -1
+	if not force_position and (contextual or explicit_attack):
+		target = _entity_hit(state, point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
 	var ref: Dictionary = ECONOMY.service_targets(state).get(target, {})
-	var wreck: int = _salvage_hit(state, point) if contextual and not force_position else -1
+	var wreck: int = -1
+	if contextual and not force_position:
+		wreck = _salvage_hit(state, point) if minimap_hint.is_empty() else int(minimap_hint["wreck"])
 	var field: int = -1
 	var rock_id: int = -1
-	if contextual and not force_position and node >= state["planets"].size():
+	if contextual and not force_position and not minimap_hint.is_empty():
+		field = int(minimap_hint["field"])
+	elif contextual and not force_position and node >= state["planets"].size():
 		var candidate: int = node - state["planets"].size()
 		var data: Dictionary = state["map"]["fields"][candidate]
 		var distance: float = point.distance_to(_screen_point(data["position"]))
@@ -4148,7 +4222,8 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			var destination: int = ECONOMY.sector_at(graph, endpoint, ECONOMY.military_pois(state, _me()))
 			if destination < 0:
 				continue
-			if contextual and not force_position and ref.is_empty() and craft["kind"] == "colony_ship" and not colony_sent and destination < state["planets"].size() and point.distance_to(_screen_point(graph["points"][destination])) <= maxf(9.0, _star_draw_radius(_planet_radius(destination, state))) and not ECONOMY.colony_path(state, _me(), craft, destination).is_empty():
+			var clicked_system: bool = destination == int(minimap_hint.get("system", -1)) if not minimap_hint.is_empty() else destination < state["planets"].size() and point.distance_to(_screen_point(graph["points"][destination])) <= maxf(9.0, _star_draw_radius(_planet_radius(destination, state)))
+			if contextual and not force_position and ref.is_empty() and craft["kind"] == "colony_ship" and not colony_sent and destination < state["planets"].size() and clicked_system and not ECONOMY.colony_path(state, _me(), craft, destination).is_empty():
 				order = {"kind": "colonize", "target": destination}
 				colony_sent = true
 			else:
@@ -4447,6 +4522,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_cycle_owned_system(-1 if key == KEY_Q else 1)
 	elif key == KEY_F:
 		_focus_selection()
+	elif key == KEY_F2:
+		_select_all_military()
 	elif key == KEY_H:
 		_hold_selected()
 	elif key == KEY_U:
@@ -4460,6 +4537,28 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	else:
 		return
 	get_viewport().set_input_as_handled()
+
+func _select_all_military() -> void:
+	var state: Dictionary = _state()
+	if state.is_empty() or str(session.get("phase")) != "match":
+		return
+	_clear_building_selection()
+	selected = -1
+	selected_body = -1
+	selected_yard = -1
+	selected_field = -1
+	selected_units.clear()
+	for craft in state["ships"]:
+		if craft["kind"] == "fighter" and int(craft["owner"]) == _me():
+			selected_units.append(int(craft["id"]))
+	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
+	last_control_group_recall = -1
+	follow_units = false
+	pending_command = ""
+	formation_button = 0
+	selecting_units = false
+	_refresh_command_mode()
+	_refresh()
 
 func _cycle_owned_system(direction: int) -> void:
 	pending_command = ""
