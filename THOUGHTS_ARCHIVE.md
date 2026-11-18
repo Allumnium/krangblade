@@ -1,5 +1,9 @@
 # Warbound — thoughts archive
 
+### v0.40.0 — Station upgrade construction time (resolved v0.42.0)
+- **Original observation:** Station and shipyard queues share tile rendering but retain separate infrastructure/production work. Former instant manual station upgrades now finish on the next fixed tick; they are observable and cancellable during pause without adding meaningful balance time. Consider longer construction periods only if requested after playtesting. Verify narrow build-card captions and trade footer.
+- **Resolution:** Warehouse, habitation and orbital eco-housing now take substantial time in the existing queue, including AI expansion. Regression coverage confirms no immediate completion and multiplayer paused queue replication. Narrow layout and pacing remain playtest acceptance items.
+
 ### T-33b — Station ownership anchor (resolved 2026-11-17)
 - **Original observation:** Conquest could leave claimed systems with no shipyards. Proposed an orbital core, three attached production modules, and 20% stored-resource salvage.
 - **Resolution:** Implemented in v0.34.0. Destroying the core neutralizes the sector and requires a new colony ship to establish a station; fighter occupation no longer grants ownership. Physical station docking and independent module loss preserve the distinction between claim and production. Visual acceptance remains in TODO.md.

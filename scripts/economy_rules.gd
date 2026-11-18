@@ -12,7 +12,6 @@ const STARTING_STOCK = {"Metals": 1650.0, "Plastics": 360.0, "Textiles": 240.0, 
 const BASE_INDUSTRIAL_RATE: float = 1.0
 const INDUSTRIAL_POPULATION_PER_LEVEL: float = 100000.0
 const BUILDING_BONUS: float = 0.25
-const QUICK_STATION_WORK: float = 0.1
 const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional repeatable local production infrastructure; no self-input recipes.
 const ECONOMY_BUILDINGS = {
@@ -76,7 +75,7 @@ const DEFAULT_FOG_OF_WAR: bool = false
 const TRADE_REFERENCE: float = 2000.0
 const WAREHOUSE_CAPACITIES = [2000.0, 5000.0, 12000.0, 30000.0]
 # Each tier is 3x the previous one, with each price fitting in the
-# immediately preceding warehouse capacity (instant purchase).
+# immediately preceding warehouse capacity.
 const WAREHOUSE_COSTS = [
 	{"Metals": 500.0, "Plastics": 80.0, "Tech": 40.0},
 	{"Metals": 1500.0, "Plastics": 240.0, "Tech": 120.0},
@@ -490,16 +489,6 @@ static func _regenerate_eco(p: Dictionary, dt: float, residents: float) -> void:
 static func orbital_housing_available(p: Dictionary) -> bool:
 	return not has_planets(p) and int(p.get("owner", 0)) != 0 and affordable(p, ORBITAL_HOUSING_COST)
 
-static func _buy_orbital_housing(p: Dictionary) -> bool:
-	if not orbital_housing_available(p):
-		return false
-	for resource in ORBITAL_HOUSING_COST:
-		_spend_material(p, "Construction: orbital housing", resource, float(ORBITAL_HOUSING_COST[resource]))
-	p["orbital_housing"] = int(p.get("orbital_housing", 0)) + 1
-	_add_eco_residents(p, ORBITAL_HOUSING_POPULATION)
-	p["population_velocity"] = 0.0
-	return true
-
 static func overpopulation_penalty(planet: Dictionary, capacity_factor: float = 1.0) -> float:
 	if not has_planets(planet):
 		return 0.0
@@ -668,7 +657,9 @@ static func _work(kind: String, level: int) -> float:
 		"reinforced_plating", "laser_matrix": return 60.0
 		"yard_upgrade": return 15.0 * level
 		"production": return 10.0 * level
-		"warehouse", "habitation", "orbital_housing": return QUICK_STATION_WORK
+		"warehouse": return 10.0 + 10.0 * level
+		"habitation": return 12.0 + 12.0 * level
+		"orbital_housing": return 30.0
 	return 1.0
 
 static func _get_owned(state: Dictionary, player: int, index: int) -> Dictionary:
@@ -4217,7 +4208,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		if not (p["queue"] as Array).is_empty():
 			continue
 		if not has_planets(p) and float(p["population"]) < ORBITAL_HOUSING_POPULATION:
-			_buy_orbital_housing(p)
+			enqueue(state, player, index, "economy", "orbital_housing")
 			continue
 		var level: int = production_level(p, "Metals") + int(p.get("buildings", {}).get("Metals", 0))
 		var abundance: float = float(p["abundance"].get("Metals", 0.0))

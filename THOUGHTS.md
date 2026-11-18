@@ -4,9 +4,9 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
-- v0.41.0: Stable physical shipyard ports are independent of compact production indices and price tiers; rebuilding a lost numbered port retains existing count-based prices. Station plating and matrix require larger warehouse capacity than the starter 2,000 t; review affordability, construction duration and defense strength during contested play. Old selection references still invalidate on shipyard-count changes for safety.
+- v0.42.0: Removed AI's instant orbital housing bypass and timed previously quick warehouse/habitation jobs. Review construction pacing with limited colony materials; preserve prepaid refunds. Target rings deduplicate shared targets and follow interpolated ship/structure poses; check dense overlapping hulls and planet-detail transitions during play.
 
-- v0.40.0: Station and shipyard queues share tile rendering but retain separate infrastructure/production work. Former instant manual station upgrades now finish on the next fixed tick; they are observable and cancellable during pause without adding meaningful balance time. Consider longer construction periods only if requested after playtesting. Verify narrow build-card captions and trade footer.
+- v0.41.0: Stable physical shipyard ports are independent of compact production indices and price tiers; rebuilding a lost numbered port retains existing count-based prices. Station plating and matrix require larger warehouse capacity than the starter 2,000 t; review affordability, construction duration and defense strength during contested play. Old selection references still invalidate on shipyard-count changes for safety.
 
 - v0.39.0: Exact rally convergence combined with persistent Hold Position caused crowding; release nearby hulls into idle formation flight or autonomous work. Check rally points at sector edges and very large fleets, and verify that empty console panels expose both map rendering and map input. Shared multiplayer speed changes are last-authoritative-request wins; assess player coordination during live matches.
 

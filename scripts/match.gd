@@ -159,6 +159,7 @@ var selected_yard_count: int = 0
 var building_selection_kind: String = ""
 var selected_buildings: Dictionary = {}
 var building_group_panel: VBoxContainer
+var building_group_grid: GridContainer
 var building_group_title: Label
 var building_group_rows: Dictionary = {}
 var selection_double_click: bool = false
@@ -553,6 +554,11 @@ func _build_ui() -> void:
 	overview.add_child(building_group_panel)
 	building_group_title = _label("", 16)
 	building_group_panel.add_child(building_group_title)
+	building_group_grid = GridContainer.new()
+	building_group_grid.columns = 6
+	building_group_grid.add_theme_constant_override("h_separation", 3)
+	building_group_grid.add_theme_constant_override("v_separation", 3)
+	building_group_panel.add_child(building_group_grid)
 	building_group_panel.hide()
 	ship_overview = VBoxContainer.new()
 	ship_overview.add_theme_constant_override("separation", 4)
@@ -750,6 +756,8 @@ func _layout_console() -> void:
 		time_panel.offset_right = 8.0 + wing_width
 		time_panel.offset_bottom = console_panel.offset_top - 3.0
 		time_panel.offset_top = time_panel.offset_bottom - 31.0
+	if is_instance_valid(control_group_strip):
+		_layout_control_group_strip()
 	# SC2-style raised wings: minimap and commands use the full deck height;
 	# selection details begin 20% lower, leaving more map visible centrally.
 	console_center_spacer.custom_minimum_size.y = height * 0.20
@@ -831,6 +839,7 @@ func _layout_command_grids() -> void:
 			station_trade_back.custom_minimum_size = Vector2(slot_width, slot_height)
 	if is_instance_valid(selection_grid):
 		selection_grid.columns = maxi(1, floori(maxf(38.0, console_center.size.x - 20.0) / 41.0))
+		building_group_grid.columns = selection_grid.columns
 	if is_instance_valid(selection_portrait):
 		var portrait_width: float = clampf(floorf(console_center.size.x * 0.22), 70.0, 108.0)
 		selection_portrait.custom_minimum_size.x = portrait_width
@@ -1445,7 +1454,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			name_text = "Warehouse logistics · Lv %d" % level
 			eligible = level < 3
 			available = ECONOMY.warehouse_available(p)
-			work = ECONOMY.QUICK_STATION_WORK
+			work = ECONOMY._work("warehouse", level + 1)
 			description = "Storage: %s per resource" % _tons(ECONOMY.storage_capacity(p), 0)
 			if eligible:
 				recipe = ECONOMY.WAREHOUSE_COSTS[level]
@@ -1455,15 +1464,16 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			var caption: Label = button.get_meta("caption")
 			caption.text = "Habitation" if kind == "habitation" else "Orbital\nhousing"
 			(button.get_meta("portrait") as TextureRect).texture = _station_command_icon(kind)
-			work = ECONOMY.QUICK_STATION_WORK
 			if kind == "habitation":
 				var level: int = int(p.get("habitation_level", 0))
+				work = ECONOMY._work(kind, level + 1)
 				name_text = "Habitation technology · Lv %d" % level
 				eligible = level < 3
 				available = ECONOMY.habitation_available(p)
 				recipe = ECONOMY.habitation_cost(p) if eligible else {}
 				description = "Habitation capacity: %s → %s" % [_compact_amount(ECONOMY.habitation_capacity(p)), _compact_amount(ECONOMY.habitation_capacity(p) * (2.0 if eligible else 1.0))]
 			else:
+				work = ECONOMY._work(kind, 1)
 				name_text = "Orbital Eco-Housing"
 				recipe = ECONOMY.ORBITAL_HOUSING_COST
 				available = ECONOMY.orbital_housing_available(p)
@@ -2117,12 +2127,7 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 			tile = selection_tiles[id]
 		else:
 			tile = Button.new()
-			tile.custom_minimum_size = Vector2(38, 38)
-			tile.focus_mode = Control.FOCUS_NONE
-			tile.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			tile.add_theme_stylebox_override("normal", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 2, 2))
-			tile.add_theme_stylebox_override("hover", HUD.surface(HUD.CONSOLE_BACKGROUND.lightened(0.06), HUD.ACCENT, 2, 2))
-			tile.add_theme_stylebox_override("pressed", HUD.surface(HUD.CONSOLE_BACKGROUND.lightened(0.10), Color.WHITE, 2, 2))
+			_style_selection_tile(tile)
 			tile.pressed.connect(_select_tile.bind(id))
 			selection_grid.add_child(tile)
 			selection_tiles[id] = tile
@@ -2139,6 +2144,16 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 			tile.queue_free()
 			selection_tiles.erase(id)
 	selection_grid.visible = living.size() > 1
+
+func _style_selection_tile(tile: Button) -> void:
+	tile.custom_minimum_size = Vector2(38, 38)
+	tile.focus_mode = Control.FOCUS_NONE
+	tile.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tile.expand_icon = true
+	tile.add_theme_constant_override("icon_max_width", 32)
+	tile.add_theme_stylebox_override("normal", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 2, 2))
+	tile.add_theme_stylebox_override("hover", HUD.surface(HUD.CONSOLE_BACKGROUND.lightened(0.06), HUD.ACCENT, 2, 2))
+	tile.add_theme_stylebox_override("pressed", HUD.surface(HUD.CONSOLE_BACKGROUND.lightened(0.10), Color.WHITE, 2, 2))
 
 func _refresh_field_panels(state: Dictionary) -> void:
 	var field: Dictionary = state["map"]["fields"][selected_field]
@@ -2653,14 +2668,14 @@ func _tons(value: float, decimals: int = 1, compact: bool = false) -> String:
 	var number: String = "%.1f" % (value / scale) if scale > 1.0 or decimals == 1 else "%.0f" % value
 	return number + ("" if compact else " ") + unit
 
-func _theoretical_delta(p: Dictionary, resource: String) -> float:
+func _resource_delta(p: Dictionary, resource: String) -> float:
 	return ECONOMY.rate(p, resource) - ECONOMY.consumption(p, resource)
 
-func _empire_theoretical_delta(state: Dictionary, resource: String) -> float:
+func _empire_resource_delta(state: Dictionary, resource: String) -> float:
 	var total: float = 0.0
 	for p in state.get("planets", []):
 		if int(p["owner"]) == _me():
-			total += _theoretical_delta(p, resource)
+			total += _resource_delta(p, resource)
 	return total
 
 func _set_resource_delta(label: Label, annual: float, parentheses: bool = false) -> void:
@@ -2692,18 +2707,6 @@ func _build_resource_hover() -> void:
 	scroll.add_child(resource_hover_label)
 	resource_hover_panel.hide()
 
-func _flow_name(category: String) -> String:
-	if category.begins_with("Construction: "):
-		var kind: String = category.trim_prefix("Construction: ")
-		match kind:
-			"ship": return "Logistics ships"
-			"yard": return "Shipyard builds"
-			"yard_upgrade": return "Shipyard upgrades"
-			"production": return "Production upgrades"
-			"pds": return "Planetary defense"
-			_: return kind.replace("_", " ").capitalize() + " builds"
-	return category
-
 func _resource_breakdown(state: Dictionary, resource: String) -> String:
 	if resource == "population":
 		var lines: PackedStringArray = ["Population · %.0f people" % float(ECONOMY.empire_totals(state, _me())["population"]), "Current local growth (people/yr)"]
@@ -2718,30 +2721,12 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
 	var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
 		"%.2f t in transit  /  %.0f t storage" % [float(totals["cargo"][resource]), float(totals["storage_reference"][resource])],
-		"Theoretical empire net: %+.2f t/yr (production − demand)" % _empire_theoretical_delta(state, resource),
-		"Latest actual local flows (t/yr)"]
+		"Empire net: %+.2f t/yr" % _empire_resource_delta(state, resource)]
 	for i in range((state.get("planets", []) as Array).size()):
 		var p: Dictionary = state["planets"][i]
 		if int(p["owner"]) != _me():
 			continue
-		var parts: PackedStringArray = []
-		var categories: Array = ["Production", "Population", "Mining deliveries", "Salvage deliveries", "Manual deliveries", "Imports", "Exports"]
-		for category in p.get("flows", {}):
-			if not categories.has(category):
-				categories.append(category)
-		var net: float = 0.0
-		for category in categories:
-			var amount: float = ECONOMY.local_flow(p, category, resource)
-			if amount <= ECONOMY.EPS:
-				continue
-			var sign: float = -1.0 if category == "Population" or category == "Exports" or str(category).begins_with("Construction: ") else 1.0
-			net += sign * amount
-			parts.append("%+.2f %s" % [sign * amount, _flow_name(category)])
-		lines.append("%s  %+.2f theoretical · %+.2f actual" % [_system_name(i), _theoretical_delta(p, resource), net])
-		if not parts.is_empty():
-			lines.append("  " + " · ".join(parts))
-	if int(state.get("time_speed", 1)) == 0:
-		lines.append("Paused · last simulation step")
+		lines.append("%s  %+.2f t/yr · %.2f production / %.2f demand" % [_system_name(i), _resource_delta(p, resource), ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource)])
 	return "\n".join(lines)
 
 func _local_breakdown(p: Dictionary, resource: String) -> String:
@@ -2751,20 +2736,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year\nEco-Housing: %.0f / %.0f residents · +%.2f t/yr Organics" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics"), ECONOMY.eco_population(p), ECONOMY.eco_capacity(p), ECONOMY.eco_organics(p)]
 	var potential: float = ECONOMY.rate(p, resource)
 	var demand: float = ECONOMY.consumption(p, resource)
-	var lines: PackedStringArray = ["%s · %.2f t stored" % [resource, float(p["stock"][resource])], "Theoretical: %.2f production − %.2f demand = %+.2f t/yr" % [potential, demand, potential - demand], "Latest actual flows (t/yr)"]
-	var categories: Array = ["Production", "Population", "Mining deliveries", "Salvage deliveries", "Manual deliveries", "Imports", "Exports"]
-	for category in p.get("flows", {}):
-		if not categories.has(category):
-			categories.append(category)
-	var net: float = 0.0
-	for category in categories:
-		var amount: float = ECONOMY.local_flow(p, category, resource)
-		var sign: float = -1.0 if category == "Population" or category == "Exports" or str(category).begins_with("Construction: ") else 1.0
-		net += sign * amount
-		if amount > ECONOMY.EPS:
-			lines.append("%+.2f %s" % [sign * amount, _flow_name(category)])
-	lines.append("%+.2f net" % net)
-	return "\n".join(lines)
+	return "%s · %.2f t stored\nProduction: %.2f t/yr\nDemand: %.2f t/yr\nNet: %+.2f t/yr" % [resource, float(p["stock"][resource]), potential, demand, potential - demand]
 
 func _update_resource_hover() -> void:
 	if not is_instance_valid(resource_hover_panel):
@@ -2819,7 +2791,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])
-		var annual: float = _empire_theoretical_delta(state, resource)
+		var annual: float = _empire_resource_delta(state, resource)
 		global_resource_labels[resource].text = _tons(value, 0, true)
 		_set_resource_delta(global_resource_delta_labels[resource], annual, true)
 		var stored: float = float(totals["stock"][resource])
@@ -3101,10 +3073,10 @@ func _refresh() -> void:
 		bonus.text = "—" if percent == 100 else "%d%%" % (percent - 100) if percent < 100 else "+%d%%" % (percent - 100)
 		bonus.add_theme_color_override("font_color", HUD.ACCENT if percent > 100 else (Color("#e4a479") if percent < 100 else HUD.MUTED))
 		bonus.tooltip_text = "%.1f%% of baseline output" % (100.0 * ECONOMY.production_modifier(p, resource))
-		var annual: float = _theoretical_delta(p, resource)
+		var annual: float = _resource_delta(p, resource)
 		var delta_label: Label = production_values[resource]["rate"]
 		_set_resource_delta(delta_label, annual)
-		delta_label.tooltip_text = "Potential production %.2f t/yr · Demand %.2f t/yr · Theoretical net %+.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
+		delta_label.tooltip_text = "Production %.2f t/yr · Demand %.2f t/yr · Net %+.2f t/yr" % [ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource), annual]
 	var population: float = float(p["population"])
 	var raw: float = float(p["stock"].get(ECONOMY.ANTIMATTER, 0.0))
 	raw_antimatter_label.visible = raw > ECONOMY.EPS
@@ -3619,12 +3591,12 @@ func _clear_building_selection() -> void:
 
 func _build_control_group_strip() -> void:
 	control_group_strip = HBoxContainer.new()
+	control_group_strip.theme = HUD.compact()
 	control_group_strip.add_theme_constant_override("separation", 2)
-	console_center_spacer.add_child(control_group_strip)
-	control_group_strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	control_group_strip.offset_top = -26.0
-	control_group_strip.offset_bottom = -2.0
-	console_center_spacer.clip_contents = true
+	add_child(control_group_strip)
+	control_group_strip.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	control_group_strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header_panel.resized.connect(_layout_control_group_strip)
 	for number in [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]:
 		var button := _button(str(number), _recall_control_group.bind(number), control_group_strip)
 		button.focus_mode = Control.FOCUS_NONE
@@ -3637,6 +3609,13 @@ func _build_control_group_strip() -> void:
 		button.disabled = true
 		control_group_buttons[number] = button
 	control_group_strip.resized.connect(func() -> void: _refresh_control_groups(_state()))
+	_layout_control_group_strip()
+
+func _layout_control_group_strip() -> void:
+	if not is_instance_valid(control_group_strip):
+		return
+	control_group_strip.position = Vector2(8.0, header_panel.position.y + header_panel.size.y + 3.0)
+	control_group_strip.size = Vector2(minf(540.0, maxf(220.0, size.x - 16.0)), 26.0)
 
 func _control_ref_valid(state: Dictionary, ref: Vector2i, kind: String, expected_count: int) -> bool:
 	var planets: Array = state.get("planets", [])
@@ -3862,7 +3841,7 @@ func _refresh_building_group(state: Dictionary) -> void:
 	building_group_panel.visible = group
 	if not group:
 		for button in building_group_rows.values():
-			building_group_panel.remove_child(button)
+			building_group_grid.remove_child(button)
 			button.queue_free()
 		building_group_rows.clear()
 		return
@@ -3871,20 +3850,34 @@ func _refresh_building_group(state: Dictionary) -> void:
 	for ref in building_group_rows.keys():
 		if not selected_buildings.has(ref) or building_group_rows[ref].get_meta("kind") != kind:
 			var old: Button = building_group_rows[ref]
-			building_group_panel.remove_child(old)
+			building_group_grid.remove_child(old)
 			old.queue_free()
 			building_group_rows.erase(ref)
 	for ref in selected_buildings:
 		var system: Dictionary = state["planets"][ref.x]
 		if not building_group_rows.has(ref):
-			var row: Button = _button("", _select_building_ref.bind(ref, kind), building_group_panel)
-			row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			var row: Button = _button("", _select_building_tile.bind(ref, kind), building_group_grid)
+			_style_selection_tile(row)
 			row.set_meta("kind", kind)
 			building_group_rows[ref] = row
 		var button: Button = building_group_rows[ref]
 		var name_text: String = "%s · Shipyard %d · Lv %d" % [_system_name(ref.x), ECONOMY.shipyard_port(system, ref.y), int(system["yards"][ref.y]["level"])] if kind == "shipyard" else _system_name(ref.x) + " · Space Station" if kind == "station" else _body_name(ref.x, ref.y)
-		button.text = name_text + ("" if int(system["owner"]) == _me() else " · Foreign")
-		button.tooltip_text = "Select this building"
+		var maximum: float = ECONOMY.station_max_hp(system) if kind == "station" else ECONOMY.PDS_HP if kind == "pds" else ECONOMY.SHIP_HP * 10.0 * int(system["yards"][ref.y]["level"])
+		var entity: Dictionary = system["station"] if kind == "station" else system["pds"][ref.y] if kind == "pds" else system["yards"][ref.y]
+		var hp: float = float(entity.get("hp", maximum))
+		var tint: Color = _health_color(clampf(hp / maximum, 0.0, 1.0))
+		button.icon = _selection_portrait_icon(kind)
+		button.add_theme_color_override("icon_normal_color", tint)
+		button.add_theme_color_override("icon_hover_color", tint)
+		button.add_theme_color_override("icon_pressed_color", tint)
+		button.tooltip_text = "%s · %.0f / %.0f HP%s" % [name_text, hp, maximum, "" if int(system["owner"]) == _me() else " · Foreign"]
+
+func _select_building_tile(ref: Vector2i, kind: String) -> void:
+	if Input.is_key_pressed(KEY_SHIFT):
+		selected_buildings.erase(ref)
+		_refresh()
+	else:
+		_select_building_ref(ref, kind)
 
 func _refresh_group_yard_commands(state: Dictionary) -> void:
 	var refs: Array[Vector2i] = _selected_yards(state, true)
@@ -4702,6 +4695,85 @@ func _draw_selection_ring(point: Vector2, radius: float, tint: Color = HUD.ACCEN
 		var start: float = step * index
 		map_canvas.draw_arc(point, radius, start, start + step * 0.72, maxi(3, ceili(radius * step / 4.0)), tint, 1.0, true)
 
+# Target indicators use authoritative entity IDs, not the ship's navigation
+# waypoint. They follow the interpolated pose and rendered structure geometry.
+func _target_ring_entity(state: Dictionary, poses: Dictionary, refs: Dictionary, id: int) -> Dictionary:
+	var ref: Dictionary = refs.get(id, {})
+	if ref.is_empty():
+		return {}
+	var center: Vector2 = poses[id]["point"] if poses.has(id) else _screen_point(ref["position"])
+	var radius: float = maxf(8.0, 15.0 * _ship_scale())
+	match str(ref["kind"]):
+		"station": radius = _station_radius() + 4.0
+		"yard": radius = maxf(8.0, 23.0 * _ship_scale() * pow(1.2, int(ref["entity"]["level"]) - 1))
+		"pds":
+			var node: int = int(ref["node"])
+			var slot: int = floori(float(-2 - id - state["planets"].size() * 3) / float(state["planets"].size()))
+			var system_radius: float = _planet_radius(node, state)
+			if _planet_detail_opacity(node, system_radius) >= 0.5:
+				var body: Dictionary = _system_visual(node, state)["bodies"][slot]
+				center += _body_position(body, system_radius, game_visual_clock)
+				radius = maxf(8.0, system_radius * float(body["size"]) * 0.55 + 5.0)
+			else:
+				radius = maxf(8.0, _star_draw_radius(system_radius) + 5.0)
+	return {"point": center, "radius": radius, "owner": ref["owner"]}
+
+func _ship_target_ring(state: Dictionary, poses: Dictionary, refs: Dictionary, ship: Dictionary) -> Dictionary:
+	var destination: int = -1
+	if bool(ship.get("retreating", false)):
+		destination = int(ship.get("repair_site", -1))
+		if destination >= 0:
+			return _target_ring_entity(state, poses, refs, ECONOMY.station_target_id(state, destination))
+		return {}
+	for key in ["attack_order", "combat_target", "pursuit_target", "yard_target", "repair_order", "repair_target"]:
+		var target: int = int(ship.get(key, -1))
+		if target != -1 and refs.has(target):
+			return _target_ring_entity(state, poses, refs, target)
+	var cargo: Dictionary = ship.get("cargo_order", {})
+	if cargo.get("kind", "") == "deposit":
+		return _target_ring_entity(state, poses, refs, int(cargo.get("target", -1)))
+	for key in ["salvage_target", "auto_salvage_target"]:
+		var pile: Dictionary = state.get("salvage", {}).get(int(ship.get(key, -1)), {})
+		if not pile.is_empty():
+			return {"point": _screen_point(pile["position"]), "radius": _salvage_radius(pile) + 5.0, "owner": 0}
+	if ship.has("local_move_target") or ship.has("launch_rally") or bool(ship.get("holding", false)):
+		return {}
+	if ship["kind"] == "miner" and ship.get("mining_mode", "") in ["approach", "outbound", "mining"]:
+		var field: int = int(ship.get("field", -1))
+		if field >= 0 and field < state["map"]["fields"].size():
+			var chunk: Dictionary = ECONOMY._find_chunk(state["map"]["fields"][field], int(ship.get("chunk", -1)))
+			if not chunk.is_empty():
+				var radius: float = float(chunk["radius"]) * _fit() * zoom * sqrt(float(chunk["remaining"]) / float(chunk["initial"]))
+				return {"point": _screen_point(chunk["position"]), "radius": maxf(6.0, radius + 4.0), "owner": 0}
+	if bool(ship.get("salvage_delivery", false)):
+		destination = int(ship.get("salvage_depot", -1))
+	elif ship["kind"] == "miner" and ship.get("mining_mode", "") in ["return", "delivery"]:
+		destination = int(ship.get("mining_anchor", -1)) if ship.get("mining_mode", "") == "return" else int(ship.get("dest", -1))
+	elif ship["kind"] == "ship":
+		destination = int(ship.get("source", -1)) if int(ship.get("source", -1)) >= 0 else int(ship.get("dest", -1))
+	elif ship["kind"] == "colony_ship":
+		destination = int(ship.get("dest", -1))
+	if destination >= 0 and destination < state["planets"].size():
+		if refs.has(ECONOMY.station_target_id(state, destination)):
+			return _target_ring_entity(state, poses, refs, ECONOMY.station_target_id(state, destination))
+		return {"point": _screen_point(state["map"]["points"][destination]), "radius": maxf(8.0, _star_draw_radius(_planet_radius(destination, state)) + 5.0), "owner": state["planets"][destination]["owner"]}
+	return {}
+
+func _draw_ship_target_rings(state: Dictionary, poses: Dictionary, refs: Dictionary) -> void:
+	var drawn: Dictionary = {}
+	for ship in state["ships"]:
+		if not selected_units.has(int(ship["id"])) and int(ship["id"]) != selected_ship_id:
+			continue
+		var target: Dictionary = _ship_target_ring(state, poses, refs, ship)
+		if target.is_empty() or drawn.has(target["point"]):
+			continue
+		drawn[target["point"]] = true
+		var owner: int = int(target["owner"])
+		var tint: Color = Color.WHITE if owner <= 0 else Color("#50a8ff") if ECONOMY._friendly_target(state, _me(), target) else Color("#ff5058")
+		var radius: float = float(target["radius"]) + 4.0
+		if Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 4.0).has_point(target["point"]):
+			map_canvas.draw_arc(target["point"], radius, 0.0, TAU, clampi(ceili(radius * 0.7), 24, 96), tint, 1.8, true)
+
 func _hull_polygon(origin: Vector2, forward: Vector2, lateral: Vector2, vertices: Array) -> PackedVector2Array:
 	var polygon := PackedVector2Array()
 	for vertex in vertices:
@@ -4919,6 +4991,8 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 		var axis: Vector2 = Vector2.from_angle(angle)
 		var side: Vector2 = axis.orthogonal()
 		var point: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
+		if not Rect2(Vector2.ZERO, map_canvas.size).grow(maxf(16.0, 32.0 * scale)).has_point(point):
+			continue
 		if scale < 0.15:
 			map_canvas.draw_rect(Rect2(point - Vector2.ONE, Vector2(2.0, 2.0)), tint.lightened(0.25))
 			if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
@@ -5136,6 +5210,8 @@ func _draw_map() -> void:
 	for field_index in range(fields.size()):
 		var field: Dictionary = fields[field_index]
 		var center: Vector2 = _screen_point(field["position"])
+		if not viewport_bounds.grow(float(field["radius"]) * render_scale * 2.0 + 40.0).has_point(center):
+			continue
 		if not ECONOMY.discovered(state, _me(), "fields", field_index):
 			map_canvas.draw_string(font, center + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
 			continue
@@ -5199,6 +5275,8 @@ func _draw_map() -> void:
 	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
 	_draw_salvage(state, poses, viewport_bounds, font)
+	var service_refs: Dictionary = ECONOMY.service_targets(state)
+	_draw_ship_target_rings(state, poses, service_refs)
 	var order_graph: Dictionary = ECONOMY.military_graph(state)
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
@@ -5252,7 +5330,6 @@ func _draw_map() -> void:
 			if _planet_detail_opacity(index, radius) >= 0.5:
 				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, game_visual_clock)
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
-	var service_refs: Dictionary = ECONOMY.service_targets(state)
 	for ship in state["ships"]:
 		var shooter: int = int(ship["id"])
 		var target: int = int(ship.get("combat_target", -1))
