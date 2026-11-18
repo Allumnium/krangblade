@@ -1859,6 +1859,25 @@ static func sector_contains(graph: Dictionary, node: int, position: Vector2) -> 
 	var offset: Vector2 = position - (graph["points"][node] as Vector2)
 	return offset.length() <= sector_limit(graph, node, offset.normalized()) + EPS
 
+# Resolve a world point using the same clipped disks used by local orders.
+# Prefer the current sector at an exact shared edge to avoid command jitter.
+static func sector_at(graph: Dictionary, position: Vector2, candidates: Array, preferred: int = -1) -> int:
+	if not position.is_finite():
+		return -1
+	if preferred >= 0 and candidates.has(preferred) and sector_contains(graph, preferred, position):
+		return preferred
+	var hit: int = -1
+	var best: float = INF
+	for candidate in candidates:
+		var node: int = int(candidate)
+		if not sector_contains(graph, node, position):
+			continue
+		var distance: float = position.distance_squared_to(graph["points"][node])
+		if distance < best or (distance == best and node < hit):
+			hit = node
+			best = distance
+	return hit
+
 static func military_graph(state: Dictionary) -> Dictionary:
 	var map_data: Dictionary = state["map"]
 	if not cached_military_graph.is_empty() and cached_military_map.get("points") == map_data["points"] and cached_military_map.get("edges") == map_data["edges"] and cached_military_map.get("field_positions") == _field_positions(map_data):
