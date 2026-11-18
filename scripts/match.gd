@@ -47,6 +47,7 @@ var minimap: Control
 var console_columns: HBoxContainer
 var console_center: VBoxContainer
 var console_center_spacer: Control
+var console_right_body: VBoxContainer
 var console_profile: Control
 var yard_panel: PanelContainer
 var yard_column: VBoxContainer
@@ -425,22 +426,9 @@ func _build_ui() -> void:
 	minimap.draw.connect(_draw_minimap)
 	minimap.gui_input.connect(_minimap_input)
 	minimap.resized.connect(minimap.queue_redraw)
-	var console := VBoxContainer.new()
-	console.add_theme_constant_override("separation", 3)
-	console.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	deck.add_child(console)
-	var toolbar := HBoxContainer.new()
-	toolbar.add_theme_constant_override("separation", 3)
-	console.add_child(toolbar)
-	_build_lens_buttons(toolbar)
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	toolbar.add_child(spacer)
-	_build_time_controls(toolbar)
-	console_columns = HBoxContainer.new()
-	console_columns.add_theme_constant_override("separation", 4)
+	# Three actual columns; controls are owned by their corresponding wing.
+	console_columns = deck
 	console_columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	console.add_child(console_columns)
 	empty_selection = _label("Select a system, ship or asteroid field", 14)
 	empty_selection.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	empty_selection.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -448,24 +436,46 @@ func _build_ui() -> void:
 	empty_selection.add_theme_color_override("font_color", HUD.MUTED)
 	console_center = VBoxContainer.new()
 	console_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	console_center.size_flags_stretch_ratio = 1.15
+	console_center.size_flags_stretch_ratio = 1.0
+	console_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	console_columns.add_child(console_center)
 	console_center_spacer = Control.new()
 	console_center.add_child(console_center_spacer)
+	var center_toolbar := HBoxContainer.new()
+	center_toolbar.add_theme_constant_override("separation", 3)
+	console_center.add_child(center_toolbar)
+	_build_lens_buttons(center_toolbar)
 	console_center.add_child(empty_selection)
 	inspector_panel = PanelContainer.new()
 	console_columns.add_child(inspector_panel)
 	inspector_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inspector_panel.size_flags_stretch_ratio = 1.3
+	inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
+	var right_column := VBoxContainer.new()
+	right_column.add_theme_constant_override("separation", 3)
+	inspector_panel.add_child(right_column)
+	var right_toolbar := HBoxContainer.new()
+	right_toolbar.alignment = BoxContainer.ALIGNMENT_END
+	right_column.add_child(right_toolbar)
+	_build_time_controls(right_toolbar)
+	var command_scroll := ScrollContainer.new()
+	command_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	command_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	right_column.add_child(command_scroll)
 	var body := VBoxContainer.new()
 	body.add_theme_constant_override("separation", 3)
-	inspector_panel.add_child(body)
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	command_scroll.add_child(body)
+	console_right_body = body
 	overview_panel = PanelContainer.new()
 	console_center.add_child(overview_panel)
-	overview_panel.custom_minimum_size.x = OVERVIEW_WIDTH
+	overview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	overview_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101f30"), Color("#284661"), 3, 3))
 	var overview_scroll := ScrollContainer.new()
-	overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	overview_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	overview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	overview_panel.add_child(overview_scroll)
 	var overview := VBoxContainer.new()
 	overview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -570,7 +580,7 @@ func _build_ui() -> void:
 	yard_scroll.add_child(yard_column)
 	yard_activity = HUD.section(yard_column, "Shipyards", true)
 	inspector_tabs = TabContainer.new()
-	inspector_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	inspector_tabs.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	inspector_tabs.clip_contents = true
 	inspector_tabs.tab_changed.connect(func(_tab: int) -> void: _collapse_details())
 	body.add_child(inspector_tabs)
@@ -652,6 +662,7 @@ func _build_ui() -> void:
 	inspector_panel.resized.connect(_layout_command_grids)
 	inspector_panel.resized.connect(console_profile.queue_redraw)
 	console_center.resized.connect(console_profile.queue_redraw)
+	console_columns.resized.connect(console_profile.queue_redraw)
 	_layout_console()
 
 func _layout_console() -> void:
@@ -669,7 +680,8 @@ func _layout_console() -> void:
 	# selection details begin 20% lower, leaving more map visible centrally.
 	console_center_spacer.custom_minimum_size.y = height * 0.20
 	console_profile.queue_redraw()
-	overview_panel.custom_minimum_size.x = minf(OVERVIEW_WIDTH, maxf(190.0, size.x * 0.31))
+	# Do not force the center wider than its allotted column.
+	overview_panel.custom_minimum_size.x = 0.0
 	yard_panel.hide()
 	_layout_command_grids()
 
@@ -694,7 +706,7 @@ func _draw_console_profile() -> void:
 			console_profile.draw_rect(rect.grow(-0.5), edge, false, 1.0)
 
 func _layout_command_grids() -> void:
-	var width: float = inspector_panel.size.x - 22.0
+	var width: float = inspector_panel.size.x - 34.0
 	for title in command_grids:
 		var grid: GridContainer = command_grids[title]
 		var cell_width: float = 160.0 if title == "Trade" else 222.0
@@ -2373,7 +2385,8 @@ func _refresh() -> void:
 	var yard_selected: bool = not other_selected and not body_selected and not p.is_empty() and selected_yard >= 0 and selected_yard < p.get("yards", []).size() and selected_yard_count == p.get("yards", []).size()
 	if not yard_selected:
 		selected_yard = -1
-	inspector_panel.visible = not p.is_empty() or other_selected
+	inspector_panel.visible = true
+	console_right_body.visible = not p.is_empty() or other_selected
 	overview_panel.visible = (not p.is_empty() or other_selected)
 	empty_selection.visible = not overview_panel.visible
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
