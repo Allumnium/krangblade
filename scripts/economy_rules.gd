@@ -2226,8 +2226,9 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 		ship["navigation_target"] = point
 		if ship.get("kind", "") == "fighter":
 			ship["direct_order"] = true
-			# Preserve the actual lane anchor until normal navigation reaches
-			# a waypoint. Overwriting `at` here caused jumps on later orders.
+			# Once physical containment is validated, normalize the stale lane
+			# anchor to the actual sector before clearing its route.
+			ship["at"] = node
 			ship["operation_target"] = node
 			ship["dest"] = node
 			ship["route"] = []
