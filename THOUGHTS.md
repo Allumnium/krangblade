@@ -399,3 +399,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 ### T-29i — Prefer local fighter commands
 - **Type:** Command reliability.
 - **Observation:** Right-click near a POI could still resolve as a sector move even when the cursor was inside the fighter's current sector. Prioritize local-position orders for fighters physically in the clicked sector before resolving cross-sector moves.
+
+### T-29j — Geometric local orders versus stale lane anchors
+- **Type:** Movement correctness.
+- **Observation:** Local movement validation depended on `at`, which can lag the fighter's physical position. Successful local orders also overwrote `at`, corrupting subsequent lane routing. Validate physical containment and preserve lane anchor, and avoid redirecting local holds solely because `at` differs.

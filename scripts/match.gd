@@ -3330,6 +3330,13 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			if not fighters.has(id) or bool(craft.get("retreating", false)):
 				continue
 			var current: int = ECONOMY.local_sector(graph, craft)
+			# A fighter can physically enter a sector before its lane waypoint
+			# updates `at`. Prefer the actual sector under the fighter.
+			if current < 0:
+				for candidate in ECONOMY.military_pois(state, _me()):
+					if ECONOMY.sector_contains(graph, candidate, craft["position"]):
+						current = candidate
+						break
 			if current >= 0 and ECONOMY.sector_contains(graph, current, world):
 				if not local_groups.has(current):
 					local_groups[current] = []
