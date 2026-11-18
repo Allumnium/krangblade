@@ -421,3 +421,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - **Verify:** Small viewport/UI scales, multi-unit selection, command cancellation, and networked commands. Consider distinct stop/resume-idle semantics and general cargo transfer later.
 
 - v0.30.1: Preserve opportunistic salvage for held units as covered by ENet smoke tests; explicit Attack Move cannot issue a salvage-click order. Exercise move-only RPC payloads in the existing network smoke scenario.
+
+### T-30b — Zoom-based planet detail
+- User superseded selection-only planet visibility. All discovered systems now fade their bodies in at close range (40–100 logical-pixel projected system radius, 0.22s fade), including PDS frames. Orbital rings remain selected-system-only and fade with planets; PDS indicator stays visible at overview scale. Planet hit testing uses the same opacity and supports unselected systems.
