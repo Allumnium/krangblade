@@ -358,3 +358,13 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.28.1: User requested a StarCraft-like unified bottom console instead of left/right overlays. Reserve 43% of the available window height (normally 250–360 logical pixels, clamped at small heights), keep independent scroll areas and responsive grids, and use the full-width map above. A local headless sizing probe at 880×505, 1152×648, 1280×720 and 1920×1080 confirmed reserved map/console bounds, the two-column fallback and visible ship-build cards at normal width. Actual visual aesthetics, scrolling, hover and interaction still require manual verification. Consider a user-adjustable console height only after playtesting; no gameplay changes.
 
 - v0.28.2: User requested more compact styling and a minimap. Scope the denser theme to the console, reduce target height to 32% (195–285 logical pixels), keep independent scroll areas and fit common ship-build cards in a two-column grid. The minimap draws sector/field links, known ownership, ships and camera rectangle using the existing projection and snapshots; clicks/drag pan locally without changing orders or selection. Headless sizing probe at four window sizes confirmed camera centering to within floating-point precision and the 1280×720 console shrinking from 310 to 230 logical pixels. Manual visual and large-fleet performance checks remain outstanding.
+
+### T-Console-29 — Raised-wing console density
+- **Type:** UX hypothesis.
+- **Observation:** v0.29.1 places selection details in a lower center zone and commands on the raised right wing, with a persistent raised minimap on the left.
+- **Consider:** Verify legibility and scrolling at 1152×648, ultrawide and increased UI scale; evaluate whether the 20% center recess leaves sufficient selection detail space.
+
+### T-Console-29b — True stepped console outline
+- **Type:** UX correction.
+- **Observation:** The prior full-width console backdrop concealed the 20% center recess; v0.29.2 draws independent left, center and right panel silhouettes.
+- **Consider:** Visually check border joins and map occlusion with and without a selection.
