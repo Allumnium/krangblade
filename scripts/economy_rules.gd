@@ -2001,7 +2001,7 @@ static func sector_at(graph: Dictionary, position: Vector2, candidates: Array, p
 
 static func military_graph(state: Dictionary) -> Dictionary:
 	var map_data: Dictionary = state["map"]
-	if not cached_military_graph.is_empty() and cached_military_map.get("points") == map_data["points"] and cached_military_map.get("edges") == map_data["edges"] and cached_military_map.get("field_positions") == _field_positions(map_data):
+	if not cached_military_graph.is_empty() and cached_military_map.get("points") == map_data["points"] and cached_military_map.get("edges") == map_data["edges"] and cached_military_map.get("field_positions") == _field_positions(map_data) and cached_military_map.get("field_edges") == map_data.get("field_edges", []):
 		return cached_military_graph
 	var points: Array = map_data["points"].duplicate()
 	var edges: Array = map_data["edges"].duplicate()
@@ -2009,6 +2009,9 @@ static func military_graph(state: Dictionary) -> Dictionary:
 		for anchor in field_access_systems(state["map"], field):
 			edges.append([anchor, points.size()])
 		points.append(field["position"])
+	var count: int = map_data["points"].size()
+	for edge in map_data.get("field_edges", []):
+		edges.append([count + int(edge[0]), count + int(edge[1])])
 	var adjacent: Array = []
 	for i in range(points.size()):
 		adjacent.append([])
@@ -2029,7 +2032,7 @@ static func military_graph(state: Dictionary) -> Dictionary:
 			if delta.length_squared() < 4.0 * radius * radius and delta.length_squared() > EPS:
 				neighbors.append(delta)
 		sector_neighbors.append(neighbors)
-	cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data)}
+	cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data), "field_edges": map_data.get("field_edges", []).duplicate(true)}
 	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors, "system_count": map_data["points"].size()}
 	return cached_military_graph
 
@@ -2192,6 +2195,10 @@ static func _clear_tactical_order(ship: Dictionary) -> void:
 	ship.erase("attack_local")
 	ship.erase("patrol_from")
 	ship.erase("patrol_to")
+	ship.erase("patrol_start_point")
+	ship.erase("patrol_end_point")
+	ship.erase("patrol_returning")
+	ship.erase("patrol_arrived")
 
 static func _hostile_hull(state: Dictionary, player: int, target: Dictionary) -> bool:
 	var team: int = int(state["teams"].get(player, 0))
@@ -2221,20 +2228,56 @@ static func command_attack(state: Dictionary, player: int, ids: Array, target_id
 		_set_unit_order(craft, {"kind": "attack", "target": target_id})
 	return true
 
-static func command_patrol(state: Dictionary, player: int, ids: Array, target: int) -> bool:
+static func patrol_node(state: Dictionary, graph: Dictionary, player: int, point: Vector2) -> int:
+	if not point.is_finite() or (state["map"].has("size") and not Rect2(Vector2.ZERO, state["map"]["size"]).has_point(point)):
+		return -1
+	var candidates: Array[int] = military_pois(state, player)
+	var node: int = sector_at(graph, point, candidates)
+	if node >= 0:
+		return node
+	var best: float = INF
+	for candidate in candidates:
+		var distance: float = point.distance_squared_to(graph["points"][candidate])
+		if distance < best:
+			best = distance
+			node = candidate
+	return node
+
+static func command_patrol(state: Dictionary, player: int, ids: Array, target: int, point: Vector2 = Vector2.INF) -> bool:
 	var selected: Array = _owned_fighters(state, player, ids)
+	var graph: Dictionary = military_graph(state)
+	if not military_pois(state, player).has(target) or selected.is_empty():
+		return false
+	var precise: bool = point != Vector2.INF
+	if not precise:
+		point = graph["points"][target]
+	elif patrol_node(state, graph, player, point) != target:
+		return false
 	var origins: Dictionary = {}
+	var starts: Dictionary = {}
 	for craft in selected:
-		var origin: int = int(craft["at"])
-		if origin == target or not military_pois(state, player).has(origin):
+		var position: Vector2 = craft["position"]
+		var origin: int = local_sector(graph, craft)
+		if origin < 0:
+			origin = int(craft["at"])
+		if (not precise and origin == target) or position.distance_to(point) <= EPS or not military_pois(state, player).has(origin):
 			return false
 		origins[int(craft["id"])] = origin
+		starts[int(craft["id"])] = position
 	if not command_fighters(state, player, ids, target):
 		return false
 	for craft in selected:
 		craft["patrol_from"] = origins[int(craft["id"])]
 		craft["patrol_to"] = target
-		_set_unit_order(craft, {"kind": "patrol", "target": target})
+		craft["patrol_start_point"] = starts[int(craft["id"])]
+		craft["patrol_end_point"] = point
+		craft["patrol_returning"] = false
+		craft["patrol_arrived"] = false
+		if not craft.get("retreating", false) and local_sector(graph, craft) == target:
+			craft["at"] = target
+			craft["route"] = []
+			craft["leg"] = 0.0
+		_set_unit_order(craft, {"kind": "patrol", "target": target, "point": point})
 	return true
 
 static func _update_tactical_orders(state: Dictionary, graph: Dictionary) -> void:
@@ -2264,10 +2307,10 @@ static func _update_tactical_orders(state: Dictionary, graph: Dictionary) -> voi
 				craft["route"] = []
 				craft["leg"] = 0.0
 				craft["dest"] = goal
-		elif craft.has("patrol_from") and (craft["route"] as Array).is_empty() and not _engaged(craft):
-			var current: int = int(craft.get("operation_target", -1))
-			if int(craft["at"]) == current:
-				goal = int(craft["patrol_from"]) if current == int(craft["patrol_to"]) else int(craft["patrol_to"])
+		elif craft.has("patrol_from") and craft.get("patrol_arrived", false) and not _engaged(craft):
+			craft["patrol_returning"] = not bool(craft.get("patrol_returning", false))
+			craft["patrol_arrived"] = false
+			goal = int(craft["patrol_from"]) if craft["patrol_returning"] else int(craft["patrol_to"])
 		if goal >= 0:
 			craft["operation_target"] = goal
 			if int(craft.get("dest", -1)) != goal:
@@ -2385,7 +2428,12 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 	match order.get("kind", ""):
 		"position":
 			return order.get("point", Vector2.INF)
-		"sector", "patrol", "colonize":
+		"patrol":
+			if order.has("point"):
+				return order["point"]
+			if target >= 0 and target < graph["points"].size():
+				return graph["points"][target]
+		"sector", "colonize":
 			if target >= 0 and target < graph["points"].size():
 				return graph["points"][target]
 		"attack":
@@ -2414,6 +2462,8 @@ static func unit_order_origin(state: Dictionary, graph: Dictionary, ship: Dictio
 		if point.is_finite():
 			return point
 	var active: Vector2 = unit_order_point(state, graph, ship, ship.get("unit_order", {})) if _unit_order_running(ship) else Vector2.INF
+	if ship.has("patrol_from") and ship.get("patrol_returning", false):
+		active = ship["patrol_start_point"]
 	if not active.is_finite() and ship.has("launch_rally"):
 		active = ship["launch_rally"]["point"]
 	return active if active.is_finite() else ship["position"]
@@ -2430,7 +2480,7 @@ static func _unit_order_running(ship: Dictionary) -> bool:
 		"attack":
 			return ship.has("attack_order")
 		"patrol":
-			return ship.has("patrol_from") and ((ship.get("order_queue", []) as Array).is_empty() or not (ship["route"] as Array).is_empty() or _engaged(ship))
+			return ship.has("patrol_from") and ((ship.get("order_queue", []) as Array).is_empty() or not ship.get("patrol_arrived", false) or _engaged(ship))
 		"salvage":
 			return int(ship.get("salvage_target", -1)) >= 0
 		"unload":
@@ -2459,7 +2509,9 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 				return false
 			var origin: Vector2 = unit_order_origin(state, graph, ship) if append else ship["position"]
 			return sector_contains(graph, target, origin) or (fighter and order.has("heading") and _military_paths(graph, target)["distance"].has(int(ship["at"])))
-		"sector", "patrol":
+		"patrol":
+			return fighter and military_pois(state, owner).has(target) and (not order.has("point") or (order["point"] is Vector2 and patrol_node(state, graph, owner, order["point"]) == target))
+		"sector":
 			return fighter and military_pois(state, owner).has(target)
 		"attack":
 			for victim in state["ships"]:
@@ -2481,7 +2533,7 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 		"attack":
 			return command_attack(state, player, ids, target)
 		"patrol":
-			return command_patrol(state, player, ids, target)
+			return command_patrol(state, player, ids, target, order.get("point", Vector2.INF))
 		"mine":
 			return command_miners(state, player, ids, target, int(order.get("chunk", -1)))
 		"salvage":
@@ -2769,7 +2821,7 @@ static func territory_claims(state: Dictionary) -> Array[int]:
 		var team: int = int(state["teams"].get(int(ship["owner"]), 0))
 		if team <= 0:
 			continue
-		var stationary: bool = (ship["route"] as Array).is_empty() and not _engaged(ship)
+		var stationary: bool = (ship["route"] as Array).is_empty() and not _engaged(ship) and not ship.has("patrol_from")
 		if stationary:
 			node = int(ship["at"])
 			if claims[node] != 0 and claims[node] != team:
@@ -4242,7 +4294,7 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 # same-kind hulls share a moving local anchor and tangent-relative V slots.
 # Routing, docking, mining, combat and withdrawal always take precedence.
 static func _is_idle_ship(ship: Dictionary) -> bool:
-	if _salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally"):
+	if _salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally") or ship.has("patrol_from"):
 		return false
 	var fighter: bool = ship.get("kind", "") == "fighter"
 	var mode: String = str(ship.get("mining_mode", "idle"))
@@ -4634,6 +4686,10 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 				ship["pursuit_left"] = 0.0
 				if not (ship["route"] as Array).is_empty():
 					_move_formation(combat_graph, ship, dt)
+				elif ship.has("patrol_from"):
+					var endpoint: Vector2 = ship["patrol_start_point"] if ship["patrol_returning"] else ship["patrol_end_point"]
+					_navigate(ship, endpoint, SHIP_SPEED * dt)
+					ship["patrol_arrived"] = (ship["position"] as Vector2).distance_to(endpoint) <= EPS
 		var ship_id: int = int(ship["id"])
 		# Only use the idle budget if the ship started and finished its
 		# work idle and did not already move this tick.

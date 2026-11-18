@@ -294,7 +294,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 		for anchor in anchors:
 			if used.has(anchor) or degrees[anchor] >= MAX_CONNECTIONS:
 				continue
-			var field: Dictionary = _ordinary_field(anchor, points, edges, fields, degrees, rng)
+			var field: Dictionary = _ordinary_field(anchor, points, edges, fields, degrees, rng, specials if radial else [])
 			if not field.is_empty():
 				ordinary.append(field)
 				fields.append(field)
@@ -303,11 +303,41 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	for anchor in range(points.size()):
 		if used.has(anchor) or degrees[anchor] >= MAX_CONNECTIONS:
 			continue
-		var field: Dictionary = _ordinary_field(anchor, points, edges, fields, degrees, rng)
+		var field: Dictionary = _ordinary_field(anchor, points, edges, fields, degrees, rng, specials if radial else [])
 		if not field.is_empty():
 			ordinary.append(field)
 			fields.append(field)
 	fields = ordinary + specials
+	# Reserve nearby deposit-to-deposit lanes before filling spare star ports.
+	# The central radial antimatter pair is a deliberate traversal corridor.
+	var field_edges: Array = []
+	var field_degrees: Array[int] = []
+	var field_options: Array = []
+	for field in fields:
+		field_degrees.append(field["access"].size())
+	for a in range(fields.size()):
+		for b in range(a + 1, fields.size()):
+			var start: Vector2 = fields[a]["position"]
+			var finish: Vector2 = fields[b]["position"]
+			var distance: float = start.distance_to(finish)
+			var central_pair: bool = radial and fields[a].get("antimatter", false) and fields[b].get("antimatter", false)
+			if not central_pair and distance > 3.0 * (float(fields[a]["radius"]) + float(fields[b]["radius"])):
+				continue
+			var clear: bool = true
+			for other in range(fields.size()):
+				if other != a and other != b and Geometry2D.get_closest_point_to_segment(fields[other]["position"], start, finish).distance_to(fields[other]["position"]) <= float(fields[other]["radius"]):
+					clear = false
+					break
+			if clear:
+				field_options.append({"a": a, "b": b, "score": -1.0 if central_pair else distance})
+	field_options.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] < b["score"])
+	for option in field_options:
+		var a: int = option["a"]
+		var b: int = option["b"]
+		if field_degrees[a] < MAX_CONNECTIONS and field_degrees[b] < MAX_CONNECTIONS:
+			field_edges.append([a, b])
+			field_degrees[a] += 1
+			field_degrees[b] += 1
 	var options: Array = []
 	for index in range(fields.size()):
 		var field: Dictionary = fields[index]
@@ -330,9 +360,10 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	for option in options:
 		var node: int = option["node"]
 		var access: Array = fields[option["field"]]["access"]
-		if degrees[node] < MAX_CONNECTIONS and access.size() < MAX_CONNECTIONS:
+		if degrees[node] < MAX_CONNECTIONS and field_degrees[option["field"]] < MAX_CONNECTIONS:
 			access.append(node)
 			degrees[node] += 1
+			field_degrees[option["field"]] += 1
 	var longest: float = 0.0
 	for edge in edges:
 		longest = maxf(longest, points[edge[0]].distance_to(points[edge[1]]))
@@ -349,7 +380,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			field[ANTIMATTER] = 1.0
 			for chunk in field["chunks"]:
 				chunk["resource"] = ANTIMATTER
-	return {"seed": seed_value, "layout": layout, "planetless": planetless_systems(seed_value, points.size(), edges, player_count), "antimatter_home_clearance": ANTIMATTER_CLEARANCE * scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "size": bounds * scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": points.size()}
+	return {"seed": seed_value, "layout": layout, "planetless": planetless_systems(seed_value, points.size(), edges, player_count), "antimatter_home_clearance": ANTIMATTER_CLEARANCE * scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "field_edges": field_edges, "size": bounds * scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": points.size()}
 
 static func _field_at(center: Vector2, radius: float, points: Array[Vector2], edges: Array, fields: Array, degrees: Array[int], first_node: int, required_anchor: int = -1) -> Dictionary:
 	var field: Dictionary = _safe_field(center, radius, points, edges, fields)
@@ -376,11 +407,13 @@ static func _field_at(center: Vector2, radius: float, points: Array[Vector2], ed
 	degrees[best] += 1
 	return field
 
-static func _ordinary_field(anchor: int, points: Array[Vector2], edges: Array, fields: Array, degrees: Array[int], rng: RandomNumberGenerator) -> Dictionary:
+static func _ordinary_field(anchor: int, points: Array[Vector2], edges: Array, fields: Array, degrees: Array[int], rng: RandomNumberGenerator, protected_pair: Array = []) -> Dictionary:
 	var start: float = rng.randf_range(0.0, TAU)
 	for ring in range(3):
 		for angle in range(16):
 			var center: Vector2 = points[anchor] + Vector2.from_angle(start + TAU * float(angle) / 16.0) * (150.0 + float(ring) * 60.0)
+			if protected_pair.size() == 2 and Geometry2D.get_closest_point_to_segment(center, protected_pair[0]["position"], protected_pair[1]["position"]).distance_to(center) <= 42.0:
+				continue
 			var field: Dictionary = _field_at(center, 42.0, points, edges, fields, degrees, 0, anchor)
 			if not field.is_empty():
 				field.merge({"Metals": rng.randf_range(1.0, 2.0), "Crystals": rng.randf_range(1.0, 2.0)})

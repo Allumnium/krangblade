@@ -370,7 +370,10 @@ func _send_commands() -> void:
 	session.call("request_miner_assignment", [own_miners[0], enemy_miner], -1)
 	session.call("request_miner_assignment", [own_miners[0]], 999999)
 	session.call("request_fighter_move", [own_fighters[0]], field_node, true)
-	session.call("request_tactical_order", [own_fighters[0]], "patrol", field_node)
+	var patrol_graph: Dictionary = ECON.military_graph(initial)
+	var patrol_point: Vector2 = patrol_graph["points"][field_node] + Vector2.UP * ECON.sector_limit(patrol_graph, field_node, Vector2.UP) * 0.3
+	session.call("request_unit_orders", [{"ids": [own_fighters[0]], "order": {"kind": "patrol", "target": field_node, "point": patrol_point}}], false)
+	session.call("request_unit_orders", [{"ids": [own_fighters[0]], "order": {"kind": "patrol", "target": field_node, "point": Vector2.INF}}], false)
 	session.call("request_tactical_order", [own_fighters[0], enemy_fighter], "patrol", home_index)
 	session.call("request_tactical_order", [own_fighters[0]], "patrol", -1)
 	var attack_id: int = 920000 + home_index
@@ -552,6 +555,7 @@ func _check_economy_sync() -> void:
 			var graph: Dictionary = ECON.military_graph(state)
 			var owner_home: int = state["planets"].find(system)
 			var local_point: Vector2 = graph["points"][owner_home] + Vector2.RIGHT * ECON.sector_limit(graph, owner_home, Vector2.RIGHT) * 0.25
+			var patrol_point: Vector2 = graph["points"][field_node] + Vector2.UP * ECON.sector_limit(graph, field_node, Vector2.UP) * 0.3
 			var rally_point: Vector2 = graph["points"][owner_home] + Vector2.UP * ECON.sector_limit(graph, owner_home, Vector2.UP) * 0.65
 			for craft in state["ships"]:
 				if int(craft["owner"]) == owner and craft["kind"] == "fighter":
@@ -561,7 +565,7 @@ func _check_economy_sync() -> void:
 							_fail("Rallying fighter replicated a move-only order.")
 							return
 						rally_attack_move = launch.get("point", Vector2.INF) == rally_point or (bool(craft.get("holding", false)) and craft.get("hold_position", Vector2.INF) == rally_point)
-					patrol_verified = patrol_verified or (int(craft.get("patrol_from", -1)) == owner_home and int(craft.get("patrol_to", -1)) == field_node)
+					patrol_verified = patrol_verified or (int(craft.get("patrol_from", -1)) == owner_home and int(craft.get("patrol_to", -1)) == field_node and craft.get("patrol_end_point", Vector2.INF) == patrol_point and ECON.sector_contains(graph, owner_home, craft.get("patrol_start_point", Vector2.INF)))
 					attack_verified = attack_verified or (int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) == 920000 + (owner_home + 1) % expected_players)
 					if int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) >= 0:
 						var queue: Array = craft.get("order_queue", [])

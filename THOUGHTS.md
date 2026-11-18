@@ -454,3 +454,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-34a — Station and movement acceptance
 - Station core is the sole ownership anchor; colonization establishes the station and first module. Station destruction resets the sector, drops exactly 20% of stored goods and requires recolonization. Review provisional 1,000 HP, art and physical docking paths; verify move-only clicks do not interrupt movement for combat, while explicit attack-move/rallies do. Module housing remains tied to completed shipyards, not the core itself.
+
+### T-35a — Field transit and precise patrol
+- Field access was exclusively star-to-deposit; central radial antimatter fields could not travel directly between each other. Persist field pair lanes, reserve the central corridor, and choose nearby unobstructed pairs within existing three-port limits. Patrol anchors retain exact world positions, and may terminate outside sector circles after lane travel. Verify the visual feedback, combat interruption and travel timing, especially over empty space. Multi-ship selection drops individual details; modifier clicks and icon-only aggregate cargo need manual acceptance.

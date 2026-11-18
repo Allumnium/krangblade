@@ -216,7 +216,7 @@ var pending_command: String = ""
 var selection_grid: GridContainer
 var selection_tiles: Dictionary = {}
 var selection_icons: Dictionary = {}
-var fleet_cargo: VBoxContainer
+var fleet_cargo: HBoxContainer
 var fleet_cargo_labels: Dictionary = {}
 var initial_selection_done: bool = false
 var global_resource_labels: Dictionary = {}
@@ -559,8 +559,10 @@ func _build_ui() -> void:
 	ship_overview.add_child(fleet_detail)
 	_build_command_card(fleet_overview)
 	_build_yard_command_card(body)
-	fleet_cargo = HUD.section(ship_overview, "Fleet cargo", true)
-	_build_cargo_rows(fleet_cargo, fleet_cargo_labels)
+	fleet_cargo = HBoxContainer.new()
+	fleet_cargo.add_theme_constant_override("separation", 10)
+	ship_overview.add_child(fleet_cargo)
+	_build_fleet_cargo_row()
 	mining_controls = HUD.section(fleet_overview, "Mine", true)
 	mining_enabled = CheckBox.new()
 	mining_enabled.text = "Enabled"
@@ -1428,7 +1430,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	_yard_ability_face(rally_button, "Rally", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12"/>'))
 	rally_button.toggle_mode = true
 	rally_button.focus_mode = Control.FOCUS_NONE
-	rally_button.tooltip_text = "Set rally point · click a discovered star system or a position within it"
+	rally_button.tooltip_text = "Set Rally Point"
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
@@ -1707,6 +1709,27 @@ func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
 		row.add_child(amount)
 		labels[resource] = amount
 
+func _build_fleet_cargo_row() -> void:
+	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
+		var pair := HBoxContainer.new()
+		pair.tooltip_text = resource
+		fleet_cargo.add_child(pair)
+		var icon := TextureRect.new()
+		icon.texture = HUD.ICONS.get(resource)
+		if resource == ECONOMY.ANTIMATTER:
+			var image := Image.new()
+			image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path fill="#f279d7" d="M12 1L22 12L12 23L2 12Z"/><path fill="#4e2356" d="M12 5L17 12L12 19L7 12Z"/></svg>')
+			icon.texture = ImageTexture.create_from_image(image)
+		icon.custom_minimum_size = Vector2(16, 16)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		pair.add_child(icon)
+		var amount := _label("", 12)
+		amount.autowrap_mode = TextServer.AUTOWRAP_OFF
+		amount.add_theme_color_override("font_color", HUD.COLORS[resource])
+		pair.add_child(amount)
+		fleet_cargo_labels[resource] = amount
+
 func _selected_ship(state: Dictionary) -> Dictionary:
 	if selected_ship_id < 0:
 		return {}
@@ -1764,13 +1787,13 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	command_card.add_theme_constant_override("h_separation", 3)
 	command_card.add_theme_constant_override("v_separation", 3)
 	parent.add_child(command_card)
-	_command_slot("move", "Move · click a destination. Fighters travel without engaging until arrival.", '<path d="M5 16H26M17 7L26 16L17 25"/>', _arm_command.bind("move"))
-	_command_slot("stop", "Stop · cancel the order and stop in place.", '<rect x="8" y="8" width="16" height="16" fill="#c5e5f5"/>', _stop_selected)
-	hold_button = _command_slot("hold", "Hold position [H] · toggle holding position.", '<path d="M9 6V26M23 6V26M5 10L9 6L13 10M19 10L23 6L27 10M9 16H23"/>', _hold_selected)
-	_command_slot("patrol", "Patrol · click another sector or asteroid field.", '<path d="M7 12A10 10 0 0 1 25 10M25 10V4M25 10H19M25 20A10 10 0 0 1 7 22M7 22V28M7 22H13"/>', _arm_command.bind("patrol"))
-	_command_slot("attack", "Attack move · click a sector or hostile ship.", '<circle cx="16" cy="16" r="9"/><path d="M16 3V11M16 21V29M3 16H11M21 16H29"/>', _arm_command.bind("attack"))
-	_command_slot("load", "Load cargo · click salvage debris to collect it.", '<rect x="7" y="17" width="18" height="10"/><path d="M16 4V20M10 14L16 20L22 14"/>', _arm_command.bind("load"))
-	unload_button = _command_slot("unload", "Unload cargo [U] · return cargo to storage.", '<rect x="7" y="17" width="18" height="10"/><path d="M16 20V4M10 10L16 4L22 10"/>', _unload_selected)
+	_command_slot("move", "Move", '<path d="M5 16H26M17 7L26 16L17 25"/>', _arm_command.bind("move"))
+	_command_slot("stop", "Stop", '<rect x="8" y="6" width="5" height="20" fill="#c5e5f5"/><rect x="19" y="6" width="5" height="20" fill="#c5e5f5"/>', _stop_selected)
+	hold_button = _command_slot("hold", "Hold Position", '<rect x="8" y="8" width="16" height="16" fill="#c5e5f5"/>', _hold_selected)
+	_command_slot("patrol", "Patrol", '<path d="M7 12A10 10 0 0 1 25 10M25 10V4M25 10H19M25 20A10 10 0 0 1 7 22M7 22V28M7 22H13"/>', _arm_command.bind("patrol"))
+	_command_slot("attack", "Attack Move", '<circle cx="16" cy="16" r="9"/><path d="M16 3V11M16 21V29M3 16H11M21 16H29"/>', _arm_command.bind("attack"))
+	_command_slot("load", "Load Cargo", '<rect x="7" y="17" width="18" height="10"/><path d="M16 4V20M10 14L16 20L22 14"/>', _arm_command.bind("load"))
+	unload_button = _command_slot("unload", "Unload Cargo", '<rect x="7" y="17" width="18" height="10"/><path d="M16 20V4M10 10L16 4L22 10"/>', _unload_selected)
 	command_hint = _label("", 12)
 	parent.add_child(command_hint)
 	command_hint.hide()
@@ -1856,8 +1879,23 @@ func _selection_icon(kind: String, tint: Color) -> Texture2D:
 
 func _select_tile(id: int) -> void:
 	_clear_building_selection()
-	selected_units.assign([id])
-	selected_ship_id = id
+	var shift: bool = Input.is_key_pressed(KEY_SHIFT)
+	var control: bool = Input.is_key_pressed(KEY_CTRL)
+	if control:
+		var kind: String = ""
+		var ships: Array = _state().get("ships", [])
+		for craft in ships:
+			if int(craft["id"]) == id:
+				kind = craft["kind"]
+				break
+		for craft in ships:
+			if selected_units.has(int(craft["id"])) and (craft["kind"] == kind) == shift:
+				selected_units.erase(int(craft["id"]))
+	elif shift:
+		selected_units.erase(id)
+	else:
+		selected_units.assign([id])
+	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 	selected = -1
 	selected_body = -1
 	selected_yard = -1
@@ -1892,7 +1930,7 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 		if tile.get_meta("health_color", Color.TRANSPARENT) != tint:
 			tile.set_meta("health_color", tint)
 			tile.icon = _selection_icon(str(craft["kind"]), tint)
-		tile.tooltip_text = "%s #%d · HP %.0f / %.0f" % [_ship_kind_name(str(craft["kind"])), id, float(craft.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
+		tile.tooltip_text = _ship_kind_name(str(craft["kind"])) if selected_units.size() > 1 else "%s #%d · HP %.0f / %.0f" % [_ship_kind_name(str(craft["kind"])), id, float(craft.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
 	for id in selection_tiles.keys():
 		if not living.has(id):
 			var tile: Button = selection_tiles[id]
@@ -1915,8 +1953,9 @@ func _refresh_field_panels(state: Dictionary) -> void:
 		var metals: int = roundi(100.0 * float(stock["Metals"]) / total)
 		ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, _tons(float(stock["Metals"])), 100 - metals, _tons(float(stock["Crystals"]))]
 	var access_names: PackedStringArray = []
-	for anchor in ECONOMY.field_access_systems(state["map"], field):
-		access_names.append(_system_name(anchor))
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	for anchor in graph["adjacent"][state["planets"].size() + selected_field]:
+		access_names.append(_poi_name(anchor))
 	ship_detail.tooltip_text = "%d chunks remaining · Access: %s" % [field["chunks"].size(), ", ".join(access_names)]
 	ship_cargo.get_parent().hide()
 	fleet_title.text = "Mining"
@@ -1924,7 +1963,7 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	command_card.hide()
 	pending_command = ""
 	_refresh_command_mode()
-	fleet_cargo.get_parent().hide()
+	fleet_cargo.hide()
 	mining_controls.get_parent().show()
 	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field)
 	mining_enabled.set_pressed_no_signal(bool(policy["enabled"]))
@@ -1980,7 +2019,10 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status += " · Salvaging" if bool(ship.get("tractor_active", false)) else " · Approaching debris"
 	ship_detail.text = "%s\n%s\nHP %.0f / %.0f" % [str(roster.get(owner, {}).get("name", "Player")), status, float(ship.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
 	ship_detail.tooltip_text = ""
-	ship_cargo.get_parent().show()
+	var multiple: bool = selected_units.size() > 1
+	ship_title.visible = not multiple
+	ship_detail.visible = not multiple
+	ship_cargo.get_parent().visible = not multiple
 	ship_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total(ship), ECONOMY.cargo_capacity(kind)]
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 		var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
@@ -1988,18 +2030,14 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		ship_cargo_labels[resource].get_parent().visible = true
 	fleet_title.text = "Fleet"
 	fleet_detail.visible = true
-	var counts: Dictionary = {"fighter": 0, "colony_ship": 0, "miner": 0, "ship": 0}
 	var owned_count: int = 0
 	var loaded_owned: bool = false
-	var capacity: float = 0.0
 	var cargo: Dictionary = ECONOMY.empty_stock()
 	for craft in state["ships"]:
 		if not selected_units.has(int(craft["id"])):
 			continue
-		counts[craft["kind"]] += 1
 		owned_count += int(int(craft["owner"]) == _me())
 		loaded_owned = loaded_owned or (int(craft["owner"]) == _me() and ECONOMY._cargo_total(craft) > ECONOMY.EPS)
-		capacity += ECONOMY.cargo_capacity(str(craft["kind"]))
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft.get("cargo", {}).get(resource, 0.0))
 	command_card.show()
@@ -2015,20 +2053,15 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
 		pending_command = ""
 	_refresh_command_mode()
-	fleet_detail.text = "%d fighters · %d colony ships · %d miners · %d logistics" % [counts["fighter"], counts["colony_ship"], counts["miner"], counts["ship"]]
-	if owned_count < selected_units.size():
-		fleet_detail.text += "\n%d owned · %d foreign" % [owned_count, selected_units.size() - owned_count]
-	fleet_detail.tooltip_text = "Foreign ships are read-only. Commands affect only your own ships. Ctrl+1–9 assigns a selection group, 1–9 recalls it."
-	if owned_count > 0:
-		fleet_detail.tooltip_text += " Right-click to move. Use the Attack command for attack-move or focus attack. Hold Shift to queue up to 30 commands. Drag right-click to place a formation. Patrol is on the command card. Ships collect nearby salvage when safe; Load explicitly claims a wreck; U unloads cargo. Alt-right-click forces a local position. H holds/releases."
-	fleet_cargo.get_parent().show()
-	fleet_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total({"cargo": cargo}), capacity]
-	if fleet_cargo.get_parent().visible:
+	fleet_title.visible = false
+	fleet_detail.visible = false
+	fleet_cargo.visible = multiple and ECONOMY._cargo_total({"cargo": cargo}) > ECONOMY.EPS
+	if fleet_cargo.visible:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			var amount: float = float(cargo.get(resource, 0.0))
-			fleet_cargo_labels[resource].text = _tons(amount)
+			fleet_cargo_labels[resource].text = _compact_amount(amount) if amount >= 1000.0 else ("%.1f" % amount).trim_suffix(".0") if amount >= 0.1 else "%.2f" % amount
 			fleet_cargo_labels[resource].tooltip_text = "%.1f t" % amount
-			fleet_cargo_labels[resource].get_parent().visible = true
+			fleet_cargo_labels[resource].get_parent().visible = amount > ECONOMY.EPS
 
 func _build_lens_buttons(parent: Container) -> void:
 	logistics_lens = _button("", _toggle_lens.bind("logistics"), parent)
@@ -2780,6 +2813,8 @@ func _refresh() -> void:
 		last_system_tab_selection = current_system
 	interaction_scroll.visible = not other_selected and not yard_selected and not p.is_empty() and not own_system and not grouped_buildings
 	ship_overview.visible = other_selected
+	ship_title.visible = other_selected
+	ship_detail.visible = other_selected
 	_refresh_selection_tiles(state)
 	if not ship_selected and not (yard_selected and not _selected_yards(state, true).is_empty() and pending_command == "rally"):
 		pending_command = ""
@@ -3838,6 +3873,11 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	var distance: float = INF
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var world: Vector2 = _world_point(point)
+	if patrol:
+		var anchor: int = ECONOMY.patrol_node(state, graph, _me(), world)
+		if anchor >= 0 and not fighters.is_empty():
+			_issue_order(fighters, {"kind": "patrol", "target": anchor, "point": world}, append)
+		return
 	var candidates: Array[int] = ECONOMY.military_pois(state, _me())
 	var handled_fighters: Dictionary = {}
 	# Resolve each fighter's actual current sector first. The same exact
@@ -3888,10 +3928,6 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		hit_radius = maxf(9.0, _star_draw_radius(radius))
 	else:
 		hit_radius = maxf(9.0, float(state["map"]["fields"][node - system_count]["radius"]) * _fit() * zoom)
-	if patrol and not force_position:
-		if not fighters.is_empty() and (ECONOMY.sector_contains(graph, node, world) or distance <= hit_radius * hit_radius):
-			_issue_order(fighters, {"kind": "patrol", "target": node}, append)
-		return
 	if force_position or distance > hit_radius * hit_radius:
 		if ECONOMY.sector_contains(graph, node, world):
 			var local: Array[int] = []
@@ -4825,6 +4861,8 @@ func _order_color(ship: Dictionary, order: Dictionary) -> Color:
 func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2) -> void:
 	var order: Dictionary = ship.get("unit_order", {})
 	var endpoint: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
+	if ship.has("patrol_from") and ship.get("patrol_returning", false):
+		endpoint = ship["patrol_start_point"]
 	if endpoint.is_finite():
 		start = _screen_point(endpoint)
 	elif ship.has("launch_rally"):
@@ -4870,7 +4908,7 @@ func _draw_map() -> void:
 		var b: int = int(edge[1])
 		if b < points.size():
 			continue
-		var known: bool = ECONOMY.discovered(state, _me(), "planets", a) and ECONOMY.discovered(state, _me(), "fields", b - points.size())
+		var known: bool = ECONOMY.discovered(state, _me(), "planets" if a < points.size() else "fields", a if a < points.size() else a - points.size()) and ECONOMY.discovered(state, _me(), "fields", b - points.size())
 		map_canvas.draw_line(_screen_point(graph["points"][a]), _screen_point(graph["points"][b]), Color(Color("#40566b"), 0.30 if known else 0.15), 1.0, true)
 	var font: Font = ThemeDB.fallback_font
 	var fields: Array = state["map"].get("fields", [])
@@ -4959,8 +4997,8 @@ func _draw_map() -> void:
 			map_canvas.draw_line(start, marker, Color(order_tint, 0.65), 1.5, true)
 			map_canvas.draw_arc(marker, maxf(9.0, 15.0 * _ship_scale()), 0.0, TAU, 24, order_tint, 1.5, true)
 		if craft.has("patrol_from"):
-			for endpoint in [craft["patrol_from"], craft["patrol_to"]]:
-				map_canvas.draw_arc(_screen_point(order_points[int(endpoint)]), 10.0, 0.0, TAU, 24, Color(HUD.ACCENT, 0.7), 1.5, true)
+			for endpoint in [craft["patrol_start_point"], craft["patrol_end_point"]]:
+				map_canvas.draw_arc(_screen_point(endpoint), 10.0, 0.0, TAU, 24, Color(order_tint, 0.7), 1.5, true)
 		if bool(craft.get("holding", false)) and not bool(craft.get("retreating", false)):
 			if craft.has("hold_position"):
 				var target: Vector2 = _screen_point(craft["hold_position"])
@@ -4971,6 +5009,10 @@ func _draw_map() -> void:
 			var finish: Vector2 = _screen_point(order_points[int(node)])
 			map_canvas.draw_line(start, finish, Color(order_tint, 0.65), 1.5, true)
 			start = finish
+		if craft.has("patrol_from") and not craft.get("retreating", false):
+			var endpoint: Vector2 = craft["patrol_start_point"] if craft["patrol_returning"] else craft["patrol_end_point"]
+			map_canvas.draw_line(start, _screen_point(endpoint), Color(order_tint, 0.65), 1.5, true)
+			continue
 		if craft.has("local_move_target") and not bool(craft.get("retreating", false)):
 			var destination: Vector2 = _screen_point(craft["local_move_target"])
 			map_canvas.draw_line(start, destination, Color(order_tint, 0.65), 1.5, true)

@@ -23,6 +23,8 @@ class MapPreview:
 		var colors: Array = get_meta("colors", [])
 		for edge in graph["edges"]:
 			draw_line(offset + points[edge[0]] * scale_factor, offset + points[edge[1]] * scale_factor, Color("#8299b3"), 1.3, true)
+		for edge in graph.get("field_edges", []):
+			draw_line(offset + graph["fields"][edge[0]]["position"] * scale_factor, offset + graph["fields"][edge[1]]["position"] * scale_factor, Color("#52677c"), 1.0, true)
 		for asteroid in graph["fields"]:
 			var center: Vector2 = offset + asteroid["position"] * scale_factor
 			var special: bool = bool(asteroid.get("antimatter", false))

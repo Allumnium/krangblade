@@ -126,6 +126,7 @@ func _initialize() -> void:
 	_test_idle_formations()
 	_test_local_position_orders()
 	_test_tactical_orders()
+	_test_precise_patrol()
 	_test_salvage()
 	_test_opportunistic_salvage()
 	_test_civilian_waiting_movement()
@@ -725,6 +726,7 @@ func _initialize() -> void:
 	var mineral_points: Array = mineral_map["points"]
 	var metal_pos: Vector2 = (mineral_points[0] as Vector2) + Vector2(95, 0)
 	var crystal_pos: Vector2 = (mineral_points[0] as Vector2) + Vector2(95, 30)
+	mineral_map["field_edges"] = []
 	mineral_map["fields"] = [{"position": metal_pos, "radius": 40.0, "anchor": 0, "Metals": 1.0, "Crystals": 1.0,
 		"chunks": [{"id": 7, "position": metal_pos, "resource": "Metals", "remaining": 24.0},
 			{"id": 9, "position": crystal_pos, "resource": "Crystals", "remaining": 36.0}]}]
@@ -920,6 +922,7 @@ func _initialize() -> void:
 	force_points[3] = Vector2(1000, 0)
 	force_points[4] = Vector2(2000, 0)
 	force_map["edges"] = [[0, 3], [3, 4]]
+	force_map["field_edges"] = []
 	force_map["fields"] = [{"position": Vector2(1000, 100), "anchor": 3}]
 	var force_state: Dictionary = ECON.create(force_map, players, ids, false)
 	var field_node: int = force_points.size()
@@ -1590,6 +1593,7 @@ func _initialize() -> void:
 	var neutral_mine: Dictionary = ECON.create(mineral_map.duplicate(true), players, ids, false)
 	var neutral_map: Dictionary = neutral_mine["map"]
 	var neutral_anchor: int = 3
+	neutral_map["field_edges"] = []
 	neutral_map["fields"] = [{"anchor": neutral_anchor, "position": mineral_points[neutral_anchor] + Vector2(30, 0), "Metals": 1.0, "Crystals": 1.0, "chunks": [{"id": 10001, "position": mineral_points[neutral_anchor] + Vector2(30, 0), "resource": "Crystals", "remaining": 20.0}]}]
 	if not MAP.linked(neutral_map, 0, neutral_anchor):
 		neutral_map["edges"].append([0, neutral_anchor])
@@ -1606,6 +1610,7 @@ func _initialize() -> void:
 	var access_points: Array = access_map["points"]
 	var access_center: Vector2 = (access_points[0] + access_points[1]) * 0.5
 	var access_field: Dictionary = {"anchor": 1, "access": [0, 1], "position": access_center, "radius": 40.0, "Metals": 1.0, "Crystals": 1.0, "chunks": [{"id": 92001, "position": access_center, "resource": "Crystals", "remaining": 20.0}]}
+	access_map["field_edges"] = []
 	access_map["fields"] = [access_field]
 	var access_home: Dictionary = multi_access["planets"][0]
 	assert(ECON.field_access_systems(access_map, access_field).has(0))
@@ -1941,6 +1946,47 @@ func _test_tactical_orders() -> void:
 	assert(ECON.command_fighters(state, 1, [100], 0))
 	assert(not f.has("patrol_from") and not f.has("patrol_to"))
 	print("PASS: explicit hostile targeting, priority fire, cancellation, bounded lane patrol and return")
+
+func _test_precise_patrol() -> void:
+	var map: Dictionary = {"seed": 42, "size": Vector2(6000, 4000), "points": [Vector2(1000, 1000), Vector2(5500, 3500), Vector2(3500, 1000)], "edges": [[0, 2], [2, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var start := Vector2(1050, 1080)
+	var craft: Dictionary = {"id": 100, "owner": 1, "kind": "fighter", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": start, "heading": Vector2.RIGHT, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
+	state["ships"] = [craft]
+	var graph: Dictionary = ECON.military_graph(state)
+	var nearby := Vector2(1300, 1150)
+	assert(not ECON.issue_unit_order(state, 2, [100], {"kind": "patrol", "target": 0, "point": nearby}, false))
+	assert(not ECON.issue_unit_order(state, 1, [100], {"kind": "patrol", "target": 0, "point": Vector2.INF}, false))
+	assert(not ECON.issue_unit_order(state, 1, [100], {"kind": "patrol", "target": 0, "point": Vector2(-1, 10)}, false))
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "patrol", "target": 0, "point": nearby}, false))
+	assert(craft["patrol_start_point"] == start and craft["patrol_end_point"] == nearby)
+	var reached: bool = false
+	var returned: bool = false
+	for tick in range(200):
+		var prior: Vector2 = craft["position"]
+		ECON.step(state, 0.1)
+		assert(prior.distance_to(craft["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		reached = reached or craft["position"] == nearby
+		if reached and craft["position"] == start:
+			returned = true
+			break
+	assert(reached and returned)
+	# A remote click outside the normal sector circles still has an exact endpoint.
+	var remote := Vector2(3400, 3000)
+	var node: int = ECON.patrol_node(state, graph, 1, remote)
+	assert(node >= 0 and node != 0)
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "patrol", "target": node, "point": remote}, false))
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "sector", "target": 0, "move_only": true}, true))
+	reached = false
+	for tick in range(2000):
+		var prior: Vector2 = craft["position"]
+		ECON.step(state, 0.1)
+		assert(prior.distance_to(craft["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		reached = reached or craft["position"] == remote
+		if not craft.has("patrol_from"):
+			break
+	assert(reached and not craft.has("patrol_from") and craft["unit_order"]["kind"] == "sector")
+	print("PASS: exact same-sector patrol, arbitrary remote point, return, queue and input validation")
 
 func _test_salvage() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
@@ -2510,6 +2556,16 @@ func _test_map_layouts() -> void:
 						total_degrees[anchor] += 1
 				for degree in total_degrees:
 					assert(degree <= MAP.MAX_CONNECTIONS)
+				var graph: Dictionary = ECON.military_graph({"map": galaxy})
+				for neighbors in graph["adjacent"]:
+					assert(neighbors.size() <= MAP.MAX_CONNECTIONS)
+				var central_nodes: Array[int] = []
+				for index in range(galaxy["fields"].size()):
+					if galaxy["fields"][index].get("antimatter", false):
+						central_nodes.append(points.size() + index)
+				if layout == "Radial" and central_nodes.size() == 2:
+					assert(graph["adjacent"][central_nodes[0]].has(central_nodes[1]))
+					assert(ECON._military_paths(graph, central_nodes[1])["next"][central_nodes[0]] == central_nodes[1])
 				var deposits: int = 0
 				for field in galaxy["fields"]:
 					if not bool(field.get("antimatter", false)):
@@ -2641,6 +2697,7 @@ func _test_antimatter_extraction() -> void:
 	var map_data: Dictionary = _planetary_fixture(7021, 2, "Grid")
 	var points: Array = map_data["points"]
 	var deposit: Vector2 = points[0] + Vector2(400.0, 0.0)
+	map_data["field_edges"] = []
 	map_data["fields"] = [{"anchor": 0, "position": deposit, "radius": 50.0, "antimatter": true,
 		"Metals": 0.0, "Crystals": 0.0, ECON.ANTIMATTER: 1.0,
 		"chunks": [{"id": 0, "position": deposit, "resource": ECON.ANTIMATTER, "remaining": 30.0}]}]
