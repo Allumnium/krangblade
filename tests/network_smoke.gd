@@ -391,6 +391,7 @@ func _send_commands() -> void:
 	var graph: Dictionary = ECON.military_graph(initial)
 	var local_point: Vector2 = graph["points"][home_index] + Vector2.RIGHT * ECON.sector_limit(graph, home_index, Vector2.RIGHT) * 0.25
 	session.call("request_local_position", [own_fighters[1]], home_index, local_point, true)
+	session.call("request_unit_orders", [{"ids": [own_fighters[1]], "order": {"kind": "position", "target": home_index, "point": local_point, "move_only": true, "heading": Vector2.UP}}], false)
 	session.call("request_local_position", [own_fighters[1], enemy_fighter], home_index, local_point, true)
 	session.call("request_local_position", [own_fighters[1]], home_index, graph["points"][(home_index + 1) % expected_players])
 	session.call("request_unit_hold", [own_fighters[1], enemy_fighter], true)
@@ -578,8 +579,8 @@ func _check_economy_sync() -> void:
 						if craft.get("holding", false) or ECON._is_idle_ship(craft):
 							idle += 1
 						if not craft.get("holding", false):
-							local_moving = local_moving or (craft.get("local_move_target", Vector2.INF) as Vector2).is_equal_approx(local_point)
-							local_arrived = local_arrived or (not craft.has("local_move_target") and int(craft.get("operation_target", -1)) == owner_home and (craft["position"] as Vector2).distance_to(local_point) <= ECON.SHIP_SEPARATION_RADIUS * 2.0)
+							local_moving = local_moving or ((craft.get("local_move_target", Vector2.INF) as Vector2).is_equal_approx(local_point) and craft.get("arrival_heading", Vector2.ZERO) == Vector2.UP)
+							local_arrived = local_arrived or (not craft.has("local_move_target") and int(craft.get("operation_target", -1)) == owner_home and (craft["position"] as Vector2).distance_to(local_point) <= ECON.SHIP_SEPARATION_RADIUS * 2.0 and ECON._idle_formation_targets(state, graph).has(int(craft["id"])))
 			var assigned_miners: int = 0
 			var auto_salvage: bool = false
 			for craft in state["ships"]:

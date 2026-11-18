@@ -60,7 +60,6 @@ var console_profile: Control
 var yard_column: VBoxContainer
 var empty_selection: Label
 var command_grids: Dictionary = {}
-var cargo_grids: Array[GridContainer] = []
 var yard_activity: VBoxContainer
 var yard_activity_rows: Dictionary = {}
 var inspector_tabs: TabContainer
@@ -194,8 +193,6 @@ var body_progress: ProgressBar
 var ship_overview: VBoxContainer
 var ship_title: Label
 var ship_detail: Label
-var ship_cargo: VBoxContainer
-var ship_cargo_labels: Dictionary = {}
 var fleet_scroll: ScrollContainer
 var fleet_overview: VBoxContainer
 var fleet_title: Label
@@ -551,8 +548,6 @@ func _build_ui() -> void:
 	ship_overview.add_child(selection_grid)
 	ship_detail = _label("", 13)
 	ship_overview.add_child(ship_detail)
-	ship_cargo = HUD.section(ship_overview, "Cargo", true)
-	_build_cargo_rows(ship_cargo, ship_cargo_labels)
 	fleet_scroll = ScrollContainer.new()
 	fleet_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	fleet_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -795,8 +790,6 @@ func _layout_command_grids() -> void:
 		var grid: GridContainer = command_grids[title]
 		var cell_width: float = 160.0 if title == "Trade" else 222.0
 		grid.columns = clampi(floori(width / cell_width), 1, 3)
-	for grid in cargo_grids:
-		grid.columns = 2 if grid.get_parent() == ship_cargo else clampi(floori(width / 180.0), 1, 4)
 
 func _minimap_area() -> Rect2:
 	var bounds: Vector2 = _map_size().max(Vector2.ONE)
@@ -1763,36 +1756,6 @@ func _refresh_pds(planet: Dictionary, owned: bool) -> void:
 	elif not full:
 		_show_cost(pds_card["costs"], cost)
 
-func _build_cargo_rows(parent: Container, labels: Dictionary) -> void:
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 10)
-	grid.add_theme_constant_override("v_separation", 3)
-	parent.add_child(grid)
-	cargo_grids.append(grid)
-	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
-		var row := HBoxContainer.new()
-		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.tooltip_text = resource
-		grid.add_child(row)
-		var icon := TextureRect.new()
-		icon.texture = HUD.ICONS.get(resource)
-		icon.custom_minimum_size = Vector2(18, 18)
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		row.add_child(icon)
-		var title := _label("Antimatter" if resource == ECONOMY.ANTIMATTER else resource, 11)
-		title.autowrap_mode = TextServer.AUTOWRAP_OFF
-		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(title)
-		var amount := _label("0.0", 12)
-		amount.autowrap_mode = TextServer.AUTOWRAP_OFF
-		amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		amount.custom_minimum_size.x = 42
-		amount.add_theme_color_override("font_color", HUD.COLORS[resource])
-		row.add_child(amount)
-		labels[resource] = amount
-
 func _build_fleet_cargo_row() -> void:
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 		var pair := HBoxContainer.new()
@@ -2117,7 +2080,6 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	for anchor in graph["adjacent"][state["planets"].size() + selected_field]:
 		access_names.append(_poi_name(anchor))
 	ship_detail.tooltip_text = "%d chunks remaining · Access: %s" % [field["chunks"].size(), ", ".join(access_names)]
-	ship_cargo.get_parent().hide()
 	fleet_title.text = "Mining"
 	fleet_detail.hide()
 	command_card.hide()
@@ -2138,7 +2100,6 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	mining_controls.get_parent().hide()
 	var kind: String = ship.get("kind", "ship")
 	var owner: int = int(ship["owner"])
-	var roster: Dictionary = session.get("players")
 	ship_title.text = "%s #%d" % [_ship_kind_name(kind), int(ship["id"])]
 	var route: Array = ship["route"]
 	var mode: String = ship.get("mining_mode", "idle")
@@ -2177,17 +2138,11 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Delivering salvage" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for salvage storage"
 	elif int(ship.get("auto_salvage_target", -1)) >= 0:
 		status += " · Salvaging" if bool(ship.get("tractor_active", false)) else " · Approaching debris"
-	ship_detail.text = "%s\n%s" % [str(roster.get(owner, {}).get("name", "Player")), status]
+	ship_detail.text = status
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
 	ship_title.visible = not multiple
 	ship_detail.visible = not multiple
-	ship_cargo.get_parent().visible = not multiple
-	ship_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total(ship), ECONOMY.cargo_capacity(kind)]
-	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
-		var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
-		ship_cargo_labels[resource].text = _tons(amount)
-		ship_cargo_labels[resource].get_parent().visible = true
 	fleet_title.text = "Fleet"
 	fleet_detail.visible = true
 	var owned_count: int = 0
@@ -2215,7 +2170,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	_refresh_command_mode()
 	fleet_title.visible = false
 	fleet_detail.visible = false
-	fleet_cargo.visible = multiple and ECONOMY._cargo_total({"cargo": cargo}) > ECONOMY.EPS
+	fleet_cargo.visible = ECONOMY._cargo_total({"cargo": cargo}) > ECONOMY.EPS
 	if fleet_cargo.visible:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			var amount: float = float(cargo.get(resource, 0.0))
@@ -3472,10 +3427,18 @@ func _max_zoom() -> float:
 	var target_scale: float = size.x * CLOSEUP_SCREEN_FRACTION / FIGHTER_HULL_LENGTH
 	return OVERVIEW_MAX_ZOOM * maxf(1.0, target_scale / base_scale)
 
-func _zoom_at(point: Vector2, multiplier: float) -> void:
+func _zoom_at(point: Vector2, direction: float) -> void:
 	var anchor: Vector2 = _camera_center() if follow_units else point
 	var world: Vector2 = _world_point(anchor)
-	zoom = clampf(zoom * multiplier, MIN_ZOOM, _max_zoom())
+	var maximum: float = _max_zoom()
+	# Step in log space, with progressively finer percentage changes as
+	# the camera approaches its close-up limit (reversible in either direction).
+	var log_span: float = log(maximum / MIN_ZOOM)
+	var log_zoom: float = log(zoom / MIN_ZOOM)
+	var rate: float = (0.25 - 0.06) / log_span
+	var limit: float = 0.25 / rate
+	var next_log: float = limit - (limit - log_zoom) * exp(-rate * direction)
+	zoom = clampf(MIN_ZOOM * exp(next_log), MIN_ZOOM, maximum)
 	pan += anchor - _screen_point(world)
 	map_canvas.queue_redraw()
 
@@ -4309,10 +4272,10 @@ func _map_input(event: InputEvent) -> void:
 					selection_double_click = false
 			MOUSE_BUTTON_WHEEL_UP:
 				if mouse.pressed:
-					_zoom_at(mouse.position, 1.15)
+					_zoom_at(mouse.position, 1.0)
 			MOUSE_BUTTON_WHEEL_DOWN:
 				if mouse.pressed:
-					_zoom_at(mouse.position, 1.0 / 1.15)
+					_zoom_at(mouse.position, -1.0)
 	elif event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event
 		if formation_button != 0:

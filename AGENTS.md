@@ -29,6 +29,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- Wheel zoom uses progressively smaller logarithmic steps near the close-up limit and larger steps at overview scale, retaining the cursor/follow anchor. Single-ship detail omits owner text and uses the same single icon-and-amount cargo row as fleet selection; hide empty resources and the entire row when empty. Formation arrivals resume idle/working behavior like click moves, with exact facing on the arrival tick only (v0.36.4).
+
 - Single ships, shipyards, space stations and planets show a large wireframe portrait in the leftmost column of the central selection panel. Use green/yellow/red health tiers with current/max HP immediately below; undefended planets lack HP, so use a neutral outline. Multi-selections retain compact tiles without the single portrait. Start each player's camera centered on and framed to their home command sector.
 
 - Keep command grids free of explanatory/status labels; use button faces, pressed states, cursors and tooltips. Shipyard grid has four fixed columns: four hulls in the top row, Upgrade / empty / Clear Rally / Rally in the bottom row. Scale button width rather than wrapping. Do not append planetless status to system names.
