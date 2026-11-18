@@ -160,6 +160,35 @@ func _test_yard_autobuild_and_station_approach() -> void:
 	assert(ECON._move({"map": map}, fighter, 100.0, dock, 0) and fighter["position"] == dock)
 	print("PASS: per-shipyard round robin, capacity, cancellation, upgrade cap and direct station approach")
 
+func _test_population_queue_priority() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
+	var p: Dictionary = state["planets"][0]
+	p["population"] = 10000.0
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 100000.0
+	assert(ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
+	var colony: Dictionary = p["queue"][0]
+	ECON._work_planet(state, 0, 0.1)
+	assert(int(p["yards"][0]["job"]) == -1 and colony["progress"] == 0.0)
+	assert(ECON.enqueue(state, 1, 0, "fighter", "", 0))
+	var fighter: Dictionary = p["queue"][1]
+	ECON._work_planet(state, 0, 0.1)
+	assert(int(p["yards"][0]["job"]) == int(fighter["id"]) and fighter["progress"] > 0.0 and colony["progress"] == 0.0)
+	var progress: float = fighter["progress"]
+	p["population"] = 600.0
+	p["eco_population"] = 0.0
+	ECON._work_planet(state, 0, 0.1)
+	assert(int(p["yards"][0]["job"]) == -1 and fighter["progress"] == progress)
+	assert("Population" in ECON.construction_blockers(p, fighter, 0))
+	p["population"] = 45000.0
+	ECON._work_planet(state, 0, 0.1)
+	assert(int(p["yards"][0]["job"]) == int(colony["id"]) and colony["progress"] > 0.0)
+	assert(fighter["progress"] == progress and p["queue"].size() == 2)
+	assert(ECON.cancel(state, 1, 0, int(colony["id"])))
+	ECON._work_planet(state, 0, 0.1)
+	assert(int(p["yards"][0]["job"]) == int(fighter["id"]) and fighter["progress"] > progress)
+	print("PASS: population-blocked pinned jobs release the yard, eligible work advances and retained progress resumes")
+
 func _test_mining_lasers() -> void:
 	var rock := Vector2(1000, 0)
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": [{"position": rock, "radius": 40.0, "anchor": 0, "Metals": 0.5, "Crystals": 0.5, "chunks": [{"id": 7, "position": rock, "resource": "Metals", "remaining": 24.0}]}]}
@@ -374,6 +403,7 @@ func _initialize() -> void:
 	_test_miner_service_orders()
 	_test_mining_lasers()
 	_test_yard_autobuild_and_station_approach()
+	_test_population_queue_priority()
 	_test_unit_order_queue()
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()

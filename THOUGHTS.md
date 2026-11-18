@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.43.2: Population-starved pinned jobs previously occupied active shipyard slots. Releasing them preserves queued investment and lets eligible work proceed; review prolonged colony-ship wait times with continuous cheap-hull production. Single-ship facing preview reuses the existing authority-validated arrival heading; ordinary idle flight may turn again after arrival.
+
 - v0.43.1: Larger ore deposits extend useful mining lifetimes without increasing throughput; crystal scarcity is now a cap on initial tonnage, not on the number of rocks. Watch bootstrap crystal availability and prolonged salvage clutter. The Trade wing extends independently of the console footprint, preserving the existing camera and other HUD panels.
 
 - v0.43.0: Civilian salvage search is conservative around hostile sectors/armed patrols, and idle collectors now finish gathering before normal logistics resumes. Check pickup versus mining/freight priority and crowded neutral lanes; minimap marker hit radius may warrant tuning in dense systems.

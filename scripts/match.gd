@@ -889,8 +889,9 @@ func _layout_command_grids() -> void:
 		var slot_width: float = maxf(36.0, floorf((inspector_panel.custom_minimum_size.x - padding - 9.0) / 4.0))
 		var slot_height: float = clampf(slot_width, 40.0, 52.0)
 		for grid in [station_primary_grid, station_build_grid]:
+			var row_height: float = minf(slot_height, floorf((inspector_slot.size.y - padding - 9.0) / 4.0)) if grid == station_build_grid and inspector_slot.size.y > 0.0 else slot_height
 			for button in grid.get_children():
-				button.custom_minimum_size = Vector2(slot_width, slot_height)
+				button.custom_minimum_size = Vector2(slot_width, maxf(32.0, row_height))
 				if not button is Button:
 					continue
 				var caption: Label = button.get_meta("caption")
@@ -1030,7 +1031,7 @@ func _draw_minimap() -> void:
 		known.append(ECONOMY.discovered(state, viewer, "planets" if i < count else "fields", i if i < count else i - count))
 		if known[i] and i < territory_last.size() and territory_last[i] > 0:
 			var radius: float = clampf(territory_radius * area.size.x / _map_size().x, 3.0, 12.0) * (1.0 if i < count else 0.68)
-			minimap.draw_circle(locations[i], radius, Color(COLORS[territory_last[i]], 0.20))
+			minimap.draw_circle(locations[i], radius, Color(COLORS[territory_last[i]], 0.17))
 	for edge in graph["edges"]:
 		var a: int = int(edge[0])
 		var b: int = int(edge[1])
@@ -1477,6 +1478,10 @@ func _build_station_command_card(parent: Container) -> void:
 			button.set_meta("auto_border", border)
 	_station_spacer(station_build_grid)
 	_station_spacer(station_build_grid)
+	_station_spacer(station_build_grid)
+	# Build actions sit one row above Return, which stays at the bottom right.
+	for i in range(3):
+		_station_spacer(station_build_grid)
 	_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")).tooltip_text = "Return"
 	station_trade = VBoxContainer.new()
 	station_trade.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1716,14 +1721,19 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	yard_title.text = "Shipyard %d · Lv %d" % [ECONOMY.shipyard_port(system, selected_yard), level]
 	yard_context.text = _system_name(selected)
 	var jobs: Array = []
+	var waiting: Array = []
 	var active_id: int = int(yard["job"])
 	for job in system["queue"]:
 		var upgrade: bool = job["kind"] == "yard_upgrade" and int(job["target"]) == selected_yard
 		if int(job["id"]) == active_id:
 			jobs.push_front(job)
 		elif upgrade or int(job.get("yard_slot", -1)) == selected_yard:
-			jobs.append(job)
-	yard_status.text = "Offline" if not operating else ("Idle" if jobs.is_empty() else "%d queued" % jobs.size())
+			if ECONOMY.construction_blockers(system, job, selected_yard).is_empty():
+				jobs.append(job)
+			else:
+				waiting.append(job)
+	jobs.append_array(waiting)
+	yard_status.text = "Offline" if not operating else ("Idle" if jobs.is_empty() else "Waiting for population" if active_id < 0 and waiting.size() == jobs.size() else "%d queued" % jobs.size())
 	_refresh_queue_tiles(yard_queue, yard_queue_rows, system, jobs, owned, active_id)
 	for kind in ECONOMY.SHIP_KINDS:
 		var button: Button = yard_commands[kind]
@@ -2596,7 +2606,7 @@ void fragment() {
 	}
 	float inside = 1.0 - smoothstep(-aa, 0.0, d);
 	float border = inside * smoothstep(-aa * 2.8, -aa * 1.1, d);
-	COLOR = vec4(team_color(winner), winner > 0 ? inside * 0.12 + border * 0.52 : 0.0);
+	COLOR = vec4(team_color(winner), winner > 0 ? inside * 0.10 + border * 0.45 : 0.0);
 }
 """
 	territory_material = ShaderMaterial.new()
@@ -4303,7 +4313,7 @@ func _unload_selected() -> void:
 func _formation_orders(state: Dictionary) -> Array:
 	var entries: Array = []
 	var owned: Array[int] = _selected_owned_units(state)
-	if owned.size() < 2 or formation_length <= 5.0:
+	if owned.is_empty() or formation_length <= 5.0:
 		return entries
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var stroke := PackedVector2Array()
@@ -4317,6 +4327,20 @@ func _formation_orders(state: Dictionary) -> Array:
 			ships[ship["id"]] = ship
 			origins[ship["id"]] = origin
 	var candidates: Array[int] = ECONOMY.military_pois(state, _me())
+	if owned.size() == 1:
+		if ships.is_empty():
+			return entries
+		var ship: Dictionary = ships[owned[0]]
+		# The press anchors the destination. The cursor rotates the ghost
+		# around that point, instead of moving it along a formation stroke.
+		var point: Vector2 = stroke[0]
+		var heading: Vector2 = (stroke[-1] - point).normalized()
+		if heading.is_zero_approx():
+			heading = ship.get("heading", Vector2.UP)
+		var node: int = ECONOMY.patrol_node(state, graph, _me(), point) if formation_mode == "patrol" else ECONOMY.sector_at(graph, point, candidates)
+		var order: Dictionary = {"kind": "patrol" if formation_mode == "patrol" else "position", "target": node, "point": point, "move_only": formation_mode != "attack", "heading": heading}
+		entries.append({"ids": owned, "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
+		return entries
 	for slot in ECONOMY.polyline_formation_slots(origins, stroke):
 		var ship: Dictionary = ships[slot["id"]]
 		var point: Vector2 = slot["point"]
@@ -4350,7 +4374,10 @@ func _draw_formation_preview(state: Dictionary) -> void:
 	if entries.is_empty():
 		return
 	var color: Color = Color("#b880fa") if formation_mode == "patrol" else Color("#ff605c") if formation_mode == "attack" else HUD.ACCENT
-	map_canvas.draw_polyline(formation_path, color, 1.5, true)
+	if _selected_owned_units(state).size() == 1:
+		map_canvas.draw_line(formation_path[0], formation_path[-1], color, 1.5, true)
+	else:
+		map_canvas.draw_polyline(formation_path, color, 1.5, true)
 	for entry in entries:
 		var order: Dictionary = entry["order"]
 		var point: Vector2 = _screen_point(order["point"])

@@ -1125,29 +1125,36 @@ static func _spend_material(p: Dictionary, category: String, resource: String, a
 	pending[category][resource] = float(pending[category].get(resource, 0.0)) + amount
 	p["pending_spending"] = pending
 
-static func _possible(p: Dictionary, item: Dictionary) -> float:
+static func _possible(p: Dictionary, item: Dictionary, yard_slot: int = -1) -> float:
 	var work: float = float(item["work"])
 	var possible: float = work - float(item["progress"])
-	if item["kind"] == "colony_ship" and float(p["population"]) + EPS < _remaining_colony_crew(item) + SHIPYARD_POPULATION[0]:
-		return 0.0
-	var people_per_work: float = float(item.get("population_cost", 0.0)) / work
-	if people_per_work > 0.0:
-		possible = minf(possible, maxf(0.0, float(p["population"]) - 1.0) / people_per_work)
+	var crew: float = _remaining_crew(item)
+	if crew > EPS:
+		var reserve: float = SHIPYARD_POPULATION[0] if item["kind"] == "colony_ship" else 1.0
+		if yard_slot >= 0:
+			reserve = maxf(reserve, float(SHIPYARD_POPULATION[yard_slot]))
+		# A hull may only start/resume when the entire unpaid crew is
+		# available, without consuming the yard's operating population.
+		if float(p["population"]) + EPS < crew + reserve:
+			return 0.0
 	return maxf(0.0, possible)
 
-static func _remaining_colony_crew(item: Dictionary) -> float:
+static func _remaining_crew(item: Dictionary) -> float:
 	return maxf(0.0, float(item.get("population_cost", 0.0)) - float(item.get("population_allocated", 0.0)))
 
-static func construction_blockers(p: Dictionary, item: Dictionary) -> Array[String]:
+static func construction_blockers(p: Dictionary, item: Dictionary, yard_slot: int = -1) -> Array[String]:
 	var missing: Array[String] = []
 	if float(item["work"]) - float(item["progress"]) <= EPS:
 		return missing
-	if (item["kind"] == "colony_ship" and float(p["population"]) + EPS < _remaining_colony_crew(item) + SHIPYARD_POPULATION[0]) or (float(item.get("population_cost", 0.0)) > 0.0 and float(p["population"]) <= 1.0 + EPS) or (int(item.get("size", 0)) > 0 and not p["yards"].is_empty() and operational_shipyards(p) == 0) or (item["kind"] == "yard_upgrade" and not shipyard_operational(p, int(item["target"]))):
+	var slot: int = yard_slot if yard_slot >= 0 else int(item.get("yard_slot", -1))
+	if slot < 0 and int(item.get("size", 0)) > 0 and not p["yards"].is_empty():
+		slot = 0
+	if _possible(p, item, slot) <= EPS or (int(item.get("size", 0)) > 0 and slot >= 0 and not shipyard_operational(p, slot)) or (item["kind"] == "yard_upgrade" and not shipyard_operational(p, int(item["target"]))):
 		missing.append("Population")
 	return missing
 
-static func _advance(p: Dictionary, item: Dictionary, work_budget: float) -> bool:
-	var amount: float = minf(work_budget, _possible(p, item))
+static func _advance(p: Dictionary, item: Dictionary, work_budget: float, yard_slot: int = -1) -> bool:
+	var amount: float = minf(work_budget, _possible(p, item, yard_slot))
 	var crew: float = amount * float(item.get("population_cost", 0.0)) / float(item["work"])
 	var eco: float = eco_population(p)
 	var eco_crew: float = minf(eco, crew)
@@ -1362,7 +1369,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		for item in p["queue"]:
 			if int(item["id"]) != int(yard["job"]):
 				continue
-			if item["kind"] == "yard_upgrade" or int(item.get("yard_slot", -1)) == y or (int(item["size"]) > 0 and _possible(p, item) > EPS):
+			if item["kind"] == "yard_upgrade" or (int(item["size"]) > 0 and _possible(p, item, y) > EPS):
 				assigned[int(item["id"])] = true
 				retained = true
 				break
@@ -1375,7 +1382,12 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		var chosen: Dictionary = {}
 		for item in p["queue"]:
 			if int(item["id"]) == int(yard["job"]):
-				chosen = item
+				# Earlier yards may have recruited population this tick.
+				if _possible(p, item, y) > EPS:
+					chosen = item
+				else:
+					assigned.erase(int(item["id"]))
+					yard["job"] = -1
 				break
 		if chosen.is_empty():
 			# Repeat hulls take turns in queue order, even if the next one
@@ -1391,14 +1403,15 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 				var hull: bool = int(item["size"]) > 0 and int(item["size"]) <= max_size(int(yard["level"])) and (pinned < 0 or pinned == y)
 				if hull and pinned < 0 and shipyard_queue_count(p, y) >= SHIPYARD_QUEUE_LIMIT:
 					continue
-				if hull and pinned == y:
-					chosen = item
-					break
+				# A population-blocked order never occupies the active slot,
+				# even when explicitly pinned to this yard. Keep it queued.
+				if hull and _possible(p, item, y) <= EPS:
+					continue
 				if hull and bool(item.get("automatic", false)):
 					if repeat_seen:
 						continue
 					repeat_seen = true
-				if (upgrade or hull) and _possible(p, item) > EPS:
+				if (upgrade or hull) and _possible(p, item, y) > EPS:
 					chosen = item
 					break
 		if chosen.is_empty():
@@ -1408,7 +1421,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		yard["job"] = id
 		assigned[id] = true
 		var speed: float = 1.0 if chosen["kind"] == "yard_upgrade" else yard_speed(int(yard["level"]))
-		if _advance(p, chosen, speed * dt):
+		if _advance(p, chosen, speed * dt, y):
 			_finish(state, index, p, chosen)
 			yard["job"] = -1
 
