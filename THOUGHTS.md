@@ -424,3 +424,6 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-30b — Zoom-based planet detail
 - User superseded selection-only planet visibility. All discovered systems now fade their bodies in at close range (40–100 logical-pixel projected system radius, 0.22s fade), including PDS frames. Orbital rings remain selected-system-only and fade with planets; PDS indicator stays visible at overview scale. Planet hit testing uses the same opacity and supports unselected systems.
+
+### T-31a — Shipyard command card and rally
+- Manual build orders pin to the selected completed shipyard. Preserve system maintenance policies and AI scheduling; show active and pinned jobs in center queue with refund cancellation. Rally uses a discovered system and an exact local point, with normal physical travel. Civilian automation resumes after rally; fighters and colony ships wait. Asteroid-field rally destinations are intentionally deferred because civilian routes use system indices.

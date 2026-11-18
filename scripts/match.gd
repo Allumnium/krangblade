@@ -187,6 +187,11 @@ var fleet_title: Label
 var fleet_detail: Label
 var hold_button: Button
 var unload_button: Button
+var yard_command_card: VBoxContainer
+var yard_commands: Dictionary = {}
+var yard_queue: VBoxContainer
+var yard_queue_rows: Dictionary = {}
+var yard_rally_hint: Label
 var command_card: GridContainer
 var command_hint: Label
 var command_buttons: Dictionary = {}
@@ -532,6 +537,7 @@ func _build_ui() -> void:
 	fleet_detail = _label("", 14)
 	ship_overview.add_child(fleet_detail)
 	_build_command_card(fleet_overview)
+	_build_yard_command_card(body)
 	fleet_cargo = HUD.section(ship_overview, "Fleet cargo", true)
 	_build_cargo_rows(fleet_cargo, fleet_cargo_labels)
 	mining_controls = HUD.section(fleet_overview, "Mine", true)
@@ -594,6 +600,7 @@ func _build_ui() -> void:
 		if not inspector_tabs.is_visible_in_tree():
 			_collapse_details())
 	var shipyard_page: GridContainer = _inspector_page("Shipyards")
+	var policy_page: GridContainer = _inspector_page("Fleet policy")
 	# Keep building cards first and yard activity below them in one scroll.
 	yard_column = VBoxContainer.new()
 	yard_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -652,14 +659,14 @@ func _build_ui() -> void:
 		trade_checks[resource] = [incoming, outgoing]
 		incoming.toggled.connect(_trade_toggle.bind(resource))
 		outgoing.toggled.connect(_trade_toggle.bind(resource))
-	ship_button = _ship_build_row(shipyard_page, "BUILD LOGISTICS SHIP", "ship")
+	ship_button = _ship_build_row(policy_page, "BUILD LOGISTICS SHIP", "ship")
 	HUD.action(ship_button, HUD.ACCENT, true)
-	colony_button = _ship_build_row(shipyard_page, "BUILD COLONY SHIP", "colony_ship")
+	colony_button = _ship_build_row(policy_page, "BUILD COLONY SHIP", "colony_ship")
 	HUD.action(colony_button, Color("#c7a4ff"), true)
-	fighter_button = _ship_build_row(shipyard_page, "BUILD FIGHTER", "fighter")
+	fighter_button = _ship_build_row(policy_page, "BUILD FIGHTER", "fighter")
 	HUD.action(fighter_button, Color("#f2b57e"), true)
 	fighter_button.tooltip_text = "Select fighters and right-click a destination or hostile ship."
-	miner_button = _ship_build_row(shipyard_page, "BUILD MINING SHIP", "miner")
+	miner_button = _ship_build_row(policy_page, "BUILD MINING SHIP", "miner")
 	HUD.action(miner_button, Color("#d8e58b"), true)
 	miner_button.tooltip_text = "Automatically mines accessible fields from owned service systems."
 	for grid in command_grids.values():
@@ -1066,6 +1073,7 @@ func _ship_build_row(parent: Container, title_text: String, kind: String) -> But
 	cancel.tooltip_text = "Cancel one order and stop repeat"
 	disclosure.merge({"maintain_amount": amount, "infinity": infinity, "button": button, "cancel": cancel, "title": title_text, "requirements": requirements, "costs": costs, "build_progress": build_progress})
 	build_cards[kind] = disclosure
+	button.hide()
 	return button
 
 func _filter_ship_limit(value: String, field: LineEdit) -> void:
@@ -1311,7 +1319,7 @@ func _refresh_economy_cards(p: Dictionary, owned: bool) -> void:
 				job = item
 				break
 		card["progress"].visible = not job.is_empty()
-		card["cancel"].visible = not job.is_empty()
+		card["cancel"].visible = false
 		card["cancel"].disabled = not owned or job.is_empty()
 		if not job.is_empty():
 			card["progress"].value = 100.0 * float(job["progress"]) / float(job["work"])
@@ -1356,63 +1364,141 @@ func _build_yard_overview(parent: Container) -> void:
 		_refresh(), yard_overview)
 	yard_status = _label("", 12)
 	yard_overview.add_child(yard_status)
-	var section: VBoxContainer = HUD.section(yard_overview, "Upgrade", true)
-	yard_detail = _label("", 12)
-	section.add_child(yard_detail)
-	yard_costs = _cost_grid(section)
-	yard_progress = ProgressBar.new()
-	yard_progress.custom_minimum_size.y = 15
-	yard_progress.step = 0.0
-	section.add_child(yard_progress)
-	var actions := HBoxContainer.new()
-	section.add_child(actions)
-	yard_upgrade = _button("Upgrade", func() -> void:
-		if selected_yard >= 0:
-			_operation("yard_upgrade", str(selected_yard)), actions)
-	yard_upgrade.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	HUD.action(yard_upgrade, HUD.ACCENT, true)
-	yard_cancel = _button("×", func() -> void:
-		if selected_yard >= 0:
-			_cancel_kind("yard_upgrade", str(selected_yard)), actions)
-	yard_cancel.tooltip_text = "Cancel upgrade and refund"
+	yard_queue = VBoxContainer.new()
+	yard_queue.add_theme_constant_override("separation", 4)
+	yard_overview.add_child(yard_queue)
 	yard_overview.hide()
+
+func _select_yard_slot(slot: int) -> void:
+	var system: Dictionary = _planet()
+	if slot < 0 or slot >= system.get("yards", []).size():
+		return
+	selected_yard = slot
+	selected_yard_count = system["yards"].size()
+	selected_body = -1
+	selected_units.clear()
+	selected_ship_id = -1
+	selected_field = -1
+	follow_units = false
+	pending_command = ""
+	_refresh()
+
+func _build_yard_command_card(parent: VBoxContainer) -> void:
+	yard_command_card = VBoxContainer.new()
+	yard_command_card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	parent.add_child(yard_command_card)
+	var grid := GridContainer.new()
+	grid.columns = 5
+	grid.add_theme_constant_override("h_separation", 3)
+	grid.add_theme_constant_override("v_separation", 3)
+	yard_command_card.add_child(grid)
+	for kind in ECONOMY.SHIP_KINDS:
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(48, 48)
+		button.focus_mode = Control.FOCUS_NONE
+		button.icon = _selection_icon(kind)
+		button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		button.pressed.connect(_build_at_yard.bind(kind))
+		grid.add_child(button)
+		yard_commands[kind] = button
+	var rally_button := Button.new()
+	rally_button.custom_minimum_size = Vector2(48, 48)
+	rally_button.icon = _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12"/>')
+	rally_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rally_button.toggle_mode = true
+	rally_button.focus_mode = Control.FOCUS_NONE
+	rally_button.tooltip_text = "Set rally point · click a discovered star system or a position within it"
+	rally_button.pressed.connect(_arm_command.bind("rally"))
+	grid.add_child(rally_button)
+	yard_commands["rally"] = rally_button
+	yard_upgrade = _button("Upgrade", func() -> void: _operation("yard_upgrade", str(selected_yard)), yard_command_card)
+	yard_rally_hint = _label("", 12)
+	yard_command_card.add_child(yard_rally_hint)
+	var clear := _button("Clear rally", func() -> void:
+		session.call("request_shipyard_rally", selected, selected_yard, -1, Vector2.ZERO), yard_command_card)
+	yard_commands["clear"] = clear
+	yard_command_card.hide()
+
+func _build_at_yard(kind: String) -> void:
+	if selected_yard >= 0:
+		session.call("request_operation", selected, "shipyard_build", "%d:%s" % [selected_yard, kind])
 
 func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	var yard: Dictionary = system["yards"][selected_yard]
 	var level: int = int(yard["level"])
-	var owner: int = int(system["owner"])
-	var roster: Dictionary = session.get("players")
-	var owner_name: String = str(roster.get(owner, {}).get("name", "Player"))
 	var operating: bool = ECONOMY.shipyard_operational(system, selected_yard)
-	var active: Dictionary = {}
-	var pending: Dictionary = {}
-	for job in system["queue"]:
-		if int(job["id"]) == int(yard["job"]):
-			active = job
-		if job["kind"] == "yard_upgrade" and job["target"] == str(selected_yard):
-			pending = job
 	yard_title.text = "Shipyard %d · Lv %d" % [selected_yard + 1, level]
-	yard_context.text = "%s · %s" % [_system_name(selected), owner_name]
-	yard_context.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
+	yard_context.text = _system_name(selected)
 	var max_hp: float = ECONOMY.SHIP_HP * 10.0 * level
-	yard_status.text = "%.0f / %.0f HP\n%s" % [float(yard.get("hp", max_hp)), max_hp, "Offline · Requires %s population" % _compact_amount(float(ECONOMY.SHIPYARD_POPULATION[selected_yard])) if not operating else ("Idle" if active.is_empty() else _job_name(active))]
-	yard_detail.text = "Build speed: %.0f → %.0f work/yr\nMaximum ship size: %d → %d\nMaximum HP: %.0f → %.0f\nEco-Housing: 5,000 capacity · +0.2 t/yr Organics (unchanged)" % [ECONOMY.yard_speed(level), ECONOMY.yard_speed(level + 1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1), max_hp, ECONOMY.SHIP_HP * 10.0 * (level + 1)]
-	var recipe: Dictionary = ECONOMY._cost("yard_upgrade", level + 1) if pending.is_empty() else pending["cost"]
-	_show_cost(yard_costs, recipe)
+	yard_status.text = "%.0f / %.0f HP" % [float(yard.get("hp", max_hp)), max_hp]
+	var jobs: Array = []
+	var active_id: int = int(yard["job"])
+	var pending_upgrade: bool = false
+	for job in system["queue"]:
+		var upgrade: bool = job["kind"] == "yard_upgrade" and int(job["target"]) == selected_yard
+		pending_upgrade = pending_upgrade or upgrade
+		if int(job["id"]) == active_id:
+			jobs.push_front(job)
+		elif upgrade or int(job.get("yard_slot", -1)) == selected_yard:
+			jobs.append(job)
+	for id in yard_queue_rows.keys():
+		var keep: bool = false
+		for job in jobs:
+			if int(job["id"]) == id:
+				keep = true
+				break
+		if not keep:
+			var row: Control = yard_queue_rows[id]["row"]
+			yard_queue.remove_child(row)
+			row.queue_free()
+			yard_queue_rows.erase(id)
+	yard_status.text += " · " + ("Offline" if not operating else ("Idle" if jobs.is_empty() else "%d queued" % jobs.size()))
+	for idx in range(jobs.size()):
+		var job: Dictionary = jobs[idx]
+		var id: int = int(job["id"])
+		if not yard_queue_rows.has(id):
+			var row := HBoxContainer.new()
+			var icon := TextureRect.new()
+			icon.custom_minimum_size = Vector2(28, 28)
+			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			icon.texture = _selection_icon(str(job["kind"])) if ECONOMY.SHIP_KINDS.has(job["kind"]) else _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>')
+			row.add_child(icon)
+			var stack := VBoxContainer.new()
+			stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(stack)
+			var title := _label("", 12)
+			stack.add_child(title)
+			var bar := ProgressBar.new()
+			bar.custom_minimum_size.y = 12
+			bar.step = 0.0
+			stack.add_child(bar)
+			var cancel := _button("×", _cancel_job.bind(id), row)
+			cancel.tooltip_text = "Cancel order and refund"
+			yard_queue.add_child(row)
+			yard_queue_rows[id] = {"row": row, "title": title, "bar": bar, "cancel": cancel}
+		var widgets: Dictionary = yard_queue_rows[id]
+		yard_queue.move_child(widgets["row"], idx)
+		widgets["title"].text = _job_name(job) + (" · Building" if id == active_id else " · Queued")
+		widgets["bar"].value = 100.0 * float(job["progress"]) / maxf(1.0, float(job["work"]))
+		_style_progress(widgets["bar"], system, job)
+		widgets["cancel"].disabled = not owned
+	for kind in ECONOMY.SHIP_KINDS:
+		var button: Button = yard_commands[kind]
+		var recipe: Dictionary = ECONOMY._cost(kind, 1)
+		button.disabled = not owned or not operating or not ECONOMY.affordable(system, recipe) or (kind == "ship" and not bool(system["home"]))
+		button.tooltip_text = "%s · %.0f yr\n%s · %.0f population" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _cost_text(recipe), float(ECONOMY.CREW_COSTS[kind])]
+	var rally: Dictionary = yard.get("rally", {})
+	var rally_button: Button = yard_commands["rally"]
+	rally_button.disabled = not owned
+	rally_button.set_pressed_no_signal(pending_command == "rally")
+	yard_commands["clear"].disabled = not owned or rally.is_empty()
+	yard_rally_hint.text = "Choose rally destination" if pending_command == "rally" else ("Rally: " + _system_name(int(rally["node"])) if not rally.is_empty() else "Rally: not set")
+	var upgrade_recipe: Dictionary = ECONOMY._cost("yard_upgrade", level + 1)
+	yard_upgrade.disabled = not owned or not operating or pending_upgrade or not ECONOMY.affordable(system, upgrade_recipe)
 	_set_timed_action(yard_upgrade, "Upgrade to Lv %d" % (level + 1), ECONOMY._work("yard_upgrade", level + 1))
-	yard_upgrade.disabled = not owned or not operating or not pending.is_empty() or not ECONOMY.affordable(system, recipe)
-	yard_cancel.visible = not pending.is_empty()
-	yard_cancel.disabled = not owned or pending.is_empty()
-	var display_job: Dictionary = pending if not pending.is_empty() else active
-	yard_progress.visible = not display_job.is_empty()
-	if not display_job.is_empty():
-		yard_progress.value = 100.0 * float(display_job["progress"]) / float(display_job["work"])
-		yard_progress.tooltip_text = _job_name(display_job)
-		_style_progress(yard_progress, system, display_job)
-	if not pending.is_empty():
-		yard_status.text += "\nUpgrade pending"
-	elif not ECONOMY.affordable(system, recipe):
-		yard_status.text += "\nInsufficient local materials"
+	yard_upgrade.tooltip_text = _cost_text(upgrade_recipe)
+
 
 func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
@@ -1646,6 +1732,10 @@ func _refresh_command_mode() -> void:
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.set_pressed_no_signal(id == pending_command or (id == "hold" and _any_selected_holding()))
+	if is_instance_valid(yard_command_card):
+		yard_commands["rally"].set_pressed_no_signal(pending_command == "rally")
+		if pending_command == "rally":
+			yard_rally_hint.text = "Choose rally destination"
 	command_hint.visible = not pending_command.is_empty()
 	command_hint.text = "Choose %s · Esc / right-click cancels" % ("salvage" if pending_command == "load" else ("patrol destination" if pending_command == "patrol" else "destination"))
 	map_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS if not pending_command.is_empty() else Control.CURSOR_ARROW
@@ -1661,7 +1751,9 @@ func _execute_pending_command(point: Vector2) -> void:
 	var mode: String = pending_command
 	pending_command = ""
 	_refresh_command_mode()
-	if mode == "load":
+	if mode == "rally":
+		_set_rally_at(point)
+	elif mode == "load":
 		var state: Dictionary = _state()
 		var wreck: int = _salvage_hit(state, point)
 		if wreck >= 0:
@@ -1672,6 +1764,21 @@ func _execute_pending_command(point: Vector2) -> void:
 		_command_at(point, false, false, true)
 	elif mode == "attack":
 		_command_at(point, false, false, false, true)
+
+func _set_rally_at(point: Vector2) -> void:
+	var state: Dictionary = _state()
+	var system: Dictionary = _planet()
+	if selected_yard < 0 or system.is_empty() or int(system["owner"]) != _me():
+		return
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var candidates: Array[int] = []
+	for index in range(state["planets"].size()):
+		if ECONOMY.discovered(state, _me(), "planets", index):
+			candidates.append(index)
+	var world: Vector2 = _world_point(point)
+	var node: int = ECONOMY.sector_at(graph, world, candidates, selected)
+	if node >= 0:
+		session.call("request_shipyard_rally", selected, selected_yard, node, world)
 
 func _selection_icon(kind: String) -> Texture2D:
 	if not selection_icons.has(kind):
@@ -2568,17 +2675,18 @@ func _refresh() -> void:
 	body_overview.visible = body_selected
 	yard_overview.visible = yard_selected
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
-	inspector_tabs.visible = not other_selected and own_system
+	inspector_tabs.visible = not other_selected and own_system and not yard_selected
+	yard_command_card.visible = yard_selected
 	var current_system: int = selected if not other_selected and not p.is_empty() else -1
 	if current_system != last_system_tab_selection:
 		if current_system >= 0:
 			inspector_tabs.current_tab = 0
 		_collapse_details()
 		last_system_tab_selection = current_system
-	interaction_panel.visible = not other_selected and not p.is_empty() and not own_system
+	interaction_panel.visible = not other_selected and not yard_selected and not p.is_empty() and not own_system
 	ship_overview.visible = other_selected
 	_refresh_selection_tiles(state)
-	if not ship_selected:
+	if not ship_selected and not (yard_selected and own_system and pending_command == "rally"):
 		pending_command = ""
 		_refresh_command_mode()
 	fleet_scroll.visible = other_selected
@@ -2725,6 +2833,8 @@ func _refresh_yard_activity(p: Dictionary) -> void:
 			var title := _label("", 12)
 			title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			header.add_child(title)
+			var select_button: Button = _button("Select", _select_yard_slot.bind(int(index)), header)
+			select_button.visible = int(index) >= 0 and int(index) < ECONOMY.MAX_SHIPYARDS
 			var build: Button = _button("Build", _upgrade_yard_at.bind(int(index)), header)
 			build.custom_minimum_size = Vector2(48, 22)
 			build.add_theme_font_size_override("font_size", 11)
@@ -2902,7 +3012,7 @@ func _refresh_build_cards(p: Dictionary, owned: bool) -> void:
 		card["requirements"].visible = not requirements.is_empty()
 		var job: Dictionary = first_jobs.get(kind, {})
 		var progress: ProgressBar = card["build_progress"]
-		progress.visible = not job.is_empty()
+		progress.visible = false
 		if not job.is_empty():
 			progress.value = 100.0 * float(job["progress"]) / float(job["work"])
 			progress.tooltip_text = _cost_text(job["cost"], job["allocated"])
@@ -3630,6 +3740,8 @@ func _map_input(event: InputEvent) -> void:
 					if not pending_command.is_empty():
 						pending_command = ""
 						_refresh_command_mode()
+					elif selected_yard >= 0:
+						_set_rally_at(mouse.position)
 					else:
 						_command_at(mouse.position, mouse.alt_pressed, mouse.shift_pressed)
 			MOUSE_BUTTON_LEFT:
@@ -4359,6 +4471,14 @@ func _draw_map() -> void:
 				map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
 		var name_star_radius: float = _star_draw_radius(radius)
 		map_canvas.draw_string(font, pos + Vector2(-80, -name_star_radius - 7), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
+	if selected >= 0 and selected_yard >= 0 and selected_yard < state["planets"][selected]["yards"].size():
+		var rally: Dictionary = state["planets"][selected]["yards"][selected_yard].get("rally", {})
+		if not rally.is_empty():
+			var start: Vector2 = _screen_point(ECONOMY.shipyard_position(state, selected, selected_yard, float(state["elapsed"])))
+			var target: Vector2 = _screen_point(rally["point"])
+			map_canvas.draw_line(start, target, Color(HUD.ACCENT, 0.65), 1.5, true)
+			map_canvas.draw_arc(target, 7.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
+			map_canvas.draw_line(target + Vector2(0, -6), target + Vector2(0, -22), HUD.ACCENT, 1.5, true)
 	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
 	_draw_salvage(state, poses, viewport_bounds, font)
