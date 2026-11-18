@@ -330,7 +330,7 @@ func _check_time_controls(state: Dictionary) -> bool:
 		if not is_equal_approx(float(state["elapsed"]), paused_elapsed):
 			_fail("Clock advanced while paused.")
 			return false
-		# Queue and cancel a formerly instant station purchase on every peer
+		# Queue and cancel a timed station purchase on every peer
 		# while paused, so the replicated queue and refund are observable.
 		var outpost_index: int = int(state["map"]["planetless"][home_index])
 		var outpost: Dictionary = state["planets"][outpost_index]
@@ -341,7 +341,7 @@ func _check_time_controls(state: Dictionary) -> bool:
 		if not bool(get_meta("station_cancel_sent", false)):
 			for job in outpost["queue"]:
 				if job["kind"] == "orbital_housing":
-					if int(outpost.get("orbital_housing", 0)) != 0 or int(job["size"]) != 0 or job["cost"] != ECON.ORBITAL_HOUSING_COST:
+					if int(outpost.get("orbital_housing", 0)) != 0 or int(job["size"]) != 0 or job["cost"] != ECON.ORBITAL_HOUSING_COST or float(job["work"]) != ECON._work("orbital_housing", 1) or float(job["progress"]) != 0.0:
 						_fail("Station infrastructure queue did not replicate correctly.")
 						return false
 					set_meta("station_cancel_sent", true)

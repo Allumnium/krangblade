@@ -281,9 +281,14 @@ func _test_station_construction_queue() -> void:
 	assert(ECON.enqueue(state, 1, 0, "economy", "Metals"))
 	assert(ECON.enqueue(state, 1, 0, "fighter", "", 0))
 	assert(ECON.shipyard_queue_count(p, 0) == 1)
-	ECON._work_planet(state, 0, ECON.QUICK_STATION_WORK)
-	assert(int(p["habitation_level"]) == 1 and not ECON._has_job(p, "habitation", ""))
+	var duration: float = ECON._work("habitation", 1)
+	assert(duration > 1.0)
+	ECON._work_planet(state, 0, 0.1)
+	assert(int(p.get("habitation_level", 0)) == 0 and ECON._has_job(p, "habitation", ""))
 	assert(ECON._has_job(p, "economy_building", "Metals") and ECON.shipyard_queue_count(p, 0) == 1)
+	ECON._work_planet(state, 0, duration - 0.1)
+	assert(int(p["habitation_level"]) == 1 and not ECON._has_job(p, "habitation", ""))
+	assert(ECON._has_job(p, "economy_building", "Metals") and ECON.shipyard_queue_count(p, 0) == 0)
 	assert(ECON.set_continuous(state, 1, 0, "habitation", true))
 	ECON._refill_continuous(state, 0, p)
 	assert(ECON._has_job(p, "habitation", ""))
@@ -293,6 +298,25 @@ func _test_station_construction_queue() -> void:
 		repeat_count += int(item["kind"] == "habitation")
 	assert(repeat_count == 1)
 	print("PASS: independent station construction, prepaid cancellation, upgrade completion and repeat")
+
+func _test_ai_timed_orbital_housing() -> void:
+	var galaxy: Dictionary = MAP.generate(827, 2, "Grid")
+	var state: Dictionary = ECON.create(galaxy, {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
+	var index: int = galaxy["planetless"][0]
+	var outpost: Dictionary = state["planets"][index]
+	outpost["owner"] = 2
+	outpost["station"] = {"hp": ECON.STATION_HP}
+	for resource in ECON.ORBITAL_HOUSING_COST:
+		outpost["stock"][resource] = ECON.ORBITAL_HOUSING_COST[resource]
+	ECON._ai_turn(state, ECON.military_graph(state), 2)
+	assert(float(outpost["population"]) == 0.0 and int(outpost["orbital_housing"]) == 0)
+	assert(outpost["queue"].size() == 1 and outpost["queue"][0]["kind"] == "orbital_housing")
+	var work: float = float(outpost["queue"][0]["work"])
+	ECON._work_planet(state, index, work * 0.5)
+	assert(float(outpost["queue"][0]["progress"]) > 0.0 and int(outpost["orbital_housing"]) == 0)
+	ECON._work_planet(state, index, work * 0.5)
+	assert(int(outpost["orbital_housing"]) == 1 and float(outpost["population"]) == ECON.ORBITAL_HOUSING_POPULATION)
+	print("PASS: AI orbital housing uses the same timed station construction queue")
 
 func _test_station_defense_and_ports() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -346,6 +370,7 @@ func _test_station_defense_and_ports() -> void:
 func _initialize() -> void:
 	_test_station_defense_and_ports()
 	_test_station_construction_queue()
+	_test_ai_timed_orbital_housing()
 	_test_miner_service_orders()
 	_test_mining_lasers()
 	_test_yard_autobuild_and_station_approach()
@@ -1608,14 +1633,17 @@ func _initialize() -> void:
 	assert(ECON.enqueue(warehouse_state, 1, 0, "economy", "warehouse"))
 	assert(ECON.storage_capacity(depot) == 2000.0 and depot["queue"][-1]["kind"] == "warehouse")
 	assert(not ECON.enqueue(warehouse_state, 1, 0, "economy", "warehouse"))
-	ECON._work_planet(warehouse_state, 0, ECON.QUICK_STATION_WORK)
+	assert(ECON._work("warehouse", 1) > 1.0)
+	ECON._work_planet(warehouse_state, 0, 1.0)
+	assert(ECON.storage_capacity(depot) == 2000.0 and ECON._has_job(depot, "warehouse", ""))
+	ECON._work_planet(warehouse_state, 0, ECON._work("warehouse", 1) - 1.0)
 	assert(ECON.storage_capacity(depot) == 5000.0)
 	for level in [1, 2]:
 		depot["population"] = float(ECON.WAREHOUSE_POPULATIONS[level])
 		for material in ECON.WAREHOUSE_COSTS[level]:
 			depot["stock"][material] = ECON.storage_capacity(depot)
 		assert(ECON.enqueue(warehouse_state, 1, 0, "economy", "warehouse"))
-		ECON._work_planet(warehouse_state, 0, ECON.QUICK_STATION_WORK)
+		ECON._work_planet(warehouse_state, 0, ECON._work("warehouse", level + 1))
 		assert(ECON.storage_capacity(depot) == ECON.WAREHOUSE_CAPACITIES[level + 1])
 	assert(not ECON.enqueue(warehouse_state, 1, 0, "economy", "warehouse"))
 	assert(float(ECON.empire_totals(warehouse_state, 1)["storage_reference"]["Tech"]) == 30000.0)
@@ -2864,7 +2892,9 @@ func _test_orbital_housing() -> void:
 	for purchase in range(2):
 		assert(ECON.enqueue(state, 1, index, "economy", "orbital_housing"))
 		assert(int(p["orbital_housing"]) == purchase and p["queue"][-1]["kind"] == "orbital_housing")
-		ECON._work_planet(state, index, ECON.QUICK_STATION_WORK)
+		ECON._work_planet(state, index, 1.0)
+		assert(int(p["orbital_housing"]) == purchase)
+		ECON._work_planet(state, index, ECON._work("orbital_housing", 1) - 1.0)
 		assert(float(p["population"]) == ECON.ORBITAL_HOUSING_POPULATION * (purchase + 2))
 		assert(int(p["orbital_housing"]) == purchase + 1)
 	assert(not ECON.enqueue(state, 1, index, "economy", "orbital_housing"))
@@ -2911,7 +2941,7 @@ func _test_eco_regrowth() -> void:
 	assert(ECON.shipyard_operational(p, 0))
 	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.2))
 	assert(ECON.enqueue(state, 1, index, "economy", "orbital_housing"))
-	ECON._work_planet(state, index, ECON.QUICK_STATION_WORK)
+	ECON._work_planet(state, index, ECON._work("orbital_housing", 1))
 	assert(ECON.eco_capacity(p) == 10000.0 and float(p["population"]) == 10000.0)
 	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.4))
 	assert(ECON.enqueue(state, 1, index, "fighter"))
