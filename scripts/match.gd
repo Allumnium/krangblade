@@ -713,7 +713,9 @@ func _build_ui() -> void:
 	population_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	station_details = VBoxContainer.new()
 	station_details.add_theme_constant_override("separation", 3)
+	station_details.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	planet_overview.add_child(station_details)
+	overview_scroll.resized.connect(_layout_station_details.bind(overview_scroll))
 	var population_row: HBoxContainer = _population_row(station_details)
 	population_row.add_child(population_label)
 	population_delta_label = _label("", 11)
@@ -728,6 +730,7 @@ func _build_ui() -> void:
 	raw_antimatter_label.add_theme_color_override("font_color", HUD.COLORS[ECONOMY.ANTIMATTER])
 	production_summary.add_child(raw_antimatter_label)
 	raw_antimatter_label.hide()
+	_layout_station_details(overview_scroll)
 	station_queue = _build_centered_queue(planet_overview)
 	station_queue.hide()
 	interaction_scroll = ScrollContainer.new()
@@ -1179,6 +1182,13 @@ func _build_production_summary() -> void:
 		bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(bonus)
 		production_values[resource] = {"row": row, "stock": stock, "level": level, "rate": rate_label, "bonus": bonus}
+
+func _layout_station_details(scroll: ScrollContainer) -> void:
+	# Keep the stock/capacity figures close to their labels on wide screens.
+	# Use the viewport width, not the child's minimum width, so a resize
+	# downwards can shrink the preferred width without creating a feedback loop.
+	var available: float = scroll.size.x - scroll.get_v_scroll_bar().get_combined_minimum_size().x
+	station_details.custom_minimum_size.x = minf(360.0, maxf(0.0, floorf(available)))
 
 func _system_bonus_text(p: Dictionary) -> String:
 	var lines: PackedStringArray = []
