@@ -29,6 +29,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.36.5: Ctrl+0–9 assigns owned units or selected owned structures/planets/systems to ten local control groups, number or strip click recalls, Shift+number adds compatible selections. Prune destroyed or no-longer-owned entities and stale shipyard slots. Show group numbers, counts and representative icons when space permits above the center panel; no automatic camera pan. Cargo is a labeled bottom footer for single/multi ships, with tonnage units and only positive amounts. Station tabs are Economy and Trade; construction/cancellation of new shipyard modules is in Economy, production/upgrades/rally on the physical shipyards only. This supersedes the older Shipyards tab and activity card instructions.
+
 - Wheel zoom uses progressively smaller logarithmic steps near the close-up limit and larger steps at overview scale, retaining the cursor/follow anchor. Single-ship detail omits owner text and uses the same single icon-and-amount cargo row as fleet selection; hide empty resources and the entire row when empty. Formation arrivals resume idle/working behavior like click moves, with exact facing on the arrival tick only (v0.36.4).
 
 - Single ships, shipyards, space stations and planets show a large wireframe portrait in the leftmost column of the central selection panel. Use green/yellow/red health tiers with current/max HP immediately below; undefended planets lack HP, so use a neutral outline. Multi-selections retain compact tiles without the single portrait. Start each player's camera centered on and framed to their home command sector.

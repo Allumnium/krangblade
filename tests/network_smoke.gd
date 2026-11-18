@@ -660,16 +660,11 @@ func _check_economy_sync() -> void:
 			view.set("selected", home_index)
 			view.call("_load_thresholds")
 			view.call("_refresh")
-			var yard_rows: Dictionary = view.get("yard_activity_rows")
-			if yard_rows.size() != 3:
-				_fail("All three shipyard slots must remain visible.")
-				return
-			for row in yard_rows.values():
-				if (row["build"] as Button).visible:
-					_fail("No shipyard build button may be visible at the maximum.")
-					return
 			var sliders: Dictionary = view.get("trade_sliders")
 			var home: Dictionary = state["planets"][home_index]
+			if ECON.next_shipyard_slot(home) != 0:
+				_fail("A fourth shipyard slot must not be available.")
+				return
 			for index in range((home["yards"] as Array).size()):
 				if not ECON.shipyard_operational(home, index) and int(home["yards"][index]["job"]) >= 0:
 					_fail("Understaffed shipyard is operating on replicated state.")
