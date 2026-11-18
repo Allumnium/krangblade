@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.36.1: Shipyard command placement now preserves fixed spatial muscle memory across widths. Recheck compact caption legibility and command highlight/crosshair feedback in playtests (TODO phase 1).
+
 ### T-041 — Curved formation feedback and docking routes
 - **Type:** UX/playtest risk.
 - **Observation:** v0.36.0 places slots by arc length along the player's stroke; closely overlapping loops can place ships near each other, and station navigation offsets final lane endpoints from stars. Check dense curves and the visible station approach at multiple zooms.
