@@ -1,5 +1,9 @@
 # Warbound — thoughts archive
 
+### T-33b — Station ownership anchor (resolved 2026-11-17)
+- **Original observation:** Conquest could leave claimed systems with no shipyards. Proposed an orbital core, three attached production modules, and 20% stored-resource salvage.
+- **Resolution:** Implemented in v0.34.0. Destroying the core neutralizes the sector and requires a new colony ship to establish a station; fighter occupation no longer grants ownership. Physical station docking and independent module loss preserve the distinction between claim and production. Visual acceptance remains in TODO.md.
+
 ### T-007 — Small allocations can stall attacks (superseded 2026-11-17)
 - **Original observation:** Hostile-system allocations below three hulls rallied instead of deploying; splitting a small fleet could stall every attack.
 - **Disposition:** v0.18.0 design replaces policy allocations with direct commands that depart immediately regardless of size. No regional allocation or mandatory human rally remains. Retest direct movement instead.

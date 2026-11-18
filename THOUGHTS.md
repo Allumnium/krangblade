@@ -452,5 +452,5 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 ### T-33a — Order queues and painted lines
 - Shift is now a queue modifier; patrol moved entirely to the command card. Authoritative per-unit FIFO is revalidated as orders become active; transient targets may expire before execution. Right-drag distributes orders with matching projected hull origins and common perpendicular facing. Verify very short lines and mixed fleets at sector boundaries; auto salvage and civilian work still take precedence after precise arrival.
 
-### T-33b — Station ownership anchor
-- User identified a claimed system with no surviving shipyard after conquest. Proposed station core separates territorial ownership, storage, docking and repairs from up to three attached production shipyards; central station destruction drops 20% of stored resources. Decide whether a destroyed station leaves a neutral system requiring colonization or an occupation that establishes a replacement station before implementing the ownership transition.
+### T-34a — Station and movement acceptance
+- Station core is the sole ownership anchor; colonization establishes the station and first module. Station destruction resets the sector, drops exactly 20% of stored goods and requires recolonization. Review provisional 1,000 HP, art and physical docking paths; verify move-only clicks do not interrupt movement for combat, while explicit attack-move/rallies do. Module housing remains tied to completed shipyards, not the core itself.

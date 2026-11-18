@@ -1958,7 +1958,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Stationed at %s" % _poi_name(int(ship["at"])) if route.is_empty() else "%s\nETA %.1f yr" % [_poi_name(int(route.back())), _remaining_years(state, ship)]
 	if bool(ship.get("retreating", false)):
 		var site: int = int(ship.get("repair_site", -1))
-		status = "Repairing" if route.is_empty() and site >= 0 and (ship["position"] as Vector2).distance_to(state["map"]["points"][site]) <= ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), owner, site) else "Withdrawing"
+		status = "Repairing" if route.is_empty() and site >= 0 and (ship["position"] as Vector2).distance_to(ECONOMY.station_position(state, site, float(state["elapsed"]))) <= ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), owner, site) else "Withdrawing"
 	elif int(ship.get("pursuit_target", -1)) >= 0:
 		status = "Pursuing"
 	elif bool(ship.get("holding", false)):
@@ -2020,7 +2020,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		fleet_detail.text += "\n%d owned · %d foreign" % [owned_count, selected_units.size() - owned_count]
 	fleet_detail.tooltip_text = "Foreign ships are read-only. Commands affect only your own ships. Ctrl+1–9 assigns a selection group, 1–9 recalls it."
 	if owned_count > 0:
-		fleet_detail.tooltip_text += " Right-click a hostile ship to focus attack, or a sector to attack-move. Hold Shift to queue up to 30 commands. Drag right-click to place a formation. Patrol is on the command card. Ships collect nearby salvage when safe; right-click to claim manually; U unloads cargo. Alt-right-click forces a local position. H holds/releases."
+		fleet_detail.tooltip_text += " Right-click to move. Use the Attack command for attack-move or focus attack. Hold Shift to queue up to 30 commands. Drag right-click to place a formation. Patrol is on the command card. Ships collect nearby salvage when safe; Load explicitly claims a wreck; U unloads cargo. Alt-right-click forces a local position. H holds/releases."
 	fleet_cargo.get_parent().show()
 	fleet_cargo.get_child(0).text = "Cargo %.1f / %.0f t" % [ECONOMY._cargo_total({"cargo": cargo}), capacity]
 	if fleet_cargo.get_parent().visible:
@@ -2763,7 +2763,7 @@ func _refresh() -> void:
 	overview_panel.visible = true
 	empty_selection.visible = false
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	planet_overview.visible = not p.is_empty() and not other_selected and not body_selected and not yard_selected
+	planet_overview.visible = not p.is_empty() and not other_selected and not body_selected and not yard_selected and selected_buildings.size() <= 1
 	yard_column.visible = planet_overview.visible and overview_panel.visible
 	var grouped_buildings: bool = selected_buildings.size() > 1
 	body_overview.visible = body_selected and not grouped_buildings
@@ -2825,8 +2825,10 @@ func _refresh() -> void:
 	var owner: int = int(p["owner"])
 	var roster: Dictionary = session.get("players")
 	var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
-	info.text = _system_name(selected) + (" · No planets" if not ECONOMY.has_planets(p) else "")
+	info.text = ("Space Station · " if building_selection_kind == "station" else "") + _system_name(selected) + (" · No planets" if not ECONOMY.has_planets(p) else "")
 	info.tooltip_text = info.text + (" · Home" if bool(p["home"]) else "")
+	if ECONOMY.has_station(p):
+		info.tooltip_text += "\nSpace Station · %.0f / %.0f HP" % [float(p["station"]["hp"]), ECONOMY.STATION_HP]
 	system_owner_label.text = name_text
 	system_owner_label.tooltip_text = name_text
 	system_owner_label.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
@@ -3192,10 +3194,9 @@ func _leave() -> void:
 
 func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) -> void:
 	var neutral: bool = not p.is_empty() and int(p.get("owner", -1)) == 0 and phase == "match"
-	var empty_system: bool = neutral and not ECONOMY.has_planets(p)
-	colony_picker.visible = neutral and not empty_system
+	colony_picker.visible = neutral
 	send_colony_button.visible = neutral
-	send_colony_button.text = "CAPTURE WITH FIGHTERS" if empty_system else "SEND COLONY SHIP"
+	send_colony_button.text = "SEND COLONY SHIP"
 	var choices: Array[int] = []
 	var labels: Array[String] = []
 	if neutral:
@@ -3499,6 +3500,23 @@ func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 				hit = Vector2i(index, slot)
 	return hit
 
+func _station_radius() -> float:
+	return maxf(5.0, 58.0 * _fit() * zoom)
+
+func _station_hit(point: Vector2, state: Dictionary) -> int:
+	var hit: int = -1
+	var nearest: float = INF
+	for index in range(state["planets"].size()):
+		if not ECONOMY.has_station(state["planets"][index]) or not ECONOMY.discovered(state, _me(), "planets", index):
+			continue
+		var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, float(state["elapsed"])))
+		var star: Vector2 = _screen_point(state["map"]["points"][index])
+		var distance: float = point.distance_to(center)
+		if center.distance_to(star) >= 8.0 and distance <= _station_radius() + 3.0 and distance < nearest:
+			hit = index
+			nearest = distance
+	return hit
+
 func _clear_building_selection() -> void:
 	selected_buildings.clear()
 	building_selection_kind = ""
@@ -3510,11 +3528,15 @@ func _building_valid(state: Dictionary, ref: Vector2i, kind: String, expected_co
 	var system: Dictionary = planets[ref.x]
 	if kind == "shipyard":
 		return ref.y < system["yards"].size() and (expected_count < 0 or expected_count == system["yards"].size())
+	if kind == "station":
+		return ref.y == 0 and ECONOMY.has_station(system)
 	return kind == "pds" and system.get("pds", {}).has(ref.y)
 
 func _building_world(state: Dictionary, ref: Vector2i, kind: String) -> Vector2:
 	if kind == "shipyard":
 		return ECONOMY.shipyard_position(state, ref.x, ref.y, float(state["elapsed"]))
+	if kind == "station":
+		return ECONOMY.station_position(state, ref.x, float(state["elapsed"]))
 	var body: Dictionary = _system_visual(ref.x, state)["bodies"][ref.y]
 	return _world_point(_screen_point(state["map"]["points"][ref.x]) + _body_position(body, _planet_radius(ref.x, state), game_visual_clock))
 
@@ -3545,6 +3567,9 @@ func _select_building_ref(ref: Vector2i, kind: String) -> void:
 		return
 	_clear_building_selection()
 	_set_building_primary(state, ref, kind)
+	if kind == "station":
+		building_selection_kind = kind
+		selected_buildings[ref] = 0
 	follow_units = false
 	pending_command = ""
 	_load_thresholds()
@@ -3559,7 +3584,7 @@ func _select_visible_buildings(state: Dictionary, first: Vector2i, kind: String)
 		var system: Dictionary = state["planets"][index]
 		if kind == "pds" and _planet_detail_opacity(index, _planet_radius(index, state)) < 0.3:
 			continue
-		var slots: Array = range(system["yards"].size()) if kind == "shipyard" else system.get("pds", {}).keys()
+		var slots: Array = range(system["yards"].size()) if kind == "shipyard" else ([0] if ECONOMY.has_station(system) else []) if kind == "station" else system.get("pds", {}).keys()
 		for slot in slots:
 			var ref := Vector2i(index, int(slot))
 			if _in_visible_playfield(_screen_point(_building_world(state, ref, kind))):
@@ -3585,7 +3610,7 @@ func _prune_building_selection(state: Dictionary) -> void:
 		selected_body = -1
 		follow_units = false
 		return
-	var current := Vector2i(selected, selected_yard if building_selection_kind == "shipyard" else selected_body)
+	var current := Vector2i(selected, selected_yard if building_selection_kind == "shipyard" else 0 if building_selection_kind == "station" else selected_body)
 	if not selected_buildings.has(current):
 		_set_building_primary(state, selected_buildings.keys()[0], building_selection_kind)
 
@@ -3599,7 +3624,7 @@ func _refresh_building_group(state: Dictionary) -> void:
 		building_group_rows.clear()
 		return
 	var kind: String = building_selection_kind
-	building_group_title.text = "%d %s" % [selected_buildings.size(), "shipyards" if kind == "shipyard" else "planetary defenses"]
+	building_group_title.text = "%d %s" % [selected_buildings.size(), "shipyards" if kind == "shipyard" else "space stations" if kind == "station" else "planetary defenses"]
 	for ref in building_group_rows.keys():
 		if not selected_buildings.has(ref) or building_group_rows[ref].get_meta("kind") != kind:
 			var old: Button = building_group_rows[ref]
@@ -3614,7 +3639,7 @@ func _refresh_building_group(state: Dictionary) -> void:
 			row.set_meta("kind", kind)
 			building_group_rows[ref] = row
 		var button: Button = building_group_rows[ref]
-		var name_text: String = "%s · Shipyard %d · Lv %d" % [_system_name(ref.x), ref.y + 1, int(system["yards"][ref.y]["level"])] if kind == "shipyard" else _body_name(ref.x, ref.y)
+		var name_text: String = "%s · Shipyard %d · Lv %d" % [_system_name(ref.x), ref.y + 1, int(system["yards"][ref.y]["level"])] if kind == "shipyard" else _system_name(ref.x) + " · Space Station" if kind == "station" else _body_name(ref.x, ref.y)
 		button.text = name_text + ("" if int(system["owner"]) == _me() else " · Foreign")
 		button.tooltip_text = "Select this building"
 
@@ -3688,6 +3713,19 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 			var focus: Control = get_viewport().gui_get_focus_owner()
 			if is_instance_valid(focus):
 				focus.release_focus()
+			_load_thresholds()
+			_refresh()
+			return
+	if not additive:
+		var station_hit: int = _station_hit(point, state)
+		if station_hit >= 0 and (next_ship < 0 or point.distance_to(_screen_point(ECONOMY.station_position(state, station_hit, float(state["elapsed"])))) < ship_distance):
+			var ref := Vector2i(station_hit, 0)
+			_set_building_primary(state, ref, "station")
+			building_selection_kind = "station"
+			selected_buildings[ref] = 0
+			follow_units = false
+			if double_click:
+				_select_visible_buildings(state, ref, "station")
 			_load_thresholds()
 			_refresh()
 			return
@@ -3767,7 +3805,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	selected_field = -1
 	_refresh()
 
-func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = false, explicit_attack: bool = false, append: bool = false) -> void:
+func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = true, explicit_attack: bool = false, append: bool = false, contextual: bool = false) -> void:
 	var state: Dictionary = _state()
 	var owned: Array[int] = _selected_owned_units(state)
 	if state.is_empty() or owned.is_empty():
@@ -3776,7 +3814,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	for craft in state["ships"]:
 		if owned.has(int(craft["id"])) and craft["kind"] == "fighter":
 			fighters.append(int(craft["id"]))
-	if not force_position and not patrol and not move_only:
+	if not force_position and not patrol and explicit_attack:
 		var poses: Dictionary = _ship_poses(state)
 		var target: int = -1
 		var nearest: float = maxf(5.0, 14.0 * _ship_scale())
@@ -3791,11 +3829,11 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		if target >= 0:
 			_issue_order(fighters, {"kind": "attack", "target": target}, append)
 			return
-		if not explicit_attack:
-			var wreck: int = _salvage_hit(state, point)
-			if wreck >= 0:
-				_issue_order(owned, {"kind": "salvage", "target": wreck}, append)
-				return
+	if contextual and not force_position and fighters.is_empty():
+		var wreck: int = _salvage_hit(state, point)
+		if wreck >= 0:
+			_issue_order(owned, {"kind": "salvage", "target": wreck}, append)
+			return
 	var node: int = -1
 	var distance: float = INF
 	var graph: Dictionary = ECONOMY.military_graph(state)
@@ -4003,7 +4041,7 @@ func _map_input(event: InputEvent) -> void:
 					var entries: Array = _formation_orders(_state())
 					formation_drag = false
 					if entries.is_empty():
-						_command_at(mouse.position, formation_force_position, false, false, false, formation_append)
+						_command_at(mouse.position, formation_force_position, false, true, false, formation_append, true)
 					else:
 						var valid: Array = []
 						for entry in entries:
@@ -4301,6 +4339,12 @@ func _sync_destruction_effects(state: Dictionary) -> void:
 		var rng := RandomNumberGenerator.new()
 		rng.seed = sequence * 7919 + int(event["ship"])
 		var vertices: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE)
+		if kind == "station":
+			vertices = []
+			for segment in range(16):
+				vertices.append(Vector2.from_angle(TAU * float(segment) / 16.0) * 12.0)
+		elif kind == "shipyard":
+			vertices = [Vector2(-12, -8), Vector2(12, -8), Vector2(12, 8), Vector2(-12, 8)]
 		var panels: Array = HULL_PANELS.get(kind, [])
 		var edge_color: Color = _empire_color(int(event["owner"])).lightened(0.2)
 		var fragments: Array = []
@@ -4329,7 +4373,7 @@ func _sync_destruction_effects(state: Dictionary) -> void:
 					sparks.append(_destruction_spark(Vector2(rng.randf_range(-8.0, 8.0), rng.randf_range(-5.0, 5.0)), HUD.COLORS.get(resource, hull), rng))
 		for index in range(5):
 			sparks.append(_destruction_spark(Vector2.ZERO, hull, rng))
-		ship_destructions.append({"position": event["position"], "angle": angle, "started": visual_clock, "fragments": fragments, "sparks": sparks})
+		ship_destructions.append({"position": event["position"], "angle": angle, "started": visual_clock, "fragments": fragments, "sparks": sparks, "scale": 3.2 if kind == "station" else 2.0 if kind == "shipyard" else 1.0})
 		if ship_destructions.size() > MAX_VISIBLE_DESTRUCTIONS:
 			ship_destructions.pop_front()
 
@@ -4338,8 +4382,8 @@ func _destruction_spark(offset: Vector2, color: Color, rng: RandomNumberGenerato
 	return {"offset": offset, "velocity": direction * rng.randf_range(18.0, 42.0), "size": rng.randf_range(0.65, 1.65), "color": color}
 
 func _draw_ship_destructions(viewport_bounds: Rect2) -> void:
-	var scale: float = maxf(0.2, _ship_scale())
 	for effect in ship_destructions:
+		var scale: float = maxf(0.2, _ship_scale()) * float(effect.get("scale", 1.0))
 		var point: Vector2 = _screen_point(effect["position"])
 		if not viewport_bounds.grow(maxf(80.0, 44.0 * scale)).has_point(point):
 			continue
@@ -4467,6 +4511,10 @@ func _follow_selection(state: Dictionary, poses: Dictionary, reframe: bool = fal
 			if reframe:
 				zoom = _bounds_zoom(Rect2(Vector2.ZERO, Vector2.ONE * 140.0))
 			_center_world(ECONOMY.shipyard_position(state, selected, selected_yard, float(state["elapsed"])))
+		elif building_selection_kind == "station" and ECONOMY.has_station(system):
+			if reframe:
+				zoom = _bounds_zoom(Rect2(Vector2.ZERO, Vector2.ONE * 270.0))
+			_center_world(ECONOMY.station_position(state, selected, float(state["elapsed"])))
 		elif selected_body >= 0 and selected_body < int(system.get("planet_count", 0)):
 			var body: Dictionary = _system_visual(selected, state)["bodies"][selected_body]
 			if reframe:
@@ -4570,6 +4618,44 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 				for j in range(count):
 					var tip: Vector2 = base + axis * float(j * 5)
 					map_canvas.draw_polyline(PackedVector2Array([tip - axis * 4.0 + normal * 3.0, tip, tip - axis * 4.0 - normal * 3.0]), HUD.COLORS[resource], 1.5, true)
+
+func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
+	var system: Dictionary = state["planets"][index]
+	if not ECONOMY.has_station(system):
+		return
+	var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, elapsed))
+	var radius: float = _station_radius()
+	var frame: Color = Color("#71869b")
+	var selected_station: bool = building_selection_kind == "station" and selected_buildings.has(Vector2i(index, 0))
+	# Orbital hub with circular habitat/industrial ring, central docking
+	# berth, and three fixed module attachment arms on its rotating frame.
+	map_canvas.draw_circle(center, radius, Color("#131e2b"), true, -1.0, true)
+	map_canvas.draw_arc(center, radius * 0.85, 0.0, TAU, 48, frame, maxf(2.0, radius * 0.22), true)
+	map_canvas.draw_arc(center, radius, 0.0, TAU, 48, tint.lightened(0.30), maxf(1.0, radius * 0.055), true)
+	map_canvas.draw_circle(center, radius * 0.32, Color("#293c51"), true, -1.0, true)
+	map_canvas.draw_arc(center, radius * 0.35, 0.0, TAU, 24, tint, maxf(1.0, radius * 0.07), true)
+	for slot in range(3):
+		var axis: Vector2 = Vector2.from_angle(float(slot) * TAU / 3.0 + elapsed * 0.008)
+		var side: Vector2 = axis.orthogonal()
+		map_canvas.draw_line(center + axis * radius * 0.35, center + axis * radius * 0.87, frame.darkened(0.3), maxf(1.0, radius * 0.13), true)
+		var port: Vector2 = center + axis * radius
+		map_canvas.draw_line(port - side * radius * 0.18, port + side * radius * 0.18, tint.lightened(0.4), maxf(1.0, radius * 0.07), true)
+		if slot < system["yards"].size():
+			var dock: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
+			map_canvas.draw_line(port, dock, frame, maxf(1.0, radius * 0.12), true)
+	if radius >= 12.0:
+		for segment in range(12):
+			var a: float = float(segment) * TAU / 12.0 + elapsed * 0.008
+			var direction: Vector2 = Vector2.from_angle(a)
+			map_canvas.draw_line(center + direction * radius * 0.74, center + direction * radius * 0.95, Color("#1a293a"), maxf(1.0, radius * 0.05), true)
+			map_canvas.draw_circle(center + direction * radius * 0.88, maxf(0.8, radius * 0.035), tint.lightened(0.4))
+	if selected_station:
+		map_canvas.draw_arc(center, radius + 4.0, 0.0, TAU, 40, HUD.ACCENT, 1.5, true)
+	var hp: float = float(system["station"]["hp"]) / ECONOMY.STATION_HP
+	if hp < 0.999:
+		var base: Vector2 = center + Vector2(-radius, -radius - 6.0)
+		map_canvas.draw_rect(Rect2(base, Vector2(radius * 2.0, 3.0)), Color("#283748"))
+		map_canvas.draw_rect(Rect2(base, Vector2(radius * 2.0 * hp, 3.0)), tint)
 
 func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
 	var planet: Dictionary = state["planets"][index]
@@ -4833,13 +4919,8 @@ func _draw_map() -> void:
 		var radius: float = _planet_radius(i, state)
 		var tint: Color = _empire_color(int(state["planets"][i]["owner"]))
 		_draw_system(i, state, pos, radius, tint)
+		_draw_station(state, i, tint, float(state["elapsed"]))
 		_draw_shipyards(state, i, tint, float(state["elapsed"]))
-		var capture: Dictionary = state["planets"][i].get("capture", {})
-		if not capture.is_empty():
-			var progress: float = clampf(float(capture["held"]) / ECONOMY.CAPTURE_YEARS, 0.0, 1.0)
-			var captor: Color = _empire_color(int(capture["player"]))
-			map_canvas.draw_arc(pos, radius + 12.0, -PI * 0.5, -PI * 0.5 + TAU * progress, 48, captor, 3.0, true)
-			map_canvas.draw_string(font, pos + Vector2(-60, radius + 26.0), "Capture %d%%" % roundi(progress * 100.0), HORIZONTAL_ALIGNMENT_CENTER, 120, 12, captor)
 		if i == selected and bool(state["planets"][i]["home"]):
 			map_canvas.draw_arc(pos, radius + 5.0, 0.0, TAU, 48, Color(tint, 0.5), 1.0, true)
 		if i == selected:
@@ -4938,6 +5019,10 @@ func _draw_map() -> void:
 				var slot: int = posmod(encoded, 3)
 				if slot < state["planets"][index]["yards"].size():
 					_draw_owned_laser(_fighter_beam_origin(poses[shooter]), _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), int(ship["owner"]), 1.5)
+			elif encoded >= count * 9:
+				var station_index: int = encoded - count * 9
+				if station_index < count and ECONOMY.has_station(state["planets"][station_index]):
+					_draw_owned_laser(_fighter_beam_origin(poses[shooter]), _screen_point(ECONOMY.station_position(state, station_index, float(state["elapsed"]))), int(ship["owner"]), 1.5)
 			else:
 				var pds_index: int = posmod(encoded - count * 3, count)
 				var pds_slot: int = floori(float(encoded - count * 3) / float(count))
