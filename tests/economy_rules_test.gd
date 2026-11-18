@@ -147,7 +147,40 @@ func _test_yard_autobuild_and_station_approach() -> void:
 	assert(ECON._move({"map": map}, fighter, 100.0, dock, 0) and fighter["position"] == dock)
 	print("PASS: per-shipyard round robin, capacity, cancellation, upgrade cap and direct station approach")
 
+func _test_mining_lasers() -> void:
+	var rock := Vector2(1000, 0)
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": [{"position": rock, "radius": 40.0, "anchor": 0, "Metals": 0.5, "Crystals": 0.5, "chunks": [{"id": 7, "position": rock, "resource": "Metals", "remaining": 24.0}]}]}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var miner: Dictionary = {"id": 100, "owner": 1, "kind": "miner", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": rock + Vector2.LEFT * 20, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "mining", "field": 0, "chunk": 7, "mining_rock": rock, "mining_target": rock + Vector2.LEFT * 20, "mining_years": 0.0}
+	var enemy: Dictionary = {"id": 101, "owner": 2, "kind": "ship", "at": 1, "dest": -1, "route": [], "leg": 0.0, "position": rock + Vector2.UP * 50, "hp": ECON.SHIP_HP}
+	var friend: Dictionary = {"id": 102, "owner": 1, "kind": "fighter", "at": 0, "dest": 0, "route": [], "leg": 0.0, "position": rock + Vector2.LEFT * 300, "hp": ECON.SHIP_HP}
+	state["ships"] = [miner, enemy, friend]
+	var field: Dictionary = state["map"]["fields"][0]
+	var chunk: Dictionary = field["chunks"][0]
+	var budgets: Array = [{"Metals": 100.0, "Crystals": 100.0}]
+	ECON._combat(state, graph, 1.0)
+	assert(enemy["hp"] == ECON.SHIP_HP - ECON.MINER_LASER_DAMAGE and miner["combat_target"] == 101 and miner["pursuit_target"] == -1)
+	assert(friend["hp"] == ECON.SHIP_HP and chunk["remaining"] == 24.0)
+	ECON._work_miner(state, miner, ECON.planet_teams(state), {}, budgets, 1.0)
+	assert(chunk["remaining"] == 24.0 and not miner["mining_active"])
+	# Move-only suppresses even the weak automatic weapon.
+	miner["move_only"] = true
+	miner["local_move_target"] = rock
+	ECON._combat(state, graph, 1.0)
+	assert(miner["combat_target"] == -1 and enemy["hp"] == ECON.SHIP_HP - ECON.MINER_LASER_DAMAGE)
+	miner.erase("local_move_target")
+	state["ships"].erase(enemy)
+	ECON._combat(state, graph, 1.0)
+	assert(not ECON.command_miners(state, 1, [102], 0, 7))
+	ECON._work_miner(state, miner, ECON.planet_teams(state), {}, budgets, 1.0)
+	var mined: float = ECON.MINER_LASER_DAMAGE * ECON.MINER_ASTEROID_MULTIPLIER * 0.5
+	assert(miner["mining_active"] and is_equal_approx(chunk["remaining"], 24.0 - mined) and is_equal_approx(miner["cargo"]["Metals"], mined))
+	assert(is_equal_approx(budgets[0]["Metals"], 100.0 - mined))
+	print("PASS: weak miner fire, friendly safety, no pursuit, move-only suppression, asteroid bonus and conserved ore")
+
 func _initialize() -> void:
+	_test_mining_lasers()
 	_test_yard_autobuild_and_station_approach()
 	_test_unit_order_queue()
 	_test_conquest()

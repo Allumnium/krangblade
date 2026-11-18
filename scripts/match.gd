@@ -1085,7 +1085,7 @@ func _ship_stats(kind: String) -> String:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
 		"colony_ship": details = "Settles a neutral system · %.0f settlers · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_CAPACITY]
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f · Cargo %.0f t" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.FIGHTER_CAPACITY]
-		"miner": details = "Extracts asteroids · Cargo %.0f t · Mining %.0f t/yr" % [ECONOMY.MINER_CAPACITY, ECONOMY.MINER_RATE]
+		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/yr · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 	return "%s\nHP %.0f · Speed %.0f/yr · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
 
 func _repeat_button(parent: Container, key: String) -> Button:
@@ -1641,11 +1641,20 @@ func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
 	body_overview.add_theme_constant_override("separation", 8)
 	parent.add_child(body_overview)
+	var header := HBoxContainer.new()
+	body_overview.add_child(header)
 	body_title = _label("", 19)
-	body_overview.add_child(body_title)
+	body_title.autowrap_mode = TextServer.AUTOWRAP_OFF
+	body_title.clip_text = true
+	body_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(body_title)
 	body_context = _label("", 12)
+	body_context.autowrap_mode = TextServer.AUTOWRAP_OFF
+	body_context.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	body_context.clip_text = true
+	body_context.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body_context.add_theme_color_override("font_color", HUD.MUTED)
-	body_overview.add_child(body_context)
+	header.add_child(body_context)
 	var section: VBoxContainer = HUD.section(body_overview, "Planetary defense", true)
 	body_defense = _label("", 12)
 	section.add_child(body_defense)
@@ -1681,7 +1690,8 @@ func _refresh_body_overview(system: Dictionary, owned: bool) -> void:
 	var roster: Dictionary = session.get("players")
 	var owner_name: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
 	body_title.text = _body_name(selected, selected_body)
-	body_context.text = "%s · %s" % [_system_name(selected), owner_name]
+	body_context.text = "%s\n%s" % [_system_name(selected), owner_name]
+	body_context.tooltip_text = body_context.text
 	var defenses: Dictionary = system.get("pds", {})
 	var battery: Dictionary = defenses.get(selected_body, {})
 	var job: Dictionary = ECONOMY.pds_job(system)
@@ -3435,7 +3445,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 				if system.get("pds", {}).has(slot):
 					_draw_pds_frame(point, body_radius, detail)
 				if (index == selected and selected_body == slot) or (building_selection_kind == "pds" and selected_buildings.has(Vector2i(index, slot))):
-					map_canvas.draw_arc(point, body_radius + 4.0, 0.0, TAU, 24, Color(HUD.ACCENT, detail), 1.5, true)
+					_draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
 	var pulse: float = 0.96 + 0.04 * sin(visual_clock * 1.2 + float(index))
 	for layer in range(5, 0, -1):
@@ -3451,7 +3461,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		for slot in system.get("pds", {}):
 			if selected_buildings.has(Vector2i(index, int(slot))) and int(slot) < bodies.size():
 				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, game_visual_clock)
-				map_canvas.draw_arc(point, 6.0, 0.0, TAU, 24, HUD.ACCENT, 1.5, true)
+				_draw_selection_ring(point, 6.0)
 	if _show_system_rings(index):
 		map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
 
@@ -4241,15 +4251,20 @@ func _map_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
 		if mouse.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
-			# Both buttons place the armed movement command. Without one,
-			# only the right button places orders; left still selects.
+			# Right click places orders; left cancels armed movement and
+			# returns to normal selection (including deselect on empty space).
 			if formation_button != 0:
-				if mouse.button_index == formation_button and not mouse.pressed:
-					_finish_formation(mouse.position)
-				map_canvas.queue_redraw()
-				map_canvas.accept_event()
-				return
-			if mouse.pressed and (pending_command in ["move", "attack", "patrol"] or (mouse.button_index == MOUSE_BUTTON_RIGHT and pending_command.is_empty() and selected_yard < 0)):
+				if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed:
+					formation_button = 0
+					pending_command = ""
+					_refresh_command_mode()
+				else:
+					if mouse.button_index == formation_button and not mouse.pressed:
+						_finish_formation(mouse.position)
+					map_canvas.queue_redraw()
+					map_canvas.accept_event()
+					return
+			if mouse.pressed and mouse.button_index == MOUSE_BUTTON_RIGHT and (pending_command in ["move", "attack", "patrol"] or (pending_command.is_empty() and selected_yard < 0)):
 				_begin_formation(mouse)
 				map_canvas.queue_redraw()
 				map_canvas.accept_event()
@@ -4267,7 +4282,10 @@ func _map_input(event: InputEvent) -> void:
 					elif selected_yard >= 0:
 						_set_rally_at(mouse.position)
 			MOUSE_BUTTON_LEFT:
-				if not pending_command.is_empty():
+				if pending_command in ["move", "attack", "patrol"]:
+					pending_command = ""
+					_refresh_command_mode()
+				elif not pending_command.is_empty():
 					if mouse.pressed:
 						_execute_pending_command(mouse.position, mouse.shift_pressed)
 					map_canvas.accept_event()
@@ -4626,6 +4644,27 @@ func _draw_owned_laser(origin: Vector2, target: Vector2, owner: int, width: floa
 func _fighter_beam_origin(pose: Dictionary) -> Vector2:
 	return (pose["point"] as Vector2) + (pose["direction"] as Vector2) * FIGHTER_MUZZLE * _ship_scale()
 
+func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, width: float) -> void:
+	if ship["kind"] != "miner":
+		_draw_owned_laser(_fighter_beam_origin(pose), endpoint, int(ship["owner"]), width)
+		return
+	var point: Vector2 = pose["point"]
+	var direction: Vector2 = point.direction_to(endpoint)
+	if direction.is_zero_approx():
+		direction = pose["direction"]
+	pose["direction"] = direction
+	var scale: float = _ship_scale()
+	for sign in [-1.0, 1.0]:
+		var origin: Vector2 = point + (direction * MINER_MUZZLE.x + direction.orthogonal() * sign * MINER_MUZZLE.y) * scale
+		_draw_owned_laser(origin, endpoint, int(ship["owner"]), maxf(0.65, width * 0.65))
+
+func _draw_selection_ring(point: Vector2, radius: float, tint: Color = HUD.ACCENT) -> void:
+	var count: int = clampi(roundi(TAU * radius / 9.0), 6, 128)
+	var step: float = TAU / float(count)
+	for index in range(count):
+		var start: float = step * index
+		map_canvas.draw_arc(point, radius, start, start + step * 0.72, maxi(3, ceili(radius * step / 4.0)), tint, 1.0, true)
+
 func _hull_polygon(origin: Vector2, forward: Vector2, lateral: Vector2, vertices: Array) -> PackedVector2Array:
 	var polygon := PackedVector2Array()
 	for vertex in vertices:
@@ -4873,7 +4912,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 			map_canvas.draw_line(center + direction * radius * 0.74, center + direction * radius * 0.95, Color("#1a293a"), maxf(1.0, radius * 0.05), true)
 			map_canvas.draw_circle(center + direction * radius * 0.88, maxf(0.8, radius * 0.035), tint.lightened(0.4))
 	if selected_station:
-		map_canvas.draw_arc(center, radius + 4.0, 0.0, TAU, 40, HUD.ACCENT, 1.5, true)
+		_draw_selection_ring(center, radius + 4.0)
 	var hp: float = float(system["station"]["hp"]) / ECONOMY.STATION_HP
 	if hp < 0.999:
 		var base: Vector2 = center + Vector2(-radius, -radius - 6.0)
@@ -4892,7 +4931,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 		if scale < 0.15:
 			map_canvas.draw_rect(Rect2(point - Vector2.ONE, Vector2(2.0, 2.0)), tint.lightened(0.25))
 			if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
-				map_canvas.draw_arc(point, 9.0, 0.0, TAU, 32, HUD.ACCENT, 1.5, true)
+				_draw_selection_ring(point, 9.0)
 			continue
 		var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
 		var frame: PackedVector2Array = PackedVector2Array([point - axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale + side * 17.0 * scale, point - axis * 11.0 * scale + side * 17.0 * scale])
@@ -4937,7 +4976,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 					var light: Vector2 = point + forward * end * 16.0
 					map_canvas.draw_line(light - lateral * 3.0, light + lateral * 3.0, tint.lightened(0.4), maxf(0.7, scale), true)
 		if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
-			map_canvas.draw_arc(point, maxf(9.0, 23.0 * scale), 0.0, TAU, 32, HUD.ACCENT, 1.5, true)
+			_draw_selection_ring(point, maxf(9.0, 23.0 * scale))
 		var health: float = float(yard.get("hp", ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))) / (ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))
 		if health < 0.999:
 			map_canvas.draw_rect(Rect2(point + Vector2(-12, -22) * scale, Vector2(24, 3) * scale), Color("#283748"))
@@ -5277,11 +5316,11 @@ func _draw_map() -> void:
 				var index: int = floori(float(encoded) / 3.0)
 				var slot: int = posmod(encoded, 3)
 				if slot < state["planets"][index]["yards"].size():
-					_draw_owned_laser(_fighter_beam_origin(poses[shooter]), _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), int(ship["owner"]), 1.5)
+					_draw_ship_laser(ship, poses[shooter], _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), 1.5)
 			elif encoded >= count * 9:
 				var station_index: int = encoded - count * 9
 				if station_index < count and ECONOMY.has_station(state["planets"][station_index]):
-					_draw_owned_laser(_fighter_beam_origin(poses[shooter]), _screen_point(ECONOMY.station_position(state, station_index, float(state["elapsed"]))), int(ship["owner"]), 1.5)
+					_draw_ship_laser(ship, poses[shooter], _screen_point(ECONOMY.station_position(state, station_index, float(state["elapsed"]))), 1.5)
 			else:
 				var pds_index: int = posmod(encoded - count * 3, count)
 				var pds_slot: int = floori(float(encoded - count * 3) / float(count))
@@ -5290,17 +5329,16 @@ func _draw_map() -> void:
 					var pds_radius: float = _planet_radius(pds_index, state)
 					if _planet_detail_opacity(pds_index, pds_radius) >= 0.5:
 						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, game_visual_clock)
-					_draw_owned_laser(_fighter_beam_origin(poses[shooter]), endpoint, int(ship["owner"]), 1.5)
+					_draw_ship_laser(ship, poses[shooter], endpoint, 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
-			_draw_owned_laser(_fighter_beam_origin(poses[shooter]), poses[target]["point"], int(ship["owner"]), 1.0)
+			_draw_ship_laser(ship, poses[shooter], poses[target]["point"], 1.0)
 	for ship in state["ships"]:
 		if not poses.has(int(ship["id"])):
 			continue
 		var pose: Dictionary = poses[int(ship["id"])]
 		var point: Vector2 = pose["point"]
 		var direction: Vector2 = pose["direction"]
-		var mining: bool = pose["mining"]
-		if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock"):
+		if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and not ECONOMY._engaged(ship) and int(ship.get("yard_target", -1)) >= -1:
 			var aim: Vector2 = _screen_point(ship["mining_rock"]) - point
 			if not aim.is_zero_approx():
 				direction = aim.normalized()
@@ -5327,7 +5365,7 @@ func _draw_map() -> void:
 					var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * age * 2.5
 					var spark: Vector2 = engine - direction * (2.0 + age * 12.0) + side * offset
 					map_canvas.draw_circle(spark, maxf(0.75, (2.0 - age) * scale), Color(0.45, 0.85, 1.0, (1.0 - age) * 0.85), false)
-		if ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
+		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
 				var emitter: Vector2 = point + direction * MINER_MUZZLE.x + side * sign * MINER_MUZZLE.y
@@ -5341,9 +5379,7 @@ func _draw_map() -> void:
 			continue
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
 			var radius: float = maxf(5.0, 15.0 * scale)
-			var dots: int = maxi(12, roundi(TAU * radius / 5.0))
-			for dot in range(dots):
-				map_canvas.draw_circle(point + Vector2.from_angle(TAU * float(dot) / dots) * radius, 0.65, HUD.ACCENT, true, -1.0, true)
+			_draw_selection_ring(point, radius)
 		# At a distant galaxy overview, the smallest authored edges can
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.

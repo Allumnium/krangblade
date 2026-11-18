@@ -22,6 +22,7 @@ var commands_sent: bool = false
 var hold_release_id: int = -1
 var hold_release_sent: bool = false
 var hold_release_verified: bool = false
+var miner_weapon_verified: bool = false
 var next_diagnostic: float = 10.0
 var speed_stage: int = 0
 var paused_elapsed: float = -1.0
@@ -179,6 +180,27 @@ func _phase_changed() -> void:
 				var assault: Dictionary = {"id": 960000, "kind": "fighter", "owner": ordered[0], "origin": 0, "at": target_index, "dest": target_index, "operation_target": target_index, "route": [], "leg": 0.0, "position": ECON.station_position(state, target_index, 0.0), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock()}
 				assault["cargo"]["Metals"] = ECON.CARGO_CAPACITY
 				state["ships"].append(assault)
+				# A separate neutral system isolates mining-laser combat from
+				# the home command fixtures and station assault.
+				var remote: int = -1
+				var clearance: float = -1.0
+				for candidate in range(state["planets"].size()):
+					if int(state["planets"][candidate]["owner"]) != 0:
+						continue
+					var nearest: float = INF
+					for occupied in range(state["planets"].size()):
+						if int(state["planets"][occupied]["owner"]) != 0:
+							nearest = minf(nearest, (state["map"]["points"][candidate] as Vector2).distance_to(state["map"]["points"][occupied]))
+					if nearest > clearance:
+						remote = candidate
+						clearance = nearest
+				assert(remote >= 0)
+				var test_point: Vector2 = state["map"]["points"][remote]
+				for slot in range(2):
+					var kind: String = "miner" if slot == 0 else "ship"
+					var hull: Dictionary = {"id": 970000 + slot, "kind": kind, "owner": ordered[slot], "origin": slot, "at": remote, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": test_point + Vector2.RIGHT * 100.0 * slot, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock()}
+					hull["cargo"]["Metals"] = ECON.cargo_capacity(kind)
+					state["ships"].append(hull)
 				for system in state["planets"]:
 					if bool(system["home"]):
 						system["population"] = 150000.0
@@ -436,6 +458,15 @@ func _check_economy_sync() -> void:
 	if economy_verified or str(session.get("phase")) != "match":
 		return
 	var state: Dictionary = session.get("economy")
+	var test_miner: Dictionary = {}
+	var test_victim: Dictionary = {}
+	for hull in state["ships"]:
+		if int(hull["id"]) == 970000:
+			test_miner = hull
+		elif int(hull["id"]) == 970001:
+			test_victim = hull
+	if not test_miner.is_empty() and not test_victim.is_empty():
+		miner_weapon_verified = miner_weapon_verified or (int(test_miner.get("combat_target", -1)) == 970001 and int(test_miner.get("pursuit_target", -1)) == -1 and float(test_victim["hp"]) < ECON.SHIP_HP and not bool(test_miner.get("mining_active", false)))
 	if home_index < 0 or not _check_time_controls(state):
 		if role == "host" and int(Time.get_ticks_msec() / 5000) > int(get_meta("speed_debug", -1)):
 			set_meta("speed_debug", int(Time.get_ticks_msec() / 5000))
@@ -656,7 +687,7 @@ func _check_economy_sync() -> void:
 			if event["kind"] == "station" and int(event["ship"]) == ECON.station_target_id(state, target_index):
 				station_destroyed = true
 		var station_verified: bool = station_destroyed and int(target["owner"]) == 0 and not ECON.has_station(target)
-		if cancel_sent and yard_rebuilt and hold_release_verified and verified == expected_players and orbital_verified and station_verified and view != null and view.has_method("_update_trade_stock"):
+		if cancel_sent and yard_rebuilt and hold_release_verified and verified == expected_players and orbital_verified and station_verified and miner_weapon_verified and view != null and view.has_method("_update_trade_stock"):
 			view.set("selected", home_index)
 			view.call("_load_thresholds")
 			view.call("_refresh")
