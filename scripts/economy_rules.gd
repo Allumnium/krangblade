@@ -2511,7 +2511,6 @@ static func polyline_formation_slots(origins: Dictionary, stroke: PackedVector2A
 
 static func _set_unit_order(ship: Dictionary, order: Dictionary) -> void:
 	ship.erase("order_queue")
-	ship.erase("formation_stationary")
 	if order.is_empty():
 		ship.erase("unit_order")
 	else:
@@ -2806,9 +2805,6 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float) -> 
 	if (ship["position"] as Vector2).distance_to(point) <= EPS:
 		if ship.has("arrival_heading"):
 			ship["heading"] = ship["arrival_heading"]
-			# Preserve the player's line while idle, without suppressing
-			# combat, pursuit, salvage, or civilian work as Hold would.
-			ship["formation_stationary"] = true
 		_clear_local_move(ship)
 		ship.erase("move_only")
 		if fighter:
@@ -4412,7 +4408,7 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 			if not stationary_teams.has(node):
 				stationary_teams[node] = {}
 			stationary_teams[node][int(state["teams"].get(int(ship["owner"]), 0))] = true
-		if not _is_idle_ship(ship) or bool(ship.get("formation_stationary", false)):
+		if not _is_idle_ship(ship):
 			continue
 		var key: String = "%d:%s:%d:%d" % [int(ship["owner"]), str(ship.get("kind", "ship")), int(ship["at"]), int(ship.get("operation_id", 0))]
 		if not groups.has(key):
@@ -4597,7 +4593,10 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		var planned: Vector2 = ship["position"]
 		var held: bool = bool(ship.get("holding", false))
 		var local_moving: bool = ship.has("local_move_target")
-		if bool(ship.get("formation_stationary", false)) and _is_idle_ship(ship):
+		# Preserve the exact endpoint and facing on the arrival tick only.
+		# The completed order is retired before next tick's ordinary wandering.
+		var order: Dictionary = ship.get("unit_order", {})
+		if not local_moving and order.get("kind", "") == "position" and planned == order.get("point", Vector2.INF):
 			continue
 		# Do not let repulsion prevent completion of a shared point order.
 		# The newly idle ships spread naturally after arrival.

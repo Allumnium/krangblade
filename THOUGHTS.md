@@ -468,3 +468,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-35a — Field transit and precise patrol
 - Field access was exclusively star-to-deposit; central radial antimatter fields could not travel directly between each other. Persist field pair lanes, reserve the central corridor, and choose nearby unobstructed pairs within existing three-port limits. Patrol anchors retain exact world positions, and may terminate outside sector circles after lane travel. Verify the visual feedback, combat interruption and travel timing, especially over empty space. Multi-ship selection drops individual details; modifier clicks and icon-only aggregate cargo need manual acceptance.
+
+### T-36a — Movement arrival and camera precision
+- Formation slots previously kept an idle-only stationary flag indefinitely. Remove it; preserve exact arrival facing for one simulation tick and then allow ordinary wander, work and pursuit. Wheel zoom now uses reversible steps in log space that diminish toward close-up; verify mouse feel at both ends. Single and multi-ship cargo share the same icon-only row; verify narrow console fit.
+- Existing neutral-occupation test asserts a held fighter's exact position beside another moving hull; it fails identically on v0.36.3 and v0.36.4. Investigate the intentional soft-separation/hold interaction separately; do not weaken the assertion as part of this arrival fix.

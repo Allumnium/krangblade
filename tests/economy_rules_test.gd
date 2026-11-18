@@ -1807,9 +1807,13 @@ func _test_unit_order_queue() -> void:
 		if visited.size() == 3:
 			break
 	assert(visited == [first["point"], second["point"], third["point"]])
-	for tick in range(10):
-		ECON.step(state, 0.1)
 	assert(ship["position"] == third["point"] and ship["heading"] == Vector2.LEFT and not ship.get("holding", false))
+	var wander_distance: float = 0.0
+	for tick in range(10):
+		var previous: Vector2 = ship["position"]
+		ECON.step(state, 0.1)
+		wander_distance += previous.distance_to(ship["position"])
+	assert(wander_distance > ECON.EPS and ECON._is_idle_ship(ship))
 	assert(ECON.issue_unit_order(state, 1, [100], first, false))
 	for i in range(ECON.MAX_UNIT_ORDERS - 1):
 		assert(ECON.issue_unit_order(state, 1, [100], second, true))
@@ -1830,6 +1834,13 @@ func _test_unit_order_queue() -> void:
 		if ship["position"] == remote["point"] and not ship.has("local_move_target"):
 			break
 	assert(ship["position"] == remote["point"] and ship["heading"] == Vector2.DOWN and ship["at"] == 1)
+	ECON.step(state, 0.1)
+	assert(ship["position"] != remote["point"] and ECON._is_idle_ship(ship))
+	assert(ECON.command_hold_units(state, 1, [100], false))
+	var held_point: Vector2 = ship["position"]
+	for tick in range(10):
+		ECON.step(state, 0.1)
+	assert(ship["position"] == held_point and not ECON._is_idle_ship(ship))
 	print("PASS: sequential unit orders, ownership, queue limit, direct/hold cancellation and lane-routed formation facing")
 
 func _test_local_position_orders() -> void:
