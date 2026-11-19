@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.55.8: Withdrawal repairs stop within station beam range (180 world units); twin green beams per repairing hull, existing safety and combined repair rate unchanged. Cargo docking unchanged.
+
 - v0.55.7: Shipyard card rows Small, Medium, Large, navigation. Medium (U) and Large (I) upgrade buttons lead their rows and apply only to the immediately preceding class; same authoritative sequential upgrade rules.
 
 - v0.55.6: Stop (S) clears active/queued orders and Hold, permits autonomous work after the arrival cooldown, and preserves emergency withdrawal. Station hub shows current infrastructure and assigned yard job icons with individual progress bars; hide at distant zoom.

@@ -2743,7 +2743,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Stationed at %s" % _poi_name(int(ship["at"])) if route.is_empty() else "%s\nETA %.1f yr" % [_poi_name(int(route.back())), _remaining_years(state, ship)]
 	if bool(ship.get("retreating", false)):
 		var site: int = int(ship.get("repair_site", -1))
-		status = "Repairing" if route.is_empty() and site >= 0 and (ship["position"] as Vector2).distance_to(ECONOMY.station_position(state, site, float(state["elapsed"]))) <= ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), owner, site) else "Withdrawing"
+		status = "Repairing" if route.is_empty() and site >= 0 and (ship["position"] as Vector2).distance_to(ECONOMY.station_position(state, site, float(state["elapsed"]))) <= ECONOMY.STATION_REPAIR_RANGE + ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), owner, site) else "Withdrawing"
 	elif int(ship.get("pursuit_target", -1)) >= 0:
 		status = "Pursuing"
 	elif bool(ship.get("holding", false)):
@@ -6658,6 +6658,18 @@ func _draw_map() -> void:
 					_draw_ship_laser(ship, poses[shooter], endpoint, 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
 			_draw_ship_laser(ship, poses[shooter], poses[target]["point"], 1.0)
+		if bool(ship.get("retreating", false)) and poses.has(shooter) and (ship["route"] as Array).is_empty():
+			var site: int = int(ship.get("repair_site", -1))
+			if site >= 0 and site < state["planets"].size():
+				var world: Vector2 = ECONOMY.station_position(state, site, float(state["elapsed"]))
+				if int(ship["at"]) == site and (ship["position"] as Vector2).distance_to(world) <= ECONOMY.STATION_REPAIR_RANGE + ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), int(ship["owner"]), site):
+					var hub: Vector2 = _screen_point(ECONOMY.station_position(state, site, _orbit_time(state)))
+					var end: Vector2 = poses[shooter]["point"]
+					var aim: Vector2 = hub.direction_to(end)
+					if not aim.is_zero_approx():
+						for side in [-1.0, 1.0]:
+							var muzzle: Vector2 = hub + (aim * 0.8 + aim.orthogonal() * side * 0.35) * _station_radius()
+							map_canvas.draw_line(muzzle, end, Color("#59e8a4"), 1.4, true)
 		var repair: int = int(ship.get("repair_target", -1))
 		if poses.has(shooter) and service_refs.has(repair):
 			var origin: Vector2 = poses[shooter]["point"]
