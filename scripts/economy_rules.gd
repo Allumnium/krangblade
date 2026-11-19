@@ -37,6 +37,7 @@ const POPULATION_RESPONSE: float = 0.065
 const FARM_VARIATION: float = 0.05
 const FARM_CYCLE_SECONDS: float = 100.0
 const START_YEAR: int = 2850
+const SYSTEM_WORLD_RADIUS: float = 600.0
 const CARGO_CAPACITY: float = 30.0
 const FREIGHTER_BAY_COUNT: int = 7
 const FREIGHTER_BAY_CAPACITY: float = CARGO_CAPACITY / FREIGHTER_BAY_COUNT
@@ -154,6 +155,20 @@ static func system_bodies(system: Dictionary, seed_value: int, index: int) -> Ar
 			"size": rng.randf_range(0.035, 0.095), "surface_seed": rng.randi_range(1, 2147483646),
 			"surface_angle": rng.randf_range(0.0, TAU), "muted": rng.randf_range(0.0, 0.65), "bands": rng.randf() < 0.3})
 	return bodies
+
+# Match the rendered orbit geometry using the authoritative simulation clock.
+static func body_position(body: Dictionary, radius: float, elapsed: float) -> Vector2:
+	var angle: float = float(body["phase"]) + elapsed * float(body["speed"]) * 0.22
+	var orbit_radius: float = radius * float(body["orbit"])
+	return Vector2(cos(angle) * orbit_radius, sin(angle) * orbit_radius * 0.65)
+
+static func system_world_radius(state: Dictionary, index: int) -> float:
+	var points: Array = state["map"]["points"]
+	var closest: float = INF
+	for i in range(points.size()):
+		if i != index:
+			closest = minf(closest, (points[index] as Vector2).distance_to(points[i]))
+	return minf(SYSTEM_WORLD_RADIUS * float(state["planets"][index].get("size_factor", 1.0)), closest * 0.39)
 
 static func empty_stock() -> Dictionary:
 	var result: Dictionary = {}
@@ -2679,8 +2694,17 @@ static func service_targets(state: Dictionary) -> Dictionary:
 		for slot in range(p["yards"].size()):
 			var yard: Dictionary = p["yards"][slot]
 			targets[-2 - node * 3 - slot] = {"owner": p["owner"], "entity": yard, "position": shipyard_position(state, node, slot, float(state["elapsed"])), "max_hp": SHIP_HP * 10.0 * int(yard["level"]), "node": node, "kind": "yard"}
-		for slot in p.get("pds", {}):
-			targets[-2 - count * 3 - int(slot) * count - node] = {"owner": p["owner"], "entity": p["pds"][slot], "position": state["map"]["points"][node], "max_hp": PDS_HP, "node": node, "kind": "pds"}
+		var defenses: Dictionary = p.get("pds", {})
+		if not defenses.is_empty():
+			var bodies: Array = system_bodies(p, int(state["map"]["seed"]), node)
+			var radius: float = system_world_radius(state, node)
+			for slot in defenses:
+				if int(slot) < 0 or int(slot) >= bodies.size():
+					continue
+				var center: Vector2 = state["map"]["points"][node]
+				var point: Vector2 = center + body_position(bodies[int(slot)], radius, float(state["elapsed"]))
+				# Keep established system-centered combat range; repairs use the actual battery.
+				targets[-2 - count * 3 - int(slot) * count - node] = {"owner": p["owner"], "entity": defenses[slot], "position": center, "repair_position": point, "max_hp": PDS_HP, "node": node, "kind": "pds"}
 	return targets
 
 static func _friendly_target(state: Dictionary, owner: int, target: Dictionary) -> bool:
@@ -2870,14 +2894,14 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 			var candidate: Dictionary = targets[id]
 			if not _friendly_target(state, int(ship["owner"]), candidate) or not _damaged(candidate):
 				continue
-			var distance: float = pos.distance_squared_to(candidate["position"])
+			var distance: float = pos.distance_squared_to(candidate.get("repair_position", candidate["position"]))
 			if distance < best:
 				best = distance
 				target_id = id
 				ref = candidate
 	if ref.is_empty():
 		return false
-	var point: Vector2 = ref["position"]
+	var point: Vector2 = ref.get("repair_position", ref["position"])
 	if pos.distance_to(point) > LASER_RANGE:
 		if explicit:
 			var node: int = patrol_node(state, graph, int(ship["owner"]), point)
@@ -3318,7 +3342,10 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 				return graph["points"][target]
 		"attack", "follow":
 			return service_targets(state).get(target, {}).get("position", Vector2.INF)
-		"repair", "deposit":
+		"repair":
+			var ref: Dictionary = service_targets(state).get(target, {})
+			return ref.get("repair_position", ref.get("position", Vector2.INF))
+		"deposit":
 			return service_targets(state).get(target, {}).get("position", Vector2.INF)
 		"drop":
 			return order.get("point", Vector2.INF)

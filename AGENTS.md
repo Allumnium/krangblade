@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.51.8: Repair uses the actual orbiting planetary defense position and stable battery ID, never the star. Render planet positions from authoritative elapsed time; repair beams, markers and command lines use the battery position. Preserve existing system-centered PDS combat range.
+
 - v0.51.7: Trade rows use full Import/Export labels with inset checkboxes. Keep normal command-wing height when the three rows and Return fit; permit only a measured shortfall up to 48 logical pixels, bounded by the top HUD. Retain scroll fallback, sliders and authority.
 
 - v0.51.6: Default trade thresholds for every standard resource are import below 50% and export above 80% of actual warehouse capacity, including newly initialized and reset sectors. Preserve explicit AI policy and manual overrides. Top HUD resource net rates show t/yr.
