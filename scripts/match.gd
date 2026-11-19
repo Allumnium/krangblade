@@ -4506,15 +4506,19 @@ func _draw_planet_production(state: Dictionary, index: int, center: Vector2, rad
 				var alpha: float = detail * smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.85, 1.0, phase))
 				var axis: Vector2 = origin.direction_to(destination)
 				var lateral: Vector2 = axis.orthogonal()
-				var size_factor: float = clampf(radius * 0.025, 2.0, 8.0)
-				var hull := PackedVector2Array([point + axis * size_factor, point - axis * size_factor * 0.4 + lateral * size_factor * 0.48, point - axis * size_factor + lateral * size_factor * 0.48, point - axis * size_factor * 0.72, point - axis * size_factor - lateral * size_factor * 0.48, point - axis * size_factor * 0.4 - lateral * size_factor * 0.48])
-				map_canvas.draw_colored_polygon(hull, Color(Color("#293b50"), alpha))
-				hull.append(hull[0])
-				map_canvas.draw_polyline(hull, Color(Color("#b2c8db"), alpha), 0.8, true)
-				var cargo: PackedVector2Array = _hull_polygon(point, axis * size_factor, lateral * size_factor, [Vector2(0.25, 0.24), Vector2(-0.55, 0.24), Vector2(-0.55, -0.24), Vector2(0.25, -0.24)])
+				var size_factor: float = clampf(radius * 0.025, 2.0, 8.0) * 0.25
+				var forward: Vector2 = axis * size_factor
+				var side: Vector2 = lateral * size_factor
+				# Short blunt capsule, broad cargo section and paired side jets.
+				var hull: PackedVector2Array = _hull_polygon(point, forward, side, [Vector2(0.75, 0.30), Vector2(0.35, 0.62), Vector2(-0.65, 0.72), Vector2(-0.85, 0.48), Vector2(-0.85, -0.48), Vector2(-0.65, -0.72), Vector2(0.35, -0.62), Vector2(0.75, -0.30)])
+				map_canvas.draw_colored_polygon(hull, Color(Color("#b2c8db"), alpha))
+				var cargo: PackedVector2Array = _hull_polygon(point, forward, side, [Vector2(0.13, 0.40), Vector2(-0.52, 0.47), Vector2(-0.52, -0.47), Vector2(0.13, -0.40)])
 				map_canvas.draw_colored_polygon(cargo, Color(color, alpha))
-				_draw_resource_glow(point, size_factor * 0.6, color, alpha * 0.35)
-				map_canvas.draw_line(point - axis * size_factor * 0.78, point - axis * size_factor * 1.55, Color(Color("#a1eaff"), alpha * 0.8), maxf(0.7, size_factor * 0.18), true)
+				for sign in [-1.0, 1.0]:
+					var jet: Vector2 = point - forward * 0.35 + side * sign * 0.76
+					map_canvas.draw_circle(jet, size_factor * 0.23, Color(Color("#71879e"), alpha), true)
+					map_canvas.draw_line(jet - forward * 0.18, jet - forward * 0.66, Color(Color("#a1eaff"), alpha * 0.8), maxf(0.2, size_factor * 0.18), true)
+
 
 func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
 	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(pos):
