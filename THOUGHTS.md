@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.45.3: Slower population and the new fixed food reserve reward local farming and delivered imports, but empty colonies with low farm output may take longer to replenish crews. Monitor colony timing, the existing 40k settler cost, AI expansion, food export settings, dependence on installed orbital populations and whether a 200 t target feels appropriate. Do not rebalance unrelated costs before playtesting.
+
 - v0.45.2: Follow-up to v0.45.1: Return was placed in the shipyard action grid's second row, not at the bottom of the command card like the Build submenu. Move it into a separate bottom-aligned footer beneath the two-row action grid; preserve all action positions and selection-only behavior. Manual interaction verification remains pending.
 
 - v0.45.0: The three-resource economy removes duplicate industrial bottlenecks. Basic hull construction is independent of crystal acquisition, while PDS, additional shipyards and Laser Matrix need Crystals. Removing costs without redistributing them preserves existing metal/crew/time gates but may accelerate production or change AI pacing. Metal Refinery now costs Organics, so food-poor colonies may need imports. Validate balance, exact seeded map differences, local recovery and actual multiplayer before marking complete.

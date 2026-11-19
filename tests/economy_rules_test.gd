@@ -668,13 +668,27 @@ func _initialize() -> void:
 	assert(is_equal_approx(ECON.rate(home, "Metals"), baseline * 0.5))
 	home["population"] = ECON.HOME_POPULATION
 	assert(ECON.rate(home, "Organics") > ECON.organics_demand(home))
-	home["stock"]["Organics"] = 10000.0
-	for i in range(300):
+	home["stock"]["Organics"] = ECON.POPULATION_FOOD_RESERVE
+	assert(ECON.POPULATION_DOUBLING_YEARS == 60.0)
+	for i in range(600):
 		ECON._update_population(home, 0.1)
 	assert(float(home["population"]) > 19500.0 and float(home["population"]) <= 20000.01)
-	for i in range(300):
+	for i in range(600):
 		ECON._update_population(home, 0.1)
 	assert(float(home["population"]) > 39000.0 and float(home["population"]) <= 40000.02)
+	# Food reserve affects only positive terrestrial growth, independently of storage tier.
+	for fraction in [0.0, 0.25, 0.5, 0.75, 1.0, 2.0]:
+		var sample: Dictionary = home.duplicate(true)
+		sample["population"] = ECON.HOME_POPULATION
+		sample["population_velocity"] = 1000.0
+		sample["stock"]["Organics"] = fraction * ECON.POPULATION_FOOD_RESERVE
+		var expected: float = minf(fraction, 1.0)
+		assert(is_equal_approx(ECON.food_growth_multiplier(sample), expected))
+		sample["warehouse_level"] = 3
+		assert(is_equal_approx(ECON.food_growth_multiplier(sample), expected))
+		var growth_constant: float = log(2.0) / 60.0 * expected * (1.0 - ECON.overpopulation_penalty(sample))
+		ECON._update_population(sample, 1.0)
+		assert(is_equal_approx(float(sample["population"]), ECON.HOME_POPULATION * exp(growth_constant)))
 	# Convergence is damped from either side; no overshoot for fixed capacity.
 	var prior: float = float(home["population"])
 	for i in range(300):
@@ -719,6 +733,7 @@ func _initialize() -> void:
 	home["population"] = capacity
 	home["population_velocity"] = 0.0
 	home["stock"]["Metals"] = 1000.0
+	home["stock"]["Organics"] = ECON.POPULATION_FOOD_RESERVE
 	assert(ECON.enqueue(demographics, 1, 0, "production", "Organics"))
 	ECON.step(demographics, 20.0)
 	assert(int(home["levels"]["Organics"]) == 2)
@@ -739,7 +754,7 @@ func _initialize() -> void:
 	assert(largest - smallest > 1000.0 and largest - smallest < 30000.0)
 	assert(smallest > 270000.0 and largest < 330000.0)
 	assert(ECON.current_year(demographics) == 3273)
-	print("PASS: 30-year doubling, critically damped population, food shortage, farm upgrades and year clock")
+	print("PASS: 60-year doubling, food reserve modifier, warehouse independence, damped population, food shortage, farm upgrades and year clock")
 
 	# Visual planet count loosely follows system richness, without modifying state.
 	var poor: Dictionary = {"abundance": {"Metals": 0.0, "Crystals": 0.0}, "bonuses": {"Organics": 1.0}}
@@ -3089,9 +3104,10 @@ func _test_eco_regrowth() -> void:
 	ECON._finish(state, index, p, job)
 	for resource in ECON.RESOURCES:
 		p["stock"][resource] = 0.0
+	assert(ECON.food_growth_multiplier(p) == 1.0)
 	ECON._update_population(p, 1.0)
-	assert(float(p["population"]) > 9500.0 and float(p["population"]) < 10000.0)
-	ECON._update_population(p, 30.0)
+	assert(is_equal_approx(float(p["population"]), 9500.0 * exp(log(2.0) / 60.0)))
+	ECON._update_population(p, 60.0)
 	assert(float(p["population"]) == 10000.0)
 	assert(ECON.consumption(p, "Organics") == 0.0)
 	assert(ECON.overpopulation_penalty(p) == 0.0)
