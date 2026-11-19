@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.55.11: New and starting stations have 1500 HP and two built-in 18-damage lasers (existing matrix range/cooldown). Laser Matrix adds two more; Reinforced Plating retains 3000 HP.
+
 - v0.55.10: Restore partial dispatch after eight simulation years without receiving cargo; each miner handoff or salvage pickup refreshes the timer. Full/depleted-site dispatch unchanged.
 
 - v0.55.9: Staged freighters wait for a full hold while resources remain available; no timed partial dispatch. Preserve depleted-site fallback, explicit orders and safety.

@@ -429,18 +429,18 @@ func _test_station_defense_and_ports() -> void:
 	assert(ECON.enqueue(state, 1, 0, "reinforced_plating"))
 	assert(ECON.enqueue(state, 1, 0, "laser_matrix"))
 	assert(not ECON.enqueue(state, 1, 0, "laser_matrix"))
-	p["station"]["hp"] = 900.0
+	p["station"]["hp"] = ECON.STATION_HP - 100.0
 	ECON._work_planet(state, 0, ECON._work("yard", 2))
 	assert(ECON.shipyard_at_port(p, 3) == 1 and ECON.shipyard_at_port(p, 2) == -1)
 	assert(float(ECON.station_construction_job(p)["progress"]) == 0.0)
 	ECON._work_planet(state, 0, ECON._work("yard", 3))
-	assert(ECON.shipyard_at_port(p, 2) == 2 and ECON.station_max_hp(p) == 1000.0)
+	assert(ECON.shipyard_at_port(p, 2) == 2 and ECON.station_max_hp(p) == 1500.0)
 	ECON._work_planet(state, 0, ECON._work("reinforced_plating", 1))
 	assert(ECON.station_max_hp(p) == 3000.0 and p["station"]["hp"] == 2900.0)
 	assert(ECON.service_targets(state)[ECON.station_target_id(state, 0)]["max_hp"] == 3000.0)
-	assert(p["station"].get("weapons", []).is_empty())
+	assert(p["station"].get("weapons", []).size() == 2)
 	ECON._work_planet(state, 0, ECON._work("laser_matrix", 1))
-	assert(p["station"]["weapons"].size() == 2)
+	assert(p["station"]["weapons"].size() == 4)
 	assert(not ECON.enqueue(state, 1, 0, "reinforced_plating"))
 	assert(not ECON.enqueue(state, 1, 0, "laser_matrix"))
 	assert(ECON.shipyard_at_port(p, 3) == 1 and ECON.shipyard_at_port(p, 2) == 2)
@@ -451,7 +451,7 @@ func _test_station_defense_and_ports() -> void:
 		{"id": 9900, "owner": 2, "kind": "ship", "at": 0, "route": [], "position": origin, "hp": 100.0},
 		{"id": 9901, "owner": 1, "kind": "ship", "at": 0, "route": [], "position": origin, "hp": 100.0}]
 	ECON._combat(state, graph, 0.1)
-	assert(state["ships"][0]["hp"] == 64.0 and state["ships"][1]["hp"] == 100.0)
+	assert(state["ships"][0]["hp"] == 28.0 and state["ships"][1]["hp"] == 100.0)
 	ECON._combat(state, graph, 0.1)
 	assert(state["ships"][0]["hp"] == 64.0)
 	# Existing physical port survives array compaction and can be rebuilt independently.
@@ -460,7 +460,7 @@ func _test_station_defense_and_ports() -> void:
 	assert(ECON.shipyard_at_port(p, 3) == 0 and ECON.shipyard_position(state, 0, 0, 0.0) == retained)
 	assert(ECON.shipyard_at_port(p, 1) == -1)
 	assert(ECON.enqueue(state, 1, 0, "yard", "port:1"))
-	print("PASS: stable station ports, one-time prepaid upgrades, increased repair cap and twin defensive lasers")
+	print("PASS: stable station ports, one-time prepaid upgrades, increased repair cap and baseline and upgraded defensive lasers")
 
 func _test_local_avoidance() -> void:
 	var craft: Dictionary = {"id": 100, "position": Vector2.ZERO}
