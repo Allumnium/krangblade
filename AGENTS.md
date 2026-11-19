@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.58.6: Ship exhaust uses short tapered blue-white plasma plumes and streaks proportional to sampled acceleration, with no cruise baseline. Revision-based sampling and independent frame decay suppress stationary/noise effects; visual only.
+
 - v0.58.5: Station primary card has one Select Shipyards (Z) action for all local completed yards. Build submenu has one Build Shipyard (X) action using existing next-free-port construction, costs and limits; Return stays bottom right.
 
 - v0.58.4: Active Harvester and station repair rates doubled. Idle repaired hulls pause wandering and separation displacement for the repair tick, independent of fleet processing order; explicit movement and passive regeneration unchanged.
