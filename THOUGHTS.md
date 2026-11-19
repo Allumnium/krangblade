@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.61.0: Lane outlines now follow real connections. Check corridor width/overlap at busy junctions and field access; route anchors remain metadata, not a physical midpoint boundary.
+
 - v0.60.1: Scouts now join military fleets and pursue targets; observe whether their higher speed causes separation from attack waves.
 
 - v0.60.0: Extended gap outlines evaluate nearest POI boundaries across the map; benchmark shader cost. Retreat is now opt-in even for armed Harvesters and AI; observe combat survival.

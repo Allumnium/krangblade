@@ -3187,6 +3187,9 @@ shader_type canvas_item;
 render_mode unshaded;
 uniform sampler2D site_data : filter_nearest, repeat_disable;
 uniform int site_count = 0;
+uniform sampler2D lane_data : filter_nearest, repeat_disable;
+uniform int lane_count = 0;
+uniform float lane_radius_fraction = 0.35;
 uniform vec2 world_extent = vec2(1.0);
 uniform float padding = 1.0;
 uniform float corner_rounding = 0.32;
@@ -3251,25 +3254,27 @@ void fragment() {
 	}
 	float inside = 1.0 - smoothstep(-aa, 0.0, d);
 	float border = inside * smoothstep(-aa * 2.8, -aa * 1.1, d);
-	float gap_edge = min(min(p.x, p.y), min(bounds.x - p.x, bounds.y - p.y));
-	if (d >= -aa && site_index >= 0) {
-		for (int i = 0; i < site_count; i++) {
-			if (i == site_index) { continue; }
-			vec2 delta = texelFetch(site_data, ivec2(i, 0), 0).xy - site.xy;
-			float separation = length(delta);
-			if (separation > 0.000001) {
-				float bisector = (dot(delta, delta) - 2.0 * dot(p - site.xy, delta)) / (2.0 * separation);
-				gap_edge = min(gap_edge, abs(bisector));
-			}
+	float gap_border = 0.0;
+	if (d >= -aa) {
+		float lane_d = 1e20;
+		for (int i = 0; i < lane_count; i++) {
+			vec4 edge = texelFetch(lane_data, ivec2(i, 0), 0);
+			vec4 a = texelFetch(site_data, ivec2(int(edge.x + 0.5), 0), 0);
+			vec4 b = texelFetch(site_data, ivec2(int(edge.y + 0.5), 0), 0);
+			vec2 ab = b.xy - a.xy;
+			float t = clamp(dot(p - a.xy, ab) / max(dot(ab, ab), 0.00000001), 0.0, 1.0);
+			float distance = length(p - (a.xy + ab * t)) - min(a.z, b.z) * lane_radius_fraction;
+			lane_d = min(lane_d, distance);
 		}
+		gap_border = (1.0 - inside) * (1.0 - smoothstep(-aa * 0.25, aa * 1.2, abs(lane_d))) * 0.20;
 	}
-	float gap_border = (1.0 - inside) * (1.0 - smoothstep(aa * 0.3, aa * 1.2, gap_edge)) * 0.20;
 	COLOR = winner > 0 && inside > 0.0 ? vec4(team_color(winner), inside * 0.10 + border * 0.45) : vec4(vec3(0.60, 0.68, 0.76), max(border * 0.20, gap_border));
 }
 """
 	territory_material = ShaderMaterial.new()
 	territory_material.shader = shader
 	territory_material.set_shader_parameter("corner_rounding", ECONOMY.SECTOR_CORNER_ROUNDING)
+	territory_material.set_shader_parameter("lane_radius_fraction", ECONOMY.LANE_RADIUS_FRACTION)
 	territory_image.material = territory_material
 	territory_image.hide()
 
@@ -3339,6 +3344,12 @@ func _refresh_territory(state: Dictionary) -> void:
 	territory_sites = ImageTexture.create_from_image(data)
 	territory_material.set_shader_parameter("site_data", territory_sites)
 	territory_material.set_shader_parameter("site_count", territory_site_count)
+	var edges: Array = graph["edges"]
+	var lanes: Image = Image.create_empty(maxi(1, edges.size()), 1, false, Image.FORMAT_RGBAF)
+	for i in range(edges.size()):
+		lanes.set_pixel(i, 0, Color(float(edges[i][0]), float(edges[i][1]), 0.0, 1.0))
+	territory_material.set_shader_parameter("lane_data", ImageTexture.create_from_image(lanes))
+	territory_material.set_shader_parameter("lane_count", edges.size())
 	var extent: Vector2 = _map_size() / territory_radius + Vector2.ONE * 3.0
 	territory_material.set_shader_parameter("world_extent", extent)
 	territory_material.set_shader_parameter("padding", 1.5)

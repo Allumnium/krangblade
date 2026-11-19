@@ -2982,6 +2982,16 @@ static func _military_approach(graph: Dictionary, ship: Dictionary, paths: Dicti
 	var distances: Dictionary = paths["distance"]
 	var route: Array = ship["route"]
 	var position: Vector2 = ship.get("position", _initial_position(points, ship))
+	# A stopped ship inside a corridor can depart through either endpoint,
+	# independent of which endpoint was retained as its routing hint.
+	if route.is_empty() and graph.has("sector_radii") and graph.has("edges") and not sector_contains(graph, here, position):
+		var lane: Vector2i = lane_at(graph, position)
+		if lane.x >= 0 and not sector_contains(graph, lane.x, position) and not sector_contains(graph, lane.y, position):
+			var cost_a: float = position.distance_to(points[lane.x]) + float(distances.get(lane.x, INF))
+			var cost_b: float = position.distance_to(points[lane.y]) + float(distances.get(lane.y, INF))
+			var anchor: int = lane.x if cost_a <= cost_b else lane.y
+			var other: int = lane.y if anchor == lane.x else lane.x
+			return {"distance": minf(cost_a, cost_b), "anchor": anchor, "reverse": false, "edge": true, "from_anchor": other}
 	var best: float = position.distance_to(points[here]) + float(distances.get(here, INF))
 	var reverse: bool = not route.is_empty() and position.distance_to(points[here]) > EPS
 	if not route.is_empty():
@@ -2997,7 +3007,9 @@ static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, 
 	var anchor: int = int(approach["anchor"])
 	var route: Array[int] = []
 	if bool(approach["edge"]):
-		if bool(approach["reverse"]):
+		if approach.has("from_anchor"):
+			ship["at"] = int(approach["from_anchor"])
+		elif bool(approach["reverse"]):
 			ship["at"] = int(ship["route"][0])
 		route.append(anchor)
 	else:
@@ -3418,7 +3430,7 @@ static func _manual_nav(state: Dictionary, graph: Dictionary, ship: Dictionary, 
 		var adjacent: Array = []
 		for index in range(count):
 			adjacent.append(graph["adjacent"][index].filter(func(other: int) -> bool: return other < count))
-		graph["civilian_manual_nav"] = {"points": state["map"]["points"], "adjacent": adjacent, "paths": {}}
+		graph["civilian_manual_nav"] = {"points": state["map"]["points"], "edges": state["map"]["edges"], "adjacent": adjacent, "paths": {}, "sector_radii": graph["sector_radii"].slice(0, count), "sector_neighbors": graph["sector_neighbors"].slice(0, count)}
 	return {"graph": graph["civilian_manual_nav"], "node": node}
 
 # A follow order references a stable hull ID and lasts until replaced. Reject
@@ -3555,6 +3567,15 @@ static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionar
 	var pos: Vector2 = ship["position"]
 	var nav: Dictionary = _manual_nav(state, graph, ship, node)
 	var goal: int = nav["node"]
+	if ship.get("unit_order", {}).get("kind", "") == "guard" and lane_direct(graph, pos, point, military_pois(state, int(ship["owner"]))):
+		ship["route"] = []
+		ship["leg"] = 0.0
+		ship["dest"] = goal
+		_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, maxf(0.0, pos.distance_to(point) - reach)))
+		if (ship["position"] as Vector2).distance_to(point) <= reach + EPS:
+			ship["at"] = goal
+			return true
+		return false
 	if pos.distance_to(point) <= reach + EPS:
 		if sector_contains(graph, node, pos):
 			ship["at"] = goal
@@ -3624,6 +3645,46 @@ static func command_attack(state: Dictionary, player: int, ids: Array, target_id
 		_set_unit_order(state, craft, {"kind": "attack", "target": target_id})
 	return true
 
+# Each persisted connection is one continuous neutral corridor, not two
+# half-sectors. Use the smaller endpoint radius to keep field lanes narrow.
+const LANE_RADIUS_FRACTION: float = 0.35
+
+static func lane_radius(graph: Dictionary, a: int, b: int) -> float:
+	return minf(float(graph["sector_radii"][a]), float(graph["sector_radii"][b])) * LANE_RADIUS_FRACTION
+
+static func lane_contains(graph: Dictionary, a: int, b: int, point: Vector2) -> bool:
+	var center: Vector2 = Geometry2D.get_closest_point_to_segment(point, graph["points"][a], graph["points"][b])
+	return point.distance_squared_to(center) <= pow(lane_radius(graph, a, b) + EPS, 2.0)
+
+static func lane_at(graph: Dictionary, point: Vector2, candidates: Array = []) -> Vector2i:
+	var result := Vector2i(-1, -1)
+	var best: float = INF
+	for edge in graph["edges"]:
+		var a: int = int(edge[0])
+		var b: int = int(edge[1])
+		if not candidates.is_empty() and (not candidates.has(a) or not candidates.has(b)):
+			continue
+		var center: Vector2 = Geometry2D.get_closest_point_to_segment(point, graph["points"][a], graph["points"][b])
+		var distance: float = point.distance_squared_to(center)
+		if distance < best and distance <= pow(lane_radius(graph, a, b) + EPS, 2.0):
+			best = distance
+			result = Vector2i(a, b)
+	return result
+
+static func lane_direct(graph: Dictionary, origin: Vector2, destination: Vector2, candidates: Array) -> bool:
+	if candidates.is_empty():
+		return false
+	var target_sector: int = sector_at(graph, destination, candidates)
+	if target_sector < 0:
+		var lane: Vector2i = lane_at(graph, destination, candidates)
+		return lane.x >= 0 and (lane_contains(graph, lane.x, lane.y, origin) or sector_contains(graph, lane.x, origin) or sector_contains(graph, lane.y, origin))
+	# Direct entry into an adjoining sector from the corridor, without
+	# changing ordinary core-to-core routes or sector entry behavior.
+	if sector_at(graph, origin, candidates) >= 0:
+		return false
+	var origin_lane: Vector2i = lane_at(graph, origin, candidates)
+	return target_sector == origin_lane.x or target_sector == origin_lane.y
+
 static func patrol_node(state: Dictionary, graph: Dictionary, player: int, point: Vector2) -> int:
 	if not point.is_finite() or (state["map"].has("size") and not Rect2(Vector2.ZERO, state["map"]["size"]).has_point(point)):
 		return -1
@@ -3631,21 +3692,24 @@ static func patrol_node(state: Dictionary, graph: Dictionary, player: int, point
 	var node: int = sector_at(graph, point, candidates)
 	if node >= 0:
 		return node
-	var best: float = INF
-	for candidate in candidates:
-		var distance: float = point.distance_squared_to(graph["points"][candidate])
-		if distance < best:
-			best = distance
-			node = candidate
-	return node
+	if candidates.is_empty():
+		return -1
+	var lane: Vector2i = lane_at(graph, point, candidates)
+	if lane.x < 0:
+		return -1
+	return lane.x if point.distance_squared_to(graph["points"][lane.x]) <= point.distance_squared_to(graph["points"][lane.y]) else lane.y
 
-# An exact point may be outside every sector. In that case its nearest
-# discovered POI is a routing anchor only, not the actual destination.
+# The anchor is a routing hint only; the complete lane is commandable.
 static func _position_target_valid(state: Dictionary, graph: Dictionary, player: int, node: int, point: Vector2) -> bool:
 	if not military_pois(state, player).has(node):
 		return false
 	var anchor: int = patrol_node(state, graph, player, point)
-	return anchor >= 0 and (anchor == node or sector_contains(graph, node, point))
+	if anchor < 0:
+		return false
+	if anchor == node or sector_contains(graph, node, point):
+		return true
+	var lane: Vector2i = lane_at(graph, point, military_pois(state, player))
+	return node == lane.x or node == lane.y
 
 static func command_patrol(state: Dictionary, player: int, ids: Array, target: int, point: Vector2 = Vector2.INF) -> bool:
 	var selected: Array = _owned_fighters(state, player, ids)
@@ -3655,7 +3719,7 @@ static func command_patrol(state: Dictionary, player: int, ids: Array, target: i
 	var precise: bool = point != Vector2.INF
 	if not precise:
 		point = graph["points"][target]
-	elif patrol_node(state, graph, player, point) != target:
+	elif not _position_target_valid(state, graph, player, target, point):
 		return false
 	var origins: Dictionary = {}
 	var starts: Dictionary = {}
@@ -4009,11 +4073,11 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			var nav: Dictionary = _manual_nav(state, graph, ship, target)
 			return sector_contains(graph, target, origin) or _military_paths(nav["graph"], nav["node"])["distance"].has(int(ship["at"]))
 		"guard":
-			return fighter and military_pois(state, owner).has(target) and order.get("point") is Vector2 and patrol_node(state, graph, owner, order["point"]) == target and _military_paths(graph, target)["distance"].has(int(ship["at"]))
+			return fighter and military_pois(state, owner).has(target) and order.get("point") is Vector2 and _position_target_valid(state, graph, owner, target, order["point"]) and _military_paths(graph, target)["distance"].has(int(ship["at"]))
 		"patrol":
 			if order.has("heading") and (not order["heading"] is Vector2 or not (order["heading"] as Vector2).is_finite() or (order["heading"] as Vector2).is_zero_approx()):
 				return false
-			return fighter and military_pois(state, owner).has(target) and (not order.has("point") or (order["point"] is Vector2 and patrol_node(state, graph, owner, order["point"]) == target))
+			return fighter and military_pois(state, owner).has(target) and (not order.has("point") or (order["point"] is Vector2 and _position_target_valid(state, graph, owner, target, order["point"])))
 		"sector_entry":
 			if target < 0 or target >= state["planets"].size() or not military_pois(state, owner).has(target) or bool(ship.get("retreating", false)):
 				return false
@@ -4273,11 +4337,28 @@ static func command_remote_position(state: Dictionary, player: int, ids: Array, 
 		_clear_local_hold(ship)
 		_interrupt_work(ship)
 		var nav: Dictionary = _manual_nav(state, graph, ship, node)
-		_redirect_fighter(nav["graph"], ship, nav["node"], _military_paths(nav["graph"], nav["node"]))
+		var anchor: int = node
+		var lane: Vector2i = lane_at(graph, point, military_pois(state, player))
+		if not sector_contains(graph, node, point) and lane.x >= 0:
+			var best: float = INF
+			for endpoint in [lane.x, lane.y]:
+				var option: Dictionary = _manual_nav(state, graph, ship, int(endpoint))
+				var option_paths: Dictionary = _military_paths(option["graph"], option["node"])
+				var cost: float = float(_military_approach(option["graph"], ship, option_paths)["distance"]) + (point as Vector2).distance_to(graph["points"][endpoint])
+				if cost < best:
+					best = cost
+					nav = option
+					anchor = int(endpoint)
+		if lane_direct(graph, ship["position"], point, military_pois(state, player)):
+			ship["route"] = []
+			ship["leg"] = 0.0
+			ship["dest"] = nav["node"]
+		else:
+			_redirect_fighter(nav["graph"], ship, nav["node"], _military_paths(nav["graph"], nav["node"]))
 		if ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
-			ship["operation_target"] = node
+			ship["operation_target"] = anchor
 		ship["local_move_target"] = point
-		ship["local_move_sector"] = node
+		ship["local_move_sector"] = anchor
 		ship["move_only"] = move_only
 		_set_unit_order(state, ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
 	return true
@@ -4351,9 +4432,23 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 		return false
 	var node: int = int(ship["local_move_sector"])
 	var destination: Vector2 = ship["local_move_target"]
+	if not state.is_empty() and lane_direct(graph, ship["position"], destination, military_pois(state, int(ship["owner"]))):
+		var nav: Dictionary = _manual_nav(state, graph, ship, node)
+		ship["route"] = []
+		ship["leg"] = 0.0
+		ship["dest"] = nav["node"]
+		_navigate(ship, destination, ship_speed(str(ship.get("kind", "ship"))) * dt)
+		if (ship["position"] as Vector2).distance_to(destination) <= EPS:
+			ship["at"] = nav["node"]
+			if ship.has("arrival_heading"):
+				ship["heading"] = ship["arrival_heading"]
+			_clear_local_move(ship)
+			_finish_manual(ship)
+			ship["arrival_wait_until"] = float(state["elapsed"]) + MOVE_ARRIVAL_WAIT_YEARS
+		return true
 	if not state.is_empty() and not sector_contains(graph, node, destination):
-		# Keep the ordinary lane route to the anchor, then fly the final
-		# off-sector leg directly. Physical sector membership stays geometric.
+		# Approach the selected lane endpoint; the direct branch takes over
+		# as soon as the ship enters the destination corridor.
 		var nav: Dictionary = _manual_nav(state, graph, ship, node)
 		var goal: int = int(nav["node"])
 		if int(ship.get("dest", -1)) != goal:
@@ -6934,12 +7029,19 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 					ship["combat_target"] = -1
 				ship["pursuit_target"] = -1
 				ship["pursuit_left"] = 0.0
-				if not (ship["route"] as Array).is_empty():
+				var patrol_point: Vector2 = (ship["patrol_start_point"] if ship["patrol_returning"] else ship["patrol_end_point"]) if ship.has("patrol_from") else Vector2.INF
+				if patrol_point.is_finite() and lane_direct(combat_graph, ship["position"], patrol_point, military_pois(state, int(ship["owner"]))):
+					ship["route"] = []
+					ship["leg"] = 0.0
+					_navigate(ship, patrol_point, ship_speed(str(ship.get("kind", "ship"))) * dt)
+					ship["patrol_arrived"] = (ship["position"] as Vector2).distance_to(patrol_point) <= EPS
+					if ship["patrol_arrived"]:
+						ship["at"] = int(ship["patrol_from"] if ship["patrol_returning"] else ship["patrol_to"])
+				elif not (ship["route"] as Array).is_empty():
 					_move_formation(combat_graph, ship, dt)
-				elif ship.has("patrol_from"):
-					var endpoint: Vector2 = ship["patrol_start_point"] if ship["patrol_returning"] else ship["patrol_end_point"]
-					_navigate(ship, endpoint, ship_speed(str(ship.get("kind", "ship"))) * dt)
-					ship["patrol_arrived"] = (ship["position"] as Vector2).distance_to(endpoint) <= EPS
+				elif patrol_point.is_finite():
+					_navigate(ship, patrol_point, ship_speed(str(ship.get("kind", "ship"))) * dt)
+					ship["patrol_arrived"] = (ship["position"] as Vector2).distance_to(patrol_point) <= EPS
 		var ship_id: int = int(ship["id"])
 		# Only use the idle budget if the ship started and finished its
 		# work idle and did not already move this tick.
