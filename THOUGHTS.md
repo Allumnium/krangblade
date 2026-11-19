@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.56.0: Cruiser and Destroyer use stronger single-volley weapons and slower speeds as provisional balance. Assess capital ship pacing and Scout utility.
+
 - v0.55.11: Baseline station defenses make expansions harder to rush; assess four-emitter upgraded station balance during contested matches.
 
 - v0.55.10: Inactivity timer replaces first-load timer; monitor sparse miner arrivals and partial shipments. Manual unload remains available.
