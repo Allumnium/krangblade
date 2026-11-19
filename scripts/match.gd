@@ -15,7 +15,7 @@ const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
 const KEYBOARD_PAN_SPEED: float = 420.0
-const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm", "collect": "collect"}
+const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm", "collect": "collect", "auto_retreat": "retreat"}
 const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
 const MIN_ZOOM: float = 0.5
 const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
@@ -1713,6 +1713,7 @@ func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
 	if station_icons.has(key):
 		return station_icons[key]
 	var paths: Dictionary = {
+		"auto_retreat": '<path fill="#f6aa79" d="M3 16L15 4V11H28V21H15V28Z"/><path stroke="#ffe5cc" stroke-width="2" d="M18 7L28 7M18 25L28 25"/>',
 		"auto_wander": '<path stroke="#8bd5ed" stroke-width="2.5" fill="none" d="M3 25Q9 4 17 17T29 4"/><circle cx="4" cy="25" r="3" fill="#e1f8ff"/><path fill="#b4e9f9" d="M16 9L24 18L19 28L16 24L11 28L11 17Z"/>',
 		"collect": '<circle cx="16" cy="16" r="10" fill="none" stroke="#ab92ff" stroke-width="3"/><circle cx="16" cy="16" r="5" fill="#e4c9ff"/><path stroke="#e4c9ff" stroke-width="2" d="M16 1V6M16 26V31M1 16H6M26 16H31"/>',
 		"auto_farm": '<path fill="#9ee6a1" d="M15 28V17Q3 18 3 5Q14 5 16 15Q18 3 29 3Q29 18 18 19V28Z"/><path stroke="#e5ffd6" stroke-width="1.8" d="M7 9L16 18L25 8"/>',
@@ -2383,7 +2384,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	active_border.draw.connect(_draw_active_command.bind(active_border))
 	active_border.visible = false
 	button.set_meta("active_border", active_border)
-	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J}[id], "Fleet", "fleet_" + id, hint)
+	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -2397,7 +2398,11 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	unload_button = _command_slot("unload", "Drop Cargo", _arm_command.bind("unload"))
 	_command_slot("repair", "Repair target", _arm_command.bind("repair"))
 	_command_slot("deliver_farm", "Deliver Organics to nearest station", _deliver_farm_selected)
-	for id in ["collect", "auto_farm", "auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair"]:
+	for id in ["collect", "auto_farm", "auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair", "auto_retreat"]:
+		if id == "auto_retreat":
+			_fill_ability_grid(command_card)
+			_command_slot("guard", "Guard sector · return to the chosen point after combat", _arm_command.bind("guard"))
+			_command_slot("transform", "Transform into Space Station", _transform_selected)
 		var mode: String = AUTOCAST_SLOTS[id]
 		var title_text: String = "Collect Antimatter" if mode == "collect" else ("Wander" if mode == "wander" else "Auto-" + mode.capitalize())
 		var action: Callable = _arm_command.bind("collect") if mode == "collect" else _toggle_autocast.bind(mode)
@@ -2415,9 +2420,6 @@ func _build_command_card(parent: VBoxContainer) -> void:
 		border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		border.draw.connect(_draw_autobuild_border.bind(border))
 		button.set_meta("auto_border", border)
-	_fill_ability_grid(command_card)
-	_command_slot("guard", "Guard sector · return to the chosen point after combat", _arm_command.bind("guard"))
-	_command_slot("transform", "Transform into Space Station", _transform_selected)
 
 func _autocast_units(state: Dictionary, mode: String) -> Array:
 	var units: Array = []
@@ -2490,6 +2492,14 @@ func _refresh_autocast_cards() -> void:
 		if collect_button.get_parent() != collect_slot:
 			collect_button.reparent(collect_slot, false)
 			collect_button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if command_buttons.has("auto_retreat"):
+		var retreat: Button = command_buttons["auto_retreat"]
+		var retreat_extra: Control = command_card.get_child(18)
+		var retreat_slot: Control = command_card.get_child(13) if _autocast_units(state, "collect").is_empty() and _autocast_units(state, "mine").is_empty() else retreat_extra
+		if retreat.get_parent() != retreat_slot:
+			retreat.reparent(retreat_slot, false)
+			retreat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		retreat_extra.visible = retreat_slot == retreat_extra and not _autocast_units(state, "retreat").is_empty()
 	for id in AUTOCAST_SLOTS:
 		if not command_buttons.has(id):
 			continue
@@ -2524,6 +2534,8 @@ func _refresh_autocast_cards() -> void:
 			_set_button_hint(button, _button_hint(button) + "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority.")
 		elif mode == "collect":
 			_set_button_hint(button, "%s · Auto: %s\nLeft click [%s], then choose a Pulsar. Right click toggles autocast.\nCollects 1 unit in %.0f s at 1×; auto cooldown %.0f s." % [title_text, status, shortcut, ECONOMY.SCIENCE_COLLECTION_YEARS, duration])
+		elif mode == "retreat":
+			_set_button_hint(button, _button_hint(button) + "\nWithdraw to safety at %.0f%% hull; resume orders after full repair." % (100.0 * ECONOMY.WITHDRAW_HP / ECONOMY.SHIP_HP))
 		elif mode == "farm":
 			_set_button_hint(button, _button_hint(button) + "\nProduces %.0f t/s at 1×; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
 
@@ -3175,8 +3187,6 @@ shader_type canvas_item;
 render_mode unshaded;
 uniform sampler2D site_data : filter_nearest, repeat_disable;
 uniform int site_count = 0;
-uniform sampler2D occupied_tiles : filter_nearest, repeat_disable;
-uniform vec2 tile_grid = vec2(1.0);
 uniform vec2 world_extent = vec2(1.0);
 uniform float padding = 1.0;
 uniform float corner_rounding = 0.32;
@@ -3192,11 +3202,10 @@ vec3 team_color(int team) {
 	return vec3(0.929, 0.459, 0.467);
 }
 void fragment() {
-	ivec2 tile = ivec2(clamp(floor(UV * tile_grid), vec2(0.0), tile_grid - vec2(1.0)));
-	if (texelFetch(occupied_tiles, tile, 0).r < 0.5) {
-		discard;
-	}
+
 	vec2 p = UV * world_extent - vec2(padding);
+	vec2 bounds = world_extent - vec2(2.0 * padding);
+	if (p.x < 0.0 || p.y < 0.0 || p.x > bounds.x || p.y > bounds.y) { discard; }
 	// First identify the nearest POI (including neutral fields).
 	float best_sq = 1e20;
 	int site_index = -1;
@@ -3242,7 +3251,20 @@ void fragment() {
 	}
 	float inside = 1.0 - smoothstep(-aa, 0.0, d);
 	float border = inside * smoothstep(-aa * 2.8, -aa * 1.1, d);
-	COLOR = winner > 0 ? vec4(team_color(winner), inside * 0.10 + border * 0.45) : vec4(vec3(0.60, 0.68, 0.76), border * 0.20);
+	float gap_edge = min(min(p.x, p.y), min(bounds.x - p.x, bounds.y - p.y));
+	if (d >= -aa && site_index >= 0) {
+		for (int i = 0; i < site_count; i++) {
+			if (i == site_index) { continue; }
+			vec2 delta = texelFetch(site_data, ivec2(i, 0), 0).xy - site.xy;
+			float separation = length(delta);
+			if (separation > 0.000001) {
+				float bisector = (dot(delta, delta) - 2.0 * dot(p - site.xy, delta)) / (2.0 * separation);
+				gap_edge = min(gap_edge, abs(bisector));
+			}
+		}
+	}
+	float gap_border = (1.0 - inside) * (1.0 - smoothstep(aa * 0.3, aa * 1.2, gap_edge)) * 0.20;
+	COLOR = winner > 0 && inside > 0.0 ? vec4(team_color(winner), inside * 0.10 + border * 0.45) : vec4(vec3(0.60, 0.68, 0.76), max(border * 0.20, gap_border));
 }
 """
 	territory_material = ShaderMaterial.new()
@@ -3318,34 +3340,10 @@ func _refresh_territory(state: Dictionary) -> void:
 	territory_material.set_shader_parameter("site_data", territory_sites)
 	territory_material.set_shader_parameter("site_count", territory_site_count)
 	var extent: Vector2 = _map_size() / territory_radius + Vector2.ONE * 3.0
-	_cache_territory_tiles(sites, extent)
 	territory_material.set_shader_parameter("world_extent", extent)
 	territory_material.set_shader_parameter("padding", 1.5)
 	territory_image.show()
 	_position_territory()
-
-# Conservative tile mask: tiles near any sector disk need
-# shading. All POI centers still participate in the nearest-site test.
-func _cache_territory_tiles(sites: Array[Color], extent: Vector2) -> void:
-	var dimensions := Vector2i(maxi(1, ceili(extent.x)), maxi(1, ceili(extent.y)))
-	var cell: Vector2 = extent / Vector2(dimensions)
-	var mask: Image = Image.create_empty(dimensions.x, dimensions.y, false, Image.FORMAT_R8)
-	mask.fill(Color.BLACK)
-	var counts: Dictionary = {}
-	for site in sites:
-		if site.a > 0.0:
-			var team: int = roundi(site.a)
-			counts[team] = int(counts.get(team, 0)) + 1
-	for site in sites:
-		var reach: float = site.b + 0.12 * float(counts.get(roundi(site.a), 0)) + 2.0
-		var center := Vector2(site.r, site.g) + Vector2.ONE * 1.5
-		var low: Vector2 = (center - Vector2.ONE * reach) / cell
-		var high: Vector2 = (center + Vector2.ONE * reach) / cell
-		for y in range(maxi(0, floori(low.y)), mini(dimensions.y - 1, floori(high.y)) + 1):
-			for x in range(maxi(0, floori(low.x)), mini(dimensions.x - 1, floori(high.x)) + 1):
-				mask.set_pixel(x, y, Color.WHITE)
-	territory_material.set_shader_parameter("occupied_tiles", ImageTexture.create_from_image(mask))
-	territory_material.set_shader_parameter("tile_grid", Vector2(dimensions))
 
 func _position_territory() -> void:
 	var padding: Vector2 = Vector2.ONE * territory_radius * 1.5

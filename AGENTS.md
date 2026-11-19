@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.60.0: Inter-sector space has faint nearest-POI boundaries clipped to commandable map bounds; retain rounded owned sector cores. Armed hull Auto-Retreat (K) defaults off, opt-in at 46% max HP, cancelable via existing validated autocast RPC.
+
 - v0.59.1: Double all ship maximum HP and the absolute withdrawal threshold; triple yard and PDS HP. Station base 10,000 HP, Reinforced Plating adds 3,000. Neutral sectors use existing rounded territory borders at low opacity without fill; claimed colors unchanged.
 
 - v0.59.0: Blasters fire four 1-damage shots per mount at 0.25 s intervals, with 0.5 s between one-second bursts; laser range. Scout/Fighter/Cruiser/Destroyer mount 1/2/3/4; Fighters lose lasers; capital lasers and missiles unchanged. Scouts fire without autonomous pursuit. Compact shot tracers use authoritative combat snapshots.

@@ -324,6 +324,10 @@ func _test_miner_service_orders() -> void:
 	assert(is_equal_approx(float(station["hp"]), ECON.STATION_HP))
 	miner["hp"] = ECON.WITHDRAW_HP
 	ECON._prepare_withdrawals(state, graph)
+	assert(not miner.get("retreating", false))
+	assert(not ECON.set_autocast(state, 2, [int(miner["id"])], "retreat", true))
+	assert(ECON.set_autocast(state, 1, [int(miner["id"])], "retreat", true))
+	ECON._prepare_withdrawals(state, graph)
 	assert(miner.get("retreating", false))
 	miner["hp"] = ECON.SHIP_HP
 	miner["retreating"] = false
@@ -2146,6 +2150,7 @@ func _initialize() -> void:
 	var recovery_graph: Dictionary = ECON.military_graph(recovery)
 	var wounded: Dictionary = {"id": 1210, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 400.0, "position": Vector2(400, 0), "dest": 3, "operation_target": 3, "hp": ECON.WITHDRAW_HP}
 	recovery["ships"] = [wounded]
+	assert(ECON.set_autocast(recovery, 2, [1210], "retreat", true))
 	assert(ECON.set_military(recovery, 2, "fighter", 3, 100))
 	ECON._prepare_withdrawals(recovery, recovery_graph)
 	assert(wounded["retreating"] and int(wounded["repair_site"]) == 1)
@@ -2860,6 +2865,7 @@ func _test_local_position_orders() -> void:
 	var post := Vector2(1000, 25)
 	assert(ECON.command_local_position(repair, 1, [200], 2, post))
 	damaged["hp"] = ECON.WITHDRAW_HP
+	assert(ECON.set_autocast(repair, 1, [200], "retreat", true))
 	var repaired: bool = false
 	for tick in range(500):
 		var previous: Vector2 = damaged["position"]
@@ -2921,6 +2927,7 @@ func _test_tactical_orders() -> void:
 	assert(not ECON.command_patrol(state, 1, [100], 2))
 	assert(ECON.command_patrol(state, 1, [100], 0))
 	f["hp"] = ECON.WITHDRAW_HP
+	assert(ECON.set_autocast(state, 1, [100], "retreat", true))
 	var reached_home: bool = false
 	var returned: bool = false
 	var restored: bool = false

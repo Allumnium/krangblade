@@ -83,7 +83,7 @@ const FIGHTER_SPEED: float = FREIGHTER_SPEED * 1.2
 const AUTOCAST_COOLDOWN_YEARS: float = 30.0
 const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
-const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade", "farm", "collect"]
+const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade", "farm", "collect", "retreat"]
 const SHIP_SIZE: int = 1 # Legacy small-class reference.
 const SHIP_SIZES = {"fighter": 1, "miner": 1, "ship": 2, "colony_ship": 2, "science_ship": 3, "scout": 1, "cruiser": 2, "destroyer": 3}
 const STATION_STORAGE_BAYS: int = 3
@@ -3193,14 +3193,15 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 		"trade": return ship.get("kind", "") == "ship"
 		"farm": return ship.get("kind", "") == "colony_ship"
 		"collect": return ship.get("kind", "") == "science_ship"
+		"retreat": return armed(ship)
 	return false
 
 static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
-	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", mode != "collect"))
+	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", mode not in ["collect", "retreat"]))
 
 static func autocast_duration(mode: String) -> float:
 	match mode:
-		"repair", "farm": return 0.0
+		"repair", "farm", "retreat": return 0.0
 		"mine", "salvage": return MINING_SALVAGE_COOLDOWN_YEARS
 	return AUTOCAST_COOLDOWN_YEARS
 
@@ -3224,6 +3225,11 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 		return set_repair_auto(state, player, ids, enabled)
 	for ship in units:
 		ship[mode + "_auto"] = enabled
+		if mode == "retreat" and not enabled and bool(ship.get("retreating", false)):
+			ship["retreating"] = false
+			ship.erase("repair_site")
+			ship.erase("withdrawal_objective")
+			ship["dest"] = -1
 		if mode == "trade" and not enabled:
 			_clear_resource_stage(ship)
 		if mode == "collect" and not enabled and ship.get("unit_order", {}).get("kind", "") == "collect" and bool(ship.get("unit_order", {}).get("automatic", false)):
@@ -6216,7 +6222,7 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 		if not armed(ship):
 			continue
 		var withdrawing: bool = bool(ship.get("retreating", false))
-		if not withdrawing and float(ship.get("hp", SHIP_HP)) > WITHDRAW_HP:
+		if not withdrawing and (not autocast_enabled(ship, "retreat") or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) > ship_max_hp(str(ship["kind"])) * WITHDRAW_HP / SHIP_HP):
 			continue
 		var site: int = int(ship.get("repair_site", -1))
 		if not withdrawing or not _repair_site_safe(state, graph, int(ship["owner"]), site):
