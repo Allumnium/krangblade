@@ -366,3 +366,5 @@ See THOUGHTS.md for active observations and THOUGHTS_ARCHIVE.md for resolved or 
 - [ ] v0.31.10: Playtest F framing for single/mixed foreign fleets, distant group members, spreading fleets, partial/total losses, systems, planets/PDS, shipyards and asteroid fields. Check zoom/pan cancellation, orbit tracking, manual zoom-out and different viewport sizes.
 
 - [ ] v0.32.0/v0.39.0: Playtest rally attack-move during lane and local travel, repair/resume, proximity-based rally arrival and civilian behavior. Verify double-click selection of ships/shipyards/PDS by visible type, foreign read-only groups, grouped shipyard actions, F framing, and slot invalidation when structures are lost or completed.
+
+- [ ] v0.64.0: Validate direct exact-point, formation, patrol and manual service travel across nonadjacent sectors, including neutral/hostile transit, arrival anchors, queues, avoidance and two-/three-peer replication. Follow up by separating autonomous logistics and military strategic route selection from physical waypoint travel; retain safety and adjacency rules. Benchmark large fleets.

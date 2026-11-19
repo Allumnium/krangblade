@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.64.0: Exact-point movement, formations, patrols and manual service travel use direct physical flight across borders. Preserve discovered sector/corridor target validation, local avoidance and strategic adjacency. Automatic economic and sector-target routing remain a migration follow-up.
+
 - v0.63.1: Render each sector/highway section with a closed clearance contour shared by fill and antialiased rim. Round lane mouths, intersections and section ends; no union-mask fragments. Preserve authoritative region membership, influence and navigation; visual rounding is local.
 
 - v0.63.0: Regions with at least 50 direct influence add 5% of each player's uncapped direct points to each immediately connected weaker region. Compare total direct influence, exclude equal totals, no recursive spillover or hidden donors. Highway section adjacency follows the connection chain; ownership and movement unchanged.
