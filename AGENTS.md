@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.49.2: Station and shipyard queue tiles are 57×57 with 44-pixel art and 6-pixel progress bars. Star clicks and star-anchored drags target the sector outline and route to its incoming boundary (1 world unit inside); no hull ghosts on sector targets. Preserve exact-position/formation ghosts in free space or Alt-forced targeting, contextual attack/deposit/colonization, and the arrival wait. Legacy AI sector orders remain unchanged.
+
 - v0.49.1: Manual position and sector move arrivals wait 20 simulation years before idle wandering or civilian autonomous work. Waiting is not Hold; keep combat, emergency withdrawal and explicit/queued orders responsive. Preserve exact arrival positions/facing against idle separation and use the authority's elapsed clock; show remaining wait in single-hull status. Shipyard launch rallies retain existing behavior.
 
 - v0.49.0: Menu has independent keyboard and mouse edge pan speed (0–250%, default 100%) and mouse wheel zoom speed (25–250%, default 100%). Hotkeys opens a bounded local editor with per-context A–Z/F1–F12 bindings and reset-all; prevent same-context/global conflicts, preserve fixed Esc/arrows/control groups, save to user settings, refresh card badges/tooltips. Codex header is nonwrapping with compact Close; mark its controls table as defaults.
