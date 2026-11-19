@@ -1688,6 +1688,9 @@ static func _waiting_berth(state: Dictionary, ship: Dictionary, center: Vector2,
 	var axis: Vector2 = preferred.normalized()
 	if axis.is_zero_approx():
 		axis = Vector2.from_angle(float(int(ship["id"]) % 24) * TAU / 24.0)
+	# Long-distance approaches need no berth search until they reach the dock.
+	if (ship["position"] as Vector2).distance_to(center) > reach * 3.0:
+		return center + axis * reach * 0.9
 	var nearby: Array[Vector2] = []
 	for other in state.get("ships", []):
 		if int(other["id"]) == int(ship["id"]) or not other.has("position"):
@@ -1701,7 +1704,7 @@ static func _waiting_berth(state: Dictionary, ship: Dictionary, center: Vector2,
 		var candidate: Vector2 = center + axis.rotated(float(slot) * TAU / 12.0) * reach * 0.9
 		var score: float = candidate.distance_to(center + axis * reach * 0.9)
 		for point in nearby:
-			score += maxf(0.0, SHIP_CLEARANCE - candidate.distance_to(point)) * 8.0
+			score += maxf(0.0, SHIP_CLEARANCE - candidate.distance_to(point)) * 24.0
 		if score < best_score:
 			best_score = score
 			best = candidate
@@ -4815,13 +4818,15 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var team: int = int(state["teams"].get(int(ship["owner"]), 0))
 		var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 		var target: int = -1
+		var guard: Dictionary = ship.get("unit_order", {})
+		var guard_node: int = int(guard["target"]) if guard.get("kind", "") == "guard" else -1
 		var pursuit: int = int(ship.get("pursuit_target", -1)) if fighter else -1
 		var remaining: float = float(ship.get("pursuit_left", 0.0))
 		var blocked: Dictionary = ship.get("pursuit_blocked", {})
 		for blocked_id in blocked.keys():
 			if not positions.has(blocked_id) or pos.distance_squared_to(positions[blocked_id]) > LASER_RANGE * LASER_RANGE:
 				blocked.erase(blocked_id)
-		if bool(ship.get("holding", false)):
+		if bool(ship.get("holding", false)) or (guard_node >= 0 and (ship_sectors[id] != guard_node or ship_sectors.get(pursuit, -1) != guard_node)):
 			pursuit = -1
 		if pursuit >= 0:
 			if ship_sectors[id] >= 0 and ship_sectors.get(pursuit, -1) == ship_sectors[id]:
@@ -4842,7 +4847,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 					if int(state["teams"].get(int(other["owner"]), 0)) == team or team == 0:
 						continue
 					var other_id: int = int(other["id"])
-					if other_id < 0:
+					if other_id < 0 or (guard_node >= 0 and (ship_sectors[id] != guard_node or ship_sectors.get(other_id, -1) != guard_node)):
 						continue
 					var distance: float = pos.distance_squared_to(positions[other_id])
 					if blocked.has(other_id) and _fleeing(other, positions[other_id] - pos, int(previous_targets[other_id])):
@@ -4871,9 +4876,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 					pursuit = enemy_id
 			if pursuit >= 0:
 				remaining = PURSUIT_YEARS
-		var guard: Dictionary = ship.get("unit_order", {})
-		if guard.get("kind", "") == "guard":
-			var guarded: int = int(guard["target"])
+		if guard_node >= 0:
+			var guarded: int = guard_node
 			if ship_sectors.get(pursuit, -1) != guarded or ship_sectors[id] != guarded:
 				pursuit = -1
 			if ship_sectors.get(target, -1) != guarded or ship_sectors[id] != guarded:

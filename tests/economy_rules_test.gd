@@ -3584,6 +3584,14 @@ func _test_antimatter_extraction() -> void:
 	assert(not craft.has("unit_order"))
 	assert(not ECON.issue_unit_order(state, 2, [901], {"kind": "collect", "target": 0}, false))
 	assert(ECON.issue_unit_order(state, 1, [901], {"kind": "collect", "target": 0}, false))
+	var traveler: Dictionary = craft.duplicate(true)
+	traveler["position"] = points[1]
+	traveler["at"] = 1
+	traveler["dest"] = 0
+	traveler["route"] = [0]
+	var before: Vector2 = traveler["position"]
+	ECON._manual_travel(state, graph, traveler, state["planets"].size(), deposit, 0.1, 10.0)
+	assert((before.direction_to(traveler["position"])).dot(before.direction_to(points[0])) > 0.999)
 	craft["position"] = deposit
 	assert(ECON._work_science(state, graph, craft, 29.0))
 	assert(ECON._cargo_total(craft) == 0.0)
