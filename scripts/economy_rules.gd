@@ -1188,6 +1188,13 @@ static func construction_leaves_salvage(item: Dictionary) -> bool:
 static func construction_position(state: Dictionary, index: int, item: Dictionary) -> Vector2:
 	var elapsed: float = float(state["elapsed"])
 	var p: Dictionary = state["planets"][index]
+	if item.has("delivery_slot"):
+		var bodies: Array = system_bodies(p, int(state["map"].get("seed", 0)), index)
+		var slot: int = int(item["delivery_slot"])
+		if slot >= 0 and slot < bodies.size():
+			var destination: Vector2 = (state["map"]["points"][index] as Vector2) + body_position(bodies[slot], system_world_radius(state, index), elapsed)
+			var fraction: float = 1.0 - clampf(float(item["delivery_remaining"]) / PLANET_UPGRADE_DELIVERY_TIME, 0.0, 1.0)
+			return station_position(state, index, elapsed).lerp(destination, fraction)
 	if item["kind"] == "yard":
 		return shipyard_port_position(state, index, int(item.get("station_slot", item["level"])), elapsed)
 	if SHIP_KINDS.has(item["kind"]):
@@ -1531,9 +1538,35 @@ static func local_flow(p: Dictionary, category: String, resource: String) -> flo
 		return 0.0
 	return float(p["flows"].get(category, {}).get(resource, 0.0)) / maxf(EPS, float(p.get("flow_dt", 1.0)))
 
+const PLANET_UPGRADE_DELIVERY_TIME: float = 3.0
+
+# Planetary improvements retain their paid queue entry until the cargo arrives.
+# Station equipment, orbital housing and shipyards finish at their own site.
+static func planetary_upgrade_slot(state: Dictionary, index: int, item: Dictionary) -> int:
+	if not item["kind"] in ["economy_building", "production", "habitation", "pds"]:
+		return -1
+	var bodies: Array = system_bodies(state["planets"][index], int(state["map"].get("seed", 0)), index)
+	if bodies.is_empty():
+		return -1
+	if item["kind"] == "pds":
+		return clampi(int(item["target"]), 0, bodies.size() - 1)
+	var resource: String = "Organics" if item["kind"] == "habitation" else str(item["target"])
+	for slot in range(bodies.size()):
+		if bodies[slot]["resource"] == resource:
+			return slot
+	return 0
+
+static func _work_upgrade_deliveries(state: Dictionary, index: int, p: Dictionary, dt: float) -> void:
+	for item in p["queue"].duplicate():
+		if not item.has("delivery_slot"):
+			continue
+		item["delivery_remaining"] = maxf(0.0, float(item["delivery_remaining"]) - dt)
+		if float(item["delivery_remaining"]) <= EPS:
+			_finish(state, index, p, item)
+
 static func station_construction_job(p: Dictionary) -> Dictionary:
 	for item in p["queue"]:
-		if int(item["size"]) == 0 and item["kind"] != "yard_upgrade":
+		if int(item["size"]) == 0 and item["kind"] != "yard_upgrade" and not item.has("delivery_slot"):
 			return item
 	return {}
 
@@ -1551,7 +1584,12 @@ static func _work_station_queue(state: Dictionary, index: int, p: Dictionary, dt
 		remaining = maxf(0.0, remaining - (float(item["progress"]) - before))
 		if item["kind"] == "yard" and int(item["level"]) != (p["yards"] as Array).size() + 1:
 			break
-		_finish(state, index, p, item)
+		var slot: int = planetary_upgrade_slot(state, index, item)
+		if slot >= 0:
+			item["delivery_slot"] = slot
+			item["delivery_remaining"] = PLANET_UPGRADE_DELIVERY_TIME
+		else:
+			_finish(state, index, p, item)
 
 static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	var p: Dictionary = state["planets"][index]
@@ -1579,6 +1617,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		_record_flow(p, "Production", resource, produced)
 		_record_flow(p, "Population", resource, used)
 		p["stock"][resource] = maxf(0.0, stored + produced - used)
+	_work_upgrade_deliveries(state, index, p, dt)
 	_work_station_queue(state, index, p, dt)
 	_refill_yard_autobuild(state, index, p)
 	_refill_continuous(state, index, p)

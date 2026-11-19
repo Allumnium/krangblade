@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.58.0: Three-year planetary upgrade deliveries use the existing queue and are not independently targetable; inspect pacing, arrival legibility and cancellation salvage position. Station remains free to fabricate the next job.
+
 - v0.57.1: Cached per-kind/color hull textures and early viewport culling reduce draw work; benchmark before changing simulation. Dynamic cargo and effects remain separate.
 
 - v0.57.0: Missile damage is resolved at launch; projectile trail is cosmetic. Playtest 1200 range, 12-second cooldown and capital costs; Destroyer needs upgraded warehouse.
