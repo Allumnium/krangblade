@@ -713,6 +713,7 @@ func _initialize() -> void:
 	_test_follow_order()
 	_test_blaster_bursts()
 	_test_conquest()
+	_test_territory_influence()
 	_test_conquest_resistance_and_evacuation()
 	_test_soft_separation()
 	_test_explicit_hold_pose()
@@ -3449,6 +3450,45 @@ func _test_blaster_bursts() -> void:
 	assert(ECON.blaster_count("cruiser") == 3 and ECON.blaster_count("destroyer") == 4)
 	assert(ECON.armed({"kind": "scout"}) and ECON.capital_lasers("fighter") == 0)
 	print("PASS: blaster mounts, four-shot burst and half-second pause")
+
+func _test_territory_influence() -> void:
+	var map: Dictionary = {"seed": 42, "size": Vector2(10000, 5000), "points": [Vector2(500, 500), Vector2(2500, 500), Vector2(6500, 500), Vector2(8500, 500)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	for system in state["planets"]:
+		system["owner"] = 0
+		system["station"] = {}
+		system["yards"] = []
+		system["pds"] = {}
+		system["buildings"] = {}
+		system["orbital_housing"] = 0
+	var home: Dictionary = state["planets"][0]
+	home["owner"] = 1
+	home["station"] = {"hp": ECON.STATION_HP}
+	home["yards"] = [{"level": 1}, {"level": 3}]
+	state["ships"] = [
+		{"id": 1, "owner": 2, "kind": "fighter", "position": Vector2(500, 500)},
+		{"id": 2, "owner": 1, "kind": "scout", "position": Vector2(4400, 600)},
+		{"id": 3, "owner": 2, "kind": "destroyer", "position": Vector2(4600, 600)},
+		{"id": 4, "owner": 1, "kind": "cruiser", "position": Vector2(4500, 2500)},
+	]
+	var weights: Array[Dictionary] = ECON.territory_influence(state, graph)
+	assert(weights[0] == {1: 70, 2: 2})
+	assert(weights[5] == {1: 1, 2: 10} and weights[1].is_empty() and weights[2].is_empty())
+	var palette: Dictionary = {1: Color.RED, 2: Color.BLUE}
+	var mixed: Color = ECON.influence_color(weights[0], palette)
+	assert(is_equal_approx(mixed.r, 70.0 / 72.0) and is_equal_approx(mixed.b, 2.0 / 72.0) and mixed.a == 1.0)
+	assert(is_equal_approx(ECON.influence_color(weights[5], palette).a, 11.0 / 50.0))
+	assert(ECON.influence_color({}, palette).a == 0.0)
+	state["ships"][1]["position"] = Vector2(2500, 500)
+	weights = ECON.territory_influence(state, graph)
+	assert(weights[1] == {1: 1} and weights[5] == {2: 10})
+	home["yards"].pop_back()
+	home["pds"][0] = {"hp": ECON.PDS_HP}
+	weights = ECON.territory_influence(state, graph)
+	assert(weights[0] == {1: 60, 2: 2} and home["owner"] == 1)
+	assert(ECON.territory_influence(bytes_to_var(var_to_bytes(state)), graph) == weights)
+	print("PASS: physical sector/highway influence, infrastructure, normalized mixed colors, saturation cap and snapshot parity")
 
 func _test_conquest() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)

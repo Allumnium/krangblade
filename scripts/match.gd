@@ -102,8 +102,8 @@ var territory_material: ShaderMaterial
 var territory_sites: ImageTexture
 var territory_site_count: int = 0
 var territory_radius: float = 1.0
-var territory_last: Array[int] = []
-var territory_cycle_elapsed: float = 0.0
+var territory_last: Array[Color] = []
+var territory_influence_texture: ImageTexture
 var territory_seed: int = -1
 var header_panel: PanelContainer
 var inspector_panel: PanelContainer
@@ -1156,13 +1156,23 @@ func _draw_minimap() -> void:
 	for i in range(points.size()):
 		locations.append(_minimap_point(points[i], area))
 		known.append(ECONOMY.discovered(state, viewer, "planets" if i < count else "fields", i if i < count else i - count))
-		if known[i] and i < territory_last.size() and territory_last[i] > 0:
+		if known[i] and i < territory_last.size() and territory_last[i].a > 0.0:
 			var radius: float = clampf(territory_radius * area.size.x / _map_size().x, 3.0, 12.0) * (1.0 if i < count else 0.68)
-			minimap.draw_circle(locations[i], radius, Color(COLORS[territory_last[i]], 0.17))
-	for edge in graph["edges"]:
-		var a: int = int(edge[0])
-		var b: int = int(edge[1])
-		minimap.draw_line(locations[a], locations[b], Color("#39546c") if known[a] and known[b] else Color("#182b3b"), 1.0, true)
+			var influence: Color = territory_last[i]
+			minimap.draw_circle(locations[i], radius, Color(influence, 0.17 * influence.a))
+	var edges: Array = graph["edges"]
+	for i in range(edges.size()):
+		var a: int = int(edges[i][0])
+		var b: int = int(edges[i][1])
+		var tint: Color = Color("#39546c") if known[a] and known[b] else Color("#182b3b")
+		var weight_index: int = points.size() + i
+		if known[a] and known[b] and weight_index < territory_last.size():
+			var influence: Color = territory_last[weight_index]
+			var width: float = clampf(2.0 * ECONOMY.lane_radius(graph, a, b) * area.size.x / _map_size().x, 1.0, 8.0)
+			if influence.a > 0.0:
+				minimap.draw_line(locations[a], locations[b], Color(influence, 0.25 * influence.a), width, true)
+			tint = tint.lerp(Color(influence, 1.0), influence.a)
+		minimap.draw_line(locations[a], locations[b], tint, 1.0, true)
 	for i in range(points.size()):
 		var tint := Color("#34485a")
 		if i < count:
@@ -3189,22 +3199,13 @@ render_mode unshaded;
 uniform sampler2D site_data : filter_nearest, repeat_disable;
 uniform int site_count = 0;
 uniform sampler2D lane_data : filter_nearest, repeat_disable;
+uniform sampler2D influence_data : filter_nearest, repeat_disable;
 uniform int lane_count = 0;
 uniform float lane_radius_fraction = 0.35;
 uniform vec2 world_extent = vec2(1.0);
 uniform float padding = 1.0;
 uniform float corner_rounding = 0.32;
 
-vec3 team_color(int team) {
-	if (team == 1) return vec3(0.404, 0.831, 0.663);
-	if (team == 2) return vec3(0.957, 0.643, 0.416);
-	if (team == 3) return vec3(0.467, 0.667, 0.996);
-	if (team == 4) return vec3(0.808, 0.569, 0.929);
-	if (team == 5) return vec3(0.933, 0.820, 0.420);
-	if (team == 6) return vec3(0.941, 0.518, 0.651);
-	if (team == 7) return vec3(0.420, 0.796, 0.831);
-	return vec3(0.929, 0.459, 0.467);
-}
 // Smooth the displayed junctions without changing authoritative lane widths.
 float rounded_join(float a, float b, float width) {
 	float overlap = max(0.0, width - abs(a - b));
@@ -3231,7 +3232,6 @@ void fragment() {
 		}
 	}
 	float aa = max(length(fwidth(p)), 0.000001);
-	int winner = int(site.w + 0.5);
 	float distance_to_center = sqrt(best_sq);
 	float d = distance_to_center - site.z;
 	if (d <= 0.0 && site_index >= 0) {
@@ -3261,11 +3261,21 @@ void fragment() {
 	}
 	float inside = 1.0 - smoothstep(-aa, 0.0, d);
 	float border = inside * smoothstep(-aa * 2.8, -aa * 1.1, d);
+	vec4 neutral = vec4(0.60, 0.68, 0.76, 0.0);
+	vec4 sector_tint = neutral;
+	if (site_index >= 0) {
+		sector_tint = texelFetch(influence_data, ivec2(site_index, 0), 0);
+	}
 	float gap_border = 0.0;
+	float lane_fill = 0.0;
+	vec4 lane_tint = neutral;
 	if (d >= -aa) {
 		float lane_d = 1e20;
 		float second_lane = 1e20;
 		float nearest_radius = 0.0;
+		int rim_index = -1;
+		int interior_index = -1;
+		float interior_best = 1e20;
 		for (int i = 0; i < lane_count; i++) {
 			vec4 edge = texelFetch(lane_data, ivec2(i, 0), 0);
 			vec4 a = texelFetch(site_data, ivec2(int(edge.x + 0.5), 0), 0);
@@ -3273,8 +3283,14 @@ void fragment() {
 			vec2 ab = b.xy - a.xy;
 			float t = clamp(dot(p - a.xy, ab) / max(dot(ab, ab), 0.00000001), 0.0, 1.0);
 			float radius = min(a.z, b.z) * lane_radius_fraction;
-			float distance = length(p - (a.xy + ab * t)) - radius;
+			float center_distance = length(p - (a.xy + ab * t));
+			float distance = center_distance - radius;
+			if (distance <= 0.0 && center_distance < interior_best) {
+				interior_best = center_distance;
+				interior_index = i;
+			}
 			if (distance < lane_d) {
+				rim_index = i;
 				second_lane = lane_d;
 				lane_d = distance;
 				nearest_radius = radius;
@@ -3291,9 +3307,21 @@ void fragment() {
 		float lane_inside = 1.0 - smoothstep(-aa, 0.0, outer);
 		float lane_rim = lane_inside * smoothstep(-aa * 2.8, -aa * 1.1, outer);
 		float near_lane = 1.0 - smoothstep(rounding, rounding + aa * 2.8, rounded_lane);
-		gap_border = (1.0 - inside) * lane_rim * near_lane * 0.20;
+		gap_border = (1.0 - inside) * lane_rim * near_lane;
+		lane_fill = (1.0 - inside) * (1.0 - smoothstep(-aa, 0.0, lane_d));
+		int color_index = interior_index >= 0 ? interior_index : rim_index;
+		if (color_index >= 0) {
+			lane_tint = texelFetch(influence_data, ivec2(site_count + color_index, 0), 0);
+		}
 	}
-	COLOR = winner > 0 && inside > 0.0 ? vec4(team_color(winner), inside * 0.10 + border * 0.45) : vec4(vec3(0.60, 0.68, 0.76), max(border * 0.20, gap_border));
+	// Fade from neutral outline to player mix as total influence approaches
+	// 50; maintain faint sector-style fill even at full strength.
+	float core_alpha = inside * 0.10 * sector_tint.a + border * mix(0.20, 0.45, sector_tint.a);
+	float lane_alpha = lane_fill * 0.10 * lane_tint.a + gap_border * mix(0.20, 0.45, lane_tint.a);
+	vec3 core_rgb = mix(neutral.rgb, sector_tint.rgb, sector_tint.a);
+	vec3 lane_rgb = mix(neutral.rgb, lane_tint.rgb, lane_tint.a);
+	float alpha = min(1.0, core_alpha + lane_alpha);
+	COLOR = vec4((core_rgb * core_alpha + lane_rgb * lane_alpha) / max(alpha, 0.000001), alpha);
 }
 """
 	territory_material = ShaderMaterial.new()
@@ -3310,74 +3338,57 @@ func _refresh_territory(state: Dictionary) -> void:
 		territory_image.hide()
 		territory_seed = -1
 		territory_last.clear()
+		territory_influence_texture = null
 		return
 	var seed_value: int = int(state["map"]["seed"])
-	if territory_seed != seed_value:
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var points: Array = graph["points"]
+	var edges: Array = graph["edges"]
+	if points.is_empty():
+		territory_image.hide()
+		return
+	if territory_seed != seed_value or territory_site_count != points.size() or territory_last.size() != points.size() + edges.size():
 		territory_radius = ECONOMY.sector_base_radius(state["map"])
 		territory_seed = seed_value
 		territory_last.clear()
-	var empires: Array[int] = ECONOMY.territory_empires(state)
-	var graph: Dictionary = ECONOMY.military_graph(state)
-	var contenders: Dictionary = {}
-	# The simulation's territory claims can be neutralized by combat. Keep
-	# the visual footprint and cycle through hostile players instead.
-	for i in range((state["planets"] as Array).size()):
-		var planet: Dictionary = state["planets"][i]
-		var owner: int = int(planet["owner"])
-		if owner > 0 and (float(planet.get("population", 0.0)) > 0.0 or not (planet.get("yards", []) as Array).is_empty()):
-			contenders[i] = [owner]
-	for ship in state["ships"]:
-		if ship.get("kind", "") not in ["fighter", "scout", "cruiser", "destroyer"] or bool(ship.get("retreating", false)):
-			continue
-		var node: int = ECONOMY.local_sector(graph, ship)
-		if node < 0:
-			continue
-		var player: int = int(ship["owner"])
-		if not contenders.has(node):
-			contenders[node] = []
-		if not (contenders[node] as Array).has(player):
-			contenders[node].append(player)
-	var claims: Array[int] = []
-	var cycle: int = floori(territory_cycle_elapsed / 0.85)
-	for i in range(empires.size()):
-		var players: Array = contenders.get(i, [])
-		players.sort()
-		var teams: Dictionary = {}
-		for player in players:
-			teams[int(state["teams"].get(int(player), 0))] = true
-		if teams.size() > 1:
-			claims.append(_empire_color_index(int(players[cycle % players.size()])))
-		else:
-			claims.append(_empire_color_index(empires[i]))
-	if claims == territory_last:
+		territory_influence_texture = null
+		territory_site_count = points.size()
+		var data: Image = Image.create_empty(points.size(), 1, false, Image.FORMAT_RGBAF)
+		for i in range(points.size()):
+			var point: Vector2 = points[i]
+			data.set_pixel(i, 0, Color(point.x / territory_radius, point.y / territory_radius, float(graph["sector_radii"][i]) / territory_radius, 1.0))
+		territory_sites = ImageTexture.create_from_image(data)
+		territory_material.set_shader_parameter("site_data", territory_sites)
+		territory_material.set_shader_parameter("site_count", territory_site_count)
+		var lanes: Image = Image.create_empty(maxi(1, edges.size()), 1, false, Image.FORMAT_RGBAF)
+		for i in range(edges.size()):
+			lanes.set_pixel(i, 0, Color(float(edges[i][0]), float(edges[i][1]), 0.0, 1.0))
+		territory_material.set_shader_parameter("lane_data", ImageTexture.create_from_image(lanes))
+		territory_material.set_shader_parameter("lane_count", edges.size())
+		var extent: Vector2 = _map_size() / territory_radius + Vector2.ONE * 3.0
+		territory_material.set_shader_parameter("world_extent", extent)
+		territory_material.set_shader_parameter("padding", 1.5)
+	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph)
+	var roster: Dictionary = session.get("players")
+	var colors: Dictionary = {}
+	for player in roster:
+		colors[player] = _empire_color(int(player))
+	var known: Array[int] = ECONOMY.military_pois(state, _me())
+	var tints: Array[Color] = []
+	for i in range(weights.size()):
+		var visible: bool = known.has(i) if i < points.size() else known.has(int(edges[i - points.size()][0])) and known.has(int(edges[i - points.size()][1]))
+		tints.append(ECONOMY.influence_color(weights[i] if visible else {}, colors))
+	if tints == territory_last:
 		return
-	territory_last = claims
-	var points: Array = ECONOMY.military_graph(state)["points"]
-	var sites: Array[Color] = []
-	for i in range(points.size()):
-		var point: Vector2 = points[i]
-		var radius: float = float(graph["sector_radii"][i]) / territory_radius
-		# Neutral centers clip their neighbors exactly like the simulation.
-		sites.append(Color(point.x / territory_radius, point.y / territory_radius, radius, float(claims[i])))
-	territory_site_count = sites.size()
-	if sites.is_empty():
-		territory_image.hide()
-		return
-	var data: Image = Image.create_empty(sites.size(), 1, false, Image.FORMAT_RGBAF)
-	for i in range(sites.size()):
-		data.set_pixel(i, 0, sites[i])
-	territory_sites = ImageTexture.create_from_image(data)
-	territory_material.set_shader_parameter("site_data", territory_sites)
-	territory_material.set_shader_parameter("site_count", territory_site_count)
-	var edges: Array = graph["edges"]
-	var lanes: Image = Image.create_empty(maxi(1, edges.size()), 1, false, Image.FORMAT_RGBAF)
-	for i in range(edges.size()):
-		lanes.set_pixel(i, 0, Color(float(edges[i][0]), float(edges[i][1]), 0.0, 1.0))
-	territory_material.set_shader_parameter("lane_data", ImageTexture.create_from_image(lanes))
-	territory_material.set_shader_parameter("lane_count", edges.size())
-	var extent: Vector2 = _map_size() / territory_radius + Vector2.ONE * 3.0
-	territory_material.set_shader_parameter("world_extent", extent)
-	territory_material.set_shader_parameter("padding", 1.5)
+	territory_last = tints
+	var influence: Image = Image.create_empty(tints.size(), 1, false, Image.FORMAT_RGBAF)
+	for i in range(tints.size()):
+		influence.set_pixel(i, 0, tints[i])
+	if territory_influence_texture == null:
+		territory_influence_texture = ImageTexture.create_from_image(influence)
+		territory_material.set_shader_parameter("influence_data", territory_influence_texture)
+	else:
+		territory_influence_texture.update(influence)
 	territory_image.show()
 	_position_territory()
 
@@ -5825,10 +5836,6 @@ func _process(delta: float) -> void:
 		map_canvas.queue_redraw()
 	_sync_match_mouse_mode()
 	_keyboard_pan(delta)
-	territory_cycle_elapsed += delta
-	if territory_cycle_elapsed >= 0.85:
-		territory_cycle_elapsed = fmod(territory_cycle_elapsed, 1020.0)
-		_refresh_territory(_state())
 	_update_resource_hover()
 	if is_instance_valid(diagnostic_label):
 		diagnostic_elapsed += delta
