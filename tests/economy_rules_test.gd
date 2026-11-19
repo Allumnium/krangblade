@@ -2295,6 +2295,9 @@ func _test_autocast_modes() -> void:
 	var point: Vector2 = center + Vector2.RIGHT * 10.0
 	assert(ECON.issue_unit_order(state, 1, [9809], {"kind": "position", "target": 0, "point": point, "move_only": true}, false))
 	assert(is_equal_approx(ECON.autocast_remaining(state, miner), ECON.AUTOCAST_COOLDOWN_YEARS))
+	assert(is_equal_approx(ECON.autocast_remaining(state, miner, "mine"), 5.0))
+	assert(is_equal_approx(ECON.autocast_remaining(state, miner, "salvage"), 5.0))
+	assert(ECON.autocast_remaining(state, miner, "repair") == 0.0)
 	for tick in range(100):
 		ECON.step(state, 0.1)
 		if not miner.has("local_move_target"):
@@ -2303,7 +2306,7 @@ func _test_autocast_modes() -> void:
 	assert(ECON.set_autocast(state, 1, [9809], "wander", true))
 	assert(ECON.autocast_ready(state, miner, "wander"))
 	assert(ECON.autocast_remaining(state, miner, "wander") == 0.0)
-	assert(ECON.autocast_remaining(state, miner, "salvage") > ECON.EPS)
+	assert(is_equal_approx(ECON.autocast_remaining(state, miner, "salvage"), 5.0))
 	assert(ECON._idle_formation_targets(state, graph).has(9809))
 	assert(ECON.issue_unit_order(state, 1, [9809], {"kind": "position", "target": 0, "point": center, "move_only": true}, false))
 	assert(not ECON.autocast_ready(state, miner, "wander"))
@@ -2311,6 +2314,16 @@ func _test_autocast_modes() -> void:
 		ECON.step(state, 0.1)
 		if not miner.has("local_move_target"):
 			break
+	assert(ECON.set_autocast(state, 1, [9809], "repair", true))
+	assert(ECON.autocast_ready(state, miner, "repair"))
+	assert(ECON.set_autocast(state, 1, [9809], "mine", true))
+	assert(not ECON.autocast_ready(state, miner, "mine"))
+	state["elapsed"] = float(state["elapsed"]) + 4.9
+	assert(not ECON.autocast_ready(state, miner, "mine") and not ECON.autocast_ready(state, miner, "salvage"))
+	state["elapsed"] = float(state["elapsed"]) + 0.11
+	assert(ECON.autocast_ready(state, miner, "mine") and ECON.autocast_ready(state, miner, "salvage"))
+	assert(not ECON.autocast_ready(state, miner, "wander"))
+	assert(ECON.set_autocast(state, 1, [9809], "mine", false))
 	state["elapsed"] = float(state["elapsed"]) + ECON.AUTOCAST_COOLDOWN_YEARS + 0.1
 	assert(ECON.autocast_ready(state, miner, "wander"))
 	assert(ECON._idle_formation_targets(state, graph).has(9809))

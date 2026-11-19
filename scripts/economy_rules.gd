@@ -69,6 +69,7 @@ const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
 const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const AUTOCAST_COOLDOWN_YEARS: float = 30.0
+const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
 const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade"]
 const SHIP_SIZE: int = 1
@@ -1855,7 +1856,7 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 	return true
 
 static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictionary, receivers: Array, threats: Dictionary) -> float:
-	if miner.get("kind", "") != "miner" or _cargo_total(miner) <= EPS or bool(miner.get("holding", false)) or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("cargo_order") or miner.has("repair_order") or miner.has("local_move_target") or arrival_wait_remaining(state, miner) > EPS:
+	if miner.get("kind", "") != "miner" or _cargo_total(miner) <= EPS or bool(miner.get("holding", false)) or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("cargo_order") or miner.has("repair_order") or miner.has("local_move_target") or autocast_remaining(state, miner, "mine") > EPS:
 		return 0.0
 	if miner.get("mining_mode", "") not in ["mining", "return", "delivery"] and not bool(miner.get("salvage_delivery", false)) and not miner.has("auto_salvage_target"):
 		return 0.0
@@ -2715,10 +2716,20 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
 	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", true))
 
+static func autocast_duration(mode: String) -> float:
+	match mode:
+		"repair": return 0.0
+		"mine", "salvage": return MINING_SALVAGE_COOLDOWN_YEARS
+	return AUTOCAST_COOLDOWN_YEARS
+
 static func autocast_remaining(state: Dictionary, ship: Dictionary, mode: String = "") -> float:
 	if mode == "wander" and bool(ship.get("wander_cooldown_override", false)):
 		return 0.0
-	return maxf(arrival_wait_remaining(state, ship), maxf(0.0, float(ship.get("auto_cooldown_until", 0.0)) - float(state["elapsed"])))
+	var duration: float = autocast_duration(mode)
+	# The existing authoritative deadlines represent the longest cooldown.
+	# Shorter modes share the same start/arrival timestamp without new fields.
+	var longest: float = maxf(arrival_wait_remaining(state, ship), maxf(0.0, float(ship.get("auto_cooldown_until", 0.0)) - float(state["elapsed"])))
+	return clampf(longest - (AUTOCAST_COOLDOWN_YEARS - duration), 0.0, duration)
 
 static func autocast_ready(state: Dictionary, ship: Dictionary, mode: String) -> bool:
 	return autocast_enabled(ship, mode) and autocast_remaining(state, ship, mode) <= EPS
@@ -5792,14 +5803,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			continue
 		if _work_resource_stage(state, combat_graph, ship, teams, cache, salvage_threats, salvage_cells, salvage_busy, dt):
 			continue
-		# Explicit work and emergency withdrawal have priority. Defer civilian
-		# autonomous job selection and idle salvage approaches during the wait.
-		if arrival_wait_remaining(state, ship) > EPS and ship.get("kind", "") != "fighter" and not ship.has("repair_order"):
-			ship["navigation_target"] = ship["position"]
-			# Deliberately enabling Wander bypasses only its own cooldown.
-			if idle_targets.has(salvage_ship_id) and _is_idle_ship(ship) and autocast_ready(state, ship, "wander") and not coordinated.has(salvage_ship_id):
-				_navigate(ship, idle_targets[salvage_ship_id], SHIP_SPEED * dt)
-			continue
+		# Each automatic job checks its own cooldown; explicit movement,
+		# follow, cargo orders and emergency withdrawal already take priority.
 		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_ids):
 			continue
 		ship.erase("repair_target")

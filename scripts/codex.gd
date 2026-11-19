@@ -425,7 +425,7 @@ func _ships() -> void:
 	_table(["Level", "Build speed", "Staff required"], rows)
 
 func _combat() -> void:
-	_body("Fighters engage hostile targets automatically when idle or attack-moving. Autocast waits %.0f years after manual orders; movement refreshes the delay on arrival. Follow keeps a safe distance from a friendly hull until replaced. New orders act immediately. Hold keeps ships in place; damaged ships can withdraw and repair." % E.MOVE_ARRIVAL_WAIT_YEARS)
+	_body("Fighters engage hostile targets automatically when idle or attack-moving. Autocast cooldown after orders or arrival: Wander/Trade %.0f years, Mine/Salvage %.0f, Repair none. Follow keeps a safe distance from a friendly hull until replaced. New orders act immediately. Hold keeps ships in place; damaged ships can withdraw and repair." % [E.AUTOCAST_COOLDOWN_YEARS, E.MINING_SALVAGE_COOLDOWN_YEARS])
 	_table(["Weapon", "Damage / shot or volley", "Range"], [["Fighter laser", "%.0f" % E.LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Mining lasers", "%.0f" % E.MINER_LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Planetary defense", "%.0f" % E.PDS_DAMAGE, "%.0f" % E.PDS_RANGE]])
 	_section("Station defenses")
 	_table(["Upgrade", "Effect", "Materials"], [["Reinforced Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Laser Matrix", "%d defensive lasers" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Planetary defense battery", _recipe(E._cost("pds", 1))]])
