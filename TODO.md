@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.57.2: Inspect quarter-size planetary cargo capsules and paired side jets at close zoom.
+
 - [ ] v0.57.1: Benchmark large fleets, inspect cached hull parity and edge culling, single-ship command lines and team double-click selection.
 
 - [ ] v0.57.0: Validate capital hull HP, no cargo, missile cooldown/range/focus/teams, laser volleys, costs and peer visuals.
