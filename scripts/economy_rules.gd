@@ -76,7 +76,7 @@ const FIGHTER_SPEED: float = FREIGHTER_SPEED * 1.2
 const AUTOCAST_COOLDOWN_YEARS: float = 30.0
 const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
-const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade", "farm"]
+const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade", "farm", "collect"]
 const SHIP_SIZE: int = 1
 const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
@@ -2892,10 +2892,11 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 		"salvage": return ship.get("kind", "") in ["ship", "miner"]
 		"trade": return ship.get("kind", "") == "ship"
 		"farm": return ship.get("kind", "") == "colony_ship"
+		"collect": return ship.get("kind", "") == "science_ship"
 	return false
 
 static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
-	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", true))
+	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", mode != "collect"))
 
 static func autocast_duration(mode: String) -> float:
 	match mode:
@@ -2925,6 +2926,11 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 		ship[mode + "_auto"] = enabled
 		if mode == "trade" and not enabled:
 			_clear_resource_stage(ship)
+		if mode == "collect" and not enabled and ship.get("unit_order", {}).get("kind", "") == "collect" and bool(ship.get("unit_order", {}).get("automatic", false)):
+			ship.erase("unit_order")
+			ship.erase("science_years")
+			_finish_manual(ship)
+			ship["navigation_target"] = ship["position"]
 		if mode == "farm" and not enabled and bool(ship.get("farm_auto_delivery", false)):
 			_cancel_salvage_order(ship)
 			ship.erase("unit_order")
@@ -3181,7 +3187,7 @@ static func _work_science(state: Dictionary, graph: Dictionary, ship: Dictionary
 		if _cargo_total(ship) >= SCIENCE_CAPACITY - EPS:
 			ship["navigation_target"] = ship["position"]
 			return true
-		if autocast_remaining(state, ship, "wander") > EPS:
+		if not autocast_ready(state, ship, "collect"):
 			return false
 		var best: float = INF
 		var chosen: int = -1
@@ -3194,7 +3200,7 @@ static func _work_science(state: Dictionary, graph: Dictionary, ship: Dictionary
 				chosen = index
 		if chosen < 0:
 			return false
-		_set_unit_order(state, ship, {"kind": "collect", "target": chosen})
+		_set_unit_order(state, ship, {"kind": "collect", "target": chosen, "automatic": true})
 		ship["science_years"] = 0.0
 		order = ship["unit_order"]
 	var index: int = int(order["target"])
@@ -3737,7 +3743,7 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 				_clear_tactical_order(ship)
 				_clear_local_hold(ship)
 				_interrupt_work(ship)
-				_set_unit_order(state, ship, order.duplicate(true))
+				_set_unit_order(state, ship, {"kind": "collect", "target": target})
 				ship["science_years"] = 0.0
 			return true
 		"mine":

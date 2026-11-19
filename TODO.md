@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.54.0: Verify renamed hulls, crew details without world labels, Collect Antimatter targeting and default-off autocast; validate manual/automatic cancellation, ownership and peer replication. Runtime pending.
+
 - [ ] v0.53.7: Verify passing miner handoff between sectors, manual movement, hold, trade toggle, capacity and same-tick station unloading conservation; verify fighter combat interrupts and resumes movement. Runtime pending.
 
 - [ ] v0.53.6: Validate rate-limited mining, trade, handoff, farm and manual deliveries, cargo conservation, full warehouses, pause and peer replication; verify sector pursuit, hold, move-only and withdrawal. Runtime pending.

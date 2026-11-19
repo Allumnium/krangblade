@@ -15,7 +15,7 @@ const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
 const KEYBOARD_PAN_SPEED: float = 420.0
-const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm"}
+const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm", "collect": "collect"}
 const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
 const MIN_ZOOM: float = 0.5
 const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
@@ -788,7 +788,7 @@ func _build_ui() -> void:
 	interaction_scroll.add_child(interaction_panel)
 	colony_picker = OptionButton.new()
 	interaction_panel.add_child(colony_picker)
-	send_colony_button = _button("SEND COLONY SHIP", _send_colony, interaction_panel)
+	send_colony_button = _button("SEND COLONY", _send_colony, interaction_panel)
 	HUD.action(send_colony_button, Color("#c7a4ff"), true)
 	_build_station_command_card(body)
 	var trade_page: GridContainer = _inspector_page("Trade")
@@ -1059,7 +1059,7 @@ func _minimap_order(mouse: InputEventMouseButton) -> void:
 					hint["world"] = pile["position"]
 	var point: Vector2 = _screen_point(hint["world"])
 	var mode: String = pending_command
-	if mode in ["repair", "unload", "load"]:
+	if mode in ["repair", "unload", "load", "collect"]:
 		_execute_pending_command(point, mouse.shift_pressed, hint)
 	elif mode == "rally" or (mode.is_empty() and selected_yard >= 0):
 		_set_rally_at(point)
@@ -1480,7 +1480,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_grid = grid
 	for kind in ECONOMY.SHIP_KINDS:
 		var button := CostButton.new()
-		var caption: String = {"ship": "Freighter", "colony_ship": "Colony\nship", "fighter": "Fighter", "miner": "Mining\nship", "science_ship": "Science\nvessel"}[kind]
+		var caption: String = {"ship": "Freighter", "colony_ship": "Colony", "fighter": "Fighter", "miner": "Harvester", "science_ship": "Science\nvessel"}[kind]
 		var art: TextureRect = _yard_ability_face(button, caption, _production_icon(kind, HUD.ACCENT))
 		button.set_meta("portrait", art)
 		button.pressed.connect(_build_at_yard.bind(kind))
@@ -1537,6 +1537,7 @@ func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
 		return station_icons[key]
 	var paths: Dictionary = {
 		"auto_wander": '<path stroke="#8bd5ed" stroke-width="2.5" fill="none" d="M3 25Q9 4 17 17T29 4"/><circle cx="4" cy="25" r="3" fill="#e1f8ff"/><path fill="#b4e9f9" d="M16 9L24 18L19 28L16 24L11 28L11 17Z"/>',
+		"collect": '<circle cx="16" cy="16" r="10" fill="none" stroke="#ab92ff" stroke-width="3"/><circle cx="16" cy="16" r="5" fill="#e4c9ff"/><path stroke="#e4c9ff" stroke-width="2" d="M16 1V6M16 26V31M1 16H6M26 16H31"/>',
 		"auto_farm": '<path fill="#9ee6a1" d="M15 28V17Q3 18 3 5Q14 5 16 15Q18 3 29 3Q29 18 18 19V28Z"/><path stroke="#e5ffd6" stroke-width="1.8" d="M7 9L16 18L25 8"/>',
 		"auto_mine": '<path fill="#9fb8c9" d="M3 17L9 10L18 12L23 21L18 29L7 27Z"/><path fill="#dce8f3" d="M9 10L18 12L12 19L3 17Z"/><path stroke="#ffbd77" stroke-width="3" d="M28 3L17 14M30 10L21 19"/><path fill="#f1c892" d="M25 2L30 2L30 7Z"/>',
 		"auto_salvage": '<path fill="#9ccfc5" d="M4 4H8V14Q8 21 16 21Q24 21 24 14V4H28V15Q28 27 16 27Q4 27 4 15Z"/><path fill="#d3e4eb" d="M13 4L21 6L18 13L10 11Z"/><path fill="#ffcd81" d="M12 14L16 18L12 22L8 18Z"/>',
@@ -2072,7 +2073,7 @@ func _selected_ship(state: Dictionary) -> Dictionary:
 func _ship_kind_name(kind: String) -> String:
 	if kind == "science_ship":
 		return "Science vessel"
-	return "Freighter" if kind == "ship" else ("Mining ship" if kind == "miner" else kind.replace("_", " ").capitalize())
+	return {"ship": "Freighter", "miner": "Harvester", "colony_ship": "Colony"}.get(kind, kind.replace("_", " ").capitalize())
 
 func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
 	var points: Array = ECONOMY.military_graph(state)["points"] if ship.get("kind", "") == "fighter" else state["map"]["points"]
@@ -2173,7 +2174,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	slot.add_child(button)
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_buttons[id] = button
-	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E}[id], "Fleet", "fleet_" + id, hint)
+	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -2187,12 +2188,11 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	unload_button = _command_slot("unload", "Drop Cargo", _arm_command.bind("unload"))
 	_command_slot("repair", "Repair target", _arm_command.bind("repair"))
 	_command_slot("deliver_farm", "Deliver Organics to nearest station", _deliver_farm_selected)
-	while command_card.get_child_count() < 10:
-		_station_spacer(command_card)
-	for id in ["auto_farm", "auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair"]:
+	for id in ["collect", "auto_farm", "auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair"]:
 		var mode: String = AUTOCAST_SLOTS[id]
-		var title_text: String = "Wander" if mode == "wander" else "Auto-" + mode.capitalize()
-		var button: Button = _command_slot(id, title_text, _toggle_autocast.bind(mode))
+		var title_text: String = "Collect Antimatter" if mode == "collect" else ("Wander" if mode == "wander" else "Auto-" + mode.capitalize())
+		var action: Callable = _arm_command.bind("collect") if mode == "collect" else _toggle_autocast.bind(mode)
+		var button: Button = _command_slot(id, title_text, action)
 		button.gui_input.connect(_autocast_input.bind(mode, button))
 		var mask := Control.new()
 		mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2262,6 +2262,12 @@ func _refresh_autocast_cards() -> void:
 		if farm.get_parent() != farm_slot:
 			farm.reparent(farm_slot, false)
 			farm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if command_buttons.has("collect"):
+		var collect_button: Button = command_buttons["collect"]
+		var collect_slot: Control = command_card.get_child(9 if not _autocast_units(state, "mine").is_empty() else 13)
+		if collect_button.get_parent() != collect_slot:
+			collect_button.reparent(collect_slot, false)
+			collect_button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for id in AUTOCAST_SLOTS:
 		if not command_buttons.has(id):
 			continue
@@ -2276,7 +2282,7 @@ func _refresh_autocast_cards() -> void:
 				remaining = maxf(remaining, ECONOMY.autocast_remaining(state, ship, mode))
 		button.visible = not units.is_empty()
 		button.disabled = units.is_empty()
-		button.set_pressed_no_signal(enabled_count > 0)
+		button.set_pressed_no_signal(enabled_count > 0 or (mode == "collect" and pending_command == "collect"))
 		var border: Control = button.get_meta("auto_border")
 		border.visible = enabled_count > 0
 		border.queue_redraw()
@@ -2284,7 +2290,7 @@ func _refresh_autocast_cards() -> void:
 		var duration: float = ECONOMY.autocast_duration(mode)
 		mask.set_meta("fraction", remaining / duration if duration > 0.0 else 0.0)
 		mask.queue_redraw()
-		var title_text: String = "Wander" if mode == "wander" else "Auto-" + mode.capitalize()
+		var title_text: String = "Collect Antimatter" if mode == "collect" else ("Wander" if mode == "wander" else "Auto-" + mode.capitalize())
 		var status: String = "Off" if enabled_count == 0 else ("On" if enabled_count == units.size() else "%d/%d on" % [enabled_count, units.size()])
 		var speed: float = maxf(1.0, float(state.get("time_speed", 1)))
 		if remaining > ECONOMY.EPS:
@@ -2294,6 +2300,8 @@ func _refresh_autocast_cards() -> void:
 		button.tooltip_text += "\nCooldown: %.1f s at 1×" % duration
 		if mode == "wander":
 			button.tooltip_text += "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority."
+		elif mode == "collect":
+			button.tooltip_text = "%s · Auto: %s\nLeft click [%s], then choose a Pulsar. Right click toggles autocast.\nCollects 1 unit in %.0f s at 1×; auto cooldown %.0f s." % [title_text, status, shortcut, ECONOMY.SCIENCE_COLLECTION_YEARS, duration]
 		elif mode == "farm":
 			button.tooltip_text += "\nProduces %.0f t/s at 1×; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE
 
@@ -2338,6 +2346,19 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 				if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
 					eligible.append(int(craft["id"]))
 			_issue_order(eligible, {"kind": "salvage", "target": wreck}, append)
+	elif mode == "collect":
+		var state: Dictionary = _state()
+		var graph: Dictionary = ECONOMY.military_graph(state)
+		var field: int = int(minimap_hint.get("field", -1))
+		if minimap_hint.is_empty():
+			var node: int = ECONOMY.sector_at(graph, _world_point(point), ECONOMY.military_pois(state, _me()))
+			if node >= state["planets"].size():
+				field = node - state["planets"].size()
+		var eligible: Array[int] = []
+		for craft in _autocast_units(state, "collect"):
+			if ECONOMY._science_target_valid(state, graph, craft, field):
+				eligible.append(int(craft["id"]))
+		_issue_order(eligible, {"kind": "collect", "target": field}, append)
 	elif mode == "repair":
 		var target: int = _entity_hit(_state(), point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
 		if target != -1:
@@ -3827,7 +3848,7 @@ func _refresh_match_result(state: Dictionary) -> void:
 		if is_instance_valid(codex):
 			codex.hide()
 		match_result_dialog.title = "Empire defeated"
-		match_result_dialog.dialog_text = "Your empire has no remaining colony or colony ship."
+		match_result_dialog.dialog_text = "Your empire has no remaining settlement or Colony."
 		match_result_dialog.ok_button_text = "Observe match"
 		match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
 
@@ -3870,14 +3891,14 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
 	var neutral: bool = not p.is_empty() and int(p.get("owner", -1)) == 0 and phase == "match"
 	colony_picker.visible = neutral
 	send_colony_button.visible = neutral
-	send_colony_button.text = "SEND COLONY SHIP"
+	send_colony_button.text = "SEND COLONY"
 	var choices: Array[int] = []
 	var labels: Array[String] = []
 	if neutral:
 		for ship in state["ships"]:
 			if not ECONOMY.colony_path(state, _me(), ship, selected).is_empty():
 				choices.append(int(ship["id"]))
-				labels.append("Colony ship • %s" % _system_name(int(ship["at"])))
+				labels.append("Colony • %s" % _system_name(int(ship["at"])))
 	if choices != colony_choices or colony_picker.item_count == 0:
 		var previous: int = -1
 		if colony_picker.selected >= 0 and colony_picker.selected < colony_choices.size():
@@ -3887,7 +3908,7 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
 		for label_text in labels:
 			colony_picker.add_item(label_text)
 		if choices.is_empty():
-			colony_picker.add_item("No available colony ships")
+			colony_picker.add_item("No available Colonies")
 		else:
 			colony_picker.select(maxi(0, choices.find(previous)))
 	colony_picker.disabled = choices.is_empty()
@@ -5105,7 +5126,7 @@ func _map_input(event: InputEvent) -> void:
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
-					if pending_command in ["repair", "unload", "load", "rally"]:
+					if pending_command in ["repair", "unload", "load", "rally", "collect"]:
 						_execute_pending_command(mouse.position, mouse.shift_pressed)
 					elif not pending_command.is_empty() and pending_command not in ["move", "attack", "patrol"]:
 						pending_command = ""
@@ -6455,15 +6476,6 @@ func _draw_map() -> void:
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
 			var radius: float = maxf(5.0, (24.0 if ship["kind"] == "ship" else 15.0) * scale)
 			_draw_selection_ring(point, radius)
-			if scale >= 0.65:
-				var crew_text: String = _compact_amount(float(ship.get("crew", 0.0)))
-				var crew_font: Font = theme.default_font
-				if crew_font == null:
-					crew_font = ThemeDB.fallback_font
-				var crew_width: float = crew_font.get_string_size(crew_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-				var crew_pos: Vector2 = point + Vector2(-0.5 * (crew_width + 13.0), radius + 4.0)
-				map_canvas.draw_texture_rect(_population_texture(12), Rect2(crew_pos, Vector2(12, 12)), false)
-				map_canvas.draw_string(crew_font, crew_pos + Vector2(14, 11), crew_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#b9d9ed"))
 		# At a distant galaxy overview, the smallest authored edges can
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.

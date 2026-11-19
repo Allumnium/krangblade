@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.54.0: Collect Antimatter uses a dual-purpose icon (left target, right toggle); verify tooltip discoverability and mixed-fleet slot placement. Science holds remain non-unloadable pending antimatter usage design.
+
 - v0.53.7: Passive handoff uses pre-movement positions; very fast opposing ships could cross transfer range between simulation ticks. Monitor logistics throughput and whether staged or moving receivers compete fairly.
 
 - v0.53.6: Freighter 6 t/yr unloading follows its 3 t/yr salvage pickup rate; review throughput with 100 t holds and instantaneous warehouse loading. Sector pursuit can tie up fighters longer than the old three-year chase. Test dense fleet costs and boundary transitions.
