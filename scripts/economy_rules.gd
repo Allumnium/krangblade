@@ -109,6 +109,7 @@ const AI_WAVE_MIN: int = 3
 const AI_RALLY_RADIUS: float = 150.0
 const FORMATION_SPACING: float = 28.0
 const SHIP_SEPARATION_RADIUS: float = 45.0
+const FOLLOW_DISTANCE: float = SHIP_SEPARATION_RADIUS * 2.0
 const RALLY_ARRIVAL_RADIUS: float = SHIP_SEPARATION_RADIUS * 2.0
 const SHIP_SEPARATION_STRENGTH: float = 0.65
 const FORMATION_RADIUS: float = 105.0
@@ -2898,6 +2899,67 @@ static func _manual_nav(state: Dictionary, graph: Dictionary, ship: Dictionary, 
 		graph["civilian_manual_nav"] = {"points": state["map"]["points"], "adjacent": adjacent, "paths": {}}
 	return {"graph": graph["civilian_manual_nav"], "node": node}
 
+# A follow order references a stable hull ID and lasts until replaced. Reject
+# self-follow, hostile targets and cycles (including queued-order activation).
+static func _valid_follow_target(state: Dictionary, ship: Dictionary, target: int, refs: Dictionary) -> bool:
+	var ref: Dictionary = refs.get(target, {})
+	if ref.get("kind", "") != "ship" or not _friendly_target(state, int(ship["owner"]), ref):
+		return false
+	var seen: Dictionary = {int(ship["id"]): true}
+	var current: int = target
+	while current >= 0 and refs.has(current):
+		if seen.has(current):
+			return false
+		seen[current] = true
+		var other: Dictionary = refs[current]["entity"]
+		var order: Dictionary = other.get("unit_order", {})
+		if order.get("kind", "") != "follow":
+			break
+		current = int(order["target"])
+	return true
+
+static func _work_follow(state: Dictionary, graph: Dictionary, ship: Dictionary, refs: Dictionary, dt: float) -> bool:
+	var order: Dictionary = ship.get("unit_order", {})
+	if order.get("kind", "") != "follow":
+		return false
+	var target: int = int(order["target"])
+	var ref: Dictionary = refs.get(target, {})
+	if not _valid_follow_target(state, ship, target, refs):
+		ship.erase("unit_order")
+		ship.erase("follow_arrived")
+		_finish_manual(ship)
+		ship["navigation_target"] = ship["position"]
+		ship["arrival_wait_until"] = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
+		return true
+	var point: Vector2 = ref["position"]
+	var pos: Vector2 = ship["position"]
+	# Small deterministic spacing variation helps groups avoid occupying
+	# one point while retaining a predictable near-target standoff.
+	var reach: float = FOLLOW_DISTANCE + float(int(ship["id"]) % 4) * SHIP_SEPARATION_RADIUS * 0.5
+	var distance: float = pos.distance_to(point)
+	ship["follow_arrived"] = distance <= reach + EPS
+	if distance <= reach + EPS:
+		ship.erase("move_only")
+		ship["navigation_target"] = pos
+		# If the target comes towards us, make room without jittering on
+		# the outer edge. Keep the saved lane anchor for subsequent travel.
+		if distance < reach * 0.65:
+			var away: Vector2 = point.direction_to(pos)
+			if away.is_zero_approx():
+				away = Vector2.from_angle(float(ship["id"]) * 2.399963)
+			_navigate(ship, point + away * reach * 0.8, SHIP_SPEED * dt)
+		return true
+	ship["move_only"] = true
+	var node: int = _attack_destination(graph, ref["entity"])
+	if node < 0 or node >= graph["points"].size():
+		return true
+	# Approach the moving hull through the same lane routing as a manual
+	# move, limiting the final step to the current standoff distance.
+	var budget_dt: float = minf(dt, maxf(0.0, distance - reach) / SHIP_SPEED)
+	_manual_travel(state, graph, ship, node, point, budget_dt, reach)
+	ship["follow_arrived"] = (ship["position"] as Vector2).distance_to(point) <= reach + EPS
+	return true
+
 static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionary, node: int, point: Vector2, dt: float, reach: float = 0.0) -> bool:
 	var pos: Vector2 = ship["position"]
 	var nav: Dictionary = _manual_nav(state, graph, ship, node)
@@ -3196,6 +3258,7 @@ static func _set_unit_order(state: Dictionary, ship: Dictionary, order: Dictiona
 	ship.erase("arrival_wait_until")
 	ship.erase("manual_mine")
 	ship.erase("wander_cooldown_override")
+	ship.erase("follow_arrived")
 	ship["auto_cooldown_until"] = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
 	ship.erase("order_queue")
 	if order.is_empty():
@@ -3223,7 +3286,7 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 		"sector", "colonize":
 			if target >= 0 and target < graph["points"].size():
 				return graph["points"][target]
-		"attack":
+		"attack", "follow":
 			return service_targets(state).get(target, {}).get("position", Vector2.INF)
 		"repair", "deposit":
 			return service_targets(state).get(target, {}).get("position", Vector2.INF)
@@ -3266,6 +3329,8 @@ static func _unit_order_running(ship: Dictionary) -> bool:
 			return ship.has("local_move_target")
 		"sector":
 			return not (ship["route"] as Array).is_empty() or (not bool(order.get("move_only", false)) and _engaged(ship))
+		"follow":
+			return (ship.get("order_queue", []) as Array).is_empty() or not bool(ship.get("follow_arrived", false))
 		"attack":
 			return ship.has("attack_order")
 		"repair":
@@ -3316,6 +3381,9 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			return sector_contains(graph, target, ship["position"]) or _military_paths(nav["graph"], nav["node"])["distance"].has(int(ship["at"]))
 		"sector":
 			return military_pois(state, owner).has(target)
+		"follow":
+			var refs: Dictionary = service_targets(state)
+			return _valid_follow_target(state, ship, target, refs)
 		"attack":
 			return armed(ship) and _hostile_hull(state, owner, service_targets(state).get(target, {}))
 		"repair":
@@ -3334,6 +3402,21 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
+		"follow":
+			var units: Array = _owned_units(state, player, ids)
+			var refs: Dictionary = service_targets(state)
+			if units.is_empty() or units.any(func(ship: Dictionary) -> bool: return not _valid_follow_target(state, ship, target, refs)):
+				return false
+			for ship in units:
+				_cancel_salvage_order(ship)
+				_clear_tactical_order(ship)
+				_clear_local_hold(ship)
+				_interrupt_work(ship)
+				_set_unit_order(state, ship, order.duplicate(true))
+				# Retain an in-flight lane until the follow worker replans it.
+				ship["dest"] = -1
+				ship["move_only"] = true
+			return true
 		"sector_entry":
 			var graph: Dictionary = military_graph(state)
 			var center: Vector2 = graph["points"][target]
@@ -3432,6 +3515,9 @@ static func _advance_unit_orders(state: Dictionary, graph: Dictionary) -> void:
 		_mark_sector_arrival(state, ship)
 		if _unit_order_running(ship):
 			continue
+		if ship.get("unit_order", {}).get("kind", "") == "follow":
+			_finish_manual(ship)
+			ship.erase("follow_arrived")
 		ship.erase("unit_order")
 		var queue: Array = ship.get("order_queue", [])
 		while not queue.is_empty():
@@ -4329,7 +4415,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		if miner:
 			ship["mining_active"] = false
 		var weapon_damage: float = LASER_DAMAGE if fighter else MINER_LASER_DAMAGE
-		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
+		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or ship.get("unit_order", {}).get("kind", "") == "follow" or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
 		if bool(ship.get("retreating", false)) or moving_only or ship.has("cargo_order") or ship.has("repair_order"):
@@ -5105,7 +5191,7 @@ static func _move_formation(graph: Dictionary, ship: Dictionary, dt: float) -> b
 static func _formation_lane_groups(state: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
 	for craft in state["ships"]:
-		if craft.get("kind", "") != "fighter" or craft.has("launch_rally") or craft.has("local_move_target") or craft.has("attack_order") or craft.has("cargo_order") or _salvage_active(craft) or _engaged(craft) or bool(craft.get("retreating", false)) or bool(craft.get("holding", false)) or (craft["route"] as Array).is_empty():
+		if craft.get("kind", "") != "fighter" or craft.get("unit_order", {}).get("kind", "") == "follow" or craft.has("launch_rally") or craft.has("local_move_target") or craft.has("attack_order") or craft.has("cargo_order") or _salvage_active(craft) or _engaged(craft) or bool(craft.get("retreating", false)) or bool(craft.get("holding", false)) or (craft["route"] as Array).is_empty():
 			continue
 		var key: String = "%d:%d:%d:%d" % [int(craft.get("operation_id", 0)), int(craft["at"]), int(craft["route"][0]), int(craft.get("dest", -1))]
 		if not groups.has(key):
@@ -5237,7 +5323,7 @@ static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Diction
 			ship["operation_target"] = int(ship.get("hold_sector", site))
 
 static func _order_operation_ship(graph: Dictionary, ship: Dictionary, goal: int, paths: Dictionary) -> void:
-	if _salvage_active(ship) or ship.has("cargo_order") or ship.has("attack_order") or int(ship.get("dest", -1)) == goal:
+	if ship.get("unit_order", {}).get("kind", "") == "follow" or _salvage_active(ship) or ship.has("cargo_order") or ship.has("attack_order") or int(ship.get("dest", -1)) == goal:
 		return
 	if not paths.has(goal):
 		paths[goal] = _military_paths(graph, goal)
@@ -5318,7 +5404,7 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 # same-kind hulls share a moving local anchor and tangent-relative V slots.
 # Routing, docking, mining, combat and withdrawal always take precedence.
 static func _is_idle_ship(ship: Dictionary) -> bool:
-	if ship.has("resource_stage") or _salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally") or ship.has("patrol_from") or ship.has("attack_order") or ship.has("cargo_order") or ship.has("repair_order") or ship.has("repair_target"):
+	if ship.get("unit_order", {}).get("kind", "") == "follow" or ship.has("resource_stage") or _salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally") or ship.has("patrol_from") or ship.has("attack_order") or ship.has("cargo_order") or ship.has("repair_order") or ship.has("repair_target"):
 		return false
 	var fighter: bool = ship.get("kind", "") == "fighter"
 	var mode: String = str(ship.get("mining_mode", "idle"))
@@ -5519,6 +5605,9 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		var planned: Vector2 = ship["position"]
 		var held: bool = bool(ship.get("holding", false))
 		var local_moving: bool = ship.has("local_move_target")
+		# Follow owns its movement budget, including close-range backing off.
+		if ship.get("unit_order", {}).get("kind", "") == "follow":
+			continue
 		# Waiting hulls remain precise obstacles, but combat/withdrawal can move.
 		if not _engaged(ship) and ((arrival_wait_remaining(state, ship) > EPS and not (_is_idle_ship(ship) and autocast_ready(state, ship, "wander"))) or (_is_idle_ship(ship) and not autocast_ready(state, ship, "wander"))):
 			continue
@@ -5675,6 +5764,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if bool(ship.get("retreating", false)) and armed(ship):
 			ship.erase("repair_target")
 			_work_withdrawal(state, combat_graph, ship, dt)
+			continue
+		if _work_follow(state, combat_graph, ship, service_refs, dt):
 			continue
 		if ship.has("attack_order"):
 			var ref: Dictionary = service_refs.get(int(ship["attack_order"]), {})

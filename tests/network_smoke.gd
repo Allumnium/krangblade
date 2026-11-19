@@ -234,6 +234,13 @@ func _phase_changed() -> void:
 						hauler["next_resource_stage_search"] = float(state["elapsed"]) + 5.0
 						state["ships"].append(collector)
 						state["ships"].append(hauler)
+						var follow_leader: Dictionary = hauler.duplicate(true)
+						follow_leader.erase("resource_stage")
+						follow_leader.merge({"id": 988000 + index, "kind": "colony_ship", "position": haul_point + Vector2.LEFT * 180.0, "wander_auto": false, "cargo": ECON.empty_stock()}, true)
+						var follower: Dictionary = follow_leader.duplicate(true)
+						follower.merge({"id": 989000 + index, "position": haul_point + Vector2.LEFT * 380.0}, true)
+						state["ships"].append(follow_leader)
+						state["ships"].append(follower)
 						var point: Vector2 = graph["points"][index] + Vector2.RIGHT * minf(150.0, ECON.sector_limit(graph, index, Vector2.RIGHT) * 0.5)
 						var pile_id: int = 910000 + index
 						state["salvage"][pile_id] = {"id": pile_id, "resource": ECON.ANTIMATTER, "amount": 12.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
@@ -434,6 +441,7 @@ func _send_commands() -> void:
 	session.call("request_tactical_order", [own_fighters[0]], "patrol", -1)
 	var attack_id: int = 920000 + home_index
 	var service_id: int = 980000 + home_index
+	session.call("request_unit_orders", [{"ids": [989000 + home_index], "order": {"kind": "follow", "target": 988000 + home_index}}], false)
 	session.call("request_autocast", [service_id], "repair", false)
 	session.call("request_autocast", [service_id], "mine", false)
 	session.call("request_autocast", [service_id], "salvage", true)
@@ -674,6 +682,7 @@ func _check_economy_sync() -> void:
 							local_arrived = local_arrived or (not craft.has("local_move_target") and int(craft.get("operation_target", -1)) == owner_home and (craft["position"] as Vector2).is_equal_approx(local_point) and craft.get("heading", Vector2.ZERO) == Vector2.UP and ECON.arrival_wait_remaining(state, craft) > ECON.EPS and ECON.arrival_wait_remaining(state, craft) <= ECON.MOVE_ARRIVAL_WAIT_YEARS + ECON.EPS and not ECON._idle_formation_targets(state, graph).has(int(craft["id"])))
 			var assigned_miners: int = 0
 			var auto_salvage: bool = false
+			var follow_verified: bool = false
 			var resource_handoff: bool = false
 			var recipient_loaded: bool = false
 			var repair_toggled: bool = false
@@ -684,6 +693,8 @@ func _check_economy_sync() -> void:
 					assigned_miners += 1
 				if int(craft["id"]) == 930000 + owner_home:
 					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
+				if int(craft["id"]) == 989000 + owner_home:
+					follow_verified = craft.get("unit_order", {}).get("kind", "") == "follow" and int(craft["unit_order"]["target"]) == 988000 + owner_home and bool(craft.get("follow_arrived", false))
 				if int(craft["id"]) == 986000 + owner_home:
 					resource_handoff = ECON._cargo_total(craft) <= ECON.EPS
 				if int(craft["id"]) == 987000 + owner_home:
@@ -707,6 +718,7 @@ func _check_economy_sync() -> void:
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
 				"miner_repair_toggle": repair_toggled,
 				"miner_resource_handoff": resource_handoff and recipient_loaded,
+				"persistent_follow": follow_verified,
 				"miner_repaired": repaired,
 				"miner_deposited": deposited,
 				"local_move_order": local_moving,

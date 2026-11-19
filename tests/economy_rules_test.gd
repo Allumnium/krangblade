@@ -427,6 +427,7 @@ func _initialize() -> void:
 	_test_sector_entry_orders()
 	_test_autocast_modes()
 	_test_resource_handoff()
+	_test_follow_order()
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
 	_test_soft_separation()
@@ -2183,6 +2184,47 @@ func _test_unit_order_queue() -> void:
 		ECON.step(state, 0.1)
 		assert(ship["position"] == sector_arrival)
 	print("PASS: sequential orders, queue limits, formation facing, 30-year precise and sector arrival waits, hold override")
+
+func _test_follow_order() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	state["ships"].clear()
+	for k in range(2):
+		state["ships"].append({"id": 9840 + k, "owner": 1, "kind": "fighter" if k == 0 else "colony_ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(0, 350 * k), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "wander_auto": false, "salvage_auto": false})
+	var follower: Dictionary = state["ships"][0]
+	var leader: Dictionary = state["ships"][1]
+	var order: Dictionary = {"kind": "follow", "target": 9841}
+	assert(not ECON.issue_unit_order(state, 2, [9840], order, false))
+	assert(not ECON.issue_unit_order(state, 1, [9840], {"kind": "follow", "target": 9840}, false))
+	assert(not ECON.issue_unit_order(state, 1, [9840], {"kind": "follow", "target": 99999}, false))
+	assert(ECON.issue_unit_order(state, 1, [9840], order, false))
+	assert(not ECON.issue_unit_order(state, 1, [9841], {"kind": "follow", "target": 9840}, false))
+	for tick in range(150):
+		ECON.step(state, 0.1)
+		if bool(follower.get("follow_arrived", false)):
+			break
+	assert(bool(follower.get("follow_arrived", false)))
+	var resting: Vector2 = follower["position"]
+	for tick in range(20):
+		ECON.step(state, 0.1)
+		assert(follower["position"].is_equal_approx(resting))
+	assert(ECON._unit_order_running(follower))
+	assert(ECON.issue_unit_order(state, 1, [9841], {"kind": "position", "target": 1, "point": map["points"][1], "move_only": true}, false))
+	for tick in range(1000):
+		var before: Vector2 = follower["position"]
+		ECON.step(state, 0.1)
+		assert(before.distance_to(follower["position"]) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+		if not leader.has("local_move_target") and bool(follower.get("follow_arrived", false)):
+			break
+	assert((follower["position"] as Vector2).distance_to(leader["position"]) <= ECON.FOLLOW_DISTANCE + 1.0)
+	assert(ECON._unit_order_running(follower))
+	assert(ECON.command_hold_units(state, 1, [9840], false))
+	assert(follower.get("unit_order", {}).get("kind", "") != "follow")
+	assert(ECON.issue_unit_order(state, 1, [9840], order, false))
+	state["ships"].erase(leader)
+	ECON.step(state, 0.1)
+	assert(follower.get("unit_order", {}).get("kind", "") != "follow")
+	print("PASS: persistent friendly follow, standoff, lane travel, cycle/ownership validation and cancellation")
 
 func _test_resource_handoff() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
