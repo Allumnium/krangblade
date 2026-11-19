@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.56.10: Verify live planetary production details match particles, including undefended planets, blockade and multiple matching bodies.
+
 - [ ] v0.56.8: Verify one command tooltip, fast delay, cost/crew rows, hover transitions and ordinary native tooltips.
 
 - [ ] v0.56.7: Validate production blockade and resumption, friendly presence, orbital output, particle origins and peer synchronization.

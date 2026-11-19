@@ -2205,8 +2205,22 @@ func _refresh_body_overview(system: Dictionary) -> void:
 	body_title.text = _body_name(selected, selected_body)
 	body_context.text = "%s\n%s" % [_system_name(selected), owner_name]
 	var has_battery: bool = system.get("pds", {}).has(selected_body)
-	body_status.text = "Planetary defense · Operational" if has_battery else ""
-	body_status.visible = has_battery
+	var bodies: Array = _system_visual(selected, _state())["bodies"]
+	var lines: PackedStringArray = []
+	for resource in ECONOMY.ACTIVE_PRODUCTION:
+		var sources: Array = _planet_production_sources(bodies, resource)
+		if not sources.has(selected_body):
+			continue
+		var output: float = _planet_production_rate(system, resource) / float(sources.size())
+		lines.append("%s · %.2f t/yr" % [resource, output])
+	if lines.is_empty():
+		lines.append("No resource production")
+	if bool(system.get("planet_blockaded", false)):
+		lines.append("Planetary production blockaded")
+	if has_battery:
+		lines.append("PDS · Operational")
+	body_status.text = "\n".join(lines)
+	body_status.visible = true
 
 func _build_fleet_cargo_row() -> void:
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
@@ -4437,6 +4451,23 @@ func _draw_star(index: int, pos: Vector2, radius: float, tint: Color, cool: bool
 		map_canvas.draw_line(point - axis * minf(5.0, radius * 0.045), point, Color(spark_color, fade * 0.26), maxf(0.7, spark_size * 0.65), true)
 		map_canvas.draw_circle(point, spark_size, Color(spark_color, fade * 0.54), true, -1.0, true)
 
+func _planet_production_sources(bodies: Array, resource: String) -> Array:
+	var sources: Array = []
+	for slot in range(bodies.size()):
+		if bodies[slot]["resource"] == resource:
+			sources.append(slot)
+	if sources.is_empty() and not bodies.is_empty():
+		sources.append(0)
+	return sources
+
+func _planet_production_rate(system: Dictionary, resource: String) -> float:
+	if not ECONOMY.has_station(system) or bool(system.get("planet_blockaded", false)):
+		return 0.0
+	var output: float = ECONOMY.local_flow(system, "Production", resource)
+	if resource == "Organics":
+		output = maxf(0.0, output - ECONOMY.eco_organics(system))
+	return output
+
 func _draw_planet_production(state: Dictionary, index: int, center: Vector2, radius: float, detail: float) -> void:
 	var system: Dictionary = state["planets"][index]
 	if detail < 0.05 or not ECONOMY.has_station(system) or bool(system.get("planet_blockaded", false)):
@@ -4446,17 +4477,10 @@ func _draw_planet_production(state: Dictionary, index: int, center: Vector2, rad
 		return
 	var elapsed: float = _orbit_time(state)
 	for resource in ECONOMY.ACTIVE_PRODUCTION:
-		var output: float = ECONOMY.local_flow(system, "Production", resource)
-		if resource == "Organics":
-			output = maxf(0.0, output - ECONOMY.eco_organics(system))
+		var output: float = _planet_production_rate(system, resource)
 		if output <= ECONOMY.EPS:
 			continue
-		var sources: Array = []
-		for slot in range(bodies.size()):
-			if bodies[slot]["resource"] == resource:
-				sources.append(slot)
-		if sources.is_empty():
-			sources.append(0)
+		var sources: Array = _planet_production_sources(bodies, resource)
 		var color: Color = HUD.COLORS[resource]
 		var bay: int = clampi(floori(float(system["stock"][resource]) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system)) * ECONOMY.STATION_STORAGE_BAYS), 0, ECONOMY.STATION_STORAGE_BAYS - 1)
 		var destination: Vector2 = _station_bay_point(_screen_point(ECONOMY.station_position(state, index, elapsed)), _station_radius(), elapsed, resource, bay)
