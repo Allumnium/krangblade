@@ -366,7 +366,7 @@ func _draw_chart(canvas: Control, population: bool) -> void:
 		canvas.draw_polyline(points, SERIES_COLORS[series], 2.5, true)
 
 func _mining() -> void:
-	_body("Harvesters extract ore and transfer it to nearby freighters, even while traveling (10 Harvester holds per freighter), or return to an owned depot. Cargo enters storage gradually within docking range; ships seek separated berths near the edge of transfer range. Select a Harvester and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
+	_body("Harvesters extract ore and transfer it to nearby freighters, even while traveling (10 Harvester holds per freighter), or return to an owned depot. Cargo enters storage gradually within doubled docking and handoff range; ships seek separated berths near the edge of transfer range. Select a Harvester and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
 	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Local resource ceiling", "%.0f t/yr" % E.PLANET_MINING_LIMIT], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
@@ -388,7 +388,7 @@ func _trade() -> void:
 	_note("Empire totals include cargo in transit, but local construction uses delivered stock. Protect supply routes and avoid exporting essential food reserves.")
 
 func _expansion() -> void:
-	_body("Build a Colony and direct it to a reachable neutral system. On arrival it establishes a station and shipyard. Settlers become the new colony population; existing colonies cannot be freely claimed.")
+	_body("Build a Colony and direct it to a reachable neutral system. When it arrives, press Transform (J) to establish a station and shipyard. Settlers become the new colony population; existing colonies cannot be freely claimed.")
 	_flow(["Recruit settlers", "Travel", "Establish colony"])
 	_body("Colonies farm %.0f t/yr into a %.0f t Organics hold. Auto-Farm delivers full loads when idle; Deliver Organics or right-click a friendly station to unload early. They cannot salvage." % [E.COLONY_FARM_RATE, E.COLONY_CAPACITY])
 	_table(["Colony", "Requirement"], [["Crew", "%.0f people" % E.COLONY_POPULATION], ["Materials", _recipe(E._cost("colony_ship", 1))], ["Base build time", "%.0f years" % (E._work("colony_ship", 1) / E.yard_speed(1))]])
@@ -412,7 +412,7 @@ func _infrastructure() -> void:
 	_body("Warehouse upgrades expand storage; habitation increases terrestrial housing capacity. Orbital Eco-Housing adds self-sufficient residents in planetless systems. Additional shipyards also supply eco-housing.")
 
 func _ships() -> void:
-	_body("Small yards (Lv 1) build Harvesters and Fighters; Medium (Lv 2) adds Freighters and Colonies; Large (Lv 3) adds Science vessels. Start with one Freighter. Costs are paid from the local station. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship selection displays crew. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
+	_body("Small yards (Lv 1) build Harvesters and Fighters; Medium (Lv 2) adds Freighters and Colonies; Large (Lv 3) adds Science vessels. Start with one Freighter. Costs are paid from the local station. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship details show crew, lifetime kills, cargo pickup/dropoff tonnage and Colony food production. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
 	var names := {"fighter": "Fighter", "miner": "Harvester", "ship": "Freighter", "colony_ship": "Colony", "science_ship": "Science vessel"}
 	for kind in ["fighter", "miner", "ship", "colony_ship", "science_ship"]:
@@ -434,7 +434,7 @@ func _combat() -> void:
 
 func _controls() -> void:
 	_note("Default hotkeys. Menu → Hotkeys changes bindings; camera speed sliders adjust keyboard, mouse edge and wheel zoom.")
-	_table(["Input", "Action"], [["Left click / drag", "Select a ship, structure or fleet"], ["Shift + select", "Add to selection"], ["Right click / drag", "Contextual order / formation"], ["Right click friendly ship", "Guard (fighters) / Follow (others)"], ["A / M / P, then click", "Attack / move / patrol"], ["S / H", "Stop / hold"], ["L / D / R, then click", "Load / drop cargo / repair"], ["Y, then click / X", "Set / clear shipyard rally"], ["Shift + order", "Queue an order"], ["Arrows / screen edge / middle drag", "Pan camera"], ["Mouse wheel", "Zoom; ships enlarge up to 12×, structures up to 4×"], ["F", "Follow or focus selection"], ["F2", "Select all owned fighters"], ["Double F2", "Center military selection"], ["Ctrl + 0–9", "Assign control group"], ["Shift + 0–9", "Add selection to group"], ["0–9 / double tap", "Recall / center group"], ["B / T (station)", "Build / trade"], ["Esc", "Cancel targeting, return or menu"]])
+	_table(["Input", "Action"], [["Left click / drag", "Select a ship, structure or fleet"], ["Shift + select", "Add to selection"], ["Right click / drag", "Contextual order / formation"], ["Right click friendly ship", "Guard (fighters) / Follow (others)"], ["A / M / P, then click", "Attack / move / patrol"], ["S / H", "Stop / hold"], ["L / D / R, then click", "Load / drop cargo / repair"], ["Y, then click / X", "Set / clear shipyard rally"], ["Shift + order", "Queue an order"], ["Arrows / screen edge / middle drag", "Pan camera"], ["Mouse wheel", "Zoom; ships enlarge up to 12×, structures up to 4×"], ["F", "Follow or focus selection"], ["F2", "Select all owned fighters"], ["Double F2", "Center military selection"], ["Ctrl + 0–9", "Assign control group"], ["Shift + 0–9", "Add selection to group"], ["0–9 / double tap", "Recall / center group (1 station, 2 yard initially)"], ["B / T (station)", "Build / trade"], ["Esc", "Cancel targeting, return or menu"]])
 	_body("Wander, Auto-Mine, Auto-Salvage, Auto-Repair, Auto-Trade and Auto-Farm toggle with either mouse button. Modes occupy the bottom row (extra modes above for mixed fleets). Collect Antimatter uses left-click targeting and right-click autocast. Lit borders show enabled modes; clock masks show cooldown. Enabling Wander clears its cooldown only; active orders and Hold take priority.")
 	_body("Click a star to target its sector boundary; drag from a star to target the whole sector. Alt forces precise positioning. Use the minimap to navigate or issue contextual orders. Command-card buttons expose additional actions and tooltips; right-click eligible production cards to repeat.")
 

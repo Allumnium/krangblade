@@ -1545,6 +1545,7 @@ func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
 		"auto_salvage": '<path fill="#9ccfc5" d="M4 4H8V14Q8 21 16 21Q24 21 24 14V4H28V15Q28 27 16 27Q4 27 4 15Z"/><path fill="#d3e4eb" d="M13 4L21 6L18 13L10 11Z"/><path fill="#ffcd81" d="M12 14L16 18L12 22L8 18Z"/>',
 		"move": '<path fill="#9ed9f6" d="M3 12H18V5L30 16L18 27V20H3Z"/><path fill="#edfaff" d="M5 13H19V9L26 15H5Z"/>',
 		"stop": '<rect x="6" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/><rect x="18" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/>',
+		"transform": '<circle cx="16" cy="16" r="12" stroke="#a3d6e9" stroke-width="3" fill="none"/><rect x="12" y="12" width="8" height="8" fill="#a3d6e9"/><path d="M16 2V10M16 22V30M2 16H10M22 16H30" stroke="#a3d6e9" stroke-width="3"/>',
 		"guard": '<path fill="#a3d6e9" d="M16 2L29 7V17Q27 26 16 30Q5 26 3 17V7Z"/><path fill="#243d52" d="M16 7L24 10V17Q22 23 16 26Q10 23 8 17V10Z"/><path stroke="#a7e9c5" stroke-width="3" fill="none" d="M10 16L14 20L23 11"/>',
 		"hold": '<rect x="5" y="5" width="22" height="22" rx="2" fill="#c1d4e2"/><rect x="10" y="10" width="12" height="12" rx="1" fill="#334c60"/>',
 		"patrol": '<path fill="#bc9df1" d="M3 12A13 13 0 0 1 24 6L28 2V14H16L20 10A7 7 0 0 0 9 13ZM29 20A13 13 0 0 1 8 26L4 30V18H16L12 22A7 7 0 0 0 23 19Z"/>',
@@ -2186,7 +2187,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	active_border.draw.connect(_draw_active_command.bind(active_border))
 	active_border.visible = false
 	button.set_meta("active_border", active_border)
-	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U}[id], "Fleet", "fleet_" + id, hint)
+	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -2220,6 +2221,7 @@ func _build_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 	_fill_ability_grid(command_card)
 	_command_slot("guard", "Guard sector · return to the chosen point after combat", _arm_command.bind("guard"))
+	_command_slot("transform", "Transform into Space Station", _transform_selected)
 
 func _autocast_units(state: Dictionary, mode: String) -> Array:
 	var units: Array = []
@@ -2779,6 +2781,16 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		elif ship.get("unit_order", {}).get("kind", "") == "collect":
 			var years: float = float(ship.get("science_years", 0.0))
 			status = "Collecting antimatter · %.1f / %.0f yr" % [years, ECONOMY.SCIENCE_COLLECTION_YEARS] if years > 0.0 else "Approaching Pulsar"
+	if ECONOMY.armed(ship):
+		status += "\nKills: %d" % int(ship.get("kills", 0))
+	if ECONOMY.cargo_capacity(kind) > ECONOMY.EPS:
+		var picked: float = float(ship.get("tons_picked", 0.0))
+		var dropped: float = float(ship.get("tons_dropped", 0.0))
+		status += "\nCargo handled: %.1f t (↑ %.1f / ↓ %.1f)" % [picked + dropped, picked, dropped]
+	if kind == "colony_ship":
+		status += "\nFood produced: %.1f t" % float(ship.get("food_produced", 0.0))
+		if ECONOMY.can_transform_colony(state, ECONOMY.military_graph(state), ship):
+			status += "\nReady to establish station"
 	ship_detail.text = status
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
@@ -2820,6 +2832,16 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_miners) and (id not in ["load", "unload"] or has_cargo_hold)
 		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] == "fighter")) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+	var transform: Button = command_buttons["transform"]
+	var transform_extra: Control = command_card.get_child(17)
+	var transform_slot: Control = transform_extra if has_miners else command_card.get_child(7)
+	if transform.get_parent() != transform_slot:
+		transform.reparent(transform_slot, false)
+		transform.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	transform_extra.visible = has_farm and has_miners
+	transform.visible = has_farm
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY.can_transform_colony(state, graph, craft))
 	command_buttons["deliver_farm"].visible = has_farm
 	command_buttons["deliver_farm"].disabled = not loaded_farm
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
@@ -3515,6 +3537,9 @@ func _refresh() -> void:
 			if int(planets[i]["owner"]) == _me() and bool(planets[i].get("home", false)):
 				initial_selection_done = true
 				selected = i
+				control_groups[1] = {"kind": "station", "refs": {Vector2i(i, 0): 0}}
+				if not planets[i]["yards"].is_empty():
+					control_groups[2] = {"kind": "shipyard", "refs": {Vector2i(i, 0): planets[i]["yards"].size()}}
 				# Center the initial camera on the player's home system.
 				_frame_starting_sector(i)
 				# The first snapshot can arrive before the HUD containers have
@@ -5050,6 +5075,16 @@ func _hold_selected() -> void:
 	if not owned.is_empty():
 		session.call("request_unit_hold", owned, _any_selected_holding())
 	_refresh_command_mode()
+
+func _transform_selected() -> void:
+	var state: Dictionary = _state()
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var ids: Array[int] = []
+	for ship in state["ships"]:
+		if selected_units.has(int(ship["id"])) and int(ship["owner"]) == _me() and ECONOMY.can_transform_colony(state, graph, ship):
+			ids.append(int(ship["id"]))
+	if not ids.is_empty():
+		_issue_order(ids, {"kind": "transform"})
 
 func _deliver_farm_selected() -> void:
 	var ids: Array[int] = []
