@@ -2554,6 +2554,11 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Delivering salvage" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for salvage storage"
 	elif int(ship.get("auto_salvage_target", -1)) >= 0:
 		status += " · Salvaging" if bool(ship.get("tractor_active", false)) else " · Approaching debris"
+	if ship.has("resource_stage"):
+		var stage: Dictionary = ship["resource_stage"]
+		status = "Approaching resource site" if (ship["position"] as Vector2).distance_to(stage["point"]) > ECONOMY.RESOURCE_HANDOFF_RANGE else "Awaiting resource cargo"
+	elif bool(ship.get("resource_haul", false)):
+		status = "Hauling resources" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for resource storage"
 	var wait_left: float = ECONOMY.arrival_wait_remaining(state, ship)
 	if wait_left > ECONOMY.EPS and not ECONOMY._engaged(ship) and not bool(ship.get("retreating", false)):
 		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)

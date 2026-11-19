@@ -225,6 +225,15 @@ func _phase_changed() -> void:
 						repair_victim.merge({"id": 990000 + index, "kind": "ship", "position": repair_point + Vector2.RIGHT * 40, "hp": ECON.SHIP_HP - 12.0, "cargo": ECON.empty_stock()}, true)
 						state["ships"].append(repairer)
 						state["ships"].append(repair_victim)
+						var haul_point: Vector2 = graph["points"][index] + Vector2.UP * minf(200.0, ECON.sector_limit(graph, index, Vector2.UP) * 0.4)
+						var collector: Dictionary = repairer.duplicate(true)
+						collector.merge({"id": 986000 + index, "position": haul_point, "holding": false, "cargo": ECON.empty_stock(), "mine_auto": false, "salvage_auto": false, "repair_auto": false, "wander_auto": false}, true)
+						collector["cargo"]["Metals"] = ECON.CARGO_CAPACITY
+						var hauler: Dictionary = repair_victim.duplicate(true)
+						hauler.merge({"id": 987000 + index, "position": haul_point, "holding": false, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "salvage_auto": false, "resource_stage": {"node": index, "anchor": index, "point": haul_point, "salvage_site": true}}, true)
+						hauler["next_resource_stage_search"] = float(state["elapsed"]) + 5.0
+						state["ships"].append(collector)
+						state["ships"].append(hauler)
 						var point: Vector2 = graph["points"][index] + Vector2.RIGHT * minf(150.0, ECON.sector_limit(graph, index, Vector2.RIGHT) * 0.5)
 						var pile_id: int = 910000 + index
 						state["salvage"][pile_id] = {"id": pile_id, "resource": ECON.ANTIMATTER, "amount": 12.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
@@ -498,6 +507,19 @@ func _check_economy_sync() -> void:
 	var state: Dictionary = session.get("economy")
 	var test_miner: Dictionary = {}
 	var test_victim: Dictionary = {}
+	var handoff_collectors: Dictionary = {}
+	var handoff_haulers: Dictionary = {}
+	for hull in state["ships"]:
+		var hull_id: int = int(hull["id"])
+		if hull_id >= 986000 and hull_id < 986100:
+			handoff_collectors[int(hull["owner"])] = hull
+		elif hull_id >= 987000 and hull_id < 987100:
+			handoff_haulers[int(hull["owner"])] = hull
+	for owner in handoff_collectors:
+		if handoff_haulers.has(owner) and ECON._cargo_total(handoff_collectors[owner]) <= ECON.EPS and ECON._cargo_total(handoff_haulers[owner]) >= ECON.CARGO_CAPACITY - ECON.EPS:
+			var observed: Dictionary = observed_commands.get(owner, {})
+			observed["miner_resource_handoff"] = true
+			observed_commands[owner] = observed
 	for hull in state["ships"]:
 		if int(hull["id"]) == 970000:
 			test_miner = hull
@@ -652,6 +674,8 @@ func _check_economy_sync() -> void:
 							local_arrived = local_arrived or (not craft.has("local_move_target") and int(craft.get("operation_target", -1)) == owner_home and (craft["position"] as Vector2).is_equal_approx(local_point) and craft.get("heading", Vector2.ZERO) == Vector2.UP and ECON.arrival_wait_remaining(state, craft) > ECON.EPS and ECON.arrival_wait_remaining(state, craft) <= ECON.MOVE_ARRIVAL_WAIT_YEARS + ECON.EPS and not ECON._idle_formation_targets(state, graph).has(int(craft["id"])))
 			var assigned_miners: int = 0
 			var auto_salvage: bool = false
+			var resource_handoff: bool = false
+			var recipient_loaded: bool = false
 			var repair_toggled: bool = false
 			var repaired: bool = false
 			var deposited: bool = false
@@ -660,6 +684,10 @@ func _check_economy_sync() -> void:
 					assigned_miners += 1
 				if int(craft["id"]) == 930000 + owner_home:
 					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
+				if int(craft["id"]) == 986000 + owner_home:
+					resource_handoff = ECON._cargo_total(craft) <= ECON.EPS
+				if int(craft["id"]) == 987000 + owner_home:
+					recipient_loaded = ECON._cargo_total(craft) >= ECON.CARGO_CAPACITY - ECON.EPS
 				if int(craft["id"]) == 980000 + owner_home:
 					repair_toggled = not ECON.autocast_enabled(craft, "repair") and not ECON.autocast_enabled(craft, "mine") and ECON.autocast_enabled(craft, "salvage") and not ECON.autocast_enabled(craft, "wander")
 					deposited = float(craft["cargo"].get(ECON.ANTIMATTER, 0.0)) <= ECON.EPS and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 15.0 - ECON.EPS
@@ -678,6 +706,7 @@ func _check_economy_sync() -> void:
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
 				"miner_repair_toggle": repair_toggled,
+				"miner_resource_handoff": resource_handoff and recipient_loaded,
 				"miner_repaired": repaired,
 				"miner_deposited": deposited,
 				"local_move_order": local_moving,
