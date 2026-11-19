@@ -2110,7 +2110,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		if level >= target_level:
 			_set_cost_tooltip(upgrade, ECONOMY.size_name(target_level) + " unlocked")
 		else:
-			var hint: String = "Upgrade to %s · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), ECONOMY.yard_speed(target_level - 1) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.SHIP_HP * 10.0 * (target_level - 1), ECONOMY.SHIP_HP * 10.0 * target_level]
+			var hint: String = "Upgrade to %s · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), ECONOMY.yard_speed(target_level - 1) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP * (target_level - 1), ECONOMY.YARD_HP * target_level]
 			if not eligible:
 				hint += "\nRequires " + ECONOMY.size_name(target_level - 1) + " shipyard"
 			_set_cost_tooltip(upgrade, hint, ECONOMY._cost("yard_upgrade", target_level), 0.0, _available_cost_resources(system, selected_yard))
@@ -2747,7 +2747,7 @@ func _refresh_selection_portrait(ship: Dictionary, system: Dictionary, body_sele
 		if yard_selected:
 			var yard: Dictionary = system["yards"][selected_yard]
 			kind = "shipyard"
-			maximum = ECONOMY.SHIP_HP * 10.0 * int(yard["level"])
+			maximum = ECONOMY.YARD_HP * int(yard["level"])
 			hp = float(yard.get("hp", maximum))
 		elif body_selected:
 			var battery: Dictionary = system.get("pds", {}).get(selected_body, {})
@@ -3215,7 +3215,7 @@ void fragment() {
 	int winner = int(site.w + 0.5);
 	float distance_to_center = sqrt(best_sq);
 	float d = distance_to_center - site.z;
-	if (winner > 0 && d <= 0.0 && site_index >= 0) {
+	if (d <= 0.0 && site_index >= 0) {
 		// Same two smallest radial bounds as ECONOMY.sector_limit.
 		vec2 ray = (p - site.xy) / max(distance_to_center, 0.0000001);
 		float limit = site.z;
@@ -3242,7 +3242,7 @@ void fragment() {
 	}
 	float inside = 1.0 - smoothstep(-aa, 0.0, d);
 	float border = inside * smoothstep(-aa * 2.8, -aa * 1.1, d);
-	COLOR = vec4(team_color(winner), winner > 0 ? inside * 0.10 + border * 0.45 : 0.0);
+	COLOR = winner > 0 ? vec4(team_color(winner), inside * 0.10 + border * 0.45) : vec4(vec3(0.60, 0.68, 0.76), border * 0.20);
 }
 """
 	territory_material = ShaderMaterial.new()
@@ -3302,15 +3302,13 @@ func _refresh_territory(state: Dictionary) -> void:
 	territory_last = claims
 	var points: Array = ECONOMY.military_graph(state)["points"]
 	var sites: Array[Color] = []
-	var has_claim: bool = false
 	for i in range(points.size()):
 		var point: Vector2 = points[i]
 		var radius: float = float(graph["sector_radii"][i]) / territory_radius
-		has_claim = has_claim or claims[i] > 0
 		# Neutral centers clip their neighbors exactly like the simulation.
 		sites.append(Color(point.x / territory_radius, point.y / territory_radius, radius, float(claims[i])))
 	territory_site_count = sites.size()
-	if not has_claim:
+	if sites.is_empty():
 		territory_image.hide()
 		return
 	var data: Image = Image.create_empty(sites.size(), 1, false, Image.FORMAT_RGBAF)
@@ -3326,7 +3324,7 @@ func _refresh_territory(state: Dictionary) -> void:
 	territory_image.show()
 	_position_territory()
 
-# Conservative tile mask: only tiles near a claimed sector disk need
+# Conservative tile mask: tiles near any sector disk need
 # shading. All POI centers still participate in the nearest-site test.
 func _cache_territory_tiles(sites: Array[Color], extent: Vector2) -> void:
 	var dimensions := Vector2i(maxi(1, ceili(extent.x)), maxi(1, ceili(extent.y)))
@@ -3339,9 +3337,7 @@ func _cache_territory_tiles(sites: Array[Color], extent: Vector2) -> void:
 			var team: int = roundi(site.a)
 			counts[team] = int(counts.get(team, 0)) + 1
 	for site in sites:
-		if site.a <= 0.0:
-			continue
-		var reach: float = site.b + 0.12 * float(counts[roundi(site.a)]) + 2.0
+		var reach: float = site.b + 0.12 * float(counts.get(roundi(site.a), 0)) + 2.0
 		var center := Vector2(site.r, site.g) + Vector2.ONE * 1.5
 		var low: Vector2 = (center - Vector2.ONE * reach) / cell
 		var high: Vector2 = (center + Vector2.ONE * reach) / cell
@@ -5006,7 +5002,7 @@ func _refresh_building_group(state: Dictionary) -> void:
 			building_group_rows[ref] = row
 		var button: Button = building_group_rows[ref]
 		var name_text: String = "%s · Shipyard %d · Lv %d" % [_system_name(ref.x), ECONOMY.shipyard_port(system, ref.y), int(system["yards"][ref.y]["level"])] if kind == "shipyard" else _system_name(ref.x) + " · Space Station" if kind == "station" else _body_name(ref.x, ref.y)
-		var maximum: float = ECONOMY.station_max_hp(system) if kind == "station" else ECONOMY.PDS_HP if kind == "pds" else ECONOMY.SHIP_HP * 10.0 * int(system["yards"][ref.y]["level"])
+		var maximum: float = ECONOMY.station_max_hp(system) if kind == "station" else ECONOMY.PDS_HP if kind == "pds" else ECONOMY.YARD_HP * int(system["yards"][ref.y]["level"])
 		var entity: Dictionary = system["station"] if kind == "station" else system["pds"][ref.y] if kind == "pds" else system["yards"][ref.y]
 		var hp: float = float(entity.get("hp", maximum))
 		var tint: Color = _health_color(clampf(hp / maximum, 0.0, 1.0))
@@ -6514,7 +6510,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 					map_canvas.draw_line(light - lateral * 3.0, light + lateral * 3.0, tint.lightened(0.4), maxf(0.7, scale), true)
 		if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
 			_draw_selection_ring(point, maxf(9.0, 23.0 * scale))
-		var health: float = float(yard.get("hp", ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))) / (ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))
+		var health: float = float(yard.get("hp", ECONOMY.YARD_HP * int(yard["level"]))) / (ECONOMY.YARD_HP * int(yard["level"]))
 		_draw_damage_bar(point, maxf(8.0, 22.0 * scale), health)
 		for job in planet["queue"]:
 			if int(job["id"]) != int(yard["job"]):

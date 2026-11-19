@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.59.1: Higher HP with unchanged damage/repair rates lengthens engagements and repairs, especially station assaults. Neutral territory outlines expand shader coverage; profile large maps.
+
 - v0.59.0: Fighter sustained damage falls from 18 to ~5.33 HP/s at 1×; watch combat pacing, AI waves and station assault balance. Blaster projectiles are cosmetic tracers of authoritative immediate damage, avoiding per-projectile replication.
 
 - v0.58.10: Larger capital art preserves existing physical avoidance and combat ranges; observe visual overlap and consider size-aware formation spacing separately if needed.

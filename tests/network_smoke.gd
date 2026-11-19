@@ -228,7 +228,7 @@ func _phase_changed() -> void:
 						var repairer: Dictionary = {"id": 980000 + index, "kind": "miner", "owner": system["owner"], "origin": index, "at": index, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": repair_point, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock(), "mining_mode": "delivery", "field": -1}
 						repairer["cargo"][ECON.ANTIMATTER] = 3.0
 						var repair_victim: Dictionary = repairer.duplicate(true)
-						repair_victim.merge({"id": 990000 + index, "kind": "ship", "position": repair_point + Vector2.RIGHT * 40, "hp": ECON.SHIP_HP - 12.0, "cargo": ECON.empty_stock()}, true)
+						repair_victim.merge({"id": 990000 + index, "kind": "ship", "position": repair_point + Vector2.RIGHT * 40, "hp": ECON.FREIGHTER_HP - 12.0, "cargo": ECON.empty_stock()}, true)
 						state["ships"].append(repairer)
 						state["ships"].append(repair_victim)
 						var haul_point: Vector2 = graph["points"][index] + Vector2.UP * minf(200.0, ECON.sector_limit(graph, index, Vector2.UP) * 0.4)
@@ -660,7 +660,7 @@ func _check_economy_sync() -> void:
 				elif job["kind"] == "miner" and bool(job.get("automatic", false)):
 					repeat_miner = true
 			for ship in state["ships"]:
-				if not ship.has("hp") or float(ship["hp"]) <= 0.0 or float(ship["hp"]) > ECON.SHIP_HP:
+				if not ship.has("hp") or float(ship["hp"]) <= 0.0 or float(ship["hp"]) > ECON.ship_max_hp(str(ship["kind"])):
 					_fail("Replicated hull hit points are invalid.")
 					return
 				if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship" and int(ship["id"]) > expected_players * 6 and int(ship["id"]) < 900000:
@@ -755,7 +755,7 @@ func _check_economy_sync() -> void:
 					repair_toggled = not ECON.autocast_enabled(craft, "repair") and not ECON.autocast_enabled(craft, "mine") and ECON.autocast_enabled(craft, "salvage") and not ECON.autocast_enabled(craft, "wander")
 					deposited = float(craft["cargo"].get(ECON.ANTIMATTER, 0.0)) <= ECON.EPS and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 17.0 - ECON.EPS
 				if int(craft["id"]) == 990000 + owner_home:
-					repaired = float(craft["hp"]) >= ECON.SHIP_HP - ECON.EPS
+					repaired = float(craft["hp"]) >= ECON.FREIGHTER_HP - ECON.EPS
 			var checks: Dictionary = {
 				"station_plating": ECON._has_job(system, "reinforced_plating", "") or ECON.station_max_hp(system) == ECON.REINFORCED_STATION_HP,
 				"station_matrix": ECON._has_job(system, "laser_matrix", "") or system["station"].get("weapons", []).size() == ECON.STATION_LASER_COUNT,
