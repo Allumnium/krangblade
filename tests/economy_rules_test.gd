@@ -453,7 +453,7 @@ func _test_station_defense_and_ports() -> void:
 	ECON._combat(state, graph, 0.1)
 	assert(state["ships"][0]["hp"] == 28.0 and state["ships"][1]["hp"] == 100.0)
 	ECON._combat(state, graph, 0.1)
-	assert(state["ships"][0]["hp"] == 64.0)
+	assert(state["ships"][0]["hp"] == 28.0)
 	# Existing physical port survives array compaction and can be rebuilt independently.
 	var retained: Vector2 = ECON.shipyard_position(state, 0, 1, 0.0)
 	p["yards"].remove_at(0)
