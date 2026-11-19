@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.46.2: User screenshots showed the Codex extending beyond the screen and passive cells resembling buttons. Replace the content-sized AcceptDialog with a bounded exclusive Window and explicitly anchored layout; use a fixed article viewport and always-visible scrollbar. Verify in-game at 1152×648 and larger, including long population article and short-window navigation. Runtime/visual verification pending.
+
 - v0.46.0: The Codex provides an in-match reference for otherwise hidden economy and control rules. Derive numeric examples directly from shared simulation constants; verify legibility and avoid stale prose when mechanics change. Opening the local guide should never pause a shared match.
 
 - v0.45.3: Slower population and the new fixed food reserve reward local farming and delivered imports, but empty colonies with low farm output may take longer to replenish crews. Monitor colony timing, the existing 40k settler cost, AI expansion, food export settings, dependence on installed orbital populations and whether a 200 t target feels appropriate. Do not rebalance unrelated costs before playtesting.
