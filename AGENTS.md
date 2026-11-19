@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.58.1: Multi-ship selections show one direct centroid-to-target line only when every selected hull shares an active command and semantic target. Sector entry compares sector IDs, exact point orders compare destinations; mixed orders remain hidden. Individual route/queue lines unchanged.
+
 - v0.58.0: Vector planetary cargo capsules use resource-colored centers; planetary economy, habitation and PDS jobs dispatch a larger pod after fabrication, applying effects on arrival after three simulation years. Station and yard upgrades remain local; delivery reserves the original job and is not a combat hull.
 
 - v0.57.2: Planetary transfer art uses quarter-size blunt cargo capsules with paired side thrusters; production, timing and blockade rules unchanged.

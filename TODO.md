@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.58.1: Inspect shared group command lines for mixed orders, sector entry, same-point moves, follow/attack, patrol and peer motion interpolation.
+
 - [ ] v0.58.0: Validate planetary upgrade delivery timing, target, cancellation, concurrent station fabrication, peer replication and close-zoom art.
 
 - [ ] v0.57.2: Inspect quarter-size planetary cargo capsules and paired side jets at close zoom.
