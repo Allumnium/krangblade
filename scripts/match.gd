@@ -15,6 +15,7 @@ const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
 const KEYBOARD_PAN_SPEED: float = 420.0
+const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade"}
 const SYSTEM_WORLD_RADIUS: float = 600.0
 const MIN_ZOOM: float = 0.5
 const OVERVIEW_MAX_ZOOM: float = 64.0
@@ -1498,6 +1499,9 @@ func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
 	if station_icons.has(key):
 		return station_icons[key]
 	var paths: Dictionary = {
+		"auto_wander": '<path stroke="#8bd5ed" stroke-width="2.5" fill="none" d="M3 25Q9 4 17 17T29 4"/><circle cx="4" cy="25" r="3" fill="#e1f8ff"/><path fill="#b4e9f9" d="M16 9L24 18L19 28L16 24L11 28L11 17Z"/>',
+		"auto_mine": '<path fill="#9fb8c9" d="M3 17L9 10L18 12L23 21L18 29L7 27Z"/><path fill="#dce8f3" d="M9 10L18 12L12 19L3 17Z"/><path stroke="#ffbd77" stroke-width="3" d="M28 3L17 14M30 10L21 19"/><path fill="#f1c892" d="M25 2L30 2L30 7Z"/>',
+		"auto_salvage": '<path fill="#9ccfc5" d="M4 4H8V14Q8 21 16 21Q24 21 24 14V4H28V15Q28 27 16 27Q4 27 4 15Z"/><path fill="#d3e4eb" d="M13 4L21 6L18 13L10 11Z"/><path fill="#ffcd81" d="M12 14L16 18L12 22L8 18Z"/>',
 		"move": '<path fill="#9ed9f6" d="M3 12H18V5L30 16L18 27V20H3Z"/><path fill="#edfaff" d="M5 13H19V9L26 15H5Z"/>',
 		"stop": '<rect x="6" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/><rect x="18" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/>',
 		"hold": '<rect x="5" y="5" width="22" height="22" rx="2" fill="#c1d4e2"/><rect x="10" y="10" width="12" height="12" rx="1" fill="#334c60"/>',
@@ -2060,7 +2064,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 32)
 	button.focus_mode = Control.FOCUS_NONE
-	button.icon = _station_command_icon(id)
+	button.icon = _station_command_icon({"auto_repair": "repair", "auto_trade": "trade"}.get(id, id))
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	button.tooltip_text = hint
 	button.toggle_mode = true
@@ -2069,7 +2073,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	slot.add_child(button)
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_buttons[id] = button
-	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R}[id], "Fleet", "fleet_" + id, hint)
+	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -2081,29 +2085,93 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	_command_slot("attack", "Attack Move", _arm_command.bind("attack"))
 	_command_slot("load", "Load Cargo", _arm_command.bind("load"))
 	unload_button = _command_slot("unload", "Drop Cargo", _arm_command.bind("unload"))
-	var repair: Button = _command_slot("repair", "Repair (right-click: autocast)", _arm_command.bind("repair"))
-	repair.gui_input.connect(_repair_button_input)
-	var border := Control.new()
-	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	repair.add_child(border)
-	border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	border.draw.connect(_draw_autobuild_border.bind(border))
-	repair.set_meta("auto_border", border)
+	_command_slot("repair", "Repair target", _arm_command.bind("repair"))
+	for id in AUTOCAST_SLOTS:
+		var mode: String = AUTOCAST_SLOTS[id]
+		var title_text: String = "Wander" if mode == "wander" else "Auto-" + mode.capitalize()
+		var button: Button = _command_slot(id, title_text, _toggle_autocast.bind(mode))
+		button.gui_input.connect(_autocast_input.bind(mode, button))
+		var mask := Control.new()
+		mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		button.add_child(mask)
+		mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		mask.draw.connect(_draw_autocast_cooldown.bind(mask))
+		button.set_meta("cooldown_mask", mask)
+		var border := Control.new()
+		border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		button.add_child(border)
+		border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		border.draw.connect(_draw_autobuild_border.bind(border))
+		button.set_meta("auto_border", border)
 	_fill_ability_grid(command_card)
 
-func _repair_button_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not command_buttons["repair"].disabled:
-		var miners: Array[int] = _selected_miners()
-		if not miners.is_empty():
-			session.call("request_repair_auto", miners, not _repair_auto_enabled())
-			command_buttons["repair"].accept_event()
+func _autocast_units(state: Dictionary, mode: String) -> Array:
+	var units: Array = []
+	for ship in state.get("ships", []):
+		if selected_units.has(int(ship["id"])) and int(ship["owner"]) == _me() and ECONOMY.supports_autocast(ship, mode):
+			units.append(ship)
+	return units
 
-func _repair_auto_enabled() -> bool:
-	var miners: Array[int] = _selected_miners()
-	for ship in _state().get("ships", []):
-		if miners.has(int(ship["id"])) and bool(ship.get("repair_auto", true)):
-			return true
-	return false
+func _toggle_autocast(mode: String) -> void:
+	var units: Array = _autocast_units(_state(), mode)
+	if units.is_empty():
+		return
+	var all_on: bool = units.all(func(ship: Dictionary) -> bool: return ECONOMY.autocast_enabled(ship, mode))
+	var ids: Array = units.map(func(ship: Dictionary) -> int: return int(ship["id"]))
+	session.call("request_autocast", ids, mode, not all_on)
+
+func _autocast_input(event: InputEvent, mode: String, button: Button) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not button.disabled:
+		_toggle_autocast(mode)
+		button.accept_event()
+
+func _draw_autocast_cooldown(mask: Control) -> void:
+	var fraction: float = clampf(float(mask.get_meta("fraction", 0.0)), 0.0, 1.0)
+	if fraction <= 0.0 or mask.size.x <= 0.0 or mask.size.y <= 0.0:
+		return
+	var center: Vector2 = mask.size * 0.5
+	# Clockwise wipe from twelve o'clock; clip radial rays to the square.
+	var polygon := PackedVector2Array([center])
+	var segments: int = maxi(2, ceili(fraction * 96.0))
+	for i in range(segments + 1):
+		var angle: float = -PI * 0.5 + TAU * (1.0 - fraction + fraction * float(i) / float(segments))
+		var ray := Vector2.from_angle(angle)
+		var distance: float = minf(center.x / maxf(absf(ray.x), 0.00001), center.y / maxf(absf(ray.y), 0.00001))
+		polygon.append(center + ray * distance)
+	if fraction >= 0.9999:
+		mask.draw_rect(Rect2(Vector2.ZERO, mask.size), Color(0.0, 0.0, 0.0, 0.65))
+	else:
+		mask.draw_colored_polygon(polygon, Color(0.0, 0.0, 0.0, 0.65))
+
+func _refresh_autocast_cards() -> void:
+	var state: Dictionary = _state()
+	for id in AUTOCAST_SLOTS:
+		if not command_buttons.has(id):
+			continue
+		var button: Button = command_buttons[id]
+		var mode: String = AUTOCAST_SLOTS[id]
+		var units: Array = _autocast_units(state, mode)
+		var enabled_count: int = 0
+		var remaining: float = 0.0
+		for ship in units:
+			if ECONOMY.autocast_enabled(ship, mode):
+				enabled_count += 1
+				remaining = maxf(remaining, ECONOMY.autocast_remaining(state, ship))
+		button.visible = not units.is_empty()
+		button.disabled = units.is_empty()
+		button.set_pressed_no_signal(enabled_count > 0)
+		var border: Control = button.get_meta("auto_border")
+		border.visible = enabled_count > 0
+		border.queue_redraw()
+		var mask: Control = button.get_meta("cooldown_mask")
+		mask.set_meta("fraction", remaining / ECONOMY.AUTOCAST_COOLDOWN_YEARS)
+		mask.queue_redraw()
+		var title_text: String = "Wander" if mode == "wander" else "Auto-" + mode.capitalize()
+		var status: String = "Off" if enabled_count == 0 else ("On" if enabled_count == units.size() else "%d/%d on" % [enabled_count, units.size()])
+		if remaining > ECONOMY.EPS:
+			status += " · %.0f yr cooldown" % ceilf(remaining)
+		var shortcut: String = str(button.get_meta("hotkey", ""))
+		button.tooltip_text = "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut]
 
 func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""
@@ -2115,10 +2183,7 @@ func _refresh_command_mode() -> void:
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.set_pressed_no_signal(id == pending_command or (id == "hold" and _any_selected_holding()))
-	if command_buttons.has("repair"):
-		var border: Control = command_buttons["repair"].get_meta("auto_border")
-		border.visible = not command_buttons["repair"].disabled and _repair_auto_enabled()
-		border.queue_redraw()
+	_refresh_autocast_cards()
 	if is_instance_valid(yard_command_card):
 		yard_commands["rally"].set_pressed_no_signal(pending_command == "rally")
 	map_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS if not pending_command.is_empty() else Control.CURSOR_ARROW

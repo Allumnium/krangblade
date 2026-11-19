@@ -64,7 +64,9 @@ const MINER_REPAIR_RATE: float = 5.0
 const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
 const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED
-const MOVE_ARRIVAL_WAIT_YEARS: float = 20.0
+const AUTOCAST_COOLDOWN_YEARS: float = 30.0
+const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
+const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade"]
 const SHIP_SIZE: int = 1
 const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
@@ -405,7 +407,7 @@ static func send_colony(state: Dictionary, player: int, ship_id: int, target: in
 			return false
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
-		_set_unit_order(ship, {"kind": "colonize", "target": target})
+		_set_unit_order(state, ship, {"kind": "colonize", "target": target})
 		ship["dest"] = target
 		ship["return_path"] = path.duplicate()
 		_clear_local_hold(ship)
@@ -1639,6 +1641,12 @@ static func _pick_loaded_destination(state: Dictionary, ship: Dictionary, teams:
 
 static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
 	var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+	if not autocast_ready(state, ship, "trade"):
+		if team != 0 and teams[int(ship["at"])] != team:
+			_evacuate_civilian(state, ship, teams)
+			if not (ship["route"] as Array).is_empty():
+				_move(state, ship, dt)
+		return
 	if team == 0 or not _move(state, ship, dt):
 		return
 	var planets: Array = state["planets"]
@@ -1832,7 +1840,8 @@ static func command_miners(state: Dictionary, player: int, ids: Array, field_ind
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
-		_set_unit_order(ship, {"kind": "mine", "target": field_index, "chunk": chunk_id})
+		_set_unit_order(state, ship, {"kind": "mine", "target": field_index, "chunk": chunk_id})
+		ship["manual_mine"] = field_index >= 0
 		ship["assigned_field"] = field_index
 		ship["assigned_chunk"] = chunk_id
 		ship["next_mining_search"] = 0.0
@@ -1929,11 +1938,15 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 	ship["mining_active"] = false
 	var mode: String = str(ship.get("mining_mode", "idle"))
 	if mode == "idle":
+		if not bool(ship.get("manual_mine", false)) and not autocast_ready(state, ship, "mine"):
+			return
 		if (ship["route"] as Array).is_empty():
 			ship["dest"] = -1
 			ship["source"] = -1
 		if float(state["elapsed"]) + EPS >= float(ship.get("next_mining_search", 0.0)):
 			_choose_field(state, ship, teams, cache)
+			if ship.get("mining_mode", "idle") == "idle" and int(ship.get("assigned_field", -1)) < 0:
+				ship.erase("manual_mine")
 			# Idle fleets retry twice per game year instead of every tick.
 			ship["next_mining_search"] = float(state["elapsed"]) + 0.5
 		return
@@ -2049,6 +2062,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 			_record_flow(local, "Mining deliveries", resource, amount)
 			ship["cargo"][resource] -= amount
 	if _cargo_total(ship) <= EPS:
+		ship.erase("manual_mine")
 		ship["mining_mode"] = "idle"
 		ship["field"] = -1
 		ship["dest"] = -1
@@ -2340,7 +2354,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 	for ship in selected:
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
-		_set_unit_order(ship, {"kind": "sector", "target": target, "move_only": move_only})
+		_set_unit_order(state, ship, {"kind": "sector", "target": target, "move_only": move_only})
 		ship["direct_order"] = true
 		_clear_local_hold(ship)
 		ship["operation_target"] = target
@@ -2437,12 +2451,54 @@ static func command_service(state: Dictionary, player: int, ids: Array, order: D
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
 		_interrupt_work(ship)
-		_set_unit_order(ship, order.duplicate(true))
+		_set_unit_order(state, ship, order.duplicate(true))
 		if order["kind"] == "repair":
 			ship["repair_order"] = order["target"]
 		else:
 			ship["cargo_order"] = order.duplicate(true)
 			ship["move_only"] = true
+	return true
+
+static func supports_autocast(ship: Dictionary, mode: String) -> bool:
+	match mode:
+		"wander": return SHIP_KINDS.has(ship.get("kind", ""))
+		"mine", "repair": return ship.get("kind", "") == "miner"
+		"salvage": return cargo_capacity(str(ship.get("kind", ""))) > EPS
+		"trade": return ship.get("kind", "") == "ship"
+	return false
+
+static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
+	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", true))
+
+static func autocast_remaining(state: Dictionary, ship: Dictionary) -> float:
+	return maxf(arrival_wait_remaining(state, ship), maxf(0.0, float(ship.get("auto_cooldown_until", 0.0)) - float(state["elapsed"])))
+
+static func autocast_ready(state: Dictionary, ship: Dictionary, mode: String) -> bool:
+	return autocast_enabled(ship, mode) and autocast_remaining(state, ship) <= EPS
+
+static func set_autocast(state: Dictionary, player: int, ids: Array, mode: String, enabled: bool) -> bool:
+	var units: Array = _owned_units(state, player, ids)
+	if not AUTOCAST_MODES.has(mode) or units.is_empty() or units.any(func(ship: Dictionary) -> bool: return not supports_autocast(ship, mode)):
+		return false
+	if mode == "repair":
+		return set_repair_auto(state, player, ids, enabled)
+	for ship in units:
+		ship[mode + "_auto"] = enabled
+		if enabled:
+			continue
+		if mode == "salvage":
+			_release_auto_salvage(ship, state.get("salvage", {}))
+		elif mode == "mine" and not bool(ship.get("manual_mine", false)) and ship.get("mining_mode", "idle") in ["approach", "outbound", "mining", "return"]:
+			_interrupt_work(ship)
+			ship["route"] = []
+			ship["leg"] = 0.0
+			ship["mining_active"] = false
+			ship["navigation_target"] = ship["position"]
+		elif mode == "trade" and not _unit_order_running(ship) and not _salvage_active(ship):
+			_interrupt_work(ship)
+			ship["route"] = []
+			ship["leg"] = 0.0
+			ship["navigation_target"] = ship["position"]
 	return true
 
 static func set_repair_auto(state: Dictionary, player: int, ids: Array, enabled: bool) -> bool:
@@ -2513,7 +2569,7 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 		return false
 	ship.erase("repair_target")
 	var explicit: bool = ship.has("repair_order")
-	if not explicit and (not bool(ship.get("repair_auto", true)) or (_unit_order_running(ship) and ship.get("unit_order", {}).get("kind", "") != "mine") or bool(ship.get("holding", false)) or _salvage_active(ship)):
+	if not explicit and (not autocast_ready(state, ship, "repair") or (_unit_order_running(ship) and ship.get("unit_order", {}).get("kind", "") != "mine") or bool(ship.get("holding", false)) or _salvage_active(ship)):
 		return false
 	var target_id: int = int(ship.get("repair_order", -1))
 	var ref: Dictionary = targets.get(target_id, {})
@@ -2657,7 +2713,7 @@ static func command_attack(state: Dictionary, player: int, ids: Array, target_id
 		_clear_local_hold(craft)
 		_interrupt_work(craft)
 		craft["attack_order"] = target_id
-		_set_unit_order(craft, {"kind": "attack", "target": target_id})
+		_set_unit_order(state, craft, {"kind": "attack", "target": target_id})
 	return true
 
 static func patrol_node(state: Dictionary, graph: Dictionary, player: int, point: Vector2) -> int:
@@ -2709,7 +2765,7 @@ static func command_patrol(state: Dictionary, player: int, ids: Array, target: i
 			craft["at"] = target
 			craft["route"] = []
 			craft["leg"] = 0.0
-		_set_unit_order(craft, {"kind": "patrol", "target": target, "point": point})
+		_set_unit_order(state, craft, {"kind": "patrol", "target": target, "point": point})
 	return true
 
 static func _update_tactical_orders(state: Dictionary, graph: Dictionary) -> void:
@@ -2780,7 +2836,7 @@ static func hold_fighters(state: Dictionary, player: int, ids: Array) -> bool:
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
-		_set_unit_order(ship, {})
+		_set_unit_order(state, ship, {})
 		ship["direct_order"] = true
 		ship["holding"] = true
 		ship["operation_target"] = int(ship["at"])
@@ -2877,8 +2933,10 @@ static func polyline_formation_slots(origins: Dictionary, stroke: PackedVector2A
 		slots.append({"id": ids[i], "point": point, "heading": heading})
 	return slots
 
-static func _set_unit_order(ship: Dictionary, order: Dictionary) -> void:
+static func _set_unit_order(state: Dictionary, ship: Dictionary, order: Dictionary) -> void:
 	ship.erase("arrival_wait_until")
+	ship.erase("manual_mine")
+	ship["auto_cooldown_until"] = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
 	ship.erase("order_queue")
 	if order.is_empty():
 		ship.erase("unit_order")
@@ -3096,6 +3154,7 @@ static func issue_unit_order(state: Dictionary, player: int, ids: Array, order: 
 			continue
 		queue.append(order.duplicate(true))
 		ship["order_queue"] = queue
+		ship["auto_cooldown_until"] = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
 		accepted = true
 	return accepted
 
@@ -3156,7 +3215,7 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
 		_interrupt_work(ship)
-		_set_unit_order(ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
+		_set_unit_order(state, ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
 		ship["local_move_target"] = point
 		ship["local_move_sector"] = node
 		ship["move_only"] = move_only
@@ -3200,7 +3259,7 @@ static func command_remote_position(state: Dictionary, player: int, ids: Array, 
 		ship["local_move_target"] = point
 		ship["local_move_sector"] = node
 		ship["move_only"] = move_only
-		_set_unit_order(ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
+		_set_unit_order(state, ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
 	return true
 
 static func command_hold_units(state: Dictionary, player: int, ids: Array, release: bool) -> bool:
@@ -3208,7 +3267,7 @@ static func command_hold_units(state: Dictionary, player: int, ids: Array, relea
 	if units.is_empty():
 		return false
 	for ship in units:
-		_set_unit_order(ship, {})
+		_set_unit_order(state, ship, {})
 		ship.erase("launch_rally")
 		_cancel_salvage_order(ship)
 		if release:
@@ -3622,6 +3681,8 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 	var piles: Dictionary = state.get("salvage", {})
 	var previously_collecting: bool = ship.has("auto_salvage_target")
 	_release_auto_salvage(ship, piles)
+	if not autocast_ready(state, ship, "salvage"):
+		return false
 	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or _salvage_active(ship) or bool(ship.get("move_only", false)) or busy.has(int(ship["id"])):
 		return false
 	if piles.is_empty() and not previously_collecting:
@@ -3769,7 +3830,7 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		_clear_tactical_order(best)
 		_clear_local_hold(best)
 		_interrupt_work(best)
-		_set_unit_order(best, {"kind": "salvage", "target": id})
+		_set_unit_order(state, best, {"kind": "salvage", "target": id})
 		best["salvage_target"] = id
 		pile["claim"] = int(best["id"])
 		changed = true
@@ -3786,7 +3847,7 @@ static func command_unload_cargo(state: Dictionary, player: int, ids: Array) -> 
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
-		_set_unit_order(ship, {"kind": "unload"})
+		_set_unit_order(state, ship, {"kind": "unload"})
 		ship["salvage_delivery"] = true
 		changed = true
 	return changed
@@ -5010,7 +5071,7 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 			if not stationary_teams.has(node):
 				stationary_teams[node] = {}
 			stationary_teams[node][int(state["teams"].get(int(ship["owner"]), 0))] = true
-		if not _is_idle_ship(ship) or arrival_wait_remaining(state, ship) > EPS:
+		if not _is_idle_ship(ship) or not autocast_ready(state, ship, "wander"):
 			continue
 		var key: String = "%d:%s:%d:%d" % [int(ship["owner"]), str(ship.get("kind", "ship")), int(ship["at"]), int(ship.get("operation_id", 0))]
 		if not groups.has(key):
@@ -5196,7 +5257,7 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		var held: bool = bool(ship.get("holding", false))
 		var local_moving: bool = ship.has("local_move_target")
 		# Waiting hulls remain precise obstacles, but combat/withdrawal can move.
-		if arrival_wait_remaining(state, ship) > EPS and not _engaged(ship):
+		if not _engaged(ship) and (arrival_wait_remaining(state, ship) > EPS or (_is_idle_ship(ship) and not autocast_ready(state, ship, "wander"))):
 			continue
 		# Preserve the exact endpoint and facing on the arrival tick only.
 		# The completed order is retired before next tick's ordinary wandering.
@@ -5368,7 +5429,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			continue
 		# Explicit work and emergency withdrawal have priority. Defer civilian
 		# autonomous job selection and idle salvage approaches during the wait.
-		if arrival_wait_remaining(state, ship) > EPS and ship.get("kind", "") != "fighter":
+		if arrival_wait_remaining(state, ship) > EPS and ship.get("kind", "") != "fighter" and not ship.has("repair_order"):
 			ship["navigation_target"] = ship["position"]
 			continue
 		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_ids):
@@ -5429,10 +5490,12 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		var ship_id: int = int(ship["id"])
 		# Only use the idle budget if the ship started and finished its
 		# work idle and did not already move this tick.
-		if idle_targets.has(ship_id) and _is_idle_ship(ship) and arrival_wait_remaining(state, ship) <= EPS and not coordinated.has(ship_id) and ship["position"] == initial_position:
+		if idle_targets.has(ship_id) and _is_idle_ship(ship) and autocast_ready(state, ship, "wander") and not coordinated.has(ship_id) and ship["position"] == initial_position:
 			_navigate(ship, idle_targets[ship_id], SHIP_SPEED * dt)
 	for ship in state["ships"]:
 		_mark_sector_arrival(state, ship)
+		if ship.has("auto_cooldown_until") and float(ship["auto_cooldown_until"]) <= float(state["elapsed"]):
+			ship.erase("auto_cooldown_until")
 		if ship.has("arrival_wait_until") and arrival_wait_remaining(state, ship) <= EPS and ship.get("unit_order", {}).get("kind", "") != "sector":
 			ship.erase("arrival_wait_until")
 	_separate_ships(state, combat_graph, combat_positions, dt)

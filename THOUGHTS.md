@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.50.0: Expose autonomous ship behavior via independent enabled borders and radial cooldowns rather than hidden wandering. Default modes preserve low-micro play; monitor manual mining completion, cargo retention and mixed selections. No change to defensive combat or emergency withdrawal.
+
 - v0.49.2: Star targets should read as sector objectives rather than individual destination silhouettes. New authority-computed entry point is one world unit inside the incoming boundary; observe overlapping fleets and rounded shared boundaries. Keep free-space formations and explicit contextual actions unchanged.
 
 - v0.49.1: User reported immediate post-move wandering prevents issuing Hold in time. Use a 20-year authoritative arrival deadline, not persistent hold or wall-clock time. Watch overlapping single-point arrivals during the grace period and civilian delay in resuming profitable jobs; explicit orders remain immediate. Verify guest poses/status and AI movement pacing.

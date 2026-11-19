@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.50.0: Independent default-on per-ship autocast modes: Wander, Auto-Mine, Auto-Salvage, Auto-Repair, Auto-Trade where supported. Either mouse button toggles mode; manual repair remains separate. Contextual hotkeys, animated enabled border and dark radial cooldown mask; mixed selection enables all unless all on. Authority validates owner and capability. All manual orders begin a 30-simulation-year autocast cooldown, refreshed on movement arrival; explicit work, combat, withdrawal and delivery of already collected cargo remain possible. Disable automatic mining/trade without discarding cargo. Fixed 4×4 card retained.
+
 - v0.49.2: Station and shipyard queue tiles are 57×57 with 44-pixel art and 6-pixel progress bars. Star clicks and star-anchored drags target the sector outline and route to its incoming boundary (1 world unit inside); no hull ghosts on sector targets. Preserve exact-position/formation ghosts in free space or Alt-forced targeting, contextual attack/deposit/colonization, and the arrival wait. Legacy AI sector orders remain unchanged.
 
 - v0.49.1: Manual position and sector move arrivals wait 20 simulation years before idle wandering or civilian autonomous work. Waiting is not Hold; keep combat, emergency withdrawal and explicit/queued orders responsive. Preserve exact arrival positions/facing against idle separation and use the authority's elapsed clock; show remaining wait in single-hull status. Shipyard launch rallies retain existing behavior.

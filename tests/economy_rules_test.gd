@@ -425,6 +425,7 @@ func _initialize() -> void:
 	_test_population_queue_priority()
 	_test_unit_order_queue()
 	_test_sector_entry_orders()
+	_test_autocast_modes()
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
 	_test_soft_separation()
@@ -2131,8 +2132,8 @@ func _test_unit_order_queue() -> void:
 			break
 	assert(visited == [first["point"], second["point"], third["point"]])
 	assert(ship["position"] == third["point"] and ship["heading"] == Vector2.LEFT and not ship.get("holding", false))
-	assert(is_equal_approx(ECON.arrival_wait_remaining(state, ship), 20.0))
-	for tick in range(199):
+	assert(is_equal_approx(ECON.arrival_wait_remaining(state, ship), ECON.AUTOCAST_COOLDOWN_YEARS))
+	for tick in range(299):
 		ECON.step(state, 0.1)
 		assert(ship["position"] == third["point"] and ship["heading"] == Vector2.LEFT and not ship.get("holding", false))
 	var wander_distance: float = 0.0
@@ -2162,7 +2163,7 @@ func _test_unit_order_queue() -> void:
 			break
 	assert(ship["position"] == remote["point"] and ship["heading"] == Vector2.DOWN and ship["at"] == 1)
 	ECON.step(state, 0.1)
-	assert(ship["position"] == remote["point"] and ECON.arrival_wait_remaining(state, ship) > 19.0)
+	assert(ship["position"] == remote["point"] and ECON.arrival_wait_remaining(state, ship) > 29.0)
 	assert(ECON.command_hold_units(state, 1, [100], false))
 	assert(ECON.arrival_wait_remaining(state, ship) == 0.0)
 	var held_point: Vector2 = ship["position"]
@@ -2175,12 +2176,44 @@ func _test_unit_order_queue() -> void:
 		if ECON.arrival_wait_remaining(state, ship) > 0.0:
 			break
 	assert(int(ship["at"]) == 0 and (ship["route"] as Array).is_empty())
-	assert(ECON.arrival_wait_remaining(state, ship) > 19.0)
+	assert(ECON.arrival_wait_remaining(state, ship) > 29.0)
 	var sector_arrival: Vector2 = ship["position"]
-	for tick in range(199):
+	for tick in range(299):
 		ECON.step(state, 0.1)
 		assert(ship["position"] == sector_arrival)
-	print("PASS: sequential orders, queue limits, formation facing, 20-year precise and sector arrival waits, hold override")
+	print("PASS: sequential orders, queue limits, formation facing, 30-year precise and sector arrival waits, hold override")
+
+func _test_autocast_modes() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var center: Vector2 = graph["points"][0]
+	var miner: Dictionary = {"id": 9809, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": center, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"}
+	state["ships"] = [miner]
+	assert(not ECON.set_autocast(state, 2, [9809], "mine", false))
+	assert(not ECON.set_autocast(state, 1, [9809], "trade", false))
+	assert(not ECON.set_autocast(state, 1, [9809], "invalid", false))
+	assert(ECON.set_autocast(state, 1, [9809], "mine", false))
+	assert(ECON.set_autocast(state, 1, [9809], "wander", false))
+	assert(ECON.set_autocast(state, 1, [9809], "repair", false))
+	assert(ECON.autocast_enabled(miner, "salvage") and not ECON.autocast_enabled(miner, "mine"))
+	var point: Vector2 = center + Vector2.RIGHT * 10.0
+	assert(ECON.issue_unit_order(state, 1, [9809], {"kind": "position", "target": 0, "point": point, "move_only": true}, false))
+	assert(is_equal_approx(ECON.autocast_remaining(state, miner), ECON.AUTOCAST_COOLDOWN_YEARS))
+	for tick in range(100):
+		ECON.step(state, 0.1)
+		if not miner.has("local_move_target"):
+			break
+	assert(miner["position"].is_equal_approx(point))
+	assert(ECON.set_autocast(state, 1, [9809], "wander", true))
+	assert(not ECON.autocast_ready(state, miner, "wander"))
+	assert(not ECON._idle_formation_targets(state, graph).has(9809))
+	state["elapsed"] = float(state["elapsed"]) + ECON.AUTOCAST_COOLDOWN_YEARS + 0.1
+	assert(ECON.autocast_ready(state, miner, "wander"))
+	assert(ECON._idle_formation_targets(state, graph).has(9809))
+	assert(ECON.set_autocast(state, 1, [9809], "wander", false))
+	assert(not ECON._idle_formation_targets(state, graph).has(9809))
+	assert(ECON.autocast_ready(state, miner, "salvage") and not ECON.autocast_ready(state, miner, "mine"))
+	print("PASS: independent autocast modes, permission validation and command cooldown")
 
 func _test_sector_entry_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
@@ -2269,7 +2302,7 @@ func _test_local_position_orders() -> void:
 	for craft in state["ships"]:
 		assert(craft.get("holding", false) and not craft.has("local_move_target"))
 	assert(ECON.command_hold_units(state, 1, selection, true))
-	for tick in range(20):
+	for tick in range(320):
 		ECON.step(state, 0.1)
 	for craft in state["ships"]:
 		assert(not craft.get("holding", false) and not craft.has("hold_position"))

@@ -425,7 +425,7 @@ func _ships() -> void:
 	_table(["Level", "Build speed", "Staff required"], rows)
 
 func _combat() -> void:
-	_body("Fighters engage hostile targets automatically when idle or attack-moving. After a move, ships wait %.0f years before wandering or resuming civilian jobs. New orders act immediately. Hold keeps ships in place; damaged ships can withdraw and repair." % E.MOVE_ARRIVAL_WAIT_YEARS)
+	_body("Fighters engage hostile targets automatically when idle or attack-moving. Autocast waits %.0f years after manual orders; movement refreshes the delay on arrival. New orders act immediately. Hold keeps ships in place; damaged ships can withdraw and repair." % E.MOVE_ARRIVAL_WAIT_YEARS)
 	_table(["Weapon", "Damage / shot or volley", "Range"], [["Fighter laser", "%.0f" % E.LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Mining lasers", "%.0f" % E.MINER_LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Planetary defense", "%.0f" % E.PDS_DAMAGE, "%.0f" % E.PDS_RANGE]])
 	_section("Station defenses")
 	_table(["Upgrade", "Effect", "Materials"], [["Reinforced Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Laser Matrix", "%d defensive lasers" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Planetary defense battery", _recipe(E._cost("pds", 1))]])
@@ -434,6 +434,7 @@ func _combat() -> void:
 func _controls() -> void:
 	_note("Default hotkeys. Menu → Hotkeys changes bindings; camera speed sliders adjust keyboard, mouse edge and wheel zoom.")
 	_table(["Input", "Action"], [["Left click / drag", "Select a ship, structure or fleet"], ["Shift + select", "Add to selection"], ["Right click / drag", "Contextual order / formation"], ["A / M / P, then click", "Attack / move / patrol"], ["S / H", "Stop / hold"], ["L / D / R, then click", "Load / drop cargo / repair"], ["Y, then click / X", "Set / clear shipyard rally"], ["Shift + order", "Queue an order"], ["Arrows / screen edge / middle drag", "Pan camera"], ["Mouse wheel", "Zoom"], ["F", "Follow or focus selection"], ["F2", "Select all owned fighters"], ["Double F2", "Center military selection"], ["Ctrl + 0–9", "Assign control group"], ["Shift + 0–9", "Add selection to group"], ["0–9 / double tap", "Recall / center group"], ["B / T (station)", "Build / trade"], ["Esc", "Cancel targeting, return or menu"]])
+	_body("Wander, Auto-Mine, Auto-Salvage, Auto-Repair and Auto-Trade toggle with either mouse button. Lit borders show enabled modes; clock masks show cooldown. Manual commands are independent.")
 	_body("Click a star to target its sector boundary; drag from a star to target the whole sector. Alt forces precise positioning. Use the minimap to navigate or issue contextual orders. Command-card buttons expose additional actions and tooltips; right-click eligible production cards to repeat.")
 
 func _multiplayer() -> void:

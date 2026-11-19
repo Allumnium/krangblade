@@ -425,7 +425,9 @@ func _send_commands() -> void:
 	session.call("request_tactical_order", [own_fighters[0]], "patrol", -1)
 	var attack_id: int = 920000 + home_index
 	var service_id: int = 980000 + home_index
-	session.call("request_repair_auto", [service_id], false)
+	session.call("request_autocast", [service_id], "repair", false)
+	session.call("request_autocast", [service_id], "mine", false)
+	session.call("request_autocast", [service_id], "salvage", true)
 	session.call("request_repair_auto", [980000 + (home_index + 1) % expected_players], false)
 	session.call("request_unit_orders", [{"ids": [service_id], "order": {"kind": "repair", "target": 990000 + home_index}}], false)
 	session.call("request_unit_orders", [{"ids": [service_id], "order": {"kind": "deposit", "target": ECON.station_target_id(initial, home_index)}}], true)
@@ -658,7 +660,7 @@ func _check_economy_sync() -> void:
 				if int(craft["id"]) == 930000 + owner_home:
 					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
 				if int(craft["id"]) == 980000 + owner_home:
-					repair_toggled = not bool(craft.get("repair_auto", true))
+					repair_toggled = not ECON.autocast_enabled(craft, "repair") and not ECON.autocast_enabled(craft, "mine") and ECON.autocast_enabled(craft, "salvage")
 					deposited = float(craft["cargo"].get(ECON.ANTIMATTER, 0.0)) <= ECON.EPS and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 15.0 - ECON.EPS
 				if int(craft["id"]) == 990000 + owner_home:
 					repaired = float(craft["hp"]) >= ECON.SHIP_HP - ECON.EPS

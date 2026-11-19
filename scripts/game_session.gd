@@ -945,6 +945,23 @@ func _unit_orders_for(id: int, orders: Array, append: bool) -> void:
 	if changed:
 		_publish_economy()
 
+func request_autocast(ids: Array, mode: String, enabled: bool) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_autocast_for(1, ids, mode, enabled)
+	else:
+		_rpc_autocast.rpc_id(1, ids, mode, enabled)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_autocast(ids: Array, mode: String, enabled: bool) -> void:
+	if multiplayer.is_server():
+		_autocast_for(multiplayer.get_remote_sender_id(), ids, mode, enabled)
+
+func _autocast_for(id: int, ids: Array, mode: String, enabled: bool) -> void:
+	if _active_player(id) and ECONOMY.set_autocast(economy, id, ids, mode, enabled):
+		_publish_economy()
+
 func request_repair_auto(ids: Array, enabled: bool) -> void:
 	if phase != "match":
 		return
