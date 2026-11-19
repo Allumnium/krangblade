@@ -1192,7 +1192,7 @@ func _layout_station_details(scroll: ScrollContainer) -> void:
 
 func _system_bonus_text(p: Dictionary) -> String:
 	var lines: PackedStringArray = []
-	var names: Dictionary = {"Metals": "Metal production", "Plastics": "Plastic production", "Crystals": "Crystal production", "Organics": "Organics production", "Tech": "Tech production", "Textiles": "Textile production"}
+	var names: Dictionary = {"Metals": "Metal production", "Crystals": "Crystal production", "Organics": "Organics production"}
 	for resource in ECONOMY.ACTIVE_PRODUCTION:
 		var percent: int = roundi(ECONOMY.production_modifier(p, resource) * 100.0)
 		if percent != 100:
@@ -1221,11 +1221,7 @@ func _economy_building_effect(p: Dictionary, resource: String) -> String:
 	lines.append("Net after %.2f t/yr demand: %+.2f → %+.2f t/yr" % [demand, before - demand, after - demand])
 	if ECONOMY.production_level(p, resource) == 0 and ECONOMY.production_level(preview, resource) > 0:
 		lines.append("Unlocks local production (level 0 → 1)")
-	if resource in ["Plastics", "Textiles", "Tech"]:
-		var capacity_before: float = ECONOMY.INDUSTRIAL_POPULATION_PER_LEVEL * (ECONOMY.production_level(p, resource) + int(p.get("buildings", {}).get(resource, 0)))
-		var capacity_after: float = ECONOMY.INDUSTRIAL_POPULATION_PER_LEVEL * (ECONOMY.production_level(preview, resource) + int(buildings[resource]))
-		lines.append("Productive population: %s → %s max" % [_compact_amount(capacity_before), _compact_amount(capacity_after)])
-	elif resource == "Organics":
+	if resource == "Organics":
 		lines.append("Maximum farm output: %.2f → %.2f t/yr" % [ECONOMY.farm_potential(p), ECONOMY.farm_potential(preview)])
 		lines.append("Food capacity: %s → %s people" % [_compact_amount(ECONOMY.population_capacity(p)), _compact_amount(ECONOMY.population_capacity(preview))])
 	elif ECONOMY.MINED_RESOURCES.has(resource):
@@ -1458,10 +1454,10 @@ func _build_station_command_card(parent: Container) -> void:
 			border.draw.connect(_draw_autobuild_border.bind(border))
 			border.hide()
 			button.set_meta("auto_border", border)
-	_station_spacer(station_build_grid)
-	_station_spacer(station_build_grid)
-	_station_spacer(station_build_grid)
-	# Build actions sit one row above Return, which stays at the bottom right.
+	# Keep the fixed four-row grid and Return position with fewer resource cards.
+	for i in range(9 - ECONOMY.RESOURCES.size()):
+		_station_spacer(station_build_grid)
+	# Return stays at the bottom right.
 	for i in range(3):
 		_station_spacer(station_build_grid)
 	_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary"))

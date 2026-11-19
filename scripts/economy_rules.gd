@@ -5,22 +5,17 @@ static var cached_route_topology: Dictionary = {}
 static var cached_military_graph: Dictionary = {}
 static var cached_military_map: Dictionary = {}
 const MAP = preload("res://scripts/planet_map.gd")
-const RESOURCES = ["Metals", "Plastics", "Textiles", "Organics", "Tech", "Crystals"]
-const EXTRACTED = ["Metals", "Plastics", "Crystals"]
+const RESOURCES = ["Metals", "Organics", "Crystals"]
+const EXTRACTED = ["Metals", "Crystals"]
 const ACTIVE_PRODUCTION = RESOURCES
-const STARTING_STOCK = {"Metals": 1650.0, "Plastics": 360.0, "Textiles": 240.0, "Organics": 300.0, "Tech": 240.0, "Crystals": 0.0}
-const BASE_INDUSTRIAL_RATE: float = 1.0
-const INDUSTRIAL_POPULATION_PER_LEVEL: float = 100000.0
+const STARTING_STOCK = {"Metals": 1650.0, "Organics": 300.0, "Crystals": 0.0}
 const BUILDING_BONUS: float = 0.25
 const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional repeatable local production infrastructure; no self-input recipes.
 const ECONOMY_BUILDINGS = {
-	"Metals": {"name": "Metal Refinery", "population": 500, "cost": {"Plastics": 90.0, "Textiles": 60.0, "Tech": 45.0}},
-	"Plastics": {"name": "Plastics Factory", "population": 500, "cost": {"Metals": 240.0, "Textiles": 45.0, "Tech": 30.0}},
-	"Textiles": {"name": "Textile Mill", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}},
-	"Organics": {"name": "Farms", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}},
-	"Tech": {"name": "Tech Fabs", "population": 500, "cost": {"Metals": 300.0, "Plastics": 90.0, "Textiles": 60.0}},
-	"Crystals": {"name": "Crystal Incubator", "population": 500, "cost": {"Metals": 240.0, "Plastics": 45.0, "Tech": 30.0}}
+	"Metals": {"name": "Metal Refinery", "population": 500, "cost": {"Organics": 90.0}},
+	"Organics": {"name": "Farms", "population": 500, "cost": {"Metals": 240.0}},
+	"Crystals": {"name": "Crystal Incubator", "population": 500, "cost": {"Metals": 240.0}}
 }
 const CONSTRUCTION_RESERVE: float = 500.0
 const CONSTRUCTION_PRODUCTION_SHARE: float = 0.1
@@ -28,7 +23,7 @@ const CONSTRUCTION_PRODUCTION_SHARE: float = 0.1
 const HOME_POPULATION: float = 10000.0
 const ORBITAL_HOUSING_POPULATION: float = 5000.0
 const ECO_HOUSING_ORGANICS: float = 0.2
-const ORBITAL_HOUSING_COST: Dictionary = {"Metals": 180.0, "Plastics": 80.0, "Textiles": 40.0, "Tech": 40.0}
+const ORBITAL_HOUSING_COST: Dictionary = {"Metals": 180.0}
 const COLONY_POPULATION: float = 40000.0
 const POPULATION_DOUBLING_YEARS: float = 30.0
 const PRODUCTION_PER_LEVEL: float = 4.0
@@ -77,12 +72,12 @@ const WAREHOUSE_CAPACITIES = [2000.0, 5000.0, 12000.0, 30000.0]
 # Each tier is 3x the previous one, with each price fitting in the
 # immediately preceding warehouse capacity.
 const WAREHOUSE_COSTS = [
-	{"Metals": 500.0, "Plastics": 80.0, "Tech": 40.0},
-	{"Metals": 1500.0, "Plastics": 240.0, "Tech": 120.0},
-	{"Metals": 4500.0, "Plastics": 720.0, "Tech": 360.0}
+	{"Metals": 500.0},
+	{"Metals": 1500.0},
+	{"Metals": 4500.0}
 ]
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
-const CIVILIAN_CONSUMPTION = {"Metals": 0.1, "Plastics": 0.25, "Textiles": 0.25, "Tech": 0.25}
+const CIVILIAN_CONSUMPTION = {"Metals": 0.1}
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
 const SHIPYARD_QUEUE_LIMIT = 8
 const MAX_SHIPYARD_LEVEL = 3
@@ -428,7 +423,7 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 		colony["population_velocity"] = 0.0
 		colony["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "station_slot": 1, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
 		if has_planets(colony):
-			for resource in ["Metals", "Plastics", "Textiles", "Organics", "Tech"]:
+			for resource in ["Metals", "Organics"]:
 				colony["levels"][resource] = 1
 		for resource in RESOURCES + [ANTIMATTER]:
 			var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
@@ -560,18 +555,8 @@ static func rate(planet: Dictionary, resource: String) -> float:
 			return eco_organics(planet)
 		var labor: float = sqrt(clampf(planetary_population(planet) / capacity, 0.0, 1.0))
 		return farm_potential(planet) * labor + eco_organics(planet)
-	var base: float = PRODUCTION_PER_LEVEL
-	if resource in ["Textiles", "Tech"]:
-		base = BASE_INDUSTRIAL_RATE
-	elif resource == "Plastics":
-		# Baseline polymer production is possible even without a deposit.
-		base = BASE_INDUSTRIAL_RATE
 	var labor: float = population_multiplier(planet)
-	if resource in ["Plastics", "Textiles", "Tech"]:
-		# Installed production capacity limits the number of productive workers.
-		# Population demand continues increasing after this output saturates.
-		labor = minf(labor, INDUSTRIAL_POPULATION_PER_LEVEL * (level + int(planet.get("buildings", {}).get(resource, 0))) / HOME_POPULATION)
-	var output: float = base * level * production_modifier(planet, resource) * labor
+	var output: float = PRODUCTION_PER_LEVEL * level * production_modifier(planet, resource) * labor
 	return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func _update_population(planet: Dictionary, dt: float) -> void:
@@ -626,24 +611,24 @@ static func _has_job(planet: Dictionary, kind: String, target: String) -> bool:
 static func _cost(kind: String, level: int) -> Dictionary:
 	# Explicit prototype values; the final costs/recipes are intentionally undefined.
 	match kind:
-		"ship": return {"Metals": 360.0, "Plastics": 75.0, "Textiles": 45.0, "Organics": 15.0, "Tech": 30.0}
-		"colony_ship": return {"Metals": 1200.0, "Plastics": 120.0, "Textiles": 90.0, "Organics": 30.0, "Tech": 90.0}
-		"fighter": return {"Metals": 270.0, "Plastics": 60.0, "Textiles": 30.0, "Organics": 10.0, "Tech": 30.0}
-		"miner": return {"Metals": 540.0, "Plastics": 90.0, "Textiles": 45.0, "Organics": 20.0, "Tech": 60.0}
+		"ship": return {"Metals": 360.0, "Organics": 15.0}
+		"colony_ship": return {"Metals": 1200.0, "Organics": 30.0}
+		"fighter": return {"Metals": 270.0, "Organics": 10.0}
+		"miner": return {"Metals": 540.0, "Organics": 20.0}
 		"yard":
 			match level:
 				1: return {"Metals": 480.0}
-				2: return {"Metals": 2000.0, "Plastics": 500.0, "Textiles": 500.0, "Organics": 200.0, "Tech": 100.0, "Crystals": 100.0}
-				3: return {"Metals": 6000.0, "Plastics": 1500.0, "Textiles": 1500.0, "Organics": 600.0, "Tech": 300.0, "Crystals": 300.0}
-		"pds": return {"Metals": 540.0, "Plastics": 120.0, "Textiles": 60.0, "Organics": 60.0, "Tech": 60.0}
+				2: return {"Metals": 2000.0, "Organics": 200.0, "Crystals": 200.0}
+				3: return {"Metals": 6000.0, "Organics": 600.0, "Crystals": 600.0}
+		"pds": return {"Metals": 540.0, "Organics": 60.0, "Crystals": 60.0}
 		"reinforced_plating": return {"Metals": 4000.0}
-		"laser_matrix": return {"Metals": 2500.0, "Tech": 600.0, "Crystals": 200.0}
+		"laser_matrix": return {"Metals": 2500.0, "Crystals": 800.0}
 		"yard_upgrade": return {"Metals": 240.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"production": return {"Metals": 200.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"warehouse": return WAREHOUSE_COSTS[level - 1].duplicate()
 		"habitation":
 			var factor: float = pow(3.0, level - 1)
-			return {"Metals": 600.0 * factor, "Tech": 100.0 * factor, "Plastics": 150.0 * factor}
+			return {"Metals": 600.0 * factor}
 		"orbital_housing": return ORBITAL_HOUSING_COST.duplicate()
 	return {}
 
@@ -738,10 +723,8 @@ static func _compact_shipyard_orders(p: Dictionary, removed_level: int) -> void:
 		item["allocated"] = allocated
 
 # Gates apply to new local production orders, not completed infrastructure.
-# Early farming remains available, so capacity can grow toward the Tech gate.
-static func production_population(resource: String, level: int) -> int:
-	if resource == "Tech":
-		return maxi(1000, 200000 * (level - 1))
+# All three resources use the ordinary local population gate.
+static func production_population(_resource: String, level: int) -> int:
 	return maxi(1000, 10000 * (level - 1))
 
 static func production_available(p: Dictionary, resource: String) -> bool:
@@ -772,7 +755,7 @@ static func warehouse_available(p: Dictionary) -> bool:
 
 static func habitation_cost(p: Dictionary) -> Dictionary:
 	var factor: float = pow(3.0, int(p.get("habitation_level", 0)))
-	return {"Metals": 600.0 * factor, "Tech": 100.0 * factor, "Plastics": 150.0 * factor}
+	return {"Metals": 600.0 * factor}
 
 static func habitation_available(p: Dictionary) -> bool:
 	return has_planets(p) and int(p.get("habitation_level", 0)) < 3 and not _has_job(p, "habitation", "") and affordable(p, habitation_cost(p))
@@ -912,8 +895,6 @@ static func production_modifier(system: Dictionary, resource: String) -> float:
 	var modifier: float = float(system["bonuses"].get(resource, 1.0))
 	if MINED_RESOURCES.has(resource):
 		modifier *= float(system["abundance"].get(resource, 0.0))
-	elif resource == "Plastics":
-		modifier *= maxf(1.0, float(system["abundance"].get(resource, 0.0)))
 	return clampf(modifier, 0.1, 4.0) * building_multiplier(system, resource)
 
 static func _continuous_target(p: Dictionary, key: String) -> Array:
@@ -1354,7 +1335,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	p["farm_factor"] = 1.0 + FARM_VARIATION * sin(TAU * elapsed / FARM_CYCLE_SECONDS + float(p["farm_phase"]))
 	_update_population(p, dt)
 	p["demographic_rate"] = (float(p["population"]) - before_population) / maxf(EPS, dt)
-	# Residents consume all non-crystal resources. Only net surplus can occupy
+	# Residents consume Metals and Organics. Only net surplus can occupy
 	# free storage. At capacity production covers demand but stores no excess.
 	# Refunds may temporarily exceed capacity; never destroy returned materials.
 	for resource in ACTIVE_PRODUCTION:
@@ -4369,7 +4350,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 			elif counts["fighter"] < 32:
 				action = "fighter"
 			else:
-				for resource in ["Plastics", "Crystals"]:
+				for resource in ["Crystals"]:
 					if float(p["abundance"].get(resource, 0.0)) > 0.0 and production_level(p, resource) == 0:
 						action = "economy"
 						target = resource
@@ -4380,7 +4361,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		var price: Dictionary = building_cost(p, target) if action == "economy" else _cost(action, build_level)
 		if not affordable(p, price):
 			# Saving for an unaffordable hull must not leave mature systems
-			# waiting indefinitely for food or saturated industrial output.
+			# waiting indefinitely for food or local extraction.
 			for resource in price:
 				if float(p["stock"][resource]) >= float(price[resource]) or not ECONOMY_BUILDINGS.has(resource):
 					continue
