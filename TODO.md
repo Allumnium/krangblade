@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.56.1: Verify command-only tooltip timing, recipe display, level badges, target levels and renamed cards at all UI scales.
+
 - [ ] v0.56.0: Validate Scout/Cruiser/Destroyer construction, movement, combat, withdrawal, commands, artwork and peer replication; runtime pending.
 
 - [ ] v0.55.11: Validate starting/converted station HP, baseline and upgraded laser fire, cooldown, friendly exclusion and peer rendering. Runtime pending.

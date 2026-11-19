@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.56.1: Verify faster tooltips do not obscure neighboring command cards; check long Roman numerals on repeated economy buildings.
+
 - v0.56.0: Cruiser and Destroyer use stronger single-volley weapons and slower speeds as provisional balance. Assess capital ship pacing and Scout utility.
 
 - v0.55.11: Baseline station defenses make expansions harder to rush; assess four-emitter upgraded station balance during contested matches.
