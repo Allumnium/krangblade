@@ -307,7 +307,7 @@ var production_values: Dictionary = {}
 var system_owner_label: Label
 var leave: Button
 var match_menu: AcceptDialog
-var codex: AcceptDialog
+var codex: Window
 var match_result_dialog: AcceptDialog
 var match_result_shown: bool = false
 var defeated_shown: bool = false
@@ -480,6 +480,7 @@ func _build_ui() -> void:
 	help.focus_mode = Control.FOCUS_NONE
 	leave = _button("MENU", _open_menu, row)
 	codex = CODEX.new()
+	codex.hide()
 	add_child(codex)
 	match_menu = AcceptDialog.new()
 	match_menu.title = "Menu"
@@ -3372,7 +3373,10 @@ func _open_codex() -> void:
 	pending_command = ""
 	_refresh_command_mode()
 	resource_hover_panel.hide()
-	codex.popup_centered_ratio(0.88)
+	# Bound both axes by the actual match viewport, not desktop resolution.
+	var available: Vector2 = get_viewport_rect().size
+	var target := Vector2i(mini(1180, floori(available.x * 0.78)), mini(760, floori(available.y * 0.78)))
+	codex.popup_centered(target)
 
 func _open_menu() -> void:
 	drag_button = 0

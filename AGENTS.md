@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.46.2: Codex is a centered bounded window (78% of match viewport per axis, maximum 1180×760), with fixed header and independently scrolling article. Only navigation, search, close and scrollbar use interactive treatments; tables, diagrams, charts and notes are flat passive content. Keep scroll reachable at short window heights and avoid content-driven window growth.
+
 - v0.46.0: Add a local non-pausing Warbound Codex via the question-mark icon beside Menu. Searchable topic navigation, scrollable articles, resource icons, tables, flow diagrams and simulation-derived population/food reserve charts. Keep map/keyboard commands blocked while open; Escape/Close returns to match. No new simulation/network messages. Update articles with gameplay changes.
 
 - v0.45.3: Base population doubling time is 60 simulation years, including orbital recovery. Terrestrial positive growth is multiplied by clamp(local Organics stock / 200 t, 0, 1), independent of warehouse level or trade thresholds, in addition to existing habitation, food availability and damped capacity constraints. Orbital habitats remain self-sufficient and exempt from the stock modifier. Show food growth penalty on population hover; preserve existing crew and construction costs.
