@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.62.2: Highway influence regions have a 3,000-world-unit maximum centerline span, divided equally per connection. Soft section rims and independent tint; no change to real graph edges, width or direct movement.
+
 - v0.62.0: Sector/highway tint derives from local per-player influence: Scout/civilian 1, Fighter 2, Cruiser 5, Destroyer 10, station 30, each yard 20, PDS/standalone economic or orbital building 10. Normalize raw total shares and cap color intensity at 50; empty regions remain faint neutral. Ownership/combat unchanged; no new replication fields.
 
 - v0.61.3: Selected ship groups show persistent hull ghosts for active and queued drag-formation Move, Attack Move and Patrol orders, using authoritative points/headings and command colors. Cull offscreen ghosts; keep existing shared center line and suppress per-ship route lines for groups.

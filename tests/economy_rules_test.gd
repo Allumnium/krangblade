@@ -3474,15 +3474,20 @@ func _test_territory_influence() -> void:
 	]
 	var weights: Array[Dictionary] = ECON.territory_influence(state, graph)
 	assert(weights[0] == {1: 70, 2: 2})
-	assert(weights[5] == {1: 1, 2: 10} and weights[1].is_empty() and weights[2].is_empty())
+	var layout: Dictionary = ECON.highway_regions(graph)
+	assert(layout["counts"] == [1, 2, 1] and layout["starts"] == [4, 5, 7])
+	assert(weights.size() == 8 and weights[5] == {1: 1} and weights[6] == {2: 10} and weights[1].is_empty() and weights[2].is_empty())
+	assert(ECON.influence_region(graph, Vector2(4500, 600)) == 6)
+	assert(ECON.lane_direct(graph, Vector2(4400, 600), Vector2(4600, 600), [0, 1, 2, 3]))
 	var palette: Dictionary = {1: Color.RED, 2: Color.BLUE}
 	var mixed: Color = ECON.influence_color(weights[0], palette)
 	assert(is_equal_approx(mixed.r, 70.0 / 72.0) and is_equal_approx(mixed.b, 2.0 / 72.0) and mixed.a == 1.0)
-	assert(is_equal_approx(ECON.influence_color(weights[5], palette).a, 11.0 / 50.0))
+	assert(is_equal_approx(ECON.influence_color(weights[5], palette).a, 1.0 / 50.0))
+	assert(is_equal_approx(ECON.influence_color(weights[6], palette).a, 10.0 / 50.0))
 	assert(ECON.influence_color({}, palette).a == 0.0)
 	state["ships"][1]["position"] = Vector2(2500, 500)
 	weights = ECON.territory_influence(state, graph)
-	assert(weights[1] == {1: 1} and weights[5] == {2: 10})
+	assert(weights[1] == {1: 1} and weights[5].is_empty() and weights[6] == {2: 10})
 	home["yards"].pop_back()
 	home["pds"][0] = {"hp": ECON.PDS_HP}
 	weights = ECON.territory_influence(state, graph)
