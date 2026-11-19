@@ -59,7 +59,7 @@ const COLONY_FARM_RATE: float = 5.0
 const TRACTOR_RANGE: float = 90.0
 const TRACTOR_RATE: float = 12.0
 const FREIGHTER_TRACTOR_RATE: float = TRACTOR_RATE * 0.25
-const RESOURCE_HANDOFF_RANGE: float = TRACTOR_RANGE
+const RESOURCE_HANDOFF_RANGE: float = TRACTOR_RANGE * 2.0
 const RESOURCE_STAGE_SEARCH_YEARS: float = 2.0
 const RESOURCE_PARTIAL_WAIT_YEARS: float = 8.0
 const SALVAGE_CHANCE: float = 0.75
@@ -132,7 +132,7 @@ const FORMATION_SPACING: float = 28.0
 const SHIP_SEPARATION_RADIUS: float = 45.0
 const SHIP_CLEARANCE: float = 32.0
 # Service within the station footprint; contact correction need not permit exact center arrival.
-const STATION_DOCK_RANGE: float = 64.0
+const STATION_DOCK_RANGE: float = 128.0
 const SHIP_CLEARANCE_PASSES: int = 1
 const FOLLOW_DISTANCE: float = SHIP_SEPARATION_RADIUS * 2.0
 const RALLY_ARRIVAL_RADIUS: float = SHIP_SEPARATION_RADIUS * 2.0
@@ -445,7 +445,7 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
 	transit.fill(team)
 	return MAP.path(state["map"], transit, team, start, target)
 
-static func send_colony(state: Dictionary, player: int, ship_id: int, target: int) -> bool:
+static func send_colony(state: Dictionary, player: int, ship_id: int, target: int, automatic: bool = false) -> bool:
 	for ship in state["ships"]:
 		if int(ship["id"]) != ship_id:
 			continue
@@ -454,7 +454,7 @@ static func send_colony(state: Dictionary, player: int, ship_id: int, target: in
 			return false
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
-		_set_unit_order(state, ship, {"kind": "colonize", "target": target})
+		_set_unit_order(state, ship, {"kind": "colonize", "target": target, "automatic": automatic})
 		ship["dest"] = target
 		ship["return_path"] = path.duplicate()
 		_clear_local_hold(ship)
@@ -469,6 +469,7 @@ static func _grow_colony_cargo(ship: Dictionary, dt: float) -> void:
 		return
 	var amount: float = minf(cargo_free(ship), COLONY_FARM_RATE * maxf(0.0, dt))
 	ship["cargo"]["Organics"] = float(ship["cargo"].get("Organics", 0.0)) + amount
+	ship["food_produced"] = float(ship.get("food_produced", 0.0)) + amount
 
 static func _begin_farm_delivery(state: Dictionary, ship: Dictionary) -> bool:
 	if not autocast_enabled(ship, "farm") or cargo_free(ship) > EPS or not _is_idle_ship(ship) or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty():
@@ -478,25 +479,44 @@ static func _begin_farm_delivery(state: Dictionary, ship: Dictionary) -> bool:
 	ship["farm_auto_delivery"] = true
 	return true
 
+static func can_transform_colony(state: Dictionary, graph: Dictionary, ship: Dictionary) -> bool:
+	if ship.get("kind", "") != "colony_ship" or not ship.get("route", []).is_empty():
+		return false
+	var node: int = local_sector(graph, ship)
+	return node >= 0 and node < state["planets"].size() and int(state["planets"][node]["owner"]) == 0 and not has_station(state["planets"][node]) and discovered(state, int(ship["owner"]), "planets", node)
+
+static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> bool:
+	var colony: Dictionary = state["planets"][at]
+	colony["owner"] = int(ship["owner"])
+	colony["station"] = {"hp": STATION_HP, "converted_at": float(state["elapsed"])}
+	colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION if has_planets(colony) else ORBITAL_HOUSING_POPULATION
+	colony["eco_population"] = ORBITAL_HOUSING_POPULATION
+	colony["population_velocity"] = 0.0
+	colony["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "station_slot": 1, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
+	if has_planets(colony):
+		for resource in ["Metals", "Organics"]:
+			colony["levels"][resource] = 1
+	for resource in RESOURCES + [ANTIMATTER]:
+		var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
+		colony["stock"][resource] = float(colony["stock"].get(resource, 0.0)) + amount
+	return true # consumed to establish the colony
+
 static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool:
+	if ship.get("unit_order", {}).get("kind", "") != "colonize":
+		if not ship["route"].is_empty():
+			_move(state, ship, dt)
+		return false
 	if not _move(state, ship, dt) or int(ship["dest"]) < 0:
 		return false
 	var at: int = int(ship["at"])
 	if int(state["planets"][at]["owner"]) == 0 and not has_station(state["planets"][at]):
-		var colony: Dictionary = state["planets"][at]
-		colony["owner"] = int(ship["owner"])
-		colony["station"] = {"hp": STATION_HP, "converted_at": float(state["elapsed"])}
-		colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION if has_planets(colony) else ORBITAL_HOUSING_POPULATION
-		colony["eco_population"] = ORBITAL_HOUSING_POPULATION
-		colony["population_velocity"] = 0.0
-		colony["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "station_slot": 1, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
-		if has_planets(colony):
-			for resource in ["Metals", "Organics"]:
-				colony["levels"][resource] = 1
-		for resource in RESOURCES + [ANTIMATTER]:
-			var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
-			colony["stock"][resource] = float(colony["stock"].get(resource, 0.0)) + amount
-		return true # consumed to establish the colony
+		if bool(ship.get("unit_order", {}).get("automatic", false)):
+			return _convert_colony(state, ship, at)
+		ship["dest"] = -1
+		ship.erase("unit_order")
+		ship["holding"] = true
+		ship["navigation_target"] = ship["position"]
+		return false
 	# Another ship arrived first. Return to launch without claiming or combat.
 	var back: Array[int] = []
 	back.assign(ship["return_path"])
@@ -1467,9 +1487,15 @@ static func _transfer_bay(entity: Dictionary, resource: String, amount: float, o
 	var count: int = cargo_bay_count(kind)
 	return clampi(floori(offset / maxf(EPS, cargo_capacity(kind)) * count), 0, count - 1)
 
+static func _cargo_stat(ship: Dictionary, key: String, resource: String, amount: float) -> void:
+	if ship.has("kind") and resource != ANTIMATTER and amount > EPS:
+		ship[key] = float(ship.get(key, 0.0)) + amount
+
 static func _record_transfer(state: Dictionary, source_id: int, source: Dictionary, target_id: int, target: Dictionary, resource: String, amount: float) -> void:
 	if amount <= EPS:
 		return
+	_cargo_stat(source, "tons_dropped", resource, amount)
+	_cargo_stat(target, "tons_picked", resource, amount)
 	var events: Dictionary = state.get("cargo_transfers", {})
 	var key: String = "%d:%d:%s" % [source_id, target_id, resource]
 	if not events.has(key) and events.size() >= TRANSFER_EVENT_LIMIT:
@@ -2577,6 +2603,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			var free: float = MINER_CAPACITY - _cargo_total(ship)
 			var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource]))))
 			ship["mining_active"] = amount > EPS
+			_cargo_stat(ship, "tons_picked", resource, amount)
 			ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
 			chunk["remaining"] = maxf(0.0, float(chunk["remaining"]) - amount)
 			budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
@@ -3147,6 +3174,7 @@ static func _drop_carried(state: Dictionary, ship: Dictionary) -> void:
 		rng.seed = int(state["map"].get("seed", 0)) + id * 15485863
 		var angle: float = rng.randf_range(0.0, TAU)
 		piles[id] = {"id": id, "resource": resource, "amount": amount, "origin": pos, "position": pos, "drift": Vector2.from_angle(angle) * rng.randf_range(4.0, 10.0), "born": born, "expires_at": born + rng.randf_range(SALVAGE_MIN_LIFETIME, SALVAGE_MAX_LIFETIME), "claim": -1, "dropped_by": ship["id"]}
+		_cargo_stat(ship, "tons_dropped", resource, amount)
 		ship["cargo"][resource] = 0.0
 	state["salvage"] = piles
 
@@ -3166,7 +3194,7 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		ship.erase("cargo_order")
 		_finish_manual(ship)
 		return false
-	var reach: float = 0.0 if drop else (STATION_DOCK_RANGE if ref.get("kind") == "station" else TRACTOR_RANGE * 0.5)
+	var reach: float = 0.0 if drop else (STATION_DOCK_RANGE if ref.get("kind") == "station" else TRACTOR_RANGE)
 	if not drop and ship["route"].is_empty() and (ship["position"] as Vector2).distance_to(point) <= reach + EPS:
 		_navigate(ship, _waiting_berth(state, ship, point, reach, point.direction_to(ship["position"])), ship_speed(str(ship["kind"])) * dt)
 	elif not _manual_travel(state, graph, ship, node, point, dt, reach):
@@ -3816,6 +3844,8 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		return false
 	if ship["kind"] == "colony_ship" and kind in ["salvage", "drop"]:
 		return false
+	if kind == "transform":
+		return not append and can_transform_colony(state, graph, ship)
 	if kind == "unload":
 		return cargo_capacity(str(ship["kind"])) > EPS
 	if kind == "drop":
@@ -3868,6 +3898,15 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
+		"transform":
+			var graph: Dictionary = military_graph(state)
+			var converted: bool = false
+			for ship in _owned_units(state, player, ids):
+				if can_transform_colony(state, graph, ship):
+					_convert_colony(state, ship, local_sector(graph, ship))
+					state["ships"].erase(ship)
+					converted = true
+			return converted
 		"follow":
 			var units: Array = _owned_units(state, player, ids)
 			var refs: Dictionary = service_targets(state)
@@ -4600,6 +4639,7 @@ static func _collect_salvage(ship: Dictionary, pile: Dictionary, dt: float) -> v
 	if not ship.has("cargo"):
 		ship["cargo"] = empty_stock()
 	var resource: String = pile["resource"]
+	_cargo_stat(ship, "tons_picked", resource, amount)
 	ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
 	pile["amount"] -= amount
 	ship["tractor_active"] = true
@@ -4850,11 +4890,19 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		ship.erase("salvage_depot")
 	return true
 
+static func _ship_hit(damage: Dictionary, killed_by: Dictionary, health: Dictionary, target: int, attacker: Dictionary, amount: float) -> void:
+	var before: float = float(damage.get(target, 0.0))
+	damage[target] = before + amount
+	if before < float(health.get(target, INF)) and float(damage[target]) >= float(health.get(target, INF)) - EPS:
+		killed_by[target] = attacker
+
 static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	var ships: Array = state["ships"]
 	var positions: Dictionary = {}
 	var by_id: Dictionary = {}
 	var previous_targets: Dictionary = {}
+	var health: Dictionary = {}
+	var killed_by: Dictionary = {}
 	var cells: Dictionary = {}
 	var sectors: Dictionary = {}
 	var ship_sectors: Dictionary = {}
@@ -4863,6 +4911,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var pos: Vector2 = combat_position(state, graph, ship)
 		positions[id] = pos
 		by_id[id] = ship
+		health[id] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
 		previous_targets[id] = int(ship.get("combat_target", -1))
 		var sector: int = local_sector(graph, ship)
 		if sector < 0:
@@ -4886,6 +4935,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			var target_id: int = station_target_id(state, index)
 			var pos: Vector2 = station_position(state, index, float(state["elapsed"]))
 			station_targets[target_id] = index
+			health[target_id] = float(system["station"]["hp"])
 			positions[target_id] = pos
 			var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 			if not cells.has(cell):
@@ -4895,6 +4945,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			var target_id: int = -2 - index * 3 - slot
 			var pos: Vector2 = shipyard_position(state, index, slot, float(state["elapsed"]))
 			yard_targets[target_id] = Vector2i(index, slot)
+			health[target_id] = float(system["yards"][slot].get("hp", SHIP_HP * 10.0 * int(system["yards"][slot]["level"])))
 			positions[target_id] = pos
 			var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 			if not cells.has(cell):
@@ -4906,6 +4957,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			var target_id: int = -2 - system_count * 3 - int(slot) * system_count - index
 			var pos: Vector2 = graph["points"][index]
 			pds_targets[target_id] = Vector2i(index, int(slot))
+			health[target_id] = float(system["pds"][slot].get("hp", PDS_HP))
 			positions[target_id] = pos
 			var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 			if not cells.has(cell):
@@ -4951,7 +5003,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			ship["laser_until"] = -1.0 if int(previous_targets[id]) != int(ship["combat_target"]) else ship.get("laser_until", -1.0)
 			var focus_cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
 			if in_range and focus_cooldown <= EPS:
-				damage[focus] = float(damage.get(focus, 0.0)) + weapon_damage
+				_ship_hit(damage, killed_by, health, focus, ship, weapon_damage)
 				focus_cooldown = 1.0
 				ship["laser_until" if focus >= 0 else "yard_laser_until"] = float(state["elapsed"]) + 0.2
 			ship["laser_cooldown"] = focus_cooldown
@@ -5042,7 +5094,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		ship["combat_target"] = target
 		var cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
 		if target >= 0 and cooldown <= EPS:
-			damage[target] = float(damage.get(target, 0.0)) + weapon_damage
+			_ship_hit(damage, killed_by, health, target, ship, weapon_damage)
 			cooldown = 1.0
 			ship["laser_until"] = float(state["elapsed"]) + 0.2
 		ship["laser_cooldown"] = cooldown
@@ -5061,7 +5113,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 							ship["yard_target"] = yard_id
 			var yard_id: int = int(ship["yard_target"])
 			if yard_id < -1 and cooldown <= EPS:
-				damage[yard_id] = float(damage.get(yard_id, 0.0)) + weapon_damage
+				_ship_hit(damage, killed_by, health, yard_id, ship, weapon_damage)
 				ship["laser_cooldown"] = 1.0
 				ship["yard_laser_until"] = float(state["elapsed"]) + 0.2
 	# Each matrix emitter has its own cooldown and fires from the station.
@@ -5134,6 +5186,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 				cooldown = 1.0
 				battery["laser_until"] = float(state["elapsed"]) + 0.2
 			battery["cooldown"] = cooldown
+	for target in killed_by:
+		var attacker: Dictionary = killed_by[target]
+		attacker["kills"] = int(attacker.get("kills", 0)) + 1
 	for ship in ships.duplicate():
 		var id: int = int(ship["id"])
 		if damage.has(id):
@@ -5248,7 +5303,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 			if int(ship["owner"]) != player or ship.get("kind", "") != "colony_ship" or not (ship["route"] as Array).is_empty():
 				continue
 			var target: int = _ai_colony_target(state, player, ship, reserved)
-			if target >= 0 and send_colony(state, player, int(ship["id"]), target):
+			if target >= 0 and send_colony(state, player, int(ship["id"]), target, true):
 				reserved[target] = true
 		return
 	var planets: Array = state["planets"]
@@ -5290,7 +5345,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		set_thresholds(state, player, index, "Metals", 10.0 if bool(p["home"]) else (35.0 if producer else 90.0), 40.0 if bool(p["home"]) else (60.0 if producer else 95.0))
 	for ship in idle_colonies:
 		var target: int = _ai_colony_target(state, player, ship, reserved)
-		if target >= 0 and send_colony(state, player, int(ship["id"]), target):
+		if target >= 0 and send_colony(state, player, int(ship["id"]), target, true):
 			reserved[target] = true
 	var probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": home, "route": []}
 	var expansion: bool = _ai_colony_target(state, player, probe, reserved) >= 0

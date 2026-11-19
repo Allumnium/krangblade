@@ -522,7 +522,34 @@ func _test_passive_health() -> void:
 	assert(freighter["hp"] == 200.0 and station["hp"] == ECON.STATION_HP)
 	print("PASS: freighter hull and capped passive regeneration")
 
+func _test_manual_conversion_and_stats() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(3000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	ECON._finish(state, 0, state["planets"][0], {"id": 90001, "kind": "colony_ship", "population_allocated": ECON.COLONY_POPULATION})
+	var colony: Dictionary = state["ships"][0]
+	colony["position"] = map["points"][1]
+	colony["at"] = 1
+	colony["dest"] = 1
+	colony["unit_order"] = {"kind": "colonize", "target": 1}
+	assert(not ECON._work_colony(state, colony, 0.1))
+	assert(int(state["planets"][1]["owner"]) == 0)
+	ECON._grow_colony_cargo(colony, 1.0)
+	assert(is_equal_approx(float(colony["food_produced"]), ECON.COLONY_FARM_RATE))
+	assert(not ECON.issue_unit_order(state, 2, [90001], {"kind": "transform"}, false))
+	assert(ECON.issue_unit_order(state, 1, [90001], {"kind": "transform"}, false))
+	assert(state["ships"].is_empty() and int(state["planets"][1]["owner"]) == 1)
+	var source: Dictionary = {"kind": "miner", "cargo": {"Metals": 4.0}}
+	var target: Dictionary = {"kind": "ship", "cargo": {"Metals": 0.0}}
+	ECON._record_transfer(state, 1, source, 2, target, "Metals", 2.0)
+	assert(source["tons_dropped"] == 2.0 and target["tons_picked"] == 2.0)
+	var damage: Dictionary = {}
+	var killed_by: Dictionary = {}
+	ECON._ship_hit(damage, killed_by, {2: 10.0}, 2, source, 10.0)
+	assert(killed_by[2] == source)
+	print("PASS: manual conversion, lifetime transfer and production counters, lethal hit attribution")
+
 func _initialize() -> void:
+	_test_manual_conversion_and_stats()
 	_test_passive_health()
 	_test_ship_size_classes()
 	_test_local_avoidance()
@@ -1374,8 +1401,8 @@ func _initialize() -> void:
 	assert(not ECON.send_colony(colonization, 2, int(c1["id"]), 3))
 	assert(ECON.colony_path(colonization, 1, c1, 4) == [0, 1, 3, 4])
 	assert(not ECON.send_colony(colonization, 1, int(c1["id"]), 2))
-	assert(ECON.send_colony(colonization, 1, int(c1["id"]), 3))
-	assert(ECON.send_colony(colonization, 3, int(c2["id"]), 3))
+	assert(ECON.send_colony(colonization, 1, int(c1["id"]), 3, true))
+	assert(ECON.send_colony(colonization, 3, int(c2["id"]), 3, true))
 	assert(int(colonization["planets"][3]["owner"]) == 0)
 	var distance1: float = (c1["position"] as Vector2).distance_to(cp[1]) + (cp[1] as Vector2).distance_to(cp[3])
 	var distance2: float = (c2["position"] as Vector2).distance_to(cp[3])
@@ -1404,7 +1431,7 @@ func _initialize() -> void:
 		system["pds"].clear()
 	var distant_ship: Dictionary = {"id": 999, "kind": "colony_ship", "owner": 1, "at": 0, "position": cp[0], "route": [], "leg": 0.0, "dest": -1}
 	distant["ships"].append(distant_ship)
-	assert(ECON.send_colony(distant, 1, 999, 4))
+	assert(ECON.send_colony(distant, 1, 999, 4, true))
 	assert(distant_ship["position"] == cp[0])
 	ECON.step(distant, 2.0)
 	assert(int(distant["planets"][3]["owner"]) == 0 and int(distant["planets"][4]["owner"]) == 0)
@@ -3204,7 +3231,7 @@ func _test_conquest() -> void:
 	assert(not ECON.set_thresholds(state, 1, 1, "Metals", 10.0, 20.0))
 	var colony: Dictionary = {"id": 9901, "owner": 1, "kind": "colony_ship", "at": 1, "dest": -1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	state["ships"].append(colony)
-	assert(ECON.send_colony(state, 1, 9901, 1))
+	assert(ECON.send_colony(state, 1, 9901, 1, true))
 	assert(ECON._work_colony(state, colony, 0.1))
 	assert(int(planet["owner"]) == 1 and ECON.has_station(planet) and planet["yards"].size() == 1)
 	assert(ECON.set_thresholds(state, 1, 1, "Metals", 10.0, 20.0))
@@ -3524,7 +3551,7 @@ func _test_orbital_housing() -> void:
 	assert(int(p["owner"]) == 0)
 	var settlement: Dictionary = {"id": 9902, "owner": 1, "kind": "colony_ship", "at": index, "dest": -1, "route": [], "position": graph["points"][index], "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	state["ships"].append(settlement)
-	assert(ECON.send_colony(state, 1, 9902, index))
+	assert(ECON.send_colony(state, 1, 9902, index, true))
 	assert(ECON._work_colony(state, settlement, 0.1))
 	assert(int(p["owner"]) == 1 and float(p["population"]) == ECON.ORBITAL_HOUSING_POPULATION and ECON.has_station(p))
 	for resource in ECON.ORBITAL_HOUSING_COST:
@@ -3684,7 +3711,7 @@ func _test_match_elimination() -> void:
 	assert(not state.get("eliminated", []).has(2))
 	var target: int = 3
 	assert(not ECON.colony_path(state, 2, colony, target).is_empty())
-	assert(ECON.send_colony(state, 2, 11000, target))
+	assert(ECON.send_colony(state, 2, 11000, target, true))
 	state["ships"].erase(colony)
 	assert(ECON.update_match_outcome(state))
 	assert(state["eliminated"].has(2) and state.get("match_result", {}).is_empty())

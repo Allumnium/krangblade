@@ -516,6 +516,7 @@ func _send_commands() -> void:
 	session.call("request_shipyard_rally", home_index, 0, home_index, graph["points"][home_index])
 	session.call("request_shipyard_rally", (home_index + 1) % expected_players, 0, home_index, graph["points"][home_index])
 	session.call("request_autocast", [939000 + home_index], "farm", true)
+	session.call("request_unit_orders", [{"ids": [939000 + home_index], "order": {"kind": "transform"}}], false)
 	session.call("request_unit_orders", [{"ids": [943000 + home_index], "order": {"kind": "guard", "target": home_index, "point": graph["points"][home_index]}}], false)
 	session.call("request_autocast", [942000 + home_index], "collect", true)
 	session.call("request_autocast", [942000 + (home_index + 1) % expected_players], "collect", false)
