@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.56.11: Render planet transfers as miniature loaded rockets; neutral Send Colony uses command card, station hub only shows station queue. Preserve production and blockade rules.
+
 - v0.56.7: Planetary production emits resource-colored particles from matching orbital bodies to station storage. Hostile sector presence blocks planetary production, not orbital housing.
 
 - v0.56.6: Selected ship command lines trace authoritative remaining route nodes and final destination; queued orders use dashed connectors.

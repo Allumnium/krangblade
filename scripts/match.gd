@@ -832,8 +832,10 @@ func _build_ui() -> void:
 	interaction_scroll.add_child(interaction_panel)
 	colony_picker = OptionButton.new()
 	interaction_panel.add_child(colony_picker)
-	send_colony_button = _button("SEND COLONY", _send_colony, interaction_panel)
-	HUD.action(send_colony_button, Color("#c7a4ff"), true)
+	var neutral_grid: GridContainer = _ability_grid(interaction_panel)
+	send_colony_button = _station_button(neutral_grid, "Send\nColony", "transform", _send_colony)
+	_set_button_hint(send_colony_button, "Send selected available Colony to this sector")
+	_fill_ability_grid(neutral_grid)
 	_build_station_command_card(body)
 	var trade_page: GridContainer = _inspector_page("Trade")
 	for resource in ECONOMY.RESOURCES:
@@ -3782,7 +3784,7 @@ func _refresh() -> void:
 		station_card = "primary"
 	_sync_station_card()
 	yard_command_scroll.visible = yard_selected
-	interaction_scroll.visible = not other_selected and not yard_selected and not p.is_empty() and not own_system and not grouped_buildings
+	interaction_scroll.visible = not other_selected and not body_selected and not yard_selected and not p.is_empty() and int(p["owner"]) == 0 and not grouped_buildings
 	ship_overview.visible = other_selected
 	ship_population.get_parent().hide()
 	ship_title.visible = other_selected
@@ -4171,7 +4173,6 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
 	var neutral: bool = not p.is_empty() and int(p.get("owner", -1)) == 0 and phase == "match"
 	colony_picker.visible = neutral
 	send_colony_button.visible = neutral
-	send_colony_button.text = "SEND COLONY"
 	var choices: Array[int] = []
 	var labels: Array[String] = []
 	if neutral:
@@ -4491,8 +4492,17 @@ func _draw_planet_production(state: Dictionary, index: int, center: Vector2, rad
 				var phase: float = fposmod(elapsed * 0.8 + float(k) / float(count) + float(slot) * 0.173, 1.0)
 				var point: Vector2 = origin.lerp(destination, phase)
 				var alpha: float = detail * smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.85, 1.0, phase))
-				_draw_resource_glow(point, 3.0, color, alpha * 0.55)
-				map_canvas.draw_rect(Rect2(point - Vector2.ONE, Vector2.ONE * 2.0), Color(color.lightened(0.25), alpha))
+				var axis: Vector2 = origin.direction_to(destination)
+				var lateral: Vector2 = axis.orthogonal()
+				var size_factor: float = clampf(radius * 0.025, 2.0, 8.0)
+				var hull := PackedVector2Array([point + axis * size_factor, point - axis * size_factor * 0.4 + lateral * size_factor * 0.48, point - axis * size_factor + lateral * size_factor * 0.48, point - axis * size_factor * 0.72, point - axis * size_factor - lateral * size_factor * 0.48, point - axis * size_factor * 0.4 - lateral * size_factor * 0.48])
+				map_canvas.draw_colored_polygon(hull, Color(Color("#293b50"), alpha))
+				hull.append(hull[0])
+				map_canvas.draw_polyline(hull, Color(Color("#b2c8db"), alpha), 0.8, true)
+				var cargo: PackedVector2Array = _hull_polygon(point, axis * size_factor, lateral * size_factor, [Vector2(0.25, 0.24), Vector2(-0.55, 0.24), Vector2(-0.55, -0.24), Vector2(0.25, -0.24)])
+				map_canvas.draw_colored_polygon(cargo, Color(color, alpha))
+				_draw_resource_glow(point, size_factor * 0.6, color, alpha * 0.35)
+				map_canvas.draw_line(point - axis * size_factor * 0.78, point - axis * size_factor * 1.55, Color(Color("#a1eaff"), alpha * 0.8), maxf(0.7, size_factor * 0.18), true)
 
 func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
 	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(pos):
@@ -6229,15 +6239,6 @@ func _draw_station_jobs(system: Dictionary, center: Vector2, radius: float, tint
 	var infrastructure: Dictionary = ECONOMY.station_construction_job(system)
 	if not infrastructure.is_empty():
 		jobs.append(infrastructure)
-	for yard in system["yards"]:
-		var active_id: int = int(yard.get("job", -1))
-		if active_id < 0:
-			continue
-		for item in system["queue"]:
-			if int(item["id"]) == active_id:
-				if item["kind"] != "yard_upgrade":
-					jobs.append(item)
-				break
 	if jobs.is_empty():
 		return
 	var columns: int = mini(2, jobs.size())
