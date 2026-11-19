@@ -242,7 +242,7 @@ var yard_status: Label
 var yard_detail: Label
 var yard_costs: GridContainer
 var yard_progress: ProgressBar
-var yard_upgrade: Button
+var yard_upgrades: Dictionary = {}
 var yard_cancel: Button
 var selected_ship_id: int = -1
 var selected_units: Array[int] = []
@@ -1497,12 +1497,17 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		grid.add_child(button)
 		yard_commands[kind] = button
 		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S, "science_ship": KEY_V}[kind], "Shipyard", "yard_" + kind, _ship_kind_name(kind))
-	# Upgrade remains on row two; navigation and rally use the shared bottom row.
-	yard_upgrade = _button("", _upgrade_selected_yards, grid, true)
-	_yard_ability_face(yard_upgrade, "Upgrade", _station_command_icon("upgrade"))
-	_register_command_hotkey(yard_upgrade, KEY_U, "Shipyard", "yard_upgrade", "Upgrade")
-	while grid.get_child_count() < 12:
-		_station_spacer(grid)
+	# Rows 1–3: Small, Medium and Large. Upgrade occupies the first
+	# cell of the class it unlocks; navigation stays in row four.
+	for target_level in [2, 3]:
+		var upgrade: Button = _button("", _upgrade_selected_yards.bind(target_level), grid, true)
+		var class_name_text: String = ECONOMY.size_name(target_level)
+		_yard_ability_face(upgrade, "Upgrade\n" + class_name_text, _station_command_icon("upgrade"))
+		yard_upgrades[target_level] = upgrade
+		_register_command_hotkey(upgrade, KEY_U if target_level == 2 else KEY_I, "Shipyard", "yard_upgrade" if target_level == 2 else "yard_upgrade_large", "Upgrade to " + class_name_text)
+	var ordered_slots: Array = [yard_commands["miner"], yard_commands["fighter"], _station_spacer(grid), _station_spacer(grid), yard_upgrades[2], yard_commands["ship"], yard_commands["colony_ship"], _station_spacer(grid), yard_upgrades[3], yard_commands["science_ship"], _station_spacer(grid), _station_spacer(grid)]
+	for slot in range(ordered_slots.size()):
+		grid.move_child(ordered_slots[slot], slot)
 	var station_button := _button("", _select_yard_station, grid)
 	_yard_ability_face(station_button, "Select Space\nStation", _station_command_icon("select_station"))
 	station_button.tooltip_text = "Select parent Space Station"
@@ -1866,11 +1871,11 @@ func _build_at_yard(kind: String) -> void:
 		if _yard_build_available(system, ref.y, kind):
 			session.call("request_operation", ref.x, "shipyard_build", "%d:%s" % [ref.y, kind])
 
-func _upgrade_selected_yards() -> void:
+func _upgrade_selected_yards(target_level: int) -> void:
 	var state: Dictionary = _state()
 	for ref in _selected_yards(state, true):
 		var system: Dictionary = state["planets"][ref.x]
-		if _yard_can_upgrade(system, ref.y):
+		if int(system["yards"][ref.y]["level"]) == target_level - 1 and _yard_can_upgrade(system, ref.y):
 			session.call("request_operation", ref.x, "yard_upgrade", str(ref.y))
 
 func _yard_can_upgrade(system: Dictionary, slot: int) -> bool:
@@ -1927,12 +1932,17 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	rally_button.disabled = not owned
 	rally_button.set_pressed_no_signal(pending_command == "rally")
 	yard_commands["clear"].disabled = not owned or rally.is_empty()
-	var upgrade_recipe: Dictionary = ECONOMY._cost("yard_upgrade", level + 1)
-	yard_upgrade.disabled = not owned or not _yard_can_upgrade(system, selected_yard)
-	if level >= ECONOMY.MAX_SHIPYARD_LEVEL:
-		_set_cost_tooltip(yard_upgrade, "Maximum level")
-	else:
-		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMax ship size: %s → %s\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.size_name(ECONOMY.max_size(level)), ECONOMY.size_name(ECONOMY.max_size(level + 1)), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe, 0.0, _available_cost_resources(system, selected_yard))
+	for target_level in [2, 3]:
+		var upgrade: Button = yard_upgrades[target_level]
+		var eligible: bool = level == target_level - 1
+		upgrade.disabled = not owned or not eligible or not _yard_can_upgrade(system, selected_yard)
+		if level >= target_level:
+			_set_cost_tooltip(upgrade, ECONOMY.size_name(target_level) + " unlocked")
+		else:
+			var hint: String = "Upgrade to %s · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), ECONOMY.yard_speed(target_level - 1) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.SHIP_HP * 10.0 * (target_level - 1), ECONOMY.SHIP_HP * 10.0 * target_level]
+			if not eligible:
+				hint += "\nRequires " + ECONOMY.size_name(target_level - 1) + " shipyard"
+			_set_cost_tooltip(upgrade, hint, ECONOMY._cost("yard_upgrade", target_level), 0.0, _available_cost_resources(system, selected_yard))
 
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
@@ -4775,14 +4785,18 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		portrait.texture = _production_icon(kind, _empire_color(_me()))
 		portrait.modulate = Color.WHITE if eligible else Color(0.55, 0.55, 0.55)
 		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [_ship_kind_name(kind), _ship_stats(kind)], ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]), available)
-	var can_upgrade: bool = false
 	var can_clear: bool = false
+	var can_upgrade: Dictionary = {2: false, 3: false}
 	for ref in refs:
 		var system: Dictionary = state["planets"][ref.x]
-		can_upgrade = can_upgrade or _yard_can_upgrade(system, ref.y)
+		var next_level: int = int(system["yards"][ref.y]["level"]) + 1
+		if can_upgrade.has(next_level) and _yard_can_upgrade(system, ref.y):
+			can_upgrade[next_level] = true
 		can_clear = can_clear or not system["yards"][ref.y].get("rally", {}).is_empty()
-	yard_upgrade.disabled = not can_upgrade
-	_set_cost_tooltip(yard_upgrade, "Upgrade every eligible owned shipyard\nEach level adds 1× base build speed, unlocks the next ship class and adds 1,000 maximum HP. Restores full health.")
+	for target_level in [2, 3]:
+		var upgrade: Button = yard_upgrades[target_level]
+		upgrade.disabled = not can_upgrade[target_level]
+		_set_cost_tooltip(upgrade, "Upgrade every eligible %s shipyard to %s\nUnlocks the next ship class and restores full health." % [ECONOMY.size_name(target_level - 1), ECONOMY.size_name(target_level)], ECONOMY._cost("yard_upgrade", target_level), 0.0, available)
 	yard_commands["rally"].disabled = refs.is_empty()
 	yard_commands["clear"].disabled = not can_clear
 
