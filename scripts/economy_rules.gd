@@ -112,6 +112,8 @@ const MAX_SHIPYARD_LEVEL = 3
 const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 750.0, "science_ship": 2000.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
+const FREIGHTER_HP: float = SHIP_HP * 2.0
+const PASSIVE_REGEN: float = 1.0 / 3.0
 const STATION_HP: float = SHIP_HP * 10.0
 const REINFORCED_STATION_HP: float = 3000.0
 const STATION_LASER_COUNT: int = 2
@@ -1443,7 +1445,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			launch = _free_launch_position(state, index, launch, launch + (item.get("spawn_offset", Vector2.ZERO) as Vector2), int(item["id"]))
 			state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
 				"position": launch, "heading": Vector2.UP, "navigation_target": launch,
-				"route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
+				"route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": ship_max_hp(str(item["kind"])), "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
 			_launch_to_rally(state, state["ships"].back(), rally)
 	p["queue"].erase(item)
 
@@ -2953,6 +2955,25 @@ static func _attack_destination(graph: Dictionary, target: Dictionary) -> int:
 	var route: Array = target.get("route", [])
 	return int(route[0]) if not route.is_empty() else int(target.get("at", -1))
 
+static func ship_max_hp(kind: String) -> float:
+	return FREIGHTER_HP if kind == "ship" else SHIP_HP
+
+static func _regenerate_hull(entity: Dictionary, maximum: float, dt: float) -> void:
+	var hp: float = float(entity.get("hp", maximum))
+	if hp > 0.0 and hp < maximum:
+		entity["hp"] = minf(maximum, hp + PASSIVE_REGEN * maxf(0.0, dt))
+
+static func _passive_regeneration(state: Dictionary, dt: float) -> void:
+	for ship in state["ships"]:
+		_regenerate_hull(ship, ship_max_hp(str(ship["kind"])), dt)
+	for system in state["planets"]:
+		if has_station(system):
+			_regenerate_hull(system["station"], station_max_hp(system), dt)
+		for yard in system["yards"]:
+			_regenerate_hull(yard, SHIP_HP * 10.0 * int(yard["level"]), dt)
+		for battery in system.get("pds", {}).values():
+			_regenerate_hull(battery, PDS_HP, dt)
+
 static func armed(ship: Dictionary) -> bool:
 	return ship.get("kind", "") in ["fighter", "miner"]
 
@@ -2964,7 +2985,7 @@ static func service_targets(state: Dictionary) -> Dictionary:
 		var position: Vector2 = ship.get("position", Vector2.INF)
 		if not position.is_finite():
 			continue
-		targets[ship["id"]] = {"owner": ship["owner"], "entity": ship, "position": position, "max_hp": SHIP_HP, "node": -1, "kind": "ship"}
+		targets[ship["id"]] = {"owner": ship["owner"], "entity": ship, "position": position, "max_hp": ship_max_hp(str(ship["kind"])), "node": -1, "kind": "ship"}
 	var count: int = state["planets"].size()
 	for node in range(count):
 		var p: Dictionary = state["planets"][node]
@@ -3306,7 +3327,7 @@ static func _work_follow(state: Dictionary, graph: Dictionary, ship: Dictionary,
 				away = Vector2.from_angle(float(ship["id"]) * 2.399963)
 			_navigate(ship, point + away * reach * 0.8, ship_speed(str(ship.get("kind", "ship"))) * dt)
 		return true
-	ship["move_only"] = true
+	ship["move_only"] = not bool(order.get("guard", false))
 	var node: int = _attack_destination(graph, ref["entity"])
 	if node < 0 or node >= graph["points"].size():
 		return true
@@ -3826,7 +3847,7 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			return military_pois(state, owner).has(target)
 		"follow":
 			var refs: Dictionary = service_targets(state)
-			return _valid_follow_target(state, ship, target, refs)
+			return (not bool(order.get("guard", false)) or fighter) and _valid_follow_target(state, ship, target, refs)
 		"attack":
 			return armed(ship) and _hostile_hull(state, owner, service_targets(state).get(target, {}))
 		"repair":
@@ -3860,7 +3881,7 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 				_set_unit_order(state, ship, order.duplicate(true))
 				# Retain an in-flight lane until the follow worker replans it.
 				ship["dest"] = -1
-				ship["move_only"] = true
+				ship["move_only"] = not bool(order.get("guard", false))
 			return true
 		"sector_entry":
 			var graph: Dictionary = military_graph(state)
@@ -4276,7 +4297,7 @@ static func territory_empires(state: Dictionary) -> Array[int]:
 	return owners
 
 static func _engaged(ship: Dictionary) -> bool:
-	return int(ship.get("combat_target", -1)) >= 0 or int(ship.get("pursuit_target", -1)) >= 0
+	return (int(ship.get("combat_target", -1)) >= 0 and not bool(ship.get("passing_fire", false))) or int(ship.get("pursuit_target", -1)) >= 0
 
 # Civilian hulls do not pursue, even if armed. A fighter fleeing along a route (or
 # explicitly withdrawing in a future retreat system) is also eligible.
@@ -4907,7 +4928,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 				if _hostile_hull(state, int(ship["owner"]), enemy):
 					moving_only = false
 					break
-		if bool(ship.get("retreating", false)) or moving_only or ship.has("cargo_order") or ship.has("repair_order"):
+		ship["passing_fire"] = moving_only and fighter
+		if bool(ship.get("retreating", false)) or ship.has("cargo_order") or ship.has("repair_order"):
 			ship["combat_target"] = -1
 			ship["pursuit_target"] = -1
 			ship["pursuit_left"] = 0.0
@@ -4919,7 +4941,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var pos: Vector2 = positions[id]
 		# Explicit attack is focus fire, never attack-move: even when another
 		# hostile is closer, only the ordered entity may receive damage.
-		if ship.has("attack_order"):
+		if ship.has("attack_order") and positions.has(int(ship["attack_order"])) and pos.distance_to(positions[int(ship["attack_order"])]) <= LASER_RANGE:
 			var focus: int = int(ship["attack_order"])
 			var in_range: bool = positions.has(focus) and pos.distance_to(positions[focus]) <= LASER_RANGE
 			ship["combat_target"] = focus if in_range and focus >= 0 else -1
@@ -4945,7 +4967,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		for blocked_id in blocked.keys():
 			if not positions.has(blocked_id) or pos.distance_squared_to(positions[blocked_id]) > LASER_RANGE * LASER_RANGE:
 				blocked.erase(blocked_id)
-		if bool(ship.get("holding", false)) or (guard_node >= 0 and (ship_sectors[id] != guard_node or ship_sectors.get(pursuit, -1) != guard_node)):
+		if moving_only or bool(ship.get("holding", false)) or (guard_node >= 0 and (ship_sectors[id] != guard_node or ship_sectors.get(pursuit, -1) != guard_node)):
 			pursuit = -1
 		if pursuit >= 0:
 			if ship_sectors[id] >= 0 and ship_sectors.get(pursuit, -1) == ship_sectors[id]:
@@ -4966,24 +4988,24 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 					if int(state["teams"].get(int(other["owner"]), 0)) == team or team == 0:
 						continue
 					var other_id: int = int(other["id"])
-					if other_id < 0 or (guard_node >= 0 and (ship_sectors[id] != guard_node or ship_sectors.get(other_id, -1) != guard_node)):
+					if other_id < 0:
 						continue
 					var distance: float = pos.distance_squared_to(positions[other_id])
-					if blocked.has(other_id) and _fleeing(other, positions[other_id] - pos, int(previous_targets[other_id])):
+					if not moving_only and blocked.has(other_id) and _fleeing(other, positions[other_id] - pos, int(previous_targets[other_id])):
 						continue
 					if distance < best or (is_equal_approx(distance, best) and (target < 0 or other_id < target)):
 						best = distance
 						target = other_id
-		if fighter and not bool(ship.get("holding", false)) and pursuit < 0 and target >= 0 and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[target])):
+		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target >= 0 and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[target])):
 			pursuit = target
 			remaining = PURSUIT_YEARS
 		# A previously engaged fighter may escape the firing envelope before
 		# the next scan; its departure is still a valid pursuit trigger.
 		var prior: int = int(previous_targets[id])
-		if fighter and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[prior])):
+		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[prior])):
 			pursuit = prior
 			remaining = PURSUIT_YEARS
-		if fighter and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and int(ship_sectors[id]) >= 0 and team != 0:
+		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and int(ship_sectors[id]) >= 0 and team != 0:
 			var nearest_enemy: float = INF
 			for enemy in sectors.get(ship_sectors[id], []):
 				if not _hostile_hull(state, int(ship["owner"]), enemy):
@@ -5000,7 +5022,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			if ship_sectors.get(pursuit, -1) != guarded or ship_sectors[id] != guarded:
 				pursuit = -1
 			if ship_sectors.get(target, -1) != guarded or ship_sectors[id] != guarded:
-				target = -1
+				ship["passing_fire"] = true
 		if pursuit >= 0:
 			target = pursuit if pos.distance_squared_to(positions[pursuit]) <= LASER_RANGE * LASER_RANGE else -1
 		else:
@@ -5117,7 +5139,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	for ship in ships.duplicate():
 		var id: int = int(ship["id"])
 		if damage.has(id):
-			ship["hp"] = maxf(0.0, float(ship.get("hp", SHIP_HP)) - float(damage[id]))
+			ship["hp"] = maxf(0.0, float(ship.get("hp", ship_max_hp(str(ship["kind"])))) - float(damage[id]))
 			if float(ship["hp"]) <= EPS:
 				_record_ship_destruction(state, graph, ship)
 				ships.erase(ship)
@@ -6307,6 +6329,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	started = _profile_stage(profile, "AI / routing setup", started)
 	for craft in state["ships"]:
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") == "fighter" else state["map"]["points"], craft)
+	_passive_regeneration(state, dt)
 	_prepare_withdrawals(state, combat_graph)
 	_advance_unit_orders(state, combat_graph)
 	_update_tactical_orders(state, combat_graph)
@@ -6371,7 +6394,9 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			ship.erase("repair_target")
 			_work_withdrawal(state, combat_graph, ship, dt)
 			continue
-		if not (ship.get("kind", "") == "fighter" and _engaged(ship) and not bool(ship.get("holding", false))) and _work_follow(state, combat_graph, ship, service_refs, dt):
+		var follow: Dictionary = ship.get("unit_order", {})
+		var escort_far: bool = follow.get("kind", "") == "follow" and bool(follow.get("guard", false)) and (ship["position"] as Vector2).distance_to(service_refs.get(int(follow["target"]), {}).get("position", Vector2.INF)) > FOLLOW_DISTANCE * 2.0
+		if (escort_far or not (ship.get("kind", "") == "fighter" and _engaged(ship) and not bool(ship.get("holding", false)))) and _work_follow(state, combat_graph, ship, service_refs, dt):
 			continue
 		if ship.has("attack_order"):
 			var ref: Dictionary = service_refs.get(int(ship["attack_order"]), {})
@@ -6450,13 +6475,14 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			elif combat_positions.has(pursuit_id):
 				_pursue_fighter(ship, combat_positions[pursuit_id], dt)
 				ship["leg"] = _lane_progress(combat_graph["points"], ship)
-			elif combat_positions.has(target_id):
+			elif combat_positions.has(target_id) and not bool(ship.get("passing_fire", false)):
 				ship["pursuit_target"] = -1
 				ship["pursuit_left"] = 0.0
 				_maneuver_fighter(ship, combat_positions[target_id], dt)
 				ship["leg"] = _lane_progress(combat_graph["points"], ship)
 			else:
-				ship["combat_target"] = -1
+				if not bool(ship.get("passing_fire", false)):
+					ship["combat_target"] = -1
 				ship["pursuit_target"] = -1
 				ship["pursuit_left"] = 0.0
 				if not (ship["route"] as Array).is_empty():

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.55.3: Escort uses existing follow protocol with guard intent; verify tether and pursuit behavior during fast target travel. Passive hull healing may change prolonged low-damage combat; check balance. Active Attack and Attack Move share the existing command button.
+
 - v0.55.1: Recent same-link/resource records use the midpoint bay of transferred quantity; large transfers spanning multiple bays show a representative stream. Bounded 192-link history may omit effects in busy hubs. Profile snapshot overhead.
 
 - v0.55.0: Medium-yard prerequisite may delay AI expansion; verify upgrade funding and colony timing.

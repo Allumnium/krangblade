@@ -227,11 +227,11 @@ func _test_mining_lasers() -> void:
 	assert(friend["hp"] == ECON.SHIP_HP and chunk["remaining"] == 24.0)
 	ECON._work_miner(state, miner, ECON.planet_teams(state), {}, budgets, 1.0)
 	assert(chunk["remaining"] == 24.0 and not miner["mining_active"])
-	# Move-only suppresses even the weak automatic weapon.
+	# Moving armed ships still fire in range.
 	miner["move_only"] = true
 	miner["local_move_target"] = rock
 	ECON._combat(state, graph, 1.0)
-	assert(miner["combat_target"] == -1 and enemy["hp"] == ECON.SHIP_HP - ECON.MINER_LASER_DAMAGE)
+	assert(miner["combat_target"] == 101 and enemy["hp"] == ECON.SHIP_HP - ECON.MINER_LASER_DAMAGE * 2.0)
 	miner.erase("local_move_target")
 	state["ships"].erase(enemy)
 	ECON._combat(state, graph, 1.0)
@@ -240,7 +240,7 @@ func _test_mining_lasers() -> void:
 	var mined: float = ECON.MINER_LASER_DAMAGE * ECON.MINER_ASTEROID_MULTIPLIER * 0.5
 	assert(miner["mining_active"] and is_equal_approx(chunk["remaining"], 24.0 - mined) and is_equal_approx(miner["cargo"]["Metals"], mined))
 	assert(is_equal_approx(budgets[0]["Metals"], 100.0 - mined))
-	print("PASS: weak miner fire, friendly safety, no pursuit, move-only suppression, asteroid bonus and conserved ore")
+	print("PASS: weak miner fire, friendly safety, no pursuit, passing fire, asteroid bonus and conserved ore")
 
 func _test_miner_service_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(10000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
@@ -506,7 +506,24 @@ func _test_ship_size_classes() -> void:
 	assert(bytes_to_var(var_to_bytes(state))["cargo_transfers"] == state["cargo_transfers"])
 	print("PASS: ship classes, yard authority and cargo transfer metadata")
 
+func _test_passive_health() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1])
+	var freighter: Dictionary = {}
+	for ship in state["ships"]:
+		if ship["kind"] == "ship":
+			freighter = ship
+	assert(not freighter.is_empty() and freighter["hp"] == 200.0)
+	freighter["hp"] = 180.0
+	var station: Dictionary = state["planets"][0]["station"]
+	station["hp"] = 900.0
+	ECON._passive_regeneration(state, 3.0)
+	assert(is_equal_approx(float(freighter["hp"]), 181.0) and is_equal_approx(float(station["hp"]), 901.0))
+	ECON._passive_regeneration(state, 1000.0)
+	assert(freighter["hp"] == 200.0 and station["hp"] == ECON.STATION_HP)
+	print("PASS: freighter hull and capped passive regeneration")
+
 func _initialize() -> void:
+	_test_passive_health()
 	_test_ship_size_classes()
 	_test_local_avoidance()
 	_test_station_defense_and_ports()
@@ -2347,7 +2364,7 @@ func _test_follow_order() -> void:
 		state["ships"].append({"id": 9840 + k, "owner": 1, "kind": "fighter" if k == 0 else "colony_ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(0, 350 * k), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "wander_auto": false, "salvage_auto": false})
 	var follower: Dictionary = state["ships"][0]
 	var leader: Dictionary = state["ships"][1]
-	var order: Dictionary = {"kind": "follow", "target": 9841}
+	var order: Dictionary = {"kind": "follow", "target": 9841, "guard": true}
 	assert(not ECON.issue_unit_order(state, 2, [9840], order, false))
 	assert(not ECON.issue_unit_order(state, 1, [9840], {"kind": "follow", "target": 9840}, false))
 	assert(not ECON.issue_unit_order(state, 1, [9840], {"kind": "follow", "target": 99999}, false))

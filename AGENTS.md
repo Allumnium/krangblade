@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.55.3: Highlight current orders independent of targeting/autocast. Fighter right-click on friendly hull escorts it using validated Guard-follow. Armed ships fire in range on movement; preserve same-sector engagement and withdrawal priority. Gap clicks snap to nearest known sector. Freighters 200 HP; passive regeneration 1 HP/3 years for ships and structures.
+
 - v0.55.1: Three dedicated storage squares per resource on the station ring; fill and borders reflect resource stock. Actual cargo transfers record source/destination bay and animate bounded colored streams with interpolated ship poses.
 
 - v0.55.0: Small (1) Harvester/Fighter, Medium (2) Freighter/Colony, Large (3) Science vessel. Enforce yard class for manual and automatic construction; starting Freighter stays.
