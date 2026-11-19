@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.51.5: Loaded freighters should dock while blocked on storage. Check station congestion and retry behavior when all warehouses are full; single-unit order lines should remain readable at different zooms.
+
 - v0.51.4: Shorten mining/salvage delays and eliminate repair cooldown; existing order/arrival timestamps are shared but durations vary by mode. Monitor automatic repair precedence after movement and early civilian job resumption.
 
 - v0.51.3: Starter logistics ship supports the new resource-hauling loop immediately; monitor opening mineral throughput and AI production pacing before changing costs or fleet ratios.

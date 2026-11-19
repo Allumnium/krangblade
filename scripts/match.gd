@@ -5943,6 +5943,64 @@ func _order_color(ship: Dictionary, order: Dictionary) -> Color:
 		return Color("#55c88b")
 	return HUD.ACCENT
 
+func _draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, poses: Dictionary, refs: Dictionary) -> void:
+	var order: Dictionary = ship.get("unit_order", {})
+	var endpoint: Vector2 = Vector2.INF
+	var tint: Color = _order_color(ship, order)
+	var target: int = int(order.get("target", -1))
+	if bool(ship.get("retreating", false)):
+		var site: int = int(ship.get("repair_site", -1))
+		if site >= 0 and site < state["planets"].size():
+			endpoint = ECONOMY.station_position(state, site, float(state["elapsed"]))
+			tint = Color("#55c88b")
+	elif ship.has("patrol_from"):
+		endpoint = ship["patrol_start_point"] if bool(ship.get("patrol_returning", false)) else ship["patrol_end_point"]
+	elif order.get("kind", "") == "follow" and poses.has(target):
+		# The existing follow branch draws its own live line.
+		return
+	elif ship.has("launch_rally"):
+		# The existing rally branch draws its own line.
+		return
+	elif ship.has("local_move_target"):
+		endpoint = ship["local_move_target"]
+	elif ECONOMY._unit_order_running(ship):
+		endpoint = ECONOMY.unit_order_point(state, graph, ship, order)
+		if order.get("kind", "") in ["attack", "repair", "deposit"] and poses.has(target):
+			endpoint = Vector2.INF
+			map_canvas.draw_line(start, poses[target]["point"], Color(tint, 0.8), 1.5, true)
+			return
+	if not endpoint.is_finite():
+		var depot: int = int(ship.get("salvage_depot", ship.get("dest", -1)))
+		var repair: int = int(ship.get("repair_target", -1))
+		var salvage: int = int(ship.get("salvage_target", ship.get("auto_salvage_target", -1)))
+		var combat: int = int(ship.get("combat_target", -1))
+		if refs.has(repair):
+			endpoint = refs[repair]["position"]
+			tint = Color("#55c88b")
+		elif poses.has(combat):
+			map_canvas.draw_line(start, poses[combat]["point"], Color("#ff605c", 0.8), 1.5, true)
+			return
+		elif state.get("salvage", {}).has(salvage):
+			endpoint = state["salvage"][salvage]["position"]
+		elif ship.has("resource_stage"):
+			endpoint = ship["resource_stage"]["point"]
+		elif ship.get("mining_mode", "") in ["outbound", "mining"] and ship.has("mining_target"):
+			endpoint = ship["mining_target"]
+		elif depot >= 0 and depot < state["planets"].size() and ECONOMY.has_station(state["planets"][depot]) and ship.get("kind", "") != "fighter":
+			endpoint = ECONOMY.station_position(state, depot, float(state["elapsed"]))
+		elif not ship["route"].is_empty():
+			var node: int = int(ship["route"].back())
+			if node >= 0 and node < graph["points"].size():
+				endpoint = graph["points"][node]
+		elif ship.has("hold_position") and bool(ship.get("holding", false)):
+			endpoint = ship["hold_position"]
+		else:
+			endpoint = ship.get("navigation_target", Vector2.INF)
+	if endpoint.is_finite():
+		var finish: Vector2 = _screen_point(endpoint)
+		if start.distance_to(finish) > 1.0:
+			map_canvas.draw_line(start, finish, Color(tint, 0.8), 1.5, true)
+
 func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, drawn_sectors: Dictionary) -> void:
 	var order: Dictionary = ship.get("unit_order", {})
 	var endpoint: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
@@ -6076,6 +6134,8 @@ func _draw_map() -> void:
 		if not selected_units.has(id) or not poses.has(id):
 			continue
 		var start: Vector2 = poses[id]["point"]
+		if selected_units.size() == 1:
+			_draw_single_command_line(state, order_graph, craft, start, poses, service_refs)
 		_draw_queued_orders(state, order_graph, craft, start, drawn_sectors)
 		var active_order: Dictionary = craft.get("unit_order", {})
 		var order_tint: Color = _order_color(craft, active_order)
