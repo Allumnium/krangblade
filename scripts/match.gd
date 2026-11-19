@@ -109,6 +109,14 @@ var console_profile: Control
 var empty_selection: Label
 var command_grids: Dictionary = {}
 var command_hotkeys: Dictionary = {}
+var hotkey_entries: Dictionary = {}
+var hotkey_overrides: Dictionary = {}
+var hotkey_dialog: AcceptDialog
+var hotkey_status: Label
+var hotkey_pickers: Dictionary = {}
+var keyboard_pan_percent: float = 100.0
+var mouse_pan_percent: float = 100.0
+var wheel_zoom_percent: float = 100.0
 var station_commands: VBoxContainer
 var station_primary_grid: GridContainer
 var station_port_buttons: Dictionary = {}
@@ -415,6 +423,9 @@ func _ready() -> void:
 	add_child(background_music)
 	_load_settings()
 	_build_ui()
+	hotkey_entries["focus"] = {"scope": "General", "title": "Focus selection", "default": KEY_F}
+	hotkey_entries["army"] = {"scope": "General", "title": "Select all fighters", "default": KEY_F2}
+	_load_hotkey_overrides()
 	_build_resource_hover()
 	_apply_settings()
 	_on_economy_changed()
@@ -1311,16 +1322,8 @@ func _production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
 		production_icons[key] = ImageTexture.create_from_image(image)
 	return production_icons[key]
 
-func _register_command_hotkey(button: Button, key: int) -> void:
-	var shortcuts: Array = command_hotkeys.get(key, [])
-	shortcuts.append(button)
-	command_hotkeys[key] = shortcuts
-	var hint: String = "Esc" if key == KEY_ESCAPE else String.chr(key)
-	button.set_meta("hotkey", hint)
-	if not button.tooltip_text.is_empty():
-		button.tooltip_text += " [" + hint + "]"
+func _register_command_hotkey(button: Button, key: int, scope: String, id: String, title_text: String) -> void:
 	var label := Label.new()
-	label.text = hint
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	label.add_theme_font_size_override("font_size", 9)
@@ -1333,6 +1336,59 @@ func _register_command_hotkey(button: Button, key: int) -> void:
 	label.offset_right = -2.0
 	label.offset_top = 0.0
 	label.offset_bottom = 12.0
+	hotkey_entries[id] = {"scope": scope, "title": title_text, "default": key, "button": button, "badge": label}
+
+func _hotkey_value(id: String, overrides: Dictionary) -> int:
+	return int(overrides.get(id, hotkey_entries[id]["default"]))
+
+func _hotkey_name(key: int) -> String:
+	return "Esc" if key == KEY_ESCAPE else OS.get_keycode_string(key)
+
+func _hotkey_conflict(id: String, key: int, overrides: Dictionary) -> String:
+	var scope: String = hotkey_entries[id]["scope"]
+	for other in hotkey_entries:
+		if other == id:
+			continue
+		var other_scope: String = hotkey_entries[other]["scope"]
+		if (scope == other_scope or scope == "General" or other_scope == "General") and _hotkey_value(other, overrides) == key:
+			return str(hotkey_entries[other]["title"])
+	return ""
+
+func _load_hotkey_overrides() -> void:
+	var candidate: Dictionary = {}
+	for id in hotkey_entries:
+		var default_key: int = int(hotkey_entries[id]["default"])
+		var key: int = int(settings.get_value("hotkeys", id, default_key))
+		if default_key != KEY_ESCAPE and ((key >= KEY_A and key <= KEY_Z) or (key >= KEY_F1 and key <= KEY_F12)) and key != default_key:
+			candidate[id] = key
+	for id in candidate.keys():
+		if not _hotkey_conflict(id, int(candidate[id]), candidate).is_empty():
+			candidate.clear()
+			break
+	hotkey_overrides = candidate
+	_sync_hotkey_bindings()
+
+func _sync_hotkey_bindings() -> void:
+	command_hotkeys.clear()
+	for id in hotkey_entries:
+		var entry: Dictionary = hotkey_entries[id]
+		if not entry.has("button"):
+			continue
+		var button: Button = entry["button"]
+		var key: int = _hotkey_value(id, hotkey_overrides)
+		var hint: String = _hotkey_name(key)
+		var old: String = str(button.get_meta("hotkey", ""))
+		if not old.is_empty():
+			button.tooltip_text = button.tooltip_text.replace("\n[" + old + "]", "").replace(" [" + old + "]", "")
+			if button.tooltip_text == "[" + old + "]":
+				button.tooltip_text = ""
+		button.set_meta("hotkey", hint)
+		button.tooltip_text += ("\n" if not button.tooltip_text.is_empty() else "") + "[" + hint + "]"
+		var badge: Label = entry["badge"]
+		badge.text = hint
+		var shortcuts: Array = command_hotkeys.get(key, [])
+		shortcuts.append(button)
+		command_hotkeys[key] = shortcuts
 
 func _trigger_command_hotkey(key: int) -> bool:
 	for candidate in command_hotkeys.get(key, []):
@@ -1400,17 +1456,17 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 		grid.add_child(button)
 		yard_commands[kind] = button
-		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S}[kind])
+		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S}[kind], "Shipyard", "yard_" + kind, _ship_kind_name(kind))
 	# Upgrade remains on row two; navigation and rally use the shared bottom row.
 	yard_upgrade = _button("", _upgrade_selected_yards, grid, true)
 	_yard_ability_face(yard_upgrade, "Upgrade", _station_command_icon("upgrade"))
-	_register_command_hotkey(yard_upgrade, KEY_U)
+	_register_command_hotkey(yard_upgrade, KEY_U, "Shipyard", "yard_upgrade", "Upgrade")
 	while grid.get_child_count() < 12:
 		_station_spacer(grid)
 	var station_button := _button("", _select_yard_station, grid)
 	_yard_ability_face(station_button, "Select Space\nStation", _station_command_icon("select_station"))
 	station_button.tooltip_text = "Select parent Space Station"
-	_register_command_hotkey(station_button, KEY_Z)
+	_register_command_hotkey(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
 	_station_spacer(grid)
 	var clear := _button("", func() -> void:
 		pending_command = ""
@@ -1420,7 +1476,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	_yard_ability_face(clear, "Clear\nRally", _station_command_icon("clear_rally"))
 	clear.tooltip_text = "Clear rally point"
 	yard_commands["clear"] = clear
-	_register_command_hotkey(clear, KEY_X)
+	_register_command_hotkey(clear, KEY_X, "Shipyard", "yard_clear", "Clear Rally")
 	var rally_button := Button.new()
 	_yard_ability_face(rally_button, "Rally", _station_command_icon("rally"))
 	rally_button.toggle_mode = true
@@ -1428,7 +1484,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
-	_register_command_hotkey(rally_button, KEY_Y)
+	_register_command_hotkey(rally_button, KEY_Y, "Shipyard", "yard_rally", "Rally")
 	_fill_ability_grid(grid)
 	yard_command_scroll.hide()
 
@@ -1509,18 +1565,18 @@ func _build_station_command_card(parent: Container) -> void:
 	station_primary_grid = _ability_grid(station_commands)
 	for port in range(1, ECONOMY.MAX_SHIPYARDS + 1):
 		station_port_buttons[port] = _station_button(station_primary_grid, "Build\nShipyard %d" % port, "yard", _station_port_pressed.bind(port))
-		_register_command_hotkey(station_port_buttons[port], [KEY_Z, KEY_X, KEY_C][port - 1])
+		_register_command_hotkey(station_port_buttons[port], [KEY_Z, KEY_X, KEY_C][port - 1], "Station", "station_port_" + str(port), "Build / select Shipyard %d" % port)
 	_station_spacer(station_primary_grid)
 	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Reinforced\nPlating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
-	_register_command_hotkey(station_upgrade_buttons["reinforced_plating"], KEY_V)
-	_register_command_hotkey(station_upgrade_buttons["laser_matrix"], KEY_L)
+	_register_command_hotkey(station_upgrade_buttons["reinforced_plating"], KEY_V, "Station", "station_plating", "Reinforced Plating")
+	_register_command_hotkey(station_upgrade_buttons["laser_matrix"], KEY_L, "Station", "station_matrix", "Laser Matrix")
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
 	for i in range(4):
 		_station_spacer(station_primary_grid)
-	_register_command_hotkey(_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")), KEY_B)
-	_register_command_hotkey(_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")), KEY_T)
+	_register_command_hotkey(_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")), KEY_B, "Station", "station_build", "Build")
+	_register_command_hotkey(_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")), KEY_T, "Station", "station_trade", "Trade")
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
 	station_build_grid = _ability_grid(station_commands)
@@ -1530,7 +1586,7 @@ func _build_station_command_card(parent: Container) -> void:
 	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds"]:
 		var button: Button = _station_button(station_build_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
 		station_build_buttons[key] = button
-		_register_command_hotkey(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_T}[key])
+		_register_command_hotkey(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_T}[key], "Station Build", "build_" + key, captions[key].replace("\n", " "))
 		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing"]:
 			button.gui_input.connect(_station_repeat_input.bind(key, button))
 			var border := Control.new()
@@ -1546,7 +1602,7 @@ func _build_station_command_card(parent: Container) -> void:
 	# Return stays at the bottom right.
 	for i in range(3):
 		_station_spacer(station_build_grid)
-	_register_command_hotkey(_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")), KEY_ESCAPE)
+	_register_command_hotkey(_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")), KEY_ESCAPE, "Station Build", "build_return", "Return")
 	station_trade = VBoxContainer.new()
 	station_trade.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	station_commands.add_child(station_trade)
@@ -2013,7 +2069,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	slot.add_child(button)
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_buttons[id] = button
-	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R}[id])
+	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -3023,7 +3079,7 @@ func _inspector_page(title_text: String) -> GridContainer:
 	station_trade.add_child(footer)
 	station_trade_back = _button("", _station_card_to.bind("primary"), footer)
 	_yard_ability_face(station_trade_back, "Return", _station_command_icon("return"))
-	_register_command_hotkey(station_trade_back, KEY_ESCAPE)
+	_register_command_hotkey(station_trade_back, KEY_ESCAPE, "Station Trade", "trade_return", "Return")
 	station_trade_back.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return page
 
@@ -3323,6 +3379,9 @@ func _load_settings() -> void:
 	sfx_volume = clampf(float(settings.get_value("audio", "sfx", 100.0)), 0.0, 100.0)
 	music_muted = bool(settings.get_value("audio", "music_muted", false))
 	sfx_muted = bool(settings.get_value("audio", "sfx_muted", false))
+	keyboard_pan_percent = clampf(float(settings.get_value("camera", "keyboard_pan", 100.0)), 0.0, 250.0)
+	mouse_pan_percent = clampf(float(settings.get_value("camera", "edge_pan", 100.0)), 0.0, 250.0)
+	wheel_zoom_percent = clampf(float(settings.get_value("camera", "wheel_zoom", 100.0)), 25.0, 250.0)
 
 func _apply_settings() -> void:
 	for bus_name in ["Music", "SFX"]:
@@ -3342,6 +3401,13 @@ func _save_settings() -> void:
 	settings.set_value("audio", "sfx", sfx_volume)
 	settings.set_value("audio", "music_muted", music_muted)
 	settings.set_value("audio", "sfx_muted", sfx_muted)
+	settings.set_value("camera", "keyboard_pan", keyboard_pan_percent)
+	settings.set_value("camera", "edge_pan", mouse_pan_percent)
+	settings.set_value("camera", "wheel_zoom", wheel_zoom_percent)
+	if settings.has_section("hotkeys"):
+		settings.erase_section("hotkeys")
+	for id in hotkey_overrides:
+		settings.set_value("hotkeys", id, hotkey_overrides[id])
 	settings.save("user://warbound_settings.cfg")
 	_apply_settings()
 
@@ -3378,6 +3444,126 @@ func _build_settings_menu() -> void:
 		mute.toggled.connect(func(value: bool) -> void:
 			_set_mute_icon(mute, value)
 			_audio_mute_changed(value, channel))
+	options.add_child(HSeparator.new())
+	_add_camera_setting(options, "Keyboard scroll speed", "keyboard", keyboard_pan_percent, 0.0)
+	_add_camera_setting(options, "Mouse edge scroll speed", "edge", mouse_pan_percent, 0.0)
+	_add_camera_setting(options, "Mouse wheel zoom speed", "wheel", wheel_zoom_percent, 25.0)
+	_button("Hotkeys…", _open_hotkey_editor, options)
+
+func _add_camera_setting(parent: Container, title_text: String, kind: String, initial: float, minimum: float) -> void:
+	var row := HBoxContainer.new()
+	parent.add_child(row)
+	var caption := _label(title_text, 13)
+	caption.autowrap_mode = TextServer.AUTOWRAP_OFF
+	caption.custom_minimum_size.x = 170
+	row.add_child(caption)
+	var slider := HSlider.new()
+	slider.min_value = minimum
+	slider.max_value = 250.0
+	slider.step = 5.0
+	slider.value = initial
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.custom_minimum_size = Vector2(100, 24)
+	row.add_child(slider)
+	var value_label := _label("%d%%" % roundi(initial), 12)
+	value_label.custom_minimum_size.x = 45
+	value_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	row.add_child(value_label)
+	slider.value_changed.connect(func(value: float) -> void:
+		value_label.text = "%d%%" % roundi(value)
+		match kind:
+			"keyboard": keyboard_pan_percent = value
+			"edge": mouse_pan_percent = value
+			"wheel": wheel_zoom_percent = value
+		_save_settings())
+
+func _open_hotkey_editor() -> void:
+	if not is_instance_valid(hotkey_dialog):
+		hotkey_dialog = AcceptDialog.new()
+		hotkey_dialog.title = "Hotkeys"
+		hotkey_dialog.theme = theme
+		hotkey_dialog.exclusive = true
+		hotkey_dialog.transient = true
+		hotkey_dialog.unresizable = true
+		hotkey_dialog.ok_button_text = "Done"
+		match_menu.add_child(hotkey_dialog)
+		var body := VBoxContainer.new()
+		hotkey_dialog.add_child(body)
+		body.add_child(_label("Choose a key for each command. Keys may be reused on different cards.", 13))
+		var viewport_size: Vector2 = get_viewport_rect().size
+		var scroll := ScrollContainer.new()
+		scroll.custom_minimum_size = Vector2(minf(510.0, viewport_size.x - 70.0), clampf(viewport_size.y - 230.0, 120.0, 380.0))
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		body.add_child(scroll)
+		var rows := VBoxContainer.new()
+		rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroll.add_child(rows)
+		for scope in ["General", "Fleet", "Shipyard", "Station", "Station Build", "Station Trade"]:
+			var heading := _label(scope.to_upper(), 13)
+			heading.add_theme_color_override("font_color", HUD.ACCENT)
+			rows.add_child(heading)
+			for id in hotkey_entries:
+				var entry: Dictionary = hotkey_entries[id]
+				if entry["scope"] != scope:
+					continue
+				var row := HBoxContainer.new()
+				rows.add_child(row)
+				var caption := _label(str(entry["title"]), 13)
+				caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				row.add_child(caption)
+				var picker := OptionButton.new()
+				picker.custom_minimum_size.x = 92
+				var default_key: int = int(entry["default"])
+				if default_key == KEY_ESCAPE:
+					picker.add_item("Esc (fixed)", KEY_ESCAPE)
+					picker.disabled = true
+				else:
+					for key in range(KEY_A, KEY_Z + 1):
+						picker.add_item(_hotkey_name(key), key)
+					for key in range(KEY_F1, KEY_F12 + 1):
+						picker.add_item(_hotkey_name(key), key)
+				row.add_child(picker)
+				hotkey_pickers[id] = picker
+				picker.item_selected.connect(_hotkey_changed.bind(str(id), picker))
+		body.add_child(_label("Fixed: arrow keys, Esc, 0–9 control groups and mouse gestures.", 12))
+		hotkey_status = _label("", 13)
+		hotkey_status.custom_minimum_size.y = 26
+		body.add_child(hotkey_status)
+		_button("Reset all to defaults", _reset_hotkeys, body)
+	_refresh_hotkey_pickers()
+	hotkey_status.text = ""
+	hotkey_dialog.popup_centered()
+
+func _refresh_hotkey_pickers() -> void:
+	for id in hotkey_pickers:
+		var picker: OptionButton = hotkey_pickers[id]
+		var index: int = picker.get_item_index(_hotkey_value(id, hotkey_overrides))
+		if index >= 0:
+			picker.select(index)
+
+func _hotkey_changed(index: int, id: String, picker: OptionButton) -> void:
+	var key: int = picker.get_item_id(index)
+	var conflict: String = _hotkey_conflict(id, key, hotkey_overrides)
+	if not conflict.is_empty():
+		hotkey_status.text = "%s is already assigned to %s." % [_hotkey_name(key), conflict]
+		_refresh_hotkey_pickers()
+		return
+	if key == int(hotkey_entries[id]["default"]):
+		hotkey_overrides.erase(id)
+	else:
+		hotkey_overrides[id] = key
+	_sync_hotkey_bindings()
+	_save_settings()
+	hotkey_status.text = "Saved."
+
+func _reset_hotkeys() -> void:
+	hotkey_overrides.clear()
+	_sync_hotkey_bindings()
+	_refresh_hotkey_pickers()
+	_save_settings()
+	hotkey_status.text = "Default hotkeys restored."
 
 func _set_mute_icon(button: Button, muted: bool) -> void:
 	var speaker: String = '<path d="M4 12H10L17 6V26L10 20H4Z"/>'
@@ -3439,7 +3625,7 @@ func _open_codex() -> void:
 
 func _open_menu() -> void:
 	drag_button = 0
-	match_menu.popup_centered(Vector2i(420, 190))
+	match_menu.popup_centered(Vector2i(460, 350))
 
 func _menu_action(action: StringName) -> void:
 	if action == &"leave":
@@ -4577,10 +4763,10 @@ func _map_input(event: InputEvent) -> void:
 					selection_double_click = false
 			MOUSE_BUTTON_WHEEL_UP:
 				if mouse.pressed:
-					_zoom_at(mouse.position, 1.0)
+					_zoom_at(mouse.position, wheel_zoom_percent / 100.0)
 			MOUSE_BUTTON_WHEEL_DOWN:
 				if mouse.pressed:
-					_zoom_at(mouse.position, -1.0)
+					_zoom_at(mouse.position, -wheel_zoom_percent / 100.0)
 	elif event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event
 		if formation_button != 0:
@@ -4686,6 +4872,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if is_instance_valid(match_result_dialog) and match_result_dialog.visible:
 		return
+	if is_instance_valid(hotkey_dialog) and hotkey_dialog.visible:
+		return
 	if key == KEY_ESCAPE:
 		if match_menu.visible:
 			match_menu.hide()
@@ -4715,9 +4903,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_recall_control_group(number)
 	elif event.ctrl_pressed:
 		return
-	elif key == KEY_F:
+	elif key == _hotkey_value("focus", hotkey_overrides):
 		_focus_selection()
-	elif key == KEY_F2:
+	elif key == _hotkey_value("army", hotkey_overrides):
 		_select_all_military()
 	elif not _trigger_command_hotkey(key):
 		return
@@ -4766,6 +4954,7 @@ func _keyboard_pan(delta: float) -> void:
 	var direction := Vector2(
 		float(Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_LEFT)),
 		float(Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_UP)))
+	var edge_direction := Vector2.ZERO
 	# Do not edge-scroll while dragging a selection, order or UI control.
 	if Input.mouse_mode == Input.MOUSE_MODE_CONFINED and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 		var bounds: Rect2 = get_viewport_rect()
@@ -4775,8 +4964,10 @@ func _keyboard_pan(delta: float) -> void:
 			var edge := Vector2(
 				float(cursor.x >= bounds.size.x - EDGE_MARGIN) - float(cursor.x < EDGE_MARGIN),
 				float(cursor.y >= bounds.size.y - EDGE_MARGIN) - float(cursor.y < EDGE_MARGIN))
-			direction = (direction + edge).clamp(Vector2(-1, -1), Vector2.ONE)
-	_pan_camera(direction, delta)
+			edge_direction = edge
+	var velocity: Vector2 = direction.normalized() * keyboard_pan_percent / 100.0 + edge_direction.normalized() * mouse_pan_percent / 100.0
+	velocity = velocity.limit_length(maxf(keyboard_pan_percent, mouse_pan_percent) / 100.0)
+	_pan_camera(velocity, delta)
 
 func _sync_match_mouse_mode() -> void:
 	var active: bool = str(session.get("phase")) == "match" and get_window().has_focus()
@@ -4788,7 +4979,7 @@ func _sync_match_mouse_mode() -> void:
 func _pan_camera(direction: Vector2, delta: float) -> void:
 	if not direction.is_zero_approx():
 		follow_units = false
-		camera_world = _camera_world_center() + direction.normalized() * KEYBOARD_PAN_SPEED * delta / (_fit() * zoom)
+		camera_world = _camera_world_center() + direction * KEYBOARD_PAN_SPEED * delta / (_fit() * zoom)
 		map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
