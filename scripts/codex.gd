@@ -282,7 +282,7 @@ func _overview() -> void:
 	_body("Expand your empire through local economies, autonomous logistics and direct fleet command.")
 	_section("The strategic loop")
 	_flow(["Extract resources", "Build & recruit", "Expand", "Defend supply"])
-	_body("Miners gather ore, freighters distribute surplus and fighters defend your territory. Select a unit or station to issue orders.")
+	_body("Start with 3 miners, 2 fighters and 1 logistics ship. Select a unit or station to issue orders.")
 	_section("First priorities")
 	_table(["Goal", "Action"], [["Establish supplies", "Protect nearby asteroid fields and keep food reserves healthy."], ["Build a fleet", "Select a shipyard and queue miners, fighters or logistics ships."], ["Expand", "Send a colony ship to an eligible neutral system. Secure your trade lanes."], ["Survive", "Defend your stations and colony ships; defeat hostile teams by conquest."]])
 	_note("Start with Population & food and Trade & storage.")

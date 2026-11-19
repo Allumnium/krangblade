@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.51.3: All players (human and AI) start with three miners, two fighters and one logistics ship. Preserve existing free starter fleet provisioning, home population, stocks and defensive structures.
+
 - v0.51.2: Contextual right-click friendly or allied hull issues persistent Follow by stable ID (self, hostile and cyclic targets rejected). Maintain 90–157.5 world-unit standoff with small per-hull variation; use existing legal manual lanes, normal ship speed and emergency withdrawal priority. Explicit replacement, Hold, Stop or lost target ends follow; queued successors start after reaching standoff. Selection shows live order line and Following status. Preserve Alt exact positions, manual cargo/repair and formation drags.
 
 - v0.51.1: Floating resource entities and occupied ship cargo segments use a shared cached soft resource-colored halo; empty cargo bays and asteroid art remain unchanged. Asteroid fields have a fixed 4×4 card with Mining, Metals and Crystals modes on the bottom row, persistent on-state borders, left/right click and configurable G/M/C shortcuts. Antimatter fields show only Mining. Reuse existing player-specific mining-policy authority and preserve resource preferences while disabled.
