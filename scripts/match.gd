@@ -16,7 +16,7 @@ const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
 const KEYBOARD_PAN_SPEED: float = 420.0
 const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade"}
-const SYSTEM_WORLD_RADIUS: float = 600.0
+const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
 const MIN_ZOOM: float = 0.5
 const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
 const OVERVIEW_ART_NORMAL_ZOOM: float = 16.0
@@ -3931,9 +3931,7 @@ func _star_draw_radius(radius: float) -> float:
 	return radius * 0.13
 
 func _body_position(body: Dictionary, radius: float, time: float) -> Vector2:
-	var angle: float = float(body["phase"]) + time * float(body["speed"]) * 0.22
-	var orbit_radius: float = radius * float(body["orbit"])
-	return Vector2(cos(angle) * orbit_radius, sin(angle) * orbit_radius * 0.65)
+	return ECONOMY.body_position(body, radius, time)
 
 func _draw_elliptical_orbit(center: Vector2, radius: float, tint: Color) -> void:
 	var points := PackedVector2Array()
@@ -4075,7 +4073,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 			var orbit: float = radius * float(body["orbit"])
 			if _show_system_rings(index):
 				_draw_elliptical_orbit(pos, orbit, Color(tint, 0.20 * detail))
-			var point: Vector2 = pos + _body_position(body, radius, game_visual_clock)
+			var point: Vector2 = pos + _body_position(body, radius, float(state["elapsed"]))
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
@@ -4091,13 +4089,20 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 	_draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity)
 	if detail < 0.999 and not system.get("pds", {}).is_empty():
 		map_canvas.draw_arc(pos, star_radius + 3.0, -PI * 0.8, PI * 0.8, 18, Color(Color("#bdcbd6"), 1.0 - detail), 1.5, true)
+	if detail < 0.999:
+		# A small battery marker stays on its actual planet even at overview zoom.
+		var bodies: Array = _system_visual(index, state)["bodies"]
+		for slot in system.get("pds", {}):
+			if int(slot) >= 0 and int(slot) < bodies.size():
+				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, float(state["elapsed"]))
+				map_canvas.draw_circle(point, 2.0, Color(Color("#bdcbd6"), 1.0 - detail), true)
 	if detail < 0.3 and building_selection_kind == "pds":
 		# Retain a selection marker when F frames a distant battery group and
 		# the individual planet surfaces fade out at overview zoom.
 		var bodies: Array = _system_visual(index, state)["bodies"]
 		for slot in system.get("pds", {}):
 			if selected_buildings.has(Vector2i(index, int(slot))) and int(slot) < bodies.size():
-				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, game_visual_clock)
+				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, float(state["elapsed"]))
 				_draw_selection_ring(point, 6.0)
 	if _show_system_rings(index):
 		map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
@@ -4160,7 +4165,7 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 		var bodies: Array = _system_visual(index, state)["bodies"]
 		for slot in range(bodies.size()):
 			var body: Dictionary = bodies[slot]
-			var position: Vector2 = center + _body_position(body, radius, game_visual_clock)
+			var position: Vector2 = center + _body_position(body, radius, float(state["elapsed"]))
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			var distance: float = point.distance_to(position)
 			if distance <= body_radius + 3.0 and distance < nearest:
@@ -4395,7 +4400,7 @@ func _building_world(state: Dictionary, ref: Vector2i, kind: String) -> Vector2:
 	if kind == "station":
 		return ECONOMY.station_position(state, ref.x, float(state["elapsed"]))
 	var body: Dictionary = _system_visual(ref.x, state)["bodies"][ref.y]
-	return (state["map"]["points"][ref.x] as Vector2) + _body_position(body, _system_world_radius(ref.x, state), game_visual_clock)
+	return (state["map"]["points"][ref.x] as Vector2) + _body_position(body, _system_world_radius(ref.x, state), float(state["elapsed"]))
 
 func _selected_yards(state: Dictionary, owned_only: bool = false) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
@@ -5473,12 +5478,9 @@ func _target_ring_entity(state: Dictionary, poses: Dictionary, refs: Dictionary,
 			var node: int = int(ref["node"])
 			var slot: int = floori(float(-2 - id - state["planets"].size() * 3) / float(state["planets"].size()))
 			var system_radius: float = _planet_radius(node, state)
-			if _planet_detail_opacity(node, system_radius) >= 0.5:
-				var body: Dictionary = _system_visual(node, state)["bodies"][slot]
-				center += _body_position(body, system_radius, game_visual_clock)
-				radius = maxf(8.0, system_radius * float(body["size"]) * 0.55 + 5.0)
-			else:
-				radius = maxf(8.0, _star_draw_radius(system_radius) + 5.0)
+			var body: Dictionary = _system_visual(node, state)["bodies"][slot]
+			center = _screen_point(ref["repair_position"])
+			radius = maxf(6.0, system_radius * float(body["size"]) * 0.55 + 5.0)
 	return {"point": center, "radius": radius, "owner": ref["owner"]}
 
 func _ship_target_ring(state: Dictionary, poses: Dictionary, refs: Dictionary, ship: Dictionary) -> Dictionary:
@@ -5987,7 +5989,7 @@ func _draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dicti
 		var salvage: int = int(ship.get("salvage_target", ship.get("auto_salvage_target", -1)))
 		var combat: int = int(ship.get("combat_target", -1))
 		if refs.has(repair):
-			endpoint = refs[repair]["position"]
+			endpoint = refs[repair].get("repair_position", refs[repair]["position"])
 			tint = Color("#55c88b")
 		elif poses.has(combat):
 			map_canvas.draw_line(start, poses[combat]["point"], Color("#ff605c", 0.8), 1.5, true)
@@ -6198,7 +6200,7 @@ func _draw_map() -> void:
 				continue
 			var origin: Vector2 = _screen_point(points[index])
 			if _planet_detail_opacity(index, radius) >= 0.5:
-				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, game_visual_clock)
+				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, float(state["elapsed"]))
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
 		var shooter: int = int(ship["id"])
@@ -6223,14 +6225,14 @@ func _draw_map() -> void:
 					var endpoint: Vector2 = _screen_point(points[pds_index])
 					var pds_radius: float = _planet_radius(pds_index, state)
 					if _planet_detail_opacity(pds_index, pds_radius) >= 0.5:
-						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, game_visual_clock)
+						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, float(state["elapsed"]))
 					_draw_ship_laser(ship, poses[shooter], endpoint, 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
 			_draw_ship_laser(ship, poses[shooter], poses[target]["point"], 1.0)
 		var repair: int = int(ship.get("repair_target", -1))
 		if poses.has(shooter) and service_refs.has(repair):
 			var origin: Vector2 = poses[shooter]["point"]
-			var endpoint: Vector2 = poses[repair]["point"] if poses.has(repair) else _screen_point(service_refs[repair]["position"])
+			var endpoint: Vector2 = poses[repair]["point"] if poses.has(repair) else _screen_point(service_refs[repair].get("repair_position", service_refs[repair]["position"]))
 			var axis: Vector2 = origin.direction_to(endpoint)
 			if not axis.is_zero_approx():
 				poses[shooter]["direction"] = axis

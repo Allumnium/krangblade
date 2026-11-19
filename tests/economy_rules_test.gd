@@ -247,6 +247,22 @@ func _test_miner_service_orders() -> void:
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "repair", "target": station_id}, false))
 	assert(ECON._work_miner_repair(state, graph, miner, ECON.service_targets(state), 1.0))
 	assert(station["hp"] == ECON.STATION_HP - 5.0)
+	var pds_id: int = -2 - state["planets"].size() * 3
+	var defense: Dictionary = state["planets"][0]["pds"][0]
+	defense["hp"] = ECON.PDS_HP - 20.0
+	var ref: Dictionary = ECON.service_targets(state)[pds_id]
+	var battery_point: Vector2 = ref["repair_position"]
+	assert(battery_point.distance_to(map["points"][0]) > ECON.EPS)
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "repair", "target": pds_id}, false))
+	# Opposite side of the star, outside battery range even though near the star.
+	miner["position"] = (map["points"][0] as Vector2) - (battery_point - (map["points"][0] as Vector2)).normalized() * (ECON.LASER_RANGE - 1.0)
+	assert(ECON._work_miner_repair(state, graph, miner, ECON.service_targets(state), 0.01))
+	assert(is_equal_approx(float(defense["hp"]), ECON.PDS_HP - 20.0))
+	miner["position"] = battery_point
+	assert(ECON._work_miner_repair(state, graph, miner, ECON.service_targets(state), 1.0))
+	assert(is_equal_approx(float(defense["hp"]), ECON.PDS_HP - 20.0 + ECON.MINER_REPAIR_RATE))
+	assert(int(miner["repair_target"]) == pds_id)
+	assert(is_equal_approx(float(station["hp"]), ECON.STATION_HP - 5.0))
 	miner["hp"] = ECON.WITHDRAW_HP
 	ECON._prepare_withdrawals(state, graph)
 	assert(miner.get("retreating", false))
