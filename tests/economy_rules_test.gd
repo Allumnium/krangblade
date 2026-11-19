@@ -432,6 +432,38 @@ func _test_station_construction_queue() -> void:
 	assert(is_equal_approx(float(ECON.station_construction_job(p)["progress"]), 0.5))
 	print("PASS: sequential station FIFO, independent shipyards, carryover time, refunds and repeat")
 
+func _test_ai_capital_fleets() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1, "ai": true}, 2: {"team": 2}}, [1, 2], false)
+	var p: Dictionary = state["planets"][0]
+	p["population"] = 100000.0
+	p["levels"]["Metals"] = 2
+	p["yards"][0]["level"] = 2
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 2000.0
+	for i in range(ECON.AI_WAVE_MIN):
+		state["ships"].append({"id": 500 + i, "kind": "fighter", "owner": 1, "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(50.0 * i, 0), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()})
+	var graph: Dictionary = ECON.military_graph(state)
+	ECON._ai_turn(state, graph, 1)
+	assert(p["queue"].size() == 1 and p["queue"][0]["kind"] == "cruiser")
+	p["queue"].clear()
+	p["yards"][0]["level"] = 3
+	var capital: Dictionary = state["ships"][0].duplicate(true)
+	capital.merge({"id": 700, "kind": "cruiser", "hp": ECON.ship_max_hp("cruiser"), "direct_order": false}, true)
+	state["ships"].append(capital)
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 2000.0
+	ECON._ai_turn(state, graph, 1)
+	assert(p["queue"].size() == 1 and p["queue"][0]["kind"] == "warehouse")
+	assert(capital.get("direct_order", false))
+	p["queue"].clear()
+	p["warehouse_level"] = 1
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 5000.0
+	ECON._ai_turn(state, graph, 1)
+	assert(p["queue"].size() == 1 and p["queue"][0]["kind"] == "destroyer")
+	print("PASS: AI cruiser construction, capital deployment, warehouse prerequisite and destroyer construction")
+
 func _test_ai_timed_orbital_housing() -> void:
 	var galaxy: Dictionary = MAP.generate(827, 2, "Grid")
 	var state: Dictionary = ECON.create(galaxy, {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
@@ -659,6 +691,7 @@ func _initialize() -> void:
 	_test_station_defense_and_ports()
 	_test_station_construction_queue()
 	_test_ai_timed_orbital_housing()
+	_test_ai_capital_fleets()
 	_test_miner_service_orders()
 	_test_repair_pauses_wander()
 	_test_mining_lasers()
@@ -687,6 +720,7 @@ func _initialize() -> void:
 	_test_precise_patrol()
 	_test_salvage()
 	_test_opportunistic_salvage()
+	_test_remote_salvage()
 	_test_colony_farm()
 	_test_civilian_waiting_movement()
 	_test_depleted_field_routes()
@@ -1507,7 +1541,7 @@ func _initialize() -> void:
 	assert(not ECON.send_colony(colonization, 2, int(c1["id"]), 3))
 	assert(ECON.colony_path(colonization, 1, c1, 4) == [0, 1, 3, 4])
 	assert(not ECON.send_colony(colonization, 1, int(c1["id"]), 2))
-	assert(ECON.send_colony(colonization, 1, int(c1["id"]), 3, true))
+	assert(ECON.send_colony(colonization, 1, int(c1["id"]), 3))
 	assert(ECON.send_colony(colonization, 3, int(c2["id"]), 3, true))
 	assert(int(colonization["planets"][3]["owner"]) == 0)
 	var distance1: float = (c1["position"] as Vector2).distance_to(cp[1]) + (cp[1] as Vector2).distance_to(cp[3])
@@ -3054,6 +3088,26 @@ func _test_colony_farm() -> void:
 	assert(home["stock"]["Organics"] == ECON.storage_capacity(home))
 	print("PASS: colony farming, cap, authority, manual and auto delivery, full warehouse")
 
+func _test_remote_salvage() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(1000, 0), Vector2(2000, 0), Vector2(3000, 0)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var craft: Dictionary = {"id": 500, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"}
+	state["ships"] = [craft]
+	var piles: Dictionary = state["salvage"]
+	piles[300] = {"id": 300, "resource": "Metals", "amount": 3.0, "position": map["points"][3], "claim": -1}
+	assert(not ECON._work_opportunistic_salvage(state, graph, craft, 0.1, {}, ECON._salvage_cells(piles), false))
+	piles[301] = {"id": 301, "resource": "Metals", "amount": 3.0, "position": map["points"][2], "claim": -1}
+	assert(ECON._work_opportunistic_salvage(state, graph, craft, 0.1, {}, ECON._salvage_cells(piles), false))
+	assert(craft["auto_salvage_target"] == 301 and craft["position"] != Vector2.ZERO)
+	for tick in range(1000):
+		ECON._work_opportunistic_salvage(state, graph, craft, 0.1, {}, ECON._salvage_cells(piles), false)
+		if craft.get("salvage_delivery", false):
+			break
+	assert(not piles.has(301) and craft.get("salvage_delivery", false))
+	assert(int(craft["at"]) == 2)
+	print("PASS: two-hop salvage search, three-hop exclusion, remote pickup and return anchor")
+
 func _test_opportunistic_salvage() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -3156,7 +3210,7 @@ func _test_opportunistic_salvage() -> void:
 	var working: Dictionary = {"id": 600, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": 0, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "mining", "mining_active": true, "assigned_field": 0, "field": 0}
 	state["ships"] = [working]
 	piles.clear()
-	piles[300] = {"id": 300, "resource": "Metals", "amount": 3.0, "position": Vector2(ECON.HARVESTER_SALVAGE_PRIORITY_RANGE + 1.0, 0), "claim": -1}
+	piles[300] = {"id": 300, "resource": "Metals", "amount": 3.0, "position": Vector2(ECON.AUTO_SALVAGE_RANGE + 1.0, 0), "claim": -1}
 	assert(not ECON._work_opportunistic_salvage(state, graph, working, 0.1, {}, ECON._salvage_cells(piles), false))
 	assert(working["mining_mode"] == "mining" and working["position"] == Vector2.ZERO)
 	piles[300]["position"] = Vector2(180, 0)

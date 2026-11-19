@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.58.9: AI capital investments favor home yards; monitor crystal imports and early defense pacing. Remote salvage uses safe two-hop waypoints and a sparse cell search; profile large wreck fields and watch for detours through gap space.
+
 - v0.58.8: Explicit holds are immovable obstacles rather than repelling each other; verify close formation and post-repair return. Resource planet palettes retain subtle variation without masking dominant color.
 
 - v0.58.7: Colony dispatch uses route distance and excludes held/busy ships; queued Hold/Stop act at their turn and later queued orders can supersede them. Inspect discoverability and queue display in playtests.
