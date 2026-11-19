@@ -5351,7 +5351,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 						best_yard = slot
 				action = "yard_upgrade"
 				target = str(best_yard)
-		var build_level: int = next_shipyard_slot(p) if action == "yard" else 1
+		var build_level: int = next_shipyard_slot(p) if action == "yard" else (int(p["yards"][int(target)]["level"]) + 1 if action == "yard_upgrade" else 1)
 		var price: Dictionary = building_cost(p, target) if action == "economy" else _cost(action, build_level)
 		if not affordable(p, price):
 			# Saving for an unaffordable hull must not leave mature systems

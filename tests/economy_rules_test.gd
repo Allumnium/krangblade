@@ -1029,18 +1029,18 @@ func _initialize() -> void:
 	assert(ECON.enqueue(state, 1, 0, "yard_upgrade", "0"))
 	assert(int(p["yards"][0]["job"]) == first_job)
 	ECON.step(state, 1.0)
-	assert(is_equal_approx(float(p["queue"][0]["progress"]), 12.0))
+	assert(is_equal_approx(float(p["queue"][0]["progress"]), ECON.yard_speed(2) * 2.0))
 	assert(is_zero_approx(float(p["queue"][2]["progress"])))
-	for i in range(6):
+	for i in range(ceili(ECON._work("ship", 1) / ECON.yard_speed(2)) - 2):
 		ECON.step(state, 1.0)
 	assert(state["ships"].size() == 2)
 	assert(p["queue"].size() == 1)
 	ECON.step(state, 1.0)
 	assert(int(p["yards"][0]["job"]) == int(p["queue"][0]["id"]))
 	assert(is_equal_approx(float(p["queue"][0]["progress"]), 1.0))
-	for i in range(29):
+	for i in range(ceili(ECON._work("yard_upgrade", 3)) - 1):
 		ECON.step(state, 1.0)
-	assert(int(p["yards"][0]["level"]) == 2)
+	assert(int(p["yards"][0]["level"]) == 3)
 	assert(ECON.max_size(2) > ECON.max_size(1))
 
 	# Eight shipyard orders including the active job; repeat waits for space.

@@ -1912,6 +1912,8 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		portrait.texture = _production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
+		if not ECONOMY.yard_fits(system, selected_yard, kind):
+			button.tooltip_text += "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)]
 		if not operating:
 			button.tooltip_text += "\nShipyard offline"
 		if kind == "ship" and not bool(system["home"]):
