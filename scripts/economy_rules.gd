@@ -38,7 +38,7 @@ const FARM_VARIATION: float = 0.05
 const FARM_CYCLE_SECONDS: float = 100.0
 const START_YEAR: int = 2850
 const SYSTEM_WORLD_RADIUS: float = 600.0
-const CARGO_CAPACITY: float = 30.0
+const CARGO_CAPACITY: float = 100.0
 const FREIGHTER_BAY_COUNT: int = 7
 const FREIGHTER_BAY_CAPACITY: float = CARGO_CAPACITY / FREIGHTER_BAY_COUNT
 const MINED_RESOURCES = ["Metals", "Crystals"]
@@ -47,7 +47,7 @@ const FIELD_RESOURCES = ["Metals", "Crystals", ANTIMATTER]
 # Provisional per-resource ceilings, independent of unlimited upgrade levels.
 const PLANET_MINING_LIMIT: float = 100.0
 const FIELD_MINING_LIMIT: float = 200.0
-const MINER_CAPACITY: float = 60.0
+const MINER_CAPACITY: float = 10.0
 const FIGHTER_CAPACITY: float = 0.0
 const COLONY_CAPACITY: float = 20.0
 const TRACTOR_RANGE: float = 90.0
