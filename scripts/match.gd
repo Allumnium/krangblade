@@ -1200,7 +1200,7 @@ func _ship_stats(kind: String) -> String:
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
-	return "%s\nHP %.0f · Speed %.0f/s (1×) · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.ship_speed(kind), ECONOMY.SHIP_SIZE]
+	return "%s\nHP %.0f · Speed %.0f/s (1×) · %s" % [details, ECONOMY.SHIP_HP, ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind))]
 
 func _build_production_summary() -> void:
 	var header := HBoxContainer.new()
@@ -1845,7 +1845,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	var enable: bool = false
 	for ref in refs:
 		var system: Dictionary = state["planets"][ref.x]
-		if kind == "ship" and not bool(system["home"]):
+		if not ECONOMY.yard_fits(system, ref.y, kind) or (kind == "ship" and not bool(system["home"])):
 			continue
 		eligible.append(ref)
 		enable = enable or not system["yards"][ref.y].get("autobuild", []).has(kind)
@@ -1854,7 +1854,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	button.accept_event()
 
 func _yard_build_available(system: Dictionary, slot: int, kind: String) -> bool:
-	return ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.affordable(system, ECONOMY._cost(kind, 1)) and (kind != "ship" or bool(system["home"]))
+	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.affordable(system, ECONOMY._cost(kind, 1)) and (kind != "ship" or bool(system["home"]))
 
 func _build_at_yard(kind: String) -> void:
 	var state: Dictionary = _state()
@@ -1882,7 +1882,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	var yard: Dictionary = system["yards"][selected_yard]
 	var level: int = int(yard["level"])
 	var operating: bool = ECONOMY.shipyard_operational(system, selected_yard)
-	yard_title.text = "Shipyard %d · Lv %d" % [ECONOMY.shipyard_port(system, selected_yard), level]
+	yard_title.text = "%s Shipyard %d · Lv %d" % [ECONOMY.size_name(level), ECONOMY.shipyard_port(system, selected_yard), level]
 	yard_context.text = _system_name(selected)
 	var jobs: Array = []
 	var waiting: Array = []
@@ -1902,7 +1902,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	for kind in ECONOMY.SHIP_KINDS:
 		var button: Button = yard_commands[kind]
 		var recipe: Dictionary = ECONOMY._cost(kind, 1)
-		button.disabled = not owned or (kind == "ship" and not bool(system["home"]))
+		button.disabled = not owned or not ECONOMY.yard_fits(system, selected_yard, kind) or (kind == "ship" and not bool(system["home"]))
 		var available: bool = owned and _yard_build_available(system, selected_yard, kind)
 		var auto: bool = yard.get("autobuild", []).has(kind)
 		(button.get_meta("auto_border") as Control).visible = auto
@@ -1927,7 +1927,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	if level >= ECONOMY.MAX_SHIPYARD_LEVEL:
 		_set_cost_tooltip(yard_upgrade, "Maximum level")
 	else:
-		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMax ship size: %d → %d\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe, 0.0, _available_cost_resources(system, selected_yard))
+		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMax ship size: %s → %s\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.size_name(ECONOMY.max_size(level)), ECONOMY.size_name(ECONOMY.max_size(level + 1)), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe, 0.0, _available_cost_resources(system, selected_yard))
 
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
@@ -4695,7 +4695,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		for ref in refs:
 			var system: Dictionary = state["planets"][ref.x]
 			eligible = eligible or _yard_build_available(system, ref.y, kind)
-			can_toggle = can_toggle or kind != "ship" or bool(system["home"])
+			can_toggle = can_toggle or (ECONOMY.yard_fits(system, ref.y, kind) and (kind != "ship" or bool(system["home"])))
 			auto = auto or system["yards"][ref.y].get("autobuild", []).has(kind)
 		var button: Button = yard_commands[kind]
 		button.disabled = not can_toggle
@@ -4711,7 +4711,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		can_upgrade = can_upgrade or _yard_can_upgrade(system, ref.y)
 		can_clear = can_clear or not system["yards"][ref.y].get("rally", {}).is_empty()
 	yard_upgrade.disabled = not can_upgrade
-	_set_cost_tooltip(yard_upgrade, "Upgrade every eligible owned shipyard\nEach level adds 1× base build speed, +1 maximum ship size and +1,000 maximum HP. Restores full health.")
+	_set_cost_tooltip(yard_upgrade, "Upgrade every eligible owned shipyard\nEach level adds 1× base build speed, unlocks the next ship class and adds 1,000 maximum HP. Restores full health.")
 	yard_commands["rally"].disabled = refs.is_empty()
 	yard_commands["clear"].disabled = not can_clear
 

@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.55.0: Small (1) Harvester/Fighter, Medium (2) Freighter/Colony, Large (3) Science vessel. Enforce yard class for manual and automatic construction; starting Freighter stays.
+
 - v0.54.3: Local forward-corridor steering uses a single bounded spatial grid per movement substep. Preserve authoritative lane routes, movement budgets, precise shared endpoints and soft contact fallback. Harvester nominal extraction 3 t/yr; dropoff 120/60/100 t/yr (Harvester/Freighter/Colony), independent of mining rate.
 
 - v0.54.1: Damaged hulls, stations, yards and PDS show readable HP bars even at distant zoom (PDS minimum health at star when bodies hidden). Cargo work seeks spaced in-range berths. Fighter Guard (U) is a persistent sector-defense order with return point. Civilian field travel honors the final star waypoint before local approach.

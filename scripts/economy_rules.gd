@@ -82,7 +82,8 @@ const AUTOCAST_COOLDOWN_YEARS: float = 30.0
 const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
 const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade", "farm", "collect"]
-const SHIP_SIZE: int = 1
+const SHIP_SIZE: int = 1 # Legacy small-class reference.
+const SHIP_SIZES = {"fighter": 1, "miner": 1, "ship": 2, "colony_ship": 2, "science_ship": 3}
 const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
 const DEFAULT_FOG_OF_WAR: bool = false
@@ -664,6 +665,21 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 	planet["population_velocity"] = minf(next_velocity, growth_constant * next) if next > 0.0 else 0.0
 	_regenerate_eco(planet, dt, eco)
 
+static func ship_size(kind: String) -> int:
+	return int(SHIP_SIZES.get(kind, 1))
+
+static func size_name(size_class: int) -> String:
+	return ["Small", "Medium", "Large"][clampi(size_class, 1, 3) - 1]
+
+static func yard_fits(p: Dictionary, slot: int, kind: String) -> bool:
+	return slot >= 0 and slot < p["yards"].size() and ship_size(kind) <= max_size(int(p["yards"][slot]["level"]))
+
+static func has_fitting_yard(p: Dictionary, kind: String) -> bool:
+	for slot in range(p["yards"].size()):
+		if yard_fits(p, slot, kind):
+			return true
+	return false
+
 static func max_size(level: int) -> int:
 	return level
 
@@ -860,7 +876,9 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 	var p: Dictionary = _get_owned(state, player, index)
 	if p.is_empty():
 		return false
-	if yard_slot != -1 and (not SHIP_KINDS.has(kind) or not shipyard_operational(p, yard_slot) or max_size(int(p["yards"][yard_slot]["level"])) < SHIP_SIZE):
+	if yard_slot != -1 and (not SHIP_KINDS.has(kind) or not shipyard_operational(p, yard_slot) or not yard_fits(p, yard_slot, kind)):
+		return false
+	if SHIP_KINDS.has(kind) and not has_fitting_yard(p, kind):
 		return false
 	if SHIP_KINDS.has(kind) or kind == "yard_upgrade":
 		var total: int = 0
@@ -956,7 +974,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 	state["next_id"] = id + 1
 	p["queue"].append({"id": id, "kind": kind, "target": target, "yard_slot": yard_slot, "level": level,
 		"cost": cost, "work": 30.0 if kind == "economy_building" else _work(kind, level),
-		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if SHIP_KINDS.has(kind) else 0})
+		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": ship_size(kind) if SHIP_KINDS.has(kind) else 0})
 	if kind == "yard":
 		p["queue"][-1]["station_slot"] = station_slot
 	return true
@@ -1076,7 +1094,7 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 				p["queue"][-1]["automatic"] = true
 			continue
 		if SHIP_KINDS.has(order[0]):
-			if hull_waiting_for_funds or (p["yards"] as Array).is_empty() or cycle.has(key) or manual_hulls.has(key):
+			if hull_waiting_for_funds or not has_fitting_yard(p, str(order[0])) or cycle.has(key) or manual_hulls.has(key):
 				continue
 			# Do not duplicate a waiting order if its repeat toggle was
 			# switched off and on during the same cycle.
@@ -1103,6 +1121,8 @@ static func set_yard_autobuild(state: Dictionary, player: int, index: int, slot:
 	if p.is_empty() or slot < 0 or slot >= p["yards"].size() or not SHIP_KINDS.has(kind) or (kind == "ship" and not bool(p["home"])):
 		return false
 	var modes: Array = p["yards"][slot].get("autobuild", [])
+	if enabled and not yard_fits(p, slot, kind):
+		return false
 	if enabled and not modes.has(kind):
 		modes.append(kind)
 	elif not enabled:
@@ -1116,6 +1136,8 @@ static func _refill_yard_autobuild(state: Dictionary, index: int, p: Dictionary)
 			continue
 		var yard: Dictionary = p["yards"][slot]
 		for kind in yard.get("autobuild", []):
+			if not yard_fits(p, slot, kind):
+				continue
 			var exists: bool = false
 			for item in p["queue"]:
 				if item["kind"] == kind and (int(item.get("yard_slot", -1)) == slot or int(item["id"]) == int(yard["job"])):
@@ -5279,6 +5301,17 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 						break
 		if action.is_empty():
 			continue
+		if SHIP_KINDS.has(action) and not has_fitting_yard(p, action):
+			if p["yards"].is_empty():
+				action = "yard"
+				target = ""
+			else:
+				var best_yard: int = 0
+				for slot in range(1, p["yards"].size()):
+					if int(p["yards"][slot]["level"]) > int(p["yards"][best_yard]["level"]):
+						best_yard = slot
+				action = "yard_upgrade"
+				target = str(best_yard)
 		var build_level: int = next_shipyard_slot(p) if action == "yard" else 1
 		var price: Dictionary = building_cost(p, target) if action == "economy" else _cost(action, build_level)
 		if not affordable(p, price):

@@ -211,6 +211,7 @@ func _phase_changed() -> void:
 				for system in state["planets"]:
 					if bool(system["home"]):
 						system["population"] = 150000.0
+						system["yards"][0]["level"] = 2
 						system["levels"]["Organics"] = 3
 						for resource in ECON.RESOURCES:
 							system["stock"][resource] = maxf(float(system["stock"][resource]), 25000.0)
