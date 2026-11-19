@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.55.7: Shipyard card rows Small, Medium, Large, navigation. Medium (U) and Large (I) upgrade buttons lead their rows and apply only to the immediately preceding class; same authoritative sequential upgrade rules.
+
 - v0.55.6: Stop (S) clears active/queued orders and Hold, permits autonomous work after the arrival cooldown, and preserves emergency withdrawal. Station hub shows current infrastructure and assigned yard job icons with individual progress bars; hide at distant zoom.
 
 - v0.55.5: Lifetime kills (lethal shot, including defenses), picked/dropped tonnage and Colony food production. Default groups 1 station, 2 first yard. Colony Transform (J) explicitly converts a hull in a neutral system; AI retains automatic conversion. Double station and ship transfer ranges; keep salvage pickup range unchanged.
