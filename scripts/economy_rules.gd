@@ -4991,12 +4991,10 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 					if other_id < 0:
 						continue
 					var distance: float = pos.distance_squared_to(positions[other_id])
-					if not moving_only and blocked.has(other_id) and _fleeing(other, positions[other_id] - pos, int(previous_targets[other_id])):
-						continue
 					if distance < best or (is_equal_approx(distance, best) and (target < 0 or other_id < target)):
 						best = distance
 						target = other_id
-		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target >= 0 and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[target])):
+		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target >= 0 and not blocked.has(target) and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[target])):
 			pursuit = target
 			remaining = PURSUIT_YEARS
 		# A previously engaged fighter may escape the firing envelope before
@@ -5021,7 +5019,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			var guarded: int = guard_node
 			if ship_sectors.get(pursuit, -1) != guarded or ship_sectors[id] != guarded:
 				pursuit = -1
-			if ship_sectors.get(target, -1) != guarded or ship_sectors[id] != guarded:
+			if target >= 0 and (ship_sectors.get(target, -1) != guarded or ship_sectors[id] != guarded):
 				ship["passing_fire"] = true
 		if pursuit >= 0:
 			target = pursuit if pos.distance_squared_to(positions[pursuit]) <= LASER_RANGE * LASER_RANGE else -1

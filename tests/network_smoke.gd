@@ -242,7 +242,7 @@ func _phase_changed() -> void:
 						follow_leader.erase("resource_stage")
 						follow_leader.merge({"id": 988000 + index, "kind": "colony_ship", "position": haul_point + Vector2.LEFT * 180.0, "wander_auto": false, "cargo": ECON.empty_stock()}, true)
 						var follower: Dictionary = follow_leader.duplicate(true)
-						follower.merge({"id": 989000 + index, "position": haul_point + Vector2.LEFT * 380.0}, true)
+						follower.merge({"id": 989000 + index, "kind": "fighter", "hp": ECON.SHIP_HP, "position": haul_point + Vector2.LEFT * 380.0}, true)
 						state["ships"].append(follow_leader)
 						state["ships"].append(follower)
 						var point: Vector2 = graph["points"][index] + Vector2.RIGHT * minf(150.0, ECON.sector_limit(graph, index, Vector2.RIGHT) * 0.5)
