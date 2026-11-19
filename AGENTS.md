@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.50.3: Ship autocast modes occupy the bottom row: Wander, Mine, Salvage, Repair/Trade. Mixed miner/logistics groups show Trade in the third-row rightmost slot, keeping all five available. Enabling Wander explicitly bypasses its own cooldown, without resetting any other mode or cancelling active orders/Hold. New manual and queued orders reset the bypass.
+
 - v0.50.2: Stars use cached, softly glowing procedural photosphere/corona art (warm planetary, cool planetless), slowly varying orientation and up to nine small fading solar sparks at detail zoom. Preserve star radius, deep-zoom opacity, planet/PDS detail, selection rings, minimap and authority; use cheap dots for sub-2-pixel stars. Avoid per-frame texture generation and persistent particle nodes.
 
 - v0.50.1: Local camera presentation scales ship, shipyard and station art smoothly in log zoom from 4× at MIN_ZOOM to 1× at zoom 16, preserving native small-marker floors for stations and the existing close-up ceiling. Tiny hull/yard fallback markers enlarge too. Keep world centers, orbital geometry, combat ranges, navigation, minimap and authority unchanged. Selection and visual effects use the shared displayed scale.

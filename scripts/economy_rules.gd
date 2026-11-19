@@ -2470,11 +2470,13 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
 	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", true))
 
-static func autocast_remaining(state: Dictionary, ship: Dictionary) -> float:
+static func autocast_remaining(state: Dictionary, ship: Dictionary, mode: String = "") -> float:
+	if mode == "wander" and bool(ship.get("wander_cooldown_override", false)):
+		return 0.0
 	return maxf(arrival_wait_remaining(state, ship), maxf(0.0, float(ship.get("auto_cooldown_until", 0.0)) - float(state["elapsed"])))
 
 static func autocast_ready(state: Dictionary, ship: Dictionary, mode: String) -> bool:
-	return autocast_enabled(ship, mode) and autocast_remaining(state, ship) <= EPS
+	return autocast_enabled(ship, mode) and autocast_remaining(state, ship, mode) <= EPS
 
 static func set_autocast(state: Dictionary, player: int, ids: Array, mode: String, enabled: bool) -> bool:
 	var units: Array = _owned_units(state, player, ids)
@@ -2484,6 +2486,11 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 		return set_repair_auto(state, player, ids, enabled)
 	for ship in units:
 		ship[mode + "_auto"] = enabled
+		if mode == "wander":
+			if enabled and autocast_remaining(state, ship) > EPS:
+				ship["wander_cooldown_override"] = true
+			else:
+				ship.erase("wander_cooldown_override")
 		if enabled:
 			continue
 		if mode == "salvage":
@@ -2936,6 +2943,7 @@ static func polyline_formation_slots(origins: Dictionary, stroke: PackedVector2A
 static func _set_unit_order(state: Dictionary, ship: Dictionary, order: Dictionary) -> void:
 	ship.erase("arrival_wait_until")
 	ship.erase("manual_mine")
+	ship.erase("wander_cooldown_override")
 	ship["auto_cooldown_until"] = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
 	ship.erase("order_queue")
 	if order.is_empty():
@@ -3154,6 +3162,7 @@ static func issue_unit_order(state: Dictionary, player: int, ids: Array, order: 
 			continue
 		queue.append(order.duplicate(true))
 		ship["order_queue"] = queue
+		ship.erase("wander_cooldown_override")
 		ship["auto_cooldown_until"] = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
 		accepted = true
 	return accepted
@@ -5257,7 +5266,7 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		var held: bool = bool(ship.get("holding", false))
 		var local_moving: bool = ship.has("local_move_target")
 		# Waiting hulls remain precise obstacles, but combat/withdrawal can move.
-		if not _engaged(ship) and (arrival_wait_remaining(state, ship) > EPS or (_is_idle_ship(ship) and not autocast_ready(state, ship, "wander"))):
+		if not _engaged(ship) and ((arrival_wait_remaining(state, ship) > EPS and not (_is_idle_ship(ship) and autocast_ready(state, ship, "wander"))) or (_is_idle_ship(ship) and not autocast_ready(state, ship, "wander"))):
 			continue
 		# Preserve the exact endpoint and facing on the arrival tick only.
 		# The completed order is retired before next tick's ordinary wandering.
@@ -5431,6 +5440,9 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		# autonomous job selection and idle salvage approaches during the wait.
 		if arrival_wait_remaining(state, ship) > EPS and ship.get("kind", "") != "fighter" and not ship.has("repair_order"):
 			ship["navigation_target"] = ship["position"]
+			# Deliberately enabling Wander bypasses only its own cooldown.
+			if idle_targets.has(salvage_ship_id) and _is_idle_ship(ship) and autocast_ready(state, ship, "wander") and not coordinated.has(salvage_ship_id):
+				_navigate(ship, idle_targets[salvage_ship_id], SHIP_SPEED * dt)
 			continue
 		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_ids):
 			continue
@@ -5498,6 +5510,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			ship.erase("auto_cooldown_until")
 		if ship.has("arrival_wait_until") and arrival_wait_remaining(state, ship) <= EPS and ship.get("unit_order", {}).get("kind", "") != "sector":
 			ship.erase("arrival_wait_until")
+		if ship.has("wander_cooldown_override") and autocast_remaining(state, ship) <= EPS and not _unit_order_running(ship):
+			ship.erase("wander_cooldown_override")
 	_separate_ships(state, combat_graph, combat_positions, dt)
 	if not profile.is_empty():
 		var now: int = Time.get_ticks_usec()
