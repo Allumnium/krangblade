@@ -366,7 +366,7 @@ func _draw_chart(canvas: Control, population: bool) -> void:
 		canvas.draw_polyline(points, SERIES_COLORS[series], 2.5, true)
 
 func _mining() -> void:
-	_body("Mining ships extract ore and transfer it to nearby waiting freighters (10 miner holds per freighter), or return to an owned depot. Cargo enters storage gradually within docking range. Select a miner and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
+	_body("Mining ships extract ore and transfer it to nearby freighters, even while traveling (10 miner holds per freighter), or return to an owned depot. Cargo enters storage gradually within docking range. Select a miner and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
 	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Local resource ceiling", "%.0f t/yr" % E.PLANET_MINING_LIMIT], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
@@ -426,7 +426,7 @@ func _ships() -> void:
 	_table(["Level", "Build speed", "Staff required"], rows)
 
 func _combat() -> void:
-	_body("Fighters seek hostile ships within their sector unless holding or executing a move-only order. Hold permits firing in range. Autocast cooldown after orders or arrival: Wander/Trade %.0f s, Mine/Salvage %.0f s at 1×; Repair and Farm have no cooldown. Follow keeps a safe distance from a friendly hull until replaced. New orders act immediately. Ships maintain spacing even on shared commands. Hold stops movement; damaged ships can withdraw and repair." % [E.AUTOCAST_COOLDOWN_YEARS, E.MINING_SALVAGE_COOLDOWN_YEARS])
+	_body("Fighters seek hostile ships within their sector unless holding; they resume movement orders afterward. Hold permits firing in range. Autocast cooldown after orders or arrival: Wander/Trade %.0f s, Mine/Salvage %.0f s at 1×; Repair and Farm have no cooldown. Follow keeps a safe distance from a friendly hull until replaced. New orders act immediately. Ships maintain spacing even on shared commands. Hold stops movement; damaged ships can withdraw and repair." % [E.AUTOCAST_COOLDOWN_YEARS, E.MINING_SALVAGE_COOLDOWN_YEARS])
 	_table(["Weapon", "Damage / shot or volley", "Range"], [["Fighter laser", "%.0f" % E.LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Mining lasers", "%.0f" % E.MINER_LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Planetary defense", "%.0f" % E.PDS_DAMAGE, "%.0f" % E.PDS_RANGE]])
 	_section("Station defenses")
 	_table(["Upgrade", "Effect", "Materials"], [["Reinforced Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Laser Matrix", "%d defensive lasers" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Planetary defense battery", _recipe(E._cost("pds", 1))]])

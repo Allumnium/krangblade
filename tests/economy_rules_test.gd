@@ -2345,6 +2345,20 @@ func _test_resource_handoff() -> void:
 	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 0.1), ECON.dropoff_rate("miner") * 0.1))
 	assert(is_equal_approx(ECON._cargo_total(miner) + ECON._cargo_total(freighter), ECON.MINER_CAPACITY))
 	freighter["cargo"]["Metals"] = 0.0
+	var saved_stage: Dictionary = freighter["resource_stage"]
+	freighter.erase("resource_stage")
+	freighter["route"] = [1]
+	miner["route"] = [1]
+	miner["mining_mode"] = "idle"
+	miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
+	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 0.1), ECON.dropoff_rate("miner") * 0.1))
+	assert(freighter["route"] == [1] and miner["route"] == [1])
+	assert(is_equal_approx(ECON._cargo_total(miner) + ECON._cargo_total(freighter), ECON.MINER_CAPACITY))
+	freighter["cargo"]["Metals"] = 0.0
+	freighter["route"] = []
+	miner["route"] = []
+	miner["mining_mode"] = "delivery"
+	freighter["resource_stage"] = saved_stage
 	assert(ECON.MINER_CAPACITY == 10.0 and ECON.CARGO_CAPACITY == 100.0)
 	for load in range(10):
 		miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
