@@ -1,6 +1,6 @@
 # Warbound — active thoughts
 
-- v0.45.1: Shipyard selection lacked an explicit way back to the parent system overview, unlike the station Build submenu. The command card now uses its previously empty bottom-row slot for Return; this is selection-only and must not cancel production, upgrades or rally settings. Manual interaction verification remains pending.
+- v0.45.2: Follow-up to v0.45.1: Return was placed in the shipyard action grid's second row, not at the bottom of the command card like the Build submenu. Move it into a separate bottom-aligned footer beneath the two-row action grid; preserve all action positions and selection-only behavior. Manual interaction verification remains pending.
 
 - v0.45.0: The three-resource economy removes duplicate industrial bottlenecks. Basic hull construction is independent of crystal acquisition, while PDS, additional shipyards and Laser Matrix need Crystals. Removing costs without redistributing them preserves existing metal/crew/time gates but may accelerate production or change AI pacing. Metal Refinery now costs Organics, so food-poor colonies may need imports. Validate balance, exact seeded map differences, local recovery and actual multiplayer before marking complete.
 
