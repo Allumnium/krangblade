@@ -413,7 +413,7 @@ func _ships() -> void:
 		rows.append([names[kind], _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(1))])
 	_table(["Ship", "Materials", "Crew", "Time (Lv 1)"], rows)
 	_section("Shipyard upgrades")
-	_body("Higher shipyard levels increase construction speed and staffing requirements. Rally points direct completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")
+	_body("Higher shipyard levels increase construction speed and staffing requirements. Select Space Station returns to the parent station. Rally / Clear Rally occupy the bottom-right slots. Rally points direct completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")
 	rows = []
 	for i in range(1, E.MAX_SHIPYARD_LEVEL + 1):
 		rows.append([str(i), "%.0f×" % (E.yard_speed(i) / E.yard_speed(1)), "%.0f" % float(E.SHIPYARD_POPULATION[i - 1])])
@@ -427,7 +427,7 @@ func _combat() -> void:
 	_note("Use coordinated attack groups, protect miners and freighters, and retreat before losing ships and their crew investment.")
 
 func _controls() -> void:
-	_table(["Input", "Action"], [["Left click / drag", "Select a ship, structure or fleet"], ["Shift + select", "Add to selection"], ["Right click / drag", "Contextual move, attack, mine or rally / formation"], ["Shift + order", "Queue an order"], ["Middle drag / WASD", "Pan camera"], ["Mouse wheel", "Zoom"], ["F", "Follow or focus selection"], ["F2", "Select all owned fighters"], ["Double F2", "Center military selection"], ["Q / E", "Cycle owned systems"], ["H", "Hold position"], ["U", "Unload cargo"], ["Ctrl + 0–9", "Assign control group"], ["0–9 / double tap", "Recall / center group"], ["Esc", "Open or close menu / Codex"]])
+	_table(["Input", "Action"], [["Left click / drag", "Select a ship, structure or fleet"], ["Shift + select", "Add to selection"], ["Right click / drag", "Contextual move, attack, mine or rally / formation"], ["Shift + order", "Queue an order"], ["Arrows / screen edge / middle drag", "Pan camera"], ["Mouse wheel", "Zoom"], ["F", "Follow or focus selection"], ["F2", "Select all owned fighters"], ["Double F2", "Center military selection"], ["Q / E", "Cycle owned systems"], ["H", "Hold position"], ["U", "Unload cargo"], ["Ctrl + 0–9", "Assign control group"], ["0–9 / double tap", "Recall / center group"], ["Esc", "Open or close menu / Codex"]])
 	_body("Use the minimap to navigate or issue contextual orders. Command-card buttons expose additional actions and tooltips; right-click eligible production cards to repeat.")
 
 func _multiplayer() -> void:
