@@ -171,12 +171,50 @@ var ship_destructions: Array = []
 # Authored top-down silhouette and interior panel geometry in hull-local
 # coordinates (forward, lateral). Freighter has five paired cargo rows.
 const HULL_OUTLINES: Dictionary = {
+	"scout": [Vector2(12, 0), Vector2(4, 2), Vector2(-2, 5), Vector2(-8, 5), Vector2(-6, 2), Vector2(-10, 1.8), Vector2(-10, -1.8), Vector2(-6, -2), Vector2(-8, -5), Vector2(-2, -5), Vector2(4, -2)],
+	"cruiser": [Vector2(20, 0), Vector2(13, 5), Vector2(5, 6), Vector2(2, 9), Vector2(-15, 9), Vector2(-20, 5), Vector2(-20, -5), Vector2(-15, -9), Vector2(2, -9), Vector2(5, -6), Vector2(13, -5)],
+	"destroyer": [Vector2(29, 0), Vector2(20, 6), Vector2(12, 7), Vector2(9, 11), Vector2(-6, 13), Vector2(-24, 13), Vector2(-28, 8), Vector2(-30, 5), Vector2(-30, -5), Vector2(-28, -8), Vector2(-24, -13), Vector2(-6, -13), Vector2(9, -11), Vector2(12, -7), Vector2(20, -6)],
 	"science_ship": [Vector2(14, 0), Vector2(12, 7), Vector2(7, 12), Vector2(0, 14), Vector2(-7, 12), Vector2(-12, 7), Vector2(-14, 0), Vector2(-12, -7), Vector2(-7, -12), Vector2(0, -14), Vector2(7, -12), Vector2(12, -7)],
 	"fighter": [Vector2(12, 0), Vector2(6, 2.5), Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-6, 3), Vector2(-10, 2.5), Vector2(-10, -2.5), Vector2(-6, -3), Vector2(-7, -7.5), Vector2(-3, -8), Vector2(2.5, -3), Vector2(6, -2.5)],
 	"miner": [Vector2(10, 5), Vector2(6, 5), Vector2(3, 7), Vector2(-5, 7), Vector2(-8, 4), Vector2(-8, -4), Vector2(-5, -7), Vector2(3, -7), Vector2(6, -5), Vector2(10, -5), Vector2(10, -2.5), Vector2(5, -2.5), Vector2(4, 0), Vector2(5, 2.5), Vector2(10, 2.5)],
 	"colony_ship": [Vector2(13, 0), Vector2(8, 3), Vector2(5, 3.5), Vector2(3, 6.5), Vector2(-5, 7), Vector2(-9, 4), Vector2(-11, 3), Vector2(-11, -3), Vector2(-9, -4), Vector2(-5, -7), Vector2(3, -6.5), Vector2(5, -3.5), Vector2(8, -3)]
 }
 const HULL_PANELS: Dictionary = {
+	"scout": [
+		[Color("#a3b8c9"), [Vector2(11, 0), Vector2(3, 1.5), Vector2(-7, 1.5), Vector2(-8, 0), Vector2(-7, -1.5), Vector2(3, -1.5)]],
+		[Color("#21364c"), [Vector2(5, 0), Vector2(1, 1.3), Vector2(-2, 1), Vector2(-2, -1), Vector2(1, -1.3)]],
+		[Color("#556e87"), [Vector2(-1, 2), Vector2(-3, 4.5), Vector2(-7, 4.5), Vector2(-5, 2)]],
+		[Color("#556e87"), [Vector2(-1, -2), Vector2(-3, -4.5), Vector2(-7, -4.5), Vector2(-5, -2)]],
+		[Color("#9de6ff"), [Vector2(-9, 1.3), Vector2(-10, 1.3), Vector2(-10, -1.3), Vector2(-9, -1.3)]]
+	],
+	"cruiser": [
+		[Color("#7189a2"), [Vector2(19, 0), Vector2(12, 4), Vector2(4, 5), Vector2(-17, 5), Vector2(-19, 0), Vector2(-17, -5), Vector2(4, -5), Vector2(12, -4)]],
+		[Color("#b3c7da"), [Vector2(15, 0), Vector2(7, 2.7), Vector2(-10, 2.7), Vector2(-13, 0), Vector2(-10, -2.7), Vector2(7, -2.7)]],
+		[Color("#23374d"), [Vector2(8, 0), Vector2(4, 2), Vector2(-1, 2), Vector2(-1, -2), Vector2(4, -2)]],
+		[Color("#394f65"), [Vector2(2, -6), Vector2(-14, -6), Vector2(-17, -8), Vector2(1, -8)]],
+		[Color("#b8ccd9"), [Vector2(10, -3), Vector2(14, -3), Vector2(14, -4), Vector2(10, -4)]],
+		[Color("#9de6ff"), [Vector2(-18, -3), Vector2(-20, -3), Vector2(-20, -4.5), Vector2(-18, -4.5)]],
+		[Color("#394f65"), [Vector2(2, 6), Vector2(-14, 6), Vector2(-17, 8), Vector2(1, 8)]],
+		[Color("#b8ccd9"), [Vector2(10, 3), Vector2(14, 3), Vector2(14, 4), Vector2(10, 4)]],
+		[Color("#9de6ff"), [Vector2(-18, 3), Vector2(-20, 3), Vector2(-20, 4.5), Vector2(-18, 4.5)]]
+	],
+	"destroyer": [
+		[Color("#60758c"), [Vector2(27, 0), Vector2(19, 5), Vector2(9, 7), Vector2(-24, 8), Vector2(-29, 0), Vector2(-24, -8), Vector2(9, -7), Vector2(19, -5)]],
+		[Color("#a9bed1"), [Vector2(22, 0), Vector2(13, 4), Vector2(-17, 4), Vector2(-22, 0), Vector2(-17, -4), Vector2(13, -4)]],
+		[Color("#22364c"), [Vector2(11, 0), Vector2(6, 3), Vector2(-1, 3), Vector2(-3, 0), Vector2(-1, -3), Vector2(6, -3)]],
+		[Color("#344b61"), [Vector2(8, -8), Vector2(-6, -12), Vector2(-23, -12), Vector2(-26, -8)]],
+		[Color("#8ca6bd"), [Vector2(5, -8), Vector2(-5, -11), Vector2(-12, -11), Vector2(-9, -8)]],
+		[Color("#bfd0df"), [Vector2(15, -3), Vector2(20, -3), Vector2(20, -4), Vector2(15, -4)]],
+		[Color("#bfd0df"), [Vector2(1, -5), Vector2(7, -5), Vector2(7, -6.5), Vector2(1, -6.5)]],
+		[Color("#9de6ff"), [Vector2(-26, -2), Vector2(-29, -2), Vector2(-29, -4), Vector2(-26, -4)]],
+		[Color("#9de6ff"), [Vector2(-24, -8), Vector2(-26, -8), Vector2(-26, -10), Vector2(-24, -10)]],
+		[Color("#344b61"), [Vector2(8, 8), Vector2(-6, 12), Vector2(-23, 12), Vector2(-26, 8)]],
+		[Color("#8ca6bd"), [Vector2(5, 8), Vector2(-5, 11), Vector2(-12, 11), Vector2(-9, 8)]],
+		[Color("#bfd0df"), [Vector2(15, 3), Vector2(20, 3), Vector2(20, 4), Vector2(15, 4)]],
+		[Color("#bfd0df"), [Vector2(1, 5), Vector2(7, 5), Vector2(7, 6.5), Vector2(1, 6.5)]],
+		[Color("#9de6ff"), [Vector2(-26, 2), Vector2(-29, 2), Vector2(-29, 4), Vector2(-26, 4)]],
+		[Color("#9de6ff"), [Vector2(-24, 8), Vector2(-26, 8), Vector2(-26, 10), Vector2(-24, 10)]]
+	],
 	"science_ship": [[Color("#7e9eb9"), [Vector2(12, 0), Vector2(8, 8), Vector2(0, 12), Vector2(-8, 8), Vector2(-12, 0), Vector2(-8, -8), Vector2(0, -12), Vector2(8, -8)]], [Color("#23374d"), [Vector2(7, 0), Vector2(5, 5), Vector2(0, 7), Vector2(-5, 5), Vector2(-7, 0), Vector2(-5, -5), Vector2(0, -7), Vector2(5, -5)]]],
 	"fighter": [
 		[Color("#6b493e"), [Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-5, 3)]],
@@ -1353,12 +1391,13 @@ func _portrait_points(vertices: Array, factor: float = 1.0) -> String:
 func _production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
 	var key: String = "%s:%s:%d" % [kind, tint.to_html(false), pixels]
 	if not production_icons.has(key):
-		var outline: String = _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE), 0.6 if kind == "ship" else 1.0)
+		var portrait_scale: float = float({"ship": 0.6, "cruiser": 0.85, "destroyer": 0.65}.get(kind, 1.0))
+		var outline: String = _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE), portrait_scale)
 		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><g transform="translate(32 32) scale(1.13) translate(-32 -32)">'
 		art += '<polygon points="%s" fill="#18283c" stroke="#%s" stroke-width="1.8" stroke-linejoin="round"/>' % [outline, tint.lightened(0.35).to_html(false)]
 		for panel in HULL_PANELS.get(kind, []):
 			var color: Color = _hull_panel_color(tint, panel[0])
-			art += '<polygon points="%s" fill="#%s"/>' % [_portrait_points(panel[1]), color.lightened(0.12).to_html(false)]
+			art += '<polygon points="%s" fill="#%s"/>' % [_portrait_points(panel[1], portrait_scale), color.lightened(0.12).to_html(false)]
 		if kind == "ship":
 			for bay in range(ECONOMY.FREIGHTER_BAY_COUNT):
 				art += '<polygon points="%s" fill="#32465c" stroke="#9bb6cb" stroke-width="0.8"/>' % _portrait_points(_freighter_bay_vertices(bay), 0.6)
@@ -4911,7 +4950,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	var ship_distance: float = INF
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance <= maxf(5.0, (24.0 if poses[id]["kind"] == "ship" else 14.0) * _ship_scale()) and distance < ship_distance:
+		if distance <= maxf(5.0, float({"ship": 24.0, "cruiser": 21.0, "destroyer": 31.0}.get(poses[id]["kind"], 14.0)) * _ship_scale()) and distance < ship_distance:
 			ship_distance = distance
 			ship_hit = int(id)
 	var next_ship: int = ship_hit
@@ -5041,7 +5080,7 @@ func _entity_hit(state: Dictionary, point: Vector2) -> int:
 	var poses: Dictionary = _ship_poses(state)
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance <= maxf(5.0, (24.0 if poses[id]["kind"] == "ship" else 14.0) * _ship_scale()) and distance < nearest:
+		if distance <= maxf(5.0, float({"ship": 24.0, "cruiser": 21.0, "destroyer": 31.0}.get(poses[id]["kind"], 14.0)) * _ship_scale()) and distance < nearest:
 			nearest = distance
 			target = int(id)
 	if target != -1:
@@ -5808,7 +5847,8 @@ func _fighter_beam_origin(pose: Dictionary) -> Vector2:
 
 func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, width: float) -> void:
 	if ship["kind"] != "miner":
-		_draw_owned_laser(_fighter_beam_origin(pose), endpoint, int(ship["owner"]), width)
+		var muzzle: float = float({"cruiser": 20.0, "destroyer": 29.0}.get(ship["kind"], FIGHTER_MUZZLE))
+		_draw_owned_laser((pose["point"] as Vector2) + (pose["direction"] as Vector2) * muzzle * _ship_scale(), endpoint, int(ship["owner"]), width)
 		return
 	var point: Vector2 = pose["point"]
 	var direction: Vector2 = point.direction_to(endpoint)
