@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.50.1: Local camera presentation scales ship, shipyard and station art smoothly in log zoom from 4× at MIN_ZOOM to 1× at zoom 16, preserving native small-marker floors for stations and the existing close-up ceiling. Tiny hull/yard fallback markers enlarge too. Keep world centers, orbital geometry, combat ranges, navigation, minimap and authority unchanged. Selection and visual effects use the shared displayed scale.
+
 - v0.50.0: Independent default-on per-ship autocast modes: Wander, Auto-Mine, Auto-Salvage, Auto-Repair, Auto-Trade where supported. Either mouse button toggles mode; manual repair remains separate. Contextual hotkeys, animated enabled border and dark radial cooldown mask; mixed selection enables all unless all on. Authority validates owner and capability. All manual orders begin a 30-simulation-year autocast cooldown, refreshed on movement arrival; explicit work, combat, withdrawal and delivery of already collected cargo remain possible. Disable automatic mining/trade without discarding cargo. Fixed 4×4 card retained.
 
 - v0.49.2: Station and shipyard queue tiles are 57×57 with 44-pixel art and 6-pixel progress bars. Star clicks and star-anchored drags target the sector outline and route to its incoming boundary (1 world unit inside); no hull ghosts on sector targets. Preserve exact-position/formation ghosts in free space or Alt-forced targeting, contextual attack/deposit/colonization, and the arrival wait. Legacy AI sector orders remain unchanged.

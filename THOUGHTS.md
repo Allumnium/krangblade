@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.50.1: At galaxy zoom, ships/structures benefit from up to 4× visual-only enlargement. Keep star selection precedence when orbital centers overlap; monitor fleet clutter and low-zoom detail cost in eight-player games. Station minimum radius remains 5 px to avoid multiplying an existing artificial floor.
+
 - v0.50.0: Expose autonomous ship behavior via independent enabled borders and radial cooldowns rather than hidden wandering. Default modes preserve low-micro play; monitor manual mining completion, cargo retention and mixed selections. No change to defensive combat or emergency withdrawal.
 
 - v0.49.2: Star targets should read as sector objectives rather than individual destination silhouettes. New authority-computed entry point is one world unit inside the incoming boundary; observe overlapping fleets and rounded shared boundaries. Keep free-space formations and explicit contextual actions unchanged.

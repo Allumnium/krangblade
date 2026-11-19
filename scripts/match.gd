@@ -18,6 +18,8 @@ const KEYBOARD_PAN_SPEED: float = 420.0
 const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade"}
 const SYSTEM_WORLD_RADIUS: float = 600.0
 const MIN_ZOOM: float = 0.5
+const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
+const OVERVIEW_ART_NORMAL_ZOOM: float = 16.0
 const OVERVIEW_MAX_ZOOM: float = 64.0
 const FIGHTER_HULL_LENGTH: float = 22.0
 const CLOSEUP_SCREEN_FRACTION: float = 0.6
@@ -4018,7 +4020,7 @@ func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 			# Do not steal star selection when a dock overlaps its star.
 			if center.distance_to(star) < 8.0 or point.distance_to(star) < 5.0:
 				continue
-			var axis: Vector2 = Vector2.from_angle(float(slot) * TAU / 3.0 + elapsed * 0.008)
+			var axis: Vector2 = Vector2.from_angle(float(ECONOMY.shipyard_port(state["planets"][index], slot) - 1) * TAU / 3.0 + elapsed * 0.008)
 			var offset: Vector2 = point - center
 			var distance: float = offset.length_squared()
 			if absf(offset.dot(axis)) <= 14.0 * scale + 3.0 and absf(offset.dot(axis.orthogonal())) <= 17.0 * scale + 3.0 and distance < nearest:
@@ -4027,7 +4029,8 @@ func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 	return hit
 
 func _station_radius() -> float:
-	return maxf(5.0, 58.0 * _fit() * zoom)
+	# Scale the projected art, not its orbital position or simulation radius.
+	return maxf(5.0, 58.0 * _fit() * zoom * _overview_art_multiplier())
 
 func _station_hit(point: Vector2, state: Dictionary) -> int:
 	var hit: int = -1
@@ -5371,10 +5374,16 @@ func _hull_polygon(origin: Vector2, forward: Vector2, lateral: Vector2, vertices
 		polygon.append(origin + forward * vertex.x + lateral * vertex.y)
 	return polygon
 
+func _overview_art_multiplier() -> float:
+	# Wheel zoom is logarithmic; blend in the same space for a smooth
+	# overview-to-tactical transition, with exact 4x/1x endpoint values.
+	var progress: float = clampf(log(maxf(zoom, MIN_ZOOM) / MIN_ZOOM) / log(OVERVIEW_ART_NORMAL_ZOOM / MIN_ZOOM), 0.0, 1.0)
+	return lerpf(OVERVIEW_ART_MAX_MULTIPLIER, 1.0, smoothstep(0.0, 1.0, progress))
+
 func _ship_scale() -> float:
-	# Preserve the previous overview dimensions. Beyond the old ceiling,
-	# scale the actual authored hull geometry continuously with the camera.
-	return minf(SHIP_WORLD_SCALE * _fit() * minf(zoom, OVERVIEW_MAX_ZOOM), 1.25) * maxf(1.0, zoom / OVERVIEW_MAX_ZOOM)
+	# Preserve the authored close-up ceiling and camera framing.
+	var base: float = minf(SHIP_WORLD_SCALE * _fit() * minf(zoom, OVERVIEW_MAX_ZOOM), 1.25) * maxf(1.0, zoom / OVERVIEW_MAX_ZOOM)
+	return base * _overview_art_multiplier()
 
 func _focus_selection() -> void:
 	var state: Dictionary = _state()
@@ -5584,8 +5593,9 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 		var point: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
 		if not Rect2(Vector2.ZERO, map_canvas.size).grow(maxf(16.0, 32.0 * scale)).has_point(point):
 			continue
-		if scale < 0.15:
-			map_canvas.draw_rect(Rect2(point - Vector2.ONE, Vector2(2.0, 2.0)), tint.lightened(0.25))
+		if scale < 0.15 * _overview_art_multiplier():
+			var half_size: float = _overview_art_multiplier()
+			map_canvas.draw_rect(Rect2(point - Vector2.ONE * half_size, Vector2.ONE * half_size * 2.0), tint.lightened(0.25))
 			if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
 				_draw_selection_ring(point, 9.0)
 			continue
@@ -6016,8 +6026,8 @@ func _draw_map() -> void:
 		# At a distant galaxy overview, the smallest authored edges can
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
-		if scale < 0.15 or (scale < 0.42 and Geometry2D.triangulate_polygon(shape).is_empty()):
-			map_canvas.draw_circle(point, maxf(0.8, 6.0 * scale), hull, true, -1.0, true)
+		if scale < 0.15 * _overview_art_multiplier() or (scale < 0.42 and Geometry2D.triangulate_polygon(shape).is_empty()):
+			map_canvas.draw_circle(point, maxf(0.8, 6.0 * scale / _overview_art_multiplier()) * _overview_art_multiplier(), hull, true, -1.0, true)
 			continue
 		map_canvas.draw_colored_polygon(shape, hull)
 		if ship["kind"] == "ship" and scale >= 0.42:
