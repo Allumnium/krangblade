@@ -646,7 +646,7 @@ func _check_economy_sync() -> void:
 							idle += 1
 						if not craft.get("holding", false):
 							local_moving = local_moving or ((craft.get("local_move_target", Vector2.INF) as Vector2).is_equal_approx(local_point) and craft.get("arrival_heading", Vector2.ZERO) == Vector2.UP)
-							local_arrived = local_arrived or (not craft.has("local_move_target") and int(craft.get("operation_target", -1)) == owner_home and (craft["position"] as Vector2).distance_to(local_point) <= ECON.SHIP_SEPARATION_RADIUS * 2.0 and ECON._idle_formation_targets(state, graph).has(int(craft["id"])))
+							local_arrived = local_arrived or (not craft.has("local_move_target") and int(craft.get("operation_target", -1)) == owner_home and (craft["position"] as Vector2).is_equal_approx(local_point) and craft.get("heading", Vector2.ZERO) == Vector2.UP and ECON.arrival_wait_remaining(state, craft) > ECON.EPS and ECON.arrival_wait_remaining(state, craft) <= ECON.MOVE_ARRIVAL_WAIT_YEARS + ECON.EPS and not ECON._idle_formation_targets(state, graph).has(int(craft["id"])))
 			var assigned_miners: int = 0
 			var auto_salvage: bool = false
 			var repair_toggled: bool = false

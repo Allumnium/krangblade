@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.49.1: User reported immediate post-move wandering prevents issuing Hold in time. Use a 20-year authoritative arrival deadline, not persistent hold or wall-clock time. Watch overlapping single-point arrivals during the grace period and civilian delay in resuming profitable jobs; explicit orders remain immediate. Verify guest poses/status and AI movement pacing.
+
 - v0.49.0: Screenshot confirms Codex version label wrapping one character per line and stretching Close vertically. Use nonwrapping header labels and a centered compact button. Check actual header and scroll bounds; confirm hotkey editor stays bounded, and local preferences persist without sending network commands.
 
 - v0.48.0: Standard SC2 action keys map to existing Warbound button callbacks, with mnemonic bindings for unmatched production/structure actions. Check badge/icon overlap at minimum slot size, Escape priority and input isolation. F1 idle-worker selection, camera location shortcuts and further control-group variants are not implemented in this pass.

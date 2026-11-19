@@ -64,6 +64,7 @@ const MINER_REPAIR_RATE: float = 5.0
 const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
 const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED
+const MOVE_ARRIVAL_WAIT_YEARS: float = 20.0
 const SHIP_SIZE: int = 1
 const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
@@ -2869,6 +2870,7 @@ static func polyline_formation_slots(origins: Dictionary, stroke: PackedVector2A
 	return slots
 
 static func _set_unit_order(ship: Dictionary, order: Dictionary) -> void:
+	ship.erase("arrival_wait_until")
 	ship.erase("order_queue")
 	if order.is_empty():
 		ship.erase("unit_order")
@@ -3060,8 +3062,17 @@ static func issue_unit_order(state: Dictionary, player: int, ids: Array, order: 
 		accepted = true
 	return accepted
 
+static func _mark_sector_arrival(state: Dictionary, ship: Dictionary) -> void:
+	var order: Dictionary = ship.get("unit_order", {})
+	if order.get("kind", "") == "sector" and not ship.has("arrival_wait_until") and not bool(ship.get("retreating", false)) and (ship["route"] as Array).is_empty() and int(ship["at"]) == int(order["target"]):
+		ship["arrival_wait_until"] = float(state["elapsed"]) + MOVE_ARRIVAL_WAIT_YEARS
+
+static func arrival_wait_remaining(state: Dictionary, ship: Dictionary) -> float:
+	return maxf(0.0, float(ship.get("arrival_wait_until", 0.0)) - float(state.get("elapsed", 0.0)))
+
 static func _advance_unit_orders(state: Dictionary, graph: Dictionary) -> void:
 	for ship in state["ships"]:
+		_mark_sector_arrival(state, ship)
 		if _unit_order_running(ship):
 			continue
 		ship.erase("unit_order")
@@ -3181,7 +3192,7 @@ static func command_hold_units(state: Dictionary, player: int, ids: Array, relea
 
 # A local move is a one-shot order, not a persistent hold. Keep the
 # destination through a repair detour, and resume the normal idle/working
-# behavior as soon as the point is physically reached.
+# behavior after a short arrival grace period; queued orders can start immediately.
 static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, state: Dictionary = {}) -> bool:
 	if not ship.has("local_move_target") or bool(ship.get("retreating", false)):
 		return false
@@ -3195,6 +3206,7 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 				ship["heading"] = ship["arrival_heading"]
 			_clear_local_move(ship)
 			_finish_manual(ship)
+			ship["arrival_wait_until"] = float(state["elapsed"]) + MOVE_ARRIVAL_WAIT_YEARS
 		return true
 	if fighter and not sector_contains(graph, node, ship["position"]):
 		if int(ship.get("dest", -1)) != node:
@@ -3211,6 +3223,8 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 			ship["heading"] = ship["arrival_heading"]
 		_clear_local_move(ship)
 		ship.erase("move_only")
+		if not state.is_empty():
+			ship["arrival_wait_until"] = float(state["elapsed"]) + MOVE_ARRIVAL_WAIT_YEARS
 		if fighter:
 			ship["at"] = node
 			ship["dest"] = node
@@ -4958,7 +4972,7 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 			if not stationary_teams.has(node):
 				stationary_teams[node] = {}
 			stationary_teams[node][int(state["teams"].get(int(ship["owner"]), 0))] = true
-		if not _is_idle_ship(ship):
+		if not _is_idle_ship(ship) or arrival_wait_remaining(state, ship) > EPS:
 			continue
 		var key: String = "%d:%s:%d:%d" % [int(ship["owner"]), str(ship.get("kind", "ship")), int(ship["at"]), int(ship.get("operation_id", 0))]
 		if not groups.has(key):
@@ -5143,6 +5157,9 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		var planned: Vector2 = ship["position"]
 		var held: bool = bool(ship.get("holding", false))
 		var local_moving: bool = ship.has("local_move_target")
+		# Waiting hulls remain precise obstacles, but combat/withdrawal can move.
+		if arrival_wait_remaining(state, ship) > EPS and not _engaged(ship):
+			continue
 		# Preserve the exact endpoint and facing on the arrival tick only.
 		# The completed order is retired before next tick's ordinary wandering.
 		var order: Dictionary = ship.get("unit_order", {})
@@ -5311,6 +5328,11 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			continue
 		if _work_salvage(state, combat_graph, ship, dt, salvage_busy.has(salvage_ship_id)):
 			continue
+		# Explicit work and emergency withdrawal have priority. Defer civilian
+		# autonomous job selection and idle salvage approaches during the wait.
+		if arrival_wait_remaining(state, ship) > EPS and ship.get("kind", "") != "fighter":
+			ship["navigation_target"] = ship["position"]
+			continue
 		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_ids):
 			continue
 		ship.erase("repair_target")
@@ -5369,8 +5391,12 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		var ship_id: int = int(ship["id"])
 		# Only use the idle budget if the ship started and finished its
 		# work idle and did not already move this tick.
-		if idle_targets.has(ship_id) and _is_idle_ship(ship) and not coordinated.has(ship_id) and ship["position"] == initial_position:
+		if idle_targets.has(ship_id) and _is_idle_ship(ship) and arrival_wait_remaining(state, ship) <= EPS and not coordinated.has(ship_id) and ship["position"] == initial_position:
 			_navigate(ship, idle_targets[ship_id], SHIP_SPEED * dt)
+	for ship in state["ships"]:
+		_mark_sector_arrival(state, ship)
+		if ship.has("arrival_wait_until") and arrival_wait_remaining(state, ship) <= EPS and ship.get("unit_order", {}).get("kind", "") != "sector":
+			ship.erase("arrival_wait_until")
 	_separate_ships(state, combat_graph, combat_positions, dt)
 	if not profile.is_empty():
 		var now: int = Time.get_ticks_usec()

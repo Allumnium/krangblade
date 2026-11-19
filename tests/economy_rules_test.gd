@@ -2130,8 +2130,12 @@ func _test_unit_order_queue() -> void:
 			break
 	assert(visited == [first["point"], second["point"], third["point"]])
 	assert(ship["position"] == third["point"] and ship["heading"] == Vector2.LEFT and not ship.get("holding", false))
+	assert(is_equal_approx(ECON.arrival_wait_remaining(state, ship), 20.0))
+	for tick in range(199):
+		ECON.step(state, 0.1)
+		assert(ship["position"] == third["point"] and ship["heading"] == Vector2.LEFT and not ship.get("holding", false))
 	var wander_distance: float = 0.0
-	for tick in range(10):
+	for tick in range(20):
 		var previous: Vector2 = ship["position"]
 		ECON.step(state, 0.1)
 		wander_distance += previous.distance_to(ship["position"])
@@ -2157,13 +2161,25 @@ func _test_unit_order_queue() -> void:
 			break
 	assert(ship["position"] == remote["point"] and ship["heading"] == Vector2.DOWN and ship["at"] == 1)
 	ECON.step(state, 0.1)
-	assert(ship["position"] != remote["point"] and ECON._is_idle_ship(ship))
+	assert(ship["position"] == remote["point"] and ECON.arrival_wait_remaining(state, ship) > 19.0)
 	assert(ECON.command_hold_units(state, 1, [100], false))
+	assert(ECON.arrival_wait_remaining(state, ship) == 0.0)
 	var held_point: Vector2 = ship["position"]
 	for tick in range(10):
 		ECON.step(state, 0.1)
 	assert(ship["position"] == held_point and not ECON._is_idle_ship(ship))
-	print("PASS: sequential unit orders, ownership, queue limit, direct/hold cancellation and lane-routed formation facing")
+	assert(ECON.command_fighters(state, 1, [100], 0, true))
+	for tick in range(2000):
+		ECON.step(state, 0.1)
+		if ECON.arrival_wait_remaining(state, ship) > 0.0:
+			break
+	assert(int(ship["at"]) == 0 and (ship["route"] as Array).is_empty())
+	assert(ECON.arrival_wait_remaining(state, ship) > 19.0)
+	var sector_arrival: Vector2 = ship["position"]
+	for tick in range(199):
+		ECON.step(state, 0.1)
+		assert(ship["position"] == sector_arrival)
+	print("PASS: sequential orders, queue limits, formation facing, 20-year precise and sector arrival waits, hold override")
 
 func _test_local_position_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
@@ -2216,6 +2232,15 @@ func _test_local_position_orders() -> void:
 			break
 	assert(arrivals.size() == selection.size())
 	assert(ECON._is_idle_ship(fighter))
+	for craft in state["ships"]:
+		assert(ECON.arrival_wait_remaining(state, craft) > 0.0)
+	var waiting_positions: Dictionary = {}
+	for craft in state["ships"]:
+		waiting_positions[craft["id"]] = craft["position"]
+	for tick in range(50):
+		ECON.step(state, 0.1)
+		for craft in state["ships"]:
+			assert(craft["position"] == waiting_positions[craft["id"]])
 	assert(ECON.command_hold_units(state, 1, selection, false))
 	for craft in state["ships"]:
 		assert(craft.get("holding", false) and not craft.has("local_move_target"))
