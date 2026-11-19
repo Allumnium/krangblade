@@ -1,5 +1,9 @@
 # Warbound — active thoughts
 
+- v0.53.7: Passive handoff uses pre-movement positions; very fast opposing ships could cross transfer range between simulation ticks. Monitor logistics throughput and whether staged or moving receivers compete fairly.
+
+- v0.53.6: Freighter 6 t/yr unloading follows its 3 t/yr salvage pickup rate; review throughput with 100 t holds and instantaneous warehouse loading. Sector pursuit can tie up fighters longer than the old three-year chase. Test dense fleet costs and boundary transitions.
+
 - v0.53.5: Mild overlap is intentional; check contact jitter at mining/docking endpoints. Depot-facing staging leaves a 20% handoff margin; monitor miners on dispersed rocks and whether depot selection should account for multiple resources.
 
 - v0.53.4: Local orbit prediction is capped at 0.6 real seconds to prevent drift on stalled snapshots; verify catch-up on lossy connections. Exhaust acceleration is estimated from received positions, so contact corrections and irregular sample timing may affect its intensity.

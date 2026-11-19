@@ -1996,33 +1996,42 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 		_work_opportunistic_salvage(state, graph, ship, dt, busy, cells, false, threats)
 	return true
 
-static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictionary, receivers: Array, threats: Dictionary) -> float:
-	if miner.get("kind", "") != "miner" or _cargo_total(miner) <= EPS or bool(miner.get("holding", false)) or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("cargo_order") or miner.has("repair_order") or miner.has("local_move_target") or autocast_remaining(state, miner, "mine") > EPS:
-		return 0.0
-	if miner.get("mining_mode", "") not in ["mining", "return", "delivery"] and not bool(miner.get("salvage_delivery", false)) and not miner.has("auto_salvage_target"):
+static func _dropoff_budget(ship: Dictionary, dt: float) -> float:
+	return maxf(0.0, dropoff_rate(str(ship["kind"])) * maxf(0.0, dt) - float(ship.get("_handoff_sent", 0.0)))
+
+static func dropoff_rate(kind: String) -> float:
+	match kind:
+		"miner": return MINER_RATE * 2.0
+		"ship": return FREIGHTER_TRACTOR_RATE * 2.0
+		"colony_ship": return COLONY_FARM_RATE * 2.0
+	return TRACTOR_RATE * 2.0
+
+static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictionary, receivers: Array, threats: Dictionary, dt: float) -> float:
+	if miner.get("kind", "") != "miner" or _cargo_total(miner) <= EPS or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("cargo_order") or miner.has("repair_order"):
 		return 0.0
 	var owner: int = int(miner["owner"])
 	var point: Vector2 = miner["position"]
 	if not _salvage_safe(state, graph, owner, point, local_sector(graph, miner), threats):
 		return 0.0
 	var total: float = 0.0
+	var budget: float = _dropoff_budget(miner, dt)
 	for freighter in receivers:
-		if int(freighter["owner"]) != owner or freighter.get("kind", "") != "ship" or not freighter.has("resource_stage") or not autocast_ready(state, freighter, "trade") or bool(freighter.get("holding", false)) or bool(freighter.get("retreating", false)) or _engaged(freighter) or _unit_order_running(freighter) or _salvage_active(freighter) or not freighter["route"].is_empty():
+		if int(freighter["owner"]) != owner or freighter.get("kind", "") != "ship" or not autocast_enabled(freighter, "trade") or bool(freighter.get("retreating", false)) or _engaged(freighter) or freighter.has("cargo_order"):
 			continue
 		if (freighter["position"] as Vector2).distance_to(point) > RESOURCE_HANDOFF_RANGE or not _salvage_safe(state, graph, owner, freighter["position"], local_sector(graph, freighter), threats):
 			continue
 		for resource in RESOURCES + [ANTIMATTER]:
-			var amount: float = minf(cargo_free(freighter), float(miner["cargo"].get(resource, 0.0)))
+			var amount: float = minf(budget - total, minf(cargo_free(freighter), float(miner["cargo"].get(resource, 0.0))))
 			if amount <= EPS:
 				continue
 			miner["cargo"][resource] -= amount
 			freighter["cargo"][resource] = float(freighter["cargo"].get(resource, 0.0)) + amount
 			total += amount
-			if not freighter.has("resource_loaded_at"):
+			if freighter.has("resource_stage") and not freighter.has("resource_loaded_at"):
 				freighter["resource_loaded_at"] = float(state["elapsed"])
-		if cargo_free(freighter) <= EPS:
+		if freighter.has("resource_stage") and cargo_free(freighter) <= EPS:
 			_resource_haul(freighter)
-		if _cargo_total(miner) <= EPS:
+		if _cargo_total(miner) <= EPS or total >= budget - EPS:
 			break
 	return total
 
@@ -2063,14 +2072,18 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 		ship["source"] = -1
 		ship["dest"] = -1
 	if int(ship["dest"]) == here and teams[here] == team and _cargo_total(ship) > EPS:
+		var budget: float = dropoff_rate("ship") * maxf(0.0, dt)
 		for resource in RESOURCES + [ANTIMATTER]:
 			var capacity: float = storage_free(planets[here], resource) if resource == ANTIMATTER and int(planets[here]["owner"]) == int(ship["owner"]) else (0.0 if resource == ANTIMATTER else _need(planets[here], resource))
-			var amount: float = minf(float(ship["cargo"].get(resource, 0.0)), capacity)
+			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), capacity))
 			if amount <= EPS:
 				continue
 			ship["cargo"][resource] = float(ship["cargo"][resource]) - amount
 			planets[here]["stock"][resource] = float(planets[here]["stock"].get(resource, 0.0)) + amount
 			_record_flow(planets[here], "Imports", resource, amount)
+			budget -= amount
+		if budget <= EPS and _cargo_total(ship) > EPS:
+			return
 		ship["dest"] = -1
 	if _cargo_total(ship) > EPS:
 		_pick_loaded_destination(state, ship, teams, team, cache)
@@ -2342,6 +2355,10 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			ship["next_mining_search"] = float(state["elapsed"]) + 0.5
 		return
 	if mode == "delivery":
+		if _cargo_total(ship) <= EPS and not ship["route"].is_empty() and not _unit_order_running(ship):
+			# Finish the current legal lane before selecting new work.
+			if not _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
+				return
 		# A loaded miner with nowhere to unload can fly locally while
 		# waiting for storage. Reacquire a reachable depot before docking;
 		# never transfer cargo from an idle formation's position.
@@ -2369,9 +2386,8 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 						_set_route(ship, _mining_path(state, teams, team, here, depot, cache))
 						break
 			return
-		if _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE) and float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
-			_unload_miner(state, ship, teams, cache)
-			ship["next_unload_search"] = float(state["elapsed"]) + 0.5
+		if _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
+			_unload_miner(state, ship, teams, cache, dt)
 		return
 	var field_index: int = int(ship["field"])
 	var field: Dictionary = state["map"]["fields"][field_index]
@@ -2430,9 +2446,9 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 		ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
 		if (ship["position"] as Vector2) == origin:
 			ship["mining_mode"] = "delivery"
-			_unload_miner(state, ship, teams, cache)
+			_unload_miner(state, ship, teams, cache, dt)
 
-static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
+static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
 	var here: int = int(ship["at"])
 	var owner: int = int(ship["owner"])
 	var team: int = int(state["teams"].get(owner, 0))
@@ -2445,13 +2461,18 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 		if _cargo_total(ship) > EPS and (ship["position"] as Vector2).distance_to(dock) > STATION_DOCK_RANGE + EPS:
 			ship["dest"] = here
 			return
+		var budget: float = _dropoff_budget(ship, dt)
 		for resource in RESOURCES + [ANTIMATTER]:
-			var amount: float = minf(float(ship["cargo"].get(resource, 0.0)), storage_free(local, resource))
+			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), storage_free(local, resource)))
 			if amount <= 0.0:
 				continue
 			local["stock"][resource] = float(local["stock"].get(resource, 0.0)) + amount
 			_record_flow(local, "Mining deliveries", resource, amount)
 			ship["cargo"][resource] -= amount
+			budget -= amount
+		if budget <= EPS and _cargo_total(ship) > EPS:
+			ship["dest"] = here
+			return
 	if _cargo_total(ship) <= EPS:
 		ship.erase("manual_mine")
 		ship["mining_mode"] = "idle"
@@ -2979,16 +3000,18 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	elif ref["kind"] in ["station", "ship"]:
 		var depot: Dictionary = state["planets"][ref["node"]] if ref["kind"] == "station" else ref["entity"]
 		var stock: Dictionary = depot["stock"] if ref["kind"] == "station" else depot["cargo"]
+		var budget: float = _dropoff_budget(ship, dt)
 		for resource in RESOURCES + [ANTIMATTER]:
 			var free: float = storage_free(depot, resource) if ref["kind"] == "station" else cargo_free(depot)
-			var amount: float = minf(float(ship["cargo"].get(resource, 0.0)), free)
+			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), free))
 			if amount <= EPS:
 				continue
 			ship["cargo"][resource] -= amount
 			stock[resource] = float(stock.get(resource, 0.0)) + amount
+			budget -= amount
 			if ref["kind"] == "station":
 				_record_flow(depot, "Manual deliveries", resource, amount)
-		if ref["kind"] == "station" and _cargo_total(ship) > EPS:
+		if _cargo_total(ship) > EPS and (ref["kind"] == "station" or cargo_free(depot) > EPS):
 			return true # wait in range for released capacity; a new order can interrupt
 	ship.erase("cargo_order")
 	_finish_manual(ship)
@@ -3909,7 +3932,7 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 	if not ship.has("local_move_target") or bool(ship.get("retreating", false)):
 		return false
 	var fighter: bool = ship.get("kind", "") == "fighter"
-	if fighter and _engaged(ship) and not bool(ship.get("move_only", false)):
+	if fighter and _engaged(ship):
 		return false
 	var node: int = int(ship["local_move_sector"])
 	if not fighter and not state.is_empty():
@@ -4619,16 +4642,18 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 	if (ship["position"] as Vector2).distance_to(dock) > STATION_DOCK_RANGE + EPS:
 		return true
 	var p: Dictionary = state["planets"][depot]
+	var budget: float = _dropoff_budget(ship, dt)
 	for resource in RESOURCES + [ANTIMATTER]:
-		var amount: float = minf(float(ship["cargo"].get(resource, 0.0)), storage_free(p, resource))
+		var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), storage_free(p, resource)))
 		if amount > EPS:
 			ship["cargo"][resource] -= amount
 			p["stock"][resource] = float(p["stock"].get(resource, 0.0)) + amount
 			var category: String = "Farm deliveries" if ship["kind"] == "colony_ship" else ("Resource deliveries" if bool(ship.get("resource_haul", false)) else "Salvage deliveries")
 			_record_flow(p, category, resource, amount)
+			budget -= amount
 	if _cargo_total(ship) <= EPS:
 		_cancel_salvage_order(ship)
-	else:
+	elif budget > EPS:
 		ship.erase("salvage_depot")
 	return true
 
@@ -4638,12 +4663,22 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	var by_id: Dictionary = {}
 	var previous_targets: Dictionary = {}
 	var cells: Dictionary = {}
+	var sectors: Dictionary = {}
+	var ship_sectors: Dictionary = {}
 	for ship in ships:
 		var id: int = int(ship["id"])
 		var pos: Vector2 = combat_position(state, graph, ship)
 		positions[id] = pos
 		by_id[id] = ship
 		previous_targets[id] = int(ship.get("combat_target", -1))
+		var sector: int = local_sector(graph, ship)
+		if sector < 0:
+			sector = sector_at(graph, pos, range(graph["points"].size()))
+		ship_sectors[id] = sector
+		if sector >= 0:
+			if not sectors.has(sector):
+				sectors[sector] = []
+			sectors[sector].append(ship)
 		var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 		if not cells.has(cell):
 			cells[cell] = []
@@ -4695,6 +4730,11 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or ship.get("unit_order", {}).get("kind", "") == "follow" or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
+		elif fighter and not bool(ship.get("holding", false)) and int(ship_sectors[int(ship["id"])]) >= 0:
+			for enemy in sectors.get(ship_sectors[int(ship["id"])], []):
+				if _hostile_hull(state, int(ship["owner"]), enemy):
+					moving_only = false
+					break
 		if bool(ship.get("retreating", false)) or moving_only or ship.has("cargo_order") or ship.has("repair_order"):
 			ship["combat_target"] = -1
 			ship["pursuit_target"] = -1
@@ -4731,7 +4771,11 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		for blocked_id in blocked.keys():
 			if not positions.has(blocked_id) or pos.distance_squared_to(positions[blocked_id]) > LASER_RANGE * LASER_RANGE:
 				blocked.erase(blocked_id)
+		if bool(ship.get("holding", false)):
+			pursuit = -1
 		if pursuit >= 0:
+			if ship_sectors[id] >= 0 and ship_sectors.get(pursuit, -1) == ship_sectors[id]:
+				remaining = PURSUIT_YEARS
 			if not by_id.has(pursuit) or int(state["teams"].get(int(by_id[pursuit]["owner"]), 0)) == team or team == 0:
 				pursuit = -1
 			elif remaining <= EPS:
@@ -4765,6 +4809,18 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		if fighter and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[prior])):
 			pursuit = prior
 			remaining = PURSUIT_YEARS
+		if fighter and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and int(ship_sectors[id]) >= 0 and team != 0:
+			var nearest_enemy: float = INF
+			for enemy in sectors.get(ship_sectors[id], []):
+				if not _hostile_hull(state, int(ship["owner"]), enemy):
+					continue
+				var enemy_id: int = int(enemy["id"])
+				var distance: float = pos.distance_squared_to(positions[enemy_id])
+				if distance < nearest_enemy or (is_equal_approx(distance, nearest_enemy) and enemy_id < pursuit):
+					nearest_enemy = distance
+					pursuit = enemy_id
+			if pursuit >= 0:
+				remaining = PURSUIT_YEARS
 		if pursuit >= 0:
 			target = pursuit if pos.distance_squared_to(positions[pursuit]) <= LASER_RANGE * LASER_RANGE else -1
 		else:
@@ -6078,6 +6134,10 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			if not stage_receivers.has(owner):
 				stage_receivers[owner] = []
 			stage_receivers[owner].append(craft)
+	# Passive handoff is independent of route and job. Evaluate all hulls before movement.
+	for miner in state["ships"]:
+		if miner.get("kind", "") == "miner" and not salvage_busy.has(int(miner["id"])):
+			miner["_handoff_sent"] = _miner_handoff(state, combat_graph, miner, stage_receivers.get(int(miner["owner"]), []), salvage_threats, dt)
 	started = _profile_stage(profile, "Combat / repair", started)
 	var fleets: Dictionary = {}
 	for craft in state["ships"]:
@@ -6115,7 +6175,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			ship.erase("repair_target")
 			_work_withdrawal(state, combat_graph, ship, dt)
 			continue
-		if _work_follow(state, combat_graph, ship, service_refs, dt):
+		if not (ship.get("kind", "") == "fighter" and _engaged(ship) and not bool(ship.get("holding", false))) and _work_follow(state, combat_graph, ship, service_refs, dt):
 			continue
 		if ship.has("attack_order"):
 			var ref: Dictionary = service_refs.get(int(ship["attack_order"]), {})
@@ -6136,8 +6196,6 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			continue
 		if _work_local_move(combat_graph, ship, dt, state):
 			continue
-		if ship.get("kind", "") == "miner" and not salvage_busy.has(salvage_ship_id):
-			_miner_handoff(state, combat_graph, ship, stage_receivers.get(int(ship["owner"]), []), salvage_threats)
 		if _work_salvage(state, combat_graph, ship, dt, salvage_busy.has(salvage_ship_id)):
 			continue
 		if _work_resource_stage(state, combat_graph, ship, teams, cache, salvage_threats, salvage_cells, salvage_busy, dt):
@@ -6213,6 +6271,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if idle_targets.has(ship_id) and _is_idle_ship(ship) and autocast_ready(state, ship, "wander") and not coordinated.has(ship_id) and ship["position"] == initial_position:
 			_navigate(ship, idle_targets[ship_id], ship_speed(str(ship.get("kind", "ship"))) * dt)
 	for ship in state["ships"]:
+		ship.erase("_handoff_sent")
 		_mark_sector_arrival(state, ship)
 		if ship.has("auto_cooldown_until") and float(ship["auto_cooldown_until"]) <= float(state["elapsed"]):
 			ship.erase("auto_cooldown_until")
