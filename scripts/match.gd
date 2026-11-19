@@ -1465,7 +1465,7 @@ func _sync_hotkey_bindings() -> void:
 		var old: String = str(button.get_meta("hotkey", ""))
 		if not old.is_empty():
 			_set_button_hint(button, _button_hint(button).replace("\n[" + old + "]", "").replace(" [" + old + "]", ""))
-			if _set_button_hint(button, = "[" + old + "]":)
+			if _button_hint(button) == "[" + old + "]":
 				_set_button_hint(button, "")
 		button.set_meta("hotkey", hint)
 		_set_button_hint(button, _button_hint(button) + ("\n" if not _button_hint(button).is_empty() else "") + "[" + hint + "]")
@@ -1531,7 +1531,7 @@ func _enable_fast_command_tooltip(button: Button) -> void:
 			timer.stop()
 			popup.hide())
 	timer.timeout.connect(func() -> void:
-		if not button.is_visible_in_tree() or not button.get_global_rect().has_point(button.get_global_mouse_position()) or button.get_meta("command_hint", "").is_empty():
+		if not button.is_visible_in_tree() or not button.get_global_rect().has_point(button.get_global_mouse_position()) or str(button.get_meta("command_hint", "")).is_empty():
 			return
 		for child in popup.get_children():
 			popup.remove_child(child)
