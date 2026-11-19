@@ -1350,9 +1350,6 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	# Bottom row: Upgrade, Return to the system, Clear Rally, Rally.
 	yard_upgrade = _button("", _upgrade_selected_yards, grid, true)
 	_yard_ability_face(yard_upgrade, "Upgrade", _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>'))
-	var return_button := _button("", _return_from_yard, grid)
-	_yard_ability_face(return_button, "Return", _station_command_icon("return"))
-	return_button.tooltip_text = "Return to the system overview"
 	var clear := _button("", func() -> void:
 		pending_command = ""
 		_refresh_command_mode()
@@ -1369,6 +1366,19 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
 	_fill_ability_grid(grid)
+	var footer_spacer := Control.new()
+	footer_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	footer_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	yard_command_scroll.add_child(footer_spacer)
+	var footer := HBoxContainer.new()
+	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.alignment = BoxContainer.ALIGNMENT_END
+	yard_command_scroll.add_child(footer)
+	var return_button := _button("", _return_from_yard, footer)
+	_yard_ability_face(return_button, "Return", _station_command_icon("return"))
+	return_button.custom_minimum_size = Vector2(60, 60)
+	return_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return_button.tooltip_text = "Return to the system overview"
 	yard_command_scroll.hide()
 
 func _return_from_yard() -> void:
