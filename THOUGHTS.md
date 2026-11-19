@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.61.3: Formation ghosts reuse replicated order data without new state or per-hull route drawing. Check overlapping queued destinations and dense fleet readability.
+
 - v0.61.2: Corridor junction smoothing is visual-only and slightly rounds the silhouette near intersections. Check whether the subtle visual margin affects edge clicks; minimap retains compact topology markers.
 
 - v0.61.1: Removing star-hit exceptions makes overlapping objects selectable based on their actual art. Check dense layouts and minimap overlap at overview scale.
