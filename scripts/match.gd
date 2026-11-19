@@ -1288,17 +1288,17 @@ func _production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
 	var key: String = "%s:%s:%d" % [kind, tint.to_html(false), pixels]
 	if not production_icons.has(key):
 		var outline: String = _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE))
-		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">'
+		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><g transform="translate(32 32) scale(1.13) translate(-32 -32)">'
 		art += '<polygon points="%s" fill="#18283c" stroke="#%s" stroke-width="1.8" stroke-linejoin="round"/>' % [outline, tint.lightened(0.35).to_html(false)]
 		for panel in HULL_PANELS.get(kind, []):
 			var color: Color = _hull_panel_color(tint, panel[0])
-			art += '<polygon points="%s" fill="#%s"/>' % [_portrait_points(panel[1]), color.to_html(false)]
+			art += '<polygon points="%s" fill="#%s"/>' % [_portrait_points(panel[1]), color.lightened(0.12).to_html(false)]
 		if kind == "ship":
 			art += '<rect x="21" y="11" width="22" height="8" rx="2" fill="#%s"/>' % tint.lightened(0.35).to_html(false)
 			for row in range(3):
 				for column in range(2):
 					art += '<rect x="%d" y="%d" width="11" height="9" rx="1" fill="#32465c" stroke="#9bb6cb" stroke-width="0.8"/>' % [20 + column * 13, 22 + row * 11]
-		art += '<polygon points="%s" fill="none" stroke="#%s" stroke-width="1.25" stroke-linejoin="round"/></svg>' % [outline, tint.lightened(0.50).to_html(false)]
+		art += '<polygon points="%s" fill="none" stroke="#%s" stroke-width="1.25" stroke-linejoin="round"/></g></svg>' % [outline, tint.lightened(0.50).to_html(false)]
 		var image := Image.new()
 		image.load_svg_from_string(art, float(pixels) / 64.0)
 		production_icons[key] = ImageTexture.create_from_image(image)
@@ -1364,11 +1364,11 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		yard_commands[kind] = button
 	# Upgrade remains on row two; navigation and rally use the shared bottom row.
 	yard_upgrade = _button("", _upgrade_selected_yards, grid, true)
-	_yard_ability_face(yard_upgrade, "Upgrade", _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>'))
+	_yard_ability_face(yard_upgrade, "Upgrade", _station_command_icon("upgrade"))
 	while grid.get_child_count() < 12:
 		_station_spacer(grid)
 	var station_button := _button("", _select_yard_station, grid)
-	_yard_ability_face(station_button, "Select Space\nStation", _selection_portrait_icon("station"))
+	_yard_ability_face(station_button, "Select Space\nStation", _station_command_icon("select_station"))
 	station_button.tooltip_text = "Select parent Space Station"
 	_station_spacer(grid)
 	var clear := _button("", func() -> void:
@@ -1376,11 +1376,11 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		_refresh_command_mode()
 		for ref in _selected_yards(_state(), true):
 			session.call("request_shipyard_rally", ref.x, ref.y, -1, Vector2.ZERO), grid)
-	_yard_ability_face(clear, "Clear\nRally", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12M18 19L28 29M28 19L18 29"/>'))
+	_yard_ability_face(clear, "Clear\nRally", _station_command_icon("clear_rally"))
 	clear.tooltip_text = "Clear rally point"
 	yard_commands["clear"] = clear
 	var rally_button := Button.new()
-	_yard_ability_face(rally_button, "Rally", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12"/>'))
+	_yard_ability_face(rally_button, "Rally", _station_command_icon("rally"))
 	rally_button.toggle_mode = true
 	rally_button.tooltip_text = "Set Rally Point"
 	rally_button.pressed.connect(_arm_command.bind("rally"))
@@ -1393,25 +1393,42 @@ func _select_yard_station() -> void:
 	# For grouped yards, select the primary yard's parent station.
 	_select_building_ref(Vector2i(selected, 0), "station")
 
-func _station_command_icon(kind: String, pixels: int = 32) -> Texture2D:
-	if HUD.ICONS.has(kind):
-		return HUD.resource_icon(kind, 24 if pixels == 32 else pixels)
+# Shared command-card art. Keep silhouettes legible at compact native UI sizes.
+func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
 	var key: String = "%s:%d" % [kind, pixels]
 	if station_icons.has(key):
 		return station_icons[key]
 	var paths: Dictionary = {
-		"build": '<path d="M4 27L17 14M12 5L17 2L29 14L25 18L19 12L8 23"/><path d="M3 25L7 29"/>',
-		"trade": '<path d="M4 10H28L21 3M28 10L21 17M28 22H4L11 15M4 22L11 29"/>',
-		"return": '<path d="M7 8L2 16L7 24M2 16H22Q28 16 28 22V27"/>',
-		"warehouse": '<path d="M3 12L16 4L29 12V28H3Z M9 28V17H23V28M9 21H23M9 25H23"/>',
-		"habitation": '<path d="M3 28V13H12V4H22V28M22 14H29V28M7 18H9M7 23H9M16 9H18M16 15H18M16 21H18"/>',
-		"orbital_housing": '<circle cx="16" cy="16" r="12"/><path d="M8 23V14L16 8L24 14V23H8M13 23V17H19V23"/>',
-		"yard": '<path d="M4 4H28V28H4Z M4 9H28M4 23H28M12 23L16 10L20 23Z"/>',
-		"reinforced_plating": '<path d="M16 3L28 8V18Q25 26 16 30Q7 26 4 18V8Z M16 8L23 11V18Q21 23 16 26Q11 23 9 18V11Z"/>',
-		"laser_matrix": '<path d="M4 26L26 4M10 28L28 10M3 19L13 29M19 3L29 13"/>',
-		"pds": '<path d="M16 3L27 8V18Q24 26 16 30Q8 26 5 18V8Z M11 17H21M16 12V22"/>'
+		"move": '<path fill="#9ed9f6" d="M3 12H18V5L30 16L18 27V20H3Z"/><path fill="#edfaff" d="M5 13H19V9L26 15H5Z"/>',
+		"stop": '<rect x="6" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/><rect x="18" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/>',
+		"hold": '<rect x="5" y="5" width="22" height="22" rx="2" fill="#c1d4e2"/><rect x="10" y="10" width="12" height="12" rx="1" fill="#334c60"/>',
+		"patrol": '<path fill="#bc9df1" d="M3 12A13 13 0 0 1 24 6L28 2V14H16L20 10A7 7 0 0 0 9 13ZM29 20A13 13 0 0 1 8 26L4 30V18H16L12 22A7 7 0 0 0 23 19Z"/>',
+		"attack": '<path stroke="#ff776f" stroke-width="2.6" fill="none" d="M16 2V9M16 23V30M2 16H9M23 16H30"/><circle cx="16" cy="16" r="10" fill="none" stroke="#ff9c8d" stroke-width="3"/><path d="M16 11L21 20L16 18L11 20Z" fill="#ffe1ca"/>',
+		"load": '<path fill="#8aa8c1" d="M3 19H29V29H3Z"/><path fill="#304c65" d="M6 22H26V26H6Z"/><path fill="#a7e9c5" d="M12 2H20V11H26L16 21L6 11H12Z"/>',
+		"unload": '<path fill="#8aa8c1" d="M3 21H29V29H3Z"/><path fill="#304c65" d="M6 23H26V27H6Z"/><path fill="#ffd186" d="M16 2L26 13H20V20H12V13H6Z"/>',
+		"repair": '<path fill="#a7e9c5" d="M12 3H20V12H29V20H20V29H12V20H3V12H12Z"/><path fill="#e0ffee" d="M13 4H19V13H27V15H13Z"/>',
+		"rally": '<path fill="#b4e9f9" d="M5 3H8V25H12V29H2V25H5Z"/><path fill="#ff9b83" d="M9 4L29 7L23 12L29 17L9 14Z"/><path fill="#ffded0" d="M10 5L26 8L23 10L10 8Z"/>',
+		"clear_rally": '<path fill="#8096a8" d="M5 3H8V25H12V29H2V25H5ZM9 4L28 7L23 12L28 17L9 14Z"/><path stroke="#162535" stroke-width="6" d="M16 16L29 29M29 16L16 29"/><path stroke="#ff8279" stroke-width="3.6" d="M16 16L29 29M29 16L16 29"/>',
+		"upgrade": '<path fill="#a5d9f5" d="M3 14L16 3L29 14V20L16 9L3 20ZM3 23L16 12L29 23V29L16 18L3 29Z"/><path fill="#effaff" d="M16 3L29 14V16L16 6L3 16V14Z"/>',
+		"select_station": '<circle cx="16" cy="16" r="12" fill="none" stroke="#a3c6e0" stroke-width="5"/><path fill="#8baec9" d="M14 1H18V11H14ZM14 21H18V31H14ZM1 14H11V18H1ZM21 14H31V18H21Z"/><circle cx="16" cy="16" r="6" fill="#d7f3ff"/><circle cx="16" cy="16" r="3" fill="#3c7798"/>',
+		"build": '<path fill="#bcd5e6" d="M2 26L15 13L12 10L19 3L29 13L22 20L19 17L6 30Z"/><path fill="#7c9ab0" d="M19 3L29 13L25 14L18 7Z"/><path fill="#ffca80" d="M3 4H10V7H3ZM3 9H6V14H3Z"/>',
+		"trade": '<path fill="#a2dfd0" d="M2 8H19V2L30 12L19 21V15H2Z"/><path fill="#efc98c" d="M30 24H13V30L2 20L13 11V17H30Z"/>',
+		"return": '<path fill="#bfd8ed" d="M2 12L13 2V9H20Q30 9 30 19V29H23V19Q23 16 20 16H13V23Z"/>',
+		"warehouse": '<path fill="#9ab5cb" d="M2 12L16 3L30 12V29H2Z"/><path fill="#d4e8f4" d="M2 12L16 3L30 12V15L16 7L2 15Z"/><path fill="#243a4d" d="M7 16H25V29H7Z"/><path fill="#d6b184" d="M9 19H15V24H9ZM17 19H23V24H17ZM9 25H23V28H9Z"/>',
+		"habitation": '<path fill="#b3cee0" d="M3 12H12V29H3ZM13 3H23V29H13ZM24 15H30V29H24Z"/><path fill="#36536a" d="M5 15H9V19H5ZM5 22H9V26H5ZM16 7H20V11H16ZM16 14H20V18H16ZM16 21H20V25H16ZM26 19H28V23H26Z"/><path fill="#9ce1ed" d="M16 7H20V11H16ZM5 22H9V26H5Z"/>',
+		"orbital_housing": '<circle cx="16" cy="16" r="13" fill="#41667b" stroke="#b3d6e8" stroke-width="2"/><path fill="#a0d5b7" d="M5 23Q16 11 27 23L23 27H9Z"/><path fill="#d4eef0" d="M9 21V13L16 7L23 13V21H19V16H13V21Z"/><path stroke="#b3d6e8" stroke-width="1.7" d="M1 16H5M27 16H31"/>',
+		"yard": '<path fill="#9ebacf" d="M3 3H10V29H3ZM22 3H29V29H22ZM10 3H22V7H10ZM10 25H22V29H10Z"/><path fill="#d4e9f5" d="M3 3H7V29H3ZM22 3H26V29H22Z"/><path fill="#5c8fae" d="M16 8L21 22L16 20L11 22Z"/><path fill="#ffd088" d="M5 10H9V13H5ZM23 10H27V13H23ZM5 20H9V23H5ZM23 20H27V23H23Z"/>',
+		"reinforced_plating": '<path fill="#a9c4d7" d="M16 2L29 7V17Q27 26 16 30Q5 26 3 17V7Z"/><path fill="#405a72" d="M16 7L24 10V17Q22 23 16 26Q10 23 8 17V10Z"/><path fill="#dbeaf4" d="M16 10L22 12V17Q20 21 16 23Q12 21 10 17V12Z"/>',
+		"laser_matrix": '<path fill="#829caf" d="M2 24L9 17L15 23L8 30ZM10 16L17 9L23 15L16 22Z"/><path stroke="#ff776f" stroke-width="4" d="M11 21L26 6M19 13L29 3"/><path stroke="#ffe9d8" stroke-width="1.3" d="M11 21L26 6M19 13L29 3"/>',
+		"pds": '<circle cx="15" cy="18" r="11" fill="#5c90ad"/><path fill="#97c3d8" d="M5 17Q15 10 25 17L24 22Q15 16 6 22Z"/><path fill="#b3ccdf" d="M12 4H25L29 8V13H19L15 19L10 16L15 10H12Z"/><path stroke="#ff8c75" stroke-width="2.5" d="M25 7L30 2"/><path fill="#eaf6fc" d="M18 6H24V9H18Z"/>',
+		"Metals": '<path fill="#9fb8c9" d="M2 17H30V29H2ZM5 6H10V18H5ZM13 2H18V18H13Z"/><path fill="#cbd9e3" d="M2 17L12 11V17L21 11V17L30 11V20H2Z"/><path fill="#344b60" d="M6 23H12V27H6ZM16 23H26V27H16Z"/><path fill="#ffd194" d="M5 6H10V9H5ZM13 2H18V5H13Z"/>',
+		"Organics": '<path fill="#658b72" d="M2 24Q2 9 16 5Q30 9 30 24V29H2Z"/><path fill="#a6e0b5" d="M3 24Q3 11 16 5Q29 11 29 24H26Q26 14 16 9Q6 14 6 24Z"/><path fill="#b8e28e" d="M16 25Q5 22 9 15Q16 16 16 21Q18 13 24 13Q27 21 17 25Z"/><path stroke="#d0eaca" stroke-width="1.5" d="M16 29V20"/>',
+		"Crystals": '<path fill="#849ab6" d="M3 13H29V28H3Z"/><path fill="#4a607a" d="M6 15H26V25H6Z"/><path fill="#bb9bf5" d="M16 2L24 11L20 23H12L8 11Z"/><path fill="#e7d6ff" d="M16 2L16 23L8 11Z"/><path fill="#c6deed" d="M3 26H29V29H3Z"/>'
 	}
-	station_icons[key] = _command_icon(paths.get(kind, paths["build"]), pixels)
+	var svg: String = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g stroke-linecap="round" stroke-linejoin="round">' + str(paths.get(kind, paths["build"])) + '</g></svg>'
+	var image := Image.new()
+	image.load_svg_from_string(svg, float(pixels) / 32.0)
+	station_icons[key] = ImageTexture.create_from_image(image)
 	return station_icons[key]
 
 func _ability_grid(parent: Container) -> GridContainer:
@@ -1770,7 +1787,7 @@ func _job_icon(job: Dictionary, owner: int) -> Texture2D:
 	if ECONOMY.SHIP_KINDS.has(job["kind"]):
 		return _production_icon(str(job["kind"]), _empire_color(owner), 88)
 	if job["kind"] == "yard_upgrade":
-		return _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>', 88)
+		return _station_command_icon("upgrade", 88)
 	return _station_command_icon(str(job["target"]) if job["kind"] in ["economy_building", "production"] else str(job["kind"]), 88)
 
 func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
@@ -1935,12 +1952,12 @@ func _command_icon(path: String, pixels: int = 32) -> Texture2D:
 	image.load_svg_from_string(svg, float(pixels) / 32.0)
 	return ImageTexture.create_from_image(image)
 
-func _command_slot(id: String, hint: String, art: String, action: Callable) -> Button:
+func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	var button := Button.new()
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 32)
 	button.focus_mode = Control.FOCUS_NONE
-	button.icon = _command_icon(art)
+	button.icon = _station_command_icon(id)
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	button.tooltip_text = hint
 	button.toggle_mode = true
@@ -1953,14 +1970,14 @@ func _command_slot(id: String, hint: String, art: String, action: Callable) -> B
 
 func _build_command_card(parent: VBoxContainer) -> void:
 	command_card = _ability_grid(parent)
-	_command_slot("move", "Move", '<path d="M5 16H26M17 7L26 16L17 25"/>', _arm_command.bind("move"))
-	_command_slot("stop", "Stop", '<rect x="8" y="6" width="5" height="20" fill="#c5e5f5"/><rect x="19" y="6" width="5" height="20" fill="#c5e5f5"/>', _stop_selected)
-	hold_button = _command_slot("hold", "Hold Position", '<rect x="8" y="8" width="16" height="16" fill="#c5e5f5"/>', _hold_selected)
-	_command_slot("patrol", "Patrol", '<path d="M7 12A10 10 0 0 1 25 10M25 10V4M25 10H19M25 20A10 10 0 0 1 7 22M7 22V28M7 22H13"/>', _arm_command.bind("patrol"))
-	_command_slot("attack", "Attack Move", '<circle cx="16" cy="16" r="9"/><path d="M16 3V11M16 21V29M3 16H11M21 16H29"/>', _arm_command.bind("attack"))
-	_command_slot("load", "Load Cargo", '<rect x="7" y="17" width="18" height="10"/><path d="M16 4V20M10 14L16 20L22 14"/>', _arm_command.bind("load"))
-	unload_button = _command_slot("unload", "Drop Cargo", '<rect x="7" y="17" width="18" height="10"/><path d="M16 20V4M10 10L16 4L22 10"/>', _arm_command.bind("unload"))
-	var repair: Button = _command_slot("repair", "Repair (right-click: autocast)", '<path d="M13 5H19V13H27V19H19V27H13V19H5V13H13Z"/>', _arm_command.bind("repair"))
+	_command_slot("move", "Move", _arm_command.bind("move"))
+	_command_slot("stop", "Stop", _stop_selected)
+	hold_button = _command_slot("hold", "Hold Position", _hold_selected)
+	_command_slot("patrol", "Patrol", _arm_command.bind("patrol"))
+	_command_slot("attack", "Attack Move", _arm_command.bind("attack"))
+	_command_slot("load", "Load Cargo", _arm_command.bind("load"))
+	unload_button = _command_slot("unload", "Drop Cargo", _arm_command.bind("unload"))
+	var repair: Button = _command_slot("repair", "Repair (right-click: autocast)", _arm_command.bind("repair"))
 	repair.gui_input.connect(_repair_button_input)
 	var border := Control.new()
 	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
