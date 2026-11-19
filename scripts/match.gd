@@ -309,6 +309,10 @@ var global_population_label: Label
 var year_label: Label
 var time_buttons: Dictionary = {}
 var game_visual_clock: float = 0.0
+var orbit_visual_time: float = -1.0
+var orbit_sample_time: float = -1.0
+var orbit_sample_age: float = 0.0
+var orbit_seed: int = -1
 var info: Label
 var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
@@ -3989,6 +3993,29 @@ func _star_draw_radius(radius: float) -> float:
 	# Constant world-space ratio; camera zoom is the only size multiplier.
 	return radius * 0.13
 
+func _update_orbit_clock(state: Dictionary, delta: float) -> void:
+	var elapsed: float = float(state["elapsed"])
+	var seed_value: int = int(state["map"]["seed"])
+	var speed: float = float(state.get("time_speed", 1))
+	if orbit_seed != seed_value or orbit_visual_time < 0.0 or elapsed < orbit_sample_time or speed <= 0.0 or not state.get("match_result", {}).is_empty():
+		orbit_seed = seed_value
+		orbit_visual_time = elapsed
+		orbit_sample_time = elapsed
+		orbit_sample_age = 0.0
+		return
+	if elapsed != orbit_sample_time:
+		orbit_sample_time = elapsed
+		orbit_sample_age = 0.0
+	else:
+		orbit_sample_age += delta
+	# Predict only a bounded interval; gently converge on authoritative time.
+	var target: float = elapsed + minf(orbit_sample_age, 0.6) * speed
+	var correction: float = clampf((target - orbit_visual_time) * 4.0, -speed, speed * 2.0)
+	orbit_visual_time = minf(maxf(orbit_visual_time, target), orbit_visual_time + delta * maxf(0.0, speed + correction))
+
+func _orbit_time(state: Dictionary) -> float:
+	return orbit_visual_time if orbit_visual_time >= 0.0 and orbit_seed == int(state["map"]["seed"]) else float(state["elapsed"])
+
 func _body_position(body: Dictionary, radius: float, time: float) -> Vector2:
 	return ECONOMY.body_position(body, radius, time)
 
@@ -4132,7 +4159,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 			var orbit: float = radius * float(body["orbit"])
 			if _show_system_rings(index):
 				_draw_elliptical_orbit(pos, orbit, Color(tint, 0.20 * detail))
-			var point: Vector2 = pos + _body_position(body, radius, float(state["elapsed"]))
+			var point: Vector2 = pos + _body_position(body, radius, _orbit_time(state))
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
@@ -4153,7 +4180,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		var bodies: Array = _system_visual(index, state)["bodies"]
 		for slot in system.get("pds", {}):
 			if int(slot) >= 0 and int(slot) < bodies.size():
-				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, float(state["elapsed"]))
+				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, _orbit_time(state))
 				map_canvas.draw_circle(point, 2.0, Color(Color("#bdcbd6"), 1.0 - detail), true)
 	if detail < 0.3 and building_selection_kind == "pds":
 		# Retain a selection marker when F frames a distant battery group and
@@ -4161,7 +4188,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		var bodies: Array = _system_visual(index, state)["bodies"]
 		for slot in system.get("pds", {}):
 			if selected_buildings.has(Vector2i(index, int(slot))) and int(slot) < bodies.size():
-				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, float(state["elapsed"]))
+				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, _orbit_time(state))
 				_draw_selection_ring(point, 6.0)
 	if _show_system_rings(index):
 		map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
@@ -4224,7 +4251,7 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 		var bodies: Array = _system_visual(index, state)["bodies"]
 		for slot in range(bodies.size()):
 			var body: Dictionary = bodies[slot]
-			var position: Vector2 = center + _body_position(body, radius, float(state["elapsed"]))
+			var position: Vector2 = center + _body_position(body, radius, _orbit_time(state))
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			var distance: float = point.distance_to(position)
 			if distance <= body_radius + 3.0 and distance < nearest:
@@ -4459,7 +4486,7 @@ func _building_world(state: Dictionary, ref: Vector2i, kind: String) -> Vector2:
 	if kind == "station":
 		return ECONOMY.station_position(state, ref.x, float(state["elapsed"]))
 	var body: Dictionary = _system_visual(ref.x, state)["bodies"][ref.y]
-	return (state["map"]["points"][ref.x] as Vector2) + _body_position(body, _system_world_radius(ref.x, state), float(state["elapsed"]))
+	return (state["map"]["points"][ref.x] as Vector2) + _body_position(body, _system_world_radius(ref.x, state), _orbit_time(state))
 
 func _selected_yards(state: Dictionary, owned_only: bool = false) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
@@ -5185,9 +5212,15 @@ func _sync_ship_visuals(state: Dictionary) -> void:
 			var previous: Dictionary = ship_visuals.get(id, {})
 			var interval: float = duration if not sample.is_empty() else SNAPSHOT_SECONDS
 			if previous.is_empty():
-				updated[id] = {"from": target, "to": target, "age": interval, "duration": interval, "heading": heading}
+				updated[id] = {"from": target, "to": target, "age": interval, "duration": interval, "heading": heading, "sample_ms": Time.get_ticks_msec(), "velocity": Vector2.ZERO, "thrust": 0.0}
 			elif previous["to"] != target:
-				updated[id] = {"from": _visual_position(previous), "to": target, "age": 0.0, "duration": interval, "heading": heading}
+				var now: int = Time.get_ticks_msec()
+				var sample_dt: float = maxf(0.05, float(now - int(previous.get("sample_ms", now))) / 1000.0)
+				var old_velocity: Vector2 = previous.get("velocity", Vector2.ZERO)
+				var velocity: Vector2 = (target - (previous["to"] as Vector2)) / sample_dt
+				var acceleration: float = (velocity - old_velocity).length() / sample_dt
+				var thrust: float = clampf(acceleration * interval / maxf(maxf(velocity.length(), old_velocity.length()), 1.0), 0.0, 1.0)
+				updated[id] = {"from": _visual_position(previous), "to": target, "age": 0.0, "duration": interval, "heading": heading, "sample_ms": now, "velocity": velocity, "thrust": lerpf(float(previous.get("thrust", 0.0)), thrust, 0.65)}
 			else:
 				previous["heading"] = heading
 				updated[id] = previous
@@ -5387,11 +5420,15 @@ func _process(delta: float) -> void:
 			visual["age"] = minf(duration, float(visual["age"]) + delta)
 	var state: Dictionary = _state()
 	if not state.is_empty():
+		_update_orbit_clock(state, delta)
 		_update_planet_detail(state, delta)
 		var poses: Dictionary = _ship_poses(state, delta)
 		_follow_selection(state, poses)
 		_sync_destruction_effects(state)
 	else:
+		orbit_visual_time = -1.0
+		orbit_sample_time = -1.0
+		orbit_seed = -1
 		planet_detail_alpha.clear()
 		planet_detail_seed = -1
 		follow_units = false
@@ -6311,7 +6348,7 @@ func _draw_map() -> void:
 				continue
 			var origin: Vector2 = _screen_point(points[index])
 			if _planet_detail_opacity(index, radius) >= 0.5:
-				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, float(state["elapsed"]))
+				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, _orbit_time(state))
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
 		var shooter: int = int(ship["id"])
@@ -6336,7 +6373,7 @@ func _draw_map() -> void:
 					var endpoint: Vector2 = _screen_point(points[pds_index])
 					var pds_radius: float = _planet_radius(pds_index, state)
 					if _planet_detail_opacity(pds_index, pds_radius) >= 0.5:
-						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, float(state["elapsed"]))
+						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, _orbit_time(state))
 					_draw_ship_laser(ship, poses[shooter], endpoint, 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
 			_draw_ship_laser(ship, poses[shooter], poses[target]["point"], 1.0)
@@ -6344,6 +6381,10 @@ func _draw_map() -> void:
 		if poses.has(shooter) and service_refs.has(repair):
 			var origin: Vector2 = poses[shooter]["point"]
 			var endpoint: Vector2 = poses[repair]["point"] if poses.has(repair) else _screen_point(service_refs[repair].get("repair_position", service_refs[repair]["position"]))
+			if str(service_refs[repair].get("kind", "")) == "pds":
+				var count: int = state["planets"].size()
+				var encoded: int = -2 - repair - count * 3
+				endpoint = _screen_point(_building_world(state, Vector2i(posmod(encoded, count), floori(float(encoded) / float(count))), "pds"))
 			var axis: Vector2 = origin.direction_to(endpoint)
 			if not axis.is_zero_approx():
 				poses[shooter]["direction"] = axis
@@ -6375,14 +6416,24 @@ func _draw_map() -> void:
 		var physical: Vector2 = ship.get("position", Vector2.ZERO)
 		var target: Vector2 = ship.get("navigation_target", physical)
 		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not ECONOMY._engaged(ship)) and physical.distance_to(target) > ECONOMY.EPS:
-			var engine: Vector2 = point - direction * 9.0
+			var hull_vertices: Array = HULL_OUTLINES.get(ship["kind"], FREIGHTER_OUTLINE)
+			var rear: float = 0.0
+			var nose: float = 0.0
+			for vertex in hull_vertices:
+				rear = minf(rear, vertex.x)
+				nose = maxf(nose, vertex.x)
+			var hull_factor: float = maxf(0.5, (nose - rear) / 18.0)
+			var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
+			var thrust: float = float(visual.get("thrust", 0.0)) * exp(-maxf(0.0, float(visual.get("age", 0.0)) - 0.1) * 3.0)
+			var exhaust: float = hull_factor * lerpf(0.35, 1.5, thrust)
+			var engine: Vector2 = point + direction * rear
 			if viewport_bounds.grow(maxf(24.0, 16.0 * scale)).has_point(engine):
 				var particle_count: int = 5 if scale >= 1.0 else 2
 				for k in range(particle_count):
 					var age: float = fposmod(visual_clock * 3.5 + float(k) / float(particle_count) + float(ship["id"]) * 0.173, 1.0)
 					var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * age * 2.5
-					var spark: Vector2 = engine - direction * (2.0 + age * 12.0) + side * offset
-					map_canvas.draw_circle(spark, maxf(0.75, (2.0 - age) * scale), Color(0.45, 0.85, 1.0, (1.0 - age) * 0.85), false)
+					var spark: Vector2 = engine - direction * (2.0 + age * 12.0 * exhaust) + side * offset * exhaust
+					map_canvas.draw_circle(spark, maxf(0.45, (2.0 - age) * scale * exhaust), Color(0.45, 0.85, 1.0, (1.0 - age) * 0.85), false)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
