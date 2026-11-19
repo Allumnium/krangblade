@@ -49,7 +49,8 @@ const PLANET_MINING_LIMIT: float = 100.0
 const FIELD_MINING_LIMIT: float = 200.0
 const MINER_CAPACITY: float = 10.0
 const FIGHTER_CAPACITY: float = 0.0
-const COLONY_CAPACITY: float = 20.0
+const COLONY_CAPACITY: float = 100.0
+const COLONY_FARM_RATE: float = 5.0
 const TRACTOR_RANGE: float = 90.0
 const TRACTOR_RATE: float = 12.0
 const FREIGHTER_TRACTOR_RATE: float = TRACTOR_RATE * 0.25
@@ -72,7 +73,7 @@ const SHIP_SPEED: float = MAP.TRAVEL_SPEED
 const AUTOCAST_COOLDOWN_YEARS: float = 30.0
 const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
-const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade"]
+const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade", "farm"]
 const SHIP_SIZE: int = 1
 const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
@@ -444,6 +445,22 @@ static func send_colony(state: Dictionary, player: int, ship_id: int, target: in
 		_set_route(ship, path)
 		return true
 	return false
+
+# Farms produce into the physical hold, not directly into station stock.
+# Suspend production during a delivery so the existing unload job can finish.
+static func _grow_colony_cargo(ship: Dictionary, dt: float) -> void:
+	if not autocast_enabled(ship, "farm") or _salvage_active(ship) or ship.has("cargo_order"):
+		return
+	var amount: float = minf(cargo_free(ship), COLONY_FARM_RATE * maxf(0.0, dt))
+	ship["cargo"]["Organics"] = float(ship["cargo"].get("Organics", 0.0)) + amount
+
+static func _begin_farm_delivery(state: Dictionary, ship: Dictionary) -> bool:
+	if not autocast_enabled(ship, "farm") or cargo_free(ship) > EPS or not _is_idle_ship(ship) or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty():
+		return false
+	if not command_unload_cargo(state, int(ship["owner"]), [ship["id"]]):
+		return false
+	ship["farm_auto_delivery"] = true
+	return true
 
 static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool:
 	if not _move(state, ship, dt) or int(ship["dest"]) < 0:
@@ -2750,7 +2767,9 @@ static func _damaged(target: Dictionary) -> bool:
 
 static func can_deposit(state: Dictionary, ship: Dictionary, target_id: int) -> bool:
 	var ref: Dictionary = service_targets(state).get(target_id, {})
-	if ship.get("kind", "") == "science_ship" or ref.get("entity", {}).get("kind", "") == "science_ship":
+	if ship.get("kind", "") == "science_ship" or ref.get("entity", {}).get("kind", "") in ["science_ship", "colony_ship"]:
+		return false
+	if ship.get("kind", "") == "colony_ship" and ref.get("kind", "") != "station":
 		return false
 	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or target_id == int(ship["id"]) or not _friendly_target(state, int(ship["owner"]), ref) or _cargo_total(ship) <= EPS:
 		return false
@@ -2789,8 +2808,9 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 	match mode:
 		"wander": return SHIP_KINDS.has(ship.get("kind", ""))
 		"mine", "repair": return ship.get("kind", "") == "miner"
-		"salvage": return ship.get("kind", "") != "science_ship" and cargo_capacity(str(ship.get("kind", ""))) > EPS
+		"salvage": return ship.get("kind", "") in ["ship", "miner"]
 		"trade": return ship.get("kind", "") == "ship"
+		"farm": return ship.get("kind", "") == "colony_ship"
 	return false
 
 static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
@@ -2798,7 +2818,7 @@ static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
 
 static func autocast_duration(mode: String) -> float:
 	match mode:
-		"repair": return 0.0
+		"repair", "farm": return 0.0
 		"mine", "salvage": return MINING_SALVAGE_COOLDOWN_YEARS
 	return AUTOCAST_COOLDOWN_YEARS
 
@@ -2824,6 +2844,9 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 		ship[mode + "_auto"] = enabled
 		if mode == "trade" and not enabled:
 			_clear_resource_stage(ship)
+		if mode == "farm" and not enabled and bool(ship.get("farm_auto_delivery", false)):
+			_cancel_salvage_order(ship)
+			ship.erase("unit_order")
 		if mode == "wander":
 			if enabled and autocast_remaining(state, ship) > EPS:
 				ship["wander_cooldown_override"] = true
@@ -2879,7 +2902,7 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var order: Dictionary = ship["cargo_order"]
 	var ref: Dictionary = targets.get(int(order.get("target", -1)), {})
 	var drop: bool = order["kind"] == "drop"
-	if not drop and not _friendly_target(state, int(ship["owner"]), ref):
+	if not drop and (not _friendly_target(state, int(ship["owner"]), ref) or ref.get("entity", {}).get("kind", "") in ["science_ship", "colony_ship"]):
 		ship.erase("cargo_order")
 		_finish_manual(ship)
 		return false
@@ -3470,7 +3493,7 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 		"unload":
 			var destination: int = int(ship.get("dest", -1))
 			if destination >= 0 and destination < state["planets"].size():
-				return graph["points"][destination]
+				return station_position(state, destination, float(state["elapsed"]))
 	return Vector2.INF
 
 static func unit_order_origin(state: Dictionary, graph: Dictionary, ship: Dictionary) -> Vector2:
@@ -3523,6 +3546,8 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var owner: int = int(ship["owner"])
 	var fighter: bool = ship["kind"] == "fighter"
 	if ship["kind"] == "science_ship" and kind in ["unload", "drop", "deposit", "salvage"]:
+		return false
+	if ship["kind"] == "colony_ship" and kind in ["salvage", "drop"]:
 		return false
 	if kind == "unload":
 		return cargo_capacity(str(ship["kind"])) > EPS
@@ -4095,6 +4120,7 @@ static func _salvage_active(ship: Dictionary) -> bool:
 
 static func _cancel_salvage_order(ship: Dictionary) -> void:
 	ship.erase("resource_haul")
+	ship.erase("farm_auto_delivery")
 	ship.erase("salvage_target")
 	ship.erase("auto_salvage_target")
 	ship.erase("tractor_active")
@@ -4342,7 +4368,7 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		var best: Dictionary = {}
 		var distance: float = INF
 		for ship in units:
-			if ship.get("kind", "") == "science_ship" or cargo_free(ship) <= EPS or bool(ship.get("retreating", false)) or patrol_node(state, graph, player, pile["position"]) < 0:
+			if not supports_autocast(ship, "salvage") or cargo_free(ship) <= EPS or bool(ship.get("retreating", false)) or patrol_node(state, graph, player, pile["position"]) < 0:
 				continue
 			var d: float = (ship["position"] as Vector2).distance_squared_to(pile["position"])
 			if d < distance:
@@ -4378,6 +4404,9 @@ static func command_unload_cargo(state: Dictionary, player: int, ids: Array) -> 
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
 		_clear_local_hold(ship)
+		if ship["kind"] == "colony_ship":
+			ship.erase("return_path")
+			ship["dest"] = -1
 		_set_unit_order(state, ship, {"kind": "unload"})
 		ship["salvage_delivery"] = true
 		changed = true
@@ -4514,7 +4543,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 			return true
 		ship["next_salvage_search"] = float(state["elapsed"]) + 0.5
 		if not _salvage_depot_route(state, graph, ship):
-			if ship.get("kind", "") != "ship" or not _salvage_depot_route(state, graph, ship, true):
+			if ship.get("kind", "") not in ["ship", "colony_ship"] or not _salvage_depot_route(state, graph, ship, true):
 				return true
 		depot = int(ship["salvage_depot"])
 	var nav: Dictionary = graph if ship["kind"] == "fighter" else state["map"]
@@ -4531,7 +4560,8 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		if amount > EPS:
 			ship["cargo"][resource] -= amount
 			p["stock"][resource] = float(p["stock"].get(resource, 0.0)) + amount
-			_record_flow(p, "Resource deliveries" if bool(ship.get("resource_haul", false)) else "Salvage deliveries", resource, amount)
+			var category: String = "Farm deliveries" if ship["kind"] == "colony_ship" else ("Resource deliveries" if bool(ship.get("resource_haul", false)) else "Salvage deliveries")
+			_record_flow(p, category, resource, amount)
 	if _cargo_total(ship) <= EPS:
 		_cancel_salvage_order(ship)
 	else:
@@ -6009,6 +6039,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var civilian_usec: int = 0
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
+		if ship.get("kind", "") == "colony_ship":
+			_grow_colony_cargo(ship, dt)
 		var salvage_ship_id: int = int(ship["id"])
 		if bool(ship.get("retreating", false)) and armed(ship):
 			ship.erase("repair_target")
@@ -6054,6 +6086,9 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if _work_science(state, combat_graph, ship, dt):
 			continue
 		if ship.get("kind", "ship") == "colony_ship":
+			if _begin_farm_delivery(state, ship):
+				_work_salvage(state, combat_graph, ship, dt)
+				continue
 			if _work_colony(state, ship, dt):
 				state["ships"].erase(ship)
 				continue

@@ -15,7 +15,7 @@ const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
 const KEYBOARD_PAN_SPEED: float = 420.0
-const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade"}
+const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm"}
 const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
 const MIN_ZOOM: float = 0.5
 const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
@@ -1178,7 +1178,7 @@ func _ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
-		"colony_ship": details = "Settles a neutral system · %.0f settlers · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_CAPACITY]
+		"colony_ship": details = "Settles a neutral system · %.0f settlers\nFarm %.0f t/yr · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/yr · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f yr collection" % ECONOMY.SCIENCE_COLLECTION_YEARS
@@ -1514,6 +1514,7 @@ func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
 		return station_icons[key]
 	var paths: Dictionary = {
 		"auto_wander": '<path stroke="#8bd5ed" stroke-width="2.5" fill="none" d="M3 25Q9 4 17 17T29 4"/><circle cx="4" cy="25" r="3" fill="#e1f8ff"/><path fill="#b4e9f9" d="M16 9L24 18L19 28L16 24L11 28L11 17Z"/>',
+		"auto_farm": '<path fill="#9ee6a1" d="M15 28V17Q3 18 3 5Q14 5 16 15Q18 3 29 3Q29 18 18 19V28Z"/><path stroke="#e5ffd6" stroke-width="1.8" d="M7 9L16 18L25 8"/>',
 		"auto_mine": '<path fill="#9fb8c9" d="M3 17L9 10L18 12L23 21L18 29L7 27Z"/><path fill="#dce8f3" d="M9 10L18 12L12 19L3 17Z"/><path stroke="#ffbd77" stroke-width="3" d="M28 3L17 14M30 10L21 19"/><path fill="#f1c892" d="M25 2L30 2L30 7Z"/>',
 		"auto_salvage": '<path fill="#9ccfc5" d="M4 4H8V14Q8 21 16 21Q24 21 24 14V4H28V15Q28 27 16 27Q4 27 4 15Z"/><path fill="#d3e4eb" d="M13 4L21 6L18 13L10 11Z"/><path fill="#ffcd81" d="M12 14L16 18L12 22L8 18Z"/>',
 		"move": '<path fill="#9ed9f6" d="M3 12H18V5L30 16L18 27V20H3Z"/><path fill="#edfaff" d="M5 13H19V9L26 15H5Z"/>',
@@ -2140,7 +2141,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 32)
 	button.focus_mode = Control.FOCUS_NONE
-	button.icon = _station_command_icon({"auto_repair": "repair", "auto_trade": "trade"}.get(id, id))
+	button.icon = _station_command_icon({"auto_repair": "repair", "auto_trade": "trade", "deliver_farm": "unload"}.get(id, id))
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	button.tooltip_text = hint
 	button.toggle_mode = true
@@ -2149,7 +2150,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	slot.add_child(button)
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_buttons[id] = button
-	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T}[id], "Fleet", "fleet_" + id, hint)
+	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -2162,10 +2163,10 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	_command_slot("load", "Load Cargo", _arm_command.bind("load"))
 	unload_button = _command_slot("unload", "Drop Cargo", _arm_command.bind("unload"))
 	_command_slot("repair", "Repair target", _arm_command.bind("repair"))
-	# Third row: reserve its last slot for the fifth mode in mixed selections.
-	while command_card.get_child_count() < 11:
+	_command_slot("deliver_farm", "Deliver Organics to nearest station", _deliver_farm_selected)
+	while command_card.get_child_count() < 10:
 		_station_spacer(command_card)
-	for id in ["auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair"]:
+	for id in ["auto_farm", "auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair"]:
 		var mode: String = AUTOCAST_SLOTS[id]
 		var title_text: String = "Wander" if mode == "wander" else "Auto-" + mode.capitalize()
 		var button: Button = _command_slot(id, title_text, _toggle_autocast.bind(mode))
@@ -2232,6 +2233,12 @@ func _refresh_autocast_cards() -> void:
 		if trade.get_parent() != desired_slot:
 			trade.reparent(desired_slot, false)
 			trade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if command_buttons.has("auto_farm"):
+		var farm: Button = command_buttons["auto_farm"]
+		var farm_slot: Control = command_card.get_child(10 if not _autocast_units(state, "salvage").is_empty() else 14)
+		if farm.get_parent() != farm_slot:
+			farm.reparent(farm_slot, false)
+			farm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for id in AUTOCAST_SLOTS:
 		if not command_buttons.has(id):
 			continue
@@ -2262,6 +2269,8 @@ func _refresh_autocast_cards() -> void:
 		button.tooltip_text = "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut]
 		if mode == "wander":
 			button.tooltip_text += "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority."
+		elif mode == "farm":
+			button.tooltip_text += "\nProduces %.0f t/yr; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE
 
 func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""
@@ -2301,7 +2310,7 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 		if wreck >= 0:
 			var eligible: Array[int] = []
 			for craft in state["ships"]:
-				if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
+				if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
 					eligible.append(int(craft["id"]))
 			_issue_order(eligible, {"kind": "salvage", "target": wreck}, append)
 	elif mode == "repair":
@@ -2526,7 +2535,7 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 		if tile.get_meta("health_color", Color.TRANSPARENT) != tint:
 			tile.set_meta("health_color", tint)
 			tile.icon = _selection_icon(str(craft["kind"]), tint)
-		tile.tooltip_text = _ship_kind_name(str(craft["kind"])) if selected_units.size() > 1 else "%s #%d · HP %.0f / %.0f" % [_ship_kind_name(str(craft["kind"])), id, float(craft.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
+		tile.tooltip_text = _ship_kind_name(str(craft["kind"])) if selected_units.size() > 1 else "%s · HP %.0f / %.0f" % [_ship_kind_name(str(craft["kind"])), float(craft.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
 	for id in selection_tiles.keys():
 		if not living.has(id):
 			var tile: Button = selection_tiles[id]
@@ -2577,7 +2586,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	field_command_grid.hide()
 	var kind: String = ship.get("kind", "ship")
 	var owner: int = int(ship["owner"])
-	ship_title.text = "%s #%d" % [_ship_kind_name(kind), int(ship["id"])]
+	ship_title.text = _ship_kind_name(kind)
 	var route: Array = ship["route"]
 	var mode: String = ship.get("mining_mode", "idle")
 	var status: String = "Orbiting %s" % _system_name(int(ship["at"]))
@@ -2627,10 +2636,14 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	var follow_order: Dictionary = ship.get("unit_order", {})
 	if follow_order.get("kind", "") == "follow" and not bool(ship.get("retreating", false)):
 		var target_ship: Dictionary = ECONOMY.service_targets(state).get(int(follow_order["target"]), {}).get("entity", {})
-		status = "Following %s #%d" % [_ship_kind_name(str(target_ship.get("kind", "ship"))), int(follow_order["target"])]
+		status = "Following %s" % _ship_kind_name(str(target_ship.get("kind", "ship")))
 	var wait_left: float = ECONOMY.autocast_remaining(state, ship, "wander")
 	if wait_left > ECONOMY.EPS and ECONOMY.autocast_enabled(ship, "wander") and ECONOMY._is_idle_ship(ship):
 		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)
+	if kind == "colony_ship":
+		if bool(ship.get("salvage_delivery", false)):
+			status = "Delivering Organics" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for storage"
+		status += "\nOrganics %.1f / %.0f t · %s" % [float(ship["cargo"].get("Organics", 0.0)), ECONOMY.COLONY_CAPACITY, "Farming" if ECONOMY.autocast_enabled(ship, "farm") and not bool(ship.get("salvage_delivery", false)) and ECONOMY.cargo_free(ship) > ECONOMY.EPS else "Farm idle"]
 	if kind == "science_ship":
 		if ECONOMY._cargo_total(ship) > ECONOMY.EPS:
 			status += "\nAntimatter secured · 1 unit"
@@ -2658,16 +2671,22 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	var combat_owned: bool = false
 	var can_load: bool = false
 	var has_cargo_hold: bool = false
+	var has_farm: bool = false
+	var loaded_farm: bool = false
 	var has_miners: bool = not _selected_miners().is_empty()
 	for craft in state["ships"]:
 		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me():
 			combat_owned = combat_owned or ECONOMY.armed(craft)
-			can_load = can_load or (craft["kind"] != "science_ship" and ECONOMY.cargo_free(craft) > ECONOMY.EPS)
-			has_cargo_hold = has_cargo_hold or (craft["kind"] != "science_ship" and ECONOMY.cargo_capacity(str(craft["kind"])) > ECONOMY.EPS)
+			can_load = can_load or (ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS)
+			has_cargo_hold = has_cargo_hold or ECONOMY.supports_autocast(craft, "salvage")
+			has_farm = has_farm or craft["kind"] == "colony_ship"
+			loaded_farm = loaded_farm or (craft["kind"] == "colony_ship" and ECONOMY._cargo_total(craft) > ECONOMY.EPS)
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_miners) and (id not in ["load", "unload"] or has_cargo_hold)
 		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] == "fighter")) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+	command_buttons["deliver_farm"].visible = has_farm
+	command_buttons["deliver_farm"].disabled = not loaded_farm
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
 		pending_command = ""
 	_refresh_command_mode()
@@ -3823,7 +3842,7 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
 		for ship in state["ships"]:
 			if not ECONOMY.colony_path(state, _me(), ship, selected).is_empty():
 				choices.append(int(ship["id"]))
-				labels.append("Colony ship #%d • %s" % [int(ship["id"]), _system_name(int(ship["at"]))])
+				labels.append("Colony ship • %s" % _system_name(int(ship["at"])))
 	if choices != colony_choices or colony_picker.item_count == 0:
 		var previous: int = -1
 		if colony_picker.selected >= 0 and colony_picker.selected < colony_choices.size():
@@ -4805,7 +4824,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			order = {"kind": "deposit", "target": target}
 		elif field >= 0 and bool(state["map"]["fields"][field].get("antimatter", false)) and craft["kind"] == "science_ship" and ECONOMY._cargo_total(craft) <= ECONOMY.EPS:
 			order = {"kind": "collect", "target": field}
-		elif wreck >= 0 and craft["kind"] != "science_ship" and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
+		elif wreck >= 0 and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
 			salvage_ids.append(id)
 			continue
 		elif field >= 0 and craft["kind"] == "miner" and not bool(state["map"]["fields"][field].get("antimatter", false)):
@@ -4861,6 +4880,15 @@ func _hold_selected() -> void:
 	var owned: Array[int] = _selected_owned_units(_state())
 	if not owned.is_empty():
 		session.call("request_unit_hold", owned, _any_selected_holding())
+	_refresh_command_mode()
+
+func _deliver_farm_selected() -> void:
+	var ids: Array[int] = []
+	for ship in _state().get("ships", []):
+		if ship["kind"] == "colony_ship" and int(ship["owner"]) == _me() and selected_units.has(int(ship["id"])) and ECONOMY._cargo_total(ship) > ECONOMY.EPS:
+			ids.append(int(ship["id"]))
+	pending_command = ""
+	_issue_order(ids, {"kind": "unload"})
 	_refresh_command_mode()
 
 func _unload_selected() -> void:

@@ -248,7 +248,7 @@ func _phase_changed() -> void:
 						var pile_id: int = 910000 + index
 						state["salvage"][pile_id] = {"id": pile_id, "resource": ECON.ANTIMATTER, "amount": 12.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
 						# A separate held hull passively collects a local pile, without RPCs.
-						ECON._finish(state, index, system, {"id": 930000 + index, "kind": "colony_ship", "population_allocated": ECON.CREW_COSTS["colony_ship"]})
+						ECON._finish(state, index, system, {"id": 930000 + index, "kind": "ship", "population_allocated": ECON.CREW_COSTS["ship"]})
 						var auto_craft: Dictionary = state["ships"].back()
 						auto_craft["holding"] = true
 						var auto_point: Vector2 = graph["points"][index] + Vector2.LEFT * ECON.sector_limit(graph, index, Vector2.LEFT) * 0.8
@@ -257,6 +257,10 @@ func _phase_changed() -> void:
 						auto_craft["hold_sector"] = index
 						var auto_pile_id: int = 940000 + index
 						state["salvage"][auto_pile_id] = {"id": auto_pile_id, "resource": "Crystals", "amount": 2.0, "origin": auto_point, "position": auto_point, "drift": Vector2.ZERO, "born": 0.0, "expires_at": 105.0, "claim": -1}
+						ECON._finish(state, index, system, {"id": 939000 + index, "kind": "colony_ship"})
+						var farm: Dictionary = state["ships"].back()
+						farm["holding"] = true
+						farm["farm_auto"] = false
 						# Separate focus-fire hull so the existing movement and hold
 						# scenarios remain independent of this command.
 						ECON._finish(state, index, system, {"id": 920000 + index, "kind": "fighter", "population_allocated": 0.0})
@@ -494,6 +498,8 @@ func _send_commands() -> void:
 	session.call("request_operation", (home_index + 1) % expected_players, "shipyard_autobuild", "0:ship:0")
 	session.call("request_shipyard_rally", home_index, 0, home_index, graph["points"][home_index])
 	session.call("request_shipyard_rally", (home_index + 1) % expected_players, 0, home_index, graph["points"][home_index])
+	session.call("request_autocast", [939000 + home_index], "farm", true)
+	session.call("request_autocast", [939000 + home_index], "salvage", true)
 	session.call("request_continuous", home_index, "colony_ship", true)
 	session.call("request_continuous", home_index, "miner", true)
 	session.call("request_continuous", home_index, "economy_building:Organics", true)
@@ -688,12 +694,15 @@ func _check_economy_sync() -> void:
 			var follow_verified: bool = false
 			var resource_handoff: bool = false
 			var recipient_loaded: bool = false
+			var farm_verified: bool = false
 			var repair_toggled: bool = false
 			var repaired: bool = false
 			var deposited: bool = false
 			for craft in state["ships"]:
 				if int(craft["owner"]) == owner and craft["kind"] == "miner" and int(craft.get("assigned_field", -1)) >= 0:
 					assigned_miners += 1
+				if int(craft["id"]) == 939000 + owner_home:
+					farm_verified = ECON.autocast_enabled(craft, "farm") and not ECON.supports_autocast(craft, "salvage") and float(craft["cargo"]["Organics"]) > ECON.EPS and ECON._cargo_total(craft) <= ECON.COLONY_CAPACITY + ECON.EPS
 				if int(craft["id"]) == 930000 + owner_home:
 					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
 				if int(craft["id"]) == 989000 + owner_home:
@@ -718,6 +727,7 @@ func _check_economy_sync() -> void:
 				"attack_target": attack_verified,
 				"unit_order_queue": order_queue_verified,
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
+				"colony_farming": farm_verified,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
 				"miner_repair_toggle": repair_toggled,
 				"miner_resource_handoff": resource_handoff and recipient_loaded,
