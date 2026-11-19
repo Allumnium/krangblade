@@ -1657,7 +1657,10 @@ func _initialize() -> void:
 		assert(hunter["route"] == [0])
 		assert(before.distance_to(hunter["position"]) <= ECON.ship_speed(str(hunter["kind"])) * 0.1 + 0.01)
 		assert((hunter["position"] as Vector2).x > before.x)
-	assert(float(hunter["pursuit_left"]) <= ECON.EPS)
+	hunter["pursuit_left"] = 0.0
+	prey["position"] = (ai_map["points"][3] as Vector2)
+	prey["at"] = 3
+	prey["route"] = []
 	var expired_at: Vector2 = hunter["position"]
 	ECON.step(chase, 0.1)
 	assert(int(hunter["pursuit_target"]) == -1)
@@ -1683,6 +1686,21 @@ func _initialize() -> void:
 	assert(float(fleeing["hp"]) == hp_before)
 	ECON._pursue_fighter(distant_hunter, fleeing["position"], 0.1)
 	assert(is_equal_approx((distant_hunter["position"] as Vector2).length(), ECON.ship_speed(str(distant_hunter["kind"])) * 0.1))
+	distant_hunter["pursuit_left"] = 0.0
+	ECON._combat(distant_chase, distant_graph, 0.1)
+	# An unheld fighter can acquire a hostile beyond weapon range in the same sector.
+	var sector_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var sector_state: Dictionary = ECON.create(sector_map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var sector_graph: Dictionary = ECON.military_graph(sector_state)
+	var sector_fighter: Dictionary = {"id": 986, "owner": 1, "kind": "fighter", "at": 0, "route": [], "position": Vector2.ZERO, "hp": 100.0}
+	var sector_enemy: Dictionary = {"id": 987, "owner": 2, "kind": "ship", "at": 0, "route": [], "position": Vector2.RIGHT * (ECON.LASER_RANGE + 10.0), "hp": 100.0}
+	sector_state["ships"] = [sector_fighter, sector_enemy]
+	assert(ECON.local_sector(sector_graph, sector_enemy) == 0)
+	ECON._combat(sector_state, sector_graph, 0.1)
+	assert(sector_fighter["pursuit_target"] == 987 and sector_fighter["combat_target"] == -1)
+	sector_fighter["holding"] = true
+	ECON._combat(sector_state, sector_graph, 0.1)
+	assert(sector_fighter["pursuit_target"] == -1)
 	distant_chase["ships"].erase(fleeing)
 	ECON._combat(distant_chase, distant_graph, 0.1)
 	assert(int(distant_hunter["pursuit_target"]) == -1)
@@ -2316,18 +2334,21 @@ func _test_resource_handoff() -> void:
 	miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
 	state["ships"] = [miner, freighter]
 	var threats: Dictionary = ECON._salvage_threats(state, graph)
-	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats) == 0.0)
+	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats, 1.0) == 0.0)
 	freighter["position"] = point
 	freighter["owner"] = 2
-	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats) == 0.0)
+	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats, 1.0) == 0.0)
 	freighter["owner"] = 1
 	freighter["trade_auto"] = false
-	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats) == 0.0)
+	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats, 1.0) == 0.0)
 	freighter["trade_auto"] = true
+	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 0.1), ECON.dropoff_rate("miner") * 0.1))
+	assert(is_equal_approx(ECON._cargo_total(miner) + ECON._cargo_total(freighter), ECON.MINER_CAPACITY))
+	freighter["cargo"]["Metals"] = 0.0
 	assert(ECON.MINER_CAPACITY == 10.0 and ECON.CARGO_CAPACITY == 100.0)
 	for load in range(10):
 		miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
-		assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats), ECON.MINER_CAPACITY))
+		assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 1.0), ECON.MINER_CAPACITY))
 		assert(is_zero_approx(ECON._cargo_total(miner)))
 		assert(is_equal_approx(ECON._cargo_total(freighter), ECON.MINER_CAPACITY * float(load + 1)))
 		if load < 9:
@@ -2752,6 +2773,8 @@ func _test_colony_farm() -> void:
 	assert(ECON.issue_unit_order(state, 1, [901], {"kind": "unload"}, false))
 	ship["position"] = ECON.station_position(state, 0, float(state["elapsed"]))
 	assert(ECON._work_salvage(state, graph, ship, 1.0))
+	assert(is_equal_approx(float(home["stock"]["Organics"]), ECON.dropoff_rate("colony_ship")))
+	assert(ECON._work_salvage(state, graph, ship, 5.0))
 	assert(home["stock"]["Organics"] == 50.0 and ECON._cargo_total(ship) == 0.0)
 	ship.erase("unit_order")
 	ECON._grow_colony_cargo(ship, 40.0)
@@ -3150,21 +3173,23 @@ func _test_crowded_dock_delivery() -> void:
 	ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 0.01)
 	assert(ship.get("resource_haul", false))
 	assert(ECON._work_salvage(state, graph, ship, 0.01))
+	assert(is_equal_approx(float(ship["cargo"]["Metals"]), 50.0 - ECON.dropoff_rate("ship") * 0.01))
+	assert(ECON._work_salvage(state, graph, ship, 10.0))
 	assert(is_equal_approx(float(ship["cargo"]["Metals"]), 10.0))
 	assert(is_equal_approx(float(home["stock"]["Metals"]), ECON.storage_capacity(home)))
 	home["stock"]["Metals"] -= 10.0
 	state["elapsed"] += 1.0
 	ship["position"] = ECON.station_position(state, 0, float(state["elapsed"])) + Vector2.LEFT * ECON.SHIP_CLEARANCE
-	assert(ECON._work_salvage(state, graph, ship, 0.01))
+	assert(ECON._work_salvage(state, graph, ship, 10.0))
 	assert(ECON._cargo_total(ship) <= ECON.EPS)
 	assert(is_equal_approx(float(home["stock"]["Metals"]), ECON.storage_capacity(home)))
 	ship["cargo"]["Metals"] = 20.0
 	home["stock"]["Metals"] -= 10.0
 	assert(ECON.issue_unit_order(state, 1, [521], {"kind": "deposit", "target": ECON.station_target_id(state, 0)}, false))
-	assert(ECON._work_cargo_order(state, graph, ship, ECON.service_targets(state), 0.01))
+	assert(ECON._work_cargo_order(state, graph, ship, ECON.service_targets(state), 10.0))
 	assert(ship.has("cargo_order") and is_equal_approx(float(ship["cargo"]["Metals"]), 10.0))
 	home["stock"]["Metals"] -= 10.0
-	assert(ECON._work_cargo_order(state, graph, ship, ECON.service_targets(state), 0.01))
+	assert(ECON._work_cargo_order(state, graph, ship, ECON.service_targets(state), 10.0))
 	assert(not ship.has("cargo_order") and ECON._cargo_total(ship) <= ECON.EPS)
 	print("PASS: dock clearance, leftover trade cargo, partial manual deliveries and storage retry")
 
@@ -3215,7 +3240,7 @@ func _test_freighter_bays() -> void:
 	assert(is_equal_approx(ECON._cargo_total(ship), ECON.CARGO_CAPACITY))
 	assert(is_equal_approx(float(source["stock"]["Metals"]), 1000.0 - ECON.CARGO_CAPACITY))
 	assert(float(destination["stock"]["Metals"]) == 0.0)
-	ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 10.0)
+	ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 20.0)
 	assert((ship["position"] as Vector2).distance_to(ECON.station_position(state, 1, 0.0)) <= ECON.STATION_DOCK_RANGE + ECON.EPS)
 	assert(is_equal_approx(float(destination["stock"]["Metals"]), ECON.CARGO_CAPACITY))
 	assert(is_zero_approx(ECON._cargo_total(ship)))

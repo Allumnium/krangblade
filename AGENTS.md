@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.53.6: Gradual per-hull resource dropoff (miner 12, freighter 6, colony 10 t/yr). Apply shared tonnage budget per delivery across resources, including miner handoff and manual deposits. Preserve instant jettison and colony conversion. Fighters autonomously acquire enemies beyond laser range within their physical sector; refresh pursuit in-sector, retain bounded pursuit outside. Hold, explicit move-only and withdrawal retain precedence.
+
 - v0.53.5: Full-height map and territory canvas behind independent HUD controls; header gaps pass input. Plain crew count in ship details. Gentle 15% budget contact push, allow overlap. Miner 0.8×, freighter 1.1×, fighter 1.32× baseline travel; colony/science unchanged. Stage freighters on depot-facing side of mining site with 20% handoff margin.
 
 - v0.53.4: Smooth planetary presentation using a bounded local orbit clock synchronized to authority; keep planet hit tests, focus, PDS marks and beams aligned. Engine exhaust size and length use authored hull length and estimated motion-sample acceleration; no simulation changes.
