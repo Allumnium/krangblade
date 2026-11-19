@@ -344,6 +344,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 - v0.14.2: fix maintain row wrapping by enforcing single-line labels and compact input dimensions; verify actual window rendering.
 
 ### T-026 — Large match performance
+- v0.62.1: User approved the eight-phase scalability program in TODO.md (5,000 total ships target; 10,000 stretch). Source audit of v0.62.0: combat has spatial cells but dense cells and sector pursuit still scan many candidates per hull; repair, handoff and staging contain broader fleet scans; pose synchronization runs again from _ship_poses; territory shader iterates region geometry per pixel; reliable snapshots still include ship dictionaries and pose stream is 20 bytes at 10 Hz. These are code observations, not measured bottleneck rankings. Establish reproducible baselines first, then execute the prioritized roadmap; existing validation entries remain open.
 - Cached static military graph and lazy destination-indexed Dijkstra trees retain existing tie breaking without transmitting caches. Sparse graph makes this a practical alternative to Floyd–Warshall; profile before prewarming every destination. Civilian paths still require ownership-sensitive invalidation.
 
 - v0.14.4 adds asteroid off-screen culling and logistics capacity bars. Dense overlapping traffic indicators and shader spatial caching remain candidates for visual profiling.
