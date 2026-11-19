@@ -729,8 +729,8 @@ static func _cost(kind: String, level: int) -> Dictionary:
 		"miner": return {"Metals": 540.0, "Organics": 20.0}
 		"science_ship": return {"Metals": 900.0, "Organics": 30.0}
 		"scout": return {"Metals": 60.0, "Organics": 2.0}
-		"cruiser": return {"Metals": 800.0, "Organics": 25.0}
-		"destroyer": return {"Metals": 2000.0, "Organics": 60.0, "Crystals": 100.0}
+		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0}
+		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0}
 		"yard":
 			match level:
 				1: return {"Metals": 480.0}
@@ -1497,7 +1497,7 @@ static func _transfer_bay(entity: Dictionary, resource: String, amount: float, o
 	return clampi(floori(offset / maxf(EPS, cargo_capacity(kind)) * count), 0, count - 1)
 
 static func _cargo_stat(ship: Dictionary, key: String, resource: String, amount: float) -> void:
-	if ship.has("kind") and resource != ANTIMATTER and amount > EPS:
+	if ship.has("kind") and cargo_capacity(str(ship["kind"])) > EPS and resource != ANTIMATTER and amount > EPS:
 		ship[key] = float(ship.get(key, 0.0)) + amount
 
 static func _record_transfer(state: Dictionary, source_id: int, source: Dictionary, target_id: int, target: Dictionary, resource: String, amount: float) -> void:
@@ -1664,7 +1664,7 @@ static func cargo_capacity(kind: String) -> float:
 	match kind:
 		"miner": return MINER_CAPACITY
 		"science_ship": return SCIENCE_CAPACITY
-		"fighter": return FIGHTER_CAPACITY
+		"fighter", "scout", "cruiser", "destroyer": return 0.0
 		"colony_ship": return COLONY_CAPACITY
 	return CARGO_CAPACITY
 
@@ -3007,8 +3007,18 @@ static func _attack_destination(graph: Dictionary, target: Dictionary) -> int:
 	var route: Array = target.get("route", [])
 	return int(route[0]) if not route.is_empty() else int(target.get("at", -1))
 
+const MISSILE_RANGE: float = 1200.0
+const MISSILE_DAMAGE: float = 120.0
+const MISSILE_COOLDOWN: float = 12.0
+
+static func capital_lasers(kind: String) -> int:
+	return int({"cruiser": 2, "destroyer": 4}.get(kind, 0))
+
+static func missile_count(kind: String) -> int:
+	return int({"cruiser": 1, "destroyer": 2}.get(kind, 0))
+
 static func ship_max_hp(kind: String) -> float:
-	return float({"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": SHIP_HP * 3.0, "destroyer": SHIP_HP * 6.0}.get(kind, SHIP_HP))
+	return float({"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 800.0, "destroyer": 1600.0}.get(kind, SHIP_HP))
 
 static func _regenerate_hull(entity: Dictionary, maximum: float, dt: float) -> void:
 	var hp: float = float(entity.get("hp", maximum))
@@ -5040,7 +5050,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			continue
 		if miner:
 			ship["mining_active"] = false
-		var weapon_damage: float = LASER_DAMAGE * float({"cruiser": 2.0, "destroyer": 4.0}.get(ship["kind"], 1.0)) if fighter else MINER_LASER_DAMAGE
+		var weapon_damage: float = LASER_DAMAGE * float(maxi(1, capital_lasers(str(ship["kind"])))) if fighter else MINER_LASER_DAMAGE
 		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or ship.get("unit_order", {}).get("kind", "") == "follow" or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
@@ -5060,6 +5070,32 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			continue
 		var id: int = int(ship["id"])
 		var pos: Vector2 = positions[id]
+		var launchers: int = missile_count(str(ship["kind"]))
+		if launchers > 0:
+			var missile_cd: float = maxf(0.0, float(ship.get("missile_cooldown", 0.0)) - dt)
+			if missile_cd <= EPS:
+				var missile_target: int = -1
+				var best: float = MISSILE_RANGE * MISSILE_RANGE
+				var focus_id: int = int(ship.get("attack_order", -1))
+				var missile_cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+				var reach: int = ceili(MISSILE_RANGE / LASER_RANGE)
+				for x in range(-reach, reach + 1):
+					for y in range(-reach, reach + 1):
+						for enemy in cells.get(missile_cell + Vector2i(x, y), []):
+							var enemy_id: int = int(enemy["id"])
+							if not _hostile_hull(state, int(ship["owner"]), enemy) or (ship.has("attack_order") and enemy_id != focus_id):
+								continue
+							var distance: float = pos.distance_squared_to(positions[enemy_id])
+							if distance <= best:
+								best = distance
+								missile_target = enemy_id
+				if missile_target != -1:
+					_ship_hit(damage, killed_by, health, missile_target, ship, MISSILE_DAMAGE * launchers)
+					missile_cd = MISSILE_COOLDOWN
+					ship["missile_origin"] = pos
+					ship["missile_endpoint"] = positions[missile_target]
+					ship["missile_until"] = float(state["elapsed"]) + 0.65
+			ship["missile_cooldown"] = missile_cd
 		# Explicit attack is focus fire, never attack-move: even when another
 		# hostile is closer, only the ordered entity may receive damage.
 		if ship.has("attack_order") and positions.has(int(ship["attack_order"])) and pos.distance_to(positions[int(ship["attack_order"])]) <= LASER_RANGE:

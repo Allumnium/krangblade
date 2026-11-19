@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.57.0: Missile damage is resolved at launch; projectile trail is cosmetic. Playtest 1200 range, 12-second cooldown and capital costs; Destroyer needs upgraded warehouse.
+
 - v0.56.12: Population bar now uses habitation ceiling rather than food equilibrium; food shortage may halt growth before the bar fills.
 
 - v0.56.11: Planetary rockets are visual representations with colored cargo bays, not independent combat hulls; production accounting unchanged.
