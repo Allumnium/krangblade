@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.61.2: Inspect soft corridor rims and rounded junctions at all zooms; check connection readability without static tactical centerlines.
+
 - [ ] v0.61.1: Playtest bounded sector selection, object priority, friendly stations, exact star/near-star click and drag orders, minimap and colony commands.
 
 - [ ] v0.61.0: Validate corridor geometry, command bounds, bidirectional/interior movement, remote routing, patrol, guard, queues, formations and peer parity. Inspect performance and field intersections.

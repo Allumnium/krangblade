@@ -3205,6 +3205,12 @@ vec3 team_color(int team) {
 	if (team == 7) return vec3(0.420, 0.796, 0.831);
 	return vec3(0.929, 0.459, 0.467);
 }
+// Smooth the displayed junctions without changing authoritative lane widths.
+float rounded_join(float a, float b, float width) {
+	float overlap = max(0.0, width - abs(a - b));
+	return min(a, b) - overlap * overlap / (4.0 * width);
+}
+
 void fragment() {
 
 	vec2 p = UV * world_extent - vec2(padding);
@@ -3258,16 +3264,34 @@ void fragment() {
 	float gap_border = 0.0;
 	if (d >= -aa) {
 		float lane_d = 1e20;
+		float second_lane = 1e20;
+		float nearest_radius = 0.0;
 		for (int i = 0; i < lane_count; i++) {
 			vec4 edge = texelFetch(lane_data, ivec2(i, 0), 0);
 			vec4 a = texelFetch(site_data, ivec2(int(edge.x + 0.5), 0), 0);
 			vec4 b = texelFetch(site_data, ivec2(int(edge.y + 0.5), 0), 0);
 			vec2 ab = b.xy - a.xy;
 			float t = clamp(dot(p - a.xy, ab) / max(dot(ab, ab), 0.00000001), 0.0, 1.0);
-			float distance = length(p - (a.xy + ab * t)) - min(a.z, b.z) * lane_radius_fraction;
-			lane_d = min(lane_d, distance);
+			float radius = min(a.z, b.z) * lane_radius_fraction;
+			float distance = length(p - (a.xy + ab * t)) - radius;
+			if (distance < lane_d) {
+				second_lane = lane_d;
+				lane_d = distance;
+				nearest_radius = radius;
+			} else {
+				second_lane = min(second_lane, distance);
+			}
 		}
-		gap_border = (1.0 - inside) * (1.0 - smoothstep(-aa * 0.25, aa * 1.2, abs(lane_d))) * 0.20;
+		// Round concave joins between neighboring lanes and at sector mouths.
+		float rounding = max(0.000001, nearest_radius * corner_rounding * 0.5);
+		float rounded_lane = rounded_join(lane_d, second_lane, rounding);
+		float outer = rounded_join(rounded_lane, d, rounding);
+		// Retain the original sector outline; the lane uses exactly the
+		// same soft inward-facing stroke profile as neutral sector rims.
+		float lane_inside = 1.0 - smoothstep(-aa, 0.0, outer);
+		float lane_rim = lane_inside * smoothstep(-aa * 2.8, -aa * 1.1, outer);
+		float near_lane = 1.0 - smoothstep(rounding, rounding + aa * 2.8, rounded_lane);
+		gap_border = (1.0 - inside) * lane_rim * near_lane * 0.20;
 	}
 	COLOR = winner > 0 && inside > 0.0 ? vec4(team_color(winner), inside * 0.10 + border * 0.45) : vec4(vec3(0.60, 0.68, 0.76), max(border * 0.20, gap_border));
 }
@@ -6900,26 +6924,6 @@ func _draw_map() -> void:
 	var viewport_bounds := Rect2(Vector2.ZERO, map_canvas.size)
 	var render_scale: float = _fit() * zoom
 	var points: Array = state["map"]["points"]
-	for edge in state["map"]["edges"]:
-		var a: int = int(edge[0])
-		var b: int = int(edge[1])
-		var known: bool = ECONOMY.discovered(state, _me(), "planets", a) and ECONOMY.discovered(state, _me(), "planets", b)
-		var owner_a: int = int(state["planets"][a]["owner"])
-		var owner_b: int = int(state["planets"][b]["owner"])
-		var color: Color = _empire_color(owner_a).darkened(0.3) if known and owner_a > 0 and owner_a == owner_b else Color("#40566b")
-		var a_pos: Vector2 = _screen_point(points[a])
-		var b_pos: Vector2 = _screen_point(points[b])
-		map_canvas.draw_line(a_pos, b_pos, Color(color, 0.30), 1.0, true)
-	# Draw the actual system-to-field routes used by military navigation.
-	# A depleted field retains its stable POI and access edges.
-	var graph: Dictionary = ECONOMY.military_graph(state)
-	for edge in graph["edges"]:
-		var a: int = int(edge[0])
-		var b: int = int(edge[1])
-		if b < points.size():
-			continue
-		var known: bool = ECONOMY.discovered(state, _me(), "planets" if a < points.size() else "fields", a if a < points.size() else a - points.size()) and ECONOMY.discovered(state, _me(), "fields", b - points.size())
-		map_canvas.draw_line(_screen_point(graph["points"][a]), _screen_point(graph["points"][b]), Color(Color("#40566b"), 0.30 if known else 0.15), 1.0, true)
 	var font: Font = ThemeDB.fallback_font
 	var fields: Array = state["map"].get("fields", [])
 	for field_index in range(fields.size()):
