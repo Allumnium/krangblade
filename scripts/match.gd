@@ -130,7 +130,7 @@ var mouse_pan_percent: float = 100.0
 var wheel_zoom_percent: float = 100.0
 var station_commands: VBoxContainer
 var station_primary_grid: GridContainer
-var station_port_buttons: Dictionary = {}
+var station_select_yards_button: Button
 var station_upgrade_buttons: Dictionary = {}
 var weapon_details: Label
 var station_build_grid: GridContainer
@@ -1761,10 +1761,10 @@ func _build_station_command_card(parent: Container) -> void:
 	station_commands.alignment = BoxContainer.ALIGNMENT_BEGIN
 	parent.add_child(station_commands)
 	station_primary_grid = _ability_grid(station_commands)
-	for port in range(1, ECONOMY.MAX_SHIPYARDS + 1):
-		station_port_buttons[port] = _station_button(station_primary_grid, "Build\nShipyard %d" % port, "yard", _station_port_pressed.bind(port))
-		_register_command_hotkey(station_port_buttons[port], [KEY_Z, KEY_X, KEY_C][port - 1], "Station", "station_port_" + str(port), "Build / select Shipyard %d" % port)
-	_station_spacer(station_primary_grid)
+	station_select_yards_button = _station_button(station_primary_grid, "Select\nShipyards", "yard", _station_select_yards)
+	_register_command_hotkey(station_select_yards_button, KEY_Z, "Station", "station_port_1", "Select Shipyards")
+	for i in range(3):
+		_station_spacer(station_primary_grid)
 	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Reinforced\nPlating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
 	_register_command_hotkey(station_upgrade_buttons["reinforced_plating"], KEY_V, "Station", "station_plating", "Reinforced Plating")
@@ -1778,13 +1778,13 @@ func _build_station_command_card(parent: Container) -> void:
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
 	station_build_grid = _ability_grid(station_commands)
-	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "PDS"}
+	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "PDS", "yard": "Build\nShipyard"}
 	for resource in ECONOMY.RESOURCES:
 		captions[resource] = str(ECONOMY.ECONOMY_BUILDINGS[resource]["name"]).replace(" ", "\n")
-	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds"]:
+	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds", "yard"]:
 		var button: Button = _station_button(station_build_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
 		station_build_buttons[key] = button
-		_register_command_hotkey(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_T}[key], "Station Build", "build_" + key, captions[key].replace("\n", " "))
+		_register_command_hotkey(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_T, "yard": KEY_X}[key], "Station Build", "build_" + key, captions[key].replace("\n", " "))
 		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing"]:
 			button.gui_input.connect(_station_repeat_input.bind(key, button))
 			var border := Control.new()
@@ -1795,7 +1795,7 @@ func _build_station_command_card(parent: Container) -> void:
 			border.hide()
 			button.set_meta("auto_border", border)
 	# Keep the fixed four-row grid and Return position with fewer resource cards.
-	for i in range(9 - ECONOMY.RESOURCES.size()):
+	for i in range(8 - ECONOMY.RESOURCES.size()):
 		_station_spacer(station_build_grid)
 	# Return stays at the bottom right.
 	for i in range(3):
@@ -1828,39 +1828,30 @@ func _station_build(key: String) -> void:
 	else:
 		_operation("economy", key)
 
-func _station_port_pressed(port: int) -> void:
+func _station_select_yards() -> void:
+	var state: Dictionary = _state()
 	var p: Dictionary = _planet()
-	if p.is_empty() or int(p["owner"]) != _me() or station_selected_index != selected:
+	if p.is_empty() or int(p["owner"]) != _me() or station_selected_index != selected or p["yards"].is_empty():
 		return
-	var slot: int = ECONOMY.shipyard_at_port(p, port)
-	if slot >= 0:
-		# Station and first yard share a local reference key; discard the
-		# station's selection metadata before validating a different entity.
-		_clear_building_selection()
-		_select_building_ref(Vector2i(selected, slot), "shipyard")
-	else:
-		_operation("yard", "port:%d" % port)
+	var system: int = selected
+	_clear_building_selection()
+	_set_building_primary(state, Vector2i(system, 0), "shipyard")
+	building_selection_kind = "shipyard"
+	for slot in range(p["yards"].size()):
+		selected_buildings[Vector2i(system, slot)] = p["yards"].size()
+	follow_units = false
+	pending_command = ""
+	_load_thresholds()
+	_refresh()
 
 func _station_upgrade_pressed(kind: String) -> void:
 	if station_selected_index == selected:
 		_operation(kind)
 
 func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
-	for port in station_port_buttons:
-		var button: Button = station_port_buttons[port]
-		var slot: int = ECONOMY.shipyard_at_port(p, port)
-		var pending: Dictionary = ECONOMY.shipyard_port_job(p, port)
-		var tier: int = ECONOMY.next_shipyard_slot(p)
-		var cost: Dictionary = ECONOMY._cost("yard", tier)
-		var label: Label = button.get_meta("caption")
-		label.text = ("Select" if slot >= 0 else "Building" if not pending.is_empty() else "Build") + "\nShipyard %d" % port
-		button.disabled = not owned or (slot < 0 and (not pending.is_empty() or tier <= 0 or not ECONOMY.affordable(p, cost)))
-		var hint: String = label.text.replace("\n", " ")
-		if slot < 0 and pending.is_empty() and tier > 0:
-			_set_cost_tooltip(button, hint + " · %.0f s (1×)" % ECONOMY._work("yard", tier), cost, 0.0, _available_cost_resources(p))
-		else:
-			_set_cost_tooltip(button, "" if slot >= 0 else hint)
-		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled else Color.WHITE
+	station_select_yards_button.disabled = not owned or p["yards"].is_empty()
+	_set_button_hint(station_select_yards_button, "Select all %d completed shipyards at this station" % p["yards"].size())
+	(station_select_yards_button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if station_select_yards_button.disabled else Color.WHITE
 	for kind in station_upgrade_buttons:
 		var button: Button = station_upgrade_buttons[kind]
 		var installed: bool = bool(p["station"].get(kind, false))
@@ -1943,7 +1934,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				description = "%d installed · +5,000 crew capacity · +%.1f t/yr Organics" % [int(p.get("orbital_housing", 0)), ECONOMY.ECO_HOUSING_ORGANICS]
 		elif key == "yard":
 			var slot: int = ECONOMY.next_shipyard_slot(p)
-			name_text = "Shipyard"
+			name_text = "Build Shipyard"
 			eligible = slot > 0
 			if eligible:
 				recipe = ECONOMY._cost("yard", slot)
@@ -1959,7 +1950,8 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			work = ECONOMY._work("pds", 1)
 			description = "%d / %d defended · %.0f HP · %.0f damage · Range %.0f" % [p.get("pds", {}).size(), int(p["planet_count"]), ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
 		_upgrade_level_badge(button, current_level)
-		name_text += " " + _roman_level(current_level + (1 if eligible else 0))
+		if key != "yard":
+			name_text += " " + _roman_level(current_level + (1 if eligible else 0))
 		var repeat_key: String = _station_repeat_key(p, key)
 		var auto: bool = not repeat_key.is_empty() and bool(p.get("continuous", {}).get(repeat_key, false))
 		available = owned and available and ECONOMY.affordable(p, recipe)

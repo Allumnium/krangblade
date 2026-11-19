@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.58.5: Consolidated station shipyard controls use grouped selection and automatic free-port allocation. Check readability and group behavior as yards complete or are destroyed.
+
 - v0.58.4: Idle repaired hulls remain stationary while beams operate; wander is deferred until all repairs resolve. Check crowded repair formations and balance with doubled throughput; passive regeneration unchanged.
 
 - v0.58.3: Precise off-sector moves retain a routing anchor, not sector membership. Check gap combat, subsequent autonomous work, hold and repair detours during playtesting.

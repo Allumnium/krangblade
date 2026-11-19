@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.58.5: Station primary card has one Select Shipyards (Z) action for all local completed yards. Build submenu has one Build Shipyard (X) action using existing next-free-port construction, costs and limits; Return stays bottom right.
+
 - v0.58.4: Active Harvester and station repair rates doubled. Idle repaired hulls pause wandering and separation displacement for the repair tick, independent of fleet processing order; explicit movement and passive regeneration unchanged.
 
 - v0.58.3: Exact position commands and formation placements may target empty space between sectors within map bounds. Route through the nearest discovered POI, then fly the final off-sector leg; sector clicks retain boundary entry, ownership and queued order validation. Normal arrival/automation remains unchanged.
