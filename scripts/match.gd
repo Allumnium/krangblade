@@ -5311,8 +5311,6 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			var destination: int = ECONOMY.patrol_node(state, graph, _me(), endpoint)
 			if destination < 0:
 				continue
-			if not ECONOMY.sector_contains(graph, destination, endpoint):
-				endpoint = ECONOMY.sector_entry_point(graph, destination, craft["position"])
 			var clicked_system: bool = destination == int(minimap_hint.get("system", -1)) if not minimap_hint.is_empty() else destination < state["planets"].size() and point.distance_to(_screen_point(graph["points"][destination])) <= maxf(9.0, _star_draw_radius(_planet_radius(destination, state)))
 			if contextual and not force_position and ref.is_empty() and craft["kind"] == "colony_ship" and not colony_sent and destination < state["planets"].size() and clicked_system and not ECONOMY.colony_path(state, _me(), craft, destination).is_empty():
 				order = {"kind": "colonize", "target": destination}
@@ -5410,8 +5408,6 @@ func _formation_orders(state: Dictionary) -> Array:
 		if heading.is_zero_approx():
 			heading = ship.get("heading", Vector2.UP)
 		var node: int = ECONOMY.patrol_node(state, graph, _me(), point)
-		if node >= 0 and formation_mode != "patrol" and not ECONOMY.sector_contains(graph, node, point):
-			point = ECONOMY.sector_entry_point(graph, node, origins[ship["id"]])
 		var order: Dictionary = {"kind": "patrol" if formation_mode == "patrol" else "position", "target": node, "point": point, "move_only": formation_mode != "attack", "heading": heading}
 		entries.append({"ids": owned, "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
 		return entries
@@ -5419,8 +5415,6 @@ func _formation_orders(state: Dictionary) -> Array:
 		var ship: Dictionary = ships[slot["id"]]
 		var point: Vector2 = slot["point"]
 		var node: int = ECONOMY.patrol_node(state, graph, _me(), point)
-		if node >= 0 and formation_mode != "patrol" and not ECONOMY.sector_contains(graph, node, point):
-			point = ECONOMY.sector_entry_point(graph, node, origins[ship["id"]])
 		var order: Dictionary = {"kind": "patrol" if formation_mode == "patrol" else "position", "target": node, "point": point, "move_only": formation_mode != "attack", "heading": slot["heading"]}
 		entries.append({"ids": [ship["id"]], "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
 	return entries

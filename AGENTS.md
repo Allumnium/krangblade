@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.58.3: Exact position commands and formation placements may target empty space between sectors within map bounds. Route through the nearest discovered POI, then fly the final off-sector leg; sector clicks retain boundary entry, ownership and queued order validation. Normal arrival/automation remains unchanged.
+
 - v0.58.2: Harvesters with Auto-Mine and Auto-Salvage enabled prioritize safe scraps within 8× tractor range, including before departure on a mining route. Preserve active lane crossings, explicit movement, repairs and delivery; resume assigned mining afterward.
 
 - v0.58.1: Multi-ship selections show one direct centroid-to-target line only when every selected hull shares an active command and semantic target. Sector entry compares sector IDs, exact point orders compare destinations; mixed orders remain hidden. Individual route/queue lines unchanged.
