@@ -379,7 +379,7 @@ func _trade() -> void:
 	_section("Trade thresholds")
 	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both are percentages of actual local storage; imports and exports may be toggled separately.")
 	var base: float = E.WAREHOUSE_CAPACITIES[0]
-	_table(["Example at base storage", "Amount"], [["10% import target", "%.0f t" % (base * 0.1)], ["20% export target", "%.0f t" % (base * 0.2)], ["Freighter hold", "%.0f t" % E.CARGO_CAPACITY]])
+	_table(["Defaults at base storage", "Amount"], [["Import below %.0f%%" % E.DEFAULT_IMPORT_PERCENT, "%.0f t" % (base * E.DEFAULT_IMPORT_PERCENT / 100.0)], ["Export above %.0f%%" % E.DEFAULT_EXPORT_PERCENT, "%.0f t" % (base * E.DEFAULT_EXPORT_PERCENT / 100.0)], ["Freighter hold", "%.0f t" % E.CARGO_CAPACITY]])
 	_section("Warehouse capacity per resource")
 	var rows: Array = []
 	for i in range(E.WAREHOUSE_CAPACITIES.size()):

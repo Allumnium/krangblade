@@ -331,8 +331,8 @@ var menu_exit: Button
 
 class TradeRange extends Control:
 	signal committed(minimum: float, maximum: float)
-	var lower: float = 10.0
-	var upper: float = 20.0
+	var lower: float = 50.0
+	var upper: float = 80.0
 	var stock_percent: float = 0.0
 	var stock_color: Color = Color.WHITE
 	var enabled: bool = true
@@ -3047,7 +3047,7 @@ func _empire_resource_delta(state: Dictionary, resource: String) -> float:
 func _set_resource_delta(label: Label, annual: float, parentheses: bool = false) -> void:
 	var displayed: float = 0.0 if absf(annual) < 0.05 else annual
 	var amount: String = ("+" if displayed > 0.0 else "") + _tons(displayed, 1, true)
-	label.text = "(%s)" % amount if parentheses else amount
+	label.text = "(%s/yr)" % amount if parentheses else amount
 	label.add_theme_color_override("font_color", Color("#7cdb9b") if displayed > 0.0 else (Color("#eb8585") if displayed < 0.0 else Color.WHITE))
 
 func _compact_amount(value: float) -> String:

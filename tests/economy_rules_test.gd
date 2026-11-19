@@ -577,6 +577,19 @@ func _initialize() -> void:
 	assert(p["levels"].size() == 3)
 	assert(p["stock"].size() == 3)
 	assert(p["thresholds"].size() == 3)
+	for system in state["planets"]:
+		for resource in ECON.RESOURCES:
+			assert(is_equal_approx(float(system["thresholds"][resource]["min"]), 50.0))
+			assert(is_equal_approx(float(system["thresholds"][resource]["max"]), 80.0))
+	var default_test: Dictionary = p.duplicate(true)
+	default_test["stock"]["Metals"] = 900.0
+	assert(is_equal_approx(ECON._need(default_test, "Metals"), 100.0))
+	default_test["stock"]["Metals"] = 1000.0
+	assert(is_zero_approx(ECON._need(default_test, "Metals")))
+	default_test["stock"]["Metals"] = 1600.0
+	assert(is_zero_approx(ECON._surplus(default_test, "Metals")))
+	default_test["stock"]["Metals"] = 1700.0
+	assert(is_equal_approx(ECON._surplus(default_test, "Metals"), 100.0))
 	for removed in ["Plastics", "Textiles", "Tech"]:
 		assert(not p["stock"].has(removed) and not p["levels"].has(removed))
 		assert(not p["abundance"].has(removed) and not p["bonuses"].has(removed))

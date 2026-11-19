@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.51.6: Default trade thresholds for every standard resource are import below 50% and export above 80% of actual warehouse capacity, including newly initialized and reset sectors. Preserve explicit AI policy and manual overrides. Top HUD resource net rates show t/yr.
+
 - v0.51.5: Loaded logistics ships without available storage wait at a reachable owned station instead of remaining at the resource site. Retain physical cargo and retry delivery. Single selected hulls show a live current-order line, including automatic jobs; preserve existing group markers.
 
 - v0.51.4: Per-mode cooldowns after explicit orders and movement arrival: Auto-Repair 0, Auto-Mine/Auto-Salvage 5, Wander/Auto-Trade 30 simulation years. Normalize radial overlays to each duration; do not gate civilian work behind the longer Wander timer. Explicit orders, safety and per-mode toggles retain priority.
