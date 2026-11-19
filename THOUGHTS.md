@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.62.0: Raw influence is normalized above 50; opposing player colors may blend toward gray even at full intensity. Check contested readability and performance on large fleets. Derived from snapshots; static geometry textures remain cached.
+
 - v0.61.3: Formation ghosts reuse replicated order data without new state or per-hull route drawing. Check overlapping queued destinations and dense fleet readability.
 
 - v0.61.2: Corridor junction smoothing is visual-only and slightly rounds the silhouette near intersections. Check whether the subtle visual margin affects edge clicks; minimap retains compact topology markers.

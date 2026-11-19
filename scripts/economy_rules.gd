@@ -4577,6 +4577,82 @@ static func combat_position(state: Dictionary, graph: Dictionary, ship: Dictiona
 	var points: Array = graph["points"] if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"]
 	return _initial_position(points, ship)
 
+# Influence is presentation data derived from replicated physical state,
+# deliberately independent of ownership, access, conquest and combat.
+const INFLUENCE_CAP: float = 50.0
+const SHIP_INFLUENCE = {"scout": 1, "fighter": 2, "cruiser": 5, "destroyer": 10, "miner": 1, "ship": 1, "colony_ship": 1, "science_ship": 1}
+const STATION_INFLUENCE: int = 30
+const YARD_INFLUENCE: int = 20
+const BUILDING_INFLUENCE: int = 10
+
+# Regions are indexed by POI followed by connection index. Core membership
+# takes priority; overlapping highways award points to the nearest centerline.
+static func influence_region(graph: Dictionary, point: Vector2) -> int:
+	if not point.is_finite():
+		return -1
+	var points: Array = graph["points"]
+	var nearest: float = INF
+	var region: int = -1
+	for i in range(points.size()):
+		var d: float = point.distance_squared_to(points[i])
+		if d < nearest and d <= pow(float(graph["sector_radii"][i]) + EPS, 2.0) and sector_contains(graph, i, point):
+			nearest = d
+			region = i
+	if region >= 0:
+		return region
+	var edges: Array = graph["edges"]
+	for i in range(edges.size()):
+		var a: int = int(edges[i][0])
+		var b: int = int(edges[i][1])
+		var center: Vector2 = Geometry2D.get_closest_point_to_segment(point, points[a], points[b])
+		var d: float = point.distance_squared_to(center)
+		if d < nearest and d <= pow(lane_radius(graph, a, b) + EPS, 2.0):
+			nearest = d
+			region = points.size() + i
+	return region
+
+static func territory_influence(state: Dictionary, graph: Dictionary) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for i in range(graph["points"].size() + graph["edges"].size()):
+		result.append({})
+	for i in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][i]
+		var owner: int = int(system["owner"])
+		if owner <= 0:
+			continue
+		var points: int = STATION_INFLUENCE if has_station(system) else 0
+		points += YARD_INFLUENCE * (system.get("yards", []) as Array).size()
+		var buildings: int = (system.get("pds", {}) as Dictionary).size() + int(system.get("orbital_housing", 0))
+		for count in system.get("buildings", {}).values():
+			buildings += int(count)
+		points += BUILDING_INFLUENCE * buildings
+		if points > 0:
+			result[i][owner] = points
+	for ship in state["ships"]:
+		var owner: int = int(ship["owner"])
+		var weight: int = int(SHIP_INFLUENCE.get(ship["kind"], 1))
+		if owner <= 0 or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) <= 0.0:
+			continue
+		var region: int = influence_region(graph, combat_position(state, graph, ship))
+		if region >= 0:
+			result[region][owner] = int(result[region].get(owner, 0)) + weight
+	return result
+
+# RGB is the normalized weighted mean; alpha carries influence strength.
+# Never clamp individual players' points before computing their share.
+static func influence_color(weights: Dictionary, colors: Dictionary) -> Color:
+	var sum := Vector3.ZERO
+	var total: float = 0.0
+	for owner in weights:
+		var weight: float = maxf(0.0, float(weights[owner]))
+		var tint: Color = colors.get(owner, Color("#99aebf"))
+		sum += Vector3(tint.r, tint.g, tint.b) * weight
+		total += weight
+	if total <= 0.0:
+		return Color(0.60, 0.68, 0.76, 0.0)
+	sum /= total
+	return Color(sum.x, sum.y, sum.z, minf(total / INFLUENCE_CAP, 1.0))
+
 # Only settled infrastructure or resident population creates territory.
 # Hostile presence or combat can still suppress existing territory.
 static func territory_claims(state: Dictionary) -> Array[int]:
