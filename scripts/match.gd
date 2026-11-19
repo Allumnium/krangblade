@@ -258,10 +258,8 @@ var formation_mode: String = ""
 var formation_append: bool = false
 var formation_force_position: bool = false
 var selected_field: int = -1
-var mining_controls: VBoxContainer
-var mining_enabled: CheckBox
-var mining_metals: CheckBox
-var mining_crystals: CheckBox
+var field_command_grid: GridContainer
+var field_commands: Dictionary = {}
 var planet_overview: VBoxContainer
 var body_overview: VBoxContainer
 var body_title: Label
@@ -311,6 +309,7 @@ var info: Label
 var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
 var star_textures: Dictionary = {}
+var resource_glow_texture: Texture2D
 var system_visual_seed: int = -1
 var planet_detail_alpha: Dictionary = {}
 var planet_detail_seed: int = -1
@@ -705,19 +704,7 @@ func _build_ui() -> void:
 	cargo_scroll.add_child(fleet_cargo)
 	_build_fleet_cargo_row()
 	fleet_cargo_footer.hide()
-	mining_controls = HUD.section(fleet_overview, "Mine", true)
-	mining_enabled = CheckBox.new()
-	mining_enabled.text = "Enabled"
-	mining_controls.add_child(mining_enabled)
-	mining_metals = CheckBox.new()
-	mining_metals.text = "Metals"
-	mining_controls.add_child(mining_metals)
-	mining_crystals = CheckBox.new()
-	mining_crystals.text = "Crystals"
-	mining_controls.add_child(mining_crystals)
-	for check in [mining_enabled, mining_metals, mining_crystals]:
-		check.toggled.connect(func(_value: bool) -> void: _apply_mining_policy())
-	mining_controls.get_parent().hide()
+	_build_field_command_card(fleet_overview)
 	var system_header := HBoxContainer.new()
 	planet_overview.add_child(system_header)
 	info = _label("", 14)
@@ -923,14 +910,17 @@ func _layout_command_grids() -> void:
 	var slot_width: float = maxf(36.0, floorf((inspector_panel.custom_minimum_size.x - padding.x - 9.0) / 4.0))
 	var slot_height: float = floorf((inspector_slot.size.y - padding.y - 9.0) / 4.0) if inspector_slot.size.y > 0.0 else 52.0
 	var slot_size := Vector2(slot_width, maxf(32.0, slot_height))
-	for grid in [command_card, yard_command_grid, station_primary_grid, station_build_grid]:
+	for grid in [command_card, field_command_grid, yard_command_grid, station_primary_grid, station_build_grid]:
 		if not is_instance_valid(grid):
 			continue
 		for slot in grid.get_children():
 			slot.custom_minimum_size = slot_size
-			if not slot is Button or not slot.has_meta("caption"):
+			var face: Control = slot
+			if not slot is Button and slot.get_child_count() > 0 and slot.get_child(0) is Button:
+				face = slot.get_child(0)
+			if not face is Button or not face.has_meta("caption"):
 				continue
-			var caption: Label = slot.get_meta("caption")
+			var caption: Label = face.get_meta("caption")
 			var font: Font = caption.get_theme_font("font")
 			var font_size: int = 11
 			for line in caption.text.split("\n"):
@@ -2055,9 +2045,69 @@ func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
 		pos = next
 	return remaining / ECONOMY.SHIP_SPEED
 
-func _apply_mining_policy() -> void:
-	if selected_field >= 0:
-		session.call("request_mining_policy", selected_field, mining_enabled.button_pressed, mining_metals.button_pressed, mining_crystals.button_pressed)
+func _build_field_command_card(parent: Container) -> void:
+	field_command_grid = _ability_grid(parent)
+	# Keep the bottom row for persistent modes, as on ship cards.
+	while field_command_grid.get_child_count() < 12:
+		_station_spacer(field_command_grid)
+	for key in ["enabled", "Metals", "Crystals"]:
+		var slot: Control = _station_spacer(field_command_grid)
+		var button := Button.new()
+		slot.add_child(button)
+		var caption: String = "Mining" if key == "enabled" else key
+		var art: Texture2D = _station_command_icon("auto_mine") if key == "enabled" else HUD.resource_icon(key, 32)
+		_yard_ability_face(button, caption, art)
+		button.custom_minimum_size = Vector2.ZERO
+		button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		button.toggle_mode = true
+		button.pressed.connect(_toggle_field_command.bind(key))
+		button.gui_input.connect(_field_toggle_input.bind(key, button))
+		var border := Control.new()
+		border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		button.add_child(border)
+		border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		border.draw.connect(_draw_field_enabled_border.bind(border))
+		border.hide()
+		button.set_meta("mode_border", border)
+		field_commands[key] = button
+		_register_command_hotkey(button, {"enabled": KEY_G, "Metals": KEY_M, "Crystals": KEY_C}[key], "Asteroid Field", "field_" + key, caption)
+	_fill_ability_grid(field_command_grid)
+	field_command_grid.hide()
+
+func _draw_field_enabled_border(border: Control) -> void:
+	if border.size.x > 4.0 and border.size.y > 4.0:
+		border.draw_rect(Rect2(Vector2.ONE * 2.0, border.size - Vector2.ONE * 4.0), Color(HUD.ACCENT, 0.85), false, 2.0)
+
+func _field_toggle_input(event: InputEvent, key: String, button: Button) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not button.disabled:
+		_toggle_field_command(key)
+		button.accept_event()
+
+func _toggle_field_command(key: String) -> void:
+	var state: Dictionary = _state()
+	if str(session.get("phase")) != "match" or state.is_empty() or selected_field < 0 or not ECONOMY.discovered(state, _me(), "fields", selected_field):
+		return
+	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field).duplicate()
+	var special: bool = bool(state["map"]["fields"][selected_field].get("antimatter", false))
+	if key != "enabled" and (special or not bool(policy["enabled"])):
+		return
+	policy[key] = not bool(policy[key])
+	session.call("request_mining_policy", selected_field, bool(policy["enabled"]), bool(policy["Metals"]), bool(policy["Crystals"]))
+
+func _refresh_field_commands(state: Dictionary, special: bool) -> void:
+	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field)
+	for key in field_commands:
+		var button: Button = field_commands[key]
+		var enabled: bool = bool(policy[key])
+		button.visible = key == "enabled" or not special
+		button.disabled = str(session.get("phase")) != "match" or (key != "enabled" and not bool(policy["enabled"]))
+		button.set_pressed_no_signal(enabled)
+		var border: Control = button.get_meta("mode_border")
+		border.visible = enabled and not button.disabled
+		border.queue_redraw()
+		var caption: String = "Mining" if key == "enabled" else key
+		var hint: String = str(button.get_meta("hotkey", ""))
+		button.tooltip_text = "%s · %s\nClick to toggle [%s]" % [caption, "On" if enabled else "Off", hint]
 
 func _command_icon(path: String, pixels: int = 32) -> Texture2D:
 	var image := Image.new()
@@ -2498,18 +2548,11 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	pending_command = ""
 	_refresh_command_mode()
 	fleet_cargo_footer.hide()
-	mining_controls.get_parent().show()
-	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field)
-	mining_enabled.set_pressed_no_signal(bool(policy["enabled"]))
-	mining_metals.visible = not special
-	mining_crystals.visible = not special
-	mining_metals.set_pressed_no_signal(bool(policy["Metals"]))
-	mining_crystals.set_pressed_no_signal(bool(policy["Crystals"]))
-	mining_metals.disabled = not mining_enabled.button_pressed
-	mining_crystals.disabled = not mining_enabled.button_pressed
+	field_command_grid.show()
+	_refresh_field_commands(state, special)
 
 func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
-	mining_controls.get_parent().hide()
+	field_command_grid.hide()
 	var kind: String = ship.get("kind", "ship")
 	var owner: int = int(ship["owner"])
 	ship_title.text = "%s #%d" % [_ship_kind_name(kind), int(ship["id"])]
@@ -3363,6 +3406,7 @@ func _refresh() -> void:
 		_refresh_command_mode()
 	fleet_scroll.visible = other_selected
 	fleet_overview.visible = other_selected
+	field_command_grid.visible = field_selected
 	fleet_title.visible = other_selected
 	fleet_detail.visible = other_selected
 	fleet_cargo_footer.hide()
@@ -3592,7 +3636,7 @@ func _open_hotkey_editor() -> void:
 		var rows := VBoxContainer.new()
 		rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		scroll.add_child(rows)
-		for scope in ["General", "Fleet", "Shipyard", "Station", "Station Build", "Station Trade"]:
+		for scope in ["General", "Fleet", "Shipyard", "Station", "Station Build", "Station Trade", "Asteroid Field"]:
 			var heading := _label(scope.to_upper(), 13)
 			heading.add_theme_color_override("font_color", HUD.ACCENT)
 			rows.add_child(heading)
@@ -5779,6 +5823,35 @@ func _salvage_hit(state: Dictionary, point: Vector2) -> int:
 			hit = int(pile["id"])
 	return hit
 
+# A shared white alpha falloff supplies soft local halos without HDR/bloom
+# or a particle emitter per resource. Tint at draw time to preserve identity.
+func _resource_glow() -> Texture2D:
+	if is_instance_valid(resource_glow_texture):
+		return resource_glow_texture
+	var image := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	for y in range(64):
+		for x in range(64):
+			var radius: float = ((Vector2(x + 0.5, y + 0.5) - Vector2(32.0, 32.0)) / 32.0).length()
+			var alpha: float = pow(maxf(0.0, 1.0 - radius * radius), 3.0)
+			image.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
+	resource_glow_texture = ImageTexture.create_from_image(image)
+	return resource_glow_texture
+
+func _draw_resource_glow(point: Vector2, radius: float, tint: Color, strength: float) -> void:
+	var extent: float = maxf(1.5, radius)
+	map_canvas.draw_texture_rect(_resource_glow(), Rect2(point - Vector2.ONE * extent, Vector2.ONE * extent * 2.0), false, Color(tint.lightened(0.12), strength))
+
+func _draw_cargo_segment(shape: PackedVector2Array, tint: Color) -> void:
+	map_canvas.draw_colored_polygon(shape, tint.lightened(0.14))
+	# Smaller or partially filled bays get a proportionally weaker halo.
+	var length: float = shape[0].distance_to(shape[1])
+	var width: float = shape[1].distance_to(shape[2])
+	if minf(length, width) < 0.8:
+		return
+	var center: Vector2 = (shape[0] + shape[2]) * 0.5
+	var extent: float = clampf(maxf(length, width) * 0.9, 2.0, 48.0)
+	_draw_resource_glow(center, extent, tint, 0.32 * clampf(length / maxf(width, 0.1), 0.25, 1.0))
+
 func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2, font: Font) -> void:
 	if state.get("salvage", {}).is_empty():
 		return
@@ -5789,16 +5862,17 @@ func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2,
 	for pile in state.get("salvage", {}).values():
 		var point: Vector2 = _screen_point(pile["position"])
 		var radius: float = _salvage_radius(pile)
-		if not viewport_bounds.grow(radius + 24.0).has_point(point):
+		if not viewport_bounds.grow(radius * 2.6 + 24.0).has_point(point):
 			continue
 		var tint: Color = HUD.COLORS[pile["resource"]]
+		_draw_resource_glow(point, radius * 2.6, tint, 0.58)
 		var rotation: float = float(pile["id"]) * 2.4 + game_visual_clock * 0.08
 		var axis: Vector2 = Vector2.from_angle(rotation) * radius
 		var side: Vector2 = axis.orthogonal() * 0.68
 		var shape := PackedVector2Array([point + axis, point + side, point - axis, point - side])
-		map_canvas.draw_colored_polygon(shape, tint.darkened(0.25))
+		map_canvas.draw_colored_polygon(shape, tint.lerp(Color.WHITE, 0.12))
 		shape.append(shape[0])
-		map_canvas.draw_polyline(shape, tint.lightened(0.3), 1.0, true)
+		map_canvas.draw_polyline(shape, tint.lightened(0.45), 1.0, true)
 		var claimant: int = int(pile["claim"])
 		if ships_by_id.has(claimant) and poses.has(claimant):
 			var craft: Dictionary = ships_by_id[claimant]
@@ -5847,7 +5921,7 @@ func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, later
 			# Fractional tonnes can project to a degenerate polygon.
 			if (end - start) * forward.length() >= 0.1:
 				var fill := PackedVector2Array([module + forward * end + lateral * half_width, module + forward * start + lateral * half_width, module + forward * start - lateral * half_width, module + forward * end - lateral * half_width])
-				map_canvas.draw_colored_polygon(fill, HUD.COLORS[segment["resource"]])
+				_draw_cargo_segment(fill, HUD.COLORS[segment["resource"]])
 			start = end
 
 func _order_color(ship: Dictionary, order: Dictionary) -> Color:
@@ -6148,7 +6222,7 @@ func _draw_map() -> void:
 					var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / ECONOMY.FREIGHTER_BAY_CAPACITY)
 					if (end - start) * scale >= 0.1:
 						var filled := PackedVector2Array([module + direction * end + side * 3, module + direction * start + side * 3, module + direction * start - side * 3, module + direction * end - side * 3])
-						map_canvas.draw_colored_polygon(filled, HUD.COLORS[segment["resource"]])
+						_draw_cargo_segment(filled, HUD.COLORS[segment["resource"]])
 					start = end
 		elif scale >= 0.42 and HULL_PANELS.has(ship["kind"]) and viewport_bounds.grow(maxf(24.0, 14.0 * scale)).has_point(point):
 			# At distant zoom levels the silhouette and allegiance outline are
