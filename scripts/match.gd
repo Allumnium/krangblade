@@ -19,6 +19,7 @@ const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salv
 const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
 const MIN_ZOOM: float = 0.5
 const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
+const OVERVIEW_SHIP_MAX_MULTIPLIER: float = 12.0
 const OVERVIEW_ART_NORMAL_ZOOM: float = 16.0
 const OVERVIEW_MAX_ZOOM: float = 64.0
 const FIGHTER_HULL_LENGTH: float = 22.0
@@ -4212,7 +4213,7 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 	var hit := Vector2i(-1, -1)
 	var nearest: float = INF
-	if _ship_scale() < 0.14:
+	if _ship_scale(true) < 0.14:
 		return hit
 	var elapsed: float = float(state["elapsed"])
 	for index in range(state["planets"].size()):
@@ -4220,7 +4221,7 @@ func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 			continue
 		var star: Vector2 = _screen_point(state["map"]["points"][index])
 		for slot in range(state["planets"][index]["yards"].size()):
-			var scale: float = _ship_scale() * pow(1.2, int(state["planets"][index]["yards"][slot]["level"]) - 1)
+			var scale: float = _ship_scale(true) * pow(1.2, int(state["planets"][index]["yards"][slot]["level"]) - 1)
 			var center: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
 			# Do not steal star selection when a dock overlaps its star.
 			if center.distance_to(star) < 8.0 or point.distance_to(star) < 5.0:
@@ -5444,7 +5445,7 @@ func _sync_destruction_effects(state: Dictionary) -> void:
 					sparks.append(_destruction_spark(Vector2(rng.randf_range(-8.0, 8.0), rng.randf_range(-5.0, 5.0)), HUD.COLORS.get(resource, hull), rng))
 		for index in range(5):
 			sparks.append(_destruction_spark(Vector2.ZERO, hull, rng))
-		ship_destructions.append({"position": event["position"], "angle": angle, "started": visual_clock, "fragments": fragments, "sparks": sparks, "scale": 3.2 if kind == "station" else 1.0})
+		ship_destructions.append({"position": event["position"], "angle": angle, "started": visual_clock, "fragments": fragments, "sparks": sparks, "scale": 3.2 if kind == "station" else 1.0, "structure": not ECONOMY.SHIP_KINDS.has(kind)})
 		if ship_destructions.size() > MAX_VISIBLE_DESTRUCTIONS:
 			ship_destructions.pop_front()
 
@@ -5454,7 +5455,7 @@ func _destruction_spark(offset: Vector2, color: Color, rng: RandomNumberGenerato
 
 func _draw_ship_destructions(viewport_bounds: Rect2) -> void:
 	for effect in ship_destructions:
-		var scale: float = maxf(0.2, _ship_scale()) * float(effect.get("scale", 1.0))
+		var scale: float = maxf(0.2, _ship_scale(bool(effect.get("structure", false)))) * float(effect.get("scale", 1.0))
 		var point: Vector2 = _screen_point(effect["position"])
 		if not viewport_bounds.grow(maxf(80.0, 44.0 * scale)).has_point(point):
 			continue
@@ -5520,7 +5521,7 @@ func _target_ring_entity(state: Dictionary, poses: Dictionary, refs: Dictionary,
 	var radius: float = maxf(8.0, 15.0 * _ship_scale())
 	match str(ref["kind"]):
 		"station": radius = _station_radius() + 4.0
-		"yard": radius = maxf(8.0, 23.0 * _ship_scale() * pow(1.2, int(ref["entity"]["level"]) - 1))
+		"yard": radius = maxf(8.0, 23.0 * _ship_scale(true) * pow(1.2, int(ref["entity"]["level"]) - 1))
 		"pds":
 			var node: int = int(ref["node"])
 			var slot: int = floori(float(-2 - id - state["planets"].size() * 3) / float(state["planets"].size()))
@@ -5592,16 +5593,16 @@ func _hull_polygon(origin: Vector2, forward: Vector2, lateral: Vector2, vertices
 		polygon.append(origin + forward * vertex.x + lateral * vertex.y)
 	return polygon
 
-func _overview_art_multiplier() -> float:
+func _overview_art_multiplier(maximum: float = OVERVIEW_ART_MAX_MULTIPLIER) -> float:
 	# Wheel zoom is logarithmic; blend in the same space for a smooth
-	# overview-to-tactical transition, with exact 4x/1x endpoint values.
+	# overview-to-tactical transition, with exact maximum/1x endpoints.
 	var progress: float = clampf(log(maxf(zoom, MIN_ZOOM) / MIN_ZOOM) / log(OVERVIEW_ART_NORMAL_ZOOM / MIN_ZOOM), 0.0, 1.0)
-	return lerpf(OVERVIEW_ART_MAX_MULTIPLIER, 1.0, smoothstep(0.0, 1.0, progress))
+	return lerpf(maximum, 1.0, smoothstep(0.0, 1.0, progress))
 
-func _ship_scale() -> float:
+func _ship_scale(structure: bool = false) -> float:
 	# Preserve the authored close-up ceiling and camera framing.
 	var base: float = minf(SHIP_WORLD_SCALE * _fit() * minf(zoom, OVERVIEW_MAX_ZOOM), 1.25) * maxf(1.0, zoom / OVERVIEW_MAX_ZOOM)
-	return base * _overview_art_multiplier()
+	return base * _overview_art_multiplier(OVERVIEW_ART_MAX_MULTIPLIER if structure else OVERVIEW_SHIP_MAX_MULTIPLIER)
 
 func _focus_selection() -> void:
 	var state: Dictionary = _state()
@@ -5803,7 +5804,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 func _draw_shipyard_construction(state: Dictionary, index: int, job: Dictionary, tint: Color, elapsed: float) -> void:
 	var port: int = int(job.get("station_slot", job["level"]))
 	var point: Vector2 = _screen_point(ECONOMY.shipyard_port_position(state, index, port, elapsed))
-	var scale: float = _ship_scale()
+	var scale: float = _ship_scale(true)
 	if not Rect2(Vector2.ZERO, map_canvas.size).grow(maxf(16.0, 32.0 * scale)).has_point(point):
 		return
 	var u: float = clampf(float(job["progress"]) / maxf(ECONOMY.EPS, float(job["work"])), 0.0, 1.0)
@@ -5836,7 +5837,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 		_draw_shipyard_construction(state, index, pending, tint, elapsed)
 	for slot in range(planet["yards"].size()):
 		var yard: Dictionary = planet["yards"][slot]
-		var scale: float = _ship_scale() * pow(1.2, int(yard["level"]) - 1)
+		var scale: float = _ship_scale(true) * pow(1.2, int(yard["level"]) - 1)
 		var angle: float = float(ECONOMY.shipyard_port(planet, slot) - 1) * TAU / 3.0 + elapsed * 0.008
 		var axis: Vector2 = Vector2.from_angle(angle)
 		var side: Vector2 = axis.orthogonal()
@@ -6275,7 +6276,7 @@ func _draw_map() -> void:
 				continue
 			var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, float(state["elapsed"])))
 			var endpoint: Vector2 = poses[target]["point"]
-			var offset: Vector2 = center.direction_to(endpoint).orthogonal() * (float(emitter) * 2.0 - 1.0) * 4.0 * _ship_scale()
+			var offset: Vector2 = center.direction_to(endpoint).orthogonal() * (float(emitter) * 2.0 - 1.0) * 4.0 * _ship_scale(true)
 			_draw_owned_laser(center + offset, endpoint, int(system["owner"]), 1.5)
 		var defenses: Dictionary = state["planets"][index].get("pds", {})
 		if defenses.is_empty():
@@ -6378,8 +6379,9 @@ func _draw_map() -> void:
 		# At a distant galaxy overview, the smallest authored edges can
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
-		if scale < 0.15 * _overview_art_multiplier() or (scale < 0.42 and Geometry2D.triangulate_polygon(shape).is_empty()):
-			map_canvas.draw_circle(point, maxf(0.8, 6.0 * scale / _overview_art_multiplier()) * _overview_art_multiplier(), hull, true, -1.0, true)
+		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
+		if scale < 0.15 * overview or (scale < 0.42 and Geometry2D.triangulate_polygon(shape).is_empty()):
+			map_canvas.draw_circle(point, maxf(0.8, 6.0 * scale / overview) * overview, hull, true, -1.0, true)
 			continue
 		map_canvas.draw_colored_polygon(shape, hull)
 		if ship["kind"] == "ship" and scale >= 0.42:
