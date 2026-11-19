@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.59.0: Fighter sustained damage falls from 18 to ~5.33 HP/s at 1×; watch combat pacing, AI waves and station assault balance. Blaster projectiles are cosmetic tracers of authoritative immediate damage, avoiding per-projectile replication.
+
 - v0.58.10: Larger capital art preserves existing physical avoidance and combat ranges; observe visual overlap and consider size-aware formation spacing separately if needed.
 
 - v0.58.9: AI capital investments favor home yards; monitor crystal imports and early defense pacing. Remote salvage uses safe two-hop waypoints and a sparse cell search; profile large wreck fields and watch for detours through gap space.

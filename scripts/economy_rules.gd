@@ -3071,6 +3071,16 @@ const MISSILE_RANGE: float = 1200.0
 const MISSILE_DAMAGE: float = 120.0
 const MISSILE_COOLDOWN: float = 12.0
 
+const BLASTER_DAMAGE: float = 1.0
+const BLASTER_SHOTS: int = 4
+const BLASTER_BURST: float = 1.0
+const BLASTER_PAUSE: float = 0.5
+const BLASTER_SHOT_INTERVAL: float = BLASTER_BURST / BLASTER_SHOTS
+const BLASTER_TRAVEL: float = 0.45
+
+static func blaster_count(kind: String) -> int:
+	return int({"scout": 1, "fighter": 2, "cruiser": 3, "destroyer": 4}.get(kind, 0))
+
 static func capital_lasers(kind: String) -> int:
 	return int({"cruiser": 2, "destroyer": 4}.get(kind, 0))
 
@@ -3097,7 +3107,7 @@ static func _passive_regeneration(state: Dictionary, dt: float) -> void:
 			_regenerate_hull(battery, PDS_HP, dt)
 
 static func armed(ship: Dictionary) -> bool:
-	return ship.get("kind", "") in ["fighter", "miner", "cruiser", "destroyer"]
+	return ship.get("kind", "") in ["fighter", "miner", "cruiser", "destroyer", "scout"]
 
 # Stable hull IDs and the existing disjoint structure target IDs. HP lives
 # in the actual entity dictionary, so repair never creates a new entity.
@@ -5156,6 +5166,31 @@ static func _ship_hit(damage: Dictionary, killed_by: Dictionary, health: Diction
 	if before < float(health.get(target, INF)) and float(damage[target]) >= float(health.get(target, INF)) - EPS:
 		killed_by[target] = attacker
 
+# Resolve one shot from every mounted blaster at each burst interval.
+# Damage is authoritative and simultaneous with other weapons; projectile
+# tracer metadata is compact and rides the existing combat snapshot.
+static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, positions: Dictionary, damage: Dictionary, killed_by: Dictionary, health: Dictionary, dt: float) -> void:
+	var mounts: int = blaster_count(str(ship["kind"]))
+	if mounts <= 0 or dt <= 0.0:
+		return
+	var next: float = float(ship.get("blaster_cooldown", 0.0))
+	var shot: int = int(ship.get("blaster_shot", 0))
+	if target == -1 or not positions.has(target):
+		ship["blaster_cooldown"] = maxf(0.0, next - dt)
+		if next <= dt:
+			ship["blaster_shot"] = 0
+		return
+	while next < dt - EPS:
+		_ship_hit(damage, killed_by, health, target, ship, BLASTER_DAMAGE * mounts)
+		ship["blaster_origin"] = positions[ship["id"]]
+		ship["blaster_endpoint"] = positions[target]
+		ship["blaster_fired"] = float(state["elapsed"]) - dt + next
+		ship["blaster_visual_shot"] = shot
+		shot = (shot + 1) % BLASTER_SHOTS
+		next += BLASTER_SHOT_INTERVAL + (BLASTER_PAUSE if shot == 0 else 0.0)
+	ship["blaster_shot"] = shot
+	ship["blaster_cooldown"] = maxf(0.0, next - dt)
+
 static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	var ships: Array = state["ships"]
 	var positions: Dictionary = {}
@@ -5227,11 +5262,11 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	for ship in ships:
 		var fighter: bool = ship.get("kind", "") in ["fighter", "cruiser", "destroyer"]
 		var miner: bool = ship.get("kind", "") == "miner"
-		if not fighter and not miner:
+		if not fighter and not miner and ship.get("kind", "") != "scout":
 			continue
 		if miner:
 			ship["mining_active"] = false
-		var weapon_damage: float = LASER_DAMAGE * float(maxi(1, capital_lasers(str(ship["kind"])))) if fighter else MINER_LASER_DAMAGE
+		var weapon_damage: float = MINER_LASER_DAMAGE if miner else LASER_DAMAGE * float(capital_lasers(str(ship["kind"])))
 		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or ship.get("unit_order", {}).get("kind", "") == "follow" or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
@@ -5240,7 +5275,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 				if _hostile_hull(state, int(ship["owner"]), enemy):
 					moving_only = false
 					break
-		ship["passing_fire"] = moving_only and fighter
+		ship["passing_fire"] = (moving_only and fighter) or ship["kind"] == "scout"
 		if bool(ship.get("retreating", false)) or ship.has("cargo_order") or ship.has("repair_order"):
 			ship["combat_target"] = -1
 			ship["pursuit_target"] = -1
@@ -5248,6 +5283,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			ship["laser_until"] = -1.0
 			ship["yard_target"] = -1
 			ship["yard_laser_until"] = -1.0
+			_fire_blaster(state, ship, -1, positions, damage, killed_by, health, dt)
 			continue
 		var id: int = int(ship["id"])
 		var pos: Vector2 = positions[id]
@@ -5288,11 +5324,12 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			ship["pursuit_left"] = 0.0
 			ship["laser_until"] = -1.0 if int(previous_targets[id]) != int(ship["combat_target"]) else ship.get("laser_until", -1.0)
 			var focus_cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
-			if in_range and focus_cooldown <= EPS:
+			if in_range and weapon_damage > 0.0 and focus_cooldown <= EPS:
 				_ship_hit(damage, killed_by, health, focus, ship, weapon_damage)
 				focus_cooldown = 1.0
 				ship["laser_until" if focus >= 0 else "yard_laser_until"] = float(state["elapsed"]) + 0.2
 			ship["laser_cooldown"] = focus_cooldown
+			_fire_blaster(state, ship, focus if in_range else -1, positions, damage, killed_by, health, dt)
 			continue
 		var team: int = int(state["teams"].get(int(ship["owner"]), 0))
 		var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
@@ -5379,7 +5416,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			ship["laser_until"] = -1.0
 		ship["combat_target"] = target
 		var cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
-		if target >= 0 and cooldown <= EPS:
+		if target >= 0 and weapon_damage > 0.0 and cooldown <= EPS:
 			_ship_hit(damage, killed_by, health, target, ship, weapon_damage)
 			cooldown = 1.0
 			ship["laser_until"] = float(state["elapsed"]) + 0.2
@@ -5398,10 +5435,11 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 							nearest = distance
 							ship["yard_target"] = yard_id
 			var yard_id: int = int(ship["yard_target"])
-			if yard_id < -1 and cooldown <= EPS:
+			if yard_id < -1 and weapon_damage > 0.0 and cooldown <= EPS:
 				_ship_hit(damage, killed_by, health, yard_id, ship, weapon_damage)
 				ship["laser_cooldown"] = 1.0
 				ship["yard_laser_until"] = float(state["elapsed"]) + 0.2
+		_fire_blaster(state, ship, target if target >= 0 else int(ship["yard_target"]), positions, damage, killed_by, health, dt)
 	# Each matrix emitter has its own cooldown and fires from the station.
 	for index in range(system_count):
 		var system: Dictionary = state["planets"][index]

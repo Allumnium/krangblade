@@ -703,6 +703,7 @@ func _initialize() -> void:
 	_test_autocast_modes()
 	_test_resource_handoff()
 	_test_follow_order()
+	_test_blaster_bursts()
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
 	_test_soft_separation()
@@ -1632,7 +1633,7 @@ func _initialize() -> void:
 	ECON._move({"map": force_graph}, force_fleet[0], 100.0)
 	assert(force_fleet[0]["at"] == field_node and force_fleet[0]["route"].is_empty())
 	print("PASS: normalized POI force allocation, nearest assignments and continuous reversal")
-	# Simultaneous weapon fire: allies cannot be targeted and six hits kill.
+	# Simultaneous burst fire: allies cannot be targeted; each blaster shot deals 1 HP.
 	var duel: Dictionary = ECON.create(force_map, players, ids, false)
 	# Isolate fighter-v-fighter combat from the starting planetary batteries.
 	for planet in duel["planets"]:
@@ -1640,11 +1641,11 @@ func _initialize() -> void:
 	var duel_graph: Dictionary = ECON.military_graph(duel)
 	for owner_id in [1, 3]:
 		duel["ships"].append({"id": owner_id, "owner": owner_id, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0, "dest": 0})
-	for shot in range(5):
+	for shot in range(18):
 		ECON._combat(duel, duel_graph, 1.0)
 	assert(duel["ships"].size() == 2)
 	assert(duel["ship_destructions"].is_empty())
-	assert(is_equal_approx(float(duel["ships"][0]["hp"]), 10.0))
+	assert(is_equal_approx(float(duel["ships"][0]["hp"]), 4.0))
 	ECON._combat(duel, duel_graph, 1.0)
 	assert(duel["ships"].is_empty())
 	assert(duel["ship_destructions"].size() == 2)
@@ -1659,7 +1660,7 @@ func _initialize() -> void:
 	duel["ships"] = [{"id": 11, "owner": 1, "kind": "fighter", "at": 0, "route": [3], "leg": 0.0, "position": Vector2(500, 0), "hp": 100.0}, {"id": 12, "owner": 3, "kind": "ship", "at": 3, "route": [0], "leg": 0.0, "position": Vector2(550, 0), "hp": 100.0}, {"id": 13, "owner": 3, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": Vector2(5000, 0), "hp": 100.0}]
 	ECON._combat(duel, duel_graph, 1.0)
 	assert(int(duel["ships"][0]["combat_target"]) == 12)
-	assert(is_equal_approx(float(duel["ships"][1]["hp"]), 100.0 - ECON.LASER_DAMAGE))
+	assert(is_equal_approx(float(duel["ships"][1]["hp"]), 100.0 - ECON.BLASTER_DAMAGE * ECON.BLASTER_SHOTS * ECON.blaster_count("fighter")))
 	assert(is_equal_approx(float(duel["ships"][2]["hp"]), 100.0))
 	for tick in range(20):
 		var before: Vector2 = miner["position"]
@@ -2887,7 +2888,8 @@ func _test_tactical_orders() -> void:
 	# Reset damage to isolate the focused-target checks below.
 	enemy["hp"] = ECON.SHIP_HP
 	decoy["hp"] = ECON.SHIP_HP
-	f["laser_cooldown"] = 0.0
+	f["blaster_cooldown"] = 0.0
+	f["blaster_shot"] = 0
 	assert(not ECON.command_attack(state, 2, [100], 101))
 	assert(not ECON.command_attack(state, 1, [100], 100))
 	assert(not ECON.command_attack(state, 1, [100, 101], 102))
@@ -3412,20 +3414,45 @@ func _test_ai_defensive_orders() -> void:
 	assert(fighters.filter(func(ship: Dictionary) -> bool: return ship.get("operation_target", -1) == 0).size() == 6)
 	print("PASS: AI direct orders and defense allocation")
 
+func _test_blaster_bursts() -> void:
+	for kind in ["scout", "fighter", "cruiser", "destroyer"]:
+		var mounts: int = ECON.blaster_count(kind)
+		var state: Dictionary = {"elapsed": 0.0}
+		var ship: Dictionary = {"id": 1, "kind": kind}
+		var damage: Dictionary = {}
+		var positions: Dictionary = {1: Vector2.ZERO, 2: Vector2(100, 0)}
+		var health: Dictionary = {2: 1000.0}
+		for tick in range(10):
+			state["elapsed"] += 0.1
+			ECON._fire_blaster(state, ship, 2, positions, damage, {}, health, 0.1)
+		assert(is_equal_approx(float(damage[2]), ECON.BLASTER_DAMAGE * mounts * 4))
+		for tick in range(5):
+			state["elapsed"] += 0.1
+			ECON._fire_blaster(state, ship, 2, positions, damage, {}, health, 0.1)
+		assert(is_equal_approx(float(damage[2]), ECON.BLASTER_DAMAGE * mounts * 4))
+		state["elapsed"] += 0.1
+		ECON._fire_blaster(state, ship, 2, positions, damage, {}, health, 0.1)
+		assert(is_equal_approx(float(damage[2]), ECON.BLASTER_DAMAGE * mounts * 5))
+	assert(ECON.blaster_count("scout") == 1 and ECON.blaster_count("fighter") == 2)
+	assert(ECON.blaster_count("cruiser") == 3 and ECON.blaster_count("destroyer") == 4)
+	assert(ECON.armed({"kind": "scout"}) and ECON.capital_lasers("fighter") == 0)
+	print("PASS: blaster mounts, four-shot burst and half-second pause")
+
 func _test_conquest() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var planet: Dictionary = state["planets"][1]
 	planet["pds"].clear()
-	planet["yards"][0]["hp"] = ECON.LASER_DAMAGE
+	planet["yards"][0]["hp"] = ECON.BLASTER_DAMAGE * ECON.BLASTER_SHOTS * ECON.blaster_count("fighter")
 	var attacker: Dictionary = {"id": 9900, "owner": 1, "kind": "fighter", "at": 1, "dest": 1, "operation_target": 1, "route": [], "position": ECON.shipyard_position(state, 1, 0, 0.0), "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	state["ships"] = [attacker]
 	ECON._combat(state, graph, 1.0)
 	assert(planet["yards"].is_empty() and int(planet["owner"]) == 2 and ECON.has_station(planet))
 	assert(state["ship_destructions"].back()["kind"] == "shipyard")
-	planet["station"]["hp"] = ECON.LASER_DAMAGE
+	planet["station"]["hp"] = ECON.BLASTER_DAMAGE * ECON.BLASTER_SHOTS * ECON.blaster_count("fighter")
 	attacker["position"] = ECON.station_position(state, 1, 0.0)
-	attacker["laser_cooldown"] = 0.0
+	attacker["blaster_cooldown"] = 0.0
+	attacker["blaster_shot"] = 0
 	planet["stock"][ECON.ANTIMATTER] = 50.0
 	var stock: Dictionary = planet["stock"].duplicate()
 	ECON._combat(state, graph, 1.0)
@@ -3460,7 +3487,7 @@ func _test_conquest_resistance_and_evacuation() -> void:
 	colony["owner"] = 2
 	colony["station"] = {"hp": ECON.STATION_HP}
 	colony["population"] = 10000.0
-	colony["pds"][0] = {"hp": ECON.LASER_DAMAGE, "cooldown": 0.0, "target": -1, "laser_until": -1.0}
+	colony["pds"][0] = {"hp": ECON.BLASTER_DAMAGE * ECON.BLASTER_SHOTS * ECON.blaster_count("fighter"), "cooldown": 0.0, "target": -1, "laser_until": -1.0}
 	var attacker: Dictionary = {"id": 10001, "owner": 1, "kind": "fighter", "at": 2, "dest": 2, "operation_target": 2, "route": [], "position": map["points"][2], "hp": ECON.SHIP_HP}
 	state["ships"] = [attacker]
 	assert(ECON.command_fighters(state, 1, [10001], 2))
@@ -3473,8 +3500,9 @@ func _test_conquest_resistance_and_evacuation() -> void:
 	state["ships"].append(freighter)
 	var before: Vector2 = freighter["position"]
 	attacker["position"] = ECON.station_position(state, 2, float(state["elapsed"]))
-	attacker["laser_cooldown"] = 0.0
-	colony["station"]["hp"] = ECON.LASER_DAMAGE
+	attacker["blaster_cooldown"] = 0.0
+	attacker["blaster_shot"] = 0
+	colony["station"]["hp"] = ECON.BLASTER_DAMAGE * ECON.BLASTER_SHOTS * ECON.blaster_count("fighter")
 	ECON._combat(state, graph, 1.0)
 	assert(int(colony["owner"]) == 0)
 	assert(freighter["position"] == before and int(freighter["dest"]) == 1)

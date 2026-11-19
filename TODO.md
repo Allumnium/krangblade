@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.59.0: Validate blaster cadence, target and ally filtering, scout movement, capital simultaneous weapons, conquest pacing, effects and multiplayer damage/trace parity.
+
 - [ ] v0.58.10: Inspect capital silhouettes at all zooms, portrait fitting, selection rings, weapon origins, shipyard construction and crowded fleet readability.
 
 - [ ] v0.58.9: Validate AI capital resource/crew progression, mixed military fleets, bounded remote salvage and delivery return, and automatic human colony conversion with host/guest parity.
