@@ -431,7 +431,7 @@ func _send_commands() -> void:
 	session.call("request_unit_orders", [{"ids": [service_id], "order": {"kind": "deposit", "target": ECON.station_target_id(initial, home_index)}}], true)
 	var victim_id: int = 920000 + (home_index + 1) % expected_players
 	session.call("request_tactical_order", [attack_id], "attack", victim_id)
-	session.call("request_unit_orders", [{"ids": [attack_id], "order": {"kind": "sector", "target": home_index, "move_only": true}}], true)
+	session.call("request_unit_orders", [{"ids": [attack_id], "order": {"kind": "sector_entry", "target": home_index, "move_only": true}}], true)
 	session.call("request_unit_orders", [{"ids": [attack_id, victim_id], "order": {"kind": "sector", "target": field_node}}], true)
 	session.call("request_tactical_order", [attack_id], "attack", own_fighters[0])
 	session.call("request_tactical_order", [attack_id, victim_id], "patrol", field_node)
@@ -638,7 +638,7 @@ func _check_economy_sync() -> void:
 					attack_verified = attack_verified or (int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) == 920000 + (owner_home + 1) % expected_players)
 					if int(craft["id"]) == 920000 + owner_home and int(craft.get("attack_order", -1)) >= 0:
 						var queue: Array = craft.get("order_queue", [])
-						order_queue_verified = queue.size() == 1 and queue[0].get("kind") == "sector" and queue[0].get("target") == owner_home and queue[0].get("move_only", false)
+						order_queue_verified = queue.size() == 1 and queue[0].get("kind") == "sector_entry" and queue[0].get("target") == owner_home and queue[0].get("move_only", false)
 					if craft.get("patrol_to", -1) == field_node and craft.get("direct_order", false):
 						ordered += 1
 					elif int(craft["at"]) == owner_home and (craft["route"] as Array).is_empty():

@@ -2133,6 +2133,14 @@ static func sector_limit(graph: Dictionary, node: int, direction: Vector2) -> fl
 	var overlap: float = maxf(0.0, width - (second - limit))
 	return limit - overlap * overlap / (4.0 * width)
 
+static func sector_entry_point(graph: Dictionary, node: int, origin: Vector2) -> Vector2:
+	var center: Vector2 = graph["points"][node]
+	var direction: Vector2 = center.direction_to(origin)
+	if direction.is_zero_approx():
+		direction = Vector2.RIGHT
+	# A tiny inward inset avoids shared-edge ambiguity and floating-point jitter.
+	return center + direction * maxf(0.0, sector_limit(graph, node, direction) - 1.0)
+
 static func sector_contains(graph: Dictionary, node: int, position: Vector2) -> bool:
 	var offset: Vector2 = position - (graph["points"][node] as Vector2)
 	return offset.length() <= sector_limit(graph, node, offset.normalized()) + EPS
@@ -2889,6 +2897,11 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 				return order["point"]
 			if target >= 0 and target < graph["points"].size():
 				return graph["points"][target]
+		"sector_entry":
+			if target >= 0 and target < graph["points"].size():
+				if ship.get("unit_order", {}) == order and ship.has("local_move_target"):
+					return ship["local_move_target"]
+				return sector_entry_point(graph, target, ship["position"])
 		"sector", "colonize":
 			if target >= 0 and target < graph["points"].size():
 				return graph["points"][target]
@@ -2931,7 +2944,7 @@ static func _unit_order_running(ship: Dictionary) -> bool:
 		return true
 	var order: Dictionary = ship.get("unit_order", {})
 	match order.get("kind", ""):
-		"position":
+		"position", "sector_entry":
 			return ship.has("local_move_target")
 		"sector":
 			return not (ship["route"] as Array).is_empty() or (not bool(order.get("move_only", false)) and _engaged(ship))
@@ -2978,6 +2991,11 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			if order.has("heading") and (not order["heading"] is Vector2 or not (order["heading"] as Vector2).is_finite() or (order["heading"] as Vector2).is_zero_approx()):
 				return false
 			return fighter and military_pois(state, owner).has(target) and (not order.has("point") or (order["point"] is Vector2 and patrol_node(state, graph, owner, order["point"]) == target))
+		"sector_entry":
+			if target < 0 or target >= state["planets"].size() or not military_pois(state, owner).has(target) or bool(ship.get("retreating", false)):
+				return false
+			var nav: Dictionary = _manual_nav(state, graph, ship, target)
+			return sector_contains(graph, target, ship["position"]) or _military_paths(nav["graph"], nav["node"])["distance"].has(int(ship["at"]))
 		"sector":
 			return military_pois(state, owner).has(target)
 		"attack":
@@ -2998,6 +3016,25 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
+		"sector_entry":
+			var graph: Dictionary = military_graph(state)
+			var center: Vector2 = graph["points"][target]
+			var move_only: bool = bool(order.get("move_only", false))
+			var accepted: bool = command_local_position(state, player, ids, target, center, move_only)
+			if not accepted:
+				accepted = command_remote_position(state, player, ids, target, center, move_only)
+			if not accepted:
+				return false
+			for ship in _owned_units(state, player, ids):
+				var origin: Vector2 = ship["position"]
+				var route: Array = ship["route"]
+				if route.size() > 1:
+					origin = graph["points"][int(route[-2])]
+				var point: Vector2 = sector_entry_point(graph, target, origin)
+				ship["local_move_target"] = point
+				ship["navigation_target"] = point
+				ship["unit_order"] = {"kind": "sector_entry", "target": target, "move_only": move_only}
+			return true
 		"sector":
 			if _owned_fighters(state, player, ids).size() == ids.size():
 				return command_fighters(state, player, ids, target, bool(order.get("move_only", false)))
@@ -3211,10 +3248,11 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 	if fighter and not sector_contains(graph, node, ship["position"]):
 		if int(ship.get("dest", -1)) != node:
 			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
+		var entry: bool = ship.get("unit_order", {}).get("kind", "") == "sector_entry"
 		if (ship["route"] as Array).is_empty():
-			_navigate(ship, graph["points"][node], SHIP_SPEED * dt)
+			_navigate(ship, ship["local_move_target"] if entry else graph["points"][node], SHIP_SPEED * dt)
 		else:
-			_move({"map": graph}, ship, dt)
+			_move({"map": graph}, ship, dt, ship["local_move_target"] if entry else Vector2.INF, node)
 		return true
 	var point: Vector2 = ship["local_move_target"]
 	_navigate(ship, point, SHIP_SPEED * dt)

@@ -1290,8 +1290,8 @@ func _build_centered_queue(parent: Container) -> HFlowContainer:
 	# Filling the width lets each wrapped line stay centered independently.
 	queue.size_flags_vertical = Control.SIZE_EXPAND | Control.SIZE_SHRINK_CENTER
 	queue.alignment = FlowContainer.ALIGNMENT_CENTER
-	queue.add_theme_constant_override("h_separation", 12)
-	queue.add_theme_constant_override("v_separation", 12)
+	queue.add_theme_constant_override("h_separation", 6)
+	queue.add_theme_constant_override("v_separation", 6)
 	parent.add_child(queue)
 	return queue
 
@@ -1888,10 +1888,10 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
 	if ECONOMY.SHIP_KINDS.has(job["kind"]):
-		return _production_icon(str(job["kind"]), _empire_color(owner), 88)
+		return _production_icon(str(job["kind"]), _empire_color(owner), 44)
 	if job["kind"] == "yard_upgrade":
-		return _station_command_icon("upgrade", 88)
-	return _station_command_icon(str(job["target"]) if job["kind"] in ["economy_building", "production"] else str(job["kind"]), 88)
+		return _station_command_icon("upgrade", 44)
+	return _station_command_icon(str(job["target"]) if job["kind"] in ["economy_building", "production"] else str(job["kind"]), 44)
 
 func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
 	var jobs: Array = []
@@ -1937,16 +1937,16 @@ func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dicti
 		var id: int = int(job["id"])
 		if not rows.has(id):
 			var row := VBoxContainer.new()
-			row.add_theme_constant_override("separation", 6)
+			row.add_theme_constant_override("separation", 3)
 			var cancel := _button("", _cancel_job.bind(id), row)
 			cancel.focus_mode = Control.FOCUS_NONE
-			cancel.custom_minimum_size = Vector2(114, 114)
+			cancel.custom_minimum_size = Vector2(57, 57)
 			cancel.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			cancel.expand_icon = true
-			cancel.add_theme_constant_override("icon_max_width", 88)
+			cancel.add_theme_constant_override("icon_max_width", 44)
 			cancel.icon = _job_icon(job, int(system["owner"]))
 			var bar := ProgressBar.new()
-			bar.custom_minimum_size.y = 12
+			bar.custom_minimum_size.y = 6
 			bar.show_percentage = false
 			bar.step = 0.0
 			bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -4568,6 +4568,8 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			if contextual and not force_position and ref.is_empty() and craft["kind"] == "colony_ship" and not colony_sent and destination < state["planets"].size() and clicked_system and not ECONOMY.colony_path(state, _me(), craft, destination).is_empty():
 				order = {"kind": "colonize", "target": destination}
 				colony_sent = true
+			elif clicked_system and not force_position and (ref.is_empty() or not minimap_hint.is_empty()):
+				order = {"kind": "sector_entry", "target": destination, "move_only": move_only}
 			else:
 				order = {"kind": "position", "target": destination, "point": endpoint, "move_only": move_only}
 		entries.append({"ids": [id], "order": order})
@@ -4623,6 +4625,12 @@ func _formation_orders(state: Dictionary) -> Array:
 			ships[ship["id"]] = ship
 			origins[ship["id"]] = origin
 	var candidates: Array[int] = ECONOMY.military_pois(state, _me())
+	var anchor: int = ECONOMY.sector_at(graph, stroke[0], candidates)
+	if formation_mode != "patrol" and not formation_force_position and anchor >= 0 and anchor < state["planets"].size() and formation_path[0].distance_to(_screen_point(graph["points"][anchor])) <= maxf(9.0, _star_draw_radius(_planet_radius(anchor, state))):
+		for ship in ships.values():
+			var order: Dictionary = {"kind": "sector_entry", "target": anchor, "move_only": formation_mode != "attack"}
+			entries.append({"ids": [ship["id"]], "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
+		return entries
 	if owned.size() == 1:
 		if ships.is_empty():
 			return entries
@@ -4663,6 +4671,17 @@ func _draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tin
 	shape.append(shape[0])
 	map_canvas.draw_polyline(shape, Color(tint, 0.85), 1.0, true)
 
+func _draw_sector_target(graph: Dictionary, node: int, tint: Color, drawn: Dictionary) -> void:
+	if node < 0 or node >= graph["points"].size() or drawn.has(node):
+		return
+	drawn[node] = true
+	var center: Vector2 = graph["points"][node]
+	var outline := PackedVector2Array()
+	for i in range(97):
+		var direction := Vector2.from_angle(TAU * float(i) / 96.0)
+		outline.append(_screen_point(center + direction * ECONOMY.sector_limit(graph, node, direction)))
+	map_canvas.draw_polyline(outline, Color(tint, 0.9), 2.0, true)
+
 func _draw_formation_preview(state: Dictionary) -> void:
 	if formation_button == 0 or formation_length <= 5.0:
 		return
@@ -4670,6 +4689,10 @@ func _draw_formation_preview(state: Dictionary) -> void:
 	if entries.is_empty():
 		return
 	var color: Color = Color("#b880fa") if formation_mode == "patrol" else Color("#ff605c") if formation_mode == "attack" else HUD.ACCENT
+	if entries[0]["order"]["kind"] == "sector_entry":
+		var graph: Dictionary = ECONOMY.military_graph(state)
+		_draw_sector_target(graph, int(entries[0]["order"]["target"]), color, {})
+		return
 	if _selected_owned_units(state).size() == 1:
 		map_canvas.draw_line(formation_path[0], formation_path[-1], color, 1.5, true)
 	else:
@@ -5652,13 +5675,13 @@ func _order_color(ship: Dictionary, order: Dictionary) -> Color:
 	var kind: String = str(order.get("kind", ""))
 	if kind == "patrol":
 		return Color("#b880fa")
-	if ECONOMY.armed(ship) and (kind == "attack" or (kind in ["sector", "position"] and not bool(order.get("move_only", false)))):
+	if ECONOMY.armed(ship) and (kind == "attack" or (kind in ["sector", "sector_entry", "position"] and not bool(order.get("move_only", false)))):
 		return Color("#ff605c")
 	if kind == "repair":
 		return Color("#55c88b")
 	return HUD.ACCENT
 
-func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2) -> void:
+func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, drawn_sectors: Dictionary) -> void:
 	var order: Dictionary = ship.get("unit_order", {})
 	var endpoint: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
 	if ship.has("patrol_from") and ship.get("patrol_returning", false):
@@ -5673,7 +5696,9 @@ func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary,
 			continue
 		var finish: Vector2 = _screen_point(endpoint)
 		var tint: Color = _order_color(ship, pending)
-		if pending["kind"] in ["position", "sector"]:
+		if pending["kind"] in ["sector", "sector_entry"]:
+			_draw_sector_target(graph, int(pending["target"]), tint, drawn_sectors)
+		elif pending["kind"] == "position":
 			_draw_destination_ghost(ship["kind"], finish, pending.get("heading", finish - start), tint)
 		start = finish
 
@@ -5783,12 +5808,13 @@ func _draw_map() -> void:
 	var service_refs: Dictionary = ECONOMY.service_targets(state)
 	_draw_ship_target_rings(state, poses, service_refs)
 	var order_graph: Dictionary = ECONOMY.military_graph(state)
+	var drawn_sectors: Dictionary = {}
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
 		if not selected_units.has(id) or not poses.has(id):
 			continue
 		var start: Vector2 = poses[id]["point"]
-		_draw_queued_orders(state, order_graph, craft, start)
+		_draw_queued_orders(state, order_graph, craft, start, drawn_sectors)
 		var active_order: Dictionary = craft.get("unit_order", {})
 		var order_tint: Color = _order_color(craft, active_order)
 		if craft.has("patrol_from"):
@@ -5800,7 +5826,9 @@ func _draw_map() -> void:
 			var rally_tint := Color("#ff605c")
 			map_canvas.draw_line(start, destination, Color(rally_tint, 0.65), 1.5, true)
 			_draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
-		elif active_order.get("kind", "") in ["position", "sector"] and ECONOMY._unit_order_running(craft):
+		elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY._unit_order_running(craft):
+			_draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
+		elif active_order.get("kind", "") == "position" and ECONOMY._unit_order_running(craft):
 			var endpoint: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
 			if endpoint.is_finite():
 				var destination: Vector2 = _screen_point(endpoint)

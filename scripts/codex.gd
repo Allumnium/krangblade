@@ -434,7 +434,7 @@ func _combat() -> void:
 func _controls() -> void:
 	_note("Default hotkeys. Menu → Hotkeys changes bindings; camera speed sliders adjust keyboard, mouse edge and wheel zoom.")
 	_table(["Input", "Action"], [["Left click / drag", "Select a ship, structure or fleet"], ["Shift + select", "Add to selection"], ["Right click / drag", "Contextual order / formation"], ["A / M / P, then click", "Attack / move / patrol"], ["S / H", "Stop / hold"], ["L / D / R, then click", "Load / drop cargo / repair"], ["Y, then click / X", "Set / clear shipyard rally"], ["Shift + order", "Queue an order"], ["Arrows / screen edge / middle drag", "Pan camera"], ["Mouse wheel", "Zoom"], ["F", "Follow or focus selection"], ["F2", "Select all owned fighters"], ["Double F2", "Center military selection"], ["Ctrl + 0–9", "Assign control group"], ["Shift + 0–9", "Add selection to group"], ["0–9 / double tap", "Recall / center group"], ["B / T (station)", "Build / trade"], ["Esc", "Cancel targeting, return or menu"]])
-	_body("Use the minimap to navigate or issue contextual orders. Command-card buttons expose additional actions and tooltips; right-click eligible production cards to repeat.")
+	_body("Click a star to target its sector boundary; drag from a star to target the whole sector. Alt forces precise positioning. Use the minimap to navigate or issue contextual orders. Command-card buttons expose additional actions and tooltips; right-click eligible production cards to repeat.")
 
 func _multiplayer() -> void:
 	_body("Warbound supports up to eight players, flexible teams and AI opponents in solo and multiplayer. The host owns the simulation and validates commands. Guests view synchronized state and issue requests.")

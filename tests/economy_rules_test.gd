@@ -424,6 +424,7 @@ func _initialize() -> void:
 	_test_yard_autobuild_and_station_approach()
 	_test_population_queue_priority()
 	_test_unit_order_queue()
+	_test_sector_entry_orders()
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
 	_test_soft_separation()
@@ -2180,6 +2181,29 @@ func _test_unit_order_queue() -> void:
 		ECON.step(state, 0.1)
 		assert(ship["position"] == sector_arrival)
 	print("PASS: sequential orders, queue limits, formation facing, 20-year precise and sector arrival waits, hold override")
+
+func _test_sector_entry_orders() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	for i in range(2):
+		state["ships"].append({"id": 9800 + i, "owner": 1, "kind": "fighter" if i == 0 else "colony_ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.RIGHT, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()})
+	var order: Dictionary = {"kind": "sector_entry", "target": 2, "move_only": true}
+	assert(not ECON.issue_unit_order(state, 2, [9800], order, false))
+	assert(not ECON.issue_unit_order(state, 1, [9800], {"kind": "sector_entry", "target": 999}, false))
+	assert(ECON.issue_unit_order(state, 1, [9800, 9801], order, false))
+	var border: Vector2 = ECON.sector_entry_point(graph, 2, graph["points"][1])
+	for ship in state["ships"]:
+		assert(ship["local_move_target"].is_equal_approx(border))
+	for tick in range(2000):
+		ECON.step(state, 0.1)
+		if state["ships"].all(func(ship: Dictionary) -> bool: return not ship.has("local_move_target")):
+			break
+	for ship in state["ships"]:
+		assert(ship["position"].is_equal_approx(border) and ECON.sector_contains(graph, 2, ship["position"]))
+		assert(ECON.arrival_wait_remaining(state, ship) > 0.0)
+		assert(not ship.get("holding", false))
+	print("PASS: authoritative star-sector entry, border arrival and idle grace")
 
 func _test_local_position_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
