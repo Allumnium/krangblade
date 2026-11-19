@@ -460,7 +460,27 @@ func _test_station_defense_and_ports() -> void:
 	assert(ECON.enqueue(state, 1, 0, "yard", "port:1"))
 	print("PASS: stable station ports, one-time prepaid upgrades, increased repair cap and twin defensive lasers")
 
+func _test_local_avoidance() -> void:
+	var craft: Dictionary = {"id": 100, "position": Vector2.ZERO}
+	var goal := Vector2(300.0, 0.0)
+	ECON._begin_ship_avoidance({100: Vector2.ZERO, 101: Vector2(55.0, 0.0)})
+	assert(is_equal_approx(ECON._navigate(craft, goal, 10.0), 10.0))
+	assert(absf((craft["position"] as Vector2).y) > 1.0 and (craft["position"] as Vector2).x > 0.0)
+	assert(craft["navigation_target"] == goal)
+	var initial := Vector2.ZERO
+	craft["position"] = initial
+	ECON._begin_ship_avoidance({100: initial, 101: Vector2(55.0, 100.0)})
+	ECON._navigate(craft, goal, 10.0)
+	assert((craft["position"] as Vector2).is_equal_approx(Vector2(10.0, 0.0)))
+	craft["position"] = initial
+	ECON._begin_ship_avoidance({100: initial, 101: Vector2(20.0, 0.0)})
+	ECON._navigate(craft, Vector2(20.0, 0.0), 20.0)
+	assert(craft["position"] == Vector2(20.0, 0.0))
+	ECON.avoidance_cells.clear()
+	print("PASS: forward avoidance, movement budget, unobstructed path and shared endpoint")
+
 func _initialize() -> void:
+	_test_local_avoidance()
 	_test_station_defense_and_ports()
 	_test_station_construction_queue()
 	_test_ai_timed_orbital_housing()
@@ -725,7 +745,10 @@ func _initialize() -> void:
 	assert(is_equal_approx(baseline, 4.0))
 	assert(is_equal_approx(ECON.farm_potential(home), 4.0))
 	assert(is_equal_approx(ECON.organics_demand(home), 0.4))
-	assert(is_equal_approx(ECON.MINER_RATE, 6.0))
+	assert(is_equal_approx(ECON.MINER_RATE, 3.0))
+	assert(is_equal_approx(ECON.dropoff_rate("miner"), 120.0))
+	assert(is_equal_approx(ECON.dropoff_rate("ship"), 60.0))
+	assert(is_equal_approx(ECON.dropoff_rate("colony_ship"), 100.0))
 	assert(is_equal_approx(ECON.PLANET_MINING_LIMIT, 100.0))
 	assert(is_equal_approx(ECON.FIELD_MINING_LIMIT, 200.0))
 	home["population"] = ECON.HOME_POPULATION * 0.5
@@ -2342,7 +2365,7 @@ func _test_resource_handoff() -> void:
 	freighter["trade_auto"] = false
 	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats, 1.0) == 0.0)
 	freighter["trade_auto"] = true
-	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 0.1), ECON.dropoff_rate("miner") * 0.1))
+	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 0.01), ECON.dropoff_rate("miner") * 0.01))
 	assert(is_equal_approx(ECON._cargo_total(miner) + ECON._cargo_total(freighter), ECON.MINER_CAPACITY))
 	freighter["cargo"]["Metals"] = 0.0
 	var saved_stage: Dictionary = freighter["resource_stage"]
@@ -2351,7 +2374,7 @@ func _test_resource_handoff() -> void:
 	miner["route"] = [1]
 	miner["mining_mode"] = "idle"
 	miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
-	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 0.1), ECON.dropoff_rate("miner") * 0.1))
+	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 0.01), ECON.dropoff_rate("miner") * 0.01))
 	assert(freighter["route"] == [1] and miner["route"] == [1])
 	assert(is_equal_approx(ECON._cargo_total(miner) + ECON._cargo_total(freighter), ECON.MINER_CAPACITY))
 	freighter["cargo"]["Metals"] = 0.0
@@ -2786,8 +2809,8 @@ func _test_colony_farm() -> void:
 	assert(not ECON.command_unload_cargo(state, 2, [901]))
 	assert(ECON.issue_unit_order(state, 1, [901], {"kind": "unload"}, false))
 	ship["position"] = ECON.station_position(state, 0, float(state["elapsed"]))
-	assert(ECON._work_salvage(state, graph, ship, 1.0))
-	assert(is_equal_approx(float(home["stock"]["Organics"]), ECON.dropoff_rate("colony_ship")))
+	assert(ECON._work_salvage(state, graph, ship, 0.1))
+	assert(is_equal_approx(float(home["stock"]["Organics"]), ECON.dropoff_rate("colony_ship") * 0.1))
 	assert(ECON._work_salvage(state, graph, ship, 5.0))
 	assert(home["stock"]["Organics"] == 50.0 and ECON._cargo_total(ship) == 0.0)
 	ship.erase("unit_order")

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.54.3: Local avoidance examines at most 24 hulls per nearby grid cell and steers around the closest forward blocker. Dense swarms and shared endpoints can still overlap; profile at eight players and look for oscillation or traffic congestion. Fast unloading is limited by tick size, cargo and storage space.
+
 - v0.54.2: Berth scoring favors clearance over shortest approach; very crowded stations may not have enough space for all hulls. Check jitter and throughput. Guard is a fighter-only sector defense with a chosen return point; verify edge pursuit and emergency repair behavior.
 
 - v0.54.0: Collect Antimatter uses a dual-purpose icon (left target, right toggle); verify tooltip discoverability and mixed-fleet slot placement. Science holds remain non-unloadable pending antimatter usage design.
