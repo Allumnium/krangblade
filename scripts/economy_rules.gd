@@ -4585,8 +4585,32 @@ const STATION_INFLUENCE: int = 30
 const YARD_INFLUENCE: int = 20
 const BUILDING_INFLUENCE: int = 10
 
-# Regions are indexed by POI followed by connection index. Core membership
-# takes priority; overlapping highways award points to the nearest centerline.
+# Highway influence sections are independent of the navigation graph.
+# Split each centerline into equal lengths no greater than this cap.
+const HIGHWAY_MAX_LENGTH: float = 3000.0
+
+static func highway_regions(graph: Dictionary) -> Dictionary:
+	if graph.has("highway_regions"):
+		return graph["highway_regions"]
+	var points: Array = graph["points"]
+	var edges: Array = graph["edges"]
+	var starts: Array[int] = []
+	var counts: Array[int] = []
+	var region_edges: Array[int] = []
+	for i in range(edges.size()):
+		var a: Vector2 = points[int(edges[i][0])]
+		var b: Vector2 = points[int(edges[i][1])]
+		var count: int = maxi(1, ceili(a.distance_to(b) / HIGHWAY_MAX_LENGTH))
+		starts.append(points.size() + region_edges.size())
+		counts.append(count)
+		for j in range(count):
+			region_edges.append(i)
+	var layout: Dictionary = {"starts": starts, "counts": counts, "region_edges": region_edges, "size": points.size() + region_edges.size()}
+	graph["highway_regions"] = layout
+	return layout
+
+# Core membership takes priority; overlapping highways award points to the
+# nearest centerline. A section boundary never changes navigation.
 static func influence_region(graph: Dictionary, point: Vector2) -> int:
 	if not point.is_finite():
 		return -1
@@ -4601,6 +4625,7 @@ static func influence_region(graph: Dictionary, point: Vector2) -> int:
 	if region >= 0:
 		return region
 	var edges: Array = graph["edges"]
+	var layout: Dictionary = highway_regions(graph)
 	for i in range(edges.size()):
 		var a: int = int(edges[i][0])
 		var b: int = int(edges[i][1])
@@ -4608,12 +4633,15 @@ static func influence_region(graph: Dictionary, point: Vector2) -> int:
 		var d: float = point.distance_squared_to(center)
 		if d < nearest and d <= pow(lane_radius(graph, a, b) + EPS, 2.0):
 			nearest = d
-			region = points.size() + i
+			var axis: Vector2 = (points[b] as Vector2) - (points[a] as Vector2)
+			var along: float = clampf((point - (points[a] as Vector2)).dot(axis) / maxf(axis.length_squared(), EPS), 0.0, 1.0)
+			var count: int = int(layout["counts"][i])
+			region = int(layout["starts"][i]) + mini(count - 1, floori(along * count))
 	return region
 
 static func territory_influence(state: Dictionary, graph: Dictionary) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
-	for i in range(graph["points"].size() + graph["edges"].size()):
+	for i in range(int(highway_regions(graph)["size"])):
 		result.append({})
 	for i in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][i]

@@ -1161,18 +1161,23 @@ func _draw_minimap() -> void:
 			var influence: Color = territory_last[i]
 			minimap.draw_circle(locations[i], radius, Color(influence, 0.17 * influence.a))
 	var edges: Array = graph["edges"]
+	var layout: Dictionary = ECONOMY.highway_regions(graph)
 	for i in range(edges.size()):
 		var a: int = int(edges[i][0])
 		var b: int = int(edges[i][1])
-		var tint: Color = Color("#39546c") if known[a] and known[b] else Color("#182b3b")
-		var weight_index: int = points.size() + i
-		if known[a] and known[b] and weight_index < territory_last.size():
-			var influence: Color = territory_last[weight_index]
-			var width: float = clampf(2.0 * ECONOMY.lane_radius(graph, a, b) * area.size.x / _map_size().x, 1.0, 8.0)
-			if influence.a > 0.0:
-				minimap.draw_line(locations[a], locations[b], Color(influence, 0.25 * influence.a), width, true)
-			tint = tint.lerp(Color(influence, 1.0), influence.a)
-		minimap.draw_line(locations[a], locations[b], tint, 1.0, true)
+		var sections: int = int(layout["counts"][i])
+		var width: float = clampf(2.0 * ECONOMY.lane_radius(graph, a, b) * area.size.x / _map_size().x, 1.0, 8.0)
+		for j in range(sections):
+			var start: Vector2 = locations[a].lerp(locations[b], float(j) / sections)
+			var finish: Vector2 = locations[a].lerp(locations[b], float(j + 1) / sections)
+			var tint: Color = Color("#39546c") if known[a] and known[b] else Color("#182b3b")
+			var weight_index: int = int(layout["starts"][i]) + j
+			if known[a] and known[b] and weight_index < territory_last.size():
+				var influence: Color = territory_last[weight_index]
+				if influence.a > 0.0:
+					minimap.draw_line(start, finish, Color(influence, 0.25 * influence.a), width, true)
+				tint = tint.lerp(Color(influence, 1.0), influence.a)
+			minimap.draw_line(start, finish, tint, 1.0, true)
 	for i in range(points.size()):
 		var tint := Color("#34485a")
 		if i < count:
@@ -3276,6 +3281,8 @@ void fragment() {
 		int rim_index = -1;
 		int interior_index = -1;
 		float interior_best = 1e20;
+		float rim_t = 0.0;
+		float interior_t = 0.0;
 		for (int i = 0; i < lane_count; i++) {
 			vec4 edge = texelFetch(lane_data, ivec2(i, 0), 0);
 			vec4 a = texelFetch(site_data, ivec2(int(edge.x + 0.5), 0), 0);
@@ -3288,9 +3295,11 @@ void fragment() {
 			if (distance <= 0.0 && center_distance < interior_best) {
 				interior_best = center_distance;
 				interior_index = i;
+				interior_t = t;
 			}
 			if (distance < lane_d) {
 				rim_index = i;
+				rim_t = t;
 				second_lane = lane_d;
 				lane_d = distance;
 				nearest_radius = radius;
@@ -3311,7 +3320,21 @@ void fragment() {
 		lane_fill = (1.0 - inside) * (1.0 - smoothstep(-aa, 0.0, lane_d));
 		int color_index = interior_index >= 0 ? interior_index : rim_index;
 		if (color_index >= 0) {
-			lane_tint = texelFetch(influence_data, ivec2(site_count + color_index, 0), 0);
+			vec4 edge = texelFetch(lane_data, ivec2(color_index, 0), 0);
+			int sections = max(1, int(edge.w + 0.5));
+			float along = interior_index >= 0 ? interior_t : rim_t;
+			float scaled = along * float(sections);
+			int section = min(sections - 1, int(floor(scaled)));
+			lane_tint = texelFetch(influence_data, ivec2(int(edge.z + 0.5) + section, 0), 0);
+			// Soft internal rims only on long lanes; never split routing.
+			if (sections > 1 && interior_index >= 0) {
+				vec2 a = texelFetch(site_data, ivec2(int(edge.x + 0.5), 0), 0).xy;
+				vec2 b = texelFetch(site_data, ivec2(int(edge.y + 0.5), 0), 0).xy;
+				float cut = clamp(floor(scaled + 0.5), 1.0, float(sections - 1));
+				float cut_dist = abs(scaled - cut) * length(b - a) / float(sections);
+				float seam = (1.0 - smoothstep(aa * 0.4, aa * 2.0, cut_dist)) * lane_fill;
+				gap_border = max(gap_border, seam);
+			}
 		}
 	}
 	// Fade from neutral outline to player mix as total influence approaches
@@ -3347,7 +3370,8 @@ func _refresh_territory(state: Dictionary) -> void:
 	if points.is_empty():
 		territory_image.hide()
 		return
-	if territory_seed != seed_value or territory_site_count != points.size() or territory_last.size() != points.size() + edges.size():
+	var layout: Dictionary = ECONOMY.highway_regions(graph)
+	if territory_seed != seed_value or territory_site_count != points.size() or territory_last.size() != int(layout["size"]):
 		territory_radius = ECONOMY.sector_base_radius(state["map"])
 		territory_seed = seed_value
 		territory_last.clear()
@@ -3362,7 +3386,7 @@ func _refresh_territory(state: Dictionary) -> void:
 		territory_material.set_shader_parameter("site_count", territory_site_count)
 		var lanes: Image = Image.create_empty(maxi(1, edges.size()), 1, false, Image.FORMAT_RGBAF)
 		for i in range(edges.size()):
-			lanes.set_pixel(i, 0, Color(float(edges[i][0]), float(edges[i][1]), 0.0, 1.0))
+			lanes.set_pixel(i, 0, Color(float(edges[i][0]), float(edges[i][1]), float(layout["starts"][i]), float(layout["counts"][i])))
 		territory_material.set_shader_parameter("lane_data", ImageTexture.create_from_image(lanes))
 		territory_material.set_shader_parameter("lane_count", edges.size())
 		var extent: Vector2 = _map_size() / territory_radius + Vector2.ONE * 3.0
@@ -3376,7 +3400,10 @@ func _refresh_territory(state: Dictionary) -> void:
 	var known: Array[int] = ECONOMY.military_pois(state, _me())
 	var tints: Array[Color] = []
 	for i in range(weights.size()):
-		var visible: bool = known.has(i) if i < points.size() else known.has(int(edges[i - points.size()][0])) and known.has(int(edges[i - points.size()][1]))
+		var visible: bool = known.has(i)
+		if i >= points.size():
+			var edge: Array = edges[int(layout["region_edges"][i - points.size()])]
+			visible = known.has(int(edge[0])) and known.has(int(edge[1]))
 		tints.append(ECONOMY.influence_color(weights[i] if visible else {}, colors))
 	if tints == territory_last:
 		return
