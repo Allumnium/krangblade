@@ -474,6 +474,7 @@ func _initialize() -> void:
 	_test_rounded_sector_limits()
 	_test_shipyard_rally()
 	_test_freighter_bays()
+	_test_crowded_dock_delivery()
 	_test_recovery_economy()
 	_test_opening_pacing()
 	_test_neutral_direct_occupation()
@@ -1254,7 +1255,7 @@ func _initialize() -> void:
 		ECON.step(transport, 0.1)
 		if ECON._cargo_total(first) > ECON.EPS:
 			break
-	assert((first["position"] as Vector2).distance_to(ECON.station_position(transport, 0, float(transport["elapsed"]))) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+	assert((first["position"] as Vector2).distance_to(ECON.station_position(transport, 0, float(transport["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.SHIP_CLEARANCE + ECON.EPS)
 	assert(is_equal_approx(float(first["cargo"]["Metals"]), 4.0))
 	assert(is_equal_approx(float(first["cargo"]["Crystals"]), 6.0))
 	assert(is_equal_approx(ECON._cargo_total(second), 0.0))
@@ -1265,7 +1266,7 @@ func _initialize() -> void:
 		ECON.step(transport, 0.1)
 		if float(ally["stock"]["Metals"]) > ECON.EPS:
 			break
-	assert((first["position"] as Vector2).distance_to(ECON.station_position(transport, 1, float(transport["elapsed"]))) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+	assert((first["position"] as Vector2).distance_to(ECON.station_position(transport, 1, float(transport["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.SHIP_CLEARANCE + ECON.EPS)
 	assert(is_equal_approx(float(ally["stock"]["Metals"]), 4.0))
 	assert(is_equal_approx(float(ally["stock"]["Crystals"]), 6.0))
 	assert(is_equal_approx(float(hostile["stock"]["Metals"]), 0.0))
@@ -2062,7 +2063,7 @@ func _initialize() -> void:
 			assert(float(access_home["stock"]["Crystals"]) == 0.0)
 			was_loaded = true
 		if float(access_home["stock"]["Crystals"]) >= 20.0 - ECON.EPS:
-			assert(access_miner["position"] == ECON.station_position(multi_access, 0, float(multi_access["elapsed"])))
+			assert((access_miner["position"] as Vector2).distance_to(ECON.station_position(multi_access, 0, float(multi_access["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.SHIP_CLEARANCE + ECON.EPS)
 			assert(ECON.local_flow(access_home, "Mining deliveries", "Crystals") > 0.0)
 			break
 	assert(was_loaded and is_equal_approx(float(access_home["stock"]["Crystals"]), 20.0))
@@ -2357,7 +2358,7 @@ func _test_resource_handoff() -> void:
 	depot["stock"]["Metals"] = ECON.storage_capacity(depot)
 	hauler["position"] = Vector2(100, 0)
 	assert(ECON._work_salvage(staging, stage_graph, hauler, 100.0))
-	assert((hauler["position"] as Vector2).distance_to(ECON.station_position(staging, 0, float(staging["elapsed"]))) <= ECON.EPS)
+	assert((hauler["position"] as Vector2).distance_to(ECON.station_position(staging, 0, float(staging["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.EPS)
 	assert(is_equal_approx(float(hauler["cargo"]["Metals"]), 5.0))
 	assert(is_equal_approx(float(depot["stock"]["Metals"]), ECON.storage_capacity(depot)))
 	depot["stock"]["Metals"] -= 5.0
@@ -2921,7 +2922,7 @@ func _test_civilian_waiting_movement() -> void:
 	for tick in range(500):
 		ECON.step(state, 0.1)
 		if float(miner["cargo"]["Crystals"]) < 10.0 - ECON.EPS:
-			assert((miner["position"] as Vector2).distance_to(ECON.station_position(state, 0, float(state["elapsed"]))) <= ECON.EPS)
+			assert((miner["position"] as Vector2).distance_to(ECON.station_position(state, 0, float(state["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.SHIP_CLEARANCE + ECON.EPS)
 			break
 	assert(float(miner["cargo"]["Crystals"]) <= ECON.EPS)
 	assert(is_equal_approx(float(home["stock"]["Crystals"]), 10.0))
@@ -3130,13 +3131,45 @@ func _test_conquest_resistance_and_evacuation() -> void:
 	assert((freighter["position"] as Vector2).distance_to(dock) < before.distance_to(dock))
 	print("PASS: planetary defense simultaneous damage and safe cargo-preserving station-loss reroute")
 
+func _test_crowded_dock_delivery() -> void:
+	var map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var home: Dictionary = state["planets"][0]
+	var graph: Dictionary = ECON.military_graph(state)
+	var dock: Vector2 = ECON.station_position(state, 0, float(state["elapsed"]))
+	home["stock"]["Metals"] = ECON.storage_capacity(home) - 40.0
+	var ship: Dictionary = {"id": 521, "owner": 1, "kind": "ship", "at": 0, "origin": 0, "route": [], "leg": 0.0, "dest": -1, "source": -1, "position": dock + Vector2.RIGHT * ECON.SHIP_CLEARANCE, "heading": Vector2.UP, "cargo": ECON.empty_stock(), "hp": ECON.SHIP_HP}
+	state["ships"].append(ship)
+	ship["cargo"]["Metals"] = 50.0
+	home["thresholds"]["Metals"]["import"] = false
+	ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 0.01)
+	assert(ship.get("resource_haul", false))
+	assert(ECON._work_salvage(state, graph, ship, 0.01))
+	assert(is_equal_approx(float(ship["cargo"]["Metals"]), 10.0))
+	assert(is_equal_approx(float(home["stock"]["Metals"]), ECON.storage_capacity(home)))
+	home["stock"]["Metals"] -= 10.0
+	state["elapsed"] += 1.0
+	ship["position"] = ECON.station_position(state, 0, float(state["elapsed"])) + Vector2.LEFT * ECON.SHIP_CLEARANCE
+	assert(ECON._work_salvage(state, graph, ship, 0.01))
+	assert(ECON._cargo_total(ship) <= ECON.EPS)
+	assert(is_equal_approx(float(home["stock"]["Metals"]), ECON.storage_capacity(home)))
+	ship["cargo"]["Metals"] = 20.0
+	home["stock"]["Metals"] -= 10.0
+	assert(ECON.issue_unit_order(state, 1, [521], {"kind": "deposit", "target": ECON.station_target_id(state, 0)}, false))
+	assert(ECON._work_cargo_order(state, graph, ship, ECON.service_targets(state), 0.01))
+	assert(ship.has("cargo_order") and is_equal_approx(float(ship["cargo"]["Metals"]), 10.0))
+	home["stock"]["Metals"] -= 10.0
+	assert(ECON._work_cargo_order(state, graph, ship, ECON.service_targets(state), 0.01))
+	assert(not ship.has("cargo_order") and ECON._cargo_total(ship) <= ECON.EPS)
+	print("PASS: dock clearance, leftover trade cargo, partial manual deliveries and storage retry")
+
 func _test_freighter_bays() -> void:
 	var cargo: Dictionary = ECON.empty_stock()
 	for bay in ECON.freighter_cargo_bays(cargo):
 		assert(bay.is_empty())
 	cargo["Metals"] = ECON.CARGO_CAPACITY
 	var bays: Array = ECON.freighter_cargo_bays(cargo)
-	assert(bays.size() == 7)
+	assert(bays.size() == 10 and ECON.FREIGHTER_BAY_CAPACITY == 10.0)
 	for bay in bays:
 		assert(bay.size() == 1 and bay[0]["resource"] == "Metals")
 		assert(is_equal_approx(float(bay[0]["amount"]), ECON.FREIGHTER_BAY_CAPACITY))
@@ -3165,23 +3198,23 @@ func _test_freighter_bays() -> void:
 	source["stock"]["Metals"] = 1000.0
 	source["thresholds"]["Metals"]["max"] = 20.0
 	destination["stock"]["Metals"] = 0.0
-	var ship: Dictionary = {"id": 1, "kind": "ship", "owner": 1, "at": 0, "route": [], "leg": 0.0, "position": Vector2.ZERO, "source": 0, "dest": 1, "cargo": ECON.empty_stock()}
+	var ship: Dictionary = {"id": 1, "kind": "ship", "owner": 1, "at": 0, "route": [], "leg": 0.0, "position": ECON.station_position(state, 0, 0.0) - Vector2.RIGHT * 150.0, "source": 0, "dest": 1, "cargo": ECON.empty_stock()}
 	ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 0.1)
 	assert(is_zero_approx(ECON._cargo_total(ship)))
 	for tick in range(100):
 		ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 0.1)
 		if ECON._cargo_total(ship) > ECON.EPS:
 			break
-	assert(ship["position"] == ECON.station_position(state, 0, 0.0))
+	assert((ship["position"] as Vector2).distance_to(ECON.station_position(state, 0, 0.0)) <= ECON.STATION_DOCK_RANGE + ECON.EPS)
 	assert(is_equal_approx(float(ship["cargo"]["Metals"]), ECON.CARGO_CAPACITY))
 	assert(is_equal_approx(ECON._cargo_total(ship), ECON.CARGO_CAPACITY))
 	assert(is_equal_approx(float(source["stock"]["Metals"]), 1000.0 - ECON.CARGO_CAPACITY))
 	assert(float(destination["stock"]["Metals"]) == 0.0)
 	ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 10.0)
-	assert(ship["position"] == ECON.station_position(state, 1, 0.0))
+	assert((ship["position"] as Vector2).distance_to(ECON.station_position(state, 1, 0.0)) <= ECON.STATION_DOCK_RANGE + ECON.EPS)
 	assert(is_equal_approx(float(destination["stock"]["Metals"]), ECON.CARGO_CAPACITY))
 	assert(is_zero_approx(ECON._cargo_total(ship)))
-	print("PASS: seven shared tonnage bays, full single-resource and mixed loads, partial and empty cargo")
+	print("PASS: ten shared ten-ton bays, full single-resource and mixed loads, partial and empty cargo")
 
 # Contract only degree-two standalone connectors to inspect the original
 # cluster-level topology without pretending they are a single cluster.

@@ -261,6 +261,13 @@ func _phase_changed() -> void:
 						var farm: Dictionary = state["ships"].back()
 						farm["holding"] = true
 						farm["farm_auto"] = false
+						# Dock-separated freighters must deliver without exact-center arrival.
+						for dock_slot in range(2):
+							var docked: Dictionary = repair_victim.duplicate(true)
+							var dock_point: Vector2 = ECON.station_position(state, index, float(state["elapsed"])) + Vector2.from_angle(float(dock_slot) * PI) * ECON.SHIP_CLEARANCE
+							docked.merge({"id": 941000 + index * 2 + dock_slot, "position": dock_point, "holding": false, "cargo": ECON.empty_stock(), "hp": ECON.SHIP_HP, "salvage_delivery": true, "salvage_depot": index, "dest": index, "salvage_auto": false, "trade_auto": false, "wander_auto": false}, true)
+							docked["cargo"][ECON.ANTIMATTER] = 1.0
+							state["ships"].append(docked)
 						# Separate focus-fire hull so the existing movement and hold
 						# scenarios remain independent of this command.
 						ECON._finish(state, index, system, {"id": 920000 + index, "kind": "fighter", "population_allocated": 0.0})
@@ -699,6 +706,7 @@ func _check_economy_sync() -> void:
 			var follow_verified: bool = false
 			var resource_handoff: bool = false
 			var recipient_loaded: bool = false
+			var dock_delivered: int = 0
 			var farm_verified: bool = false
 			var repair_toggled: bool = false
 			var repaired: bool = false
@@ -706,6 +714,8 @@ func _check_economy_sync() -> void:
 			for craft in state["ships"]:
 				if int(craft["owner"]) == owner and craft["kind"] == "miner" and int(craft.get("assigned_field", -1)) >= 0:
 					assigned_miners += 1
+				if int(craft["id"]) in [941000 + owner_home * 2, 941001 + owner_home * 2] and ECON._cargo_total(craft) <= ECON.EPS:
+					dock_delivered += 1
 				if int(craft["id"]) == 939000 + owner_home:
 					farm_verified = ECON.autocast_enabled(craft, "farm") and not ECON.supports_autocast(craft, "salvage") and float(craft["cargo"]["Organics"]) > ECON.EPS and ECON._cargo_total(craft) <= ECON.COLONY_CAPACITY + ECON.EPS
 				if int(craft["id"]) == 930000 + owner_home:
@@ -718,7 +728,7 @@ func _check_economy_sync() -> void:
 					recipient_loaded = ECON._cargo_total(craft) >= ECON.CARGO_CAPACITY - ECON.EPS
 				if int(craft["id"]) == 980000 + owner_home:
 					repair_toggled = not ECON.autocast_enabled(craft, "repair") and not ECON.autocast_enabled(craft, "mine") and ECON.autocast_enabled(craft, "salvage") and not ECON.autocast_enabled(craft, "wander")
-					deposited = float(craft["cargo"].get(ECON.ANTIMATTER, 0.0)) <= ECON.EPS and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 15.0 - ECON.EPS
+					deposited = float(craft["cargo"].get(ECON.ANTIMATTER, 0.0)) <= ECON.EPS and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 17.0 - ECON.EPS
 				if int(craft["id"]) == 990000 + owner_home:
 					repaired = float(craft["hp"]) >= ECON.SHIP_HP - ECON.EPS
 			var checks: Dictionary = {
@@ -731,7 +741,8 @@ func _check_economy_sync() -> void:
 				"patrol": patrol_verified,
 				"attack_target": attack_verified,
 				"unit_order_queue": order_queue_verified,
-				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 12.0 - 0.001,
+				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 14.0 - 0.001,
+				"crowded_dock_delivery": dock_delivered == 2,
 				"colony_farming": farm_verified,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
 				"miner_repair_toggle": repair_toggled,

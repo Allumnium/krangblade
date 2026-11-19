@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.53.3: Freighter display name (internal ship key unchanged), elongated five paired rows of 10 t cargo bays, total 100 t. Show actual crew in selection and fleet totals. Station deliveries use a 64-world-unit docking radius to tolerate separation; trade leftover cargo seeks owned warehouse capacity and manual station deposits retry partial loads. Top HUD has no enclosing surface; omit rounded-zero annual net rates.
+
 - v0.53.2: Triple the ship overview display multiplier from 4× to 12× at minimum zoom; keep station/shipyard multiplier 4×. Use the same smooth log-zoom blend to 1× at zoom 16, shared ship hit/selection/muzzle scale and tiny-hull fallback. No simulation or minimap change.
 
 - v0.53.1: Ability/tooltips express real-time seconds (1× baseline; remaining cooldown scales with active speed); preserve game-year economy displays. Active shipyard construction draws progressive outline and fill at reserved port. Physical builds canceled before completion drop all paid materials as persistent salvage; non-standalone upgrades refund directly and crew returns.

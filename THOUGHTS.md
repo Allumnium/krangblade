@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.53.3: Exact station arrival and contact correction can conflict. Docking radius preserves physical delivery and avoids chasing a shared point; monitor very crowded docks and repeated export/redeposit when demand changes.
+
 - v0.53.2: Larger distant ship markers improve readability but may obscure densely packed fleets; verify map click selection without changing world separation or station art.
 
 - v0.53.1: Construction cancellation salvage is persistent to guarantee 100% recoverability. Monitor debris accumulation and salvage competition near busy yards; later-yard repricing still returns only the price difference directly.
