@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.56.5: Observe moving freighter handoffs and repeated depot replanning if receiver fills or leaves range.
+
 - v0.56.4: Check yard upgrade icon legibility at tactical zoom, especially with concurrent yard and station jobs.
 
 - v0.56.3: Previous new hull art did not match typed dictionary declaration. Explicit vector shapes and panel layers now present; inspect visual scale and large-hull overlap.

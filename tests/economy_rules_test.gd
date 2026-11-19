@@ -2481,6 +2481,12 @@ func _test_resource_handoff() -> void:
 	miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
 	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 0.01), ECON.dropoff_rate("miner") * 0.01))
 	assert(freighter["route"] == [1] and miner["route"] == [1])
+	miner["mining_mode"] = "delivery"
+	miner["cargo_order"] = {"kind": "deposit", "target": -2}
+	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats, 1.0) > 0.0)
+	assert(not miner.has("cargo_order") and miner["route"].is_empty() and miner["mining_mode"] == "idle")
+	miner.erase("_handoff_delivery")
+	miner["cargo"]["Metals"] = ECON.MINER_CAPACITY - float(freighter["cargo"]["Metals"])
 	assert(is_equal_approx(ECON._cargo_total(miner) + ECON._cargo_total(freighter), ECON.MINER_CAPACITY))
 	freighter["cargo"]["Metals"] = 0.0
 	freighter["route"] = []

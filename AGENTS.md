@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.56.5: Positive Harvester handoff cancels prior cargo delivery, pauses movement for the transfer tick, and reevaluates remaining cargo afterward. Empty manual cargo orders finish immediately.
+
 - v0.56.4: Show active yard upgrades as static icons with progress bars in their own berths, not in the station hub. Ship construction animation unchanged.
 
 - v0.56.3: Authored Scout, Cruiser and Destroyer hull silhouettes and layered empire-tinted panels; scale production portraits and large-hull click radius, align beam origins. No stat changes.

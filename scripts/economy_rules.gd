@@ -2186,7 +2186,7 @@ static func dropoff_rate(kind: String) -> float:
 	return TRACTOR_RATE * 20.0
 
 static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictionary, receivers: Array, threats: Dictionary, dt: float) -> float:
-	if miner.get("kind", "") != "miner" or _cargo_total(miner) <= EPS or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("cargo_order") or miner.has("repair_order"):
+	if miner.get("kind", "") != "miner" or _cargo_total(miner) <= EPS or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("repair_order"):
 		return 0.0
 	var owner: int = int(miner["owner"])
 	var point: Vector2 = miner["position"]
@@ -2213,6 +2213,19 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 			_resource_haul(freighter)
 		if _cargo_total(miner) <= EPS or total >= budget - EPS:
 			break
+	if total > EPS and (miner.has("cargo_order") or bool(miner.get("salvage_delivery", false)) or miner.get("mining_mode", "") in ["return", "delivery"]):
+		_cancel_salvage_order(miner)
+		miner.erase("cargo_order")
+		if miner.get("unit_order", {}).get("kind", "") in ["deposit", "drop", "unload"]:
+			miner.erase("unit_order")
+		_finish_manual(miner)
+		miner["source"] = -1
+		miner["field"] = -1
+		miner["mining_mode"] = "delivery" if _cargo_total(miner) > EPS else "idle"
+		miner["navigation_target"] = miner["position"]
+		miner["next_mining_search"] = 0.0
+		miner["next_unload_search"] = 0.0
+		miner["_handoff_delivery"] = true
 	return total
 
 static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
@@ -3190,6 +3203,10 @@ static func _drop_carried(state: Dictionary, ship: Dictionary) -> void:
 
 static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float) -> bool:
 	if not ship.has("cargo_order"):
+		return false
+	if _cargo_total(ship) <= EPS:
+		ship.erase("cargo_order")
+		_finish_manual(ship)
 		return false
 	var order: Dictionary = ship["cargo_order"]
 	var ref: Dictionary = targets.get(int(order.get("target", -1)), {})
@@ -6496,6 +6513,9 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var civilian_usec: int = 0
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
+		if ship.get("_handoff_delivery", false):
+			ship.erase("_handoff_delivery")
+			continue
 		if ship.get("kind", "") == "colony_ship":
 			_grow_colony_cargo(ship, dt)
 		var salvage_ship_id: int = int(ship["id"])
