@@ -29,6 +29,9 @@ const TRADE_HEIGHT_REDUCTION: float = 90.0
 const PLANET_FADE_START: float = 40.0
 const PLANET_FADE_FULL: float = 100.0
 const PLANET_FADE_SECONDS: float = 0.22
+const STAR_TEXTURE_SIZE: int = 256
+const STAR_TEXTURE_CORE: float = 74.0
+const STAR_SPARK_COUNT: int = 9
 
 # Keep construction recipes graphical even in the engine's native tooltip
 # popup. Non-construction buttons still use the standard text tooltip.
@@ -307,6 +310,7 @@ var game_visual_clock: float = 0.0
 var info: Label
 var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
+var star_textures: Dictionary = {}
 var system_visual_seed: int = -1
 var planet_detail_alpha: Dictionary = {}
 var planet_detail_seed: int = -1
@@ -3893,6 +3897,90 @@ func _body_texture(body: Dictionary) -> Texture2D:
 	body["texture"] = ImageTexture.create_from_image(image)
 	return body["texture"]
 
+# Bake two photosphere/corona textures once per match. Every star shares
+# its temperature-class texture with its own rotation and small color tint.
+# No per-frame noise, particle nodes, network state or random simulation calls.
+func _star_texture(cool: bool) -> Texture2D:
+	if star_textures.has(cool):
+		return star_textures[cool]
+	var noise := FastNoiseLite.new()
+	noise.seed = 91813 if cool else 41207
+	noise.frequency = 0.047
+	noise.fractal_octaves = 4
+	var image := Image.create(STAR_TEXTURE_SIZE, STAR_TEXTURE_SIZE, false, Image.FORMAT_RGBA8)
+	var dark := Color("#496c9b") if cool else Color("#c05a25")
+	var middle := Color("#a4c7eb") if cool else Color("#ffbf64")
+	var bright := Color("#eaf7ff") if cool else Color("#fff8dc")
+	var halo := Color("#77a8df") if cool else Color("#f4a752")
+	var half: float = float(STAR_TEXTURE_SIZE) * 0.5
+	var extent: float = half / STAR_TEXTURE_CORE
+	for y in range(STAR_TEXTURE_SIZE):
+		for x in range(STAR_TEXTURE_SIZE):
+			var q := (Vector2(x + 0.5, y + 0.5) - Vector2.ONE * half) / STAR_TEXTURE_CORE
+			var r: float = q.length()
+			if r >= extent:
+				continue
+			# Directional noise breaks the corona into soft, radial filaments.
+			var axis: Vector2 = q.normalized()
+			var plume: float = clampf(0.5 + noise.get_noise_2d(axis.x * 87.0 + 133.0, axis.y * 87.0) * 1.25, 0.0, 1.0)
+			var distance: float = maxf(0.0, r - 1.0)
+			var falloff: float = 1.0 - smoothstep(1.0, extent, r)
+			var glow: float = (0.15 * exp(-distance * 7.0) + 0.18 * plume * plume * exp(-distance * 4.5)) * falloff
+			var coverage: float = 1.0 - smoothstep(1.0 - 1.0 / STAR_TEXTURE_CORE, 1.0 + 1.0 / STAR_TEXTURE_CORE, r)
+			var color: Color = halo.lerp(middle, plume * 0.24)
+			if coverage > 0.0:
+				var z: float = sqrt(maxf(0.0, 1.0 - r * r))
+				var surface: Vector2 = q * 105.0 + Vector2(z * 28.0, z * 15.0)
+				# Warp the granulation into curved plasma cells and mottled lanes.
+				var warp: float = noise.get_noise_2d(surface.x + 320.0, surface.y - 110.0)
+				var cells: float = noise.get_noise_2d(surface.x + warp * 23.0, surface.y + warp * 18.0)
+				var grain: float = noise.get_noise_2d(surface.x * 2.8 + 580.0, surface.y * 2.8)
+				var heat: float = clampf(0.56 + cells * 0.83 + grain * 0.20 + z * 0.11, 0.0, 1.0)
+				var core: Color = dark.lerp(middle, smoothstep(0.0, 0.56, heat)).lerp(bright, smoothstep(0.35, 0.98, heat))
+				core = core.darkened((1.0 - z) * 0.18)
+				color = color.lerp(core, coverage)
+			color.a = coverage + glow * (1.0 - coverage)
+			if color.a > 0.001:
+				image.set_pixel(x, y, color)
+	var texture := ImageTexture.create_from_image(image)
+	star_textures[cool] = texture
+	return texture
+
+func _draw_star(index: int, pos: Vector2, radius: float, tint: Color, cool: bool, opacity: float) -> void:
+	var viewport := Rect2(Vector2.ZERO, map_canvas.size)
+	var extent: float = radius * float(STAR_TEXTURE_SIZE) / (2.0 * STAR_TEXTURE_CORE)
+	if not viewport.grow(extent + 3.0).has_point(pos):
+		return
+	if radius < 2.0:
+		# Keep the smallest overview stars clean and cheap.
+		map_canvas.draw_circle(pos, maxf(0.75, radius), Color(tint.lightened(0.22), opacity), true, -1.0, true)
+		return
+	var texture: Texture2D = _star_texture(cool)
+	var rotation: float = float(index) * 2.399963 + visual_clock * (0.012 + 0.003 * float(index % 5))
+	var modulation: Color = Color.WHITE.lerp(tint.lightened(0.30), 0.20)
+	modulation.a = opacity
+	map_canvas.draw_set_transform(pos, rotation)
+	map_canvas.draw_texture_rect(texture, Rect2(-Vector2.ONE * extent, Vector2.ONE * extent * 2.0), false, modulation)
+	map_canvas.draw_set_transform(Vector2.ZERO)
+	# Analytic, short-lived plasma sparks drift away from the limb.
+	# Fade in only at detail zoom; fixed count, no persistent emitters.
+	var detail: float = smoothstep(10.0, 32.0, radius)
+	if detail <= 0.001:
+		return
+	for i in range(STAR_SPARK_COUNT):
+		var phase: float = float(i) * 0.618034 + float(index) * 0.137
+		var age: float = fposmod(visual_clock * (0.16 + float(i % 3) * 0.025) + phase, 1.0)
+		var angle: float = phase * TAU * 3.0 + rotation + age * 0.15
+		var axis: Vector2 = Vector2.from_angle(angle)
+		var point: Vector2 = pos + axis * radius * lerpf(0.98, 1.36, age)
+		if not viewport.grow(4.0).has_point(point):
+			continue
+		var fade: float = sin(age * PI) * detail * opacity
+		var spark_size: float = clampf(radius * 0.021, 0.65, 2.1)
+		var spark_color: Color = tint.lightened(0.48)
+		map_canvas.draw_line(point - axis * minf(5.0, radius * 0.045), point, Color(spark_color, fade * 0.26), maxf(0.7, spark_size * 0.65), true)
+		map_canvas.draw_circle(point, spark_size, Color(spark_color, fade * 0.54), true, -1.0, true)
+
 func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
 	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(pos):
 		return
@@ -3921,10 +4009,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 					_draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
 	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
-	for layer in range(5, 0, -1):
-		map_canvas.draw_circle(pos, star_radius * (1.0 + float(layer) * 0.33), Color(star_color, 0.05 * opacity), true)
-	map_canvas.draw_circle(pos, star_radius, Color(star_color, opacity), true)
-	map_canvas.draw_circle(pos, star_radius * 0.55, Color(Color("#fffdf1"), clampf((opacity - 0.6) / 0.4, 0.0, 1.0)), true)
+	_draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity)
 	if detail < 0.999 and not system.get("pds", {}).is_empty():
 		map_canvas.draw_arc(pos, star_radius + 3.0, -PI * 0.8, PI * 0.8, 18, Color(Color("#bdcbd6"), 1.0 - detail), 1.5, true)
 	if detail < 0.3 and building_selection_kind == "pds":
@@ -5132,10 +5217,11 @@ func _process(delta: float) -> void:
 			var border: Control = button.get_meta("auto_border")
 			if border.is_visible_in_tree():
 				border.queue_redraw()
-	if command_buttons.has("repair"):
-		var border: Control = command_buttons["repair"].get_meta("auto_border")
-		if border.is_visible_in_tree():
-			border.queue_redraw()
+	for id in AUTOCAST_SLOTS:
+		if command_buttons.has(id):
+			var border: Control = command_buttons[id].get_meta("auto_border")
+			if is_instance_valid(border) and border.is_visible_in_tree():
+				border.queue_redraw()
 	game_visual_clock += delta * float(_state().get("time_speed", 1))
 	for visual in ship_visuals.values():
 		var duration: float = float(visual.get("duration", SNAPSHOT_SECONDS))

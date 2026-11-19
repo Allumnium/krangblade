@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.50.2: Layered star circles looked diagrammatic; bounded shared textures provide granulation and soft coronal detail with inexpensive zoom-gated sparks. Check extreme zoom texture softness and first texture-generation cost. Fixed stale per-frame repair autocast border lookup left by v0.50.0 (manual Repair no longer owns an auto border).
+
 - v0.50.1: At galaxy zoom, ships/structures benefit from up to 4× visual-only enlargement. Keep star selection precedence when orbital centers overlap; monitor fleet clutter and low-zoom detail cost in eight-player games. Station minimum radius remains 5 px to avoid multiplying an existing artificial floor.
 
 - v0.50.0: Expose autonomous ship behavior via independent enabled borders and radial cooldowns rather than hidden wandering. Default modes preserve low-micro play; monitor manual mining completion, cargo retention and mixed selections. No change to defensive combat or emergency withdrawal.
