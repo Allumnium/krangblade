@@ -2092,7 +2092,10 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	_command_slot("load", "Load Cargo", _arm_command.bind("load"))
 	unload_button = _command_slot("unload", "Drop Cargo", _arm_command.bind("unload"))
 	_command_slot("repair", "Repair target", _arm_command.bind("repair"))
-	for id in AUTOCAST_SLOTS:
+	# Third row: reserve its last slot for the fifth mode in mixed selections.
+	while command_card.get_child_count() < 11:
+		_station_spacer(command_card)
+	for id in ["auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair"]:
 		var mode: String = AUTOCAST_SLOTS[id]
 		var title_text: String = "Wander" if mode == "wander" else "Auto-" + mode.capitalize()
 		var button: Button = _command_slot(id, title_text, _toggle_autocast.bind(mode))
@@ -2151,6 +2154,14 @@ func _draw_autocast_cooldown(mask: Control) -> void:
 
 func _refresh_autocast_cards() -> void:
 	var state: Dictionary = _state()
+	# Repair and Trade are exclusive on individual hulls. Keep Trade in
+	# the bottom-right slot unless a mixed fleet needs both modes.
+	if command_buttons.has("auto_trade") and command_buttons.has("auto_repair"):
+		var trade: Button = command_buttons["auto_trade"]
+		var desired_slot: Control = command_card.get_child(11 if not _autocast_units(state, "repair").is_empty() else 15)
+		if trade.get_parent() != desired_slot:
+			trade.reparent(desired_slot, false)
+			trade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for id in AUTOCAST_SLOTS:
 		if not command_buttons.has(id):
 			continue
@@ -2162,7 +2173,7 @@ func _refresh_autocast_cards() -> void:
 		for ship in units:
 			if ECONOMY.autocast_enabled(ship, mode):
 				enabled_count += 1
-				remaining = maxf(remaining, ECONOMY.autocast_remaining(state, ship))
+				remaining = maxf(remaining, ECONOMY.autocast_remaining(state, ship, mode))
 		button.visible = not units.is_empty()
 		button.disabled = units.is_empty()
 		button.set_pressed_no_signal(enabled_count > 0)
@@ -2178,6 +2189,8 @@ func _refresh_autocast_cards() -> void:
 			status += " · %.0f yr cooldown" % ceilf(remaining)
 		var shortcut: String = str(button.get_meta("hotkey", ""))
 		button.tooltip_text = "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut]
+		if mode == "wander":
+			button.tooltip_text += "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority."
 
 func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""

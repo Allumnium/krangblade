@@ -2205,8 +2205,16 @@ func _test_autocast_modes() -> void:
 			break
 	assert(miner["position"].is_equal_approx(point))
 	assert(ECON.set_autocast(state, 1, [9809], "wander", true))
+	assert(ECON.autocast_ready(state, miner, "wander"))
+	assert(ECON.autocast_remaining(state, miner, "wander") == 0.0)
+	assert(ECON.autocast_remaining(state, miner, "salvage") > ECON.EPS)
+	assert(ECON._idle_formation_targets(state, graph).has(9809))
+	assert(ECON.issue_unit_order(state, 1, [9809], {"kind": "position", "target": 0, "point": center, "move_only": true}, false))
 	assert(not ECON.autocast_ready(state, miner, "wander"))
-	assert(not ECON._idle_formation_targets(state, graph).has(9809))
+	for tick in range(100):
+		ECON.step(state, 0.1)
+		if not miner.has("local_move_target"):
+			break
 	state["elapsed"] = float(state["elapsed"]) + ECON.AUTOCAST_COOLDOWN_YEARS + 0.1
 	assert(ECON.autocast_ready(state, miner, "wander"))
 	assert(ECON._idle_formation_targets(state, graph).has(9809))

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.50.3: Explicit Wander enable should skip its remaining cooldown rather than force the player to wait. Preserve other cooldowns and active orders. Four bottom slots suffice per hull; mixed miner/logistics selections require a fifth control just above.
+
 - v0.50.2: Layered star circles looked diagrammatic; bounded shared textures provide granulation and soft coronal detail with inexpensive zoom-gated sparks. Check extreme zoom texture softness and first texture-generation cost. Fixed stale per-frame repair autocast border lookup left by v0.50.0 (manual Repair no longer owns an auto border).
 
 - v0.50.1: At galaxy zoom, ships/structures benefit from up to 4× visual-only enlargement. Keep star selection precedence when orbital centers overlap; monitor fleet clutter and low-zoom detail cost in eight-player games. Station minimum radius remains 5 px to avoid multiplying an existing artificial floor.
