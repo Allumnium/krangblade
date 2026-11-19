@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.63.0: Spillover uses uncapped direct totals (500 contributes 25 at 5%), never received influence. Check color readability at hubs with many strong neighbors; connected region adjacency does not jump over highway sections.
+
 - v0.62.3: Fixed four-row shipyard deck uses blank slots for locked classes; mixed-level selections retain applicable upgrade buttons after unlocked ships. Check hotkeys and refresh on upgrade completion.
 
 - v0.62.2: Long highways split into equal influence sections using center-to-center length (conservative cap; exposed sections can be shorter near sector cores). The cached layout leaves navigation untouched; verify seams and fog filtering visually.

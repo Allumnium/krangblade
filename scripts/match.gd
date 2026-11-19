@@ -3429,19 +3429,15 @@ func _refresh_territory(state: Dictionary) -> void:
 		var extent: Vector2 = _map_size() / territory_radius + Vector2.ONE * 3.0
 		territory_material.set_shader_parameter("world_extent", extent)
 		territory_material.set_shader_parameter("padding", 1.5)
-	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph)
+	var known: Array[int] = ECONOMY.military_pois(state, _me())
+	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph, known)
 	var roster: Dictionary = session.get("players")
 	var colors: Dictionary = {}
 	for player in roster:
 		colors[player] = _empire_color(int(player))
-	var known: Array[int] = ECONOMY.military_pois(state, _me())
 	var tints: Array[Color] = []
-	for i in range(weights.size()):
-		var visible: bool = known.has(i)
-		if i >= points.size():
-			var edge: Array = edges[int(layout["region_edges"][i - points.size()])]
-			visible = known.has(int(edge[0])) and known.has(int(edge[1]))
-		tints.append(ECONOMY.influence_color(weights[i] if visible else {}, colors))
+	for weights_by_player in weights:
+		tints.append(ECONOMY.influence_color(weights_by_player, colors))
 	if tints == territory_last:
 		return
 	territory_last = tints

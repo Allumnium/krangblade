@@ -3476,6 +3476,10 @@ func _test_territory_influence() -> void:
 	assert(weights[0] == {1: 70, 2: 2})
 	var layout: Dictionary = ECON.highway_regions(graph)
 	assert(layout["counts"] == [1, 2, 1] and layout["starts"] == [4, 5, 7])
+	assert(layout["links"] == [Vector2i(0, 4), Vector2i(4, 1), Vector2i(1, 5), Vector2i(5, 6), Vector2i(6, 2), Vector2i(2, 7), Vector2i(7, 3)])
+	assert(is_equal_approx(float(weights[4][1]), 3.5) and is_equal_approx(float(weights[4][2]), 0.1))
+	assert(ECON.territory_influence(state, graph, [0])[4].is_empty())
+	assert(ECON.territory_influence(state, graph, [1])[0].is_empty())
 	assert(weights.size() == 8 and weights[5] == {1: 1} and weights[6] == {2: 10} and weights[1].is_empty() and weights[2].is_empty())
 	assert(ECON.influence_region(graph, Vector2(4500, 600)) == 6)
 	assert(ECON.lane_direct(graph, Vector2(4400, 600), Vector2(4600, 600), [0, 1, 2, 3]))
@@ -3493,7 +3497,16 @@ func _test_territory_influence() -> void:
 	weights = ECON.territory_influence(state, graph)
 	assert(weights[0] == {1: 60, 2: 2} and home["owner"] == 1)
 	assert(ECON.territory_influence(bytes_to_var(var_to_bytes(state)), graph) == weights)
-	print("PASS: physical sector/highway influence, infrastructure, normalized mixed colors, saturation cap and snapshot parity")
+	# Stronger-to-weaker only, threshold inclusive, proportional mixed
+	# colors, multiple donors, equal totals and no second-hop propagation.
+	var raw: Array[Dictionary] = [{1: 400, 2: 100}, {2: 49}, {}, {1: 50}, {2: 50}, {2: 25}, {1: 49}]
+	var links: Array = [Vector2i(0, 1), Vector2i(1, 2), Vector2i(3, 4), Vector2i(3, 5), Vector2i(0, 5), Vector2i(6, 2)]
+	var added: Array[Dictionary] = ECON.influence_spillover(raw, links)
+	assert(added[0] == raw[0] and added[1] == {1: 20.0, 2: 54.0})
+	assert(added[2].is_empty() and added[3] == raw[3] and added[4] == raw[4])
+	assert(added[5] == {1: 22.5, 2: 30.0} and added[6] == raw[6])
+	assert(raw[1] == {2: 49} and raw[5] == {2: 25})
+	print("PASS: physical sector/highway influence, infrastructure, normalized mixed colors, saturation cap, one-hop spillover and snapshot parity")
 
 func _test_conquest() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
