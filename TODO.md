@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.51.9: Validate 10 t mining and 100 t hauling, repeated handoff, full and partial dispatch, conservation, 100 t salvage staging threshold, cargo art and two-/three-peer replication. Economy and peer fixtures revised; runtime pending.
+
 - [ ] v0.51.8: Verify PDS repair approach/range, exact battery HP, manual and automatic repair, orbit alignment, pause and peer rendering; monitor orbit smoothness on guests. Economy assertions added; runtime pending.
 
 - [ ] v0.51.7: Playtest Trade checkbox labels, insets, slider/checkbox interaction, standard-height panel and bounded expansion/scroll at small windows and UI scales; verify Return and normal wing restoration. Runtime and visual checks pending.

@@ -5913,14 +5913,14 @@ func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2,
 			var remaining: float = maxf(0.0, float(pile.get("expires_at", float(pile["born"]) + ECONOMY.SALVAGE_MAX_LIFETIME)) - float(state["elapsed"]))
 			map_canvas.draw_string(font, point + Vector2(9, -9), "%s · %.1f t · %ds%s" % [pile["resource"], float(pile["amount"]), ceili(remaining), " · Claimed" if claimant >= 0 else ""], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint.lightened(0.35))
 
-# All bays represent equal tonnage, with partial, resource-colored fills.
-# Smaller combat holds get fewer bays, larger mining holds get more.
+# Bays represent equal shares of each hull’s capacity, with partial resource-colored fills.
+# Preserve the authored bay geometry independently of cargo balance.
 func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, lateral: Vector2) -> void:
 	var kind: String = str(ship["kind"])
 	var capacity: float = ECONOMY.cargo_capacity(kind)
 	if capacity <= ECONOMY.EPS:
 		return
-	var count: int = ceili(capacity / ECONOMY.FREIGHTER_BAY_CAPACITY)
+	var count: int = 2 if kind == "miner" else 5 if kind == "colony_ship" else 1
 	var bays: Array = ECONOMY.cargo_bays(ship.get("cargo", {}), capacity, count)
 	var per_bay: float = capacity / float(count)
 	for k in range(count):
@@ -5928,7 +5928,7 @@ func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, later
 		var half_length: float = 1.05
 		var half_width: float = 1.35
 		if kind == "miner":
-			center = Vector2(5.7 - float(k % 7) * 1.9, -4.8 if k < 7 else 4.8)
+			center = Vector2(5.7, -4.8 if k == 0 else 4.8)
 			half_length = 0.85
 		elif kind == "colony_ship":
 			center = Vector2(4.0 - float(k) * 2.65, 0.0)

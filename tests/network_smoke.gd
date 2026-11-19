@@ -230,9 +230,10 @@ func _phase_changed() -> void:
 						var haul_point: Vector2 = graph["points"][index] + Vector2.UP * minf(200.0, ECON.sector_limit(graph, index, Vector2.UP) * 0.4)
 						var collector: Dictionary = repairer.duplicate(true)
 						collector.merge({"id": 986000 + index, "position": haul_point, "holding": false, "cargo": ECON.empty_stock(), "mine_auto": false, "salvage_auto": false, "repair_auto": false, "wander_auto": false}, true)
-						collector["cargo"]["Metals"] = ECON.CARGO_CAPACITY
+						collector["cargo"]["Metals"] = ECON.MINER_CAPACITY
 						var hauler: Dictionary = repair_victim.duplicate(true)
 						hauler.merge({"id": 987000 + index, "position": haul_point, "holding": false, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "salvage_auto": false, "resource_stage": {"node": index, "anchor": index, "point": haul_point, "salvage_site": true}}, true)
+						hauler["cargo"]["Metals"] = ECON.CARGO_CAPACITY - ECON.MINER_CAPACITY
 						hauler["next_resource_stage_search"] = float(state["elapsed"]) + 5.0
 						state["ships"].append(collector)
 						state["ships"].append(hauler)

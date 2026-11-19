@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.51.9: New 10:1 hauling ratio supports on-site collectors. Monitor whether the unchanged five-year minimum mining stay and eight-year partial freight dispatch cause underfilled or inefficient trips with these capacities before retuning.
+
 - v0.51.8: PDS service references previously placed repair at the star. Separate actual repair position from established combat range; use authoritative elapsed for planet rendering so repair aligns on all peers. Check snapshot-driven orbital smoothness and overview markers.
 
 - v0.51.7: Three trade resources no longer need the former tall trade wing. Size it to actual content with a small expansion cap; check 100% checkbox text width, scroll and Return accessibility at minimum viewport.

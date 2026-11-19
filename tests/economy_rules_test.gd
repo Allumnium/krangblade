@@ -268,7 +268,7 @@ func _test_miner_service_orders() -> void:
 	assert(miner.get("retreating", false))
 	miner["hp"] = ECON.SHIP_HP
 	miner["retreating"] = false
-	miner["cargo"]["Metals"] = 20.0
+	miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
 	# A loaded miner waiting on a full warehouse can travel and dump its
 	# exact cargo at an arbitrary point, without creating structural loot.
 	var remote := Vector2(10000, 100)
@@ -278,22 +278,22 @@ func _test_miner_service_orders() -> void:
 		if not miner.has("local_move_target"):
 			break
 		ECON._work_local_move(graph, miner, 1.0, state)
-	assert(miner["position"] == remote and miner["at"] == 2 and miner["cargo"]["Metals"] == 20.0)
+	assert(miner["position"] == remote and miner["at"] == 2 and miner["cargo"]["Metals"] == ECON.MINER_CAPACITY)
 	var drop := remote + Vector2(40, 40)
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "drop", "point": drop}, false))
 	assert(ECON._work_cargo_order(state, graph, miner, ECON.service_targets(state), 1.0))
 	assert(miner["position"] == drop and ECON._cargo_total(miner) == 0.0 and state["salvage"].size() == 1)
 	var pile: Dictionary = state["salvage"].values()[0]
-	assert(pile["amount"] == 20.0 and pile["position"] == drop)
+	assert(pile["amount"] == ECON.MINER_CAPACITY and pile["position"] == drop)
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "salvage", "target": pile["id"]}, false))
 	assert(ECON._work_salvage(state, graph, miner, 10.0))
-	assert(is_equal_approx(miner["cargo"]["Metals"], 20.0))
+	assert(is_equal_approx(miner["cargo"]["Metals"], ECON.MINER_CAPACITY))
 	var depot: Dictionary = state["planets"][0]
 	depot["stock"]["Metals"] = ECON.storage_capacity(depot) - 3.0
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "deposit", "target": station_id}, false))
 	miner["position"] = ECON.station_position(state, 0, 0.0)
 	assert(ECON._work_cargo_order(state, graph, miner, ECON.service_targets(state), 1.0))
-	assert(miner["cargo"]["Metals"] == 17.0 and depot["stock"]["Metals"] == ECON.storage_capacity(depot))
+	assert(miner["cargo"]["Metals"] == ECON.MINER_CAPACITY - 3.0 and depot["stock"]["Metals"] == ECON.storage_capacity(depot))
 	assert(not ECON.can_deposit(state, miner, station_id))
 	assert(not ECON.can_deposit(state, miner, ECON.station_target_id(state, 1)))
 	# A focused attack ignores a closer hostile; focus can be a structure.
@@ -2266,7 +2266,7 @@ func _test_resource_handoff() -> void:
 	var point: Vector2 = graph["points"][0]
 	var miner: Dictionary = {"id": 9820, "owner": 1, "kind": "miner", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": point, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "delivery"}
 	var freighter: Dictionary = {"id": 9821, "owner": 1, "kind": "ship", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": point + Vector2.RIGHT * (ECON.RESOURCE_HANDOFF_RANGE + 1.0), "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "resource_stage": {"node": 0, "anchor": 0, "point": point, "salvage_site": true}}
-	miner["cargo"]["Metals"] = 40.0
+	miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
 	state["ships"] = [miner, freighter]
 	var threats: Dictionary = ECON._salvage_threats(state, graph)
 	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats) == 0.0)
@@ -2277,15 +2277,21 @@ func _test_resource_handoff() -> void:
 	freighter["trade_auto"] = false
 	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats) == 0.0)
 	freighter["trade_auto"] = true
-	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats), ECON.CARGO_CAPACITY))
-	assert(is_equal_approx(ECON._cargo_total(miner), 40.0 - ECON.CARGO_CAPACITY))
+	assert(ECON.MINER_CAPACITY == 10.0 and ECON.CARGO_CAPACITY == 100.0)
+	for load in range(10):
+		miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
+		assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats), ECON.MINER_CAPACITY))
+		assert(is_zero_approx(ECON._cargo_total(miner)))
+		assert(is_equal_approx(ECON._cargo_total(freighter), ECON.MINER_CAPACITY * float(load + 1)))
+		if load < 9:
+			assert(freighter.has("resource_stage") and not freighter.get("salvage_delivery", false))
 	assert(is_equal_approx(ECON._cargo_total(freighter), ECON.CARGO_CAPACITY))
 	assert(not freighter.has("resource_stage") and bool(freighter["salvage_delivery"]))
 	var pile: Dictionary = {"resource": "Metals", "amount": 100.0}
 	miner["cargo"] = ECON.empty_stock()
 	freighter["cargo"] = ECON.empty_stock()
-	ECON._collect_salvage(miner, pile, 1.0)
-	ECON._collect_salvage(freighter, pile, 1.0)
+	ECON._collect_salvage(miner, pile, 0.5)
+	ECON._collect_salvage(freighter, pile, 0.5)
 	assert(is_equal_approx(ECON._cargo_total(freighter), ECON._cargo_total(miner) * 0.25))
 	assert(is_equal_approx(float(pile["amount"]) + ECON._cargo_total(miner) + ECON._cargo_total(freighter), 100.0))
 	var staging_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
@@ -2639,7 +2645,7 @@ func _test_salvage() -> void:
 	state["elapsed"] = 2.0
 	state["salvage"].clear()
 	var hauler: Dictionary = {"id": 100, "owner": 1, "kind": "ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(200, 0), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"}
-	hauler["cargo"]["Metals"] = 28.0
+	hauler["cargo"]["Metals"] = ECON.CARGO_CAPACITY - 2.0
 	var second: Dictionary = hauler.duplicate(true)
 	second["id"] = 101
 	state["ships"] = [hauler, second]
@@ -2655,7 +2661,7 @@ func _test_salvage() -> void:
 	var original: Dictionary = home["stock"].duplicate()
 	ECON._work_salvage(state, graph, hauler, 0.1)
 	assert(hauler["position"].distance_to(Vector2(200, 0)) <= ECON.SHIP_SPEED * 0.1 + 0.01)
-	assert(ECON._cargo_total(hauler) == 28.0)
+	assert(ECON._cargo_total(hauler) == ECON.CARGO_CAPACITY - 2.0)
 	for tick in range(200):
 		state["elapsed"] += 0.1
 		var previous: Vector2 = hauler["position"]
@@ -2666,7 +2672,7 @@ func _test_salvage() -> void:
 			break
 	assert(not ECON._salvage_active(hauler) and ECON._cargo_total(hauler) < 0.001)
 	assert(is_equal_approx(pile["amount"], 23.0) and pile["claim"] == -1)
-	assert(is_equal_approx(home["stock"]["Metals"], original["Metals"] + 28.0))
+	assert(is_equal_approx(home["stock"]["Metals"], original["Metals"] + ECON.CARGO_CAPACITY - 2.0))
 	assert(is_equal_approx(home["stock"]["Crystals"], original["Crystals"] + 2.0))
 	assert(not ECON.command_unload_cargo(state, 2, [101]))
 	assert(ECON.command_unload_cargo(state, 1, [101]))
@@ -3054,8 +3060,8 @@ func _test_freighter_bays() -> void:
 	for bay in bays:
 		assert(bay.size() == 1 and bay[0]["resource"] == "Metals")
 		assert(is_equal_approx(float(bay[0]["amount"]), ECON.FREIGHTER_BAY_CAPACITY))
-	cargo["Metals"] = 12.0
-	cargo["Crystals"] = 18.0
+	cargo["Metals"] = ECON.CARGO_CAPACITY * 0.4
+	cargo["Crystals"] = ECON.CARGO_CAPACITY * 0.6
 	var totals: Dictionary = ECON.empty_stock()
 	for bay in ECON.freighter_cargo_bays(cargo):
 		var bay_total: float = 0.0
@@ -3063,20 +3069,21 @@ func _test_freighter_bays() -> void:
 			totals[segment["resource"]] += float(segment["amount"])
 			bay_total += float(segment["amount"])
 		assert(is_equal_approx(bay_total, ECON.FREIGHTER_BAY_CAPACITY))
-	assert(is_equal_approx(float(totals["Metals"]), 12.0))
-	assert(is_equal_approx(float(totals["Crystals"]), 18.0))
+	assert(is_equal_approx(float(totals["Metals"]), ECON.CARGO_CAPACITY * 0.4))
+	assert(is_equal_approx(float(totals["Crystals"]), ECON.CARGO_CAPACITY * 0.6))
 	cargo = ECON.empty_stock()
 	cargo["Crystals"] = 0.5
 	bays = ECON.freighter_cargo_bays(cargo)
 	assert(is_equal_approx(float(bays[0][0]["amount"]), 0.5))
 	for index in range(1, bays.size()):
 		assert(bays[index].is_empty())
-	# An actual freight trip can load and deliver all ten tons of one resource.
+	# An actual freight trip can load and deliver a full hold of one resource.
 	var map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(190.0, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 1}}, [1, 2], false)
 	var source: Dictionary = state["planets"][0]
 	var destination: Dictionary = state["planets"][1]
 	source["stock"]["Metals"] = 1000.0
+	source["thresholds"]["Metals"]["max"] = 20.0
 	destination["stock"]["Metals"] = 0.0
 	var ship: Dictionary = {"id": 1, "kind": "ship", "owner": 1, "at": 0, "route": [], "leg": 0.0, "position": Vector2.ZERO, "source": 0, "dest": 1, "cargo": ECON.empty_stock()}
 	ECON._work_ship(state, ship, ECON.planet_teams(state), {}, 0.1)
