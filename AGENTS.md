@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.51.10: Apply bounded, host-authoritative spatial contact correction to all hulls after jobs and movement, including independent orders, held, docking, following and waiting ships; retain soft steering and service logic. Starting fleets launch in spaced rings; subsequent launches seek free positions.
+
 - v0.51.9: Miner hold 10 t; logistics hold 100 t across seven bays. Preserve mining/salvage rates, full or partial dispatch timing, one-full-hold salvage staging threshold (now 100 t), physical handoff and storage rules. Miner art has two symmetric cargo bays; colony/fighter capacity unchanged.
 
 - v0.51.8: Repair uses the actual orbiting planetary defense position and stable battery ID, never the star. Render planet positions from authoritative elapsed time; repair beams, markers and command lines use the battery position. Preserve existing system-centered PDS combat range.

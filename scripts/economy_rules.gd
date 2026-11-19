@@ -113,6 +113,8 @@ const AI_WAVE_MIN: int = 3
 const AI_RALLY_RADIUS: float = 150.0
 const FORMATION_SPACING: float = 28.0
 const SHIP_SEPARATION_RADIUS: float = 45.0
+const SHIP_CLEARANCE: float = 32.0
+const SHIP_CLEARANCE_PASSES: int = 6
 const FOLLOW_DISTANCE: float = SHIP_SEPARATION_RADIUS * 2.0
 const RALLY_ARRIVAL_RADIUS: float = SHIP_SEPARATION_RADIUS * 2.0
 const SHIP_SEPARATION_STRENGTH: float = 0.65
@@ -233,10 +235,13 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 		planets[index]["planet_count"] = system_bodies(planets[index], int(map_data["seed"]), index).size()
 	if starting_fleet:
 		for index in range(ordered.size()):
+			var slot: int = 0
 			for kind in ["miner", "miner", "miner", "fighter", "fighter", "ship"]:
 				var id: int = int(state["next_id"])
 				state["next_id"] = id + 1
-				_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind]})
+				var offset: Vector2 = Vector2.from_angle(float(index) * 2.399963 + float(slot) * TAU / 6.0) * (SHIP_CLEARANCE * 1.8)
+				_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind], "spawn_offset": offset})
+				slot += 1
 	update_exploration(state)
 	return state
 
@@ -1273,6 +1278,29 @@ static func _work_launch_rally(state: Dictionary, ship: Dictionary, dt: float) -
 		ship["source"] = -1
 	return true
 
+# Choose a free nearby launch point without changing the shipyard or rally.
+static func _launch_position_clear(state: Dictionary, point: Vector2) -> bool:
+	for craft in state["ships"]:
+		if craft.has("position") and (craft["position"] as Vector2).distance_squared_to(point) < SHIP_CLEARANCE * SHIP_CLEARANCE:
+			return false
+	return true
+
+static func _free_launch_position(state: Dictionary, node: int, origin: Vector2, preferred: Vector2, id: int) -> Vector2:
+	var graph: Dictionary = military_graph(state)
+	if sector_contains(graph, node, preferred) and _launch_position_clear(state, preferred):
+		return preferred
+	if sector_contains(graph, node, origin) and _launch_position_clear(state, origin):
+		return origin
+	for ring in range(1, 7):
+		var radius: float = float(ring) * SHIP_CLEARANCE * 1.1
+		for slot in range(12 * ring):
+			var angle: float = float(id) * 2.399963 + TAU * float(slot) / float(12 * ring)
+			var candidate: Vector2 = origin + Vector2.from_angle(angle) * radius
+			if sector_contains(graph, node, candidate) and _launch_position_clear(state, candidate):
+				return candidate
+	# Extremely crowded or narrow sectors use the regular collision pass.
+	return origin
+
 static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictionary) -> void:
 	match str(item["kind"]):
 		"economy_building":
@@ -1312,8 +1340,9 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 					launch = shipyard_position(state, index, slot, float(state["elapsed"]))
 					rally = p["yards"][slot].get("rally", {})
 					break
+			launch = _free_launch_position(state, index, launch, launch + (item.get("spawn_offset", Vector2.ZERO) as Vector2), int(item["id"]))
 			state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
-				"position": launch, "heading": Vector2.UP, "navigation_target": state["map"]["points"][index],
+				"position": launch, "heading": Vector2.UP, "navigation_target": launch,
 				"route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
 			_launch_to_rally(state, state["ships"].back(), rally)
 	p["queue"].erase(item)
@@ -5746,6 +5775,72 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		if not route.is_empty():
 			ship["leg"] = _lane_progress(graph["points"], ship)
 
+# Resolve overlaps on the actual post-movement coordinates, including ships
+# exempt from soft steering. This is contact correction, not a new order;
+# service actions and arrival checks have already executed for this tick.
+# A sparse grid and bounded iterations avoid an all-fleet pair scan.
+static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary) -> void:
+	var ships: Array = state["ships"]
+	if ships.size() < 2:
+		return
+	var reach: float = SHIP_CLEARANCE
+	for iteration in range(SHIP_CLEARANCE_PASSES):
+		var cells: Dictionary = {}
+		for i in range(ships.size()):
+			var point: Vector2 = ships[i]["position"]
+			var cell := Vector2i(floori(point.x / reach), floori(point.y / reach))
+			if not cells.has(cell):
+				cells[cell] = []
+			cells[cell].append(i)
+		var corrections: Dictionary = {}
+		for i in range(ships.size()):
+			var a: Dictionary = ships[i]
+			var pa: Vector2 = a["position"]
+			var cell := Vector2i(floori(pa.x / reach), floori(pa.y / reach))
+			for x in range(-1, 2):
+				for y in range(-1, 2):
+					for j in cells.get(cell + Vector2i(x, y), []):
+						if int(j) <= i:
+							continue
+						var b: Dictionary = ships[j]
+						var pb: Vector2 = b["position"]
+						var offset: Vector2 = pa - pb
+						var distance: float = offset.length()
+						if distance >= reach - EPS:
+							continue
+						var direction: Vector2
+						if distance <= EPS:
+							# Side-step a head-on approach; stable IDs break exact ties.
+							var old_a: Vector2 = previous.get(int(a["id"]), pa)
+							var old_b: Vector2 = previous.get(int(b["id"]), pb)
+							var prior: Vector2 = old_a - old_b
+							direction = prior.normalized().orthogonal() if prior.length_squared() > EPS else Vector2.from_angle(float(posmod(int(a["id"]) * 97 + int(b["id"]) * 193, 360)) * PI / 180.0)
+						else:
+							direction = offset / distance
+						var push: Vector2 = direction * ((reach - distance) * 0.5 + 0.001)
+						corrections[i] = (corrections.get(i, Vector2.ZERO) as Vector2) + push
+						corrections[j] = (corrections.get(j, Vector2.ZERO) as Vector2) - push
+		if corrections.is_empty():
+			break
+		for i in corrections:
+			var craft: Dictionary = ships[i]
+			var point: Vector2 = craft["position"]
+			var candidate: Vector2 = point + (corrections[i] as Vector2).limit_length(reach)
+			var sector: int = local_sector(graph, craft)
+			if sector >= 0 and sector_contains(graph, sector, point) and not sector_contains(graph, sector, candidate):
+				var low: float = 0.0
+				var high: float = 1.0
+				for step_index in range(10):
+					var fraction: float = (low + high) * 0.5
+					if sector_contains(graph, sector, point.lerp(candidate, fraction)):
+						low = fraction
+					else:
+						high = fraction
+				candidate = point.lerp(candidate, low)
+			craft["position"] = candidate
+			if not craft["route"].is_empty():
+				craft["leg"] = _lane_progress(graph["points"], craft)
+
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	state["elapsed"] = float(state["elapsed"]) + dt
@@ -5924,6 +6019,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if ship.has("wander_cooldown_override") and autocast_remaining(state, ship) <= EPS and not _unit_order_running(ship):
 			ship.erase("wander_cooldown_override")
 	_separate_ships(state, combat_graph, combat_positions, dt)
+	if dt > 0.0:
+		_resolve_ship_contacts(state, combat_graph, combat_positions)
 	if not profile.is_empty():
 		var now: int = Time.get_ticks_usec()
 		profile["Civilian logistics"] = int(profile.get("Civilian logistics", 0)) + civilian_usec
