@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.58.7: Colony dispatch uses route distance and excludes held/busy ships; queued Hold/Stop act at their turn and later queued orders can supersede them. Inspect discoverability and queue display in playtests.
+
 - v0.58.6: Exhaust derives from local motion revisions rather than adding replication fields; tune acceleration dead zone, fade and plume length in visual playtests, particularly for arrival corrections and guest packet loss.
 
 - v0.58.5: Consolidated station shipyard controls use grouped selection and automatic free-port allocation. Check readability and group behavior as yards complete or are destroyed.

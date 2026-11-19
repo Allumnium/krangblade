@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.58.7: Validate nearest-idle Colony dispatch and Shift Stop/Hold/Deliver/Transform, including queue activation, cancellation and guest commands.
+
 - [ ] v0.58.6: Inspect acceleration exhaust on starts, turns, steady cruise, stopping, docking, idle formations, pause/speed changes and guest interpolation at different zooms.
 
 - [ ] v0.58.5: Inspect station Select Shipyards with zero/one/multiple completed yards, Build Shipyard costs, queued slots, max capacity, and grouped commands on host and guest.

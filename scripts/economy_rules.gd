@@ -447,6 +447,24 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
 	transit.fill(team)
 	return MAP.path(state["map"], transit, team, start, target)
 
+# Select on the authority, not from a stale client-side dropdown.
+static func nearest_idle_colony(state: Dictionary, player: int, target: int) -> int:
+	var best: float = INF
+	var chosen: int = -1
+	for ship in state["ships"]:
+		if int(ship["owner"]) != player or ship["kind"] != "colony_ship" or not _is_idle_ship(ship) or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty():
+			continue
+		var path: Array[int] = colony_path(state, player, ship, target)
+		if path.is_empty():
+			continue
+		var pos: Vector2 = ship.get("position", state["map"]["points"][int(ship["at"])])
+		var distance: float = pos.distance_to(state["map"]["points"][path[0]]) + MAP.route_length(state["map"], path)
+		var id: int = int(ship["id"])
+		if distance < best or (is_equal_approx(distance, best) and (chosen < 0 or id < chosen)):
+			best = distance
+			chosen = id
+	return chosen
+
 static func send_colony(state: Dictionary, player: int, ship_id: int, target: int, automatic: bool = false) -> bool:
 	for ship in state["ships"]:
 		if int(ship["id"]) != ship_id:
@@ -3927,14 +3945,19 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var kind: String = str(order.get("kind", ""))
 	var owner: int = int(ship["owner"])
 	var fighter: bool = ship["kind"] in ["fighter", "cruiser", "destroyer"]
-	if kind == "stop":
-		return not append
+	if kind in ["stop", "hold"]:
+		return true
 	if ship["kind"] == "science_ship" and kind in ["unload", "drop", "deposit", "salvage"]:
 		return false
 	if ship["kind"] == "colony_ship" and kind in ["salvage", "drop"]:
 		return false
 	if kind == "transform":
-		return not append and can_transform_colony(state, graph, ship)
+		if not append:
+			return can_transform_colony(state, graph, ship)
+		if ship["kind"] != "colony_ship":
+			return false
+		var node: int = sector_at(graph, unit_order_origin(state, graph, ship), military_pois(state, owner))
+		return node >= 0 and node < state["planets"].size() and int(state["planets"][node]["owner"]) == 0 and not has_station(state["planets"][node])
 	if kind == "unload":
 		return cargo_capacity(str(ship["kind"])) > EPS
 	if kind == "drop":
@@ -3989,6 +4012,8 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 	match order["kind"]:
 		"stop":
 			return command_stop_units(state, player, ids)
+		"hold":
+			return command_hold_units(state, player, ids, false)
 		"transform":
 			var graph: Dictionary = military_graph(state)
 			var converted: bool = false
@@ -4123,7 +4148,7 @@ static func arrival_wait_remaining(state: Dictionary, ship: Dictionary) -> float
 	return maxf(0.0, float(ship.get("arrival_wait_until", 0.0)) - float(state.get("elapsed", 0.0)))
 
 static func _advance_unit_orders(state: Dictionary, graph: Dictionary) -> void:
-	for ship in state["ships"]:
+	for ship in (state["ships"] as Array).duplicate():
 		_mark_sector_arrival(state, ship)
 		if _unit_order_running(ship):
 			continue
