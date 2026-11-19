@@ -6567,7 +6567,7 @@ func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2,
 				map_canvas.draw_line(start, point, color.lightened(0.45), 1.5, true)
 				var pulse: float = fposmod(visual_clock * 1.8, 1.0)
 				map_canvas.draw_circle(point.lerp(start, pulse), 2.0, tint.lightened(0.5))
-			elif selected_units.has(claimant):
+			elif selected_units.size() == 1 and selected_units.has(claimant):
 				map_canvas.draw_line(poses[claimant]["point"], point, Color(color, 0.45), 1.0, true)
 		if int(pile["id"]) == hovered:
 			var remaining: float = maxf(0.0, float(pile.get("expires_at", float(pile["born"]) + ECONOMY.SALVAGE_MAX_LIFETIME)) - float(state["elapsed"]))
@@ -6694,6 +6694,89 @@ func _draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dicti
 	if endpoint.is_finite():
 		var finish: Vector2 = _screen_point(endpoint)
 		_draw_command_route(graph, ship, start, finish, tint)
+
+# Shared orders use semantic targets, not individual route legs or formation
+# offsets. A sector-entry order has one sector despite differing approach points.
+func _group_command_target(state: Dictionary, graph: Dictionary, ship: Dictionary, poses: Dictionary, refs: Dictionary) -> Dictionary:
+	if bool(ship.get("holding", false)):
+		return {}
+	var order: Dictionary = ship.get("unit_order", {})
+	var kind: String = str(order.get("kind", ""))
+	var target: int = int(order.get("target", -1))
+	var endpoint: Vector2 = Vector2.INF
+	var tint: Color = _order_color(ship, order)
+	var signature: Array = [kind, target, bool(order.get("move_only", false)), bool(order.get("guard", false)), int(order.get("chunk", -1))]
+	if bool(ship.get("retreating", false)):
+		var site: int = int(ship.get("repair_site", -1))
+		if site < 0 or site >= state["planets"].size():
+			return {}
+		signature = ["withdraw", site]
+		endpoint = _screen_point(ECONOMY.station_position(state, site, float(state["elapsed"])))
+		tint = Color("#55c88b")
+	elif ship.has("launch_rally"):
+		signature = ["rally", ship["launch_rally"]["point"]]
+		endpoint = _screen_point(ship["launch_rally"]["point"])
+		tint = Color("#ff605c")
+	elif kind.is_empty() or not ECONOMY._unit_order_running(ship):
+		return {}
+	elif kind in ["sector", "sector_entry"]:
+		if target < 0 or target >= graph["points"].size():
+			return {}
+		endpoint = _screen_point(graph["points"][target])
+	elif kind == "patrol" and ship.has("patrol_from"):
+		var leg_end: Vector2 = ship["patrol_start_point"] if bool(ship.get("patrol_returning", false)) else ship["patrol_end_point"]
+		signature.append(leg_end)
+		endpoint = _screen_point(leg_end)
+	elif kind in ["follow", "attack", "repair", "deposit"]:
+		if poses.has(target):
+			endpoint = poses[target]["point"]
+		elif refs.has(target):
+			var ref: Dictionary = refs[target]
+			var world: Vector2 = ref.get("repair_position", ref["position"]) if kind == "repair" else ref["position"]
+			endpoint = _screen_point(world)
+		if kind == "follow":
+			tint = HUD.ACCENT
+	else:
+		var world: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
+		if world.is_finite():
+			endpoint = _screen_point(world)
+		# Point orders and automatically chosen unload destinations must
+		# actually agree; a shared sector alone is not enough.
+		signature.append(world)
+	if not endpoint.is_finite():
+		return {}
+	return {"signature": signature, "point": endpoint, "tint": tint}
+
+func _draw_group_command_line(state: Dictionary, poses: Dictionary, refs: Dictionary) -> void:
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var shared: Dictionary = {}
+	var center := Vector2.ZERO
+	var count: int = 0
+	for ship in state["ships"]:
+		var id: int = int(ship["id"])
+		if not selected_units.has(id):
+			continue
+		if not poses.has(id):
+			return
+		var command: Dictionary = _group_command_target(state, graph, ship, poses, refs)
+		if command.is_empty():
+			return
+		if shared.is_empty():
+			shared = command
+		elif command["signature"] != shared["signature"]:
+			return
+		# Use attack-move color if a mixed fleet has armed members.
+		elif command["tint"] == Color("#ff605c"):
+			shared["tint"] = command["tint"]
+		center += poses[id]["point"] as Vector2
+		count += 1
+	if count < 2 or count != selected_units.size():
+		return
+	center /= float(count)
+	var finish: Vector2 = shared["point"]
+	if center.distance_to(finish) > 1.0:
+		# One direct intent indicator; individual ships may take different lanes.
+		map_canvas.draw_line(center, finish, Color(shared["tint"], 0.8), 1.5, true)
 
 func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, drawn_sectors: Dictionary) -> void:
 	var order: Dictionary = ship.get("unit_order", {})
@@ -6891,6 +6974,8 @@ func _draw_map() -> void:
 	_draw_salvage(state, poses, viewport_bounds, font)
 	var service_refs: Dictionary = ECONOMY.service_targets(state)
 	_draw_ship_target_rings(state, poses, service_refs)
+	if selected_units.size() > 1:
+		_draw_group_command_line(state, poses, service_refs)
 	if selected_units.size() == 1:
 		var order_graph: Dictionary = ECONOMY.military_graph(state)
 		var drawn_sectors: Dictionary = {}
