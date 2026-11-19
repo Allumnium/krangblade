@@ -2278,7 +2278,7 @@ func _ship_kind_name(kind: String) -> String:
 	return {"ship": "Freighter", "miner": "Harvester", "colony_ship": "Colony"}.get(kind, kind.replace("_", " ").capitalize())
 
 func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
-	var points: Array = ECONOMY.military_graph(state)["points"] if ship.get("kind", "") in ["fighter", "cruiser", "destroyer"] else state["map"]["points"]
+	var points: Array = ECONOMY.military_graph(state)["points"] if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"]
 	var pos: Vector2 = ECONOMY.combat_position(state, ECONOMY.military_graph(state), ship)
 	var mode: String = ship.get("mining_mode", "idle")
 	if mode == "outbound":
@@ -2477,7 +2477,7 @@ func _refresh_autocast_cards() -> void:
 			farm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if command_buttons.has("collect"):
 		var collect_button: Button = command_buttons["collect"]
-		var has_fighters: bool = state.get("ships", []).any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "cruiser", "destroyer"])
+		var has_fighters: bool = state.get("ships", []).any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"])
 		var has_harvesters: bool = not _autocast_units(state, "mine").is_empty()
 		var extra: Control = command_card.get_child(16)
 		var collect_slot: Control = command_card.get_child((16 if has_fighters else 9) if has_harvesters else 13)
@@ -2622,7 +2622,7 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 			world = graph["points"][node]
 		var ids: Array[int] = []
 		for craft in state["ships"]:
-			if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "cruiser", "destroyer"]:
+			if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
 				ids.append(int(craft["id"]))
 		if node >= 0:
 			_issue_order(ids, {"kind": "guard", "target": node, "point": world}, append)
@@ -3040,7 +3040,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_miners) and (id not in ["load", "unload"] or has_cargo_hold)
-		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "cruiser", "destroyer"])) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"])) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
 	var transform: Button = command_buttons["transform"]
 	var transform_extra: Control = command_card.get_child(17)
 	var transform_slot: Control = transform_extra if has_miners else command_card.get_child(7)
@@ -3297,7 +3297,7 @@ func _refresh_territory(state: Dictionary) -> void:
 		if owner > 0 and (float(planet.get("population", 0.0)) > 0.0 or not (planet.get("yards", []) as Array).is_empty()):
 			contenders[i] = [owner]
 	for ship in state["ships"]:
-		if ship.get("kind", "") not in ["fighter", "cruiser", "destroyer"] or bool(ship.get("retreating", false)):
+		if ship.get("kind", "") not in ["fighter", "scout", "cruiser", "destroyer"] or bool(ship.get("retreating", false)):
 			continue
 		var node: int = ECONOMY.local_sector(graph, ship)
 		if node < 0:
@@ -5242,7 +5242,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		var anchor: int = ECONOMY.patrol_node(state, graph, _me(), world)
 		var fighters: Array[int] = []
 		for craft in state["ships"]:
-			if owned.has(int(craft["id"])) and craft["kind"] in ["fighter", "cruiser", "destroyer"]:
+			if owned.has(int(craft["id"])) and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
 				fighters.append(int(craft["id"]))
 		if anchor >= 0:
 			_issue_order(fighters, {"kind": "patrol", "target": anchor, "point": world}, append)
@@ -5286,7 +5286,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		elif contextual and ref.get("kind") == "ship" and ECONOMY._friendly_target(state, _me(), ref):
 			if id == target:
 				continue
-			order = {"kind": "follow", "target": target, "guard": craft["kind"] in ["fighter", "cruiser", "destroyer"]}
+			order = {"kind": "follow", "target": target, "guard": craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"]}
 		elif contextual and ref.get("kind") == "station" and ECONOMY.can_deposit(state, craft, target):
 			order = {"kind": "deposit", "target": target}
 		elif field >= 0 and bool(state["map"]["fields"][field].get("antimatter", false)) and craft["kind"] == "science_ship" and ECONOMY._cargo_total(craft) <= ECONOMY.EPS:
@@ -5386,7 +5386,7 @@ func _formation_orders(state: Dictionary) -> Array:
 	var ships: Dictionary = {}
 	var origins: Dictionary = {}
 	for ship in state["ships"]:
-		if owned.has(int(ship["id"])) and not bool(ship.get("retreating", false)) and (formation_mode != "attack" or ECONOMY.armed(ship)) and (formation_mode != "patrol" or ship["kind"] in ["fighter", "cruiser", "destroyer"]):
+		if owned.has(int(ship["id"])) and not bool(ship.get("retreating", false)) and (formation_mode != "attack" or ECONOMY.armed(ship)) and (formation_mode != "patrol" or ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]):
 			var origin: Vector2 = ECONOMY.unit_order_origin(state, graph, ship) if formation_append else ship["position"]
 			ships[ship["id"]] = ship
 			origins[ship["id"]] = origin
@@ -5746,7 +5746,7 @@ func _select_all_military() -> void:
 	selected_field = -1
 	selected_units.clear()
 	for craft in state["ships"]:
-		if craft["kind"] in ["fighter", "cruiser", "destroyer"] and int(craft["owner"]) == _me():
+		if craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"] and int(craft["owner"]) == _me():
 			selected_units.append(int(craft["id"]))
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 	var now: int = Time.get_ticks_msec()
@@ -6724,7 +6724,7 @@ func _draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dicti
 			endpoint = ship["resource_stage"]["point"]
 		elif ship.get("mining_mode", "") in ["outbound", "mining"] and ship.has("mining_target"):
 			endpoint = ship["mining_target"]
-		elif depot >= 0 and depot < state["planets"].size() and ECONOMY.has_station(state["planets"][depot]) and ship.get("kind", "") not in ["fighter", "cruiser", "destroyer"]:
+		elif depot >= 0 and depot < state["planets"].size() and ECONOMY.has_station(state["planets"][depot]) and ship.get("kind", "") not in ["fighter", "scout", "cruiser", "destroyer"]:
 			endpoint = ECONOMY.station_position(state, depot, float(state["elapsed"]))
 		elif not ship["route"].is_empty():
 			var node: int = int(ship["route"].back())

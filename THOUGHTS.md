@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.60.1: Scouts now join military fleets and pursue targets; observe whether their higher speed causes separation from attack waves.
+
 - v0.60.0: Extended gap outlines evaluate nearest POI boundaries across the map; benchmark shader cost. Retreat is now opt-in even for armed Harvesters and AI; observe combat survival.
 
 - v0.59.1: Higher HP with unchanged damage/repair rates lengthens engagements and repairs, especially station assaults. Neutral territory outlines expand shader coverage; profile large maps.
