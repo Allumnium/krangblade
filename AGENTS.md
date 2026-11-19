@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.63.0: Regions with at least 50 direct influence add 5% of each player's uncapped direct points to each immediately connected weaker region. Compare total direct influence, exclude equal totals, no recursive spillover or hidden donors. Highway section adjacency follows the connection chain; ownership and movement unchanged.
+
 - v0.62.3: Shipyard class rows hide locked ships and completed upgrades; available ships start in column one. Small shows Medium upgrade only in row two, Medium shows Large upgrade only in row three. Mixed yard groups show unlocked ships first and any still-applicable upgrade after them. Preserve four rows and navigation slots.
 
 - v0.62.2: Highway influence regions have a 3,000-world-unit maximum centerline span, divided equally per connection. Soft section rims and independent tint; no change to real graph edges, width or direct movement.

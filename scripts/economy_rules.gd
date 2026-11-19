@@ -4580,6 +4580,8 @@ static func combat_position(state: Dictionary, graph: Dictionary, ship: Dictiona
 # Influence is presentation data derived from replicated physical state,
 # deliberately independent of ownership, access, conquest and combat.
 const INFLUENCE_CAP: float = 50.0
+const INFLUENCE_SPILLOVER: float = 0.05
+const INFLUENCE_SPILLOVER_MIN: float = 50.0
 const SHIP_INFLUENCE = {"scout": 1, "fighter": 2, "cruiser": 5, "destroyer": 10, "miner": 1, "ship": 1, "colony_ship": 1, "science_ship": 1}
 const STATION_INFLUENCE: int = 30
 const YARD_INFLUENCE: int = 20
@@ -4605,7 +4607,17 @@ static func highway_regions(graph: Dictionary) -> Dictionary:
 		counts.append(count)
 		for j in range(count):
 			region_edges.append(i)
-	var layout: Dictionary = {"starts": starts, "counts": counts, "region_edges": region_edges, "size": points.size() + region_edges.size()}
+	# Economic influence follows immediate region neighbors: core to first
+	# highway section, section to section, last section to the other core.
+	var links: Array[Vector2i] = []
+	for i in range(edges.size()):
+		var start: int = starts[i]
+		var count: int = counts[i]
+		links.append(Vector2i(int(edges[i][0]), start))
+		for j in range(count - 1):
+			links.append(Vector2i(start + j, start + j + 1))
+		links.append(Vector2i(start + count - 1, int(edges[i][1])))
+	var layout: Dictionary = {"starts": starts, "counts": counts, "region_edges": region_edges, "size": points.size() + region_edges.size(), "links": links}
 	graph["highway_regions"] = layout
 	return layout
 
@@ -4639,7 +4651,7 @@ static func influence_region(graph: Dictionary, point: Vector2) -> int:
 			region = int(layout["starts"][i]) + mini(count - 1, floori(along * count))
 	return region
 
-static func territory_influence(state: Dictionary, graph: Dictionary) -> Array[Dictionary]:
+static func territory_influence(state: Dictionary, graph: Dictionary, known_pois: Variant = null) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for i in range(int(highway_regions(graph)["size"])):
 		result.append({})
@@ -4664,6 +4676,44 @@ static func territory_influence(state: Dictionary, graph: Dictionary) -> Array[D
 		var region: int = influence_region(graph, combat_position(state, graph, ship))
 		if region >= 0:
 			result[region][owner] = int(result[region].get(owner, 0)) + weight
+	var layout: Dictionary = highway_regions(graph)
+	var visible: Array[bool] = []
+	if known_pois != null:
+		# Preserve discovery boundaries: a hidden donor must not reveal its
+		# fleet through the influence color of a discovered neighbor.
+		for i in range(result.size()):
+			var known: bool = known_pois.has(i)
+			if i >= graph["points"].size():
+				var edge: Array = graph["edges"][layout["region_edges"][i - graph["points"].size()]]
+				known = known_pois.has(int(edge[0])) and known_pois.has(int(edge[1]))
+			visible.append(known)
+	return influence_spillover(result, layout["links"], visible)
+
+# Use only direct influence to decide direction and transfer amounts.
+# Incoming points never propagate again or change eligibility in this pass.
+static func influence_spillover(direct: Array[Dictionary], links: Array, visible: Array[bool] = []) -> Array[Dictionary]:
+	var totals: Array[float] = []
+	var result: Array[Dictionary] = []
+	for i in range(direct.size()):
+		var weights: Dictionary = direct[i] if visible.is_empty() or visible[i] else {}
+		var total: float = 0.0
+		for value in weights.values():
+			total += float(value)
+		totals.append(total)
+		result.append(weights.duplicate())
+	for link in links:
+		var a: int = link.x
+		var b: int = link.y
+		if not visible.is_empty() and (not visible[a] or not visible[b]):
+			continue
+		if totals[a] == totals[b]:
+			continue
+		var donor: int = a if totals[a] > totals[b] else b
+		var receiver: int = b if donor == a else a
+		if totals[donor] < INFLUENCE_SPILLOVER_MIN:
+			continue
+		for owner in direct[donor]:
+			result[receiver][owner] = float(result[receiver].get(owner, 0.0)) + float(direct[donor][owner]) * INFLUENCE_SPILLOVER
 	return result
 
 # RGB is the normalized weighted mean; alpha carries influence strength.
