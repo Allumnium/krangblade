@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.51.6: Higher default import/export thresholds retain more local stock and may reduce trade opportunities until warehouses accumulate resources. Monitor early fleet utilization and existing AI-specific trade policies.
+
 - v0.51.5: Loaded freighters should dock while blocked on storage. Check station congestion and retry behavior when all warehouses are full; single-unit order lines should remain readable at different zooms.
 
 - v0.51.4: Shorten mining/salvage delays and eliminate repair cooldown; existing order/arrival timestamps are shared but durations vary by mode. Monitor automatic repair precedence after movement and early civilian job resumption.

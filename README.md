@@ -101,7 +101,7 @@ The top bar has no reset button. Menu opens a modal with Resume and an explicit 
 
 ## Percentage trade thresholds
 
-The Trade tab uses a single range slider per selected resource with import-below and export-above handles. Changes commit on release and are validated by the host. The 0–100% range refers to a fixed provisional 1,000-unit reserve reference, not a storage limit: the default 10%/20% preserves the previous 100/200-unit thresholds. Inventory may exceed 100%; any stock above the chosen export threshold remains eligible for trade. The population display no longer includes carrying capacity or a saturation bar; population and Organics simulation are unchanged.
+The Trade tab uses a single range slider per selected resource with import-below and export-above handles. Changes commit on release and are validated by the host. The 0–100% range refers to actual local warehouse capacity. The default is to import below 50% and export above 80% (1,000 t and 1,600 t at base storage). Explicit AI trade settings and player overrides remain possible. The population display no longer includes carrying capacity or a saturation bar; population and Organics simulation are unchanged.
 
 ## Production overview and repeat controls
 

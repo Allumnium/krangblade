@@ -78,6 +78,8 @@ const EPS: float = 0.00001
 const DEFAULT_FOG_OF_WAR: bool = false
 # Starting storage capacity per resource; warehouse upgrades increase it.
 const TRADE_REFERENCE: float = 2000.0
+const DEFAULT_IMPORT_PERCENT: float = 50.0
+const DEFAULT_EXPORT_PERCENT: float = 80.0
 const WAREHOUSE_CAPACITIES = [2000.0, 5000.0, 12000.0, 30000.0]
 # Each tier is 3x the previous one, with each price fitting in the
 # immediately preceding warehouse capacity.
@@ -176,7 +178,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 				bonuses[resource] = rng.randf_range(1.1, 1.8)
 		var thresholds: Dictionary = {}
 		for resource in RESOURCES:
-			thresholds[resource] = {"min": 10.0, "max": 20.0}
+			thresholds[resource] = {"min": DEFAULT_IMPORT_PERCENT, "max": DEFAULT_EXPORT_PERCENT}
 		for resource in EXTRACTED:
 			abundance[resource] = 0.1 if rng.randf() < 0.35 else rng.randf_range(0.5, 4.0)
 		var home: bool = i < ordered.size()
@@ -3929,7 +3931,7 @@ static func _destroy_station(state: Dictionary, graph: Dictionary, index: int) -
 	p["flows"] = {}
 	p.erase("capture")
 	for resource in RESOURCES:
-		p["thresholds"][resource] = {"min": 10.0, "max": 20.0}
+		p["thresholds"][resource] = {"min": DEFAULT_IMPORT_PERCENT, "max": DEFAULT_EXPORT_PERCENT}
 	_reroute_after_capture(state, index)
 
 static func station_target_id(state: Dictionary, index: int) -> int:
