@@ -2519,7 +2519,11 @@ func _test_resource_handoff() -> void:
 	assert(hauler.has("resource_stage"))
 	hauler["cargo"]["Metals"] = 5.0
 	hauler["resource_loaded_at"] = 0.0
-	staging["elapsed"] = ECON.RESOURCE_PARTIAL_WAIT_YEARS
+	staging["elapsed"] = 60.0
+	assert(ECON._work_resource_stage(staging, stage_graph, hauler, ECON.planet_teams(staging), {}, safe, ECON._salvage_cells(staging["salvage"]), {}, 0.1))
+	assert(hauler.has("resource_stage") and not hauler.get("salvage_delivery", false))
+	staging["salvage"].clear()
+	staging["elapsed"] += ECON.RESOURCE_STAGE_SEARCH_YEARS
 	assert(ECON._work_resource_stage(staging, stage_graph, hauler, ECON.planet_teams(staging), {}, safe, ECON._salvage_cells(staging["salvage"]), {}, 0.1))
 	assert(hauler["salvage_delivery"] and not hauler.has("resource_stage"))
 	var depot: Dictionary = staging["planets"][0]
@@ -2534,7 +2538,7 @@ func _test_resource_handoff() -> void:
 	assert(ECON._work_salvage(staging, stage_graph, hauler, 100.0))
 	assert(ECON._cargo_total(hauler) <= ECON.EPS)
 	assert(is_equal_approx(float(depot["stock"]["Metals"]), ECON.storage_capacity(depot)))
-	print("PASS: physical resource handoff, ownership, capacity, staging threshold, partial dispatch and freighter salvage rate")
+	print("PASS: physical resource handoff, ownership, capacity, staging threshold, full-load waiting and depleted-site dispatch and freighter salvage rate")
 
 func _test_autocast_modes() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
