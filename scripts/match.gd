@@ -325,6 +325,7 @@ var yard_command_card: VBoxContainer
 var yard_command_grid: GridContainer
 var yard_commands: Dictionary = {}
 var production_icons: Dictionary = {}
+var hull_textures: Dictionary = {}
 var yard_queue: HFlowContainer
 var yard_queue_rows: Dictionary = {}
 var command_card: GridContainer
@@ -5123,10 +5124,16 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 				selected_units.append(selected_ship_id)
 			if double_click:
 				var kind: String = str(craft["kind"])
+				var team: int = int(state["teams"].get(_me(), -1))
+				if int(state["teams"].get(int(craft["owner"]), -2)) != team:
+					selected_units.clear()
+					selected_ship_id = -1
 				for other in state["ships"]:
 					var id: int = int(other["id"])
-					if other["kind"] == kind and poses.has(id) and _in_visible_playfield(poses[id]["point"]) and not selected_units.has(id):
+					if int(state["teams"].get(int(other["owner"]), -2)) == team and other["kind"] == kind and poses.has(id) and _in_visible_playfield(poses[id]["point"]) and not selected_units.has(id):
 						selected_units.append(id)
+				if not selected_units.is_empty():
+					selected_ship_id = selected_units[0]
 			break
 	selected_field = -1
 	if selected_ship_id < 0:
@@ -5846,6 +5853,29 @@ func _orbit_offset(slot: int, radius: float, time: float) -> Vector2:
 
 func _orbit_direction(offset: Vector2) -> Vector2:
 	return Vector2(-offset.y, offset.x).normalized()
+
+func _cached_hull_texture(kind: String, empire: Color, detailed: bool) -> Texture2D:
+	var key: String = "%s:%s:%s" % [kind, empire.to_html(false), str(detailed)]
+	if not hull_textures.has(key):
+		var vertices: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE if kind == "ship" else [Vector2(9, 0), Vector2(-6, 5), Vector2(-3, 0), Vector2(-6, -5)])
+		var outline: String = _hull_svg_points(vertices)
+		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="-40 -40 80 80">'
+		art += '<polygon points="%s" fill="#%s"/>' % [outline, empire.lightened(0.35).to_html(false)]
+		if detailed and kind not in ["ship", "science_ship"]:
+			for panel in HULL_PANELS.get(kind, []):
+				art += '<polygon points="%s" fill="#%s"/>' % [_hull_svg_points(panel[1]), _hull_panel_color(empire, panel[0]).to_html(false)]
+		art += '<polygon points="%s" fill="none" stroke="#08111b" stroke-width="2.5" stroke-linejoin="round"/>' % outline
+		art += '<polygon points="%s" fill="none" stroke="#%s" stroke-width="1" stroke-linejoin="round"/></svg>' % [outline, empire.lightened(0.2).to_html(false)]
+		var image := Image.new()
+		image.load_svg_from_string(art)
+		hull_textures[key] = ImageTexture.create_from_image(image)
+	return hull_textures[key]
+
+func _hull_svg_points(vertices: Array) -> String:
+	var coordinates: PackedStringArray = []
+	for vertex in vertices:
+		coordinates.append("%.2f,%.2f" % [vertex.x, vertex.y])
+	return " ".join(coordinates)
 
 func _hull_panel_color(empire: Color, original: Color) -> Color:
 	# Use the original value contrast as a shading template, not its class
@@ -6833,40 +6863,41 @@ func _draw_map() -> void:
 	_draw_salvage(state, poses, viewport_bounds, font)
 	var service_refs: Dictionary = ECONOMY.service_targets(state)
 	_draw_ship_target_rings(state, poses, service_refs)
-	var order_graph: Dictionary = ECONOMY.military_graph(state)
-	var drawn_sectors: Dictionary = {}
-	for craft in state["ships"]:
-		var id: int = int(craft["id"])
-		if not selected_units.has(id) or not poses.has(id):
-			continue
-		var start: Vector2 = poses[id]["point"]
-		if selected_units.size() == 1 or not craft["route"].is_empty():
-			_draw_single_command_line(state, order_graph, craft, start, poses, service_refs)
-		_draw_queued_orders(state, order_graph, craft, start, drawn_sectors)
-		var active_order: Dictionary = craft.get("unit_order", {})
-		var order_tint: Color = _order_color(craft, active_order)
-		if craft.has("patrol_from"):
-			var from: Vector2 = _screen_point(craft["patrol_start_point"])
-			var to: Vector2 = _screen_point(craft["patrol_end_point"])
-			map_canvas.draw_dashed_line(from, to, Color("#b880fa"), 1.5, 4.0, true, true)
-		elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
-			var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
-			var rally_tint := Color("#ff605c")
-			_draw_command_route(order_graph, craft, start, destination, rally_tint)
-			_draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
-		elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
-			var destination: Vector2 = poses[int(active_order["target"])]["point"]
-			_draw_command_route(order_graph, craft, start, destination, HUD.ACCENT, true)
-		elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY._unit_order_running(craft):
-			_draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
-		elif active_order.get("kind", "") == "position" and ECONOMY._unit_order_running(craft):
-			var endpoint: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
-			if endpoint.is_finite():
-				var destination: Vector2 = _screen_point(endpoint)
+	if selected_units.size() == 1:
+		var order_graph: Dictionary = ECONOMY.military_graph(state)
+		var drawn_sectors: Dictionary = {}
+		for craft in state["ships"]:
+			var id: int = int(craft["id"])
+			if not selected_units.has(id) or not poses.has(id):
+				continue
+			var start: Vector2 = poses[id]["point"]
+			if selected_units.size() == 1:
+				_draw_single_command_line(state, order_graph, craft, start, poses, service_refs)
+			_draw_queued_orders(state, order_graph, craft, start, drawn_sectors)
+			var active_order: Dictionary = craft.get("unit_order", {})
+			var order_tint: Color = _order_color(craft, active_order)
+			if craft.has("patrol_from"):
+				var from: Vector2 = _screen_point(craft["patrol_start_point"])
+				var to: Vector2 = _screen_point(craft["patrol_end_point"])
+				map_canvas.draw_dashed_line(from, to, Color("#b880fa"), 1.5, 4.0, true, true)
+			elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
+				var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
+				var rally_tint := Color("#ff605c")
+				_draw_command_route(order_graph, craft, start, destination, rally_tint)
+				_draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
+			elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
+				var destination: Vector2 = poses[int(active_order["target"])]["point"]
+				_draw_command_route(order_graph, craft, start, destination, HUD.ACCENT, true)
+			elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY._unit_order_running(craft):
+				_draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
+			elif active_order.get("kind", "") == "position" and ECONOMY._unit_order_running(craft):
+				var endpoint: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
+				if endpoint.is_finite():
+					var destination: Vector2 = _screen_point(endpoint)
+					_draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
+			elif craft.has("local_move_target") and not bool(craft.get("retreating", false)):
+				var destination: Vector2 = _screen_point(craft["local_move_target"])
 				_draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
-		elif craft.has("local_move_target") and not bool(craft.get("retreating", false)):
-			var destination: Vector2 = _screen_point(craft["local_move_target"])
-			_draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
 	for index in range(points.size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
@@ -6962,6 +6993,9 @@ func _draw_map() -> void:
 			continue
 		var pose: Dictionary = poses[int(ship["id"])]
 		var point: Vector2 = pose["point"]
+		var scale: float = _ship_scale()
+		if not viewport_bounds.grow(maxf(32.0, 80.0 * scale)).has_point(point):
+			continue
 		var direction: Vector2 = pose["direction"]
 		if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and not ECONOMY._engaged(ship) and int(ship.get("yard_target", -1)) >= -1:
 			var aim: Vector2 = _screen_point(ship["mining_rock"]) - point
@@ -6970,15 +7004,8 @@ func _draw_map() -> void:
 		var route: Array = ship["route"]
 		var empire: Color = _empire_color(int(ship["owner"]))
 		var hull: Color = empire.lightened(0.35)
-		var scale: float = _ship_scale()
 		var side: Vector2 = direction.orthogonal() * scale
 		direction *= scale
-		var shape := PackedVector2Array([point + direction * 9, point - direction * 6 + side * 5,
-			point - direction * 3, point - direction * 6 - side * 5])
-		if ship["kind"] == "ship":
-			shape = _hull_polygon(point, direction, side, FREIGHTER_OUTLINE)
-		elif HULL_OUTLINES.has(ship["kind"]):
-			shape = _hull_polygon(point, direction, side, HULL_OUTLINES[ship["kind"]])
 		var physical: Vector2 = ship.get("position", Vector2.ZERO)
 		var target: Vector2 = ship.get("navigation_target", physical)
 		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not ECONOMY._engaged(ship)) and physical.distance_to(target) > ECONOMY.EPS:
@@ -7010,8 +7037,6 @@ func _draw_map() -> void:
 					var age: float = fposmod(visual_clock * 4.0 + float(k) * 0.33 + sign * 0.12, 1.0)
 					var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
 					map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
-		if not viewport_bounds.grow(maxf(24.0, (25.0 if ship["kind"] == "ship" else 18.0) * scale)).has_point(point):
-			continue
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
 			var radius: float = maxf(5.0, (24.0 if ship["kind"] == "ship" else 15.0) * scale)
 			_draw_selection_ring(point, radius)
@@ -7020,10 +7045,13 @@ func _draw_map() -> void:
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
 		_draw_damage_bar(point, (24.0 if ship["kind"] == "ship" else 15.0) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])))
-		if scale < 0.15 * overview or (scale < 0.42 and Geometry2D.triangulate_polygon(shape).is_empty()):
+		if scale < 0.15 * overview:
 			map_canvas.draw_circle(point, maxf(0.8, 6.0 * scale / overview) * overview, hull, true, -1.0, true)
 			continue
-		map_canvas.draw_colored_polygon(shape, hull)
+		var texture: Texture2D = _cached_hull_texture(str(ship["kind"]), empire, scale >= 0.42)
+		map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
+		map_canvas.draw_texture_rect(texture, Rect2(-40, -40, 80, 80), false)
+		map_canvas.draw_set_transform(Vector2.ZERO)
 		if ship["kind"] == "ship" and scale >= 0.42:
 			var bays: Array = ECONOMY.freighter_cargo_bays(ship["cargo"])
 			for k in range(bays.size()):
@@ -7051,17 +7079,8 @@ func _draw_map() -> void:
 				for k in range(3):
 					var angle: float = visual_clock * 2.0 + TAU * float(k) / 3.0
 					map_canvas.draw_circle(point + Vector2.from_angle(angle) * 5.0 * scale, maxf(0.7, scale), tint, true, -1.0, true)
-		elif scale >= 0.42 and HULL_PANELS.has(ship["kind"]) and viewport_bounds.grow(maxf(24.0, 14.0 * scale)).has_point(point):
-			# At distant zoom levels the silhouette and allegiance outline are
-			# enough. Draw layered panels only when they can actually be seen.
-			for panel in HULL_PANELS[ship["kind"]]:
-				map_canvas.draw_colored_polygon(_hull_polygon(point, direction, side, panel[1]), _hull_panel_color(empire, panel[0]))
+		elif scale >= 0.42:
 			_draw_other_cargo(ship, point, direction, side)
-		var outline: PackedVector2Array = shape.duplicate()
-		outline.append(shape[0])
-		map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)
-		# Identify allegiance on every hull, including loaded ships.
-		map_canvas.draw_polyline(outline, empire.lightened(0.2), scale, true)
 	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
 	_draw_ship_destructions(viewport_bounds)
 	_draw_formation_preview(state)
