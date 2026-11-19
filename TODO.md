@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.56.6: Check routed command lines, queued connectors, escort/rally and multi-selection on host and guest.
+
 - [ ] v0.56.5: Validate interrupted automatic/manual deliveries, partial handoff, empty order cancellation and peer replication.
 
 - [ ] v0.56.4: Verify yard upgrade icon and progress at each berth, concurrent station jobs and unchanged ship construction visuals.

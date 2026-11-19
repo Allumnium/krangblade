@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.56.6: Multiple selected routes may overlap; inspect clutter. Queued connectors show intended endpoints, not speculative future navigation.
+
 - v0.56.5: Observe moving freighter handoffs and repeated depot replanning if receiver fills or leaves range.
 
 - v0.56.4: Check yard upgrade icon legibility at tactical zoom, especially with concurrent yard and station jobs.
