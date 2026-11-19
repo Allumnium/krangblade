@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.56.7: Planetary production emits resource-colored particles from matching orbital bodies to station storage. Hostile sector presence blocks planetary production, not orbital housing.
+
 - v0.56.6: Selected ship command lines trace authoritative remaining route nodes and final destination; queued orders use dashed connectors.
 
 - v0.56.5: Positive Harvester handoff cancels prior cargo delivery, pauses movement for the transfer tick, and reevaluates remaining cargo afterward. Empty manual cargo orders finish immediately.

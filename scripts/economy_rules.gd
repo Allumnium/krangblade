@@ -634,6 +634,8 @@ static func net_rate(planet: Dictionary, resource: String) -> float:
 	return net
 
 static func rate(planet: Dictionary, resource: String) -> float:
+	if bool(planet.get("planet_blockaded", false)) and has_planets(planet):
+		return eco_organics(planet) if resource == "Organics" else 0.0
 	if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0 or (not has_planets(planet) and resource in ["Metals", "Crystals"]):
 		return 0.0
 	var level: int = production_level(planet, resource)
@@ -6431,6 +6433,19 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 			if not craft["route"].is_empty():
 				craft["leg"] = _lane_progress(graph["points"], craft)
 
+static func _update_planet_blockades(state: Dictionary, graph: Dictionary) -> void:
+	for system in state["planets"]:
+		system["planet_blockaded"] = false
+	for craft in state["ships"]:
+		_ensure_position(graph["points"], craft)
+		var node: int = local_sector(graph, craft)
+		if node < 0 or node >= state["planets"].size():
+			continue
+		var system: Dictionary = state["planets"][node]
+		var owner: int = int(system["owner"])
+		if owner != 0 and int(state["teams"].get(owner, 0)) != int(state["teams"].get(int(craft["owner"]), 0)):
+			system["planet_blockaded"] = true
+
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	state["elapsed"] = float(state["elapsed"]) + dt
@@ -6438,6 +6453,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	for key in transfer_events.keys():
 		if float(state["elapsed"]) - float(transfer_events[key]["elapsed"]) > TRANSFER_EVENT_YEARS:
 			transfer_events.erase(key)
+	var combat_graph: Dictionary = military_graph(state)
+	_update_planet_blockades(state, combat_graph)
 	for i in range((state["planets"] as Array).size()):
 		_work_planet(state, i, dt)
 	started = _profile_stage(profile, "Economy", started)
@@ -6447,7 +6464,6 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var budgets: Array = []
 	for field in state["map"].get("fields", []):
 		budgets.append({"Metals": field_limit(field, "Metals") * dt, "Crystals": field_limit(field, "Crystals") * dt, ANTIMATTER: field_limit(field, ANTIMATTER) * dt})
-	var combat_graph: Dictionary = military_graph(state)
 	if float(state["elapsed"]) >= float(state.get("next_ai", 0.0)) and not state.get("ai_players", []).is_empty():
 		state["next_ai"] = float(state["elapsed"]) + AI_INTERVAL
 		for player in state["ai_players"]:
