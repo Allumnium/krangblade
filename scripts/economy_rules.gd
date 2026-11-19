@@ -113,17 +113,18 @@ const SHIPYARD_QUEUE_LIMIT = 8
 const MAX_SHIPYARD_LEVEL = 3
 const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 750.0, "science_ship": 2000.0, "scout": 50.0, "cruiser": 1500.0, "destroyer": 4000.0}
 const MINING_STAY: float = 5.0
-const SHIP_HP: float = 100.0
+const SHIP_HP: float = 200.0
+const YARD_HP: float = 3000.0
 const FREIGHTER_HP: float = SHIP_HP * 2.0
 const PASSIVE_REGEN: float = 1.0 / 3.0
-const STATION_HP: float = 1500.0
-const REINFORCED_STATION_HP: float = 3000.0
+const STATION_HP: float = 10000.0
+const REINFORCED_STATION_HP: float = STATION_HP + 3000.0
 const STATION_LASER_COUNT: int = 2
 const STATION_UPGRADES = ["reinforced_plating", "laser_matrix"]
 const STATION_SALVAGE_FRACTION: float = 0.20
 const LASER_DAMAGE: float = 18.0
 const PDS_DAMAGE: float = LASER_DAMAGE * 2.0
-const PDS_HP: float = SHIP_HP
+const PDS_HP: float = 300.0
 const LASER_RANGE: float = 180.0
 const PDS_RANGE: float = LASER_RANGE * 2.0
 const PURSUIT_YEARS: float = 3.0
@@ -141,7 +142,7 @@ const RALLY_ARRIVAL_RADIUS: float = SHIP_SEPARATION_RADIUS * 2.0
 const SHIP_SEPARATION_STRENGTH: float = 0.15
 const FORMATION_RADIUS: float = 105.0
 const FORMATION_TRAVEL_FRACTION: float = 0.8
-const WITHDRAW_HP: float = 46.0
+const WITHDRAW_HP: float = 92.0
 const REPAIR_PER_YEAR: float = 20.0
 const STATION_REPAIR_RANGE: float = LASER_RANGE
 const REPAIR_SAFE_RADIUS: float = LASER_RANGE * 2.0
@@ -230,7 +231,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 				if resource != "Crystals":
 					levels[resource] = 1
 			stock = STARTING_STOCK.duplicate()
-			yards.append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "station_slot": 1})
+			yards.append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1})
 		var richness: float = 0.0
 		for resource in EXTRACTED:
 			richness += float(abundance[resource])
@@ -513,7 +514,7 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 	colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION if has_planets(colony) else ORBITAL_HOUSING_POPULATION
 	colony["eco_population"] = ORBITAL_HOUSING_POPULATION
 	colony["population_velocity"] = 0.0
-	colony["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "station_slot": 1, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
+	colony["yards"].append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
 	if has_planets(colony):
 		for resource in ["Metals", "Organics"]:
 			colony["levels"][resource] = 1
@@ -1478,7 +1479,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 		"pds":
 			p["pds"][int(item["target"])] = _new_pds()
 		"yard":
-			p["yards"].append({"level": 1, "job": -1, "hp": SHIP_HP * 10.0, "station_slot": int(item.get("station_slot", item["level"]))})
+			p["yards"].append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": int(item.get("station_slot", item["level"]))})
 			_add_eco_residents(p, ORBITAL_HOUSING_POPULATION)
 		"reinforced_plating":
 			p["station"]["reinforced_plating"] = true
@@ -1488,7 +1489,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			p["station"]["weapons"] = p["station"].get("weapons", []) + [_new_pds(), _new_pds()]
 		"yard_upgrade":
 			p["yards"][int(item["target"])]["level"] = int(item["level"])
-			p["yards"][int(item["target"])]["hp"] = SHIP_HP * 10.0 * int(item["level"])
+			p["yards"][int(item["target"])]["hp"] = YARD_HP * int(item["level"])
 			if int(item["level"]) >= MAX_SHIPYARD_LEVEL:
 				p["continuous"]["yard_upgrade:" + str(item["target"])] = false
 		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer":
@@ -3088,7 +3089,7 @@ static func missile_count(kind: String) -> int:
 	return int({"cruiser": 1, "destroyer": 2}.get(kind, 0))
 
 static func ship_max_hp(kind: String) -> float:
-	return float({"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 800.0, "destroyer": 1600.0}.get(kind, SHIP_HP))
+	return float({"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0}.get(kind, SHIP_HP))
 
 static func _regenerate_hull(entity: Dictionary, maximum: float, dt: float) -> void:
 	var hp: float = float(entity.get("hp", maximum))
@@ -3102,7 +3103,7 @@ static func _passive_regeneration(state: Dictionary, dt: float) -> void:
 		if has_station(system):
 			_regenerate_hull(system["station"], station_max_hp(system), dt)
 		for yard in system["yards"]:
-			_regenerate_hull(yard, SHIP_HP * 10.0 * int(yard["level"]), dt)
+			_regenerate_hull(yard, YARD_HP * int(yard["level"]), dt)
 		for battery in system.get("pds", {}).values():
 			_regenerate_hull(battery, PDS_HP, dt)
 
@@ -3125,7 +3126,7 @@ static func service_targets(state: Dictionary) -> Dictionary:
 			targets[station_target_id(state, node)] = {"owner": p["owner"], "entity": p["station"], "position": station_position(state, node, float(state["elapsed"])), "max_hp": station_max_hp(p), "node": node, "kind": "station"}
 		for slot in range(p["yards"].size()):
 			var yard: Dictionary = p["yards"][slot]
-			targets[-2 - node * 3 - slot] = {"owner": p["owner"], "entity": yard, "position": shipyard_position(state, node, slot, float(state["elapsed"])), "max_hp": SHIP_HP * 10.0 * int(yard["level"]), "node": node, "kind": "yard"}
+			targets[-2 - node * 3 - slot] = {"owner": p["owner"], "entity": yard, "position": shipyard_position(state, node, slot, float(state["elapsed"])), "max_hp": YARD_HP * int(yard["level"]), "node": node, "kind": "yard"}
 		var defenses: Dictionary = p.get("pds", {})
 		if not defenses.is_empty():
 			var bodies: Array = system_bodies(p, int(state["map"]["seed"]), node)
@@ -5240,7 +5241,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			var target_id: int = -2 - index * 3 - slot
 			var pos: Vector2 = shipyard_position(state, index, slot, float(state["elapsed"]))
 			yard_targets[target_id] = Vector2i(index, slot)
-			health[target_id] = float(system["yards"][slot].get("hp", SHIP_HP * 10.0 * int(system["yards"][slot]["level"])))
+			health[target_id] = float(system["yards"][slot].get("hp", YARD_HP * int(system["yards"][slot]["level"])))
 			positions[target_id] = pos
 			var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 			if not cells.has(cell):
@@ -5537,7 +5538,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			continue
 		var location: Vector2i = yard_targets[id]
 		var yard: Dictionary = state["planets"][location.x]["yards"][location.y]
-		yard["hp"] = maxf(0.0, float(yard.get("hp", SHIP_HP * 10.0 * int(yard["level"]))) - float(damage[id]))
+		yard["hp"] = maxf(0.0, float(yard.get("hp", YARD_HP * int(yard["level"]))) - float(damage[id]))
 		if float(yard["hp"]) <= EPS:
 			destroyed.append(id)
 	destroyed.sort()

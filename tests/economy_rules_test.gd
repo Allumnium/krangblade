@@ -14,7 +14,7 @@ func _test_shipyard_rally() -> void:
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var system: Dictionary = state["planets"][0]
 	system["population"] = 100000.0
-	system["yards"].append({"level": 1, "job": -1, "hp": ECON.SHIP_HP * 10.0})
+	system["yards"].append({"level": 1, "job": -1, "hp": ECON.YARD_HP})
 	for resource in ECON.RESOURCES:
 		system["stock"][resource] = 10000.0
 	var point := Vector2(100, 100)
@@ -167,7 +167,7 @@ func _test_yard_autobuild_and_station_approach() -> void:
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var p: Dictionary = state["planets"][0]
 	p["population"] = 100000.0
-	p["yards"].append({"level": 1, "job": -1, "hp": ECON.SHIP_HP * 10.0})
+	p["yards"].append({"level": 1, "job": -1, "hp": ECON.YARD_HP})
 	for resource in ECON.RESOURCES:
 		p["stock"][resource] = 100000.0
 	assert(not ECON.set_yard_autobuild(state, 2, 0, 0, "fighter", true))
@@ -511,10 +511,10 @@ func _test_station_defense_and_ports() -> void:
 	assert(ECON.shipyard_at_port(p, 3) == 1 and ECON.shipyard_at_port(p, 2) == -1)
 	assert(float(ECON.station_construction_job(p)["progress"]) == 0.0)
 	ECON._work_planet(state, 0, ECON._work("yard", 3))
-	assert(ECON.shipyard_at_port(p, 2) == 2 and ECON.station_max_hp(p) == 1500.0)
+	assert(ECON.shipyard_at_port(p, 2) == 2 and ECON.station_max_hp(p) == 10000.0)
 	ECON._work_planet(state, 0, ECON._work("reinforced_plating", 1))
-	assert(ECON.station_max_hp(p) == 3000.0 and p["station"]["hp"] == 2900.0)
-	assert(ECON.service_targets(state)[ECON.station_target_id(state, 0)]["max_hp"] == 3000.0)
+	assert(ECON.station_max_hp(p) == 13000.0 and p["station"]["hp"] == 12900.0)
+	assert(ECON.service_targets(state)[ECON.station_target_id(state, 0)]["max_hp"] == 13000.0)
 	assert(p["station"].get("weapons", []).size() == 2)
 	ECON._work_planet(state, 0, ECON._work("laser_matrix", 1))
 	assert(p["station"]["weapons"].size() == 4)
@@ -584,19 +584,23 @@ func _test_ship_size_classes() -> void:
 	print("PASS: ship classes, yard authority and cargo transfer metadata")
 
 func _test_passive_health() -> void:
+	assert(ECON.ship_max_hp("scout") == 100.0 and ECON.ship_max_hp("fighter") == 200.0)
+	assert(ECON.ship_max_hp("miner") == 200.0 and ECON.ship_max_hp("colony_ship") == 200.0 and ECON.ship_max_hp("science_ship") == 200.0)
+	assert(ECON.ship_max_hp("cruiser") == 1600.0 and ECON.ship_max_hp("destroyer") == 3200.0)
+	assert(ECON.YARD_HP == 3000.0 and ECON.PDS_HP == 300.0)
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1])
 	var freighter: Dictionary = {}
 	for ship in state["ships"]:
 		if ship["kind"] == "ship":
 			freighter = ship
-	assert(not freighter.is_empty() and freighter["hp"] == 200.0)
+	assert(not freighter.is_empty() and freighter["hp"] == 400.0)
 	freighter["hp"] = 180.0
 	var station: Dictionary = state["planets"][0]["station"]
 	station["hp"] = 900.0
 	ECON._passive_regeneration(state, 3.0)
 	assert(is_equal_approx(float(freighter["hp"]), 181.0) and is_equal_approx(float(station["hp"]), 901.0))
-	ECON._passive_regeneration(state, 1000.0)
-	assert(freighter["hp"] == 200.0 and station["hp"] == ECON.STATION_HP)
+	ECON._passive_regeneration(state, 30000.0)
+	assert(freighter["hp"] == 400.0 and station["hp"] == ECON.STATION_HP)
 	print("PASS: freighter hull and capped passive regeneration")
 
 func _test_manual_conversion_and_stats() -> void:

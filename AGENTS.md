@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.59.1: Double all ship maximum HP and the absolute withdrawal threshold; triple yard and PDS HP. Station base 10,000 HP, Reinforced Plating adds 3,000. Neutral sectors use existing rounded territory borders at low opacity without fill; claimed colors unchanged.
+
 - v0.59.0: Blasters fire four 1-damage shots per mount at 0.25 s intervals, with 0.5 s between one-second bursts; laser range. Scout/Fighter/Cruiser/Destroyer mount 1/2/3/4; Fighters lose lasers; capital lasers and missiles unchanged. Scouts fire without autonomous pursuit. Compact shot tracers use authoritative combat snapshots.
 
 - v0.58.10: Cruiser hull length increases from 40 to 50 local units; Destroyer from 59 to 88. Distinct swept-wing and armored shoulder silhouettes share map, portrait, blueprint and debris art. Laser mounts and selection bounds follow hull geometry; combat and simulation sizes unchanged.
