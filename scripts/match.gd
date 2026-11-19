@@ -4413,6 +4413,39 @@ func _draw_star(index: int, pos: Vector2, radius: float, tint: Color, cool: bool
 		map_canvas.draw_line(point - axis * minf(5.0, radius * 0.045), point, Color(spark_color, fade * 0.26), maxf(0.7, spark_size * 0.65), true)
 		map_canvas.draw_circle(point, spark_size, Color(spark_color, fade * 0.54), true, -1.0, true)
 
+func _draw_planet_production(state: Dictionary, index: int, center: Vector2, radius: float, detail: float) -> void:
+	var system: Dictionary = state["planets"][index]
+	if detail < 0.05 or not ECONOMY.has_station(system) or bool(system.get("planet_blockaded", false)):
+		return
+	var bodies: Array = _system_visual(index, state)["bodies"]
+	if bodies.is_empty():
+		return
+	var elapsed: float = _orbit_time(state)
+	for resource in ECONOMY.ACTIVE_PRODUCTION:
+		var output: float = ECONOMY.local_flow(system, "Production", resource)
+		if resource == "Organics":
+			output = maxf(0.0, output - ECONOMY.eco_organics(system))
+		if output <= ECONOMY.EPS:
+			continue
+		var sources: Array = []
+		for slot in range(bodies.size()):
+			if bodies[slot]["resource"] == resource:
+				sources.append(slot)
+		if sources.is_empty():
+			sources.append(0)
+		var color: Color = HUD.COLORS[resource]
+		var bay: int = clampi(floori(float(system["stock"][resource]) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system)) * ECONOMY.STATION_STORAGE_BAYS), 0, ECONOMY.STATION_STORAGE_BAYS - 1)
+		var destination: Vector2 = _station_bay_point(_screen_point(ECONOMY.station_position(state, index, elapsed)), _station_radius(), elapsed, resource, bay)
+		for slot in sources:
+			var origin: Vector2 = center + _body_position(bodies[slot], radius, elapsed)
+			var count: int = clampi(ceili(sqrt(output / float(sources.size()))), 1, 7)
+			for k in range(count):
+				var phase: float = fposmod(elapsed * 0.8 + float(k) / float(count) + float(slot) * 0.173, 1.0)
+				var point: Vector2 = origin.lerp(destination, phase)
+				var alpha: float = detail * smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.85, 1.0, phase))
+				_draw_resource_glow(point, 3.0, color, alpha * 0.55)
+				map_canvas.draw_rect(Rect2(point - Vector2.ONE, Vector2.ONE * 2.0), Color(color.lightened(0.25), alpha))
+
 func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
 	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(pos):
 		return
@@ -4442,6 +4475,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 				if (index == selected and selected_body == slot) or (building_selection_kind == "pds" and selected_buildings.has(Vector2i(index, slot))):
 					_draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
+	_draw_planet_production(state, index, pos, radius, detail)
 	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
 	_draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity)
 	if detail < 0.5:
