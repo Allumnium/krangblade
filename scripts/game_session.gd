@@ -52,6 +52,7 @@ var snapshot_elapsed: float = 0.0
 var snapshot_revision: int = 0
 var snapshot_sent: Dictionary = {}
 var snapshot_pending: Dictionary = {}
+var snapshot_full_only: Dictionary = {}
 var replication_elapsed: float = 0.0
 var scheduled_snapshot_revision: int = 0
 var urgent_snapshot_revision: int = 0
@@ -59,6 +60,11 @@ var motion_revision: int = 0
 var motion_base_revision: int = 0
 var motion_samples: Dictionary = {}
 var motion_ship_ids: Dictionary = {}
+# Authoritative initial map is sent with the first reliable state of each round.
+# Later ore updates refer to this immutable template, not a previous snapshot.
+var replication_map_template: Dictionary = {}
+var last_sent_motion: Dictionary = {}
+const MOTION_REFRESH_TICKS: int = 10
 
 func _ready() -> void:
 	multiplayer.peer_connected.connect(_peer_connected)
@@ -204,6 +210,10 @@ func _reset_network() -> void:
 	loaded.clear()
 	owners.clear()
 	economy.clear()
+	replication_map_template.clear()
+	last_sent_motion.clear()
+	motion_samples.clear()
+	motion_ship_ids.clear()
 	map_layout = MAP.DEFAULT_LAYOUT
 	lobby_map_seed = 0
 	round_id = 0
@@ -245,6 +255,7 @@ func _peer_disconnected(peer_id: int) -> void:
 	players.erase(peer_id)
 	snapshot_sent.erase(peer_id)
 	snapshot_pending.erase(peer_id)
+	snapshot_full_only.erase(peer_id)
 	loaded.erase(peer_id)
 	last_message.erase(peer_id)
 	_send_roster()
@@ -655,6 +666,7 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 	snapshot_revision = 0
 	snapshot_sent.clear()
 	snapshot_pending.clear()
+	snapshot_full_only.clear()
 	replication_elapsed = 0.0
 	scheduled_snapshot_revision = 0
 	urgent_snapshot_revision = 0
@@ -662,6 +674,9 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 	motion_base_revision = 0
 	motion_samples.clear()
 	motion_ship_ids.clear()
+	replication_map_template.clear()
+	last_sent_motion.clear()
+	diagnostic_compact_received = 0
 	diagnostic_full_received = 0
 	diagnostic_motion_received = 0
 	diagnostic_last_motion_ms = -1
@@ -676,6 +691,8 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 	economy["time_speed"] = 1
 	economy["eliminated"] = []
 	economy["match_result"] = {}
+	if not is_solo and multiplayer.is_server():
+		replication_map_template = (economy["map"] as Dictionary).duplicate(true)
 	_refresh_motion_roster()
 	owners = ECONOMY.planet_teams(economy)
 	_set_phase("match")
@@ -725,6 +742,10 @@ func _back_to_lobby(snapshot: Dictionary, reason: String) -> void:
 	economy_timer.stop()
 	owners.clear()
 	economy.clear()
+	replication_map_template.clear()
+	last_sent_motion.clear()
+	motion_samples.clear()
+	motion_ship_ids.clear()
 	_set_phase("lobby")
 	_status(reason)
 	roster_changed.emit()
@@ -1100,6 +1121,7 @@ var diagnostic_snapshot_bytes: int = 0
 var diagnostic_sent_bytes: int = 0
 var diagnostic_received_bytes: int = 0
 var diagnostic_full_received: int = 0
+var diagnostic_compact_received: int = 0
 var diagnostic_motion_received: int = 0
 var diagnostic_last_full_ms: int = -1
 var diagnostic_last_motion_ms: int = -1
@@ -1111,7 +1133,7 @@ func network_diagnostics() -> Dictionary:
 	var peer: ENetMultiplayerPeer = multiplayer.multiplayer_peer as ENetMultiplayerPeer
 	if is_solo or peer == null or peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
 		return {}
-	var ids: Array[int] = _connected_guests() if multiplayer.is_server() else [1]
+	var ids: Array = _connected_guests() if multiplayer.is_server() else [1]
 	var ping: float = 0.0
 	var loss: float = 0.0
 	for id in ids:
@@ -1167,18 +1189,23 @@ func _publish_economy(urgent: bool = true) -> void:
 func _flush_economy() -> void:
 	if is_solo:
 		return
-	var payload: PackedByteArray = PackedByteArray()
+	var payloads: Dictionary = {}
 	var due: int = maxi(scheduled_snapshot_revision, urgent_snapshot_revision)
+	var encode_start: int = Time.get_ticks_usec()
 	for id in _connected_guests():
 		if snapshot_pending.has(id) or int(snapshot_sent.get(id, 0)) >= due:
 			continue
-		if payload.is_empty():
-			var encode_start: int = Time.get_ticks_usec()
-			payload = var_to_bytes(economy).compress(FileAccess.COMPRESSION_GZIP)
+		var needs_template: bool = not snapshot_sent.has(id)
+		var full_only: bool = snapshot_full_only.has(id)
+		var payload_key := Vector2i(int(needs_template), int(full_only))
+		if not payloads.has(payload_key):
+			var wire: Dictionary = economy if full_only else _encode_replica(economy, replication_map_template, needs_template)
+			payloads[payload_key] = var_to_bytes(wire).compress(FileAccess.COMPRESSION_GZIP)
 			diagnostic_encode_ms = float(Time.get_ticks_usec() - encode_start) / 1000.0
-			diagnostic_snapshot_bytes = payload.size()
-		# At most one reliable full snapshot in flight per guest. A slow guest
-		# skips intermediate states, receiving the newest revision after ACK.
+		var payload: PackedByteArray = payloads[payload_key]
+		diagnostic_snapshot_bytes = payload.size()
+		# One reliable snapshot in flight; the initial ACK also confirms the
+		# map template arrived. Every later inventory update is independent.
 		if rpc_id(id, "_rpc_economy", round_id, snapshot_revision, motion_revision, payload) == OK:
 			diagnostic_sent_bytes += payload.size()
 			snapshot_pending[id] = snapshot_revision
@@ -1200,12 +1227,31 @@ func _rpc_economy(update_round: int, revision: int, pose_revision: int, compress
 	diagnostic_snapshot_bytes = compressed.size()
 	var decode_start: int = Time.get_ticks_usec()
 	var decoded: Variant = bytes_to_var(compressed.decompress_dynamic(16777216, FileAccess.COMPRESSION_GZIP))
-	diagnostic_decode_ms = float(Time.get_ticks_usec() - decode_start) / 1000.0
 	if not decoded is Dictionary:
+		_request_snapshot_recovery(revision)
 		return
 	var snapshot: Dictionary = decoded
 	if (snapshot.get("planets", []) as Array).size() != (economy.get("planets", []) as Array).size():
+		_request_snapshot_recovery(revision)
 		return
+	var compact: bool = snapshot.has("_wire_ore")
+	var has_template: bool = snapshot.has("_wire_map_template")
+	var template: Dictionary = snapshot.get("_wire_map_template", replication_map_template)
+	if compact:
+		var restored: Dictionary = _restore_map_ore(template, snapshot["_wire_ore"])
+		if restored.is_empty():
+			_request_snapshot_recovery(revision)
+			return
+		snapshot["map"] = restored
+	elif not snapshot.has("map"):
+		_request_snapshot_recovery(revision)
+		return
+	replication_map_template = template
+	snapshot.erase("_wire_map_template")
+	snapshot.erase("_wire_ore")
+	if compact and not has_template:
+		diagnostic_compact_received += 1
+	diagnostic_decode_ms = float(Time.get_ticks_usec() - decode_start) / 1000.0
 	economy = snapshot
 	motion_base_revision = pose_revision
 	_refresh_motion_roster()
@@ -1233,11 +1279,18 @@ func _send_motion() -> void:
 	if guests.is_empty():
 		return
 	var packet := PackedByteArray()
+	var current: Dictionary = {}
+	var refresh: bool = motion_revision % MOTION_REFRESH_TICKS == 0
 	for ship in economy["ships"]:
 		if not ship.has("position"):
 			continue
 		var position: Vector2 = ship["position"]
 		var heading: Vector2 = ship.get("heading", Vector2.UP)
+		var id: int = int(ship["id"])
+		var pose := Vector4(position.x, position.y, heading.x, heading.y)
+		current[id] = pose
+		if not refresh and last_sent_motion.get(id) == pose:
+			continue
 		var offset: int = packet.size()
 		packet.resize(offset + MOTION_RECORD_BYTES)
 		packet.encode_s64(offset, int(ship["id"]))
@@ -1250,6 +1303,7 @@ func _send_motion() -> void:
 			packet = PackedByteArray()
 	if not packet.is_empty():
 		_send_motion_batch(guests, packet)
+	last_sent_motion = current
 
 func _send_motion_batch(guests: Array[int], packet: PackedByteArray) -> void:
 	for id in guests:
@@ -1280,3 +1334,113 @@ func _rpc_motion(update_round: int, revision: int, packet: PackedByteArray) -> v
 		var heading := Vector2(packet.decode_float(offset + 16), packet.decode_float(offset + 20))
 		if position.is_finite() and heading.is_finite():
 			motion_samples[id] = {"position": position, "heading": heading, "revision": revision}
+
+# Map ore is the only mutable part of generated map geometry. Record just
+# changes from the starting template; -1 means a depleted, removed rock.
+# The original ship/planet/economy dictionaries are never modified by encoding.
+func _encode_map_ore(live: Dictionary, template: Dictionary) -> Variant:
+	var base_fields: Array = template.get("fields", [])
+	var live_fields: Array = live.get("fields", [])
+	if template.is_empty() or live_fields.size() != base_fields.size() or live.size() != template.size():
+		return null
+	for key in live:
+		if key != "fields" and live[key] != template.get(key):
+			return null
+	var updates: Array = []
+	for i in range(base_fields.size()):
+		var base_field: Dictionary = base_fields[i]
+		var live_field: Dictionary = live_fields[i]
+		if live_field.size() != base_field.size():
+			return null
+		for key in live_field:
+			if key != "chunks" and live_field[key] != base_field.get(key):
+				return null
+		var base_chunks: Array = base_field.get("chunks", [])
+		var live_chunks: Array = live_field.get("chunks", [])
+		var changes: Dictionary = {}
+		var cursor: int = 0
+		# Mining only removes rocks, never renumbers or reorders them.
+		for rock in base_chunks:
+			var id: int = int(rock["id"])
+			if cursor >= live_chunks.size() or int(live_chunks[cursor]["id"]) != id:
+				changes[id] = -1.0
+				continue
+			var active: Dictionary = live_chunks[cursor]
+			cursor += 1
+			if active.size() != rock.size():
+				return null
+			for key in active:
+				if key != "remaining" and active[key] != rock.get(key):
+					return null
+			var remaining: float = float(active["remaining"])
+			if remaining != float(rock["remaining"]):
+				changes[id] = remaining
+		if cursor != live_chunks.size():
+			return null
+		updates.append(changes)
+	return updates
+
+func _restore_map_ore(template: Dictionary, updates: Variant) -> Dictionary:
+	if template.is_empty() or not updates is Array:
+		return {}
+	var base_fields: Array = template.get("fields", [])
+	if updates.size() != base_fields.size():
+		return {}
+	var result: Dictionary = template.duplicate()
+	var fields: Array = []
+	for i in range(base_fields.size()):
+		if not updates[i] is Dictionary:
+			return {}
+		var changes: Dictionary = updates[i]
+		var field: Dictionary = (base_fields[i] as Dictionary).duplicate()
+		var chunks: Array = []
+		var matched: int = 0
+		for rock in field.get("chunks", []):
+			var id: int = int(rock["id"])
+			var remaining: float = float(rock["remaining"])
+			if changes.has(id):
+				matched += 1
+				var value: Variant = changes[id]
+				if not value is float and not value is int:
+					return {}
+				remaining = float(value)
+				if remaining == -1.0:
+					continue
+				if not is_finite(remaining) or remaining < 0.0:
+					return {}
+			var active: Dictionary = (rock as Dictionary).duplicate()
+			active["remaining"] = remaining
+			chunks.append(active)
+		if matched != changes.size():
+			return {}
+		field["chunks"] = chunks
+		fields.append(field)
+	result["fields"] = fields
+	return result
+
+func _encode_replica(state: Dictionary, template: Dictionary, needs_template: bool) -> Dictionary:
+	var wire: Dictionary = state.duplicate()
+	var updates: Variant = _encode_map_ore(state["map"], template)
+	if updates != null:
+		wire.erase("map")
+		wire["_wire_ore"] = updates
+	# Full current map remains the fallback if map topology changes.
+	if needs_template:
+		wire["_wire_map_template"] = template
+	return wire
+
+func _request_snapshot_recovery(revision: int) -> void:
+	_rpc_snapshot_recovery.rpc_id(1, round_id, revision)
+
+@rpc("any_peer", "call_remote", "reliable", 1)
+func _rpc_snapshot_recovery(recovery_round: int, revision: int) -> void:
+	if not multiplayer.is_server() or phase != "match" or recovery_round != round_id:
+		return
+	var id: int = multiplayer.get_remote_sender_id()
+	if _match_peer(id) and int(snapshot_pending.get(id, -1)) == revision:
+		# A failed compact decode switches this peer back to self-contained
+		# reliable full states for the rest of the match.
+		snapshot_pending.erase(id)
+		snapshot_sent.erase(id)
+		snapshot_full_only[id] = true
+		urgent_snapshot_revision = snapshot_revision

@@ -149,6 +149,9 @@ func _phase_changed() -> void:
 		if int(state["map"]["seed"]) != preview_seed or state["map"] != MAP.generate(preview_seed, expected_players, _expected_layout()):
 			_fail("Generated map does not match authoritative seed and layout.")
 			return
+		if mode == "normal" and not _check_map_codec(state):
+			_fail("Static-map codec failed exact inventory round trip.")
+			return
 		for owner in roster:
 			var miners: int = 0
 			var fighters: int = 0
@@ -777,6 +780,9 @@ func _check_economy_sync() -> void:
 			if role == "client" and int(session.get("diagnostic_motion_received")) < 2:
 				_fail("Guest did not receive independent movement updates.")
 				return
+			if role == "client" and int(session.get("diagnostic_compact_received")) < 1:
+				_fail("Guest did not receive a map-template-independent inventory update.")
+				return
 			economy_verified = true
 			# A normal game command is the completion acknowledgment. Return
 			# only after each real peer has independently verified its replica.
@@ -831,3 +837,43 @@ func _fail(reason: String) -> void:
 		print("DEBUG: phase=", session.get("phase"), " roster=", session.get("players"), " loaded=", session.get("loaded"), " status=", session.get("status"), " started=", started, " saw_match=", saw_match)
 	push_error("FAIL: %s (%s, %d players)" % [reason, role, expected_players])
 	quit(1)
+
+func _check_map_codec(state: Dictionary) -> bool:
+	var template: Dictionary = (state["map"] as Dictionary).duplicate(true)
+	var live: Dictionary = template.duplicate(true)
+	var altered: bool = false
+	for field in live["fields"]:
+		var chunks: Array = field["chunks"]
+		if chunks.size() >= 2:
+			chunks.remove_at(0)
+			chunks[0]["remaining"] = float(chunks[0]["remaining"]) * 0.5
+			altered = true
+			break
+	if not altered:
+		return false
+	var wire_state: Dictionary = state.duplicate()
+	wire_state["map"] = live
+	var first: Dictionary = session.call("_encode_replica", wire_state, template, true)
+	var next: Dictionary = session.call("_encode_replica", wire_state, template, false)
+	if first.has("map") or next.has("map") or not first.has("_wire_map_template") or next.has("_wire_map_template"):
+		return false
+	var full_bytes: PackedByteArray = var_to_bytes(wire_state).compress(FileAccess.COMPRESSION_GZIP)
+	var compact_bytes: PackedByteArray = var_to_bytes(next).compress(FileAccess.COMPRESSION_GZIP)
+	if compact_bytes.size() >= full_bytes.size():
+		return false
+	var decoded_first: Dictionary = bytes_to_var(var_to_bytes(first))
+	var decoded_next: Dictionary = bytes_to_var(compact_bytes.decompress_dynamic(16777216, FileAccess.COMPRESSION_GZIP))
+	var restored: Dictionary = session.call("_restore_map_ore", decoded_first["_wire_map_template"], decoded_next["_wire_ore"])
+	if restored != live or template != state["map"]:
+		return false
+	var same: Dictionary = session.call("_restore_map_ore", template, session.call("_encode_map_ore", template, template))
+	if same != template:
+		return false
+	var invalid: Dictionary = session.call("_restore_map_ore", template, [])
+	if not invalid.is_empty():
+		return false
+	var topology: Dictionary = live.duplicate(true)
+	topology["seed"] = int(topology["seed"]) + 1
+	wire_state["map"] = topology
+	var fallback: Dictionary = session.call("_encode_replica", wire_state, template, false)
+	return fallback.get("map") == topology and not fallback.has("_wire_ore")
