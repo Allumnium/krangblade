@@ -3803,7 +3803,6 @@ static func arrival_wait_remaining(state: Dictionary, ship: Dictionary) -> float
 
 static func _advance_unit_orders(state: Dictionary, graph: Dictionary) -> void:
 	for ship in state["ships"]:
-		ship.erase("_handoff_sent")
 		_mark_sector_arrival(state, ship)
 		if _unit_order_running(ship):
 			continue
@@ -6272,6 +6271,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if idle_targets.has(ship_id) and _is_idle_ship(ship) and autocast_ready(state, ship, "wander") and not coordinated.has(ship_id) and ship["position"] == initial_position:
 			_navigate(ship, idle_targets[ship_id], ship_speed(str(ship.get("kind", "ship"))) * dt)
 	for ship in state["ships"]:
+		ship.erase("_handoff_sent")
 		_mark_sector_arrival(state, ship)
 		if ship.has("auto_cooldown_until") and float(ship["auto_cooldown_until"]) <= float(state["elapsed"]):
 			ship.erase("auto_cooldown_until")
