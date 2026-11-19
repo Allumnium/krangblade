@@ -1238,13 +1238,16 @@ func _available_cost_resources(p: Dictionary, yard: int = -1) -> Dictionary:
 	available["Population"] = maxf(0.0, float(p["population"]) - reserve)
 	return available
 
+func _capital_weapon_summary(kind: String) -> String:
+	return "Lasers ×%d · %.0f damage each · 1 s · Range %.0f\nMissiles ×%d · %.0f damage each · %.0f s · Range %.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE]
+
 func _ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
 		"colony_ship": details = "Settles a neutral system · %.0f settlers\nFarm %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
 		"scout": details = "Fast unarmed reconnaissance"
-		"cruiser", "destroyer": details = "Combat ship · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE * (2.0 if kind == "cruiser" else 4.0), ECONOMY.LASER_RANGE]
+		"cruiser", "destroyer": details = _capital_weapon_summary(kind)
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
@@ -2758,6 +2761,7 @@ func _refresh_weapon_details(ship: Dictionary, system: Dictionary, body_selected
 			parent = ship_overview
 			at = ship_detail.get_index() + 1
 			match str(ship["kind"]):
+				"cruiser", "destroyer": details = _capital_weapon_summary(str(ship["kind"]))
 				"fighter": details = "Laser\n%.0f damage · 1 shot/s (1×) · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 				"miner": details = "Mining laser ×2\n%.0f damage each · 1 shot/s (1×) · Range %.0f\n+200%% vs asteroids · %.0f t/yr nominal" % [ECONOMY.MINER_LASER_DAMAGE / 2.0, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE]
 		elif not system.is_empty() and not yard_selected:
@@ -5947,7 +5951,11 @@ func _fighter_beam_origin(pose: Dictionary) -> Vector2:
 func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, width: float) -> void:
 	if ship["kind"] != "miner":
 		var muzzle: float = float({"cruiser": 20.0, "destroyer": 29.0}.get(ship["kind"], FIGHTER_MUZZLE))
-		_draw_owned_laser((pose["point"] as Vector2) + (pose["direction"] as Vector2) * muzzle * _ship_scale(), endpoint, int(ship["owner"]), width)
+		var count: int = maxi(1, ECONOMY.capital_lasers(str(ship["kind"])))
+		var axis: Vector2 = pose["direction"]
+		for i in range(count):
+			var offset: float = (float(i) - float(count - 1) * 0.5) * 3.0
+			_draw_owned_laser((pose["point"] as Vector2) + (axis * muzzle + axis.orthogonal() * offset) * _ship_scale(), endpoint, int(ship["owner"]), width)
 		return
 	var point: Vector2 = pose["point"]
 	var direction: Vector2 = point.direction_to(endpoint)
@@ -6888,6 +6896,16 @@ func _draw_map() -> void:
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
 		var shooter: int = int(ship["id"])
+		if float(ship.get("missile_until", -1.0)) >= float(state["elapsed"]) and ship.has("missile_endpoint"):
+			var a: Vector2 = _screen_point(ship["missile_origin"])
+			var b: Vector2 = _screen_point(ship["missile_endpoint"])
+			var phase: float = clampf(1.0 - (float(ship["missile_until"]) - _orbit_time(state)) / 0.65, 0.0, 1.0)
+			var axis: Vector2 = a.direction_to(b)
+			for launcher in range(ECONOMY.missile_count(str(ship["kind"]))):
+				var offset: Vector2 = axis.orthogonal() * (float(launcher) - float(ECONOMY.missile_count(str(ship["kind"])) - 1) * 0.5) * 6.0 * sin(phase * PI)
+				var tip: Vector2 = a.lerp(b, phase) + offset
+				map_canvas.draw_line(tip - axis * 12.0, tip, Color("#ffb36b"), 2.0, true)
+				map_canvas.draw_circle(tip, 2.0, Color("#fff2d2"))
 		var target: int = int(ship.get("combat_target", -1))
 		var yard_target: int = int(ship.get("yard_target", -1))
 		if poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
