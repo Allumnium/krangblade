@@ -43,13 +43,18 @@ func _ready() -> void:
 	heading.add_theme_constant_override("separation", 10)
 	root.add_child(heading)
 	var emblem := _label(heading, "WARBOUND  /  CODEX", 20, HUD.ACCENT)
+	emblem.autowrap_mode = TextServer.AUTOWRAP_OFF
+	emblem.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	emblem.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	emblem.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	var version := _label(heading, "v%s" % ProjectSettings.get_setting("application/config/version"), 12, HUD.MUTED)
+	version.autowrap_mode = TextServer.AUTOWRAP_OFF
 	version.size_flags_horizontal = Control.SIZE_SHRINK_END
 	version.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	var close := Button.new()
 	close.text = "Close  ×"
 	close.custom_minimum_size = Vector2(82, 32)
+	close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	close.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	close.pressed.connect(hide)
 	heading.add_child(close)
@@ -427,6 +432,7 @@ func _combat() -> void:
 	_note("Use coordinated attack groups, protect miners and freighters, and retreat before losing ships and their crew investment.")
 
 func _controls() -> void:
+	_note("Default hotkeys. Menu → Hotkeys changes bindings; camera speed sliders adjust keyboard, mouse edge and wheel zoom.")
 	_table(["Input", "Action"], [["Left click / drag", "Select a ship, structure or fleet"], ["Shift + select", "Add to selection"], ["Right click / drag", "Contextual order / formation"], ["A / M / P, then click", "Attack / move / patrol"], ["S / H", "Stop / hold"], ["L / D / R, then click", "Load / drop cargo / repair"], ["Y, then click / X", "Set / clear shipyard rally"], ["Shift + order", "Queue an order"], ["Arrows / screen edge / middle drag", "Pan camera"], ["Mouse wheel", "Zoom"], ["F", "Follow or focus selection"], ["F2", "Select all owned fighters"], ["Double F2", "Center military selection"], ["Ctrl + 0–9", "Assign control group"], ["Shift + 0–9", "Add selection to group"], ["0–9 / double tap", "Recall / center group"], ["B / T (station)", "Build / trade"], ["Esc", "Cancel targeting, return or menu"]])
 	_body("Use the minimap to navigate or issue contextual orders. Command-card buttons expose additional actions and tooltips; right-click eligible production cards to repeat.")
 

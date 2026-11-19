@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.49.0: Menu has independent keyboard and mouse edge pan speed (0–250%, default 100%) and mouse wheel zoom speed (25–250%, default 100%). Hotkeys opens a bounded local editor with per-context A–Z/F1–F12 bindings and reset-all; prevent same-context/global conflicts, preserve fixed Esc/arrows/control groups, save to user settings, refresh card badges/tooltips. Codex header is nonwrapping with compact Close; mark its controls table as defaults.
+
 - v0.48.0: Standard SC2-style contextual hotkeys. M/S/H/P/A for move/stop/hold/patrol/attack, L/D/R for load/drop/repair, Y rally, X clear. Armed orders accept left click/drag as well as existing right click/drag; minimap accepts armed left click. Escape cancels targeting/selection drag, returns from station submenu, then opens menu. Ctrl+number replaces and Shift+number adds to compatible control group; plain recall/double center, F and F2 preserved. Remove Q/E station cycling; do not assign other commands to Q/E for now. Use visible, enabled card buttons as hotkey source with key badges; preserve authority, layout, tooltips and autocast. Warbound-specific production/structure bindings are mnemonic and contextual.
 
 - v0.47.1: Command icons use bold, compact vector silhouettes with semantic color accents and dark cutouts; production structures depict their function rather than raw material symbols. Keep ship portraits based on authored hull shapes and owner colors, queue artwork consistent, and HUD resource/selection art unchanged. Preserve all command slots, captions, tooltips, availability and repeat indicators.
