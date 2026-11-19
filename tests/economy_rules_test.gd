@@ -473,6 +473,7 @@ func _initialize() -> void:
 	_test_precise_patrol()
 	_test_salvage()
 	_test_opportunistic_salvage()
+	_test_colony_farm()
 	_test_civilian_waiting_movement()
 	_test_depleted_field_routes()
 	_test_wide_patrol_rally_and_conquest()
@@ -2702,6 +2703,42 @@ func _test_salvage() -> void:
 		assert(ECON.cargo_bays(craft["cargo"], capacity, 4)[0][0]["amount"] > 0.0)
 	print("PASS: wreck recovery, drift, ownership, exclusive claim, partial pickup, physical delivery, cargo-capable hulls")
 
+func _test_colony_farm() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var home: Dictionary = state["planets"][0]
+	ECON._finish(state, 0, home, {"id": 901, "kind": "colony_ship"})
+	var ship: Dictionary = state["ships"][0]
+	var graph: Dictionary = ECON.military_graph(state)
+	assert(ECON.COLONY_CAPACITY == 100.0 and not ECON.supports_autocast(ship, "salvage"))
+	assert(not ECON.set_autocast(state, 2, [901], "farm", false))
+	assert(ECON.set_autocast(state, 1, [901], "farm", false))
+	ECON._grow_colony_cargo(ship, 10.0)
+	assert(ECON._cargo_total(ship) == 0.0)
+	assert(ECON.set_autocast(state, 1, [901], "farm", true))
+	home["stock"]["Organics"] = 0.0
+	ECON._grow_colony_cargo(ship, 10.0)
+	assert(ship["cargo"]["Organics"] == 50.0 and home["stock"]["Organics"] == 0.0)
+	assert(not ECON._begin_farm_delivery(state, ship))
+	assert(not ECON.command_unload_cargo(state, 2, [901]))
+	assert(ECON.issue_unit_order(state, 1, [901], {"kind": "unload"}, false))
+	ship["position"] = ECON.station_position(state, 0, float(state["elapsed"]))
+	assert(ECON._work_salvage(state, graph, ship, 1.0))
+	assert(home["stock"]["Organics"] == 50.0 and ECON._cargo_total(ship) == 0.0)
+	ship.erase("unit_order")
+	ECON._grow_colony_cargo(ship, 40.0)
+	assert(ship["cargo"]["Organics"] == 100.0)
+	assert(ECON._begin_farm_delivery(state, ship))
+	home["stock"]["Organics"] = ECON.storage_capacity(home)
+	assert(ECON._work_salvage(state, graph, ship, 1.0))
+	assert(ECON._cargo_total(ship) == 100.0)
+	home["stock"]["Organics"] -= 100.0
+	state["elapsed"] += 1.0
+	assert(ECON._work_salvage(state, graph, ship, 100.0))
+	assert(ECON._cargo_total(ship) <= ECON.EPS)
+	assert(home["stock"]["Organics"] == ECON.storage_capacity(home))
+	print("PASS: colony farming, cap, authority, manual and auto delivery, full warehouse")
+
 func _test_opportunistic_salvage() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -2715,8 +2752,11 @@ func _test_opportunistic_salvage() -> void:
 		state["salvage"][id] = {"id": id, "resource": "Metals", "amount": 50.0, "origin": pos, "position": pos, "drift": Vector2.ZERO, "born": 0.0, "expires_at": 100.0, "claim": -1}
 	ECON.step(state, 0.1)
 	for ship in state["ships"]:
-		var carries_cargo: bool = ship["kind"] != "fighter"
+		var carries_cargo: bool = ECON.supports_autocast(ship, "salvage")
 		var expected: float = (ECON.FREIGHTER_TRACTOR_RATE if ship["kind"] == "ship" else ECON.TRACTOR_RATE) * 0.1 if carries_cargo else 0.0
+		if ship["kind"] == "colony_ship":
+			expected = ECON.COLONY_FARM_RATE * 0.1
+			assert(is_zero_approx(float(ship["cargo"]["Metals"])))
 		assert(is_equal_approx(ECON._cargo_total(ship), expected))
 		assert(ship["holding"] and ship["route"].is_empty())
 		assert(int(state["salvage"][ship["id"]]["claim"]) == (int(ship["id"]) if carries_cargo else -1))

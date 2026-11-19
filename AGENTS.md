@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.53.0: Colony ships farm Organics into 100 t holds at 5 t/yr, auto-deliver full loads when idle, and accept early delivery orders. No salvage or floating cargo pickup; keep colonization and explicit orders. Use type-only ship display names; internal IDs remain.
+
 - v0.52.0: Pulsars replace visible antimatter fields; only science vessels extract from them, after 30 years in range for one stored unit. Preserve ship speed and map topology; no unloading or new uses yet. Compact resource HUD and content-height logistics overlay.
 
 - v0.51.10: Apply bounded, host-authoritative spatial contact correction to all hulls after jobs and movement, including independent orders, held, docking, following and waiting ships; retain soft steering and service logic. Starting fleets launch in spaced rings; subsequent launches seek free positions.

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.53.0: Colony ship farming rate provisionally 5 t/yr (20 years per hold); watch food balance and idle fleet logistics. Auto-delivery pauses production while unloading; colonization transfers carried Organics.
+
 - v0.52.0: Science vessels retain a full containment chamber at the Pulsar. Existing finite reservoir preserved; prototype price 900 Metals, 30 Organics, 2,000 crew, 15 years at level one. Review whether unlimited source, different costs or auto-collection controls are desired later.
 
 - v0.51.10: Previous soft steering skipped many occupied endpoints; bounded post-movement spatial correction covers these. Watch crowded dock jitter, extreme-density residual overlaps, contact displacement versus speed budget, and high-speed interpolation.

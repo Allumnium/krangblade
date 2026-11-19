@@ -370,7 +370,7 @@ func _mining() -> void:
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
 	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Local resource ceiling", "%.0f t/yr" % E.PLANET_MINING_LIMIT], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
-	_body("Destroyed ships can leave drifting salvage. Cargo-capable ships may collect it in safe space; miners prioritize reachable safe salvage. Debris lasts %.0f–%.0f simulation years. Logistics ships salvage at one-quarter the mining ship rate. Miners repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
+	_body("Destroyed ships can leave drifting salvage. Mining and logistics ships may collect it in safe space; miners prioritize reachable safe salvage. Debris lasts %.0f–%.0f simulation years. Logistics ships salvage at one-quarter the mining ship rate. Miners repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
 
 func _trade() -> void:
@@ -390,6 +390,7 @@ func _trade() -> void:
 func _expansion() -> void:
 	_body("Build a colony ship and direct it to a reachable neutral system. On arrival it establishes a station and shipyard. Settlers become the new colony population; existing colonies cannot be freely claimed.")
 	_flow(["Recruit settlers", "Travel", "Establish colony"])
+	_body("Colony ships farm %.0f t/yr into a %.0f t Organics hold. Auto-Farm delivers full loads when idle; Deliver Organics or right-click a friendly station to unload early. They cannot salvage." % [E.COLONY_FARM_RATE, E.COLONY_CAPACITY])
 	_table(["Colony ship", "Requirement"], [["Crew", "%.0f people" % E.COLONY_POPULATION], ["Materials", _recipe(E._cost("colony_ship", 1))], ["Base build time", "%.0f years" % (E._work("colony_ship", 1) / E.yard_speed(1))]])
 	_section("Planetless sectors & conquest")
 	_body("Cool blue stars mark planetless sectors, useful for routes and mining access. They rely on orbital housing rather than terrestrial agriculture or mining. Defeat hostile defenses and occupy a system to contest territory. A system's claim depends on its station/population and infrastructure, not passing ships.")
@@ -434,7 +435,7 @@ func _combat() -> void:
 func _controls() -> void:
 	_note("Default hotkeys. Menu → Hotkeys changes bindings; camera speed sliders adjust keyboard, mouse edge and wheel zoom.")
 	_table(["Input", "Action"], [["Left click / drag", "Select a ship, structure or fleet"], ["Shift + select", "Add to selection"], ["Right click / drag", "Contextual order / formation"], ["Right click friendly ship", "Follow until replaced"], ["A / M / P, then click", "Attack / move / patrol"], ["S / H", "Stop / hold"], ["L / D / R, then click", "Load / drop cargo / repair"], ["Y, then click / X", "Set / clear shipyard rally"], ["Shift + order", "Queue an order"], ["Arrows / screen edge / middle drag", "Pan camera"], ["Mouse wheel", "Zoom; distant ships and stations enlarge up to 4×"], ["F", "Follow or focus selection"], ["F2", "Select all owned fighters"], ["Double F2", "Center military selection"], ["Ctrl + 0–9", "Assign control group"], ["Shift + 0–9", "Add selection to group"], ["0–9 / double tap", "Recall / center group"], ["B / T (station)", "Build / trade"], ["Esc", "Cancel targeting, return or menu"]])
-	_body("Wander, Auto-Mine, Auto-Salvage, Auto-Repair and Auto-Trade toggle with either mouse button. Modes occupy the bottom row (extra Trade above for mixed fleets). Lit borders show enabled modes; clock masks show cooldown. Enabling Wander clears its cooldown only; active orders and Hold take priority.")
+	_body("Wander, Auto-Mine, Auto-Salvage, Auto-Repair, Auto-Trade and Auto-Farm toggle with either mouse button. Modes occupy the bottom row (extra modes above for mixed fleets). Lit borders show enabled modes; clock masks show cooldown. Enabling Wander clears its cooldown only; active orders and Hold take priority.")
 	_body("Click a star to target its sector boundary; drag from a star to target the whole sector. Alt forces precise positioning. Use the minimap to navigate or issue contextual orders. Command-card buttons expose additional actions and tooltips; right-click eligible production cards to repeat.")
 
 func _multiplayer() -> void:
