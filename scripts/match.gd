@@ -166,11 +166,13 @@ var ship_destructions: Array = []
 # Authored top-down silhouette and interior panel geometry in hull-local
 # coordinates (forward, lateral). Logistics keeps its original cargo bays.
 const HULL_OUTLINES: Dictionary = {
+	"science_ship": [Vector2(14, 0), Vector2(12, 7), Vector2(7, 12), Vector2(0, 14), Vector2(-7, 12), Vector2(-12, 7), Vector2(-14, 0), Vector2(-12, -7), Vector2(-7, -12), Vector2(0, -14), Vector2(7, -12), Vector2(12, -7)],
 	"fighter": [Vector2(12, 0), Vector2(6, 2.5), Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-6, 3), Vector2(-10, 2.5), Vector2(-10, -2.5), Vector2(-6, -3), Vector2(-7, -7.5), Vector2(-3, -8), Vector2(2.5, -3), Vector2(6, -2.5)],
 	"miner": [Vector2(10, 5), Vector2(6, 5), Vector2(3, 7), Vector2(-5, 7), Vector2(-8, 4), Vector2(-8, -4), Vector2(-5, -7), Vector2(3, -7), Vector2(6, -5), Vector2(10, -5), Vector2(10, -2.5), Vector2(5, -2.5), Vector2(4, 0), Vector2(5, 2.5), Vector2(10, 2.5)],
 	"colony_ship": [Vector2(13, 0), Vector2(8, 3), Vector2(5, 3.5), Vector2(3, 6.5), Vector2(-5, 7), Vector2(-9, 4), Vector2(-11, 3), Vector2(-11, -3), Vector2(-9, -4), Vector2(-5, -7), Vector2(3, -6.5), Vector2(5, -3.5), Vector2(8, -3)]
 }
 const HULL_PANELS: Dictionary = {
+	"science_ship": [[Color("#7e9eb9"), [Vector2(12, 0), Vector2(8, 8), Vector2(0, 12), Vector2(-8, 8), Vector2(-12, 0), Vector2(-8, -8), Vector2(0, -12), Vector2(8, -8)]], [Color("#23374d"), [Vector2(7, 0), Vector2(5, 5), Vector2(0, 7), Vector2(-5, 5), Vector2(-7, 0), Vector2(-5, -5), Vector2(0, -7), Vector2(5, -5)]]],
 	"fighter": [
 		[Color("#6b493e"), [Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-5, 3)]],
 		[Color("#6b493e"), [Vector2(2.5, -3), Vector2(-3, -8), Vector2(-7, -7.5), Vector2(-5, -3)]],
@@ -491,6 +493,9 @@ func _build_ui() -> void:
 	year_label = _global_stat(row, "%d A.D." % ECONOMY.START_YEAR, HUD.ACCENT)
 	_build_global_bar(row)
 	global_population_label = _global_stat(row, "0", Color("#b9d9ed"), true)
+	var header_spacer := Control.new()
+	header_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(header_spacer)
 	var help := _button("", _open_codex, row)
 	help.icon = _command_icon('<circle cx="16" cy="16" r="13"/><path d="M11 12Q11 6 17 7Q23 8 21 13Q20 15 17 17V20M17 25H17.1"/>', 24)
 	help.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1176,6 +1181,7 @@ func _ship_stats(kind: String) -> String:
 		"colony_ship": details = "Settles a neutral system · %.0f settlers · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_CAPACITY]
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/yr · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
+		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f yr collection" % ECONOMY.SCIENCE_COLLECTION_YEARS
 	return "%s\nHP %.0f · Speed %.0f/yr · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
 
 func _build_production_summary() -> void:
@@ -1451,7 +1457,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_grid = grid
 	for kind in ECONOMY.SHIP_KINDS:
 		var button := CostButton.new()
-		var caption: String = {"ship": "Logistics\nship", "colony_ship": "Colony\nship", "fighter": "Fighter", "miner": "Mining\nship"}[kind]
+		var caption: String = {"ship": "Logistics\nship", "colony_ship": "Colony\nship", "fighter": "Fighter", "miner": "Mining\nship", "science_ship": "Science\nvessel"}[kind]
 		var art: TextureRect = _yard_ability_face(button, caption, _production_icon(kind, HUD.ACCENT))
 		button.set_meta("portrait", art)
 		button.pressed.connect(_build_at_yard.bind(kind))
@@ -1465,7 +1471,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 		grid.add_child(button)
 		yard_commands[kind] = button
-		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S}[kind], "Shipyard", "yard_" + kind, _ship_kind_name(kind))
+		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S, "science_ship": KEY_V}[kind], "Shipyard", "yard_" + kind, _ship_kind_name(kind))
 	# Upgrade remains on row two; navigation and rally use the shared bottom row.
 	yard_upgrade = _button("", _upgrade_selected_yards, grid, true)
 	_yard_ability_face(yard_upgrade, "Upgrade", _station_command_icon("upgrade"))
@@ -2040,6 +2046,8 @@ func _selected_ship(state: Dictionary) -> Dictionary:
 	return {}
 
 func _ship_kind_name(kind: String) -> String:
+	if kind == "science_ship":
+		return "Science vessel"
 	return "Logistics ship" if kind == "ship" else ("Mining ship" if kind == "miner" else kind.replace("_", " ").capitalize())
 
 func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
@@ -2544,7 +2552,7 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	var stock: Dictionary = ECONOMY.field_inventory(field)
 	var total: float = float(stock["Metals"]) + float(stock["Crystals"])
 	if special:
-		ship_detail.text = "Raw antimatter · %s" % _tons(float(stock[ECONOMY.ANTIMATTER])) if float(stock[ECONOMY.ANTIMATTER]) > ECONOMY.EPS else "Depleted"
+		ship_detail.text = "Science vessels collect 1 unit / 30 yr" if float(stock[ECONOMY.ANTIMATTER]) >= 1.0 - ECONOMY.EPS else "Depleted"
 	elif total <= ECONOMY.EPS:
 		ship_detail.text = "Depleted"
 	else:
@@ -2561,8 +2569,9 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	pending_command = ""
 	_refresh_command_mode()
 	fleet_cargo_footer.hide()
-	field_command_grid.show()
-	_refresh_field_commands(state, special)
+	field_command_grid.visible = not special
+	if not special:
+		_refresh_field_commands(state, special)
 
 func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	field_command_grid.hide()
@@ -2622,6 +2631,12 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	var wait_left: float = ECONOMY.autocast_remaining(state, ship, "wander")
 	if wait_left > ECONOMY.EPS and ECONOMY.autocast_enabled(ship, "wander") and ECONOMY._is_idle_ship(ship):
 		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)
+	if kind == "science_ship":
+		if ECONOMY._cargo_total(ship) > ECONOMY.EPS:
+			status += "\nAntimatter secured · 1 unit"
+		elif ship.get("unit_order", {}).get("kind", "") == "collect":
+			var years: float = float(ship.get("science_years", 0.0))
+			status = "Collecting antimatter · %.1f / %.0f yr" % [years, ECONOMY.SCIENCE_COLLECTION_YEARS] if years > 0.0 else "Approaching Pulsar"
 	ship_detail.text = status
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
@@ -2647,8 +2662,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	for craft in state["ships"]:
 		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me():
 			combat_owned = combat_owned or ECONOMY.armed(craft)
-			can_load = can_load or ECONOMY.cargo_free(craft) > ECONOMY.EPS
-			has_cargo_hold = has_cargo_hold or ECONOMY.cargo_capacity(str(craft["kind"])) > ECONOMY.EPS
+			can_load = can_load or (craft["kind"] != "science_ship" and ECONOMY.cargo_free(craft) > ECONOMY.EPS)
+			has_cargo_hold = has_cargo_hold or (craft["kind"] != "science_ship" and ECONOMY.cargo_capacity(str(craft["kind"])) > ECONOMY.EPS)
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_miners) and (id not in ["load", "unload"] or has_cargo_hold)
@@ -2977,7 +2992,7 @@ func _show_system_rings(index: int) -> bool:
 func _build_global_bar(stats: Container) -> void:
 	for resource in ECONOMY.RESOURCES:
 		var tile := PanelContainer.new()
-		tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tile.custom_minimum_size.x = 148.0
 		tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#284661"), 4, 3))
 		stats.add_child(tile)
 		var stack := VBoxContainer.new()
@@ -3023,7 +3038,7 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
 	label.add_theme_color_override("font_color", tint)
 	label.mouse_filter = Control.MOUSE_FILTER_PASS
 	if population:
-		tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tile.custom_minimum_size.x = 180.0
 		label.clip_text = true
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var stack := VBoxContainer.new()
@@ -4788,10 +4803,12 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			order = {"kind": "follow", "target": target}
 		elif contextual and ref.get("kind") == "station" and ECONOMY.can_deposit(state, craft, target):
 			order = {"kind": "deposit", "target": target}
-		elif wreck >= 0 and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
+		elif field >= 0 and bool(state["map"]["fields"][field].get("antimatter", false)) and craft["kind"] == "science_ship" and ECONOMY._cargo_total(craft) <= ECONOMY.EPS:
+			order = {"kind": "collect", "target": field}
+		elif wreck >= 0 and craft["kind"] != "science_ship" and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
 			salvage_ids.append(id)
 			continue
-		elif field >= 0 and craft["kind"] == "miner":
+		elif field >= 0 and craft["kind"] == "miner" and not bool(state["map"]["fields"][field].get("antimatter", false)):
 			order = {"kind": "mine", "target": field, "chunk": rock_id}
 		else:
 			var endpoint: Vector2 = ref.get("position", world)
@@ -5060,7 +5077,7 @@ func _poi_name(node: int) -> String:
 		return _system_name(node)
 	var index: int = node - count
 	var fields: Array = _state().get("map", {}).get("fields", [])
-	return "Antimatter Field" if index < fields.size() and bool(fields[index].get("antimatter", false)) else "Asteroid Field"
+	return "Pulsar" if index < fields.size() and bool(fields[index].get("antimatter", false)) else "Asteroid Field"
 
 func _ship_position(ship: Dictionary, _points: Array) -> Vector2:
 	if ship.has("position"):
@@ -5662,7 +5679,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 		var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * zoom
 		var scale: float = clampf(spacing / 150.0, 0.22, 1.0)
 		var origin: Vector2 = pos + Vector2(-69.0 * scale, radius + 5.0 * scale)
-		map_canvas.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(144, 38) * scale), Color("#0c1928ec"))
+		map_canvas.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(144, 20.0 + 18.0 * float(maxi(0, ceili(float(ECONOMY.RESOURCES.size()) / 3.0) - 1))) * scale), Color("#0c1928ec"))
 		for r in range(ECONOMY.RESOURCES.size()):
 			var resource: String = ECONOMY.RESOURCES[r]
 			var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 18.0) * scale
@@ -6089,7 +6106,16 @@ func _draw_map() -> void:
 			boundary.append(boundary[0])
 			map_canvas.draw_polyline(boundary, HUD.ACCENT if selected_field == field_index else Color(edge_tint, 0.8 if special else 0.25), 1.5, true)
 			if special:
-				map_canvas.draw_string(font, center + Vector2(-60, float(field["radius"]) * render_scale + 14.0), "Antimatter Field", HORIZONTAL_ALIGNMENT_CENTER, 120, 12, edge_tint)
+				map_canvas.draw_string(font, center + Vector2(-60, float(field["radius"]) * render_scale + 14.0), "Pulsar", HORIZONTAL_ALIGNMENT_CENTER, 120, 12, edge_tint)
+		if bool(field.get("antimatter", false)):
+			var pulse: float = 0.5 + 0.5 * sin(visual_clock * 3.0)
+			var star_radius: float = maxf(4.0, float(field["radius"]) * render_scale * 0.16)
+			var glow: Color = HUD.COLORS[ECONOMY.ANTIMATTER]
+			_draw_resource_glow(center, star_radius * 2.0, glow, 0.6 + pulse * 0.4)
+			map_canvas.draw_circle(center, star_radius, glow.lightened(0.7), true, -1.0, true)
+			var axis: Vector2 = Vector2.from_angle(visual_clock * 0.8)
+			map_canvas.draw_line(center - axis * star_radius * 4.0, center + axis * star_radius * 4.0, Color(glow, 0.45 + pulse * 0.4), maxf(1.0, star_radius * 0.45), true)
+			continue
 		for chunk in field["chunks"]:
 			var rock_pos: Vector2 = _screen_point(chunk["position"])
 			if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
@@ -6310,6 +6336,18 @@ func _draw_map() -> void:
 						var filled := PackedVector2Array([module + direction * end + side * 3, module + direction * start + side * 3, module + direction * start - side * 3, module + direction * end - side * 3])
 						_draw_cargo_segment(filled, HUD.COLORS[segment["resource"]])
 					start = end
+		elif ship["kind"] == "science_ship":
+			map_canvas.draw_circle(point, maxf(1.0, 11.5 * scale), empire.darkened(0.4), true, -1.0, true)
+			map_canvas.draw_arc(point, 10.5 * scale, 0.0, TAU, 32, empire.lightened(0.5), maxf(0.8, scale), true)
+			map_canvas.draw_circle(point, maxf(0.9, 6.0 * scale), Color("#101d30"), true, -1.0, true)
+			if float(ship.get("cargo", {}).get(ECONOMY.ANTIMATTER, 0.0)) >= 1.0 - ECONOMY.EPS:
+				var tint: Color = HUD.COLORS[ECONOMY.ANTIMATTER]
+				var pulse: float = 0.5 + 0.5 * sin(visual_clock * 4.0)
+				_draw_resource_glow(point, maxf(2.0, 8.0 * scale), tint, 0.7 + 0.3 * pulse)
+				map_canvas.draw_circle(point, maxf(1.0, (2.5 + pulse) * scale), tint.lightened(0.5), true, -1.0, true)
+				for k in range(3):
+					var angle: float = visual_clock * 2.0 + TAU * float(k) / 3.0
+					map_canvas.draw_circle(point + Vector2.from_angle(angle) * 5.0 * scale, maxf(0.7, scale), tint, true, -1.0, true)
 		elif scale >= 0.42 and HULL_PANELS.has(ship["kind"]) and viewport_bounds.grow(maxf(24.0, 14.0 * scale)).has_point(point):
 			# At distant zoom levels the silhouette and allegiance outline are
 			# enough. Draw layered panels only when they can actually be seen.
