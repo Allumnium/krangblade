@@ -25,7 +25,9 @@ const ORBITAL_HOUSING_POPULATION: float = 5000.0
 const ECO_HOUSING_ORGANICS: float = 0.2
 const ORBITAL_HOUSING_COST: Dictionary = {"Metals": 180.0}
 const COLONY_POPULATION: float = 40000.0
-const POPULATION_DOUBLING_YEARS: float = 30.0
+const POPULATION_DOUBLING_YEARS: float = 60.0
+# Fixed full-growth food reserve, independent of warehouse size and trade policy.
+const POPULATION_FOOD_RESERVE: float = 200.0
 const PRODUCTION_PER_LEVEL: float = 4.0
 const ORGANICS_PER_LEVEL: float = 4.0
 # Food production and demand both halve; population capacity stays unchanged.
@@ -559,6 +561,12 @@ static func rate(planet: Dictionary, resource: String) -> float:
 	var output: float = PRODUCTION_PER_LEVEL * level * production_modifier(planet, resource) * labor
 	return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
+static func food_growth_multiplier(planet: Dictionary) -> float:
+	# Orbital residents are self-sufficient; only terrestrial growth is food-limited.
+	if not has_planets(planet):
+		return 1.0
+	return clampf(float(planet["stock"].get("Organics", 0.0)) / POPULATION_FOOD_RESERVE, 0.0, 1.0)
+
 static func _update_population(planet: Dictionary, dt: float) -> void:
 	var eco: float = eco_population(planet)
 	if not has_planets(planet):
@@ -576,9 +584,9 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 	var decay: float = exp(-omega * dt)
 	var next: float = target + (error + slope * dt) * decay
 	var next_velocity: float = (velocity - omega * slope * dt) * decay
-	# Far below equilibrium, limit positive growth to a 30-year doubling.
+	# Far below equilibrium, limit positive growth to a 60-year doubling at full food reserves.
 	# Near capacity the damped response takes over without a hard population cap.
-	var growth_constant: float = log(2.0) / POPULATION_DOUBLING_YEARS
+	var growth_constant: float = log(2.0) / POPULATION_DOUBLING_YEARS * food_growth_multiplier(planet)
 	if current < habitation_capacity(planet):
 		growth_constant *= 1.0 - overpopulation_penalty(planet)
 	else:

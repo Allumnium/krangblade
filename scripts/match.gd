@@ -2815,7 +2815,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 				continue
 			var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 			var crew: float = float(p.get("crew_rate", 0.0))
-			lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% overpopulation penalty" % [_system_name(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p)])
+			lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% overpopulation · %+.1f%% food reserve" % [_system_name(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p))])
 		return "\n".join(lines)
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
 	var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
@@ -2832,7 +2832,7 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 	if resource == "population":
 		var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 		var crew: float = float(p.get("crew_rate", 0.0))
-		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nOrganics: %.2f produced / %.2f consumed per year\nEco-Housing: %.0f / %.0f residents · +%.2f t/yr Organics" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics"), ECONOMY.eco_population(p), ECONOMY.eco_capacity(p), ECONOMY.eco_organics(p)]
+		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nFood reserve growth penalty: %+.1f%% (%.2f / %.0f t for full growth)\nOrganics: %.2f produced / %.2f consumed per year\nEco-Housing: %.0f / %.0f residents · +%.2f t/yr Organics" % [_system_name(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p)), float(p["stock"]["Organics"]), ECONOMY.POPULATION_FOOD_RESERVE, ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics"), ECONOMY.eco_population(p), ECONOMY.eco_capacity(p), ECONOMY.eco_organics(p)]
 	var potential: float = ECONOMY.rate(p, resource)
 	var demand: float = ECONOMY.consumption(p, resource)
 	return "%s · %.2f t stored\nProduction: %.2f t/yr\nDemand: %.2f t/yr\nNet: %+.2f t/yr\nOutput: %.1f%% of baseline" % [resource, float(p["stock"][resource]), potential, demand, potential - demand, 100.0 * ECONOMY.production_modifier(p, resource)]
