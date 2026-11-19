@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.58.0: Vector planetary cargo capsules use resource-colored centers; planetary economy, habitation and PDS jobs dispatch a larger pod after fabrication, applying effects on arrival after three simulation years. Station and yard upgrades remain local; delivery reserves the original job and is not a combat hull.
+
 - v0.57.2: Planetary transfer art uses quarter-size blunt cargo capsules with paired side thrusters; production, timing and blockade rules unchanged.
 
 - v0.57.1: Single-ship command routes only; double-click hull selection limited to local team. Cache static hull artwork by type/color/detail, cull offscreen hulls before geometry; preserve dynamic effects.

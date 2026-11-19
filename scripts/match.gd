@@ -2180,7 +2180,7 @@ func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dicti
 			tile.add_theme_stylebox_override("normal", HUD.surface(Color("#172c3b"), Color("#db9b54") if blocked else HUD.ACCENT, 3, 3))
 		else:
 			tile.remove_theme_stylebox_override("normal")
-		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), "Building" if id == active_id else "Queued", percent, "\n" + widgets["bar"].tooltip_text if blocked else "", ("\nClick to cancel; materials become salvage" if ECONOMY.construction_leaves_salvage(job) else "\nClick to cancel and refund") if owned else ""]
+		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), ("Delivering" if job.has("delivery_slot") else ("Building" if id == active_id else "Queued")), percent, "\n" + widgets["bar"].tooltip_text if blocked else "", ("\nClick to cancel; materials become salvage" if ECONOMY.construction_leaves_salvage(job) else "\nClick to cancel and refund") if owned else ""]
 
 func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
@@ -4504,20 +4504,43 @@ func _draw_planet_production(state: Dictionary, index: int, center: Vector2, rad
 				var phase: float = fposmod(elapsed * 0.8 + float(k) / float(count) + float(slot) * 0.173, 1.0)
 				var point: Vector2 = origin.lerp(destination, phase)
 				var alpha: float = detail * smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.85, 1.0, phase))
-				var axis: Vector2 = origin.direction_to(destination)
-				var lateral: Vector2 = axis.orthogonal()
-				var size_factor: float = clampf(radius * 0.025, 2.0, 8.0) * 0.25
-				var forward: Vector2 = axis * size_factor
-				var side: Vector2 = lateral * size_factor
-				# Short blunt capsule, broad cargo section and paired side jets.
-				var hull: PackedVector2Array = _hull_polygon(point, forward, side, [Vector2(0.75, 0.30), Vector2(0.35, 0.62), Vector2(-0.65, 0.72), Vector2(-0.85, 0.48), Vector2(-0.85, -0.48), Vector2(-0.65, -0.72), Vector2(0.35, -0.62), Vector2(0.75, -0.30)])
-				map_canvas.draw_colored_polygon(hull, Color(Color("#b2c8db"), alpha))
-				var cargo: PackedVector2Array = _hull_polygon(point, forward, side, [Vector2(0.13, 0.40), Vector2(-0.52, 0.47), Vector2(-0.52, -0.47), Vector2(0.13, -0.40)])
-				map_canvas.draw_colored_polygon(cargo, Color(color, alpha))
-				for sign in [-1.0, 1.0]:
-					var jet: Vector2 = point - forward * 0.35 + side * sign * 0.76
-					map_canvas.draw_circle(jet, size_factor * 0.23, Color(Color("#71879e"), alpha), true)
-					map_canvas.draw_line(jet - forward * 0.18, jet - forward * 0.66, Color(Color("#a1eaff"), alpha * 0.8), maxf(0.2, size_factor * 0.18), true)
+				_draw_planet_cargo_pod(point, origin.direction_to(destination), clampf(radius * 0.025, 2.0, 8.0) * 0.25, color, alpha)
+
+func _draw_planet_cargo_pod(point: Vector2, axis: Vector2, size_factor: float, color: Color, alpha: float) -> void:
+	var forward: Vector2 = axis * size_factor
+	var side: Vector2 = axis.orthogonal() * size_factor
+	var hull: PackedVector2Array = _hull_polygon(point, forward, side, [Vector2(0.72, 0.32), Vector2(0.40, 0.48), Vector2(-0.55, 0.82), Vector2(-0.82, 0.61), Vector2(-0.82, -0.61), Vector2(-0.55, -0.82), Vector2(0.40, -0.48), Vector2(0.72, -0.32)])
+	map_canvas.draw_colored_polygon(hull, Color(Color("#a9bfd2"), alpha))
+	var cargo: PackedVector2Array = _hull_polygon(point, forward, side, [Vector2(0.35, 0.30), Vector2(-0.58, 0.50), Vector2(-0.58, -0.50), Vector2(0.35, -0.30)])
+	map_canvas.draw_colored_polygon(cargo, Color(color, alpha))
+	for sign in [-1.0, 1.0]:
+		var jet: Vector2 = point - forward * 0.38 + side * sign * 0.79
+		map_canvas.draw_circle(jet, size_factor * 0.24, Color(Color("#526b80"), alpha), true)
+		map_canvas.draw_line(jet - forward * 0.18, jet - forward * 0.67, Color(Color("#a1eaff"), alpha * 0.85), maxf(0.2, size_factor * 0.20), true)
+
+func _draw_planet_upgrade_deliveries(state: Dictionary, index: int, center: Vector2, radius: float, detail: float) -> void:
+	if detail < 0.05:
+		return
+	var system: Dictionary = state["planets"][index]
+	var bodies: Array = _system_visual(index, state)["bodies"]
+	var elapsed: float = _orbit_time(state)
+	for item in system["queue"]:
+		if not item.has("delivery_slot"):
+			continue
+		var slot: int = int(item["delivery_slot"])
+		if slot < 0 or slot >= bodies.size():
+			continue
+		var fraction: float = 1.0 - clampf(float(item["delivery_remaining"]) / ECONOMY.PLANET_UPGRADE_DELIVERY_TIME, 0.0, 1.0)
+		var origin: Vector2 = _screen_point(ECONOMY.station_position(state, index, elapsed))
+		var destination: Vector2 = center + _body_position(bodies[slot], radius, elapsed)
+		var point: Vector2 = origin.lerp(destination, fraction)
+		var pod_size: float = clampf(radius * 0.025, 2.0, 8.0) * 0.75
+		var color: Color = HUD.COLORS.get(str(item["target"]), Color("#d7b774")) if item["kind"] in ["economy_building", "production"] else Color("#d7b774")
+		_draw_planet_cargo_pod(point, origin.direction_to(destination), pod_size, color, detail)
+		var icon: Texture2D = _job_icon(item, int(system["owner"]))
+		var icon_size: float = pod_size * 0.85
+		if icon_size >= 4.0:
+			map_canvas.draw_texture_rect(icon, Rect2(point - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, Color(1.0, 1.0, 1.0, detail))
 
 
 func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
@@ -4550,6 +4573,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 					_draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
 	_draw_planet_production(state, index, pos, radius, detail)
+	_draw_planet_upgrade_deliveries(state, index, pos, radius, detail)
 	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
 	_draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity)
 	if detail < 0.5:
