@@ -1,6 +1,6 @@
 # Warbound — active thoughts
 
-- v0.55.9: Full-load waiting replaces the eight-year timer; monitor partially loaded freighters at resource-rich but unstaffed fields. Manual unload remains available.
+- v0.55.10: Inactivity timer replaces first-load timer; monitor sparse miner arrivals and partial shipments. Manual unload remains available.
 
 - v0.55.8: Twin repair beams represent existing per-hull repair throughput; monitor visual clutter and crowded station standoff. No shared repair capacity added.
 
