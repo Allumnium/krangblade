@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.61.1: Removing star-hit exceptions makes overlapping objects selectable based on their actual art. Check dense layouts and minimap overlap at overview scale.
+
 - v0.61.0: Lane outlines now follow real connections. Check corridor width/overlap at busy junctions and field access; route anchors remain metadata, not a physical midpoint boundary.
 
 - v0.60.1: Scouts now join military fleets and pursue targets; observe whether their higher speed causes separation from attack waves.
