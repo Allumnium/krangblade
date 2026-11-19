@@ -1202,7 +1202,7 @@ func _ship_stats(kind: String) -> String:
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
-	return "%s\nHP %.0f · Speed %.0f/s (1×) · %s" % [details, ECONOMY.SHIP_HP, ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind))]
+	return "%s\nHP %.0f · Speed %.0f/s (1×) · %s" % [details, ECONOMY.ship_max_hp(kind), ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind))]
 
 func _build_production_summary() -> void:
 	var header := HBoxContainer.new()
@@ -2179,6 +2179,13 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	slot.add_child(button)
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_buttons[id] = button
+	var active_border := Control.new()
+	active_border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(active_border)
+	active_border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	active_border.draw.connect(_draw_active_command.bind(active_border))
+	active_border.visible = false
+	button.set_meta("active_border", active_border)
 	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
@@ -2326,12 +2333,45 @@ func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""
 	_refresh_command_mode()
 
+func _draw_active_command(border: Control) -> void:
+	border.draw_rect(Rect2(Vector2.ONE * 2.0, border.size - Vector2.ONE * 4.0), Color("#7de4ff"), false, 2.0)
+
+func _active_command(ship: Dictionary) -> String:
+	if bool(ship.get("retreating", false)):
+		return ""
+	if bool(ship.get("holding", false)):
+		return "hold"
+	if not ECONOMY._unit_order_running(ship):
+		return ""
+	var order: Dictionary = ship.get("unit_order", {})
+	match str(order.get("kind", "")):
+		"guard": return "guard"
+		"follow": return "guard" if bool(order.get("guard", false)) else "move"
+		"position", "sector", "sector_entry": return "move" if bool(order.get("move_only", false)) else "attack"
+		"attack": return "attack"
+		"patrol": return "patrol"
+		"repair": return "repair"
+		"deposit", "drop", "unload": return "unload"
+		"salvage": return "load"
+		"collect": return "collect"
+		"mine": return "auto_mine"
+	return ""
+
 func _refresh_command_mode() -> void:
 	if not is_instance_valid(command_card):
 		return
+	var active: Dictionary = {}
+	for ship in _state().get("ships", []):
+		if selected_units.has(int(ship["id"])) and int(ship["owner"]) == _me():
+			var command: String = _active_command(ship)
+			if not command.is_empty():
+				active[command] = true
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
-		button.set_pressed_no_signal(id == pending_command or (id == "hold" and _any_selected_holding()))
+		button.set_pressed_no_signal(id == pending_command or active.has(id))
+		var border: Control = button.get_meta("active_border")
+		border.visible = active.has(id)
+		border.queue_redraw()
 	_refresh_autocast_cards()
 	if is_instance_valid(yard_command_card):
 		yard_commands["rally"].set_pressed_no_signal(pending_command == "rally")
@@ -2367,7 +2407,9 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 		var state: Dictionary = _state()
 		var graph: Dictionary = ECONOMY.military_graph(state)
 		var world: Vector2 = minimap_hint.get("world", _world_point(point))
-		var node: int = ECONOMY.sector_at(graph, world, ECONOMY.military_pois(state, _me()))
+		var node: int = ECONOMY.patrol_node(state, graph, _me(), world)
+		if node >= 0 and not ECONOMY.sector_contains(graph, node, world):
+			world = graph["points"][node]
 		var ids: Array[int] = []
 		for craft in state["ships"]:
 			if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] == "fighter":
@@ -2501,7 +2543,7 @@ func _refresh_selection_portrait(ship: Dictionary, system: Dictionary, body_sele
 	var maximum: float = 0.0
 	if not ship.is_empty() and selected_units.size() <= 1:
 		kind = str(ship["kind"])
-		maximum = ECONOMY.SHIP_HP
+		maximum = ECONOMY.ship_max_hp(str(ship["kind"]))
 		hp = float(ship.get("hp", maximum))
 	elif not grouped and not system.is_empty():
 		if yard_selected:
@@ -2612,12 +2654,12 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 			tile.pressed.connect(_select_tile.bind(id))
 			selection_grid.add_child(tile)
 			selection_tiles[id] = tile
-		var hp: float = clampf(float(craft.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
+		var hp: float = clampf(float(craft.get("hp", ECONOMY.ship_max_hp(str(craft["kind"])))) / ECONOMY.ship_max_hp(str(craft["kind"])), 0.0, 1.0)
 		var tint: Color = _health_color(hp)
 		if tile.get_meta("health_color", Color.TRANSPARENT) != tint:
 			tile.set_meta("health_color", tint)
 			tile.icon = _selection_icon(str(craft["kind"]), tint)
-		tile.tooltip_text = "%s · HP %.0f / %.0f\nCrew: %s" % [_ship_kind_name(str(craft["kind"])), float(craft.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP, _crew_text(float(craft.get("crew", 0.0)))]
+		tile.tooltip_text = "%s · HP %.0f / %.0f\nCrew: %s" % [_ship_kind_name(str(craft["kind"])), float(craft.get("hp", ECONOMY.ship_max_hp(str(craft["kind"])))), ECONOMY.ship_max_hp(str(craft["kind"])), _crew_text(float(craft.get("crew", 0.0)))]
 	for id in selection_tiles.keys():
 		if not living.has(id):
 			var tile: Button = selection_tiles[id]
@@ -2723,7 +2765,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Guarding sector" if bool(ship.get("guard_arrived", false)) else "Moving to guard position"
 	if follow_order.get("kind", "") == "follow" and not bool(ship.get("retreating", false)):
 		var target_ship: Dictionary = ECONOMY.service_targets(state).get(int(follow_order["target"]), {}).get("entity", {})
-		status = "Following %s" % _ship_kind_name(str(target_ship.get("kind", "ship")))
+		status = ("%s %s" % ["Guarding" if bool(follow_order.get("guard", false)) else "Following", _ship_kind_name(str(target_ship.get("kind", "ship")))])
 	var wait_left: float = ECONOMY.autocast_remaining(state, ship, "wander")
 	if wait_left > ECONOMY.EPS and ECONOMY.autocast_enabled(ship, "wander") and ECONOMY._is_idle_ship(ship):
 		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)
@@ -4944,7 +4986,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		elif contextual and ref.get("kind") == "ship" and ECONOMY._friendly_target(state, _me(), ref):
 			if id == target:
 				continue
-			order = {"kind": "follow", "target": target}
+			order = {"kind": "follow", "target": target, "guard": craft["kind"] == "fighter"}
 		elif contextual and ref.get("kind") == "station" and ECONOMY.can_deposit(state, craft, target):
 			order = {"kind": "deposit", "target": target}
 		elif field >= 0 and bool(state["map"]["fields"][field].get("antimatter", false)) and craft["kind"] == "science_ship" and ECONOMY._cargo_total(craft) <= ECONOMY.EPS:
@@ -4963,9 +5005,11 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 				var pds_node: int = int(ref["node"])
 				var slot: int = floori(float(-2 - count * 3 - target - pds_node) / float(count))
 				endpoint = _building_world(state, Vector2i(pds_node, slot), "pds")
-			var destination: int = ECONOMY.sector_at(graph, endpoint, ECONOMY.military_pois(state, _me()))
+			var destination: int = ECONOMY.patrol_node(state, graph, _me(), endpoint)
 			if destination < 0:
 				continue
+			if not ECONOMY.sector_contains(graph, destination, endpoint):
+				endpoint = ECONOMY.sector_entry_point(graph, destination, craft["position"])
 			var clicked_system: bool = destination == int(minimap_hint.get("system", -1)) if not minimap_hint.is_empty() else destination < state["planets"].size() and point.distance_to(_screen_point(graph["points"][destination])) <= maxf(9.0, _star_draw_radius(_planet_radius(destination, state)))
 			if contextual and not force_position and ref.is_empty() and craft["kind"] == "colony_ship" and not colony_sent and destination < state["planets"].size() and clicked_system and not ECONOMY.colony_path(state, _me(), craft, destination).is_empty():
 				order = {"kind": "colonize", "target": destination}
@@ -5052,14 +5096,18 @@ func _formation_orders(state: Dictionary) -> Array:
 		var heading: Vector2 = (stroke[-1] - point).normalized()
 		if heading.is_zero_approx():
 			heading = ship.get("heading", Vector2.UP)
-		var node: int = ECONOMY.patrol_node(state, graph, _me(), point) if formation_mode == "patrol" else ECONOMY.sector_at(graph, point, candidates)
+		var node: int = ECONOMY.patrol_node(state, graph, _me(), point)
+		if node >= 0 and formation_mode != "patrol" and not ECONOMY.sector_contains(graph, node, point):
+			point = ECONOMY.sector_entry_point(graph, node, origins[ship["id"]])
 		var order: Dictionary = {"kind": "patrol" if formation_mode == "patrol" else "position", "target": node, "point": point, "move_only": formation_mode != "attack", "heading": heading}
 		entries.append({"ids": owned, "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
 		return entries
 	for slot in ECONOMY.polyline_formation_slots(origins, stroke):
 		var ship: Dictionary = ships[slot["id"]]
 		var point: Vector2 = slot["point"]
-		var node: int = ECONOMY.patrol_node(state, graph, _me(), point) if formation_mode == "patrol" else ECONOMY.sector_at(graph, point, candidates)
+		var node: int = ECONOMY.patrol_node(state, graph, _me(), point)
+		if node >= 0 and formation_mode != "patrol" and not ECONOMY.sector_contains(graph, node, point):
+			point = ECONOMY.sector_entry_point(graph, node, origins[ship["id"]])
 		var order: Dictionary = {"kind": "patrol" if formation_mode == "patrol" else "position", "target": node, "point": point, "move_only": formation_mode != "attack", "heading": slot["heading"]}
 		entries.append({"ids": [ship["id"]], "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
 	return entries
@@ -6598,7 +6646,7 @@ func _draw_map() -> void:
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
-		_draw_damage_bar(point, (24.0 if ship["kind"] == "ship" else 15.0) * scale, float(ship.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP)
+		_draw_damage_bar(point, (24.0 if ship["kind"] == "ship" else 15.0) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])))
 		if scale < 0.15 * overview or (scale < 0.42 and Geometry2D.triangulate_polygon(shape).is_empty()):
 			map_canvas.draw_circle(point, maxf(0.8, 6.0 * scale / overview) * overview, hull, true, -1.0, true)
 			continue

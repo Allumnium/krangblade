@@ -242,7 +242,7 @@ func _phase_changed() -> void:
 						follow_leader.erase("resource_stage")
 						follow_leader.merge({"id": 988000 + index, "kind": "colony_ship", "position": haul_point + Vector2.LEFT * 180.0, "wander_auto": false, "cargo": ECON.empty_stock()}, true)
 						var follower: Dictionary = follow_leader.duplicate(true)
-						follower.merge({"id": 989000 + index, "position": haul_point + Vector2.LEFT * 380.0}, true)
+						follower.merge({"id": 989000 + index, "kind": "fighter", "hp": ECON.SHIP_HP, "position": haul_point + Vector2.LEFT * 380.0}, true)
 						state["ships"].append(follow_leader)
 						state["ships"].append(follower)
 						var point: Vector2 = graph["points"][index] + Vector2.RIGHT * minf(150.0, ECON.sector_limit(graph, index, Vector2.RIGHT) * 0.5)
@@ -465,7 +465,7 @@ func _send_commands() -> void:
 	session.call("request_tactical_order", [own_fighters[0]], "patrol", -1)
 	var attack_id: int = 920000 + home_index
 	var service_id: int = 980000 + home_index
-	session.call("request_unit_orders", [{"ids": [989000 + home_index], "order": {"kind": "follow", "target": 988000 + home_index}}], false)
+	session.call("request_unit_orders", [{"ids": [989000 + home_index], "order": {"kind": "follow", "target": 988000 + home_index, "guard": true}}], false)
 	session.call("request_autocast", [service_id], "repair", false)
 	session.call("request_autocast", [service_id], "mine", false)
 	session.call("request_autocast", [service_id], "salvage", true)
@@ -735,7 +735,7 @@ func _check_economy_sync() -> void:
 				if int(craft["id"]) == 930000 + owner_home:
 					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
 				if int(craft["id"]) == 989000 + owner_home:
-					follow_verified = craft.get("unit_order", {}).get("kind", "") == "follow" and int(craft["unit_order"]["target"]) == 988000 + owner_home and bool(craft.get("follow_arrived", false))
+					follow_verified = craft.get("unit_order", {}).get("kind", "") == "follow" and bool(craft["unit_order"].get("guard", false)) and int(craft["unit_order"]["target"]) == 988000 + owner_home and bool(craft.get("follow_arrived", false))
 				if int(craft["id"]) == 986000 + owner_home:
 					resource_handoff = ECON._cargo_total(craft) <= ECON.EPS
 				if int(craft["id"]) == 987000 + owner_home:
