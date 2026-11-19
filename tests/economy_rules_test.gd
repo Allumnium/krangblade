@@ -185,6 +185,8 @@ func _test_population_queue_priority() -> void:
 	p["population"] = 10000.0
 	for resource in ECON.RESOURCES:
 		p["stock"][resource] = 100000.0
+	assert(not ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
+	p["yards"][0]["level"] = 2
 	assert(ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
 	var colony: Dictionary = p["queue"][0]
 	ECON._work_planet(state, 0, 0.1)
@@ -479,7 +481,33 @@ func _test_local_avoidance() -> void:
 	ECON.avoidance_cells.clear()
 	print("PASS: forward avoidance, movement budget, unobstructed path and shared endpoint")
 
+func _test_ship_size_classes() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
+	var p: Dictionary = state["planets"][0]
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 100000.0
+	assert(ECON.ship_size("miner") == 1 and ECON.ship_size("fighter") == 1)
+	assert(ECON.ship_size("ship") == 2 and ECON.ship_size("colony_ship") == 2 and ECON.ship_size("science_ship") == 3)
+	assert(not ECON.enqueue(state, 1, 0, "ship", "", 0))
+	assert(not ECON.enqueue(state, 1, 0, "colony_ship"))
+	assert(not ECON.set_yard_autobuild(state, 1, 0, 0, "science_ship", true))
+	p["yards"][0]["level"] = 2
+	assert(ECON.enqueue(state, 1, 0, "ship", "", 0))
+	assert(int(p["queue"][-1]["size"]) == 2)
+	assert(not ECON.enqueue(state, 1, 0, "science_ship"))
+	p["yards"][0]["level"] = 3
+	assert(ECON.enqueue(state, 1, 0, "science_ship", "", 0))
+	assert(int(p["queue"][-1]["size"]) == 3)
+	var source: Dictionary = {"kind": "miner", "cargo": {"Metals": 10.0}}
+	var target: Dictionary = {"kind": "ship", "cargo": {"Metals": 20.0}}
+	ECON._record_transfer(state, 101, source, 102, target, "Metals", 2.0)
+	var event: Dictionary = state["cargo_transfers"]["101:102:Metals"]
+	assert(event["from_bay"] == 1 and event["to_bay"] == 2 and event["amount"] == 2.0)
+	assert(bytes_to_var(var_to_bytes(state))["cargo_transfers"] == state["cargo_transfers"])
+	print("PASS: ship classes, yard authority and cargo transfer metadata")
+
 func _initialize() -> void:
+	_test_ship_size_classes()
 	_test_local_avoidance()
 	_test_station_defense_and_ports()
 	_test_station_construction_queue()
@@ -864,6 +892,7 @@ func _initialize() -> void:
 	var failed_id: int = int(state["next_id"])
 	assert(not ECON.enqueue(state, 1, 0, "ship"))
 	assert(p["stock"] == failed_stock and p["queue"].is_empty() and int(state["next_id"]) == failed_id)
+	p["yards"][0]["level"] = 2
 	for material in ECON._cost("ship", 1):
 		p["stock"][material] = ECON._cost("ship", 1)[material]
 	assert(ECON.enqueue(state, 1, 0, "ship"))
@@ -990,7 +1019,8 @@ func _initialize() -> void:
 	p["warehouse_level"] = 3
 	for material in ECON.RESOURCES:
 		p["stock"][material] = 5000.0
-	p["yards"].append({"level": 1, "job": -1})
+	p["yards"][0]["level"] = 2
+	p["yards"].append({"level": 2, "job": -1})
 	assert(ECON.enqueue(state, 1, 0, "ship"))
 	assert(ECON.enqueue(state, 1, 0, "ship"))
 	ECON.step(state, 1.0)
@@ -999,24 +1029,25 @@ func _initialize() -> void:
 	assert(ECON.enqueue(state, 1, 0, "yard_upgrade", "0"))
 	assert(int(p["yards"][0]["job"]) == first_job)
 	ECON.step(state, 1.0)
-	assert(is_equal_approx(float(p["queue"][0]["progress"]), 12.0))
+	assert(is_equal_approx(float(p["queue"][0]["progress"]), ECON.yard_speed(2) * 2.0))
 	assert(is_zero_approx(float(p["queue"][2]["progress"])))
-	for i in range(6):
+	for i in range(ceili(ECON._work("ship", 1) / ECON.yard_speed(2)) - 2):
 		ECON.step(state, 1.0)
 	assert(state["ships"].size() == 2)
 	assert(p["queue"].size() == 1)
 	ECON.step(state, 1.0)
 	assert(int(p["yards"][0]["job"]) == int(p["queue"][0]["id"]))
 	assert(is_equal_approx(float(p["queue"][0]["progress"]), 1.0))
-	for i in range(29):
+	for i in range(ceili(ECON._work("yard_upgrade", 3)) - 1):
 		ECON.step(state, 1.0)
-	assert(int(p["yards"][0]["level"]) == 2)
+	assert(int(p["yards"][0]["level"]) == 3)
 	assert(ECON.max_size(2) > ECON.max_size(1))
 
 	# Eight shipyard orders including the active job; repeat waits for space.
 	var repeat_state: Dictionary = ECON.create(graph, players, ids, false)
 	var repeat_home: Dictionary = repeat_state["planets"][0]
 	repeat_home["warehouse_level"] = 3
+	repeat_home["yards"][0]["level"] = 2
 	for material in ECON.RESOURCES:
 		repeat_home["stock"][material] = 5000.0
 	assert(not ECON.set_continuous(repeat_state, 2, 0, "fighter", true))
@@ -1314,6 +1345,7 @@ func _initialize() -> void:
 		system["pds"].clear()
 	for index in [0, 2]:
 		colonization["planets"][index]["population"] = 150000.0
+		colonization["planets"][index]["yards"][0]["level"] = 2
 	assert(ECON.enqueue(colonization, 1, 0, "colony_ship"))
 	assert(ECON.enqueue(colonization, 3, 2, "colony_ship"))
 	for i in range(ceili(ECON._work("colony_ship", 1) / ECON.yard_speed(1))):
@@ -3654,6 +3686,7 @@ func _test_recovery_economy() -> void:
 	for resource in ECON.RESOURCES:
 		assert(not ECON.building_cost(p, resource).has(resource))
 		assert(ECON.building_available(p, resource))
+	p["yards"][0]["level"] = 2
 	assert(ECON.enqueue(state, 1, 0, "colony_ship"))
 	var colony_job: Dictionary = p["queue"][0]
 	var starting: float = float(p["population"])

@@ -82,7 +82,11 @@ const AUTOCAST_COOLDOWN_YEARS: float = 30.0
 const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
 const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade", "farm", "collect"]
-const SHIP_SIZE: int = 1
+const SHIP_SIZE: int = 1 # Legacy small-class reference.
+const SHIP_SIZES = {"fighter": 1, "miner": 1, "ship": 2, "colony_ship": 2, "science_ship": 3}
+const STATION_STORAGE_BAYS: int = 3
+const TRANSFER_EVENT_LIMIT: int = 192
+const TRANSFER_EVENT_YEARS: float = 6.0
 const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
 const DEFAULT_FOG_OF_WAR: bool = false
@@ -664,6 +668,21 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 	planet["population_velocity"] = minf(next_velocity, growth_constant * next) if next > 0.0 else 0.0
 	_regenerate_eco(planet, dt, eco)
 
+static func ship_size(kind: String) -> int:
+	return int(SHIP_SIZES.get(kind, 1))
+
+static func size_name(size_class: int) -> String:
+	return ["Small", "Medium", "Large"][clampi(size_class, 1, 3) - 1]
+
+static func yard_fits(p: Dictionary, slot: int, kind: String) -> bool:
+	return slot >= 0 and slot < p["yards"].size() and ship_size(kind) <= max_size(int(p["yards"][slot]["level"]))
+
+static func has_fitting_yard(p: Dictionary, kind: String) -> bool:
+	for slot in range(p["yards"].size()):
+		if yard_fits(p, slot, kind):
+			return true
+	return false
+
 static func max_size(level: int) -> int:
 	return level
 
@@ -860,7 +879,9 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 	var p: Dictionary = _get_owned(state, player, index)
 	if p.is_empty():
 		return false
-	if yard_slot != -1 and (not SHIP_KINDS.has(kind) or not shipyard_operational(p, yard_slot) or max_size(int(p["yards"][yard_slot]["level"])) < SHIP_SIZE):
+	if yard_slot != -1 and (not SHIP_KINDS.has(kind) or not shipyard_operational(p, yard_slot) or not yard_fits(p, yard_slot, kind)):
+		return false
+	if SHIP_KINDS.has(kind) and not has_fitting_yard(p, kind):
 		return false
 	if SHIP_KINDS.has(kind) or kind == "yard_upgrade":
 		var total: int = 0
@@ -956,7 +977,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 	state["next_id"] = id + 1
 	p["queue"].append({"id": id, "kind": kind, "target": target, "yard_slot": yard_slot, "level": level,
 		"cost": cost, "work": 30.0 if kind == "economy_building" else _work(kind, level),
-		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if SHIP_KINDS.has(kind) else 0})
+		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": ship_size(kind) if SHIP_KINDS.has(kind) else 0})
 	if kind == "yard":
 		p["queue"][-1]["station_slot"] = station_slot
 	return true
@@ -1076,7 +1097,7 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 				p["queue"][-1]["automatic"] = true
 			continue
 		if SHIP_KINDS.has(order[0]):
-			if hull_waiting_for_funds or (p["yards"] as Array).is_empty() or cycle.has(key) or manual_hulls.has(key):
+			if hull_waiting_for_funds or not has_fitting_yard(p, str(order[0])) or cycle.has(key) or manual_hulls.has(key):
 				continue
 			# Do not duplicate a waiting order if its repeat toggle was
 			# switched off and on during the same cycle.
@@ -1103,6 +1124,8 @@ static func set_yard_autobuild(state: Dictionary, player: int, index: int, slot:
 	if p.is_empty() or slot < 0 or slot >= p["yards"].size() or not SHIP_KINDS.has(kind) or (kind == "ship" and not bool(p["home"])):
 		return false
 	var modes: Array = p["yards"][slot].get("autobuild", [])
+	if enabled and not yard_fits(p, slot, kind):
+		return false
 	if enabled and not modes.has(kind):
 		modes.append(kind)
 	elif not enabled:
@@ -1116,6 +1139,8 @@ static func _refill_yard_autobuild(state: Dictionary, index: int, p: Dictionary)
 			continue
 		var yard: Dictionary = p["yards"][slot]
 		for kind in yard.get("autobuild", []):
+			if not yard_fits(p, slot, kind):
+				continue
 			var exists: bool = false
 			for item in p["queue"]:
 				if item["kind"] == kind and (int(item.get("yard_slot", -1)) == slot or int(item["id"]) == int(yard["job"])):
@@ -1421,6 +1446,36 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 				"route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": SHIP_HP, "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
 			_launch_to_rally(state, state["ships"].back(), rally)
 	p["queue"].erase(item)
+
+static func cargo_bay_count(kind: String) -> int:
+	return FREIGHTER_BAY_COUNT if kind == "ship" else (2 if kind == "miner" else (5 if kind == "colony_ship" else 1))
+
+static func _transfer_bay(entity: Dictionary, resource: String, amount: float, outgoing: bool) -> int:
+	if entity.has("stock"):
+		var quantity: float = float(entity["stock"].get(resource, 0.0)) + amount * (-0.5 if outgoing else 0.5)
+		return clampi(floori(quantity / maxf(EPS, storage_capacity(entity)) * STATION_STORAGE_BAYS), 0, STATION_STORAGE_BAYS - 1)
+	var kind: String = str(entity["kind"])
+	var cargo: Dictionary = entity.get("cargo", {})
+	var offset: float = 0.0
+	for key in RESOURCES + [ANTIMATTER]:
+		if key == resource:
+			break
+		offset += float(cargo.get(key, 0.0))
+	offset += float(cargo.get(resource, 0.0)) + amount * (-0.5 if outgoing else 0.5)
+	var count: int = cargo_bay_count(kind)
+	return clampi(floori(offset / maxf(EPS, cargo_capacity(kind)) * count), 0, count - 1)
+
+static func _record_transfer(state: Dictionary, source_id: int, source: Dictionary, target_id: int, target: Dictionary, resource: String, amount: float) -> void:
+	if amount <= EPS:
+		return
+	var events: Dictionary = state.get("cargo_transfers", {})
+	var key: String = "%d:%d:%s" % [source_id, target_id, resource]
+	if not events.has(key) and events.size() >= TRANSFER_EVENT_LIMIT:
+		events.erase(events.keys()[0])
+	var seq: int = int(state.get("cargo_transfer_seq", 0)) + 1
+	state["cargo_transfer_seq"] = seq
+	events[key] = {"source": source_id, "target": target_id, "resource": resource, "amount": amount, "from_bay": _transfer_bay(source, resource, amount, true), "to_bay": _transfer_bay(target, resource, amount, false), "elapsed": float(state["elapsed"]), "seq": seq}
+	state["cargo_transfers"] = events
 
 static func _record_flow(p: Dictionary, category: String, resource: String, amount: float) -> void:
 	if amount <= EPS or not p.has("flows"):
@@ -2110,6 +2165,7 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 			var amount: float = minf(budget - total, minf(cargo_free(freighter), float(miner["cargo"].get(resource, 0.0))))
 			if amount <= EPS:
 				continue
+			_record_transfer(state, int(miner["id"]), miner, int(freighter["id"]), freighter, resource, amount)
 			miner["cargo"][resource] -= amount
 			freighter["cargo"][resource] = float(freighter["cargo"].get(resource, 0.0)) + amount
 			total += amount
@@ -2145,6 +2201,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 			var amount: float = minf(free, minf(_surplus(planets[here], resource), _need(planets[dest], resource)))
 			if amount <= EPS:
 				continue
+			_record_transfer(state, station_target_id(state, here), planets[here], int(ship["id"]), ship, resource, amount)
 			planets[here]["stock"][resource] = float(planets[here]["stock"][resource]) - amount
 			_record_flow(planets[here], "Exports", resource, amount)
 			ship["cargo"][resource] = float(ship["cargo"][resource]) + amount
@@ -2164,6 +2221,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), capacity))
 			if amount <= EPS:
 				continue
+			_record_transfer(state, int(ship["id"]), ship, station_target_id(state, here), planets[here], resource, amount)
 			ship["cargo"][resource] = float(ship["cargo"][resource]) - amount
 			planets[here]["stock"][resource] = float(planets[here]["stock"].get(resource, 0.0)) + amount
 			_record_flow(planets[here], "Imports", resource, amount)
@@ -2552,6 +2610,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), storage_free(local, resource)))
 			if amount <= 0.0:
 				continue
+			_record_transfer(state, int(ship["id"]), ship, station_target_id(state, here), local, resource, amount)
 			local["stock"][resource] = float(local["stock"].get(resource, 0.0)) + amount
 			_record_flow(local, "Mining deliveries", resource, amount)
 			ship["cargo"][resource] -= amount
@@ -3104,6 +3163,7 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), free))
 			if amount <= EPS:
 				continue
+			_record_transfer(state, int(ship["id"]), ship, int(order["target"]), depot, resource, amount)
 			ship["cargo"][resource] -= amount
 			stock[resource] = float(stock.get(resource, 0.0)) + amount
 			budget -= amount
@@ -4757,6 +4817,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 	for resource in RESOURCES + [ANTIMATTER]:
 		var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), storage_free(p, resource)))
 		if amount > EPS:
+			_record_transfer(state, int(ship["id"]), ship, station_target_id(state, depot), p, resource, amount)
 			ship["cargo"][resource] -= amount
 			p["stock"][resource] = float(p["stock"].get(resource, 0.0)) + amount
 			var category: String = "Farm deliveries" if ship["kind"] == "colony_ship" else ("Resource deliveries" if bool(ship.get("resource_haul", false)) else "Salvage deliveries")
@@ -5279,7 +5340,18 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 						break
 		if action.is_empty():
 			continue
-		var build_level: int = next_shipyard_slot(p) if action == "yard" else 1
+		if SHIP_KINDS.has(action) and not has_fitting_yard(p, action):
+			if p["yards"].is_empty():
+				action = "yard"
+				target = ""
+			else:
+				var best_yard: int = 0
+				for slot in range(1, p["yards"].size()):
+					if int(p["yards"][slot]["level"]) > int(p["yards"][best_yard]["level"]):
+						best_yard = slot
+				action = "yard_upgrade"
+				target = str(best_yard)
+		var build_level: int = next_shipyard_slot(p) if action == "yard" else (int(p["yards"][int(target)]["level"]) + 1 if action == "yard_upgrade" else 1)
 		var price: Dictionary = building_cost(p, target) if action == "economy" else _cost(action, build_level)
 		if not affordable(p, price):
 			# Saving for an unaffordable hull must not leave mature systems
@@ -6214,6 +6286,10 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	state["elapsed"] = float(state["elapsed"]) + dt
+	var transfer_events: Dictionary = state.get("cargo_transfers", {})
+	for key in transfer_events.keys():
+		if float(state["elapsed"]) - float(transfer_events[key]["elapsed"]) > TRANSFER_EVENT_YEARS:
+			transfer_events.erase(key)
 	for i in range((state["planets"] as Array).size()):
 		_work_planet(state, i, dt)
 	started = _profile_stage(profile, "Economy", started)

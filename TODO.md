@@ -6,6 +6,10 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.55.1: Validate station storage art and ship/ship and station/ship transfer particles on host and guest; profile busy hubs. Runtime pending.
+
+- [ ] v0.55.0: Validate size-gated manual/repeat/AI builds, unchanged starting fleet, upgraded-yard fixtures and peer replication. Runtime pending.
+
 - [ ] v0.54.3: Validate local avoidance across opposing lanes, formations, mining and crowded docks; profile dense fleets on host, verify guest motion and cargo conservation with new extraction/dropoff rates. Runtime pending.
 
 - [ ] v0.54.1: Verify damaged-unit bars at all zooms, queued dock spacing and cargo conservation, guard arrival/engagement/return and cancellation, Pulsar lane travel and peer replication. Runtime pending.

@@ -374,7 +374,7 @@ func _mining() -> void:
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
 
 func _trade() -> void:
-	_body("Every station has separate resource stockpiles and import/export settings. Freighters move surplus between friendly systems. With Auto-Trade enabled, idle ships wait within handoff range on the depot-facing side of Harvesters, or at salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait if storage is full. Trade surplus without an importer returns to owned storage. Dropoff: Harvesters %.0f, freighters %.0f, Colonies %.0f t/yr." % [E.dropoff_rate("miner"), E.dropoff_rate("ship"), E.dropoff_rate("colony_ship")])
+	_body("Every station has separate resource stockpiles and import/export settings. Dedicated colored storage squares show fill; particles trace actual cargo transfers. Freighters move surplus between friendly systems. With Auto-Trade enabled, idle ships wait within handoff range on the depot-facing side of Harvesters, or at salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait if storage is full. Trade surplus without an importer returns to owned storage. Dropoff: Harvesters %.0f, freighters %.0f, Colonies %.0f t/yr." % [E.dropoff_rate("miner"), E.dropoff_rate("ship"), E.dropoff_rate("colony_ship")])
 	_flow(["Source surplus", "Freighter in transit", "Destination deficit"])
 	_section("Trade thresholds")
 	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both use local storage capacity; the Import and Export checkboxes toggle each independently.")
@@ -412,12 +412,12 @@ func _infrastructure() -> void:
 	_body("Warehouse upgrades expand storage; habitation increases terrestrial housing capacity. Orbital Eco-Housing adds self-sufficient residents in planetless systems. Additional shipyards also supply eco-housing.")
 
 func _ships() -> void:
-	_body("Select a shipyard to construct ships. Costs are paid from the local station. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship selection displays crew. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
+	_body("Small yards (Lv 1) build Harvesters and Fighters; Medium (Lv 2) adds Freighters and Colonies; Large (Lv 3) adds Science vessels. Start with one Freighter. Costs are paid from the local station. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship selection displays crew. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
 	var names := {"fighter": "Fighter", "miner": "Harvester", "ship": "Freighter", "colony_ship": "Colony", "science_ship": "Science vessel"}
 	for kind in ["fighter", "miner", "ship", "colony_ship", "science_ship"]:
-		rows.append([names[kind], _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(1))])
-	_table(["Ship", "Materials", "Crew", "Time (Lv 1)"], rows)
+		rows.append([names[kind], E.size_name(E.ship_size(kind)), _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(E.ship_size(kind)))])
+	_table(["Ship", "Class", "Materials", "Crew", "Time (min. yard)"], rows)
 	_section("Shipyard upgrades")
 	_body("Higher shipyard levels increase construction speed and staffing requirements. Select Space Station returns to the parent station. Clear Rally / Rally occupy the bottom-right slots. Rally points direct completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")
 	rows = []

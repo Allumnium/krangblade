@@ -309,6 +309,8 @@ var global_population_label: Label
 var year_label: Label
 var time_buttons: Dictionary = {}
 var game_visual_clock: float = 0.0
+var transfer_visuals: Dictionary = {}
+var transfer_visual_seed: int = -1
 var orbit_visual_time: float = -1.0
 var orbit_sample_time: float = -1.0
 var orbit_sample_age: float = 0.0
@@ -1200,7 +1202,7 @@ func _ship_stats(kind: String) -> String:
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
-	return "%s\nHP %.0f · Speed %.0f/s (1×) · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.ship_speed(kind), ECONOMY.SHIP_SIZE]
+	return "%s\nHP %.0f · Speed %.0f/s (1×) · %s" % [details, ECONOMY.SHIP_HP, ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind))]
 
 func _build_production_summary() -> void:
 	var header := HBoxContainer.new()
@@ -1845,7 +1847,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	var enable: bool = false
 	for ref in refs:
 		var system: Dictionary = state["planets"][ref.x]
-		if kind == "ship" and not bool(system["home"]):
+		if not ECONOMY.yard_fits(system, ref.y, kind) or (kind == "ship" and not bool(system["home"])):
 			continue
 		eligible.append(ref)
 		enable = enable or not system["yards"][ref.y].get("autobuild", []).has(kind)
@@ -1854,7 +1856,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	button.accept_event()
 
 func _yard_build_available(system: Dictionary, slot: int, kind: String) -> bool:
-	return ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.affordable(system, ECONOMY._cost(kind, 1)) and (kind != "ship" or bool(system["home"]))
+	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.affordable(system, ECONOMY._cost(kind, 1)) and (kind != "ship" or bool(system["home"]))
 
 func _build_at_yard(kind: String) -> void:
 	var state: Dictionary = _state()
@@ -1882,7 +1884,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	var yard: Dictionary = system["yards"][selected_yard]
 	var level: int = int(yard["level"])
 	var operating: bool = ECONOMY.shipyard_operational(system, selected_yard)
-	yard_title.text = "Shipyard %d · Lv %d" % [ECONOMY.shipyard_port(system, selected_yard), level]
+	yard_title.text = "%s Shipyard %d · Lv %d" % [ECONOMY.size_name(level), ECONOMY.shipyard_port(system, selected_yard), level]
 	yard_context.text = _system_name(selected)
 	var jobs: Array = []
 	var waiting: Array = []
@@ -1902,7 +1904,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	for kind in ECONOMY.SHIP_KINDS:
 		var button: Button = yard_commands[kind]
 		var recipe: Dictionary = ECONOMY._cost(kind, 1)
-		button.disabled = not owned or (kind == "ship" and not bool(system["home"]))
+		button.disabled = not owned or not ECONOMY.yard_fits(system, selected_yard, kind) or (kind == "ship" and not bool(system["home"]))
 		var available: bool = owned and _yard_build_available(system, selected_yard, kind)
 		var auto: bool = yard.get("autobuild", []).has(kind)
 		(button.get_meta("auto_border") as Control).visible = auto
@@ -1910,6 +1912,8 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		portrait.texture = _production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
+		if not ECONOMY.yard_fits(system, selected_yard, kind):
+			button.tooltip_text += "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)]
 		if not operating:
 			button.tooltip_text += "\nShipyard offline"
 		if kind == "ship" and not bool(system["home"]):
@@ -1927,7 +1931,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	if level >= ECONOMY.MAX_SHIPYARD_LEVEL:
 		_set_cost_tooltip(yard_upgrade, "Maximum level")
 	else:
-		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMax ship size: %d → %d\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe, 0.0, _available_cost_resources(system, selected_yard))
+		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMax ship size: %s → %s\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.size_name(ECONOMY.max_size(level)), ECONOMY.size_name(ECONOMY.max_size(level + 1)), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe, 0.0, _available_cost_resources(system, selected_yard))
 
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
@@ -4695,7 +4699,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		for ref in refs:
 			var system: Dictionary = state["planets"][ref.x]
 			eligible = eligible or _yard_build_available(system, ref.y, kind)
-			can_toggle = can_toggle or kind != "ship" or bool(system["home"])
+			can_toggle = can_toggle or (ECONOMY.yard_fits(system, ref.y, kind) and (kind != "ship" or bool(system["home"])))
 			auto = auto or system["yards"][ref.y].get("autobuild", []).has(kind)
 		var button: Button = yard_commands[kind]
 		button.disabled = not can_toggle
@@ -4711,7 +4715,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		can_upgrade = can_upgrade or _yard_can_upgrade(system, ref.y)
 		can_clear = can_clear or not system["yards"][ref.y].get("rally", {}).is_empty()
 	yard_upgrade.disabled = not can_upgrade
-	_set_cost_tooltip(yard_upgrade, "Upgrade every eligible owned shipyard\nEach level adds 1× base build speed, +1 maximum ship size and +1,000 maximum HP. Restores full health.")
+	_set_cost_tooltip(yard_upgrade, "Upgrade every eligible owned shipyard\nEach level adds 1× base build speed, unlocks the next ship class and adds 1,000 maximum HP. Restores full health.")
 	yard_commands["rally"].disabled = refs.is_empty()
 	yard_commands["clear"].disabled = not can_clear
 
@@ -5890,6 +5894,27 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 					var tip: Vector2 = base + axis * float(j * 5)
 					map_canvas.draw_polyline(PackedVector2Array([tip - axis * 4.0 + normal * 3.0, tip, tip - axis * 4.0 - normal * 3.0]), HUD.COLORS[resource], 1.5, true)
 
+func _station_bay_point(center: Vector2, radius: float, elapsed: float, resource: String, bay: int) -> Vector2:
+	var resources: Array = ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]
+	var slot: int = resources.find(resource) * ECONOMY.STATION_STORAGE_BAYS + bay
+	return center + Vector2.from_angle((float(slot) + 0.5) * TAU / float(resources.size() * ECONOMY.STATION_STORAGE_BAYS) + elapsed * 0.008) * radius * 0.71
+
+func _draw_station_storage(system: Dictionary, center: Vector2, radius: float, elapsed: float) -> void:
+	if radius < 8.0:
+		return
+	var half: float = radius * 0.115
+	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
+		var color: Color = HUD.COLORS[resource]
+		var fill: float = clampf(float(system["stock"].get(resource, 0.0)) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system)), 0.0, 1.0) * ECONOMY.STATION_STORAGE_BAYS
+		for bay in range(ECONOMY.STATION_STORAGE_BAYS):
+			var point: Vector2 = _station_bay_point(center, radius, elapsed, resource, bay)
+			var bounds := Rect2(point - Vector2.ONE * half, Vector2.ONE * half * 2.0)
+			map_canvas.draw_rect(bounds, Color("#111d2b"))
+			var fraction: float = clampf(fill - float(bay), 0.0, 1.0)
+			if fraction > 0.0:
+				map_canvas.draw_rect(Rect2(bounds.position + Vector2(0.0, bounds.size.y * (1.0 - fraction)), Vector2(bounds.size.x, bounds.size.y * fraction)), color.darkened(0.25))
+			map_canvas.draw_rect(bounds, color, false, maxf(0.8, radius * 0.018))
+
 func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
 	var system: Dictionary = state["planets"][index]
 	if not ECONOMY.has_station(system):
@@ -5921,6 +5946,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 			var direction: Vector2 = Vector2.from_angle(a)
 			map_canvas.draw_line(center + direction * radius * 0.74, center + direction * radius * 0.95, Color("#1a293a"), maxf(1.0, radius * 0.05), true)
 			map_canvas.draw_circle(center + direction * radius * 0.88, maxf(0.8, radius * 0.035), tint.lightened(0.4))
+	_draw_station_storage(system, center, radius, elapsed)
 	if selected_station:
 		_draw_selection_ring(center, radius + 4.0)
 	var hp: float = float(system["station"]["hp"]) / ECONOMY.station_max_hp(system)
@@ -6238,6 +6264,61 @@ func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary,
 		elif pending["kind"] == "position":
 			_draw_destination_ghost(ship["kind"], finish, pending.get("heading", finish - start), tint)
 		start = finish
+
+func _transfer_anchor(state: Dictionary, poses: Dictionary, refs: Dictionary, id: int, resource: String, bay: int) -> Vector2:
+	var ref: Dictionary = refs.get(id, {})
+	if ref.get("kind", "") == "station":
+		var node: int = int(ref["node"])
+		if not ECONOMY.discovered(state, _me(), "planets", node):
+			return Vector2.INF
+		return _station_bay_point(_screen_point(ECONOMY.station_position(state, node, float(state["elapsed"]))), _station_radius(), float(state["elapsed"]), resource, bay)
+	if not poses.has(id):
+		return Vector2.INF
+	var pose: Dictionary = poses[id]
+	var kind: String = str(pose["kind"])
+	var offset: Vector2 = Vector2.ZERO
+	if kind == "ship":
+		offset = _freighter_bay_center(bay)
+	elif kind == "miner":
+		offset = Vector2(5.7, -4.8 if bay == 0 else 4.8)
+	elif kind == "colony_ship":
+		offset = Vector2(4.0 - float(bay) * 2.65, 0.0)
+	var axis: Vector2 = pose["direction"]
+	return (pose["point"] as Vector2) + (axis * offset.x + axis.orthogonal() * offset.y) * _ship_scale()
+
+func _draw_cargo_transfers(state: Dictionary, poses: Dictionary, refs: Dictionary, bounds: Rect2) -> void:
+	var seed_value: int = int(state["map"]["seed"])
+	if transfer_visual_seed != seed_value:
+		transfer_visual_seed = seed_value
+		transfer_visuals.clear()
+	var events: Dictionary = state.get("cargo_transfers", {})
+	for key in transfer_visuals.keys():
+		if not events.has(key):
+			transfer_visuals.erase(key)
+	for key in events:
+		var event: Dictionary = events[key]
+		var old: Dictionary = transfer_visuals.get(key, {})
+		if int(old.get("seq", -1)) != int(event["seq"]):
+			var start: float = float(old.get("start", visual_clock)) if visual_clock - float(old.get("last", -100.0)) < 0.65 else visual_clock
+			old = {"seq": event["seq"], "start": start, "last": visual_clock}
+			transfer_visuals[key] = old
+		var age: float = visual_clock - float(old["last"])
+		if age > 0.65:
+			continue
+		var resource: String = event["resource"]
+		var a: Vector2 = _transfer_anchor(state, poses, refs, int(event["source"]), resource, int(event["from_bay"]))
+		var b: Vector2 = _transfer_anchor(state, poses, refs, int(event["target"]), resource, int(event["to_bay"]))
+		if not a.is_finite() or not b.is_finite() or (not bounds.grow(30.0).has_point(a) and not bounds.grow(30.0).has_point(b)):
+			continue
+		var color: Color = HUD.COLORS[resource]
+		var count: int = clampi(ceili(sqrt(float(event["amount"])) * 2.0), 2, 8)
+		var radius: float = clampf(_ship_scale() * 1.2, 0.9, 3.5)
+		for i in range(count):
+			var phase: float = fposmod((visual_clock - float(old["start"])) * 2.8 + float(i) / float(count), 1.0)
+			var point: Vector2 = a.lerp(b, phase)
+			var alpha: float = (1.0 - age / 0.65) * smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.85, 1.0, phase))
+			map_canvas.draw_circle(point, radius * 2.0, Color(color, alpha * 0.18), true, -1.0, true)
+			map_canvas.draw_rect(Rect2(point - Vector2.ONE * radius, Vector2.ONE * radius * 2.0), Color(color.lightened(0.2), alpha))
 
 func _draw_map() -> void:
 	if session == null:
@@ -6560,6 +6641,7 @@ func _draw_map() -> void:
 		map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)
 		# Identify allegiance on every hull, including loaded ships.
 		map_canvas.draw_polyline(outline, empire.lightened(0.2), scale, true)
+	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
 	_draw_ship_destructions(viewport_bounds)
 	_draw_formation_preview(state)
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
