@@ -25,6 +25,8 @@ const OVERVIEW_MAX_ZOOM: float = 64.0
 const FIGHTER_HULL_LENGTH: float = 22.0
 const CLOSEUP_SCREEN_FRACTION: float = 0.6
 const SNAPSHOT_SECONDS: float = 0.2
+const THRUST_FADE_RATE: float = 5.0
+const THRUST_DEAD_ZONE: float = 0.06
 const TRADE_MAX_EXTRA_HEIGHT: float = 48.0
 # Projected system radius in logical screen pixels, independent of selection.
 const PLANET_FADE_START: float = 40.0
@@ -5631,19 +5633,45 @@ func _sync_ship_visuals(state: Dictionary) -> void:
 			var heading: Vector2 = sample.get("heading", ship.get("heading", Vector2.UP))
 			var previous: Dictionary = ship_visuals.get(id, {})
 			var interval: float = duration if not sample.is_empty() else SNAPSHOT_SECONDS
+			# Authority revisions, not frame/packet-arrival timing, keep the
+			# acceleration estimate stable across rendering rates and peers.
+			var revision: int = int(sample.get("revision", session.get("motion_base_revision") if guest else session.get("motion_revision")))
+			var speed: int = int(state.get("time_speed", 1))
 			if previous.is_empty():
-				updated[id] = {"from": target, "to": target, "age": interval, "duration": interval, "heading": heading, "sample_ms": Time.get_ticks_msec(), "velocity": Vector2.ZERO, "thrust": 0.0}
-			elif previous["to"] != target:
-				var now: int = Time.get_ticks_msec()
-				var sample_dt: float = maxf(0.05, float(now - int(previous.get("sample_ms", now))) / 1000.0)
+				updated[id] = {"from": target, "to": target, "age": interval, "duration": interval, "heading": heading, "motion_revision": revision, "motion_point": target, "motion_speed": speed, "velocity": Vector2.ZERO, "thrust": 0.0}
+				continue
+			var prior_revision: int = int(previous.get("motion_revision", revision))
+			if speed <= 0 or int(previous.get("motion_speed", speed)) != speed or revision < prior_revision:
+				previous["velocity"] = Vector2.ZERO
+				previous["thrust"] = 0.0
+				previous["motion_revision"] = revision
+				previous["motion_point"] = target
+			elif revision > prior_revision:
+				var sample_dt: float = float(revision - prior_revision) * 0.1 * float(speed)
+				var velocity: Vector2 = (target - (previous.get("motion_point", target) as Vector2)) / maxf(0.1, sample_dt)
 				var old_velocity: Vector2 = previous.get("velocity", Vector2.ZERO)
-				var velocity: Vector2 = (target - (previous["to"] as Vector2)) / sample_dt
-				var acceleration: float = (velocity - old_velocity).length() / sample_dt
-				var thrust: float = clampf(acceleration * interval / maxf(maxf(velocity.length(), old_velocity.length()), 1.0), 0.0, 1.0)
-				updated[id] = {"from": _visual_position(previous), "to": target, "age": 0.0, "duration": interval, "heading": heading, "sample_ms": now, "velocity": velocity, "thrust": lerpf(float(previous.get("thrust", 0.0)), thrust, 0.65)}
-			else:
-				previous["heading"] = heading
-				updated[id] = previous
+				var nominal: float = maxf(1.0, ECONOMY.ship_speed(str(ship["kind"])))
+				var delta_velocity: Vector2 = velocity - old_velocity
+				# Forward acceleration drives the main plume. Turning gets
+				# a smaller burst; braking and tiny position corrections do not.
+				var axis: Vector2 = velocity.normalized()
+				var forward_accel: float = maxf(0.0, delta_velocity.dot(axis))
+				var turning: float = absf(delta_velocity.cross(axis)) * 0.30
+				var impulse: float = (forward_accel + turning) * SNAPSHOT_SECONDS / (nominal * maxf(0.1, sample_dt))
+				var thrust: float = smoothstep(THRUST_DEAD_ZONE, 0.75, clampf(impulse, 0.0, 1.0))
+				thrust *= smoothstep(0.04, 0.25, velocity.length() / nominal)
+				previous["thrust"] = maxf(float(previous.get("thrust", 0.0)), thrust) if velocity.length() > nominal * 0.04 else 0.0
+				previous["velocity"] = velocity
+				previous["motion_revision"] = revision
+				previous["motion_point"] = target
+			previous["motion_speed"] = speed
+			if previous["to"] != target:
+				previous["from"] = _visual_position(previous)
+				previous["to"] = target
+				previous["age"] = 0.0
+				previous["duration"] = interval
+			previous["heading"] = heading
+			updated[id] = previous
 	ship_visuals = updated
 	for id in ship_offsets.keys():
 		if not updated.has(id):
@@ -5838,6 +5866,8 @@ func _process(delta: float) -> void:
 		var duration: float = float(visual.get("duration", SNAPSHOT_SECONDS))
 		if float(visual["age"]) < duration:
 			visual["age"] = minf(duration, float(visual["age"]) + delta)
+		# Exhaust decays even after interpolation reaches its destination.
+		visual["thrust"] = float(visual.get("thrust", 0.0)) * exp(-delta * THRUST_FADE_RATE)
 	var state: Dictionary = _state()
 	if not state.is_empty():
 		_update_orbit_clock(state, delta)
@@ -7105,9 +7135,9 @@ func _draw_map() -> void:
 		var hull: Color = empire.lightened(0.35)
 		var side: Vector2 = direction.orthogonal() * scale
 		direction *= scale
-		var physical: Vector2 = ship.get("position", Vector2.ZERO)
-		var target: Vector2 = ship.get("navigation_target", physical)
-		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and (not ECONOMY._engaged(ship)) and physical.distance_to(target) > ECONOMY.EPS:
+		var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
+		var thrust: float = float(visual.get("thrust", 0.0))
+		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and thrust > 0.035:
 			var hull_vertices: Array = HULL_OUTLINES.get(ship["kind"], FREIGHTER_OUTLINE)
 			var rear: float = 0.0
 			var nose: float = 0.0
@@ -7115,17 +7145,21 @@ func _draw_map() -> void:
 				rear = minf(rear, vertex.x)
 				nose = maxf(nose, vertex.x)
 			var hull_factor: float = maxf(0.5, (nose - rear) / 18.0)
-			var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
-			var thrust: float = float(visual.get("thrust", 0.0)) * exp(-maxf(0.0, float(visual.get("age", 0.0)) - 0.1) * 3.0)
-			var exhaust: float = hull_factor * lerpf(0.35, 1.5, thrust)
 			var engine: Vector2 = point + direction * rear
-			if viewport_bounds.grow(maxf(24.0, 16.0 * scale)).has_point(engine):
-				var particle_count: int = 5 if scale >= 1.0 else 2
+			var length: float = hull_factor * lerpf(4.0, 20.0, thrust)
+			var width: float = hull_factor * lerpf(0.8, 2.1, thrust)
+			if viewport_bounds.grow(maxf(24.0, length * scale + 8.0)).has_point(engine):
+				# Narrow blue plasma sheath and a white-hot nozzle core.
+				var flame: PackedVector2Array = PackedVector2Array([engine + side * width, engine - direction * length, engine - side * width])
+				map_canvas.draw_colored_polygon(flame, Color(0.15, 0.62, 1.0, thrust * 0.34))
+				map_canvas.draw_colored_polygon(PackedVector2Array([engine + side * width * 0.45, engine - direction * length * 0.40, engine - side * width * 0.45]), Color(0.80, 0.96, 1.0, thrust * 0.90))
+				var particle_count: int = clampi(ceili(thrust * (5.0 if scale >= 1.0 else 2.0)), 1, 5)
 				for k in range(particle_count):
-					var age: float = fposmod(visual_clock * 3.5 + float(k) / float(particle_count) + float(ship["id"]) * 0.173, 1.0)
-					var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * age * 2.5
-					var spark: Vector2 = engine - direction * (2.0 + age * 12.0 * exhaust) + side * offset * exhaust
-					map_canvas.draw_circle(spark, maxf(0.45, (2.0 - age) * scale * exhaust), Color(0.45, 0.85, 1.0, (1.0 - age) * 0.85), false)
+					var age: float = fposmod(visual_clock * 4.5 + float(k) / float(particle_count) + float(ship["id"]) * 0.173, 1.0)
+					var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * width * (0.3 + age * 0.7)
+					var spark: Vector2 = engine - direction * (1.0 + age * length) + side * offset
+					var streak: float = hull_factor * lerpf(1.5, 4.0, thrust) * (1.0 - age * 0.65)
+					map_canvas.draw_line(spark, spark - direction * streak, Color(0.38, 0.83, 1.0, thrust * (1.0 - age) * 0.85), maxf(0.6, scale * hull_factor * (1.0 - age) * 0.9), true)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:

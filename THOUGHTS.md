@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.58.6: Exhaust derives from local motion revisions rather than adding replication fields; tune acceleration dead zone, fade and plume length in visual playtests, particularly for arrival corrections and guest packet loss.
+
 - v0.58.5: Consolidated station shipyard controls use grouped selection and automatic free-port allocation. Check readability and group behavior as yards complete or are destroyed.
 
 - v0.58.4: Idle repaired hulls remain stationary while beams operate; wander is deferred until all repairs resolve. Check crowded repair formations and balance with doubled throughput; passive regeneration unchanged.
