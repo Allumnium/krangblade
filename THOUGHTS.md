@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.56.8: Separate command hint text from native tooltip_text; keep descendants mouse-transparent to avoid recursive hover popups. Verify in editor.
+
 - v0.56.7: Planetary particle streams represent aggregate production, distributed over matching bodies (fallback first body). Watch raiding balance and visual clutter.
 
 - v0.56.6: Multiple selected routes may overlap; inspect clutter. Queued connectors show intended endpoints, not speculative future navigation.

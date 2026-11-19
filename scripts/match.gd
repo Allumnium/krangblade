@@ -1228,7 +1228,7 @@ func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {
 			if float(available.get(resource, 0.0)) + ECONOMY.EPS < float(cost_button.recipe[resource]):
 				cost_button.missing.append(resource)
 	var shortcut: String = str(button.get_meta("hotkey", ""))
-	button.tooltip_text = description if shortcut.is_empty() else (description + "\n[" + shortcut + "]" if not description.is_empty() else "[" + shortcut + "]")
+	_set_button_hint(button, description if shortcut.is_empty() else (description + "\n[" + shortcut + "]" if not description.is_empty() else "[" + shortcut + "]"))
 
 func _available_cost_resources(p: Dictionary, yard: int = -1) -> Dictionary:
 	var available: Dictionary = p["stock"].duplicate()
@@ -1464,11 +1464,11 @@ func _sync_hotkey_bindings() -> void:
 		var hint: String = _hotkey_name(key)
 		var old: String = str(button.get_meta("hotkey", ""))
 		if not old.is_empty():
-			button.tooltip_text = button.tooltip_text.replace("\n[" + old + "]", "").replace(" [" + old + "]", "")
-			if button.tooltip_text == "[" + old + "]":
-				button.tooltip_text = ""
+			_set_button_hint(button, _button_hint(button).replace("\n[" + old + "]", "").replace(" [" + old + "]", ""))
+			if _button_hint(button) == "[" + old + "]":
+				_set_button_hint(button, "")
 		button.set_meta("hotkey", hint)
-		button.tooltip_text += ("\n" if not button.tooltip_text.is_empty() else "") + "[" + hint + "]"
+		_set_button_hint(button, _button_hint(button) + ("\n" if not _button_hint(button).is_empty() else "") + "[" + hint + "]")
 		var badge: Label = entry["badge"]
 		badge.text = hint
 		var shortcuts: Array = command_hotkeys.get(key, [])
@@ -1483,9 +1483,29 @@ func _trigger_command_hotkey(key: int) -> bool:
 			return true
 	return false
 
+func _button_hint(button: Button) -> String:
+	return str(button.get_meta("command_hint", "")) if button.has_meta("command_hint") else button.tooltip_text
+
+func _set_button_hint(button: Button, hint: String) -> void:
+	if button.has_meta("command_hint"):
+		button.set_meta("command_hint", hint)
+		button.tooltip_text = ""
+	else:
+		button.tooltip_text = hint
+
+func _make_tooltip_mouse_transparent(node: Node) -> void:
+	if node is Control:
+		(node as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for child in node.get_children():
+		_make_tooltip_mouse_transparent(child)
+
 func _enable_fast_command_tooltip(button: Button) -> void:
 	if not button is CostButton:
 		return
+	if button.has_meta("command_hint"):
+		return
+	button.set_meta("command_hint", button.tooltip_text)
+	button.tooltip_text = ""
 	(button as CostButton).fast_tooltip = true
 	var timer := Timer.new()
 	timer.one_shot = true
@@ -1496,7 +1516,7 @@ func _enable_fast_command_tooltip(button: Button) -> void:
 	popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	popup.z_index = 100
 	popup.theme = HUD.compact()
-	popup.add_theme_stylebox_override("panel", HUD.surface(Color("#101b29"), Color("#6385a4"), 8, 3))
+	popup.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	button.add_child(popup)
 	popup.hide()
 	button.mouse_entered.connect(func() -> void: timer.start())
@@ -1511,17 +1531,21 @@ func _enable_fast_command_tooltip(button: Button) -> void:
 			timer.stop()
 			popup.hide())
 	timer.timeout.connect(func() -> void:
-		if not button.is_visible_in_tree() or not button.get_global_rect().has_point(button.get_global_mouse_position()) or button.tooltip_text.is_empty():
+		if not button.is_visible_in_tree() or not button.get_global_rect().has_point(button.get_global_mouse_position()) or str(button.get_meta("command_hint", "")).is_empty():
 			return
 		for child in popup.get_children():
 			popup.remove_child(child)
 			child.queue_free()
-		var content: Control = (button as CostButton)._make_custom_tooltip(button.tooltip_text) as Control
+		var content: Control = (button as CostButton)._make_custom_tooltip(str(button.get_meta("command_hint", ""))) as Control
 		if content == null:
 			var label := Label.new()
-			label.text = button.tooltip_text
-			content = label
+			label.text = str(button.get_meta("command_hint", ""))
+			var panel := PanelContainer.new()
+			panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101b29"), Color("#6385a4"), 8, 3))
+			panel.add_child(label)
+			content = panel
 		popup.add_child(content)
+		_make_tooltip_mouse_transparent(content)
 		popup.reset_size()
 		var bounds: Vector2 = button.get_viewport_rect().size
 		var extent: Vector2 = popup.get_combined_minimum_size()
@@ -1626,7 +1650,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		grid.move_child(ordered_slots[slot], slot)
 	var station_button := _button("", _select_yard_station, grid)
 	_yard_ability_face(station_button, "Select Space\nStation", _station_command_icon("select_station"))
-	station_button.tooltip_text = "Select parent Space Station"
+	_set_button_hint(station_button, "Select parent Space Station")
 	_register_command_hotkey(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
 	_station_spacer(grid)
 	var clear := _button("", func() -> void:
@@ -1635,13 +1659,13 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		for ref in _selected_yards(_state(), true):
 			session.call("request_shipyard_rally", ref.x, ref.y, -1, Vector2.ZERO), grid)
 	_yard_ability_face(clear, "Clear\nRally", _station_command_icon("clear_rally"))
-	clear.tooltip_text = "Clear rally point"
+	_set_button_hint(clear, "Clear rally point")
 	yard_commands["clear"] = clear
 	_register_command_hotkey(clear, KEY_X, "Shipyard", "yard_clear", "Clear Rally")
 	var rally_button := CostButton.new()
 	_yard_ability_face(rally_button, "Rally", _station_command_icon("rally"))
 	rally_button.toggle_mode = true
-	rally_button.tooltip_text = "Set Rally Point"
+	_set_button_hint(rally_button, "Set Rally Point")
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
@@ -1840,7 +1864,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		var hint: String = "Reinforced Plating I · %.0f s (1×)\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s (1×)\n+2 defensive lasers (4 total) · 18 damage each · 1 shot/s (1×) · range 180"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
-			button.tooltip_text += "\n" + ("Installed" if installed else "Building")
+			_set_button_hint(button, _button_hint(button) + "\n" + ("Installed" if installed else "Building"))
 		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled and not installed else Color.WHITE
 
 func _station_repeat_key(p: Dictionary, key: String) -> String:
@@ -1939,11 +1963,11 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			(button.get_meta("auto_border") as Control).visible = auto
 		_set_cost_tooltip(button, name_text + (" · %.1f s (1×)" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
 		if not eligible:
-			button.tooltip_text += "\nUnavailable"
+			_set_button_hint(button, _button_hint(button) + "\nUnavailable")
 		elif not available and ECONOMY.affordable(p, recipe):
-			button.tooltip_text += "\nRequirements not met or already queued"
+			_set_button_hint(button, _button_hint(button) + "\nRequirements not met or already queued")
 		if not repeat_key.is_empty() and eligible:
-			button.tooltip_text += "\nRight-click: %s repeat" % ("Disable" if auto else "Enable")
+			_set_button_hint(button, _button_hint(button) + "\nRight-click: %s repeat" % ("Disable" if auto else "Enable"))
 
 func _draw_autobuild_border(border: Control) -> void:
 	var bounds := Rect2(Vector2.ONE * 2.0, border.size - Vector2.ONE * 4.0)
@@ -2044,14 +2068,14 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
 		if not ECONOMY.yard_fits(system, selected_yard, kind):
-			button.tooltip_text += "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)]
+			_set_button_hint(button, _button_hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
 		if not operating:
-			button.tooltip_text += "\nShipyard offline"
+			_set_button_hint(button, _button_hint(button) + "\nShipyard offline")
 		if kind == "ship" and not bool(system["home"]):
-			button.tooltip_text += "\nRequires home system"
+			_set_button_hint(button, _button_hint(button) + "\nRequires home system")
 		elif ECONOMY.shipyard_queue_count(system, selected_yard) >= ECONOMY.SHIPYARD_QUEUE_LIMIT:
-			button.tooltip_text += "\nQueue full (8/8)"
-		button.tooltip_text += "\nRight-click: %s autobuild" % ("Disable" if auto else "Enable")
+			_set_button_hint(button, _button_hint(button) + "\nQueue full (8/8)")
+		_set_button_hint(button, _button_hint(button) + "\nRight-click: %s autobuild" % ("Disable" if auto else "Enable"))
 	var rally: Dictionary = yard.get("rally", {})
 	var rally_button: Button = yard_commands["rally"]
 	rally_button.disabled = not owned
@@ -2293,7 +2317,7 @@ func _refresh_field_commands(state: Dictionary, special: bool) -> void:
 		border.queue_redraw()
 		var caption: String = "Mining" if key == "enabled" else key
 		var hint: String = str(button.get_meta("hotkey", ""))
-		button.tooltip_text = "%s · %s\nClick to toggle [%s]" % [caption, "On" if enabled else "Off", hint]
+		_set_button_hint(button, "%s · %s\nClick to toggle [%s]" % [caption, "On" if enabled else "Off", hint])
 
 func _command_icon(path: String, pixels: int = 32) -> Texture2D:
 	var image := Image.new()
@@ -2309,7 +2333,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	button.focus_mode = Control.FOCUS_NONE
 	button.icon = _station_command_icon({"auto_repair": "repair", "auto_trade": "trade", "deliver_farm": "unload"}.get(id, id))
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	button.tooltip_text = hint
+	_set_button_hint(button, hint)
 	button.toggle_mode = true
 	button.pressed.connect(action)
 	var slot: Control = _station_spacer(command_card)
@@ -2458,14 +2482,14 @@ func _refresh_autocast_cards() -> void:
 		if remaining > ECONOMY.EPS:
 			status += " · %.1f s remaining%s" % [remaining / speed, " (paused)" if int(state.get("time_speed", 1)) == 0 else ""]
 		var shortcut: String = str(button.get_meta("hotkey", ""))
-		button.tooltip_text = "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut]
-		button.tooltip_text += "\nCooldown: %.1f s at 1×" % duration
+		_set_button_hint(button, "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut])
+		_set_button_hint(button, _button_hint(button) + "\nCooldown: %.1f s at 1×" % duration)
 		if mode == "wander":
-			button.tooltip_text += "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority."
+			_set_button_hint(button, _button_hint(button) + "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority.")
 		elif mode == "collect":
-			button.tooltip_text = "%s · Auto: %s\nLeft click [%s], then choose a Pulsar. Right click toggles autocast.\nCollects 1 unit in %.0f s at 1×; auto cooldown %.0f s." % [title_text, status, shortcut, ECONOMY.SCIENCE_COLLECTION_YEARS, duration]
+			_set_button_hint(button, "%s · Auto: %s\nLeft click [%s], then choose a Pulsar. Right click toggles autocast.\nCollects 1 unit in %.0f s at 1×; auto cooldown %.0f s." % [title_text, status, shortcut, ECONOMY.SCIENCE_COLLECTION_YEARS, duration])
 		elif mode == "farm":
-			button.tooltip_text += "\nProduces %.0f t/s at 1×; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE
+			_set_button_hint(button, _button_hint(button) + "\nProduces %.0f t/s at 1×; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
 
 func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""
@@ -4053,7 +4077,7 @@ func _reset_hotkeys() -> void:
 func _set_mute_icon(button: Button, muted: bool) -> void:
 	var speaker: String = '<path d="M4 12H10L17 6V26L10 20H4Z"/>'
 	button.icon = _command_icon(speaker + ('<path d="M4 29L29 4"/>' if muted else '<path d="M21 11Q27 16 21 21M25 7Q32 16 25 25"/>'))
-	button.tooltip_text = "Unmute" if muted else "Mute"
+	_set_button_hint(button, "Unmute" if muted else "Mute")
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 24)
 
@@ -4714,7 +4738,7 @@ func _refresh_control_groups(state: Dictionary) -> void:
 			button.text = str(number)
 			button.icon = null
 			button.disabled = true
-			button.tooltip_text = "Ctrl+%d to assign a selection" % number
+			_set_button_hint(button, "Ctrl+%d to assign a selection" % number)
 			continue
 		control_groups[number] = group
 		var kind: String = group["kind"]
@@ -4728,7 +4752,7 @@ func _refresh_control_groups(state: Dictionary) -> void:
 		button.text = "%d·%d" % [number, count] if button.size.x >= 34.0 else str(number)
 		button.icon = _selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
 		button.disabled = false
-		button.tooltip_text = "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace · Shift+%d to add" % [number, count, "ships" if kind == "units" else "structures", number, number, number]
+		_set_button_hint(button, "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace · Shift+%d to add" % [number, count, "ships" if kind == "units" else "structures", number, number, number])
 
 func _recall_control_group(number: int, additive: bool = false) -> void:
 	var state: Dictionary = _state()
@@ -4913,7 +4937,7 @@ func _refresh_building_group(state: Dictionary) -> void:
 		button.add_theme_color_override("icon_normal_color", tint)
 		button.add_theme_color_override("icon_hover_color", tint)
 		button.add_theme_color_override("icon_pressed_color", tint)
-		button.tooltip_text = "%s · %.0f / %.0f HP%s" % [name_text, hp, maximum, "" if int(system["owner"]) == _me() else " · Foreign"]
+		_set_button_hint(button, "%s · %.0f / %.0f HP%s" % [name_text, hp, maximum, "" if int(system["owner"]) == _me() else " · Foreign"])
 
 func _select_building_tile(ref: Vector2i, kind: String) -> void:
 	if Input.is_key_pressed(KEY_SHIFT):
