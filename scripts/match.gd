@@ -2602,6 +2602,10 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Approaching resource site" if (ship["position"] as Vector2).distance_to(stage["point"]) > ECONOMY.RESOURCE_HANDOFF_RANGE else "Awaiting resource cargo"
 	elif bool(ship.get("resource_haul", false)):
 		status = "Hauling resources" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for resource storage"
+	var follow_order: Dictionary = ship.get("unit_order", {})
+	if follow_order.get("kind", "") == "follow" and not bool(ship.get("retreating", false)):
+		var target_ship: Dictionary = ECONOMY.service_targets(state).get(int(follow_order["target"]), {}).get("entity", {})
+		status = "Following %s #%d" % [_ship_kind_name(str(target_ship.get("kind", "ship"))), int(follow_order["target"])]
 	var wait_left: float = ECONOMY.arrival_wait_remaining(state, ship)
 	if wait_left > ECONOMY.EPS and not ECONOMY._engaged(ship) and not bool(ship.get("retreating", false)):
 		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)
@@ -4760,6 +4764,10 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			continue
 		if not ref.is_empty() and armed and ECONOMY._hostile_hull(state, _me(), ref):
 			order = {"kind": "attack", "target": target}
+		elif contextual and ref.get("kind") == "ship" and ECONOMY._friendly_target(state, _me(), ref):
+			if id == target:
+				continue
+			order = {"kind": "follow", "target": target}
 		elif contextual and ref.get("kind") == "station" and ECONOMY.can_deposit(state, craft, target):
 			order = {"kind": "deposit", "target": target}
 		elif wreck >= 0 and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
@@ -6079,6 +6087,9 @@ func _draw_map() -> void:
 			var rally_tint := Color("#ff605c")
 			map_canvas.draw_line(start, destination, Color(rally_tint, 0.65), 1.5, true)
 			_draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
+		elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
+			var destination: Vector2 = poses[int(active_order["target"])]["point"]
+			map_canvas.draw_dashed_line(start, destination, Color(HUD.ACCENT, 0.8), 1.5, 6.0, true, true)
 		elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY._unit_order_running(craft):
 			_draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
 		elif active_order.get("kind", "") == "position" and ECONOMY._unit_order_running(craft):
