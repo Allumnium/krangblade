@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.58.2: Harvesters with both modes enabled search a wider sector-local salvage radius; monitor travel time versus asteroid throughput and contention with freighters. Safety, cargo return and explicit orders retain precedence.
+
 - v0.58.0: Three-year planetary upgrade deliveries use the existing queue and are not independently targetable; inspect pacing, arrival legibility and cancellation salvage position. Station remains free to fabricate the next job.
 
 - v0.57.1: Cached per-kind/color hull textures and early viewport culling reduce draw work; benchmark before changing simulation. Dynamic cargo and effects remain separate.

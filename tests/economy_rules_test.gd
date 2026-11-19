@@ -3054,7 +3054,7 @@ func _test_opportunistic_salvage() -> void:
 	var working: Dictionary = {"id": 600, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": 0, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "mining", "mining_active": true, "assigned_field": 0, "field": 0}
 	state["ships"] = [working]
 	piles.clear()
-	piles[300] = {"id": 300, "resource": "Metals", "amount": 3.0, "position": Vector2(ECON.SALVAGE_APPROACH_RANGE * 2.0 + 1.0, 0), "claim": -1}
+	piles[300] = {"id": 300, "resource": "Metals", "amount": 3.0, "position": Vector2(ECON.HARVESTER_SALVAGE_PRIORITY_RANGE + 1.0, 0), "claim": -1}
 	assert(not ECON._work_opportunistic_salvage(state, graph, working, 0.1, {}, ECON._salvage_cells(piles), false))
 	assert(working["mining_mode"] == "mining" and working["position"] == Vector2.ZERO)
 	piles[300]["position"] = Vector2(180, 0)
@@ -3062,7 +3062,16 @@ func _test_opportunistic_salvage() -> void:
 	state["ships"].append(threat)
 	assert(not ECON._work_opportunistic_salvage(state, graph, working, 0.1, {}, ECON._salvage_cells(piles), false))
 	state["ships"].erase(threat)
+	# Prioritize safe salvage even after choosing a mining route, as long
+	# as the Harvester is still in its departure sector.
+	working["mining_mode"] = "approach"
+	working["route"] = [1]
+	working["salvage_auto"] = false
+	assert(not ECON._work_opportunistic_salvage(state, graph, working, 0.1, {}, ECON._salvage_cells(piles), false))
+	assert(working["route"] == [1] and working["position"] == Vector2.ZERO and piles[300]["claim"] == -1)
+	working["salvage_auto"] = true
 	assert(ECON._work_opportunistic_salvage(state, graph, working, 0.1, {}, ECON._salvage_cells(piles), false))
+	assert(working["route"].is_empty() and float(working["leg"]) == 0.0)
 	assert(working["position"] != Vector2.ZERO and not working["mining_active"] and working["assigned_field"] == 0 and working["auto_salvage_target"] == 300)
 	working["position"] = piles[300]["position"]
 	assert(ECON._work_opportunistic_salvage(state, graph, working, 1.0, {}, ECON._salvage_cells(piles), false))

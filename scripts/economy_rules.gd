@@ -67,6 +67,7 @@ const SALVAGE_FRACTION: float = 0.20
 const SALVAGE_MIN_LIFETIME: float = 90.0
 const SALVAGE_MAX_LIFETIME: float = 180.0
 const SALVAGE_APPROACH_RANGE: float = TRACTOR_RANGE * 2.0
+const HARVESTER_SALVAGE_PRIORITY_RANGE: float = SALVAGE_APPROACH_RANGE * 4.0
 # The pair of mining lasers deals one combined volley per year. One point
 # of damage to a resource chunk removes one ton, subject to field limits.
 const MINER_LASER_DAMAGE: float = 2.0
@@ -4675,13 +4676,21 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 		return false
 	var pos: Vector2 = ship["position"]
 	var idle: bool = not coordinated and _is_idle_ship(ship) and not _unit_order_running(ship) and ship.get("order_queue", []).is_empty()
-	# A mining assignment is a work preference, not a reason to ignore
-	# valuable nearby debris. Only detour within the local sector, never
-	# abandon a lane crossing, explicit movement, or loaded delivery.
-	var mining_detour: bool = ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") in ["idle", "approach", "outbound", "mining"] and ship["route"].is_empty() and not bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)) and (not _unit_order_running(ship) or ship.get("unit_order", {}).get("kind") == "mine")
-	idle = idle or mining_detour or (ship.get("kind", "") == "miner" and previously_collecting and not bool(ship.get("holding", false)) and ship["route"].is_empty() and ship.get("unit_order", {}).get("kind", "mine") == "mine")
-	var civilian: bool = ship.get("kind", "") in ["miner", "ship"]
 	var sector: int = local_sector(graph, ship)
+	var harvester: bool = ship.get("kind", "") == "miner"
+	var priority: bool = harvester and autocast_enabled(ship, "mine")
+	# A mining assignment is a preference. Prefer scraps before departing
+	# for a rock, and interrupt local extraction, but finish real lane
+	# crossings, explicit movement and loaded depot deliveries.
+	var can_leave_route: bool = ship["route"].is_empty() or (priority and ship.get("mining_mode", "idle") == "approach" and sector >= 0 and sector == int(ship["at"]))
+	var mining_detour: bool = harvester and ship.get("mining_mode", "idle") in ["idle", "approach", "outbound", "mining"] and can_leave_route and not bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)) and (not _unit_order_running(ship) or ship.get("unit_order", {}).get("kind") == "mine")
+	var continuing_detour: bool = harvester and previously_collecting and not bool(ship.get("holding", false)) and ship["route"].is_empty() and ship.get("unit_order", {}).get("kind", "mine") == "mine"
+	idle = idle or mining_detour or continuing_detour
+	var civilian: bool = ship.get("kind", "") in ["miner", "ship"]
+	# Interrupting mining clears the field index. Keep the same physical
+	# sector available for subsequent approaches from inside asteroid fields.
+	if continuing_detour and sector < 0:
+		sector = sector_at(graph, pos, range(graph["points"].size()))
 	if civilian:
 		if threats.is_empty():
 			threats = _salvage_threats(state, graph)
@@ -4693,6 +4702,8 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 			return true
 		return false
 	var limit: float = (SALVAGE_APPROACH_RANGE * 2.0 if civilian else SALVAGE_APPROACH_RANGE) if idle else TRACTOR_RANGE
+	if priority and idle and sector >= 0:
+		limit = HARVESTER_SALVAGE_PRIORITY_RANGE
 	var nearest: float = limit * limit + EPS
 	var best: int = -1
 	var cell := Vector2i(floori(pos.x / SALVAGE_APPROACH_RANGE), floori(pos.y / SALVAGE_APPROACH_RANGE))
@@ -4708,7 +4719,7 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 				var distance: float = pos.distance_squared_to(point)
 				if distance > nearest or (is_equal_approx(distance, nearest) and best >= 0 and int(candidate) > best):
 					continue
-				if not _salvage_reachable(graph, ship, point):
+				if pos.distance_to(point) > TRACTOR_RANGE + EPS and (sector < 0 or not sector_contains(graph, sector, point)):
 					continue
 				if civilian and not _salvage_safe(state, graph, int(ship["owner"]), point, sector, threats):
 					continue
@@ -4722,6 +4733,8 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 	var pile: Dictionary = piles[best]
 	if mining_detour:
 		_interrupt_work(ship)
+		ship["route"] = []
+		ship["leg"] = 0.0
 		ship["mining_active"] = false
 	pile["claim"] = int(ship["id"])
 	ship["auto_salvage_target"] = best
