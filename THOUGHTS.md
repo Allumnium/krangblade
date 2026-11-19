@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.56.10: Planet details share particle source allocation; absent matching colors use first-body fallback, and matching bodies divide output equally.
+
 - v0.56.8: Separate command hint text from native tooltip_text; keep descendants mouse-transparent to avoid recursive hover popups. Verify in editor.
 
 - v0.56.7: Planetary particle streams represent aggregate production, distributed over matching bodies (fallback first body). Watch raiding balance and visual clutter.
