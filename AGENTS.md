@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.58.9: AI builds capital hulls with normal yard/storage prerequisites and deploys them alongside fighters. Automatic salvage searches safe discovered sectors within two lane links and 4,000 direct distance; explicit work and combat precedence retained. Colonize orders convert on arrival.
+
 - v0.58.8: Explicit Hold captures each hull’s position and heading, excludes it from separation nudges and autonomous work while held, retains emergency repair withdrawal. Planet surface palettes emphasize green Organics, gray Metals and purple Crystals, preserving procedural shading.
 
 - v0.58.7: Neutral-sector Send Colony selects the nearest idle reachable owned Colony on the authority. Shift queues Stop, Hold, Deliver Organics and eligible Transform via the normal unit-order pathway; ordinary Hold retains its toggle behavior.

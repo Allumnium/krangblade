@@ -67,7 +67,8 @@ const SALVAGE_FRACTION: float = 0.20
 const SALVAGE_MIN_LIFETIME: float = 90.0
 const SALVAGE_MAX_LIFETIME: float = 180.0
 const SALVAGE_APPROACH_RANGE: float = TRACTOR_RANGE * 2.0
-const HARVESTER_SALVAGE_PRIORITY_RANGE: float = SALVAGE_APPROACH_RANGE * 4.0
+const AUTO_SALVAGE_RANGE: float = 4000.0
+const AUTO_SALVAGE_HOPS: int = 2
 # The pair of mining lasers deals one combined volley per year. One point
 # of damage to a resource chunk removes one ton, subject to field limits.
 const MINER_LASER_DAMAGE: float = 2.0
@@ -465,7 +466,7 @@ static func nearest_idle_colony(state: Dictionary, player: int, target: int) -> 
 			chosen = id
 	return chosen
 
-static func send_colony(state: Dictionary, player: int, ship_id: int, target: int, automatic: bool = false) -> bool:
+static func send_colony(state: Dictionary, player: int, ship_id: int, target: int, automatic: bool = true) -> bool:
 	for ship in state["ships"]:
 		if int(ship["id"]) != ship_id:
 			continue
@@ -4633,6 +4634,7 @@ static func _cancel_salvage_order(ship: Dictionary) -> void:
 	ship.erase("farm_auto_delivery")
 	ship.erase("salvage_target")
 	ship.erase("auto_salvage_target")
+	ship.erase("auto_salvage_origin")
 	ship.erase("tractor_active")
 	if bool(ship.get("salvage_delivery", false)):
 		ship["route"] = []
@@ -4740,13 +4742,37 @@ static func _salvage_safe(state: Dictionary, graph: Dictionary, owner: int, poin
 					return false
 	return true
 
+# Search only discovered, safe sectors reachable in at most two lane hops.
+# Store the first waypoint for each destination so remote pickup can
+# follow those connections without a full-map route search per wreck.
+static func _auto_salvage_sectors(state: Dictionary, graph: Dictionary, owner: int, origin: int, threats: Dictionary) -> Dictionary:
+	if origin < 0 or origin >= graph["points"].size():
+		return {}
+	var allowed: Array[int] = military_pois(state, owner)
+	var reached: Dictionary = {origin: origin}
+	var frontier: Array = [origin]
+	for hop in range(AUTO_SALVAGE_HOPS):
+		var next: Array = []
+		for node in frontier:
+			for neighbor in graph["adjacent"][node]:
+				if reached.has(neighbor) or not allowed.has(neighbor):
+					continue
+				if not _salvage_safe(state, graph, owner, graph["points"][neighbor], neighbor, threats):
+					continue
+				reached[neighbor] = neighbor if node == origin else reached[node]
+				next.append(neighbor)
+		frontier = next
+	return reached
+
 # Combat and existing orders always take precedence. An idle craft can make
-# a short sector-local detour; a working/held/transiting craft may tractor
+# a bounded multi-sector detour; a working/held/transiting craft may tractor
 # only resources within beam range without changing its route or hold.
 static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, busy: Dictionary, cells: Dictionary, coordinated: bool, threats: Dictionary = {}) -> bool:
 	var piles: Dictionary = state.get("salvage", {})
 	var previously_collecting: bool = ship.has("auto_salvage_target")
+	var prior_origin: int = int(ship.get("auto_salvage_origin", -1))
 	_release_auto_salvage(ship, piles)
+	ship.erase("auto_salvage_origin")
 	if not autocast_ready(state, ship, "salvage"):
 		return false
 	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or _salvage_active(ship) or bool(ship.get("move_only", false)) or busy.has(int(ship["id"])):
@@ -4768,8 +4794,10 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 	var civilian: bool = ship.get("kind", "") in ["miner", "ship"]
 	# Interrupting mining clears the field index. Keep the same physical
 	# sector available for subsequent approaches from inside asteroid fields.
-	if continuing_detour and sector < 0:
+	if idle and sector < 0:
 		sector = sector_at(graph, pos, range(graph["points"].size()))
+		if sector < 0:
+			sector = prior_origin if previously_collecting and prior_origin >= 0 else patrol_node(state, graph, int(ship["owner"]), pos)
 	if civilian:
 		if threats.is_empty():
 			threats = _salvage_threats(state, graph)
@@ -4780,30 +4808,43 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 			ship["salvage_delivery"] = true
 			return true
 		return false
-	var limit: float = (SALVAGE_APPROACH_RANGE * 2.0 if civilian else SALVAGE_APPROACH_RANGE) if idle else TRACTOR_RANGE
-	if priority and idle and sector >= 0:
-		limit = HARVESTER_SALVAGE_PRIORITY_RANGE
+	var limit: float = AUTO_SALVAGE_RANGE if idle and civilian and sector >= 0 else TRACTOR_RANGE
+	var reachable: Dictionary = _auto_salvage_sectors(state, graph, int(ship["owner"]), sector, threats) if idle and civilian else {}
 	var nearest: float = limit * limit + EPS
 	var best: int = -1
+	var best_node: int = -1
 	var cell := Vector2i(floori(pos.x / SALVAGE_APPROACH_RANGE), floori(pos.y / SALVAGE_APPROACH_RANGE))
 	var reach: int = ceili(limit / SALVAGE_APPROACH_RANGE)
-	for x in range(-reach, reach + 1):
-		for y in range(-reach, reach + 1):
-			for candidate in cells.get(cell + Vector2i(x, y), []):
-				if not piles.has(candidate) or int(piles[candidate]["claim"]) >= 0:
-					continue
-				var point: Vector2 = piles[candidate]["position"]
-				if piles[candidate].has("dropped_by") and (int(piles[candidate]["dropped_by"]) == int(ship["id"]) or float(state["elapsed"]) - float(piles[candidate]["born"]) < 2.0):
-					continue
-				var distance: float = pos.distance_squared_to(point)
-				if distance > nearest or (is_equal_approx(distance, nearest) and best >= 0 and int(candidate) > best):
-					continue
-				if pos.distance_to(point) > TRACTOR_RANGE + EPS and (sector < 0 or not sector_contains(graph, sector, point)):
-					continue
-				if civilian and not _salvage_safe(state, graph, int(ship["owner"]), point, sector, threats):
-					continue
-				best = int(candidate)
-				nearest = distance
+	var nearby_cells: Array = []
+	# Sparse wreck fields are cheaper to scan than thousands of empty cells.
+	if cells.size() < (reach * 2 + 1) * (reach * 2 + 1):
+		for key in cells:
+			if absi(key.x - cell.x) <= reach and absi(key.y - cell.y) <= reach:
+				nearby_cells.append(key)
+	else:
+		for x in range(-reach, reach + 1):
+			for y in range(-reach, reach + 1):
+				var key: Vector2i = cell + Vector2i(x, y)
+				if cells.has(key):
+					nearby_cells.append(key)
+	for key in nearby_cells:
+		for candidate in cells[key]:
+			if not piles.has(candidate) or int(piles[candidate]["claim"]) >= 0:
+				continue
+			var point: Vector2 = piles[candidate]["position"]
+			if piles[candidate].has("dropped_by") and (int(piles[candidate]["dropped_by"]) == int(ship["id"]) or float(state["elapsed"]) - float(piles[candidate]["born"]) < 2.0):
+				continue
+			var distance: float = pos.distance_squared_to(point)
+			if distance > nearest or (is_equal_approx(distance, nearest) and best >= 0 and int(candidate) > best):
+				continue
+			var node: int = sector_at(graph, point, reachable.keys(), sector)
+			if distance > TRACTOR_RANGE * TRACTOR_RANGE + EPS and node < 0:
+				continue
+			if civilian and not _salvage_safe(state, graph, int(ship["owner"]), point, node, threats):
+				continue
+			best = int(candidate)
+			best_node = node
+			nearest = distance
 	if best < 0:
 		if civilian and idle and previously_collecting and _cargo_total(ship) > EPS:
 			ship["salvage_delivery"] = true
@@ -4819,7 +4860,16 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 	ship["auto_salvage_target"] = best
 	var point: Vector2 = pile["position"]
 	if pos.distance_to(point) > TRACTOR_RANGE:
-		_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, pos.distance_to(point) - TRACTOR_RANGE * 0.85))
+		ship["auto_salvage_origin"] = sector
+		var waypoint: int = int(reachable.get(best_node, best_node))
+		var approach: Vector2 = graph["points"][waypoint] if waypoint >= 0 and waypoint != best_node else point
+		var stop_range: float = TRACTOR_RANGE * 0.85 if approach == point else 0.0
+		_navigate(ship, approach, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, maxf(0.0, pos.distance_to(approach) - stop_range)))
+		# Keep civilian star anchors valid when crossing a field or sector.
+		var entered: int = sector_at(graph, ship["position"], reachable.keys(), sector)
+		if entered >= 0:
+			ship["at"] = entered if entered < state["planets"].size() else int(state["map"]["fields"][entered - state["planets"].size()]["anchor"])
+			ship["auto_salvage_origin"] = entered
 		return true
 	var before_pickup: float = _cargo_total(ship)
 	_collect_salvage(ship, pile, dt)
@@ -5555,7 +5605,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 			continue
 		var kind: String = ship["kind"]
 		counts[kind] += 1
-		if kind == "fighter":
+		if kind in ["fighter", "cruiser", "destroyer"]:
 			fighters.append(ship)
 		elif kind == "colony_ship":
 			if (ship["route"] as Array).is_empty():
@@ -5579,6 +5629,8 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 				counts[job["kind"]] += 1
 		var producer: bool = int(p["levels"]["Metals"]) > 0
 		set_thresholds(state, player, index, "Metals", 10.0 if bool(p["home"]) else (35.0 if producer else 90.0), 40.0 if bool(p["home"]) else (60.0 if producer else 95.0))
+		var crystal_source: bool = production_available(p, "Crystals") and index != home
+		set_thresholds(state, player, index, "Crystals", 0.0 if crystal_source else 50.0, 5.0 if crystal_source else 90.0)
 	for ship in idle_colonies:
 		var target: int = _ai_colony_target(state, player, ship, reserved)
 		if target >= 0 and send_colony(state, player, int(ship["id"]), target, true):
@@ -5629,7 +5681,17 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 			if _ai_colony_target(state, player, local_probe, reserved) >= 0:
 				action = "colony_ship"
 		if action.is_empty():
-			if has_yard and counts["fighter"] < maxi(3, mini(24, owned.size() * 2)):
+			# After basic defense, expansion and logistics, reserve a capital
+			# budget at the home yard. Other stations keep producing escorts.
+			var population: float = float(p["population"])
+			if index == home and has_yard and counts["fighter"] >= AI_WAVE_MIN and counts["cruiser"] < maxi(1, mini(4, owned.size())) and population >= SHIPYARD_POPULATION[1] + CREW_COSTS["cruiser"]:
+				action = "cruiser"
+			elif index == home and has_yard and counts["cruiser"] > 0 and counts["destroyer"] < maxi(1, mini(3, ceili(float(owned.size()) / 2.0))) and population >= SHIPYARD_POPULATION[2] + CREW_COSTS["destroyer"]:
+				action = "destroyer"
+			elif index != home and production_available(p, "Crystals") and production_level(p, "Crystals") == 0 and counts["fighter"] >= AI_WAVE_MIN:
+				action = "economy"
+				target = "Crystals"
+			elif has_yard and counts["fighter"] < maxi(3, mini(24, owned.size() * 2)):
 				action = "fighter"
 			elif has_yard and useful_fields > 0 and counts["miner"] < mini(6, useful_fields * 2):
 				action = "miner"
@@ -5651,6 +5713,9 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 						break
 		if action.is_empty():
 			continue
+		if action in ["cruiser", "destroyer"]:
+			# Do not export the savings needed for capital construction.
+			set_thresholds(state, player, index, "Metals", 90.0, 100.0)
 		if SHIP_KINDS.has(action) and not has_fitting_yard(p, action):
 			if p["yards"].is_empty():
 				action = "yard"
@@ -5664,6 +5729,15 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 				target = str(best_yard)
 		var build_level: int = next_shipyard_slot(p) if action == "yard" else (int(p["yards"][int(target)]["level"]) + 1 if action == "yard_upgrade" else 1)
 		var price: Dictionary = building_cost(p, target) if action == "economy" else _cost(action, build_level)
+		# Capital hulls (and enabling upgrades) cannot fit the initial
+		# warehouse. Reserve a normal warehouse upgrade before saving.
+		var capacity_needed: float = 0.0
+		for resource in price:
+			capacity_needed = maxf(capacity_needed, float(price[resource]))
+		if capacity_needed > storage_capacity(p) + EPS:
+			if warehouse_available(p):
+				enqueue(state, player, index, "economy", "warehouse")
+			continue
 		if not affordable(p, price):
 			# Saving for an unaffordable hull must not leave mature systems
 			# waiting indefinitely for food or local extraction.
