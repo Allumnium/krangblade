@@ -2391,6 +2391,8 @@ var diagnostic_label: Label
 var diagnostic_button: Button
 var diagnostic_elapsed: float = 0.0
 var diagnostic_last_bytes: int = -1
+var diagnostic_last_full_count: int = 0
+var diagnostic_last_motion_count: int = 0
 
 func _build_time_controls(parent: Container) -> void:
 	var row := HBoxContainer.new()
@@ -4493,7 +4495,8 @@ func _ship_position(ship: Dictionary, _points: Array) -> Vector2:
 	return ECONOMY.combat_position(_state(), ECONOMY.military_graph(_state()), ship)
 
 func _visual_position(visual: Dictionary) -> Vector2:
-	return (visual["from"] as Vector2).lerp(visual["to"], clampf(float(visual["age"]) / SNAPSHOT_SECONDS, 0.0, 1.0))
+	var duration: float = float(visual.get("duration", SNAPSHOT_SECONDS))
+	return (visual["from"] as Vector2).lerp(visual["to"], clampf(float(visual["age"]) / duration, 0.0, 1.0))
 
 # React to accepted orders in authority snapshots, not speculative UI clicks.
 # Only local system-production orders play audio; initial state is silent.
@@ -4528,15 +4531,22 @@ func _sync_ship_visuals(state: Dictionary) -> void:
 	var updated: Dictionary = {}
 	if not state.is_empty():
 		var points: Array = state["map"]["points"]
+		var samples: Dictionary = session.get("motion_samples")
+		var guest: bool = not bool(session.get("is_solo")) and not multiplayer.is_server()
+		var duration: float = clampf(float(session.get("diagnostic_motion_gap_ms")) / 1000.0 * 1.2, 0.1, 0.3) if guest else SNAPSHOT_SECONDS
 		for ship in state["ships"]:
 			var id: int = int(ship["id"])
-			var target: Vector2 = _ship_position(ship, points)
+			var sample: Dictionary = samples.get(id, {})
+			var target: Vector2 = sample.get("position", _ship_position(ship, points))
+			var heading: Vector2 = sample.get("heading", ship.get("heading", Vector2.UP))
 			var previous: Dictionary = ship_visuals.get(id, {})
+			var interval: float = duration if not sample.is_empty() else SNAPSHOT_SECONDS
 			if previous.is_empty():
-				updated[id] = {"from": target, "to": target, "age": SNAPSHOT_SECONDS}
+				updated[id] = {"from": target, "to": target, "age": interval, "duration": interval, "heading": heading}
 			elif previous["to"] != target:
-				updated[id] = {"from": _visual_position(previous), "to": target, "age": 0.0}
+				updated[id] = {"from": _visual_position(previous), "to": target, "age": 0.0, "duration": interval, "heading": heading}
 			else:
+				previous["heading"] = heading
 				updated[id] = previous
 	ship_visuals = updated
 	for id in ship_offsets.keys():
@@ -4682,6 +4692,18 @@ func _process(delta: float) -> void:
 			diagnostic_last_bytes = bytes
 			if diagnostic_label.visible:
 				var timing: String = " · sim %.2f ms · encode %.2f ms" % [float(session.get("diagnostic_sim_ms")), float(session.get("diagnostic_encode_ms"))] if authority else ""
+				var net: Dictionary = session.call("network_diagnostics")
+				if not net.is_empty():
+					timing += " · %.0f ms RTT · %.1f%% reliable loss" % [float(net["ping"]), float(net["loss"])]
+				if not authority:
+					var now: int = Time.get_ticks_msec()
+					var last_full: int = int(session.get("diagnostic_last_full_ms"))
+					var last_motion: int = int(session.get("diagnostic_last_motion_ms"))
+					var full_count: int = int(session.get("diagnostic_full_received"))
+					var motion_count: int = int(session.get("diagnostic_motion_received"))
+					timing += " · decode %.2f ms · state %.1f Hz / %s · motion %.1f Hz / %s" % [float(session.get("diagnostic_decode_ms")), float(maxi(0, full_count - diagnostic_last_full_count)) / diagnostic_elapsed, "%d ms" % (now - last_full) if last_full >= 0 else "—", float(maxi(0, motion_count - diagnostic_last_motion_count)) / diagnostic_elapsed, "%d ms" % (now - last_motion) if last_motion >= 0 else "—"]
+					diagnostic_last_full_count = full_count
+					diagnostic_last_motion_count = motion_count
 				var phases: Dictionary = session.get("diagnostic_sim_phases") if authority else {}
 				var ranked: Array = phases.keys()
 				ranked.sort_custom(func(a: String, b: String) -> bool: return int(phases[a]) > int(phases[b]))
@@ -4709,8 +4731,9 @@ func _process(delta: float) -> void:
 			border.queue_redraw()
 	game_visual_clock += delta * float(_state().get("time_speed", 1))
 	for visual in ship_visuals.values():
-		if float(visual["age"]) < SNAPSHOT_SECONDS:
-			visual["age"] = minf(SNAPSHOT_SECONDS, float(visual["age"]) + delta)
+		var duration: float = float(visual.get("duration", SNAPSHOT_SECONDS))
+		if float(visual["age"]) < duration:
+			visual["age"] = minf(duration, float(visual["age"]) + delta)
 	var state: Dictionary = _state()
 	if not state.is_empty():
 		_update_planet_detail(state, delta)
@@ -5028,7 +5051,7 @@ func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 		var id: int = int(ship["id"])
 		var visual: Dictionary = ship_visuals.get(id, {})
 		var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
-		var direction: Vector2 = ship.get("heading", Vector2.UP)
+		var direction: Vector2 = visual.get("heading", ship.get("heading", Vector2.UP))
 		var prior: Dictionary = ship_offsets.get(id, {"angle": direction.angle()})
 		var weight: float = 1.0 - exp(-delta / SNAPSHOT_SECONDS * 3.0)
 		var angle: float = lerp_angle(float(prior["angle"]), direction.angle(), weight)
