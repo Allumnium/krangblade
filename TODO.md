@@ -23,6 +23,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ### Existing RTS implementation and validation backlog
 
+- [ ] v0.62.3: Playtest shipyard rows before/during/after upgrades, mixed-level selections, hotkeys and locked class visibility on host/guest.
+
 - [ ] v0.62.2: Verify highway influence section boundaries, exact cap, independent color transfer, direct travel across seams and minimap/peer parity. Include section geometry in scalability phase 5.
 
 - [ ] v0.62.0: Validate influence membership and mixed colors, highway traversal/intersections, infrastructure destruction, minimap, fog visibility, rendering cost and peer parity.

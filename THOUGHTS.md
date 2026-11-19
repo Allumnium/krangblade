@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.62.3: Fixed four-row shipyard deck uses blank slots for locked classes; mixed-level selections retain applicable upgrade buttons after unlocked ships. Check hotkeys and refresh on upgrade completion.
+
 - v0.62.2: Long highways split into equal influence sections using center-to-center length (conservative cap; exposed sections can be shorter near sector cores). The cached layout leaves navigation untouched; verify seams and fog filtering visually.
 
 - v0.62.0: Raw influence is normalized above 50; opposing player colors may blend toward gray even at full intensity. Check contested readability and performance on large fleets. Derived from snapshots; static geometry textures remain cached.

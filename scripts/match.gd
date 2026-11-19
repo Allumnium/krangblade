@@ -338,6 +338,10 @@ var yard_command_scroll: VBoxContainer
 var yard_command_card: VBoxContainer
 var yard_command_grid: GridContainer
 var yard_commands: Dictionary = {}
+var yard_top_slots: Array[Control] = []
+var yard_bottom_slots: Array[Control] = []
+var yard_row_spacers: Array[Control] = []
+var yard_layout_key := Vector3i(-1, -1, -1)
 var production_icons: Dictionary = {}
 var hull_textures: Dictionary = {}
 var yard_queue: HFlowContainer
@@ -1685,22 +1689,22 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		grid.add_child(button)
 		yard_commands[kind] = button
 		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S, "science_ship": KEY_V, "scout": KEY_Q, "cruiser": KEY_E, "destroyer": KEY_F}[kind], "Shipyard", "yard_" + kind, _ship_kind_name(kind))
-	# Rows 1–3: Small, Medium and Large. Upgrade occupies the first
-	# cell of the class it unlocks; navigation stays in row four.
+	# Rows 1–3: Small, Medium and Large. A locked class shows only
+	# its next eligible upgrade; unlocked ships begin in column one.
 	for target_level in [2, 3]:
 		var upgrade: Button = _button("", _upgrade_selected_yards.bind(target_level), grid, true)
 		var class_name_text: String = ECONOMY.size_name(target_level)
 		_yard_ability_face(upgrade, "Upgrade\n" + class_name_text, _station_command_icon("upgrade"))
 		yard_upgrades[target_level] = upgrade
 		_register_command_hotkey(upgrade, KEY_U if target_level == 2 else KEY_I, "Shipyard", "yard_upgrade" if target_level == 2 else "yard_upgrade_large", "Upgrade to " + class_name_text)
-	var ordered_slots: Array = [yard_commands["miner"], yard_commands["fighter"], yard_commands["scout"], _station_spacer(grid), yard_upgrades[2], yard_commands["ship"], yard_commands["colony_ship"], yard_commands["cruiser"], yard_upgrades[3], yard_commands["science_ship"], yard_commands["destroyer"], _station_spacer(grid)]
-	for slot in range(ordered_slots.size()):
-		grid.move_child(ordered_slots[slot], slot)
+	yard_top_slots.assign([yard_commands["miner"], yard_commands["fighter"], yard_commands["scout"], _station_spacer(grid)])
+	for i in range(8):
+		yard_row_spacers.append(_station_spacer(grid))
 	var station_button := _button("", _select_yard_station, grid)
 	_yard_ability_face(station_button, "Select Space\nStation", _station_command_icon("select_station"))
 	_set_button_hint(station_button, "Select parent Space Station")
 	_register_command_hotkey(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
-	_station_spacer(grid)
+	var navigation_spacer: Control = _station_spacer(grid)
 	var clear := _button("", func() -> void:
 		pending_command = ""
 		_refresh_command_mode()
@@ -1718,8 +1722,41 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
 	_register_command_hotkey(rally_button, KEY_Y, "Shipyard", "yard_rally", "Rally")
-	_fill_ability_grid(grid)
+	yard_bottom_slots.assign([station_button, navigation_spacer, clear, rally_button])
+	_layout_yard_classes(1, true, false)
 	yard_command_scroll.hide()
+
+func _layout_yard_classes(level: int, show_medium_upgrade: bool, show_large_upgrade: bool) -> void:
+	var key := Vector3i(level, int(show_medium_upgrade), int(show_large_upgrade))
+	if key == yard_layout_key:
+		return
+	yard_layout_key = key
+	var ordered: Array[Control] = []
+	ordered.append_array(yard_top_slots)
+	var spacer_index: int = 0
+	for target_level in [2, 3]:
+		var kinds: Array = ["ship", "colony_ship", "cruiser"] if target_level == 2 else ["science_ship", "destroyer"]
+		var row: Array[Control] = []
+		for kind in kinds:
+			var button: Button = yard_commands[kind]
+			button.visible = level >= target_level
+			if button.visible:
+				row.append(button)
+		var upgrade: Button = yard_upgrades[target_level]
+		upgrade.visible = show_medium_upgrade if target_level == 2 else show_large_upgrade
+		if upgrade.visible:
+			row.append(upgrade)
+		while row.size() < 4:
+			yard_row_spacers[spacer_index].show()
+			row.append(yard_row_spacers[spacer_index])
+			spacer_index += 1
+		ordered.append_array(row)
+	for i in range(spacer_index, yard_row_spacers.size()):
+		yard_row_spacers[i].hide()
+	ordered.append_array(yard_bottom_slots)
+	for i in range(ordered.size()):
+		if ordered[i].get_index() != i:
+			yard_command_grid.move_child(ordered[i], i)
 
 func _select_yard_station() -> void:
 	# For grouped yards, select the primary yard's parent station.
@@ -3906,6 +3943,9 @@ func _refresh() -> void:
 		_refresh_yard_overview(p, own_system and phase == "match")
 		if grouped_buildings:
 			_refresh_group_yard_commands(state)
+		else:
+			var yard_level: int = int(p["yards"][selected_yard]["level"])
+			_layout_yard_classes(yard_level, yard_level == 1, yard_level == 2)
 		return
 	if body_selected:
 		if not grouped_buildings:
@@ -5088,6 +5128,18 @@ func _select_building_tile(ref: Vector2i, kind: String) -> void:
 
 func _refresh_group_yard_commands(state: Dictionary) -> void:
 	var refs: Array[Vector2i] = _selected_yards(state, true)
+	# Mixed owned selections expose unlocked ships plus any remaining
+	# upgrades; ship buttons always precede the upgrade in their row.
+	var display_refs: Array[Vector2i] = refs if not refs.is_empty() else _selected_yards(state)
+	var max_level: int = 1
+	var show_medium: bool = false
+	var show_large: bool = false
+	for ref in display_refs:
+		var level: int = int(state["planets"][ref.x]["yards"][ref.y]["level"])
+		max_level = maxi(max_level, level)
+		show_medium = show_medium or level == 1
+		show_large = show_large or level == 2
+	_layout_yard_classes(max_level, show_medium, show_large)
 	var available: Dictionary = {}
 	for ref in refs:
 		var local: Dictionary = _available_cost_resources(state["planets"][ref.x], ref.y)
