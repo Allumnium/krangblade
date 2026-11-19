@@ -4,6 +4,11 @@ static var cached_civilian_routes: Dictionary = {}
 static var cached_route_topology: Dictionary = {}
 static var cached_military_graph: Dictionary = {}
 static var cached_military_map: Dictionary = {}
+# Ephemeral authoritative snapshot, active only during a movement substep.
+static var avoidance_cells: Dictionary = {}
+const AVOIDANCE_LOOKAHEAD: float = 96.0
+const AVOIDANCE_CELL: float = 128.0
+const AVOIDANCE_BUCKET_LIMIT: int = 24
 const MAP = preload("res://scripts/planet_map.gd")
 const RESOURCES = ["Metals", "Organics", "Crystals"]
 const EXTRACTED = ["Metals", "Crystals"]
@@ -65,7 +70,7 @@ const SALVAGE_APPROACH_RANGE: float = TRACTOR_RANGE * 2.0
 # The pair of mining lasers deals one combined volley per year. One point
 # of damage to a resource chunk removes one ton, subject to field limits.
 const MINER_LASER_DAMAGE: float = 2.0
-const MINER_ASTEROID_MULTIPLIER: float = 3.0
+const MINER_ASTEROID_MULTIPLIER: float = 1.5
 const MINER_REPAIR_RATE: float = 5.0
 const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
 const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
@@ -1650,12 +1655,65 @@ static func _ensure_position(points: Array, ship: Dictionary) -> void:
 		ship["heading"] = Vector2.UP
 		ship["navigation_target"] = ship["position"]
 
+# Build once from the common pre-movement positions, not once per hull.
+static func _begin_ship_avoidance(positions: Dictionary) -> void:
+	avoidance_cells.clear()
+	for id in positions:
+		var point: Vector2 = positions[id]
+		var cell := Vector2i(floori(point.x / AVOIDANCE_CELL), floori(point.y / AVOIDANCE_CELL))
+		if not avoidance_cells.has(cell):
+			avoidance_cells[cell] = []
+		# Bound worst-case work in dense swarms; contact correction remains soft.
+		if avoidance_cells[cell].size() < AVOIDANCE_BUCKET_LIMIT:
+			avoidance_cells[cell].append([id, point])
+
+static func _avoidance_direction(ship: Dictionary, target: Vector2, budget: float) -> Vector2:
+	var before: Vector2 = ship["position"]
+	var distance: float = before.distance_to(target)
+	var axis: Vector2 = before.direction_to(target)
+	if avoidance_cells.is_empty() or budget <= EPS or distance <= SHIP_CLEARANCE * 0.5 or bool(ship.get("holding", false)):
+		return axis
+	var lookahead: float = minf(distance, AVOIDANCE_LOOKAHEAD)
+	var cell := Vector2i(floori(before.x / AVOIDANCE_CELL), floori(before.y / AVOIDANCE_CELL))
+	var nearest: float = INF
+	var blocker: Vector2 = Vector2.ZERO
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			for entry in avoidance_cells.get(cell + Vector2i(x, y), []):
+				if int(entry[0]) == int(ship["id"]):
+					continue
+				var other: Vector2 = entry[1]
+				# Shared endpoints must remain reachable: leave final precision
+				# docking, extraction, formation and hold to their existing rules.
+				if other.distance_squared_to(target) <= SHIP_CLEARANCE * SHIP_CLEARANCE:
+					continue
+				var offset: Vector2 = other - before
+				var forward: float = offset.dot(axis)
+				if forward <= EPS or forward > lookahead or absf(axis.cross(offset)) >= SHIP_CLEARANCE:
+					continue
+				if forward < nearest:
+					nearest = forward
+					blocker = offset
+	if nearest == INF:
+		return axis
+	# Steer toward a tangent on the open side. A centered head-on contact
+	# always passes on the ship's own right; no symmetric stop or hard wall.
+	var lateral: float = axis.cross(blocker)
+	var side: float = -1.0 if lateral > 1.0 else 1.0
+	var tangent: float = asin(clampf(SHIP_CLEARANCE / maxf(SHIP_CLEARANCE, blocker.length()), 0.0, 1.0))
+	var turn: float = axis.angle_to(blocker) + side * (tangent + 0.12)
+	return axis.rotated(clampf(turn, -PI * 0.42, PI * 0.42))
+
 # The only movement integrator. Orders change targets, never current position.
 # Return the distance actually flown so a tick cannot exceed its travel budget.
 static func _navigate(ship: Dictionary, target: Vector2, budget: float) -> float:
 	ship["navigation_target"] = target
 	var before: Vector2 = ship["position"]
+	var direct: Vector2 = before.direction_to(target)
+	var steering: Vector2 = _avoidance_direction(ship, target, budget)
 	var after: Vector2 = before.move_toward(target, maxf(0.0, budget))
+	if not steering.is_equal_approx(direct):
+		after = before + steering * minf(maxf(0.0, budget), before.distance_to(target))
 	var displacement: Vector2 = after - before
 	if not displacement.is_zero_approx():
 		ship["heading"] = displacement.normalized()
@@ -2029,10 +2087,10 @@ static func _dropoff_budget(ship: Dictionary, dt: float) -> float:
 
 static func dropoff_rate(kind: String) -> float:
 	match kind:
-		"miner": return MINER_RATE * 2.0
-		"ship": return FREIGHTER_TRACTOR_RATE * 2.0
-		"colony_ship": return COLONY_FARM_RATE * 2.0
-	return TRACTOR_RATE * 2.0
+		"miner": return 120.0 # Independent of extraction balance.
+		"ship": return FREIGHTER_TRACTOR_RATE * 20.0
+		"colony_ship": return COLONY_FARM_RATE * 20.0
+	return TRACTOR_RATE * 20.0
 
 static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictionary, receivers: Array, threats: Dictionary, dt: float) -> float:
 	if miner.get("kind", "") != "miner" or _cargo_total(miner) <= EPS or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("cargo_order") or miner.has("repair_order"):
@@ -6221,6 +6279,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var combat_positions: Dictionary = {}
 	for craft in state["ships"]:
 		combat_positions[int(craft["id"])] = craft["position"]
+	_begin_ship_avoidance(combat_positions)
 	var idle_targets: Dictionary = _idle_formation_targets(state, combat_graph)
 	var coordinated: Dictionary = _coordinate_formations(state, combat_graph, dt)
 	var service_refs: Dictionary = service_targets(state)
@@ -6344,6 +6403,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			ship.erase("arrival_wait_until")
 		if ship.has("wander_cooldown_override") and autocast_remaining(state, ship) <= EPS and not _unit_order_running(ship):
 			ship.erase("wander_cooldown_override")
+	avoidance_cells.clear()
 	_separate_ships(state, combat_graph, combat_positions, dt)
 	if dt > 0.0:
 		_resolve_ship_contacts(state, combat_graph, combat_positions, dt)
