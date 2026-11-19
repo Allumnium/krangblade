@@ -2,6 +2,7 @@ extends Control
 ## Planet map and inspector. Host/solo session owns all simulation mutations.
 const MAP = preload("res://scripts/planet_map.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
+const CODEX = preload("res://scripts/codex.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const PLANET = preload("res://assets/ui/planet.svg")
 const UPGRADE_SOUND = preload("res://assets/sfx/detail.wav")
@@ -306,6 +307,7 @@ var production_values: Dictionary = {}
 var system_owner_label: Label
 var leave: Button
 var match_menu: AcceptDialog
+var codex: AcceptDialog
 var match_result_dialog: AcceptDialog
 var match_result_shown: bool = false
 var defeated_shown: bool = false
@@ -468,7 +470,17 @@ func _build_ui() -> void:
 	year_label = _global_stat(row, "%d A.D." % ECONOMY.START_YEAR, HUD.ACCENT)
 	_build_global_bar(row)
 	global_population_label = _global_stat(row, "0", Color("#b9d9ed"), true)
+	var help := _button("", _open_codex, row)
+	help.icon = _command_icon('<circle cx="16" cy="16" r="13"/><path d="M11 12Q11 6 17 7Q23 8 21 13Q20 15 17 17V20M17 25H17.1"/>', 24)
+	help.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help.expand_icon = true
+	help.add_theme_constant_override("icon_max_width", 24)
+	help.custom_minimum_size.x = 36
+	help.tooltip_text = "Warbound Codex"
+	help.focus_mode = Control.FOCUS_NONE
 	leave = _button("MENU", _open_menu, row)
+	codex = CODEX.new()
+	add_child(codex)
 	match_menu = AcceptDialog.new()
 	match_menu.title = "Menu"
 	match_menu.theme = theme
@@ -927,7 +939,7 @@ func _minimap_point(point: Vector2, area: Rect2) -> Vector2:
 	return area.position + point / _map_size().max(Vector2.ONE) * area.size
 
 func _minimap_input(event: InputEvent) -> void:
-	if match_menu.visible:
+	if match_menu.visible or (is_instance_valid(codex) and codex.visible):
 		return
 	var move_camera: bool = false
 	if event is InputEventMouseButton:
@@ -2840,6 +2852,9 @@ func _local_breakdown(p: Dictionary, resource: String) -> String:
 func _update_resource_hover() -> void:
 	if not is_instance_valid(resource_hover_panel):
 		return
+	if is_instance_valid(codex) and codex.visible:
+		resource_hover_panel.hide()
+		return
 	var mouse: Vector2 = get_global_mouse_position()
 	var resource: String = ""
 	for key in global_resource_tiles:
@@ -3331,6 +3346,8 @@ func _refresh_match_result(state: Dictionary) -> void:
 	var result: Dictionary = state.get("match_result", {})
 	if not result.is_empty() and not match_result_shown:
 		match_result_shown = true
+		if is_instance_valid(codex):
+			codex.hide()
 		var team: int = int(result["team"])
 		var mine: int = int(state.get("teams", {}).get(_me(), 0))
 		match_result_dialog.title = "Draw" if team == 0 else ("Victory" if mine == team else "Defeat")
@@ -3339,10 +3356,23 @@ func _refresh_match_result(state: Dictionary) -> void:
 		match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
 	elif result.is_empty() and state.get("eliminated", []).has(_me()) and not defeated_shown:
 		defeated_shown = true
+		if is_instance_valid(codex):
+			codex.hide()
 		match_result_dialog.title = "Empire defeated"
 		match_result_dialog.dialog_text = "Your empire has no remaining colony or colony ship."
 		match_result_dialog.ok_button_text = "Observe match"
 		match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
+
+func _open_codex() -> void:
+	if match_menu.visible or codex.visible:
+		return
+	drag_button = 0
+	formation_button = 0
+	selecting_units = false
+	pending_command = ""
+	_refresh_command_mode()
+	resource_hover_panel.hide()
+	codex.popup_centered_ratio(0.88)
 
 func _open_menu() -> void:
 	drag_button = 0
@@ -4409,7 +4439,7 @@ func _finish_formation(point: Vector2) -> void:
 		_refresh_command_mode()
 
 func _map_input(event: InputEvent) -> void:
-	if match_menu.visible:
+	if match_menu.visible or (is_instance_valid(codex) and codex.visible):
 		return
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
@@ -4571,6 +4601,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_instance_valid(match_menu) or str(session.get("phase")) != "match":
 		return
 	var key: int = event.physical_keycode
+	if is_instance_valid(codex) and codex.visible:
+		if key == KEY_ESCAPE:
+			codex.hide()
+			get_viewport().set_input_as_handled()
+		return
 	if key == KEY_ESCAPE:
 		formation_button = 0
 		pending_command = ""
@@ -4581,7 +4616,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_open_menu()
 		get_viewport().set_input_as_handled()
 		return
-	if match_menu.visible:
+	if match_menu.visible or (is_instance_valid(codex) and codex.visible):
 		return
 	var focus: Control = get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit or colony_picker.get_popup().visible:
@@ -4661,7 +4696,7 @@ func _cycle_owned_system(direction: int) -> void:
 	_refresh()
 
 func _keyboard_pan(delta: float) -> void:
-	if str(session.get("phase")) != "match" or match_menu.visible:
+	if str(session.get("phase")) != "match" or match_menu.visible or (is_instance_valid(codex) and codex.visible):
 		return
 	if not get_window().has_focus():
 		return

@@ -2,6 +2,10 @@
 
 Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three intended playable races. Only Empire is implemented. ENet multiplayer uses UDP 24567 (LAN/Tailscale); no Steam dependency.
 
+## In-game reference
+
+Open the question-mark button beside Menu to browse the searchable Warbound Codex, including population and food graphs, resource logistics, construction, combat, expansion and controls. All figures are illustrative or derived from current game constants; the guide does not pause the simulation.
+
 ## Current economy — v0.45.3
 
 Base population doubling time is 60 simulation years, including orbital recovery. Terrestrial positive growth is multiplied by clamp(local Organics stock / 200 t, 0, 1), independent of warehouse level or trade thresholds, in addition to existing habitation, food availability and damped capacity constraints. Orbital habitats remain self-sufficient and exempt from the stock modifier. Show food growth penalty on population hover; preserve existing crew and construction costs.
