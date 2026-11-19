@@ -291,7 +291,7 @@ func _resources() -> void:
 	_body("The empire uses three ordinary resources. Material prices are paid from local stock, not a shared global wallet.")
 	_resource_card("Metals", "Primary construction material. Extracted from planets and asteroid fields; used in ships, buildings and upgrades.")
 	_resource_card("Organics", "Food for residents and supplies for basic ships. Farming and imports improve local population growth.")
-	_resource_card("Crystals", "Advanced construction material. Mine crystal-rich rocks or invest in local Crystal Incubators. Used in additional shipyards, planetary defense and Laser Matrix.")
+	_resource_card("Crystals", "Advanced construction material. Mine crystal-rich rocks or invest in local Incubators. Used in additional shipyards, PDS and Laser Matrix.")
 	_section("Starting stock per home system")
 	var rows: Array = []
 	for r in E.RESOURCES:
@@ -419,7 +419,7 @@ func _ships() -> void:
 		rows.append([names[kind], E.size_name(E.ship_size(kind)), _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(E.ship_size(kind)))])
 	_table(["Ship", "Class", "Materials", "Crew", "Time (min. yard)"], rows)
 	_section("Shipyard upgrades")
-	_body("Upgrade to Medium (U) or Large (I) in the corresponding ship-class row. Higher shipyard levels increase construction speed and staffing requirements. Active station and yard jobs show an icon and progress in the station hub. Select Space Station returns to the parent station. Clear Rally / Rally occupy the bottom-right slots. Rally points direct completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")
+	_body("Upgrade cards show current levels at top left; tooltips show the target level. Upgrade to Medium (U) or Large (I) in the corresponding ship-class row. Higher shipyard levels increase construction speed and staffing requirements. Active station and yard jobs show an icon and progress in the station hub. Select Space Station returns to the parent station. Clear Rally / Rally occupy the bottom-right slots. Rally points direct completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")
 	rows = []
 	for i in range(1, E.MAX_SHIPYARD_LEVEL + 1):
 		rows.append([str(i), "%.0f×" % (E.yard_speed(i) / E.yard_speed(1)), "%.0f" % float(E.SHIPYARD_POPULATION[i - 1])])

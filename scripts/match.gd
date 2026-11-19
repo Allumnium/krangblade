@@ -40,6 +40,10 @@ class CostButton extends Button:
 	var recipe: Dictionary = {}
 	var missing: Array[String] = []
 	var crew_icon: Texture2D
+	var fast_tooltip: bool = false
+
+	func _get_tooltip(_at_position: Vector2) -> String:
+		return "" if fast_tooltip else tooltip_text
 
 	func _make_custom_tooltip(for_text: String) -> Object:
 		if recipe.is_empty():
@@ -461,7 +465,7 @@ func _label(value: String, font_size: int = 14) -> Label:
 	return label
 
 func _button(text: String, action: Callable, parent: Container, with_recipe: bool = false) -> Button:
-	var b: Button = CostButton.new() if with_recipe else Button.new()
+	var b: Button = CostButton.new()
 	b.text = text
 	b.pressed.connect(action)
 	b.custom_minimum_size.y = 23 if is_instance_valid(console_panel) and console_panel.is_ancestor_of(parent) else 32
@@ -1440,7 +1444,78 @@ func _trigger_command_hotkey(key: int) -> bool:
 			return true
 	return false
 
+func _enable_fast_command_tooltip(button: Button) -> void:
+	if not button is CostButton:
+		return
+	(button as CostButton).fast_tooltip = true
+	var timer := Timer.new()
+	timer.one_shot = true
+	timer.wait_time = float(ProjectSettings.get_setting("gui/timers/tooltip_delay", 0.5)) * 0.5
+	button.add_child(timer)
+	var popup := PanelContainer.new()
+	popup.top_level = true
+	popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	popup.z_index = 100
+	popup.theme = HUD.compact()
+	popup.add_theme_stylebox_override("panel", HUD.surface(Color("#101b29"), Color("#6385a4"), 8, 3))
+	button.add_child(popup)
+	popup.hide()
+	button.mouse_entered.connect(func() -> void: timer.start())
+	button.mouse_exited.connect(func() -> void:
+		timer.stop()
+		popup.hide())
+	button.visibility_changed.connect(func() -> void:
+		timer.stop()
+		popup.hide())
+	button.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed:
+			timer.stop()
+			popup.hide())
+	timer.timeout.connect(func() -> void:
+		if not button.is_visible_in_tree() or not button.get_global_rect().has_point(button.get_global_mouse_position()) or button.tooltip_text.is_empty():
+			return
+		for child in popup.get_children():
+			popup.remove_child(child)
+			child.queue_free()
+		var content: Control = (button as CostButton)._make_custom_tooltip(button.tooltip_text) as Control
+		if content == null:
+			var label := Label.new()
+			label.text = button.tooltip_text
+			content = label
+		popup.add_child(content)
+		popup.reset_size()
+		var bounds: Vector2 = button.get_viewport_rect().size
+		var extent: Vector2 = popup.get_combined_minimum_size()
+		var cursor: Vector2 = button.get_global_mouse_position()
+		popup.global_position = Vector2(clampf(cursor.x + 14.0, 0.0, maxf(0.0, bounds.x - extent.x)), clampf(cursor.y - extent.y - 12.0, 0.0, maxf(0.0, bounds.y - extent.y)))
+		popup.show())
+
+func _roman_level(level: int) -> String:
+	if level <= 0:
+		return "0"
+	var result: String = ""
+	for pair in [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]]:
+		while level >= int(pair[0]):
+			result += str(pair[1])
+			level -= int(pair[0])
+	return result
+
+func _upgrade_level_badge(button: Button, level: int) -> void:
+	var label: Label = button.get_meta("level_badge", null)
+	if label == null:
+		label = Label.new()
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.add_theme_font_size_override("font_size", 10)
+		label.add_theme_color_override("font_color", Color("#e3f3ff"))
+		label.add_theme_color_override("font_outline_color", Color("#101b29"))
+		label.add_theme_constant_override("outline_size", 3)
+		button.add_child(label)
+		label.position = Vector2(3, 1)
+		button.set_meta("level_badge", label)
+	label.text = _roman_level(level)
+
 func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> TextureRect:
+	_enable_fast_command_tooltip(button)
 	button.custom_minimum_size = Vector2(60, 60)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.focus_mode = Control.FOCUS_NONE
@@ -1524,7 +1599,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	clear.tooltip_text = "Clear rally point"
 	yard_commands["clear"] = clear
 	_register_command_hotkey(clear, KEY_X, "Shipyard", "yard_clear", "Clear Rally")
-	var rally_button := Button.new()
+	var rally_button := CostButton.new()
 	_yard_ability_face(rally_button, "Rally", _station_command_icon("rally"))
 	rally_button.toggle_mode = true
 	rally_button.tooltip_text = "Set Rally Point"
@@ -1634,7 +1709,7 @@ func _build_station_command_card(parent: Container) -> void:
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
 	station_build_grid = _ability_grid(station_commands)
-	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "Planetary\ndefense"}
+	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "PDS"}
 	for resource in ECONOMY.RESOURCES:
 		captions[resource] = str(ECONOMY.ECONOMY_BUILDINGS[resource]["name"]).replace(" ", "\n")
 	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds"]:
@@ -1720,9 +1795,10 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 	for kind in station_upgrade_buttons:
 		var button: Button = station_upgrade_buttons[kind]
 		var installed: bool = bool(p["station"].get(kind, false))
+		_upgrade_level_badge(button, 1 if installed else 0)
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not ECONOMY.station_upgrade_available(p, kind)
-		var hint: String = "Reinforced Plating · %.0f s (1×)\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix · %.0f s (1×)\n+2 defensive lasers (4 total) · 18 damage each · 1 shot/s (1×) · range 180"
+		var hint: String = "Reinforced Plating I · %.0f s (1×)\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s (1×)\n+2 defensive lasers (4 total) · 18 damage each · 1 shot/s (1×) · range 180"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
 			button.tooltip_text += "\n" + ("Installed" if installed else "Building")
@@ -1756,7 +1832,9 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		var work: float = 30.0
 		var eligible: bool = true
 		var available: bool = false
+		var current_level: int = 0
 		if key in ECONOMY.RESOURCES:
+			current_level = int(p.get("buildings", {}).get(key, 0))
 			name_text = str(ECONOMY.ECONOMY_BUILDINGS[key]["name"])
 			recipe = ECONOMY.building_cost(p, key)
 			eligible = ECONOMY.production_available(p, key)
@@ -1764,7 +1842,8 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			description = "%s installed · Requires %s population\n%s" % [int(p.get("buildings", {}).get(key, 0)), _compact_amount(float(ECONOMY.ECONOMY_BUILDINGS[key]["population"])), _economy_building_effect(p, key)]
 		elif key == "warehouse":
 			var level: int = int(p.get("warehouse_level", 0))
-			name_text = "Warehouse logistics · Lv %d" % level
+			current_level = level
+			name_text = "Warehouse"
 			eligible = level < 3
 			available = ECONOMY.warehouse_available(p)
 			work = ECONOMY._work("warehouse", level + 1)
@@ -1780,13 +1859,15 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			if kind == "habitation":
 				var level: int = int(p.get("habitation_level", 0))
 				work = ECONOMY._work(kind, level + 1)
-				name_text = "Habitation technology · Lv %d" % level
+				current_level = level
+				name_text = "Habitation"
 				eligible = level < 3
 				available = ECONOMY.habitation_available(p)
 				recipe = ECONOMY.habitation_cost(p) if eligible else {}
 				description = "Habitation capacity: %s → %s" % [_compact_amount(ECONOMY.habitation_capacity(p)), _compact_amount(ECONOMY.habitation_capacity(p) * (2.0 if eligible else 1.0))]
 			else:
 				work = ECONOMY._work(kind, 1)
+				current_level = int(p.get("orbital_housing", 0))
 				name_text = "Orbital Eco-Housing"
 				recipe = ECONOMY.ORBITAL_HOUSING_COST
 				available = ECONOMY.orbital_housing_available(p)
@@ -1801,12 +1882,15 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			available = eligible
 			description = "%d / %d completed or queued" % [ECONOMY.shipyard_count(p), ECONOMY.MAX_SHIPYARDS]
 		elif key == "pds":
-			name_text = "Planetary defense"
+			name_text = "PDS"
+			current_level = p.get("pds", {}).size()
 			eligible = ECONOMY.next_pds(p) >= 0
 			available = eligible and ECONOMY.pds_job(p).is_empty()
 			recipe = ECONOMY._cost("pds", 1)
 			work = ECONOMY._work("pds", 1)
 			description = "%d / %d defended · %.0f HP · %.0f damage · Range %.0f" % [p.get("pds", {}).size(), int(p["planet_count"]), ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
+		_upgrade_level_badge(button, current_level)
+		name_text += " " + _roman_level(current_level + (1 if eligible else 0))
 		var repeat_key: String = _station_repeat_key(p, key)
 		var auto: bool = not repeat_key.is_empty() and bool(p.get("continuous", {}).get(repeat_key, false))
 		available = owned and available and ECONOMY.affordable(p, recipe)
@@ -2179,7 +2263,8 @@ func _command_icon(path: String, pixels: int = 32) -> Texture2D:
 	return ImageTexture.create_from_image(image)
 
 func _command_slot(id: String, hint: String, action: Callable) -> Button:
-	var button := Button.new()
+	var button := CostButton.new()
+	_enable_fast_command_tooltip(button)
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 32)
 	button.focus_mode = Control.FOCUS_NONE
@@ -3719,7 +3804,7 @@ func _job_name(item: Dictionary) -> String:
 		"warehouse": return "Warehouse logistics → Lv %d" % int(item["level"])
 		"habitation": return "Habitation technology → Lv %d" % int(item["level"])
 		"orbital_housing": return "Orbital Eco-Housing"
-		"pds": return "Planetary defense"
+		"pds": return "PDS"
 		"yard": return "Build Shipyard %d" % int(item.get("station_slot", item["level"]))
 		"yard_upgrade": return "Shipyard %d → Lv %d" % [ECONOMY.shipyard_port(_planet(), int(item["target"])), int(item["level"])]
 		"reinforced_plating": return "Reinforced Plating"
