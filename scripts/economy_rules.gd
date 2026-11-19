@@ -1429,6 +1429,7 @@ static func _work_launch_rally(state: Dictionary, ship: Dictionary, dt: float) -
 		ship.erase("holding")
 		ship.erase("hold_position")
 		ship.erase("hold_sector")
+		ship.erase("hold_heading")
 		ship["at"] = int(rally["node"])
 		ship["leg"] = 0.0
 		ship["dest"] = int(rally["node"]) if fighter else -1
@@ -3725,6 +3726,22 @@ static func _owned_fighters(state: Dictionary, player: int, ids: Array) -> Array
 		return []
 	return selected
 
+# Explicit Hold captures each hull's own pose, including in empty space.
+static func _capture_hold_pose(state: Dictionary, ship: Dictionary) -> void:
+	if not ship.has("position"):
+		return
+	var graph: Dictionary = military_graph(state)
+	var node: int = local_sector(graph, ship)
+	if node < 0:
+		node = int(ship["at"])
+	ship["hold_position"] = ship["position"]
+	ship["hold_heading"] = ship.get("heading", Vector2.UP)
+	ship["hold_sector"] = node
+	if not bool(ship.get("retreating", false)):
+		_interrupt_work(ship)
+		_finish_manual(ship)
+		ship["navigation_target"] = ship["position"]
+
 static func hold_fighters(state: Dictionary, player: int, ids: Array) -> bool:
 	var selected: Array = _owned_fighters(state, player, ids)
 	if selected.is_empty():
@@ -3741,8 +3758,7 @@ static func hold_fighters(state: Dictionary, player: int, ids: Array) -> bool:
 		ship["pursuit_left"] = 0.0
 		ship.erase("pursuit_blocked")
 		ship.erase("rally_pending")
-		if not bool(ship.get("retreating", false)) and ship.has("position"):
-			ship["navigation_target"] = ship["position"]
+		_capture_hold_pose(state, ship)
 	return true
 
 # A local point is legal only within the hull's current physical sector.
@@ -4182,6 +4198,7 @@ static func _clear_local_hold(ship: Dictionary) -> void:
 	ship["holding"] = false
 	ship.erase("hold_position")
 	ship.erase("hold_sector")
+	ship.erase("hold_heading")
 
 static func command_local_position(state: Dictionary, player: int, ids: Array, node: int, point: Vector2, move_only: bool = false) -> bool:
 	if not point.is_finite() or not military_pois(state, player).has(node):
@@ -4302,6 +4319,7 @@ static func command_hold_units(state: Dictionary, player: int, ids: Array, relea
 			_clear_tactical_order(ship)
 			_clear_local_hold(ship)
 			ship["holding"] = true
+			_capture_hold_pose(state, ship)
 	return true
 
 # A local move is a one-shot order, not a persistent hold. Keep the
@@ -4373,8 +4391,14 @@ static func _work_local_hold(graph: Dictionary, ship: Dictionary, dt: float) -> 
 		ship["navigation_target"] = ship["position"]
 		return
 	var node: int = int(ship["hold_sector"])
+	if (ship["position"] as Vector2).distance_to(ship["hold_position"]) <= EPS:
+		ship["navigation_target"] = ship["hold_position"]
+		if ship.has("hold_heading"):
+			ship["heading"] = ship["hold_heading"]
+		ship.erase("move_only")
+		return
 	# Repair may have taken a fighter to another sector. Return by lanes.
-	if ship.get("kind", "") in ["fighter", "cruiser", "destroyer"] and not sector_contains(graph, node, ship["position"]):
+	if ship.get("kind", "") in ["fighter", "cruiser", "destroyer"] and int(ship["at"]) != node and not sector_contains(graph, node, ship["position"]):
 		if int(ship.get("dest", -1)) != node:
 			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
 		if (ship["route"] as Array).is_empty():
@@ -4384,6 +4408,8 @@ static func _work_local_hold(graph: Dictionary, ship: Dictionary, dt: float) -> 
 		return
 	_navigate(ship, ship["hold_position"], ship_speed(str(ship.get("kind", "ship"))) * dt)
 	if (ship["position"] as Vector2).distance_to(ship["hold_position"]) <= EPS:
+		if ship.has("hold_heading"):
+			ship["heading"] = ship["hold_heading"]
 		ship.erase("move_only")
 
 static func _allocate_fighters(state: Dictionary, graph: Dictionary, player: int, fleet: Array, defer_routes: bool = false) -> void:
@@ -6420,6 +6446,8 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		var before: Vector2 = previous[id]
 		var planned: Vector2 = ship["position"]
 		var held: bool = bool(ship.get("holding", false))
+		if held and ship.has("hold_heading"):
+			continue
 		var local_moving: bool = ship.has("local_move_target")
 		# Follow owns its movement budget, including close-range backing off.
 		if ship.get("unit_order", {}).get("kind", "") == "follow":
@@ -6553,7 +6581,7 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 			break
 		for i in corrections:
 			var craft: Dictionary = ships[i]
-			if repair_parked.has(int(craft["id"])):
+			if repair_parked.has(int(craft["id"])) or (bool(craft.get("holding", false)) and craft.has("hold_heading") and not bool(craft.get("retreating", false))):
 				continue
 			var point: Vector2 = craft["position"]
 			var budget: float = ship_speed(str(craft.get("kind", "ship"))) * dt
@@ -6687,6 +6715,10 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			_work_withdrawal(state, combat_graph, ship, dt)
 			if float(ship["hp"]) > before_hp and ship["position"] == initial_position:
 				repair_parked[salvage_ship_id] = true
+			continue
+		if bool(ship.get("holding", false)) and ship.has("hold_heading"):
+			ship.erase("repair_target")
+			_work_local_hold(combat_graph, ship, dt)
 			continue
 		var follow: Dictionary = ship.get("unit_order", {})
 		var escort_far: bool = follow.get("kind", "") == "follow" and bool(follow.get("guard", false)) and (ship["position"] as Vector2).distance_to(service_refs.get(int(follow["target"]), {}).get("position", Vector2.INF)) > FOLLOW_DISTANCE * 2.0
