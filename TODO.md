@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.56.4: Verify yard upgrade icon and progress at each berth, concurrent station jobs and unchanged ship construction visuals.
+
 - [ ] v0.56.3: Inspect three new hulls, portraits, breakup, targeting and construction ghosts across zoom levels.
 
 - [ ] v0.56.2: Verify overlapping field/star and hull/star clicks at all zooms, unchanged orders and selected yard rally flags.
