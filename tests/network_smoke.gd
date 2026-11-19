@@ -278,6 +278,7 @@ func _phase_changed() -> void:
 						# supply a distinct completed launch to validate rally replication.
 						var rally_point: Vector2 = graph["points"][index] + Vector2.UP * ECON.sector_limit(graph, index, Vector2.UP) * 0.65
 						ECON.set_shipyard_rally(state, int(system["owner"]), index, 0, index, rally_point)
+						ECON._finish(state, index, system, {"id": 943000 + index, "kind": "fighter", "population_allocated": 0.0})
 						var launch_id: int = 950000 + index
 						system["yards"][0]["job"] = launch_id
 						ECON._finish(state, index, system, {"id": launch_id, "kind": "fighter", "population_allocated": 0.0})
@@ -514,6 +515,7 @@ func _send_commands() -> void:
 	session.call("request_shipyard_rally", home_index, 0, home_index, graph["points"][home_index])
 	session.call("request_shipyard_rally", (home_index + 1) % expected_players, 0, home_index, graph["points"][home_index])
 	session.call("request_autocast", [939000 + home_index], "farm", true)
+	session.call("request_unit_orders", [{"ids": [943000 + home_index], "order": {"kind": "guard", "target": home_index, "point": graph["points"][home_index]}}], false)
 	session.call("request_autocast", [942000 + home_index], "collect", true)
 	session.call("request_autocast", [942000 + (home_index + 1) % expected_players], "collect", false)
 	session.call("request_autocast", [939000 + home_index], "salvage", true)
@@ -714,6 +716,7 @@ func _check_economy_sync() -> void:
 			var dock_delivered: int = 0
 			var farm_verified: bool = false
 			var science_verified: bool = false
+			var guard_verified: bool = false
 			var repair_toggled: bool = false
 			var repaired: bool = false
 			var deposited: bool = false
@@ -722,6 +725,8 @@ func _check_economy_sync() -> void:
 					assigned_miners += 1
 				if int(craft["id"]) in [941000 + owner_home * 2, 941001 + owner_home * 2] and ECON._cargo_total(craft) <= ECON.EPS:
 					dock_delivered += 1
+				if int(craft["id"]) == 943000 + owner_home:
+					guard_verified = craft.get("unit_order", {}).get("kind", "") == "guard" and int(craft["unit_order"]["target"]) == owner_home
 				if int(craft["id"]) == 942000 + owner_home:
 					science_verified = ECON.autocast_enabled(craft, "collect") and bool(craft.get("holding", false)) and ECON._cargo_total(craft) <= ECON.EPS
 				if int(craft["id"]) == 939000 + owner_home:
@@ -753,6 +758,7 @@ func _check_economy_sync() -> void:
 				"crowded_dock_delivery": dock_delivered == 2,
 				"colony_farming": farm_verified,
 				"science_collect_toggle": science_verified,
+				"guard_order": guard_verified,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
 				"miner_repair_toggle": repair_toggled,
 				"miner_resource_handoff": resource_handoff and recipient_loaded,

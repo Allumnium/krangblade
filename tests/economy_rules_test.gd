@@ -3179,6 +3179,16 @@ func _test_crowded_dock_delivery() -> void:
 	var home: Dictionary = state["planets"][0]
 	var graph: Dictionary = ECON.military_graph(state)
 	var dock: Vector2 = ECON.station_position(state, 0, float(state["elapsed"]))
+	var a: Dictionary = {"id": 52101, "position": dock + Vector2.RIGHT * ECON.STATION_DOCK_RANGE * 0.9}
+	var b: Dictionary = {"id": 52102, "position": dock}
+	var berth: Vector2 = ECON._waiting_berth({"ships": [a, b]}, b, dock, ECON.STATION_DOCK_RANGE, Vector2.RIGHT)
+	assert(berth.distance_to(dock) < ECON.STATION_DOCK_RANGE and berth.distance_to(a["position"]) >= ECON.SHIP_CLEARANCE)
+	var guard: Dictionary = {"id": 52103, "kind": "fighter", "owner": 1, "at": 0, "dest": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
+	state["ships"].append(guard)
+	assert(not ECON.issue_unit_order(state, 2, [52103], {"kind": "guard", "target": 0, "point": Vector2.ZERO}, false))
+	assert(ECON.issue_unit_order(state, 1, [52103], {"kind": "guard", "target": 0, "point": Vector2.ZERO}, false))
+	assert(guard["unit_order"]["kind"] == "guard" and ECON._unit_order_running(guard))
+	state["ships"].erase(guard)
 	home["stock"]["Metals"] = ECON.storage_capacity(home) - 40.0
 	var ship: Dictionary = {"id": 521, "owner": 1, "kind": "ship", "at": 0, "origin": 0, "route": [], "leg": 0.0, "dest": -1, "source": -1, "position": dock + Vector2.RIGHT * ECON.SHIP_CLEARANCE, "heading": Vector2.UP, "cargo": ECON.empty_stock(), "hp": ECON.SHIP_HP}
 	state["ships"].append(ship)
@@ -3574,6 +3584,14 @@ func _test_antimatter_extraction() -> void:
 	assert(not craft.has("unit_order"))
 	assert(not ECON.issue_unit_order(state, 2, [901], {"kind": "collect", "target": 0}, false))
 	assert(ECON.issue_unit_order(state, 1, [901], {"kind": "collect", "target": 0}, false))
+	var traveler: Dictionary = craft.duplicate(true)
+	traveler["position"] = points[1]
+	traveler["at"] = 1
+	traveler["dest"] = 0
+	traveler["route"] = [0]
+	var before: Vector2 = traveler["position"]
+	ECON._manual_travel(state, graph, traveler, state["planets"].size(), deposit, 0.1, 10.0)
+	assert((before.direction_to(traveler["position"])).dot(before.direction_to(points[0])) > 0.999)
 	craft["position"] = deposit
 	assert(ECON._work_science(state, graph, craft, 29.0))
 	assert(ECON._cargo_total(craft) == 0.0)
