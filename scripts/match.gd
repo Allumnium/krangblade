@@ -6461,6 +6461,27 @@ func _order_color(ship: Dictionary, order: Dictionary) -> Color:
 		return Color("#55c88b")
 	return HUD.ACCENT
 
+# Use the authoritative remaining route, never reconstruct a straight-line path.
+func _draw_command_route(graph: Dictionary, ship: Dictionary, start: Vector2, finish: Vector2, tint: Color, dashed: bool = false) -> void:
+	var cursor: Vector2 = start
+	var points: Array = graph["points"]
+	var route: Array = ship.get("route", [])
+	for node in route:
+		if int(node) < 0 or int(node) >= points.size():
+			continue
+		var waypoint: Vector2 = _screen_point(points[int(node)])
+		if cursor.distance_to(waypoint) > 1.0:
+			if dashed:
+				map_canvas.draw_dashed_line(cursor, waypoint, Color(tint, 0.8), 1.5, 6.0, true, true)
+			else:
+				map_canvas.draw_line(cursor, waypoint, Color(tint, 0.8), 1.5, true)
+		cursor = waypoint
+	if cursor.distance_to(finish) > 1.0:
+		if dashed:
+			map_canvas.draw_dashed_line(cursor, finish, Color(tint, 0.8), 1.5, 6.0, true, true)
+		else:
+			map_canvas.draw_line(cursor, finish, Color(tint, 0.8), 1.5, true)
+
 func _draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, poses: Dictionary, refs: Dictionary) -> void:
 	var order: Dictionary = ship.get("unit_order", {})
 	var endpoint: Vector2 = Vector2.INF
@@ -6485,7 +6506,7 @@ func _draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dicti
 		endpoint = ECONOMY.unit_order_point(state, graph, ship, order)
 		if order.get("kind", "") in ["attack", "repair", "deposit"] and poses.has(target):
 			endpoint = Vector2.INF
-			map_canvas.draw_line(start, poses[target]["point"], Color(tint, 0.8), 1.5, true)
+			_draw_command_route(graph, ship, start, poses[target]["point"], tint)
 			return
 	if not endpoint.is_finite():
 		var depot: int = int(ship.get("salvage_depot", ship.get("dest", -1)))
@@ -6496,7 +6517,7 @@ func _draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dicti
 			endpoint = refs[repair].get("repair_position", refs[repair]["position"])
 			tint = Color("#55c88b")
 		elif poses.has(combat):
-			map_canvas.draw_line(start, poses[combat]["point"], Color("#ff605c", 0.8), 1.5, true)
+			_draw_command_route(graph, ship, start, poses[combat]["point"], Color("#ff605c"))
 			return
 		elif state.get("salvage", {}).has(salvage):
 			endpoint = state["salvage"][salvage]["position"]
@@ -6516,8 +6537,7 @@ func _draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dicti
 			endpoint = ship.get("navigation_target", Vector2.INF)
 	if endpoint.is_finite():
 		var finish: Vector2 = _screen_point(endpoint)
-		if start.distance_to(finish) > 1.0:
-			map_canvas.draw_line(start, finish, Color(tint, 0.8), 1.5, true)
+		_draw_command_route(graph, ship, start, finish, tint)
 
 func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, drawn_sectors: Dictionary) -> void:
 	var order: Dictionary = ship.get("unit_order", {})
@@ -6538,6 +6558,7 @@ func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary,
 			_draw_sector_target(graph, int(pending["target"]), tint, drawn_sectors)
 		elif pending["kind"] == "position":
 			_draw_destination_ghost(ship["kind"], finish, pending.get("heading", finish - start), tint)
+		map_canvas.draw_dashed_line(start, finish, Color(tint, 0.45), 1.0, 5.0, true, true)
 		start = finish
 
 func _transfer_anchor(state: Dictionary, poses: Dictionary, refs: Dictionary, id: int, resource: String, bay: int) -> Vector2:
@@ -6721,7 +6742,7 @@ func _draw_map() -> void:
 		if not selected_units.has(id) or not poses.has(id):
 			continue
 		var start: Vector2 = poses[id]["point"]
-		if selected_units.size() == 1:
+		if selected_units.size() == 1 or not craft["route"].is_empty():
 			_draw_single_command_line(state, order_graph, craft, start, poses, service_refs)
 		_draw_queued_orders(state, order_graph, craft, start, drawn_sectors)
 		var active_order: Dictionary = craft.get("unit_order", {})
@@ -6733,11 +6754,11 @@ func _draw_map() -> void:
 		elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
 			var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
 			var rally_tint := Color("#ff605c")
-			map_canvas.draw_line(start, destination, Color(rally_tint, 0.65), 1.5, true)
+			_draw_command_route(order_graph, craft, start, destination, rally_tint)
 			_draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
 		elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
 			var destination: Vector2 = poses[int(active_order["target"])]["point"]
-			map_canvas.draw_dashed_line(start, destination, Color(HUD.ACCENT, 0.8), 1.5, 6.0, true, true)
+			_draw_command_route(order_graph, craft, start, destination, HUD.ACCENT, true)
 		elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY._unit_order_running(craft):
 			_draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
 		elif active_order.get("kind", "") == "position" and ECONOMY._unit_order_running(craft):
