@@ -81,6 +81,24 @@ func _test_rounded_sector_limits() -> void:
 	assert(not ECON.sector_contains(graph, 0, diagonal * (rounded + 0.1)))
 	assert(not ECON.sector_contains(graph, 0, Vector2(60.1, 0)))
 
+func _test_explicit_hold_pose() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var point := Vector2(100, 200)
+	var a: Dictionary = {"id": 501, "kind": "fighter", "owner": 1, "origin": 0, "at": 0, "dest": 1, "source": -1, "route": [1], "leg": 0.0, "position": point, "heading": Vector2.LEFT, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
+	var b: Dictionary = a.duplicate(true)
+	b.merge({"id": 502, "kind": "miner", "heading": Vector2.DOWN, "mining_mode": "idle"}, true)
+	state["ships"] = [a, b]
+	assert(ECON.command_hold_units(state, 1, [501, 502], false))
+	for tick in range(20):
+		ECON.step(state, 0.1)
+		assert(a["position"] == point and b["position"] == point)
+		assert(a["heading"] == Vector2.LEFT and b["heading"] == Vector2.DOWN)
+		assert(a["route"].is_empty() and b["route"].is_empty())
+	assert(ECON.command_hold_units(state, 1, [501, 502], true))
+	assert(not a.has("hold_heading") and not b.has("hold_heading"))
+	print("PASS: explicit hold preserves each ship's position and heading despite overlap")
+
 func _test_soft_separation() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -655,6 +673,7 @@ func _initialize() -> void:
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
 	_test_soft_separation()
+	_test_explicit_hold_pose()
 	_test_rounded_sector_limits()
 	_test_shipyard_rally()
 	_test_freighter_bays()

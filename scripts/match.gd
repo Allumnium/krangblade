@@ -4317,6 +4317,13 @@ func _draw_elliptical_orbit(center: Vector2, radius: float, tint: Color) -> void
 		points.append(center + Vector2(cos(angle) * radius, sin(angle) * radius * 0.65))
 	map_canvas.draw_polyline(points, tint, 0.8, true)
 
+# Resource palettes use strong surface hues, not UI icon tints.
+func _body_base_color(body: Dictionary) -> Color:
+	var palette: Dictionary = {"Organics": Color("#52a452"), "Metals": Color("#a3a7ad"), "Crystals": Color("#a16bda")}
+	var material: String = str(body["resource"])
+	var base: Color = palette.get(material, HUD.COLORS.get(material, Color("#7d8b9b")))
+	return base.lerp(Color("#7b8790"), float(body["muted"]) * (0.22 if not material.is_empty() else 0.65))
+
 # Generate a unique shaded surface once per visible body; no separate highlight dot.
 func _body_texture(body: Dictionary) -> Texture2D:
 	if body.has("texture"):
@@ -4326,9 +4333,8 @@ func _body_texture(body: Dictionary) -> Texture2D:
 	noise.frequency = 0.065
 	noise.fractal_octaves = 3
 	var image := Image.create(96, 96, false, Image.FORMAT_RGBA8)
-	var material: String = body["resource"]
-	var base: Color = HUD.COLORS.get(material, Color("#7d8b9b"))
-	base = base.lerp(Color("#7b8790"), float(body["muted"]))
+	var base: Color = _body_base_color(body)
+	var highlight: Color = base.lightened(0.48)
 	var light := Vector3(-0.55, -0.45, 0.70).normalized()
 	var angle: float = float(body["surface_angle"])
 	var bands: bool = bool(body["bands"])
@@ -4345,7 +4351,7 @@ func _body_texture(body: Dictionary) -> Texture2D:
 			if bands:
 				terrain = sin(uv.y * 29.0 + grain * 2.0) * 0.24 + grain * 0.2
 			var diffuse: float = maxf(0.0, Vector3(q.x, q.y, z).dot(light))
-			var color: Color = base.lerp(Color("#d6e1e9"), maxf(0.0, terrain) * 0.7).darkened(clampf(0.74 - diffuse * 0.64 - terrain * 0.18, 0.0, 0.85))
+			var color: Color = base.lerp(highlight, maxf(0.0, terrain) * 0.7).darkened(clampf(0.74 - diffuse * 0.64 - terrain * 0.18, 0.0, 0.85))
 			color.a = clampf((1.0 - sqrt(rr)) * 47.0, 0.0, 1.0)
 			image.set_pixel(x, y, color)
 	body["texture"] = ImageTexture.create_from_image(image)
@@ -4535,7 +4541,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 				if body_radius >= 5.0:
 					map_canvas.draw_texture_rect(_body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(1.0, 1.0, 1.0, detail))
 				else:
-					map_canvas.draw_circle(point, body_radius, Color(HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), detail), true)
+					map_canvas.draw_circle(point, body_radius, Color(_body_base_color(body).darkened(0.18), detail), true)
 				if system.get("pds", {}).has(slot):
 					_draw_pds_frame(point, body_radius, detail)
 					if detail >= 0.5:
@@ -6009,7 +6015,7 @@ func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, wid
 			_draw_owned_laser((pose["point"] as Vector2) + (axis * muzzle + axis.orthogonal() * offset) * _ship_scale(), endpoint, int(ship["owner"]), width)
 		return
 	var point: Vector2 = pose["point"]
-	var direction: Vector2 = point.direction_to(endpoint)
+	var direction: Vector2 = pose["direction"] if bool(ship.get("holding", false)) else point.direction_to(endpoint)
 	if direction.is_zero_approx():
 		direction = pose["direction"]
 	pose["direction"] = direction
@@ -7090,6 +7096,8 @@ func _draw_map() -> void:
 				endpoint = _screen_point(_building_world(state, Vector2i(posmod(encoded, count), floori(float(encoded) / float(count))), "pds"))
 			var axis: Vector2 = origin.direction_to(endpoint)
 			if not axis.is_zero_approx():
+				if bool(ship.get("holding", false)):
+					axis = poses[shooter]["direction"]
 				poses[shooter]["direction"] = axis
 				for side in [-1.0, 1.0]:
 					var muzzle: Vector2 = origin + (axis * MINER_MUZZLE.x + axis.orthogonal() * side * MINER_MUZZLE.y) * _ship_scale()
@@ -7103,7 +7111,7 @@ func _draw_map() -> void:
 		if not viewport_bounds.grow(maxf(32.0, 80.0 * scale)).has_point(point):
 			continue
 		var direction: Vector2 = pose["direction"]
-		if ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and not ECONOMY._engaged(ship) and int(ship.get("yard_target", -1)) >= -1:
+		if not bool(ship.get("holding", false)) and ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and not ECONOMY._engaged(ship) and int(ship.get("yard_target", -1)) >= -1:
 			var aim: Vector2 = _screen_point(ship["mining_rock"]) - point
 			if not aim.is_zero_approx():
 				direction = aim.normalized()

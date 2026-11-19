@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.58.8: Explicit Hold captures each hull’s position and heading, excludes it from separation nudges and autonomous work while held, retains emergency repair withdrawal. Planet surface palettes emphasize green Organics, gray Metals and purple Crystals, preserving procedural shading.
+
 - v0.58.7: Neutral-sector Send Colony selects the nearest idle reachable owned Colony on the authority. Shift queues Stop, Hold, Deliver Organics and eligible Transform via the normal unit-order pathway; ordinary Hold retains its toggle behavior.
 
 - v0.58.6: Ship exhaust uses short tapered blue-white plasma plumes and streaks proportional to sampled acceleration, with no cruise baseline. Revision-based sampling and independent frame decay suppress stationary/noise effects; visual only.
