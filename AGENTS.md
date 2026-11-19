@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.53.5: Full-height map and territory canvas behind independent HUD controls; header gaps pass input. Plain crew count in ship details. Gentle 15% budget contact push, allow overlap. Miner 0.8×, freighter 1.1×, fighter 1.32× baseline travel; colony/science unchanged. Stage freighters on depot-facing side of mining site with 20% handoff margin.
+
 - v0.53.4: Smooth planetary presentation using a bounded local orbit clock synchronized to authority; keep planet hit tests, focus, PDS marks and beams aligned. Engine exhaust size and length use authored hull length and estimated motion-sample acceleration; no simulation changes.
 
 - v0.53.3: Freighter display name (internal ship key unchanged), elongated five paired rows of 10 t cargo bays, total 100 t. Show actual crew in selection and fleet totals. Station deliveries use a 64-world-unit docking radius to tolerate separation; trade leftover cargo seeks owned warehouse capacity and manual station deposits retry partial loads. Top HUD has no enclosing surface; omit rounded-zero annual net rates.

@@ -93,8 +93,8 @@ func _test_soft_separation() -> void:
 	var previous: Dictionary = {501: point, 502: point}
 	ECON._separate_ships(state, graph, previous, 0.1)
 	assert((a["position"] as Vector2).distance_to(b["position"]) > 0.0)
-	assert((a["position"] as Vector2).distance_to(point) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
-	assert((b["position"] as Vector2).distance_to(point) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+	assert((a["position"] as Vector2).distance_to(point) <= ECON.ship_speed(str(a["kind"])) * 0.1 + ECON.EPS)
+	assert((b["position"] as Vector2).distance_to(point) <= ECON.ship_speed(str(b["kind"])) * 0.1 + ECON.EPS)
 	assert(((a["position"] as Vector2) + (b["position"] as Vector2)).is_equal_approx(point * 2.0))
 	assert(a["hold_position"] == point and b["hold_position"] == point)
 	assert(ECON.sector_contains(graph, 0, a["position"]) and ECON.sector_contains(graph, 0, b["position"]))
@@ -114,7 +114,12 @@ func _test_soft_separation() -> void:
 	b["salvage_delivery"] = true
 	previous = {501: point - Vector2.RIGHT * 100.0, 502: point + Vector2.RIGHT * 100.0}
 	ECON._resolve_ship_contacts(state, graph, previous)
-	assert((a["position"] as Vector2).distance_to(b["position"]) >= ECON.SHIP_CLEARANCE - ECON.EPS)
+	assert((a["position"] as Vector2).distance_to(b["position"]) > 0.0)
+	assert((a["position"] as Vector2).distance_to(b["position"]) < ECON.SHIP_CLEARANCE)
+	assert((a["position"] as Vector2).distance_to(point) <= ECON.ship_speed("fighter") * 0.1 * 0.15 + ECON.EPS)
+	assert((b["position"] as Vector2).distance_to(point) <= ECON.ship_speed("ship") * 0.1 * 0.15 + ECON.EPS)
+	assert(is_equal_approx(ECON.ship_speed("fighter"), ECON.ship_speed("ship") * 1.2))
+	assert(ECON.ship_speed("miner") < ECON.SHIP_SPEED and ECON.ship_speed("ship") > ECON.SHIP_SPEED)
 	assert(a["holding"] and a["arrival_wait_until"] == 30.0 and b["salvage_delivery"])
 	assert(ECON.sector_contains(graph, 0, a["position"]) and ECON.sector_contains(graph, 0, b["position"]))
 
@@ -1205,7 +1210,7 @@ func _initialize() -> void:
 	assert(ECON.set_mining_policy(mineral, 1, 0, true, false, true))
 	# The ship may have been wandering away from its dock while no ore
 	# was enabled; allow the actual additional return-to-anchor travel.
-	var approach_years: int = ceili((miner["position"] as Vector2).distance_to(mineral_points[0]) / ECON.SHIP_SPEED)
+	var approach_years: int = ceili((miner["position"] as Vector2).distance_to(mineral_points[0]) / ECON.ship_speed(str(miner["kind"])))
 	for i in range(20 + approach_years):
 		ECON.step(mineral, 1.0)
 		if float(mine_home["stock"]["Crystals"]) >= 36.0 - ECON.EPS:
@@ -1319,7 +1324,7 @@ func _initialize() -> void:
 			break
 		var before: Vector2 = loser["position"]
 		ECON.step(colonization, 0.5)
-		assert(before.distance_to(loser["position"]) <= ECON.SHIP_SPEED * 0.5 + 0.01)
+		assert(before.distance_to(loser["position"]) <= ECON.ship_speed(str(loser["kind"])) * 0.5 + 0.01)
 	assert(int(loser["dest"]) == -1)
 	assert(int(loser["at"]) == loser_home and loser["route"].is_empty())
 	var distant: Dictionary = ECON.create(colony_map, players, ids, false)
@@ -1380,7 +1385,7 @@ func _initialize() -> void:
 	assert(is_equal_approx(float(force_fleet[1]["leg"]), 52.5))
 	assert(force_fleet[1]["position"] == reversal_position)
 	ECON._move({"map": force_graph}, force_fleet[1], 0.1)
-	assert(is_equal_approx(reversal_position.distance_to(force_fleet[1]["position"]), ECON.SHIP_SPEED * 0.1))
+	assert(is_equal_approx(reversal_position.distance_to(force_fleet[1]["position"]), ECON.ship_speed(str(force_fleet[1]["kind"])) * 0.1))
 	ECON._move({"map": force_graph}, force_fleet[1], 100.0)
 	assert(force_fleet[1]["at"] == 0 and force_fleet[1]["route"].is_empty())
 	assert(ECON.set_military(force_state, 1, "fighter", field_node, 100))
@@ -1420,7 +1425,7 @@ func _initialize() -> void:
 	for tick in range(20):
 		var before: Vector2 = miner["position"]
 		ECON.step(mineral, 0.1)
-		assert(before.distance_to(miner["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(before.distance_to(miner["position"]) <= ECON.ship_speed(str(miner["kind"])) * 0.1 + 0.01)
 
 	var ai_map: Dictionary = {"seed": 123, "points": [Vector2(-950, 0), Vector2.ZERO, Vector2(3800, 0), Vector2(950, 0), Vector2(1900, 0)], "edges": [[0, 1], [1, 3], [3, 4], [4, 2]], "fields": []}
 	var ai_roster: Dictionary = {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 2}}
@@ -1622,7 +1627,7 @@ func _initialize() -> void:
 		var before: Vector2 = travelling["position"]
 		ECON.step(transit, 0.1)
 		assert(int(travelling["combat_target"]) == 971)
-		assert(before.distance_to(travelling["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(before.distance_to(travelling["position"]) <= ECON.ship_speed(str(travelling["kind"])) * 0.1 + 0.01)
 		assert(before.distance_to(travelling["position"]) > 0.01)
 		assert(travelling["route"] == original_route and int(travelling["at"]) == 1)
 	assert(float(enemy["hp"]) < 100.0)
@@ -1633,7 +1638,7 @@ func _initialize() -> void:
 	assert(int(travelling["combat_target"]) == -1)
 	assert(travelling["route"] == original_route)
 	assert((travelling["position"] as Vector2).distance_to(ai_map["points"][3]) < disengaged_position.distance_to(ai_map["points"][3]))
-	assert(disengaged_position.distance_to(travelling["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+	assert(disengaged_position.distance_to(travelling["position"]) <= ECON.ship_speed(str(travelling["kind"])) * 0.1 + 0.01)
 	print("PASS: coordinated human rally, reinforcements, retargeting, combat circling and route resumption")
 	# Pursuit retains a fleeing civilian beyond laser range, obeys the speed
 	# budget and expires after three years even while the target remains nearby.
@@ -1650,7 +1655,7 @@ func _initialize() -> void:
 		ECON.step(chase, 0.1)
 		assert(int(hunter["pursuit_target"]) == 981)
 		assert(hunter["route"] == [0])
-		assert(before.distance_to(hunter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(before.distance_to(hunter["position"]) <= ECON.ship_speed(str(hunter["kind"])) * 0.1 + 0.01)
 		assert((hunter["position"] as Vector2).x > before.x)
 	assert(float(hunter["pursuit_left"]) <= ECON.EPS)
 	var expired_at: Vector2 = hunter["position"]
@@ -1677,7 +1682,7 @@ func _initialize() -> void:
 	assert(int(distant_hunter["pursuit_target"]) == 983 and int(distant_hunter["combat_target"]) == -1)
 	assert(float(fleeing["hp"]) == hp_before)
 	ECON._pursue_fighter(distant_hunter, fleeing["position"], 0.1)
-	assert(is_equal_approx((distant_hunter["position"] as Vector2).length(), ECON.SHIP_SPEED * 0.1))
+	assert(is_equal_approx((distant_hunter["position"] as Vector2).length(), ECON.ship_speed(str(distant_hunter["kind"])) * 0.1))
 	distant_chase["ships"].erase(fleeing)
 	ECON._combat(distant_chase, distant_graph, 0.1)
 	assert(int(distant_hunter["pursuit_target"]) == -1)
@@ -1834,7 +1839,7 @@ func _initialize() -> void:
 		for craft in form_fleet:
 			var before: Vector2 = craft["position"]
 			ECON._move_formation(form_graph, craft, 0.1)
-			assert(before.distance_to(craft["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+			assert(before.distance_to(craft["position"]) <= ECON.ship_speed(str(craft["kind"])) * 0.1 + 0.01)
 	for craft in form_fleet:
 		assert(int(craft["at"]) == 3 and (craft["route"] as Array).is_empty())
 		assert((craft["position"] as Vector2).distance_to(ai_map["points"][3]) <= ECON.AI_RALLY_RADIUS)
@@ -1862,8 +1867,8 @@ func _initialize() -> void:
 		var before_lead: Vector2 = lead["position"]
 		var before_lag: Vector2 = lag["position"]
 		ECON._coordinate_formations(cohesion, cohesion_graph, 0.1)
-		assert(before_lead.distance_to(lead["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
-		assert(before_lag.distance_to(lag["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(before_lead.distance_to(lead["position"]) <= ECON.ship_speed(str(lead["kind"])) * 0.1 + 0.01)
+		assert(before_lag.distance_to(lag["position"]) <= ECON.ship_speed(str(lag["kind"])) * 0.1 + 0.01)
 		assert(int(lead["at"]) == int(lag["at"]))
 		if tick == 0:
 			assert(lead["position"] == before_lead)
@@ -1889,7 +1894,7 @@ func _initialize() -> void:
 	for tick in range(200):
 		var before: Vector2 = wounded["position"]
 		ECON.step(recovery, 0.1)
-		assert(before.distance_to(wounded["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(before.distance_to(wounded["position"]) <= ECON.ship_speed(str(wounded["kind"])) * 0.1 + 0.01)
 		if not wounded["retreating"]:
 			break
 	assert(not wounded["retreating"] and float(wounded["hp"]) == ECON.SHIP_HP)
@@ -2150,7 +2155,7 @@ func _test_idle_formations() -> void:
 			before[craft["id"]] = craft["position"]
 		ECON.step(state, 0.1)
 		for craft in state["ships"]:
-			assert((craft["position"] as Vector2).distance_to(before[craft["id"]]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+			assert((craft["position"] as Vector2).distance_to(before[craft["id"]]) <= ECON.ship_speed(str(craft["kind"])) * 0.1 + 0.01)
 			assert(int(craft["at"]) == 0 and (craft["route"] as Array).is_empty())
 			assert(ECON.sector_contains(graph, 0, craft["position"]))
 			furthest = maxf(furthest, (craft["position"] as Vector2).distance_to(center))
@@ -2203,7 +2208,7 @@ func _test_unit_order_queue() -> void:
 	for tick in range(500):
 		var previous: Vector2 = ship["position"]
 		ECON.step(state, 0.1)
-		assert(previous.distance_to(ship["position"]) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+		assert(previous.distance_to(ship["position"]) <= ECON.ship_speed(str(ship["kind"])) * 0.1 + ECON.EPS)
 		if not ship.has("local_move_target") and ship["position"] in [first["point"], second["point"], third["point"]] and not visited.has(ship["position"]):
 			visited.append(ship["position"])
 		if visited.size() == 3:
@@ -2289,7 +2294,7 @@ func _test_follow_order() -> void:
 	for tick in range(1000):
 		var before: Vector2 = follower["position"]
 		ECON.step(state, 0.1)
-		assert(before.distance_to(follower["position"]) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+		assert(before.distance_to(follower["position"]) <= ECON.ship_speed(str(follower["kind"])) * 0.1 + ECON.EPS)
 		if not leader.has("local_move_target") and bool(follower.get("follow_arrived", false)):
 			break
 	assert((follower["position"] as Vector2).distance_to(leader["position"]) <= ECON.FOLLOW_DISTANCE + 1.0)
@@ -2482,14 +2487,14 @@ func _test_local_position_orders() -> void:
 	for tick in range(100):
 		var previous: Vector2 = fighter["position"]
 		ECON.step(state, 0.1)
-		assert(previous.distance_to(fighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(previous.distance_to(fighter["position"]) <= ECON.ship_speed(str(fighter["kind"])) * 0.1 + 0.01)
 		for ship in state["ships"]:
 			var ship_id: int = int(ship["id"])
 			if not arrivals.has(ship_id):
 				assert(ECON.sector_contains(ECON.military_graph(state), 0, ship["position"]))
 				if not ship.has("local_move_target"):
 					assert(not ship.get("holding", false))
-					assert((ship["position"] as Vector2).distance_to(point) <= ECON.SHIP_SPEED * 0.1 + ECON.EPS)
+					assert((ship["position"] as Vector2).distance_to(point) <= ECON.ship_speed(str(ship["kind"])) * 0.1 + ECON.EPS)
 					arrivals[ship_id] = true
 		if arrivals.size() == selection.size():
 			break
@@ -2535,7 +2540,7 @@ func _test_local_position_orders() -> void:
 	for tick in range(500):
 		var previous: Vector2 = damaged["position"]
 		ECON.step(repair, 0.1)
-		assert(previous.distance_to(damaged["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(previous.distance_to(damaged["position"]) <= ECON.ship_speed(str(damaged["kind"])) * 0.1 + 0.01)
 		repaired = repaired or (damaged["at"] == 0 and is_equal_approx(float(damaged["hp"]), ECON.SHIP_HP))
 		if repaired and damaged["at"] == 2 and damaged["position"] == post:
 			break
@@ -2579,7 +2584,7 @@ func _test_tactical_orders() -> void:
 	var before: Vector2 = f["position"]
 	ECON.step(state, 0.1)
 	assert(f["attack_order"] == 101 and f["operation_target"] == 1 and (f["route"] as Array).has(1))
-	assert(before.distance_to(f["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+	assert(before.distance_to(f["position"]) <= ECON.ship_speed(str(f["kind"])) * 0.1 + 0.01)
 	assert(ECON.command_hold_units(state, 1, [100], false))
 	assert(not f.has("attack_order"))
 	assert(ECON.command_attack(state, 1, [100], 101))
@@ -2597,7 +2602,7 @@ func _test_tactical_orders() -> void:
 	for tick in range(1000):
 		var previous: Vector2 = f["position"]
 		ECON.step(state, 0.25)
-		assert(previous.distance_to(f["position"]) <= ECON.SHIP_SPEED * 0.25 + 0.01)
+		assert(previous.distance_to(f["position"]) <= ECON.ship_speed(str(f["kind"])) * 0.25 + 0.01)
 		assert(f["patrol_from"] == 2 and f["patrol_to"] == 0)
 		restored = restored or (not bool(f.get("retreating", false)) and is_equal_approx(float(f["hp"]), ECON.SHIP_HP))
 		reached_home = reached_home or int(f["at"]) == 0
@@ -2627,7 +2632,7 @@ func _test_precise_patrol() -> void:
 	for tick in range(200):
 		var prior: Vector2 = craft["position"]
 		ECON.step(state, 0.1)
-		assert(prior.distance_to(craft["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(prior.distance_to(craft["position"]) <= ECON.ship_speed(str(craft["kind"])) * 0.1 + 0.01)
 		reached = reached or craft["position"] == nearby
 		if reached and craft["position"] == start:
 			returned = true
@@ -2643,7 +2648,7 @@ func _test_precise_patrol() -> void:
 	for tick in range(2000):
 		var prior: Vector2 = craft["position"]
 		ECON.step(state, 0.1)
-		assert(prior.distance_to(craft["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(prior.distance_to(craft["position"]) <= ECON.ship_speed(str(craft["kind"])) * 0.1 + 0.01)
 		reached = reached or craft["position"] == remote
 		if not craft.has("patrol_from"):
 			break
@@ -2702,13 +2707,13 @@ func _test_salvage() -> void:
 	var home: Dictionary = state["planets"][0]
 	var original: Dictionary = home["stock"].duplicate()
 	ECON._work_salvage(state, graph, hauler, 0.1)
-	assert(hauler["position"].distance_to(Vector2(200, 0)) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+	assert(hauler["position"].distance_to(Vector2(200, 0)) <= ECON.ship_speed(str(hauler["kind"])) * 0.1 + 0.01)
 	assert(ECON._cargo_total(hauler) == ECON.CARGO_CAPACITY - 2.0)
 	for tick in range(200):
 		state["elapsed"] += 0.1
 		var previous: Vector2 = hauler["position"]
 		ECON._work_salvage(state, graph, hauler, 0.1)
-		assert(previous.distance_to(hauler["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(previous.distance_to(hauler["position"]) <= ECON.ship_speed(str(hauler["kind"])) * 0.1 + 0.01)
 		assert(ECON._cargo_total(hauler) <= ECON.CARGO_CAPACITY + 0.0001)
 		if not ECON._salvage_active(hauler):
 			break
@@ -2822,7 +2827,7 @@ func _test_opportunistic_salvage() -> void:
 	craft["dest"] = -1
 	piles[200]["position"] = pos + Vector2(ECON.TRACTOR_RANGE * 1.5, 0)
 	assert(ECON._work_opportunistic_salvage(state, graph, craft, 0.1, {}, ECON._salvage_cells(piles), false))
-	assert(pos.distance_to(craft["position"]) > 0.0 and pos.distance_to(craft["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+	assert(pos.distance_to(craft["position"]) > 0.0 and pos.distance_to(craft["position"]) <= ECON.ship_speed(str(craft["kind"])) * 0.1 + 0.01)
 	craft["cargo"]["Metals"] = ECON.cargo_capacity("ship") - float(craft["cargo"]["Crystals"])
 	assert(ECON._work_opportunistic_salvage(state, graph, craft, 0.1, {}, ECON._salvage_cells(piles), false))
 	assert(piles[200]["claim"] == -1 and is_zero_approx(ECON.cargo_free(craft)))
@@ -2910,7 +2915,7 @@ func _test_civilian_waiting_movement() -> void:
 		ECON.step(state, 0.1)
 		for craft in state["ships"]:
 			var distance: float = (craft["position"] as Vector2).distance_to(craft["test_before"])
-			assert(distance <= ECON.SHIP_SPEED * 0.1 + 0.01)
+			assert(distance <= ECON.ship_speed(str(craft["kind"])) * 0.1 + 0.01)
 			if distance > ECON.EPS:
 				moved[craft["id"]] = true
 	assert(moved.size() == 3)
@@ -2947,7 +2952,7 @@ func _test_civilian_waiting_movement() -> void:
 		var previous: Vector2 = empty_miner["position"]
 		trapped["elapsed"] += 0.1
 		ECON._work_miner(trapped, empty_miner, ECON.planet_teams(trapped), {}, [], 0.1)
-		assert(previous.distance_to(empty_miner["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+		assert(previous.distance_to(empty_miner["position"]) <= ECON.ship_speed(str(empty_miner["kind"])) * 0.1 + 0.01)
 		if empty_miner["mining_mode"] == "idle":
 			break
 	assert(empty_miner["at"] == 0 and empty_miner["mining_mode"] == "idle")
@@ -2992,7 +2997,7 @@ func _test_depleted_field_routes() -> void:
 		ECON.step(state, 0.5)
 		assert(fighter["at"] == count and fighter["route"].is_empty())
 		assert(ECON.sector_contains(graph, count, fighter["position"]))
-		assert(before.distance_to(fighter["position"]) <= ECON.SHIP_SPEED * 0.5 + 0.01)
+		assert(before.distance_to(fighter["position"]) <= ECON.ship_speed(str(fighter["kind"])) * 0.5 + 0.01)
 		max_distance = maxf(max_distance, field_pos.distance_to(fighter["position"]))
 	assert(max_distance > ECON.AI_RALLY_RADIUS)
 	print("PASS: depleted asteroid access routes and sector-bounded patrol")
@@ -3009,7 +3014,7 @@ func _test_wide_patrol_rally_and_conquest() -> void:
 	for tick in range(80):
 		var before: Vector2 = state["ships"][0]["position"]
 		ECON.step(state, 0.5)
-		assert(before.distance_to(state["ships"][0]["position"]) <= ECON.SHIP_SPEED * 0.5 + 0.01)
+		assert(before.distance_to(state["ships"][0]["position"]) <= ECON.ship_speed(str(state["ships"][0]["kind"])) * 0.5 + 0.01)
 		if int(state["ships"][0]["dest"]) == 1:
 			launched = true
 			break
@@ -3126,7 +3131,7 @@ func _test_conquest_resistance_and_evacuation() -> void:
 	assert(freighter["cargo"]["Metals"] == 50.0)
 	assert(not (freighter["route"] as Array).has(2))
 	ECON._work_ship(state, freighter, ECON.planet_teams(state), {}, 0.1)
-	assert(before.distance_to(freighter["position"]) <= ECON.SHIP_SPEED * 0.1 + 0.01)
+	assert(before.distance_to(freighter["position"]) <= ECON.ship_speed(str(freighter["kind"])) * 0.1 + 0.01)
 	var dock: Vector2 = ECON.station_position(state, 1, float(state["elapsed"]))
 	assert((freighter["position"] as Vector2).distance_to(dock) < before.distance_to(dock))
 	print("PASS: planetary defense simultaneous damage and safe cargo-preserving station-loss reroute")

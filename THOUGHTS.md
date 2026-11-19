@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.53.5: Mild overlap is intentional; check contact jitter at mining/docking endpoints. Depot-facing staging leaves a 20% handoff margin; monitor miners on dispersed rocks and whether depot selection should account for multiple resources.
+
 - v0.53.4: Local orbit prediction is capped at 0.6 real seconds to prevent drift on stalled snapshots; verify catch-up on lossy connections. Exhaust acceleration is estimated from received positions, so contact corrections and irregular sample timing may affect its intensity.
 
 - v0.53.3: Exact station arrival and contact correction can conflict. Docking radius preserves physical delivery and avoids chasing a shared point; monitor very crowded docks and repeated export/redeposit when demand changes.
