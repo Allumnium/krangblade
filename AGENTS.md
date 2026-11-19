@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.56.2: Select systems via compact star-centered hit radius; ships, buildings, planets and fields take precedence. Preserve order targeting. Selected yard rallies end in flag markers.
+
 - v0.56.1: Command card tooltip delay halved; Refinery, Incubator and PDS labels; current station upgrade level top-left, target level in tooltip.
 
 - v0.56.0: Small Scout (unarmed, 2× fighter speed, 50 HP), Medium Cruiser and Large Destroyer use normal shipyard classes; military hulls reuse fighter tactical behavior. Prototype costs and combat stats subject to playtest.

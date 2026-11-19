@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.56.2: Compact star hit radius is bounded in screen pixels; check accessibility at extreme zoom and overlapping field outlines.
+
 - v0.56.1: Verify faster tooltips do not obscure neighboring command cards; check long Roman numerals on repeated economy buildings.
 
 - v0.56.0: Cruiser and Destroyer use stronger single-volley weapons and slower speeds as provisional balance. Assess capital ship pacing and Scout utility.
