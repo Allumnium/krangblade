@@ -322,6 +322,13 @@ func _test_miner_service_orders() -> void:
 	assert(ECON.command_attack(state, 1, [100], ECON.station_target_id(state, 1)))
 	print("PASS: miner repair/autocast, withdrawal priority, remote orders, targeted cargo conservation and focused attacks")
 
+func _cancelled_material(state: Dictionary, job_id: int, resource: String) -> float:
+	var result: float = 0.0
+	for pile in state["salvage"].values():
+		if int(pile.get("construction_job", -1)) == job_id and pile["resource"] == resource:
+			result += float(pile["amount"])
+	return result
+
 func _test_station_construction_queue() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var p: Dictionary = state["planets"][0]
@@ -335,7 +342,10 @@ func _test_station_construction_queue() -> void:
 	assert(job["kind"] == "habitation" and int(job["size"]) == 0 and int(p.get("habitation_level", 0)) == 0)
 	assert(not ECON.enqueue(state, 1, 0, "economy", "habitation"))
 	assert(not ECON.cancel(state, 2, 0, int(job["id"])))
-	assert(ECON.cancel(state, 1, 0, int(job["id"])) and p["stock"] == prior)
+	assert(ECON.cancel(state, 1, 0, int(job["id"])))
+	for resource in ECON.RESOURCES:
+		assert(is_equal_approx(float(p["stock"][resource]) + _cancelled_material(state, int(job["id"]), resource), float(prior[resource])))
+		assert(is_equal_approx(_cancelled_material(state, int(job["id"]), resource), float(job["allocated"][resource])))
 	assert(ECON.enqueue(state, 1, 0, "economy", "habitation"))
 	assert(ECON.enqueue(state, 1, 0, "economy", "Metals"))
 	assert(ECON.enqueue(state, 1, 0, "fighter", "", 0))
@@ -838,7 +848,8 @@ func _initialize() -> void:
 	ECON._advance(p, p["queue"][0], 6.0)
 	assert(is_equal_approx(float(item["progress"]), 18.0))
 	assert(ECON.cancel(state, 1, 0, int(item["id"])))
-	assert(is_equal_approx(float(p["stock"]["Metals"]), 360.0))
+	assert(is_zero_approx(float(p["stock"]["Metals"])))
+	assert(is_equal_approx(_cancelled_material(state, int(item["id"]), "Metals"), 360.0))
 	assert(p["queue"].is_empty())
 	assert(is_equal_approx(float(p["population"]), saved_population))
 
@@ -872,7 +883,9 @@ func _initialize() -> void:
 		assert(not ECON.cancel(refunds, 2, 0, int(order["id"])))
 		assert(ECON.cancel(refunds, 1, 0, int(order["id"])))
 		assert(refund_home["queue"].is_empty())
-		assert(is_equal_approx(float(refund_home["stock"]["Metals"]), 10000.0 - ECON.consumption(refund_home, "Metals")))
+		var dropped: float = _cancelled_material(refunds, int(order["id"]), "Metals")
+		assert(is_equal_approx(dropped, float(order["allocated"]["Metals"]) if ECON.construction_leaves_salvage(order) else 0.0))
+		assert(is_equal_approx(float(refund_home["stock"]["Metals"]) + dropped, 10000.0 - ECON.consumption(refund_home, "Metals")))
 		assert(int(refund_home["yards"][0]["job"]) == -1)
 	# Completed and pending shipyards share a hard three-slot limit.
 	var capped: Dictionary = ECON.create(graph, players, ids, false)
@@ -890,6 +903,9 @@ func _initialize() -> void:
 	assert(not ECON.enqueue(capped, 1, 0, "yard"))
 	assert(ECON.cancel(capped, 1, 0, int(cap_home["queue"][-1]["id"])))
 	assert(ECON.shipyard_count(cap_home) == 2)
+	assert(not ECON.enqueue(capped, 1, 0, "yard"))
+	for material in ECON._cost("yard", 3):
+		cap_home["stock"][material] += float(ECON._cost("yard", 3)[material])
 	assert(ECON.enqueue(capped, 1, 0, "yard"))
 	ECON.step(capped, ECON._work("yard", 2))
 	assert(cap_home["yards"].size() == 2)
@@ -924,8 +940,10 @@ func _initialize() -> void:
 	assert(is_equal_approx(float(stack_third["progress"]) / float(stack_third["work"]), fraction))
 	for material in ECON.RESOURCES:
 		assert(is_equal_approx(float(stack_third["allocated"][material]), float(stack_third["cost"].get(material, 0.0))))
-		assert(is_equal_approx(float(gap_home["stock"][material]) + float(stack_third["allocated"][material]), float(total_material[material])))
+		assert(is_equal_approx(float(gap_home["stock"][material]) + float(stack_third["allocated"][material]) + _cancelled_material(gap_state, int(stack_second["id"]), material), float(total_material[material])))
 	assert(ECON.next_shipyard_slot(gap_home) == 3)
+	for material in ECON._cost("yard", 3):
+		gap_home["stock"][material] += float(ECON._cost("yard", 3)[material])
 	assert(ECON.enqueue(gap_state, 1, 0, "yard", "3"))
 	assert(ECON.shipyard_count(gap_home) == 3)
 	assert(not ECON.enqueue(gap_state, 1, 0, "yard", "3"))
@@ -1722,7 +1740,7 @@ func _initialize() -> void:
 		assert(float(build["allocated"][material]) > 0.0)
 	assert(ECON.cancel(bootstrap, 1, 0, int(build["id"])))
 	for material in preallocation:
-		assert(is_equal_approx(float(industry["stock"][material]), float(preallocation[material])))
+		assert(is_equal_approx(float(industry["stock"][material]) + _cancelled_material(bootstrap, int(build["id"]), material), float(preallocation[material])))
 	var timed_state: Dictionary = ECON.create(graph, players, ids, false)
 	var timed_home: Dictionary = timed_state["planets"][0]
 	assert(ECON.enqueue(timed_state, 1, 0, "economy", "Metals"))
@@ -1956,7 +1974,9 @@ func _initialize() -> void:
 		assert(is_zero_approx(float(target_home["stock"][material])))
 	assert(ECON.cancel(targeted, 1, 0, int(target_job["id"])))
 	for material in target_recipe:
-		assert(is_equal_approx(float(target_home["stock"][material]), float(target_recipe[material])))
+		assert(is_zero_approx(float(target_home["stock"][material])))
+		assert(is_equal_approx(_cancelled_material(targeted, int(target_job["id"]), material), float(target_recipe[material])))
+		target_home["stock"][material] = float(target_recipe[material]) # separate funds for next build
 	assert(ECON.enqueue(targeted, 1, 0, "pds"))
 	target_job = ECON.pds_job(target_home)
 	assert(ECON._advance(target_home, target_job, float(target_job["work"])))
@@ -1975,7 +1995,9 @@ func _initialize() -> void:
 	ECON._advance(defended, first_defense, 1.0)
 	var refund: float = float(defended["stock"]["Metals"]) + float(first_defense["allocated"]["Metals"])
 	assert(ECON.cancel(defenses, 1, 0, int(first_defense["id"])))
-	assert(is_equal_approx(float(defended["stock"]["Metals"]), refund))
+	assert(is_equal_approx(float(defended["stock"]["Metals"]) + _cancelled_material(defenses, int(first_defense["id"]), "Metals"), refund))
+	for material in first_defense["allocated"]:
+		defended["stock"][material] += float(first_defense["allocated"][material]) # separate funds for next build
 	assert(ECON.enqueue(defenses, 1, 0, "pds"))
 	first_defense = ECON.pds_job(defended)
 	assert(ECON._advance(defended, first_defense, float(first_defense["work"])))

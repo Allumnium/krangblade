@@ -1116,6 +1116,44 @@ static func _refill_yard_autobuild(state: Dictionary, index: int, p: Dictionary)
 					break
 				p["queue"][-1]["yard_auto"] = true
 
+static func construction_leaves_salvage(item: Dictionary) -> bool:
+	return SHIP_KINDS.has(item["kind"]) or item["kind"] in ["yard", "pds", "economy_building", "warehouse", "habitation", "orbital_housing"]
+
+static func construction_position(state: Dictionary, index: int, item: Dictionary) -> Vector2:
+	var elapsed: float = float(state["elapsed"])
+	var p: Dictionary = state["planets"][index]
+	if item["kind"] == "yard":
+		return shipyard_port_position(state, index, int(item.get("station_slot", item["level"])), elapsed)
+	if SHIP_KINDS.has(item["kind"]):
+		for slot in range(p["yards"].size()):
+			if int(p["yards"][slot]["job"]) == int(item["id"]):
+				return shipyard_position(state, index, slot, elapsed)
+		var slot: int = int(item.get("yard_slot", -1))
+		if slot >= 0 and slot < p["yards"].size():
+			return shipyard_position(state, index, slot, elapsed)
+	if item["kind"] == "pds":
+		var bodies: Array = system_bodies(p, int(state["map"].get("seed", 0)), index)
+		var slot: int = int(item["target"])
+		if slot >= 0 and slot < bodies.size():
+			return (state["map"]["points"][index] as Vector2) + body_position(bodies[slot], system_world_radius(state, index), elapsed)
+	return station_position(state, index, elapsed)
+
+# Unlike wreck destruction, cancellation recovers every prepaid tonne.
+static func _drop_construction_materials(state: Dictionary, index: int, item: Dictionary) -> void:
+	var point: Vector2 = construction_position(state, index, item)
+	var born: float = float(state["elapsed"])
+	var piles: Dictionary = state.get("salvage", {})
+	for resource in RESOURCES:
+		var amount: float = float(item["allocated"].get(resource, 0.0))
+		if amount <= EPS:
+			continue
+		var id: int = int(state.get("next_salvage_id", 1))
+		state["next_salvage_id"] = id + 1
+		var axis: Vector2 = Vector2.from_angle(float(id) * 2.399963)
+		var origin: Vector2 = point + axis * 14.0
+		piles[id] = {"id": id, "resource": resource, "amount": amount, "origin": origin, "position": origin, "drift": axis.orthogonal() * 4.0, "born": born, "claim": -1, "construction_job": item["id"]}
+	state["salvage"] = piles
+
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
 	if p.is_empty():
@@ -1123,8 +1161,11 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
 	for item in p["queue"]:
 		if int(item["id"]) != job_id:
 			continue
-		for resource in RESOURCES:
-			p["stock"][resource] = float(p["stock"][resource]) + float(item["allocated"][resource])
+		if construction_leaves_salvage(item):
+			_drop_construction_materials(state, index, item)
+		else:
+			for resource in RESOURCES:
+				p["stock"][resource] = float(p["stock"][resource]) + float(item["allocated"][resource])
 		var eco: float = eco_population(p)
 		var eco_refund: float = minf(float(item.get("eco_allocated", 0.0)), maxf(0.0, eco_capacity(p) - eco))
 		p["population"] = float(p["population"]) + float(item.get("population_allocated", 0.0))
@@ -1220,7 +1261,10 @@ static func station_position(state: Dictionary, index: int, elapsed: float) -> V
 	return center + axis * radius * smoothstep(0.0, 1.0, conversion)
 
 static func shipyard_position(state: Dictionary, index: int, slot: int, elapsed: float) -> Vector2:
-	var angle: float = float(shipyard_port(state["planets"][index], slot) - 1) * TAU / 3.0 + elapsed * 0.008
+	return shipyard_port_position(state, index, shipyard_port(state["planets"][index], slot), elapsed)
+
+static func shipyard_port_position(state: Dictionary, index: int, port: int, elapsed: float) -> Vector2:
+	var angle: float = float(port - 1) * TAU / 3.0 + elapsed * 0.008
 	return station_position(state, index, elapsed) + Vector2.from_angle(angle) * 90.0
 
 static func _rally_path(state: Dictionary, index: int, target: int) -> Array[int]:
@@ -4149,7 +4193,7 @@ static func _update_salvage(state: Dictionary) -> void:
 	var elapsed: float = float(state["elapsed"])
 	for id in piles.keys():
 		var pile: Dictionary = piles[id]
-		if elapsed >= float(pile.get("expires_at", float(pile["born"]) + SALVAGE_MAX_LIFETIME)):
+		if not pile.has("construction_job") and elapsed >= float(pile.get("expires_at", float(pile["born"]) + SALVAGE_MAX_LIFETIME)):
 			piles.erase(id)
 			continue
 		if claims.get(int(pile["claim"]), -1) != int(id):

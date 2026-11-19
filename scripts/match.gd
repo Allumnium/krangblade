@@ -1178,11 +1178,11 @@ func _ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
-		"colony_ship": details = "Settles a neutral system · %.0f settlers\nFarm %.0f t/yr · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
+		"colony_ship": details = "Settles a neutral system · %.0f settlers\nFarm %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
-		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/yr · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
-		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f yr collection" % ECONOMY.SCIENCE_COLLECTION_YEARS
-	return "%s\nHP %.0f · Speed %.0f/yr · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
+		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
+		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
+	return "%s\nHP %.0f · Speed %.0f/s (1×) · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
 
 func _build_production_summary() -> void:
 	var header := HBoxContainer.new()
@@ -1678,7 +1678,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		button.disabled = not owned or (slot < 0 and (not pending.is_empty() or tier <= 0 or not ECONOMY.affordable(p, cost)))
 		var hint: String = label.text.replace("\n", " ")
 		if slot < 0 and pending.is_empty() and tier > 0:
-			_set_cost_tooltip(button, hint + " · %.0f yr" % ECONOMY._work("yard", tier), cost, 0.0, _available_cost_resources(p))
+			_set_cost_tooltip(button, hint + " · %.0f s (1×)" % ECONOMY._work("yard", tier), cost, 0.0, _available_cost_resources(p))
 		else:
 			_set_cost_tooltip(button, "" if slot >= 0 else hint)
 		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled else Color.WHITE
@@ -1687,7 +1687,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		var installed: bool = bool(p["station"].get(kind, false))
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not ECONOMY.station_upgrade_available(p, kind)
-		var hint: String = "Reinforced Plating · %.0f yr\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix · %.0f yr\n2 defensive lasers · 18 damage each · 1 shot/s (1×) · range 180"
+		var hint: String = "Reinforced Plating · %.0f s (1×)\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix · %.0f s (1×)\n2 defensive lasers · 18 damage each · 1 shot/s (1×) · range 180"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
 			button.tooltip_text += "\n" + ("Installed" if installed else "Building")
@@ -1779,7 +1779,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		if button.has_meta("auto_border"):
 			(button.get_meta("auto_border") as Control).visible = auto
-		_set_cost_tooltip(button, name_text + (" · %.1f yr" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
+		_set_cost_tooltip(button, name_text + (" · %.1f s (1×)" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
 		if not eligible:
 			button.tooltip_text += "\nUnavailable"
 		elif not available and ECONOMY.affordable(p, recipe):
@@ -1884,7 +1884,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = _production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · %.1f yr\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
+		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
 		if not operating:
 			button.tooltip_text += "\nShipyard offline"
 		if kind == "ship" and not bool(system["home"]):
@@ -1902,7 +1902,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	if level >= ECONOMY.MAX_SHIPYARD_LEVEL:
 		_set_cost_tooltip(yard_upgrade, "Maximum level")
 	else:
-		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f yr\nBuild speed: %.1f× → %.1f×\nMax ship size: %d → %d\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe, 0.0, _available_cost_resources(system, selected_yard))
+		_set_cost_tooltip(yard_upgrade, "Upgrade to Lv %d · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMax ship size: %d → %d\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [level + 1, ECONOMY._work("yard_upgrade", level + 1), ECONOMY.yard_speed(level) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(level + 1) / ECONOMY.yard_speed(1), ECONOMY.max_size(level), ECONOMY.max_size(level + 1), ECONOMY.SHIP_HP * 10.0 * level, ECONOMY.SHIP_HP * 10.0 * (level + 1)], upgrade_recipe, 0.0, _available_cost_resources(system, selected_yard))
 
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
@@ -1985,7 +1985,7 @@ func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dicti
 			tile.add_theme_stylebox_override("normal", HUD.surface(Color("#172c3b"), Color("#db9b54") if blocked else HUD.ACCENT, 3, 3))
 		else:
 			tile.remove_theme_stylebox_override("normal")
-		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), "Building" if id == active_id else "Queued", percent, "\n" + widgets["bar"].tooltip_text if blocked else "", "\nClick to cancel and refund" if owned else ""]
+		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), "Building" if id == active_id else "Queued", percent, "\n" + widgets["bar"].tooltip_text if blocked else "", ("\nClick to cancel; materials become salvage" if ECONOMY.construction_leaves_salvage(job) else "\nClick to cancel and refund") if owned else ""]
 
 func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
@@ -2263,14 +2263,16 @@ func _refresh_autocast_cards() -> void:
 		mask.queue_redraw()
 		var title_text: String = "Wander" if mode == "wander" else "Auto-" + mode.capitalize()
 		var status: String = "Off" if enabled_count == 0 else ("On" if enabled_count == units.size() else "%d/%d on" % [enabled_count, units.size()])
+		var speed: float = maxf(1.0, float(state.get("time_speed", 1)))
 		if remaining > ECONOMY.EPS:
-			status += " · %.0f yr cooldown" % ceilf(remaining)
+			status += " · %.1f s remaining%s" % [remaining / speed, " (paused)" if int(state.get("time_speed", 1)) == 0 else ""]
 		var shortcut: String = str(button.get_meta("hotkey", ""))
 		button.tooltip_text = "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut]
+		button.tooltip_text += "\nCooldown: %.1f s at 1×" % duration
 		if mode == "wander":
 			button.tooltip_text += "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority."
 		elif mode == "farm":
-			button.tooltip_text += "\nProduces %.0f t/yr; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE
+			button.tooltip_text += "\nProduces %.0f t/s at 1×; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE
 
 func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""
@@ -5798,8 +5800,40 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 		map_canvas.draw_rect(Rect2(base, Vector2(radius * 2.0, 3.0)), Color("#283748"))
 		map_canvas.draw_rect(Rect2(base, Vector2(radius * 2.0 * hp, 3.0)), tint)
 
+func _draw_shipyard_construction(state: Dictionary, index: int, job: Dictionary, tint: Color, elapsed: float) -> void:
+	var port: int = int(job.get("station_slot", job["level"]))
+	var point: Vector2 = _screen_point(ECONOMY.shipyard_port_position(state, index, port, elapsed))
+	var scale: float = _ship_scale()
+	if not Rect2(Vector2.ZERO, map_canvas.size).grow(maxf(16.0, 32.0 * scale)).has_point(point):
+		return
+	var u: float = clampf(float(job["progress"]) / maxf(ECONOMY.EPS, float(job["work"])), 0.0, 1.0)
+	var angle: float = float(port - 1) * TAU / 3.0 + elapsed * 0.008
+	var lateral: Vector2 = Vector2.from_angle(angle) * scale
+	var forward: Vector2 = lateral.orthogonal()
+	if scale < 0.15 * _overview_art_multiplier():
+		map_canvas.draw_rect(Rect2(point - Vector2.ONE, Vector2.ONE * 2.0), Color(tint, 0.25 + u * 0.75))
+		return
+	for sign in [-1.0, 1.0]:
+		var rail: Array = [Vector2(-17, sign * 8), Vector2(-15, sign * 13), Vector2(-10, sign * 14), Vector2(10, sign * 14), Vector2(15, sign * 13), Vector2(17, sign * 8), Vector2(12, sign * 7), Vector2(-12, sign * 7)]
+		var hull: PackedVector2Array = _hull_polygon(point, forward, lateral, rail)
+		for k in range(hull.size()):
+			var a: Vector2 = hull[k]
+			var b: Vector2 = hull[(k + 1) % hull.size()]
+			map_canvas.draw_line(a, b, Color(tint, 0.18), maxf(0.65, scale), true)
+			var part: float = clampf(u * 2.0 * float(hull.size()) - float(k), 0.0, 1.0)
+			if part > 0.0:
+				map_canvas.draw_line(a, a.lerp(b, part), tint.lightened(0.4), maxf(0.65, scale), true)
+		if u > 0.5:
+			map_canvas.draw_colored_polygon(hull, Color(Color("#607387"), (u - 0.5) * 2.0))
+	for end in [-1.0, 1.0]:
+		var bridge: Vector2 = point + forward * end * 16.0
+		map_canvas.draw_line(bridge - lateral * 8.5, bridge + lateral * 8.5, Color(tint, clampf(u * 2.0, 0.18, 1.0)), maxf(0.65, scale), true)
+
 func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
 	var planet: Dictionary = state["planets"][index]
+	var pending: Dictionary = ECONOMY.station_construction_job(planet)
+	if pending.get("kind", "") == "yard":
+		_draw_shipyard_construction(state, index, pending, tint, elapsed)
 	for slot in range(planet["yards"].size()):
 		var yard: Dictionary = planet["yards"][slot]
 		var scale: float = _ship_scale() * pow(1.2, int(yard["level"]) - 1)

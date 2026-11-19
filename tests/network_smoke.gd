@@ -359,7 +359,7 @@ func _check_time_controls(state: Dictionary) -> bool:
 			_fail("Clock advanced while paused.")
 			return false
 		# Queue and cancel a timed station purchase on every peer
-		# while paused, so the replicated queue and refund are observable.
+		# while paused, so the replicated queue and salvage are observable.
 		var outpost_index: int = int(state["map"]["planetless"][home_index])
 		var outpost: Dictionary = state["planets"][outpost_index]
 		if not bool(get_meta("station_queue_sent", false)):
@@ -372,6 +372,7 @@ func _check_time_controls(state: Dictionary) -> bool:
 					if int(outpost.get("orbital_housing", 0)) != 0 or int(job["size"]) != 0 or job["cost"] != ECON.ORBITAL_HOUSING_COST or float(job["work"]) != ECON._work("orbital_housing", 1) or float(job["progress"]) != 0.0:
 						_fail("Station infrastructure queue did not replicate correctly.")
 						return false
+					set_meta("station_cancel_job", int(job["id"]))
 					set_meta("station_cancel_sent", true)
 					session.call("request_cancel", outpost_index, int(job["id"]))
 					break
@@ -379,8 +380,12 @@ func _check_time_controls(state: Dictionary) -> bool:
 		if not outpost["queue"].is_empty():
 			return false
 		for resource in ECON.ORBITAL_HOUSING_COST:
-			if not is_equal_approx(float(outpost["stock"][resource]), float(ECON.ORBITAL_HOUSING_COST[resource])):
-				_fail("Station construction cancellation did not refund materials.")
+			var recovered: float = 0.0
+			for pile in state["salvage"].values():
+				if int(pile.get("construction_job", -1)) == int(get_meta("station_cancel_job", -2)) and pile["resource"] == resource:
+					recovered += float(pile["amount"])
+			if not is_zero_approx(float(outpost["stock"][resource])) or not is_equal_approx(recovered, float(ECON.ORBITAL_HOUSING_COST[resource])):
+				_fail("Station construction cancellation did not replicate full material salvage.")
 				return false
 		# Explicit salvage is tested while paused, before automatic collection
 		# can sweep the same fixture. Guest commands use the actual RPC path.

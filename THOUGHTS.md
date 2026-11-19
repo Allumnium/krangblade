@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.53.1: Construction cancellation salvage is persistent to guarantee 100% recoverability. Monitor debris accumulation and salvage competition near busy yards; later-yard repricing still returns only the price difference directly.
+
 - v0.53.0: Colony ship farming rate provisionally 5 t/yr (20 years per hold); watch food balance and idle fleet logistics. Auto-delivery pauses production while unloading; colonization transfers carried Organics.
 
 - v0.52.0: Science vessels retain a full containment chamber at the Pulsar. Existing finite reservoir preserved; prototype price 900 Metals, 30 Organics, 2,000 crew, 15 years at level one. Review whether unlimited source, different costs or auto-collection controls are desired later.
