@@ -425,7 +425,7 @@ func _ships() -> void:
 	_table(["Level", "Build speed", "Staff required"], rows)
 
 func _combat() -> void:
-	_body("Fighters engage hostile targets automatically when idle or attack-moving. Direct attack orders prioritize the designated target. Hold position keeps ships in place; damaged ships can withdraw and repair.")
+	_body("Fighters engage hostile targets automatically when idle or attack-moving. After a move, ships wait %.0f years before wandering or resuming civilian jobs. New orders act immediately. Hold keeps ships in place; damaged ships can withdraw and repair." % E.MOVE_ARRIVAL_WAIT_YEARS)
 	_table(["Weapon", "Damage / shot or volley", "Range"], [["Fighter laser", "%.0f" % E.LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Mining lasers", "%.0f" % E.MINER_LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Planetary defense", "%.0f" % E.PDS_DAMAGE, "%.0f" % E.PDS_RANGE]])
 	_section("Station defenses")
 	_table(["Upgrade", "Effect", "Materials"], [["Reinforced Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Laser Matrix", "%d defensive lasers" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Planetary defense battery", _recipe(E._cost("pds", 1))]])

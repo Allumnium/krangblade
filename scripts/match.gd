@@ -2470,6 +2470,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Delivering salvage" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for salvage storage"
 	elif int(ship.get("auto_salvage_target", -1)) >= 0:
 		status += " · Salvaging" if bool(ship.get("tractor_active", false)) else " · Approaching debris"
+	var wait_left: float = ECONOMY.arrival_wait_remaining(state, ship)
+	if wait_left > ECONOMY.EPS and not ECONOMY._engaged(ship) and not bool(ship.get("retreating", false)):
+		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)
 	ship_detail.text = status
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
