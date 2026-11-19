@@ -4902,7 +4902,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 		if not ECONOMY.discovered(state, _me(), "planets", i):
 			continue
 		var distance: float = point.distance_to(_screen_point(points[i]))
-		if distance <= _planet_radius(i, state) + 4.0 and distance < nearest:
+		if distance <= clampf(_star_draw_radius(_planet_radius(i, state)) + 3.0, 7.0, 24.0) and distance < nearest:
 			nearest = distance
 			hit = i
 	# Use the same interpolated physical pose for selection and rendering.
@@ -4914,7 +4914,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 		if distance <= maxf(5.0, (24.0 if poses[id]["kind"] == "ship" else 14.0) * _ship_scale()) and distance < ship_distance:
 			ship_distance = distance
 			ship_hit = int(id)
-	var next_ship: int = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
+	var next_ship: int = ship_hit
 	var body_hit: Vector2i = _body_hit(point, state) if not additive else Vector2i(-1, -1)
 	var yard_hit: Vector2i = _yard_hit(point, state) if not additive else Vector2i(-1, -1)
 	if yard_hit.x >= 0:
@@ -4987,7 +4987,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 						selected_units.append(id)
 			break
 	selected_field = -1
-	if selected_ship_id < 0 and hit < 0:
+	if selected_ship_id < 0:
 		var fields: Array = state["map"].get("fields", [])
 		for i in range(fields.size()):
 			if not ECONOMY.discovered(state, _me(), "fields", i):
@@ -6650,8 +6650,13 @@ func _draw_map() -> void:
 			var target: Vector2 = _screen_point(rally["point"])
 			var rally_tint := Color("#ff605c")
 			map_canvas.draw_line(start, target, Color(rally_tint, 0.65), 1.5, true)
-			map_canvas.draw_arc(target, 7.0, 0.0, TAU, 24, rally_tint, 1.5, true)
-			map_canvas.draw_line(target + Vector2(0, -6), target + Vector2(0, -22), rally_tint, 1.5, true)
+			var pole_top: Vector2 = target + Vector2(0, -23)
+			var flag := PackedVector2Array([pole_top, pole_top + Vector2(15, 0), pole_top + Vector2(10, 5), pole_top + Vector2(15, 10), pole_top + Vector2(0, 10)])
+			map_canvas.draw_line(target, pole_top, Color("#111b26"), 4.0, true)
+			map_canvas.draw_line(target, pole_top, rally_tint, 2.0, true)
+			map_canvas.draw_colored_polygon(flag, rally_tint)
+			flag.append(flag[0])
+			map_canvas.draw_polyline(flag, Color("#111b26"), 1.0, true)
 	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
 	_draw_salvage(state, poses, viewport_bounds, font)
