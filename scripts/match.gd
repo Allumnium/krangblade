@@ -1251,17 +1251,20 @@ func _available_cost_resources(p: Dictionary, yard: int = -1) -> Dictionary:
 	available["Population"] = maxf(0.0, float(p["population"]) - reserve)
 	return available
 
+func _blaster_summary(kind: String) -> String:
+	return "Blasters ×%d · %.0f damage/shot · %d shots/burst · %.1f s on / %.1f s off · Range %.0f" % [ECONOMY.blaster_count(kind), ECONOMY.BLASTER_DAMAGE, ECONOMY.BLASTER_SHOTS, ECONOMY.BLASTER_BURST, ECONOMY.BLASTER_PAUSE, ECONOMY.LASER_RANGE]
+
 func _capital_weapon_summary(kind: String) -> String:
-	return "Lasers ×%d · %.0f damage each · 1 s · Range %.0f\nMissiles ×%d · %.0f damage each · %.0f s · Range %.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE]
+	return "Lasers ×%d · %.0f damage each · 1 s · Range %.0f\nMissiles ×%d · %.0f damage each · %.0f s · Range %.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE] + "\n" + _blaster_summary(kind)
 
 func _ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
 		"colony_ship": details = "Settles a neutral system · %.0f settlers\nFarm %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
-		"scout": details = "Fast unarmed reconnaissance"
+		"scout": details = "Fast reconnaissance · " + _blaster_summary(kind)
 		"cruiser", "destroyer": details = _capital_weapon_summary(kind)
-		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
+		"fighter": details = _blaster_summary(kind)
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
 	return "%s\nHP %.0f · Speed %.0f/s (1×) · %s" % [details, ECONOMY.ship_max_hp(kind), ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind))]
@@ -2776,7 +2779,7 @@ func _refresh_weapon_details(ship: Dictionary, system: Dictionary, body_selected
 			at = ship_detail.get_index() + 1
 			match str(ship["kind"]):
 				"cruiser", "destroyer": details = _capital_weapon_summary(str(ship["kind"]))
-				"fighter": details = "Laser\n%.0f damage · 1 shot/s (1×) · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
+				"scout", "fighter": details = _blaster_summary(str(ship["kind"]))
 				"miner": details = "Mining laser ×2\n%.0f damage each · 1 shot/s (1×) · Range %.0f\n+200%% vs asteroids · %.0f t/yr nominal" % [ECONOMY.MINER_LASER_DAMAGE / 2.0, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE]
 		elif not system.is_empty() and not yard_selected:
 			if body_selected and system.get("pds", {}).has(selected_body):
@@ -6029,7 +6032,32 @@ func _draw_owned_laser(origin: Vector2, target: Vector2, owner: int, width: floa
 func _fighter_beam_origin(pose: Dictionary) -> Vector2:
 	return (pose["point"] as Vector2) + (pose["direction"] as Vector2) * FIGHTER_MUZZLE * _ship_scale()
 
+func _draw_blaster_tracers(state: Dictionary, ship: Dictionary, poses: Dictionary) -> void:
+	if not ship.has("blaster_fired"):
+		return
+	var age: float = maxf(0.0, _orbit_time(state) - float(ship["blaster_fired"]))
+	if age >= ECONOMY.BLASTER_TRAVEL:
+		return
+	var mounts: Array = {"scout": [Vector2(11, 0)], "fighter": [Vector2(1, -5), Vector2(1, 5)], "cruiser": [Vector2(17, 0), Vector2(5, -10), Vector2(5, 10)], "destroyer": [Vector2(34, -5), Vector2(34, 5), Vector2(14, -15), Vector2(14, 15)]}.get(ship["kind"], [])
+	var start: Vector2 = _screen_point(ship["blaster_origin"])
+	var endpoint: Vector2 = _screen_point(ship["blaster_endpoint"])
+	var direction: Vector2 = poses.get(int(ship["id"]), {}).get("direction", start.direction_to(endpoint))
+	var tint: Color = _empire_color(int(ship["owner"])).lightened(0.45)
+	var scale: float = _ship_scale()
+	for prior in range(int(ship.get("blaster_visual_shot", 0)) + 1):
+		var travel: float = (age + float(prior) * ECONOMY.BLASTER_SHOT_INTERVAL) / ECONOMY.BLASTER_TRAVEL
+		if travel >= 1.0:
+			break
+		for mount in mounts:
+			var muzzle: Vector2 = start + (direction * mount.x + direction.orthogonal() * mount.y) * scale
+			var point: Vector2 = muzzle.lerp(endpoint, travel)
+			var radius: float = clampf(scale * 0.9, 1.0, 3.5)
+			map_canvas.draw_circle(point, radius * 1.8, Color(tint, 0.24))
+			map_canvas.draw_circle(point, radius, tint)
+
 func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, width: float) -> void:
+	if ship["kind"] in ["scout", "fighter"]:
+		return
 	if ship["kind"] != "miner":
 		var mounts: Array = {"cruiser": [Vector2(20, 3), Vector2(20, -3)], "destroyer": [Vector2(30, 12), Vector2(30, -12), Vector2(21, 16), Vector2(21, -16)]}.get(ship["kind"], [Vector2(FIGHTER_MUZZLE, 0)])
 		var axis: Vector2 = pose["direction"]
@@ -7061,6 +7089,7 @@ func _draw_map() -> void:
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
 		var shooter: int = int(ship["id"])
+		_draw_blaster_tracers(state, ship, poses)
 		if float(ship.get("missile_until", -1.0)) >= float(state["elapsed"]) and ship.has("missile_endpoint"):
 			var a: Vector2 = _screen_point(ship["missile_origin"])
 			var b: Vector2 = _screen_point(ship["missile_endpoint"])
