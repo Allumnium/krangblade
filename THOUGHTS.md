@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.55.9: Full-load waiting replaces the eight-year timer; monitor partially loaded freighters at resource-rich but unstaffed fields. Manual unload remains available.
+
 - v0.55.8: Twin repair beams represent existing per-hull repair throughput; monitor visual clutter and crowded station standoff. No shared repair capacity added.
 
 - v0.55.7: Class-grouped yard card keeps unavailable hulls and upgrades visible to explain progression; verify captions at reduced UI scales.

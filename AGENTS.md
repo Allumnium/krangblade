@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.55.9: Staged freighters wait for a full hold while resources remain available; no timed partial dispatch. Preserve depleted-site fallback, explicit orders and safety.
+
 - v0.55.8: Withdrawal repairs stop within station beam range (180 world units); twin green beams per repairing hull, existing safety and combined repair rate unchanged. Cargo docking unchanged.
 
 - v0.55.7: Shipyard card rows Small, Medium, Large, navigation. Medium (U) and Large (I) upgrade buttons lead their rows and apply only to the immediately preceding class; same authoritative sequential upgrade rules.
