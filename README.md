@@ -2,7 +2,13 @@
 
 Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three intended playable races. Only Empire is implemented. ENet multiplayer uses UDP 24567 (LAN/Tailscale); no Steam dependency.
 
-## Current gameplay — v0.19.0
+## Current economy — v0.45.0
+
+Three standard resources (Metals, Organics, Crystals), plus reserved raw antimatter and population. Remove Plastics/Textiles and Tech; ordinary hulls use Metals and Organics, foundational storage/housing uses Metals, advanced PDS/additional shipyards/Laser Matrix use Crystals. Crystal production starts locked and is unlockable at a planetary deposit with a Metal-funded Crystal Incubator; asteroid extraction, physical transport, salvage, trade thresholds, local stock, population, and authority remain. Metal Refinery costs Organics; Farms cost Metals. No new antimatter recipes. Values provisional.
+
+Earlier gameplay notes below are historical where superseded by the current economy.
+
+## Gameplay notes — v0.19.0
 
 Select owned fighters or colony ships by clicking or dragging a box; Shift-drag adds and Shift-click toggles. Ctrl+1–9 stores a control group, 1–9 recalls it, and Shift+number adds it. Right-click a discovered system or asteroid field to order fighter movement along the lanes; selected ships show their routes. H or Hold position stops selected fighters in place, including mid-lane, while retaining weapon fire and emergency repair withdrawal. Fighters automatically engage nearby hostiles and repair when safe, and direct occupation can capture hostile systems after their defenses are destroyed. Right-click a neutral system to send one eligible selected colony ship. Middle-drag pans; scroll zooms. Miners are autonomous by default: select them like fighters, right-click a discovered permitted field or individual rock to assign it, or right-click a system to restore automatic mining. They deliver cargo before returning to their assigned field; depleted assignments fall back to autonomous mining. Freighters remain autonomous. All material costs are paid from local stock before a construction or upgrade order is accepted; cancellations refund prepaid materials, and crew allocation and construction work remain gradual. Repeat and maintain orders wait for full local funding. Policy cards, regional allocation, warmup and the separate Upgrades tab are removed. Repeatable Economy buildings expand output, can bootstrap Crystal production, never cost their own output, and use fixed local recipes. The Economy tab also contains PDS, habitation and warehouse development. Nonfood construction reserves cover the next warehouse tier; a stronger early habitation penalty protects recovery. Colony hulls embark 40,000 settlers, reserving at least 500 residents for their origin shipyard. Plastics/Textiles/Tech baseline output doubles, freighters carry 30 t across seven shared bays, and hull Organics costs fall by two-thirds. Earlier version notes below describe historical behavior, not current controls.
 
@@ -14,7 +20,7 @@ Select your home planet to queue a logistics ship. Each Empire player starts wit
 
 ## Resources and logistics
 
-The six universal resources are Metals, Plastics, Textiles, Organics, Tech, and Crystals. Metals, Plastics and Crystals have mixed planetary deposit availability, while Organics and Crystals have planetary bonus data. Each planet has one production level per resource. Deposit extraction and provisional Organics production are active; Tech, Textiles and advanced component recipes remain deliberately unspecified.
+The universal resources are Metals, Organics and Crystals. Metals and Crystals have planetary deposit availability, while Organics and Crystals have planetary bonus data. Each system has local production levels and inventory. Raw antimatter remains separate and has no construction recipe.
 
 Inventories are planetary. Each resource has adjustable minimum import and maximum export targets, shared for own and allied traffic. Generic cargo ships carry mixed resources, choose a short reachable delivery greedily, travel physically along friendly fixed routes and collect surplus on arrival (no reservations or owner priority). Ships may have to reassess a delivery or wait while loaded if demand disappears. They never move goods through hostile or unclaimed planets. Ship production is currently queued at the home world.
 

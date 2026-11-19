@@ -5,16 +5,12 @@ const MUTED := Color("#8ca5be")
 const ACCENT := Color("#62cbe8")
 const CONSOLE_BACKGROUND := Color("#080c12")
 const COLORS = {
-	"Metals": Color("#c1cedc"), "Plastics": Color("#f6a45b"),
-	"Textiles": Color("#48d6c1"), "Organics": Color("#8ed779"),
-	"Tech": Color("#5dbdff"), "Crystals": Color("#c8a2ff"), "Raw antimatter": Color("#f279d7")
+	"Metals": Color("#c1cedc"), "Organics": Color("#8ed779"),
+	"Crystals": Color("#c8a2ff"), "Raw antimatter": Color("#f279d7")
 }
 const ICONS = {
 	"Metals": preload("res://assets/ui/metals.svg"),
-	"Plastics": preload("res://assets/ui/plastics.svg"),
-	"Textiles": preload("res://assets/ui/textiles.svg"),
 	"Organics": preload("res://assets/ui/organics.svg"),
-	"Tech": preload("res://assets/ui/tech.svg"),
 	"Crystals": preload("res://assets/ui/crystals.svg")
 }
 

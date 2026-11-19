@@ -310,7 +310,7 @@ func _prepare_commands() -> void:
 		session.call("request_time_speed", 0)
 
 # Each real peer acknowledges the observed speed before the host advances.
-# Reuse otherwise untouched local Plastics thresholds as test acknowledgments.
+# Reuse otherwise untouched local Crystals thresholds as test acknowledgments.
 func _check_time_controls(state: Dictionary) -> bool:
 	if speed_stage >= TEST_SPEEDS.size():
 		return true
@@ -321,7 +321,7 @@ func _check_time_controls(state: Dictionary) -> bool:
 		if speed_requester and speed_stage > 0:
 			var confirmed: int = 0
 			for system in state["planets"]:
-				if bool(system["home"]) and is_equal_approx(float(system["thresholds"]["Plastics"]["min"]), 12.0 + float(speed_stage - 1)):
+				if bool(system["home"]) and is_equal_approx(float(system["thresholds"]["Crystals"]["min"]), 12.0 + float(speed_stage - 1)):
 					confirmed += 1
 			if confirmed == expected_players:
 				session.call("request_time_speed", expected)
@@ -366,7 +366,7 @@ func _check_time_controls(state: Dictionary) -> bool:
 		session.call("request_unload_cargo", [other])
 		session.call("request_salvage", [900000 + home_index], 910000 + home_index)
 	if speed_stage < TEST_SPEEDS.size() - 1:
-		session.call("request_thresholds", home_index, "Plastics", 12.0 + float(speed_stage), 25.0)
+		session.call("request_thresholds", home_index, "Crystals", 12.0 + float(speed_stage), 25.0)
 	speed_stage += 1
 	return speed_stage >= TEST_SPEEDS.size()
 
@@ -454,9 +454,11 @@ func _send_commands() -> void:
 	session.call("request_thresholds", home_index, "Metals", 99.0, 101.0)
 	session.call("request_thresholds", (home_index + 1) % expected_players, "Metals", 77.0, 88.0)
 	session.call("request_operation", home_index, "economy", "warehouse")
-	session.call("request_operation", home_index, "economy", "Textiles")
-	session.call("request_operation", home_index, "economy", "Textiles")
+	session.call("request_operation", home_index, "economy", "Crystals")
+	session.call("request_operation", home_index, "economy", "Crystals")
 	session.call("request_operation", home_index, "economy", "invalid")
+	session.call("request_operation", home_index, "economy", "Plastics")
+	session.call("request_thresholds", home_index, "Tech", 15.0, 65.0)
 	session.call("request_operation", (home_index + 1) % expected_players, "economy", "Metals")
 	session.call("request_operation", home_index, "pds", "999")
 	session.call("request_operation", (home_index + 1) % expected_players, "pds", "1")
@@ -684,8 +686,8 @@ func _check_economy_sync() -> void:
 				"2": priced_slots.get(2, {}) == ECON._cost("yard", 2),
 				"3": priced_slots.get(3, {}) == ECON._cost("yard", 3),
 				"4": int(system.get("warehouse_level", 0)) == 1,
-				"5": not buildings.has("invalid"),
-				"6": buildings.get("Textiles", false),
+				"5": not buildings.has("invalid") and not buildings.has("Plastics") and not system["thresholds"].has("Tech"),
+				"6": buildings.get("Crystals", false),
 				"7": ordered == 1,
 				"8": idle >= 1,
 				"9": is_equal_approx(float(thresholds["min"]), 15.0),
@@ -792,7 +794,7 @@ func _check_economy_sync() -> void:
 			economy_verified = true
 			# A normal game command is the completion acknowledgment. Return
 			# only after each real peer has independently verified its replica.
-			session.call("request_thresholds", home_index, "Plastics", 11.0, 22.0)
+			session.call("request_thresholds", home_index, "Crystals", 11.0, 22.0)
 	if not economy_verified:
 		create_timer(0.25).timeout.connect(_check_economy_sync)
 
@@ -804,7 +806,7 @@ func _return_after_all_verified() -> void:
 	for system in state.get("planets", []):
 		if not bool(system["home"]):
 			continue
-		var ack: Dictionary = system["thresholds"]["Plastics"]
+		var ack: Dictionary = system["thresholds"]["Crystals"]
 		if is_equal_approx(float(ack["min"]), 11.0) and is_equal_approx(float(ack["max"]), 22.0):
 			confirmed += 1
 	if economy_verified and confirmed == expected_players:
