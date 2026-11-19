@@ -298,7 +298,7 @@ func _resources() -> void:
 		rows.append([r, "%.0f t" % float(E.STARTING_STOCK[r])])
 	_table(["Resource", "Stock"], rows)
 	_section("Raw antimatter")
-	_body("A separate rare material extracted from special deposits. It can be collected and delivered; advanced construction recipes are reserved for future gameplay.")
+	_body("Science vessels collect one unit at a Pulsar after 30 years in range. Antimatter remains aboard; uses come later.")
 
 func _population() -> void:
 	_body("Residents power production, staff shipyards and crew ships. Food and housing limit terrestrial growth.")
@@ -413,8 +413,8 @@ func _infrastructure() -> void:
 func _ships() -> void:
 	_body("Select a shipyard to construct ships. Costs are paid from the local station. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Queued work can be canceled and eligible orders repeated.")
 	var rows: Array = []
-	var names := {"fighter": "Fighter", "miner": "Mining ship", "ship": "Logistics ship", "colony_ship": "Colony ship"}
-	for kind in ["fighter", "miner", "ship", "colony_ship"]:
+	var names := {"fighter": "Fighter", "miner": "Mining ship", "ship": "Logistics ship", "colony_ship": "Colony ship", "science_ship": "Science vessel"}
+	for kind in ["fighter", "miner", "ship", "colony_ship", "science_ship"]:
 		rows.append([names[kind], _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(1))])
 	_table(["Ship", "Materials", "Crew", "Time (Lv 1)"], rows)
 	_section("Shipyard upgrades")

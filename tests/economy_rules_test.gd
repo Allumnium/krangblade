@@ -1884,7 +1884,7 @@ func _initialize() -> void:
 	crew_home["population"] = 150000.0
 	for kind in ECON.SHIP_KINDS:
 		var people: float = float(ECON.CREW_COSTS[kind])
-		assert(people == float({"colony_ship": 40000.0, "ship": 2000.0, "fighter": 500.0, "miner": 750.0}[kind]))
+		assert(people == float({"colony_ship": 40000.0, "ship": 2000.0, "fighter": 500.0, "miner": 750.0, "science_ship": 2000.0}[kind]))
 		assert(ECON.enqueue(crew_state, 1, 0, kind))
 		var crew_job: Dictionary = crew_home["queue"][0]
 		var original_population: float = float(crew_home["population"])
@@ -3420,26 +3420,22 @@ func _test_antimatter_extraction() -> void:
 	ECON.step(state, 1.0)
 	assert(miner["mining_mode"] == "idle")
 	assert(ECON.set_mining_policy(state, 1, 0, true, false, false))
-	var loaded: bool = false
-	for tick in range(200):
-		ECON.step(state, 0.5)
-		var totals: Dictionary = ECON.raw_antimatter_totals(state, 1)
-		var remaining: float = ECON.field_inventory(map_data["fields"][0])[ECON.ANTIMATTER]
-		assert(is_equal_approx(remaining + float(totals["stock"]) + float(totals["cargo"]), 30.0))
-		if float(totals["cargo"]) > ECON.EPS:
-			loaded = true
-			assert(totals["stock"] == 0.0)
-			assert(ECON._cargo_total(miner) <= ECON.MINER_CAPACITY)
-		if float(totals["stock"]) >= 30.0 - ECON.EPS:
-			assert(miner["position"] == ECON.station_position(state, 0, float(state["elapsed"])))
-			break
-	assert(loaded and is_equal_approx(float(home["stock"][ECON.ANTIMATTER]), 30.0))
-	assert(ECON.raw_antimatter_totals(bytes_to_var(var_to_bytes(state)), 1)["stock"] == 30.0)
-	ECON._destroy_station(state, ECON.military_graph(state), 0)
-	assert(ECON.raw_antimatter_totals(state, 1)["stock"] == 0.0)
-	assert(ECON.raw_antimatter_totals(state, 2)["stock"] == 0.0)
-	assert(state["salvage"].values().any(func(pile: Dictionary) -> bool: return pile["resource"] == ECON.ANTIMATTER and is_equal_approx(float(pile["amount"]), 6.0)))
-	print("PASS: central antimatter generation, opt-in extraction, station delivery and guaranteed salvage")
+	assert(not ECON.command_miners(state, 1, [900], 0))
+	ECON._finish(state, 0, home, {"id": 901, "kind": "science_ship"})
+	var craft: Dictionary = state["ships"].back()
+	var graph: Dictionary = ECON.military_graph(state)
+	assert(not ECON.issue_unit_order(state, 2, [901], {"kind": "collect", "target": 0}, false))
+	assert(ECON.issue_unit_order(state, 1, [901], {"kind": "collect", "target": 0}, false))
+	craft["position"] = deposit
+	assert(ECON._work_science(state, graph, craft, 29.0))
+	assert(ECON._cargo_total(craft) == 0.0)
+	assert(ECON._work_science(state, graph, craft, 1.0))
+	assert(ECON._cargo_total(craft) == 1.0)
+	assert(ECON.field_inventory(map_data["fields"][0])[ECON.ANTIMATTER] == 29.0)
+	assert(not ECON.issue_unit_order(state, 1, [901], {"kind": "collect", "target": 0}, false))
+	assert(not ECON.command_unload_cargo(state, 1, [901]))
+	assert(ECON.raw_antimatter_totals(bytes_to_var(var_to_bytes(state)), 1)["cargo"] == 1.0)
+	print("PASS: Pulsar generation, science-only collection, 30-year timer, retained cargo and state serialization")
 
 func _test_match_elimination() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 3, "Grid"), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 2}}, [1, 2, 3], false)

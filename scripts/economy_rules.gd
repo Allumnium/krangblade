@@ -91,10 +91,12 @@ const WAREHOUSE_COSTS = [
 ]
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
 const CIVILIAN_CONSUMPTION = {"Metals": 0.1}
-const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner"]
+const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship"]
+const SCIENCE_CAPACITY: float = 1.0
+const SCIENCE_COLLECTION_YEARS: float = 30.0
 const SHIPYARD_QUEUE_LIMIT = 8
 const MAX_SHIPYARD_LEVEL = 3
-const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 750.0}
+const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 750.0, "science_ship": 2000.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
 const STATION_HP: float = SHIP_HP * 10.0
@@ -301,7 +303,7 @@ static func _mining_resources(state: Dictionary, player: int, index: int) -> Arr
 	var resources: Array[String] = []
 	if bool(policy["enabled"]):
 		if bool(state["map"]["fields"][index].get("antimatter", false)):
-			return [ANTIMATTER]
+			return resources
 		for resource in MINED_RESOURCES:
 			if bool(policy[resource]):
 				resources.append(resource)
@@ -654,6 +656,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
 		"colony_ship": return {"Metals": 1200.0, "Organics": 30.0}
 		"fighter": return {"Metals": 270.0, "Organics": 10.0}
 		"miner": return {"Metals": 540.0, "Organics": 20.0}
+		"science_ship": return {"Metals": 900.0, "Organics": 30.0}
 		"yard":
 			match level:
 				1: return {"Metals": 480.0}
@@ -677,6 +680,7 @@ static func _work(kind: String, level: int) -> float:
 		"colony_ship": return 102.0
 		"fighter": return 36.0
 		"miner": return 60.0
+		"science_ship": return 90.0
 		"yard": return 30.0
 		"pds": return 36.0
 		"reinforced_plating", "laser_matrix": return 60.0
@@ -845,7 +849,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 			if not bool(p["home"]):
 				return false
 			target = ""
-		"colony_ship", "fighter", "miner":
+		"colony_ship", "fighter", "miner", "science_ship":
 			target = ""
 		"yard":
 			level = next_shipyard_slot(p)
@@ -925,7 +929,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 	state["next_id"] = id + 1
 	p["queue"].append({"id": id, "kind": kind, "target": target, "yard_slot": yard_slot, "level": level,
 		"cost": cost, "work": 30.0 if kind == "economy_building" else _work(kind, level),
-		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if kind in ["ship", "colony_ship", "fighter", "miner"] else 0})
+		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": SHIP_SIZE if SHIP_KINDS.has(kind) else 0})
 	if kind == "yard":
 		p["queue"][-1]["station_slot"] = station_slot
 	return true
@@ -1332,7 +1336,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			p["yards"][int(item["target"])]["hp"] = SHIP_HP * 10.0 * int(item["level"])
 			if int(item["level"]) >= MAX_SHIPYARD_LEVEL:
 				p["continuous"]["yard_upgrade:" + str(item["target"])] = false
-		"ship", "colony_ship", "fighter", "miner":
+		"ship", "colony_ship", "fighter", "miner", "science_ship":
 			var launch: Vector2 = station_position(state, index, float(state["elapsed"]))
 			var rally: Dictionary = {}
 			for slot in range(p["yards"].size()):
@@ -1496,6 +1500,7 @@ static func _cargo_total(ship: Dictionary) -> float:
 static func cargo_capacity(kind: String) -> float:
 	match kind:
 		"miner": return MINER_CAPACITY
+		"science_ship": return SCIENCE_CAPACITY
 		"fighter": return FIGHTER_CAPACITY
 		"colony_ship": return COLONY_CAPACITY
 	return CARGO_CAPACITY
@@ -2677,6 +2682,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 # and repair rules as attack-move. The target is a stable hull ID, not a slot.
 static func _clear_tactical_order(ship: Dictionary) -> void:
 	_clear_local_move(ship)
+	ship.erase("science_years")
 	ship.erase("launch_rally")
 	ship.erase("move_only")
 	ship.erase("attack_order")
@@ -2744,6 +2750,8 @@ static func _damaged(target: Dictionary) -> bool:
 
 static func can_deposit(state: Dictionary, ship: Dictionary, target_id: int) -> bool:
 	var ref: Dictionary = service_targets(state).get(target_id, {})
+	if ship.get("kind", "") == "science_ship" or ref.get("entity", {}).get("kind", "") == "science_ship":
+		return false
 	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or target_id == int(ship["id"]) or not _friendly_target(state, int(ship["owner"]), ref) or _cargo_total(ship) <= EPS:
 		return false
 	if ref["kind"] == "ship":
@@ -2781,7 +2789,7 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 	match mode:
 		"wander": return SHIP_KINDS.has(ship.get("kind", ""))
 		"mine", "repair": return ship.get("kind", "") == "miner"
-		"salvage": return cargo_capacity(str(ship.get("kind", ""))) > EPS
+		"salvage": return ship.get("kind", "") != "science_ship" and cargo_capacity(str(ship.get("kind", ""))) > EPS
 		"trade": return ship.get("kind", "") == "ship"
 	return false
 
@@ -3041,6 +3049,75 @@ static func _work_follow(state: Dictionary, graph: Dictionary, ship: Dictionary,
 	var budget_dt: float = minf(dt, maxf(0.0, distance - reach) / SHIP_SPEED)
 	_manual_travel(state, graph, ship, node, point, budget_dt, reach)
 	ship["follow_arrived"] = (ship["position"] as Vector2).distance_to(point) <= reach + EPS
+	return true
+
+# Pulsars retain the finite reservoir and navigation nodes of the old deposits.
+static func _science_target_valid(state: Dictionary, graph: Dictionary, ship: Dictionary, index: int) -> bool:
+	var fields: Array = state["map"].get("fields", [])
+	if ship["kind"] != "science_ship" or _cargo_total(ship) > EPS or index < 0 or index >= fields.size() or not discovered(state, int(ship["owner"]), "fields", index):
+		return false
+	var field: Dictionary = fields[index]
+	if not bool(field.get("antimatter", false)) or float(field_inventory(field)[ANTIMATTER]) < 1.0 - EPS:
+		return false
+	var node: int = state["planets"].size() + index
+	var nav: Dictionary = _manual_nav(state, graph, ship, node)
+	return sector_contains(graph, node, ship["position"]) or _military_paths(nav["graph"], nav["node"])["distance"].has(int(ship["at"]))
+
+static func _work_science(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+	if ship["kind"] != "science_ship" or bool(ship.get("holding", false)):
+		return false
+	var order: Dictionary = ship.get("unit_order", {})
+	if order.get("kind", "") != "collect":
+		if not _is_idle_ship(ship) or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty():
+			return false
+		if _cargo_total(ship) >= SCIENCE_CAPACITY - EPS:
+			ship["navigation_target"] = ship["position"]
+			return true
+		if autocast_remaining(state, ship, "wander") > EPS:
+			return false
+		var best: float = INF
+		var chosen: int = -1
+		for index in range(state["map"].get("fields", []).size()):
+			if not _science_target_valid(state, graph, ship, index):
+				continue
+			var distance: float = (ship["position"] as Vector2).distance_squared_to(state["map"]["fields"][index]["position"])
+			if distance < best:
+				best = distance
+				chosen = index
+		if chosen < 0:
+			return false
+		_set_unit_order(state, ship, {"kind": "collect", "target": chosen})
+		ship["science_years"] = 0.0
+		order = ship["unit_order"]
+	var index: int = int(order["target"])
+	if not _science_target_valid(state, graph, ship, index):
+		ship.erase("unit_order")
+		ship.erase("science_years")
+		_finish_manual(ship)
+		return true
+	var field: Dictionary = state["map"]["fields"][index]
+	var point: Vector2 = field["position"]
+	var node: int = state["planets"].size() + index
+	var reach: float = minf(100.0, float(field["radius"]) * 0.65)
+	if (ship["position"] as Vector2).distance_to(point) > reach + EPS:
+		_manual_travel(state, graph, ship, node, point, dt, reach * 0.65)
+		return true
+	ship["navigation_target"] = ship["position"]
+	ship["science_years"] = minf(SCIENCE_COLLECTION_YEARS, float(ship.get("science_years", 0.0)) + dt)
+	if float(ship["science_years"]) >= SCIENCE_COLLECTION_YEARS - EPS:
+		var remaining: float = SCIENCE_CAPACITY
+		for chunk in field["chunks"]:
+			if chunk["resource"] != ANTIMATTER:
+				continue
+			var taken: float = minf(remaining, float(chunk["remaining"]))
+			chunk["remaining"] -= taken
+			remaining -= taken
+			if remaining <= EPS:
+				break
+		ship["cargo"][ANTIMATTER] = SCIENCE_CAPACITY
+		ship.erase("science_years")
+		ship.erase("unit_order")
+		_finish_manual(ship)
 	return true
 
 static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionary, node: int, point: Vector2, dt: float, reach: float = 0.0) -> bool:
@@ -3380,6 +3457,9 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 			return order.get("point", Vector2.INF)
 		"salvage":
 			return state.get("salvage", {}).get(target, {}).get("position", Vector2.INF)
+		"collect":
+			if target >= 0 and target < state["map"].get("fields", []).size():
+				return state["map"]["fields"][target]["position"]
 		"mine":
 			if target >= 0 and target < state["map"].get("fields", []).size():
 				var field: Dictionary = state["map"]["fields"][target]
@@ -3431,6 +3511,8 @@ static func _unit_order_running(ship: Dictionary) -> bool:
 			return bool(ship.get("salvage_delivery", false))
 		"colonize":
 			return int(ship.get("dest", -1)) >= 0
+		"collect":
+			return ship["kind"] == "science_ship" and _cargo_total(ship) < SCIENCE_CAPACITY - EPS
 		"mine":
 			var target: int = int(order["target"])
 			return target >= 0 and int(ship.get("assigned_field", -1)) == target and (int(ship.get("field", -1)) != target or ship.get("mining_mode", "") != "mining")
@@ -3440,6 +3522,8 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var kind: String = str(order.get("kind", ""))
 	var owner: int = int(ship["owner"])
 	var fighter: bool = ship["kind"] == "fighter"
+	if ship["kind"] == "science_ship" and kind in ["unload", "drop", "deposit", "salvage"]:
+		return false
 	if kind == "unload":
 		return cargo_capacity(str(ship["kind"])) > EPS
 	if kind == "drop":
@@ -3481,6 +3565,8 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			return cargo_capacity(str(ship["kind"])) > EPS and state.get("salvage", {}).has(target)
 		"colonize":
 			return ship["kind"] == "colony_ship" and target >= 0 and target < state["planets"].size() and discovered(state, owner, "planets", target)
+		"collect":
+			return _science_target_valid(state, graph, ship, target)
 		"mine":
 			return ship["kind"] == "miner" and order.get("chunk", -1) is int and (target == -1 or (target >= 0 and target < state["map"].get("fields", []).size() and discovered(state, owner, "fields", target)))
 	return false
@@ -3535,6 +3621,15 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 				for ship in _owned_units(state, player, ids):
 					ship["unit_order"]["heading"] = order["heading"]
 			return accepted
+		"collect":
+			for ship in _owned_units(state, player, ids):
+				_cancel_salvage_order(ship)
+				_clear_tactical_order(ship)
+				_clear_local_hold(ship)
+				_interrupt_work(ship)
+				_set_unit_order(state, ship, order.duplicate(true))
+				ship["science_years"] = 0.0
+			return true
 		"mine":
 			return command_miners(state, player, ids, target, int(order.get("chunk", -1)))
 		"salvage":
@@ -3622,6 +3717,7 @@ static func _clear_local_move(ship: Dictionary) -> void:
 
 static func _clear_local_hold(ship: Dictionary) -> void:
 	_clear_local_move(ship)
+	ship.erase("science_years")
 	ship.erase("launch_rally")
 	ship.erase("move_only")
 	if bool(ship.get("holding", false)) and ship.get("kind", "") == "miner" and ship.get("mining_mode", "") == "mining":
@@ -4246,7 +4342,7 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		var best: Dictionary = {}
 		var distance: float = INF
 		for ship in units:
-			if cargo_free(ship) <= EPS or bool(ship.get("retreating", false)) or patrol_node(state, graph, player, pile["position"]) < 0:
+			if ship.get("kind", "") == "science_ship" or cargo_free(ship) <= EPS or bool(ship.get("retreating", false)) or patrol_node(state, graph, player, pile["position"]) < 0:
 				continue
 			var d: float = (ship["position"] as Vector2).distance_squared_to(pile["position"])
 			if d < distance:
@@ -4277,7 +4373,7 @@ static func command_unload_cargo(state: Dictionary, player: int, ids: Array) -> 
 	var units: Array = _owned_units(state, player, ids)
 	var changed: bool = false
 	for ship in units:
-		if cargo_capacity(str(ship["kind"])) <= EPS or _cargo_total(ship) <= EPS or bool(ship.get("retreating", false)):
+		if ship.get("kind", "") == "science_ship" or cargo_capacity(str(ship["kind"])) <= EPS or _cargo_total(ship) <= EPS or bool(ship.get("retreating", false)):
 			continue
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
@@ -4808,7 +4904,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 	var planets: Array = state["planets"]
 	var team: int = int(state["teams"][player])
 	var owned: Array[int] = []
-	var counts: Dictionary = {"ship": 0, "colony_ship": 0, "miner": 0, "fighter": 0}
+	var counts: Dictionary = {"ship": 0, "colony_ship": 0, "miner": 0, "fighter": 0, "science_ship": 0}
 	var reserved: Dictionary = {}
 	var fighters: Array = []
 	var idle_colonies: Array = []
@@ -5954,6 +6050,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			continue
 		if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
 			_work_local_hold(combat_graph, ship, dt)
+			continue
+		if _work_science(state, combat_graph, ship, dt):
 			continue
 		if ship.get("kind", "ship") == "colony_ship":
 			if _work_colony(state, ship, dt):
