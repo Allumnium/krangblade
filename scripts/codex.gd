@@ -370,7 +370,7 @@ func _mining() -> void:
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
 	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Local resource ceiling", "%.0f t/yr" % E.PLANET_MINING_LIMIT], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
-	_body("Destroyed ships can leave drifting salvage. Mining and logistics ships may collect it in safe space; miners prioritize reachable safe salvage. Debris lasts %.0f–%.0f simulation years. Logistics ships salvage at one-quarter the mining ship rate. Miners repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
+	_body("Destroyed ships can leave drifting salvage. Mining and logistics ships may collect it in safe space; miners prioritize reachable safe salvage. Wreck debris lasts %.0f–%.0f simulation years; cancelled construction salvage persists. Logistics ships salvage at one-quarter the mining ship rate. Miners repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
 
 func _trade() -> void:
@@ -397,7 +397,7 @@ func _expansion() -> void:
 	_note("A colony is a long-term economic investment. Food imports and local farming improve its growth, while fleets defend its shipping lanes.")
 
 func _infrastructure() -> void:
-	_body("Select a station and open Build. Infrastructure jobs are prepaid and advance in a shared sequential construction queue. Canceling refunds allocated materials. Shipyards have independent hull queues.")
+	_body("Select a station and open Build. Infrastructure jobs are prepaid and advance in a shared sequential construction queue. Canceling a physical build drops all prepaid materials as persistent salvage. Non-standalone upgrades refund directly. Shipyards have independent hull queues.")
 	_section("Resource production")
 	var rows: Array = []
 	for r in E.RESOURCES:
@@ -412,7 +412,7 @@ func _infrastructure() -> void:
 	_body("Warehouse upgrades expand storage; habitation increases terrestrial housing capacity. Orbital Eco-Housing adds self-sufficient residents in planetless systems. Additional shipyards also supply eco-housing.")
 
 func _ships() -> void:
-	_body("Select a shipyard to construct ships. Costs are paid from the local station. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Queued work can be canceled and eligible orders repeated.")
+	_body("Select a shipyard to construct ships. Costs are paid from the local station. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
 	var names := {"fighter": "Fighter", "miner": "Mining ship", "ship": "Logistics ship", "colony_ship": "Colony ship", "science_ship": "Science vessel"}
 	for kind in ["fighter", "miner", "ship", "colony_ship", "science_ship"]:
@@ -426,7 +426,7 @@ func _ships() -> void:
 	_table(["Level", "Build speed", "Staff required"], rows)
 
 func _combat() -> void:
-	_body("Fighters engage hostile targets automatically when idle or attack-moving. Autocast cooldown after orders or arrival: Wander/Trade %.0f years, Mine/Salvage %.0f, Repair none. Follow keeps a safe distance from a friendly hull until replaced. New orders act immediately. Ships maintain spacing even on shared commands. Hold stops movement; damaged ships can withdraw and repair." % [E.AUTOCAST_COOLDOWN_YEARS, E.MINING_SALVAGE_COOLDOWN_YEARS])
+	_body("Fighters engage hostile targets automatically when idle or attack-moving. Autocast cooldown after orders or arrival: Wander/Trade %.0f s, Mine/Salvage %.0f s at 1×; Repair and Farm have no cooldown. Follow keeps a safe distance from a friendly hull until replaced. New orders act immediately. Ships maintain spacing even on shared commands. Hold stops movement; damaged ships can withdraw and repair." % [E.AUTOCAST_COOLDOWN_YEARS, E.MINING_SALVAGE_COOLDOWN_YEARS])
 	_table(["Weapon", "Damage / shot or volley", "Range"], [["Fighter laser", "%.0f" % E.LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Mining lasers", "%.0f" % E.MINER_LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Planetary defense", "%.0f" % E.PDS_DAMAGE, "%.0f" % E.PDS_RANGE]])
 	_section("Station defenses")
 	_table(["Upgrade", "Effect", "Materials"], [["Reinforced Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Laser Matrix", "%d defensive lasers" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Planetary defense battery", _recipe(E._cost("pds", 1))]])

@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.53.1: Verify cooldown seconds at all speeds, shipyard ghost and port alignment, cancellation conservation/authority for queued and active hulls/buildings and upgrades, persistent salvage recovery and peer replication. Runtime and visual validation pending.
+
 - [ ] v0.53.0: Validate colony farming, 100 t cap, hold/colonization precedence, full-depot fallback, manual delivery, mixed command cards, two-/three-peer farm toggle and cargo replication. Runtime pending.
 
 - [ ] v0.52.0: Validate science vessel build, travel, authority, interruption, 30-year collection and cargo persistence; inspect Pulsar art and animated containment, compact HUD and overlay on peers. Antimatter uses deferred; prototype costs subject to balance. Runtime pending.
