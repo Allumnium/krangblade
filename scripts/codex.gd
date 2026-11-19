@@ -374,7 +374,7 @@ func _mining() -> void:
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
 
 func _trade() -> void:
-	_body("Every station has separate resource stockpiles and import/export settings. Freighters move surplus between friendly systems. With Auto-Trade enabled, idle ships wait near miners or salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait if storage is full. Trade surplus without an importer returns to owned storage.")
+	_body("Every station has separate resource stockpiles and import/export settings. Freighters move surplus between friendly systems. With Auto-Trade enabled, idle ships wait within handoff range on the depot-facing side of miners, or at salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait if storage is full. Trade surplus without an importer returns to owned storage.")
 	_flow(["Source surplus", "Freighter in transit", "Destination deficit"])
 	_section("Trade thresholds")
 	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both use local storage capacity; the Import and Export checkboxes toggle each independently.")
@@ -412,7 +412,7 @@ func _infrastructure() -> void:
 	_body("Warehouse upgrades expand storage; habitation increases terrestrial housing capacity. Orbital Eco-Housing adds self-sufficient residents in planetless systems. Additional shipyards also supply eco-housing.")
 
 func _ships() -> void:
-	_body("Select a shipyard to construct ships. Costs are paid from the local station. Freighters have ten 10 t bays. Ship selection displays crew. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
+	_body("Select a shipyard to construct ships. Costs are paid from the local station. Freighters have ten 10 t bays. Miners travel slower; fighters are 20% faster than freighters. Ship selection displays crew. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
 	var names := {"fighter": "Fighter", "miner": "Mining ship", "ship": "Freighter", "colony_ship": "Colony ship", "science_ship": "Science vessel"}
 	for kind in ["fighter", "miner", "ship", "colony_ship", "science_ship"]:

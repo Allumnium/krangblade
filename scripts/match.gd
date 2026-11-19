@@ -477,7 +477,7 @@ func _build_ui() -> void:
 	add_child(map_canvas)
 	map_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	map_canvas.offset_left = 8
-	map_canvas.offset_top = HEADER_HEIGHT + 16
+	map_canvas.offset_top = 0
 	map_canvas.offset_right = -8
 	map_canvas.offset_bottom = -8
 	map_canvas.clip_contents = false
@@ -486,6 +486,7 @@ func _build_ui() -> void:
 	map_canvas.draw.connect(_draw_map)
 	map_canvas.resized.connect(_map_resized)
 	header_panel = PanelContainer.new()
+	header_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(header_panel)
 	var header_style := StyleBoxEmpty.new()
 	header_style.set_content_margin_all(6.0)
@@ -496,12 +497,14 @@ func _build_ui() -> void:
 	header_panel.offset_top = 8
 	header_panel.offset_bottom = 8 + HEADER_HEIGHT
 	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_theme_constant_override("separation", 4)
 	header_panel.add_child(row)
 	year_label = _global_stat(row, "%d A.D." % ECONOMY.START_YEAR, HUD.ACCENT)
 	_build_global_bar(row)
 	global_population_label = _global_stat(row, "0", Color("#b9d9ed"), true)
 	var header_spacer := Control.new()
+	header_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(header_spacer)
 	var help := _button("", _open_codex, row)
@@ -684,8 +687,11 @@ func _build_ui() -> void:
 	ship_overview.add_child(selection_grid)
 	ship_detail = _label("", 13)
 	ship_overview.add_child(ship_detail)
-	var crew_row: HBoxContainer = _population_row(ship_overview)
+	var crew_row := HBoxContainer.new()
+	ship_overview.add_child(crew_row)
 	ship_population = _label("", 13)
+	ship_population.autowrap_mode = TextServer.AUTOWRAP_OFF
+	ship_population.add_theme_color_override("font_color", Color("#b9d9ed"))
 	crew_row.add_child(ship_population)
 	crew_row.hide()
 	weapon_details = _label("", 12)
@@ -1194,7 +1200,7 @@ func _ship_stats(kind: String) -> String:
 		"fighter": details = "Engages hostile ships · Damage %.0f · Range %.0f" % [ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
-	return "%s\nHP %.0f · Speed %.0f/s (1×) · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.SHIP_SPEED, ECONOMY.SHIP_SIZE]
+	return "%s\nHP %.0f · Speed %.0f/s (1×) · Size %d" % [details, ECONOMY.SHIP_HP, ECONOMY.ship_speed(kind), ECONOMY.SHIP_SIZE]
 
 func _build_production_summary() -> void:
 	var header := HBoxContainer.new()
@@ -2073,15 +2079,15 @@ func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
 	var pos: Vector2 = ECONOMY.combat_position(state, ECONOMY.military_graph(state), ship)
 	var mode: String = ship.get("mining_mode", "idle")
 	if mode == "outbound":
-		return pos.distance_to(ship["mining_target"]) / ECONOMY.SHIP_SPEED
+		return pos.distance_to(ship["mining_target"]) / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
 	if mode == "return":
-		return pos.distance_to(points[int(ship["at"])]) / ECONOMY.SHIP_SPEED
+		return pos.distance_to(points[int(ship["at"])]) / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
 	var remaining: float = 0.0
 	for index in ship["route"]:
 		var next: Vector2 = points[int(index)]
 		remaining += pos.distance_to(next)
 		pos = next
-	return remaining / ECONOMY.SHIP_SPEED
+	return remaining / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
 
 func _build_field_command_card(parent: Container) -> void:
 	field_command_grid = _ability_grid(parent)
@@ -2633,7 +2639,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	elif int(ship.get("combat_target", -1)) >= 0:
 		status = "Engaged"
 	elif ship.has("local_move_target"):
-		status = "Moving · ETA %.1f yr" % ((ship["position"] as Vector2).distance_to(ship["local_move_target"]) / ECONOMY.SHIP_SPEED)
+		status = "Moving · ETA %.1f yr" % ((ship["position"] as Vector2).distance_to(ship["local_move_target"]) / ECONOMY.ship_speed(str(ship.get("kind", "ship"))))
 	if not bool(ship.get("retreating", false)):
 		if ship.has("attack_order"):
 			status = "Attacking target"
@@ -2692,7 +2698,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft.get("cargo", {}).get(resource, 0.0))
 	if not multiple:
 		selected_crew = float(ship.get("crew", 0.0))
-	ship_population.text = _crew_text(selected_crew) + (" total crew" if multiple else " crew")
+	ship_population.text = ("Total crew: " if multiple else "Crew: ") + _crew_text(selected_crew)
 	ship_population.get_parent().show()
 	command_card.show()
 	var combat_owned: bool = false
@@ -2832,7 +2838,7 @@ func _build_territory_layer() -> void:
 	add_child(territory_layer)
 	territory_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	territory_layer.offset_left = 8
-	territory_layer.offset_top = HEADER_HEIGHT + 16
+	territory_layer.offset_top = 0
 	territory_layer.offset_right = -8
 	territory_layer.offset_bottom = -8
 	territory_layer.clip_contents = true

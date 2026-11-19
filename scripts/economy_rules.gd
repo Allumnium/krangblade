@@ -69,7 +69,10 @@ const MINER_ASTEROID_MULTIPLIER: float = 3.0
 const MINER_REPAIR_RATE: float = 5.0
 const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
 const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
-const SHIP_SPEED: float = MAP.TRAVEL_SPEED
+const SHIP_SPEED: float = MAP.TRAVEL_SPEED # Map-scale reference speed.
+const MINER_SPEED: float = SHIP_SPEED * 0.8
+const FREIGHTER_SPEED: float = SHIP_SPEED * 1.1
+const FIGHTER_SPEED: float = FREIGHTER_SPEED * 1.2
 const AUTOCAST_COOLDOWN_YEARS: float = 30.0
 const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
@@ -119,10 +122,10 @@ const SHIP_SEPARATION_RADIUS: float = 45.0
 const SHIP_CLEARANCE: float = 32.0
 # Service within the station footprint; contact correction need not permit exact center arrival.
 const STATION_DOCK_RANGE: float = 64.0
-const SHIP_CLEARANCE_PASSES: int = 6
+const SHIP_CLEARANCE_PASSES: int = 1
 const FOLLOW_DISTANCE: float = SHIP_SEPARATION_RADIUS * 2.0
 const RALLY_ARRIVAL_RADIUS: float = SHIP_SEPARATION_RADIUS * 2.0
-const SHIP_SEPARATION_STRENGTH: float = 0.65
+const SHIP_SEPARATION_STRENGTH: float = 0.15
 const FORMATION_RADIUS: float = 105.0
 const FORMATION_TRAVEL_FRACTION: float = 0.8
 const WITHDRAW_HP: float = 46.0
@@ -1323,7 +1326,7 @@ static func _work_launch_rally(state: Dictionary, ship: Dictionary, dt: float) -
 			_move({"map": graph}, ship, dt)
 			return true
 		if not sector_contains(graph, node, ship["position"]):
-			_navigate(ship, graph["points"][node], SHIP_SPEED * dt)
+			_navigate(ship, graph["points"][node], ship_speed(str(ship.get("kind", "ship"))) * dt)
 			return true
 	elif not (ship["route"] as Array).is_empty():
 		_move(state, ship, dt)
@@ -1332,7 +1335,7 @@ static func _work_launch_rally(state: Dictionary, ship: Dictionary, dt: float) -
 	# can otherwise keep a crowded fleet fighting the same arrival target.
 	var distance: float = (ship["position"] as Vector2).distance_to(rally["point"])
 	if distance > RALLY_ARRIVAL_RADIUS:
-		_navigate(ship, rally["point"], minf(SHIP_SPEED * dt, distance - RALLY_ARRIVAL_RADIUS * 0.9))
+		_navigate(ship, rally["point"], minf(ship_speed(str(ship.get("kind", "ship"))) * dt, distance - RALLY_ARRIVAL_RADIUS * 0.9))
 	if (ship["position"] as Vector2).distance_to(rally["point"]) <= RALLY_ARRIVAL_RADIUS:
 		ship.erase("launch_rally")
 		ship.erase("move_only")
@@ -1674,11 +1677,18 @@ static func _service_point(state: Dictionary, ship: Dictionary, index: int) -> V
 			return station_position(state, index, float(state["elapsed"]))
 	return state["map"]["points"][index]
 
+static func ship_speed(kind: String) -> float:
+	match kind:
+		"miner": return MINER_SPEED
+		"ship": return FREIGHTER_SPEED
+		"fighter": return FIGHTER_SPEED
+	return SHIP_SPEED
+
 static func _move(state: Dictionary, ship: Dictionary, dt: float, explicit_dock: Vector2 = Vector2.INF, dock_index: int = -1, dock_range: float = 0.0) -> bool:
 	var route: Array = ship["route"]
 	var points: Array = state["map"]["points"]
 	_ensure_position(points, ship)
-	var distance: float = SHIP_SPEED * dt
+	var distance: float = ship_speed(str(ship.get("kind", "ship"))) * dt
 	while not route.is_empty() and distance > EPS:
 		var node: int = int(route[0])
 		var next: Vector2 = points[node]
@@ -1781,6 +1791,17 @@ static func _resource_haul(ship: Dictionary) -> void:
 		ship.erase("salvage_depot")
 		ship.erase("next_salvage_search")
 
+static func _stage_wait_point(state: Dictionary, graph: Dictionary, ship: Dictionary, rock: Vector2, node: int, anchor: int, threats: Dictionary) -> Vector2:
+	var entry: Vector2 = _service_point(state, ship, anchor)
+	var toward: Vector2 = rock.direction_to(entry)
+	if toward.is_zero_approx():
+		toward = Vector2.RIGHT
+	# Leave breathing room for contact pushes and small miner movements.
+	var offset: Vector2 = rock + toward * RESOURCE_HANDOFF_RANGE * 0.8
+	if _salvage_safe(state, graph, int(ship["owner"]), offset, local_sector(graph, ship) if node < 0 else node, threats):
+		return offset
+	return rock
+
 static func _stage_candidate(state: Dictionary, graph: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, threats: Dictionary, node: int, anchor: int, point: Vector2, resources: Array, demand: float) -> Dictionary:
 	var owner: int = int(ship["owner"])
 	var team: int = int(state["teams"].get(owner, 0))
@@ -1845,7 +1866,8 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 		var demand: float = 1.0 + float(active.size()) * 2.0
 		demand /= 1.0 + float(occupied.get(count + i, 0)) * 4.0
 		for anchor in field_access_systems(state["map"], field):
-			var candidate: Dictionary = _stage_candidate(state, graph, ship, teams, cache, threats, count + i, anchor, point, resources, demand)
+			var wait_point: Vector2 = _stage_wait_point(state, graph, ship, point, count + i, anchor, threats)
+			var candidate: Dictionary = _stage_candidate(state, graph, ship, teams, cache, threats, count + i, anchor, wait_point, resources, demand)
 			if not candidate.is_empty() and float(candidate["score"]) < best_score:
 				best = candidate
 				best_score = float(candidate["score"])
@@ -1945,11 +1967,13 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 					if int(miner["owner"]) != owner or miner.get("kind", "") != "miner" or int(miner.get("field", -1)) != field_index or miner.get("mining_mode", "") not in ["outbound", "mining"] or bool(miner.get("holding", false)):
 						continue
 					var target: Vector2 = miner.get("mining_target", point)
-					var distance: float = (ship["position"] as Vector2).distance_squared_to(target)
-					if distance < nearest and _salvage_safe(state, graph, owner, target, node, threats):
+					var wait_point: Vector2 = _stage_wait_point(state, graph, ship, target, node, int(stage["anchor"]), threats)
+					var distance: float = (ship["position"] as Vector2).distance_squared_to(wait_point)
+					if distance < nearest and _salvage_safe(state, graph, owner, wait_point, node, threats):
 						nearest = distance
-						point = target
+						point = wait_point
 				stage["point"] = point
+				ship["navigation_target"] = point
 		if not available:
 			if _cargo_total(ship) > EPS:
 				_resource_haul(ship)
@@ -1966,7 +1990,7 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 	if not ship["route"].is_empty():
 		_move(state, ship, dt)
 	else:
-		_navigate(ship, point, minf(SHIP_SPEED * dt, (ship["position"] as Vector2).distance_to(point)))
+		_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, (ship["position"] as Vector2).distance_to(point)))
 		# A staged logistics ship can still collect debris in beam range,
 		# but at its reduced rate. It waits for miners rather than chasing.
 		_work_opportunistic_salvage(state, graph, ship, dt, busy, cells, false, threats)
@@ -2371,7 +2395,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 		if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
 			ship["mining_mode"] = "return"
 			return
-		_navigate(ship, target, SHIP_SPEED * dt)
+		_navigate(ship, target, ship_speed(str(ship.get("kind", "ship"))) * dt)
 		ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
 		if (ship["position"] as Vector2) == target:
 			ship["mining_mode"] = "mining"
@@ -2402,7 +2426,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			ship["mining_mode"] = "return"
 		return
 	if mode == "return":
-		_navigate(ship, origin, SHIP_SPEED * dt)
+		_navigate(ship, origin, ship_speed(str(ship.get("kind", "ship"))) * dt)
 		ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
 		if (ship["position"] as Vector2) == origin:
 			ship["mining_mode"] = "delivery"
@@ -3008,7 +3032,7 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 				return false
 			_manual_travel(state, graph, ship, node, point, dt, LASER_RANGE * 0.8)
 		else:
-			_navigate(ship, point, minf(SHIP_SPEED * dt, pos.distance_to(point) - LASER_RANGE * 0.8))
+			_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, pos.distance_to(point) - LASER_RANGE * 0.8))
 	else:
 		var entity: Dictionary = ref["entity"]
 		entity["hp"] = minf(float(ref["max_hp"]), float(entity.get("hp", ref["max_hp"])) + MINER_REPAIR_RATE * dt)
@@ -3099,7 +3123,7 @@ static func _work_follow(state: Dictionary, graph: Dictionary, ship: Dictionary,
 			var away: Vector2 = point.direction_to(pos)
 			if away.is_zero_approx():
 				away = Vector2.from_angle(float(ship["id"]) * 2.399963)
-			_navigate(ship, point + away * reach * 0.8, SHIP_SPEED * dt)
+			_navigate(ship, point + away * reach * 0.8, ship_speed(str(ship.get("kind", "ship"))) * dt)
 		return true
 	ship["move_only"] = true
 	var node: int = _attack_destination(graph, ref["entity"])
@@ -3107,7 +3131,7 @@ static func _work_follow(state: Dictionary, graph: Dictionary, ship: Dictionary,
 		return true
 	# Approach the moving hull through the same lane routing as a manual
 	# move, limiting the final step to the current standoff distance.
-	var budget_dt: float = minf(dt, maxf(0.0, distance - reach) / SHIP_SPEED)
+	var budget_dt: float = minf(dt, maxf(0.0, distance - reach) / ship_speed(str(ship.get("kind", "ship"))))
 	_manual_travel(state, graph, ship, node, point, budget_dt, reach)
 	ship["follow_arrived"] = (ship["position"] as Vector2).distance_to(point) <= reach + EPS
 	return true
@@ -3205,7 +3229,7 @@ static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionar
 	if not (ship["route"] as Array).is_empty():
 		_move({"map": nav["graph"]}, ship, dt, point, goal, minf(reach, STATION_DOCK_RANGE) if ship.get("cargo_order", {}).get("kind", "") == "deposit" else 0.0)
 		return (ship["position"] as Vector2).distance_to(point) <= reach + EPS
-	_navigate(ship, point, minf(SHIP_SPEED * dt, maxf(0.0, pos.distance_to(point) - reach)))
+	_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, maxf(0.0, pos.distance_to(point) - reach)))
 	return (ship["position"] as Vector2).distance_to(point) <= reach + EPS
 
 static func _finish_manual(ship: Dictionary) -> void:
@@ -3901,12 +3925,12 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
 		var entry: bool = ship.get("unit_order", {}).get("kind", "") == "sector_entry"
 		if (ship["route"] as Array).is_empty():
-			_navigate(ship, ship["local_move_target"] if entry else graph["points"][node], SHIP_SPEED * dt)
+			_navigate(ship, ship["local_move_target"] if entry else graph["points"][node], ship_speed(str(ship.get("kind", "ship"))) * dt)
 		else:
 			_move({"map": graph}, ship, dt, ship["local_move_target"] if entry else Vector2.INF, node)
 		return true
 	var point: Vector2 = ship["local_move_target"]
-	_navigate(ship, point, SHIP_SPEED * dt)
+	_navigate(ship, point, ship_speed(str(ship.get("kind", "ship"))) * dt)
 	if (ship["position"] as Vector2).distance_to(point) <= EPS:
 		if ship.has("arrival_heading"):
 			ship["heading"] = ship["arrival_heading"]
@@ -3932,11 +3956,11 @@ static func _work_local_hold(graph: Dictionary, ship: Dictionary, dt: float) -> 
 		if int(ship.get("dest", -1)) != node:
 			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
 		if (ship["route"] as Array).is_empty():
-			_navigate(ship, graph["points"][node], SHIP_SPEED * dt)
+			_navigate(ship, graph["points"][node], ship_speed(str(ship.get("kind", "ship"))) * dt)
 		else:
 			_move({"map": graph}, ship, dt)
 		return
-	_navigate(ship, ship["hold_position"], SHIP_SPEED * dt)
+	_navigate(ship, ship["hold_position"], ship_speed(str(ship.get("kind", "ship"))) * dt)
 	if (ship["position"] as Vector2).distance_to(ship["hold_position"]) <= EPS:
 		ship.erase("move_only")
 
@@ -4335,7 +4359,7 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 	ship["auto_salvage_target"] = best
 	var point: Vector2 = pile["position"]
 	if pos.distance_to(point) > TRACTOR_RANGE:
-		_navigate(ship, point, minf(SHIP_SPEED * dt, pos.distance_to(point) - TRACTOR_RANGE * 0.85))
+		_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, pos.distance_to(point) - TRACTOR_RANGE * 0.85))
 		return true
 	_collect_salvage(ship, pile, dt)
 	if civilian and idle:
@@ -4591,7 +4615,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		if not ship["route"].is_empty():
 			return true
 	elif (ship["position"] as Vector2).distance_to(dock) > STATION_DOCK_RANGE:
-		_navigate(ship, dock, SHIP_SPEED * dt)
+		_navigate(ship, dock, ship_speed(str(ship.get("kind", "ship"))) * dt)
 	if (ship["position"] as Vector2).distance_to(dock) > STATION_DOCK_RANGE + EPS:
 		return true
 	var p: Dictionary = state["planets"][depot]
@@ -5417,7 +5441,7 @@ static func _move_formation(graph: Dictionary, ship: Dictionary, dt: float) -> b
 	var points: Array = graph["points"]
 	var route: Array = ship["route"]
 	_ensure_position(points, ship)
-	var budget: float = SHIP_SPEED * dt
+	var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
 	if route.is_empty():
 		# Stationed formations gather around a common point rather than
 		# independently orbiting the star. Keep the full disk in rally range.
@@ -5469,14 +5493,14 @@ static func _coordinate_formations(state: Dictionary, graph: Dictionary, dt: flo
 		for craft in group:
 			var corrected: Vector2 = craft["position"] - _formation_offset(craft, axis)
 			progress = minf(progress, clampf((corrected - origin).dot(axis), 0.0, length))
-		var next_progress: float = minf(length, progress + SHIP_SPEED * FORMATION_TRAVEL_FRACTION * dt)
+		var next_progress: float = minf(length, progress + ship_speed(str(first.get("kind", "ship"))) * FORMATION_TRAVEL_FRACTION * dt)
 		var arrived: bool = true
 		for craft in group:
 			var offset: Vector2 = _formation_offset(craft, axis)
 			var corrected: Vector2 = craft["position"] - offset
 			var own_progress: float = clampf((corrected - origin).dot(axis), 0.0, length)
 			var target: Vector2 = origin + axis * maxf(own_progress, next_progress) + offset
-			_navigate(craft, target, SHIP_SPEED * dt)
+			_navigate(craft, target, ship_speed(str(craft.get("kind", "ship"))) * dt)
 			craft["leg"] = _lane_progress(points, craft)
 			arrived = arrived and (craft["position"] as Vector2).distance_to(endpoint + offset) <= EPS
 			moved[int(craft["id"])] = true
@@ -5560,10 +5584,10 @@ static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Diction
 	if int(ship["at"]) != site:
 		return
 	var dock: Vector2 = station_position(state, site, float(state["elapsed"]))
-	var distance: float = _navigate(ship, dock, SHIP_SPEED * dt)
+	var distance: float = _navigate(ship, dock, ship_speed(str(ship.get("kind", "ship"))) * dt)
 	if (ship["position"] as Vector2) != dock or not _repair_site_safe(state, graph, int(ship["owner"]), site):
 		return
-	var repair_time: float = maxf(0.0, dt - distance / SHIP_SPEED)
+	var repair_time: float = maxf(0.0, dt - distance / ship_speed(str(ship.get("kind", "ship"))))
 	ship["hp"] = minf(SHIP_HP, float(ship.get("hp", SHIP_HP)) + REPAIR_PER_YEAR * repair_time)
 	if float(ship["hp"]) >= SHIP_HP - EPS:
 		ship["hp"] = SHIP_HP
@@ -5634,7 +5658,7 @@ static func _maneuver_fighter(ship: Dictionary, opponent: Vector2, dt: float) ->
 	var radial: Vector2 = position - opponent
 	var radius: float = radial.length()
 	var direction: Vector2 = radial / radius if radius > EPS else Vector2.from_angle(float(int(ship["id"]) % 64) * 2.399963)
-	var budget: float = SHIP_SPEED * dt
+	var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
 	var preferred_radius: float = LASER_RANGE * 0.60
 	# Move tangentially while gradually correcting distance. An angular
 	# waypoint (rather than a straight tangent) keeps the path curved.
@@ -5650,7 +5674,7 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 	var separation: Vector2 = opponent - position
 	var travel: float = maxf(0.0, separation.length() - LASER_RANGE * 0.60)
 	var duration: float = minf(dt, float(ship.get("pursuit_left", 0.0)))
-	_navigate(ship, position + separation.normalized() * travel, SHIP_SPEED * duration)
+	_navigate(ship, position + separation.normalized() * travel, ship_speed(str(ship.get("kind", "ship"))) * duration)
 	ship["pursuit_left"] = maxf(0.0, float(ship["pursuit_left"]) - duration)
 
 # Idle ships remain in their current sector. Up to three same-owner,
@@ -5694,7 +5718,7 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 				var owner: int = int(state["planets"][node]["owner"]) if node < (state["planets"] as Array).size() else 0
 				var hostile_system: bool = owner != 0 and int(state["teams"].get(owner, 0)) != team
 				compact = bool(leader.get("rally_pending", false)) or hostile_system or (stationary_teams.get(node, {}) as Dictionary).size() > 1
-			var phase: float = float(state["elapsed"]) * SHIP_SPEED / maxf(radius, 100.0)
+			var phase: float = float(state["elapsed"]) * ship_speed(str(leader.get("kind", "ship"))) / maxf(radius, 100.0)
 			var angle: float = float(seed) * 2.399963 + (float(state["elapsed"]) * 0.32 if compact else phase * 0.55)
 			var radial: Vector2 = Vector2.from_angle(angle)
 			var direction: Vector2 = radial.orthogonal()
@@ -5849,11 +5873,12 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		if not cells.has(cell):
 			cells[cell] = []
 		cells[cell].append(id)
-	var budget: float = SHIP_SPEED * dt
+
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
 		if not previous.has(id) or bool(ship.get("retreating", false)) or _salvage_active(ship):
 			continue
+		var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
 		var before: Vector2 = previous[id]
 		var planned: Vector2 = ship["position"]
 		var held: bool = bool(ship.get("holding", false))
@@ -5941,11 +5966,11 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		if not route.is_empty():
 			ship["leg"] = _lane_progress(graph["points"], ship)
 
-# Resolve overlaps on the actual post-movement coordinates, including ships
+# Apply a gentle push on the actual post-movement coordinates, including ships
 # exempt from soft steering. This is contact correction, not a new order;
 # service actions and arrival checks have already executed for this tick.
 # A sparse grid and bounded iterations avoid an all-fleet pair scan.
-static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary) -> void:
+static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float = 0.1) -> void:
 	var ships: Array = state["ships"]
 	if ships.size() < 2:
 		return
@@ -5983,7 +6008,7 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 							direction = prior.normalized().orthogonal() if prior.length_squared() > EPS else Vector2.from_angle(float(posmod(int(a["id"]) * 97 + int(b["id"]) * 193, 360)) * PI / 180.0)
 						else:
 							direction = offset / distance
-						var push: Vector2 = direction * ((reach - distance) * 0.5 + 0.001)
+						var push: Vector2 = direction * (reach - distance) * 0.12
 						corrections[i] = (corrections.get(i, Vector2.ZERO) as Vector2) + push
 						corrections[j] = (corrections.get(j, Vector2.ZERO) as Vector2) - push
 		if corrections.is_empty():
@@ -5991,7 +6016,11 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 		for i in corrections:
 			var craft: Dictionary = ships[i]
 			var point: Vector2 = craft["position"]
-			var candidate: Vector2 = point + (corrections[i] as Vector2).limit_length(reach)
+			var budget: float = ship_speed(str(craft.get("kind", "ship"))) * dt
+			var before: Vector2 = previous.get(int(craft["id"]), point)
+			var candidate: Vector2 = point + (corrections[i] as Vector2).limit_length(budget * 0.15)
+			if before.distance_to(point) <= budget + EPS:
+				candidate = before + (candidate - before).limit_length(budget)
 			var sector: int = local_sector(graph, craft)
 			if sector >= 0 and sector_contains(graph, sector, point) and not sector_contains(graph, sector, candidate):
 				var low: float = 0.0
@@ -6157,7 +6186,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 				if (ship["position"] as Vector2).distance_to(opponent) <= LASER_RANGE:
 					_maneuver_fighter(ship, opponent, dt)
 				else:
-					_navigate(ship, opponent, SHIP_SPEED * dt)
+					_navigate(ship, opponent, ship_speed(str(ship.get("kind", "ship"))) * dt)
 			elif coordinated.has(int(ship["id"])):
 				pass # Already moved as a group this tick.
 			elif combat_positions.has(pursuit_id):
@@ -6176,13 +6205,13 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 					_move_formation(combat_graph, ship, dt)
 				elif ship.has("patrol_from"):
 					var endpoint: Vector2 = ship["patrol_start_point"] if ship["patrol_returning"] else ship["patrol_end_point"]
-					_navigate(ship, endpoint, SHIP_SPEED * dt)
+					_navigate(ship, endpoint, ship_speed(str(ship.get("kind", "ship"))) * dt)
 					ship["patrol_arrived"] = (ship["position"] as Vector2).distance_to(endpoint) <= EPS
 		var ship_id: int = int(ship["id"])
 		# Only use the idle budget if the ship started and finished its
 		# work idle and did not already move this tick.
 		if idle_targets.has(ship_id) and _is_idle_ship(ship) and autocast_ready(state, ship, "wander") and not coordinated.has(ship_id) and ship["position"] == initial_position:
-			_navigate(ship, idle_targets[ship_id], SHIP_SPEED * dt)
+			_navigate(ship, idle_targets[ship_id], ship_speed(str(ship.get("kind", "ship"))) * dt)
 	for ship in state["ships"]:
 		_mark_sector_arrival(state, ship)
 		if ship.has("auto_cooldown_until") and float(ship["auto_cooldown_until"]) <= float(state["elapsed"]):
@@ -6193,7 +6222,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			ship.erase("wander_cooldown_override")
 	_separate_ships(state, combat_graph, combat_positions, dt)
 	if dt > 0.0:
-		_resolve_ship_contacts(state, combat_graph, combat_positions)
+		_resolve_ship_contacts(state, combat_graph, combat_positions, dt)
 	if not profile.is_empty():
 		var now: int = Time.get_ticks_usec()
 		profile["Civilian logistics"] = int(profile.get("Civilian logistics", 0)) + civilian_usec
