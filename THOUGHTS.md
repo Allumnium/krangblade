@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.58.4: Idle repaired hulls remain stationary while beams operate; wander is deferred until all repairs resolve. Check crowded repair formations and balance with doubled throughput; passive regeneration unchanged.
+
 - v0.58.3: Precise off-sector moves retain a routing anchor, not sector membership. Check gap combat, subsequent autonomous work, hold and repair detours during playtesting.
 
 - v0.58.2: Harvesters with both modes enabled search a wider sector-local salvage radius; monitor travel time versus asteroid throughput and contention with freighters. Safety, cargo return and explicit orders retain precedence.
