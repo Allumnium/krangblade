@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.51.3: Starter logistics ship supports the new resource-hauling loop immediately; monitor opening mineral throughput and AI production pacing before changing costs or fleet ratios.
+
 - v0.51.2: Persist follow by hull ID rather than a sampled world point. Monitor spacing of large escort groups and tracking of moving targets through fields/lanes; same-speed ships may require time to catch up if they start well behind. Follow uses ordinary manual navigation and does not force a new movement speed.
 
 - v0.51.1: Use cached soft local resource halos rather than global bloom; watch dense cargo bay readability and overdraw in large debris fields. Move field mining rules from checkbox section to stable bottom command-card row, keeping the existing authority and per-player policy.
@@ -182,7 +184,7 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ### T-021 — Planetary defense strength and starting fleet pacing
 - **Type:** Balance and visual hypothesis.
-- **Observation:** All players start with three miners and two fighters without reducing stocks or resident population. PDS installations each fire 36 damage once per year at basic fighter range; each successive planetary installation costs three times the preceding recipe. Build one at a time per system. The shared authoritative system waypoint is the range origin; at close zoom the beam originates at the corresponding decorative planet.
+- **Observation:** All players start with three miners, two fighters and (v0.51.3) one logistics ship without reducing stocks or resident population. PDS installations each fire 36 damage once per year at basic fighter range; each successive planetary installation costs three times the preceding recipe. Build one at a time per system. The shared authoritative system waypoint is the range origin; at close zoom the beam originates at the corresponding decorative planet.
 - **Consider:** Playtest attack waves against multiple defenses. PDS installations are not independently targetable or destructible yet; decide that along with conquest design. Check starter miners' resource throughput and PDS pacing.
 
 - v0.13.1 corrects a duplicate fixture variable found during static review of the PDS test.

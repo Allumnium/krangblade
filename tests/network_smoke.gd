@@ -158,11 +158,13 @@ func _phase_changed() -> void:
 		for owner in roster:
 			var miners: int = 0
 			var fighters: int = 0
+			var freighters: int = 0
 			for craft in state["ships"]:
 				if int(craft["owner"]) == int(owner):
 					miners += 1 if craft["kind"] == "miner" else 0
 					fighters += 1 if craft["kind"] == "fighter" else 0
-			if miners != 3 or fighters != 2:
+					freighters += 1 if craft["kind"] == "ship" else 0
+			if miners != 3 or fighters != 2 or freighters != 1:
 				_fail("Starting fleet did not replicate.")
 				return
 		if owners.size() != state["map"]["points"].size() or state["map"]["cluster_sizes"].size() != MAP.cluster_count_for(expected_players, _expected_layout()):
@@ -623,8 +625,8 @@ func _check_economy_sync() -> void:
 				if not ship.has("hp") or float(ship["hp"]) <= 0.0 or float(ship["hp"]) > ECON.SHIP_HP:
 					_fail("Replicated hull hit points are invalid.")
 					return
-				if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship":
-					ship_progress = is_equal_approx(float(ship.get("crew", 0.0)), float(ECON.CREW_COSTS["ship"]))
+				if int(ship["owner"]) == owner and ship.get("kind", "ship") == "ship" and int(ship["id"]) > expected_players * 6 and int(ship["id"]) < 900000:
+					ship_progress = ship_progress or is_equal_approx(float(ship.get("crew", 0.0)), float(ECON.CREW_COSTS["ship"]))
 			var field_node: int = (state["planets"] as Array).size()
 			var buildings: Dictionary = system.get("buildings", {})
 			var priced_slots: Dictionary = {}

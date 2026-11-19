@@ -215,7 +215,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 		planets[index]["planet_count"] = system_bodies(planets[index], int(map_data["seed"]), index).size()
 	if starting_fleet:
 		for index in range(ordered.size()):
-			for kind in ["miner", "miner", "miner", "fighter", "fighter"]:
+			for kind in ["miner", "miner", "miner", "fighter", "fighter", "ship"]:
 				var id: int = int(state["next_id"])
 				state["next_id"] = id + 1
 				_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind]})

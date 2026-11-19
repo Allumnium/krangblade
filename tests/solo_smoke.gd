@@ -103,7 +103,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (session.get("economy")["ships"].size() == 20):
+	if not (session.get("economy")["ships"].size() == 24):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
@@ -130,12 +130,16 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (state["ships"].size() == 5):
+	if not (state["ships"].size() == 6):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
 	if not (state["ships"].filter(func(craft: Dictionary) -> bool: return craft["kind"] == "miner").size() == 3):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
+		quit(1)
+		return
+	if state["ships"].filter(func(craft: Dictionary) -> bool: return craft["kind"] == "ship").size() != 1:
+		push_error("Solo starting logistics ship missing.")
 		quit(1)
 		return
 	# Isolate original construction and colonization assertions.
@@ -265,10 +269,15 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (setup["ships"].size() == 15):
+	if not (setup["ships"].size() == 18):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
+	for player in [1, 2, 3]:
+		if setup["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) == player and craft["kind"] == "ship").size() != 1:
+			push_error("Starting logistics ship missing for player %d." % player)
+			quit(1)
+			return
 	for index in [1, 2]:
 		setup["planets"][index]["population"] = 150000.0
 		setup["planets"][index]["levels"]["Organics"] = 3

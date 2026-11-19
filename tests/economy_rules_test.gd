@@ -1861,17 +1861,22 @@ func _initialize() -> void:
 	assert(is_equal_approx(float(crew_state["ships"][0]["crew"]), 500.0))
 	print("PASS: proportional crew costs, refunds, population starvation and completed crew")
 	var opening: Dictionary = ECON.create(graph, players, ids)
-	assert(opening["ships"].size() == ids.size() * 5)
+	assert(opening["ships"].size() == ids.size() * 6)
 	for owner in ids:
 		var opening_home: int = ECON.military_home(opening, owner)
 		var miners: int = 0
 		var fighters: int = 0
+		var freighters: int = 0
 		for craft in opening["ships"]:
 			if int(craft["owner"]) == owner:
 				assert(int(craft["at"]) == opening_home and craft["position"] == ECON.station_position(opening, opening_home, float(opening["elapsed"])))
 				miners += 1 if craft["kind"] == "miner" else 0
 				fighters += 1 if craft["kind"] == "fighter" else 0
-		assert(miners == 3 and fighters == 2)
+				if craft["kind"] == "ship":
+					freighters += 1
+					assert(ECON._cargo_total(craft) == 0.0 and ECON.autocast_enabled(craft, "trade"))
+					assert(is_equal_approx(float(craft["crew"]), float(ECON.CREW_COSTS["ship"])))
+		assert(miners == 3 and fighters == 2 and freighters == 1)
 		assert(opening["planets"][opening_home]["stock"] == ECON.STARTING_STOCK)
 		assert(opening["planets"][opening_home]["population"] == ECON.HOME_POPULATION + ECON.ORBITAL_HOUSING_POPULATION)
 		var starting_defenses: Dictionary = opening["planets"][opening_home]["pds"]
