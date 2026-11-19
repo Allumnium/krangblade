@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.55.6: Station hub shows one icon/bar per active production lane. At mid zoom, multiple concurrent jobs may be small; verify legibility. Stop cancels lane travel without teleporting; check subsequent autonomous routing from between sectors.
+
 - v0.55.5: Cargo handled is pickup plus dropoff, not unique tonnes; farm production tracked separately and antimatter units excluded. Kill credit uses deterministic lethal-shot ordering for simultaneous fire. Larger transfer range may affect crowded docking and logistics throughput.
 
 - v0.55.3: Escort uses existing follow protocol with guard intent; verify tether and pursuit behavior during fast target travel. Passive hull healing may change prolonged low-damage combat; check balance. Active Attack and Attack Move share the existing command button.

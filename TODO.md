@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.55.6: Validate Stop versus Hold, cancellation in transit, ownership and real peer Stop; inspect station hub progress with concurrent production and different zoom levels. Runtime pending.
+
 - [ ] v0.55.5: Verify lifetime counters and lethal-hit attribution, default groups, manual Colony conversion and AI expansion, doubled transfer ranges and peer replication. Runtime pending.
 
 - [ ] v0.55.3: Validate current command borders, mixed selections, moving escort, lane passing fire, gap targeting, freighter HP/repair and capped regeneration on host and guest. Runtime pending.

@@ -2383,7 +2383,7 @@ func _stop_selected() -> void:
 	pending_command = ""
 	var owned: Array[int] = _selected_owned_units(_state())
 	if not owned.is_empty():
-		session.call("request_unit_hold", owned, false)
+		_issue_order(owned, {"kind": "stop"})
 	_refresh_command_mode()
 
 func _issue_order(ids: Array, order: Dictionary, append: bool = false) -> void:
@@ -5998,6 +5998,44 @@ func _draw_station_storage(system: Dictionary, center: Vector2, radius: float, e
 				map_canvas.draw_rect(Rect2(bounds.position + Vector2(0.0, bounds.size.y * (1.0 - fraction)), Vector2(bounds.size.x, bounds.size.y * fraction)), color.darkened(0.25))
 			map_canvas.draw_rect(bounds, color, false, maxf(0.8, radius * 0.018))
 
+# Show current production lanes, not queued future yard work.
+func _draw_station_jobs(system: Dictionary, center: Vector2, radius: float, tint: Color) -> void:
+	if radius < 22.0 or not Rect2(Vector2.ZERO, map_canvas.size).grow(radius).has_point(center):
+		return
+	var jobs: Array = []
+	var infrastructure: Dictionary = ECONOMY.station_construction_job(system)
+	if not infrastructure.is_empty():
+		jobs.append(infrastructure)
+	for yard in system["yards"]:
+		var active_id: int = int(yard.get("job", -1))
+		if active_id < 0:
+			continue
+		for item in system["queue"]:
+			if int(item["id"]) == active_id:
+				jobs.append(item)
+				break
+	if jobs.is_empty():
+		return
+	var columns: int = mini(2, jobs.size())
+	var rows: int = ceili(float(jobs.size()) / float(columns))
+	var cell: float = radius * (0.46 if jobs.size() == 1 else (0.30 if rows == 1 else 0.20))
+	var gap: float = maxf(1.0, cell * 0.1)
+	var step: float = cell + gap
+	for i in range(jobs.size()):
+		var job: Dictionary = jobs[i]
+		var row: int = floori(float(i) / float(columns))
+		var in_row: int = mini(columns, jobs.size() - row * columns)
+		var point: Vector2 = center + Vector2((float(i % columns) - float(in_row - 1) * 0.5) * step, (float(row) - float(rows - 1) * 0.5) * step)
+		var icon: Texture2D = _job_icon(job, int(system["owner"]))
+		var icon_size: float = cell * 0.82
+		map_canvas.draw_texture_rect(icon, Rect2(point - Vector2(icon_size * 0.5, cell * 0.5), Vector2.ONE * icon_size), false)
+		var width: float = cell * 0.92
+		var height: float = maxf(1.0, cell * 0.09)
+		var bar := Rect2(point + Vector2(-width * 0.5, cell * 0.39), Vector2(width, height))
+		var fraction: float = clampf(float(job["progress"]) / maxf(ECONOMY.EPS, float(job["work"])), 0.0, 1.0)
+		map_canvas.draw_rect(bar, Color("#101a26"))
+		map_canvas.draw_rect(Rect2(bar.position, Vector2(bar.size.x * fraction, bar.size.y)), tint.lightened(0.35))
+
 func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
 	var system: Dictionary = state["planets"][index]
 	if not ECONOMY.has_station(system):
@@ -6030,6 +6068,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 			map_canvas.draw_line(center + direction * radius * 0.74, center + direction * radius * 0.95, Color("#1a293a"), maxf(1.0, radius * 0.05), true)
 			map_canvas.draw_circle(center + direction * radius * 0.88, maxf(0.8, radius * 0.035), tint.lightened(0.4))
 	_draw_station_storage(system, center, radius, elapsed)
+	_draw_station_jobs(system, center, radius, tint)
 	if selected_station:
 		_draw_selection_ring(center, radius + 4.0)
 	var hp: float = float(system["station"]["hp"]) / ECONOMY.station_max_hp(system)

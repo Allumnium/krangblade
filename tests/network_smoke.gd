@@ -22,6 +22,9 @@ var commands_sent: bool = false
 var hold_release_id: int = -1
 var hold_release_sent: bool = false
 var hold_release_verified: bool = false
+var stop_hold_sent: bool = false
+var stop_sent: bool = false
+var stop_verified: bool = false
 var miner_weapon_verified: bool = false
 var next_diagnostic: float = 10.0
 var speed_stage: int = 0
@@ -587,8 +590,15 @@ func _check_economy_sync() -> void:
 			if not hold_release_sent and bool(craft.get("holding", false)):
 				hold_release_sent = true
 				session.call("request_unit_hold", [hold_release_id], true)
-			elif hold_release_sent and not bool(craft.get("holding", false)):
+			elif hold_release_sent and not stop_hold_sent and not bool(craft.get("holding", false)):
 				hold_release_verified = true
+				stop_hold_sent = true
+				session.call("request_unit_hold", [hold_release_id], false)
+			elif stop_hold_sent and not stop_sent and bool(craft.get("holding", false)):
+				stop_sent = true
+				session.call("request_unit_orders", [{"ids": [hold_release_id], "order": {"kind": "stop"}}], false)
+			elif stop_sent and not bool(craft.get("holding", false)):
+				stop_verified = true
 		var own: Dictionary = state["planets"][home_index]
 		if not cancel_sent:
 			for item in own["queue"]:
@@ -826,7 +836,7 @@ func _check_economy_sync() -> void:
 			if event["kind"] == "station" and int(event["ship"]) == ECON.station_target_id(state, target_index):
 				station_destroyed = true
 		var station_verified: bool = station_destroyed and int(target["owner"]) == 0 and not ECON.has_station(target)
-		if cancel_sent and yard_rebuilt and hold_release_verified and verified == expected_players and orbital_verified and station_verified and miner_weapon_verified and view != null and view.has_method("_update_trade_stock"):
+		if cancel_sent and yard_rebuilt and hold_release_verified and stop_verified and verified == expected_players and orbital_verified and station_verified and miner_weapon_verified and view != null and view.has_method("_update_trade_stock"):
 			view.set("selected", home_index)
 			view.call("_load_thresholds")
 			view.call("_refresh")

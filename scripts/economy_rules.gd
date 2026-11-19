@@ -3840,6 +3840,8 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var kind: String = str(order.get("kind", ""))
 	var owner: int = int(ship["owner"])
 	var fighter: bool = ship["kind"] == "fighter"
+	if kind == "stop":
+		return not append
 	if ship["kind"] == "science_ship" and kind in ["unload", "drop", "deposit", "salvage"]:
 		return false
 	if ship["kind"] == "colony_ship" and kind in ["salvage", "drop"]:
@@ -3898,6 +3900,8 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
+		"stop":
+			return command_stop_units(state, player, ids)
 		"transform":
 			var graph: Dictionary = military_graph(state)
 			var converted: bool = false
@@ -4129,6 +4133,39 @@ static func command_remote_position(state: Dictionary, player: int, ids: Array, 
 		ship["local_move_sector"] = node
 		ship["move_only"] = move_only
 		_set_unit_order(state, ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
+	return true
+
+# Stop cancels work and queued movement without imposing a persistent hold.
+static func command_stop_units(state: Dictionary, player: int, ids: Array) -> bool:
+	var units: Array = _owned_units(state, player, ids)
+	if units.is_empty():
+		return false
+	var graph: Dictionary = military_graph(state)
+	for ship in units:
+		var retreating: bool = bool(ship.get("retreating", false))
+		var sector: int = local_sector(graph, ship)
+		_cancel_salvage_order(ship)
+		_clear_tactical_order(ship)
+		_clear_local_hold(ship)
+		_set_unit_order(state, ship, {})
+		ship.erase("pursuit_blocked")
+		ship.erase("rally_pending")
+		ship.erase("passing_fire")
+		ship["combat_target"] = -1
+		ship["pursuit_target"] = -1
+		ship["pursuit_left"] = 0.0
+		ship["laser_until"] = -1.0
+		ship["yard_target"] = -1
+		ship["yard_laser_until"] = -1.0
+		# Emergency repair travel retains its route and destination.
+		if retreating:
+			continue
+		if sector >= 0 and (ship["kind"] == "fighter" or sector < state["planets"].size()):
+			ship["at"] = sector
+		_interrupt_work(ship)
+		_finish_manual(ship)
+		ship["navigation_target"] = ship["position"]
+		ship["arrival_wait_until"] = float(state["elapsed"]) + MOVE_ARRIVAL_WAIT_YEARS
 	return true
 
 static func command_hold_units(state: Dictionary, player: int, ids: Array, release: bool) -> bool:
