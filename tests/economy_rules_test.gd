@@ -103,6 +103,20 @@ func _test_soft_separation() -> void:
 	var unchanged: Vector2 = a["position"]
 	ECON._separate_ships(state, graph, previous, 0.1)
 	assert(a["position"] == unchanged)
+	# Independently ordered, different-owner hulls may converge in the same
+	# tick, even when neither was in the old steering neighborhood.
+	state["ships"] = [a, b]
+	a["position"] = point
+	b["position"] = point
+	b["owner"] = 2
+	b["kind"] = "ship"
+	a["arrival_wait_until"] = 30.0
+	b["salvage_delivery"] = true
+	previous = {501: point - Vector2.RIGHT * 100.0, 502: point + Vector2.RIGHT * 100.0}
+	ECON._resolve_ship_contacts(state, graph, previous)
+	assert((a["position"] as Vector2).distance_to(b["position"]) >= ECON.SHIP_CLEARANCE - ECON.EPS)
+	assert(a["holding"] and a["arrival_wait_until"] == 30.0 and b["salvage_delivery"])
+	assert(ECON.sector_contains(graph, 0, a["position"]) and ECON.sector_contains(graph, 0, b["position"]))
 
 func _test_maintain_targets() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1])
@@ -1896,9 +1910,13 @@ func _initialize() -> void:
 		var miners: int = 0
 		var fighters: int = 0
 		var freighters: int = 0
+		var spawned: Array[Vector2] = []
 		for craft in opening["ships"]:
 			if int(craft["owner"]) == owner:
-				assert(int(craft["at"]) == opening_home and craft["position"] == ECON.station_position(opening, opening_home, float(opening["elapsed"])))
+				assert(int(craft["at"]) == opening_home and ECON.sector_contains(ECON.military_graph(opening), opening_home, craft["position"]))
+				for other in spawned:
+					assert(other.distance_to(craft["position"]) >= ECON.SHIP_CLEARANCE - ECON.EPS)
+				spawned.append(craft["position"])
 				miners += 1 if craft["kind"] == "miner" else 0
 				fighters += 1 if craft["kind"] == "fighter" else 0
 				if craft["kind"] == "ship":
