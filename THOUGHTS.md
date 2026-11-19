@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.58.10: Larger capital art preserves existing physical avoidance and combat ranges; observe visual overlap and consider size-aware formation spacing separately if needed.
+
 - v0.58.9: AI capital investments favor home yards; monitor crystal imports and early defense pacing. Remote salvage uses safe two-hop waypoints and a sparse cell search; profile large wreck fields and watch for detours through gap space.
 
 - v0.58.8: Explicit holds are immovable obstacles rather than repelling each other; verify close formation and post-repair return. Resource planet palettes retain subtle variation without masking dominant color.

@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.58.10: Cruiser hull length increases from 40 to 50 local units; Destroyer from 59 to 88. Distinct swept-wing and armored shoulder silhouettes share map, portrait, blueprint and debris art. Laser mounts and selection bounds follow hull geometry; combat and simulation sizes unchanged.
+
 - v0.58.9: AI builds capital hulls with normal yard/storage prerequisites and deploys them alongside fighters. Automatic salvage searches safe discovered sectors within two lane links and 4,000 direct distance; explicit work and combat precedence retained. Colonize orders convert on arrival.
 
 - v0.58.8: Explicit Hold captures each hull’s position and heading, excludes it from separation nudges and autonomous work while held, retains emergency repair withdrawal. Planet surface palettes emphasize green Organics, gray Metals and purple Crystals, preserving procedural shading.
