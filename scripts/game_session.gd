@@ -14,7 +14,11 @@ const ECONOMY = preload("res://scripts/economy_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 const SIM_STEP: float = 0.1
 const MATCH_SPEEDS: Array[int] = [0, 1, 2, 5]
-const SNAPSHOT_INTERVAL: float = 0.2
+const SNAPSHOT_INTERVAL: float = 0.2 # Local authority UI refresh.
+const REPLICATION_INTERVAL: float = 0.5
+# 48 records x 24 bytes = 1152 bytes, leaving room for RPC/ENet headers.
+const MOTION_RECORD_BYTES: int = 24
+const MOTION_BATCH: int = 48
 const PORT: int = 24567
 const DISCOVERY_PORT: int = 24568
 const DISCOVERY_QUERY: String = "WARBOUND_DISCOVER_1:"
@@ -48,6 +52,13 @@ var snapshot_elapsed: float = 0.0
 var snapshot_revision: int = 0
 var snapshot_sent: Dictionary = {}
 var snapshot_pending: Dictionary = {}
+var replication_elapsed: float = 0.0
+var scheduled_snapshot_revision: int = 0
+var urgent_snapshot_revision: int = 0
+var motion_revision: int = 0
+var motion_base_revision: int = 0
+var motion_samples: Dictionary = {}
+var motion_ship_ids: Dictionary = {}
 
 func _ready() -> void:
 	multiplayer.peer_connected.connect(_peer_connected)
@@ -123,7 +134,7 @@ func host_game(wanted_name: String) -> bool:
 	if phase != "offline":
 		return false
 	var peer := ENetMultiplayerPeer.new()
-	var err: int = peer.create_server(PORT, RULES.MAX_PLAYERS - 1, 2)
+	var err: int = peer.create_server(PORT, RULES.MAX_PLAYERS - 1, 3)
 	if err != OK:
 		_status("Could not host (error %d). Check UDP %d." % [err, PORT])
 		return false
@@ -155,7 +166,7 @@ func join_game(wanted_name: String, address: String) -> bool:
 		_status("Enter the host IP address.")
 		return false
 	var peer := ENetMultiplayerPeer.new()
-	var err: int = peer.create_client(ip, PORT, 2)
+	var err: int = peer.create_client(ip, PORT, 3)
 	if err != OK:
 		_status("Could not connect (error %d)." % err)
 		return false
@@ -644,10 +655,28 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 	snapshot_revision = 0
 	snapshot_sent.clear()
 	snapshot_pending.clear()
+	replication_elapsed = 0.0
+	scheduled_snapshot_revision = 0
+	urgent_snapshot_revision = 0
+	motion_revision = 0
+	motion_base_revision = 0
+	motion_samples.clear()
+	motion_ship_ids.clear()
+	diagnostic_full_received = 0
+	diagnostic_motion_received = 0
+	diagnostic_last_motion_ms = -1
+	diagnostic_last_full_ms = -1
+	diagnostic_last_motion_revision = 0
+	diagnostic_motion_gap_ms = 100.0
+	diagnostic_decode_ms = 0.0
+	diagnostic_sent_bytes = 0
+	diagnostic_received_bytes = 0
+	diagnostic_snapshot_bytes = 0
 	economy = ECONOMY.create(MAP.generate(map_seed, players.size(), map_layout), players, RULES.ordered_peers(players))
 	economy["time_speed"] = 1
 	economy["eliminated"] = []
 	economy["match_result"] = {}
+	_refresh_motion_roster()
 	owners = ECONOMY.planet_teams(economy)
 	_set_phase("match")
 	_status("Match in progress")
@@ -1070,12 +1099,34 @@ var diagnostic_encode_ms: float = 0.0
 var diagnostic_snapshot_bytes: int = 0
 var diagnostic_sent_bytes: int = 0
 var diagnostic_received_bytes: int = 0
+var diagnostic_full_received: int = 0
+var diagnostic_motion_received: int = 0
+var diagnostic_last_full_ms: int = -1
+var diagnostic_last_motion_ms: int = -1
+var diagnostic_last_motion_revision: int = 0
+var diagnostic_motion_gap_ms: float = 100.0
+var diagnostic_decode_ms: float = 0.0
+
+func network_diagnostics() -> Dictionary:
+	var peer: ENetMultiplayerPeer = multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if is_solo or peer == null or peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
+		return {}
+	var ids: Array[int] = _connected_guests() if multiplayer.is_server() else [1]
+	var ping: float = 0.0
+	var loss: float = 0.0
+	for id in ids:
+		var connection: ENetPacketPeer = peer.get_peer(id)
+		if connection != null and connection.is_active():
+			ping = maxf(ping, connection.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME))
+			loss = maxf(loss, 100.0 * connection.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS) / ENetPacketPeer.PACKET_LOSS_SCALE)
+	return {"ping": ping, "loss": loss}
 
 func _economy_tick() -> void:
 	if phase != "match" or not (is_solo or multiplayer.is_server()):
 		return
 	var speed: int = int(economy.get("time_speed", 1))
 	# Pause stops the simulation, but not accepted orders or replication.
+	motion_revision += 1
 	var started: int = Time.get_ticks_usec()
 	var profile: Dictionary = {"enabled": true}
 	for i in range(speed):
@@ -1094,12 +1145,21 @@ func _economy_tick() -> void:
 	if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
 		snapshot_elapsed = 0.0
 		if speed > 0:
-			_publish_economy()
-		_flush_economy()
+			_publish_economy(false)
+	replication_elapsed += SIM_STEP
+	if replication_elapsed >= REPLICATION_INTERVAL - 0.00001:
+		replication_elapsed = 0.0
+		if speed > 0:
+			scheduled_snapshot_revision = snapshot_revision
+	if speed > 0:
+		_send_motion()
+	_flush_economy()
 
-func _publish_economy() -> void:
-	# Local UI stays synchronous. Coalesce remote changes on the snapshot clock.
+func _publish_economy(urgent: bool = true) -> void:
+	# Local UI stays synchronous. Accepted commands bypass the slow state clock.
 	snapshot_revision += 1
+	if urgent:
+		urgent_snapshot_revision = snapshot_revision
 	owners = ECONOMY.planet_teams(economy)
 	owners_changed.emit()
 	economy_changed.emit()
@@ -1108,8 +1168,9 @@ func _flush_economy() -> void:
 	if is_solo:
 		return
 	var payload: PackedByteArray = PackedByteArray()
+	var due: int = maxi(scheduled_snapshot_revision, urgent_snapshot_revision)
 	for id in _connected_guests():
-		if snapshot_pending.has(id) or int(snapshot_sent.get(id, -1)) == snapshot_revision:
+		if snapshot_pending.has(id) or int(snapshot_sent.get(id, 0)) >= due:
 			continue
 		if payload.is_empty():
 			var encode_start: int = Time.get_ticks_usec()
@@ -1118,7 +1179,7 @@ func _flush_economy() -> void:
 			diagnostic_snapshot_bytes = payload.size()
 		# At most one reliable full snapshot in flight per guest. A slow guest
 		# skips intermediate states, receiving the newest revision after ACK.
-		if rpc_id(id, "_rpc_economy", round_id, snapshot_revision, payload) == OK:
+		if rpc_id(id, "_rpc_economy", round_id, snapshot_revision, motion_revision, payload) == OK:
 			diagnostic_sent_bytes += payload.size()
 			snapshot_pending[id] = snapshot_revision
 			snapshot_sent[id] = snapshot_revision
@@ -1132,19 +1193,90 @@ func _rpc_snapshot_ack(ack_round: int, revision: int) -> void:
 		snapshot_pending.erase(id)
 
 @rpc("authority", "call_remote", "reliable", 1)
-func _rpc_economy(update_round: int, revision: int, compressed: PackedByteArray) -> void:
+func _rpc_economy(update_round: int, revision: int, pose_revision: int, compressed: PackedByteArray) -> void:
 	if phase != "match" or update_round != round_id:
 		return
 	diagnostic_received_bytes += compressed.size()
 	diagnostic_snapshot_bytes = compressed.size()
+	var decode_start: int = Time.get_ticks_usec()
 	var decoded: Variant = bytes_to_var(compressed.decompress_dynamic(16777216, FileAccess.COMPRESSION_GZIP))
+	diagnostic_decode_ms = float(Time.get_ticks_usec() - decode_start) / 1000.0
 	if not decoded is Dictionary:
 		return
 	var snapshot: Dictionary = decoded
 	if (snapshot.get("planets", []) as Array).size() != (economy.get("planets", []) as Array).size():
 		return
 	economy = snapshot
+	motion_base_revision = pose_revision
+	_refresh_motion_roster()
+	diagnostic_full_received += 1
+	diagnostic_last_full_ms = Time.get_ticks_msec()
 	owners = ECONOMY.planet_teams(economy)
 	owners_changed.emit()
 	economy_changed.emit()
 	_rpc_snapshot_ack.rpc_id(1, update_round, revision)
+
+# Fast packets are presentation-only. Reliable state still owns entity lifetime,
+# commands, combat, resources and every gameplay decision.
+func _refresh_motion_roster() -> void:
+	motion_ship_ids.clear()
+	for ship in economy.get("ships", []):
+		motion_ship_ids[int(ship["id"])] = true
+	for id in motion_samples.keys():
+		if not motion_ship_ids.has(id) or int(motion_samples[id]["revision"]) <= motion_base_revision:
+			motion_samples.erase(id)
+
+func _send_motion() -> void:
+	if is_solo:
+		return
+	var guests: Array[int] = _connected_guests()
+	if guests.is_empty():
+		return
+	var packet := PackedByteArray()
+	for ship in economy["ships"]:
+		if not ship.has("position"):
+			continue
+		var position: Vector2 = ship["position"]
+		var heading: Vector2 = ship.get("heading", Vector2.UP)
+		var offset: int = packet.size()
+		packet.resize(offset + MOTION_RECORD_BYTES)
+		packet.encode_s64(offset, int(ship["id"]))
+		packet.encode_float(offset + 8, position.x)
+		packet.encode_float(offset + 12, position.y)
+		packet.encode_float(offset + 16, heading.x)
+		packet.encode_float(offset + 20, heading.y)
+		if packet.size() >= MOTION_BATCH * MOTION_RECORD_BYTES:
+			_send_motion_batch(guests, packet)
+			packet = PackedByteArray()
+	if not packet.is_empty():
+		_send_motion_batch(guests, packet)
+
+func _send_motion_batch(guests: Array[int], packet: PackedByteArray) -> void:
+	for id in guests:
+		if rpc_id(id, "_rpc_motion", round_id, motion_revision, packet) == OK:
+			diagnostic_sent_bytes += packet.size()
+
+# Unordered delivery avoids dropping earlier chunks of the same fleet update.
+# A per-ship revision discards late packets without stalling other ships.
+@rpc("authority", "call_remote", "unreliable", 2)
+func _rpc_motion(update_round: int, revision: int, packet: PackedByteArray) -> void:
+	if phase != "match" or update_round != round_id or revision <= motion_base_revision:
+		return
+	if packet.is_empty() or packet.size() > MOTION_BATCH * MOTION_RECORD_BYTES or packet.size() % MOTION_RECORD_BYTES != 0:
+		return
+	diagnostic_received_bytes += packet.size()
+	if revision > diagnostic_last_motion_revision:
+		var now: int = Time.get_ticks_msec()
+		if diagnostic_last_motion_ms >= 0:
+			diagnostic_motion_gap_ms = lerpf(diagnostic_motion_gap_ms, clampf(float(now - diagnostic_last_motion_ms), 50.0, 350.0), 0.2)
+		diagnostic_last_motion_revision = revision
+		diagnostic_last_motion_ms = now
+		diagnostic_motion_received += 1
+	for offset in range(0, packet.size(), MOTION_RECORD_BYTES):
+		var id: int = packet.decode_s64(offset)
+		if not motion_ship_ids.has(id) or revision <= int(motion_samples.get(id, {}).get("revision", -1)):
+			continue
+		var position := Vector2(packet.decode_float(offset + 8), packet.decode_float(offset + 12))
+		var heading := Vector2(packet.decode_float(offset + 16), packet.decode_float(offset + 20))
+		if position.is_finite() and heading.is_finite():
+			motion_samples[id] = {"position": position, "heading": heading, "revision": revision}

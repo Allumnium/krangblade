@@ -764,10 +764,19 @@ func _check_economy_sync() -> void:
 					_fail("Ship is missing replicated physical navigation state.")
 					return
 				var actual: Vector2 = ship["position"]
+				var sample: Dictionary = session.get("motion_samples").get(int(ship["id"]), {})
+				if not sample.is_empty():
+					if int(sample["revision"]) <= int(session.get("motion_base_revision")):
+						_fail("Stale movement sample survived newer reliable state.")
+						return
+					actual = sample["position"]
 				var visual: Dictionary = view.get("ship_visuals").get(int(ship["id"]), {})
 				if visual.is_empty() or not (visual["to"] as Vector2).is_equal_approx(actual):
 					_fail("Ship render target differs from authoritative physical position.")
 					return
+			if role == "client" and int(session.get("diagnostic_motion_received")) < 2:
+				_fail("Guest did not receive independent movement updates.")
+				return
 			economy_verified = true
 			# A normal game command is the completion acknowledgment. Return
 			# only after each real peer has independently verified its replica.

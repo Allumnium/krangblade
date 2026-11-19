@@ -4,6 +4,8 @@ A running log of potential issues, UX improvements and gameplay ideas noticed du
 
 ## Active observations (v0.8.0)
 
+- v0.44.0 / T-014 follow-up: User reports noticeable guest lag; screenshot shows 35 FPS, 25.42 ms simulation, 4.17 ms encoding and 30.2 KiB compressed state. Verified full reliable state was ACK-gated at 5 Hz, with fixed 200 ms render interpolation. Separate small revisioned 10 Hz unreliable pose batches from 2 Hz reliable state plus urgent command updates; retain authority and lifecycle snapshots. Adaptive render blending is an initial mitigation, not a timestamped jitter buffer. Measure real loss/jitter, bandwidth scaling, pause and dense combat before reducing state further; dynamic asteroid inventory is part of map state and cannot be treated as immutable geometry without splitting it.
+
 - v0.43.8: Larger queue tiles improve recognition; small middle panels will need scrolling sooner when multiple rows wrap.
 
 - v0.43.7: Large center panels no longer separate resource names from their figures across the entire panel; keep the compact width readable as stock values grow.
