@@ -6834,6 +6834,32 @@ func _draw_group_command_line(state: Dictionary, poses: Dictionary, refs: Dictio
 		# One direct intent indicator; individual ships may take different lanes.
 		map_canvas.draw_line(center, finish, Color(shared["tint"], 0.8), 1.5, true)
 
+# Drag placement orders already carry authoritative points and headings.
+# Draw their original hull slots independently of shared command-line targets.
+func _draw_formation_order_ghost(ship: Dictionary, order: Dictionary, bounds: Rect2) -> void:
+	if order.get("kind", "") not in ["position", "patrol"] or not order.get("heading") is Vector2 or not order.get("point") is Vector2:
+		return
+	var world: Vector2 = order["point"]
+	if not world.is_finite():
+		return
+	var point: Vector2 = _screen_point(world)
+	if not bounds.has_point(point):
+		return
+	_draw_destination_ghost(str(ship["kind"]), point, order["heading"], _order_color(ship, order))
+
+func _draw_group_formation_ghosts(state: Dictionary, viewport_bounds: Rect2) -> void:
+	var bounds: Rect2 = viewport_bounds.grow(60.0 * maxf(0.42, _ship_scale()))
+	for ship in state["ships"]:
+		if not selected_units.has(int(ship["id"])) or int(ship["owner"]) != _me():
+			continue
+		var order: Dictionary = ship.get("unit_order", {})
+		# Preserve the planned patrol endpoint on either leg and the move
+		# destination through combat or repair. Completed orders disappear.
+		if (order.get("kind", "") == "position" and ship.has("local_move_target")) or (order.get("kind", "") == "patrol" and ship.has("patrol_from")):
+			_draw_formation_order_ghost(ship, order, bounds)
+		for queued in ship.get("order_queue", []):
+			_draw_formation_order_ghost(ship, queued, bounds)
+
 func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, drawn_sectors: Dictionary) -> void:
 	var order: Dictionary = ship.get("unit_order", {})
 	var endpoint: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
@@ -6851,7 +6877,7 @@ func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary,
 		var tint: Color = _order_color(ship, pending)
 		if pending["kind"] in ["sector", "sector_entry"]:
 			_draw_sector_target(graph, int(pending["target"]), tint, drawn_sectors)
-		elif pending["kind"] == "position":
+		elif pending["kind"] == "position" or (pending["kind"] == "patrol" and pending.has("heading")):
 			_draw_destination_ghost(ship["kind"], finish, pending.get("heading", finish - start), tint)
 		map_canvas.draw_dashed_line(start, finish, Color(tint, 0.45), 1.0, 5.0, true, true)
 		start = finish
@@ -7012,6 +7038,7 @@ func _draw_map() -> void:
 	_draw_ship_target_rings(state, poses, service_refs)
 	if selected_units.size() > 1:
 		_draw_group_command_line(state, poses, service_refs)
+		_draw_group_formation_ghosts(state, viewport_bounds)
 	if selected_units.size() == 1:
 		var order_graph: Dictionary = ECONOMY.military_graph(state)
 		var drawn_sectors: Dictionary = {}
@@ -7029,6 +7056,7 @@ func _draw_map() -> void:
 				var from: Vector2 = _screen_point(craft["patrol_start_point"])
 				var to: Vector2 = _screen_point(craft["patrol_end_point"])
 				map_canvas.draw_dashed_line(from, to, Color("#b880fa"), 1.5, 4.0, true, true)
+				_draw_formation_order_ghost(craft, active_order, viewport_bounds.grow(60.0 * maxf(0.42, _ship_scale())))
 			elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
 				var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
 				var rally_tint := Color("#ff605c")

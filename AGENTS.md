@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.61.3: Selected ship groups show persistent hull ghosts for active and queued drag-formation Move, Attack Move and Patrol orders, using authoritative points/headings and command colors. Cull offscreen ghosts; keep existing shared center line and suppress per-ship route lines for groups.
+
 - v0.61.2: Travel corridors share neutral sector rim shading and subtle rounded visual junctions. Remove static system and field connection lines from the main tactical map; keep minimap/lobby route schematics and active order lines. Navigation geometry unchanged.
 
 - v0.61.1: Stars are background landmarks; exact movement and formations no longer snap to stars or sector entry. Select discovered sectors via authoritative rounded bounds after physical objects; friendly occupied sectors select their station. Keep explicit Send Colony/Transform rather than star-click colonization. Minimap uses exact world points for positional orders.
