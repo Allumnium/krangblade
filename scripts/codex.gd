@@ -392,7 +392,7 @@ func _expansion() -> void:
 	_flow(["Recruit settlers", "Travel", "Establish colony"])
 	_table(["Colony ship", "Requirement"], [["Crew", "%.0f people" % E.COLONY_POPULATION], ["Materials", _recipe(E._cost("colony_ship", 1))], ["Base build time", "%.0f years" % (E._work("colony_ship", 1) / E.yard_speed(1))]])
 	_section("Planetless sectors & conquest")
-	_body("Planetless sectors are useful for routes and mining access. They rely on orbital housing rather than terrestrial agriculture or mining. Defeat hostile defenses and occupy a system to contest territory. A system's claim depends on its station/population and infrastructure, not passing ships.")
+	_body("Cool blue stars mark planetless sectors, useful for routes and mining access. They rely on orbital housing rather than terrestrial agriculture or mining. Defeat hostile defenses and occupy a system to contest territory. A system's claim depends on its station/population and infrastructure, not passing ships.")
 	_note("A colony is a long-term economic investment. Food imports and local farming improve its growth, while fleets defend its shipping lanes.")
 
 func _infrastructure() -> void:
