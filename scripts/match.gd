@@ -24,7 +24,7 @@ const OVERVIEW_MAX_ZOOM: float = 64.0
 const FIGHTER_HULL_LENGTH: float = 22.0
 const CLOSEUP_SCREEN_FRACTION: float = 0.6
 const SNAPSHOT_SECONDS: float = 0.2
-const TRADE_HEIGHT_REDUCTION: float = 90.0
+const TRADE_MAX_EXTRA_HEIGHT: float = 48.0
 # Projected system radius in logical screen pixels, independent of selection.
 const PLANET_FADE_START: float = 40.0
 const PLANET_FADE_FULL: float = 100.0
@@ -797,18 +797,23 @@ func _build_ui() -> void:
 		slider.committed.connect(_apply_thresholds.bind(resource))
 		logistics.add_child(slider)
 		trade_sliders[resource] = slider
+		var switch_inset := MarginContainer.new()
+		switch_inset.add_theme_constant_override("margin_left", 8)
+		switch_inset.add_theme_constant_override("margin_right", 6)
+		logistics.add_child(switch_inset)
+		logistics.move_child(switch_inset, slider.get_index())
 		var switches := HBoxContainer.new()
-		logistics.add_child(switches)
-		logistics.move_child(switches, slider.get_index())
+		switches.add_theme_constant_override("separation", 6)
+		switch_inset.add_child(switches)
 		var incoming := CheckBox.new()
-		incoming.text = "In"
+		incoming.text = "Import"
 		incoming.tooltip_text = "Enable imports below the left threshold"
 		incoming.add_theme_font_size_override("font_size", 10)
 		_compact_trade_check(incoming)
 		incoming.button_pressed = true
 		switches.add_child(incoming)
 		var outgoing := CheckBox.new()
-		outgoing.text = "Out"
+		outgoing.text = "Export"
 		outgoing.tooltip_text = "Enable exports above the right threshold"
 		outgoing.add_theme_font_size_override("font_size", 10)
 		_compact_trade_check(outgoing)
@@ -871,9 +876,15 @@ func _layout_right_panel() -> void:
 	if not is_instance_valid(inspector_slot) or not is_instance_valid(inspector_panel):
 		return
 	var extra: float = 0.0
-	if station_card == "trade" and station_selected_index >= 0 and is_instance_valid(station_commands) and station_commands.visible:
+	if station_card == "trade" and station_selected_index >= 0 and is_instance_valid(station_commands) and station_commands.visible and command_grids.has("Trade") and is_instance_valid(station_trade_back):
+		var page: GridContainer = command_grids["Trade"]
+		var padding: float = inspector_panel.get_theme_stylebox("panel").get_minimum_size().y
+		var required: float = page.get_combined_minimum_size().y + station_trade_back.get_combined_minimum_size().y + float(station_trade.get_theme_constant("separation")) + padding + 4.0
 		var top_limit: float = header_panel.global_position.y + header_panel.size.y + 4.0
-		extra = roundf(maxf(0.0, minf(inspector_slot.size.y, inspector_slot.global_position.y - top_limit) - TRADE_HEIGHT_REDUCTION))
+		var available: float = maxf(0.0, inspector_slot.global_position.y - top_limit)
+		# Three resources usually fit in the standard wing. Extend only to
+		# cover a small shortfall; the scroll viewport handles smaller windows.
+		extra = ceilf(clampf(required - inspector_slot.size.y, 0.0, minf(TRADE_MAX_EXTRA_HEIGHT, available)))
 	inspector_panel.offset_top = -extra
 	console_profile.queue_redraw()
 
@@ -940,6 +951,7 @@ func _layout_command_grids() -> void:
 		var grid: GridContainer = command_grids[title]
 		var cell_width: float = 160.0 if title == "Trade" else 222.0
 		grid.columns = clampi(floori(width / cell_width), 1, 3)
+	_layout_right_panel()
 
 func _minimap_area() -> Rect2:
 	var bounds: Vector2 = _map_size().max(Vector2.ONE)
@@ -3282,8 +3294,8 @@ func _update_trade_stock(p: Dictionary) -> void:
 			slider.export_enabled = bool(t.get("export", true))
 			trade_checks[resource][0].set_pressed_no_signal(slider.import_enabled)
 			trade_checks[resource][1].set_pressed_no_signal(slider.export_enabled)
-			trade_checks[resource][0].text = "In %d%%" % roundi(float(t["min"]))
-			trade_checks[resource][1].text = "Out %d%%" % roundi(float(t["max"]))
+			trade_checks[resource][0].text = "Import %d%%" % roundi(float(t["min"]))
+			trade_checks[resource][1].text = "Export %d%%" % roundi(float(t["max"]))
 			slider.queue_redraw()
 			if not is_equal_approx(slider.lower, float(t["min"])) or not is_equal_approx(slider.upper, float(t["max"])):
 				slider.set_range(float(t["min"]), float(t["max"]))
