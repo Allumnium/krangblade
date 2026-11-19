@@ -84,6 +84,9 @@ const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
 const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade", "farm", "collect"]
 const SHIP_SIZE: int = 1 # Legacy small-class reference.
 const SHIP_SIZES = {"fighter": 1, "miner": 1, "ship": 2, "colony_ship": 2, "science_ship": 3}
+const STATION_STORAGE_BAYS: int = 3
+const TRANSFER_EVENT_LIMIT: int = 192
+const TRANSFER_EVENT_YEARS: float = 6.0
 const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
 const DEFAULT_FOG_OF_WAR: bool = false
@@ -1444,6 +1447,36 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			_launch_to_rally(state, state["ships"].back(), rally)
 	p["queue"].erase(item)
 
+static func cargo_bay_count(kind: String) -> int:
+	return FREIGHTER_BAY_COUNT if kind == "ship" else (2 if kind == "miner" else (5 if kind == "colony_ship" else 1))
+
+static func _transfer_bay(entity: Dictionary, resource: String, amount: float, outgoing: bool) -> int:
+	if entity.has("stock"):
+		var quantity: float = float(entity["stock"].get(resource, 0.0)) + amount * (-0.5 if outgoing else 0.5)
+		return clampi(floori(quantity / maxf(EPS, storage_capacity(entity)) * STATION_STORAGE_BAYS), 0, STATION_STORAGE_BAYS - 1)
+	var kind: String = str(entity["kind"])
+	var cargo: Dictionary = entity.get("cargo", {})
+	var offset: float = 0.0
+	for key in RESOURCES + [ANTIMATTER]:
+		if key == resource:
+			break
+		offset += float(cargo.get(key, 0.0))
+	offset += float(cargo.get(resource, 0.0)) + amount * (-0.5 if outgoing else 0.5)
+	var count: int = cargo_bay_count(kind)
+	return clampi(floori(offset / maxf(EPS, cargo_capacity(kind)) * count), 0, count - 1)
+
+static func _record_transfer(state: Dictionary, source_id: int, source: Dictionary, target_id: int, target: Dictionary, resource: String, amount: float) -> void:
+	if amount <= EPS:
+		return
+	var events: Dictionary = state.get("cargo_transfers", {})
+	var key: String = "%d:%d:%s" % [source_id, target_id, resource]
+	if not events.has(key) and events.size() >= TRANSFER_EVENT_LIMIT:
+		events.erase(events.keys()[0])
+	var seq: int = int(state.get("cargo_transfer_seq", 0)) + 1
+	state["cargo_transfer_seq"] = seq
+	events[key] = {"source": source_id, "target": target_id, "resource": resource, "amount": amount, "from_bay": _transfer_bay(source, resource, amount, true), "to_bay": _transfer_bay(target, resource, amount, false), "elapsed": float(state["elapsed"]), "seq": seq}
+	state["cargo_transfers"] = events
+
 static func _record_flow(p: Dictionary, category: String, resource: String, amount: float) -> void:
 	if amount <= EPS or not p.has("flows"):
 		return
@@ -2132,6 +2165,7 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 			var amount: float = minf(budget - total, minf(cargo_free(freighter), float(miner["cargo"].get(resource, 0.0))))
 			if amount <= EPS:
 				continue
+			_record_transfer(state, int(miner["id"]), miner, int(freighter["id"]), freighter, resource, amount)
 			miner["cargo"][resource] -= amount
 			freighter["cargo"][resource] = float(freighter["cargo"].get(resource, 0.0)) + amount
 			total += amount
@@ -2167,6 +2201,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 			var amount: float = minf(free, minf(_surplus(planets[here], resource), _need(planets[dest], resource)))
 			if amount <= EPS:
 				continue
+			_record_transfer(state, station_target_id(state, here), planets[here], int(ship["id"]), ship, resource, amount)
 			planets[here]["stock"][resource] = float(planets[here]["stock"][resource]) - amount
 			_record_flow(planets[here], "Exports", resource, amount)
 			ship["cargo"][resource] = float(ship["cargo"][resource]) + amount
@@ -2186,6 +2221,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), capacity))
 			if amount <= EPS:
 				continue
+			_record_transfer(state, int(ship["id"]), ship, station_target_id(state, here), planets[here], resource, amount)
 			ship["cargo"][resource] = float(ship["cargo"][resource]) - amount
 			planets[here]["stock"][resource] = float(planets[here]["stock"].get(resource, 0.0)) + amount
 			_record_flow(planets[here], "Imports", resource, amount)
@@ -2574,6 +2610,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), storage_free(local, resource)))
 			if amount <= 0.0:
 				continue
+			_record_transfer(state, int(ship["id"]), ship, station_target_id(state, here), local, resource, amount)
 			local["stock"][resource] = float(local["stock"].get(resource, 0.0)) + amount
 			_record_flow(local, "Mining deliveries", resource, amount)
 			ship["cargo"][resource] -= amount
@@ -3126,6 +3163,7 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), free))
 			if amount <= EPS:
 				continue
+			_record_transfer(state, int(ship["id"]), ship, int(order["target"]), depot, resource, amount)
 			ship["cargo"][resource] -= amount
 			stock[resource] = float(stock.get(resource, 0.0)) + amount
 			budget -= amount
@@ -4779,6 +4817,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 	for resource in RESOURCES + [ANTIMATTER]:
 		var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), storage_free(p, resource)))
 		if amount > EPS:
+			_record_transfer(state, int(ship["id"]), ship, station_target_id(state, depot), p, resource, amount)
 			ship["cargo"][resource] -= amount
 			p["stock"][resource] = float(p["stock"].get(resource, 0.0)) + amount
 			var category: String = "Farm deliveries" if ship["kind"] == "colony_ship" else ("Resource deliveries" if bool(ship.get("resource_haul", false)) else "Salvage deliveries")
@@ -6247,6 +6286,10 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	state["elapsed"] = float(state["elapsed"]) + dt
+	var transfer_events: Dictionary = state.get("cargo_transfers", {})
+	for key in transfer_events.keys():
+		if float(state["elapsed"]) - float(transfer_events[key]["elapsed"]) > TRANSFER_EVENT_YEARS:
+			transfer_events.erase(key)
 	for i in range((state["planets"] as Array).size()):
 		_work_planet(state, i, dt)
 	started = _profile_stage(profile, "Economy", started)

@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.55.1: Three dedicated storage squares per resource on the station ring; fill and borders reflect resource stock. Actual cargo transfers record source/destination bay and animate bounded colored streams with interpolated ship poses.
+
 - v0.55.0: Small (1) Harvester/Fighter, Medium (2) Freighter/Colony, Large (3) Science vessel. Enforce yard class for manual and automatic construction; starting Freighter stays.
 
 - v0.54.3: Local forward-corridor steering uses a single bounded spatial grid per movement substep. Preserve authoritative lane routes, movement budgets, precise shared endpoints and soft contact fallback. Harvester nominal extraction 3 t/yr; dropoff 120/60/100 t/yr (Harvester/Freighter/Colony), independent of mining rate.

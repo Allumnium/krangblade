@@ -498,7 +498,13 @@ func _test_ship_size_classes() -> void:
 	p["yards"][0]["level"] = 3
 	assert(ECON.enqueue(state, 1, 0, "science_ship", "", 0))
 	assert(int(p["queue"][-1]["size"]) == 3)
-	print("PASS: ship classes and yard authority")
+	var source: Dictionary = {"kind": "miner", "cargo": {"Metals": 10.0}}
+	var target: Dictionary = {"kind": "ship", "cargo": {"Metals": 20.0}}
+	ECON._record_transfer(state, 101, source, 102, target, "Metals", 2.0)
+	var event: Dictionary = state["cargo_transfers"]["101:102:Metals"]
+	assert(event["from_bay"] == 1 and event["to_bay"] == 2 and event["amount"] == 2.0)
+	assert(bytes_to_var(var_to_bytes(state))["cargo_transfers"] == state["cargo_transfers"])
+	print("PASS: ship classes, yard authority and cargo transfer metadata")
 
 func _initialize() -> void:
 	_test_ship_size_classes()

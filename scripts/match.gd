@@ -309,6 +309,8 @@ var global_population_label: Label
 var year_label: Label
 var time_buttons: Dictionary = {}
 var game_visual_clock: float = 0.0
+var transfer_visuals: Dictionary = {}
+var transfer_visual_seed: int = -1
 var orbit_visual_time: float = -1.0
 var orbit_sample_time: float = -1.0
 var orbit_sample_age: float = 0.0
@@ -5890,6 +5892,27 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 					var tip: Vector2 = base + axis * float(j * 5)
 					map_canvas.draw_polyline(PackedVector2Array([tip - axis * 4.0 + normal * 3.0, tip, tip - axis * 4.0 - normal * 3.0]), HUD.COLORS[resource], 1.5, true)
 
+func _station_bay_point(center: Vector2, radius: float, elapsed: float, resource: String, bay: int) -> Vector2:
+	var resources: Array = ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]
+	var slot: int = resources.find(resource) * ECONOMY.STATION_STORAGE_BAYS + bay
+	return center + Vector2.from_angle((float(slot) + 0.5) * TAU / float(resources.size() * ECONOMY.STATION_STORAGE_BAYS) + elapsed * 0.008) * radius * 0.71
+
+func _draw_station_storage(system: Dictionary, center: Vector2, radius: float, elapsed: float) -> void:
+	if radius < 8.0:
+		return
+	var half: float = radius * 0.115
+	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
+		var color: Color = HUD.COLORS[resource]
+		var fill: float = clampf(float(system["stock"].get(resource, 0.0)) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system)), 0.0, 1.0) * ECONOMY.STATION_STORAGE_BAYS
+		for bay in range(ECONOMY.STATION_STORAGE_BAYS):
+			var point: Vector2 = _station_bay_point(center, radius, elapsed, resource, bay)
+			var bounds := Rect2(point - Vector2.ONE * half, Vector2.ONE * half * 2.0)
+			map_canvas.draw_rect(bounds, Color("#111d2b"))
+			var fraction: float = clampf(fill - float(bay), 0.0, 1.0)
+			if fraction > 0.0:
+				map_canvas.draw_rect(Rect2(bounds.position + Vector2(0.0, bounds.size.y * (1.0 - fraction)), Vector2(bounds.size.x, bounds.size.y * fraction)), color.darkened(0.25))
+			map_canvas.draw_rect(bounds, color, false, maxf(0.8, radius * 0.018))
+
 func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -> void:
 	var system: Dictionary = state["planets"][index]
 	if not ECONOMY.has_station(system):
@@ -5921,6 +5944,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 			var direction: Vector2 = Vector2.from_angle(a)
 			map_canvas.draw_line(center + direction * radius * 0.74, center + direction * radius * 0.95, Color("#1a293a"), maxf(1.0, radius * 0.05), true)
 			map_canvas.draw_circle(center + direction * radius * 0.88, maxf(0.8, radius * 0.035), tint.lightened(0.4))
+	_draw_station_storage(system, center, radius, elapsed)
 	if selected_station:
 		_draw_selection_ring(center, radius + 4.0)
 	var hp: float = float(system["station"]["hp"]) / ECONOMY.station_max_hp(system)
@@ -6238,6 +6262,61 @@ func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary,
 		elif pending["kind"] == "position":
 			_draw_destination_ghost(ship["kind"], finish, pending.get("heading", finish - start), tint)
 		start = finish
+
+func _transfer_anchor(state: Dictionary, poses: Dictionary, refs: Dictionary, id: int, resource: String, bay: int) -> Vector2:
+	var ref: Dictionary = refs.get(id, {})
+	if ref.get("kind", "") == "station":
+		var node: int = int(ref["node"])
+		if not ECONOMY.discovered(state, _me(), "planets", node):
+			return Vector2.INF
+		return _station_bay_point(_screen_point(ECONOMY.station_position(state, node, float(state["elapsed"]))), _station_radius(), float(state["elapsed"]), resource, bay)
+	if not poses.has(id):
+		return Vector2.INF
+	var pose: Dictionary = poses[id]
+	var kind: String = str(pose["kind"])
+	var offset: Vector2 = Vector2.ZERO
+	if kind == "ship":
+		offset = _freighter_bay_center(bay)
+	elif kind == "miner":
+		offset = Vector2(5.7, -4.8 if bay == 0 else 4.8)
+	elif kind == "colony_ship":
+		offset = Vector2(4.0 - float(bay) * 2.65, 0.0)
+	var axis: Vector2 = pose["direction"]
+	return (pose["point"] as Vector2) + (axis * offset.x + axis.orthogonal() * offset.y) * _ship_scale()
+
+func _draw_cargo_transfers(state: Dictionary, poses: Dictionary, refs: Dictionary, bounds: Rect2) -> void:
+	var seed_value: int = int(state["map"]["seed"])
+	if transfer_visual_seed != seed_value:
+		transfer_visual_seed = seed_value
+		transfer_visuals.clear()
+	var events: Dictionary = state.get("cargo_transfers", {})
+	for key in transfer_visuals.keys():
+		if not events.has(key):
+			transfer_visuals.erase(key)
+	for key in events:
+		var event: Dictionary = events[key]
+		var old: Dictionary = transfer_visuals.get(key, {})
+		if int(old.get("seq", -1)) != int(event["seq"]):
+			var start: float = float(old.get("start", visual_clock)) if visual_clock - float(old.get("last", -100.0)) < 0.65 else visual_clock
+			old = {"seq": event["seq"], "start": start, "last": visual_clock}
+			transfer_visuals[key] = old
+		var age: float = visual_clock - float(old["last"])
+		if age > 0.65:
+			continue
+		var resource: String = event["resource"]
+		var a: Vector2 = _transfer_anchor(state, poses, refs, int(event["source"]), resource, int(event["from_bay"]))
+		var b: Vector2 = _transfer_anchor(state, poses, refs, int(event["target"]), resource, int(event["to_bay"]))
+		if not a.is_finite() or not b.is_finite() or (not bounds.grow(30.0).has_point(a) and not bounds.grow(30.0).has_point(b)):
+			continue
+		var color: Color = HUD.COLORS[resource]
+		var count: int = clampi(ceili(sqrt(float(event["amount"])) * 2.0), 2, 8)
+		var radius: float = clampf(_ship_scale() * 1.2, 0.9, 3.5)
+		for i in range(count):
+			var phase: float = fposmod((visual_clock - float(old["start"])) * 2.8 + float(i) / float(count), 1.0)
+			var point: Vector2 = a.lerp(b, phase)
+			var alpha: float = (1.0 - age / 0.65) * smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.85, 1.0, phase))
+			map_canvas.draw_circle(point, radius * 2.0, Color(color, alpha * 0.18), true, -1.0, true)
+			map_canvas.draw_rect(Rect2(point - Vector2.ONE * radius, Vector2.ONE * radius * 2.0), Color(color.lightened(0.2), alpha))
 
 func _draw_map() -> void:
 	if session == null:
@@ -6560,6 +6639,7 @@ func _draw_map() -> void:
 		map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)
 		# Identify allegiance on every hull, including loaded ships.
 		map_canvas.draw_polyline(outline, empire.lightened(0.2), scale, true)
+	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
 	_draw_ship_destructions(viewport_bounds)
 	_draw_formation_preview(state)
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:

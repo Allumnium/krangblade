@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.55.1: Recent same-link/resource records use the midpoint bay of transferred quantity; large transfers spanning multiple bays show a representative stream. Bounded 192-link history may omit effects in busy hubs. Profile snapshot overhead.
+
 - v0.55.0: Medium-yard prerequisite may delay AI expansion; verify upgrade funding and colony timing.
 
 - v0.54.3: Local avoidance examines at most 24 hulls per nearby grid cell and steers around the closest forward blocker. Dense swarms and shared endpoints can still overlap; profile at eight players and look for oscillation or traffic congestion. Fast unloading is limited by tick size, cargo and storage space.
