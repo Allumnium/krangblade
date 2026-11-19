@@ -1076,38 +1076,42 @@ func _minimap_order(mouse: InputEventMouseButton) -> void:
 	if not area.has_point(mouse.position):
 		return
 	var world: Vector2 = (mouse.position - area.position) / area.size * _map_size()
-	var hint: Dictionary = {"world": world, "entity": -1, "field": -1, "system": -1, "wreck": -1}
+	var hint: Dictionary = {"world": world, "entity": -1, "field": -1, "wreck": -1}
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var count: int = state["planets"].size()
 	var nearest: float = 5.0
 	var node_hit: int = -1
-	# Minimap markers have their own pixel hit radius and show systems, not
-	# orbital structures. Never use the main map's current zoom to hit them.
-	if not mouse.alt_pressed:
-		for node in ECONOMY.military_pois(state, _me()):
-			var distance: float = mouse.position.distance_to(_minimap_point(graph["points"][node], area))
+	# Star markers are background landmarks, not implicit destinations or
+	# station targets. Only actual entity/service orders use marker hits.
+	if not mouse.alt_pressed and pending_command not in ["move", "patrol", "guard", "rally"]:
+		var poses: Dictionary = _ship_poses(state)
+		nearest = 3.0
+		for id in poses:
+			var ship_point: Vector2 = poses[id]["world"]
+			var distance: float = mouse.position.distance_to(_minimap_point(ship_point, area))
 			if distance < nearest:
 				nearest = distance
-				node_hit = node
-		if node_hit >= 0:
-			hint["world"] = graph["points"][node_hit]
-			if node_hit < count:
-				hint["system"] = node_hit
-				if ECONOMY.has_station(state["planets"][node_hit]):
-					hint["entity"] = ECONOMY.station_target_id(state, node_hit)
-					hint["world"] = ECONOMY.station_position(state, node_hit, float(state["elapsed"]))
-			else:
-				hint["field"] = node_hit - count
-		else:
-			nearest = 3.0
-			var poses: Dictionary = _ship_poses(state)
-			for id in poses:
-				var ship_point: Vector2 = poses[id]["world"]
-				var distance: float = mouse.position.distance_to(_minimap_point(ship_point, area))
-				if distance < nearest:
-					nearest = distance
-					hint["entity"] = id
-					hint["world"] = ship_point
+				hint["entity"] = id
+		if int(hint["entity"]) == -1:
+			nearest = 5.0
+			for node in ECONOMY.military_pois(state, _me()):
+				if node < count:
+					if not ECONOMY.has_station(state["planets"][node]):
+						continue
+					var station_point: Vector2 = ECONOMY.station_position(state, node, float(state["elapsed"]))
+					var distance: float = mouse.position.distance_to(_minimap_point(station_point, area))
+					if distance < nearest:
+						nearest = distance
+						node_hit = node
+						hint["entity"] = ECONOMY.station_target_id(state, node)
+						hint["field"] = -1
+				else:
+					var distance: float = mouse.position.distance_to(_minimap_point(graph["points"][node], area))
+					if distance < nearest:
+						nearest = distance
+						node_hit = node
+						hint["field"] = node - count
+						hint["entity"] = -1
 		if pending_command == "load" or (node_hit < 0 and int(hint["entity"]) == -1):
 			nearest = 3.0
 			for pile in state.get("salvage", {}).values():
@@ -1115,7 +1119,6 @@ func _minimap_order(mouse: InputEventMouseButton) -> void:
 				if distance < nearest:
 					nearest = distance
 					hint["wreck"] = int(pile["id"])
-					hint["world"] = pile["position"]
 	var point: Vector2 = _screen_point(hint["world"])
 	var mode: String = pending_command
 	if mode in ["repair", "unload", "load", "collect", "guard"]:
@@ -2618,8 +2621,6 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 		var graph: Dictionary = ECONOMY.military_graph(state)
 		var world: Vector2 = minimap_hint.get("world", _world_point(point))
 		var node: int = ECONOMY.patrol_node(state, graph, _me(), world)
-		if node >= 0 and not ECONOMY.sector_contains(graph, node, world):
-			world = graph["points"][node]
 		var ids: Array[int] = []
 		for craft in state["ships"]:
 			if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
@@ -4662,7 +4663,7 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 		if _planet_detail_opacity(index, radius) < 0.3:
 			continue
 		var center: Vector2 = _screen_point(state["map"]["points"][index])
-		if point.distance_to(center) > radius + 32.0 or point.distance_to(center) <= _star_draw_radius(radius):
+		if point.distance_to(center) > radius + 32.0:
 			continue
 		var bodies: Array = _system_visual(index, state)["bodies"]
 		for slot in range(bodies.size()):
@@ -4684,13 +4685,9 @@ func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 	for index in range(state["planets"].size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
-		var star: Vector2 = _screen_point(state["map"]["points"][index])
 		for slot in range(state["planets"][index]["yards"].size()):
 			var scale: float = _ship_scale(true) * pow(1.2, int(state["planets"][index]["yards"][slot]["level"]) - 1)
 			var center: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
-			# Do not steal star selection when a dock overlaps its star.
-			if center.distance_to(star) < 8.0 or point.distance_to(star) < 5.0:
-				continue
 			var axis: Vector2 = Vector2.from_angle(float(ECONOMY.shipyard_port(state["planets"][index], slot) - 1) * TAU / 3.0 + elapsed * 0.008)
 			var offset: Vector2 = point - center
 			var distance: float = offset.length_squared()
@@ -4710,9 +4707,8 @@ func _station_hit(point: Vector2, state: Dictionary) -> int:
 		if not ECONOMY.has_station(state["planets"][index]) or not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
 		var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, float(state["elapsed"])))
-		var star: Vector2 = _screen_point(state["map"]["points"][index])
 		var distance: float = point.distance_to(center)
-		if center.distance_to(star) >= 8.0 and distance <= _station_radius() + 3.0 and distance < nearest:
+		if distance <= _station_radius() + 3.0 and distance < nearest:
 			hit = index
 			nearest = distance
 	return hit
@@ -5074,16 +5070,9 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	_clear_building_selection()
 	if double_click:
 		additive = false
-	var points: Array = state["map"]["points"]
-	var nearest: float = INF
-	var hit: int = -1
-	for i in range(points.size()):
-		if not ECONOMY.discovered(state, _me(), "planets", i):
-			continue
-		var distance: float = point.distance_to(_screen_point(points[i]))
-		if distance <= clampf(_star_draw_radius(_planet_radius(i, state)) + 3.0, 7.0, 24.0) and distance < nearest:
-			nearest = distance
-			hit = i
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var hit: int = ECONOMY.sector_at(graph, _world_point(point), ECONOMY.military_pois(state, _me()))
+	# Objects have priority over the sector's background geometry.
 	# Use the same interpolated physical pose for selection and rendering.
 	var poses: Dictionary = _ship_poses(state)
 	var ship_hit: int = -1
@@ -5181,14 +5170,22 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 			if distance <= maxf(9.0, float(fields[i]["radius"]) * _fit() * zoom):
 				selected_field = i
 				break
+	if selected_ship_id < 0 and selected_field < 0 and hit >= state["planets"].size():
+		selected_field = hit - state["planets"].size()
+		hit = -1
 	selected = -1 if selected_ship_id >= 0 or selected_field >= 0 else hit
 	follow_units = false
 	var focused: Control = get_viewport().gui_get_focus_owner()
 	if is_instance_valid(focused):
 		focused.release_focus()
 	if selected >= 0:
-		if double_click and ECONOMY.has_station(state["planets"][selected]):
-			_select_visible_buildings(state, Vector2i(selected, 0), "station")
+		var system: Dictionary = state["planets"][selected]
+		var owner: int = int(system["owner"])
+		if owner > 0 and ECONOMY.has_station(system) and int(state["teams"].get(owner, -1)) == int(state["teams"].get(_me(), -2)):
+			var ref := Vector2i(selected, 0)
+			_set_building_primary(state, ref, "station")
+			building_selection_kind = "station"
+			selected_buildings[ref] = 0
 		_load_thresholds()
 	_refresh()
 
@@ -5283,7 +5280,6 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 					rock_id = int(rock["id"])
 	var entries: Array = []
 	var salvage_ids: Array[int] = []
-	var colony_sent: bool = false
 	for craft in state["ships"]:
 		var id: int = int(craft["id"])
 		if not owned.has(id):
@@ -5319,14 +5315,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			var destination: int = ECONOMY.patrol_node(state, graph, _me(), endpoint)
 			if destination < 0:
 				continue
-			var clicked_system: bool = destination == int(minimap_hint.get("system", -1)) if not minimap_hint.is_empty() else destination < state["planets"].size() and point.distance_to(_screen_point(graph["points"][destination])) <= maxf(9.0, _star_draw_radius(_planet_radius(destination, state)))
-			if contextual and not force_position and ref.is_empty() and craft["kind"] == "colony_ship" and not colony_sent and destination < state["planets"].size() and clicked_system and not ECONOMY.colony_path(state, _me(), craft, destination).is_empty():
-				order = {"kind": "colonize", "target": destination}
-				colony_sent = true
-			elif clicked_system and not force_position and (ref.is_empty() or not minimap_hint.is_empty()):
-				order = {"kind": "sector_entry", "target": destination, "move_only": move_only}
-			else:
-				order = {"kind": "position", "target": destination, "point": endpoint, "move_only": move_only}
+			order = {"kind": "position", "target": destination, "point": endpoint, "move_only": move_only}
 		entries.append({"ids": [id], "order": order})
 	if not salvage_ids.is_empty():
 		entries.append({"ids": salvage_ids, "order": {"kind": "salvage", "target": wreck}})
@@ -5401,13 +5390,6 @@ func _formation_orders(state: Dictionary) -> Array:
 			var origin: Vector2 = ECONOMY.unit_order_origin(state, graph, ship) if formation_append else ship["position"]
 			ships[ship["id"]] = ship
 			origins[ship["id"]] = origin
-	var candidates: Array[int] = ECONOMY.military_pois(state, _me())
-	var anchor: int = ECONOMY.sector_at(graph, stroke[0], candidates)
-	if formation_mode != "patrol" and not formation_force_position and anchor >= 0 and anchor < state["planets"].size() and formation_path[0].distance_to(_screen_point(graph["points"][anchor])) <= maxf(9.0, _star_draw_radius(_planet_radius(anchor, state))):
-		for ship in ships.values():
-			var order: Dictionary = {"kind": "sector_entry", "target": anchor, "move_only": formation_mode != "attack"}
-			entries.append({"ids": [ship["id"]], "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
-		return entries
 	if owned.size() == 1:
 		if ships.is_empty():
 			return entries
@@ -5466,10 +5448,6 @@ func _draw_formation_preview(state: Dictionary) -> void:
 	if entries.is_empty():
 		return
 	var color: Color = Color("#b880fa") if formation_mode == "patrol" else Color("#ff605c") if formation_mode == "attack" else HUD.ACCENT
-	if entries[0]["order"]["kind"] == "sector_entry":
-		var graph: Dictionary = ECONOMY.military_graph(state)
-		_draw_sector_target(graph, int(entries[0]["order"]["target"]), color, {})
-		return
 	if _selected_owned_units(state).size() == 1:
 		map_canvas.draw_line(formation_path[0], formation_path[-1], color, 1.5, true)
 	else:

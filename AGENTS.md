@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.61.1: Stars are background landmarks; exact movement and formations no longer snap to stars or sector entry. Select discovered sectors via authoritative rounded bounds after physical objects; friendly occupied sectors select their station. Keep explicit Send Colony/Transform rather than star-click colonization. Minimap uses exact world points for positional orders.
+
 - v0.61.0: Replace gap Voronoi partition with continuous outlined lane capsules (radius 35% of smaller endpoint sector). Exact point orders require a sector or discovered connection; direct movement from either adjoining core or within a lane, no midpoint routing restriction. Ownership stays core-only.
 
 - v0.60.1: Scouts are military hulls for tactical movement, guard, patrol, pursuit, AI fleet allocation, threat and territory logic; preserve speed, HP and blaster stats.
