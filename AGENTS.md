@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.54.1: Damaged hulls, stations, yards and PDS show readable HP bars even at distant zoom (PDS minimum health at star when bodies hidden). Cargo work seeks spaced in-range berths. Fighter Guard (U) is a persistent sector-defense order with return point. Civilian field travel honors the final star waypoint before local approach.
+
 - v0.54.0: Display Colony and Harvester; preserve internal ship keys. Ship crew visible in details only, not world labels. Science vessel Collect Antimatter (C): left-click targets a Pulsar, right-click toggles default-off autocast. Manual collection works regardless of toggle; disabling cancels automatic collection only. Preserve 30-year collection and one-unit hold.
 
 - v0.53.7: Opportunistic same-owner miner-to-freighter transfer in beam range even on lane crossings and without staging, while Auto-Trade is enabled. Preserve routes and explicit cargo operations; apply one shared unload budget per miner per tick. Sector combat overrides ordinary fighter move/follow while a hostile shares the sector; resume the original order afterward.

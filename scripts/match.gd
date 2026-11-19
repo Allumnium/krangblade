@@ -1059,7 +1059,7 @@ func _minimap_order(mouse: InputEventMouseButton) -> void:
 					hint["world"] = pile["position"]
 	var point: Vector2 = _screen_point(hint["world"])
 	var mode: String = pending_command
-	if mode in ["repair", "unload", "load", "collect"]:
+	if mode in ["repair", "unload", "load", "collect", "guard"]:
 		_execute_pending_command(point, mouse.shift_pressed, hint)
 	elif mode == "rally" or (mode.is_empty() and selected_yard >= 0):
 		_set_rally_at(point)
@@ -1543,6 +1543,7 @@ func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
 		"auto_salvage": '<path fill="#9ccfc5" d="M4 4H8V14Q8 21 16 21Q24 21 24 14V4H28V15Q28 27 16 27Q4 27 4 15Z"/><path fill="#d3e4eb" d="M13 4L21 6L18 13L10 11Z"/><path fill="#ffcd81" d="M12 14L16 18L12 22L8 18Z"/>',
 		"move": '<path fill="#9ed9f6" d="M3 12H18V5L30 16L18 27V20H3Z"/><path fill="#edfaff" d="M5 13H19V9L26 15H5Z"/>',
 		"stop": '<rect x="6" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/><rect x="18" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/>',
+		"guard": '<path fill="#a3d6e9" d="M16 2L29 7V17Q27 26 16 30Q5 26 3 17V7Z"/><path fill="#243d52" d="M16 7L24 10V17Q22 23 16 26Q10 23 8 17V10Z"/><path stroke="#a7e9c5" stroke-width="3" fill="none" d="M10 16L14 20L23 11"/>',
 		"hold": '<rect x="5" y="5" width="22" height="22" rx="2" fill="#c1d4e2"/><rect x="10" y="10" width="12" height="12" rx="1" fill="#334c60"/>',
 		"patrol": '<path fill="#bc9df1" d="M3 12A13 13 0 0 1 24 6L28 2V14H16L20 10A7 7 0 0 0 9 13ZM29 20A13 13 0 0 1 8 26L4 30V18H16L12 22A7 7 0 0 0 23 19Z"/>',
 		"attack": '<path stroke="#ff776f" stroke-width="2.6" fill="none" d="M16 2V9M16 23V30M2 16H9M23 16H30"/><circle cx="16" cy="16" r="10" fill="none" stroke="#ff9c8d" stroke-width="3"/><path d="M16 11L21 20L16 18L11 20Z" fill="#ffe1ca"/>',
@@ -2174,7 +2175,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	slot.add_child(button)
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_buttons[id] = button
-	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C}[id], "Fleet", "fleet_" + id, hint)
+	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -2207,6 +2208,7 @@ func _build_command_card(parent: VBoxContainer) -> void:
 		border.draw.connect(_draw_autobuild_border.bind(border))
 		button.set_meta("auto_border", border)
 	_fill_ability_grid(command_card)
+	_command_slot("guard", "Guard sector · return to the chosen point after combat", _arm_command.bind("guard"))
 
 func _autocast_units(state: Dictionary, mode: String) -> Array:
 	var units: Array = []
@@ -2264,7 +2266,18 @@ func _refresh_autocast_cards() -> void:
 			farm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if command_buttons.has("collect"):
 		var collect_button: Button = command_buttons["collect"]
-		var collect_slot: Control = command_card.get_child(9 if not _autocast_units(state, "mine").is_empty() else 13)
+		var has_fighters: bool = state.get("ships", []).any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] == "fighter")
+		var has_harvesters: bool = not _autocast_units(state, "mine").is_empty()
+		var extra: Control = command_card.get_child(16)
+		var collect_slot: Control = command_card.get_child((16 if has_fighters else 9) if has_harvesters else 13)
+		var guard_button: Button = command_buttons["guard"]
+		var guard_slot: Control = command_card.get_child(9)
+		if guard_button.get_parent() != guard_slot:
+			guard_button.reparent(guard_slot, false)
+			guard_button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		guard_button.visible = has_fighters
+		guard_button.disabled = not has_fighters
+		extra.visible = has_fighters and has_harvesters and not _autocast_units(state, "collect").is_empty()
 		if collect_button.get_parent() != collect_slot:
 			collect_button.reparent(collect_slot, false)
 			collect_button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -2346,6 +2359,17 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 				if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
 					eligible.append(int(craft["id"]))
 			_issue_order(eligible, {"kind": "salvage", "target": wreck}, append)
+	elif mode == "guard":
+		var state: Dictionary = _state()
+		var graph: Dictionary = ECONOMY.military_graph(state)
+		var world: Vector2 = minimap_hint.get("world", _world_point(point))
+		var node: int = ECONOMY.sector_at(graph, world, ECONOMY.military_pois(state, _me()))
+		var ids: Array[int] = []
+		for craft in state["ships"]:
+			if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] == "fighter":
+				ids.append(int(craft["id"]))
+		if node >= 0:
+			_issue_order(ids, {"kind": "guard", "target": node, "point": world}, append)
 	elif mode == "collect":
 		var state: Dictionary = _state()
 		var graph: Dictionary = ECONOMY.military_graph(state)
@@ -2422,6 +2446,15 @@ func _build_selection_portrait(parent: Container) -> void:
 	selection_portrait_health.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	selection_portrait.add_child(selection_portrait_health)
 	selection_portrait.hide()
+
+func _draw_damage_bar(point: Vector2, radius: float, fraction: float) -> void:
+	if fraction >= 1.0:
+		return
+	var width: float = clampf(radius * 2.0, 18.0, 100.0)
+	var base: Vector2 = point + Vector2(-width * 0.5, -maxf(8.0, radius) - 6.0)
+	map_canvas.draw_rect(Rect2(base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
+	map_canvas.draw_rect(Rect2(base, Vector2(width, 3.0)), Color("#283748"))
+	map_canvas.draw_rect(Rect2(base, Vector2(width * clampf(fraction, 0.0, 1.0), 3.0)), _health_color(fraction))
 
 func _health_color(fraction: float) -> Color:
 	return Color("#e45b60") if fraction < 0.2 else (Color("#eac64a") if fraction < 0.5 else Color("#55c88b"))
@@ -2682,6 +2715,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	elif bool(ship.get("resource_haul", false)):
 		status = "Hauling resources" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for resource storage"
 	var follow_order: Dictionary = ship.get("unit_order", {})
+	if follow_order.get("kind", "") == "guard" and not bool(ship.get("retreating", false)):
+		status = "Guarding sector" if bool(ship.get("guard_arrived", false)) else "Moving to guard position"
 	if follow_order.get("kind", "") == "follow" and not bool(ship.get("retreating", false)):
 		var target_ship: Dictionary = ECONOMY.service_targets(state).get(int(follow_order["target"]), {}).get("entity", {})
 		status = "Following %s" % _ship_kind_name(str(target_ship.get("kind", "ship")))
@@ -4195,11 +4230,18 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 					map_canvas.draw_circle(point, body_radius, Color(HUD.COLORS.get(body["resource"], Color("#7d8b9b")).darkened(0.18), detail), true)
 				if system.get("pds", {}).has(slot):
 					_draw_pds_frame(point, body_radius, detail)
+					if detail >= 0.5:
+						_draw_damage_bar(point, body_radius + 4.0, float(system["pds"][slot].get("hp", ECONOMY.PDS_HP)) / ECONOMY.PDS_HP)
 				if (index == selected and selected_body == slot) or (building_selection_kind == "pds" and selected_buildings.has(Vector2i(index, slot))):
 					_draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
 	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
 	_draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity)
+	if detail < 0.5:
+		var defense_health: float = 1.0
+		for battery in system.get("pds", {}).values():
+			defense_health = minf(defense_health, float(battery.get("hp", ECONOMY.PDS_HP)) / ECONOMY.PDS_HP)
+		_draw_damage_bar(pos, star_radius + 4.0, defense_health)
 	if detail < 0.999 and not system.get("pds", {}).is_empty():
 		map_canvas.draw_arc(pos, star_radius + 3.0, -PI * 0.8, PI * 0.8, 18, Color(Color("#bdcbd6"), 1.0 - detail), 1.5, true)
 	if detail < 0.999:
@@ -5126,7 +5168,7 @@ func _map_input(event: InputEvent) -> void:
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
-					if pending_command in ["repair", "unload", "load", "rally", "collect"]:
+					if pending_command in ["repair", "unload", "load", "rally", "collect", "guard"]:
 						_execute_pending_command(mouse.position, mouse.shift_pressed)
 					elif not pending_command.is_empty() and pending_command not in ["move", "attack", "patrol"]:
 						pending_command = ""
@@ -5882,10 +5924,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 	if selected_station:
 		_draw_selection_ring(center, radius + 4.0)
 	var hp: float = float(system["station"]["hp"]) / ECONOMY.station_max_hp(system)
-	if hp < 0.999:
-		var base: Vector2 = center + Vector2(-radius, -radius - 6.0)
-		map_canvas.draw_rect(Rect2(base, Vector2(radius * 2.0, 3.0)), Color("#283748"))
-		map_canvas.draw_rect(Rect2(base, Vector2(radius * 2.0 * hp, 3.0)), tint)
+	_draw_damage_bar(center, radius, hp)
 
 func _draw_shipyard_construction(state: Dictionary, index: int, job: Dictionary, tint: Color, elapsed: float) -> void:
 	var port: int = int(job.get("station_slot", job["level"]))
@@ -5981,9 +6020,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 		if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
 			_draw_selection_ring(point, maxf(9.0, 23.0 * scale))
 		var health: float = float(yard.get("hp", ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))) / (ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))
-		if health < 0.999:
-			map_canvas.draw_rect(Rect2(point + Vector2(-12, -22) * scale, Vector2(24, 3) * scale), Color("#283748"))
-			map_canvas.draw_rect(Rect2(point + Vector2(-12, -22) * scale, Vector2(24 * health, 3) * scale), tint)
+		_draw_damage_bar(point, maxf(8.0, 22.0 * scale), health)
 		for job in planet["queue"]:
 			if int(job["id"]) != int(yard["job"]) or not ECONOMY.SHIP_KINDS.has(job["kind"]):
 				continue
@@ -6480,6 +6517,7 @@ func _draw_map() -> void:
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
+		_draw_damage_bar(point, (24.0 if ship["kind"] == "ship" else 15.0) * scale, float(ship.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP)
 		if scale < 0.15 * overview or (scale < 0.42 and Geometry2D.triangulate_polygon(shape).is_empty()):
 			map_canvas.draw_circle(point, maxf(0.8, 6.0 * scale / overview) * overview, hull, true, -1.0, true)
 			continue
@@ -6522,12 +6560,6 @@ func _draw_map() -> void:
 		map_canvas.draw_polyline(outline, Color("#08111b"), 2.5 * scale, true)
 		# Identify allegiance on every hull, including loaded ships.
 		map_canvas.draw_polyline(outline, empire.lightened(0.2), scale, true)
-		var hp: float = clampf(float(ship.get("hp", ECONOMY.SHIP_HP)) / ECONOMY.SHIP_HP, 0.0, 1.0)
-		if hp < 1.0 and scale >= 0.65:
-			var width: float = clampf(20.0 * scale, 20.0, 100.0)
-			var bar_pos: Vector2 = point + Vector2(-width * 0.5, maxf(13.0, 15.0 * scale))
-			map_canvas.draw_rect(Rect2(bar_pos, Vector2(width, 3.0)), Color("#182333"))
-			map_canvas.draw_rect(Rect2(bar_pos, Vector2(width * hp, 3.0)), Color("#e9a276"))
 	_draw_ship_destructions(viewport_bounds)
 	_draw_formation_preview(state)
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:

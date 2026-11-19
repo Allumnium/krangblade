@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.54.1: Berth scoring favors clearance over shortest approach; very crowded stations may not have enough space for all hulls. Check jitter and throughput. Guard is a fighter-only sector defense with a chosen return point; verify edge pursuit and emergency repair behavior.
+
 - v0.54.0: Collect Antimatter uses a dual-purpose icon (left target, right toggle); verify tooltip discoverability and mixed-fleet slot placement. Science holds remain non-unloadable pending antimatter usage design.
 
 - v0.53.7: Passive handoff uses pre-movement positions; very fast opposing ships could cross transfer range between simulation ticks. Monitor logistics throughput and whether staged or moving receivers compete fairly.
