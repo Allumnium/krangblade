@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.58.5: Inspect station Select Shipyards with zero/one/multiple completed yards, Build Shipyard costs, queued slots, max capacity, and grouped commands on host and guest.
+
 - [ ] v0.58.4: Validate doubled repair throughput, stationary idle recipients, resumption after beam interruption/full HP, explicit orders and multiplayer parity.
 
 - [ ] v0.58.3: Validate gap moves and formations for all hulls, queued movement, return to sectors, repair, map bounds and host/guest parity.

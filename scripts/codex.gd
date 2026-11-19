@@ -406,6 +406,7 @@ func _infrastructure() -> void:
 		rows.append([definition["name"], _recipe(definition["cost"]), "%.0f%% baseline" % (E.BUILDING_BONUS * 100.0)])
 	_table(["Building", "Materials", "Output bonus"], rows)
 	_section("Shipyard modules")
+	_body("Select Shipyards (Z) selects all completed yards at this station. Build → Build Shipyard (X) adds a yard at the next free port.")
 	rows = []
 	for i in range(1, E.MAX_SHIPYARDS + 1):
 		rows.append(["Module %d" % i, _recipe(E._cost("yard", i))])
