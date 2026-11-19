@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.56.12: Verify population bar against summed habitation and orbital capacity, upgrades and new colonies.
+
 - [ ] v0.56.11: Inspect cargo rocket art and blockade visibility, neutral-sector command card and separate station/yard jobs.
 
 - [ ] v0.56.10: Verify live planetary production details match particles, including undefended planets, blockade and multiple matching bodies.

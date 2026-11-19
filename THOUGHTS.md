@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.56.12: Population bar now uses habitation ceiling rather than food equilibrium; food shortage may halt growth before the bar fills.
+
 - v0.56.11: Planetary rockets are visual representations with colored cargo bays, not independent combat hulls; production accounting unchanged.
 
 - v0.56.10: Planet details share particle source allocation; absent matching colors use first-body fallback, and matching bodies divide output equally.
