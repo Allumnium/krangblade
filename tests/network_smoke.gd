@@ -261,6 +261,9 @@ func _phase_changed() -> void:
 						var farm: Dictionary = state["ships"].back()
 						farm["holding"] = true
 						farm["farm_auto"] = false
+						ECON._finish(state, index, system, {"id": 942000 + index, "kind": "science_ship"})
+						var science: Dictionary = state["ships"].back()
+						science["holding"] = true
 						# Dock-separated freighters must deliver without exact-center arrival.
 						for dock_slot in range(2):
 							var docked: Dictionary = repair_victim.duplicate(true)
@@ -511,6 +514,8 @@ func _send_commands() -> void:
 	session.call("request_shipyard_rally", home_index, 0, home_index, graph["points"][home_index])
 	session.call("request_shipyard_rally", (home_index + 1) % expected_players, 0, home_index, graph["points"][home_index])
 	session.call("request_autocast", [939000 + home_index], "farm", true)
+	session.call("request_autocast", [942000 + home_index], "collect", true)
+	session.call("request_autocast", [942000 + (home_index + 1) % expected_players], "collect", false)
 	session.call("request_autocast", [939000 + home_index], "salvage", true)
 	session.call("request_continuous", home_index, "colony_ship", true)
 	session.call("request_continuous", home_index, "miner", true)
@@ -708,6 +713,7 @@ func _check_economy_sync() -> void:
 			var recipient_loaded: bool = false
 			var dock_delivered: int = 0
 			var farm_verified: bool = false
+			var science_verified: bool = false
 			var repair_toggled: bool = false
 			var repaired: bool = false
 			var deposited: bool = false
@@ -716,6 +722,8 @@ func _check_economy_sync() -> void:
 					assigned_miners += 1
 				if int(craft["id"]) in [941000 + owner_home * 2, 941001 + owner_home * 2] and ECON._cargo_total(craft) <= ECON.EPS:
 					dock_delivered += 1
+				if int(craft["id"]) == 942000 + owner_home:
+					science_verified = ECON.autocast_enabled(craft, "collect") and bool(craft.get("holding", false)) and ECON._cargo_total(craft) <= ECON.EPS
 				if int(craft["id"]) == 939000 + owner_home:
 					farm_verified = ECON.autocast_enabled(craft, "farm") and not ECON.supports_autocast(craft, "salvage") and float(craft["cargo"]["Organics"]) > ECON.EPS and ECON._cargo_total(craft) <= ECON.COLONY_CAPACITY + ECON.EPS
 				if int(craft["id"]) == 930000 + owner_home:
@@ -744,6 +752,7 @@ func _check_economy_sync() -> void:
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 14.0 - 0.001,
 				"crowded_dock_delivery": dock_delivered == 2,
 				"colony_farming": farm_verified,
+				"science_collect_toggle": science_verified,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
 				"miner_repair_toggle": repair_toggled,
 				"miner_resource_handoff": resource_handoff and recipient_loaded,

@@ -282,9 +282,9 @@ func _overview() -> void:
 	_body("Expand your empire through local economies, autonomous logistics and direct fleet command.")
 	_section("The strategic loop")
 	_flow(["Extract resources", "Build & recruit", "Expand", "Defend supply"])
-	_body("Start with 3 miners, 2 fighters and 1 freighter. Select a unit or station to issue orders.")
+	_body("Start with 3 Harvesters, 2 fighters and 1 freighter. Select a unit or station to issue orders.")
 	_section("First priorities")
-	_table(["Goal", "Action"], [["Establish supplies", "Protect nearby asteroid fields and keep food reserves healthy."], ["Build a fleet", "Select a shipyard and queue miners, fighters or freighters."], ["Expand", "Send a colony ship to an eligible neutral system. Secure your trade lanes."], ["Survive", "Defend your stations and colony ships; defeat hostile teams by conquest."]])
+	_table(["Goal", "Action"], [["Establish supplies", "Protect nearby asteroid fields and keep food reserves healthy."], ["Build a fleet", "Select a shipyard and queue Harvesters, fighters or freighters."], ["Expand", "Send a Colony to an eligible neutral system. Secure your trade lanes."], ["Survive", "Defend your stations and Colonies; defeat hostile teams by conquest."]])
 	_note("Start with Population & food and Trade & storage.")
 
 func _resources() -> void:
@@ -298,7 +298,7 @@ func _resources() -> void:
 		rows.append([r, "%.0f t" % float(E.STARTING_STOCK[r])])
 	_table(["Resource", "Stock"], rows)
 	_section("Raw antimatter")
-	_body("Science vessels collect one unit at a Pulsar after 30 years in range. Antimatter remains aboard; uses come later.")
+	_body("Science vessels collect one unit at a Pulsar after 30 years in range. Collect Antimatter (C), then choose a Pulsar; right-click the ability to enable autocast (off by default). Antimatter remains aboard.")
 
 func _population() -> void:
 	_body("Residents power production, staff shipyards and crew ships. Food and housing limit terrestrial growth.")
@@ -314,7 +314,7 @@ func _population() -> void:
 	_label(article, "Ideal growth from %.0f residents. Capacity limits and recruitment reduce actual growth." % E.HOME_POPULATION, 12, HUD.MUTED)
 	_section("Orbital Eco-Housing")
 	_body("Each completed shipyard and orbital housing module supports %.0f residents and produces %.1f t/yr Organics. These residents recover at a %.0f-year doubling rate and are exempt from terrestrial food and overcrowding penalties." % [E.ORBITAL_HOUSING_POPULATION, E.ECO_HOUSING_ORGANICS, E.POPULATION_DOUBLING_YEARS])
-	_note("Keep Organics near the reserve target before spending food on ships. Colony ships require %.0f settlers; a starving system cannot grow its terrestrial population." % E.COLONY_POPULATION)
+	_note("Keep Organics near the reserve target before spending food on ships. Colonies require %.0f settlers; a starving system cannot grow its terrestrial population." % E.COLONY_POPULATION)
 
 func _chart(population: bool) -> void:
 	var panel := _panel(article, Color("#091420"), 10)
@@ -366,15 +366,15 @@ func _draw_chart(canvas: Control, population: bool) -> void:
 		canvas.draw_polyline(points, SERIES_COLORS[series], 2.5, true)
 
 func _mining() -> void:
-	_body("Mining ships extract ore and transfer it to nearby freighters, even while traveling (10 miner holds per freighter), or return to an owned depot. Cargo enters storage gradually within docking range. Select a miner and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
+	_body("Harvesters extract ore and transfer it to nearby freighters, even while traveling (10 Harvester holds per freighter), or return to an owned depot. Cargo enters storage gradually within docking range. Select a Harvester and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
 	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Local resource ceiling", "%.0f t/yr" % E.PLANET_MINING_LIMIT], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
-	_body("Destroyed ships can leave drifting salvage. Mining and freighters may collect it in safe space; miners prioritize reachable safe salvage. Wreck debris lasts %.0f–%.0f simulation years; cancelled construction salvage persists. Freighters salvage at one-quarter the mining ship rate. Miners repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
+	_body("Destroyed ships can leave drifting salvage. Harvesters and freighters may collect it in safe space; Harvesters prioritize reachable safe salvage. Wreck debris lasts %.0f–%.0f simulation years; cancelled construction salvage persists. Freighters salvage at one-quarter the Harvester rate. Harvesters repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
 
 func _trade() -> void:
-	_body("Every station has separate resource stockpiles and import/export settings. Freighters move surplus between friendly systems. With Auto-Trade enabled, idle ships wait within handoff range on the depot-facing side of miners, or at salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait if storage is full. Trade surplus without an importer returns to owned storage. Dropoff: miners %.0f, freighters %.0f, colony ships %.0f t/yr." % [E.dropoff_rate("miner"), E.dropoff_rate("ship"), E.dropoff_rate("colony_ship")])
+	_body("Every station has separate resource stockpiles and import/export settings. Freighters move surplus between friendly systems. With Auto-Trade enabled, idle ships wait within handoff range on the depot-facing side of Harvesters, or at salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait if storage is full. Trade surplus without an importer returns to owned storage. Dropoff: Harvesters %.0f, freighters %.0f, Colonies %.0f t/yr." % [E.dropoff_rate("miner"), E.dropoff_rate("ship"), E.dropoff_rate("colony_ship")])
 	_flow(["Source surplus", "Freighter in transit", "Destination deficit"])
 	_section("Trade thresholds")
 	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both use local storage capacity; the Import and Export checkboxes toggle each independently.")
@@ -388,10 +388,10 @@ func _trade() -> void:
 	_note("Empire totals include cargo in transit, but local construction uses delivered stock. Protect supply routes and avoid exporting essential food reserves.")
 
 func _expansion() -> void:
-	_body("Build a colony ship and direct it to a reachable neutral system. On arrival it establishes a station and shipyard. Settlers become the new colony population; existing colonies cannot be freely claimed.")
+	_body("Build a Colony and direct it to a reachable neutral system. On arrival it establishes a station and shipyard. Settlers become the new colony population; existing colonies cannot be freely claimed.")
 	_flow(["Recruit settlers", "Travel", "Establish colony"])
-	_body("Colony ships farm %.0f t/yr into a %.0f t Organics hold. Auto-Farm delivers full loads when idle; Deliver Organics or right-click a friendly station to unload early. They cannot salvage." % [E.COLONY_FARM_RATE, E.COLONY_CAPACITY])
-	_table(["Colony ship", "Requirement"], [["Crew", "%.0f people" % E.COLONY_POPULATION], ["Materials", _recipe(E._cost("colony_ship", 1))], ["Base build time", "%.0f years" % (E._work("colony_ship", 1) / E.yard_speed(1))]])
+	_body("Colonies farm %.0f t/yr into a %.0f t Organics hold. Auto-Farm delivers full loads when idle; Deliver Organics or right-click a friendly station to unload early. They cannot salvage." % [E.COLONY_FARM_RATE, E.COLONY_CAPACITY])
+	_table(["Colony", "Requirement"], [["Crew", "%.0f people" % E.COLONY_POPULATION], ["Materials", _recipe(E._cost("colony_ship", 1))], ["Base build time", "%.0f years" % (E._work("colony_ship", 1) / E.yard_speed(1))]])
 	_section("Planetless sectors & conquest")
 	_body("Cool blue stars mark planetless sectors, useful for routes and mining access. They rely on orbital housing rather than terrestrial agriculture or mining. Defeat hostile defenses and occupy a system to contest territory. A system's claim depends on its station/population and infrastructure, not passing ships.")
 	_note("A colony is a long-term economic investment. Food imports and local farming improve its growth, while fleets defend its shipping lanes.")
@@ -412,9 +412,9 @@ func _infrastructure() -> void:
 	_body("Warehouse upgrades expand storage; habitation increases terrestrial housing capacity. Orbital Eco-Housing adds self-sufficient residents in planetless systems. Additional shipyards also supply eco-housing.")
 
 func _ships() -> void:
-	_body("Select a shipyard to construct ships. Costs are paid from the local station. Freighters have ten 10 t bays. Miners travel slower; fighters are 20% faster than freighters. Ship selection displays crew. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
+	_body("Select a shipyard to construct ships. Costs are paid from the local station. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship selection displays crew. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
-	var names := {"fighter": "Fighter", "miner": "Mining ship", "ship": "Freighter", "colony_ship": "Colony ship", "science_ship": "Science vessel"}
+	var names := {"fighter": "Fighter", "miner": "Harvester", "ship": "Freighter", "colony_ship": "Colony", "science_ship": "Science vessel"}
 	for kind in ["fighter", "miner", "ship", "colony_ship", "science_ship"]:
 		rows.append([names[kind], _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(1))])
 	_table(["Ship", "Materials", "Crew", "Time (Lv 1)"], rows)
@@ -430,12 +430,12 @@ func _combat() -> void:
 	_table(["Weapon", "Damage / shot or volley", "Range"], [["Fighter laser", "%.0f" % E.LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Mining lasers", "%.0f" % E.MINER_LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Planetary defense", "%.0f" % E.PDS_DAMAGE, "%.0f" % E.PDS_RANGE]])
 	_section("Station defenses")
 	_table(["Upgrade", "Effect", "Materials"], [["Reinforced Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Laser Matrix", "%d defensive lasers" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Planetary defense battery", _recipe(E._cost("pds", 1))]])
-	_note("Use coordinated attack groups, protect miners and freighters, and retreat before losing ships and their crew investment.")
+	_note("Use coordinated attack groups, protect Harvesters and freighters, and retreat before losing ships and their crew investment.")
 
 func _controls() -> void:
 	_note("Default hotkeys. Menu → Hotkeys changes bindings; camera speed sliders adjust keyboard, mouse edge and wheel zoom.")
 	_table(["Input", "Action"], [["Left click / drag", "Select a ship, structure or fleet"], ["Shift + select", "Add to selection"], ["Right click / drag", "Contextual order / formation"], ["Right click friendly ship", "Follow until replaced"], ["A / M / P, then click", "Attack / move / patrol"], ["S / H", "Stop / hold"], ["L / D / R, then click", "Load / drop cargo / repair"], ["Y, then click / X", "Set / clear shipyard rally"], ["Shift + order", "Queue an order"], ["Arrows / screen edge / middle drag", "Pan camera"], ["Mouse wheel", "Zoom; ships enlarge up to 12×, structures up to 4×"], ["F", "Follow or focus selection"], ["F2", "Select all owned fighters"], ["Double F2", "Center military selection"], ["Ctrl + 0–9", "Assign control group"], ["Shift + 0–9", "Add selection to group"], ["0–9 / double tap", "Recall / center group"], ["B / T (station)", "Build / trade"], ["Esc", "Cancel targeting, return or menu"]])
-	_body("Wander, Auto-Mine, Auto-Salvage, Auto-Repair, Auto-Trade and Auto-Farm toggle with either mouse button. Modes occupy the bottom row (extra modes above for mixed fleets). Lit borders show enabled modes; clock masks show cooldown. Enabling Wander clears its cooldown only; active orders and Hold take priority.")
+	_body("Wander, Auto-Mine, Auto-Salvage, Auto-Repair, Auto-Trade and Auto-Farm toggle with either mouse button. Modes occupy the bottom row (extra modes above for mixed fleets). Collect Antimatter uses left-click targeting and right-click autocast. Lit borders show enabled modes; clock masks show cooldown. Enabling Wander clears its cooldown only; active orders and Hold take priority.")
 	_body("Click a star to target its sector boundary; drag from a star to target the whole sector. Alt forces precise positioning. Use the minimap to navigate or issue contextual orders. Command-card buttons expose additional actions and tooltips; right-click eligible production cards to repeat.")
 
 func _multiplayer() -> void:
