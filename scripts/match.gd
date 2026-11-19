@@ -1347,12 +1347,12 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 		grid.add_child(button)
 		yard_commands[kind] = button
-	# Bottom row: Upgrade, empty slot, Clear Rally, Rally.
+	# Bottom row: Upgrade, Return to the system, Clear Rally, Rally.
 	yard_upgrade = _button("", _upgrade_selected_yards, grid, true)
 	_yard_ability_face(yard_upgrade, "Upgrade", _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>'))
-	var empty_slot := Control.new()
-	empty_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	grid.add_child(empty_slot)
+	var return_button := _button("", _return_from_yard, grid)
+	_yard_ability_face(return_button, "Return", _station_command_icon("return"))
+	return_button.tooltip_text = "Return to the system overview"
 	var clear := _button("", func() -> void:
 		pending_command = ""
 		_refresh_command_mode()
@@ -1370,6 +1370,12 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_commands["rally"] = rally_button
 	_fill_ability_grid(grid)
 	yard_command_scroll.hide()
+
+func _return_from_yard() -> void:
+	selected_yard = -1
+	selected_yard_count = 0
+	pending_command = ""
+	_refresh()
 
 func _station_command_icon(kind: String, pixels: int = 32) -> Texture2D:
 	if HUD.ICONS.has(kind):
