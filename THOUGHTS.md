@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.47.1: Compact command icons previously mixed thin line strokes, raw resource glyphs and ship portraits. Use solid silhouettes, deliberate negative space and secondary semantic accents; distinguish construction facility art from stock icons. Verify readability at minimum slot heights and against disabled/selected states before further stylization.
+
 - v0.47.0: Edge scrolling uses a 12-pixel margin and pauses while mouse buttons are held to avoid inadvertent camera motion during selections, formations and UI drags. Check windowed focus transitions and bottom-console edge behavior in live play.
 
 - v0.46.2: User screenshots showed the Codex extending beyond the screen and passive cells resembling buttons. Replace the content-sized AcceptDialog with a bounded exclusive Window and explicitly anchored layout; use a fixed article viewport and always-visible scrollbar. Verify in-game at 1152×648 and larger, including long population article and short-window navigation. Runtime/visual verification pending.
