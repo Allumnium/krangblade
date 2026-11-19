@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.51.1: Use cached soft local resource halos rather than global bloom; watch dense cargo bay readability and overdraw in large debris fields. Move field mining rules from checkbox section to stable bottom command-card row, keeping the existing authority and per-player policy.
+
 - v0.51.0: Logistics idle resource staging turns miners into collectors and freighters into haulers. Existing 30 t logistics capacity is smaller than 60 t miner capacity; tune fleet ratios, 8-year partial dispatch, site selection and safety in play before adjusting capacity or adding more controls. Larger salvage sites use spatial-cell aggregation, so debris straddling a cell boundary can be missed.
 
 - v0.50.3: Explicit Wander enable should skip its remaining cooldown rather than force the player to wait. Preserve other cooldowns and active orders. Four bottom slots suffice per hull; mixed miner/logistics selections require a fifth control just above.

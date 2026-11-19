@@ -366,7 +366,7 @@ func _draw_chart(canvas: Control, population: bool) -> void:
 		canvas.draw_polyline(points, SERIES_COLORS[series], 2.5, true)
 
 func _mining() -> void:
-	_body("Mining ships extract ore and transfer it to nearby waiting logistics ships, or return to an owned depot. Cargo is spendable only after station delivery. Select a miner and right-click a field or individual rock to assign it manually.")
+	_body("Mining ships extract ore and transfer it to nearby waiting logistics ships, or return to an owned depot. Cargo is spendable only after station delivery. Select a miner and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
 	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Local resource ceiling", "%.0f t/yr" % E.PLANET_MINING_LIMIT], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
