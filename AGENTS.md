@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.51.0: Auto-Trade includes idle logistics resource staging at discovered safe asteroid fields and local clusters of at least 30 t salvage. Prefer active same-owner miners and distribute across sites; ordinary trade work takes precedence. Miners physically transfer cargo within tractor range to waiting freighters (no stock credit until station delivery); haul when full or after 8 years of partial load, using legal civilian lanes and owned depot capacity. Freighter salvage rate is 25% of miner rate (3 vs 12 t/year). Preserve manual orders, hold, safety, cargo capacity and independent autocasts.
+
 - v0.50.3: Ship autocast modes occupy the bottom row: Wander, Mine, Salvage, Repair/Trade. Mixed miner/logistics groups show Trade in the third-row rightmost slot, keeping all five available. Enabling Wander explicitly bypasses its own cooldown, without resetting any other mode or cancelling active orders/Hold. New manual and queued orders reset the bypass.
 
 - v0.50.2: Stars use cached, softly glowing procedural photosphere/corona art (warm planetary, cool planetless), slowly varying orientation and up to nine small fading solar sparks at detail zoom. Preserve star radius, deep-zoom opacity, planet/PDS detail, selection rings, minimap and authority; use cheap dots for sub-2-pixel stars. Avoid per-frame texture generation and persistent particle nodes.

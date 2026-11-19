@@ -426,6 +426,7 @@ func _initialize() -> void:
 	_test_unit_order_queue()
 	_test_sector_entry_orders()
 	_test_autocast_modes()
+	_test_resource_handoff()
 	_test_conquest()
 	_test_conquest_resistance_and_evacuation()
 	_test_soft_separation()
@@ -2183,6 +2184,54 @@ func _test_unit_order_queue() -> void:
 		assert(ship["position"] == sector_arrival)
 	print("PASS: sequential orders, queue limits, formation facing, 30-year precise and sector arrival waits, hold override")
 
+func _test_resource_handoff() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var point: Vector2 = graph["points"][0]
+	var miner: Dictionary = {"id": 9820, "owner": 1, "kind": "miner", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": point, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "delivery"}
+	var freighter: Dictionary = {"id": 9821, "owner": 1, "kind": "ship", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": point + Vector2.RIGHT * (ECON.RESOURCE_HANDOFF_RANGE + 1.0), "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "resource_stage": {"node": 0, "anchor": 0, "point": point, "salvage_site": true}}
+	miner["cargo"]["Metals"] = 40.0
+	state["ships"] = [miner, freighter]
+	var threats: Dictionary = ECON._salvage_threats(state, graph)
+	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats) == 0.0)
+	freighter["position"] = point
+	freighter["owner"] = 2
+	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats) == 0.0)
+	freighter["owner"] = 1
+	freighter["trade_auto"] = false
+	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats) == 0.0)
+	freighter["trade_auto"] = true
+	assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats), ECON.CARGO_CAPACITY))
+	assert(is_equal_approx(ECON._cargo_total(miner), 40.0 - ECON.CARGO_CAPACITY))
+	assert(is_equal_approx(ECON._cargo_total(freighter), ECON.CARGO_CAPACITY))
+	assert(not freighter.has("resource_stage") and bool(freighter["salvage_delivery"]))
+	var pile: Dictionary = {"resource": "Metals", "amount": 100.0}
+	miner["cargo"] = ECON.empty_stock()
+	freighter["cargo"] = ECON.empty_stock()
+	ECON._collect_salvage(miner, pile, 1.0)
+	ECON._collect_salvage(freighter, pile, 1.0)
+	assert(is_equal_approx(ECON._cargo_total(freighter), ECON._cargo_total(miner) * 0.25))
+	assert(is_equal_approx(float(pile["amount"]) + ECON._cargo_total(miner) + ECON._cargo_total(freighter), 100.0))
+	var staging_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var staging: Dictionary = ECON.create(staging_map, {1: {"team": 1}}, [1], false)
+	var stage_graph: Dictionary = ECON.military_graph(staging)
+	var hauler: Dictionary = {"id": 9822, "owner": 1, "kind": "ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "salvage_auto": false}
+	staging["ships"] = [hauler]
+	staging["planets"][0]["stock"]["Metals"] = 0.0
+	var debris: Dictionary = {"id": 9823, "resource": "Metals", "amount": ECON.CARGO_CAPACITY - 1.0, "position": Vector2(100, 0), "claim": -1}
+	staging["salvage"][9823] = debris
+	var safe: Dictionary = ECON._salvage_threats(staging, stage_graph)
+	assert(not ECON._choose_resource_stage(staging, stage_graph, hauler, ECON.planet_teams(staging), {}, safe, ECON._salvage_cells(staging["salvage"])))
+	debris["amount"] = ECON.CARGO_CAPACITY
+	assert(ECON._choose_resource_stage(staging, stage_graph, hauler, ECON.planet_teams(staging), {}, safe, ECON._salvage_cells(staging["salvage"])))
+	assert(hauler.has("resource_stage"))
+	hauler["cargo"]["Metals"] = 5.0
+	hauler["resource_loaded_at"] = 0.0
+	staging["elapsed"] = ECON.RESOURCE_PARTIAL_WAIT_YEARS
+	assert(ECON._work_resource_stage(staging, stage_graph, hauler, ECON.planet_teams(staging), {}, safe, ECON._salvage_cells(staging["salvage"]), {}, 0.1))
+	assert(hauler["salvage_delivery"] and not hauler.has("resource_stage"))
+	print("PASS: physical resource handoff, ownership, capacity, staging threshold, partial dispatch and freighter salvage rate")
+
 func _test_autocast_modes() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
@@ -2542,7 +2591,8 @@ func _test_opportunistic_salvage() -> void:
 	ECON.step(state, 0.1)
 	for ship in state["ships"]:
 		var carries_cargo: bool = ship["kind"] != "fighter"
-		assert(is_equal_approx(ECON._cargo_total(ship), 1.2 if carries_cargo else 0.0))
+		var expected: float = (ECON.FREIGHTER_TRACTOR_RATE if ship["kind"] == "ship" else ECON.TRACTOR_RATE) * 0.1 if carries_cargo else 0.0
+		assert(is_equal_approx(ECON._cargo_total(ship), expected))
 		assert(ship["holding"] and ship["route"].is_empty())
 		assert(int(state["salvage"][ship["id"]]["claim"]) == (int(ship["id"]) if carries_cargo else -1))
 	var fighter: Dictionary = state["ships"][0]
@@ -2579,7 +2629,7 @@ func _test_opportunistic_salvage() -> void:
 	piles[200] = {"id": 200, "resource": "Crystals", "amount": 50.0, "position": point, "claim": -1}
 	var route: Array = craft["route"].duplicate()
 	assert(not ECON._work_opportunistic_salvage(state, graph, craft, 0.1, {}, ECON._salvage_cells(piles), false))
-	assert(craft["route"] == route and craft["position"] == pos and is_equal_approx(craft["cargo"]["Crystals"], 1.2))
+	assert(craft["route"] == route and craft["position"] == pos and is_equal_approx(craft["cargo"]["Crystals"], ECON.FREIGHTER_TRACTOR_RATE * 0.1))
 	craft["route"] = []
 	craft["dest"] = -1
 	piles[200]["position"] = pos + Vector2(ECON.TRACTOR_RANGE * 1.5, 0)
@@ -2609,8 +2659,9 @@ func _test_opportunistic_salvage() -> void:
 		enemy["owner"] = 1
 		civilian["position"] = piles[201]["position"]
 		assert(ECON._work_opportunistic_salvage(state, graph, civilian, 0.1, {}, ECON._salvage_cells(piles), false))
-		assert(is_equal_approx(ECON._cargo_total(civilian), 1.2) and not ECON._salvage_active(civilian))
-		assert(ECON._work_opportunistic_salvage(state, graph, civilian, 0.2, {}, ECON._salvage_cells(piles), false))
+		var rate: float = ECON.FREIGHTER_TRACTOR_RATE if kind == "ship" else ECON.TRACTOR_RATE
+		assert(is_equal_approx(ECON._cargo_total(civilian), rate * 0.1) and not ECON._salvage_active(civilian))
+		assert(ECON._work_opportunistic_salvage(state, graph, civilian, 1.0, {}, ECON._salvage_cells(piles), false))
 		assert(piles.is_empty() and is_equal_approx(ECON._cargo_total(civilian), 3.0) and civilian["salvage_delivery"])
 		var before: float = float(state["planets"][0]["stock"]["Metals"])
 		for tick in range(150):

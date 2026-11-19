@@ -366,15 +366,15 @@ func _draw_chart(canvas: Control, population: bool) -> void:
 		canvas.draw_polyline(points, SERIES_COLORS[series], 2.5, true)
 
 func _mining() -> void:
-	_body("Mining ships automatically seek reachable fields, extract ore and return to an owned depot. Cargo is not spendable until unloaded. Select a miner and right-click a field or individual rock to assign it manually.")
+	_body("Mining ships extract ore and transfer it to nearby waiting logistics ships, or return to an owned depot. Cargo is spendable only after station delivery. Select a miner and right-click a field or individual rock to assign it manually.")
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
 	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Local resource ceiling", "%.0f t/yr" % E.PLANET_MINING_LIMIT], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
-	_body("Destroyed ships can leave drifting salvage. Cargo-capable ships may collect it in safe space; miners prioritize reachable safe salvage. Debris lasts %.0f–%.0f simulation years. Miners can also repair friendly hulls and structures at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
+	_body("Destroyed ships can leave drifting salvage. Cargo-capable ships may collect it in safe space; miners prioritize reachable safe salvage. Debris lasts %.0f–%.0f simulation years. Logistics ships salvage at one-quarter the mining ship rate. Miners can also repair friendly hulls and structures at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
 
 func _trade() -> void:
-	_body("Every station has separate resource stockpiles and import/export settings. Logistics ships travel physically between friendly or allied systems, moving surplus to systems with unmet demand.")
+	_body("Every station has separate resource stockpiles and import/export settings. Logistics ships move surplus between friendly systems. With Auto-Trade enabled, idle ships wait near miners or salvage sites containing at least a full hold; they deliver full or partial loads to owned stations.")
 	_flow(["Source surplus", "Freighter in transit", "Destination deficit"])
 	_section("Trade thresholds")
 	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both are percentages of actual local storage; imports and exports may be toggled separately.")
