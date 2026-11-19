@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.61.0: Replace gap Voronoi partition with continuous outlined lane capsules (radius 35% of smaller endpoint sector). Exact point orders require a sector or discovered connection; direct movement from either adjoining core or within a lane, no midpoint routing restriction. Ownership stays core-only.
+
 - v0.60.1: Scouts are military hulls for tactical movement, guard, patrol, pursuit, AI fleet allocation, threat and territory logic; preserve speed, HP and blaster stats.
 
 - v0.60.0: Inter-sector space has faint nearest-POI boundaries clipped to commandable map bounds; retain rounded owned sector cores. Armed hull Auto-Retreat (K) defaults off, opt-in at 46% max HP, cancelable via existing validated autocast RPC.

@@ -2748,23 +2748,23 @@ func _test_sector_entry_orders() -> void:
 	print("PASS: authoritative star-sector entry, border arrival and idle grace")
 
 func _test_gap_position_orders() -> void:
-	var map: Dictionary = {"seed": 42, "size": Vector2(6000, 5000), "points": [Vector2(500, 500), Vector2(2500, 500), Vector2(4500, 500)], "edges": [[0, 1], [1, 2]], "fields": []}
+	var map: Dictionary = {"seed": 42, "size": Vector2(10000, 5000), "points": [Vector2(500, 500), Vector2(2500, 500), Vector2(6500, 500), Vector2(8500, 500)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}
 	for kind in ["fighter", "miner", "ship", "colony_ship", "scout", "science_ship", "cruiser", "destroyer"]:
 		var state: Dictionary = ECON.create(map.duplicate(true), {1: {"team": 1}}, [1], false)
 		var graph: Dictionary = ECON.military_graph(state)
-		var craft: Dictionary = {"id": 9805, "owner": 1, "kind": kind, "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": map["points"][0], "heading": Vector2.RIGHT, "hp": ECON.ship_max_hp(kind), "cargo": ECON.empty_stock(), "mining_mode": "idle"}
+		var craft: Dictionary = {"id": 9805, "owner": 1, "kind": kind, "origin": 2, "at": 2, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": map["points"][2], "heading": Vector2.LEFT, "hp": ECON.ship_max_hp(kind), "cargo": ECON.empty_stock(), "mining_mode": "idle", "wander_auto": false}
 		state["ships"] = [craft]
-		var gap := Vector2(2500, 2500)
-		var second := Vector2(2500, 2600)
-		assert(ECON.sector_at(graph, gap, [0, 1, 2]) == -1)
-		assert(ECON.patrol_node(state, graph, 1, gap) == 1)
+		var gap := Vector2(4400, 600)
+		var second := Vector2(4600, 600)
+		assert(ECON.sector_at(graph, gap, [0, 1, 2, 3]) == -1)
+		assert(ECON.lane_at(graph, gap) == Vector2i(1, 2) and ECON.lane_at(graph, second) == Vector2i(1, 2))
+		assert(ECON.patrol_node(state, graph, 1, Vector2(4500, 2500)) == -1)
+		assert(not ECON.issue_unit_order(state, 1, [9805], {"kind": "position", "target": 1, "point": Vector2(4500, 2500)}, false))
 		assert(not ECON.issue_unit_order(state, 2, [9805], {"kind": "position", "target": 1, "point": gap}, false))
 		assert(not ECON.issue_unit_order(state, 1, [9805], {"kind": "position", "target": 0, "point": gap}, false))
-		assert(not ECON.issue_unit_order(state, 1, [9805], {"kind": "position", "target": 1, "point": Vector2.INF}, false))
-		assert(not ECON.issue_unit_order(state, 1, [9805], {"kind": "position", "target": 1, "point": Vector2(2500, 6000)}, false))
 		assert(ECON.issue_unit_order(state, 1, [9805], {"kind": "position", "target": 1, "point": gap, "move_only": true}, false))
-		assert(craft["route"].has(1) and craft["local_move_target"] == gap)
-		assert(ECON.issue_unit_order(state, 1, [9805], {"kind": "position", "target": 1, "point": second, "move_only": true}, true))
+		assert(craft["route"].is_empty() and craft["local_move_target"] == gap)
+		assert(ECON.issue_unit_order(state, 1, [9805], {"kind": "position", "target": 2, "point": second, "move_only": true}, true))
 		var reached_first: bool = false
 		for tick in range(2000):
 			var previous: Vector2 = craft["position"]
@@ -2774,9 +2774,8 @@ func _test_gap_position_orders() -> void:
 			if reached_first and not craft.has("local_move_target") and craft["position"].is_equal_approx(second):
 				break
 		assert(reached_first and craft["position"].is_equal_approx(second) and not craft.has("local_move_target"))
-		assert(ECON.local_sector(graph, craft) == -1 and craft["at"] == 1)
-		assert(not craft.get("holding", false) and ECON.arrival_wait_remaining(state, craft) > 0.0)
-	print("PASS: precise gap movement for all hulls, lane routing, queued destinations and authority validation")
+		assert(ECON.local_sector(graph, craft) == -1 and not craft.get("holding", false))
+	print("PASS: bounded lane movement, direct cross-midpoint travel, queued destinations and authority validation")
 
 func _test_local_position_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
@@ -2970,8 +2969,10 @@ func _test_precise_patrol() -> void:
 			returned = true
 			break
 	assert(reached and returned)
-	# A remote click outside the normal sector circles still has an exact endpoint.
-	var remote := Vector2(3400, 3000)
+	# A remote click outside travel lanes is invalid; a point on a
+	# connected lane remains a valid exact patrol endpoint.
+	assert(ECON.patrol_node(state, graph, 1, Vector2(3400, 3000)) == -1)
+	var remote := Vector2(4500, 2250)
 	var node: int = ECON.patrol_node(state, graph, 1, remote)
 	assert(node >= 0 and node != 0)
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "patrol", "target": node, "point": remote}, false))
@@ -2985,7 +2986,7 @@ func _test_precise_patrol() -> void:
 		if not craft.has("patrol_from"):
 			break
 	assert(reached and not craft.has("patrol_from") and craft["unit_order"]["kind"] == "sector")
-	print("PASS: exact same-sector patrol, arbitrary remote point, return, queue and input validation")
+	print("PASS: exact same-sector patrol, remote lane point, return, queue and input validation")
 
 func _test_salvage() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
