@@ -159,13 +159,13 @@ var ship_offsets: Dictionary = {}
 const SHIP_WORLD_SCALE: float = 1.5
 const FIGHTER_MUZZLE: float = 12.0
 const MINER_MUZZLE: Vector2 = Vector2(10.0, 3.75)
-const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(14, 4), Vector2(10, 8), Vector2(-13, 8), Vector2(-13, -8), Vector2(10, -8), Vector2(14, -4)]
+const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(23, 4), Vector2(19, 8), Vector2(-20, 8), Vector2(-20, -8), Vector2(19, -8), Vector2(23, -4)]
 const DESTRUCTION_LIFETIME: float = 1.35
 const MAX_VISIBLE_DESTRUCTIONS: int = 32
 var last_destruction_sequence: int = 0
 var ship_destructions: Array = []
 # Authored top-down silhouette and interior panel geometry in hull-local
-# coordinates (forward, lateral). Logistics keeps its original cargo bays.
+# coordinates (forward, lateral). Freighter has five paired cargo rows.
 const HULL_OUTLINES: Dictionary = {
 	"science_ship": [Vector2(14, 0), Vector2(12, 7), Vector2(7, 12), Vector2(0, 14), Vector2(-7, 12), Vector2(-12, 7), Vector2(-14, 0), Vector2(-12, -7), Vector2(-7, -12), Vector2(0, -14), Vector2(7, -12), Vector2(12, -7)],
 	"fighter": [Vector2(12, 0), Vector2(6, 2.5), Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-6, 3), Vector2(-10, 2.5), Vector2(-10, -2.5), Vector2(-6, -3), Vector2(-7, -7.5), Vector2(-3, -8), Vector2(2.5, -3), Vector2(6, -2.5)],
@@ -271,6 +271,7 @@ var body_status: Label
 var ship_overview: VBoxContainer
 var ship_title: Label
 var ship_detail: Label
+var ship_population: Label
 var fleet_scroll: ScrollContainer
 var fleet_overview: VBoxContainer
 var fleet_title: Label
@@ -482,7 +483,9 @@ func _build_ui() -> void:
 	map_canvas.resized.connect(_map_resized)
 	header_panel = PanelContainer.new()
 	add_child(header_panel)
-	header_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928ed"), Color("#284661"), 6))
+	var header_style := StyleBoxEmpty.new()
+	header_style.set_content_margin_all(6.0)
+	header_panel.add_theme_stylebox_override("panel", header_style)
 	header_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	header_panel.offset_left = 8
 	header_panel.offset_right = -8
@@ -677,6 +680,10 @@ func _build_ui() -> void:
 	ship_overview.add_child(selection_grid)
 	ship_detail = _label("", 13)
 	ship_overview.add_child(ship_detail)
+	var crew_row: HBoxContainer = _population_row(ship_overview)
+	ship_population = _label("", 13)
+	crew_row.add_child(ship_population)
+	crew_row.hide()
 	weapon_details = _label("", 12)
 	overview.add_child(weapon_details)
 	weapon_details.hide()
@@ -1311,27 +1318,32 @@ func _build_centered_queue(parent: Container) -> HFlowContainer:
 	parent.add_child(queue)
 	return queue
 
-func _portrait_points(vertices: Array) -> String:
+func _freighter_bay_center(index: int) -> Vector2:
+	return Vector2(14.0 - float(floori(float(index) / 2.0)) * 7.0, -3.5 if index % 2 == 0 else 3.5)
+
+func _freighter_bay_vertices(index: int) -> Array:
+	var center: Vector2 = _freighter_bay_center(index)
+	return [center + Vector2(3, 3), center + Vector2(-3, 3), center + Vector2(-3, -3), center + Vector2(3, -3)]
+
+func _portrait_points(vertices: Array, factor: float = 1.0) -> String:
 	var coordinates: PackedStringArray = []
 	for vertex in vertices:
 		var v: Vector2 = vertex
-		coordinates.append("%.2f,%.2f" % [32.0 + v.y * 1.85, 32.0 - v.x * 1.85])
+		coordinates.append("%.2f,%.2f" % [32.0 + v.y * 1.85 * factor, 32.0 - v.x * 1.85 * factor])
 	return " ".join(coordinates)
 
 func _production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
 	var key: String = "%s:%s:%d" % [kind, tint.to_html(false), pixels]
 	if not production_icons.has(key):
-		var outline: String = _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE))
+		var outline: String = _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE), 0.6 if kind == "ship" else 1.0)
 		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><g transform="translate(32 32) scale(1.13) translate(-32 -32)">'
 		art += '<polygon points="%s" fill="#18283c" stroke="#%s" stroke-width="1.8" stroke-linejoin="round"/>' % [outline, tint.lightened(0.35).to_html(false)]
 		for panel in HULL_PANELS.get(kind, []):
 			var color: Color = _hull_panel_color(tint, panel[0])
 			art += '<polygon points="%s" fill="#%s"/>' % [_portrait_points(panel[1]), color.lightened(0.12).to_html(false)]
 		if kind == "ship":
-			art += '<rect x="21" y="11" width="22" height="8" rx="2" fill="#%s"/>' % tint.lightened(0.35).to_html(false)
-			for row in range(3):
-				for column in range(2):
-					art += '<rect x="%d" y="%d" width="11" height="9" rx="1" fill="#32465c" stroke="#9bb6cb" stroke-width="0.8"/>' % [20 + column * 13, 22 + row * 11]
+			for bay in range(ECONOMY.FREIGHTER_BAY_COUNT):
+				art += '<polygon points="%s" fill="#32465c" stroke="#9bb6cb" stroke-width="0.8"/>' % _portrait_points(_freighter_bay_vertices(bay), 0.6)
 		art += '<polygon points="%s" fill="none" stroke="#%s" stroke-width="1.25" stroke-linejoin="round"/></g></svg>' % [outline, tint.lightened(0.50).to_html(false)]
 		var image := Image.new()
 		image.load_svg_from_string(art, float(pixels) / 64.0)
@@ -1458,7 +1470,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_grid = grid
 	for kind in ECONOMY.SHIP_KINDS:
 		var button := CostButton.new()
-		var caption: String = {"ship": "Logistics\nship", "colony_ship": "Colony\nship", "fighter": "Fighter", "miner": "Mining\nship", "science_ship": "Science\nvessel"}[kind]
+		var caption: String = {"ship": "Freighter", "colony_ship": "Colony\nship", "fighter": "Fighter", "miner": "Mining\nship", "science_ship": "Science\nvessel"}[kind]
 		var art: TextureRect = _yard_ability_face(button, caption, _production_icon(kind, HUD.ACCENT))
 		button.set_meta("portrait", art)
 		button.pressed.connect(_build_at_yard.bind(kind))
@@ -2050,7 +2062,7 @@ func _selected_ship(state: Dictionary) -> Dictionary:
 func _ship_kind_name(kind: String) -> String:
 	if kind == "science_ship":
 		return "Science vessel"
-	return "Logistics ship" if kind == "ship" else ("Mining ship" if kind == "miner" else kind.replace("_", " ").capitalize())
+	return "Freighter" if kind == "ship" else ("Mining ship" if kind == "miner" else kind.replace("_", " ").capitalize())
 
 func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
 	var points: Array = ECONOMY.military_graph(state)["points"] if ship.get("kind", "") == "fighter" else state["map"]["points"]
@@ -2404,14 +2416,12 @@ func _selection_portrait_icon(kind: String) -> Texture2D:
 			if kind == "pds":
 				art += '<circle cx="32" cy="32" r="28"/><path d="M32 1V7M32 57V63M1 32H7M57 32H63"/>'
 		else:
-			art += '<polygon points="%s"/>' % _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE))
+			art += '<polygon points="%s"/>' % _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE), 0.6 if kind == "ship" else 1.0)
 			for panel in HULL_PANELS.get(kind, []):
 				art += '<polygon points="%s" stroke-width="0.55" opacity="0.68"/>' % _portrait_points(panel[1])
 			if kind == "ship":
-				art += '<rect x="21" y="11" width="22" height="8" rx="2" stroke-width="0.7"/>'
-				for row in range(3):
-					for column in range(2):
-						art += '<rect x="%d" y="%d" width="11" height="9" rx="1" stroke-width="0.7"/>' % [20 + column * 13, 22 + row * 11]
+				for bay in range(ECONOMY.FREIGHTER_BAY_COUNT):
+					art += '<polygon points="%s" stroke-width="0.7"/>' % _portrait_points(_freighter_bay_vertices(bay), 0.6)
 		var image := Image.new()
 		image.load_svg_from_string(art + '</g></svg>')
 		selection_portrait_icons[kind] = ImageTexture.create_from_image(image)
@@ -2484,7 +2494,8 @@ func _selection_icon(kind: String, tint: Color) -> Texture2D:
 		var coords: PackedStringArray = []
 		for vertex in points:
 			var v: Vector2 = vertex
-			coords.append("%.2f,%.2f" % [16.0 + v.y, 16.0 - v.x])
+			var factor: float = 0.62 if kind == "ship" else 1.0
+			coords.append("%.2f,%.2f" % [16.0 + v.y * factor, 16.0 - v.x * factor])
 		var image := Image.new()
 		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><polygon points="%s" fill="none" stroke="#%s" stroke-width="1.8" stroke-linejoin="round"/></svg>' % [" ".join(coords), tint.to_html(false)])
 		selection_icons[key] = ImageTexture.create_from_image(image)
@@ -2538,7 +2549,7 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 		if tile.get_meta("health_color", Color.TRANSPARENT) != tint:
 			tile.set_meta("health_color", tint)
 			tile.icon = _selection_icon(str(craft["kind"]), tint)
-		tile.tooltip_text = _ship_kind_name(str(craft["kind"])) if selected_units.size() > 1 else "%s · HP %.0f / %.0f" % [_ship_kind_name(str(craft["kind"])), float(craft.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP]
+		tile.tooltip_text = "%s · HP %.0f / %.0f\nCrew: %s" % [_ship_kind_name(str(craft["kind"])), float(craft.get("hp", ECONOMY.SHIP_HP)), ECONOMY.SHIP_HP, _crew_text(float(craft.get("crew", 0.0)))]
 	for id in selection_tiles.keys():
 		if not living.has(id):
 			var tile: Button = selection_tiles[id]
@@ -2584,6 +2595,9 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	field_command_grid.visible = not special
 	if not special:
 		_refresh_field_commands(state, special)
+
+func _crew_text(crew: float) -> String:
+	return "%.0f" % crew
 
 func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	field_command_grid.hide()
@@ -2661,15 +2675,21 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	fleet_title.text = "Fleet"
 	fleet_detail.visible = true
 	var owned_count: int = 0
+	var selected_crew: float = 0.0
 	var loaded_owned: bool = false
 	var cargo: Dictionary = ECONOMY.empty_stock()
 	for craft in state["ships"]:
 		if not selected_units.has(int(craft["id"])):
 			continue
+		selected_crew += float(craft.get("crew", 0.0))
 		owned_count += int(int(craft["owner"]) == _me())
 		loaded_owned = loaded_owned or (int(craft["owner"]) == _me() and ECONOMY._cargo_total(craft) > ECONOMY.EPS)
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft.get("cargo", {}).get(resource, 0.0))
+	if not multiple:
+		selected_crew = float(ship.get("crew", 0.0))
+	ship_population.text = _crew_text(selected_crew) + (" total crew" if multiple else " crew")
+	ship_population.get_parent().show()
 	command_card.show()
 	var combat_owned: bool = false
 	var can_load: bool = false
@@ -3096,7 +3116,8 @@ func _empire_resource_delta(state: Dictionary, resource: String) -> float:
 func _set_resource_delta(label: Label, annual: float, parentheses: bool = false) -> void:
 	var displayed: float = 0.0 if absf(annual) < 0.05 else annual
 	var amount: String = ("+" if displayed > 0.0 else "") + _tons(displayed, 1, true)
-	label.text = "(%s/yr)" % amount if parentheses else amount
+	label.text = ("(%s/yr)" % amount if displayed != 0.0 else "") if parentheses else amount
+	label.visible = not parentheses or displayed != 0.0
 	label.add_theme_color_override("font_color", Color("#7cdb9b") if displayed > 0.0 else (Color("#eb8585") if displayed < 0.0 else Color.WHITE))
 
 func _compact_amount(value: float) -> String:
@@ -3452,6 +3473,7 @@ func _refresh() -> void:
 	yard_command_scroll.visible = yard_selected
 	interaction_scroll.visible = not other_selected and not yard_selected and not p.is_empty() and not own_system and not grouped_buildings
 	ship_overview.visible = other_selected
+	ship_population.get_parent().hide()
 	ship_title.visible = other_selected
 	ship_detail.visible = other_selected
 	_refresh_selection_tiles(state)
@@ -3543,7 +3565,7 @@ func _refresh() -> void:
 
 func _job_name(item: Dictionary) -> String:
 	match str(item["kind"]):
-		"ship": return "Logistics ship"
+		"ship": return "Freighter"
 		"economy_building": return str(ECONOMY.ECONOMY_BUILDINGS[item["target"]]["name"])
 		"warehouse": return "Warehouse logistics → Lv %d" % int(item["level"])
 		"habitation": return "Habitation technology → Lv %d" % int(item["level"])
@@ -4621,7 +4643,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	var ship_distance: float = INF
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance <= maxf(5.0, 14.0 * _ship_scale()) and distance < ship_distance:
+		if distance <= maxf(5.0, (24.0 if poses[id]["kind"] == "ship" else 14.0) * _ship_scale()) and distance < ship_distance:
 			ship_distance = distance
 			ship_hit = int(id)
 	var next_ship: int = ship_hit if hit < 0 or nearest > 5.0 or ship_distance < nearest else -1
@@ -4746,12 +4768,12 @@ func _entity_hit(state: Dictionary, point: Vector2) -> int:
 		var center: Vector2 = _screen_point(ECONOMY.station_position(state, station, float(state["elapsed"])))
 		if point.distance_to(center) <= maxf(5.0, _station_radius() * 0.55):
 			return ECONOMY.station_target_id(state, station)
-	var nearest: float = maxf(5.0, 14.0 * _ship_scale())
+	var nearest: float = INF
 	var target: int = -1
 	var poses: Dictionary = _ship_poses(state)
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance < nearest:
+		if distance <= maxf(5.0, (24.0 if poses[id]["kind"] == "ship" else 14.0) * _ship_scale()) and distance < nearest:
 			nearest = distance
 			target = int(id)
 	if target != -1:
@@ -5437,7 +5459,7 @@ func _sync_destruction_effects(state: Dictionary) -> void:
 			for index in range(2):
 				sparks.append(_destruction_spark(center, _hull_panel_color(empire, panel[0]), rng))
 		if panels.is_empty():
-			# The unchanged logistics ship has dark cargo wells and resource-colored bays.
+			# The freighter has dark cargo wells and resource-colored bays.
 			for index in range(8):
 				sparks.append(_destruction_spark(Vector2(rng.randf_range(-8.0, 8.0), rng.randf_range(-5.0, 5.0)), Color("#182333"), rng))
 			for resource in event.get("materials", []):
@@ -5518,7 +5540,7 @@ func _target_ring_entity(state: Dictionary, poses: Dictionary, refs: Dictionary,
 	if ref.is_empty():
 		return {}
 	var center: Vector2 = poses[id]["point"] if poses.has(id) else _screen_point(ref["position"])
-	var radius: float = maxf(8.0, 15.0 * _ship_scale())
+	var radius: float = maxf(8.0, (24.0 if ref.get("entity", {}).get("kind", "") == "ship" else 15.0) * _ship_scale())
 	match str(ref["kind"]):
 		"station": radius = _station_radius() + 4.0
 		"yard": radius = maxf(8.0, 23.0 * _ship_scale(true) * pow(1.2, int(ref["entity"]["level"]) - 1))
@@ -5690,7 +5712,7 @@ func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 		if delta > 0.0 or not ship_offsets.has(id):
 			ship_offsets[id] = {"angle": angle}
 		var mining: bool = ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
-		poses[id] = {"point": _screen_point(pos), "world": pos, "direction": Vector2.from_angle(angle), "mining": mining}
+		poses[id] = {"point": _screen_point(pos), "world": pos, "direction": Vector2.from_angle(angle), "mining": mining, "kind": ship.get("kind", "")}
 	return poses
 
 func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
@@ -6371,11 +6393,20 @@ func _draw_map() -> void:
 					var age: float = fposmod(visual_clock * 4.0 + float(k) * 0.33 + sign * 0.12, 1.0)
 					var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
 					map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
-		if not viewport_bounds.grow(maxf(24.0, 18.0 * scale)).has_point(point):
+		if not viewport_bounds.grow(maxf(24.0, (25.0 if ship["kind"] == "ship" else 18.0) * scale)).has_point(point):
 			continue
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
-			var radius: float = maxf(5.0, 15.0 * scale)
+			var radius: float = maxf(5.0, (24.0 if ship["kind"] == "ship" else 15.0) * scale)
 			_draw_selection_ring(point, radius)
+			if scale >= 0.65:
+				var crew_text: String = _compact_amount(float(ship.get("crew", 0.0)))
+				var crew_font: Font = theme.default_font
+				if crew_font == null:
+					crew_font = ThemeDB.fallback_font
+				var crew_width: float = crew_font.get_string_size(crew_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+				var crew_pos: Vector2 = point + Vector2(-0.5 * (crew_width + 13.0), radius + 4.0)
+				map_canvas.draw_texture_rect(_population_texture(12), Rect2(crew_pos, Vector2(12, 12)), false)
+				map_canvas.draw_string(crew_font, crew_pos + Vector2(14, 11), crew_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#b9d9ed"))
 		# At a distant galaxy overview, the smallest authored edges can
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
@@ -6387,10 +6418,9 @@ func _draw_map() -> void:
 		if ship["kind"] == "ship" and scale >= 0.42:
 			var bays: Array = ECONOMY.freighter_cargo_bays(ship["cargo"])
 			for k in range(bays.size()):
-				var row: int = floori(float(k - 1) / 2.0)
-				var module: Vector2 = point + direction * 11.5 if k == 0 else point + direction * (5.0 - float(row) * 7.0) + side * (-3.5 if k % 2 == 1 else 3.5)
-				# The nose bay is slightly shorter to fit within the hull.
-				var half_length: float = 2.5 if k == 0 else 3.0
+				var bay_center: Vector2 = _freighter_bay_center(k)
+				var module: Vector2 = point + direction * bay_center.x + side * bay_center.y
+				var half_length: float = 3.0
 				var corners := PackedVector2Array([module + direction * half_length + side * 3, module - direction * half_length + side * 3, module - direction * half_length - side * 3, module + direction * half_length - side * 3])
 				map_canvas.draw_colored_polygon(corners, Color("#182333"))
 				var start: float = -half_length

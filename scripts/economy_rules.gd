@@ -39,7 +39,7 @@ const FARM_CYCLE_SECONDS: float = 100.0
 const START_YEAR: int = 2850
 const SYSTEM_WORLD_RADIUS: float = 600.0
 const CARGO_CAPACITY: float = 100.0
-const FREIGHTER_BAY_COUNT: int = 7
+const FREIGHTER_BAY_COUNT: int = 10
 const FREIGHTER_BAY_CAPACITY: float = CARGO_CAPACITY / FREIGHTER_BAY_COUNT
 const MINED_RESOURCES = ["Metals", "Crystals"]
 const ANTIMATTER = MAP.ANTIMATTER
@@ -117,6 +117,8 @@ const AI_RALLY_RADIUS: float = 150.0
 const FORMATION_SPACING: float = 28.0
 const SHIP_SEPARATION_RADIUS: float = 45.0
 const SHIP_CLEARANCE: float = 32.0
+# Service within the station footprint; contact correction need not permit exact center arrival.
+const STATION_DOCK_RANGE: float = 64.0
 const SHIP_CLEARANCE_PASSES: int = 6
 const FOLLOW_DISTANCE: float = SHIP_SEPARATION_RADIUS * 2.0
 const RALLY_ARRIVAL_RADIUS: float = SHIP_SEPARATION_RADIUS * 2.0
@@ -1672,7 +1674,7 @@ static func _service_point(state: Dictionary, ship: Dictionary, index: int) -> V
 			return station_position(state, index, float(state["elapsed"]))
 	return state["map"]["points"][index]
 
-static func _move(state: Dictionary, ship: Dictionary, dt: float, explicit_dock: Vector2 = Vector2.INF, dock_index: int = -1) -> bool:
+static func _move(state: Dictionary, ship: Dictionary, dt: float, explicit_dock: Vector2 = Vector2.INF, dock_index: int = -1, dock_range: float = 0.0) -> bool:
 	var route: Array = ship["route"]
 	var points: Array = state["map"]["points"]
 	_ensure_position(points, ship)
@@ -1686,7 +1688,8 @@ static func _move(state: Dictionary, ship: Dictionary, dt: float, explicit_dock:
 			elif ship.get("kind", "") != "fighter" and (int(ship.get("source", -1)) == node or int(ship.get("dest", -1)) == node or ship.get("mining_mode", "") == "approach"):
 				next = _service_point(state, ship, node)
 		distance -= _navigate(ship, next, distance)
-		if (ship["position"] as Vector2) != next:
+		var service: bool = route.size() == 1 and ((explicit_dock.is_finite() and node == dock_index) or (state.has("planets") and node < state["planets"].size() and has_station(state["planets"][node]) and next == _service_point(state, ship, node)))
+		if (ship["position"] as Vector2).distance_to(next) > (dock_range if service else 0.0) + EPS:
 			ship["leg"] = _lane_progress(points, ship)
 			return false
 		ship["at"] = int(route.pop_front())
@@ -1699,7 +1702,7 @@ static func _move(state: Dictionary, ship: Dictionary, dt: float, explicit_dock:
 	if dock_required and ship.get("kind", "") != "fighter":
 		var dock: Vector2 = explicit_dock if explicit_dock.is_finite() and here == dock_index else _service_point(state, ship, here)
 		_navigate(ship, dock, distance)
-		return (ship["position"] as Vector2).distance_to(dock) <= EPS
+		return (ship["position"] as Vector2).distance_to(dock) <= (dock_range if explicit_dock.is_finite() or (state.has("planets") and has_station(state["planets"][here])) else 0.0) + EPS
 	return true
 
 static func _choose_delivery(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, cache: Dictionary) -> void:
@@ -1737,7 +1740,7 @@ static func _pick_loaded_destination(state: Dictionary, ship: Dictionary, teams:
 	var best_dest: int = -1
 	var best_path: Array[int] = []
 	for i in range(planets.size()):
-		if teams[i] != team:
+		if teams[i] != team or not has_station(planets[i]):
 			continue
 		var useful: bool = false
 		for resource in RESOURCES + [ANTIMATTER]:
@@ -1748,6 +1751,8 @@ static func _pick_loaded_destination(state: Dictionary, ship: Dictionary, teams:
 		if not useful:
 			continue
 		var path: Array[int] = _path(state, teams, team, int(ship["at"]), i, cache)
+		if path.is_empty():
+			continue
 		var distance: float = MAP.route_length(state["map"], path)
 		if distance < best:
 			best = distance
@@ -2005,7 +2010,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 			if not (ship["route"] as Array).is_empty():
 				_move(state, ship, dt)
 		return
-	if team == 0 or not _move(state, ship, dt):
+	if team == 0 or not _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
 		return
 	var planets: Array = state["planets"]
 	var here: int = int(ship["at"])
@@ -2045,23 +2050,10 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 		ship["dest"] = -1
 	if _cargo_total(ship) > EPS:
 		_pick_loaded_destination(state, ship, teams, team, cache)
-		# If no trade recipient has room, dock at the closest reachable owned station.
+		# Import targets control trade demand, not whether existing cargo can be recovered.
+		# If nobody requests this load, use the owned-storage delivery job.
 		if int(ship["dest"]) < 0:
-			var best: float = INF
-			var waiting_path: Array[int] = []
-			for i in range(planets.size()):
-				if int(planets[i]["owner"]) != int(ship["owner"]) or not has_station(planets[i]):
-					continue
-				var path: Array[int] = _path(state, teams, team, here, i, cache)
-				if path.is_empty():
-					continue
-				var distance: float = MAP.route_length(state["map"], path) + (ship["position"] as Vector2).distance_to(_service_point(state, ship, here))
-				if distance < best:
-					best = distance
-					waiting_path = path
-			if not waiting_path.is_empty():
-				ship["dest"] = waiting_path.back()
-				_set_route(ship, waiting_path)
+			_resource_haul(ship)
 	else:
 		ship["source"] = -1
 		ship["dest"] = -1
@@ -2353,7 +2345,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 						_set_route(ship, _mining_path(state, teams, team, here, depot, cache))
 						break
 			return
-		if _move(state, ship, dt) and float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
+		if _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE) and float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
 			_unload_miner(state, ship, teams, cache)
 			ship["next_unload_search"] = float(state["elapsed"]) + 0.5
 		return
@@ -2426,7 +2418,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 		return
 	if int(local["owner"]) == owner and has_station(local):
 		var dock: Vector2 = station_position(state, here, float(state["elapsed"]))
-		if _cargo_total(ship) > EPS and (ship["position"] as Vector2).distance_to(dock) > EPS:
+		if _cargo_total(ship) > EPS and (ship["position"] as Vector2).distance_to(dock) > STATION_DOCK_RANGE + EPS:
 			ship["dest"] = here
 			return
 		for resource in RESOURCES + [ANTIMATTER]:
@@ -2956,7 +2948,7 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		ship.erase("cargo_order")
 		_finish_manual(ship)
 		return false
-	if not _manual_travel(state, graph, ship, node, point, dt, 0.0 if drop or ref.get("kind") == "station" else TRACTOR_RANGE * 0.5):
+	if not _manual_travel(state, graph, ship, node, point, dt, 0.0 if drop else (STATION_DOCK_RANGE if ref.get("kind") == "station" else TRACTOR_RANGE * 0.5)):
 		return true
 	if drop:
 		_drop_carried(state, ship)
@@ -2972,6 +2964,8 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			stock[resource] = float(stock.get(resource, 0.0)) + amount
 			if ref["kind"] == "station":
 				_record_flow(depot, "Manual deliveries", resource, amount)
+		if ref["kind"] == "station" and _cargo_total(ship) > EPS:
+			return true # wait in range for released capacity; a new order can interrupt
 	ship.erase("cargo_order")
 	_finish_manual(ship)
 	return true
@@ -3209,7 +3203,7 @@ static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionar
 	if ship["kind"] == "fighter":
 		ship["operation_target"] = goal
 	if not (ship["route"] as Array).is_empty():
-		_move({"map": nav["graph"]}, ship, dt, point, goal)
+		_move({"map": nav["graph"]}, ship, dt, point, goal, minf(reach, STATION_DOCK_RANGE) if ship.get("cargo_order", {}).get("kind", "") == "deposit" else 0.0)
 		return (ship["position"] as Vector2).distance_to(point) <= reach + EPS
 	_navigate(ship, point, minf(SHIP_SPEED * dt, maxf(0.0, pos.distance_to(point) - reach)))
 	return (ship["position"] as Vector2).distance_to(point) <= reach + EPS
@@ -4587,16 +4581,18 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 			return true
 		ship["next_salvage_search"] = float(state["elapsed"]) + 0.5
 		if not _salvage_depot_route(state, graph, ship):
-			if ship.get("kind", "") not in ["ship", "colony_ship"] or not _salvage_depot_route(state, graph, ship, true):
+			if ship.get("kind", "") not in ["ship", "colony_ship", "miner"] or not _salvage_depot_route(state, graph, ship, true):
 				return true
 		depot = int(ship["salvage_depot"])
 	var nav: Dictionary = graph if ship["kind"] == "fighter" else state["map"]
-	if not (ship["route"] as Array).is_empty():
-		_move({"map": nav}, ship, dt, station_position(state, depot, float(state["elapsed"])), depot)
-		return true
 	var dock: Vector2 = station_position(state, depot, float(state["elapsed"]))
-	_navigate(ship, dock, SHIP_SPEED * dt)
-	if (ship["position"] as Vector2).distance_to(dock) > EPS:
+	if not (ship["route"] as Array).is_empty():
+		_move({"map": nav}, ship, dt, dock, depot, STATION_DOCK_RANGE)
+		if not ship["route"].is_empty():
+			return true
+	elif (ship["position"] as Vector2).distance_to(dock) > STATION_DOCK_RANGE:
+		_navigate(ship, dock, SHIP_SPEED * dt)
+	if (ship["position"] as Vector2).distance_to(dock) > STATION_DOCK_RANGE + EPS:
 		return true
 	var p: Dictionary = state["planets"][depot]
 	for resource in RESOURCES + [ANTIMATTER]:

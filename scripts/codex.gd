@@ -282,9 +282,9 @@ func _overview() -> void:
 	_body("Expand your empire through local economies, autonomous logistics and direct fleet command.")
 	_section("The strategic loop")
 	_flow(["Extract resources", "Build & recruit", "Expand", "Defend supply"])
-	_body("Start with 3 miners, 2 fighters and 1 logistics ship. Select a unit or station to issue orders.")
+	_body("Start with 3 miners, 2 fighters and 1 freighter. Select a unit or station to issue orders.")
 	_section("First priorities")
-	_table(["Goal", "Action"], [["Establish supplies", "Protect nearby asteroid fields and keep food reserves healthy."], ["Build a fleet", "Select a shipyard and queue miners, fighters or logistics ships."], ["Expand", "Send a colony ship to an eligible neutral system. Secure your trade lanes."], ["Survive", "Defend your stations and colony ships; defeat hostile teams by conquest."]])
+	_table(["Goal", "Action"], [["Establish supplies", "Protect nearby asteroid fields and keep food reserves healthy."], ["Build a fleet", "Select a shipyard and queue miners, fighters or freighters."], ["Expand", "Send a colony ship to an eligible neutral system. Secure your trade lanes."], ["Survive", "Defend your stations and colony ships; defeat hostile teams by conquest."]])
 	_note("Start with Population & food and Trade & storage.")
 
 func _resources() -> void:
@@ -366,15 +366,15 @@ func _draw_chart(canvas: Control, population: bool) -> void:
 		canvas.draw_polyline(points, SERIES_COLORS[series], 2.5, true)
 
 func _mining() -> void:
-	_body("Mining ships extract ore and transfer it to nearby waiting logistics ships (10 miner holds per freighter), or return to an owned depot. Cargo is spendable only after station delivery. Select a miner and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
+	_body("Mining ships extract ore and transfer it to nearby waiting freighters (10 miner holds per freighter), or return to an owned depot. Cargo is spendable only after delivery within docking range. Select a miner and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
 	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Local resource ceiling", "%.0f t/yr" % E.PLANET_MINING_LIMIT], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
-	_body("Destroyed ships can leave drifting salvage. Mining and logistics ships may collect it in safe space; miners prioritize reachable safe salvage. Wreck debris lasts %.0f–%.0f simulation years; cancelled construction salvage persists. Logistics ships salvage at one-quarter the mining ship rate. Miners repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
+	_body("Destroyed ships can leave drifting salvage. Mining and freighters may collect it in safe space; miners prioritize reachable safe salvage. Wreck debris lasts %.0f–%.0f simulation years; cancelled construction salvage persists. Freighters salvage at one-quarter the mining ship rate. Miners repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/yr." % [E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
 
 func _trade() -> void:
-	_body("Every station has separate resource stockpiles and import/export settings. Logistics ships move surplus between friendly systems. With Auto-Trade enabled, idle ships wait near miners or salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait at a station when storage is full.")
+	_body("Every station has separate resource stockpiles and import/export settings. Freighters move surplus between friendly systems. With Auto-Trade enabled, idle ships wait near miners or salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait if storage is full. Trade surplus without an importer returns to owned storage.")
 	_flow(["Source surplus", "Freighter in transit", "Destination deficit"])
 	_section("Trade thresholds")
 	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both use local storage capacity; the Import and Export checkboxes toggle each independently.")
@@ -412,9 +412,9 @@ func _infrastructure() -> void:
 	_body("Warehouse upgrades expand storage; habitation increases terrestrial housing capacity. Orbital Eco-Housing adds self-sufficient residents in planetless systems. Additional shipyards also supply eco-housing.")
 
 func _ships() -> void:
-	_body("Select a shipyard to construct ships. Costs are paid from the local station. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
+	_body("Select a shipyard to construct ships. Costs are paid from the local station. Freighters have ten 10 t bays. Ship selection displays crew. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
-	var names := {"fighter": "Fighter", "miner": "Mining ship", "ship": "Logistics ship", "colony_ship": "Colony ship", "science_ship": "Science vessel"}
+	var names := {"fighter": "Fighter", "miner": "Mining ship", "ship": "Freighter", "colony_ship": "Colony ship", "science_ship": "Science vessel"}
 	for kind in ["fighter", "miner", "ship", "colony_ship", "science_ship"]:
 		rows.append([names[kind], _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(1))])
 	_table(["Ship", "Materials", "Crew", "Time (Lv 1)"], rows)

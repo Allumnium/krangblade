@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.53.3: Verify crowded docking, leftover trade cargo, partial and full warehouse retry, distinct crew totals, 10-bay freighter art, transparent top HUD, hidden zero rates and two-/three-peer docking regressions. Runtime pending.
+
 - [ ] v0.53.2: Visually verify 12× ship overview scaling, ship selection and beam alignment, preserved structure scale and smooth transition to tactical art. Runtime pending.
 
 - [ ] v0.53.1: Verify cooldown seconds at all speeds, shipyard ghost and port alignment, cancellation conservation/authority for queued and active hulls/buildings and upgrades, persistent salvage recovery and peer replication. Runtime and visual validation pending.
