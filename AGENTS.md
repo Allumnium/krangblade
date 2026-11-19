@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.63.1: Render each sector/highway section with a closed clearance contour shared by fill and antialiased rim. Round lane mouths, intersections and section ends; no union-mask fragments. Preserve authoritative region membership, influence and navigation; visual rounding is local.
+
 - v0.63.0: Regions with at least 50 direct influence add 5% of each player's uncapped direct points to each immediately connected weaker region. Compare total direct influence, exclude equal totals, no recursive spillover or hidden donors. Highway section adjacency follows the connection chain; ownership and movement unchanged.
 
 - v0.62.3: Shipyard class rows hide locked ships and completed upgrades; available ships start in column one. Small shows Medium upgrade only in row two, Medium shows Large upgrade only in row three. Mixed yard groups show unlocked ships first and any still-applicable upgrade after them. Preserve four rows and navigation slots.

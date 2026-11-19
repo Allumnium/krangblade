@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.63.1: Screenshot showed dangling/disconnected corridor lines. Previous union rim was masked by independent core/near-lane tests; replacement draws shared fill/rim contours for individual assigned regions. Additional lane overlap checks may increase GPU cost in corridor pixels; measure and carry into cached territory geometry roadmap. In-game appearance unverified.
+
 - v0.63.0: Spillover uses uncapped direct totals (500 contributes 25 at 5%), never received influence. Check color readability at hubs with many strong neighbors; connected region adjacency does not jump over highway sections.
 
 - v0.62.3: Fixed four-row shipyard deck uses blank slots for locked classes; mixed-level selections retain applicable upgrade buttons after unlocked ships. Check hotkeys and refresh on upgrade completion.

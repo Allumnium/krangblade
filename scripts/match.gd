@@ -3248,140 +3248,170 @@ uniform vec2 world_extent = vec2(1.0);
 uniform float padding = 1.0;
 uniform float corner_rounding = 0.32;
 
-// Smooth the displayed junctions without changing authoritative lane widths.
-float rounded_join(float a, float b, float width) {
+// Positive clearance is inside one region. Smooth the intersection of
+// constraints inward; the same contour defines both fill and rim.
+float rounded_intersection(float a, float b, float width) {
 	float overlap = max(0.0, width - abs(a - b));
-	return min(a, b) - overlap * overlap / (4.0 * width);
+	return min(a, b) - overlap * overlap / (4.0 * max(width, 0.000001));
+}
+
+float sector_distance(vec2 p, vec4 site, int index) {
+	vec2 offset = p - site.xy;
+	float distance_to_center = length(offset);
+	float limit = site.z;
+	// Outside the disk this lower bound is sufficient for membership.
+	// Near the disk calculate the clipped, rounded radial boundary too,
+	// so the lane's region boundary meets the actual sector edge.
+	if (distance_to_center > site.z * 1.2) {
+		return distance_to_center - site.z;
+	}
+	vec2 ray = offset / max(distance_to_center, 0.0000001);
+	float second = 1e20;
+	for (int i = 0; i < site_count; i++) {
+		if (i == index) { continue; }
+		vec2 delta = texelFetch(site_data, ivec2(i, 0), 0).xy - site.xy;
+		float length_sq = dot(delta, delta);
+		float projection = dot(ray, delta);
+		if (length_sq > 0.000000000001 && length_sq < 4.0 * site.z * site.z && projection > 0.000000001) {
+			float bound = length_sq / (2.0 * projection);
+			if (bound < limit) {
+				second = limit;
+				limit = bound;
+			} else {
+				second = min(second, bound);
+			}
+		}
+	}
+	float width = max(0.000000001, limit * corner_rounding);
+	float overlap = max(0.0, width - (second - limit));
+	limit -= overlap * overlap / (4.0 * width);
+	return distance_to_center - limit;
+}
+
+// Lane samples contain axial fraction, centerline distance and radius.
+vec3 lane_sample(vec2 p, int index) {
+	vec4 edge = texelFetch(lane_data, ivec2(index, 0), 0);
+	vec4 a = texelFetch(site_data, ivec2(int(edge.x + 0.5), 0), 0);
+	vec4 b = texelFetch(site_data, ivec2(int(edge.y + 0.5), 0), 0);
+	vec2 axis = b.xy - a.xy;
+	float along = clamp(dot(p - a.xy, axis) / max(dot(axis, axis), 0.00000001), 0.0, 1.0);
+	return vec3(along, length(p - (a.xy + axis * along)), min(a.z, b.z) * lane_radius_fraction);
+}
+
+vec4 region_color(int region, float clearance, float aa) {
+	vec4 tint = texelFetch(influence_data, ivec2(region, 0), 0);
+	vec3 neutral = vec3(0.60, 0.68, 0.76);
+	float fill = smoothstep(-aa * 0.5, aa * 0.5, clearance);
+	// A single centered AA stroke, rather than independent line
+	// fragments with conflicting masks. Also visible at deep zoom.
+	float rim = 1.0 - smoothstep(aa * 0.45, aa * 1.6, abs(clearance));
+	float alpha = fill * 0.10 * tint.a + rim * mix(0.20, 0.45, tint.a);
+	return vec4(mix(neutral, tint.rgb, tint.a), alpha);
 }
 
 void fragment() {
-
 	vec2 p = UV * world_extent - vec2(padding);
 	vec2 bounds = world_extent - vec2(2.0 * padding);
-	if (p.x < 0.0 || p.y < 0.0 || p.x > bounds.x || p.y > bounds.y) { discard; }
-	// First identify the nearest POI (including neutral fields).
-	float best_sq = 1e20;
-	int site_index = -1;
-	vec4 site = vec4(0.0);
+	float map_clearance = min(min(p.x, p.y), min(bounds.x - p.x, bounds.y - p.y));
+	if (map_clearance < 0.0) { discard; }
+	// Take derivatives before branching, to avoid undefined AA at seams.
+	float aa = max(length(fwidth(p)), 0.000001);
+	float core_d = 1e20;
+	int core = -1;
+	float nearest_inside = 1e20;
+	int nearest_core = -1;
 	for (int i = 0; i < site_count; i++) {
-		vec4 candidate = texelFetch(site_data, ivec2(i, 0), 0);
-		vec2 offset = p - candidate.xy;
-		float distance_sq = dot(offset, offset);
-		if (distance_sq < best_sq) {
-			best_sq = distance_sq;
-			site_index = i;
-			site = candidate;
+		vec4 site = texelFetch(site_data, ivec2(i, 0), 0);
+		float distance_sq = dot(p - site.xy, p - site.xy);
+		// Skip expensive radial clipping when the disk lower bound
+		// cannot affect either the selected core or the nearby lane rim.
+		float disk_d = sqrt(distance_sq) - site.z;
+		if (disk_d > max(core_d, aa * 2.0)) { continue; }
+		float d = sector_distance(p, site, i);
+		if (d < core_d) {
+			core_d = d;
+			nearest_core = i;
+		}
+		if (d <= 0.0 && distance_sq < nearest_inside) {
+			nearest_inside = distance_sq;
+			core = i;
 		}
 	}
-	float aa = max(length(fwidth(p)), 0.000001);
-	float distance_to_center = sqrt(best_sq);
-	float d = distance_to_center - site.z;
-	if (d <= 0.0 && site_index >= 0) {
-		// Same two smallest radial bounds as ECONOMY.sector_limit.
-		vec2 ray = (p - site.xy) / max(distance_to_center, 0.0000001);
-		float limit = site.z;
-		float second = 1e20;
-		for (int i = 0; i < site_count; i++) {
-			if (i == site_index) { continue; }
-			vec2 delta = texelFetch(site_data, ivec2(i, 0), 0).xy - site.xy;
-			float length_sq = dot(delta, delta);
-			float projection = dot(ray, delta);
-			if (length_sq > 0.000000000001 && length_sq < 4.0 * site.z * site.z && projection > 0.000000001) {
-				float bound = length_sq / (2.0 * projection);
-				if (bound < limit) {
-					second = limit;
-					limit = bound;
-				} else {
-					second = min(second, bound);
+	if (core >= 0) {
+		vec4 site = texelFetch(site_data, ivec2(core, 0), 0);
+		float clearance = min(-sector_distance(p, site, core), map_clearance);
+		COLOR = region_color(core, clearance, aa);
+	} else {
+		// Assign actual lane membership by nearest eligible centerline,
+		// matching influence_region. Pick the nearest surface outside for AA.
+		int lane = -1;
+		int nearest_lane = -1;
+		float nearest_distance = 1e20;
+		float surface = 1e20;
+		vec3 picked = vec3(0.0);
+		vec3 outside = vec3(0.0);
+		for (int i = 0; i < lane_count; i++) {
+			vec3 lane_values = lane_sample(p, i);
+			float d = lane_values.y - lane_values.z;
+			if (d < surface) {
+				surface = d;
+				nearest_lane = i;
+				outside = lane_values;
+			}
+			if (d <= 0.0 && lane_values.y < nearest_distance) {
+				nearest_distance = lane_values.y;
+				lane = i;
+				picked = lane_values;
+			}
+		}
+		bool in_lane = lane >= 0;
+		if (!in_lane) {
+			lane = nearest_lane;
+			picked = outside;
+		}
+		vec4 lane_color = vec4(0.0);
+		if (lane >= 0 && (in_lane || surface <= aa * 2.0)) {
+			vec4 edge = texelFetch(lane_data, ivec2(lane, 0), 0);
+			int sections = max(1, int(edge.w + 0.5));
+			float scaled = picked.x * float(sections);
+			int section = min(sections - 1, int(floor(scaled)));
+			int region = int(edge.z + 0.5) + section;
+			vec2 a = texelFetch(site_data, ivec2(int(edge.x + 0.5), 0), 0).xy;
+			vec2 b = texelFetch(site_data, ivec2(int(edge.y + 0.5), 0), 0).xy;
+			float span = length(b - a) / float(sections);
+			float rounding = max(0.000001, picked.z * corner_rounding * 0.25);
+			float clearance = min(picked.z - picked.y, map_clearance);
+			// Closed lane mouths and section ends, not disconnected
+			// lines from a smoothed union. Round only the local corners.
+			clearance = rounded_intersection(clearance, core_d, rounding);
+			if (section > 0) {
+				clearance = rounded_intersection(clearance, (scaled - float(section)) * span, rounding);
+			}
+			if (section < sections - 1) {
+				clearance = rounded_intersection(clearance, (float(section + 1) - scaled) * span, rounding);
+			}
+			// Clip against competing lanes' assigned areas. A point is
+			// ours if outside the other capsule OR nearer our centerline.
+			// This also closes contours at crossing or branching highways.
+			for (int i = 0; i < lane_count; i++) {
+				if (i == lane) { continue; }
+				vec3 other = lane_sample(p, i);
+				float separation = max(other.y - other.z, (other.y - picked.y) * 0.5);
+				if (separation < clearance + rounding) {
+					clearance = rounded_intersection(clearance, separation, rounding);
 				}
 			}
+			lane_color = region_color(region, clearance, aa);
 		}
-		float width = max(0.000000001, limit * corner_rounding);
-		float overlap = max(0.0, width - (second - limit));
-		limit -= overlap * overlap / (4.0 * width);
-		d = distance_to_center - limit;
-	}
-	float inside = 1.0 - smoothstep(-aa, 0.0, d);
-	float border = inside * smoothstep(-aa * 2.8, -aa * 1.1, d);
-	vec4 neutral = vec4(0.60, 0.68, 0.76, 0.0);
-	vec4 sector_tint = neutral;
-	if (site_index >= 0) {
-		sector_tint = texelFetch(influence_data, ivec2(site_index, 0), 0);
-	}
-	float gap_border = 0.0;
-	float lane_fill = 0.0;
-	vec4 lane_tint = neutral;
-	if (d >= -aa) {
-		float lane_d = 1e20;
-		float second_lane = 1e20;
-		float nearest_radius = 0.0;
-		int rim_index = -1;
-		int interior_index = -1;
-		float interior_best = 1e20;
-		float rim_t = 0.0;
-		float interior_t = 0.0;
-		for (int i = 0; i < lane_count; i++) {
-			vec4 edge = texelFetch(lane_data, ivec2(i, 0), 0);
-			vec4 a = texelFetch(site_data, ivec2(int(edge.x + 0.5), 0), 0);
-			vec4 b = texelFetch(site_data, ivec2(int(edge.y + 0.5), 0), 0);
-			vec2 ab = b.xy - a.xy;
-			float t = clamp(dot(p - a.xy, ab) / max(dot(ab, ab), 0.00000001), 0.0, 1.0);
-			float radius = min(a.z, b.z) * lane_radius_fraction;
-			float center_distance = length(p - (a.xy + ab * t));
-			float distance = center_distance - radius;
-			if (distance <= 0.0 && center_distance < interior_best) {
-				interior_best = center_distance;
-				interior_index = i;
-				interior_t = t;
-			}
-			if (distance < lane_d) {
-				rim_index = i;
-				rim_t = t;
-				second_lane = lane_d;
-				lane_d = distance;
-				nearest_radius = radius;
-			} else {
-				second_lane = min(second_lane, distance);
-			}
+		// Preserve the outer half of a core rim in empty space and at
+		// highway mouths, blending rather than truncating at membership.
+		vec4 core_color = vec4(0.0);
+		if (nearest_core >= 0 && core_d < aa * 2.0) {
+			core_color = region_color(nearest_core, -core_d, aa);
 		}
-		// Round concave joins between neighboring lanes and at sector mouths.
-		float rounding = max(0.000001, nearest_radius * corner_rounding * 0.5);
-		float rounded_lane = rounded_join(lane_d, second_lane, rounding);
-		float outer = rounded_join(rounded_lane, d, rounding);
-		// Retain the original sector outline; the lane uses exactly the
-		// same soft inward-facing stroke profile as neutral sector rims.
-		float lane_inside = 1.0 - smoothstep(-aa, 0.0, outer);
-		float lane_rim = lane_inside * smoothstep(-aa * 2.8, -aa * 1.1, outer);
-		float near_lane = 1.0 - smoothstep(rounding, rounding + aa * 2.8, rounded_lane);
-		gap_border = (1.0 - inside) * lane_rim * near_lane;
-		lane_fill = (1.0 - inside) * (1.0 - smoothstep(-aa, 0.0, lane_d));
-		int color_index = interior_index >= 0 ? interior_index : rim_index;
-		if (color_index >= 0) {
-			vec4 edge = texelFetch(lane_data, ivec2(color_index, 0), 0);
-			int sections = max(1, int(edge.w + 0.5));
-			float along = interior_index >= 0 ? interior_t : rim_t;
-			float scaled = along * float(sections);
-			int section = min(sections - 1, int(floor(scaled)));
-			lane_tint = texelFetch(influence_data, ivec2(int(edge.z + 0.5) + section, 0), 0);
-			// Soft internal rims only on long lanes; never split routing.
-			if (sections > 1 && interior_index >= 0) {
-				vec2 a = texelFetch(site_data, ivec2(int(edge.x + 0.5), 0), 0).xy;
-				vec2 b = texelFetch(site_data, ivec2(int(edge.y + 0.5), 0), 0).xy;
-				float cut = clamp(floor(scaled + 0.5), 1.0, float(sections - 1));
-				float cut_dist = abs(scaled - cut) * length(b - a) / float(sections);
-				float seam = (1.0 - smoothstep(aa * 0.4, aa * 2.0, cut_dist)) * lane_fill;
-				gap_border = max(gap_border, seam);
-			}
-		}
+		float alpha = core_color.a + lane_color.a * (1.0 - core_color.a);
+		COLOR = vec4((core_color.rgb * core_color.a + lane_color.rgb * lane_color.a * (1.0 - core_color.a)) / max(alpha, 0.000001), alpha);
 	}
-	// Fade from neutral outline to player mix as total influence approaches
-	// 50; maintain faint sector-style fill even at full strength.
-	float core_alpha = inside * 0.10 * sector_tint.a + border * mix(0.20, 0.45, sector_tint.a);
-	float lane_alpha = lane_fill * 0.10 * lane_tint.a + gap_border * mix(0.20, 0.45, lane_tint.a);
-	vec3 core_rgb = mix(neutral.rgb, sector_tint.rgb, sector_tint.a);
-	vec3 lane_rgb = mix(neutral.rgb, lane_tint.rgb, lane_tint.a);
-	float alpha = min(1.0, core_alpha + lane_alpha);
-	COLOR = vec4((core_rgb * core_alpha + lane_rgb * lane_alpha) / max(alpha, 0.000001), alpha);
 }
 """
 	territory_material = ShaderMaterial.new()
