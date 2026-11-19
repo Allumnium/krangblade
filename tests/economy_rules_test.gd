@@ -548,7 +548,35 @@ func _test_manual_conversion_and_stats() -> void:
 	assert(killed_by[2] == source)
 	print("PASS: manual conversion, lifetime transfer and production counters, lethal hit attribution")
 
+func _test_stop_order() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], true)
+	var fighter: Dictionary = {}
+	for craft in state["ships"]:
+		if craft["kind"] == "fighter":
+			fighter = craft
+			break
+	assert(not fighter.is_empty())
+	var id: int = int(fighter["id"])
+	var point: Vector2 = fighter["position"]
+	assert(ECON.command_hold_units(state, 1, [id], false))
+	assert(bool(fighter["holding"]))
+	fighter["order_queue"] = [{"kind": "sector", "target": 0}]
+	assert(not ECON.issue_unit_order(state, 2, [id], {"kind": "stop"}, false))
+	assert(not ECON.issue_unit_order(state, 1, [id], {"kind": "stop"}, true))
+	assert(bool(fighter["holding"]))
+	assert(ECON.issue_unit_order(state, 1, [id], {"kind": "stop"}, false))
+	assert(not bool(fighter["holding"]) and not fighter.has("unit_order") and not fighter.has("order_queue"))
+	assert(fighter["route"].is_empty() and fighter["position"] == point and fighter["navigation_target"] == point)
+	var graph: Dictionary = ECON.military_graph(state)
+	var target: Vector2 = graph["points"][0]
+	assert(ECON.issue_unit_order(state, 1, [id], {"kind": "position", "target": 0, "point": target, "move_only": true}, false))
+	assert(ECON.issue_unit_order(state, 1, [id], {"kind": "position", "target": 0, "point": target, "move_only": false}, true))
+	assert(ECON.issue_unit_order(state, 1, [id], {"kind": "stop"}, false))
+	assert(not fighter.has("local_move_target") and not fighter.has("order_queue") and not bool(fighter["holding"]))
+	print("PASS: Stop cancels Hold, active movement and queued commands")
+
 func _initialize() -> void:
+	_test_stop_order()
 	_test_manual_conversion_and_stats()
 	_test_passive_health()
 	_test_ship_size_classes()

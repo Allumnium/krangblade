@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.55.6: Stop (S) clears active/queued orders and Hold, permits autonomous work after the arrival cooldown, and preserves emergency withdrawal. Station hub shows current infrastructure and assigned yard job icons with individual progress bars; hide at distant zoom.
+
 - v0.55.5: Lifetime kills (lethal shot, including defenses), picked/dropped tonnage and Colony food production. Default groups 1 station, 2 first yard. Colony Transform (J) explicitly converts a hull in a neutral system; AI retains automatic conversion. Double station and ship transfer ranges; keep salvage pickup range unchanged.
 
 - v0.55.3: Highlight current orders independent of targeting/autocast. Fighter right-click on friendly hull escorts it using validated Guard-follow. Armed ships fire in range on movement; preserve same-sector engagement and withdrawal priority. Gap clicks snap to nearest known sector. Freighters 200 HP; passive regeneration 1 HP/3 years for ships and structures.
