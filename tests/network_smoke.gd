@@ -152,6 +152,9 @@ func _phase_changed() -> void:
 		if mode == "normal" and not _check_map_codec(state):
 			_fail("Static-map codec failed exact inventory round trip.")
 			return
+		if mode == "normal" and not _check_planet_motion_codec(state):
+			_fail("Planet template or motion codec failed round trip.")
+			return
 		for owner in roster:
 			var miners: int = 0
 			var fighters: int = 0
@@ -783,6 +786,9 @@ func _check_economy_sync() -> void:
 			if role == "client" and int(session.get("diagnostic_compact_received")) < 1:
 				_fail("Guest did not receive a map-template-independent inventory update.")
 				return
+			if role == "client" and int(session.get("diagnostic_planet_compact_received")) < 1:
+				_fail("Guest did not reconstruct compact planet state.")
+				return
 			economy_verified = true
 			# A normal game command is the completion acknowledgment. Return
 			# only after each real peer has independently verified its replica.
@@ -877,3 +883,45 @@ func _check_map_codec(state: Dictionary) -> bool:
 	wire_state["map"] = topology
 	var fallback: Dictionary = session.call("_encode_replica", wire_state, template, false)
 	return fallback.get("map") == topology and not fallback.has("_wire_ore")
+
+func _check_planet_motion_codec(state: Dictionary) -> bool:
+	var template: Array = session.call("_planet_template", state["planets"])
+	var live: Array = (state["planets"] as Array).duplicate(true)
+	live[0]["stock"]["Metals"] = float(live[0]["stock"]["Metals"]) + 123.456
+	live[0]["population"] = float(live[0]["population"]) + 5.0
+	var wire_state: Dictionary = state.duplicate()
+	wire_state["planets"] = live
+	wire_state["ai_waves"] = {1: {"members": [1, 2]}}
+	var wire: Dictionary = session.call("_encode_replica", wire_state, state["map"], false, template)
+	if not wire.get("_wire_planets_compact", false) or wire.has("_wire_planet_template") or wire.has("ai_waves") or wire.has("next_ai") or wire.has("next_operation_id"):
+		return false
+	var decoded: Dictionary = bytes_to_var(var_to_bytes(wire))
+	var restored: Array = session.call("_restore_planets", decoded["planets"], template)
+	if restored != live or wire_state["ai_waves"].is_empty() or wire["operations"] != state["operations"]:
+		return false
+	var first: Dictionary = session.call("_encode_replica", wire_state, state["map"], true, template)
+	if first.get("_wire_planet_template") != template:
+		return false
+	var full_map_wire: Dictionary = session.call("_encode_replica", wire_state, state["map"], false)
+	if var_to_bytes(wire).compress(FileAccess.COMPRESSION_GZIP).size() >= var_to_bytes(full_map_wire).compress(FileAccess.COMPRESSION_GZIP).size():
+		return false
+	live[0]["size_factor"] = float(live[0]["size_factor"]) + 0.5
+	var fallback: Dictionary = session.call("_encode_replica", wire_state, state["map"], false, template)
+	if fallback.has("_wire_planets_compact") or fallback["planets"] != live:
+		return false
+	var packet := PackedByteArray()
+	packet.resize(20)
+	var position := Vector2(54321.25, -123.125)
+	packet.encode_s64(0, 123456789012)
+	packet.encode_float(8, position.x)
+	packet.encode_float(12, position.y)
+	if packet.decode_s64(0) != 123456789012 or Vector2(packet.decode_float(8), packet.decode_float(12)) != position:
+		return false
+	for i in range(360):
+		var heading: Vector2 = Vector2.from_angle(deg_to_rad(float(i)))
+		packet.encode_half(16, heading.x)
+		packet.encode_half(18, heading.y)
+		var restored_heading := Vector2(packet.decode_half(16), packet.decode_half(18))
+		if heading.distance_to(restored_heading) > 0.001:
+			return false
+	return true
