@@ -3567,38 +3567,17 @@ static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionar
 	var pos: Vector2 = ship["position"]
 	var nav: Dictionary = _manual_nav(state, graph, ship, node)
 	var goal: int = nav["node"]
-	if ship.get("unit_order", {}).get("kind", "") == "guard" and lane_direct(graph, pos, point, military_pois(state, int(ship["owner"]))):
-		ship["route"] = []
-		ship["leg"] = 0.0
-		ship["dest"] = goal
-		_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, maxf(0.0, pos.distance_to(point) - reach)))
-		if (ship["position"] as Vector2).distance_to(point) <= reach + EPS:
-			ship["at"] = goal
-			return true
-		return false
-	if pos.distance_to(point) <= reach + EPS:
-		if sector_contains(graph, node, pos):
-			ship["at"] = goal
-			ship["route"] = []
-			ship["leg"] = 0.0
-		return true
-	if sector_contains(graph, node, pos):
-		ship["route"] = []
-		ship["at"] = goal
-		ship["leg"] = 0.0
-	elif int(ship.get("dest", -1)) != goal:
-		var paths: Dictionary = _military_paths(nav["graph"], goal)
-		if not paths["distance"].has(int(ship["at"])):
-			return false
-		_redirect_fighter(nav["graph"], ship, goal, paths)
+	ship["route"] = []
+	ship["leg"] = 0.0
+	ship["dest"] = goal
 	if ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
 		ship["operation_target"] = goal
-	if not (ship["route"] as Array).is_empty():
-		var lane_end: Vector2 = point if goal == node else nav["graph"]["points"][goal]
-		_move({"map": nav["graph"], "ships": state["ships"]}, ship, dt, lane_end, goal, minf(reach, STATION_DOCK_RANGE) if goal == node and ship.get("cargo_order", {}).get("kind", "") == "deposit" else 0.0)
-		return (ship["position"] as Vector2).distance_to(point) <= reach + EPS
 	_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, maxf(0.0, pos.distance_to(point) - reach)))
-	return (ship["position"] as Vector2).distance_to(point) <= reach + EPS
+	if (ship["position"] as Vector2).distance_to(point) <= reach + EPS:
+		ship["at"] = goal
+		return true
+	return false
+
 
 static func _finish_manual(ship: Dictionary) -> void:
 	ship["route"] = []
@@ -3672,18 +3651,9 @@ static func lane_at(graph: Dictionary, point: Vector2, candidates: Array = []) -
 	return result
 
 static func lane_direct(graph: Dictionary, origin: Vector2, destination: Vector2, candidates: Array) -> bool:
-	if candidates.is_empty():
-		return false
-	var target_sector: int = sector_at(graph, destination, candidates)
-	if target_sector < 0:
-		var lane: Vector2i = lane_at(graph, destination, candidates)
-		return lane.x >= 0 and (lane_contains(graph, lane.x, lane.y, origin) or sector_contains(graph, lane.x, origin) or sector_contains(graph, lane.y, origin))
-	# Direct entry into an adjoining sector from the corridor, without
-	# changing ordinary core-to-core routes or sector entry behavior.
-	if sector_at(graph, origin, candidates) >= 0:
-		return false
-	var origin_lane: Vector2i = lane_at(graph, origin, candidates)
-	return target_sector == origin_lane.x or target_sector == origin_lane.y
+	# Territory validates destinations, not the intervening flight line.
+	return origin.is_finite() and destination.is_finite() and (sector_at(graph, destination, candidates) >= 0 or lane_at(graph, destination, candidates).x >= 0)
+
 
 static func patrol_node(state: Dictionary, graph: Dictionary, player: int, point: Vector2) -> int:
 	if not point.is_finite() or (state["map"].has("size") and not Rect2(Vector2.ZERO, state["map"]["size"]).has_point(point)):
@@ -4328,8 +4298,7 @@ static func command_remote_position(state: Dictionary, player: int, ids: Array, 
 	if units.is_empty() or not _position_target_valid(state, graph, player, node, point):
 		return false
 	for ship in units:
-		var nav: Dictionary = _manual_nav(state, graph, ship, node)
-		if not _military_paths(nav["graph"], nav["node"])["distance"].has(int(ship["at"])) or bool(ship.get("retreating", false)):
+		if bool(ship.get("retreating", false)):
 			return false
 	for ship in units:
 		_cancel_salvage_order(ship)
@@ -4337,33 +4306,20 @@ static func command_remote_position(state: Dictionary, player: int, ids: Array, 
 		_clear_local_hold(ship)
 		_interrupt_work(ship)
 		var nav: Dictionary = _manual_nav(state, graph, ship, node)
-		var anchor: int = node
-		var lane: Vector2i = lane_at(graph, point, military_pois(state, player))
-		if not sector_contains(graph, node, point) and lane.x >= 0:
-			var best: float = INF
-			for endpoint in [lane.x, lane.y]:
-				var option: Dictionary = _manual_nav(state, graph, ship, int(endpoint))
-				var option_paths: Dictionary = _military_paths(option["graph"], option["node"])
-				var cost: float = float(_military_approach(option["graph"], ship, option_paths)["distance"]) + (point as Vector2).distance_to(graph["points"][endpoint])
-				if cost < best:
-					best = cost
-					nav = option
-					anchor = int(endpoint)
-		if lane_direct(graph, ship["position"], point, military_pois(state, player)):
-			ship["route"] = []
-			ship["leg"] = 0.0
-			ship["dest"] = nav["node"]
-		else:
-			_redirect_fighter(nav["graph"], ship, nav["node"], _military_paths(nav["graph"], nav["node"]))
+		ship["route"] = []
+		ship["leg"] = 0.0
+		ship["dest"] = nav["node"]
 		if ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
-			ship["operation_target"] = anchor
+			ship["operation_target"] = node
 		ship["local_move_target"] = point
-		ship["local_move_sector"] = anchor
+		ship["local_move_sector"] = node
 		ship["move_only"] = move_only
+		ship["navigation_target"] = point
 		_set_unit_order(state, ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
 	return true
 
 # Stop cancels work and queued movement without imposing a persistent hold.
+
 static func command_stop_units(state: Dictionary, player: int, ids: Array) -> bool:
 	var units: Array = _owned_units(state, player, ids)
 	if units.is_empty():
@@ -4432,7 +4388,7 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 		return false
 	var node: int = int(ship["local_move_sector"])
 	var destination: Vector2 = ship["local_move_target"]
-	if not state.is_empty() and lane_direct(graph, ship["position"], destination, military_pois(state, int(ship["owner"]))):
+	if not state.is_empty():
 		var nav: Dictionary = _manual_nav(state, graph, ship, node)
 		ship["route"] = []
 		ship["leg"] = 0.0
@@ -4440,33 +4396,6 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 		_navigate(ship, destination, ship_speed(str(ship.get("kind", "ship"))) * dt)
 		if (ship["position"] as Vector2).distance_to(destination) <= EPS:
 			ship["at"] = nav["node"]
-			if ship.has("arrival_heading"):
-				ship["heading"] = ship["arrival_heading"]
-			_clear_local_move(ship)
-			_finish_manual(ship)
-			ship["arrival_wait_until"] = float(state["elapsed"]) + MOVE_ARRIVAL_WAIT_YEARS
-		return true
-	if not state.is_empty() and not sector_contains(graph, node, destination):
-		# Approach the selected lane endpoint; the direct branch takes over
-		# as soon as the ship enters the destination corridor.
-		var nav: Dictionary = _manual_nav(state, graph, ship, node)
-		var goal: int = int(nav["node"])
-		if int(ship.get("dest", -1)) != goal:
-			_redirect_fighter(nav["graph"], ship, goal, _military_paths(nav["graph"], goal))
-		if not (ship["route"] as Array).is_empty():
-			_move({"map": nav["graph"]}, ship, dt)
-			return true
-		_navigate(ship, destination, ship_speed(str(ship.get("kind", "ship"))) * dt)
-		if (ship["position"] as Vector2).distance_to(destination) <= EPS:
-			if ship.has("arrival_heading"):
-				ship["heading"] = ship["arrival_heading"]
-			ship["at"] = goal
-			_clear_local_move(ship)
-			_finish_manual(ship)
-			ship["arrival_wait_until"] = float(state["elapsed"]) + MOVE_ARRIVAL_WAIT_YEARS
-		return true
-	if not fighter and not state.is_empty():
-		if _manual_travel(state, graph, ship, node, ship["local_move_target"], dt):
 			if ship.has("arrival_heading"):
 				ship["heading"] = ship["arrival_heading"]
 			_clear_local_move(ship)
