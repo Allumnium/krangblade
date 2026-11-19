@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.51.5: Loaded logistics ships without available storage wait at a reachable owned station instead of remaining at the resource site. Retain physical cargo and retry delivery. Single selected hulls show a live current-order line, including automatic jobs; preserve existing group markers.
+
 - v0.51.4: Per-mode cooldowns after explicit orders and movement arrival: Auto-Repair 0, Auto-Mine/Auto-Salvage 5, Wander/Auto-Trade 30 simulation years. Normalize radial overlays to each duration; do not gate civilian work behind the longer Wander timer. Explicit orders, safety and per-mode toggles retain priority.
 
 - v0.51.3: All players (human and AI) start with three miners, two fighters and one logistics ship. Preserve existing free starter fleet provisioning, home population, stocks and defensive structures.

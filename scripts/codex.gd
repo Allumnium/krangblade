@@ -374,7 +374,7 @@ func _mining() -> void:
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
 
 func _trade() -> void:
-	_body("Every station has separate resource stockpiles and import/export settings. Logistics ships move surplus between friendly systems. With Auto-Trade enabled, idle ships wait near miners or salvage sites containing at least a full hold; they deliver full or partial loads to owned stations.")
+	_body("Every station has separate resource stockpiles and import/export settings. Logistics ships move surplus between friendly systems. With Auto-Trade enabled, idle ships wait near miners or salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait at a station when storage is full.")
 	_flow(["Source surplus", "Freighter in transit", "Destination deficit"])
 	_section("Trade thresholds")
 	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both are percentages of actual local storage; imports and exports may be toggled separately.")

@@ -1933,6 +1933,23 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 		ship["dest"] = -1
 	if _cargo_total(ship) > EPS:
 		_pick_loaded_destination(state, ship, teams, team, cache)
+		# If no trade recipient has room, dock at the closest reachable owned station.
+		if int(ship["dest"]) < 0:
+			var best: float = INF
+			var waiting_path: Array[int] = []
+			for i in range(planets.size()):
+				if int(planets[i]["owner"]) != int(ship["owner"]) or not has_station(planets[i]):
+					continue
+				var path: Array[int] = _path(state, teams, team, here, i, cache)
+				if path.is_empty():
+					continue
+				var distance: float = MAP.route_length(state["map"], path) + (ship["position"] as Vector2).distance_to(_service_point(state, ship, here))
+				if distance < best:
+					best = distance
+					waiting_path = path
+			if not waiting_path.is_empty():
+				ship["dest"] = waiting_path.back()
+				_set_route(ship, waiting_path)
 	else:
 		ship["source"] = -1
 		ship["dest"] = -1
@@ -4212,7 +4229,7 @@ static func command_unload_cargo(state: Dictionary, player: int, ids: Array) -> 
 		changed = true
 	return changed
 
-static func _salvage_depot_route(state: Dictionary, graph: Dictionary, ship: Dictionary) -> bool:
+static func _salvage_depot_route(state: Dictionary, graph: Dictionary, ship: Dictionary, allow_full: bool = false) -> bool:
 	var fighter: bool = ship["kind"] == "fighter"
 	var nav: Dictionary = graph if fighter else state["map"]
 	var points: Array = nav["points"]
@@ -4247,7 +4264,7 @@ static func _salvage_depot_route(state: Dictionary, graph: Dictionary, ship: Dic
 				if float(ship.get("cargo", {}).get(resource, 0.0)) > EPS and storage_free(p, resource) > EPS:
 					useful = true
 					break
-			if not useful:
+			if not useful and not allow_full:
 				continue
 			var path: Array[int] = MAP.path(nav, access, team, origin, node)
 			if path.is_empty():
@@ -4259,7 +4276,7 @@ static func _salvage_depot_route(state: Dictionary, graph: Dictionary, ship: Dic
 	if chosen.is_empty():
 		return false
 	# Include the actual entry waypoint, not a direct shortcut to its neighbor.
-	ship["route"] = chosen
+	ship["route"] = [] if chosen.size() == 1 and int(ship["at"]) == int(chosen.back()) else chosen
 	ship["leg"] = 0.0
 	ship["source"] = -1
 	ship["dest"] = chosen.back()
@@ -4343,7 +4360,8 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 			return true
 		ship["next_salvage_search"] = float(state["elapsed"]) + 0.5
 		if not _salvage_depot_route(state, graph, ship):
-			return true
+			if ship.get("kind", "") != "ship" or not _salvage_depot_route(state, graph, ship, true):
+				return true
 		depot = int(ship["salvage_depot"])
 	var nav: Dictionary = graph if ship["kind"] == "fighter" else state["map"]
 	if not (ship["route"] as Array).is_empty():
