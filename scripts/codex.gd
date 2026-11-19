@@ -412,10 +412,10 @@ func _infrastructure() -> void:
 	_body("Warehouse upgrades expand storage; habitation increases terrestrial housing capacity. Orbital Eco-Housing adds self-sufficient residents in planetless systems. Additional shipyards also supply eco-housing.")
 
 func _ships() -> void:
-	_body("Small yards (Lv 1) build Harvesters and Fighters; Medium (Lv 2) adds Freighters and Colonies; Large (Lv 3) adds Science vessels. Start with one Freighter. Costs are paid from the local station. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship details show crew, lifetime kills, cargo pickup/dropoff tonnage and Colony food production. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
+	_body("Small yards build Harvesters, Fighters and Scouts; Medium adds Freighters, Colonies and Cruisers; Large adds Science vessels and Destroyers. Scouts are unarmed, twice fighter speed and half fighter HP. Start with one Freighter. Costs are paid from the local station. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship details show crew, lifetime kills, cargo pickup/dropoff tonnage and Colony food production. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
-	var names := {"fighter": "Fighter", "miner": "Harvester", "ship": "Freighter", "colony_ship": "Colony", "science_ship": "Science vessel"}
-	for kind in ["fighter", "miner", "ship", "colony_ship", "science_ship"]:
+	var names := {"fighter": "Fighter", "miner": "Harvester", "ship": "Freighter", "colony_ship": "Colony", "science_ship": "Science vessel", "scout": "Scout", "cruiser": "Cruiser", "destroyer": "Destroyer"}
+	for kind in E.SHIP_KINDS:
 		rows.append([names[kind], E.size_name(E.ship_size(kind)), _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(E.ship_size(kind)))])
 	_table(["Ship", "Class", "Materials", "Crew", "Time (min. yard)"], rows)
 	_section("Shipyard upgrades")
