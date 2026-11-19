@@ -775,7 +775,11 @@ func _rpc_colonize(ship_id: int, target: int) -> void:
 		_colonize_for(multiplayer.get_remote_sender_id(), ship_id, target)
 
 func _colonize_for(id: int, ship_id: int, target: int) -> void:
-	if _active_player(id) and ECONOMY.send_colony(economy, id, ship_id, target):
+	if not _active_player(id):
+		return
+	if ship_id == -1:
+		ship_id = ECONOMY.nearest_idle_colony(economy, id, target)
+	if ship_id >= 0 and ECONOMY.send_colony(economy, id, ship_id, target):
 		_publish_economy()
 
 func request_fighter_move(ids: Array, target: int, move_only: bool = false) -> void:

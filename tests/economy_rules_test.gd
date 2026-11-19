@@ -575,6 +575,34 @@ func _test_manual_conversion_and_stats() -> void:
 	assert(killed_by[2] == source)
 	print("PASS: manual conversion, lifetime transfer and production counters, lethal hit attribution")
 
+func _test_nearest_colony_and_queued_hold() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var far: Dictionary = {"id": 100, "owner": 1, "kind": "colony_ship", "at": 0, "origin": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
+	var near: Dictionary = far.duplicate(true)
+	near.merge({"id": 101, "at": 1, "position": map["points"][1]}, true)
+	state["ships"] = [far, near]
+	assert(ECON.nearest_idle_colony(state, 1, 2) == 101)
+	near["holding"] = true
+	assert(ECON.nearest_idle_colony(state, 1, 2) == 100)
+	near["holding"] = false
+	assert(ECON.send_colony(state, 1, 101, 2))
+	assert(ECON.nearest_idle_colony(state, 1, 2) == 100)
+	assert(ECON.nearest_idle_colony(state, 2, 2) == -1)
+	var point := Vector2(150, 200)
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "position", "target": 0, "point": point, "move_only": true}, false))
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "hold"}, true))
+	assert(not far.get("holding", false) and far["order_queue"][0]["kind"] == "hold")
+	var graph: Dictionary = ECON.military_graph(state)
+	for tick in range(300):
+		ECON._advance_unit_orders(state, graph)
+		ECON._work_local_move(graph, far, 0.1, state)
+		if far.get("holding", false):
+			break
+	assert(far.get("holding", false) and far["position"].is_equal_approx(point))
+	assert(not far.has("order_queue"))
+	print("PASS: nearest idle colony dispatch and queued hold after movement")
+
 func _test_stop_order() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], true)
 	var fighter: Dictionary = {}
@@ -589,7 +617,8 @@ func _test_stop_order() -> void:
 	assert(bool(fighter["holding"]))
 	fighter["order_queue"] = [{"kind": "sector", "target": 0}]
 	assert(not ECON.issue_unit_order(state, 2, [id], {"kind": "stop"}, false))
-	assert(not ECON.issue_unit_order(state, 1, [id], {"kind": "stop"}, true))
+	assert(ECON.issue_unit_order(state, 1, [id], {"kind": "stop"}, true))
+	assert(fighter["order_queue"][-1]["kind"] == "stop")
 	assert(bool(fighter["holding"]))
 	assert(ECON.issue_unit_order(state, 1, [id], {"kind": "stop"}, false))
 	assert(not bool(fighter["holding"]) and not fighter.has("unit_order") and not fighter.has("order_queue"))
@@ -604,6 +633,7 @@ func _test_stop_order() -> void:
 
 func _initialize() -> void:
 	_test_stop_order()
+	_test_nearest_colony_and_queued_hold()
 	_test_manual_conversion_and_stats()
 	_test_passive_health()
 	_test_ship_size_classes()

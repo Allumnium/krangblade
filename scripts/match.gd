@@ -265,9 +265,7 @@ var active_lens: String = ""
 var global_resource_fills: Dictionary = {}
 var global_resource_segments: Dictionary = {}
 var global_resource_strips: Dictionary = {}
-var colony_picker: OptionButton
 var send_colony_button: Button
-var colony_choices: Array[int] = []
 var selected: int = -1
 var selected_body: int = -1
 var selected_yard: int = -1
@@ -833,11 +831,9 @@ func _build_ui() -> void:
 	interaction_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	interaction_panel.add_theme_constant_override("separation", 8)
 	interaction_scroll.add_child(interaction_panel)
-	colony_picker = OptionButton.new()
-	interaction_panel.add_child(colony_picker)
 	var neutral_grid: GridContainer = _ability_grid(interaction_panel)
 	send_colony_button = _station_button(neutral_grid, "Send\nColony", "transform", _send_colony)
-	_set_button_hint(send_colony_button, "Send selected available Colony to this sector")
+	_set_button_hint(send_colony_button, "Send the nearest idle Colony to this sector")
 	_fill_ability_grid(neutral_grid)
 	_build_station_command_card(body)
 	var trade_page: GridContainer = _inspector_page("Trade")
@@ -2557,7 +2553,7 @@ func _stop_selected() -> void:
 	pending_command = ""
 	var owned: Array[int] = _selected_owned_units(_state())
 	if not owned.is_empty():
-		_issue_order(owned, {"kind": "stop"})
+		_issue_order(owned, {"kind": "stop"}, Input.is_key_pressed(KEY_SHIFT))
 	_refresh_command_mode()
 
 func _issue_order(ids: Array, order: Dictionary, append: bool = false) -> void:
@@ -3016,7 +3012,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	transform_extra.visible = has_farm and has_miners
 	transform.visible = has_farm
 	var graph: Dictionary = ECONOMY.military_graph(state)
-	transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY.can_transform_colony(state, graph, craft))
+	transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY._valid_unit_order(state, graph, craft, {"kind": "transform"}, true))
 	command_buttons["deliver_farm"].visible = has_farm
 	command_buttons["deliver_farm"].disabled = not loaded_farm
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
@@ -4177,34 +4173,15 @@ func _leave() -> void:
 
 func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) -> void:
 	var neutral: bool = not p.is_empty() and int(p.get("owner", -1)) == 0 and phase == "match"
-	colony_picker.visible = neutral
 	send_colony_button.visible = neutral
-	var choices: Array[int] = []
-	var labels: Array[String] = []
-	if neutral:
-		for ship in state["ships"]:
-			if not ECONOMY.colony_path(state, _me(), ship, selected).is_empty():
-				choices.append(int(ship["id"]))
-				labels.append("Colony • %s" % _system_name(int(ship["at"])))
-	if choices != colony_choices or colony_picker.item_count == 0:
-		var previous: int = -1
-		if colony_picker.selected >= 0 and colony_picker.selected < colony_choices.size():
-			previous = colony_choices[colony_picker.selected]
-		colony_choices = choices
-		colony_picker.clear()
-		for label_text in labels:
-			colony_picker.add_item(label_text)
-		if choices.is_empty():
-			colony_picker.add_item("No available Colonies")
-		else:
-			colony_picker.select(maxi(0, choices.find(previous)))
-	colony_picker.disabled = choices.is_empty()
-	send_colony_button.disabled = choices.is_empty()
+	var id: int = ECONOMY.nearest_idle_colony(state, _me(), selected) if neutral else -1
+	send_colony_button.disabled = id < 0
+	_set_button_hint(send_colony_button, "Send nearest idle Colony to this sector" if id >= 0 else "No available idle Colonies")
 
 func _send_colony() -> void:
-	var index: int = colony_picker.selected
-	if not send_colony_button.disabled and index >= 0 and index < colony_choices.size():
-		session.call("request_colonize", colony_choices[index], selected)
+	if not send_colony_button.disabled:
+		# -1 requests authoritative nearest-idle selection.
+		session.call("request_colonize", -1, selected)
 
 func _reset_view() -> void:
 	follow_units = false
@@ -5343,7 +5320,10 @@ func _hold_selected() -> void:
 	pending_command = ""
 	var owned: Array[int] = _selected_owned_units(_state())
 	if not owned.is_empty():
-		session.call("request_unit_hold", owned, _any_selected_holding())
+		if Input.is_key_pressed(KEY_SHIFT):
+			_issue_order(owned, {"kind": "hold"}, true)
+		else:
+			session.call("request_unit_hold", owned, _any_selected_holding())
 	_refresh_command_mode()
 
 func _transform_selected() -> void:
@@ -5351,10 +5331,10 @@ func _transform_selected() -> void:
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var ids: Array[int] = []
 	for ship in state["ships"]:
-		if selected_units.has(int(ship["id"])) and int(ship["owner"]) == _me() and ECONOMY.can_transform_colony(state, graph, ship):
+		if selected_units.has(int(ship["id"])) and int(ship["owner"]) == _me() and ECONOMY._valid_unit_order(state, graph, ship, {"kind": "transform"}, Input.is_key_pressed(KEY_SHIFT)):
 			ids.append(int(ship["id"]))
 	if not ids.is_empty():
-		_issue_order(ids, {"kind": "transform"})
+		_issue_order(ids, {"kind": "transform"}, Input.is_key_pressed(KEY_SHIFT))
 
 func _deliver_farm_selected() -> void:
 	var ids: Array[int] = []
@@ -5362,7 +5342,7 @@ func _deliver_farm_selected() -> void:
 		if ship["kind"] == "colony_ship" and int(ship["owner"]) == _me() and selected_units.has(int(ship["id"])) and ECONOMY._cargo_total(ship) > ECONOMY.EPS:
 			ids.append(int(ship["id"]))
 	pending_command = ""
-	_issue_order(ids, {"kind": "unload"})
+	_issue_order(ids, {"kind": "unload"}, Input.is_key_pressed(KEY_SHIFT))
 	_refresh_command_mode()
 
 func _unload_selected() -> void:
@@ -5707,7 +5687,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible):
 		return
 	var focus: Control = get_viewport().gui_get_focus_owner()
-	if focus is LineEdit or focus is TextEdit or colony_picker.get_popup().visible:
+	if focus is LineEdit or focus is TextEdit:
 		return
 	if event.alt_pressed or event.meta_pressed:
 		return
@@ -5766,9 +5746,6 @@ func _keyboard_pan(delta: float) -> void:
 	var focus: Control = get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit:
 		return
-	for picker in [colony_picker]:
-		if picker.get_popup().visible:
-			return
 	var direction := Vector2(
 		float(Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_LEFT)),
 		float(Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_UP)))

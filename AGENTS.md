@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.58.7: Neutral-sector Send Colony selects the nearest idle reachable owned Colony on the authority. Shift queues Stop, Hold, Deliver Organics and eligible Transform via the normal unit-order pathway; ordinary Hold retains its toggle behavior.
+
 - v0.58.6: Ship exhaust uses short tapered blue-white plasma plumes and streaks proportional to sampled acceleration, with no cruise baseline. Revision-based sampling and independent frame decay suppress stationary/noise effects; visual only.
 
 - v0.58.5: Station primary card has one Select Shipyards (Z) action for all local completed yards. Build submenu has one Build Shipyard (X) action using existing next-free-port construction, costs and limits; Return stays bottom right.
