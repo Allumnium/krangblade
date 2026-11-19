@@ -242,6 +242,26 @@ func _test_mining_lasers() -> void:
 	assert(is_equal_approx(budgets[0]["Metals"], 100.0 - mined))
 	print("PASS: weak miner fire, friendly safety, no pursuit, passing fire, asteroid bonus and conserved ore")
 
+func _test_repair_pauses_wander() -> void:
+	assert(ECON.MINER_REPAIR_RATE == 10.0 and ECON.REPAIR_PER_YEAR == 20.0)
+	for reverse in [false, true]:
+		var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+		var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+		var miner: Dictionary = {"id": 100, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(500, 0), "heading": Vector2.UP, "hp": ECON.ship_max_hp("miner"), "cargo": ECON.empty_stock(), "mining_mode": "idle", "mine_auto": false, "salvage_auto": false, "wander_auto": false}
+		var patient: Dictionary = {"id": 101, "owner": 1, "kind": "scout", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(550, 0), "heading": Vector2.UP, "hp": 20.0, "cargo": ECON.empty_stock(), "wander_auto": true}
+		state["ships"] = [patient, miner] if reverse else [miner, patient]
+		var point: Vector2 = patient["position"]
+		for tick in range(5):
+			ECON.step(state, 0.1)
+			assert(patient["position"] == point and miner.get("repair_target", -1) == 101)
+		assert(float(patient["hp"]) > 20.0 and ECON.autocast_enabled(patient, "wander"))
+		for tick in range(100):
+			ECON.step(state, 0.1)
+			if patient["position"] != point:
+				break
+		assert(is_equal_approx(float(patient["hp"]), ECON.ship_max_hp("scout")) and patient["position"] != point)
+	print("PASS: active repair rates, idle recipient motion pause, automatic wander resumption in either fleet order")
+
 func _test_miner_service_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(10000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -267,7 +287,7 @@ func _test_miner_service_orders() -> void:
 	var station_id: int = ECON.station_target_id(state, 0)
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "repair", "target": station_id}, false))
 	assert(ECON._work_miner_repair(state, graph, miner, ECON.service_targets(state), 1.0))
-	assert(station["hp"] == ECON.STATION_HP - 5.0)
+	assert(station["hp"] == ECON.STATION_HP)
 	var pds_id: int = -2 - state["planets"].size() * 3
 	var defense: Dictionary = state["planets"][0]["pds"][0]
 	defense["hp"] = ECON.PDS_HP - 20.0
@@ -283,7 +303,7 @@ func _test_miner_service_orders() -> void:
 	assert(ECON._work_miner_repair(state, graph, miner, ECON.service_targets(state), 1.0))
 	assert(is_equal_approx(float(defense["hp"]), ECON.PDS_HP - 20.0 + ECON.MINER_REPAIR_RATE))
 	assert(int(miner["repair_target"]) == pds_id)
-	assert(is_equal_approx(float(station["hp"]), ECON.STATION_HP - 5.0))
+	assert(is_equal_approx(float(station["hp"]), ECON.STATION_HP))
 	miner["hp"] = ECON.WITHDRAW_HP
 	ECON._prepare_withdrawals(state, graph)
 	assert(miner.get("retreating", false))
@@ -592,6 +612,7 @@ func _initialize() -> void:
 	_test_station_construction_queue()
 	_test_ai_timed_orbital_housing()
 	_test_miner_service_orders()
+	_test_repair_pauses_wander()
 	_test_mining_lasers()
 	_test_yard_autobuild_and_station_approach()
 	_test_population_queue_priority()

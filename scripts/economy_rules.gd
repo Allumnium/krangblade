@@ -72,7 +72,7 @@ const HARVESTER_SALVAGE_PRIORITY_RANGE: float = SALVAGE_APPROACH_RANGE * 4.0
 # of damage to a resource chunk removes one ton, subject to field limits.
 const MINER_LASER_DAMAGE: float = 2.0
 const MINER_ASTEROID_MULTIPLIER: float = 1.5
-const MINER_REPAIR_RATE: float = 5.0
+const MINER_REPAIR_RATE: float = 10.0
 const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
 const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED # Map-scale reference speed.
@@ -141,7 +141,7 @@ const SHIP_SEPARATION_STRENGTH: float = 0.15
 const FORMATION_RADIUS: float = 105.0
 const FORMATION_TRAVEL_FRACTION: float = 0.8
 const WITHDRAW_HP: float = 46.0
-const REPAIR_PER_YEAR: float = 10.0
+const REPAIR_PER_YEAR: float = 20.0
 const STATION_REPAIR_RANGE: float = LASER_RANGE
 const REPAIR_SAFE_RADIUS: float = LASER_RANGE * 2.0
 # Decorative bodies are derived from immutable system data, not simulated entities.
@@ -6372,7 +6372,7 @@ static func _profile_stage(profile: Dictionary, stage: String, started: int) -> 
 # Gentle neighborhood steering, not rigid collision or additional travel.
 # All hulls are obstacles; ships performing precise service actions are
 # not displaced. Use the same pre-movement snapshot for every pair.
-static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float) -> void:
+static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary = {}) -> void:
 	if dt <= 0.0:
 		return
 	var cells: Dictionary = {}
@@ -6389,7 +6389,7 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
-		if not previous.has(id) or bool(ship.get("retreating", false)) or _salvage_active(ship):
+		if not previous.has(id) or repair_parked.has(id) or bool(ship.get("retreating", false)) or _salvage_active(ship):
 			continue
 		var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
 		var before: Vector2 = previous[id]
@@ -6483,7 +6483,7 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 # exempt from soft steering. This is contact correction, not a new order;
 # service actions and arrival checks have already executed for this tick.
 # A sparse grid and bounded iterations avoid an all-fleet pair scan.
-static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float = 0.1) -> void:
+static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float = 0.1, repair_parked: Dictionary = {}) -> void:
 	var ships: Array = state["ships"]
 	if ships.size() < 2:
 		return
@@ -6528,6 +6528,8 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 			break
 		for i in corrections:
 			var craft: Dictionary = ships[i]
+			if repair_parked.has(int(craft["id"])):
+				continue
 			var point: Vector2 = craft["position"]
 			var budget: float = ship_speed(str(craft.get("kind", "ship"))) * dt
 			var before: Vector2 = previous.get(int(craft["id"]), point)
@@ -6643,6 +6645,9 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var damaged_ids: Array = service_refs.keys().filter(func(id: int) -> bool: return _damaged(service_refs[id]))
 	started = _profile_stage(profile, "Formations / orders", started)
 	var civilian_usec: int = 0
+	var repaired_hulls: Dictionary = {}
+	var repair_parked: Dictionary = {}
+	var wander_candidates: Dictionary = {}
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
 		if ship.get("_handoff_delivery", false):
@@ -6653,7 +6658,10 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		var salvage_ship_id: int = int(ship["id"])
 		if bool(ship.get("retreating", false)) and armed(ship):
 			ship.erase("repair_target")
+			var before_hp: float = float(ship["hp"])
 			_work_withdrawal(state, combat_graph, ship, dt)
+			if float(ship["hp"]) > before_hp and ship["position"] == initial_position:
+				repair_parked[salvage_ship_id] = true
 			continue
 		var follow: Dictionary = ship.get("unit_order", {})
 		var escort_far: bool = follow.get("kind", "") == "follow" and bool(follow.get("guard", false)) and (ship["position"] as Vector2).distance_to(service_refs.get(int(follow["target"]), {}).get("position", Vector2.INF)) > FOLLOW_DISTANCE * 2.0
@@ -6689,6 +6697,10 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		# Each automatic job checks its own cooldown; explicit movement,
 		# follow, cargo orders and emergency withdrawal already take priority.
 		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_ids):
+			if ship.has("repair_target") and dt > 0.0:
+				var recipient: int = int(ship["repair_target"])
+				if service_refs.get(recipient, {}).get("kind", "") == "ship":
+					repaired_hulls[recipient] = true
 			continue
 		ship.erase("repair_target")
 		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id), salvage_threats):
@@ -6758,8 +6770,18 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		# Only use the idle budget if the ship started and finished its
 		# work idle and did not already move this tick.
 		if idle_targets.has(ship_id) and _is_idle_ship(ship) and autocast_ready(state, ship, "wander") and not coordinated.has(ship_id) and ship["position"] == initial_position:
-			_navigate(ship, idle_targets[ship_id], ship_speed(str(ship.get("kind", "ship"))) * dt)
+			wander_candidates[ship_id] = true
+	# Resolve wandering after every Harvester has had a chance to repair.
+	# This avoids dependence on whether the recipient precedes its healer
+	# in the fleet array. Explicit movement and other work remain legal.
 	for ship in state["ships"]:
+		var id: int = int(ship["id"])
+		if repaired_hulls.has(id) and _is_idle_ship(ship) and not _unit_order_running(ship) and ship["position"] == combat_positions.get(id):
+			repair_parked[id] = true
+		if repair_parked.has(id):
+			ship["navigation_target"] = ship["position"]
+		elif wander_candidates.has(id):
+			_navigate(ship, idle_targets[id], ship_speed(str(ship.get("kind", "ship"))) * dt)
 		ship.erase("_handoff_sent")
 		_mark_sector_arrival(state, ship)
 		if ship.has("auto_cooldown_until") and float(ship["auto_cooldown_until"]) <= float(state["elapsed"]):
@@ -6769,9 +6791,9 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if ship.has("wander_cooldown_override") and autocast_remaining(state, ship) <= EPS and not _unit_order_running(ship):
 			ship.erase("wander_cooldown_override")
 	avoidance_cells.clear()
-	_separate_ships(state, combat_graph, combat_positions, dt)
+	_separate_ships(state, combat_graph, combat_positions, dt, repair_parked)
 	if dt > 0.0:
-		_resolve_ship_contacts(state, combat_graph, combat_positions, dt)
+		_resolve_ship_contacts(state, combat_graph, combat_positions, dt, repair_parked)
 	if not profile.is_empty():
 		var now: int = Time.get_ticks_usec()
 		profile["Civilian logistics"] = int(profile.get("Civilian logistics", 0)) + civilian_usec
