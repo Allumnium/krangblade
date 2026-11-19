@@ -377,7 +377,7 @@ func _trade() -> void:
 	_body("Every station has separate resource stockpiles and import/export settings. Logistics ships move surplus between friendly systems. With Auto-Trade enabled, idle ships wait near miners or salvage sites containing at least a full hold; they deliver full or partial loads to owned stations and wait at a station when storage is full.")
 	_flow(["Source surplus", "Freighter in transit", "Destination deficit"])
 	_section("Trade thresholds")
-	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both are percentages of actual local storage; imports and exports may be toggled separately.")
+	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both use local storage capacity; the Import and Export checkboxes toggle each independently.")
 	var base: float = E.WAREHOUSE_CAPACITIES[0]
 	_table(["Defaults at base storage", "Amount"], [["Import below %.0f%%" % E.DEFAULT_IMPORT_PERCENT, "%.0f t" % (base * E.DEFAULT_IMPORT_PERCENT / 100.0)], ["Export above %.0f%%" % E.DEFAULT_EXPORT_PERCENT, "%.0f t" % (base * E.DEFAULT_EXPORT_PERCENT / 100.0)], ["Freighter hold", "%.0f t" % E.CARGO_CAPACITY]])
 	_section("Warehouse capacity per resource")
