@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.51.4: Shorten mining/salvage delays and eliminate repair cooldown; existing order/arrival timestamps are shared but durations vary by mode. Monitor automatic repair precedence after movement and early civilian job resumption.
+
 - v0.51.3: Starter logistics ship supports the new resource-hauling loop immediately; monitor opening mineral throughput and AI production pacing before changing costs or fleet ratios.
 
 - v0.51.2: Persist follow by hull ID rather than a sampled world point. Monitor spacing of large escort groups and tracking of moving targets through fields/lanes; same-speed ships may require time to catch up if they start well behind. Follow uses ordinary manual navigation and does not force a new movement speed.

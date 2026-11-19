@@ -2231,7 +2231,8 @@ func _refresh_autocast_cards() -> void:
 		border.visible = enabled_count > 0
 		border.queue_redraw()
 		var mask: Control = button.get_meta("cooldown_mask")
-		mask.set_meta("fraction", remaining / ECONOMY.AUTOCAST_COOLDOWN_YEARS)
+		var duration: float = ECONOMY.autocast_duration(mode)
+		mask.set_meta("fraction", remaining / duration if duration > 0.0 else 0.0)
 		mask.queue_redraw()
 		var title_text: String = "Wander" if mode == "wander" else "Auto-" + mode.capitalize()
 		var status: String = "Off" if enabled_count == 0 else ("On" if enabled_count == units.size() else "%d/%d on" % [enabled_count, units.size()])
@@ -2606,8 +2607,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	if follow_order.get("kind", "") == "follow" and not bool(ship.get("retreating", false)):
 		var target_ship: Dictionary = ECONOMY.service_targets(state).get(int(follow_order["target"]), {}).get("entity", {})
 		status = "Following %s #%d" % [_ship_kind_name(str(target_ship.get("kind", "ship"))), int(follow_order["target"])]
-	var wait_left: float = ECONOMY.arrival_wait_remaining(state, ship)
-	if wait_left > ECONOMY.EPS and not ECONOMY._engaged(ship) and not bool(ship.get("retreating", false)):
+	var wait_left: float = ECONOMY.autocast_remaining(state, ship, "wander")
+	if wait_left > ECONOMY.EPS and ECONOMY.autocast_enabled(ship, "wander") and ECONOMY._is_idle_ship(ship):
 		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)
 	ship_detail.text = status
 	ship_detail.tooltip_text = ""
