@@ -16,9 +16,11 @@ const SIM_STEP: float = 0.1
 const MATCH_SPEEDS: Array[int] = [0, 1, 2, 5]
 const SNAPSHOT_INTERVAL: float = 0.2 # Local authority UI refresh.
 const REPLICATION_INTERVAL: float = 0.5
-# 48 records x 24 bytes = 1152 bytes, leaving room for RPC/ENet headers.
-const MOTION_RECORD_BYTES: int = 24
-const MOTION_BATCH: int = 48
+# 57 records x 20 bytes = 1140 bytes, leaving room for RPC/ENet headers.
+# IDs and positions retain their previous precision; only visual headings use half floats.
+const MOTION_RECORD_BYTES: int = 20
+const MOTION_BATCH: int = 57
+const PLANET_STATIC_KEYS: Array[String] = ["size_factor", "advanced_bonus", "home", "farm_phase", "abundance", "bonuses", "planetless", "planet_count"]
 const PORT: int = 24567
 const DISCOVERY_PORT: int = 24568
 const DISCOVERY_QUERY: String = "WARBOUND_DISCOVER_1:"
@@ -63,6 +65,7 @@ var motion_ship_ids: Dictionary = {}
 # Authoritative initial map is sent with the first reliable state of each round.
 # Later ore updates refer to this immutable template, not a previous snapshot.
 var replication_map_template: Dictionary = {}
+var replication_planet_template: Array = []
 var last_sent_motion: Dictionary = {}
 const MOTION_REFRESH_TICKS: int = 10
 
@@ -211,6 +214,7 @@ func _reset_network() -> void:
 	owners.clear()
 	economy.clear()
 	replication_map_template.clear()
+	replication_planet_template.clear()
 	last_sent_motion.clear()
 	motion_samples.clear()
 	motion_ship_ids.clear()
@@ -675,8 +679,10 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 	motion_samples.clear()
 	motion_ship_ids.clear()
 	replication_map_template.clear()
+	replication_planet_template.clear()
 	last_sent_motion.clear()
 	diagnostic_compact_received = 0
+	diagnostic_planet_compact_received = 0
 	diagnostic_full_received = 0
 	diagnostic_motion_received = 0
 	diagnostic_last_motion_ms = -1
@@ -693,6 +699,7 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 	economy["match_result"] = {}
 	if not is_solo and multiplayer.is_server():
 		replication_map_template = (economy["map"] as Dictionary).duplicate(true)
+		replication_planet_template = _planet_template(economy["planets"])
 	_refresh_motion_roster()
 	owners = ECONOMY.planet_teams(economy)
 	_set_phase("match")
@@ -743,6 +750,7 @@ func _back_to_lobby(snapshot: Dictionary, reason: String) -> void:
 	owners.clear()
 	economy.clear()
 	replication_map_template.clear()
+	replication_planet_template.clear()
 	last_sent_motion.clear()
 	motion_samples.clear()
 	motion_ship_ids.clear()
@@ -1122,6 +1130,7 @@ var diagnostic_sent_bytes: int = 0
 var diagnostic_received_bytes: int = 0
 var diagnostic_full_received: int = 0
 var diagnostic_compact_received: int = 0
+var diagnostic_planet_compact_received: int = 0
 var diagnostic_motion_received: int = 0
 var diagnostic_last_full_ms: int = -1
 var diagnostic_last_motion_ms: int = -1
@@ -1199,7 +1208,7 @@ func _flush_economy() -> void:
 		var full_only: bool = snapshot_full_only.has(id)
 		var payload_key := Vector2i(int(needs_template), int(full_only))
 		if not payloads.has(payload_key):
-			var wire: Dictionary = economy if full_only else _encode_replica(economy, replication_map_template, needs_template)
+			var wire: Dictionary = economy if full_only else _encode_replica(economy, replication_map_template, needs_template, replication_planet_template)
 			payloads[payload_key] = var_to_bytes(wire).compress(FileAccess.COMPRESSION_GZIP)
 			diagnostic_encode_ms = float(Time.get_ticks_usec() - encode_start) / 1000.0
 		var payload: PackedByteArray = payloads[payload_key]
@@ -1246,6 +1255,17 @@ func _rpc_economy(update_round: int, revision: int, pose_revision: int, compress
 	elif not snapshot.has("map"):
 		_request_snapshot_recovery(revision)
 		return
+	var planet_template: Array = snapshot.get("_wire_planet_template", replication_planet_template)
+	if snapshot.get("_wire_planets_compact", false):
+		var planets: Array = _restore_planets(snapshot["planets"], planet_template)
+		if planets.size() != planet_template.size() or planets.is_empty():
+			_request_snapshot_recovery(revision)
+			return
+		snapshot["planets"] = planets
+		diagnostic_planet_compact_received += 1
+	replication_planet_template = planet_template
+	snapshot.erase("_wire_planet_template")
+	snapshot.erase("_wire_planets_compact")
 	replication_map_template = template
 	snapshot.erase("_wire_map_template")
 	snapshot.erase("_wire_ore")
@@ -1296,8 +1316,8 @@ func _send_motion() -> void:
 		packet.encode_s64(offset, int(ship["id"]))
 		packet.encode_float(offset + 8, position.x)
 		packet.encode_float(offset + 12, position.y)
-		packet.encode_float(offset + 16, heading.x)
-		packet.encode_float(offset + 20, heading.y)
+		packet.encode_half(offset + 16, heading.x)
+		packet.encode_half(offset + 18, heading.y)
 		if packet.size() >= MOTION_BATCH * MOTION_RECORD_BYTES:
 			_send_motion_batch(guests, packet)
 			packet = PackedByteArray()
@@ -1331,7 +1351,7 @@ func _rpc_motion(update_round: int, revision: int, packet: PackedByteArray) -> v
 		if not motion_ship_ids.has(id) or revision <= int(motion_samples.get(id, {}).get("revision", -1)):
 			continue
 		var position := Vector2(packet.decode_float(offset + 8), packet.decode_float(offset + 12))
-		var heading := Vector2(packet.decode_float(offset + 16), packet.decode_float(offset + 20))
+		var heading := Vector2(packet.decode_half(offset + 16), packet.decode_half(offset + 18))
 		if position.is_finite() and heading.is_finite():
 			motion_samples[id] = {"position": position, "heading": heading, "revision": revision}
 
@@ -1418,8 +1438,19 @@ func _restore_map_ore(template: Dictionary, updates: Variant) -> Dictionary:
 	result["fields"] = fields
 	return result
 
-func _encode_replica(state: Dictionary, template: Dictionary, needs_template: bool) -> Dictionary:
+func _encode_replica(state: Dictionary, template: Dictionary, needs_template: bool, planet_template: Array = []) -> Dictionary:
 	var wire: Dictionary = state.duplicate()
+	# Host-only AI scheduling and operation ID allocation. Keep the actual
+	# operation records, AI roster, orders and all gameplay state replicated.
+	wire.erase("next_ai")
+	wire.erase("ai_waves")
+	wire.erase("next_operation_id")
+	var compact_planets: Array = _compact_planets(state["planets"], planet_template)
+	if not compact_planets.is_empty():
+		wire["planets"] = compact_planets
+		wire["_wire_planets_compact"] = true
+	if needs_template and not planet_template.is_empty():
+		wire["_wire_planet_template"] = planet_template
 	var updates: Variant = _encode_map_ore(state["map"], template)
 	if updates != null:
 		wire.erase("map")
@@ -1428,6 +1459,48 @@ func _encode_replica(state: Dictionary, template: Dictionary, needs_template: bo
 	if needs_template:
 		wire["_wire_map_template"] = template
 	return wire
+
+# Stable generated planet attributes are transmitted once. If any of them
+# change unexpectedly, send the full live planet array instead of guessing.
+func _planet_template(planets: Array) -> Array:
+	var template: Array = []
+	for planet in planets:
+		var entry: Dictionary = {}
+		for key in PLANET_STATIC_KEYS:
+			if planet.has(key):
+				entry[key] = planet[key]
+		template.append(entry.duplicate(true))
+	return template
+
+func _compact_planets(planets: Array, template: Array) -> Array:
+	if template.is_empty() or planets.size() != template.size():
+		return []
+	var result: Array = []
+	for i in range(planets.size()):
+		var live: Dictionary = planets[i]
+		var base: Dictionary = template[i]
+		var current: Dictionary = live.duplicate()
+		for key in PLANET_STATIC_KEYS:
+			if live.has(key) != base.has(key) or live.get(key) != base.get(key):
+				return []
+			current.erase(key)
+		result.append(current)
+	return result
+
+func _restore_planets(planets: Array, template: Array) -> Array:
+	if template.is_empty() or planets.size() != template.size():
+		return []
+	var result: Array = []
+	for i in range(planets.size()):
+		if not planets[i] is Dictionary or not template[i] is Dictionary:
+			return []
+		var full: Dictionary = (planets[i] as Dictionary).duplicate()
+		for key in template[i]:
+			if not PLANET_STATIC_KEYS.has(key) or full.has(key):
+				return []
+		full.merge((template[i] as Dictionary).duplicate(true))
+		result.append(full)
+	return result
 
 func _request_snapshot_recovery(revision: int) -> void:
 	_rpc_snapshot_recovery.rpc_id(1, round_id, revision)
