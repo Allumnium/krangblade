@@ -3602,6 +3602,14 @@ static func patrol_node(state: Dictionary, graph: Dictionary, player: int, point
 			node = candidate
 	return node
 
+# An exact point may be outside every sector. In that case its nearest
+# discovered POI is a routing anchor only, not the actual destination.
+static func _position_target_valid(state: Dictionary, graph: Dictionary, player: int, node: int, point: Vector2) -> bool:
+	if not military_pois(state, player).has(node):
+		return false
+	var anchor: int = patrol_node(state, graph, player, point)
+	return anchor >= 0 and (anchor == node or sector_contains(graph, node, point))
+
 static func command_patrol(state: Dictionary, player: int, ids: Array, target: int, point: Vector2 = Vector2.INF) -> bool:
 	var selected: Array = _owned_fighters(state, player, ids)
 	var graph: Dictionary = military_graph(state)
@@ -3936,7 +3944,7 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var target: int = order["target"]
 	match kind:
 		"position":
-			if not order.get("point", null) is Vector2 or not (order["point"] as Vector2).is_finite() or not military_pois(state, owner).has(target) or not sector_contains(graph, target, order["point"]):
+			if not order.get("point", null) is Vector2 or not _position_target_valid(state, graph, owner, target, order["point"]):
 				return false
 			if order.has("heading") and (not order["heading"] is Vector2 or not (order["heading"] as Vector2).is_finite() or (order["heading"] as Vector2).is_zero_approx()):
 				return false
@@ -4193,7 +4201,7 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 static func command_remote_position(state: Dictionary, player: int, ids: Array, node: int, point: Vector2, move_only: bool) -> bool:
 	var units: Array = _owned_units(state, player, ids)
 	var graph: Dictionary = military_graph(state)
-	if units.is_empty() or not military_pois(state, player).has(node) or not sector_contains(graph, node, point):
+	if units.is_empty() or not _position_target_valid(state, graph, player, node, point):
 		return false
 	for ship in units:
 		var nav: Dictionary = _manual_nav(state, graph, ship, node)
@@ -4281,6 +4289,26 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 	if fighter and _engaged(ship):
 		return false
 	var node: int = int(ship["local_move_sector"])
+	var destination: Vector2 = ship["local_move_target"]
+	if not state.is_empty() and not sector_contains(graph, node, destination):
+		# Keep the ordinary lane route to the anchor, then fly the final
+		# off-sector leg directly. Physical sector membership stays geometric.
+		var nav: Dictionary = _manual_nav(state, graph, ship, node)
+		var goal: int = int(nav["node"])
+		if int(ship.get("dest", -1)) != goal:
+			_redirect_fighter(nav["graph"], ship, goal, _military_paths(nav["graph"], goal))
+		if not (ship["route"] as Array).is_empty():
+			_move({"map": nav["graph"]}, ship, dt)
+			return true
+		_navigate(ship, destination, ship_speed(str(ship.get("kind", "ship"))) * dt)
+		if (ship["position"] as Vector2).distance_to(destination) <= EPS:
+			if ship.has("arrival_heading"):
+				ship["heading"] = ship["arrival_heading"]
+			ship["at"] = goal
+			_clear_local_move(ship)
+			_finish_manual(ship)
+			ship["arrival_wait_until"] = float(state["elapsed"]) + MOVE_ARRIVAL_WAIT_YEARS
+		return true
 	if not fighter and not state.is_empty():
 		if _manual_travel(state, graph, ship, node, ship["local_move_target"], dt):
 			if ship.has("arrival_heading"):
