@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.57.1: Single-ship command routes only; double-click hull selection limited to local team. Cache static hull artwork by type/color/detail, cull offscreen hulls before geometry; preserve dynamic effects.
+
 - v0.56.11: Render planet transfers as miniature loaded rockets; neutral Send Colony uses command card, station hub only shows station queue. Preserve production and blockade rules.
 
 - v0.56.7: Planetary production emits resource-colored particles from matching orbital bodies to station storage. Hostile sector presence blocks planetary production, not orbital housing.
