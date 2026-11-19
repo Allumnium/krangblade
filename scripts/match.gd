@@ -98,6 +98,7 @@ var inspector_slot: Control
 var overview_panel: PanelContainer
 var console_panel: PanelContainer
 var minimap: Control
+var minimap_pan_drag: bool = false
 var time_panel: PanelContainer
 var lens_column: VBoxContainer
 var console_columns: HBoxContainer
@@ -107,6 +108,7 @@ var console_right_body: VBoxContainer
 var console_profile: Control
 var empty_selection: Label
 var command_grids: Dictionary = {}
+var command_hotkeys: Dictionary = {}
 var station_commands: VBoxContainer
 var station_primary_grid: GridContainer
 var station_port_buttons: Dictionary = {}
@@ -946,11 +948,15 @@ func _minimap_input(event: InputEvent) -> void:
 		return
 	var move_camera: bool = false
 	if event is InputEventMouseButton:
-		move_camera = event.button_index == MOUSE_BUTTON_LEFT and event.pressed
-		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not _state().is_empty():
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			minimap_pan_drag = event.pressed and pending_command.is_empty()
+			move_camera = minimap_pan_drag
+		if event.pressed and not _state().is_empty() and (event.button_index == MOUSE_BUTTON_RIGHT or (event.button_index == MOUSE_BUTTON_LEFT and not pending_command.is_empty())):
 			_minimap_order(event)
+			minimap.accept_event()
+			return
 	elif event is InputEventMouseMotion:
-		move_camera = (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0
+		move_camera = minimap_pan_drag and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0
 	if move_camera and not _state().is_empty():
 		var area: Rect2 = _minimap_area()
 		var fraction: Vector2 = ((event.position - area.position) / area.size).clamp(Vector2.ZERO, Vector2.ONE)
@@ -1134,7 +1140,8 @@ func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {
 		for resource in cost_button.recipe:
 			if float(available.get(resource, 0.0)) + ECONOMY.EPS < float(cost_button.recipe[resource]):
 				cost_button.missing.append(resource)
-	button.tooltip_text = description
+	var shortcut: String = str(button.get_meta("hotkey", ""))
+	button.tooltip_text = description if shortcut.is_empty() else (description + "\n[" + shortcut + "]" if not description.is_empty() else "[" + shortcut + "]")
 
 func _available_cost_resources(p: Dictionary, yard: int = -1) -> Dictionary:
 	var available: Dictionary = p["stock"].duplicate()
@@ -1304,6 +1311,37 @@ func _production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
 		production_icons[key] = ImageTexture.create_from_image(image)
 	return production_icons[key]
 
+func _register_command_hotkey(button: Button, key: int) -> void:
+	var shortcuts: Array = command_hotkeys.get(key, [])
+	shortcuts.append(button)
+	command_hotkeys[key] = shortcuts
+	var hint: String = "Esc" if key == KEY_ESCAPE else String.chr(key)
+	button.set_meta("hotkey", hint)
+	if not button.tooltip_text.is_empty():
+		button.tooltip_text += " [" + hint + "]"
+	var label := Label.new()
+	label.text = hint
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	label.add_theme_font_size_override("font_size", 9)
+	label.add_theme_color_override("font_color", Color("#e3f3ff"))
+	label.add_theme_color_override("font_outline_color", Color("#101b29"))
+	label.add_theme_constant_override("outline_size", 3)
+	button.add_child(label)
+	label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	label.offset_left = -24.0
+	label.offset_right = -2.0
+	label.offset_top = 0.0
+	label.offset_bottom = 12.0
+
+func _trigger_command_hotkey(key: int) -> bool:
+	for candidate in command_hotkeys.get(key, []):
+		var button: Button = candidate
+		if is_instance_valid(button) and button.is_visible_in_tree() and not button.disabled:
+			button.pressed.emit()
+			return true
+	return false
+
 func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> TextureRect:
 	button.custom_minimum_size = Vector2(60, 60)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1362,14 +1400,17 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 		grid.add_child(button)
 		yard_commands[kind] = button
+		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S}[kind])
 	# Upgrade remains on row two; navigation and rally use the shared bottom row.
 	yard_upgrade = _button("", _upgrade_selected_yards, grid, true)
 	_yard_ability_face(yard_upgrade, "Upgrade", _station_command_icon("upgrade"))
+	_register_command_hotkey(yard_upgrade, KEY_U)
 	while grid.get_child_count() < 12:
 		_station_spacer(grid)
 	var station_button := _button("", _select_yard_station, grid)
 	_yard_ability_face(station_button, "Select Space\nStation", _station_command_icon("select_station"))
 	station_button.tooltip_text = "Select parent Space Station"
+	_register_command_hotkey(station_button, KEY_Z)
 	_station_spacer(grid)
 	var clear := _button("", func() -> void:
 		pending_command = ""
@@ -1379,6 +1420,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	_yard_ability_face(clear, "Clear\nRally", _station_command_icon("clear_rally"))
 	clear.tooltip_text = "Clear rally point"
 	yard_commands["clear"] = clear
+	_register_command_hotkey(clear, KEY_X)
 	var rally_button := Button.new()
 	_yard_ability_face(rally_button, "Rally", _station_command_icon("rally"))
 	rally_button.toggle_mode = true
@@ -1386,6 +1428,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
+	_register_command_hotkey(rally_button, KEY_Y)
 	_fill_ability_grid(grid)
 	yard_command_scroll.hide()
 
@@ -1466,15 +1509,18 @@ func _build_station_command_card(parent: Container) -> void:
 	station_primary_grid = _ability_grid(station_commands)
 	for port in range(1, ECONOMY.MAX_SHIPYARDS + 1):
 		station_port_buttons[port] = _station_button(station_primary_grid, "Build\nShipyard %d" % port, "yard", _station_port_pressed.bind(port))
+		_register_command_hotkey(station_port_buttons[port], [KEY_Z, KEY_X, KEY_C][port - 1])
 	_station_spacer(station_primary_grid)
 	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Reinforced\nPlating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
+	_register_command_hotkey(station_upgrade_buttons["reinforced_plating"], KEY_V)
+	_register_command_hotkey(station_upgrade_buttons["laser_matrix"], KEY_L)
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
 	for i in range(4):
 		_station_spacer(station_primary_grid)
-	_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build"))
-	_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade"))
+	_register_command_hotkey(_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")), KEY_B)
+	_register_command_hotkey(_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")), KEY_T)
 	_station_spacer(station_primary_grid)
 	_station_spacer(station_primary_grid)
 	station_build_grid = _ability_grid(station_commands)
@@ -1484,6 +1530,7 @@ func _build_station_command_card(parent: Container) -> void:
 	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds"]:
 		var button: Button = _station_button(station_build_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
 		station_build_buttons[key] = button
+		_register_command_hotkey(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_T}[key])
 		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing"]:
 			button.gui_input.connect(_station_repeat_input.bind(key, button))
 			var border := Control.new()
@@ -1499,7 +1546,7 @@ func _build_station_command_card(parent: Container) -> void:
 	# Return stays at the bottom right.
 	for i in range(3):
 		_station_spacer(station_build_grid)
-	_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary"))
+	_register_command_hotkey(_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")), KEY_ESCAPE)
 	station_trade = VBoxContainer.new()
 	station_trade.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	station_commands.add_child(station_trade)
@@ -1966,6 +2013,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	slot.add_child(button)
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_buttons[id] = button
+	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R}[id])
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -2975,6 +3023,7 @@ func _inspector_page(title_text: String) -> GridContainer:
 	station_trade.add_child(footer)
 	station_trade_back = _button("", _station_card_to.bind("primary"), footer)
 	_yard_ability_face(station_trade_back, "Return", _station_command_icon("return"))
+	_register_command_hotkey(station_trade_back, KEY_ESCAPE)
 	station_trade_back.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return page
 
@@ -3809,11 +3858,28 @@ func _current_control_group(state: Dictionary) -> Dictionary:
 	var ref := Vector2i(selected, selected_yard if selected_yard >= 0 else selected_body if selected_body >= 0 else 0)
 	return _prune_control_group(state, {"kind": kind, "refs": {ref: selected_yard_count if kind == "shipyard" else 0}})
 
-func _assign_control_group(number: int) -> void:
+func _assign_control_group(number: int, additive: bool = false) -> void:
 	last_control_group_recall = -1
 	var state: Dictionary = _state()
 	var group: Dictionary = _current_control_group(state)
 	if not group.is_empty():
+		if additive:
+			var previous: Dictionary = _prune_control_group(state, control_groups.get(number, {}))
+			if not previous.is_empty() and previous["kind"] != group["kind"]:
+				return
+			if not previous.is_empty():
+				if group["kind"] == "units":
+					var ids: Array = previous["ids"].duplicate()
+					for id in group["ids"]:
+						if not ids.has(id):
+							ids.append(id)
+					group["ids"] = ids
+				elif group["kind"] in ["shipyard", "station", "pds"]:
+					var refs: Dictionary = previous["refs"].duplicate()
+					refs.merge(group["refs"], true)
+					group["refs"] = refs
+				else:
+					return
 		control_groups[number] = group
 	_refresh_control_groups(state)
 
@@ -3840,7 +3906,7 @@ func _refresh_control_groups(state: Dictionary) -> void:
 		button.text = "%d·%d" % [number, count] if button.size.x >= 34.0 else str(number)
 		button.icon = _selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
 		button.disabled = false
-		button.tooltip_text = "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace" % [number, count, "ships" if kind == "units" else "structures", number, number]
+		button.tooltip_text = "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace · Shift+%d to add" % [number, count, "ships" if kind == "units" else "structures", number, number, number]
 
 func _recall_control_group(number: int, additive: bool = false) -> void:
 	var state: Dictionary = _state()
@@ -4458,10 +4524,10 @@ func _map_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
 		if mouse.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
-			# Right click places orders; left cancels armed movement and
-			# returns to normal selection (including deselect on empty space).
+			# Either button can confirm an armed order; ordinary right drag
+			# still forms a move line and ordinary left drag selects.
 			if formation_button != 0:
-				if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed:
+				if mouse.button_index != formation_button and mouse.pressed:
 					formation_button = 0
 					pending_command = ""
 					_refresh_command_mode()
@@ -4471,7 +4537,7 @@ func _map_input(event: InputEvent) -> void:
 					map_canvas.queue_redraw()
 					map_canvas.accept_event()
 					return
-			if mouse.pressed and mouse.button_index == MOUSE_BUTTON_RIGHT and (pending_command in ["move", "attack", "patrol"] or (pending_command.is_empty() and selected_yard < 0)):
+			if mouse.pressed and (pending_command in ["move", "attack", "patrol"] or (mouse.button_index == MOUSE_BUTTON_RIGHT and pending_command.is_empty() and selected_yard < 0)):
 				_begin_formation(mouse)
 				map_canvas.queue_redraw()
 				map_canvas.accept_event()
@@ -4483,7 +4549,7 @@ func _map_input(event: InputEvent) -> void:
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
-					if pending_command in ["repair", "unload", "load"]:
+					if pending_command in ["repair", "unload", "load", "rally"]:
 						_execute_pending_command(mouse.position, mouse.shift_pressed)
 					elif not pending_command.is_empty() and pending_command not in ["move", "attack", "patrol"]:
 						pending_command = ""
@@ -4491,11 +4557,9 @@ func _map_input(event: InputEvent) -> void:
 					elif selected_yard >= 0:
 						_set_rally_at(mouse.position)
 			MOUSE_BUTTON_LEFT:
-				if pending_command in ["move", "attack", "patrol", "repair", "unload"]:
-					pending_command = ""
-					_refresh_command_mode()
-				elif not pending_command.is_empty():
+				if not pending_command.is_empty():
 					if mouse.pressed:
+						selecting_units = false
 						_execute_pending_command(mouse.position, mouse.shift_pressed)
 					map_canvas.accept_event()
 					return
@@ -4620,38 +4684,42 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			codex.hide()
 			get_viewport().set_input_as_handled()
 		return
+	if is_instance_valid(match_result_dialog) and match_result_dialog.visible:
+		return
 	if key == KEY_ESCAPE:
-		formation_button = 0
-		pending_command = ""
-		_refresh_command_mode()
 		if match_menu.visible:
 			match_menu.hide()
-		else:
+		elif not pending_command.is_empty() or formation_button != 0 or selecting_units:
+			formation_button = 0
+			selecting_units = false
+			pending_command = ""
+			_refresh_command_mode()
+		elif not _trigger_command_hotkey(KEY_ESCAPE):
 			_open_menu()
 		get_viewport().set_input_as_handled()
 		return
-	if match_menu.visible or (is_instance_valid(codex) and codex.visible):
+	if match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible):
 		return
 	var focus: Control = get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit or colony_picker.get_popup().visible:
 		return
-	if key in [KEY_Q, KEY_E]:
-		_cycle_owned_system(-1 if key == KEY_Q else 1)
+	if event.alt_pressed or event.meta_pressed:
+		return
+	if key >= KEY_0 and key <= KEY_9:
+		var number: int = key - KEY_0
+		if event.ctrl_pressed:
+			_assign_control_group(number)
+		elif event.shift_pressed:
+			_assign_control_group(number, true)
+		else:
+			_recall_control_group(number)
+	elif event.ctrl_pressed:
+		return
 	elif key == KEY_F:
 		_focus_selection()
 	elif key == KEY_F2:
 		_select_all_military()
-	elif key == KEY_H:
-		_hold_selected()
-	elif key == KEY_U:
-		_unload_selected()
-	elif key >= KEY_0 and key <= KEY_9:
-		var number: int = key - KEY_0
-		if event.ctrl_pressed:
-			_assign_control_group(number)
-		else:
-			_recall_control_group(number, event.shift_pressed)
-	else:
+	elif not _trigger_command_hotkey(key):
 		return
 	get_viewport().set_input_as_handled()
 
@@ -4683,31 +4751,6 @@ func _select_all_military() -> void:
 		_follow_selection(state, _ship_poses(state), true)
 		_position_territory()
 		map_canvas.queue_redraw()
-
-func _cycle_owned_system(direction: int) -> void:
-	pending_command = ""
-	_refresh_command_mode()
-	var state: Dictionary = _state()
-	if state.is_empty():
-		return
-	var owned: Array[int] = []
-	for i in range(state["planets"].size()):
-		if int(state["planets"][i]["owner"]) == _me():
-			owned.append(i)
-	if owned.is_empty():
-		return
-	_clear_building_selection()
-	var current: int = owned.find(selected)
-	selected = owned[(0 if direction > 0 else owned.size() - 1) if current < 0 else posmod(current + direction, owned.size())]
-	selected_body = -1
-	selected_yard = -1
-	selected_ship_id = -1
-	selected_units.clear()
-	selected_field = -1
-	follow_units = false
-	_center_world(ECONOMY.station_position(state, selected, float(state["elapsed"])))
-	_load_thresholds()
-	_refresh()
 
 func _keyboard_pan(delta: float) -> void:
 	if str(session.get("phase")) != "match" or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible):

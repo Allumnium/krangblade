@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.48.0: Standard SC2-style contextual hotkeys. M/S/H/P/A for move/stop/hold/patrol/attack, L/D/R for load/drop/repair, Y rally, X clear. Armed orders accept left click/drag as well as existing right click/drag; minimap accepts armed left click. Escape cancels targeting/selection drag, returns from station submenu, then opens menu. Ctrl+number replaces and Shift+number adds to compatible control group; plain recall/double center, F and F2 preserved. Remove Q/E station cycling; do not assign other commands to Q/E for now. Use visible, enabled card buttons as hotkey source with key badges; preserve authority, layout, tooltips and autocast. Warbound-specific production/structure bindings are mnemonic and contextual.
+
 - v0.47.1: Command icons use bold, compact vector silhouettes with semantic color accents and dark cutouts; production structures depict their function rather than raw material symbols. Keep ship portraits based on authored hull shapes and owner colors, queue artwork consistent, and HUD resource/selection art unchanged. Preserve all command slots, captions, tooltips, availability and repeat indicators.
 
 - v0.47.0: All rally-capable command cards reserve the two bottom-right slots of the shared 4×4 grid for Clear Rally and Rally (far right). Shipyard Select Space Station is bottom left and selects the primary yard's parent station for grouped selections. Arrow keys and screen-edge scrolling replace WASD; retain middle drag. Confine the visible pointer during focused gameplay, release on focus loss, modal dialogs and match exit.
