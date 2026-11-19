@@ -114,7 +114,7 @@ const MINING_STAY: float = 5.0
 const SHIP_HP: float = 100.0
 const FREIGHTER_HP: float = SHIP_HP * 2.0
 const PASSIVE_REGEN: float = 1.0 / 3.0
-const STATION_HP: float = SHIP_HP * 10.0
+const STATION_HP: float = 1500.0
 const REINFORCED_STATION_HP: float = 3000.0
 const STATION_LASER_COUNT: int = 2
 const STATION_UPGRADES = ["reinforced_plating", "laser_matrix"]
@@ -237,7 +237,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 		var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
 		planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION + ORBITAL_HOUSING_POPULATION if home else 0.0, "eco_population": ORBITAL_HOUSING_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
 			"abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
-			"station": {"hp": STATION_HP} if home else {}, "yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {0: _new_pds()} if home else {}})
+			"station": {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()]} if home else {}, "yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {0: _new_pds()} if home else {}})
 	var ai_players: Array[int] = []
 	for id in ordered:
 		if bool(players[id].get("ai", false)):
@@ -489,7 +489,7 @@ static func can_transform_colony(state: Dictionary, graph: Dictionary, ship: Dic
 static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> bool:
 	var colony: Dictionary = state["planets"][at]
 	colony["owner"] = int(ship["owner"])
-	colony["station"] = {"hp": STATION_HP, "converted_at": float(state["elapsed"])}
+	colony["station"] = {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()], "converted_at": float(state["elapsed"])}
 	colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION if has_planets(colony) else ORBITAL_HOUSING_POPULATION
 	colony["eco_population"] = ORBITAL_HOUSING_POPULATION
 	colony["population_velocity"] = 0.0
@@ -1449,7 +1449,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			p["station"]["hp"] = minf(REINFORCED_STATION_HP, float(p["station"]["hp"]) + REINFORCED_STATION_HP - STATION_HP)
 		"laser_matrix":
 			p["station"]["laser_matrix"] = true
-			p["station"]["weapons"] = [_new_pds(), _new_pds()]
+			p["station"]["weapons"] = p["station"].get("weapons", []) + [_new_pds(), _new_pds()]
 		"yard_upgrade":
 			p["yards"][int(item["target"])]["level"] = int(item["level"])
 			p["yards"][int(item["target"])]["hp"] = SHIP_HP * 10.0 * int(item["level"])

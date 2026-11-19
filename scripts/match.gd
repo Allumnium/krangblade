@@ -1720,7 +1720,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		var installed: bool = bool(p["station"].get(kind, false))
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not ECONOMY.station_upgrade_available(p, kind)
-		var hint: String = "Reinforced Plating · %.0f s (1×)\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix · %.0f s (1×)\n2 defensive lasers · 18 damage each · 1 shot/s (1×) · range 180"
+		var hint: String = "Reinforced Plating · %.0f s (1×)\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix · %.0f s (1×)\n+2 defensive lasers (4 total) · 18 damage each · 1 shot/s (1×) · range 180"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
 			button.tooltip_text += "\n" + ("Installed" if installed else "Building")
@@ -2599,10 +2599,10 @@ func _refresh_weapon_details(ship: Dictionary, system: Dictionary, body_selected
 				parent = body_status.get_parent()
 				at = body_status.get_index() + 1
 				details = "Planetary defense laser\n%.0f damage · 1 shot/s (1×) · Range %.0f" % [ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
-			elif not body_selected and building_selection_kind == "station" and bool(system.get("station", {}).get("laser_matrix", false)):
+			elif not body_selected and building_selection_kind == "station" and ECONOMY.has_station(system):
 				parent = planet_overview
 				at = 1
-				details = "Laser Matrix ×%d\n%.0f damage each · 1 shot/s (1×) · Range %.0f" % [ECONOMY.STATION_LASER_COUNT, ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
+				details = "Station lasers ×%d\n%.0f damage each · 1 shot/s (1×) · Range %.0f" % [system["station"].get("weapons", []).size(), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 	if weapon_details.get_parent() != parent:
 		weapon_details.reparent(parent, false)
 		parent.move_child(weapon_details, at)
@@ -6616,7 +6616,7 @@ func _draw_map() -> void:
 				continue
 			var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, float(state["elapsed"])))
 			var endpoint: Vector2 = poses[target]["point"]
-			var offset: Vector2 = center.direction_to(endpoint).orthogonal() * (float(emitter) * 2.0 - 1.0) * 4.0 * _ship_scale(true)
+			var offset: Vector2 = center.direction_to(endpoint).orthogonal() * (float(emitter) * 2.0 - float(weapons.size() - 1)) * 4.0 * _ship_scale(true)
 			_draw_owned_laser(center + offset, endpoint, int(system["owner"]), 1.5)
 		var defenses: Dictionary = state["planets"][index].get("pds", {})
 		if defenses.is_empty():
