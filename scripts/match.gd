@@ -419,6 +419,8 @@ func _ready() -> void:
 	session.call("match_scene_loaded")
 
 func _exit_tree() -> void:
+	if Input.mouse_mode == Input.MOUSE_MODE_CONFINED:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	if is_instance_valid(background_music):
 		background_music.stop()
 
@@ -1360,15 +1362,21 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 		grid.add_child(button)
 		yard_commands[kind] = button
-	# Bottom row: Upgrade, Return to the system, Clear Rally, Rally.
+	# Upgrade remains on row two; navigation and rally use the shared bottom row.
 	yard_upgrade = _button("", _upgrade_selected_yards, grid, true)
 	_yard_ability_face(yard_upgrade, "Upgrade", _command_icon('<path d="M5 21L16 10L27 21M5 13L16 2L27 13"/>'))
+	while grid.get_child_count() < 12:
+		_station_spacer(grid)
+	var station_button := _button("", _select_yard_station, grid)
+	_yard_ability_face(station_button, "Select Space\nStation", _selection_portrait_icon("station"))
+	station_button.tooltip_text = "Select parent Space Station"
+	_station_spacer(grid)
 	var clear := _button("", func() -> void:
 		pending_command = ""
 		_refresh_command_mode()
 		for ref in _selected_yards(_state(), true):
 			session.call("request_shipyard_rally", ref.x, ref.y, -1, Vector2.ZERO), grid)
-	_yard_ability_face(clear, "Clear", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12M18 19L28 29M28 19L18 29"/>'))
+	_yard_ability_face(clear, "Clear\nRally", _command_icon('<path d="M8 27V5L25 8L8 15M4 27H12M18 19L28 29M28 19L18 29"/>'))
 	clear.tooltip_text = "Clear rally point"
 	yard_commands["clear"] = clear
 	var rally_button := Button.new()
@@ -1379,26 +1387,11 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
 	_fill_ability_grid(grid)
-	var footer_spacer := Control.new()
-	footer_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	footer_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	yard_command_scroll.add_child(footer_spacer)
-	var footer := HBoxContainer.new()
-	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.alignment = BoxContainer.ALIGNMENT_END
-	yard_command_scroll.add_child(footer)
-	var return_button := _button("", _return_from_yard, footer)
-	_yard_ability_face(return_button, "Return", _station_command_icon("return"))
-	return_button.custom_minimum_size = Vector2(60, 60)
-	return_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	return_button.tooltip_text = "Return to the system overview"
 	yard_command_scroll.hide()
 
-func _return_from_yard() -> void:
-	selected_yard = -1
-	selected_yard_count = 0
-	pending_command = ""
-	_refresh()
+func _select_yard_station() -> void:
+	# For grouped yards, select the primary yard's parent station.
+	_select_building_ref(Vector2i(selected, 0), "station")
 
 func _station_command_icon(kind: String, pixels: int = 32) -> Texture2D:
 	if HUD.ICONS.has(kind):
@@ -4700,7 +4693,7 @@ func _cycle_owned_system(direction: int) -> void:
 	_refresh()
 
 func _keyboard_pan(delta: float) -> void:
-	if str(session.get("phase")) != "match" or match_menu.visible or (is_instance_valid(codex) and codex.visible):
+	if str(session.get("phase")) != "match" or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible):
 		return
 	if not get_window().has_focus():
 		return
@@ -4711,9 +4704,26 @@ func _keyboard_pan(delta: float) -> void:
 		if picker.get_popup().visible:
 			return
 	var direction := Vector2(
-		float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A)),
-		float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W)))
+		float(Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_LEFT)),
+		float(Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_UP)))
+	# Do not edge-scroll while dragging a selection, order or UI control.
+	if Input.mouse_mode == Input.MOUSE_MODE_CONFINED and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
+		var bounds: Rect2 = get_viewport_rect()
+		var cursor: Vector2 = get_viewport().get_mouse_position() - bounds.position
+		if Rect2(Vector2.ZERO, bounds.size).has_point(cursor):
+			const EDGE_MARGIN: float = 12.0
+			var edge := Vector2(
+				float(cursor.x >= bounds.size.x - EDGE_MARGIN) - float(cursor.x < EDGE_MARGIN),
+				float(cursor.y >= bounds.size.y - EDGE_MARGIN) - float(cursor.y < EDGE_MARGIN))
+			direction = (direction + edge).clamp(Vector2(-1, -1), Vector2.ONE)
 	_pan_camera(direction, delta)
+
+func _sync_match_mouse_mode() -> void:
+	var active: bool = str(session.get("phase")) == "match" and get_window().has_focus()
+	var modal: bool = match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible)
+	var target: Input.MouseMode = Input.MOUSE_MODE_CONFINED if active and not modal else Input.MOUSE_MODE_VISIBLE
+	if Input.mouse_mode != target:
+		Input.mouse_mode = target
 
 func _pan_camera(direction: Vector2, delta: float) -> void:
 	if not direction.is_zero_approx():
@@ -4728,6 +4738,7 @@ func _process(delta: float) -> void:
 	if selecting_units and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		selecting_units = false
 		map_canvas.queue_redraw()
+	_sync_match_mouse_mode()
 	_keyboard_pan(delta)
 	territory_cycle_elapsed += delta
 	if territory_cycle_elapsed >= 0.85:

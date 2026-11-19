@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.47.0: All rally-capable command cards reserve the two bottom-right slots of the shared 4×4 grid for Clear Rally and Rally (far right). Shipyard Select Space Station is bottom left and selects the primary yard's parent station for grouped selections. Arrow keys and screen-edge scrolling replace WASD; retain middle drag. Confine the visible pointer during focused gameplay, release on focus loss, modal dialogs and match exit.
+
 - v0.46.2: Codex is a centered bounded window (78% of match viewport per axis, maximum 1180×760), with fixed header and independently scrolling article. Only navigation, search, close and scrollbar use interactive treatments; tables, diagrams, charts and notes are flat passive content. Keep scroll reachable at short window heights and avoid content-driven window growth.
 
 - v0.46.0: Add a local non-pausing Warbound Codex via the question-mark icon beside Menu. Searchable topic navigation, scrollable articles, resource icons, tables, flow diagrams and simulation-derived population/food reserve charts. Keep map/keyboard commands blocked while open; Escape/Close returns to match. No new simulation/network messages. Update articles with gameplay changes.
