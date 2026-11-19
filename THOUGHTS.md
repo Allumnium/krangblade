@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.48.0: Standard SC2 action keys map to existing Warbound button callbacks, with mnemonic bindings for unmatched production/structure actions. Check badge/icon overlap at minimum slot size, Escape priority and input isolation. F1 idle-worker selection, camera location shortcuts and further control-group variants are not implemented in this pass.
+
 - v0.47.1: Compact command icons previously mixed thin line strokes, raw resource glyphs and ship portraits. Use solid silhouettes, deliberate negative space and secondary semantic accents; distinguish construction facility art from stock icons. Verify readability at minimum slot heights and against disabled/selected states before further stylization.
 
 - v0.47.0: Edge scrolling uses a 12-pixel margin and pauses while mouse buttons are held to avoid inadvertent camera motion during selections, formations and UI drags. Check windowed focus transitions and bottom-console edge behavior in live play.
