@@ -2043,6 +2043,7 @@ func _initialize() -> void:
 		if not wounded["retreating"]:
 			break
 	assert(not wounded["retreating"] and float(wounded["hp"]) == ECON.SHIP_HP)
+	assert((wounded["position"] as Vector2).distance_to(ECON.station_position(recovery, 1, float(recovery["elapsed"]))) > ECON.EPS)
 	ECON.step(recovery, 0.1)
 	assert(int(wounded["dest"]) == 3 and not (wounded["route"] as Array).is_empty())
 	var hostile_repair: Dictionary = {"id": 1211, "owner": 3, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "dest": 1, "hp": 100.0}

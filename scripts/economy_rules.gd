@@ -141,6 +141,7 @@ const FORMATION_RADIUS: float = 105.0
 const FORMATION_TRAVEL_FRACTION: float = 0.8
 const WITHDRAW_HP: float = 46.0
 const REPAIR_PER_YEAR: float = 10.0
+const STATION_REPAIR_RANGE: float = LASER_RANGE
 const REPAIR_SAFE_RADIUS: float = LASER_RANGE * 2.0
 # Decorative bodies are derived from immutable system data, not simulated entities.
 # Separate RNG keeps the economy's seeded resource generation unchanged.
@@ -5938,13 +5939,18 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> void:
 	var site: int = int(ship["repair_site"])
 	if not (ship["route"] as Array).is_empty():
-		_move({"map": graph}, ship, dt, station_position(state, site, float(state["elapsed"])), site)
+		_move({"map": graph}, ship, dt, station_position(state, site, float(state["elapsed"])), site, STATION_REPAIR_RANGE)
 		return
 	if int(ship["at"]) != site:
 		return
 	var dock: Vector2 = station_position(state, site, float(state["elapsed"]))
-	var distance: float = _navigate(ship, dock, ship_speed(str(ship.get("kind", "ship"))) * dt)
-	if (ship["position"] as Vector2) != dock or not _repair_site_safe(state, graph, int(ship["owner"]), site):
+	var distance: float = 0.0
+	if (ship["position"] as Vector2).distance_to(dock) > STATION_REPAIR_RANGE:
+		var berth: Vector2 = _waiting_berth(state, ship, dock, STATION_REPAIR_RANGE, dock.direction_to(ship["position"]))
+		distance = _navigate(ship, berth, ship_speed(str(ship.get("kind", "ship"))) * dt)
+	else:
+		ship["navigation_target"] = ship["position"]
+	if (ship["position"] as Vector2).distance_to(dock) > STATION_REPAIR_RANGE + EPS or not _repair_site_safe(state, graph, int(ship["owner"]), site):
 		return
 	var repair_time: float = maxf(0.0, dt - distance / ship_speed(str(ship.get("kind", "ship"))))
 	ship["hp"] = minf(SHIP_HP, float(ship.get("hp", SHIP_HP)) + REPAIR_PER_YEAR * repair_time)

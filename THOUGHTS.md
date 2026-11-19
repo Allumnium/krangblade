@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.55.8: Twin repair beams represent existing per-hull repair throughput; monitor visual clutter and crowded station standoff. No shared repair capacity added.
+
 - v0.55.7: Class-grouped yard card keeps unavailable hulls and upgrades visible to explain progression; verify captions at reduced UI scales.
 
 - v0.55.6: Station hub shows one icon/bar per active production lane. At mid zoom, multiple concurrent jobs may be small; verify legibility. Stop cancels lane travel without teleporting; check subsequent autonomous routing from between sectors.
