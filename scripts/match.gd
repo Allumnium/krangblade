@@ -6153,7 +6153,8 @@ func _draw_station_jobs(system: Dictionary, center: Vector2, radius: float, tint
 			continue
 		for item in system["queue"]:
 			if int(item["id"]) == active_id:
-				jobs.append(item)
+				if item["kind"] != "yard_upgrade":
+					jobs.append(item)
 				break
 	if jobs.is_empty():
 		return
@@ -6311,7 +6312,18 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 		var health: float = float(yard.get("hp", ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))) / (ECONOMY.SHIP_HP * 10.0 * int(yard["level"]))
 		_draw_damage_bar(point, maxf(8.0, 22.0 * scale), health)
 		for job in planet["queue"]:
-			if int(job["id"]) != int(yard["job"]) or not ECONOMY.SHIP_KINDS.has(job["kind"]):
+			if int(job["id"]) != int(yard["job"]):
+				continue
+			if job["kind"] == "yard_upgrade":
+				var icon: Texture2D = _station_command_icon("upgrade")
+				var icon_size: float = 14.0 * scale
+				map_canvas.draw_texture_rect(icon, Rect2(point - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false)
+				var fraction: float = clampf(float(job["progress"]) / maxf(ECONOMY.EPS, float(job["work"])), 0.0, 1.0)
+				var bar := Rect2(point + Vector2(-7.0, 8.0) * scale, Vector2(14.0 * scale, maxf(1.0, 1.5 * scale)))
+				map_canvas.draw_rect(bar, Color("#101a26"))
+				map_canvas.draw_rect(Rect2(bar.position, Vector2(bar.size.x * fraction, bar.size.y)), tint.lightened(0.35))
+				break
+			if not ECONOMY.SHIP_KINDS.has(job["kind"]):
 				continue
 			var u: float = clampf(float(job["progress"]) / float(job["work"]), 0.0, 1.0)
 			var shape: Array = HULL_OUTLINES.get(str(job["kind"]), FREIGHTER_OUTLINE)

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.56.4: Check yard upgrade icon legibility at tactical zoom, especially with concurrent yard and station jobs.
+
 - v0.56.3: Previous new hull art did not match typed dictionary declaration. Explicit vector shapes and panel layers now present; inspect visual scale and large-hull overlap.
 
 - v0.56.2: Compact star hit radius is bounded in screen pixels; check accessibility at extreme zoom and overlapping field outlines.

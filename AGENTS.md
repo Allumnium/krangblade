@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.56.4: Show active yard upgrades as static icons with progress bars in their own berths, not in the station hub. Ship construction animation unchanged.
+
 - v0.56.3: Authored Scout, Cruiser and Destroyer hull silhouettes and layered empire-tinted panels; scale production portraits and large-hull click radius, align beam origins. No stat changes.
 
 - v0.56.2: Select systems via compact star-centered hit radius; ships, buildings, planets and fields take precedence. Preserve order targeting. Selected yard rallies end in flag markers.
