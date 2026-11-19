@@ -61,6 +61,7 @@ const TRACTOR_RATE: float = 12.0
 const FREIGHTER_TRACTOR_RATE: float = TRACTOR_RATE * 0.25
 const RESOURCE_HANDOFF_RANGE: float = TRACTOR_RANGE * 2.0
 const RESOURCE_STAGE_SEARCH_YEARS: float = 2.0
+const RESOURCE_PARTIAL_WAIT_YEARS: float = 8.0
 const SALVAGE_CHANCE: float = 0.75
 const SALVAGE_FRACTION: float = 0.20
 const SALVAGE_MIN_LIFETIME: float = 90.0
@@ -2108,7 +2109,7 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 	if _cargo_total(ship) > EPS:
 		if not ship.has("resource_loaded_at"):
 			ship["resource_loaded_at"] = now
-		if cargo_free(ship) <= EPS:
+		if cargo_free(ship) <= EPS or now - float(ship["resource_loaded_at"]) >= RESOURCE_PARTIAL_WAIT_YEARS:
 			_resource_haul(ship)
 			return true
 	if now >= float(ship.get("next_resource_stage_search", 0.0)):
@@ -2197,7 +2198,7 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 			miner["cargo"][resource] -= amount
 			freighter["cargo"][resource] = float(freighter["cargo"].get(resource, 0.0)) + amount
 			total += amount
-			if freighter.has("resource_stage") and not freighter.has("resource_loaded_at"):
+			if freighter.has("resource_stage"):
 				freighter["resource_loaded_at"] = float(state["elapsed"])
 		if freighter.has("resource_stage") and cargo_free(freighter) <= EPS:
 			_resource_haul(freighter)
@@ -4651,7 +4652,10 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 	if pos.distance_to(point) > TRACTOR_RANGE:
 		_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, pos.distance_to(point) - TRACTOR_RANGE * 0.85))
 		return true
+	var before_pickup: float = _cargo_total(ship)
 	_collect_salvage(ship, pile, dt)
+	if ship.has("resource_stage") and _cargo_total(ship) > before_pickup + EPS:
+		ship["resource_loaded_at"] = float(state["elapsed"])
 	if civilian and idle:
 		if float(pile["amount"]) > EPS and cargo_free(ship) > EPS:
 			return true

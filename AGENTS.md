@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.55.10: Restore partial dispatch after eight simulation years without receiving cargo; each miner handoff or salvage pickup refreshes the timer. Full/depleted-site dispatch unchanged.
+
 - v0.55.9: Staged freighters wait for a full hold while resources remain available; no timed partial dispatch. Preserve depleted-site fallback, explicit orders and safety.
 
 - v0.55.8: Withdrawal repairs stop within station beam range (180 world units); twin green beams per repairing hull, existing safety and combined repair rate unchanged. Cargo docking unchanged.
