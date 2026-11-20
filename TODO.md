@@ -16,9 +16,10 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 - [ ] v0.66.1: Verify direct local asteroid access rather than detouring through an alternate anchor, including multi-access field regression and physical delivery.
 
-### Objectives and specialization (v0.74.0)
+### Objectives and specialization (v0.75.0)
+- [ ] Validate one active Economic/Military goal each, Tech unlock, colony construction before colonization, lifetime colony food after loss/conversion, military construction/kill credit, random eligible refresh with independent 60 s cooldown, same-tick ties, top-center fading notices and inline CP/refresh controls. Economy and real-peer refresh fixtures added; runtime pending.
 - [ ] Validate unique reward race, permanent first-player reservation, no charge on rejected claim, replacement drafts and purple labels. Two-/three-peer ENet race fixture added; runtime pending. Verify fixed conquest modal parser and layout.
-- [ ] Validate categorized CP payouts (2 first including same-tick ties, 1 later), 10-second objective transitions, current stock/cargo and resident/crew accounting, advanced objectives and compact counters in solo/ENet.
+- [ ] Validate categorized CP payouts (2 first including same-tick ties, 1 later), 10-second objective transitions, current stock/cargo and resident/crew accounting, category pools and compact counters in solo/ENet.
 - [ ] Validate compact choice modal, immediate close at zero CP, category-specific + general random draft, stale/wrong-category rejection, shared reward invalidation, AI selection and exhausted pools. Private drafts implemented in v0.73.0; unique unlock announcements added in v0.74.0. Verify peer privacy and announcements.
 - [ ] Validate Empire F4 autoqueue, 500 target cap, eligibility filters, mixed yard levels, affordability, manual/repeat interaction and replication.
 - [ ] Validate Shields 1–3 and armor damage, recharge, costs/refunds, AI construction, selection/world health indicators and peer replication; provisional values. Mixed-selection shield bars and world rings implemented in v0.73.0; improve SVG-matching shield glow if needed.

@@ -1029,19 +1029,41 @@ func _test_objective_holdings() -> void:
 	var home: Dictionary = state["planets"][0]
 	home["population"] = 199000.0
 	home["stock"]["Metals"] = 900.0
-	ECON._update_objectives(state)
 	var progress: Dictionary = ECON.objective_progress(state, 1)
+	assert(ECON.active_objectives(progress, 0.0).size() == 2)
+	assert(progress["active_goals"]["economic"] == "colony_ships")
+	progress["colony_ships_built"] = 2
+	ECON._update_objectives(state)
+	assert(progress["completed"].has("colony_ships") and ECON.reward_points(progress, "economic") == 2)
 	assert(float(progress["population"]) == 200000.0 and float(progress["metals"]) == 1000.0)
-	assert(progress["completed"].has("population") and progress["completed"].has("metals"))
+	assert(not progress["completed"].has("population") and not progress["completed"].has("metals"))
+	assert(not ECON.refresh_objective(state, 1, "economic", "colony_ships"))
+	state["objective_clock"] = 11.0
+	ECON._update_objectives(state)
+	assert(progress["active_goals"]["economic"] == "colonies")
+	assert(ECON.objective_category("colonies") == "economic")
+	assert(ECON.refresh_objective(state, 1, "economic", "colonies"))
+	var rerolled: String = progress["active_goals"]["economic"]
+	assert(rerolled != "colonies" and ECON.objective_category(rerolled) == "economic")
+	assert(not ECON.refresh_objective(state, 1, "economic", rerolled))
+	assert(ECON.refresh_objective(state, 1, "military", "military_built"))
+	assert(ECON.objective_refresh_remaining(progress, "economic", 11.0) == 60.0)
+	assert(not ECON.refresh_objective(state, 99, "economic", rerolled))
+	assert(not ECON.refresh_objective(state, 1, "tech", "advanced_antimatter"))
+	state["objective_clock"] = 71.0
+	assert(ECON.refresh_objective(state, 1, "economic", rerolled))
+	progress["active_goals"]["economic"] = "metals"
+	ECON._update_objectives(state)
+	assert(progress["completed"].has("metals"))
 	home["stock"]["Metals"] = 100.0
 	ECON._update_objectives(state)
 	assert(float(progress["metals"]) == 200.0 and progress["completed"].has("metals"))
-	progress["completed"]["metals_2"] = 0.0
-	progress["completed"]["metals_3"] = 0.0
-	state["objective_clock"] = 11.0
-	ECON._assign_advanced_objectives(state, 1, progress)
-	assert(str(progress["advanced"]["metals"]) in ["advanced_antimatter", "advanced_metals"])
-	print("PASS: objective holdings, crew and non-overlapping tracks")
+	progress["active_goals"]["economic"] = "colony_food"
+	progress["colony_food"] = 1000.0
+	ECON._update_objectives(state)
+	assert(progress["completed"].has("colony_food"))
+	assert(ECON.objective_tech_unlocked(progress))
+	print("PASS: one objective per category, colony prerequisites, current holdings, lifetime food, separate rerolls and cooldowns")
 
 func _test_reward_redraft() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)

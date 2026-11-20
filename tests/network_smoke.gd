@@ -180,6 +180,11 @@ func _phase_changed() -> void:
 					var progress: Dictionary = ECON.objective_progress(state, peer)
 					progress["points"]["economic"] = 2
 					progress["points"]["tech"] = 1
+					# Reserve distant, incomplete goals so the reward race fixture has fixed CP balances.
+					for key in ECON.OBJECTIVE_SPECS:
+						if key not in ["colonies_3", "advanced_population"]:
+							progress["completed"][key] = 0.0
+					progress["active_goals"] = {"economic": "colonies_3", "military": "", "tech": ""}
 					# Everyone starts with a nonunique economic choice and the
 					# same unique Tech choice to exercise a real peer race.
 					progress["offers"]["economic"] = ["industry", "agriculture", "population"]
@@ -917,6 +922,18 @@ func _check_reward_redraft(state: Dictionary) -> bool:
 			if int(other) != id and not state["objectives"][other].get("offers", {}).is_empty():
 				_fail("Another player\u0027s private reward draft leaked.")
 				return false
+	if not has_meta("objective_refresh_requested"):
+		if progress.get("active_goals", {}).get("economic") != "colonies_3":
+			return false
+		set_meta("objective_refresh_requested", true)
+		session.call("request_objective_refresh", "economic", "colonies_3")
+		session.call("request_objective_refresh", "economic", "advanced_population")
+		return false
+	if progress.get("active_goals", {}).get("economic") != "advanced_population":
+		return false
+	if float(progress.get("goal_refresh", {}).get("economic", 0.0)) <= 0.0:
+		_fail("Objective refresh cooldown did not replicate.")
+		return false
 	if not has_meta("reward_previous"):
 		var offer: Array = ECON.reward_offer(progress, "economic")
 		if offer.size() != 3 or ECON.reward_points(progress, "economic") < 2:
