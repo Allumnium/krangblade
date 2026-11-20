@@ -975,7 +975,20 @@ func _test_indexed_hostile_bucket() -> void:
 	for team in range(3):
 		assert(ECON._hostile_bucket(state, buckets, {}, 0, team, teams) == ECON._hostile_bucket(state, buckets, {}, 0, team))
 
+func _test_packed_threat_records() -> void:
+	var radius: float = ECON.REPAIR_SAFE_RADIUS
+	var legacy: Dictionary = {"sectors": {}, "cells": {}}
+	var packed: Dictionary = {"sectors": {}, "cells": {}, "positions": PackedVector2Array([Vector2.ZERO, Vector2(-radius, 0)]), "teams": PackedInt32Array([1, 2]), "ids": PackedInt64Array([10, 20])}
+	ECON._spatial_insert(legacy["cells"], Vector2.ZERO, radius, [1, Vector2.ZERO])
+	ECON._spatial_insert(legacy["cells"], Vector2(-radius, 0), radius, [2, Vector2(-radius, 0)])
+	ECON._spatial_insert(packed["cells"], Vector2.ZERO, radius, 0)
+	ECON._spatial_insert(packed["cells"], Vector2(-radius, 0), radius, 1)
+	for team in range(3):
+		for point in [Vector2.ZERO, Vector2(-radius, 0), Vector2(radius, 0), Vector2(radius * 3, 0)]:
+			assert(ECON._salvage_threat_free(point, -1, team, packed) == ECON._salvage_threat_free(point, -1, team, legacy))
+
 func _initialize() -> void:
+	_test_packed_threat_records()
 	_test_indexed_hostile_bucket()
 	_test_reuse_combat_threats()
 	_test_shared_threat_index()

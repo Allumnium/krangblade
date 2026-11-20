@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.43: Combat-produced threat snapshot now uses packed position/team/ID arrays with slot-indexed cells. Legacy survivor rebuild remains supported. No authoritative state migration yet; runtime and net allocation/time benefit require measurement.
+
 - v0.64.42: Combat shares a frozen ID-to-team lookup across hulls, structures and salvage threat construction, removing repeated nested owner/team lookups in hostile filtering. Not yet a packed array or unified grid. Runtime and benchmark pending.
 
 - v0.64.41: Combat builds the frozen salvage threat snapshot alongside its own index. Post-combat reuse requires matching survivor count and exact team/routing/position signatures; fallback rebuild preserves safety. Still two bucket resolutions and a validation scan; profile total cost before claiming improvement. Runtime pending.
