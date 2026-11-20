@@ -3439,6 +3439,9 @@ static func _nearby_repair_ids(cells: Dictionary, point: Vector2) -> Array:
 		ids.append(entry[1])
 	return ids
 
+static func _repair_retry_due(ship: Dictionary, now: float) -> bool:
+	return now + EPS >= float(ship.get("_next_repair_search", 0.0))
+
 static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float, damaged_cells: Variant = null) -> bool:
 	if ship["kind"] != "miner":
 		return false
@@ -3454,6 +3457,10 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 		return false
 	var pos: Vector2 = ship["position"]
 	if not explicit:
+		# Only throttle unsuccessful automatic searches. Active repairs and
+		# explicit orders retain their original per-step behavior.
+		if damaged_cells != null and not _repair_retry_due(ship, float(state["elapsed"])):
+			return false
 		var best: float = MINER_REPAIR_SEARCH * MINER_REPAIR_SEARCH
 		for id in (targets.keys() if damaged_cells == null else _nearby_repair_ids(damaged_cells, pos)):
 			if id == ship["id"]:
@@ -3467,7 +3474,10 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 				target_id = id
 				ref = candidate
 	if ref.is_empty():
+		if not explicit and damaged_cells != null:
+			ship["_next_repair_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
 		return false
+	ship.erase("_next_repair_search")
 	var point: Vector2 = ref.get("repair_position", ref["position"])
 	if pos.distance_to(point) > LASER_RANGE:
 		if explicit:

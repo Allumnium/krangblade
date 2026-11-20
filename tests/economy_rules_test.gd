@@ -870,7 +870,15 @@ func _test_search_slots() -> void:
 		assert(is_equal_approx(ECON._next_search_slot(next, id, 0.5), next + 0.5))
 	assert(slots.size() == 5)
 
+func _test_repair_retry_due() -> void:
+	var ship: Dictionary = {}
+	assert(ECON._repair_retry_due(ship, 0.0))
+	ship["_next_repair_search"] = 1.5
+	assert(not ECON._repair_retry_due(ship, 1.2))
+	assert(ECON._repair_retry_due(ship, 1.5))
+
 func _initialize() -> void:
+	_test_repair_retry_due()
 	_test_search_slots()
 	_test_pursuit_blocks()
 	_test_missile_blocks()
