@@ -302,6 +302,9 @@ var logistics_lens: Button
 var active_lens: String = "logistics"
 var logistics_overlay: Control
 var objectives_overlay: Control
+var conquest_button: Button
+var conquest_dialog: AcceptDialog
+const OBJECTIVES_WIDTH: float = 328.0
 var global_resource_fills: Dictionary = {}
 var global_resource_segments: Dictionary = {}
 var global_resource_strips: Dictionary = {}
@@ -586,6 +589,23 @@ func _build_ui() -> void:
 	objectives_overlay.z_index = 3
 	objectives_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	objectives_overlay.draw.connect(_draw_objectives_overlay)
+	conquest_button = Button.new()
+	map_canvas.add_child(conquest_button)
+	conquest_button.z_index = 4
+	conquest_button.focus_mode = Control.FOCUS_NONE
+	conquest_button.text = "Conquest points: 0"
+	conquest_button.tooltip_text = "Open conquest upgrades"
+	HUD.action(conquest_button, Color("#e9cb7c"))
+	conquest_button.pressed.connect(_open_conquest_upgrades)
+	conquest_dialog = AcceptDialog.new()
+	conquest_dialog.title = "Conquest upgrades"
+	conquest_dialog.theme = theme
+	conquest_dialog.exclusive = true
+	conquest_dialog.unresizable = true
+	conquest_dialog.ok_button_text = "Close"
+	add_child(conquest_dialog)
+	HUD.action(conquest_dialog.get_ok_button())
+	_layout_conquest_button()
 	_build_exhaust_batch()
 	beam_batch = _build_effect_batch(false)
 	projectile_batch = _build_effect_batch(true)
@@ -3960,6 +3980,7 @@ func _refresh() -> void:
 	elif phase != "match" and background_music.playing:
 		background_music.stop()
 	_refresh_global_bar(state)
+	_refresh_conquest_button(state)
 	_refresh_match_result(state)
 	_refresh_time_controls(state)
 	menu_exit.text = "Main menu" if bool(session.get("is_solo")) else ("Return to lobby" if multiplayer.is_server() else "Leave match")
@@ -4456,6 +4477,7 @@ func _projection_size() -> Vector2:
 	return Vector2(map_canvas.size.x, maxf(1.0, map_canvas.size.y - hud_height))
 
 func _map_resized() -> void:
+	_layout_conquest_button()
 	# The world-space center is independent of screen dimensions.
 	zoom = minf(zoom, _max_zoom())
 	map_canvas.queue_redraw()
@@ -7933,9 +7955,9 @@ func _draw_objectives_overlay() -> void:
 	var progress: Dictionary = state.get("objectives", {}).get(_me(), {})
 	var completed: Dictionary = progress.get("completed", {})
 	var font: Font = ThemeDB.fallback_font
-	var x: float = maxf(8.0, map_canvas.size.x - 252.0)
+	var x: float = maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH)
 	var y: float = HEADER_HEIGHT + 24.0
-	var rows: Array = [["OBJECTIVES", "", ""], ["Economic", "", ""], ["Harvest 1,000t Metals", "metals", "%d / 1000" % int(progress.get("metals", 0.0))], ["Reach 200k population", "population", "%dk / 200k" % int(float(progress.get("population", 0.0)) / 1000.0)], ["Conquest", "", ""], ["Colonize two systems", "colonies", "%d / 2" % mini(2, (progress.get("colonies", {}) as Dictionary).size())], ["Conquest points: %d" % int(progress.get("points", 0)), "", ""]]
+	var rows: Array = [["OBJECTIVES", "", ""], ["Economic", "", ""], ["Harvest 1,000t Metals", "metals", "%d / 1000" % int(progress.get("metals", 0.0))], ["Reach 200k population", "population", "%dk / 200k" % int(float(progress.get("population", 0.0)) / 1000.0)], ["Military", "", ""], ["Colonize two systems", "colonies", "%d / 2" % mini(2, (progress.get("colonies", {}) as Dictionary).size())]]
 	for row in rows:
 		var label: String = row[0]
 		var key: String = row[1]
@@ -7952,14 +7974,16 @@ func _draw_objectives_overlay() -> void:
 		if done:
 			objectives_overlay.draw_line(pos + Vector2(0, -5), pos + Vector2(font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, -5), tint, 1.0)
 		if not key.is_empty():
-			var counter := Vector2(x + 16, y + 15)
-			objectives_overlay.draw_string_outline(font, counter, str(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color("#101824"))
-			objectives_overlay.draw_string(font, counter, str(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
-		y += 34.0 if not key.is_empty() else 22.0
+			var counter_text: String = str(row[2])
+			var counter_width: float = font.get_string_size(counter_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+			var counter := Vector2(map_canvas.size.x - 12.0 - counter_width, y)
+			objectives_overlay.draw_string_outline(font, counter, counter_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color("#101824"))
+			objectives_overlay.draw_string(font, counter, counter_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
+		y += 22.0
 	var events: Array = state.get("objective_events", [])
 	var roster: Dictionary = session.get("players")
 	var names: Dictionary = {"colonies": "Colonization", "metals": "Metals", "population": "Population"}
-	y += 8.0
+	y += 42.0
 	for j in range(events.size() - 1, maxi(-1, events.size() - 4), -1):
 		var event: Dictionary = events[j]
 		var player_name: String = str(roster.get(event["player"], {}).get("name", "Player")).left(16)
@@ -7970,3 +7994,26 @@ func _draw_objectives_overlay() -> void:
 		objectives_overlay.draw_string_outline(font, Vector2(x, y), message, HORIZONTAL_ALIGNMENT_LEFT, 244, 12, 4, Color("#101824"))
 		objectives_overlay.draw_string(font, Vector2(x, y), message, HORIZONTAL_ALIGNMENT_LEFT, 244, 12, tint)
 		y += 17.0
+
+func _layout_conquest_button() -> void:
+	if not is_instance_valid(conquest_button):
+		return
+	conquest_button.position = Vector2(maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH), HEADER_HEIGHT + 24.0 + 6.0 * 22.0 - 12.0)
+	conquest_button.size = Vector2(minf(OBJECTIVES_WIDTH - 12.0, maxf(100.0, map_canvas.size.x - 20.0)), 30.0)
+
+func _refresh_conquest_button(state: Dictionary) -> void:
+	if not is_instance_valid(conquest_button):
+		return
+	conquest_button.visible = not state.is_empty()
+	var points: int = int(state.get("objectives", {}).get(_me(), {}).get("points", 0))
+	conquest_button.text = "Conquest points: %d" % points
+	if is_instance_valid(conquest_dialog) and conquest_dialog.visible:
+		conquest_dialog.dialog_text = _conquest_dialog_text(points)
+
+func _conquest_dialog_text(points: int) -> String:
+	return "Available conquest points: %d\n\nEarn points by completing objectives.\nUpgrade cards and point spending are not available yet." % points
+
+func _open_conquest_upgrades() -> void:
+	var points: int = int(_state().get("objectives", {}).get(_me(), {}).get("points", 0))
+	conquest_dialog.dialog_text = _conquest_dialog_text(points)
+	conquest_dialog.popup_centered(Vector2i(420, 180))
