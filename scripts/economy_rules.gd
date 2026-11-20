@@ -7793,6 +7793,9 @@ static func _update_objectives(state: Dictionary) -> void:
 		var player: int = int(system["owner"])
 		if player > 0:
 			populations[player] = float(populations.get(player, 0.0)) + float(system["population"])
+	var first: Dictionary = state.get("objective_first", {})
+	var events: Array = state.get("objective_events", [])
+	var now: float = float(state["elapsed"])
 	for player in state["teams"]:
 		var progress: Dictionary = objective_progress(state, int(player))
 		progress["population"] = maxf(float(progress["population"]), float(populations.get(player, 0.0)))
@@ -7800,7 +7803,14 @@ static func _update_objectives(state: Dictionary) -> void:
 		for key in reached:
 			if reached[key] and not progress["completed"].has(key):
 				progress["completed"][key] = float(state["elapsed"])
-				progress["points"] = int(progress["points"]) + 1
+				if not first.has(key):
+					first[key] = now
+				var winner: bool = float(first[key]) == now
+				var award: int = 2 if winner else 1
+				progress["points"] = int(progress["points"]) + award
+				events.append({"player": player, "objective": key, "first": winner, "award": award, "elapsed": now})
+	state["objective_first"] = first
+	state["objective_events"] = events
 
 static func specialization_grade(system: Dictionary, resource: String) -> int:
 	if not has_planets(system):

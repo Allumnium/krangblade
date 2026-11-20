@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.66.0: Competitive first-place bonus is provisional (2 points vs 1, ties in the same authoritative step share first). Public latest three achievements remain visible; check HUD clipping and match pacing. Population column uses sustainable capacity; verify readability. Reward drafting effects pending.
+
 - v0.65.0: Objectives track distinct new colony sites, cumulative actual Metals extraction (planetary and asteroid), peak resident population; one point per personal completion pending competitive payout and reward drafting design. Validate multiplayer, public notification design, and default lens readability/performance. Grades use inherent resource factors (<0.5, <0.9, >=1.1, >=1.5); planetless marked poor for local planetary output.
 
 - v0.64.63: Base habitation reduced from 5M to 500k; crowding penalty changed from 1-(1-f)^3 to f^3. Demographic target and HUD use the lower of farm support and habitation plus orbital capacity for aggregate display. Balance is provisional; verify crew supply and food-limited growth. Tests adjusted but runtime pending.
