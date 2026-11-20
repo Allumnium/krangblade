@@ -30,7 +30,7 @@ const HOME_POPULATION: float = 10000.0
 const ORBITAL_HOUSING_POPULATION: float = 5000.0
 const ECO_HOUSING_ORGANICS: float = 0.2
 const ORBITAL_HOUSING_COST: Dictionary = {"Metals": 180.0}
-const COLONY_POPULATION: float = 40000.0
+const COLONY_POPULATION: float = 80000.0
 const POPULATION_DOUBLING_YEARS: float = 60.0
 # Fixed full-growth food reserve, independent of warehouse size and trade policy.
 const POPULATION_FOOD_RESERVE: float = 200.0
@@ -87,7 +87,7 @@ const FIGHTER_SPEED: float = FREIGHTER_SPEED * 1.2
 const AUTOCAST_COOLDOWN_YEARS: float = 30.0
 const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
-const AUTOCAST_MODES = ["wander", "mine", "salvage", "repair", "trade", "farm", "collect", "retreat"]
+const AUTOCAST_MODES = ["explore", "wander", "mine", "salvage", "repair", "trade", "farm", "collect", "retreat"]
 const SHIP_SIZE: int = 1 # Legacy small-class reference.
 const SHIP_SIZES = {"fighter": 1, "miner": 1, "ship": 2, "colony_ship": 2, "science_ship": 3, "scout": 1, "cruiser": 2, "destroyer": 3}
 const STATION_STORAGE_BAYS: int = 3
@@ -115,7 +115,7 @@ const SCIENCE_CAPACITY: float = 1.0
 const SCIENCE_COLLECTION_YEARS: float = 30.0
 const SHIPYARD_QUEUE_LIMIT = 8
 const MAX_SHIPYARD_LEVEL = 3
-const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 750.0, "science_ship": 2000.0, "scout": 50.0, "cruiser": 1500.0, "destroyer": 4000.0}
+const CREW_COSTS = {"ship": 4000.0, "colony_ship": COLONY_POPULATION, "fighter": 1000.0, "miner": 1500.0, "science_ship": 4000.0, "scout": 100.0, "cruiser": 3000.0, "destroyer": 8000.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 200.0
 const YARD_HP: float = 1500.0
@@ -3461,6 +3461,7 @@ static func command_service(state: Dictionary, player: int, ids: Array, order: D
 
 static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 	match mode:
+		"explore": return ship.get("kind", "") == "scout"
 		"wander": return SHIP_KINDS.has(ship.get("kind", ""))
 		"mine", "repair": return ship.get("kind", "") == "miner"
 		"salvage": return ship.get("kind", "") in ["ship", "miner"]
@@ -3471,7 +3472,7 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 	return false
 
 static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
-	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", mode not in ["collect", "retreat"]))
+	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", mode not in ["collect", "retreat", "explore"]))
 
 static func autocast_duration(mode: String) -> float:
 	match mode:
@@ -3499,6 +3500,10 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 		return set_repair_auto(state, player, ids, enabled)
 	for ship in units:
 		ship[mode + "_auto"] = enabled
+		if mode == "explore" and not enabled and bool(ship.get("unit_order", {}).get("exploration", false)):
+			ship.erase("unit_order")
+			_finish_manual(ship)
+			ship["navigation_target"] = ship["position"]
 		if mode == "retreat" and not enabled and bool(ship.get("retreating", false)):
 			ship["retreating"] = false
 			ship.erase("repair_site")
@@ -7279,6 +7284,54 @@ static func ship_activity(ship: Dictionary) -> ShipActivity:
 static func _is_idle_ship(ship: Dictionary) -> bool:
 	return ship_activity(ship) == ShipActivity.IDLE
 
+# Select adjacent connected sectors by low allied occupancy and oldest visit.
+static func _dispatch_explorers(state: Dictionary, graph: Dictionary) -> void:
+	var occupancy: Dictionary = {}
+	var scouts: Array = []
+	for craft in state["ships"]:
+		var team: int = int(state["teams"].get(int(craft["owner"]), 0))
+		var node: int = int(craft.get("at", -1))
+		var key := Vector2i(team, node)
+		occupancy[key] = int(occupancy.get(key, 0)) + 1
+		if bool(craft.get("unit_order", {}).get("exploration", false)) and not craft.get("route", []).is_empty():
+			var destination := Vector2i(team, int(craft.get("dest", node)))
+			occupancy[destination] = int(occupancy.get(destination, 0)) + 1
+		if craft.get("kind", "") == "scout" and _is_idle_ship(craft) and autocast_ready(state, craft, "explore"):
+			scouts.append(craft)
+	if scouts.is_empty():
+		return
+	for node in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][node]
+		if has_station(system):
+			var key := Vector2i(int(state["teams"].get(int(system["owner"]), 0)), node)
+			occupancy[key] = int(occupancy.get(key, 0)) + 8 + system["yards"].size()
+	for craft in scouts:
+		var node: int = int(craft["at"])
+		if node < 0 or node >= graph["adjacent"].size():
+			continue
+		var team: int = int(state["teams"].get(int(craft["owner"]), 0))
+		var visits: Dictionary = craft.get("explore_visits", {})
+		visits[node] = float(state["elapsed"])
+		var best: int = -1
+		var score: float = -INF
+		for candidate in graph["adjacent"][node]:
+			var age: float = minf(600.0, float(state["elapsed"]) - float(visits.get(candidate, -600.0)))
+			var value: float = age - float(occupancy.get(Vector2i(team, candidate), 0)) * 80.0
+			if value > score:
+				score = value
+				best = candidate
+		if best < 0:
+			continue
+		craft["explore_visits"] = visits
+		_clear_local_hold(craft)
+		_set_unit_order(state, craft, {"kind": "sector", "target": best, "move_only": true, "exploration": true})
+		craft["direct_order"] = true
+		craft["move_only"] = true
+		craft["operation_target"] = best
+		_redirect_fighter(graph, craft, best, _military_paths(graph, best))
+		var key := Vector2i(team, best)
+		occupancy[key] = int(occupancy.get(key, 0)) + 1
+
 static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
 	var stationary_teams: Dictionary = {}
@@ -7774,6 +7827,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	for craft in state["ships"]:
 		combat_positions[int(craft["id"])] = craft["position"]
 	_begin_ship_avoidance(combat_positions)
+	_dispatch_explorers(state, combat_graph)
 	var idle_targets: Dictionary = _idle_formation_targets(state, combat_graph)
 	var coordinated: Dictionary = _coordinate_formations(state, combat_graph, dt)
 	var service_refs: Dictionary = service_targets(state)

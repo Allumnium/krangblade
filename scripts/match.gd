@@ -15,7 +15,7 @@ const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
 const KEYBOARD_PAN_SPEED: float = 420.0
-const AUTOCAST_SLOTS = {"auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm", "collect": "collect", "auto_retreat": "retreat"}
+const AUTOCAST_SLOTS = {"auto_explore": "explore", "auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm", "collect": "collect", "auto_retreat": "retreat"}
 const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
 const MIN_ZOOM: float = 0.5
 const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
@@ -1907,6 +1907,7 @@ func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
 		return station_icons[key]
 	var paths: Dictionary = {
 		"auto_retreat": '<path fill="#f6aa79" d="M3 16L15 4V11H28V21H15V28Z"/><path stroke="#ffe5cc" stroke-width="2" d="M18 7L28 7M18 25L28 25"/>',
+		"auto_explore": '<circle cx="16" cy="16" r="13" fill="none" stroke="#8bd5ed" stroke-width="2"/><path d="M23 5L19 19L5 26L12 12Z" fill="#b4e9f9"/><circle cx="16" cy="16" r="2" fill="#122337"/>',
 		"auto_wander": '<path stroke="#8bd5ed" stroke-width="2.5" fill="none" d="M3 25Q9 4 17 17T29 4"/><circle cx="4" cy="25" r="3" fill="#e1f8ff"/><path fill="#b4e9f9" d="M16 9L24 18L19 28L16 24L11 28L11 17Z"/>',
 		"collect": '<circle cx="16" cy="16" r="10" fill="none" stroke="#ab92ff" stroke-width="3"/><circle cx="16" cy="16" r="5" fill="#e4c9ff"/><path stroke="#e4c9ff" stroke-width="2" d="M16 1V6M16 26V31M1 16H6M26 16H31"/>',
 		"auto_farm": '<path fill="#9ee6a1" d="M15 28V17Q3 18 3 5Q14 5 16 15Q18 3 29 3Q29 18 18 19V28Z"/><path stroke="#e5ffd6" stroke-width="1.8" d="M7 9L16 18L25 8"/>',
@@ -2637,7 +2638,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	active_border.draw.connect(_draw_active_command.bind(active_border))
 	active_border.visible = false
 	button.set_meta("active_border", active_border)
-	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K}[id], "Fleet", "fleet_" + id, hint)
+	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -2651,13 +2652,13 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	unload_button = _command_slot("unload", "Drop Cargo", _arm_command.bind("unload"))
 	_command_slot("repair", "Repair target", _arm_command.bind("repair"))
 	_command_slot("deliver_farm", "Deliver Organics to nearest station", _deliver_farm_selected)
-	for id in ["collect", "auto_farm", "auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair", "auto_retreat"]:
+	for id in ["collect", "auto_farm", "auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair", "auto_retreat", "auto_explore"]:
 		if id == "auto_retreat":
 			_fill_ability_grid(command_card)
 			_command_slot("guard", "Guard sector · return to the chosen point after combat", _arm_command.bind("guard"))
 			_command_slot("transform", "Transform into Space Station", _transform_selected)
 		var mode: String = AUTOCAST_SLOTS[id]
-		var title_text: String = "Collect Antimatter" if mode == "collect" else ("Wander" if mode == "wander" else "Auto-" + mode.capitalize())
+		var title_text: String = "Collect Antimatter" if mode == "collect" else (mode.capitalize() if mode in ["wander", "explore"] else "Auto-" + mode.capitalize())
 		var action: Callable = _arm_command.bind("collect") if mode == "collect" else _toggle_autocast.bind(mode)
 		var button: Button = _command_slot(id, title_text, action)
 		button.gui_input.connect(_autocast_input.bind(mode, button))
@@ -2753,6 +2754,13 @@ func _refresh_autocast_cards() -> void:
 			retreat.reparent(retreat_slot, false)
 			retreat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		retreat_extra.visible = retreat_slot == retreat_extra and not _autocast_units(state, "retreat").is_empty()
+	if command_buttons.has("auto_explore"):
+		var explore: Button = command_buttons["auto_explore"]
+		var extra: Control = explore.get_parent()
+		if extra != command_card.get_child(14):
+			explore.reparent(command_card.get_child(14), false)
+			explore.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			extra.hide()
 	for id in AUTOCAST_SLOTS:
 		if not command_buttons.has(id):
 			continue
@@ -2775,7 +2783,7 @@ func _refresh_autocast_cards() -> void:
 		var duration: float = ECONOMY.autocast_duration(mode)
 		mask.set_meta("fraction", remaining / duration if duration > 0.0 else 0.0)
 		mask.queue_redraw()
-		var title_text: String = "Collect Antimatter" if mode == "collect" else ("Wander" if mode == "wander" else "Auto-" + mode.capitalize())
+		var title_text: String = "Collect Antimatter" if mode == "collect" else (mode.capitalize() if mode in ["wander", "explore"] else "Auto-" + mode.capitalize())
 		var status: String = "Off" if enabled_count == 0 else ("On" if enabled_count == units.size() else "%d/%d on" % [enabled_count, units.size()])
 		var speed: float = maxf(1.0, float(state.get("time_speed", 1)))
 		if remaining > ECONOMY.EPS:

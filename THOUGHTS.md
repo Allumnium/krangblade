@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.82.0: Explore uses adjacent graph destinations, recency and allied sector occupancy as a cheap separation heuristic; no all-pairs distance scans. Colony crew doubled to 80k, so starting economy/housing and AI expansion need playtesting.
+
 - v0.81.0: Dyson costs and late Tech prerequisite provisional; use station storage expansion, one sphere per sector, no retroactive refunds or crew/work discounts. PDS remains defensive until core loss. Playtest siege strength and megastructure affordability.
 
 - v0.80.4: Direct-flight migration allowed gaps between sectors; restore graph waypoints for manual travel and patrol fallback. Existing avoidance and autonomous pursuit require further boundary testing. Track cumulative category CP separately from spendable balances.
