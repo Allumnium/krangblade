@@ -4,6 +4,7 @@ static var cached_civilian_routes: Dictionary = {}
 static var cached_route_topology: Dictionary = {}
 static var cached_military_graph: Dictionary = {}
 static var cached_military_map: Dictionary = {}
+static var cached_military_source: Dictionary = {}
 # Ephemeral authoritative snapshot, active only during a movement substep.
 static var avoidance_cells: Dictionary = {}
 const AVOIDANCE_LOOKAHEAD: float = 96.0
@@ -2806,10 +2807,13 @@ static func sector_limit(graph: Dictionary, node: int, direction: Vector2) -> fl
 	# Never expand beyond the nearest-POI bisector or the original disk.
 	var limit: float = float(graph["sector_radii"][node])
 	var second: float = INF
-	for delta in graph["sector_neighbors"][node]:
+	var neighbors: Array = graph["sector_neighbors"][node]
+	var squares: Array = graph["sector_neighbor_squares"][node] if graph.has("sector_neighbor_squares") else []
+	for i in range(neighbors.size()):
+		var delta: Vector2 = neighbors[i]
 		var projection: float = direction.dot(delta)
 		if projection > EPS:
-			var bound: float = (delta as Vector2).length_squared() / (2.0 * projection)
+			var bound: float = (float(squares[i]) if not squares.is_empty() else delta.length_squared()) / (2.0 * projection)
 			if bound < limit:
 				second = limit
 				limit = bound
@@ -2829,6 +2833,9 @@ static func sector_entry_point(graph: Dictionary, node: int, origin: Vector2) ->
 
 static func sector_contains(graph: Dictionary, node: int, position: Vector2) -> bool:
 	var offset: Vector2 = position - (graph["points"][node] as Vector2)
+	var radius: float = float(graph["sector_radii"][node]) + EPS
+	if offset.length_squared() > radius * radius:
+		return false
 	return offset.length() <= sector_limit(graph, node, offset.normalized()) + EPS
 
 # Resolve a world point using the same clipped disks used by local orders.
@@ -2852,6 +2859,10 @@ static func sector_at(graph: Dictionary, position: Vector2, candidates: Array, p
 
 static func military_graph(state: Dictionary) -> Dictionary:
 	var map_data: Dictionary = state["map"]
+	# Match topology is immutable; resource quantities can change in place.
+	if not cached_military_graph.is_empty() and is_same(cached_military_source, map_data):
+		return cached_military_graph
+	cached_military_source = map_data
 	if not cached_military_graph.is_empty() and cached_military_map.get("points") == map_data["points"] and cached_military_map.get("edges") == map_data["edges"] and cached_military_map.get("field_positions") == _field_positions(map_data) and cached_military_map.get("field_edges") == map_data.get("field_edges", []):
 		return cached_military_graph
 	var points: Array = map_data["points"].duplicate()
@@ -2872,19 +2883,23 @@ static func military_graph(state: Dictionary) -> Dictionary:
 	var base_radius: float = sector_base_radius(map_data)
 	var sector_radii: Array[float] = []
 	var sector_neighbors: Array = []
+	var sector_neighbor_squares: Array = []
 	for i in range(points.size()):
 		var radius: float = base_radius if i < (map_data["points"] as Array).size() else base_radius * 0.68
 		sector_radii.append(radius)
 		var neighbors: Array[Vector2] = []
+		var squares: Array[float] = []
 		for j in range(points.size()):
 			if i == j:
 				continue
 			var delta: Vector2 = points[j] - points[i]
 			if delta.length_squared() < 4.0 * radius * radius and delta.length_squared() > EPS:
 				neighbors.append(delta)
+				squares.append(delta.length_squared())
 		sector_neighbors.append(neighbors)
+		sector_neighbor_squares.append(squares)
 	cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data), "field_edges": map_data.get("field_edges", []).duplicate(true)}
-	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors, "system_count": map_data["points"].size()}
+	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors, "sector_neighbor_squares": sector_neighbor_squares, "system_count": map_data["points"].size()}
 	return cached_military_graph
 
 static func _field_positions(map_data: Dictionary) -> Array:
@@ -3430,7 +3445,7 @@ static func _manual_nav(state: Dictionary, graph: Dictionary, ship: Dictionary, 
 		var adjacent: Array = []
 		for index in range(count):
 			adjacent.append(graph["adjacent"][index].filter(func(other: int) -> bool: return other < count))
-		graph["civilian_manual_nav"] = {"points": state["map"]["points"], "edges": state["map"]["edges"], "adjacent": adjacent, "paths": {}, "sector_radii": graph["sector_radii"].slice(0, count), "sector_neighbors": graph["sector_neighbors"].slice(0, count)}
+		graph["civilian_manual_nav"] = {"points": state["map"]["points"], "edges": state["map"]["edges"], "adjacent": adjacent, "paths": {}, "sector_radii": graph["sector_radii"].slice(0, count), "sector_neighbors": graph["sector_neighbors"].slice(0, count), "sector_neighbor_squares": graph["sector_neighbor_squares"].slice(0, count)}
 	return {"graph": graph["civilian_manual_nav"], "node": node}
 
 # A follow order references a stable hull ID and lasts until replaced. Reject
