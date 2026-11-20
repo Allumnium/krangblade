@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.64.62: Square global selection buttons above minimap: F1 stations, F2 army, F3 shipyards; owned entities across map, separate building/unit selections.
+
 - v0.64.61: Mixed owned building Shift-selection cycles active type via Tab/Shift+Tab; grouped stations expose the command card. Keep ship and building selections separate.
 
 - v0.64.60: Box selection, including Shift-add, excludes opposing teams; allied hulls remain selectable and individual enemy inspection remains available. Command ownership checks unchanged.

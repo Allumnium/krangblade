@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.62: Global selection strip uses command-card icons and hotkey badges; F1/F3 select all owned stations/yards, F2 retains military selection and double-press focus. Verify small-window placement and runtime.
+
 - v0.64.61: Mixed building types retain inactive groups while Tab switches command focus; grouped stations expose the card and ordinary station operations fan out. Active group drives existing highlights/control groups and primary station drives availability/trade; complete aggregate behavior and visual/runtime verification remain pending.
 
 - v0.64.60: Box selection filters by local team, including prior selections on Shift-drag. Individual enemy inspection unchanged; manual verification pending.
