@@ -6195,15 +6195,15 @@ func _draw_ship_destructions(viewport_bounds: Rect2) -> void:
 		for particle in effect["sparks"]:
 			var offset: Vector2 = particle["offset"] + particle["velocity"] * travel
 			var position: Vector2 = point + forward * offset.x + lateral * offset.y
-			map_canvas.draw_circle(position, maxf(0.65, float(particle["size"]) * scale * (0.55 + fade * 0.45)), Color(particle["color"], fade))
+			_queue_projectile(position, maxf(0.65, float(particle["size"]) * scale * (0.55 + fade * 0.45)), Color(particle["color"], fade))
 		# Each original outline segment detaches, drifts and tumbles.
 		for fragment in effect["fragments"]:
 			var offset: Vector2 = fragment["offset"] + fragment["velocity"] * travel
 			var half: Vector2 = (fragment["half"] as Vector2).rotated(float(fragment["spin"]) * age)
 			var center: Vector2 = point + forward * offset.x + lateral * offset.y
 			var edge: Vector2 = forward * half.x + lateral * half.y
-			map_canvas.draw_line(center - edge, center + edge, Color(fragment["hull"], fade), maxf(1.0, 2.0 * scale), true)
-			map_canvas.draw_line(center - edge, center + edge, Color(fragment["color"], fade), maxf(0.6, scale), true)
+			_queue_beam(center - edge, center + edge, Color(fragment["hull"], fade), maxf(1.0, 2.0 * scale))
+			_queue_beam(center - edge, center + edge, Color(fragment["color"], fade), maxf(0.6, scale))
 
 # Same source-player hue for every beam. The wider translucent halo
 # and brighter core retain readability without changing the allegiance.
@@ -7663,6 +7663,7 @@ func _draw_map() -> void:
 					map_canvas.draw_circle(point + Vector2.from_angle(angle) * 5.0 * scale, maxf(0.7, scale), tint, true, -1.0, true)
 		elif scale >= 0.42:
 			_draw_other_cargo(ship, point, direction, side)
+	_draw_ship_destructions(viewport_bounds)
 	_flush_exhaust()
 	_flush_effect_batch(beam_batch, beam_instances)
 	_flush_effect_batch(projectile_batch, projectile_instances)
@@ -7670,7 +7671,6 @@ func _draw_map() -> void:
 	_flush_effect_batch(cargo_batch, cargo_entries)
 	_flush_effect_batch(cargo_glow_batch, cargo_glow_entries)
 	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
-	_draw_ship_destructions(viewport_bounds)
 	_draw_formation_preview(state)
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
