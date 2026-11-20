@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.70.3: Verify immediate full infrastructure cancellation refunds, ship-only cancellation salvage, and ENet replication.
+
 - [ ] v0.70.1: Verify grouped station construction allows any eligible station and resolves housing per destination; test mixed levels, ownership, resources and ENet.
 
 - [ ] v0.66.4: Playtest tenfold lower incubator base production, crystal scarcity and AI access to advanced construction.

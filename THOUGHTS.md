@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.70.3: Infrastructure cancellations return prepaid resources directly, even during delivery; ship cancellations retain salvage. Verify refunds including storage overflow and shipyard compaction.
+
 - v0.70.2: Empire target steps capped at 500 per type; no change to actual hull limits or scalability goals.
 
 - v0.70.1: Grouped station build buttons now consider all selected stations rather than primary affordability/unlock; housing resolves per station. Existing authority validates each order. Runtime pending.

@@ -427,7 +427,7 @@ func _test_station_construction_queue() -> void:
 	assert(ECON.cancel(state, 1, 0, int(job["id"])))
 	for resource in ECON.RESOURCES:
 		assert(is_equal_approx(float(p["stock"][resource]) + _cancelled_material(state, int(job["id"]), resource), float(prior[resource])))
-		assert(is_equal_approx(_cancelled_material(state, int(job["id"]), resource), float(job["allocated"][resource])))
+		assert(is_zero_approx(_cancelled_material(state, int(job["id"]), resource)))
 	assert(ECON.enqueue(state, 1, 0, "economy", "habitation"))
 	assert(ECON.enqueue(state, 1, 0, "economy", "Metals"))
 	assert(ECON.enqueue(state, 1, 0, "fighter", "", 0))
@@ -1494,7 +1494,7 @@ func _initialize() -> void:
 		assert(ECON.cancel(refunds, 1, 0, int(order["id"])))
 		assert(refund_home["queue"].is_empty())
 		var dropped: float = _cancelled_material(refunds, int(order["id"]), "Metals")
-		assert(is_equal_approx(dropped, float(order["allocated"]["Metals"]) if ECON.construction_leaves_salvage(order) else 0.0))
+		assert(is_equal_approx(dropped, float(order["allocated"]["Metals"]) if ECON.SHIP_KINDS.has(order["kind"]) else 0.0))
 		assert(is_equal_approx(float(refund_home["stock"]["Metals"]) + dropped, 10000.0 - ECON.consumption(refund_home, "Metals")))
 		assert(int(refund_home["yards"][0]["job"]) == -1)
 	# Completed and pending shipyards share a hard three-slot limit.
@@ -2612,9 +2612,8 @@ func _initialize() -> void:
 		assert(is_zero_approx(float(target_home["stock"][material])))
 	assert(ECON.cancel(targeted, 1, 0, int(target_job["id"])))
 	for material in target_recipe:
-		assert(is_zero_approx(float(target_home["stock"][material])))
-		assert(is_equal_approx(_cancelled_material(targeted, int(target_job["id"]), material), float(target_recipe[material])))
-		target_home["stock"][material] = float(target_recipe[material]) # separate funds for next build
+		assert(is_equal_approx(float(target_home["stock"][material]), float(target_recipe[material])))
+		assert(is_zero_approx(_cancelled_material(targeted, int(target_job["id"]), material)))
 	assert(ECON.enqueue(targeted, 1, 0, "pds"))
 	target_job = ECON.pds_job(target_home)
 	assert(ECON._advance(target_home, target_job, float(target_job["work"])))

@@ -174,7 +174,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - v0.53.2: Triple the ship overview display multiplier from 4× to 12× at minimum zoom; keep station/shipyard multiplier 4×. Use the same smooth log-zoom blend to 1× at zoom 16, shared ship hit/selection/muzzle scale and tiny-hull fallback. No simulation or minimap change.
 
-- v0.53.1: Ability/tooltips express real-time seconds (1× baseline; remaining cooldown scales with active speed); preserve game-year economy displays. Active shipyard construction draws progressive outline and fill at reserved port. Physical builds canceled before completion drop all paid materials as persistent salvage; non-standalone upgrades refund directly and crew returns.
+- v0.53.1: Ability/tooltips express real-time seconds (1× baseline; remaining cooldown scales with active speed); preserve game-year economy displays. Active shipyard construction draws progressive outline and fill at reserved port. Only canceled ship construction drops paid materials as persistent salvage; all infrastructure and upgrade cancellations refund directly and crew returns (v0.70.3).
 
 - v0.53.0: Colony ships farm Organics into 100 t holds at 5 t/yr, auto-deliver full loads when idle, and accept early delivery orders. No salvage or floating cargo pickup; keep colonization and explicit orders. Use type-only ship display names; internal IDs remain.
 
