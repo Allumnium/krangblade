@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.68.0: Fixed escalating Metals, population and colonization tracks; completed tier displays for 10 authority real-time seconds before next tier. Lifetime extraction and peak population count. Random advanced science objectives and warp gates are agreed follow-up.
+
 - v0.67.0: Host drafts persistent unique conquest choices; five economic upgrades initially active with upkeep tradeoffs. Remaining approved rewards require combat/logistics/cost integration. No free rerolls.
 
 - v0.66.4: Planetary crystal production base is 0.4 t/yr per level (previously 4); preserve abundance, staffing and asteroid extraction.

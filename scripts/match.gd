@@ -7979,7 +7979,11 @@ func _draw_objectives_overlay() -> void:
 	var font: Font = ThemeDB.fallback_font
 	var x: float = maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH)
 	var y: float = HEADER_HEIGHT + 24.0
-	var rows: Array = [["OBJECTIVES", "", ""], ["Economic", "", ""], ["Harvest 1,000t Metals", "metals", "%d / 1000" % int(progress.get("metals", 0.0))], ["Reach 200k population", "population", "%dk / 200k" % int(float(progress.get("population", 0.0)) / 1000.0)], ["Military", "", ""], ["Colonize two systems", "colonies", "%d / 2" % mini(2, (progress.get("colonies", {}) as Dictionary).size())]]
+	var rows: Array = [["OBJECTIVES", "", ""], ["Economic", "", ""]]
+	for objective in ECONOMY.active_objectives(progress, float(state.get("objective_clock", 0.0))):
+		if objective["track"] == "colonies":
+			rows.append(["Military", "", ""])
+		rows.append([objective["label"], objective["id"], objective["counter"]])
 	for row in rows:
 		var label: String = row[0]
 		var key: String = row[1]
@@ -8009,7 +8013,7 @@ func _draw_objectives_overlay() -> void:
 	for j in range(events.size() - 1, maxi(-1, events.size() - 4), -1):
 		var event: Dictionary = events[j]
 		var player_name: String = str(roster.get(event["player"], {}).get("name", "Player")).left(16)
-		var message: String = "%s: %s +%d CP" % [player_name, names.get(event["objective"], ""), int(event["award"])]
+		var message: String = "%s: %s +%d CP" % [player_name, names.get(str(event["objective"]).get_slice("_", 0), ""), int(event["award"])]
 		if bool(event["first"]):
 			message += " (first)"
 		var tint := Color("#e9cb7c") if bool(event["first"]) else Color("#b8d9ef")
