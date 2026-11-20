@@ -96,6 +96,10 @@ var background_music: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
 var map_canvas: Control
+var beam_batch: MultiMeshInstance2D
+var projectile_batch: MultiMeshInstance2D
+var beam_instances: Array = []
+var projectile_instances: Array = []
 var exhaust_batch: MultiMeshInstance2D
 var exhaust_instances: Array = []
 var exhaust_extents: Dictionary = {}
@@ -556,6 +560,8 @@ func _build_ui() -> void:
 	map_canvas.gui_input.connect(_map_input)
 	map_canvas.draw.connect(_draw_map)
 	_build_exhaust_batch()
+	beam_batch = _build_effect_batch(false)
+	projectile_batch = _build_effect_batch(true)
 	map_canvas.resized.connect(_map_resized)
 	header_panel = PanelContainer.new()
 	header_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -6189,10 +6195,79 @@ func _draw_ship_destructions(viewport_bounds: Rect2) -> void:
 
 # Same source-player hue for every beam. The wider translucent halo
 # and brighter core retain readability without changing the allegiance.
+# GPU instanced, color-modulated quads. The circle shader softens edges
+# without per-projectile tessellation; beams retain their exact endpoints.
+func _build_effect_batch(round_sprite: bool) -> MultiMeshInstance2D:
+	var batch := MultiMeshInstance2D.new()
+	var mesh := MultiMesh.new()
+	mesh.transform_format = MultiMesh.TRANSFORM_2D
+	mesh.use_colors = true
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE
+	mesh.mesh = quad
+	batch.multimesh = mesh
+	if round_sprite:
+		var shader := Shader.new()
+		shader.code = """
+shader_type canvas_item;
+render_mode unshaded;
+void fragment() {
+	float edge = 1.0 - smoothstep(0.85, 1.0, length(UV * 2.0 - 1.0));
+	COLOR.a *= edge;
+}
+"""
+		var material := ShaderMaterial.new()
+		material.shader = shader
+		batch.material = material
+	map_canvas.add_child(batch)
+	batch.hide()
+	return batch
+
+func _queue_beam(origin: Vector2, target: Vector2, tint: Color, width: float) -> void:
+	var axis: Vector2 = target - origin
+	var length: float = axis.length()
+	if length <= 0.001:
+		return
+	var bounds := Rect2(origin, axis).abs().grow(width)
+	if not bounds.intersects(Rect2(Vector2.ZERO, map_canvas.size), true):
+		return
+	beam_instances.append([Transform2D(axis.angle(), Vector2(length, width), 0.0, (origin + target) * 0.5), tint])
+
+func _queue_projectile(point: Vector2, radius: float, tint: Color) -> void:
+	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius).has_point(point):
+		return
+	projectile_instances.append([Transform2D(0.0, Vector2.ONE * radius * 2.0, 0.0, point), tint])
+
+func _flush_effect_batch(batch: MultiMeshInstance2D, entries: Array) -> void:
+	if entries.is_empty():
+		return
+	var mesh: MultiMesh = batch.multimesh
+	if mesh.instance_count < entries.size():
+		mesh.instance_count = maxi(entries.size(), maxi(64, mesh.instance_count * 2))
+	var buffer := PackedFloat32Array()
+	buffer.resize(mesh.instance_count * 12)
+	for i in range(entries.size()):
+		var t: Transform2D = entries[i][0]
+		var tint: Color = entries[i][1]
+		var offset: int = i * 12
+		buffer[offset] = t.x.x
+		buffer[offset + 1] = t.y.x
+		buffer[offset + 3] = t.origin.x
+		buffer[offset + 4] = t.x.y
+		buffer[offset + 5] = t.y.y
+		buffer[offset + 7] = t.origin.y
+		buffer[offset + 8] = tint.r
+		buffer[offset + 9] = tint.g
+		buffer[offset + 10] = tint.b
+		buffer[offset + 11] = tint.a
+	mesh.buffer = buffer
+	mesh.visible_instance_count = entries.size()
+	batch.show()
+
 func _draw_owned_laser(origin: Vector2, target: Vector2, owner: int, width: float) -> void:
 	var tint: Color = _empire_color(owner)
-	map_canvas.draw_line(origin, target, Color(tint, 0.28), width * 3.0, true)
-	map_canvas.draw_line(origin, target, tint.lightened(0.28), width, true)
+	_queue_beam(origin, target, Color(tint, 0.28), width * 3.0)
+	_queue_beam(origin, target, tint.lightened(0.28), width)
 
 func _fighter_beam_origin(pose: Dictionary) -> Vector2:
 	return (pose["point"] as Vector2) + (pose["direction"] as Vector2) * FIGHTER_MUZZLE * _ship_scale()
@@ -6217,8 +6292,8 @@ func _draw_blaster_tracers(state: Dictionary, ship: Dictionary, poses: Dictionar
 			var muzzle: Vector2 = start + (direction * mount.x + direction.orthogonal() * mount.y) * scale
 			var point: Vector2 = muzzle.lerp(endpoint, travel)
 			var radius: float = clampf(scale * 0.9, 1.0, 3.5)
-			map_canvas.draw_circle(point, radius * 1.8, Color(tint, 0.24))
-			map_canvas.draw_circle(point, radius, tint)
+			_queue_projectile(point, radius * 1.8, Color(tint, 0.24))
+			_queue_projectile(point, radius, tint)
 
 func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, width: float) -> void:
 	if ship["kind"] in ["scout", "fighter"]:
@@ -7231,6 +7306,10 @@ func _flush_overview_hulls() -> void:
 		batch.show()
 
 func _draw_map() -> void:
+	beam_instances.clear()
+	projectile_instances.clear()
+	beam_batch.hide()
+	projectile_batch.hide()
 	exhaust_instances.clear()
 	exhaust_batch.hide()
 	overview_instances.clear()
@@ -7416,8 +7495,8 @@ func _draw_map() -> void:
 					var mount: Vector2 = Vector2(4, 0) if ship["kind"] == "cruiser" else Vector2(8, -8 if launcher == 0 else 8)
 					launch += (facing * mount.x + facing.orthogonal() * mount.y) * _ship_scale()
 				var tip: Vector2 = launch.lerp(b, phase) + offset
-				map_canvas.draw_line(tip - axis * 12.0, tip, Color("#ffb36b"), 2.0, true)
-				map_canvas.draw_circle(tip, 2.0, Color("#fff2d2"))
+				_queue_beam(tip - axis * 12.0, tip, Color("#ffb36b"), 2.0)
+				_queue_projectile(tip, 2.0, Color("#fff2d2"))
 		var target: int = int(ship.get("combat_target", -1))
 		var yard_target: int = int(ship.get("yard_target", -1))
 		if poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
@@ -7454,7 +7533,7 @@ func _draw_map() -> void:
 					if not aim.is_zero_approx():
 						for side in [-1.0, 1.0]:
 							var muzzle: Vector2 = hub + (aim * 0.8 + aim.orthogonal() * side * 0.35) * _station_radius()
-							map_canvas.draw_line(muzzle, end, Color("#59e8a4"), 1.4, true)
+							_queue_beam(muzzle, end, Color("#59e8a4"), 1.4)
 		var repair: int = int(ship.get("repair_target", -1))
 		if poses.has(shooter) and service_refs.has(repair):
 			var origin: Vector2 = poses[shooter]["point"]
@@ -7470,7 +7549,7 @@ func _draw_map() -> void:
 				poses[shooter]["direction"] = axis
 				for side in [-1.0, 1.0]:
 					var muzzle: Vector2 = origin + (axis * MINER_MUZZLE.x + axis.orthogonal() * side * MINER_MUZZLE.y) * _ship_scale()
-					map_canvas.draw_line(muzzle, endpoint, Color("#59e8a4"), 1.4, true)
+					_queue_beam(muzzle, endpoint, Color("#59e8a4"), 1.4)
 	for ship in state["ships"]:
 		if not poses.has(int(ship["id"])):
 			continue
@@ -7552,6 +7631,8 @@ func _draw_map() -> void:
 		elif scale >= 0.42:
 			_draw_other_cargo(ship, point, direction, side)
 	_flush_exhaust()
+	_flush_effect_batch(beam_batch, beam_instances)
+	_flush_effect_batch(projectile_batch, projectile_instances)
 	_flush_overview_hulls()
 	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
 	_draw_ship_destructions(viewport_bounds)

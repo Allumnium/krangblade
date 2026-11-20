@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.12: Combat effect geometry submitted as two GPU quad batches; exact existing times and endpoints retained, offscreen bounds rejected. Beam edges simplified, layering and GL buffer/shader behavior require runtime review. No simulation or Codex rule changes.
+
 - v0.64.11: GPU canvas shader replaces per-hull exhaust polygons and CPU spark loops with one MultiMesh batch; retain acceleration-driven thrust, pause and zoom gating. Detailed cargo-free hulls now batch too. Exhaust visual approximation and layer ordering require manual review; GL shader compilation/runtime and performance unverified. No simulation changes.
 
 - v0.64.10: Distant hulls use texture-grouped GPU instancing rather than separate canvas draw commands. Batches are children of the map canvas, so hulls may overlay some existing map effects/selection rectangle; verify visual layering and correct if necessary. Detailed cargo and science overlays retain existing path. No compute shaders or renderer switch. Runtime and draw-call measurements pending.
