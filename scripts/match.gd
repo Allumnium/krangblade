@@ -5626,12 +5626,20 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	var poses: Dictionary = _ship_poses(state)
 	var team: int = int(state["teams"].get(_me(), -1))
 	var friendly_ids: Dictionary = {}
+	var combat_ids: Dictionary = {}
+	var boxed: Array[int] = []
 	for craft in state.get("ships", []):
 		if int(state["teams"].get(int(craft["owner"]), -2)) != team or craft.get("kind", "") == "warp_gate":
 			continue
 		friendly_ids[int(craft["id"])] = true
 		var id: int = int(craft["id"])
-		if poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
+		if ECONOMY.military_hull(str(craft["kind"])):
+			combat_ids[id] = true
+		if poses.has(id) and rect.has_point(poses[id]["point"]):
+			boxed.append(id)
+	var combat_in_box: bool = boxed.any(func(id: int) -> bool: return combat_ids.has(id))
+	for id in boxed:
+		if (not combat_in_box or combat_ids.has(id)) and not selected_units.has(id):
 			selected_units.append(id)
 	# Shift-box must not retain a previously inspected enemy.
 	for id in selected_units.duplicate():

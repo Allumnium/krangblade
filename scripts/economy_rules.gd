@@ -7932,7 +7932,7 @@ static func _update_objectives(state: Dictionary) -> void:
 		_assign_category_objectives(state, int(player), progress)
 		for objective in active_objectives(progress, float(state.get("objective_clock", 0.0))):
 			var key: String = objective["id"]
-			if not key.is_empty() and float(objective["value"]) >= float(objective["target"]) - EPS and not progress["completed"].has(key):
+			if not key.is_empty() and reward_points(progress, str(objective["track"])) == 0 and float(objective["value"]) >= float(objective["target"]) - EPS and not progress["completed"].has(key):
 				progress["completed"][key] = float(state.get("objective_clock", 0.0))
 				if not first.has(key):
 					first[key] = now
@@ -8451,23 +8451,30 @@ static func active_objectives(progress: Dictionary, _clock: float) -> Array:
 			result.append({"id": "", "track": category, "target": 1, "value": 0, "label": "Preparing objective", "counter": ""})
 	return result
 
+static func _objective_target_met(progress: Dictionary, key: String) -> bool:
+	var row: Dictionary = _objective_row(progress, key)
+	return float(row["value"]) >= float(row["target"]) - EPS
+
+static func _objective_prerequisite_met(progress: Dictionary, key: String) -> bool:
+	return key.is_empty() or progress["completed"].has(key) or _objective_target_met(progress, key)
+
 static func objective_candidates(progress: Dictionary, category: String, excluded: String = "") -> Array:
 	var candidates: Array = []
 	var completed: Dictionary = progress.get("completed", {})
 	for key in OBJECTIVE_SPECS:
 		var spec: Array = OBJECTIVE_SPECS[key]
-		if spec[0] != category or key == excluded or completed.has(key):
+		if spec[0] != category or key == excluded or completed.has(key) or _objective_target_met(progress, key):
 			continue
-		if str(spec[4]).is_empty() or completed.has(spec[4]):
+		if _objective_prerequisite_met(progress, str(spec[4])):
 			candidates.append(key)
 	for metric in REPEAT_OBJECTIVES:
 		var spec: Array = REPEAT_OBJECTIVES[metric]
-		if spec[0] != category or (not str(spec[4]).is_empty() and not completed.has(spec[4])):
+		if spec[0] != category or not _objective_prerequisite_met(progress, str(spec[4])):
 			continue
 		if category == "economic" and str(spec[4]).is_empty() and not completed.keys().any(func(key) -> bool: return objective_category(str(key)) == "economic"):
 			continue
 		var tier: int = 1
-		while completed.has(_repeat_objective_key(str(metric), tier)):
+		while completed.has(_repeat_objective_key(str(metric), tier)) or _objective_target_met(progress, _repeat_objective_key(str(metric), tier)):
 			tier += 1
 		var key: String = _repeat_objective_key(str(metric), tier)
 		if key != excluded:
@@ -8489,15 +8496,14 @@ static func _draw_objective(state: Dictionary, player: int, progress: Dictionary
 static func _assign_category_objectives(state: Dictionary, player: int, progress: Dictionary) -> void:
 	var active: Dictionary = progress.get("active_goals", {"economic": "colony_ships", "military": "military_built"})
 	var completed: Dictionary = progress["completed"]
-	var clock: float = float(state.get("objective_clock", 0.0))
 	for category in REWARD_CATEGORIES:
 		if category == "tech" and not objective_tech_unlocked(progress):
 			continue
 		var current: String = str(active.get(category, ""))
-		if not current.is_empty() and (not completed.has(current) or clock - float(completed[current]) < OBJECTIVE_COMPLETE_SECONDS):
+		if reward_points(progress, category) > 0 or (not current.is_empty() and not completed.has(current)):
 			continue
 		# Continue the introductory colony chain before ordinary random goals.
-		if current == "colony_ships" and not completed.has("colonies"):
+		if current == "colony_ships" and not completed.has("colonies") and not _objective_target_met(progress, "colonies"):
 			active[category] = "colonies"
 		else:
 			active[category] = _draw_objective(state, player, progress, category, current)
@@ -8515,7 +8521,7 @@ static func refresh_objective(state: Dictionary, player: int, category: String, 
 	var active: Dictionary = progress["active_goals"]
 	var current: String = str(active.get(category, ""))
 	var clock: float = float(state.get("objective_clock", 0.0))
-	if current.is_empty() or current != expected or progress["completed"].has(current) or objective_refresh_remaining(progress, category, clock) > EPS:
+	if reward_points(progress, category) > 0 or current.is_empty() or current != expected or progress["completed"].has(current) or objective_refresh_remaining(progress, category, clock) > EPS:
 		return false
 	var next: String = _draw_objective(state, player, progress, category, current)
 	if next.is_empty():
