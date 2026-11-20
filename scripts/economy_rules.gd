@@ -5626,7 +5626,7 @@ static func _combat_sector_has_hostile(presence: Dictionary, sector: int, team: 
 
 # Lazily filter each occupied bucket once per team and combat snapshot.
 # Keep original insertion order for all weapon-specific tie rules.
-static func _hostile_bucket(state: Dictionary, buckets: Dictionary, cache: Dictionary, key: Variant, team: int, team_by_id: Dictionary = {}) -> Array:
+static func _hostile_bucket(state: Dictionary, buckets: Dictionary, cache: Dictionary, key: Variant, team: int, team_by_id: Dictionary = {}, positive_only: bool = false) -> Array:
 	if not cache.has(team):
 		cache[team] = {}
 	var by_key: Dictionary = cache[team]
@@ -5638,7 +5638,7 @@ static func _hostile_bucket(state: Dictionary, buckets: Dictionary, cache: Dicti
 				candidate_team = int(state["teams"].get(int(candidate["owner"]), 0))
 			else:
 				candidate_team = int(team_by_id[int(candidate["id"])])
-			if candidate_team != team:
+			if candidate_team != team and (not positive_only or candidate_team > 0):
 				hostile.append(candidate)
 		by_key[key] = hostile
 	return by_key[key]
@@ -5803,6 +5803,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "pds"})
 	var hostile_cache: Dictionary = {}
+	var positive_hostile_cache: Dictionary = {}
 	var sector_hostile_cache: Dictionary = {}
 	var laser_blocks: Dictionary = {}
 	var missile_blocks: Dictionary = {}
@@ -5852,7 +5853,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 						for y in range(-reach, reach + 1):
 							var key: Vector2i = missile_cell + Vector2i(x, y)
 							if not team_blocks.has(key):
-								var candidates: Array = _hostile_bucket(state, cells, hostile_cache, key, team, team_by_id).filter(func(enemy: Dictionary) -> bool: return int(team_by_id[int(enemy["id"])]) > 0)
+								var candidates: Array = _hostile_bucket(state, cells, positive_hostile_cache, key, team, team_by_id, true)
 								team_blocks[key] = _laser_blocks(candidates, positions, true)
 							var nearest: Array = _missile_block_nearest(team_blocks[key], positions, pos, best, missile_target, focused, focus_id)
 							best = float(nearest[0])
@@ -5941,7 +5942,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 				var team_blocks: Dictionary = pursuit_blocks[team]
 				var sector: int = int(ship_sectors[id])
 				if not team_blocks.has(sector):
-					var candidates: Array = _hostile_bucket(state, sectors, sector_hostile_cache, sector, team, team_by_id).filter(func(enemy: Dictionary) -> bool: return int(team_by_id[int(enemy["id"])]) > 0)
+					var candidates: Array = _hostile_bucket(state, sectors, sector_hostile_cache, sector, team, team_by_id, true)
 					team_blocks[sector] = _laser_blocks(candidates, positions)
 				var nearest: Array = _laser_block_nearest(team_blocks[sector], positions, pos, INF, -1)
 				pursuit = int(nearest[1])

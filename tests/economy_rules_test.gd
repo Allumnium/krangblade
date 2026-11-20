@@ -974,6 +974,7 @@ func _test_indexed_hostile_bucket() -> void:
 	var teams: Dictionary = {1: 1, 2: 2, -2: 2, 3: 0}
 	for team in range(3):
 		assert(ECON._hostile_bucket(state, buckets, {}, 0, team, teams) == ECON._hostile_bucket(state, buckets, {}, 0, team))
+		assert(ECON._hostile_bucket(state, buckets, {}, 0, team, teams, true) == ECON._hostile_bucket(state, buckets, {}, 0, team, teams).filter(func(enemy: Dictionary) -> bool: return int(teams[enemy["id"]]) > 0))
 
 func _test_packed_threat_records() -> void:
 	var radius: float = ECON.REPAIR_SAFE_RADIUS
