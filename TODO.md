@@ -17,6 +17,7 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 - [ ] v0.66.1: Verify direct local asteroid access rather than detouring through an alternate anchor, including multi-access field regression and physical delivery.
 
 ### Objectives and specialization (v0.75.0)
+- [ ] v0.75.2: Compare actual time-to-completion for starter objectives at 1× across map seeds and strategies (80k population, 3kt Metals, two colony ships, 1kt colony food, military builds/kills); tune if outliers remain. Verify tier progression and boundaries; no starter target satisfied by initial stock.
 - [ ] Validate one active Economic/Military goal each, Tech unlock, colony construction before colonization, lifetime colony food after loss/conversion, military construction/kill credit, random eligible refresh with independent 60 s cooldown, same-tick ties, top-center fading notices and header-height square refresh/Upgrade buttons with inline CP balance (v0.75.1). Economy and real-peer refresh fixtures added; runtime pending.
 - [ ] Validate unique reward race, permanent first-player reservation, no charge on rejected claim, replacement drafts and purple labels. Two-/three-peer ENet race fixture added; runtime pending. Verify fixed conquest modal parser and layout.
 - [ ] Validate categorized CP payouts (2 first including same-tick ties, 1 later), 10-second objective transitions, current stock/cargo and resident/crew accounting, category pools and compact counters in solo/ENet.
