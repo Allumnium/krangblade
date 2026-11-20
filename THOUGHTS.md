@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.11: GPU canvas shader replaces per-hull exhaust polygons and CPU spark loops with one MultiMesh batch; retain acceleration-driven thrust, pause and zoom gating. Detailed cargo-free hulls now batch too. Exhaust visual approximation and layer ordering require manual review; GL shader compilation/runtime and performance unverified. No simulation changes.
+
 - v0.64.10: Distant hulls use texture-grouped GPU instancing rather than separate canvas draw commands. Batches are children of the map canvas, so hulls may overlay some existing map effects/selection rectangle; verify visual layering and correct if necessary. Detailed cargo and science overlays retain existing path. No compute shaders or renderer switch. Runtime and draw-call measurements pending.
 
 - v0.64.9: Reuse salvage sector-center threat results per team within the existing frozen threat snapshot. Ownership and discovery are deliberately not memoized (colony conversion can occur during movement). Arbitrary wreck/ship positions remain exact; benchmark and runtime pending.
