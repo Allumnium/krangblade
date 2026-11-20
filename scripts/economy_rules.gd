@@ -5545,6 +5545,47 @@ static func _hostile_bucket(state: Dictionary, buckets: Dictionary, cache: Dicti
 		by_key[key] = hostile
 	return by_key[key]
 
+# Contiguous blocks preserve traversal order, including approximate-distance ties.
+# Bounds are built once per hostile bucket, not once per attacking hull.
+static func _laser_blocks(candidates: Array, positions: Dictionary) -> Array:
+	var blocks: Array = []
+	var ids: Array = []
+	var low := Vector2.ZERO
+	var high := Vector2.ZERO
+	for other in candidates:
+		var id: int = int(other["id"])
+		if id < 0:
+			continue
+		var point: Vector2 = positions[id]
+		if ids.is_empty():
+			low = point
+			high = point
+		else:
+			low = low.min(point)
+			high = high.max(point)
+		ids.append(id)
+		if ids.size() == 16:
+			blocks.append([low, high, ids])
+			ids = []
+	if not ids.is_empty():
+		blocks.append([low, high, ids])
+	return blocks
+
+static func _laser_block_nearest(blocks: Array, positions: Dictionary, pos: Vector2, best: float, target: int) -> Array:
+	for block in blocks:
+		var low: Vector2 = block[0]
+		var high: Vector2 = block[1]
+		var bound: float = pos.distance_squared_to(pos.clamp(low, high))
+		# Leave a conservative margin for floating-point and approximate ties.
+		if bound > best + maxf(0.001, absf(best) * 0.0001):
+			continue
+		for id in block[2]:
+			var distance: float = pos.distance_squared_to(positions[id])
+			if distance < best or (is_equal_approx(distance, best) and (target < 0 or int(id) < target)):
+				best = distance
+				target = int(id)
+	return [best, target]
+
 static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	var ships: Array = state["ships"]
 	var positions: Dictionary = {}
@@ -5606,6 +5647,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "pds"})
 	var hostile_cache: Dictionary = {}
 	var sector_hostile_cache: Dictionary = {}
+	var laser_blocks: Dictionary = {}
 	var damage: Dictionary = {}
 	for ship in ships:
 		var fighter: bool = ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]
@@ -5702,18 +5744,18 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			elif by_id[pursuit].get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and not bool(by_id[pursuit].get("retreating", false)) and int(previous_targets[pursuit]) == id and pos.distance_squared_to(positions[pursuit]) <= LASER_RANGE * LASER_RANGE:
 				pursuit = -1
 		var best: float = LASER_RANGE * LASER_RANGE
-		for x in range(-1, 2):
-			for y in range(-1, 2):
-				for other in _hostile_bucket(state, cells, hostile_cache, cell + Vector2i(x, y), team):
-					if int(state["teams"].get(int(other["owner"]), 0)) == team or team == 0:
-						continue
-					var other_id: int = int(other["id"])
-					if other_id < 0:
-						continue
-					var distance: float = pos.distance_squared_to(positions[other_id])
-					if distance < best or (is_equal_approx(distance, best) and (target < 0 or other_id < target)):
-						best = distance
-						target = other_id
+		if team != 0:
+			if not laser_blocks.has(team):
+				laser_blocks[team] = {}
+			var team_blocks: Dictionary = laser_blocks[team]
+			for x in range(-1, 2):
+				for y in range(-1, 2):
+					var key: Vector2i = cell + Vector2i(x, y)
+					if not team_blocks.has(key):
+						team_blocks[key] = _laser_blocks(_hostile_bucket(state, cells, hostile_cache, key, team), positions)
+					var nearest: Array = _laser_block_nearest(team_blocks[key], positions, pos, best, target)
+					best = float(nearest[0])
+					target = int(nearest[1])
 		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target >= 0 and not blocked.has(target) and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[target])):
 			pursuit = target
 			remaining = PURSUIT_YEARS

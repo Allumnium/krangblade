@@ -823,7 +823,27 @@ func _test_hostile_buckets() -> void:
 	assert(ECON._hostile_bucket(state, buckets, cache, Vector2i.ZERO, 2).size() == 3)
 	assert(ECON._hostile_bucket(state, buckets, cache, Vector2i.ONE, 1).is_empty())
 
+func _test_laser_blocks() -> void:
+	var positions: Dictionary = {}
+	var candidates: Array = []
+	for id in range(64, 0, -1):
+		positions[id] = Vector2(float(id % 8) * 10.0, float(id / 8) * 10.0)
+		candidates.append({"id": id})
+	var blocks: Array = ECON._laser_blocks(candidates, positions)
+	assert(blocks.size() == 4)
+	for point in [Vector2.ZERO, Vector2(30, 20), Vector2(100, 100), Vector2(5, 5)]:
+		var best: float = ECON.LASER_RANGE * ECON.LASER_RANGE
+		var target: int = -1
+		for candidate in candidates:
+			var id: int = int(candidate["id"])
+			var distance: float = point.distance_squared_to(positions[id])
+			if distance < best or (is_equal_approx(distance, best) and (target < 0 or id < target)):
+				best = distance
+				target = id
+		assert(ECON._laser_block_nearest(blocks, positions, point, ECON.LASER_RANGE * ECON.LASER_RANGE, -1) == [best, target])
+
 func _initialize() -> void:
+	_test_laser_blocks()
 	_test_hostile_buckets()
 	_test_repair_cells()
 	_test_handoff_candidates()
