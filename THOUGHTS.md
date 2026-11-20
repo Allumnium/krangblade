@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.37: Sector containment accepts points inside a conservative precomputed inner disk, accounting for maximum corner rounding. Exact boundary checks remain unchanged. Runtime parity and profiler pending.
+
 - v0.64.36: Production loop reuses warehouse capacity, next-tier recipe and per-resource stock rather than repeated storage helper lookups. Population/rate calculations remain live and queue processing unchanged. Runtime and measured improvement pending.
 
 - v0.64.35: Latest profiler highlights _work_planet, sector_limit, _sync_operations and combat. Yard selection no longer recounts the queue for every unpinned candidate or repeats eligibility calculations. Preserve per-yard live stock and crew checks; runtime and self-time benchmark pending. Screenshot timings were truncated.
