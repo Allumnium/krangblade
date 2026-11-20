@@ -6,7 +6,9 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
-- [ ] v0.79.1: Verify menu soundtrack audible at default volume, saved mute/zero volume recovery via menu toggle, navigation and match return. Listening/runtime pending.
+- [ ] v0.79.2: Verify menu navigation and automatic music playback without the standalone toggle; shared settings remain honored.
+
+- [ ] v0.79.1: Verify menu soundtrack audible at default volume, saved mute/zero volume and recovery via match audio settings, navigation and match return. Listening/runtime pending.
 
 - [ ] v0.79.0: Audition layered SFX and original menu loop; assess startup synthesis cost, clipping, loop seam, mute/volume persistence, menu navigation and return from match. Runtime/audio pending.
 

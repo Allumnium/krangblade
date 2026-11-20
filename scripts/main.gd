@@ -231,33 +231,12 @@ func _show_menu() -> void:
 	center.add_child(actions)
 	actions.add_child(_button("SINGLE PLAYER", _show_solo_setup))
 	actions.add_child(_button("MULTIPLAYER", _show_multiplayer))
-	var music_toggle := CheckButton.new()
-	music_toggle.text = "Menu music"
-	var bus: int = AudioServer.get_bus_index("Music")
-	music_toggle.button_pressed = bus >= 0 and not AudioServer.is_bus_mute(bus) and AudioServer.get_bus_volume_db(bus) > -79.0
-	music_toggle.toggled.connect(_set_menu_music_enabled)
-	actions.add_child(music_toggle)
 	actions.add_child(_button("QUIT", func() -> void: get_tree().quit()))
 	col.add_spacer(false)
 	var version_label := _text("v%s" % str(ProjectSettings.get_setting("application/config/version")), 12, MUTED)
 	version_label.name = "GameVersion"
 	version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	col.add_child(version_label)
-
-func _set_menu_music_enabled(enabled: bool) -> void:
-	var bus: int = AudioServer.get_bus_index("Music")
-	if bus < 0:
-		return
-	var config := ConfigFile.new()
-	config.load("user://warbound_settings.cfg")
-	if enabled and float(config.get_value("audio", "music", 100.0)) <= 0.0:
-		config.set_value("audio", "music", 100.0)
-		AudioServer.set_bus_volume_db(bus, 0.0)
-	AudioServer.set_bus_mute(bus, not enabled)
-	config.set_value("audio", "music_muted", not enabled)
-	config.save("user://warbound_settings.cfg")
-	if enabled and is_instance_valid(menu_music) and not menu_music.playing:
-		menu_music.play()
 
 func _setup_header(col: VBoxContainer, title_text: String) -> void:
 	var header := HBoxContainer.new()

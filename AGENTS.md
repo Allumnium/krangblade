@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.79.2: Remove main-menu Music toggle; soundtrack still starts automatically and obeys saved shared Music settings.
+
 - v0.79.1: Normalize menu score PCM, raise playback gain, initialize player before menu build and provide a menu music toggle respecting shared settings.
 
 - v0.79.0: Layer filtered noise, modulation, subharmonics, debris and short echoes into synthesized cues; expand combat/service variants; preserve voice caps and WAV overrides. Original looping stereo menu score uses saved Music volume/mute and survives menu rebuilds only.
