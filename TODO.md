@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.79.1: Verify menu soundtrack audible at default volume, saved mute/zero volume recovery via menu toggle, navigation and match return. Listening/runtime pending.
+
 - [ ] v0.79.0: Audition layered SFX and original menu loop; assess startup synthesis cost, clipping, loop seam, mute/volume persistence, menu navigation and return from match. Runtime/audio pending.
 
 - [ ] v0.78.6: Verify halved station/yard hull durability and station shield capacity, reinforced plating, 5%/s shield recharge, structure destruction and host/guest combat replication. Runtime pending.

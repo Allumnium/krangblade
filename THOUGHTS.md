@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.79.1: User reports inaudible menu synthesis. Low PCM amplitude compounded by -12 dB player gain and possible saved mute/zero volume; normalize samples, increase gain and expose shared Music toggle. Actual cause not confirmed by playback.
+
 - v0.79.0: Synthesized audio now has layered transient/body/tail textures, deterministic variants and a cached original 40 s stereo menu ambient loop. Existing match music stays unchanged. Audition balance and measure first-open generation cost before further toolchain investment.
 
 - v0.78.6: Structure hull durability halved, including reinforcement; existing station shield percentages unchanged on smaller hulls. Yards do not currently have their own shields. Reduce global shield recharge from 20% to 5%/s to make disengagement meaningful; playtest siege pacing.
