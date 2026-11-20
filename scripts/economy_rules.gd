@@ -631,7 +631,7 @@ static func population_growth(planet: Dictionary) -> float:
 static func organics_demand(planet: Dictionary) -> float:
 	if not has_planets(planet):
 		return 0.0
-	return planetary_population(planet) / POPULATION_PER_ORGANICS_RATE * (1.0 + (0.15 if has_reward(planet, "industry") else 0.0) + (0.15 if has_reward(planet, "population") else 0.0))
+	return planetary_population(planet) / POPULATION_PER_ORGANICS_RATE
 
 static func consumption(planet: Dictionary, resource: String) -> float:
 	if int(planet["owner"]) == 0 or not has_planets(planet):
@@ -640,7 +640,7 @@ static func consumption(planet: Dictionary, resource: String) -> float:
 		return organics_demand(planet)
 	var upkeep: float = 1.0
 	if resource == "Metals":
-		for key in ["crystals", "agriculture", "storage"]:
+		for key in ["crystals"]:
 			if has_reward(planet, key):
 				upkeep += 0.15
 	return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * planetary_population(planet) / HOME_POPULATION * upkeep
@@ -7863,11 +7863,11 @@ static func specialization_grade(system: Dictionary, resource: String) -> int:
 	return 0
 
 const CONQUEST_REWARDS = {
-	"industry": ["Industrial Revolution", "+50% planetary Metals output", "+15% civilian Organics demand"],
+	"industry": ["Industrial Revolution", "+50% planetary Metals output", ""],
 	"crystals": ["Crystalline Synthesis", "+100% Incubator output", "+15% civilian Metals demand"],
-	"agriculture": ["Agricultural Revolution", "+50% planetary Organics output", "+15% civilian Metals demand"],
-	"population": ["Population Boom", "+50% terrestrial growth ceiling", "+15% civilian Organics demand"],
-	"storage": ["Megastructures", "+100% station storage capacity", "+15% civilian Metals demand"]
+	"agriculture": ["Agricultural Revolution", "+50% planetary Organics output", ""],
+	"population": ["Population Boom", "+50% terrestrial growth ceiling", ""],
+	"storage": ["Megastructures", "+100% station storage capacity", ""]
 }
 
 static func has_reward(system: Dictionary, key: String) -> bool:

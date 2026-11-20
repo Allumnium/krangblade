@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.69.1: Conquest rewards need not have drawbacks. Prefer pure benefits for simple upgrades, optional modest thematic costs for intricate technologies. Show drawbacks only when applicable. Four economic cards now have no upkeep penalty; Crystalline Synthesis retains its Metals demand.
+
 - v0.69.0: Advanced objective pool follows fixed tracks, with host-seeded nonduplicate assignments and lifetime antimatter processing counted on science collection. No item consumed by processing.
 
 - v0.68.0: Fixed escalating Metals, population and colonization tracks; completed tier displays for 10 authority real-time seconds before next tier. Lifetime extraction and peak population count. Random advanced science objectives and warp gates are agreed follow-up.
