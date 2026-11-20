@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.71.0: Screenshot showed excessively tall conquest dialog. Use explicit compact Window and scrolling content. Category points and reward pools split; Tech appears with science objective/balance. Shield and armor values provisional; validate costs, combat, health presentation and performance. Warp gates/cloak/carrier remain pending. Existing shared snapshot still contains other players' drafts; isolate private offers without multiplying large fleet snapshot encoding.
+
 - v0.70.6: Screenshot showed single-selection shipyard portrait stuck at the top of a tall inspector. Center the shared portrait/HP group vertically; verify short and tall consoles manually.
 
 - v0.70.4: User observed 2M and 200k population objectives simultaneously; advanced pool now excludes metrics with unfinished fixed tracks. Metals uses current holdings, not mining history; crew included in totals without changing food demand. Initial stock can immediately complete early Metals tiers; review thresholds if needed.
@@ -22,7 +24,7 @@
 
 - v0.66.4: Incubator base rate reduced 90%; asteroid extraction unchanged. Verify advanced construction pacing and AI economy.
 
-- v0.66.3: Empire targets are local match UI state (0–10,000 each); no automation or network commands yet. Verify hotkey, modal focus and pulse readability.
+- v0.66.3 superseded by v0.70.0–0.70.2: Empire targets are authoritative autoqueue settings capped at 500. Verify hotkey, modal focus and pulse readability.
 
 - v0.66.2: Objective rows use inline right-aligned counters; Military replaces Conquest category. Upgrade modal now shows framed cards and current balance; verify visual fit and input.
 

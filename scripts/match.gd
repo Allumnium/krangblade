@@ -298,15 +298,15 @@ var logistics_lens: Button
 var active_lens: String = "logistics"
 var logistics_overlay: Control
 var objectives_overlay: Control
-var conquest_button: Button
-var conquest_dialog: AcceptDialog
+var conquest_buttons: Dictionary = {}
+var conquest_category: String = "economic"
+var conquest_dialog: Window
 var conquest_cards: VBoxContainer
 var conquest_card_signature: String = ""
 var empire_dialog: AcceptDialog
 var empire_rows: VBoxContainer
 var empire_controls: Dictionary = {}
 var empire_signature: String = ""
-var conquest_balance: int = 0
 var conquest_pulse_time: float = 0.0
 const OBJECTIVES_WIDTH: float = 328.0
 var global_resource_fills: Dictionary = {}
@@ -392,6 +392,7 @@ var selection_icons: Dictionary = {}
 var selection_portrait: VBoxContainer
 var selection_portrait_art: TextureRect
 var selection_portrait_health: Label
+var selection_portrait_shield: Label
 var selection_portrait_icons: Dictionary = {}
 var fleet_cargo: HBoxContainer
 var fleet_cargo_footer: HBoxContainer
@@ -593,26 +594,34 @@ func _build_ui() -> void:
 	objectives_overlay.z_index = 3
 	objectives_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	objectives_overlay.draw.connect(_draw_objectives_overlay)
-	conquest_button = Button.new()
-	map_canvas.add_child(conquest_button)
-	conquest_button.z_index = 4
-	conquest_button.focus_mode = Control.FOCUS_NONE
-	conquest_button.text = "Conquest points: 0"
-	conquest_button.tooltip_text = "Open conquest upgrades"
-	HUD.action(conquest_button, Color("#e9cb7c"))
-	conquest_button.pressed.connect(_open_conquest_upgrades)
-	conquest_dialog = AcceptDialog.new()
-	conquest_dialog.title = "Conquest upgrades"
+	for category in ECONOMY.REWARD_CATEGORIES:
+		var button := Button.new()
+		map_canvas.add_child(button)
+		button.z_index = 4
+		button.focus_mode = Control.FOCUS_NONE
+		HUD.action(button, Color("#e9cb7c"))
+		button.pressed.connect(_open_conquest_upgrades.bind(category))
+		conquest_buttons[category] = button
+	conquest_dialog = Window.new()
+	conquest_dialog.title = "Choose an upgrade"
 	conquest_dialog.theme = theme
+	conquest_dialog.transient = true
 	conquest_dialog.exclusive = true
 	conquest_dialog.unresizable = true
-	conquest_dialog.ok_button_text = "Close"
+	conquest_dialog.visible = false
 	add_child(conquest_dialog)
-	HUD.action(conquest_dialog.get_ok_button())
+	conquest_dialog.close_requested.connect(conquest_dialog.hide)
+	var background := PanelContainer.new()
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	background.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#45617b"), 14, 4))
+	conquest_dialog.add_child(background)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	background.add_child(scroll)
 	conquest_cards = VBoxContainer.new()
-	conquest_cards.custom_minimum_size.x = 620
-	conquest_cards.add_theme_constant_override("separation", 12)
-	conquest_dialog.add_child(conquest_cards)
+	conquest_cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	conquest_cards.add_theme_constant_override("separation", 10)
+	scroll.add_child(conquest_cards)
 	_layout_conquest_button()
 	_build_exhaust_batch()
 	beam_batch = _build_effect_batch(false)
@@ -2167,7 +2176,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	button.accept_event()
 
 func _yard_build_available(system: Dictionary, slot: int, kind: String) -> bool:
-	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.affordable(system, ECONOMY._cost(kind, 1)) and (kind != "ship" or bool(system["home"]))
+	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.affordable(system, ECONOMY.construction_cost(system, kind, 1)) and (kind != "ship" or bool(system["home"]))
 
 func _build_at_yard(kind: String) -> void:
 	var state: Dictionary = _state()
@@ -2214,7 +2223,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	_refresh_queue_tiles(yard_queue, yard_queue_rows, system, jobs, owned, active_id)
 	for kind in ECONOMY.SHIP_KINDS:
 		var button: Button = yard_commands[kind]
-		var recipe: Dictionary = ECONOMY._cost(kind, 1)
+		var recipe: Dictionary = ECONOMY.construction_cost(system, kind, 1)
 		button.disabled = not owned or not ECONOMY.yard_fits(system, selected_yard, kind) or (kind == "ship" and not bool(system["home"]))
 		var available: bool = owned and _yard_build_available(system, selected_yard, kind)
 		var auto: bool = yard.get("autobuild", []).has(kind)
@@ -2816,6 +2825,11 @@ func _build_selection_portrait(parent: Container) -> void:
 	selection_portrait_health.autowrap_mode = TextServer.AUTOWRAP_OFF
 	selection_portrait_health.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	selection_portrait.add_child(selection_portrait_health)
+	selection_portrait_shield = _label("", 11)
+	selection_portrait_shield.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	selection_portrait_shield.add_theme_color_override("font_color", Color("#80caff"))
+	selection_portrait.add_child(selection_portrait_shield)
+	selection_portrait_shield.hide()
 	selection_portrait.hide()
 
 func _queue_health_rect(rect: Rect2, tint: Color) -> void:
@@ -2823,14 +2837,21 @@ func _queue_health_rect(rect: Rect2, tint: Color) -> void:
 		return
 	health_entries.append([Transform2D(0.0, rect.size, 0.0, rect.get_center()), tint])
 
-func _draw_damage_bar(point: Vector2, radius: float, fraction: float) -> void:
-	if fraction >= 1.0:
+func _draw_damage_bar(point: Vector2, radius: float, fraction: float, shield: float = -1.0) -> void:
+	if fraction >= 1.0 and shield < 0.0:
 		return
 	var width: float = clampf(radius * 2.0, 18.0, 100.0)
 	var base: Vector2 = point + Vector2(-width * 0.5, -maxf(8.0, radius) - 6.0)
 	_queue_health_rect(Rect2(base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
 	_queue_health_rect(Rect2(base, Vector2(width, 3.0)), Color("#283748"))
 	_queue_health_rect(Rect2(base, Vector2(width * clampf(fraction, 0.0, 1.0), 3.0)), _health_color(fraction))
+	if shield >= 0.0:
+		_queue_health_rect(Rect2(base + Vector2(0, 4), Vector2(width, 3)), Color("#203f5c"))
+		_queue_health_rect(Rect2(base + Vector2(0, 4), Vector2(width * clampf(shield, 0.0, 1.0), 3)), Color("#6fbaff"))
+
+func _shield_fraction(entity: Dictionary) -> float:
+	var maximum: float = float(entity.get("shield_max", 0.0))
+	return float(entity.get("shield", 0.0)) / maximum if maximum > 0.0 else -1.0
 
 func _health_color(fraction: float) -> Color:
 	return Color("#e45b60") if fraction < 0.2 else (Color("#eac64a") if fraction < 0.5 else Color("#55c88b"))
@@ -2900,6 +2921,10 @@ func _refresh_selection_portrait(ship: Dictionary, system: Dictionary, body_sele
 	selection_portrait_health.visible = maximum > 0.0
 	selection_portrait_health.text = "%.0f / %.0f" % [hp, maximum] if maximum > 0.0 else ""
 	selection_portrait_health.add_theme_color_override("font_color", tint)
+	var entity: Dictionary = ship if not ship.is_empty() else (system.get("station", {}) if kind == "station" else {})
+	var shield_max: float = float(entity.get("shield_max", 0.0))
+	selection_portrait_shield.visible = shield_max > 0.0
+	selection_portrait_shield.text = "Shield %.0f / %.0f" % [float(entity.get("shield", 0.0)), shield_max]
 
 func _refresh_weapon_details(ship: Dictionary, system: Dictionary, body_selected: bool, yard_selected: bool, grouped: bool) -> void:
 	var details: String = ""
@@ -5318,7 +5343,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = _production_icon(kind, _empire_color(_me()))
 		portrait.modulate = Color.WHITE if eligible else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [_ship_kind_name(kind), _ship_stats(kind)], ECONOMY._cost(kind, 1), float(ECONOMY.CREW_COSTS[kind]), available)
+		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [_ship_kind_name(kind), _ship_stats(kind)], ECONOMY.construction_cost(state["planets"][refs[0].x] if not refs.is_empty() else {}, kind, 1), float(ECONOMY.CREW_COSTS[kind]), available)
 	var can_clear: bool = false
 	var can_upgrade: Dictionary = {2: false, 3: false}
 	for ref in refs:
@@ -6190,14 +6215,10 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 		map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
-	if is_instance_valid(conquest_button):
-		if conquest_balance > 0:
-			conquest_pulse_time += delta
-			var glow: float = 0.5 + 0.5 * sin(conquest_pulse_time * TAU / 1.4)
-			conquest_button.modulate = Color(1.0 + glow * 0.3, 0.88 + glow * 0.22, 0.65 + glow * 0.35)
-		else:
-			conquest_pulse_time = 0.0
-			conquest_button.modulate = Color.WHITE
+	conquest_pulse_time += delta
+	var glow: float = 0.5 + 0.5 * sin(conquest_pulse_time * TAU / 1.4)
+	for button in conquest_buttons.values():
+		button.modulate = Color(1.0 + glow * 0.3, 0.88 + glow * 0.22, 0.65 + glow * 0.35) if not button.disabled else Color.WHITE
 	if formation_button != 0 and not Input.is_mouse_button_pressed(formation_button):
 		formation_button = 0
 		map_canvas.queue_redraw()
@@ -6931,7 +6952,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 	if selected_station:
 		_draw_selection_ring(center, radius + 4.0)
 	var hp: float = float(system["station"]["hp"]) / ECONOMY.station_max_hp(system)
-	_draw_damage_bar(center, radius, hp)
+	_draw_damage_bar(center, radius, hp, _shield_fraction(system["station"]))
 
 func _draw_shipyard_construction(state: Dictionary, index: int, job: Dictionary, tint: Color, elapsed: float) -> void:
 	var port: int = int(job.get("station_slot", job["level"]))
@@ -7889,7 +7910,7 @@ func _draw_map() -> void:
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
-		_draw_damage_bar(point, _hull_ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])))
+		_draw_damage_bar(point, _hull_ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
 		if scale < 0.15 * overview:
 			_queue_overview_hull(_overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
 			continue
@@ -7964,11 +7985,19 @@ func _draw_objectives_overlay() -> void:
 	var font: Font = ThemeDB.fallback_font
 	var x: float = maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH)
 	var y: float = HEADER_HEIGHT + 24.0
-	var rows: Array = [["OBJECTIVES", "", ""], ["Economic", "", ""]]
-	for objective in ECONOMY.active_objectives(progress, float(state.get("objective_clock", 0.0))):
-		if objective["track"] == "colonies":
-			rows.append(["Military", "", ""])
-		rows.append([objective["label"], objective["id"], objective["counter"]])
+	var rows: Array = [["OBJECTIVES", "", ""]]
+	var objectives: Array = ECONOMY.active_objectives(progress, float(state.get("objective_clock", 0.0)))
+	for category in ECONOMY.REWARD_CATEGORIES:
+		var added: bool = false
+		for objective in objectives:
+			var metric: String = str(objective.get("id", ""))
+			var classification: String = ECONOMY.objective_category(metric if not metric.is_empty() else str(objective["track"]))
+			if classification != category:
+				continue
+			if not added:
+				rows.append([str(category).capitalize(), "", ""])
+				added = true
+			rows.append([objective["label"], objective["id"], objective["counter"]])
 	for row in rows:
 		var label: String = row[0]
 		var key: String = row[1]
@@ -8007,34 +8036,60 @@ func _draw_objectives_overlay() -> void:
 		y += 17.0
 
 func _layout_conquest_button() -> void:
-	if not is_instance_valid(conquest_button):
+	if conquest_buttons.is_empty():
 		return
-	conquest_button.position = Vector2(maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH), HEADER_HEIGHT + 24.0 + 6.0 * 22.0 - 12.0)
-	conquest_button.size = Vector2(minf(OBJECTIVES_WIDTH - 12.0, maxf(100.0, map_canvas.size.x - 20.0)), 30.0)
+	var state: Dictionary = _state()
+	var progress: Dictionary = state.get("objectives", {}).get(_me(), {})
+	var objectives: Array = ECONOMY.active_objectives(progress, float(state.get("objective_clock", 0.0)))
+	var categories: Array = []
+	for objective in objectives:
+		var key: String = str(objective.get("id", ""))
+		var category: String = ECONOMY.objective_category(key if not key.is_empty() else str(objective["track"]))
+		if not categories.has(category):
+			categories.append(category)
+	var show_tech: bool = categories.has("tech") or ECONOMY.reward_points(progress, "tech") > 0
+	var count: int = 3 if show_tech else 2
+	var width: float = minf(OBJECTIVES_WIDTH - 12.0, maxf(100.0, map_canvas.size.x - 20.0))
+	var button_width: float = (width - 4.0 * (count - 1)) / count
+	var y: float = HEADER_HEIGHT + 24.0 + (1.0 + objectives.size() + categories.size()) * 22.0 - 12.0
+	for i in range(ECONOMY.REWARD_CATEGORIES.size()):
+		var category: String = ECONOMY.REWARD_CATEGORIES[i]
+		var button: Button = conquest_buttons[category]
+		button.visible = not state.is_empty() and (category != "tech" or show_tech)
+		button.position = Vector2(maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH) + i * (button_width + 4.0), y)
+		button.size = Vector2(button_width, 30.0)
 
 func _refresh_conquest_button(state: Dictionary) -> void:
-	if not is_instance_valid(conquest_button):
+	if conquest_buttons.is_empty():
 		return
-	conquest_button.visible = not state.is_empty()
-	var points: int = int(state.get("objectives", {}).get(_me(), {}).get("points", 0))
-	conquest_balance = points
-	conquest_button.text = "Conquest points: %d" % points
+	var progress: Dictionary = state.get("objectives", {}).get(_me(), {})
+	for category in ECONOMY.REWARD_CATEGORIES:
+		var button: Button = conquest_buttons[category]
+		var points: int = ECONOMY.reward_points(progress, category)
+		button.text = "%s: %d CP" % [str(category).capitalize(), points]
+		button.disabled = points <= 0 or ECONOMY.reward_offer(progress, category).is_empty()
+		button.tooltip_text = "Choose a %s or general upgrade" % category
+	_layout_conquest_button()
 	if is_instance_valid(conquest_dialog) and conquest_dialog.visible:
-		_refresh_reward_cards()
+		if ECONOMY.reward_points(progress, conquest_category) <= 0:
+			conquest_dialog.hide()
+			conquest_card_signature = ""
+		else:
+			_refresh_reward_cards()
 
 func _refresh_reward_cards() -> void:
 	var progress: Dictionary = _state().get("objectives", {}).get(_me(), {})
-	var signature: String = str(progress.get("offer", [])) + str(progress.get("rewards", [])) + str(progress.get("points", 0))
+	var signature: String = conquest_category + str(ECONOMY.reward_offer(progress, conquest_category)) + str(progress.get("rewards", [])) + str(ECONOMY.reward_points(progress, conquest_category))
 	if signature == conquest_card_signature:
 		return
 	conquest_card_signature = signature
 	for child in conquest_cards.get_children():
 		conquest_cards.remove_child(child)
 		child.queue_free()
-	var points: int = int(progress.get("points", 0))
+	var points: int = ECONOMY.reward_points(progress, conquest_category)
 	var generation: int = progress.get("rewards", []).size()
 	var heading := Label.new()
-	heading.text = "Select a conquest reward · %d CP" % points
+	heading.text = "Choose one %s upgrade · %d CP" % [conquest_category.capitalize(), points]
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	heading.add_theme_font_size_override("font_size", 20)
 	conquest_cards.add_child(heading)
@@ -8042,11 +8097,10 @@ func _refresh_reward_cards() -> void:
 	cards.alignment = BoxContainer.ALIGNMENT_CENTER
 	cards.add_theme_constant_override("separation", 10)
 	conquest_cards.add_child(cards)
-	var icon_keys: Dictionary = {"industry": "Metals", "crystals": "Crystals", "agriculture": "Organics", "population": "habitation", "storage": "warehouse"}
-	for key in progress.get("offer", []):
+	for key in ECONOMY.reward_offer(progress, conquest_category):
 		var reward: Array = ECONOMY.CONQUEST_REWARDS[key]
 		var card := PanelContainer.new()
-		card.custom_minimum_size = Vector2(192, 290)
+		card.custom_minimum_size = Vector2(192, 300)
 		var frame: StyleBoxFlat = HUD.surface(Color("#102b40"), Color("#d6b46a"), 12, 8)
 		frame.set_border_width_all(2)
 		frame.shadow_color = Color("#0a0f19")
@@ -8057,7 +8111,7 @@ func _refresh_reward_cards() -> void:
 		content.add_theme_constant_override("separation", 12)
 		card.add_child(content)
 		var art := TextureRect.new()
-		HUD.fixed_icon(art, _station_command_icon(str(icon_keys.get(key, "upgrade")), 72), 72)
+		HUD.fixed_icon(art, _station_command_icon(str(reward[4]), 72), 72)
 		art.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		content.add_child(art)
 		var title_label := Label.new()
@@ -8086,36 +8140,47 @@ func _refresh_reward_cards() -> void:
 		spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		content.add_child(spacer)
 		var buy := Button.new()
-		buy.text = "Acquire · 1 CP"
+		buy.text = "SELECT · 1 CP"
+		buy.custom_minimum_size.y = 38
 		buy.disabled = points < 1
-		HUD.action(buy, Color("#d6b46a"))
+		HUD.action(buy, Color("#e9cb7c"))
+		buy.add_theme_stylebox_override("normal", HUD.surface(Color("#5a4824"), Color("#edc76f"), 5, 4))
+		buy.add_theme_stylebox_override("hover", HUD.surface(Color("#80642c"), Color("#fff0b2"), 5, 4))
 		content.add_child(buy)
 		buy.pressed.connect(_buy_conquest_reward.bind(str(key), generation, cards))
-	if progress.get("offer", []).is_empty():
+	if ECONOMY.reward_offer(progress, conquest_category).is_empty():
 		var empty := Label.new()
-		empty.text = "All available rewards acquired." if generation >= ECONOMY.CONQUEST_REWARDS.size() else "Earn conquest points to unlock your first choices."
+		empty.text = "No eligible rewards remain in this category."
 		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cards.add_child(empty)
-	var owned := Label.new()
-	var names: PackedStringArray = []
-	for key in progress.get("rewards", []):
-		names.append(ECONOMY.CONQUEST_REWARDS[key][0])
-	owned.text = "Acquired: " + (", ".join(names) if not names.is_empty() else "None")
-	owned.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	conquest_cards.add_child(owned)
+	var footer := HBoxContainer.new()
+	footer.alignment = BoxContainer.ALIGNMENT_END
+	conquest_cards.add_child(footer)
+	var close := Button.new()
+	close.text = "Close"
+	HUD.action(close)
+	footer.add_child(close)
+	close.pressed.connect(conquest_dialog.hide)
 
 func _buy_conquest_reward(key: String, generation: int, cards: HBoxContainer) -> void:
-	# Lock the old cards immediately; the authority publishes the new draft.
 	for card in cards.get_children():
 		for child in card.get_child(0).get_children():
 			if child is Button:
 				child.disabled = true
-	session.call("request_conquest_reward", key, generation)
+	var progress: Dictionary = _state().get("objectives", {}).get(_me(), {})
+	if ECONOMY.reward_points(progress, conquest_category) == 1:
+		conquest_dialog.hide()
+	session.call("request_conquest_reward", key, generation, conquest_category)
 
-func _open_conquest_upgrades() -> void:
+func _open_conquest_upgrades(category: String) -> void:
+	var progress: Dictionary = _state().get("objectives", {}).get(_me(), {})
+	if ECONOMY.reward_points(progress, category) <= 0 or ECONOMY.reward_offer(progress, category).is_empty():
+		return
+	conquest_category = category
 	conquest_card_signature = ""
 	_refresh_reward_cards()
-	conquest_dialog.popup_centered(Vector2i(660, 420))
+	var viewport_size: Vector2 = get_viewport_rect().size
+	conquest_dialog.popup_centered(Vector2i(mini(660, int(viewport_size.x) - 32), mini(420, int(viewport_size.y) - 56)))
 
 func _build_empire_dialog() -> void:
 	empire_dialog = AcceptDialog.new()

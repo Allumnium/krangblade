@@ -1046,29 +1046,40 @@ func _test_objective_holdings() -> void:
 func _test_reward_redraft() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var progress: Dictionary = ECON.objective_progress(state, 1)
-	progress["points"] = 1
-	ECON._fill_reward_offer(state, 1)
-	var previous: Array = progress["offer"].duplicate()
+	progress["points"]["economic"] = 2
+	progress["points"]["military"] = 1
+	ECON._fill_reward_offer(state, 1, "economic")
+	ECON._fill_reward_offer(state, 1, "military")
+	var previous: Array = ECON.reward_offer(progress, "economic").duplicate()
 	assert(previous.size() == 3)
 	var chosen: String = previous[0]
-	assert(ECON.acquire_reward(state, 1, chosen, 0))
-	assert(int(progress["points"]) == 0 and progress["offer"].size() == 3)
-	assert(not progress["offer"].has(chosen))
-	for key in ECON.CONQUEST_REWARDS:
-		if not previous.has(key):
-			assert(progress["offer"].has(key))
-	var next: Array = progress["offer"].duplicate()
-	ECON._fill_reward_offer(state, 1)
-	assert(progress["offer"] == next)
-	progress["points"] = 4
-	assert(not ECON.acquire_reward(state, 1, str(next[0]), 0))
-	assert(int(progress["points"]) == 4)
-	for generation in range(1, ECON.CONQUEST_REWARDS.size()):
-		assert(ECON.acquire_reward(state, 1, str(progress["offer"][0]), generation))
-		assert(progress["offer"].size() == mini(3, ECON.CONQUEST_REWARDS.size() - generation - 1))
-	assert(progress["offer"].is_empty() and int(progress["points"]) == 0)
+	assert(not ECON.acquire_reward(state, 1, chosen, 0, "tech"))
+	assert(ECON.acquire_reward(state, 1, chosen, 0, "economic"))
+	assert(ECON.reward_points(progress, "economic") == 1 and ECON.reward_points(progress, "military") == 1)
+	assert(not ECON.reward_offer(progress, "economic").has(chosen))
+	assert(not ECON.reward_offer(progress, "military").has(chosen))
+	assert(not ECON.acquire_reward(state, 1, str(previous[1]), 0, "economic"))
+	assert(ECON.acquire_reward(state, 1, str(ECON.reward_offer(progress, "economic")[0]), 1, "economic"))
+	assert(ECON.reward_points(progress, "economic") == 0 and ECON.reward_offer(progress, "economic").is_empty())
+	assert(not ECON.reward_eligible([], "shield_2", "military"))
+	assert(ECON.reward_eligible(["shield_1"], "shield_2", "military"))
+	assert(not ECON.reward_eligible(["shield_1"], "shield_3", "military"))
+	assert(not ECON.reward_eligible([], "shield_1", "economic"))
 	assert(ECON.objective_progress(state, 2).get("rewards", []).is_empty())
-	print("PASS: conquest redraft, stale offers, zero balance and exhausted pool")
+	var hull: Dictionary = {"hp": 100.0}
+	ECON._update_shield(hull, 30.0, 0.0, 0.0)
+	ECON._apply_reward_damage(hull, 100.0, 40.0, 1.0)
+	assert(hull["shield"] == 0.0 and hull["hp"] == 90.0)
+	ECON._update_shield(hull, 30.0, 5.9, 1.0)
+	assert(hull["shield"] == 0.0)
+	ECON._update_shield(hull, 30.0, 6.0, 1.0)
+	assert(hull["shield"] == 6.0)
+	hull["armor"] = 0.15
+	ECON._apply_reward_damage(hull, 100.0, 16.0, 6.0)
+	assert(is_equal_approx(float(hull["hp"]), 81.5))
+	var price: Dictionary = ECON.construction_cost({"conquest_rewards": ["shield_1", "shield_2", "armor"]}, "fighter", 1)
+	assert(price["Crystals"] == 27.0 and price["Metals"] == 311.0)
+	print("PASS: categorized conquest rewards, stale drafts, hidden zero-balance offers, shield absorption/recharge and armor costs")
 
 func _initialize() -> void:
 	_test_reward_redraft()
