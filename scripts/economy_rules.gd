@@ -3857,16 +3857,40 @@ static func _work_science(state: Dictionary, graph: Dictionary, ship: Dictionary
 
 static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionary, node: int, point: Vector2, dt: float, reach: float = 0.0) -> bool:
 	var pos: Vector2 = ship["position"]
-	var nav: Dictionary = _manual_nav(state, graph, ship, node)
-	var goal: int = nav["node"]
+	var candidates: Array[int] = military_pois(state, int(ship["owner"]))
+	var budget: float = ship_speed(str(ship["kind"])) * dt
+	var waypoint: Vector2 = point
+	if not lane_direct(graph, pos, point, candidates):
+		var paths: Dictionary = _military_paths(graph, node)
+		var origin: int = sector_at(graph, pos, candidates)
+		if origin < 0:
+			var lane: Vector2i = lane_at(graph, pos, candidates)
+			if lane.x >= 0:
+				var cost_a: float = pos.distance_to(graph["points"][lane.x]) + float(paths["distance"].get(lane.x, INF))
+				var cost_b: float = pos.distance_to(graph["points"][lane.y]) + float(paths["distance"].get(lane.y, INF))
+				origin = lane.x if cost_a <= cost_b else lane.y
+			else:
+				origin = int(ship["at"])
+			if origin < 0 or origin >= graph["points"].size():
+				return false
+			waypoint = graph["points"][origin]
+		elif paths["next"].has(origin):
+			# Center the hull before entering a new corridor, preventing corner cutting.
+			var center: Vector2 = graph["points"][origin]
+			var next: Vector2 = graph["points"][int(paths["next"][origin])]
+			waypoint = next if lane_direct(graph, pos, next, candidates) else center
+		else:
+			waypoint = graph["points"][origin]
 	ship["route"] = []
 	ship["leg"] = 0.0
-	ship["dest"] = goal
-	if ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
-		ship["operation_target"] = goal
-	_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, maxf(0.0, pos.distance_to(point) - reach)))
-	if (ship["position"] as Vector2).distance_to(point) <= reach + EPS:
-		ship["at"] = goal
+	var nav: Dictionary = _manual_nav(state, graph, ship, node)
+	ship["dest"] = nav["node"]
+	if military_hull(str(ship["kind"])):
+		ship["operation_target"] = node
+	var stop: float = reach if waypoint == point else 0.0
+	_navigate(ship, waypoint, minf(budget, maxf(0.0, pos.distance_to(waypoint) - stop)))
+	if waypoint == point and (ship["position"] as Vector2).distance_to(point) <= reach + EPS:
+		ship["at"] = nav["node"]
 		return true
 	return false
 
@@ -3943,8 +3967,21 @@ static func lane_at(graph: Dictionary, point: Vector2, candidates: Array = []) -
 	return result
 
 static func lane_direct(graph: Dictionary, origin: Vector2, destination: Vector2, candidates: Array) -> bool:
-	# Territory validates destinations, not the intervening flight line.
-	return origin.is_finite() and destination.is_finite() and (sector_at(graph, destination, candidates) >= 0 or lane_at(graph, destination, candidates).x >= 0)
+	if not origin.is_finite() or not destination.is_finite():
+		return false
+	# A sector or corridor is convex. A shared region permits an exact straight leg.
+	var sector: int = sector_at(graph, origin, candidates)
+	if sector >= 0 and sector_contains(graph, sector, destination):
+		return true
+	var lane: Vector2i = lane_at(graph, origin, candidates)
+	if lane.x >= 0 and lane_contains(graph, lane.x, lane.y, destination):
+		return true
+	# A center-to-center leg may begin in the sector and enter its corridor.
+	if sector >= 0:
+		for other in graph["adjacent"][sector]:
+			if candidates.has(other) and lane_contains(graph, sector, other, origin) and lane_contains(graph, sector, other, destination):
+				return true
+	return false
 
 
 static func patrol_node(state: Dictionary, graph: Dictionary, player: int, point: Vector2) -> int:
@@ -7900,8 +7937,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 				elif not (ship["route"] as Array).is_empty():
 					_move_formation(combat_graph, ship, dt)
 				elif patrol_point.is_finite():
-					_navigate(ship, patrol_point, ship_speed(str(ship.get("kind", "ship"))) * dt)
-					ship["patrol_arrived"] = (ship["position"] as Vector2).distance_to(patrol_point) <= EPS
+					ship["patrol_arrived"] = _manual_travel(state, combat_graph, ship, int(ship["patrol_from"] if ship["patrol_returning"] else ship["patrol_to"]), patrol_point, dt)
 		var ship_id: int = int(ship["id"])
 		# Only use the idle budget if the ship started and finished its
 		# work idle and did not already move this tick.
@@ -7993,6 +8029,9 @@ static func _update_objectives(state: Dictionary) -> void:
 				var award: int = 2 if winner else 1
 				var category: String = objective_category(key)
 				progress["points"][category] = reward_points(progress, category) + award
+				var earned: Dictionary = progress.get("earned_points", {})
+				earned[category] = int(earned.get(category, 0)) + award
+				progress["earned_points"] = earned
 				events.append({"player": player, "objective": key, "first": winner, "award": award, "elapsed": now})
 				if events.size() > 64:
 					events.pop_front()
@@ -8068,6 +8107,9 @@ static func objective_category(key: String) -> String:
 
 static func reward_points(progress: Dictionary, category: String) -> int:
 	return int(progress.get("points", {}).get(category, 0))
+
+static func lifetime_reward_points(progress: Dictionary, category: String) -> int:
+	return int(progress.get("earned_points", {}).get(category, 0))
 
 static func reward_offer(progress: Dictionary, category: String) -> Array:
 	return progress.get("offers", {}).get(category, [])

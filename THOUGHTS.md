@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.80.4: Direct-flight migration allowed gaps between sectors; restore graph waypoints for manual travel and patrol fallback. Existing avoidance and autonomous pursuit require further boundary testing. Track cumulative category CP separately from spendable balances.
+
 - v0.80.3: Reuse territory shader contours above fog with neutral tint in concealed cells; avoid a duplicate geometry pass. Scout sight increased 50%; logistics data restricted to friendly teams. Check rendering order and fog edge transitions.
 
 - v0.80.2: User screenshot shows fog ending outside map and coarse edges. Cover viewport exterior explicitly, halve cell width and use linear filtering. Finer grid raises stamping work; profile before further resolution increases.
