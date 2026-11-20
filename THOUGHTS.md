@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.70.1: Grouped station build buttons now consider all selected stations rather than primary affordability/unlock; housing resolves per station. Existing authority validates each order. Runtime pending.
+
 - v0.70.0: Empire targets now authority-owned. Periodic refill counts all live and queued hulls; paid orders remain on lowering target. Validate modal fit and interaction with manual/autobuild orders.
 
 - v0.69.1: User clarified drawbacks are optional, not universal. Industry, agriculture, population and storage are pure benefits; Crystalline Synthesis retains +15% Metals demand provisionally. Verify balance and card text.

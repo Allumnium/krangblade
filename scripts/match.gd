@@ -1988,7 +1988,7 @@ func _station_build(key: String) -> void:
 	var p: Dictionary = _planet()
 	if p.is_empty() or int(p["owner"]) != _me() or station_selected_index != selected:
 		return
-	if key == "housing":
+	if key == "housing" and building_selection_kind != "station":
 		key = "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
 	if key in ["yard", "pds"]:
 		_operation(key)
@@ -2024,7 +2024,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		var installed: bool = bool(p["station"].get(kind, false))
 		_upgrade_level_badge(button, 1 if installed else 0)
 		var pending: bool = ECONOMY._has_job(p, kind, "")
-		button.disabled = not owned or not ECONOMY.station_upgrade_available(p, kind)
+		button.disabled = not owned or not _any_selected_station_buildable(kind, p)
 		var hint: String = "Reinforced Plating I · %.0f s (1×)\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s (1×)\n+2 defensive lasers (4 total) · 18 damage each · 1 shot/s (1×) · range 180"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
@@ -2122,7 +2122,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		var repeat_key: String = _station_repeat_key(p, key)
 		var auto: bool = not repeat_key.is_empty() and bool(p.get("continuous", {}).get(repeat_key, false))
 		available = owned and available and ECONOMY.affordable(p, recipe)
-		button.disabled = not owned or not eligible or (repeat_key.is_empty() and not available)
+		button.disabled = not owned or (not _any_selected_station_buildable(key, p) if building_selection_kind == "station" and selected_buildings.size() > 1 else (not eligible or (repeat_key.is_empty() and not available)))
 		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		if button.has_meta("auto_border"):
 			(button.get_meta("auto_border") as Control).visible = auto
@@ -3968,8 +3968,13 @@ func _operation(kind: String, target: String = "") -> void:
 		var state: Dictionary = _state()
 		for ref in selected_buildings:
 			if _building_valid(state, ref, "station") and int(state["planets"][ref.x]["owner"]) == _me():
-				session.call("request_operation", ref.x, kind, target)
+				var local_target: String = target
+				if kind == "economy" and target == "housing":
+					local_target = "habitation" if ECONOMY.has_planets(state["planets"][ref.x]) else "orbital_housing"
+				session.call("request_operation", ref.x, kind, local_target)
 		return
+	if kind == "economy" and target == "housing":
+		target = "habitation" if ECONOMY.has_planets(_planet()) else "orbital_housing"
 	session.call("request_operation", selected, kind, target)
 
 func _cancel_job(id: int) -> void:
@@ -8193,3 +8198,29 @@ func _open_empire() -> void:
 	_refresh_empire(_state())
 	var viewport: Vector2 = get_viewport_rect().size
 	empire_dialog.popup_centered(Vector2i(int(minf(600, viewport.x - 40)), int(minf(570, viewport.y - 80))))
+
+func _any_selected_station_buildable(key: String, primary: Dictionary) -> bool:
+	if building_selection_kind != "station" or selected_buildings.size() <= 1:
+		return _station_buildable(key, primary)
+	var state: Dictionary = _state()
+	for ref in selected_buildings:
+		if _building_valid(state, ref, "station"):
+			var p: Dictionary = state["planets"][ref.x]
+			if int(p["owner"]) == _me() and _station_buildable(key, p):
+				return true
+	return false
+
+func _station_buildable(key: String, p: Dictionary) -> bool:
+	if key in ECONOMY.RESOURCES:
+		return ECONOMY.building_available(p, key) and ECONOMY.affordable(p, ECONOMY.building_cost(p, key))
+	match key:
+		"warehouse":
+			return ECONOMY.warehouse_available(p)
+		"housing":
+			return ECONOMY.habitation_available(p) if ECONOMY.has_planets(p) else ECONOMY.orbital_housing_available(p)
+		"yard":
+			var level: int = ECONOMY.next_shipyard_slot(p)
+			return level > 0 and ECONOMY.affordable(p, ECONOMY._cost("yard", level))
+		"pds":
+			return ECONOMY.next_pds(p) >= 0 and ECONOMY.pds_job(p).is_empty() and ECONOMY.affordable(p, ECONOMY._cost("pds", 1))
+	return ECONOMY.station_upgrade_available(p, key)
