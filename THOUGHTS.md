@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.50: Single-target command validation and order destination queries avoid constructing the entire service reference dictionary. Still scans IDs without a persistent lifecycle index; live positions/ownership and full phase snapshots retained. Runtime and benchmark pending.
+
 - v0.64.49: Reuse aligned combat cell coordinates during threat insertion and compare frozen routing signatures in place. Separate bucket lists remain; verify negative-coordinate boundaries and runtime before claiming savings.
 
 - v0.64.48: Frozen salvage threat cells lazily cache hostile slots per querying team, eliminating repeated allied filtering in mixed cells. Extra cache memory scales with occupied queried cells and teams; benchmark net cost, runtime and parity pending.
