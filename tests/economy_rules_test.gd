@@ -1258,7 +1258,49 @@ func _test_sfx_rules() -> void:
 	instance.free()
 	print("PASS: SFX attenuation, bounded candidates, reward cue routing and PCM generation")
 
+func _test_endless_conquest() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var progress: Dictionary = ECON.objective_progress(state, 1)
+	progress["rewards"] = []
+	for key in ECON.CONQUEST_REWARDS:
+		if not ECON.reward_repeatable(key):
+			progress["rewards"].append(key)
+	for category in ECON.REWARD_CATEGORIES:
+		progress["points"][category] = 40
+		for i in range(40):
+			var generation: int = ECON.reward_generation(progress)
+			ECON._fill_reward_offer(state, 1, category)
+			var offer: Array = ECON.reward_offer(progress, category)
+			assert(offer.size() == 3 and offer[0] != offer[1] and offer[0] != offer[2] and offer[1] != offer[2])
+			assert(ECON.reward_repeatable(offer[0]))
+			assert(ECON.acquire_reward(state, 1, str(offer[0]), generation, category))
+		assert(ECON.reward_points(progress, category) == 0)
+	for key in ECON.OBJECTIVE_SPECS:
+		progress["completed"][key] = 0.0
+	for category in ECON.REWARD_CATEGORIES:
+		for i in range(50):
+			var next: String = ECON._draw_objective(state, 1, progress, category)
+			assert(not next.is_empty() and not progress["completed"].has(next))
+			assert(ECON.objective_category(next) == category)
+			var spec: Array = ECON.objective_spec(next)
+			assert(int(spec[2]) > 0)
+			progress["completed"][next] = 0.0
+			assert(not ECON.objective_candidates(progress, category).is_empty())
+	var first: Array = ECON.objective_spec("repeat:military_built:1")
+	var second: Array = ECON.objective_spec("repeat:military_built:2")
+	assert(int(second[2]) > int(first[2]))
+	var depot: Dictionary = state["planets"][0]
+	depot["conquest_rewards"] = ["rank_storage", "rank_storage"]
+	assert(is_equal_approx(ECON.storage_capacity(depot), 2200.0))
+	var price: Dictionary = ECON.construction_cost({"conquest_rewards": ["rank_military_metal", "rank_military_metal"]}, "fighter", 1)
+	assert(float(price["Metals"]) == ceilf(270.0 / 1.06))
+	var damage: Dictionary = {}
+	ECON._ship_hit(damage, {}, {}, 1, {"reward_damage_multiplier": 1.04}, 100.0)
+	assert(is_equal_approx(float(damage[1]), 104.0))
+	print("PASS: three distinct repeatable offers, escalating objectives and stacked bonuses")
+
 func _initialize() -> void:
+	_test_endless_conquest()
 	_test_sfx_rules()
 	_test_station_crystals()
 	_test_cloaking()

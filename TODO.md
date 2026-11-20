@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.78.0–0.78.1: Validate three-choice reward drafts after all one-time rewards, repeated ranks and real effects, peer synchronization, endless objective tiers and reward pacing. Manually verify no scrolling/clipping at supported window sizes, especially lengthy shield/cloak descriptions. Runtime/visual validation pending.
+
 - [ ] v0.77.3: Audition personal objective / first-place fanfares and subdued rival cue; verify simultaneous events, no replay on snapshots, SFX mute and voice priority in crowded matches. Runtime/audio pending.
 
 - [ ] v0.77.2: Playtest ship-ready and tactical warning sounds, off-camera allied hull damage/instant loss, approaching combat counts and click-to-center on host/guest; check dense fleets, narrow HUD, cooldowns and cloak visibility. Verify hull glow aligns at tactical/overview zoom and selection rings remain distinct.

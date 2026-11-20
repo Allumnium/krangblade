@@ -654,13 +654,11 @@ func _build_ui() -> void:
 	conquest_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	conquest_background.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#45617b"), 14, 4))
 	conquest_dialog.add_child(conquest_background)
-	var conquest_scroll := ScrollContainer.new()
-	conquest_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	conquest_background.add_child(conquest_scroll)
 	conquest_cards = VBoxContainer.new()
 	conquest_cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	conquest_cards.add_theme_constant_override("separation", 10)
-	conquest_scroll.add_child(conquest_cards)
+	conquest_cards.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	conquest_cards.add_theme_constant_override("separation", 8)
+	conquest_background.add_child(conquest_cards)
 	_layout_conquest_button()
 	_build_exhaust_batch()
 	beam_batch = _build_effect_batch(false)
@@ -8641,32 +8639,35 @@ func _refresh_reward_cards() -> void:
 	var heading := Label.new()
 	heading.text = "Choose one %s upgrade · %d CP" % [conquest_category.capitalize(), points]
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	heading.add_theme_font_size_override("font_size", 20)
+	heading.add_theme_font_size_override("font_size", 17)
 	conquest_cards.add_child(heading)
 	var cards := HBoxContainer.new()
 	cards.alignment = BoxContainer.ALIGNMENT_CENTER
-	cards.add_theme_constant_override("separation", 10)
+	cards.add_theme_constant_override("separation", 8)
+	cards.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	conquest_cards.add_child(cards)
 	for key in ECONOMY.reward_offer(progress, conquest_category):
 		var reward: Array = ECONOMY.CONQUEST_REWARDS[key]
 		var card := PanelContainer.new()
-		card.custom_minimum_size = Vector2(192, 300)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		var unique: bool = ECONOMY.reward_is_unique(str(key))
-		var frame: StyleBoxFlat = HUD.surface(Color("#24203d") if unique else Color("#102b40"), Color("#b697ff") if unique else Color("#d6b46a"), 12, 8)
+		var repeatable: bool = ECONOMY.reward_repeatable(str(key))
+		var frame: StyleBoxFlat = HUD.surface(Color("#24203d") if unique else Color("#102b40"), Color("#b697ff") if unique else Color("#d6b46a"), 8, 6)
 		frame.set_border_width_all(2)
 		frame.shadow_color = Color("#0a0f19")
 		frame.shadow_size = 4
 		card.add_theme_stylebox_override("panel", frame)
 		cards.add_child(card)
 		var content := VBoxContainer.new()
-		content.add_theme_constant_override("separation", 12)
+		content.add_theme_constant_override("separation", 6)
 		card.add_child(content)
 		var art := TextureRect.new()
-		HUD.fixed_icon(art, _station_command_icon(str(reward[4]), 72), 72)
+		HUD.fixed_icon(art, _station_command_icon(str(reward[4]), 48), 48)
 		art.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		content.add_child(art)
 		var rarity := Label.new()
-		rarity.text = "UNIQUE · ONE PLAYER" if unique else ""
+		rarity.text = "UNIQUE · ONE PLAYER" if unique else ("RESEARCH · RANK %d" % (ECONOMY.reward_rank(progress.get("rewards", []), str(key)) + 1) if repeatable else "TECHNOLOGY")
 		rarity.add_theme_color_override("font_color", Color("#d2baff"))
 		rarity.add_theme_font_size_override("font_size", 11)
 		rarity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -8677,13 +8678,14 @@ func _refresh_reward_cards() -> void:
 		title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		title_label.add_theme_font_size_override("font_size", 16)
 		title_label.add_theme_color_override("font_color", Color("#f4dca3"))
-		title_label.custom_minimum_size.y = 42
+		title_label.custom_minimum_size.y = 34
 		content.add_child(title_label)
 		content.add_child(HSeparator.new())
 		var benefit := Label.new()
 		benefit.text = reward[1]
 		benefit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		benefit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		benefit.add_theme_font_size_override("font_size", 13)
 		benefit.modulate = Color("#c8f3db")
 		content.add_child(benefit)
 		if not str(reward[2]).is_empty():
@@ -8691,6 +8693,7 @@ func _refresh_reward_cards() -> void:
 			drawback.text = reward[2]
 			drawback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			drawback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			drawback.add_theme_font_size_override("font_size", 12)
 			drawback.modulate = Color("#ffb4a4")
 			content.add_child(drawback)
 		var spacer := Control.new()
@@ -8699,7 +8702,7 @@ func _refresh_reward_cards() -> void:
 		var buy := Button.new()
 		buy.text = "SELECT · 1 CP"
 		buy.tooltip_text = "Only the first player to select this upgrade can acquire it." if unique else "Spend 1 conquest point"
-		buy.custom_minimum_size.y = 38
+		buy.custom_minimum_size.y = 30
 		buy.disabled = points < 1
 		HUD.action(buy, Color("#e9cb7c"))
 		buy.add_theme_stylebox_override("normal", HUD.surface(Color("#5a4824"), Color("#edc76f"), 5, 4))
@@ -8708,7 +8711,7 @@ func _refresh_reward_cards() -> void:
 		buy.pressed.connect(_buy_conquest_reward.bind(str(key), generation, cards))
 	if ECONOMY.reward_offer(progress, conquest_category).is_empty():
 		var empty := Label.new()
-		empty.text = "No eligible rewards remain in this category."
+		empty.text = "Preparing reward choices…"
 		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cards.add_child(empty)
 	var footer := HBoxContainer.new()
@@ -8737,7 +8740,7 @@ func _open_conquest_upgrades(category: String) -> void:
 	conquest_card_signature = ""
 	_refresh_reward_cards()
 	var viewport_size: Vector2 = get_viewport_rect().size
-	conquest_dialog.popup_centered(Vector2i(mini(660, int(viewport_size.x) - 32), mini(420, int(viewport_size.y) - 56)))
+	conquest_dialog.popup_centered(Vector2i(mini(780, int(viewport_size.x) - 32), mini(380, int(viewport_size.y) - 56)))
 
 func _build_empire_dialog() -> void:
 	empire_dialog = AcceptDialog.new()
