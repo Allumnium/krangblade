@@ -3220,26 +3220,42 @@ static func armed(ship: Dictionary) -> bool:
 
 # Stable hull IDs and the existing disjoint structure target IDs. HP lives
 # in the actual entity dictionary, so repair never creates a new entity.
-static func service_targets(state: Dictionary) -> Dictionary:
+static func service_targets(state: Dictionary, only_id: int = -1) -> Dictionary:
 	var targets: Dictionary = {}
 	for ship in state["ships"]:
+		if only_id != -1 and int(ship["id"]) != only_id:
+			continue
 		var position: Vector2 = ship.get("position", Vector2.INF)
 		if not position.is_finite():
 			continue
 		targets[ship["id"]] = {"owner": ship["owner"], "entity": ship, "position": position, "max_hp": ship_max_hp(str(ship["kind"])), "node": -1, "kind": "ship"}
+	if only_id >= 0:
+		return targets
 	var count: int = state["planets"].size()
 	for node in range(count):
 		var p: Dictionary = state["planets"][node]
-		if has_station(p):
+		if has_station(p) and (only_id == -1 or only_id == station_target_id(state, node)):
 			targets[station_target_id(state, node)] = {"owner": p["owner"], "entity": p["station"], "position": station_position(state, node, float(state["elapsed"])), "max_hp": station_max_hp(p), "node": node, "kind": "station"}
 		for slot in range(p["yards"].size()):
+			if only_id != -1 and only_id != -2 - node * 3 - slot:
+				continue
 			var yard: Dictionary = p["yards"][slot]
 			targets[-2 - node * 3 - slot] = {"owner": p["owner"], "entity": yard, "position": shipyard_position(state, node, slot, float(state["elapsed"])), "max_hp": YARD_HP * int(yard["level"]), "node": node, "kind": "yard"}
 		var defenses: Dictionary = p.get("pds", {})
 		if not defenses.is_empty():
+			if only_id != -1:
+				var matching: bool = false
+				for slot in defenses:
+					if only_id == -2 - count * 3 - int(slot) * count - node:
+						matching = true
+						break
+				if not matching:
+					continue
 			var bodies: Array = system_bodies(p, int(state["map"]["seed"]), node)
 			var radius: float = system_world_radius(state, node)
 			for slot in defenses:
+				if only_id != -1 and only_id != -2 - count * 3 - int(slot) * count - node:
+					continue
 				if int(slot) < 0 or int(slot) >= bodies.size():
 					continue
 				var center: Vector2 = state["map"]["points"][node]
@@ -3255,7 +3271,7 @@ static func _damaged(target: Dictionary) -> bool:
 	return not target.is_empty() and float(target["entity"].get("hp", target["max_hp"])) < float(target["max_hp"]) - EPS
 
 static func can_deposit(state: Dictionary, ship: Dictionary, target_id: int) -> bool:
-	var ref: Dictionary = service_targets(state).get(target_id, {})
+	var ref: Dictionary = service_targets(state, target_id).get(target_id, {})
 	if ship.get("kind", "") == "science_ship" or ref.get("entity", {}).get("kind", "") in ["science_ship", "colony_ship"]:
 		return false
 	if ship.get("kind", "") == "colony_ship" and ref.get("kind", "") != "station":
@@ -3737,7 +3753,7 @@ static func _shift_yard_targets(state: Dictionary, node: int, slot: int) -> void
 				order["target"] = target + 1
 
 static func command_attack(state: Dictionary, player: int, ids: Array, target_id: int) -> bool:
-	var target: Dictionary = service_targets(state).get(target_id, {})
+	var target: Dictionary = service_targets(state, target_id).get(target_id, {})
 	if target.is_empty() or not _hostile_hull(state, player, target):
 		return false
 	var units: Array = _owned_units(state, player, ids)
@@ -4064,12 +4080,12 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 			if target >= 0 and target < graph["points"].size():
 				return graph["points"][target]
 		"attack", "follow":
-			return service_targets(state).get(target, {}).get("position", Vector2.INF)
+			return service_targets(state, target).get(target, {}).get("position", Vector2.INF)
 		"repair":
-			var ref: Dictionary = service_targets(state).get(target, {})
+			var ref: Dictionary = service_targets(state, target).get(target, {})
 			return ref.get("repair_position", ref.get("position", Vector2.INF))
 		"deposit":
-			return service_targets(state).get(target, {}).get("position", Vector2.INF)
+			return service_targets(state, target).get(target, {}).get("position", Vector2.INF)
 		"drop":
 			return order.get("point", Vector2.INF)
 		"salvage":
@@ -4187,9 +4203,9 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			var refs: Dictionary = service_targets(state)
 			return (not bool(order.get("guard", false)) or fighter) and _valid_follow_target(state, ship, target, refs)
 		"attack":
-			return armed(ship) and _hostile_hull(state, owner, service_targets(state).get(target, {}))
+			return armed(ship) and _hostile_hull(state, owner, service_targets(state, target).get(target, {}))
 		"repair":
-			var ref: Dictionary = service_targets(state).get(target, {})
+			var ref: Dictionary = service_targets(state, target).get(target, {})
 			return ship["kind"] == "miner" and target != int(ship["id"]) and _friendly_target(state, owner, ref) and _damaged(ref)
 		"deposit":
 			return can_deposit(state, ship, target)
