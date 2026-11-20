@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.74.0: Unique conquest rewards (Cloaking Field, Shields 3, Warp Gates, Crystalline Synthesis) permanently reserved to the first authority-accepted player per match, not team. Purple UNIQUE cards and public ownership feed; competing drafts refresh without charging points; generation invalidates stale clicks. Close modal only after confirmed zero balance, including unique races. Fix duplicate conquest panel local in `_build_ui`.
+
 - v0.73.0: Scout-only Military Cloaking Field replaces Scout armor/shields and costs 15% of base Metals in Crystals; hide from hostile map/picking/weapon acquisition unless within 250 of an enemy hull/structure or 5 s after firing. Full state still replicates hulls for existing network architecture; public shared snapshots strip drafts; private choices accompany only the owning guest's packet. Blue shield bars in multiselection and world rings. Runtime pending.
 
 - v0.72.0: Tech Warp Gates convert a loaded science vessel in an owned station sector, one gate per system, stable hull ID and 10,000 HP. Auto-link on second deployment; J cycles destinations; right-click a linked owned gate to approach and transit. 180 range, 10 s per-ship cooldown, links invalidate on destruction. Prototype uses existing combat/replication entity storage; exclude from movement and box selection. AI deployment/transit and peer validation pending.

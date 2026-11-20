@@ -1081,6 +1081,41 @@ func _test_reward_redraft() -> void:
 	assert(price["Crystals"] == 27.0 and price["Metals"] == 311.0)
 	print("PASS: categorized conquest rewards, stale drafts, hidden zero-balance offers, shield absorption/recharge and armor costs")
 
+func _test_unique_rewards() -> void:
+	for key in ECON.UNIQUE_CONQUEST_REWARDS:
+		var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+		var category: String = ECON.CONQUEST_REWARDS[key][3]
+		var first: Dictionary = ECON.objective_progress(state, 1)
+		var rival: Dictionary = ECON.objective_progress(state, 2)
+		var prerequisite: Array = ["shield_1", "shield_2"] if key == "shield_3" else []
+		for progress in [first, rival]:
+			progress["rewards"] = prerequisite.duplicate()
+			progress["points"][category] = 1
+			progress["offers"][category] = [key, "population"]
+		var old_generation: int = ECON.reward_generation(rival)
+		assert(ECON.reward_available(state, key))
+		assert(ECON.acquire_reward(state, 1, key, ECON.reward_generation(first), category))
+		assert(state["unique_reward_claims"][key] == 1)
+		assert(not ECON.reward_available(state, key))
+		assert(not ECON.reward_offer(rival, category).has(key))
+		assert(ECON.reward_points(rival, category) == 1)
+		assert(ECON.reward_generation(rival) > old_generation)
+		assert(not ECON.acquire_reward(state, 2, key, old_generation, category))
+		assert(not ECON.acquire_reward(state, 2, "population", old_generation, category))
+		# Even forged offers and fresh generations cannot override the claim.
+		rival["offers"][category] = [key]
+		assert(not ECON.acquire_reward(state, 2, key, ECON.reward_generation(rival), category))
+		rival["offers"][category] = []
+		ECON._fill_reward_offer(state, 2, category)
+		assert(not ECON.reward_offer(rival, category).has(key))
+		assert(ECON.acquire_reward(state, 2, str(ECON.reward_offer(rival, category)[0]), ECON.reward_generation(rival), category))
+		assert(ECON.reward_points(rival, category) == 0)
+		# A defeated empire cannot make its unique reward available again.
+		state["eliminated"] = [1]
+		assert(not ECON.reward_available(state, key))
+	assert(not ECON.reward_is_unique("shield_1") and not ECON.reward_is_unique("shield_2"))
+	print("PASS: exclusive conquest claims, rival refresh, stale clicks, retained points and permanent reservation")
+
 func _test_warp_gates() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
@@ -1142,6 +1177,7 @@ func _initialize() -> void:
 	_test_cloaking()
 	_test_warp_gates()
 	_test_reward_redraft()
+	_test_unique_rewards()
 	_test_objective_holdings()
 	_test_empire_targets()
 	_test_packed_threat_records()

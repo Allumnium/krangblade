@@ -611,17 +611,17 @@ func _build_ui() -> void:
 	conquest_dialog.visible = false
 	add_child(conquest_dialog)
 	conquest_dialog.close_requested.connect(conquest_dialog.hide)
-	var background := PanelContainer.new()
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	background.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#45617b"), 14, 4))
-	conquest_dialog.add_child(background)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	background.add_child(scroll)
+	var conquest_background := PanelContainer.new()
+	conquest_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	conquest_background.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#45617b"), 14, 4))
+	conquest_dialog.add_child(conquest_background)
+	var conquest_scroll := ScrollContainer.new()
+	conquest_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	conquest_background.add_child(conquest_scroll)
 	conquest_cards = VBoxContainer.new()
 	conquest_cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	conquest_cards.add_theme_constant_override("separation", 10)
-	scroll.add_child(conquest_cards)
+	conquest_scroll.add_child(conquest_cards)
 	_layout_conquest_button()
 	_build_exhaust_batch()
 	beam_batch = _build_effect_batch(false)
@@ -8118,6 +8118,13 @@ func _draw_objectives_overlay() -> void:
 		objectives_overlay.draw_string_outline(font, Vector2(x, y), message, HORIZONTAL_ALIGNMENT_LEFT, 244, 12, 4, Color("#101824"))
 		objectives_overlay.draw_string(font, Vector2(x, y), message, HORIZONTAL_ALIGNMENT_LEFT, 244, 12, tint)
 		y += 17.0
+	var claims: Dictionary = state.get("unique_reward_claims", {})
+	for key in claims:
+		var owner_name: String = str(roster.get(claims[key], {}).get("name", "Player")).left(16)
+		var unlock: String = "%s: %s" % [owner_name, ECONOMY.CONQUEST_REWARDS[key][0]]
+		objectives_overlay.draw_string_outline(font, Vector2(x, y), unlock, HORIZONTAL_ALIGNMENT_LEFT, OBJECTIVES_WIDTH - 12, 12, 4, Color("#101824"))
+		objectives_overlay.draw_string(font, Vector2(x, y), unlock, HORIZONTAL_ALIGNMENT_LEFT, OBJECTIVES_WIDTH - 12, 12, Color("#c7aaff"))
+		y += 17.0
 
 func _layout_conquest_button() -> void:
 	if conquest_buttons.is_empty():
@@ -8163,7 +8170,7 @@ func _refresh_conquest_button(state: Dictionary) -> void:
 
 func _refresh_reward_cards() -> void:
 	var progress: Dictionary = _state().get("objectives", {}).get(_me(), {})
-	var signature: String = conquest_category + str(ECONOMY.reward_offer(progress, conquest_category)) + str(progress.get("rewards", [])) + str(ECONOMY.reward_points(progress, conquest_category))
+	var signature: String = conquest_category + str(ECONOMY.reward_offer(progress, conquest_category)) + str(ECONOMY.reward_generation(progress)) + str(ECONOMY.reward_points(progress, conquest_category))
 	if signature == conquest_card_signature:
 		return
 	conquest_card_signature = signature
@@ -8171,7 +8178,7 @@ func _refresh_reward_cards() -> void:
 		conquest_cards.remove_child(child)
 		child.queue_free()
 	var points: int = ECONOMY.reward_points(progress, conquest_category)
-	var generation: int = progress.get("rewards", []).size()
+	var generation: int = ECONOMY.reward_generation(progress)
 	var heading := Label.new()
 	heading.text = "Choose one %s upgrade · %d CP" % [conquest_category.capitalize(), points]
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -8185,7 +8192,8 @@ func _refresh_reward_cards() -> void:
 		var reward: Array = ECONOMY.CONQUEST_REWARDS[key]
 		var card := PanelContainer.new()
 		card.custom_minimum_size = Vector2(192, 300)
-		var frame: StyleBoxFlat = HUD.surface(Color("#102b40"), Color("#d6b46a"), 12, 8)
+		var unique: bool = ECONOMY.reward_is_unique(str(key))
+		var frame: StyleBoxFlat = HUD.surface(Color("#24203d") if unique else Color("#102b40"), Color("#b697ff") if unique else Color("#d6b46a"), 12, 8)
 		frame.set_border_width_all(2)
 		frame.shadow_color = Color("#0a0f19")
 		frame.shadow_size = 4
@@ -8198,6 +8206,12 @@ func _refresh_reward_cards() -> void:
 		HUD.fixed_icon(art, _station_command_icon(str(reward[4]), 72), 72)
 		art.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		content.add_child(art)
+		var rarity := Label.new()
+		rarity.text = "UNIQUE · ONE PLAYER" if unique else ""
+		rarity.add_theme_color_override("font_color", Color("#d2baff"))
+		rarity.add_theme_font_size_override("font_size", 11)
+		rarity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		content.add_child(rarity)
 		var title_label := Label.new()
 		title_label.text = reward[0]
 		title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -8225,6 +8239,7 @@ func _refresh_reward_cards() -> void:
 		content.add_child(spacer)
 		var buy := Button.new()
 		buy.text = "SELECT · 1 CP"
+		buy.tooltip_text = "Only the first player to select this upgrade can acquire it." if unique else "Spend 1 conquest point"
 		buy.custom_minimum_size.y = 38
 		buy.disabled = points < 1
 		HUD.action(buy, Color("#e9cb7c"))
@@ -8251,9 +8266,8 @@ func _buy_conquest_reward(key: String, generation: int, cards: HBoxContainer) ->
 		for child in card.get_child(0).get_children():
 			if child is Button:
 				child.disabled = true
-	var progress: Dictionary = _state().get("objectives", {}).get(_me(), {})
-	if ECONOMY.reward_points(progress, conquest_category) == 1:
-		conquest_dialog.hide()
+	# Wait for the authoritative result: a losing unique-reward race must
+	# keep the remaining point and show its replacement draft.
 	session.call("request_conquest_reward", key, generation, conquest_category)
 
 func _open_conquest_upgrades(category: String) -> void:
