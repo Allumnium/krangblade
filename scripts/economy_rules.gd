@@ -1505,6 +1505,8 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
 				"position": launch, "heading": Vector2.UP, "navigation_target": launch,
 				"route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": ship_max_hp(str(item["kind"])), "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
+			if is_same(state, _indexed_state):
+				_hulls_by_id[int(item["id"])] = state["ships"].back()
 			_launch_to_rally(state, state["ships"].back(), rally)
 	p["queue"].erase(item)
 
@@ -3220,9 +3222,29 @@ static func armed(ship: Dictionary) -> bool:
 
 # Stable hull IDs and the existing disjoint structure target IDs. HP lives
 # in the actual entity dictionary, so repair never creates a new entity.
+static var _indexed_state: Dictionary = {}
+static var _hulls_by_id: Dictionary = {}
+
+# Scope derived references to one authority step; never serialize them.
+static func _begin_hull_index(state: Dictionary) -> void:
+	_indexed_state = state
+	_hulls_by_id.clear()
+	for ship in state["ships"]:
+		_hulls_by_id[int(ship["id"])] = ship
+
+static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
+	state["ships"].erase(ship)
+	if is_same(state, _indexed_state):
+		_hulls_by_id.erase(int(ship["id"]))
+
 static func service_targets(state: Dictionary, only_id: int = -1) -> Dictionary:
 	var targets: Dictionary = {}
-	for ship in state["ships"]:
+	var hulls: Array = state["ships"]
+	if only_id >= 0 and is_same(state, _indexed_state):
+		hulls = [_hulls_by_id[only_id]] if _hulls_by_id.has(only_id) else []
+	elif only_id < -1:
+		hulls = []
+	for ship in hulls:
 		if only_id != -1 and int(ship["id"]) != only_id:
 			continue
 		var position: Vector2 = ship.get("position", Vector2.INF)
@@ -4232,7 +4254,7 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 			for ship in _owned_units(state, player, ids):
 				if can_transform_colony(state, graph, ship):
 					_convert_colony(state, ship, local_sector(graph, ship))
-					state["ships"].erase(ship)
+					_remove_indexed_hull(state, ship)
 					converted = true
 			return converted
 		"follow":
@@ -6133,7 +6155,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			ship["hp"] = maxf(0.0, float(ship.get("hp", ship_max_hp(str(ship["kind"])))) - float(damage[id]))
 			if float(ship["hp"]) <= EPS:
 				_record_ship_destruction(state, graph, ship)
-				ships.erase(ship)
+				_remove_indexed_hull(state, ship)
 	# Fixed batteries and shipyards participate in simultaneous damage.
 	for id in pds_targets:
 		if not damage.has(id):
@@ -7183,7 +7205,7 @@ static func update_match_outcome(state: Dictionary) -> bool:
 		# Surviving non-colony hulls of defeated empires stand down.
 		for ship in state["ships"].duplicate():
 			if eliminated.has(int(ship["owner"])):
-				state["ships"].erase(ship)
+				_remove_indexed_hull(state, ship)
 		_sync_operations(state)
 	if starting_teams.size() < 2:
 		return changed
@@ -7456,6 +7478,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_update_planet_blockades(state, combat_graph)
 	for i in range((state["planets"] as Array).size()):
 		_work_planet(state, i, dt)
+	_begin_hull_index(state)
 	started = _profile_stage(profile, "Economy", started)
 	var teams: Array[int] = planet_teams(state)
 	# Validate the static map and territory once per substep, not on each search.
@@ -7609,7 +7632,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 				_work_salvage(state, combat_graph, ship, dt)
 				continue
 			if _work_colony(state, ship, dt):
-				state["ships"].erase(ship)
+				_remove_indexed_hull(state, ship)
 				continue
 		elif ship.get("kind", "ship") == "ship":
 			var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
@@ -7701,5 +7724,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_sync_operations(state)
 	update_exploration(state)
 	_profile_stage(profile, "Conquest / exploration", started)
+	_indexed_state = {}
+	_hulls_by_id.clear()
 	_sector_query_graph = {}
 	_sector_query_cache.clear()

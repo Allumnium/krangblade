@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.51: Step-scoped stable-ID hull references accelerate single-target service queries without duplicating serialized state. Combat deaths, colony conversion and elimination erase indexed references; outside the step use live scans. Cross-step persistence, regression and measurement pending.
+
 - v0.64.50: Single-target command validation and order destination queries avoid constructing the entire service reference dictionary. Still scans IDs without a persistent lifecycle index; live positions/ownership and full phase snapshots retained. Runtime and benchmark pending.
 
 - v0.64.49: Reuse aligned combat cell coordinates during threat insertion and compare frozen routing signatures in place. Separate bucket lists remain; verify negative-coordinate boundaries and runtime before claiming savings.
