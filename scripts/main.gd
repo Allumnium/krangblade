@@ -46,6 +46,7 @@ class MapPreview:
 			if home:
 				draw_arc(position, 6.0, 0.0, TAU, 20, colors[index], 1.0, true)
 
+var menu_music: AudioStreamPlayer
 var network: Node
 var screen: String = ""
 var saved_ip: String = "127.0.0.1"
@@ -82,11 +83,78 @@ func _ready() -> void:
 	network.connect("status_changed", _refresh_status)
 	network.connect("lobbies_changed", _refresh_browser)
 	_on_phase_changed()
+	_start_menu_music.call_deferred()
+
+func _start_menu_music() -> void:
+	if not is_inside_tree() or is_instance_valid(menu_music):
+		return
+	var config := ConfigFile.new()
+	config.load("user://warbound_settings.cfg")
+	var bus: int = AudioServer.get_bus_index("Music")
+	if bus < 0:
+		AudioServer.add_bus()
+		bus = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(bus, "Music")
+	AudioServer.set_bus_volume_db(bus, linear_to_db(maxf(0.0001, clampf(float(config.get_value("audio", "music", 100.0)), 0.0, 100.0) / 100.0)))
+	AudioServer.set_bus_mute(bus, bool(config.get_value("audio", "music_muted", false)))
+	menu_music = AudioStreamPlayer.new()
+	menu_music.bus = "Music"
+	menu_music.volume_db = -12.0
+	add_child(menu_music)
+	menu_music.stream = _menu_score()
+	menu_music.play()
+
+static var cached_menu_score: AudioStreamWAV
+
+func _menu_score() -> AudioStreamWAV:
+	if cached_menu_score != null:
+		return cached_menu_score
+	# Original 16-bar ambient score: minor ninth pads, a pulse and glass arpeggios.
+	const RATE: int = 22050
+	const BEAT: float = 0.625
+	var chords: Array = [[45, 52, 55, 59], [41, 48, 52, 55], [48, 55, 59, 62], [43, 50, 53, 57], [45, 52, 55, 60], [41, 48, 57, 60], [38, 45, 48, 52], [43, 50, 55, 59]]
+	var count: int = int(RATE * BEAT * 64.0)
+	var pcm := PackedByteArray()
+	pcm.resize(count * 4)
+	for i in range(count):
+		var t: float = float(i) / RATE
+		var beat: float = t / BEAT
+		var chord_index: int = int(beat / 8.0) % chords.size()
+		var local: float = fmod(beat, 8.0) * BEAT
+		var pad_env: float = minf(1.0, local / 0.8) * minf(1.0, (8.0 * BEAT - local) / 0.8)
+		var left: float = 0.0
+		var right: float = 0.0
+		for n in range(4):
+			var hz: float = 440.0 * pow(2.0, (float(chords[chord_index][n]) - 69.0) / 12.0)
+			var angle: float = TAU * hz * t
+			left += pad_env * (sin(angle + 0.45 * sin(TAU * 0.19 * t + n)) + 0.2 * sin(angle * 2.0)) * 0.048
+			right += pad_env * (sin(angle + 0.45 * sin(TAU * 0.23 * t + n + 1.0)) + 0.2 * sin(angle * 2.0)) * 0.048
+		var pulse_age: float = fmod(beat, 2.0) * BEAT
+		var bass_hz: float = 440.0 * pow(2.0, (float(chords[chord_index][0]) - 81.0) / 12.0)
+		var bass: float = sin(TAU * bass_hz * pulse_age) * exp(-3.0 * pulse_age) * minf(1.0, pulse_age / 0.025) * 0.11
+		var step: int = int(beat * 2.0)
+		var age: float = fmod(beat * 2.0, 1.0) * BEAT * 0.5
+		var melody_hz: float = 440.0 * pow(2.0, (float(chords[chord_index][[0, 2, 1, 3, 2, 1, 3, 1][step % 8]]) + 24.0 - 69.0) / 12.0)
+		var bell: float = (sin(TAU * melody_hz * age) + 0.25 * sin(TAU * melody_hz * 2.01 * age)) * exp(-10.0 * age) * minf(1.0, age / 0.012) * minf(1.0, (BEAT * 0.5 - age) / 0.025) * 0.075
+		var edge: float = minf(1.0, t / 0.25) * minf(1.0, (float(count - i) / RATE) / 0.25)
+		pcm.encode_s16(i * 4, roundi(clampf((left + bass + bell * 0.75) * edge, -1.0, 1.0) * 30000.0))
+		pcm.encode_s16(i * 4 + 2, roundi(clampf((right + bass + bell) * edge, -1.0, 1.0) * 30000.0))
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = RATE
+	wav.stereo = true
+	wav.data = pcm
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_end = count
+	cached_menu_score = wav
+	return wav
 
 func _root() -> VBoxContainer:
 	if screen != "multiplayer":
 		network.call("stop_lobby_browser")
 	for child in get_children():
+		if child == menu_music:
+			continue
 		remove_child(child)
 		child.queue_free()
 	var background := ColorRect.new()

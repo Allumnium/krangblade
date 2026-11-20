@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.79.0: Synthesized audio now has layered transient/body/tail textures, deterministic variants and a cached original 40 s stereo menu ambient loop. Existing match music stays unchanged. Audition balance and measure first-open generation cost before further toolchain investment.
+
 - v0.78.6: Structure hull durability halved, including reinforcement; existing station shield percentages unchanged on smaller hulls. Yards do not currently have their own shields. Reduce global shield recharge from 20% to 5%/s to make disengagement meaningful; playtest siege pacing.
 
 - v0.78.5: Preserve fine low-count control using evenly spaced existing nonlinear milestones with piecewise interpolation. Label each milestone and allow all integer targets through 500. Verify label fit and high-count mouse precision in play.
