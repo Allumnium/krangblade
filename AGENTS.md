@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.82.2: Keep fixed command-card slots when technology buttons are hidden; Dyson Sphere reserves its cell regardless of unlock state.
+
 - v0.82.1: Scout Wander defaults on, Explore defaults off; enabling either disables the other at authority. Disabling Explore or enabling Wander cancels only active automatic exploration orders.
 
 - v0.82.0: Scout-only Explore autocast off by default (X); idle scouts choose connected sectors based on allied occupancy and recency, reserving destinations. All ship crew costs doubled including Colony 80k. Existing manual orders take priority.

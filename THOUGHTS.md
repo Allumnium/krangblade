@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.82.2: Hidden Dyson button previously collapsed a GridContainer cell; reserve its slot with a visible wrapper. Visual verification pending.
+
 - v0.82.1: Scout exploration and wandering are independent controls but mutually exclusive when enabled. Both may be off; switching to Wander cancels automatic exploration without clearing manual orders.
 
 - v0.82.0: Explore uses adjacent graph destinations, recency and allied sector occupancy as a cheap separation heuristic; no all-pairs distance scans. Colony crew doubled to 80k, so starting economy/housing and AI expansion need playtesting.
