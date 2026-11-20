@@ -1230,7 +1230,23 @@ func _test_station_crystals() -> void:
 	assert(ECON.construction_cost({"conquest_rewards": ["cloak"]}, "scout", 1)["Crystals"] == 45.0)
 	print("PASS: station baseline, planetary crystal rate, blockade and increased construction costs")
 
+func _test_sfx_rules() -> void:
+	var mixer = preload("res://scripts/match_sfx.gd")
+	assert(mixer.spatial_gain(0.0, 1000.0, 8.0) > mixer.spatial_gain(800.0, 1000.0, 8.0))
+	assert(mixer.spatial_gain(0.0, 1000.0, 8.0) > mixer.spatial_gain(0.0, 1000.0, 1.0))
+	assert(mixer.spatial_gain(1800.0, 1000.0, 8.0) == 0.0)
+	var instance = mixer.new()
+	for i in range(100):
+		instance.offer("laser", float(i) / 100.0)
+	assert(instance.candidates["laser"].size() == 4)
+	assert(instance.candidates["laser"].min() >= 0.96)
+	var wav: AudioStreamWAV = instance._synthesize("laser", 0)
+	assert(wav.data.size() > 0 and wav.mix_rate == 22050)
+	instance.free()
+	print("PASS: SFX attenuation, bounded loudest candidates and PCM generation")
+
 func _initialize() -> void:
+	_test_sfx_rules()
 	_test_station_crystals()
 	_test_cloaking()
 	_test_warp_gates()

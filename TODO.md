@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] **Replace prototype sound effects with authored audio later (v0.77.0).** Supply normalized WAVs in assets/sfx for laser, blaster, missile, explosion, heavy_explosion, mining, repair, tractor, select, click, order, queue, complete and notice. Keep the cue mixer and attenuation/polyphony; audition at 1× and crowded 5×, check host/guest, music balance, mute, camera movement and sustained combat. Runtime/audio validation pending.
+
 - [ ] v0.76.0: Playtest station baseline, 0.04 Incubator rate and fivefold Crystal prices, especially expensive Laser Matrix/third yard storage requirements and AI sourcing. Verify actual two-/three-peer chat delivery, sender validation, rate limit, typing focus, wrapping, pause/fade and restart. Runtime and visual checks pending.
 
 - [ ] v0.75.3: Verify immediate Harvester reassignment after final freighter transfer, including manual movement, partial deliveries, conservation and remote snapshots; verify available Upgrade pulse and independent damaged-only world bars/selection shield meters. Runtime and visual checks pending.

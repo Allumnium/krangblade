@@ -5,7 +5,7 @@ const HUD = preload("res://scripts/ui_theme.gd")
 const CODEX = preload("res://scripts/codex.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const PLANET = preload("res://assets/ui/planet.svg")
-const UPGRADE_SOUND = preload("res://assets/sfx/detail.wav")
+const SFX = preload("res://scripts/match_sfx.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
 const COLORS = RULES.EMPIRE_COLORS
@@ -91,7 +91,12 @@ var music_volume: float = 100.0
 var sfx_volume: float = 100.0
 var music_muted: bool = false
 var sfx_muted: bool = false
-var upgrade_audio: AudioStreamPlayer
+var sound_mixer: Node
+var sound_elapsed: float = -1.0
+var sound_destruction_sequence: int = 0
+var sound_objectives: Dictionary = {}
+var sound_hulls: Dictionary = {}
+var sound_structures: Dictionary = {}
 var background_music: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
@@ -532,13 +537,15 @@ func _ready() -> void:
 	session.connect("phase_changed", _refresh)
 	session.connect("status_changed", _refresh)
 	session.connect("economy_changed", _on_economy_changed)
-	upgrade_audio = AudioStreamPlayer.new()
-	upgrade_audio.stream = UPGRADE_SOUND
-	add_child(upgrade_audio)
+	sound_mixer = SFX.new()
 	background_music = AudioStreamPlayer.new()
 	background_music.stream = preload("res://assets/music/peaceful3.mp3")
 	add_child(background_music)
 	_load_settings()
+	_apply_settings()
+	add_child(sound_mixer)
+	get_tree().node_added.connect(_sound_button_added)
+	session.connect("chat_changed", _sound_chat)
 	_build_ui()
 	hotkey_entries["focus"] = {"scope": "General", "title": "Focus selection", "default": KEY_F}
 	_load_hotkey_overrides()
@@ -548,6 +555,8 @@ func _ready() -> void:
 	session.call("match_scene_loaded")
 
 func _exit_tree() -> void:
+	if get_tree().node_added.is_connected(_sound_button_added):
+		get_tree().node_added.disconnect(_sound_button_added)
 	if Input.mouse_mode == Input.MOUSE_MODE_CONFINED:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	if is_instance_valid(background_music):
@@ -2747,6 +2756,7 @@ func _stop_selected() -> void:
 
 func _issue_order(ids: Array, order: Dictionary, append: bool = false) -> void:
 	if not ids.is_empty():
+		sound_mixer.play_cue("order")
 		session.call("request_unit_orders", [{"ids": ids, "order": order}], append)
 
 func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint: Dictionary = {}) -> void:
@@ -2809,6 +2819,7 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 			else:
 				orders.append({"ids": [ship["id"]], "order": {"kind": "drop", "point": minimap_hint.get("world", _world_point(point))}})
 		if not orders.is_empty():
+			sound_mixer.play_cue("order")
 			session.call("request_unit_orders", orders, append)
 	if append and mode != "rally":
 		pending_command = mode
@@ -4288,7 +4299,6 @@ func _apply_settings() -> void:
 		var volume: float = music_volume if bus_name == "Music" else sfx_volume
 		AudioServer.set_bus_volume_db(index, linear_to_db(maxf(0.0001, volume / 100.0)))
 		AudioServer.set_bus_mute(index, music_muted if bus_name == "Music" else sfx_muted)
-	upgrade_audio.bus = "SFX"
 	background_music.bus = "Music"
 
 func _save_settings() -> void:
@@ -5435,6 +5445,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	var state: Dictionary = _state()
 	if state.is_empty() or str(session.get("phase")) != "match":
 		return
+	sound_mixer.play_cue("select")
 	last_control_group_recall = -1
 	if additive and not double_click and selected_units.is_empty():
 		var yard: Vector2i = _yard_hit(point, state)
@@ -5582,6 +5593,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	var state: Dictionary = _state()
 	if state.is_empty() or str(session.get("phase")) != "match":
 		return
+	sound_mixer.play_cue("select")
 	last_control_group_recall = -1
 	_clear_building_selection()
 	if not additive:
@@ -5720,6 +5732,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	if not salvage_ids.is_empty():
 		entries.append({"ids": salvage_ids, "order": {"kind": "salvage", "target": wreck}})
 	if not entries.is_empty():
+		sound_mixer.play_cue("order")
 		session.call("request_unit_orders", entries, append)
 
 func _command_kinds(state: Dictionary) -> Array[String]:
@@ -5937,6 +5950,7 @@ func _finish_formation(point: Vector2) -> void:
 			if entry["valid"]:
 				valid.append({"ids": entry["ids"], "order": entry["order"]})
 		if not valid.is_empty():
+			sound_mixer.play_cue("order")
 			session.call("request_unit_orders", valid, formation_append)
 	if not formation_append:
 		pending_command = ""
@@ -6042,31 +6056,142 @@ func _visual_position(visual: Dictionary) -> Vector2:
 	var duration: float = float(visual.get("duration", SNAPSHOT_SECONDS))
 	return (visual["from"] as Vector2).lerp(visual["to"], clampf(float(visual["age"]) / duration, 0.0, 1.0))
 
-# React to accepted orders in authority snapshots, not speculative UI clicks.
-# Only local system-production orders play audio; initial state is silent.
+# UI cues are local, while world cues use the same authority snapshots as
+# combat visuals. No audio events or additional network traffic are required.
+func _sound_button_added(node: Node) -> void:
+	if node is BaseButton and is_ancestor_of(node):
+		var button: BaseButton = node
+		button.pressed.connect(_sound_click)
+
+func _sound_click() -> void:
+	sound_mixer.play_cue("click")
+
+func _sound_chat() -> void:
+	if str(session.get("phase")) == "match" and not session.get("match_chat").is_empty():
+		sound_mixer.play_cue("notice")
+
+func _sound_gain(point: Vector2, center: Vector2, radius: float) -> float:
+	return SFX.spatial_gain(point.distance_to(center), radius, zoom)
+
 func _sync_upgrade_audio(state: Dictionary) -> void:
 	if state.is_empty() or str(session.get("phase")) != "match":
 		return
 	var active: Dictionary = {}
+	var structures: Dictionary = {}
 	var added: bool = false
-	for system in state.get("planets", []):
+	var complete: bool = false
+	for system_index in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][system_index]
 		if int(system["owner"]) != _me():
 			continue
 		for job in system["queue"]:
-			if job["kind"] != "economy_building":
-				continue
 			var id: int = int(job["id"])
 			active[id] = true
 			if not known_upgrade_jobs.has(id):
 				added = true
-	if upgrade_audio_initialized and added:
-		upgrade_audio.play()
+		var level: int = int(system.get("warehouse_level", 0)) + int(system.get("habitation_level", 0)) + int(system.get("orbital_housing", 0)) + system.get("pds", {}).size()
+		for yard in system.get("yards", []):
+			level += int(yard["level"])
+		for resource in ECONOMY.RESOURCES:
+			level += int(system.get("levels", {}).get(resource, 0)) + int(system.get("buildings", {}).get(resource, 0))
+		level += int(bool(system.get("station", {}).get("reinforced_plating", false))) + int(bool(system.get("station", {}).get("laser_matrix", false)))
+		structures[system_index] = level
+		if level > int(sound_structures.get(system_index, -1)):
+			complete = true
+	var hulls: Dictionary = {}
+	for ship in state["ships"]:
+		if int(ship["owner"]) == _me():
+			var id: int = int(ship["id"])
+			hulls[id] = true
+			if not sound_hulls.has(id):
+				complete = true
+	if upgrade_audio_initialized:
+		if added:
+			sound_mixer.play_cue("queue")
+		if complete:
+			sound_mixer.play_cue("complete")
 	known_upgrade_jobs = active
+	sound_hulls = hulls
+	sound_structures = structures
 	upgrade_audio_initialized = true
+
+func _sync_world_audio(state: Dictionary) -> void:
+	if state.is_empty() or str(session.get("phase")) != "match":
+		return
+	var now: float = float(state["elapsed"])
+	var initial: bool = sound_elapsed < 0.0
+	var advanced: bool = not initial and now > sound_elapsed
+	var center: Vector2 = _camera_world_center()
+	var radius: float = clampf(_projection_size().length() / maxf(0.0001, _fit() * zoom) * 0.55, 650.0, 9000.0)
+	for event in state.get("ship_destructions", []):
+		var sequence: int = int(event["sequence"])
+		if sequence <= sound_destruction_sequence:
+			continue
+		sound_destruction_sequence = sequence
+		if not initial:
+			var gain: float = _sound_gain(event["position"], center, radius)
+			var heavy: bool = event["kind"] in ["station", "shipyard", "cruiser", "destroyer"]
+			sound_mixer.offer("heavy_explosion" if heavy else "explosion", gain)
+	var notices: Dictionary = {}
+	var announced: bool = false
+	for event in state.get("objective_events", []):
+		var key: String = "%s:%s:%s" % [event["player"], event.get("objective", event.get("reward", "")), event["elapsed"]]
+		notices[key] = true
+		if not sound_objectives.has(key):
+			announced = true
+	if announced and not initial:
+		sound_mixer.play_cue("notice")
+	sound_objectives = notices
+	if advanced:
+		# Timestamp edges, not visual-frame repeats. A sampled volley can
+		# represent several actual shots between network snapshots.
+		for ship in state["ships"]:
+			var laser: bool = maxf(float(ship.get("laser_until", -1.0)), float(ship.get("yard_laser_until", -1.0))) > sound_elapsed + 0.2 + ECONOMY.EPS
+			var blaster: bool = float(ship.get("blaster_fired", -1.0)) > sound_elapsed + ECONOMY.EPS
+			var missile: bool = float(ship.get("missile_until", -1.0)) > sound_elapsed + 0.65 + ECONOMY.EPS
+			var mining: bool = bool(ship.get("mining_active", false))
+			var repair: bool = ship.has("repair_target")
+			var tractor: bool = bool(ship.get("tractor_active", false))
+			if not (laser or blaster or missile or mining or repair or tractor) or not _ship_visible(state, ship):
+				continue
+			var gain: float = _sound_gain(ship["position"], center, radius)
+			if gain < 0.035:
+				continue
+			if laser:
+				sound_mixer.offer("laser", gain)
+			if blaster:
+				sound_mixer.offer("blaster", gain)
+			if missile:
+				sound_mixer.offer("missile", gain)
+			if mining:
+				sound_mixer.offer("mining", gain)
+			if repair:
+				sound_mixer.offer("repair", gain)
+			if tractor:
+				sound_mixer.offer("tractor", gain)
+		for index in range(state["planets"].size()):
+			if not ECONOMY.discovered(state, _me(), "planets", index):
+				continue
+			var system: Dictionary = state["planets"][index]
+			var firing: bool = false
+			for weapon in system.get("station", {}).get("weapons", []):
+				if float(weapon.get("laser_until", -1.0)) > sound_elapsed + 0.2 + ECONOMY.EPS:
+					firing = true
+					break
+			if not firing:
+				for battery in system.get("pds", {}).values():
+					if float(battery.get("laser_until", -1.0)) > sound_elapsed + 0.2 + ECONOMY.EPS:
+						firing = true
+						break
+			if firing:
+				sound_mixer.offer("laser", _sound_gain(state["map"]["points"][index], center, radius))
+	sound_elapsed = now
+	sound_mixer.flush()
 
 func _on_economy_changed() -> void:
 	var state: Dictionary = _state()
 	_sync_upgrade_audio(state)
+	_sync_world_audio(state)
 	_refresh_territory(state)
 	_sync_ship_visuals(state)
 	_refresh()
