@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.9: Reuse salvage sector-center threat results per team within the existing frozen threat snapshot. Ownership and discovery are deliberately not memoized (colony conversion can occur during movement). Arbitrary wreck/ship positions remain exact; benchmark and runtime pending.
+
 - v0.64.8: User 5× profile reports unusually high idle predicate self-time. Introduce derived activity enum and reuse idle/engaged decisions in separation; no duplicated authoritative state or wire changes. Verify timing independently, avoid caching across job/combat mutations. Target 5× scaling as well as 1×; runtime measurements pending.
 
 - v0.64.7: Camera follows arithmetic mean of surviving selected ship poses rather than bounds midpoint; an isolated ship has 1/N influence. Extremely distant stragglers can still shift the mean; monitor before considering robust trimming. No zoom change.

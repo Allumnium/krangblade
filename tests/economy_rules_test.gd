@@ -757,7 +757,26 @@ func _test_ship_activity() -> void:
 	assert(ECON.ship_activity({"kind": "miner", "route": [], "mining_mode": "mining"}) == ECON.ShipActivity.MINING)
 	print("PASS: derived ship activity and legacy idle parity")
 
+func _test_salvage_center_cache() -> void:
+	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var threats: Dictionary = ECON._salvage_threats(state, graph)
+	assert(ECON._salvage_sector_center_safe(state, graph, 1, 0, threats))
+	assert(not ECON._salvage_sector_center_safe(state, graph, 1, 1, threats))
+	state["planets"][0]["owner"] = 2
+	assert(not ECON._salvage_sector_center_safe(state, graph, 1, 0, threats))
+	state["planets"][0]["owner"] = 1
+	assert(ECON._salvage_sector_center_safe(state, graph, 1, 0, threats))
+	var hostile: Dictionary = {"id": 101, "kind": "fighter", "owner": 2, "at": 0, "position": Vector2.ZERO, "route": []}
+	state["ships"] = [hostile]
+	var fresh: Dictionary = ECON._salvage_threats(state, graph)
+	assert(not ECON._salvage_sector_center_safe(state, graph, 1, 0, fresh))
+	assert(ECON._salvage_sector_center_safe(state, graph, 1, 0, fresh) == ECON._salvage_safe(state, graph, 1, Vector2.ZERO, 0, fresh))
+	print("PASS: salvage center threat cache, live ownership and fresh phase invalidation")
+
 func _initialize() -> void:
+	_test_salvage_center_cache()
 	_test_ship_activity()
 	_test_combat_sector_presence()
 	_test_stop_order()
