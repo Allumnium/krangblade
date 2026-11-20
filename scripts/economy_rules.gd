@@ -5665,6 +5665,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	var sector_hostile_cache: Dictionary = {}
 	var laser_blocks: Dictionary = {}
 	var missile_blocks: Dictionary = {}
+	var pursuit_blocks: Dictionary = {}
 	var damage: Dictionary = {}
 	for ship in ships:
 		var fighter: bool = ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]
@@ -5787,15 +5788,16 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			pursuit = prior
 			remaining = PURSUIT_YEARS
 		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and _combat_sector_has_hostile(sector_teams, int(ship_sectors[id]), team):
-			var nearest_enemy: float = INF
-			for enemy in _hostile_bucket(state, sectors, sector_hostile_cache, ship_sectors[id], team):
-				if not _hostile_hull(state, int(ship["owner"]), enemy):
-					continue
-				var enemy_id: int = int(enemy["id"])
-				var distance: float = pos.distance_squared_to(positions[enemy_id])
-				if distance < nearest_enemy or (is_equal_approx(distance, nearest_enemy) and enemy_id < pursuit):
-					nearest_enemy = distance
-					pursuit = enemy_id
+			if team > 0:
+				if not pursuit_blocks.has(team):
+					pursuit_blocks[team] = {}
+				var team_blocks: Dictionary = pursuit_blocks[team]
+				var sector: int = int(ship_sectors[id])
+				if not team_blocks.has(sector):
+					var candidates: Array = _hostile_bucket(state, sectors, sector_hostile_cache, sector, team).filter(func(enemy: Dictionary) -> bool: return int(state["teams"].get(int(enemy["owner"]), 0)) > 0)
+					team_blocks[sector] = _laser_blocks(candidates, positions)
+				var nearest: Array = _laser_block_nearest(team_blocks[sector], positions, pos, INF, -1)
+				pursuit = int(nearest[1])
 			if pursuit >= 0:
 				remaining = PURSUIT_YEARS
 		if guard_node >= 0:
