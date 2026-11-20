@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.78.4: Hold completed category goals until their CP is spent; never draw already-satisfied goals, including repeat tiers. Preserve first-place 2 CP and category independence. Box selection prioritizes military hulls within the drag rectangle; Shift preserves existing friendly selections.
+
 - v0.78.3: Compact right-side conquest scoreboard below local objectives lists every match player's current unspent Economic, Military and Tech CP in stable player-color order. Only local conquest completions and unique unlocks produce notifications/sounds; chat and tactical warnings unchanged. Read existing public authority snapshots; private offers stay private.
 
 - v0.78.2: Empire fleet modal uses a viewport-bounded explicit Window instead of content-sized AcceptDialog; dynamic rows scroll inside it. Same first-open and subsequent size, Close/Esc supported; fleet logic unchanged.

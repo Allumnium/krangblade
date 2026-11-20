@@ -1040,6 +1040,17 @@ func _test_objective_holdings() -> void:
 	assert(not ECON.refresh_objective(state, 1, "economic", "colony_ships"))
 	state["objective_clock"] = 11.0
 	ECON._update_objectives(state)
+	assert(progress["active_goals"]["economic"] == "colony_ships")
+	assert(ECON.reward_points(progress, "economic") == 2)
+	assert(not ECON.objective_candidates(progress, "economic").has("population"))
+	assert(not ECON.objective_candidates(progress, "economic").has("metals"))
+	for i in range(2):
+		var offer: Array = ECON.reward_offer(progress, "economic")
+		assert(ECON.acquire_reward(state, 1, str(offer[0]), ECON.reward_generation(progress), "economic"))
+		ECON._update_objectives(state)
+		if i == 0:
+			assert(progress["active_goals"]["economic"] == "colony_ships")
+	assert(ECON.reward_points(progress, "economic") == 0)
 	assert(progress["active_goals"]["economic"] == "colonies")
 	assert(ECON.objective_category("colonies") == "economic")
 	assert(ECON.refresh_objective(state, 1, "economic", "colonies"))
@@ -1063,6 +1074,7 @@ func _test_objective_holdings() -> void:
 	home["stock"]["Metals"] = 100.0
 	ECON._update_objectives(state)
 	assert(float(progress["metals"]) == 200.0 and progress["completed"].has("metals"))
+	progress["points"]["economic"] = 0 # Isolate the next metric fixture.
 	progress["active_goals"]["economic"] = "population"
 	home["population"] = 78999.0
 	ECON._update_objectives(state)
@@ -1071,6 +1083,7 @@ func _test_objective_holdings() -> void:
 	ECON._update_objectives(state)
 	assert(progress["completed"].has("population"))
 	assert(ECON.OBJECTIVE_SPECS["population_2"][2] == 200000)
+	progress["points"]["economic"] = 0 # Isolate the next metric fixture.
 	progress["active_goals"]["economic"] = "colony_food"
 	progress["colony_food"] = 1000.0
 	ECON._update_objectives(state)

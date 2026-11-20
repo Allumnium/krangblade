@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.78.4: Verified CP accumulation caused by timed objective replacement and draws with already-satisfied thresholds. Keep completed goal until CP reaches zero; skip satisfied tiers without credit, retain first-place two-point award. Check pacing when lifetime metrics rise faster than goal allocation. Combat-first drag boxes preserve existing Shift selections.
+
 - v0.78.3: Public unspent CP scoreboard replaces other-player conquest popups and sounds (including unique unlocks). Stable color order and aligned numbers keep rows readable. Existing snapshots already carry every player's balance; no extra traffic. Verify overlap at small resolutions and with eight players.
 
 - v0.78.2: User reports oversized first Empire opening but normal second opening. Likely deferred minimum-size negotiation of freshly populated AcceptDialog; switch to an explicit bounded Window with an internal scrolling list and fixed header/footer. Verify first-open behavior in Godot; no simulation changes.
