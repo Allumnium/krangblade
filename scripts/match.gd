@@ -6748,8 +6748,8 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 			continue
 		var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * zoom
 		var scale: float = clampf(spacing / 150.0, 0.22, 1.0)
-		var origin: Vector2 = pos + Vector2(-69.0 * scale, radius + 5.0 * scale)
-		logistics_overlay.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(144, 34.0 + 32.0 * float(maxi(0, ceili(float(ECONOMY.RESOURCES.size()) / 3.0) - 1))) * scale), Color("#0c1928ec"))
+		var origin: Vector2 = pos + Vector2(-94.0 * scale, radius + 5.0 * scale)
+		logistics_overlay.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(194, 34.0 + 32.0 * float(maxi(0, ceili(float(ECONOMY.RESOURCES.size()) / 3.0) - 1))) * scale), Color("#0c1928ec"))
 		for r in range(ECONOMY.RESOURCES.size()):
 			var resource: String = ECONOMY.RESOURCES[r]
 			var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 32.0) * scale
@@ -6765,6 +6765,14 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 				logistics_overlay.draw_texture_rect(HUD.ICONS[resource], Rect2(badge_pos, Vector2(11, 11) * scale), false)
 				var marks: String = ("+" if grade > 0 else "-").repeat(absi(grade))
 				logistics_overlay.draw_string(font, badge_pos + Vector2(13, 10) * scale, marks, HORIZONTAL_ALIGNMENT_LEFT, -1, maxi(9, roundi(13 * scale)), Color("#79e59a") if grade > 0 else Color("#ff7777"))
+		var pop_cell: Vector2 = origin + Vector2(141, 0) * scale
+		var population: float = float(system["population"])
+		var capacity: float = maxf(1.0, ECONOMY.sustainable_population_capacity(system))
+		logistics_overlay.draw_rect(Rect2(pop_cell, Vector2(50, 14) * scale), Color("#263b50"))
+		logistics_overlay.draw_rect(Rect2(pop_cell, Vector2(50 * clampf(population / capacity, 0.0, 1.0), 14) * scale), Color("#44647e"))
+		logistics_overlay.draw_texture_rect(_population_texture(24), Rect2(pop_cell, Vector2(13, 13) * scale), false)
+		if scale >= 0.8:
+			logistics_overlay.draw_string(font, pop_cell + Vector2(15, 11) * scale, "%.1fk" % (population / 1000.0) if population >= 1000 else str(int(population)), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
 	# Aggregate loaded shipments at their origin and final destination.
 	var traffic: Dictionary = {}
 	for ship in state["ships"]:
@@ -7948,3 +7956,17 @@ func _draw_objectives_overlay() -> void:
 			objectives_overlay.draw_string_outline(font, counter, str(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color("#101824"))
 			objectives_overlay.draw_string(font, counter, str(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
 		y += 34.0 if not key.is_empty() else 22.0
+	var events: Array = state.get("objective_events", [])
+	var roster: Dictionary = session.get("players")
+	var names: Dictionary = {"colonies": "Colonization", "metals": "Metals", "population": "Population"}
+	y += 8.0
+	for j in range(events.size() - 1, maxi(-1, events.size() - 4), -1):
+		var event: Dictionary = events[j]
+		var player_name: String = str(roster.get(event["player"], {}).get("name", "Player")).left(16)
+		var message: String = "%s: %s +%d CP" % [player_name, names.get(event["objective"], ""), int(event["award"])]
+		if bool(event["first"]):
+			message += " (first)"
+		var tint := Color("#e9cb7c") if bool(event["first"]) else Color("#b8d9ef")
+		objectives_overlay.draw_string_outline(font, Vector2(x, y), message, HORIZONTAL_ALIGNMENT_LEFT, 244, 12, 4, Color("#101824"))
+		objectives_overlay.draw_string(font, Vector2(x, y), message, HORIZONTAL_ALIGNMENT_LEFT, 244, 12, tint)
+		y += 17.0

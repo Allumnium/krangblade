@@ -8,7 +8,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ### Objectives and specialization (v0.65.0)
 - [ ] Validate default raised logistics lens and inherent resource grades, and objective progression/replication in solo and ENet.
-- [ ] Design competitive objective payout/ranking and public achievement notifications; draft three random permanent rewards per conquest point, no repeated unlock per empire. No artificial catch-up modifier. Define reward pool and authority validation before implementing.
+- [ ] Verify v0.66.0 competitive payout (2 first, including same-tick ties; 1 later) and public recent achievement feed; check population column at multiple zoom levels.
+- [ ] Implement three-card reward drafting: spend one point, host generates three distinct unowned options, validate offered choice and ownership at authority, prevent repeat purchases, replicate offers privately and chosen rewards publicly. Define actual reward effects and AI selection before enabling. No artificial catch-up modifier.
 - [ ] Explore science objectives, technology specialization via rewards, and alternate victories.
 
 ### Large-fleet scalability — approved engineering program (v0.62.1; T-026)
