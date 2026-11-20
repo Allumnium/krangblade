@@ -96,6 +96,9 @@ var background_music: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
 var map_canvas: Control
+var overview_batches: Dictionary = {}
+var overview_instances: Dictionary = {}
+var overview_dot_textures: Dictionary = {}
 var territory_layer: Control
 var territory_image: ColorRect
 var territory_material: ShaderMaterial
@@ -7096,7 +7099,58 @@ func _draw_cargo_transfers(state: Dictionary, poses: Dictionary, refs: Dictionar
 			map_canvas.draw_circle(point, radius * 2.0, Color(color, alpha * 0.18), true, -1.0, true)
 			map_canvas.draw_rect(Rect2(point - Vector2.ONE * radius, Vector2.ONE * radius * 2.0), Color(color.lightened(0.2), alpha))
 
+# One GPU-instanced quad batch per cached overview texture. Keep detailed
+# hulls and gameplay/picking on their existing paths.
+func _overview_dot_texture(tint: Color) -> Texture2D:
+	var key: String = tint.to_html(false)
+	if not overview_dot_textures.has(key):
+		var image := Image.new()
+		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="31" fill="#%s"/></svg>' % key)
+		overview_dot_textures[key] = ImageTexture.create_from_image(image)
+	return overview_dot_textures[key]
+
+func _queue_overview_hull(texture: Texture2D, point: Vector2, angle: float, extent: float) -> void:
+	if not overview_instances.has(texture):
+		overview_instances[texture] = []
+	overview_instances[texture].append(Transform2D(angle, Vector2.ONE * extent * 2.0, 0.0, point))
+
+func _flush_overview_hulls() -> void:
+	for texture in overview_instances:
+		var transforms: Array = overview_instances[texture]
+		if not overview_batches.has(texture):
+			var instance := MultiMeshInstance2D.new()
+			var quad := QuadMesh.new()
+			quad.size = Vector2.ONE
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_2D
+			mm.mesh = quad
+			instance.multimesh = mm
+			instance.texture = texture
+			map_canvas.add_child(instance)
+			overview_batches[texture] = instance
+		var batch: MultiMeshInstance2D = overview_batches[texture]
+		var mesh: MultiMesh = batch.multimesh
+		if mesh.instance_count < transforms.size():
+			mesh.instance_count = maxi(transforms.size(), maxi(64, mesh.instance_count * 2))
+		var buffer := PackedFloat32Array()
+		buffer.resize(mesh.instance_count * 8)
+		for i in range(transforms.size()):
+			var t: Transform2D = transforms[i]
+			var offset: int = i * 8
+			buffer[offset] = t.x.x
+			buffer[offset + 1] = t.y.x
+			buffer[offset + 3] = t.origin.x
+			buffer[offset + 4] = t.x.y
+			buffer[offset + 5] = t.y.y
+			buffer[offset + 7] = t.origin.y
+		mesh.buffer = buffer
+		mesh.visible_instance_count = transforms.size()
+		batch.show()
+
 func _draw_map() -> void:
+	overview_instances.clear()
+	for batch in overview_batches.values():
+		batch.hide()
 	if session == null:
 		return
 	var state: Dictionary = _state()
@@ -7394,9 +7448,12 @@ func _draw_map() -> void:
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
 		_draw_damage_bar(point, _hull_ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])))
 		if scale < 0.15 * overview:
-			map_canvas.draw_circle(point, maxf(0.8, 6.0 * scale / overview) * overview, hull, true, -1.0, true)
+			_queue_overview_hull(_overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
 			continue
 		var texture: Texture2D = _cached_hull_texture(str(ship["kind"]), empire, scale >= 0.42)
+		if scale < 0.42 and ship["kind"] != "science_ship":
+			_queue_overview_hull(texture, point, direction.angle(), _hull_texture_half_size(str(ship["kind"])) * scale)
+			continue
 		map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
 		var half: float = _hull_texture_half_size(str(ship["kind"]))
 		map_canvas.draw_texture_rect(texture, Rect2(-half, -half, half * 2.0, half * 2.0), false)
@@ -7430,6 +7487,7 @@ func _draw_map() -> void:
 					map_canvas.draw_circle(point + Vector2.from_angle(angle) * 5.0 * scale, maxf(0.7, scale), tint, true, -1.0, true)
 		elif scale >= 0.42:
 			_draw_other_cargo(ship, point, direction, side)
+	_flush_overview_hulls()
 	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
 	_draw_ship_destructions(viewport_bounds)
 	_draw_formation_preview(state)
