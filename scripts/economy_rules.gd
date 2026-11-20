@@ -5418,6 +5418,16 @@ static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, posi
 	ship["blaster_shot"] = shot
 	ship["blaster_cooldown"] = maxf(0.0, next - dt)
 
+# Precomputed sector presence avoids an O(fleet size) hostile search for
+# every moving combat hull, including dense friendly formations.
+static func _combat_sector_has_hostile(presence: Dictionary, sector: int, team: int) -> bool:
+	if sector < 0 or team <= 0:
+		return false
+	for other_team in presence.get(sector, {}):
+		if int(other_team) > 0 and int(other_team) != team:
+			return true
+	return false
+
 static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	var ships: Array = state["ships"]
 	var positions: Dictionary = {}
@@ -5427,6 +5437,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 	var killed_by: Dictionary = {}
 	var cells: Dictionary = {}
 	var sectors: Dictionary = {}
+	var sector_teams: Dictionary = {}
 	var ship_sectors: Dictionary = {}
 	for ship in ships:
 		var id: int = int(ship["id"])
@@ -5443,6 +5454,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			if not sectors.has(sector):
 				sectors[sector] = []
 			sectors[sector].append(ship)
+			if not sector_teams.has(sector):
+				sector_teams[sector] = {}
+			sector_teams[sector][int(state["teams"].get(int(ship["owner"]), 0))] = true
 		var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 		if not cells.has(cell):
 			cells[cell] = []
@@ -5497,11 +5511,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or ship.get("unit_order", {}).get("kind", "") == "follow" or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
-		elif fighter and not bool(ship.get("holding", false)) and int(ship_sectors[int(ship["id"])]) >= 0:
-			for enemy in sectors.get(ship_sectors[int(ship["id"])], []):
-				if _hostile_hull(state, int(ship["owner"]), enemy):
-					moving_only = false
-					break
+		elif fighter and not bool(ship.get("holding", false)) and _combat_sector_has_hostile(sector_teams, int(ship_sectors[int(ship["id"])]), int(state["teams"].get(int(ship["owner"]), 0))):
+			moving_only = false
 		ship["passing_fire"] = moving_only and fighter
 		if bool(ship.get("retreating", false)) or ship.has("cargo_order") or ship.has("repair_order"):
 			ship["combat_target"] = -1
