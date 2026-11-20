@@ -336,7 +336,7 @@ static func _mining_resources(state: Dictionary, player: int, index: int) -> Arr
 
 ## Read-only player-wide holdings: stock plus the player's own cargo in transit.
 static func storage_capacity(p: Dictionary) -> float:
-	return float(WAREHOUSE_CAPACITIES[clampi(int(p.get("warehouse_level", 0)), 0, 3)]) * (2.0 if int(p["owner"]) != 0 and has_reward(p, "storage") else 1.0)
+	return float(WAREHOUSE_CAPACITIES[clampi(int(p.get("warehouse_level", 0)), 0, 3)]) * (1.0 + (1.0 if int(p["owner"]) != 0 and has_reward(p, "storage") else 0.0) + 0.05 * reward_rank(p.get("conquest_rewards", []), "rank_storage"))
 
 static func storage_free(p: Dictionary, resource: String) -> float:
 	return maxf(0.0, storage_capacity(p) - float(p["stock"].get(resource, 0.0)))
@@ -586,7 +586,7 @@ static func planetary_population(p: Dictionary) -> float:
 	return maxf(0.0, float(p.get("population", 0.0)) - eco_population(p))
 
 static func eco_organics(p: Dictionary) -> float:
-	return ECO_HOUSING_ORGANICS * eco_housing_count(p) if int(p.get("owner", 0)) != 0 else 0.0
+	return ECO_HOUSING_ORGANICS * eco_housing_count(p) * _rank_factor(p, "rank_orbital", 0.05) if int(p.get("owner", 0)) != 0 else 0.0
 
 static func _add_eco_residents(p: Dictionary, count: float) -> void:
 	var residents: float = eco_population(p)
@@ -615,7 +615,7 @@ static func overpopulation_penalty(planet: Dictionary, capacity_factor: float = 
 static func farm_potential(planet: Dictionary) -> float:
 	if int(planet["owner"]) == 0 or not has_planets(planet):
 		return 0.0
-	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0)) * (1.5 if has_reward(planet, "agriculture") else 1.0)
+	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0)) * (_rank_factor(planet, "rank_food", 0.05) + (0.5 if has_reward(planet, "agriculture") else 0.0))
 
 static func population_capacity(planet: Dictionary) -> float:
 	return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
@@ -623,7 +623,7 @@ static func population_capacity(planet: Dictionary) -> float:
 static func habitation_capacity(planet: Dictionary) -> float:
 	if not has_planets(planet):
 		return 0.0
-	return 500000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0)))
+	return 500000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0))) * _rank_factor(planet, "rank_housing", 0.05)
 
 static func sustainable_population_capacity(planet: Dictionary) -> float:
 	return minf(population_capacity(planet), habitation_capacity(planet)) + eco_capacity(planet)
@@ -649,7 +649,7 @@ static func consumption(planet: Dictionary, resource: String) -> float:
 		for key in ["crystals"]:
 			if has_reward(planet, key):
 				upkeep += 0.15
-	return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * planetary_population(planet) / HOME_POPULATION * upkeep
+	return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * planetary_population(planet) / HOME_POPULATION * upkeep / (_rank_factor(planet, "rank_upkeep", 0.03) if resource == "Metals" else 1.0)
 
 static func civilian_stock_access(planet: Dictionary, resource: String) -> float:
 	# Stock above the import target is reserved for trade and construction.
@@ -690,10 +690,10 @@ static func rate(planet: Dictionary, resource: String) -> float:
 	var labor: float = population_multiplier(planet)
 	var base_rate: float = CRYSTALS_PER_LEVEL if resource == "Crystals" else PRODUCTION_PER_LEVEL
 	var output: float = base_rate * level * production_modifier(planet, resource) * labor
-	if resource == "Metals" and has_reward(planet, "industry"):
-		output *= 1.5
-	if resource == "Crystals" and has_reward(planet, "crystals"):
-		output *= 2.0
+	if resource == "Metals":
+		output *= _rank_factor(planet, "rank_metals", 0.05) + (0.5 if has_reward(planet, "industry") else 0.0)
+	if resource == "Crystals":
+		output *= _rank_factor(planet, "rank_crystals", 0.05) + (1.0 if has_reward(planet, "crystals") else 0.0)
 	return station_output + minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func food_growth_multiplier(planet: Dictionary) -> float:
@@ -726,8 +726,7 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 		growth_constant *= 1.0 - overpopulation_penalty(planet)
 	else:
 		growth_constant = 0.0
-	if has_reward(planet, "population"):
-		growth_constant *= 1.5
+	growth_constant *= _rank_factor(planet, "rank_growth", 0.05) + (0.5 if has_reward(planet, "population") else 0.0)
 	var growth_ceiling: float = current * exp(growth_constant * dt)
 	if next > growth_ceiling:
 		next = growth_ceiling
@@ -1540,6 +1539,14 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 					progress["colony_ships_built"] = int(progress.get("colony_ships_built", 0)) + 1
 				elif military_hull(str(item["kind"])):
 					progress["military_built"] = int(progress.get("military_built", 0)) + 1
+					progress["military_investment"] = float(progress.get("military_investment", 0.0)) + float(_cost(str(item["kind"]), 1).get("Metals", 0.0))
+				elif item["kind"] == "science_ship":
+					progress["science_built"] = int(progress.get("science_built", 0)) + 1
+				elif item["kind"] in ["miner", "ship"]:
+					progress["logistics_built"] = int(progress.get("logistics_built", 0)) + 1
+	if not SHIP_KINDS.has(item["kind"]) and int(p["owner"]) > 0:
+		var progress: Dictionary = objective_progress(state, int(p["owner"]))
+		progress["infrastructure_built"] = int(progress.get("infrastructure_built", 0)) + 1
 	p["queue"].erase(item)
 
 static func cargo_bay_count(kind: String) -> int:
@@ -1676,6 +1683,9 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 			used = minf(used, potential * (1.0 - CONSTRUCTION_PRODUCTION_SHARE))
 		var produced: float = minf(potential, used + maxf(0.0, capacity - stored))
 		_record_flow(p, "Production", resource, produced)
+		var progress: Dictionary = objective_progress(state, int(p["owner"]))
+		var metric: String = "produced_" + resource.to_lower()
+		progress[metric] = float(progress.get(metric, 0.0)) + produced
 		_record_flow(p, "Population", resource, used)
 		p["stock"][resource] = maxf(0.0, stored + produced - used)
 	_work_upgrade_deliveries(state, index, p, dt)
@@ -5737,7 +5747,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 
 static func _ship_hit(damage: Dictionary, killed_by: Dictionary, health: Dictionary, target: int, attacker: Dictionary, amount: float, hull_slots: Dictionary = {}, hull_health: PackedFloat64Array = PackedFloat64Array()) -> void:
 	var before: float = float(damage.get(target, 0.0))
-	damage[target] = before + amount
+	damage[target] = before + amount * float(attacker.get("reward_damage_multiplier", 1.0))
 	var hp: float = hull_health[hull_slots[target]] if hull_slots.has(target) else float(health.get(target, INF))
 	if before < hp and float(damage[target]) >= hp - EPS:
 		killed_by[target] = attacker
@@ -7969,11 +7979,35 @@ const CONQUEST_REWARDS = {
 	"shield_3": ["Shields 3", "Military +90% shield HP; stations +150%.", "Military construction: extra Crystals (75% of base Metals).", "military", "guard"],
 	"armor": ["Reinforced Armor", "Military hulls take 15% less hull damage.", "Military construction: +15% Metals.", "military", "reinforced_plating"],
 	"warp_gate": ["Warp Gates", "Deploy a science vessel as a gate; link owned gates for rapid travel.", "Consumes 1 antimatter per gate.", "tech", "transform"],
-	"cloak": ["Cloaking Field", "Scouts hide outside 250-unit enemy detection. Firing reveals them for 5 s.", "Replaces Scout armor/shields; extra Crystals (75% of base Metals).", "military", "auto_wander"]
+	"cloak": ["Cloaking Field", "Scouts hide outside 250-unit enemy detection. Firing reveals them for 5 s.", "Replaces Scout armor/shields; extra Crystals (75% of base Metals).", "military", "auto_wander"],
+	"rank_metals": ["Precision Refining", "+5% base planetary Metals output per rank.", "", "economic", "Metals"],
+	"rank_food": ["Cultivation", "+5% base planetary Organics output per rank.", "", "economic", "Organics"],
+	"rank_growth": ["Medical Research", "+5% base terrestrial growth ceiling per rank.", "", "economic", "habitation"],
+	"rank_orbital": ["Orbital Agriculture", "+5% base orbital food output per rank.", "", "economic", "Organics"],
+	"rank_storage": ["Expanded Warehouses", "+5% base storage capacity per rank.", "", "general", "warehouse"],
+	"rank_housing": ["Habitat Engineering", "+5% base terrestrial housing capacity per rank.", "", "general", "habitation"],
+	"rank_upkeep": ["Material Efficiency", "+3% civilian Metals efficiency per rank.", "", "general", "Metals"],
+	"rank_crystals": ["Incubator Research", "+5% base planetary Crystals output per rank.", "", "tech", "Crystals"],
+	"rank_science": ["Scientific Fabrication", "+3% science ship Metals cost efficiency per rank.", "", "tech", "science_ship"],
+	"rank_civilian": ["Civilian Fabrication", "+3% civilian ship Metals cost efficiency per rank.", "", "tech", "ship"],
+	"rank_damage": ["Weapons Calibration", "+2% military weapon damage per rank.", "", "military", "attack"],
+	"rank_armor": ["Hull Materials", "+2% military hull damage efficiency per rank.", "Does not affect cloaked Scouts.", "military", "reinforced_plating"],
+	"rank_military_metal": ["Fleet Fabrication", "+3% military Metals cost efficiency per rank.", "", "military", "Metals"],
+	"rank_military_crystal": ["Crystal Engineering", "+3% military Crystals cost efficiency per rank.", "", "military", "Crystals"]
 }
 
+static func reward_repeatable(key: String) -> bool:
+	return key.begins_with("rank_") and CONQUEST_REWARDS.has(key)
+
+static func reward_rank(rewards: Array, key: String) -> int:
+	return rewards.count(key)
+
+static func _rank_factor(system: Dictionary, key: String, step: float) -> float:
+	return 1.0 + step * reward_rank(system.get("conquest_rewards", []), key)
+
 static func objective_category(key: String) -> String:
-	return str(OBJECTIVE_SPECS.get(key, ["economic"])[0])
+	var spec: Array = objective_spec(key)
+	return str(spec[0]) if not spec.is_empty() else "economic"
 
 static func reward_points(progress: Dictionary, category: String) -> int:
 	return int(progress.get("points", {}).get(category, 0))
@@ -7994,7 +8028,7 @@ static func has_reward(system: Dictionary, key: String) -> bool:
 	return system.get("conquest_rewards", []).has(key)
 
 static func reward_eligible(rewards: Array, key: String, category: String) -> bool:
-	if not CONQUEST_REWARDS.has(key) or rewards.has(key):
+	if not CONQUEST_REWARDS.has(key) or (rewards.has(key) and not reward_repeatable(key)):
 		return false
 	var pool: String = CONQUEST_REWARDS[key][3]
 	if pool != category and pool != "general":
@@ -8005,19 +8039,27 @@ static func reward_eligible(rewards: Array, key: String, category: String) -> bo
 		return rewards.has("shield_2")
 	return true
 
-static func _fill_reward_offer(state: Dictionary, player: int, category: String) -> void:
+static func _fill_reward_offer(state: Dictionary, player: int, category: String, excluded: String = "") -> void:
 	var progress: Dictionary = objective_progress(state, player)
 	if not REWARD_CATEGORIES.has(category) or reward_points(progress, category) < 1 or not reward_offer(progress, category).is_empty():
 		return
 	var available: Array = []
+	var repeatable: Array = []
 	for key in CONQUEST_REWARDS:
-		if reward_available(state, key) and reward_eligible(progress.get("rewards", []), key, category):
+		if key == excluded or not reward_available(state, key) or not reward_eligible(progress.get("rewards", []), key, category):
+			continue
+		if reward_repeatable(key):
+			repeatable.append(key)
+		else:
 			available.append(key)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(state["map"]["seed"]) + player * 7919 + reward_generation(progress) * 104729 + REWARD_CATEGORIES.find(category) * 15485863
 	var offer: Array = []
-	while not available.is_empty() and offer.size() < 3:
+	# Reserve one slot for incremental research from the start.
+	while not available.is_empty() and offer.size() < 2:
 		offer.append(available.pop_at(rng.randi_range(0, available.size() - 1)))
+	while not repeatable.is_empty() and offer.size() < 3:
+		offer.append(repeatable.pop_at(rng.randi_range(0, repeatable.size() - 1)))
 	progress["offers"][category] = offer
 
 static func acquire_reward(state: Dictionary, player: int, key: String, generation: int, category: String) -> bool:
@@ -8048,7 +8090,7 @@ static func acquire_reward(state: Dictionary, player: int, key: String, generati
 	for other in REWARD_CATEGORIES:
 		if reward_offer(progress, other).has(key):
 			progress["offers"][other] = []
-		_fill_reward_offer(state, player, other)
+		_fill_reward_offer(state, player, other, key)
 	# First authority-accepted purchase permanently reserves a unique reward.
 	# Invalidate every competing draft containing it, even when paused.
 	if reward_is_unique(key):
@@ -8067,7 +8109,7 @@ static func acquire_reward(state: Dictionary, player: int, key: String, generati
 			for rival_category in affected:
 				_fill_reward_offer(state, int(rival), rival_category)
 	# Apply a newly acquired defense immediately, even while paused.
-	if key.begins_with("shield_") or key in ["armor", "cloak"]:
+	if key.begins_with("shield_") or key in ["armor", "cloak", "rank_damage", "rank_armor"]:
 		_refresh_reward_defenses(state, 0.0)
 	return true
 
@@ -8184,12 +8226,21 @@ static func construction_cost(p: Dictionary, kind: String, level: int) -> Dictio
 		var metal: float = float(cost.get("Metals", 0.0))
 		if kind == "scout" and rewards.has("cloak"):
 			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.15 * CRYSTAL_COST_MULTIPLIER)
-			return cost
-		var tier: int = shield_tier(rewards)
-		if tier > 0:
-			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.05 * tier * CRYSTAL_COST_MULTIPLIER)
-		if rewards.has("armor"):
-			cost["Metals"] = ceilf(metal * 1.15)
+		else:
+			var tier: int = shield_tier(rewards)
+			if tier > 0:
+				cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.05 * tier * CRYSTAL_COST_MULTIPLIER)
+			if rewards.has("armor"):
+				cost["Metals"] = ceilf(metal * 1.15)
+		for resource in ["Metals", "Crystals"]:
+			if cost.has(resource):
+				cost[resource] = ceilf(float(cost[resource]) / _rank_factor(p, "rank_military_metal" if resource == "Metals" else "rank_military_crystal", 0.03))
+		return cost
+	if kind in ["ship", "miner", "colony_ship", "science_ship"] and cost.has("Metals"):
+		var efficiency: float = _rank_factor(p, "rank_civilian", 0.03)
+		if kind == "science_ship":
+			efficiency += 0.03 * reward_rank(p.get("conquest_rewards", []), "rank_science")
+		cost["Metals"] = ceilf(float(cost["Metals"]) / efficiency)
 	return cost
 
 static func _update_shield(entity: Dictionary, maximum: float, now: float, dt: float) -> void:
@@ -8209,18 +8260,25 @@ static func _refresh_reward_defenses(state: Dictionary, dt: float) -> void:
 	var now: float = float(state["elapsed"])
 	var levels: Dictionary = {}
 	var armors: Dictionary = {}
+	var damage_factors: Dictionary = {}
 	var cloaks: Dictionary = {}
 	for player in state["teams"]:
 		var rewards: Array = state.get("objectives", {}).get(player, {}).get("rewards", [])
 		levels[player] = shield_tier(rewards)
-		armors[player] = rewards.has("armor")
+		armors[player] = 1.0 - (0.85 if rewards.has("armor") else 1.0) / (1.0 + 0.02 * reward_rank(rewards, "rank_armor"))
+		damage_factors[player] = 1.0 + 0.02 * reward_rank(rewards, "rank_damage")
 		cloaks[player] = rewards.has("cloak")
-	if not levels.values().any(func(level: int) -> bool: return level > 0) and not armors.values().has(true) and not cloaks.values().has(true):
+	if not levels.values().any(func(level: int) -> bool: return level > 0) and not armors.values().any(func(value: float) -> bool: return value > 0.0) and not damage_factors.values().any(func(value: float) -> bool: return value > 1.0) and not cloaks.values().has(true):
 		return
 	for ship in state["ships"]:
 		if not military_hull(str(ship["kind"])):
 			continue
 		var owner: int = int(ship["owner"])
+		var damage_factor: float = float(damage_factors.get(owner, 1.0))
+		if damage_factor > 1.0:
+			ship["reward_damage_multiplier"] = damage_factor
+		else:
+			ship.erase("reward_damage_multiplier")
 		if ship["kind"] == "scout" and bool(cloaks.get(owner, false)):
 			ship["cloak_equipped"] = true
 			ship["cloaked"] = now >= float(ship.get("cloak_reveal_until", 0.0))
@@ -8231,8 +8289,8 @@ static func _refresh_reward_defenses(state: Dictionary, dt: float) -> void:
 		var tier: int = int(levels.get(owner, 0))
 		if tier > 0 or ship.has("shield_max"):
 			_update_shield(ship, ship_max_hp(str(ship["kind"])) * 0.3 * tier, now, dt)
-		if bool(armors.get(owner, false)):
-			ship["armor"] = 0.15
+		if float(armors.get(owner, 0.0)) > 0.0:
+			ship["armor"] = float(armors[owner])
 		else:
 			ship.erase("armor")
 	for system in state["planets"]:
@@ -8311,6 +8369,41 @@ const OBJECTIVE_SPECS = {
 	"antimatter_2": ["tech", "antimatter_processed", 4, "Process 4 antimatter", "advanced_antimatter"]
 }
 
+# category, first lifetime target, incremental step, label format, fixed prerequisite
+const REPEAT_OBJECTIVES = {
+	"colony_food": ["economic", 5000, 2000, "Produce %st colony ship food", "colony_food_2"],
+	"colony_ships_built": ["economic", 4, 2, "Build %s colony ships", "colony_ships"],
+	"produced_metals": ["economic", 5000, 3000, "Produce %st Metals", "colony_ships"],
+	"produced_organics": ["economic", 5000, 3000, "Produce %st Organics", "colony_ships"],
+	"logistics_built": ["economic", 5, 4, "Build %s logistics ships", "colony_ships"],
+	"military_built": ["military", 45, 15, "Build %s military ships", "military_built_3"],
+	"enemy_ships_destroyed": ["military", 45, 15, "Destroy %s enemy ships", "enemy_ships_3"],
+	"military_investment": ["military", 2500, 2000, "Build %st of base-metal military hulls", "military_built"],
+	"antimatter_processed": ["tech", 6, 2, "Process %s antimatter", "antimatter_2"],
+	"produced_crystals": ["tech", 150, 100, "Produce %st Crystals", ""],
+	"science_built": ["tech", 2, 2, "Build %s science ships", ""],
+	"infrastructure_built": ["tech", 8, 5, "Complete %s infrastructure projects", ""]
+}
+
+static func _repeat_objective_key(metric: String, tier: int) -> String:
+	return "repeat:%s:%d" % [metric, tier]
+
+static func objective_spec(key: String) -> Array:
+	if OBJECTIVE_SPECS.has(key):
+		return OBJECTIVE_SPECS[key]
+	var parts: PackedStringArray = key.split(":")
+	if parts.size() != 3 or parts[0] != "repeat" or not REPEAT_OBJECTIVES.has(parts[1]) or not parts[2].is_valid_int():
+		return []
+	var tier: int = int(parts[2])
+	if tier < 1:
+		return []
+	var metric: String = parts[1]
+	var spec: Array = REPEAT_OBJECTIVES[metric]
+	# Arithmetic growth in the increment, rather than exponential targets.
+	var increments: float = float(tier - 1)
+	var target: int = int(spec[1]) + roundi(float(spec[2]) * (increments + 0.05 * increments * (increments - 1.0)))
+	return [spec[0], metric, target, str(spec[3]) % objective_amount(float(target)), spec[4]]
+
 static func objective_amount(value: float) -> String:
 	if value >= 1000000.0:
 		return ("%0.1f" % (value / 1000000.0)).trim_suffix(".0") + "M"
@@ -8319,7 +8412,8 @@ static func objective_amount(value: float) -> String:
 	return str(int(value))
 
 static func objective_label(key: String) -> String:
-	return str(OBJECTIVE_SPECS.get(key, ["", "", 0, "Objective"])[3])
+	var spec: Array = objective_spec(key)
+	return str(spec[3]) if not spec.is_empty() else "Objective"
 
 static func objective_tech_unlocked(progress: Dictionary) -> bool:
 	var count: int = 0
@@ -8329,7 +8423,7 @@ static func objective_tech_unlocked(progress: Dictionary) -> bool:
 	return count >= 3 or int(progress.get("antimatter_processed", 0)) > 0 or reward_points(progress, "tech") > 0
 
 static func _objective_row(progress: Dictionary, key: String) -> Dictionary:
-	var spec: Array = OBJECTIVE_SPECS[key]
+	var spec: Array = objective_spec(key)
 	var metric: String = spec[1]
 	var target: int = spec[2]
 	var value: float = float((progress.get("colonies", {}) as Dictionary).size()) if metric == "colonies" else float(progress.get(metric, 0))
@@ -8345,10 +8439,10 @@ static func active_objectives(progress: Dictionary, _clock: float) -> Array:
 		if category == "tech" and not objective_tech_unlocked(progress):
 			continue
 		var key: String = str(active.get(category, ""))
-		if OBJECTIVE_SPECS.has(key):
+		if not objective_spec(key).is_empty():
 			result.append(_objective_row(progress, key))
 		else:
-			result.append({"id": "", "track": category, "target": 1, "value": 0, "label": "No objectives remaining", "counter": ""})
+			result.append({"id": "", "track": category, "target": 1, "value": 0, "label": "Preparing objective", "counter": ""})
 	return result
 
 static func objective_candidates(progress: Dictionary, category: String, excluded: String = "") -> Array:
@@ -8359,6 +8453,16 @@ static func objective_candidates(progress: Dictionary, category: String, exclude
 		if spec[0] != category or key == excluded or completed.has(key):
 			continue
 		if str(spec[4]).is_empty() or completed.has(spec[4]):
+			candidates.append(key)
+	for metric in REPEAT_OBJECTIVES:
+		var spec: Array = REPEAT_OBJECTIVES[metric]
+		if spec[0] != category or (not str(spec[4]).is_empty() and not completed.has(spec[4])):
+			continue
+		var tier: int = 1
+		while completed.has(_repeat_objective_key(str(metric), tier)):
+			tier += 1
+		var key: String = _repeat_objective_key(str(metric), tier)
+		if key != excluded:
 			candidates.append(key)
 	return candidates
 
