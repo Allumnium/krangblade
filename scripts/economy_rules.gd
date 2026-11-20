@@ -1042,7 +1042,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 				return false
 			level = int(p["levels"][target]) + 1
 		_: return false
-	var cost: Dictionary = building_cost(p, target) if kind == "economy_building" else _cost(kind, level)
+	var cost: Dictionary = building_cost(p, target) if kind == "economy_building" else construction_cost(p, kind, level)
 	if not affordable(p, cost):
 		return false
 	var paid: Dictionary = empty_stock()
@@ -5869,7 +5869,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			by_id[id] = ship
 		team_by_id[id] = int(state["teams"].get(int(ship["owner"]), 0))
 		var slot: int = hull_slots.size()
-		hull_health[slot] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
+		hull_health[slot] = _effective_health(ship, ship_max_hp(str(ship["kind"])))
 		hull_slots[id] = slot
 		hull_positions[slot] = pos
 		hull_teams[slot] = int(team_by_id[id])
@@ -5918,7 +5918,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			var target_id: int = station_target_id(state, index)
 			var pos: Vector2 = station_position(state, index, float(state["elapsed"]))
 			station_targets[target_id] = index
-			health[target_id] = float(system["station"]["hp"])
+			health[target_id] = _effective_health(system["station"], station_max_hp(system))
 			positions[target_id] = pos
 			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "station"})
@@ -6218,7 +6218,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	for ship in ships.duplicate():
 		var id: int = int(ship["id"])
 		if damage.has(id):
-			ship["hp"] = maxf(0.0, float(ship.get("hp", ship_max_hp(str(ship["kind"])))) - float(damage[id]))
+			_apply_reward_damage(ship, ship_max_hp(str(ship["kind"])), float(damage[id]), float(state["elapsed"]))
 			if float(ship["hp"]) <= EPS:
 				_record_ship_destruction(state, graph, ship)
 				_remove_indexed_hull(state, ship)
@@ -6272,7 +6272,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			continue
 		var index: int = station_targets[id]
 		var station: Dictionary = state["planets"][index]["station"]
-		station["hp"] = maxf(0.0, float(station["hp"]) - float(damage[id]))
+		_apply_reward_damage(station, station_max_hp(state["planets"][index]), float(damage[id]), float(state["elapsed"]))
 		if float(station["hp"]) <= EPS:
 			_destroy_station(state, graph, index)
 
@@ -6468,7 +6468,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 				action = "yard_upgrade"
 				target = str(best_yard)
 		var build_level: int = next_shipyard_slot(p) if action == "yard" else (int(p["yards"][int(target)]["level"]) + 1 if action == "yard_upgrade" else 1)
-		var price: Dictionary = building_cost(p, target) if action == "economy" else _cost(action, build_level)
+		var price: Dictionary = building_cost(p, target) if action == "economy" else construction_cost(p, action, build_level)
 		# Capital hulls (and enabling upgrades) cannot fit the initial
 		# warehouse. Reserve a normal warehouse upgrade before saving.
 		var capacity_needed: float = 0.0
@@ -7572,6 +7572,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	for craft in state["ships"]:
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"], craft)
 	_passive_regeneration(state, dt)
+	_refresh_reward_defenses(state, dt)
 	_prepare_withdrawals(state, combat_graph)
 	_advance_unit_orders(state, combat_graph)
 	_update_tactical_orders(state, combat_graph)
@@ -7808,7 +7809,7 @@ static func objective_progress(state: Dictionary, player: int) -> Dictionary:
 		state["objectives"] = {}
 	var all_progress: Dictionary = state["objectives"]
 	if not all_progress.has(player):
-		all_progress[player] = {"colonies": {}, "metals": 0.0, "population": 0.0, "completed": {}, "points": 0}
+		all_progress[player] = {"colonies": {}, "metals": 0.0, "population": 0.0, "completed": {}, "points": {"economic": 0, "military": 0, "tech": 0}, "offers": {}}
 	return all_progress[player]
 
 static func embarked_construction_population(planet: Dictionary) -> float:
@@ -7848,16 +7849,19 @@ static func _update_objectives(state: Dictionary) -> void:
 					first[key] = now
 				var winner: bool = float(first[key]) == now
 				var award: int = 2 if winner else 1
-				progress["points"] = int(progress["points"]) + award
+				var category: String = objective_category(key)
+				progress["points"][category] = reward_points(progress, category) + award
 				events.append({"player": player, "objective": key, "first": winner, "award": award, "elapsed": now})
 	state["objective_first"] = first
 	state["objective_events"] = events
 	for player in state["teams"]:
-		_fill_reward_offer(state, int(player))
-		if state.get("ai_players", []).has(player):
-			var offer: Array = objective_progress(state, int(player)).get("offer", [])
-			if not offer.is_empty() and int(objective_progress(state, int(player))["points"]) > 0:
-				acquire_reward(state, int(player), str(offer[0]), objective_progress(state, int(player)).get("rewards", []).size())
+		for category in REWARD_CATEGORIES:
+			_fill_reward_offer(state, int(player), category)
+			if state.get("ai_players", []).has(player):
+				var progress: Dictionary = objective_progress(state, int(player))
+				var offer: Array = reward_offer(progress, category)
+				if not offer.is_empty():
+					acquire_reward(state, int(player), str(offer[0]), progress.get("rewards", []).size(), category)
 
 static func specialization_grade(system: Dictionary, resource: String) -> int:
 	if not has_planets(system):
@@ -7875,62 +7879,153 @@ static func specialization_grade(system: Dictionary, resource: String) -> int:
 		return 1
 	return 0
 
+const REWARD_CATEGORIES = ["economic", "military", "tech"]
 const CONQUEST_REWARDS = {
-	"industry": ["Industrial Revolution", "+50% planetary Metals output", ""],
-	"crystals": ["Crystalline Synthesis", "+100% Incubator output", "+15% civilian Metals demand"],
-	"agriculture": ["Agricultural Revolution", "+50% planetary Organics output", ""],
-	"population": ["Population Boom", "+50% terrestrial growth ceiling", ""],
-	"storage": ["Megastructures", "+100% station storage capacity", ""]
+	"industry": ["Industrial Revolution", "+50% planetary Metals output", "", "economic", "Metals"],
+	"crystals": ["Crystalline Synthesis", "+100% Incubator output", "+15% civilian Metals demand", "economic", "Crystals"],
+	"agriculture": ["Agricultural Revolution", "+50% planetary Organics output", "", "economic", "Organics"],
+	"population": ["Population Boom", "+50% terrestrial growth ceiling", "", "general", "habitation"],
+	"storage": ["Megastructures", "+100% station storage capacity", "", "general", "warehouse"],
+	"shield_1": ["Shields 1", "Military +30% shield HP; stations +50%.", "Military construction: extra Crystals (5% of base Metals).", "military", "guard"],
+	"shield_2": ["Shields 2", "Military +60% shield HP; stations +100%.", "Military construction: extra Crystals (10% of base Metals).", "military", "guard"],
+	"shield_3": ["Shields 3", "Military +90% shield HP; stations +150%.", "Military construction: extra Crystals (15% of base Metals).", "military", "guard"],
+	"armor": ["Reinforced Armor", "Military hulls take 15% less hull damage.", "Military construction: +15% Metals.", "military", "reinforced_plating"]
 }
+
+static func objective_category(key: String) -> String:
+	if key == "advanced_antimatter":
+		return "tech"
+	return "military" if key.begins_with("colonies") or key == "advanced_colonies" else "economic"
+
+static func reward_points(progress: Dictionary, category: String) -> int:
+	return int(progress.get("points", {}).get(category, 0))
+
+static func reward_offer(progress: Dictionary, category: String) -> Array:
+	return progress.get("offers", {}).get(category, [])
 
 static func has_reward(system: Dictionary, key: String) -> bool:
 	return system.get("conquest_rewards", []).has(key)
 
-static func _fill_reward_offer(state: Dictionary, player: int, previous: Array = [], force_draft: bool = false) -> void:
-	var progress: Dictionary = objective_progress(state, player)
-	if (int(progress["points"]) < 1 and not force_draft) or not progress.get("offer", []).is_empty():
-		return
-	var fresh: Array = []
-	var repeats: Array = []
-	for key in CONQUEST_REWARDS:
-		if not progress.get("rewards", []).has(key):
-			if previous.has(key):
-				repeats.append(key)
-			else:
-				fresh.append(key)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = int(state["map"]["seed"]) + player * 7919 + progress.get("rewards", []).size() * 104729
-	var offer: Array = []
-	# Prefer previously unseen choices; refill from old unowned choices only
-	# when the small reward pool makes overlap unavoidable.
-	while offer.size() < 3 and not fresh.is_empty():
-		offer.append(fresh.pop_at(rng.randi_range(0, fresh.size() - 1)))
-	while offer.size() < 3 and not repeats.is_empty():
-		offer.append(repeats.pop_at(rng.randi_range(0, repeats.size() - 1)))
-	for i in range(offer.size() - 1, 0, -1):
-		var j: int = rng.randi_range(0, i)
-		var value: String = offer[i]
-		offer[i] = offer[j]
-		offer[j] = value
-	progress["offer"] = offer
+static func reward_eligible(rewards: Array, key: String, category: String) -> bool:
+	if not CONQUEST_REWARDS.has(key) or rewards.has(key):
+		return false
+	var pool: String = CONQUEST_REWARDS[key][3]
+	if pool != category and pool != "general":
+		return false
+	if key == "shield_2":
+		return rewards.has("shield_1")
+	if key == "shield_3":
+		return rewards.has("shield_2")
+	return true
 
-static func acquire_reward(state: Dictionary, player: int, key: String, generation: int) -> bool:
-	if not state["teams"].has(player) or not CONQUEST_REWARDS.has(key):
+static func _fill_reward_offer(state: Dictionary, player: int, category: String) -> void:
+	var progress: Dictionary = objective_progress(state, player)
+	if not REWARD_CATEGORIES.has(category) or reward_points(progress, category) < 1 or not reward_offer(progress, category).is_empty():
+		return
+	var available: Array = []
+	for key in CONQUEST_REWARDS:
+		if reward_eligible(progress.get("rewards", []), key, category):
+			available.append(key)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(state["map"]["seed"]) + player * 7919 + progress.get("rewards", []).size() * 104729 + REWARD_CATEGORIES.find(category) * 15485863
+	var offer: Array = []
+	while not available.is_empty() and offer.size() < 3:
+		offer.append(available.pop_at(rng.randi_range(0, available.size() - 1)))
+	progress["offers"][category] = offer
+
+static func acquire_reward(state: Dictionary, player: int, key: String, generation: int, category: String) -> bool:
+	if not state["teams"].has(player) or not REWARD_CATEGORIES.has(category):
 		return false
 	var progress: Dictionary = objective_progress(state, player)
-	if generation != progress.get("rewards", []).size() or int(progress["points"]) < 1 or not progress.get("offer", []).has(key) or progress.get("rewards", []).has(key):
-		return false
-	var previous: Array = progress["offer"].duplicate()
 	var rewards: Array = progress.get("rewards", [])
+	if generation != rewards.size() or reward_points(progress, category) < 1 or not reward_offer(progress, category).has(key) or not reward_eligible(rewards, key, category):
+		return false
 	rewards.append(key)
 	progress["rewards"] = rewards
-	progress["points"] = int(progress["points"]) - 1
-	progress["offer"] = []
+	progress["points"][category] = reward_points(progress, category) - 1
+	progress["offers"][category] = []
 	for system in state["planets"]:
 		if int(system["owner"]) == player:
 			system["conquest_rewards"] = rewards.duplicate()
-	_fill_reward_offer(state, player, previous, true)
+	# Shared rewards cannot survive in another category's existing draft.
+	for other in REWARD_CATEGORIES:
+		if reward_offer(progress, other).has(key):
+			progress["offers"][other] = []
+		_fill_reward_offer(state, player, other)
+	# Apply a newly acquired defense immediately, even while paused.
+	if key.begins_with("shield_") or key == "armor":
+		_refresh_reward_defenses(state, 0.0)
 	return true
+
+static func shield_tier(rewards: Array) -> int:
+	for level in range(3, 0, -1):
+		if rewards.has("shield_%d" % level):
+			return level
+	return 0
+
+static func military_hull(kind: String) -> bool:
+	return kind in ["scout", "fighter", "cruiser", "destroyer"]
+
+static func construction_cost(p: Dictionary, kind: String, level: int) -> Dictionary:
+	var cost: Dictionary = _cost(kind, level)
+	if military_hull(kind):
+		var rewards: Array = p.get("conquest_rewards", [])
+		var metal: float = float(cost.get("Metals", 0.0))
+		var tier: int = shield_tier(rewards)
+		if tier > 0:
+			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.05 * tier)
+		if rewards.has("armor"):
+			cost["Metals"] = ceilf(metal * 1.15)
+	return cost
+
+static func _update_shield(entity: Dictionary, maximum: float, now: float, dt: float) -> void:
+	var previous: float = float(entity.get("shield_max", 0.0))
+	if maximum <= 0.0:
+		entity.erase("shield")
+		entity.erase("shield_max")
+		entity.erase("shield_hit")
+		return
+	entity["shield_max"] = maximum
+	var current: float = minf(maximum, float(entity.get("shield", 0.0)) + maxf(0.0, maximum - previous))
+	if now - float(entity.get("shield_hit", -INF)) >= 5.0:
+		current = minf(maximum, current + maximum * 0.2 * dt)
+	entity["shield"] = current
+
+static func _refresh_reward_defenses(state: Dictionary, dt: float) -> void:
+	var now: float = float(state["elapsed"])
+	var levels: Dictionary = {}
+	var armors: Dictionary = {}
+	for player in state["teams"]:
+		var rewards: Array = state.get("objectives", {}).get(player, {}).get("rewards", [])
+		levels[player] = shield_tier(rewards)
+		armors[player] = rewards.has("armor")
+	for ship in state["ships"]:
+		if not military_hull(str(ship["kind"])):
+			continue
+		var owner: int = int(ship["owner"])
+		var tier: int = int(levels.get(owner, 0))
+		if tier > 0 or ship.has("shield_max"):
+			_update_shield(ship, ship_max_hp(str(ship["kind"])) * 0.3 * tier, now, dt)
+		if bool(armors.get(owner, false)):
+			ship["armor"] = 0.15
+		else:
+			ship.erase("armor")
+	for system in state["planets"]:
+		if has_station(system):
+			var tier: int = int(levels.get(int(system["owner"]), 0))
+			if tier > 0 or system["station"].has("shield_max"):
+				_update_shield(system["station"], station_max_hp(system) * 0.5 * tier, now, dt)
+
+static func _effective_health(entity: Dictionary, maximum: float) -> float:
+	return float(entity.get("shield", 0.0)) + float(entity.get("hp", maximum)) / (1.0 - float(entity.get("armor", 0.0)))
+
+static func _apply_reward_damage(entity: Dictionary, maximum: float, amount: float, now: float) -> void:
+	if entity.has("shield_max"):
+		var absorbed: float = minf(amount, float(entity.get("shield", 0.0)))
+		entity["shield"] = float(entity.get("shield", 0.0)) - absorbed
+		entity["shield_hit"] = now
+		amount -= absorbed
+	entity["hp"] = maxf(0.0, float(entity.get("hp", maximum)) - amount * (1.0 - float(entity.get("armor", 0.0))))
 
 const OBJECTIVE_TRACKS = {
 	"metals": [1000, 3000, 10000],

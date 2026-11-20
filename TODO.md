@@ -16,22 +16,17 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 - [ ] v0.66.1: Verify direct local asteroid access rather than detouring through an alternate anchor, including multi-access field regression and physical delivery.
 
-### Objectives and specialization (v0.65.0)
-- [ ] v0.70.4: Validate global crew accounting, holdings-based objectives, completed-row retention, advanced-pool metric exclusion and consistent compact counters in solo/ENet.
-- [ ] v0.70.2: Verify 500 maximum desired count per ship type, including authority rejection of larger targets; retain 10,000-ship stress testing.
-- [ ] v0.70.0: Validate Empire modal sizing, slider input, unlock filtering, queue limits, affordability, current/target replication and deficit replenishment in solo/ENet. Check interaction with independent yard repeat modes.
-- [ ] v0.69.1: Validate removal of generic upkeep from four economic rewards; optional thematic drawbacks only (e.g. shields and armor construction materials).
-- [ ] v0.68.0: Validate objective tier advancement, authority real-time delay independent of speed, cumulative progress, competitive awards and pause replication. Initial thresholds: Metals 1k/3k/10k, population 200k/500k/1M, colonies 2/4/8. Last fixed tier remains visible pending advanced pool.
-- [ ] Validate v0.69.0 advanced pool assignment, 10-second replacement, exhaustion and science collection counting (one stabilized item per completed collection). Keep antimatter physical; gate use remains pending.
-- [ ] Warp gate unlock reward: science vessel carrying one antimatter transforms into immobile high-HP building, consumes item, auto-links to next owned gate; command card selects destination among eligible owned gates, host validates stable IDs, destruction invalidates links. Design actual transit activation, direction, cooldown, and AI before implementing. Include map links, selection, combat, replication and ENet tests.
-- [ ] v0.67.0: Validate economic reward drafting, acquisition, AI, replication and upkeep. Expand pool to all approved rewards; private offers and public unlock announcements remain pending.
-- [ ] Shields: military 30%/station 50% extra rechargeable HP, absorb before hull, five seconds out of damage, blue bars under HP and SVG-matching glow in world/selection tile/center inspector; extra Crystal construction cost. Armor mitigation with extra Metal cost, cloak with attack reveal/detection, exclusive hulls. Integrate costs consistently in quotes, queue, refunds and AI. Drawbacks optional: reserve modest thematic tradeoffs for intricate technology, with rewards remaining net beneficial; clearly disclose any costs.
-- [ ] v0.66.3: Validate F4 Empire target editor, hotkey and conquest pulse. Later integrate target quantities with validated authority production policy.
-- [ ] v0.70.5: Playtest three-card conquest drafts/reselection and side-by-side station storage/queue tiles at narrow and wide resolutions; run economy and two-/three-peer ENet reward-generation regression.
-- [ ] Validate default raised logistics lens and inherent resource grades, and objective progression/replication in solo and ENet.
-- [ ] Verify v0.66.0 competitive payout (2 first, including same-tick ties; 1 later) and public recent achievement feed; check population column at multiple zoom levels.
-- [ ] Implement three-card reward drafting: spend one point, host generates three distinct unowned options, validate offered choice and ownership at authority, prevent repeat purchases, replicate offers privately and chosen rewards publicly. Define actual reward effects and AI selection before enabling. No artificial catch-up modifier.
-- [ ] Explore science objectives, technology specialization via rewards, and alternate victories.
+### Objectives and specialization (v0.71.0)
+- [ ] Validate categorized CP payouts (2 first including same-tick ties, 1 later), 10-second objective transitions, current stock/cargo and resident/crew accounting, advanced objectives and compact counters in solo/ENet.
+- [ ] Validate compact choice modal, immediate close at zero CP, category-specific + general random draft, stale/wrong-category rejection, shared reward invalidation, AI selection and exhausted pools. Private peer offers and public unlock announcements remain pending.
+- [ ] Validate Empire F4 autoqueue, 500 target cap, eligibility filters, mixed yard levels, affordability, manual/repeat interaction and replication.
+- [ ] Validate Shields 1–3 and armor damage, recharge, costs/refunds, AI construction, selection/world health indicators and peer replication; provisional values. Add SVG-matching shield glow and mixed-selection shield bars.
+- [ ] Implement cloak with attack reveal/detection and explicit hull eligibility; decide interaction with armor/shields and construction cost.
+- [ ] Warp gate unlock reward: science vessel carrying one antimatter transforms into immobile high-HP building, consumes item, auto-links to next owned gate; command card selects destination among eligible owned gates, host validates stable IDs, destruction invalidates links. Define transit activation, direction, cooldown and AI; map links, selection, combat and ENet.
+- [ ] Expand category-specific and shared reward pools, particularly Tech and Military; keep drawbacks optional and thematic.
+- [ ] Science objectives, antimatter uses and victory condition; retain physical cargo.
+- [ ] Carrier: large expensive hull with 1,000 t storage, fighter/scout production commands using its cargo, repair beams and lasers, distinctive central shipyard art. Integrate AI, costs, population, salvage and peer tests; no drones or additional mechanics without agreement.
+- [ ] Verify v0.66.4 crystal production scarcity, logistics lens and inherent grades; validate objective modal and station side-by-side resources/queue at constrained sizes.
 
 ### Large-fleet scalability — approved engineering program (v0.62.1; T-026)
 
@@ -335,7 +330,7 @@ Observed approximately 5 FPS as the match progressed; Godot profiler set to self
 
 - [ ] Playtest v0.41.0 station command card's three numbered shipyard ports, build/select/pending states, one-time Reinforced Plating and Laser Matrix, weapon details for single armed entities, dual defensive beam visuals and provisional upgrade costs. Check rebuilding a destroyed middle port without moving its neighbors.
 
-- [ ] Playtest v0.40.0 station command subcards at varied window sizes: Build/Trade/Return placement, cost/effect tooltips, repeat borders, sequential infrastructure queue tiles (v0.43.4), clicking to refund, resource details returning on empty queue, trade sliders, and station-anchored logistics lens. Verify F/portrait follow never snaps zoom, even for dispersed fleets.
+- [ ] Playtest v0.40.0 station command subcards at varied window sizes: Build/Trade/Return placement, cost/effect tooltips, repeat borders, sequential infrastructure queue tiles (v0.43.4), clicking to refund, persistent resources beside the station queue, trade sliders, and station-anchored logistics lens. Verify F/portrait follow never snaps zoom, even for dispersed fleets.
 
 - [ ] Playtest v0.39.0: station-first selection and neutral-only sector rings, generic field names, full minimap view bounds, map interaction through empty panels, Escape menu toggle, double control-group recall without tracking, shared guest time controls, crowded rally release and red rally/selected purple patrol routes.
 

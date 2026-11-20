@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.71.0: Separate Economic/Military/Tech conquest balances and category + general drafts. Zero balance closes modal; no next offer until earned. Shields 1–3 unlock sequentially: military 30/60/90%, station 50/100/150% shield HP; 5 simulation seconds without damage, recharge 20% per second. Military armor reduces hull damage 15%; shield tiers add 5/10/15% of base Metals as Crystals; armor adds 15% Metals. Provisional balance, actual warp gates/cloak pending.
+
 - v0.70.6: Vertically center the shared single-selection SVG portrait and HP label together in the center inspector; preserve image sizing, health colors and double-click focus.
 
 - v0.70.5: Conquest purchases immediately redraft up to three unowned rewards, preferring unseen options; reject stale draft generations at the host. Three framed reward cards; station details show resources and existing queue tiles side by side, including empty queues.

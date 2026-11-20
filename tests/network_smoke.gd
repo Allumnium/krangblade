@@ -177,8 +177,8 @@ func _phase_changed() -> void:
 			if role == "host":
 				var ordered: Array[int] = RULES.ordered_peers(roster)
 				for peer in ordered:
-					ECON.objective_progress(state, peer)["points"] = 2
-					ECON._fill_reward_offer(state, peer)
+					ECON.objective_progress(state, peer)["points"]["economic"] = 2
+					ECON._fill_reward_offer(state, peer, "economic")
 				for index in range(ordered.size()):
 					var outpost: Dictionary = state["planets"][int(state["map"]["planetless"][index])]
 					outpost["owner"] = ordered[index]
@@ -908,25 +908,21 @@ func _check_reward_redraft(state: Dictionary) -> bool:
 	var id: int = session.multiplayer.get_unique_id()
 	var progress: Dictionary = state.get("objectives", {}).get(id, {})
 	if not has_meta("reward_previous"):
-		var offer: Array = progress.get("offer", [])
-		if offer.size() != 3 or int(progress.get("points", 0)) < 2:
+		var offer: Array = ECON.reward_offer(progress, "economic")
+		if offer.size() != 3 or ECON.reward_points(progress, "economic") < 2:
 			return false
 		set_meta("reward_previous", offer.duplicate())
-		session.call("request_conquest_reward", str(offer[0]), 0)
+		session.call("request_conquest_reward", str(offer[0]), 0, "economic")
 		# A queued click from the discarded draft must never buy a second card.
-		session.call("request_conquest_reward", str(offer[1]), 0)
+		session.call("request_conquest_reward", str(offer[1]), 0, "economic")
 		return false
 	var previous: Array = get_meta("reward_previous")
 	var rewards: Array = progress.get("rewards", [])
 	if rewards.is_empty():
 		return false
-	if rewards.size() != 1 or rewards[0] != previous[0] or progress.get("offer", []).size() != 3 or progress["offer"].has(previous[0]):
+	if rewards.size() != 1 or rewards[0] != previous[0] or ECON.reward_offer(progress, "economic").size() != 3 or ECON.reward_offer(progress, "economic").has(previous[0]):
 		_fail("Conquest reward or refreshed draft did not replicate.")
 		return false
-	for key in ECON.CONQUEST_REWARDS:
-		if not previous.has(key) and not progress["offer"].has(key):
-			_fail("Conquest draft failed to prioritize previously unseen rewards.")
-			return false
 	return true
 
 func _return_after_all_verified() -> void:
