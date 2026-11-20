@@ -5053,6 +5053,11 @@ static func _threat_sector_signature(ship: Dictionary) -> Array:
 	var route: Array = ship.get("route", [])
 	return [ship.get("position", Vector2.INF), int(ship.get("at", -1)), ship.get("kind", ""), ship.get("mining_mode", ""), int(ship.get("field", -1)), int(ship.get("resource_stage", {}).get("node", -1)), int(route[0]) if not route.is_empty() else -1]
 
+# Compare existing signature fields directly without allocating a second array.
+static func _threat_signature_matches(ship: Dictionary, signature: Array) -> bool:
+	var route: Array = ship.get("route", [])
+	return signature[0] == ship.get("position", Vector2.INF) and int(signature[1]) == int(ship.get("at", -1)) and signature[2] == ship.get("kind", "") and signature[3] == ship.get("mining_mode", "") and int(signature[4]) == int(ship.get("field", -1)) and int(signature[5]) == int(ship.get("resource_stage", {}).get("node", -1)) and int(signature[6]) == (int(route[0]) if not route.is_empty() else -1)
+
 # Validate the frozen threat snapshot after combat and withdrawal rerouting.
 # If anything relevant changed, fall back to the exact survivor rebuild.
 static func _reuse_combat_threats(state: Dictionary, graph: Dictionary, combat_index: Dictionary) -> Dictionary:
@@ -5065,7 +5070,7 @@ static func _reuse_combat_threats(state: Dictionary, graph: Dictionary, combat_i
 			continue
 		count += 1
 		var entry: Array = combat_index.get(int(craft["id"]), [])
-		if entry.size() != 3 or entry[0] != _threat_sector_signature(craft) or int(entry[2]) != int(state_teams.get(int(craft["owner"]), 0)):
+		if entry.size() != 3 or not _threat_signature_matches(craft, entry[0]) or int(entry[2]) != int(state_teams.get(int(craft["owner"]), 0)):
 			return _salvage_threats(state, graph, combat_index)
 	if count != int(combat_index["count"]):
 		return _salvage_threats(state, graph, combat_index)
@@ -5084,7 +5089,7 @@ static func _salvage_threats(state: Dictionary, graph: Dictionary, combat_index:
 		var point: Vector2 = craft["position"]
 		var cached: Array = combat_index.get(int(craft["id"]), [])
 		var sector: int
-		if not cached.is_empty() and cached[0] == _threat_sector_signature(craft):
+		if not cached.is_empty() and _threat_signature_matches(craft, cached[0]):
 			sector = int(cached[1])
 		else:
 			sector = local_sector(graph, craft)
@@ -5767,6 +5772,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		health[id] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
 		previous_targets[id] = int(ship.get("combat_target", -1))
 		var sector: int = local_sector(graph, ship)
+		var combat_cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 		if armed(ship) and ship.get("position", Vector2.INF).is_finite():
 			var threat_team: int = int(team_by_id[id])
 			threat_index[id] = [_threat_sector_signature(ship), sector, threat_team]
@@ -5775,7 +5781,12 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 				if not threat_sectors.has(sector):
 					threat_sectors[sector] = {}
 				threat_sectors[sector][threat_team] = true
-			_spatial_insert(threat_cells, pos, REPAIR_SAFE_RADIUS, threat_positions.size())
+			# Threat cells are exactly two combat cells wide. Reuse the
+			# combat coordinate, including floor semantics for negatives.
+			var threat_cell := Vector2i(floori(float(combat_cell.x) / 2.0), floori(float(combat_cell.y) / 2.0))
+			if not threat_cells.has(threat_cell):
+				threat_cells[threat_cell] = []
+			threat_cells[threat_cell].append(threat_positions.size())
 			threat_positions.append(pos)
 			threat_teams.append(threat_team)
 			threat_ids.append(id)
@@ -5789,7 +5800,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			if not sector_teams.has(sector):
 				sector_teams[sector] = {}
 			sector_teams[sector][int(team_by_id[id])] = true
-		_spatial_insert(cells, pos, LASER_RANGE, ship)
+		if not cells.has(combat_cell):
+			cells[combat_cell] = []
+		cells[combat_cell].append(ship)
 	threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells, "positions": threat_positions, "teams": threat_teams, "ids": threat_ids}
 	threat_index["count"] = threat_count
 	var yard_targets: Dictionary = {}
