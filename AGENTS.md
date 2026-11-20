@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.70.6: Vertically center the shared single-selection SVG portrait and HP label together in the center inspector; preserve image sizing, health colors and double-click focus.
+
 - v0.70.5: Conquest purchases immediately redraft up to three unowned rewards, preferring unseen options; reject stale draft generations at the host. Three framed reward cards; station details show resources and existing queue tiles side by side, including empty queues.
 
 - v0.70.4: Global population includes residents, embarked ship crews and already allocated construction crew (no new consumption or labor). Fleet segment distinct; station capacity remains resident-only. Metals objectives use current owned stock + cargo, population objectives use current total population; completion permanent. Advanced objectives cannot precede their metric's completed fixed track; shared compact formatting.

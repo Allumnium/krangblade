@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.70.6: Screenshot showed single-selection shipyard portrait stuck at the top of a tall inspector. Center the shared portrait/HP group vertically; verify short and tall consoles manually.
+
 - v0.70.4: User observed 2M and 200k population objectives simultaneously; advanced pool now excludes metrics with unfinished fixed tracks. Metals uses current holdings, not mining history; crew included in totals without changing food demand. Initial stock can immediately complete early Metals tiers; review thresholds if needed.
 
 - v0.70.3: Infrastructure cancellations return prepaid resources directly, even during delivery; ship cancellations retain salvage. Verify refunds including storage overflow and shipyard compaction.
