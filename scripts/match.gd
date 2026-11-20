@@ -2855,16 +2855,21 @@ func _queue_health_rect(rect: Rect2, tint: Color) -> void:
 	health_entries.append([Transform2D(0.0, rect.size, 0.0, rect.get_center()), tint])
 
 func _draw_damage_bar(point: Vector2, radius: float, fraction: float, shield: float = -1.0) -> void:
-	if fraction >= 1.0 and shield < 0.0:
+	var show_health: bool = fraction < 1.0
+	var show_shield: bool = shield >= 0.0 and shield < 1.0
+	if not show_health and not show_shield:
 		return
 	var width: float = clampf(radius * 2.0, 18.0, 100.0)
 	var base: Vector2 = point + Vector2(-width * 0.5, -maxf(8.0, radius) - 6.0)
-	_queue_health_rect(Rect2(base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
-	_queue_health_rect(Rect2(base, Vector2(width, 3.0)), Color("#283748"))
-	_queue_health_rect(Rect2(base, Vector2(width * clampf(fraction, 0.0, 1.0), 3.0)), _health_color(fraction))
-	if shield >= 0.0:
-		_queue_health_rect(Rect2(base + Vector2(0, 4), Vector2(width, 3)), Color("#203f5c"))
-		_queue_health_rect(Rect2(base + Vector2(0, 4), Vector2(width * clampf(shield, 0.0, 1.0), 3)), Color("#6fbaff"))
+	if show_health:
+		_queue_health_rect(Rect2(base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
+		_queue_health_rect(Rect2(base, Vector2(width, 3.0)), Color("#283748"))
+		_queue_health_rect(Rect2(base, Vector2(width * clampf(fraction, 0.0, 1.0), 3.0)), _health_color(fraction))
+	if show_shield:
+		var shield_base: Vector2 = base + Vector2(0, 4) if show_health else base
+		_queue_health_rect(Rect2(shield_base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
+		_queue_health_rect(Rect2(shield_base, Vector2(width, 3.0)), Color("#203f5c"))
+		_queue_health_rect(Rect2(shield_base, Vector2(width * clampf(shield, 0.0, 1.0), 3.0)), Color("#6fbaff"))
 
 func _shield_fraction(entity: Dictionary) -> float:
 	var maximum: float = float(entity.get("shield_max", 0.0))
@@ -3037,7 +3042,7 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 			tile.icon = _selection_icon(str(craft["kind"]), tint)
 		var shield_bar: ProgressBar = tile.get_meta("shield_bar")
 		var shield: float = _shield_fraction(craft)
-		shield_bar.visible = shield >= 0.0
+		shield_bar.visible = shield >= 0.0 and shield < 1.0
 		shield_bar.value = maxf(0.0, shield)
 		tile.tooltip_text = "%s · HP %.0f / %.0f\nCrew: %s" % [_ship_kind_name(str(craft["kind"])), float(craft.get("hp", ECONOMY.ship_max_hp(str(craft["kind"])))), ECONOMY.ship_max_hp(str(craft["kind"])), _crew_text(float(craft.get("crew", 0.0)))]
 	for id in selection_tiles.keys():
@@ -6289,7 +6294,7 @@ func _process(delta: float) -> void:
 	conquest_pulse_time += delta
 	var glow: float = 0.5 + 0.5 * sin(conquest_pulse_time * TAU / 1.4)
 	for button in conquest_buttons.values():
-		button.modulate = Color(1.0 + glow * 0.3, 0.88 + glow * 0.22, 0.65 + glow * 0.35) if not button.disabled else Color.WHITE
+		button.modulate = Color(0.78 + glow * 0.65, 0.68 + glow * 0.57, 0.45 + glow * 0.47) if button.visible and not button.disabled else Color.WHITE
 	if formation_button != 0 and not Input.is_mouse_button_pressed(formation_button):
 		formation_button = 0
 		map_canvas.queue_redraw()

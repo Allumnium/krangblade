@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.75.3: Empty Harvesters immediately abandon completed delivery routing and reenter normal work selection, preserving explicit non-delivery orders. Upgrade pulses while enabled. World HP/shield bars and selection shield meters hide independently at full capacity; numeric inspector stats remain.
+
 - v0.75.2: Starter economic objectives target comparable effort: 80k population (then 200k, 500k, 1M) and 3kt Metals (then 6kt, 10kt, 20kt), above initial 1,650t stock. Preserve two colony ships, 1kt colony food and military targets pending playtest timing.
 
 - v0.75.1: Objective category headers display CP balance as text; compact square refresh (arrow or remaining seconds) and narrow Upgrade button match the 13 px header font's line height. Preserve cooldown, purchase and notification behavior.

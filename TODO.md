@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.75.3: Verify immediate Harvester reassignment after final freighter transfer, including manual movement, partial deliveries, conservation and remote snapshots; verify available Upgrade pulse and independent damaged-only world bars/selection shield meters. Runtime and visual checks pending.
+
 - [ ] v0.70.6: Visually verify centered single-selection portraits and HP captions for ships, stations, shipyards and planets at varied window sizes.
 
 - [ ] v0.70.3: Verify immediate full infrastructure cancellation refunds, ship-only cancellation salvage, and ENet replication.

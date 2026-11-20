@@ -2329,7 +2329,9 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 			_resource_haul(freighter)
 		if _cargo_total(miner) <= EPS or total >= budget - EPS:
 			break
-	if total > EPS and (miner.has("cargo_order") or bool(miner.get("salvage_delivery", false)) or miner.get("mining_mode", "") in ["return", "delivery"]):
+	var emptied: bool = total > EPS and _cargo_total(miner) <= EPS
+	var idle_delivery: bool = emptied and miner.get("mining_mode", "idle") == "idle" and not _unit_order_running(miner) and not bool(miner.get("holding", false)) and not bool(miner.get("move_only", false)) and not miner.has("local_move_target") and not miner.has("launch_rally")
+	if total > EPS and (miner.has("cargo_order") or bool(miner.get("salvage_delivery", false)) or miner.get("mining_mode", "") in ["return", "delivery"] or idle_delivery):
 		_cancel_salvage_order(miner)
 		miner.erase("cargo_order")
 		if miner.get("unit_order", {}).get("kind", "") in ["deposit", "drop", "unload"]:
@@ -2341,7 +2343,13 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 		miner["navigation_target"] = miner["position"]
 		miner["next_mining_search"] = 0.0
 		miner["next_unload_search"] = 0.0
-		miner["_handoff_delivery"] = true
+		if emptied:
+			# Reenter normal queued orders / repair / salvage / mining this step.
+			miner.erase("_handoff_delivery")
+			miner.erase("_next_repair_search")
+		else:
+			# Keep the shared transfer budget and defer a partial delivery.
+			miner["_handoff_delivery"] = true
 	return total
 
 static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
@@ -2811,6 +2819,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 		ship["mining_mode"] = "idle"
 		ship["field"] = -1
 		ship["dest"] = -1
+		ship["next_mining_search"] = 0.0
 		return
 	for resource in RESOURCES + [ANTIMATTER]:
 		if float(ship["cargo"].get(resource, 0.0)) <= EPS:

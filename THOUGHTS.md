@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.75.3: User observed empty Harvesters continuing beyond a freighter. Existing completed-handoff skip delayed work; remove skip for empty deliveries and clear stale autonomous idle routing, preserving manual movement and partial transfer budget. Stronger enabled Upgrade pulse and independent damaged-only bars reduce visual clutter. Verify actual reassignment and pulse in play.
+
 - v0.75.2: Starter population reduced from 200k to 80k; smoother later tiers. Metals raised from 1kt (already below initial stock) to 3kt, requiring expansion/storage or enough cargo. Colony ship crews are 40k each, so the early population goal is similar in total people required. Food production and military goals retain existing thresholds; scout-only construction may substantially shorten the military goal. Compare real completion times before further tuning.
 
 - v0.75.1: Shrink objective header controls to the text line height; compact square refresh and Upgrade label, balance next to category. Verify actual Godot minimum sizes in all states and arrow glyph legibility at native UI scale.
