@@ -6500,11 +6500,17 @@ static func _repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, 
 			return false
 	return true
 
-static func _nearest_repair_site(state: Dictionary, graph: Dictionary, ship: Dictionary, paths: Dictionary) -> int:
+static func _cached_repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, site: int, safety: Dictionary) -> bool:
+	var key := Vector2i(owner, site)
+	if not safety.has(key):
+		safety[key] = _repair_site_safe(state, graph, owner, site)
+	return bool(safety[key])
+
+static func _nearest_repair_site(state: Dictionary, graph: Dictionary, ship: Dictionary, paths: Dictionary, safety: Dictionary = {}) -> int:
 	var best: int = -1
 	var distance: float = INF
 	for site in range((state["planets"] as Array).size()):
-		if not _repair_site_safe(state, graph, int(ship["owner"]), site):
+		if not _cached_repair_site_safe(state, graph, int(ship["owner"]), site, safety):
 			continue
 		if not paths.has(site):
 			paths[site] = _military_paths(graph, site)
@@ -6518,6 +6524,9 @@ static func _nearest_repair_site(state: Dictionary, graph: Dictionary, ship: Dic
 # operation objective distinct from the physical repair destination.
 static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 	var paths: Dictionary = {}
+	# Positions and station ownership are fixed during withdrawal planning.
+	# Rebuild after combat; movement-time safety still checks live positions.
+	var safety: Dictionary = {}
 	for ship in state["ships"]:
 		if not armed(ship):
 			continue
@@ -6525,8 +6534,8 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 		if not withdrawing and (not autocast_enabled(ship, "retreat") or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) > ship_max_hp(str(ship["kind"])) * WITHDRAW_HP / SHIP_HP):
 			continue
 		var site: int = int(ship.get("repair_site", -1))
-		if not withdrawing or not _repair_site_safe(state, graph, int(ship["owner"]), site):
-			var replacement: int = _nearest_repair_site(state, graph, ship, paths)
+		if not withdrawing or not _cached_repair_site_safe(state, graph, int(ship["owner"]), site, safety):
+			var replacement: int = _nearest_repair_site(state, graph, ship, paths, safety)
 			if replacement < 0:
 				if withdrawing:
 					ship["retreating"] = false

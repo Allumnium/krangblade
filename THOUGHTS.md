@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.22: Withdrawal planning reuses owner/site safety results within each pass, avoiding repeated full-fleet hostile scans for wounded hulls. Live movement-time checks retained; runtime and mass-retreat profile pending.
+
 - v0.64.21: User refocused scalability on simulation architecture. Miner handoffs query nearby same-owner freighter buckets rather than all owned freighters. Original order preserved by sorting local candidates; exact range and safety unchanged. Runtime and dense-hub benchmark pending.
 
 - v0.64.20: User profiler highlights salvage center safety and 61 debugger errors (details unavailable). Cache center membership and local two-hop reachability; retain live eligibility checks. Profile before pursuing further changes; investigate debugger errors separately.

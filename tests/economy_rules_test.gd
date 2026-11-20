@@ -2293,8 +2293,11 @@ func _initialize() -> void:
 	ECON.step(recovery, 0.1)
 	assert(int(wounded["dest"]) == 3 and not (wounded["route"] as Array).is_empty())
 	var hostile_repair: Dictionary = {"id": 1211, "owner": 3, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "dest": 1, "hp": 100.0}
+	var safety: Dictionary = {}
+	assert(ECON._cached_repair_site_safe(recovery, recovery_graph, 2, 1, safety))
 	recovery["ships"].append(hostile_repair)
 	assert(not ECON._repair_site_safe(recovery, recovery_graph, 2, 1))
+	assert(not ECON._cached_repair_site_safe(recovery, recovery_graph, 2, 1, {}))
 	print("PASS: shared lane pacing, safe individual withdrawal, full repair and rejoining")
 	var crew_state: Dictionary = ECON.create(graph, players, ids, false)
 	var crew_home: Dictionary = crew_state["planets"][0]
