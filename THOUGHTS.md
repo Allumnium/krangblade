@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.25: Laser hull acquisition prunes contiguous 16-candidate blocks by bounding box while preserving original traversal and approximate ties. Benefit depends on spatial coherence of fleet order; worst-case overlap remains quadratic. Test parity and benchmark before wider adoption.
+
 - v0.64.24: Shared hostile candidate buckets skip allied hulls in repeated laser, missile, defense and pursuit scans. Exact weapon checks and ordering retained. Dense opposing fleets still require nearest-target acceleration; runtime pending.
 
 - v0.64.23: Automatic Harvester repairs query nearby damaged target buckets rather than all damaged entities. Preserve snapshot coordinates, actual PDS repair positions, tie order and live damage checks. Runtime and dense repair benchmark pending.
