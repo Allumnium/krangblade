@@ -968,7 +968,15 @@ func _test_reuse_combat_threats() -> void:
 	state["ships"].clear()
 	assert(ECON._reuse_combat_threats(state, graph, index) == {"sectors": {}, "cells": {}})
 
+func _test_indexed_hostile_bucket() -> void:
+	var state: Dictionary = {"teams": {1: 1, 2: 2}}
+	var buckets: Dictionary = {0: [{"id": 1, "owner": 1}, {"id": 2, "owner": 2}, {"id": -2, "owner": 2}, {"id": 3, "owner": 0}]}
+	var teams: Dictionary = {1: 1, 2: 2, -2: 2, 3: 0}
+	for team in range(3):
+		assert(ECON._hostile_bucket(state, buckets, {}, 0, team, teams) == ECON._hostile_bucket(state, buckets, {}, 0, team))
+
 func _initialize() -> void:
+	_test_indexed_hostile_bucket()
 	_test_reuse_combat_threats()
 	_test_shared_threat_index()
 	_test_sector_query_cache()
