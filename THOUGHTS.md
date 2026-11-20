@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.77.2: Tactical warnings are client-side sampled from snapshots, use friendly-majority sector sites plus owned/allied station sites, and count moving visible combat hulls once per scan. Lane-only territory is not a separate warning destination. Real-time rate limits and spatial grouping suppress floods. Hull-shaped glow uses cached per-kind SVG batches; tiny overview dots remain unoutlined. Verify warnings and art with live play.
+
 - v0.77.1: Screenshot confirmed six malformed Crystal recipe dictionaries from v0.76.0. Removed surplus braces without changing prices. Add delimiter balance checks to static review of scripted replacements; real Godot parsing still required. Notifications use one fixed left edge and sender color from authority; verify contrast and narrow layouts in-game.
 
 - v0.77.0: Original procedural PCM fallback samples are intentionally temporary. World audio is snapshot-sampled, density-limited and centered on camera; quiet distant fights, reserved UI voices and explosion priority prevent overwhelming playback. Short one-shots use gain at emission; evaluate stereo panning, longer loops and exact weapon timing only if needed after playtesting. Replacement audio TODO added.

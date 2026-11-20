@@ -97,6 +97,17 @@ var sound_destruction_sequence: int = 0
 var sound_objectives: Dictionary = {}
 var sound_hulls: Dictionary = {}
 var sound_structures: Dictionary = {}
+var tactical_alerts: Dictionary = {}
+var tactical_hit_rects: Array[Dictionary] = []
+var tactical_durability: Dictionary = {}
+var tactical_positions: Dictionary = {}
+var tactical_friendly: Array[int] = []
+var tactical_next_scan: int = 0
+var tactical_last_damage_sequence: int = 0
+var tactical_initialized: bool = false
+const ALERT_APPROACH_RANGE: float = 1200.0
+const ALERT_LIFETIME_MS: int = 10000
+const ALERT_REPEAT_MS: int = 15000
 var background_music: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
@@ -388,6 +399,7 @@ var yard_row_spacers: Array[Control] = []
 var yard_layout_key := Vector3i(-1, -1, -1)
 var production_icons: Dictionary = {}
 var hull_textures: Dictionary = {}
+var shield_textures: Dictionary = {}
 var yard_queue: HFlowContainer
 var yard_queue_rows: Dictionary = {}
 var command_card: GridContainer
@@ -3665,6 +3677,21 @@ func _refresh_territory(state: Dictionary) -> void:
 		territory_region_cache.clear()
 		territory_region_graph = graph
 	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph, known, territory_region_cache)
+	# Only known sectors with a friendly majority are warning destinations.
+	tactical_friendly.clear()
+	var my_team: int = int(state["teams"].get(_me(), -1))
+	for index in range(points.size()):
+		if not known.has(index):
+			continue
+		var friendly: float = 0.0
+		var hostile: float = 0.0
+		for owner in weights[index]:
+			if int(state["teams"].get(owner, 0)) == my_team:
+				friendly += float(weights[index][owner])
+			else:
+				hostile += float(weights[index][owner])
+		if friendly > hostile or (index < state["planets"].size() and ECONOMY.has_station(state["planets"][index]) and int(state["teams"].get(int(state["planets"][index]["owner"]), 0)) == my_team):
+			tactical_friendly.append(index)
 	var roster: Dictionary = session.get("players")
 	var colors: Dictionary = {}
 	for player in roster:
@@ -5961,6 +5988,9 @@ func _map_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
+		if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed and _jump_tactical_alert(mouse.position):
+			map_canvas.accept_event()
+			return
 		if mouse.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
 			# Either button can confirm an armed order; ordinary right drag
 			# still forms a move line and ordinary left drag selects.
@@ -6099,17 +6129,20 @@ func _sync_upgrade_audio(state: Dictionary) -> void:
 		if level > int(sound_structures.get(system_index, -1)):
 			complete = true
 	var hulls: Dictionary = {}
+	var ship_ready: bool = false
 	for ship in state["ships"]:
 		if int(ship["owner"]) == _me():
 			var id: int = int(ship["id"])
 			hulls[id] = true
 			if not sound_hulls.has(id):
-				complete = true
+				ship_ready = true
 	if upgrade_audio_initialized:
 		if added:
 			sound_mixer.play_cue("queue")
 		if complete:
 			sound_mixer.play_cue("complete")
+		if ship_ready:
+			sound_mixer.play_cue("ship_ready")
 	known_upgrade_jobs = active
 	sound_hulls = hulls
 	sound_structures = structures
@@ -6188,11 +6221,149 @@ func _sync_world_audio(state: Dictionary) -> void:
 	sound_elapsed = now
 	sound_mixer.flush()
 
+func _alert_off_camera(point: Vector2) -> bool:
+	return not Rect2(Vector2(0, HEADER_HEIGHT), (_projection_size() - Vector2(0, HEADER_HEIGHT)).max(Vector2.ONE)).has_point(_screen_point(point))
+
+func _post_tactical_alert(key: String, message: String, point: Vector2, now: int, target_id: int = -1) -> void:
+	var previous: Dictionary = tactical_alerts.get(key, {})
+	if not previous.is_empty() and now - int(previous["born"]) < ALERT_REPEAT_MS:
+		if now - int(previous["born"]) < ALERT_LIFETIME_MS:
+			previous["text"] = message
+			previous["point"] = point
+			previous["target"] = target_id
+		return
+	tactical_alerts[key] = {"text": message, "point": point, "born": now, "target": target_id}
+	sound_mixer.play_cue("warning")
+
+func _jump_tactical_alert(point: Vector2) -> bool:
+	for hit in tactical_hit_rects:
+		if not (hit["rect"] as Rect2).has_point(point):
+			continue
+		var key: String = hit["key"]
+		var alert: Dictionary = tactical_alerts.get(key, {})
+		if alert.is_empty() or Time.get_ticks_msec() - int(alert["born"]) >= ALERT_LIFETIME_MS:
+			continue
+		var destination: Vector2 = alert["point"]
+		var target: int = int(alert["target"])
+		if target >= 0:
+			for ship in _state().get("ships", []):
+				if int(ship["id"]) == target:
+					destination = ship["position"]
+					break
+		follow_units = false
+		formation_button = 0
+		selecting_units = false
+		_center_world(destination)
+		_position_territory()
+		map_canvas.queue_redraw()
+		sound_mixer.play_cue("click")
+		return true
+	return false
+
+func _sync_tactical_alerts(state: Dictionary) -> void:
+	if state.is_empty() or str(session.get("phase")) != "match":
+		tactical_alerts.clear()
+		tactical_hit_rects.clear()
+		tactical_durability.clear()
+		tactical_positions.clear()
+		tactical_initialized = false
+		tactical_next_scan = 0
+		tactical_last_damage_sequence = 0
+		return
+	var now: int = Time.get_ticks_msec()
+	for key in tactical_alerts.keys():
+		if now - int(tactical_alerts[key]["born"]) >= ALERT_REPEAT_MS:
+			tactical_alerts.erase(key)
+	var current: Dictionary = {}
+	var team: int = int(state["teams"].get(_me(), -1))
+	for ship in state["ships"]:
+		if int(state["teams"].get(int(ship["owner"]), 0)) != team:
+			continue
+		var id: int = int(ship["id"])
+		var point: Vector2 = ship["position"]
+		var health: Vector2 = Vector2(float(ship.get("hp", 0.0)), float(ship.get("shield", 0.0)))
+		var previous: Vector2 = tactical_durability.get(id, health)
+		current[id] = health
+		if tactical_initialized and (health.x < previous.x - ECONOMY.EPS or health.y < previous.y - ECONOMY.EPS) and _alert_off_camera(point):
+			var cell := Vector2i(floori(point.x / 1500.0), floori(point.y / 1500.0))
+			_post_tactical_alert("attack:%s" % str(cell), "Unit under attack!  ›", point, now, id)
+	for event in state.get("ship_destructions", []):
+		var sequence: int = int(event["sequence"])
+		if sequence <= tactical_last_damage_sequence:
+			continue
+		tactical_last_damage_sequence = sequence
+		var point: Vector2 = event["position"]
+		if tactical_initialized and int(state["teams"].get(int(event["owner"]), 0)) == team and _alert_off_camera(point):
+			var cell := Vector2i(floori(point.x / 1500.0), floori(point.y / 1500.0))
+			_post_tactical_alert("attack:%s" % str(cell), "Unit under attack!  ›", point, now)
+	tactical_durability = current
+	tactical_initialized = true
+	if now < tactical_next_scan:
+		return
+	tactical_next_scan = now + 500
+	var graph: Dictionary = territory_region_graph
+	if graph.is_empty():
+		return
+	var points: Array = graph["points"]
+	# Build a temporary grid of friendly sector centers. Each visible hostile
+	# is counted once, at its nearest approaching friendly sector.
+	var cell_size: float = ALERT_APPROACH_RANGE
+	for index in tactical_friendly:
+		cell_size = maxf(cell_size, float(graph["sector_radii"][index]) + ALERT_APPROACH_RANGE)
+	var cells: Dictionary = {}
+	for index in tactical_friendly:
+		var center: Vector2 = points[index]
+		var cell := Vector2i(floori(center.x / cell_size), floori(center.y / cell_size))
+		if not cells.has(cell):
+			cells[cell] = []
+		cells[cell].append(index)
+	var positions: Dictionary = {}
+	var groups: Dictionary = {}
+	for ship in state["ships"]:
+		if not ECONOMY.military_hull(str(ship["kind"])) or int(state["teams"].get(int(ship["owner"]), 0)) == team or not _ship_visible(state, ship):
+			continue
+		var id: int = int(ship["id"])
+		var point: Vector2 = ship["position"]
+		var previous: Vector2 = tactical_positions.get(id, point)
+		positions[id] = point
+		var movement: Vector2 = point - previous
+		if movement.length_squared() <= ECONOMY.EPS:
+			continue
+		var cell := Vector2i(floori(point.x / cell_size), floori(point.y / cell_size))
+		var best: int = -1
+		var best_distance: float = INF
+		for x in range(-1, 2):
+			for y in range(-1, 2):
+				for index in cells.get(cell + Vector2i(x, y), []):
+					var center: Vector2 = points[index]
+					var distance: float = point.distance_to(center)
+					if distance > float(graph["sector_radii"][index]) + ALERT_APPROACH_RANGE or distance >= best_distance:
+						continue
+					if sector_contains_for_alert(graph, index, point) or movement.normalized().dot(point.direction_to(center)) < 0.35:
+						continue
+					best = index
+					best_distance = distance
+		if best >= 0:
+			var group: Dictionary = groups.get(best, {"count": 0, "sum": Vector2.ZERO})
+			group["count"] = int(group["count"]) + 1
+			group["sum"] = (group["sum"] as Vector2) + point
+			groups[best] = group
+	tactical_positions = positions
+	for index in groups:
+		var group: Dictionary = groups[index]
+		var count: int = int(group["count"])
+		var label_text: String = "%d enemy combat unit%s approaching %s!  ›" % [count, "" if count == 1 else "s", _poi_name(index)]
+		_post_tactical_alert("approach:%d" % index, label_text, (group["sum"] as Vector2) / float(count), now)
+
+func sector_contains_for_alert(graph: Dictionary, index: int, point: Vector2) -> bool:
+	return ECONOMY.sector_contains(graph, index, point)
+
 func _on_economy_changed() -> void:
 	var state: Dictionary = _state()
 	_sync_upgrade_audio(state)
 	_sync_world_audio(state)
 	_refresh_territory(state)
+	_sync_tactical_alerts(state)
 	_sync_ship_visuals(state)
 	_refresh()
 
@@ -6577,6 +6748,20 @@ func _cached_hull_texture(kind: String, empire: Color, detailed: bool) -> Textur
 		image.load_svg_from_string(art)
 		hull_textures[key] = ImageTexture.create_from_image(image)
 	return hull_textures[key]
+
+func _shield_texture(kind: String) -> Texture2D:
+	if not shield_textures.has(kind):
+		var outline: String = _hull_svg_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE))
+		var half: float = _hull_texture_half_size(kind) + 8.0
+		# Three soft bands and a bright rim, baked once per hull type.
+		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="%s %s %s %s"><g fill="none" stroke-linejoin="round">' % [-half, -half, half * 2.0, half * 2.0]
+		for band in [[8.0, 0.10], [5.5, 0.18], [3.5, 0.36], [1.4, 0.95]]:
+			art += '<polygon points="%s" stroke="#77ccff" stroke-width="%s" opacity="%s"/>' % [outline, band[0], band[1]]
+		art += '</g></svg>'
+		var image := Image.new()
+		image.load_svg_from_string(art)
+		shield_textures[kind] = ImageTexture.create_from_image(image)
+	return shield_textures[kind]
 
 func _hull_svg_points(vertices: Array) -> String:
 	var coordinates: PackedStringArray = []
@@ -7204,7 +7389,9 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 	var hp: float = float(system["station"]["hp"]) / ECONOMY.station_max_hp(system)
 	_draw_damage_bar(center, radius, hp, _shield_fraction(system["station"]))
 	if _shield_fraction(system["station"]) > 0.0:
-		_draw_selection_ring(center, radius + 3.0, Color("#65baff80"))
+		# Stations themselves have a circular hull; use a continuous glow.
+		for band in [[6.0, 0.10], [3.5, 0.23], [1.3, 0.85]]:
+			map_canvas.draw_arc(center, radius, 0.0, TAU, 48, Color(0.47, 0.8, 1.0, float(band[1])), float(band[0]), true)
 
 func _draw_shipyard_construction(state: Dictionary, index: int, job: Dictionary, tint: Color, elapsed: float) -> void:
 	var port: int = int(job.get("station_slot", job["level"]))
@@ -7826,6 +8013,8 @@ func _flush_overview_hulls() -> void:
 			mm.mesh = quad
 			instance.multimesh = mm
 			instance.texture = texture
+			if shield_textures.values().has(texture):
+				instance.z_index = 1
 			map_canvas.add_child(instance)
 			overview_batches[texture] = instance
 		var batch: MultiMeshInstance2D = overview_batches[texture]
@@ -8171,8 +8360,6 @@ func _draw_map() -> void:
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
 		_draw_damage_bar(point, _hull_ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
-		if _shield_fraction(ship) > 0.0:
-			_draw_selection_ring(point, maxf(6.0, _hull_ui_radius(str(ship["kind"])) * scale + 3.0), Color("#65baff80"))
 		if bool(ship.get("cloaked", false)):
 			_draw_selection_ring(point, maxf(5.0, _hull_ui_radius(str(ship["kind"])) * scale + 2.0), Color("#b698ff80"))
 		if ship["kind"] == "warp_gate":
@@ -8186,6 +8373,8 @@ func _draw_map() -> void:
 			_queue_overview_hull(_overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
 			continue
 		var texture: Texture2D = _cached_hull_texture(str(ship["kind"]), empire, scale >= 0.42)
+		if _shield_fraction(ship) > 0.0:
+			_queue_overview_hull(_shield_texture(str(ship["kind"])), point, direction.angle(), (_hull_texture_half_size(str(ship["kind"])) + 8.0) * scale)
 		if ship["kind"] != "science_ship":
 			_queue_overview_hull(texture, point, direction.angle(), _hull_texture_half_size(str(ship["kind"])) * scale)
 		else:
@@ -8299,6 +8488,23 @@ func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -
 	var width: float = _notification_width() - 16.0
 	var left: float = (map_canvas.size.x - _notification_width()) * 0.5 + 8.0
 	var visible_count: int = 0
+	tactical_hit_rects.clear()
+	var now: int = Time.get_ticks_msec()
+	var keys: Array = tactical_alerts.keys()
+	keys.sort_custom(func(a, b) -> bool: return int(tactical_alerts[a]["born"]) > int(tactical_alerts[b]["born"]))
+	for key in keys:
+		var alert: Dictionary = tactical_alerts[key]
+		var age: int = now - int(alert["born"])
+		if age >= ALERT_LIFETIME_MS:
+			continue
+		var tint := Color("#ffb16b") if str(key).begins_with("approach:") else Color("#ff7777")
+		tint.a = clampf(float(ALERT_LIFETIME_MS - age) / 2000.0, 0.0, 1.0)
+		var height: float = _draw_notice_text(font, Vector2(left, y), alert["text"], width, tint)
+		tactical_hit_rects.append({"key": key, "rect": Rect2(left - 5.0, y - font.get_ascent(13) - 2.0, width + 10.0, maxf(24.0, height + 6.0))})
+		y += maxf(24.0, height + 8.0)
+		visible_count += 1
+		if visible_count >= 3:
+			break
 	var chat_count: int = 0
 	var chat: Array = session.get("match_chat")
 	for j in range(chat.size() - 1, -1, -1):
@@ -8327,9 +8533,11 @@ func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -
 		y += maxf(24.0, height + 8.0)
 		visible_count += 1
 		chat_count += 1
-		if chat_count >= 3:
+		if chat_count >= 3 or visible_count >= 5:
 			break
 	for j in range(events.size() - 1, -1, -1):
+		if visible_count >= 5:
+			break
 		var event: Dictionary = events[j]
 		var age: float = maxf(0.0, clock - float(event["elapsed"]))
 		if age >= 10.0:
