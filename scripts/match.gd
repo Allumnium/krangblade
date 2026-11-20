@@ -333,6 +333,7 @@ var control_groups: Dictionary = {}
 var last_control_group_recall: int = -1
 var last_control_group_recall_ms: int = -1000
 var control_group_strip: HBoxContainer
+var global_selection_strip: VBoxContainer
 var control_group_buttons: Dictionary = {}
 var selection_start: Vector2 = Vector2.ZERO
 var selection_end: Vector2 = Vector2.ZERO
@@ -528,7 +529,6 @@ func _ready() -> void:
 	_load_settings()
 	_build_ui()
 	hotkey_entries["focus"] = {"scope": "General", "title": "Focus selection", "default": KEY_F}
-	hotkey_entries["army"] = {"scope": "General", "title": "Select all fighters", "default": KEY_F2}
 	_load_hotkey_overrides()
 	_build_resource_hover()
 	_apply_settings()
@@ -706,6 +706,7 @@ func _build_ui() -> void:
 	console_center_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	console_center.add_child(console_center_spacer)
 	_build_control_group_strip()
+	_build_global_selection_strip()
 	console_center.add_child(empty_selection)
 	# Keep the right wing's footprint in the normal deck; its actual panel
 	# may extend upward for Trade without resizing the minimap or camera.
@@ -990,6 +991,8 @@ func _layout_console() -> void:
 		time_panel.offset_top = time_panel.offset_bottom - 31.0
 	if is_instance_valid(control_group_strip):
 		_layout_control_group_strip()
+	if is_instance_valid(global_selection_strip):
+		global_selection_strip.position = Vector2(8.0, size.y + console_panel.offset_top - 36.0 - global_selection_strip.size.y)
 	# SC2-style raised wings: minimap and commands use the full deck height;
 	# selection details begin 20% lower, leaving more map visible centrally.
 	console_center_spacer.custom_minimum_size.y = roundf(height * 0.20)
@@ -5169,6 +5172,8 @@ func _in_visible_playfield(point: Vector2) -> bool:
 	var global_point: Vector2 = map_canvas.get_global_transform() * point
 	if is_instance_valid(time_panel) and time_panel.get_global_rect().has_point(global_point):
 		return false
+	if is_instance_valid(global_selection_strip) and global_selection_strip.get_global_rect().has_point(global_point):
+		return false
 	if is_instance_valid(control_group_strip) and control_group_strip.get_global_rect().has_point(global_point):
 		return false
 	for panel in [minimap, lens_column, overview_panel, inspector_panel]:
@@ -6037,6 +6042,51 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	elif not _trigger_command_hotkey(key):
 		return
 	get_viewport().set_input_as_handled()
+
+func _build_global_selection_strip() -> void:
+	global_selection_strip = VBoxContainer.new()
+	global_selection_strip.theme = HUD.compact()
+	global_selection_strip.z_index = 5
+	global_selection_strip.add_theme_constant_override("separation", 3)
+	add_child(global_selection_strip)
+	for entry in [["stations", "Stations", "station", KEY_F1], ["army", "Army", "fighter", KEY_F2], ["shipyards", "Shipyards", "shipyard", KEY_F3]]:
+		var action: Callable = _select_all_military if entry[0] == "army" else _select_all_buildings.bind(entry[2])
+		var button: Button = _button("", action, global_selection_strip)
+		_yard_ability_face(button, entry[1], _selection_portrait_icon(entry[2]))
+		_set_button_hint(button, "Select all owned " + str(entry[1]).to_lower())
+		_register_command_hotkey(button, int(entry[3]), "General", entry[0], "Select all " + str(entry[1]).to_lower())
+	global_selection_strip.resized.connect(_layout_console)
+
+func _select_all_buildings(kind: String) -> void:
+	var state: Dictionary = _state()
+	if state.is_empty() or str(session.get("phase")) != "match":
+		return
+	_clear_building_selection()
+	selected_units.clear()
+	selected_ship_id = -1
+	selected = -1
+	selected_body = -1
+	selected_yard = -1
+	selected_field = -1
+	for node in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][node]
+		if int(system["owner"]) != _me():
+			continue
+		if kind == "station" and ECONOMY.has_station(system):
+			selected_buildings[Vector2i(node, 0)] = 0
+		elif kind == "shipyard":
+			for slot in range(system["yards"].size()):
+				selected_buildings[Vector2i(node, slot)] = system["yards"].size()
+	if not selected_buildings.is_empty():
+		building_selection_kind = kind
+		_set_building_primary(state, selected_buildings.keys()[0], kind)
+		_load_thresholds()
+	last_control_group_recall = -1
+	follow_units = false
+	pending_command = ""
+	formation_button = 0
+	selecting_units = false
+	_refresh()
 
 func _select_all_military() -> void:
 	var state: Dictionary = _state()
