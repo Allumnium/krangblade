@@ -1757,7 +1757,7 @@ static func cargo_capacity(kind: String) -> float:
 	match kind:
 		"miner": return MINER_CAPACITY
 		"science_ship": return SCIENCE_CAPACITY
-		"fighter", "scout", "cruiser", "destroyer": return 0.0
+		"fighter", "scout", "cruiser", "destroyer", "warp_gate": return 0.0
 		"colony_ship": return COLONY_CAPACITY
 	return CARGO_CAPACITY
 
@@ -1922,6 +1922,7 @@ static func _service_point(state: Dictionary, ship: Dictionary, index: int) -> V
 
 static func ship_speed(kind: String) -> float:
 	match kind:
+		"warp_gate": return 0.0
 		"miner": return MINER_SPEED
 		"ship": return FREIGHTER_SPEED
 		"fighter": return FIGHTER_SPEED
@@ -3233,7 +3234,7 @@ static func missile_count(kind: String) -> int:
 	return int({"cruiser": 1, "destroyer": 2}.get(kind, 0))
 
 static func ship_max_hp(kind: String) -> float:
-	return float({"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0}.get(kind, SHIP_HP))
+	return float({"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "warp_gate": WARP_GATE_HP}.get(kind, SHIP_HP))
 
 static func _regenerate_hull(entity: Dictionary, maximum: float, dt: float) -> void:
 	var hp: float = float(entity.get("hp", maximum))
@@ -3267,6 +3268,10 @@ static func _begin_hull_index(state: Dictionary) -> void:
 		_hulls_by_id[int(ship["id"])] = ship
 
 static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
+	if ship.get("kind", "") == "warp_gate":
+		for other in state["ships"]:
+			if other.get("kind", "") == "warp_gate" and int(other.get("warp_destination", -1)) == int(ship["id"]):
+				other["warp_destination"] = -1
 	state["ships"].erase(ship)
 	if is_same(state, _indexed_state):
 		_hulls_by_id.erase(int(ship["id"]))
@@ -4047,11 +4052,11 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 		requested[id] = true
 	if requested.size() == 1 and is_same(state, _indexed_state):
 		var craft: Dictionary = _hulls_by_id.get(ids[0], {})
-		return [craft] if not craft.is_empty() and int(craft["owner"]) == player else []
+		return [craft] if not craft.is_empty() and int(craft["owner"]) == player and craft.get("kind", "") != "warp_gate" else []
 	var units: Array = []
 	for ship in state["ships"]:
 		if requested.has(ship["id"]):
-			if int(ship["owner"]) != player:
+			if int(ship["owner"]) != player or ship.get("kind", "") == "warp_gate":
 				return []
 			units.append(ship)
 	return units if units.size() == requested.size() else []
@@ -4207,6 +4212,8 @@ static func _unit_order_running(ship: Dictionary) -> bool:
 			return bool(ship.get("salvage_delivery", false))
 		"colonize":
 			return int(ship.get("dest", -1)) >= 0
+		"warp_travel":
+			return true
 		"collect":
 			return ship["kind"] == "science_ship" and _cargo_total(ship) < SCIENCE_CAPACITY - EPS
 		"mine":
@@ -4218,6 +4225,12 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var kind: String = str(order.get("kind", ""))
 	var owner: int = int(ship["owner"])
 	var fighter: bool = ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]
+	if kind == "warp_build":
+		return not append and can_build_warp_gate(state, graph, ship)
+	if kind == "warp_travel":
+		return not append and order.get("target") is int and _warp_order_valid(state, ship, int(order["target"]))
+	if ship.get("kind", "") == "warp_gate":
+		return false
 	if kind in ["stop", "hold"]:
 		return true
 	if ship["kind"] == "science_ship" and kind in ["unload", "drop", "deposit", "salvage"]:
@@ -4283,6 +4296,21 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
+		"warp_build":
+			var graph: Dictionary = military_graph(state)
+			var changed: bool = false
+			for ship in _owned_units(state, player, ids):
+				changed = build_warp_gate(state, graph, ship) or changed
+			return changed
+		"warp_travel":
+			for ship in _owned_units(state, player, ids):
+				_cancel_salvage_order(ship)
+				_clear_tactical_order(ship)
+				_clear_local_hold(ship)
+				_interrupt_work(ship)
+				_finish_manual(ship)
+				_set_unit_order(state, ship, order.duplicate(true))
+			return true
 		"stop":
 			return command_stop_units(state, player, ids)
 		"hold":
@@ -4384,6 +4412,8 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 # All mutation takes place on the authority. A pending command never reserves
 # salvage or changes the current route until it actually starts.
 static func issue_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary, append: bool) -> bool:
+	if order.get("kind") == "warp_link":
+		return not append and ids.size() == 1 and ids[0] is int and order.get("target") is int and set_warp_destination(state, player, int(ids[0]), int(order["target"]))
 	var units: Array = _owned_units(state, player, ids)
 	if units.is_empty():
 		return false
@@ -6344,6 +6374,8 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		if int(ship["owner"]) != player:
 			continue
 		var kind: String = ship["kind"]
+		if kind == "warp_gate":
+			continue
 		counts[kind] += 1
 		if kind in ["fighter", "scout", "cruiser", "destroyer"]:
 			fighters.append(ship)
@@ -7637,6 +7669,14 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var wander_candidates: Dictionary = {}
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
+		if ship.get("kind", "") == "warp_gate":
+			continue
+		if ship.get("unit_order", {}).get("kind", "") == "warp_travel" and not bool(ship.get("retreating", false)):
+			var previous_warp: float = float(ship.get("warp_ready", 0.0))
+			_work_warp_order(state, combat_graph, ship, dt)
+			if float(ship.get("warp_ready", 0.0)) > previous_warp:
+				combat_positions[int(ship["id"])] = ship["position"]
+			continue
 		if ship.get("_handoff_delivery", false):
 			ship.erase("_handoff_delivery")
 			continue
@@ -7889,7 +7929,8 @@ const CONQUEST_REWARDS = {
 	"shield_1": ["Shields 1", "Military +30% shield HP; stations +50%.", "Military construction: extra Crystals (5% of base Metals).", "military", "guard"],
 	"shield_2": ["Shields 2", "Military +60% shield HP; stations +100%.", "Military construction: extra Crystals (10% of base Metals).", "military", "guard"],
 	"shield_3": ["Shields 3", "Military +90% shield HP; stations +150%.", "Military construction: extra Crystals (15% of base Metals).", "military", "guard"],
-	"armor": ["Reinforced Armor", "Military hulls take 15% less hull damage.", "Military construction: +15% Metals.", "military", "reinforced_plating"]
+	"armor": ["Reinforced Armor", "Military hulls take 15% less hull damage.", "Military construction: +15% Metals.", "military", "reinforced_plating"],
+	"warp_gate": ["Warp Gates", "Deploy a science vessel as a gate; link owned gates for rapid travel.", "Consumes 1 antimatter per gate.", "tech", "transform"]
 }
 
 static func objective_category(key: String) -> String:
@@ -7957,6 +7998,101 @@ static func acquire_reward(state: Dictionary, player: int, key: String, generati
 		_refresh_reward_defenses(state, 0.0)
 	return true
 
+const WARP_GATE_HP: float = 10000.0
+const WARP_RANGE: float = 180.0
+const WARP_COOLDOWN: float = 10.0
+
+static func warp_gate(state: Dictionary, owner: int, id: int) -> Dictionary:
+	var gate: Dictionary = service_targets(state, id).get(id, {}).get("entity", {})
+	return gate if gate.get("kind", "") == "warp_gate" and int(gate.get("owner", -1)) == owner and float(gate.get("hp", 0.0)) > EPS else {}
+
+static func warp_gate_choices(state: Dictionary, owner: int, id: int) -> Array[int]:
+	var result: Array[int] = []
+	for candidate in state["ships"]:
+		if candidate.get("kind", "") == "warp_gate" and int(candidate["owner"]) == owner and int(candidate["id"]) != id and float(candidate.get("hp", 0.0)) > EPS:
+			result.append(int(candidate["id"]))
+	result.sort()
+	return result
+
+static func can_build_warp_gate(state: Dictionary, graph: Dictionary, ship: Dictionary) -> bool:
+	if ship.get("kind", "") != "science_ship" or float(ship.get("cargo", {}).get(ANTIMATTER, 0.0)) < 1.0 - EPS:
+		return false
+	var owner: int = int(ship["owner"])
+	if not state.get("objectives", {}).get(owner, {}).get("rewards", []).has("warp_gate"):
+		return false
+	var node: int = sector_at(graph, ship["position"], military_pois(state, owner))
+	if node < 0 or node >= state["planets"].size() or int(state["planets"][node]["owner"]) != owner or not has_station(state["planets"][node]):
+		return false
+	for other in state["ships"]:
+		if other.get("kind", "") == "warp_gate" and int(other["owner"]) == owner and int(other["at"]) == node:
+			return false
+	return true
+
+static func build_warp_gate(state: Dictionary, graph: Dictionary, ship: Dictionary) -> bool:
+	if not can_build_warp_gate(state, graph, ship):
+		return false
+	var owner: int = int(ship["owner"])
+	var id: int = int(ship["id"])
+	var position: Vector2 = ship["position"]
+	var node: int = sector_at(graph, position, military_pois(state, owner))
+	var choices: Array[int] = warp_gate_choices(state, owner, id)
+	# Preserve the existing stable combat/replication ID; replace all mobile orders.
+	var crew: float = float(ship.get("crew", 0.0))
+	ship.clear()
+	ship.merge({"id": id, "kind": "warp_gate", "owner": owner, "origin": node, "at": node, "position": position, "heading": Vector2.UP,
+		"navigation_target": position, "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": WARP_GATE_HP, "crew": crew,
+		"cargo": empty_stock(), "field": -1, "mining_mode": "idle", "holding": true, "hold_position": position, "hold_heading": Vector2.UP, "hold_sector": node,
+		"warp_destination": choices[0] if not choices.is_empty() else -1}, true)
+	for other_id in choices:
+		var other: Dictionary = warp_gate(state, owner, other_id)
+		if int(other.get("warp_destination", -1)) < 0:
+			other["warp_destination"] = id
+	return true
+
+static func set_warp_destination(state: Dictionary, owner: int, source: int, destination: int) -> bool:
+	var gate: Dictionary = warp_gate(state, owner, source)
+	if gate.is_empty() or source == destination or (destination != -1 and warp_gate(state, owner, destination).is_empty()):
+		return false
+	gate["warp_destination"] = destination
+	return true
+
+static func _warp_order_valid(state: Dictionary, ship: Dictionary, source: int) -> bool:
+	var owner: int = int(ship["owner"])
+	var gate: Dictionary = warp_gate(state, owner, source)
+	return ship.get("kind", "") != "warp_gate" and not bool(ship.get("retreating", false)) and not gate.is_empty() and not warp_gate(state, owner, int(gate.get("warp_destination", -1))).is_empty()
+
+static func _work_warp_order(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+	var order: Dictionary = ship.get("unit_order", {})
+	if order.get("kind", "") != "warp_travel":
+		return false
+	var source: int = int(order["target"])
+	if not _warp_order_valid(state, ship, source):
+		ship.erase("unit_order")
+		_finish_manual(ship)
+		return true
+	var owner: int = int(ship["owner"])
+	var gate: Dictionary = warp_gate(state, owner, source)
+	var destination: Dictionary = warp_gate(state, owner, int(gate["warp_destination"]))
+	var point: Vector2 = gate["position"]
+	if (ship["position"] as Vector2).distance_to(point) > WARP_RANGE:
+		_manual_travel(state, graph, ship, int(gate["at"]), point, dt, WARP_RANGE * 0.8)
+		return true
+	if float(state["elapsed"]) < float(ship.get("warp_ready", 0.0)):
+		ship["navigation_target"] = ship["position"]
+		return true
+	var exit: Vector2 = destination["position"]
+	var offset: Vector2 = Vector2.from_angle(float(int(ship["id"]) % 24) * TAU / 24.0) * 60.0
+	var node: int = int(destination["at"])
+	if sector_contains(graph, node, exit + offset):
+		exit += offset
+	ship["position"] = exit
+	ship["navigation_target"] = exit
+	ship["at"] = node
+	ship["warp_ready"] = float(state["elapsed"]) + WARP_COOLDOWN
+	ship.erase("unit_order")
+	_finish_manual(ship)
+	return true
+
 static func shield_tier(rewards: Array) -> int:
 	for level in range(3, 0, -1):
 		if rewards.has("shield_%d" % level):
@@ -7999,6 +8135,8 @@ static func _refresh_reward_defenses(state: Dictionary, dt: float) -> void:
 		var rewards: Array = state.get("objectives", {}).get(player, {}).get("rewards", [])
 		levels[player] = shield_tier(rewards)
 		armors[player] = rewards.has("armor")
+	if not levels.values().any(func(level: int) -> bool: return level > 0) and not armors.values().has(true):
+		return
 	for ship in state["ships"]:
 		if not military_hull(str(ship["kind"])):
 			continue
@@ -8116,7 +8254,7 @@ static func empire_fleet_counts(state: Dictionary, player: int) -> Dictionary:
 	var live: Dictionary = {}
 	var queued: Dictionary = {}
 	for ship in state["ships"]:
-		if int(ship["owner"]) == player:
+		if int(ship["owner"]) == player and SHIP_KINDS.has(ship["kind"]):
 			var kind: String = str(ship["kind"])
 			live[kind] = int(live.get(kind, 0)) + 1
 	for p in state["planets"]:

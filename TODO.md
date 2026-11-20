@@ -22,7 +22,7 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 - [ ] Validate Empire F4 autoqueue, 500 target cap, eligibility filters, mixed yard levels, affordability, manual/repeat interaction and replication.
 - [ ] Validate Shields 1–3 and armor damage, recharge, costs/refunds, AI construction, selection/world health indicators and peer replication; provisional values. Add SVG-matching shield glow and mixed-selection shield bars.
 - [ ] Implement cloak with attack reveal/detection and explicit hull eligibility; decide interaction with armor/shields and construction cost.
-- [ ] Warp gate unlock reward: science vessel carrying one antimatter transforms into immobile high-HP building, consumes item, auto-links to next owned gate; command card selects destination among eligible owned gates, host validates stable IDs, destruction invalidates links. Define transit activation, direction, cooldown and AI; map links, selection, combat and ENet.
+- [ ] v0.72.0: Validate Tech Warp Gates: loaded science vessel conversion in owned sectors, one gate per system, stable links, approach/teleport, cooldown, destruction, costs, selection/map art and real two-/three-peer ENet. Add AI deployment/transit and dedicated peer regression.
 - [ ] Expand category-specific and shared reward pools, particularly Tech and Military; keep drawbacks optional and thematic.
 - [ ] Science objectives, antimatter uses and victory condition; retain physical cargo.
 - [ ] Carrier: large expensive hull with 1,000 t storage, fighter/scout production commands using its cargo, repair beams and lasers, distinctive central shipyard art. Integrate AI, costs, population, salvage and peer tests; no drones or additional mechanics without agreement.
