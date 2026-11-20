@@ -118,11 +118,11 @@ const MAX_SHIPYARD_LEVEL = 3
 const CREW_COSTS = {"ship": 2000.0, "colony_ship": COLONY_POPULATION, "fighter": 500.0, "miner": 750.0, "science_ship": 2000.0, "scout": 50.0, "cruiser": 1500.0, "destroyer": 4000.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 200.0
-const YARD_HP: float = 3000.0
+const YARD_HP: float = 1500.0
 const FREIGHTER_HP: float = SHIP_HP * 2.0
 const PASSIVE_REGEN: float = 1.0 / 3.0
-const STATION_HP: float = 10000.0
-const REINFORCED_STATION_HP: float = STATION_HP + 3000.0
+const STATION_HP: float = 5000.0
+const REINFORCED_STATION_HP: float = STATION_HP + 1500.0
 const STATION_LASER_COUNT: int = 2
 const STATION_UPGRADES = ["reinforced_plating", "laser_matrix"]
 const STATION_SALVAGE_FRACTION: float = 0.20
@@ -8257,7 +8257,7 @@ static func _update_shield(entity: Dictionary, maximum: float, now: float, dt: f
 	entity["shield_max"] = maximum
 	var current: float = minf(maximum, float(entity.get("shield", 0.0)) + maxf(0.0, maximum - previous))
 	if now - float(entity.get("shield_hit", -INF)) >= 5.0:
-		current = minf(maximum, current + maximum * 0.2 * dt)
+		current = minf(maximum, current + maximum * 0.05 * dt)
 	entity["shield"] = current
 
 static func _refresh_reward_defenses(state: Dictionary, dt: float) -> void:

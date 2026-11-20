@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.78.6: Structure hull durability halved, including reinforcement; existing station shield percentages unchanged on smaller hulls. Yards do not currently have their own shields. Reduce global shield recharge from 20% to 5%/s to make disengagement meaningful; playtest siege pacing.
+
 - v0.78.5: Preserve fine low-count control using evenly spaced existing nonlinear milestones with piecewise interpolation. Label each milestone and allow all integer targets through 500. Verify label fit and high-count mouse precision in play.
 
 - v0.78.4: Verified CP accumulation caused by timed objective replacement and draws with already-satisfied thresholds. Keep completed goal until CP reaches zero; skip satisfied tiers without credit, retain first-place two-point award. Check pacing when lifetime metrics rise faster than goal allocation. Combat-first drag boxes preserve existing Shift selections.
