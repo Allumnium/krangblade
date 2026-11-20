@@ -35,9 +35,9 @@ const POPULATION_DOUBLING_YEARS: float = 60.0
 # Fixed full-growth food reserve, independent of warehouse size and trade policy.
 const POPULATION_FOOD_RESERVE: float = 200.0
 const PRODUCTION_PER_LEVEL: float = 4.0
-const CRYSTALS_PER_LEVEL: float = 0.04
-const STATION_CRYSTALS_PER_YEAR: float = 1.0
-const CRYSTAL_COST_MULTIPLIER: float = 5.0
+const CRYSTALS_PER_LEVEL: float = 0.06
+const STATION_CRYSTALS_PER_YEAR: float = 1.25
+const CRYSTAL_COST_MULTIPLIER: float = 4.0
 const ORGANICS_PER_LEVEL: float = 4.0
 # Food production and demand both halve; population capacity stays unchanged.
 const POPULATION_PER_ORGANICS_RATE: float = 25000.0
@@ -7978,12 +7978,12 @@ const CONQUEST_REWARDS = {
 	"agriculture": ["Agricultural Revolution", "+50% planetary Organics output", "", "economic", "Organics"],
 	"population": ["Population Boom", "+50% terrestrial growth ceiling", "", "general", "habitation"],
 	"storage": ["Megastructures", "+100% station storage capacity", "", "general", "warehouse"],
-	"shield_1": ["Shields 1", "Military +30% shield HP; stations +50%.", "Military construction: extra Crystals (25% of base Metals).", "military", "guard"],
-	"shield_2": ["Shields 2", "Military +60% shield HP; stations +100%.", "Military construction: extra Crystals (50% of base Metals).", "military", "guard"],
-	"shield_3": ["Shields 3", "Military +90% shield HP; stations +150%.", "Military construction: extra Crystals (75% of base Metals).", "military", "guard"],
+	"shield_1": ["Shields 1", "Military +30% shield HP; stations +50%.", "Military construction: extra Crystals (20% of base Metals).", "military", "guard"],
+	"shield_2": ["Shields 2", "Military +60% shield HP; stations +100%.", "Military construction: extra Crystals (40% of base Metals).", "military", "guard"],
+	"shield_3": ["Shields 3", "Military +90% shield HP; stations +150%.", "Military construction: extra Crystals (60% of base Metals).", "military", "guard"],
 	"armor": ["Reinforced Armor", "Military hulls take 15% less hull damage.", "Military construction: +15% Metals.", "military", "reinforced_plating"],
 	"warp_gate": ["Warp Gates", "Deploy a science vessel as a gate; link owned gates for rapid travel.", "Consumes 1 antimatter per gate.", "tech", "transform"],
-	"cloak": ["Cloaking Field", "Scouts hide outside 250-unit enemy detection. Firing reveals them for 5 s.", "Replaces Scout armor/shields; extra Crystals (75% of base Metals).", "military", "auto_wander"],
+	"cloak": ["Cloaking Field", "Scouts hide outside 250-unit enemy detection. Firing reveals them for 5 s.", "Replaces Scout armor/shields; extra Crystals (60% of base Metals).", "military", "auto_wander"],
 	"rank_metals": ["Precision Refining", "+5% base planetary Metals output per rank.", "", "economic", "Metals"],
 	"rank_food": ["Cultivation", "+5% base planetary Organics output per rank.", "", "economic", "Organics"],
 	"rank_growth": ["Medical Research", "+5% base terrestrial growth ceiling per rank.", "", "economic", "habitation"],

@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.79.3: Crystal baseline 1.25 t/yr per station, Incubator 0.06 t/yr per level, Crystal recipe and military premium multiplier 4× rather than 5×. Other costs and mining unchanged.
+
 - v0.79.2: Remove main-menu Music toggle; soundtrack still starts automatically and obeys saved shared Music settings.
 
 - v0.79.1: Normalize menu score PCM, raise playback gain, initialize player before menu build and provide a menu music toggle respecting shared settings.
