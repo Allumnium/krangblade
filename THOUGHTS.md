@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.77.3: Objective reward sounds should feel distinct from construction and alerts; short resolving bell arpeggios, layered longer first-place fanfare and subdued other-player cue. Coalesce same-snapshot rewards to strongest cue rather than stacking fanfares; audition and tune against music in-game.
+
 - v0.77.2: Tactical warnings are client-side sampled from snapshots, use friendly-majority sector sites plus owned/allied station sites, and count moving visible combat hulls once per scan. Lane-only territory is not a separate warning destination. Real-time rate limits and spatial grouping suppress floods. Hull-shaped glow uses cached per-kind SVG batches; tiny overview dots remain unoutlined. Verify warnings and art with live play.
 
 - v0.77.1: Screenshot confirmed six malformed Crystal recipe dictionaries from v0.76.0. Removed surplus braces without changing prices. Add delimiter balance checks to static review of scripted replacements; real Godot parsing still required. Notifications use one fixed left edge and sender color from authority; verify contrast and narrow layouts in-game.

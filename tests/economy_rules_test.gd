@@ -1242,8 +1242,21 @@ func _test_sfx_rules() -> void:
 	assert(instance.candidates["laser"].min() >= 0.96)
 	var wav: AudioStreamWAV = instance._synthesize("laser", 0)
 	assert(wav.data.size() > 0 and wav.mix_rate == 22050)
+	assert(mixer.objective_cue({"player": 1, "objective": "test", "first": true}, 1) == "objective_first")
+	assert(mixer.objective_cue({"player": 1, "objective": "test", "first": false}, 1) == "objective_complete")
+	assert(mixer.objective_cue({"player": 2, "objective": "test", "first": true}, 1) == "objective_other")
+	assert(mixer.objective_cue({"player": 1, "reward": "test"}, 1) == "notice")
+	assert(mixer.stronger_objective_cue("objective_first", "objective_complete") == "objective_first")
+	assert(mixer.stronger_objective_cue("notice", "objective_complete") == "objective_complete")
+	for cue in ["objective_other", "objective_complete", "objective_first"]:
+		var reward_wav: AudioStreamWAV = instance._synthesize(cue, 0)
+		assert(reward_wav.data.size() == ceili(float(mixer.CUES[cue][0]) * mixer.SAMPLE_RATE) * 2)
+		var peak: int = 0
+		for i in range(0, reward_wav.data.size(), 2):
+			peak = maxi(peak, absi(reward_wav.data.decode_s16(i)))
+		assert(peak > 1000 and peak < 32767)
 	instance.free()
-	print("PASS: SFX attenuation, bounded loudest candidates and PCM generation")
+	print("PASS: SFX attenuation, bounded candidates, reward cue routing and PCM generation")
 
 func _initialize() -> void:
 	_test_sfx_rules()

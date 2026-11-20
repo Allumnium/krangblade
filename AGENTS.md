@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.77.3: Objective completions have original ascending bell arpeggios: personal +1 CP chime, richer personal first-place +2 CP fanfare, and a quieter other-player cue. Highest-priority new reward per snapshot, no initial replay; existing UI voice limits and SFX settings apply.
+
 - v0.77.2: Distinct ship-ready and warning cues. Clickable top-center tactical alerts for off-camera allied hull damage/destruction and visible combat hulls moving toward friendly sectors (within 1200 world units of the sector radius); group counts by destination, 10 s display / 15 s repeat cooldown. Cached hull-shaped shield glow instead of dashed shield circles; selection circles unchanged.
 
 - v0.77.1: Fix six extra closing braces in Crystal cost recipes from v0.76.0; prices unchanged. Match notices share an invisible centered column and left alignment, with outlined text and player-colored chat sender names. Host supplies sender identity/color separately from message text.
