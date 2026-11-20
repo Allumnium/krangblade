@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.53: Operation dispatch reuses the live step hull index and indexes deployed membership once per group. No dispatch order or cohort changes. Runtime and profiling pending.
+
 - v0.64.52: Single-hull order authorization uses the step index, queued follow validation builds only its target. Added regression for live positions, ownership and removal; not executed. Multi-hull order traversal unchanged.
 
 - v0.64.51: Step-scoped stable-ID hull references accelerate single-target service queries without duplicating serialized state. Combat deaths, colony conversion and elimination erase indexed references; outside the step use live scans. Cross-step persistence, regression and measurement pending.

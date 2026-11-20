@@ -6953,10 +6953,11 @@ static func _order_operation_ship(graph: Dictionary, ship: Dictionary, goal: int
 # allocation orders, including home defense and neutral/field assignments.
 # Reuse the AI minimum and physical rally radius as provisional defaults.
 static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
-	var by_id: Dictionary = {}
-	for ship in state["ships"]:
-		if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
-			by_id[int(ship["id"])] = ship
+	var by_id: Dictionary = _hulls_by_id if is_same(state, _indexed_state) else {}
+	if not is_same(state, _indexed_state):
+		for ship in state["ships"]:
+			if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
+				by_id[int(ship["id"])] = ship
 	var paths: Dictionary = {}
 	for operation in state["operations"].values():
 		if operation["role"] != "allocation":
@@ -6983,9 +6984,12 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
 			continue
 		var deployed: Array[int] = []
 		var fighters: Array = []
+		var deployed_set: Dictionary = {}
+		for member in operation["deployed"]:
+			deployed_set[member] = true
 		for member in operation["members"]:
 			fighters.append(by_id[member])
-			if operation["deployed"].has(member) and not bool(by_id[member].get("retreating", false)):
+			if deployed_set.has(member) and not bool(by_id[member].get("retreating", false)):
 				deployed.append(member)
 		if deployed.size() == 1 and not _engaged(by_id[deployed[0]]):
 			deployed.clear()
