@@ -4968,6 +4968,10 @@ static func _salvage_safe(state: Dictionary, graph: Dictionary, owner: int, poin
 	if _hostile_system(state, owner, sector):
 		return false
 	var team: int = int(state["teams"].get(owner, 0))
+	return _salvage_threat_free(point, sector, team, threats)
+
+# Threat geometry is frozen for the movement phase; ownership remains live.
+static func _salvage_threat_free(point: Vector2, sector: int, team: int, threats: Dictionary) -> bool:
 	for other_team in threats["sectors"].get(sector, {}):
 		if int(other_team) != team:
 			return false
@@ -4978,6 +4982,22 @@ static func _salvage_safe(state: Dictionary, graph: Dictionary, owner: int, poin
 				if int(threat[0]) != team and point.distance_squared_to(threat[1]) <= REPAIR_SAFE_RADIUS * REPAIR_SAFE_RADIUS:
 					return false
 	return true
+
+
+static func _salvage_sector_center_safe(state: Dictionary, graph: Dictionary, owner: int, node: int, threats: Dictionary) -> bool:
+	var point: Vector2 = graph["points"][node]
+	var sector: int = node if sector_contains(graph, node, point) else sector_at(graph, point, range(graph["points"].size()))
+	if _hostile_system(state, owner, sector):
+		return false
+	var team: int = int(state["teams"].get(owner, 0))
+	# Cache only the frozen threat test, not discovery or live ownership.
+	var key := Vector2i(node, team)
+	if not threats.has("center_safety"):
+		threats["center_safety"] = {}
+	var safety: Dictionary = threats["center_safety"]
+	if not safety.has(key):
+		safety[key] = _salvage_threat_free(point, sector, team, threats)
+	return bool(safety[key])
 
 # Search only discovered, safe sectors reachable in at most two lane hops.
 # Store the first waypoint for each destination so remote pickup can
@@ -4994,7 +5014,7 @@ static func _auto_salvage_sectors(state: Dictionary, graph: Dictionary, owner: i
 			for neighbor in graph["adjacent"][node]:
 				if reached.has(neighbor) or not allowed.has(neighbor):
 					continue
-				if not _salvage_safe(state, graph, owner, graph["points"][neighbor], neighbor, threats):
+				if not _salvage_sector_center_safe(state, graph, owner, neighbor, threats):
 					continue
 				reached[neighbor] = neighbor if node == origin else reached[node]
 				next.append(neighbor)
