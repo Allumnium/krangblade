@@ -600,16 +600,16 @@ func _build_ui() -> void:
 		map_canvas.add_child(button)
 		button.z_index = 4
 		button.focus_mode = Control.FOCUS_NONE
-		HUD.action(button, Color("#e9cb7c"))
+		_style_objective_header_button(button, Color("#e9cb7c"))
+		button.text = "Upgrade"
 		button.pressed.connect(_open_conquest_upgrades.bind(category))
 		conquest_buttons[category] = button
-		button.add_theme_font_size_override("font_size", 11)
 		var refresh := Button.new()
 		map_canvas.add_child(refresh)
 		refresh.z_index = 4
 		refresh.focus_mode = Control.FOCUS_NONE
-		refresh.add_theme_font_size_override("font_size", 11)
-		HUD.action(refresh)
+		_style_objective_header_button(refresh, HUD.ACCENT)
+		refresh.text = "↻"
 		refresh.pressed.connect(_request_objective_refresh.bind(category))
 		objective_refresh_buttons[category] = refresh
 	conquest_dialog = Window.new()
@@ -8087,7 +8087,7 @@ func _draw_objectives_overlay() -> void:
 		var key: String = objective["id"]
 		var done: bool = completed.has(key)
 		var tint: Color = Color("#8ee2a9") if done else Color.WHITE
-		objectives_overlay.draw_string(font, Vector2(x, y), category.capitalize(), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
+		objectives_overlay.draw_string(font, Vector2(x, y), "%s · %d CP" % [category.capitalize(), ECONOMY.reward_points(progress, category)], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
 		y += 23.0
 		var pos := Vector2(x, y)
 		if not key.is_empty():
@@ -8135,12 +8135,23 @@ func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -
 		if visible_count >= 5:
 			break
 
+func _style_objective_header_button(button: Button, accent: Color) -> void:
+	button.add_theme_font_size_override("font_size", 10)
+	button.add_theme_stylebox_override("normal", HUD.surface(Color("#193448"), accent.darkened(0.35), 1, 2))
+	button.add_theme_stylebox_override("hover", HUD.surface(Color("#285268"), accent, 1, 2))
+	button.add_theme_stylebox_override("pressed", HUD.surface(Color("#24526a"), accent, 1, 2))
+	button.add_theme_stylebox_override("disabled", HUD.surface(Color("#101c29"), Color("#263748"), 1, 2))
+	button.add_theme_color_override("font_color", accent.lightened(0.25))
+
 func _layout_conquest_button() -> void:
 	if conquest_buttons.is_empty():
 		return
 	var state: Dictionary = _state()
 	var progress: Dictionary = state.get("objectives", {}).get(_me(), {})
-	var y: float = HEADER_HEIGHT + 34.0 + 26.0
+	var font: Font = ThemeDB.fallback_font
+	var height: float = ceilf(font.get_height(13))
+	var upgrade_width: float = 52.0
+	var y: float = HEADER_HEIGHT + 24.0 + 26.0
 	var visible_categories: Array = []
 	for objective in ECONOMY.active_objectives(progress, float(state.get("objective_clock", 0.0))):
 		visible_categories.append(objective["track"])
@@ -8152,11 +8163,11 @@ func _layout_conquest_button() -> void:
 		if not button.visible:
 			continue
 		var right: float = map_canvas.size.x - 12.0
-		var header_y: float = y - 26.0
-		button.position = Vector2(right - 70.0, header_y)
-		button.size = Vector2(70.0, 21.0)
-		refresh.position = Vector2(right - 141.0, header_y)
-		refresh.size = Vector2(67.0, 21.0)
+		var header_y: float = roundf(y - font.get_ascent(13))
+		button.position = Vector2(right - upgrade_width, header_y)
+		button.size = Vector2(upgrade_width, height)
+		refresh.position = Vector2(right - upgrade_width - height - 4.0, header_y)
+		refresh.size = Vector2(height, height)
 		y += 52.0
 
 func _request_objective_refresh(category: String) -> void:
@@ -8173,15 +8184,14 @@ func _refresh_conquest_button(state: Dictionary) -> void:
 	for category in ECONOMY.REWARD_CATEGORIES:
 		var button: Button = conquest_buttons[category]
 		var points: int = ECONOMY.reward_points(progress, category)
-		button.text = "%d CP" % points
 		button.disabled = points <= 0 or ECONOMY.reward_offer(progress, category).is_empty()
-		button.tooltip_text = "Choose a %s or general upgrade" % category
+		button.tooltip_text = "%d CP · Choose a %s or general upgrade" % [points, category]
 		var refresh: Button = objective_refresh_buttons[category]
 		var remaining: float = ECONOMY.objective_refresh_remaining(progress, category, clock)
 		var key: String = str(progress.get("active_goals", {}).get(category, ""))
-		refresh.text = "%ds" % ceili(remaining) if remaining > 0.0 else "Refresh"
+		refresh.text = str(ceili(remaining)) if remaining > 0.0 else "↻"
 		refresh.disabled = remaining > ECONOMY.EPS or key.is_empty() or progress.get("completed", {}).has(key) or ECONOMY.objective_candidates(progress, category, key).is_empty()
-		refresh.tooltip_text = "Randomize this objective · 60 s cooldown"
+		refresh.tooltip_text = "Refresh available in %d s" % ceili(remaining) if remaining > 0.0 else "Randomize this objective · 60 s cooldown"
 	_layout_conquest_button()
 	if is_instance_valid(conquest_dialog) and conquest_dialog.visible:
 		if ECONOMY.reward_points(progress, conquest_category) <= 0:
