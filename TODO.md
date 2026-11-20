@@ -13,6 +13,7 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 - [ ] v0.66.1: Verify direct local asteroid access rather than detouring through an alternate anchor, including multi-access field regression and physical delivery.
 
 ### Objectives and specialization (v0.65.0)
+- [ ] v0.70.2: Verify 500 maximum desired count per ship type, including authority rejection of larger targets; retain 10,000-ship stress testing.
 - [ ] v0.70.0: Validate Empire modal sizing, slider input, unlock filtering, queue limits, affordability, current/target replication and deficit replenishment in solo/ENet. Check interaction with independent yard repeat modes.
 - [ ] v0.69.1: Validate removal of generic upkeep from four economic rewards; optional thematic drawbacks only (e.g. shields and armor construction materials).
 - [ ] v0.68.0: Validate objective tier advancement, authority real-time delay independent of speed, cumulative progress, competitive awards and pause replication. Initial thresholds: Metals 1k/3k/10k, population 200k/500k/1M, colonies 2/4/8. Last fixed tier remains visible pending advanced pool.

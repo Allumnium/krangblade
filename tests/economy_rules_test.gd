@@ -1011,6 +1011,8 @@ func _test_empire_targets() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	assert(not ECON.set_empire_target(state, 999, "fighter", 5))
 	assert(not ECON.set_empire_target(state, 1, "fighter", 4))
+	assert(not ECON.set_empire_target(state, 1, "fighter", 750))
+	assert(ECON.set_empire_target(state, 1, "fighter", 500))
 	assert(ECON.set_empire_target(state, 1, "fighter", 5))
 	var p: Dictionary = state["planets"][0]
 	p["population"] = 100000.0
