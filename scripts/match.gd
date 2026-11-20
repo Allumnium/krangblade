@@ -3271,6 +3271,7 @@ shader_type canvas_item;
 render_mode unshaded;
 uniform sampler2D site_data : filter_nearest, repeat_disable;
 uniform int site_count = 0;
+uniform sampler2D sector_neighbors : filter_nearest, repeat_disable;
 uniform sampler2D lane_data : filter_nearest, repeat_disable;
 uniform sampler2D influence_data : filter_nearest, repeat_disable;
 uniform int lane_count = 0;
@@ -3298,10 +3299,10 @@ float sector_distance(vec2 p, vec4 site, int index) {
 	}
 	vec2 ray = offset / max(distance_to_center, 0.0000001);
 	float second = 1e20;
-	for (int i = 0; i < site_count; i++) {
-		if (i == index) { continue; }
-		vec2 delta = texelFetch(site_data, ivec2(i, 0), 0).xy - site.xy;
-		float length_sq = dot(delta, delta);
+	for (int i = 0; i < int(site.w + 0.5); i++) {
+		vec3 neighbor = texelFetch(sector_neighbors, ivec2(i, index), 0).xyz;
+		vec2 delta = neighbor.xy;
+		float length_sq = neighbor.z;
 		float projection = dot(ray, delta);
 		if (length_sq > 0.000000000001 && length_sq < 4.0 * site.z * site.z && projection > 0.000000001) {
 			float bound = length_sq / (2.0 * projection);
@@ -3475,10 +3476,31 @@ func _refresh_territory(state: Dictionary) -> void:
 		territory_last.clear()
 		territory_influence_texture = null
 		territory_site_count = points.size()
+		# Cache possible bisector constraints in original site order. Use a
+		# conservative margin around the shader's strict disk cutoff.
+		var neighbor_rows: Array = []
+		var max_neighbors: int = 1
+		for i in range(points.size()):
+			var row: Array = []
+			var radius: float = float(graph["sector_radii"][i]) / territory_radius
+			for j in range(points.size()):
+				if i == j:
+					continue
+				var delta: Vector2 = (points[j] as Vector2) / territory_radius - (points[i] as Vector2) / territory_radius
+				var length_sq: float = delta.length_squared()
+				if length_sq <= 4.0 * radius * radius + 0.00001:
+					row.append(Color(delta.x, delta.y, length_sq, 0.0))
+			neighbor_rows.append(row)
+			max_neighbors = maxi(max_neighbors, row.size())
+		var neighbors: Image = Image.create_empty(max_neighbors, points.size(), false, Image.FORMAT_RGBAF)
 		var data: Image = Image.create_empty(points.size(), 1, false, Image.FORMAT_RGBAF)
 		for i in range(points.size()):
 			var point: Vector2 = points[i]
-			data.set_pixel(i, 0, Color(point.x / territory_radius, point.y / territory_radius, float(graph["sector_radii"][i]) / territory_radius, 1.0))
+			var row: Array = neighbor_rows[i]
+			for j in range(row.size()):
+				neighbors.set_pixel(j, i, row[j])
+			data.set_pixel(i, 0, Color(point.x / territory_radius, point.y / territory_radius, float(graph["sector_radii"][i]) / territory_radius, float(row.size())))
+		territory_material.set_shader_parameter("sector_neighbors", ImageTexture.create_from_image(neighbors))
 		territory_sites = ImageTexture.create_from_image(data)
 		territory_material.set_shader_parameter("site_data", territory_sites)
 		territory_material.set_shader_parameter("site_count", territory_site_count)
