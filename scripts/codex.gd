@@ -279,7 +279,7 @@ func _resource_card(resource: String, description: String) -> void:
 	_label(text, description)
 
 func _overview() -> void:
-	_body("Expand through local economies and direct fleet command. The default logistics lens marks local resource strengths (+/++) and weaknesses (-/--). Population appears beside storage. First finishers earn 2 conquest points (ties share first); later finishers earn 1. Objectives progress through fixed tiers after a 10-second completion display: establish systems, extract Metals, grow population. Later objectives draw from an advanced pool; science vessel collection stabilizes one antimatter item. Spend conquest points on permanent upgrades; cards list benefits and any applicable tradeoff. F4 maintains empire fleet targets (up to 500 per ship type) at owned shipyards; existing ships and queued hulls count. Group station construction orders apply to every eligible selected station.")
+	_body("Expand through local economies and direct fleet command. The default logistics lens marks local resource strengths (+/++) and weaknesses (-/--). Population appears beside storage. First finishers earn 2 conquest points (ties share first); later finishers earn 1. Objectives progress through fixed tiers after a 10-second completion display: establish systems, hold Metals (stock and ship cargo), grow total population (residents and ship crews). Later objectives draw from an advanced pool; science vessel collection stabilizes one antimatter item. Spend conquest points on permanent upgrades; cards list benefits and any applicable tradeoff. F4 maintains empire fleet targets (up to 500 per ship type) at owned shipyards; existing ships and queued hulls count. Group station construction orders apply to every eligible selected station.")
 	_section("The strategic loop")
 	_flow(["Extract resources", "Build & recruit", "Expand", "Defend supply"])
 	_body("Start with 3 Harvesters, 2 fighters and 1 freighter. Select a unit or station to issue orders.")
@@ -309,7 +309,7 @@ func _population() -> void:
 		rows.append(["%.0f t" % (fraction * E.POPULATION_FOOD_RESERVE), "%.0f%%" % (fraction * 100.0), "%.0f years" % (E.POPULATION_DOUBLING_YEARS / fraction) if fraction > 0.0 else "No growth"])
 	_table(["Organics reserve", "Growth ceiling", "Doubling time"], rows)
 	_chart(false)
-	_body("The population bar fills toward sustainable capacity: the lower of farm support and habitation, plus orbital housing. Base habitation is 500,000, scaled by system size; upgrades double it. Crowding reduces growth by occupancy cubed.")
+	_body("Ship crews count toward empire population, not local labor or food demand. The resident portion of the population bar fills toward sustainable capacity: the lower of farm support and habitation, plus orbital housing. Base habitation is 500,000, scaled by system size; upgrades double it. Crowding reduces growth by occupancy cubed.")
 	_section("Illustrative population growth")
 	_chart(true)
 	_label(article, "Ideal growth from %.0f residents. Capacity limits and recruitment reduce actual growth." % E.HOME_POPULATION, 12, HUD.MUTED)

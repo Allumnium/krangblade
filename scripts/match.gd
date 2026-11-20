@@ -3301,6 +3301,8 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
 	for i in range(segments.size()):
 		var segment: Dictionary = segments[i]
 		var w: float = width * float(segment["share"])
+		if segment.has("color"):
+			strip.draw_rect(Rect2(Vector2(x, 0), Vector2(w, strip.size.y)), segment["color"])
 		if i > 0:
 			strip.draw_line(Vector2(x, 0), Vector2(x, strip.size.y), Color("#081421"), 1.0)
 		var name_text: String = segment["name"]
@@ -3730,12 +3732,13 @@ func _build_resource_hover() -> void:
 
 func _resource_breakdown(state: Dictionary, resource: String) -> String:
 	if resource == "population":
-		var lines: PackedStringArray = ["Population · %.0f people" % float(ECONOMY.empire_totals(state, _me())["population"]), "Current local growth (people/yr)"]
+		var population_totals: Dictionary = ECONOMY.empire_totals(state, _me())
+		var lines: PackedStringArray = ["Population · %s people" % _compact_amount(float(population_totals["population"])), "Residents: %s · Ships: %s · Embarking: %s" % [_compact_amount(float(population_totals["resident_population"])), _compact_amount(float(population_totals["ship_population"])), _compact_amount(float(population_totals["embarking_population"]))], "Current local growth (people/yr)"]
 		var ceiling: float = 0.0
 		for system in state["planets"]:
 			if int(system["owner"]) == _me():
 				ceiling += ECONOMY.sustainable_population_capacity(system)
-		lines.insert(1, "Sustainable capacity: %s people" % _compact_amount(ceiling))
+		lines.insert(1, "Resident sustainable capacity: %s people" % _compact_amount(ceiling))
 		for i in range(state["planets"].size()):
 			var p: Dictionary = state["planets"][i]
 			if int(p["owner"]) != _me():
@@ -3850,9 +3853,13 @@ func _refresh_global_bar(state: Dictionary) -> void:
 		if int(p["owner"]) != _me():
 			continue
 		population_ceiling += ECONOMY.sustainable_population_capacity(p)
-		population_net += float(p.get("demographic_rate", ECONOMY.population_growth(p))) - float(p.get("crew_rate", 0.0))
+		population_net += float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 		if population_total > 0.0 and float(p["population"]) > 0.0:
 			population_segments.append({"name": _system_name(i), "share": float(p["population"]) / population_total, "index": i})
+	var fleet_population: float = float(totals["ship_population"]) + float(totals["embarking_population"])
+	if fleet_population > 0.0 and population_total > 0.0:
+		population_segments.append({"name": "Fleet", "share": fleet_population / population_total, "index": -1, "color": Color("#5b90ba")})
+	population_ceiling += fleet_population
 	population_segments.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["share"] > b["share"] if a["share"] != b["share"] else a["index"] < b["index"])
 	global_population_label.text = "%s (%+.0f/yr)" % [_compact_amount(population_total), population_net]
 	global_population_label.tooltip_text = ""
