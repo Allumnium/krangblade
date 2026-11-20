@@ -1554,3 +1554,20 @@ func _rpc_conquest_reward(key: String) -> void:
 func _conquest_reward_for(id: int, key: String) -> void:
 	if _active_player(id) and ECONOMY.acquire_reward(economy, id, key):
 		_publish_economy()
+
+func request_empire_target(kind: String, amount: int) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_empire_target_for(1, kind, amount)
+	else:
+		_rpc_empire_target.rpc_id(1, kind, amount)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_empire_target(kind: String, amount: int) -> void:
+	if multiplayer.is_server():
+		_empire_target_for(multiplayer.get_remote_sender_id(), kind, amount)
+
+func _empire_target_for(id: int, kind: String, amount: int) -> void:
+	if _active_player(id) and ECONOMY.set_empire_target(economy, id, kind, amount):
+		_publish_economy()

@@ -1007,7 +1007,22 @@ func _test_packed_threat_records() -> void:
 		for point in [Vector2.ZERO, Vector2(-radius, 0), Vector2(radius, 0), Vector2(radius * 3, 0)]:
 			assert(ECON._salvage_threat_free(point, -1, team, packed) == ECON._salvage_threat_free(point, -1, team, legacy))
 
+func _test_empire_targets() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	assert(not ECON.set_empire_target(state, 999, "fighter", 5))
+	assert(not ECON.set_empire_target(state, 1, "fighter", 4))
+	assert(ECON.set_empire_target(state, 1, "fighter", 5))
+	var p: Dictionary = state["planets"][0]
+	p["population"] = 100000.0
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 10000.0
+	ECON._refill_empire_fleets(state)
+	var counts: Dictionary = ECON.empire_fleet_counts(state, 1)
+	assert(int(counts["live"].get("fighter", 0)) + int(counts["queued"].get("fighter", 0)) <= 5)
+	assert(ECON.set_empire_target(state, 1, "fighter", 0))
+
 func _initialize() -> void:
+	_test_empire_targets()
 	_test_packed_threat_records()
 	_test_indexed_hostile_bucket()
 	_test_reuse_combat_threats()

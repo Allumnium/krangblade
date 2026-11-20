@@ -307,7 +307,9 @@ var conquest_dialog: AcceptDialog
 var conquest_cards: VBoxContainer
 var conquest_card_signature: String = ""
 var empire_dialog: AcceptDialog
-var empire_targets: Dictionary = {}
+var empire_rows: VBoxContainer
+var empire_controls: Dictionary = {}
+var empire_signature: String = ""
 var conquest_balance: int = 0
 var conquest_pulse_time: float = 0.0
 const OBJECTIVES_WIDTH: float = 328.0
@@ -3990,6 +3992,8 @@ func _refresh() -> void:
 		background_music.stop()
 	_refresh_global_bar(state)
 	_refresh_conquest_button(state)
+	if is_instance_valid(empire_dialog) and empire_dialog.visible:
+		_refresh_empire(state)
 	_refresh_match_result(state)
 	_refresh_time_controls(state)
 	menu_exit.text = "Main menu" if bool(session.get("is_solo")) else ("Return to lobby" if multiplayer.is_server() else "Leave match")
@@ -8087,40 +8091,105 @@ func _open_conquest_upgrades() -> void:
 
 func _build_empire_dialog() -> void:
 	empire_dialog = AcceptDialog.new()
-	empire_dialog.title = "Empire"
+	empire_dialog.title = "Empire · Fleet management"
 	empire_dialog.theme = theme
 	empire_dialog.exclusive = true
 	empire_dialog.ok_button_text = "Close"
 	add_child(empire_dialog)
 	var content := VBoxContainer.new()
-	content.custom_minimum_size = Vector2(360, 0)
+	content.add_theme_constant_override("separation", 8)
 	empire_dialog.add_child(content)
 	var heading := Label.new()
 	heading.text = "Desired fleet composition"
+	heading.add_theme_font_size_override("font_size", 20)
 	content.add_child(heading)
 	var note := Label.new()
-	note.text = "Planning only — does not issue production orders."
+	note.text = "Automatically build missing ships. Existing orders count toward targets."
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(note)
-	for kind in ECONOMY.SHIP_KINDS:
-		var row := HBoxContainer.new()
-		content.add_child(row)
-		var name_label := Label.new()
-		name_label.text = _ship_kind_name(kind)
-		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(name_label)
-		var target := SpinBox.new()
-		target.min_value = 0
-		target.max_value = 10000
-		target.step = 1
-		target.custom_minimum_size.x = 100
-		row.add_child(target)
-		target.value = int(empire_targets.get(kind, 0))
-		target.value_changed.connect(_set_empire_target.bind(kind))
+	var scroll := ScrollContainer.new()
+	scroll.name = "FleetScroll"
+	scroll.custom_minimum_size = Vector2(320, 180)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	content.add_child(scroll)
+	empire_rows = VBoxContainer.new()
+	empire_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	empire_rows.add_theme_constant_override("separation", 8)
+	scroll.add_child(empire_rows)
+	HUD.action(empire_dialog.get_ok_button())
 
-func _set_empire_target(value: float, kind: String) -> void:
-	empire_targets[kind] = clampi(int(value), 0, 10000)
+func _refresh_empire(state: Dictionary) -> void:
+	if state.is_empty():
+		return
+	var counts: Dictionary = ECONOMY.empire_fleet_counts(state, _me())
+	var targets: Dictionary = state.get("empire_targets", {}).get(_me(), {})
+	var visible_kinds: Array = []
+	for kind in ["scout", "fighter", "miner", "ship", "colony_ship", "science_ship", "cruiser", "destroyer"]:
+		if ECONOMY.empire_ship_available(state, _me(), kind, counts) or targets.has(kind):
+			visible_kinds.append(kind)
+	var signature: String = str(visible_kinds)
+	if signature != empire_signature:
+		empire_signature = signature
+		empire_controls.clear()
+		for child in empire_rows.get_children():
+			empire_rows.remove_child(child)
+			child.queue_free()
+		for kind in visible_kinds:
+			var panel := PanelContainer.new()
+			empire_rows.add_child(panel)
+			var row := HBoxContainer.new()
+			panel.add_child(row)
+			var portrait := TextureRect.new()
+			portrait.texture = _selection_portrait_icon(kind)
+			portrait.custom_minimum_size = Vector2(40, 40)
+			portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			row.add_child(portrait)
+			var body := VBoxContainer.new()
+			body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(body)
+			var top := HBoxContainer.new()
+			body.add_child(top)
+			var name_label := Label.new()
+			name_label.text = _ship_kind_name(kind)
+			name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			top.add_child(name_label)
+			var counter := Label.new()
+			top.add_child(counter)
+			var slider := HSlider.new()
+			slider.max_value = ECONOMY.EMPIRE_TARGET_STEPS.size() - 1
+			slider.step = 1
+			slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			body.add_child(slider)
+			slider.drag_ended.connect(_empire_slider_released.bind(kind, slider))
+			slider.value_changed.connect(_empire_preview.bind(kind, slider, counter))
+			empire_controls[kind] = {"slider": slider, "counter": counter}
+	for kind in empire_controls:
+		var entry: Dictionary = empire_controls[kind]
+		var slider: HSlider = entry["slider"]
+		var desired: int = int(targets.get(kind, 0))
+		if not slider.has_focus() and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			slider.set_value_no_signal(maxi(0, ECONOMY.EMPIRE_TARGET_STEPS.find(desired)))
+		var counter: Label = entry["counter"]
+		_empire_preview(slider.value, kind, slider, counter)
+
+func _empire_preview(value: float, kind: String, _slider: HSlider, counter: Label) -> void:
+	var counts: Dictionary = ECONOMY.empire_fleet_counts(_state(), _me())
+	var live: int = int(counts["live"].get(kind, 0))
+	var queued: int = int(counts["queued"].get(kind, 0))
+	var desired: int = ECONOMY.EMPIRE_TARGET_STEPS[int(value)]
+	counter.text = "%d / %d  (+%d queued)" % [live, desired, queued]
+	counter.modulate = Color("#8ee2a9") if live + queued >= desired else Color("#e9cb7c")
+
+func _empire_slider_released(changed: bool, kind: String, slider: HSlider) -> void:
+	if changed:
+		session.call("request_empire_target", kind, ECONOMY.EMPIRE_TARGET_STEPS[int(slider.value)])
+	slider.release_focus()
 
 func _open_empire() -> void:
-	if str(session.get("phase")) == "match":
-		empire_dialog.popup_centered(Vector2i(420, 400))
+	if str(session.get("phase")) != "match":
+		return
+	_refresh_empire(_state())
+	var viewport: Vector2 = get_viewport_rect().size
+	empire_dialog.popup_centered(Vector2i(int(minf(600, viewport.x - 40)), int(minf(570, viewport.y - 80))))

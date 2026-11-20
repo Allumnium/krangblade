@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.70.0: Empire targets now authority-owned. Periodic refill counts all live and queued hulls; paid orders remain on lowering target. Validate modal fit and interaction with manual/autobuild orders.
+
 - v0.69.1: User clarified drawbacks are optional, not universal. Industry, agriculture, population and storage are pure benefits; Crystalline Synthesis retains +15% Metals demand provisionally. Verify balance and card text.
 
 - v0.69.0: Advanced pool includes two antimatter, 20k Metals, 2M population and 12 sites; map size may make some milestones impossible. Science collection counts as processing. Pool exhaustion retains last completed advanced card; validate pacing and multiplayer.
