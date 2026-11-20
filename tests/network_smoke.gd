@@ -970,7 +970,11 @@ func _check_reward_redraft(state: Dictionary) -> bool:
 		return false
 	# Wait until every peer has made the nonunique purchase before racing.
 	for peer in state["teams"]:
-		if not state.get("objectives", {}).get(peer, {}).get("rewards", []).has("industry"):
+		var peer_progress: Dictionary = state.get("objectives", {}).get(peer, {})
+		if not peer_progress.get("rewards", []).has("industry"):
+			return false
+		if ECON.reward_points(peer_progress, "economic") != 1:
+			_fail("Public Economic CP did not replicate after purchase.")
 			return false
 	if not has_meta("unique_reward_requested"):
 		set_meta("unique_reward_requested", true)
@@ -986,6 +990,11 @@ func _check_reward_redraft(state: Dictionary) -> bool:
 			if int(peer) != winner:
 				_fail("Unique reward ownership differed from authority claim.")
 				return false
+	for peer in state["teams"]:
+		var peer_progress: Dictionary = state.get("objectives", {}).get(peer, {})
+		if ECON.reward_points(peer_progress, "tech") != (0 if int(peer) == winner else 1):
+			_fail("Public Tech CP did not replicate after unique reward race.")
+			return false
 	if holders != 1 or ECON.reward_offer(progress, "tech").has("warp_gate"):
 		_fail("Unique reward was duplicated or remained in a rival draft.")
 		return false

@@ -1,10 +1,12 @@
 # Warbound — active thoughts
 
+- v0.78.3: Public unspent CP scoreboard replaces other-player conquest popups and sounds (including unique unlocks). Stable color order and aligned numbers keep rows readable. Existing snapshots already carry every player's balance; no extra traffic. Verify overlap at small resolutions and with eight players.
+
 - v0.78.2: User reports oversized first Empire opening but normal second opening. Likely deferred minimum-size negotiation of freshly populated AcceptDialog; switch to an explicit bounded Window with an internal scrolling list and fixed header/footer. Verify first-open behavior in Godot; no simulation changes.
 
 - v0.78.0–0.78.1: Finite conquest lists replaced with rankable research and deterministic repeat-tier IDs. Outputs/storage stack linearly, cost/armor efficiencies use positive diminishing-cost/damage denominators. Lifetime production measures actual stored or consumed output, not theoretical output or transfers; military investment counts base Metals of completed hulls. Arithmetic target increments are provisional; tune variety and pacing after playtests. Repeat ranks reuse the existing replicated reward array; consider compact counts if exceptionally long games warrant it.
 
-- v0.77.3: Objective reward sounds should feel distinct from construction and alerts; short resolving bell arpeggios, layered longer first-place fanfare and subdued other-player cue. Coalesce same-snapshot rewards to strongest cue rather than stacking fanfares; audition and tune against music in-game.
+- v0.77.3: Objective reward sounds should feel distinct from construction and alerts; short resolving bell arpeggios, layered longer first-place fanfare and silence for other-player events (v0.78.3). Coalesce same-snapshot rewards to strongest cue rather than stacking fanfares; audition and tune against music in-game.
 
 - v0.77.2: Tactical warnings are client-side sampled from snapshots, use friendly-majority sector sites plus owned/allied station sites, and count moving visible combat hulls once per scan. Lane-only territory is not a separate warning destination. Real-time rate limits and spatial grouping suppress floods. Hull-shaped glow uses cached per-kind SVG batches; tiny overview dots remain unoutlined. Verify warnings and art with live play.
 
