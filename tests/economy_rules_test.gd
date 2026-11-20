@@ -877,7 +877,17 @@ func _test_repair_retry_due() -> void:
 	assert(not ECON._repair_retry_due(ship, 1.2))
 	assert(ECON._repair_retry_due(ship, 1.5))
 
+func _test_combat_search_due() -> void:
+	var ship: Dictionary = {"_next_combat_search": 1.2}
+	assert(not ECON._combat_search_due(ship, 1.1))
+	assert(ECON._combat_search_due(ship, 1.2))
+	for key in ["attack_order", "combat_target", "pursuit_target", "yard_target"]:
+		ship[key] = -2 if key == "yard_target" else 10
+		assert(ECON._combat_search_due(ship, 1.1))
+		ship.erase(key)
+
 func _initialize() -> void:
+	_test_combat_search_due()
 	_test_repair_retry_due()
 	_test_search_slots()
 	_test_pursuit_blocks()

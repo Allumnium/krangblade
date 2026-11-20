@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.30: Idle combat acquisition retries at staggered 0.2-year intervals. Active engagements and explicit attacks bypass the timer; missile acquisition and damage/cooldown accounting unchanged. New contacts may wait one or two simulation steps. Runtime and benchmark pending.
+
 - v0.64.29: Throttle only unsuccessful automatic Harvester repair searches; successful searches and explicit orders remain per-step. New damage may wait up to half a simulation year for idle repair acquisition. Runtime and benchmark pending.
 
 - v0.64.28: Existing logistics retry periods now use five stable hull-ID phase slots. First retries may occur sooner within the original period; initial and reset searches remain immediate. Active movement and transfer unchanged. Runtime and synchronized-spike measurements pending.
