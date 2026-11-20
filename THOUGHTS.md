@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.57: Ordered target blocks hold packed IDs and positions for nearest-target loops, retaining exact bounds and traversal. Additional block storage trades memory for fewer hot dictionary reads; runtime and dense-fleet benchmark pending.
+
 - v0.64.56: Attacker loop reads packed frozen positions, teams, sectors and prior targets through a single slot. Existing target dictionaries remain compatibility data, so this transitional stage adds position/team storage; measure before claiming performance gains. Runtime pending.
 
 - v0.64.55: Combat previous target and sector fields now share frozen ID-to-slot indexing and typed arrays. Position and HP dictionaries remain authoritative for the combat pass; runtime and benchmark pending.
