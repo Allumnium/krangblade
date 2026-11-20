@@ -5651,16 +5651,17 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		ship.erase("salvage_depot")
 	return true
 
-static func _ship_hit(damage: Dictionary, killed_by: Dictionary, health: Dictionary, target: int, attacker: Dictionary, amount: float) -> void:
+static func _ship_hit(damage: Dictionary, killed_by: Dictionary, health: Dictionary, target: int, attacker: Dictionary, amount: float, hull_slots: Dictionary = {}, hull_health: PackedFloat64Array = PackedFloat64Array()) -> void:
 	var before: float = float(damage.get(target, 0.0))
 	damage[target] = before + amount
-	if before < float(health.get(target, INF)) and float(damage[target]) >= float(health.get(target, INF)) - EPS:
+	var hp: float = hull_health[hull_slots[target]] if hull_slots.has(target) else float(health.get(target, INF))
+	if before < hp and float(damage[target]) >= hp - EPS:
 		killed_by[target] = attacker
 
 # Resolve one shot from every mounted blaster at each burst interval.
 # Damage is authoritative and simultaneous with other weapons; projectile
 # tracer metadata is compact and rides the existing combat snapshot.
-static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, positions: Dictionary, damage: Dictionary, killed_by: Dictionary, health: Dictionary, dt: float) -> void:
+static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, positions: Dictionary, damage: Dictionary, killed_by: Dictionary, health: Dictionary, dt: float, hull_slots: Dictionary = {}, hull_health: PackedFloat64Array = PackedFloat64Array()) -> void:
 	var mounts: int = blaster_count(str(ship["kind"]))
 	if mounts <= 0 or dt <= 0.0:
 		return
@@ -5672,7 +5673,7 @@ static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, posi
 			ship["blaster_shot"] = 0
 		return
 	while next < dt - EPS:
-		_ship_hit(damage, killed_by, health, target, ship, BLASTER_DAMAGE * mounts)
+		_ship_hit(damage, killed_by, health, target, ship, BLASTER_DAMAGE * mounts, hull_slots, hull_health)
 		ship["blaster_origin"] = positions[ship["id"]]
 		ship["blaster_endpoint"] = positions[target]
 		ship["blaster_fired"] = float(state["elapsed"]) - dt + next
@@ -5804,10 +5805,12 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	var team_by_id: Dictionary = {}
 	var hull_slots: Dictionary = {}
 	var hull_positions := PackedVector2Array()
+	var hull_health := PackedFloat64Array()
 	var hull_teams := PackedInt32Array()
 	var previous_targets := PackedInt64Array()
 	var ship_sectors := PackedInt32Array()
 	hull_positions.resize(ships.size())
+	hull_health.resize(ships.size())
 	hull_teams.resize(ships.size())
 	previous_targets.resize(ships.size())
 	ship_sectors.resize(ships.size())
@@ -5829,8 +5832,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		if not indexed:
 			by_id[id] = ship
 		team_by_id[id] = int(state["teams"].get(int(ship["owner"]), 0))
-		health[id] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
 		var slot: int = hull_slots.size()
+		hull_health[slot] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
 		hull_slots[id] = slot
 		hull_positions[slot] = pos
 		hull_teams[slot] = int(team_by_id[id])
@@ -5929,7 +5932,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			ship["laser_until"] = -1.0
 			ship["yard_target"] = -1
 			ship["yard_laser_until"] = -1.0
-			_fire_blaster(state, ship, -1, positions, damage, killed_by, health, dt)
+			_fire_blaster(state, ship, -1, positions, damage, killed_by, health, dt, hull_slots, hull_health)
 			continue
 		var id: int = int(ship["id"])
 		var hull_slot: int = int(hull_slots[id])
@@ -5959,7 +5962,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 							best = float(nearest[0])
 							missile_target = int(nearest[1])
 				if missile_target != -1:
-					_ship_hit(damage, killed_by, health, missile_target, ship, MISSILE_DAMAGE * launchers)
+					_ship_hit(damage, killed_by, health, missile_target, ship, MISSILE_DAMAGE * launchers, hull_slots, hull_health)
 					missile_cd = MISSILE_COOLDOWN
 					ship["missile_origin"] = pos
 					ship["missile_endpoint"] = positions[missile_target]
@@ -5977,11 +5980,11 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			ship["laser_until"] = -1.0 if int(previous_targets[hull_slot]) != int(ship["combat_target"]) else ship.get("laser_until", -1.0)
 			var focus_cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
 			if in_range and weapon_damage > 0.0 and focus_cooldown <= EPS:
-				_ship_hit(damage, killed_by, health, focus, ship, weapon_damage)
+				_ship_hit(damage, killed_by, health, focus, ship, weapon_damage, hull_slots, hull_health)
 				focus_cooldown = 1.0
 				ship["laser_until" if focus >= 0 else "yard_laser_until"] = float(state["elapsed"]) + 0.2
 			ship["laser_cooldown"] = focus_cooldown
-			_fire_blaster(state, ship, focus if in_range else -1, positions, damage, killed_by, health, dt)
+			_fire_blaster(state, ship, focus if in_range else -1, positions, damage, killed_by, health, dt, hull_slots, hull_health)
 			continue
 		var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 		var target: int = -1
@@ -6075,7 +6078,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		ship["combat_target"] = target
 		var cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
 		if target >= 0 and weapon_damage > 0.0 and cooldown <= EPS:
-			_ship_hit(damage, killed_by, health, target, ship, weapon_damage)
+			_ship_hit(damage, killed_by, health, target, ship, weapon_damage, hull_slots, hull_health)
 			cooldown = 1.0
 			ship["laser_until"] = float(state["elapsed"]) + 0.2
 		ship["laser_cooldown"] = cooldown
@@ -6094,7 +6097,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 							ship["yard_target"] = yard_id
 			var yard_id: int = int(ship["yard_target"])
 			if yard_id < -1 and weapon_damage > 0.0 and cooldown <= EPS:
-				_ship_hit(damage, killed_by, health, yard_id, ship, weapon_damage)
+				_ship_hit(damage, killed_by, health, yard_id, ship, weapon_damage, hull_slots, hull_health)
 				ship["laser_cooldown"] = 1.0
 				ship["yard_laser_until"] = float(state["elapsed"]) + 0.2
 		if target >= 0 or pursuit >= 0 or int(ship["yard_target"]) < -1:
@@ -6102,7 +6105,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		elif search_due:
 			# Two tick slots at the normal 0.1 simulation step.
 			ship["_next_combat_search"] = _next_search_slot(now, int(ship["id"]) % 2 * 2, 0.2)
-		_fire_blaster(state, ship, target if target >= 0 else int(ship["yard_target"]), positions, damage, killed_by, health, dt)
+		_fire_blaster(state, ship, target if target >= 0 else int(ship["yard_target"]), positions, damage, killed_by, health, dt, hull_slots, hull_health)
 	# Each matrix emitter has its own cooldown and fires from the station.
 	for index in range(system_count):
 		var system: Dictionary = state["planets"][index]
