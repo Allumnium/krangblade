@@ -898,7 +898,15 @@ func _test_reusable_laser_target() -> void:
 	ship["attack_order"] = 8
 	assert(ECON._reusable_laser_target(state, ship, by_id, positions, Vector2.ZERO, 1.1) == -1)
 
+func _test_contact_bucket_bounds() -> void:
+	var bounds := Rect2(Vector2(10, 10), Vector2(10, 10))
+	assert(ECON._contact_bucket_near(Vector2(15, 15), bounds, 25.0))
+	assert(ECON._contact_bucket_near(Vector2(5, 10), bounds, 25.0))
+	assert(not ECON._contact_bucket_near(Vector2.ZERO, bounds, 25.0))
+	assert(ECON._contact_bucket_near(Vector2(-10, -10), Rect2(Vector2(-10, -10), Vector2.ZERO), 25.0))
+
 func _initialize() -> void:
+	_test_contact_bucket_bounds()
 	_test_reusable_laser_target()
 	_test_combat_search_due()
 	_test_repair_retry_due()
