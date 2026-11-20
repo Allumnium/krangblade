@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.7: Camera follows arithmetic mean of surviving selected ship poses rather than bounds midpoint; an isolated ship has 1/N influence. Extremely distant stragglers can still shift the mean; monitor before considering robust trimming. No zoom change.
+
 - v0.64.6: Combat already uses weapon-range cells but move-only ships redundantly scan every ship in their sector for hostile presence; compact sector/team presence removes that hot O(N²) path in crowded sectors. Remaining nearest-hostile whole-sector pursuit can still be quadratic under dense battles; profile before altering tactical priorities. Runtime and peer tests pending.
 
 - v0.64.5: Static sector AABB grid avoids scanning all sectors for point membership and influence core lookup. Exact rounded containment, preferred-node and discovery filters remain; highway lookup unchanged. Compare grid and linear fixtures, measure profiler and headless workloads. Runtime pending.
