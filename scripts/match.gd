@@ -6257,7 +6257,7 @@ func _sync_ship_visuals(state: Dictionary) -> void:
 func _layout_match_chat() -> void:
 	if not is_instance_valid(match_chat_edit):
 		return
-	var width: float = maxf(80.0, minf(560.0, map_canvas.size.x - 24.0))
+	var width: float = _notification_width()
 	match_chat_edit.position = Vector2((map_canvas.size.x - width) * 0.5, HEADER_HEIGHT + 2.0)
 	match_chat_edit.size = Vector2(width, 28.0)
 
@@ -8281,10 +8281,23 @@ func _draw_objectives_overlay() -> void:
 		y += 29.0
 	_draw_conquest_notifications(state, font, clock)
 
+func _notification_width() -> float:
+	return clampf(map_canvas.size.x * 0.56, 80.0, 560.0)
+
+# Keep every message on one invisible, centered column. Text shadows
+# preserve legibility without a background panel or individually centered cards.
+func _draw_notice_text(font: Font, point: Vector2, message: String, width: float, tint: Color) -> float:
+	var height: float = font.get_multiline_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, width, 13).y
+	objectives_overlay.draw_multiline_string_outline(font, point, message, HORIZONTAL_ALIGNMENT_LEFT, width, 13, -1, 4, Color(0.04, 0.08, 0.13, tint.a))
+	objectives_overlay.draw_multiline_string(font, point, message, HORIZONTAL_ALIGNMENT_LEFT, width, 13, -1, tint)
+	return height
+
 func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -> void:
 	var events: Array = state.get("objective_events", [])
 	var roster: Dictionary = session.get("players")
 	var y: float = HEADER_HEIGHT + 49.0 if match_chat_edit.visible else HEADER_HEIGHT + 34.0
+	var width: float = _notification_width() - 16.0
+	var left: float = (map_canvas.size.x - _notification_width()) * 0.5 + 8.0
 	var visible_count: int = 0
 	var chat_count: int = 0
 	var chat: Array = session.get("match_chat")
@@ -8293,14 +8306,25 @@ func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -
 		var age: float = float(Time.get_ticks_msec() - int(item["received_ms"])) / 1000.0
 		if age >= 10.0:
 			break
-		var message: String = item["text"]
+		var sender: int = int(item["sender"])
+		var name_text: String = str(item.get("sender_name", roster.get(sender, {}).get("name", "Player"))) + ": "
+		var message: String = str(item.get("message", str(item["text"]).trim_prefix(name_text)))
 		var alpha: float = clampf((10.0 - age) / 2.0, 0.0, 1.0)
-		var width: float = maxf(80.0, minf(map_canvas.size.x * 0.56, font.get_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 28.0))
-		var left: float = (map_canvas.size.x - width) * 0.5
-		var height: float = maxf(24.0, font.get_multiline_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, width - 16.0, 13).y + 10.0)
-		objectives_overlay.draw_rect(Rect2(left, y - 17.0, width, height), Color(0.04, 0.08, 0.13, alpha * 0.9))
-		objectives_overlay.draw_multiline_string(font, Vector2(left + 8.0, y), message, HORIZONTAL_ALIGNMENT_LEFT, width - 16.0, 13, -1, Color(0.85, 0.94, 1.0, alpha))
-		y += height + 4.0
+		var color_index: int = clampi(int(item.get("sender_color", _empire_color_index(sender))), 0, RULES.MAX_PLAYERS)
+		var sender_tint: Color = COLORS[color_index]
+		sender_tint.a = alpha
+		var body_tint := Color(0.85, 0.94, 1.0, alpha)
+		var name_width: float = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		var height: float
+		if name_width > width * 0.45:
+			# Long names on narrow windows get their own wrapped line.
+			height = _draw_notice_text(font, Vector2(left, y), name_text, width, sender_tint)
+			height += _draw_notice_text(font, Vector2(left, y + height), message, width, body_tint)
+		else:
+			objectives_overlay.draw_string_outline(font, Vector2(left, y), name_text, HORIZONTAL_ALIGNMENT_LEFT, name_width, 13, 4, Color(0.04, 0.08, 0.13, alpha))
+			objectives_overlay.draw_string(font, Vector2(left, y), name_text, HORIZONTAL_ALIGNMENT_LEFT, name_width, 13, sender_tint)
+			height = _draw_notice_text(font, Vector2(left + name_width, y), message, width - name_width, body_tint)
+		y += maxf(24.0, height + 8.0)
 		visible_count += 1
 		chat_count += 1
 		if chat_count >= 3:
@@ -8320,13 +8344,9 @@ func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -
 			message = "%s completed %s · +%d CP" % [name_text, ECONOMY.objective_label(str(event["objective"])), int(event["award"])]
 			if not bool(event["first"]):
 				tint = Color("#b8d9ef")
-		var alpha: float = clampf((10.0 - age) / 2.0, 0.0, 1.0)
-		tint.a = alpha
-		var width: float = minf(map_canvas.size.x * 0.56, font.get_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 28.0)
-		var left: float = (map_canvas.size.x - width) * 0.5
-		objectives_overlay.draw_rect(Rect2(left, y - 17.0, width, 24.0), Color(0.04, 0.08, 0.13, alpha * 0.9))
-		objectives_overlay.draw_string(font, Vector2(left + 8.0, y), message, HORIZONTAL_ALIGNMENT_CENTER, width - 16.0, 13, tint)
-		y += 28.0
+		tint.a = clampf((10.0 - age) / 2.0, 0.0, 1.0)
+		var height: float = _draw_notice_text(font, Vector2(left, y), message, width, tint)
+		y += maxf(24.0, height + 8.0)
 		visible_count += 1
 		if visible_count >= 5:
 			break

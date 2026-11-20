@@ -777,16 +777,16 @@ static func _cost(kind: String, level: int) -> Dictionary:
 		"miner": return {"Metals": 540.0, "Organics": 20.0}
 		"science_ship": return {"Metals": 900.0, "Organics": 30.0}
 		"scout": return {"Metals": 60.0, "Organics": 2.0}
-		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0 * CRYSTAL_COST_MULTIPLIER}}
-		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}}
+		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0 * CRYSTAL_COST_MULTIPLIER}
+		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}
 		"yard":
 			match level:
 				1: return {"Metals": 480.0}
-				2: return {"Metals": 2000.0, "Organics": 200.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}}
-				3: return {"Metals": 6000.0, "Organics": 600.0, "Crystals": 600.0 * CRYSTAL_COST_MULTIPLIER}}
-		"pds": return {"Metals": 540.0, "Organics": 60.0, "Crystals": 60.0 * CRYSTAL_COST_MULTIPLIER}}
+				2: return {"Metals": 2000.0, "Organics": 200.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}
+				3: return {"Metals": 6000.0, "Organics": 600.0, "Crystals": 600.0 * CRYSTAL_COST_MULTIPLIER}
+		"pds": return {"Metals": 540.0, "Organics": 60.0, "Crystals": 60.0 * CRYSTAL_COST_MULTIPLIER}
 		"reinforced_plating": return {"Metals": 4000.0}
-		"laser_matrix": return {"Metals": 2500.0, "Crystals": 800.0 * CRYSTAL_COST_MULTIPLIER}}
+		"laser_matrix": return {"Metals": 2500.0, "Crystals": 800.0 * CRYSTAL_COST_MULTIPLIER}
 		"yard_upgrade": return {"Metals": 240.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"production": return {"Metals": 200.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"warehouse": return WAREHOUSE_COSTS[level - 1].duplicate()

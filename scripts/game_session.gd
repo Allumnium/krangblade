@@ -536,7 +536,7 @@ func _accept_chat(sender: int, value: String) -> void:
 	last_message[sender] = now
 	var name: String = str((players[sender] as Dictionary).get("name", "Player"))
 	if phase == "match":
-		var item: Dictionary = {"round": round_id, "sender": sender, "text": "%s: %s" % [name, message]}
+		var item: Dictionary = {"round": round_id, "sender": sender, "sender_name": name, "sender_color": int(players[sender].get("color", 0)), "message": message, "text": "%s: %s" % [name, message]}
 		_store_chat(item)
 		if not is_solo:
 			for id in _connected_guests():
