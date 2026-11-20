@@ -4622,7 +4622,7 @@ static func influence_region(graph: Dictionary, point: Vector2) -> int:
 			region = int(layout["starts"][i]) + mini(count - 1, floori(along * count))
 	return region
 
-static func territory_influence(state: Dictionary, graph: Dictionary, known_pois: Variant = null) -> Array[Dictionary]:
+static func territory_influence(state: Dictionary, graph: Dictionary, known_pois: Variant = null, region_cache: Dictionary = {}) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for i in range(int(highway_regions(graph)["size"])):
 		result.append({})
@@ -4639,14 +4639,25 @@ static func territory_influence(state: Dictionary, graph: Dictionary, known_pois
 		points += BUILDING_INFLUENCE * buildings
 		if points > 0:
 			result[i][owner] = points
+	var live_regions: Dictionary = {}
 	for ship in state["ships"]:
 		var owner: int = int(ship["owner"])
 		var weight: int = int(SHIP_INFLUENCE.get(ship["kind"], 1))
 		if owner <= 0 or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) <= 0.0:
 			continue
-		var region: int = influence_region(graph, combat_position(state, graph, ship))
+		var id: int = int(ship["id"])
+		var point: Vector2 = combat_position(state, graph, ship)
+		var prior: Variant = region_cache.get(id)
+		var region: int = -1
+		if prior != null and prior[0] == point:
+			region = int(prior[1])
+		else:
+			region = influence_region(graph, point)
+		live_regions[id] = [point, region]
 		if region >= 0:
 			result[region][owner] = int(result[region].get(owner, 0)) + weight
+	region_cache.clear()
+	region_cache.merge(live_regions)
 	var layout: Dictionary = highway_regions(graph)
 	var visible: Array[bool] = []
 	if known_pois != null:
