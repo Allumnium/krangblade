@@ -173,6 +173,7 @@ var station_detail_system: int = -1
 var station_detail_page: String = "resources"
 var station_has_queue: bool = false
 var asteroid_shape_cache: Dictionary = {}
+var asteroid_frame_meshes: Array[ArrayMesh] = []
 var asteroid_cache_seed: int = -1
 var population_label: Label
 var raw_antimatter_label: Label
@@ -7394,6 +7395,7 @@ func _flush_overview_hulls() -> void:
 		batch.show()
 
 func _draw_map() -> void:
+	asteroid_frame_meshes.clear()
 	health_entries.clear()
 	ring_entries.clear()
 	health_batch.hide()
@@ -7453,6 +7455,8 @@ func _draw_map() -> void:
 			var axis: Vector2 = Vector2.from_angle(visual_clock * 0.8)
 			map_canvas.draw_line(center - axis * star_radius * 4.0, center + axis * star_radius * 4.0, Color(glow, 0.45 + pulse * 0.4), maxf(1.0, star_radius * 0.45), true)
 			continue
+		var rock_vertices := PackedVector3Array()
+		var rock_colors := PackedColorArray()
 		for chunk in field["chunks"]:
 			var rock_pos: Vector2 = _screen_point(chunk["position"])
 			if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
@@ -7465,14 +7469,33 @@ func _draw_map() -> void:
 				for k in range(chunk["shape"].size()):
 					var angle: float = TAU * float(k) / float(chunk["shape"].size()) + float(chunk["rotation"])
 					unit_shape.append(Vector2.from_angle(angle) * float(chunk["shape"][k]))
-				asteroid_shape_cache[shape_key] = unit_shape
+				asteroid_shape_cache[shape_key] = {"vertices": unit_shape, "triangles": Geometry2D.triangulate_polygon(unit_shape)}
 			var rock := PackedVector2Array()
-			for vertex in asteroid_shape_cache[shape_key]:
+			var cached: Dictionary = asteroid_shape_cache[shape_key]
+			for vertex in cached["vertices"]:
 				rock.append(rock_pos + vertex * rock_radius)
 			var tint: Color = HUD.COLORS[chunk["resource"]]
-			map_canvas.draw_colored_polygon(rock, tint.darkened(0.25))
-			rock.append(rock[0])
-			map_canvas.draw_polyline(rock, tint, 0.8, true)
+			for index in cached["triangles"]:
+				var p: Vector2 = rock[index]
+				rock_vertices.append(Vector3(p.x, p.y, 0.0))
+				rock_colors.append(tint.darkened(0.25))
+			# Batch thin edge quads, retaining the existing screen-space width.
+			for k in range(rock.size()):
+				var p: Vector2 = rock[k]
+				var q: Vector2 = rock[(k + 1) % rock.size()]
+				var normal: Vector2 = (q - p).normalized().orthogonal() * 0.4
+				for v in [p - normal, q - normal, q + normal, p - normal, q + normal, p + normal]:
+					rock_vertices.append(Vector3(v.x, v.y, 0.0))
+					rock_colors.append(tint)
+		if not rock_vertices.is_empty():
+			var arrays: Array = []
+			arrays.resize(Mesh.ARRAY_MAX)
+			arrays[Mesh.ARRAY_VERTEX] = rock_vertices
+			arrays[Mesh.ARRAY_COLOR] = rock_colors
+			var mesh := ArrayMesh.new()
+			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+			asteroid_frame_meshes.append(mesh)
+			map_canvas.draw_mesh(mesh, null)
 	for i in range(points.size()):
 		var pos: Vector2 = _screen_point(points[i])
 		if not ECONOMY.discovered(state, _me(), "planets", i):
