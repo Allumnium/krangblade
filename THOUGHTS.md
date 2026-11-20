@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.81.0: Dyson costs and late Tech prerequisite provisional; use station storage expansion, one sphere per sector, no retroactive refunds or crew/work discounts. PDS remains defensive until core loss. Playtest siege strength and megastructure affordability.
+
 - v0.80.4: Direct-flight migration allowed gaps between sectors; restore graph waypoints for manual travel and patrol fallback. Existing avoidance and autonomous pursuit require further boundary testing. Track cumulative category CP separately from spendable balances.
 
 - v0.80.3: Reuse territory shader contours above fog with neutral tint in concealed cells; avoid a duplicate geometry pass. Scout sight increased 50%; logistics data restricted to friendly teams. Check rendering order and fog edge transitions.
