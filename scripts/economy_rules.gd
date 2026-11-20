@@ -5621,6 +5621,21 @@ static func _missile_block_nearest(blocks: Array, positions: Dictionary, pos: Ve
 				target = int(id)
 	return [best, target]
 
+static func _reusable_laser_target(state: Dictionary, ship: Dictionary, by_id: Dictionary, positions: Dictionary, pos: Vector2, now: float) -> int:
+	if ship.has("attack_order") or int(ship.get("pursuit_target", -1)) >= 0 or ship.get("unit_order", {}).get("kind", "") == "guard":
+		return -1
+	if now + EPS >= float(ship.get("_next_laser_refresh", 0.0)):
+		return -1
+	var id: int = int(ship.get("combat_target", -1))
+	if id < 0 or not by_id.has(id) or not positions.has(id):
+		return -1
+	var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+	if team == 0 or int(state["teams"].get(int(by_id[id]["owner"]), 0)) == team:
+		return -1
+	if pos.distance_squared_to(positions[id]) > LASER_RANGE * LASER_RANGE:
+		return -1
+	return id
+
 static func _combat_search_due(ship: Dictionary, now: float) -> bool:
 	return ship.has("attack_order") or int(ship.get("combat_target", -1)) >= 0 or int(ship.get("pursuit_target", -1)) >= 0 or int(ship.get("yard_target", -1)) < -1 or now + EPS >= float(ship.get("_next_combat_search", 0.0))
 
@@ -5790,7 +5805,11 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		var best: float = LASER_RANGE * LASER_RANGE
 		var now: float = float(state["elapsed"])
 		var search_due: bool = _combat_search_due(ship, now)
-		if team != 0 and search_due:
+		var reusable: int = _reusable_laser_target(state, ship, by_id, positions, pos, now)
+		if reusable >= 0:
+			target = reusable
+		elif team != 0 and search_due:
+			ship["_next_laser_refresh"] = _next_search_slot(now, int(ship["id"]) % 2 * 2, 0.2)
 			if not laser_blocks.has(team):
 				laser_blocks[team] = {}
 			var team_blocks: Dictionary = laser_blocks[team]

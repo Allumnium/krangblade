@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.31: Active laser hull acquisition reuses valid in-range targets between staggered refreshes. A closer enemy may wait until the next refresh; explicit attack, guard and pursuit bypass reuse. Damage accounting unchanged. Runtime and dense-battle benchmark pending.
+
 - v0.64.30: Idle combat acquisition retries at staggered 0.2-year intervals. Active engagements and explicit attacks bypass the timer; missile acquisition and damage/cooldown accounting unchanged. New contacts may wait one or two simulation steps. Runtime and benchmark pending.
 
 - v0.64.29: Throttle only unsuccessful automatic Harvester repair searches; successful searches and explicit orders remain per-step. New damage may wait up to half a simulation year for idle repair acquisition. Runtime and benchmark pending.

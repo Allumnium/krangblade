@@ -886,7 +886,20 @@ func _test_combat_search_due() -> void:
 		assert(ECON._combat_search_due(ship, 1.1))
 		ship.erase(key)
 
+func _test_reusable_laser_target() -> void:
+	var state: Dictionary = {"teams": {1: 1, 2: 2}}
+	var ship: Dictionary = {"owner": 1, "combat_target": 8, "_next_laser_refresh": 1.2}
+	var by_id: Dictionary = {8: {"owner": 2}}
+	var positions: Dictionary = {8: Vector2(10, 0)}
+	assert(ECON._reusable_laser_target(state, ship, by_id, positions, Vector2.ZERO, 1.1) == 8)
+	assert(ECON._reusable_laser_target(state, ship, by_id, positions, Vector2.ZERO, 1.2) == -1)
+	assert(ECON._reusable_laser_target(state, ship, {}, positions, Vector2.ZERO, 1.1) == -1)
+	assert(ECON._reusable_laser_target(state, ship, by_id, positions, Vector2(ECON.LASER_RANGE * 3, 0), 1.1) == -1)
+	ship["attack_order"] = 8
+	assert(ECON._reusable_laser_target(state, ship, by_id, positions, Vector2.ZERO, 1.1) == -1)
+
 func _initialize() -> void:
+	_test_reusable_laser_target()
 	_test_combat_search_due()
 	_test_repair_retry_due()
 	_test_search_slots()
