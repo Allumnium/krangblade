@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.66.2: Objective rows use inline right-aligned counters; Military replaces Conquest category. Upgrade modal currently displays balance and explicitly states that spending is unavailable. Verify visual fit and input.
+
 - v0.66.1: User reports miners from Nyxaxis detouring through Nyxyra toward an asteroid field. Prefer viable current-system access per field before scoring remote alternatives; verify screenshot topology and runtime regression.
 
 - v0.66.0: Competitive first-place bonus is provisional (2 points vs 1, ties in the same authoritative step share first). Public latest three achievements remain visible; check HUD clipping and match pacing. Population column uses sustainable capacity; verify readability. Reward drafting effects pending.
