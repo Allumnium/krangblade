@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.46: Skip homogeneous friendly-only packed threat cells via lazy per-snapshot team classification; retain exact mixed-cell checks. Runtime and profiler pending.
+
 - v0.64.45: Filter missile and pursuit candidates in one ordered pass, with distinct positive-team cache; preserve neutral targeting rules. Runtime and benchmark pending.
 
 - v0.64.44: Use the same packed threat layout for survivor rebuilds, including casualty ticks; retain legacy-query fixture compatibility. Runtime and benchmark pending.
