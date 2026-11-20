@@ -703,7 +703,36 @@ func _test_stop_order() -> void:
 	assert(not fighter.has("local_move_target") and not fighter.has("order_queue") and not bool(fighter["holding"]))
 	print("PASS: Stop cancels Hold, active movement and queued commands")
 
+func _test_combat_sector_presence() -> void:
+	var presence: Dictionary = {0: {1: true}, 1: {1: true, 2: true}, 2: {0: true}, 3: {2: true, 3: true}}
+	assert(not ECON._combat_sector_has_hostile(presence, 0, 1))
+	assert(not ECON._combat_sector_has_hostile(presence, 0, 0))
+	assert(not ECON._combat_sector_has_hostile(presence, 2, 1))
+	assert(not ECON._combat_sector_has_hostile(presence, -1, 1))
+	assert(ECON._combat_sector_has_hostile(presence, 1, 1))
+	assert(ECON._combat_sector_has_hostile(presence, 1, 2))
+	assert(ECON._combat_sector_has_hostile(presence, 3, 2))
+	assert(ECON._combat_sector_has_hostile(presence, 3, 3))
+	# Preserve passing-fire behavior: friendly-only move stays move-only,
+	# while a hostile in the same sector permits normal pursuit.
+	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = ECON.create(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var craft: Dictionary = {"id": 101, "kind": "fighter", "owner": 1, "at": 0, "position": Vector2(20, 0), "heading": Vector2.RIGHT, "route": [1], "leg": 0.0, "dest": 1, "source": -1, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock(), "move_only": true}
+	var ally: Dictionary = craft.duplicate(true)
+	ally["id"] = 102
+	ally["position"] = Vector2(40, 0)
+	ally.erase("move_only")
+	state["ships"] = [craft, ally]
+	var graph: Dictionary = ECON.military_graph(state)
+	ECON._combat(state, graph, 0.1)
+	assert(bool(craft.get("passing_fire", false)))
+	ally["owner"] = 2
+	ECON._combat(state, graph, 0.1)
+	assert(not bool(craft.get("passing_fire", false)))
+	print("PASS: indexed combat sector team presence and move-only behavior")
+
 func _initialize() -> void:
+	_test_combat_sector_presence()
 	_test_stop_order()
 	_test_nearest_colony_and_queued_hold()
 	_test_manual_conversion_and_stats()
