@@ -511,6 +511,8 @@ static func can_transform_colony(state: Dictionary, graph: Dictionary, ship: Dic
 static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> bool:
 	var colony: Dictionary = state["planets"][at]
 	colony["owner"] = int(ship["owner"])
+	var progress: Dictionary = objective_progress(state, int(ship["owner"]))
+	progress["colonies"][at] = true
 	colony["station"] = {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()], "converted_at": float(state["elapsed"])}
 	colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION if has_planets(colony) else ORBITAL_HOUSING_POPULATION
 	colony["eco_population"] = ORBITAL_HOUSING_POPULATION
@@ -1646,6 +1648,8 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		if resource != "Organics" and potential > EPS and demand > potential and stored < minf(capacity, maxf(CONSTRUCTION_RESERVE, float(next_costs.get(resource, 0.0)))):
 			used = minf(used, potential * (1.0 - CONSTRUCTION_PRODUCTION_SHARE))
 		var produced: float = minf(potential, used + maxf(0.0, capacity - stored))
+		if resource == "Metals" and produced > EPS:
+			_record_objective_metals(state, int(p["owner"]), produced)
 		_record_flow(p, "Production", resource, produced)
 		_record_flow(p, "Population", resource, used)
 		p["stock"][resource] = maxf(0.0, stored + produced - used)
@@ -2724,6 +2728,8 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			var free: float = MINER_CAPACITY - _cargo_total(ship)
 			var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource]))))
 			ship["mining_active"] = amount > EPS
+			if resource == "Metals" and amount > EPS:
+				_record_objective_metals(state, int(ship["owner"]), amount)
 			_cargo_stat(ship, "tons_picked", resource, amount)
 			ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
 			chunk["remaining"] = maxf(0.0, float(chunk["remaining"]) - amount)
@@ -7762,8 +7768,52 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		started = now
 	_sync_operations(state)
 	update_exploration(state)
+	_update_objectives(state)
 	_profile_stage(profile, "Conquest / exploration", started)
 	_indexed_state = {}
 	_hulls_by_id.clear()
 	_sector_query_graph = {}
 	_sector_query_cache.clear()
+
+static func objective_progress(state: Dictionary, player: int) -> Dictionary:
+	if not state.has("objectives"):
+		state["objectives"] = {}
+	var all_progress: Dictionary = state["objectives"]
+	if not all_progress.has(player):
+		all_progress[player] = {"colonies": {}, "metals": 0.0, "population": 0.0, "completed": {}, "points": 0}
+	return all_progress[player]
+
+static func _record_objective_metals(state: Dictionary, player: int, amount: float) -> void:
+	var progress: Dictionary = objective_progress(state, player)
+	progress["metals"] = minf(1000.0, float(progress["metals"]) + amount)
+
+static func _update_objectives(state: Dictionary) -> void:
+	var populations: Dictionary = {}
+	for system in state["planets"]:
+		var player: int = int(system["owner"])
+		if player > 0:
+			populations[player] = float(populations.get(player, 0.0)) + float(system["population"])
+	for player in state["teams"]:
+		var progress: Dictionary = objective_progress(state, int(player))
+		progress["population"] = maxf(float(progress["population"]), float(populations.get(player, 0.0)))
+		var reached: Dictionary = {"colonies": progress["colonies"].size() >= 2, "metals": float(progress["metals"]) >= 1000.0 - EPS, "population": float(progress["population"]) >= 200000.0}
+		for key in reached:
+			if reached[key] and not progress["completed"].has(key):
+				progress["completed"][key] = float(state["elapsed"])
+				progress["points"] = int(progress["points"]) + 1
+
+static func specialization_grade(system: Dictionary, resource: String) -> int:
+	if not has_planets(system):
+		return -2
+	var factor: float = float(system["bonuses"].get(resource, 1.0))
+	if MINED_RESOURCES.has(resource):
+		factor *= float(system["abundance"].get(resource, 0.0))
+	if factor < 0.5:
+		return -2
+	if factor < 0.9:
+		return -1
+	if factor >= 1.5:
+		return 2
+	if factor >= 1.1:
+		return 1
+	return 0

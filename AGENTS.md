@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.65.0: Default logistics overlay above ships/effects, below HUD; inherent resource strengths/weaknesses below storage. Right-side read-only objectives show permanent completion and conquest points. Authority tracks unique new colony sites, actual Metals production/mining and peak resident population; reward rules pending.
+
 - v0.64.62: Square global selection buttons above minimap: F1 stations, F2 army, F3 shipyards; owned entities across map, separate building/unit selections.
 
 - v0.64.61: Mixed owned building Shift-selection cycles active type via Tab/Shift+Tab; grouped stations expose the command card. Keep ship and building selections separate.

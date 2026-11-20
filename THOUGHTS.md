@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.65.0: Objectives track distinct new colony sites, cumulative actual Metals extraction (planetary and asteroid), peak resident population; one point per personal completion pending competitive payout and reward drafting design. Validate multiplayer, public notification design, and default lens readability/performance. Grades use inherent resource factors (<0.5, <0.9, >=1.1, >=1.5); planetless marked poor for local planetary output.
+
 - v0.64.63: Base habitation reduced from 5M to 500k; crowding penalty changed from 1-(1-f)^3 to f^3. Demographic target and HUD use the lower of farm support and habitation plus orbital capacity for aggregate display. Balance is provisional; verify crew supply and food-limited growth. Tests adjusted but runtime pending.
 
 - v0.64.62: Global selection strip uses command-card icons and hotkey badges; F1/F3 select all owned stations/yards, F2 retains military selection and double-press focus. Verify small-window placement and runtime.
