@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.20: User profiler highlights salvage center safety and 61 debugger errors (details unavailable). Cache center membership and local two-hop reachability; retain live eligibility checks. Profile before pursuing further changes; investigate debugger errors separately.
+
 - v0.64.19: Combat and salvage grids share ordered bucket insertion, but retain separate snapshots and cell widths because their sampling phases differ. Idle pursuit now skips friendly-only sectors entirely. Dense enemy sectors still require exact nearest search; benchmark pending. No gameplay changes.
 
 - v0.64.18: Local territory refresh caches unchanged hull position-to-region results by stable ID and graph identity; rebuild live totals, ownership, visibility and spillover every refresh. Moving hulls still resolve exactly. Full incremental aggregation and benchmark pending.
