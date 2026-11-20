@@ -1027,15 +1027,15 @@ func _test_objective_holdings() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	state["ships"] = [{"owner": 1, "crew": 1000.0, "cargo": {"Metals": 100.0}}, {"owner": 2, "crew": 999999.0, "cargo": {"Metals": 100000.0}}]
 	var home: Dictionary = state["planets"][0]
-	home["population"] = 199000.0
-	home["stock"]["Metals"] = 900.0
+	home["population"] = 79000.0
+	home["stock"]["Metals"] = 2900.0
 	var progress: Dictionary = ECON.objective_progress(state, 1)
 	assert(ECON.active_objectives(progress, 0.0).size() == 2)
 	assert(progress["active_goals"]["economic"] == "colony_ships")
 	progress["colony_ships_built"] = 2
 	ECON._update_objectives(state)
 	assert(progress["completed"].has("colony_ships") and ECON.reward_points(progress, "economic") == 2)
-	assert(float(progress["population"]) == 200000.0 and float(progress["metals"]) == 1000.0)
+	assert(float(progress["population"]) == 80000.0 and float(progress["metals"]) == 3000.0)
 	assert(not progress["completed"].has("population") and not progress["completed"].has("metals"))
 	assert(not ECON.refresh_objective(state, 1, "economic", "colony_ships"))
 	state["objective_clock"] = 11.0
@@ -1053,11 +1053,24 @@ func _test_objective_holdings() -> void:
 	state["objective_clock"] = 71.0
 	assert(ECON.refresh_objective(state, 1, "economic", rerolled))
 	progress["active_goals"]["economic"] = "metals"
+	assert(int(ECON.OBJECTIVE_SPECS["metals"][2]) > int(ECON.STARTING_STOCK["Metals"]))
+	home["stock"]["Metals"] = 2899.0
+	ECON._update_objectives(state)
+	assert(not progress["completed"].has("metals"))
+	home["stock"]["Metals"] = 2900.0
 	ECON._update_objectives(state)
 	assert(progress["completed"].has("metals"))
 	home["stock"]["Metals"] = 100.0
 	ECON._update_objectives(state)
 	assert(float(progress["metals"]) == 200.0 and progress["completed"].has("metals"))
+	progress["active_goals"]["economic"] = "population"
+	home["population"] = 78999.0
+	ECON._update_objectives(state)
+	assert(not progress["completed"].has("population"))
+	home["population"] = 79000.0
+	ECON._update_objectives(state)
+	assert(progress["completed"].has("population"))
+	assert(ECON.OBJECTIVE_SPECS["population_2"][2] == 200000)
 	progress["active_goals"]["economic"] = "colony_food"
 	progress["colony_food"] = 1000.0
 	ECON._update_objectives(state)

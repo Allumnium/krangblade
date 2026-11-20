@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.75.2: Starter population reduced from 200k to 80k; smoother later tiers. Metals raised from 1kt (already below initial stock) to 3kt, requiring expansion/storage or enough cargo. Colony ship crews are 40k each, so the early population goal is similar in total people required. Food production and military goals retain existing thresholds; scout-only construction may substantially shorten the military goal. Compare real completion times before further tuning.
+
 - v0.75.1: Shrink objective header controls to the text line height; compact square refresh and Upgrade label, balance next to category. Verify actual Godot minimum sizes in all states and arrow glyph legibility at native UI scale.
 
 - v0.75.0: Objectives consolidated; initial military build five hulls and later kill/build thresholds provisional. Rerolls preserve lifetime metrics, exclude completed goals and require preceding tiers; Tech unlock after three Economic goals or first antimatter. Only ship-attributed enemy hull kills count (not station battery kills). Notifications use authority real-time clock, capped history and final two-second fade; verify narrower HUD and multiplayer cooldown timing.
