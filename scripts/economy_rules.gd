@@ -272,6 +272,59 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 	update_exploration(state)
 	return state
 
+# Client presentation vision is separate from strategic route discovery.
+const VISION_CELL: float = 160.0
+const STATION_SIGHT: float = 1500.0
+const YARD_SIGHT: float = 1000.0
+const PDS_SIGHT: float = 1000.0
+
+static func sight_radius(kind: String) -> float:
+	match kind:
+		"scout": return 1800.0
+		"cruiser", "destroyer": return 1500.0
+		"fighter": return 1000.0
+		"warp_gate": return 1200.0
+		_: return 850.0
+
+static func vision_cell(point: Vector2) -> Vector2i:
+	return Vector2i(floori(point.x / VISION_CELL), floori(point.y / VISION_CELL))
+
+static func _stamp_vision(cells: Dictionary, point: Vector2, radius: float) -> void:
+	var center: Vector2i = vision_cell(point)
+	var reach: int = ceili(radius / VISION_CELL)
+	for y in range(center.y - reach, center.y + reach + 1):
+		for x in range(center.x - reach, center.x + reach + 1):
+			var cell := Vector2i(x, y)
+			if cells.has(cell):
+				continue
+			if ((Vector2(cell) + Vector2.ONE * 0.5) * VISION_CELL).distance_squared_to(point) <= radius * radius:
+				cells[cell] = true
+
+static func team_vision(state: Dictionary, team: int) -> Dictionary:
+	var cells: Dictionary = {}
+	if team <= 0:
+		return cells
+	var sources: Dictionary = {}
+	for ship in state.get("ships", []):
+		if int(state["teams"].get(int(ship["owner"]), 0)) != team or not ship.has("position"):
+			continue
+		var cell: Vector2i = vision_cell(ship["position"])
+		sources[cell] = maxf(float(sources.get(cell, 0.0)), sight_radius(str(ship["kind"])))
+	for cell in sources:
+		_stamp_vision(cells, (Vector2(cell) + Vector2.ONE * 0.5) * VISION_CELL, float(sources[cell]))
+	var elapsed: float = float(state["elapsed"])
+	for index in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][index]
+		if int(state["teams"].get(int(system["owner"]), 0)) != team:
+			continue
+		if has_station(system):
+			_stamp_vision(cells, station_position(state, index, elapsed), STATION_SIGHT)
+		for slot in range(system["yards"].size()):
+			_stamp_vision(cells, shipyard_position(state, index, slot, elapsed), YARD_SIGHT)
+		if not system.get("pds", {}).is_empty():
+			_stamp_vision(cells, state["map"]["points"][index], PDS_SIGHT)
+	return cells
+
 static func discovered(state: Dictionary, player: int, kind: String, index: int) -> bool:
 	var team: int = int(state.get("teams", {}).get(player, 0))
 	if team <= 0 or index < 0:

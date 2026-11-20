@@ -607,6 +607,11 @@ func _build_ui() -> void:
 	map_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	map_canvas.gui_input.connect(_map_input)
 	map_canvas.draw.connect(_draw_map)
+	fog_overlay = Control.new()
+	map_canvas.add_child(fog_overlay)
+	fog_overlay.z_index = 2
+	fog_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fog_overlay.draw.connect(_draw_fog)
 	logistics_overlay = Control.new()
 	map_canvas.add_child(logistics_overlay)
 	logistics_overlay.z_index = 3
@@ -1317,7 +1322,7 @@ func _draw_minimap() -> void:
 		var tint := Color("#34485a")
 		if i < count:
 			var owner: int = int(state["planets"][i]["owner"])
-			if known[i]:
+			if known[i] and _fog_visible(points[i]):
 				tint = _empire_color(owner) if owner > 0 else Color("#a3b0bb")
 			minimap.draw_circle(locations[i], 2.4 if owner > 0 and known[i] else 1.8, tint)
 		elif known[i]:
@@ -1327,9 +1332,15 @@ func _draw_minimap() -> void:
 		if (i < count and i == selected and selected_units.is_empty() and selected_field < 0) or (i >= count and i - count == selected_field):
 			minimap.draw_arc(locations[i], 4.5, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
 	for pile in state.get("salvage", {}).values():
+		if not _fog_visible(pile["position"]):
+			continue
 		var point: Vector2 = _minimap_point(pile["position"], area)
 		if area.has_point(point):
 			minimap.draw_circle(point, 1.0, HUD.COLORS[pile["resource"]])
+	if fog_texture != null:
+		var corner: Vector2 = _minimap_point(fog_origin, area)
+		var far: Vector2 = _minimap_point(fog_origin + fog_extent, area)
+		minimap.draw_texture_rect(fog_texture, Rect2(corner, far - corner), false)
 	# Mirror the main map's live hull visibility and interpolation; do not
 	# reveal undiscovered system ownership.
 	for ship in state["ships"]:
@@ -2429,8 +2440,58 @@ func _build_fleet_cargo_row() -> void:
 		pair.add_child(amount)
 		fleet_cargo_labels[resource] = amount
 
+var fog_live: Dictionary = {}
+var fog_explored: Dictionary = {}
+var fog_texture: ImageTexture
+var fog_origin := Vector2.ZERO
+var fog_extent := Vector2.ZERO
+var fog_revision: Array = []
+var fog_overlay: Control
+
+func _update_fog(state: Dictionary) -> void:
+	if state.is_empty():
+		return
+	var team: int = int(state["teams"].get(_me(), 0))
+	var revision: Array = [state.get("elapsed"), session.get("motion_revision"), team, state["ships"].size()]
+	if revision == fog_revision:
+		return
+	fog_revision = revision
+	fog_live = ECONOMY.team_vision(state, team)
+	fog_explored.merge(fog_live, true)
+	var padding: float = 2200.0
+	var cell: float = ECONOMY.VISION_CELL
+	var start: Vector2i = ECONOMY.vision_cell(Vector2.ONE * -padding)
+	var finish: Vector2i = ECONOMY.vision_cell(_map_size() + Vector2.ONE * padding)
+	var dimensions: Vector2i = finish - start + Vector2i.ONE
+	var image := Image.create(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.015, 0.025, 0.04, 0.96))
+	for key in fog_explored:
+		var pixel: Vector2i = key - start
+		if Rect2i(Vector2i.ZERO, dimensions).has_point(pixel):
+			image.set_pixelv(pixel, Color(0.015, 0.025, 0.04, 0.62))
+	for key in fog_live:
+		var pixel: Vector2i = key - start
+		if Rect2i(Vector2i.ZERO, dimensions).has_point(pixel):
+			image.set_pixelv(pixel, Color(0.0, 0.0, 0.0, 0.0))
+	if fog_texture == null or fog_texture.get_size() != Vector2(dimensions):
+		fog_texture = ImageTexture.create_from_image(image)
+	else:
+		fog_texture.update(image)
+	fog_origin = Vector2(start) * cell
+	fog_extent = Vector2(dimensions) * cell
+
+func _fog_visible(point: Vector2) -> bool:
+	return point.is_finite() and fog_live.has(ECONOMY.vision_cell(point))
+
+func _draw_fog() -> void:
+	if fog_texture != null:
+		fog_overlay.draw_texture_rect(fog_texture, Rect2(_screen_point(fog_origin), fog_extent * _fit() * zoom), false)
+
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
-	return ECONOMY.ship_visible_to_team(state, ship, int(state.get("teams", {}).get(_me(), -1)))
+	var team: int = int(state.get("teams", {}).get(_me(), -1))
+	if int(state["teams"].get(int(ship["owner"]), 0)) == team:
+		return true
+	return _fog_visible(ship.get("position", Vector2.INF)) and ECONOMY.ship_visible_to_team(state, ship, team)
 
 func _selected_ship(state: Dictionary) -> Dictionary:
 	if selected_ship_id < 0:
@@ -4100,6 +4161,7 @@ func _refresh() -> void:
 	if not is_instance_valid(year_label):
 		return
 	var state: Dictionary = _state()
+	_update_fog(state)
 	pose_frame = -1
 	_sync_command_kind(state)
 	var phase: String = str(session.get("phase"))
@@ -5065,6 +5127,8 @@ func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 			var center: Vector2 = _screen_point(ECONOMY.shipyard_position(state, index, slot, elapsed))
 			var axis: Vector2 = Vector2.from_angle(float(ECONOMY.shipyard_port(state["planets"][index], slot) - 1) * TAU / 3.0 + elapsed * 0.008)
 			var offset: Vector2 = point - center
+			if not _fog_visible(ECONOMY.shipyard_position(state, index, slot, elapsed)):
+				continue
 			var distance: float = offset.length_squared()
 			if absf(offset.dot(axis)) <= 14.0 * scale + 3.0 and absf(offset.dot(axis.orthogonal())) <= 17.0 * scale + 3.0 and distance < nearest:
 				nearest = distance
@@ -5079,7 +5143,7 @@ func _station_hit(point: Vector2, state: Dictionary) -> int:
 	var hit: int = -1
 	var nearest: float = INF
 	for index in range(state["planets"].size()):
-		if not ECONOMY.has_station(state["planets"][index]) or not ECONOMY.discovered(state, _me(), "planets", index):
+		if not ECONOMY.has_station(state["planets"][index]) or not _fog_visible(ECONOMY.station_position(state, index, float(state["elapsed"]))) or not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
 		var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, float(state["elapsed"])))
 		var distance: float = point.distance_to(center)
@@ -7578,6 +7642,8 @@ func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2,
 	for ship in state["ships"]:
 		ships_by_id[int(ship["id"])] = ship
 	for pile in state.get("salvage", {}).values():
+		if not _fog_visible(pile["position"]):
+			continue
 		var point: Vector2 = _screen_point(pile["position"])
 		var radius: float = _salvage_radius(pile)
 		if not viewport_bounds.grow(radius * 2.6 + 24.0).has_point(point):
@@ -8046,6 +8112,8 @@ func _flush_overview_hulls() -> void:
 		batch.show()
 
 func _draw_map() -> void:
+	_update_fog(_state())
+	fog_overlay.queue_redraw()
 	logistics_overlay.queue_redraw()
 	objectives_overlay.queue_redraw()
 	asteroid_frame_meshes.clear()
@@ -8157,8 +8225,9 @@ func _draw_map() -> void:
 		var radius: float = _planet_radius(i, state)
 		var tint: Color = _empire_color(int(state["planets"][i]["owner"]))
 		_draw_system(i, state, pos, radius, tint)
-		_draw_station(state, i, tint, float(state["elapsed"]))
-		_draw_shipyards(state, i, tint, float(state["elapsed"]))
+		if _fog_visible(ECONOMY.station_position(state, i, float(state["elapsed"]))):
+			_draw_station(state, i, tint, float(state["elapsed"]))
+			_draw_shipyards(state, i, tint, float(state["elapsed"]))
 		if _show_system_rings(i):
 			var phase: float = 0.6 + 0.35 * sin(visual_clock * 3.0)
 			for angle in range(4):
