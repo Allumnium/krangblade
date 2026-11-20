@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.70.0: F4 fleet targets use stepped sliders and host-authoritative autoqueue, counting owned and queued ships. Show available hulls and retain editable targets if access is lost. Lowering targets does not cancel paid orders.
+
 - v0.69.1: Conquest rewards need not have drawbacks. Prefer pure benefits for simple upgrades, optional modest thematic costs for intricate technologies. Show drawbacks only when applicable. Four economic cards now have no upkeep penalty; Crystalline Synthesis retains its Metals demand.
 
 - v0.69.0: Advanced objective pool follows fixed tracks, with host-seeded nonduplicate assignments and lifetime antimatter processing counted on science collection. No item consumed by processing.

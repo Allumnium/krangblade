@@ -7550,6 +7550,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_update_planet_blockades(state, combat_graph)
 	for i in range((state["planets"] as Array).size()):
 		_work_planet(state, i, dt)
+	_refill_empire_fleets(state)
 	_begin_hull_index(state)
 	started = _profile_stage(profile, "Economy", started)
 	var teams: Array[int] = planet_teams(state)
@@ -7975,3 +7976,73 @@ static func _assign_advanced_objectives(state: Dictionary, player: int, progress
 		rng.seed = int(state["map"]["seed"]) + player * 7919 + completed.size() * 104729
 		assigned[track] = candidates[rng.randi_range(0, candidates.size() - 1)]
 	progress["advanced"] = assigned
+
+const EMPIRE_TARGET_STEPS = [0, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000]
+
+static func empire_fleet_counts(state: Dictionary, player: int) -> Dictionary:
+	var live: Dictionary = {}
+	var queued: Dictionary = {}
+	for ship in state["ships"]:
+		if int(ship["owner"]) == player:
+			var kind: String = str(ship["kind"])
+			live[kind] = int(live.get(kind, 0)) + 1
+	for p in state["planets"]:
+		if int(p["owner"]) != player:
+			continue
+		for job in p["queue"]:
+			var kind: String = str(job["kind"])
+			if SHIP_KINDS.has(kind):
+				queued[kind] = int(queued.get(kind, 0)) + 1
+	return {"live": live, "queued": queued}
+
+static func empire_ship_available(state: Dictionary, player: int, kind: String, counts: Dictionary) -> bool:
+	if int(counts["live"].get(kind, 0)) + int(counts["queued"].get(kind, 0)) > 0:
+		return true
+	for p in state["planets"]:
+		if int(p["owner"]) == player and (kind != "ship" or bool(p["home"])) and has_fitting_yard(p, kind):
+			return true
+	return false
+
+static func set_empire_target(state: Dictionary, player: int, kind: String, amount: int) -> bool:
+	if not state["teams"].has(player) or not SHIP_KINDS.has(kind) or not EMPIRE_TARGET_STEPS.has(amount):
+		return false
+	if amount > 0 and not empire_ship_available(state, player, kind, empire_fleet_counts(state, player)):
+		return false
+	var targets: Dictionary = state.get("empire_targets", {})
+	var fleet: Dictionary = targets.get(player, {})
+	if amount == 0:
+		fleet.erase(kind)
+	else:
+		fleet[kind] = amount
+	targets[player] = fleet
+	state["empire_targets"] = targets
+	return true
+
+static func _refill_empire_fleets(state: Dictionary) -> void:
+	var now: float = float(state["elapsed"])
+	if now + EPS < float(state.get("_next_empire_refill", 0.0)):
+		return
+	state["_next_empire_refill"] = now + 0.5
+	for player in state.get("empire_targets", {}):
+		var fleet: Dictionary = state["empire_targets"][player]
+		if fleet.is_empty():
+			continue
+		var counts: Dictionary = empire_fleet_counts(state, int(player))
+		for kind in fleet:
+			var needed: int = int(fleet[kind]) - int(counts["live"].get(kind, 0)) - int(counts["queued"].get(kind, 0))
+			if needed <= 0:
+				continue
+			for index in range(state["planets"].size()):
+				var p: Dictionary = state["planets"][index]
+				if int(p["owner"]) != int(player) or (kind == "ship" and not bool(p["home"])):
+					continue
+				for slot in range(p["yards"].size()):
+					if not shipyard_operational(p, slot) or not yard_fits(p, slot, kind):
+						continue
+					if enqueue(state, int(player), index, kind, "", slot):
+						p["queue"][-1]["empire_auto"] = true
+						needed -= 1
+					if needed <= 0:
+						break
+				if needed <= 0:
+					break
