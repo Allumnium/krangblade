@@ -5047,7 +5047,13 @@ static func _spatial_insert(cells: Dictionary, point: Vector2, width: float, ent
 		cells[cell] = []
 	cells[cell].append(entry)
 
-static func _salvage_threats(state: Dictionary, graph: Dictionary) -> Dictionary:
+# The physical sector hint depends on more than position. Capture the
+# relevant routing inputs so post-combat reroutes cannot reuse stale values.
+static func _threat_sector_signature(ship: Dictionary) -> Array:
+	var route: Array = ship.get("route", [])
+	return [ship.get("position", Vector2.INF), int(ship.get("at", -1)), ship.get("kind", ""), ship.get("mining_mode", ""), int(ship.get("field", -1)), int(ship.get("resource_stage", {}).get("node", -1)), int(route[0]) if not route.is_empty() else -1]
+
+static func _salvage_threats(state: Dictionary, graph: Dictionary, combat_index: Dictionary = {}) -> Dictionary:
 	var sectors: Dictionary = {}
 	var cells: Dictionary = {}
 	for craft in state["ships"]:
@@ -5055,7 +5061,12 @@ static func _salvage_threats(state: Dictionary, graph: Dictionary) -> Dictionary
 			continue
 		var team: int = int(state["teams"].get(int(craft["owner"]), 0))
 		var point: Vector2 = craft["position"]
-		var sector: int = local_sector(graph, craft)
+		var cached: Array = combat_index.get(int(craft["id"]), [])
+		var sector: int
+		if not cached.is_empty() and cached[0] == _threat_sector_signature(craft):
+			sector = int(cached[1])
+		else:
+			sector = local_sector(graph, craft)
 		if sector >= 0:
 			if not sectors.has(sector):
 				sectors[sector] = {}
@@ -5670,7 +5681,7 @@ static func _reusable_laser_target(state: Dictionary, ship: Dictionary, by_id: D
 static func _combat_search_due(ship: Dictionary, now: float) -> bool:
 	return ship.has("attack_order") or int(ship.get("combat_target", -1)) >= 0 or int(ship.get("pursuit_target", -1)) >= 0 or int(ship.get("yard_target", -1)) < -1 or now + EPS >= float(ship.get("_next_combat_search", 0.0))
 
-static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
+static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}) -> void:
 	var ships: Array = state["ships"]
 	var positions: Dictionary = {}
 	var by_id: Dictionary = {}
@@ -5689,6 +5700,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		health[id] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
 		previous_targets[id] = int(ship.get("combat_target", -1))
 		var sector: int = local_sector(graph, ship)
+		if armed(ship):
+			threat_index[id] = [_threat_sector_signature(ship), sector]
 		if sector < 0:
 			sector = sector_at(graph, pos, range(graph["points"].size()))
 		ship_sectors[id] = sector
@@ -7335,7 +7348,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_prepare_withdrawals(state, combat_graph)
 	_advance_unit_orders(state, combat_graph)
 	_update_tactical_orders(state, combat_graph)
-	_combat(state, combat_graph, dt)
+	var threat_index: Dictionary = {}
+	_combat(state, combat_graph, dt, threat_index)
 	# Station destruction changes ownership during combat. Never use stale
 	# allied routes or permit a delivery into the destroyed stockpile.
 	var surviving_teams: Array[int] = planet_teams(state)
@@ -7346,7 +7360,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_update_salvage(state)
 	var salvage_busy: Dictionary = _salvage_combat_busy(state)
 	var salvage_cells: Dictionary = _salvage_cells(state.get("salvage", {}))
-	var salvage_threats: Dictionary = _salvage_threats(state, combat_graph)
+	var salvage_threats: Dictionary = _salvage_threats(state, combat_graph, threat_index)
 	var stage_receivers: Dictionary = {}
 	var receiver_order: int = 0
 	for craft in state["ships"]:
