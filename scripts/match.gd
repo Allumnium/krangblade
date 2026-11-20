@@ -321,7 +321,7 @@ var conquest_category: String = "economic"
 var conquest_dialog: Window
 var conquest_cards: VBoxContainer
 var conquest_card_signature: String = ""
-var empire_dialog: AcceptDialog
+var empire_dialog: Window
 var empire_rows: VBoxContainer
 var empire_controls: Dictionary = {}
 var empire_signature: String = ""
@@ -8743,15 +8743,25 @@ func _open_conquest_upgrades(category: String) -> void:
 	conquest_dialog.popup_centered(Vector2i(mini(780, int(viewport_size.x) - 32), mini(380, int(viewport_size.y) - 56)))
 
 func _build_empire_dialog() -> void:
-	empire_dialog = AcceptDialog.new()
+	# Size the window from the viewport, never from dynamically added rows.
+	empire_dialog = Window.new()
 	empire_dialog.title = "Empire · Fleet management"
 	empire_dialog.theme = theme
+	empire_dialog.transient = true
 	empire_dialog.exclusive = true
-	empire_dialog.ok_button_text = "Close"
+	empire_dialog.unresizable = true
+	empire_dialog.wrap_controls = false
+	empire_dialog.visible = false
 	add_child(empire_dialog)
+	empire_dialog.close_requested.connect(empire_dialog.hide)
+	empire_dialog.window_input.connect(_empire_window_input)
+	var background := PanelContainer.new()
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	background.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#45617b"), 12, 4))
+	empire_dialog.add_child(background)
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 8)
-	empire_dialog.add_child(content)
+	background.add_child(content)
 	var heading := Label.new()
 	heading.text = "Desired fleet composition"
 	heading.add_theme_font_size_override("font_size", 20)
@@ -8762,15 +8772,27 @@ func _build_empire_dialog() -> void:
 	content.add_child(note)
 	var scroll := ScrollContainer.new()
 	scroll.name = "FleetScroll"
-	scroll.custom_minimum_size = Vector2(320, 180)
+	# The list may grow, but the bounded scroll viewport keeps the
+	# header and footer inside the same window on the very first open.
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	content.add_child(scroll)
 	empire_rows = VBoxContainer.new()
 	empire_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	empire_rows.add_theme_constant_override("separation", 8)
 	scroll.add_child(empire_rows)
-	HUD.action(empire_dialog.get_ok_button())
+	var close := Button.new()
+	close.text = "Close"
+	close.size_flags_horizontal = Control.SIZE_SHRINK_END
+	HUD.action(close)
+	content.add_child(close)
+	close.pressed.connect(empire_dialog.hide)
+
+func _empire_window_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		empire_dialog.set_input_as_handled()
+		empire_dialog.hide()
 
 func _refresh_empire(state: Dictionary) -> void:
 	if state.is_empty():
@@ -8843,9 +8865,12 @@ func _empire_slider_released(changed: bool, kind: String, slider: HSlider) -> vo
 func _open_empire() -> void:
 	if str(session.get("phase")) != "match":
 		return
-	_refresh_empire(_state())
 	var viewport: Vector2 = get_viewport_rect().size
-	empire_dialog.popup_centered(Vector2i(int(minf(600, viewport.x - 40)), int(minf(570, viewport.y - 80))))
+	var target := Vector2i(maxi(1, mini(600, int(viewport.x) - 40)), maxi(1, mini(570, int(viewport.y) - 80)))
+	# Set the outer dimensions before populating the scroll content.
+	empire_dialog.size = target
+	_refresh_empire(_state())
+	empire_dialog.popup_centered(target)
 
 func _any_selected_station_buildable(key: String, primary: Dictionary) -> bool:
 	if building_selection_kind != "station" or selected_buildings.size() <= 1:
