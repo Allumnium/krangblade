@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.77.0: Original procedural PCM fallback samples are intentionally temporary. World audio is snapshot-sampled, density-limited and centered on camera; quiet distant fights, reserved UI voices and explosion priority prevent overwhelming playback. Short one-shots use gain at emission; evaluate stereo panning, longer loops and exact weapon timing only if needed after playtesting. Replacement audio TODO added.
+
 - v0.76.0: Fivefold Crystal cost increase is provisional; Laser Matrix is 4kt and third yard 3kt, requiring expanded capacity to fund. Station baseline remains under planetary blockade; Incubators contribute only 0.04 t/yr base. Check AI sourcing and late-game pacing. Public chat uses existing reliable authority RPC, separated round history and local receipt clock; verify long text and concurrent notices.
 
 - v0.75.3: User observed empty Harvesters continuing beyond a freighter. Existing completed-handoff skip delayed work; remove skip for empty deliveries and clear stale autonomous idle routing, preserving manual movement and partial transfer budget. Stronger enabled Upgrade pulse and independent damaged-only bars reduce visual clutter. Verify actual reassignment and pulse in play.

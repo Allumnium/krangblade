@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.77.0: Client-only synthesized prototype SFX: weapons, explosions, mining/repair/tractor and UI, orders, construction and notices. Reuse authority snapshots without extra packets; distance/zoom attenuation, 20 world + 4 reserved UI voices, per-cue caps and real-time throttles. Preserve Music/SFX settings. Optional replacement WAVs under assets/sfx named by cue. Do not replay initial snapshot sounds.
+
 - v0.76.0: Every owned station generates 1 t/yr Crystals independent of planets, staffing and blockade, subject to storage. Incubator base output 0.04 t/yr per level; asteroid yield unchanged. Fivefold existing Crystal costs including shield/cloak premiums; other materials unchanged. Enter opens public match chat, Enter sends, Esc cancels; validated authority messages appear in the top-center notices for 10 real seconds, including solo. Preserve lobby history separately.
 
 - v0.75.3: Empty Harvesters immediately abandon completed delivery routing and reenter normal work selection, preserving explicit non-delivery orders. Upgrade pulses while enabled. World HP/shield bars and selection shield meters hide independently at full capacity; numeric inspector stats remain.
