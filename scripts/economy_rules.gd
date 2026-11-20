@@ -5794,8 +5794,12 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	var by_id: Dictionary = _hulls_by_id.duplicate() if indexed else {}
 	var team_by_id: Dictionary = {}
 	var hull_slots: Dictionary = {}
+	var hull_positions := PackedVector2Array()
+	var hull_teams := PackedInt32Array()
 	var previous_targets := PackedInt64Array()
 	var ship_sectors := PackedInt32Array()
+	hull_positions.resize(ships.size())
+	hull_teams.resize(ships.size())
 	previous_targets.resize(ships.size())
 	ship_sectors.resize(ships.size())
 	var health: Dictionary = {}
@@ -5819,6 +5823,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		health[id] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
 		var slot: int = hull_slots.size()
 		hull_slots[id] = slot
+		hull_positions[slot] = pos
+		hull_teams[slot] = int(team_by_id[id])
 		previous_targets[slot] = int(ship.get("combat_target", -1))
 		var sector: int = local_sector(graph, ship)
 		var combat_cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
@@ -5917,8 +5923,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			_fire_blaster(state, ship, -1, positions, damage, killed_by, health, dt)
 			continue
 		var id: int = int(ship["id"])
-		var pos: Vector2 = positions[id]
-		var team: int = int(team_by_id[id])
+		var hull_slot: int = int(hull_slots[id])
+		var pos: Vector2 = hull_positions[hull_slot]
+		var team: int = hull_teams[hull_slot]
 		var launchers: int = missile_count(str(ship["kind"]))
 		if launchers > 0:
 			var missile_cd: float = maxf(0.0, float(ship.get("missile_cooldown", 0.0)) - dt)
@@ -5958,7 +5965,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			ship["yard_target"] = focus if in_range and focus < -1 else -1
 			ship["pursuit_target"] = -1
 			ship["pursuit_left"] = 0.0
-			ship["laser_until"] = -1.0 if int(previous_targets[hull_slots[id]]) != int(ship["combat_target"]) else ship.get("laser_until", -1.0)
+			ship["laser_until"] = -1.0 if int(previous_targets[hull_slot]) != int(ship["combat_target"]) else ship.get("laser_until", -1.0)
 			var focus_cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
 			if in_range and weapon_damage > 0.0 and focus_cooldown <= EPS:
 				_ship_hit(damage, killed_by, health, focus, ship, weapon_damage)
@@ -5977,10 +5984,10 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		for blocked_id in blocked.keys():
 			if not positions.has(blocked_id) or pos.distance_squared_to(positions[blocked_id]) > LASER_RANGE * LASER_RANGE:
 				blocked.erase(blocked_id)
-		if moving_only or bool(ship.get("holding", false)) or (guard_node >= 0 and (ship_sectors[hull_slots[id]] != guard_node or (ship_sectors[hull_slots[pursuit]] if hull_slots.has(pursuit) else -1) != guard_node)):
+		if moving_only or bool(ship.get("holding", false)) or (guard_node >= 0 and (ship_sectors[hull_slot] != guard_node or (ship_sectors[hull_slots[pursuit]] if hull_slots.has(pursuit) else -1) != guard_node)):
 			pursuit = -1
 		if pursuit >= 0:
-			if ship_sectors[hull_slots[id]] >= 0 and (ship_sectors[hull_slots[pursuit]] if hull_slots.has(pursuit) else -1) == ship_sectors[hull_slots[id]]:
+			if ship_sectors[hull_slot] >= 0 and (ship_sectors[hull_slots[pursuit]] if hull_slots.has(pursuit) else -1) == ship_sectors[hull_slot]:
 				remaining = PURSUIT_YEARS
 			if not by_id.has(pursuit) or int(state["teams"].get(int(by_id[pursuit]["owner"]), 0)) == team or team == 0:
 				pursuit = -1
@@ -6015,16 +6022,16 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			remaining = PURSUIT_YEARS
 		# A previously engaged fighter may escape the firing envelope before
 		# the next scan; its departure is still a valid pursuit trigger.
-		var prior: int = int(previous_targets[hull_slots[id]])
+		var prior: int = int(previous_targets[hull_slot])
 		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[hull_slots[prior]])):
 			pursuit = prior
 			remaining = PURSUIT_YEARS
-		if search_due and fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and _combat_sector_has_hostile(sector_teams, int(ship_sectors[hull_slots[id]]), team):
+		if search_due and fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and _combat_sector_has_hostile(sector_teams, int(ship_sectors[hull_slot]), team):
 			if team > 0:
 				if not pursuit_blocks.has(team):
 					pursuit_blocks[team] = {}
 				var team_blocks: Dictionary = pursuit_blocks[team]
-				var sector: int = int(ship_sectors[hull_slots[id]])
+				var sector: int = int(ship_sectors[hull_slot])
 				if not team_blocks.has(sector):
 					var candidates: Array = _hostile_bucket(state, sectors, sector_hostile_cache, sector, team, team_by_id, true)
 					team_blocks[sector] = _laser_blocks(candidates, positions)
@@ -6034,9 +6041,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 				remaining = PURSUIT_YEARS
 		if guard_node >= 0:
 			var guarded: int = guard_node
-			if (ship_sectors[hull_slots[pursuit]] if hull_slots.has(pursuit) else -1) != guarded or ship_sectors[hull_slots[id]] != guarded:
+			if (ship_sectors[hull_slots[pursuit]] if hull_slots.has(pursuit) else -1) != guarded or ship_sectors[hull_slot] != guarded:
 				pursuit = -1
-			if target >= 0 and ((ship_sectors[hull_slots[target]] if hull_slots.has(target) else -1) != guarded or ship_sectors[hull_slots[id]] != guarded):
+			if target >= 0 and ((ship_sectors[hull_slots[target]] if hull_slots.has(target) else -1) != guarded or ship_sectors[hull_slot] != guarded):
 				ship["passing_fire"] = true
 		if pursuit >= 0:
 			target = pursuit if pos.distance_squared_to(positions[pursuit]) <= LASER_RANGE * LASER_RANGE else -1
@@ -6054,7 +6061,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		ship["pursuit_target"] = pursuit
 		ship["pursuit_left"] = remaining
 		ship["pursuit_blocked"] = blocked
-		if int(previous_targets[hull_slots[id]]) != target:
+		if int(previous_targets[hull_slot]) != target:
 			ship["laser_until"] = -1.0
 		ship["combat_target"] = target
 		var cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)

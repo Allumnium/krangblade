@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.56: Attacker loop reads packed frozen positions, teams, sectors and prior targets through a single slot. Existing target dictionaries remain compatibility data, so this transitional stage adds position/team storage; measure before claiming performance gains. Runtime pending.
+
 - v0.64.55: Combat previous target and sector fields now share frozen ID-to-slot indexing and typed arrays. Position and HP dictionaries remain authoritative for the combat pass; runtime and benchmark pending.
 
 - v0.64.54: Operation sync reuses the live hull index; combat shallow-copies it to preserve frozen membership through simultaneous casualties. Dictionary copy cost versus insertion savings requires profiling; no packed authority migration yet. Runtime pending.
