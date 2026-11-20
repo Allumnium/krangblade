@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.76.0: Fivefold Crystal cost increase is provisional; Laser Matrix is 4kt and third yard 3kt, requiring expanded capacity to fund. Station baseline remains under planetary blockade; Incubators contribute only 0.04 t/yr base. Check AI sourcing and late-game pacing. Public chat uses existing reliable authority RPC, separated round history and local receipt clock; verify long text and concurrent notices.
+
 - v0.75.3: User observed empty Harvesters continuing beyond a freighter. Existing completed-handoff skip delayed work; remove skip for empty deliveries and clear stale autonomous idle routing, preserving manual movement and partial transfer budget. Stronger enabled Upgrade pulse and independent damaged-only bars reduce visual clutter. Verify actual reassignment and pulse in play.
 
 - v0.75.2: Starter population reduced from 200k to 80k; smoother later tiers. Metals raised from 1kt (already below initial stock) to 3kt, requiring expansion/storage or enough cargo. Colony ship crews are 40k each, so the early population goal is similar in total people required. Food production and military goals retain existing thresholds; scout-only construction may substantially shorten the military goal. Compare real completion times before further tuning.

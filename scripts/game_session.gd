@@ -34,6 +34,7 @@ var status: String = ""
 var display_name: String = "Player"
 var players: Dictionary = {}
 var history: Array[Dictionary] = []
+var match_chat: Array[Dictionary] = []
 var last_message: Dictionary = {}
 var owners: Array[int] = []
 var economy: Dictionary = {}
@@ -199,6 +200,7 @@ func leave_session() -> void:
 	_status("Disconnected.")
 
 func _reset_network() -> void:
+	match_chat.clear()
 	stop_lobby_browser()
 	if discovery_host != null:
 		discovery_host.close()
@@ -510,20 +512,20 @@ func _change_color(id: int, choice: int) -> void:
 	_send_roster()
 
 func send_chat(value: String) -> void:
-	if phase != "lobby":
+	if phase not in ["lobby", "match"]:
 		return
-	if multiplayer.is_server():
+	if is_solo or multiplayer.is_server():
 		_accept_chat(1, value)
 	else:
 		_rpc_chat_request.rpc_id(1, value)
 
 @rpc("any_peer", "call_remote", "reliable")
 func _rpc_chat_request(value: String) -> void:
-	if multiplayer.is_server() and phase == "lobby":
+	if multiplayer.is_server() and phase in ["lobby", "match"]:
 		_accept_chat(multiplayer.get_remote_sender_id(), value)
 
 func _accept_chat(sender: int, value: String) -> void:
-	if not players.has(sender):
+	if phase not in ["lobby", "match"] or not players.has(sender) or bool(players[sender].get("ai", false)) or (phase == "match" and not _match_peer(sender)):
 		return
 	var now: int = Time.get_ticks_msec()
 	if now - int(last_message.get(sender, -100000)) < 650:
@@ -533,7 +535,14 @@ func _accept_chat(sender: int, value: String) -> void:
 		return
 	last_message[sender] = now
 	var name: String = str((players[sender] as Dictionary).get("name", "Player"))
-	_add_chat("%s: %s" % [name, message])
+	if phase == "match":
+		var item: Dictionary = {"round": round_id, "sender": sender, "text": "%s: %s" % [name, message]}
+		_store_chat(item)
+		if not is_solo:
+			for id in _connected_guests():
+				_rpc_chat_item.rpc_id(id, item)
+	else:
+		_add_chat("%s: %s" % [name, message])
 
 func _system_message(message: String) -> void:
 	_add_chat("• " + message)
@@ -545,6 +554,16 @@ func _add_chat(message: String) -> void:
 		_rpc_chat_item.rpc_id(id, item)
 
 func _store_chat(item: Dictionary) -> void:
+	if item.has("round"):
+		if phase != "match" or int(item["round"]) != round_id:
+			return
+		var received: Dictionary = item.duplicate(true)
+		received["received_ms"] = Time.get_ticks_msec()
+		match_chat.append(received)
+		if match_chat.size() > CHAT_HISTORY:
+			match_chat.pop_front()
+		chat_changed.emit()
+		return
 	history.append(item.duplicate(true))
 	if history.size() > CHAT_HISTORY:
 		history.pop_front()
@@ -664,6 +683,8 @@ func _rpc_begin(begin_round: int, snapshot: Dictionary, map_seed: int, layout: S
 	_activate_match(snapshot, map_seed)
 
 func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
+	match_chat.clear()
+	last_message.clear()
 	lobby_map_seed = map_seed
 	players = snapshot.duplicate(true)
 	snapshot_elapsed = 0.0

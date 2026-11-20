@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.76.0: Playtest station baseline, 0.04 Incubator rate and fivefold Crystal prices, especially expensive Laser Matrix/third yard storage requirements and AI sourcing. Verify actual two-/three-peer chat delivery, sender validation, rate limit, typing focus, wrapping, pause/fade and restart. Runtime and visual checks pending.
+
 - [ ] v0.75.3: Verify immediate Harvester reassignment after final freighter transfer, including manual movement, partial deliveries, conservation and remote snapshots; verify available Upgrade pulse and independent damaged-only world bars/selection shield meters. Runtime and visual checks pending.
 
 - [ ] v0.70.6: Visually verify centered single-selection portraits and HP captions for ships, stations, shipyards and planets at varied window sizes.

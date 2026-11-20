@@ -298,6 +298,7 @@ var logistics_lens: Button
 var active_lens: String = "logistics"
 var logistics_overlay: Control
 var objectives_overlay: Control
+var match_chat_edit: LineEdit
 var conquest_buttons: Dictionary = {}
 var objective_refresh_buttons: Dictionary = {}
 var conquest_category: String = "economic"
@@ -595,6 +596,13 @@ func _build_ui() -> void:
 	objectives_overlay.z_index = 3
 	objectives_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	objectives_overlay.draw.connect(_draw_objectives_overlay)
+	match_chat_edit = LineEdit.new()
+	match_chat_edit.placeholder_text = "All players · Enter to send · Esc to cancel"
+	match_chat_edit.max_length = 250
+	match_chat_edit.z_index = 5
+	map_canvas.add_child(match_chat_edit)
+	match_chat_edit.hide()
+	match_chat_edit.focus_exited.connect(_close_match_chat)
 	for category in ECONOMY.REWARD_CATEGORIES:
 		var button := Button.new()
 		map_canvas.add_child(button)
@@ -4558,6 +4566,7 @@ func _projection_size() -> Vector2:
 
 func _map_resized() -> void:
 	_layout_conquest_button()
+	_layout_match_chat()
 	# The world-space center is independent of screen dimensions.
 	zoom = minf(zoom, _max_zoom())
 	map_canvas.queue_redraw()
@@ -4817,6 +4826,8 @@ func _planet_production_rate(system: Dictionary, resource: String) -> float:
 	var output: float = ECONOMY.local_flow(system, "Production", resource)
 	if resource == "Organics":
 		output = maxf(0.0, output - ECONOMY.eco_organics(system))
+	elif resource == "Crystals":
+		output = maxf(0.0, output - ECONOMY.STATION_CRYSTALS_PER_YEAR)
 	return output
 
 func _draw_planet_production(state: Dictionary, index: int, center: Vector2, radius: float, detail: float) -> void:
@@ -6117,6 +6128,42 @@ func _sync_ship_visuals(state: Dictionary) -> void:
 	for id in ship_offsets.keys():
 		if not updated.has(id):
 			ship_offsets.erase(id)
+
+func _layout_match_chat() -> void:
+	if not is_instance_valid(match_chat_edit):
+		return
+	var width: float = maxf(80.0, minf(560.0, map_canvas.size.x - 24.0))
+	match_chat_edit.position = Vector2((map_canvas.size.x - width) * 0.5, HEADER_HEIGHT + 2.0)
+	match_chat_edit.size = Vector2(width, 28.0)
+
+func _close_match_chat() -> void:
+	if is_instance_valid(match_chat_edit):
+		match_chat_edit.hide()
+		match_chat_edit.clear()
+
+func _input(event: InputEvent) -> void:
+	if not event is InputEventKey or not event.pressed or event.echo or not is_instance_valid(match_chat_edit) or str(session.get("phase")) != "match":
+		return
+	var key: int = event.keycode
+	var enter: bool = key in [KEY_ENTER, KEY_KP_ENTER]
+	if match_chat_edit.visible:
+		if enter or key == KEY_ESCAPE:
+			if enter:
+				session.call("send_chat", match_chat_edit.text)
+			_close_match_chat()
+			get_viewport().set_input_as_handled()
+		return
+	if not enter or event.alt_pressed or event.ctrl_pressed or event.meta_pressed:
+		return
+	if match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible) or (is_instance_valid(hotkey_dialog) and hotkey_dialog.visible) or (is_instance_valid(conquest_dialog) and conquest_dialog.visible) or (is_instance_valid(empire_dialog) and empire_dialog.visible):
+		return
+	var focus: Control = get_viewport().gui_get_focus_owner()
+	if focus is LineEdit or focus is TextEdit:
+		return
+	_layout_match_chat()
+	match_chat_edit.show()
+	match_chat_edit.grab_focus()
+	get_viewport().set_input_as_handled()
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
@@ -8112,8 +8159,27 @@ func _draw_objectives_overlay() -> void:
 func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -> void:
 	var events: Array = state.get("objective_events", [])
 	var roster: Dictionary = session.get("players")
-	var y: float = HEADER_HEIGHT + 34.0
+	var y: float = HEADER_HEIGHT + 49.0 if match_chat_edit.visible else HEADER_HEIGHT + 34.0
 	var visible_count: int = 0
+	var chat_count: int = 0
+	var chat: Array = session.get("match_chat")
+	for j in range(chat.size() - 1, -1, -1):
+		var item: Dictionary = chat[j]
+		var age: float = float(Time.get_ticks_msec() - int(item["received_ms"])) / 1000.0
+		if age >= 10.0:
+			break
+		var message: String = item["text"]
+		var alpha: float = clampf((10.0 - age) / 2.0, 0.0, 1.0)
+		var width: float = maxf(80.0, minf(map_canvas.size.x * 0.56, font.get_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 28.0))
+		var left: float = (map_canvas.size.x - width) * 0.5
+		var height: float = maxf(24.0, font.get_multiline_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, width - 16.0, 13).y + 10.0)
+		objectives_overlay.draw_rect(Rect2(left, y - 17.0, width, height), Color(0.04, 0.08, 0.13, alpha * 0.9))
+		objectives_overlay.draw_multiline_string(font, Vector2(left + 8.0, y), message, HORIZONTAL_ALIGNMENT_LEFT, width - 16.0, 13, -1, Color(0.85, 0.94, 1.0, alpha))
+		y += height + 4.0
+		visible_count += 1
+		chat_count += 1
+		if chat_count >= 3:
+			break
 	for j in range(events.size() - 1, -1, -1):
 		var event: Dictionary = events[j]
 		var age: float = maxf(0.0, clock - float(event["elapsed"]))

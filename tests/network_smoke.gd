@@ -302,6 +302,8 @@ func _phase_changed() -> void:
 						system["yards"][0]["job"] = -1
 						ECON.set_shipyard_rally(state, int(system["owner"]), index, 0, -1, Vector2.ZERO)
 				session.call("_publish_economy")
+			session.call_deferred("send_chat", "match smoke\nmessage")
+			session.call_deferred("send_chat", "rate-limit duplicate")
 			call_deferred("_prepare_commands")
 			create_timer(0.5).timeout.connect(_check_economy_sync)
 		if role == "host":
@@ -905,6 +907,19 @@ func _check_economy_sync() -> void:
 				_fail("Guest did not reconstruct compact planet state.")
 				return
 			if not _check_reward_redraft(state):
+				create_timer(0.25).timeout.connect(_check_economy_sync)
+				return
+			var received: Dictionary = {}
+			for item in session.get("match_chat"):
+				if str(item["text"]).ends_with(": rate-limit duplicate"):
+					_fail("Match chat rate limit failed.")
+					return
+				if str(item["text"]).ends_with(": match smoke message"):
+					var sender: int = int(item["sender"])
+					var name_text: String = str(session.get("players").get(sender, {}).get("name", ""))
+					if str(item["text"]) == name_text + ": match smoke message":
+						received[sender] = true
+			if received.size() != expected_players:
 				create_timer(0.25).timeout.connect(_check_economy_sync)
 				return
 			economy_verified = true
