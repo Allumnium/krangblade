@@ -8060,10 +8060,11 @@ func _refresh_reward_cards() -> void:
 		benefit.text = reward[1]
 		benefit.modulate = Color("#8ee2a9")
 		card.add_child(benefit)
-		var drawback := Label.new()
-		drawback.text = reward[2]
-		drawback.modulate = Color("#ff9999")
-		card.add_child(drawback)
+		if not str(reward[2]).is_empty():
+			var drawback := Label.new()
+			drawback.text = reward[2]
+			drawback.modulate = Color("#ff9999")
+			card.add_child(drawback)
 		var buy := Button.new()
 		buy.text = "Acquire — 1 CP"
 		card.add_child(buy)
