@@ -4954,6 +4954,13 @@ static func _release_auto_salvage(ship: Dictionary, piles: Dictionary) -> void:
 # Cache threat locations for the tick rather than searching every fleet for
 # each civilian and each pile. Hostile armed hulls threaten their sector and
 # nearby space, including a lane or the far side of a sector boundary.
+# Phase-local spatial buckets: preserve insertion order for target tie breaks.
+static func _spatial_insert(cells: Dictionary, point: Vector2, width: float, entry: Variant) -> void:
+	var cell := Vector2i(floori(point.x / width), floori(point.y / width))
+	if not cells.has(cell):
+		cells[cell] = []
+	cells[cell].append(entry)
+
 static func _salvage_threats(state: Dictionary, graph: Dictionary) -> Dictionary:
 	var sectors: Dictionary = {}
 	var cells: Dictionary = {}
@@ -4967,10 +4974,7 @@ static func _salvage_threats(state: Dictionary, graph: Dictionary) -> Dictionary
 			if not sectors.has(sector):
 				sectors[sector] = {}
 			sectors[sector][team] = true
-		var cell := Vector2i(floori(point.x / REPAIR_SAFE_RADIUS), floori(point.y / REPAIR_SAFE_RADIUS))
-		if not cells.has(cell):
-			cells[cell] = []
-		cells[cell].append([team, point])
+		_spatial_insert(cells, point, REPAIR_SAFE_RADIUS, [team, point])
 	return {"sectors": sectors, "cells": cells}
 
 static func _salvage_safe(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, sector: int, threats: Dictionary) -> bool:
@@ -5488,10 +5492,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			if not sector_teams.has(sector):
 				sector_teams[sector] = {}
 			sector_teams[sector][int(state["teams"].get(int(ship["owner"]), 0))] = true
-		var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
-		if not cells.has(cell):
-			cells[cell] = []
-		cells[cell].append(ship)
+		_spatial_insert(cells, pos, LASER_RANGE, ship)
 	var yard_targets: Dictionary = {}
 	var pds_targets: Dictionary = {}
 	var station_targets: Dictionary = {}
@@ -5504,20 +5505,14 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			station_targets[target_id] = index
 			health[target_id] = float(system["station"]["hp"])
 			positions[target_id] = pos
-			var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
-			if not cells.has(cell):
-				cells[cell] = []
-			cells[cell].append({"id": target_id, "owner": system["owner"], "kind": "station"})
+			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "station"})
 		for slot in range(system["yards"].size()):
 			var target_id: int = -2 - index * 3 - slot
 			var pos: Vector2 = shipyard_position(state, index, slot, float(state["elapsed"]))
 			yard_targets[target_id] = Vector2i(index, slot)
 			health[target_id] = float(system["yards"][slot].get("hp", YARD_HP * int(system["yards"][slot]["level"])))
 			positions[target_id] = pos
-			var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
-			if not cells.has(cell):
-				cells[cell] = []
-			cells[cell].append({"id": target_id, "owner": system["owner"], "kind": "shipyard"})
+			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "shipyard"})
 		for slot in system.get("pds", {}):
 			# Disjoint negative ID range; all batteries use the same
 			# authoritative fire/range origin as their defensive shots.
@@ -5526,10 +5521,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 			pds_targets[target_id] = Vector2i(index, int(slot))
 			health[target_id] = float(system["pds"][slot].get("hp", PDS_HP))
 			positions[target_id] = pos
-			var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
-			if not cells.has(cell):
-				cells[cell] = []
-			cells[cell].append({"id": target_id, "owner": system["owner"], "kind": "pds"})
+			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "pds"})
 	var damage: Dictionary = {}
 	for ship in ships:
 		var fighter: bool = ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]
@@ -5647,7 +5639,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float) -> void:
 		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[prior])):
 			pursuit = prior
 			remaining = PURSUIT_YEARS
-		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and int(ship_sectors[id]) >= 0 and team != 0:
+		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and _combat_sector_has_hostile(sector_teams, int(ship_sectors[id]), team):
 			var nearest_enemy: float = INF
 			for enemy in sectors.get(ship_sectors[id], []):
 				if not _hostile_hull(state, int(ship["owner"]), enemy):
