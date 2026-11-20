@@ -586,6 +586,7 @@ func _build_ui() -> void:
 	cargo_glow_batch.z_index = 1
 	map_canvas.resized.connect(_map_resized)
 	header_panel = PanelContainer.new()
+	header_panel.z_index = 4
 	header_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(header_panel)
 	var header_style := StyleBoxEmpty.new()
@@ -645,6 +646,7 @@ func _build_ui() -> void:
 	# One reserved, bottom-anchored command deck. The camera uses the map
 	# rectangle above it regardless of selection or visible inspector content.
 	console_panel = PanelContainer.new()
+	console_panel.z_index = 4
 	console_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(console_panel)
 	console_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
@@ -721,6 +723,7 @@ func _build_ui() -> void:
 	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
 	# Simulation controls are global, not contextual commands.
 	time_panel = PanelContainer.new()
+	time_panel.z_index = 4
 	add_child(time_panel)
 	time_panel.theme = HUD.compact()
 	time_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0b1624"), Color("#345570"), 4, 3))
@@ -5454,7 +5457,7 @@ func _entity_hit(state: Dictionary, point: Vector2) -> int:
 
 func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = true, explicit_attack: bool = false, append: bool = false, contextual: bool = false, minimap_hint: Dictionary = {}) -> void:
 	var state: Dictionary = _state()
-	var owned: Array[int] = _selected_owned_units(state)
+	var owned: Array[int] = _selected_owned_units(state, not patrol and not explicit_attack)
 	if state.is_empty() or owned.is_empty():
 		return
 	var graph: Dictionary = ECONOMY.military_graph(state)
@@ -5573,10 +5576,10 @@ func _selected_miners() -> Array[int]:
 			miners.append(int(craft["id"]))
 	return miners
 
-func _selected_owned_units(state: Dictionary) -> Array[int]:
+func _selected_owned_units(state: Dictionary, all_types: bool = false) -> Array[int]:
 	var owned: Array[int] = []
 	for craft in state.get("ships", []):
-		if _command_member(craft):
+		if _command_member(craft) or (all_types and selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me()):
 			owned.append(int(craft["id"]))
 	return owned
 
@@ -5620,7 +5623,7 @@ func _unload_selected() -> void:
 
 func _formation_orders(state: Dictionary) -> Array:
 	var entries: Array = []
-	var owned: Array[int] = _selected_owned_units(state)
+	var owned: Array[int] = _selected_owned_units(state, formation_mode not in ["attack", "patrol"])
 	if owned.is_empty() or formation_length <= 5.0:
 		return entries
 	var graph: Dictionary = ECONOMY.military_graph(state)
@@ -5692,7 +5695,7 @@ func _draw_formation_preview(state: Dictionary) -> void:
 	if entries.is_empty():
 		return
 	var color: Color = Color("#b880fa") if formation_mode == "patrol" else Color("#ff605c") if formation_mode == "attack" else HUD.ACCENT
-	if _selected_owned_units(state).size() == 1:
+	if _selected_owned_units(state, formation_mode not in ["attack", "patrol"]).size() == 1:
 		map_canvas.draw_line(formation_path[0], formation_path[-1], color, 1.5, true)
 	else:
 		map_canvas.draw_polyline(formation_path, color, 1.5, true)
