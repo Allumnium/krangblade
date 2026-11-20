@@ -50,7 +50,7 @@ func _ready() -> void:
 			if replacement != null:
 				variants.append(replacement)
 		if variants.is_empty():
-			for variant in range(3 if kind in ["laser", "blaster", "missile", "explosion", "heavy_explosion"] else 1):
+			for variant in range(5 if kind in ["laser", "blaster", "missile", "explosion", "heavy_explosion"] else (3 if kind in ["mining", "repair", "tractor", "click", "select"] else 1)):
 				variants.append(_synthesize(kind, variant))
 		streams[kind] = variants
 	for i in range(WORLD_VOICES + UI_VOICES):
@@ -180,13 +180,19 @@ func _synthesize(kind: String, variant: int) -> AudioStreamWAV:
 	noise_rng.seed = 90210 + int(kind.hash()) + variant * 7919
 	var low: float = 0.0
 	var phase: float = 0.0
-	var detune: float = 1.0 + float(variant - 1) * 0.08
+	var mid: float = 0.0
+	var delay := PackedFloat32Array()
+	var delay_length: int = int(SAMPLE_RATE * (0.037 + 0.009 * variant))
+	delay.resize(delay_length)
+	var detune: float = 1.0 + float(variant) * 0.045
 	var notes: Array = REWARD_NOTES.get(kind, [])
 	for i in range(count):
 		var t: float = float(i) / SAMPLE_RATE
 		var u: float = t / duration
 		var noise: float = noise_rng.randf_range(-1.0, 1.0)
 		low = lerpf(low, noise, 0.045 if kind == "heavy_explosion" else 0.12)
+		mid = lerpf(mid, noise, 0.28)
+		var grit: float = mid - low
 		var frequency: float = 440.0
 		var sample: float = 0.0
 		match kind:
@@ -202,25 +208,31 @@ func _synthesize(kind: String, variant: int) -> AudioStreamWAV:
 					sample += float(note[2]) * ring * bell
 			"laser":
 				frequency = lerpf(1900.0, 190.0, pow(u, 0.55))
-				sample = (sin(phase) * 0.65 + sin(phase * 1.51) * 0.18 + noise * 0.15) * exp(-4.0 * u)
+				sample = (sin(phase + 1.4 * sin(phase * 1.47) * exp(-3.0 * u)) * 0.53 + sin(phase * 0.5) * 0.19 + grit * 0.55 * exp(-12.0 * u)) * exp(-4.0 * u)
 			"blaster":
 				frequency = lerpf(690.0, 110.0, u)
-				sample = (sin(phase) * 0.50 + noise * 0.42) * exp(-7.0 * u)
+				sample = (sin(phase) * 0.38 + sin(phase * 0.52) * 0.23 + grit * 0.85 + noise * 0.23 * exp(-20.0 * u)) * exp(-7.0 * u)
 			"missile":
 				frequency = lerpf(180.0, 380.0, u)
 				var launch: float = (low * 1.8 + sin(phase) * 0.28 + noise * 0.16) * exp(-3.5 * u)
 				var impact: float = (low * 1.5 + sin(TAU * 70.0 * t) * 0.36) * exp(-12.0 * maxf(0.0, u - 0.63)) if u >= 0.63 else 0.0
-				sample = launch + impact
+				sample = launch * (0.8 + 0.2 * sin(TAU * 31.0 * t)) + impact + grit * 0.45 * exp(-18.0 * u)
 			"explosion", "heavy_explosion":
 				var heavy: bool = kind == "heavy_explosion"
 				frequency = lerpf(100.0 if heavy else 160.0, 32.0 if heavy else 55.0, u)
-				sample = (sin(phase) * 0.36 + low * 1.8 + noise * 0.28 * exp(-10.0 * u)) * exp(-4.6 * u)
+				var debris: float = grit * pow(maxf(0.0, sin(TAU * (17.0 + variant * 3.0) * t)), 6.0) * exp(-2.4 * u)
+				sample = (sin(phase) * 0.32 + sin(phase * 0.57) * 0.18 + low * 2.4 + noise * 0.42 * exp(-14.0 * u)) * exp(-4.6 * u) + debris * 0.55
 			"mining", "repair", "tractor":
 				frequency = 120.0 + 90.0 * u if kind == "mining" else (520.0 + 250.0 * u if kind == "repair" else 280.0 - 100.0 * u)
-				sample = (sin(phase) * 0.48 + sin(phase * 2.01) * 0.18 + low * 0.35) * (0.75 + 0.25 * sin(TAU * 19.0 * t))
+				if kind == "mining":
+					sample = (grit * 0.8 + sin(phase) * 0.28 + sin(phase * 3.17) * 0.13) * (0.6 + 0.4 * sin(TAU * 23.0 * t))
+				elif kind == "repair":
+					sample = sin(phase + 0.7 * sin(phase * 2.0)) * 0.42 + sin(phase * 1.5) * 0.17 + grit * 0.12
+				else:
+					sample = (sin(phase) * 0.42 + sin(phase * 0.5) * 0.25 + low * 0.3) * (0.7 + 0.3 * sin(TAU * 11.0 * t))
 			"click", "select":
 				frequency = 850.0 if kind == "click" else 1200.0
-				sample = (sin(phase) * 0.65 + noise * 0.2) * exp(-6.0 * u)
+				sample = (sin(phase) * 0.47 + sin(phase * 1.92) * 0.16 + grit * 0.35 + noise * 0.13 * exp(-25.0 * u)) * exp(-6.0 * u)
 			"ship_ready":
 				# Soft three-note glassy confirmation, distinct from upgrades.
 				frequency = 392.0 if u < 0.27 else (523.25 if u < 0.54 else 783.99)
@@ -240,7 +252,11 @@ func _synthesize(kind: String, variant: int) -> AudioStreamWAV:
 				sample = (sin(phase) * 0.65 + sin(phase * 2.0) * 0.12) * exp(-4.0 * local)
 		phase += TAU * frequency * detune / SAMPLE_RATE
 		var envelope: float = minf(1.0, t / 0.004) * minf(1.0, (duration - t) / 0.025)
-		pcm.encode_s16(i * 2, roundi(clampf(sample * envelope, -1.0, 1.0) * 26000.0))
+		var tap: int = i % delay_length
+		var echo: float = delay[tap]
+		delay[tap] = sample * envelope + echo * 0.22
+		var wet: float = 0.24 if kind in ["explosion", "heavy_explosion", "missile", "objective_complete", "objective_first"] else 0.08
+		pcm.encode_s16(i * 2, roundi(tanh((sample * envelope + echo * wet) * minf(1.0, (duration - t) / 0.025)) * 28000.0))
 	var wav := AudioStreamWAV.new()
 	wav.format = AudioStreamWAV.FORMAT_16_BITS
 	wav.mix_rate = SAMPLE_RATE
