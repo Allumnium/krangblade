@@ -941,7 +941,20 @@ func _test_sector_query_cache() -> void:
 	ECON._sector_query_graph = {}
 	ECON._sector_query_cache.clear()
 
+func _test_shared_threat_index() -> void:
+	var graph: Dictionary = {"points": [Vector2.ZERO, Vector2(1000, 0)], "sector_radii": [200.0, 200.0], "sector_neighbors": [[], []]}
+	var ship: Dictionary = {"id": 1, "kind": "fighter", "owner": 1, "position": Vector2.ZERO, "at": 0, "route": []}
+	var state: Dictionary = {"ships": [ship], "teams": {1: 1}}
+	var index: Dictionary = {1: [ECON._threat_sector_signature(ship), 0]}
+	assert(ECON._salvage_threats(state, graph, index) == ECON._salvage_threats(state, graph))
+	ship["position"] = Vector2(1000, 0)
+	ship["at"] = 1
+	assert(ECON._salvage_threats(state, graph, index) == ECON._salvage_threats(state, graph))
+	state["ships"].clear()
+	assert(ECON._salvage_threats(state, graph, index) == {"sectors": {}, "cells": {}})
+
 func _initialize() -> void:
+	_test_shared_threat_index()
 	_test_sector_query_cache()
 	_test_sector_inner_fast_path()
 	_test_ai_slots()
