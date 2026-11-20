@@ -11,6 +11,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 - [ ] v0.66.1: Verify direct local asteroid access rather than detouring through an alternate anchor, including multi-access field regression and physical delivery.
 
 ### Objectives and specialization (v0.65.0)
+- [ ] v0.67.0: Validate economic reward drafting, acquisition, AI, replication and upkeep. Expand pool to all approved rewards; private offers, public unlock announcements, true three-card layout and exhausted-pool handling remain pending.
+- [ ] Shields: military 30%/station 50% extra rechargeable HP, absorb before hull, five seconds out of damage, blue bars under HP and SVG-matching glow in world/selection tile/center inspector; extra Crystal construction cost. Armor mitigation with extra Metal cost, cloak with attack reveal/detection, exclusive hulls. Integrate costs consistently in quotes, queue, refunds and AI. All cards must communicate net-beneficial tradeoffs.
 - [ ] v0.66.3: Validate F4 Empire target editor, hotkey and conquest pulse. Later integrate target quantities with validated authority production policy.
 - [ ] v0.66.2: Playtest wider single-line objectives and conquest upgrade modal input, resizing and HUD layering; wire the modal to future reward drafting.
 - [ ] Validate default raised logistics lens and inherent resource grades, and objective progression/replication in solo and ENet.

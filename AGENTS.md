@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.67.0: Host drafts persistent unique conquest choices; five economic upgrades initially active with upkeep tradeoffs. Remaining approved rewards require combat/logistics/cost integration. No free rerolls.
+
 - v0.66.4: Planetary crystal production base is 0.4 t/yr per level (previously 4); preserve abundance, staffing and asteroid extraction.
 
 - v0.66.3: F4 Empire button in global strip opens a match-local fleet target editor for every ship kind; targets are planning only, not production commands. Conquest button pulses while balance is positive.

@@ -304,6 +304,8 @@ var logistics_overlay: Control
 var objectives_overlay: Control
 var conquest_button: Button
 var conquest_dialog: AcceptDialog
+var conquest_cards: VBoxContainer
+var conquest_card_signature: String = ""
 var empire_dialog: AcceptDialog
 var empire_targets: Dictionary = {}
 var conquest_balance: int = 0
@@ -609,6 +611,9 @@ func _build_ui() -> void:
 	conquest_dialog.ok_button_text = "Close"
 	add_child(conquest_dialog)
 	HUD.action(conquest_dialog.get_ok_button())
+	conquest_cards = VBoxContainer.new()
+	conquest_cards.custom_minimum_size.x = 470
+	conquest_dialog.add_child(conquest_cards)
 	_layout_conquest_button()
 	_build_exhaust_batch()
 	beam_batch = _build_effect_batch(false)
@@ -8026,15 +8031,54 @@ func _refresh_conquest_button(state: Dictionary) -> void:
 	conquest_balance = points
 	conquest_button.text = "Conquest points: %d" % points
 	if is_instance_valid(conquest_dialog) and conquest_dialog.visible:
-		conquest_dialog.dialog_text = _conquest_dialog_text(points)
+		_refresh_reward_cards()
 
-func _conquest_dialog_text(points: int) -> String:
-	return "Available conquest points: %d\n\nEarn points by completing objectives.\nUpgrade cards and point spending are not available yet." % points
+func _refresh_reward_cards() -> void:
+	var progress: Dictionary = _state().get("objectives", {}).get(_me(), {})
+	var signature: String = str(progress.get("offer", [])) + str(progress.get("rewards", [])) + str(progress.get("points", 0))
+	if signature == conquest_card_signature:
+		return
+	conquest_card_signature = signature
+	for child in conquest_cards.get_children():
+		conquest_cards.remove_child(child)
+		child.queue_free()
+	var heading := Label.new()
+	heading.text = "Available conquest points: %d" % int(progress.get("points", 0))
+	conquest_cards.add_child(heading)
+	for key in progress.get("offer", []):
+		var reward: Array = ECONOMY.CONQUEST_REWARDS[key]
+		var card := VBoxContainer.new()
+		conquest_cards.add_child(card)
+		var title_label := Label.new()
+		title_label.text = reward[0]
+		card.add_child(title_label)
+		var benefit := Label.new()
+		benefit.text = reward[1]
+		benefit.modulate = Color("#8ee2a9")
+		card.add_child(benefit)
+		var drawback := Label.new()
+		drawback.text = reward[2]
+		drawback.modulate = Color("#ff9999")
+		card.add_child(drawback)
+		var buy := Button.new()
+		buy.text = "Acquire — 1 CP"
+		card.add_child(buy)
+		buy.pressed.connect(_buy_conquest_reward.bind(str(key)))
+		conquest_cards.add_child(HSeparator.new())
+	var owned := Label.new()
+	var names: PackedStringArray = []
+	for key in progress.get("rewards", []):
+		names.append(ECONOMY.CONQUEST_REWARDS[key][0])
+	owned.text = "Acquired: " + (", ".join(names) if not names.is_empty() else "None")
+	owned.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	conquest_cards.add_child(owned)
+
+func _buy_conquest_reward(key: String) -> void:
+	session.call("request_conquest_reward", key)
 
 func _open_conquest_upgrades() -> void:
-	var points: int = int(_state().get("objectives", {}).get(_me(), {}).get("points", 0))
-	conquest_dialog.dialog_text = _conquest_dialog_text(points)
-	conquest_dialog.popup_centered(Vector2i(420, 180))
+	_refresh_reward_cards()
+	conquest_dialog.popup_centered(Vector2i(500, 440))
 
 func _build_empire_dialog() -> void:
 	empire_dialog = AcceptDialog.new()
