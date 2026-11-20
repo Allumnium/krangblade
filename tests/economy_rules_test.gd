@@ -3167,7 +3167,8 @@ func _test_resource_handoff() -> void:
 	miner["cargo_order"] = {"kind": "deposit", "target": -2}
 	assert(ECON._miner_handoff(state, graph, miner, [freighter], threats, 1.0) > 0.0)
 	assert(not miner.has("cargo_order") and miner["route"].is_empty() and miner["mining_mode"] == "idle")
-	miner.erase("_handoff_delivery")
+	assert(not miner.has("_handoff_delivery") and float(miner["next_mining_search"]) == 0.0)
+	assert(miner["navigation_target"] == miner["position"])
 	miner["cargo"]["Metals"] = ECON.MINER_CAPACITY - float(freighter["cargo"]["Metals"])
 	assert(is_equal_approx(ECON._cargo_total(miner) + ECON._cargo_total(freighter), ECON.MINER_CAPACITY))
 	freighter["cargo"]["Metals"] = 0.0
@@ -3181,6 +3182,7 @@ func _test_resource_handoff() -> void:
 		miner["cargo"]["Metals"] = ECON.MINER_CAPACITY
 		assert(is_equal_approx(ECON._miner_handoff(state, graph, miner, [freighter], threats, 1.0), ECON.MINER_CAPACITY))
 		assert(is_zero_approx(ECON._cargo_total(miner)))
+		assert(not miner.has("_handoff_delivery") and miner["route"].is_empty())
 		assert(is_equal_approx(ECON._cargo_total(freighter), ECON.MINER_CAPACITY * float(load + 1)))
 		if load < 9:
 			assert(float(freighter["resource_loaded_at"]) == float(state["elapsed"]))
