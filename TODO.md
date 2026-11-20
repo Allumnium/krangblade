@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.80.3: Verify fog topology outlines, hidden contents and ownership tint, allied-only logistics, Scout sight and overlay layering at all zooms. Runtime/visual pending.
+
 - [ ] v0.80.2: Verify fog exterior at extreme zoom/pan, smooth mask edges, minimap crop and finer-grid CPU cost at 10k hulls. Runtime pending.
 
 - [ ] v0.80.1: Verify thinner shield glow preserves team colors across zoom levels while remaining visible.

@@ -2477,6 +2477,9 @@ func _update_fog(state: Dictionary) -> void:
 		fog_texture = ImageTexture.create_from_image(image)
 	else:
 		fog_texture.update(image)
+	territory_material.set_shader_parameter("fog_data", fog_texture)
+	territory_material.set_shader_parameter("fog_uv_scale", _map_size() / (Vector2(dimensions) * cell))
+	territory_material.set_shader_parameter("fog_ready", true)
 	fog_origin = Vector2(start) * cell
 	fog_extent = Vector2(dimensions) * cell
 
@@ -3483,6 +3486,7 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
 
 func _build_territory_layer() -> void:
 	territory_layer = Control.new()
+	territory_layer.z_index = 3
 	add_child(territory_layer)
 	territory_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	territory_layer.offset_left = 8
@@ -3505,6 +3509,9 @@ uniform int site_count = 0;
 uniform sampler2D sector_neighbors : filter_nearest, repeat_disable;
 uniform sampler2D lane_data : filter_nearest, repeat_disable;
 uniform sampler2D influence_data : filter_nearest, repeat_disable;
+uniform sampler2D fog_data : filter_linear, repeat_disable;
+uniform vec2 fog_uv_scale = vec2(1.0);
+uniform bool fog_ready = false;
 uniform int lane_count = 0;
 uniform float lane_radius_fraction = 0.35;
 uniform vec2 world_extent = vec2(1.0);
@@ -3561,8 +3568,10 @@ vec3 lane_sample(vec2 p, int index) {
 	return vec3(along, length(p - (a.xy + axis * along)), min(a.z, b.z) * lane_radius_fraction);
 }
 
-vec4 region_color(int region, float clearance, float aa) {
+vec4 region_color(int region, float clearance, float aa, vec2 p) {
 	vec4 tint = texelFetch(influence_data, ivec2(region, 0), 0);
+	vec2 fog_uv = p / (world_extent - vec2(2.0 * padding)) * fog_uv_scale;
+	if (!fog_ready || texture(fog_data, fog_uv).a > 0.05) { tint.a = 0.0; }
 	vec3 neutral = vec3(0.60, 0.68, 0.76);
 	float fill = smoothstep(-aa * 0.5, aa * 0.5, clearance);
 	// A single centered AA stroke, rather than independent line
@@ -3603,7 +3612,7 @@ void fragment() {
 	if (core >= 0) {
 		vec4 site = texelFetch(site_data, ivec2(core, 0), 0);
 		float clearance = min(-sector_distance(p, site, core), map_clearance);
-		COLOR = region_color(core, clearance, aa);
+		COLOR = region_color(core, clearance, aa, p);
 	} else {
 		// Assign actual lane membership by nearest eligible centerline,
 		// matching influence_region. Pick the nearest surface outside for AA.
@@ -3664,13 +3673,13 @@ void fragment() {
 					clearance = rounded_intersection(clearance, separation, rounding);
 				}
 			}
-			lane_color = region_color(region, clearance, aa);
+			lane_color = region_color(region, clearance, aa, p);
 		}
 		// Preserve the outer half of a core rim in empty space and at
 		// highway mouths, blending rather than truncating at membership.
 		vec4 core_color = vec4(0.0);
 		if (nearest_core >= 0 && core_d < aa * 2.0) {
-			core_color = region_color(nearest_core, -core_d, aa);
+			core_color = region_color(nearest_core, -core_d, aa, p);
 		}
 		float alpha = core_color.a + lane_color.a * (1.0 - core_color.a);
 		COLOR = vec4((core_color.rgb * core_color.a + lane_color.rgb * lane_color.a * (1.0 - core_color.a)) / max(alpha, 0.000001), alpha);
@@ -7307,10 +7316,11 @@ func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 	if active_lens != "logistics":
 		return
+	var team: int = int(state["teams"].get(_me(), -1))
 	var points: Array = state["map"]["points"]
 	for i in range(points.size()):
 		var system: Dictionary = state["planets"][i]
-		if int(system["owner"]) == 0 or not ECONOMY.discovered(state, _me(), "planets", i):
+		if int(system["owner"]) == 0 or int(state["teams"].get(int(system["owner"]), 0)) != team or not ECONOMY.discovered(state, _me(), "planets", i):
 			continue
 		if not ECONOMY.has_station(system):
 			continue
@@ -7348,7 +7358,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 	# Aggregate loaded shipments at their origin and final destination.
 	var traffic: Dictionary = {}
 	for ship in state["ships"]:
-		if ship["kind"] != "ship" or ECONOMY._cargo_total(ship) <= ECONOMY.EPS:
+		if int(state["teams"].get(int(ship["owner"]), 0)) != team or ship["kind"] != "ship" or ECONOMY._cargo_total(ship) <= ECONOMY.EPS:
 			continue
 		for endpoint in ["source", "dest"]:
 			var node: int = int(ship.get(endpoint, -1))
@@ -7366,7 +7376,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 			for resource in ECONOMY.RESOURCES:
 				traffic[node][key][resource] += float(ship["cargo"][resource])
 	for node in traffic:
-		if not ECONOMY.has_station(state["planets"][node]) or not ECONOMY.discovered(state, _me(), "planets", node):
+		if int(state["teams"].get(int(state["planets"][node]["owner"]), 0)) != team or not ECONOMY.has_station(state["planets"][node]) or not ECONOMY.discovered(state, _me(), "planets", node):
 			continue
 		var center: Vector2 = _screen_point(ECONOMY.station_position(state, node, float(state["elapsed"])))
 		var radius: float = _station_radius()
@@ -8170,6 +8180,8 @@ func _draw_map() -> void:
 		if not ECONOMY.discovered(state, _me(), "fields", field_index):
 			map_canvas.draw_string(font, center + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
 			continue
+		if not _fog_visible(field["position"]):
+			continue
 		var boundary := PackedVector2Array()
 		for vertex in field["outline"]:
 			boundary.append(_screen_point(vertex))
@@ -8235,6 +8247,8 @@ func _draw_map() -> void:
 		var pos: Vector2 = _screen_point(points[i])
 		if not ECONOMY.discovered(state, _me(), "planets", i):
 			map_canvas.draw_string(font, pos + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
+			continue
+		if not _fog_visible(points[i]):
 			continue
 		var radius: float = _planet_radius(i, state)
 		var tint: Color = _empire_color(int(state["planets"][i]["owner"]))

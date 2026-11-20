@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.80.3: Neutral sector/highway contours visible above fog; suppress hidden territory tint and system/field contents. Logistics lens restricted to friendly team stations and shipments. Scout sight 2,700.
+
 - v0.80.2: Fog uses 80-unit cells and linear filtering. Draw unexplored darkness across the entire viewport exterior to map bounds, crop main and minimap masks to map size. Existing sight radii unchanged.
 
 - v0.80.1: Halve shield glow stroke widths on ships and stations; slightly soften bright rims to preserve owner colors. Shield mechanics unchanged.
