@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.80.4: Verify manual movement, patrol, follow, formations, combat pursuit and civilian service routes stay in sectors/highways; investigate avoidance crossing boundaries. Verify lifetime CP persists through purchases and replicates to guests. Runtime pending.
+
 - [ ] v0.80.3: Verify fog topology outlines, hidden contents and ownership tint, allied-only logistics, Scout sight and overlay layering at all zooms. Runtime/visual pending.
 
 - [ ] v0.80.2: Verify fog exterior at extreme zoom/pan, smooth mask edges, minimap crop and finer-grid CPU cost at 10k hulls. Runtime pending.

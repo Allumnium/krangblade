@@ -1056,6 +1056,7 @@ func _test_objective_holdings() -> void:
 		if i == 0:
 			assert(progress["active_goals"]["economic"] == "colony_ships")
 	assert(ECON.reward_points(progress, "economic") == 0)
+	assert(ECON.lifetime_reward_points(progress, "economic") == 2)
 	assert(progress["active_goals"]["economic"] == "colonies")
 	assert(ECON.objective_category("colonies") == "economic")
 	assert(ECON.refresh_objective(state, 1, "economic", "colonies"))
@@ -4158,7 +4159,7 @@ func _test_territory_influence() -> void:
 	assert(weights.size() == 8 and weights[5] == {1: 1} and weights[6] == {2: 10} and weights[1].is_empty() and weights[2].is_empty())
 	assert(ECON.influence_region(graph, Vector2(4500, 600)) == 6)
 	assert(ECON.lane_direct(graph, Vector2(4400, 600), Vector2(4600, 600), [0, 1, 2, 3]))
-	assert(ECON.lane_direct(graph, Vector2(500, 500), Vector2(4500, 2500), [0, 1, 2, 3]))
+	assert(not ECON.lane_direct(graph, Vector2(500, 500), Vector2(4500, 2500), [0, 1, 2, 3]))
 	var palette: Dictionary = {1: Color.RED, 2: Color.BLUE}
 	var mixed: Color = ECON.influence_color(weights[0], palette)
 	assert(is_equal_approx(mixed.r, 70.0 / 72.0) and is_equal_approx(mixed.b, 2.0 / 72.0) and mixed.a == 1.0)

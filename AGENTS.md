@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.80.4: Supersede direct cross-sector flight: manual travel uses sector centers and highway graph; patrol fallback uses same routing. Scoreboard shows lifetime earned category CP, spendable header balances unchanged.
+
 - v0.80.3: Neutral sector/highway contours visible above fog; suppress hidden territory tint and system/field contents. Logistics lens restricted to friendly team stations and shipments. Scout sight 2,700.
 
 - v0.80.2: Fog uses 80-unit cells and linear filtering. Draw unexplored darkness across the entire viewport exterior to map bounds, crop main and minimap masks to map size. Existing sight radii unchanged.

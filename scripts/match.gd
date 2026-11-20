@@ -8592,8 +8592,8 @@ func _draw_conquest_scoreboard(state: Dictionary, font: Font, x: float, y: float
 	var name_width: float = maxf(1.0, width - column * 3.0 - 8.0)
 	var header_tint := Color("#b8d9ef")
 	var outline := Color("#101824")
-	objectives_overlay.draw_string_outline(font, Vector2(x, y), "CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, outline)
-	objectives_overlay.draw_string(font, Vector2(x, y), "CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, header_tint)
+	objectives_overlay.draw_string_outline(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, outline)
+	objectives_overlay.draw_string(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, header_tint)
 	y += 20.0
 	for index in range(ECONOMY.REWARD_CATEGORIES.size()):
 		var category: String = ECONOMY.REWARD_CATEGORIES[index]
@@ -8611,7 +8611,7 @@ func _draw_conquest_scoreboard(state: Dictionary, font: Font, x: float, y: float
 		objectives_overlay.draw_string_outline(font, Vector2(x, y), name_text, HORIZONTAL_ALIGNMENT_LEFT, name_width, 12, 4, outline)
 		objectives_overlay.draw_string(font, Vector2(x, y), name_text, HORIZONTAL_ALIGNMENT_LEFT, name_width, 12, tint)
 		for index in range(ECONOMY.REWARD_CATEGORIES.size()):
-			var points: int = ECONOMY.reward_points(progress, str(ECONOMY.REWARD_CATEGORIES[index]))
+			var points: int = ECONOMY.lifetime_reward_points(progress, str(ECONOMY.REWARD_CATEGORIES[index]))
 			var at := Vector2(edge - column * float(3 - index), y)
 			var value: String = str(points)
 			var value_tint: Color = Color("#dceaf4") if points > 0 else Color("#8296a8")
