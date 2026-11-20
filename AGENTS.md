@@ -30,7 +30,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
-- v0.78.0: Three compact scroll-free conquest cards; two eligible one-time technologies at most and at least one repeatable research card. Repeat ranks stack base bonuses or efficiencies; exclude just-purchased card from immediate redraft. Unlimited cumulative lifetime objective tiers with gradually increasing increments and category-specific metric variety; keep existing starter tracks, CP awards, unique races and refresh cooldown.
+- v0.78.0–0.78.1: Three compact scroll-free conquest cards; two eligible one-time technologies at most and at least one repeatable research card. Repeat ranks stack base bonuses or efficiencies; exclude just-purchased card from immediate redraft. Unlimited cumulative lifetime objective tiers with gradually increasing increments and category-specific metric variety; keep existing starter tracks, CP awards, unique races and refresh cooldown.
 
 - v0.77.3: Objective completions have original ascending bell arpeggios: personal +1 CP chime, richer personal first-place +2 CP fanfare, and a quieter other-player cue. Highest-priority new reward per snapshot, no initial replay; existing UI voice limits and SFX settings apply.
 

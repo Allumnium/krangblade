@@ -1,6 +1,6 @@
 # Warbound — active thoughts
 
-- v0.78.0: Finite conquest lists replaced with rankable research and deterministic repeat-tier IDs. Outputs/storage stack linearly, cost/armor efficiencies use positive diminishing-cost/damage denominators. Lifetime production measures actual stored or consumed output, not theoretical output or transfers; military investment counts base Metals of completed hulls. Arithmetic target increments are provisional; tune variety and pacing after playtests. Repeat ranks reuse the existing replicated reward array; consider compact counts if exceptionally long games warrant it.
+- v0.78.0–0.78.1: Finite conquest lists replaced with rankable research and deterministic repeat-tier IDs. Outputs/storage stack linearly, cost/armor efficiencies use positive diminishing-cost/damage denominators. Lifetime production measures actual stored or consumed output, not theoretical output or transfers; military investment counts base Metals of completed hulls. Arithmetic target increments are provisional; tune variety and pacing after playtests. Repeat ranks reuse the existing replicated reward array; consider compact counts if exceptionally long games warrant it.
 
 - v0.77.3: Objective reward sounds should feel distinct from construction and alerts; short resolving bell arpeggios, layered longer first-place fanfare and subdued other-player cue. Coalesce same-snapshot rewards to strongest cue rather than stacking fanfares; audition and tune against music in-game.
 

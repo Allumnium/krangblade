@@ -1540,6 +1540,10 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 				elif military_hull(str(item["kind"])):
 					progress["military_built"] = int(progress.get("military_built", 0)) + 1
 					progress["military_investment"] = float(progress.get("military_investment", 0.0)) + float(_cost(str(item["kind"]), 1).get("Metals", 0.0))
+					if item["kind"] in ["cruiser", "destroyer"]:
+						progress["capital_built"] = int(progress.get("capital_built", 0)) + 1
+					elif item["kind"] == "fighter":
+						progress["fighters_built"] = int(progress.get("fighters_built", 0)) + 1
 				elif item["kind"] == "science_ship":
 					progress["science_built"] = int(progress.get("science_built", 0)) + 1
 				elif item["kind"] in ["miner", "ship"]:
@@ -8373,12 +8377,14 @@ const OBJECTIVE_SPECS = {
 const REPEAT_OBJECTIVES = {
 	"colony_food": ["economic", 5000, 2000, "Produce %st colony ship food", "colony_food_2"],
 	"colony_ships_built": ["economic", 4, 2, "Build %s colony ships", "colony_ships"],
-	"produced_metals": ["economic", 5000, 3000, "Produce %st Metals", "colony_ships"],
-	"produced_organics": ["economic", 5000, 3000, "Produce %st Organics", "colony_ships"],
-	"logistics_built": ["economic", 5, 4, "Build %s logistics ships", "colony_ships"],
+	"produced_metals": ["economic", 5000, 3000, "Produce %st Metals", ""],
+	"produced_organics": ["economic", 5000, 3000, "Produce %st Organics", ""],
+	"logistics_built": ["economic", 5, 4, "Build %s logistics ships", ""],
 	"military_built": ["military", 45, 15, "Build %s military ships", "military_built_3"],
 	"enemy_ships_destroyed": ["military", 45, 15, "Destroy %s enemy ships", "enemy_ships_3"],
 	"military_investment": ["military", 2500, 2000, "Build %st of base-metal military hulls", "military_built"],
+	"capital_built": ["military", 3, 3, "Build %s capital ships", "military_built"],
+	"fighters_built": ["military", 12, 8, "Build %s fighters", "military_built"],
 	"antimatter_processed": ["tech", 6, 2, "Process %s antimatter", "antimatter_2"],
 	"produced_crystals": ["tech", 150, 100, "Produce %st Crystals", ""],
 	"science_built": ["tech", 2, 2, "Build %s science ships", ""],
@@ -8457,6 +8463,8 @@ static func objective_candidates(progress: Dictionary, category: String, exclude
 	for metric in REPEAT_OBJECTIVES:
 		var spec: Array = REPEAT_OBJECTIVES[metric]
 		if spec[0] != category or (not str(spec[4]).is_empty() and not completed.has(spec[4])):
+			continue
+		if category == "economic" and str(spec[4]).is_empty() and not completed.keys().any(func(key) -> bool: return objective_category(str(key)) == "economic"):
 			continue
 		var tier: int = 1
 		while completed.has(_repeat_objective_key(str(metric), tier)):

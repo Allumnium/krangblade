@@ -1261,9 +1261,10 @@ func _test_sfx_rules() -> void:
 func _test_endless_conquest() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var progress: Dictionary = ECON.objective_progress(state, 1)
+	progress["rewards"] = []
 	for key in ECON.CONQUEST_REWARDS:
 		if not ECON.reward_repeatable(key):
-			progress.get_or_add("rewards", []).append(key)
+			progress["rewards"].append(key)
 	for category in ECON.REWARD_CATEGORIES:
 		progress["points"][category] = 40
 		for i in range(40):
@@ -1293,6 +1294,9 @@ func _test_endless_conquest() -> void:
 	assert(is_equal_approx(ECON.storage_capacity(depot), 2200.0))
 	var price: Dictionary = ECON.construction_cost({"conquest_rewards": ["rank_military_metal", "rank_military_metal"]}, "fighter", 1)
 	assert(float(price["Metals"]) == ceilf(270.0 / 1.06))
+	var damage: Dictionary = {}
+	ECON._ship_hit(damage, {}, {}, 1, {"reward_damage_multiplier": 1.04}, 100.0)
+	assert(is_equal_approx(float(damage[1]), 104.0))
 	print("PASS: three distinct repeatable offers, escalating objectives and stacked bonuses")
 
 func _initialize() -> void:

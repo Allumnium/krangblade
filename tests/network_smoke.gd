@@ -993,7 +993,7 @@ func _check_reward_redraft(state: Dictionary) -> bool:
 		if rewards.size() != 2 or ECON.reward_points(progress, "tech") != 0:
 			_fail("Unique winner did not spend exactly one point.")
 			return false
-	elif rewards.size() != 1 or ECON.reward_points(progress, "tech") != 1 or ECON.reward_generation(progress) < 2 or ECON.reward_offer(progress, "tech").size() != 2:
+	elif rewards.size() != 1 or ECON.reward_points(progress, "tech") != 1 or ECON.reward_generation(progress) < 2 or ECON.reward_offer(progress, "tech").size() != 3:
 		_fail("Unique loser did not retain point and receive a replacement draft.")
 		return false
 	return true
