@@ -16,13 +16,13 @@
 
 - v0.68.0: Fixed objective tiers and authority clock for ten-second replacement; thresholds provisional. Final tiers remain until random advanced pool implemented. Antimatter collection already exists; processing semantics and gate transit unresolved. Runtime pending.
 
-- v0.67.0: Five economic cards implemented as first playable pool; offers currently replicated in normal snapshots, AI picks first. Pros/cons use additive upkeep, not yet construction surcharges. Need private offers, public announcements, remaining rewards, pool exhaustion, runtime and ENet tests.
+- v0.67.0: Five economic cards implemented as first playable pool; offers currently replicated in normal snapshots, AI picks first. Pros/cons use additive upkeep, not yet construction surcharges. Need private offers, public announcements, remaining rewards, runtime and ENet tests. v0.70.5 redraws on spend and handles pool exhaustion; with five rewards, repeat unowned cards are sometimes unavoidable. Verify narrow HUD fit and card layout manually.
 
 - v0.66.4: Incubator base rate reduced 90%; asteroid extraction unchanged. Verify advanced construction pacing and AI economy.
 
 - v0.66.3: Empire targets are local match UI state (0–10,000 each); no automation or network commands yet. Verify hotkey, modal focus and pulse readability.
 
-- v0.66.2: Objective rows use inline right-aligned counters; Military replaces Conquest category. Upgrade modal currently displays balance and explicitly states that spending is unavailable. Verify visual fit and input.
+- v0.66.2: Objective rows use inline right-aligned counters; Military replaces Conquest category. Upgrade modal now shows framed cards and current balance; verify visual fit and input.
 
 - v0.66.1: User reports miners from Nyxaxis detouring through Nyxyra toward an asteroid field. Prefer viable current-system access per field before scoring remote alternatives; verify screenshot topology and runtime regression.
 
