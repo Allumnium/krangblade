@@ -124,6 +124,8 @@ var territory_sites: ImageTexture
 var territory_site_count: int = 0
 var territory_radius: float = 1.0
 var territory_last: Array[Color] = []
+var territory_region_cache: Dictionary = {}
+var territory_region_graph: Dictionary = {}
 var territory_influence_texture: ImageTexture
 var territory_seed: int = -1
 var header_panel: PanelContainer
@@ -3472,6 +3474,8 @@ func _refresh_territory(state: Dictionary) -> void:
 	if state.is_empty():
 		territory_image.hide()
 		territory_seed = -1
+		territory_region_cache.clear()
+		territory_region_graph = {}
 		territory_last.clear()
 		territory_influence_texture = null
 		return
@@ -3526,7 +3530,10 @@ func _refresh_territory(state: Dictionary) -> void:
 		territory_material.set_shader_parameter("world_extent", extent)
 		territory_material.set_shader_parameter("padding", 1.5)
 	var known: Array[int] = ECONOMY.military_pois(state, _me())
-	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph, known)
+	if not is_same(territory_region_graph, graph):
+		territory_region_cache.clear()
+		territory_region_graph = graph
+	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph, known, territory_region_cache)
 	var roster: Dictionary = session.get("players")
 	var colors: Dictionary = {}
 	for player in roster:
