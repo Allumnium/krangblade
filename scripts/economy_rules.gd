@@ -5611,14 +5611,19 @@ static func _combat_sector_has_hostile(presence: Dictionary, sector: int, team: 
 
 # Lazily filter each occupied bucket once per team and combat snapshot.
 # Keep original insertion order for all weapon-specific tie rules.
-static func _hostile_bucket(state: Dictionary, buckets: Dictionary, cache: Dictionary, key: Variant, team: int) -> Array:
+static func _hostile_bucket(state: Dictionary, buckets: Dictionary, cache: Dictionary, key: Variant, team: int, team_by_id: Dictionary = {}) -> Array:
 	if not cache.has(team):
 		cache[team] = {}
 	var by_key: Dictionary = cache[team]
 	if not by_key.has(key):
 		var hostile: Array = []
 		for candidate in buckets.get(key, []):
-			if int(state["teams"].get(int(candidate["owner"]), 0)) != team:
+			var candidate_team: int
+			if team_by_id.is_empty():
+				candidate_team = int(state["teams"].get(int(candidate["owner"]), 0))
+			else:
+				candidate_team = int(team_by_id[int(candidate["id"])])
+			if candidate_team != team:
 				hostile.append(candidate)
 		by_key[key] = hostile
 	return by_key[key]
@@ -5702,6 +5707,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	var ships: Array = state["ships"]
 	var positions: Dictionary = {}
 	var by_id: Dictionary = {}
+	var team_by_id: Dictionary = {}
 	var previous_targets: Dictionary = {}
 	var health: Dictionary = {}
 	var killed_by: Dictionary = {}
@@ -5717,11 +5723,12 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		var pos: Vector2 = combat_position(state, graph, ship)
 		positions[id] = pos
 		by_id[id] = ship
+		team_by_id[id] = int(state["teams"].get(int(ship["owner"]), 0))
 		health[id] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
 		previous_targets[id] = int(ship.get("combat_target", -1))
 		var sector: int = local_sector(graph, ship)
 		if armed(ship) and ship.get("position", Vector2.INF).is_finite():
-			var threat_team: int = int(state["teams"].get(int(ship["owner"]), 0))
+			var threat_team: int = int(team_by_id[id])
 			threat_index[id] = [_threat_sector_signature(ship), sector, threat_team]
 			threat_count += 1
 			if sector >= 0:
@@ -5738,7 +5745,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			sectors[sector].append(ship)
 			if not sector_teams.has(sector):
 				sector_teams[sector] = {}
-			sector_teams[sector][int(state["teams"].get(int(ship["owner"]), 0))] = true
+			sector_teams[sector][int(team_by_id[id])] = true
 		_spatial_insert(cells, pos, LASER_RANGE, ship)
 	threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells}
 	threat_index["count"] = threat_count
@@ -5754,6 +5761,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			station_targets[target_id] = index
 			health[target_id] = float(system["station"]["hp"])
 			positions[target_id] = pos
+			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "station"})
 		for slot in range(system["yards"].size()):
 			var target_id: int = -2 - index * 3 - slot
@@ -5761,6 +5769,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			yard_targets[target_id] = Vector2i(index, slot)
 			health[target_id] = float(system["yards"][slot].get("hp", YARD_HP * int(system["yards"][slot]["level"])))
 			positions[target_id] = pos
+			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "shipyard"})
 		for slot in system.get("pds", {}):
 			# Disjoint negative ID range; all batteries use the same
@@ -5770,6 +5779,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			pds_targets[target_id] = Vector2i(index, int(slot))
 			health[target_id] = float(system["pds"][slot].get("hp", PDS_HP))
 			positions[target_id] = pos
+			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "pds"})
 	var hostile_cache: Dictionary = {}
 	var sector_hostile_cache: Dictionary = {}
@@ -5802,7 +5812,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			continue
 		var id: int = int(ship["id"])
 		var pos: Vector2 = positions[id]
-		var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+		var team: int = int(team_by_id[id])
 		var launchers: int = missile_count(str(ship["kind"]))
 		if launchers > 0:
 			var missile_cd: float = maxf(0.0, float(ship.get("missile_cooldown", 0.0)) - dt)
@@ -5821,7 +5831,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 						for y in range(-reach, reach + 1):
 							var key: Vector2i = missile_cell + Vector2i(x, y)
 							if not team_blocks.has(key):
-								var candidates: Array = _hostile_bucket(state, cells, hostile_cache, key, team).filter(func(enemy: Dictionary) -> bool: return int(state["teams"].get(int(enemy["owner"]), 0)) > 0)
+								var candidates: Array = _hostile_bucket(state, cells, hostile_cache, key, team, team_by_id).filter(func(enemy: Dictionary) -> bool: return int(team_by_id[int(enemy["id"])]) > 0)
 								team_blocks[key] = _laser_blocks(candidates, positions, true)
 							var nearest: Array = _missile_block_nearest(team_blocks[key], positions, pos, best, missile_target, focused, focus_id)
 							best = float(nearest[0])
@@ -5890,7 +5900,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 				for y in range(-1, 2):
 					var key: Vector2i = cell + Vector2i(x, y)
 					if not team_blocks.has(key):
-						team_blocks[key] = _laser_blocks(_hostile_bucket(state, cells, hostile_cache, key, team), positions)
+						team_blocks[key] = _laser_blocks(_hostile_bucket(state, cells, hostile_cache, key, team, team_by_id), positions)
 					var nearest: Array = _laser_block_nearest(team_blocks[key], positions, pos, best, target)
 					best = float(nearest[0])
 					target = int(nearest[1])
@@ -5910,7 +5920,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 				var team_blocks: Dictionary = pursuit_blocks[team]
 				var sector: int = int(ship_sectors[id])
 				if not team_blocks.has(sector):
-					var candidates: Array = _hostile_bucket(state, sectors, sector_hostile_cache, sector, team).filter(func(enemy: Dictionary) -> bool: return int(state["teams"].get(int(enemy["owner"]), 0)) > 0)
+					var candidates: Array = _hostile_bucket(state, sectors, sector_hostile_cache, sector, team, team_by_id).filter(func(enemy: Dictionary) -> bool: return int(team_by_id[int(enemy["id"])]) > 0)
 					team_blocks[sector] = _laser_blocks(candidates, positions)
 				var nearest: Array = _laser_block_nearest(team_blocks[sector], positions, pos, INF, -1)
 				pursuit = int(nearest[1])
@@ -5952,9 +5962,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			var nearest: float = LASER_RANGE * LASER_RANGE
 			for x in range(-1, 2):
 				for y in range(-1, 2):
-					for other in _hostile_bucket(state, cells, hostile_cache, cell + Vector2i(x, y), team):
+					for other in _hostile_bucket(state, cells, hostile_cache, cell + Vector2i(x, y), team, team_by_id):
 						var yard_id: int = int(other["id"])
-						if yard_id >= 0 or team == 0 or int(state["teams"].get(int(other["owner"]), 0)) == team:
+						if yard_id >= 0 or team == 0 or int(team_by_id[int(other["id"])]) == team:
 							continue
 						var distance: float = pos.distance_squared_to(positions[yard_id])
 						if distance < nearest:
@@ -5986,9 +5996,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		var best: float = LASER_RANGE * LASER_RANGE
 		for x in range(-1, 2):
 			for y in range(-1, 2):
-				for other in _hostile_bucket(state, cells, hostile_cache, cell + Vector2i(x, y), team):
+				for other in _hostile_bucket(state, cells, hostile_cache, cell + Vector2i(x, y), team, team_by_id):
 					var other_id: int = int(other["id"])
-					if other_id < 0 or int(state["teams"].get(int(other["owner"]), 0)) == team:
+					if other_id < 0 or int(team_by_id[int(other["id"])]) == team:
 						continue
 					var distance: float = origin.distance_squared_to(positions[other_id])
 					if distance < best or (distance <= best and (target < 0 or other_id < target)):
@@ -6021,8 +6031,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		var reach: int = ceili(PDS_RANGE / LASER_RANGE)
 		for x in range(-reach, reach + 1):
 			for y in range(-reach, reach + 1):
-				for other in _hostile_bucket(state, cells, hostile_cache, cell + Vector2i(x, y), team):
-					if int(state["teams"].get(int(other["owner"]), 0)) == team:
+				for other in _hostile_bucket(state, cells, hostile_cache, cell + Vector2i(x, y), team, team_by_id):
+					if int(team_by_id[int(other["id"])]) == team:
 						continue
 					var other_id: int = int(other["id"])
 					if other_id < 0:
