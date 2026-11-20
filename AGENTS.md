@@ -32,7 +32,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - v0.64.7: Fleet focus/follow uses equal weight per surviving selected hull, not the bounding-box midpoint. Preserve current zoom, selection, building focus and manual pan cancellation.
 
-- v0.64.2: Mixed owned hull selections show one type's command card. Tab/Shift+Tab cycles sorted owned hull types while preserving selection; commands apply to focused hull type. Reset focus when selection changes.
+- v0.64.2: Mixed owned hull selections show one type's command card. Tab/Shift+Tab cycles sorted owned hull types while preserving selection; specialized commands apply to focused hull type; Move and contextual right-click (including move formations) affect all owned selected hulls (v0.64.59). Reset focus when selection changes.
 
 - v0.64.0: Exact-point movement, formations, patrols and manual service travel use direct physical flight across borders. Preserve discovered sector/corridor target validation, local avoidance and strategic adjacency. Automatic economic and sector-target routing remain a migration follow-up.
 
