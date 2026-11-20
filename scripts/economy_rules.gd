@@ -5715,7 +5715,8 @@ static func _hostile_bucket(state: Dictionary, buckets: Dictionary, cache: Dicti
 # Bounds are built once per hostile bucket, not once per attacking hull.
 static func _laser_blocks(candidates: Array, positions: Dictionary, include_structures: bool = false) -> Array:
 	var blocks: Array = []
-	var ids: Array = []
+	var ids := PackedInt64Array()
+	var points := PackedVector2Array()
 	var low := Vector2.ZERO
 	var high := Vector2.ZERO
 	for other in candidates:
@@ -5730,14 +5731,16 @@ static func _laser_blocks(candidates: Array, positions: Dictionary, include_stru
 			low = low.min(point)
 			high = high.max(point)
 		ids.append(id)
+		points.append(point)
 		if ids.size() == 16:
-			blocks.append([low, high, ids])
-			ids = []
+			blocks.append([low, high, ids, points])
+			ids = PackedInt64Array()
+			points = PackedVector2Array()
 	if not ids.is_empty():
-		blocks.append([low, high, ids])
+		blocks.append([low, high, ids, points])
 	return blocks
 
-static func _laser_block_nearest(blocks: Array, positions: Dictionary, pos: Vector2, best: float, target: int) -> Array:
+static func _laser_block_nearest(blocks: Array, _positions: Dictionary, pos: Vector2, best: float, target: int) -> Array:
 	for block in blocks:
 		var low: Vector2 = block[0]
 		var high: Vector2 = block[1]
@@ -5745,24 +5748,30 @@ static func _laser_block_nearest(blocks: Array, positions: Dictionary, pos: Vect
 		# Leave a conservative margin for floating-point and approximate ties.
 		if bound > best + maxf(0.001, absf(best) * 0.0001):
 			continue
-		for id in block[2]:
-			var distance: float = pos.distance_squared_to(positions[id])
+		var ids: PackedInt64Array = block[2]
+		var points: PackedVector2Array = block[3]
+		for i in range(ids.size()):
+			var id: int = ids[i]
+			var distance: float = pos.distance_squared_to(points[i])
 			if distance < best or (is_equal_approx(distance, best) and (target < 0 or int(id) < target)):
 				best = distance
 				target = int(id)
 	return [best, target]
 
-static func _missile_block_nearest(blocks: Array, positions: Dictionary, pos: Vector2, best: float, target: int, focused: bool, focus_id: int) -> Array:
+static func _missile_block_nearest(blocks: Array, _positions: Dictionary, pos: Vector2, best: float, target: int, focused: bool, focus_id: int) -> Array:
 	for block in blocks:
 		var low: Vector2 = block[0]
 		var high: Vector2 = block[1]
 		var bound: float = pos.distance_squared_to(pos.clamp(low, high))
 		if bound > best + maxf(0.001, absf(best) * 0.0001):
 			continue
-		for id in block[2]:
+		var ids: PackedInt64Array = block[2]
+		var points: PackedVector2Array = block[3]
+		for i in range(ids.size()):
+			var id: int = ids[i]
 			if focused and int(id) != focus_id:
 				continue
-			var distance: float = pos.distance_squared_to(positions[id])
+			var distance: float = pos.distance_squared_to(points[i])
 			if distance <= best:
 				best = distance
 				target = int(id)
