@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.75.0: One active objective per category. Economic starts with two constructed colony ships then two unique colonizations; cumulative colony food production, current holdings and population; military construction and enemy ship kills. Tech unlocks after three economic completions or first collected antimatter. Host-seeded refresh chooses another eligible goal without resetting metric progress, one independent 60 s real-time cooldown per category. Completed goals display 10 s then replace. CP and refresh buttons inline in section headers; top-center objective/unique notifications fade within 10 s. Runtime pending.
+
 - v0.74.0: Unique conquest rewards (Cloaking Field, Shields 3, Warp Gates, Crystalline Synthesis) permanently reserved to the first authority-accepted player per match, not team. Purple UNIQUE cards and public ownership feed; competing drafts refresh without charging points; generation invalidates stale clicks. Close modal only after confirmed zero balance, including unique races. Fix duplicate conquest panel local in `_build_ui`.
 
 - v0.73.0: Scout-only Military Cloaking Field replaces Scout armor/shields and costs 15% of base Metals in Crystals; hide from hostile map/picking/weapon acquisition unless within 250 of an enemy hull/structure or 5 s after firing. Full state still replicates hulls for existing network architecture; public shared snapshots strip drafts; private choices accompany only the owning guest's packet. Blue shield bars in multiselection and world rings. Runtime pending.

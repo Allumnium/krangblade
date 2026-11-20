@@ -299,6 +299,7 @@ var active_lens: String = "logistics"
 var logistics_overlay: Control
 var objectives_overlay: Control
 var conquest_buttons: Dictionary = {}
+var objective_refresh_buttons: Dictionary = {}
 var conquest_category: String = "economic"
 var conquest_dialog: Window
 var conquest_cards: VBoxContainer
@@ -602,6 +603,15 @@ func _build_ui() -> void:
 		HUD.action(button, Color("#e9cb7c"))
 		button.pressed.connect(_open_conquest_upgrades.bind(category))
 		conquest_buttons[category] = button
+		button.add_theme_font_size_override("font_size", 11)
+		var refresh := Button.new()
+		map_canvas.add_child(refresh)
+		refresh.z_index = 4
+		refresh.focus_mode = Control.FOCUS_NONE
+		refresh.add_theme_font_size_override("font_size", 11)
+		HUD.action(refresh)
+		refresh.pressed.connect(_request_objective_refresh.bind(category))
+		objective_refresh_buttons[category] = refresh
 	conquest_dialog = Window.new()
 	conquest_dialog.title = "Choose an upgrade"
 	conquest_dialog.theme = theme
@@ -8069,97 +8079,109 @@ func _draw_objectives_overlay() -> void:
 	var font: Font = ThemeDB.fallback_font
 	var x: float = maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH)
 	var y: float = HEADER_HEIGHT + 24.0
-	var rows: Array = [["OBJECTIVES", "", ""]]
-	var objectives: Array = ECONOMY.active_objectives(progress, float(state.get("objective_clock", 0.0)))
-	for category in ECONOMY.REWARD_CATEGORIES:
-		var added: bool = false
-		for objective in objectives:
-			var metric: String = str(objective.get("id", ""))
-			var classification: String = ECONOMY.objective_category(metric if not metric.is_empty() else str(objective["track"]))
-			if classification != category:
-				continue
-			if not added:
-				rows.append([str(category).capitalize(), "", ""])
-				added = true
-			rows.append([objective["label"], objective["id"], objective["counter"]])
-	for row in rows:
-		var label: String = row[0]
-		var key: String = row[1]
+	var clock: float = float(state.get("objective_clock", 0.0))
+	objectives_overlay.draw_string(font, Vector2(x, y), "OBJECTIVES", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
+	y += 26.0
+	for objective in ECONOMY.active_objectives(progress, clock):
+		var category: String = objective["track"]
+		var key: String = objective["id"]
 		var done: bool = completed.has(key)
-		var tint: Color = Color("#8ee2a9") if done else (Color("#b8d9ef") if key.is_empty() else Color.WHITE)
+		var tint: Color = Color("#8ee2a9") if done else Color.WHITE
+		objectives_overlay.draw_string(font, Vector2(x, y), category.capitalize(), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
+		y += 23.0
 		var pos := Vector2(x, y)
 		if not key.is_empty():
 			objectives_overlay.draw_rect(Rect2(pos + Vector2(0, -10), Vector2(10, 10)), tint, false, 1.0)
 			if done:
 				objectives_overlay.draw_polyline(PackedVector2Array([pos + Vector2(1, -6), pos + Vector2(4, -2), pos + Vector2(9, -9)]), tint, 2.0, true)
 			pos.x += 16.0
-		objectives_overlay.draw_string_outline(font, pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, Color("#101824"))
-		objectives_overlay.draw_string(font, pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, tint)
-		if done:
-			objectives_overlay.draw_line(pos + Vector2(0, -5), pos + Vector2(font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, -5), tint, 1.0)
-		if not key.is_empty():
-			var counter_text: String = str(row[2])
-			var counter_width: float = font.get_string_size(counter_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-			var counter := Vector2(map_canvas.size.x - 12.0 - counter_width, y)
-			objectives_overlay.draw_string_outline(font, counter, counter_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color("#101824"))
-			objectives_overlay.draw_string(font, counter, counter_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
-		y += 22.0
+		var counter: String = objective["counter"]
+		var counter_width: float = font.get_string_size(counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+		var label_width: float = maxf(40.0, map_canvas.size.x - 12.0 - counter_width - pos.x - 8.0)
+		objectives_overlay.draw_string_outline(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, 4, Color("#101824"))
+		objectives_overlay.draw_string(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, tint)
+		objectives_overlay.draw_string(font, Vector2(map_canvas.size.x - 12.0 - counter_width, y), counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
+		y += 29.0
+	_draw_conquest_notifications(state, font, clock)
+
+func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -> void:
 	var events: Array = state.get("objective_events", [])
 	var roster: Dictionary = session.get("players")
-	var names: Dictionary = {"colonies": "Colonization", "metals": "Metals", "population": "Population"}
-	y += 42.0
-	for j in range(events.size() - 1, maxi(-1, events.size() - 4), -1):
+	var y: float = HEADER_HEIGHT + 34.0
+	var visible_count: int = 0
+	for j in range(events.size() - 1, -1, -1):
 		var event: Dictionary = events[j]
-		var player_name: String = str(roster.get(event["player"], {}).get("name", "Player")).left(16)
-		var message: String = "%s: %s +%d CP" % [player_name, names.get(str(event["objective"]).get_slice("_", 0), str(ECONOMY.ADVANCED_OBJECTIVES.get(event["objective"], ["", 0, "Objective"])[2])), int(event["award"])]
-		if bool(event["first"]):
-			message += " (first)"
-		var tint := Color("#e9cb7c") if bool(event["first"]) else Color("#b8d9ef")
-		objectives_overlay.draw_string_outline(font, Vector2(x, y), message, HORIZONTAL_ALIGNMENT_LEFT, 244, 12, 4, Color("#101824"))
-		objectives_overlay.draw_string(font, Vector2(x, y), message, HORIZONTAL_ALIGNMENT_LEFT, 244, 12, tint)
-		y += 17.0
-	var claims: Dictionary = state.get("unique_reward_claims", {})
-	for key in claims:
-		var owner_name: String = str(roster.get(claims[key], {}).get("name", "Player")).left(16)
-		var unlock: String = "%s: %s" % [owner_name, ECONOMY.CONQUEST_REWARDS[key][0]]
-		objectives_overlay.draw_string_outline(font, Vector2(x, y), unlock, HORIZONTAL_ALIGNMENT_LEFT, OBJECTIVES_WIDTH - 12, 12, 4, Color("#101824"))
-		objectives_overlay.draw_string(font, Vector2(x, y), unlock, HORIZONTAL_ALIGNMENT_LEFT, OBJECTIVES_WIDTH - 12, 12, Color("#c7aaff"))
-		y += 17.0
+		var age: float = maxf(0.0, clock - float(event["elapsed"]))
+		if age >= 10.0:
+			continue
+		var name_text: String = str(roster.get(event["player"], {}).get("name", "Player")).left(20)
+		var message: String
+		var tint := Color("#e9cb7c")
+		if event.has("reward"):
+			message = "%s acquired %s (Unique)" % [name_text, ECONOMY.CONQUEST_REWARDS[event["reward"]][0]]
+			tint = Color("#c7aaff")
+		else:
+			message = "%s completed %s · +%d CP" % [name_text, ECONOMY.objective_label(str(event["objective"])), int(event["award"])]
+			if not bool(event["first"]):
+				tint = Color("#b8d9ef")
+		var alpha: float = clampf((10.0 - age) / 2.0, 0.0, 1.0)
+		tint.a = alpha
+		var width: float = minf(map_canvas.size.x * 0.56, font.get_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 28.0)
+		var left: float = (map_canvas.size.x - width) * 0.5
+		objectives_overlay.draw_rect(Rect2(left, y - 17.0, width, 24.0), Color(0.04, 0.08, 0.13, alpha * 0.9))
+		objectives_overlay.draw_string(font, Vector2(left + 8.0, y), message, HORIZONTAL_ALIGNMENT_CENTER, width - 16.0, 13, tint)
+		y += 28.0
+		visible_count += 1
+		if visible_count >= 5:
+			break
 
 func _layout_conquest_button() -> void:
 	if conquest_buttons.is_empty():
 		return
 	var state: Dictionary = _state()
 	var progress: Dictionary = state.get("objectives", {}).get(_me(), {})
-	var objectives: Array = ECONOMY.active_objectives(progress, float(state.get("objective_clock", 0.0)))
-	var categories: Array = []
-	for objective in objectives:
-		var key: String = str(objective.get("id", ""))
-		var category: String = ECONOMY.objective_category(key if not key.is_empty() else str(objective["track"]))
-		if not categories.has(category):
-			categories.append(category)
-	var show_tech: bool = categories.has("tech") or ECONOMY.reward_points(progress, "tech") > 0
-	var count: int = 3 if show_tech else 2
-	var width: float = minf(OBJECTIVES_WIDTH - 12.0, maxf(100.0, map_canvas.size.x - 20.0))
-	var button_width: float = (width - 4.0 * (count - 1)) / count
-	var y: float = HEADER_HEIGHT + 24.0 + (1.0 + objectives.size() + categories.size()) * 22.0 - 12.0
-	for i in range(ECONOMY.REWARD_CATEGORIES.size()):
-		var category: String = ECONOMY.REWARD_CATEGORIES[i]
+	var y: float = HEADER_HEIGHT + 34.0 + 26.0
+	var visible_categories: Array = []
+	for objective in ECONOMY.active_objectives(progress, float(state.get("objective_clock", 0.0))):
+		visible_categories.append(objective["track"])
+	for category in ECONOMY.REWARD_CATEGORIES:
 		var button: Button = conquest_buttons[category]
-		button.visible = not state.is_empty() and (category != "tech" or show_tech)
-		button.position = Vector2(maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH) + i * (button_width + 4.0), y)
-		button.size = Vector2(button_width, 30.0)
+		var refresh: Button = objective_refresh_buttons[category]
+		button.visible = not state.is_empty() and visible_categories.has(category)
+		refresh.visible = button.visible
+		if not button.visible:
+			continue
+		var right: float = map_canvas.size.x - 12.0
+		var header_y: float = y - 26.0
+		button.position = Vector2(right - 70.0, header_y)
+		button.size = Vector2(70.0, 21.0)
+		refresh.position = Vector2(right - 141.0, header_y)
+		refresh.size = Vector2(67.0, 21.0)
+		y += 52.0
+
+func _request_objective_refresh(category: String) -> void:
+	var progress: Dictionary = _state().get("objectives", {}).get(_me(), {})
+	var key: String = str(progress.get("active_goals", {}).get(category, ""))
+	if not key.is_empty():
+		session.call("request_objective_refresh", category, key)
 
 func _refresh_conquest_button(state: Dictionary) -> void:
 	if conquest_buttons.is_empty():
 		return
 	var progress: Dictionary = state.get("objectives", {}).get(_me(), {})
+	var clock: float = float(state.get("objective_clock", 0.0))
 	for category in ECONOMY.REWARD_CATEGORIES:
 		var button: Button = conquest_buttons[category]
 		var points: int = ECONOMY.reward_points(progress, category)
-		button.text = "%s: %d CP" % [str(category).capitalize(), points]
+		button.text = "%d CP" % points
 		button.disabled = points <= 0 or ECONOMY.reward_offer(progress, category).is_empty()
 		button.tooltip_text = "Choose a %s or general upgrade" % category
+		var refresh: Button = objective_refresh_buttons[category]
+		var remaining: float = ECONOMY.objective_refresh_remaining(progress, category, clock)
+		var key: String = str(progress.get("active_goals", {}).get(category, ""))
+		refresh.text = "%ds" % ceili(remaining) if remaining > 0.0 else "Refresh"
+		refresh.disabled = remaining > ECONOMY.EPS or key.is_empty() or progress.get("completed", {}).has(key) or ECONOMY.objective_candidates(progress, category, key).is_empty()
+		refresh.tooltip_text = "Randomize this objective · 60 s cooldown"
 	_layout_conquest_button()
 	if is_instance_valid(conquest_dialog) and conquest_dialog.visible:
 		if ECONOMY.reward_points(progress, conquest_category) <= 0:

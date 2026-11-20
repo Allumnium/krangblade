@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.75.0: Objectives consolidated; initial military build five hulls and later kill/build thresholds provisional. Rerolls preserve lifetime metrics, exclude completed goals and require preceding tiers; Tech unlock after three Economic goals or first antimatter. Only ship-attributed enemy hull kills count (not station battery kills). Notifications use authority real-time clock, capped history and final two-second fade; verify narrower HUD and multiplayer cooldown timing.
+
 - v0.74.0: Screenshot confirmed duplicate `background` declaration in `_build_ui`; rename conquest-specific locals. Unique claims are permanent for the match, even after elimination. Four selected unique rewards; Crystalline Synthesis is the additional economic exclusive. Tech may offer fewer than three cards after Warp Gates is claimed; expand pool later. Verify concurrent claims and confirmed zero-CP closure on live peers.
 
 - v0.73.0: Scout cloak is exclusive and reuses the combat spatial index for detection. Verify detection transitions, enemy target loss, UI selection pruning, AI/influence effects and multiplayer. Full hull data still replicates; cloak is UI/gameplay concealment, not packet-level secrecy. Private CP draft payloads ride the existing snapshot RPC; verify compact/full recovery and packet visibility.

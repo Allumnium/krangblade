@@ -265,7 +265,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 				var id: int = int(state["next_id"])
 				state["next_id"] = id + 1
 				var offset: Vector2 = Vector2.from_angle(float(index) * 2.399963 + float(slot) * TAU / 6.0) * (SHIP_CLEARANCE * 1.8)
-				_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind], "spawn_offset": offset})
+				_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind], "spawn_offset": offset, "starting_fleet": true})
 				slot += 1
 	update_exploration(state)
 	return state
@@ -1531,6 +1531,12 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			if is_same(state, _indexed_state):
 				_hulls_by_id[int(item["id"])] = state["ships"].back()
 			_launch_to_rally(state, state["ships"].back(), rally)
+			if not bool(item.get("starting_fleet", false)):
+				var progress: Dictionary = objective_progress(state, int(p["owner"]))
+				if item["kind"] == "colony_ship":
+					progress["colony_ships_built"] = int(progress.get("colony_ships_built", 0)) + 1
+				elif military_hull(str(item["kind"])):
+					progress["military_built"] = int(progress.get("military_built", 0)) + 1
 	p["queue"].erase(item)
 
 static func cargo_bay_count(kind: String) -> int:
@@ -6256,6 +6262,10 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		if damage.has(id):
 			_apply_reward_damage(ship, ship_max_hp(str(ship["kind"])), float(damage[id]), float(state["elapsed"]))
 			if float(ship["hp"]) <= EPS:
+				if killed_by.has(id) and SHIP_KINDS.has(ship["kind"]):
+					var attacker: Dictionary = killed_by[id]
+					var progress: Dictionary = objective_progress(state, int(attacker["owner"]))
+					progress["enemy_ships_destroyed"] = int(progress.get("enemy_ships_destroyed", 0)) + 1
 				_record_ship_destruction(state, graph, ship)
 				_remove_indexed_hull(state, ship)
 	# Fixed batteries and shipyards participate in simultaneous damage.
@@ -7687,7 +7697,12 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			ship.erase("_handoff_delivery")
 			continue
 		if ship.get("kind", "") == "colony_ship":
+			var previous_food: float = float(ship.get("food_produced", 0.0))
 			_grow_colony_cargo(ship, dt)
+			var produced: float = float(ship.get("food_produced", 0.0)) - previous_food
+			if produced > 0.0:
+				var progress: Dictionary = objective_progress(state, int(ship["owner"]))
+				progress["colony_food"] = float(progress.get("colony_food", 0.0)) + produced
 		var salvage_ship_id: int = int(ship["id"])
 		if bool(ship.get("retreating", false)) and armed(ship):
 			ship.erase("repair_target")
@@ -7855,7 +7870,7 @@ static func objective_progress(state: Dictionary, player: int) -> Dictionary:
 		state["objectives"] = {}
 	var all_progress: Dictionary = state["objectives"]
 	if not all_progress.has(player):
-		all_progress[player] = {"colonies": {}, "metals": 0.0, "population": 0.0, "completed": {}, "points": {"economic": 0, "military": 0, "tech": 0}, "offers": {}}
+		all_progress[player] = {"colonies": {}, "metals": 0.0, "population": 0.0, "completed": {}, "points": {"economic": 0, "military": 0, "tech": 0}, "offers": {}, "active_goals": {"economic": "colony_ships", "military": "military_built"}, "goal_refresh": {}, "goal_draws": {}}
 	return all_progress[player]
 
 static func embarked_construction_population(planet: Dictionary) -> float:
@@ -7883,10 +7898,12 @@ static func _update_objectives(state: Dictionary) -> void:
 	var events: Array = state.get("objective_events", [])
 	var now: float = float(state.get("objective_clock", state["elapsed"]))
 	for player in state["teams"]:
+		if state.get("eliminated", []).has(player):
+			continue
 		var progress: Dictionary = objective_progress(state, int(player))
 		progress["population"] = float(populations.get(player, 0.0))
 		progress["metals"] = float(metals.get(player, 0.0))
-		_assign_advanced_objectives(state, int(player), progress)
+		_assign_category_objectives(state, int(player), progress)
 		for objective in active_objectives(progress, float(state.get("objective_clock", 0.0))):
 			var key: String = objective["id"]
 			if not key.is_empty() and float(objective["value"]) >= float(objective["target"]) - EPS and not progress["completed"].has(key):
@@ -7898,6 +7915,8 @@ static func _update_objectives(state: Dictionary) -> void:
 				var category: String = objective_category(key)
 				progress["points"][category] = reward_points(progress, category) + award
 				events.append({"player": player, "objective": key, "first": winner, "award": award, "elapsed": now})
+				if events.size() > 64:
+					events.pop_front()
 	state["objective_first"] = first
 	state["objective_events"] = events
 	for player in state["teams"]:
@@ -7942,9 +7961,7 @@ const CONQUEST_REWARDS = {
 }
 
 static func objective_category(key: String) -> String:
-	if key == "advanced_antimatter":
-		return "tech"
-	return "military" if key.begins_with("colonies") or key == "advanced_colonies" else "economic"
+	return str(OBJECTIVE_SPECS.get(key, ["economic"])[0])
 
 static func reward_points(progress: Dictionary, category: String) -> int:
 	return int(progress.get("points", {}).get(category, 0))
@@ -8002,6 +8019,11 @@ static func acquire_reward(state: Dictionary, player: int, key: String, generati
 		var claims: Dictionary = state.get("unique_reward_claims", {})
 		claims[key] = player
 		state["unique_reward_claims"] = claims
+		var events: Array = state.get("objective_events", [])
+		events.append({"player": player, "reward": key, "elapsed": float(state.get("objective_clock", 0.0))})
+		if events.size() > 64:
+			events.pop_front()
+		state["objective_events"] = events
 	progress["draft_generation"] = generation + 1
 	rewards.append(key)
 	progress["rewards"] = rewards
@@ -8248,10 +8270,33 @@ static func _apply_reward_damage(entity: Dictionary, maximum: float, amount: flo
 		amount -= absorbed
 	entity["hp"] = maxf(0.0, float(entity.get("hp", maximum)) - amount * (1.0 - float(entity.get("armor", 0.0))))
 
-const OBJECTIVE_TRACKS = {
-	"metals": [1000, 3000, 10000],
-	"population": [200000, 500000, 1000000],
-	"colonies": [2, 4, 8]
+const OBJECTIVE_REFRESH_SECONDS: float = 60.0
+const OBJECTIVE_COMPLETE_SECONDS: float = 10.0
+# category, lifetime/current metric, target, label, required prior objective
+const OBJECTIVE_SPECS = {
+	"colony_ships": ["economic", "colony_ships_built", 2, "Build 2 colony ships", ""],
+	"colonies": ["economic", "colonies", 2, "Colonize 2 systems", "colony_ships"],
+	"colonies_2": ["economic", "colonies", 4, "Colonize 4 systems", "colonies"],
+	"colonies_3": ["economic", "colonies", 8, "Colonize 8 systems", "colonies_2"],
+	"advanced_colonies": ["economic", "colonies", 12, "Colonize 12 systems", "colonies_3"],
+	"colony_food": ["economic", "colony_food", 1000, "Produce 1kt colony ship food", ""],
+	"colony_food_2": ["economic", "colony_food", 3000, "Produce 3kt colony ship food", "colony_food"],
+	"metals": ["economic", "metals", 1000, "Have 1kt Metals", ""],
+	"metals_2": ["economic", "metals", 3000, "Have 3kt Metals", "metals"],
+	"metals_3": ["economic", "metals", 10000, "Have 10kt Metals", "metals_2"],
+	"advanced_metals": ["economic", "metals", 20000, "Have 20kt Metals", "metals_3"],
+	"population": ["economic", "population", 200000, "Reach 200k population", ""],
+	"population_2": ["economic", "population", 500000, "Reach 500k population", "population"],
+	"population_3": ["economic", "population", 1000000, "Reach 1M population", "population_2"],
+	"advanced_population": ["economic", "population", 2000000, "Reach 2M population", "population_3"],
+	"military_built": ["military", "military_built", 5, "Build 5 military ships", ""],
+	"military_built_2": ["military", "military_built", 15, "Build 15 military ships", "military_built"],
+	"military_built_3": ["military", "military_built", 30, "Build 30 military ships", "military_built_2"],
+	"enemy_ships": ["military", "enemy_ships_destroyed", 3, "Destroy 3 enemy ships", ""],
+	"enemy_ships_2": ["military", "enemy_ships_destroyed", 10, "Destroy 10 enemy ships", "enemy_ships"],
+	"enemy_ships_3": ["military", "enemy_ships_destroyed", 30, "Destroy 30 enemy ships", "enemy_ships_2"],
+	"advanced_antimatter": ["tech", "antimatter_processed", 2, "Process 2 antimatter", ""],
+	"antimatter_2": ["tech", "antimatter_processed", 4, "Process 4 antimatter", "advanced_antimatter"]
 }
 
 static func objective_amount(value: float) -> String:
@@ -8261,75 +8306,99 @@ static func objective_amount(value: float) -> String:
 		return ("%0.1f" % (value / 1000.0)).trim_suffix(".0") + "k"
 	return str(int(value))
 
-static func _objective_row(progress: Dictionary, key: String, track: String, metric: String, target: int, title: String) -> Dictionary:
+static func objective_label(key: String) -> String:
+	return str(OBJECTIVE_SPECS.get(key, ["", "", 0, "Objective"])[3])
+
+static func objective_tech_unlocked(progress: Dictionary) -> bool:
+	var count: int = 0
+	for key in progress.get("completed", {}):
+		if objective_category(str(key)) == "economic":
+			count += 1
+	return count >= 3 or int(progress.get("antimatter_processed", 0)) > 0 or reward_points(progress, "tech") > 0
+
+static func _objective_row(progress: Dictionary, key: String) -> Dictionary:
+	var spec: Array = OBJECTIVE_SPECS[key]
+	var metric: String = spec[1]
+	var target: int = spec[2]
 	var value: float = float((progress.get("colonies", {}) as Dictionary).size()) if metric == "colonies" else float(progress.get(metric, 0))
 	if progress.get("completed", {}).has(key):
 		value = maxf(value, float(target))
 	var counter: String = "%s / %s" % [objective_amount(minf(value, target)), objective_amount(target)]
-	return {"id": key, "track": track, "metric": metric, "target": target, "value": value, "label": title, "counter": counter}
+	return {"id": key, "track": spec[0], "metric": metric, "target": target, "value": value, "label": spec[3], "counter": counter}
 
-static func active_objectives(progress: Dictionary, clock: float) -> Array:
+static func active_objectives(progress: Dictionary, _clock: float) -> Array:
 	var result: Array = []
-	var completed: Dictionary = progress.get("completed", {})
-	for track in OBJECTIVE_TRACKS:
-		var thresholds: Array = OBJECTIVE_TRACKS[track]
-		for tier in range(thresholds.size()):
-			var key: String = track if tier == 0 else "%s_%d" % [track, tier + 1]
-			if completed.has(key) and clock - float(completed[key]) >= 10.0:
-				continue
-			var target: int = int(thresholds[tier])
-			var title: String = ""
-			match track:
-				"metals": title = "Have %st Metals" % objective_amount(target)
-				"population": title = "Reach %s population" % objective_amount(target)
-				"colonies": title = "Colonize %d systems" % target
-			result.append(_objective_row(progress, key, track, track, target, title))
-			break
-		if not result.is_empty() and result.back()["track"] == track:
+	var active: Dictionary = progress.get("active_goals", {"economic": "colony_ships", "military": "military_built"})
+	for category in REWARD_CATEGORIES:
+		if category == "tech" and not objective_tech_unlocked(progress):
 			continue
-		var key: String = str(progress.get("advanced", {}).get(track, ""))
-		if key.is_empty():
-			result.append({"id": "", "track": track, "target": 1, "value": 0, "label": "Awaiting next objective", "counter": ""})
-			continue
-		var spec: Array = ADVANCED_OBJECTIVES[key]
-		result.append(_objective_row(progress, key, track, str(spec[0]), int(spec[1]), str(spec[2])))
+		var key: String = str(active.get(category, ""))
+		if OBJECTIVE_SPECS.has(key):
+			result.append(_objective_row(progress, key))
+		else:
+			result.append({"id": "", "track": category, "target": 1, "value": 0, "label": "No objectives remaining", "counter": ""})
 	return result
 
-const ADVANCED_OBJECTIVES = {
-	"advanced_antimatter": ["antimatter_processed", 2, "Process 2 antimatter"],
-	"advanced_metals": ["metals", 20000, "Have 20kt Metals"],
-	"advanced_population": ["population", 2000000, "Reach 2M population"],
-	"advanced_colonies": ["colonies", 12, "Colonize 12 systems"]
-}
+static func objective_candidates(progress: Dictionary, category: String, excluded: String = "") -> Array:
+	var candidates: Array = []
+	var completed: Dictionary = progress.get("completed", {})
+	for key in OBJECTIVE_SPECS:
+		var spec: Array = OBJECTIVE_SPECS[key]
+		if spec[0] != category or key == excluded or completed.has(key):
+			continue
+		if str(spec[4]).is_empty() or completed.has(spec[4]):
+			candidates.append(key)
+	return candidates
 
-static func _objective_track_finished(completed: Dictionary, track: String, clock: float) -> bool:
-	var last: String = "%s_%d" % [track, OBJECTIVE_TRACKS[track].size()]
-	return completed.has(last) and clock - float(completed[last]) >= 10.0
+static func _draw_objective(state: Dictionary, player: int, progress: Dictionary, category: String, excluded: String = "") -> String:
+	var candidates: Array = objective_candidates(progress, category, excluded)
+	if candidates.is_empty():
+		return ""
+	var draws: Dictionary = progress.get("goal_draws", {})
+	var draw: int = int(draws.get(category, 0)) + 1
+	draws[category] = draw
+	progress["goal_draws"] = draws
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(state["map"]["seed"]) + player * 7919 + draw * 104729 + REWARD_CATEGORIES.find(category) * 15485863
+	return str(candidates[rng.randi_range(0, candidates.size() - 1)])
 
-static func _assign_advanced_objectives(state: Dictionary, player: int, progress: Dictionary) -> void:
-	var assigned: Dictionary = progress.get("advanced", {})
+static func _assign_category_objectives(state: Dictionary, player: int, progress: Dictionary) -> void:
+	var active: Dictionary = progress.get("active_goals", {"economic": "colony_ships", "military": "military_built"})
 	var completed: Dictionary = progress["completed"]
 	var clock: float = float(state.get("objective_clock", 0.0))
-	for track in OBJECTIVE_TRACKS:
-		if not _objective_track_finished(completed, track, clock):
+	for category in REWARD_CATEGORIES:
+		if category == "tech" and not objective_tech_unlocked(progress):
 			continue
-		var current: String = str(assigned.get(track, ""))
-		if not current.is_empty() and (not completed.has(current) or clock - float(completed[current]) < 10.0):
+		var current: String = str(active.get(category, ""))
+		if not current.is_empty() and (not completed.has(current) or clock - float(completed[current]) < OBJECTIVE_COMPLETE_SECONDS):
 			continue
-		var candidates: Array = []
-		for key in ADVANCED_OBJECTIVES:
-			var metric: String = ADVANCED_OBJECTIVES[key][0]
-			# Never draw a higher tier while the fixed track for its metric is active.
-			if OBJECTIVE_TRACKS.has(metric) and not _objective_track_finished(completed, metric, clock):
-				continue
-			if not completed.has(key) and not assigned.values().has(key):
-				candidates.append(key)
-		if candidates.is_empty():
-			continue
-		var rng := RandomNumberGenerator.new()
-		rng.seed = int(state["map"]["seed"]) + player * 7919 + completed.size() * 104729
-		assigned[track] = candidates[rng.randi_range(0, candidates.size() - 1)]
-	progress["advanced"] = assigned
+		# Continue the introductory colony chain before ordinary random goals.
+		if current == "colony_ships" and not completed.has("colonies"):
+			active[category] = "colonies"
+		else:
+			active[category] = _draw_objective(state, player, progress, category, current)
+	progress["active_goals"] = active
+
+static func objective_refresh_remaining(progress: Dictionary, category: String, clock: float) -> float:
+	return maxf(0.0, float(progress.get("goal_refresh", {}).get(category, 0.0)) - clock)
+
+static func refresh_objective(state: Dictionary, player: int, category: String, expected: String) -> bool:
+	if not state["teams"].has(player) or state.get("eliminated", []).has(player) or not REWARD_CATEGORIES.has(category):
+		return false
+	var progress: Dictionary = objective_progress(state, player)
+	if category == "tech" and not objective_tech_unlocked(progress):
+		return false
+	var active: Dictionary = progress["active_goals"]
+	var current: String = str(active.get(category, ""))
+	var clock: float = float(state.get("objective_clock", 0.0))
+	if current.is_empty() or current != expected or progress["completed"].has(current) or objective_refresh_remaining(progress, category, clock) > EPS:
+		return false
+	var next: String = _draw_objective(state, player, progress, category, current)
+	if next.is_empty():
+		return false
+	active[category] = next
+	progress["goal_refresh"][category] = clock + OBJECTIVE_REFRESH_SECONDS
+	return true
 
 const EMPIRE_TARGET_STEPS = [0, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500]
 
