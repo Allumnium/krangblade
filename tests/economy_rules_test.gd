@@ -773,6 +773,15 @@ func _test_salvage_center_cache() -> void:
 	var fresh: Dictionary = ECON._salvage_threats(state, graph)
 	assert(not ECON._salvage_sector_center_safe(state, graph, 1, 0, fresh))
 	assert(ECON._salvage_sector_center_safe(state, graph, 1, 0, fresh) == ECON._salvage_safe(state, graph, 1, Vector2.ZERO, 0, fresh))
+	state["ships"] = []
+	state["planets"][1]["owner"] = 0
+	state["fog_of_war"] = false
+	var reach: Dictionary = ECON._salvage_threats(state, graph)
+	assert(ECON._auto_salvage_sectors(state, graph, 1, 0, reach).has(1))
+	state["planets"][1]["owner"] = 2
+	assert(not ECON._auto_salvage_sectors(state, graph, 1, 0, reach).has(1))
+	state["planets"][1]["owner"] = 0
+	assert(ECON._auto_salvage_sectors(state, graph, 1, 0, reach).has(1))
 	print("PASS: salvage center threat cache, live ownership and fresh phase invalidation")
 
 func _test_spatial_buckets() -> void:

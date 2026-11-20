@@ -5001,11 +5001,15 @@ static func _salvage_threat_free(point: Vector2, sector: int, team: int, threats
 
 static func _salvage_sector_center_safe(state: Dictionary, graph: Dictionary, owner: int, node: int, threats: Dictionary) -> bool:
 	var point: Vector2 = graph["points"][node]
-	var sector: int = node if sector_contains(graph, node, point) else sector_at(graph, point, range(graph["points"].size()))
+	if not threats.has("center_sectors"):
+		threats["center_sectors"] = {}
+	var centers: Dictionary = threats["center_sectors"]
+	if not centers.has(node):
+		centers[node] = node if sector_contains(graph, node, point) else sector_at(graph, point, range(graph["points"].size()))
+	var sector: int = int(centers[node])
 	if _hostile_system(state, owner, sector):
 		return false
 	var team: int = int(state["teams"].get(owner, 0))
-	# Cache only the frozen threat test, not discovery or live ownership.
 	var key := Vector2i(node, team)
 	if not threats.has("center_safety"):
 		threats["center_safety"] = {}
@@ -5014,26 +5018,54 @@ static func _salvage_sector_center_safe(state: Dictionary, graph: Dictionary, ow
 		safety[key] = _salvage_threat_free(point, sector, team, threats)
 	return bool(safety[key])
 
-# Search only discovered, safe sectors reachable in at most two lane hops.
-# Store the first waypoint for each destination so remote pickup can
-# follow those connections without a full-map route search per wreck.
+# Cache the bounded topology walk independently of mutable safety. For an
+# identical local eligibility mask, all ships on the same team reuse BFS.
 static func _auto_salvage_sectors(state: Dictionary, graph: Dictionary, owner: int, origin: int, threats: Dictionary) -> Dictionary:
 	if origin < 0 or origin >= graph["points"].size():
 		return {}
-	var allowed: Array[int] = military_pois(state, owner)
+	if not threats.has("reach_topology"):
+		threats["reach_topology"] = {}
+	var topology: Dictionary = threats["reach_topology"]
+	if not topology.has(origin):
+		var candidates: Dictionary = {origin: true}
+		var frontier: Array = [origin]
+		for hop in range(AUTO_SALVAGE_HOPS):
+			var next: Array = []
+			for node in frontier:
+				for neighbor in graph["adjacent"][node]:
+					if not candidates.has(neighbor):
+						candidates[neighbor] = true
+						next.append(neighbor)
+			frontier = next
+		topology[origin] = candidates.keys()
+	var team: int = int(state["teams"].get(owner, 0))
+	var known: Dictionary = {}
+	var planets: int = state["planets"].size()
+	for node in topology[origin]:
+		if node == origin:
+			continue
+		if discovered(state, owner, "planets" if node < planets else "fields", node if node < planets else node - planets):
+			if _salvage_sector_center_safe(state, graph, owner, node, threats):
+				known[node] = true
+	if not threats.has("reach_cache"):
+		threats["reach_cache"] = {}
+	var cache: Dictionary = threats["reach_cache"]
+	var key := Vector2i(origin, team)
+	var prior: Dictionary = cache.get(key, {})
+	if not prior.is_empty() and prior["known"] == known:
+		return prior["reached"]
 	var reached: Dictionary = {origin: origin}
 	var frontier: Array = [origin]
 	for hop in range(AUTO_SALVAGE_HOPS):
 		var next: Array = []
 		for node in frontier:
 			for neighbor in graph["adjacent"][node]:
-				if reached.has(neighbor) or not allowed.has(neighbor):
-					continue
-				if not _salvage_sector_center_safe(state, graph, owner, neighbor, threats):
+				if reached.has(neighbor) or not known.has(neighbor):
 					continue
 				reached[neighbor] = neighbor if node == origin else reached[node]
 				next.append(neighbor)
 		frontier = next
+	cache[key] = {"known": known, "reached": reached}
 	return reached
 
 # Combat and existing orders always take precedence. An idle craft can make
