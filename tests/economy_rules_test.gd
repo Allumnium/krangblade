@@ -1083,8 +1083,8 @@ func _initialize() -> void:
 	_test_orbital_housing()
 	_test_eco_regrowth()
 	_test_antimatter_extraction()
-	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 5000000.0))
-	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 15000000.0))
+	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 500000.0))
+	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 1500000.0))
 	var bounds: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1])
 	var world: Dictionary = bounds["planets"][0]
 	world["abundance"]["Metals"] = 0.1
@@ -4411,7 +4411,7 @@ func _test_recovery_economy() -> void:
 		ECON._work_planet(state, 0, 1.0)
 	for resource in ["Metals"]:
 		assert(float(p["stock"][resource]) > 0.0)
-	assert(ECON.overpopulation_penalty(p) > ECON.planetary_population(p) / ECON.habitation_capacity(p))
+	assert(is_equal_approx(ECON.overpopulation_penalty(p), pow(clampf(ECON.planetary_population(p) / ECON.habitation_capacity(p), 0.0, 1.0), 3.0)))
 	# A depleted economy can recover enough to prepay a building.
 	for i in range(1200):
 		if ECON.affordable(p, ECON.building_cost(p, "Organics")):
