@@ -1010,7 +1010,12 @@ func _test_packed_threat_records() -> void:
 func _test_empire_targets() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	assert(not ECON.set_empire_target(state, 999, "fighter", 5))
-	assert(not ECON.set_empire_target(state, 1, "fighter", 4))
+	assert(ECON.set_empire_target(state, 1, "fighter", 4))
+	assert(state["empire_targets"][1]["fighter"] == 4)
+	assert(not ECON.set_empire_target(state, 1, "fighter", -1))
+	assert(not ECON.set_empire_target(state, 1, "fighter", 501))
+	for amount in range(501):
+		assert(ECON.empire_target_at_tick(ECON.empire_target_tick(amount)) == amount)
 	assert(not ECON.set_empire_target(state, 1, "fighter", 750))
 	assert(ECON.set_empire_target(state, 1, "fighter", 500))
 	assert(ECON.set_empire_target(state, 1, "fighter", 5))

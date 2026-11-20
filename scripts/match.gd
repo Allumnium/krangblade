@@ -8887,9 +8887,17 @@ func _refresh_empire(state: Dictionary) -> void:
 			top.add_child(counter)
 			var slider := HSlider.new()
 			slider.max_value = ECONOMY.EMPIRE_TARGET_STEPS.size() - 1
-			slider.step = 1
+			slider.step = 0.005
+			slider.tick_count = ECONOMY.EMPIRE_TARGET_STEPS.size()
+			slider.ticks_on_borders = true
 			slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			body.add_child(slider)
+			var tick_labels := Control.new()
+			tick_labels.custom_minimum_size.y = 15
+			tick_labels.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			body.add_child(tick_labels)
+			tick_labels.draw.connect(_draw_empire_tick_labels.bind(tick_labels, slider))
+			tick_labels.resized.connect(tick_labels.queue_redraw)
 			slider.drag_ended.connect(_empire_slider_released.bind(kind, slider))
 			slider.value_changed.connect(_empire_preview.bind(kind, slider, counter))
 			empire_controls[kind] = {"slider": slider, "counter": counter}
@@ -8898,21 +8906,31 @@ func _refresh_empire(state: Dictionary) -> void:
 		var slider: HSlider = entry["slider"]
 		var desired: int = int(targets.get(kind, 0))
 		if not slider.has_focus() and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-			slider.set_value_no_signal(maxi(0, ECONOMY.EMPIRE_TARGET_STEPS.find(desired)))
+			slider.set_value_no_signal(ECONOMY.empire_target_tick(desired))
 		var counter: Label = entry["counter"]
 		_empire_preview(slider.value, kind, slider, counter)
+
+func _draw_empire_tick_labels(labels: Control, slider: HSlider) -> void:
+	var font: Font = ThemeDB.fallback_font
+	var inset: float = slider.get_theme_icon("grabber").get_size().x * 0.5
+	var steps: Array = ECONOMY.EMPIRE_TARGET_STEPS
+	for index in range(steps.size()):
+		var caption: String = str(steps[index])
+		var width: float = font.get_string_size(caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		var x: float = lerpf(inset, labels.size.x - inset, float(index) / float(steps.size() - 1))
+		labels.draw_string(font, Vector2(clampf(x - width * 0.5, 0.0, maxf(0.0, labels.size.x - width)), 11.0), caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#b8d9ef"))
 
 func _empire_preview(value: float, kind: String, _slider: HSlider, counter: Label) -> void:
 	var counts: Dictionary = ECONOMY.empire_fleet_counts(_state(), _me())
 	var live: int = int(counts["live"].get(kind, 0))
 	var queued: int = int(counts["queued"].get(kind, 0))
-	var desired: int = ECONOMY.EMPIRE_TARGET_STEPS[int(value)]
+	var desired: int = ECONOMY.empire_target_at_tick(value)
 	counter.text = "%d / %d  (+%d queued)" % [live, desired, queued]
 	counter.modulate = Color("#8ee2a9") if live + queued >= desired else Color("#e9cb7c")
 
 func _empire_slider_released(changed: bool, kind: String, slider: HSlider) -> void:
 	if changed:
-		session.call("request_empire_target", kind, ECONOMY.EMPIRE_TARGET_STEPS[int(slider.value)])
+		session.call("request_empire_target", kind, ECONOMY.empire_target_at_tick(slider.value))
 	slider.release_focus()
 
 func _open_empire() -> void:

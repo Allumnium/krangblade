@@ -8531,6 +8531,20 @@ static func refresh_objective(state: Dictionary, player: int, category: String, 
 	return true
 
 const EMPIRE_TARGET_STEPS = [0, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500]
+const EMPIRE_TARGET_MAX: int = 500
+
+static func empire_target_at_tick(position: float) -> int:
+	var index: int = clampi(floori(position), 0, EMPIRE_TARGET_STEPS.size() - 2)
+	return roundi(lerpf(float(EMPIRE_TARGET_STEPS[index]), float(EMPIRE_TARGET_STEPS[index + 1]), clampf(position - index, 0.0, 1.0)))
+
+static func empire_target_tick(amount: int) -> float:
+	var target: int = clampi(amount, 0, EMPIRE_TARGET_MAX)
+	for index in range(EMPIRE_TARGET_STEPS.size() - 1):
+		var low: int = EMPIRE_TARGET_STEPS[index]
+		var high: int = EMPIRE_TARGET_STEPS[index + 1]
+		if target <= high:
+			return float(index) + float(target - low) / float(high - low)
+	return float(EMPIRE_TARGET_STEPS.size() - 1)
 
 static func empire_fleet_counts(state: Dictionary, player: int) -> Dictionary:
 	var live: Dictionary = {}
@@ -8557,7 +8571,7 @@ static func empire_ship_available(state: Dictionary, player: int, kind: String, 
 	return false
 
 static func set_empire_target(state: Dictionary, player: int, kind: String, amount: int) -> bool:
-	if not state["teams"].has(player) or not SHIP_KINDS.has(kind) or not EMPIRE_TARGET_STEPS.has(amount):
+	if not state["teams"].has(player) or not SHIP_KINDS.has(kind) or amount < 0 or amount > EMPIRE_TARGET_MAX:
 		return false
 	if amount > 0 and not empire_ship_available(state, player, kind, empire_fleet_counts(state, player)):
 		return false

@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.78.5: Empire fleet sliders retain nonlinear milestone spacing with labeled ticks and integer interpolation between them. Authority accepts every integer 0–500; autoqueue unchanged.
+
 - v0.78.4: Hold completed category goals until their CP is spent; never draw already-satisfied goals, including repeat tiers. Preserve first-place 2 CP and category independence. Box selection prioritizes military hulls within the drag rectangle; Shift preserves existing friendly selections.
 
 - v0.78.3: Compact right-side conquest scoreboard below local objectives lists every match player's current unspent Economic, Military and Tech CP in stable player-color order. Only local conquest completions and unique unlocks produce notifications/sounds; chat and tactical warnings unchanged. Read existing public authority snapshots; private offers stay private.
