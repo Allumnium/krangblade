@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.80.2: Fog uses 80-unit cells and linear filtering. Draw unexplored darkness across the entire viewport exterior to map bounds, crop main and minimap masks to map size. Existing sight radii unchanged.
+
 - v0.80.1: Halve shield glow stroke widths on ships and stations; slightly soften bright rims to preserve owner colors. Shield mechanics unchanged.
 
 - v0.80.0: First client-side team sight pass; cached 160-unit cells, shared allied sight, dark unexplored and dim explored areas, hostile hull/structure and salvage rendering culling. Strategic route discovery unchanged. Authority targeting, last-known structures and per-team replication remain follow-ups; do not claim packet secrecy.

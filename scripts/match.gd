@@ -611,6 +611,7 @@ func _build_ui() -> void:
 	map_canvas.add_child(fog_overlay)
 	fog_overlay.z_index = 2
 	fog_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fog_overlay.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	fog_overlay.draw.connect(_draw_fog)
 	logistics_overlay = Control.new()
 	map_canvas.add_child(logistics_overlay)
@@ -1338,9 +1339,9 @@ func _draw_minimap() -> void:
 		if area.has_point(point):
 			minimap.draw_circle(point, 1.0, HUD.COLORS[pile["resource"]])
 	if fog_texture != null:
-		var corner: Vector2 = _minimap_point(fog_origin, area)
-		var far: Vector2 = _minimap_point(fog_origin + fog_extent, area)
-		minimap.draw_texture_rect(fog_texture, Rect2(corner, far - corner), false)
+		var corner: Vector2 = _minimap_point(Vector2.ZERO, area)
+		var far: Vector2 = _minimap_point(_map_size(), area)
+		minimap.draw_texture_rect_region(fog_texture, Rect2(corner, far - corner), Rect2(Vector2.ZERO, _map_size() / ECONOMY.VISION_CELL))
 	# Mirror the main map's live hull visibility and interpolation; do not
 	# reveal undiscovered system ownership.
 	for ship in state["ships"]:
@@ -2458,10 +2459,9 @@ func _update_fog(state: Dictionary) -> void:
 	fog_revision = revision
 	fog_live = ECONOMY.team_vision(state, team)
 	fog_explored.merge(fog_live, true)
-	var padding: float = 2200.0
 	var cell: float = ECONOMY.VISION_CELL
-	var start: Vector2i = ECONOMY.vision_cell(Vector2.ONE * -padding)
-	var finish: Vector2i = ECONOMY.vision_cell(_map_size() + Vector2.ONE * padding)
+	var start := Vector2i.ZERO
+	var finish: Vector2i = ECONOMY.vision_cell(_map_size())
 	var dimensions: Vector2i = finish - start + Vector2i.ONE
 	var image := Image.create(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0.015, 0.025, 0.04, 0.96))
@@ -2481,11 +2481,25 @@ func _update_fog(state: Dictionary) -> void:
 	fog_extent = Vector2(dimensions) * cell
 
 func _fog_visible(point: Vector2) -> bool:
-	return point.is_finite() and fog_live.has(ECONOMY.vision_cell(point))
+	return point.is_finite() and Rect2(Vector2.ZERO, _map_size()).has_point(point) and fog_live.has(ECONOMY.vision_cell(point))
 
 func _draw_fog() -> void:
-	if fog_texture != null:
-		fog_overlay.draw_texture_rect(fog_texture, Rect2(_screen_point(fog_origin), fog_extent * _fit() * zoom), false)
+	if fog_texture == null:
+		return
+	var bounds := Rect2(Vector2.ZERO, map_canvas.size)
+	var map_rect := Rect2(_screen_point(Vector2.ZERO), _map_size() * _fit() * zoom)
+	var inside: Rect2 = bounds.intersection(map_rect)
+	var dark := Color(0.015, 0.025, 0.04, 0.96)
+	if not inside.has_area():
+		fog_overlay.draw_rect(bounds, dark)
+		return
+	# Cover every exterior pixel, independent of camera zoom or pan.
+	fog_overlay.draw_rect(Rect2(bounds.position, Vector2(bounds.size.x, inside.position.y)), dark)
+	fog_overlay.draw_rect(Rect2(Vector2(0, inside.end.y), Vector2(bounds.size.x, bounds.end.y - inside.end.y)), dark)
+	fog_overlay.draw_rect(Rect2(Vector2(0, inside.position.y), Vector2(inside.position.x, inside.size.y)), dark)
+	fog_overlay.draw_rect(Rect2(Vector2(inside.end.x, inside.position.y), Vector2(bounds.end.x - inside.end.x, inside.size.y)), dark)
+	var source := Rect2(Vector2.ZERO, _map_size() / ECONOMY.VISION_CELL)
+	fog_overlay.draw_texture_rect_region(fog_texture, map_rect, source)
 
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
 	var team: int = int(state.get("teams", {}).get(_me(), -1))
