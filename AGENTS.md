@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.64.61: Mixed owned building Shift-selection cycles active type via Tab/Shift+Tab; grouped stations expose the command card. Keep ship and building selections separate.
+
 - v0.64.60: Box selection, including Shift-add, excludes opposing teams; allied hulls remain selectable and individual enemy inspection remains available. Command ownership checks unchanged.
 
 - v0.64.7: Fleet focus/follow uses equal weight per surviving selected hull, not the bounding-box midpoint. Preserve current zoom, selection, building focus and manual pan cancellation.

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.61: Mixed building types retain inactive groups while Tab switches command focus; grouped stations expose the card and ordinary station operations fan out. Active group drives existing highlights/control groups and primary station drives availability/trade; complete aggregate behavior and visual/runtime verification remain pending.
+
 - v0.64.60: Box selection filters by local team, including prior selections on Shift-drag. Individual enemy inspection unchanged; manual verification pending.
 
 - v0.64.59: User reports mixed fleet movement only moves focused hull type and selection rings cover HUD. Move/contextual orders and move formations now use all owned selected hulls; HUD panels sit above positive-Z GPU batches. Runtime and visual confirmation pending.

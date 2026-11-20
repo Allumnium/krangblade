@@ -310,6 +310,7 @@ var selected_yard: int = -1
 var selected_yard_count: int = 0
 var building_selection_kind: String = ""
 var selected_buildings: Dictionary = {}
+var parked_building_types: Dictionary = {}
 var building_group_panel: VBoxContainer
 var building_group_grid: GridContainer
 var building_group_title: Label
@@ -3917,6 +3918,12 @@ func _trade_toggle(_pressed: bool, resource: String) -> void:
 	_apply_thresholds(slider.lower, slider.upper, resource)
 
 func _operation(kind: String, target: String = "") -> void:
+	if building_selection_kind == "station" and selected_buildings.size() > 1:
+		var state: Dictionary = _state()
+		for ref in selected_buildings:
+			if _building_valid(state, ref, "station") and int(state["planets"][ref.x]["owner"]) == _me():
+				session.call("request_operation", ref.x, kind, target)
+		return
 	session.call("request_operation", selected, kind, target)
 
 func _cancel_job(id: int) -> void:
@@ -4007,7 +4014,7 @@ func _refresh() -> void:
 	yard_overview.visible = yard_selected and not grouped_buildings
 	_refresh_building_group(state)
 	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
-	var owned_station: bool = not other_selected and not body_selected and not yard_selected and not grouped_buildings and own_system and ECONOMY.has_station(p)
+	var owned_station: bool = not other_selected and not body_selected and not yard_selected and own_system and ECONOMY.has_station(p)
 	var right_needed: bool = field_selected or (ship_selected and state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())) or (yard_selected and not _selected_yards(state, true).is_empty()) or owned_station or (not other_selected and not yard_selected and not body_selected and not grouped_buildings and not p.is_empty() and int(p["owner"]) == 0)
 	console_right_body.visible = right_needed
 	inspector_panel.self_modulate.a = 1.0 if right_needed else 0.0
@@ -4919,7 +4926,8 @@ func _station_hit(point: Vector2, state: Dictionary) -> int:
 	return hit
 
 func _clear_building_selection() -> void:
-	selected_buildings.clear()
+	parked_building_types.clear()
+	selected_buildings = {}
 	building_selection_kind = ""
 
 func _build_control_group_strip() -> void:
@@ -5171,11 +5179,23 @@ func _in_visible_playfield(point: Vector2) -> bool:
 	return Rect2(Vector2.ZERO, map_canvas.size).has_point(point)
 
 func _prune_building_selection(state: Dictionary) -> void:
+	for kind in parked_building_types.keys():
+		var refs: Dictionary = parked_building_types[kind]
+		for ref in refs.keys():
+			if not _building_valid(state, ref, kind, int(refs[ref])):
+				refs.erase(ref)
+		if refs.is_empty():
+			parked_building_types.erase(kind)
 	if building_selection_kind.is_empty():
 		return
 	for ref in selected_buildings.keys():
 		if not _building_valid(state, ref, building_selection_kind, int(selected_buildings[ref])):
 			selected_buildings.erase(ref)
+	if selected_buildings.is_empty() and not parked_building_types.is_empty():
+		building_selection_kind = parked_building_types.keys()[0]
+		selected_buildings = parked_building_types[building_selection_kind]
+		parked_building_types.erase(building_selection_kind)
+		_set_building_primary(state, selected_buildings.keys()[0], building_selection_kind)
 	if selected_buildings.is_empty():
 		_clear_building_selection()
 		selected_yard = -1
@@ -5187,7 +5207,7 @@ func _prune_building_selection(state: Dictionary) -> void:
 		_set_building_primary(state, selected_buildings.keys()[0], building_selection_kind)
 
 func _refresh_building_group(state: Dictionary) -> void:
-	var group: bool = selected_buildings.size() > 1
+	var group: bool = selected_buildings.size() > 1 or not parked_building_types.is_empty()
 	building_group_panel.visible = group
 	if not group:
 		for button in building_group_rows.values():
@@ -5197,6 +5217,8 @@ func _refresh_building_group(state: Dictionary) -> void:
 		return
 	var kind: String = building_selection_kind
 	building_group_title.text = "%d %s" % [selected_buildings.size(), "shipyards" if kind == "shipyard" else "space stations" if kind == "station" else "planetary defenses"]
+	if not parked_building_types.is_empty():
+		building_group_title.text += " · Tab"
 	for ref in building_group_rows.keys():
 		if not selected_buildings.has(ref) or building_group_rows[ref].get_meta("kind") != kind:
 			var old: Button = building_group_rows[ref]
@@ -5284,6 +5306,26 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	if state.is_empty() or str(session.get("phase")) != "match":
 		return
 	last_control_group_recall = -1
+	if additive and not double_click and selected_units.is_empty():
+		var yard: Vector2i = _yard_hit(point, state)
+		var station: int = _station_hit(point, state)
+		var body: Vector2i = _body_hit(point, state)
+		var kind: String = "shipyard" if yard.x >= 0 else "station" if station >= 0 else "pds" if body.x >= 0 and state["planets"][body.x].get("pds", {}).has(body.y) else ""
+		if not kind.is_empty():
+			var ref: Vector2i = yard if kind == "shipyard" else Vector2i(station, 0) if kind == "station" else body
+			if int(state["planets"][ref.x]["owner"]) == _me():
+				if kind != building_selection_kind:
+					if not selected_buildings.is_empty():
+						parked_building_types[building_selection_kind] = selected_buildings
+					selected_buildings = parked_building_types.get(kind, {})
+					parked_building_types.erase(kind)
+					building_selection_kind = kind
+				selected_buildings[ref] = state["planets"][ref.x]["yards"].size()
+				_set_building_primary(state, ref, kind)
+				pending_command = ""
+				_load_thresholds()
+				_refresh()
+				return
 	_clear_building_selection()
 	if double_click:
 		additive = false
@@ -5568,6 +5610,20 @@ func _command_member(craft: Dictionary) -> bool:
 
 func _cycle_command_kind(reverse: bool) -> bool:
 	var state: Dictionary = _state()
+	if not building_selection_kind.is_empty() and not parked_building_types.is_empty():
+		var kinds: Array = parked_building_types.keys()
+		kinds.append(building_selection_kind)
+		kinds.sort()
+		var next: String = kinds[posmod(kinds.find(building_selection_kind) + (-1 if reverse else 1), kinds.size())]
+		parked_building_types[building_selection_kind] = selected_buildings
+		selected_buildings = parked_building_types[next]
+		parked_building_types.erase(next)
+		building_selection_kind = next
+		_set_building_primary(state, selected_buildings.keys()[0], next)
+		pending_command = ""
+		_load_thresholds()
+		_refresh()
+		return true
 	_sync_command_kind(state)
 	var kinds: Array[String] = _command_kinds(state)
 	if kinds.size() < 2:

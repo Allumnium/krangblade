@@ -88,6 +88,8 @@ Observed approximately 5 FPS as the match progressed; Godot profiler set to self
 
 ### Existing RTS implementation and validation backlog
 
+- [ ] v0.64.61: Verify mixed-building Shift-selection and Tab cycling, grouped station operation dispatch, destruction pruning, and separate ship selection. Extend mixed building highlights, complete group control recall and aggregate availability/trade semantics.
+
 - [ ] v0.64.60: Playtest mixed-team and enemy-only drag selection, Shift-add after enemy inspection, allied selection and unchanged command ownership.
 
 - [ ] v0.64.59: Verify mixed-type move clicks, minimap and drag formations affect all owned selected hulls while specialized commands remain focused; inspect GPU selection rings and health overlays beneath the HUD at all UI scales.
