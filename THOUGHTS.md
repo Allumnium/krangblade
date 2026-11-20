@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.60: Box selection filters by local team, including prior selections on Shift-drag. Individual enemy inspection unchanged; manual verification pending.
+
 - v0.64.59: User reports mixed fleet movement only moves focused hull type and selection rings cover HUD. Move/contextual orders and move formations now use all owned selected hulls; HUD panels sit above positive-Z GPU batches. Runtime and visual confirmation pending.
 
 - v0.64.58: Frozen combat hull health uses packed float64 slots, with structure health and sparse damage dictionaries retained. Lethal-shot attribution reads the same starting HP; runtime and profiling pending.

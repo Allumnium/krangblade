@@ -5415,10 +5415,19 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	if not additive:
 		selected_units.clear()
 	var poses: Dictionary = _ship_poses(state)
+	var team: int = int(state["teams"].get(_me(), -1))
+	var friendly_ids: Dictionary = {}
 	for craft in state.get("ships", []):
+		if int(state["teams"].get(int(craft["owner"]), -2)) != team:
+			continue
+		friendly_ids[int(craft["id"])] = true
 		var id: int = int(craft["id"])
 		if poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
 			selected_units.append(id)
+	# Shift-box must not retain a previously inspected enemy.
+	for id in selected_units.duplicate():
+		if not friendly_ids.has(id):
+			selected_units.erase(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 	follow_units = false
 	selected = -1
