@@ -1618,8 +1618,8 @@ func _roman_level(level: int) -> String:
 	return result
 
 func _upgrade_level_badge(button: Button, level: int) -> void:
-	var label: Label = button.get_meta("level_badge", null)
-	if label == null:
+	var label: Label = button.get_meta("level_badge") as Label if button.has_meta("level_badge") else null
+	if not is_instance_valid(label):
 		label = Label.new()
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		label.add_theme_font_size_override("font_size", 10)

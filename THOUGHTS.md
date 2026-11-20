@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.3: User profiler Self view highlights sector_limit, combat and field-position reconstruction. Prioritize static sector/field geometry caching; compare identical workloads. Missing upgrade badge metadata was read before initialization; guard access explicitly. Runtime verification pending.
+
 - v0.64.2: Mixed fleet command focus is client-local and cycles owned hull types without dropping selection. Commands including contextual movement apply to the active type; inspect usability and Tab focus handling in play.
 
 - v0.64.1: Synthetic fleet stress harness reports timing distributions, deadline misses, phase costs and live hull counts. Dense battle casualties change workload over time; compare counts and identical seed/options. No measured baseline yet; graphical and ENet workloads remain separate.
