@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.66.3: F4 Empire button in global strip opens a match-local fleet target editor for every ship kind; targets are planning only, not production commands. Conquest button pulses while balance is positive.
+
 - v0.66.2: Wider objective tracker with inline progress, Military category, and conquest points button opening the upgrade modal. Spending remains unavailable until rewards are implemented.
 
 - v0.66.1: Miners prefer viable direct access from their current system to a given asteroid field; alternative safe entrances remain fallback. Preserve depot checks and physical delivery.

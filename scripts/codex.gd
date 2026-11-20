@@ -279,7 +279,7 @@ func _resource_card(resource: String, description: String) -> void:
 	_label(text, description)
 
 func _overview() -> void:
-	_body("Expand through local economies and direct fleet command. The default logistics lens marks local resource strengths (+/++) and weaknesses (-/--). Population appears beside storage. First finishers earn 2 conquest points (ties share first); later finishers earn 1. Objectives: two new systems, 1,000t Metals produced or mined, 200k resident population. Click conquest points to view the upgrade window; spending is not yet available.")
+	_body("Expand through local economies and direct fleet command. The default logistics lens marks local resource strengths (+/++) and weaknesses (-/--). Population appears beside storage. First finishers earn 2 conquest points (ties share first); later finishers earn 1. Objectives: two new systems, 1,000t Metals produced or mined, 200k resident population. Click conquest points to view upgrades; spending is not yet available. F4 opens Empire fleet targets (planning only).")
 	_section("The strategic loop")
 	_flow(["Extract resources", "Build & recruit", "Expand", "Defend supply"])
 	_body("Start with 3 Harvesters, 2 fighters and 1 freighter. Select a unit or station to issue orders.")

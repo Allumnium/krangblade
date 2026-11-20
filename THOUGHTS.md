@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.66.3: Empire targets are local match UI state (0–10,000 each); no automation or network commands yet. Verify hotkey, modal focus and pulse readability.
+
 - v0.66.2: Objective rows use inline right-aligned counters; Military replaces Conquest category. Upgrade modal currently displays balance and explicitly states that spending is unavailable. Verify visual fit and input.
 
 - v0.66.1: User reports miners from Nyxaxis detouring through Nyxyra toward an asteroid field. Prefer viable current-system access per field before scoring remote alternatives; verify screenshot topology and runtime regression.

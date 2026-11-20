@@ -304,6 +304,10 @@ var logistics_overlay: Control
 var objectives_overlay: Control
 var conquest_button: Button
 var conquest_dialog: AcceptDialog
+var empire_dialog: AcceptDialog
+var empire_targets: Dictionary = {}
+var conquest_balance: int = 0
+var conquest_pulse_time: float = 0.0
 const OBJECTIVES_WIDTH: float = 328.0
 var global_resource_fills: Dictionary = {}
 var global_resource_segments: Dictionary = {}
@@ -6089,6 +6093,11 @@ func _build_global_selection_strip() -> void:
 		_yard_ability_face(button, entry[1], _selection_portrait_icon(entry[2]))
 		_set_button_hint(button, "Select all owned " + str(entry[1]).to_lower())
 		_register_command_hotkey(button, int(entry[3]), "General", entry[0], "Select all " + str(entry[1]).to_lower())
+	var empire_button: Button = _button("", _open_empire, global_selection_strip)
+	_yard_ability_face(empire_button, "Empire", _command_icon('<circle cx="16" cy="16" r="6"/><circle cx="5" cy="6" r="3"/><circle cx="27" cy="6" r="3"/><circle cx="16" cy="28" r="2"/><path d="M8 9L12 12M24 9L20 12M16 22V26"/>'))
+	_set_button_hint(empire_button, "Empire fleet planning")
+	_register_command_hotkey(empire_button, KEY_F4, "General", "empire", "Empire")
+	_build_empire_dialog()
 	global_selection_strip.resized.connect(_layout_console)
 
 func _select_all_buildings(kind: String) -> void:
@@ -6191,6 +6200,14 @@ func _pan_camera(direction: Vector2, delta: float) -> void:
 		map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
+	if is_instance_valid(conquest_button):
+		if conquest_balance > 0:
+			conquest_pulse_time += delta
+			var glow: float = 0.5 + 0.5 * sin(conquest_pulse_time * TAU / 1.4)
+			conquest_button.modulate = Color(1.0 + glow * 0.3, 0.88 + glow * 0.22, 0.65 + glow * 0.35)
+		else:
+			conquest_pulse_time = 0.0
+			conquest_button.modulate = Color.WHITE
 	if formation_button != 0 and not Input.is_mouse_button_pressed(formation_button):
 		formation_button = 0
 		map_canvas.queue_redraw()
@@ -8006,6 +8023,7 @@ func _refresh_conquest_button(state: Dictionary) -> void:
 		return
 	conquest_button.visible = not state.is_empty()
 	var points: int = int(state.get("objectives", {}).get(_me(), {}).get("points", 0))
+	conquest_balance = points
 	conquest_button.text = "Conquest points: %d" % points
 	if is_instance_valid(conquest_dialog) and conquest_dialog.visible:
 		conquest_dialog.dialog_text = _conquest_dialog_text(points)
@@ -8017,3 +8035,43 @@ func _open_conquest_upgrades() -> void:
 	var points: int = int(_state().get("objectives", {}).get(_me(), {}).get("points", 0))
 	conquest_dialog.dialog_text = _conquest_dialog_text(points)
 	conquest_dialog.popup_centered(Vector2i(420, 180))
+
+func _build_empire_dialog() -> void:
+	empire_dialog = AcceptDialog.new()
+	empire_dialog.title = "Empire"
+	empire_dialog.theme = theme
+	empire_dialog.exclusive = true
+	empire_dialog.ok_button_text = "Close"
+	add_child(empire_dialog)
+	var content := VBoxContainer.new()
+	content.custom_minimum_size = Vector2(360, 0)
+	empire_dialog.add_child(content)
+	var heading := Label.new()
+	heading.text = "Desired fleet composition"
+	content.add_child(heading)
+	var note := Label.new()
+	note.text = "Planning only — does not issue production orders."
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	content.add_child(note)
+	for kind in ECONOMY.SHIP_KINDS:
+		var row := HBoxContainer.new()
+		content.add_child(row)
+		var name_label := Label.new()
+		name_label.text = _ship_kind_name(kind)
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(name_label)
+		var target := SpinBox.new()
+		target.min_value = 0
+		target.max_value = 10000
+		target.step = 1
+		target.custom_minimum_size.x = 100
+		row.add_child(target)
+		target.value = int(empire_targets.get(kind, 0))
+		target.value_changed.connect(_set_empire_target.bind(kind))
+
+func _set_empire_target(value: float, kind: String) -> void:
+	empire_targets[kind] = clampi(int(value), 0, 10000)
+
+func _open_empire() -> void:
+	if str(session.get("phase")) == "match":
+		empire_dialog.popup_centered(Vector2i(420, 400))
