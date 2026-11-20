@@ -1934,6 +1934,7 @@ func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
 		"orbital_housing": '<circle cx="16" cy="16" r="13" fill="#41667b" stroke="#b3d6e8" stroke-width="2"/><path fill="#a0d5b7" d="M5 23Q16 11 27 23L23 27H9Z"/><path fill="#d4eef0" d="M9 21V13L16 7L23 13V21H19V16H13V21Z"/><path stroke="#b3d6e8" stroke-width="1.7" d="M1 16H5M27 16H31"/>',
 		"yard": '<path fill="#9ebacf" d="M3 3H10V29H3ZM22 3H29V29H22ZM10 3H22V7H10ZM10 25H22V29H10Z"/><path fill="#d4e9f5" d="M3 3H7V29H3ZM22 3H26V29H22Z"/><path fill="#5c8fae" d="M16 8L21 22L16 20L11 22Z"/><path fill="#ffd088" d="M5 10H9V13H5ZM23 10H27V13H23ZM5 20H9V23H5ZM23 20H27V23H23Z"/>',
 		"reinforced_plating": '<path fill="#a9c4d7" d="M16 2L29 7V17Q27 26 16 30Q5 26 3 17V7Z"/><path fill="#405a72" d="M16 7L24 10V17Q22 23 16 26Q10 23 8 17V10Z"/><path fill="#dbeaf4" d="M16 10L22 12V17Q20 21 16 23Q12 21 10 17V12Z"/>',
+		"dyson_sphere": '<circle cx="16" cy="16" r="12" fill="#e7ae54" stroke="#b6d4eb" stroke-width="2"/><ellipse cx="16" cy="16" rx="6" ry="12" fill="none" stroke="#e0eef9" stroke-width="2"/><path d="M4 16H28M7 10H25M7 22H25" stroke="#e0eef9" stroke-width="1.5"/>',
 		"laser_matrix": '<path fill="#829caf" d="M2 24L9 17L15 23L8 30ZM10 16L17 9L23 15L16 22Z"/><path stroke="#ff776f" stroke-width="4" d="M11 21L26 6M19 13L29 3"/><path stroke="#ffe9d8" stroke-width="1.3" d="M11 21L26 6M19 13L29 3"/>',
 		"pds": '<circle cx="15" cy="18" r="11" fill="#5c90ad"/><path fill="#97c3d8" d="M5 17Q15 10 25 17L24 22Q15 16 6 22Z"/><path fill="#b3ccdf" d="M12 4H25L29 8V13H19L15 19L10 16L15 10H12Z"/><path stroke="#ff8c75" stroke-width="2.5" d="M25 7L30 2"/><path fill="#eaf6fc" d="M18 6H24V9H18Z"/>',
 		"Metals": '<path fill="#9fb8c9" d="M2 17H30V29H2ZM5 6H10V18H5ZM13 2H18V18H13Z"/><path fill="#cbd9e3" d="M2 17L12 11V17L21 11V17L30 11V20H2Z"/><path fill="#344b60" d="M6 23H12V27H6ZM16 23H26V27H16Z"/><path fill="#ffd194" d="M5 6H10V9H5ZM13 2H18V5H13Z"/>',
@@ -1987,7 +1988,7 @@ func _build_station_command_card(parent: Container) -> void:
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
 	_register_command_hotkey(station_upgrade_buttons["reinforced_plating"], KEY_V, "Station", "station_plating", "Reinforced Plating")
 	_register_command_hotkey(station_upgrade_buttons["laser_matrix"], KEY_L, "Station", "station_matrix", "Laser Matrix")
-	_station_spacer(station_primary_grid)
+	station_upgrade_buttons["dyson_sphere"] = _station_button(station_primary_grid, "Dyson\nSphere", "dyson_sphere", _station_upgrade_pressed.bind("dyson_sphere"))
 	_station_spacer(station_primary_grid)
 	for i in range(4):
 		_station_spacer(station_primary_grid)
@@ -2072,11 +2073,15 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 	(station_select_yards_button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if station_select_yards_button.disabled else Color.WHITE
 	for kind in station_upgrade_buttons:
 		var button: Button = station_upgrade_buttons[kind]
+		if kind == "dyson_sphere":
+			button.visible = p.get("conquest_rewards", []).has(kind) or bool(p["station"].get(kind, false))
 		var installed: bool = bool(p["station"].get(kind, false))
 		_upgrade_level_badge(button, 1 if installed else 0)
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not _any_selected_station_buildable(kind, p)
-		var hint: String = "Reinforced Plating I · %.0f s (1×)\nMaximum hull: 3,000 HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s (1×)\n+2 defensive lasers (4 total) · 18 damage each · 1 shot/s (1×) · range 180"
+		var hint: String = "Reinforced Plating I · %.0f s (1×)\nMaximum hull: 6,500 HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s (1×)\n+2 defensive lasers (4 total) · 18 damage each · 1 shot/s (1×) · range 180"
+		if kind == "dyson_sphere":
+			hint = "Dyson Sphere · %.0f s (1×)\nAll ship material costs in this sector -50%%"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
 			_set_button_hint(button, _button_hint(button) + "\n" + ("Installed" if installed else "Building"))
@@ -4379,6 +4384,7 @@ func _job_name(item: Dictionary) -> String:
 		"yard_upgrade": return "Shipyard %d → Lv %d" % [ECONOMY.shipyard_port(_planet(), int(item["target"])), int(item["level"])]
 		"reinforced_plating": return "Reinforced Plating"
 		"laser_matrix": return "Laser Matrix"
+		"dyson_sphere": return "Dyson Sphere"
 		"production": return "%s → Lv %d" % [str(item["target"]), int(item["level"])]
 		_: return str(item["kind"]).replace("_", " ").capitalize()
 
@@ -5045,6 +5051,9 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 	_draw_planet_upgrade_deliveries(state, index, pos, radius, detail)
 	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
 	_draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity)
+	if bool(system.get("station", {}).get("dyson_sphere", false)):
+		_draw_pds_frame(pos, star_radius * 1.18, 1.0)
+		map_canvas.draw_arc(pos, star_radius * 1.35, 0.0, TAU, 48, Color("#e5b66c"), 1.5, true)
 	if detail < 0.5:
 		var defense_health: float = 1.0
 		for battery in system.get("pds", {}).values():

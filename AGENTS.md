@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.81.0: PDS cannot be attacked independently; lost on station destruction. Dyson Sphere Tech reward unlocks per-station construction after Warp Gates or three category-specific Tech research ranks; 20kt Metals, 10kt Crystals, 300 work. Completed sphere halves local ship material costs, stacks with research, appears as stellar ribs. No independent HP.
+
 - v0.80.4: Supersede direct cross-sector flight: manual travel uses sector centers and highway graph; patrol fallback uses same routing. Scoreboard shows lifetime earned category CP, spendable header balances unchanged.
 
 - v0.80.3: Neutral sector/highway contours visible above fog; suppress hidden territory tint and system/field contents. Logistics lens restricted to friendly team stations and shipments. Scout sight 2,700.

@@ -1246,6 +1246,13 @@ func _test_station_crystals() -> void:
 	assert(ECON.rate(home, "Crystals") == 0.0)
 	assert(ECON._cost("cruiser", 1)["Crystals"] == 320.0)
 	assert(ECON._cost("laser_matrix", 1)["Crystals"] == 3200.0)
+	assert(not ECON.reward_eligible([], "dyson_sphere", "tech"))
+	assert(ECON.reward_eligible(["warp_gate"], "dyson_sphere", "tech"))
+	for kind in ECON.SHIP_KINDS:
+		var full: Dictionary = ECON.construction_cost({}, kind, 1)
+		var discounted: Dictionary = ECON.construction_cost({"station": {"dyson_sphere": true}}, kind, 1)
+		for resource in full:
+			assert(discounted[resource] == full[resource] * 0.5)
 	assert(ECON.construction_cost({"conquest_rewards": ["cloak"]}, "scout", 1)["Crystals"] == 36.0)
 	print("PASS: station baseline, planetary crystal rate, blockade and increased construction costs")
 
@@ -4240,7 +4247,7 @@ func _test_conquest_resistance_and_evacuation() -> void:
 	assert(ECON.command_fighters(state, 1, [10001], 2))
 	state["elapsed"] = 20.0
 	ECON._combat(state, graph, 1.0)
-	assert(colony["pds"].is_empty())
+	assert(colony["pds"].has(0))
 	assert(float(attacker["hp"]) == ECON.SHIP_HP - ECON.PDS_DAMAGE)
 	var freighter: Dictionary = {"id": 10002, "owner": 2, "kind": "ship", "at": 1, "route": [2], "leg": 100.0, "position": Vector2(1100, 0), "source": -1, "dest": 2, "cargo": ECON.empty_stock()}
 	freighter["cargo"]["Metals"] = 50.0

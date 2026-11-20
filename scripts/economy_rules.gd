@@ -124,7 +124,7 @@ const PASSIVE_REGEN: float = 1.0 / 3.0
 const STATION_HP: float = 5000.0
 const REINFORCED_STATION_HP: float = STATION_HP + 1500.0
 const STATION_LASER_COUNT: int = 2
-const STATION_UPGRADES = ["reinforced_plating", "laser_matrix"]
+const STATION_UPGRADES = ["reinforced_plating", "laser_matrix", "dyson_sphere"]
 const STATION_SALVAGE_FRACTION: float = 0.20
 const LASER_DAMAGE: float = 18.0
 const PDS_DAMAGE: float = LASER_DAMAGE * 2.0
@@ -837,6 +837,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
 				2: return {"Metals": 2000.0, "Organics": 200.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}
 				3: return {"Metals": 6000.0, "Organics": 600.0, "Crystals": 600.0 * CRYSTAL_COST_MULTIPLIER}
 		"pds": return {"Metals": 540.0, "Organics": 60.0, "Crystals": 60.0 * CRYSTAL_COST_MULTIPLIER}
+		"dyson_sphere": return {"Metals": 20000.0, "Crystals": 10000.0}
 		"reinforced_plating": return {"Metals": 4000.0}
 		"laser_matrix": return {"Metals": 2500.0, "Crystals": 800.0 * CRYSTAL_COST_MULTIPLIER}
 		"yard_upgrade": return {"Metals": 240.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
@@ -860,6 +861,7 @@ static func _work(kind: String, level: int) -> float:
 		"destroyer": return 180.0
 		"yard": return 30.0
 		"pds": return 36.0
+		"dyson_sphere": return 300.0
 		"reinforced_plating", "laser_matrix": return 60.0
 		"yard_upgrade": return 15.0 * level
 		"production": return 10.0 * level
@@ -920,7 +922,7 @@ static func station_max_hp(p: Dictionary) -> float:
 	return REINFORCED_STATION_HP if bool(p.get("station", {}).get("reinforced_plating", false)) else STATION_HP
 
 static func station_upgrade_available(p: Dictionary, kind: String) -> bool:
-	return STATION_UPGRADES.has(kind) and has_station(p) and not bool(p["station"].get(kind, false)) and not _has_job(p, kind, "") and affordable(p, _cost(kind, 1))
+	return STATION_UPGRADES.has(kind) and (kind != "dyson_sphere" or p.get("conquest_rewards", []).has("dyson_sphere")) and has_station(p) and not bool(p["station"].get(kind, false)) and not _has_job(p, kind, "") and affordable(p, _cost(kind, 1))
 
 # Move later construction down one slot when an earlier job is cancelled.
 # Preserve its fractional work, but retain only the cheaper recipe's
@@ -1051,7 +1053,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 				if station_slot == 0:
 					return false
 			target = ""
-		"reinforced_plating", "laser_matrix":
+		"reinforced_plating", "laser_matrix", "dyson_sphere":
 			if not target.is_empty() or not station_upgrade_available(p, kind):
 				return false
 		"yard_upgrade":
@@ -1563,6 +1565,8 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 		"reinforced_plating":
 			p["station"]["reinforced_plating"] = true
 			p["station"]["hp"] = minf(REINFORCED_STATION_HP, float(p["station"]["hp"]) + REINFORCED_STATION_HP - STATION_HP)
+		"dyson_sphere":
+			p["station"]["dyson_sphere"] = true
 		"laser_matrix":
 			p["station"]["laser_matrix"] = true
 			p["station"]["weapons"] = p["station"].get("weapons", []) + [_new_pds(), _new_pds()]
@@ -3289,7 +3293,7 @@ static func _clear_tactical_order(ship: Dictionary) -> void:
 static func _hostile_hull(state: Dictionary, player: int, target: Dictionary) -> bool:
 	var team: int = int(state["teams"].get(player, 0))
 	var enemy_team: int = int(state["teams"].get(int(target.get("owner", 0)), 0))
-	return team > 0 and enemy_team > 0 and enemy_team != team and ship_visible_to_team(state, target.get("entity", target), team)
+	return target.get("kind", "") != "pds" and team > 0 and enemy_team > 0 and enemy_team != team and ship_visible_to_team(state, target.get("entity", target), team)
 
 static func _attack_destination(graph: Dictionary, target: Dictionary) -> int:
 	var sector: int = local_sector(graph, target)
@@ -6063,7 +6067,6 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells, "positions": threat_positions, "teams": threat_teams, "ids": threat_ids}
 	threat_index["count"] = threat_count
 	var yard_targets: Dictionary = {}
-	var pds_targets: Dictionary = {}
 	var station_targets: Dictionary = {}
 	var system_count: int = (state["planets"] as Array).size()
 	for index in range(system_count):
@@ -6084,16 +6087,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			positions[target_id] = pos
 			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "shipyard"})
-		for slot in system.get("pds", {}):
-			# Disjoint negative ID range; all batteries use the same
-			# authoritative fire/range origin as their defensive shots.
-			var target_id: int = -2 - system_count * 3 - int(slot) * system_count - index
-			var pos: Vector2 = graph["points"][index]
-			pds_targets[target_id] = Vector2i(index, int(slot))
-			health[target_id] = float(system["pds"][slot].get("hp", PDS_HP))
-			positions[target_id] = pos
-			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
-			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "pds"})
+
 	_detect_cloaked(state, ships, cells, positions, team_by_id)
 	var hostile_cache: Dictionary = {}
 	var positive_hostile_cache: Dictionary = {}
@@ -6384,16 +6378,6 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 					progress["enemy_ships_destroyed"] = int(progress.get("enemy_ships_destroyed", 0)) + 1
 				_record_ship_destruction(state, graph, ship)
 				_remove_indexed_hull(state, ship)
-	# Fixed batteries and shipyards participate in simultaneous damage.
-	for id in pds_targets:
-		if not damage.has(id):
-			continue
-		var location: Vector2i = pds_targets[id]
-		var defenses: Dictionary = state["planets"][location.x]["pds"]
-		var battery: Dictionary = defenses[location.y]
-		battery["hp"] = maxf(0.0, float(battery.get("hp", PDS_HP)) - float(damage[id]))
-		if float(battery["hp"]) <= EPS:
-			defenses.erase(location.y)
 	# Remove in reverse slot order to preserve indices during compaction.
 	var destroyed: Array[int] = []
 	for id in yard_targets:
@@ -8074,6 +8058,7 @@ const CONQUEST_REWARDS = {
 	"shield_2": ["Shields 2", "Military +60% shield HP; stations +100%.", "Military construction: extra Crystals (40% of base Metals).", "military", "guard"],
 	"shield_3": ["Shields 3", "Military +90% shield HP; stations +150%.", "Military construction: extra Crystals (60% of base Metals).", "military", "guard"],
 	"armor": ["Reinforced Armor", "Military hulls take 15% less hull damage.", "Military construction: +15% Metals.", "military", "reinforced_plating"],
+	"dyson_sphere": ["Dyson Sphere", "Unlock a stellar megastructure: all local ship material costs -50%.", "20kt Metals and 10kt Crystals per sector.", "tech", "dyson_sphere"],
 	"warp_gate": ["Warp Gates", "Deploy a science vessel as a gate; link owned gates for rapid travel.", "Consumes 1 antimatter per gate.", "tech", "transform"],
 	"cloak": ["Cloaking Field", "Scouts hide outside 250-unit enemy detection. Firing reveals them for 5 s.", "Replaces Scout armor/shields; extra Crystals (60% of base Metals).", "military", "auto_wander"],
 	"rank_metals": ["Precision Refining", "+5% base planetary Metals output per rank.", "", "economic", "Metals"],
@@ -8132,6 +8117,8 @@ static func reward_eligible(rewards: Array, key: String, category: String) -> bo
 	var pool: String = CONQUEST_REWARDS[key][3]
 	if pool != category and pool != "general":
 		return false
+	if key == "dyson_sphere":
+		return rewards.has("warp_gate") or rewards.count("rank_crystals") + rewards.count("rank_science") + rewards.count("rank_civilian") >= 3
 	if key == "shield_2":
 		return rewards.has("shield_1")
 	if key == "shield_3":
@@ -8319,6 +8306,13 @@ static func military_hull(kind: String) -> bool:
 	return kind in ["scout", "fighter", "cruiser", "destroyer"]
 
 static func construction_cost(p: Dictionary, kind: String, level: int) -> Dictionary:
+	var cost: Dictionary = _construction_cost_before_dyson(p, kind, level)
+	if SHIP_KINDS.has(kind) and bool(p.get("station", {}).get("dyson_sphere", false)):
+		for resource in cost:
+			cost[resource] = float(cost[resource]) * 0.5
+	return cost
+
+static func _construction_cost_before_dyson(p: Dictionary, kind: String, level: int) -> Dictionary:
 	var cost: Dictionary = _cost(kind, level)
 	if military_hull(kind):
 		var rewards: Array = p.get("conquest_rewards", [])
