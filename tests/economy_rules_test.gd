@@ -842,7 +842,16 @@ func _test_laser_blocks() -> void:
 				target = id
 		assert(ECON._laser_block_nearest(blocks, positions, point, ECON.LASER_RANGE * ECON.LASER_RANGE, -1) == [best, target])
 
+func _test_missile_blocks() -> void:
+	var positions: Dictionary = {8: Vector2(10, 0), -2: Vector2(-10, 0), 9: Vector2(100, 0)}
+	var candidates: Array = [{"id": 8}, {"id": -2}, {"id": 9}]
+	var blocks: Array = ECON._laser_blocks(candidates, positions, true)
+	assert(ECON._missile_block_nearest(blocks, positions, Vector2.ZERO, 10000.0, -1, false, -1) == [100.0, -2])
+	assert(ECON._missile_block_nearest(blocks, positions, Vector2.ZERO, 10000.0, -1, true, 8) == [100.0, 8])
+	assert(ECON._missile_block_nearest(blocks, positions, Vector2.ZERO, 99.0, -1, false, -1) == [99.0, -1])
+
 func _initialize() -> void:
+	_test_missile_blocks()
 	_test_laser_blocks()
 	_test_hostile_buckets()
 	_test_repair_cells()
