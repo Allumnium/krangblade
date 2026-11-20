@@ -2799,7 +2799,7 @@ func _set_rally_at(point: Vector2) -> void:
 func _build_selection_portrait(parent: Container) -> void:
 	selection_portrait = VBoxContainer.new()
 	selection_portrait.custom_minimum_size.x = 90.0
-	selection_portrait.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	selection_portrait.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	selection_portrait.add_theme_constant_override("separation", 1)
 	parent.add_child(selection_portrait)
 	selection_portrait_art = TextureRect.new()
