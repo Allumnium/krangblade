@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.78.6: Station 5,000 HP (6,500 reinforced); yard 1,500 HP per level. Station shields scale with halved hull HP; yards have no separate shields. All existing shields recharge 5% per simulation second after the unchanged 5 s delay. Mobile hulls and PDS unchanged.
+
 - v0.78.5: Empire fleet sliders retain nonlinear milestone spacing with labeled ticks and integer interpolation between them. Authority accepts every integer 0–500; autoqueue unchanged.
 
 - v0.78.4: Hold completed category goals until their CP is spent; never draw already-satisfied goals, including repeat tiers. Preserve first-place 2 CP and category independence. Box selection prioritizes military hulls within the drag rectangle; Shift preserves existing friendly selections.

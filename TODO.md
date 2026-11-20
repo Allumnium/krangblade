@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.78.6: Verify halved station/yard hull durability and station shield capacity, reinforced plating, 5%/s shield recharge, structure destruction and host/guest combat replication. Runtime pending.
+
 - [ ] v0.78.5: Verify labeled fleet slider ticks, intermediate integer dragging and persisted targets with host/guest, narrow windows and endpoints. Integer round-trip and authority fixtures added; runtime/visual pending.
 
 - [ ] v0.78.4: Verify completed goal stays until all category CP is allocated, no immediate reroll completion, skipped lifetime tiers, independent categories, host/guest synchronization and mixed combat/civilian box selection (including Shift). Economy regression extended; runtime/manual pending.
