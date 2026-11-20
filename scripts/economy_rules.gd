@@ -1224,7 +1224,7 @@ static func _refill_yard_autobuild(state: Dictionary, index: int, p: Dictionary)
 				p["queue"][-1]["yard_auto"] = true
 
 static func construction_leaves_salvage(item: Dictionary) -> bool:
-	return SHIP_KINDS.has(item["kind"]) or item["kind"] in ["yard", "pds", "economy_building", "warehouse", "habitation", "orbital_housing"]
+	return SHIP_KINDS.has(item["kind"])
 
 static func construction_position(state: Dictionary, index: int, item: Dictionary) -> Vector2:
 	var elapsed: float = float(state["elapsed"])
