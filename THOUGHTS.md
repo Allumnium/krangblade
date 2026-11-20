@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.15: Territory shader inner sector clipping now reads static near-neighbor rows rather than rescanning all sites per pixel. Conservative cutoff and original order retained; floating-point boundary parity, deep zoom and shader runtime pending. Outer site/lane scans and influence recomputation remain.
+
 - v0.64.14: Destruction sparks and detached outlines now share existing combat instance batches, with per-primitive viewport rejection. CPU retains drift/spin calculations. Visual layering and mass-destruction performance pending verification.
 
 - v0.64.13: Cargo fill/background and halo batches preserve fractional fills, with detailed cargo hulls instanced except science. Reuse world interpolation within a frame/revision and reproject after camera movement; isolate mutable draw poses. GPU motion interpolation deferred until shared transforms can preserve picking, beams and cargo alignment. Runtime/visual/benchmark pending.
