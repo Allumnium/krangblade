@@ -7856,8 +7856,8 @@ static func _update_objectives(state: Dictionary) -> void:
 		_fill_reward_offer(state, int(player))
 		if state.get("ai_players", []).has(player):
 			var offer: Array = objective_progress(state, int(player)).get("offer", [])
-			if not offer.is_empty():
-				acquire_reward(state, int(player), str(offer[0]))
+			if not offer.is_empty() and int(objective_progress(state, int(player))["points"]) > 0:
+				acquire_reward(state, int(player), str(offer[0]), objective_progress(state, int(player)).get("rewards", []).size())
 
 static func specialization_grade(system: Dictionary, resource: String) -> int:
 	if not has_planets(system):
@@ -7886,27 +7886,41 @@ const CONQUEST_REWARDS = {
 static func has_reward(system: Dictionary, key: String) -> bool:
 	return system.get("conquest_rewards", []).has(key)
 
-static func _fill_reward_offer(state: Dictionary, player: int) -> void:
+static func _fill_reward_offer(state: Dictionary, player: int, previous: Array = [], force_draft: bool = false) -> void:
 	var progress: Dictionary = objective_progress(state, player)
-	if int(progress["points"]) < 1 or not progress.get("offer", []).is_empty():
+	if (int(progress["points"]) < 1 and not force_draft) or not progress.get("offer", []).is_empty():
 		return
-	var available: Array = []
+	var fresh: Array = []
+	var repeats: Array = []
 	for key in CONQUEST_REWARDS:
 		if not progress.get("rewards", []).has(key):
-			available.append(key)
+			if previous.has(key):
+				repeats.append(key)
+			else:
+				fresh.append(key)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(state["map"]["seed"]) + player * 7919 + progress.get("rewards", []).size() * 104729
 	var offer: Array = []
-	while not available.is_empty() and offer.size() < 3:
-		offer.append(available.pop_at(rng.randi_range(0, available.size() - 1)))
+	# Prefer previously unseen choices; refill from old unowned choices only
+	# when the small reward pool makes overlap unavoidable.
+	while offer.size() < 3 and not fresh.is_empty():
+		offer.append(fresh.pop_at(rng.randi_range(0, fresh.size() - 1)))
+	while offer.size() < 3 and not repeats.is_empty():
+		offer.append(repeats.pop_at(rng.randi_range(0, repeats.size() - 1)))
+	for i in range(offer.size() - 1, 0, -1):
+		var j: int = rng.randi_range(0, i)
+		var value: String = offer[i]
+		offer[i] = offer[j]
+		offer[j] = value
 	progress["offer"] = offer
 
-static func acquire_reward(state: Dictionary, player: int, key: String) -> bool:
+static func acquire_reward(state: Dictionary, player: int, key: String, generation: int) -> bool:
 	if not state["teams"].has(player) or not CONQUEST_REWARDS.has(key):
 		return false
 	var progress: Dictionary = objective_progress(state, player)
-	if int(progress["points"]) < 1 or not progress.get("offer", []).has(key) or progress.get("rewards", []).has(key):
+	if generation != progress.get("rewards", []).size() or int(progress["points"]) < 1 or not progress.get("offer", []).has(key) or progress.get("rewards", []).has(key):
 		return false
+	var previous: Array = progress["offer"].duplicate()
 	var rewards: Array = progress.get("rewards", [])
 	rewards.append(key)
 	progress["rewards"] = rewards
@@ -7915,7 +7929,7 @@ static func acquire_reward(state: Dictionary, player: int, key: String) -> bool:
 	for system in state["planets"]:
 		if int(system["owner"]) == player:
 			system["conquest_rewards"] = rewards.duplicate()
-	_fill_reward_offer(state, player)
+	_fill_reward_offer(state, player, previous, true)
 	return true
 
 const OBJECTIVE_TRACKS = {

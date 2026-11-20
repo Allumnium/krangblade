@@ -168,12 +168,8 @@ var station_selected_index: int = -1
 var station_queue: HFlowContainer
 var station_queue_rows: Dictionary = {}
 var station_details: VBoxContainer
-var station_detail_tabs: HBoxContainer
-var station_resources_tab: Button
-var station_queue_tab: Button
-var station_detail_system: int = -1
-var station_detail_page: String = "resources"
-var station_has_queue: bool = false
+var station_queue_panel: VBoxContainer
+var station_queue_heading: Label
 var asteroid_shape_cache: Dictionary = {}
 var asteroid_frame_meshes: Array[ArrayMesh] = []
 var asteroid_cache_seed: int = -1
@@ -614,7 +610,8 @@ func _build_ui() -> void:
 	add_child(conquest_dialog)
 	HUD.action(conquest_dialog.get_ok_button())
 	conquest_cards = VBoxContainer.new()
-	conquest_cards.custom_minimum_size.x = 470
+	conquest_cards.custom_minimum_size.x = 620
+	conquest_cards.add_theme_constant_override("separation", 12)
 	conquest_dialog.add_child(conquest_cards)
 	_layout_conquest_button()
 	_build_exhaust_batch()
@@ -889,17 +886,10 @@ func _build_ui() -> void:
 	system_owner_label.custom_minimum_size.x = 72
 	system_owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	system_header.add_child(system_owner_label)
-	station_detail_tabs = HBoxContainer.new()
-	station_detail_tabs.add_theme_constant_override("separation", 3)
-	planet_overview.add_child(station_detail_tabs)
-	station_resources_tab = _button("Resources", _set_station_detail_page.bind("resources"), station_detail_tabs)
-	station_queue_tab = _button("Queue", _set_station_detail_page.bind("queue"), station_detail_tabs)
-	for tab in [station_resources_tab, station_queue_tab]:
-		tab.toggle_mode = true
-		tab.focus_mode = Control.FOCUS_NONE
-		tab.add_theme_font_size_override("font_size", 11)
-		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	station_detail_tabs.hide()
+	var station_columns := HBoxContainer.new()
+	station_columns.add_theme_constant_override("separation", 8)
+	station_columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	planet_overview.add_child(station_columns)
 	population_label = _label("", 13)
 	population_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	population_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -907,8 +897,7 @@ func _build_ui() -> void:
 	station_details = VBoxContainer.new()
 	station_details.add_theme_constant_override("separation", 3)
 	station_details.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	planet_overview.add_child(station_details)
-	overview_scroll.resized.connect(_layout_station_details.bind(overview_scroll))
+	station_columns.add_child(station_details)
 	var population_row: HBoxContainer = _population_row(station_details)
 	population_row.add_child(population_label)
 	population_delta_label = _label("", 11)
@@ -923,9 +912,18 @@ func _build_ui() -> void:
 	raw_antimatter_label.add_theme_color_override("font_color", HUD.COLORS[ECONOMY.ANTIMATTER])
 	production_summary.add_child(raw_antimatter_label)
 	raw_antimatter_label.hide()
-	_layout_station_details(overview_scroll)
-	station_queue = _build_centered_queue(planet_overview)
-	station_queue.hide()
+	station_queue_panel = VBoxContainer.new()
+	station_queue_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	station_queue_panel.custom_minimum_size.x = 65
+	station_columns.add_child(station_queue_panel)
+	station_queue_heading = _label("Queue (0)", 11)
+	station_queue_heading.add_theme_color_override("font_color", HUD.MUTED)
+	station_queue_heading.autowrap_mode = TextServer.AUTOWRAP_OFF
+	station_queue_panel.add_child(station_queue_heading)
+	station_queue = _build_centered_queue(station_queue_panel)
+	station_queue.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	station_queue.alignment = FlowContainer.ALIGNMENT_BEGIN
+	station_queue_panel.hide()
 	interaction_scroll = ScrollContainer.new()
 	interaction_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	interaction_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1385,7 +1383,7 @@ func _build_production_summary() -> void:
 	var blank := Control.new()
 	blank.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(blank)
-	for column in [["Stock", 54], ["Lv", 20], ["/yr", 50], ["Bonus", 42]]:
+	for column in [["Stock", 48], ["Lv", 18], ["/yr", 44], ["Bonus", 36]]:
 		var title_label := _label(str(column[0]), 10)
 		title_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 		title_label.custom_minimum_size.x = float(column[1])
@@ -1405,32 +1403,25 @@ func _build_production_summary() -> void:
 		row.add_child(name_label)
 		var stock := _label("", 11)
 		stock.autowrap_mode = TextServer.AUTOWRAP_OFF
-		stock.custom_minimum_size.x = 54
+		stock.custom_minimum_size.x = 48
 		stock.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(stock)
 		var level := _label("", 11)
 		level.autowrap_mode = TextServer.AUTOWRAP_OFF
-		level.custom_minimum_size.x = 20
+		level.custom_minimum_size.x = 18
 		level.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(level)
 		var rate_label := _label("", 11)
 		rate_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-		rate_label.custom_minimum_size.x = 50
+		rate_label.custom_minimum_size.x = 44
 		rate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(rate_label)
 		var bonus := _label("", 11)
 		bonus.autowrap_mode = TextServer.AUTOWRAP_OFF
-		bonus.custom_minimum_size.x = 42
+		bonus.custom_minimum_size.x = 36
 		bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(bonus)
 		production_values[resource] = {"row": row, "stock": stock, "level": level, "rate": rate_label, "bonus": bonus}
-
-func _layout_station_details(scroll: ScrollContainer) -> void:
-	# Keep the stock/capacity figures close to their labels on wide screens.
-	# Use the viewport width, not the child's minimum width, so a resize
-	# downwards can shrink the preferred width without creating a feedback loop.
-	var available: float = scroll.size.x - scroll.get_v_scroll_bar().get_combined_minimum_size().x
-	station_details.custom_minimum_size.x = minf(360.0, maxf(0.0, floorf(available)))
 
 func _system_bonus_text(p: Dictionary) -> String:
 	var lines: PackedStringArray = []
@@ -2271,26 +2262,10 @@ func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
 	for job in system["queue"]:
 		if int(job["size"]) == 0 and job["kind"] != "yard_upgrade":
 			jobs.append(job)
-	var has_jobs: bool = not jobs.is_empty()
-	if selected != station_detail_system or (has_jobs and not station_has_queue):
-		station_detail_page = "queue" if has_jobs else "resources"
-	station_detail_system = selected
-	station_has_queue = has_jobs
-	station_queue_tab.text = "Queue (%d)" % jobs.size()
-	_set_station_detail_page(station_detail_page)
-	var active_id: int = int(jobs[0]["id"]) if has_jobs else -1
+	station_queue_panel.show()
+	station_queue_heading.text = "Queue (%d)" % jobs.size()
+	var active_id: int = int(jobs[0]["id"]) if not jobs.is_empty() else -1
 	_refresh_queue_tiles(station_queue, station_queue_rows, system, jobs, owned, active_id)
-
-func _set_station_detail_page(page: String) -> void:
-	station_detail_page = page if station_has_queue else "resources"
-	station_detail_tabs.visible = station_has_queue
-	station_queue.visible = station_has_queue and station_detail_page == "queue"
-	station_details.visible = not station_queue.visible
-	station_resources_tab.set_pressed_no_signal(station_detail_page == "resources")
-	station_queue_tab.set_pressed_no_signal(station_detail_page == "queue")
-	if not station_details.visible and hovered_resource.begins_with("local:"):
-		resource_hover_panel.hide()
-		hovered_resource = ""
 
 func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dictionary, jobs: Array, owned: bool, active_id: int) -> void:
 	for id in rows.keys():
@@ -4103,13 +4078,7 @@ func _refresh() -> void:
 	fleet_title.visible = other_selected
 	fleet_detail.visible = other_selected
 	fleet_cargo_footer.hide()
-	station_queue.hide()
-	station_detail_tabs.hide()
-	station_details.show()
-	if not planet_overview.visible or building_selection_kind != "station":
-		station_detail_system = -1
-		station_has_queue = false
-		station_detail_page = "resources"
+	station_queue_panel.hide()
 	if yard_selected:
 		_refresh_yard_overview(p, own_system and phase == "match")
 		if grouped_buildings:
@@ -8062,30 +8031,71 @@ func _refresh_reward_cards() -> void:
 	for child in conquest_cards.get_children():
 		conquest_cards.remove_child(child)
 		child.queue_free()
+	var points: int = int(progress.get("points", 0))
+	var generation: int = progress.get("rewards", []).size()
 	var heading := Label.new()
-	heading.text = "Available conquest points: %d" % int(progress.get("points", 0))
+	heading.text = "Select a conquest reward · %d CP" % points
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heading.add_theme_font_size_override("font_size", 20)
 	conquest_cards.add_child(heading)
+	var cards := HBoxContainer.new()
+	cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	cards.add_theme_constant_override("separation", 10)
+	conquest_cards.add_child(cards)
+	var icon_keys: Dictionary = {"industry": "Metals", "crystals": "Crystals", "agriculture": "Organics", "population": "habitation", "storage": "warehouse"}
 	for key in progress.get("offer", []):
 		var reward: Array = ECONOMY.CONQUEST_REWARDS[key]
-		var card := VBoxContainer.new()
-		conquest_cards.add_child(card)
+		var card := PanelContainer.new()
+		card.custom_minimum_size = Vector2(192, 290)
+		var frame: StyleBoxFlat = HUD.surface(Color("#102b40"), Color("#d6b46a"), 12, 8)
+		frame.set_border_width_all(2)
+		frame.shadow_color = Color("#0a0f19")
+		frame.shadow_size = 4
+		card.add_theme_stylebox_override("panel", frame)
+		cards.add_child(card)
+		var content := VBoxContainer.new()
+		content.add_theme_constant_override("separation", 12)
+		card.add_child(content)
+		var art := TextureRect.new()
+		HUD.fixed_icon(art, _station_command_icon(str(icon_keys.get(key, "upgrade")), 72), 72)
+		art.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		content.add_child(art)
 		var title_label := Label.new()
 		title_label.text = reward[0]
-		card.add_child(title_label)
+		title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		title_label.add_theme_font_size_override("font_size", 16)
+		title_label.add_theme_color_override("font_color", Color("#f4dca3"))
+		title_label.custom_minimum_size.y = 42
+		content.add_child(title_label)
+		content.add_child(HSeparator.new())
 		var benefit := Label.new()
 		benefit.text = reward[1]
-		benefit.modulate = Color("#8ee2a9")
-		card.add_child(benefit)
+		benefit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		benefit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		benefit.modulate = Color("#c8f3db")
+		content.add_child(benefit)
 		if not str(reward[2]).is_empty():
 			var drawback := Label.new()
 			drawback.text = reward[2]
-			drawback.modulate = Color("#ff9999")
-			card.add_child(drawback)
+			drawback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			drawback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			drawback.modulate = Color("#ffb4a4")
+			content.add_child(drawback)
+		var spacer := Control.new()
+		spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		content.add_child(spacer)
 		var buy := Button.new()
-		buy.text = "Acquire — 1 CP"
-		card.add_child(buy)
-		buy.pressed.connect(_buy_conquest_reward.bind(str(key)))
-		conquest_cards.add_child(HSeparator.new())
+		buy.text = "Acquire · 1 CP"
+		buy.disabled = points < 1
+		HUD.action(buy, Color("#d6b46a"))
+		content.add_child(buy)
+		buy.pressed.connect(_buy_conquest_reward.bind(str(key), generation, cards))
+	if progress.get("offer", []).is_empty():
+		var empty := Label.new()
+		empty.text = "All available rewards acquired." if generation >= ECONOMY.CONQUEST_REWARDS.size() else "Earn conquest points to unlock your first choices."
+		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cards.add_child(empty)
 	var owned := Label.new()
 	var names: PackedStringArray = []
 	for key in progress.get("rewards", []):
@@ -8094,12 +8104,18 @@ func _refresh_reward_cards() -> void:
 	owned.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	conquest_cards.add_child(owned)
 
-func _buy_conquest_reward(key: String) -> void:
-	session.call("request_conquest_reward", key)
+func _buy_conquest_reward(key: String, generation: int, cards: HBoxContainer) -> void:
+	# Lock the old cards immediately; the authority publishes the new draft.
+	for card in cards.get_children():
+		for child in card.get_child(0).get_children():
+			if child is Button:
+				child.disabled = true
+	session.call("request_conquest_reward", key, generation)
 
 func _open_conquest_upgrades() -> void:
+	conquest_card_signature = ""
 	_refresh_reward_cards()
-	conquest_dialog.popup_centered(Vector2i(500, 440))
+	conquest_dialog.popup_centered(Vector2i(660, 420))
 
 func _build_empire_dialog() -> void:
 	empire_dialog = AcceptDialog.new()

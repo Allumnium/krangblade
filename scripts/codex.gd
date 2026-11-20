@@ -279,7 +279,7 @@ func _resource_card(resource: String, description: String) -> void:
 	_label(text, description)
 
 func _overview() -> void:
-	_body("Expand through local economies and direct fleet command. The default logistics lens marks local resource strengths (+/++) and weaknesses (-/--). Population appears beside storage. First finishers earn 2 conquest points (ties share first); later finishers earn 1. Objectives progress through fixed tiers after a 10-second completion display: establish systems, hold Metals (stock and ship cargo), grow total population (residents and ship crews). Later objectives draw from an advanced pool; science vessel collection stabilizes one antimatter item. Spend conquest points on permanent upgrades; cards list benefits and any applicable tradeoff. F4 maintains empire fleet targets (up to 500 per ship type) at owned shipyards; existing ships and queued hulls count. Group station construction orders apply to every eligible selected station.")
+	_body("Expand through local economies and direct fleet command. The default logistics lens marks local resource strengths (+/++) and weaknesses (-/--). Population appears beside storage. First finishers earn 2 conquest points (ties share first); later finishers earn 1. Objectives progress through fixed tiers after a 10-second completion display: establish systems, hold Metals (stock and ship cargo), grow total population (residents and ship crews). Later objectives draw from an advanced pool; science vessel collection stabilizes one antimatter item. Spend conquest points on permanent upgrades. Each purchase immediately redraws the cards; acquired rewards never repeat. F4 maintains empire fleet targets (up to 500 per ship type) at owned shipyards; existing ships and queued hulls count. Group station construction orders apply to every eligible selected station.")
 	_section("The strategic loop")
 	_flow(["Extract resources", "Build & recruit", "Expand", "Defend supply"])
 	_body("Start with 3 Harvesters, 2 fighters and 1 freighter. Select a unit or station to issue orders.")
@@ -398,7 +398,7 @@ func _expansion() -> void:
 	_note("A colony is a long-term economic investment. Food imports and local farming improve its growth, while fleets defend its shipping lanes.")
 
 func _infrastructure() -> void:
-	_body("Select a station and open Build. Infrastructure jobs are prepaid and advance in a shared sequential construction queue. Canceling infrastructure or upgrades refunds all prepaid materials directly. Only canceled ship construction drops materials as persistent salvage. Shipyards have independent hull queues.")
+	_body("Select a station and open Build. Infrastructure jobs advance in a prepaid sequential queue beside station resources. Canceling infrastructure or upgrades refunds all prepaid materials directly. Only canceled ship construction drops materials as persistent salvage. Shipyards have independent hull queues.")
 	_section("Resource production")
 	var rows: Array = []
 	for r in E.RESOURCES:

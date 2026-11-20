@@ -1043,7 +1043,35 @@ func _test_objective_holdings() -> void:
 	assert(str(progress["advanced"]["metals"]) in ["advanced_antimatter", "advanced_metals"])
 	print("PASS: objective holdings, crew and non-overlapping tracks")
 
+func _test_reward_redraft() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var progress: Dictionary = ECON.objective_progress(state, 1)
+	progress["points"] = 1
+	ECON._fill_reward_offer(state, 1)
+	var previous: Array = progress["offer"].duplicate()
+	assert(previous.size() == 3)
+	var chosen: String = previous[0]
+	assert(ECON.acquire_reward(state, 1, chosen, 0))
+	assert(int(progress["points"]) == 0 and progress["offer"].size() == 3)
+	assert(not progress["offer"].has(chosen))
+	for key in ECON.CONQUEST_REWARDS:
+		if not previous.has(key):
+			assert(progress["offer"].has(key))
+	var next: Array = progress["offer"].duplicate()
+	ECON._fill_reward_offer(state, 1)
+	assert(progress["offer"] == next)
+	progress["points"] = 4
+	assert(not ECON.acquire_reward(state, 1, str(next[0]), 0))
+	assert(int(progress["points"]) == 4)
+	for generation in range(1, ECON.CONQUEST_REWARDS.size()):
+		assert(ECON.acquire_reward(state, 1, str(progress["offer"][0]), generation))
+		assert(progress["offer"].size() == mini(3, ECON.CONQUEST_REWARDS.size() - generation - 1))
+	assert(progress["offer"].is_empty() and int(progress["points"]) == 0)
+	assert(ECON.objective_progress(state, 2).get("rewards", []).is_empty())
+	print("PASS: conquest redraft, stale offers, zero balance and exhausted pool")
+
 func _initialize() -> void:
+	_test_reward_redraft()
 	_test_objective_holdings()
 	_test_empire_targets()
 	_test_packed_threat_records()

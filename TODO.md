@@ -22,10 +22,10 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 - [ ] v0.68.0: Validate objective tier advancement, authority real-time delay independent of speed, cumulative progress, competitive awards and pause replication. Initial thresholds: Metals 1k/3k/10k, population 200k/500k/1M, colonies 2/4/8. Last fixed tier remains visible pending advanced pool.
 - [ ] Validate v0.69.0 advanced pool assignment, 10-second replacement, exhaustion and science collection counting (one stabilized item per completed collection). Keep antimatter physical; gate use remains pending.
 - [ ] Warp gate unlock reward: science vessel carrying one antimatter transforms into immobile high-HP building, consumes item, auto-links to next owned gate; command card selects destination among eligible owned gates, host validates stable IDs, destruction invalidates links. Design actual transit activation, direction, cooldown, and AI before implementing. Include map links, selection, combat, replication and ENet tests.
-- [ ] v0.67.0: Validate economic reward drafting, acquisition, AI, replication and upkeep. Expand pool to all approved rewards; private offers, public unlock announcements, true three-card layout and exhausted-pool handling remain pending.
+- [ ] v0.67.0: Validate economic reward drafting, acquisition, AI, replication and upkeep. Expand pool to all approved rewards; private offers and public unlock announcements remain pending.
 - [ ] Shields: military 30%/station 50% extra rechargeable HP, absorb before hull, five seconds out of damage, blue bars under HP and SVG-matching glow in world/selection tile/center inspector; extra Crystal construction cost. Armor mitigation with extra Metal cost, cloak with attack reveal/detection, exclusive hulls. Integrate costs consistently in quotes, queue, refunds and AI. Drawbacks optional: reserve modest thematic tradeoffs for intricate technology, with rewards remaining net beneficial; clearly disclose any costs.
 - [ ] v0.66.3: Validate F4 Empire target editor, hotkey and conquest pulse. Later integrate target quantities with validated authority production policy.
-- [ ] v0.66.2: Playtest wider single-line objectives and conquest upgrade modal input, resizing and HUD layering; wire the modal to future reward drafting.
+- [ ] v0.70.5: Playtest three-card conquest drafts/reselection and side-by-side station storage/queue tiles at narrow and wide resolutions; run economy and two-/three-peer ENet reward-generation regression.
 - [ ] Validate default raised logistics lens and inherent resource grades, and objective progression/replication in solo and ENet.
 - [ ] Verify v0.66.0 competitive payout (2 first, including same-tick ties; 1 later) and public recent achievement feed; check population column at multiple zoom levels.
 - [ ] Implement three-card reward drafting: spend one point, host generates three distinct unowned options, validate offered choice and ownership at authority, prevent repeat purchases, replicate offers privately and chosen rewards publicly. Define actual reward effects and AI selection before enabling. No artificial catch-up modifier.
@@ -317,7 +317,7 @@ Observed approximately 5 FPS as the match progressed; Godot profiler set to self
 
 - [ ] Playtest v0.43.4 single-lane station construction across infrastructure and upgrades, cancellation/repeat, independent shipyard work, PDS range and planet detail cleanup; check Trade checkbox contrast and scroll reach at small window sizes.
 
-- [ ] Playtest v0.43.3 world-center camera and F2 double recall at all zooms/resolutions; local movement onto rendered PDS planets, station queue/resource tab visibility and hover, command-card row placement and concise upgrade/weapon tooltips.
+- [ ] Playtest v0.43.3 world-center camera and F2 double recall at all zooms/resolutions; local movement onto rendered PDS planets, station side-by-side resources and queue visibility and hover, command-card row placement and concise upgrade/weapon tooltips.
 
 - [ ] Playtest v0.43.2 translucent territory, four-row station Build card, single-ship facing drag at different zooms and population-blocked shipyard orders yielding to eligible hulls and resuming on recovery.
 

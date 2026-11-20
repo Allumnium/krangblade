@@ -1538,21 +1538,21 @@ func _rpc_snapshot_recovery(recovery_round: int, revision: int) -> void:
 		snapshot_full_only[id] = true
 		urgent_snapshot_revision = snapshot_revision
 
-func request_conquest_reward(key: String) -> void:
+func request_conquest_reward(key: String, generation: int) -> void:
 	if phase != "match":
 		return
 	if is_solo or multiplayer.is_server():
-		_conquest_reward_for(1, key)
+		_conquest_reward_for(1, key, generation)
 	else:
-		_rpc_conquest_reward.rpc_id(1, key)
+		_rpc_conquest_reward.rpc_id(1, key, generation)
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_conquest_reward(key: String) -> void:
+func _rpc_conquest_reward(key: String, generation: int) -> void:
 	if multiplayer.is_server():
-		_conquest_reward_for(multiplayer.get_remote_sender_id(), key)
+		_conquest_reward_for(multiplayer.get_remote_sender_id(), key, generation)
 
-func _conquest_reward_for(id: int, key: String) -> void:
-	if _active_player(id) and ECONOMY.acquire_reward(economy, id, key):
+func _conquest_reward_for(id: int, key: String, generation: int) -> void:
+	if _active_player(id) and ECONOMY.acquire_reward(economy, id, key, generation):
 		_publish_economy()
 
 func request_empire_target(kind: String, amount: int) -> void:
