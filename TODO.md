@@ -9,6 +9,7 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 - [ ] v0.66.1: Verify direct local asteroid access rather than detouring through an alternate anchor, including multi-access field regression and physical delivery.
 
 ### Objectives and specialization (v0.65.0)
+- [ ] v0.66.3: Validate F4 Empire target editor, hotkey and conquest pulse. Later integrate target quantities with validated authority production policy.
 - [ ] v0.66.2: Playtest wider single-line objectives and conquest upgrade modal input, resizing and HUD layering; wire the modal to future reward drafting.
 - [ ] Validate default raised logistics lens and inherent resource grades, and objective progression/replication in solo and ENet.
 - [ ] Verify v0.66.0 competitive payout (2 first, including same-tick ties; 1 later) and public recent achievement feed; check population column at multiple zoom levels.
