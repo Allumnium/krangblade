@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.78.2: Manually verify the first F4 opening after match start matches subsequent openings, including small windows, unlocked ship types, scroll and Close/Esc. Runtime/visual pending.
+
 - [ ] v0.78.0–0.78.1: Validate three-choice reward drafts after all one-time rewards, repeated ranks and real effects, peer synchronization, endless objective tiers and reward pacing. Manually verify no scrolling/clipping at supported window sizes, especially lengthy shield/cloak descriptions. Runtime/visual validation pending.
 
 - [ ] v0.77.3: Audition personal objective / first-place fanfares and subdued rival cue; verify simultaneous events, no replay on snapshots, SFX mute and voice priority in crowded matches. Runtime/audio pending.
