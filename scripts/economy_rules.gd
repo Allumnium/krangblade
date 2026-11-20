@@ -5059,12 +5059,13 @@ static func _reuse_combat_threats(state: Dictionary, graph: Dictionary, combat_i
 	if not combat_index.has("snapshot"):
 		return _salvage_threats(state, graph, combat_index)
 	var count: int = 0
+	var state_teams: Dictionary = state["teams"]
 	for craft in state["ships"]:
 		if not armed(craft) or not craft.get("position", Vector2.INF).is_finite():
 			continue
 		count += 1
 		var entry: Array = combat_index.get(int(craft["id"]), [])
-		if entry.size() != 3 or entry[0] != _threat_sector_signature(craft) or int(entry[2]) != int(state["teams"].get(int(craft["owner"]), 0)):
+		if entry.size() != 3 or entry[0] != _threat_sector_signature(craft) or int(entry[2]) != int(state_teams.get(int(craft["owner"]), 0)):
 			return _salvage_threats(state, graph, combat_index)
 	if count != int(combat_index["count"]):
 		return _salvage_threats(state, graph, combat_index)
@@ -6552,6 +6553,16 @@ static func _dispatch_cohorts(state: Dictionary, graph: Dictionary, home: int, g
 # when its members are reassigned together to another objective.
 static func _sync_operations(state: Dictionary) -> void:
 	var previous: Dictionary = state.get("operations", {})
+	# Membership checks must not scan an entire wave for every hull.
+	var wave_members: Dictionary = {}
+	var ai_players: Dictionary = {}
+	for player in state.get("ai_players", []):
+		ai_players[player] = true
+	for owner in state.get("ai_waves", {}):
+		var members: Dictionary = {}
+		for member in state["ai_waves"][owner].get("members", []):
+			members[member] = true
+		wave_members[owner] = members
 	var current: Dictionary = {}
 	var by_id: Dictionary = {}
 	for ship in state["ships"]:
@@ -6562,9 +6573,9 @@ static func _sync_operations(state: Dictionary) -> void:
 		if target < 0:
 			target = int(ship["at"])
 		var role: String = "hold" if bool(ship.get("holding", false)) else "allocation"
-		if state.get("ai_players", []).has(owner) and not bool(ship.get("direct_order", false)):
+		if ai_players.has(owner) and not bool(ship.get("direct_order", false)):
 			var wave: Dictionary = state.get("ai_waves", {}).get(owner, {})
-			role = "wave" if wave.get("members", []).has(int(ship["id"])) else "reserve"
+			role = "wave" if wave_members.get(owner, {}).has(int(ship["id"])) else "reserve"
 			# An explicitly assigned objective remains stable while the craft
 			# pursues enemies or takes a detour to repair.
 			if role == "wave" and int(wave.get("target", -1)) >= 0:
@@ -6582,6 +6593,7 @@ static func _sync_operations(state: Dictionary) -> void:
 		operation["engaged"] = bool(operation["engaged"]) or _engaged(ship)
 	var reused: Dictionary = {}
 	var prior_by_id: Dictionary = {}
+	var prior_members: Dictionary = {}
 	for old_operation in previous.values():
 		prior_by_id[int(old_operation["id"])] = old_operation
 	# Reserve persistent wave identities before matching transient groups.
@@ -6615,9 +6627,14 @@ static func _sync_operations(state: Dictionary) -> void:
 				var candidate: int = int(old["id"])
 				if reused.has(candidate) or current.has(old_key) or old["owner"] != operation["owner"] or old["role"] != operation["role"]:
 					continue
+				if not prior_members.has(candidate):
+					var member_set: Dictionary = {}
+					for member in old["members"]:
+						member_set[member] = true
+					prior_members[candidate] = member_set
 				var overlap: int = 0
 				for member in operation["members"]:
-					if old["members"].has(member):
+					if prior_members[candidate].has(member):
 						overlap += 1
 				if overlap > best_overlap:
 					best_overlap = overlap
@@ -6647,6 +6664,9 @@ static func _sync_operations(state: Dictionary) -> void:
 			last_slot = maxi(last_slot, int(slots[member]))
 		operation["slots"] = slots
 		var deployed: Array = []
+		var prior_deployed: Dictionary = {}
+		for member in operation["deployed"]:
+			prior_deployed[member] = true
 		var recovering: Array = []
 		var rallying: Array = []
 		var in_transit: Array = []
@@ -6654,7 +6674,7 @@ static func _sync_operations(state: Dictionary) -> void:
 			var craft: Dictionary = by_id[member]
 			if bool(craft.get("retreating", false)):
 				recovering.append(member)
-			elif operation["role"] == "wave" or operation["deployed"].has(member):
+			elif operation["role"] == "wave" or prior_deployed.has(member):
 				deployed.append(member)
 			elif operation["role"] == "reserve" or operation["phase"] in ["rallying", "deployed"]:
 				rallying.append(member)

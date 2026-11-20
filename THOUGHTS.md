@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.47: Operation synchronization uses step-local membership sets for waves, deployed members and prior-group overlap. Avoids quadratic membership scans without changing identity or formation assignment; full incremental lifecycle and measured validation remain open.
+
 - v0.64.46: Skip homogeneous friendly-only packed threat cells via lazy per-snapshot team classification; retain exact mixed-cell checks. Runtime and profiler pending.
 
 - v0.64.45: Filter missile and pursuit candidates in one ordered pass, with distinct positive-team cache; preserve neutral targeting rules. Runtime and benchmark pending.
