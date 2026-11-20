@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.82.1: Scout Wander defaults on, Explore defaults off; enabling either disables the other at authority. Disabling Explore or enabling Wander cancels only active automatic exploration orders.
+
 - v0.82.0: Scout-only Explore autocast off by default (X); idle scouts choose connected sectors based on allied occupancy and recency, reserving destinations. All ship crew costs doubled including Colony 80k. Existing manual orders take priority.
 
 - v0.81.0: PDS cannot be attacked independently; lost on station destruction. Dyson Sphere Tech reward unlocks per-station construction after Warp Gates or three category-specific Tech research ranks; 20kt Metals, 10kt Crystals, 300 work. Completed sphere halves local ship material costs, stacks with research, appears as stellar ribs. No independent HP.

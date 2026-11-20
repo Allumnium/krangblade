@@ -3500,7 +3500,13 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 		return set_repair_auto(state, player, ids, enabled)
 	for ship in units:
 		ship[mode + "_auto"] = enabled
-		if mode == "explore" and not enabled and bool(ship.get("unit_order", {}).get("exploration", false)):
+		if ship.get("kind", "") == "scout" and enabled:
+			if mode == "explore":
+				ship["wander_auto"] = false
+				ship.erase("wander_cooldown_override")
+			elif mode == "wander":
+				ship["explore_auto"] = false
+		if ((mode == "explore" and not enabled) or (mode == "wander" and enabled)) and bool(ship.get("unit_order", {}).get("exploration", false)):
 			ship.erase("unit_order")
 			_finish_manual(ship)
 			ship["navigation_target"] = ship["position"]
