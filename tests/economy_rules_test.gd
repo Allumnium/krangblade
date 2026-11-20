@@ -81,6 +81,12 @@ func _test_rounded_sector_limits() -> void:
 	assert(not ECON.sector_contains(graph, 0, diagonal * (rounded + 0.1)))
 	assert(not ECON.sector_contains(graph, 0, Vector2(60.1, 0)))
 	var cached: Dictionary = graph.duplicate(true)
+	ECON._index_sector_bounds(cached, 100.0)
+	for x in range(-150, 251, 5):
+		for y in range(-150, 251, 5):
+			var point := Vector2(x, y)
+			assert(ECON.sector_at(graph, point, [0, 1, 2]) == ECON.sector_at(cached, point, [0, 1, 2]))
+			assert(ECON.sector_at(graph, point, [2, 0], 2) == ECON.sector_at(cached, point, [2, 0], 2))
 	cached["sector_neighbor_squares"] = [[14400.0, 14400.0], [], []]
 	for i in range(360):
 		var direction: Vector2 = Vector2.from_angle(deg_to_rad(float(i)))

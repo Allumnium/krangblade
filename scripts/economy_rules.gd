@@ -2840,6 +2840,31 @@ static func sector_contains(graph: Dictionary, node: int, position: Vector2) -> 
 
 # Resolve a world point using the same clipped disks used by local orders.
 # Prefer the current sector at an exact shared edge to avoid command jitter.
+# Static broad phase: insert each sector into every cell touched by its
+# bounding disk's AABB. Exact containment and tie-breaking remain unchanged.
+static func _sector_candidates(graph: Dictionary, point: Vector2) -> Array:
+	if not graph.has("sector_cells"):
+		return range(graph["points"].size())
+	var width: float = float(graph["sector_cell_width"])
+	var cell := Vector2i(floori(point.x / width), floori(point.y / width))
+	return graph["sector_cells"].get(cell, [])
+
+static func _index_sector_bounds(graph: Dictionary, width: float) -> void:
+	var cells: Dictionary = {}
+	for i in range(graph["points"].size()):
+		var center: Vector2 = graph["points"][i]
+		var radius: float = float(graph["sector_radii"][i]) + EPS
+		var low: Vector2 = (center - Vector2.ONE * radius) / width
+		var high: Vector2 = (center + Vector2.ONE * radius) / width
+		for x in range(floori(low.x), floori(high.x) + 1):
+			for y in range(floori(low.y), floori(high.y) + 1):
+				var cell := Vector2i(x, y)
+				if not cells.has(cell):
+					cells[cell] = []
+				cells[cell].append(i)
+	graph["sector_cells"] = cells
+	graph["sector_cell_width"] = width
+
 static func sector_at(graph: Dictionary, position: Vector2, candidates: Array, preferred: int = -1) -> int:
 	if not position.is_finite():
 		return -1
@@ -2847,9 +2872,10 @@ static func sector_at(graph: Dictionary, position: Vector2, candidates: Array, p
 		return preferred
 	var hit: int = -1
 	var best: float = INF
-	for candidate in candidates:
+	var nearby: Array = _sector_candidates(graph, position)
+	for candidate in nearby:
 		var node: int = int(candidate)
-		if not sector_contains(graph, node, position):
+		if not candidates.has(node) or not sector_contains(graph, node, position):
 			continue
 		var distance: float = position.distance_squared_to(graph["points"][node])
 		if distance < best or (distance == best and node < hit):
@@ -2900,6 +2926,7 @@ static func military_graph(state: Dictionary) -> Dictionary:
 		sector_neighbor_squares.append(squares)
 	cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data), "field_edges": map_data.get("field_edges", []).duplicate(true)}
 	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors, "sector_neighbor_squares": sector_neighbor_squares, "system_count": map_data["points"].size()}
+	_index_sector_bounds(cached_military_graph, base_radius)
 	return cached_military_graph
 
 static func _field_positions(map_data: Dictionary) -> Array:
@@ -4573,7 +4600,7 @@ static func influence_region(graph: Dictionary, point: Vector2) -> int:
 	var points: Array = graph["points"]
 	var nearest: float = INF
 	var region: int = -1
-	for i in range(points.size()):
+	for i in _sector_candidates(graph, point):
 		var d: float = point.distance_squared_to(points[i])
 		if d < nearest and d <= pow(float(graph["sector_radii"][i]) + EPS, 2.0) and sector_contains(graph, i, point):
 			nearest = d
