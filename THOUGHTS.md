@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.69.0: Advanced pool includes two antimatter, 20k Metals, 2M population and 12 sites; map size may make some milestones impossible. Science collection counts as processing. Pool exhaustion retains last completed advanced card; validate pacing and multiplayer.
+
 - v0.68.0: Fixed objective tiers and authority clock for ten-second replacement; thresholds provisional. Final tiers remain until random advanced pool implemented. Antimatter collection already exists; processing semantics and gate transit unresolved. Runtime pending.
 
 - v0.67.0: Five economic cards implemented as first playable pool; offers currently replicated in normal snapshots, AI picks first. Pros/cons use additive upkeep, not yet construction surcharges. Need private offers, public announcements, remaining rewards, pool exhaustion, runtime and ENet tests.
