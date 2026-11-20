@@ -1629,14 +1629,18 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	# Residents consume Metals and Organics. Only net surplus can occupy
 	# free storage. At capacity production covers demand but stores no excess.
 	# Refunds may temporarily exceed capacity; never destroy returned materials.
+	var capacity: float = storage_capacity(p)
+	var tier: int = int(p.get("warehouse_level", 0))
+	var next_costs: Dictionary = WAREHOUSE_COSTS[tier] if tier < WAREHOUSE_COSTS.size() else {}
 	for resource in ACTIVE_PRODUCTION:
 		var stored: float = float(p["stock"][resource])
 		var potential: float = rate(p, resource) * dt
 		var demand: float = consumption(p, resource) * dt
-		var used: float = minf(demand, civilian_stock_access(p, resource) + potential)
-		if resource != "Organics" and potential > EPS and demand > potential and stored < construction_reserve(p, resource):
+		var reserve: float = capacity * float(p["thresholds"][resource]["min"]) / 100.0
+		var used: float = minf(demand, minf(maxf(0.0, stored), reserve) + potential)
+		if resource != "Organics" and potential > EPS and demand > potential and stored < minf(capacity, maxf(CONSTRUCTION_RESERVE, float(next_costs.get(resource, 0.0)))):
 			used = minf(used, potential * (1.0 - CONSTRUCTION_PRODUCTION_SHARE))
-		var produced: float = minf(potential, used + storage_free(p, resource))
+		var produced: float = minf(potential, used + maxf(0.0, capacity - stored))
 		_record_flow(p, "Production", resource, produced)
 		_record_flow(p, "Population", resource, used)
 		p["stock"][resource] = maxf(0.0, stored + produced - used)
