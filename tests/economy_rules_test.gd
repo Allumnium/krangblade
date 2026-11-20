@@ -80,6 +80,14 @@ func _test_rounded_sector_limits() -> void:
 	assert(ECON.sector_contains(graph, 0, diagonal * (rounded - 0.1)))
 	assert(not ECON.sector_contains(graph, 0, diagonal * (rounded + 0.1)))
 	assert(not ECON.sector_contains(graph, 0, Vector2(60.1, 0)))
+	var cached: Dictionary = graph.duplicate(true)
+	cached["sector_neighbor_squares"] = [[14400.0, 14400.0], [], []]
+	for i in range(360):
+		var direction: Vector2 = Vector2.from_angle(deg_to_rad(float(i)))
+		var boundary: float = ECON.sector_limit(graph, 0, direction)
+		assert(is_equal_approx(boundary, ECON.sector_limit(cached, 0, direction)))
+		assert(ECON.sector_contains(cached, 0, direction * (boundary - 0.1)))
+		assert(not ECON.sector_contains(cached, 0, direction * (boundary + 0.1)))
 
 func _test_explicit_hold_pose() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}

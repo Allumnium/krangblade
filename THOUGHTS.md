@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.4: Avoid rebuilding field topology signatures for the same map object; retain structural comparison for replacement snapshots. Same-object topology is assumed immutable during a match; future topology edits need explicit invalidation. Cache squared neighbor lengths and reject points outside the sector disk before radial clipping. Exact formula retained; runtime and profiler comparison pending.
+
 - v0.64.3: User profiler Self view highlights sector_limit, combat and field-position reconstruction. Prioritize static sector/field geometry caching; compare identical workloads. Missing upgrade badge metadata was read before initialization; guard access explicitly. Runtime verification pending.
 
 - v0.64.2: Mixed fleet command focus is client-local and cycles owned hull types without dropping selection. Commands including contextual movement apply to the active type; inspect usability and Tab focus handling in play.
