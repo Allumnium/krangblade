@@ -2676,6 +2676,13 @@ func _initialize() -> void:
 	assert(ECON.field_access_systems(access_map, access_field).has(0))
 	ECON._finish(multi_access, 0, access_home, {"id": 92002, "kind": "miner", "population_allocated": 30.0})
 	var access_miner: Dictionary = multi_access["ships"][0]
+	# The original anchor is not the local entrance. Prefer direct
+	# access despite an off-center deposit closer to the other system.
+	access_field["access"] = [1, 0]
+	access_field["chunks"][0]["position"] = access_center.lerp(access_points[1], 0.8)
+	ECON._choose_field(multi_access, access_miner, ECON.planet_teams(multi_access), {})
+	assert(int(access_miner.get("mining_anchor", -1)) == 0)
+	assert(access_miner["route"].is_empty())
 	var was_loaded: bool = false
 	for tick in range(1600):
 		ECON.step(multi_access, 0.5)

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.66.1: User reports miners from Nyxaxis detouring through Nyxyra toward an asteroid field. Prefer viable current-system access per field before scoring remote alternatives; verify screenshot topology and runtime regression.
+
 - v0.66.0: Competitive first-place bonus is provisional (2 points vs 1, ties in the same authoritative step share first). Public latest three achievements remain visible; check HUD clipping and match pacing. Population column uses sustainable capacity; verify readability. Reward drafting effects pending.
 
 - v0.65.0: Objectives track distinct new colony sites, cumulative actual Metals extraction (planetary and asteroid), peak resident population; one point per personal completion pending competitive payout and reward drafting design. Validate multiplayer, public notification design, and default lens readability/performance. Grades use inherent resource factors (<0.5, <0.9, >=1.1, >=1.5); planetless marked poor for local planetary output.
