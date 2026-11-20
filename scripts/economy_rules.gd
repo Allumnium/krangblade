@@ -2186,7 +2186,7 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 			_resource_haul(ship)
 			return true
 	if now >= float(ship.get("next_resource_stage_search", 0.0)):
-		ship["next_resource_stage_search"] = now + RESOURCE_STAGE_SEARCH_YEARS
+		ship["next_resource_stage_search"] = _next_search_slot(now, int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
 		var available: bool = false
 		if bool(stage.get("salvage_site", false)):
 			var piles: Dictionary = state.get("salvage", {})
@@ -2611,6 +2611,15 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 		ship["mining_mode"] = "approach"
 		_set_route(ship, best_path)
 
+# Align retries to stable hull-specific slots. Initial searches and explicit
+# reset-to-zero requests remain immediate; subsequent retries are staggered.
+static func _next_search_slot(now: float, id: int, interval: float) -> float:
+	var phase: float = float(posmod(id, 5)) * interval / 5.0
+	var next: float = floorf((now - phase) / interval) * interval + phase + interval
+	if next <= now + EPS:
+		next += interval
+	return next
+
 static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, budgets: Array, dt: float) -> void:
 	ship["mining_active"] = false
 	var mode: String = str(ship.get("mining_mode", "idle"))
@@ -2625,7 +2634,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			if ship.get("mining_mode", "idle") == "idle" and int(ship.get("assigned_field", -1)) < 0:
 				ship.erase("manual_mine")
 			# Idle fleets retry twice per game year instead of every tick.
-			ship["next_mining_search"] = float(state["elapsed"]) + 0.5
+			ship["next_mining_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
 		return
 	if mode == "delivery":
 		if _cargo_total(ship) <= EPS and not ship["route"].is_empty() and not _unit_order_running(ship):
@@ -2641,7 +2650,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			# Even empty miners must keep retrying escape from hostile space.
 			if teams[here] not in [0, team]:
 				if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
-					ship["next_unload_search"] = float(state["elapsed"]) + 0.5
+					ship["next_unload_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
 					_evacuate_civilian(state, ship, teams)
 				return
 			if _cargo_total(ship) <= EPS:
@@ -2649,7 +2658,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 				ship["field"] = -1
 				return
 			if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
-				ship["next_unload_search"] = float(state["elapsed"]) + 0.5
+				ship["next_unload_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
 				for resource in RESOURCES + [ANTIMATTER]:
 					if float(ship["cargo"].get(resource, 0.0)) <= EPS:
 						continue
@@ -5457,7 +5466,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		ship.erase("salvage_depot")
 		if float(state["elapsed"]) + EPS < float(ship.get("next_salvage_search", 0.0)):
 			return true
-		ship["next_salvage_search"] = float(state["elapsed"]) + 0.5
+		ship["next_salvage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
 		if not _salvage_depot_route(state, graph, ship):
 			if ship.get("kind", "") not in ["ship", "colony_ship", "miner"] or not _salvage_depot_route(state, graph, ship, true):
 				return true
@@ -7348,7 +7357,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 			_work_ship(state, ship, teams, cache, dt)
 			if _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade") and float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)):
-				ship["next_resource_stage_search"] = float(state["elapsed"]) + RESOURCE_STAGE_SEARCH_YEARS
+				ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
 				_choose_resource_stage(state, combat_graph, ship, teams, cache, salvage_threats, salvage_cells)
 			if not profile.is_empty():
 				civilian_usec += Time.get_ticks_usec() - before
