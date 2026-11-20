@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.66.4: Playtest tenfold lower incubator base production, crystal scarcity and AI access to advanced construction.
+
 - [ ] v0.66.1: Verify direct local asteroid access rather than detouring through an alternate anchor, including multi-access field regression and physical delivery.
 
 ### Objectives and specialization (v0.65.0)

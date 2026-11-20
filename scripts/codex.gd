@@ -291,7 +291,7 @@ func _resources() -> void:
 	_body("The empire uses three ordinary resources. Material prices are paid from local stock, not a shared global wallet.")
 	_resource_card("Metals", "Primary construction material. Extracted from planets and asteroid fields; used in ships, buildings and upgrades.")
 	_resource_card("Organics", "Food for residents and supplies for basic ships. Farming and imports improve local population growth.")
-	_resource_card("Crystals", "Advanced construction material. Mine crystal-rich rocks or invest in local Incubators. Used in additional shipyards, PDS and Laser Matrix.")
+	_resource_card("Crystals", "Advanced construction material. Mine crystal-rich rocks or invest in slow local Incubators (%.1f t/yr base per level). Used in additional shipyards, PDS and Laser Matrix." % E.CRYSTALS_PER_LEVEL)
 	_section("Starting stock per home system")
 	var rows: Array = []
 	for r in E.RESOURCES:

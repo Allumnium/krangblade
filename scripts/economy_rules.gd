@@ -35,6 +35,7 @@ const POPULATION_DOUBLING_YEARS: float = 60.0
 # Fixed full-growth food reserve, independent of warehouse size and trade policy.
 const POPULATION_FOOD_RESERVE: float = 200.0
 const PRODUCTION_PER_LEVEL: float = 4.0
+const CRYSTALS_PER_LEVEL: float = 0.4
 const ORGANICS_PER_LEVEL: float = 4.0
 # Food production and demand both halve; population capacity stays unchanged.
 const POPULATION_PER_ORGANICS_RATE: float = 25000.0
@@ -674,7 +675,8 @@ static func rate(planet: Dictionary, resource: String) -> float:
 		var labor: float = sqrt(clampf(planetary_population(planet) / capacity, 0.0, 1.0))
 		return farm_potential(planet) * labor + eco_organics(planet)
 	var labor: float = population_multiplier(planet)
-	var output: float = PRODUCTION_PER_LEVEL * level * production_modifier(planet, resource) * labor
+	var base_rate: float = CRYSTALS_PER_LEVEL if resource == "Crystals" else PRODUCTION_PER_LEVEL
+	var output: float = base_rate * level * production_modifier(planet, resource) * labor
 	return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func food_growth_multiplier(planet: Dictionary) -> float:
