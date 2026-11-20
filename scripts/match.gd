@@ -6828,7 +6828,7 @@ func _shield_texture(kind: String) -> Texture2D:
 		var half: float = _hull_texture_half_size(kind) + 8.0
 		# Three soft bands and a bright rim, baked once per hull type.
 		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="%s %s %s %s"><g fill="none" stroke-linejoin="round">' % [-half, -half, half * 2.0, half * 2.0]
-		for band in [[8.0, 0.10], [5.5, 0.18], [3.5, 0.36], [1.4, 0.95]]:
+		for band in [[4.0, 0.10], [2.75, 0.18], [1.75, 0.36], [0.7, 0.75]]:
 			art += '<polygon points="%s" stroke="#77ccff" stroke-width="%s" opacity="%s"/>' % [outline, band[0], band[1]]
 		art += '</g></svg>'
 		var image := Image.new()
@@ -7463,7 +7463,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 	_draw_damage_bar(center, radius, hp, _shield_fraction(system["station"]))
 	if _shield_fraction(system["station"]) > 0.0:
 		# Stations themselves have a circular hull; use a continuous glow.
-		for band in [[6.0, 0.10], [3.5, 0.23], [1.3, 0.85]]:
+		for band in [[3.0, 0.10], [1.75, 0.23], [0.65, 0.70]]:
 			map_canvas.draw_arc(center, radius, 0.0, TAU, 48, Color(0.47, 0.8, 1.0, float(band[1])), float(band[0]), true)
 
 func _draw_shipyard_construction(state: Dictionary, index: int, job: Dictionary, tint: Color, elapsed: float) -> void:

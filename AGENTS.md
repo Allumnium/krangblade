@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.80.1: Halve shield glow stroke widths on ships and stations; slightly soften bright rims to preserve owner colors. Shield mechanics unchanged.
+
 - v0.80.0: First client-side team sight pass; cached 160-unit cells, shared allied sight, dark unexplored and dim explored areas, hostile hull/structure and salvage rendering culling. Strategic route discovery unchanged. Authority targeting, last-known structures and per-team replication remain follow-ups; do not claim packet secrecy.
 
 - v0.79.3: Crystal baseline 1.25 t/yr per station, Incubator 0.06 t/yr per level, Crystal recipe and military premium multiplier 4× rather than 5×. Other costs and mining unchanged.

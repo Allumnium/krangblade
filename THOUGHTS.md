@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.80.1: User reports shield glow obscures team colors; halve all shield stroke widths and soften core opacity. Visual validation pending.
+
 - v0.80.0: Shared team sight cached as coarse raster; group hull sources by cell to avoid per-enemy scans. Client culling can reduce draw cost but authority still simulates and transmits full state. Strategic discovery separated to avoid breaking routing. Last-known structures, authority and packet filtering required for competitive fog.
 
 - v0.79.3: User reports excessive Crystal scarcity. Raise station income 25%, Incubator base 50% from tiny baseline, and cut Crystal costs 20%; preserve differentiation and asteroid yields. Reassess pacing in play.
