@@ -273,7 +273,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 	return state
 
 # Client presentation vision is separate from strategic route discovery.
-const VISION_CELL: float = 160.0
+const VISION_CELL: float = 80.0
 const STATION_SIGHT: float = 1500.0
 const YARD_SIGHT: float = 1000.0
 const PDS_SIGHT: float = 1000.0

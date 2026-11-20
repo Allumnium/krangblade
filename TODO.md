@@ -6,6 +6,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.80.2: Verify fog exterior at extreme zoom/pan, smooth mask edges, minimap crop and finer-grid CPU cost at 10k hulls. Runtime pending.
+
 - [ ] v0.80.1: Verify thinner shield glow preserves team colors across zoom levels while remaining visible.
 
 - [ ] v0.80.0: Complete fog of war: authority-side sight and target validation, remembered structures/ownership and resource state, fog-safe inspectors/effects, AI visibility, per-team filtered snapshots and reentry baselines. Validate initial client overlay and team sight on real peers, profile 10k ships and compare FPS/network bandwidth. Runtime pending.
