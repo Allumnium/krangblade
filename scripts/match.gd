@@ -96,6 +96,13 @@ var background_music: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
 var map_canvas: Control
+var cargo_batch: MultiMeshInstance2D
+var cargo_glow_batch: MultiMeshInstance2D
+var cargo_entries: Array = []
+var cargo_glow_entries: Array = []
+var pose_frame: int = -1
+var pose_revision: Array = []
+var pose_world_cache: Dictionary = {}
 var beam_batch: MultiMeshInstance2D
 var projectile_batch: MultiMeshInstance2D
 var beam_instances: Array = []
@@ -562,6 +569,11 @@ func _build_ui() -> void:
 	_build_exhaust_batch()
 	beam_batch = _build_effect_batch(false)
 	projectile_batch = _build_effect_batch(true)
+	cargo_batch = _build_effect_batch(false)
+	cargo_glow_batch = _build_effect_batch(false)
+	cargo_glow_batch.texture = _resource_glow()
+	cargo_batch.z_index = 1
+	cargo_glow_batch.z_index = 1
 	map_canvas.resized.connect(_map_resized)
 	header_panel = PanelContainer.new()
 	header_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -6494,6 +6506,15 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 	follow_units = false
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
+	var frame: int = Engine.get_process_frames()
+	var revision: Array = [session.get("motion_revision"), session.get("motion_base_revision"), state.get("elapsed"), state["ships"].size(), state.get("time_speed")]
+	if delta <= 0.0 and pose_frame == frame and pose_revision == revision:
+		var projected: Dictionary = {}
+		for id in pose_world_cache:
+			var pose: Dictionary = pose_world_cache[id].duplicate()
+			pose["point"] = _screen_point(pose["world"])
+			projected[id] = pose
+		return projected
 	_sync_ship_visuals(state)
 	var points: Array = state["map"]["points"]
 	var poses: Dictionary = {}
@@ -6509,6 +6530,9 @@ func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 			ship_offsets[id] = {"angle": angle}
 		var mining: bool = ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
 		poses[id] = {"point": _screen_point(pos), "world": pos, "direction": Vector2.from_angle(angle), "mining": mining, "kind": ship.get("kind", "")}
+	pose_frame = frame
+	pose_revision = revision
+	pose_world_cache = poses.duplicate(true)
 	return poses
 
 func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
@@ -6821,16 +6845,21 @@ func _draw_resource_glow(point: Vector2, radius: float, tint: Color, strength: f
 	var extent: float = maxf(1.5, radius)
 	map_canvas.draw_texture_rect(_resource_glow(), Rect2(point - Vector2.ONE * extent, Vector2.ONE * extent * 2.0), false, Color(tint.lightened(0.12), strength))
 
+func _queue_cargo_rect(shape: PackedVector2Array, tint: Color) -> void:
+	var axis: Vector2 = shape[0] - shape[1]
+	var width: float = shape[1].distance_to(shape[2])
+	cargo_entries.append([Transform2D(axis.angle(), Vector2(axis.length(), width), 0.0, (shape[0] + shape[2]) * 0.5), tint])
+
 func _draw_cargo_segment(shape: PackedVector2Array, tint: Color) -> void:
-	map_canvas.draw_colored_polygon(shape, tint.lightened(0.14))
-	# Smaller or partially filled bays get a proportionally weaker halo.
+	_queue_cargo_rect(shape, tint.lightened(0.14))
 	var length: float = shape[0].distance_to(shape[1])
 	var width: float = shape[1].distance_to(shape[2])
 	if minf(length, width) < 0.8:
 		return
 	var center: Vector2 = (shape[0] + shape[2]) * 0.5
 	var extent: float = clampf(maxf(length, width) * 0.9, 2.0, 48.0)
-	_draw_resource_glow(center, extent, tint, 0.32 * clampf(length / maxf(width, 0.1), 0.25, 1.0))
+	var strength: float = 0.32 * clampf(length / maxf(width, 0.1), 0.25, 1.0)
+	cargo_glow_entries.append([Transform2D(0.0, Vector2.ONE * extent * 2.0, 0.0, center), Color(tint.lightened(0.12), strength)])
 
 func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2, font: Font) -> void:
 	if state.get("salvage", {}).is_empty():
@@ -6894,7 +6923,7 @@ func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, later
 			center = [Vector2(-4.4, 4.7), Vector2(-4.4, -4.7), Vector2(-7.0, 0.0)][k]
 		var module: Vector2 = point + forward * center.x + lateral * center.y
 		var corners := PackedVector2Array([module + forward * half_length + lateral * half_width, module - forward * half_length + lateral * half_width, module - forward * half_length - lateral * half_width, module + forward * half_length - lateral * half_width])
-		map_canvas.draw_colored_polygon(corners, Color("#182333"))
+		_queue_cargo_rect(corners, Color("#182333"))
 		var start: float = -half_length
 		for segment in bays[k]:
 			var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / per_bay)
@@ -7306,6 +7335,10 @@ func _flush_overview_hulls() -> void:
 		batch.show()
 
 func _draw_map() -> void:
+	cargo_entries.clear()
+	cargo_glow_entries.clear()
+	cargo_batch.hide()
+	cargo_glow_batch.hide()
 	beam_instances.clear()
 	projectile_instances.clear()
 	beam_batch.hide()
@@ -7594,13 +7627,13 @@ func _draw_map() -> void:
 			_queue_overview_hull(_overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
 			continue
 		var texture: Texture2D = _cached_hull_texture(str(ship["kind"]), empire, scale >= 0.42)
-		if ship["kind"] != "science_ship" and (scale < 0.42 or ECONOMY.cargo_capacity(str(ship["kind"])) <= ECONOMY.EPS):
+		if ship["kind"] != "science_ship":
 			_queue_overview_hull(texture, point, direction.angle(), _hull_texture_half_size(str(ship["kind"])) * scale)
-			continue
-		map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
-		var half: float = _hull_texture_half_size(str(ship["kind"]))
-		map_canvas.draw_texture_rect(texture, Rect2(-half, -half, half * 2.0, half * 2.0), false)
-		map_canvas.draw_set_transform(Vector2.ZERO)
+		else:
+			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
+			var half: float = _hull_texture_half_size(str(ship["kind"]))
+			map_canvas.draw_texture_rect(texture, Rect2(-half, -half, half * 2.0, half * 2.0), false)
+			map_canvas.draw_set_transform(Vector2.ZERO)
 		if ship["kind"] == "ship" and scale >= 0.42:
 			var bays: Array = ECONOMY.freighter_cargo_bays(ship["cargo"])
 			for k in range(bays.size()):
@@ -7608,7 +7641,7 @@ func _draw_map() -> void:
 				var module: Vector2 = point + direction * bay_center.x + side * bay_center.y
 				var half_length: float = 3.0
 				var corners := PackedVector2Array([module + direction * half_length + side * 3, module - direction * half_length + side * 3, module - direction * half_length - side * 3, module + direction * half_length - side * 3])
-				map_canvas.draw_colored_polygon(corners, Color("#182333"))
+				_queue_cargo_rect(corners, Color("#182333"))
 				var start: float = -half_length
 				for segment in bays[k]:
 					var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / ECONOMY.FREIGHTER_BAY_CAPACITY)
@@ -7634,6 +7667,8 @@ func _draw_map() -> void:
 	_flush_effect_batch(beam_batch, beam_instances)
 	_flush_effect_batch(projectile_batch, projectile_instances)
 	_flush_overview_hulls()
+	_flush_effect_batch(cargo_batch, cargo_entries)
+	_flush_effect_batch(cargo_glow_batch, cargo_glow_entries)
 	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
 	_draw_ship_destructions(viewport_bounds)
 	_draw_formation_preview(state)
