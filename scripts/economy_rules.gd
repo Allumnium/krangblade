@@ -35,7 +35,9 @@ const POPULATION_DOUBLING_YEARS: float = 60.0
 # Fixed full-growth food reserve, independent of warehouse size and trade policy.
 const POPULATION_FOOD_RESERVE: float = 200.0
 const PRODUCTION_PER_LEVEL: float = 4.0
-const CRYSTALS_PER_LEVEL: float = 0.4
+const CRYSTALS_PER_LEVEL: float = 0.04
+const STATION_CRYSTALS_PER_YEAR: float = 1.0
+const CRYSTAL_COST_MULTIPLIER: float = 5.0
 const ORGANICS_PER_LEVEL: float = 4.0
 # Food production and demand both halve; population capacity stays unchanged.
 const POPULATION_PER_ORGANICS_RATE: float = 25000.0
@@ -672,10 +674,11 @@ static func net_rate(planet: Dictionary, resource: String) -> float:
 	return net
 
 static func rate(planet: Dictionary, resource: String) -> float:
+	var station_output: float = STATION_CRYSTALS_PER_YEAR if resource == "Crystals" and int(planet["owner"]) != 0 and has_station(planet) else 0.0
 	if bool(planet.get("planet_blockaded", false)) and has_planets(planet):
-		return eco_organics(planet) if resource == "Organics" else 0.0
+		return eco_organics(planet) if resource == "Organics" else station_output
 	if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0 or (not has_planets(planet) and resource in ["Metals", "Crystals"]):
-		return 0.0
+		return station_output
 	var level: int = production_level(planet, resource)
 	if resource == "Organics":
 		# Small populations still produce a surplus; farm capacity limits output.
@@ -691,7 +694,7 @@ static func rate(planet: Dictionary, resource: String) -> float:
 		output *= 1.5
 	if resource == "Crystals" and has_reward(planet, "crystals"):
 		output *= 2.0
-	return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
+	return station_output + minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func food_growth_multiplier(planet: Dictionary) -> float:
 	# Orbital residents are self-sufficient; only terrestrial growth is food-limited.
@@ -774,16 +777,16 @@ static func _cost(kind: String, level: int) -> Dictionary:
 		"miner": return {"Metals": 540.0, "Organics": 20.0}
 		"science_ship": return {"Metals": 900.0, "Organics": 30.0}
 		"scout": return {"Metals": 60.0, "Organics": 2.0}
-		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0}
-		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0}
+		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0 * CRYSTAL_COST_MULTIPLIER}}
+		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}}
 		"yard":
 			match level:
 				1: return {"Metals": 480.0}
-				2: return {"Metals": 2000.0, "Organics": 200.0, "Crystals": 200.0}
-				3: return {"Metals": 6000.0, "Organics": 600.0, "Crystals": 600.0}
-		"pds": return {"Metals": 540.0, "Organics": 60.0, "Crystals": 60.0}
+				2: return {"Metals": 2000.0, "Organics": 200.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}}
+				3: return {"Metals": 6000.0, "Organics": 600.0, "Crystals": 600.0 * CRYSTAL_COST_MULTIPLIER}}
+		"pds": return {"Metals": 540.0, "Organics": 60.0, "Crystals": 60.0 * CRYSTAL_COST_MULTIPLIER}}
 		"reinforced_plating": return {"Metals": 4000.0}
-		"laser_matrix": return {"Metals": 2500.0, "Crystals": 800.0}
+		"laser_matrix": return {"Metals": 2500.0, "Crystals": 800.0 * CRYSTAL_COST_MULTIPLIER}}
 		"yard_upgrade": return {"Metals": 240.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"production": return {"Metals": 200.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
 		"warehouse": return WAREHOUSE_COSTS[level - 1].duplicate()
@@ -7961,12 +7964,12 @@ const CONQUEST_REWARDS = {
 	"agriculture": ["Agricultural Revolution", "+50% planetary Organics output", "", "economic", "Organics"],
 	"population": ["Population Boom", "+50% terrestrial growth ceiling", "", "general", "habitation"],
 	"storage": ["Megastructures", "+100% station storage capacity", "", "general", "warehouse"],
-	"shield_1": ["Shields 1", "Military +30% shield HP; stations +50%.", "Military construction: extra Crystals (5% of base Metals).", "military", "guard"],
-	"shield_2": ["Shields 2", "Military +60% shield HP; stations +100%.", "Military construction: extra Crystals (10% of base Metals).", "military", "guard"],
-	"shield_3": ["Shields 3", "Military +90% shield HP; stations +150%.", "Military construction: extra Crystals (15% of base Metals).", "military", "guard"],
+	"shield_1": ["Shields 1", "Military +30% shield HP; stations +50%.", "Military construction: extra Crystals (25% of base Metals).", "military", "guard"],
+	"shield_2": ["Shields 2", "Military +60% shield HP; stations +100%.", "Military construction: extra Crystals (50% of base Metals).", "military", "guard"],
+	"shield_3": ["Shields 3", "Military +90% shield HP; stations +150%.", "Military construction: extra Crystals (75% of base Metals).", "military", "guard"],
 	"armor": ["Reinforced Armor", "Military hulls take 15% less hull damage.", "Military construction: +15% Metals.", "military", "reinforced_plating"],
 	"warp_gate": ["Warp Gates", "Deploy a science vessel as a gate; link owned gates for rapid travel.", "Consumes 1 antimatter per gate.", "tech", "transform"],
-	"cloak": ["Cloaking Field", "Scouts hide outside 250-unit enemy detection. Firing reveals them for 5 s.", "Replaces Scout armor/shields; extra Crystals (15% of base Metals).", "military", "auto_wander"]
+	"cloak": ["Cloaking Field", "Scouts hide outside 250-unit enemy detection. Firing reveals them for 5 s.", "Replaces Scout armor/shields; extra Crystals (75% of base Metals).", "military", "auto_wander"]
 }
 
 static func objective_category(key: String) -> String:
@@ -8180,11 +8183,11 @@ static func construction_cost(p: Dictionary, kind: String, level: int) -> Dictio
 		var rewards: Array = p.get("conquest_rewards", [])
 		var metal: float = float(cost.get("Metals", 0.0))
 		if kind == "scout" and rewards.has("cloak"):
-			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.15)
+			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.15 * CRYSTAL_COST_MULTIPLIER)
 			return cost
 		var tier: int = shield_tier(rewards)
 		if tier > 0:
-			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.05 * tier)
+			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.05 * tier * CRYSTAL_COST_MULTIPLIER)
 		if rewards.has("armor"):
 			cost["Metals"] = ceilf(metal * 1.15)
 	return cost
