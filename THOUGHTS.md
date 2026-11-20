@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.39: User reports approximately 5 FPS in an eight-player match at 5× as frame time rises. Self-time profiler highlights _salvage_threats, _combat, _hostile_bucket, _sync_operations, separation, service_targets and map/minimap/station drawing. Debugger shows 62 errors; details and causality unknown (earlier 61-error observation remains unresolved). Prioritize error triage, reproducible baseline, unified phase-aware world index and incremental packed state before further isolated tweaks. No measured speedup claimed.
+
 - v0.64.38: Exact containment queries share a step-scoped cache on the immutable combat graph. Moved positions and different nodes use distinct keys; other graphs bypass the cache. Cache overhead versus geometry savings needs profiling.
 
 - v0.64.37: Sector containment accepts points inside a conservative precomputed inner disk, accounting for maximum corner rounding. Exact boundary checks remain unchanged. Runtime parity and profiler pending.
