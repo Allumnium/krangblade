@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.64.60: Box selection, including Shift-add, excludes opposing teams; allied hulls remain selectable and individual enemy inspection remains available. Command ownership checks unchanged.
+
 - v0.64.7: Fleet focus/follow uses equal weight per surviving selected hull, not the bounding-box midpoint. Preserve current zoom, selection, building focus and manual pan cancellation.
 
 - v0.64.2: Mixed owned hull selections show one type's command card. Tab/Shift+Tab cycles sorted owned hull types while preserving selection; specialized commands apply to focused hull type; Move and contextual right-click (including move formations) affect all owned selected hulls (v0.64.59). Reset focus when selection changes.

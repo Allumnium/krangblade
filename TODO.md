@@ -88,6 +88,8 @@ Observed approximately 5 FPS as the match progressed; Godot profiler set to self
 
 ### Existing RTS implementation and validation backlog
 
+- [ ] v0.64.60: Playtest mixed-team and enemy-only drag selection, Shift-add after enemy inspection, allied selection and unchanged command ownership.
+
 - [ ] v0.64.59: Verify mixed-type move clicks, minimap and drag formations affect all owned selected hulls while specialized commands remain focused; inspect GPU selection rings and health overlays beneath the HUD at all UI scales.
 
 - [ ] v0.64.7: Playtest F and group recall focus with compact fleets, isolated stragglers, split fleets and casualties; preserve zoom and building focus.
