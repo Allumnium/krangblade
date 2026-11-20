@@ -24,6 +24,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ### Existing RTS implementation and validation backlog
 
+- [ ] v0.64.3: Verify upgrade badges initialize without missing-metadata errors; repeat profiler capture before geometry caching.
+
 - [ ] v0.64.2: Playtest Tab/Shift+Tab mixed hull cards, type-scoped commands and formation, selection changes, foreign hulls and guest command ownership.
 
 - [ ] v0.63.1: Inspect closed region contours at sector mouths, highway crossings/sections, small fields, map edges and all zoom levels; compare influence boundaries to commands and profile shader cost. Preserve this appearance in scalability phase 5 cached geometry.
