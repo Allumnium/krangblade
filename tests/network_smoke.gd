@@ -177,8 +177,13 @@ func _phase_changed() -> void:
 			if role == "host":
 				var ordered: Array[int] = RULES.ordered_peers(roster)
 				for peer in ordered:
-					ECON.objective_progress(state, peer)["points"]["economic"] = 2
-					ECON._fill_reward_offer(state, peer, "economic")
+					var progress: Dictionary = ECON.objective_progress(state, peer)
+					progress["points"]["economic"] = 2
+					progress["points"]["tech"] = 1
+					# Everyone starts with a nonunique economic choice and the
+					# same unique Tech choice to exercise a real peer race.
+					progress["offers"]["economic"] = ["industry", "agriculture", "population"]
+					progress["offers"]["tech"] = ["warp_gate", "storage", "population"]
 				for index in range(ordered.size()):
 					var outpost: Dictionary = state["planets"][int(state["map"]["planetless"][index])]
 					outpost["owner"] = ordered[index]
@@ -925,8 +930,36 @@ func _check_reward_redraft(state: Dictionary) -> bool:
 	var rewards: Array = progress.get("rewards", [])
 	if rewards.is_empty():
 		return false
-	if rewards.size() != 1 or rewards[0] != previous[0] or ECON.reward_offer(progress, "economic").size() != 3 or ECON.reward_offer(progress, "economic").has(previous[0]):
+	if rewards[0] != previous[0] or ECON.reward_offer(progress, "economic").size() != 3 or ECON.reward_offer(progress, "economic").has(previous[0]):
 		_fail("Conquest reward or refreshed draft did not replicate.")
+		return false
+	# Wait until every peer has made the nonunique purchase before racing.
+	for peer in state["teams"]:
+		if not state.get("objectives", {}).get(peer, {}).get("rewards", []).has("industry"):
+			return false
+	if not has_meta("unique_reward_requested"):
+		set_meta("unique_reward_requested", true)
+		session.call("request_conquest_reward", "warp_gate", 1, "tech")
+		return false
+	var winner: int = int(state.get("unique_reward_claims", {}).get("warp_gate", -1))
+	if winner < 0:
+		return false
+	var holders: int = 0
+	for peer in state["teams"]:
+		if state.get("objectives", {}).get(peer, {}).get("rewards", []).has("warp_gate"):
+			holders += 1
+			if int(peer) != winner:
+				_fail("Unique reward ownership differed from authority claim.")
+				return false
+	if holders != 1 or ECON.reward_offer(progress, "tech").has("warp_gate"):
+		_fail("Unique reward was duplicated or remained in a rival draft.")
+		return false
+	if id == winner:
+		if rewards.size() != 2 or ECON.reward_points(progress, "tech") != 0:
+			_fail("Unique winner did not spend exactly one point.")
+			return false
+	elif rewards.size() != 1 or ECON.reward_points(progress, "tech") != 1 or ECON.reward_generation(progress) < 2 or ECON.reward_offer(progress, "tech").size() != 2:
+		_fail("Unique loser did not retain point and receive a replacement draft.")
 		return false
 	return true
 

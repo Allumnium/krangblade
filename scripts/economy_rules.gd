@@ -7907,7 +7907,7 @@ static func _update_objectives(state: Dictionary) -> void:
 				var progress: Dictionary = objective_progress(state, int(player))
 				var offer: Array = reward_offer(progress, category)
 				if not offer.is_empty():
-					acquire_reward(state, int(player), str(offer[0]), progress.get("rewards", []).size(), category)
+					acquire_reward(state, int(player), str(offer[0]), reward_generation(progress), category)
 
 static func specialization_grade(system: Dictionary, resource: String) -> int:
 	if not has_planets(system):
@@ -7926,6 +7926,7 @@ static func specialization_grade(system: Dictionary, resource: String) -> int:
 	return 0
 
 const REWARD_CATEGORIES = ["economic", "military", "tech"]
+const UNIQUE_CONQUEST_REWARDS = ["cloak", "shield_3", "warp_gate", "crystals"]
 const CONQUEST_REWARDS = {
 	"industry": ["Industrial Revolution", "+50% planetary Metals output", "", "economic", "Metals"],
 	"crystals": ["Crystalline Synthesis", "+100% Incubator output", "+15% civilian Metals demand", "economic", "Crystals"],
@@ -7951,6 +7952,15 @@ static func reward_points(progress: Dictionary, category: String) -> int:
 static func reward_offer(progress: Dictionary, category: String) -> Array:
 	return progress.get("offers", {}).get(category, [])
 
+static func reward_is_unique(key: String) -> bool:
+	return UNIQUE_CONQUEST_REWARDS.has(key)
+
+static func reward_generation(progress: Dictionary) -> int:
+	return int(progress.get("draft_generation", progress.get("rewards", []).size()))
+
+static func reward_available(state: Dictionary, key: String) -> bool:
+	return not reward_is_unique(key) or not state.get("unique_reward_claims", {}).has(key)
+
 static func has_reward(system: Dictionary, key: String) -> bool:
 	return system.get("conquest_rewards", []).has(key)
 
@@ -7972,10 +7982,10 @@ static func _fill_reward_offer(state: Dictionary, player: int, category: String)
 		return
 	var available: Array = []
 	for key in CONQUEST_REWARDS:
-		if reward_eligible(progress.get("rewards", []), key, category):
+		if reward_available(state, key) and reward_eligible(progress.get("rewards", []), key, category):
 			available.append(key)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = int(state["map"]["seed"]) + player * 7919 + progress.get("rewards", []).size() * 104729 + REWARD_CATEGORIES.find(category) * 15485863
+	rng.seed = int(state["map"]["seed"]) + player * 7919 + reward_generation(progress) * 104729 + REWARD_CATEGORIES.find(category) * 15485863
 	var offer: Array = []
 	while not available.is_empty() and offer.size() < 3:
 		offer.append(available.pop_at(rng.randi_range(0, available.size() - 1)))
@@ -7986,8 +7996,13 @@ static func acquire_reward(state: Dictionary, player: int, key: String, generati
 		return false
 	var progress: Dictionary = objective_progress(state, player)
 	var rewards: Array = progress.get("rewards", [])
-	if generation != rewards.size() or reward_points(progress, category) < 1 or not reward_offer(progress, category).has(key) or not reward_eligible(rewards, key, category):
+	if generation != reward_generation(progress) or reward_points(progress, category) < 1 or not reward_offer(progress, category).has(key) or not reward_eligible(rewards, key, category) or not reward_available(state, key):
 		return false
+	if reward_is_unique(key):
+		var claims: Dictionary = state.get("unique_reward_claims", {})
+		claims[key] = player
+		state["unique_reward_claims"] = claims
+	progress["draft_generation"] = generation + 1
 	rewards.append(key)
 	progress["rewards"] = rewards
 	progress["points"][category] = reward_points(progress, category) - 1
@@ -8000,6 +8015,23 @@ static func acquire_reward(state: Dictionary, player: int, key: String, generati
 		if reward_offer(progress, other).has(key):
 			progress["offers"][other] = []
 		_fill_reward_offer(state, player, other)
+	# First authority-accepted purchase permanently reserves a unique reward.
+	# Invalidate every competing draft containing it, even when paused.
+	if reward_is_unique(key):
+		for rival in state.get("objectives", {}):
+			if int(rival) == player:
+				continue
+			var rival_progress: Dictionary = state["objectives"][rival]
+			var affected: Array = []
+			for rival_category in REWARD_CATEGORIES:
+				if reward_offer(rival_progress, rival_category).has(key):
+					rival_progress["offers"][rival_category] = []
+					affected.append(rival_category)
+			if affected.is_empty():
+				continue
+			rival_progress["draft_generation"] = reward_generation(rival_progress) + 1
+			for rival_category in affected:
+				_fill_reward_offer(state, int(rival), rival_category)
 	# Apply a newly acquired defense immediately, even while paused.
 	if key.begins_with("shield_") or key in ["armor", "cloak"]:
 		_refresh_reward_defenses(state, 0.0)

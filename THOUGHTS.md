@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.74.0: Screenshot confirmed duplicate `background` declaration in `_build_ui`; rename conquest-specific locals. Unique claims are permanent for the match, even after elimination. Four selected unique rewards; Crystalline Synthesis is the additional economic exclusive. Tech may offer fewer than three cards after Warp Gates is claimed; expand pool later. Verify concurrent claims and confirmed zero-CP closure on live peers.
+
 - v0.73.0: Scout cloak is exclusive and reuses the combat spatial index for detection. Verify detection transitions, enemy target loss, UI selection pruning, AI/influence effects and multiplayer. Full hull data still replicates; cloak is UI/gameplay concealment, not packet-level secrecy. Private CP draft payloads ride the existing snapshot RPC; verify compact/full recovery and packet visibility.
 
 - v0.72.0: Warp Gates use stable combat IDs with immobile gate records; provisional one-per-owned-system placement, 10k HP, 180 approach range and 10 s per-ship cooldown. Verify remote motion interpolation/snap, target destruction and gate links, narrow command card, group behavior and AI. Runtime pending.

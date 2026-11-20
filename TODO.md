@@ -16,9 +16,10 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 - [ ] v0.66.1: Verify direct local asteroid access rather than detouring through an alternate anchor, including multi-access field regression and physical delivery.
 
-### Objectives and specialization (v0.71.0)
+### Objectives and specialization (v0.74.0)
+- [ ] Validate unique reward race, permanent first-player reservation, no charge on rejected claim, replacement drafts and purple labels. Two-/three-peer ENet race fixture added; runtime pending. Verify fixed conquest modal parser and layout.
 - [ ] Validate categorized CP payouts (2 first including same-tick ties, 1 later), 10-second objective transitions, current stock/cargo and resident/crew accounting, advanced objectives and compact counters in solo/ENet.
-- [ ] Validate compact choice modal, immediate close at zero CP, category-specific + general random draft, stale/wrong-category rejection, shared reward invalidation, AI selection and exhausted pools. Private drafts implemented in v0.73.0; verify peer privacy and add public unlock announcements.
+- [ ] Validate compact choice modal, immediate close at zero CP, category-specific + general random draft, stale/wrong-category rejection, shared reward invalidation, AI selection and exhausted pools. Private drafts implemented in v0.73.0; unique unlock announcements added in v0.74.0. Verify peer privacy and announcements.
 - [ ] Validate Empire F4 autoqueue, 500 target cap, eligibility filters, mixed yard levels, affordability, manual/repeat interaction and replication.
 - [ ] Validate Shields 1–3 and armor damage, recharge, costs/refunds, AI construction, selection/world health indicators and peer replication; provisional values. Mixed-selection shield bars and world rings implemented in v0.73.0; improve SVG-matching shield glow if needed.
 - [ ] v0.73.0: Validate Scout-only cloaking, 250-unit detection and 5 s reveal on fire, no shield/armor stacking, Crystal cost, explicit/automatic target checks, minimap/picking and replication. Full hull state remains on peers; adversarial packet privacy and AI/influence behavior remain pending.
