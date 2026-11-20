@@ -1176,6 +1176,7 @@ func network_diagnostics() -> Dictionary:
 func _economy_tick() -> void:
 	if phase != "match" or not (is_solo or multiplayer.is_server()):
 		return
+	economy["objective_clock"] = float(economy.get("objective_clock", 0.0)) + SIM_STEP
 	var speed: int = int(economy.get("time_speed", 1))
 	# Pause stops the simulation, but not accepted orders or replication.
 	motion_revision += 1
@@ -1196,13 +1197,11 @@ func _economy_tick() -> void:
 	snapshot_elapsed += SIM_STEP
 	if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
 		snapshot_elapsed = 0.0
-		if speed > 0:
-			_publish_economy(false)
+		_publish_economy(false)
 	replication_elapsed += SIM_STEP
 	if replication_elapsed >= REPLICATION_INTERVAL - 0.00001:
 		replication_elapsed = 0.0
-		if speed > 0:
-			scheduled_snapshot_revision = snapshot_revision
+		scheduled_snapshot_revision = snapshot_revision
 	if speed > 0:
 		_send_motion()
 	_flush_economy()

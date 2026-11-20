@@ -7810,7 +7810,7 @@ static func objective_progress(state: Dictionary, player: int) -> Dictionary:
 
 static func _record_objective_metals(state: Dictionary, player: int, amount: float) -> void:
 	var progress: Dictionary = objective_progress(state, player)
-	progress["metals"] = minf(1000.0, float(progress["metals"]) + amount)
+	progress["metals"] = float(progress["metals"]) + amount
 
 static func _update_objectives(state: Dictionary) -> void:
 	var populations: Dictionary = {}
@@ -7824,10 +7824,10 @@ static func _update_objectives(state: Dictionary) -> void:
 	for player in state["teams"]:
 		var progress: Dictionary = objective_progress(state, int(player))
 		progress["population"] = maxf(float(progress["population"]), float(populations.get(player, 0.0)))
-		var reached: Dictionary = {"colonies": progress["colonies"].size() >= 2, "metals": float(progress["metals"]) >= 1000.0 - EPS, "population": float(progress["population"]) >= 200000.0}
-		for key in reached:
-			if reached[key] and not progress["completed"].has(key):
-				progress["completed"][key] = float(state["elapsed"])
+		for objective in active_objectives(progress, float(state.get("objective_clock", 0.0))):
+			var key: String = objective["id"]
+			if float(objective["value"]) >= float(objective["target"]) - EPS and not progress["completed"].has(key):
+				progress["completed"][key] = float(state.get("objective_clock", 0.0))
 				if not first.has(key):
 					first[key] = now
 				var winner: bool = float(first[key]) == now
@@ -7901,3 +7901,36 @@ static func acquire_reward(state: Dictionary, player: int, key: String) -> bool:
 			system["conquest_rewards"] = rewards.duplicate()
 	_fill_reward_offer(state, player)
 	return true
+
+const OBJECTIVE_TRACKS = {
+	"metals": [1000, 3000, 10000],
+	"population": [200000, 500000, 1000000],
+	"colonies": [2, 4, 8]
+}
+
+static func active_objectives(progress: Dictionary, clock: float) -> Array:
+	var result: Array = []
+	var completed: Dictionary = progress.get("completed", {})
+	for track in OBJECTIVE_TRACKS:
+		var thresholds: Array = OBJECTIVE_TRACKS[track]
+		for tier in range(thresholds.size()):
+			var key: String = track if tier == 0 else "%s_%d" % [track, tier + 1]
+			if completed.has(key) and clock - float(completed[key]) >= 10.0 and tier < thresholds.size() - 1:
+				continue
+			var target: int = int(thresholds[tier])
+			var value: float = float((progress.get("colonies", {}) as Dictionary).size()) if track == "colonies" else float(progress.get(track, 0))
+			var label: String = ""
+			var counter: String = ""
+			match track:
+				"metals":
+					label = "Harvest %dt Metals" % target
+					counter = "%d / %d" % [mini(int(value), target), target]
+				"population":
+					label = "Reach %dk population" % (target / 1000)
+					counter = "%dk / %dk" % [mini(int(value), target) / 1000, target / 1000]
+				"colonies":
+					label = "Colonize %d systems" % target
+					counter = "%d / %d" % [mini(int(value), target), target]
+			result.append({"id": key, "track": track, "target": target, "value": value, "label": label, "counter": counter})
+			break
+	return result
