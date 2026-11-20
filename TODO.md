@@ -27,6 +27,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ### Existing RTS implementation and validation backlog
 
+- [ ] v0.64.7: Playtest F and group recall focus with compact fleets, isolated stragglers, split fleets and casualties; preserve zoom and building focus.
+
 - [ ] v0.64.3: Verify upgrade badges initialize without missing-metadata errors; repeat profiler capture before geometry caching.
 
 - [ ] v0.64.2: Playtest Tab/Shift+Tab mixed hull cards, type-scoped commands and formation, selection changes, foreign hulls and guest command ownership.

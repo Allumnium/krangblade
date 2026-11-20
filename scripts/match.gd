@@ -6374,16 +6374,24 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 	for id in ids:
 		if poses.has(id):
 			positions.append(poses[id]["world"])
+	var tracking_ships: bool = not positions.is_empty()
 	if positions.is_empty():
 		for ref in selected_buildings:
 			if _building_valid(state, ref, building_selection_kind, int(selected_buildings[ref])):
 				positions.append(_building_world(state, ref, building_selection_kind))
 	if not positions.is_empty():
-		# Follow the selection's bounding-box center without changing zoom.
-		var bounds := Rect2(positions[0], Vector2.ZERO)
-		for point in positions:
-			bounds = bounds.expand(point)
-		_center_world(bounds.get_center())
+		# Equal weight per hull, not per extreme of its bounding box.
+		# Preserve the original bounds center for building-only selections.
+		if tracking_ships:
+			var sum: Vector2 = Vector2.ZERO
+			for point in positions:
+				sum += point
+			_center_world(sum / float(positions.size()))
+		else:
+			var bounds := Rect2(positions[0], Vector2.ZERO)
+			for point in positions:
+				bounds = bounds.expand(point)
+			_center_world(bounds.get_center())
 		return
 	var fields: Array = state["map"].get("fields", [])
 	if selected_field >= 0 and selected_field < fields.size() and ECONOMY.discovered(state, _me(), "fields", selected_field):
