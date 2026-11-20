@@ -302,6 +302,8 @@ var yard_upgrades: Dictionary = {}
 var yard_cancel: Button
 var selected_ship_id: int = -1
 var selected_units: Array[int] = []
+var command_kind: String = ""
+var command_selection: Array[int] = []
 var control_groups: Dictionary = {}
 var last_control_group_recall: int = -1
 var last_control_group_recall_ms: int = -1000
@@ -2479,7 +2481,7 @@ func _build_command_card(parent: VBoxContainer) -> void:
 func _autocast_units(state: Dictionary, mode: String) -> Array:
 	var units: Array = []
 	for ship in state.get("ships", []):
-		if selected_units.has(int(ship["id"])) and int(ship["owner"]) == _me() and ECONOMY.supports_autocast(ship, mode):
+		if _command_member(ship) and ECONOMY.supports_autocast(ship, mode):
 			units.append(ship)
 	return units
 
@@ -2532,7 +2534,7 @@ func _refresh_autocast_cards() -> void:
 			farm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if command_buttons.has("collect"):
 		var collect_button: Button = command_buttons["collect"]
-		var has_fighters: bool = state.get("ships", []).any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"])
+		var has_fighters: bool = state.get("ships", []).any(func(craft: Dictionary) -> bool: return _command_member(craft) and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"])
 		var has_harvesters: bool = not _autocast_units(state, "mine").is_empty()
 		var extra: Control = command_card.get_child(16)
 		var collect_slot: Control = command_card.get_child((16 if has_fighters else 9) if has_harvesters else 13)
@@ -2627,7 +2629,7 @@ func _refresh_command_mode() -> void:
 		return
 	var active: Dictionary = {}
 	for ship in _state().get("ships", []):
-		if selected_units.has(int(ship["id"])) and int(ship["owner"]) == _me():
+		if _command_member(ship):
 			var command: String = _active_command(ship)
 			if not command.is_empty():
 				active[command] = true
@@ -2665,7 +2667,7 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 		if wreck >= 0:
 			var eligible: Array[int] = []
 			for craft in state["ships"]:
-				if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
+				if _command_member(craft) and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
 					eligible.append(int(craft["id"]))
 			_issue_order(eligible, {"kind": "salvage", "target": wreck}, append)
 	elif mode == "guard":
@@ -2675,7 +2677,7 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 		var node: int = ECONOMY.patrol_node(state, graph, _me(), world)
 		var ids: Array[int] = []
 		for craft in state["ships"]:
-			if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
+			if _command_member(craft) and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
 				ids.append(int(craft["id"]))
 		if node >= 0:
 			_issue_order(ids, {"kind": "guard", "target": node, "point": world}, append)
@@ -3076,7 +3078,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		selected_crew = float(ship.get("crew", 0.0))
 	ship_population.text = ("Total crew: " if multiple else "Crew: ") + _crew_text(selected_crew)
 	ship_population.get_parent().show()
+	_sync_command_kind(state)
 	command_card.show()
+	loaded_owned = false
 	var combat_owned: bool = false
 	var can_load: bool = false
 	var has_cargo_hold: bool = false
@@ -3084,7 +3088,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	var loaded_farm: bool = false
 	var has_miners: bool = not _selected_miners().is_empty()
 	for craft in state["ships"]:
-		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me():
+		if _command_member(craft):
+			loaded_owned = loaded_owned or ECONOMY._cargo_total(craft) > ECONOMY.EPS
 			combat_owned = combat_owned or ECONOMY.armed(craft)
 			can_load = can_load or (ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS)
 			has_cargo_hold = has_cargo_hold or ECONOMY.supports_autocast(craft, "salvage")
@@ -3093,7 +3098,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_miners) and (id not in ["load", "unload"] or has_cargo_hold)
-		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"])) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"])) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
 	var transform: Button = command_buttons["transform"]
 	var transform_extra: Control = command_card.get_child(17)
 	var transform_slot: Control = transform_extra if has_miners else command_card.get_child(7)
@@ -3103,13 +3108,14 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	transform_extra.visible = has_farm and has_miners
 	transform.visible = has_farm
 	var graph: Dictionary = ECONOMY.military_graph(state)
-	transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY._valid_unit_order(state, graph, craft, {"kind": "transform"}, true))
+	transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY._valid_unit_order(state, graph, craft, {"kind": "transform"}, true))
 	command_buttons["deliver_farm"].visible = has_farm
 	command_buttons["deliver_farm"].disabled = not loaded_farm
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
 		pending_command = ""
 	_refresh_command_mode()
-	fleet_title.visible = false
+	fleet_title.visible = _command_kinds(state).size() > 1
+	fleet_title.text = "%s · Tab" % _ship_kind_name(command_kind)
 	fleet_detail.visible = false
 	fleet_cargo_footer.visible = ECONOMY._cargo_total({"cargo": cargo}) > ECONOMY.EPS
 	if fleet_cargo_footer.visible:
@@ -3855,6 +3861,7 @@ func _refresh() -> void:
 	if not is_instance_valid(year_label):
 		return
 	var state: Dictionary = _state()
+	_sync_command_kind(state)
 	var phase: String = str(session.get("phase"))
 	if phase == "match" and not background_music.playing:
 		background_music.play()
@@ -5462,23 +5469,53 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	if not entries.is_empty():
 		session.call("request_unit_orders", entries, append)
 
+func _command_kinds(state: Dictionary) -> Array[String]:
+	var kinds: Array[String] = []
+	for craft in state.get("ships", []):
+		var kind: String = str(craft["kind"])
+		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and not kinds.has(kind):
+			kinds.append(kind)
+	kinds.sort()
+	return kinds
+
+func _sync_command_kind(state: Dictionary) -> void:
+	var kinds: Array[String] = _command_kinds(state)
+	if command_selection != selected_units or not kinds.has(command_kind):
+		command_selection.assign(selected_units)
+		command_kind = kinds[0] if not kinds.is_empty() else ""
+
+func _command_member(craft: Dictionary) -> bool:
+	return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and str(craft["kind"]) == command_kind
+
+func _cycle_command_kind(reverse: bool) -> bool:
+	var state: Dictionary = _state()
+	_sync_command_kind(state)
+	var kinds: Array[String] = _command_kinds(state)
+	if kinds.size() < 2:
+		return false
+	command_kind = kinds[posmod(kinds.find(command_kind) + (-1 if reverse else 1), kinds.size())]
+	pending_command = ""
+	formation_button = 0
+	_refresh()
+	return true
+
 func _selected_miners() -> Array[int]:
 	var miners: Array[int] = []
 	for craft in _state().get("ships", []):
-		if int(craft["owner"]) == _me() and craft["kind"] == "miner" and selected_units.has(int(craft["id"])):
+		if _command_member(craft) and craft["kind"] == "miner":
 			miners.append(int(craft["id"]))
 	return miners
 
 func _selected_owned_units(state: Dictionary) -> Array[int]:
 	var owned: Array[int] = []
 	for craft in state.get("ships", []):
-		if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])):
+		if _command_member(craft):
 			owned.append(int(craft["id"]))
 	return owned
 
 func _any_selected_holding() -> bool:
 	for craft in _state().get("ships", []):
-		if int(craft["owner"]) == _me() and selected_units.has(int(craft["id"])) and bool(craft.get("holding", false)):
+		if _command_member(craft) and bool(craft.get("holding", false)):
 			return true
 	return false
 
@@ -5497,7 +5534,7 @@ func _transform_selected() -> void:
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var ids: Array[int] = []
 	for ship in state["ships"]:
-		if selected_units.has(int(ship["id"])) and int(ship["owner"]) == _me() and ECONOMY._valid_unit_order(state, graph, ship, {"kind": "transform"}, Input.is_key_pressed(KEY_SHIFT)):
+		if _command_member(ship) and ECONOMY._valid_unit_order(state, graph, ship, {"kind": "transform"}, Input.is_key_pressed(KEY_SHIFT)):
 			ids.append(int(ship["id"]))
 	if not ids.is_empty():
 		_issue_order(ids, {"kind": "transform"}, Input.is_key_pressed(KEY_SHIFT))
@@ -5505,7 +5542,7 @@ func _transform_selected() -> void:
 func _deliver_farm_selected() -> void:
 	var ids: Array[int] = []
 	for ship in _state().get("ships", []):
-		if ship["kind"] == "colony_ship" and int(ship["owner"]) == _me() and selected_units.has(int(ship["id"])) and ECONOMY._cargo_total(ship) > ECONOMY.EPS:
+		if ship["kind"] == "colony_ship" and _command_member(ship) and ECONOMY._cargo_total(ship) > ECONOMY.EPS:
 			ids.append(int(ship["id"]))
 	pending_command = ""
 	_issue_order(ids, {"kind": "unload"}, Input.is_key_pressed(KEY_SHIFT))
@@ -5856,6 +5893,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_recall_control_group(number)
 	elif event.ctrl_pressed:
 		return
+	elif key == KEY_TAB and _cycle_command_kind(event.shift_pressed):
+		pass
 	elif key == _hotkey_value("focus", hotkey_overrides):
 		_focus_selection()
 	elif key == _hotkey_value("army", hotkey_overrides):

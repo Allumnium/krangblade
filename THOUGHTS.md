@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.2: Mixed fleet command focus is client-local and cycles owned hull types without dropping selection. Commands including contextual movement apply to the active type; inspect usability and Tab focus handling in play.
+
 - v0.64.1: Synthetic fleet stress harness reports timing distributions, deadline misses, phase costs and live hull counts. Dense battle casualties change workload over time; compare counts and identical seed/options. No measured baseline yet; graphical and ENet workloads remain separate.
 
 - v0.63.1: Screenshot showed dangling/disconnected corridor lines. Previous union rim was masked by independent core/near-lane tests; replacement draws shared fill/rim contours for individual assigned regions. Additional lane overlap checks may increase GPU cost in corridor pixels; measure and carry into cached territory geometry roadmap. In-game appearance unverified.

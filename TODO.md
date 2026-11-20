@@ -24,6 +24,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ### Existing RTS implementation and validation backlog
 
+- [ ] v0.64.2: Playtest Tab/Shift+Tab mixed hull cards, type-scoped commands and formation, selection changes, foreign hulls and guest command ownership.
+
 - [ ] v0.63.1: Inspect closed region contours at sector mouths, highway crossings/sections, small fields, map edges and all zoom levels; compare influence boundaries to commands and profile shader cost. Preserve this appearance in scalability phase 5 cached geometry.
 
 - [ ] v0.63.0: Validate one-hop adjacent influence, threshold, proportional blends, fog boundaries and long highway seams; retain adjacency in scalability phase 5 incremental totals.

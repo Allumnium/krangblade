@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.64.2: Mixed owned hull selections show one type's command card. Tab/Shift+Tab cycles sorted owned hull types while preserving selection; commands apply to focused hull type. Reset focus when selection changes.
+
 - v0.64.0: Exact-point movement, formations, patrols and manual service travel use direct physical flight across borders. Preserve discovered sector/corridor target validation, local avoidance and strategic adjacency. Automatic economic and sector-target routing remain a migration follow-up.
 
 - v0.63.1: Render each sector/highway section with a closed clearance contour shared by fill and antialiased rim. Round lane mouths, intersections and section ends; no union-mask fragments. Preserve authoritative region membership, influence and navigation; visual rounding is local.
