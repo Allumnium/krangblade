@@ -731,7 +731,34 @@ func _test_combat_sector_presence() -> void:
 	assert(not bool(craft.get("passing_fire", false)))
 	print("PASS: indexed combat sector team presence and move-only behavior")
 
+# Compare the old idle predicate against activity classification for
+# representative state transitions, including overlapping orders.
+func _legacy_idle_ship(ship: Dictionary) -> bool:
+	if ship.get("unit_order", {}).get("kind", "") in ["follow", "guard"] or ship.has("resource_stage") or ECON._salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally") or ship.has("patrol_from") or ship.has("attack_order") or ship.has("cargo_order") or ship.has("repair_order") or ship.has("repair_target"):
+		return false
+	var fighter: bool = ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]
+	var mode: String = str(ship.get("mining_mode", "idle"))
+	var waiting_miner: bool = ship.get("kind", "") == "miner" and mode == "delivery" and int(ship.get("dest", -1)) < 0
+	return (ship["route"] as Array).is_empty() and (mode == "idle" or waiting_miner) and (fighter or int(ship.get("dest", -1)) < 0) and int(ship.get("source", -1)) < 0 and not ECON._engaged(ship) and not bool(ship.get("retreating", false)) and not bool(ship.get("holding", false))
+
+func _test_ship_activity() -> void:
+	var ship: Dictionary = {"kind": "fighter", "route": [], "dest": 0, "source": -1}
+	assert(ECON.ship_activity(ship) == ECON.ShipActivity.IDLE)
+	var changes: Array = [{"route": [1]}, {"holding": true}, {"retreating": true}, {"combat_target": 12}, {"combat_target": 12, "passing_fire": true}, {"pursuit_target": 12}, {"repair_order": 12}, {"repair_target": 12}, {"cargo_order": {}}, {"resource_stage": {}}, {"salvage_target": 12}, {"salvage_delivery": true}, {"local_move_target": Vector2.ZERO}, {"launch_rally": {}}, {"patrol_from": 0}, {"attack_order": 12}, {"unit_order": {"kind": "follow"}}, {"unit_order": {"kind": "guard"}}, {"source": 0}, {"mining_mode": "mining"}, {"mining_mode": "delivery", "dest": -1}]
+	for kind in ECON.SHIP_KINDS:
+		ship["kind"] = kind
+		for dest in [-1, 0]:
+			ship["dest"] = dest
+			assert(ECON._is_idle_ship(ship) == _legacy_idle_ship(ship))
+			for change in changes:
+				var craft: Dictionary = ship.duplicate(true)
+				craft.merge(change, true)
+				assert(ECON._is_idle_ship(craft) == _legacy_idle_ship(craft))
+	assert(ECON.ship_activity({"kind": "miner", "route": [], "mining_mode": "mining"}) == ECON.ShipActivity.MINING)
+	print("PASS: derived ship activity and legacy idle parity")
+
 func _initialize() -> void:
+	_test_ship_activity()
 	_test_combat_sector_presence()
 	_test_stop_order()
 	_test_nearest_colony_and_queued_hold()

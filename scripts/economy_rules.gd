@@ -6594,13 +6594,44 @@ static func _pursue_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> v
 # Idle ships remain in their current sector. Up to three same-owner,
 # same-kind hulls share a moving local anchor and tangent-relative V slots.
 # Routing, docking, mining, combat and withdrawal always take precedence.
-static func _is_idle_ship(ship: Dictionary) -> bool:
-	if ship.get("unit_order", {}).get("kind", "") in ["follow", "guard"] or ship.has("resource_stage") or _salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally") or ship.has("patrol_from") or ship.has("attack_order") or ship.has("cargo_order") or ship.has("repair_order") or ship.has("repair_target"):
-		return false
-	var fighter: bool = ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]
+# Derived primary activity: existing orders/jobs remain authoritative.
+# No replicated state or invalidation requirement; use a local value only
+# while the hull's orders, route and combat flags are unchanged.
+enum ShipActivity { IDLE, MOVING, FIGHTING, MINING, HAULING, REPAIRING, HOLDING, WITHDRAWING, WORKING }
+
+static func ship_activity(ship: Dictionary) -> ShipActivity:
+	if bool(ship.get("retreating", false)):
+		return ShipActivity.WITHDRAWING
+	if bool(ship.get("holding", false)):
+		return ShipActivity.HOLDING
+	if _engaged(ship) or ship.has("attack_order"):
+		return ShipActivity.FIGHTING
+	if ship.has("repair_order") or ship.has("repair_target"):
+		return ShipActivity.REPAIRING
+	if ship.has("cargo_order") or ship.has("resource_stage") or bool(ship.get("salvage_delivery", false)):
+		return ShipActivity.HAULING
+	if not (ship["route"] as Array).is_empty() or ship.has("local_move_target") or ship.has("launch_rally") or ship.has("patrol_from"):
+		return ShipActivity.MOVING
+	var order: Variant = ship.get("unit_order")
+	if order != null:
+		var order_kind: String = order.get("kind", "")
+		if order_kind == "follow" or order_kind == "guard":
+			return ShipActivity.MOVING
+	if int(ship.get("salvage_target", -1)) >= 0:
+		return ShipActivity.WORKING
 	var mode: String = str(ship.get("mining_mode", "idle"))
-	var waiting_miner: bool = ship.get("kind", "") == "miner" and mode == "delivery" and int(ship.get("dest", -1)) < 0
-	return (ship["route"] as Array).is_empty() and (mode == "idle" or waiting_miner) and (fighter or int(ship.get("dest", -1)) < 0) and int(ship.get("source", -1)) < 0 and not _engaged(ship) and not bool(ship.get("retreating", false)) and not bool(ship.get("holding", false))
+	var kind: String = str(ship.get("kind", ""))
+	var dest: int = int(ship.get("dest", -1))
+	if mode != "idle" and not (kind == "miner" and mode == "delivery" and dest < 0):
+		return ShipActivity.MINING if kind == "miner" else ShipActivity.WORKING
+	if int(ship.get("source", -1)) >= 0:
+		return ShipActivity.HAULING
+	if dest >= 0 and kind != "fighter" and kind != "scout" and kind != "cruiser" and kind != "destroyer":
+		return ShipActivity.MOVING
+	return ShipActivity.IDLE
+
+static func _is_idle_ship(ship: Dictionary) -> bool:
+	return ship_activity(ship) == ShipActivity.IDLE
 
 static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dictionary:
 	var groups: Dictionary = {}
@@ -6803,8 +6834,13 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		if ship.get("unit_order", {}).get("kind", "") == "follow":
 			continue
 		# Waiting hulls remain precise obstacles, but combat/withdrawal can move.
-		if not _engaged(ship) and ((arrival_wait_remaining(state, ship) > EPS and not (_is_idle_ship(ship) and autocast_ready(state, ship, "wander"))) or (_is_idle_ship(ship) and not autocast_ready(state, ship, "wander"))):
-			continue
+		var engaged: bool = _engaged(ship)
+		var idle: bool = false
+		if not engaged:
+			idle = _is_idle_ship(ship)
+			var can_wander: bool = idle and autocast_ready(state, ship, "wander")
+			if (arrival_wait_remaining(state, ship) > EPS and not can_wander) or (idle and not can_wander):
+				continue
 		# Preserve the exact endpoint and facing on the arrival tick only.
 		# The completed order is retired before next tick's ordinary wandering.
 		var order: Dictionary = ship.get("unit_order", {})
@@ -6819,7 +6855,7 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		# Do not push docking or extracting civilian ships off their targets.
 		if not held:
 			if route.is_empty():
-				if not local_moving and not _is_idle_ship(ship) and not _engaged(ship):
+				if not local_moving and not idle and not engaged:
 					continue
 				var at: int = int(ship["at"])
 				if at >= 0 and at < graph["points"].size() and planned.distance_to(graph["points"][at]) <= EPS:
