@@ -18,10 +18,10 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ### Objectives and specialization (v0.71.0)
 - [ ] Validate categorized CP payouts (2 first including same-tick ties, 1 later), 10-second objective transitions, current stock/cargo and resident/crew accounting, advanced objectives and compact counters in solo/ENet.
-- [ ] Validate compact choice modal, immediate close at zero CP, category-specific + general random draft, stale/wrong-category rejection, shared reward invalidation, AI selection and exhausted pools. Private peer offers and public unlock announcements remain pending.
+- [ ] Validate compact choice modal, immediate close at zero CP, category-specific + general random draft, stale/wrong-category rejection, shared reward invalidation, AI selection and exhausted pools. Private drafts implemented in v0.73.0; verify peer privacy and add public unlock announcements.
 - [ ] Validate Empire F4 autoqueue, 500 target cap, eligibility filters, mixed yard levels, affordability, manual/repeat interaction and replication.
-- [ ] Validate Shields 1–3 and armor damage, recharge, costs/refunds, AI construction, selection/world health indicators and peer replication; provisional values. Add SVG-matching shield glow and mixed-selection shield bars.
-- [ ] Implement cloak with attack reveal/detection and explicit hull eligibility; decide interaction with armor/shields and construction cost.
+- [ ] Validate Shields 1–3 and armor damage, recharge, costs/refunds, AI construction, selection/world health indicators and peer replication; provisional values. Mixed-selection shield bars and world rings implemented in v0.73.0; improve SVG-matching shield glow if needed.
+- [ ] v0.73.0: Validate Scout-only cloaking, 250-unit detection and 5 s reveal on fire, no shield/armor stacking, Crystal cost, explicit/automatic target checks, minimap/picking and replication. Full hull state remains on peers; adversarial packet privacy and AI/influence behavior remain pending.
 - [ ] v0.72.0: Validate Tech Warp Gates: loaded science vessel conversion in owned sectors, one gate per system, stable links, approach/teleport, cooldown, destruction, costs, selection/map art and real two-/three-peer ENet. Add AI deployment/transit and dedicated peer regression.
 - [ ] Expand category-specific and shared reward pools, particularly Tech and Military; keep drawbacks optional and thematic.
 - [ ] Science objectives, antimatter uses and victory condition; retain physical cargo.
