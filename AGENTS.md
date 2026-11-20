@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.70.4: Global population includes residents, embarked ship crews and already allocated construction crew (no new consumption or labor). Fleet segment distinct; station capacity remains resident-only. Metals objectives use current owned stock + cargo, population objectives use current total population; completion permanent. Advanced objectives cannot precede their metric's completed fixed track; shared compact formatting.
+
 - v0.70.2: Empire desired fleet slider and authority validation cap targets at 500 per hull type; this is not a fleet population cap. Preserve 10,000-ship stress-test goal.
 
 - v0.70.0: F4 fleet targets use stepped sliders and host-authoritative autoqueue, counting owned and queued ships. Show available hulls and retain editable targets if access is lost. Lowering targets does not cancel paid orders.

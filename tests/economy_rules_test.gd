@@ -1023,7 +1023,28 @@ func _test_empire_targets() -> void:
 	assert(int(counts["live"].get("fighter", 0)) + int(counts["queued"].get("fighter", 0)) <= 5)
 	assert(ECON.set_empire_target(state, 1, "fighter", 0))
 
+func _test_objective_holdings() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	state["ships"] = [{"owner": 1, "crew": 1000.0, "cargo": {"Metals": 100.0}}, {"owner": 2, "crew": 999999.0, "cargo": {"Metals": 100000.0}}]
+	var home: Dictionary = state["planets"][0]
+	home["population"] = 199000.0
+	home["stock"]["Metals"] = 900.0
+	ECON._update_objectives(state)
+	var progress: Dictionary = ECON.objective_progress(state, 1)
+	assert(float(progress["population"]) == 200000.0 and float(progress["metals"]) == 1000.0)
+	assert(progress["completed"].has("population") and progress["completed"].has("metals"))
+	home["stock"]["Metals"] = 100.0
+	ECON._update_objectives(state)
+	assert(float(progress["metals"]) == 200.0 and progress["completed"].has("metals"))
+	progress["completed"]["metals_2"] = 0.0
+	progress["completed"]["metals_3"] = 0.0
+	state["objective_clock"] = 11.0
+	ECON._assign_advanced_objectives(state, 1, progress)
+	assert(str(progress["advanced"]["metals"]) in ["advanced_antimatter", "advanced_metals"])
+	print("PASS: objective holdings, crew and non-overlapping tracks")
+
 func _initialize() -> void:
+	_test_objective_holdings()
 	_test_empire_targets()
 	_test_packed_threat_records()
 	_test_indexed_hostile_bucket()
@@ -1273,13 +1294,13 @@ func _initialize() -> void:
 	totals_state["planets"][3]["stock"]["Metals"] = 25.0
 	var own_cargo: Dictionary = ECON.empty_stock()
 	own_cargo["Metals"] = 7.0
-	totals_state["ships"].append({"owner": 1, "kind": "ship", "cargo": own_cargo})
-	totals_state["ships"].append({"owner": 1, "kind": "colony_ship", "cargo": ECON.empty_stock()})
-	totals_state["ships"].append({"owner": 2, "kind": "ship", "cargo": own_cargo.duplicate()})
+	totals_state["ships"].append({"owner": 1, "kind": "ship", "cargo": own_cargo, "crew": 20.0})
+	totals_state["ships"].append({"owner": 1, "kind": "colony_ship", "cargo": ECON.empty_stock(), "crew": 80.0})
+	totals_state["ships"].append({"owner": 2, "kind": "ship", "cargo": own_cargo.duplicate(), "crew": 200.0})
 	var totals: Dictionary = ECON.empire_totals(totals_state, 1)
 	assert(totals["planets"] == 2 and totals["craft"] == 2)
 	assert(totals["logistics"] == 1 and totals["colonies"] == 1)
-	assert(is_equal_approx(float(totals["population"]), ECON.HOME_POPULATION + ECON.ORBITAL_HOUSING_POPULATION + ECON.COLONY_POPULATION))
+	assert(is_equal_approx(float(totals["population"]), ECON.HOME_POPULATION + ECON.ORBITAL_HOUSING_POPULATION + ECON.COLONY_POPULATION + 100.0))
 	assert(is_equal_approx(float(totals["stock"]["Metals"]), float(ECON.STARTING_STOCK["Metals"]) + 25.0))
 	assert(is_equal_approx(float(totals["cargo"]["Metals"]), 7.0))
 	assert(is_equal_approx(float(totals["resources"]["Metals"]), float(ECON.STARTING_STOCK["Metals"]) + 32.0))

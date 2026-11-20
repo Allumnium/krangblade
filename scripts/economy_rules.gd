@@ -355,6 +355,8 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 	var cargo: Dictionary = empty_stock()
 	var total: Dictionary = empty_stock()
 	var population: float = 0.0
+	var ship_population: float = 0.0
+	var embarking_population: float = 0.0
 	var capacity: float = 0.0
 	var planets: int = 0
 	var craft: int = 0
@@ -368,12 +370,14 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 		planets += 1
 		capacity += storage_capacity(planet)
 		population += float(planet["population"])
+		embarking_population += embarked_construction_population(planet)
 		for resource in RESOURCES:
 			stock[resource] = float(stock[resource]) + float(planet["stock"].get(resource, 0.0))
 	for ship in state.get("ships", []):
 		if int(ship["owner"]) != player:
 			continue
 		craft += 1
+		ship_population += float(ship.get("crew", 0.0))
 		if ship.get("kind", "ship") == "colony_ship":
 			colonies += 1
 		elif ship.get("kind", "ship") in ["fighter", "scout", "cruiser", "destroyer"]:
@@ -390,7 +394,7 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 	var storage_reference: Dictionary = empty_stock()
 	for resource in RESOURCES:
 		storage_reference[resource] = capacity
-	return {"stock": stock, "cargo": cargo, "resources": total, "storage_reference": storage_reference, "population": population,
+	return {"stock": stock, "cargo": cargo, "resources": total, "storage_reference": storage_reference, "population": population + ship_population + embarking_population, "resident_population": population, "ship_population": ship_population, "embarking_population": embarking_population,
 		"planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters, "miners": miners}
 
 ## Host-only sample history; only the derived rates are replicated.
@@ -1662,8 +1666,6 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		if resource != "Organics" and potential > EPS and demand > potential and stored < minf(capacity, maxf(CONSTRUCTION_RESERVE, float(next_costs.get(resource, 0.0)))):
 			used = minf(used, potential * (1.0 - CONSTRUCTION_PRODUCTION_SHARE))
 		var produced: float = minf(potential, used + maxf(0.0, capacity - stored))
-		if resource == "Metals" and produced > EPS:
-			_record_objective_metals(state, int(p["owner"]), produced)
 		_record_flow(p, "Production", resource, produced)
 		_record_flow(p, "Population", resource, used)
 		p["stock"][resource] = maxf(0.0, stored + produced - used)
@@ -2753,8 +2755,6 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			var free: float = MINER_CAPACITY - _cargo_total(ship)
 			var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource]))))
 			ship["mining_active"] = amount > EPS
-			if resource == "Metals" and amount > EPS:
-				_record_objective_metals(state, int(ship["owner"]), amount)
 			_cargo_stat(ship, "tons_picked", resource, amount)
 			ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
 			chunk["remaining"] = maxf(0.0, float(chunk["remaining"]) - amount)
@@ -7811,22 +7811,34 @@ static func objective_progress(state: Dictionary, player: int) -> Dictionary:
 		all_progress[player] = {"colonies": {}, "metals": 0.0, "population": 0.0, "completed": {}, "points": 0}
 	return all_progress[player]
 
-static func _record_objective_metals(state: Dictionary, player: int, amount: float) -> void:
-	var progress: Dictionary = objective_progress(state, player)
-	progress["metals"] = float(progress["metals"]) + amount
+static func embarked_construction_population(planet: Dictionary) -> float:
+	var total: float = 0.0
+	for job in planet.get("queue", []):
+		if SHIP_KINDS.has(job["kind"]):
+			total += float(job.get("population_allocated", 0.0))
+	return total
 
 static func _update_objectives(state: Dictionary) -> void:
+	# Aggregate once for all empires; cargo and crew count exactly once.
 	var populations: Dictionary = {}
+	var metals: Dictionary = {}
 	for system in state["planets"]:
 		var player: int = int(system["owner"])
 		if player > 0:
-			populations[player] = float(populations.get(player, 0.0)) + float(system["population"])
+			populations[player] = float(populations.get(player, 0.0)) + float(system["population"]) + embarked_construction_population(system)
+			metals[player] = float(metals.get(player, 0.0)) + float(system["stock"].get("Metals", 0.0))
+	for ship in state["ships"]:
+		var player: int = int(ship["owner"])
+		if player > 0:
+			populations[player] = float(populations.get(player, 0.0)) + float(ship.get("crew", 0.0))
+			metals[player] = float(metals.get(player, 0.0)) + float(ship.get("cargo", {}).get("Metals", 0.0))
 	var first: Dictionary = state.get("objective_first", {})
 	var events: Array = state.get("objective_events", [])
 	var now: float = float(state.get("objective_clock", state["elapsed"]))
 	for player in state["teams"]:
 		var progress: Dictionary = objective_progress(state, int(player))
-		progress["population"] = maxf(float(progress["population"]), float(populations.get(player, 0.0)))
+		progress["population"] = float(populations.get(player, 0.0))
+		progress["metals"] = float(metals.get(player, 0.0))
 		_assign_advanced_objectives(state, int(player), progress)
 		for objective in active_objectives(progress, float(state.get("objective_clock", 0.0))):
 			var key: String = objective["id"]
@@ -7912,6 +7924,20 @@ const OBJECTIVE_TRACKS = {
 	"colonies": [2, 4, 8]
 }
 
+static func objective_amount(value: float) -> String:
+	if value >= 1000000.0:
+		return ("%0.1f" % (value / 1000000.0)).trim_suffix(".0") + "M"
+	if value >= 1000.0:
+		return ("%0.1f" % (value / 1000.0)).trim_suffix(".0") + "k"
+	return str(int(value))
+
+static func _objective_row(progress: Dictionary, key: String, track: String, metric: String, target: int, title: String) -> Dictionary:
+	var value: float = float((progress.get("colonies", {}) as Dictionary).size()) if metric == "colonies" else float(progress.get(metric, 0))
+	if progress.get("completed", {}).has(key):
+		value = maxf(value, float(target))
+	var counter: String = "%s / %s" % [objective_amount(minf(value, target)), objective_amount(target)]
+	return {"id": key, "track": track, "metric": metric, "target": target, "value": value, "label": title, "counter": counter}
+
 static func active_objectives(progress: Dictionary, clock: float) -> Array:
 	var result: Array = []
 	var completed: Dictionary = progress.get("completed", {})
@@ -7922,20 +7948,12 @@ static func active_objectives(progress: Dictionary, clock: float) -> Array:
 			if completed.has(key) and clock - float(completed[key]) >= 10.0:
 				continue
 			var target: int = int(thresholds[tier])
-			var value: float = float((progress.get("colonies", {}) as Dictionary).size()) if track == "colonies" else float(progress.get(track, 0))
-			var label: String = ""
-			var counter: String = ""
+			var title: String = ""
 			match track:
-				"metals":
-					label = "Harvest %dt Metals" % target
-					counter = "%d / %d" % [mini(int(value), target), target]
-				"population":
-					label = "Reach %dk population" % (target / 1000)
-					counter = "%dk / %dk" % [mini(int(value), target) / 1000, target / 1000]
-				"colonies":
-					label = "Colonize %d systems" % target
-					counter = "%d / %d" % [mini(int(value), target), target]
-			result.append({"id": key, "track": track, "target": target, "value": value, "label": label, "counter": counter})
+				"metals": title = "Have %st Metals" % objective_amount(target)
+				"population": title = "Reach %s population" % objective_amount(target)
+				"colonies": title = "Colonize %d systems" % target
+			result.append(_objective_row(progress, key, track, track, target, title))
 			break
 		if not result.is_empty() and result.back()["track"] == track:
 			continue
@@ -7944,30 +7962,36 @@ static func active_objectives(progress: Dictionary, clock: float) -> Array:
 			result.append({"id": "", "track": track, "target": 1, "value": 0, "label": "Awaiting next objective", "counter": ""})
 			continue
 		var spec: Array = ADVANCED_OBJECTIVES[key]
-		var value: float = float((progress.get("colonies", {}) as Dictionary).size()) if spec[0] == "colonies" else float(progress.get(spec[0], 0))
-		result.append({"id": key, "track": track, "target": spec[1], "value": value, "label": spec[2], "counter": "%d / %d" % [mini(int(value), int(spec[1])), int(spec[1])]})
+		result.append(_objective_row(progress, key, track, str(spec[0]), int(spec[1]), str(spec[2])))
 	return result
 
 const ADVANCED_OBJECTIVES = {
 	"advanced_antimatter": ["antimatter_processed", 2, "Process 2 antimatter"],
-	"advanced_metals": ["metals", 20000, "Harvest 20,000t Metals"],
+	"advanced_metals": ["metals", 20000, "Have 20kt Metals"],
 	"advanced_population": ["population", 2000000, "Reach 2M population"],
 	"advanced_colonies": ["colonies", 12, "Colonize 12 systems"]
 }
+
+static func _objective_track_finished(completed: Dictionary, track: String, clock: float) -> bool:
+	var last: String = "%s_%d" % [track, OBJECTIVE_TRACKS[track].size()]
+	return completed.has(last) and clock - float(completed[last]) >= 10.0
 
 static func _assign_advanced_objectives(state: Dictionary, player: int, progress: Dictionary) -> void:
 	var assigned: Dictionary = progress.get("advanced", {})
 	var completed: Dictionary = progress["completed"]
 	var clock: float = float(state.get("objective_clock", 0.0))
 	for track in OBJECTIVE_TRACKS:
-		var last: String = "%s_%d" % [track, OBJECTIVE_TRACKS[track].size()]
-		if not completed.has(last) or clock - float(completed[last]) < 10.0:
+		if not _objective_track_finished(completed, track, clock):
 			continue
 		var current: String = str(assigned.get(track, ""))
 		if not current.is_empty() and (not completed.has(current) or clock - float(completed[current]) < 10.0):
 			continue
 		var candidates: Array = []
 		for key in ADVANCED_OBJECTIVES:
+			var metric: String = ADVANCED_OBJECTIVES[key][0]
+			# Never draw a higher tier while the fixed track for its metric is active.
+			if OBJECTIVE_TRACKS.has(metric) and not _objective_track_finished(completed, metric, clock):
+				continue
 			if not completed.has(key) and not assigned.values().has(key):
 				candidates.append(key)
 		if candidates.is_empty():

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.70.4: User observed 2M and 200k population objectives simultaneously; advanced pool now excludes metrics with unfinished fixed tracks. Metals uses current holdings, not mining history; crew included in totals without changing food demand. Initial stock can immediately complete early Metals tiers; review thresholds if needed.
+
 - v0.70.3: Infrastructure cancellations return prepaid resources directly, even during delivery; ship cancellations retain salvage. Verify refunds including storage overflow and shipyard compaction.
 
 - v0.70.2: Empire target steps capped at 500 per type; no change to actual hull limits or scalability goals.
