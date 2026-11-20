@@ -861,7 +861,17 @@ func _test_pursuit_blocks() -> void:
 	assert(ECON._laser_block_nearest(blocks, positions, Vector2(48000, 0), INF, -1) == [0.0, 48])
 	assert(ECON._laser_block_nearest([], positions, Vector2.ZERO, INF, -1)[1] == -1)
 
+func _test_search_slots() -> void:
+	var slots: Dictionary = {}
+	for id in range(5):
+		var next: float = ECON._next_search_slot(10.0, id, 0.5)
+		assert(next > 10.0 and next <= 10.5 + ECON.EPS)
+		slots[roundi(next * 10.0)] = true
+		assert(is_equal_approx(ECON._next_search_slot(next, id, 0.5), next + 0.5))
+	assert(slots.size() == 5)
+
 func _initialize() -> void:
+	_test_search_slots()
 	_test_pursuit_blocks()
 	_test_missile_blocks()
 	_test_laser_blocks()

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.28: Existing logistics retry periods now use five stable hull-ID phase slots. First retries may occur sooner within the original period; initial and reset searches remain immediate. Active movement and transfer unchanged. Runtime and synchronized-spike measurements pending.
+
 - v0.64.27: Sector pursuit reuses ordered bounding blocks per team and sector within the combat snapshot. Existing guards, range and chase transitions are unchanged; worst-case overlapping blocks remain expensive. Runtime and benchmark pending.
 
 - v0.64.26: Missile search uses cached ordered bounding blocks, retaining structure targets, positive-team hostility and focus-fire filters. Worst-case overlapping blocks remain expensive; runtime and benchmark pending.
