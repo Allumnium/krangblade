@@ -8013,7 +8013,7 @@ func _draw_objectives_overlay() -> void:
 	for j in range(events.size() - 1, maxi(-1, events.size() - 4), -1):
 		var event: Dictionary = events[j]
 		var player_name: String = str(roster.get(event["player"], {}).get("name", "Player")).left(16)
-		var message: String = "%s: %s +%d CP" % [player_name, names.get(str(event["objective"]).get_slice("_", 0), ""), int(event["award"])]
+		var message: String = "%s: %s +%d CP" % [player_name, names.get(str(event["objective"]).get_slice("_", 0), str(ECONOMY.ADVANCED_OBJECTIVES.get(event["objective"], ["", 0, "Objective"])[2])), int(event["award"])]
 		if bool(event["first"]):
 			message += " (first)"
 		var tint := Color("#e9cb7c") if bool(event["first"]) else Color("#b8d9ef")

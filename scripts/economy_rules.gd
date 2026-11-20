@@ -3758,6 +3758,8 @@ static func _work_science(state: Dictionary, graph: Dictionary, ship: Dictionary
 			if remaining <= EPS:
 				break
 		ship["cargo"][ANTIMATTER] = SCIENCE_CAPACITY
+		var progress: Dictionary = objective_progress(state, int(ship["owner"]))
+		progress["antimatter_processed"] = int(progress.get("antimatter_processed", 0)) + 1
 		ship.erase("science_years")
 		ship.erase("unit_order")
 		_finish_manual(ship)
@@ -7820,13 +7822,14 @@ static func _update_objectives(state: Dictionary) -> void:
 			populations[player] = float(populations.get(player, 0.0)) + float(system["population"])
 	var first: Dictionary = state.get("objective_first", {})
 	var events: Array = state.get("objective_events", [])
-	var now: float = float(state["elapsed"])
+	var now: float = float(state.get("objective_clock", state["elapsed"]))
 	for player in state["teams"]:
 		var progress: Dictionary = objective_progress(state, int(player))
 		progress["population"] = maxf(float(progress["population"]), float(populations.get(player, 0.0)))
+		_assign_advanced_objectives(state, int(player), progress)
 		for objective in active_objectives(progress, float(state.get("objective_clock", 0.0))):
 			var key: String = objective["id"]
-			if float(objective["value"]) >= float(objective["target"]) - EPS and not progress["completed"].has(key):
+			if not key.is_empty() and float(objective["value"]) >= float(objective["target"]) - EPS and not progress["completed"].has(key):
 				progress["completed"][key] = float(state.get("objective_clock", 0.0))
 				if not first.has(key):
 					first[key] = now
@@ -7915,7 +7918,7 @@ static func active_objectives(progress: Dictionary, clock: float) -> Array:
 		var thresholds: Array = OBJECTIVE_TRACKS[track]
 		for tier in range(thresholds.size()):
 			var key: String = track if tier == 0 else "%s_%d" % [track, tier + 1]
-			if completed.has(key) and clock - float(completed[key]) >= 10.0 and tier < thresholds.size() - 1:
+			if completed.has(key) and clock - float(completed[key]) >= 10.0:
 				continue
 			var target: int = int(thresholds[tier])
 			var value: float = float((progress.get("colonies", {}) as Dictionary).size()) if track == "colonies" else float(progress.get(track, 0))
@@ -7933,4 +7936,42 @@ static func active_objectives(progress: Dictionary, clock: float) -> Array:
 					counter = "%d / %d" % [mini(int(value), target), target]
 			result.append({"id": key, "track": track, "target": target, "value": value, "label": label, "counter": counter})
 			break
+		if not result.is_empty() and result.back()["track"] == track:
+			continue
+		var key: String = str(progress.get("advanced", {}).get(track, ""))
+		if key.is_empty():
+			result.append({"id": "", "track": track, "target": 1, "value": 0, "label": "Awaiting next objective", "counter": ""})
+			continue
+		var spec: Array = ADVANCED_OBJECTIVES[key]
+		var value: float = float((progress.get("colonies", {}) as Dictionary).size()) if spec[0] == "colonies" else float(progress.get(spec[0], 0))
+		result.append({"id": key, "track": track, "target": spec[1], "value": value, "label": spec[2], "counter": "%d / %d" % [mini(int(value), int(spec[1])), int(spec[1])]})
 	return result
+
+const ADVANCED_OBJECTIVES = {
+	"advanced_antimatter": ["antimatter_processed", 2, "Process 2 antimatter"],
+	"advanced_metals": ["metals", 20000, "Harvest 20,000t Metals"],
+	"advanced_population": ["population", 2000000, "Reach 2M population"],
+	"advanced_colonies": ["colonies", 12, "Colonize 12 systems"]
+}
+
+static func _assign_advanced_objectives(state: Dictionary, player: int, progress: Dictionary) -> void:
+	var assigned: Dictionary = progress.get("advanced", {})
+	var completed: Dictionary = progress["completed"]
+	var clock: float = float(state.get("objective_clock", 0.0))
+	for track in OBJECTIVE_TRACKS:
+		var last: String = "%s_%d" % [track, OBJECTIVE_TRACKS[track].size()]
+		if not completed.has(last) or clock - float(completed[last]) < 10.0:
+			continue
+		var current: String = str(assigned.get(track, ""))
+		if not current.is_empty() and (not completed.has(current) or clock - float(completed[current]) < 10.0):
+			continue
+		var candidates: Array = []
+		for key in ADVANCED_OBJECTIVES:
+			if not completed.has(key) and not assigned.values().has(key):
+				candidates.append(key)
+		if candidates.is_empty():
+			continue
+		var rng := RandomNumberGenerator.new()
+		rng.seed = int(state["map"]["seed"]) + player * 7919 + completed.size() * 104729
+		assigned[track] = candidates[rng.randi_range(0, candidates.size() - 1)]
+	progress["advanced"] = assigned
