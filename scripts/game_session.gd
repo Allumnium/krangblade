@@ -1229,13 +1229,14 @@ func _flush_economy() -> void:
 		var payload_key := Vector2i(int(needs_template), int(full_only))
 		if not payloads.has(payload_key):
 			var wire: Dictionary = economy if full_only else _encode_replica(economy, replication_map_template, needs_template, replication_planet_template)
+			wire = _public_reward_snapshot(wire)
 			payloads[payload_key] = var_to_bytes(wire).compress(FileAccess.COMPRESSION_GZIP)
 			diagnostic_encode_ms = float(Time.get_ticks_usec() - encode_start) / 1000.0
 		var payload: PackedByteArray = payloads[payload_key]
 		diagnostic_snapshot_bytes = payload.size()
 		# One reliable snapshot in flight; the initial ACK also confirms the
 		# map template arrived. Every later inventory update is independent.
-		if rpc_id(id, "_rpc_economy", round_id, snapshot_revision, motion_revision, payload) == OK:
+		if rpc_id(id, "_rpc_economy", round_id, snapshot_revision, motion_revision, payload, economy.get("objectives", {}).get(id, {}).get("offers", {})) == OK:
 			diagnostic_sent_bytes += payload.size()
 			snapshot_pending[id] = snapshot_revision
 			snapshot_sent[id] = snapshot_revision
@@ -1248,8 +1249,18 @@ func _rpc_snapshot_ack(ack_round: int, revision: int) -> void:
 	if _match_peer(id) and int(snapshot_pending.get(id, -1)) == revision:
 		snapshot_pending.erase(id)
 
+func _public_reward_snapshot(state: Dictionary) -> Dictionary:
+	var result: Dictionary = state.duplicate()
+	var public_objectives: Dictionary = {}
+	for id in state.get("objectives", {}):
+		var progress: Dictionary = state["objectives"][id].duplicate()
+		progress.erase("offers")
+		public_objectives[id] = progress
+	result["objectives"] = public_objectives
+	return result
+
 @rpc("authority", "call_remote", "reliable", 1)
-func _rpc_economy(update_round: int, revision: int, pose_revision: int, compressed: PackedByteArray) -> void:
+func _rpc_economy(update_round: int, revision: int, pose_revision: int, compressed: PackedByteArray, own_offers: Dictionary) -> void:
 	if phase != "match" or update_round != round_id:
 		return
 	diagnostic_received_bytes += compressed.size()
@@ -1292,6 +1303,9 @@ func _rpc_economy(update_round: int, revision: int, pose_revision: int, compress
 	if compact and not has_template:
 		diagnostic_compact_received += 1
 	diagnostic_decode_ms = float(Time.get_ticks_usec() - decode_start) / 1000.0
+	var local_id: int = multiplayer.get_unique_id()
+	if snapshot.get("objectives", {}).has(local_id):
+		snapshot["objectives"][local_id]["offers"] = own_offers
 	economy = snapshot
 	motion_base_revision = pose_revision
 	_refresh_motion_roster()

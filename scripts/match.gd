@@ -1296,6 +1296,8 @@ func _draw_minimap() -> void:
 	# Mirror the main map's live hull visibility and interpolation; do not
 	# reveal undiscovered system ownership.
 	for ship in state["ships"]:
+		if not _ship_visible(state, ship):
+			continue
 		var id: int = int(ship["id"])
 		var visual: Dictionary = ship_visuals.get(id, {})
 		var world: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
@@ -2390,11 +2392,14 @@ func _build_fleet_cargo_row() -> void:
 		pair.add_child(amount)
 		fleet_cargo_labels[resource] = amount
 
+func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
+	return ECONOMY.ship_visible_to_team(state, ship, int(state.get("teams", {}).get(_me(), -1)))
+
 func _selected_ship(state: Dictionary) -> Dictionary:
 	if selected_ship_id < 0:
 		return {}
 	for ship in state.get("ships", []):
-		if int(ship["id"]) == selected_ship_id:
+		if int(ship["id"]) == selected_ship_id and _ship_visible(state, ship):
 			return ship
 	return {}
 
@@ -3016,9 +3021,14 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 			selection_tiles[id] = tile
 		var hp: float = clampf(float(craft.get("hp", ECONOMY.ship_max_hp(str(craft["kind"])))) / ECONOMY.ship_max_hp(str(craft["kind"])), 0.0, 1.0)
 		var tint: Color = _health_color(hp)
-		if tile.get_meta("health_color", Color.TRANSPARENT) != tint:
+		if tile.get_meta("health_color", Color.TRANSPARENT) != tint or tile.get_meta("hull_kind", "") != craft["kind"]:
 			tile.set_meta("health_color", tint)
+			tile.set_meta("hull_kind", craft["kind"])
 			tile.icon = _selection_icon(str(craft["kind"]), tint)
+		var shield_bar: ProgressBar = tile.get_meta("shield_bar")
+		var shield: float = _shield_fraction(craft)
+		shield_bar.visible = shield >= 0.0
+		shield_bar.value = maxf(0.0, shield)
 		tile.tooltip_text = "%s · HP %.0f / %.0f\nCrew: %s" % [_ship_kind_name(str(craft["kind"])), float(craft.get("hp", ECONOMY.ship_max_hp(str(craft["kind"])))), ECONOMY.ship_max_hp(str(craft["kind"])), _crew_text(float(craft.get("crew", 0.0)))]
 	for id in selection_tiles.keys():
 		if not living.has(id):
@@ -3037,6 +3047,19 @@ func _style_selection_tile(tile: Button) -> void:
 	tile.add_theme_stylebox_override("normal", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 2, 2))
 	tile.add_theme_stylebox_override("hover", HUD.surface(HUD.CONSOLE_BACKGROUND.lightened(0.06), HUD.ACCENT, 2, 2))
 	tile.add_theme_stylebox_override("pressed", HUD.surface(HUD.CONSOLE_BACKGROUND.lightened(0.10), Color.WHITE, 2, 2))
+	var shield := ProgressBar.new()
+	shield.show_percentage = false
+	shield.max_value = 1.0
+	shield.step = 0.0
+	shield.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shield.add_theme_stylebox_override("background", HUD.surface(Color("#203f5c"), Color("#203f5c"), 0, 0))
+	shield.add_theme_stylebox_override("fill", HUD.surface(Color("#6fbaff"), Color("#6fbaff"), 0, 0))
+	tile.add_child(shield)
+	shield.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	shield.offset_top = -4.0
+	shield.offset_bottom = -1.0
+	shield.hide()
+	tile.set_meta("shield_bar", shield)
 
 func _refresh_field_panels(state: Dictionary) -> void:
 	var field: Dictionary = state["map"]["fields"][selected_field]
@@ -3139,6 +3162,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		elif ship.get("unit_order", {}).get("kind", "") == "collect":
 			var years: float = float(ship.get("science_years", 0.0))
 			status = "Collecting antimatter · %.1f / %.0f yr" % [years, ECONOMY.SCIENCE_COLLECTION_YEARS] if years > 0.0 else "Approaching Pulsar"
+	if bool(ship.get("cloak_equipped", false)):
+		status += "\nCloaked" if bool(ship.get("cloaked", false)) else "\nCloak recharging"
 	if ECONOMY.armed(ship):
 		status += "\nKills: %d" % int(ship.get("kills", 0))
 	if ECONOMY.cargo_capacity(kind) > ECONOMY.EPS:
@@ -4016,6 +4041,7 @@ func _refresh() -> void:
 	if not is_instance_valid(year_label):
 		return
 	var state: Dictionary = _state()
+	pose_frame = -1
 	_sync_command_kind(state)
 	var phase: String = str(session.get("phase"))
 	if phase == "match" and not background_music.playing:
@@ -4050,7 +4076,7 @@ func _refresh() -> void:
 	var ship: Dictionary = _selected_ship(state)
 	var living: Array[int] = []
 	for craft in state.get("ships", []):
-		if selected_units.has(int(craft["id"])):
+		if selected_units.has(int(craft["id"])) and _ship_visible(state, craft):
 			living.append(int(craft["id"]))
 	selected_units = living
 	_refresh_control_groups(state)
@@ -6801,6 +6827,8 @@ func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 	var points: Array = state["map"]["points"]
 	var poses: Dictionary = {}
 	for ship in state["ships"]:
+		if not _ship_visible(state, ship):
+			continue
 		var id: int = int(ship["id"])
 		var visual: Dictionary = ship_visuals.get(id, {})
 		var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
@@ -6988,6 +7016,8 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 		_draw_selection_ring(center, radius + 4.0)
 	var hp: float = float(system["station"]["hp"]) / ECONOMY.station_max_hp(system)
 	_draw_damage_bar(center, radius, hp, _shield_fraction(system["station"]))
+	if _shield_fraction(system["station"]) > 0.0:
+		_draw_selection_ring(center, radius + 3.0, Color("#65baff80"))
 
 func _draw_shipyard_construction(state: Dictionary, index: int, job: Dictionary, tint: Color, elapsed: float) -> void:
 	var port: int = int(job.get("station_slot", job["level"]))
@@ -7842,6 +7872,8 @@ func _draw_map() -> void:
 				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, _orbit_time(state))
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
+		if not _ship_visible(state, ship):
+			continue
 		var shooter: int = int(ship["id"])
 		_draw_blaster_tracers(state, ship, poses)
 		if float(ship.get("missile_until", -1.0)) >= float(state["elapsed"]) and ship.has("missile_endpoint"):
@@ -7952,6 +7984,10 @@ func _draw_map() -> void:
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
 		_draw_damage_bar(point, _hull_ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
+		if _shield_fraction(ship) > 0.0:
+			_draw_selection_ring(point, maxf(6.0, _hull_ui_radius(str(ship["kind"])) * scale + 3.0), Color("#65baff80"))
+		if bool(ship.get("cloaked", false)):
+			_draw_selection_ring(point, maxf(5.0, _hull_ui_radius(str(ship["kind"])) * scale + 2.0), Color("#b698ff80"))
 		if ship["kind"] == "warp_gate":
 			var gate_radius: float = maxf(5.0, 44.0 * scale)
 			map_canvas.draw_circle(point, gate_radius, Color("#382b58"), true, -1.0, true)

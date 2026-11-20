@@ -1109,7 +1109,37 @@ func _test_warp_gates() -> void:
 	assert(a["warp_destination"] == -1)
 	print("PASS: warp gate deployment, consumption, ownership, linking, travel and destruction")
 
+func _test_cloaking() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(829), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	ECON.objective_progress(state, 1)["rewards"] = ["shield_1", "armor", "cloak"]
+	var scout: Dictionary = {"id": 989901, "kind": "scout", "owner": 1, "position": Vector2.ZERO, "hp": ECON.ship_max_hp("scout")}
+	var enemy: Dictionary = {"id": 989902, "kind": "fighter", "owner": 2, "position": Vector2(200.0, 0.0)}
+	state["ships"] = [scout, enemy]
+	ECON._refresh_reward_defenses(state, 0.0)
+	assert(bool(scout["cloaked"]) and not scout.has("shield_max") and not scout.has("armor"))
+	var positions: Dictionary = {scout["id"]: scout["position"], enemy["id"]: enemy["position"]}
+	var teams: Dictionary = {scout["id"]: 1, enemy["id"]: 2}
+	var cells: Dictionary = {}
+	ECON._spatial_insert(cells, scout["position"], ECON.LASER_RANGE, scout)
+	ECON._spatial_insert(cells, enemy["position"], ECON.LASER_RANGE, enemy)
+	ECON._detect_cloaked(state, state["ships"], cells, positions, teams)
+	assert(ECON.ship_visible_to_team(state, scout, 2))
+	enemy["position"] = Vector2(600.0, 0.0)
+	positions[enemy["id"]] = enemy["position"]
+	cells.clear()
+	ECON._spatial_insert(cells, scout["position"], ECON.LASER_RANGE, scout)
+	ECON._spatial_insert(cells, enemy["position"], ECON.LASER_RANGE, enemy)
+	ECON._detect_cloaked(state, state["ships"], cells, positions, teams)
+	assert(not ECON.ship_visible_to_team(state, scout, 2) and ECON.ship_visible_to_team(state, scout, 1))
+	assert(not ECON._hostile_hull(state, 2, scout))
+	ECON._fire_blaster(state, scout, int(enemy["id"]), positions, {}, {}, {enemy["id"]: 100.0}, 0.1)
+	assert(float(scout["cloak_reveal_until"]) > float(state["elapsed"]))
+	ECON._refresh_reward_defenses(state, 0.0)
+	assert(not bool(scout["cloaked"]))
+	print("PASS: cloak detection, attack reveal and exclusive scout defenses")
+
 func _initialize() -> void:
+	_test_cloaking()
 	_test_warp_gates()
 	_test_reward_redraft()
 	_test_objective_holdings()

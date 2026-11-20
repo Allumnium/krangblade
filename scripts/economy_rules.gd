@@ -3204,7 +3204,7 @@ static func _clear_tactical_order(ship: Dictionary) -> void:
 static func _hostile_hull(state: Dictionary, player: int, target: Dictionary) -> bool:
 	var team: int = int(state["teams"].get(player, 0))
 	var enemy_team: int = int(state["teams"].get(int(target.get("owner", 0)), 0))
-	return team > 0 and enemy_team > 0 and enemy_team != team
+	return team > 0 and enemy_team > 0 and enemy_team != team and ship_visible_to_team(state, target.get("entity", target), team)
 
 static func _attack_destination(graph: Dictionary, target: Dictionary) -> int:
 	var sector: int = local_sector(graph, target)
@@ -4835,7 +4835,7 @@ static func territory_influence(state: Dictionary, graph: Dictionary, known_pois
 	var live_regions: Dictionary = {}
 	for ship in state["ships"]:
 		var owner: int = int(ship["owner"])
-		var weight: int = int(SHIP_INFLUENCE.get(ship["kind"], 1))
+		var weight: int = int(SHIP_INFLUENCE.get(ship["kind"], BUILDING_INFLUENCE if ship["kind"] == "warp_gate" else 1))
 		if owner <= 0 or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) <= 0.0:
 			continue
 		var id: int = int(ship["id"])
@@ -5744,6 +5744,8 @@ static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, posi
 		ship["blaster_endpoint"] = positions[target]
 		ship["blaster_fired"] = float(state["elapsed"]) - dt + next
 		ship["blaster_visual_shot"] = shot
+		if bool(ship.get("cloak_equipped", false)):
+			ship["cloak_reveal_until"] = float(state["elapsed"]) + CLOAK_REVEAL_TIME
 		shot = (shot + 1) % BLASTER_SHOTS
 		next += BLASTER_SHOT_INTERVAL + (BLASTER_PAUSE if shot == 0 else 0.0)
 	ship["blaster_shot"] = shot
@@ -5773,7 +5775,7 @@ static func _hostile_bucket(state: Dictionary, buckets: Dictionary, cache: Dicti
 				candidate_team = int(state["teams"].get(int(candidate["owner"]), 0))
 			else:
 				candidate_team = int(team_by_id[int(candidate["id"])])
-			if candidate_team != team and (not positive_only or candidate_team > 0):
+			if candidate_team != team and (not positive_only or candidate_team > 0) and ship_visible_to_team(state, candidate, team):
 				hostile.append(candidate)
 		by_key[key] = hostile
 	return by_key[key]
@@ -5853,7 +5855,7 @@ static func _reusable_laser_target(state: Dictionary, ship: Dictionary, by_id: D
 	if id < 0 or not by_id.has(id) or not positions.has(id):
 		return -1
 	var team: int = int(state["teams"].get(int(ship["owner"]), 0))
-	if team == 0 or int(state["teams"].get(int(by_id[id]["owner"]), 0)) == team:
+	if team == 0 or int(state["teams"].get(int(by_id[id]["owner"]), 0)) == team or not ship_visible_to_team(state, by_id[id], team):
 		return -1
 	if pos.distance_squared_to(positions[id]) > LASER_RANGE * LASER_RANGE:
 		return -1
@@ -5970,6 +5972,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			positions[target_id] = pos
 			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "pds"})
+	_detect_cloaked(state, ships, cells, positions, team_by_id)
 	var hostile_cache: Dictionary = {}
 	var positive_hostile_cache: Dictionary = {}
 	var sector_hostile_cache: Dictionary = {}
@@ -6036,7 +6039,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			ship["missile_cooldown"] = missile_cd
 		# Explicit attack is focus fire, never attack-move: even when another
 		# hostile is closer, only the ordered entity may receive damage.
-		if ship.has("attack_order") and positions.has(int(ship["attack_order"])) and pos.distance_to(positions[int(ship["attack_order"])]) <= LASER_RANGE:
+		if ship.has("attack_order") and positions.has(int(ship["attack_order"])) and (not by_id.has(int(ship["attack_order"])) or ship_visible_to_team(state, by_id[int(ship["attack_order"])], team)) and pos.distance_to(positions[int(ship["attack_order"])]) <= LASER_RANGE:
 			var focus: int = int(ship["attack_order"])
 			var in_range: bool = positions.has(focus) and pos.distance_to(positions[focus]) <= LASER_RANGE
 			ship["combat_target"] = focus if in_range and focus >= 0 else -1
@@ -6067,7 +6070,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		if pursuit >= 0:
 			if ship_sectors[hull_slot] >= 0 and (ship_sectors[hull_slots[pursuit]] if hull_slots.has(pursuit) else -1) == ship_sectors[hull_slot]:
 				remaining = PURSUIT_YEARS
-			if not by_id.has(pursuit) or int(state["teams"].get(int(by_id[pursuit]["owner"]), 0)) == team or team == 0:
+			if not by_id.has(pursuit) or int(state["teams"].get(int(by_id[pursuit]["owner"]), 0)) == team or team == 0 or not ship_visible_to_team(state, by_id[pursuit], team):
 				pursuit = -1
 			elif remaining <= EPS:
 				# Do not immediately restart a timed-out chase while the same
@@ -6101,7 +6104,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		# A previously engaged fighter may escape the firing envelope before
 		# the next scan; its departure is still a valid pursuit trigger.
 		var prior: int = int(previous_targets[hull_slot])
-		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[hull_slots[prior]])):
+		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and ship_visible_to_team(state, by_id[prior], team) and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[hull_slots[prior]])):
 			pursuit = prior
 			remaining = PURSUIT_YEARS
 		if search_due and fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and _combat_sector_has_hostile(sector_teams, int(ship_sectors[hull_slot]), team):
@@ -6242,6 +6245,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 				cooldown = 1.0
 				battery["laser_until"] = float(state["elapsed"]) + 0.2
 			battery["cooldown"] = cooldown
+	for ship in ships:
+		if bool(ship.get("cloak_equipped", false)) and float(state["elapsed"]) < float(ship.get("cloak_reveal_until", 0.0)):
+			ship["cloaked"] = false
 	for target in killed_by:
 		var attacker: Dictionary = killed_by[target]
 		attacker["kills"] = int(attacker.get("kills", 0)) + 1
@@ -7930,7 +7936,8 @@ const CONQUEST_REWARDS = {
 	"shield_2": ["Shields 2", "Military +60% shield HP; stations +100%.", "Military construction: extra Crystals (10% of base Metals).", "military", "guard"],
 	"shield_3": ["Shields 3", "Military +90% shield HP; stations +150%.", "Military construction: extra Crystals (15% of base Metals).", "military", "guard"],
 	"armor": ["Reinforced Armor", "Military hulls take 15% less hull damage.", "Military construction: +15% Metals.", "military", "reinforced_plating"],
-	"warp_gate": ["Warp Gates", "Deploy a science vessel as a gate; link owned gates for rapid travel.", "Consumes 1 antimatter per gate.", "tech", "transform"]
+	"warp_gate": ["Warp Gates", "Deploy a science vessel as a gate; link owned gates for rapid travel.", "Consumes 1 antimatter per gate.", "tech", "transform"],
+	"cloak": ["Cloaking Field", "Scouts hide outside 250-unit enemy detection. Firing reveals them for 5 s.", "Replaces Scout armor/shields; extra Crystals (15% of base Metals).", "military", "auto_wander"]
 }
 
 static func objective_category(key: String) -> String:
@@ -7994,7 +8001,7 @@ static func acquire_reward(state: Dictionary, player: int, key: String, generati
 			progress["offers"][other] = []
 		_fill_reward_offer(state, player, other)
 	# Apply a newly acquired defense immediately, even while paused.
-	if key.begins_with("shield_") or key == "armor":
+	if key.begins_with("shield_") or key in ["armor", "cloak"]:
 		_refresh_reward_defenses(state, 0.0)
 	return true
 
@@ -8003,6 +8010,8 @@ const WARP_RANGE: float = 180.0
 const WARP_COOLDOWN: float = 10.0
 
 static func warp_gate(state: Dictionary, owner: int, id: int) -> Dictionary:
+	if id < 0:
+		return {}
 	var gate: Dictionary = service_targets(state, id).get(id, {}).get("entity", {})
 	return gate if gate.get("kind", "") == "warp_gate" and int(gate.get("owner", -1)) == owner and float(gate.get("hp", 0.0)) > EPS else {}
 
@@ -8107,6 +8116,9 @@ static func construction_cost(p: Dictionary, kind: String, level: int) -> Dictio
 	if military_hull(kind):
 		var rewards: Array = p.get("conquest_rewards", [])
 		var metal: float = float(cost.get("Metals", 0.0))
+		if kind == "scout" and rewards.has("cloak"):
+			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.15)
+			return cost
 		var tier: int = shield_tier(rewards)
 		if tier > 0:
 			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.05 * tier)
@@ -8131,16 +8143,25 @@ static func _refresh_reward_defenses(state: Dictionary, dt: float) -> void:
 	var now: float = float(state["elapsed"])
 	var levels: Dictionary = {}
 	var armors: Dictionary = {}
+	var cloaks: Dictionary = {}
 	for player in state["teams"]:
 		var rewards: Array = state.get("objectives", {}).get(player, {}).get("rewards", [])
 		levels[player] = shield_tier(rewards)
 		armors[player] = rewards.has("armor")
-	if not levels.values().any(func(level: int) -> bool: return level > 0) and not armors.values().has(true):
+		cloaks[player] = rewards.has("cloak")
+	if not levels.values().any(func(level: int) -> bool: return level > 0) and not armors.values().has(true) and not cloaks.values().has(true):
 		return
 	for ship in state["ships"]:
 		if not military_hull(str(ship["kind"])):
 			continue
 		var owner: int = int(ship["owner"])
+		if ship["kind"] == "scout" and bool(cloaks.get(owner, false)):
+			ship["cloak_equipped"] = true
+			ship["cloaked"] = now >= float(ship.get("cloak_reveal_until", 0.0))
+			if ship.has("shield_max"):
+				_update_shield(ship, 0.0, now, dt)
+			ship.erase("armor")
+			continue
 		var tier: int = int(levels.get(owner, 0))
 		if tier > 0 or ship.has("shield_max"):
 			_update_shield(ship, ship_max_hp(str(ship["kind"])) * 0.3 * tier, now, dt)
@@ -8153,6 +8174,36 @@ static func _refresh_reward_defenses(state: Dictionary, dt: float) -> void:
 			var tier: int = int(levels.get(int(system["owner"]), 0))
 			if tier > 0 or system["station"].has("shield_max"):
 				_update_shield(system["station"], station_max_hp(system) * 0.5 * tier, now, dt)
+
+const CLOAK_DETECTION_RANGE: float = 250.0
+const CLOAK_REVEAL_TIME: float = 5.0
+
+static func ship_visible_to_team(state: Dictionary, ship: Dictionary, team: int) -> bool:
+	if not bool(ship.get("cloaked", false)):
+		return true
+	return int(state["teams"].get(int(ship.get("owner", -1)), -1)) == team or ship.get("cloak_detected", []).has(team)
+
+static func _detect_cloaked(state: Dictionary, ships: Array, cells: Dictionary, positions: Dictionary, team_by_id: Dictionary) -> void:
+	var reach: int = ceili(CLOAK_DETECTION_RANGE / LASER_RANGE)
+	var range_squared: float = CLOAK_DETECTION_RANGE * CLOAK_DETECTION_RANGE
+	for ship in ships:
+		if not bool(ship.get("cloaked", false)):
+			continue
+		var id: int = int(ship["id"])
+		var pos: Vector2 = positions[id]
+		var team: int = int(team_by_id[id])
+		var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+		var detected: Array[int] = []
+		for x in range(-reach, reach + 1):
+			for y in range(-reach, reach + 1):
+				for sensor in cells.get(cell + Vector2i(x, y), []):
+					var sensor_id: int = int(sensor["id"])
+					var sensor_team: int = int(team_by_id[sensor_id])
+					if sensor_team <= 0 or sensor_team == team or detected.has(sensor_team):
+						continue
+					if pos.distance_squared_to(positions[sensor_id]) <= range_squared:
+						detected.append(sensor_team)
+		ship["cloak_detected"] = detected
 
 static func _effective_health(entity: Dictionary, maximum: float) -> float:
 	return float(entity.get("shield", 0.0)) + float(entity.get("hp", maximum)) / (1.0 - float(entity.get("armor", 0.0)))

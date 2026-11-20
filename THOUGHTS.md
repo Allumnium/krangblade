@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.73.0: Scout cloak is exclusive and reuses the combat spatial index for detection. Verify detection transitions, enemy target loss, UI selection pruning, AI/influence effects and multiplayer. Full hull data still replicates; cloak is UI/gameplay concealment, not packet-level secrecy. Private CP draft payloads ride the existing snapshot RPC; verify compact/full recovery and packet visibility.
+
 - v0.72.0: Warp Gates use stable combat IDs with immobile gate records; provisional one-per-owned-system placement, 10k HP, 180 approach range and 10 s per-ship cooldown. Verify remote motion interpolation/snap, target destruction and gate links, narrow command card, group behavior and AI. Runtime pending.
 
 - v0.71.0: Screenshot showed excessively tall conquest dialog. Use explicit compact Window and scrolling content. Category points and reward pools split; Tech appears with science objective/balance. Shield and armor values provisional; validate costs, combat, health presentation and performance. Warp gates/cloak/carrier remain pending. Existing shared snapshot still contains other players' drafts; isolate private offers without multiplying large fleet snapshot encoding.

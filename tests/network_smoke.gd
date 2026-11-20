@@ -907,6 +907,11 @@ func _check_economy_sync() -> void:
 func _check_reward_redraft(state: Dictionary) -> bool:
 	var id: int = session.multiplayer.get_unique_id()
 	var progress: Dictionary = state.get("objectives", {}).get(id, {})
+	if role == "client":
+		for other in state.get("objectives", {}):
+			if int(other) != id and not state["objectives"][other].get("offers", {}).is_empty():
+				_fail("Another player\u0027s private reward draft leaked.")
+				return false
 	if not has_meta("reward_previous"):
 		var offer: Array = ECON.reward_offer(progress, "economic")
 		if offer.size() != 3 or ECON.reward_points(progress, "economic") < 2:
