@@ -5073,6 +5073,9 @@ static func _reuse_combat_threats(state: Dictionary, graph: Dictionary, combat_i
 static func _salvage_threats(state: Dictionary, graph: Dictionary, combat_index: Dictionary = {}) -> Dictionary:
 	var sectors: Dictionary = {}
 	var cells: Dictionary = {}
+	var positions := PackedVector2Array()
+	var teams := PackedInt32Array()
+	var ids := PackedInt64Array()
 	for craft in state["ships"]:
 		if not armed(craft) or not craft.get("position", Vector2.INF).is_finite():
 			continue
@@ -5088,8 +5091,11 @@ static func _salvage_threats(state: Dictionary, graph: Dictionary, combat_index:
 			if not sectors.has(sector):
 				sectors[sector] = {}
 			sectors[sector][team] = true
-		_spatial_insert(cells, point, REPAIR_SAFE_RADIUS, [team, point])
-	return {"sectors": sectors, "cells": cells}
+		_spatial_insert(cells, point, REPAIR_SAFE_RADIUS, positions.size())
+		positions.append(point)
+		teams.append(team)
+		ids.append(int(craft["id"]))
+	return {"sectors": sectors, "cells": cells, "positions": positions, "teams": teams, "ids": ids}
 
 static func _salvage_safe(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, sector: int, threats: Dictionary) -> bool:
 	if sector < 0 or not sector_contains(graph, sector, point):

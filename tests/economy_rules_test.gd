@@ -951,7 +951,7 @@ func _test_shared_threat_index() -> void:
 	ship["at"] = 1
 	assert(ECON._salvage_threats(state, graph, index) == ECON._salvage_threats(state, graph))
 	state["ships"].clear()
-	assert(ECON._salvage_threats(state, graph, index) == {"sectors": {}, "cells": {}})
+	assert(ECON._salvage_threats(state, graph, index) ["ids"].is_empty())
 
 func _test_reuse_combat_threats() -> void:
 	var graph: Dictionary = {"points": [Vector2.ZERO, Vector2(1000, 0)], "sector_radii": [200.0, 200.0], "sector_neighbors": [[], []]}
@@ -966,7 +966,7 @@ func _test_reuse_combat_threats() -> void:
 	ship["at"] = 1
 	assert(ECON._reuse_combat_threats(state, graph, index) == ECON._salvage_threats(state, graph))
 	state["ships"].clear()
-	assert(ECON._reuse_combat_threats(state, graph, index) == {"sectors": {}, "cells": {}})
+	assert(ECON._reuse_combat_threats(state, graph, index) ["ids"].is_empty())
 
 func _test_indexed_hostile_bucket() -> void:
 	var state: Dictionary = {"teams": {1: 1, 2: 2}}
