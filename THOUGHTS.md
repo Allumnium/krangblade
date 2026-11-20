@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.33: Physical contact correction caches occupied cell bounds and skips distant neighbor buckets conservatively. Original pair order and exact checks retained. Overlapping occupied bounds still incur quadratic work; runtime and benchmark pending.
+
 - v0.64.32: Separation and contact correction reject distant pairs before square roots; contact accumulators use packed vectors and touched flags with original first-touch order. No intentional cadence or movement changes; floating-point boundary parity and dense-swarm benchmark pending. Dense coincident pairs remain quadratic.
 
 - v0.64.31: Active laser hull acquisition reuses valid in-range targets between staggered refreshes. A closer enemy may wait until the next refresh; explicit attack, guard and pursuit bypass reuse. Damage accounting unchanged. Runtime and dense-battle benchmark pending.

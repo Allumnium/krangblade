@@ -7153,6 +7153,11 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 # exempt from soft steering. This is contact correction, not a new order;
 # service actions and arrival checks have already executed for this tick.
 # A sparse grid and bounded iterations avoid an all-fleet pair scan.
+static func _contact_bucket_near(point: Vector2, bounds: Rect2, cutoff_squared: float) -> bool:
+	var nearest: Vector2 = point.clamp(bounds.position, bounds.end)
+	# Conservative margin avoids rejecting boundary pairs due to rounding.
+	return point.distance_squared_to(nearest) <= cutoff_squared + maxf(0.001, cutoff_squared * 0.0001)
+
 static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float = 0.1, repair_parked: Dictionary = {}) -> void:
 	var ships: Array = state["ships"]
 	if ships.size() < 2:
@@ -7166,12 +7171,15 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 	touched.resize(ships.size())
 	for iteration in range(SHIP_CLEARANCE_PASSES):
 		var cells: Dictionary = {}
+		var bounds: Dictionary = {}
 		for i in range(ships.size()):
 			var point: Vector2 = ships[i]["position"]
 			var cell := Vector2i(floori(point.x / reach), floori(point.y / reach))
 			if not cells.has(cell):
 				cells[cell] = []
 			cells[cell].append(i)
+			var box: Rect2 = bounds.get(cell, Rect2(point, Vector2.ZERO))
+			bounds[cell] = box.expand(point)
 		corrections.fill(Vector2.ZERO)
 		touched.fill(0)
 		var correction_order: Array[int] = []
@@ -7181,7 +7189,10 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 			var cell := Vector2i(floori(pa.x / reach), floori(pa.y / reach))
 			for x in range(-1, 2):
 				for y in range(-1, 2):
-					for j in cells.get(cell + Vector2i(x, y), []):
+					var key: Vector2i = cell + Vector2i(x, y)
+					if not bounds.has(key) or not _contact_bucket_near(pa, bounds[key], cutoff_squared):
+						continue
+					for j in cells[key]:
 						if int(j) <= i:
 							continue
 						var b: Dictionary = ships[j]
