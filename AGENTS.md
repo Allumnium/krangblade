@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.66.1: Miners prefer viable direct access from their current system to a given asteroid field; alternative safe entrances remain fallback. Preserve depot checks and physical delivery.
+
 - v0.66.0: Logistics fourth column shows resident population and sustainable capacity fill. First objective finishers earn two points; same-tick ties share first, later finishers earn one. Public recent achievements in tracker; no catch-up modifiers.
 
 - v0.65.0: Default logistics overlay above ships/effects, below HUD; inherent resource strengths/weaknesses below storage. Right-side read-only objectives show permanent completion and conquest points. Authority tracks unique new colony sites, actual Metals production/mining and peak resident population; reward rules pending.

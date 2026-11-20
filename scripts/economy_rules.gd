@@ -2584,7 +2584,15 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 		var access_key: String = "mine:access:%d" % i
 		if not cache.has(access_key):
 			cache[access_key] = field_access_systems(state["map"], field)
-		for anchor in cache[access_key]:
+		# A viable entrance in the current system wins over a detour
+		# through another system for this same field.
+		var entrances: Array = cache[access_key].duplicate()
+		var here: int = int(ship["at"])
+		if entrances.has(here):
+			entrances.erase(here)
+			entrances.push_front(here)
+		for anchor in entrances:
+			var local_viable: bool = false
 			var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor, cache)
 			if path.is_empty():
 				continue
@@ -2606,6 +2614,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 				var depot: int = int(depots.get(chunk["resource"], -1))
 				if depot < 0:
 					continue
+				local_viable = true
 				var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0 + float(return_distances[chunk["resource"]])
 				if distance < best:
 					best = distance
@@ -2613,6 +2622,8 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 					best_path = path
 					best_chunk = chunk
 					best_anchor = anchor
+			if anchor == here and local_viable:
+				break
 	if chosen >= 0:
 		ship["field"] = chosen
 		ship["mining_anchor"] = best_anchor
