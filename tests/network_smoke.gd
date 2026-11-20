@@ -918,6 +918,9 @@ func _check_economy_sync() -> void:
 					var sender: int = int(item["sender"])
 					var name_text: String = str(session.get("players").get(sender, {}).get("name", ""))
 					if str(item["text"]) == name_text + ": match smoke message":
+						if str(item.get("sender_name", "")) != name_text or str(item.get("message", "")) != "match smoke message" or int(item.get("sender_color", -1)) != int(session.get("players")[sender]["color"]):
+							_fail("Match chat sender identity or color failed.")
+							return
 						received[sender] = true
 			if received.size() != expected_players:
 				create_timer(0.25).timeout.connect(_check_economy_sync)
