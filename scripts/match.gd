@@ -96,6 +96,10 @@ var background_music: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
 var map_canvas: Control
+var health_batch: MultiMeshInstance2D
+var ring_batch: MultiMeshInstance2D
+var health_entries: Array = []
+var ring_entries: Array = []
 var cargo_batch: MultiMeshInstance2D
 var cargo_glow_batch: MultiMeshInstance2D
 var cargo_entries: Array = []
@@ -569,6 +573,9 @@ func _build_ui() -> void:
 	_build_exhaust_batch()
 	beam_batch = _build_effect_batch(false)
 	projectile_batch = _build_effect_batch(true)
+	health_batch = _build_effect_batch(false)
+	health_batch.z_index = 2
+	ring_batch = _build_ring_batch()
 	cargo_batch = _build_effect_batch(false)
 	cargo_glow_batch = _build_effect_batch(false)
 	cargo_glow_batch.texture = _resource_glow()
@@ -2783,14 +2790,19 @@ func _build_selection_portrait(parent: Container) -> void:
 	selection_portrait.add_child(selection_portrait_health)
 	selection_portrait.hide()
 
+func _queue_health_rect(rect: Rect2, tint: Color) -> void:
+	if rect.size.x <= 0.0 or not rect.intersects(Rect2(Vector2.ZERO, map_canvas.size), true):
+		return
+	health_entries.append([Transform2D(0.0, rect.size, 0.0, rect.get_center()), tint])
+
 func _draw_damage_bar(point: Vector2, radius: float, fraction: float) -> void:
 	if fraction >= 1.0:
 		return
 	var width: float = clampf(radius * 2.0, 18.0, 100.0)
 	var base: Vector2 = point + Vector2(-width * 0.5, -maxf(8.0, radius) - 6.0)
-	map_canvas.draw_rect(Rect2(base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
-	map_canvas.draw_rect(Rect2(base, Vector2(width, 3.0)), Color("#283748"))
-	map_canvas.draw_rect(Rect2(base, Vector2(width * clampf(fraction, 0.0, 1.0), 3.0)), _health_color(fraction))
+	_queue_health_rect(Rect2(base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
+	_queue_health_rect(Rect2(base, Vector2(width, 3.0)), Color("#283748"))
+	_queue_health_rect(Rect2(base, Vector2(width * clampf(fraction, 0.0, 1.0), 3.0)), _health_color(fraction))
 
 func _health_color(fraction: float) -> Color:
 	return Color("#e45b60") if fraction < 0.2 else (Color("#eac64a") if fraction < 0.5 else Color("#55c88b"))
@@ -6348,12 +6360,37 @@ func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, wid
 		var origin: Vector2 = point + (direction * MINER_MUZZLE.x + direction.orthogonal() * sign * MINER_MUZZLE.y) * scale
 		_draw_owned_laser(origin, endpoint, int(ship["owner"]), maxf(0.65, width * 0.65))
 
+func _build_ring_batch() -> MultiMeshInstance2D:
+	var batch: MultiMeshInstance2D = _build_effect_batch(false)
+	var shader := Shader.new()
+	shader.code = """
+shader_type canvas_item;
+render_mode unshaded;
+varying float radius;
+void vertex() {
+	radius = max(1.0, length(MODEL_MATRIX[0].xy) * 0.5 - 2.0);
+}
+void fragment() {
+	vec2 p = (UV * 2.0 - 1.0) * (radius + 2.0);
+	float angle = atan(p.y, p.x);
+	float count = clamp(floor(6.2831853 * radius / 9.0 + 0.5), 6.0, 128.0);
+	float phase = fract(angle / 6.2831853 * count);
+	float rim = 1.0 - smoothstep(0.25, 1.25, abs(length(p) - radius));
+	float dash = 1.0 - smoothstep(0.67, 0.75, phase);
+	COLOR.a *= rim * dash;
+}
+"""
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	batch.material = material
+	batch.z_index = 2
+	return batch
+
 func _draw_selection_ring(point: Vector2, radius: float, tint: Color = HUD.ACCENT) -> void:
-	var count: int = clampi(roundi(TAU * radius / 9.0), 6, 128)
-	var step: float = TAU / float(count)
-	for index in range(count):
-		var start: float = step * index
-		map_canvas.draw_arc(point, radius, start, start + step * 0.72, maxi(3, ceili(radius * step / 4.0)), tint, 1.0, true)
+	var extent: float = radius + 2.0
+	if not Rect2(Vector2.ZERO, map_canvas.size).grow(extent).has_point(point):
+		return
+	ring_entries.append([Transform2D(0.0, Vector2.ONE * extent * 2.0, 0.0, point), tint])
 
 # Target indicators use authoritative entity IDs, not the ship's navigation
 # waypoint. They follow the interpolated pose and rendered structure geometry.
@@ -7357,6 +7394,10 @@ func _flush_overview_hulls() -> void:
 		batch.show()
 
 func _draw_map() -> void:
+	health_entries.clear()
+	ring_entries.clear()
+	health_batch.hide()
+	ring_batch.hide()
 	cargo_entries.clear()
 	cargo_glow_entries.clear()
 	cargo_batch.hide()
@@ -7694,6 +7735,8 @@ func _draw_map() -> void:
 	_flush_effect_batch(cargo_glow_batch, cargo_glow_entries)
 	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
 	_draw_formation_preview(state)
+	_flush_effect_batch(health_batch, health_entries)
+	_flush_effect_batch(ring_batch, ring_entries)
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
 		map_canvas.draw_rect(rect, Color(HUD.ACCENT, 0.12))

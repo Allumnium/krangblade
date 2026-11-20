@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.16: Health rectangles and procedural dashed selection rings use shared GPU batches. Full-health suppression and selection semantics unchanged; ring shader uses projected model scale, with GL compatibility and layering requiring visual validation. No Codex rule changes.
+
 - v0.64.15: Territory shader inner sector clipping now reads static near-neighbor rows rather than rescanning all sites per pixel. Conservative cutoff and original order retained; floating-point boundary parity, deep zoom and shader runtime pending. Outer site/lane scans and influence recomputation remain.
 
 - v0.64.14: Destruction sparks and detached outlines now share existing combat instance batches, with per-primitive viewport rejection. CPU retains drift/spin calculations. Visual layering and mass-destruction performance pending verification.
