@@ -4009,6 +4009,9 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 		if not id is int or requested.has(id):
 			return []
 		requested[id] = true
+	if requested.size() == 1 and is_same(state, _indexed_state):
+		var craft: Dictionary = _hulls_by_id.get(ids[0], {})
+		return [craft] if not craft.is_empty() and int(craft["owner"]) == player else []
 	var units: Array = []
 	for ship in state["ships"]:
 		if requested.has(ship["id"]):
@@ -4222,7 +4225,7 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		"sector":
 			return military_pois(state, owner).has(target)
 		"follow":
-			var refs: Dictionary = service_targets(state)
+			var refs: Dictionary = service_targets(state, target)
 			return (not bool(order.get("guard", false)) or fighter) and _valid_follow_target(state, ship, target, refs)
 		"attack":
 			return armed(ship) and _hostile_hull(state, owner, service_targets(state, target).get(target, {}))

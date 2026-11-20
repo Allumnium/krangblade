@@ -9,6 +9,25 @@ func _planetary_fixture(seed_value: int, players: int = 3, layout: String = "Gri
 	map_data["planetless"] = []
 	return map_data
 
+func _test_hull_index() -> void:
+	var map: Dictionary = _planetary_fixture(426)
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var craft: Dictionary = state["ships"][0]
+	var id: int = int(craft["id"])
+	craft["position"] = Vector2.ZERO
+	ECON._begin_hull_index(state)
+	assert(ECON.service_targets(state, id)[id]["entity"] == craft)
+	assert(ECON._owned_units(state, int(craft["owner"]), [id]).size() == 1)
+	assert(ECON._owned_units(state, -1, [id]).is_empty())
+	craft["position"] = Vector2(12, 34)
+	assert(ECON.service_targets(state, id)[id]["position"] == craft["position"])
+	ECON._remove_indexed_hull(state, craft)
+	assert(ECON.service_targets(state, id).is_empty())
+	assert(ECON._owned_units(state, int(craft["owner"]), [id]).is_empty())
+	ECON._indexed_state = {}
+	ECON._hulls_by_id.clear()
+	print("PASS: live indexed hull references, ownership and removal")
+
 func _test_shipyard_rally() -> void:
 	var map: Dictionary = {"seed": 426, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -1039,6 +1058,7 @@ func _initialize() -> void:
 	_test_soft_separation()
 	_test_explicit_hold_pose()
 	_test_rounded_sector_limits()
+	_test_hull_index()
 	_test_shipyard_rally()
 	_test_freighter_bays()
 	_test_crowded_dock_delivery()
