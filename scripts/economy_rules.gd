@@ -7038,6 +7038,7 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		return
 	var cells: Dictionary = {}
 	var reach: float = SHIP_SEPARATION_RADIUS
+	var reach_squared: float = reach * reach
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
 		if not previous.has(id):
@@ -7103,9 +7104,10 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 					if int(other_id) == id:
 						continue
 					var offset: Vector2 = before - (previous[other_id] as Vector2)
-					var distance: float = offset.length()
-					if distance >= reach:
+					var distance_squared: float = offset.length_squared()
+					if distance_squared >= reach_squared:
 						continue
+					var distance: float = offset.length()
 					var direction: Vector2
 					if distance <= EPS:
 						# Stable opposite directions even for exactly coincident hulls.
@@ -7156,6 +7158,12 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 	if ships.size() < 2:
 		return
 	var reach: float = SHIP_CLEARANCE
+	var cutoff_squared: float = (reach - EPS) * (reach - EPS)
+	# Reuse dense indexed scratch arrays across contact passes.
+	var corrections := PackedVector2Array()
+	corrections.resize(ships.size())
+	var touched := PackedByteArray()
+	touched.resize(ships.size())
 	for iteration in range(SHIP_CLEARANCE_PASSES):
 		var cells: Dictionary = {}
 		for i in range(ships.size()):
@@ -7164,7 +7172,9 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 			if not cells.has(cell):
 				cells[cell] = []
 			cells[cell].append(i)
-		var corrections: Dictionary = {}
+		corrections.fill(Vector2.ZERO)
+		touched.fill(0)
+		var correction_order: Array[int] = []
 		for i in range(ships.size()):
 			var a: Dictionary = ships[i]
 			var pa: Vector2 = a["position"]
@@ -7177,9 +7187,9 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 						var b: Dictionary = ships[j]
 						var pb: Vector2 = b["position"]
 						var offset: Vector2 = pa - pb
-						var distance: float = offset.length()
-						if distance >= reach - EPS:
+						if offset.length_squared() >= cutoff_squared:
 							continue
+						var distance: float = offset.length()
 						var direction: Vector2
 						if distance <= EPS:
 							# Side-step a head-on approach; stable IDs break exact ties.
@@ -7190,11 +7200,17 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 						else:
 							direction = offset / distance
 						var push: Vector2 = direction * (reach - distance) * 0.12
-						corrections[i] = (corrections.get(i, Vector2.ZERO) as Vector2) + push
-						corrections[j] = (corrections.get(j, Vector2.ZERO) as Vector2) - push
-		if corrections.is_empty():
+						if touched[i] == 0:
+							touched[i] = 1
+							correction_order.append(i)
+						if touched[j] == 0:
+							touched[j] = 1
+							correction_order.append(int(j))
+						corrections[i] += push
+						corrections[j] -= push
+		if correction_order.is_empty():
 			break
-		for i in corrections:
+		for i in correction_order:
 			var craft: Dictionary = ships[i]
 			if repair_parked.has(int(craft["id"])) or (bool(craft.get("holding", false)) and craft.has("hold_heading") and not bool(craft.get("retreating", false))):
 				continue
