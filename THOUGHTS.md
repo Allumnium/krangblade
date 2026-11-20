@@ -1,6 +1,6 @@
 # Warbound — active thoughts
 
-- v0.79.1: User reports inaudible menu synthesis. Low PCM amplitude compounded by -12 dB player gain and possible saved mute/zero volume; normalize samples, increase gain and expose shared Music toggle. Actual cause not confirmed by playback.
+- v0.79.1: User reports inaudible menu synthesis. Low PCM amplitude compounded by -12 dB player gain and possible saved mute/zero volume; normalize samples, increase gain and expose shared Music toggle (removed in v0.79.2 at user request). Actual cause not confirmed by playback.
 
 - v0.79.0: Synthesized audio now has layered transient/body/tail textures, deterministic variants and a cached original 40 s stereo menu ambient loop. Existing match music stays unchanged. Audition balance and measure first-open generation cost before further toolchain investment.
 
