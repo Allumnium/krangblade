@@ -19,6 +19,8 @@ const CUES: Dictionary = {
 	"order": [0.13, 0.23, 2, 2],
 	"queue": [0.19, 0.24, 2, 2],
 	"complete": [0.36, 0.28, 2, 3],
+	"ship_ready": [0.42, 0.25, 2, 3],
+	"warning": [0.36, 0.26, 1, 4],
 	"notice": [0.26, 0.22, 2, 3],
 }
 var streams: Dictionary = {}
@@ -188,6 +190,15 @@ func _synthesize(kind: String, variant: int) -> AudioStreamWAV:
 			"click", "select":
 				frequency = 850.0 if kind == "click" else 1200.0
 				sample = (sin(phase) * 0.65 + noise * 0.2) * exp(-6.0 * u)
+			"ship_ready":
+				# Soft three-note glassy confirmation, distinct from upgrades.
+				frequency = 392.0 if u < 0.27 else (523.25 if u < 0.54 else 783.99)
+				var note_age: float = u if u < 0.27 else (u - 0.27 if u < 0.54 else u - 0.54)
+				sample = (sin(phase) * 0.57 + sin(phase * 2.0) * 0.10 + sin(phase * 3.0) * 0.04) * exp(-7.0 * note_age) * minf(1.0, note_age * 90.0)
+			"warning":
+				frequency = 440.0 if u < 0.48 else 330.0
+				var gate: float = fmod(u, 0.5)
+				sample = (sin(phase) * 0.55 + sin(phase * 2.0) * 0.13) * minf(1.0, gate * 35.0) * clampf((0.42 - gate) * 15.0, 0.0, 1.0)
 			"order", "queue", "complete", "notice":
 				frequency = 440.0 if kind == "order" else 520.0
 				if u > 0.38:
