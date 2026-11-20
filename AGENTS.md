@@ -30,6 +30,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.79.1: Normalize menu score PCM, raise playback gain, initialize player before menu build and provide a menu music toggle respecting shared settings.
+
 - v0.79.0: Layer filtered noise, modulation, subharmonics, debris and short echoes into synthesized cues; expand combat/service variants; preserve voice caps and WAV overrides. Original looping stereo menu score uses saved Music volume/mute and survives menu rebuilds only.
 
 - v0.78.6: Station 5,000 HP (6,500 reinforced); yard 1,500 HP per level. Station shields scale with halved hull HP; yards have no separate shields. All existing shields recharge 5% per simulation second after the unchanged 5 s delay. Mobile hulls and PDS unchanged.

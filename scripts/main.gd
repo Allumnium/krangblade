@@ -82,8 +82,8 @@ func _ready() -> void:
 	network.connect("chat_changed", _refresh_chat)
 	network.connect("status_changed", _refresh_status)
 	network.connect("lobbies_changed", _refresh_browser)
+	_start_menu_music()
 	_on_phase_changed()
-	_start_menu_music.call_deferred()
 
 func _start_menu_music() -> void:
 	if not is_inside_tree() or is_instance_valid(menu_music):
@@ -98,9 +98,9 @@ func _start_menu_music() -> void:
 	AudioServer.set_bus_volume_db(bus, linear_to_db(maxf(0.0001, clampf(float(config.get_value("audio", "music", 100.0)), 0.0, 100.0) / 100.0)))
 	AudioServer.set_bus_mute(bus, bool(config.get_value("audio", "music_muted", false)))
 	menu_music = AudioStreamPlayer.new()
-	menu_music.bus = "Music"
-	menu_music.volume_db = -12.0
 	add_child(menu_music)
+	menu_music.bus = "Music"
+	menu_music.volume_db = -3.0
 	menu_music.stream = _menu_score()
 	menu_music.play()
 
@@ -116,6 +116,7 @@ func _menu_score() -> AudioStreamWAV:
 	var count: int = int(RATE * BEAT * 64.0)
 	var pcm := PackedByteArray()
 	pcm.resize(count * 4)
+	var peak: int = 1
 	for i in range(count):
 		var t: float = float(i) / RATE
 		var beat: float = t / BEAT
@@ -137,15 +138,23 @@ func _menu_score() -> AudioStreamWAV:
 		var melody_hz: float = 440.0 * pow(2.0, (float(chords[chord_index][[0, 2, 1, 3, 2, 1, 3, 1][step % 8]]) + 24.0 - 69.0) / 12.0)
 		var bell: float = (sin(TAU * melody_hz * age) + 0.25 * sin(TAU * melody_hz * 2.01 * age)) * exp(-10.0 * age) * minf(1.0, age / 0.012) * minf(1.0, (BEAT * 0.5 - age) / 0.025) * 0.075
 		var edge: float = minf(1.0, t / 0.25) * minf(1.0, (float(count - i) / RATE) / 0.25)
-		pcm.encode_s16(i * 4, roundi(clampf((left + bass + bell * 0.75) * edge, -1.0, 1.0) * 30000.0))
-		pcm.encode_s16(i * 4 + 2, roundi(clampf((right + bass + bell) * edge, -1.0, 1.0) * 30000.0))
+		var sample_l: int = roundi(clampf((left + bass + bell * 0.75) * edge, -1.0, 1.0) * 30000.0)
+		var sample_r: int = roundi(clampf((right + bass + bell) * edge, -1.0, 1.0) * 30000.0)
+		peak = maxi(peak, maxi(absi(sample_l), absi(sample_r)))
+		pcm.encode_s16(i * 4, sample_l)
+		pcm.encode_s16(i * 4 + 2, sample_r)
+	# Normalize once, leaving headroom; otherwise the quiet pad mix is barely audible.
+	var gain: float = 28000.0 / float(peak)
+	for offset in range(0, pcm.size(), 2):
+		pcm.encode_s16(offset, roundi(float(pcm.decode_s16(offset)) * gain))
 	var wav := AudioStreamWAV.new()
 	wav.format = AudioStreamWAV.FORMAT_16_BITS
 	wav.mix_rate = RATE
 	wav.stereo = true
 	wav.data = pcm
-	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
 	wav.loop_end = count
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
 	cached_menu_score = wav
 	return wav
 
@@ -222,12 +231,33 @@ func _show_menu() -> void:
 	center.add_child(actions)
 	actions.add_child(_button("SINGLE PLAYER", _show_solo_setup))
 	actions.add_child(_button("MULTIPLAYER", _show_multiplayer))
+	var music_toggle := CheckButton.new()
+	music_toggle.text = "Menu music"
+	var bus: int = AudioServer.get_bus_index("Music")
+	music_toggle.button_pressed = bus >= 0 and not AudioServer.is_bus_mute(bus) and AudioServer.get_bus_volume_db(bus) > -79.0
+	music_toggle.toggled.connect(_set_menu_music_enabled)
+	actions.add_child(music_toggle)
 	actions.add_child(_button("QUIT", func() -> void: get_tree().quit()))
 	col.add_spacer(false)
 	var version_label := _text("v%s" % str(ProjectSettings.get_setting("application/config/version")), 12, MUTED)
 	version_label.name = "GameVersion"
 	version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	col.add_child(version_label)
+
+func _set_menu_music_enabled(enabled: bool) -> void:
+	var bus: int = AudioServer.get_bus_index("Music")
+	if bus < 0:
+		return
+	var config := ConfigFile.new()
+	config.load("user://warbound_settings.cfg")
+	if enabled and float(config.get_value("audio", "music", 100.0)) <= 0.0:
+		config.set_value("audio", "music", 100.0)
+		AudioServer.set_bus_volume_db(bus, 0.0)
+	AudioServer.set_bus_mute(bus, not enabled)
+	config.set_value("audio", "music_muted", not enabled)
+	config.save("user://warbound_settings.cfg")
+	if enabled and is_instance_valid(menu_music) and not menu_music.playing:
+		menu_music.play()
 
 func _setup_header(col: VBoxContainer, title_text: String) -> void:
 	var header := HBoxContainer.new()
