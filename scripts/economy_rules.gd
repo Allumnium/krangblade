@@ -280,7 +280,7 @@ const PDS_SIGHT: float = 1000.0
 
 static func sight_radius(kind: String) -> float:
 	match kind:
-		"scout": return 1800.0
+		"scout": return 2700.0
 		"cruiser", "destroyer": return 1500.0
 		"fighter": return 1000.0
 		"warp_gate": return 1200.0
