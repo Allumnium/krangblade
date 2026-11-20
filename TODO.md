@@ -6,7 +6,7 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
-- [ ] v0.82.0: Validate Scout Explore toggle, route choice, manual interruption, multiple scouts, cooldown and peer ownership; doubled crew allocation, colony affordability and founding populations, AI pacing. Runtime pending.
+- [ ] v0.82.0: Validate mutually exclusive Scout Explore/Wander toggles (v0.82.1), route choice, manual interruption, multiple scouts, cooldown and peer ownership; doubled crew allocation, colony affordability and founding populations, AI pacing. Runtime pending.
 
 - [ ] v0.81.0: Validate invulnerable PDS fire and loss on station destruction; Dyson unlock eligibility, queue/cancel, affordability, all ship discounts and station loss, UI art and peer synchronization. Runtime pending.
 
