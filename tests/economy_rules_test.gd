@@ -1131,7 +1131,7 @@ func _test_reward_redraft() -> void:
 	ECON._apply_reward_damage(hull, 100.0, 16.0, 6.0)
 	assert(is_equal_approx(float(hull["hp"]), 77.675))
 	var price: Dictionary = ECON.construction_cost({"conquest_rewards": ["shield_1", "shield_2", "armor"]}, "fighter", 1)
-	assert(price["Crystals"] == 135.0 and price["Metals"] == 311.0)
+	assert(price["Crystals"] == 108.0 and price["Metals"] == 311.0)
 	print("PASS: categorized conquest rewards, stale drafts, hidden zero-balance offers, shield absorption/recharge and armor costs")
 
 func _test_unique_rewards() -> void:
@@ -1230,22 +1230,22 @@ func _test_station_crystals() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var home: Dictionary = state["planets"][0]
 	home["levels"]["Crystals"] = 0
-	assert(ECON.rate(home, "Crystals") == 1.0)
+	assert(ECON.rate(home, "Crystals") == 1.25)
 	ECON._work_planet(state, 0, 3.0)
-	assert(is_equal_approx(float(home["stock"]["Crystals"]), 3.0))
+	assert(is_equal_approx(float(home["stock"]["Crystals"]), 3.75))
 	home["levels"]["Crystals"] = 1
-	var expected: float = 1.0 + 0.04 * ECON.production_modifier(home, "Crystals") * ECON.population_multiplier(home)
+	var expected: float = 1.25 + 0.06 * ECON.production_modifier(home, "Crystals") * ECON.population_multiplier(home)
 	assert(is_equal_approx(ECON.rate(home, "Crystals"), expected))
 	home["planet_blockaded"] = true
-	assert(ECON.rate(home, "Crystals") == 1.0)
+	assert(ECON.rate(home, "Crystals") == 1.25)
 	home["planetless"] = true
-	assert(ECON.rate(home, "Crystals") == 1.0)
+	assert(ECON.rate(home, "Crystals") == 1.25)
 	home["station"] = {}
 	home["owner"] = 0
 	assert(ECON.rate(home, "Crystals") == 0.0)
-	assert(ECON._cost("cruiser", 1)["Crystals"] == 400.0)
-	assert(ECON._cost("laser_matrix", 1)["Crystals"] == 4000.0)
-	assert(ECON.construction_cost({"conquest_rewards": ["cloak"]}, "scout", 1)["Crystals"] == 45.0)
+	assert(ECON._cost("cruiser", 1)["Crystals"] == 320.0)
+	assert(ECON._cost("laser_matrix", 1)["Crystals"] == 3200.0)
+	assert(ECON.construction_cost({"conquest_rewards": ["cloak"]}, "scout", 1)["Crystals"] == 36.0)
 	print("PASS: station baseline, planetary crystal rate, blockade and increased construction costs")
 
 func _test_sfx_rules() -> void:
@@ -1811,7 +1811,7 @@ func _initialize() -> void:
 	assert(ECON.enqueue(capped, 1, 0, "yard"))
 	assert(ECON.enqueue(capped, 1, 0, "yard"))
 	assert(ECON.shipyard_count(cap_home) == 3)
-	assert(cap_home["queue"][0]["cost"] == {"Metals": 2000.0, "Organics": 200.0, "Crystals": 1000.0})
+	assert(cap_home["queue"][0]["cost"] == {"Metals": 2000.0, "Organics": 200.0, "Crystals": 800.0})
 	assert(cap_home["queue"][1]["cost"]["Metals"] == 6000.0)
 	assert(not ECON.enqueue(capped, 1, 0, "yard"))
 	assert(ECON.cancel(capped, 1, 0, int(cap_home["queue"][-1]["id"])))
