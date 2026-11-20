@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.45: Filter missile and pursuit candidates in one ordered pass, with distinct positive-team cache; preserve neutral targeting rules. Runtime and benchmark pending.
+
 - v0.64.44: Use the same packed threat layout for survivor rebuilds, including casualty ticks; retain legacy-query fixture compatibility. Runtime and benchmark pending.
 
 - v0.64.43: Combat-produced threat snapshot now uses packed position/team/ID arrays with slot-indexed cells. Legacy survivor rebuild remains supported. No authoritative state migration yet; runtime and net allocation/time benefit require measurement.
