@@ -5107,20 +5107,22 @@ static func _salvage_safe(state: Dictionary, graph: Dictionary, owner: int, poin
 	return _salvage_threat_free(point, sector, team, threats)
 
 # Threat geometry is frozen for the movement phase; ownership remains live.
-# Lazily classify occupied cells once per frozen snapshot. A homogeneous
-# friendly cell cannot threaten this team, regardless of its density.
-static func _threat_cell_team(threats: Dictionary, cell: Vector2i, teams: PackedInt32Array, slots: Array) -> int:
-	if not threats.has("uniform_cell_teams"):
-		threats["uniform_cell_teams"] = {}
-	var cache: Dictionary = threats["uniform_cell_teams"]
-	if not cache.has(cell):
-		var uniform: int = teams[slots[0]]
+# Cache ordered hostile slots per querying team and frozen cell.
+# Mixed cells also avoid repeated allied-hull filtering.
+static func _threat_hostile_slots(threats: Dictionary, cell: Vector2i, teams: PackedInt32Array, slots: Array, team: int) -> Array:
+	if not threats.has("hostile_cell_slots"):
+		threats["hostile_cell_slots"] = {}
+	var cache: Dictionary = threats["hostile_cell_slots"]
+	if not cache.has(team):
+		cache[team] = {}
+	var by_cell: Dictionary = cache[team]
+	if not by_cell.has(cell):
+		var hostile: Array = []
 		for slot in slots:
-			if teams[slot] != uniform:
-				uniform = -1
-				break
-		cache[cell] = uniform
-	return int(cache[cell])
+			if teams[slot] != team:
+				hostile.append(slot)
+		by_cell[cell] = hostile
+	return by_cell[cell]
 
 static func _salvage_threat_free(point: Vector2, sector: int, team: int, threats: Dictionary) -> bool:
 	for other_team in threats["sectors"].get(sector, {}):
@@ -5134,10 +5136,10 @@ static func _salvage_threat_free(point: Vector2, sector: int, team: int, threats
 			for y in range(-1, 2):
 				var key: Vector2i = cell + Vector2i(x, y)
 				var slots: Array = threats["cells"].get(key, [])
-				if slots.is_empty() or (team >= 0 and _threat_cell_team(threats, key, teams, slots) == team):
+				if slots.is_empty():
 					continue
-				for slot in slots:
-					if teams[slot] != team and point.distance_squared_to(positions[slot]) <= REPAIR_SAFE_RADIUS * REPAIR_SAFE_RADIUS:
+				for slot in _threat_hostile_slots(threats, key, teams, slots, team):
+					if point.distance_squared_to(positions[slot]) <= REPAIR_SAFE_RADIUS * REPAIR_SAFE_RADIUS:
 						return false
 		return true
 	for x in range(-1, 2):
