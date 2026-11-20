@@ -775,7 +775,19 @@ func _test_salvage_center_cache() -> void:
 	assert(ECON._salvage_sector_center_safe(state, graph, 1, 0, fresh) == ECON._salvage_safe(state, graph, 1, Vector2.ZERO, 0, fresh))
 	print("PASS: salvage center threat cache, live ownership and fresh phase invalidation")
 
+func _test_spatial_buckets() -> void:
+	var cells: Dictionary = {}
+	ECON._spatial_insert(cells, Vector2(-1, 9), 10.0, 1)
+	ECON._spatial_insert(cells, Vector2(-9, 0), 10.0, 2)
+	ECON._spatial_insert(cells, Vector2(0, 10), 10.0, 3)
+	assert(cells[Vector2i(-1, 0)] == [1, 2])
+	assert(cells[Vector2i(0, 1)] == [3])
+	assert(not ECON._combat_sector_has_hostile({0: {1: true, 0: true}}, 0, 1))
+	assert(ECON._combat_sector_has_hostile({0: {1: true, 2: true}}, 0, 1))
+	print("PASS: spatial bucket ordering and hostile presence")
+
 func _initialize() -> void:
+	_test_spatial_buckets()
 	_test_salvage_center_cache()
 	_test_ship_activity()
 	_test_combat_sector_presence()

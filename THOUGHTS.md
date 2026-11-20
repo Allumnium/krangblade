@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.19: Combat and salvage grids share ordered bucket insertion, but retain separate snapshots and cell widths because their sampling phases differ. Idle pursuit now skips friendly-only sectors entirely. Dense enemy sectors still require exact nearest search; benchmark pending. No gameplay changes.
+
 - v0.64.18: Local territory refresh caches unchanged hull position-to-region results by stable ID and graph identity; rebuild live totals, ownership, visibility and spillover every refresh. Moving hulls still resolve exactly. Full incremental aggregation and benchmark pending.
 
 - v0.64.17: Asteroid field batching preserves unique silhouettes using cached triangulation and combined colored triangle meshes rather than per-rock textures. Mesh rebuilt on redraw; thin edges approximate old antialiasing. Benchmark CPU upload and visual quality before claiming improvement. No gameplay changes.
