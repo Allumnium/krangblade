@@ -8469,7 +8469,50 @@ func _draw_objectives_overlay() -> void:
 		objectives_overlay.draw_string(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, tint)
 		objectives_overlay.draw_string(font, Vector2(map_canvas.size.x - 12.0 - counter_width, y), counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
 		y += 29.0
+	_draw_conquest_scoreboard(state, font, x, y + 4.0)
 	_draw_conquest_notifications(state, font, clock)
+
+func _draw_conquest_scoreboard(state: Dictionary, font: Font, x: float, y: float) -> void:
+	var roster: Dictionary = session.get("players")
+	var all_progress: Dictionary = state.get("objectives", {})
+	var players: Array = state.get("teams", {}).keys()
+	# Stable order keeps rows from jumping when points are earned or spent.
+	players.sort_custom(func(a, b) -> bool:
+		var color_a: int = _empire_color_index(int(a))
+		var color_b: int = _empire_color_index(int(b))
+		return int(a) < int(b) if color_a == color_b else color_a < color_b)
+	var edge: float = map_canvas.size.x - 12.0
+	var width: float = maxf(1.0, edge - x)
+	var column: float = minf(58.0, width * 0.22)
+	var name_width: float = maxf(1.0, width - column * 3.0 - 8.0)
+	var header_tint := Color("#b8d9ef")
+	var outline := Color("#101824")
+	objectives_overlay.draw_string_outline(font, Vector2(x, y), "CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, outline)
+	objectives_overlay.draw_string(font, Vector2(x, y), "CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, header_tint)
+	y += 20.0
+	for index in range(ECONOMY.REWARD_CATEGORIES.size()):
+		var category: String = ECONOMY.REWARD_CATEGORIES[index]
+		var at := Vector2(edge - column * float(3 - index), y)
+		objectives_overlay.draw_string_outline(font, at, category.capitalize(), HORIZONTAL_ALIGNMENT_RIGHT, column, 11, 4, outline)
+		objectives_overlay.draw_string(font, at, category.capitalize(), HORIZONTAL_ALIGNMENT_RIGHT, column, 11, header_tint)
+	y += 5.0
+	objectives_overlay.draw_line(Vector2(x, y), Vector2(edge, y), Color("#45617b"), 1.0)
+	y += 16.0
+	for player in players:
+		var id: int = int(player)
+		var name_text: String = str(roster.get(id, {}).get("name", "Player %d" % id))
+		var tint: Color = _empire_color(id)
+		var progress: Dictionary = all_progress.get(id, {})
+		objectives_overlay.draw_string_outline(font, Vector2(x, y), name_text, HORIZONTAL_ALIGNMENT_LEFT, name_width, 12, 4, outline)
+		objectives_overlay.draw_string(font, Vector2(x, y), name_text, HORIZONTAL_ALIGNMENT_LEFT, name_width, 12, tint)
+		for index in range(ECONOMY.REWARD_CATEGORIES.size()):
+			var points: int = ECONOMY.reward_points(progress, str(ECONOMY.REWARD_CATEGORIES[index]))
+			var at := Vector2(edge - column * float(3 - index), y)
+			var value: String = str(points)
+			var value_tint: Color = Color("#dceaf4") if points > 0 else Color("#8296a8")
+			objectives_overlay.draw_string_outline(font, at, value, HORIZONTAL_ALIGNMENT_RIGHT, column, 12, 4, outline)
+			objectives_overlay.draw_string(font, at, value, HORIZONTAL_ALIGNMENT_RIGHT, column, 12, value_tint)
+		y += 18.0
 
 func _notification_width() -> float:
 	return clampf(map_canvas.size.x * 0.56, 80.0, 560.0)
@@ -8540,6 +8583,8 @@ func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -
 		if visible_count >= 5:
 			break
 		var event: Dictionary = events[j]
+		if int(event["player"]) != _me():
+			continue
 		var age: float = maxf(0.0, clock - float(event["elapsed"]))
 		if age >= 10.0:
 			continue
