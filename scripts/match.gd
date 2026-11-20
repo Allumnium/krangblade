@@ -1519,7 +1519,7 @@ func _portrait_points(vertices: Array, factor: float = 1.0) -> String:
 	return " ".join(coordinates)
 
 func _hull_ui_radius(kind: String) -> float:
-	return float({"ship": 24.0, "cruiser": 27.0, "destroyer": 46.0}.get(kind, 15.0))
+	return float({"ship": 24.0, "cruiser": 27.0, "destroyer": 46.0, "warp_gate": 44.0}.get(kind, 15.0))
 
 func _portrait_scale(kind: String) -> float:
 	return float({"ship": 0.6, "cruiser": 0.52, "destroyer": 0.30}.get(kind, 1.0))
@@ -2399,6 +2399,8 @@ func _selected_ship(state: Dictionary) -> Dictionary:
 	return {}
 
 func _ship_kind_name(kind: String) -> String:
+	if kind == "warp_gate":
+		return "Warp Gate"
 	if kind == "science_ship":
 		return "Science vessel"
 	return {"ship": "Freighter", "miner": "Harvester", "colony_ship": "Colony"}.get(kind, kind.replace("_", " ").capitalize())
@@ -2867,6 +2869,8 @@ func _selection_portrait_icon(kind: String) -> Texture2D:
 				art += '<g transform="rotate(%d 32 32)"><path d="M28 23V13H36V23M27 7V3H37V7"/></g>' % (120 * slot)
 			for segment in range(12):
 				art += '<path transform="rotate(%d 32 32)" d="M32 7V13" stroke-width="0.7"/>' % (30 * segment)
+		elif kind == "warp_gate":
+			art += '<circle cx="32" cy="32" r="27"/><circle cx="32" cy="32" r="20"/><circle cx="32" cy="32" r="14"/><path d="M32 5V12M32 52V59M5 32H12M52 32H59M13 13L18 18M46 46L51 51M13 51L18 46M46 18L51 13"/>'
 		elif kind == "shipyard":
 			# Open berth, paired gantries and cross braces match the map art.
 			art += '<path d="M12 5L7 10V54L12 59H22L25 51V13L22 5ZM52 5L57 10V54L52 59H42L39 51V13L42 5ZM22 8H42M22 56H42M22 13H42M22 51H42"/>'
@@ -3145,6 +3149,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status += "\nFood produced: %.1f t" % float(ship.get("food_produced", 0.0))
 		if ECONOMY.can_transform_colony(state, ECONOMY.military_graph(state), ship):
 			status += "\nReady to establish station"
+	if kind == "warp_gate":
+		var destination: Dictionary = ECONOMY.warp_gate(state, owner, int(ship.get("warp_destination", -1)))
+		status = "Linked to %s" % _system_name(int(destination["at"])) if not destination.is_empty() else "Unlinked · deploy another gate"
 	ship_detail.text = status
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
@@ -3196,9 +3203,22 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		transform.reparent(transform_slot, false)
 		transform.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	transform_extra.visible = has_farm and has_miners
-	transform.visible = has_farm
 	var graph: Dictionary = ECONOMY.military_graph(state)
-	transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY._valid_unit_order(state, graph, craft, {"kind": "transform"}, true))
+	var science: bool = command_kind == "science_ship" and state.get("objectives", {}).get(_me(), {}).get("rewards", []).has("warp_gate")
+	var gate: bool = command_kind == "warp_gate"
+	transform.visible = has_farm or science or gate
+	if gate:
+		for button in command_buttons.values():
+			button.visible = button == transform
+			button.disabled = button != transform
+		transform.disabled = ECONOMY.warp_gate_choices(state, _me(), int(ship.get("id", -1))).is_empty() or owned_count == 0
+		_set_button_hint(transform, "Cycle link destination [J] · right-click an owned linked gate with ships to travel")
+	elif science:
+		transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY.can_build_warp_gate(state, graph, craft))
+		_set_button_hint(transform, "Deploy Warp Gate [J] · consumes 1 antimatter; one gate per owned system")
+	else:
+		transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY._valid_unit_order(state, graph, craft, {"kind": "transform"}, true))
+		_set_button_hint(transform, "Transform into Space Station [J]")
 	command_buttons["deliver_farm"].visible = has_farm
 	command_buttons["deliver_farm"].disabled = not loaded_farm
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
@@ -5518,7 +5538,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	var team: int = int(state["teams"].get(_me(), -1))
 	var friendly_ids: Dictionary = {}
 	for craft in state.get("ships", []):
-		if int(state["teams"].get(int(craft["owner"]), -2)) != team:
+		if int(state["teams"].get(int(craft["owner"]), -2)) != team or craft.get("kind", "") == "warp_gate":
 			continue
 		friendly_ids[int(craft["id"])] = true
 		var id: int = int(craft["id"])
@@ -5616,6 +5636,8 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			continue
 		if not ref.is_empty() and armed and ECONOMY._hostile_hull(state, _me(), ref):
 			order = {"kind": "attack", "target": target}
+		elif contextual and ref.get("entity", {}).get("kind", "") == "warp_gate" and int(ref.get("owner", -1)) == _me() and ECONOMY._warp_order_valid(state, craft, target):
+			order = {"kind": "warp_travel", "target": target}
 		elif contextual and ref.get("kind") == "ship" and ECONOMY._friendly_target(state, _me(), ref):
 			if id == target:
 				continue
@@ -5702,7 +5724,7 @@ func _selected_miners() -> Array[int]:
 func _selected_owned_units(state: Dictionary, all_types: bool = false) -> Array[int]:
 	var owned: Array[int] = []
 	for craft in state.get("ships", []):
-		if _command_member(craft) or (all_types and selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me()):
+		if craft.get("kind", "") != "warp_gate" and (_command_member(craft) or (all_types and selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())):
 			owned.append(int(craft["id"]))
 	return owned
 
@@ -5726,6 +5748,19 @@ func _transform_selected() -> void:
 	var state: Dictionary = _state()
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var ids: Array[int] = []
+	if command_kind == "warp_gate":
+		var gate: Dictionary = _selected_ship(state)
+		var choices: Array[int] = ECONOMY.warp_gate_choices(state, _me(), int(gate.get("id", -1)))
+		if not gate.is_empty() and not choices.is_empty():
+			var next: int = (choices.find(int(gate.get("warp_destination", -1))) + 1) % choices.size()
+			_issue_order([int(gate["id"])], {"kind": "warp_link", "target": choices[next]})
+		return
+	if command_kind == "science_ship":
+		for ship in state["ships"]:
+			if _command_member(ship) and ECONOMY.can_build_warp_gate(state, graph, ship):
+				ids.append(int(ship["id"]))
+		_issue_order(ids, {"kind": "warp_build"})
+		return
 	for ship in state["ships"]:
 		if _command_member(ship) and ECONOMY._valid_unit_order(state, graph, ship, {"kind": "transform"}, Input.is_key_pressed(KEY_SHIFT)):
 			ids.append(int(ship["id"]))
@@ -7733,6 +7768,12 @@ func _draw_map() -> void:
 	var poses: Dictionary = _ship_poses(state)
 	_draw_salvage(state, poses, viewport_bounds, font)
 	var service_refs: Dictionary = ECONOMY.service_targets(state)
+	for gate in state["ships"]:
+		if gate.get("kind", "") != "warp_gate" or int(gate["owner"]) != _me():
+			continue
+		var target: Dictionary = service_refs.get(int(gate.get("warp_destination", -1)), {}).get("entity", {})
+		if target.get("kind", "") == "warp_gate" and int(target["owner"]) == _me():
+			map_canvas.draw_line(_screen_point(gate["position"]), _screen_point(target["position"]), Color("#855bbf80"), 2.0, true)
 	_draw_ship_target_rings(state, poses, service_refs)
 	if selected_units.size() > 1:
 		_draw_group_command_line(state, poses, service_refs)
@@ -7911,6 +7952,13 @@ func _draw_map() -> void:
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
 		_draw_damage_bar(point, _hull_ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
+		if ship["kind"] == "warp_gate":
+			var gate_radius: float = maxf(5.0, 44.0 * scale)
+			map_canvas.draw_circle(point, gate_radius, Color("#382b58"), true, -1.0, true)
+			map_canvas.draw_arc(point, gate_radius, 0.0, TAU, 32, empire, maxf(1.0, scale * 2.0), true)
+			map_canvas.draw_arc(point, gate_radius * 0.72, 0.0, TAU, 32, Color("#b998ff"), maxf(1.0, scale * 2.0), true)
+			map_canvas.draw_circle(point, gate_radius * 0.48, Color("#151225"), true, -1.0, true)
+			continue
 		if scale < 0.15 * overview:
 			_queue_overview_hull(_overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
 			continue

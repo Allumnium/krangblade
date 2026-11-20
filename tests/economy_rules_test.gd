@@ -1081,7 +1081,36 @@ func _test_reward_redraft() -> void:
 	assert(price["Crystals"] == 27.0 and price["Metals"] == 311.0)
 	print("PASS: categorized conquest rewards, stale drafts, hidden zero-balance offers, shield absorption/recharge and armor costs")
 
+func _test_warp_gates() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var home: Dictionary = state["planets"][0]
+	var other_node: int = 2
+	state["planets"][other_node]["owner"] = 1
+	state["planets"][other_node]["station"] = {"hp": ECON.STATION_HP}
+	var a: Dictionary = {"id": 980001, "owner": 1, "kind": "science_ship", "at": 0, "position": graph["points"][0], "cargo": {ECON.ANTIMATTER: 1.0}}
+	var b: Dictionary = {"id": 980002, "owner": 1, "kind": "science_ship", "at": other_node, "position": graph["points"][other_node], "cargo": {ECON.ANTIMATTER: 1.0}}
+	state["ships"].append(a)
+	state["ships"].append(b)
+	assert(not ECON.can_build_warp_gate(state, graph, a))
+	ECON.objective_progress(state, 1)["rewards"] = ["warp_gate"]
+	assert(ECON.build_warp_gate(state, graph, a))
+	assert(ECON.build_warp_gate(state, graph, b))
+	assert(a["warp_destination"] == b["id"] and b["warp_destination"] == a["id"])
+	assert(ECON._cargo_total(a) == 0.0 and a["hp"] == ECON.WARP_GATE_HP)
+	assert(not ECON.set_warp_destination(state, 2, int(a["id"]), int(b["id"])))
+	assert(not ECON.issue_unit_order(state, 1, [a["id"]], {"kind": "stop"}, false))
+	var traveler: Dictionary = state["ships"][0]
+	traveler["position"] = a["position"]
+	traveler["unit_order"] = {"kind": "warp_travel", "target": a["id"]}
+	assert(ECON._work_warp_order(state, graph, traveler, 0.1))
+	assert(traveler["at"] == other_node and (traveler["position"] as Vector2).distance_to(b["position"]) <= 60.1)
+	ECON._remove_indexed_hull(state, b)
+	assert(a["warp_destination"] == -1)
+	print("PASS: warp gate deployment, consumption, ownership, linking, travel and destruction")
+
 func _initialize() -> void:
+	_test_warp_gates()
 	_test_reward_redraft()
 	_test_objective_holdings()
 	_test_empire_targets()

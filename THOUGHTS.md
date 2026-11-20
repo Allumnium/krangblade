@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.72.0: Warp Gates use stable combat IDs with immobile gate records; provisional one-per-owned-system placement, 10k HP, 180 approach range and 10 s per-ship cooldown. Verify remote motion interpolation/snap, target destruction and gate links, narrow command card, group behavior and AI. Runtime pending.
+
 - v0.71.0: Screenshot showed excessively tall conquest dialog. Use explicit compact Window and scrolling content. Category points and reward pools split; Tech appears with science objective/balance. Shield and armor values provisional; validate costs, combat, health presentation and performance. Warp gates/cloak/carrier remain pending. Existing shared snapshot still contains other players' drafts; isolate private offers without multiplying large fleet snapshot encoding.
 
 - v0.70.6: Screenshot showed single-selection shipyard portrait stuck at the top of a tall inspector. Center the shared portrait/HP group vertically; verify short and tall consoles manually.
