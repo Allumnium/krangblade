@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.49: Reuse aligned combat cell coordinates during threat insertion and compare frozen routing signatures in place. Separate bucket lists remain; verify negative-coordinate boundaries and runtime before claiming savings.
+
 - v0.64.48: Frozen salvage threat cells lazily cache hostile slots per querying team, eliminating repeated allied filtering in mixed cells. Extra cache memory scales with occupied queried cells and teams; benchmark net cost, runtime and parity pending.
 
 - v0.64.47: Operation synchronization uses step-local membership sets for waves, deployed members and prior-group overlap. Avoids quadratic membership scans without changing identity or formation assignment; full incremental lifecycle and measured validation remain open.
