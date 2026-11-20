@@ -795,7 +795,18 @@ func _test_spatial_buckets() -> void:
 	assert(ECON._combat_sector_has_hostile({0: {1: true, 2: true}}, 0, 1))
 	print("PASS: spatial bucket ordering and hostile presence")
 
+func _test_handoff_candidates() -> void:
+	var cells: Dictionary = {}
+	var radius: float = ECON.RESOURCE_HANDOFF_RANGE
+	ECON._spatial_insert(cells, Vector2(radius, 0), radius, [0, {"id": 10}])
+	ECON._spatial_insert(cells, Vector2(-1, 0), radius, [1, {"id": 20}])
+	ECON._spatial_insert(cells, Vector2(radius * 4, 0), radius, [2, {"id": 30}])
+	var candidates: Array = ECON._handoff_candidates(cells, Vector2.ZERO)
+	assert(candidates.size() == 2)
+	assert(candidates[0]["id"] == 10 and candidates[1]["id"] == 20)
+
 func _initialize() -> void:
+	_test_handoff_candidates()
 	_test_spatial_buckets()
 	_test_salvage_center_cache()
 	_test_ship_activity()

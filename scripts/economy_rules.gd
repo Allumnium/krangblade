@@ -2249,6 +2249,20 @@ static func dropoff_rate(kind: String) -> float:
 		"colony_ship": return COLONY_FARM_RATE * 20.0
 	return TRACTOR_RATE * 20.0
 
+# Build once before movement; entries retain authoritative fleet order.
+static func _handoff_candidates(cells: Dictionary, point: Vector2) -> Array:
+	var cell := Vector2i(floori(point.x / RESOURCE_HANDOFF_RANGE), floori(point.y / RESOURCE_HANDOFF_RANGE))
+	var ordered: Array = []
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			for entry in cells.get(cell + Vector2i(x, y), []):
+				ordered.append(entry)
+	ordered.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) < int(b[0]))
+	var result: Array = []
+	for entry in ordered:
+		result.append(entry[1])
+	return result
+
 static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictionary, receivers: Array, threats: Dictionary, dt: float) -> float:
 	if miner.get("kind", "") != "miner" or _cargo_total(miner) <= EPS or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("repair_order"):
 		return 0.0
@@ -7100,16 +7114,19 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var salvage_cells: Dictionary = _salvage_cells(state.get("salvage", {}))
 	var salvage_threats: Dictionary = _salvage_threats(state, combat_graph)
 	var stage_receivers: Dictionary = {}
+	var receiver_order: int = 0
 	for craft in state["ships"]:
 		if craft.get("kind", "") == "ship":
 			var owner: int = int(craft["owner"])
 			if not stage_receivers.has(owner):
-				stage_receivers[owner] = []
-			stage_receivers[owner].append(craft)
+				stage_receivers[owner] = {}
+			_spatial_insert(stage_receivers[owner], craft["position"], RESOURCE_HANDOFF_RANGE, [receiver_order, craft])
+			receiver_order += 1
 	# Passive handoff is independent of route and job. Evaluate all hulls before movement.
 	for miner in state["ships"]:
 		if miner.get("kind", "") == "miner" and not salvage_busy.has(int(miner["id"])):
-			miner["_handoff_sent"] = _miner_handoff(state, combat_graph, miner, stage_receivers.get(int(miner["owner"]), []), salvage_threats, dt)
+			var receivers: Array = _handoff_candidates(stage_receivers.get(int(miner["owner"]), {}), miner["position"]) if _cargo_total(miner) > EPS else []
+			miner["_handoff_sent"] = _miner_handoff(state, combat_graph, miner, receivers, salvage_threats, dt)
 	started = _profile_stage(profile, "Combat / repair", started)
 	var fleets: Dictionary = {}
 	for craft in state["ships"]:
