@@ -924,7 +924,25 @@ func _test_sector_inner_fast_path() -> void:
 				var point := Vector2(x, y)
 				assert(ECON.sector_contains(graph, node, point) == ECON.sector_contains(baseline, node, point))
 
+func _test_sector_query_cache() -> void:
+	var graph: Dictionary = {"points": [Vector2.ZERO, Vector2(100, 0)], "sector_radii": [100.0, 100.0], "sector_neighbors": [[Vector2(100, 0)], [Vector2(-100, 0)]]}
+	ECON._sector_query_graph = graph
+	ECON._sector_query_cache.clear()
+	assert(ECON.sector_contains(graph, 0, Vector2.ZERO))
+	assert(ECON.sector_contains(graph, 0, Vector2.ZERO))
+	assert(ECON._sector_query_cache.size() == 1)
+	assert(not ECON.sector_contains(graph, 0, Vector2(100, 0)))
+	assert(ECON.sector_contains(graph, 1, Vector2(100, 0)))
+	assert(ECON._sector_query_cache.size() == 3)
+	var other: Dictionary = graph.duplicate(true)
+	other["sector_radii"][0] = 1.0
+	assert(not ECON.sector_contains(other, 0, Vector2(10, 0)))
+	assert(ECON._sector_query_cache.size() == 3)
+	ECON._sector_query_graph = {}
+	ECON._sector_query_cache.clear()
+
 func _initialize() -> void:
+	_test_sector_query_cache()
 	_test_sector_inner_fast_path()
 	_test_ai_slots()
 	_test_contact_bucket_bounds()

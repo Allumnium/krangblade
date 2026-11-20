@@ -2860,7 +2860,19 @@ static func sector_entry_point(graph: Dictionary, node: int, origin: Vector2) ->
 	# A tiny inward inset avoids shared-edge ambiguity and floating-point jitter.
 	return center + direction * maxf(0.0, sector_limit(graph, node, direction) - 1.0)
 
+static var _sector_query_graph: Dictionary = {}
+static var _sector_query_cache: Dictionary = {}
+
 static func sector_contains(graph: Dictionary, node: int, position: Vector2) -> bool:
+	if not is_same(graph, _sector_query_graph) or not position.is_finite():
+		return _sector_contains_exact(graph, node, position)
+	# Exact coordinates and node are the complete inputs to static containment.
+	var key := Vector3(position.x, position.y, float(node))
+	if not _sector_query_cache.has(key):
+		_sector_query_cache[key] = _sector_contains_exact(graph, node, position)
+	return bool(_sector_query_cache[key])
+
+static func _sector_contains_exact(graph: Dictionary, node: int, position: Vector2) -> bool:
 	var offset: Vector2 = position - (graph["points"][node] as Vector2)
 	var radius: float = float(graph["sector_radii"][node]) + EPS
 	var distance_squared: float = offset.length_squared()
@@ -7295,6 +7307,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if float(state["elapsed"]) - float(transfer_events[key]["elapsed"]) > TRANSFER_EVENT_YEARS:
 			transfer_events.erase(key)
 	var combat_graph: Dictionary = military_graph(state)
+	_sector_query_cache.clear()
+	_sector_query_graph = combat_graph
 	_update_planet_blockades(state, combat_graph)
 	for i in range((state["planets"] as Array).size()):
 		_work_planet(state, i, dt)
@@ -7542,3 +7556,5 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_sync_operations(state)
 	update_exploration(state)
 	_profile_stage(profile, "Conquest / exploration", started)
+	_sector_query_graph = {}
+	_sector_query_cache.clear()

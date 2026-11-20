@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.38: Exact containment queries share a step-scoped cache on the immutable combat graph. Moved positions and different nodes use distinct keys; other graphs bypass the cache. Cache overhead versus geometry savings needs profiling.
+
 - v0.64.37: Sector containment accepts points inside a conservative precomputed inner disk, accounting for maximum corner rounding. Exact boundary checks remain unchanged. Runtime parity and profiler pending.
 
 - v0.64.36: Production loop reuses warehouse capacity, next-tier recipe and per-resource stock rather than repeated storage helper lookups. Population/rate calculations remain live and queue processing unchanged. Runtime and measured improvement pending.
