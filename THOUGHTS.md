@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.52: Single-hull order authorization uses the step index, queued follow validation builds only its target. Added regression for live positions, ownership and removal; not executed. Multi-hull order traversal unchanged.
+
 - v0.64.51: Step-scoped stable-ID hull references accelerate single-target service queries without duplicating serialized state. Combat deaths, colony conversion and elimination erase indexed references; outside the step use live scans. Cross-step persistence, regression and measurement pending.
 
 - v0.64.50: Single-target command validation and order destination queries avoid constructing the entire service reference dictionary. Still scans IDs without a persistent lifecycle index; live positions/ownership and full phase snapshots retained. Runtime and benchmark pending.
