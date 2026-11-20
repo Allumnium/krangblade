@@ -6,11 +6,13 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.77.3: Audition personal objective / first-place fanfares and subdued rival cue; verify simultaneous events, no replay on snapshots, SFX mute and voice priority in crowded matches. Runtime/audio pending.
+
 - [ ] v0.77.2: Playtest ship-ready and tactical warning sounds, off-camera allied hull damage/instant loss, approaching combat counts and click-to-center on host/guest; check dense fleets, narrow HUD, cooldowns and cloak visibility. Verify hull glow aligns at tactical/overview zoom and selection rings remain distinct.
 
 - [ ] v0.77.1: Verify Godot startup after Crystal dictionary parse fix, and match notification alignment, player-colored names, wrapping, fade and chat replication on real peers.
 
-- [ ] **Replace prototype sound effects with authored audio later (v0.77.0).** Supply normalized WAVs in assets/sfx for laser, blaster, missile, explosion, heavy_explosion, mining, repair, tractor, select, click, order, queue, complete, ship_ready, warning and notice. Keep the cue mixer and attenuation/polyphony; audition at 1× and crowded 5×, check host/guest, music balance, mute, camera movement and sustained combat. Runtime/audio validation pending.
+- [ ] **Replace prototype sound effects with authored audio later (v0.77.0).** Supply normalized WAVs in assets/sfx for laser, blaster, missile, explosion, heavy_explosion, mining, repair, tractor, select, click, order, queue, complete, ship_ready, warning, notice, objective_other, objective_complete and objective_first. Keep the cue mixer and attenuation/polyphony; audition at 1× and crowded 5×, check host/guest, music balance, mute, camera movement and sustained combat. Runtime/audio validation pending.
 
 - [ ] v0.76.0: Playtest station baseline, 0.04 Incubator rate and fivefold Crystal prices, especially expensive Laser Matrix/third yard storage requirements and AI sourcing. Verify actual two-/three-peer chat delivery, sender validation, rate limit, typing focus, wrapping, pause/fade and restart. Runtime and visual checks pending.
 

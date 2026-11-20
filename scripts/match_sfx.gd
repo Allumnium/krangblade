@@ -22,7 +22,19 @@ const CUES: Dictionary = {
 	"ship_ready": [0.42, 0.25, 2, 3],
 	"warning": [0.36, 0.26, 1, 4],
 	"notice": [0.26, 0.22, 2, 3],
+	"objective_other": [0.32, 0.14, 1, 3],
+	"objective_complete": [0.78, 0.33, 1, 6],
+	"objective_first": [1.10, 0.39, 1, 7],
 }
+# Start time, pitch (Hz), amplitude, ringing duration (seconds).
+# Original layered bell arpeggios: a clear ascending resolution, with
+# extra bass and harmony on the first-place reward.
+const REWARD_NOTES: Dictionary = {
+	"objective_other": [[0.0, 523.25, 0.38, 0.16], [0.09, 659.25, 0.35, 0.23]],
+	"objective_complete": [[0.0, 523.25, 0.42, 0.35], [0.10, 659.25, 0.42, 0.36], [0.20, 783.99, 0.42, 0.38], [0.32, 1046.50, 0.46, 0.46], [0.32, 523.25, 0.13, 0.46], [0.32, 659.25, 0.13, 0.46]],
+	"objective_first": [[0.0, 392.0, 0.32, 0.38], [0.085, 523.25, 0.37, 0.42], [0.17, 659.25, 0.40, 0.42], [0.255, 783.99, 0.43, 0.42], [0.36, 1046.50, 0.46, 0.70], [0.36, 523.25, 0.19, 0.70], [0.36, 659.25, 0.16, 0.70], [0.36, 261.63, 0.16, 0.68], [0.51, 1318.51, 0.19, 0.57]],
+}
+const REWARD_ORDER: Array[String] = ["", "notice", "objective_other", "objective_complete", "objective_first"]
 var streams: Dictionary = {}
 var world_pool: Array[Dictionary] = []
 var ui_pool: Array[Dictionary] = []
@@ -52,6 +64,16 @@ func _ready() -> void:
 			world_pool.append(voice)
 		else:
 			ui_pool.append(voice)
+
+static func objective_cue(event: Dictionary, local_player: int) -> String:
+	if not event.has("objective"):
+		return "notice"
+	if int(event.get("player", -1)) != local_player:
+		return "objective_other"
+	return "objective_first" if bool(event.get("first", false)) else "objective_complete"
+
+static func stronger_objective_cue(a: String, b: String) -> String:
+	return b if REWARD_ORDER.find(b) > REWARD_ORDER.find(a) else a
 
 static func spatial_gain(distance: float, radius: float, zoom_level: float) -> float:
 	# Distance from camera center plus camera altitude. At overview the
@@ -142,7 +164,7 @@ func play_cue(kind: String, gain: float = 1.0, spatial: bool = false) -> void:
 	player.stop()
 	player.stream = variants[rng.randi_range(0, variants.size() - 1)]
 	player.volume_db = linear_to_db(maxf(0.0001, loudness))
-	player.pitch_scale = rng.randf_range(0.90, 1.10) if spatial else rng.randf_range(0.98, 1.02)
+	player.pitch_scale = 1.0 if REWARD_NOTES.has(kind) else (rng.randf_range(0.90, 1.10) if spatial else rng.randf_range(0.98, 1.02))
 	chosen["kind"] = kind
 	chosen["gain"] = loudness
 	chosen["priority"] = priority
@@ -161,6 +183,7 @@ func _synthesize(kind: String, variant: int) -> AudioStreamWAV:
 	var low: float = 0.0
 	var phase: float = 0.0
 	var detune: float = 1.0 + float(variant - 1) * 0.08
+	var notes: Array = REWARD_NOTES.get(kind, [])
 	for i in range(count):
 		var t: float = float(i) / SAMPLE_RATE
 		var u: float = t / duration
@@ -169,6 +192,16 @@ func _synthesize(kind: String, variant: int) -> AudioStreamWAV:
 		var frequency: float = 440.0
 		var sample: float = 0.0
 		match kind:
+			"objective_other", "objective_complete", "objective_first":
+				for note in notes:
+					var age: float = t - float(note[0])
+					var length: float = float(note[3])
+					if age < 0.0 or age >= length:
+						continue
+					var angle: float = TAU * float(note[1]) * age
+					var ring: float = minf(1.0, age / 0.008) * exp(-3.5 * age / length) * minf(1.0, (length - age) / 0.045)
+					var bell: float = sin(angle) * 0.72 + sin(angle * 2.0) * 0.17 + sin(angle * 3.01) * 0.08 * exp(-10.0 * age) + sin(angle * 4.0) * 0.03
+					sample += float(note[2]) * ring * bell
 			"laser":
 				frequency = lerpf(1900.0, 190.0, pow(u, 0.55))
 				sample = (sin(phase) * 0.65 + sin(phase * 1.51) * 0.18 + noise * 0.15) * exp(-4.0 * u)

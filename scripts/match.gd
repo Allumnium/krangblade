@@ -6166,14 +6166,17 @@ func _sync_world_audio(state: Dictionary) -> void:
 			var heavy: bool = event["kind"] in ["station", "shipyard", "cruiser", "destroyer"]
 			sound_mixer.offer("heavy_explosion" if heavy else "explosion", gain)
 	var notices: Dictionary = {}
-	var announced: bool = false
+	var reward_cue: String = ""
 	for event in state.get("objective_events", []):
 		var key: String = "%s:%s:%s" % [event["player"], event.get("objective", event.get("reward", "")), event["elapsed"]]
 		notices[key] = true
 		if not sound_objectives.has(key):
-			announced = true
-	if announced and not initial:
-		sound_mixer.play_cue("notice")
+			var cue: String = SFX.objective_cue(event, _me())
+			reward_cue = SFX.stronger_objective_cue(reward_cue, cue)
+	# A busy snapshot plays its most significant new reward once. Existing
+	# notices and the initial snapshot must never replay a fanfare.
+	if not reward_cue.is_empty() and not initial:
+		sound_mixer.play_cue(reward_cue)
 	sound_objectives = notices
 	if advanced:
 		# Timestamp edges, not visual-frame repeats. A sampled volley can
