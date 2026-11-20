@@ -5105,6 +5105,15 @@ static func _salvage_threat_free(point: Vector2, sector: int, team: int, threats
 		if int(other_team) != team:
 			return false
 	var cell := Vector2i(floori(point.x / REPAIR_SAFE_RADIUS), floori(point.y / REPAIR_SAFE_RADIUS))
+	if threats.has("positions"):
+		var positions: PackedVector2Array = threats["positions"]
+		var teams: PackedInt32Array = threats["teams"]
+		for x in range(-1, 2):
+			for y in range(-1, 2):
+				for slot in threats["cells"].get(cell + Vector2i(x, y), []):
+					if teams[slot] != team and point.distance_squared_to(positions[slot]) <= REPAIR_SAFE_RADIUS * REPAIR_SAFE_RADIUS:
+						return false
+		return true
 	for x in range(-1, 2):
 		for y in range(-1, 2):
 			for threat in threats["cells"].get(cell + Vector2i(x, y), []):
@@ -5717,6 +5726,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	var ship_sectors: Dictionary = {}
 	var threat_sectors: Dictionary = {}
 	var threat_cells: Dictionary = {}
+	var threat_positions := PackedVector2Array()
+	var threat_teams := PackedInt32Array()
+	var threat_ids := PackedInt64Array()
 	var threat_count: int = 0
 	for ship in ships:
 		var id: int = int(ship["id"])
@@ -5735,7 +5747,10 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 				if not threat_sectors.has(sector):
 					threat_sectors[sector] = {}
 				threat_sectors[sector][threat_team] = true
-			_spatial_insert(threat_cells, pos, REPAIR_SAFE_RADIUS, [threat_team, pos])
+			_spatial_insert(threat_cells, pos, REPAIR_SAFE_RADIUS, threat_positions.size())
+			threat_positions.append(pos)
+			threat_teams.append(threat_team)
+			threat_ids.append(id)
 		if sector < 0:
 			sector = sector_at(graph, pos, range(graph["points"].size()))
 		ship_sectors[id] = sector
@@ -5747,7 +5762,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 				sector_teams[sector] = {}
 			sector_teams[sector][int(team_by_id[id])] = true
 		_spatial_insert(cells, pos, LASER_RANGE, ship)
-	threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells}
+	threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells, "positions": threat_positions, "teams": threat_teams, "ids": threat_ids}
 	threat_index["count"] = threat_count
 	var yard_targets: Dictionary = {}
 	var pds_targets: Dictionary = {}
