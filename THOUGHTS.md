@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.55: Combat previous target and sector fields now share frozen ID-to-slot indexing and typed arrays. Position and HP dictionaries remain authoritative for the combat pass; runtime and benchmark pending.
+
 - v0.64.54: Operation sync reuses the live hull index; combat shallow-copies it to preserve frozen membership through simultaneous casualties. Dictionary copy cost versus insertion savings requires profiling; no packed authority migration yet. Runtime pending.
 
 - v0.64.53: Operation dispatch reuses the live step hull index and indexes deployed membership once per group. No dispatch order or cohort changes. Runtime and profiling pending.
