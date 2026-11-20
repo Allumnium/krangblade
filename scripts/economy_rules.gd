@@ -5053,6 +5053,23 @@ static func _threat_sector_signature(ship: Dictionary) -> Array:
 	var route: Array = ship.get("route", [])
 	return [ship.get("position", Vector2.INF), int(ship.get("at", -1)), ship.get("kind", ""), ship.get("mining_mode", ""), int(ship.get("field", -1)), int(ship.get("resource_stage", {}).get("node", -1)), int(route[0]) if not route.is_empty() else -1]
 
+# Validate the frozen threat snapshot after combat and withdrawal rerouting.
+# If anything relevant changed, fall back to the exact survivor rebuild.
+static func _reuse_combat_threats(state: Dictionary, graph: Dictionary, combat_index: Dictionary) -> Dictionary:
+	if not combat_index.has("snapshot"):
+		return _salvage_threats(state, graph, combat_index)
+	var count: int = 0
+	for craft in state["ships"]:
+		if not armed(craft) or not craft.get("position", Vector2.INF).is_finite():
+			continue
+		count += 1
+		var entry: Array = combat_index.get(int(craft["id"]), [])
+		if entry.size() != 3 or entry[0] != _threat_sector_signature(craft) or int(entry[2]) != int(state["teams"].get(int(craft["owner"]), 0)):
+			return _salvage_threats(state, graph, combat_index)
+	if count != int(combat_index["count"]):
+		return _salvage_threats(state, graph, combat_index)
+	return combat_index["snapshot"]
+
 static func _salvage_threats(state: Dictionary, graph: Dictionary, combat_index: Dictionary = {}) -> Dictionary:
 	var sectors: Dictionary = {}
 	var cells: Dictionary = {}
@@ -5692,6 +5709,9 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	var sectors: Dictionary = {}
 	var sector_teams: Dictionary = {}
 	var ship_sectors: Dictionary = {}
+	var threat_sectors: Dictionary = {}
+	var threat_cells: Dictionary = {}
+	var threat_count: int = 0
 	for ship in ships:
 		var id: int = int(ship["id"])
 		var pos: Vector2 = combat_position(state, graph, ship)
@@ -5700,8 +5720,15 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		health[id] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
 		previous_targets[id] = int(ship.get("combat_target", -1))
 		var sector: int = local_sector(graph, ship)
-		if armed(ship):
-			threat_index[id] = [_threat_sector_signature(ship), sector]
+		if armed(ship) and ship.get("position", Vector2.INF).is_finite():
+			var threat_team: int = int(state["teams"].get(int(ship["owner"]), 0))
+			threat_index[id] = [_threat_sector_signature(ship), sector, threat_team]
+			threat_count += 1
+			if sector >= 0:
+				if not threat_sectors.has(sector):
+					threat_sectors[sector] = {}
+				threat_sectors[sector][threat_team] = true
+			_spatial_insert(threat_cells, pos, REPAIR_SAFE_RADIUS, [threat_team, pos])
 		if sector < 0:
 			sector = sector_at(graph, pos, range(graph["points"].size()))
 		ship_sectors[id] = sector
@@ -5713,6 +5740,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 				sector_teams[sector] = {}
 			sector_teams[sector][int(state["teams"].get(int(ship["owner"]), 0))] = true
 		_spatial_insert(cells, pos, LASER_RANGE, ship)
+	threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells}
+	threat_index["count"] = threat_count
 	var yard_targets: Dictionary = {}
 	var pds_targets: Dictionary = {}
 	var station_targets: Dictionary = {}
@@ -7360,7 +7389,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_update_salvage(state)
 	var salvage_busy: Dictionary = _salvage_combat_busy(state)
 	var salvage_cells: Dictionary = _salvage_cells(state.get("salvage", {}))
-	var salvage_threats: Dictionary = _salvage_threats(state, combat_graph, threat_index)
+	var salvage_threats: Dictionary = _reuse_combat_threats(state, combat_graph, threat_index)
 	var stage_receivers: Dictionary = {}
 	var receiver_order: int = 0
 	for craft in state["ships"]:

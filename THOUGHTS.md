@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.41: Combat builds the frozen salvage threat snapshot alongside its own index. Post-combat reuse requires matching survivor count and exact team/routing/position signatures; fallback rebuild preserves safety. Still two bucket resolutions and a validation scan; profile total cost before claiming improvement. Runtime pending.
+
 - v0.64.40: User explicitly deprioritized debugger errors and approved P1. Combat exports physical sector hints for armed hulls; salvage validates exact routing/position inputs after combat and ignores destroyed hulls. Separate threat cells remain; measure whether signature overhead offsets saved geometry queries. Runtime pending.
 
 - v0.64.39: User reports approximately 5 FPS in an eight-player match at 5× as frame time rises. Self-time profiler highlights _salvage_threats, _combat, _hostile_bucket, _sync_operations, separation, service_targets and map/minimap/station drawing. Debugger shows 62 errors; details and causality unknown (earlier 61-error observation remains unresolved). Prioritize error triage, reproducible baseline, unified phase-aware world index and incremental packed state before further isolated tweaks. No measured speedup claimed.

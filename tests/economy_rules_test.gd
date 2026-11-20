@@ -953,7 +953,23 @@ func _test_shared_threat_index() -> void:
 	state["ships"].clear()
 	assert(ECON._salvage_threats(state, graph, index) == {"sectors": {}, "cells": {}})
 
+func _test_reuse_combat_threats() -> void:
+	var graph: Dictionary = {"points": [Vector2.ZERO, Vector2(1000, 0)], "sector_radii": [200.0, 200.0], "sector_neighbors": [[], []]}
+	var ship: Dictionary = {"id": 1, "kind": "fighter", "owner": 1, "position": Vector2.ZERO, "at": 0, "route": []}
+	var state: Dictionary = {"ships": [ship], "teams": {1: 1}}
+	var snapshot: Dictionary = ECON._salvage_threats(state, graph)
+	var index: Dictionary = {1: [ECON._threat_sector_signature(ship), 0, 1], "snapshot": snapshot, "count": 1}
+	assert(is_same(ECON._reuse_combat_threats(state, graph, index), snapshot))
+	state["teams"][1] = 2
+	assert(ECON._reuse_combat_threats(state, graph, index) == ECON._salvage_threats(state, graph))
+	ship["position"] = Vector2(1000, 0)
+	ship["at"] = 1
+	assert(ECON._reuse_combat_threats(state, graph, index) == ECON._salvage_threats(state, graph))
+	state["ships"].clear()
+	assert(ECON._reuse_combat_threats(state, graph, index) == {"sectors": {}, "cells": {}})
+
 func _initialize() -> void:
+	_test_reuse_combat_threats()
 	_test_shared_threat_index()
 	_test_sector_query_cache()
 	_test_sector_inner_fast_path()
