@@ -5789,7 +5789,9 @@ static func _combat_search_due(ship: Dictionary, now: float) -> bool:
 static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}) -> void:
 	var ships: Array = state["ships"]
 	var positions: Dictionary = {}
-	var by_id: Dictionary = {}
+	# Combat needs a frozen reference map until simultaneous damage resolves.
+	var indexed: bool = is_same(state, _indexed_state)
+	var by_id: Dictionary = _hulls_by_id.duplicate() if indexed else {}
 	var team_by_id: Dictionary = {}
 	var previous_targets: Dictionary = {}
 	var health: Dictionary = {}
@@ -5808,7 +5810,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		var id: int = int(ship["id"])
 		var pos: Vector2 = combat_position(state, graph, ship)
 		positions[id] = pos
-		by_id[id] = ship
+		if not indexed:
+			by_id[id] = ship
 		team_by_id[id] = int(state["teams"].get(int(ship["owner"]), 0))
 		health[id] = float(ship.get("hp", ship_max_hp(str(ship["kind"]))))
 		previous_targets[id] = int(ship.get("combat_target", -1))
@@ -6620,7 +6623,8 @@ static func _sync_operations(state: Dictionary) -> void:
 			members[member] = true
 		wave_members[owner] = members
 	var current: Dictionary = {}
-	var by_id: Dictionary = {}
+	var indexed: bool = is_same(state, _indexed_state)
+	var by_id: Dictionary = _hulls_by_id if indexed else {}
 	for ship in state["ships"]:
 		if ship.get("kind", "") not in ["fighter", "scout", "cruiser", "destroyer"]:
 			continue
@@ -6643,7 +6647,8 @@ static func _sync_operations(state: Dictionary) -> void:
 			current[key] = {"id": 0, "owner": owner, "target": target, "role": role, "members": [], "moving": false, "engaged": false, "phase": "assigned", "deployed": []}
 		var operation: Dictionary = current[key]
 		var ship_id: int = int(ship["id"])
-		by_id[ship_id] = ship
+		if not indexed:
+			by_id[ship_id] = ship
 		operation["members"].append(ship_id)
 		operation["moving"] = bool(operation["moving"]) or (not (ship["route"] as Array).is_empty() and (not bool(ship.get("holding", false)) or bool(ship.get("retreating", false))))
 		operation["engaged"] = bool(operation["engaged"]) or _engaged(ship)

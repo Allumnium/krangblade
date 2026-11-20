@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.54: Operation sync reuses the live hull index; combat shallow-copies it to preserve frozen membership through simultaneous casualties. Dictionary copy cost versus insertion savings requires profiling; no packed authority migration yet. Runtime pending.
+
 - v0.64.53: Operation dispatch reuses the live step hull index and indexes deployed membership once per group. No dispatch order or cohort changes. Runtime and profiling pending.
 
 - v0.64.52: Single-hull order authorization uses the step index, queued follow validation builds only its target. Added regression for live positions, ownership and removal; not executed. Multi-hull order traversal unchanged.
