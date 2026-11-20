@@ -96,6 +96,9 @@ var background_music: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
 var map_canvas: Control
+var exhaust_batch: MultiMeshInstance2D
+var exhaust_instances: Array = []
+var exhaust_extents: Dictionary = {}
 var overview_batches: Dictionary = {}
 var overview_instances: Dictionary = {}
 var overview_dot_textures: Dictionary = {}
@@ -552,6 +555,7 @@ func _build_ui() -> void:
 	map_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	map_canvas.gui_input.connect(_map_input)
 	map_canvas.draw.connect(_draw_map)
+	_build_exhaust_batch()
 	map_canvas.resized.connect(_map_resized)
 	header_panel = PanelContainer.new()
 	header_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -7101,6 +7105,85 @@ func _draw_cargo_transfers(state: Dictionary, poses: Dictionary, refs: Dictionar
 
 # One GPU-instanced quad batch per cached overview texture. Keep detailed
 # hulls and gameplay/picking on their existing paths.
+func _build_exhaust_batch() -> void:
+	exhaust_batch = MultiMeshInstance2D.new()
+	var mesh := MultiMesh.new()
+	mesh.transform_format = MultiMesh.TRANSFORM_2D
+	mesh.use_custom_data = true
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE
+	mesh.mesh = quad
+	exhaust_batch.multimesh = mesh
+	var shader := Shader.new()
+	shader.code = """
+shader_type canvas_item;
+render_mode unshaded;
+uniform float visual_time;
+varying vec4 plume;
+void vertex() {
+	plume = INSTANCE_CUSTOM;
+}
+void fragment() {
+	float t = 1.0 - UV.x;
+	float y = abs(UV.y * 2.0 - 1.0);
+	float taper = max(0.0, 1.0 - t);
+	float sheath = (1.0 - smoothstep(taper * 0.75, taper + 0.04, y)) * (1.0 - smoothstep(0.8, 1.0, t));
+	float core_width = max(0.0, 0.45 * (1.0 - t / 0.4));
+	float core = (1.0 - smoothstep(core_width * 0.7, core_width + 0.025, y)) * (1.0 - smoothstep(0.32, 0.4, t));
+	float phase = fract(t * 5.0 - visual_time * 4.5 + plume.y);
+	float sparks = (1.0 - smoothstep(0.06, 0.22, abs(phase - 0.5))) * (1.0 - smoothstep(0.12, 0.35, y)) * taper;
+	float alpha = clamp(plume.x * (0.34 * sheath + 0.9 * core + 0.45 * sparks), 0.0, 1.0);
+	COLOR = vec4(mix(vec3(0.15, 0.62, 1.0), vec3(0.8, 0.96, 1.0), core), alpha);
+}
+"""
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	exhaust_batch.material = material
+	map_canvas.add_child(exhaust_batch)
+	exhaust_batch.hide()
+
+func _queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float, id: int, bounds: Rect2) -> void:
+	if not exhaust_extents.has(kind):
+		var rear: float = 0.0
+		var nose: float = 0.0
+		for vertex in HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE):
+			rear = minf(rear, vertex.x)
+			nose = maxf(nose, vertex.x)
+		exhaust_extents[kind] = Vector2(rear, maxf(0.5, (nose - rear) / 18.0))
+	var extent: Vector2 = exhaust_extents[kind]
+	var engine: Vector2 = point + direction * extent.x
+	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
+	var plume_width: float = extent.y * lerpf(0.8, 2.1, thrust) * scale
+	if not bounds.grow(maxf(24.0, plume_length + 8.0)).has_point(engine):
+		return
+	var center: Vector2 = engine - direction.normalized() * plume_length * 0.5
+	exhaust_instances.append([Transform2D(direction.angle(), Vector2(plume_length, plume_width * 2.0), 0.0, center), thrust, fposmod(float(id) * 0.173, 1.0)])
+
+func _flush_exhaust() -> void:
+	if exhaust_instances.is_empty():
+		return
+	var mesh: MultiMesh = exhaust_batch.multimesh
+	if mesh.instance_count < exhaust_instances.size():
+		mesh.instance_count = maxi(exhaust_instances.size(), maxi(64, mesh.instance_count * 2))
+	var buffer := PackedFloat32Array()
+	buffer.resize(mesh.instance_count * 12)
+	for i in range(exhaust_instances.size()):
+		var entry: Array = exhaust_instances[i]
+		var t: Transform2D = entry[0]
+		var offset: int = i * 12
+		buffer[offset] = t.x.x
+		buffer[offset + 1] = t.y.x
+		buffer[offset + 3] = t.origin.x
+		buffer[offset + 4] = t.x.y
+		buffer[offset + 5] = t.y.y
+		buffer[offset + 7] = t.origin.y
+		buffer[offset + 8] = entry[1]
+		buffer[offset + 9] = entry[2]
+	mesh.buffer = buffer
+	mesh.visible_instance_count = exhaust_instances.size()
+	(exhaust_batch.material as ShaderMaterial).set_shader_parameter("visual_time", visual_clock)
+	exhaust_batch.show()
+
 func _overview_dot_texture(tint: Color) -> Texture2D:
 	var key: String = tint.to_html(false)
 	if not overview_dot_textures.has(key):
@@ -7148,6 +7231,8 @@ func _flush_overview_hulls() -> void:
 		batch.show()
 
 func _draw_map() -> void:
+	exhaust_instances.clear()
+	exhaust_batch.hide()
 	overview_instances.clear()
 	for batch in overview_batches.values():
 		batch.hide()
@@ -7407,28 +7492,7 @@ func _draw_map() -> void:
 		var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
 		var thrust: float = float(visual.get("thrust", 0.0))
 		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and thrust > 0.035:
-			var hull_vertices: Array = HULL_OUTLINES.get(ship["kind"], FREIGHTER_OUTLINE)
-			var rear: float = 0.0
-			var nose: float = 0.0
-			for vertex in hull_vertices:
-				rear = minf(rear, vertex.x)
-				nose = maxf(nose, vertex.x)
-			var hull_factor: float = maxf(0.5, (nose - rear) / 18.0)
-			var engine: Vector2 = point + direction * rear
-			var length: float = hull_factor * lerpf(4.0, 20.0, thrust)
-			var width: float = hull_factor * lerpf(0.8, 2.1, thrust)
-			if viewport_bounds.grow(maxf(24.0, length * scale + 8.0)).has_point(engine):
-				# Narrow blue plasma sheath and a white-hot nozzle core.
-				var flame: PackedVector2Array = PackedVector2Array([engine + side * width, engine - direction * length, engine - side * width])
-				map_canvas.draw_colored_polygon(flame, Color(0.15, 0.62, 1.0, thrust * 0.34))
-				map_canvas.draw_colored_polygon(PackedVector2Array([engine + side * width * 0.45, engine - direction * length * 0.40, engine - side * width * 0.45]), Color(0.80, 0.96, 1.0, thrust * 0.90))
-				var particle_count: int = clampi(ceili(thrust * (5.0 if scale >= 1.0 else 2.0)), 1, 5)
-				for k in range(particle_count):
-					var age: float = fposmod(visual_clock * 4.5 + float(k) / float(particle_count) + float(ship["id"]) * 0.173, 1.0)
-					var offset: float = sin(float(k) * 2.4 + float(ship["id"])) * width * (0.3 + age * 0.7)
-					var spark: Vector2 = engine - direction * (1.0 + age * length) + side * offset
-					var streak: float = hull_factor * lerpf(1.5, 4.0, thrust) * (1.0 - age * 0.65)
-					map_canvas.draw_line(spark, spark - direction * streak, Color(0.38, 0.83, 1.0, thrust * (1.0 - age) * 0.85), maxf(0.6, scale * hull_factor * (1.0 - age) * 0.9), true)
+			_queue_exhaust(str(ship["kind"]), point, direction, scale, thrust, int(ship["id"]), viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
@@ -7451,7 +7515,7 @@ func _draw_map() -> void:
 			_queue_overview_hull(_overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
 			continue
 		var texture: Texture2D = _cached_hull_texture(str(ship["kind"]), empire, scale >= 0.42)
-		if scale < 0.42 and ship["kind"] != "science_ship":
+		if ship["kind"] != "science_ship" and (scale < 0.42 or ECONOMY.cargo_capacity(str(ship["kind"])) <= ECONOMY.EPS):
 			_queue_overview_hull(texture, point, direction.angle(), _hull_texture_half_size(str(ship["kind"])) * scale)
 			continue
 		map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
@@ -7487,6 +7551,7 @@ func _draw_map() -> void:
 					map_canvas.draw_circle(point + Vector2.from_angle(angle) * 5.0 * scale, maxf(0.7, scale), tint, true, -1.0, true)
 		elif scale >= 0.42:
 			_draw_other_cargo(ship, point, direction, side)
+	_flush_exhaust()
 	_flush_overview_hulls()
 	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
 	_draw_ship_destructions(viewport_bounds)
