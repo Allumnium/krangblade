@@ -1989,7 +1989,12 @@ func _build_station_command_card(parent: Container) -> void:
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
 	_register_command_hotkey(station_upgrade_buttons["reinforced_plating"], KEY_V, "Station", "station_plating", "Reinforced Plating")
 	_register_command_hotkey(station_upgrade_buttons["laser_matrix"], KEY_L, "Station", "station_matrix", "Laser Matrix")
-	station_upgrade_buttons["dyson_sphere"] = _station_button(station_primary_grid, "Dyson\nSphere", "dyson_sphere", _station_upgrade_pressed.bind("dyson_sphere"))
+	var dyson_button: Button = _station_button(station_primary_grid, "Dyson\nSphere", "dyson_sphere", _station_upgrade_pressed.bind("dyson_sphere"))
+	var dyson_slot: Control = _station_spacer(station_primary_grid)
+	dyson_slot.custom_minimum_size = dyson_button.custom_minimum_size
+	dyson_button.reparent(dyson_slot, false)
+	dyson_button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	station_upgrade_buttons["dyson_sphere"] = dyson_button
 	_station_spacer(station_primary_grid)
 	for i in range(4):
 		_station_spacer(station_primary_grid)
