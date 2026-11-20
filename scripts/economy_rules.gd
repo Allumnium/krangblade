@@ -1685,23 +1685,25 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 			# leapfrog a more expensive one and starve it. Manual orders and
 			# targeted upgrades retain their existing eligibility rules.
 			var repeat_seen: bool = false
+			var queue_full: bool = shipyard_queue_count(p, y) >= SHIPYARD_QUEUE_LIMIT
 			for item in p["queue"]:
 				if assigned.has(int(item["id"])):
 					continue
 				var upgrade: bool = item["kind"] == "yard_upgrade" and int(item["target"]) == y
 				var pinned: int = int(item.get("yard_slot", -1))
 				var hull: bool = int(item["size"]) > 0 and int(item["size"]) <= max_size(int(yard["level"])) and (pinned < 0 or pinned == y)
-				if hull and pinned < 0 and shipyard_queue_count(p, y) >= SHIPYARD_QUEUE_LIMIT:
+				if hull and pinned < 0 and queue_full:
 					continue
 				# A population-blocked order never occupies the active slot,
 				# even when explicitly pinned to this yard. Keep it queued.
-				if hull and _possible(p, item, y) <= EPS:
+				var possible: bool = (upgrade or hull) and _possible(p, item, y) > EPS
+				if hull and not possible:
 					continue
 				if hull and bool(item.get("automatic", false)):
 					if repeat_seen:
 						continue
 					repeat_seen = true
-				if (upgrade or hull) and _possible(p, item, y) > EPS:
+				if possible:
 					chosen = item
 					break
 		if chosen.is_empty():
