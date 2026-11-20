@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.26: Missile search uses cached ordered bounding blocks, retaining structure targets, positive-team hostility and focus-fire filters. Worst-case overlapping blocks remain expensive; runtime and benchmark pending.
+
 - v0.64.25: Laser hull acquisition prunes contiguous 16-candidate blocks by bounding box while preserving original traversal and approximate ties. Benefit depends on spatial coherence of fleet order; worst-case overlap remains quadratic. Test parity and benchmark before wider adoption.
 
 - v0.64.24: Shared hostile candidate buckets skip allied hulls in repeated laser, missile, defense and pursuit scans. Exact weapon checks and ordering retained. Dense opposing fleets still require nearest-target acceleration; runtime pending.
