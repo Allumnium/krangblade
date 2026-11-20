@@ -814,7 +814,17 @@ func _test_repair_cells() -> void:
 		40: {"position": Vector2(radius * 4, 0), "entity": {"hp": 1.0}, "max_hp": 10.0}}
 	assert(ECON._nearby_repair_ids(ECON._damaged_repair_cells(targets), Vector2.ZERO) == [10, 20])
 
+func _test_hostile_buckets() -> void:
+	var state: Dictionary = {"teams": {1: 1, 2: 1, 3: 2}}
+	var buckets: Dictionary = {Vector2i.ZERO: [{"owner": 1, "id": 4}, {"owner": 3, "id": 8}, {"owner": 2, "id": 6}, {"owner": 3, "id": 2}, {"owner": 0, "id": -2}]}
+	var cache: Dictionary = {}
+	var hostile: Array = ECON._hostile_bucket(state, buckets, cache, Vector2i.ZERO, 1)
+	assert(hostile.map(func(entry: Dictionary) -> int: return int(entry["id"])) == [8, 2, -2])
+	assert(ECON._hostile_bucket(state, buckets, cache, Vector2i.ZERO, 2).size() == 3)
+	assert(ECON._hostile_bucket(state, buckets, cache, Vector2i.ONE, 1).is_empty())
+
 func _initialize() -> void:
+	_test_hostile_buckets()
 	_test_repair_cells()
 	_test_handoff_candidates()
 	_test_spatial_buckets()
