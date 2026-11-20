@@ -279,7 +279,7 @@ func _resource_card(resource: String, description: String) -> void:
 	_label(text, description)
 
 func _overview() -> void:
-	_body("Expand your empire through local economies, autonomous logistics and direct fleet command.")
+	_body("Expand through local economies and direct fleet command. The default logistics lens marks local resource strengths (+/++) and weaknesses (-/--). Complete objectives to earn conquest points: two new systems, 1,000t Metals produced or mined, 200k resident population.")
 	_section("The strategic loop")
 	_flow(["Extract resources", "Build & recruit", "Expand", "Defend supply"])
 	_body("Start with 3 Harvesters, 2 fighters and 1 freighter. Select a unit or station to issue orders.")

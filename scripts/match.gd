@@ -299,7 +299,9 @@ const HULL_PANELS: Dictionary = {
 var interaction_scroll: ScrollContainer
 var interaction_panel: VBoxContainer
 var logistics_lens: Button
-var active_lens: String = ""
+var active_lens: String = "logistics"
+var logistics_overlay: Control
+var objectives_overlay: Control
 var global_resource_fills: Dictionary = {}
 var global_resource_segments: Dictionary = {}
 var global_resource_strips: Dictionary = {}
@@ -574,6 +576,16 @@ func _build_ui() -> void:
 	map_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	map_canvas.gui_input.connect(_map_input)
 	map_canvas.draw.connect(_draw_map)
+	logistics_overlay = Control.new()
+	map_canvas.add_child(logistics_overlay)
+	logistics_overlay.z_index = 3
+	logistics_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	logistics_overlay.draw.connect(_draw_logistics_overlay)
+	objectives_overlay = Control.new()
+	map_canvas.add_child(objectives_overlay)
+	objectives_overlay.z_index = 3
+	objectives_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	objectives_overlay.draw.connect(_draw_objectives_overlay)
 	_build_exhaust_batch()
 	beam_batch = _build_effect_batch(false)
 	projectile_batch = _build_effect_batch(true)
@@ -6737,16 +6749,22 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 		var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * zoom
 		var scale: float = clampf(spacing / 150.0, 0.22, 1.0)
 		var origin: Vector2 = pos + Vector2(-69.0 * scale, radius + 5.0 * scale)
-		map_canvas.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(144, 20.0 + 18.0 * float(maxi(0, ceili(float(ECONOMY.RESOURCES.size()) / 3.0) - 1))) * scale), Color("#0c1928ec"))
+		logistics_overlay.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(144, 34.0 + 32.0 * float(maxi(0, ceili(float(ECONOMY.RESOURCES.size()) / 3.0) - 1))) * scale), Color("#0c1928ec"))
 		for r in range(ECONOMY.RESOURCES.size()):
 			var resource: String = ECONOMY.RESOURCES[r]
-			var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 18.0) * scale
+			var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 32.0) * scale
 			var fraction: float = clampf(float(system["stock"][resource]) / ECONOMY.storage_capacity(system), 0.0, 1.0)
-			map_canvas.draw_rect(Rect2(cell, Vector2(44, 14) * scale), Color("#263b50"))
-			map_canvas.draw_rect(Rect2(cell, Vector2(44.0 * fraction, 14) * scale), HUD.COLORS[resource].darkened(0.4))
-			map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13) * scale), false)
+			logistics_overlay.draw_rect(Rect2(cell, Vector2(44, 14) * scale), Color("#263b50"))
+			logistics_overlay.draw_rect(Rect2(cell, Vector2(44.0 * fraction, 14) * scale), HUD.COLORS[resource].darkened(0.4))
+			logistics_overlay.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13) * scale), false)
 			if scale >= 0.8:
-				map_canvas.draw_string(font, cell + Vector2(15, 11) * scale, _tons(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+				logistics_overlay.draw_string(font, cell + Vector2(15, 11) * scale, _tons(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+			var grade: int = ECONOMY.specialization_grade(system, resource)
+			if grade != 0 and scale >= 0.55:
+				var badge_pos: Vector2 = cell + Vector2(8, 16) * scale
+				logistics_overlay.draw_texture_rect(HUD.ICONS[resource], Rect2(badge_pos, Vector2(11, 11) * scale), false)
+				var marks: String = ("+" if grade > 0 else "-").repeat(absi(grade))
+				logistics_overlay.draw_string(font, badge_pos + Vector2(13, 10) * scale, marks, HORIZONTAL_ALIGNMENT_LEFT, -1, maxi(9, roundi(13 * scale)), Color("#79e59a") if grade > 0 else Color("#ff7777"))
 	# Aggregate loaded shipments at their origin and final destination.
 	var traffic: Dictionary = {}
 	for ship in state["ships"]:
@@ -6784,10 +6802,10 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 				var normal: Vector2 = axis.orthogonal()
 				var base: Vector2 = center + radial * minf(radius + 24.0 + float(k) * 13.0, center.distance_to(_screen_point(points[key.x])) * 0.48)
 				var count: int = clampi(ceili(3.0 * cargo / ECONOMY.CARGO_CAPACITY), 1, 3)
-				map_canvas.draw_texture_rect(HUD.ICONS[resource], Rect2(base + radial * 14.0 - Vector2(5, 5), Vector2(10, 10)), false)
+				logistics_overlay.draw_texture_rect(HUD.ICONS[resource], Rect2(base + radial * 14.0 - Vector2(5, 5), Vector2(10, 10)), false)
 				for j in range(count):
 					var tip: Vector2 = base + axis * float(j * 5)
-					map_canvas.draw_polyline(PackedVector2Array([tip - axis * 4.0 + normal * 3.0, tip, tip - axis * 4.0 - normal * 3.0]), HUD.COLORS[resource], 1.5, true)
+					logistics_overlay.draw_polyline(PackedVector2Array([tip - axis * 4.0 + normal * 3.0, tip, tip - axis * 4.0 - normal * 3.0]), HUD.COLORS[resource], 1.5, true)
 
 func _station_bay_point(center: Vector2, radius: float, elapsed: float, resource: String, bay: int) -> Vector2:
 	var resources: Array = ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]
@@ -7520,6 +7538,8 @@ func _flush_overview_hulls() -> void:
 		batch.show()
 
 func _draw_map() -> void:
+	logistics_overlay.queue_redraw()
+	objectives_overlay.queue_redraw()
 	asteroid_frame_meshes.clear()
 	health_entries.clear()
 	ring_entries.clear()
@@ -7652,7 +7672,6 @@ func _draw_map() -> void:
 			map_canvas.draw_colored_polygon(flag, rally_tint)
 			flag.append(flag[0])
 			map_canvas.draw_polyline(flag, Color("#111b26"), 1.0, true)
-	_draw_logistics_lens(state, font)
 	var poses: Dictionary = _ship_poses(state)
 	_draw_salvage(state, poses, viewport_bounds, font)
 	var service_refs: Dictionary = ECONOMY.service_targets(state)
@@ -7889,3 +7908,43 @@ func _draw_map() -> void:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
 		map_canvas.draw_rect(rect, Color(HUD.ACCENT, 0.12))
 		map_canvas.draw_rect(rect, HUD.ACCENT, false, 1.0)
+
+func _draw_logistics_overlay() -> void:
+	if session == null:
+		return
+	var state: Dictionary = _state()
+	if not state.is_empty():
+		_draw_logistics_lens(state, ThemeDB.fallback_font)
+
+func _draw_objectives_overlay() -> void:
+	if session == null:
+		return
+	var state: Dictionary = _state()
+	if state.is_empty():
+		return
+	var progress: Dictionary = state.get("objectives", {}).get(_me(), {})
+	var completed: Dictionary = progress.get("completed", {})
+	var font: Font = ThemeDB.fallback_font
+	var x: float = maxf(8.0, map_canvas.size.x - 252.0)
+	var y: float = HEADER_HEIGHT + 24.0
+	var rows: Array = [["OBJECTIVES", "", ""], ["Economic", "", ""], ["Harvest 1,000t Metals", "metals", "%d / 1000" % int(progress.get("metals", 0.0))], ["Reach 200k population", "population", "%dk / 200k" % int(float(progress.get("population", 0.0)) / 1000.0)], ["Conquest", "", ""], ["Colonize two systems", "colonies", "%d / 2" % mini(2, (progress.get("colonies", {}) as Dictionary).size())], ["Conquest points: %d" % int(progress.get("points", 0)), "", ""]]
+	for row in rows:
+		var label: String = row[0]
+		var key: String = row[1]
+		var done: bool = completed.has(key)
+		var tint: Color = Color("#8ee2a9") if done else (Color("#b8d9ef") if key.is_empty() else Color.WHITE)
+		var pos := Vector2(x, y)
+		if not key.is_empty():
+			objectives_overlay.draw_rect(Rect2(pos + Vector2(0, -10), Vector2(10, 10)), tint, false, 1.0)
+			if done:
+				objectives_overlay.draw_polyline(PackedVector2Array([pos + Vector2(1, -6), pos + Vector2(4, -2), pos + Vector2(9, -9)]), tint, 2.0, true)
+			pos.x += 16.0
+		objectives_overlay.draw_string_outline(font, pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, Color("#101824"))
+		objectives_overlay.draw_string(font, pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, tint)
+		if done:
+			objectives_overlay.draw_line(pos + Vector2(0, -5), pos + Vector2(font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, -5), tint, 1.0)
+		if not key.is_empty():
+			var counter := Vector2(x + 16, y + 15)
+			objectives_overlay.draw_string_outline(font, counter, str(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color("#101824"))
+			objectives_overlay.draw_string(font, counter, str(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
+		y += 34.0 if not key.is_empty() else 22.0

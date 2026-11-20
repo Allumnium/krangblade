@@ -6,6 +6,11 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+### Objectives and specialization (v0.65.0)
+- [ ] Validate default raised logistics lens and inherent resource grades, and objective progression/replication in solo and ENet.
+- [ ] Design competitive objective payout/ranking and public achievement notifications; draft three random permanent rewards per conquest point, no repeated unlock per empire. No artificial catch-up modifier. Define reward pool and authority validation before implementing.
+- [ ] Explore science objectives, technology specialization via rewards, and alternate victories.
+
 ### Large-fleet scalability — approved engineering program (v0.62.1; T-026)
 
 **Goal:** sustain 5,000 simultaneous individually simulated and selectable ships across up to eight players (human/AI); 10,000 is the stretch/stress target, not a gameplay cap. Preserve physical logistics, combat, movement, precise commands, influence and host authority. All eight phases are approved roadmap work; implement in dependency order with measured before/after evidence and gameplay regression coverage. Prioritize shared simulation indexing and nonblocking benchmarks; begin phase 7 incrementally alongside phase 2 rather than waiting for all rendering or networking work. Phase 8 follows stable packed state and measured hot kernels. No phase is complete merely because code was merged.
