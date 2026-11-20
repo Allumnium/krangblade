@@ -2863,8 +2863,13 @@ static func sector_entry_point(graph: Dictionary, node: int, origin: Vector2) ->
 static func sector_contains(graph: Dictionary, node: int, position: Vector2) -> bool:
 	var offset: Vector2 = position - (graph["points"][node] as Vector2)
 	var radius: float = float(graph["sector_radii"][node]) + EPS
-	if offset.length_squared() > radius * radius:
+	var distance_squared: float = offset.length_squared()
+	if distance_squared > radius * radius:
 		return false
+	# Every radial bisector is at least half its center separation away.
+	# Rounding can shrink the tightest bound by at most width / 4.
+	if graph.has("sector_inner_squared") and distance_squared < float(graph["sector_inner_squared"][node]):
+		return true
 	return offset.length() <= sector_limit(graph, node, offset.normalized()) + EPS
 
 # Resolve a world point using the same clipped disks used by local orders.
@@ -2891,6 +2896,14 @@ static func _index_sector_bounds(graph: Dictionary, width: float) -> void:
 				if not cells.has(cell):
 					cells[cell] = []
 				cells[cell].append(i)
+	var inner_squared: Array = []
+	for i in range(graph["points"].size()):
+		var minimum: float = float(graph["sector_radii"][i])
+		for delta in graph["sector_neighbors"][i]:
+			minimum = minf(minimum, (delta as Vector2).length() * 0.5)
+		var inner: float = maxf(0.0, minimum * (1.0 - SECTOR_CORNER_ROUNDING * 0.25) - EPS - 0.01)
+		inner_squared.append(inner * inner)
+	graph["sector_inner_squared"] = inner_squared
 	graph["sector_cells"] = cells
 	graph["sector_cell_width"] = width
 

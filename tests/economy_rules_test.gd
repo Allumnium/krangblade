@@ -914,7 +914,18 @@ func _test_ai_slots() -> void:
 		assert(is_equal_approx(ECON._next_ai_slot(next, player), next + ECON.AI_INTERVAL))
 	assert(slots.size() == 8)
 
+func _test_sector_inner_fast_path() -> void:
+	var graph: Dictionary = {"points": [Vector2.ZERO, Vector2(100, 0)], "sector_radii": [100.0, 100.0], "sector_neighbors": [[Vector2(100, 0)], [Vector2(-100, 0)]]}
+	var baseline: Dictionary = graph.duplicate(true)
+	ECON._index_sector_bounds(graph, 100.0)
+	for node in range(2):
+		for x in range(-100, 201, 5):
+			for y in range(-100, 101, 5):
+				var point := Vector2(x, y)
+				assert(ECON.sector_contains(graph, node, point) == ECON.sector_contains(baseline, node, point))
+
 func _initialize() -> void:
+	_test_sector_inner_fast_path()
 	_test_ai_slots()
 	_test_contact_bucket_bounds()
 	_test_reusable_laser_target()
