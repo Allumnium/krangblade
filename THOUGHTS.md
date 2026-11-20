@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.63: Base habitation reduced from 5M to 500k; crowding penalty changed from 1-(1-f)^3 to f^3. Demographic target and HUD use the lower of farm support and habitation plus orbital capacity for aggregate display. Balance is provisional; verify crew supply and food-limited growth. Tests adjusted but runtime pending.
+
 - v0.64.62: Global selection strip uses command-card icons and hotkey badges; F1/F3 select all owned stations/yards, F2 retains military selection and double-press focus. Verify small-window placement and runtime.
 
 - v0.64.61: Mixed building types retain inactive groups while Tab switches command focus; grouped stations expose the card and ordinary station operations fan out. Active group drives existing highlights/control groups and primary station drives availability/trade; complete aggregate behavior and visual/runtime verification remain pending.

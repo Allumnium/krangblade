@@ -3691,8 +3691,8 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 		var ceiling: float = 0.0
 		for system in state["planets"]:
 			if int(system["owner"]) == _me():
-				ceiling += ECONOMY.habitation_capacity(system) + ECONOMY.eco_capacity(system)
-		lines.insert(1, "Habitation ceiling: %s people" % _compact_amount(ceiling))
+				ceiling += ECONOMY.sustainable_population_capacity(system)
+		lines.insert(1, "Sustainable capacity: %s people" % _compact_amount(ceiling))
 		for i in range(state["planets"].size()):
 			var p: Dictionary = state["planets"][i]
 			if int(p["owner"]) != _me():
@@ -3806,7 +3806,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
 		var p: Dictionary = state["planets"][i]
 		if int(p["owner"]) != _me():
 			continue
-		population_ceiling += ECONOMY.habitation_capacity(p) + ECONOMY.eco_capacity(p)
+		population_ceiling += ECONOMY.sustainable_population_capacity(p)
 		population_net += float(p.get("demographic_rate", ECONOMY.population_growth(p))) - float(p.get("crew_rate", 0.0))
 		if population_total > 0.0 and float(p["population"]) > 0.0:
 			population_segments.append({"name": _system_name(i), "share": float(p["population"]) / population_total, "index": i})

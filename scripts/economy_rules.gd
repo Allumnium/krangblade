@@ -600,7 +600,7 @@ static func overpopulation_penalty(planet: Dictionary, capacity_factor: float = 
 	if not has_planets(planet):
 		return 0.0
 	var fraction: float = clampf(planetary_population(planet) / (habitation_capacity(planet) * capacity_factor), 0.0, 1.0)
-	return 1.0 - pow(1.0 - fraction, 3.0)
+	return pow(fraction, 3.0)
 
 static func farm_potential(planet: Dictionary) -> float:
 	if int(planet["owner"]) == 0 or not has_planets(planet):
@@ -613,7 +613,10 @@ static func population_capacity(planet: Dictionary) -> float:
 static func habitation_capacity(planet: Dictionary) -> float:
 	if not has_planets(planet):
 		return 0.0
-	return 5000000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0)))
+	return 500000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0)))
+
+static func sustainable_population_capacity(planet: Dictionary) -> float:
+	return minf(population_capacity(planet), habitation_capacity(planet)) + eco_capacity(planet)
 
 static func population_multiplier(planet: Dictionary) -> float:
 	return float(planet["population"]) / HOME_POPULATION
@@ -687,7 +690,7 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 	# Exact solution of x'' + 2*w*x' + w*w*(x-target) = 0
 	# for a constant target during this tick. Stable even for large dt.
 	var current: float = planetary_population(planet)
-	var target: float = population_capacity(planet)
+	var target: float = minf(population_capacity(planet), habitation_capacity(planet))
 	var velocity: float = population_growth(planet)
 	var error: float = current - target
 	var omega: float = POPULATION_RESPONSE

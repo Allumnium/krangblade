@@ -309,7 +309,7 @@ func _population() -> void:
 		rows.append(["%.0f t" % (fraction * E.POPULATION_FOOD_RESERVE), "%.0f%%" % (fraction * 100.0), "%.0f years" % (E.POPULATION_DOUBLING_YEARS / fraction) if fraction > 0.0 else "No growth"])
 	_table(["Organics reserve", "Growth ceiling", "Doubling time"], rows)
 	_chart(false)
-	_body("The population bar fills toward total habitation and orbital housing capacity. Food availability may limit growth earlier.")
+	_body("The population bar fills toward sustainable capacity: the lower of farm support and habitation, plus orbital housing. Base habitation is 500,000, scaled by system size; upgrades double it. Crowding reduces growth by occupancy cubed.")
 	_section("Illustrative population growth")
 	_chart(true)
 	_label(article, "Ideal growth from %.0f residents. Capacity limits and recruitment reduce actual growth." % E.HOME_POPULATION, 12, HUD.MUTED)
