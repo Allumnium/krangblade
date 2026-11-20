@@ -7259,6 +7259,15 @@ static func _update_planet_blockades(state: Dictionary, graph: Dictionary) -> vo
 		if owner != 0 and int(state["teams"].get(owner, 0)) != int(state["teams"].get(int(craft["owner"]), 0)):
 			system["planet_blockaded"] = true
 
+# First turn is immediate. Subsequent turns align to stable player slots
+# within the existing strategic interval, independent of eliminated players.
+static func _next_ai_slot(now: float, player: int) -> float:
+	var phase: float = float(posmod(player - 1, 8)) * AI_INTERVAL / 8.0
+	var next: float = floorf((now - phase) / AI_INTERVAL) * AI_INTERVAL + phase + AI_INTERVAL
+	if next <= now + EPS:
+		next += AI_INTERVAL
+	return next
+
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	state["elapsed"] = float(state["elapsed"]) + dt
@@ -7277,10 +7286,15 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var budgets: Array = []
 	for field in state["map"].get("fields", []):
 		budgets.append({"Metals": field_limit(field, "Metals") * dt, "Crystals": field_limit(field, "Crystals") * dt, ANTIMATTER: field_limit(field, ANTIMATTER) * dt})
-	if float(state["elapsed"]) >= float(state.get("next_ai", 0.0)) and not state.get("ai_players", []).is_empty():
-		state["next_ai"] = float(state["elapsed"]) + AI_INTERVAL
-		for player in state["ai_players"]:
+	var ai_now: float = float(state["elapsed"])
+	var ai_schedule: Dictionary = state.get("_ai_schedule", {})
+	for player in state.get("ai_players", []).duplicate():
+		if not state["ai_players"].has(player):
+			continue
+		if ai_now + EPS >= float(ai_schedule.get(player, 0.0)):
 			_ai_turn(state, combat_graph, int(player))
+			ai_schedule[player] = _next_ai_slot(ai_now, int(player))
+	state["_ai_schedule"] = ai_schedule
 	started = _profile_stage(profile, "AI / routing setup", started)
 	for craft in state["ships"]:
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"], craft)

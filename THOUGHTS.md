@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.64.34: Strategic AI uses per-player deadlines with eight stable phase slots. First turns remain immediate; the first repeat can occur sooner than four years before steady cadence. Strategy unchanged, timing and match balance require runtime verification.
+
 - v0.64.33: Physical contact correction caches occupied cell bounds and skips distant neighbor buckets conservatively. Original pair order and exact checks retained. Overlapping occupied bounds still incur quadratic work; runtime and benchmark pending.
 
 - v0.64.32: Separation and contact correction reject distant pairs before square roots; contact accumulators use packed vectors and touched flags with original first-touch order. No intentional cadence or movement changes; floating-point boundary parity and dense-swarm benchmark pending. Dense coincident pairs remain quadratic.

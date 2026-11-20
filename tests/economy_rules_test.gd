@@ -905,7 +905,17 @@ func _test_contact_bucket_bounds() -> void:
 	assert(not ECON._contact_bucket_near(Vector2.ZERO, bounds, 25.0))
 	assert(ECON._contact_bucket_near(Vector2(-10, -10), Rect2(Vector2(-10, -10), Vector2.ZERO), 25.0))
 
+func _test_ai_slots() -> void:
+	var slots: Dictionary = {}
+	for player in range(1, 9):
+		var next: float = ECON._next_ai_slot(4.0, player)
+		assert(next > 4.0 and next <= 4.0 + ECON.AI_INTERVAL)
+		slots[next] = true
+		assert(is_equal_approx(ECON._next_ai_slot(next, player), next + ECON.AI_INTERVAL))
+	assert(slots.size() == 8)
+
 func _initialize() -> void:
+	_test_ai_slots()
 	_test_contact_bucket_bounds()
 	_test_reusable_laser_target()
 	_test_combat_search_due()
