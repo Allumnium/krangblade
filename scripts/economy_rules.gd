@@ -334,7 +334,7 @@ static func _mining_resources(state: Dictionary, player: int, index: int) -> Arr
 
 ## Read-only player-wide holdings: stock plus the player's own cargo in transit.
 static func storage_capacity(p: Dictionary) -> float:
-	return float(WAREHOUSE_CAPACITIES[clampi(int(p.get("warehouse_level", 0)), 0, 3)])
+	return float(WAREHOUSE_CAPACITIES[clampi(int(p.get("warehouse_level", 0)), 0, 3)]) * (2.0 if int(p["owner"]) != 0 and has_reward(p, "storage") else 1.0)
 
 static func storage_free(p: Dictionary, resource: String) -> float:
 	return maxf(0.0, storage_capacity(p) - float(p["stock"].get(resource, 0.0)))
@@ -514,6 +514,7 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 	colony["owner"] = int(ship["owner"])
 	var progress: Dictionary = objective_progress(state, int(ship["owner"]))
 	progress["colonies"][at] = true
+	colony["conquest_rewards"] = progress.get("rewards", []).duplicate()
 	colony["station"] = {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()], "converted_at": float(state["elapsed"])}
 	colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION if has_planets(colony) else ORBITAL_HOUSING_POPULATION
 	colony["eco_population"] = ORBITAL_HOUSING_POPULATION
@@ -608,7 +609,7 @@ static func overpopulation_penalty(planet: Dictionary, capacity_factor: float = 
 static func farm_potential(planet: Dictionary) -> float:
 	if int(planet["owner"]) == 0 or not has_planets(planet):
 		return 0.0
-	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0))
+	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0)) * (1.5 if has_reward(planet, "agriculture") else 1.0)
 
 static func population_capacity(planet: Dictionary) -> float:
 	return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
@@ -630,14 +631,19 @@ static func population_growth(planet: Dictionary) -> float:
 static func organics_demand(planet: Dictionary) -> float:
 	if not has_planets(planet):
 		return 0.0
-	return planetary_population(planet) / POPULATION_PER_ORGANICS_RATE
+	return planetary_population(planet) / POPULATION_PER_ORGANICS_RATE * (1.0 + (0.15 if has_reward(planet, "industry") else 0.0) + (0.15 if has_reward(planet, "population") else 0.0))
 
 static func consumption(planet: Dictionary, resource: String) -> float:
 	if int(planet["owner"]) == 0 or not has_planets(planet):
 		return 0.0
 	if resource == "Organics":
 		return organics_demand(planet)
-	return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * planetary_population(planet) / HOME_POPULATION
+	var upkeep: float = 1.0
+	if resource == "Metals":
+		for key in ["crystals", "agriculture", "storage"]:
+			if has_reward(planet, key):
+				upkeep += 0.15
+	return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * planetary_population(planet) / HOME_POPULATION * upkeep
 
 static func civilian_stock_access(planet: Dictionary, resource: String) -> float:
 	# Stock above the import target is reserved for trade and construction.
@@ -677,6 +683,10 @@ static func rate(planet: Dictionary, resource: String) -> float:
 	var labor: float = population_multiplier(planet)
 	var base_rate: float = CRYSTALS_PER_LEVEL if resource == "Crystals" else PRODUCTION_PER_LEVEL
 	var output: float = base_rate * level * production_modifier(planet, resource) * labor
+	if resource == "Metals" and has_reward(planet, "industry"):
+		output *= 1.5
+	if resource == "Crystals" and has_reward(planet, "crystals"):
+		output *= 2.0
 	return minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
 
 static func food_growth_multiplier(planet: Dictionary) -> float:
@@ -709,6 +719,8 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 		growth_constant *= 1.0 - overpopulation_penalty(planet)
 	else:
 		growth_constant = 0.0
+	if has_reward(planet, "population"):
+		growth_constant *= 1.5
 	var growth_ceiling: float = current * exp(growth_constant * dt)
 	if next > growth_ceiling:
 		next = growth_ceiling
@@ -7824,6 +7836,12 @@ static func _update_objectives(state: Dictionary) -> void:
 				events.append({"player": player, "objective": key, "first": winner, "award": award, "elapsed": now})
 	state["objective_first"] = first
 	state["objective_events"] = events
+	for player in state["teams"]:
+		_fill_reward_offer(state, int(player))
+		if state.get("ai_players", []).has(player):
+			var offer: Array = objective_progress(state, int(player)).get("offer", [])
+			if not offer.is_empty():
+				acquire_reward(state, int(player), str(offer[0]))
 
 static func specialization_grade(system: Dictionary, resource: String) -> int:
 	if not has_planets(system):
@@ -7840,3 +7858,46 @@ static func specialization_grade(system: Dictionary, resource: String) -> int:
 	if factor >= 1.1:
 		return 1
 	return 0
+
+const CONQUEST_REWARDS = {
+	"industry": ["Industrial Revolution", "+50% planetary Metals output", "+15% civilian Organics demand"],
+	"crystals": ["Crystalline Synthesis", "+100% Incubator output", "+15% civilian Metals demand"],
+	"agriculture": ["Agricultural Revolution", "+50% planetary Organics output", "+15% civilian Metals demand"],
+	"population": ["Population Boom", "+50% terrestrial growth ceiling", "+15% civilian Organics demand"],
+	"storage": ["Megastructures", "+100% station storage capacity", "+15% civilian Metals demand"]
+}
+
+static func has_reward(system: Dictionary, key: String) -> bool:
+	return system.get("conquest_rewards", []).has(key)
+
+static func _fill_reward_offer(state: Dictionary, player: int) -> void:
+	var progress: Dictionary = objective_progress(state, player)
+	if int(progress["points"]) < 1 or not progress.get("offer", []).is_empty():
+		return
+	var available: Array = []
+	for key in CONQUEST_REWARDS:
+		if not progress.get("rewards", []).has(key):
+			available.append(key)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(state["map"]["seed"]) + player * 7919 + progress.get("rewards", []).size() * 104729
+	var offer: Array = []
+	while not available.is_empty() and offer.size() < 3:
+		offer.append(available.pop_at(rng.randi_range(0, available.size() - 1)))
+	progress["offer"] = offer
+
+static func acquire_reward(state: Dictionary, player: int, key: String) -> bool:
+	if not state["teams"].has(player) or not CONQUEST_REWARDS.has(key):
+		return false
+	var progress: Dictionary = objective_progress(state, player)
+	if int(progress["points"]) < 1 or not progress.get("offer", []).has(key) or progress.get("rewards", []).has(key):
+		return false
+	var rewards: Array = progress.get("rewards", [])
+	rewards.append(key)
+	progress["rewards"] = rewards
+	progress["points"] = int(progress["points"]) - 1
+	progress["offer"] = []
+	for system in state["planets"]:
+		if int(system["owner"]) == player:
+			system["conquest_rewards"] = rewards.duplicate()
+	_fill_reward_offer(state, player)
+	return true

@@ -1538,3 +1538,20 @@ func _rpc_snapshot_recovery(recovery_round: int, revision: int) -> void:
 		snapshot_sent.erase(id)
 		snapshot_full_only[id] = true
 		urgent_snapshot_revision = snapshot_revision
+
+func request_conquest_reward(key: String) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_conquest_reward_for(1, key)
+	else:
+		_rpc_conquest_reward.rpc_id(1, key)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_conquest_reward(key: String) -> void:
+	if multiplayer.is_server():
+		_conquest_reward_for(multiplayer.get_remote_sender_id(), key)
+
+func _conquest_reward_for(id: int, key: String) -> void:
+	if _active_player(id) and ECONOMY.acquire_reward(economy, id, key):
+		_publish_economy()

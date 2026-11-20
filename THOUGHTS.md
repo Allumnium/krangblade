@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.67.0: Five economic cards implemented as first playable pool; offers currently replicated in normal snapshots, AI picks first. Pros/cons use additive upkeep, not yet construction surcharges. Need private offers, public announcements, remaining rewards, pool exhaustion, runtime and ENet tests.
+
 - v0.66.4: Incubator base rate reduced 90%; asteroid extraction unchanged. Verify advanced construction pacing and AI economy.
 
 - v0.66.3: Empire targets are local match UI state (0–10,000 each); no automation or network commands yet. Verify hotkey, modal focus and pulse readability.
