@@ -805,7 +805,17 @@ func _test_handoff_candidates() -> void:
 	assert(candidates.size() == 2)
 	assert(candidates[0]["id"] == 10 and candidates[1]["id"] == 20)
 
+func _test_repair_cells() -> void:
+	var radius: float = ECON.MINER_REPAIR_SEARCH
+	var targets: Dictionary = {
+		10: {"position": Vector2(radius, 0), "entity": {"hp": 1.0}, "max_hp": 10.0},
+		20: {"position": Vector2(-radius * 4, 0), "repair_position": Vector2(-1, 0), "entity": {"hp": 1.0}, "max_hp": 10.0},
+		30: {"position": Vector2.ZERO, "entity": {"hp": 10.0}, "max_hp": 10.0},
+		40: {"position": Vector2(radius * 4, 0), "entity": {"hp": 1.0}, "max_hp": 10.0}}
+	assert(ECON._nearby_repair_ids(ECON._damaged_repair_cells(targets), Vector2.ZERO) == [10, 20])
+
 func _initialize() -> void:
+	_test_repair_cells()
 	_test_handoff_candidates()
 	_test_spatial_buckets()
 	_test_salvage_center_cache()

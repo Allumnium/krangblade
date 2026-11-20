@@ -3408,7 +3408,29 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	_finish_manual(ship)
 	return true
 
-static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float, damaged_ids: Variant = null) -> bool:
+static func _damaged_repair_cells(targets: Dictionary) -> Dictionary:
+	var cells: Dictionary = {}
+	var order: int = 0
+	for id in targets:
+		var ref: Dictionary = targets[id]
+		if _damaged(ref):
+			_spatial_insert(cells, ref.get("repair_position", ref["position"]), MINER_REPAIR_SEARCH, [order, id])
+		order += 1
+	return cells
+
+static func _nearby_repair_ids(cells: Dictionary, point: Vector2) -> Array:
+	var cell := Vector2i(floori(point.x / MINER_REPAIR_SEARCH), floori(point.y / MINER_REPAIR_SEARCH))
+	var entries: Array = []
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			entries.append_array(cells.get(cell + Vector2i(x, y), []))
+	entries.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) < int(b[0]))
+	var ids: Array = []
+	for entry in entries:
+		ids.append(entry[1])
+	return ids
+
+static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float, damaged_cells: Variant = null) -> bool:
 	if ship["kind"] != "miner":
 		return false
 	ship.erase("repair_target")
@@ -3424,7 +3446,7 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 	var pos: Vector2 = ship["position"]
 	if not explicit:
 		var best: float = MINER_REPAIR_SEARCH * MINER_REPAIR_SEARCH
-		for id in (targets.keys() if damaged_ids == null else damaged_ids):
+		for id in (targets.keys() if damaged_cells == null else _nearby_repair_ids(damaged_cells, pos)):
 			if id == ship["id"]:
 				continue
 			var candidate: Dictionary = targets[id]
@@ -7162,7 +7184,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var idle_targets: Dictionary = _idle_formation_targets(state, combat_graph)
 	var coordinated: Dictionary = _coordinate_formations(state, combat_graph, dt)
 	var service_refs: Dictionary = service_targets(state)
-	var damaged_ids: Array = service_refs.keys().filter(func(id: int) -> bool: return _damaged(service_refs[id]))
+	var damaged_cells: Dictionary = _damaged_repair_cells(service_refs)
 	started = _profile_stage(profile, "Formations / orders", started)
 	var civilian_usec: int = 0
 	var repaired_hulls: Dictionary = {}
@@ -7220,7 +7242,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			continue
 		# Each automatic job checks its own cooldown; explicit movement,
 		# follow, cargo orders and emergency withdrawal already take priority.
-		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_ids):
+		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_cells):
 			if ship.has("repair_target") and dt > 0.0:
 				var recipient: int = int(ship["repair_target"])
 				if service_refs.get(recipient, {}).get("kind", "") == "ship":
