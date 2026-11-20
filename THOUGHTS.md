@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.70.2: Empire target steps capped at 500 per type; no change to actual hull limits or scalability goals.
+
 - v0.70.1: Grouped station build buttons now consider all selected stations rather than primary affordability/unlock; housing resolves per station. Existing authority validates each order. Runtime pending.
 
 - v0.70.0: Empire targets now authority-owned. Periodic refill counts all live and queued hulls; paid orders remain on lowering target. Validate modal fit and interaction with manual/autobuild orders.

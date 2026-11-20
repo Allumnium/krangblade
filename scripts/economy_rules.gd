@@ -7977,7 +7977,7 @@ static func _assign_advanced_objectives(state: Dictionary, player: int, progress
 		assigned[track] = candidates[rng.randi_range(0, candidates.size() - 1)]
 	progress["advanced"] = assigned
 
-const EMPIRE_TARGET_STEPS = [0, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000]
+const EMPIRE_TARGET_STEPS = [0, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500]
 
 static func empire_fleet_counts(state: Dictionary, player: int) -> Dictionary:
 	var live: Dictionary = {}
