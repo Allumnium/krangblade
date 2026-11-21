@@ -22,6 +22,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.85.3: Correct extra indentation in `_refresh_territory` introduced in v0.85.0; verify Godot parse/startup and tactical territory warning destinations in solo and ENet. Static indentation and delimiter scan of eight GDScript files touched by v0.85.0–0.85.1 found only this malformed block; full runtime validation remains pending.
+
 - [ ] v0.85.1: Strategic AI diplomacy approved and implemented: stagger slow authority decisions, estimate own/visible fleet strength and station defense, account for existing fronts, distance, common threats and possible third-party intervention. AI initiates/accepts reciprocal peace/alliance offers and declares profitable wars through existing treaty guards; respects truce and never auto-enters an ally's war. Provisional opening/cadence/thresholds require AI-v-AI, human-v-AI and ENet playtesting with fog and large fleets. Prevent diplomacy overrides during future forced Revelation phases. No automatic alliance betrayal or new victory rules.
 
 - [ ] v0.85.0: New matched solo/ENet sessions initialize bilateral neutrality; remove lobby team picker, make selection/territory/alerts/AI target/explore/formation logic empire-aware, retain independent last-surviving-empire conquest fallback and legacy fixture API. Update Codex and solo/network fixtures. AI autonomous declarations, alliance and peace responses implemented in v0.85.1; coalition/alternate victory and paid trade/gifts remain pending. Validate parser, solo, real peers and visual interaction before closing.

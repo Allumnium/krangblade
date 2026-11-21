@@ -3787,7 +3787,7 @@ func _refresh_territory(state: Dictionary) -> void:
 	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph, known, territory_region_cache)
 	# Only known sectors with a friendly majority are warning destinations.
 	tactical_friendly.clear()
-		for index in range(points.size()):
+	for index in range(points.size()):
 		if not known.has(index):
 			continue
 		var friendly: float = 0.0
