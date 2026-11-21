@@ -514,13 +514,16 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
 	var teams: Array[int] = planet_teams(state)
 	var team: int = _combat_group(state, player)
 	var start: int = int(ship["at"])
-	if team == 0 or (teams[start] not in [0, team] and military_home(state, player) >= 0):
+	if team == 0 or (not _civilian_transit_allowed(state, team, teams[start]) and military_home(state, player) >= 0):
 		return []
 	if not discovered(state, player, "planets", target):
 		return []
 	var transit: Array[int] = []
 	transit.resize(planets.size())
 	transit.fill(team)
+	if state.has("diplomacy"):
+		transit = _civilian_access(state, teams, team)
+		transit[start] = team
 	return MAP.path(state["map"], transit, team, start, target)
 
 # Select on the authority, not from a stale client-side dropdown.
@@ -604,6 +607,13 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 	if ship.get("unit_order", {}).get("kind", "") != "colonize":
 		if not ship["route"].is_empty():
 			_move(state, ship, dt)
+		return false
+	if state.has("diplomacy") and not _civilian_route_safe(state, ship, planet_teams(state), _combat_group(state, int(ship["owner"]))):
+		ship["route"] = []
+		ship["leg"] = 0.0
+		ship["dest"] = -1
+		ship.erase("unit_order")
+		ship["navigation_target"] = ship["position"]
 		return false
 	if not _move(state, ship, dt) or int(ship["dest"]) < 0:
 		return false
@@ -1896,20 +1906,39 @@ static func _opportunity(a: Dictionary, b: Dictionary) -> bool:
 			return true
 	return false
 
+# Transit is not permission to use another empire's stockpile.
+static func _civilian_transit_allowed(state: Dictionary, group: int, sector_group: int) -> bool:
+	if state.has("diplomacy"):
+		return not empires_hostile(state, group, sector_group)
+	return sector_group in [0, group]
+
+static func _civilian_access(state: Dictionary, teams: Array[int], group: int) -> Array[int]:
+	var access: Array[int] = []
+	for sector_group in teams:
+		access.append(group if _civilian_transit_allowed(state, group, sector_group) else sector_group)
+	return access
+
+static func _civilian_route_safe(state: Dictionary, ship: Dictionary, teams: Array[int], group: int) -> bool:
+	for waypoint in ship.get("route", []):
+		if int(waypoint) != int(ship["at"]) and not _civilian_transit_allowed(state, group, teams[int(waypoint)]):
+			return false
+	return true
+
 static func _path(state: Dictionary, teams: Array[int], team: int, a: int, b: int, _cache: Dictionary) -> Array[int]:
 	var routes: Dictionary = _cache["civilian_routes"] if _cache.has("civilian_routes") else _civilian_route_cache(state, teams)
 	var key: String = "%d:%d:%d" % [team, a, b]
 	if not routes.has(key):
-		routes[key] = MAP.path(state["map"], teams, team, a, b)
+		var access: Array[int] = _civilian_access(state, teams, team) if state.has("diplomacy") else teams
+		routes[key] = MAP.path(state["map"], access, team, a, b)
 	var result: Array[int] = []
 	result.assign(routes[key])
 	return result
 
 static func _civilian_route_cache(state: Dictionary, teams: Array[int]) -> Dictionary:
 	var map_data: Dictionary = state["map"]
-	if cached_route_topology.get("points") != map_data["points"] or cached_route_topology.get("edges") != map_data["edges"] or cached_route_topology.get("teams") != teams:
+	if cached_route_topology.get("points") != map_data["points"] or cached_route_topology.get("edges") != map_data["edges"] or cached_route_topology.get("teams") != teams or cached_route_topology.get("diplomacy", {}) != state.get("diplomacy", {}):
 		cached_civilian_routes = {}
-		cached_route_topology = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "teams": teams.duplicate()}
+		cached_route_topology = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "teams": teams.duplicate(), "diplomacy": state.get("diplomacy", {}).duplicate(true)}
 	return cached_civilian_routes
 
 static func _set_route(ship: Dictionary, path: Array[int]) -> void:
@@ -2292,7 +2321,7 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 	var team: int = _combat_group(state, owner)
 	var safe: bool = _salvage_safe(state, graph, owner, point, node, threats) and _salvage_safe(state, graph, owner, ship["position"], local_sector(graph, ship), threats)
 	for waypoint in ship["route"]:
-		if teams[int(waypoint)] not in [0, team]:
+		if not _civilian_transit_allowed(state, team, teams[int(waypoint)]):
 			safe = false
 			break
 	if not safe or not autocast_ready(state, ship, "trade") or bool(ship.get("holding", false)) or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty():
@@ -2300,7 +2329,7 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 		if safe and autocast_ready(state, ship, "trade") and not bool(ship.get("holding", false)) and not _unit_order_running(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) > EPS:
 			_resource_haul(ship)
 			return true
-		if not safe and teams[int(ship["at"])] != team:
+		if not safe and (not _civilian_transit_allowed(state, team, teams[int(ship["at"])]) if state.has("diplomacy") else teams[int(ship["at"])] != team):
 			_evacuate_civilian(state, ship, teams)
 		return false
 	var now: float = float(state["elapsed"])
@@ -2441,9 +2470,13 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 
 static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
 	var team: int = _combat_group(state, int(ship["owner"]))
+	if state.has("diplomacy") and not _civilian_route_safe(state, ship, teams, team):
+		_evacuate_civilian(state, ship, teams)
+		return
 	if not autocast_ready(state, ship, "trade"):
-		if team != 0 and teams[int(ship["at"])] != team:
-			_evacuate_civilian(state, ship, teams)
+		if team != 0 and (not _civilian_transit_allowed(state, team, teams[int(ship["at"])]) if state.has("diplomacy") else teams[int(ship["at"])] != team):
+			if not state.has("diplomacy") or ship["route"].is_empty():
+				_evacuate_civilian(state, ship, teams)
 			if not (ship["route"] as Array).is_empty():
 				_move(state, ship, dt)
 		return
@@ -2451,7 +2484,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 		return
 	var planets: Array = state["planets"]
 	var here: int = int(ship["at"])
-	if teams[here] != team:
+	if (not _civilian_transit_allowed(state, team, teams[here]) if state.has("diplomacy") else teams[here] != team):
 		_evacuate_civilian(state, ship, teams)
 		return
 	var source: int = int(ship["source"])
@@ -2523,7 +2556,7 @@ static func _find_chunk(field: Dictionary, id: int) -> Dictionary:
 static func _mining_path(state: Dictionary, teams: Array[int], team: int, start: int, goal: int, _cache: Dictionary) -> Array[int]:
 	if start < 0 or goal < 0 or start >= teams.size() or goal >= teams.size():
 		return []
-	if teams[start] not in [0, team] or teams[goal] not in [0, team]:
+	if not _civilian_transit_allowed(state, team, teams[start]) or not _civilian_transit_allowed(state, team, teams[goal]):
 		return []
 	var cache: Dictionary = _cache["civilian_routes"] if _cache.has("civilian_routes") else _civilian_route_cache(state, teams)
 	var points: Array = state["map"]["points"]
@@ -2551,7 +2584,7 @@ static func _mining_path(state: Dictionary, teams: Array[int], team: int, start:
 			visited[current] = true
 			for neighbor in adjacency[current]:
 				var next: int = int(neighbor)
-				if visited.has(next) or teams[next] not in [0, team]:
+				if visited.has(next) or not _civilian_transit_allowed(state, team, teams[next]):
 					continue
 				var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[next])
 				if distance < float(distances.get(next, INF)):
@@ -2767,6 +2800,15 @@ static func _next_search_slot(now: float, id: int, interval: float) -> float:
 static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, budgets: Array, dt: float) -> void:
 	ship["mining_active"] = false
 	var mode: String = str(ship.get("mining_mode", "idle"))
+	if state.has("diplomacy"):
+		var group: int = _combat_group(state, int(ship["owner"]))
+		var hostile_here: bool = not _civilian_transit_allowed(state, group, teams[int(ship["at"])])
+		if hostile_here and mode in ["outbound", "mining"]:
+			ship["mining_mode"] = "return"
+			mode = "return"
+		elif mode in ["approach", "delivery", "idle"] and (not _civilian_route_safe(state, ship, teams, group) or (hostile_here and ship["route"].is_empty())):
+			_evacuate_civilian(state, ship, teams)
+			return
 	if mode == "idle":
 		if not bool(ship.get("manual_mine", false)) and not autocast_ready(state, ship, "mine"):
 			return
@@ -2792,7 +2834,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			var here: int = int(ship["at"])
 			var team: int = _combat_group(state, int(ship["owner"]))
 			# Even empty miners must keep retrying escape from hostile space.
-			if teams[here] not in [0, team]:
+			if not _civilian_transit_allowed(state, team, teams[here]):
 				if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
 					ship["next_unload_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
 					_evacuate_civilian(state, ship, teams)
@@ -2880,7 +2922,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 	var owner: int = int(ship["owner"])
 	var team: int = _combat_group(state, owner)
 	var local: Dictionary = state["planets"][here]
-	if teams[here] not in [0, team]:
+	if not _civilian_transit_allowed(state, team, teams[here]):
 		_evacuate_civilian(state, ship, teams)
 		return
 	if int(local["owner"]) == owner and has_station(local):
@@ -3361,6 +3403,25 @@ static func diplomacy_declare_war(state: Dictionary, a: int, b: int) -> bool:
 	return true
 
 # A reciprocal offer is acceptance. Repeating one's own offer does nothing.
+static func diplomacy_confirm_attack(state: Dictionary, player: int, expected_owner: int, ids: Array, target_id: int) -> bool:
+	if not _can_change_diplomacy(state, player, expected_owner) or diplomatic_relation(state, player, expected_owner) != DIPLO_NEUTRAL:
+		return false
+	var ref: Dictionary = service_targets(state, target_id).get(target_id, {})
+	if ref.is_empty() or int(ref.get("owner", 0)) != expected_owner or ref.get("kind", "") == "pds":
+		return false
+	if not ship_visible_to_team(state, ref.get("entity", ref), _combat_group(state, player)):
+		return false
+	if bool(state.get("fog_of_war", DEFAULT_FOG_OF_WAR)) and not team_vision(state, _combat_group(state, player)).has(vision_cell(ref["position"])):
+		return false
+	var units: Array = _owned_units(state, player, ids)
+	if units.is_empty() or units.any(func(craft: Dictionary) -> bool: return not armed(craft)):
+		return false
+	# All validation precedes the declaration. Existing attack command uses
+	# the same frozen ownership/visibility predicates on the authority.
+	if not diplomacy_declare_war(state, player, expected_owner):
+		return false
+	return command_attack(state, player, ids, target_id)
+
 static func diplomacy_offer_peace(state: Dictionary, a: int, b: int) -> bool:
 	if not _can_change_diplomacy(state, a, b) or diplomatic_relation(state, a, b) != DIPLO_WAR:
 		return false
@@ -5843,7 +5904,7 @@ static func _salvage_depot_route(state: Dictionary, graph: Dictionary, ship: Dic
 	var allowed: Array[int] = planet_teams(state)
 	allowed.resize(points.size())
 	for node in range(allowed.size()):
-		if node >= state["planets"].size() or allowed[node] == 0:
+		if node >= state["planets"].size() or _civilian_transit_allowed(state, team, allowed[node]):
 			allowed[node] = team
 	var origins: Array[int] = [int(ship["at"])]
 	var sector: int = local_sector(graph, ship)
@@ -5954,7 +6015,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		if int(waypoint) == int(ship["at"]) or waypoint >= state["planets"].size():
 			continue
 		var waypoint_team: int = _combat_group(state, int(state["planets"][waypoint]["owner"]))
-		if waypoint_team != 0 and waypoint_team != team:
+		if not _civilian_transit_allowed(state, team, waypoint_team):
 			depot = -1
 			break
 	if depot < 0 or int(state["planets"][depot]["owner"]) != owner or not has_station(state["planets"][depot]):
@@ -6578,7 +6639,7 @@ static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, 
 	var teams: Array[int] = planet_teams(state)
 	var team: int = _combat_group(state, player)
 	var here: int = int(ship["at"])
-	if team == 0 or (teams[here] != team and military_home(state, player) >= 0):
+	if team == 0 or ((not _civilian_transit_allowed(state, team, teams[here]) if state.has("diplomacy") else teams[here] != team) and military_home(state, player) >= 0):
 		return -1
 	var adjacency: Array = []
 	for i in range(points.size()):
@@ -6599,6 +6660,8 @@ static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, 
 		open.erase(current)
 		visited[current] = true
 		for node in adjacency[current]:
+			if state.has("diplomacy") and not _civilian_transit_allowed(state, team, teams[node]):
+				continue
 			var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[node])
 			if teams[node] == 0:
 				if not reserved.has(node) and discovered(state, player, "planets", int(node)):
@@ -7546,12 +7609,14 @@ static func _evacuate_civilian(state: Dictionary, ship: Dictionary, teams: Array
 	var chosen: Array[int] = []
 	var destination: int = -1
 	for origin in origins:
-		var allowed: Array[int] = teams.duplicate()
+		if state.has("diplomacy") and origin != here and not _civilian_transit_allowed(state, team, teams[origin]):
+			continue
+		var allowed: Array[int] = _civilian_access(state, teams, team) if state.has("diplomacy") else teams.duplicate()
 		allowed[origin] = team
 		for node in range(teams.size()):
 			if teams[node] != team or (miner and int(state["planets"][node]["owner"]) != int(ship["owner"])):
 				continue
-			var path: Array[int] = _mining_path(state, allowed, team, origin, node, {}) if miner else MAP.path(state["map"], allowed, team, origin, node)
+			var path: Array[int] = _mining_path(state, allowed, team, origin, node, {}) if miner and not state.has("diplomacy") else MAP.path(state["map"], allowed, team, origin, node)
 			if path.is_empty():
 				continue
 			var distance: float = (ship["position"] as Vector2).distance_to(points[origin]) + MAP.route_length(state["map"], path)

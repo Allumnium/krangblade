@@ -21,6 +21,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.84.2: Neutral transit for opt-in civilian logistics/mining/salvage routes; relation changes invalidate route caches, ordinary transfers remain owned. Host RPCs for declarations, offers, alliance preferences and explicitly confirmed neutral attacks with round, sender, target ownership/visibility and armed-unit validation. Validate route changes in flight and actual peers; Empire UI and attack confirmation prompt, victory/lobby migration, paid trade and gifts remain pending. Normal matches retain legacy rules.
+
 - [ ] v0.84.1: Opt-in diplomacy services: direct, non-transitive sensor/strategic sight and cloak detection; bilateral repair/follow with own-only material transfer; per-empire internal logistics group IDs, civilian threat caches and withdrawal eligibility. Verify all neutral routes, cargo orders, allied repairs, treaty cache invalidation and peer fog behavior. Paid inter-empire transport, gifts, neutral transit path migration, diplomacy RPC/UI, lobby and victory still pending; do not enable normal matches.
 
 
