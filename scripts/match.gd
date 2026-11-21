@@ -2468,8 +2468,8 @@ var fog_overlay: Control
 func _update_fog(state: Dictionary) -> void:
 	if state.is_empty():
 		return
-	var team: int = int(state["teams"].get(_me(), 0))
-	var revision: Array = [state.get("elapsed"), session.get("motion_revision"), team, state["ships"].size()]
+	var team: int = ECONOMY._combat_group(state, _me())
+	var revision: Array = [state.get("elapsed"), session.get("motion_revision"), team, state["ships"].size(), state.get("diplomacy_revision", 0)]
 	if revision == fog_revision:
 		return
 	fog_revision = revision
@@ -2521,8 +2521,8 @@ func _draw_fog() -> void:
 	fog_overlay.draw_texture_rect_region(fog_texture, map_rect, source)
 
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
-	var team: int = int(state.get("teams", {}).get(_me(), -1))
-	if int(state["teams"].get(int(ship["owner"]), 0)) == team:
+	var team: int = ECONOMY._combat_group(state, _me())
+	if ECONOMY._shares_group_vision(state, team, ECONOMY._combat_group(state, int(ship["owner"]))):
 		return true
 	return _fog_visible(ship.get("position", Vector2.INF)) and ECONOMY.ship_visible_to_team(state, ship, team)
 
