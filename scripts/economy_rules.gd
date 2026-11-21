@@ -7459,17 +7459,15 @@ static func update_match_outcome(state: Dictionary) -> bool:
 	for team in state["teams"].values():
 		starting_teams[team] = true
 	var viable: Dictionary = {}
-	var neutral_exists: bool = false
 	for planet in state["planets"]:
 		var owner: int = int(planet["owner"])
-		if owner == 0 or not has_station(planet):
-			neutral_exists = true
-		else:
+		if owner > 0 and has_station(planet):
 			viable[owner] = true
-	if neutral_exists:
-		for ship in state["ships"]:
-			if ship.get("kind", "") == "colony_ship":
-				viable[int(ship["owner"])] = true
+	# A fleet remains in play even when every station has fallen.
+	for ship in state["ships"]:
+		var owner: int = int(ship["owner"])
+		if owner > 0:
+			viable[owner] = true
 	var eliminated: Array = state.get("eliminated", [])
 	var changed: bool = false
 	for player in state["teams"]:
@@ -7480,12 +7478,6 @@ static func update_match_outcome(state: Dictionary) -> bool:
 		state["ai_waves"].erase(player)
 		state["ai_players"].erase(player)
 	state["eliminated"] = eliminated
-	if changed:
-		# Surviving non-colony hulls of defeated empires stand down.
-		for ship in state["ships"].duplicate():
-			if eliminated.has(int(ship["owner"])):
-				_remove_indexed_hull(state, ship)
-		_sync_operations(state)
 	if starting_teams.size() < 2:
 		return changed
 	var remaining_teams: Dictionary = {}

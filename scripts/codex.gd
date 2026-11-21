@@ -284,7 +284,7 @@ func _overview() -> void:
 	_flow(["Extract resources", "Build & recruit", "Expand", "Defend supply"])
 	_body("Start with 3 Harvesters, 2 fighters and 1 freighter. Select a unit or station to issue orders.")
 	_section("First priorities")
-	_table(["Goal", "Action"], [["Establish supplies", "Protect nearby asteroid fields and keep food reserves healthy."], ["Build a fleet", "Select a shipyard and queue Harvesters, fighters or freighters."], ["Expand", "Send a Colony to an eligible neutral system. Secure your trade lanes."], ["Survive", "Defend your stations and Colonies; defeat hostile teams by conquest."]])
+	_table(["Goal", "Action"], [["Establish supplies", "Protect nearby asteroid fields and keep food reserves healthy."], ["Build a fleet", "Select a shipyard and queue Harvesters, fighters or freighters."], ["Expand", "Send a Colony to an eligible neutral system. Secure your trade lanes."], ["Survive", "Defend stations and ships. Defeat hostile teams by destroying their remaining assets."]])
 	_note("Start with Population & food and Trade & storage.")
 
 func _resources() -> void:

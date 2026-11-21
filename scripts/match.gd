@@ -452,6 +452,9 @@ var system_owner_label: Label
 var leave: Button
 var match_menu: AcceptDialog
 var codex: Window
+var dev_console: Window
+var dev_console_output: TextEdit
+var dev_console_entry: LineEdit
 var match_result_dialog: AcceptDialog
 var match_result_shown: bool = false
 var defeated_shown: bool = false
@@ -559,6 +562,8 @@ func _ready() -> void:
 	get_tree().node_added.connect(_sound_button_added)
 	session.connect("chat_changed", _sound_chat)
 	_build_ui()
+	if OS.is_debug_build():
+		_build_dev_console()
 	hotkey_entries["focus"] = {"scope": "General", "title": "Focus selection", "default": KEY_F}
 	_load_hotkey_overrides()
 	_build_resource_hover()
@@ -4639,7 +4644,7 @@ func _refresh_match_result(state: Dictionary) -> void:
 		if is_instance_valid(codex):
 			codex.hide()
 		match_result_dialog.title = "Empire defeated"
-		match_result_dialog.dialog_text = "Your empire has no remaining settlement or Colony."
+		match_result_dialog.dialog_text = "Your empire has no remaining station or ship."
 		match_result_dialog.ok_button_text = "Observe match"
 		match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
 
@@ -6556,6 +6561,18 @@ func _close_match_chat() -> void:
 		match_chat_edit.clear()
 
 func _input(event: InputEvent) -> void:
+	if is_instance_valid(dev_console) and event is InputEventKey and event.pressed and not event.echo and str(session.get("phase")) == "match":
+		if _dev_console_toggle_key(event):
+			if dev_console.visible:
+				dev_console.hide()
+			elif not match_menu.visible and not empire_dialog.visible and not conquest_dialog.visible and not match_result_dialog.visible and not codex.visible and not hotkey_dialog.visible:
+				_close_match_chat()
+				dev_console.popup_centered(Vector2i(540, 280))
+				dev_console_entry.grab_focus()
+			get_viewport().set_input_as_handled()
+			return
+		if dev_console.visible:
+			return
 	if not event is InputEventKey or not event.pressed or event.echo or not is_instance_valid(match_chat_edit) or str(session.get("phase")) != "match":
 		return
 	var key: int = event.keycode
@@ -6580,6 +6597,8 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 func _unhandled_key_input(event: InputEvent) -> void:
+	if is_instance_valid(dev_console) and dev_console.visible:
+		return
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
 	if not is_instance_valid(match_menu) or str(session.get("phase")) != "match":
@@ -6713,6 +6732,8 @@ func _select_all_military() -> void:
 		map_canvas.queue_redraw()
 
 func _keyboard_pan(delta: float) -> void:
+	if is_instance_valid(dev_console) and dev_console.visible:
+		return
 	if str(session.get("phase")) != "match" or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible):
 		return
 	if not get_window().has_focus():
@@ -6740,7 +6761,7 @@ func _keyboard_pan(delta: float) -> void:
 
 func _sync_match_mouse_mode() -> void:
 	var active: bool = str(session.get("phase")) == "match" and get_window().has_focus()
-	var modal: bool = match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible)
+	var modal: bool = (is_instance_valid(dev_console) and dev_console.visible) or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible)
 	var target: Input.MouseMode = Input.MOUSE_MODE_CONFINED if active and not modal else Input.MOUSE_MODE_VISIBLE
 	if Input.mouse_mode != target:
 		Input.mouse_mode = target
@@ -9087,3 +9108,72 @@ func _station_buildable(key: String, p: Dictionary) -> bool:
 		"pds":
 			return ECONOMY.next_pds(p) >= 0 and ECONOMY.pds_job(p).is_empty() and ECONOMY.affordable(p, ECONOMY._cost("pds", 1))
 	return ECONOMY.station_upgrade_available(p, key)
+
+# Local debug-build command registry. No evaluation and no development RPCs.
+func _dev_console_toggle_key(event: InputEventKey) -> bool:
+	return event.physical_keycode == KEY_QUOTELEFT or event.keycode in [KEY_QUOTELEFT, KEY_ASCIITILDE]
+
+func _build_dev_console() -> void:
+	dev_console = Window.new()
+	dev_console.title = "Development console"
+	dev_console.theme = theme
+	dev_console.transient = true
+	dev_console.exclusive = true
+	dev_console.unresizable = true
+	dev_console.visible = false
+	add_child(dev_console)
+	dev_console.close_requested.connect(dev_console.hide)
+	dev_console.window_input.connect(_dev_console_window_input)
+	var panel := PanelContainer.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#45617b"), 8, 4))
+	dev_console.add_child(panel)
+	var content := VBoxContainer.new()
+	panel.add_child(content)
+	dev_console_output = TextEdit.new()
+	dev_console_output.editable = false
+	dev_console_output.focus_mode = Control.FOCUS_NONE
+	dev_console_output.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dev_console_output.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	content.add_child(dev_console_output)
+	dev_console_entry = LineEdit.new()
+	dev_console_entry.placeholder_text = "Enter command (help for commands)"
+	content.add_child(dev_console_entry)
+	dev_console_entry.text_submitted.connect(_dev_console_submit)
+	_dev_console_print("Development console — type help. Simulation commands are host/solo only.")
+
+func _dev_console_window_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and (_dev_console_toggle_key(event) or event.keycode == KEY_ESCAPE):
+		dev_console.set_input_as_handled()
+		dev_console.hide()
+
+func _dev_console_print(value: String) -> void:
+	var output: String = dev_console_output.text + ("\n" if not dev_console_output.text.is_empty() else "") + value
+	dev_console_output.text = output.right(12000)
+	dev_console_output.set_caret_line(dev_console_output.get_line_count() - 1)
+	dev_console_output.scroll_vertical = dev_console_output.get_line_count()
+
+func _dev_console_submit(raw: String) -> void:
+	dev_console_entry.clear()
+	var words: PackedStringArray = raw.strip_edges().split(" ", false)
+	if words.is_empty() or not OS.is_debug_build():
+		return
+	_dev_console_print("> " + raw)
+	match words[0].to_lower():
+		"help":
+			_dev_console_print("help · clear · status · speed <0|1|2|5> (host/solo)")
+		"clear":
+			dev_console_output.clear()
+		"status":
+			var state: Dictionary = session.get("economy")
+			_dev_console_print("Ships: %d | Speed: %dx | Elapsed years: %.1f" % [state.get("ships", []).size(), int(state.get("time_speed", 1)), float(state.get("elapsed", 0.0))])
+		"speed":
+			if not bool(session.get("is_solo")) and not multiplayer.is_server():
+				_dev_console_print("Only the host can change simulation speed here.")
+			elif words.size() != 2 or not words[1].is_valid_int() or int(words[1]) not in [0, 1, 2, 5]:
+				_dev_console_print("Usage: speed <0|1|2|5>")
+			else:
+				session.call("request_time_speed", int(words[1]))
+				_dev_console_print("Speed request: %sx" % words[1])
+		_:
+			_dev_console_print("Unknown command. Type help.")
