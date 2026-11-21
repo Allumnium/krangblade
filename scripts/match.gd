@@ -2702,7 +2702,7 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	unload_button = _command_slot("unload", "Drop Cargo", _arm_command.bind("unload"))
 	_command_slot("repair", "Repair target", _arm_command.bind("repair"))
 	_command_slot("deliver_farm", "Deliver Organics to nearest station", _deliver_farm_selected)
-	for id in ["collect", "auto_farm", "auto_trade", "auto_wander", "auto_mine", "auto_salvage", "auto_repair", "auto_retreat", "auto_explore"]:
+	for id in ["collect", "auto_farm", "auto_trade", "auto_repair", "auto_mine", "auto_salvage", "auto_wander", "auto_retreat", "auto_explore"]:
 		if id == "auto_retreat":
 			_fill_ability_grid(command_card)
 			_command_slot("guard", "Guard sector · return to the chosen point after combat", _arm_command.bind("guard"))
@@ -2765,11 +2765,11 @@ func _draw_autocast_cooldown(mask: Control) -> void:
 
 func _refresh_autocast_cards() -> void:
 	var state: Dictionary = _state()
-	# Repair and Trade are exclusive on individual hulls. Keep Trade in
-	# the bottom-right slot unless a mixed fleet needs both modes.
+	# Wander always occupies bottom-right; reuse the repair slot for Trade
+	# when the active hull type does not support Repair.
 	if command_buttons.has("auto_trade") and command_buttons.has("auto_repair"):
 		var trade: Button = command_buttons["auto_trade"]
-		var desired_slot: Control = command_card.get_child(11 if not _autocast_units(state, "repair").is_empty() else 15)
+		var desired_slot: Control = command_card.get_child(11 if not _autocast_units(state, "repair").is_empty() else 12)
 		if trade.get_parent() != desired_slot:
 			trade.reparent(desired_slot, false)
 			trade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -2843,6 +2843,8 @@ func _refresh_autocast_cards() -> void:
 		_set_button_hint(button, _button_hint(button) + "\nCooldown: %.1f s at 1×" % duration)
 		if mode == "wander":
 			_set_button_hint(button, _button_hint(button) + "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority.")
+		elif mode == "explore":
+			_set_button_hint(button, _button_hint(button) + "\nExplores connected sectors continuously when idle; no cooldown. Active orders and Hold take priority.")
 		elif mode == "collect":
 			_set_button_hint(button, "%s · Auto: %s\nLeft click [%s], then choose a Pulsar. Right click toggles autocast.\nCollects 1 unit in %.0f s at 1×; auto cooldown %.0f s." % [title_text, status, shortcut, ECONOMY.SCIENCE_COLLECTION_YEARS, duration])
 		elif mode == "retreat":
@@ -3488,6 +3490,7 @@ func _build_time_controls(parent: Container) -> void:
 	diagnostic_button.focus_mode = Control.FOCUS_NONE
 	diagnostic_button.tooltip_text = "Toggle local performance diagnostics"
 	diagnostic_label = _label("", 11)
+	diagnostic_label.z_index = 5
 	add_child(diagnostic_label)
 	diagnostic_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	diagnostic_label.offset_left = -220

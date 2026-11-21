@@ -3527,7 +3527,40 @@ func _test_resource_handoff() -> void:
 	assert(is_equal_approx(float(depot["stock"]["Metals"]), ECON.storage_capacity(depot)))
 	print("PASS: physical resource handoff, ownership, capacity, staging threshold, refreshed loading timer and inactivity dispatch and freighter salvage rate")
 
+func _test_explore_without_cooldown() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var scout: Dictionary = {"id": 9812, "owner": 1, "kind": "scout", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.RIGHT, "hp": ECON.ship_max_hp("scout"), "cargo": ECON.empty_stock(), "auto_cooldown_until": 100.0, "arrival_wait_until": 100.0}
+	state["ships"] = [scout]
+	assert(ECON.autocast_enabled(scout, "wander") and not ECON.autocast_enabled(scout, "explore"))
+	assert(not ECON.set_autocast(state, 2, [9812], "explore", true))
+	assert(ECON.set_autocast(state, 1, [9812], "explore", true))
+	assert(not ECON.autocast_enabled(scout, "wander"))
+	assert(ECON.autocast_ready(state, scout, "explore") and ECON.autocast_remaining(state, scout, "explore") == 0.0)
+	assert(ECON.autocast_remaining(state, scout, "wander") > 0.0)
+	scout["holding"] = true
+	ECON._dispatch_explorers(state, graph)
+	assert(scout["route"].is_empty())
+	scout["holding"] = false
+	ECON._dispatch_explorers(state, graph)
+	assert(int(scout["dest"]) == 1 and bool(scout["unit_order"]["exploration"]))
+	# An in-flight route must not be replaced.
+	ECON._dispatch_explorers(state, graph)
+	assert(int(scout["dest"]) == 1)
+	# Simulate a sector arrival with a fresh shared cooldown.
+	scout["at"] = 1
+	scout["position"] = graph["points"][1]
+	scout["route"] = []
+	scout["arrival_wait_until"] = 100.0
+	ECON._dispatch_explorers(state, graph)
+	assert(int(scout["dest"]) == 2 and bool(scout["unit_order"]["exploration"]))
+	assert(ECON.set_autocast(state, 1, [9812], "wander", true))
+	assert(not ECON.autocast_enabled(scout, "explore") and scout["route"].is_empty())
+	print("PASS: Explore starts and continues without cooldown; ownership, Hold and Wander exclusivity")
+
 func _test_autocast_modes() -> void:
+	_test_explore_without_cooldown()
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var center: Vector2 = graph["points"][0]

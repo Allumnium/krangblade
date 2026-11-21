@@ -309,6 +309,13 @@ func _phase_changed() -> void:
 						# Separate focus-fire hull so the existing movement and hold
 						# scenarios remain independent of this command.
 						ECON._finish(state, index, system, {"id": 920000 + index, "kind": "fighter", "population_allocated": 0.0})
+						# Dedicated scout with a long shared cooldown; Explore must dispatch anyway.
+						var explore_id: int = 976000 + index
+						ECON._finish(state, index, system, {"id": explore_id, "kind": "scout", "population_allocated": 0.0})
+						var explorer: Dictionary = state["ships"].back()
+						explorer["auto_cooldown_until"] = float(state["elapsed"]) + 100000.0
+						explorer["arrival_wait_until"] = float(state["elapsed"]) + 100000.0
+						explorer["holding"] = false
 						# The queued fighter in this scenario is deliberately canceled;
 						# supply a distinct completed launch to validate rally replication.
 						var rally_point: Vector2 = graph["points"][index] + Vector2.UP * ECON.sector_limit(graph, index, Vector2.UP) * 0.65
@@ -577,6 +584,7 @@ func _send_commands() -> void:
 	session.call("request_operation", (home_index + 1) % expected_players, "shipyard_autobuild", "0:ship:0")
 	session.call("request_shipyard_rally", home_index, 0, home_index, graph["points"][home_index])
 	session.call("request_shipyard_rally", (home_index + 1) % expected_players, 0, home_index, graph["points"][home_index])
+	session.call("request_autocast", [976000 + home_index], "explore", true)
 	session.call("request_autocast", [939000 + home_index], "farm", true)
 	session.call("request_unit_orders", [{"ids": [939000 + home_index], "order": {"kind": "transform"}}], false)
 	session.call("request_unit_orders", [{"ids": [943000 + home_index], "order": {"kind": "guard", "target": home_index, "point": graph["points"][home_index]}}], false)
@@ -791,7 +799,10 @@ func _check_economy_sync() -> void:
 			var repair_toggled: bool = false
 			var repaired: bool = false
 			var deposited: bool = false
+			var explore_verified: bool = false
 			for craft in state["ships"]:
+				if int(craft["id"]) == 976000 + owner_home:
+					explore_verified = ECON.autocast_enabled(craft, "explore") and not ECON.autocast_enabled(craft, "wander") and not craft.get("explore_visits", {}).is_empty()
 				if int(craft["owner"]) == owner and craft["kind"] == "miner" and int(craft.get("assigned_field", -1)) >= 0:
 					assigned_miners += 1
 				if int(craft["id"]) in [941000 + owner_home * 2, 941001 + owner_home * 2] and ECON._cargo_total(craft) <= ECON.EPS:
@@ -822,6 +833,7 @@ func _check_economy_sync() -> void:
 				"autobuild": system["yards"][0].get("autobuild", []).has("ship"),
 				"rally": int(system["yards"][0].get("rally", {}).get("node", -1)) == owner_home and system["yards"][0].get("rally", {}).get("point", Vector2.INF) == graph["points"][owner_home],
 				"rally_attack_move": rally_attack_move,
+				"explore_no_cooldown": explore_verified,
 				"patrol": patrol_verified,
 				"attack_target": attack_verified,
 				"unit_order_queue": order_queue_verified,
