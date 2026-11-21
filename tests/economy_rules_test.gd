@@ -1326,7 +1326,36 @@ func _test_endless_conquest() -> void:
 	assert(is_equal_approx(float(damage[1]), 104.0))
 	print("PASS: three distinct repeatable offers, escalating objectives and stacked bonuses")
 
+func _test_galactic_credits() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2])
+	assert(ECON.credit_balance(state, 1) == 5000.0 and ECON.credit_balance(state, 2) == 5000.0)
+	assert(state["galactic_credits"].size() == 2 and ECON.credit_balance(state, 0) == 0.0)
+	assert(ECON.resident_tax_income(state, 1) == 150.0)
+	assert(float(ECON.empire_totals(state, 1)["ship_population"]) > 0.0)
+	ECON.step(state, 0.1)
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5015.0))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 5015.0))
+	state["planets"][0]["population"] = 20000.0
+	state["planets"][1]["population"] = 10000.0
+	state["planets"][2]["population"] = 500000.0
+	assert(int(state["planets"][2]["owner"]) == 0)
+	ECON._accrue_resident_taxes(state, 0.0)
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5015.0))
+	ECON._accrue_resident_taxes(state, 2.5)
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5515.0))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 5265.0))
+	assert(not state["galactic_credits"].has(0))
+	state["planets"][0]["owner"] = 2
+	ECON._accrue_resident_taxes(state, 1.0)
+	assert(ECON.resident_tax_income(state, 1) == 0.0)
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5515.0))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 5565.0))
+	var fresh: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	assert(ECON.credit_balance(fresh, 1) == 5000.0 and ECON.credit_balance(fresh, 2) == 5000.0)
+	print("PASS: independent Galactic Credits, resident taxes, ownership, pause and fresh matches")
+
 func _initialize() -> void:
+	_test_galactic_credits()
 	_test_endless_conquest()
 	_test_sfx_rules()
 	_test_station_crystals()

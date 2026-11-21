@@ -112,6 +112,10 @@ func _run() -> void:
 		quit(1)
 		return
 	var state: Dictionary = session.get("economy")
+	if ECON.credit_balance(state, 1) != ECON.STARTING_GC:
+		push_error("Solo treasury did not reset at match start.")
+		quit(1)
+		return
 	if state["map"].get("layout") != MAP.DEFAULT_LAYOUT:
 		push_error("Default solo layout is not Radial")
 		quit(1)
@@ -150,7 +154,12 @@ func _run() -> void:
 	for speed in [1, 2, 5]:
 		session.call("request_time_speed", speed)
 		var before: float = float(state["elapsed"])
+		var credits_before: float = ECON.credit_balance(state, 1)
 		session.call("_economy_tick")
+		if ECON.credit_balance(state, 1) <= credits_before:
+			push_error("Solo treasury did not accrue taxes while running.")
+			quit(1)
+			return
 		if not (is_equal_approx(float(state["elapsed"]) - before, 0.1 * float(speed))):
 			push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 			quit(1)
