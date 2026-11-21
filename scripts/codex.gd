@@ -262,6 +262,8 @@ func _recipe(cost: Dictionary) -> String:
 	for resource in E.RESOURCES:
 		if cost.has(resource):
 			values.append("%.0f %s" % [float(cost[resource]), resource])
+	if not cost.is_empty():
+		values.append("%.0f GC" % E.construction_credit_cost(cost))
 	return " · ".join(values)
 
 func _resource_card(resource: String, description: String) -> void:
@@ -299,6 +301,7 @@ func _resources() -> void:
 	_table(["Resource", "Stock"], rows)
 	_section("Galactic Credits (GC)")
 	_body("Each empire starts with %.0f GC and earns %.0f%% of its resident population per simulation year in taxes. Ship crews do not pay taxes. The HUD shows your balance and annual income." % [E.STARTING_GC, E.RESIDENT_TAX_RATE * 100.0])
+	_body("Construction reserves GC and local materials immediately. Fee: %.0f%% of reference material value (rounded up). Cancel for a full GC refund; destroyed projects lose their fee. Colony transformation is prepaid; Warp Gates cost %.0f GC plus antimatter." % [E.CONSTRUCTION_CREDIT_FRACTION * 100.0, E.WARP_GATE_CREDIT_COST])
 	_section("Raw antimatter")
 	_body("Science vessels follow sector lanes to a Pulsar, then collect one unit after 30 years in range. Collect Antimatter (C), then choose a Pulsar; right-click the ability to enable autocast (off by default). Antimatter remains aboard.")
 
@@ -394,7 +397,7 @@ func _expansion() -> void:
 	_body("Send a Colony to a reachable neutral system to automatically establish a station and shipyard on arrival. Transform (J) also works for a Colony already in neutral territory. Settlers become the new colony population; existing colonies cannot be freely claimed.")
 	_flow(["Recruit settlers", "Travel", "Establish colony"])
 	_body("Colonies farm %.0f t/yr into a %.0f t Organics hold. Auto-Farm delivers full loads when idle; Deliver Organics or right-click a friendly station to unload early. They cannot salvage." % [E.COLONY_FARM_RATE, E.COLONY_CAPACITY])
-	_table(["Colony", "Requirement"], [["Crew", "%.0f people" % E.COLONY_POPULATION], ["Materials", _recipe(E._cost("colony_ship", 1))], ["Base build time", "%.0f years" % (E._work("colony_ship", 1) / E.yard_speed(1))]])
+	_table(["Colony", "Requirement"], [["Crew", "%.0f people" % E.COLONY_POPULATION], ["Construction", _recipe(E._cost("colony_ship", 1))], ["Base build time", "%.0f years" % (E._work("colony_ship", 1) / E.yard_speed(1))]])
 	_section("Planetless sectors & conquest")
 	_body("Cool blue stars mark planetless sectors, useful for routes and mining access. They rely on orbital housing rather than terrestrial agriculture or mining. Defeat hostile defenses and occupy a system to contest territory. Sector and highway tints mix local influence; full intensity at %.0f points. Rounded sector and highway outlines enclose each region; highway regions span at most %.0f units without changing travel. Scout/civilian 1, Fighter 2, Cruiser 5, Destroyer 10, Station %d, Shipyard %d, PDS/economic building %d. Regions with at least %.0f direct influence add %.0f%% of each player's points to weaker adjacent regions, one hop only. Influence does not change ownership." % [E.INFLUENCE_CAP, E.HIGHWAY_MAX_LENGTH, E.STATION_INFLUENCE, E.YARD_INFLUENCE, E.BUILDING_INFLUENCE, E.INFLUENCE_SPILLOVER_MIN, E.INFLUENCE_SPILLOVER * 100.0])
 	_note("A colony is a long-term economic investment. Food imports and local farming improve its growth, while fleets defend its shipping lanes.")
@@ -434,7 +437,7 @@ func _combat() -> void:
 	_table(["Weapon", "Damage / shot or volley", "Range"], [["Blaster", "%.0f" % E.BLASTER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Capital laser", "%.0f" % E.LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Mining lasers", "%.0f" % E.MINER_LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Planetary defense", "%.0f" % E.PDS_DAMAGE, "%.0f" % E.PDS_RANGE]])
 	_body("Blasters fire four shots in 1 s, then pause 0.5 s at 1×. Military Scout: 1; Fighter: 2 (no lasers). Scouts use military orders and pursuit. Cruisers: %.0f HP, three blasters, two lasers and one missile launcher. Destroyers: %.0f HP, four blasters, four lasers and two launchers. Missiles deal %.0f damage each at range %.0f, every %.0f s at 1×." % [E.ship_max_hp("cruiser"), E.ship_max_hp("destroyer"), E.MISSILE_DAMAGE, E.MISSILE_RANGE, E.MISSILE_COOLDOWN])
 	_section("Station defenses")
-	_table(["Upgrade", "Effect", "Materials"], [["Reinforced Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Laser Matrix", "+%d defensive lasers (4 total)" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Invulnerable; lost with station", _recipe(E._cost("pds", 1))], ["Dyson Sphere (Tech)", "-50% local ship material costs", _recipe(E._cost("dyson_sphere", 1))]])
+	_table(["Upgrade", "Effect", "Cost"], [["Reinforced Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Laser Matrix", "+%d defensive lasers (4 total)" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Invulnerable; lost with station", _recipe(E._cost("pds", 1))], ["Dyson Sphere (Tech)", "-50% local ship material costs", _recipe(E._cost("dyson_sphere", 1))]])
 	_note("Use coordinated attack groups, protect Harvesters and freighters, and retreat before losing ships and their crew investment.")
 
 func _controls() -> void:

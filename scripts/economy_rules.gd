@@ -17,6 +17,10 @@ const ACTIVE_PRODUCTION = RESOURCES
 const STARTING_STOCK = {"Metals": 1650.0, "Organics": 300.0, "Crystals": 0.0}
 const STARTING_GC: float = 5000.0
 const RESIDENT_TAX_RATE: float = 0.01
+# Fixed labor fee, independent of future fluctuating market prices.
+const CONSTRUCTION_CREDIT_FRACTION: float = 0.5
+const CONSTRUCTION_REFERENCE_VALUES = {"Metals": 2.0, "Organics": 1.0, "Crystals": 8.0}
+const WARP_GATE_CREDIT_COST: float = 1000.0
 const BUILDING_BONUS: float = 0.25
 const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional repeatable local production infrastructure; no self-input recipes.
@@ -428,6 +432,30 @@ static func raw_antimatter_totals(state: Dictionary, player: int) -> Dictionary:
 # Credits are electronic empire balances, not local stock or ship cargo.
 static func credit_balance(state: Dictionary, player: int) -> float:
 	return float(state.get("galactic_credits", {}).get(player, 0.0))
+
+static func construction_credit_cost(materials: Dictionary) -> float:
+	if materials.is_empty():
+		return 0.0
+	var value: float = 0.0
+	for resource in CONSTRUCTION_REFERENCE_VALUES:
+		value += float(materials.get(resource, 0.0)) * float(CONSTRUCTION_REFERENCE_VALUES[resource])
+	return maxf(1.0, ceilf(value * CONSTRUCTION_CREDIT_FRACTION))
+
+static func can_pay_credits(state: Dictionary, player: int, amount: float) -> bool:
+	return player > 0 and state.get("galactic_credits", {}).has(player) and is_finite(amount) and amount >= 0.0 and credit_balance(state, player) >= amount
+
+static func _pay_credits(state: Dictionary, player: int, amount: float) -> bool:
+	if not can_pay_credits(state, player, amount):
+		return false
+	state["galactic_credits"][player] = credit_balance(state, player) - amount
+	return true
+
+static func _refund_credits(state: Dictionary, player: int, amount: float) -> void:
+	if state.get("galactic_credits", {}).has(player) and is_finite(amount) and amount > 0.0:
+		state["galactic_credits"][player] = credit_balance(state, player) + amount
+
+static func construction_affordable(state: Dictionary, p: Dictionary, cost: Dictionary) -> bool:
+	return affordable(p, cost) and can_pay_credits(state, int(p["owner"]), construction_credit_cost(cost))
 
 static func resident_tax_income(state: Dictionary, player: int) -> float:
 	var total: float = 0.0
@@ -981,7 +1009,7 @@ static func station_upgrade_available(p: Dictionary, kind: String) -> bool:
 # Move later construction down one slot when an earlier job is cancelled.
 # Preserve its fractional work, but retain only the cheaper recipe's
 # full prepaid allocation; return the difference to local stock.
-static func _compact_shipyard_orders(p: Dictionary, removed_level: int) -> void:
+static func _compact_shipyard_orders(state: Dictionary, p: Dictionary, removed_level: int) -> void:
 	for item in p["queue"]:
 		if item["kind"] != "yard" or int(item["level"]) <= removed_level:
 			continue
@@ -992,6 +1020,10 @@ static func _compact_shipyard_orders(p: Dictionary, removed_level: int) -> void:
 		for resource in RESOURCES:
 			allocated[resource] = float(cost.get(resource, 0.0))
 			p["stock"][resource] += float(item["allocated"][resource]) - float(allocated[resource])
+		var reserved_gc: float = float(item.get("credit_cost", 0.0))
+		var reduced_gc: float = minf(reserved_gc, construction_credit_cost(cost))
+		_refund_credits(state, int(p["owner"]), reserved_gc - reduced_gc)
+		item["credit_cost"] = reduced_gc
 		item["level"] = level
 		item["cost"] = cost
 		item["work"] = _work("yard", level)
@@ -1154,7 +1186,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 			level = int(p["levels"][target]) + 1
 		_: return false
 	var cost: Dictionary = building_cost(p, target) if kind == "economy_building" else construction_cost(p, kind, level)
-	if not affordable(p, cost):
+	var gc: float = construction_credit_cost(cost)
+	if not affordable(p, cost) or not _pay_credits(state, player, gc):
 		return false
 	var paid: Dictionary = empty_stock()
 	for material in cost:
@@ -1163,7 +1196,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 	var id: int = int(state["next_id"])
 	state["next_id"] = id + 1
 	p["queue"].append({"id": id, "kind": kind, "target": target, "yard_slot": yard_slot, "level": level,
-		"cost": cost, "work": 30.0 if kind == "economy_building" else _work(kind, level),
+		"cost": cost, "credit_cost": gc, "work": 30.0 if kind == "economy_building" else _work(kind, level),
 		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": ship_size(kind) if SHIP_KINDS.has(kind) else 0})
 	if kind == "yard":
 		p["queue"][-1]["station_slot"] = station_slot
@@ -1415,8 +1448,9 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
 		if SHIP_KINDS.has(key) and p.has("maintain"):
 			p["maintain"][key] = 0
 		p["queue"].erase(item)
+		_refund_credits(state, player, float(item.get("credit_cost", 0.0)))
 		if item["kind"] == "yard":
-			_compact_shipyard_orders(p, int(item["level"]))
+			_compact_shipyard_orders(state, p, int(item["level"]))
 		return true
 	return false
 
@@ -6666,7 +6700,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		_shift_yard_targets(state, location.x, location.y)
 		planet["population"] = maxf(0.0, float(planet["population"]) - lost)
 		planet["eco_population"] = maxf(0.0, eco - lost)
-		_compact_shipyard_orders(planet, location.y + 1)
+		_compact_shipyard_orders(state, planet, location.y + 1)
 		for slot in range(3):
 			planet["continuous"].erase("yard_upgrade:%d" % slot)
 	for id in station_targets:
@@ -7063,6 +7097,8 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 					continue
 				if affordable(p, building_cost(p, resource)) and enqueue(state, player, index, "economy", resource):
 					break
+			continue
+		if not can_pay_credits(state, player, construction_credit_cost(price)):
 			continue
 		if float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
 			continue
@@ -8697,6 +8733,8 @@ static func can_build_warp_gate(state: Dictionary, graph: Dictionary, ship: Dict
 	if ship.get("kind", "") != "science_ship" or float(ship.get("cargo", {}).get(ANTIMATTER, 0.0)) < 1.0 - EPS:
 		return false
 	var owner: int = int(ship["owner"])
+	if not can_pay_credits(state, owner, WARP_GATE_CREDIT_COST):
+		return false
 	if not state.get("objectives", {}).get(owner, {}).get("rewards", []).has("warp_gate"):
 		return false
 	var node: int = sector_at(graph, ship["position"], military_pois(state, owner))
@@ -8715,6 +8753,8 @@ static func build_warp_gate(state: Dictionary, graph: Dictionary, ship: Dictiona
 	var position: Vector2 = ship["position"]
 	var node: int = sector_at(graph, position, military_pois(state, owner))
 	var choices: Array[int] = warp_gate_choices(state, owner, id)
+	if not _pay_credits(state, owner, WARP_GATE_CREDIT_COST):
+		return false
 	# Preserve the existing stable combat/replication ID; replace all mobile orders.
 	var crew: float = float(ship.get("crew", 0.0))
 	ship.clear()

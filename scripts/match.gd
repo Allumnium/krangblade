@@ -71,11 +71,14 @@ class CostButton extends Button:
 			var pair := HBoxContainer.new()
 			pair.add_theme_constant_override("separation", 4)
 			costs.add_child(pair)
-			var symbol := TextureRect.new()
-			HUD.fixed_icon(symbol, crew_icon if resource == "Population" else HUD.resource_icon(resource, 24), 24)
-			pair.add_child(symbol)
+			if resource != "GC":
+				var symbol := TextureRect.new()
+				HUD.fixed_icon(symbol, crew_icon if resource == "Population" else HUD.resource_icon(resource, 24), 24)
+				pair.add_child(symbol)
 			var amount := Label.new()
-			amount.text = "%.0f%s" % [float(recipe[resource]), "" if resource == "Population" else "t"]
+			amount.text = "%.0f%s" % [float(recipe[resource]), " GC" if resource == "GC" else ("" if resource == "Population" else "t")]
+			if resource == "GC":
+				amount.add_theme_color_override("font_color", Color("#e7c76b"))
 			if missing.has(resource):
 				amount.add_theme_color_override("font_color", Color("#ff7777"))
 			pair.add_child(amount)
@@ -1417,6 +1420,8 @@ func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
 func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {}, crew: float = 0.0, available: Dictionary = {}) -> void:
 	var cost_button: CostButton = button as CostButton
 	cost_button.recipe = cost.duplicate()
+	if not cost.is_empty():
+		cost_button.recipe["GC"] = ECONOMY.construction_credit_cost(cost)
 	cost_button.missing.clear()
 	if crew > 0.0:
 		cost_button.recipe["Population"] = crew
@@ -1430,6 +1435,7 @@ func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {
 
 func _available_cost_resources(p: Dictionary, yard: int = -1) -> Dictionary:
 	var available: Dictionary = p["stock"].duplicate()
+	available["GC"] = ECONOMY.credit_balance(_state(), _me())
 	var reserve: float = ECONOMY.SHIPYARD_POPULATION[yard] if yard >= 0 else 0.0
 	available["Population"] = maxf(0.0, float(p["population"]) - reserve)
 	return available
@@ -2199,7 +2205,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			name_text += " " + _roman_level(current_level + (1 if eligible else 0))
 		var repeat_key: String = _station_repeat_key(p, key)
 		var auto: bool = not repeat_key.is_empty() and bool(p.get("continuous", {}).get(repeat_key, false))
-		available = owned and available and ECONOMY.affordable(p, recipe)
+		available = owned and available and ECONOMY.construction_affordable(_state(), p, recipe)
 		button.disabled = not owned or (not _any_selected_station_buildable(key, p) if building_selection_kind == "station" and selected_buildings.size() > 1 else (not eligible or (repeat_key.is_empty() and not available)))
 		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		if button.has_meta("auto_border"):
@@ -2207,7 +2213,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		_set_cost_tooltip(button, name_text + (" · %.1f s (1×)" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
 		if not eligible:
 			_set_button_hint(button, _button_hint(button) + "\nUnavailable")
-		elif not available and ECONOMY.affordable(p, recipe):
+		elif not available and ECONOMY.construction_affordable(_state(), p, recipe):
 			_set_button_hint(button, _button_hint(button) + "\nRequirements not met or already queued")
 		if not repeat_key.is_empty() and eligible:
 			_set_button_hint(button, _button_hint(button) + "\nRight-click: %s repeat" % ("Disable" if auto else "Enable"))
@@ -2254,7 +2260,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	button.accept_event()
 
 func _yard_build_available(system: Dictionary, slot: int, kind: String) -> bool:
-	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.affordable(system, ECONOMY.construction_cost(system, kind, 1)) and (kind != "ship" or bool(system["home"]))
+	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.construction_affordable(_state(), system, ECONOMY.construction_cost(system, kind, 1)) and (kind != "ship" or bool(system["home"]))
 
 func _build_at_yard(kind: String) -> void:
 	var state: Dictionary = _state()
@@ -2276,7 +2282,7 @@ func _yard_can_upgrade(system: Dictionary, slot: int) -> bool:
 	for job in system["queue"]:
 		if job["kind"] == "yard_upgrade" and int(job["target"]) == slot:
 			return false
-	return ECONOMY.affordable(system, ECONOMY._cost("yard_upgrade", int(system["yards"][slot]["level"]) + 1))
+	return ECONOMY.construction_affordable(_state(), system, ECONOMY._cost("yard_upgrade", int(system["yards"][slot]["level"]) + 1))
 
 func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	var yard: Dictionary = system["yards"][selected_yard]
@@ -2402,6 +2408,9 @@ func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dicti
 		else:
 			tile.remove_theme_stylebox_override("normal")
 		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), ("Delivering" if job.has("delivery_slot") else ("Building" if id == active_id else "Queued")), percent, "\n" + widgets["bar"].tooltip_text if blocked else "", ("\nClick to cancel; materials become salvage" if ECONOMY.construction_leaves_salvage(job) else "\nClick to cancel and refund") if owned else ""]
+
+		if float(job.get("credit_cost", 0.0)) > 0.0:
+			tile.tooltip_text += "\n%.0f GC prepaid%s" % [float(job["credit_cost"]), " · refunded on cancellation" if owned else ""]
 
 func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
@@ -3415,10 +3424,10 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		_set_button_hint(transform, "Cycle link destination [J] · right-click an owned linked gate with ships to travel")
 	elif science:
 		transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY.can_build_warp_gate(state, graph, craft))
-		_set_button_hint(transform, "Deploy Warp Gate [J] · consumes 1 antimatter; one gate per owned system")
+		_set_button_hint(transform, "Deploy Warp Gate [J] · 1 antimatter + %.0f GC; one gate per owned system" % ECONOMY.WARP_GATE_CREDIT_COST)
 	else:
 		transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY._valid_unit_order(state, graph, craft, {"kind": "transform"}, true))
-		_set_button_hint(transform, "Transform into Space Station [J]")
+		_set_button_hint(transform, "Transform into Space Station [J] · construction fee prepaid with colony ship")
 	command_buttons["deliver_farm"].visible = has_farm
 	command_buttons["deliver_farm"].disabled = not loaded_farm
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
@@ -3992,7 +4001,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 	if resource == "credits":
 		var balance: float = ECONOMY.credit_balance(state, _me())
 		var income: float = ECONOMY.resident_tax_income(state, _me())
-		return "Galactic Credits · %.2f GC\nResident taxes (%.0f%%/yr): +%.2f GC/yr\nNet income: +%.2f GC/yr" % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, income]
+		return "Galactic Credits · %.2f GC\nResident taxes (%.0f%%/yr): +%.2f GC/yr\nNet recurring income: +%.2f GC/yr\nConstruction fees paid on ordering." % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, income]
 	if resource == "population":
 		var population_totals: Dictionary = ECONOMY.empire_totals(state, _me())
 		var lines: PackedStringArray = ["Population · %s people" % _compact_amount(float(population_totals["population"])), "Residents: %s · Ships: %s · Embarking: %s" % [_compact_amount(float(population_totals["resident_population"])), _compact_amount(float(population_totals["ship_population"])), _compact_amount(float(population_totals["embarking_population"]))], "Current local growth (people/yr)"]
@@ -9288,18 +9297,20 @@ func _any_selected_station_buildable(key: String, primary: Dictionary) -> bool:
 
 func _station_buildable(key: String, p: Dictionary) -> bool:
 	if key in ECONOMY.RESOURCES:
-		return ECONOMY.building_available(p, key) and ECONOMY.affordable(p, ECONOMY.building_cost(p, key))
+		return ECONOMY.building_available(p, key) and ECONOMY.construction_affordable(_state(), p, ECONOMY.building_cost(p, key))
 	match key:
 		"warehouse":
-			return ECONOMY.warehouse_available(p)
+			return ECONOMY.warehouse_available(p) and ECONOMY.construction_affordable(_state(), p, ECONOMY.WAREHOUSE_COSTS[int(p.get("warehouse_level", 0))])
 		"housing":
-			return ECONOMY.habitation_available(p) if ECONOMY.has_planets(p) else ECONOMY.orbital_housing_available(p)
+			if ECONOMY.has_planets(p):
+				return ECONOMY.habitation_available(p) and ECONOMY.construction_affordable(_state(), p, ECONOMY.habitation_cost(p))
+			return ECONOMY.orbital_housing_available(p) and ECONOMY.construction_affordable(_state(), p, ECONOMY.ORBITAL_HOUSING_COST)
 		"yard":
 			var level: int = ECONOMY.next_shipyard_slot(p)
-			return level > 0 and ECONOMY.affordable(p, ECONOMY._cost("yard", level))
+			return level > 0 and ECONOMY.construction_affordable(_state(), p, ECONOMY._cost("yard", level))
 		"pds":
-			return ECONOMY.next_pds(p) >= 0 and ECONOMY.pds_job(p).is_empty() and ECONOMY.affordable(p, ECONOMY._cost("pds", 1))
-	return ECONOMY.station_upgrade_available(p, key)
+			return ECONOMY.next_pds(p) >= 0 and ECONOMY.pds_job(p).is_empty() and ECONOMY.construction_affordable(_state(), p, ECONOMY._cost("pds", 1))
+	return ECONOMY.station_upgrade_available(p, key) and ECONOMY.construction_affordable(_state(), p, ECONOMY._cost(key, 1))
 
 # Local debug-build command registry. No evaluation and no development RPCs.
 func _dev_console_toggle_key(event: InputEventKey) -> bool:
