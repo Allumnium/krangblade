@@ -17,6 +17,8 @@ const ACTIVE_PRODUCTION = RESOURCES
 const STARTING_STOCK = {"Metals": 1650.0, "Organics": 300.0, "Crystals": 0.0}
 const STARTING_GC: float = 5000.0
 const RESIDENT_TAX_RATE: float = 0.01
+# Annual operating wages for completed mobile hulls; structures are exempt.
+const SHIP_UPKEEP_GC = {"scout": 1.0, "miner": 3.0, "fighter": 5.0, "ship": 8.0, "colony_ship": 10.0, "science_ship": 10.0, "cruiser": 15.0, "destroyer": 35.0}
 # Fixed labor fee, independent of future fluctuating market prices.
 const CONSTRUCTION_CREDIT_FRACTION: float = 0.5
 const CONSTRUCTION_REFERENCE_VALUES = {"Metals": 2.0, "Organics": 1.0, "Crystals": 8.0}
@@ -478,12 +480,59 @@ static func _accrue_resident_taxes(state: Dictionary, dt: float) -> void:
 		if owner > 0 and credits.has(owner):
 			credits[owner] = float(credits[owner]) + maxf(0.0, float(planet["population"])) * RESIDENT_TAX_RATE * dt
 
+static func ship_upkeep(kind: String) -> float:
+	return float(SHIP_UPKEEP_GC.get(kind, 0.0))
+
+static func unpaid_wage_years(state: Dictionary, ship: Dictionary) -> float:
+	if not ship.has("unpaid_since"):
+		return 0.0
+	return maxf(0.0, float(state["elapsed"]) - float(ship["unpaid_since"]))
+
+# Pay full current-step wages or mark the start of continuous nonpayment.
+# Past missed wages are not a debt; a successful payment restores good standing.
+static func _pay_hull_wages(credits: Dictionary, ship: Dictionary, amount: float, now: float) -> void:
+	var owner: int = int(ship["owner"])
+	var balance: float = float(credits[owner])
+	if balance + EPS >= amount:
+		credits[owner] = maxf(0.0, balance - amount)
+		if ship.has("unpaid_since"):
+			ship.erase("unpaid_since")
+	elif not ship.has("unpaid_since"):
+		ship["unpaid_since"] = now
+
+# Taxes are collected first. Civilian hulls get priority over military hulls,
+# then stable fleet order within each group. No per-hull sorting or timers.
+static func _pay_fleet_upkeep(state: Dictionary, dt: float) -> void:
+	if dt <= 0.0:
+		return
+	var credits: Dictionary = state.get("galactic_credits", {})
+	if credits.is_empty():
+		return
+	var now: float = float(state["elapsed"])
+	var military: Array = []
+	for ship in state.get("ships", []):
+		var owner: int = int(ship["owner"])
+		var kind: String = str(ship.get("kind", ""))
+		var rate: float = ship_upkeep(kind)
+		if owner <= 0 or not credits.has(owner) or rate <= 0.0:
+			if ship.has("unpaid_since"):
+				ship.erase("unpaid_since")
+			continue
+		if military_hull(kind):
+			military.append(ship)
+		else:
+			_pay_hull_wages(credits, ship, rate * dt, now)
+	for ship in military:
+		_pay_hull_wages(credits, ship, ship_upkeep(str(ship["kind"])) * dt, now)
+
 static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 	var stock: Dictionary = empty_stock()
 	var cargo: Dictionary = empty_stock()
 	var total: Dictionary = empty_stock()
 	var population: float = 0.0
 	var ship_population: float = 0.0
+	var upkeep: float = 0.0
+	var unpaid_ships: int = 0
 	var embarking_population: float = 0.0
 	var capacity: float = 0.0
 	var planets: int = 0
@@ -505,6 +554,9 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 		if int(ship["owner"]) != player:
 			continue
 		craft += 1
+		upkeep += ship_upkeep(str(ship.get("kind", "")))
+		if ship.has("unpaid_since"):
+			unpaid_ships += 1
 		ship_population += float(ship.get("crew", 0.0))
 		if ship.get("kind", "ship") == "colony_ship":
 			colonies += 1
@@ -523,7 +575,8 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 	for resource in RESOURCES:
 		storage_reference[resource] = capacity
 	return {"stock": stock, "cargo": cargo, "resources": total, "storage_reference": storage_reference, "population": population + ship_population + embarking_population, "resident_population": population, "ship_population": ship_population, "embarking_population": embarking_population,
-		"planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters, "miners": miners}
+		"planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters, "miners": miners,
+		"upkeep": upkeep, "unpaid_ships": unpaid_ships}
 
 ## Host-only sample history; only the derived rates are replicated.
 static func sample_resource_rates(state: Dictionary, history: Dictionary) -> void:
@@ -8195,6 +8248,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	_accrue_resident_taxes(state, dt)
+	_pay_fleet_upkeep(state, dt)
 	state["elapsed"] = float(state["elapsed"]) + dt
 	var transfer_events: Dictionary = state.get("cargo_transfers", {})
 	for key in transfer_events.keys():

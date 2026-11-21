@@ -1348,23 +1348,23 @@ func _test_galactic_credits() -> void:
 	# Isolate income from AI spending.
 	state["ai_players"].clear()
 	ECON.step(state, 0.1)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 5015.0))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 5015.0))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5012.3))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 5012.3))
 	state["planets"][0]["population"] = 20000.0
 	state["planets"][1]["population"] = 10000.0
 	state["planets"][2]["population"] = 500000.0
 	assert(int(state["planets"][2]["owner"]) == 0)
 	ECON._accrue_resident_taxes(state, 0.0)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 5015.0))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5012.3))
 	ECON._accrue_resident_taxes(state, 2.5)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 5515.0))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 5265.0))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5512.3))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 5262.3))
 	assert(not state["galactic_credits"].has(0))
 	state["planets"][0]["owner"] = 2
 	ECON._accrue_resident_taxes(state, 1.0)
 	assert(ECON.resident_tax_income(state, 1) == 0.0)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 5515.0))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 5565.0))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5512.3))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 5562.3))
 	var fresh: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	assert(ECON.credit_balance(fresh, 1) == 5000.0 and ECON.credit_balance(fresh, 2) == 5000.0)
 	print("PASS: independent Galactic Credits, resident taxes, ownership, pause and fresh matches")
@@ -1420,7 +1420,44 @@ func _test_construction_credits() -> void:
 	assert(auto_home["queue"].is_empty() and ECON.credit_balance(auto_state, 1) == 0.0)
 	print("PASS: construction GC reservations, insufficient funds, ownership, cancellation, repricing, autoqueue and completion")
 
+func _test_fleet_upkeep() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
+	assert(float(ECON.empire_totals(state, 1)["upkeep"]) == 27.0)
+	var fighter: Dictionary = {"owner": 1, "kind": "fighter"}
+	var miner: Dictionary = {"owner": 1, "kind": "miner"}
+	var gate: Dictionary = {"owner": 1, "kind": "warp_gate"}
+	var enemy: Dictionary = {"owner": 2, "kind": "destroyer"}
+	var neutral: Dictionary = {"owner": 0, "kind": "fighter"}
+	state["ships"] = [fighter, miner, gate, enemy, neutral]
+	state["galactic_credits"][1] = 3.0
+	state["galactic_credits"][2] = 100.0
+	ECON._pay_fleet_upkeep(state, 0.0)
+	assert(ECON.credit_balance(state, 1) == 3.0 and not fighter.has("unpaid_since"))
+	ECON._pay_fleet_upkeep(state, 1.0)
+	state["elapsed"] = 1.0
+	assert(ECON.credit_balance(state, 1) == 0.0 and ECON.credit_balance(state, 2) == 65.0)
+	assert(not miner.has("unpaid_since") and fighter.has("unpaid_since"))
+	assert(not gate.has("unpaid_since") and not neutral.has("unpaid_since"))
+	assert(ECON.unpaid_wage_years(state, fighter) == 1.0)
+	assert(int(ECON.empire_totals(state, 1)["unpaid_ships"]) == 1)
+	ECON._pay_fleet_upkeep(state, 1.0)
+	state["elapsed"] = 2.0
+	assert(ECON.unpaid_wage_years(state, fighter) == 2.0 and ECON.unpaid_wage_years(state, miner) == 1.0)
+	state["galactic_credits"][1] = 8.0
+	ECON._pay_fleet_upkeep(state, 1.0)
+	assert(ECON.credit_balance(state, 1) == 0.0)
+	assert(not fighter.has("unpaid_since") and not miner.has("unpaid_since"))
+	assert(int(ECON.empire_totals(state, 1)["unpaid_ships"]) == 0)
+	# No cash reserve needed if concurrent taxes cover current wages.
+	state["ships"] = [fighter, miner]
+	state["planets"][0]["population"] = 800.0
+	ECON._accrue_resident_taxes(state, 1.0)
+	ECON._pay_fleet_upkeep(state, 1.0)
+	assert(ECON.credit_balance(state, 1) == 0.0 and not fighter.has("unpaid_since"))
+	print("PASS: upkeep, civilian priority, separate treasuries, pause, exemptions and wage recovery")
+
 func _initialize() -> void:
+	_test_fleet_upkeep()
 	_test_construction_credits()
 	_test_galactic_credits()
 	_test_endless_conquest()

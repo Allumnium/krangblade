@@ -1239,12 +1239,14 @@ func _check_planet_motion_codec(state: Dictionary) -> bool:
 	wire_state["ai_waves"] = {1: {"members": [1, 2]}}
 	wire_state["galactic_credits"] = (state["galactic_credits"] as Dictionary).duplicate()
 	wire_state["galactic_credits"][1] = 9876.54321
+	wire_state["ships"] = (state["ships"] as Array).duplicate(true)
+	wire_state["ships"][0]["unpaid_since"] = 12.345
 	var wire: Dictionary = session.call("_encode_replica", wire_state, state["map"], false, template)
 	if not wire.get("_wire_planets_compact", false) or wire.has("_wire_planet_template") or wire.has("ai_waves") or wire.has("next_ai") or wire.has("next_operation_id"):
 		return false
 	var decoded: Dictionary = bytes_to_var(var_to_bytes(wire))
 	var restored: Array = session.call("_restore_planets", decoded["planets"], template)
-	if decoded.get("galactic_credits") != wire_state["galactic_credits"]:
+	if decoded.get("galactic_credits") != wire_state["galactic_credits"] or decoded.get("ships") != wire_state["ships"]:
 		return false
 	if restored != live or wire_state["ai_waves"].is_empty() or wire["operations"] != state["operations"]:
 		return false

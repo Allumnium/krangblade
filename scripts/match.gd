@@ -1456,7 +1456,7 @@ func _ship_stats(kind: String) -> String:
 		"fighter": details = _blaster_summary(kind)
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
-	return "%s\nHP %.0f · Speed %.0f/s (1×) · %s" % [details, ECONOMY.ship_max_hp(kind), ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind))]
+	return "%s\nHP %.0f · Speed %.0f/s (1×) · %s\nUpkeep: %.0f GC/yr" % [details, ECONOMY.ship_max_hp(kind), ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_upkeep(kind)]
 
 func _build_production_summary() -> void:
 	var header := HBoxContainer.new()
@@ -3361,6 +3361,10 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	if kind == "warp_gate":
 		var destination: Dictionary = ECONOMY.warp_gate(state, owner, int(ship.get("warp_destination", -1)))
 		status = "Linked to %s" % _system_name(int(destination["at"])) if not destination.is_empty() else "Unlinked · deploy another gate"
+	if owner == _me() and ECONOMY.ship_upkeep(kind) > 0.0:
+		status += "\nUpkeep: %.0f GC/yr" % ECONOMY.ship_upkeep(kind)
+		if ship.has("unpaid_since"):
+			status += " · Unpaid %.1f yr" % ECONOMY.unpaid_wage_years(state, ship)
 	ship_detail.text = status
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
@@ -4000,8 +4004,14 @@ func _build_resource_hover() -> void:
 func _resource_breakdown(state: Dictionary, resource: String) -> String:
 	if resource == "credits":
 		var balance: float = ECONOMY.credit_balance(state, _me())
-		var income: float = ECONOMY.resident_tax_income(state, _me())
-		return "Galactic Credits · %.2f GC\nResident taxes (%.0f%%/yr): +%.2f GC/yr\nNet recurring income: +%.2f GC/yr\nConstruction fees paid on ordering." % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, income]
+		var totals: Dictionary = ECONOMY.empire_totals(state, _me())
+		var income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE
+		var upkeep: float = float(totals["upkeep"])
+		var unpaid: int = int(totals["unpaid_ships"])
+		var details: String = "Galactic Credits · %.2f GC\nResident taxes (%.0f%%/yr): +%.2f GC/yr\nFleet upkeep: −%.2f GC/yr\nNet recurring income: %+.2f GC/yr\nConstruction fees paid on ordering." % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, upkeep, income - upkeep]
+		if unpaid > 0:
+			details += "\nWARNING: %d ships have unpaid wages." % unpaid
+		return details
 	if resource == "population":
 		var population_totals: Dictionary = ECONOMY.empire_totals(state, _me())
 		var lines: PackedStringArray = ["Population · %s people" % _compact_amount(float(population_totals["population"])), "Residents: %s · Ships: %s · Embarking: %s" % [_compact_amount(float(population_totals["resident_population"])), _compact_amount(float(population_totals["ship_population"])), _compact_amount(float(population_totals["embarking_population"]))], "Current local growth (people/yr)"]
@@ -4092,10 +4102,13 @@ func _update_resource_hover() -> void:
 func _refresh_global_bar(state: Dictionary) -> void:
 	year_label.text = "%d A.D." % ECONOMY.current_year(state)
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
-	var credit_income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE
-	global_credit_label.text = "%s GC" % _compact_amount(ECONOMY.credit_balance(state, _me()))
-	global_credit_income_label.text = "+%s GC/yr" % _compact_amount(credit_income)
-	global_credit_income_label.add_theme_color_override("font_color", Color("#7cdb9b") if credit_income > 0.0 else Color.WHITE)
+	var credit_income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE - float(totals["upkeep"])
+	var unpaid: int = int(totals["unpaid_ships"])
+	global_credit_label.text = "%s GC%s" % [_compact_amount(ECONOMY.credit_balance(state, _me())), " !" if unpaid > 0 else ""]
+	global_credit_label.add_theme_color_override("font_color", Color("#ff7777") if unpaid > 0 else Color("#e7c76b"))
+	var sign_text: String = "+" if credit_income > 0.0 else ("−" if credit_income < 0.0 else "")
+	global_credit_income_label.text = "%s%s GC/yr" % [sign_text, _compact_amount(absf(credit_income))]
+	global_credit_income_label.add_theme_color_override("font_color", Color("#ff7777") if credit_income < 0.0 else (Color("#7cdb9b") if credit_income > 0.0 else Color.WHITE))
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])
 		var annual: float = _empire_resource_delta(state, resource)
@@ -6479,7 +6492,13 @@ func _sync_tactical_alerts(state: Dictionary) -> void:
 			tactical_alerts.erase(key)
 	var current: Dictionary = {}
 	var team: int = ECONOMY._combat_group(state, _me())
+	var unpaid_count: int = 0
+	var unpaid_example: Dictionary = {}
 	for ship in state["ships"]:
+		if int(ship["owner"]) == _me() and ship.has("unpaid_since"):
+			unpaid_count += 1
+			if unpaid_example.is_empty() or float(ship["unpaid_since"]) < float(unpaid_example["unpaid_since"]):
+				unpaid_example = ship
 		if ECONOMY._combat_group(state, int(ship["owner"])) != team:
 			continue
 		var id: int = int(ship["id"])
@@ -6499,6 +6518,10 @@ func _sync_tactical_alerts(state: Dictionary) -> void:
 		if tactical_initialized and ECONOMY._combat_group(state, int(event["owner"])) == team and _alert_off_camera(point):
 			var cell := Vector2i(floori(point.x / 1500.0), floori(point.y / 1500.0))
 			_post_tactical_alert("attack:%s" % str(cell), "Unit under attack!  ›", point, now)
+	if unpaid_count > 0:
+		_post_tactical_alert("unpaid_wages", "Insufficient GC: %d ship(s) unpaid  ›" % unpaid_count, unpaid_example["position"], now, int(unpaid_example["id"]))
+	else:
+		tactical_alerts.erase("unpaid_wages")
 	tactical_durability = current
 	tactical_initialized = true
 	if now < tactical_next_scan:
