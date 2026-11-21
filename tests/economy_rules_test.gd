@@ -1456,7 +1456,43 @@ func _test_fleet_upkeep() -> void:
 	assert(ECON.credit_balance(state, 1) == 0.0 and not fighter.has("unpaid_since"))
 	print("PASS: upkeep, civilian priority, separate treasuries, pause, exemptions and wage recovery")
 
+func _test_rogue_defection() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
+	ECON.initialize_diplomacy(state)
+	var hull: Dictionary = state["ships"][0]
+	var seed_value: int = int(state["map"]["seed"])
+	var candidate: int = 1000000
+	while candidate < 1100000 and not ECON._rogue_roll(seed_value, candidate, 6):
+		candidate += 1
+	assert(candidate < 1100000)
+	hull["id"] = candidate
+	hull["unpaid_since"] = 0.0
+	hull["unit_order"] = {"kind": "stop"}
+	hull["order_queue"] = [{"kind": "stop"}]
+	hull["cargo"]["Metals"] = 3.0
+	var position: Vector2 = hull["position"]
+	var crew: float = float(hull["crew"])
+	var original_kind: String = str(hull["kind"])
+	state["elapsed"] = 59.9
+	ECON._check_unpaid_defections(state)
+	assert(int(hull["owner"]) == 1 and state.get("rogue_events", {}).is_empty())
+	state["elapsed"] = 60.0
+	ECON._check_unpaid_defections(state)
+	assert(int(hull["owner"]) == 0 and bool(hull["rogue"]) and not hull.has("unpaid_since"))
+	assert(hull["id"] == candidate and hull["position"] == position and hull["crew"] == crew and hull["kind"] == original_kind)
+	assert(float(hull["cargo"]["Metals"]) == 3.0 and not hull.has("unit_order") and not hull.has("order_queue"))
+	assert(not ECON.armed(hull) and not ECON.autocast_enabled(hull, "wander"))
+	assert(not ECON.issue_unit_order(state, 1, [candidate], {"kind": "stop"}, false))
+	assert(ECON.diplomatic_relation(state, 1, 2) == ECON.DIPLO_NEUTRAL)
+	assert(int(state["rogue_events"][1]["total"]) == 1)
+	ECON._check_unpaid_defections(state)
+	assert(int(state["rogue_events"][1]["total"]) == 1)
+	ECON.step(state, 0.1)
+	assert(hull["position"] == position and int(hull["owner"]) == 0)
+	print("PASS: deterministic defection, grace, neutral ownership, order cleanup, notice and simulation")
+
 func _initialize() -> void:
+	_test_rogue_defection()
 	_test_fleet_upkeep()
 	_test_construction_credits()
 	_test_galactic_credits()
