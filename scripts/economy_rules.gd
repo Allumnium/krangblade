@@ -300,13 +300,20 @@ static func _stamp_vision(cells: Dictionary, point: Vector2, radius: float) -> v
 			if ((Vector2(cell) + Vector2.ONE * 0.5) * VISION_CELL).distance_squared_to(point) <= radius * radius:
 				cells[cell] = true
 
+# In bilateral mode, group IDs are empire IDs. Only direct consenting
+# allies contribute live sensor coverage, never an ally's ally.
+static func _shares_group_vision(state: Dictionary, viewer: int, source: int) -> bool:
+	if state.has("diplomacy"):
+		return diplomacy_allows(state, viewer, source, "vision")
+	return viewer > 0 and viewer == source
+
 static func team_vision(state: Dictionary, team: int) -> Dictionary:
 	var cells: Dictionary = {}
 	if team <= 0:
 		return cells
 	var sources: Dictionary = {}
 	for ship in state.get("ships", []):
-		if int(state["teams"].get(int(ship["owner"]), 0)) != team or not ship.has("position"):
+		if not _shares_group_vision(state, team, _combat_group(state, int(ship["owner"]))) or not ship.has("position"):
 			continue
 		var cell: Vector2i = vision_cell(ship["position"])
 		sources[cell] = maxf(float(sources.get(cell, 0.0)), sight_radius(str(ship["kind"])))
@@ -315,7 +322,7 @@ static func team_vision(state: Dictionary, team: int) -> Dictionary:
 	var elapsed: float = float(state["elapsed"])
 	for index in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][index]
-		if int(state["teams"].get(int(system["owner"]), 0)) != team:
+		if not _shares_group_vision(state, team, _combat_group(state, int(system["owner"]))):
 			continue
 		if has_station(system):
 			_stamp_vision(cells, station_position(state, index, elapsed), STATION_SIGHT)
@@ -326,7 +333,7 @@ static func team_vision(state: Dictionary, team: int) -> Dictionary:
 	return cells
 
 static func discovered(state: Dictionary, player: int, kind: String, index: int) -> bool:
-	var team: int = int(state.get("teams", {}).get(player, 0))
+	var team: int = _combat_group(state, player) if state.has("teams") else 0
 	if team <= 0 or index < 0:
 		return false
 	if not bool(state.get("fog_of_war", DEFAULT_FOG_OF_WAR)):
@@ -335,7 +342,14 @@ static func discovered(state: Dictionary, player: int, kind: String, index: int)
 		if kind == "fields":
 			return index < (state.get("map", {}).get("fields", []) as Array).size()
 		return false
-	return bool(state.get("explored", {}).get(team, {}).get(kind, {}).get(index, false))
+	var explored: Dictionary = state.get("explored", {})
+	if bool(explored.get(team, {}).get(kind, {}).get(index, false)):
+		return true
+	if state.has("diplomacy"):
+		for ally in state["teams"]:
+			if ally != player and diplomacy_allows(state, player, int(ally), "vision") and bool(explored.get(ally, {}).get(kind, {}).get(index, false)):
+				return true
+	return false
 
 static func _survey(state: Dictionary, team: int, index: int) -> void:
 	if team <= 0:
@@ -358,7 +372,7 @@ static func _survey(state: Dictionary, team: int, index: int) -> void:
 
 static func update_exploration(state: Dictionary) -> void:
 	for i in range((state["planets"] as Array).size()):
-		var team: int = int(state["teams"].get(int(state["planets"][i]["owner"]), 0))
+		var team: int = _combat_group(state, int(state["planets"][i]["owner"]))
 		if team > 0:
 			_survey(state, team, i)
 
@@ -483,9 +497,8 @@ static func sample_resource_rates(state: Dictionary, history: Dictionary) -> voi
 
 static func planet_teams(state: Dictionary) -> Array[int]:
 	var result: Array[int] = []
-	var teams: Dictionary = state["teams"]
 	for planet in state["planets"]:
-		result.append(int(teams.get(int(planet["owner"]), 0)) if has_station(planet) else 0)
+		result.append(_combat_group(state, int(planet["owner"])) if has_station(planet) else 0)
 	return result
 
 ## Colony ships can traverse allied worlds, with one final edge into a neutral world.
@@ -499,7 +512,7 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
 	if int(ship["owner"]) != player or ship.get("kind", "ship") != "colony_ship" or not (ship["route"] as Array).is_empty():
 		return []
 	var teams: Array[int] = planet_teams(state)
-	var team: int = int(state["teams"].get(player, 0))
+	var team: int = _combat_group(state, player)
 	var start: int = int(ship["at"])
 	if team == 0 or (teams[start] not in [0, team] and military_home(state, player) >= 0):
 		return []
@@ -1996,7 +2009,7 @@ static func _lane_progress(points: Array, ship: Dictionary) -> float:
 static func _service_point(state: Dictionary, ship: Dictionary, index: int) -> Vector2:
 	if state.has("planets") and has_station(state["planets"][index]):
 		var owner: int = int(state["planets"][index]["owner"])
-		if owner == int(ship["owner"]) or (owner != 0 and state["teams"].get(owner, 0) == state["teams"].get(int(ship["owner"]), -1)):
+		if _cargo_target_allowed(state, int(ship["owner"]), {"owner": owner}):
 			return station_position(state, index, float(state["elapsed"]))
 	return state["map"]["points"][index]
 
@@ -2159,7 +2172,7 @@ static func _stage_wait_point(state: Dictionary, graph: Dictionary, ship: Dictio
 
 static func _stage_candidate(state: Dictionary, graph: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, threats: Dictionary, node: int, anchor: int, point: Vector2, resources: Array, demand: float) -> Dictionary:
 	var owner: int = int(ship["owner"])
-	var team: int = int(state["teams"].get(owner, 0))
+	var team: int = _combat_group(state, owner)
 	if not _salvage_safe(state, graph, owner, point, node, threats) or _hostile_system(state, owner, anchor):
 		return {}
 	var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor, cache)
@@ -2276,7 +2289,7 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 	var owner: int = int(ship["owner"])
 	var point: Vector2 = stage["point"]
 	var node: int = int(stage["node"])
-	var team: int = int(state["teams"].get(owner, 0))
+	var team: int = _combat_group(state, owner)
 	var safe: bool = _salvage_safe(state, graph, owner, point, node, threats) and _salvage_safe(state, graph, owner, ship["position"], local_sector(graph, ship), threats)
 	for waypoint in ship["route"]:
 		if teams[int(waypoint)] not in [0, team]:
@@ -2427,7 +2440,7 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 	return total
 
 static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
-	var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+	var team: int = _combat_group(state, int(ship["owner"]))
 	if not autocast_ready(state, ship, "trade"):
 		if team != 0 and teams[int(ship["at"])] != team:
 			_evacuate_civilian(state, ship, teams)
@@ -2619,7 +2632,7 @@ static func command_miners(state: Dictionary, player: int, ids: Array, field_ind
 		if not useful:
 			return false
 		var teams: Array[int] = planet_teams(state)
-		var team: int = int(state["teams"][player])
+		var team: int = _combat_group(state, player)
 		for ship in selected:
 			var reachable: bool = false
 			for anchor in field_access_systems(state["map"], field):
@@ -2658,7 +2671,7 @@ static func command_miners(state: Dictionary, player: int, ids: Array, field_ind
 static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
 	var fields: Array = state["map"].get("fields", [])
 	var owner: int = int(ship["owner"])
-	var team: int = int(state["teams"].get(owner, 0))
+	var team: int = _combat_group(state, owner)
 	var best: float = INF
 	var chosen: int = -1
 	var best_path: Array[int] = []
@@ -2777,7 +2790,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 		# never transfer cargo from an idle formation's position.
 		if (ship["route"] as Array).is_empty() and int(ship.get("dest", -1)) < 0:
 			var here: int = int(ship["at"])
-			var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+			var team: int = _combat_group(state, int(ship["owner"]))
 			# Even empty miners must keep retrying escape from hostile space.
 			if teams[here] not in [0, team]:
 				if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
@@ -2865,7 +2878,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
 	var here: int = int(ship["at"])
 	var owner: int = int(ship["owner"])
-	var team: int = int(state["teams"].get(owner, 0))
+	var team: int = _combat_group(state, owner)
 	var local: Dictionary = state["planets"][here]
 	if teams[here] not in [0, team]:
 		_evacuate_civilian(state, ship, teams)
@@ -3303,6 +3316,10 @@ static func initialize_diplomacy(state: Dictionary) -> bool:
 		return false
 	state["diplomacy"] = {}
 	state["diplomacy_revision"] = 1
+	# Legacy team exploration cannot be attributed to individual empires.
+	# Rebuild from their own stations rather than leaking former team data.
+	state["explored"] = {}
+	update_exploration(state)
 	return true
 
 static func _diplomacy_pair(a: int, b: int) -> Vector2i:
@@ -3532,7 +3549,14 @@ static func service_targets(state: Dictionary, only_id: int = -1) -> Dictionary:
 	return targets
 
 static func _friendly_target(state: Dictionary, owner: int, target: Dictionary) -> bool:
-	return not target.is_empty() and int(target.get("owner", 0)) > 0 and int(state["teams"].get(owner, 0)) == int(state["teams"].get(int(target["owner"]), -1))
+	return not target.is_empty() and empires_allied(state, owner, int(target.get("owner", 0)))
+
+# Trade permission does not authorize an uncompensated cargo transfer.
+# Only explicit paid shipments and gifts may later cross ownership.
+static func _cargo_target_allowed(state: Dictionary, owner: int, target: Dictionary) -> bool:
+	if state.has("diplomacy"):
+		return not target.is_empty() and owner > 0 and int(target.get("owner", 0)) == owner
+	return _friendly_target(state, owner, target)
 
 static func _damaged(target: Dictionary) -> bool:
 	return not target.is_empty() and float(target["entity"].get("hp", target["max_hp"])) < float(target["max_hp"]) - EPS
@@ -3543,7 +3567,7 @@ static func can_deposit(state: Dictionary, ship: Dictionary, target_id: int) -> 
 		return false
 	if ship.get("kind", "") == "colony_ship" and ref.get("kind", "") != "station":
 		return false
-	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or target_id == int(ship["id"]) or not _friendly_target(state, int(ship["owner"]), ref) or _cargo_total(ship) <= EPS:
+	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or target_id == int(ship["id"]) or not _cargo_target_allowed(state, int(ship["owner"]), ref) or _cargo_total(ship) <= EPS:
 		return false
 	if ref["kind"] == "ship":
 		return cargo_free(ref["entity"]) > EPS
@@ -3702,7 +3726,7 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	var order: Dictionary = ship["cargo_order"]
 	var ref: Dictionary = targets.get(int(order.get("target", -1)), {})
 	var drop: bool = order["kind"] == "drop"
-	if not drop and (not _friendly_target(state, int(ship["owner"]), ref) or ref.get("entity", {}).get("kind", "") in ["science_ship", "colony_ship"]):
+	if not drop and (not _cargo_target_allowed(state, int(ship["owner"]), ref) or ref.get("entity", {}).get("kind", "") in ["science_ship", "colony_ship"]):
 		ship.erase("cargo_order")
 		_finish_manual(ship)
 		return false
@@ -5425,13 +5449,12 @@ static func _reuse_combat_threats(state: Dictionary, graph: Dictionary, combat_i
 	if not combat_index.has("snapshot"):
 		return _salvage_threats(state, graph, combat_index)
 	var count: int = 0
-	var state_teams: Dictionary = state["teams"]
 	for craft in state["ships"]:
 		if not armed(craft) or not craft.get("position", Vector2.INF).is_finite():
 			continue
 		count += 1
 		var entry: Array = combat_index.get(int(craft["id"]), [])
-		if entry.size() != 3 or not _threat_signature_matches(craft, entry[0]) or int(entry[2]) != int(state_teams.get(int(craft["owner"]), 0)):
+		if entry.size() != 3 or not _threat_signature_matches(craft, entry[0]) or int(entry[2]) != _combat_group(state, int(craft["owner"])):
 			return _salvage_threats(state, graph, combat_index)
 	if count != int(combat_index["count"]):
 		return _salvage_threats(state, graph, combat_index)
@@ -5446,7 +5469,7 @@ static func _salvage_threats(state: Dictionary, graph: Dictionary, combat_index:
 	for craft in state["ships"]:
 		if not armed(craft) or not craft.get("position", Vector2.INF).is_finite():
 			continue
-		var team: int = int(state["teams"].get(int(craft["owner"]), 0))
+		var team: int = _combat_group(state, int(craft["owner"]))
 		var point: Vector2 = craft["position"]
 		var cached: Array = combat_index.get(int(craft["id"]), [])
 		var sector: int
@@ -5469,13 +5492,13 @@ static func _salvage_safe(state: Dictionary, graph: Dictionary, owner: int, poin
 		sector = sector_at(graph, point, range(graph["points"].size()))
 	if _hostile_system(state, owner, sector):
 		return false
-	var team: int = int(state["teams"].get(owner, 0))
-	return _salvage_threat_free(point, sector, team, threats)
+	var team: int = _combat_group(state, owner)
+	return _salvage_threat_free(point, sector, team, threats, state)
 
 # Threat geometry is frozen for the movement phase; ownership remains live.
 # Cache ordered hostile slots per querying team and frozen cell.
 # Mixed cells also avoid repeated allied-hull filtering.
-static func _threat_hostile_slots(threats: Dictionary, cell: Vector2i, teams: PackedInt32Array, slots: Array, team: int) -> Array:
+static func _threat_hostile_slots(threats: Dictionary, cell: Vector2i, teams: PackedInt32Array, slots: Array, team: int, state: Dictionary = {}) -> Array:
 	if not threats.has("hostile_cell_slots"):
 		threats["hostile_cell_slots"] = {}
 	var cache: Dictionary = threats["hostile_cell_slots"]
@@ -5485,14 +5508,14 @@ static func _threat_hostile_slots(threats: Dictionary, cell: Vector2i, teams: Pa
 	if not by_cell.has(cell):
 		var hostile: Array = []
 		for slot in slots:
-			if teams[slot] != team:
+			if _combat_groups_hostile(state, team, teams[slot]):
 				hostile.append(slot)
 		by_cell[cell] = hostile
 	return by_cell[cell]
 
-static func _salvage_threat_free(point: Vector2, sector: int, team: int, threats: Dictionary) -> bool:
+static func _salvage_threat_free(point: Vector2, sector: int, team: int, threats: Dictionary, state: Dictionary = {}) -> bool:
 	for other_team in threats["sectors"].get(sector, {}):
-		if int(other_team) != team:
+		if _combat_groups_hostile(state, team, int(other_team)):
 			return false
 	var cell := Vector2i(floori(point.x / REPAIR_SAFE_RADIUS), floori(point.y / REPAIR_SAFE_RADIUS))
 	if threats.has("positions"):
@@ -5504,14 +5527,14 @@ static func _salvage_threat_free(point: Vector2, sector: int, team: int, threats
 				var slots: Array = threats["cells"].get(key, [])
 				if slots.is_empty():
 					continue
-				for slot in _threat_hostile_slots(threats, key, teams, slots, team):
+				for slot in _threat_hostile_slots(threats, key, teams, slots, team, state):
 					if point.distance_squared_to(positions[slot]) <= REPAIR_SAFE_RADIUS * REPAIR_SAFE_RADIUS:
 						return false
 		return true
 	for x in range(-1, 2):
 		for y in range(-1, 2):
 			for threat in threats["cells"].get(cell + Vector2i(x, y), []):
-				if int(threat[0]) != team and point.distance_squared_to(threat[1]) <= REPAIR_SAFE_RADIUS * REPAIR_SAFE_RADIUS:
+				if _combat_groups_hostile(state, team, int(threat[0])) and point.distance_squared_to(threat[1]) <= REPAIR_SAFE_RADIUS * REPAIR_SAFE_RADIUS:
 					return false
 	return true
 
@@ -5526,13 +5549,13 @@ static func _salvage_sector_center_safe(state: Dictionary, graph: Dictionary, ow
 	var sector: int = int(centers[node])
 	if _hostile_system(state, owner, sector):
 		return false
-	var team: int = int(state["teams"].get(owner, 0))
+	var team: int = _combat_group(state, owner)
 	var key := Vector2i(node, team)
 	if not threats.has("center_safety"):
 		threats["center_safety"] = {}
 	var safety: Dictionary = threats["center_safety"]
 	if not safety.has(key):
-		safety[key] = _salvage_threat_free(point, sector, team, threats)
+		safety[key] = _salvage_threat_free(point, sector, team, threats, state)
 	return bool(safety[key])
 
 # Cache the bounded topology walk independently of mutable safety. For an
@@ -5555,7 +5578,7 @@ static func _auto_salvage_sectors(state: Dictionary, graph: Dictionary, owner: i
 						next.append(neighbor)
 			frontier = next
 		topology[origin] = candidates.keys()
-	var team: int = int(state["teams"].get(owner, 0))
+	var team: int = _combat_group(state, owner)
 	var known: Dictionary = {}
 	var planets: int = state["planets"].size()
 	for node in topology[origin]:
@@ -5814,7 +5837,7 @@ static func _salvage_depot_route(state: Dictionary, graph: Dictionary, ship: Dic
 	var nav: Dictionary = graph if fighter else state["map"]
 	var points: Array = nav["points"]
 	var owner: int = int(ship["owner"])
-	var team: int = int(state["teams"].get(owner, 0))
+	var team: int = _combat_group(state, owner)
 	if team == 0:
 		return false
 	var allowed: Array[int] = planet_teams(state)
@@ -5926,11 +5949,11 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		return false
 	var depot: int = int(ship.get("salvage_depot", -1))
 	var owner: int = int(ship["owner"])
-	var team: int = int(state["teams"].get(owner, 0))
+	var team: int = _combat_group(state, owner)
 	for waypoint in ship["route"]:
 		if int(waypoint) == int(ship["at"]) or waypoint >= state["planets"].size():
 			continue
-		var waypoint_team: int = int(state["teams"].get(int(state["planets"][waypoint]["owner"]), 0))
+		var waypoint_team: int = _combat_group(state, int(state["planets"][waypoint]["owner"]))
 		if waypoint_team != 0 and waypoint_team != team:
 			depot = -1
 			break
@@ -6553,7 +6576,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, reserved: Dictionary) -> int:
 	var points: Array = state["map"]["points"]
 	var teams: Array[int] = planet_teams(state)
-	var team: int = int(state["teams"].get(player, 0))
+	var team: int = _combat_group(state, player)
 	var here: int = int(ship["at"])
 	if team == 0 or (teams[here] != team and military_home(state, player) >= 0):
 		return -1
@@ -7182,12 +7205,11 @@ static func _repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, 
 	if site < 0 or site >= (state["planets"] as Array).size():
 		return false
 	var planet: Dictionary = state["planets"][site]
-	if int(planet["owner"]) != owner or not has_station(planet):
+	if not has_station(planet) or (not diplomacy_allows(state, owner, int(planet["owner"]), "repair") if state.has("diplomacy") else int(planet["owner"]) != owner):
 		return false
 	var center: Vector2 = station_position(state, site, float(state["elapsed"]))
-	var team: int = int(state["teams"].get(owner, 0))
 	for other in state["ships"]:
-		if other.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and int(state["teams"].get(int(other["owner"]), 0)) != team and combat_position(state, graph, other).distance_to(center) <= REPAIR_SAFE_RADIUS:
+		if other.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and empires_hostile(state, owner, int(other["owner"])) and combat_position(state, graph, other).distance_to(center) <= REPAIR_SAFE_RADIUS:
 			return false
 	return true
 
@@ -7512,7 +7534,7 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 # hostile. Consider both ends of its existing leg without moving the hull.
 # Only the initial hostile waypoint may be used to leave hostile territory.
 static func _evacuate_civilian(state: Dictionary, ship: Dictionary, teams: Array[int]) -> bool:
-	var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+	var team: int = _combat_group(state, int(ship["owner"]))
 	var miner: bool = ship.get("kind", "") == "miner"
 	var points: Array = state["map"]["points"]
 	_ensure_position(points, ship)
@@ -7552,7 +7574,7 @@ static func _reroute_after_capture(state: Dictionary, index: int) -> void:
 		var kind: String = str(ship.get("kind", ""))
 		if kind not in ["ship", "miner"] or _salvage_active(ship):
 			continue
-		var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+		var team: int = _combat_group(state, int(ship["owner"]))
 		if teams[index] == team:
 			continue
 		if int(ship["at"]) != index and int(ship.get("source", -1)) != index and int(ship.get("dest", -1)) != index and not (ship["route"] as Array).has(index):
@@ -8566,7 +8588,12 @@ const CLOAK_REVEAL_TIME: float = 5.0
 static func ship_visible_to_team(state: Dictionary, ship: Dictionary, team: int) -> bool:
 	if not bool(ship.get("cloaked", false)):
 		return true
-	return _combat_group(state, int(ship.get("owner", -1))) == team or ship.get("cloak_detected", []).has(team)
+	if _shares_group_vision(state, team, _combat_group(state, int(ship.get("owner", -1)))):
+		return true
+	for detector in ship.get("cloak_detected", []):
+		if _shares_group_vision(state, team, int(detector)):
+			return true
+	return false
 
 static func _detect_cloaked(state: Dictionary, ships: Array, cells: Dictionary, positions: Dictionary, team_by_id: Dictionary) -> void:
 	var reach: int = ceili(CLOAK_DETECTION_RANGE / LASER_RANGE)
