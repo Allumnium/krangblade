@@ -427,6 +427,8 @@ var resource_hover_panel: PanelContainer
 var resource_hover_label: Label
 var hovered_resource: String = ""
 var global_population_label: Label
+var global_credit_label: Label
+var global_credit_income_label: Label
 var year_label: Label
 var time_buttons: Dictionary = {}
 var game_visual_clock: float = 0.0
@@ -704,6 +706,7 @@ func _build_ui() -> void:
 	header_panel.add_child(row)
 	year_label = _global_stat(row, "%d A.D." % ECONOMY.START_YEAR, HUD.ACCENT)
 	_build_global_bar(row)
+	_build_credit_stat(row)
 	global_population_label = _global_stat(row, "0", Color("#b9d9ed"), true)
 	var header_spacer := Control.new()
 	header_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -3871,6 +3874,24 @@ func _build_global_bar(stats: Container) -> void:
 		global_resource_segments[resource] = []
 		strip.draw.connect(_draw_resource_fill.bind(strip, resource))
 
+func _build_credit_stat(parent: Container) -> void:
+	var tile := PanelContainer.new()
+	tile.custom_minimum_size.x = 94.0
+	tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#284661"), 4, 3))
+	parent.add_child(tile)
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 2)
+	tile.add_child(stack)
+	global_credit_label = _label("0 GC", 12)
+	global_credit_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	global_credit_label.add_theme_color_override("font_color", Color("#e7c76b"))
+	stack.add_child(global_credit_label)
+	global_credit_income_label = _label("+0 GC/yr", 12)
+	global_credit_income_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	global_credit_income_label.add_theme_color_override("font_color", Color("#7cdb9b"))
+	stack.add_child(global_credit_income_label)
+	global_resource_tiles["credits"] = tile
+
 func _global_stat(parent: Container, value: String, tint: Color, population: bool = false) -> Label:
 	var tile := PanelContainer.new()
 	tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#284661"), 4, 3))
@@ -3944,6 +3965,10 @@ func _build_resource_hover() -> void:
 	resource_hover_panel.hide()
 
 func _resource_breakdown(state: Dictionary, resource: String) -> String:
+	if resource == "credits":
+		var balance: float = ECONOMY.credit_balance(state, _me())
+		var income: float = ECONOMY.resident_tax_income(state, _me())
+		return "Galactic Credits · %.2f GC\nResident taxes (%.0f%%/yr): +%.2f GC/yr\nNet income: +%.2f GC/yr" % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, income]
 	if resource == "population":
 		var population_totals: Dictionary = ECONOMY.empire_totals(state, _me())
 		var lines: PackedStringArray = ["Population · %s people" % _compact_amount(float(population_totals["population"])), "Residents: %s · Ships: %s · Embarking: %s" % [_compact_amount(float(population_totals["resident_population"])), _compact_amount(float(population_totals["ship_population"])), _compact_amount(float(population_totals["embarking_population"]))], "Current local growth (people/yr)"]
@@ -4034,6 +4059,10 @@ func _update_resource_hover() -> void:
 func _refresh_global_bar(state: Dictionary) -> void:
 	year_label.text = "%d A.D." % ECONOMY.current_year(state)
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
+	var credit_income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE
+	global_credit_label.text = "%s GC" % _compact_amount(ECONOMY.credit_balance(state, _me()))
+	global_credit_income_label.text = "+%s GC/yr" % _compact_amount(credit_income)
+	global_credit_income_label.add_theme_color_override("font_color", Color("#7cdb9b") if credit_income > 0.0 else Color.WHITE)
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])
 		var annual: float = _empire_resource_delta(state, resource)

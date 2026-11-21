@@ -15,6 +15,8 @@ const RESOURCES = ["Metals", "Organics", "Crystals"]
 const EXTRACTED = ["Metals", "Crystals"]
 const ACTIVE_PRODUCTION = RESOURCES
 const STARTING_STOCK = {"Metals": 1650.0, "Organics": 300.0, "Crystals": 0.0}
+const STARTING_GC: float = 5000.0
+const RESIDENT_TAX_RATE: float = 0.01
 const BUILDING_BONUS: float = 0.25
 const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional repeatable local production infrastructure; no self-input recipes.
@@ -269,6 +271,10 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 				var offset: Vector2 = Vector2.from_angle(float(index) * 2.399963 + float(slot) * TAU / 6.0) * (SHIP_CLEARANCE * 1.8)
 				_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind], "spawn_offset": offset, "starting_fleet": true})
 				slot += 1
+	var credits: Dictionary = {}
+	for id in ordered:
+		credits[id] = STARTING_GC
+	state["galactic_credits"] = credits
 	update_exploration(state)
 	return state
 
@@ -418,6 +424,31 @@ static func raw_antimatter_totals(state: Dictionary, player: int) -> Dictionary:
 		if int(ship["owner"]) == player:
 			cargo += float(ship.get("cargo", {}).get(ANTIMATTER, 0.0))
 	return {"stock": stock, "cargo": cargo}
+
+# Credits are electronic empire balances, not local stock or ship cargo.
+static func credit_balance(state: Dictionary, player: int) -> float:
+	return float(state.get("galactic_credits", {}).get(player, 0.0))
+
+static func resident_tax_income(state: Dictionary, player: int) -> float:
+	var total: float = 0.0
+	if player <= 0 or not state.get("galactic_credits", {}).has(player):
+		return total
+	for planet in state.get("planets", []):
+		if int(planet["owner"]) == player:
+			total += maxf(0.0, float(planet["population"])) * RESIDENT_TAX_RATE
+	return total
+
+# One pass over systems, independent of fleet size. Use starting residents
+# for each simulation substep; ship crews and reserved construction crew do
+# not contribute. Never mint funds for neutral or unregistered owners.
+static func _accrue_resident_taxes(state: Dictionary, dt: float) -> void:
+	if dt <= 0.0:
+		return
+	var credits: Dictionary = state.get("galactic_credits", {})
+	for planet in state.get("planets", []):
+		var owner: int = int(planet["owner"])
+		if owner > 0 and credits.has(owner):
+			credits[owner] = float(credits[owner]) + maxf(0.0, float(planet["population"])) * RESIDENT_TAX_RATE * dt
 
 static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 	var stock: Dictionary = empty_stock()
@@ -8127,6 +8158,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
+	_accrue_resident_taxes(state, dt)
 	state["elapsed"] = float(state["elapsed"]) + dt
 	var transfer_events: Dictionary = state.get("cargo_transfers", {})
 	for key in transfer_events.keys():

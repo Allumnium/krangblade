@@ -151,6 +151,9 @@ func _phase_changed() -> void:
 			_fail("New matches must initialize bilateral diplomacy.")
 			return
 		for peer in roster:
+			if ECON.credit_balance(state, int(peer)) != ECON.STARTING_GC:
+				_fail("Starting treasury did not initialize for every peer.")
+				return
 			for other in roster:
 				if peer != other and ECON.diplomatic_relation(state, int(peer), int(other)) != ECON.DIPLO_NEUTRAL:
 					_fail("New matches must start neutral.")
@@ -395,11 +398,15 @@ func _check_time_controls(state: Dictionary) -> bool:
 	if speed_stage == 0:
 		if paused_elapsed < 0.0:
 			paused_elapsed = float(state["elapsed"])
+			set_meta("paused_credits", (state["galactic_credits"] as Dictionary).duplicate())
 			# Invalid values are rejected from both host and guest.
 			session.call("request_time_speed", 3 if role == "host" else 10)
 			return false
 		if not is_equal_approx(float(state["elapsed"]), paused_elapsed):
 			_fail("Clock advanced while paused.")
+			return false
+		if state["galactic_credits"] != get_meta("paused_credits"):
+			_fail("Treasury changed while paused.")
 			return false
 		# Queue and cancel a timed station purchase on every peer
 		# while paused, so the replicated queue and salvage are observable.
@@ -919,6 +926,10 @@ func _check_economy_sync() -> void:
 			if role == "client" and int(session.get("diagnostic_planet_compact_received")) < 1:
 				_fail("Guest did not reconstruct compact planet state.")
 				return
+			for peer in session.get("players"):
+				if ECON.credit_balance(state, int(peer)) <= ECON.STARTING_GC:
+					_fail("Positive resident taxes did not replicate after resuming.")
+					return
 			if not _check_reward_redraft(state):
 				create_timer(0.25).timeout.connect(_check_economy_sync)
 				return
@@ -1208,11 +1219,15 @@ func _check_planet_motion_codec(state: Dictionary) -> bool:
 	var wire_state: Dictionary = state.duplicate()
 	wire_state["planets"] = live
 	wire_state["ai_waves"] = {1: {"members": [1, 2]}}
+	wire_state["galactic_credits"] = (state["galactic_credits"] as Dictionary).duplicate()
+	wire_state["galactic_credits"][1] = 9876.54321
 	var wire: Dictionary = session.call("_encode_replica", wire_state, state["map"], false, template)
 	if not wire.get("_wire_planets_compact", false) or wire.has("_wire_planet_template") or wire.has("ai_waves") or wire.has("next_ai") or wire.has("next_operation_id"):
 		return false
 	var decoded: Dictionary = bytes_to_var(var_to_bytes(wire))
 	var restored: Array = session.call("_restore_planets", decoded["planets"], template)
+	if decoded.get("galactic_credits") != wire_state["galactic_credits"]:
+		return false
 	if restored != live or wire_state["ai_waves"].is_empty() or wire["operations"] != state["operations"]:
 		return false
 	var first: Dictionary = session.call("_encode_replica", wire_state, state["map"], true, template)

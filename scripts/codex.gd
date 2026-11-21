@@ -4,7 +4,7 @@ const E = preload("res://scripts/economy_rules.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
 const TOPICS = [
 	["Getting started", "Overview", "opening start strategy time victory basics"],
-	["Economy", "Resources", "metals organics crystals antimatter mining stock production"],
+	["Economy", "Resources", "metals organics crystals antimatter mining stock production galactic credits currency taxes treasury gc"],
 	["Economy", "Population & food", "growth doubling reserve farming starvation settlements habitat"],
 	["Economy", "Mining & salvage", "miner asteroid crystals cargo repair debris"],
 	["Economy", "Trade & storage", "freighter logistics import export warehouse thresholds blockade"],
@@ -297,6 +297,8 @@ func _resources() -> void:
 	for r in E.RESOURCES:
 		rows.append([r, "%.0f t" % float(E.STARTING_STOCK[r])])
 	_table(["Resource", "Stock"], rows)
+	_section("Galactic Credits (GC)")
+	_body("Each empire starts with %.0f GC and earns %.0f%% of its resident population per simulation year in taxes. Ship crews do not pay taxes. The HUD shows your balance and annual income." % [E.STARTING_GC, E.RESIDENT_TAX_RATE * 100.0])
 	_section("Raw antimatter")
 	_body("Science vessels follow sector lanes to a Pulsar, then collect one unit after 30 years in range. Collect Antimatter (C), then choose a Pulsar; right-click the ability to enable autocast (off by default). Antimatter remains aboard.")
 
