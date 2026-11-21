@@ -3844,7 +3844,7 @@ static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
 
 static func autocast_duration(mode: String) -> float:
 	match mode:
-		"repair", "farm", "retreat": return 0.0
+		"repair", "farm", "retreat", "explore": return 0.0
 		"mine", "salvage": return MINING_SALVAGE_COOLDOWN_YEARS
 	return AUTOCAST_COOLDOWN_YEARS
 
@@ -3852,6 +3852,8 @@ static func autocast_remaining(state: Dictionary, ship: Dictionary, mode: String
 	if mode == "wander" and bool(ship.get("wander_cooldown_override", false)):
 		return 0.0
 	var duration: float = autocast_duration(mode)
+	if duration <= 0.0:
+		return 0.0
 	# The existing authoritative deadlines represent the longest cooldown.
 	# Shorter modes share the same start/arrival timestamp without new fields.
 	var longest: float = maxf(arrival_wait_remaining(state, ship), maxf(0.0, float(ship.get("auto_cooldown_until", 0.0)) - float(state["elapsed"])))
@@ -7853,7 +7855,7 @@ static func _dispatch_explorers(state: Dictionary, graph: Dictionary) -> void:
 		if bool(craft.get("unit_order", {}).get("exploration", false)) and not craft.get("route", []).is_empty():
 			var destination := Vector2i(team, int(craft.get("dest", node)))
 			occupancy[destination] = int(occupancy.get(destination, 0)) + 1
-		if craft.get("kind", "") == "scout" and _is_idle_ship(craft) and autocast_ready(state, craft, "explore"):
+		if craft.get("kind", "") == "scout" and _is_idle_ship(craft) and craft.get("order_queue", []).is_empty() and not _unit_order_running(craft) and autocast_ready(state, craft, "explore"):
 			scouts.append(craft)
 	if scouts.is_empty():
 		return
