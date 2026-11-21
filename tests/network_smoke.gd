@@ -193,6 +193,8 @@ func _phase_changed() -> void:
 					for j in range(i + 1, ordered.size()):
 						assert(ECON.diplomacy_declare_war(state, ordered[i], ordered[j]))
 				for peer in ordered:
+					# Fund the existing large construction fixture after checking opening balances.
+					state["galactic_credits"][peer] = 100000.0
 					var progress: Dictionary = ECON.objective_progress(state, peer)
 					progress["points"]["economic"] = 2
 					progress["points"]["tech"] = 1
@@ -380,6 +382,15 @@ func _prepare_commands() -> void:
 
 # Each real peer acknowledges the observed speed before the host advances.
 # Reuse otherwise untouched local Crystals thresholds as test acknowledgments.
+# While paused, cash plus all prepaid construction is conserved.
+func _reserved_credits(state: Dictionary, player: int) -> float:
+	var total: float = ECON.credit_balance(state, player)
+	for system in state["planets"]:
+		if int(system["owner"]) == player:
+			for job in system["queue"]:
+				total += float(job.get("credit_cost", 0.0))
+	return total
+
 func _check_time_controls(state: Dictionary) -> bool:
 	if speed_stage >= TEST_SPEEDS.size():
 		return true
@@ -398,16 +409,20 @@ func _check_time_controls(state: Dictionary) -> bool:
 	if speed_stage == 0:
 		if paused_elapsed < 0.0:
 			paused_elapsed = float(state["elapsed"])
-			set_meta("paused_credits", (state["galactic_credits"] as Dictionary).duplicate())
+			var paused_credits: Dictionary = {}
+			for peer in state["galactic_credits"]:
+				paused_credits[peer] = _reserved_credits(state, int(peer))
+			set_meta("paused_credits", paused_credits)
 			# Invalid values are rejected from both host and guest.
 			session.call("request_time_speed", 3 if role == "host" else 10)
 			return false
 		if not is_equal_approx(float(state["elapsed"]), paused_elapsed):
 			_fail("Clock advanced while paused.")
 			return false
-		if state["galactic_credits"] != get_meta("paused_credits"):
-			_fail("Treasury changed while paused.")
-			return false
+		for peer in state["galactic_credits"]:
+			if not is_equal_approx(_reserved_credits(state, int(peer)), float(get_meta("paused_credits")[peer])):
+				_fail("Treasury plus reservations changed while paused.")
+				return false
 		# Queue and cancel a timed station purchase on every peer
 		# while paused, so the replicated queue and salvage are observable.
 		var outpost_index: int = int(state["map"]["planetless"][home_index])
@@ -422,6 +437,9 @@ func _check_time_controls(state: Dictionary) -> bool:
 					if int(outpost.get("orbital_housing", 0)) != 0 or int(job["size"]) != 0 or job["cost"] != ECON.ORBITAL_HOUSING_COST or float(job["work"]) != ECON._work("orbital_housing", 1) or float(job["progress"]) != 0.0:
 						_fail("Station infrastructure queue did not replicate correctly.")
 						return false
+					if float(job.get("credit_cost", 0.0)) != ECON.construction_credit_cost(ECON.ORBITAL_HOUSING_COST):
+						_fail("Construction GC reservation did not replicate.")
+						return false
 					set_meta("station_cancel_job", int(job["id"]))
 					set_meta("station_cancel_sent", true)
 					session.call("request_cancel", outpost_index, int(job["id"]))
@@ -434,8 +452,8 @@ func _check_time_controls(state: Dictionary) -> bool:
 			for pile in state["salvage"].values():
 				if int(pile.get("construction_job", -1)) == int(get_meta("station_cancel_job", -2)) and pile["resource"] == resource:
 					recovered += float(pile["amount"])
-			if not is_zero_approx(float(outpost["stock"][resource])) or not is_equal_approx(recovered, float(ECON.ORBITAL_HOUSING_COST[resource])):
-				_fail("Station construction cancellation did not replicate full material salvage.")
+			if not is_equal_approx(float(outpost["stock"][resource]), float(ECON.ORBITAL_HOUSING_COST[resource])) or not is_zero_approx(recovered):
+				_fail("Station construction cancellation did not replicate direct material refund.")
 				return false
 		# Explicit salvage is tested while paused, before automatic collection
 		# can sweep the same fixture. Guest commands use the actual RPC path.

@@ -9,9 +9,16 @@ func _planetary_fixture(seed_value: int, players: int = 3, layout: String = "Gri
 	map_data["planetless"] = []
 	return map_data
 
+# Legacy material, crew and combat fixtures isolate those constraints.
+func _funded_fixture(map_data: Dictionary, players: Dictionary, ordered: Array[int], starting_fleet: bool = true) -> Dictionary:
+	var state: Dictionary = ECON.create(map_data, players, ordered, starting_fleet)
+	for player in ordered:
+		state["galactic_credits"][player] = 1000000.0
+	return state
+
 func _test_hull_index() -> void:
 	var map: Dictionary = _planetary_fixture(426)
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var craft: Dictionary = state["ships"][0]
 	var id: int = int(craft["id"])
 	craft["position"] = Vector2.ZERO
@@ -30,7 +37,7 @@ func _test_hull_index() -> void:
 
 func _test_shipyard_rally() -> void:
 	var map: Dictionary = {"seed": 426, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var system: Dictionary = state["planets"][0]
 	system["population"] = 100000.0
 	system["yards"].append({"level": 1, "job": -1, "hp": ECON.YARD_HP})
@@ -116,7 +123,7 @@ func _test_rounded_sector_limits() -> void:
 
 func _test_explicit_hold_pose() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	var point := Vector2(100, 200)
 	var a: Dictionary = {"id": 501, "kind": "fighter", "owner": 1, "origin": 0, "at": 0, "dest": 1, "source": -1, "route": [1], "leg": 0.0, "position": point, "heading": Vector2.LEFT, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	var b: Dictionary = a.duplicate(true)
@@ -134,7 +141,7 @@ func _test_explicit_hold_pose() -> void:
 
 func _test_soft_separation() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var point := Vector2(100.0, 200.0)
 	var a: Dictionary = {"id": 501, "kind": "fighter", "owner": 1, "at": 0, "route": [], "position": point, "holding": true, "hold_position": point, "hold_sector": 0}
 	var b: Dictionary = a.duplicate(true)
@@ -175,7 +182,7 @@ func _test_soft_separation() -> void:
 	assert(ECON.sector_contains(graph, 0, a["position"]) and ECON.sector_contains(graph, 0, b["position"]))
 
 func _test_maintain_targets() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1])
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1])
 	var p: Dictionary = state["planets"][0]
 	assert(ECON.origin_count(state, 0, "fighter") == 2)
 	assert(not ECON.set_maintain(state, 2, 0, "fighter", 3))
@@ -197,7 +204,7 @@ func _test_maintain_targets() -> void:
 
 func _test_yard_autobuild_and_station_approach() -> void:
 	var map: Dictionary = {"seed": 426, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var p: Dictionary = state["planets"][0]
 	p["population"] = 100000.0
 	p["yards"].append({"level": 1, "job": -1, "hp": ECON.YARD_HP})
@@ -231,7 +238,7 @@ func _test_yard_autobuild_and_station_approach() -> void:
 	print("PASS: per-shipyard round robin, capacity, cancellation, upgrade cap and direct station approach")
 
 func _test_population_queue_priority() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
 	p["population"] = 10000.0
 	for resource in ECON.RESOURCES:
@@ -264,7 +271,7 @@ func _test_population_queue_priority() -> void:
 func _test_mining_lasers() -> void:
 	var rock := Vector2(1000, 0)
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": [{"position": rock, "radius": 40.0, "anchor": 0, "Metals": 0.5, "Crystals": 0.5, "chunks": [{"id": 7, "position": rock, "resource": "Metals", "remaining": 24.0}]}]}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var miner: Dictionary = {"id": 100, "owner": 1, "kind": "miner", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": rock + Vector2.LEFT * 20, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "mining", "field": 0, "chunk": 7, "mining_rock": rock, "mining_target": rock + Vector2.LEFT * 20, "mining_years": 0.0}
 	var enemy: Dictionary = {"id": 101, "owner": 2, "kind": "ship", "at": 1, "dest": -1, "route": [], "leg": 0.0, "position": rock + Vector2.UP * 50, "hp": ECON.SHIP_HP}
@@ -297,7 +304,7 @@ func _test_repair_pauses_wander() -> void:
 	assert(ECON.MINER_REPAIR_RATE == 10.0 and ECON.REPAIR_PER_YEAR == 20.0)
 	for reverse in [false, true]:
 		var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-		var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+		var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 		var miner: Dictionary = {"id": 100, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(500, 0), "heading": Vector2.UP, "hp": ECON.ship_max_hp("miner"), "cargo": ECON.empty_stock(), "mining_mode": "idle", "mine_auto": false, "salvage_auto": false, "wander_auto": false}
 		var patient: Dictionary = {"id": 101, "owner": 1, "kind": "scout", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(550, 0), "heading": Vector2.UP, "hp": 20.0, "cargo": ECON.empty_stock(), "wander_auto": true}
 		state["ships"] = [patient, miner] if reverse else [miner, patient]
@@ -315,7 +322,7 @@ func _test_repair_pauses_wander() -> void:
 
 func _test_miner_service_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(10000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var miner: Dictionary = {"id": 100, "owner": 1, "kind": "miner", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(500, 0), "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "delivery", "field": -1}
 	var ally: Dictionary = miner.duplicate(true)
@@ -412,7 +419,7 @@ func _cancelled_material(state: Dictionary, job_id: int, resource: String) -> fl
 	return result
 
 func _test_station_construction_queue() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var p: Dictionary = state["planets"][0]
 	for resource in ECON.RESOURCES:
 		p["stock"][resource] = 10000.0
@@ -471,7 +478,7 @@ func _test_station_construction_queue() -> void:
 
 func _test_ai_capital_fleets() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1, "ai": true}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1, "ai": true}, 2: {"team": 2}}, [1, 2], false)
 	var p: Dictionary = state["planets"][0]
 	p["population"] = 100000.0
 	p["levels"]["Metals"] = 2
@@ -503,7 +510,7 @@ func _test_ai_capital_fleets() -> void:
 
 func _test_ai_timed_orbital_housing() -> void:
 	var galaxy: Dictionary = MAP.generate(827, 2, "Grid")
-	var state: Dictionary = ECON.create(galaxy, {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(galaxy, {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
 	var index: int = galaxy["planetless"][0]
 	var outpost: Dictionary = state["planets"][index]
 	outpost["owner"] = 2
@@ -521,7 +528,7 @@ func _test_ai_timed_orbital_housing() -> void:
 	print("PASS: AI orbital housing uses the same timed station construction queue")
 
 func _test_station_defense_and_ports() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var p: Dictionary = state["planets"][0]
 	p["warehouse_level"] = 3
 	for resource in ECON.RESOURCES:
@@ -596,7 +603,7 @@ func _test_local_avoidance() -> void:
 	print("PASS: forward avoidance, movement budget, unobstructed path and shared endpoint")
 
 func _test_ship_size_classes() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
 	for resource in ECON.RESOURCES:
 		p["stock"][resource] = 100000.0
@@ -625,7 +632,7 @@ func _test_passive_health() -> void:
 	assert(ECON.ship_max_hp("miner") == 200.0 and ECON.ship_max_hp("colony_ship") == 200.0 and ECON.ship_max_hp("science_ship") == 200.0)
 	assert(ECON.ship_max_hp("cruiser") == 1600.0 and ECON.ship_max_hp("destroyer") == 3200.0)
 	assert(ECON.YARD_HP == 1500.0 and ECON.PDS_HP == 300.0)
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1])
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1])
 	var freighter: Dictionary = {}
 	for ship in state["ships"]:
 		if ship["kind"] == "ship":
@@ -642,7 +649,7 @@ func _test_passive_health() -> void:
 
 func _test_manual_conversion_and_stats() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(3000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	ECON._finish(state, 0, state["planets"][0], {"id": 90001, "kind": "colony_ship", "population_allocated": ECON.COLONY_POPULATION})
 	var colony: Dictionary = state["ships"][0]
 	colony["position"] = map["points"][1]
@@ -668,7 +675,7 @@ func _test_manual_conversion_and_stats() -> void:
 
 func _test_nearest_colony_and_queued_hold() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	var far: Dictionary = {"id": 100, "owner": 1, "kind": "colony_ship", "at": 0, "origin": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	var near: Dictionary = far.duplicate(true)
 	near.merge({"id": 101, "at": 1, "position": map["points"][1]}, true)
@@ -695,7 +702,7 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	print("PASS: nearest idle colony dispatch and queued hold after movement")
 
 func _test_stop_order() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], true)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], true)
 	var fighter: Dictionary = {}
 	for craft in state["ships"]:
 		if craft["kind"] == "fighter":
@@ -735,7 +742,7 @@ func _test_combat_sector_presence() -> void:
 	# Preserve passing-fire behavior: friendly-only move stays move-only,
 	# while a hostile in the same sector permits normal pursuit.
 	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var craft: Dictionary = {"id": 101, "kind": "fighter", "owner": 1, "at": 0, "position": Vector2(20, 0), "heading": Vector2.RIGHT, "route": [1], "leg": 0.0, "dest": 1, "source": -1, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock(), "move_only": true}
 	var ally: Dictionary = craft.duplicate(true)
 	ally["id"] = 102
@@ -778,7 +785,7 @@ func _test_ship_activity() -> void:
 
 func _test_salvage_center_cache() -> void:
 	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var threats: Dictionary = ECON._salvage_threats(state, graph)
 	assert(ECON._salvage_sector_center_safe(state, graph, 1, 0, threats))
@@ -1008,7 +1015,7 @@ func _test_packed_threat_records() -> void:
 			assert(ECON._salvage_threat_free(point, -1, team, packed) == ECON._salvage_threat_free(point, -1, team, legacy))
 
 func _test_empire_targets() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	assert(not ECON.set_empire_target(state, 999, "fighter", 5))
 	assert(ECON.set_empire_target(state, 1, "fighter", 4))
 	assert(state["empire_targets"][1]["fighter"] == 4)
@@ -1029,7 +1036,7 @@ func _test_empire_targets() -> void:
 	assert(ECON.set_empire_target(state, 1, "fighter", 0))
 
 func _test_objective_holdings() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	state["ships"] = [{"owner": 1, "crew": 1000.0, "cargo": {"Metals": 100.0}}, {"owner": 2, "crew": 999999.0, "cargo": {"Metals": 100000.0}}]
 	var home: Dictionary = state["planets"][0]
 	home["population"] = 79000.0
@@ -1098,7 +1105,7 @@ func _test_objective_holdings() -> void:
 	print("PASS: one objective per category, colony prerequisites, current holdings, lifetime food, separate rerolls and cooldowns")
 
 func _test_reward_redraft() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var progress: Dictionary = ECON.objective_progress(state, 1)
 	progress["points"]["economic"] = 2
 	progress["points"]["military"] = 1
@@ -1137,7 +1144,7 @@ func _test_reward_redraft() -> void:
 
 func _test_unique_rewards() -> void:
 	for key in ECON.UNIQUE_CONQUEST_REWARDS:
-		var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+		var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 		var category: String = ECON.CONQUEST_REWARDS[key][3]
 		var first: Dictionary = ECON.objective_progress(state, 1)
 		var rival: Dictionary = ECON.objective_progress(state, 2)
@@ -1171,7 +1178,7 @@ func _test_unique_rewards() -> void:
 	print("PASS: exclusive conquest claims, rival refresh, stale clicks, retained points and permanent reservation")
 
 func _test_warp_gates() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var home: Dictionary = state["planets"][0]
 	var other_node: int = 2
@@ -1183,8 +1190,14 @@ func _test_warp_gates() -> void:
 	state["ships"].append(b)
 	assert(not ECON.can_build_warp_gate(state, graph, a))
 	ECON.objective_progress(state, 1)["rewards"] = ["warp_gate"]
+	state["galactic_credits"][1] = ECON.WARP_GATE_CREDIT_COST - 1.0
+	assert(not ECON.build_warp_gate(state, graph, a))
+	assert(a["kind"] == "science_ship" and ECON._cargo_total(a) == 1.0)
+	state["galactic_credits"][1] = 2.0 * ECON.WARP_GATE_CREDIT_COST
 	assert(ECON.build_warp_gate(state, graph, a))
+	assert(ECON.credit_balance(state, 1) == ECON.WARP_GATE_CREDIT_COST)
 	assert(ECON.build_warp_gate(state, graph, b))
+	assert(ECON.credit_balance(state, 1) == 0.0)
 	assert(a["warp_destination"] == b["id"] and b["warp_destination"] == a["id"])
 	assert(ECON._cargo_total(a) == 0.0 and a["hp"] == ECON.WARP_GATE_HP)
 	assert(not ECON.set_warp_destination(state, 2, int(a["id"]), int(b["id"])))
@@ -1199,7 +1212,7 @@ func _test_warp_gates() -> void:
 	print("PASS: warp gate deployment, consumption, ownership, linking, travel and destruction")
 
 func _test_cloaking() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(829), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(829), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	ECON.objective_progress(state, 1)["rewards"] = ["shield_1", "armor", "cloak"]
 	var scout: Dictionary = {"id": 989901, "kind": "scout", "owner": 1, "position": Vector2.ZERO, "hp": ECON.ship_max_hp("scout")}
 	var enemy: Dictionary = {"id": 989902, "kind": "fighter", "owner": 2, "position": Vector2(200.0, 0.0)}
@@ -1228,7 +1241,7 @@ func _test_cloaking() -> void:
 	print("PASS: cloak detection, attack reveal and exclusive scout defenses")
 
 func _test_station_crystals() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var home: Dictionary = state["planets"][0]
 	home["levels"]["Crystals"] = 0
 	assert(ECON.rate(home, "Crystals") == 1.25)
@@ -1286,7 +1299,7 @@ func _test_sfx_rules() -> void:
 	print("PASS: SFX attenuation, bounded candidates, reward cue routing and PCM generation")
 
 func _test_endless_conquest() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var progress: Dictionary = ECON.objective_progress(state, 1)
 	progress["rewards"] = []
 	for key in ECON.CONQUEST_REWARDS:
@@ -1332,6 +1345,8 @@ func _test_galactic_credits() -> void:
 	assert(state["galactic_credits"].size() == 2 and ECON.credit_balance(state, 0) == 0.0)
 	assert(ECON.resident_tax_income(state, 1) == 150.0)
 	assert(float(ECON.empire_totals(state, 1)["ship_population"]) > 0.0)
+	# Isolate income from AI spending.
+	state["ai_players"].clear()
 	ECON.step(state, 0.1)
 	assert(is_equal_approx(ECON.credit_balance(state, 1), 5015.0))
 	assert(is_equal_approx(ECON.credit_balance(state, 2), 5015.0))
@@ -1354,7 +1369,59 @@ func _test_galactic_credits() -> void:
 	assert(ECON.credit_balance(fresh, 1) == 5000.0 and ECON.credit_balance(fresh, 2) == 5000.0)
 	print("PASS: independent Galactic Credits, resident taxes, ownership, pause and fresh matches")
 
+func _test_construction_credits() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
+	var home: Dictionary = state["planets"][0]
+	var fee: float = ECON.construction_credit_cost(ECON.construction_cost(home, "fighter", 1))
+	assert(fee == 275.0)
+	state["galactic_credits"][1] = fee - 1.0
+	var before: Dictionary = home["stock"].duplicate()
+	var next_id: int = int(state["next_id"])
+	assert(not ECON.enqueue(state, 1, 0, "fighter"))
+	assert(home["stock"] == before and home["queue"].is_empty() and int(state["next_id"]) == next_id)
+	assert(ECON.credit_balance(state, 1) == fee - 1.0)
+	state["galactic_credits"][1] = fee
+	assert(not ECON.enqueue(state, 2, 0, "fighter"))
+	assert(ECON.enqueue(state, 1, 0, "fighter"))
+	var job: Dictionary = home["queue"][0]
+	assert(float(job["credit_cost"]) == fee and ECON.credit_balance(state, 1) == 0.0)
+	assert(not ECON.enqueue(state, 1, 0, "fighter"))
+	assert(not ECON.cancel(state, 2, 0, int(job["id"])))
+	assert(ECON.cancel(state, 1, 0, int(job["id"])))
+	assert(ECON.credit_balance(state, 1) == fee and ECON.credit_balance(state, 2) == 5000.0)
+	assert(not ECON.cancel(state, 1, 0, int(job["id"])))
+	assert(ECON.credit_balance(state, 1) == fee)
+	state["galactic_credits"][1] = 100000.0
+	for resource in ECON.RESOURCES:
+		home["stock"][resource] = 100000.0
+	assert(ECON.enqueue(state, 1, 0, "yard"))
+	assert(ECON.enqueue(state, 1, 0, "yard"))
+	var first: Dictionary = home["queue"][0]
+	var second: Dictionary = home["queue"][1]
+	var first_fee: float = float(first["credit_cost"])
+	var second_fee: float = float(second["credit_cost"])
+	var reserved: float = ECON.credit_balance(state, 1)
+	assert(ECON.cancel(state, 1, 0, int(first["id"])))
+	assert(float(second["credit_cost"]) == first_fee)
+	assert(is_equal_approx(ECON.credit_balance(state, 1), reserved + second_fee))
+	var auto_state: Dictionary = ECON.create(_planetary_fixture(828, 1, "Grid"), {1: {"team": 1}}, [1])
+	var auto_home: Dictionary = auto_state["planets"][0]
+	auto_state["galactic_credits"][1] = fee - 1.0
+	assert(ECON.set_empire_target(auto_state, 1, "fighter", 3))
+	ECON._refill_empire_fleets(auto_state)
+	assert(auto_home["queue"].is_empty())
+	auto_state["galactic_credits"][1] = fee
+	auto_state["elapsed"] = 1.0
+	ECON._refill_empire_fleets(auto_state)
+	assert(auto_home["queue"].size() == 1 and ECON.credit_balance(auto_state, 1) == 0.0)
+	var completed: Dictionary = auto_home["queue"][0]
+	completed["population_allocated"] = completed["population_cost"]
+	ECON._finish(auto_state, 0, auto_home, completed)
+	assert(auto_home["queue"].is_empty() and ECON.credit_balance(auto_state, 1) == 0.0)
+	print("PASS: construction GC reservations, insufficient funds, ownership, cancellation, repricing, autoqueue and completion")
+
 func _initialize() -> void:
+	_test_construction_credits()
 	_test_galactic_credits()
 	_test_endless_conquest()
 	_test_sfx_rules()
@@ -1447,7 +1514,7 @@ func _initialize() -> void:
 	_test_antimatter_extraction()
 	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.0}), 500000.0))
 	assert(is_equal_approx(ECON.habitation_capacity({"size_factor": 1.5, "habitation_level": 1}), 1500000.0))
-	var bounds: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1])
+	var bounds: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1])
 	var world: Dictionary = bounds["planets"][0]
 	world["abundance"]["Metals"] = 0.1
 	assert(is_equal_approx(ECON.production_modifier(world, "Metals"), 0.1))
@@ -1553,7 +1620,7 @@ func _initialize() -> void:
 	print("PASS: tenfold asteroid inventory, seeded metal-rich fields and crystal tonnage cap")
 	var players: Dictionary = {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}
 	var ids: Array[int] = [1, 2, 3]
-	var state: Dictionary = ECON.create(graph, players, ids, false)
+	var state: Dictionary = _funded_fixture(graph, players, ids, false)
 	assert(not state["fog_of_war"])
 	for i in range((state["planets"] as Array).size()):
 		assert(ECON.discovered(state, 1, "planets", i))
@@ -1611,7 +1678,7 @@ func _initialize() -> void:
 	assert(not ECON.enqueue(state, 1, 0, "production", "Tech"))
 
 	# Empire totals include cargo once and exclude allied/hostile inventories.
-	var totals_state: Dictionary = ECON.create(graph, players, ids, false)
+	var totals_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	totals_state["planets"][3]["owner"] = 1
 	totals_state["planets"][3]["station"] = {"hp": ECON.STATION_HP}
 	totals_state["planets"][3]["population"] = ECON.COLONY_POPULATION
@@ -1632,7 +1699,7 @@ func _initialize() -> void:
 
 	# Rolling window measures net holdings, not internal cargo transfers.
 	var history: Dictionary = {}
-	var rolling: Dictionary = ECON.create(graph, players, ids, false)
+	var rolling: Dictionary = _funded_fixture(graph, players, ids, false)
 	ECON.sample_resource_rates(rolling, history)
 	for i in range(1, 8):
 		rolling["elapsed"] = float(i)
@@ -1653,7 +1720,7 @@ func _initialize() -> void:
 	ECON.sample_resource_rates(rolling, history)
 	assert(is_equal_approx(float(rolling["resource_rates"][1]["Metals"]), -7.0))
 	# Starting growth is exponential when well below a food-supported plateau.
-	var demographics: Dictionary = ECON.create(graph, players, ids, false)
+	var demographics: Dictionary = _funded_fixture(graph, players, ids, false)
 	var home: Dictionary = demographics["planets"][0]
 	# Isolate terrestrial demographic formulas from independent orbital habitats.
 	home["yards"].clear()
@@ -1822,7 +1889,7 @@ func _initialize() -> void:
 				assert(float(ECON.WAREHOUSE_COSTS[level][material]) == 3.0 * float(ECON.WAREHOUSE_COSTS[level - 1][material]))
 	assert(ECON.ECONOMY_BUILDINGS["Organics"]["cost"] == {"Metals": 240.0})
 	assert(ECON.ECONOMY_BUILDINGS["Crystals"]["cost"] == {"Metals": 240.0})
-	var refunds: Dictionary = ECON.create(graph, players, ids, false)
+	var refunds: Dictionary = _funded_fixture(graph, players, ids, false)
 	var refund_home: Dictionary = refunds["planets"][0]
 	refund_home["levels"]["Metals"] = 0
 	refund_home["warehouse_level"] = 3
@@ -1843,7 +1910,7 @@ func _initialize() -> void:
 		assert(is_equal_approx(float(refund_home["stock"]["Metals"]) + dropped, 10000.0 - ECON.consumption(refund_home, "Metals")))
 		assert(int(refund_home["yards"][0]["job"]) == -1)
 	# Completed and pending shipyards share a hard three-slot limit.
-	var capped: Dictionary = ECON.create(graph, players, ids, false)
+	var capped: Dictionary = _funded_fixture(graph, players, ids, false)
 	var cap_home: Dictionary = capped["planets"][0]
 	cap_home["warehouse_level"] = 3
 	for material in ECON.RESOURCES:
@@ -1870,7 +1937,7 @@ func _initialize() -> void:
 	assert(ECON.shipyard_count(cap_home) == 3)
 	assert(not ECON.enqueue(capped, 1, 0, "yard"))
 	assert(ECON.enqueue(capped, 1, 0, "yard_upgrade", "0"))
-	var gap_state: Dictionary = ECON.create(graph, players, ids, false)
+	var gap_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var gap_home: Dictionary = gap_state["planets"][0]
 	gap_home["warehouse_level"] = 3
 	for material in ECON.RESOURCES:
@@ -1941,7 +2008,7 @@ func _initialize() -> void:
 	assert(ECON.max_size(2) > ECON.max_size(1))
 
 	# Eight shipyard orders including the active job; repeat waits for space.
-	var repeat_state: Dictionary = ECON.create(graph, players, ids, false)
+	var repeat_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var repeat_home: Dictionary = repeat_state["planets"][0]
 	repeat_home["warehouse_level"] = 3
 	repeat_home["yards"][0]["level"] = 2
@@ -1971,7 +2038,7 @@ func _initialize() -> void:
 	assert(names == MAP.system_names(int(graph["seed"]), names.size()))
 
 	# Repeating hulls cycle in order, including under material starvation.
-	var rotation: Dictionary = ECON.create(graph, players, ids, false)
+	var rotation: Dictionary = _funded_fixture(graph, players, ids, false)
 	var rotation_home: Dictionary = rotation["planets"][0]
 	rotation_home["population"] = 450000.0
 	rotation_home["levels"]["Organics"] = 10
@@ -2006,7 +2073,7 @@ func _initialize() -> void:
 	for i in range(9, rotation["ships"].size()):
 		assert(rotation["ships"][i]["kind"] != "fighter")
 	# Two shipyards can start consecutive turns in parallel.
-	var parallel_repeat: Dictionary = ECON.create(graph, players, ids, false)
+	var parallel_repeat: Dictionary = _funded_fixture(graph, players, ids, false)
 	var parallel_home: Dictionary = parallel_repeat["planets"][0]
 	parallel_home["warehouse_level"] = 3
 	for material in ECON.RESOURCES:
@@ -2039,7 +2106,7 @@ func _initialize() -> void:
 		assert(starts[i] == ["fighter", "miner"][i % 2])
 
 	# Automatic system and shipyard upgrades use the shared scheduler.
-	var upgrades: Dictionary = ECON.create(graph, players, ids, false)
+	var upgrades: Dictionary = _funded_fixture(graph, players, ids, false)
 	var upgrade_home: Dictionary = upgrades["planets"][0]
 	upgrade_home["warehouse_level"] = 3
 	upgrade_home["stock"]["Metals"] = 20000.0
@@ -2075,7 +2142,7 @@ func _initialize() -> void:
 	ECON.step(upgrades, 1.0)
 	assert(upgrade_home["queue"].is_empty())
 	# Fighters use the shipyard and are counted separately; no logistics behavior.
-	var military: Dictionary = ECON.create(graph, players, ids, false)
+	var military: Dictionary = _funded_fixture(graph, players, ids, false)
 	assert(not ECON.enqueue(military, 2, 0, "fighter"))
 	assert(ECON.enqueue(military, 1, 0, "fighter"))
 	for i in range(6):
@@ -2100,7 +2167,7 @@ func _initialize() -> void:
 	mineral_map["fields"] = [{"position": metal_pos, "radius": 40.0, "anchor": 0, "Metals": 1.0, "Crystals": 1.0,
 		"chunks": [{"id": 7, "position": metal_pos, "resource": "Metals", "remaining": 24.0},
 			{"id": 9, "position": crystal_pos, "resource": "Crystals", "remaining": 36.0}]}]
-	var mineral: Dictionary = ECON.create(mineral_map, players, ids, false)
+	var mineral: Dictionary = _funded_fixture(mineral_map, players, ids, false)
 	assert(ECON.discovered(mineral, 3, "fields", 0))
 	assert(ECON.set_mining_policy(mineral, 3, 0, false, false, false))
 	mineral["fog_of_war"] = true
@@ -2185,7 +2252,7 @@ func _initialize() -> void:
 	points[0] = Vector2(0, 0)
 	points[1] = Vector2(190, 0)
 	points[2] = Vector2(380, 0)
-	var transport: Dictionary = ECON.create(test_map, players, ids, false)
+	var transport: Dictionary = _funded_fixture(test_map, players, ids, false)
 	var source: Dictionary = transport["planets"][0]
 	var ally: Dictionary = transport["planets"][1]
 	var hostile: Dictionary = transport["planets"][2]
@@ -2236,7 +2303,7 @@ func _initialize() -> void:
 	cp[2] = Vector2(285, 0)
 	cp[3] = Vector2(190, 0)
 	cp[4] = Vector2(190, 95)
-	var colonization: Dictionary = ECON.create(colony_map, players, ids, false)
+	var colonization: Dictionary = _funded_fixture(colony_map, players, ids, false)
 	# This compressed travel/race fixture tests colonization, not overlapping
 	# defensive ranges. Disable home batteries so the competing hulls survive.
 	for system in colonization["planets"]:
@@ -2280,7 +2347,7 @@ func _initialize() -> void:
 		assert(before.distance_to(loser["position"]) <= ECON.ship_speed(str(loser["kind"])) * 0.5 + 0.01)
 	assert(int(loser["dest"]) == -1)
 	assert(int(loser["at"]) == loser_home and loser["route"].is_empty())
-	var distant: Dictionary = ECON.create(colony_map, players, ids, false)
+	var distant: Dictionary = _funded_fixture(colony_map, players, ids, false)
 	for system in distant["planets"]:
 		system["pds"].clear()
 	var distant_ship: Dictionary = {"id": 999, "kind": "colony_ship", "owner": 1, "at": 0, "position": cp[0], "route": [], "leg": 0.0, "dest": -1}
@@ -2301,7 +2368,7 @@ func _initialize() -> void:
 	force_map["edges"] = [[0, 3], [3, 4]]
 	force_map["field_edges"] = []
 	force_map["fields"] = [{"position": Vector2(1000, 100), "anchor": 3}]
-	var force_state: Dictionary = ECON.create(force_map, players, ids, false)
+	var force_state: Dictionary = _funded_fixture(force_map, players, ids, false)
 	var field_node: int = force_points.size()
 	var force_graph: Dictionary = ECON.military_graph(force_state)
 	var force_weights: Dictionary = ECON.military_policy(force_state, 1, "fighter")
@@ -2347,7 +2414,7 @@ func _initialize() -> void:
 	assert(force_fleet[0]["at"] == field_node and force_fleet[0]["route"].is_empty())
 	print("PASS: normalized POI force allocation, nearest assignments and continuous reversal")
 	# Simultaneous burst fire: allies cannot be targeted; each blaster shot deals 1 HP.
-	var duel: Dictionary = ECON.create(force_map, players, ids, false)
+	var duel: Dictionary = _funded_fixture(force_map, players, ids, false)
 	# Isolate fighter-v-fighter combat from the starting planetary batteries.
 	for planet in duel["planets"]:
 		planet["pds"].clear()
@@ -2383,7 +2450,7 @@ func _initialize() -> void:
 	var ai_map: Dictionary = {"seed": 123, "points": [Vector2(-950, 0), Vector2.ZERO, Vector2(3800, 0), Vector2(950, 0), Vector2(1900, 0)], "edges": [[0, 1], [1, 3], [3, 4], [4, 2]], "fields": []}
 	var ai_roster: Dictionary = {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 2}}
 	# Attack orders wait for a physical rally, then commit only that cohort.
-	var wave_state: Dictionary = ECON.create(ai_map, ai_roster, ids, false)
+	var wave_state: Dictionary = _funded_fixture(ai_map, ai_roster, ids, false)
 	var wave_graph: Dictionary = ECON.military_graph(wave_state)
 	var wave_fleet: Array = []
 	for i in range(2):
@@ -2429,7 +2496,7 @@ func _initialize() -> void:
 	ECON._ai_wave_order(wave_state, wave_graph, 2, 1, 2, wave_fleet)
 	ECON._sync_operations(wave_state)
 	assert(int(wave_state["operations"]["2:wave:2"]["id"]) == wave_id)
-	var ai_state: Dictionary = ECON.create(ai_map, ai_roster, ids, false)
+	var ai_state: Dictionary = _funded_fixture(ai_map, ai_roster, ids, false)
 	# Mature empire fixture: test expansion and combat, not opening demographics.
 	var ai_home: Dictionary = ai_state["planets"][1]
 	ai_home["population"] = 350000.0
@@ -2455,7 +2522,7 @@ func _initialize() -> void:
 	# Generated maps, not only a toy graph: each AI builds real ships early.
 	for seed_value in [11, 83, 470, 1337]:
 		var startup_map: Dictionary = _planetary_fixture(seed_value, 3, "Grid")
-		var startup_state: Dictionary = ECON.create(startup_map, {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 1, "ai": true}}, ids, false)
+		var startup_state: Dictionary = _funded_fixture(startup_map, {1: {"team": 1}, 2: {"team": 1, "ai": true}, 3: {"team": 1, "ai": true}}, ids, false)
 		for index in [1, 2]:
 			startup_state["planets"][index]["population"] = 150000.0
 			startup_state["planets"][index]["levels"]["Organics"] = 3
@@ -2472,7 +2539,7 @@ func _initialize() -> void:
 			assert(built[player].has("fighter"))
 	print("PASS: six-hit combat, allied safety, AI expansion, logistics and attack")
 	# Only a station claims territory; ships, population and modules alone do not.
-	var territory: Dictionary = ECON.create(force_map, players, ids, false)
+	var territory: Dictionary = _funded_fixture(force_map, players, ids, false)
 	var sectors: Array[int] = ECON.territory_claims(territory)
 	assert(sectors[0] == 1 and sectors[1] == 1 and sectors[2] == 2 and sectors[3] == 0)
 	territory["ships"].append({"id": 100, "owner": 1, "kind": "fighter", "at": 3, "route": [], "leg": 0.0})
@@ -2507,7 +2574,7 @@ func _initialize() -> void:
 	print("PASS: seeded maps, ownership, construction, shipyards, mixed cargo, physical transit, ally sharing")
 	# Shared operations retain identity across reinforcement and casualties,
 	# distinguish owners, and remove empty groups without recycling IDs.
-	var operation_state: Dictionary = ECON.create(graph, players, ids, false)
+	var operation_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var operation_fleet: Array = [
 		{"id": 901, "owner": 1, "kind": "fighter", "at": 0, "dest": 2, "route": [2]},
 		{"id": 902, "owner": 1, "kind": "fighter", "at": 0, "dest": 2, "route": [2]},
@@ -2533,7 +2600,7 @@ func _initialize() -> void:
 	assert(replicated["operations"] == operation_state["operations"])
 	# Human hostile orders assemble physically; objective membership is
 	# independent of the current rally route. Neutral orders remain immediate.
-	var rally_state: Dictionary = ECON.create(ai_map, players, ids, false)
+	var rally_state: Dictionary = _funded_fixture(ai_map, players, ids, false)
 	var rally_graph: Dictionary = ECON.military_graph(rally_state)
 	var rally_fleet: Array = rally_state["ships"]
 	for i in range(2):
@@ -2570,7 +2637,7 @@ func _initialize() -> void:
 	for craft in rally_fleet:
 		assert(craft["dest"] == 3)
 	# Fighters break off their lane to orbit opponents, then resume their original route.
-	var transit: Dictionary = ECON.create(ai_map, players, ids, false)
+	var transit: Dictionary = _funded_fixture(ai_map, players, ids, false)
 	var travelling: Dictionary = {"id": 970, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 400.0, "position": Vector2(400, 0), "dest": 3, "hp": 100.0}
 	var enemy: Dictionary = {"id": 971, "owner": 3, "kind": "fighter", "at": 3, "route": [], "leg": 0.0, "position": Vector2(450, 0), "dest": 3, "hp": 100.0}
 	transit["ships"] = [travelling, enemy]
@@ -2595,7 +2662,7 @@ func _initialize() -> void:
 	print("PASS: coordinated human rally, reinforcements, retargeting, combat circling and route resumption")
 	# Pursuit retains a fleeing civilian beyond laser range, obeys the speed
 	# budget and expires after three years even while the target remains nearby.
-	var chase: Dictionary = ECON.create(ai_map, players, ids, false)
+	var chase: Dictionary = _funded_fixture(ai_map, players, ids, false)
 	# Isolate fighter pursuit behavior from longer-range fixed batteries.
 	for system in chase["planets"]:
 		system["pds"].clear()
@@ -2623,7 +2690,7 @@ func _initialize() -> void:
 	assert(int(hunter["pursuit_target"]) == -1)
 	# Separate scenario: a live target leaves range, pursuit persists but
 	# laser damage does not. Explicitly reposition the fixture to model escape.
-	var distant_chase: Dictionary = ECON.create(ai_map, players, ids, false)
+	var distant_chase: Dictionary = _funded_fixture(ai_map, players, ids, false)
 	for system in distant_chase["planets"]:
 		system["pds"].clear()
 	var distant_hunter: Dictionary = {"id": 982, "owner": 2, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "dest": 1, "hp": 100.0}
@@ -2643,7 +2710,7 @@ func _initialize() -> void:
 	ECON._combat(distant_chase, distant_graph, 0.1)
 	# An unheld fighter can acquire a hostile beyond weapon range in the same sector.
 	var sector_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var sector_state: Dictionary = ECON.create(sector_map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var sector_state: Dictionary = _funded_fixture(sector_map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var sector_graph: Dictionary = ECON.military_graph(sector_state)
 	var sector_fighter: Dictionary = {"id": 986, "owner": 1, "kind": "fighter", "at": 0, "route": [], "position": Vector2.ZERO, "hp": 100.0}
 	var sector_enemy: Dictionary = {"id": 987, "owner": 2, "kind": "ship", "at": 0, "route": [], "position": Vector2.RIGHT * (ECON.LASER_RANGE + 10.0), "hp": 100.0}
@@ -2659,7 +2726,7 @@ func _initialize() -> void:
 	assert(int(distant_hunter["pursuit_target"]) == -1)
 	print("PASS: bounded pursuit, escaping fighters, weapon range and route resumption")
 	# Basic construction is independent of the advanced crystal supply.
-	var bootstrap: Dictionary = ECON.create(graph, players, ids, false)
+	var bootstrap: Dictionary = _funded_fixture(graph, players, ids, false)
 	var industry: Dictionary = bootstrap["planets"][0]
 	for resource in ECON.RESOURCES:
 		if resource == "Crystals":
@@ -2718,7 +2785,7 @@ func _initialize() -> void:
 	assert(ECON.cancel(bootstrap, 1, 0, int(build["id"])))
 	for material in preallocation:
 		assert(is_equal_approx(float(industry["stock"][material]) + _cancelled_material(bootstrap, int(build["id"]), material), float(preallocation[material])))
-	var timed_state: Dictionary = ECON.create(graph, players, ids, false)
+	var timed_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var timed_home: Dictionary = timed_state["planets"][0]
 	assert(ECON.enqueue(timed_state, 1, 0, "economy", "Metals"))
 	var timed_building: Dictionary = timed_home["queue"][0]
@@ -2732,7 +2799,7 @@ func _initialize() -> void:
 	assert(int(timed_home["buildings"]["Metals"]) == 1)
 	assert(timed_home["queue"].is_empty())
 	print("PASS: multi-resource hulls, population gates and permanent local improvements")
-	var warehouse_state: Dictionary = ECON.create(graph, players, ids, false)
+	var warehouse_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var depot: Dictionary = warehouse_state["planets"][0]
 	# Isolate legacy linear planetary demand from exempt housing residents.
 	depot["yards"].clear()
@@ -2791,7 +2858,7 @@ func _initialize() -> void:
 	print("PASS: storage caps, three warehouse levels, advanced crystal extraction and linear consumption")
 	# Formation slots are persistent, shared by AI/human operations, and
 	# actual world-space positions converge without exceeding ship speed.
-	var form: Dictionary = ECON.create(ai_map, players, ids, false)
+	var form: Dictionary = _funded_fixture(ai_map, players, ids, false)
 	var form_graph: Dictionary = ECON.military_graph(form)
 	var form_fleet: Array = []
 	for i in range(4):
@@ -2830,7 +2897,7 @@ func _initialize() -> void:
 	print("PASS: persistent formation slots, casualty/reinforcement, bounded movement and shared AI/human slots")
 	# Shared travel: a leading craft cannot race ahead on the same lane;
 	# everyone crosses the next waypoint together after catching up.
-	var cohesion: Dictionary = ECON.create(ai_map, players, ids, false)
+	var cohesion: Dictionary = _funded_fixture(ai_map, players, ids, false)
 	var cohesion_graph: Dictionary = ECON.military_graph(cohesion)
 	var lead: Dictionary = {"id": 1200, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 250.0, "position": Vector2(250, 0), "dest": 3}
 	var lag: Dictionary = {"id": 1201, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 0.0, "position": Vector2.ZERO, "dest": 3}
@@ -2851,7 +2918,7 @@ func _initialize() -> void:
 	assert((lead["position"] as Vector2).distance_to(lag["position"]) < 50.0)
 	# Individual withdrawal: nearest safe owned shipyard, no firing or
 	# repair in transit, full recovery before rejoining the assigned objective.
-	var recovery: Dictionary = ECON.create(ai_map, players, ids, false)
+	var recovery: Dictionary = _funded_fixture(ai_map, players, ids, false)
 	var recovery_graph: Dictionary = ECON.military_graph(recovery)
 	var wounded: Dictionary = {"id": 1210, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 400.0, "position": Vector2(400, 0), "dest": 3, "operation_target": 3, "hp": ECON.WITHDRAW_HP}
 	recovery["ships"] = [wounded]
@@ -2882,7 +2949,7 @@ func _initialize() -> void:
 	assert(not ECON._repair_site_safe(recovery, recovery_graph, 2, 1))
 	assert(not ECON._cached_repair_site_safe(recovery, recovery_graph, 2, 1, {}))
 	print("PASS: shared lane pacing, safe individual withdrawal, full repair and rejoining")
-	var crew_state: Dictionary = ECON.create(graph, players, ids, false)
+	var crew_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var crew_home: Dictionary = crew_state["planets"][0]
 	crew_home["population"] = 150000.0
 	for kind in ECON.SHIP_KINDS:
@@ -2906,7 +2973,7 @@ func _initialize() -> void:
 	assert(is_equal_approx(float(crew_home["population"]), 500.0))
 	assert(is_equal_approx(float(crew_state["ships"][0]["crew"]), 500.0))
 	print("PASS: proportional crew costs, refunds, population starvation and completed crew")
-	var opening: Dictionary = ECON.create(graph, players, ids)
+	var opening: Dictionary = _funded_fixture(graph, players, ids)
 	assert(opening["ships"].size() == ids.size() * 6)
 	for owner in ids:
 		var opening_home: int = ECON.military_home(opening, owner)
@@ -2935,12 +3002,12 @@ func _initialize() -> void:
 	for planet in opening["planets"]:
 		if not planet["home"]:
 			assert(planet["pds"].is_empty())
-	var defenses: Dictionary = ECON.create(force_map, players, ids, false)
+	var defenses: Dictionary = _funded_fixture(force_map, players, ids, false)
 	var defended: Dictionary = defenses["planets"][0]
 	assert(int(defended["planet_count"]) == ECON.system_bodies(defended, int(force_map["seed"]), 0).size())
 	assert(not ECON.enqueue(defenses, 1, 0, "pds", "0"))
 	# System commands choose the first undefended slot and charge a flat recipe.
-	var targeted: Dictionary = ECON.create(force_map, players, ids, false)
+	var targeted: Dictionary = _funded_fixture(force_map, players, ids, false)
 	var target_home: Dictionary = targeted["planets"][0]
 	target_home["pds"].clear()
 	var target_recipe: Dictionary = ECON._cost("pds", 2)
@@ -3012,7 +3079,7 @@ func _initialize() -> void:
 	assert(defended["pds"].size() == int(defended["planet_count"]))
 	print("PASS: starting fleet, planet-limited defenses, refunds, damage, cooldown and allied safety")
 	# Neutral asteroid anchor, with physical return to an owned depot.
-	var neutral_mine: Dictionary = ECON.create(mineral_map.duplicate(true), players, ids, false)
+	var neutral_mine: Dictionary = _funded_fixture(mineral_map.duplicate(true), players, ids, false)
 	var neutral_map: Dictionary = neutral_mine["map"]
 	var neutral_anchor: int = 3
 	neutral_map["field_edges"] = []
@@ -3027,7 +3094,7 @@ func _initialize() -> void:
 			break
 	assert(is_equal_approx(float(neutral_depot["stock"]["Crystals"]), 20.0 + float(neutral_mine["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
 	assert(ECON.field_inventory(neutral_map["fields"][0])["Crystals"] == 0.0)
-	var multi_access: Dictionary = ECON.create(mineral_map.duplicate(true), players, ids, false)
+	var multi_access: Dictionary = _funded_fixture(mineral_map.duplicate(true), players, ids, false)
 	var access_map: Dictionary = multi_access["map"]
 	var access_points: Array = access_map["points"]
 	var access_center: Vector2 = (access_points[0] + access_points[1]) * 0.5
@@ -3056,7 +3123,7 @@ func _initialize() -> void:
 			assert(ECON.local_flow(access_home, "Mining deliveries", "Crystals") > 0.0)
 			break
 	assert(was_loaded and is_equal_approx(float(access_home["stock"]["Crystals"]), 20.0 + float(multi_access["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
-	var staffed_state: Dictionary = ECON.create(graph, players, ids, false)
+	var staffed_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var staffed_home: Dictionary = staffed_state["planets"][0]
 	staffed_home["yards"].append({"level": 1, "job": -1})
 	staffed_home["yards"].append({"level": 1, "job": -1})
@@ -3080,7 +3147,7 @@ func _initialize() -> void:
 	quit(0)
 
 func _test_neutral_direct_occupation() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var neutral: int = -1
 	for node in graph["adjacent"][0]:
@@ -3125,7 +3192,7 @@ func _test_neutral_direct_occupation() -> void:
 	print("PASS: direct individual and group orders, atomic ownership, neutral occupation and retargeting")
 
 func _test_idle_formations() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var center: Vector2 = graph["points"][0]
 	for i in range(3):
@@ -3174,7 +3241,7 @@ func _test_unit_order_queue() -> void:
 	var reversed: Array = ECON.line_formation_slots({1: Vector2(100, 0), 2: Vector2(-100, 0)}, Vector2(200, 100), Vector2(-200, 100))
 	assert(reversed[0]["id"] == 1 and reversed[0]["heading"] == Vector2.DOWN)
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	var ship: Dictionary = {"id": 100, "owner": 1, "kind": "fighter", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	state["ships"] = [ship]
 	var graph: Dictionary = ECON.military_graph(state)
@@ -3252,7 +3319,7 @@ func _test_unit_order_queue() -> void:
 
 func _test_follow_order() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	state["ships"].clear()
 	for k in range(2):
 		state["ships"].append({"id": 9840 + k, "owner": 1, "kind": "fighter" if k == 0 else "colony_ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(0, 350 * k), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "wander_auto": false, "salvage_auto": false})
@@ -3292,7 +3359,7 @@ func _test_follow_order() -> void:
 	print("PASS: persistent friendly follow, standoff, lane travel, cycle/ownership validation and cancellation")
 
 func _test_resource_handoff() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var point: Vector2 = graph["points"][0]
 	var miner: Dictionary = {"id": 9820, "owner": 1, "kind": "miner", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": point, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "delivery"}
@@ -3353,7 +3420,7 @@ func _test_resource_handoff() -> void:
 	assert(is_equal_approx(ECON._cargo_total(freighter), ECON._cargo_total(miner) * 0.25))
 	assert(is_equal_approx(float(pile["amount"]) + ECON._cargo_total(miner) + ECON._cargo_total(freighter), 100.0))
 	var staging_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var staging: Dictionary = ECON.create(staging_map, {1: {"team": 1}}, [1], false)
+	var staging: Dictionary = _funded_fixture(staging_map, {1: {"team": 1}}, [1], false)
 	var stage_graph: Dictionary = ECON.military_graph(staging)
 	var hauler: Dictionary = {"id": 9822, "owner": 1, "kind": "ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "salvage_auto": false}
 	staging["ships"] = [hauler]
@@ -3388,7 +3455,7 @@ func _test_resource_handoff() -> void:
 	print("PASS: physical resource handoff, ownership, capacity, staging threshold, refreshed loading timer and inactivity dispatch and freighter salvage rate")
 
 func _test_autocast_modes() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var center: Vector2 = graph["points"][0]
 	var miner: Dictionary = {"id": 9809, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": center, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"}
@@ -3442,7 +3509,7 @@ func _test_autocast_modes() -> void:
 
 func _test_sector_entry_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	for i in range(2):
 		state["ships"].append({"id": 9800 + i, "owner": 1, "kind": "fighter" if i == 0 else "colony_ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.RIGHT, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()})
@@ -3466,7 +3533,7 @@ func _test_sector_entry_orders() -> void:
 func _test_gap_position_orders() -> void:
 	var map: Dictionary = {"seed": 42, "size": Vector2(10000, 5000), "points": [Vector2(500, 500), Vector2(2500, 500), Vector2(6500, 500), Vector2(8500, 500)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}
 	for kind in ["fighter", "miner", "ship", "colony_ship", "scout", "science_ship", "cruiser", "destroyer"]:
-		var state: Dictionary = ECON.create(map.duplicate(true), {1: {"team": 1}}, [1], false)
+		var state: Dictionary = _funded_fixture(map.duplicate(true), {1: {"team": 1}}, [1], false)
 		var graph: Dictionary = ECON.military_graph(state)
 		var craft: Dictionary = {"id": 9805, "owner": 1, "kind": kind, "origin": 2, "at": 2, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": map["points"][2], "heading": Vector2.LEFT, "hp": ECON.ship_max_hp(kind), "cargo": ECON.empty_stock(), "mining_mode": "idle", "wander_auto": false}
 		state["ships"] = [craft]
@@ -3495,7 +3562,7 @@ func _test_gap_position_orders() -> void:
 
 func _test_local_position_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	for kind in ["fighter", "ship", "miner", "colony_ship"]:
 		var id: int = state["ships"].size() + 100
 		state["ships"].append({"id": id, "owner": 1, "kind": kind, "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"})
@@ -3574,7 +3641,7 @@ func _test_local_position_orders() -> void:
 	# Emergency repair can temporarily leave the held sector, but the
 	# original position must be recovered through the actual lane.
 	var repair_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(1000, 0)], "edges": [[0, 2], [1, 2]], "fields": []}
-	var repair: Dictionary = ECON.create(repair_map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var repair: Dictionary = _funded_fixture(repair_map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var damaged: Dictionary = {"id": 200, "owner": 1, "kind": "fighter", "at": 2, "origin": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(1000, 0), "heading": Vector2.UP, "hp": ECON.SHIP_HP}
 	repair["ships"] = [damaged]
 	var post := Vector2(1000, 25)
@@ -3594,7 +3661,7 @@ func _test_local_position_orders() -> void:
 
 func _test_tactical_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(1000, 0)], "edges": [[0, 2], [1, 2]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var f: Dictionary = {"id": 100, "owner": 1, "kind": "fighter", "origin": 0, "at": 2, "dest": 2, "source": -1, "route": [], "leg": 0.0, "position": Vector2(1000, 0), "heading": Vector2.RIGHT, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	var enemy: Dictionary = f.duplicate(true)
 	enemy.merge({"id": 101, "owner": 2, "kind": "ship", "position": Vector2(1100, 0), "holding": true}, true)
@@ -3663,7 +3730,7 @@ func _test_tactical_orders() -> void:
 
 func _test_precise_patrol() -> void:
 	var map: Dictionary = {"seed": 42, "size": Vector2(6000, 4000), "points": [Vector2(1000, 1000), Vector2(5500, 3500), Vector2(3500, 1000)], "edges": [[0, 2], [2, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var start := Vector2(1050, 1080)
 	var craft: Dictionary = {"id": 100, "owner": 1, "kind": "fighter", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": start, "heading": Vector2.RIGHT, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	state["ships"] = [craft]
@@ -3706,7 +3773,7 @@ func _test_precise_patrol() -> void:
 
 func _test_salvage() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var wreck: Dictionary = {"id": 99, "owner": 2, "kind": "ship", "at": 0, "position": Vector2.ZERO, "route": [], "leg": 0.0, "cargo": ECON.empty_stock()}
 	wreck["cargo"][ECON.ANTIMATTER] = 1.25
@@ -3782,7 +3849,7 @@ func _test_salvage() -> void:
 
 func _test_colony_farm() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var home: Dictionary = state["planets"][0]
 	ECON._finish(state, 0, home, {"id": 901, "kind": "colony_ship"})
 	var ship: Dictionary = state["ships"][0]
@@ -3820,7 +3887,7 @@ func _test_colony_farm() -> void:
 
 func _test_remote_salvage() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(1000, 0), Vector2(2000, 0), Vector2(3000, 0)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var craft: Dictionary = {"id": 500, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"}
 	state["ships"] = [craft]
@@ -3840,7 +3907,7 @@ func _test_remote_salvage() -> void:
 
 func _test_opportunistic_salvage() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	state["ships"].clear()
 	for kind in ["fighter", "miner", "ship", "colony_ship"]:
@@ -3972,7 +4039,7 @@ func _test_opportunistic_salvage() -> void:
 	print("PASS: idle civilian salvage detours, threatened-sector exclusion, claim release and automatic delivery")
 
 func _test_civilian_waiting_movement() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var center: Vector2 = state["map"]["points"][0]
 	var home: Dictionary = state["planets"][0]
 	state["ships"].clear()
@@ -4017,7 +4084,7 @@ func _test_civilian_waiting_movement() -> void:
 	# Empty miners must not abandon evacuation when the only route home
 	# is blocked by a hostile system. Opening a safe lane must resume travel.
 	var trapped_map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(570, 0), Vector2(190, 0), Vector2(380, 0)], "edges": [[0, 2], [2, 3], [1, 3]], "fields": []}
-	var trapped: Dictionary = ECON.create(trapped_map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var trapped: Dictionary = _funded_fixture(trapped_map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	trapped["planets"][2]["owner"] = 2
 	trapped["planets"][2]["station"] = {"hp": ECON.STATION_HP}
 	trapped["planets"][3]["owner"] = 2
@@ -4041,7 +4108,7 @@ func _test_civilian_waiting_movement() -> void:
 	print("PASS: empty stranded miner retries and physically evacuates")
 	# Exercise actual starter hulls and ordinary mining orders in a seeded
 	# four-player radial match, not just manually constructed idle hulls.
-	var live: Dictionary = ECON.create(MAP.generate(7021, 4, "Radial"), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 3}, 4: {"team": 4}}, [1, 2, 3, 4])
+	var live: Dictionary = _funded_fixture(MAP.generate(7021, 4, "Radial"), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 3}, 4: {"team": 4}}, [1, 2, 3, 4])
 	var initial: Dictionary = {}
 	for craft in live["ships"]:
 		if craft["kind"] == "miner":
@@ -4055,7 +4122,7 @@ func _test_civilian_waiting_movement() -> void:
 	print("PASS: starter miners move in a seeded four-player radial match")
 
 func _test_depleted_field_routes() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var count: int = state["planets"].size()
 	for index in range(state["map"]["fields"].size()):
@@ -4086,7 +4153,7 @@ func _test_depleted_field_routes() -> void:
 
 func _test_wide_patrol_rally_and_conquest() -> void:
 	var map_data: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(2000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	for i in range(3):
 		state["ships"].append({"id": 9520 + i, "owner": 1, "kind": "fighter", "at": 0, "dest": 0, "route": [], "position": Vector2(-600.0, 20.0 * i), "hp": ECON.SHIP_HP})
@@ -4118,7 +4185,7 @@ func _test_wide_patrol_rally_and_conquest() -> void:
 	print("PASS: wide patrol returns to physical rally and defenders contest their sector")
 
 func _test_ai_defensive_orders() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var owned: Array[int] = [1]
 	var fighters: Array = []
@@ -4170,7 +4237,7 @@ func _test_blaster_bursts() -> void:
 
 func _test_territory_influence() -> void:
 	var map: Dictionary = {"seed": 42, "size": Vector2(10000, 5000), "points": [Vector2(500, 500), Vector2(2500, 500), Vector2(6500, 500), Vector2(8500, 500)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	for system in state["planets"]:
 		system["owner"] = 0
@@ -4227,7 +4294,7 @@ func _test_territory_influence() -> void:
 	print("PASS: physical sector/highway influence, infrastructure, normalized mixed colors, saturation cap, one-hop spillover and snapshot parity")
 
 func _test_conquest() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var planet: Dictionary = state["planets"][1]
 	planet["pds"].clear()
@@ -4269,7 +4336,7 @@ func _test_conquest() -> void:
 
 func _test_conquest_resistance_and_evacuation() -> void:
 	var map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(1200, 0), Vector2(600, 0), Vector2(600, 600)], "edges": [[0, 2], [1, 2], [1, 3], [2, 3]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var colony: Dictionary = state["planets"][2]
 	colony["owner"] = 2
@@ -4304,7 +4371,7 @@ func _test_conquest_resistance_and_evacuation() -> void:
 
 func _test_crowded_dock_delivery() -> void:
 	var map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var home: Dictionary = state["planets"][0]
 	var graph: Dictionary = ECON.military_graph(state)
 	var dock: Vector2 = ECON.station_position(state, 0, float(state["elapsed"]))
@@ -4375,7 +4442,7 @@ func _test_freighter_bays() -> void:
 		assert(bays[index].is_empty())
 	# An actual freight trip can load and deliver a full hold of one resource.
 	var map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(190.0, 0)], "edges": [[0, 1]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 1}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 1}}, [1, 2], false)
 	var source: Dictionary = state["planets"][0]
 	var destination: Dictionary = state["planets"][1]
 	source["stock"]["Metals"] = 1000.0
@@ -4568,7 +4635,7 @@ func _test_map_layouts() -> void:
 
 func _test_orbital_housing() -> void:
 	var galaxy: Dictionary = MAP.generate(827, 2, "Grid")
-	var state: Dictionary = ECON.create(galaxy, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(galaxy, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var index: int = galaxy["planetless"][0]
 	var p: Dictionary = state["planets"][index]
 	assert(p["planet_count"] == 0 and ECON.system_bodies(p, 827, index).is_empty())
@@ -4617,7 +4684,7 @@ func _test_orbital_housing() -> void:
 
 func _test_eco_regrowth() -> void:
 	var galaxy: Dictionary = MAP.generate(827, 1, "Grid")
-	var state: Dictionary = ECON.create(galaxy, {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(galaxy, {1: {"team": 1}}, [1], false)
 	var home: Dictionary = state["planets"][0]
 	assert(ECON.eco_capacity(home) == 5000.0)
 	assert(ECON.eco_population(home) == 5000.0 and ECON.planetary_population(home) == ECON.HOME_POPULATION)
@@ -4689,7 +4756,7 @@ func _test_antimatter_extraction() -> void:
 	map_data["fields"] = [{"anchor": 0, "position": deposit, "radius": 50.0, "antimatter": true,
 		"Metals": 0.0, "Crystals": 0.0, ECON.ANTIMATTER: 1.0,
 		"chunks": [{"id": 0, "position": deposit, "resource": ECON.ANTIMATTER, "remaining": 30.0}]}]
-	var state: Dictionary = ECON.create(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var home: Dictionary = state["planets"][0]
 	ECON._finish(state, 0, home, {"id": 900, "kind": "miner"})
 	var miner: Dictionary = state["ships"][0]
@@ -4733,7 +4800,7 @@ func _test_antimatter_extraction() -> void:
 	print("PASS: Pulsar generation, science-only collection, 30-year timer, retained cargo and state serialization")
 
 func _test_match_elimination() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 3, "Grid"), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 2}}, [1, 2, 3], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 3, "Grid"), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 2}}, [1, 2, 3], false)
 	state["planets"][1]["owner"] = 1
 	# Isolate the recovery/last-hull cases from the starting fleets.
 	state["ships"] = state["ships"].filter(func(ship: Dictionary) -> bool: return int(ship["owner"]) == 1)
@@ -4762,12 +4829,12 @@ func _test_match_elimination() -> void:
 	assert(state["match_result"]["team"] == 1 and int(state["time_speed"]) == 0)
 	assert(not ECON.update_match_outcome(state))
 	assert(bytes_to_var(var_to_bytes(state))["match_result"] == state["match_result"])
-	var solo: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var solo: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	assert(not ECON.update_match_outcome(solo) and solo.get("match_result", {}).is_empty())
 	print("PASS: colony recovery, allied survival, elimination, conquest victory and sandbox")
 
 func _test_recovery_economy() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
 	for resource in ECON.RESOURCES:
 		assert(not ECON.building_cost(p, resource).has(resource))
@@ -4824,7 +4891,7 @@ func _test_opening_pacing() -> void:
 	# Allied AI isolates economic pacing from variable battle casualties.
 	# Use a one-year coarse tick for a fast repeatable balance smoke test.
 	for seed_value in [827, 123, 2468]:
-		var state: Dictionary = ECON.create(_planetary_fixture(seed_value, 2, "Grid"), {1: {"team": 1, "ai": true}, 2: {"team": 1, "ai": true}}, [1, 2])
+		var state: Dictionary = _funded_fixture(_planetary_fixture(seed_value, 2, "Grid"), {1: {"team": 1, "ai": true}, 2: {"team": 1, "ai": true}}, [1, 2])
 		var first_colony: int = -1
 		var owned: int = 0
 		var fighters: int = 0
@@ -4846,7 +4913,7 @@ func _test_opening_pacing() -> void:
 		print("PASS pacing seed %d: first colony %d years, %d worlds, %d fighters, %d freighters at year 360" % [seed_value, first_colony, owned, fighters, freighters])
 
 func _test_bilateral_diplomacy() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 3), {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}, [1, 2, 3], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 3), {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}, [1, 2, 3], false)
 	assert(ECON.empires_hostile(state, 1, 3) and ECON.empires_allied(state, 1, 2))
 	assert(ECON.initialize_diplomacy(state))
 	assert(not ECON.initialize_diplomacy(state))
@@ -4904,7 +4971,7 @@ func _test_bilateral_diplomacy() -> void:
 	print("PASS: independent diplomacy, reciprocal offers, permissions, neutral weapons and truce")
 
 func _test_bilateral_services() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 3), {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}, [1, 2, 3], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 3), {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}, [1, 2, 3], false)
 	ECON.initialize_diplomacy(state)
 	var graph: Dictionary = ECON.military_graph(state)
 	assert(ECON.planet_teams(state)[0] == 1 and ECON.planet_teams(state)[1] == 2)
@@ -4933,7 +5000,7 @@ func _test_bilateral_services() -> void:
 
 func _test_bilateral_transit_and_confirmation() -> void:
 	var map: Dictionary = {"seed": 42, "size": Vector2(10000, 5000), "points": [Vector2(500, 500), Vector2(2500, 500), Vector2(4500, 500), Vector2(6500, 500)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}
-	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], true)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], true)
 	state["fog_of_war"] = false
 	state["planets"][2]["owner"] = 1
 	var teams: Array[int] = ECON.planet_teams(state)
@@ -4967,7 +5034,7 @@ func _test_bilateral_transit_and_confirmation() -> void:
 	print("PASS: neutral transit, treaty route cache invalidation and confirmed attack validation")
 
 func _test_bilateral_conquest() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 3), {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 1}}, [1, 2, 3], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 3), {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 1}}, [1, 2, 3], false)
 	ECON.initialize_diplomacy(state)
 	assert(not ECON.update_match_outcome(state))
 	assert(ECON.diplomacy_offer_alliance(state, 1, 2) and ECON.diplomacy_offer_alliance(state, 2, 1))
@@ -4982,7 +5049,7 @@ func _test_bilateral_conquest() -> void:
 	print("PASS: bilateral conquest evaluates surviving empires independently")
 
 func _test_ai_strategic_diplomacy() -> void:
-	var state: Dictionary = ECON.create(_planetary_fixture(827, 3), {1: {"team": 1, "ai": true}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], false)
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 3), {1: {"team": 1, "ai": true}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], false)
 	ECON.initialize_diplomacy(state)
 	var estimates: Dictionary = {1: {"fleet": 30.0, "defense": 6.0, "stations": 1, "distance": 0.0}, 2: {"fleet": 3.0, "defense": 6.0, "stations": 1, "distance": 1000.0}, 3: {"fleet": 30.0, "defense": 6.0, "stations": 1, "distance": 3000.0}}
 	assert(ECON._ai_diplomacy_choice(state, 1, estimates).is_empty())
@@ -5002,7 +5069,7 @@ func _test_ai_strategic_diplomacy() -> void:
 	assert(ECON.diplomatic_relation(state, 1, 2) == ECON.DIPLO_TRUCE)
 	assert(int(ECON._ai_diplomacy_choice(state, 1, estimates).get("other", 0)) != 2)
 	# Actual authority turn accepts a visible/known useful alliance offer.
-	var fresh: Dictionary = ECON.create(_planetary_fixture(827, 3), {1: {"team": 1, "ai": true}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], true)
+	var fresh: Dictionary = _funded_fixture(_planetary_fixture(827, 3), {1: {"team": 1, "ai": true}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], true)
 	ECON.initialize_diplomacy(fresh)
 	fresh["fog_of_war"] = false
 	# A fleet capable of defending its borders prefers useful cooperation
