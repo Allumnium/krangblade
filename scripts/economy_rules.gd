@@ -3290,10 +3290,127 @@ static func _clear_tactical_order(ship: Dictionary) -> void:
 	ship.erase("patrol_returning")
 	ship.erase("patrol_arrived")
 
+# Bilateral diplomacy is opt-in until the lobby, routing, trade, sight and
+# victory consumers migrate. A missing table retains legacy match behavior.
+const TRUCE_YEARS: float = 100.0
+const DIPLO_NEUTRAL: String = "neutral"
+const DIPLO_ALLIED: String = "allied"
+const DIPLO_WAR: String = "war"
+const DIPLO_TRUCE: String = "truce"
+
+static func initialize_diplomacy(state: Dictionary) -> bool:
+	if state.has("diplomacy"):
+		return false
+	state["diplomacy"] = {}
+	state["diplomacy_revision"] = 1
+	return true
+
+static func _diplomacy_pair(a: int, b: int) -> Vector2i:
+	return Vector2i(mini(a, b), maxi(a, b))
+
+static func _valid_diplomacy_pair(state: Dictionary, a: int, b: int) -> bool:
+	return a > 0 and b > 0 and a != b and state["teams"].has(a) and state["teams"].has(b)
+
+static func diplomatic_relation(state: Dictionary, a: int, b: int) -> String:
+	if a > 0 and a == b and state["teams"].has(a):
+		return DIPLO_ALLIED
+	if not _valid_diplomacy_pair(state, a, b):
+		return DIPLO_NEUTRAL
+	if not state.has("diplomacy"):
+		return DIPLO_ALLIED if state["teams"][a] == state["teams"][b] else DIPLO_WAR
+	var entry: Dictionary = state["diplomacy"].get(_diplomacy_pair(a, b), {})
+	var relation: String = str(entry.get("relation", DIPLO_NEUTRAL))
+	if relation == DIPLO_TRUCE and float(state["elapsed"]) >= float(entry.get("until", 0.0)):
+		return DIPLO_NEUTRAL
+	return relation
+
+static func empires_hostile(state: Dictionary, a: int, b: int) -> bool:
+	return diplomatic_relation(state, a, b) == DIPLO_WAR
+
+static func empires_allied(state: Dictionary, a: int, b: int) -> bool:
+	return diplomatic_relation(state, a, b) == DIPLO_ALLIED
+
+static func _can_change_diplomacy(state: Dictionary, a: int, b: int) -> bool:
+	return state.has("diplomacy") and _valid_diplomacy_pair(state, a, b) and state.get("match_result", {}).is_empty() and not state.get("eliminated", []).has(a) and not state.get("eliminated", []).has(b)
+
+static func _write_diplomacy(state: Dictionary, a: int, b: int, entry: Dictionary) -> void:
+	state["diplomacy"][_diplomacy_pair(a, b)] = entry
+	state["diplomacy_revision"] = int(state.get("diplomacy_revision", 0)) + 1
+
+static func diplomacy_declare_war(state: Dictionary, a: int, b: int) -> bool:
+	if not _can_change_diplomacy(state, a, b) or diplomatic_relation(state, a, b) != DIPLO_NEUTRAL:
+		return false
+	_write_diplomacy(state, a, b, {"relation": DIPLO_WAR})
+	return true
+
+# A reciprocal offer is acceptance. Repeating one's own offer does nothing.
+static func diplomacy_offer_peace(state: Dictionary, a: int, b: int) -> bool:
+	if not _can_change_diplomacy(state, a, b) or diplomatic_relation(state, a, b) != DIPLO_WAR:
+		return false
+	var entry: Dictionary = state["diplomacy"].get(_diplomacy_pair(a, b), {})
+	var proposer: int = int(entry.get("peace_offer", 0))
+	if proposer == a:
+		return false
+	if proposer == b:
+		_write_diplomacy(state, a, b, {"relation": DIPLO_TRUCE, "until": float(state["elapsed"]) + TRUCE_YEARS})
+	else:
+		_write_diplomacy(state, a, b, {"relation": DIPLO_WAR, "peace_offer": a})
+	return true
+
+static func diplomacy_offer_alliance(state: Dictionary, a: int, b: int) -> bool:
+	if not _can_change_diplomacy(state, a, b) or diplomatic_relation(state, a, b) != DIPLO_NEUTRAL:
+		return false
+	var entry: Dictionary = state["diplomacy"].get(_diplomacy_pair(a, b), {})
+	var proposer: int = int(entry.get("alliance_offer", 0))
+	if proposer == a:
+		return false
+	if proposer == b:
+		_write_diplomacy(state, a, b, {"relation": DIPLO_ALLIED, "vision": {a: true, b: true}, "trade": {a: true, b: true}})
+	else:
+		_write_diplomacy(state, a, b, {"relation": DIPLO_NEUTRAL, "alliance_offer": a})
+	return true
+
+static func diplomacy_break_alliance(state: Dictionary, a: int, b: int) -> bool:
+	if not _can_change_diplomacy(state, a, b) or not empires_allied(state, a, b):
+		return false
+	_write_diplomacy(state, a, b, {"relation": DIPLO_NEUTRAL})
+	return true
+
+static func diplomacy_allows(state: Dictionary, a: int, b: int, permission: String) -> bool:
+	if permission not in ["vision", "trade", "repair"] or not empires_allied(state, a, b):
+		return false
+	if a == b or permission == "repair" or not state.has("diplomacy"):
+		return true
+	var entry: Dictionary = state["diplomacy"].get(_diplomacy_pair(a, b), {})
+	var preferences: Dictionary = entry.get(permission, {})
+	return bool(preferences.get(a, true)) and bool(preferences.get(b, true))
+
+static func diplomacy_set_permission(state: Dictionary, a: int, b: int, permission: String, enabled: bool) -> bool:
+	if permission not in ["vision", "trade"] or not _can_change_diplomacy(state, a, b) or not empires_allied(state, a, b):
+		return false
+	var entry: Dictionary = state["diplomacy"][_diplomacy_pair(a, b)].duplicate(true)
+	var preferences: Dictionary = entry.get(permission, {})
+	if bool(preferences.get(a, true)) == enabled:
+		return false
+	preferences[a] = enabled
+	entry[permission] = preferences
+	_write_diplomacy(state, a, b, entry)
+	return true
+
+# Legacy combat groups are teams. In bilateral matches they are individual
+# empires: cached hostile buckets must never merge allies transitively.
+static func _combat_group(state: Dictionary, owner: int) -> int:
+	return owner if state.has("diplomacy") else int(state["teams"].get(owner, 0))
+
+static func _combat_groups_hostile(state: Dictionary, a: int, b: int) -> bool:
+	if state.has("diplomacy"):
+		return empires_hostile(state, a, b)
+	# Preserve historical bucket behavior, including unowned targets.
+	return a != b
+
 static func _hostile_hull(state: Dictionary, player: int, target: Dictionary) -> bool:
-	var team: int = int(state["teams"].get(player, 0))
-	var enemy_team: int = int(state["teams"].get(int(target.get("owner", 0)), 0))
-	return target.get("kind", "") != "pds" and team > 0 and enemy_team > 0 and enemy_team != team and ship_visible_to_team(state, target.get("entity", target), team)
+	var owner: int = int(target.get("owner", 0))
+	return target.get("kind", "") != "pds" and empires_hostile(state, player, owner) and ship_visible_to_team(state, target.get("entity", target), _combat_group(state, player))
 
 static func _attack_destination(graph: Dictionary, target: Dictionary) -> int:
 	var sector: int = local_sector(graph, target)
@@ -5890,11 +6007,11 @@ static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, posi
 
 # Precomputed sector presence avoids an O(fleet size) hostile search for
 # every moving combat hull, including dense friendly formations.
-static func _combat_sector_has_hostile(presence: Dictionary, sector: int, team: int) -> bool:
+static func _combat_sector_has_hostile(presence: Dictionary, sector: int, team: int, state: Dictionary = {}) -> bool:
 	if sector < 0 or team <= 0:
 		return false
 	for other_team in presence.get(sector, {}):
-		if int(other_team) > 0 and int(other_team) != team:
+		if int(other_team) > 0 and _combat_groups_hostile(state, team, int(other_team)):
 			return true
 	return false
 
@@ -5909,10 +6026,10 @@ static func _hostile_bucket(state: Dictionary, buckets: Dictionary, cache: Dicti
 		for candidate in buckets.get(key, []):
 			var candidate_team: int
 			if team_by_id.is_empty():
-				candidate_team = int(state["teams"].get(int(candidate["owner"]), 0))
+				candidate_team = _combat_group(state, int(candidate["owner"]))
 			else:
 				candidate_team = int(team_by_id[int(candidate["id"])])
-			if candidate_team != team and (not positive_only or candidate_team > 0) and ship_visible_to_team(state, candidate, team):
+			if _combat_groups_hostile(state, team, candidate_team) and (not positive_only or candidate_team > 0) and ship_visible_to_team(state, candidate, team):
 				hostile.append(candidate)
 		by_key[key] = hostile
 	return by_key[key]
@@ -5991,8 +6108,8 @@ static func _reusable_laser_target(state: Dictionary, ship: Dictionary, by_id: D
 	var id: int = int(ship.get("combat_target", -1))
 	if id < 0 or not by_id.has(id) or not positions.has(id):
 		return -1
-	var team: int = int(state["teams"].get(int(ship["owner"]), 0))
-	if team == 0 or int(state["teams"].get(int(by_id[id]["owner"]), 0)) == team or not ship_visible_to_team(state, by_id[id], team):
+	var team: int = _combat_group(state, int(ship["owner"]))
+	if team == 0 or not _combat_groups_hostile(state, team, _combat_group(state, int(by_id[id]["owner"]))) or not ship_visible_to_team(state, by_id[id], team):
 		return -1
 	if pos.distance_squared_to(positions[id]) > LASER_RANGE * LASER_RANGE:
 		return -1
@@ -6036,7 +6153,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		positions[id] = pos
 		if not indexed:
 			by_id[id] = ship
-		team_by_id[id] = int(state["teams"].get(int(ship["owner"]), 0))
+		team_by_id[id] = _combat_group(state, int(ship["owner"]))
 		var slot: int = hull_slots.size()
 		hull_health[slot] = _effective_health(ship, ship_max_hp(str(ship["kind"])))
 		hull_slots[id] = slot
@@ -6088,7 +6205,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			station_targets[target_id] = index
 			health[target_id] = _effective_health(system["station"], station_max_hp(system))
 			positions[target_id] = pos
-			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
+			team_by_id[target_id] = _combat_group(state, int(system["owner"]))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "station"})
 		for slot in range(system["yards"].size()):
 			var target_id: int = -2 - index * 3 - slot
@@ -6096,7 +6213,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			yard_targets[target_id] = Vector2i(index, slot)
 			health[target_id] = float(system["yards"][slot].get("hp", YARD_HP * int(system["yards"][slot]["level"])))
 			positions[target_id] = pos
-			team_by_id[target_id] = int(state["teams"].get(int(system["owner"]), 0))
+			team_by_id[target_id] = _combat_group(state, int(system["owner"]))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "shipyard"})
 
 	_detect_cloaked(state, ships, cells, positions, team_by_id)
@@ -6118,7 +6235,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or ship.get("unit_order", {}).get("kind", "") == "follow" or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 		if not moving_only:
 			ship.erase("move_only")
-		elif fighter and not bool(ship.get("holding", false)) and _combat_sector_has_hostile(sector_teams, int(ship_sectors[hull_slots[int(ship["id"])]]), int(state["teams"].get(int(ship["owner"]), 0))):
+		elif fighter and not bool(ship.get("holding", false)) and _combat_sector_has_hostile(sector_teams, int(ship_sectors[hull_slots[int(ship["id"])]]), _combat_group(state, int(ship["owner"])), state):
 			moving_only = false
 		ship["passing_fire"] = moving_only and fighter
 		if bool(ship.get("retreating", false)) or ship.has("cargo_order") or ship.has("repair_order"):
@@ -6166,7 +6283,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			ship["missile_cooldown"] = missile_cd
 		# Explicit attack is focus fire, never attack-move: even when another
 		# hostile is closer, only the ordered entity may receive damage.
-		if ship.has("attack_order") and positions.has(int(ship["attack_order"])) and (not by_id.has(int(ship["attack_order"])) or ship_visible_to_team(state, by_id[int(ship["attack_order"])], team)) and pos.distance_to(positions[int(ship["attack_order"])]) <= LASER_RANGE:
+		if ship.has("attack_order") and positions.has(int(ship["attack_order"])) and _combat_groups_hostile(state, team, int(team_by_id.get(int(ship["attack_order"]), 0))) and (not by_id.has(int(ship["attack_order"])) or ship_visible_to_team(state, by_id[int(ship["attack_order"])], team)) and pos.distance_to(positions[int(ship["attack_order"])]) <= LASER_RANGE:
 			var focus: int = int(ship["attack_order"])
 			var in_range: bool = positions.has(focus) and pos.distance_to(positions[focus]) <= LASER_RANGE
 			ship["combat_target"] = focus if in_range and focus >= 0 else -1
@@ -6197,7 +6314,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		if pursuit >= 0:
 			if ship_sectors[hull_slot] >= 0 and (ship_sectors[hull_slots[pursuit]] if hull_slots.has(pursuit) else -1) == ship_sectors[hull_slot]:
 				remaining = PURSUIT_YEARS
-			if not by_id.has(pursuit) or int(state["teams"].get(int(by_id[pursuit]["owner"]), 0)) == team or team == 0 or not ship_visible_to_team(state, by_id[pursuit], team):
+			if not by_id.has(pursuit) or not _combat_groups_hostile(state, team, _combat_group(state, int(by_id[pursuit]["owner"]))) or team == 0 or not ship_visible_to_team(state, by_id[pursuit], team):
 				pursuit = -1
 			elif remaining <= EPS:
 				# Do not immediately restart a timed-out chase while the same
@@ -6231,10 +6348,10 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		# A previously engaged fighter may escape the firing envelope before
 		# the next scan; its departure is still a valid pursuit trigger.
 		var prior: int = int(previous_targets[hull_slot])
-		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and int(state["teams"].get(int(by_id[prior]["owner"]), 0)) != team and ship_visible_to_team(state, by_id[prior], team) and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[hull_slots[prior]])):
+		if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and _combat_groups_hostile(state, team, _combat_group(state, int(by_id[prior]["owner"]))) and ship_visible_to_team(state, by_id[prior], team) and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[hull_slots[prior]])):
 			pursuit = prior
 			remaining = PURSUIT_YEARS
-		if search_due and fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and _combat_sector_has_hostile(sector_teams, int(ship_sectors[hull_slot]), team):
+		if search_due and fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and _combat_sector_has_hostile(sector_teams, int(ship_sectors[hull_slot]), team, state):
 			if team > 0:
 				if not pursuit_blocks.has(team):
 					pursuit_blocks[team] = {}
@@ -6308,7 +6425,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		var weapons: Array = system.get("station", {}).get("weapons", [])
 		if weapons.is_empty():
 			continue
-		var team: int = int(state["teams"].get(int(system["owner"]), 0))
+		var team: int = _combat_group(state, int(system["owner"]))
 		if team <= 0:
 			continue
 		var origin: Vector2 = station_position(state, index, float(state["elapsed"]))
@@ -6342,7 +6459,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		var defenses: Dictionary = system.get("pds", {})
 		if defenses.is_empty():
 			continue
-		var team: int = int(state["teams"].get(int(system["owner"]), 0))
+		var team: int = _combat_group(state, int(system["owner"]))
 		if team <= 0:
 			continue
 		var origin: Vector2 = graph["points"][index]
@@ -6685,8 +6802,7 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 	var threats: Dictionary = {}
 	var opportunities: Dictionary = {}
 	for ship in state["ships"]:
-		var enemy_team: int = int(state["teams"].get(int(ship["owner"]), 0))
-		if enemy_team <= 0 or enemy_team == team:
+		if not empires_hostile(state, player, int(ship["owner"])):
 			continue
 		var position: Vector2 = combat_position(state, graph, ship)
 		if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and not bool(ship.get("retreating", false)):
@@ -6760,7 +6876,7 @@ static func _hostile_system(state: Dictionary, player: int, node: int) -> bool:
 	if node < 0 or node >= state["planets"].size():
 		return false
 	var owner: int = int(state["planets"][node]["owner"])
-	return owner != 0 and state["teams"].get(owner, 0) != state["teams"].get(player, 0)
+	return empires_hostile(state, player, owner)
 
 # Launch only assembled cohorts; newly built fighters are held in reserve
 # until the next wave. Existing human allocation behavior is unaffected.
@@ -7192,7 +7308,7 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
 		var attack: bool = false
 		if target >= 0 and target < (state["planets"] as Array).size():
 			var defender: int = int(state["planets"][target]["owner"])
-			attack = defender != 0 and state["teams"].get(defender, 0) != state["teams"].get(owner, 0)
+			attack = empires_hostile(state, owner, defender)
 		# Explicit RTS orders depart immediately, without requiring a cohort.
 		for member in operation["members"]:
 			if bool(by_id[member].get("direct_order", false)):
@@ -7724,7 +7840,7 @@ static func _update_planet_blockades(state: Dictionary, graph: Dictionary) -> vo
 			continue
 		var system: Dictionary = state["planets"][node]
 		var owner: int = int(system["owner"])
-		if owner != 0 and int(state["teams"].get(owner, 0)) != int(state["teams"].get(int(craft["owner"]), 0)):
+		if empires_hostile(state, owner, int(craft["owner"])):
 			system["planet_blockaded"] = true
 
 # First turn is immediate. Subsequent turns align to stable player slots
@@ -8450,7 +8566,7 @@ const CLOAK_REVEAL_TIME: float = 5.0
 static func ship_visible_to_team(state: Dictionary, ship: Dictionary, team: int) -> bool:
 	if not bool(ship.get("cloaked", false)):
 		return true
-	return int(state["teams"].get(int(ship.get("owner", -1)), -1)) == team or ship.get("cloak_detected", []).has(team)
+	return _combat_group(state, int(ship.get("owner", -1))) == team or ship.get("cloak_detected", []).has(team)
 
 static func _detect_cloaked(state: Dictionary, ships: Array, cells: Dictionary, positions: Dictionary, team_by_id: Dictionary) -> void:
 	var reach: int = ceili(CLOAK_DETECTION_RANGE / LASER_RANGE)
