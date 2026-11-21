@@ -2,6 +2,41 @@
 
 Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three intended playable races. Only Empire is implemented. ENet multiplayer uses UDP 24567 (LAN/Tailscale); no Steam dependency.
 
+## Source ownership map
+
+Current layout (v0.89.3 audit; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+
+| File | Owns / where to look |
+| --- | --- |
+| `project.godot`, `scenes/main.tscn`, `scenes/match.tscn` | Application config/version, GameSession autoload and scene entry points. |
+| `scripts/economy_rules.gd` | Authoritative simulation and canonical dictionaries: `create`, `step`; resource/population rules, recipes and queues (`building_cost`, `_work_station_queue`, `_work_planet`); cargo/mining and service (`_work_ship`, `_work_miner`, `_choose_delivery`); navigation/sector queries (`_path`, `_mining_path`, military graph); commands and orders; diplomacy (`diplomatic_relation`, `diplomacy_*`); combat and repair (`_combat`, `_prepare_withdrawals`); AI (`_ai_turn`, `_ai_diplomacy_turn`); objectives/rewards (`_update_objectives`, `_assign_category_objectives`). |
+| `scripts/game_session.gd` | Persistent lobby and match lifecycle, authority and ENet. `request_*` → `_rpc_*`/authority dispatch → simulation rules; `_economy_tick`, `_encode_replica`, `_rpc_economy` and motion roster handle timing and transport. Keep RPC endpoints on this persistent node. |
+| `scripts/match.gd` | Client match controller; `_build_ui`, `_refresh`, command cards/inspectors, input and selection, camera/projection, rendering (`_draw_map`, ship/station draw helpers), fog/territory, tactical alerts (`_sync_tactical_alerts`), Empire/diplomacy and conquest UI. Never the owner of simulation mutations. |
+| `scripts/planet_map.gd` | Deterministic map generation (`generate`), layouts, graph edges, `path`, `route_length`. Simulation-specific route policy currently lives in economy_rules. |
+| `scripts/main.gd`, `scripts/lobby_rules.gd` | Menu/lobby/setup presentation; shared lobby roster, ready, color and start rules respectively. |
+| `scripts/ui_theme.gd`, `scripts/space_background.gd`, `assets/ui/starfield.gdshader` | Reusable theme, icons, UI surfaces and backdrop. |
+| `scripts/codex.gd`, `scripts/match_sfx.gd` | Concise player guide derived from rules where possible; client-only audio synthesis, spatial gain and cue limits. |
+| `scripts/match_session.gd` | Small roster holder; not configured as the current autoload. Check remaining references before changing/removing it. |
+| `tests/economy_rules_test.gd`, `tests/lobby_rules_test.gd` | Rule regressions, seeded maps and semantic fixtures. |
+| `tests/solo_smoke.gd`, `tests/network_smoke.gd` | Real match lifecycle, authority, state replication and ENet peers. |
+| `tests/fleet_benchmark.gd`, `tests/contested_benchmark.gd`, `PERFORMANCE.md` | Fleet-scale and contested simulation measurement. |
+| `.github/workflows/godot-validation.yml` | Version/indentation, import/metadata, parse, core and peer checks; currently manual dispatch only. |
+
+### Intended dependency direction
+
+```text
+main / match UI ── commands ──> GameSession ── validated dispatch ──> simulation
+       ^                           |                                  |
+       └──── read-only snapshots ──┘                    map / domain rules
+       └──── read-only rule queries (costs, eligibility, relationships)
+```
+
+Do not make the simulation depend on UI or network transport. UI and AI must not reimplement authoritative eligibility or costs. Replicas and visual caches are derived; canonical gameplay state is mutated only by host/solo authority. Keep simulation step ordering, seeded randomness and cache lifetimes explicit.
+
+### Where to add a feature
+
+Search the existing owner and callers first. For a new gameplay command, extend the authoritative rule, session request/validation, and UI dispatch, then add focused rule/peer coverage and update Codex. For a change to a recipe or relationship, modify its canonical rule and reuse it in UI/AI. For a visual-only change, keep it within the client. The [refactoring backlog](TODO.md#code-organization-and-maintainability) records proposed module boundaries; files listed there do not exist until extracted.
+
 ## In-game reference
 
 Open the question-mark button beside Menu to browse the searchable Warbound Codex, including population and food graphs, resource logistics, construction, combat, expansion and controls. All figures are illustrative or derived from current game constants; the guide does not pause the simulation.
