@@ -4903,10 +4903,12 @@ func _test_bilateral_services() -> void:
 func _test_bilateral_transit_and_confirmation() -> void:
 	var map: Dictionary = {"seed": 42, "size": Vector2(10000, 5000), "points": [Vector2(500, 500), Vector2(2500, 500), Vector2(4500, 500), Vector2(6500, 500)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}
 	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], true)
-	ECON.initialize_diplomacy(state)
 	state["fog_of_war"] = false
 	state["planets"][2]["owner"] = 1
 	var teams: Array[int] = ECON.planet_teams(state)
+	assert(ECON._path(state, teams, 1, 0, 2, {}).is_empty())
+	ECON.initialize_diplomacy(state)
+	assert(ECON.planet_teams(state) == teams)
 	assert(ECON._path(state, teams, 1, 0, 2, {}) == [0, 1, 2])
 	assert(ECON._mining_path(state, teams, 1, 0, 2, {}) == [0, 1, 2])
 	var own: int = -1

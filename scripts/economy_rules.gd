@@ -1936,9 +1936,9 @@ static func _path(state: Dictionary, teams: Array[int], team: int, a: int, b: in
 
 static func _civilian_route_cache(state: Dictionary, teams: Array[int]) -> Dictionary:
 	var map_data: Dictionary = state["map"]
-	if cached_route_topology.get("points") != map_data["points"] or cached_route_topology.get("edges") != map_data["edges"] or cached_route_topology.get("teams") != teams or cached_route_topology.get("diplomacy", {}) != state.get("diplomacy", {}):
+	if cached_route_topology.get("points") != map_data["points"] or cached_route_topology.get("edges") != map_data["edges"] or cached_route_topology.get("teams") != teams or bool(cached_route_topology.get("bilateral", false)) != state.has("diplomacy") or cached_route_topology.get("diplomacy", {}) != state.get("diplomacy", {}):
 		cached_civilian_routes = {}
-		cached_route_topology = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "teams": teams.duplicate(), "diplomacy": state.get("diplomacy", {}).duplicate(true)}
+		cached_route_topology = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "teams": teams.duplicate(), "bilateral": state.has("diplomacy"), "diplomacy": state.get("diplomacy", {}).duplicate(true)}
 	return cached_civilian_routes
 
 static func _set_route(ship: Dictionary, path: Array[int]) -> void:
