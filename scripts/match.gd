@@ -623,6 +623,11 @@ func _build_ui() -> void:
 	fog_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fog_overlay.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	fog_overlay.draw.connect(_draw_fog)
+	sector_name_overlay = Control.new()
+	map_canvas.add_child(sector_name_overlay)
+	sector_name_overlay.z_index = 3
+	sector_name_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sector_name_overlay.draw.connect(_draw_sector_names)
 	logistics_overlay = Control.new()
 	map_canvas.add_child(logistics_overlay)
 	logistics_overlay.z_index = 3
@@ -2470,6 +2475,7 @@ var fog_origin := Vector2.ZERO
 var fog_extent := Vector2.ZERO
 var fog_revision: Array = []
 var fog_overlay: Control
+var sector_name_overlay: Control
 
 func _update_fog(state: Dictionary) -> void:
 	if state.is_empty():
@@ -2525,6 +2531,24 @@ func _draw_fog() -> void:
 	fog_overlay.draw_rect(Rect2(Vector2(inside.end.x, inside.position.y), Vector2(bounds.end.x - inside.end.x, inside.size.y)), dark)
 	var source := Rect2(Vector2.ZERO, _map_size() / ECONOMY.VISION_CELL)
 	fog_overlay.draw_texture_rect_region(fog_texture, map_rect, source)
+
+# Names are static generated map geography, not live tactical information.
+func _draw_sector_names() -> void:
+	var state: Dictionary = _state()
+	if state.is_empty():
+		return
+	var points: Array = state["map"]["points"]
+	var names: Array = state["map"]["names"]
+	var bounds := Rect2(Vector2.ZERO, map_canvas.size)
+	var font: Font = ThemeDB.fallback_font
+	for i in range(mini(points.size(), names.size())):
+		var pos: Vector2 = _screen_point(points[i])
+		var radius: float = _star_draw_radius(_planet_radius(i, state))
+		var anchor: Vector2 = pos + Vector2(-80, -radius - 7)
+		if not bounds.intersects(Rect2(anchor - Vector2(0, 16), Vector2(160, 18))):
+			continue
+		var tint: Color = Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.8)
+		sector_name_overlay.draw_string(font, anchor, str(names[i]), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, tint)
 
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
 	var team: int = ECONOMY._combat_group(state, _me())
@@ -5243,6 +5267,7 @@ func _clear_building_selection() -> void:
 
 func _build_control_group_strip() -> void:
 	control_group_strip = HBoxContainer.new()
+	control_group_strip.z_index = 4
 	control_group_strip.theme = HUD.compact()
 	control_group_strip.add_theme_constant_override("separation", 2)
 	add_child(control_group_strip)
@@ -8233,6 +8258,7 @@ func _flush_overview_hulls() -> void:
 func _draw_map() -> void:
 	_update_fog(_state())
 	fog_overlay.queue_redraw()
+	sector_name_overlay.queue_redraw()
 	logistics_overlay.queue_redraw()
 	objectives_overlay.queue_redraw()
 	asteroid_frame_meshes.clear()
@@ -8341,7 +8367,6 @@ func _draw_map() -> void:
 	for i in range(points.size()):
 		var pos: Vector2 = _screen_point(points[i])
 		if not ECONOMY.discovered(state, _me(), "planets", i):
-			map_canvas.draw_string(font, pos + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
 			continue
 		if not _fog_visible(points[i]):
 			continue
@@ -8356,8 +8381,6 @@ func _draw_map() -> void:
 			for angle in range(4):
 				var start: float = float(angle) * TAU / 4.0 + 0.1
 				map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
-		var name_star_radius: float = _star_draw_radius(radius)
-		map_canvas.draw_string(font, pos + Vector2(-80, -name_star_radius - 7), _system_name(i), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.65))
 	for ref in _selected_yards(state):
 		var rally: Dictionary = state["planets"][ref.x]["yards"][ref.y].get("rally", {})
 		if not rally.is_empty():

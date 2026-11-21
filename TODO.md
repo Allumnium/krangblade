@@ -22,6 +22,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.86.1: Control groups draw at HUD depth above fog and territory; named star-system sectors render once in a passive above-fog overlay, including unexplored systems. Preserve tactical concealment and existing discovery/command rules. Verify camera pan/zoom, fog transitions, HUD overlap, clickable groups and solo/guest presentation; Godot runtime pending.
+
 - [ ] v0.86.0: Galactic Credits foundation: independent 5,000 GC starting balances and 1% resident tax per simulation year, accrued from beginning-of-substep residents; no expense, trade or upkeep yet. HUD balance/net annual rate and hover breakdown; Codex. Economy, solo and actual ENet fixture coverage added for initialization, separate balances, ownership, pause/resume, restart and snapshot codec. Validate Godot parser/startup, economy, solo, peer sync and HUD at small resolutions before closing. Next: construction fees/refunds and AI budgets, then upkeep/defection, market, compensated shipments and gifts.
 
 - [ ] v0.85.3: Correct extra indentation in `_refresh_territory` introduced in v0.85.0; verify Godot parse/startup and tactical territory warning destinations in solo and ENet. Static indentation and delimiter scan of eight GDScript files touched by v0.85.0–0.85.1 found only this malformed block; full runtime validation remains pending.
