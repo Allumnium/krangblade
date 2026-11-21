@@ -323,6 +323,9 @@ var conquest_cards: VBoxContainer
 var conquest_card_signature: String = ""
 var empire_dialog: Window
 var empire_rows: VBoxContainer
+var diplomacy_rows: VBoxContainer
+var diplomacy_signature: String = ""
+var war_confirmation: ConfirmationDialog
 var empire_controls: Dictionary = {}
 var empire_signature: String = ""
 var conquest_pulse_time: float = 0.0
@@ -5816,6 +5819,18 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	if not force_position and (contextual or explicit_attack):
 		target = _entity_hit(state, point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
 	var ref: Dictionary = ECONOMY.service_targets(state).get(target, {})
+	if state.has("diplomacy") and explicit_attack and not ref.is_empty():
+		var other: int = int(ref.get("owner", 0))
+		if other > 0 and other != _me() and not ECONOMY.empires_hostile(state, _me(), other):
+			if ECONOMY.diplomatic_relation(state, _me(), other) == ECONOMY.DIPLO_NEUTRAL and ref.get("kind", "") != "pds":
+				var armed_ids: Array[int] = []
+				for craft in state["ships"]:
+					if owned.has(int(craft["id"])) and int(craft["owner"]) == _me() and ECONOMY.armed(craft):
+						armed_ids.append(int(craft["id"]))
+				if not armed_ids.is_empty():
+					_confirm_war(other, armed_ids, target)
+			# Do not turn a rejected attack on an ally/truce into movement.
+			return
 	var wreck: int = -1
 	if contextual and not force_position:
 		wreck = _salvage_hit(state, point) if minimap_hint.is_empty() else int(minimap_hint["wreck"])
@@ -6561,6 +6576,8 @@ func _close_match_chat() -> void:
 		match_chat_edit.clear()
 
 func _input(event: InputEvent) -> void:
+	if is_instance_valid(war_confirmation) and war_confirmation.visible:
+		return
 	if is_instance_valid(dev_console) and event is InputEventKey and event.pressed and not event.echo and str(session.get("phase")) == "match":
 		if _dev_console_toggle_key(event):
 			if dev_console.visible:
@@ -6597,6 +6614,8 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 func _unhandled_key_input(event: InputEvent) -> void:
+	if is_instance_valid(war_confirmation) and war_confirmation.visible:
+		return
 	if is_instance_valid(dev_console) and dev_console.visible:
 		return
 	if not event is InputEventKey or not event.pressed or event.echo:
@@ -6732,6 +6751,8 @@ func _select_all_military() -> void:
 		map_canvas.queue_redraw()
 
 func _keyboard_pan(delta: float) -> void:
+	if is_instance_valid(war_confirmation) and war_confirmation.visible:
+		return
 	if is_instance_valid(dev_console) and dev_console.visible:
 		return
 	if str(session.get("phase")) != "match" or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible):
@@ -8971,16 +8992,132 @@ func _build_empire_dialog() -> void:
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	content.add_child(scroll)
+	var sections := VBoxContainer.new()
+	sections.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sections.add_theme_constant_override("separation", 8)
+	scroll.add_child(sections)
+	diplomacy_rows = VBoxContainer.new()
+	diplomacy_rows.add_theme_constant_override("separation", 8)
+	diplomacy_rows.hide()
+	sections.add_child(diplomacy_rows)
 	empire_rows = VBoxContainer.new()
 	empire_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	empire_rows.add_theme_constant_override("separation", 8)
-	scroll.add_child(empire_rows)
+	sections.add_child(empire_rows)
 	var close := Button.new()
 	close.text = "Close"
 	close.size_flags_horizontal = Control.SIZE_SHRINK_END
 	HUD.action(close)
 	content.add_child(close)
 	close.pressed.connect(empire_dialog.hide)
+
+func _diplomacy_action(action: String, other: int, enabled: bool = true) -> void:
+	session.call("request_diplomacy", action, other, enabled)
+
+func _empire_name(id: int) -> String:
+	var roster: Dictionary = session.get("players")
+	return str(roster.get(id, {}).get("name", "Empire %d" % id))
+
+func _confirm_war(other: int, ids: Array = [], target: int = -1) -> void:
+	if is_instance_valid(war_confirmation):
+		return
+	war_confirmation = ConfirmationDialog.new()
+	var dialog: ConfirmationDialog = war_confirmation
+	dialog.title = "Declare war?"
+	dialog.dialog_text = "Declare war on %s?" % _empire_name(other)
+	if not ids.is_empty():
+		dialog.dialog_text += "\nThe selected armed ships will attack."
+	dialog.ok_button_text = "Declare war"
+	dialog.theme = theme
+	dialog.transient = true
+	dialog.exclusive = true
+	var parent: Node = empire_dialog if is_instance_valid(empire_dialog) and empire_dialog.visible else self
+	parent.add_child(dialog)
+	dialog.confirmed.connect(func() -> void:
+		if ids.is_empty():
+			session.call("request_diplomacy", "declare_war", other)
+		else:
+			session.call("request_confirmed_attack", other, ids, target)
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.popup_centered(Vector2i(360, 160))
+
+func _diplomacy_button(row: Container, title: String, action: Callable, disabled: bool = false) -> Button:
+	var button := Button.new()
+	button.text = title
+	button.disabled = disabled
+	HUD.action(button)
+	row.add_child(button)
+	button.pressed.connect(action)
+	return button
+
+func _refresh_diplomacy_rows(state: Dictionary) -> void:
+	if not is_instance_valid(diplomacy_rows):
+		return
+	var active: bool = state.has("diplomacy")
+	diplomacy_rows.visible = active
+	empire_dialog.title = "Empire · Diplomacy & fleet" if active else "Empire · Fleet management"
+	if not active:
+		diplomacy_signature = ""
+		return
+	var me: int = _me()
+	var others: Array = state["teams"].keys()
+	others.erase(me)
+	others.sort()
+	var rows: Array = []
+	for id in others:
+		var other: int = int(id)
+		var entry: Dictionary = state["diplomacy"].get(ECONOMY._diplomacy_pair(me, other), {})
+		rows.append([other, _empire_name(other), ECONOMY.diplomatic_relation(state, me, other), entry, state.get("eliminated", []).has(other)])
+	var signature: String = str([rows, state.get("eliminated", []).has(me), state.get("match_result", {})])
+	if signature == diplomacy_signature:
+		return
+	diplomacy_signature = signature
+	for child in diplomacy_rows.get_children():
+		diplomacy_rows.remove_child(child)
+		child.queue_free()
+	var heading := _label("Diplomacy", 18)
+	diplomacy_rows.add_child(heading)
+	for data in rows:
+		var other: int = int(data[0])
+		var relation: String = str(data[2])
+		var entry: Dictionary = data[3]
+		var inactive: bool = bool(data[4]) or state.get("eliminated", []).has(me) or not state.get("match_result", {}).is_empty()
+		var panel := PanelContainer.new()
+		diplomacy_rows.add_child(panel)
+		var column := VBoxContainer.new()
+		panel.add_child(column)
+		var title_row := HBoxContainer.new()
+		column.add_child(title_row)
+		var name_label := _label(str(data[1]), 15)
+		name_label.modulate = _empire_color(other)
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		title_row.add_child(name_label)
+		var status: String = "Eliminated" if bool(data[4]) else relation.capitalize()
+		if relation == ECONOMY.DIPLO_TRUCE:
+			status = "Truce until %d" % (ECONOMY.START_YEAR + ceili(float(entry.get("until", 0.0))))
+		title_row.add_child(_label(status, 13))
+		if inactive:
+			continue
+		var actions := HBoxContainer.new()
+		column.add_child(actions)
+		match relation:
+			ECONOMY.DIPLO_NEUTRAL:
+				var proposer: int = int(entry.get("alliance_offer", 0))
+				_diplomacy_button(actions, "Accept alliance" if proposer == other else ("Alliance offered" if proposer == me else "Offer alliance"), _diplomacy_action.bind("alliance", other, true), proposer == me)
+				_diplomacy_button(actions, "Declare war", _confirm_war.bind(other, [], -1))
+			ECONOMY.DIPLO_WAR:
+				var proposer: int = int(entry.get("peace_offer", 0))
+				_diplomacy_button(actions, "Accept peace" if proposer == other else ("Peace offered" if proposer == me else "Offer peace"), _diplomacy_action.bind("peace", other, true), proposer == me)
+			ECONOMY.DIPLO_ALLIED:
+				for permission in ["vision", "trade"]:
+					var local_enabled: bool = bool(entry.get(permission, {}).get(me, true))
+					var effective: bool = ECONOMY.diplomacy_allows(state, me, other, permission)
+					var button: Button = _diplomacy_button(actions, "%s: %s" % [permission.capitalize(), "On" if local_enabled else "Off"], _diplomacy_action.bind(permission, other, not local_enabled))
+					button.tooltip_text = "Enabled for both empires" if effective else "Disabled by one or both empires"
+				_diplomacy_button(actions, "Leave alliance", _diplomacy_action.bind("break_alliance", other, true))
+				column.add_child(_label("Repair: On · trade settlement pending", 12))
+	diplomacy_rows.add_child(HSeparator.new())
 
 func _empire_window_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
@@ -8990,6 +9127,7 @@ func _empire_window_input(event: InputEvent) -> void:
 func _refresh_empire(state: Dictionary) -> void:
 	if state.is_empty():
 		return
+	_refresh_diplomacy_rows(state)
 	var counts: Dictionary = ECONOMY.empire_fleet_counts(state, _me())
 	var targets: Dictionary = state.get("empire_targets", {}).get(_me(), {})
 	var visible_kinds: Array = []

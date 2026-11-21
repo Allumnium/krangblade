@@ -11,6 +11,7 @@ var ready_sent: bool = false
 var color_requested: bool = false
 var expected_color: int = 0
 var economy_verified: bool = false
+var diplomacy_stage: int = 0
 var observed_commands: Dictionary = {}
 var home_index: int = -1
 var cancel_id: int = -1
@@ -929,6 +930,8 @@ func _check_economy_sync() -> void:
 			# A normal game command is the completion acknowledgment. Return
 			# only after each real peer has independently verified its replica.
 			session.call("request_thresholds", home_index, "Crystals", 11.0, 22.0)
+			if role == "client":
+				create_timer(0.25).timeout.connect(_check_diplomacy_peer)
 	if not economy_verified:
 		create_timer(0.25).timeout.connect(_check_economy_sync)
 
@@ -1023,9 +1026,95 @@ func _return_after_all_verified() -> void:
 		if pending.size() > expected_players - 1:
 			_fail("More than one in-flight snapshot per guest.")
 			return
-		session.call("return_to_lobby")
+		# Only after all peers completed the existing gameplay assertions:
+		# pause and activate the experimental pair model on the authority.
+		session.call("request_time_speed", 0)
+		ECON.initialize_diplomacy(state)
+		for peer in session.multiplayer.get_peers():
+			session.call("request_diplomacy", "alliance", int(peer))
+		session.call("_publish_economy")
+		diplomacy_stage = 1
+		create_timer(0.25).timeout.connect(_check_diplomacy_host)
 	else:
 		create_timer(0.25).timeout.connect(_return_after_all_verified)
+
+func _check_diplomacy_peer() -> void:
+	if str(session.get("phase")) != "match":
+		return
+	var state: Dictionary = session.get("economy")
+	if state.has("diplomacy"):
+		var me: int = session.multiplayer.get_unique_id()
+		var relation: String = ECON.diplomatic_relation(state, me, 1)
+		# Other guests remain neutral despite their shared alliance partner.
+		for other in state["teams"]:
+			if int(other) not in [1, me] and ECON.diplomatic_relation(state, me, int(other)) != ECON.DIPLO_NEUTRAL:
+				_fail("Diplomacy propagated across independent empire pairs.")
+				return
+		if diplomacy_stage == 0 and int(state["diplomacy"].get(ECON._diplomacy_pair(me, 1), {}).get("alliance_offer", 0)) == 1:
+			session.call("request_diplomacy", "alliance", 1)
+			diplomacy_stage = 1
+		elif diplomacy_stage == 1 and relation == ECON.DIPLO_ALLIED:
+			if not ECON.diplomacy_allows(state, me, 1, "vision") or not ECON.diplomacy_allows(state, me, 1, "repair"):
+				_fail("Default alliance permissions missing from replica.")
+				return
+			session.call("request_diplomacy", "vision", 1, false)
+			diplomacy_stage = 2
+		elif diplomacy_stage == 2 and relation == ECON.DIPLO_WAR:
+			session.call("request_diplomacy", "peace", 1)
+			diplomacy_stage = 3
+		elif diplomacy_stage == 3 and relation == ECON.DIPLO_TRUCE:
+			session.call("request_diplomacy", "declare_war", 1)
+			# Reliable requests share a channel; ack follows the denied war.
+			session.call("request_thresholds", home_index, "Crystals", 12.0, 23.0)
+			diplomacy_stage = 4
+			return
+	create_timer(0.25).timeout.connect(_check_diplomacy_peer)
+
+func _check_diplomacy_host() -> void:
+	if str(session.get("phase")) != "match":
+		return
+	var state: Dictionary = session.get("economy")
+	var guests: PackedInt32Array = session.multiplayer.get_peers()
+	if diplomacy_stage == 1:
+		var all_ready: bool = true
+		for peer in guests:
+			if not ECON.empires_allied(state, 1, peer) or ECON.diplomacy_allows(state, 1, peer, "vision"):
+				all_ready = false
+		if all_ready:
+			for peer in guests:
+				if not ECON.diplomacy_allows(state, 1, peer, "repair") or not ECON.diplomacy_allows(state, 1, peer, "trade"):
+					_fail("Alliance permission change affected unrelated permissions.")
+					return
+				session.call("request_diplomacy", "break_alliance", peer)
+				session.call("request_diplomacy", "declare_war", peer)
+			diplomacy_stage = 2
+	elif diplomacy_stage == 2:
+		var all_offered: bool = true
+		for peer in guests:
+			var entry: Dictionary = state["diplomacy"].get(ECON._diplomacy_pair(1, peer), {})
+			if int(entry.get("peace_offer", 0)) != peer:
+				all_offered = false
+		if all_offered:
+			for peer in guests:
+				session.call("request_diplomacy", "peace", peer)
+			diplomacy_stage = 3
+	elif diplomacy_stage == 3:
+		var acknowledged: int = 0
+		for system in state["planets"]:
+			if not guests.has(int(system["owner"])) or not bool(system["home"]):
+				continue
+			var ack: Dictionary = system["thresholds"]["Crystals"]
+			if is_equal_approx(float(ack["min"]), 12.0) and is_equal_approx(float(ack["max"]), 23.0):
+				acknowledged += 1
+		if acknowledged == guests.size():
+			for peer in guests:
+				if ECON.diplomatic_relation(state, 1, peer) != ECON.DIPLO_TRUCE:
+					_fail("Guest broke a truce through the diplomacy RPC.")
+					return
+			print("PASS: real-peer diplomacy offers, permissions, war and truce")
+			session.call("return_to_lobby")
+			return
+	create_timer(0.25).timeout.connect(_check_diplomacy_host)
 
 # Verify the actual lobby scene, then explicitly disconnect rather than
 # relying on process teardown to propagate an ENet disconnect.
