@@ -17,6 +17,9 @@ const ACTIVE_PRODUCTION = RESOURCES
 const STARTING_STOCK = {"Metals": 1650.0, "Organics": 300.0, "Crystals": 0.0}
 const STARTING_GC: float = 5000.0
 const RESIDENT_TAX_RATE: float = 0.01
+const ROGUE_GRACE_YEARS: float = 60.0
+const ROGUE_CHECK_YEARS: float = 10.0
+const ROGUE_CHANCE: float = 0.005
 # Annual operating wages for completed mobile hulls; structures are exempt.
 const SHIP_UPKEEP_GC = {"scout": 1.0, "miner": 3.0, "fighter": 5.0, "ship": 8.0, "colony_ship": 10.0, "science_ship": 10.0, "cruiser": 15.0, "destroyer": 35.0}
 # Fixed labor fee, independent of future fluctuating market prices.
@@ -524,6 +527,51 @@ static func _pay_fleet_upkeep(state: Dictionary, dt: float) -> void:
 			_pay_hull_wages(credits, ship, rate * dt, now)
 	for ship in military:
 		_pay_hull_wages(credits, ship, ship_upkeep(str(ship["kind"])) * dt, now)
+
+# A seeded roll per hull and period, independent of simulation frame rate.
+static func _rogue_roll(seed_value: int, hull_id: int, epoch: int) -> bool:
+	return posmod(hash([seed_value, hull_id, epoch]), 1000000) < int(ROGUE_CHANCE * 1000000.0)
+
+static func _make_rogue(ship: Dictionary) -> void:
+	# Preserve the actual hull, cargo, crew, health, position and lifetime stats.
+	# Drop all orders, inherited technology, auto-service and combat state.
+	var point: Vector2 = ship["position"]
+	var heading: Vector2 = ship.get("heading", Vector2.UP)
+	var retained: Dictionary = {}
+	for key in ["id", "kind", "at", "origin", "hp", "crew", "cargo", "kills", "tons_picked", "tons_dropped", "food_produced"]:
+		if ship.has(key):
+			retained[key] = ship[key]
+	ship.clear()
+	ship.merge(retained)
+	ship.merge({"owner": 0, "rogue": true, "position": point, "heading": heading,
+		"navigation_target": point, "route": [], "leg": 0.0, "source": -1, "dest": -1,
+		"field": -1, "mining_mode": "idle", "field_leg": 0.0, "holding": true,
+		"hold_position": point, "hold_heading": heading})
+
+# Only live bilateral-diplomacy matches use independent neutral hulls.
+# Aggregate one bounded, replicated notice per former owner per check.
+static func _check_unpaid_defections(state: Dictionary) -> void:
+	if not state.has("diplomacy"):
+		return
+	var now: float = float(state["elapsed"])
+	var epoch: int = floori(now / ROGUE_CHECK_YEARS)
+	if epoch <= int(state.get("rogue_check_epoch", 0)):
+		return
+	state["rogue_check_epoch"] = epoch
+	var seed_value: int = int(state["map"]["seed"])
+	var events: Dictionary = state.get("rogue_events", {})
+	for ship in state["ships"]:
+		var owner: int = int(ship["owner"])
+		if owner <= 0 or not state.get("galactic_credits", {}).has(owner) or not ship.has("unpaid_since") or ship_upkeep(str(ship["kind"])) <= 0.0:
+			continue
+		if unpaid_wage_years(state, ship) + EPS < ROGUE_GRACE_YEARS or not _rogue_roll(seed_value, int(ship["id"]), epoch):
+			continue
+		var previous: Dictionary = events.get(owner, {})
+		var total: int = int(previous.get("total", 0)) + 1
+		var count: int = int(previous.get("count", 0)) + 1 if int(previous.get("epoch", -1)) == epoch else 1
+		events[owner] = {"epoch": epoch, "total": total, "count": count, "kind": ship["kind"], "position": ship["position"], "elapsed": now}
+		_make_rogue(ship)
+	state["rogue_events"] = events
 
 static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 	var stock: Dictionary = empty_stock()
@@ -3655,7 +3703,7 @@ static func _passive_regeneration(state: Dictionary, dt: float) -> void:
 			_regenerate_hull(battery, PDS_HP, dt)
 
 static func armed(ship: Dictionary) -> bool:
-	return ship.get("kind", "") in ["fighter", "miner", "cruiser", "destroyer", "scout"]
+	return not bool(ship.get("rogue", false)) and ship.get("kind", "") in ["fighter", "miner", "cruiser", "destroyer", "scout"]
 
 # Stable hull IDs and the existing disjoint structure target IDs. HP lives
 # in the actual entity dictionary, so repair never creates a new entity.
@@ -3792,7 +3840,7 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 	return false
 
 static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
-	return supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", mode not in ["collect", "retreat", "explore"]))
+	return not bool(ship.get("rogue", false)) and supports_autocast(ship, mode) and bool(ship.get(mode + "_auto", mode not in ["collect", "retreat", "explore"]))
 
 static func autocast_duration(mode: String) -> float:
 	match mode:
@@ -4909,6 +4957,8 @@ static func arrival_wait_remaining(state: Dictionary, ship: Dictionary) -> float
 
 static func _advance_unit_orders(state: Dictionary, graph: Dictionary) -> void:
 	for ship in (state["ships"] as Array).duplicate():
+		if bool(ship.get("rogue", false)):
+			continue
 		_mark_sector_arrival(state, ship)
 		if _unit_order_running(ship):
 			continue
@@ -6440,6 +6490,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	var pursuit_blocks: Dictionary = {}
 	var damage: Dictionary = {}
 	for ship in ships:
+		if bool(ship.get("rogue", false)):
+			continue
 		var fighter: bool = ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]
 		var miner: bool = ship.get("kind", "") == "miner"
 		if not fighter and not miner:
@@ -7345,7 +7397,7 @@ static func _sync_operations(state: Dictionary) -> void:
 	var indexed: bool = is_same(state, _indexed_state)
 	var by_id: Dictionary = _hulls_by_id if indexed else {}
 	for ship in state["ships"]:
-		if ship.get("kind", "") not in ["fighter", "scout", "cruiser", "destroyer"]:
+		if bool(ship.get("rogue", false)) or ship.get("kind", "") not in ["fighter", "scout", "cruiser", "destroyer"]:
 			continue
 		var owner: int = int(ship["owner"])
 		var target: int = int(ship.get("operation_target", ship.get("withdrawal_objective", ship.get("dest", -1))))
@@ -8250,6 +8302,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_accrue_resident_taxes(state, dt)
 	_pay_fleet_upkeep(state, dt)
 	state["elapsed"] = float(state["elapsed"]) + dt
+	if dt > 0.0:
+		_check_unpaid_defections(state)
 	var transfer_events: Dictionary = state.get("cargo_transfers", {})
 	for key in transfer_events.keys():
 		if float(state["elapsed"]) - float(transfer_events[key]["elapsed"]) > TRANSFER_EVENT_YEARS:
@@ -8305,7 +8359,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var stage_receivers: Dictionary = {}
 	var receiver_order: int = 0
 	for craft in state["ships"]:
-		if craft.get("kind", "") == "ship":
+		if craft.get("kind", "") == "ship" and not bool(craft.get("rogue", false)):
 			var owner: int = int(craft["owner"])
 			if not stage_receivers.has(owner):
 				stage_receivers[owner] = {}
@@ -8313,7 +8367,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			receiver_order += 1
 	# Passive handoff is independent of route and job. Evaluate all hulls before movement.
 	for miner in state["ships"]:
-		if miner.get("kind", "") == "miner" and not salvage_busy.has(int(miner["id"])):
+		if miner.get("kind", "") == "miner" and not bool(miner.get("rogue", false)) and not salvage_busy.has(int(miner["id"])):
 			var receivers: Array = _handoff_candidates(stage_receivers.get(int(miner["owner"]), {}), miner["position"]) if _cargo_total(miner) > EPS else []
 			miner["_handoff_sent"] = _miner_handoff(state, combat_graph, miner, receivers, salvage_threats, dt)
 	started = _profile_stage(profile, "Combat / repair", started)
@@ -8351,7 +8405,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var wander_candidates: Dictionary = {}
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
-		if ship.get("kind", "") == "warp_gate":
+		if ship.get("kind", "") == "warp_gate" or bool(ship.get("rogue", false)):
 			continue
 		if ship.get("unit_order", {}).get("kind", "") == "warp_travel" and not bool(ship.get("retreating", false)):
 			var previous_warp: float = float(ship.get("warp_ready", 0.0))

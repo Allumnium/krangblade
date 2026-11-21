@@ -319,6 +319,12 @@ func _phase_changed() -> void:
 						ECON._finish(state, index, system, {"id": launch_id, "kind": "fighter", "population_allocated": 0.0})
 						system["yards"][0]["job"] = -1
 						ECON.set_shipyard_rally(state, int(system["owner"]), index, 0, -1, Vector2.ZERO)
+				# Isolated neutral hull exercises real guest replication of a defection.
+				var rogue_point: Vector2 = state["map"]["points"][target_index]
+				var rogue: Dictionary = {"id": 975000, "kind": "scout", "owner": ordered[0], "origin": 0, "at": target_index, "position": rogue_point, "heading": Vector2.UP, "hp": ECON.ship_max_hp("scout"), "crew": 20.0, "cargo": ECON.empty_stock()}
+				ECON._make_rogue(rogue)
+				state["ships"].append(rogue)
+				state["rogue_events"] = {ordered[0]: {"epoch": 0, "total": 1, "count": 1, "kind": "scout", "position": rogue_point, "elapsed": float(state["elapsed"])}}
 				session.call("_publish_economy")
 			session.call_deferred("send_chat", "match smoke\nmessage")
 			session.call_deferred("send_chat", "rate-limit duplicate")
@@ -948,6 +954,14 @@ func _check_economy_sync() -> void:
 				if ECON.credit_balance(state, int(peer)) <= ECON.STARTING_GC:
 					_fail("Positive resident taxes did not replicate after resuming.")
 					return
+			var rogue_verified: bool = false
+			for craft in state["ships"]:
+				if int(craft["id"]) == 975000:
+					rogue_verified = int(craft["owner"]) == 0 and bool(craft.get("rogue", false)) and float(craft["crew"]) == 20.0
+					break
+			if not rogue_verified or int(state.get("rogue_events", {}).get(1, {}).get("total", 0)) < 1:
+				_fail("Rogue ownership or defection notice did not replicate.")
+				return
 			if not _check_reward_redraft(state):
 				create_timer(0.25).timeout.connect(_check_economy_sync)
 				return
@@ -1241,12 +1255,13 @@ func _check_planet_motion_codec(state: Dictionary) -> bool:
 	wire_state["galactic_credits"][1] = 9876.54321
 	wire_state["ships"] = (state["ships"] as Array).duplicate(true)
 	wire_state["ships"][0]["unpaid_since"] = 12.345
+	wire_state["rogue_events"] = {1: {"epoch": 6, "total": 1, "count": 1, "kind": "fighter", "position": Vector2(500.0, 600.0), "elapsed": 60.0}}
 	var wire: Dictionary = session.call("_encode_replica", wire_state, state["map"], false, template)
 	if not wire.get("_wire_planets_compact", false) or wire.has("_wire_planet_template") or wire.has("ai_waves") or wire.has("next_ai") or wire.has("next_operation_id"):
 		return false
 	var decoded: Dictionary = bytes_to_var(var_to_bytes(wire))
 	var restored: Array = session.call("_restore_planets", decoded["planets"], template)
-	if decoded.get("galactic_credits") != wire_state["galactic_credits"] or decoded.get("ships") != wire_state["ships"]:
+	if decoded.get("galactic_credits") != wire_state["galactic_credits"] or decoded.get("ships") != wire_state["ships"] or decoded.get("rogue_events") != wire_state["rogue_events"]:
 		return false
 	if restored != live or wire_state["ai_waves"].is_empty() or wire["operations"] != state["operations"]:
 		return false

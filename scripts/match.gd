@@ -107,6 +107,7 @@ var tactical_positions: Dictionary = {}
 var tactical_friendly: Array[int] = []
 var tactical_next_scan: int = 0
 var tactical_last_damage_sequence: int = 0
+var rogue_notice_total: int = 0
 var tactical_initialized: bool = false
 const ALERT_APPROACH_RANGE: float = 1200.0
 const ALERT_LIFETIME_MS: int = 10000
@@ -3280,7 +3281,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	field_command_grid.hide()
 	var kind: String = ship.get("kind", "ship")
 	var owner: int = int(ship["owner"])
-	ship_title.text = _ship_kind_name(kind)
+	ship_title.text = ("Rogue " if bool(ship.get("rogue", false)) else "") + _ship_kind_name(kind)
 	var route: Array = ship["route"]
 	var mode: String = ship.get("mining_mode", "idle")
 	var status: String = "Orbiting %s" % _system_name(int(ship["at"]))
@@ -3365,6 +3366,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status += "\nUpkeep: %.0f GC/yr" % ECONOMY.ship_upkeep(kind)
 		if ship.has("unpaid_since"):
 			status += " · Unpaid %.1f yr" % ECONOMY.unpaid_wage_years(state, ship)
+	if bool(ship.get("rogue", false)):
+		status = "Independent · Defected over unpaid wages"
 	ship_detail.text = status
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
@@ -6485,11 +6488,21 @@ func _sync_tactical_alerts(state: Dictionary) -> void:
 		tactical_initialized = false
 		tactical_next_scan = 0
 		tactical_last_damage_sequence = 0
+		rogue_notice_total = 0
 		return
 	var now: int = Time.get_ticks_msec()
 	for key in tactical_alerts.keys():
 		if now - int(tactical_alerts[key]["born"]) >= ALERT_REPEAT_MS:
 			tactical_alerts.erase(key)
+	var event: Dictionary = state.get("rogue_events", {}).get(_me(), {})
+	var total: int = int(event.get("total", 0))
+	if total > rogue_notice_total:
+		var count: int = total - rogue_notice_total
+		rogue_notice_total = total
+		var message: String = "%s went rogue due to unpaid wages!  ›" % _ship_kind_name(str(event["kind"])) if count == 1 else "%d ships went rogue due to unpaid wages!  ›" % count
+		# New batches must not be suppressed by the ordinary warning cooldown.
+		tactical_alerts["rogue_defection"] = {"text": message, "point": event["position"], "born": now, "target": -1}
+		sound_mixer.play_cue("warning")
 	var current: Dictionary = {}
 	var team: int = ECONOMY._combat_group(state, _me())
 	var unpaid_count: int = 0

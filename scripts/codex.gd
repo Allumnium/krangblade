@@ -303,6 +303,7 @@ func _resources() -> void:
 	_body("Each empire starts with %.0f GC and earns %.0f%% of its resident population per simulation year in taxes. Ship crews do not pay taxes. The HUD shows your balance and annual income." % [E.STARTING_GC, E.RESIDENT_TAX_RATE * 100.0])
 	_body("Construction reserves GC and local materials immediately. Fee: %.0f%% of reference material value (rounded up). Cancel for a full GC refund; destroyed projects lose their fee. Colony transformation is prepaid; Warp Gates cost %.0f GC plus antimatter." % [E.CONSTRUCTION_CREDIT_FRACTION * 100.0, E.WARP_GATE_CREDIT_COST])
 	_body("Completed ships require continuous GC upkeep. Taxes pay first, civilian ships before military ships. Unpaid wages trigger warnings; payment restores good standing. Stations and gates are upkeep-free.")
+	_body("After %.0f unpaid years, each ship has a %.1f%% chance per %.0f years of going rogue. It becomes neutral and leaves your control with its cargo and crew. No war is declared." % [E.ROGUE_GRACE_YEARS, E.ROGUE_CHANCE * 100.0, E.ROGUE_CHECK_YEARS])
 	_section("Raw antimatter")
 	_body("Science vessels follow sector lanes to a Pulsar, then collect one unit after 30 years in range. Collect Antimatter (C), then choose a Pulsar; right-click the ability to enable autocast (off by default). Antimatter remains aboard.")
 
