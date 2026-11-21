@@ -65,7 +65,6 @@ const MINED_RESOURCES = ["Metals", "Crystals"]
 const ANTIMATTER = MAP.ANTIMATTER
 const FIELD_RESOURCES = ["Metals", "Crystals", ANTIMATTER]
 # Provisional per-resource ceilings, independent of unlimited upgrade levels.
-const PLANET_MINING_LIMIT: float = 100.0
 const FIELD_MINING_LIMIT: float = 200.0
 const MINER_CAPACITY: float = 10.0
 const FIGHTER_CAPACITY: float = 0.0
@@ -930,7 +929,7 @@ static func rate(planet: Dictionary, resource: String) -> float:
 		output *= _rank_factor(planet, "rank_metals", 0.05) + (0.5 if has_reward(planet, "industry") else 0.0)
 	if resource == "Crystals":
 		output *= _rank_factor(planet, "rank_crystals", 0.05) + (1.0 if has_reward(planet, "crystals") else 0.0)
-	return station_output + minf(output, PLANET_MINING_LIMIT) if MINED_RESOURCES.has(resource) else output
+	return station_output + output
 
 static func food_growth_multiplier(planet: Dictionary) -> float:
 	# Orbital residents are self-sufficient; only terrestrial growth is food-limited.
@@ -1152,11 +1151,14 @@ static func affordable(p: Dictionary, cost: Dictionary) -> bool:
 			return false
 	return true
 
+# Minimum resident population to order the next production building.
+static func building_population(resource: String, level: int) -> int:
+	return int(ECONOMY_BUILDINGS[resource]["population"]) * maxi(1, level)
+
 static func building_available(p: Dictionary, resource: String) -> bool:
 	if not ECONOMY_BUILDINGS.has(resource) or _has_job(p, "economy_building", resource) or not production_available(p, resource):
 		return false
-	var definition: Dictionary = ECONOMY_BUILDINGS[resource]
-	return float(p["population"]) + EPS >= float(definition["population"])
+	return float(p["population"]) + EPS >= float(building_population(resource, int(p.get("buildings", {}).get(resource, 0)) + 1))
 
 static func warehouse_available(p: Dictionary) -> bool:
 	var level: int = int(p.get("warehouse_level", 0))
@@ -7147,7 +7149,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 				action = "fighter"
 			elif has_yard and useful_fields > 0 and counts["miner"] < mini(6, useful_fields * 2):
 				action = "miner"
-			elif abundance > 0.0 and level < 4 and rate(p, "Metals") < PLANET_MINING_LIMIT:
+			elif abundance > 0.0 and level < 4:
 				action = "economy"
 				target = "Metals"
 			elif has_planets(p) and farm < 3 and float(p["population"]) > population_capacity(p) * 0.8:

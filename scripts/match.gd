@@ -42,6 +42,7 @@ class CostButton extends Button:
 	var recipe: Dictionary = {}
 	var missing: Array[String] = []
 	var crew_icon: Texture2D
+	var effect_resource: String = ""
 	var fast_tooltip: bool = false
 
 	func _get_tooltip(_at_position: Vector2) -> String:
@@ -82,10 +83,22 @@ class CostButton extends Button:
 			if missing.has(resource):
 				amount.add_theme_color_override("font_color", Color("#ff7777"))
 			pair.add_child(amount)
-		if lines.size() > 1 and not lines[1].is_empty():
-			var details := Label.new()
-			details.text = lines[1]
-			body.add_child(details)
+		if lines.size() > 1:
+			for line in lines[1].split("\n", false):
+				var details := Label.new()
+				if line.begins_with("Yield: ") and not effect_resource.is_empty():
+					var benefit := HBoxContainer.new()
+					benefit.add_theme_constant_override("separation", 4)
+					body.add_child(benefit)
+					var symbol := TextureRect.new()
+					HUD.fixed_icon(symbol, HUD.resource_icon(effect_resource, 24), 24)
+					benefit.add_child(symbol)
+					details.text = line.trim_prefix("Yield: ")
+					details.add_theme_color_override("font_color", Color("#9fe3b5"))
+					benefit.add_child(details)
+				else:
+					details.text = line
+					body.add_child(details)
 		return panel
 
 var session: Node
@@ -1519,33 +1532,28 @@ func _system_bonus_text(p: Dictionary) -> String:
 	return "\n".join(lines)
 
 func _economy_building_effect(p: Dictionary, resource: String) -> String:
+	if not ECONOMY.production_available(p, resource):
+		return "Requires local production deposit" if resource != "Organics" else "Requires planets"
 	var preview: Dictionary = p.duplicate()
 	var buildings: Dictionary = p.get("buildings", {}).duplicate()
 	buildings[resource] = int(buildings.get(resource, 0)) + 1
 	preview["buildings"] = buildings
-	var before_multiplier: float = ECONOMY.building_multiplier(p, resource)
-	var after_multiplier: float = ECONOMY.building_multiplier(preview, resource)
-	var lines: PackedStringArray = ["Building output multiplier: %.2f× → %.2f× (+%.2f× baseline)" % [before_multiplier, after_multiplier, ECONOMY.BUILDING_BONUS]]
-	if not ECONOMY.production_available(p, resource):
-		lines.append("Unavailable: no local deposit")
-		return "\n".join(lines)
-	var before: float = ECONOMY.rate(p, resource)
-	var after: float = ECONOMY.rate(preview, resource)
-	var demand: float = ECONOMY.consumption(p, resource)
-	var delta: float = after - before
-	lines.append("Production: %.2f → %.2f t/yr (%+.2f)" % [before, after, delta])
-	lines.append("Net after %.2f t/yr demand: %+.2f → %+.2f t/yr" % [demand, before - demand, after - demand])
-	if ECONOMY.production_level(p, resource) == 0 and ECONOMY.production_level(preview, resource) > 0:
-		lines.append("Unlocks local production (level 0 → 1)")
+	var actual: float = ECONOMY.rate(preview, resource) - ECONOMY.rate(p, resource)
+	# A reference population makes increments comparable; agriculture has
+	# nonlinear labor scaling, so describe a reference rather than a ratio.
+	var reference: Dictionary = p.duplicate()
+	var reference_preview: Dictionary = preview.duplicate()
+	for sample in [reference, reference_preview]:
+		sample["population"] = ECONOMY.HOME_POPULATION
+		sample["eco_population"] = 0.0
+		sample["planet_blockaded"] = false
+	var base: float = ECONOMY.rate(reference_preview, resource) - ECONOMY.rate(reference, resource)
+	var result: String = "Yield: %+.2f t/yr %s %s residents (%+.2f t/yr now)" % [base, "at" if resource == "Organics" else "per", _compact_amount(ECONOMY.HOME_POPULATION), actual]
 	if resource == "Organics":
-		lines.append("Maximum farm output: %.2f → %.2f t/yr" % [ECONOMY.farm_potential(p), ECONOMY.farm_potential(preview)])
-		lines.append("Food capacity: %s → %s people" % [_compact_amount(ECONOMY.population_capacity(p)), _compact_amount(ECONOMY.population_capacity(preview))])
-	elif ECONOMY.MINED_RESOURCES.has(resource):
-		lines.append("Local extraction limit: %.0f t/yr" % ECONOMY.PLANET_MINING_LIMIT)
-		if after >= ECONOMY.PLANET_MINING_LIMIT - ECONOMY.EPS:
-			lines.append("Output capped at the extraction limit")
-	lines.append("At current population and modifiers; before storage limits.")
-	return "\n".join(lines)
+		result += "\n+%s food-supported population" % _compact_amount(ECONOMY.population_capacity(preview) - ECONOMY.population_capacity(p))
+	if bool(p.get("planet_blockaded", false)):
+		result += "\nPlanetary production blockaded"
+	return result
 
 func _body_name(system_index: int, slot: int) -> String:
 	var suffixes: Array[String] = ["I", "II", "III", "IV", "V", "VI"]
@@ -1791,7 +1799,8 @@ func _upgrade_level_badge(button: Button, level: int) -> void:
 	label.text = _roman_level(level)
 
 func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> TextureRect:
-	_enable_fast_command_tooltip(button)
+	# Construction cards use Godot's single native custom-tooltip path.
+	# Do not create a second timer-driven hover popup for these buttons.
 	button.custom_minimum_size = Vector2(60, 60)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.focus_mode = Control.FOCUS_NONE
@@ -2108,9 +2117,9 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		_upgrade_level_badge(button, 1 if installed else 0)
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not _any_selected_station_buildable(kind, p)
-		var hint: String = "Reinforced Plating I · %.0f s (1×)\nMaximum hull: 6,500 HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s (1×)\n+2 defensive lasers (4 total) · 18 damage each · 1 shot/s (1×) · range 180"
+		var hint: String = "Reinforced Plating I · %.0f s (1×)\n+1,500 station HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s (1×)\n+2 defensive lasers (4 total)"
 		if kind == "dyson_sphere":
-			hint = "Dyson Sphere · %.0f s (1×)\nAll ship material costs in this sector -50%%"
+			hint = "Dyson Sphere · %.0f s (1×)\nRequires Dyson Sphere technology\n−50%% local ship material and GC costs"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
 			_set_button_hint(button, _button_hint(button) + "\n" + ("Installed" if installed else "Building"))
@@ -2145,13 +2154,14 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		var eligible: bool = true
 		var available: bool = false
 		var current_level: int = 0
+		(button as CostButton).effect_resource = key if key in ECONOMY.RESOURCES else ""
 		if key in ECONOMY.RESOURCES:
 			current_level = int(p.get("buildings", {}).get(key, 0))
 			name_text = str(ECONOMY.ECONOMY_BUILDINGS[key]["name"])
 			recipe = ECONOMY.building_cost(p, key)
 			eligible = ECONOMY.production_available(p, key)
 			available = ECONOMY.building_available(p, key)
-			description = "%s installed · Requires %s population\n%s" % [int(p.get("buildings", {}).get(key, 0)), _compact_amount(float(ECONOMY.ECONOMY_BUILDINGS[key]["population"])), _economy_building_effect(p, key)]
+			description = "Requires %s population\n%s" % [_compact_amount(float(ECONOMY.building_population(key, current_level + 1))), _economy_building_effect(p, key)]
 		elif key == "warehouse":
 			var level: int = int(p.get("warehouse_level", 0))
 			current_level = level
@@ -2159,10 +2169,12 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			eligible = level < 3
 			available = ECONOMY.warehouse_available(p)
 			work = ECONOMY._work("warehouse", level + 1)
-			description = "Storage: %s per resource" % _tons(ECONOMY.storage_capacity(p), 0)
+			description = "Maximum storage: %s per resource" % _tons(ECONOMY.storage_capacity(p), 0)
 			if eligible:
 				recipe = ECONOMY.WAREHOUSE_COSTS[level]
-				description += " → %s\nRequires %s population" % [_tons(ECONOMY.WAREHOUSE_CAPACITIES[level + 1], 0), _compact_amount(ECONOMY.WAREHOUSE_POPULATIONS[level])]
+				var preview: Dictionary = p.duplicate()
+				preview["warehouse_level"] = level + 1
+				description = "Requires %s population\n+%s storage per resource (%s total)" % [_compact_amount(ECONOMY.WAREHOUSE_POPULATIONS[level]), _tons(ECONOMY.storage_capacity(preview) - ECONOMY.storage_capacity(p), 0), _tons(ECONOMY.storage_capacity(preview), 0)]
 		elif key == "housing":
 			kind = "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
 			var caption: Label = button.get_meta("caption")
@@ -2176,14 +2188,16 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				eligible = level < 3
 				available = ECONOMY.habitation_available(p)
 				recipe = ECONOMY.habitation_cost(p) if eligible else {}
-				description = "Habitation capacity: %s → %s" % [_compact_amount(ECONOMY.habitation_capacity(p)), _compact_amount(ECONOMY.habitation_capacity(p) * (2.0 if eligible else 1.0))]
+				description = "+%s housing capacity (%s total)" % [_compact_amount(ECONOMY.habitation_capacity(p)), _compact_amount(ECONOMY.habitation_capacity(p) * 2.0)] if eligible else "Maximum housing: %s" % _compact_amount(ECONOMY.habitation_capacity(p))
 			else:
 				work = ECONOMY._work(kind, 1)
 				current_level = int(p.get("orbital_housing", 0))
 				name_text = "Orbital Eco-Housing"
 				recipe = ECONOMY.ORBITAL_HOUSING_COST
 				available = ECONOMY.orbital_housing_available(p)
-				description = "%d installed · +5,000 crew capacity · +%.1f t/yr Organics" % [int(p.get("orbital_housing", 0)), ECONOMY.ECO_HOUSING_ORGANICS]
+				var preview: Dictionary = p.duplicate()
+				preview["orbital_housing"] = current_level + 1
+				description = "+%s housing and residents\n+%.2f t/yr Organics" % [_compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
 		elif key == "yard":
 			var slot: int = ECONOMY.next_shipyard_slot(p)
 			name_text = "Build Shipyard"
@@ -2192,7 +2206,13 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				recipe = ECONOMY._cost("yard", slot)
 				work = ECONOMY._work("yard", slot)
 			available = eligible
-			description = "%d / %d completed or queued" % [ECONOMY.shipyard_count(p), ECONOMY.MAX_SHIPYARDS]
+			description = "All shipyard slots occupied"
+			if eligible:
+				var preview: Dictionary = p.duplicate()
+				var yards: Array = p["yards"].duplicate()
+				yards.append({})
+				preview["yards"] = yards
+				description = "Staffing: %s population\n+1 Small shipyard\n+%s housing and residents · +%.2f t/yr Organics" % [_compact_amount(ECONOMY.SHIPYARD_POPULATION[slot - 1]), _compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
 		elif key == "pds":
 			name_text = "PDS"
 			current_level = p.get("pds", {}).size()
@@ -2200,7 +2220,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			available = eligible and ECONOMY.pds_job(p).is_empty()
 			recipe = ECONOMY._cost("pds", 1)
 			work = ECONOMY._work("pds", 1)
-			description = "%d / %d defended · %.0f HP · %.0f damage · Range %.0f" % [p.get("pds", {}).size(), int(p["planet_count"]), ECONOMY.PDS_HP, ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
+			description = "Defends one planet · %.0f damage · Range %.0f\nInvulnerable until station destroyed" % [ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
 		_upgrade_level_badge(button, current_level)
 		if key != "yard":
 			name_text += " " + _roman_level(current_level + (1 if eligible else 0))
@@ -2338,7 +2358,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		if level >= target_level:
 			_set_cost_tooltip(upgrade, ECONOMY.size_name(target_level) + " unlocked")
 		else:
-			var hint: String = "Upgrade to %s · %.0f s (1×)\nBuild speed: %.1f× → %.1f×\nMaximum hull: %.0f → %.0f HP\nRestores shipyard to full health" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), ECONOMY.yard_speed(target_level - 1) / ECONOMY.yard_speed(1), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP * (target_level - 1), ECONOMY.YARD_HP * target_level]
+			var hint: String = "Upgrade to %s · %.0f s (1×)\nRequires %s resident population for this yard\nUnlocks %s ships · %.1f× build speed\n+%.0f HP · Fully repairs yard" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), _compact_amount(ECONOMY.SHIPYARD_POPULATION[selected_yard]), ECONOMY.size_name(target_level), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP]
 			if not eligible:
 				hint += "\nRequires " + ECONOMY.size_name(target_level - 1) + " shipyard"
 			_set_cost_tooltip(upgrade, hint, ECONOMY._cost("yard_upgrade", target_level), 0.0, _available_cost_resources(system, selected_yard))
@@ -5663,7 +5683,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 	for target_level in [2, 3]:
 		var upgrade: Button = yard_upgrades[target_level]
 		upgrade.disabled = not can_upgrade[target_level]
-		_set_cost_tooltip(upgrade, "Upgrade every eligible %s shipyard to %s\nUnlocks the next ship class and restores full health." % [ECONOMY.size_name(target_level - 1), ECONOMY.size_name(target_level)], ECONOMY._cost("yard_upgrade", target_level), 0.0, available)
+		_set_cost_tooltip(upgrade, "Upgrade eligible %s shipyards to %s\nUnlocks next ship class · Faster construction\nFully repairs each yard" % [ECONOMY.size_name(target_level - 1), ECONOMY.size_name(target_level)], ECONOMY._cost("yard_upgrade", target_level), 0.0, available)
 	yard_commands["rally"].disabled = refs.is_empty()
 	yard_commands["clear"].disabled = not can_clear
 
