@@ -1,8 +1,14 @@
 # Warbound — development TODO
 
-Living roadmap. Build a playable, low-micro galactic RTS with conventional direct military control and autonomous physical logistics. Policies and regional card assignments are intentionally removed. Prioritize a working RTS, then promissory notes, then a complete match loop. Target 10–30 minute matches at 1×, subject to playtesting.
+Living roadmap. Build a playable, low-micro galactic RTS with conventional direct military control and autonomous physical logistics. Policies and regional card assignments are intentionally removed. Preserve the working RTS foundation while developing the agreed neutral diplomacy and hidden global Revelation direction below. Promissory notes and older endgame proposals remain subject to review. Target 10–30 minute matches at 1×, subject to playtesting.
 
 Review AGENTS.md before work. This is a prioritized backlog, not blanket approval to invent mechanics. Numerical balance remains provisional. Earlier implementation history and the superseded policy roadmap are preserved in git (v0.17.36 and earlier).
+
+## Agreed design direction — hidden global Revelations
+
+- [ ] Dynamic diplomacy: non-allied empires start neutral, not hostile. Explicit war declaration or deliberate war act initiates war; either side may offer peace, requiring mutual agreement. Enforce a 100 simulation-year bilateral no-combat truce. Put diplomacy in Empire. Define war acts, queued orders, existing teams and crisis-faction exceptions before implementation; validate ownership and treaty state at authority, including AI and real peers.
+- [ ] Hidden global event framework: investigations via science vessels, fog-dependent anomalies and random events offer resources, buffs and ambiguous clues. Support at least 20 distinct shared match outcomes with substantially different mechanics, objectives and team dynamics; avoid clues that uniquely telegraph an outcome. Every outcome should account for earlier player choices, investment and preparation. Preserve alternate roles for peaceful and military empires; define pacing, elimination and victory rules before implementation.
+- [ ] Prototype information channels (private findings, optional public news, deliberate sharing), genuine authority-side secrecy and fog-filtered replication. Define a seeded host-authoritative scenario/event director and reusable anomaly chains; keep mini-games and individual scenario rules subject to review. See THOUGHTS.md for unapproved candidates.
 
 ## 1 — Basic RTS (current priority)
 
@@ -430,7 +436,7 @@ Observed approximately 5 FPS as the match progressed; Godot profiler set to self
 
 - [ ] Define the smallest useful set of bilateral promises/transactions, independent of policy cards: what is promised, who holds it, how it is fulfilled, and when it expires or is consumed.
 - [ ] Decide acceptance, payment, resource transfer, and obligation semantics, including authority validation, ownership, duplicate redemption, and how agreements affect combat and ongoing direct orders.
-- [ ] Prototype compact diplomacy UI and host-authoritative replication; test with real multiplayer. Keep complex treaties and galactic votes deferred.
+- [ ] Prototype compact diplomacy UI and host-authoritative replication; test with real multiplayer. Implement the agreed war/peace/truce rules above first; complex treaties and galactic votes remain deferred unless approved for a Revelation.
 
 ## 3 — Core match loop
 
