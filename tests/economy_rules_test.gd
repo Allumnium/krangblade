@@ -4701,6 +4701,8 @@ func _test_antimatter_extraction() -> void:
 func _test_match_elimination() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 3, "Grid"), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 2}}, [1, 2, 3], false)
 	state["planets"][1]["owner"] = 1
+	# Isolate the recovery/last-hull cases from the starting fleets.
+	state["ships"] = state["ships"].filter(func(ship: Dictionary) -> bool: return int(ship["owner"]) == 1)
 	var colony: Dictionary = {"id": 11000, "kind": "colony_ship", "owner": 2, "at": 1, "route": [], "dest": -1}
 	state["ships"].append(colony)
 	assert(not ECON.update_match_outcome(state))
@@ -4708,10 +4710,20 @@ func _test_match_elimination() -> void:
 	var target: int = 3
 	assert(not ECON.colony_path(state, 2, colony, target).is_empty())
 	assert(ECON.send_colony(state, 2, 11000, target, true))
+	var fighter: Dictionary = {"id": 11001, "kind": "fighter", "owner": 2, "at": 1, "route": [], "dest": -1}
+	state["ships"].append(fighter)
 	state["ships"].erase(colony)
+	assert(not ECON.update_match_outcome(state))
+	assert(state["ships"].has(fighter) and not state.get("eliminated", []).has(2))
+	state["ships"].erase(fighter)
 	assert(ECON.update_match_outcome(state))
 	assert(state["eliminated"].has(2) and state.get("match_result", {}).is_empty())
+	var last_ship: Dictionary = {"id": 11002, "kind": "miner", "owner": 3, "at": 2, "route": [], "dest": -1}
+	state["ships"].append(last_ship)
 	state["planets"][2]["owner"] = 1
+	assert(not ECON.update_match_outcome(state))
+	assert(state["ships"].has(last_ship) and state.get("match_result", {}).is_empty())
+	state["ships"].erase(last_ship)
 	assert(ECON.update_match_outcome(state))
 	assert(state["match_result"]["team"] == 1 and int(state["time_speed"]) == 0)
 	assert(not ECON.update_match_outcome(state))
