@@ -21,6 +21,9 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.85.0: New matched solo/ENet sessions initialize bilateral neutrality; remove lobby team picker, make selection/territory/alerts/AI target/explore/formation logic empire-aware, retain independent last-surviving-empire conquest fallback and legacy fixture API. Update Codex and solo/network fixtures. AI autonomous declarations, alliance and peace responses require design policy; coalition/alternate victory and paid trade/gifts remain pending. Validate parser, solo, real peers and visual interaction before closing.
+
+
 - [ ] v0.84.3: Opt-in Empire diplomacy rows, two-sided alliance and peace offers, vision/trade preference buttons, mandatory repair display, war confirmation for explicit neutral-target attacks. Fix route cache separation of legacy and bilateral states. Extend existing two-/three-peer ENet smoke sequence with paused bilateral-mode lifecycle checks after legacy tests. Runtime, visual/peer validation pending. Enable normal matches only after fixed-team lobby/victory/remaining simulation and UI migration; paid trade and gifts still pending.
 
 - [ ] v0.84.2: Neutral transit for opt-in civilian logistics/mining/salvage routes; relation changes invalidate route caches, ordinary transfers remain owned. Host RPCs for declarations, offers, alliance preferences and explicitly confirmed neutral attacks with round, sender, target ownership/visibility and armed-unit validation. Validate route changes in flight and actual peers; Empire UI and attack confirmation prompt, victory/lobby migration, paid trade and gifts remain pending. Normal matches retain legacy rules.

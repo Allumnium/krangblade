@@ -401,7 +401,7 @@ func _build_roster_rows(parent: VBoxContainer, entries: Dictionary, solo: bool) 
 	var player_heading := _text("Player", 13, MUTED)
 	player_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	headings.add_child(player_heading)
-	for heading in ["Color", "Team"]:
+	for heading in ["Color"]:
 		var label := _text(heading, 13, MUTED)
 		label.custom_minimum_size.x = 100
 		headings.add_child(label)
@@ -425,14 +425,6 @@ func _build_roster_rows(parent: VBoxContainer, entries: Dictionary, solo: bool) 
 		color.disabled = not editable or (not solo and id != multiplayer.get_unique_id() and not (is_host and ai))
 		color.item_selected.connect(_solo_color_selected.bind(id) if solo else _color_selected.bind(id))
 		row.add_child(color)
-		var team := OptionButton.new()
-		team.custom_minimum_size.x = 100
-		for choice in range(1, (entries.size() if solo else RULES.MAX_PLAYERS) + 1):
-			team.add_item("Team %d" % choice)
-		team.select(int(entry["team"]) - 1)
-		team.disabled = not editable or (not is_host and id != multiplayer.get_unique_id())
-		team.item_selected.connect(_solo_team_selected.bind(id) if solo else _team_selected.bind(id))
-		row.add_child(team)
 		if not solo and not ai:
 			var ready := _text("✓" if bool(entry.get("ready", false)) else "…", 14, MUTED)
 			ready.custom_minimum_size.x = 40
@@ -445,7 +437,7 @@ func _build_roster_rows(parent: VBoxContainer, entries: Dictionary, solo: bool) 
 			remove.tooltip_text = "Remove AI player"
 			row.add_child(remove)
 			if solo:
-				solo_rows[id] = {"color": color, "team": team, "remove": remove}
+				solo_rows[id] = {"color": color, "remove": remove}
 	if is_host:
 		var add_row := HBoxContainer.new()
 		parent.add_child(add_row)
@@ -459,10 +451,6 @@ func _solo_color_selected(index: int, id: int) -> void:
 	if solo_players.has(id) and RULES.color_available(solo_players, id, index + 1):
 		solo_players[id]["color"] = index + 1
 	_refresh_solo_roster()
-
-func _solo_team_selected(index: int, id: int) -> void:
-	if solo_players.has(id) and index >= 0 and index < solo_players.size():
-		solo_players[id]["team"] = index + 1
 
 func _add_solo_player() -> void:
 	if solo_players.size() >= RULES.MAX_PLAYERS:
@@ -479,23 +467,8 @@ func _remove_solo_player(id: int) -> void:
 	for old_id in RULES.ordered_peers(solo_players):
 		compact[compact.size() + 1] = solo_players[old_id]
 	solo_players = compact
-	# Reassign out-of-range team labels without splitting existing alliances.
-	var used: Dictionary = {}
-	var replacements: Dictionary = {}
-	for entry in solo_players.values():
-		var team: int = int(entry["team"])
-		if team <= solo_players.size():
-			used[team] = true
-	for entry in solo_players.values():
-		var team: int = int(entry["team"])
-		if team > solo_players.size():
-			if not replacements.has(team):
-				for choice in range(1, solo_players.size() + 1):
-					if not used.has(choice):
-						replacements[team] = choice
-						used[choice] = true
-						break
-			entry["team"] = replacements[team]
+	for player_id in solo_players:
+		solo_players[player_id]["team"] = player_id
 	_refresh_solo_roster()
 
 func _start_solo_from_setup() -> void:
@@ -504,13 +477,13 @@ func _start_solo_from_setup() -> void:
 	for id in RULES.ordered_peers(solo_players):
 		colors.append(int(solo_players[id]["color"]))
 		if id != 1:
-			opponents.append(int(solo_players[id]["team"]))
+			opponents.append(int(id))
 	var seed_text: String = solo_seed_edit.text.strip_edges()
 	if not seed_text.is_empty() and not seed_text.is_valid_int():
 		solo_seed_edit.grab_focus()
 		return
 	var map_seed: int = solo_random_seed if seed_text.is_empty() else seed_text.to_int()
-	network.call("start_solo", int(solo_players[1]["team"]), opponents, colors, map_seed, MAP.LAYOUTS[solo_layout_picker.selected])
+	network.call("start_solo", 1, opponents, colors, map_seed, MAP.LAYOUTS[solo_layout_picker.selected])
 
 func _show_multiplayer() -> void:
 	screen = "multiplayer"
@@ -697,8 +670,6 @@ func _refresh_chat() -> void:
 func _color_selected(index: int, id: int) -> void:
 	network.call("choose_color", id, index + 1)
 
-func _team_selected(index: int, id: int) -> void:
-	network.call("choose_team", id, index + 1)
 
 func _toggle_ready() -> void:
 	network.call("toggle_ready")

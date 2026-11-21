@@ -3478,7 +3478,7 @@ static func diplomacy_set_permission(state: Dictionary, a: int, b: int, permissi
 # Legacy combat groups are teams. In bilateral matches they are individual
 # empires: cached hostile buckets must never merge allies transitively.
 static func _combat_group(state: Dictionary, owner: int) -> int:
-	return owner if state.has("diplomacy") else int(state["teams"].get(owner, 0))
+	return owner if state.has("diplomacy") and state["teams"].has(owner) else int(state["teams"].get(owner, 0))
 
 static func _combat_groups_hostile(state: Dictionary, a: int, b: int) -> bool:
 	if state.has("diplomacy"):
@@ -5276,24 +5276,37 @@ static func territory_claims(state: Dictionary) -> Array[int]:
 		near_ship[int(ship["id"])] = node
 		if kind != "fighter":
 			continue
-		var team: int = int(state["teams"].get(int(ship["owner"]), 0))
+		var team: int = _combat_group(state, int(ship["owner"]))
 		if team <= 0:
 			continue
 		var stationary: bool = (ship["route"] as Array).is_empty() and not _engaged(ship) and not ship.has("patrol_from")
 		if stationary:
 			node = int(ship["at"])
-			if claims[node] != 0 and claims[node] != team:
+			if claims[node] != 0 and _combat_groups_hostile(state, team, claims[node]):
 				contested[node] = true
 		if stationary or nearest <= LASER_RANGE * LASER_RANGE:
-			if presence.has(node) and int(presence[node]) != team:
-				contested[node] = true
-			presence[node] = team
+			if state.has("diplomacy"):
+				if not presence.has(node):
+					presence[node] = {}
+				var occupants: Dictionary = presence[node]
+				if _combat_sector_has_hostile(presence, node, team, state):
+					contested[node] = true
+				occupants[team] = true
+			else:
+				if presence.has(node) and int(presence[node]) != team:
+					contested[node] = true
+				presence[node] = team
 	for node in presence:
-		if claims[node] > 0 and claims[node] != int(presence[node]):
+		if claims[node] <= 0:
+			continue
+		if state.has("diplomacy"):
+			if _combat_sector_has_hostile(presence, node, claims[node], state):
+				contested[node] = true
+		elif claims[node] != int(presence[node]):
 			contested[node] = true
 	for ship in state["ships"]:
 		var target: int = int(ship.get("combat_target", -1))
-		if target >= 0 and near_ship.has(target):
+		if target >= 0 and near_ship.has(target) and (not state.has("diplomacy") or _hostile_hull(state, int(ship["owner"]), service_targets(state, target).get(target, {}))):
 			contested[near_ship[int(ship["id"])]] = true
 			contested[near_ship[target]] = true
 	for node in contested:
@@ -6693,7 +6706,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 				reserved[target] = true
 		return
 	var planets: Array = state["planets"]
-	var team: int = int(state["teams"][player])
+	var team: int = _combat_group(state, player)
 	var owned: Array[int] = []
 	var counts: Dictionary = {"ship": 0, "colony_ship": 0, "miner": 0, "fighter": 0, "science_ship": 0, "scout": 0, "cruiser": 0, "destroyer": 0}
 	var reserved: Dictionary = {}
@@ -6865,7 +6878,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 # Local hostile fighters determine defensive urgency; friendly systems and
 # allied ships never count as invasion targets or threats.
 static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: int, home: int, owned: Array[int], fighters: Array) -> void:
-	var team: int = int(state["teams"][player])
+	var team: int = _combat_group(state, player)
 	var planets: Array = state["planets"]
 	var points: Array = graph["points"]
 	var pois: Array[int] = military_pois(state, player)
@@ -6902,7 +6915,7 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 			node = planets.size() + int(ship["field"])
 		if not pois.has(node):
 			continue
-		if node < planets.size() and int(state["teams"].get(int(planets[node]["owner"]), 0)) == team:
+		if node < planets.size() and empires_allied(state, player, int(planets[node]["owner"])):
 			continue
 		opportunities[node] = true
 	var defense: int = home
@@ -7496,7 +7509,7 @@ static func _dispatch_explorers(state: Dictionary, graph: Dictionary) -> void:
 	var occupancy: Dictionary = {}
 	var scouts: Array = []
 	for craft in state["ships"]:
-		var team: int = int(state["teams"].get(int(craft["owner"]), 0))
+		var team: int = _combat_group(state, int(craft["owner"]))
 		var node: int = int(craft.get("at", -1))
 		var key := Vector2i(team, node)
 		occupancy[key] = int(occupancy.get(key, 0)) + 1
@@ -7510,20 +7523,25 @@ static func _dispatch_explorers(state: Dictionary, graph: Dictionary) -> void:
 	for node in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][node]
 		if has_station(system):
-			var key := Vector2i(int(state["teams"].get(int(system["owner"]), 0)), node)
+			var key := Vector2i(_combat_group(state, int(system["owner"])), node)
 			occupancy[key] = int(occupancy.get(key, 0)) + 8 + system["yards"].size()
 	for craft in scouts:
 		var node: int = int(craft["at"])
 		if node < 0 or node >= graph["adjacent"].size():
 			continue
-		var team: int = int(state["teams"].get(int(craft["owner"]), 0))
+		var team: int = _combat_group(state, int(craft["owner"]))
 		var visits: Dictionary = craft.get("explore_visits", {})
 		visits[node] = float(state["elapsed"])
 		var best: int = -1
 		var score: float = -INF
 		for candidate in graph["adjacent"][node]:
 			var age: float = minf(600.0, float(state["elapsed"]) - float(visits.get(candidate, -600.0)))
-			var value: float = age - float(occupancy.get(Vector2i(team, candidate), 0)) * 80.0
+			var friendly_occupancy: int = int(occupancy.get(Vector2i(team, candidate), 0))
+			if state.has("diplomacy"):
+				for ally in state["teams"]:
+					if int(ally) != team and empires_allied(state, team, int(ally)):
+						friendly_occupancy += int(occupancy.get(Vector2i(int(ally), candidate), 0))
+			var value: float = age - float(friendly_occupancy) * 80.0
 			if value > score:
 				score = value
 				best = candidate
@@ -7547,7 +7565,7 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 			var node: int = int(ship["at"])
 			if not stationary_teams.has(node):
 				stationary_teams[node] = {}
-			stationary_teams[node][int(state["teams"].get(int(ship["owner"]), 0))] = true
+			stationary_teams[node][_combat_group(state, int(ship["owner"]))] = true
 		if not _is_idle_ship(ship) or not autocast_ready(state, ship, "wander"):
 			continue
 		var key: String = "%d:%s:%d:%d" % [int(ship["owner"]), str(ship.get("kind", "ship")), int(ship["at"]), int(ship.get("operation_id", 0))]
@@ -7565,10 +7583,11 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 			var radius: float = float(graph["sector_radii"][node])
 			var compact: bool = false
 			if leader.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
-				var team: int = int(state["teams"].get(int(leader["owner"]), 0))
+				var team: int = _combat_group(state, int(leader["owner"]))
 				var owner: int = int(state["planets"][node]["owner"]) if node < (state["planets"] as Array).size() else 0
-				var hostile_system: bool = owner != 0 and int(state["teams"].get(owner, 0)) != team
-				compact = bool(leader.get("rally_pending", false)) or hostile_system or (stationary_teams.get(node, {}) as Dictionary).size() > 1
+				var hostile_system: bool = empires_hostile(state, int(leader["owner"]), owner)
+				var hostile_presence: bool = _combat_sector_has_hostile(stationary_teams, node, team, state) if state.has("diplomacy") else (stationary_teams.get(node, {}) as Dictionary).size() > 1
+				compact = bool(leader.get("rally_pending", false)) or hostile_system or hostile_presence
 			var phase: float = float(state["elapsed"]) * ship_speed(str(leader.get("kind", "ship"))) / maxf(radius, 100.0)
 			var angle: float = float(seed) * 2.399963 + (float(state["elapsed"]) * 0.32 if compact else phase * 0.55)
 			var radial: Vector2 = Vector2.from_angle(angle)
@@ -7652,15 +7671,15 @@ static func _reroute_after_capture(state: Dictionary, index: int) -> void:
 		_evacuate_civilian(state, ship, teams)
 
 # Match-only outcome evaluation, invoked by the authoritative session.
-# A colony ship permits recovery while a neutral system remains. Eliminate
-# only empires with neither a colony nor a viable colonization opportunity.
-# Teams win together; sandbox matches with one starting team never auto-end.
+# Eliminate only when all stations and hulls are gone. Bilateral mode
+# retains conquest as a last-empire fallback, without transitive winners.
+# A one-empire sandbox never auto-ends.
 static func update_match_outcome(state: Dictionary) -> bool:
 	if not state.get("match_result", {}).is_empty():
 		return false
 	var starting_teams: Dictionary = {}
-	for team in state["teams"].values():
-		starting_teams[team] = true
+	for player in state["teams"]:
+		starting_teams[_combat_group(state, int(player))] = true
 	var viable: Dictionary = {}
 	for planet in state["planets"]:
 		var owner: int = int(planet["owner"])
@@ -7686,10 +7705,12 @@ static func update_match_outcome(state: Dictionary) -> bool:
 	var remaining_teams: Dictionary = {}
 	for player in viable:
 		if not eliminated.has(player) and state["teams"].has(player):
-			remaining_teams[state["teams"][player]] = true
+			remaining_teams[_combat_group(state, int(player))] = true
 	if remaining_teams.size() <= 1:
 		var winner: int = int(remaining_teams.keys()[0]) if remaining_teams.size() == 1 else 0
 		state["match_result"] = {"team": winner, "reason": "conquest", "elapsed": float(state["elapsed"])}
+		if state.has("diplomacy"):
+			state["match_result"]["winner"] = winner
 		state["time_speed"] = 0
 		changed = true
 	return changed

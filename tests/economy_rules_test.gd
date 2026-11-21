@@ -1361,6 +1361,7 @@ func _initialize() -> void:
 	_test_bilateral_diplomacy()
 	_test_bilateral_services()
 	_test_bilateral_transit_and_confirmation()
+	_test_bilateral_conquest()
 	_test_stop_order()
 	_test_nearest_colony_and_queued_hold()
 	_test_manual_conversion_and_stats()
@@ -4934,3 +4935,18 @@ func _test_bilateral_transit_and_confirmation() -> void:
 	assert(not ECON.diplomacy_confirm_attack(state, 1, 2, [own], target))
 	assert(not ECON._cargo_target_allowed(state, 1, {"owner": 2}))
 	print("PASS: neutral transit, treaty route cache invalidation and confirmed attack validation")
+
+func _test_bilateral_conquest() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 3), {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 1}}, [1, 2, 3], false)
+	ECON.initialize_diplomacy(state)
+	assert(not ECON.update_match_outcome(state))
+	assert(ECON.diplomacy_offer_alliance(state, 1, 2) and ECON.diplomacy_offer_alliance(state, 2, 1))
+	state["planets"][2]["owner"] = 0
+	state["planets"][2]["station"] = {}
+	assert(ECON.update_match_outcome(state))
+	assert(state["eliminated"].has(3) and state.get("match_result", {}).is_empty())
+	state["planets"][1]["owner"] = 0
+	state["planets"][1]["station"] = {}
+	assert(ECON.update_match_outcome(state))
+	assert(state["eliminated"].has(2) and int(state["match_result"]["winner"]) == 1)
+	print("PASS: bilateral conquest evaluates surviving empires independently")

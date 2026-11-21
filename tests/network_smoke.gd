@@ -147,6 +147,14 @@ func _phase_changed() -> void:
 			return
 		var owners: Array[int] = session.get("owners")
 		var state: Dictionary = session.get("economy")
+		if not state.has("diplomacy"):
+			_fail("New matches must initialize bilateral diplomacy.")
+			return
+		for peer in roster:
+			for other in roster:
+				if peer != other and ECON.diplomatic_relation(state, int(peer), int(other)) != ECON.DIPLO_NEUTRAL:
+					_fail("New matches must start neutral.")
+					return
 		if str(session.get("map_layout")) != _expected_layout() or state["map"].get("layout") != _expected_layout():
 			_fail("Match map layout did not match host setting.")
 			return
@@ -177,6 +185,10 @@ func _phase_changed() -> void:
 		if mode == "normal":
 			if role == "host":
 				var ordered: Array[int] = RULES.ordered_peers(roster)
+				# Explicit fixture wars enable the existing combat assertions.
+				for i in range(ordered.size()):
+					for j in range(i + 1, ordered.size()):
+						assert(ECON.diplomacy_declare_war(state, ordered[i], ordered[j]))
 				for peer in ordered:
 					var progress: Dictionary = ECON.objective_progress(state, peer)
 					progress["points"]["economic"] = 2
@@ -458,7 +470,7 @@ func _send_commands() -> void:
 			break
 	if mining_field < 0:
 		var teams: Array[int] = ECON.planet_teams(initial)
-		var team: int = int(initial["teams"][self_id])
+		var team: int = ECON._combat_group(initial, self_id)
 		for i in range(1, initial["map"]["fields"].size()):
 			var field: Dictionary = initial["map"]["fields"][i]
 			if bool(field.get("antimatter", false)) or field["chunks"].is_empty():
@@ -1026,10 +1038,11 @@ func _return_after_all_verified() -> void:
 		if pending.size() > expected_players - 1:
 			_fail("More than one in-flight snapshot per guest.")
 			return
-		# Only after all peers completed the existing gameplay assertions:
-		# pause and activate the experimental pair model on the authority.
+		# Test-only reset of fixture wars so the independent relationship
+		# lifecycle can be verified without waiting a century in real time.
 		session.call("request_time_speed", 0)
-		ECON.initialize_diplomacy(state)
+		state["diplomacy"] = {}
+		state["diplomacy_revision"] = int(state["diplomacy_revision"]) + 1
 		for peer in session.multiplayer.get_peers():
 			session.call("request_diplomacy", "alliance", int(peer))
 		session.call("_publish_economy")
@@ -1045,6 +1058,9 @@ func _check_diplomacy_peer() -> void:
 	if state.has("diplomacy"):
 		var me: int = session.multiplayer.get_unique_id()
 		var relation: String = ECON.diplomatic_relation(state, me, 1)
+		if diplomacy_stage == 0 and int(state["diplomacy"].get(ECON._diplomacy_pair(me, 1), {}).get("alliance_offer", 0)) != 1:
+			create_timer(0.25).timeout.connect(_check_diplomacy_peer)
+			return
 		# Other guests remain neutral despite their shared alliance partner.
 		for other in state["teams"]:
 			if int(other) not in [1, me] and ECON.diplomatic_relation(state, me, int(other)) != ECON.DIPLO_NEUTRAL:
