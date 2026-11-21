@@ -376,7 +376,7 @@ func _draw_chart(canvas: Control, population: bool) -> void:
 func _mining() -> void:
 	_body("Harvesters extract ore and transfer it to nearby freighters, even while traveling (10 Harvester holds per freighter), or return to an owned depot. A passing freighter interrupts deliveries; empty Harvesters immediately reassess work. Cargo enters storage gradually within doubled docking and handoff range; ships seek separated berths near the edge of transfer range. Select a Harvester and right-click a field or rock to assign it. Select a field to toggle Mining, Metals and Crystals on its command card.")
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
-	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Local resource ceiling", "%.0f t/yr" % E.PLANET_MINING_LIMIT], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
+	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
 	_body("Destroyed ships can leave drifting salvage. Harvesters and freighters may collect it in safe space; Idle Harvesters and Freighters search safe debris up to %d sector links and %.0f straight-line units away. Harvesters prioritize scraps over ore. Wreck debris lasts %.0f–%.0f simulation years; cancelled construction salvage persists. Freighters salvage at one-quarter the Harvester rate. Harvesters repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/s at 1×. Idle ships stop wandering while repaired." % [E.AUTO_SALVAGE_HOPS, E.AUTO_SALVAGE_RANGE, E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
@@ -411,7 +411,8 @@ func _infrastructure() -> void:
 	for r in E.RESOURCES:
 		var definition: Dictionary = E.ECONOMY_BUILDINGS[r]
 		rows.append([definition["name"], _recipe(definition["cost"]), "%.0f%% baseline" % (E.BUILDING_BONUS * 100.0)])
-	_table(["Building", "Materials", "Output bonus"], rows)
+	_table(["Building", "Cost", "Output bonus"], rows)
+	_body("Each production building requires 500 residents per target level (500, 1,000, 1,500…). Planetary mineral production has no fixed rate cap; deposits, population and storage still matter. Farms scale with food capacity and labor.")
 	_section("Shipyard modules")
 	_body("Select Shipyards (Z) selects all completed yards at this station. Build → Build Shipyard (X) adds a yard at the next free port.")
 	rows = []

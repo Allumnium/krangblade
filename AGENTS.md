@@ -373,7 +373,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - AI chooses strategic attack/defense objectives and issues the same validated direct fighter orders. Provisional defense share and minimum AI attack strength are unchanged in spirit; playtest pacing. During engagements fighters temporarily deviate from their lanes to circle or pursue live opponents, with bounded movement, then resume orders from actual positions.
 
-- Metals and Crystals are locally extracted, with existing production modifiers and extraction ceilings. Organics supports population; civilian Metals demand continues scaling linearly. Completed economy buildings raise output; values are provisional.
+- Metals and Crystals are locally extracted with production modifiers. Planetary production has no fixed extraction ceiling; asteroid fields retain their limits. Organics supports population; civilian Metals demand continues scaling linearly. Completed economy buildings raise output; values are provisional.
 
 - Fighter formations use persistent operation slots shared across AI/human groups. Maneuver toward lane-relative offset waypoints and common station positions using authoritative world coordinates and the existing speed budget. Combat and pursuit take precedence; no client-only offsets. Disk geometry is provisional; synchronized group pace and mixed hull formations remain outstanding.
 

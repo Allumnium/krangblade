@@ -22,6 +22,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.89.2: Simplify all station/build/yard upgrade tooltips: requirements, incremental benefit, current population yield and resource icon; native custom tooltip only on construction cards. Repeat production buildings need 500 residents × target level. Remove planetary mineral output ceiling; preserve asteroid limits, storage, blockade and farm behavior. Verify UI, authority gate, rates, balance and actual peers.
+
 - [ ] v0.89.1: Explore ignores shared arrival/order cooldowns and starts whenever a scout is idle with no queued/manual orders; retain Hold, Wander exclusivity and all other cooldowns. Wander bottom-right, Explore adjacent, shift Repair/Trade to former Wander slot. Performance label above fog. Added authority and ENet fixture cases; visual/runtime verification pending.
 
 - [ ] v0.89.0: Verify defection eligibility, recovery before grace, probability, stable hull IDs, neutral/passive behavior, objective/fleet/vision effects, authority-only transfer, notifications and snapshot replication. Regression, codec and real-peer fixture cases added; runtime and actual peer execution pending. Next: dynamic market pricing.

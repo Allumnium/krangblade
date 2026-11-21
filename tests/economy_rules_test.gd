@@ -1660,7 +1660,7 @@ func _initialize() -> void:
 				assert(crystal_share <= MAP.MAX_CRYSTAL_SHARE + ECON.EPS and float(ore["Metals"]) > 0.0)
 				crystal_shares[roundi(crystal_share * 100.0)] = true
 			for resource in ECON.FIELD_RESOURCES:
-				assert(ECON.field_limit(field, resource) > ECON.PLANET_MINING_LIMIT if float(ore[resource]) > 0.0 else is_zero_approx(ECON.field_limit(field, resource)))
+				assert(ECON.field_limit(field, resource) > 100.0 if float(ore[resource]) > 0.0 else is_zero_approx(ECON.field_limit(field, resource)))
 			assert(ECON.field_limit(field, "Organics") == 0.0)
 			assert(field["outline"].size() == 12)
 			assert(field["chunks"].size() >= 9)
@@ -1814,7 +1814,6 @@ func _initialize() -> void:
 	assert(is_equal_approx(ECON.dropoff_rate("miner"), 120.0))
 	assert(is_equal_approx(ECON.dropoff_rate("ship"), 60.0))
 	assert(is_equal_approx(ECON.dropoff_rate("colony_ship"), 100.0))
-	assert(is_equal_approx(ECON.PLANET_MINING_LIMIT, 100.0))
 	assert(is_equal_approx(ECON.FIELD_MINING_LIMIT, 200.0))
 	home["population"] = ECON.HOME_POPULATION * 0.5
 	assert(is_equal_approx(ECON.rate(home, "Metals"), baseline * 0.5))
@@ -2252,7 +2251,10 @@ func _initialize() -> void:
 	assert(ECON.mining_policy(mineral, 2, 0)["Crystals"])
 	var mine_home: Dictionary = mineral["planets"][0]
 	mine_home["levels"]["Metals"] = 1000
-	assert(is_equal_approx(ECON.rate(mine_home, "Metals"), ECON.PLANET_MINING_LIMIT))
+	assert(ECON.rate(mine_home, "Metals") > 100.0)
+	var uncapped_rate: float = ECON.rate(mine_home, "Metals")
+	mine_home["levels"]["Metals"] = 2000
+	assert(is_equal_approx(ECON.rate(mine_home, "Metals"), uncapped_rate * 2.0))
 	mine_home["levels"]["Metals"] = 0
 	mine_home["levels"]["Crystals"] = 0
 	assert(not ECON.enqueue(mineral, 2, 0, "miner"))
@@ -2927,7 +2929,9 @@ func _initialize() -> void:
 	assert(ECON.consumption(depot, "Crystals") == 0.0)
 	depot["levels"]["Crystals"] = 1
 	depot["population"] = 500000.0
-	assert(ECON.rate(depot, "Crystals") > 0.0 and ECON.rate(depot, "Crystals") <= ECON.PLANET_MINING_LIMIT + ECON.STATION_CRYSTALS_PER_YEAR)
+	assert(ECON.rate(depot, "Crystals") > 0.0)
+	depot["levels"]["Crystals"] = 10000
+	assert(ECON.rate(depot, "Crystals") > 100.0)
 	print("PASS: storage caps, three warehouse levels, advanced crystal extraction and linear consumption")
 	# Formation slots are persistent, shared by AI/human operations, and
 	# actual world-space positions converge without exceeding ship speed.
@@ -4939,7 +4943,27 @@ func _test_match_elimination() -> void:
 	assert(not ECON.update_match_outcome(solo) and solo.get("match_result", {}).is_empty())
 	print("PASS: colony recovery, allied survival, elimination, conquest victory and sandbox")
 
+func _test_building_population_requirements() -> void:
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var p: Dictionary = state["planets"][0]
+	for resource in ECON.RESOURCES:
+		for level in [1, 2, 3, 10]:
+			p["buildings"][resource] = level - 1
+			var required: int = ECON.building_population(resource, level)
+			assert(required == level * 500)
+			p["population"] = float(required) - 1.0
+			assert(not ECON.building_available(p, resource))
+			assert(not ECON.enqueue(state, 1, 0, "economy", resource))
+			p["population"] = float(required)
+			for material in ECON.RESOURCES:
+				p["stock"][material] = 1000.0
+			assert(ECON.building_available(p, resource))
+			assert(ECON.enqueue(state, 1, 0, "economy", resource))
+			assert(ECON.cancel(state, 1, 0, int(p["queue"][0]["id"])))
+	print("PASS: production population requirements increase with each tier")
+
 func _test_recovery_economy() -> void:
+	_test_building_population_requirements()
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
 	for resource in ECON.RESOURCES:
