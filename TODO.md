@@ -10,6 +10,12 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 - [ ] Hidden global event framework: investigations via science vessels, fog-dependent anomalies and random events offer resources, buffs and ambiguous clues. Support at least 20 distinct shared match outcomes with substantially different mechanics, objectives and team dynamics; avoid clues that uniquely telegraph an outcome. Every outcome should account for earlier player choices, investment and preparation. Preserve alternate roles for peaceful and military empires; define pacing, elimination and victory rules before implementation.
 - [ ] Prototype information channels (private findings, optional public news, deliberate sharing), genuine authority-side secrecy and fog-filtered replication. Define a seeded host-authoritative scenario/event director and reusable anomaly chains; keep mini-games and individual scenario rules subject to review. See THOUGHTS.md for unapproved candidates.
 
+### Revelation 01 — Imposters (agreed concept; implementation details pending)
+
+- [ ] Foreshadow with apparently friendly phantom ships emerging from fog and inexplicable population spikes. Mix with other ambiguous anomalies; reuse motifs across unrelated Revelations so they do not uniquely identify this scenario.
+- [ ] Reveal that shapeshifting aliens already constitute more than half of every player's population, including rulers. Each competing ruler hosts a queen in a chosen ship type, inheriting its normal properties. Relinquish all empire orders; only the queen remains player-controlled. All former empires wage war under AI control.
+- [ ] Last surviving queen wins, transforms into a small spaghetti monster and inherits every remaining player's ships, structures, units, sectors and resources. Preserve the world rather than resetting it. Resolve fixed-team versus individual queen allocation, eligible hull selection, reveal handoff, AI allegiance, anti-stalemate, solo/AI/disconnect behavior and post-victory controls before coding. See THOUGHTS.md for proposed details, not approval.
+
 ## 1 — Basic RTS (current priority)
 
 - [ ] v0.82.2: Verify station Build/Trade stay in the bottom row before and after Dyson unlock.
