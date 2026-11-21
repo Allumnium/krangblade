@@ -9063,7 +9063,7 @@ func _build_empire_dialog() -> void:
 	content.add_theme_constant_override("separation", 8)
 	background.add_child(content)
 	var heading := Label.new()
-	heading.text = "Desired fleet composition"
+	heading.text = "Empire management"
 	heading.add_theme_font_size_override("font_size", 20)
 	content.add_child(heading)
 	var note := Label.new()
@@ -9086,6 +9086,7 @@ func _build_empire_dialog() -> void:
 	diplomacy_rows.add_theme_constant_override("separation", 8)
 	diplomacy_rows.hide()
 	sections.add_child(diplomacy_rows)
+	sections.add_child(_label("Desired fleet composition", 18))
 	empire_rows = VBoxContainer.new()
 	empire_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	empire_rows.add_theme_constant_override("separation", 8)
@@ -9176,16 +9177,23 @@ func _refresh_diplomacy_rows(state: Dictionary) -> void:
 		var title_row := HBoxContainer.new()
 		column.add_child(title_row)
 		var name_label := _label(str(data[1]), 15)
+		name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+		name_label.clip_text = true
 		name_label.modulate = _empire_color(other)
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		title_row.add_child(name_label)
 		var status: String = "Eliminated" if bool(data[4]) else relation.capitalize()
 		if relation == ECONOMY.DIPLO_TRUCE:
 			status = "Truce until %d" % (ECONOMY.START_YEAR + ceili(float(entry.get("until", 0.0))))
-		title_row.add_child(_label(status, 13))
+		var status_label := _label(status, 13)
+		status_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+		status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		title_row.add_child(status_label)
 		if inactive:
 			continue
-		var actions := HBoxContainer.new()
+		var actions := HFlowContainer.new()
+		actions.add_theme_constant_override("h_separation", 4)
+		actions.add_theme_constant_override("v_separation", 4)
 		column.add_child(actions)
 		match relation:
 			ECONOMY.DIPLO_NEUTRAL:

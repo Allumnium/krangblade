@@ -22,6 +22,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.88.1: Prevent letter-by-letter wrapping of diplomacy relation labels; clip long empire names, wrap action buttons as a group and keep fleet heading next to fleet rows. Verify first open, narrow windows and all relations manually.
+
 - [ ] v0.88.0: Validate recurring ship upkeep, net HUD income and red unpaid warning, civilian priority, speed/pause, payment recovery and snapshot arrears. Unit and codec checks added; Godot parser/runtime and real peers pending. Next: rogue defection mechanics after design review.
 
 - [ ] v0.87.0: All queued construction reserves GC and materials atomically; fixed reference valuation × 50%, rounded up, after existing material discounts. Refund GC on explicit cancellation and yard compaction; combat destruction forfeits destroyed-job fees. Colony conversion is prepaid in the colony hull; warp deployment costs 1,000 GC. AI and autoqueue obey the same treasury guard. Tooltips, queue details and Codex show fees. Verify rejection, cancellation/compaction, completion, discounts, ownership, AI pacing, real peers and GUI; runtime pending. Next: upkeep and warnings.
