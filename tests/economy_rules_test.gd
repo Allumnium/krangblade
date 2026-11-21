@@ -1362,6 +1362,7 @@ func _initialize() -> void:
 	_test_bilateral_services()
 	_test_bilateral_transit_and_confirmation()
 	_test_bilateral_conquest()
+	_test_ai_strategic_diplomacy()
 	_test_stop_order()
 	_test_nearest_colony_and_queued_hold()
 	_test_manual_conversion_and_stats()
@@ -4950,3 +4951,43 @@ func _test_bilateral_conquest() -> void:
 	assert(ECON.update_match_outcome(state))
 	assert(state["eliminated"].has(2) and int(state["match_result"]["winner"]) == 1)
 	print("PASS: bilateral conquest evaluates surviving empires independently")
+
+func _test_ai_strategic_diplomacy() -> void:
+	var state: Dictionary = ECON.create(_planetary_fixture(827, 3), {1: {"team": 1, "ai": true}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], false)
+	ECON.initialize_diplomacy(state)
+	var estimates: Dictionary = {1: {"fleet": 30.0, "defense": 6.0, "stations": 1, "distance": 0.0}, 2: {"fleet": 3.0, "defense": 6.0, "stations": 1, "distance": 1000.0}, 3: {"fleet": 30.0, "defense": 6.0, "stations": 1, "distance": 3000.0}}
+	assert(ECON._ai_diplomacy_choice(state, 1, estimates).is_empty())
+	state["elapsed"] = ECON.AI_DIPLOMACY_OPENING
+	assert(ECON._ai_diplomacy_choice(state, 1, estimates) == {"action": "declare_war", "other": 2})
+	# A powerful potential third-party intervention changes the calculation.
+	assert(ECON.diplomacy_offer_alliance(state, 2, 3) and ECON.diplomacy_offer_alliance(state, 3, 2))
+	estimates[3]["fleet"] = 80.0
+	assert(ECON._ai_diplomacy_choice(state, 1, estimates).get("action", "") != "declare_war")
+	assert(ECON.diplomacy_break_alliance(state, 2, 3))
+	assert(ECON.diplomacy_declare_war(state, 2, 1))
+	assert(ECON.diplomacy_declare_war(state, 3, 1))
+	estimates[1]["fleet"] = 1.0
+	assert(ECON._ai_diplomacy_choice(state, 1, estimates).get("action") == "peace")
+	assert(ECON.diplomacy_offer_peace(state, 2, 1))
+	assert(ECON.diplomacy_offer_peace(state, 1, 2))
+	assert(ECON.diplomatic_relation(state, 1, 2) == ECON.DIPLO_TRUCE)
+	assert(int(ECON._ai_diplomacy_choice(state, 1, estimates).get("other", 0)) != 2)
+	# Actual authority turn accepts a visible/known useful alliance offer.
+	var fresh: Dictionary = ECON.create(_planetary_fixture(827, 3), {1: {"team": 1, "ai": true}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], true)
+	ECON.initialize_diplomacy(fresh)
+	fresh["fog_of_war"] = false
+	# A fleet capable of defending its borders prefers useful cooperation
+	# over abandoning a shared war. Starting miners alone cannot do that.
+	for craft in fresh["ships"]:
+		if int(craft["owner"]) == 1 and craft["kind"] == "fighter":
+			var reinforcement: Dictionary = craft.duplicate(true)
+			reinforcement["id"] = 999999
+			fresh["ships"].append(reinforcement)
+			break
+	assert(ECON.diplomacy_declare_war(fresh, 1, 3))
+	assert(ECON.diplomacy_declare_war(fresh, 2, 3))
+	assert(ECON.diplomacy_offer_alliance(fresh, 2, 1))
+	assert(not ECON._ai_diplomacy_turn(fresh, 2))
+	assert(ECON._ai_diplomacy_turn(fresh, 1))
+	assert(ECON.empires_allied(fresh, 1, 2) and ECON.empires_hostile(fresh, 2, 3))
+	print("PASS: strategic AI opening, intervention risk, overextension, truce and mutual alliance")

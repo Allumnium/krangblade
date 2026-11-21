@@ -6647,6 +6647,171 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		if float(station["hp"]) <= EPS:
 			_destroy_station(state, graph, index)
 
+# Strategic diplomacy is deliberately slower than tactical fleet orders.
+# All scores are provisional fighter-equivalent estimates, not hidden exact
+# enemy economies. Existing treaties remain the sole authority for changes.
+const AI_DIPLOMACY_INTERVAL: float = 24.0
+const AI_DIPLOMACY_OPENING: float = 60.0
+const AI_DIPLOMACY_DISTANCE: float = 8000.0
+const AI_DIPLOMACY_MAX_ALLIES: int = 2
+
+static func _ai_diplomatic_estimates(state: Dictionary, player: int) -> Dictionary:
+	var estimates: Dictionary = {}
+	var fog: bool = bool(state.get("fog_of_war", DEFAULT_FOG_OF_WAR))
+	var vision: Dictionary = team_vision(state, player) if fog else {}
+	var home: int = military_home(state, player)
+	var origin: Vector2 = state["map"]["points"][home] if home >= 0 else Vector2.INF
+	var now: float = float(state["elapsed"])
+	for id in state["teams"]:
+		if not state.get("eliminated", []).has(id):
+			estimates[id] = {"fleet": 0.0, "defense": 0.0, "stations": 0, "distance": INF}
+	for system_index in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][system_index]
+		var owner: int = int(system["owner"])
+		if not estimates.has(owner) or not has_station(system):
+			continue
+		var point: Vector2 = station_position(state, system_index, now)
+		if owner != player and fog and not vision.has(vision_cell(point)):
+			continue
+		var estimate: Dictionary = estimates[owner]
+		estimate["stations"] += 1
+		# A station is harder to conquer than a handful of mobile hulls.
+		estimate["defense"] += 5.0 * clampf(float(system["station"].get("hp", STATION_HP)) / STATION_HP, 0.0, 2.0) + 1.5 * system.get("pds", {}).size()
+		if origin.is_finite():
+			estimate["distance"] = minf(float(estimate["distance"]), origin.distance_to(point))
+	for craft in state["ships"]:
+		var owner: int = int(craft["owner"])
+		var kind: String = str(craft["kind"])
+		if not estimates.has(owner) or not armed(craft):
+			continue
+		var point: Vector2 = craft.get("position", Vector2.INF)
+		if owner != player and ((fog and (not point.is_finite() or not vision.has(vision_cell(point)))) or not ship_visible_to_team(state, craft, player)):
+			continue
+		var weight: float = float({"miner": 0.25, "scout": 0.4, "fighter": 1.0, "cruiser": 5.0, "destroyer": 9.0}.get(kind, 0.0))
+		weight *= clampf(float(craft.get("hp", ship_max_hp(kind))) / ship_max_hp(kind), 0.0, 1.0)
+		weight *= 0.4 if bool(craft.get("retreating", false)) else 1.0
+		estimates[owner]["fleet"] += weight
+		if origin.is_finite() and point.is_finite():
+			estimates[owner]["distance"] = minf(float(estimates[owner]["distance"]), origin.distance_to(point))
+	return estimates
+
+static func _ai_rival_power(estimate: Dictionary) -> float:
+	# Incomplete sight is not proof that a rival is defenseless.
+	return maxf(3.0, float(estimate["fleet"])) + maxf(3.0, float(estimate["defense"]))
+
+static func _ai_diplomacy_choice(state: Dictionary, player: int, estimates: Dictionary) -> Dictionary:
+	if not estimates.has(player):
+		return {}
+	var own: Dictionary = estimates[player]
+	var fleet: float = float(own["fleet"])
+	var defense: float = float(own["defense"])
+	var own_power: float = maxf(1.0, fleet + defense)
+	var rivals: Array = estimates.keys()
+	rivals.sort()
+	var enemy_burden: float = 0.0
+	var wars: int = 0
+	var allies: int = 0
+	for id in rivals:
+		var other: int = int(id)
+		if other == player:
+			continue
+		if empires_hostile(state, player, other):
+			wars += 1
+			enemy_burden += _ai_rival_power(estimates[other])
+		elif empires_allied(state, player, other):
+			allies += 1
+	var best: Dictionary = {}
+	var best_score: float = 0.0
+	var now: float = float(state["elapsed"])
+	for id in rivals:
+		var other: int = int(id)
+		if other == player or not _can_change_diplomacy(state, player, other):
+			continue
+		var relation: String = diplomatic_relation(state, player, other)
+		if relation in [DIPLO_ALLIED, DIPLO_TRUCE]:
+			continue
+		var rival: Dictionary = estimates[other]
+		var rival_power: float = _ai_rival_power(rival)
+		var distance: float = float(rival["distance"])
+		var proximity: float = clampf(1.0 - distance / AI_DIPLOMACY_DISTANCE, 0.0, 1.0)
+		var entry: Dictionary = state["diplomacy"].get(_diplomacy_pair(player, other), {})
+		var action: String = ""
+		var score: float = 0.0
+		if relation == DIPLO_WAR:
+			if int(entry.get("peace_offer", 0)) == player:
+				continue
+			var other_fronts: float = maxf(0.0, enemy_burden - rival_power)
+			# Opportunity cost: peace frees fleets for defense or a better war.
+			var pressure: float = (rival_power + other_fronts * 0.8) / own_power
+			var limited_gain: bool = int(rival["stations"]) == 0 or proximity < 0.2
+			var incoming: bool = int(entry.get("peace_offer", 0)) == other
+			if pressure > 1.2 or (wars > 1 and pressure > 0.85) or (limited_gain and (incoming or wars > 1 or fleet < 3.0)):
+				action = "peace"
+				score = 3.0 + minf(3.0, pressure) + (1.0 if incoming else 0.0)
+		elif relation == DIPLO_NEUTRAL:
+			var common_threat: float = 0.0
+			var intervention: float = 0.0
+			var ally_conflict: bool = false
+			for third_id in rivals:
+				var third: int = int(third_id)
+				if third in [player, other]:
+					continue
+				var third_power: float = _ai_rival_power(estimates[third])
+				if empires_allied(state, other, third) and not empires_allied(state, player, third):
+					# Allies need not join a war; price the possibility, not certainty.
+					intervention += third_power * 0.35
+				if empires_allied(state, player, third) and empires_hostile(state, other, third):
+					ally_conflict = true
+				if empires_hostile(state, player, third) and empires_hostile(state, other, third):
+					common_threat += third_power
+				elif not empires_allied(state, other, third) and not empires_allied(state, player, third) and third_power > own_power * 1.5 and third_power > rival_power * 1.2:
+					common_threat += third_power * 0.5
+			var incoming: bool = int(entry.get("alliance_offer", 0)) == other
+			if allies < AI_DIPLOMACY_MAX_ALLIES and not ally_conflict and int(entry.get("alliance_offer", 0)) != player:
+				var coalition_value: float = common_threat / own_power
+				# Accept useful cooperation even before a common enemy fires.
+				if coalition_value > 0.65 or (incoming and wars > 0 and rival_power >= own_power * 0.65) or (incoming and proximity > 0.25 and rival_power >= own_power * 0.75):
+					action = "alliance"
+					score = 2.0 + minf(3.0, coalition_value) + (0.5 if incoming else 0.0)
+			# Require a real, reachable visible station and a substantial
+			# offensive advantage; never declare due to ordinary movement.
+			var expected_cost: float = rival_power + enemy_burden * 0.8 + intervention
+			var advantage: float = fleet / maxf(1.0, expected_cost)
+			if action.is_empty() and now >= AI_DIPLOMACY_OPENING and wars < 2 and int(own["stations"]) > 0 and int(rival["stations"]) > 0 and proximity > 0.0 and fleet >= 6.0 and advantage > 1.35:
+				action = "declare_war"
+				score = minf(4.0, advantage) + proximity - 0.5 * wars
+		if not action.is_empty() and score > best_score:
+			best_score = score
+			best = {"action": action, "other": other}
+	return best
+
+static func _ai_diplomacy_turn(state: Dictionary, player: int) -> bool:
+	if not state.has("diplomacy") or not state.get("ai_players", []).has(player) or state.get("eliminated", []).has(player) or not state.get("match_result", {}).is_empty():
+		return false
+	var decision: Dictionary = _ai_diplomacy_choice(state, player, _ai_diplomatic_estimates(state, player))
+	var other: int = int(decision.get("other", 0))
+	match decision.get("action", ""):
+		"declare_war": return diplomacy_declare_war(state, player, other)
+		"peace": return diplomacy_offer_peace(state, player, other)
+		"alliance": return diplomacy_offer_alliance(state, player, other)
+	return false
+
+static func _dispatch_ai_diplomacy(state: Dictionary) -> void:
+	if not state.has("diplomacy") or state.get("ai_players", []).is_empty():
+		return
+	var now: float = float(state["elapsed"])
+	var schedule: Dictionary = state.get("_ai_diplomacy_schedule", {})
+	for player in state["ai_players"]:
+		var id: int = int(player)
+		# Stagger initial evaluations across the eight slots, then keep the
+		# independent slow decision clock to bound work at large fleet sizes.
+		var phase: float = float(posmod(id - 1, 8)) * AI_DIPLOMACY_INTERVAL / 8.0
+		if now + EPS < float(schedule.get(id, phase)):
+			continue
+		_ai_diplomacy_turn(state, id)
+		schedule[id] = now + AI_DIPLOMACY_INTERVAL
+	state["_ai_diplomacy_schedule"] = schedule
+
 static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, reserved: Dictionary) -> int:
 	var points: Array = state["map"]["points"]
 	var teams: Array[int] = planet_teams(state)
@@ -7976,6 +8141,9 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_refill_empire_fleets(state)
 	_begin_hull_index(state)
 	started = _profile_stage(profile, "Economy", started)
+	# Decide treaties before constructing any relation-dependent route or
+	# threat caches for this substep.
+	_dispatch_ai_diplomacy(state)
 	var teams: Array[int] = planet_teams(state)
 	# Validate the static map and territory once per substep, not on each search.
 	var cache: Dictionary = {"civilian_routes": _civilian_route_cache(state, teams)}
