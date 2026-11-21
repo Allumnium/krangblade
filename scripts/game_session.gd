@@ -970,6 +970,51 @@ func _unit_orders_for(id: int, orders: Array, append: bool) -> void:
 	if changed:
 		_publish_economy()
 
+# No ordinary movement or attack RPC can change diplomatic state.
+# The client must explicitly request a confirmed declaration or agreement.
+func request_diplomacy(action: String, other: int, enabled: bool = true) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_diplomacy_for(1, action, other, enabled)
+	else:
+		_rpc_diplomacy.rpc_id(1, round_id, action, other, enabled)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_diplomacy(request_round: int, action: String, other: int, enabled: bool) -> void:
+	if multiplayer.is_server() and request_round == round_id:
+		_diplomacy_for(multiplayer.get_remote_sender_id(), action, other, enabled)
+
+func _diplomacy_for(id: int, action: String, other: int, enabled: bool) -> void:
+	if not _active_player(id):
+		return
+	var changed: bool = false
+	match action:
+		"declare_war": changed = ECONOMY.diplomacy_declare_war(economy, id, other)
+		"peace": changed = ECONOMY.diplomacy_offer_peace(economy, id, other)
+		"alliance": changed = ECONOMY.diplomacy_offer_alliance(economy, id, other)
+		"break_alliance": changed = ECONOMY.diplomacy_break_alliance(economy, id, other)
+		"vision", "trade": changed = ECONOMY.diplomacy_set_permission(economy, id, other, action, enabled)
+	if changed:
+		_publish_economy()
+
+func request_confirmed_attack(other: int, ids: Array, target: int) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_confirmed_attack_for(1, other, ids, target)
+	else:
+		_rpc_confirmed_attack.rpc_id(1, round_id, other, ids, target)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_confirmed_attack(request_round: int, other: int, ids: Array, target: int) -> void:
+	if multiplayer.is_server() and request_round == round_id:
+		_confirmed_attack_for(multiplayer.get_remote_sender_id(), other, ids, target)
+
+func _confirmed_attack_for(id: int, other: int, ids: Array, target: int) -> void:
+	if _active_player(id) and ids.size() <= economy["ships"].size() and ECONOMY.diplomacy_confirm_attack(economy, id, other, ids, target):
+		_publish_economy()
+
 func request_autocast(ids: Array, mode: String, enabled: bool) -> void:
 	if phase != "match":
 		return

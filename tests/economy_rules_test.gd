@@ -1360,6 +1360,7 @@ func _initialize() -> void:
 	_test_combat_sector_presence()
 	_test_bilateral_diplomacy()
 	_test_bilateral_services()
+	_test_bilateral_transit_and_confirmation()
 	_test_stop_order()
 	_test_nearest_colony_and_queued_hold()
 	_test_manual_conversion_and_stats()
@@ -4898,3 +4899,36 @@ func _test_bilateral_services() -> void:
 	assert(ECON.diplomacy_break_alliance(state, 1, 2))
 	assert(not ECON._repair_site_safe(state, graph, 1, 1))
 	print("PASS: direct alliance vision, repair rights, owned cargo and civilian threat safety")
+
+func _test_bilateral_transit_and_confirmation() -> void:
+	var map: Dictionary = {"seed": 42, "size": Vector2(10000, 5000), "points": [Vector2(500, 500), Vector2(2500, 500), Vector2(4500, 500), Vector2(6500, 500)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], true)
+	ECON.initialize_diplomacy(state)
+	state["fog_of_war"] = false
+	state["planets"][2]["owner"] = 1
+	var teams: Array[int] = ECON.planet_teams(state)
+	assert(ECON._path(state, teams, 1, 0, 2, {}) == [0, 1, 2])
+	assert(ECON._mining_path(state, teams, 1, 0, 2, {}) == [0, 1, 2])
+	var own: int = -1
+	var foreign: int = -1
+	for craft in state["ships"]:
+		if craft["kind"] == "fighter":
+			if int(craft["owner"]) == 1:
+				own = int(craft["id"])
+			elif int(craft["owner"]) == 2:
+				foreign = int(craft["id"])
+	var target: int = ECON.station_target_id(state, 1)
+	assert(own >= 0 and foreign >= 0)
+	assert(not ECON.command_attack(state, 1, [own], target))
+	assert(not ECON.diplomacy_confirm_attack(state, 1, 3, [own], target))
+	assert(not ECON.diplomacy_confirm_attack(state, 1, 2, [foreign], target))
+	assert(ECON.diplomatic_relation(state, 1, 2) == ECON.DIPLO_NEUTRAL)
+	assert(ECON.diplomacy_confirm_attack(state, 1, 2, [own], target))
+	assert(ECON._path(state, teams, 1, 0, 2, {}).is_empty())
+	assert(ECON._mining_path(state, teams, 1, 0, 2, {}).is_empty())
+	assert(not ECON._civilian_route_safe(state, {"at": 0, "route": [1, 2]}, teams, 1))
+	assert(ECON.diplomacy_offer_peace(state, 1, 2) and ECON.diplomacy_offer_peace(state, 2, 1))
+	assert(ECON._path(state, teams, 1, 0, 2, {}) == [0, 1, 2])
+	assert(not ECON.diplomacy_confirm_attack(state, 1, 2, [own], target))
+	assert(not ECON._cargo_target_allowed(state, 1, {"owner": 2}))
+	print("PASS: neutral transit, treaty route cache invalidation and confirmed attack validation")
