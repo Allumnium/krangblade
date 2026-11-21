@@ -1245,11 +1245,13 @@ func _economy_tick() -> void:
 	var started: int = Time.get_ticks_usec()
 	var profile: Dictionary = {"enabled": true}
 	for i in range(speed):
+		var diplomatic_revision: int = int(economy.get("diplomacy_revision", 0))
 		ECONOMY.step(economy, SIM_STEP, profile)
+		var treaty_changed: bool = diplomatic_revision != int(economy.get("diplomacy_revision", 0))
 		var outcome_started: int = Time.get_ticks_usec()
 		var changed: bool = ECONOMY.update_match_outcome(economy)
 		profile["Match outcome"] = int(profile.get("Match outcome", 0)) + Time.get_ticks_usec() - outcome_started
-		if changed:
+		if changed or treaty_changed:
 			_publish_economy()
 			if not economy["match_result"].is_empty():
 				break
@@ -1313,6 +1315,7 @@ func _rpc_snapshot_ack(ack_round: int, revision: int) -> void:
 
 func _public_reward_snapshot(state: Dictionary) -> Dictionary:
 	var result: Dictionary = state.duplicate()
+	result.erase("_ai_diplomacy_schedule")
 	var public_objectives: Dictionary = {}
 	for id in state.get("objectives", {}):
 		var progress: Dictionary = state["objectives"][id].duplicate()
