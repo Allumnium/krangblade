@@ -21,6 +21,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## 1 — Basic RTS (current priority)
 
+- [ ] v0.84.0: Bilateral diplomacy foundation implemented but opt-in only: authoritative independent pair rules, reciprocal offers, 100-year truce, permissions, relationship-aware combat bucket/explicit focus/AI hostility/blockade checks. Validate regression fixtures and migrate remaining ownership/team consumers (civilian threat/route/repair/trade, fog, lobby, victory, UI, RPCs and replication) before activating ordinary neutral matches. No free allied material transfer. Preserve legacy behavior until end-to-end authority checks pass.
+
 - [ ] v0.83.0: Validate conquest elimination only after all owned stations and ships are gone; preserve surviving fleets, AI and commands, including stationless last hulls. Regression fixture covers fighter/miner survival and last-hull defeat. Verify tilde dev console in editor/debug builds; absent in release, host-only simulation commands, no chat/hotkey conflict. Add scenario trigger once Revelation framework exists. Runtime and peer validation pending.
 
 - [ ] v0.82.2: Verify station Build/Trade stay in the bottom row before and after Dyson unlock.
