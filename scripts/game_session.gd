@@ -462,18 +462,13 @@ func _rpc_ready(value: bool) -> void:
 	players[id] = entry
 	_send_roster()
 
-func choose_team(peer_id: int, team: int) -> void:
-	if phase != "lobby" or not RULES.valid_team(team):
-		return
-	if multiplayer.is_server():
-		_change_team(peer_id, team)
-	elif peer_id == multiplayer.get_unique_id():
-		_rpc_team.rpc_id(1, team)
+func choose_team(_peer_id: int, _team: int) -> void:
+	# Fixed team selection is retired. Kept for caller compatibility.
+	pass
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_team(team: int) -> void:
-	if multiplayer.is_server() and phase == "lobby":
-		_change_team(multiplayer.get_remote_sender_id(), team)
+func _rpc_team(_team: int) -> void:
+	pass
 
 func _change_team(id: int, team: int) -> void:
 	if not players.has(id) or not RULES.valid_team(team):
@@ -715,6 +710,7 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 	diagnostic_received_bytes = 0
 	diagnostic_snapshot_bytes = 0
 	economy = ECONOMY.create(MAP.generate(map_seed, players.size(), map_layout), players, RULES.ordered_peers(players))
+	ECONOMY.initialize_diplomacy(economy)
 	economy["time_speed"] = 1
 	economy["eliminated"] = []
 	economy["match_result"] = {}

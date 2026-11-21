@@ -3787,18 +3787,17 @@ func _refresh_territory(state: Dictionary) -> void:
 	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph, known, territory_region_cache)
 	# Only known sectors with a friendly majority are warning destinations.
 	tactical_friendly.clear()
-	var my_team: int = int(state["teams"].get(_me(), -1))
-	for index in range(points.size()):
+		for index in range(points.size()):
 		if not known.has(index):
 			continue
 		var friendly: float = 0.0
 		var hostile: float = 0.0
 		for owner in weights[index]:
-			if int(state["teams"].get(owner, 0)) == my_team:
+			if ECONOMY.empires_allied(state, _me(), int(owner)):
 				friendly += float(weights[index][owner])
 			else:
 				hostile += float(weights[index][owner])
-		if friendly > hostile or (index < state["planets"].size() and ECONOMY.has_station(state["planets"][index]) and int(state["teams"].get(int(state["planets"][index]["owner"]), 0)) == my_team):
+		if friendly > hostile or (index < state["planets"].size() and ECONOMY.has_station(state["planets"][index]) and ECONOMY.empires_allied(state, _me(), int(state["planets"][index]["owner"]))):
 			tactical_friendly.append(index)
 	var roster: Dictionary = session.get("players")
 	var colors: Dictionary = {}
@@ -4637,9 +4636,12 @@ func _refresh_match_result(state: Dictionary) -> void:
 		if is_instance_valid(codex):
 			codex.hide()
 		var team: int = int(result["team"])
-		var mine: int = int(state.get("teams", {}).get(_me(), 0))
+		var mine: int = ECONOMY._combat_group(state, _me())
 		match_result_dialog.title = "Draw" if team == 0 else ("Victory" if mine == team else "Defeat")
-		match_result_dialog.dialog_text = "No surviving teams." if team == 0 else "Team %d wins by conquest." % team
+		if result.has("winner"):
+			match_result_dialog.dialog_text = "No surviving empires." if team == 0 else "%s wins by conquest." % _empire_name(team)
+		else:
+			match_result_dialog.dialog_text = "No surviving teams." if team == 0 else "Team %d wins by conquest." % team
 		match_result_dialog.ok_button_text = "Review map"
 		match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
 	elif result.is_empty() and state.get("eliminated", []).has(_me()) and not defeated_shown:
@@ -5691,13 +5693,13 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 				selected_units.append(selected_ship_id)
 			if double_click:
 				var kind: String = str(craft["kind"])
-				var team: int = int(state["teams"].get(_me(), -1))
-				if int(state["teams"].get(int(craft["owner"]), -2)) != team:
+				var team: int = ECONOMY._combat_group(state, _me())
+				if ECONOMY._combat_group(state, int(craft["owner"])) != team:
 					selected_units.clear()
 					selected_ship_id = -1
 				for other in state["ships"]:
 					var id: int = int(other["id"])
-					if int(state["teams"].get(int(other["owner"]), -2)) == team and other["kind"] == kind and poses.has(id) and _in_visible_playfield(poses[id]["point"]) and not selected_units.has(id):
+					if ECONOMY._combat_group(state, int(other["owner"])) == team and other["kind"] == kind and poses.has(id) and _in_visible_playfield(poses[id]["point"]) and not selected_units.has(id):
 						selected_units.append(id)
 				if not selected_units.is_empty():
 					selected_ship_id = selected_units[0]
@@ -5723,7 +5725,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	if selected >= 0:
 		var system: Dictionary = state["planets"][selected]
 		var owner: int = int(system["owner"])
-		if owner > 0 and ECONOMY.has_station(system) and int(state["teams"].get(owner, -1)) == int(state["teams"].get(_me(), -2)):
+		if owner > 0 and ECONOMY.has_station(system) and ECONOMY._combat_group(state, owner) == ECONOMY._combat_group(state, _me()):
 			var ref := Vector2i(selected, 0)
 			_set_building_primary(state, ref, "station")
 			building_selection_kind = "station"
@@ -5741,12 +5743,12 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	if not additive:
 		selected_units.clear()
 	var poses: Dictionary = _ship_poses(state)
-	var team: int = int(state["teams"].get(_me(), -1))
+	var team: int = ECONOMY._combat_group(state, _me())
 	var friendly_ids: Dictionary = {}
 	var combat_ids: Dictionary = {}
 	var boxed: Array[int] = []
 	for craft in state.get("ships", []):
-		if int(state["teams"].get(int(craft["owner"]), -2)) != team or craft.get("kind", "") == "warp_gate":
+		if ECONOMY._combat_group(state, int(craft["owner"])) != team or craft.get("kind", "") == "warp_gate":
 			continue
 		friendly_ids[int(craft["id"])] = true
 		var id: int = int(craft["id"])
@@ -6413,9 +6415,9 @@ func _sync_tactical_alerts(state: Dictionary) -> void:
 		if now - int(tactical_alerts[key]["born"]) >= ALERT_REPEAT_MS:
 			tactical_alerts.erase(key)
 	var current: Dictionary = {}
-	var team: int = int(state["teams"].get(_me(), -1))
+	var team: int = ECONOMY._combat_group(state, _me())
 	for ship in state["ships"]:
-		if int(state["teams"].get(int(ship["owner"]), 0)) != team:
+		if ECONOMY._combat_group(state, int(ship["owner"])) != team:
 			continue
 		var id: int = int(ship["id"])
 		var point: Vector2 = ship["position"]
@@ -6431,7 +6433,7 @@ func _sync_tactical_alerts(state: Dictionary) -> void:
 			continue
 		tactical_last_damage_sequence = sequence
 		var point: Vector2 = event["position"]
-		if tactical_initialized and int(state["teams"].get(int(event["owner"]), 0)) == team and _alert_off_camera(point):
+		if tactical_initialized and ECONOMY._combat_group(state, int(event["owner"])) == team and _alert_off_camera(point):
 			var cell := Vector2i(floori(point.x / 1500.0), floori(point.y / 1500.0))
 			_post_tactical_alert("attack:%s" % str(cell), "Unit under attack!  ›", point, now)
 	tactical_durability = current
@@ -6458,7 +6460,7 @@ func _sync_tactical_alerts(state: Dictionary) -> void:
 	var positions: Dictionary = {}
 	var groups: Dictionary = {}
 	for ship in state["ships"]:
-		if not ECONOMY.military_hull(str(ship["kind"])) or int(state["teams"].get(int(ship["owner"]), 0)) == team or not _ship_visible(state, ship):
+		if not ECONOMY.military_hull(str(ship["kind"])) or not ECONOMY.empires_hostile(state, _me(), int(ship["owner"])) or not _ship_visible(state, ship):
 			continue
 		var id: int = int(ship["id"])
 		var point: Vector2 = ship["position"]
@@ -7244,7 +7246,7 @@ func _draw_ship_target_rings(state: Dictionary, poses: Dictionary, refs: Diction
 			continue
 		drawn[target["point"]] = true
 		var owner: int = int(target["owner"])
-		var tint: Color = Color.WHITE if owner <= 0 else Color("#50a8ff") if ECONOMY._friendly_target(state, _me(), target) else Color("#ff5058")
+		var tint: Color = Color("#50a8ff") if ECONOMY._friendly_target(state, _me(), target) else (Color("#ff5058") if ECONOMY.empires_hostile(state, _me(), owner) else Color.WHITE)
 		var radius: float = float(target["radius"]) + 4.0
 		if Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 4.0).has_point(target["point"]):
 			map_canvas.draw_arc(target["point"], radius, 0.0, TAU, clampi(ceili(radius * 0.7), 24, 96), tint, 1.8, true)
@@ -7380,11 +7382,11 @@ func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 	if active_lens != "logistics":
 		return
-	var team: int = int(state["teams"].get(_me(), -1))
+	var team: int = ECONOMY._combat_group(state, _me())
 	var points: Array = state["map"]["points"]
 	for i in range(points.size()):
 		var system: Dictionary = state["planets"][i]
-		if int(system["owner"]) == 0 or int(state["teams"].get(int(system["owner"]), 0)) != team or not ECONOMY.discovered(state, _me(), "planets", i):
+		if int(system["owner"]) == 0 or ECONOMY._combat_group(state, int(system["owner"])) != team or not ECONOMY.discovered(state, _me(), "planets", i):
 			continue
 		if not ECONOMY.has_station(system):
 			continue
@@ -7422,7 +7424,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 	# Aggregate loaded shipments at their origin and final destination.
 	var traffic: Dictionary = {}
 	for ship in state["ships"]:
-		if int(state["teams"].get(int(ship["owner"]), 0)) != team or ship["kind"] != "ship" or ECONOMY._cargo_total(ship) <= ECONOMY.EPS:
+		if ECONOMY._combat_group(state, int(ship["owner"])) != team or ship["kind"] != "ship" or ECONOMY._cargo_total(ship) <= ECONOMY.EPS:
 			continue
 		for endpoint in ["source", "dest"]:
 			var node: int = int(ship.get(endpoint, -1))
@@ -7440,7 +7442,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 			for resource in ECONOMY.RESOURCES:
 				traffic[node][key][resource] += float(ship["cargo"][resource])
 	for node in traffic:
-		if int(state["teams"].get(int(state["planets"][node]["owner"]), 0)) != team or not ECONOMY.has_station(state["planets"][node]) or not ECONOMY.discovered(state, _me(), "planets", node):
+		if ECONOMY._combat_group(state, int(state["planets"][node]["owner"])) != team or not ECONOMY.has_station(state["planets"][node]) or not ECONOMY.discovered(state, _me(), "planets", node):
 			continue
 		var center: Vector2 = _screen_point(ECONOMY.station_position(state, node, float(state["elapsed"])))
 		var radius: float = _station_radius()

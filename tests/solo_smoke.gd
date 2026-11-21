@@ -37,10 +37,6 @@ func _run() -> void:
 			quit(1)
 			return
 		var row: Dictionary = menu.get("solo_rows")[id]
-		if not ((row["team"] as OptionButton).item_count == 4):
-			push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-			quit(1)
-			return
 		if not ((row["color"] as OptionButton).is_item_disabled(0) == (id != 1)):
 			push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 			quit(1)
@@ -61,18 +57,12 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	for row in (menu.get("solo_rows") as Dictionary).values():
-		if not ((row["team"] as OptionButton).item_count == 8):
-			push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-			quit(1)
-			return
-	menu.call("_solo_team_selected", 7, 1)
 	menu.call("_remove_solo_player", 8)
 	if not ((menu.get("solo_players") as Dictionary).size() == 7):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (int(menu.get("solo_players")[1]["team"]) <= 7):
+	if not (menu.get("solo_players").has(1)):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
@@ -257,7 +247,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (setup["teams"][1] == 3 and setup["teams"][2] == 3 and setup["teams"][3] == 2):
+	if not (setup.has("diplomacy") and ECON.diplomatic_relation(setup, 1, 2) == ECON.DIPLO_NEUTRAL and ECON.diplomatic_relation(setup, 1, 3) == ECON.DIPLO_NEUTRAL and ECON.diplomatic_relation(setup, 2, 3) == ECON.DIPLO_NEUTRAL):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
