@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.86.1: Screenshot confirms fog obscures the control group strip (default z=0 below fog z=2 and territory z=3). Assign HUD z=4; render static generated system names in a passive z=3 overlay, without revealing field types, stock, stations, ships or ownership. Remove duplicate original names/unknown-system question marks; preserve discovery logic. Validate readability, extreme zoom and peer rendering manually.
+
 - v0.86.0: Implemented credit foundation only. Authority accrues 1% of start-of-substep resident population per simulated year in a single system pass (no fleet scan); 5,000 GC each at match initialization. Fractional balances carry through existing full/compact snapshots; no special currency RPCs. Current snapshots contain all empire balances, HUD shows local only; decide economy privacy before trade. No GC spending, upkeep, market or rogue mechanics yet. Tax depends on current resident ownership; no borrowing. Added regression cases; runtime and HUD validation pending.
 
 - v0.85.3: User screenshot confirms parser error at `match.gd:3790`: removing `my_team` in v0.85.0 left the following `for` one tab too deep. Restore loop indentation without changing relationship semantics. Static indentation/delimiter scan of the eight recently modified GDScript files found no other malformed blocks; not a Godot parser pass. Runtime startup and peer validation pending. Codex unaffected.
