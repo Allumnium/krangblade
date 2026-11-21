@@ -6517,14 +6517,14 @@ func _sync_tactical_alerts(state: Dictionary) -> void:
 	for key in tactical_alerts.keys():
 		if now - int(tactical_alerts[key]["born"]) >= ALERT_REPEAT_MS:
 			tactical_alerts.erase(key)
-	var event: Dictionary = state.get("rogue_events", {}).get(_me(), {})
-	var total: int = int(event.get("total", 0))
+	var rogue_event: Dictionary = state.get("rogue_events", {}).get(_me(), {})
+	var total: int = int(rogue_event.get("total", 0))
 	if total > rogue_notice_total:
 		var count: int = total - rogue_notice_total
 		rogue_notice_total = total
-		var message: String = "%s went rogue due to unpaid wages!  ›" % _ship_kind_name(str(event["kind"])) if count == 1 else "%d ships went rogue due to unpaid wages!  ›" % count
+		var message: String = "%s went rogue due to unpaid wages!  ›" % _ship_kind_name(str(rogue_event["kind"])) if count == 1 else "%d ships went rogue due to unpaid wages!  ›" % count
 		# New batches must not be suppressed by the ordinary warning cooldown.
-		tactical_alerts["rogue_defection"] = {"text": message, "point": event["position"], "born": now, "target": -1}
+		tactical_alerts["rogue_defection"] = {"text": message, "point": rogue_event["position"], "born": now, "target": -1}
 		sound_mixer.play_cue("warning")
 	var current: Dictionary = {}
 	var team: int = ECONOMY._combat_group(state, _me())

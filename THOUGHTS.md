@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.3: Reported parser error in tactical alerts: rogue notification local collided with destruction event iterator. Rename only the rogue local; no gameplay or Codex changes. Godot parse and runtime validation pending.
+
 - v0.89.2: Replace verbose economy previews with one resource-icon yield line per 10k residents (farm reference at 10k because labor is nonlinear) and current incremental yield; preserve farm food-capacity effect. Compact warehouse/housing/yard/PDS/upgrade effects; construction cards use only native custom tooltip rather than parallel timer pipeline. Production tiers require 500 residents × target level; warehouse tier requirements and yard staffing unchanged, no new gate on recovery housing. Remove old 100 t/yr planetary mineral cap and obsolete AI cap check, keep separate asteroid throughput limits and storage. Potential high-population economic acceleration and native tooltip delay need playtesting. Added threshold and uncapped-rate regression cases; runtime/peer/visual pending.
 
 - v0.89.1: User reports Explore waits and Perf text under fog. Explore inherited the shared autocast deadline; give it duration zero and explicitly bypass shared deadlines for zero-duration modes. Preserve explicit orders and queued commands. Swap Wander with Repair/Trade slot so Explore sits directly left of Wander. Raise diagnostic label to z=5. Added tests for immediate dispatch and subsequent sector selection with pending cooldowns; real peer fixture checks Explore RPC/dispatch. Manual in-game validation pending.
