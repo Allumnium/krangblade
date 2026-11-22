@@ -378,7 +378,7 @@ func _mining() -> void:
 	_flow(["Asteroid field", "Miner cargo", "Station stock"])
 	_table(["Mining statistic", "Value"], [["Cargo hold", "%.0f t" % E.MINER_CAPACITY], ["Nominal extraction", "%.0f t/yr" % E.MINER_RATE], ["Field resource ceiling", "%.0f t/yr" % E.FIELD_MINING_LIMIT]])
 	_section("Salvage & repair")
-	_body("Destroyed ships can leave drifting salvage. Harvesters and freighters may collect it in safe space; Idle Harvesters and Freighters search safe debris up to %d sector links and %.0f straight-line units away. Harvesters prioritize scraps over ore. Wreck debris lasts %.0f–%.0f simulation years; cancelled construction salvage persists. Freighters salvage at one-quarter the Harvester rate. Harvesters repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/s. Idle ships stop wandering while repaired." % [E.AUTO_SALVAGE_HOPS, E.AUTO_SALVAGE_RANGE, E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
+	_body("Destroyed ships can leave drifting salvage. Harvesters and freighters may collect it in safe space; Idle Harvesters and Freighters search safe debris up to %d sector links and %.0f straight-line units away. Harvesters prioritize scraps over ore. Wreck debris lasts %.0f–%.0f simulation years. Freighters salvage at one-quarter the Harvester rate. Harvesters repair friendly hulls, stations, yards and individual planetary defenses at %.0f HP/s. Idle ships stop wandering while repaired." % [E.AUTO_SALVAGE_HOPS, E.AUTO_SALVAGE_RANGE, E.SALVAGE_MIN_LIFETIME, E.SALVAGE_MAX_LIFETIME, E.MINER_REPAIR_RATE])
 	_note("Fighters have no cargo hold. Use civilian ships to recover resources after battles.")
 
 func _trade() -> void:
@@ -405,7 +405,7 @@ func _expansion() -> void:
 	_note("A colony is a long-term economic investment. Food imports and local farming improve its growth, while fleets defend its shipping lanes.")
 
 func _infrastructure() -> void:
-	_body("Select a station and open Build. Infrastructure jobs advance in a prepaid sequential queue beside station resources. Canceling infrastructure or upgrades refunds all prepaid materials directly. Only canceled ship construction drops materials as persistent salvage. Stations and individual shipyards each hold up to four construction jobs, including the active job. Repeat construction waits for an open slot. Shipyards have independent hull queues. Shift-queued unit orders are limited to four including the active order.")
+	_body("Select a station and open Build. Infrastructure jobs advance in a prepaid sequential queue beside station resources. Canceling ships, infrastructure or upgrades immediately refunds all prepaid materials and GC. Stations and individual shipyards each hold up to four construction jobs, including the active job. Repeat construction waits for an open slot. Shipyards have independent hull queues. Shift-queued unit orders are limited to four including the active order.")
 	_section("Resource production")
 	var rows: Array = []
 	for r in E.RESOURCES:

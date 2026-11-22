@@ -1819,9 +1819,6 @@ static func _refill_yard_autobuild(state: Dictionary, index: int, p: Dictionary)
 					break
 				p["queue"][-1]["yard_auto"] = true
 
-static func construction_leaves_salvage(item: Dictionary) -> bool:
-	return SHIP_KINDS.has(item["kind"])
-
 static func construction_position(state: Dictionary, index: int, item: Dictionary) -> Vector2:
 	var elapsed: float = float(state["elapsed"])
 	var p: Dictionary = state["planets"][index]
@@ -1848,22 +1845,6 @@ static func construction_position(state: Dictionary, index: int, item: Dictionar
 			return (state["map"]["points"][index] as Vector2) + body_position(bodies[slot], system_world_radius(state, index), elapsed)
 	return station_position(state, index, elapsed)
 
-# Unlike wreck destruction, cancellation recovers every prepaid tonne.
-static func _drop_construction_materials(state: Dictionary, index: int, item: Dictionary) -> void:
-	var point: Vector2 = construction_position(state, index, item)
-	var born: float = float(state["elapsed"])
-	var piles: Dictionary = state.get("salvage", {})
-	for resource in RESOURCES:
-		var amount: float = float(item["allocated"].get(resource, 0.0))
-		if amount <= EPS:
-			continue
-		var id: int = int(state.get("next_salvage_id", 1))
-		state["next_salvage_id"] = id + 1
-		var axis: Vector2 = Vector2.from_angle(float(id) * 2.399963)
-		var origin: Vector2 = point + axis * 14.0
-		piles[id] = {"id": id, "resource": resource, "amount": amount, "origin": origin, "position": origin, "drift": axis.orthogonal() * 4.0, "born": born, "claim": -1, "construction_job": item["id"]}
-	state["salvage"] = piles
-
 static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
 	if p.is_empty():
@@ -1871,11 +1852,9 @@ static func cancel(state: Dictionary, player: int, index: int, job_id: int) -> b
 	for item in p["queue"]:
 		if int(item["id"]) != job_id:
 			continue
-		if construction_leaves_salvage(item):
-			_drop_construction_materials(state, index, item)
-		else:
-			for resource in RESOURCES:
-				p["stock"][resource] = float(p["stock"][resource]) + float(item["allocated"][resource])
+		# Refund the actual prepaid amounts, even if storage is now full.
+		for resource in RESOURCES:
+			p["stock"][resource] = float(p["stock"][resource]) + float(item["allocated"][resource])
 		var eco: float = eco_population(p)
 		var eco_refund: float = minf(float(item.get("eco_allocated", 0.0)), maxf(0.0, eco_capacity(p) - eco))
 		p["population"] = float(p["population"]) + float(item.get("population_allocated", 0.0))

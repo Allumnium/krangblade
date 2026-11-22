@@ -91,7 +91,7 @@ func refresh(queue: HFlowContainer, rows: Dictionary, system: Dictionary, jobs: 
 			tile.add_theme_stylebox_override("normal", HUD.surface(Color("#172c3b"), Color("#db9b54") if blocked else HUD.ACCENT, 3, 3))
 		else:
 			tile.remove_theme_stylebox_override("normal")
-		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job, selected_system), ("Delivering" if job.has("delivery_slot") else ("Building" if id == active_id else "Queued")), percent, "\n" + widgets["bar"].tooltip_text if blocked else "", ("\nCancel: material salvage" if ECONOMY.construction_leaves_salvage(job) else "\nCancel: full refund") if owned else ""]
+		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job, selected_system), ("Delivering" if job.has("delivery_slot") else ("Building" if id == active_id else "Queued")), percent, "\n" + widgets["bar"].tooltip_text if blocked else "", "\nCancel: full refund" if owned else ""]
 
 		if float(job.get("credit_cost", 0.0)) > 0.0:
 			tile.tooltip_text += "\n%.0f GC reserved%s" % [float(job["credit_cost"]), " · refunded on cancellation" if owned else ""]

@@ -2266,8 +2266,10 @@ func _initialize() -> void:
 	ECON._advance(p, p["queue"][0], 6.0)
 	assert(is_equal_approx(float(item["progress"]), 18.0))
 	assert(ECON.cancel(state, 1, 0, int(item["id"])))
-	assert(is_zero_approx(float(p["stock"]["Metals"])))
-	assert(is_equal_approx(_cancelled_material(state, int(item["id"]), "Metals"), 360.0))
+	assert(is_equal_approx(float(p["stock"]["Metals"]), float(item["allocated"]["Metals"])))
+	assert(is_zero_approx(_cancelled_material(state, int(item["id"]), "Metals")))
+	assert(not ECON.cancel(state, 1, 0, int(item["id"])))
+	assert(is_equal_approx(float(p["stock"]["Metals"]), float(item["allocated"]["Metals"])))
 	assert(p["queue"].is_empty())
 	assert(is_equal_approx(float(p["population"]), saved_population))
 
@@ -2302,8 +2304,8 @@ func _initialize() -> void:
 		assert(ECON.cancel(refunds, 1, 0, int(order["id"])))
 		assert(refund_home["queue"].is_empty())
 		var dropped: float = _cancelled_material(refunds, int(order["id"]), "Metals")
-		assert(is_equal_approx(dropped, float(order["allocated"]["Metals"]) if ECON.SHIP_KINDS.has(order["kind"]) else 0.0))
-		assert(is_equal_approx(float(refund_home["stock"]["Metals"]) + dropped, 10000.0))
+		assert(is_zero_approx(dropped))
+		assert(is_equal_approx(float(refund_home["stock"]["Metals"]), 10000.0))
 		assert(int(refund_home["yards"][0]["job"]) == -1)
 	# Completed and pending shipyards share a hard three-slot limit.
 	var capped: Dictionary = _funded_fixture(graph, players, ids, false)
