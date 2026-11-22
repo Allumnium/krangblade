@@ -319,6 +319,11 @@ func _build_map_layers() -> void:
 	fog_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fog_overlay.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	fog_overlay.draw.connect(_draw_fog)
+	queued_order_overlay = Control.new()
+	map_canvas.add_child(queued_order_overlay)
+	queued_order_overlay.z_index = 3
+	queued_order_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	queued_order_overlay.draw.connect(_draw_queued_order_overlay)
 	sector_name_overlay = Control.new()
 	map_canvas.add_child(sector_name_overlay)
 	sector_name_overlay.z_index = 3
@@ -1555,6 +1560,7 @@ func _build_fleet_cargo_row() -> void:
 var fog_state := FOG_OF_WAR.new()
 var territory_view := TERRITORY_VIEW.new()
 var fog_overlay: Control
+var queued_order_overlay: Control
 var sector_name_overlay: Control
 
 func _update_fog(state: Dictionary) -> void:
@@ -1565,6 +1571,23 @@ func _update_fog(state: Dictionary) -> void:
 
 func _fog_visible(point: Vector2) -> bool:
 	return fog_state.is_visible(point, _map_size())
+
+func _draw_queued_order_overlay() -> void:
+	var state: Dictionary = _state()
+	if state.is_empty() or selected_units.is_empty():
+		return
+	# Skip resolving service references when nothing selected has a queue.
+	var selected: Dictionary = {}
+	for id in selected_units:
+		selected[id] = true
+	var has_queue: bool = false
+	for ship in state["ships"]:
+		if selected.has(int(ship["id"])) and not ship.get("order_queue", []).is_empty():
+			has_queue = true
+			break
+	if not has_queue:
+		return
+	order_view.draw_queued_chains(queued_order_overlay, state, _ship_poses(state), ECONOMY.service_targets(state), selected_units, Rect2(Vector2.ZERO, map_canvas.size), _fog_visible)
 
 func _draw_fog() -> void:
 	if fog_state.texture == null:
@@ -4338,6 +4361,7 @@ func _transfer_anchor(state: Dictionary, poses: Dictionary, refs: Dictionary, id
 func _draw_map() -> void:
 	_update_fog(_state())
 	fog_overlay.queue_redraw()
+	queued_order_overlay.queue_redraw()
 	sector_name_overlay.queue_redraw()
 	logistics_overlay.queue_redraw()
 	objectives_overlay.queue_redraw()
@@ -4439,7 +4463,6 @@ func _draw_map() -> void:
 			var start: Vector2 = poses[id]["point"]
 			if selected_units.size() == 1:
 				order_view.draw_single_command_line(state, order_graph, craft, start, poses, service_refs)
-			order_view.draw_queued_orders(state, order_graph, craft, start, drawn_sectors)
 			var active_order: Dictionary = craft.get("unit_order", {})
 			var order_tint: Color = order_view.order_color(craft, active_order)
 			if craft.has("patrol_from"):

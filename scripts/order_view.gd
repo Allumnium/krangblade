@@ -32,14 +32,15 @@ func configure(canvas: Control, art: HULL_ART, celestial: CELESTIAL_VIEW, camera
 	fit_query = fit
 	local_player = player_query
 
-func draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tint: Color) -> void:
+func draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tint: Color, canvas: CanvasItem = null) -> void:
+	var surface: CanvasItem = map_canvas if canvas == null else canvas
 	var axis: Vector2 = heading.normalized() if not heading.is_zero_approx() else Vector2.UP
 	var scale: float = maxf(0.42, ship_scale.call(false))
 	var shape: PackedVector2Array = hull_art.polygon(point, axis * scale, axis.orthogonal() * scale, HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE))
 	if not Geometry2D.triangulate_polygon(shape).is_empty():
-		map_canvas.draw_colored_polygon(shape, Color(tint, 0.24))
+		surface.draw_colored_polygon(shape, Color(tint, 0.24))
 	shape.append(shape[0])
-	map_canvas.draw_polyline(shape, Color(tint, 0.85), 1.0, true)
+	surface.draw_polyline(shape, Color(tint, 0.85), 1.0, true)
 
 func draw_sector_target(graph: Dictionary, node: int, tint: Color, drawn: Dictionary) -> void:
 	if node < 0 or node >= graph["points"].size() or drawn.has(node):
@@ -336,28 +337,113 @@ func draw_group_formation_ghosts(state: Dictionary, viewport_bounds: Rect2, sele
 		# destination through combat or repair. Completed orders disappear.
 		if (order.get("kind", "") == "position" and ship.has("local_move_target")) or (order.get("kind", "") == "patrol" and ship.has("patrol_from")):
 			draw_formation_order_ghost(ship, order, bounds)
-		for queued in ship.get("order_queue", []):
-			draw_formation_order_ghost(ship, queued, bounds)
 
-func draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, drawn_sectors: Dictionary) -> void:
-	var order: Dictionary = ship.get("unit_order", {})
-	var endpoint: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
-	if ship.has("patrol_from") and ship.get("patrol_returning", false):
-		endpoint = ship["patrol_start_point"]
-	if endpoint.is_finite() and ECONOMY._unit_order_running(ship):
-		start = screen_point.call(endpoint)
-	elif ship.has("launch_rally"):
-		start = screen_point.call(ship["launch_rally"]["point"])
-	for pending in ship.get("order_queue", []):
-		endpoint = ECONOMY.unit_order_point(state, graph, ship, pending)
-		if not endpoint.is_finite():
+# Resolve entity targets using the frame's existing service references and
+# visible poses. A lost/hidden target or an order without a fixed location
+# stays in the numbered chain as a label, never a guessed destination.
+func _queue_endpoint(state: Dictionary, graph: Dictionary, ship: Dictionary, order: Dictionary, poses: Dictionary, refs: Dictionary, fog_visible: Callable, pending: bool) -> Vector2:
+	var kind: String = str(order.get("kind", ""))
+	var target: int = int(order.get("target", -1))
+	if kind in ["attack", "follow", "repair", "deposit", "warp_travel"]:
+		var ref: Dictionary = refs.get(target, {})
+		if ref.is_empty():
+			return Vector2.INF
+		if ref.get("kind", "") == "ship":
+			return poses[target]["point"] if poses.has(target) else Vector2.INF
+		var world: Vector2 = ref.get("repair_position", ref["position"]) if kind == "repair" else ref["position"]
+		return screen_point.call(world) if fog_visible.call(world) else Vector2.INF
+	if pending and kind == "unload":
+		# The actual depot is selected when the command executes.
+		return Vector2.INF
+	if kind == "salvage":
+		var pile: Dictionary = state.get("salvage", {}).get(target, {})
+		if pile.is_empty() or not fog_visible.call(pile["position"]):
+			return Vector2.INF
+	var point: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
+	return screen_point.call(point) if point.is_finite() else Vector2.INF
+
+# Identical fleet legs are aggregated rather than overdrawn per hull. When
+# a leg starts at live hull positions, average those starts to show intent.
+# Distinct formation slots or divergent queues retain their own lines.
+func _add_queue_leg(legs: Dictionary, step: int, anchor: Vector2, start: Vector2, endpoint: Vector2, kind: String, tint: Color, hull: String, heading: Vector2, ghost: bool) -> void:
+	var key: Array = [step, anchor, endpoint, kind, tint]
+	if not legs.has(key):
+		legs[key] = {"sum": Vector2.ZERO, "count": 0, "end": endpoint, "step": step, "kind": kind, "tint": tint, "hull": hull, "heading": heading, "ghost": ghost}
+	var leg: Dictionary = legs[key]
+	leg["sum"] += start
+	leg["count"] = int(leg["count"]) + 1
+
+func draw_queued_chains(canvas: CanvasItem, state: Dictionary, poses: Dictionary, refs: Dictionary, selected_units: Array[int], viewport_bounds: Rect2, fog_visible: Callable) -> void:
+	if selected_units.is_empty():
+		return
+	var selected: Dictionary = {}
+	for id in selected_units:
+		selected[id] = true
+	var graph: Dictionary = ECONOMY.military_graph(state)
+	var legs: Dictionary = {}
+	for ship in state["ships"]:
+		var id: int = int(ship["id"])
+		var queue: Array = ship.get("order_queue", [])
+		if queue.is_empty() or not selected.has(id) or not poses.has(id) or int(ship["owner"]) != local_player.call():
 			continue
-		var finish: Vector2 = screen_point.call(endpoint)
-		var tint: Color = order_color(ship, pending)
-		if pending["kind"] in ["sector", "sector_entry"]:
-			draw_sector_target(graph, int(pending["target"]), tint, drawn_sectors)
-		elif pending["kind"] == "position" or (pending["kind"] == "patrol" and pending.has("heading")):
-			draw_destination_ghost(ship["kind"], finish, pending.get("heading", finish - start), tint)
-		map_canvas.draw_dashed_line(start, finish, Color(tint, 0.45), 1.0, 5.0, true, true)
-		start = finish
-
+		var start: Vector2 = poses[id]["point"]
+		var anchor: Vector2 = Vector2.INF
+		var active: Dictionary = ship.get("unit_order", {})
+		var endpoint: Vector2 = Vector2.INF
+		var active_tint: Color = order_color(ship, active)
+		if ship.has("launch_rally"):
+			endpoint = screen_point.call(ship["launch_rally"]["point"])
+			active_tint = Color("#ff605c")
+		elif ECONOMY._unit_order_running(ship):
+			endpoint = _queue_endpoint(state, graph, ship, active, poses, refs, fog_visible, false)
+			if ship.has("patrol_from") and bool(ship.get("patrol_returning", false)):
+				endpoint = screen_point.call(ship["patrol_start_point"])
+		if endpoint.is_finite():
+			_add_queue_leg(legs, 0, anchor, start, endpoint, "", active_tint, "", Vector2.ZERO, false)
+			start = endpoint
+			anchor = endpoint
+		for index in range(queue.size()):
+			var pending: Dictionary = queue[index]
+			var kind: String = str(pending.get("kind", ""))
+			endpoint = _queue_endpoint(state, graph, ship, pending, poses, refs, fog_visible, true)
+			var tint: Color = order_color(ship, pending)
+			var ghost: bool = endpoint.is_finite() and (kind == "position" and selected_units.size() == 1 or kind in ["position", "patrol"] and pending.has("heading"))
+			var heading: Vector2 = pending.get("heading", endpoint - start if endpoint.is_finite() else Vector2.ZERO)
+			_add_queue_leg(legs, index + 1, anchor, start, endpoint, kind, tint, str(ship["kind"]), heading, ghost)
+			if endpoint.is_finite():
+				start = endpoint
+				anchor = endpoint
+	var font: Font = ThemeDB.fallback_font
+	var label_slots: Dictionary = {}
+	var markers: Dictionary = {}
+	for leg in legs.values():
+		var start: Vector2 = leg["sum"] / float(leg["count"])
+		var endpoint: Vector2 = leg["end"]
+		var finish: Vector2 = endpoint if endpoint.is_finite() else start
+		var tint: Color = leg["tint"]
+		var step: int = int(leg["step"])
+		if start.distance_to(finish) > 1.0:
+			if step == 0:
+				canvas.draw_line(start, finish, Color(tint, 0.8), 1.5, true)
+			else:
+				canvas.draw_dashed_line(start, finish, Color(tint, 0.75), 1.5, 6.0, true, true)
+		if step == 0 or not viewport_bounds.grow(30.0).has_point(finish):
+			continue
+		var kind: String = leg["kind"]
+		var marker_key: Array = [finish, step, kind, tint]
+		if markers.has(marker_key):
+			continue
+		markers[marker_key] = true
+		if bool(leg["ghost"]):
+			draw_destination_ghost(leg["hull"], finish, leg["heading"], tint, canvas)
+		canvas.draw_arc(finish, 8.0, 0.0, TAU, 20, Color(tint, 0.95), 1.5, true)
+		var slot: int = int(label_slots.get(finish, 0))
+		label_slots[finish] = slot + 1
+		var label_text: String = str(step)
+		if kind not in ["position", "sector", "sector_entry"]:
+			label_text += " " + kind.capitalize()
+		if not endpoint.is_finite():
+			label_text += " ·"
+		var label_point: Vector2 = finish + Vector2(11.0, -7.0 - slot * 13.0)
+		canvas.draw_string_outline(font, label_point, label_text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, 4, Color("#101925"))
+		canvas.draw_string(font, label_point, label_text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, Color(tint, 1.0))
