@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.96.8: Non-Harvesters use earlier 240-unit lookahead, 26-unit preferred clearance and 12-unit swept physical clearance, cached bounded local AStarGrid2D detours for nearby clusters, compact swept waypoints, two-sided angular fallback and per-step planning budget (12 ships, at most two bounded searches each). Hull contact correction also respects rocks; miners retain existing access. Increase seeded rotation for roughly 30% of rocks, detail-only with cached rates. Codex and multi-rock regression fixture updated; runtime parser, blocked goals/tight pockets, high fleet counts, FPS and multiplayer validation pending.
+
 - v0.96.7: Every empire opens with Economic: Upgrade a shipyard to Medium (one completed level-2 yard upgrade, not a queued job) and Military: Build 7 fighters (existing lifetime fighter counter). Both opening objectives can be rerolled via existing independent 60-second cooldown. Subsequent objectives use the normal eligible random draw after CP is spent; remove forced colony-chain successor but retain colony goals and their prerequisites. Codex and authority regression fixtures updated; runtime and ENet validation pending.
 
 - v0.96.6: Soften territory visuals only: world fill opacity 9.5% → 4.5%, rim 38% → 19%, white rim highlight 24% → 12%; minimap/setup baked alpha 45/95 → 28/65 (retain legibility at small scale). Claim geometry, colors, fog/visibility, influence, navigation and warning destinations unchanged. Visual verification pending.

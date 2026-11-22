@@ -82,7 +82,12 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 				unit_shape.append(Vector2.from_angle(angle) * float(chunk["shape"][k]))
 			# Derive a stable, subtly varied spin from the seeded shape.
 			var signature: float = sin(float(chunk["rotation"]) * 5.0)
-			var rate: float = lerpf(0.003, 0.008, absf(signature)) * (1.0 if signature >= 0.0 else -1.0)
+			# Keep most slow; a seeded minority rotates a little faster.
+			var variety: float = fposmod(sin(shape_key.dot(Vector2(0.013, 0.021))) * 43758.5453, 1.0)
+			var speed: float = lerpf(0.003, 0.009, absf(signature))
+			if variety < 0.30:
+				speed *= lerpf(1.5, 2.5, variety / 0.30)
+			var rate: float = speed * (1.0 if signature >= 0.0 else -1.0)
 			asteroid_shape_cache[shape_key] = {"vertices": unit_shape, "triangles": Geometry2D.triangulate_polygon(unit_shape), "spin_rate": rate}
 		var rock := PackedVector2Array()
 		var cached: Dictionary = asteroid_shape_cache[shape_key]

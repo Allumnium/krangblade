@@ -12,6 +12,14 @@ static var _movement_field_source: Array = []
 static var _movement_field_counts: Array[int] = []
 static var _rock_cells: Dictionary = {}
 const ROCK_CELL: float = 192.0
+const ROCK_HARD_CLEARANCE: float = 12.0
+const ROCK_PREFERRED_CLEARANCE: float = 26.0
+const ROCK_ROUTE_CELL: float = 24.0
+const ROCK_ROUTE_HALF: int = 24
+const ROCK_PLAN_LIMIT: int = 12
+static var _rock_routes: Dictionary = {}
+static var _rock_plan_budget: int = ROCK_PLAN_LIMIT
+static var _rock_plan_tick: int = 0
 const AVOIDANCE_LOOKAHEAD: float = 96.0
 const AVOIDANCE_CELL: float = 128.0
 const AVOIDANCE_BUCKET_LIMIT: int = 24
@@ -2323,6 +2331,9 @@ static func _refresh_movement_fields(fields: Array) -> void:
 				break
 	if not dirty:
 		return
+	# Depletion only removes obstacles; already safe routes remain usable.
+	if not is_same(fields, _movement_field_source):
+		_rock_routes.clear()
 	_movement_field_source = fields
 	_movement_fields.clear()
 	_movement_field_counts.clear()
@@ -2350,7 +2361,7 @@ static func _index_rock(center: Vector2, radius: float) -> void:
 	if radius <= EPS:
 		return
 	var obstacle: Dictionary = {"position": center, "radius": radius}
-	var padding: Vector2 = Vector2.ONE * (radius + 32.0)
+	var padding: Vector2 = Vector2.ONE * (radius + 64.0)
 	var first: Vector2i = _rock_cell(center - padding)
 	var last: Vector2i = _rock_cell(center + padding)
 	for y in range(first.y, last.y + 1):
@@ -2366,79 +2377,223 @@ static func _rocks_near(a: Vector2, b: Vector2) -> Array:
 	if first == last:
 		return _rock_cells.get(first, [])
 	var result: Array = []
+	var seen: Dictionary = {}
 	for y in range(first.y, last.y + 1):
 		for x in range(first.x, last.x + 1):
-			result.append_array(_rock_cells.get(Vector2i(x, y), []))
+			for obstacle in _rock_cells.get(Vector2i(x, y), []):
+				var key: Vector2 = obstacle["position"]
+				if not seen.has(key):
+					seen[key] = true
+					result.append(obstacle)
 	return result
 
-static func _point_clear_of_rocks(point: Vector2, clearance: float = 10.0) -> bool:
+static func _point_clear_of_rocks(point: Vector2, clearance: float = ROCK_PREFERRED_CLEARANCE) -> bool:
 	for obstacle in _rock_cells.get(_rock_cell(point), []):
 		if point.distance_squared_to(obstacle["position"]) < pow(float(obstacle["radius"]) + clearance, 2.0):
 			return false
 	return true
 
-# Only inspect the upcoming leg, never the entire field or long route.
-# The full generated radius is conservative while a rock is being mined.
-static func _field_detour(before: Vector2, target: Vector2, budget: float) -> Vector2:
-	if _rock_cells.is_empty() or before.is_equal_approx(target):
-		return target
-	var end: Vector2 = before.move_toward(target, maxf(budget + 48.0, 128.0))
-	var nearest: float = INF
-	var obstacle: Dictionary = {}
-	for rock in _rocks_near(before, end):
+# Swept preferred-clearance test. The final short leg can deliberately
+# use the tighter physical margin for precise destinations and docking.
+static func _rock_segment_clear(before: Vector2, after: Vector2, clearance: float) -> bool:
+	for rock in _rocks_near(before, after):
 		var center: Vector2 = rock["position"]
-		var radius: float = float(rock["radius"]) + 8.0
-		if Geometry2D.get_closest_point_to_segment(center, before, end).distance_squared_to(center) >= radius * radius:
+		var radius: float = float(rock["radius"]) + clearance
+		if Geometry2D.get_closest_point_to_segment(center, before, after).distance_squared_to(center) < radius * radius:
+			return false
+	return true
+
+# Find a clear local route around several obstacles together. Build this
+# bounded search only when the short direct leg is obstructed; cache the
+# resulting waypoints rather than rebuilding a grid every movement tick.
+static func _plan_rock_route(before: Vector2, target: Vector2, clearance: float) -> Array:
+	var half: int = ROCK_ROUTE_HALF
+	var region := Rect2i(Vector2i(-half, -half), Vector2i(half * 2 + 1, half * 2 + 1))
+	var grid := AStarGrid2D.new()
+	grid.region = region
+	grid.cell_size = Vector2.ONE * ROCK_ROUTE_CELL
+	grid.offset = before
+	grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	grid.update()
+	var extent: Vector2 = Vector2.ONE * float(half) * ROCK_ROUTE_CELL
+	# Rasterize only nearby rock disks; no full-map path search.
+	for rock in _rocks_near(before - extent, before + extent):
+		var center: Vector2 = rock["position"]
+		var radius: float = float(rock["radius"]) + clearance
+		var local: Vector2 = (center - before) / ROCK_ROUTE_CELL
+		var reach: float = radius / ROCK_ROUTE_CELL
+		var first: Vector2i = Vector2i((local - Vector2.ONE * reach).floor()).max(region.position)
+		var last: Vector2i = Vector2i((local + Vector2.ONE * reach).ceil()).min(region.end - Vector2i.ONE)
+		for y in range(first.y, last.y + 1):
+			for x in range(first.x, last.x + 1):
+				var cell := Vector2i(x, y)
+				if (before + Vector2(cell) * ROCK_ROUTE_CELL).distance_squared_to(center) < radius * radius:
+					grid.set_point_solid(cell)
+	var goal: Vector2 = (target - before) / ROCK_ROUTE_CELL
+	var limit: float = float(half - 1)
+	goal *= minf(1.0, limit / maxf(1.0, maxf(absf(goal.x), absf(goal.y))))
+	var goal_id := Vector2i(goal.round())
+	# Choose a nearby reachable start if contact or a narrow gap has put
+	# the hull inside the preferred margin. Actual movement stays swept.
+	var start := Vector2i.ZERO
+	if grid.is_point_solid(start):
+		var closest: float = INF
+		for y in range(-4, 5):
+			for x in range(-4, 5):
+				var cell := Vector2i(x, y)
+				if grid.is_point_solid(cell):
+					continue
+				var point: Vector2 = grid.get_point_position(cell)
+				var distance: float = Vector2(cell).length_squared()
+				if distance < closest and _clip_rock_step(before, point).is_equal_approx(point):
+					start = cell
+					closest = distance
+		if closest == INF:
+			return []
+	# Select the closest open grid point to the requested endpoint.
+	if grid.is_point_solid(goal_id):
+		var original_goal: Vector2i = goal_id
+		var closest: float = INF
+		for y in range(maxi(-half, original_goal.y - 6), mini(half, original_goal.y + 6) + 1):
+			for x in range(maxi(-half, original_goal.x - 6), mini(half, original_goal.x + 6) + 1):
+				var cell := Vector2i(x, y)
+				var distance: float = (Vector2(cell) - goal).length_squared()
+				if not grid.is_point_solid(cell) and distance < closest:
+					goal_id = cell
+					closest = distance
+		if closest == INF:
+			return []
+	var ids: Array[Vector2i] = grid.get_id_path(start, goal_id, false)
+	if ids.is_empty():
+		return []
+	var route: Array = []
+	if start != Vector2i.ZERO:
+		route.append(grid.get_point_position(start))
+	# Compact the route using actual swept geometry rather than walking
+	# cell-by-cell; never shortcut across a rock.
+	var anchor: Vector2 = before if route.is_empty() else route.back()
+	var next: int = 1
+	while next < ids.size():
+		var farthest: int = next
+		for j in range(next + 1, ids.size()):
+			if not _rock_segment_clear(anchor, grid.get_point_position(ids[j]), clearance):
+				break
+			farthest = j
+		var point: Vector2 = grid.get_point_position(ids[farthest])
+		if not _clip_rock_step(anchor, point).is_equal_approx(point):
+			return []
+		route.append(point)
+		anchor = point
+		next = farthest + 1
+	return route
+
+# Cheap bounded steering for fleets waiting for a planning slot or
+# starting in an extremely tight pocket. Try both sides, not one tangent.
+static func _rock_steering(before: Vector2, target: Vector2, budget: float) -> Vector2:
+	var axis: Vector2 = before.direction_to(target)
+	var reach: float = maxf(budget, 48.0)
+	var best: Vector2 = before
+	var best_score: float = -INF
+	for angle in [0.0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.57, -1.57, 2.1, -2.1, 2.7, -2.7, PI]:
+		var direction: Vector2 = axis.rotated(float(angle))
+		var candidate: Vector2 = _clip_rock_step(before, before + direction * reach)
+		var distance: float = before.distance_to(candidate)
+		if distance <= EPS:
 			continue
-		var distance: float = before.distance_to(center) - radius
-		if distance < nearest:
-			nearest = distance
-			obstacle = rock
-	if obstacle.is_empty():
+		var score: float = distance * (0.85 + 0.15 * direction.dot(axis)) - absf(float(angle)) * 4.0
+		if _rock_segment_clear(before, candidate, ROCK_PREFERRED_CLEARANCE):
+			score += 16.0
+		if score > best_score:
+			best_score = score
+			best = candidate
+	return best
+
+static func _field_detour(before: Vector2, target: Vector2, budget: float, ship_id: int = -1) -> Vector2:
+	if _rock_cells.is_empty() or before.is_equal_approx(target) or budget <= EPS:
 		return target
-	var center: Vector2 = obstacle["position"]
-	var radius: float = float(obstacle["radius"]) + 8.0
-	var radial: Vector2 = before - center
-	var axis: Vector2 = radial.normalized() if not radial.is_zero_approx() else Vector2.RIGHT
-	if radial.length() < radius + 2.0:
-		return center + axis * (radius + 12.0)
-	var desired: Vector2 = target - center
-	if desired.length() < radius:
-		return center + (desired.normalized() if not desired.is_zero_approx() else axis) * (radius + 2.0)
-	# Aim along a tangent of the padded disk. Turn around the nearer side.
-	var clearance: float = radius + 4.0
-	var side: float = 1.0 if axis.angle_to(desired) >= 0.0 else -1.0
-	var turn: float = acos(clampf(clearance / radial.length(), 0.0, 1.0))
-	return center + axis.rotated(side * maxf(turn, 0.22)) * clearance
+	var cached: Dictionary = _rock_routes.get(ship_id, {}) if ship_id >= 0 else {}
+	if not cached.is_empty() and (cached["target"] as Vector2).distance_to(target) > 96.0:
+		_rock_routes.erase(ship_id)
+		cached = {}
+	var route: Array = cached.get("route", [])
+	while not route.is_empty() and before.distance_to(route.front()) <= EPS:
+		route.pop_front()
+	if not route.is_empty():
+		var waypoint: Vector2 = route.front()
+		if _clip_rock_step(before, waypoint).is_equal_approx(waypoint):
+			return waypoint
+		route.clear()
+	# Start steering earlier; if the destination is in a narrow but
+	# physically accessible gap, allow the precise final approach.
+	var end: Vector2 = before.move_toward(target, maxf(budget + 96.0, 240.0))
+	var clearance: float = ROCK_HARD_CLEARANCE if before.distance_to(target) <= 96.0 and not _point_clear_of_rocks(target) else ROCK_PREFERRED_CLEARANCE
+	if _rock_segment_clear(before, end, clearance):
+		_rock_routes.erase(ship_id)
+		return target
+	if ship_id < 0 or (_rock_plan_budget > 0 and _rock_plan_tick >= int(cached.get("retry", 0))):
+		if ship_id >= 0:
+			_rock_plan_budget -= 1
+		route = _plan_rock_route(before, target, clearance + 8.0)
+		if route.is_empty():
+			route = _plan_rock_route(before, target, ROCK_HARD_CLEARANCE + 4.0)
+		if ship_id >= 0:
+			if _rock_routes.size() >= 20000:
+				_rock_routes.clear()
+			_rock_routes[ship_id] = {"target": target, "route": route, "retry": _rock_plan_tick + 12}
+		if not route.is_empty():
+			return route.front()
+	return _rock_steering(before, target, budget)
 
 # Sweep the actual step, including ship-avoidance steering, so large ticks
 # cannot tunnel through a rock. Allow an overlapping hull to move outward.
 static func _clip_rock_step(before: Vector2, after: Vector2) -> Vector2:
 	var allowed: float = 1.0
 	var delta: Vector2 = after - before
-	if delta.length_squared() <= EPS:
+	if delta.length_squared() <= EPS * EPS:
 		return after
+	var overlapping: Array = []
 	for obstacle in _rocks_near(before, after):
 		var center: Vector2 = obstacle["position"]
-		var radius: float = float(obstacle["radius"]) + 8.0
+		var radius: float = float(obstacle["radius"]) + ROCK_HARD_CLEARANCE
 		var relative: Vector2 = before - center
 		if relative.length_squared() < radius * radius:
-			if relative.dot(delta) < 0.0:
-				allowed = 0.0
+			overlapping.append(obstacle)
 			continue
 		var hit: float = Geometry2D.segment_intersects_circle(before, after, center, radius)
 		if hit >= 0.0:
 			allowed = minf(allowed, maxf(0.0, hit - 0.01 / delta.length()))
-	return before.lerp(after, allowed)
+	var candidate: Vector2 = before.lerp(after, allowed)
+	# If the hull begins inside several conservative disks (e.g. at a
+	# launch or contact correction), permit escape without entering new
+	# disks. Requiring outward motion relative to every center can trap it.
+	if overlapping.size() == 1:
+		if (before - (overlapping[0]["position"] as Vector2)).dot(candidate - before) < 0.0:
+			return before
+	elif overlapping.size() > 1:
+		# Compare at a short first step so a long sweep cannot tunnel
+		# through an existing overlap just because its endpoint is clear.
+		var probe: Vector2 = before.move_toward(candidate, 8.0)
+		var old_depth: float = 0.0
+		var new_depth: float = 0.0
+		for obstacle in overlapping:
+			var center: Vector2 = obstacle["position"]
+			var radius: float = float(obstacle["radius"]) + ROCK_HARD_CLEARANCE
+			old_depth += maxf(0.0, radius - before.distance_to(center))
+			new_depth += maxf(0.0, radius - probe.distance_to(center))
+		if new_depth >= old_depth:
+			return before
+		return probe
+	return candidate
 
 static func _navigate(ship: Dictionary, target: Vector2, budget: float) -> float:
 	ship["navigation_target"] = target
 	var before: Vector2 = ship["position"]
 	var avoid_rocks: bool = ship.get("kind", "") != "miner" and not _rock_cells.is_empty()
 	if avoid_rocks:
-		target = _field_detour(before, target, budget)
+		target = _field_detour(before, target, budget, int(ship.get("id", -1)))
 	var direct: Vector2 = before.direction_to(target)
-	var steering: Vector2 = _avoidance_direction(ship, target, budget)
+	# Do not steer away from a planned safe corridor to dodge a hull.
+	var steering: Vector2 = direct if not target.is_equal_approx(ship["navigation_target"]) else _avoidance_direction(ship, target, budget)
 	var after: Vector2 = before.move_toward(target, maxf(0.0, budget))
 	if not steering.is_equal_approx(direct):
 		var steered: Vector2 = before + steering * minf(maxf(0.0, budget), before.distance_to(target))
@@ -8795,6 +8950,8 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 					else:
 						high = fraction
 				candidate = point.lerp(candidate, low)
+			if craft.get("kind", "") != "miner" and not _rock_cells.is_empty():
+				candidate = _clip_rock_step(point, candidate)
 			craft["position"] = candidate
 			if not craft["route"].is_empty():
 				craft["leg"] = _lane_progress(graph["points"], craft)
@@ -8822,6 +8979,8 @@ static func _next_ai_slot(now: float, player: int) -> float:
 	return next
 
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
+	_rock_plan_tick += 1
+	_rock_plan_budget = ROCK_PLAN_LIMIT
 	_refresh_movement_fields(state["map"].get("fields", []))
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	_accrue_resident_taxes(state, dt)
