@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.59: Darken construction/upgrade command backgrounds whenever the corresponding manual build cannot start, including repeat-enabled and multi-selection cards. Preserve right-click automation and authority eligibility; omit redundant queued-upgrade hints. Check recovery when population or resources arrive, queue completion and mixed selections. Visual/runtime validation pending.
+
 - v0.89.58: Render visible cloaked scouts at 30% hull opacity, including overview dots, instead of a purple status ring; suppress their exhaust while cloaked. Keep ordinary selection rings and authority visibility predicates. Use separate recycled translucent MultiMesh batches, preserving opaque hull buffer format. Visual/peer validation pending.
 
 - v0.89.56: Shorten command captions to Plating, Lasers, Shipyards, Upgrade, Clear and Shipyard; preserve contextual tooltip details, hotkeys, slots and mechanics. Verify visual fit.

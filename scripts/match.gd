@@ -1214,6 +1214,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		command_card_ui.set_level_badge(button, 1 if installed else 0)
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not _any_selected_station_buildable(kind, p)
+		command_card_ui.set_build_available(button, not button.disabled)
 		var hint: String = "Plating I · %.0f s\n+1,500 station HP" if kind == "reinforced_plating" else "Lasers I · %.0f s\n+2 defensive lasers (4 total)"
 		if kind == "dyson_sphere":
 			hint = "Dyson Sphere · %.0f s\nRequires Dyson Sphere technology\n−50%% local ship material and GC costs"
@@ -1324,15 +1325,18 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		var repeat_key: String = _station_repeat_key(p, key)
 		var auto: bool = not repeat_key.is_empty() and bool(p.get("continuous", {}).get(repeat_key, false))
 		available = owned and available and ECONOMY.construction_affordable(_state(), p, recipe)
-		button.disabled = not owned or (not _any_selected_station_buildable(key, p) if building_selection_kind == "station" and selected_buildings.size() > 1 else (not eligible or (repeat_key.is_empty() and not available)))
-		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
+		var grouped: bool = building_selection_kind == "station" and selected_buildings.size() > 1
+		var can_build: bool = owned and (_any_selected_station_buildable(key, p) if grouped else available and eligible)
+		button.disabled = not owned or (not can_build if grouped else (not eligible or (repeat_key.is_empty() and not available)))
+		command_card_ui.set_build_available(button, can_build)
+		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if can_build else Color(0.55, 0.55, 0.55)
 		if button.has_meta("auto_border"):
 			(button.get_meta("auto_border") as Control).visible = auto
 		_set_cost_tooltip(button, name_text + (" · %.1f s" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
 		if not eligible:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nUnavailable")
-		elif not available and ECONOMY.construction_affordable(_state(), p, recipe):
-			var reason: String = ECONOMY.building_blocker(p, key) if key in ECONOMY.RESOURCES else "Requirements not met or already queued"
+		elif not can_build and key in ECONOMY.RESOURCES and not ECONOMY._has_job(p, "economy_building", key) and ECONOMY.construction_affordable(_state(), p, recipe):
+			var reason: String = ECONOMY.building_blocker(p, key)
 			if not reason.is_empty():
 				command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + reason)
 		if not repeat_key.is_empty() and eligible:
@@ -1430,6 +1434,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var recipe: Dictionary = ECONOMY.construction_cost(system, kind, 1)
 		button.disabled = not owned or not ECONOMY.yard_fits(system, selected_yard, kind) or (kind == "ship" and not bool(system["home"]))
 		var available: bool = owned and _yard_build_available(system, selected_yard, kind)
+		command_card_ui.set_build_available(button, available)
 		var auto: bool = yard.get("autobuild", []).has(kind)
 		(button.get_meta("auto_border") as Control).visible = auto
 		var portrait: TextureRect = button.get_meta("portrait")
@@ -1454,6 +1459,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var upgrade: Button = yard_upgrades[target_level]
 		var eligible: bool = level == target_level - 1
 		upgrade.disabled = not owned or not eligible or not _yard_can_upgrade(system, selected_yard)
+		command_card_ui.set_build_available(upgrade, not upgrade.disabled)
 		if level >= target_level:
 			_set_cost_tooltip(upgrade, ECONOMY.size_name(target_level) + " unlocked")
 		else:
@@ -3374,6 +3380,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 			auto = auto or system["yards"][ref.y].get("autobuild", []).has(kind)
 		var button: Button = yard_commands[kind]
 		button.disabled = not can_toggle
+		command_card_ui.set_build_available(button, eligible)
 		(button.get_meta("auto_border") as Control).visible = auto
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = hull_art.production_icon(kind, _empire_color(_me()))
@@ -3390,6 +3397,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 	for target_level in [2, 3]:
 		var upgrade: Button = yard_upgrades[target_level]
 		upgrade.disabled = not can_upgrade[target_level]
+		command_card_ui.set_build_available(upgrade, not upgrade.disabled)
 		_set_cost_tooltip(upgrade, "Upgrade eligible %s shipyards to %s\nUnlocks next ship class · Faster construction\nFully repairs each yard" % [ECONOMY.size_name(target_level - 1), ECONOMY.size_name(target_level)], ECONOMY._cost("yard_upgrade", target_level), 0.0, available)
 	yard_commands["rally"].disabled = refs.is_empty()
 	yard_commands["clear"].disabled = not can_clear

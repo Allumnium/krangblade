@@ -433,7 +433,7 @@ func _ships() -> void:
 		rows.append([UI_TEXT.ship_kind_name(kind), "%.0f GC/yr" % E.ship_upkeep(kind)])
 	_table(["Ship", "Upkeep"], rows)
 	_section("Shipyard upgrades")
-	_body("Upgrade cards show current levels at top left; tooltips show the target level. Upgrade (U for Medium, I for Large) in the corresponding row; locked ships remain hidden, then replace the upgrade with unlocked ships from column one. Higher shipyard levels increase construction speed and staffing requirements. Only station jobs show progress in the hub; yard production and upgrades appear in their own berths. Select Space Station returns to the parent station. Clear / Rally occupy the bottom-right slots. Rally flags mark destinations for completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")
+	_body("Dark build cards cannot start construction; right-click automation still works where available. Upgrade cards show current levels at top left; tooltips show the target level. Upgrade (U for Medium, I for Large) in the corresponding row; locked ships remain hidden, then replace the upgrade with unlocked ships from column one. Higher shipyard levels increase construction speed and staffing requirements. Only station jobs show progress in the hub; yard production and upgrades appear in their own berths. Select Space Station returns to the parent station. Clear / Rally occupy the bottom-right slots. Rally flags mark destinations for completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")
 	rows = []
 	for i in range(1, E.MAX_SHIPYARD_LEVEL + 1):
 		rows.append([str(i), "%.0f×" % (E.yard_speed(i) / E.yard_speed(1)), "%.0f" % float(E.SHIPYARD_POPULATION[i - 1])])
