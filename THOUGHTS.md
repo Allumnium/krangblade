@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.5: Replace ten hard-coded CI parser targets with tracked `.gd` discovery; local/CI share `tools/check_gdscript.py`, each script checked independently, nonzero exits, script diagnostics and timeouts fail validation. Preserve import, startup, core, real ENet checks and manual-only triggers. Godot and repo checkout unavailable locally; actual baseline remains pending.
+
 - v0.89.4 code audit (v0.89.3 baseline): 11 production GDScript files, ~22.8k lines; match.gd 9,450 and economy_rules.gd 9,338 (~82%). Top-level functions: 386/449 respectively; no repeated top-level name in individual production files (not a scope/parser check). Largest spans: match _build_ui 476, _draw_map 396, economy _combat 442, step 287. Match calls 19 underscore-prefixed rule methods at 70 sites; 10 static economy cache/index variables warrant explicit lifecycle ownership. Economy tests _initialize spans ~1,732 lines. Repeated UI helper names differ in implementation and are candidates for review, not confirmed duplicates. Current CI has explicit parse targets and is manual-only. Source map and workflow now documented; staged extraction and parser baseline in TODO. No runtime changes or validation claims; checkout/Godot executable unavailable in this session.
 
 - v0.89.3: Reported parser error in tactical alerts: rogue notification local collided with destruction event iterator. Rename only the rogue local; no gameplay or Codex changes. Godot parse and runtime validation pending.

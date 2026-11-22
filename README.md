@@ -20,6 +20,7 @@ Current layout (v0.89.3 audit; update when responsibility moves). Use the named 
 | `tests/economy_rules_test.gd`, `tests/lobby_rules_test.gd` | Rule regressions, seeded maps and semantic fixtures. |
 | `tests/solo_smoke.gd`, `tests/network_smoke.gd` | Real match lifecycle, authority, state replication and ENet peers. |
 | `tests/fleet_benchmark.gd`, `tests/contested_benchmark.gd`, `PERFORMANCE.md` | Fleet-scale and contested simulation measurement. |
+| `tools/check_gdscript.py` | Discover and parse every tracked `.gd` file; run locally after `godot --headless --path . --import` using `python3 tools/check_gdscript.py` (optional `--godot /path/to/godot`). |
 | `.github/workflows/godot-validation.yml` | Version/indentation, import/metadata, parse, core and peer checks; currently manual dispatch only. |
 
 ### Intended dependency direction
