@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.19: Repair stale economy test fixtures (yard classes, crew reservation, refunds, mining rate/hold, gradual dropoff, delivery pods, shipyard repeat, direct navigation routes, freighter kind). Root cause of the reported econ-test hang: a failed assert aborts _initialize so quit() never runs. Test-only; no gameplay change. Remaining failures continue from line ~2739.
+
 - v0.97.18: Split enqueue into _enqueue_admissible, _resolve_enqueue and _enqueue_yard_port; public signature and rejection order unchanged. Parser, determinism probe and economy failure signatures unchanged.
 
 - v0.97.17: Split _work_planet into _produce_planet_resources, _retain_yard_jobs and _next_yard_job. No behavior change; parser, determinism probe and economy failure signatures unchanged.

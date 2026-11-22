@@ -2210,7 +2210,9 @@ func _initialize() -> void:
 	home["stock"]["Metals"] = 1000.0
 	home["stock"]["Organics"] = ECON.POPULATION_FOOD_RESERVE
 	assert(ECON.enqueue(demographics, 1, 0, "production", "Organics"))
-	ECON.step(demographics, 20.0 + ECON.PLANET_UPGRADE_DELIVERY_TIME)
+	# Construction completes first; the planetary delivery pod then travels.
+	ECON.step(demographics, 20.0)
+	ECON.step(demographics, ECON.PLANET_UPGRADE_DELIVERY_TIME)
 	assert(int(home["levels"]["Organics"]) == 2)
 	assert(is_equal_approx(ECON.population_capacity(home), 200000.0 * float(home["farm_factor"])))
 	ECON.step(demographics, 1.0)
@@ -2228,7 +2230,7 @@ func _initialize() -> void:
 		largest = maxf(largest, float(home["population"]))
 	assert(largest - smallest > 1000.0 and largest - smallest < 30000.0)
 	assert(smallest > 270000.0 and largest < 330000.0)
-	assert(ECON.current_year(demographics) == 3273)
+	assert(ECON.current_year(demographics) == 3273 + int(ECON.PLANET_UPGRADE_DELIVERY_TIME))
 	print("PASS: 60-year doubling, food reserve modifier, warehouse independence, damped population, food shortage, farm upgrades and year clock")
 
 	# Visual planet count loosely follows system richness, without modifying state.
@@ -2291,6 +2293,8 @@ func _initialize() -> void:
 	var refund_home: Dictionary = refunds["planets"][0]
 	refund_home["levels"]["Metals"] = 0
 	refund_home["warehouse_level"] = 3
+	# Freighters and Colonies require a Medium shipyard.
+	refund_home["yards"][0]["level"] = 2
 	for kind in ["ship", "colony_ship", "fighter", "miner", "yard", "yard_upgrade", "production"]:
 		refund_home["population"] = 150000.0 if kind == "colony_ship" else ECON.HOME_POPULATION
 		for material in ECON.RESOURCES:
@@ -2323,9 +2327,7 @@ func _initialize() -> void:
 	assert(not ECON.enqueue(capped, 1, 0, "yard"))
 	assert(ECON.cancel(capped, 1, 0, int(cap_home["queue"][-1]["id"])))
 	assert(ECON.shipyard_count(cap_home) == 2)
-	assert(not ECON.enqueue(capped, 1, 0, "yard"))
-	for material in ECON._cost("yard", 3):
-		cap_home["stock"][material] += float(ECON._cost("yard", 3)[material])
+	# Voluntary cancellation returns all prepaid materials, so the slot can be requeued immediately.
 	assert(ECON.enqueue(capped, 1, 0, "yard"))
 	ECON.step(capped, ECON._work("yard", 2))
 	assert(cap_home["yards"].size() == 2)
@@ -2410,10 +2412,13 @@ func _initialize() -> void:
 	var repeat_home: Dictionary = repeat_state["planets"][0]
 	repeat_home["warehouse_level"] = 3
 	repeat_home["yards"][0]["level"] = 2
+	# Crew is reserved at admission, so the full queue needs enough residents.
+	repeat_home["population"] = 100000.0
 	for material in ECON.RESOURCES:
 		repeat_home["stock"][material] = 5000.0
 	assert(not ECON.set_continuous(repeat_state, 2, 0, "fighter", true))
-	assert(not ECON.set_continuous(repeat_state, 1, 0, "yard", true))
+	assert(ECON.set_continuous(repeat_state, 1, 0, "yard", true))
+	assert(ECON.set_continuous(repeat_state, 1, 0, "yard", false))
 	assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", true))
 	for i in range(ECON.SHIPYARD_QUEUE_LIMIT):
 		assert(ECON.enqueue(repeat_state, 1, 0, "ship"))
@@ -2439,6 +2444,7 @@ func _initialize() -> void:
 	var rotation: Dictionary = _funded_fixture(graph, players, ids, false)
 	var rotation_home: Dictionary = rotation["planets"][0]
 	rotation_home["population"] = 450000.0
+	rotation_home["yards"][0]["level"] = 2
 	rotation_home["levels"]["Organics"] = 10
 	rotation_home["levels"]["Metals"] = 0
 	rotation_home["stock"]["Metals"] = 0.0
@@ -2508,6 +2514,8 @@ func _initialize() -> void:
 	var upgrade_home: Dictionary = upgrades["planets"][0]
 	upgrade_home["warehouse_level"] = 3
 	upgrade_home["stock"]["Metals"] = 20000.0
+	# Production upgrades are gated by local residents.
+	upgrade_home["population"] = 500000.0
 	assert(not ECON.set_continuous(upgrades, 2, 0, "production:Organics", true))
 	assert(ECON.set_continuous(upgrades, 1, 0, "production:Crystals", true))
 	assert(ECON.set_continuous(upgrades, 1, 0, "production:Crystals", false))
@@ -2547,13 +2555,14 @@ func _initialize() -> void:
 		ECON.step(military, 1.0)
 	assert(military["ships"].size() == 1)
 	var fighter: Dictionary = military["ships"][0]
-	assert(fighter["kind"] == "fighter" and fighter["route"].is_empty())
+	# Direct navigation keeps only the destination; an idle home fighter targets its own system.
+	assert(fighter["kind"] == "fighter" and (fighter["route"] as Array).all(func(node): return int(node) == 0))
 	assert(ECON.empire_totals(military, 1)["fighters"] == 1)
 	assert(ECON.empire_totals(military, 1)["logistics"] == 0)
 	assert(not ECON.send_colony(military, 1, int(fighter["id"]), 3))
 	for i in range(20):
 		ECON.step(military, 1.0)
-	assert(int(fighter["at"]) == 0 and fighter["route"].is_empty())
+	assert(int(fighter["at"]) == 0 and (fighter["route"] as Array).all(func(node): return int(node) == 0))
 	print("PASS: clustered map and fighter construction")
 
 	# Deterministic mining round trip; no planetary production or unrelated cargo.
@@ -2563,8 +2572,8 @@ func _initialize() -> void:
 	var crystal_pos: Vector2 = (mineral_points[0] as Vector2) + Vector2(95, 30)
 	mineral_map["field_edges"] = []
 	mineral_map["fields"] = [{"position": metal_pos, "radius": 40.0, "anchor": 0, "Metals": 1.0, "Crystals": 1.0,
-		"chunks": [{"id": 7, "position": metal_pos, "resource": "Metals", "remaining": 24.0},
-			{"id": 9, "position": crystal_pos, "resource": "Crystals", "remaining": 36.0}]}]
+		"chunks": [{"id": 7, "position": metal_pos, "resource": "Metals", "remaining": ECON.MINER_RATE * 3.0},
+			{"id": 9, "position": crystal_pos, "resource": "Crystals", "remaining": ECON.MINER_RATE * 3.0}]}]
 	var mineral: Dictionary = _funded_fixture(mineral_map, players, ids, false)
 	assert(ECON.discovered(mineral, 3, "fields", 0))
 	assert(ECON.set_mining_policy(mineral, 3, 0, false, false, false))
@@ -2613,15 +2622,21 @@ func _initialize() -> void:
 			break
 		ECON.step(mineral, 1.0)
 	assert(miner["mining_mode"] == "mining")
-	for i in range(4):
+	# The 3-year Metals chunk fits in one Harvester hold.
+	for i in range(3):
 		ECON.step(mineral, 1.0)
 		assert(miner["mining_mode"] == "mining")
 	assert(ECON._find_chunk(mineral["map"]["fields"][0], 7).is_empty())
-	ECON.step(mineral, 1.0)
+	assert(ECON._find_chunk(mineral["map"]["fields"][0], 7).is_empty())
+	# Harvesters remain on site for the minimum mining stay before returning.
+	for i in range(ceili(ECON.MINING_STAY)):
+		ECON.step(mineral, 1.0)
+		if miner["mining_mode"] != "mining":
+			break
 	assert(miner["mining_mode"] == "return")
 	for i in range(20):
 		ECON.step(mineral, 1.0)
-	assert(is_equal_approx(float(mine_home["stock"]["Metals"]), after_build + 24.0))
+	assert(is_equal_approx(float(mine_home["stock"]["Metals"]), after_build + ECON.MINER_RATE * 3.0))
 	assert(ECON._find_chunk(mineral["map"]["fields"][0], 7).is_empty())
 	assert(is_zero_approx(float(ECON.field_inventory(mineral["map"]["fields"][0])["Metals"])))
 	assert(is_equal_approx(float(mine_home["stock"]["Crystals"]), float(mineral["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
@@ -2632,9 +2647,9 @@ func _initialize() -> void:
 	var approach_years: int = ceili((miner["position"] as Vector2).distance_to(mineral_points[0]) / ECON.ship_speed(str(miner["kind"])))
 	for i in range(20 + approach_years):
 		ECON.step(mineral, 1.0)
-		if float(mine_home["stock"]["Crystals"]) - float(mineral["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR >= 36.0 - ECON.EPS:
+		if float(mine_home["stock"]["Crystals"]) - float(mineral["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR >= ECON.MINER_RATE * 3.0 - ECON.EPS:
 			break
-	assert(is_equal_approx(float(mine_home["stock"]["Crystals"]), 36.0 + float(mineral["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
+	assert(is_equal_approx(float(mine_home["stock"]["Crystals"]), ECON.MINER_RATE * 3.0 + float(mineral["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
 	assert((mineral["map"]["fields"][0]["chunks"] as Array).is_empty())
 	assert(is_zero_approx(float(ECON.field_inventory(mineral["map"]["fields"][0])["Crystals"])))
 	assert(ECON.set_mining_policy(mineral, 1, 0, false, false, true))
@@ -2670,7 +2685,7 @@ func _initialize() -> void:
 	ally["thresholds"]["Crystals"] = {"min": 10.0, "max": 10.0}
 	hostile["thresholds"]["Metals"] = {"min": 10.0, "max": 10.0}
 	for i in range(2):
-		transport["ships"].append({"id": i, "owner": 1, "at": 0, "route": [],
+		transport["ships"].append({"id": i, "kind": "ship", "owner": 1, "at": 0, "route": [],
 			"leg": 0.0, "source": -1, "dest": -1, "cargo": ECON.empty_stock()})
 	ECON.step(transport, 1.0)
 	var first: Dictionary = transport["ships"][0]
@@ -2691,6 +2706,11 @@ func _initialize() -> void:
 		ECON.step(transport, 0.1)
 		if float(ally["stock"]["Metals"]) > ECON.EPS:
 			break
+	# Unloading is gradual at the Freighter dropoff rate.
+	for tick in range(ceili(ECON.CARGO_CAPACITY / (ECON.dropoff_rate("ship") * 0.1)) + 1):
+		if ECON._cargo_total(first) <= ECON.EPS:
+			break
+		ECON.step(transport, 0.1)
 	assert((first["position"] as Vector2).distance_to(ECON.station_position(transport, 1, float(transport["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.SHIP_CLEARANCE + ECON.EPS)
 	assert(is_equal_approx(float(ally["stock"]["Metals"]), 4.0))
 	assert(float(ally["stock"]["Crystals"]) >= 6.0 + float(transport["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR - ECON.EPS)
