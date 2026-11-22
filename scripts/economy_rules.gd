@@ -3676,6 +3676,8 @@ static func _attack_destination(graph: Dictionary, target: Dictionary) -> int:
 	var route: Array = target.get("route", [])
 	return int(route[0]) if not route.is_empty() else int(target.get("at", -1))
 
+const MISSILE_SPLASH_RADIUS: float = 30.0
+const STATION_MISSILE_COUNT: int = 1
 const MISSILE_RANGE: float = 1200.0
 const MISSILE_DAMAGE: float = 120.0
 const MISSILE_COOLDOWN: float = 12.0
@@ -6327,6 +6329,17 @@ static func _ship_hit(damage: Dictionary, killed_by: Dictionary, health: Diction
 # Resolve one shot from every mounted blaster at each burst interval.
 # Damage is authoritative and simultaneous with other weapons; projectile
 # tracer metadata is compact and rides the existing combat snapshot.
+# Use the frozen combat spatial index, including structures, for missile splash.
+static func _missile_splash(state: Dictionary, cells: Dictionary, positions: Dictionary, teams: Dictionary, team: int, target: int, attacker: Dictionary, amount: float, damage: Dictionary, killed_by: Dictionary, health: Dictionary, hull_slots: Dictionary, hull_health: PackedFloat64Array) -> void:
+	var impact: Vector2 = positions[target]
+	var cell := Vector2i(floori(impact.x / LASER_RANGE), floori(impact.y / LASER_RANGE))
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			for other in cells.get(cell + Vector2i(x, y), []):
+				var id: int = int(other["id"])
+				if _combat_groups_hostile(state, team, int(teams[id])) and impact.distance_squared_to(positions[id]) <= MISSILE_SPLASH_RADIUS * MISSILE_SPLASH_RADIUS:
+					_ship_hit(damage, killed_by, health, id, attacker, amount, hull_slots, hull_health)
+
 static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, positions: Dictionary, damage: Dictionary, killed_by: Dictionary, health: Dictionary, dt: float, hull_slots: Dictionary = {}, hull_health: PackedFloat64Array = PackedFloat64Array()) -> void:
 	var mounts: int = blaster_count(str(ship["kind"]))
 	if mounts <= 0 or dt <= 0.0:
@@ -6623,7 +6636,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 							best = float(nearest[0])
 							missile_target = int(nearest[1])
 				if missile_target != -1:
-					_ship_hit(damage, killed_by, health, missile_target, ship, MISSILE_DAMAGE * launchers, hull_slots, hull_health)
+					_missile_splash(state, cells, positions, team_by_id, team, missile_target, ship, MISSILE_DAMAGE * launchers, damage, killed_by, health, hull_slots, hull_health)
 					missile_cd = MISSILE_COOLDOWN
 					ship["missile_origin"] = pos
 					ship["missile_endpoint"] = positions[missile_target]
@@ -6778,6 +6791,31 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 			continue
 		var origin: Vector2 = station_position(state, index, float(state["elapsed"]))
 		var cell := Vector2i(floori(origin.x / LASER_RANGE), floori(origin.y / LASER_RANGE))
+		var station: Dictionary = system["station"]
+		var missile_cd: float = maxf(0.0, float(station.get("missile_cooldown", 0.0)) - dt)
+		if missile_cd <= EPS:
+			var missile_target: int = -1
+			var missile_best: float = MISSILE_RANGE * MISSILE_RANGE
+			var missile_reach: int = ceili(MISSILE_RANGE / LASER_RANGE)
+			for x in range(-missile_reach, missile_reach + 1):
+				for y in range(-missile_reach, missile_reach + 1):
+					for other in _hostile_bucket(state, cells, positive_hostile_cache, cell + Vector2i(x, y), team, team_by_id, true):
+						var other_id: int = int(other["id"])
+						if other_id < 0:
+							continue
+						var distance: float = origin.distance_squared_to(positions[other_id])
+						if distance < missile_best or (distance <= missile_best and (missile_target < 0 or other_id < missile_target)):
+							missile_target = other_id
+							missile_best = distance
+			if missile_target >= 0:
+				# Station damage uses the same simultaneous resolution as hull missiles.
+				var attacker: Dictionary = {"owner": system["owner"]}
+				_missile_splash(state, cells, positions, team_by_id, team, missile_target, attacker, MISSILE_DAMAGE * STATION_MISSILE_COUNT, damage, killed_by, health, hull_slots, hull_health)
+				missile_cd = MISSILE_COOLDOWN
+				station["missile_origin"] = origin
+				station["missile_endpoint"] = positions[missile_target]
+				station["missile_until"] = float(state["elapsed"]) + 0.65
+		station["missile_cooldown"] = missile_cd
 		var target: int = -1
 		var best: float = LASER_RANGE * LASER_RANGE
 		for x in range(-1, 2):

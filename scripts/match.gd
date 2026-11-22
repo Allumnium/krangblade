@@ -4768,6 +4768,14 @@ func _draw_map() -> void:
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
 		var system: Dictionary = state["planets"][index]
+		var station: Dictionary = system.get("station", {})
+		if float(station.get("missile_until", -1.0)) >= float(state["elapsed"]) and station.has("missile_endpoint"):
+			var launch: Vector2 = _screen_point(station["missile_origin"])
+			var impact: Vector2 = _screen_point(station["missile_endpoint"])
+			var phase: float = clampf(1.0 - (float(station["missile_until"]) - celestial_view.orbit_time(state)) / 0.65, 0.0, 1.0)
+			var tip: Vector2 = launch.lerp(impact, phase)
+			world_batches.queue_beam(tip - launch.direction_to(impact) * 12.0, tip, Color("#ffb36b"), 2.0)
+			world_batches.queue_projectile(tip, 2.0, Color("#fff2d2"))
 		var weapons: Array = system.get("station", {}).get("weapons", [])
 		for emitter in range(weapons.size()):
 			var weapon: Dictionary = weapons[emitter]
