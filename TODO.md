@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.93.2: Color insufficient local population red in the command information panel, matching missing resource costs. Visual validation pending.
+
 - [ ] v0.93.0: Double field radius (fourfold area), quadruple rock count using original rock sizes; expand placement search. Non-miners detour around conservative field disks during shared navigation. Interior target handling, formation/collision bypasses, depletion, map placement and ENet require further verification; runtime pending.
 
 - [ ] v0.93.1: Send Colony can replace any ordinary movement or work order, including an active sector route. Preserve existing colonization assignments, emergency retreat priority and destination validation. Runtime and ENet pending.
