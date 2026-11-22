@@ -2861,9 +2861,9 @@ func _zoom_at(point: Vector2, direction: float) -> void:
 func _planet_radius(index: int, state: Dictionary) -> float:
 	return celestial_view.system_world_radius(index, state) * _fit() * camera.zoom
 
-func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color, remembered_time: float = -1.0) -> void:
+func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color, remembered_time: float = -1.0) -> float:
 	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(pos):
-		return
+		return 0.0
 	var system: Dictionary = state["planets"][index]
 	var remembered: bool = remembered_time >= 0.0
 	var orbit_elapsed: float = remembered_time if remembered else celestial_view.orbit_time(state)
@@ -2893,7 +2893,6 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 					world_batches.draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
 	if not remembered:
-		planet_traffic.draw_production(state, index, pos, radius, detail)
 		planet_traffic.draw_upgrade_deliveries(state, index, pos, radius, detail)
 	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(camera.zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
 	celestial_view.draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity, map_canvas, remembered_time if remembered else visual_clock)
@@ -2924,6 +2923,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 				world_batches.draw_selection_ring(point, 6.0)
 	if _show_system_rings(index):
 		map_canvas.draw_arc(pos, maxf(5.0, star_radius) + 3.0, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
+	return detail
 
 func _empire_color_index(owner: int) -> int:
 	if owner == 0:
@@ -4609,10 +4609,14 @@ func _draw_map() -> void:
 		var seen_at: float = float(state["elapsed"]) if live else fog_state.observed_time(i)
 		var radius: float = _planet_radius(i, view)
 		var tint: Color = _empire_color(int(system["owner"]))
-		_draw_system(i, view, pos, radius, tint, -1.0 if live else seen_at)
+		var detail: float = _draw_system(i, view, pos, radius, tint, -1.0 if live else seen_at)
 		if not live or _fog_visible(ECONOMY.station_position(state, i, float(state["elapsed"]))):
 			structure_view.draw_station(view, i, tint, seen_at, building_selection_kind, selected_buildings)
 			structure_view.draw_shipyards(view, i, tint, seen_at, selected, selected_yard, building_selection_kind, selected_buildings)
+		# Incoming resource pods must remain visible as they cross the
+		# opaque station hull and enter its storage bays.
+		if live and detail >= 0.05:
+			planet_traffic.draw_production(state, i, pos, radius, detail)
 		if _show_system_rings(i):
 			var phase: float = 0.6 + 0.35 * sin(visual_clock * 3.0)
 			for angle in range(4):

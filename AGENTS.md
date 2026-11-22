@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.94.20: Draw incoming planetary production pods after their station and shipyards so they remain visible over the opaque station hull and storage circles. Preserve original live-fog gate, detail fade, offscreen culling, destinations, upgrade-delivery ordering and simulation. Codex remains accurate. Verify close-zoom arrival layering and fog; visual/runtime/ENet pending.
+
 - v0.94.19: Command info prioritizes red blockers above effects; show exact missing planet/deposit, completed cap, pending job, staffing, yard size and full queue reasons. Permanently unsuitable station cards receive a subtle red background/icon tint; only if all selected stations are unsuitable for group commands. Resource and GC shortage styling, repeat toggles, construction and authority unchanged. Codex updated. Verify single/group selection, short panels and disabled/armed hover in Godot; visual/runtime/ENet pending.
 
 - v0.94.18: Residents consume Organics only; remove metal upkeep, reserve-production workaround, Material Efficiency research and Crystalline Synthesis civilian metal penalty. Keep food/growth, construction costs, taxes and ship wages. AI saving uses mineral output without civilian demand, and food net output. Metal/crystal hover omits demand; Colonize (C) replaces Send Colony on the neutral system card, existing dispatch and hotkey overrides retained. Verify consumption/stock conservation, reward draws, AI, neutral/fog targeting, shortcut and ENet; runtime pending.
