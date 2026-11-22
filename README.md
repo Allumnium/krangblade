@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.89.57; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.89.65; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
@@ -18,7 +18,8 @@ Current layout (v0.89.57; update when responsibility moves). Use the named funct
 | `scripts/territory_view.gd` | Territory shader/layer, normalized site and lane textures, influence tint/cache and friendly warning destinations. Match supplies camera geometry, fog binding and player colors. |
 | `scripts/fog_of_war.gd` | Per-client live/explored vision cells, revision checks, mask texture and map fog rendering. Match supplies player, motion revision, camera geometry and territory shader bindings; minimap shares the mask. |
 | `scripts/hull_art.gd` | Authored hull geometry, cargo bay positions, hull/portrait/shield SVG generation and per-match texture caches; map drawing and selection consume the same geometry. |
-| `scripts/command_hotkeys.gd` | Command registration, key scope/conflicts, persisted override loading, hotkey badges and dispatch; match owns editor dialog and settings save. |
+| `scripts/command_hotkeys.gd` | Command registration, key scope/conflicts, persisted override loading, hotkey badges and dispatch; match_settings owns editor dialog and settings save. |
+| `scripts/match_settings.gd` | Local config persistence, audio/camera preferences and hotkey editor; match supplies widget factories, viewport, music and registry, retains menu lifecycle and input. |
 | `scripts/construction_queue_view.gd` | Construction queue flow layout, tile reconciliation, progress/blocker styling and job names; match supplies row caches, icons and cancellation callback. |
 | `scripts/trade_range.gd` | Two-handle trade threshold control, stock display, drag/commit signal; controller supplies policy and dispatches authority requests. |
 | `scripts/cost_button.gd` | CostButton widget: recipe/shortfall state and compact graphical information-panel content; no native custom tooltip. Match supplies costs, crew icon and hotkey hints. |
