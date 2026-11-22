@@ -98,7 +98,7 @@ void fragment() {
 	float rim = max(1.0 - smoothstep(aa, aa * 2.1, abs(edge)),
 		1.0 - smoothstep(rival_width, rival_width * 1.8, difference));
 	vec3 tint = texture(palette, vec2((float(winner) + 0.5) / 8.0, 0.5)).rgb;
-	COLOR = vec4(mix(tint, mix(tint, vec3(1.0), 0.24), rim), coverage * mix(0.095, 0.38, rim));
+	COLOR = vec4(mix(tint, mix(tint, vec3(1.0), 0.12), rim), coverage * mix(0.045, 0.19, rim));
 }
 """
 	var material := ShaderMaterial.new()
@@ -244,7 +244,7 @@ func _rebuild_field(empire_color: Callable) -> void:
 		pixels[offset] = roundi(tint.r * 255.0)
 		pixels[offset + 1] = roundi(tint.g * 255.0)
 		pixels[offset + 2] = roundi(tint.b * 255.0)
-		pixels[offset + 3] = 95 if best - CLAIM_THRESHOLD <= 3 or best - runner <= 3 else 45
+		pixels[offset + 3] = 65 if best - CLAIM_THRESHOLD <= 3 or best - runner <= 3 else 28
 	_minimap_texture = ImageTexture.create_from_image(Image.create_from_data(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8, pixels))
 
 func _stamp_field(data: PackedByteArray, dimensions: Vector2i, source: Dictionary, channel: int) -> void:
