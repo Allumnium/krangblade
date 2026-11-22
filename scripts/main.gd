@@ -3,6 +3,7 @@ extends Control
 
 const RULES = preload("res://scripts/lobby_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
+const TERRITORY = preload("res://scripts/territory_view.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const TEXT := HUD.TEXT
@@ -10,6 +11,16 @@ const MUTED := HUD.MUTED
 
 class MapPreview:
 	extends Control
+	var territory = TERRITORY.new()
+	var territory_signature: Array = []
+
+	func refresh_territory(entries: Dictionary, ordered: Array[int], colors: Array[Color]) -> void:
+		var signature: Array = [get_meta("signature", []), ordered, colors]
+		if signature == territory_signature:
+			return
+		territory_signature = signature
+		territory.prepare_preview(get_meta("map", {}), entries, ordered, colors)
+
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), Color("#091522"))
 		var graph: Dictionary = get_meta("map", {})
@@ -20,6 +31,7 @@ class MapPreview:
 		var available: Vector2 = (size - Vector2(24, 24)).max(Vector2.ONE)
 		var scale_factor: float = minf(available.x / bounds.x, available.y / bounds.y)
 		var offset: Vector2 = (size - bounds * scale_factor) * 0.5
+		territory.draw_claims(self, offset, bounds * scale_factor)
 		var colors: Array = get_meta("colors", [])
 		for asteroid in graph["fields"]:
 			var center: Vector2 = offset + asteroid["position"] * scale_factor
@@ -600,7 +612,7 @@ func _new_map_preview(parent: Container) -> Control:
 	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(preview)
 	preview.resized.connect(preview.queue_redraw)
-	var legend := _text("Colored: starts  ·  Solid: planetary systems  ·  Hollow: planetless  ·  Brown: asteroids  ·  Violet: antimatter", 11, MUTED)
+	var legend := _text("Colored: starts and territory  ·  Solid: planetary systems  ·  Hollow: planetless  ·  Brown: asteroids  ·  Violet: antimatter", 11, MUTED)
 	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	parent.add_child(legend)
 	return preview
@@ -616,9 +628,12 @@ func _update_map_preview(preview: Control, entries: Dictionary, seed_value: int,
 		preview.set_meta("map", MAP.generate(seed_value, entries.size(), layout))
 		preview.set_meta("signature", signature)
 	var colors: Array[Color] = []
-	for id in RULES.ordered_peers(entries):
+	var ordered: Array[int] = []
+	ordered.assign(RULES.ordered_peers(entries))
+	for id in ordered:
 		colors.append(RULES.EMPIRE_COLORS[int(entries[id]["color"])])
 	preview.set_meta("colors", colors)
+	(preview as MapPreview).refresh_territory(entries, ordered, colors)
 	preview.queue_redraw()
 
 func _map_layout_picker() -> OptionButton:

@@ -43,6 +43,22 @@ func build(parent: Control) -> void:
 	_mesh_root.draw.connect(_draw_claims)
 	_mesh_root.hide()
 
+# Setup preview uses the actual starting infrastructure, without spawning fleets.
+func prepare_preview(map_data: Dictionary, players: Dictionary, ordered: Array[int], colors: Array[Color]) -> void:
+	_observed.clear()
+	_minimap_texture = null
+	if map_data.is_empty() or ordered.is_empty():
+		return
+	_extent = (map_data["size"] as Vector2).max(Vector2.ONE)
+	_base_radius = ECONOMY.sector_base_radius(map_data)
+	var state: Dictionary = ECONOMY.create(map_data, players, ordered, false)
+	var palette_by_owner: Dictionary = {}
+	for index in range(ordered.size()):
+		var owner: int = ordered[index]
+		palette_by_owner[owner] = colors[index]
+		_observed[index] = {"point": map_data["points"][index], "owner": owner, "weight": mini(150, ECONOMY.system_presence_weight(state["planets"][index]))}
+	_rebuild_field(func(owner: int) -> Color: return palette_by_owner[owner])
+
 func _territory_material() -> ShaderMaterial:
 	var shader := Shader.new()
 	shader.code = """
@@ -202,9 +218,10 @@ func _rebuild_field(empire_color: Callable) -> void:
 	_field_low = ImageTexture.create_from_image(Image.create_from_data(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8, low))
 	_field_high = ImageTexture.create_from_image(Image.create_from_data(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8, high))
 	_palette = ImageTexture.create_from_image(palette_image)
-	_fill_material.set_shader_parameter("field_low", _field_low)
-	_fill_material.set_shader_parameter("field_high", _field_high)
-	_fill_material.set_shader_parameter("palette", _palette)
+	if _fill_material != null:
+		_fill_material.set_shader_parameter("field_low", _field_low)
+		_fill_material.set_shader_parameter("field_high", _field_high)
+		_fill_material.set_shader_parameter("palette", _palette)
 	# The small minimap uses the same cached samples, winner and threshold.
 	var pixels := PackedByteArray()
 	pixels.resize(pixel_count * 4)

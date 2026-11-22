@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.91.10: Solo and lobby map previews draw the shared cached minimap territory fields beneath stars and deposits, using actual starting infrastructure and roster colors. Refresh on map or ordered roster/color changes; no simulation or network changes. Verify preview alignment, recoloring and setup responsiveness; runtime pending.
+
 - v0.91.9: Double the visual building territory kernel radius; halve map and minimap fill and contour opacity. Preserve cached fields, fog memory and simulation rules. Profile rebuild cost and verify overlapping claims visually; runtime/ENet pending. Larger kernels may touch up to four times as many texels per source during rebuilds; unchanged per-frame shader cost.
 
 - v0.91.8: Stop pauses normal movement/automation for the existing arrival cooldown even if a behavior normally has zero cooldown; new orders or enabling automation override the pause. Emergency withdrawal remains higher priority. Wander uses per-hull idle-position anchors and nearby spatial groups rather than sector/star centers; held ships return directly to their captured coordinates. Remove Last seen labels while keeping remembered fog data. Remaining civilian/Explore routes still use legacy sectors. Host ship fields stop_until and wander_anchor are replicated with existing dictionaries and reset on orders; regression fixtures updated, runtime/ENet pending.
