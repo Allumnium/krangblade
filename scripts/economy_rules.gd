@@ -643,7 +643,7 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
 	var planets: Array = state.get("planets", [])
 	if target < 0 or target >= planets.size() or int(planets[target]["owner"]) != 0 or has_station(planets[target]):
 		return []
-	if int(ship["owner"]) != player or ship.get("kind", "ship") != "colony_ship" or not (ship["route"] as Array).is_empty():
+	if int(ship["owner"]) != player or ship.get("kind", "ship") != "colony_ship":
 		return []
 	var teams: Array[int] = planet_teams(state)
 	var team: int = _combat_group(state, player)
@@ -661,11 +661,23 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
 	return MAP.path(state["map"], transit, team, start, target)
 
 # Select on the authority, not from a stale client-side dropdown.
+static func colony_en_route(state: Dictionary, player: int, target: int) -> bool:
+	for ship in state["ships"]:
+		if int(ship["owner"]) == player and ship["kind"] == "colony_ship" and int(ship.get("dest", -1)) == target and ship.get("unit_order", {}).get("kind", "") == "colonize":
+			return true
+	return false
+
 static func nearest_idle_colony(state: Dictionary, player: int, target: int) -> int:
+	if colony_en_route(state, player, target):
+		return -1
 	var best: float = INF
 	var chosen: int = -1
 	for ship in state["ships"]:
-		if int(ship["owner"]) != player or ship["kind"] != "colony_ship" or not _is_idle_ship(ship) or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty():
+		if int(ship["owner"]) != player or ship["kind"] != "colony_ship" or bool(ship.get("retreating", false)):
+			continue
+		if ship.get("unit_order", {}).get("kind", "") == "colonize" and int(ship.get("dest", -1)) >= 0:
+			continue
+		if not ship.get("route", []).is_empty() and not bool(ship.get("farm_auto_delivery", false)) and not bool(ship.get("salvage_delivery", false)):
 			continue
 		var path: Array[int] = colony_path(state, player, ship, target)
 		if path.is_empty():

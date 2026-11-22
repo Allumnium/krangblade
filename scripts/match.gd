@@ -685,7 +685,7 @@ func _build_station_interaction(body: VBoxContainer) -> void:
 	interaction_scroll.add_child(interaction_panel)
 	var neutral_grid: GridContainer = command_card_ui.create_grid(interaction_panel)
 	send_colony_button = _station_button(neutral_grid, "Send\nColony", "transform", _send_colony)
-	command_card_ui.set_hint(send_colony_button, "Send the nearest idle Colony to this sector")
+	command_card_ui.set_hint(send_colony_button, "Send the nearest available Colony to this sector")
 	command_card_ui.fill_grid(neutral_grid)
 	_build_station_command_card(body)
 
@@ -2684,12 +2684,15 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
 	# the actual destination when the command is issued.
 	var preview: Dictionary = fog_state.observed_state(state, _map_size()) if neutral else state
 	var id: int = ECONOMY.nearest_idle_colony(preview, _me(), selected) if neutral else -1
-	send_colony_button.disabled = id < 0
-	command_card_ui.set_hint(send_colony_button, "Send nearest idle Colony to this sector" if id >= 0 else "No available idle Colonies")
+	var en_route: bool = neutral and ECONOMY.colony_en_route(state, _me(), selected)
+	send_colony_button.disabled = id < 0 or en_route
+	var caption: Label = send_colony_button.get_meta("caption")
+	caption.text = "Colony\nEn Route" if en_route else "Send\nColony"
+	command_card_ui.set_hint(send_colony_button, "Colony already en route" if en_route else ("Send nearest available Colony to this sector" if id >= 0 else "No available Colonies"))
 
 func _send_colony() -> void:
 	if not send_colony_button.disabled:
-		# -1 requests authoritative nearest-idle selection.
+		# -1 requests authoritative nearest-available selection.
 		session.call("request_colonize", -1, selected)
 
 func _reset_view() -> void:
