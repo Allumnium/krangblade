@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.93.1: Send Colony can replace any ordinary movement or work order, including an active sector route. Preserve existing colonization assignments, emergency retreat priority and destination validation. Runtime and ENet pending.
+
 - v0.93.0: Double field radius (fourfold area), quadruple rock count using original rock sizes; expand placement search. Non-miners detour around conservative field disks during shared navigation. Interior target handling, formation/collision bypasses, depletion, map placement and ENet require further verification; runtime pending.
 
 - v0.92.1: Send Colony displays Colony En Route and prevents duplicate automatic dispatch to the same world. Nearest available selection accepts local work and autonomous cargo delivery, excluding assigned colony travel, other sector routes and retreat. Host chooses using existing request. Verify rerouting, cargo retention, cancellation, arrival and ENet; runtime pending.
