@@ -1683,7 +1683,25 @@ func _draw_queued_order_overlay() -> void:
 func _draw_fog() -> void:
 	if fog_state.texture == null:
 		return
-	fog_state.draw(fog_overlay, Rect2(Vector2.ZERO, map_canvas.size), Rect2(_screen_point(Vector2.ZERO), _map_size() * _fit() * camera.zoom), _map_size())
+	var offset: Vector2 = _screen_point(Vector2.ZERO)
+	var scale: float = _fit() * camera.zoom
+	var bounds := Rect2(Vector2.ZERO, map_canvas.size)
+	fog_state.draw(fog_overlay, bounds, Rect2(offset, _map_size() * scale), _map_size())
+	var state: Dictionary = _state()
+	if state.is_empty():
+		return
+	# Reveal static terrain, not the current contents of unexplored mines.
+	for index in range(state["map"].get("fields", []).size()):
+		var field: Dictionary = state["map"]["fields"][index]
+		if bool(field.get("antimatter", false)) or _fog_visible(field["position"]):
+			continue
+		if not bounds.grow(float(field["radius"]) * scale + 4.0).has_point(_screen_point(field["position"])):
+			continue
+		var memory: Dictionary = fog_state.field_view(state, index, _map_size())
+		if not memory.is_empty() and memory.get("chunks", []).is_empty():
+			continue
+		var tint := Color("#3c3835") if memory.is_empty() else Color(0.30, 0.28, 0.26, 0.18)
+		CELESTIAL_VIEW.draw_terrain_footprint(fog_overlay, field, offset, scale, tint)
 
 # Names are static generated map geography, not live tactical information.
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
@@ -4584,7 +4602,8 @@ func _draw_map() -> void:
 		if not viewport_bounds.grow(float(field["radius"]) * render_scale * 2.0 + 40.0).has_point(center):
 			continue
 		if not ECONOMY.discovered(state, _me(), "fields", field_index):
-			map_canvas.draw_string(font, center + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
+			if bool(field.get("antimatter", false)):
+				map_canvas.draw_string(font, center + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
 			continue
 		var field_live: bool = _fog_visible(field["position"])
 		field = fog_state.field_view(state, field_index, _map_size())

@@ -1907,7 +1907,8 @@ func _initialize() -> void:
 			assert(field["outline"].size() >= 12 if field.has("belt_lobes") else field["outline"].size() == 12)
 			if field.has("belt_lobes"):
 				var lobes: Array = field["belt_lobes"]
-				assert(lobes.size() >= 2 and field["chunks"].size() == lobes.size() * 36)
+				assert(lobes.size() >= 2 and lobes.size() <= 13)
+				assert(field["chunks"].size() >= lobes.size() * 16 and field["chunks"].size() <= lobes.size() * 26)
 				for lobe_index in range(lobes.size()):
 					var lobe: Dictionary = lobes[lobe_index]
 					var center: Vector2 = lobe["position"]
@@ -1918,6 +1919,13 @@ func _initialize() -> void:
 					for earlier in range(lobe_index - 1):
 						assert(center.distance_to(lobes[earlier]["position"]) > radius + float(lobes[earlier]["radius"]))
 			assert(field["chunks"].size() >= 9)
+			if not bool(field.get("antimatter", false)):
+				var smallest_rock: float = INF
+				var largest_rock: float = 0.0
+				for chunk in field["chunks"]:
+					smallest_rock = minf(smallest_rock, float(chunk["radius"]))
+					largest_rock = maxf(largest_rock, float(chunk["radius"]))
+				assert(largest_rock > smallest_rock * 1.5)
 			var chunk_ids: Dictionary = {}
 			for chunk in field["chunks"]:
 				assert(not chunk_ids.has(chunk["id"]))

@@ -434,15 +434,19 @@ static func _grow_asteroid_belts(fields: Array, points: Array[Vector2], edges: A
 		var axis: Vector2 = (start - points[int(field["anchor"])]).normalized()
 		if axis.is_zero_approx():
 			axis = Vector2.RIGHT
-		var goal: int = rng.randi_range(5, 10)
+		# Mix isolated deposits, short knots, thin ridges and broad belts.
+		# A field-specific width and bend rate make each chain distinct.
+		var goal: int = rng.randi_range(1, 13)
+		var width: float = rng.randf_range(70.0, 190.0)
+		var bend: float = rng.randf_range(0.12, 0.72)
 		for step in range(1, goal):
 			var previous: Dictionary = lobes[-1]
-			var radius: float = rng.randf_range(105.0, 150.0)
+			var radius: float = width * rng.randf_range(0.70, 1.30)
 			var found: bool = false
-			var turn: float = rng.randf_range(-0.40, 0.40)
+			var turn: float = rng.randf_range(-bend, bend)
 			for adjustment in [0.0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]:
 				var direction: Vector2 = axis.rotated(turn + float(adjustment))
-				var center: Vector2 = previous["position"] + direction * (float(previous["radius"]) + radius) * 0.78
+				var center: Vector2 = previous["position"] + direction * (float(previous["radius"]) + radius) * rng.randf_range(0.77, 0.84)
 				var candidate: Dictionary = {"position": center, "radius": radius}
 				if not _belt_lobe_clear(candidate, fields, index, lobes, points, edges, bounds):
 					continue
@@ -584,9 +588,11 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		outline.assign(Array(_belt_outline(lobes)))
 		field["outline"] = outline
 	var chunks: Array = []
-	var count: int = 4 * clampi(roundi(7.0 + radius / 100.0), 9, 28) if lobes.is_empty() else lobes.size() * 36
-	var profile: float = rng.randf()
 	var special: bool = bool(field.get("antimatter", false))
+	var count: int = 4 * clampi(roundi(7.0 + radius / 100.0), 9, 28)
+	if not special:
+		count = rng.randi_range(18, 28) if lobes.is_empty() else lobes.size() * rng.randi_range(16, 26)
+	var profile: float = rng.randf()
 	# Seeded variety: some pure-metal fields, and other fields containing
 	# between 3% and 20% crystals by initial tonnage (not just rock count).
 	# Antimatter keeps its separate inventory and concentration.
@@ -606,21 +612,32 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 	var totals: Dictionary = {"Metals": 0.0, "Crystals": 0.0}
 	for i in range(count):
 		var angle: float = rng.randf_range(0.0, TAU)
-		var distance: float = sqrt(rng.randf()) * 0.52
+		var distance: float = sqrt(rng.randf()) * (0.52 if special else 0.59)
 		var offset: Vector2 = (Vector2.from_angle(angle) * Vector2(1.0, flatten) * radius * distance).rotated(rotation)
 		var rock_radius: float = radius
 		if not lobes.is_empty():
 			var lobe: Dictionary = lobes[i % lobes.size()]
 			rock_radius = float(lobe["radius"])
-			offset = (lobe["position"] as Vector2) - center + Vector2.from_angle(angle) * sqrt(rng.randf()) * rock_radius * 0.90
+			# Best of several seeded samples avoids rock piles while keeping
+			# an organic distribution instead of an artificial grid.
+			var best_clearance: float = -1.0
+			for attempt in range(6):
+				var trial: Vector2 = (lobe["position"] as Vector2) - center + Vector2.from_angle(rng.randf_range(0.0, TAU)) * sqrt(rng.randf()) * rock_radius * 0.89
+				var clearance: float = INF
+				for existing in chunks:
+					clearance = minf(clearance, (center + trial).distance_squared_to(existing["position"]))
+				if clearance > best_clearance:
+					best_clearance = clearance
+					offset = trial
+		var size_factor: float = rng.randf_range(0.0225, 0.0425) if special else lerpf(0.012, 0.065, pow(rng.randf(), 1.7))
 		var resource: String = "Metals" if slots[i] < metal_count else "Crystals"
 		var amount: float = rng.randf_range(90.0, 260.0) * float(field[resource]) * (1.0 if special else ASTEROID_INVENTORY_MULTIPLIER)
 		totals[resource] += amount
 		var shape: Array[float] = []
-		for vertex in range(7):
+		for vertex in range(7 if special else rng.randi_range(5, 10)):
 			shape.append(rng.randf_range(0.62, 1.0))
 		chunks.append({"id": i, "position": center + offset, "resource": resource,
-			"remaining": amount, "initial": amount, "radius": rock_radius * 0.5 * rng.randf_range(0.045, 0.085),
+			"remaining": amount, "initial": amount, "radius": rock_radius * size_factor,
 			"rotation": rng.randf_range(0.0, TAU), "shape": shape})
 	# Preserve the generated total while normalizing individual ore amounts.
 	# Otherwise random rock sizes and concentration can exceed the cap.

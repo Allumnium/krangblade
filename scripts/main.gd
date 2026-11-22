@@ -4,6 +4,7 @@ extends Control
 const RULES = preload("res://scripts/lobby_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 const TERRITORY = preload("res://scripts/territory_view.gd")
+const CELESTIAL = preload("res://scripts/celestial_view.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const TEXT := HUD.TEXT
@@ -36,11 +37,13 @@ class MapPreview:
 		for asteroid in graph["fields"]:
 			var center: Vector2 = offset + asteroid["position"] * scale_factor
 			var special: bool = bool(asteroid.get("antimatter", false))
-			var radius: float = maxf(4.0 if special else 2.0, float(asteroid["radius"]) * scale_factor)
-			var tint: Color = Color("#c295ff") if special else Color("#9b8566")
-			draw_circle(center, radius, tint)
 			if special:
+				var radius: float = maxf(4.0, float(asteroid["radius"]) * scale_factor)
+				var tint := Color("#c295ff")
+				draw_circle(center, radius, tint)
 				draw_arc(center, radius + 2.0, 0.0, TAU, 24, tint, 1.0, true)
+			else:
+				CELESTIAL.draw_terrain_footprint(self, asteroid, offset, scale_factor, Color("#514b47"))
 		for index in range(points.size()):
 			var position: Vector2 = offset + points[index] * scale_factor
 			var home: bool = index < colors.size()
@@ -612,9 +615,6 @@ func _new_map_preview(parent: Container) -> Control:
 	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(preview)
 	preview.resized.connect(preview.queue_redraw)
-	var legend := _text("Colored: starts and territory  ·  Solid: planetary systems  ·  Hollow: planetless  ·  Brown: asteroids  ·  Violet: antimatter", 11, MUTED)
-	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	parent.add_child(legend)
 	return preview
 
 func _update_map_preview(preview: Control, entries: Dictionary, seed_value: int, layout: String) -> void:
