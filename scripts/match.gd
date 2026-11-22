@@ -1053,7 +1053,8 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	command_card_ui.set_face(station_button, "Station", command_card_ui.icon("select_station"))
 	command_card_ui.set_hint(station_button, "Select parent station")
 	hotkeys.register(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
-	var navigation_spacer: Control = command_card_ui.add_spacer(grid)
+	var build_button: Button = _station_button(grid, "Build", "build", _select_yard_station.bind(true))
+	hotkeys.register(build_button, KEY_B, "Shipyard", "yard_station_build", "Station Build")
 	var clear := _button("", func() -> void:
 		pending_command = ""
 		_refresh_command_mode()
@@ -1071,7 +1072,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
 	hotkeys.register(rally_button, KEY_Y, "Shipyard", "yard_rally", "Rally")
-	yard_bottom_slots.assign([station_button, navigation_spacer, clear, rally_button])
+	yard_bottom_slots.assign([station_button, build_button, clear, rally_button])
 	_layout_yard_classes(1, true, false)
 	yard_command_scroll.hide()
 
@@ -1107,9 +1108,12 @@ func _layout_yard_classes(level: int, show_medium_upgrade: bool, show_large_upgr
 		if ordered[i].get_index() != i:
 			yard_command_grid.move_child(ordered[i], i)
 
-func _select_yard_station() -> void:
+func _select_yard_station(open_build: bool = false) -> void:
 	# For grouped yards, select the primary yard's parent station.
 	_select_building_ref(Vector2i(selected, 0), "station")
+	# Selecting refreshes the inspector and resets the station card.
+	if open_build and station_selected_index == selected and station_commands.visible:
+		_station_card_to("build")
 
 # Shared command-card art. Keep silhouettes legible at compact native UI sizes.
 func _station_button(grid: GridContainer, caption: String, key: String, action: Callable) -> Button:

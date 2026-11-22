@@ -337,7 +337,7 @@ func _phase_changed() -> void:
 				assert(morph_sites.size() == expected_players)
 				for index in range(expected_players):
 					var site: int = morph_sites[index]
-					var morph: Dictionary = {"id": 945000 + index, "kind": "colony_ship", "owner": ordered[index], "origin": index, "at": site, "dest": site, "source": -1, "route": [], "leg": 0.0, "position": ECON.colony_station_position(state, site, float(state["elapsed"])), "heading": Vector2.UP, "hp": ECON.ship_max_hp("colony_ship"), "crew": ECON.COLONY_POPULATION, "cargo": ECON.empty_stock(), "unit_order": {"kind": "colonize", "target": site, "automatic": true}, "colony_transform_progress": 0.0, "farm_auto": false}
+					var morph: Dictionary = {"id": 945000 + index, "kind": "colony_ship", "owner": ordered[index], "origin": index, "at": site, "dest": site, "source": -1, "route": [], "leg": 0.0, "position": ECON.colony_station_position(state, site, float(state["elapsed"]), 0.37), "heading": Vector2.UP, "hp": ECON.ship_max_hp("colony_ship"), "crew": ECON.COLONY_POPULATION, "cargo": ECON.empty_stock(), "unit_order": {"kind": "colonize", "target": site, "automatic": true, "orbit_phase": 0.37}, "colony_transform_progress": 0.0, "farm_auto": false}
 					state["ships"].append(morph)
 				# Isolated neutral hull exercises real guest replication of a defection.
 				var rogue_point: Vector2 = state["map"]["points"][target_index]
@@ -433,7 +433,7 @@ func _check_time_controls(state: Dictionary) -> bool:
 				if speed_stage == 1:
 					var locked_count: int = 0
 					for craft in state["ships"]:
-						if int(craft["id"]) >= 945000 and int(craft["id"]) < 945000 + expected_players and ECON.colony_morphing(craft) and craft.get("order_queue", []).is_empty() and craft.get("unit_order", {}).get("kind", "") == "colonize" and not bool(craft.get("farm_auto", true)) and not bool(craft.get("holding", false)) and int(craft["dest"]) == int(craft["at"]):
+						if int(craft["id"]) >= 945000 and int(craft["id"]) < 945000 + expected_players and ECON.colony_morphing(craft) and craft.get("order_queue", []).is_empty() and craft.get("unit_order", {}).get("kind", "") == "colonize" and not bool(craft.get("farm_auto", true)) and not bool(craft.get("holding", false)) and int(craft["dest"]) == int(craft["at"]) and is_equal_approx(float(craft["unit_order"].get("orbit_phase", INF)), 0.37):
 							locked_count += 1
 					if locked_count != expected_players:
 						_fail("Morphing Colony accepted a cancellation or queued order.")
