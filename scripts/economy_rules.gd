@@ -30,9 +30,9 @@ const BUILDING_BONUS: float = 0.25
 const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional repeatable local production infrastructure; no self-input recipes.
 const ECONOMY_BUILDINGS = {
-	"Metals": {"name": "Refinery", "population": 500, "cost": {"Organics": 90.0}},
-	"Organics": {"name": "Farms", "population": 500, "cost": {"Metals": 240.0}},
-	"Crystals": {"name": "Incubator", "population": 500, "cost": {"Metals": 240.0}}
+	"Metals": {"name": "Refinery", "population": 5000, "cost": {"Organics": 90.0}},
+	"Organics": {"name": "Farms", "population": 5000, "cost": {"Metals": 240.0}},
+	"Crystals": {"name": "Incubator", "population": 5000, "cost": {"Metals": 240.0}}
 }
 const CONSTRUCTION_RESERVE: float = 500.0
 const CONSTRUCTION_PRODUCTION_SHARE: float = 0.1
@@ -1156,9 +1156,18 @@ static func building_population(resource: String, level: int) -> int:
 	return int(ECONOMY_BUILDINGS[resource]["population"]) * maxi(1, level)
 
 static func building_available(p: Dictionary, resource: String) -> bool:
-	if not ECONOMY_BUILDINGS.has(resource) or _has_job(p, "economy_building", resource) or not production_available(p, resource):
-		return false
-	return float(p["population"]) + EPS >= float(building_population(resource, int(p.get("buildings", {}).get(resource, 0)) + 1))
+	return building_blocker(p, resource).is_empty()
+
+static func building_blocker(p: Dictionary, resource: String) -> String:
+	if not ECONOMY_BUILDINGS.has(resource):
+		return "Unknown building"
+	if not production_available(p, resource):
+		return "No suitable planetary resource deposit" if has_planets(p) else "Requires a planet"
+	if _has_job(p, "economy_building", resource):
+		return "Upgrade already queued"
+	if float(p["population"]) + EPS < float(building_population(resource, int(p.get("buildings", {}).get(resource, 0)) + 1)):
+		return "Insufficient local population"
+	return ""
 
 static func warehouse_available(p: Dictionary) -> bool:
 	var level: int = int(p.get("warehouse_level", 0))

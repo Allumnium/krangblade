@@ -16,13 +16,13 @@ var diagnostic_last_bytes: int = -1
 var diagnostic_last_full_count: int = 0
 var diagnostic_last_motion_count: int = 0
 
-func build_perf(owner: Control, parent: Container, make_button: Callable, make_label: Callable) -> void:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 2)
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	parent.add_child(row)
-	diagnostic_button = make_button.call("Perf", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, row)
-	diagnostic_button.custom_minimum_size.y = 23
+func build_perf(owner: Control, parent: Container, make_button: Callable, make_label: Callable, make_icon: Callable, strip_width: float) -> void:
+	diagnostic_button = make_button.call("", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, parent)
+	diagnostic_button.icon = make_icon.call('<path d="M3 25H29M5 23V16H10V23M13 23V8H18V23M21 23V12H26V23"/>', 32)
+	diagnostic_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	diagnostic_button.expand_icon = true
+	diagnostic_button.add_theme_constant_override("icon_max_width", 24)
+	diagnostic_button.custom_minimum_size = Vector2.ONE * strip_width
 	diagnostic_button.focus_mode = Control.FOCUS_NONE
 	diagnostic_button.tooltip_text = "Toggle local performance diagnostics"
 	diagnostic_label = make_label.call("", 11)

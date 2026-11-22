@@ -4950,7 +4950,7 @@ func _test_building_population_requirements() -> void:
 		for level in [1, 2, 3, 10]:
 			p["buildings"][resource] = level - 1
 			var required: int = ECON.building_population(resource, level)
-			assert(required == level * 500)
+			assert(required == level * 5000)
 			p["population"] = float(required) - 1.0
 			assert(not ECON.building_available(p, resource))
 			assert(not ECON.enqueue(state, 1, 0, "economy", resource))
