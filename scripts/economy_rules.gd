@@ -8,6 +8,8 @@ static var cached_military_source: Dictionary = {}
 # Ephemeral authoritative snapshot, active only during a movement substep.
 static var avoidance_cells: Dictionary = {}
 static var _movement_fields: Array = []
+static var _movement_field_source: Array = []
+static var _movement_field_counts: Array[int] = []
 const AVOIDANCE_LOOKAHEAD: float = 96.0
 const AVOIDANCE_CELL: float = 128.0
 const AVOIDANCE_BUCKET_LIMIT: int = 24
@@ -2227,11 +2229,36 @@ static func _avoidance_direction(ship: Dictionary, target: Vector2, budget: floa
 
 # The only movement integrator. Orders change targets, never current position.
 # Return the distance actually flown so a tick cannot exceed its travel budget.
-# Route around conservative field disks using short exterior arc chords.
+# Navigation is tighter than the generated placement envelope. Rocks do not
+# move or spawn during a match; only their count changes as mining depletes them.
+static func _refresh_movement_fields(fields: Array) -> void:
+	if not is_same(fields, _movement_field_source) or _movement_fields.size() != fields.size():
+		_movement_field_source = fields
+		_movement_fields = []
+		_movement_fields.resize(fields.size())
+		_movement_field_counts = []
+		_movement_field_counts.resize(fields.size())
+		_movement_field_counts.fill(-1)
+	for i in range(fields.size()):
+		var field: Dictionary = fields[i]
+		var chunks: Array = field.get("chunks", [])
+		if _movement_field_counts[i] == chunks.size():
+			continue
+		_movement_field_counts[i] = chunks.size()
+		var center: Vector2 = field["position"]
+		var radius: float = float(field["radius"]) if bool(field.get("antimatter", false)) else 0.0
+		if not bool(field.get("antimatter", false)):
+			for rock in chunks:
+				radius = maxf(radius, center.distance_to(rock["position"]) + float(rock.get("radius", 0.0)))
+		_movement_fields[i] = {"position": center, "radius": radius}
+
+# Route around tight field disks using short exterior arc chords.
 static func _field_detour(before: Vector2, target: Vector2, budget: float) -> Vector2:
 	var nearest: float = INF
 	var obstacle: Dictionary = {}
 	for field in _movement_fields:
+		if float(field["radius"]) <= EPS:
+			continue
 		var center: Vector2 = field["position"]
 		var radius: float = float(field["radius"]) + 8.0
 		if Geometry2D.get_closest_point_to_segment(center, before, target).distance_to(center) >= radius:
@@ -2433,16 +2460,59 @@ static func _resource_haul(ship: Dictionary) -> void:
 		ship.erase("salvage_depot")
 		ship.erase("next_salvage_search")
 
-static func _stage_wait_point(state: Dictionary, graph: Dictionary, ship: Dictionary, rock: Vector2, node: int, anchor: int, threats: Dictionary) -> Vector2:
-	var entry: Vector2 = _service_point(state, ship, anchor)
-	var toward: Vector2 = rock.direction_to(entry)
+# Returning workers retain their previous field only while close enough to
+# assist; do not chase them across the map or reserve inactive mining sites.
+static func _stage_worker_field(miner: Dictionary, owner: int) -> int:
+	if int(miner["owner"]) != owner or miner.get("kind", "") != "miner" or bool(miner.get("holding", false)) or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("repair_order") or miner.has("repair_target"):
+		return -1
+	var mode: String = str(miner.get("mining_mode", ""))
+	if mode in ["approach", "outbound", "mining", "return"]:
+		return int(miner.get("field", -1))
+	if mode == "delivery" and _cargo_total(miner) > EPS:
+		var field_index: int = int(miner.get("last_mining_field", -1))
+		if field_index >= 0 and field_index < _movement_fields.size():
+			var field: Dictionary = _movement_fields[field_index]
+			if (miner["position"] as Vector2).distance_to(field["position"]) <= float(field["radius"]) + RESOURCE_HANDOFF_RANGE * 2.0:
+				return field_index
+	return -1
+
+static func _stage_wait_point(state: Dictionary, graph: Dictionary, ship: Dictionary, miner: Dictionary, node: int, anchor: int, teams: Array[int], cache: Dictionary, threats: Dictionary) -> Vector2:
+	var field_index: int = node - state["planets"].size()
+	var field: Dictionary = _movement_fields[field_index]
+	var rock: Vector2 = miner.get("mining_target", miner["position"])
+	if miner.get("mining_mode", "") == "delivery":
+		rock = miner["position"]
+	var depot: int = int(miner.get("dest", -1)) if miner.get("mining_mode", "") == "delivery" else -1
+	if depot < 0:
+		var chunk: Dictionary = _find_chunk(state["map"]["fields"][field_index], int(miner.get("chunk", -1)))
+		var resource: String = str(chunk.get("resource", "Metals"))
+		for carried in RESOURCES + [ANTIMATTER]:
+			if float(miner["cargo"].get(carried, 0.0)) > EPS:
+				resource = carried
+				break
+		depot = _mining_depot(state, miner, teams, _combat_group(state, int(ship["owner"])), anchor, resource, cache, rock)
+	if depot < 0:
+		return Vector2.INF
+	var toward: Vector2 = rock.direction_to(station_position(state, depot, float(state["elapsed"])))
 	if toward.is_zero_approx():
 		toward = Vector2.RIGHT
-	# Leave breathing room for contact pushes and small miner movements.
-	var offset: Vector2 = _waiting_berth(state, ship, rock, RESOURCE_HANDOFF_RANGE, toward)
-	if _salvage_safe(state, graph, int(ship["owner"]), offset, local_sector(graph, ship) if node < 0 else node, threats):
+	var offset: Vector2 = rock + toward * RESOURCE_HANDOFF_RANGE * 0.65
+	var center: Vector2 = field["position"]
+	var radius: float = float(field["radius"]) + 40.0
+	if float(field["radius"]) > EPS and offset.distance_to(center) < radius:
+		# Intersect the worker's real return ray with the outside of the
+		# navigation disk, rather than asking a Freighter to enter it.
+		var relative: Vector2 = rock - center
+		var projection: float = relative.dot(toward)
+		var discriminant: float = projection * projection + radius * radius - relative.length_squared()
+		var exit: float = -projection + sqrt(maxf(0.0, discriminant))
+		offset = rock + toward * maxf(exit, RESOURCE_HANDOFF_RANGE * 0.65)
+	for obstacle in _movement_fields:
+		if float(obstacle["radius"]) > EPS and offset.distance_to(obstacle["position"]) < float(obstacle["radius"]) + 10.0:
+			return Vector2.INF
+	if _salvage_safe(state, graph, int(ship["owner"]), offset, node, threats):
 		return offset
-	return rock
+	return Vector2.INF
 
 static func _stage_candidate(state: Dictionary, graph: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, threats: Dictionary, node: int, anchor: int, point: Vector2, resources: Array, demand: float) -> Dictionary:
 	var owner: int = int(ship["owner"])
@@ -2467,6 +2537,7 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 	var best: Dictionary = {}
 	var best_score: float = INF
 	var fields: Array = state["map"].get("fields", [])
+	_refresh_movement_fields(fields)
 	var count: int = state["planets"].size()
 	var workers: Dictionary = {}
 	var occupied: Dictionary = {}
@@ -2476,38 +2547,42 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 		if other.has("resource_stage"):
 			var assigned: int = int(other["resource_stage"]["node"])
 			occupied[assigned] = int(occupied.get(assigned, 0)) + 1
-		if other.get("kind", "") == "miner" and int(other.get("field", -1)) >= 0 and other.get("mining_mode", "") in ["approach", "outbound", "mining", "return"] and not bool(other.get("holding", false)):
-			var field_index: int = int(other["field"])
+		var field_index: int = _stage_worker_field(other, owner)
+		if field_index >= 0:
 			if not workers.has(field_index):
 				workers[field_index] = []
 			workers[field_index].append(other)
 	for i in range(fields.size()):
 		if not discovered(state, owner, "fields", i):
 			continue
+		var active: Array = workers.get(i, [])
+		if active.is_empty():
+			continue
 		var field: Dictionary = fields[i]
 		var resources: Array[String] = []
-		var inventory: Dictionary = field_inventory(field)
 		for resource in _mining_resources(state, owner, i):
-			if float(inventory.get(resource, 0.0)) > EPS:
-				resources.append(resource)
+			resources.append(resource)
+		for miner in active:
+			for resource in RESOURCES + [ANTIMATTER]:
+				if float(miner["cargo"].get(resource, 0.0)) > EPS and not resources.has(resource):
+					resources.append(resource)
 		if resources.is_empty():
 			continue
-		var point: Vector2 = field["position"]
-		var active: Array = workers.get(i, [])
-		if not active.is_empty():
-			# Rendezvous at the actual mining position, not the anchor star.
-			var nearest: float = INF
-			for miner in active:
-				var target: Vector2 = miner.get("mining_target", point)
-				var distance: float = (ship["position"] as Vector2).distance_squared_to(target)
-				if distance < nearest:
-					nearest = distance
-					point = target
-		var demand: float = 1.0 + float(active.size()) * 2.0
-		demand /= 1.0 + float(occupied.get(count + i, 0)) * 4.0
+		var demand: float = (1.0 + float(active.size()) * 2.0) / (1.0 + float(occupied.get(count + i, 0)) * 4.0)
+		var nearest: float = INF
+		var point: Vector2 = Vector2.INF
+		for miner in active:
+			var wait_point: Vector2 = _stage_wait_point(state, graph, ship, miner, count + i, int(miner.get("mining_anchor", field["anchor"])), teams, cache, threats)
+			if not wait_point.is_finite():
+				continue
+			var distance: float = (ship["position"] as Vector2).distance_squared_to(wait_point)
+			if distance < nearest:
+				nearest = distance
+				point = wait_point
+		if not point.is_finite():
+			continue
 		for anchor in field_access_systems(state["map"], field):
-			var wait_point: Vector2 = _stage_wait_point(state, graph, ship, point, count + i, anchor, threats)
-			var candidate: Dictionary = _stage_candidate(state, graph, ship, teams, cache, threats, count + i, anchor, wait_point, resources, demand)
+			var candidate: Dictionary = _stage_candidate(state, graph, ship, teams, cache, threats, count + i, anchor, point, resources, demand)
 			if not candidate.is_empty() and float(candidate["score"]) < best_score:
 				best = candidate
 				best_score = float(candidate["score"])
@@ -2595,25 +2670,21 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 			var field_index: int = node - state["planets"].size()
 			var fields: Array = state["map"].get("fields", [])
 			if field_index >= 0 and field_index < fields.size():
-				var inventory: Dictionary = field_inventory(fields[field_index])
-				for resource in _mining_resources(state, owner, field_index):
-					if float(inventory.get(resource, 0.0)) > EPS:
-						available = true
-						break
-				# Follow local miners as they change rocks; keep a reachable
-				# point and let the same physical handoff range do the work.
 				var nearest: float = INF
 				for miner in state["ships"]:
-					if int(miner["owner"]) != owner or miner.get("kind", "") != "miner" or int(miner.get("field", -1)) != field_index or miner.get("mining_mode", "") not in ["outbound", "mining"] or bool(miner.get("holding", false)):
+					if _stage_worker_field(miner, owner) != field_index:
 						continue
-					var target: Vector2 = miner.get("mining_target", point)
-					var wait_point: Vector2 = _stage_wait_point(state, graph, ship, target, node, int(stage["anchor"]), threats)
+					var wait_point: Vector2 = _stage_wait_point(state, graph, ship, miner, node, int(stage["anchor"]), teams, cache, threats)
+					if not wait_point.is_finite():
+						continue
 					var distance: float = (ship["position"] as Vector2).distance_squared_to(wait_point)
-					if distance < nearest and _salvage_safe(state, graph, owner, wait_point, node, threats):
+					if distance < nearest:
 						nearest = distance
 						point = wait_point
-				stage["point"] = point
-				ship["navigation_target"] = point
+				available = nearest < INF
+				if available:
+					stage["point"] = point
+					ship["navigation_target"] = point
 		if not available:
 			if _cargo_total(ship) > EPS:
 				_resource_haul(ship)
@@ -2963,6 +3034,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 					best_chunk = chunk
 					best_anchor = anchor
 	if chosen >= 0:
+		ship.erase("last_mining_field")
 		ship["field"] = chosen
 		ship["mining_anchor"] = best_anchor
 		ship["chunk"] = int(best_chunk["id"])
@@ -3100,6 +3172,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 		return
 	if mode == "return":
 		# Return directly to a useful owned warehouse from the actual rock.
+		ship["last_mining_field"] = field_index
 		ship["mining_mode"] = "delivery"
 		ship["field"] = -1
 		ship["route"] = []
@@ -8386,7 +8459,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 	return next
 
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
-	_movement_fields = state["map"].get("fields", [])
+	_refresh_movement_fields(state["map"].get("fields", []))
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	_accrue_resident_taxes(state, dt)
 	_pay_fleet_upkeep(state, dt)
