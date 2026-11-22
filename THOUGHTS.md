@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.91.0: Stage 1 free-space navigation: exact position/formation, patrol, guard, follow and manual service travel use straight-line steering to bounded coordinates, regardless of discovery at the destination or territory influence. Known POIs are bookkeeping anchors only. Preserve target discovery/ownership checks, arrival, docking and queue semantics. Legacy POI routing, autonomous logistics, tactical sector restrictions and map graph remain pending migration. Runtime and ENet validation pending.
+
 - v0.90.2: Hide sector and highway borders, minimap grid/lanes and setup preview links; show localized soft player-color presence around visible infrastructure and fleets, shared with minimap. Asteroid boundaries only when selected; sector order outlines become target reticles. Keep existing hidden navigation, influence and tactical warning rules until free-space movement is migrated explicitly. Validate fog/cloak, scale, overlap, large-fleet performance, solo and ENet; visual/runtime validation pending.
 
 - v0.90.1: Extract deterministic body generation, orbital position and system radius queries into system_geometry.gd; preserve EconomyRules facade, RNG order and canonical constants. Runtime/peer validation pending. Codex rules unchanged.
