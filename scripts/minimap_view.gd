@@ -5,6 +5,7 @@ const ECONOMY = preload("res://scripts/economy_rules.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
 const TERRITORY_VIEW = preload("res://scripts/territory_view.gd")
 const FOG_OF_WAR = preload("res://scripts/fog_of_war.gd")
+const CELESTIAL = preload("res://scripts/celestial_view.gd")
 const SHIP_MOTION_VIEW = preload("res://scripts/ship_motion_view.gd")
 
 var minimap: Control
@@ -153,9 +154,8 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 			if not system.is_empty():
 				tint = empire_color.call(owner) if owner > 0 else Color("#a3b0bb")
 			minimap.draw_circle(locations[i], 2.4 if owner > 0 and known[i] else 1.8, tint)
-		elif known[i]:
-			var special: bool = bool(state["map"]["fields"][i - count].get("antimatter", false))
-			tint = HUD.COLORS[ECONOMY.ANTIMATTER] if special else Color("#b8a87a")
+		elif known[i] and bool(state["map"]["fields"][i - count].get("antimatter", false)):
+			tint = HUD.COLORS[ECONOMY.ANTIMATTER]
 			minimap.draw_rect(Rect2(locations[i] - Vector2.ONE * 1.8, Vector2.ONE * 3.6), tint, false, 1.0)
 		if (i < count and i == selected and selected_units.is_empty() and selected_field < 0) or (i >= count and i - count == selected_field):
 			minimap.draw_arc(locations[i], 4.5, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
@@ -169,6 +169,19 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 		var corner: Vector2 = _minimap_point(Vector2.ZERO, area)
 		var far: Vector2 = _minimap_point(map_size.call(), area)
 		minimap.draw_texture_rect_region(fog_state.texture, Rect2(corner, far - corner), Rect2(Vector2.ZERO, map_size.call() / ECONOMY.VISION_CELL))
+	# Terrain is public geography even where the fog mask is opaque.
+	var terrain_scale: float = area.size.x / maxf(1.0, float(map_size.call().x))
+	for index in range(state["map"].get("fields", []).size()):
+		var field: Dictionary = state["map"]["fields"][index]
+		if bool(field.get("antimatter", false)):
+			continue
+		var memory: Dictionary = fog_state.field_view(state, index, map_size.call())
+		if not memory.is_empty() and memory.get("chunks", []).is_empty():
+			continue
+		var tint := Color("#625950") if fog_visible.call(field["position"]) else Color("#443e39")
+		CELESTIAL.draw_terrain_footprint(minimap, field, area.position, terrain_scale, tint)
+		if index == selected_field:
+			minimap.draw_arc(locations[count + index], 4.5, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
 	# Mirror the main map's live hull visibility and interpolation; do not
 	# reveal undiscovered system ownership.
 	for ship in state["ships"]:

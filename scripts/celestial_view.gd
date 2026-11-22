@@ -40,6 +40,20 @@ func prepare_map(state: Dictionary) -> void:
 		asteroid_shape_cache.clear()
 		asteroid_cache_seed = seed_value
 
+# The placement radius is a broad-phase bound, NOT the shape of a belt.
+# Share the real immutable footprint across setup, the minimap and fog.
+static func draw_terrain_footprint(canvas: Control, field: Dictionary, offset: Vector2, scale: float, tint: Color) -> void:
+	var boundary := PackedVector2Array()
+	for vertex in field.get("outline", []):
+		boundary.append(offset + (vertex as Vector2) * scale)
+	if boundary.size() < 3:
+		return
+	if not Geometry2D.triangulate_polygon(boundary).is_empty():
+		canvas.draw_colored_polygon(boundary, tint)
+	else:
+		boundary.append(boundary[0])
+		canvas.draw_polyline(boundary, tint, 1.0, true)
+
 func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_point: Callable) -> void:
 	var rock_vertices := PackedVector3Array()
 	var rock_colors := PackedColorArray()
@@ -60,11 +74,13 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 		var cached: Dictionary = asteroid_shape_cache[shape_key]
 		for vertex in cached["vertices"]:
 			rock.append(rock_pos + vertex * rock_radius)
-		var tint: Color = HUD.COLORS[chunk["resource"]]
+		# The ore is embedded in stone, not a solid resource-colored rock.
+		var variation: float = 0.5 + 0.5 * sin(float(chunk["rotation"]) * 3.0)
+		var tint: Color = Color("#50545a").lerp(Color("#6b5e51"), variation)
 		for index in cached["triangles"]:
 			var p: Vector2 = rock[index]
 			rock_vertices.append(Vector3(p.x, p.y, 0.0))
-			rock_colors.append(tint.darkened(0.25))
+			rock_colors.append(tint)
 		# Batch thin edge quads, retaining the existing screen-space width.
 		for k in range(rock.size()):
 			var p: Vector2 = rock[k]
@@ -72,7 +88,18 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 			var normal: Vector2 = (q - p).normalized().orthogonal() * 0.4
 			for v in [p - normal, q - normal, q + normal, p - normal, q + normal, p + normal]:
 				rock_vertices.append(Vector3(v.x, v.y, 0.0))
-				rock_colors.append(tint)
+				rock_colors.append(tint.lightened(0.12))
+		if chunk["resource"] == "Crystals" and rock_radius >= 1.8:
+			# Subtle pink flecks inside the rock, grouped into the same mesh.
+			var spots: int = 1 if rock_radius < 4.0 else 3
+			for spot in range(spots):
+				var angle: float = float(chunk["rotation"]) + float(spot) * 2.399963
+				var spot_center: Vector2 = rock_pos + Vector2.from_angle(angle) * rock_radius * (0.12 + 0.10 * float(spot))
+				var spot_radius: float = rock_radius * (0.11 + 0.025 * float(spot % 2))
+				for k in range(3):
+					var vertex: Vector2 = spot_center + Vector2.from_angle(angle + TAU * float(k) / 3.0) * spot_radius
+					rock_vertices.append(Vector3(vertex.x, vertex.y, 0.0))
+					rock_colors.append(Color("#cf8eae"))
 	if not rock_vertices.is_empty():
 		var arrays: Array = []
 		arrays.resize(Mesh.ARRAY_MAX)
