@@ -9,16 +9,16 @@ func register(button: Button, key: int, scope: String, id: String, title_text: S
 	var label := Label.new()
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	label.add_theme_font_size_override("font_size", 9)
+	label.add_theme_font_size_override("font_size", 13)
 	label.add_theme_color_override("font_color", Color("#e3f3ff"))
 	label.add_theme_color_override("font_outline_color", Color("#101b29"))
 	label.add_theme_constant_override("outline_size", 3)
 	button.add_child(label)
 	label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	label.offset_left = -24.0
+	label.offset_left = -34.0
 	label.offset_right = -2.0
 	label.offset_top = 0.0
-	label.offset_bottom = 12.0
+	label.offset_bottom = 18.0
 	entries[id] = {"scope": scope, "title": title_text, "default": key, "button": button, "badge": label}
 
 func value(id: String, candidate: Dictionary) -> int:

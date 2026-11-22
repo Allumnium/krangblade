@@ -1237,9 +1237,9 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		command_card_ui.set_level_badge(button, 1 if installed else 0)
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not _any_selected_station_buildable(kind, p)
-		var hint: String = "Reinforced Plating I · %.0f s (1×)\n+1,500 station HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s (1×)\n+2 defensive lasers (4 total)"
+		var hint: String = "Reinforced Plating I · %.0f s\n+1,500 station HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s\n+2 defensive lasers (4 total)"
 		if kind == "dyson_sphere":
-			hint = "Dyson Sphere · %.0f s (1×)\nRequires Dyson Sphere technology\n−50%% local ship material and GC costs"
+			hint = "Dyson Sphere · %.0f s\nRequires Dyson Sphere technology\n−50%% local ship material and GC costs"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + ("Installed" if installed else "Building"))
@@ -1351,7 +1351,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		if button.has_meta("auto_border"):
 			(button.get_meta("auto_border") as Control).visible = auto
-		_set_cost_tooltip(button, name_text + (" · %.1f s (1×)" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
+		_set_cost_tooltip(button, name_text + (" · %.1f s" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
 		if not eligible:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nUnavailable")
 		elif not available and ECONOMY.construction_affordable(_state(), p, recipe):
@@ -1458,7 +1458,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = hull_art.production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard), kind)
+		_set_cost_tooltip(button, "%s · %.1f s\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard), kind)
 		if not ECONOMY.yard_fits(system, selected_yard, kind):
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
 		if not operating:
@@ -1480,7 +1480,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		if level >= target_level:
 			_set_cost_tooltip(upgrade, ECONOMY.size_name(target_level) + " unlocked")
 		else:
-			var hint: String = "Upgrade to %s · %.0f s (1×)\nRequires %s resident population for this yard\nUnlocks %s ships · %.1f× build speed\n+%.0f HP · Fully repairs yard" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[selected_yard]), ECONOMY.size_name(target_level), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP]
+			var hint: String = "Upgrade to %s · %.0f s\nRequires %s resident population for this yard\nUnlocks %s ships · %.1f× build speed\n+%.0f HP · Fully repairs yard" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[selected_yard]), ECONOMY.size_name(target_level), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP]
 			if not eligible:
 				hint += "\nRequires " + ECONOMY.size_name(target_level - 1) + " shipyard"
 			_set_cost_tooltip(upgrade, hint, ECONOMY._cost("yard_upgrade", target_level), 0.0, _available_cost_resources(system, selected_yard))
@@ -1936,7 +1936,7 @@ func _refresh_autocast_cards() -> void:
 		var shortcut: String = str(button.get_meta("hotkey", ""))
 		command_card_ui.set_hint(button, "%s · %s\nToggle [%s]" % [title_text, status, shortcut])
 		if duration > 0.0:
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nCooldown: %.1f s at 1×" % duration)
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nCooldown: %.1f s" % duration)
 		if mode in ["mine", "salvage", "repair", "trade", "wander", "explore"]:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + UI_COMMAND_DETAILS.get(id, ""))
 		if mode == "collect":
@@ -1944,7 +1944,7 @@ func _refresh_autocast_cards() -> void:
 		elif mode == "retreat":
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRetreat at %.0f%% HP; resume after repair." % (100.0 * ECONOMY.WITHDRAW_HP / ECONOMY.SHIP_HP))
 		elif mode == "farm":
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nProduces %.0f t/s at 1×; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nProduces %.0f t/s; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
 
 func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""
@@ -4273,10 +4273,9 @@ func _build_global_selection_strip() -> void:
 	hotkeys.register(empire_button, KEY_F4, "General", "empire", "Empire")
 	empire_ui.build(self, session, _me, _empire_color, hull_art.selection_portrait_icon, _label)
 	for button in global_selection_strip.get_children():
-		button.custom_minimum_size = Vector2(44, 26)
+		button.custom_minimum_size = Vector2(52, 40)
 		var caption: Label = button.get_meta("caption")
-		caption.add_theme_font_size_override("font_size", 9)
-		caption.hide()
+		caption.add_theme_font_size_override("font_size", 10)
 	global_selection_strip.resized.connect(_layout_control_group_strip)
 	_layout_control_group_strip()
 

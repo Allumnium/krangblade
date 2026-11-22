@@ -46,13 +46,13 @@ static func ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
-		"colony_ship": details = "Settles a neutral system · %.0f settlers\nFarm %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
+		"colony_ship": details = "Settles a neutral system · %.0f settlers\nFarm %.0f t/s · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
 		"scout": details = "Fast reconnaissance · " + blaster_summary(kind)
 		"cruiser", "destroyer": details = capital_weapon_summary(kind)
 		"fighter": details = blaster_summary(kind)
-		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
-		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
-	return "%s\nHP %.0f · Speed %.0f/s (1×) · %s\nUpkeep: %.0f GC/yr" % [details, ECONOMY.ship_max_hp(kind), ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_upkeep(kind)]
+		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
+		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection" % ECONOMY.SCIENCE_COLLECTION_YEARS
+	return "%s\nHP %.0f · Speed %.0f/s · %s\nUpkeep: %.0f GC/yr" % [details, ECONOMY.ship_max_hp(kind), ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_upkeep(kind)]
 
 static func system_bonus_text(p: Dictionary) -> String:
 	var lines: PackedStringArray = []
