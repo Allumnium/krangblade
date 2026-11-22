@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.90.0: Continuous bounded Voronoi influence map: stable system/field/highway-midpoint sites, cached polygons and shared borders, actual polygon adjacency spillover, matching minimap. Keep existing local tactical disks and highway graph separate; manual shortcuts require full-strength exclusively friendly/allied influence over the whole segment. No new replication fields. Validate map coverage, visuals/fog, boundary ties, route fallback on influence loss, combat/AI, solo/ENet and fleet performance.
+
 - v0.89.67: Replace inline numeric GC net income with centered white chevrons beneath balance, without storage fill. Share the resource chevron drawing and tiers; scale recurring net income to current treasury with STARTING_GC as the minimum reference (not a cap). Retain hover rates and unpaid wage warning. Visual/runtime validation pending.
 
 - v0.89.64: Right-align objective and lifetime CP headings with collapse controls on their left. Move combined personal notices, tactical warnings and all-chat above minimap, newest at bottom, ten-second fade when closed. Enter opens a translucent scrollable local history (250 messages); Enter sends chat, Esc closes, slash commands stay local. Debug-only /devmode, /help, /status, /speed and /clear share the panel; speed remains host/solo-only. Preserve clickable warning locations, no new RPC. Verify scrolling/focus, resize, fading/history dedup, alert navigation, debug/release and ENet.

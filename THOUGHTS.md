@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.90.0: Continuous bounded Voronoi influence map: stable system/field/highway-midpoint sites, cached polygons and shared borders, actual polygon adjacency spillover, matching minimap. Keep existing local tactical disks, point-order targeting and highway graph separate for this stage; broader selection/local combat/automated logistics migration pending; manual shortcuts require full-strength exclusively friendly/allied influence over the whole segment. No new replication fields. Validate map coverage, visuals/fog, boundary ties, route fallback on influence loss, combat/AI, solo/ENet and fleet performance. Runtime and visual checks pending.
+
 - v0.89.67: Replace inline numeric GC net income with centered white chevrons beneath balance, without storage fill. Share the resource chevron drawing and tiers; scale recurring net income to current treasury with STARTING_GC as the minimum reference (not a cap). Retain hover rates and unpaid wage warning. Visual/runtime validation pending.
 
 - v0.89.66: Extract chat widgets, notice history/dedup, fade drawing, hit rectangles and scroll lifecycle into match_notice_ui.gd. Match retains keyboard/modal gating, camera jump, authority chat dispatch and tactical tracker. Preserve existing layout, cap, timings, color and command behavior. Codex unchanged; runtime/peer validation pending.
