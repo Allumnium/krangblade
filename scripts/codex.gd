@@ -414,7 +414,7 @@ func _infrastructure() -> void:
 	_table(["Building", "Cost", "Output bonus"], rows)
 	_body("Production buildings require %d residents per target level. Planetary mineral production has no fixed rate cap; deposits, population and storage still matter. Farms scale with food capacity and labor." % E.building_population("Metals", 1))
 	_section("Shipyard modules")
-	_body("Select Shipyards (Z) selects all completed yards at this station. Build → Build Shipyard (X) adds a yard at the next free port.")
+	_body("Station bottom row: Select Shipyards (Z), Build (B), Trade (T). Select Shipyards selects all completed local yards. Build → Build Shipyard (X) adds a yard at the next free port.")
 	rows = []
 	for i in range(1, E.MAX_SHIPYARDS + 1):
 		rows.append(["Module %d" % i, _recipe(E._cost("yard", i))])

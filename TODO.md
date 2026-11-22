@@ -75,7 +75,7 @@ User requested AI-friendly structure and fewer duplicate definitions. v0.89.4 do
 
 - [ ] v0.83.0: Validate conquest elimination only after all owned stations and ships are gone; preserve surviving fleets, AI and commands, including stationless last hulls. Regression fixture covers fighter/miner survival and last-hull defeat. Verify tilde dev console in editor/debug builds; absent in release, `/devmode` reveals speed controls only inside console, host-only simulation commands (including direct guest RPC rejection), no chat/hotkey conflict or duplicate audio bindings. v0.89.22 fixes lazy-dialog nil access and repeated signal connections; runtime pending. Add scenario trigger once Revelation framework exists. Runtime and peer validation pending.
 
-- [ ] v0.82.2: Verify station Build/Trade stay in the bottom row before and after Dyson unlock.
+- [ ] v0.82.2 / v0.89.34: Verify station bottom row remains Select Shipyards (Z), Build (B), Trade (T), empty before and after Dyson unlock; check single/grouped station selection, disabled Select Shipyards and unchanged hotkeys/Return slots.
 
 - [ ] v0.82.0: Validate mutually exclusive Scout Explore/Wander toggles (v0.82.1), route choice, manual interruption, multiple scouts, cooldown and peer ownership; doubled crew allocation, colony affordability and founding populations, AI pacing. Runtime pending.
 

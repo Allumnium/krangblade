@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.34: Station primary 4×4 command card bottom row is Select Shipyards (Z), Build (B), Trade (T), empty. Keep second-row upgrades and reserved Dyson slot unchanged; submenu Return remains bottom right.
+
 - v0.89.23: A tiny +/− button at the right of the Total Conquest Points header collapses all table rows and column labels while leaving the title visible. Expanded by default, client-local per match; totals and objective controls unchanged.
 
 - v0.89.22: Simulation speed is developer-only. Debug builds expose it in the tilde console after `/devmode`, host/solo authority only; normal HUD and Codex omit speed controls. Perf remains available independently. Guard lazy dialogs and duplicate button-audio signal connections.
