@@ -4,6 +4,8 @@ Living roadmap. Build a playable, low-micro galactic RTS with conventional direc
 
 Review AGENTS.md before work. This is a prioritized backlog, not blanket approval to invent mechanics. Numerical balance remains provisional. Earlier implementation history and the superseded policy roadmap are preserved in git (v0.17.36 and earlier).
 
+- [ ] v0.89.42: Verify rearranged HUD, control group strip alignment, persistent empty center/right panels and input blocking at varied resolutions.
+
 ## Agreed design direction — hidden global Revelations
 
 - [ ] Dynamic diplomacy: replace fixed team membership with independent bilateral relationships between empires. Allow overlapping, non-transitive mutual alliances, neutrality and multi-sided wars. Empires without an alliance or war start neutral, not hostile. Explicit war declaration or confirmed deliberate attack initiates war. Before an explicit attack on a neutral ship or station, show a declaration confirmation identifying the targeted empire; confirmation initiates war and issues the attack, cancellation leaves neutrality and discards the order. Ordinary movement, patrol and autonomous weapons never initiate war; area attack-move does not implicitly declare war. Reject attacks and declarations during an active truce. Either side may offer peace, requiring mutual agreement. Enforce a 100 simulation-year bilateral no-combat truce. Put diplomacy in Empire. Define war acts, queued orders, alliance formation/breaking, whether allies must join wars, lobby migration and victory semantics before implementation; validate ownership and treaty state at authority, including AI and real peers. Do not equate alliances with exclusive team IDs or assume friendship/hostility propagates along alliance chains.
