@@ -380,7 +380,6 @@ func _build_match_header() -> void:
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_theme_constant_override("separation", 4)
 	header_panel.add_child(row)
-	resource_hud.build(row, _label, _population_row, _state, _me, _system_name)
 	var header_spacer := Control.new()
 	header_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -394,6 +393,10 @@ func _build_match_header() -> void:
 	help.tooltip_text = "Warbound Codex"
 	help.focus_mode = Control.FOCUS_NONE
 	leave = _button("MENU", _open_menu, row)
+	row.move_child(leave, 0)
+	row.move_child(help, 1)
+	resource_hud.build(row, _label, _population_row, _state, _me, _system_name)
+	row.move_child(resource_hud.year_label.get_parent(), 2)
 
 
 func _build_match_dialogs() -> void:
@@ -840,11 +843,7 @@ func _draw_console_profile() -> void:
 	var center_rect := Rect2(Vector2(center_left, center_top), Vector2(console_center.size.x, maxf(0.0, bounds.size.y - center_top)))
 	var right_top: float = inspector_panel.global_position.y - console_profile.global_position.y
 	var right_rect := Rect2(Vector2(right_left, right_top), Vector2(maxf(0.0, bounds.size.x - right_left), maxf(0.0, bounds.size.y - right_top)))
-	var rects: Array[Rect2] = [left_rect]
-	if overview_panel.visible:
-		rects.append(center_rect)
-	if console_right_body.visible:
-		rects.append(right_rect)
+	var rects: Array[Rect2] = [left_rect, center_rect, right_rect]
 	for rect in rects:
 		if rect.has_area():
 			console_profile.draw_rect(rect, fill)
@@ -2582,7 +2581,7 @@ func _refresh() -> void:
 			selected = -1
 			p = {}
 	inspector_panel.visible = true
-	overview_panel.visible = not p.is_empty() or other_selected
+	overview_panel.visible = true
 	empty_selection.visible = false
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	planet_overview.visible = not p.is_empty() and not other_selected and not body_selected and not yard_selected and selected_buildings.size() <= 1
@@ -2596,8 +2595,8 @@ func _refresh() -> void:
 	var owned_station: bool = not other_selected and not body_selected and not yard_selected and own_system and ECONOMY.has_station(p)
 	var right_needed: bool = field_selected or (ship_selected and state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())) or (yard_selected and not _selected_yards(state, true).is_empty()) or owned_station or (not other_selected and not yard_selected and not body_selected and not grouped_buildings and not p.is_empty() and int(p["owner"]) == 0)
 	console_right_body.visible = right_needed
-	inspector_panel.self_modulate.a = 1.0 if right_needed else 0.0
-	inspector_panel.mouse_filter = Control.MOUSE_FILTER_STOP if right_needed else Control.MOUSE_FILTER_IGNORE
+	inspector_panel.self_modulate.a = 1.0
+	inspector_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	console_profile.queue_redraw()
 	station_commands.visible = owned_station
 	var station_index: int = selected if owned_station else -1
@@ -3195,7 +3194,9 @@ func _build_control_group_strip() -> void:
 	add_child(control_group_strip)
 	control_group_strip.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	control_group_strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	header_panel.resized.connect(_layout_control_group_strip)
+	console_center.resized.connect(_layout_control_group_strip)
+	console_center_spacer.resized.connect(_layout_control_group_strip)
+	console_center_spacer.item_rect_changed.connect(_layout_control_group_strip)
 	for number in [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]:
 		var button := _button(str(number), _recall_control_group.bind(number), control_group_strip)
 		button.focus_mode = Control.FOCUS_NONE
@@ -3213,8 +3214,10 @@ func _build_control_group_strip() -> void:
 func _layout_control_group_strip() -> void:
 	if not is_instance_valid(control_group_strip):
 		return
-	control_group_strip.position = Vector2(8.0, header_panel.position.y + header_panel.size.y + 3.0)
-	control_group_strip.size = Vector2(minf(540.0, maxf(220.0, size.x - 16.0)), 26.0)
+	var center_width: float = console_center.size.x
+	var strip_width: float = minf(540.0, center_width)
+	control_group_strip.size = Vector2(strip_width, 26.0)
+	control_group_strip.global_position = console_center_spacer.global_position + Vector2((center_width - strip_width) * 0.5, console_center_spacer.size.y + console_center.get_theme_constant("separation") - control_group_strip.size.y - 3.0)
 
 func _control_ref_valid(state: Dictionary, ref: Vector2i, kind: String, expected_count: int) -> bool:
 	var planets: Array = state.get("planets", [])
@@ -3432,8 +3435,6 @@ func _in_visible_playfield(point: Vector2) -> bool:
 	if is_instance_valid(control_group_strip) and control_group_strip.get_global_rect().has_point(global_point):
 		return false
 	for panel in [minimap, lens_column, overview_panel, inspector_panel]:
-		if panel == inspector_panel and not console_right_body.visible:
-			continue
 		if panel.visible and panel.get_global_rect().has_point(global_point):
 			return false
 	return Rect2(Vector2.ZERO, map_canvas.size).has_point(point)

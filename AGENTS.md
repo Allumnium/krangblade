@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.42: Menu and Codex at top left, year immediately after Codex, resource/credit/population tiles at top right. Control groups centered immediately above the middle selection panel. Center and right command panel backgrounds remain visible and block map input even when selection/actions are absent; contextual content remains conditional.
+
 - v0.89.41: Default Total Conquest Points to collapsed; place both compact +/− toggles directly after header text. Underline OBJECTIVES; keep it expanded by default and collapse independently, hiding category actions and moving scoreboard up. Client-local only.
 
 - v0.89.34: Station primary 4×4 command card bottom row is Select Shipyards (Z), Build (B), Trade (T), empty. Keep second-row upgrades and reserved Dyson slot unchanged; submenu Return remains bottom right.

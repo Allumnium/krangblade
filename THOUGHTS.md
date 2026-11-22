@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.42: Menu and Codex at top left, year immediately after Codex, resource/credit/population tiles at top right. Control groups centered immediately above the middle selection panel. Center and right command panel backgrounds remain visible and block map input even when selection/actions are absent; contextual content remains conditional. Visual, parser and runtime checks pending.
+
 - v0.89.41: Default Total Conquest Points to collapsed; place both compact +/− toggles directly after header text. Underline OBJECTIVES; keep it expanded by default and collapse independently, hiding category actions and moving scoreboard up. Client-local only. Visual and runtime checks pending.
 
 - v0.89.40 extracts planet production and upgrade-delivery cargo pod rendering plus shared read-only production source/rate queries into planet_traffic_view.gd; match retains system draw ordering and inspector presentation. Preserve resource colors, stock bay geometry, animation timing and inspector query behavior. Runtime/import/peer checks pending; no gameplay or Codex changes.
