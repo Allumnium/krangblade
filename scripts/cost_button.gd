@@ -55,8 +55,16 @@ static func fill_info(label: RichTextLabel, description: String, costs_by_resour
 			label.add_text("%.0f%s" % [float(costs_by_resource[resource]), "" if resource in ["GC", "Population"] else "t"])
 			label.pop()
 			count += 1
+	# Put blockers first so long ship stats cannot clip the actual reason.
+	for reason in unmet:
+		label.newline()
+		label.push_color(Color("#ff7777"))
+		label.add_text(reason)
+		label.pop()
 	for index in range(1, lines.size()):
 		var detail: String = lines[index]
+		if unmet.has(detail):
+			continue
 		label.newline()
 		if detail.begins_with("Yield: ") and not yield_resource.is_empty():
 			label.add_image(HUD.resource_icon(yield_resource, 24), 14, 14)

@@ -1258,7 +1258,11 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 			hint = "Dyson Sphere · %.0f s\nRequires Dyson Sphere technology\n−50%% local ship material and GC costs"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + ("Installed" if installed else "Building"))
+			command_card_ui.add_build_blocker(button, "Already installed" if installed else "Upgrade already queued")
+		if kind == "dyson_sphere" and not p.get("conquest_rewards", []).has(kind) and not installed:
+			command_card_ui.add_build_blocker(button, "Requires Dyson Sphere technology")
+		if button.disabled and not owned:
+			command_card_ui.add_build_blocker(button, "Requires an owned station")
 		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled and not installed else Color.WHITE
 
 func _station_repeat_key(p: Dictionary, key: String) -> String:
@@ -1381,22 +1385,41 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		available = owned and available and ECONOMY.construction_affordable(_state(), p, recipe)
 		var grouped: bool = building_selection_kind == "station" and selected_buildings.size() > 1
 		var can_build: bool = owned and (_any_selected_station_buildable(key, p) if grouped else available and eligible)
+		var permanent_reason: String = UI_TEXT.permanent_station_blocker(p, key)
+		var impossible: bool = not indices.is_empty()
+		for index in indices:
+			impossible = impossible and not UI_TEXT.permanent_station_blocker(state["planets"][index], key).is_empty()
 		button.disabled = not owned or (not can_build and repeat_targets.is_empty())
-		command_card_ui.set_build_available(button, can_build)
-		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if can_build else Color(0.55, 0.55, 0.55)
+		command_card_ui.set_build_available(button, can_build, impossible)
+		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if can_build else (Color(0.78, 0.50, 0.50) if impossible else Color(0.55, 0.55, 0.55))
 		if button.has_meta("auto_border"):
 			(button.get_meta("auto_border") as Control).visible = auto
 		_set_cost_tooltip(button, name_text + (" · %.1f s" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
-		if key in ECONOMY.RESOURCES and float(p["population"]) + ECONOMY.EPS < float(ECONOMY.building_population(key, current_level + 1)):
-			(button as CostButton).unmet_requirements.append(description.get_slice("\n", 0))
-		elif key == "warehouse" and eligible and float(p["population"]) + ECONOMY.EPS < float(ECONOMY.WAREHOUSE_POPULATIONS[current_level]):
-			(button as CostButton).unmet_requirements.append(description.get_slice("\n", 0))
-		if not eligible:
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nUnavailable")
-		elif not can_build and key in ECONOMY.RESOURCES and not ECONOMY._has_job(p, "economy_building", key) and ECONOMY.construction_affordable(_state(), p, recipe):
-			var reason: String = ECONOMY.building_blocker(p, key)
-			if not reason.is_empty():
-				command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + reason)
+		if not permanent_reason.is_empty():
+			command_card_ui.add_build_blocker(button, permanent_reason)
+		elif key in ECONOMY.RESOURCES:
+			if float(p["population"]) + ECONOMY.EPS < float(ECONOMY.building_population(key, current_level + 1)):
+				command_card_ui.add_build_blocker(button, description.get_slice("\n", 0))
+			if ECONOMY._has_job(p, "economy_building", key):
+				command_card_ui.add_build_blocker(button, "Upgrade already queued")
+		elif key == "warehouse" or kind == "habitation":
+			if not eligible:
+				command_card_ui.add_build_blocker(button, "Maximum level reached")
+			elif ECONOMY._has_job(p, kind, ""):
+				command_card_ui.add_build_blocker(button, "Upgrade already queued")
+			if key == "warehouse" and eligible and float(p["population"]) + ECONOMY.EPS < float(ECONOMY.WAREHOUSE_POPULATIONS[current_level]):
+				command_card_ui.add_build_blocker(button, description.get_slice("\n", 0))
+		elif key == "pds":
+			if not eligible:
+				command_card_ui.add_build_blocker(button, "All planets already defended")
+			elif not ECONOMY.pds_job(p).is_empty():
+				command_card_ui.add_build_blocker(button, "PDS already queued")
+		elif key == "yard" and not eligible:
+			command_card_ui.add_build_blocker(button, description)
+		if grouped and not can_build:
+			command_card_ui.add_build_blocker(button, "No selected station can build this now")
+		if not owned:
+			command_card_ui.add_build_blocker(button, "Requires an owned station")
 		if not repeat_targets.is_empty():
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRight-click: %s repeat (%d station%s)" % ["Disable" if auto else "Enable", repeat_targets.size(), "" if repeat_targets.size() == 1 else "s"])
 
@@ -1505,11 +1528,13 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nInsufficient unreserved population")
 			(button as CostButton).unmet_requirements.append("Insufficient unreserved population")
 		if not ECONOMY.yard_fits(system, selected_yard, kind):
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
+			command_card_ui.add_build_blocker(button, "Requires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
 		if not operating:
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nShipyard offline")
+			command_card_ui.add_build_blocker(button, "Shipyard offline — requires %s residents" % UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[selected_yard]))
 		if ECONOMY.shipyard_queue_count(system, selected_yard) >= ECONOMY.SHIPYARD_QUEUE_LIMIT:
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nQueue full (8/8)")
+			command_card_ui.add_build_blocker(button, "Shipyard queue full (%d/%d)" % [ECONOMY.shipyard_queue_count(system, selected_yard), ECONOMY.SHIPYARD_QUEUE_LIMIT])
+		if not owned:
+			command_card_ui.add_build_blocker(button, "Requires an owned shipyard")
 		command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRight-click: %s autobuild" % ("Disable" if auto else "Enable"))
 	var rally: Dictionary = yard.get("rally", {})
 	var rally_button: Button = yard_commands["rally"]
@@ -1523,13 +1548,22 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		command_card_ui.set_build_available(upgrade, not upgrade.disabled)
 		if level >= target_level:
 			_set_cost_tooltip(upgrade, ECONOMY.size_name(target_level) + " unlocked")
+			command_card_ui.add_build_blocker(upgrade, "Already unlocked")
 		else:
 			var hint: String = "Upgrade to %s · %.0f s\nRequires %s resident population for this yard\nUnlocks %s ships · %.1f× build speed\n+%.0f HP · Fully repairs yard" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[selected_yard]), ECONOMY.size_name(target_level), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP]
 			if not eligible:
 				hint += "\nRequires " + ECONOMY.size_name(target_level - 1) + " shipyard"
 			_set_cost_tooltip(upgrade, hint, ECONOMY._cost("yard_upgrade", target_level), 0.0, _available_cost_resources(system, selected_yard))
 			if not operating:
-				(upgrade as CostButton).unmet_requirements.append(hint.get_slice("\n", 1))
+				command_card_ui.add_build_blocker(upgrade, hint.get_slice("\n", 1))
+			if not eligible:
+				command_card_ui.add_build_blocker(upgrade, "Requires " + ECONOMY.size_name(target_level - 1) + " shipyard")
+			if ECONOMY.shipyard_queue_count(system, selected_yard) >= ECONOMY.SHIPYARD_QUEUE_LIMIT:
+				command_card_ui.add_build_blocker(upgrade, "Shipyard queue full")
+			if ECONOMY._has_job(system, "yard_upgrade", str(selected_yard)):
+				command_card_ui.add_build_blocker(upgrade, "Upgrade already queued")
+			if not owned:
+				command_card_ui.add_build_blocker(upgrade, "Requires an owned shipyard")
 
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
@@ -3268,12 +3302,17 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var auto: bool = false
 		var population_met: bool = false
 		var crew_available: float = 0.0
+		var operating_fit: bool = false
+		var queue_space: bool = false
 		for ref in refs:
 			var system: Dictionary = state["planets"][ref.x]
 			eligible = eligible or _yard_build_available(system, ref.y, kind)
 			population_met = population_met or (ECONOMY.yard_fits(system, ref.y, kind) and ECONOMY.ship_origin_population_met(system, kind))
 			if ECONOMY.yard_fits(system, ref.y, kind):
 				crew_available = maxf(crew_available, ECONOMY.available_crew_population(system, ref.y, kind))
+				if ECONOMY.shipyard_operational(system, ref.y):
+					operating_fit = true
+					queue_space = queue_space or ECONOMY.shipyard_queue_count(system, ref.y) < ECONOMY.SHIPYARD_QUEUE_LIMIT
 			can_toggle = can_toggle or ECONOMY.yard_fits(system, ref.y, kind)
 			auto = auto or system["yards"][ref.y].get("autobuild", []).has(kind)
 		var button: Button = yard_commands[kind]
@@ -3289,6 +3328,17 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 			(button as CostButton).unmet_requirements.append("Insufficient unreserved population")
 		if kind == "colony_ship" and not refs.is_empty() and not population_met:
 			(button as CostButton).unmet_requirements.append(UI_TEXT.colony_population_requirement())
+		if not eligible:
+			if refs.is_empty():
+				command_card_ui.add_build_blocker(button, "Requires an owned shipyard")
+			elif not can_toggle:
+				command_card_ui.add_build_blocker(button, "Requires %s shipyard" % ECONOMY.size_name(ECONOMY.ship_size(kind)))
+			elif not operating_fit:
+				command_card_ui.add_build_blocker(button, "Matching shipyards offline — insufficient staffing")
+			elif not queue_space:
+				command_card_ui.add_build_blocker(button, "Matching shipyard queues full")
+			else:
+				command_card_ui.add_build_blocker(button, "No selected shipyard meets all requirements")
 	var can_clear: bool = false
 	var can_upgrade: Dictionary = {2: false, 3: false}
 	for ref in refs:
@@ -3302,6 +3352,21 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		upgrade.disabled = not can_upgrade[target_level]
 		command_card_ui.set_build_available(upgrade, not upgrade.disabled)
 		_set_cost_tooltip(upgrade, "Upgrade eligible %s shipyards to %s\nUnlocks next ship class · Faster construction\nFully repairs each yard" % [ECONOMY.size_name(target_level - 1), ECONOMY.size_name(target_level)], ECONOMY._cost("yard_upgrade", target_level), 0.0, available)
+		if upgrade.disabled:
+			var reasons: Array[String] = []
+			for ref in refs:
+				var system: Dictionary = state["planets"][ref.x]
+				if int(system["yards"][ref.y]["level"]) != target_level - 1:
+					continue
+				if not ECONOMY.shipyard_operational(system, ref.y) and not reasons.has("Insufficient shipyard staffing"):
+					reasons.append("Insufficient shipyard staffing")
+				if ECONOMY.shipyard_queue_count(system, ref.y) >= ECONOMY.SHIPYARD_QUEUE_LIMIT and not reasons.has("Shipyard queue full"):
+					reasons.append("Shipyard queue full")
+				if ECONOMY._has_job(system, "yard_upgrade", str(ref.y)) and not reasons.has("Upgrade already queued"):
+					reasons.append("Upgrade already queued")
+			for reason in reasons:
+				command_card_ui.add_build_blocker(upgrade, reason)
+			command_card_ui.add_build_blocker(upgrade, "No selected shipyard meets all requirements")
 	yard_commands["rally"].disabled = refs.is_empty()
 	yard_commands["clear"].disabled = not can_clear
 

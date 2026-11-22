@@ -7,6 +7,7 @@ const CostButton = preload("res://scripts/cost_button.gd")
 # Per-match texture cache, keyed by command and requested pixel size.
 var _icons: Dictionary = {}
 var _unavailable_build_style: StyleBoxFlat = HUD.surface(Color("#0b1621"), Color("#263748"), 3, 5)
+var _impossible_build_style: StyleBoxFlat = HUD.surface(Color("#24181e"), Color("#58343e"), 3, 5)
 const INFO_HEIGHT_RATIO: float = 0.55
 const INFO_MAX_HEIGHT_RATIO: float = 0.65
 const INFO_PADDING: Vector2 = Vector2(7.0, 5.0)
@@ -74,15 +75,28 @@ func set_face(button: Button, caption: String, picture: Texture2D) -> TextureRec
 	return art
 
 # Manual construction eligibility is independent of right-click automation.
-func set_build_available(button: Button, available: bool) -> void:
-	if button.has_meta("build_available") and bool(button.get_meta("build_available")) == available:
+func set_build_available(button: Button, available: bool, impossible: bool = false) -> void:
+	var visual_state: int = 0 if available else (2 if impossible else 1)
+	if int(button.get_meta("build_visual_state", -1)) == visual_state:
 		return
 	button.set_meta("build_available", available)
+	button.set_meta("build_visual_state", visual_state)
 	for style in ["normal", "hover", "pressed", "disabled"]:
 		if available:
 			button.remove_theme_stylebox_override(style)
 		else:
-			button.add_theme_stylebox_override(style, _unavailable_build_style)
+			button.add_theme_stylebox_override(style, _impossible_build_style if impossible else _unavailable_build_style)
+
+# Keep displayed requirements and their red styling in sync.
+func add_build_blocker(button: Button, reason: String) -> void:
+	if reason.is_empty():
+		return
+	var cost_button: CostButton = button as CostButton
+	if not cost_button.unmet_requirements.has(reason):
+		cost_button.unmet_requirements.append(reason)
+	var description: String = hint(button)
+	if not description.split("\n").has(reason):
+		set_hint(button, description + "\n" + reason)
 
 func set_level_badge(button: Button, level: int) -> void:
 	var label: Label = button.get_meta("level_badge") as Label if button.has_meta("level_badge") else null
