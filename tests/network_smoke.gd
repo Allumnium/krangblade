@@ -327,6 +327,18 @@ func _phase_changed() -> void:
 						ECON._finish(state, index, system, {"id": launch_id, "kind": "fighter", "population_allocated": 0.0})
 						system["yards"][0]["job"] = -1
 						ECON.set_shipyard_rally(state, int(system["owner"]), index, 0, -1, Vector2.ZERO)
+				# Seed independent morphing colonies for real-peer rejection checks.
+				var morph_sites: Array[int] = []
+				for site in range(state["planets"].size() - 1, expected_players - 1, -1):
+					if site != remote and int(state["planets"][site]["owner"]) == 0 and not ECON.has_station(state["planets"][site]):
+						morph_sites.append(site)
+						if morph_sites.size() == expected_players:
+							break
+				assert(morph_sites.size() == expected_players)
+				for index in range(expected_players):
+					var site: int = morph_sites[index]
+					var morph: Dictionary = {"id": 945000 + index, "kind": "colony_ship", "owner": ordered[index], "origin": index, "at": site, "dest": site, "source": -1, "route": [], "leg": 0.0, "position": ECON.colony_station_position(state, site, float(state["elapsed"])), "heading": Vector2.UP, "hp": ECON.ship_max_hp("colony_ship"), "crew": ECON.COLONY_POPULATION, "cargo": ECON.empty_stock(), "unit_order": {"kind": "colonize", "target": site, "automatic": true}, "colony_transform_progress": 0.0, "farm_auto": false}
+					state["ships"].append(morph)
 				# Isolated neutral hull exercises real guest replication of a defection.
 				var rogue_point: Vector2 = state["map"]["points"][target_index]
 				var rogue: Dictionary = {"id": 975000, "kind": "scout", "owner": ordered[0], "origin": 0, "at": target_index, "position": rogue_point, "heading": Vector2.UP, "hp": ECON.ship_max_hp("scout"), "crew": 20.0, "cargo": ECON.empty_stock()}
@@ -418,6 +430,14 @@ func _check_time_controls(state: Dictionary) -> bool:
 				if bool(system["home"]) and is_equal_approx(float(system["thresholds"]["Crystals"]["min"]), 12.0 + float(speed_stage - 1)):
 					confirmed += 1
 			if confirmed == expected_players:
+				if speed_stage == 1:
+					var locked_count: int = 0
+					for craft in state["ships"]:
+						if int(craft["id"]) >= 945000 and int(craft["id"]) < 945000 + expected_players and ECON.colony_morphing(craft) and craft.get("order_queue", []).is_empty() and craft.get("unit_order", {}).get("kind", "") == "colonize" and not bool(craft.get("farm_auto", true)) and not bool(craft.get("holding", false)) and int(craft["dest"]) == int(craft["at"]):
+							locked_count += 1
+					if locked_count != expected_players:
+						_fail("Morphing Colony accepted a cancellation or queued order.")
+						return false
 				session.call("request_time_speed", expected)
 		return false
 	if speed_stage == 0:
@@ -473,6 +493,11 @@ func _check_time_controls(state: Dictionary) -> bool:
 			if not is_equal_approx(float(outpost["stock"][resource]), float(ECON.ORBITAL_HOUSING_COST[resource])) or not is_zero_approx(recovered):
 				_fail("Station construction cancellation did not replicate direct material refund.")
 				return false
+		var morph_id: int = 945000 + home_index
+		session.call("request_unit_orders", [{"ids": [morph_id], "order": {"kind": "stop"}}], false)
+		session.call("request_unit_orders", [{"ids": [morph_id], "order": {"kind": "stop"}}], true)
+		session.call("request_unit_hold", [morph_id], false)
+		session.call("request_autocast", [morph_id], "farm", true)
 		# Explicit salvage is tested while paused, before automatic collection
 		# can sweep the same fixture. Guest commands use the actual RPC path.
 		var other: int = 900000 + (home_index + 1) % expected_players

@@ -124,6 +124,8 @@ var station_selected_index: int = -1
 var station_queue: HFlowContainer
 var station_queue_rows: Dictionary = {}
 var station_details: VBoxContainer
+var station_columns: HBoxContainer
+var yard_columns: HBoxContainer
 var station_queue_panel: VBoxContainer
 var station_queue_heading: Label
 var population_label: Label
@@ -188,6 +190,7 @@ var ship_overview: VBoxContainer
 var ship_title: Label
 var ship_detail: Label
 var ship_population: Label
+var colony_morph_progress: ProgressBar
 var fleet_scroll: ScrollContainer
 var fleet_overview: VBoxContainer
 var fleet_title: Label
@@ -575,6 +578,13 @@ func _build_selection_overview() -> VBoxContainer:
 	selection_inspector.build_tiles(ship_overview)
 	ship_detail = _label("", 13)
 	ship_overview.add_child(ship_detail)
+	colony_morph_progress = ProgressBar.new()
+	colony_morph_progress.custom_minimum_size = Vector2(100, 10)
+	colony_morph_progress.step = 0.0
+	colony_morph_progress.show_percentage = true
+	colony_morph_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ship_overview.add_child(colony_morph_progress)
+	colony_morph_progress.hide()
 	var crew_row := HBoxContainer.new()
 	ship_overview.add_child(crew_row)
 	ship_population = _label("", 13)
@@ -634,7 +644,7 @@ func _build_station_overview() -> void:
 	system_owner_label.custom_minimum_size.x = 72
 	system_owner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	system_header.add_child(system_owner_label)
-	var station_columns := HBoxContainer.new()
+	station_columns = HBoxContainer.new()
 	station_columns.add_theme_constant_override("separation", 8)
 	station_columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	planet_overview.add_child(station_columns)
@@ -990,9 +1000,15 @@ func _build_yard_overview(parent: Container) -> void:
 	yard_context = _label("", 12)
 	yard_context.add_theme_color_override("font_color", HUD.MUTED)
 	yard_overview.add_child(yard_context)
+	yard_columns = HBoxContainer.new()
+	yard_columns.add_theme_constant_override("separation", 8)
+	yard_overview.add_child(yard_columns)
+	var yard_work := VBoxContainer.new()
+	yard_work.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	yard_columns.add_child(yard_work)
 	yard_status = _label("", 12)
-	yard_overview.add_child(yard_status)
-	yard_queue = queue_view.build(yard_overview)
+	yard_work.add_child(yard_status)
+	yard_queue = queue_view.build(yard_work)
 	yard_overview.hide()
 
 func _build_yard_command_card(parent: VBoxContainer) -> void:
@@ -2235,9 +2251,16 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			status += " · Unpaid %.1f yr" % ECONOMY.unpaid_wage_years(state, ship)
 	if bool(ship.get("rogue", false)):
 		status = "Independent · Defected over unpaid wages"
+	var morphing: bool = ECONOMY.colony_morphing(ship)
+	if morphing:
+		ship_title.text = "Morphing · Space Station"
+		status = "Transforming into station"
 	ship_detail.text = status
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
+	colony_morph_progress.visible = morphing and not multiple
+	if morphing:
+		colony_morph_progress.value = 100.0 * float(ship["colony_transform_progress"]) / ECONOMY.COLONY_TRANSFORM_TIME
 	ship_title.visible = not multiple
 	ship_detail.visible = not multiple
 	fleet_title.text = "Fleet"
@@ -2259,7 +2282,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	ship_population.text = ("Total crew: " if multiple else "Crew: ") + UI_TEXT.crew_text(selected_crew)
 	ship_population.get_parent().show()
 	_sync_command_kind(state)
-	command_card.show()
+	command_card.visible = not command_kind.is_empty()
 	loaded_owned = false
 	var combat_owned: bool = false
 	var can_load: bool = false
@@ -2278,7 +2301,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_miners) and (id not in ["load", "unload"] or has_cargo_hold)
-		button.disabled = owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"])) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+		button.disabled = command_kind.is_empty() or owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"])) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
 	var transform: Button = command_buttons["transform"]
 	var transform_extra: Control = command_card.get_child(17)
 	var transform_slot: Control = transform_extra if has_miners else command_card.get_child(7)
@@ -2304,7 +2327,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		command_card_ui.set_hint(transform, "Transform into Space Station [J] · construction fee prepaid with colony ship")
 	command_buttons["deliver_farm"].visible = has_farm
 	command_buttons["deliver_farm"].disabled = not loaded_farm
-	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
+	if command_kind.is_empty() or not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
 		pending_command = ""
 	_refresh_command_mode()
 	fleet_title.visible = _command_kinds(state).size() > 1
@@ -2554,6 +2577,10 @@ func _refresh() -> void:
 	selection_inspector.refresh_weapons(ship, p, body_selected, yard_selected, grouped_buildings, selected_units.size(), selected_body, building_selection_kind, ship_overview, ship_detail, body_status, planet_overview)
 	body_overview.visible = body_selected and not grouped_buildings
 	yard_overview.visible = yard_selected and not grouped_buildings
+	var details_parent: HBoxContainer = yard_columns if yard_overview.visible else station_columns
+	if station_details.get_parent() != details_parent:
+		station_details.reparent(details_parent, false)
+		details_parent.move_child(station_details, 0)
 	_refresh_building_group(state)
 	var own_system: bool = system_live and int(p.get("owner", -1)) == _me()
 	var owned_station: bool = not other_selected and not body_selected and not yard_selected and own_system and ECONOMY.has_station(p)
@@ -2572,6 +2599,7 @@ func _refresh() -> void:
 	interaction_scroll.visible = not other_selected and not body_selected and not yard_selected and not p.is_empty() and int(p["owner"]) == 0 and not grouped_buildings
 	ship_overview.visible = other_selected
 	ship_population.get_parent().hide()
+	colony_morph_progress.hide()
 	ship_title.visible = other_selected
 	ship_detail.visible = other_selected
 	selection_inspector.refresh_tiles(state, selected_units, selected_ship_id, _select_tile)
@@ -2586,6 +2614,7 @@ func _refresh() -> void:
 	fleet_cargo_footer.hide()
 	station_queue_panel.hide()
 	if yard_selected:
+		_refresh_local_resources(p)
 		_refresh_yard_overview(p, own_system and phase == "match")
 		if grouped_buildings:
 			_refresh_group_yard_commands(state)
@@ -2630,6 +2659,15 @@ func _refresh() -> void:
 	system_owner_label.text = name_text
 	system_owner_label.tooltip_text = system_owner_label.text
 	system_owner_label.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
+	_refresh_local_resources(p)
+	_update_trade_stock(p)
+	if building_selection_kind == "station" and not grouped_buildings:
+		_refresh_station_queue(p, owned)
+	if owned_station:
+		_refresh_station_primary(p, owned)
+		_refresh_station_build(p, owned)
+
+func _refresh_local_resources(p: Dictionary) -> void:
 	for resource in ECONOMY.RESOURCES:
 		var amount: float = float(p["stock"][resource])
 		production_values[resource]["stock"].text = UI_TEXT.tons(amount)
@@ -2651,12 +2689,6 @@ func _refresh() -> void:
 	population_delta_label.text = "(%s%s/yr)" % ["+" if change >= 0.0 else "-", UI_TEXT.compact_amount(absf(change))]
 	population_delta_label.add_theme_color_override("font_color", Color("#7cdb9b") if change >= 0.0 else Color("#eb8585"))
 	population_label.tooltip_text = ""
-	_update_trade_stock(p)
-	if building_selection_kind == "station" and not grouped_buildings:
-		_refresh_station_queue(p, owned)
-	if owned_station:
-		_refresh_station_primary(p, owned)
-		_refresh_station_build(p, owned)
 
 func _system_name(index: int) -> String:
 	var names: Array = _state().get("map", {}).get("names", [])
@@ -3615,7 +3647,7 @@ func _command_kinds(state: Dictionary) -> Array[String]:
 	var kinds: Array[String] = []
 	for craft in state.get("ships", []):
 		var kind: String = str(craft["kind"])
-		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and not kinds.has(kind):
+		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and not ECONOMY.colony_morphing(craft) and not kinds.has(kind):
 			kinds.append(kind)
 	kinds.sort()
 	return kinds
@@ -3627,7 +3659,7 @@ func _sync_command_kind(state: Dictionary) -> void:
 		command_kind = kinds[0] if not kinds.is_empty() else ""
 
 func _command_member(craft: Dictionary) -> bool:
-	return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and str(craft["kind"]) == command_kind
+	return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and not ECONOMY.colony_morphing(craft) and str(craft["kind"]) == command_kind
 
 func _cycle_command_kind(reverse: bool) -> bool:
 	var state: Dictionary = _state()
@@ -3665,7 +3697,7 @@ func _selected_miners() -> Array[int]:
 func _selected_owned_units(state: Dictionary, all_types: bool = false) -> Array[int]:
 	var owned: Array[int] = []
 	for craft in state.get("ships", []):
-		if craft.get("kind", "") != "warp_gate" and (_command_member(craft) or (all_types and selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())):
+		if craft.get("kind", "") != "warp_gate" and not ECONOMY.colony_morphing(craft) and (_command_member(craft) or (all_types and selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())):
 			owned.append(int(craft["id"]))
 	return owned
 
