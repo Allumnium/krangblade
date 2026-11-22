@@ -43,6 +43,7 @@ const MATCH_CONQUEST_UI = preload("res://scripts/match_conquest_ui.gd")
 const MATCH_EMPIRE_UI = preload("res://scripts/match_empire_ui.gd")
 const MATCH_RESOURCE_HUD = preload("res://scripts/match_resource_hud.gd")
 const SHIP_MOTION_VIEW = preload("res://scripts/ship_motion_view.gd")
+const WORLD_RENDER_BATCHES = preload("res://scripts/world_render_batches.gd")
 const TACTICAL_ALERTS = preload("res://scripts/tactical_alerts.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
@@ -72,6 +73,7 @@ var conquest_ui := MATCH_CONQUEST_UI.new()
 var empire_ui := MATCH_EMPIRE_UI.new()
 var resource_hud := MATCH_RESOURCE_HUD.new()
 var ship_motion := SHIP_MOTION_VIEW.new()
+var world_batches := WORLD_RENDER_BATCHES.new()
 var settings := ConfigFile.new()
 var music_volume: float = 100.0
 var sfx_volume: float = 100.0
@@ -83,24 +85,6 @@ var alert_tracker := TACTICAL_ALERTS.new()
 var tactical_hit_rects: Array[Dictionary] = []
 var background_music: AudioStreamPlayer
 var map_canvas: Control
-var health_batch: MultiMeshInstance2D
-var ring_batch: MultiMeshInstance2D
-var health_entries: Array = []
-var ring_entries: Array = []
-var cargo_batch: MultiMeshInstance2D
-var cargo_glow_batch: MultiMeshInstance2D
-var cargo_entries: Array = []
-var cargo_glow_entries: Array = []
-var beam_batch: MultiMeshInstance2D
-var projectile_batch: MultiMeshInstance2D
-var beam_instances: Array = []
-var projectile_instances: Array = []
-var exhaust_batch: MultiMeshInstance2D
-var exhaust_instances: Array = []
-var exhaust_extents: Dictionary = {}
-var overview_batches: Dictionary = {}
-var overview_instances: Dictionary = {}
-var overview_dot_textures: Dictionary = {}
 var header_panel: PanelContainer
 var inspector_panel: PanelContainer
 var inspector_slot: Control
@@ -257,7 +241,6 @@ var info: Label
 var visual_clock: float = 0.0
 var system_visuals: Dictionary = {}
 var star_textures: Dictionary = {}
-var resource_glow_texture: Texture2D
 var system_visual_seed: int = -1
 var planet_detail_alpha: Dictionary = {}
 var planet_detail_seed: int = -1
@@ -394,17 +377,7 @@ func _build_match_notices() -> void:
 
 
 func _build_world_effect_batches() -> void:
-	_build_exhaust_batch()
-	beam_batch = _build_effect_batch(false)
-	projectile_batch = _build_effect_batch(true)
-	health_batch = _build_effect_batch(false)
-	health_batch.z_index = 2
-	ring_batch = _build_ring_batch()
-	cargo_batch = _build_effect_batch(false)
-	cargo_glow_batch = _build_effect_batch(false)
-	cargo_glow_batch.texture = _resource_glow()
-	cargo_batch.z_index = 1
-	cargo_glow_batch.z_index = 1
+	world_batches.build(map_canvas)
 	map_canvas.resized.connect(_map_resized)
 
 
@@ -2348,11 +2321,6 @@ func _build_selection_portrait(parent: Container) -> void:
 	selection_portrait_shield.hide()
 	selection_portrait.hide()
 
-func _queue_health_rect(rect: Rect2, tint: Color) -> void:
-	if rect.size.x <= 0.0 or not rect.intersects(Rect2(Vector2.ZERO, map_canvas.size), true):
-		return
-	health_entries.append([Transform2D(0.0, rect.size, 0.0, rect.get_center()), tint])
-
 func _draw_damage_bar(point: Vector2, radius: float, fraction: float, shield: float = -1.0) -> void:
 	var show_health: bool = fraction < 1.0
 	var show_shield: bool = shield >= 0.0 and shield < 1.0
@@ -2361,14 +2329,14 @@ func _draw_damage_bar(point: Vector2, radius: float, fraction: float, shield: fl
 	var width: float = clampf(radius * 2.0, 18.0, 100.0)
 	var base: Vector2 = point + Vector2(-width * 0.5, -maxf(8.0, radius) - 6.0)
 	if show_health:
-		_queue_health_rect(Rect2(base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
-		_queue_health_rect(Rect2(base, Vector2(width, 3.0)), Color("#283748"))
-		_queue_health_rect(Rect2(base, Vector2(width * clampf(fraction, 0.0, 1.0), 3.0)), _health_color(fraction))
+		world_batches.queue_health_rect(Rect2(base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
+		world_batches.queue_health_rect(Rect2(base, Vector2(width, 3.0)), Color("#283748"))
+		world_batches.queue_health_rect(Rect2(base, Vector2(width * clampf(fraction, 0.0, 1.0), 3.0)), _health_color(fraction))
 	if show_shield:
 		var shield_base: Vector2 = base + Vector2(0, 4) if show_health else base
-		_queue_health_rect(Rect2(shield_base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
-		_queue_health_rect(Rect2(shield_base, Vector2(width, 3.0)), Color("#203f5c"))
-		_queue_health_rect(Rect2(shield_base, Vector2(width * clampf(shield, 0.0, 1.0), 3.0)), Color("#6fbaff"))
+		world_batches.queue_health_rect(Rect2(shield_base - Vector2.ONE, Vector2(width + 2.0, 5.0)), Color("#0a111b"))
+		world_batches.queue_health_rect(Rect2(shield_base, Vector2(width, 3.0)), Color("#203f5c"))
+		world_batches.queue_health_rect(Rect2(shield_base, Vector2(width * clampf(shield, 0.0, 1.0), 3.0)), Color("#6fbaff"))
 
 func _shield_fraction(entity: Dictionary) -> float:
 	var maximum: float = float(entity.get("shield_max", 0.0))
@@ -3752,7 +3720,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 					if detail >= 0.5:
 						_draw_damage_bar(point, body_radius + 4.0, float(system["pds"][slot].get("hp", ECONOMY.PDS_HP)) / ECONOMY.PDS_HP)
 				if (index == selected and selected_body == slot) or (building_selection_kind == "pds" and selected_buildings.has(Vector2i(index, slot))):
-					_draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
+					world_batches.draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
 	_draw_planet_production(state, index, pos, radius, detail)
 	_draw_planet_upgrade_deliveries(state, index, pos, radius, detail)
@@ -3782,7 +3750,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		for slot in system.get("pds", {}):
 			if selected_buildings.has(Vector2i(index, int(slot))) and int(slot) < bodies.size():
 				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, _orbit_time(state))
-				_draw_selection_ring(point, 6.0)
+				world_batches.draw_selection_ring(point, 6.0)
 	if _show_system_rings(index):
 		map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
 
@@ -5334,91 +5302,24 @@ func _draw_ship_destructions(viewport_bounds: Rect2) -> void:
 		for particle in effect["sparks"]:
 			var offset: Vector2 = particle["offset"] + particle["velocity"] * travel
 			var position: Vector2 = point + forward * offset.x + lateral * offset.y
-			_queue_projectile(position, maxf(0.65, float(particle["size"]) * scale * (0.55 + fade * 0.45)), Color(particle["color"], fade))
+			world_batches.queue_projectile(position, maxf(0.65, float(particle["size"]) * scale * (0.55 + fade * 0.45)), Color(particle["color"], fade))
 		# Each original outline segment detaches, drifts and tumbles.
 		for fragment in effect["fragments"]:
 			var offset: Vector2 = fragment["offset"] + fragment["velocity"] * travel
 			var half: Vector2 = (fragment["half"] as Vector2).rotated(float(fragment["spin"]) * age)
 			var center: Vector2 = point + forward * offset.x + lateral * offset.y
 			var edge: Vector2 = forward * half.x + lateral * half.y
-			_queue_beam(center - edge, center + edge, Color(fragment["hull"], fade), maxf(1.0, 2.0 * scale))
-			_queue_beam(center - edge, center + edge, Color(fragment["color"], fade), maxf(0.6, scale))
+			world_batches.queue_beam(center - edge, center + edge, Color(fragment["hull"], fade), maxf(1.0, 2.0 * scale))
+			world_batches.queue_beam(center - edge, center + edge, Color(fragment["color"], fade), maxf(0.6, scale))
 
 # Same source-player hue for every beam. The wider translucent halo
 # and brighter core retain readability without changing the allegiance.
 # GPU instanced, color-modulated quads. The circle shader softens edges
 # without per-projectile tessellation; beams retain their exact endpoints.
-func _build_effect_batch(round_sprite: bool) -> MultiMeshInstance2D:
-	var batch := MultiMeshInstance2D.new()
-	var mesh := MultiMesh.new()
-	mesh.transform_format = MultiMesh.TRANSFORM_2D
-	mesh.use_colors = true
-	var quad := QuadMesh.new()
-	quad.size = Vector2.ONE
-	mesh.mesh = quad
-	batch.multimesh = mesh
-	if round_sprite:
-		var shader := Shader.new()
-		shader.code = """
-shader_type canvas_item;
-render_mode unshaded;
-void fragment() {
-	float edge = 1.0 - smoothstep(0.85, 1.0, length(UV * 2.0 - 1.0));
-	COLOR.a *= edge;
-}
-"""
-		var material := ShaderMaterial.new()
-		material.shader = shader
-		batch.material = material
-	map_canvas.add_child(batch)
-	batch.hide()
-	return batch
-
-func _queue_beam(origin: Vector2, target: Vector2, tint: Color, width: float) -> void:
-	var axis: Vector2 = target - origin
-	var length: float = axis.length()
-	if length <= 0.001:
-		return
-	var bounds := Rect2(origin, axis).abs().grow(width)
-	if not bounds.intersects(Rect2(Vector2.ZERO, map_canvas.size), true):
-		return
-	beam_instances.append([Transform2D(axis.angle(), Vector2(length, width), 0.0, (origin + target) * 0.5), tint])
-
-func _queue_projectile(point: Vector2, radius: float, tint: Color) -> void:
-	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius).has_point(point):
-		return
-	projectile_instances.append([Transform2D(0.0, Vector2.ONE * radius * 2.0, 0.0, point), tint])
-
-func _flush_effect_batch(batch: MultiMeshInstance2D, entries: Array) -> void:
-	if entries.is_empty():
-		return
-	var mesh: MultiMesh = batch.multimesh
-	if mesh.instance_count < entries.size():
-		mesh.instance_count = maxi(entries.size(), maxi(64, mesh.instance_count * 2))
-	var buffer := PackedFloat32Array()
-	buffer.resize(mesh.instance_count * 12)
-	for i in range(entries.size()):
-		var t: Transform2D = entries[i][0]
-		var tint: Color = entries[i][1]
-		var offset: int = i * 12
-		buffer[offset] = t.x.x
-		buffer[offset + 1] = t.y.x
-		buffer[offset + 3] = t.origin.x
-		buffer[offset + 4] = t.x.y
-		buffer[offset + 5] = t.y.y
-		buffer[offset + 7] = t.origin.y
-		buffer[offset + 8] = tint.r
-		buffer[offset + 9] = tint.g
-		buffer[offset + 10] = tint.b
-		buffer[offset + 11] = tint.a
-	mesh.buffer = buffer
-	mesh.visible_instance_count = entries.size()
-	batch.show()
-
 func _draw_owned_laser(origin: Vector2, target: Vector2, owner: int, width: float) -> void:
 	var tint: Color = _empire_color(owner)
-	_queue_beam(origin, target, Color(tint, 0.28), width * 3.0)
-	_queue_beam(origin, target, tint.lightened(0.28), width)
+	world_batches.queue_beam(origin, target, Color(tint, 0.28), width * 3.0)
+	world_batches.queue_beam(origin, target, tint.lightened(0.28), width)
 
 func _fighter_beam_origin(pose: Dictionary) -> Vector2:
 	return (pose["point"] as Vector2) + (pose["direction"] as Vector2) * FIGHTER_MUZZLE * _ship_scale()
@@ -5443,8 +5344,8 @@ func _draw_blaster_tracers(state: Dictionary, ship: Dictionary, poses: Dictionar
 			var muzzle: Vector2 = start + (direction * mount.x + direction.orthogonal() * mount.y) * scale
 			var point: Vector2 = muzzle.lerp(endpoint, travel)
 			var radius: float = clampf(scale * 0.9, 1.0, 3.5)
-			_queue_projectile(point, radius * 1.8, Color(tint, 0.24))
-			_queue_projectile(point, radius, tint)
+			world_batches.queue_projectile(point, radius * 1.8, Color(tint, 0.24))
+			world_batches.queue_projectile(point, radius, tint)
 
 func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, width: float) -> void:
 	if ship["kind"] in ["scout", "fighter"]:
@@ -5464,38 +5365,6 @@ func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, wid
 	for sign in [-1.0, 1.0]:
 		var origin: Vector2 = point + (direction * MINER_MUZZLE.x + direction.orthogonal() * sign * MINER_MUZZLE.y) * scale
 		_draw_owned_laser(origin, endpoint, int(ship["owner"]), maxf(0.65, width * 0.65))
-
-func _build_ring_batch() -> MultiMeshInstance2D:
-	var batch: MultiMeshInstance2D = _build_effect_batch(false)
-	var shader := Shader.new()
-	shader.code = """
-shader_type canvas_item;
-render_mode unshaded;
-varying float radius;
-void vertex() {
-	radius = max(1.0, length(MODEL_MATRIX[0].xy) * 0.5 - 2.0);
-}
-void fragment() {
-	vec2 p = (UV * 2.0 - 1.0) * (radius + 2.0);
-	float angle = atan(p.y, p.x);
-	float count = clamp(floor(6.2831853 * radius / 9.0 + 0.5), 6.0, 128.0);
-	float phase = fract(angle / 6.2831853 * count);
-	float rim = 1.0 - smoothstep(0.25, 1.25, abs(length(p) - radius));
-	float dash = 1.0 - smoothstep(0.67, 0.75, phase);
-	COLOR.a *= rim * dash;
-}
-"""
-	var material := ShaderMaterial.new()
-	material.shader = shader
-	batch.material = material
-	batch.z_index = 2
-	return batch
-
-func _draw_selection_ring(point: Vector2, radius: float, tint: Color = HUD.ACCENT) -> void:
-	var extent: float = radius + 2.0
-	if not Rect2(Vector2.ZERO, map_canvas.size).grow(extent).has_point(point):
-		return
-	ring_entries.append([Transform2D(0.0, Vector2.ONE * extent * 2.0, 0.0, point), tint])
 
 # Target indicators use authoritative entity IDs, not the ship's navigation
 # waypoint. They follow the interpolated pose and rendered structure geometry.
@@ -5831,7 +5700,7 @@ func _draw_station(state: Dictionary, index: int, tint: Color, elapsed: float) -
 	_draw_station_storage(system, center, radius, elapsed)
 	_draw_station_jobs(system, center, radius, tint)
 	if selected_station:
-		_draw_selection_ring(center, radius + 4.0)
+		world_batches.draw_selection_ring(center, radius + 4.0)
 	var hp: float = float(system["station"]["hp"]) / ECONOMY.station_max_hp(system)
 	_draw_damage_bar(center, radius, hp, _shield_fraction(system["station"]))
 	if _shield_fraction(system["station"]) > 0.0:
@@ -5886,7 +5755,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			var half_size: float = _overview_art_multiplier()
 			map_canvas.draw_rect(Rect2(point - Vector2.ONE * half_size, Vector2.ONE * half_size * 2.0), tint.lightened(0.25))
 			if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
-				_draw_selection_ring(point, 9.0)
+				world_batches.draw_selection_ring(point, 9.0)
 			continue
 		var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
 		var frame: PackedVector2Array = PackedVector2Array([point - axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale + side * 17.0 * scale, point - axis * 11.0 * scale + side * 17.0 * scale])
@@ -5931,7 +5800,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 					var light: Vector2 = point + forward * end * 16.0
 					map_canvas.draw_line(light - lateral * 3.0, light + lateral * 3.0, tint.lightened(0.4), maxf(0.7, scale), true)
 		if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
-			_draw_selection_ring(point, maxf(9.0, 23.0 * scale))
+			world_batches.draw_selection_ring(point, maxf(9.0, 23.0 * scale))
 		var health: float = float(yard.get("hp", ECONOMY.YARD_HP * int(yard["level"]))) / (ECONOMY.YARD_HP * int(yard["level"]))
 		_draw_damage_bar(point, maxf(8.0, 22.0 * scale), health)
 		for job in planet["queue"]:
@@ -5975,38 +5844,6 @@ func _salvage_hit(state: Dictionary, point: Vector2) -> int:
 
 # A shared white alpha falloff supplies soft local halos without HDR/bloom
 # or a particle emitter per resource. Tint at draw time to preserve identity.
-func _resource_glow() -> Texture2D:
-	if is_instance_valid(resource_glow_texture):
-		return resource_glow_texture
-	var image := Image.create(64, 64, false, Image.FORMAT_RGBA8)
-	for y in range(64):
-		for x in range(64):
-			var radius: float = ((Vector2(x + 0.5, y + 0.5) - Vector2(32.0, 32.0)) / 32.0).length()
-			var alpha: float = pow(maxf(0.0, 1.0 - radius * radius), 3.0)
-			image.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
-	resource_glow_texture = ImageTexture.create_from_image(image)
-	return resource_glow_texture
-
-func _draw_resource_glow(point: Vector2, radius: float, tint: Color, strength: float) -> void:
-	var extent: float = maxf(1.5, radius)
-	map_canvas.draw_texture_rect(_resource_glow(), Rect2(point - Vector2.ONE * extent, Vector2.ONE * extent * 2.0), false, Color(tint.lightened(0.12), strength))
-
-func _queue_cargo_rect(shape: PackedVector2Array, tint: Color) -> void:
-	var axis: Vector2 = shape[0] - shape[1]
-	var width: float = shape[1].distance_to(shape[2])
-	cargo_entries.append([Transform2D(axis.angle(), Vector2(axis.length(), width), 0.0, (shape[0] + shape[2]) * 0.5), tint])
-
-func _draw_cargo_segment(shape: PackedVector2Array, tint: Color) -> void:
-	_queue_cargo_rect(shape, tint.lightened(0.14))
-	var length: float = shape[0].distance_to(shape[1])
-	var width: float = shape[1].distance_to(shape[2])
-	if minf(length, width) < 0.8:
-		return
-	var center: Vector2 = (shape[0] + shape[2]) * 0.5
-	var extent: float = clampf(maxf(length, width) * 0.9, 2.0, 48.0)
-	var strength: float = 0.32 * clampf(length / maxf(width, 0.1), 0.25, 1.0)
-	cargo_glow_entries.append([Transform2D(0.0, Vector2.ONE * extent * 2.0, 0.0, center), Color(tint.lightened(0.12), strength)])
-
 func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2, font: Font) -> void:
 	if state.get("salvage", {}).is_empty():
 		return
@@ -6022,7 +5859,7 @@ func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2,
 		if not viewport_bounds.grow(radius * 2.6 + 24.0).has_point(point):
 			continue
 		var tint: Color = HUD.COLORS[pile["resource"]]
-		_draw_resource_glow(point, radius * 2.6, tint, 0.58)
+		world_batches.draw_resource_glow(point, radius * 2.6, tint, 0.58)
 		var rotation: float = float(pile["id"]) * 2.4 + game_visual_clock * 0.08
 		var axis: Vector2 = Vector2.from_angle(rotation) * radius
 		var side: Vector2 = axis.orthogonal() * 0.68
@@ -6071,14 +5908,14 @@ func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, later
 			center = [Vector2(-4.4, 4.7), Vector2(-4.4, -4.7), Vector2(-7.0, 0.0)][k]
 		var module: Vector2 = point + forward * center.x + lateral * center.y
 		var corners := PackedVector2Array([module + forward * half_length + lateral * half_width, module - forward * half_length + lateral * half_width, module - forward * half_length - lateral * half_width, module + forward * half_length - lateral * half_width])
-		_queue_cargo_rect(corners, Color("#182333"))
+		world_batches.queue_cargo_rect(corners, Color("#182333"))
 		var start: float = -half_length
 		for segment in bays[k]:
 			var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / per_bay)
 			# Fractional tonnes can project to a degenerate polygon.
 			if (end - start) * forward.length() >= 0.1:
 				var fill := PackedVector2Array([module + forward * end + lateral * half_width, module + forward * start + lateral * half_width, module + forward * start - lateral * half_width, module + forward * end - lateral * half_width])
-				_draw_cargo_segment(fill, HUD.COLORS[segment["resource"]])
+				world_batches.draw_cargo_segment(fill, HUD.COLORS[segment["resource"]])
 			start = end
 
 func _order_color(ship: Dictionary, order: Dictionary) -> Color:
@@ -6355,135 +6192,6 @@ func _draw_cargo_transfers(state: Dictionary, poses: Dictionary, refs: Dictionar
 			map_canvas.draw_circle(point, radius * 2.0, Color(color, alpha * 0.18), true, -1.0, true)
 			map_canvas.draw_rect(Rect2(point - Vector2.ONE * radius, Vector2.ONE * radius * 2.0), Color(color.lightened(0.2), alpha))
 
-# One GPU-instanced quad batch per cached overview texture. Keep detailed
-# hulls and gameplay/picking on their existing paths.
-func _build_exhaust_batch() -> void:
-	exhaust_batch = MultiMeshInstance2D.new()
-	var mesh := MultiMesh.new()
-	mesh.transform_format = MultiMesh.TRANSFORM_2D
-	mesh.use_custom_data = true
-	var quad := QuadMesh.new()
-	quad.size = Vector2.ONE
-	mesh.mesh = quad
-	exhaust_batch.multimesh = mesh
-	var shader := Shader.new()
-	shader.code = """
-shader_type canvas_item;
-render_mode unshaded;
-uniform float visual_time;
-varying vec4 plume;
-void vertex() {
-	plume = INSTANCE_CUSTOM;
-}
-void fragment() {
-	float t = 1.0 - UV.x;
-	float y = abs(UV.y * 2.0 - 1.0);
-	float taper = max(0.0, 1.0 - t);
-	float sheath = (1.0 - smoothstep(taper * 0.75, taper + 0.04, y)) * (1.0 - smoothstep(0.8, 1.0, t));
-	float core_width = max(0.0, 0.45 * (1.0 - t / 0.4));
-	float core = (1.0 - smoothstep(core_width * 0.7, core_width + 0.025, y)) * (1.0 - smoothstep(0.32, 0.4, t));
-	float phase = fract(t * 5.0 - visual_time * 4.5 + plume.y);
-	float sparks = (1.0 - smoothstep(0.06, 0.22, abs(phase - 0.5))) * (1.0 - smoothstep(0.12, 0.35, y)) * taper;
-	float alpha = clamp(plume.x * (0.34 * sheath + 0.9 * core + 0.45 * sparks), 0.0, 1.0);
-	COLOR = vec4(mix(vec3(0.15, 0.62, 1.0), vec3(0.8, 0.96, 1.0), core), alpha);
-}
-"""
-	var material := ShaderMaterial.new()
-	material.shader = shader
-	exhaust_batch.material = material
-	map_canvas.add_child(exhaust_batch)
-	exhaust_batch.hide()
-
-func _queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float, id: int, bounds: Rect2) -> void:
-	if not exhaust_extents.has(kind):
-		var rear: float = 0.0
-		var nose: float = 0.0
-		for vertex in HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE):
-			rear = minf(rear, vertex.x)
-			nose = maxf(nose, vertex.x)
-		exhaust_extents[kind] = Vector2(rear, maxf(0.5, (nose - rear) / 18.0))
-	var extent: Vector2 = exhaust_extents[kind]
-	var engine: Vector2 = point + direction * extent.x
-	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
-	var plume_width: float = extent.y * lerpf(0.8, 2.1, thrust) * scale
-	if not bounds.grow(maxf(24.0, plume_length + 8.0)).has_point(engine):
-		return
-	var center: Vector2 = engine - direction.normalized() * plume_length * 0.5
-	exhaust_instances.append([Transform2D(direction.angle(), Vector2(plume_length, plume_width * 2.0), 0.0, center), thrust, fposmod(float(id) * 0.173, 1.0)])
-
-func _flush_exhaust() -> void:
-	if exhaust_instances.is_empty():
-		return
-	var mesh: MultiMesh = exhaust_batch.multimesh
-	if mesh.instance_count < exhaust_instances.size():
-		mesh.instance_count = maxi(exhaust_instances.size(), maxi(64, mesh.instance_count * 2))
-	var buffer := PackedFloat32Array()
-	buffer.resize(mesh.instance_count * 12)
-	for i in range(exhaust_instances.size()):
-		var entry: Array = exhaust_instances[i]
-		var t: Transform2D = entry[0]
-		var offset: int = i * 12
-		buffer[offset] = t.x.x
-		buffer[offset + 1] = t.y.x
-		buffer[offset + 3] = t.origin.x
-		buffer[offset + 4] = t.x.y
-		buffer[offset + 5] = t.y.y
-		buffer[offset + 7] = t.origin.y
-		buffer[offset + 8] = entry[1]
-		buffer[offset + 9] = entry[2]
-	mesh.buffer = buffer
-	mesh.visible_instance_count = exhaust_instances.size()
-	(exhaust_batch.material as ShaderMaterial).set_shader_parameter("visual_time", visual_clock)
-	exhaust_batch.show()
-
-func _overview_dot_texture(tint: Color) -> Texture2D:
-	var key: String = tint.to_html(false)
-	if not overview_dot_textures.has(key):
-		var image := Image.new()
-		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="31" fill="#%s"/></svg>' % key)
-		overview_dot_textures[key] = ImageTexture.create_from_image(image)
-	return overview_dot_textures[key]
-
-func _queue_overview_hull(texture: Texture2D, point: Vector2, angle: float, extent: float) -> void:
-	if not overview_instances.has(texture):
-		overview_instances[texture] = []
-	overview_instances[texture].append(Transform2D(angle, Vector2.ONE * extent * 2.0, 0.0, point))
-
-func _flush_overview_hulls() -> void:
-	for texture in overview_instances:
-		var transforms: Array = overview_instances[texture]
-		if not overview_batches.has(texture):
-			var instance := MultiMeshInstance2D.new()
-			var quad := QuadMesh.new()
-			quad.size = Vector2.ONE
-			var mm := MultiMesh.new()
-			mm.transform_format = MultiMesh.TRANSFORM_2D
-			mm.mesh = quad
-			instance.multimesh = mm
-			instance.texture = texture
-			if hull_art.is_shield_texture(texture):
-				instance.z_index = 1
-			map_canvas.add_child(instance)
-			overview_batches[texture] = instance
-		var batch: MultiMeshInstance2D = overview_batches[texture]
-		var mesh: MultiMesh = batch.multimesh
-		if mesh.instance_count < transforms.size():
-			mesh.instance_count = maxi(transforms.size(), maxi(64, mesh.instance_count * 2))
-		var buffer := PackedFloat32Array()
-		buffer.resize(mesh.instance_count * 8)
-		for i in range(transforms.size()):
-			var t: Transform2D = transforms[i]
-			var offset: int = i * 8
-			buffer[offset] = t.x.x
-			buffer[offset + 1] = t.y.x
-			buffer[offset + 3] = t.origin.x
-			buffer[offset + 4] = t.x.y
-			buffer[offset + 5] = t.y.y
-			buffer[offset + 7] = t.origin.y
-		mesh.buffer = buffer
-		mesh.visible_instance_count = transforms.size()
-		batch.show()
-
 func _draw_map() -> void:
 	_update_fog(_state())
 	fog_overlay.queue_redraw()
@@ -6491,23 +6199,7 @@ func _draw_map() -> void:
 	logistics_overlay.queue_redraw()
 	objectives_overlay.queue_redraw()
 	asteroid_frame_meshes.clear()
-	health_entries.clear()
-	ring_entries.clear()
-	health_batch.hide()
-	ring_batch.hide()
-	cargo_entries.clear()
-	cargo_glow_entries.clear()
-	cargo_batch.hide()
-	cargo_glow_batch.hide()
-	beam_instances.clear()
-	projectile_instances.clear()
-	beam_batch.hide()
-	projectile_batch.hide()
-	exhaust_instances.clear()
-	exhaust_batch.hide()
-	overview_instances.clear()
-	for batch in overview_batches.values():
-		batch.hide()
+	world_batches.begin_frame()
 	if session == null:
 		return
 	var state: Dictionary = _state()
@@ -6547,7 +6239,7 @@ func _draw_map() -> void:
 			var pulse: float = 0.5 + 0.5 * sin(visual_clock * 3.0)
 			var star_radius: float = maxf(4.0, float(field["radius"]) * render_scale * 0.16)
 			var glow: Color = HUD.COLORS[ECONOMY.ANTIMATTER]
-			_draw_resource_glow(center, star_radius * 2.0, glow, 0.6 + pulse * 0.4)
+			world_batches.draw_resource_glow(center, star_radius * 2.0, glow, 0.6 + pulse * 0.4)
 			map_canvas.draw_circle(center, star_radius, glow.lightened(0.7), true, -1.0, true)
 			var axis: Vector2 = Vector2.from_angle(visual_clock * 0.8)
 			map_canvas.draw_line(center - axis * star_radius * 4.0, center + axis * star_radius * 4.0, Color(glow, 0.45 + pulse * 0.4), maxf(1.0, star_radius * 0.45), true)
@@ -6718,8 +6410,8 @@ func _draw_map() -> void:
 					var mount: Vector2 = Vector2(4, 0) if ship["kind"] == "cruiser" else Vector2(8, -8 if launcher == 0 else 8)
 					launch += (facing * mount.x + facing.orthogonal() * mount.y) * _ship_scale()
 				var tip: Vector2 = launch.lerp(b, phase) + offset
-				_queue_beam(tip - axis * 12.0, tip, Color("#ffb36b"), 2.0)
-				_queue_projectile(tip, 2.0, Color("#fff2d2"))
+				world_batches.queue_beam(tip - axis * 12.0, tip, Color("#ffb36b"), 2.0)
+				world_batches.queue_projectile(tip, 2.0, Color("#fff2d2"))
 		var target: int = int(ship.get("combat_target", -1))
 		var yard_target: int = int(ship.get("yard_target", -1))
 		if poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
@@ -6756,7 +6448,7 @@ func _draw_map() -> void:
 					if not aim.is_zero_approx():
 						for side in [-1.0, 1.0]:
 							var muzzle: Vector2 = hub + (aim * 0.8 + aim.orthogonal() * side * 0.35) * _station_radius()
-							_queue_beam(muzzle, end, Color("#59e8a4"), 1.4)
+							world_batches.queue_beam(muzzle, end, Color("#59e8a4"), 1.4)
 		var repair: int = int(ship.get("repair_target", -1))
 		if poses.has(shooter) and service_refs.has(repair):
 			var origin: Vector2 = poses[shooter]["point"]
@@ -6772,7 +6464,7 @@ func _draw_map() -> void:
 				poses[shooter]["direction"] = axis
 				for side in [-1.0, 1.0]:
 					var muzzle: Vector2 = origin + (axis * MINER_MUZZLE.x + axis.orthogonal() * side * MINER_MUZZLE.y) * _ship_scale()
-					_queue_beam(muzzle, endpoint, Color("#59e8a4"), 1.4)
+					world_batches.queue_beam(muzzle, endpoint, Color("#59e8a4"), 1.4)
 	for ship in state["ships"]:
 		if not poses.has(int(ship["id"])):
 			continue
@@ -6793,7 +6485,7 @@ func _draw_map() -> void:
 		direction *= scale
 		var thrust: float = ship_motion.thrust_for(int(ship["id"]))
 		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and thrust > 0.035:
-			_queue_exhaust(str(ship["kind"]), point, direction, scale, thrust, int(ship["id"]), viewport_bounds)
+			world_batches.queue_exhaust(str(ship["kind"]), point, direction, scale, thrust, int(ship["id"]), viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
@@ -6806,14 +6498,14 @@ func _draw_map() -> void:
 					map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
 			var radius: float = maxf(5.0, hull_art.ui_radius(str(ship["kind"])) * scale)
-			_draw_selection_ring(point, radius)
+			world_batches.draw_selection_ring(point, radius)
 		# At a distant galaxy overview, the smallest authored edges can
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
 		_draw_damage_bar(point, hull_art.ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
 		if bool(ship.get("cloaked", false)):
-			_draw_selection_ring(point, maxf(5.0, hull_art.ui_radius(str(ship["kind"])) * scale + 2.0), Color("#b698ff80"))
+			world_batches.draw_selection_ring(point, maxf(5.0, hull_art.ui_radius(str(ship["kind"])) * scale + 2.0), Color("#b698ff80"))
 		if ship["kind"] == "warp_gate":
 			var gate_radius: float = maxf(5.0, 44.0 * scale)
 			map_canvas.draw_circle(point, gate_radius, Color("#382b58"), true, -1.0, true)
@@ -6822,13 +6514,13 @@ func _draw_map() -> void:
 			map_canvas.draw_circle(point, gate_radius * 0.48, Color("#151225"), true, -1.0, true)
 			continue
 		if scale < 0.15 * overview:
-			_queue_overview_hull(_overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
+			world_batches.queue_overview_hull(world_batches.overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
 			continue
 		var texture: Texture2D = hull_art.hull_texture(str(ship["kind"]), empire, scale >= 0.42)
 		if _shield_fraction(ship) > 0.0:
-			_queue_overview_hull(hull_art.shield_texture(str(ship["kind"])), point, direction.angle(), (hull_art.texture_half_size(str(ship["kind"])) + 8.0) * scale)
+			world_batches.queue_overview_hull(hull_art.shield_texture(str(ship["kind"])), point, direction.angle(), (hull_art.texture_half_size(str(ship["kind"])) + 8.0) * scale)
 		if ship["kind"] != "science_ship":
-			_queue_overview_hull(texture, point, direction.angle(), hull_art.texture_half_size(str(ship["kind"])) * scale)
+			world_batches.queue_overview_hull(texture, point, direction.angle(), hull_art.texture_half_size(str(ship["kind"])) * scale)
 		else:
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
 			var half: float = hull_art.texture_half_size(str(ship["kind"]))
@@ -6841,13 +6533,13 @@ func _draw_map() -> void:
 				var module: Vector2 = point + direction * bay_center.x + side * bay_center.y
 				var half_length: float = 3.0
 				var corners := PackedVector2Array([module + direction * half_length + side * 3, module - direction * half_length + side * 3, module - direction * half_length - side * 3, module + direction * half_length - side * 3])
-				_queue_cargo_rect(corners, Color("#182333"))
+				world_batches.queue_cargo_rect(corners, Color("#182333"))
 				var start: float = -half_length
 				for segment in bays[k]:
 					var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / ECONOMY.FREIGHTER_BAY_CAPACITY)
 					if (end - start) * scale >= 0.1:
 						var filled := PackedVector2Array([module + direction * end + side * 3, module + direction * start + side * 3, module + direction * start - side * 3, module + direction * end - side * 3])
-						_draw_cargo_segment(filled, HUD.COLORS[segment["resource"]])
+						world_batches.draw_cargo_segment(filled, HUD.COLORS[segment["resource"]])
 					start = end
 		elif ship["kind"] == "science_ship":
 			map_canvas.draw_circle(point, maxf(1.0, 11.5 * scale), empire.darkened(0.4), true, -1.0, true)
@@ -6856,7 +6548,7 @@ func _draw_map() -> void:
 			if float(ship.get("cargo", {}).get(ECONOMY.ANTIMATTER, 0.0)) >= 1.0 - ECONOMY.EPS:
 				var tint: Color = HUD.COLORS[ECONOMY.ANTIMATTER]
 				var pulse: float = 0.5 + 0.5 * sin(visual_clock * 4.0)
-				_draw_resource_glow(point, maxf(2.0, 8.0 * scale), tint, 0.7 + 0.3 * pulse)
+				world_batches.draw_resource_glow(point, maxf(2.0, 8.0 * scale), tint, 0.7 + 0.3 * pulse)
 				map_canvas.draw_circle(point, maxf(1.0, (2.5 + pulse) * scale), tint.lightened(0.5), true, -1.0, true)
 				for k in range(3):
 					var angle: float = visual_clock * 2.0 + TAU * float(k) / 3.0
@@ -6864,16 +6556,10 @@ func _draw_map() -> void:
 		elif scale >= 0.42:
 			_draw_other_cargo(ship, point, direction, side)
 	_draw_ship_destructions(viewport_bounds)
-	_flush_exhaust()
-	_flush_effect_batch(beam_batch, beam_instances)
-	_flush_effect_batch(projectile_batch, projectile_instances)
-	_flush_overview_hulls()
-	_flush_effect_batch(cargo_batch, cargo_entries)
-	_flush_effect_batch(cargo_glow_batch, cargo_glow_entries)
+	world_batches.flush_world(visual_clock, hull_art)
 	_draw_cargo_transfers(state, poses, service_refs, viewport_bounds)
 	_draw_formation_preview(state)
-	_flush_effect_batch(health_batch, health_entries)
-	_flush_effect_batch(ring_batch, ring_entries)
+	world_batches.flush_indicators()
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
 		map_canvas.draw_rect(rect, Color(HUD.ACCENT, 0.12))
