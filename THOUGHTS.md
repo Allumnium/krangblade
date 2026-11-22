@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.29: Extract ship interpolation, heading smoothing, thrust decay and pose cache into ship_motion_view.gd. Preserve revision/time-speed checks, frame-cache copy and reprojection, per-match lifetime, fallback and draw/update order. Network smoke still asserts render targets against authoritative snapshots/motion samples via a read-only position query. Callable projection/visibility overhead should be measured in fleet benchmarks; no intended simulation/transport/Codex changes. Static reverse-substitution parity checked; Godot import, parse, benchmark, visual and peer validation pending.
+
 - v0.89.28: Extract resource/year/credit/population tiles, storage strips and local/global hover presentation into match_resource_hud.gd. Preserve shared delta helpers for the station inspector, widget factories and selection context, display formulas and snapshot access. Static reverse-substitution parity checked (explicit Callable return typing added); no gameplay or Codex changes. Godot import/parser, visual hover and peer checks pending.
 
 - v0.89.27: Extract Empire fleet window, slider previews, diplomacy rows and war confirmation into match_empire_ui.gd, with explicit player/color/portrait/label dependencies. Keep widget parentage, dialog close/focus behavior and authority request signatures; match retains attack intent and handles modal input. Source parity and field references reviewed, no gameplay or Codex behavior change. Godot unavailable locally; import, parse, visual and multiplayer checks pending.

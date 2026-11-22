@@ -953,8 +953,8 @@ func _check_economy_sync() -> void:
 						_fail("Stale movement sample survived newer reliable state.")
 						return
 					actual = sample["position"]
-				var visual: Dictionary = view.get("ship_visuals").get(int(ship["id"]), {})
-				if visual.is_empty() or not (visual["to"] as Vector2).is_equal_approx(actual):
+				var render_target: Vector2 = view.get("ship_motion").call("target_position", int(ship["id"]))
+				if not render_target.is_finite() or not render_target.is_equal_approx(actual):
 					_fail("Ship render target differs from authoritative physical position.")
 					return
 			if role == "client" and int(session.get("diagnostic_motion_received")) < 2:
