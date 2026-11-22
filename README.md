@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.89.19; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.89.24; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
@@ -26,6 +26,7 @@ Current layout (v0.89.19; update when responsibility moves). Use the named funct
 | `scripts/main.gd`, `scripts/lobby_rules.gd` | Menu/lobby/setup presentation; shared lobby roster, ready, color and start rules respectively. |
 | `scripts/ui_theme.gd`, `scripts/space_background.gd`, `assets/ui/starfield.gdshader` | Reusable theme, icons, UI surfaces and backdrop. |
 | `scripts/codex.gd`, `scripts/match_sfx.gd` | Concise player guide derived from rules where possible; client-only audio synthesis, spatial gain and cue limits. |
+| `scripts/match_audio_tracker.gd` | Per-match snapshot audio history, construction and completion cue detection, objective cue coalescing, combat/service sound edges. Match supplies local player, spatial context, visibility callback and mixer; no gameplay mutations. |
 | `scripts/match_session.gd` | Small roster holder; not configured as the current autoload. Check remaining references before changing/removing it. |
 | `tests/economy_rules_test.gd`, `tests/lobby_rules_test.gd` | Rule regressions, seeded maps and semantic fixtures. |
 | `tests/solo_smoke.gd`, `tests/network_smoke.gd` | Real match lifecycle, authority, state replication and ENet peers. |
