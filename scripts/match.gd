@@ -93,6 +93,7 @@ var audio_tracker := MATCH_AUDIO_TRACKER.new()
 var alert_tracker := TACTICAL_ALERTS.new()
 var background_music: AudioStreamPlayer
 var map_canvas: Control
+var space_backdrop: ColorRect
 var header_panel: PanelContainer
 var inspector_panel: PanelContainer
 var inspector_slot: Control
@@ -304,11 +305,11 @@ func _build_ui() -> void:
 	_connect_match_ui_layout()
 
 func _build_map_layers() -> void:
-	var background := ColorRect.new()
-	background.set_script(BACKDROP)
-	background.name = "SpaceBackdrop"
-	add_child(background)
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	space_backdrop = ColorRect.new()
+	space_backdrop.set_script(BACKDROP)
+	space_backdrop.name = "SpaceBackdrop"
+	add_child(space_backdrop)
+	space_backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_build_territory_layer()
 	map_canvas = Control.new()
 	add_child(map_canvas)
@@ -4420,6 +4421,8 @@ func _process(delta: float) -> void:
 		celestial_view.update_planet_detail(state, delta, _fit(), camera.zoom)
 		var poses: Dictionary = _ship_poses(state, delta)
 		_follow_selection(state, poses)
+		if is_instance_valid(space_backdrop):
+			space_backdrop.call("set_camera_pose", _camera_world_center(), _fit() * camera.zoom, camera.zoom)
 		world_effects.sync_destructions(state, visual_clock, _empire_color, hull_art)
 	else:
 		celestial_view.reset_clocks()

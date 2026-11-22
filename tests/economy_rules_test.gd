@@ -1352,6 +1352,13 @@ func _test_reward_redraft() -> void:
 	assert(not ECON.acquire_reward(state, 1, str(previous[1]), 0, "economic"))
 	assert(ECON.acquire_reward(state, 1, str(ECON.reward_offer(progress, "economic")[0]), 1, "economic"))
 	assert(ECON.reward_points(progress, "economic") == 0 and ECON.reward_offer(progress, "economic").is_empty())
+	assert(not ECON.reward_offer(progress, "military").has("cloak"))
+	assert(not ECON.reward_eligible([], "cloak", "military"))
+	assert(not ECON.reward_eligible(["shield_1", "armor"], "cloak", "military"))
+	assert(not ECON.reward_eligible(["industry", "storage", "rank_science"], "cloak", "military"))
+	assert(ECON.reward_eligible(["shield_1", "armor", "rank_damage"], "cloak", "military"))
+	assert(ECON.reward_eligible(["rank_damage", "rank_damage", "rank_damage"], "cloak", "military"))
+	assert(not ECON.reward_eligible(["shield_1", "armor", "rank_damage"], "cloak", "economic"))
 	assert(not ECON.reward_eligible([], "shield_2", "military"))
 	assert(ECON.reward_eligible(["shield_1"], "shield_2", "military"))
 	assert(not ECON.reward_eligible(["shield_1"], "shield_3", "military"))
@@ -1379,6 +1386,13 @@ func _test_unique_rewards() -> void:
 		var first: Dictionary = ECON.objective_progress(state, 1)
 		var rival: Dictionary = ECON.objective_progress(state, 2)
 		var prerequisite: Array = ["shield_1", "shield_2"] if key == "shield_3" else []
+		if key == "cloak":
+			# Even a forged early draft cannot bypass authority eligibility.
+			first["points"][category] = 1
+			first["offers"][category] = [key]
+			assert(not ECON.acquire_reward(state, 1, key, ECON.reward_generation(first), category))
+			assert(ECON.reward_points(first, category) == 1)
+			prerequisite = ["shield_1", "armor", "rank_damage"]
 		for progress in [first, rival]:
 			progress["rewards"] = prerequisite.duplicate()
 			progress["points"][category] = 1
