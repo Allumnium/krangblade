@@ -1,5 +1,9 @@
 # Warbound — active thoughts
 
+- v0.97.7: Restore project.godot after an open Godot editor rewrote it in canonical form during v0.97.6, dropping the [display] window/stretch/hidpi settings and gui snap_controls_to_pixels. File content identical to v0.97.5 apart from the version. No gameplay change.
+
+- Verified (v0.97.7): saving project settings from the Godot 4.7 editor can silently rewrite project.godot, removing hand-written [display] and gui entries. Review project.godot diffs before every commit; consider confirming the intended display settings are reapplied in-editor so future editor saves keep them.
+
 - v0.97.6: Split the 193-line _ai_turn into _ai_resettle (homeless colony recovery), _ai_census (hull/queue counts, reserved targets, useful fields, thresholds), _ai_station_goal (ordered goal selection) and _ai_pursue_station_goal (prerequisite substitution, funding and enqueue). Shared counts dictionary keeps per-station enqueue visibility; drop an unused team local. Determinism probe identical, economy failure set unchanged. No gameplay change; runtime/ENet pending.
 
 - v0.97.5: Split the 339-line step into ordered stages sharing a per-substep step_frame.gd: _step_economy, _step_ai, _step_combat (+ _step_resource_handoffs), _step_formations, per-hull _step_hull (_step_hull_overrides, _step_hull_services, _step_hull_routine, _step_military_motion) and _step_settle_movement. Loop continue became return true so wander eligibility is unchanged. Determinism probe identical, economy failure set unchanged, battle tick p50 within 0.5%. No gameplay change; runtime/ENet pending.
