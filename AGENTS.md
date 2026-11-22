@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.63: Every completed objective grants exactly 1 CP in its category, regardless of completion order or ties. Keep first-finisher metadata solely for existing presentation/audio. Category headers show names only; Upgrade hover and lifetime scoreboard remain. Verify first/tied/later payouts, no repeat award, spending and ENet synchronization.
+
 - v0.89.62: Assigned control-group tiles show the most numerous surviving ship type (alphabetical type key breaks ties) or structure portrait, followed by the exact membership count; unassigned tiles retain their key number. Size occupied tiles to fit the count, preserve numbered recall and hover hints, and reflow the existing shortcut layout when membership changes. Visual/runtime/peer validation pending.
 
 - v0.89.61: Increase resource/population/GC balance labels to 15 px and left-align beside icons. Reserve the conquest column beside population; start objectives at the top when space permits, otherwise below the header. Keep notifications/chat left of objectives. Underline Total Conquest Points like Objectives. Anchor F1–F4 at the right wing's left edge; control groups remain to their left, with a stacked fallback in narrow windows. Visual/runtime/peer validation pending.
@@ -118,7 +120,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - v0.78.5: Empire fleet sliders retain nonlinear milestone spacing with labeled ticks and integer interpolation between them. Authority accepts every integer 0–500; autoqueue unchanged.
 
-- v0.78.4: Hold completed category goals until their CP is spent; never draw already-satisfied goals, including repeat tiers. Preserve first-place 2 CP and category independence. Box selection prioritizes military hulls within the drag rectangle; Shift preserves existing friendly selections.
+- v0.78.4: Hold completed category goals until their CP is spent; never draw already-satisfied goals, including repeat tiers. Preserve category independence; first-place extra CP superseded by v0.89.63. Box selection prioritizes military hulls within the drag rectangle; Shift preserves existing friendly selections.
 
 - v0.78.3: Compact right-side conquest scoreboard below local objectives lists every match player's current unspent Economic, Military and Tech CP in stable player-color order. Only local conquest completions and unique unlocks produce notifications/sounds; chat and tactical warnings unchanged. Read existing public authority snapshots; private offers stay private.
 
@@ -126,7 +128,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - v0.78.0–0.78.1: Three compact scroll-free conquest cards; two eligible one-time technologies at most and at least one repeatable research card. Repeat ranks stack base bonuses or efficiencies; exclude just-purchased card from immediate redraft. Unlimited cumulative lifetime objective tiers with gradually increasing increments and category-specific metric variety; keep existing starter tracks, CP awards, unique races and refresh cooldown.
 
-- v0.77.3: Objective completions have original ascending bell arpeggios: personal +1 CP chime, richer personal first-place +2 CP fanfare, and a quieter other-player cue. Highest-priority new reward per snapshot, no initial replay; existing UI voice limits and SFX settings apply.
+- v0.77.3: Objective completions have original ascending bell arpeggios: personal +1 CP chime, richer personal first-place fanfare (also 1 CP since v0.89.63), and a quieter other-player cue. Highest-priority new reward per snapshot, no initial replay; existing UI voice limits and SFX settings apply.
 
 - v0.77.2: Distinct ship-ready and warning cues. Clickable top-center tactical alerts for off-camera allied hull damage/destruction and visible combat hulls moving toward friendly sectors (within 1200 world units of the sector radius); group counts by destination, 10 s display / 15 s repeat cooldown. Cached hull-shaped shield glow instead of dashed shield circles; selection circles unchanged.
 
@@ -178,7 +180,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - v0.66.1: Miners prefer viable direct access from their current system to a given asteroid field; alternative safe entrances remain fallback. Preserve depot checks and physical delivery.
 
-- v0.66.0: Logistics fourth column shows resident population and sustainable capacity fill. First objective finishers earn two points; same-tick ties share first, later finishers earn one. Public recent achievements in tracker; no catch-up modifiers.
+- v0.66.0: Logistics fourth column shows resident population and sustainable capacity fill. First objective finishers originally earned two points; superseded by v0.89.63 (all finishers earn one). Same-tick ties share first for presentation. Public recent achievements in tracker; no catch-up modifiers.
 
 - v0.65.0: Default logistics overlay above ships/effects, below HUD; inherent resource strengths/weaknesses below storage. Right-side read-only objectives show permanent completion and conquest points. Authority tracks unique new colony sites, actual Metals production/mining and peak resident population; reward rules pending.
 

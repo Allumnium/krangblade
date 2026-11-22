@@ -1046,24 +1046,21 @@ func _test_objective_holdings() -> void:
 	assert(progress["active_goals"]["economic"] == "colony_ships")
 	progress["colony_ships_built"] = 2
 	ECON._update_objectives(state)
-	assert(progress["completed"].has("colony_ships") and ECON.reward_points(progress, "economic") == 2)
+	assert(progress["completed"].has("colony_ships") and ECON.reward_points(progress, "economic") == 1)
 	assert(float(progress["population"]) == 80000.0 and float(progress["metals"]) == 3000.0)
 	assert(not progress["completed"].has("population") and not progress["completed"].has("metals"))
 	assert(not ECON.refresh_objective(state, 1, "economic", "colony_ships"))
 	state["objective_clock"] = 11.0
 	ECON._update_objectives(state)
 	assert(progress["active_goals"]["economic"] == "colony_ships")
-	assert(ECON.reward_points(progress, "economic") == 2)
+	assert(ECON.reward_points(progress, "economic") == 1)
 	assert(not ECON.objective_candidates(progress, "economic").has("population"))
 	assert(not ECON.objective_candidates(progress, "economic").has("metals"))
-	for i in range(2):
-		var offer: Array = ECON.reward_offer(progress, "economic")
-		assert(ECON.acquire_reward(state, 1, str(offer[0]), ECON.reward_generation(progress), "economic"))
-		ECON._update_objectives(state)
-		if i == 0:
-			assert(progress["active_goals"]["economic"] == "colony_ships")
+	var offer: Array = ECON.reward_offer(progress, "economic")
+	assert(ECON.acquire_reward(state, 1, str(offer[0]), ECON.reward_generation(progress), "economic"))
+	ECON._update_objectives(state)
 	assert(ECON.reward_points(progress, "economic") == 0)
-	assert(ECON.lifetime_reward_points(progress, "economic") == 2)
+	assert(ECON.lifetime_reward_points(progress, "economic") == 1)
 	assert(progress["active_goals"]["economic"] == "colonies")
 	assert(ECON.objective_category("colonies") == "economic")
 	assert(ECON.refresh_objective(state, 1, "economic", "colonies"))
@@ -1103,6 +1100,31 @@ func _test_objective_holdings() -> void:
 	assert(progress["completed"].has("colony_food"))
 	assert(ECON.objective_tech_unlocked(progress))
 	print("PASS: one objective per category, colony prerequisites, current holdings, lifetime food, separate rerolls and cooldowns")
+
+func _test_objective_single_point() -> void:
+	var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], false)
+	# Two simultaneous finishers and one later finisher of the same goal.
+	for player in [1, 2]:
+		ECON.objective_progress(state, player)["colony_ships_built"] = 2
+	ECON._update_objectives(state)
+	assert(ECON.reward_points(ECON.objective_progress(state, 3), "economic") == 0)
+	state["objective_clock"] = 11.0
+	ECON.objective_progress(state, 3)["colony_ships_built"] = 2
+	ECON._update_objectives(state)
+	ECON._update_objectives(state)
+	for player in [1, 2, 3]:
+		var progress: Dictionary = ECON.objective_progress(state, player)
+		assert(progress["completed"].has("colony_ships"))
+		assert(ECON.reward_points(progress, "economic") == 1)
+		assert(ECON.lifetime_reward_points(progress, "economic") == 1)
+		var completions: int = 0
+		for event in state["objective_events"]:
+			if int(event["player"]) == player and event.get("objective", "") == "colony_ships":
+				assert(int(event["award"]) == 1)
+				assert(bool(event["first"]) == (player != 3))
+				completions += 1
+		assert(completions == 1)
+	print("PASS: first, tied and later objective completions award exactly one CP once")
 
 func _test_reward_redraft() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -1504,6 +1526,7 @@ func _initialize() -> void:
 	_test_reward_redraft()
 	_test_unique_rewards()
 	_test_objective_holdings()
+	_test_objective_single_point()
 	_test_empire_targets()
 	_test_packed_threat_records()
 	_test_indexed_hostile_bucket()
