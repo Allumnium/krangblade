@@ -6,7 +6,7 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 - [ ] v0.89.42: Verify rearranged HUD, control group strip alignment, persistent empty center/right panels and input blocking at varied resolutions.
 
-- [ ] v0.89.44: Playtest quadratic production population gating (v0.89.45), precise blockers and diagnostics lens placement; run economy and peer checks.
+- [ ] v0.89.44: Playtest quadratic production population gating (v0.89.46; 30k base), precise blockers and diagnostics lens placement; run economy and peer checks.
 
 ## Agreed design direction — hidden global Revelations
 

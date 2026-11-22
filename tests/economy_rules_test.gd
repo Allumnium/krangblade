@@ -2823,7 +2823,7 @@ func _initialize() -> void:
 	assert(not ECON.affordable(industry, ECON._cost("pds", 1)))
 	assert(ECON.enqueue(bootstrap, 1, 0, "production", "Crystals"))
 	assert(ECON.cancel(bootstrap, 1, 0, int(industry["queue"][0]["id"])))
-	industry["population"] = ECON.HOME_POPULATION
+	industry["population"] = float(ECON.building_population("Metals", 1))
 	var metal_rate: float = ECON.rate(industry, "Metals")
 	var before_stock: Dictionary = industry["stock"].duplicate()
 	assert(not ECON.enqueue(bootstrap, 2, 0, "economy", "Metals"))
@@ -2840,6 +2840,7 @@ func _initialize() -> void:
 	assert(is_equal_approx(ECON.rate(industry, "Metals"), metal_rate * 1.25))
 	for material in ECON.ECONOMY_BUILDINGS["Metals"]["cost"]:
 		assert(is_equal_approx(float(industry["stock"][material]), float(before_stock[material]) - float(ECON.ECONOMY_BUILDINGS["Metals"]["cost"][material])))
+	industry["population"] = float(ECON.building_population("Metals", 2))
 	assert(ECON.enqueue(bootstrap, 1, 0, "economy", "Metals"))
 	var next_building: Dictionary = industry["queue"][0]
 	for material in ECON.ECONOMY_BUILDINGS["Metals"]["cost"]:
@@ -2862,6 +2863,7 @@ func _initialize() -> void:
 		assert(is_equal_approx(float(industry["stock"][material]) + _cancelled_material(bootstrap, int(build["id"]), material), float(preallocation[material])))
 	var timed_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var timed_home: Dictionary = timed_state["planets"][0]
+	timed_home["population"] = float(ECON.building_population("Metals", 1))
 	assert(ECON.enqueue(timed_state, 1, 0, "economy", "Metals"))
 	var timed_building: Dictionary = timed_home["queue"][0]
 	assert(is_equal_approx(float(timed_building["work"]), 30.0))
@@ -4950,7 +4952,7 @@ func _test_building_population_requirements() -> void:
 		for level in [1, 2, 3, 10]:
 			p["buildings"][resource] = level - 1
 			var required: int = ECON.building_population(resource, level)
-			assert(required == level * level * 5000)
+			assert(required == level * level * 30000)
 			p["population"] = float(required) - 1.0
 			assert(not ECON.building_available(p, resource))
 			assert(not ECON.enqueue(state, 1, 0, "economy", resource))
@@ -4966,9 +4968,12 @@ func _test_recovery_economy() -> void:
 	_test_building_population_requirements()
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
+	var original_population: float = p["population"]
+	p["population"] = float(ECON.building_population("Metals", 1))
 	for resource in ECON.RESOURCES:
 		assert(not ECON.building_cost(p, resource).has(resource))
 		assert(ECON.building_available(p, resource))
+	p["population"] = original_population
 	p["yards"][0]["level"] = 2
 	assert(ECON.enqueue(state, 1, 0, "colony_ship"))
 	var colony_job: Dictionary = p["queue"][0]

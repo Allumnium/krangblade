@@ -30,9 +30,9 @@ const BUILDING_BONUS: float = 0.25
 const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional repeatable local production infrastructure; no self-input recipes.
 const ECONOMY_BUILDINGS = {
-	"Metals": {"name": "Refinery", "population": 5000, "cost": {"Organics": 90.0}},
-	"Organics": {"name": "Farms", "population": 5000, "cost": {"Metals": 240.0}},
-	"Crystals": {"name": "Incubator", "population": 5000, "cost": {"Metals": 240.0}}
+	"Metals": {"name": "Refinery", "population": 30000, "cost": {"Organics": 90.0}},
+	"Organics": {"name": "Farms", "population": 30000, "cost": {"Metals": 240.0}},
+	"Crystals": {"name": "Incubator", "population": 30000, "cost": {"Metals": 240.0}}
 }
 const CONSTRUCTION_RESERVE: float = 500.0
 const CONSTRUCTION_PRODUCTION_SHARE: float = 0.1
