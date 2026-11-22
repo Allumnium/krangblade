@@ -1521,8 +1521,33 @@ static func shipyard_queue_count(p: Dictionary, slot: int) -> int:
 
 static func enqueue(state: Dictionary, player: int, index: int, kind: String, target: String = "", yard_slot: int = -1) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
-	if p.is_empty():
+	if p.is_empty() or not _enqueue_admissible(p, kind, yard_slot):
 		return false
+	var resolved: Dictionary = _resolve_enqueue(p, kind, target)
+	if resolved.is_empty():
+		return false
+	kind = resolved["kind"]
+	target = resolved["target"]
+	var level: int = resolved["level"]
+	var cost: Dictionary = building_cost(p, target) if kind == "economy_building" else construction_cost(p, kind, level)
+	var gc: float = construction_credit_cost(cost, kind)
+	if not affordable(p, cost) or not _pay_credits(state, player, gc):
+		return false
+	var paid: Dictionary = empty_stock()
+	for material in cost:
+		paid[material] = float(cost[material])
+		_spend_material(p, "Construction: " + kind, material, float(cost[material]))
+	var id: int = int(state["next_id"])
+	state["next_id"] = id + 1
+	p["queue"].append({"id": id, "kind": kind, "target": target, "yard_slot": yard_slot, "level": level,
+		"cost": cost, "credit_cost": gc, "work": 30.0 if kind == "economy_building" else _work(kind, level),
+		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": ship_size(kind) if SHIP_KINDS.has(kind) else 0})
+	if kind == "yard":
+		p["queue"][-1]["station_slot"] = resolved["station_slot"]
+	return true
+
+# Yard fit, crew, population and queue-capacity gates checked before any recipe resolution or payment.
+static func _enqueue_admissible(p: Dictionary, kind: String, yard_slot: int) -> bool:
 	if yard_slot != -1 and (not SHIP_KINDS.has(kind) or not shipyard_operational(p, yard_slot) or not yard_fits(p, yard_slot, kind)):
 		return false
 	if not ship_origin_population_met(p, kind) or not ship_crew_available(p, kind, yard_slot):
@@ -1538,6 +1563,10 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 			return false
 	elif station_queue_count(p) >= STATION_QUEUE_LIMIT:
 		return false
+	return true
+
+# Returns the canonical queued kind, target, level and station port, or {} when the request is invalid.
+static func _resolve_enqueue(p: Dictionary, kind: String, target: String) -> Dictionary:
 	var level: int = 1
 	var station_slot: int = 0
 	match kind:
@@ -1546,86 +1575,75 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 		"yard":
 			level = next_shipyard_slot(p)
 			if level == 0:
-				return false
-			if target.begins_with("port:"):
-				var requested: String = target.trim_prefix("port:")
-				if not requested.is_valid_int():
-					return false
-				station_slot = int(requested)
-				if station_slot < 1 or station_slot > MAX_SHIPYARDS or shipyard_at_port(p, station_slot) >= 0 or not shipyard_port_job(p, station_slot).is_empty():
-					return false
-			else:
-				if not target.is_empty() and target != str(level):
-					return false
-				for port in range(1, MAX_SHIPYARDS + 1):
-					if shipyard_at_port(p, port) < 0 and shipyard_port_job(p, port).is_empty():
-						station_slot = port
-						break
-				if station_slot == 0:
-					return false
+				return {}
+			station_slot = _enqueue_yard_port(p, target, level)
+			if station_slot == 0:
+				return {}
 			target = ""
 		"reinforced_plating", "laser_matrix", "dyson_sphere":
 			if not target.is_empty() or not station_upgrade_available(p, kind):
-				return false
+				return {}
 		"yard_upgrade":
 			if not target.is_valid_int():
-				return false
+				return {}
 			var y: int = int(target)
 			if y < 0 or y >= (p["yards"] as Array).size():
-				return false
+				return {}
 			if int(p["yards"][y]["level"]) >= MAX_SHIPYARD_LEVEL or shipyard_queue_count(p, y) >= SHIPYARD_QUEUE_LIMIT:
-				return false
+				return {}
 			target = str(y)
 			if _has_job(p, kind, target):
-				return false
+				return {}
 			level = int(p["yards"][y]["level"]) + 1
 		"pds":
 			if not target.is_empty():
-				return false
+				return {}
 			var slot: int = next_pds(p)
 			if slot < 0 or slot >= int(p.get("planet_count", 0)) or p.get("pds", {}).has(slot) or not pds_job(p).is_empty():
-				return false
+				return {}
 			target = str(slot)
 			level = 1
 		"economy":
 			match target:
 				"orbital_housing":
 					if not orbital_housing_available(p):
-						return false
+						return {}
 					kind = target
 					target = ""
 				"habitation", "warehouse":
 					if not (habitation_available(p) if target == "habitation" else warehouse_available(p)):
-						return false
+						return {}
 					kind = target
 					level = int(p.get(kind + "_level", 0)) + 1
 					target = ""
 				_:
 					if not building_available(p, target):
-						return false
+						return {}
 					kind = "economy_building"
 					level = int(p.get("buildings", {}).get(target, 0)) + 1
 		"production":
 			if not production_unlocked(p, target) or _has_job(p, kind, target):
-				return false
+				return {}
 			level = int(p["levels"][target]) + 1
-		_: return false
-	var cost: Dictionary = building_cost(p, target) if kind == "economy_building" else construction_cost(p, kind, level)
-	var gc: float = construction_credit_cost(cost, kind)
-	if not affordable(p, cost) or not _pay_credits(state, player, gc):
-		return false
-	var paid: Dictionary = empty_stock()
-	for material in cost:
-		paid[material] = float(cost[material])
-		_spend_material(p, "Construction: " + kind, material, float(cost[material]))
-	var id: int = int(state["next_id"])
-	state["next_id"] = id + 1
-	p["queue"].append({"id": id, "kind": kind, "target": target, "yard_slot": yard_slot, "level": level,
-		"cost": cost, "credit_cost": gc, "work": 30.0 if kind == "economy_building" else _work(kind, level),
-		"progress": 0.0, "allocated": paid, "population_cost": float(CREW_COSTS.get(kind, 0.0)), "population_allocated": 0.0, "size": ship_size(kind) if SHIP_KINDS.has(kind) else 0})
-	if kind == "yard":
-		p["queue"][-1]["station_slot"] = station_slot
-	return true
+		_: return {}
+	return {"kind": kind, "target": target, "level": level, "station_slot": station_slot}
+
+# Station port for a new shipyard: an explicit free "port:N" or the first free port; 0 rejects.
+static func _enqueue_yard_port(p: Dictionary, target: String, level: int) -> int:
+	if target.begins_with("port:"):
+		var requested: String = target.trim_prefix("port:")
+		if not requested.is_valid_int():
+			return 0
+		var port: int = int(requested)
+		if port < 1 or port > MAX_SHIPYARDS or shipyard_at_port(p, port) >= 0 or not shipyard_port_job(p, port).is_empty():
+			return 0
+		return port
+	if not target.is_empty() and target != str(level):
+		return 0
+	for port in range(1, MAX_SHIPYARDS + 1):
+		if shipyard_at_port(p, port) < 0 and shipyard_port_job(p, port).is_empty():
+			return port
+	return 0
 
 static func production_modifier(system: Dictionary, resource: String) -> float:
 	var modifier: float = float(system["bonuses"].get(resource, 1.0))
