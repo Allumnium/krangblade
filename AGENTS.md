@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.91.11: Revert the v0.91.9 radius doubling across world, minimap and setup preview; retain reduced opacity. Visual validation pending.
+
 - v0.91.10: Solo and lobby map previews draw the shared cached minimap territory fields beneath stars and deposits, using actual starting infrastructure and roster colors. Refresh on map or ordered roster/color changes; no simulation or network changes. Verify preview alignment, recoloring and setup responsiveness; runtime pending.
 
 - v0.91.9: Double the visual building territory kernel radius; halve map and minimap fill and contour opacity. Preserve cached fields, fog memory and simulation rules. Profile rebuild cost and verify overlapping claims visually; runtime/ENet pending.
