@@ -2188,6 +2188,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Delivering salvage" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for salvage storage"
 	elif int(ship.get("auto_salvage_target", -1)) >= 0:
 		status += " · Salvaging" if bool(ship.get("tractor_active", false)) else " · Approaching debris"
+	if ship.has("colony_transform_progress"):
+		status = "Transforming into station · %.0f%%" % (100.0 * float(ship["colony_transform_progress"]) / ECONOMY.COLONY_TRANSFORM_TIME)
 	if ship.has("resource_stage"):
 		var stage: Dictionary = ship["resource_stage"]
 		status = "Approaching resource site" if (ship["position"] as Vector2).distance_to(stage["point"]) > ECONOMY.RESOURCE_HANDOFF_RANGE else "Awaiting resource cargo"
@@ -4729,6 +4731,9 @@ func _draw_map() -> void:
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
 		_draw_damage_bar(point, hull_art.ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
+		if ship["kind"] == "colony_ship" and ship.has("colony_transform_progress"):
+			structure_view.draw_colony_transform(ship, point, direction.normalized(), scale, empire, float(state["elapsed"]))
+			continue
 		if ship["kind"] == "warp_gate":
 			var gate_radius: float = maxf(5.0, 44.0 * scale)
 			map_canvas.draw_circle(point, gate_radius, Color("#382b58"), true, -1.0, true)

@@ -47,6 +47,7 @@ const ORBITAL_HOUSING_POPULATION: float = 5000.0
 const ECO_HOUSING_ORGANICS: float = 0.2
 const ORBITAL_HOUSING_COST: Dictionary = {"Metals": 180.0}
 const COLONY_POPULATION: float = 25000.0
+const COLONY_TRANSFORM_TIME: float = 30.0
 const COLONY_MIN_ORIGIN_POPULATION: float = 50000.0
 const POPULATION_DOUBLING_YEARS: float = 60.0
 # Fixed full-growth food reserve, independent of warehouse size and trade policy.
@@ -753,6 +754,7 @@ static func send_colony(state: Dictionary, player: int, ship_id: int, target: in
 		ship.erase("withdrawal_objective")
 		_set_unit_order(state, ship, {"kind": "colonize", "target": target, "automatic": automatic})
 		ship["dest"] = target
+		ship["navigation_target"] = colony_station_position(state, target, float(state["elapsed"]))
 		ship["return_path"] = path.duplicate()
 		_clear_local_hold(ship)
 		_set_route(ship, path)
@@ -777,7 +779,7 @@ static func _begin_farm_delivery(state: Dictionary, ship: Dictionary) -> bool:
 	return true
 
 static func can_transform_colony(state: Dictionary, graph: Dictionary, ship: Dictionary) -> bool:
-	if ship.get("kind", "") != "colony_ship" or not ship.get("route", []).is_empty():
+	if ship.get("kind", "") != "colony_ship" or not ship.get("route", []).is_empty() or ship.has("colony_transform_progress"):
 		return false
 	var node: int = local_sector(graph, ship)
 	return node >= 0 and node < state["planets"].size() and int(state["planets"][node]["owner"]) == 0 and not has_station(state["planets"][node]) and discovered(state, int(ship["owner"]), "planets", node)
@@ -788,7 +790,7 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 	var progress: Dictionary = objective_progress(state, int(ship["owner"]))
 	progress["colonies"][at] = true
 	colony["conquest_rewards"] = progress.get("rewards", []).duplicate()
-	colony["station"] = {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()], "converted_at": float(state["elapsed"])}
+	colony["station"] = {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()]}
 	# Settlement transfers the crew exactly once. The founding yard supplies
 	# housing, not an additional free population; planetless residents
 	# remain aboard orbital habitats even when above nominal capacity.
@@ -796,7 +798,7 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 	colony["population"] = settlers
 	colony["eco_population"] = minf(settlers, ORBITAL_HOUSING_POPULATION) if has_planets(colony) else settlers
 	colony["population_velocity"] = 0.0
-	colony["yards"].append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
+	colony["yards"].append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1})
 	if has_planets(colony):
 		for resource in ["Metals", "Organics"]:
 			colony["levels"][resource] = 1
@@ -805,35 +807,54 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 		colony["stock"][resource] = float(colony["stock"].get(resource, 0.0)) + amount
 	return true # consumed to establish the colony
 
+# Colony remains a normal, vulnerable hull until the entire conversion is complete.
+# Progress is replicated in the ship dictionary and removed on replacement orders.
 static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool:
 	if ship.get("unit_order", {}).get("kind", "") != "colonize":
+		ship.erase("colony_transform_progress")
 		if not ship["route"].is_empty():
 			_move(state, ship, dt)
+		return false
+	var target: int = int(ship.get("dest", -1))
+	if target < 0 or target >= state["planets"].size():
+		ship.erase("colony_transform_progress")
+		ship.erase("unit_order")
 		return false
 	if state.has("diplomacy") and not _civilian_route_safe(state, ship, planet_teams(state), _combat_group(state, int(ship["owner"]))):
 		ship["route"] = []
 		ship["leg"] = 0.0
 		ship["dest"] = -1
 		ship.erase("unit_order")
+		ship.erase("colony_transform_progress")
 		ship["navigation_target"] = ship["position"]
 		return false
-	if not _move(state, ship, dt) or int(ship["dest"]) < 0:
+	if int(state["planets"][target]["owner"]) != 0 or has_station(state["planets"][target]):
+		# Another ship finished first. Return to launch without claiming.
+		var back: Array[int] = []
+		back.assign(ship.get("return_path", []))
+		back.reverse()
+		ship["dest"] = -1
+		ship.erase("unit_order")
+		ship.erase("colony_transform_progress")
+		_set_route(ship, back)
 		return false
-	var at: int = int(ship["at"])
-	if int(state["planets"][at]["owner"]) == 0 and not has_station(state["planets"][at]):
-		if bool(ship.get("unit_order", {}).get("automatic", false)):
-			return _convert_colony(state, ship, at)
+	var point: Vector2 = colony_station_position(state, target, float(state["elapsed"]))
+	if not _move(state, ship, dt, point, target):
+		ship.erase("colony_transform_progress")
+		return false
+	if not bool(ship.get("unit_order", {}).get("automatic", false)):
 		ship["dest"] = -1
 		ship.erase("unit_order")
 		ship["holding"] = true
 		ship["navigation_target"] = ship["position"]
 		return false
-	# Another ship arrived first. Return to launch without claiming or combat.
-	var back: Array[int] = []
-	back.assign(ship["return_path"])
-	back.reverse()
-	ship["dest"] = -1
-	_set_route(ship, back)
+	if not ship.has("colony_transform_progress"):
+		# Travel consumes this tick; begin assembly on the next tick.
+		ship["colony_transform_progress"] = 0.0
+		return false
+	ship["colony_transform_progress"] = minf(COLONY_TRANSFORM_TIME, float(ship["colony_transform_progress"]) + maxf(0.0, dt))
+	if float(ship["colony_transform_progress"]) + EPS >= COLONY_TRANSFORM_TIME:
+		return _convert_colony(state, ship, target)
 	return false
 
 static func current_year(state: Dictionary) -> int:
@@ -1700,15 +1721,17 @@ static func _advance(p: Dictionary, item: Dictionary, work_budget: float, yard_s
 	return float(item["progress"]) >= float(item["work"]) - EPS
 
 static func station_position(state: Dictionary, index: int, elapsed: float) -> Vector2:
+	if not has_station(state["planets"][index]):
+		return state["map"]["points"][index]
+	return colony_station_position(state, index, elapsed)
+
+# Same orbital geometry before and after settlement, with no launch slide.
+static func colony_station_position(state: Dictionary, index: int, elapsed: float) -> Vector2:
 	var center: Vector2 = state["map"]["points"][index]
-	var station: Dictionary = state["planets"][index].get("station", {})
-	if station.is_empty():
-		return center
 	var axis: Vector2 = Vector2.from_angle(float(index) * 2.399963 + elapsed * 0.008)
 	var graph: Dictionary = military_graph(state)
 	var radius: float = minf(145.0, sector_limit(graph, index, axis) * 0.5)
-	var conversion: float = clampf((elapsed - float(station.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
-	return center + axis * radius * smoothstep(0.0, 1.0, conversion)
+	return center + axis * radius
 
 static func shipyard_position(state: Dictionary, index: int, slot: int, elapsed: float) -> Vector2:
 	return shipyard_port_position(state, index, shipyard_port(state["planets"][index], slot), elapsed)
@@ -3598,6 +3621,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 # Both orders use the normal military graph and the same automatic combat
 # and repair rules as attack-move. The target is a stable hull ID, not a slot.
 static func _clear_tactical_order(ship: Dictionary) -> void:
+	ship.erase("colony_transform_progress")
 	_clear_local_move(ship)
 	ship.erase("science_years")
 	ship.erase("guard_arrived")
@@ -4786,6 +4810,7 @@ static func polyline_formation_slots(origins: Dictionary, stroke: PackedVector2A
 	return slots
 
 static func _set_unit_order(state: Dictionary, ship: Dictionary, order: Dictionary) -> void:
+	ship.erase("colony_transform_progress")
 	ship.erase("stop_until")
 	ship.erase("wander_anchor")
 	_clear_resource_stage(ship)
@@ -4817,7 +4842,10 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 				if ship.get("unit_order", {}) == order and ship.has("local_move_target"):
 					return ship["local_move_target"]
 				return sector_entry_point(graph, target, ship["position"])
-		"sector", "colonize":
+		"colonize":
+			if target >= 0 and target < state["planets"].size():
+				return colony_station_position(state, target, float(state["elapsed"]))
+		"sector":
 			if target >= 0 and target < graph["points"].size():
 				return graph["points"][target]
 		"attack", "follow":
@@ -4998,9 +5026,7 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 			var converted: bool = false
 			for ship in _owned_units(state, player, ids):
 				if can_transform_colony(state, graph, ship):
-					_convert_colony(state, ship, local_sector(graph, ship))
-					_remove_indexed_hull(state, ship)
-					converted = true
+					converted = send_colony(state, player, int(ship["id"]), local_sector(graph, ship), true) or converted
 			return converted
 		"follow":
 			var units: Array = _owned_units(state, player, ids)
@@ -8674,6 +8700,13 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 					repaired_hulls[recipient] = true
 			continue
 		ship.erase("repair_target")
+		if ship.get("kind", "") == "colony_ship" and ship.get("unit_order", {}).get("kind", "") == "colonize":
+			if _work_colony(state, ship, dt):
+				_remove_indexed_hull(state, ship)
+			elif ship.has("colony_transform_progress"):
+				# Assembly is anchored to the orbit; contact pushes other hulls.
+				repair_parked[salvage_ship_id] = true
+			continue
 		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id), salvage_threats):
 			continue
 		if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
