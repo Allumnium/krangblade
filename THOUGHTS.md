@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.24: Extract seven per-match audio history fields and snapshot-driven construction, objective, destruction, combat and service cue detection into match_audio_tracker.gd. Match supplies player, camera context, visibility and mixer; retains UI cues, lifecycle and existing invocation order. Reverse-transformation source parity checked; no simulation, network or Codex behavior changes. Godot import, parse, audible playback and peer validation pending.
+
 - v0.89.21: Add shared Galactic Credits icon and color, use in HUD and cost/upkeep rows, retain plain GC units where no icon is appropriate. Review Codex economy, infrastructure, fleet, defense and controls against current rules; clarify net income, actual versus reference yield, local materials/empire credits, Dyson fee reduction and F1–F4. No authority changes. New SVG import metadata based on existing resource icon settings; Godot import, parse, visual and peer checks pending.
 
 - v0.89.20: Simplify all shared production-building yield labels to the signed incremental t/yr value, omitting the 'now (X local)' suffix. Keep the reference rate, precision, resource icons and local-population calculation. Codex explanation remains accurate. Static review only; visual validation pending.
