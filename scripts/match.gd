@@ -926,8 +926,7 @@ func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {
 func _available_cost_resources(p: Dictionary, yard: int = -1) -> Dictionary:
 	var available: Dictionary = p["stock"].duplicate()
 	available["GC"] = ECONOMY.credit_balance(_state(), _me())
-	var reserve: float = ECONOMY.SHIPYARD_POPULATION[yard] if yard >= 0 else 0.0
-	available["Population"] = maxf(0.0, float(p["population"]) - reserve)
+	available["Population"] = ECONOMY.available_crew_population(p, yard) if yard >= 0 else maxf(0.0, float(p["population"]) - ECONOMY.reserved_construction_population(p))
 	return available
 
 func _build_production_summary() -> void:
@@ -1389,7 +1388,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	button.accept_event()
 
 func _yard_build_available(system: Dictionary, slot: int, kind: String) -> bool:
-	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.construction_affordable(_state(), system, ECONOMY.construction_cost(system, kind, 1), kind) and (kind != "ship" or bool(system["home"]))
+	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.construction_affordable(_state(), system, ECONOMY.construction_cost(system, kind, 1), kind, slot) and (kind != "ship" or bool(system["home"]))
 
 func _build_at_yard(kind: String) -> void:
 	var state: Dictionary = _state()
@@ -1448,6 +1447,9 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		_set_cost_tooltip(button, "%s · %.1f s\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard), kind)
 		if not ECONOMY.ship_origin_population_met(system, kind):
 			(button as CostButton).unmet_requirements.append(UI_TEXT.colony_population_requirement())
+		if not ECONOMY.ship_crew_available(system, kind, selected_yard):
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nInsufficient unreserved population")
+			(button as CostButton).unmet_requirements.append("Insufficient unreserved population")
 		if not ECONOMY.yard_fits(system, selected_yard, kind):
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
 		if not operating:
@@ -3189,10 +3191,13 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var can_toggle: bool = false
 		var auto: bool = false
 		var population_met: bool = false
+		var crew_available: float = 0.0
 		for ref in refs:
 			var system: Dictionary = state["planets"][ref.x]
 			eligible = eligible or _yard_build_available(system, ref.y, kind)
 			population_met = population_met or (ECONOMY.yard_fits(system, ref.y, kind) and ECONOMY.ship_origin_population_met(system, kind))
+			if ECONOMY.yard_fits(system, ref.y, kind):
+				crew_available = maxf(crew_available, ECONOMY.available_crew_population(system, ref.y, kind))
 			can_toggle = can_toggle or (ECONOMY.yard_fits(system, ref.y, kind) and (kind != "ship" or bool(system["home"])))
 			auto = auto or system["yards"][ref.y].get("autobuild", []).has(kind)
 		var button: Button = yard_commands[kind]
@@ -3202,7 +3207,10 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = hull_art.production_icon(kind, _empire_color(_me()))
 		portrait.modulate = Color.WHITE if eligible else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · Cost per ship\n1 per eligible yard\n%s\nRight-click: toggle autobuild" % [UI_TEXT.ship_kind_name(kind), UI_TEXT.ship_stats(kind)], ECONOMY.construction_cost(state["planets"][refs[0].x] if not refs.is_empty() else {}, kind, 1), float(ECONOMY.CREW_COSTS[kind]), available, kind)
+		_set_cost_tooltip(button, "%s · Cost per ship\n1 per eligible yard\n%s\nRight-click: toggle autobuild" % [UI_TEXT.ship_kind_name(kind), UI_TEXT.ship_stats(kind)], ECONOMY.construction_cost(state["planets"][refs[0].x] if not refs.is_empty() else {}, kind, 1), float(ECONOMY.CREW_COSTS[kind]), available.merged({"Population": crew_available}, true), kind)
+		if crew_available + ECONOMY.EPS < float(ECONOMY.CREW_COSTS[kind]) and not refs.is_empty():
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nInsufficient unreserved population")
+			(button as CostButton).unmet_requirements.append("Insufficient unreserved population")
 		if kind == "colony_ship" and not refs.is_empty() and not population_met:
 			(button as CostButton).unmet_requirements.append(UI_TEXT.colony_population_requirement())
 	var can_clear: bool = false

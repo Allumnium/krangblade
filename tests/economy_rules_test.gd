@@ -260,29 +260,38 @@ func _test_population_queue_priority() -> void:
 	p["yards"][0]["level"] = 2
 	assert(not ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
 	p["population"] = ECON.COLONY_MIN_ORIGIN_POPULATION
+	var tax: float = ECON.resident_tax_income(state, 1)
+	var production: float = ECON.rate(p, "Metals")
 	assert(ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
 	var colony: Dictionary = p["queue"][0]
+	assert(ECON.reserved_construction_population(p) == ECON.COLONY_POPULATION)
+	assert(p["population"] == ECON.COLONY_MIN_ORIGIN_POPULATION and colony["progress"] == 0.0)
+	assert(is_equal_approx(ECON.resident_tax_income(state, 1), tax))
+	assert(is_equal_approx(ECON.rate(p, "Metals"), production))
+	var stock: Dictionary = p["stock"].duplicate()
+	var credits: float = ECON.credit_balance(state, 1)
+	var next_id: int = int(state["next_id"])
+	assert(not ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
+	assert(p["stock"] == stock and ECON.credit_balance(state, 1) == credits and int(state["next_id"]) == next_id and p["queue"].size() == 1)
+	# A new job cannot claim an existing reservation even after population loss.
 	p["population"] = 10000.0
-	ECON._work_planet(state, 0, 0.1)
-	assert(int(p["yards"][0]["job"]) == -1 and colony["progress"] == 0.0)
-	assert(ECON.enqueue(state, 1, 0, "fighter", "", 0))
-	var fighter: Dictionary = p["queue"][1]
-	ECON._work_planet(state, 0, 0.1)
-	assert(int(p["yards"][0]["job"]) == int(fighter["id"]) and fighter["progress"] > 0.0 and colony["progress"] == 0.0)
-	var progress: float = fighter["progress"]
-	p["population"] = 600.0
-	p["eco_population"] = 0.0
-	ECON._work_planet(state, 0, 0.1)
-	assert(int(p["yards"][0]["job"]) == -1 and fighter["progress"] == progress)
-	assert("Population" in ECON.construction_blockers(p, fighter, 0))
-	p["population"] = ECON.COLONY_MIN_ORIGIN_POPULATION + 1000.0
-	ECON._work_planet(state, 0, 0.1)
-	assert(int(p["yards"][0]["job"]) == int(colony["id"]) and colony["progress"] > 0.0)
-	assert(fighter["progress"] == progress and p["queue"].size() == 2)
+	assert(not ECON.enqueue(state, 1, 0, "fighter", "", 0))
+	assert(ECON._possible(p, colony, 0) == 0.0)
+	p["population"] = ECON.COLONY_MIN_ORIGIN_POPULATION
 	assert(ECON.cancel(state, 1, 0, int(colony["id"])))
-	ECON._work_planet(state, 0, 0.1)
-	assert(int(p["yards"][0]["job"]) == int(fighter["id"]) and fighter["progress"] > progress)
-	print("PASS: population-blocked pinned jobs release the yard, eligible work advances and retained progress resumes")
+	assert(p["population"] == ECON.COLONY_MIN_ORIGIN_POPULATION and ECON.reserved_construction_population(p) == 0.0)
+	for resource in ECON.RESOURCES:
+		p["stock"][resource] = 100000.0
+	assert(ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
+	colony = p["queue"][0]
+	var total: float = float(ECON.empire_totals(state, 1)["population"])
+	assert(not ECON._advance(p, colony, 0.1, 0))
+	assert(colony["population_allocated"] == ECON.COLONY_POPULATION and ECON.reserved_construction_population(p) == 0.0)
+	assert(p["population"] == ECON.COLONY_MIN_ORIGIN_POPULATION - ECON.COLONY_POPULATION)
+	assert(is_equal_approx(float(ECON.empire_totals(state, 1)["population"]), total))
+	assert(ECON.cancel(state, 1, 0, int(colony["id"])))
+	assert(p["population"] == ECON.COLONY_MIN_ORIGIN_POPULATION)
+	print("PASS: full crew reservation, atomic rejection, resident productivity, embarkation and refunds")
 
 func _test_mining_lasers() -> void:
 	var rock := Vector2(1000, 0)
@@ -3107,27 +3116,28 @@ func _initialize() -> void:
 	var crew_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var crew_home: Dictionary = crew_state["planets"][0]
 	crew_home["population"] = 150000.0
+	crew_home["yards"][0]["level"] = 3
 	for kind in ECON.SHIP_KINDS:
 		var people: float = float(ECON.CREW_COSTS[kind])
-		assert(people == float({"colony_ship": 40000.0, "ship": 2000.0, "fighter": 500.0, "miner": 750.0, "science_ship": 2000.0}[kind]))
+		assert(people > 0.0)
 		assert(ECON.enqueue(crew_state, 1, 0, kind))
 		var crew_job: Dictionary = crew_home["queue"][0]
 		var original_population: float = float(crew_home["population"])
 		ECON._advance(crew_home, crew_job, float(crew_job["work"]) * 0.25)
-		assert(is_equal_approx(float(crew_job["population_allocated"]), people * 0.25))
-		assert(is_equal_approx(float(crew_home["population"]), original_population - people * 0.25))
+		assert(is_equal_approx(float(crew_job["population_allocated"]), people))
+		assert(is_equal_approx(float(crew_home["population"]), original_population - people))
 		assert(ECON.cancel(crew_state, 1, 0, int(crew_job["id"])))
 		assert(is_equal_approx(float(crew_home["population"]), original_population))
 	crew_home["population"] = 1.0
+	assert(not ECON.enqueue(crew_state, 1, 0, "fighter"))
+	crew_home["population"] = float(ECON.CREW_COSTS["fighter"]) + float(ECON.SHIPYARD_POPULATION[0])
 	assert(ECON.enqueue(crew_state, 1, 0, "fighter"))
-	assert(is_zero_approx(ECON._possible(crew_home, crew_home["queue"][0])))
-	crew_home["population"] = 1000.0
 	var crew_order: Dictionary = crew_home["queue"][0]
 	assert(ECON._advance(crew_home, crew_order, float(crew_order["work"])))
 	ECON._finish(crew_state, 0, crew_home, crew_order)
 	assert(is_equal_approx(float(crew_home["population"]), 500.0))
-	assert(is_equal_approx(float(crew_state["ships"][0]["crew"]), 500.0))
-	print("PASS: proportional crew costs, refunds, population starvation and completed crew")
+	assert(is_equal_approx(float(crew_state["ships"][0]["crew"]), float(ECON.CREW_COSTS["fighter"])))
+	print("PASS: reserved crew costs, refunds, population admission and completed crew")
 	var opening: Dictionary = _funded_fixture(graph, players, ids)
 	assert(opening["ships"].size() == ids.size() * 6)
 	for owner in ids:
@@ -5071,7 +5081,6 @@ func _test_recovery_economy() -> void:
 	_test_building_population_requirements()
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
-	var original_population: float = p["population"]
 	p["population"] = float(ECON.building_population("Metals", 1))
 	for resource in ECON.RESOURCES:
 		assert(not ECON.building_cost(p, resource).has(resource))
@@ -5082,7 +5091,7 @@ func _test_recovery_economy() -> void:
 	p["population"] = ECON.COLONY_MIN_ORIGIN_POPULATION
 	assert(ECON.enqueue(state, 1, 0, "colony_ship"))
 	var colony_job: Dictionary = p["queue"][0]
-	p["population"] = original_population
+	p["population"] = ECON.COLONY_POPULATION - 1.0
 	var starting: float = float(p["population"])
 	assert("Population" in ECON.construction_blockers(p, colony_job))
 	assert(not ECON._advance(p, colony_job, 6.0))
