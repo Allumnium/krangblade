@@ -414,7 +414,7 @@ func _infrastructure() -> void:
 	_table(["Building", "Cost", "Output bonus"], rows)
 	_body("Production buildings require %d local residents × target level squared. Planetary mineral production has no fixed rate cap; deposits, population and storage still matter. Farms scale with food capacity and labor." % E.building_population("Metals", 1))
 	_section("Shipyard modules")
-	_body("Station bottom row: Select Shipyards (Z), Build (B), Trade (T). Select Shipyards selects all completed local yards. Build → Build Shipyard (X) adds a yard at the next free port.")
+	_body("Station bottom row: Shipyards (Z), Build (B), Trade (T). Shipyards selects all completed local yards. Build → Shipyard (X) adds a yard at the next free port.")
 	rows = []
 	for i in range(1, E.MAX_SHIPYARDS + 1):
 		rows.append(["Module %d" % i, _recipe(E._cost("yard", i))])
@@ -433,7 +433,7 @@ func _ships() -> void:
 		rows.append([UI_TEXT.ship_kind_name(kind), "%.0f GC/yr" % E.ship_upkeep(kind)])
 	_table(["Ship", "Upkeep"], rows)
 	_section("Shipyard upgrades")
-	_body("Upgrade cards show current levels at top left; tooltips show the target level. Upgrade to Medium (U) or Large (I) in the corresponding row; locked ships remain hidden, then replace the upgrade with unlocked ships from column one. Higher shipyard levels increase construction speed and staffing requirements. Only station jobs show progress in the hub; yard production and upgrades appear in their own berths. Select Space Station returns to the parent station. Clear Rally / Rally occupy the bottom-right slots. Rally flags mark destinations for completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")
+	_body("Upgrade cards show current levels at top left; tooltips show the target level. Upgrade (U for Medium, I for Large) in the corresponding row; locked ships remain hidden, then replace the upgrade with unlocked ships from column one. Higher shipyard levels increase construction speed and staffing requirements. Only station jobs show progress in the hub; yard production and upgrades appear in their own berths. Select Space Station returns to the parent station. Clear / Rally occupy the bottom-right slots. Rally flags mark destinations for completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")
 	rows = []
 	for i in range(1, E.MAX_SHIPYARD_LEVEL + 1):
 		rows.append([str(i), "%.0f×" % (E.yard_speed(i) / E.yard_speed(1)), "%.0f" % float(E.SHIPYARD_POPULATION[i - 1])])
@@ -444,7 +444,7 @@ func _combat() -> void:
 	_table(["Weapon", "Damage / shot or volley", "Range"], [["Blaster", "%.0f" % E.BLASTER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Capital laser", "%.0f" % E.LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Mining lasers", "%.0f" % E.MINER_LASER_DAMAGE, "%.0f" % E.LASER_RANGE], ["Planetary defense", "%.0f" % E.PDS_DAMAGE, "%.0f" % E.PDS_RANGE]])
 	_body("Blasters fire four shots in 1 s, then pause 0.5 s. Military Scout: 1; Fighter: 2 (no lasers). Scouts use military orders and pursuit. Cruisers: %.0f HP, three blasters, two lasers and one missile launcher. Destroyers: %.0f HP, four blasters, four lasers and two launchers. Missiles deal %.0f damage each at range %.0f, every %.0f s. Splash: 30 world units, enemies only." % [E.ship_max_hp("cruiser"), E.ship_max_hp("destroyer"), E.MISSILE_DAMAGE, E.MISSILE_RANGE, E.MISSILE_COOLDOWN])
 	_section("Station defenses")
-	_table(["Upgrade", "Effect", "Cost"], [["Reinforced Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Laser Matrix", "+%d defensive lasers (4 total)" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Invulnerable; lost with station", _recipe(E._cost("pds", 1))], ["Dyson Sphere (Tech)", "-50% local ship material and corresponding credit costs", _recipe(E._cost("dyson_sphere", 1))]])
+	_table(["Upgrade", "Effect", "Cost"], [["Plating", "%.0f → %.0f max HP" % [E.STATION_HP, E.REINFORCED_STATION_HP], _recipe(E._cost("reinforced_plating", 1))], ["Lasers", "+%d defensive lasers (4 total)" % E.STATION_LASER_COUNT, _recipe(E._cost("laser_matrix", 1))], ["PDS", "Invulnerable; lost with station", _recipe(E._cost("pds", 1))], ["Dyson Sphere (Tech)", "-50% local ship material and corresponding credit costs", _recipe(E._cost("dyson_sphere", 1))]])
 	_note("Use coordinated attack groups, protect Harvesters and freighters, and retreat before losing ships and their crew investment.")
 
 func _controls() -> void:

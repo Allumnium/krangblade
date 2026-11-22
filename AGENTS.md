@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.56: Shorten command captions to Plating, Lasers, Shipyards, Upgrade, Clear and Shipyard; preserve contextual tooltip details, hotkeys, slots and mechanics. Verify visual fit.
+
 - v0.89.55: Replace physical-resource header annual deltas with white directional chevrons at the storage fill edge. One below 0.5% capacity/yr, two from 0.5%, three from 2%; hide below 0.05 t/yr or without capacity. Keep precise hover breakdown and local rates. Credits and population unchanged. Verify contrast and fit at empty/full bars.
 
 - v0.89.54: Remove player-facing 1× simulation-speed qualifiers from command hints, ship summaries and Codex; retain baseline durations and rates. Increase shared hotkey badges to 13 px and global F1–F4 buttons to 52×40 px, restoring captions. Verify icon/badge fit and small-window strip layout; runtime validation pending.

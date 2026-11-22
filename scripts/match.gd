@@ -1049,7 +1049,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	for target_level in [2, 3]:
 		var upgrade: Button = _button("", _upgrade_selected_yards.bind(target_level), grid, true)
 		var class_name_text: String = ECONOMY.size_name(target_level)
-		command_card_ui.set_face(upgrade, "Upgrade\n" + class_name_text, command_card_ui.icon("upgrade"))
+		command_card_ui.set_face(upgrade, "Upgrade", command_card_ui.icon("upgrade"))
 		yard_upgrades[target_level] = upgrade
 		hotkeys.register(upgrade, KEY_U if target_level == 2 else KEY_I, "Shipyard", "yard_upgrade" if target_level == 2 else "yard_upgrade_large", "Upgrade to " + class_name_text)
 	yard_top_slots.assign([yard_commands["miner"], yard_commands["fighter"], yard_commands["scout"], command_card_ui.add_spacer(grid)])
@@ -1065,7 +1065,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		_refresh_command_mode()
 		for ref in _selected_yards(_state(), true):
 			session.call("request_shipyard_rally", ref.x, ref.y, -1, Vector2.ZERO), grid)
-	command_card_ui.set_face(clear, "Clear\nRally", command_card_ui.icon("clear_rally"))
+	command_card_ui.set_face(clear, "Clear", command_card_ui.icon("clear_rally"))
 	command_card_ui.set_hint(clear, "Clear Rally")
 	yard_commands["clear"] = clear
 	hotkeys.register(clear, KEY_X, "Shipyard", "yard_clear", "Clear Rally")
@@ -1135,10 +1135,10 @@ func _build_station_command_card(parent: Container) -> void:
 	station_primary_grid = command_card_ui.create_grid(station_commands)
 	for i in range(4):
 		command_card_ui.add_spacer(station_primary_grid)
-	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Reinforced\nPlating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
-	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
-	hotkeys.register(station_upgrade_buttons["reinforced_plating"], KEY_V, "Station", "station_plating", "Reinforced Plating")
-	hotkeys.register(station_upgrade_buttons["laser_matrix"], KEY_L, "Station", "station_matrix", "Laser Matrix")
+	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Plating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
+	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Lasers", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
+	hotkeys.register(station_upgrade_buttons["reinforced_plating"], KEY_V, "Station", "station_plating", "Plating")
+	hotkeys.register(station_upgrade_buttons["laser_matrix"], KEY_L, "Station", "station_matrix", "Lasers")
 	var dyson_button: Button = _station_button(station_primary_grid, "Dyson\nSphere", "dyson_sphere", _station_upgrade_pressed.bind("dyson_sphere"))
 	var dyson_slot: Control = command_card_ui.add_spacer(station_primary_grid)
 	dyson_slot.custom_minimum_size = dyson_button.custom_minimum_size
@@ -1149,13 +1149,13 @@ func _build_station_command_card(parent: Container) -> void:
 	for i in range(4):
 		command_card_ui.add_spacer(station_primary_grid)
 	# Bottom row: Select Shipyards, Build, Trade, empty.
-	station_select_yards_button = _station_button(station_primary_grid, "Select\nShipyards", "yard", _station_select_yards)
+	station_select_yards_button = _station_button(station_primary_grid, "Shipyards", "yard", _station_select_yards)
 	hotkeys.register(station_select_yards_button, KEY_Z, "Station", "station_port_1", "Select Shipyards")
 	hotkeys.register(_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")), KEY_B, "Station", "station_build", "Build")
 	hotkeys.register(_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")), KEY_T, "Station", "station_trade", "Trade")
 	command_card_ui.add_spacer(station_primary_grid)
 	station_build_grid = command_card_ui.create_grid(station_commands)
-	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "PDS", "yard": "Build\nShipyard"}
+	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "PDS", "yard": "Shipyard"}
 	for resource in ECONOMY.RESOURCES:
 		captions[resource] = str(ECONOMY.ECONOMY_BUILDINGS[resource]["name"]).replace(" ", "\n")
 	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds", "yard"]:
@@ -1237,7 +1237,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		command_card_ui.set_level_badge(button, 1 if installed else 0)
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not _any_selected_station_buildable(kind, p)
-		var hint: String = "Reinforced Plating I · %.0f s\n+1,500 station HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s\n+2 defensive lasers (4 total)"
+		var hint: String = "Plating I · %.0f s\n+1,500 station HP" if kind == "reinforced_plating" else "Lasers I · %.0f s\n+2 defensive lasers (4 total)"
 		if kind == "dyson_sphere":
 			hint = "Dyson Sphere · %.0f s\nRequires Dyson Sphere technology\n−50%% local ship material and GC costs"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
@@ -2684,8 +2684,8 @@ func _job_name(item: Dictionary) -> String:
 		"pds": return "PDS"
 		"yard": return "Build Shipyard %d" % int(item.get("station_slot", item["level"]))
 		"yard_upgrade": return "Shipyard %d → Lv %d" % [ECONOMY.shipyard_port(_planet(), int(item["target"])), int(item["level"])]
-		"reinforced_plating": return "Reinforced Plating"
-		"laser_matrix": return "Laser Matrix"
+		"reinforced_plating": return "Plating"
+		"laser_matrix": return "Lasers"
 		"dyson_sphere": return "Dyson Sphere"
 		"production": return "%s → Lv %d" % [str(item["target"]), int(item["level"])]
 		_: return str(item["kind"]).replace("_", " ").capitalize()
