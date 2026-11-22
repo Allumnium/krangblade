@@ -5,6 +5,7 @@ const HUD = preload("res://scripts/ui_theme.gd")
 const UI_TEXT = preload("res://scripts/ui_text.gd")
 const CostButton = preload("res://scripts/cost_button.gd")
 const TradeRange = preload("res://scripts/trade_range.gd")
+const QUEUE_VIEW = preload("res://scripts/construction_queue_view.gd")
 const COMMAND_CARD_UI = preload("res://scripts/command_card_ui.gd")
 const COMMAND_HOTKEYS = preload("res://scripts/command_hotkeys.gd")
 const HULL_ART = preload("res://scripts/hull_art.gd")
@@ -123,6 +124,7 @@ var station_build_grid: GridContainer
 var station_trade: VBoxContainer
 var station_trade_back: Button
 var station_build_buttons: Dictionary = {}
+var queue_view := QUEUE_VIEW.new()
 var command_card_ui := COMMAND_CARD_UI.new()
 var station_card: String = "primary"
 var station_selected_index: int = -1
@@ -665,7 +667,7 @@ func _build_station_overview() -> void:
 	station_queue_heading.add_theme_color_override("font_color", HUD.MUTED)
 	station_queue_heading.autowrap_mode = TextServer.AUTOWRAP_OFF
 	station_queue_panel.add_child(station_queue_heading)
-	station_queue = _build_centered_queue(station_queue_panel)
+	station_queue = queue_view.build(station_queue_panel)
 	station_queue.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	station_queue.alignment = FlowContainer.ALIGNMENT_BEGIN
 	station_queue_panel.hide()
@@ -914,19 +916,6 @@ func _population_row(parent: Container) -> HBoxContainer:
 	row.add_child(icon)
 	return row
 
-func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
-	var blocked: Array[String] = []
-	if not job.is_empty():
-		blocked = ECONOMY.construction_blockers(p, job)
-	bar.set_meta("blocked", not blocked.is_empty())
-	if blocked.is_empty():
-		bar.remove_theme_stylebox_override("fill")
-		bar.remove_theme_stylebox_override("background")
-	else:
-		bar.add_theme_stylebox_override("background", HUD.surface(Color("#33251a"), Color("#db9b54"), 0, 3))
-		bar.add_theme_stylebox_override("fill", HUD.surface(Color("#b56b35"), Color("#f2b57e"), 0, 3))
-		bar.tooltip_text = "Blocked: " + ", ".join(blocked)
-
 func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {}, crew: float = 0.0, available: Dictionary = {}, kind: String = "") -> void:
 	var cost_button: CostButton = button as CostButton
 	cost_button.set_recipe(cost, crew, _population_texture() if crew > 0.0 else null, available, kind)
@@ -1003,20 +992,8 @@ func _build_yard_overview(parent: Container) -> void:
 	yard_overview.add_child(yard_context)
 	yard_status = _label("", 12)
 	yard_overview.add_child(yard_status)
-	yard_queue = _build_centered_queue(yard_overview)
+	yard_queue = queue_view.build(yard_overview)
 	yard_overview.hide()
-
-func _build_centered_queue(parent: Container) -> HFlowContainer:
-	var queue := HFlowContainer.new()
-	queue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# Center the flow's minimum-height block in the space below the header.
-	# Filling the width lets each wrapped line stay centered independently.
-	queue.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	queue.alignment = FlowContainer.ALIGNMENT_BEGIN
-	queue.add_theme_constant_override("h_separation", 6)
-	queue.add_theme_constant_override("v_separation", 6)
-	parent.add_child(queue)
-	return queue
 
 func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_scroll = VBoxContainer.new()
@@ -1447,7 +1424,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 				waiting.append(job)
 	jobs.append_array(waiting)
 	yard_status.text = "Offline" if not operating else ("Idle" if jobs.is_empty() else "Waiting for population" if active_id < 0 and waiting.size() == jobs.size() else "%d queued" % jobs.size())
-	_refresh_queue_tiles(yard_queue, yard_queue_rows, system, jobs, owned, active_id)
+	queue_view.refresh(yard_queue, yard_queue_rows, system, jobs, owned, active_id, _button, _cancel_job, _job_icon, _planet())
 	for kind in ECONOMY.SHIP_KINDS:
 		var button: Button = yard_commands[kind]
 		var recipe: Dictionary = ECONOMY.construction_cost(system, kind, 1)
@@ -1501,59 +1478,7 @@ func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
 	station_queue_panel.show()
 	station_queue_heading.text = "Queue (%d)" % jobs.size()
 	var active_id: int = int(jobs[0]["id"]) if not jobs.is_empty() else -1
-	_refresh_queue_tiles(station_queue, station_queue_rows, system, jobs, owned, active_id)
-
-func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dictionary, jobs: Array, owned: bool, active_id: int) -> void:
-	for id in rows.keys():
-		var keep: bool = false
-		for job in jobs:
-			if int(job["id"]) == id:
-				keep = true
-				break
-		if not keep:
-			var row: Control = rows[id]["row"]
-			queue.remove_child(row)
-			row.queue_free()
-			rows.erase(id)
-
-	for idx in range(jobs.size()):
-		var job: Dictionary = jobs[idx]
-		var id: int = int(job["id"])
-		if not rows.has(id):
-			var row := VBoxContainer.new()
-			row.add_theme_constant_override("separation", 3)
-			var cancel := _button("", _cancel_job.bind(id), row)
-			cancel.focus_mode = Control.FOCUS_NONE
-			cancel.custom_minimum_size = Vector2(57, 57)
-			cancel.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			cancel.expand_icon = true
-			cancel.add_theme_constant_override("icon_max_width", 44)
-			cancel.icon = _job_icon(job, int(system["owner"]))
-			var bar := ProgressBar.new()
-			bar.custom_minimum_size.y = 6
-			bar.show_percentage = false
-			bar.step = 0.0
-			bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			row.add_child(bar)
-			queue.add_child(row)
-			rows[id] = {"row": row, "bar": bar, "cancel": cancel}
-		var widgets: Dictionary = rows[id]
-		queue.move_child(widgets["row"], idx)
-		var percent: float = 100.0 * float(job["progress"]) / maxf(ECONOMY.EPS, float(job["work"]))
-		widgets["bar"].value = percent
-		widgets["bar"].visible = id == active_id or percent > 0.0
-		_style_progress(widgets["bar"], system, job)
-		var tile: Button = widgets["cancel"]
-		tile.disabled = not owned
-		var blocked: bool = bool(widgets["bar"].get_meta("blocked"))
-		if id == active_id:
-			tile.add_theme_stylebox_override("normal", HUD.surface(Color("#172c3b"), Color("#db9b54") if blocked else HUD.ACCENT, 3, 3))
-		else:
-			tile.remove_theme_stylebox_override("normal")
-		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), ("Delivering" if job.has("delivery_slot") else ("Building" if id == active_id else "Queued")), percent, "\n" + widgets["bar"].tooltip_text if blocked else "", ("\nCancel: material salvage" if ECONOMY.construction_leaves_salvage(job) else "\nCancel: full refund") if owned else ""]
-
-		if float(job.get("credit_cost", 0.0)) > 0.0:
-			tile.tooltip_text += "\n%.0f GC reserved%s" % [float(job["credit_cost"]), " · refunded on cancellation" if owned else ""]
+	queue_view.refresh(station_queue, station_queue_rows, system, jobs, owned, active_id, _button, _cancel_job, _job_icon, _planet())
 
 func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
@@ -2673,22 +2598,6 @@ func _refresh() -> void:
 	if owned_station:
 		_refresh_station_primary(p, owned)
 		_refresh_station_build(p, owned)
-
-func _job_name(item: Dictionary) -> String:
-	match str(item["kind"]):
-		"ship": return "Freighter"
-		"economy_building": return str(ECONOMY.ECONOMY_BUILDINGS[item["target"]]["name"])
-		"warehouse": return "Warehouse logistics → Lv %d" % int(item["level"])
-		"habitation": return "Habitation technology → Lv %d" % int(item["level"])
-		"orbital_housing": return "Orbital Eco-Housing"
-		"pds": return "PDS"
-		"yard": return "Build Shipyard %d" % int(item.get("station_slot", item["level"]))
-		"yard_upgrade": return "Shipyard %d → Lv %d" % [ECONOMY.shipyard_port(_planet(), int(item["target"])), int(item["level"])]
-		"reinforced_plating": return "Plating"
-		"laser_matrix": return "Lasers"
-		"dyson_sphere": return "Dyson Sphere"
-		"production": return "%s → Lv %d" % [str(item["target"]), int(item["level"])]
-		_: return str(item["kind"]).replace("_", " ").capitalize()
 
 func _system_name(index: int) -> String:
 	var names: Array = _state().get("map", {}).get("names", [])
