@@ -1532,6 +1532,11 @@ func _test_endless_conquest() -> void:
 			assert(int(spec[2]) > 0)
 			progress["completed"][next] = 0.0
 			assert(not ECON.objective_candidates(progress, category).is_empty())
+	var starter: Dictionary = {"military_built": 30, "fighters_built": 6}
+	assert(ECON.objective_spec("military_built")[3] == "Build 7 fighters")
+	assert(not ECON._objective_target_met(starter, "military_built"))
+	starter["fighters_built"] = 7
+	assert(ECON._objective_target_met(starter, "military_built"))
 	var first: Array = ECON.objective_spec("repeat:military_built:1")
 	var second: Array = ECON.objective_spec("repeat:military_built:2")
 	assert(int(second[2]) > int(first[2]))
@@ -1554,23 +1559,23 @@ func _test_galactic_credits() -> void:
 	# Isolate income from AI spending.
 	state["ai_players"].clear()
 	ECON.step(state, 0.1)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 5004.8))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 5004.8))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 4999.4))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 4999.4))
 	state["planets"][0]["population"] = 20000.0
 	state["planets"][1]["population"] = 10000.0
 	state["planets"][2]["population"] = 500000.0
 	assert(int(state["planets"][2]["owner"]) == 0)
 	ECON._accrue_resident_taxes(state, 0.0)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 5004.8))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 4999.4))
 	ECON._accrue_resident_taxes(state, 2.5)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 5254.8))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 5129.8))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5249.4))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 5124.4))
 	assert(not state["galactic_credits"].has(0))
 	state["planets"][0]["owner"] = 2
 	ECON._accrue_resident_taxes(state, 1.0)
 	assert(ECON.resident_tax_income(state, 1) == 0.0)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 5254.8))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 5279.8))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 5249.4))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 5274.4))
 	var fresh: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	assert(ECON.credit_balance(fresh, 1) == 5000.0 and ECON.credit_balance(fresh, 2) == 5000.0)
 	print("PASS: independent Galactic Credits, resident taxes, ownership, pause and fresh matches")
@@ -1643,20 +1648,21 @@ func _test_construction_credits() -> void:
 
 func _test_fleet_upkeep() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
-	assert(float(ECON.empire_totals(state, 1)["upkeep"]) == 27.0)
+	assert(float(ECON.empire_totals(state, 1)["upkeep"]) == 81.0)
+	assert(ECON.ship_upkeep("scout") == 3.0 and ECON.ship_upkeep("destroyer") == 105.0)
 	var fighter: Dictionary = {"owner": 1, "kind": "fighter"}
 	var miner: Dictionary = {"owner": 1, "kind": "miner"}
 	var gate: Dictionary = {"owner": 1, "kind": "warp_gate"}
 	var enemy: Dictionary = {"owner": 2, "kind": "destroyer"}
 	var neutral: Dictionary = {"owner": 0, "kind": "fighter"}
 	state["ships"] = [fighter, miner, gate, enemy, neutral]
-	state["galactic_credits"][1] = 3.0
-	state["galactic_credits"][2] = 100.0
+	state["galactic_credits"][1] = 9.0
+	state["galactic_credits"][2] = 300.0
 	ECON._pay_fleet_upkeep(state, 0.0)
-	assert(ECON.credit_balance(state, 1) == 3.0 and not fighter.has("unpaid_since"))
+	assert(ECON.credit_balance(state, 1) == 9.0 and not fighter.has("unpaid_since"))
 	ECON._pay_fleet_upkeep(state, 1.0)
 	state["elapsed"] = 1.0
-	assert(ECON.credit_balance(state, 1) == 0.0 and ECON.credit_balance(state, 2) == 65.0)
+	assert(ECON.credit_balance(state, 1) == 0.0 and ECON.credit_balance(state, 2) == 195.0)
 	assert(not miner.has("unpaid_since") and fighter.has("unpaid_since"))
 	assert(not gate.has("unpaid_since") and not neutral.has("unpaid_since"))
 	assert(ECON.unpaid_wage_years(state, fighter) == 1.0)
@@ -1664,14 +1670,14 @@ func _test_fleet_upkeep() -> void:
 	ECON._pay_fleet_upkeep(state, 1.0)
 	state["elapsed"] = 2.0
 	assert(ECON.unpaid_wage_years(state, fighter) == 2.0 and ECON.unpaid_wage_years(state, miner) == 1.0)
-	state["galactic_credits"][1] = 8.0
+	state["galactic_credits"][1] = 24.0
 	ECON._pay_fleet_upkeep(state, 1.0)
 	assert(ECON.credit_balance(state, 1) == 0.0)
 	assert(not fighter.has("unpaid_since") and not miner.has("unpaid_since"))
 	assert(int(ECON.empire_totals(state, 1)["unpaid_ships"]) == 0)
 	# No cash reserve needed if concurrent taxes cover current wages.
 	state["ships"] = [fighter, miner]
-	state["planets"][0]["population"] = 1600.0
+	state["planets"][0]["population"] = 4800.0
 	ECON._accrue_resident_taxes(state, 1.0)
 	ECON._pay_fleet_upkeep(state, 1.0)
 	assert(ECON.credit_balance(state, 1) == 0.0 and not fighter.has("unpaid_since"))
@@ -3983,7 +3989,29 @@ func _test_gap_position_orders() -> void:
 				break
 		assert(reached_first and craft["position"].is_equal_approx(second) and not craft.has("local_move_target"))
 		assert(ECON.local_sector(graph, craft) == -1 and not craft.get("holding", false))
-	print("PASS: straight open-space movement, queued destinations and authority validation")
+	# Exact Harvester movement within a discovered field, then target a
+	# particular rock through the same authority order path.
+	var mining_map: Dictionary = map.duplicate(true)
+	var rock_point := Vector2(1300, 500)
+	mining_map["fields"] = [{"position": rock_point, "radius": 300.0, "anchor": 0, "access": [0], "Metals": 1.0, "Crystals": 0.0, "chunks": [{"id": 17, "position": rock_point, "resource": "Metals", "remaining": 1000.0, "initial": 1000.0, "radius": 12.0}]}]
+	var mining_state: Dictionary = _funded_fixture(mining_map, {1: {"team": 1}}, [1], false)
+	var mining_graph: Dictionary = ECON.military_graph(mining_state)
+	var harvester: Dictionary = {"id": 9806, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(500, 500), "heading": Vector2.RIGHT, "hp": ECON.ship_max_hp("miner"), "cargo": ECON.empty_stock(), "mining_mode": "idle", "field": -1}
+	mining_state["ships"] = [harvester]
+	ECON._survey(mining_state, ECON._combat_group(mining_state, 1), 0)
+	var interior := rock_point + Vector2(100, 100)
+	var anchor: int = ECON.patrol_node(mining_state, mining_graph, 1, interior)
+	assert(ECON.issue_unit_order(mining_state, 1, [9806], {"kind": "position", "target": anchor, "point": interior, "move_only": true}, false))
+	assert(ECON.issue_unit_order(mining_state, 1, [9806], {"kind": "mine", "target": 0, "chunk": 17}, true))
+	for tick in range(200):
+		if not harvester.has("local_move_target"):
+			break
+		ECON._work_local_move(mining_graph, harvester, 0.5, mining_state)
+	assert(harvester["position"].is_equal_approx(interior))
+	assert(harvester["order_queue"][0]["chunk"] == 17)
+	assert(ECON.issue_unit_order(mining_state, 1, [9806], {"kind": "mine", "target": 0, "chunk": 17}, false))
+	assert(harvester["assigned_field"] == 0 and harvester["assigned_chunk"] == 17)
+	print("PASS: straight open-space and asteroid interior movement, queued destinations, specific rock and authority validation")
 
 func _test_local_position_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}

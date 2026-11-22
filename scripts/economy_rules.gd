@@ -26,7 +26,7 @@ const ROGUE_GRACE_YEARS: float = 60.0
 const ROGUE_CHECK_YEARS: float = 10.0
 const ROGUE_CHANCE: float = 0.005
 # Annual operating wages for completed mobile hulls; structures are exempt.
-const SHIP_UPKEEP_GC = {"scout": 1.0, "miner": 3.0, "fighter": 5.0, "ship": 8.0, "colony_ship": 10.0, "science_ship": 10.0, "cruiser": 15.0, "destroyer": 35.0}
+const SHIP_UPKEEP_GC = {"scout": 3.0, "miner": 9.0, "fighter": 15.0, "ship": 24.0, "colony_ship": 30.0, "science_ship": 30.0, "cruiser": 45.0, "destroyer": 105.0}
 # Fixed labor fee, independent of future fluctuating market prices.
 const CONSTRUCTION_CREDIT_FRACTION: float = 0.5
 const CONSTRUCTION_REFERENCE_VALUES = {"Metals": 2.0, "Organics": 1.0, "Crystals": 8.0}
@@ -9511,7 +9511,7 @@ const OBJECTIVE_SPECS = {
 	"population_2": ["economic", "population", 200000, "Reach 200k population", "population"],
 	"population_3": ["economic", "population", 500000, "Reach 500k population", "population_2"],
 	"advanced_population": ["economic", "population", 1000000, "Reach 1M population", "population_3"],
-	"military_built": ["military", "military_built", 5, "Build 5 military ships", ""],
+	"military_built": ["military", "fighters_built", 7, "Build 7 fighters", ""],
 	"military_built_2": ["military", "military_built", 15, "Build 15 military ships", "military_built"],
 	"military_built_3": ["military", "military_built", 30, "Build 30 military ships", "military_built_2"],
 	"enemy_ships": ["military", "enemy_ships_destroyed", 3, "Destroy 3 enemy ships", ""],
