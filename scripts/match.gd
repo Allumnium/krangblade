@@ -44,6 +44,7 @@ const MATCH_EMPIRE_UI = preload("res://scripts/match_empire_ui.gd")
 const MATCH_RESOURCE_HUD = preload("res://scripts/match_resource_hud.gd")
 const SHIP_MOTION_VIEW = preload("res://scripts/ship_motion_view.gd")
 const WORLD_RENDER_BATCHES = preload("res://scripts/world_render_batches.gd")
+const CELESTIAL_VIEW = preload("res://scripts/celestial_view.gd")
 const TACTICAL_ALERTS = preload("res://scripts/tactical_alerts.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
@@ -54,18 +55,11 @@ const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
 const AUTOCAST_SLOTS = {"auto_explore": "explore", "auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm", "collect": "collect", "auto_retreat": "retreat"}
-const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
 const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
 const OVERVIEW_SHIP_MAX_MULTIPLIER: float = 12.0
 const OVERVIEW_ART_NORMAL_ZOOM: float = 16.0
 const TRADE_MAX_EXTRA_HEIGHT: float = 48.0
 # Projected system radius in logical screen pixels, independent of selection.
-const PLANET_FADE_START: float = 40.0
-const PLANET_FADE_FULL: float = 100.0
-const PLANET_FADE_SECONDS: float = 0.22
-const STAR_TEXTURE_SIZE: int = 256
-const STAR_TEXTURE_CORE: float = 74.0
-const STAR_SPARK_COUNT: int = 9
 
 var session: Node
 var developer_tools := MATCH_DEVELOPER_TOOLS.new()
@@ -74,6 +68,7 @@ var empire_ui := MATCH_EMPIRE_UI.new()
 var resource_hud := MATCH_RESOURCE_HUD.new()
 var ship_motion := SHIP_MOTION_VIEW.new()
 var world_batches := WORLD_RENDER_BATCHES.new()
+var celestial_view := CELESTIAL_VIEW.new()
 var settings := ConfigFile.new()
 var music_volume: float = 100.0
 var sfx_volume: float = 100.0
@@ -125,9 +120,6 @@ var station_queue_rows: Dictionary = {}
 var station_details: VBoxContainer
 var station_queue_panel: VBoxContainer
 var station_queue_heading: Label
-var asteroid_shape_cache: Dictionary = {}
-var asteroid_frame_meshes: Array[ArrayMesh] = []
-var asteroid_cache_seed: int = -1
 var population_label: Label
 var raw_antimatter_label: Label
 var population_delta_label: Label
@@ -233,17 +225,8 @@ var initial_selection_done: bool = false
 var game_visual_clock: float = 0.0
 var transfer_visuals: Dictionary = {}
 var transfer_visual_seed: int = -1
-var orbit_visual_time: float = -1.0
-var orbit_sample_time: float = -1.0
-var orbit_sample_age: float = 0.0
-var orbit_seed: int = -1
 var info: Label
 var visual_clock: float = 0.0
-var system_visuals: Dictionary = {}
-var star_textures: Dictionary = {}
-var system_visual_seed: int = -1
-var planet_detail_alpha: Dictionary = {}
-var planet_detail_seed: int = -1
 var trade_sliders: Dictionary = {}
 var trade_checks: Dictionary = {}
 var trade_check_icons: Dictionary = {}
@@ -1786,7 +1769,7 @@ func _refresh_body_overview(system: Dictionary) -> void:
 	body_title.text = _body_name(selected, selected_body)
 	body_context.text = "%s\n%s" % [_system_name(selected), owner_name]
 	var has_battery: bool = system.get("pds", {}).has(selected_body)
-	var bodies: Array = _system_visual(selected, _state())["bodies"]
+	var bodies: Array = celestial_view.system_visual(selected, _state())["bodies"]
 	var lines: PackedStringArray = []
 	for resource in ECONOMY.ACTIVE_PRODUCTION:
 		var sources: Array = _planet_production_sources(bodies, resource)
@@ -1852,7 +1835,7 @@ func _draw_sector_names() -> void:
 	var font: Font = ThemeDB.fallback_font
 	for i in range(mini(points.size(), names.size())):
 		var pos: Vector2 = _screen_point(points[i])
-		var radius: float = _star_draw_radius(_planet_radius(i, state))
+		var radius: float = celestial_view.star_draw_radius(_planet_radius(i, state))
 		var anchor: Vector2 = pos + Vector2(-80, -radius - 7)
 		if not bounds.intersects(Rect2(anchor - Vector2(0, 16), Vector2(160, 18))):
 			continue
@@ -3414,203 +3397,8 @@ func _zoom_at(point: Vector2, direction: float) -> void:
 	camera.zoom_at(point, direction, size.x, _projection_size(), _map_size())
 	map_canvas.queue_redraw()
 
-func _system_visual(index: int, state: Dictionary) -> Dictionary:
-	var seed_value: int = int(state["map"]["seed"])
-	if system_visual_seed != seed_value:
-		system_visual_seed = seed_value
-		system_visuals.clear()
-	if not system_visuals.has(index):
-		var points: Array = state["map"]["points"]
-		var closest: float = INF
-		for i in range(points.size()):
-			if i != index:
-				closest = minf(closest, (points[index] as Vector2).distance_to(points[i]))
-		system_visuals[index] = {"bodies": ECONOMY.system_bodies(state["planets"][index], seed_value, index), "spacing": closest}
-	return system_visuals[index]
-
 func _planet_radius(index: int, state: Dictionary) -> float:
-	return _system_world_radius(index, state) * _fit() * camera.zoom
-
-func _system_world_radius(index: int, state: Dictionary) -> float:
-	var ideal: float = SYSTEM_WORLD_RADIUS * float(state["planets"][index].get("size_factor", 1.0))
-	return minf(ideal, float(_system_visual(index, state)["spacing"]) * 0.39)
-
-func _planet_detail_target(radius: float) -> float:
-	return smoothstep(PLANET_FADE_START, PLANET_FADE_FULL, radius)
-
-func _planet_detail_opacity(index: int, radius: float) -> float:
-	return float(planet_detail_alpha.get(index, _planet_detail_target(radius)))
-
-func _update_planet_detail(state: Dictionary, delta: float) -> void:
-	var seed_value: int = int(state["map"]["seed"])
-	if planet_detail_seed != seed_value:
-		planet_detail_alpha.clear()
-		planet_detail_seed = seed_value
-	for index in range(state["planets"].size()):
-		var target: float = _planet_detail_target(_planet_radius(index, state))
-		var previous: float = float(planet_detail_alpha.get(index, 0.0))
-		planet_detail_alpha[index] = move_toward(previous, target, delta / PLANET_FADE_SECONDS)
-
-func _star_draw_radius(radius: float) -> float:
-	# Constant world-space ratio; camera zoom is the only size multiplier.
-	return radius * 0.13
-
-func _update_orbit_clock(state: Dictionary, delta: float) -> void:
-	var elapsed: float = float(state["elapsed"])
-	var seed_value: int = int(state["map"]["seed"])
-	var speed: float = float(state.get("time_speed", 1))
-	if orbit_seed != seed_value or orbit_visual_time < 0.0 or elapsed < orbit_sample_time or speed <= 0.0 or not state.get("match_result", {}).is_empty():
-		orbit_seed = seed_value
-		orbit_visual_time = elapsed
-		orbit_sample_time = elapsed
-		orbit_sample_age = 0.0
-		return
-	if elapsed != orbit_sample_time:
-		orbit_sample_time = elapsed
-		orbit_sample_age = 0.0
-	else:
-		orbit_sample_age += delta
-	# Predict only a bounded interval; gently converge on authoritative time.
-	var target: float = elapsed + minf(orbit_sample_age, 0.6) * speed
-	var correction: float = clampf((target - orbit_visual_time) * 4.0, -speed, speed * 2.0)
-	orbit_visual_time = minf(maxf(orbit_visual_time, target), orbit_visual_time + delta * maxf(0.0, speed + correction))
-
-func _orbit_time(state: Dictionary) -> float:
-	return orbit_visual_time if orbit_visual_time >= 0.0 and orbit_seed == int(state["map"]["seed"]) else float(state["elapsed"])
-
-func _body_position(body: Dictionary, radius: float, time: float) -> Vector2:
-	return ECONOMY.body_position(body, radius, time)
-
-func _draw_elliptical_orbit(center: Vector2, radius: float, tint: Color) -> void:
-	var points := PackedVector2Array()
-	for step in range(65):
-		var angle: float = TAU * float(step) / 64.0
-		points.append(center + Vector2(cos(angle) * radius, sin(angle) * radius * 0.65))
-	map_canvas.draw_polyline(points, tint, 0.8, true)
-
-# Resource palettes use strong surface hues, not UI icon tints.
-func _body_base_color(body: Dictionary) -> Color:
-	var palette: Dictionary = {"Organics": Color("#52a452"), "Metals": Color("#a3a7ad"), "Crystals": Color("#a16bda")}
-	var material: String = str(body["resource"])
-	var base: Color = palette.get(material, HUD.COLORS.get(material, Color("#7d8b9b")))
-	return base.lerp(Color("#7b8790"), float(body["muted"]) * (0.22 if not material.is_empty() else 0.65))
-
-# Generate a unique shaded surface once per visible body; no separate highlight dot.
-func _body_texture(body: Dictionary) -> Texture2D:
-	if body.has("texture"):
-		return body["texture"]
-	var noise := FastNoiseLite.new()
-	noise.seed = int(body["surface_seed"])
-	noise.frequency = 0.065
-	noise.fractal_octaves = 3
-	var image := Image.create(96, 96, false, Image.FORMAT_RGBA8)
-	var base: Color = _body_base_color(body)
-	var highlight: Color = base.lightened(0.48)
-	var light := Vector3(-0.55, -0.45, 0.70).normalized()
-	var angle: float = float(body["surface_angle"])
-	var bands: bool = bool(body["bands"])
-	for y in range(96):
-		for x in range(96):
-			var q := (Vector2(x + 0.5, y + 0.5) - Vector2(48, 48)) / 47.0
-			var rr: float = q.length_squared()
-			if rr >= 1.0:
-				continue
-			var z: float = sqrt(1.0 - rr)
-			var uv: Vector2 = q.rotated(angle)
-			var grain: float = noise.get_noise_2d(uv.x * 90.0 + 300.0 * z, uv.y * 90.0)
-			var terrain: float = grain * 0.7
-			if bands:
-				terrain = sin(uv.y * 29.0 + grain * 2.0) * 0.24 + grain * 0.2
-			var diffuse: float = maxf(0.0, Vector3(q.x, q.y, z).dot(light))
-			var color: Color = base.lerp(highlight, maxf(0.0, terrain) * 0.7).darkened(clampf(0.74 - diffuse * 0.64 - terrain * 0.18, 0.0, 0.85))
-			color.a = clampf((1.0 - sqrt(rr)) * 47.0, 0.0, 1.0)
-			image.set_pixel(x, y, color)
-	body["texture"] = ImageTexture.create_from_image(image)
-	return body["texture"]
-
-# Bake two photosphere/corona textures once per match. Every star shares
-# its temperature-class texture with its own rotation and small color tint.
-# No per-frame noise, particle nodes, network state or random simulation calls.
-func _star_texture(cool: bool) -> Texture2D:
-	if star_textures.has(cool):
-		return star_textures[cool]
-	var noise := FastNoiseLite.new()
-	noise.seed = 91813 if cool else 41207
-	noise.frequency = 0.047
-	noise.fractal_octaves = 4
-	var image := Image.create(STAR_TEXTURE_SIZE, STAR_TEXTURE_SIZE, false, Image.FORMAT_RGBA8)
-	var dark := Color("#496c9b") if cool else Color("#c05a25")
-	var middle := Color("#a4c7eb") if cool else Color("#ffbf64")
-	var bright := Color("#eaf7ff") if cool else Color("#fff8dc")
-	var halo := Color("#77a8df") if cool else Color("#f4a752")
-	var half: float = float(STAR_TEXTURE_SIZE) * 0.5
-	var extent: float = half / STAR_TEXTURE_CORE
-	for y in range(STAR_TEXTURE_SIZE):
-		for x in range(STAR_TEXTURE_SIZE):
-			var q := (Vector2(x + 0.5, y + 0.5) - Vector2.ONE * half) / STAR_TEXTURE_CORE
-			var r: float = q.length()
-			if r >= extent:
-				continue
-			# Directional noise breaks the corona into soft, radial filaments.
-			var axis: Vector2 = q.normalized()
-			var plume: float = clampf(0.5 + noise.get_noise_2d(axis.x * 87.0 + 133.0, axis.y * 87.0) * 1.25, 0.0, 1.0)
-			var distance: float = maxf(0.0, r - 1.0)
-			var falloff: float = 1.0 - smoothstep(1.0, extent, r)
-			var glow: float = (0.15 * exp(-distance * 7.0) + 0.18 * plume * plume * exp(-distance * 4.5)) * falloff
-			var coverage: float = 1.0 - smoothstep(1.0 - 1.0 / STAR_TEXTURE_CORE, 1.0 + 1.0 / STAR_TEXTURE_CORE, r)
-			var color: Color = halo.lerp(middle, plume * 0.24)
-			if coverage > 0.0:
-				var z: float = sqrt(maxf(0.0, 1.0 - r * r))
-				var surface: Vector2 = q * 105.0 + Vector2(z * 28.0, z * 15.0)
-				# Warp the granulation into curved plasma cells and mottled lanes.
-				var warp: float = noise.get_noise_2d(surface.x + 320.0, surface.y - 110.0)
-				var cells: float = noise.get_noise_2d(surface.x + warp * 23.0, surface.y + warp * 18.0)
-				var grain: float = noise.get_noise_2d(surface.x * 2.8 + 580.0, surface.y * 2.8)
-				var heat: float = clampf(0.56 + cells * 0.83 + grain * 0.20 + z * 0.11, 0.0, 1.0)
-				var core: Color = dark.lerp(middle, smoothstep(0.0, 0.56, heat)).lerp(bright, smoothstep(0.35, 0.98, heat))
-				core = core.darkened((1.0 - z) * 0.18)
-				color = color.lerp(core, coverage)
-			color.a = coverage + glow * (1.0 - coverage)
-			if color.a > 0.001:
-				image.set_pixel(x, y, color)
-	var texture := ImageTexture.create_from_image(image)
-	star_textures[cool] = texture
-	return texture
-
-func _draw_star(index: int, pos: Vector2, radius: float, tint: Color, cool: bool, opacity: float) -> void:
-	var viewport := Rect2(Vector2.ZERO, map_canvas.size)
-	var extent: float = radius * float(STAR_TEXTURE_SIZE) / (2.0 * STAR_TEXTURE_CORE)
-	if not viewport.grow(extent + 3.0).has_point(pos):
-		return
-	if radius < 2.0:
-		# Keep the smallest overview stars clean and cheap.
-		map_canvas.draw_circle(pos, maxf(0.75, radius), Color(tint.lightened(0.22), opacity), true, -1.0, true)
-		return
-	var texture: Texture2D = _star_texture(cool)
-	var rotation: float = float(index) * 2.399963 + visual_clock * (0.012 + 0.003 * float(index % 5))
-	var modulation: Color = Color.WHITE.lerp(tint.lightened(0.30), 0.20)
-	modulation.a = opacity
-	map_canvas.draw_set_transform(pos, rotation)
-	map_canvas.draw_texture_rect(texture, Rect2(-Vector2.ONE * extent, Vector2.ONE * extent * 2.0), false, modulation)
-	map_canvas.draw_set_transform(Vector2.ZERO)
-	# Analytic, short-lived plasma sparks drift away from the limb.
-	# Fade in only at detail zoom; fixed count, no persistent emitters.
-	var detail: float = smoothstep(10.0, 32.0, radius)
-	if detail <= 0.001:
-		return
-	for i in range(STAR_SPARK_COUNT):
-		var phase: float = float(i) * 0.618034 + float(index) * 0.137
-		var age: float = fposmod(visual_clock * (0.16 + float(i % 3) * 0.025) + phase, 1.0)
-		var angle: float = phase * TAU * 3.0 + rotation + age * 0.15
-		var axis: Vector2 = Vector2.from_angle(angle)
-		var point: Vector2 = pos + axis * radius * lerpf(0.98, 1.36, age)
-		if not viewport.grow(4.0).has_point(point):
-			continue
-		var fade: float = sin(age * PI) * detail * opacity
-		var spark_size: float = clampf(radius * 0.021, 0.65, 2.1)
-		var spark_color: Color = tint.lightened(0.48)
-		map_canvas.draw_line(point - axis * minf(5.0, radius * 0.045), point, Color(spark_color, fade * 0.26), maxf(0.7, spark_size * 0.65), true)
-		map_canvas.draw_circle(point, spark_size, Color(spark_color, fade * 0.54), true, -1.0, true)
+	return celestial_view.system_world_radius(index, state) * _fit() * camera.zoom
 
 func _planet_production_sources(bodies: Array, resource: String) -> Array:
 	var sources: Array = []
@@ -3635,10 +3423,10 @@ func _draw_planet_production(state: Dictionary, index: int, center: Vector2, rad
 	var system: Dictionary = state["planets"][index]
 	if detail < 0.05 or not ECONOMY.has_station(system) or bool(system.get("planet_blockaded", false)):
 		return
-	var bodies: Array = _system_visual(index, state)["bodies"]
+	var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
 	if bodies.is_empty():
 		return
-	var elapsed: float = _orbit_time(state)
+	var elapsed: float = celestial_view.orbit_time(state)
 	for resource in ECONOMY.ACTIVE_PRODUCTION:
 		var output: float = _planet_production_rate(system, resource)
 		if output <= ECONOMY.EPS:
@@ -3648,7 +3436,7 @@ func _draw_planet_production(state: Dictionary, index: int, center: Vector2, rad
 		var bay: int = clampi(floori(float(system["stock"][resource]) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system)) * ECONOMY.STATION_STORAGE_BAYS), 0, ECONOMY.STATION_STORAGE_BAYS - 1)
 		var destination: Vector2 = _station_bay_point(_screen_point(ECONOMY.station_position(state, index, elapsed)), _station_radius(), elapsed, resource, bay)
 		for slot in sources:
-			var origin: Vector2 = center + _body_position(bodies[slot], radius, elapsed)
+			var origin: Vector2 = center + celestial_view.body_position(bodies[slot], radius, elapsed)
 			var count: int = clampi(ceili(sqrt(output / float(sources.size()))), 1, 7)
 			for k in range(count):
 				var phase: float = fposmod(elapsed * 0.8 + float(k) / float(count) + float(slot) * 0.173, 1.0)
@@ -3672,8 +3460,8 @@ func _draw_planet_upgrade_deliveries(state: Dictionary, index: int, center: Vect
 	if detail < 0.05:
 		return
 	var system: Dictionary = state["planets"][index]
-	var bodies: Array = _system_visual(index, state)["bodies"]
-	var elapsed: float = _orbit_time(state)
+	var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
+	var elapsed: float = celestial_view.orbit_time(state)
 	for item in system["queue"]:
 		if not item.has("delivery_slot"):
 			continue
@@ -3682,7 +3470,7 @@ func _draw_planet_upgrade_deliveries(state: Dictionary, index: int, center: Vect
 			continue
 		var fraction: float = 1.0 - clampf(float(item["delivery_remaining"]) / ECONOMY.PLANET_UPGRADE_DELIVERY_TIME, 0.0, 1.0)
 		var origin: Vector2 = _screen_point(ECONOMY.station_position(state, index, elapsed))
-		var destination: Vector2 = center + _body_position(bodies[slot], radius, elapsed)
+		var destination: Vector2 = center + celestial_view.body_position(bodies[slot], radius, elapsed)
 		var point: Vector2 = origin.lerp(destination, fraction)
 		var pod_size: float = clampf(radius * 0.025, 2.0, 8.0) * 0.75
 		var color: Color = HUD.COLORS.get(str(item["target"]), Color("#d7b774")) if item["kind"] in ["economy_building", "production"] else Color("#d7b774")
@@ -3697,26 +3485,26 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(pos):
 		return
 	var system: Dictionary = state["planets"][index]
-	var color: Color = _planet_color(system)
-	var star_radius: float = _star_draw_radius(radius)
+	var color: Color = celestial_view.planet_color(system)
+	var star_radius: float = celestial_view.star_draw_radius(radius)
 	var star_color: Color = Color("#fff0c4").lerp(color.lightened(0.25), 0.30) if ECONOMY.has_planets(system) else Color("#8ea2bc")
-	var detail: float = _planet_detail_opacity(index, radius)
+	var detail: float = celestial_view.planet_detail_opacity(index, radius)
 	if detail > 0.001:
-		var bodies: Array = _system_visual(index, state)["bodies"]
+		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
 		for slot in range(bodies.size()):
 			var body: Dictionary = bodies[slot]
 			var orbit: float = radius * float(body["orbit"])
 			if _show_system_rings(index):
-				_draw_elliptical_orbit(pos, orbit, Color(tint, 0.20 * detail))
-			var point: Vector2 = pos + _body_position(body, radius, _orbit_time(state))
+				celestial_view.draw_elliptical_orbit(pos, orbit, Color(tint, 0.20 * detail), map_canvas)
+			var point: Vector2 = pos + celestial_view.body_position(body, radius, celestial_view.orbit_time(state))
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
-					map_canvas.draw_texture_rect(_body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(1.0, 1.0, 1.0, detail))
+					map_canvas.draw_texture_rect(celestial_view.body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(1.0, 1.0, 1.0, detail))
 				else:
-					map_canvas.draw_circle(point, body_radius, Color(_body_base_color(body).darkened(0.18), detail), true)
+					map_canvas.draw_circle(point, body_radius, Color(celestial_view.body_base_color(body).darkened(0.18), detail), true)
 				if system.get("pds", {}).has(slot):
-					_draw_pds_frame(point, body_radius, detail)
+					celestial_view.draw_pds_frame(point, body_radius, detail, map_canvas)
 					if detail >= 0.5:
 						_draw_damage_bar(point, body_radius + 4.0, float(system["pds"][slot].get("hp", ECONOMY.PDS_HP)) / ECONOMY.PDS_HP)
 				if (index == selected and selected_body == slot) or (building_selection_kind == "pds" and selected_buildings.has(Vector2i(index, slot))):
@@ -3725,9 +3513,9 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 	_draw_planet_production(state, index, pos, radius, detail)
 	_draw_planet_upgrade_deliveries(state, index, pos, radius, detail)
 	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(camera.zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
-	_draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity)
+	celestial_view.draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity, map_canvas, visual_clock)
 	if bool(system.get("station", {}).get("dyson_sphere", false)):
-		_draw_pds_frame(pos, star_radius * 1.18, 1.0)
+		celestial_view.draw_pds_frame(pos, star_radius * 1.18, 1.0, map_canvas)
 		map_canvas.draw_arc(pos, star_radius * 1.35, 0.0, TAU, 48, Color("#e5b66c"), 1.5, true)
 	if detail < 0.5:
 		var defense_health: float = 1.0
@@ -3738,38 +3526,21 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		map_canvas.draw_arc(pos, star_radius + 3.0, -PI * 0.8, PI * 0.8, 18, Color(Color("#bdcbd6"), 1.0 - detail), 1.5, true)
 	if detail < 0.999:
 		# A small battery marker stays on its actual planet even at overview zoom.
-		var bodies: Array = _system_visual(index, state)["bodies"]
+		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
 		for slot in system.get("pds", {}):
 			if int(slot) >= 0 and int(slot) < bodies.size():
-				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, _orbit_time(state))
+				var point: Vector2 = pos + celestial_view.body_position(bodies[int(slot)], radius, celestial_view.orbit_time(state))
 				map_canvas.draw_circle(point, 2.0, Color(Color("#bdcbd6"), 1.0 - detail), true)
 	if detail < 0.3 and building_selection_kind == "pds":
 		# Retain a selection marker when F frames a distant battery group and
 		# the individual planet surfaces fade out at overview zoom.
-		var bodies: Array = _system_visual(index, state)["bodies"]
+		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
 		for slot in system.get("pds", {}):
 			if selected_buildings.has(Vector2i(index, int(slot))) and int(slot) < bodies.size():
-				var point: Vector2 = pos + _body_position(bodies[int(slot)], radius, _orbit_time(state))
+				var point: Vector2 = pos + celestial_view.body_position(bodies[int(slot)], radius, celestial_view.orbit_time(state))
 				world_batches.draw_selection_ring(point, 6.0)
 	if _show_system_rings(index):
 		map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
-
-# Thin metallic latitude/longitude ribs, clipped to the planet silhouette.
-func _draw_pds_frame(center: Vector2, radius: float, opacity: float) -> void:
-	var r: float = radius * 1.08
-	var steel := Color(Color("#c4d1dc"), opacity)
-	var shadow := Color(Color("#344655"), opacity)
-	map_canvas.draw_arc(center, r, 0.0, TAU, 32, shadow, 2.0, true)
-	map_canvas.draw_arc(center, r, 0.0, TAU, 32, steel, 1.0, true)
-	if radius < 4.0:
-		return
-	for angle in [0.0, PI / 3.0, -PI / 3.0]:
-		var axis := Vector2.from_angle(angle)
-		for fraction in [-0.5, 0.0, 0.5]:
-			var midpoint: Vector2 = center + axis.orthogonal() * r * fraction
-			var extent: Vector2 = axis * r * sqrt(1.0 - fraction * fraction)
-			map_canvas.draw_line(midpoint - extent, midpoint + extent, shadow, 2.0, true)
-			map_canvas.draw_line(midpoint - extent, midpoint + extent, steel, 0.8, true)
 
 func _empire_color_index(owner: int) -> int:
 	if owner == 0:
@@ -3780,22 +3551,6 @@ func _empire_color_index(owner: int) -> int:
 func _empire_color(owner: int) -> Color:
 	return COLORS[_empire_color_index(owner)]
 
-func _planet_color(planet: Dictionary) -> Color:
-	var sum := Vector3.ZERO
-	var weight: float = 0.0
-	for resource in ECONOMY.EXTRACTED:
-		var amount: float = float(planet["abundance"].get(resource, 0.0))
-		var tint: Color = HUD.COLORS[resource]
-		sum += Vector3(tint.r, tint.g, tint.b) * amount
-		weight += amount
-	var organic: float = maxf(0.0, float(planet["bonuses"].get("Organics", 1.0)) - 1.0)
-	var green: Color = HUD.COLORS["Organics"]
-	sum += Vector3(green.r, green.g, green.b) * organic
-	weight += organic
-	if weight <= ECONOMY.EPS:
-		return Color("#617587")
-	var mix: Vector3 = sum / weight
-	return Color(mix.x, mix.y, mix.z)
 
 func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 	var hit := Vector2i(-1, -1)
@@ -3804,15 +3559,15 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
 		var radius: float = _planet_radius(index, state)
-		if _planet_detail_opacity(index, radius) < 0.3:
+		if celestial_view.planet_detail_opacity(index, radius) < 0.3:
 			continue
 		var center: Vector2 = _screen_point(state["map"]["points"][index])
 		if point.distance_to(center) > radius + 32.0:
 			continue
-		var bodies: Array = _system_visual(index, state)["bodies"]
+		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
 		for slot in range(bodies.size()):
 			var body: Dictionary = bodies[slot]
-			var position: Vector2 = center + _body_position(body, radius, _orbit_time(state))
+			var position: Vector2 = center + celestial_view.body_position(body, radius, celestial_view.orbit_time(state))
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			var distance: float = point.distance_to(position)
 			if distance <= body_radius + 3.0 and distance < nearest:
@@ -4045,8 +3800,8 @@ func _building_world(state: Dictionary, ref: Vector2i, kind: String) -> Vector2:
 		return ECONOMY.shipyard_position(state, ref.x, ref.y, float(state["elapsed"]))
 	if kind == "station":
 		return ECONOMY.station_position(state, ref.x, float(state["elapsed"]))
-	var body: Dictionary = _system_visual(ref.x, state)["bodies"][ref.y]
-	return (state["map"]["points"][ref.x] as Vector2) + _body_position(body, _system_world_radius(ref.x, state), _orbit_time(state))
+	var body: Dictionary = celestial_view.system_visual(ref.x, state)["bodies"][ref.y]
+	return (state["map"]["points"][ref.x] as Vector2) + celestial_view.body_position(body, celestial_view.system_world_radius(ref.x, state), celestial_view.orbit_time(state))
 
 func _selected_yards(state: Dictionary, owned_only: bool = false) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
@@ -4090,7 +3845,7 @@ func _select_visible_buildings(state: Dictionary, first: Vector2i, kind: String)
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
 		var system: Dictionary = state["planets"][index]
-		if kind == "pds" and _planet_detail_opacity(index, _planet_radius(index, state)) < 0.3:
+		if kind == "pds" and celestial_view.planet_detail_opacity(index, _planet_radius(index, state)) < 0.3:
 			continue
 		var slots: Array = range(system["yards"].size()) if kind == "shipyard" else ([0] if ECONOMY.has_station(system) else []) if kind == "station" else system.get("pds", {}).keys()
 		for slot in slots:
@@ -5199,17 +4954,13 @@ func _process(delta: float) -> void:
 	ship_motion.advance(delta)
 	var state: Dictionary = _state()
 	if not state.is_empty():
-		_update_orbit_clock(state, delta)
-		_update_planet_detail(state, delta)
+		celestial_view.update_orbit_clock(state, delta)
+		celestial_view.update_planet_detail(state, delta, _fit(), camera.zoom)
 		var poses: Dictionary = _ship_poses(state, delta)
 		_follow_selection(state, poses)
 		_sync_destruction_effects(state)
 	else:
-		orbit_visual_time = -1.0
-		orbit_sample_time = -1.0
-		orbit_seed = -1
-		planet_detail_alpha.clear()
-		planet_detail_seed = -1
+		celestial_view.reset_clocks()
 		camera.following = false
 		ship_destructions.clear()
 		last_destruction_sequence = 0
@@ -5327,7 +5078,7 @@ func _fighter_beam_origin(pose: Dictionary) -> Vector2:
 func _draw_blaster_tracers(state: Dictionary, ship: Dictionary, poses: Dictionary) -> void:
 	if not ship.has("blaster_fired"):
 		return
-	var age: float = maxf(0.0, _orbit_time(state) - float(ship["blaster_fired"]))
+	var age: float = maxf(0.0, celestial_view.orbit_time(state) - float(ship["blaster_fired"]))
 	if age >= ECONOMY.BLASTER_TRAVEL:
 		return
 	var mounts: Array = {"scout": [Vector2(11, 0)], "fighter": [Vector2(1, -5), Vector2(1, 5)], "cruiser": [Vector2(17, 0), Vector2(5, -10), Vector2(5, 10)], "destroyer": [Vector2(34, -5), Vector2(34, 5), Vector2(14, -15), Vector2(14, 15)]}.get(ship["kind"], [])
@@ -5381,7 +5132,7 @@ func _target_ring_entity(state: Dictionary, poses: Dictionary, refs: Dictionary,
 			var node: int = int(ref["node"])
 			var slot: int = floori(float(-2 - id - state["planets"].size() * 3) / float(state["planets"].size()))
 			var system_radius: float = _planet_radius(node, state)
-			var body: Dictionary = _system_visual(node, state)["bodies"][slot]
+			var body: Dictionary = celestial_view.system_visual(node, state)["bodies"][slot]
 			center = _screen_point(ref["repair_position"])
 			radius = maxf(6.0, system_radius * float(body["size"]) * 0.55 + 5.0)
 	return {"point": center, "radius": radius, "owner": ref["owner"]}
@@ -5424,7 +5175,7 @@ func _ship_target_ring(state: Dictionary, poses: Dictionary, refs: Dictionary, s
 	if destination >= 0 and destination < state["planets"].size():
 		if refs.has(ECONOMY.station_target_id(state, destination)):
 			return _target_ring_entity(state, poses, refs, ECONOMY.station_target_id(state, destination))
-		return {"point": _screen_point(state["map"]["points"][destination]), "radius": maxf(8.0, _star_draw_radius(_planet_radius(destination, state)) + 5.0), "owner": state["planets"][destination]["owner"]}
+		return {"point": _screen_point(state["map"]["points"][destination]), "radius": maxf(8.0, celestial_view.star_draw_radius(_planet_radius(destination, state)) + 5.0), "owner": state["planets"][destination]["owner"]}
 	return {}
 
 func _draw_ship_target_rings(state: Dictionary, poses: Dictionary, refs: Dictionary) -> void:
@@ -5546,7 +5297,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 		var radius: float = _station_radius()
 		if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 80.0).has_point(pos):
 			continue
-		var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * camera.zoom
+		var spacing: float = float(celestial_view.system_visual(i, state)["spacing"]) * _fit() * camera.zoom
 		var scale: float = clampf(spacing / 150.0, 0.22, 1.0)
 		var origin: Vector2 = pos + Vector2(-94.0 * scale, radius + 5.0 * scale)
 		logistics_overlay.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(194, 34.0 + 32.0 * float(maxi(0, ceili(float(ECONOMY.RESOURCES.size()) / 3.0) - 1))) * scale), Color("#0c1928ec"))
@@ -6198,17 +5949,14 @@ func _draw_map() -> void:
 	sector_name_overlay.queue_redraw()
 	logistics_overlay.queue_redraw()
 	objectives_overlay.queue_redraw()
-	asteroid_frame_meshes.clear()
+	celestial_view.begin_frame()
 	world_batches.begin_frame()
 	if session == null:
 		return
 	var state: Dictionary = _state()
 	if state.is_empty():
 		return
-	var seed_value: int = int(state["map"]["seed"])
-	if asteroid_cache_seed != seed_value:
-		asteroid_shape_cache.clear()
-		asteroid_cache_seed = seed_value
+	celestial_view.prepare_map(state)
 	var viewport_bounds := Rect2(Vector2.ZERO, map_canvas.size)
 	var render_scale: float = _fit() * camera.zoom
 	var points: Array = state["map"]["points"]
@@ -6244,47 +5992,7 @@ func _draw_map() -> void:
 			var axis: Vector2 = Vector2.from_angle(visual_clock * 0.8)
 			map_canvas.draw_line(center - axis * star_radius * 4.0, center + axis * star_radius * 4.0, Color(glow, 0.45 + pulse * 0.4), maxf(1.0, star_radius * 0.45), true)
 			continue
-		var rock_vertices := PackedVector3Array()
-		var rock_colors := PackedColorArray()
-		for chunk in field["chunks"]:
-			var rock_pos: Vector2 = _screen_point(chunk["position"])
-			if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
-				continue
-			var fraction: float = float(chunk["remaining"]) / float(chunk["initial"])
-			var rock_radius: float = maxf(1.3, float(chunk["radius"]) * render_scale * sqrt(fraction))
-			var shape_key: Vector2 = chunk["position"]
-			if not asteroid_shape_cache.has(shape_key):
-				var unit_shape := PackedVector2Array()
-				for k in range(chunk["shape"].size()):
-					var angle: float = TAU * float(k) / float(chunk["shape"].size()) + float(chunk["rotation"])
-					unit_shape.append(Vector2.from_angle(angle) * float(chunk["shape"][k]))
-				asteroid_shape_cache[shape_key] = {"vertices": unit_shape, "triangles": Geometry2D.triangulate_polygon(unit_shape)}
-			var rock := PackedVector2Array()
-			var cached: Dictionary = asteroid_shape_cache[shape_key]
-			for vertex in cached["vertices"]:
-				rock.append(rock_pos + vertex * rock_radius)
-			var tint: Color = HUD.COLORS[chunk["resource"]]
-			for index in cached["triangles"]:
-				var p: Vector2 = rock[index]
-				rock_vertices.append(Vector3(p.x, p.y, 0.0))
-				rock_colors.append(tint.darkened(0.25))
-			# Batch thin edge quads, retaining the existing screen-space width.
-			for k in range(rock.size()):
-				var p: Vector2 = rock[k]
-				var q: Vector2 = rock[(k + 1) % rock.size()]
-				var normal: Vector2 = (q - p).normalized().orthogonal() * 0.4
-				for v in [p - normal, q - normal, q + normal, p - normal, q + normal, p + normal]:
-					rock_vertices.append(Vector3(v.x, v.y, 0.0))
-					rock_colors.append(tint)
-		if not rock_vertices.is_empty():
-			var arrays: Array = []
-			arrays.resize(Mesh.ARRAY_MAX)
-			arrays[Mesh.ARRAY_VERTEX] = rock_vertices
-			arrays[Mesh.ARRAY_COLOR] = rock_colors
-			var mesh := ArrayMesh.new()
-			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-			asteroid_frame_meshes.append(mesh)
-			map_canvas.draw_mesh(mesh, null)
+		celestial_view.draw_asteroid_chunks(field, viewport_bounds, render_scale, map_canvas, _screen_point)
 	for i in range(points.size()):
 		var pos: Vector2 = _screen_point(points[i])
 		if not ECONOMY.discovered(state, _me(), "planets", i):
@@ -6389,8 +6097,8 @@ func _draw_map() -> void:
 			if not poses.has(target) or float(battery["laser_until"]) < float(state["elapsed"]):
 				continue
 			var origin: Vector2 = _screen_point(points[index])
-			if _planet_detail_opacity(index, radius) >= 0.5:
-				origin += _body_position(_system_visual(index, state)["bodies"][slot], radius, _orbit_time(state))
+			if celestial_view.planet_detail_opacity(index, radius) >= 0.5:
+				origin += celestial_view.body_position(celestial_view.system_visual(index, state)["bodies"][slot], radius, celestial_view.orbit_time(state))
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
 		if not _ship_visible(state, ship):
@@ -6400,7 +6108,7 @@ func _draw_map() -> void:
 		if float(ship.get("missile_until", -1.0)) >= float(state["elapsed"]) and ship.has("missile_endpoint"):
 			var a: Vector2 = _screen_point(ship["missile_origin"])
 			var b: Vector2 = _screen_point(ship["missile_endpoint"])
-			var phase: float = clampf(1.0 - (float(ship["missile_until"]) - _orbit_time(state)) / 0.65, 0.0, 1.0)
+			var phase: float = clampf(1.0 - (float(ship["missile_until"]) - celestial_view.orbit_time(state)) / 0.65, 0.0, 1.0)
 			var axis: Vector2 = a.direction_to(b)
 			for launcher in range(ECONOMY.missile_count(str(ship["kind"]))):
 				var offset: Vector2 = axis.orthogonal() * (float(launcher) - float(ECONOMY.missile_count(str(ship["kind"])) - 1) * 0.5) * 6.0 * sin(phase * PI)
@@ -6432,8 +6140,8 @@ func _draw_map() -> void:
 				if state["planets"][pds_index].get("pds", {}).has(pds_slot):
 					var endpoint: Vector2 = _screen_point(points[pds_index])
 					var pds_radius: float = _planet_radius(pds_index, state)
-					if _planet_detail_opacity(pds_index, pds_radius) >= 0.5:
-						endpoint += _body_position(_system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, _orbit_time(state))
+					if celestial_view.planet_detail_opacity(pds_index, pds_radius) >= 0.5:
+						endpoint += celestial_view.body_position(celestial_view.system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, celestial_view.orbit_time(state))
 					_draw_ship_laser(ship, poses[shooter], endpoint, 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
 			_draw_ship_laser(ship, poses[shooter], poses[target]["point"], 1.0)
@@ -6442,7 +6150,7 @@ func _draw_map() -> void:
 			if site >= 0 and site < state["planets"].size():
 				var world: Vector2 = ECONOMY.station_position(state, site, float(state["elapsed"]))
 				if int(ship["at"]) == site and (ship["position"] as Vector2).distance_to(world) <= ECONOMY.STATION_REPAIR_RANGE + ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), int(ship["owner"]), site):
-					var hub: Vector2 = _screen_point(ECONOMY.station_position(state, site, _orbit_time(state)))
+					var hub: Vector2 = _screen_point(ECONOMY.station_position(state, site, celestial_view.orbit_time(state)))
 					var end: Vector2 = poses[shooter]["point"]
 					var aim: Vector2 = hub.direction_to(end)
 					if not aim.is_zero_approx():
