@@ -1,6 +1,9 @@
 shader_type canvas_item;
 render_mode unshaded;
 
+uniform vec2 camera_shift = vec2(0.0);
+uniform float camera_zoom_log = 0.0;
+
 // Stable grid-hashed star layers. No external textures or gameplay state.
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -17,14 +20,20 @@ vec3 stars(vec2 uv, float scale, float density, float time) {
 	vec3 tint = mix(vec3(0.49, 0.69, 0.98), vec3(0.98, 0.87, 0.72), hash(cell + 7.0));
 	return tint * (core + glow) * twinkle * step(1.0 - density, seed);
 }
+// Each depth moves at a small fraction of foreground camera travel.
+vec2 parallax_uv(vec2 p, vec2 center, float depth) {
+	return center + (p - center) * exp(-camera_zoom_log * depth * 0.35) + camera_shift * depth;
+}
+
 void fragment() {
 	vec2 uv = UV;
 	vec2 p = uv * vec2(SCREEN_PIXEL_SIZE.y / SCREEN_PIXEL_SIZE.x, 1.0);
 	float haze = exp(-length((uv - vec2(0.31, 0.42)) * vec2(1.2, 2.5)) * 3.0);
 	float rim = exp(-length((uv - vec2(0.83, 0.17)) * vec2(2.0, 1.7)) * 4.0);
 	vec3 color = vec3(0.014, 0.027, 0.052) + haze * vec3(0.035, 0.065, 0.11) + rim * vec3(0.05, 0.022, 0.085);
-	color += stars(p, 69.0, 0.24, TIME) * 0.48;
-	color += stars(p + vec2(0.27, 0.13), 30.0, 0.15, TIME) * 0.72;
-	color += stars(p + vec2(0.73, 0.51), 12.0, 0.07, TIME);
+	vec2 center = vec2(0.5 * SCREEN_PIXEL_SIZE.y / SCREEN_PIXEL_SIZE.x, 0.5);
+	color += stars(parallax_uv(p, center, 0.015), 69.0, 0.24, TIME) * 0.48;
+	color += stars(parallax_uv(p, center, 0.045) + vec2(0.27, 0.13), 30.0, 0.15, TIME) * 0.72;
+	color += stars(parallax_uv(p, center, 0.085) + vec2(0.73, 0.51), 12.0, 0.07, TIME);
 	COLOR = vec4(color, 1.0);
 }

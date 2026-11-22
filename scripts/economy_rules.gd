@@ -9227,6 +9227,7 @@ static func specialization_grade(system: Dictionary, resource: String) -> int:
 	return 0
 
 const REWARD_CATEGORIES = ["economic", "military", "tech"]
+const CLOAK_PRIOR_MILITARY_REWARDS: int = 3
 const UNIQUE_CONQUEST_REWARDS = ["cloak", "shield_3", "warp_gate", "crystals"]
 const CONQUEST_REWARDS = {
 	"industry": ["Industrial Revolution", "Planet Metals production +50%", "", "economic", "Metals"],
@@ -9298,6 +9299,14 @@ static func reward_eligible(rewards: Array, key: String, category: String) -> bo
 		return false
 	if key == "dyson_sphere":
 		return rewards.has("warp_gate") or rewards.count("rank_crystals") + rewards.count("rank_science") + rewards.count("rank_civilian") >= 3
+	if key == "cloak":
+		# Count military purchases, including repeatable military research.
+		# Economic, technology and shared rewards cannot skip this tier.
+		var military: int = 0
+		for prior in rewards:
+			if CONQUEST_REWARDS.has(prior) and CONQUEST_REWARDS[prior][3] == "military":
+				military += 1
+		return military >= CLOAK_PRIOR_MILITARY_REWARDS
 	if key == "shield_2":
 		return rewards.has("shield_1")
 	if key == "shield_3":
