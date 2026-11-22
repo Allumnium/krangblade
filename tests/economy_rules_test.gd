@@ -3626,6 +3626,40 @@ func _test_resource_handoff() -> void:
 	ECON._collect_salvage(freighter, pile, 0.5)
 	assert(is_equal_approx(ECON._cargo_total(freighter), ECON._cargo_total(miner) * 0.25))
 	assert(is_equal_approx(float(pile["amount"]) + ECON._cargo_total(miner) + ECON._cargo_total(freighter), 100.0))
+	# The navigation disk follows surviving rocks, not unused placement space.
+	var tight_fields: Array = [{"position": Vector2(1000, 0), "radius": 600.0, "chunks": [{"position": Vector2(1150, 0), "radius": 20.0}, {"position": Vector2(800, 0), "radius": 10.0}]}]
+	ECON._refresh_movement_fields(tight_fields)
+	assert(float(ECON._movement_fields[0]["radius"]) == 210.0)
+	assert(ECON._field_detour(Vector2(0, 350), Vector2(2000, 350), 10.0) == Vector2(2000, 350))
+	assert(ECON._field_detour(Vector2(0, 0), Vector2(2000, 0), 10.0) != Vector2(2000, 0))
+	tight_fields[0]["chunks"].pop_back()
+	ECON._refresh_movement_fields(tight_fields)
+	assert(float(ECON._movement_fields[0]["radius"]) == 170.0)
+	tight_fields[0]["chunks"].clear()
+	ECON._refresh_movement_fields(tight_fields)
+	assert(float(ECON._movement_fields[0]["radius"]) == 0.0)
+	# A worker deep inside the disk meets a hauler along its real depot route.
+	var rock := Vector2(3000, 1000)
+	var rendezvous_map: Dictionary = {"seed": 42, "points": [Vector2(1000, 1000), Vector2(6000, 1000)], "edges": [[0, 1]], "fields": [{"position": rock, "radius": 800.0, "anchor": 0, "access": [0], "Metals": 1.0, "Crystals": 0.0, "chunks": [{"id": 7, "position": rock, "resource": "Metals", "remaining": 24.0, "radius": 15.0}, {"id": 8, "position": rock + Vector2.RIGHT * 310.0, "resource": "Metals", "remaining": 24.0, "radius": 20.0}]}]}
+	var rendezvous: Dictionary = _funded_fixture(rendezvous_map, {1: {"team": 1}}, [1], false)
+	var rendezvous_graph: Dictionary = ECON.military_graph(rendezvous)
+	var worker: Dictionary = {"id": 9830, "owner": 1, "kind": "miner", "at": 0, "field": 0, "chunk": 7, "mining_mode": "mining", "mining_target": rock, "position": rock, "cargo": ECON.empty_stock()}
+	var helper: Dictionary = {"id": 9831, "owner": 1, "kind": "ship", "at": 0, "position": Vector2(1500, 1000), "cargo": ECON.empty_stock()}
+	rendezvous["ships"] = [worker, helper]
+	rendezvous["planets"][0]["stock"]["Metals"] = 0.0
+	ECON._refresh_movement_fields(rendezvous["map"]["fields"])
+	var berth: Vector2 = ECON._stage_wait_point(rendezvous, rendezvous_graph, helper, worker, 2, 0, ECON.planet_teams(rendezvous), {}, ECON._salvage_threats(rendezvous, rendezvous_graph))
+	assert(berth.is_finite() and berth.distance_to(rock) >= 369.0)
+	var depot_direction: Vector2 = rock.direction_to(ECON.station_position(rendezvous, 0, float(rendezvous["elapsed"])))
+	assert(absf(depot_direction.cross((berth - rock).normalized())) < 0.001 and depot_direction.dot(berth - rock) > 0.0)
+	assert(ECON._stage_worker_field(worker, 1) == 0 and ECON._stage_worker_field(worker, 2) == -1)
+	worker["mining_mode"] = "delivery"
+	worker["field"] = -1
+	worker["last_mining_field"] = 0
+	worker["cargo"]["Metals"] = 1.0
+	assert(ECON._stage_worker_field(worker, 1) == 0)
+	worker["position"] = Vector2(1000, 1000)
+	assert(ECON._stage_worker_field(worker, 1) == -1)
 	var staging_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var staging: Dictionary = _funded_fixture(staging_map, {1: {"team": 1}}, [1], false)
 	var stage_graph: Dictionary = ECON.military_graph(staging)
