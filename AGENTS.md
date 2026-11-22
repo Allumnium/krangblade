@@ -38,7 +38,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
-- v0.89.9: All command-card actions use one instant, mouse-transparent hover information panel anchored above the right command wing. Show useful effects, requirements, costs, targeting, automation and relevant cooldowns; no separate cursor-following popup or delayed tooltip. Preserve non-command tooltips.
+- v0.89.14 (supersedes v0.89.9 layout): All command-card actions use one instant, mouse-transparent hover information panel with its bottom flush with the top of the right command wing. Explicitly bound height to roughly half the deck (55%, up to 65% for long text); no content-driven background extension. Remove native custom cost tooltips. Show useful effects, requirements, costs, targeting, automation and relevant cooldowns; no separate cursor-following popup or delayed tooltip. Preserve non-command tooltips.
 
 - v0.82.2: Keep fixed command-card slots when technology buttons are hidden; Dyson Sphere reserves its cell regardless of unlock state.
 

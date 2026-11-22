@@ -35,7 +35,7 @@ User requested AI-friendly structure and fewer duplicate definitions. v0.89.4 do
 
 ## 1 — Basic RTS (current priority)
 
-- [ ] v0.89.9: Instant anchored command information for fleet, station, build, yard, asteroid and Trade controls; preserve dynamic recipe/affordability, icons and useful mode/target descriptions. Verify disabled/hidden commands, changing selection/stock, resizing and no duplicate native popup in play.
+- [ ] v0.89.14: Correct oversized command detail overlay reported in v0.89.9: explicit 55% deck height (65% ceiling), bottom flush with command wing, compact text, remove custom native cost tooltip and route live Trade hints through panel. Instant anchored command information for fleet, station, build, yard, asteroid and Trade controls; preserve dynamic recipe/affordability, icons and useful mode/target descriptions. Verify disabled/hidden commands, changing selection/stock, resizing and no duplicate native popup in play.
 
 - [ ] v0.89.2: Simplify all station/build/yard upgrade tooltips: requirements, incremental benefit, current population yield and resource icon; native custom tooltip only on construction cards. Repeat production buildings need 500 residents × target level. Remove planetary mineral output ceiling; preserve asteroid limits, storage, blockade and farm behavior. Verify UI, authority gate, rates, balance and actual peers.
 
