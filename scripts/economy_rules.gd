@@ -248,6 +248,17 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 	for id in ordered:
 		credits[id] = STARTING_GC
 	state["galactic_credits"] = credits
+	state["starting_empires"] = ordered.duplicate()
+	var survey_regions: Array = []
+	var base_radius: float = sector_base_radius(map_data)
+	for index in range(ordered.size()):
+		var weight: int = system_presence_weight(planets[index])
+		var development: float = clampf(float(weight) / 150.0, 0.0, 1.0)
+		var peak: float = lerpf(0.88, 1.65, development) * 64.0
+		var claim_radius: float = territory_kernel_reach(base_radius, weight) * sqrt(1.0 - sqrt(19.0 / peak))
+		survey_regions.append({"owner": ordered[index], "center": map_data["points"][index], "radius": claim_radius * 3.0})
+	state["starting_survey"] = survey_regions
+	_seed_starting_exploration(state)
 	update_exploration(state)
 	return state
 
@@ -356,6 +367,26 @@ static func _survey(state: Dictionary, team: int, index: int) -> void:
 	for i in range(fields.size()):
 		if int(fields[i]["anchor"]) == index:
 			knowledge["fields"][i] = true
+
+# Starting survey is historical knowledge, not a continuing sensor.
+static func _seed_starting_exploration(state: Dictionary) -> void:
+	for region in state.get("starting_survey", []):
+		var team: int = _combat_group(state, int(region["owner"]))
+		if team <= 0:
+			continue
+		var explored: Dictionary = state["explored"]
+		if not explored.has(team):
+			explored[team] = {"planets": {}, "fields": {}}
+		var center: Vector2 = region["center"]
+		var squared: float = float(region["radius"]) ** 2
+		var points: Array = state["map"]["points"]
+		for index in range(points.size()):
+			if center.distance_squared_to(points[index]) <= squared:
+				explored[team]["planets"][index] = true
+		var fields: Array = state["map"].get("fields", [])
+		for index in range(fields.size()):
+			if center.distance_squared_to(fields[index]["position"]) <= squared:
+				explored[team]["fields"][index] = true
 
 static func update_exploration(state: Dictionary) -> void:
 	for i in range((state["planets"] as Array).size()):
@@ -646,10 +677,8 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
 		return []
 	if int(ship["owner"]) != player or ship.get("kind", "ship") != "colony_ship":
 		return []
-	var teams: Array[int] = planet_teams(state)
-	var team: int = _combat_group(state, player)
 	var start: int = int(ship["at"])
-	if team == 0 or (not _civilian_transit_allowed(state, team, teams[start]) and military_home(state, player) >= 0):
+	if _combat_group(state, player) <= 0:
 		return []
 	if not discovered(state, player, "planets", target):
 		return []
@@ -668,7 +697,7 @@ static func nearest_idle_colony(state: Dictionary, player: int, target: int) -> 
 	var best: float = INF
 	var chosen: int = -1
 	for ship in state["ships"]:
-		if int(ship["owner"]) != player or ship["kind"] != "colony_ship" or bool(ship.get("retreating", false)):
+		if int(ship["owner"]) != player or ship["kind"] != "colony_ship":
 			continue
 		if ship.get("unit_order", {}).get("kind", "") == "colonize" and int(ship.get("dest", -1)) >= 0:
 			continue
@@ -692,6 +721,9 @@ static func send_colony(state: Dictionary, player: int, ship_id: int, target: in
 			return false
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
+		ship.erase("retreating")
+		ship.erase("repair_site")
+		ship.erase("withdrawal_objective")
 		_set_unit_order(state, ship, {"kind": "colonize", "target": target, "automatic": automatic})
 		ship["dest"] = target
 		ship["return_path"] = path.duplicate()
@@ -3478,6 +3510,7 @@ static func initialize_diplomacy(state: Dictionary) -> bool:
 	# Legacy team exploration cannot be attributed to individual empires.
 	# Rebuild from their own stations rather than leaking former team data.
 	state["explored"] = {}
+	_seed_starting_exploration(state)
 	update_exploration(state)
 	return true
 

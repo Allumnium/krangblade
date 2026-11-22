@@ -2803,7 +2803,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 				var point: Vector2 = pos + celestial_view.body_position(bodies[int(slot)], radius, orbit_elapsed)
 				world_batches.draw_selection_ring(point, 6.0)
 	if _show_system_rings(index):
-		map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
+		map_canvas.draw_arc(pos, maxf(5.0, star_radius) + 3.0, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
 
 func _empire_color_index(owner: int) -> int:
 	if owner == 0:
@@ -4435,7 +4435,7 @@ func _draw_map() -> void:
 			var phase: float = 0.6 + 0.35 * sin(visual_clock * 3.0)
 			for angle in range(4):
 				var start: float = float(angle) * TAU / 4.0 + 0.1
-				map_canvas.draw_arc(pos, radius + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
+				map_canvas.draw_arc(pos, maxf(5.0, celestial_view.star_draw_radius(radius)) + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
 	for ref in _selected_yards(state):
 		var rally: Dictionary = state["planets"][ref.x]["yards"][ref.y].get("rally", {})
 		if not rally.is_empty():

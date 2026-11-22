@@ -696,12 +696,18 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	var near: Dictionary = far.duplicate(true)
 	near.merge({"id": 101, "at": 1, "position": map["points"][1]}, true)
 	state["ships"] = [far, near]
+	state["fog_of_war"] = false
+	assert(state["starting_survey"].size() == 1 and float(state["starting_survey"][0]["radius"]) > ECON.sector_base_radius(map))
 	assert(ECON.nearest_idle_colony(state, 1, 2) == 101)
 	near["holding"] = true
-	assert(ECON.nearest_idle_colony(state, 1, 2) == 100)
-	near["holding"] = false
+	near["retreating"] = true
+	near["repair_site"] = 0
+	near["route"] = [0]
+	assert(ECON.nearest_idle_colony(state, 1, 2) == 101)
 	assert(ECON.send_colony(state, 1, 101, 2))
-	assert(ECON.nearest_idle_colony(state, 1, 2) == 100)
+	assert(not near.get("retreating", false) and not near.has("repair_site"))
+	assert(ECON.nearest_idle_colony(state, 1, 2) == -1)
+	assert(ECON.nearest_idle_colony(state, 1, 1) == 100)
 	assert(ECON.nearest_idle_colony(state, 2, 2) == -1)
 	var point := Vector2(150, 200)
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "position", "target": 0, "point": point, "move_only": true}, false))
