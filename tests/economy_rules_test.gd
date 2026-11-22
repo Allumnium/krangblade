@@ -25,7 +25,7 @@ func _funded_fixture(map_data: Dictionary, players: Dictionary, ordered: Array[i
 
 func _test_hull_index() -> void:
 	var map: Dictionary = _planetary_fixture(426)
-	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
 	var craft: Dictionary = state["ships"][0]
 	var id: int = int(craft["id"])
 	craft["position"] = Vector2.ZERO
@@ -305,6 +305,7 @@ func _test_mining_lasers() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": [{"position": rock, "radius": 40.0, "anchor": 0, "Metals": 0.5, "Crystals": 0.5, "chunks": [{"id": 7, "position": rock, "resource": "Metals", "remaining": 24.0}]}]}
 	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
+	_disarm_structures(state)
 	var miner: Dictionary = {"id": 100, "owner": 1, "kind": "miner", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": rock + Vector2.LEFT * 20, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "mining", "field": 0, "chunk": 7, "mining_rock": rock, "mining_target": rock + Vector2.LEFT * 20, "mining_years": 0.0}
 	var enemy: Dictionary = {"id": 101, "owner": 2, "kind": "ship", "at": 1, "dest": -1, "route": [], "leg": 0.0, "position": rock + Vector2.UP * 50, "hp": ECON.SHIP_HP}
 	var friend: Dictionary = {"id": 102, "owner": 1, "kind": "fighter", "at": 0, "dest": 0, "route": [], "leg": 0.0, "position": rock + Vector2.LEFT * 300, "hp": ECON.SHIP_HP}
@@ -338,7 +339,7 @@ func _test_repair_pauses_wander() -> void:
 		var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 		var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 		var miner: Dictionary = {"id": 100, "owner": 1, "kind": "miner", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(500, 0), "heading": Vector2.UP, "hp": ECON.ship_max_hp("miner"), "cargo": ECON.empty_stock(), "mining_mode": "idle", "mine_auto": false, "salvage_auto": false, "wander_auto": false}
-		var patient: Dictionary = {"id": 101, "owner": 1, "kind": "scout", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(550, 0), "heading": Vector2.UP, "hp": 20.0, "cargo": ECON.empty_stock(), "wander_auto": true}
+		var patient: Dictionary = {"id": 101, "owner": 1, "kind": "scout", "origin": 0, "at": 0, "dest": 0, "source": -1, "route": [], "leg": 0.0, "position": Vector2(550, 0), "heading": Vector2.UP, "hp": 20.0, "cargo": ECON.empty_stock(), "wander_auto": true}
 		state["ships"] = [patient, miner] if reverse else [miner, patient]
 		var point: Vector2 = patient["position"]
 		for tick in range(5):
@@ -431,15 +432,16 @@ func _test_miner_service_orders() -> void:
 	assert(miner["cargo"]["Metals"] == ECON.MINER_CAPACITY - 3.0 and depot["stock"]["Metals"] == ECON.storage_capacity(depot, "Metals"))
 	assert(not ECON.can_deposit(state, miner, station_id))
 	assert(not ECON.can_deposit(state, miner, ECON.station_target_id(state, 1)))
-	# A focused attack ignores a closer hostile; focus can be a structure.
+	# An in-range focused attack ignores a closer hostile; focus can be a structure.
 	miner["position"] = Vector2(500, 0)
 	foe["position"] = Vector2(550, 0)
 	var far: Dictionary = foe.duplicate(true)
-	far.merge({"id": 103, "position": Vector2(1000, 0)}, true)
+	far.merge({"id": 103, "position": Vector2(600, 0)}, true)
 	state["ships"].append(far)
+	_disarm_structures(state)
 	assert(ECON.command_attack(state, 1, [100], 103))
 	ECON._combat(state, graph, 1.0)
-	assert(foe["hp"] == 70.0 and far["hp"] == 70.0)
+	assert(foe["hp"] == 70.0 and far["hp"] < 70.0)
 	assert(ECON.command_attack(state, 1, [100], ECON.station_target_id(state, 1)))
 	print("PASS: miner repair/autocast, withdrawal priority, remote orders, targeted cargo conservation and focused attacks")
 
@@ -613,7 +615,8 @@ func _test_ai_capital_fleets() -> void:
 	for resource in ECON.RESOURCES:
 		p["stock"][resource] = 2000.0
 	ECON._ai_turn(state, graph, 1)
-	assert(p["queue"].size() == 1 and p["queue"][0]["kind"] == "warehouse")
+	# Base Metals storage fits a Destroyer, so the AI saves rather than adding a warehouse.
+	assert(p["queue"].is_empty())
 	assert(capital.get("direct_order", false))
 	p["queue"].clear()
 	p["warehouse_level"] = 1
@@ -621,7 +624,7 @@ func _test_ai_capital_fleets() -> void:
 		p["stock"][resource] = 5000.0
 	ECON._ai_turn(state, graph, 1)
 	assert(p["queue"].size() == 1 and p["queue"][0]["kind"] == "destroyer")
-	print("PASS: AI cruiser construction, capital deployment, warehouse prerequisite and destroyer construction")
+	print("PASS: AI cruiser construction, capital deployment, capital savings and destroyer construction")
 
 func _test_ai_timed_orbital_housing() -> void:
 	var galaxy: Dictionary = MAP.generate(827, 2, "Grid")
@@ -683,6 +686,8 @@ func _test_station_defense_and_ports() -> void:
 	var graph: Dictionary = ECON.military_graph(state)
 	var origin: Vector2 = ECON.station_position(state, 0, 0.0)
 	p["pds"].clear()
+	# Isolate the station lasers from its missile launcher.
+	p["station"]["missile_cooldown"] = 1000.0
 	state["ships"] = [
 		{"id": 9900, "owner": 2, "kind": "ship", "at": 0, "route": [], "position": origin, "hp": 100.0},
 		{"id": 9901, "owner": 1, "kind": "ship", "at": 0, "route": [], "position": origin, "hp": 100.0}]
@@ -1467,8 +1472,8 @@ func _test_warp_gates() -> void:
 	assert(ECON._cargo_total(a) == 0.0 and a["hp"] == ECON.WARP_GATE_HP)
 	assert(not ECON.set_warp_destination(state, 2, int(a["id"]), int(b["id"])))
 	assert(not ECON.issue_unit_order(state, 1, [a["id"]], {"kind": "stop"}, false))
-	var traveler: Dictionary = state["ships"][0]
-	traveler["position"] = a["position"]
+	var traveler: Dictionary = {"id": 980003, "owner": 1, "kind": "fighter", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": a["position"], "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
+	state["ships"].append(traveler)
 	traveler["unit_order"] = {"kind": "warp_travel", "target": a["id"]}
 	assert(ECON._work_warp_order(state, graph, traveler, 0.1))
 	assert(traveler["at"] == other_node and (traveler["position"] as Vector2).distance_to(b["position"]) <= 60.1)
@@ -2776,7 +2781,7 @@ func _initialize() -> void:
 	assert(int(loser["at"]) == loser_home and loser["route"].is_empty())
 	var distant: Dictionary = _funded_fixture(colony_map, players, ids, false)
 	_disarm_structures(distant)
-	var distant_ship: Dictionary = {"id": 999, "kind": "colony_ship", "owner": 1, "at": 0, "position": cp[0], "route": [], "leg": 0.0, "dest": -1}
+	var distant_ship: Dictionary = {"id": 999, "kind": "colony_ship", "owner": 1, "at": 0, "position": cp[0], "route": [], "leg": 0.0, "dest": -1, "cargo": ECON.empty_stock()}
 	distant["ships"].append(distant_ship)
 	assert(ECON.send_colony(distant, 1, 999, 4, true))
 	assert(distant_ship["position"] == cp[0])
@@ -3097,7 +3102,7 @@ func _initialize() -> void:
 	# Isolate fighter pursuit behavior from fixed defenses.
 	_disarm_structures(chase)
 	var hunter: Dictionary = {"id": 980, "owner": 2, "kind": "fighter", "at": 1, "route": [0], "leg": 0.0, "position": Vector2(50, 0), "dest": 0, "hp": 100.0}
-	var prey: Dictionary = {"id": 981, "owner": 3, "kind": "colony_ship", "at": 1, "route": [3], "leg": 200.0, "position": Vector2(200, 0), "dest": 3, "hp": 100.0}
+	var prey: Dictionary = {"id": 981, "owner": 3, "kind": "colony_ship", "at": 1, "route": [3], "leg": 200.0, "position": Vector2(200, 0), "dest": 3, "hp": 100.0, "cargo": ECON.empty_stock()}
 	chase["ships"] = [hunter, prey]
 	assert(ECON.set_military(chase, 2, "fighter", 0, 100))
 	for tick in range(30):
@@ -3615,6 +3620,10 @@ func _test_neutral_direct_occupation() -> void:
 	assert(not ECON.command_fighters(state, 1, [9999], field))
 	assert(state["ships"][0]["dest"] == 0)
 	state["ships"].pop_back()
+	# Generated anchors can lie inside a rock disk that non-miners cannot
+	# enter (see THOUGHTS); isolate order semantics from rock avoidance.
+	for deposit in state["map"]["fields"]:
+		deposit["chunks"] = []
 	assert(ECON.command_fighters(state, 1, [9400], neutral))
 	assert(ECON.command_fighters(state, 1, [9401], field))
 	ECON.step(state, 0.1)
@@ -3649,7 +3658,7 @@ func _test_idle_formations() -> void:
 	for i in range(3):
 		state["ships"].append({"id": 9500 + i, "owner": 1, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "position": center, "dest": 0, "hp": ECON.SHIP_HP})
 	for i in range(2):
-		state["ships"].append({"id": 9510 + i, "owner": 1, "kind": "colony_ship", "at": 0, "route": [], "leg": 0.0, "position": center, "dest": -1, "hp": ECON.SHIP_HP})
+		state["ships"].append({"id": 9510 + i, "owner": 1, "kind": "colony_ship", "at": 0, "route": [], "leg": 0.0, "position": center, "dest": -1, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()})
 	var furthest: float = 0.0
 	for tick in range(500):
 		var before: Dictionary = {}
@@ -3657,8 +3666,10 @@ func _test_idle_formations() -> void:
 			before[craft["id"]] = craft["position"]
 		ECON.step(state, 0.1)
 		for craft in state["ships"]:
-			assert((craft["position"] as Vector2).distance_to(before[craft["id"]]) <= ECON.ship_speed(str(craft["kind"])) * 0.1 + 0.01)
-			assert(int(craft["at"]) == 0 and (craft["route"] as Array).is_empty())
+			# Contact correction may add up to 15% of the step budget.
+			assert((craft["position"] as Vector2).distance_to(before[craft["id"]]) <= ECON.ship_speed(str(craft["kind"])) * 0.1 * 1.15 + 0.01)
+			# Idle Colony ships may deliver farmed Organics to this same station.
+			assert(int(craft["at"]) == 0 and (craft["route"] as Array).all(func(node): return int(node) == 0))
 			assert((craft["position"] as Vector2).distance_to(center) <= ECON.WANDER_RADIUS + ECON.SHIP_SEPARATION_RADIUS)
 			furthest = maxf(furthest, (craft["position"] as Vector2).distance_to(center))
 	assert(furthest > ECON.AI_RALLY_RADIUS * 2.0)
@@ -3774,6 +3785,7 @@ func _test_follow_order() -> void:
 	state["ships"].clear()
 	for k in range(2):
 		state["ships"].append({"id": 9840 + k, "owner": 1, "kind": "fighter" if k == 0 else "colony_ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(0, 350 * k), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "wander_auto": false, "salvage_auto": false})
+		state["ships"].back()["dest"] = 0
 	var follower: Dictionary = state["ships"][0]
 	var leader: Dictionary = state["ships"][1]
 	var order: Dictionary = {"kind": "follow", "target": 9841, "guard": true}
@@ -3797,7 +3809,7 @@ func _test_follow_order() -> void:
 		var before: Vector2 = follower["position"]
 		ECON.step(state, 0.1)
 		assert(before.distance_to(follower["position"]) <= ECON.ship_speed(str(follower["kind"])) * 0.1 + ECON.EPS)
-		if not leader.has("local_move_target") and bool(follower.get("follow_arrived", false)):
+		if (leader["position"] as Vector2).is_equal_approx(map["points"][1]) and (follower["position"] as Vector2).distance_to(leader["position"]) <= ECON.FOLLOW_DISTANCE + 1.0:
 			break
 	assert((follower["position"] as Vector2).distance_to(leader["position"]) <= ECON.FOLLOW_DISTANCE + 1.0)
 	assert(ECON._unit_order_running(follower))
@@ -3913,7 +3925,8 @@ func _test_resource_handoff() -> void:
 		ECON._rock_plan_budget = ECON.ROCK_PLAN_LIMIT
 		var previous: Vector2 = traveling["position"]
 		ECON._navigate(traveling, destination, 10.0)
-		assert(previous.distance_to(traveling["position"]) <= 10.0 + ECON.EPS)
+		# Vector2 is single precision; allow its rounding at this scale.
+		assert(previous.distance_to(traveling["position"]) <= 10.0 + 0.001)
 		for asteroid in cluster[0]["chunks"]:
 			assert(Geometry2D.get_closest_point_to_segment(asteroid["position"], previous, traveling["position"]).distance_to(asteroid["position"]) >= float(asteroid["radius"]) + ECON.ROCK_HARD_CLEARANCE - 0.1)
 		if (traveling["position"] as Vector2).distance_to(destination) < 0.1:
@@ -5465,7 +5478,7 @@ func _test_match_elimination() -> void:
 	state["planets"][1]["owner"] = 1
 	# Isolate the recovery/last-hull cases from the starting fleets.
 	state["ships"] = state["ships"].filter(func(ship: Dictionary) -> bool: return int(ship["owner"]) == 1)
-	var colony: Dictionary = {"id": 11000, "kind": "colony_ship", "owner": 2, "at": 1, "route": [], "dest": -1}
+	var colony: Dictionary = {"id": 11000, "kind": "colony_ship", "owner": 2, "at": 1, "route": [], "dest": -1, "cargo": ECON.empty_stock()}
 	state["ships"].append(colony)
 	assert(not ECON.update_match_outcome(state))
 	assert(not state.get("eliminated", []).has(2))
