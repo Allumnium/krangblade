@@ -43,7 +43,8 @@ const HOME_POPULATION: float = 10000.0
 const ORBITAL_HOUSING_POPULATION: float = 5000.0
 const ECO_HOUSING_ORGANICS: float = 0.2
 const ORBITAL_HOUSING_COST: Dictionary = {"Metals": 180.0}
-const COLONY_POPULATION: float = 80000.0
+const COLONY_POPULATION: float = 25000.0
+const COLONY_MIN_ORIGIN_POPULATION: float = 50000.0
 const POPULATION_DOUBLING_YEARS: float = 60.0
 # Fixed full-growth food reserve, independent of warehouse size and trade policy.
 const POPULATION_FOOD_RESERVE: float = 200.0
@@ -421,7 +422,10 @@ static func _refund_credits(state: Dictionary, player: int, amount: float) -> vo
 		state["galactic_credits"][player] = credit_balance(state, player) + amount
 
 static func construction_affordable(state: Dictionary, p: Dictionary, cost: Dictionary, kind: String = "") -> bool:
-	return affordable(p, cost) and can_pay_credits(state, int(p["owner"]), construction_credit_cost(cost, kind))
+	return ship_origin_population_met(p, kind) and affordable(p, cost) and can_pay_credits(state, int(p["owner"]), construction_credit_cost(cost, kind))
+
+static func ship_origin_population_met(p: Dictionary, kind: String) -> bool:
+	return kind != "colony_ship" or float(p.get("population", 0.0)) + EPS >= COLONY_MIN_ORIGIN_POPULATION
 
 static func resident_tax_income(state: Dictionary, player: int) -> float:
 	var total: float = 0.0
@@ -712,8 +716,12 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 	progress["colonies"][at] = true
 	colony["conquest_rewards"] = progress.get("rewards", []).duplicate()
 	colony["station"] = {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()], "converted_at": float(state["elapsed"])}
-	colony["population"] = float(ship.get("crew", COLONY_POPULATION)) + ORBITAL_HOUSING_POPULATION if has_planets(colony) else ORBITAL_HOUSING_POPULATION
-	colony["eco_population"] = ORBITAL_HOUSING_POPULATION
+	# Settlement transfers the crew exactly once. The founding yard supplies
+	# housing, not an additional free population; planetless residents
+	# remain aboard orbital habitats even when above nominal capacity.
+	var settlers: float = maxf(0.0, float(ship.get("crew", 0.0)))
+	colony["population"] = settlers
+	colony["eco_population"] = minf(settlers, ORBITAL_HOUSING_POPULATION) if has_planets(colony) else settlers
 	colony["population_velocity"] = 0.0
 	colony["yards"].append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1, "converted_at": float(state["elapsed"]), "colony_heading": ship.get("heading", Vector2.UP)})
 	if has_planets(colony):
@@ -1175,6 +1183,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 		return false
 	if yard_slot != -1 and (not SHIP_KINDS.has(kind) or not shipyard_operational(p, yard_slot) or not yard_fits(p, yard_slot, kind)):
 		return false
+	if not ship_origin_population_met(p, kind):
+		return false
 	if SHIP_KINDS.has(kind) and not has_fitting_yard(p, kind):
 		return false
 	if SHIP_KINDS.has(kind) or kind == "yard_upgrade":
@@ -1371,7 +1381,7 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 	var cycle: Dictionary = p.get("repeat_cycle", {})
 	var all_turns: bool = true
 	for key in keys:
-		if SHIP_KINDS.has(key) and _maintain_needed(state, index, p, str(key)) and not manual_hulls.has(key) and not cycle.has(key):
+		if SHIP_KINDS.has(key) and ship_origin_population_met(p, str(key)) and _maintain_needed(state, index, p, str(key)) and not manual_hulls.has(key) and not cycle.has(key):
 			all_turns = false
 	if not waiting and idle and all_turns:
 		cycle.clear()
@@ -1392,6 +1402,8 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 				p["queue"][-1]["automatic"] = true
 			continue
 		if SHIP_KINDS.has(order[0]):
+			if not ship_origin_population_met(p, str(order[0])):
+				continue
 			if hull_waiting_for_funds or not has_fitting_yard(p, str(order[0])) or cycle.has(key) or manual_hulls.has(key):
 				continue
 			# Do not duplicate a waiting order if its repeat toggle was
@@ -1434,7 +1446,7 @@ static func _refill_yard_autobuild(state: Dictionary, index: int, p: Dictionary)
 			continue
 		var yard: Dictionary = p["yards"][slot]
 		for kind in yard.get("autobuild", []):
-			if not yard_fits(p, slot, kind):
+			if not yard_fits(p, slot, kind) or not ship_origin_population_met(p, kind):
 				continue
 			var exists: bool = false
 			for item in p["queue"]:
@@ -1550,6 +1562,10 @@ static func _possible(p: Dictionary, item: Dictionary, yard_slot: int = -1) -> f
 	var work: float = float(item["work"])
 	var possible: float = work - float(item["progress"])
 	var crew: float = _remaining_crew(item)
+	# Check the threshold before recruitment starts, not on every tick:
+	# the colony's own departing crew must not block its construction.
+	if float(item["progress"]) <= EPS and not ship_origin_population_met(p, str(item["kind"])):
+		return 0.0
 	if crew > EPS:
 		var reserve: float = SHIPYARD_POPULATION[0] if item["kind"] == "colony_ship" else 1.0
 		if yard_slot >= 0:
@@ -7131,9 +7147,9 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		elif has_yard and owned.size() > 1 and counts["fighter"] < mini(12, owned.size() * 2):
 			action = "fighter"
 		elif index == home and expansion and counts["colony_ship"] == 0:
-			if float(p["population"]) >= CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
+			if ship_origin_population_met(p, "colony_ship"):
 				action = "colony_ship"
-			elif population_capacity(p) < CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
+			elif population_capacity(p) < COLONY_MIN_ORIGIN_POPULATION:
 				action = "economy"
 				target = "Organics"
 		elif has_yard and counts["fighter"] == 0:
@@ -7147,7 +7163,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 			action = "fighter"
 		elif index == home and counts["ship"] < mini(12, owned.size() * 2) and owned.size() > 1:
 			action = "ship"
-		elif has_yard and expansion and counts["colony_ship"] < 3 and float(p["population"]) >= CREW_COSTS["colony_ship"] + SHIPYARD_POPULATION[0]:
+		elif has_yard and expansion and counts["colony_ship"] < 3 and ship_origin_population_met(p, "colony_ship"):
 			var local_probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": index, "route": []}
 			if _ai_colony_target(state, player, local_probe, reserved) >= 0:
 				action = "colony_ship"

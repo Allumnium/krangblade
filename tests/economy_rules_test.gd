@@ -258,8 +258,11 @@ func _test_population_queue_priority() -> void:
 		p["stock"][resource] = 100000.0
 	assert(not ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
 	p["yards"][0]["level"] = 2
+	assert(not ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
+	p["population"] = ECON.COLONY_MIN_ORIGIN_POPULATION
 	assert(ECON.enqueue(state, 1, 0, "colony_ship", "", 0))
 	var colony: Dictionary = p["queue"][0]
+	p["population"] = 10000.0
 	ECON._work_planet(state, 0, 0.1)
 	assert(int(p["yards"][0]["job"]) == -1 and colony["progress"] == 0.0)
 	assert(ECON.enqueue(state, 1, 0, "fighter", "", 0))
@@ -272,7 +275,7 @@ func _test_population_queue_priority() -> void:
 	ECON._work_planet(state, 0, 0.1)
 	assert(int(p["yards"][0]["job"]) == -1 and fighter["progress"] == progress)
 	assert("Population" in ECON.construction_blockers(p, fighter, 0))
-	p["population"] = 45000.0
+	p["population"] = ECON.COLONY_MIN_ORIGIN_POPULATION + 1000.0
 	ECON._work_planet(state, 0, 0.1)
 	assert(int(p["yards"][0]["job"]) == int(colony["id"]) and colony["progress"] > 0.0)
 	assert(fighter["progress"] == progress and p["queue"].size() == 2)
@@ -2446,7 +2449,7 @@ func _initialize() -> void:
 	assert(int(colonization["planets"][3]["owner"]) == 0)
 	ECON.step(colonization, first_arrival * 0.5 + 0.001)
 	assert(int(colonization["planets"][3]["owner"]) == winner)
-	assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION + ECON.ORBITAL_HOUSING_POPULATION))
+	assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION))
 	assert(int(colonization["planets"][3]["levels"]["Organics"]) == 1)
 	assert(colonization["ships"].size() == 1)
 	assert(colonization["ship_destructions"].is_empty())
@@ -4826,11 +4829,13 @@ func _test_orbital_housing() -> void:
 	state["ships"] = [attacker]
 	ECON.step(state, 1.0)
 	assert(int(p["owner"]) == 0)
-	var settlement: Dictionary = {"id": 9902, "owner": 1, "kind": "colony_ship", "at": index, "dest": -1, "route": [], "position": graph["points"][index], "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
+	var settlement: Dictionary = {"id": 9902, "owner": 1, "kind": "colony_ship", "crew": ECON.COLONY_POPULATION, "at": index, "dest": -1, "route": [], "position": graph["points"][index], "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	state["ships"].append(settlement)
 	assert(ECON.send_colony(state, 1, 9902, index, true))
 	assert(ECON._work_colony(state, settlement, 0.1))
-	assert(int(p["owner"]) == 1 and float(p["population"]) == ECON.ORBITAL_HOUSING_POPULATION and ECON.has_station(p))
+	assert(int(p["owner"]) == 1 and float(p["population"]) == ECON.COLONY_POPULATION and ECON.has_station(p))
+	assert(ECON.eco_population(p) == ECON.COLONY_POPULATION)
+	state["ships"].erase(settlement)
 	for resource in ECON.ORBITAL_HOUSING_COST:
 		p["stock"][resource] = float(ECON.ORBITAL_HOUSING_COST[resource]) * 2.0
 	assert(not ECON.enqueue(state, 2, index, "economy", "orbital_housing"))
@@ -4840,7 +4845,7 @@ func _test_orbital_housing() -> void:
 		ECON._work_planet(state, index, 1.0)
 		assert(int(p["orbital_housing"]) == purchase)
 		ECON._work_planet(state, index, ECON._work("orbital_housing", 1) - 1.0)
-		assert(float(p["population"]) == ECON.ORBITAL_HOUSING_POPULATION * (purchase + 2))
+		assert(float(p["population"]) == ECON.COLONY_POPULATION + ECON.ORBITAL_HOUSING_POPULATION * (purchase + 1))
 		assert(int(p["orbital_housing"]) == purchase + 1)
 	assert(not ECON.enqueue(state, 1, index, "economy", "orbital_housing"))
 	assert(not ECON.enqueue(state, 1, index, "pds"))
@@ -4851,7 +4856,7 @@ func _test_orbital_housing() -> void:
 	var stock: Dictionary = p["stock"].duplicate()
 	for tick in range(30):
 		ECON._work_planet(state, index, 1.0)
-	assert(float(p["population"]) == 15000.0)
+	assert(float(p["population"]) == ECON.COLONY_POPULATION + 2.0 * ECON.ORBITAL_HOUSING_POPULATION)
 	for resource in ECON.RESOURCES:
 		var expected: float = float(stock[resource]) + (3.0 * ECON.ECO_HOUSING_ORGANICS * 30.0 if resource == "Organics" else (30.0 * ECON.STATION_CRYSTALS_PER_YEAR if resource == "Crystals" else 0.0))
 		assert(is_equal_approx(float(p["stock"][resource]), expected))
@@ -5041,20 +5046,27 @@ func _test_recovery_economy() -> void:
 	for resource in ECON.RESOURCES:
 		assert(not ECON.building_cost(p, resource).has(resource))
 		assert(ECON.building_available(p, resource))
-	p["population"] = original_population
+	p["population"] = ECON.COLONY_MIN_ORIGIN_POPULATION - 1.0
 	p["yards"][0]["level"] = 2
+	assert(not ECON.enqueue(state, 1, 0, "colony_ship"))
+	p["population"] = ECON.COLONY_MIN_ORIGIN_POPULATION
 	assert(ECON.enqueue(state, 1, 0, "colony_ship"))
 	var colony_job: Dictionary = p["queue"][0]
+	p["population"] = original_population
 	var starting: float = float(p["population"])
 	assert("Population" in ECON.construction_blockers(p, colony_job))
 	assert(not ECON._advance(p, colony_job, 6.0))
 	assert(float(p["population"]) == starting and float(colony_job["progress"]) == 0.0)
-	p["population"] = ECON.COLONY_POPULATION + ECON.SHIPYARD_POPULATION[0]
+	p["population"] = ECON.COLONY_MIN_ORIGIN_POPULATION
 	for resource in ECON.RESOURCES:
 		p["stock"][resource] = ECON.storage_capacity(p)
-	assert(ECON._advance(p, colony_job, float(colony_job["work"])))
-	assert(is_equal_approx(float(p["population"]), ECON.SHIPYARD_POPULATION[0]))
+	var half: float = float(colony_job["work"]) * 0.5
+	assert(not ECON._advance(p, colony_job, half))
+	assert(float(p["population"]) < ECON.COLONY_MIN_ORIGIN_POPULATION)
+	assert(ECON._advance(p, colony_job, half))
+	assert(is_equal_approx(float(p["population"]), ECON.COLONY_MIN_ORIGIN_POPULATION - ECON.COLONY_POPULATION))
 	assert(ECON.cancel(state, 1, 0, int(colony_job["id"])))
+	assert(is_equal_approx(float(p["population"]), ECON.COLONY_MIN_ORIGIN_POPULATION))
 	p["warehouse_level"] = 2
 	assert(ECON.construction_reserve(p, "Metals") == 4500.0)
 	p["warehouse_level"] = 0

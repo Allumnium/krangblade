@@ -46,7 +46,7 @@ static func ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
-		"colony_ship": details = "Settles a neutral system · %.0f settlers\nFarm %.0f t/s · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
+		"colony_ship": details = "Requires %.0f station population\nSettles a neutral system · %.0f settlers\nFarm %.0f t/s · Cargo %.0f t" % [ECONOMY.COLONY_MIN_ORIGIN_POPULATION, ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
 		"scout": details = "Fast reconnaissance · " + blaster_summary(kind)
 		"cruiser", "destroyer": details = capital_weapon_summary(kind)
 		"fighter": details = blaster_summary(kind)

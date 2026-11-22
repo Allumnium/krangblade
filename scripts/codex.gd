@@ -322,7 +322,7 @@ func _population() -> void:
 	_label(article, "Ideal growth from %.0f residents. Capacity limits and recruitment reduce actual growth." % E.HOME_POPULATION, 12, HUD.MUTED)
 	_section("Orbital Eco-Housing")
 	_body("Each completed shipyard and orbital housing module supports %.0f residents and produces %.1f t/yr Organics. These residents recover at a %.0f-year doubling rate and are exempt from terrestrial food and overcrowding penalties." % [E.ORBITAL_HOUSING_POPULATION, E.ECO_HOUSING_ORGANICS, E.POPULATION_DOUBLING_YEARS])
-	_note("Keep Organics near the reserve target before spending food on ships. Colonies require %.0f settlers; a starving system cannot grow its terrestrial population." % E.COLONY_POPULATION)
+	_note("Keep Organics near the reserve target before spending food on ships. Colonies require %.0f settlers and %.0f residents at the originating station." % [E.COLONY_POPULATION, E.COLONY_MIN_ORIGIN_POPULATION])
 
 func _chart(population: bool) -> void:
 	var panel := _panel(article, Color("#091420"), 10)
@@ -396,10 +396,10 @@ func _trade() -> void:
 	_note("Empire totals include cargo in transit, but local construction uses delivered stock. Protect supply routes and avoid exporting essential food reserves.")
 
 func _expansion() -> void:
-	_body("Send a Colony to a reachable neutral system to automatically establish a station and shipyard on arrival. Transform (J) also works for a Colony already in neutral territory. Settlers become the new colony population; existing colonies cannot be freely claimed.")
+	_body("Send a Colony to a reachable neutral system to automatically establish a station and shipyard on arrival. Transform (J) also works for a Colony already in neutral territory. All embarked settlers become the colony population, including at planetless systems; existing colonies cannot be freely claimed.")
 	_flow(["Recruit settlers", "Travel", "Establish colony"])
 	_body("Colonies farm %.0f t/yr into a %.0f t Organics hold. Auto-Farm delivers full loads when idle; Deliver Organics or right-click a friendly station to unload early. They cannot salvage." % [E.COLONY_FARM_RATE, E.COLONY_CAPACITY])
-	_table(["Colony", "Requirement"], [["Crew", "%.0f people" % E.COLONY_POPULATION], ["Construction", _recipe(E._cost("colony_ship", 1))], ["Base build time", "%.0f years" % (E._work("colony_ship", 1) / E.yard_speed(1))]])
+	_table(["Colony", "Requirement"], [["Crew", "%.0f people" % E.COLONY_POPULATION], ["Origin population", "%.0f residents" % E.COLONY_MIN_ORIGIN_POPULATION], ["Construction", _recipe(E._cost("colony_ship", 1))], ["Base build time", "%.0f years" % (E._work("colony_ship", 1) / E.yard_speed(1))]])
 	_section("Planetless sectors & conquest")
 	_body("Cool blue stars mark planetless systems, useful for mining access. They rely on orbital housing rather than terrestrial production. Rounded claims grow with completed stations, shipyards and other system buildings. Neighboring claims of the same empire merge; rival claims meet at a boundary. Claims in explored fog reflect last observed infrastructure; ships do not create territory. Claims never restrict movement.")
 	_note("A colony is a long-term economic investment. Food imports and local farming improve its growth, while fleets defend its shipping lanes.")
