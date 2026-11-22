@@ -113,6 +113,7 @@ var notice_ui := MATCH_NOTICE_UI.new()
 var station_commands: VBoxContainer
 var station_primary_grid: GridContainer
 var station_select_yards_button: Button
+var build_select_yards_button: Button
 var station_upgrade_buttons: Dictionary = {}
 var station_build_grid: GridContainer
 var station_trade: VBoxContainer
@@ -1174,8 +1175,10 @@ func _build_station_command_card(parent: Container) -> void:
 	# Keep the fixed four-row grid and Return position with fewer resource cards.
 	for i in range(8 - ECONOMY.RESOURCES.size()):
 		command_card_ui.add_spacer(station_build_grid)
-	# Return stays at the bottom right.
-	for i in range(3):
+	# Bottom row: Shipyards, two empty slots, Return.
+	build_select_yards_button = _station_button(station_build_grid, "Shipyards", "yard", _station_select_yards)
+	hotkeys.register(build_select_yards_button, KEY_Z, "Station Build", "build_select_yards", "Select Shipyards")
+	for i in range(2):
 		command_card_ui.add_spacer(station_build_grid)
 	hotkeys.register(_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")), KEY_ESCAPE, "Station Build", "build_return", "Return")
 	station_trade = VBoxContainer.new()
@@ -1247,9 +1250,11 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 	var state: Dictionary = _state()
 	for index in _owned_station_selection(state):
 		yard_count += state["planets"][index]["yards"].size()
-	station_select_yards_button.disabled = not owned or yard_count == 0
-	command_card_ui.set_hint(station_select_yards_button, "Select all %d completed shipyards at selected stations" % yard_count)
-	(station_select_yards_button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if station_select_yards_button.disabled else Color.WHITE
+	for shortcut in [station_select_yards_button, build_select_yards_button]:
+		var button: Button = shortcut
+		button.disabled = not owned or yard_count == 0
+		command_card_ui.set_hint(button, "Select all %d completed shipyards at selected stations" % yard_count)
+		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled else Color.WHITE
 	for kind in station_upgrade_buttons:
 		var button: Button = station_upgrade_buttons[kind]
 		if kind == "dyson_sphere":
