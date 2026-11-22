@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.28: Extract resource/year/credit/population tiles, storage strips and local/global hover presentation into match_resource_hud.gd. Preserve shared delta helpers for the station inspector, widget factories and selection context, display formulas and snapshot access. Static reverse-substitution parity checked (explicit Callable return typing added); no gameplay or Codex changes. Godot import/parser, visual hover and peer checks pending.
+
 - v0.89.27: Extract Empire fleet window, slider previews, diplomacy rows and war confirmation into match_empire_ui.gd, with explicit player/color/portrait/label dependencies. Keep widget parentage, dialog close/focus behavior and authority request signatures; match retains attack intent and handles modal input. Source parity and field references reviewed, no gameplay or Codex behavior change. Godot unavailable locally; import, parse, visual and multiplayer checks pending.
 
 - v0.89.26: Extract conquest header/counter drawing, collapsed scoreboard state, reward dialog/cards and button layout/pulse into match_conquest_ui.gd. Match supplies explicit player/color/icon/viewport queries and retains overlay and chat/tactical notice rendering. Existing economy queries and request signatures retained; Codex unchanged. Reverse-substitution static parity and references checked; Godot import, parser, visual and peer validation pending.
