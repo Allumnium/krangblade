@@ -4813,8 +4813,9 @@ func _draw_map() -> void:
 		var hull: Color = empire.lightened(0.35)
 		var side: Vector2 = direction.orthogonal() * scale
 		direction *= scale
+		var cloaked: bool = bool(ship.get("cloaked", false))
 		var thrust: float = ship_motion.thrust_for(int(ship["id"]))
-		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and thrust > 0.035:
+		if not cloaked and int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and thrust > 0.035:
 			world_batches.queue_exhaust(str(ship["kind"]), point, direction, scale, thrust, int(ship["id"]), viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
@@ -4834,8 +4835,6 @@ func _draw_map() -> void:
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
 		_draw_damage_bar(point, hull_art.ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
-		if bool(ship.get("cloaked", false)):
-			world_batches.draw_selection_ring(point, maxf(5.0, hull_art.ui_radius(str(ship["kind"])) * scale + 2.0), Color("#b698ff80"))
 		if ship["kind"] == "warp_gate":
 			var gate_radius: float = maxf(5.0, 44.0 * scale)
 			map_canvas.draw_circle(point, gate_radius, Color("#382b58"), true, -1.0, true)
@@ -4844,13 +4843,13 @@ func _draw_map() -> void:
 			map_canvas.draw_circle(point, gate_radius * 0.48, Color("#151225"), true, -1.0, true)
 			continue
 		if scale < 0.15 * overview:
-			world_batches.queue_overview_hull(world_batches.overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
+			world_batches.queue_overview_hull(world_batches.overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview, cloaked)
 			continue
 		var texture: Texture2D = hull_art.hull_texture(str(ship["kind"]), empire, scale >= 0.42)
 		if _shield_fraction(ship) > 0.0:
-			world_batches.queue_overview_hull(hull_art.shield_texture(str(ship["kind"])), point, direction.angle(), (hull_art.texture_half_size(str(ship["kind"])) + 8.0) * scale)
+			world_batches.queue_overview_hull(hull_art.shield_texture(str(ship["kind"])), point, direction.angle(), (hull_art.texture_half_size(str(ship["kind"])) + 8.0) * scale, cloaked)
 		if ship["kind"] != "science_ship":
-			world_batches.queue_overview_hull(texture, point, direction.angle(), hull_art.texture_half_size(str(ship["kind"])) * scale)
+			world_batches.queue_overview_hull(texture, point, direction.angle(), hull_art.texture_half_size(str(ship["kind"])) * scale, cloaked)
 		else:
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
 			var half: float = hull_art.texture_half_size(str(ship["kind"]))

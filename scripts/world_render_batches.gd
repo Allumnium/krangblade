@@ -3,6 +3,7 @@ extends RefCounted
 ## The match decides draw order and submits projected geometry; no gameplay state.
 const HUD = preload("res://scripts/ui_theme.gd")
 const HULL_ART = preload("res://scripts/hull_art.gd")
+const CLOAK_OPACITY: float = 0.30
 
 var map_canvas: Control
 var health_batch: MultiMeshInstance2D
@@ -22,6 +23,8 @@ var exhaust_instances: Array = []
 var exhaust_extents: Dictionary = {}
 var overview_batches: Dictionary = {}
 var overview_instances: Dictionary = {}
+var cloaked_overview_batches: Dictionary = {}
+var cloaked_overview_instances: Dictionary = {}
 var overview_dot_textures: Dictionary = {}
 var resource_glow_texture: Texture2D
 
@@ -56,6 +59,9 @@ func begin_frame() -> void:
 	exhaust_batch.hide()
 	overview_instances.clear()
 	for batch in overview_batches.values():
+		batch.hide()
+	cloaked_overview_instances.clear()
+	for batch in cloaked_overview_batches.values():
 		batch.hide()
 
 func flush_world(visual_clock: float, hull_art: HULL_ART) -> void:
@@ -295,15 +301,20 @@ func overview_dot_texture(tint: Color) -> Texture2D:
 		overview_dot_textures[key] = ImageTexture.create_from_image(image)
 	return overview_dot_textures[key]
 
-func queue_overview_hull(texture: Texture2D, point: Vector2, angle: float, extent: float) -> void:
-	if not overview_instances.has(texture):
-		overview_instances[texture] = []
-	overview_instances[texture].append(Transform2D(angle, Vector2.ONE * extent * 2.0, 0.0, point))
+func queue_overview_hull(texture: Texture2D, point: Vector2, angle: float, extent: float, cloaked: bool = false) -> void:
+	var instances: Dictionary = cloaked_overview_instances if cloaked else overview_instances
+	if not instances.has(texture):
+		instances[texture] = []
+	instances[texture].append(Transform2D(angle, Vector2.ONE * extent * 2.0, 0.0, point))
 
 func _flush_overview_hulls(hull_art: HULL_ART) -> void:
-	for texture in overview_instances:
-		var transforms: Array = overview_instances[texture]
-		if not overview_batches.has(texture):
+	_flush_hull_batches(hull_art, overview_instances, overview_batches, 1.0)
+	_flush_hull_batches(hull_art, cloaked_overview_instances, cloaked_overview_batches, CLOAK_OPACITY)
+
+func _flush_hull_batches(hull_art: HULL_ART, instances: Dictionary, batches: Dictionary, opacity: float) -> void:
+	for texture in instances:
+		var transforms: Array = instances[texture]
+		if not batches.has(texture):
 			var instance := MultiMeshInstance2D.new()
 			var quad := QuadMesh.new()
 			quad.size = Vector2.ONE
@@ -312,11 +323,12 @@ func _flush_overview_hulls(hull_art: HULL_ART) -> void:
 			mm.mesh = quad
 			instance.multimesh = mm
 			instance.texture = texture
+			instance.self_modulate = Color(1.0, 1.0, 1.0, opacity)
 			if hull_art.is_shield_texture(texture):
 				instance.z_index = 1
 			map_canvas.add_child(instance)
-			overview_batches[texture] = instance
-		var batch: MultiMeshInstance2D = overview_batches[texture]
+			batches[texture] = instance
+		var batch: MultiMeshInstance2D = batches[texture]
 		var mesh: MultiMesh = batch.multimesh
 		if mesh.instance_count < transforms.size():
 			mesh.instance_count = maxi(transforms.size(), maxi(64, mesh.instance_count * 2))
