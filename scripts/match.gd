@@ -569,6 +569,21 @@ func _button(text: String, action: Callable, parent: Container, with_recipe: boo
 	return b
 
 func _build_ui() -> void:
+	_build_map_layers()
+	_build_match_notices()
+	_build_world_effect_batches()
+	_build_match_header()
+	_build_match_dialogs()
+	_build_command_deck()
+	_build_right_body()
+	var selection_content: VBoxContainer = _build_selection_overview()
+	_build_fleet_and_yard_cards(console_right_body, selection_content)
+	_build_station_overview()
+	_build_station_interaction(console_right_body)
+	_build_trade_controls()
+	_connect_match_ui_layout()
+
+func _build_map_layers() -> void:
 	var background := ColorRect.new()
 	background.set_script(BACKDROP)
 	background.name = "SpaceBackdrop"
@@ -607,6 +622,9 @@ func _build_ui() -> void:
 	objectives_overlay.z_index = 3
 	objectives_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	objectives_overlay.draw.connect(_draw_objectives_overlay)
+
+
+func _build_match_notices() -> void:
 	match_chat_edit = LineEdit.new()
 	match_chat_edit.placeholder_text = "All players · Enter to send · Esc to cancel"
 	match_chat_edit.max_length = 250
@@ -650,6 +668,9 @@ func _build_ui() -> void:
 	conquest_cards.add_theme_constant_override("separation", 8)
 	conquest_background.add_child(conquest_cards)
 	_layout_conquest_button()
+
+
+func _build_world_effect_batches() -> void:
 	_build_exhaust_batch()
 	beam_batch = _build_effect_batch(false)
 	projectile_batch = _build_effect_batch(true)
@@ -662,6 +683,9 @@ func _build_ui() -> void:
 	cargo_batch.z_index = 1
 	cargo_glow_batch.z_index = 1
 	map_canvas.resized.connect(_map_resized)
+
+
+func _build_match_header() -> void:
 	header_panel = PanelContainer.new()
 	header_panel.z_index = 4
 	header_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -695,6 +719,9 @@ func _build_ui() -> void:
 	help.tooltip_text = "Warbound Codex"
 	help.focus_mode = Control.FOCUS_NONE
 	leave = _button("MENU", _open_menu, row)
+
+
+func _build_match_dialogs() -> void:
 	codex = CODEX.new()
 	codex.hide()
 	add_child(codex)
@@ -721,6 +748,9 @@ func _build_ui() -> void:
 		if action == &"leave":
 			match_result_dialog.hide()
 			_leave())
+
+
+func _build_command_deck() -> void:
 	# One reserved, bottom-anchored command deck. The camera uses the map
 	# rectangle above it regardless of selection or visible inspector content.
 	console_panel = PanelContainer.new()
@@ -812,6 +842,9 @@ func _build_ui() -> void:
 	time_toolbar.alignment = BoxContainer.ALIGNMENT_BEGIN
 	time_panel.add_child(time_toolbar)
 	_build_time_controls(time_toolbar)
+
+
+func _build_right_body() -> void:
 	# Tabs and fleet commands each own a bounded scroll viewport. A
 	# ScrollContainer around a TabContainer collapses its page to zero height.
 	var body := VBoxContainer.new()
@@ -820,6 +853,9 @@ func _build_ui() -> void:
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_panel.add_child(body)
 	console_right_body = body
+
+
+func _build_selection_overview() -> VBoxContainer:
 	overview_panel = PanelContainer.new()
 	console_center.add_child(overview_panel)
 	overview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -880,6 +916,10 @@ func _build_ui() -> void:
 	weapon_details = _label("", 12)
 	overview.add_child(weapon_details)
 	weapon_details.hide()
+	return selection_content
+
+
+func _build_fleet_and_yard_cards(body: VBoxContainer, selection_content: VBoxContainer) -> void:
 	fleet_scroll = ScrollContainer.new()
 	fleet_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	fleet_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -911,6 +951,9 @@ func _build_ui() -> void:
 	_build_fleet_cargo_row()
 	fleet_cargo_footer.hide()
 	_build_field_command_card(fleet_overview)
+
+
+func _build_station_overview() -> void:
 	var system_header := HBoxContainer.new()
 	planet_overview.add_child(system_header)
 	info = _label("", 14)
@@ -962,6 +1005,9 @@ func _build_ui() -> void:
 	station_queue.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	station_queue.alignment = FlowContainer.ALIGNMENT_BEGIN
 	station_queue_panel.hide()
+
+
+func _build_station_interaction(body: VBoxContainer) -> void:
 	interaction_scroll = ScrollContainer.new()
 	interaction_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	interaction_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -975,6 +1021,9 @@ func _build_ui() -> void:
 	command_card_ui.set_hint(send_colony_button, "Send the nearest idle Colony to this sector")
 	command_card_ui.fill_grid(neutral_grid)
 	_build_station_command_card(body)
+
+
+func _build_trade_controls() -> void:
 	var trade_page: GridContainer = _inspector_page("Trade")
 	for resource in ECONOMY.RESOURCES:
 		var logistics: VBoxContainer = HUD.section(trade_page, "", true)
@@ -1038,6 +1087,9 @@ func _build_ui() -> void:
 		for card in grid.get_children():
 			card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+
+
+func _connect_match_ui_layout() -> void:
 	resized.connect(_layout_console)
 	inspector_panel.resized.connect(_layout_command_grids)
 	inspector_slot.resized.connect(_layout_command_grids)
@@ -1047,6 +1099,7 @@ func _build_ui() -> void:
 	lens_column.resized.connect(console_profile.queue_redraw)
 	console_columns.resized.connect(console_profile.queue_redraw)
 	_layout_console()
+
 
 func _layout_console() -> void:
 	if not is_instance_valid(console_panel) or not is_instance_valid(station_commands):

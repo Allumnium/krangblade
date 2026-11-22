@@ -4,14 +4,14 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.89.9; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.89.10; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
 | `project.godot`, `scenes/main.tscn`, `scenes/match.tscn` | Application config/version, GameSession autoload and scene entry points. |
 | `scripts/economy_rules.gd` | Authoritative simulation and canonical dictionaries: `create`, `step`; resource/population rules, recipes and queues (`building_cost`, `_work_station_queue`, `_work_planet`); cargo/mining and service (`_work_ship`, `_work_miner`, `_choose_delivery`); navigation/sector queries (`_path`, `_mining_path`, military graph); commands and orders; diplomacy (`diplomatic_relation`, `diplomacy_*`); combat and repair (`_combat`, `_prepare_withdrawals`); AI (`_ai_turn`, `_ai_diplomacy_turn`); objectives/rewards (`_update_objectives`, `_assign_category_objectives`). |
 | `scripts/game_session.gd` | Persistent lobby and match lifecycle, authority and ENet. `request_*` → `_rpc_*`/authority dispatch → simulation rules; `_economy_tick`, `_encode_replica`, `_rpc_economy` and motion roster handle timing and transport. Keep RPC endpoints on this persistent node. |
-| `scripts/match.gd` | Client match controller; `_build_ui`, `_refresh`, command cards/inspectors, input and selection, camera/projection, rendering (`_draw_map`, ship/station draw helpers), fog/territory, tactical alert presentation (`_sync_tactical_alerts` delegates to tracker), Empire/diplomacy and conquest UI. Never the owner of simulation mutations. |
+| `scripts/match.gd` | Client match controller; `_build_ui` orchestrates named map, header, dialog, deck, inspector and Trade builders; `_refresh`, command cards/inspectors, input and selection, camera/projection, rendering (`_draw_map`, ship/station draw helpers), fog/territory, tactical alert presentation (`_sync_tactical_alerts` delegates to tracker), Empire/diplomacy and conquest UI. Never the owner of simulation mutations. |
 | `scripts/ui_text.gd` | Shared display naming, numeric formatting, weapon/ship summaries and read-only economy building previews; used by match and Codex. |
 | `scripts/command_card_ui.gd` | Shared command-card grids, reserved slots, button faces, upgrade badges, hints and a single anchored instant command-information panel; owns per-match command icon cache. Match retains card-specific actions, layout decisions, hotkey registrations and selection. |
 | `scripts/cost_button.gd` | CostButton widget: recipe/shortfall state and graphical custom tooltip; shared information-panel content. Match supplies costs, crew icon and hotkey hints. |
