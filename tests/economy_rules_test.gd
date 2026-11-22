@@ -4131,8 +4131,9 @@ func _test_sector_entry_orders() -> void:
 		ECON.step(state, 0.1)
 		if state["ships"].all(func(ship: Dictionary) -> bool: return not ship.has("local_move_target")):
 			break
+	# Both hulls share one entry point; contact correction then separates them.
 	for ship in state["ships"]:
-		assert(ship["position"].is_equal_approx(border) and ECON.sector_contains(graph, 2, ship["position"]))
+		assert(not ship.has("local_move_target") and ship["position"].distance_to(border) <= ECON.SHIP_CLEARANCE and ECON.sector_contains(graph, 2, ship["position"]))
 		assert(ECON.arrival_wait_remaining(state, ship) > 0.0)
 		assert(not ship.get("holding", false))
 	print("PASS: authoritative star-sector entry, border arrival and idle grace")
@@ -4251,7 +4252,8 @@ func _test_local_position_orders() -> void:
 	for tick in range(50):
 		ECON.step(state, 0.1)
 		for craft in state["ships"]:
-			assert(craft["position"] == waiting_positions[craft["id"]])
+			# Waiting hulls stay put apart from gentle contact separation.
+			assert((craft["position"] as Vector2).distance_to(waiting_positions[craft["id"]]) <= ECON.SHIP_CLEARANCE)
 	assert(ECON.command_hold_units(state, 1, selection, false))
 	for craft in state["ships"]:
 		assert(craft.get("holding", false) and not craft.has("local_move_target"))
@@ -4278,7 +4280,8 @@ func _test_local_position_orders() -> void:
 	repair["ships"] = [damaged]
 	var post := Vector2(1000, 25)
 	assert(ECON.command_local_position(repair, 1, [200], 2, post))
-	damaged["hp"] = ECON.WITHDRAW_HP
+	# Passive regeneration precedes the withdrawal check; start below it.
+	damaged["hp"] = ECON.WITHDRAW_HP - 1.0
 	assert(ECON.set_autocast(repair, 1, [200], "retreat", true))
 	var repaired: bool = false
 	for tick in range(500):
@@ -4300,12 +4303,16 @@ func _test_tactical_orders() -> void:
 	var decoy: Dictionary = enemy.duplicate(true)
 	decoy.merge({"id": 102, "position": Vector2(1010, 0)}, true)
 	state["ships"] = [f, enemy, decoy]
-	# Ordinary click and formation orders share move-only semantics. Nearby
-	# targets are ignored en route, while deliberate attack-move may fire.
+	_disarm_structures(state)
+	# Ordinary click and formation orders share move-only semantics; sector
+	# combat temporarily overrides them (v0.53.7) without losing the order.
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "position", "target": 2, "point": Vector2(1200, 0), "move_only": true}, false))
 	ECON.step(state, 0.1)
-	assert(enemy["hp"] == ECON.SHIP_HP and decoy["hp"] == ECON.SHIP_HP)
 	assert(f.get("move_only", false) and f.has("local_move_target"))
+	enemy["hp"] = ECON.SHIP_HP
+	decoy["hp"] = ECON.SHIP_HP
+	f["blaster_cooldown"] = 0.0
+	f["blaster_shot"] = 0
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "position", "target": 2, "point": Vector2(1200, 0), "move_only": false}, false))
 	ECON.step(state, 0.1)
 	assert(decoy["hp"] < ECON.SHIP_HP or enemy["hp"] < ECON.SHIP_HP)
@@ -4320,7 +4327,8 @@ func _test_tactical_orders() -> void:
 	assert(not ECON.command_attack(state, 1, [100], 999))
 	assert(ECON.command_attack(state, 1, [100], 101))
 	ECON.step(state, 0.1)
-	assert(f["combat_target"] == 101 and enemy["hp"] < ECON.SHIP_HP and decoy["hp"] == ECON.SHIP_HP)
+	# Freighter-class targets regenerate toward 400 HP; the decoy is untouched.
+	assert(f["combat_target"] == 101 and enemy["hp"] < ECON.SHIP_HP and decoy["hp"] >= ECON.SHIP_HP)
 	assert(f["attack_order"] == 101)
 	# Retarget the live hull when it changes sectors, without teleporting
 	# the attacker onto a different lane or changing its target identity.
@@ -4328,7 +4336,8 @@ func _test_tactical_orders() -> void:
 	enemy["position"] = map["points"][1]
 	var before: Vector2 = f["position"]
 	ECON.step(state, 0.1)
-	assert(f["attack_order"] == 101 and f["operation_target"] == 1 and (f["route"] as Array).has(1))
+	# Free-space navigation (v0.91.1) steers directly rather than by lane route.
+	assert(f["attack_order"] == 101 and f["operation_target"] == 1 and int(f["dest"]) == 1 and f["navigation_target"] == map["points"][1])
 	assert(before.distance_to(f["position"]) <= ECON.ship_speed(str(f["kind"])) * 0.1 + 0.01)
 	assert(ECON.command_hold_units(state, 1, [100], false))
 	assert(not f.has("attack_order"))
@@ -4338,9 +4347,10 @@ func _test_tactical_orders() -> void:
 	ECON.step(state, 0.1)
 	assert(not f.has("attack_order"))
 	assert(not ECON.command_patrol(state, 2, [100], 0))
-	assert(not ECON.command_patrol(state, 1, [100], 2))
+	# Same-sector patrol is valid (v0.35.0); only a zero-length leg is rejected.
+	assert(not ECON.command_patrol(state, 1, [100], 2, f["position"]))
 	assert(ECON.command_patrol(state, 1, [100], 0))
-	f["hp"] = ECON.WITHDRAW_HP
+	f["hp"] = ECON.WITHDRAW_HP - 1.0
 	assert(ECON.set_autocast(state, 1, [100], "retreat", true))
 	var reached_home: bool = false
 	var returned: bool = false

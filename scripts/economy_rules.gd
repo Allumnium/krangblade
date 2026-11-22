@@ -8807,7 +8807,8 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 		ship["pursuit_target"] = -1
 		ship["pursuit_left"] = 0.0
 		ship["laser_until"] = -1.0
-		if int(ship.get("dest", -1)) != site:
+		# Direct orders can leave dest at the site with no route; withdrawal needs one.
+		if int(ship.get("dest", -1)) != site or ((ship["route"] as Array).is_empty() and int(ship["at"]) != site):
 			if not paths.has(site):
 				paths[site] = _military_paths(graph, site)
 			var nav: Dictionary = _manual_nav(state, graph, ship, site)
