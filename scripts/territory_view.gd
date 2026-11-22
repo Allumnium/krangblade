@@ -249,7 +249,7 @@ func _rebuild_field(empire_color: Callable) -> void:
 
 func _stamp_field(data: PackedByteArray, dimensions: Vector2i, source: Dictionary, channel: int) -> void:
 	var development: float = clampf(float(source["weight"]) / 150.0, 0.0, 1.0)
-	var reach: float = _base_radius * lerpf(1.12, 1.52, development)
+	var reach: float = ECONOMY.territory_kernel_reach(_base_radius, int(source["weight"]))
 	var peak: float = lerpf(0.88, 1.65, development) * SCORE_SCALE
 	var scale: Vector2 = Vector2(dimensions) / _extent
 	var center: Vector2 = source["point"]

@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.92.0: Completed infrastructure grants live vision over its full compact territory influence support (including merged claims) plus 160 world units. Preserve existing ship/structure sensors, cloak and alliance vision permissions. Uses shared radial reach and cached map radius; verify fog, discovery, loss of infrastructure and ENet. Runtime pending.
+
 - v0.91.11: Revert the v0.91.9 radius doubling across world, minimap and setup preview; retain reduced opacity. Visual validation pending.
 
 - v0.91.10: Solo and lobby map previews draw the shared cached minimap territory fields beneath stars and deposits, using actual starting infrastructure and roster colors. Refresh on map or ordered roster/color changes; no simulation or network changes. Verify preview alignment, recoloring and setup responsiveness; runtime pending.

@@ -252,6 +252,10 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 
 # Client presentation vision is separate from strategic route discovery.
 const VISION_CELL: float = 80.0
+const TERRITORY_VISION_MARGIN: float = 160.0
+
+static func territory_kernel_reach(base_radius: float, weight: int) -> float:
+	return base_radius * lerpf(1.12, 1.52, clampf(float(weight) / 150.0, 0.0, 1.0))
 const STATION_SIGHT: float = 1500.0
 const YARD_SIGHT: float = 1000.0
 const PDS_SIGHT: float = 1000.0
@@ -298,10 +302,14 @@ static func team_vision(state: Dictionary, team: int) -> Dictionary:
 	for cell in sources:
 		_stamp_vision(cells, (Vector2(cell) + Vector2.ONE * 0.5) * VISION_CELL, float(sources[cell]))
 	var elapsed: float = float(state["elapsed"])
+	var base_radius: float = sector_base_radius(state["map"])
 	for index in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][index]
 		if not _shares_group_vision(state, team, _combat_group(state, int(system["owner"]))):
 			continue
+		var weight: int = system_presence_weight(system)
+		if weight > 0:
+			_stamp_vision(cells, state["map"]["points"][index], territory_kernel_reach(base_radius, weight) + TERRITORY_VISION_MARGIN)
 		if has_station(system):
 			_stamp_vision(cells, station_position(state, index, elapsed), STATION_SIGHT)
 		for slot in range(system["yards"].size()):
