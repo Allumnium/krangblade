@@ -6,9 +6,13 @@ const CostButton = preload("res://scripts/cost_button.gd")
 
 # Per-match texture cache, keyed by command and requested pixel size.
 var _icons: Dictionary = {}
-var _info_host: Control
+const INFO_HEIGHT_RATIO: float = 0.55
+const INFO_MAX_HEIGHT_RATIO: float = 0.65
+const INFO_PADDING: Vector2 = Vector2(7.0, 5.0)
+var _info_host: Panel
 var _anchor: Control
-var _info: PanelContainer
+var _deck_slot: Control
+var _info: RichTextLabel
 var _hovered: Control
 var _signature: String = ""
 
@@ -82,29 +86,37 @@ func set_level_badge(button: Button, level: int) -> void:
 		button.set_meta("level_badge", label)
 	label.text = UI_TEXT.roman_level(level)
 
-func hint(button: Button) -> String:
+func hint(button: Control) -> String:
 	return str(button.get_meta("command_hint", "")) if button.has_meta("command_hint") else button.tooltip_text
 
-func set_hint(button: Button, hint: String) -> void:
+func set_hint(button: Control, hint: String) -> void:
 	if button.has_meta("command_hint"):
 		button.set_meta("command_hint", hint)
 		button.tooltip_text = ""
 	else:
 		button.tooltip_text = hint
 
-func _make_tooltip_mouse_transparent(node: Node) -> void:
-	if node is Control:
-		(node as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for child in node.get_children():
-		_make_tooltip_mouse_transparent(child)
-
-# All command hover information lives in one mouse-transparent overlay.
-func setup_info(parent: Control, anchor: Control) -> void:
+# Fixed-size overlay, deliberately not a Container. Text can never resize
+# the card deck or stretch the information background across the map.
+func setup_info(parent: Control, anchor: Control, deck_slot: Control) -> void:
 	_anchor = anchor
-	_info_host = Control.new()
+	_deck_slot = deck_slot
+	_info_host = Panel.new()
 	_info_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info_host.clip_contents = true
 	_info_host.z_index = 100
+	_info_host.theme = HUD.compact()
+	_info_host.add_theme_stylebox_override("panel", HUD.surface(Color("#101b29"), Color("#6385a4"), 0, 3))
 	parent.add_child(_info_host)
+	_info_host.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_info = RichTextLabel.new()
+	_info.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info.fit_content = false
+	_info.scroll_active = false
+	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_info.add_theme_constant_override("line_separation", 0)
+	_info.add_theme_color_override("default_color", HUD.TEXT)
+	_info_host.add_child(_info)
 	_info_host.hide()
 
 func register_info(control: Control, title: String) -> void:
@@ -112,11 +124,9 @@ func register_info(control: Control, title: String) -> void:
 		control.set_meta("command_hint", control.tooltip_text)
 	control.set_meta("command_title", title)
 	control.tooltip_text = ""
-	if control is CostButton:
-		(control as CostButton).fast_tooltip = true
 
 func refresh_info(viewport: Viewport) -> void:
-	if not is_instance_valid(_info_host) or not is_instance_valid(_anchor):
+	if not is_instance_valid(_info_host) or not is_instance_valid(_anchor) or not is_instance_valid(_deck_slot):
 		return
 	var control: Control = viewport.gui_get_hovered_control()
 	while is_instance_valid(control) and not control.has_meta("command_title"):
@@ -140,22 +150,38 @@ func refresh_info(viewport: Viewport) -> void:
 		crew_icon = cost_button.crew_icon
 		effect = cost_button.effect_resource
 	var bounds: Vector2 = viewport.get_visible_rect().size
-	var width: float = minf(maxf(320.0, _anchor.size.x), maxf(120.0, bounds.x - 16.0))
-	var signature: String = str([description, recipe, missing, effect, width])
+	# Keep the right edge flush with the command wing. A little extra width
+	# on narrow cards keeps text readable without covering the whole screen.
+	var right: float = _anchor.global_position.x + _anchor.size.x
+	var bottom: float = _anchor.global_position.y
+	var width: float = minf(maxf(300.0, _anchor.size.x), minf(right - 4.0, bounds.x - 8.0))
+	var available_height: float = maxf(0.0, bottom - 4.0)
+	var target_height: float = minf(roundf(_deck_slot.size.y * INFO_HEIGHT_RATIO), available_height)
+	var max_height: float = minf(roundf(_deck_slot.size.y * INFO_MAX_HEIGHT_RATIO), available_height)
+	if width <= INFO_PADDING.x * 2.0 or target_height <= INFO_PADDING.y * 2.0:
+		_info_host.hide()
+		_hovered = null
+		return
+	var signature: String = str([description, recipe, missing, effect, width, target_height, max_height])
 	if _hovered != control or _signature != signature:
 		_hovered = control
 		_signature = signature
-		if is_instance_valid(_info):
-			_info_host.remove_child(_info)
-			_info.queue_free()
-		_info = CostButton.build_info(description, recipe, missing, crew_icon, effect, width)
-		_make_tooltip_mouse_transparent(_info)
-		_info_host.add_child(_info)
-		_info.reset_size()
-	# Fixed right-wing alignment, independent of cursor position.
-	var extent: Vector2 = _info.size.max(_info.get_combined_minimum_size())
-	var right: float = _anchor.global_position.x + _anchor.size.x
-	_info_host.global_position = Vector2(clampf(right - extent.x, 4.0, maxf(4.0, bounds.x - extent.x - 4.0)), maxf(4.0, _anchor.global_position.y - extent.y - 5.0))
+		_info_host.size = Vector2(width, target_height)
+		_info.position = INFO_PADDING
+		_info.size = _info_host.size - INFO_PADDING * 2.0
+		_info.add_theme_font_size_override("normal_font_size", 12)
+		CostButton.fill_info(_info, description, recipe, missing, crew_icon, effect)
+		# Prefer the normal text size. Shrink only for longer descriptions;
+		# the panel can grow slightly, but never beyond 65% of the deck.
+		for font_size in [12, 11, 10]:
+			_info.add_theme_font_size_override("normal_font_size", font_size)
+			if _info.get_content_height() <= _info.size.y:
+				break
+		var content_height: float = float(_info.get_content_height()) + INFO_PADDING.y * 2.0
+		_info_host.size = Vector2(width, clampf(content_height, target_height, max_height))
+		_info.size = _info_host.size - INFO_PADDING * 2.0
+	# No cursor-relative offset and no content-driven positioning.
+	_info_host.global_position = Vector2(right - width, bottom - _info_host.size.y)
 	_info_host.show()
 
 func icon(kind: String, pixels: int = 64) -> Texture2D:

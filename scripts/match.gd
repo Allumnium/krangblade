@@ -634,7 +634,7 @@ func _build_command_deck() -> void:
 	inspector_panel = PanelContainer.new()
 	inspector_slot.add_child(inspector_panel)
 	inspector_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	command_card_ui.setup_info(self, inspector_panel)
+	command_card_ui.setup_info(self, inspector_panel, inspector_slot)
 	inspector_slot.resized.connect(_layout_right_panel)
 	# Both wings use the same fixed width; only the center expands.
 	inspector_panel.size_flags_horizontal = Control.SIZE_FILL
@@ -3650,7 +3650,7 @@ func _update_trade_stock(p: Dictionary) -> void:
 		slider.set_stock(stock, capacity, HUD.COLORS[resource])
 		trade_stock_labels[resource].text = "%s / %s" % [UI_TEXT.tons(stock, 1, true), UI_TEXT.tons(capacity, 0, true)]
 		trade_stock_labels[resource].tooltip_text = "%.1f / %.0f t" % [stock, capacity]
-		slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f units." % capacity
+		command_card_ui.set_hint(slider, "%s thresholds\nImport below the left handle; export above the right handle. 100%% = %.0f units." % [resource, capacity])
 		# Preserve this handle while dragging, even when a snapshot arrives.
 		if slider.active_handle < 0:
 			var t: Dictionary = p["thresholds"][resource]
