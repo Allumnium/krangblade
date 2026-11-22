@@ -1,6 +1,6 @@
 # Warbound — star-system strategy RTS
 
-Map terrain (v0.95.0): ordinary asteroid fields can grow into continuous open ridges with more rocks; non-miners detour around the actual belt outline. Star corridors, map-edge passages and separation between belts prevent enclosed pockets. Pulsars retain their existing generation.
+Map terrain (v0.96.0): individual asteroids are rendered, selectable and navigable independently; invisible generation pools remain for mining allocation. Non-Harvesters avoid nearby rock disks through a cached spatial index and swept step checks. Rock positions stay fixed with visual rotation; pulsars retain their exclusion disks.
 
 Current economy (v0.94.18): residents consume Organics only. Metals and Crystals are for construction and trade, with no population drain. Material Efficiency is retired and Crystalline Synthesis has no civilian upkeep penalty. Select a discovered neutral system and press C (Colonize) to dispatch a Colony. Later version notes supersede historical mechanics below.
 

@@ -3769,34 +3769,40 @@ func _test_resource_handoff() -> void:
 	ECON._collect_salvage(freighter, pile, 0.5)
 	assert(is_equal_approx(ECON._cargo_total(freighter), ECON._cargo_total(miner) * 0.25))
 	assert(is_equal_approx(float(pile["amount"]) + ECON._cargo_total(miner) + ECON._cargo_total(freighter), 100.0))
-	# The navigation disk follows surviving rocks, not unused placement space.
+	# Logistics bounds follow surviving rocks; collision only checks the individual rock disks.
 	var tight_fields: Array = [{"position": Vector2(1000, 0), "radius": 600.0, "chunks": [{"position": Vector2(1150, 0), "radius": 20.0}, {"position": Vector2(800, 0), "radius": 10.0}]}]
 	ECON._refresh_movement_fields(tight_fields)
 	assert(float(ECON._movement_fields[0]["radius"]) == 210.0)
 	assert(ECON._field_detour(Vector2(0, 350), Vector2(2000, 350), 10.0) == Vector2(2000, 350))
-	assert(ECON._field_detour(Vector2(0, 0), Vector2(2000, 0), 10.0) != Vector2(2000, 0))
+	assert(ECON._field_detour(Vector2(700, 0), Vector2(2000, 0), 10.0) != Vector2(2000, 0))
 	tight_fields[0]["chunks"].pop_back()
 	ECON._refresh_movement_fields(tight_fields)
 	assert(float(ECON._movement_fields[0]["radius"]) == 170.0)
 	tight_fields[0]["chunks"].clear()
 	ECON._refresh_movement_fields(tight_fields)
 	assert(float(ECON._movement_fields[0]["radius"]) == 0.0)
+	assert(ECON._point_clear_of_rocks(Vector2(1150, 0)))
+	assert(ECON._field_detour(Vector2(1100, 0), Vector2(1200, 0), 10.0) == Vector2(1200, 0))
 	var lobes: Array = [{"position": Vector2(250, 0), "radius": 100.0}, {"position": Vector2(400, 0), "radius": 100.0}]
 	var ridge: Dictionary = {"position": Vector2(250, 0), "radius": 250.0, "belt_lobes": lobes, "outline": Array(MAP._belt_outline(lobes)), "chunks": [{"position": Vector2(250, 0), "radius": 8.0}]}
 	assert(MAP.blocked(Vector2.ZERO, Vector2(700, 0), [ridge]))
 	assert(not MAP.blocked(Vector2(0, 180), Vector2(700, 180), [ridge]))
 	ECON._refresh_movement_fields([ridge])
-	assert(ECON._movement_fields[0].has("polygon"))
+	assert(not ECON._movement_fields[0].has("polygon"))
+	assert(ECON._point_clear_of_rocks(Vector2(400, 0)))
+	assert(not ECON._point_clear_of_rocks(Vector2(250, 0)))
+	assert(ECON._clip_rock_step(Vector2(200, 0), Vector2(300, 0)).x < 235.0)
+	assert(ECON._clip_rock_step(Vector2(200, 60), Vector2(500, 60)) == Vector2(500, 60))
 	var traveling: Dictionary = {"kind": "ship", "position": Vector2.ZERO, "id": 9834}
 	var destination := Vector2(700, 0)
 	for step in range(160):
 		var previous: Vector2 = traveling["position"]
 		ECON._navigate(traveling, destination, 10.0)
-		assert(not MAP.polygon_blocks_segment(PackedVector2Array(ridge["outline"]), previous, traveling["position"]))
+		assert(Geometry2D.get_closest_point_to_segment(Vector2(250, 0), previous, traveling["position"]).distance_to(Vector2(250, 0)) >= 15.9)
 		if (traveling["position"] as Vector2).distance_to(destination) < 0.1:
 			break
 	assert((traveling["position"] as Vector2).distance_to(destination) < 0.1)
-	# A worker deep inside the disk meets a hauler along its real depot route.
+	# A worker meets a hauler along its real depot route, not a pool boundary.
 	var rock := Vector2(3000, 1000)
 	var rendezvous_map: Dictionary = {"seed": 42, "points": [Vector2(1000, 1000), Vector2(6000, 1000)], "edges": [[0, 1]], "fields": [{"position": rock, "radius": 800.0, "anchor": 0, "access": [0], "Metals": 1.0, "Crystals": 0.0, "chunks": [{"id": 7, "position": rock, "resource": "Metals", "remaining": 24.0, "radius": 15.0}, {"id": 8, "position": rock + Vector2.RIGHT * 310.0, "resource": "Metals", "remaining": 24.0, "radius": 20.0}]}]}
 	var rendezvous: Dictionary = _funded_fixture(rendezvous_map, {1: {"team": 1}}, [1], false)
@@ -3807,7 +3813,7 @@ func _test_resource_handoff() -> void:
 	rendezvous["planets"][0]["stock"]["Metals"] = 0.0
 	ECON._refresh_movement_fields(rendezvous["map"]["fields"])
 	var berth: Vector2 = ECON._stage_wait_point(rendezvous, rendezvous_graph, helper, worker, 2, 0, ECON.planet_teams(rendezvous), {}, ECON._salvage_threats(rendezvous, rendezvous_graph))
-	assert(berth.is_finite() and berth.distance_to(rock) >= 369.0)
+	assert(berth.is_finite() and berth.distance_to(rock) > 15.0 and ECON._point_clear_of_rocks(berth))
 	var depot_direction: Vector2 = rock.direction_to(ECON.station_position(rendezvous, 0, float(rendezvous["elapsed"])))
 	assert(absf(depot_direction.cross((berth - rock).normalized())) < 0.001 and depot_direction.dot(berth - rock) > 0.0)
 	assert(ECON._stage_worker_field(worker, 1) == 0 and ECON._stage_worker_field(worker, 2) == -1)

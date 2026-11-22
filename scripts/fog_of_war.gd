@@ -13,6 +13,9 @@ var _revision: Array = []
 var _map_identity: Array = []
 var _systems: Dictionary = {}
 var _fields: Dictionary = {}
+var _rock_memory: Array = []
+var _rock_views: Array = []
+var _initial_map: Dictionary = {}
 var _observed_at: Dictionary = {}
 
 func update(state: Dictionary, player: int, motion_revision: Variant, map_size: Vector2) -> bool:
@@ -21,6 +24,9 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 		_explored.clear()
 		_systems.clear()
 		_fields.clear()
+		_rock_memory.clear()
+		_rock_views.clear()
+		_initial_map = {}
 		_observed_at.clear()
 		_revision.clear()
 		_map_identity.clear()
@@ -33,8 +39,15 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 		_explored.clear()
 		_systems.clear()
 		_fields.clear()
+		_rock_memory.clear()
+		_rock_views.clear()
+		_initial_map = {}
 		_observed_at.clear()
 		_revision.clear()
+		_initial_map = state["map"]
+		if _initial_map.has("layout"):
+			_initial_map = MAP.generate(int(_initial_map["seed"]), int(_initial_map.get("player_count", state.get("starting_empires", []).size())), str(_initial_map["layout"]))
+		_seed_rock_memory()
 		_seed_starting_memory(state, player)
 	var team: int = ECONOMY._combat_group(state, player)
 	var revision: Array = [state.get("elapsed"), motion_revision, team, state["ships"].size(), state.get("diplomacy_revision", 0)]
@@ -44,6 +57,7 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 	_live = ECONOMY.team_vision(state, team)
 	_explored.merge(_live, true)
 	_observe_sites(state, player, map_size)
+	_observe_rocks(state, map_size)
 	var cell: float = ECONOMY.VISION_CELL
 	var start := Vector2i.ZERO
 	var finish: Vector2i = ECONOMY.vision_cell(map_size)
@@ -84,9 +98,7 @@ func _seed_starting_memory(state: Dictionary, player: int) -> void:
 	var players: Dictionary = {}
 	for owner in ordered:
 		players[owner] = {"team": int(state["teams"].get(owner, owner))}
-	var initial_map: Dictionary = state["map"]
-	if initial_map.has("layout"):
-		initial_map = MAP.generate(int(initial_map["seed"]), ordered.size(), str(initial_map["layout"]))
+	var initial_map: Dictionary = _initial_map
 	var initial: Dictionary = ECONOMY.create(initial_map, players, ordered, false)
 	for region in regions:
 		var center: Vector2 = region["center"]
@@ -99,6 +111,10 @@ func _seed_starting_memory(state: Dictionary, player: int) -> void:
 		for index in range(fields.size()):
 			if center.distance_squared_to(fields[index]["position"]) <= squared:
 				_fields[index] = (fields[index] as Dictionary).duplicate(true)
+			if index < _rock_memory.size():
+				for asteroid in _rock_memory[index].values():
+					if center.distance_squared_to(asteroid["position"]) <= squared:
+						asteroid["surveyed"] = true
 
 # Site memory is presentation-only and never written back to replicated state.
 # Deep copies prevent in-place solo/host updates from changing remembered data.
@@ -110,8 +126,61 @@ func _observe_sites(state: Dictionary, player: int, map_size: Vector2) -> void:
 			_observed_at[index] = float(state["elapsed"])
 	var fields: Array = state["map"].get("fields", [])
 	for index in range(fields.size()):
-		if ECONOMY.discovered(state, player, "fields", index) and is_visible(fields[index]["position"], map_size):
+		if bool(fields[index].get("antimatter", false)) and ECONOMY.discovered(state, player, "fields", index) and is_visible(fields[index]["position"], map_size):
 			_fields[index] = (fields[index] as Dictionary).duplicate(true)
+
+# Each rock has its own last-seen inventory and depletion state. Initial
+# geography is reconstructed from the seed, never from hidden live ore.
+func _seed_rock_memory() -> void:
+	for field in _initial_map.get("fields", []):
+		var memory: Dictionary = {}
+		if not bool(field.get("antimatter", false)):
+			for chunk in field.get("chunks", []):
+				var initial: Dictionary = chunk.duplicate()
+				initial["surveyed"] = false
+				memory[int(chunk["id"])] = initial
+		_rock_memory.append(memory)
+		_rock_views.append({})
+
+func _observe_rocks(state: Dictionary, map_size: Vector2) -> void:
+	var fields: Array = state["map"].get("fields", [])
+	for index in range(mini(fields.size(), _rock_memory.size())):
+		var field: Dictionary = fields[index]
+		if bool(field.get("antimatter", false)):
+			continue
+		var memory: Dictionary = _rock_memory[index]
+		var live_ids: Dictionary = {}
+		for chunk in field.get("chunks", []):
+			if is_visible(chunk["position"], map_size):
+				var id: int = int(chunk["id"])
+				var previous: Dictionary = memory.get(id, {})
+				if not bool(previous.get("surveyed", false)) or previous.get("remaining", -1.0) != chunk["remaining"]:
+					var observed: Dictionary = chunk.duplicate()
+					observed["surveyed"] = true
+					memory[id] = observed
+				live_ids[id] = true
+		var visible_rocks: Array = []
+		var hidden_rocks: Array = []
+		for id in memory.keys():
+			var rock: Dictionary = memory[id]
+			if is_visible(rock["position"], map_size):
+				if not live_ids.has(id):
+					memory.erase(id)
+					continue
+				visible_rocks.append(rock)
+			else:
+				hidden_rocks.append(rock)
+		_rock_views[index] = {"live": visible_rocks, "hidden": hidden_rocks, "chunks": visible_rocks + hidden_rocks}
+
+func rock_view(index: int) -> Dictionary:
+	if index < 0 or index >= _rock_views.size():
+		return {}
+	return _rock_views[index]
+
+func rock_at(index: int, id: int) -> Dictionary:
+	if index < 0 or index >= _rock_memory.size():
+		return {}
+	return _rock_memory[index].get(id, {})
 
 func system_view(state: Dictionary, index: int, map_size: Vector2) -> Dictionary:
 	if index < 0 or index >= state.get("planets", []).size():

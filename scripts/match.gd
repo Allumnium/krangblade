@@ -80,6 +80,7 @@ var resource_hud := MATCH_RESOURCE_HUD.new()
 var ship_motion := SHIP_MOTION_VIEW.new()
 var world_batches := WORLD_RENDER_BATCHES.new()
 var celestial_view := CELESTIAL_VIEW.new()
+var fog_asteroid_view := CELESTIAL_VIEW.new()
 var world_effects := WORLD_EFFECTS.new()
 var planet_traffic := PLANET_TRAFFIC.new()
 var structure_view := STRUCTURE_VIEW.new()
@@ -179,6 +180,7 @@ var formation_mode: String = ""
 var formation_append: bool = false
 var formation_force_position: bool = false
 var selected_field: int = -1
+var selected_rock: int = -1
 var field_command_grid: GridContainer
 var field_commands: Dictionary = {}
 var planet_overview: VBoxContainer
@@ -909,7 +911,7 @@ func _minimap_order(mouse: InputEventMouseButton) -> void:
 			_refresh_command_mode()
 
 func _draw_minimap() -> void:
-	minimap_view.draw(selected, selected_units, selected_field)
+	minimap_view.draw(selected, selected_units, selected_field, selected_rock)
 
 func _population_texture(pixels: int = 24) -> Texture2D:
 	if not population_icons.has(pixels):
@@ -1690,18 +1692,26 @@ func _draw_fog() -> void:
 	var state: Dictionary = _state()
 	if state.is_empty():
 		return
-	# Reveal static terrain, not the current contents of unexplored mines.
+	# Draw last-seen/initial individual rocks over the fog, not belt polygons.
+	fog_asteroid_view.begin_frame()
+	fog_asteroid_view.prepare_map(state)
 	for index in range(state["map"].get("fields", []).size()):
 		var field: Dictionary = state["map"]["fields"][index]
-		if bool(field.get("antimatter", false)) or _fog_visible(field["position"]):
+		if bool(field.get("antimatter", false)):
 			continue
 		if not bounds.grow(float(field["radius"]) * scale + 4.0).has_point(_screen_point(field["position"])):
 			continue
-		var memory: Dictionary = fog_state.field_view(state, index, _map_size())
-		if not memory.is_empty() and memory.get("chunks", []).is_empty():
-			continue
-		var tint := Color("#3c3835") if memory.is_empty() else Color(0.30, 0.28, 0.26, 0.18)
-		CELESTIAL_VIEW.draw_terrain_footprint(fog_overlay, field, offset, scale, tint)
+		var rocks: Array = fog_state.rock_view(index).get("hidden", [])
+		fog_asteroid_view.draw_asteroid_chunks({"chunks": rocks}, bounds, scale, fog_overlay, _screen_point, 0.66)
+		if selected_field == index and selected_rock >= 0:
+			var rock: Dictionary = fog_state.rock_at(index, selected_rock)
+			if not rock.is_empty() and not _fog_visible(rock["position"]):
+				_draw_rock_selection(fog_overlay, rock, scale)
+
+func _draw_rock_selection(canvas: Control, rock: Dictionary, scale: float) -> void:
+	var fraction: float = float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock["initial"]))
+	var radius: float = maxf(4.0, float(rock["radius"]) * scale * sqrt(clampf(fraction, 0.0, 1.0)) + 3.0)
+	canvas.draw_arc(_screen_point(rock["position"]), radius, 0.0, TAU, 24, HUD.ACCENT, 1.0, true)
 
 # Names are static generated map geography, not live tactical information.
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
@@ -1777,7 +1787,7 @@ func _field_toggle_input(event: InputEvent, key: String, button: Button) -> void
 
 func _toggle_field_command(key: String) -> void:
 	var state: Dictionary = _state()
-	if str(session.get("phase")) != "match" or state.is_empty() or selected_field < 0 or not ECONOMY.discovered(state, _me(), "fields", selected_field):
+	if str(session.get("phase")) != "match" or state.is_empty() or selected_field < 0 or selected_rock >= 0 or not ECONOMY.discovered(state, _me(), "fields", selected_field):
 		return
 	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field).duplicate()
 	var special: bool = bool(state["map"]["fields"][selected_field].get("antimatter", false))
@@ -2182,11 +2192,25 @@ func _select_tile(id: int) -> void:
 	selected_body = -1
 	selected_yard = -1
 	selected_field = -1
+	selected_rock = -1
 	camera.following = false
 	pending_command = ""
 	_refresh()
 
 func _refresh_field_panels(state: Dictionary) -> void:
+	if selected_rock >= 0:
+		var rock: Dictionary = fog_state.rock_at(selected_field, selected_rock)
+		ship_title.text = "Asteroid"
+		ship_detail.text = "Unsurveyed" if not bool(rock.get("surveyed", false)) else "%s · %s" % [str(rock["resource"]), UI_TEXT.tons(float(rock["remaining"]))]
+		ship_detail.tooltip_text = ""
+		fleet_title.hide()
+		fleet_detail.hide()
+		field_command_grid.hide()
+		command_card.hide()
+		fleet_cargo_footer.hide()
+		pending_command = ""
+		_refresh_command_mode()
+		return
 	var field: Dictionary = fog_state.field_view(state, selected_field, _map_size())
 	ship_title.text = _poi_name(state["planets"].size() + selected_field)
 	if field.is_empty():
@@ -2603,7 +2627,10 @@ func _refresh() -> void:
 		ship = _selected_ship(state)
 	_prune_building_selection(state)
 	var p: Dictionary = _planet()
-	var field_selected: bool = selected_field >= 0 and ECONOMY.discovered(state, _me(), "fields", selected_field)
+	if selected_field >= 0 and selected_rock >= 0 and fog_state.rock_at(selected_field, selected_rock).is_empty():
+		selected_field = -1
+		selected_rock = -1
+	var field_selected: bool = selected_field >= 0 and (selected_rock >= 0 or ECONOMY.discovered(state, _me(), "fields", selected_field))
 	var ship_selected: bool = not ship.is_empty()
 	if not ship_selected and not field_selected and p.is_empty():
 		camera.following = false
@@ -2645,7 +2672,7 @@ func _refresh() -> void:
 	_refresh_building_group(state)
 	var own_system: bool = system_live and int(p.get("owner", -1)) == _me()
 	var owned_station: bool = not other_selected and not body_selected and not yard_selected and own_system and ECONOMY.has_station(p)
-	var right_needed: bool = field_selected or (ship_selected and state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())) or (yard_selected and not _selected_yards(state, true).is_empty()) or owned_station or (not other_selected and not yard_selected and not body_selected and not grouped_buildings and not p.is_empty() and int(p["owner"]) == 0)
+	var right_needed: bool = (field_selected and selected_rock < 0) or (ship_selected and state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())) or (yard_selected and not _selected_yards(state, true).is_empty()) or owned_station or (not other_selected and not yard_selected and not body_selected and not grouped_buildings and not p.is_empty() and int(p["owner"]) == 0)
 	console_right_body.visible = right_needed
 	inspector_panel.self_modulate.a = 1.0
 	inspector_panel.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -3110,6 +3137,7 @@ func _recall_control_group(number: int, additive: bool = false) -> void:
 	selected_body = -1
 	selected_yard = -1
 	selected_field = -1
+	selected_rock = -1
 	selected_ship_id = -1
 	selected_units.clear()
 	camera.following = false
@@ -3183,6 +3211,7 @@ func _set_building_primary(state: Dictionary, ref: Vector2i, kind: String) -> vo
 	selected_units.clear()
 	selected_ship_id = -1
 	selected_field = -1
+	selected_rock = -1
 
 func _select_building_ref(ref: Vector2i, kind: String) -> void:
 	var state: Dictionary = _state()
@@ -3446,6 +3475,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 			selected_ship_id = -1
 			selected_units.clear()
 			selected_field = -1
+			selected_rock = -1
 			camera.following = false
 			if double_click:
 				_select_visible_buildings(state, yard_hit, "shipyard")
@@ -3476,6 +3506,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 		selected_ship_id = -1
 		selected_units.clear()
 		selected_field = -1
+		selected_rock = -1
 		if double_click and state["planets"][selected].get("pds", {}).has(selected_body):
 			_select_visible_buildings(state, body_hit, "pds")
 		var focus: Control = get_viewport().gui_get_focus_owner()
@@ -3512,18 +3543,14 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 					selected_ship_id = selected_units[0]
 			break
 	selected_field = -1
+	selected_rock = -1
 	if selected_ship_id < 0:
-		var fields: Array = state["map"].get("fields", [])
-		for i in range(fields.size()):
-			if not ECONOMY.discovered(state, _me(), "fields", i):
-				continue
-			var distance: float = point.distance_to(_screen_point(fields[i]["position"]))
-			if (fields[i].has("belt_lobes") and MAP.terrain_contains(fields[i], _world_point(point))) or (not fields[i].has("belt_lobes") and distance <= maxf(9.0, float(fields[i]["radius"]) * _fit() * camera.zoom)):
-				selected_field = i
-				break
-	if selected_ship_id < 0 and selected_field < 0 and hit >= state["planets"].size():
-		selected_field = hit - state["planets"].size()
-		hit = -1
+		var asteroid_hit: Vector2i = _asteroid_hit(point, state, false)
+		if asteroid_hit.x >= 0:
+			selected_field = asteroid_hit.x
+			selected_rock = asteroid_hit.y
+		if hit >= state["planets"].size():
+			hit = -1
 	# Direct star hits remain selectable independently of old sector geometry.
 	if selected_ship_id < 0 and selected_field < 0:
 		var closest: float = INF
@@ -3587,6 +3614,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	selected_body = -1
 	selected_yard = -1
 	selected_field = -1
+	selected_rock = -1
 	_refresh()
 
 func _entity_hit(state: Dictionary, point: Vector2) -> int:
@@ -3616,6 +3644,34 @@ func _entity_hit(state: Dictionary, point: Vector2) -> int:
 	if body.x >= 0 and state["planets"][body.x].get("pds", {}).has(body.y):
 		return -2 - state["planets"].size() * 3 - body.y * state["planets"].size() - body.x
 	return -1
+
+# Return (internal pool, rock id); pulsars retain id -1. Empty belt
+# space has no selectable object. Use the same snapshot as rendering.
+func _asteroid_hit(point: Vector2, state: Dictionary, mining: bool) -> Vector2i:
+	var result := Vector2i(-1, -1)
+	var best: float = INF
+	var scale: float = _fit() * camera.zoom
+	for index in range(state["map"].get("fields", []).size()):
+		var field: Dictionary = state["map"]["fields"][index]
+		var known: bool = ECONOMY.discovered(state, _me(), "fields", index)
+		var distance: float = point.distance_to(_screen_point(field["position"]))
+		if bool(field.get("antimatter", false)):
+			if known and distance <= maxf(9.0, float(field["radius"]) * scale * 0.16) and distance < best:
+				best = distance
+				result = Vector2i(index, -1)
+			continue
+		if distance > float(field["radius"]) * scale + 4.0 or (mining and not known):
+			continue
+		for rock in fog_state.rock_view(index).get("chunks", []):
+			if mining and not bool(rock.get("surveyed", false)):
+				continue
+			var fraction: float = clampf(float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock["initial"])), 0.0, 1.0)
+			var hit_radius: float = maxf(2.5, float(rock["radius"]) * scale * sqrt(fraction))
+			var d: float = point.distance_to(_screen_point(rock["position"]))
+			if fraction > 0.0 and d < best and d <= hit_radius:
+				best = d
+				result = Vector2i(index, int(rock["id"]))
+	return result
 
 func _command_at(point: Vector2, force_position: bool = false, patrol: bool = false, move_only: bool = true, explicit_attack: bool = false, append: bool = false, contextual: bool = false, minimap_hint: Dictionary = {}) -> void:
 	var state: Dictionary = _state()
@@ -3657,30 +3713,9 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	if contextual and not force_position and not minimap_hint.is_empty():
 		field = int(minimap_hint["field"])
 	elif contextual and not force_position:
-		# Field extents can span several legacy sectors. Hit the actual
-		# known rock, not the closest bookkeeping node or bounding circle.
-		var best: float = INF
-		var scale: float = _fit() * camera.zoom
-		for candidate in range(state["map"]["fields"].size()):
-			if not ECONOMY.discovered(state, _me(), "fields", candidate):
-				continue
-			var data: Dictionary = fog_state.field_view(state, candidate, _map_size())
-			if data.is_empty():
-				continue
-			if bool(data.get("antimatter", false)):
-				if rock_id < 0 and point.distance_to(_screen_point(data["position"])) <= maxf(9.0, float(data["radius"]) * scale):
-					field = candidate
-				continue
-			if point.distance_to(_screen_point(data["position"])) > float(data["radius"]) * scale + 3.0:
-				continue
-			for rock in data.get("chunks", []):
-				var fraction: float = clampf(float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock.get("initial", rock["remaining"]))), 0.0, 1.0)
-				var hit_radius: float = maxf(2.5, float(rock.get("radius", 0.0)) * scale * sqrt(fraction))
-				var d: float = point.distance_to(_screen_point(rock["position"]))
-				if fraction > 0.0 and d < best and d <= hit_radius:
-					best = d
-					field = candidate
-					rock_id = int(rock["id"])
+		var asteroid_hit: Vector2i = _asteroid_hit(point, state, true)
+		field = asteroid_hit.x
+		rock_id = asteroid_hit.y
 	# Only a direct hit on a known neutral star is a settlement command.
 	# Empty space inside a legacy sector remains an ordinary move.
 	var colony_target: int = -1
@@ -4218,6 +4253,7 @@ func _select_all_buildings(kind: String) -> void:
 	selected_body = -1
 	selected_yard = -1
 	selected_field = -1
+	selected_rock = -1
 	for node in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][node]
 		if int(system["owner"]) != _me():
@@ -4247,6 +4283,7 @@ func _select_all_military() -> void:
 	selected_body = -1
 	selected_yard = -1
 	selected_field = -1
+	selected_rock = -1
 	selected_units.clear()
 	for craft in state["ships"]:
 		if craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"] and int(craft["owner"]) == _me():
@@ -4446,8 +4483,12 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 			_center_world(bounds.get_center())
 		return
 	var fields: Array = state["map"].get("fields", [])
-	if selected_field >= 0 and selected_field < fields.size() and ECONOMY.discovered(state, _me(), "fields", selected_field):
-		_center_world(fields[selected_field]["position"])
+	if selected_field >= 0 and selected_field < fields.size():
+		var rock: Dictionary = fog_state.rock_at(selected_field, selected_rock)
+		if selected_rock >= 0 and not rock.is_empty():
+			_center_world(rock["position"])
+		elif selected_rock < 0 and ECONOMY.discovered(state, _me(), "fields", selected_field):
+			_center_world(fields[selected_field]["position"])
 		return
 	if selected >= 0 and selected < state["planets"].size() and ECONOMY.discovered(state, _me(), "planets", selected):
 		var system: Dictionary = state["planets"][selected]
@@ -4601,6 +4642,14 @@ func _draw_map() -> void:
 		var center: Vector2 = _screen_point(field["position"])
 		if not viewport_bounds.grow(float(field["radius"]) * render_scale * 2.0 + 40.0).has_point(center):
 			continue
+		if not bool(field.get("antimatter", false)):
+			var live_rocks: Array = fog_state.rock_view(field_index).get("live", [])
+			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _screen_point, 1.0, celestial_view.orbit_time(state))
+			if selected_field == field_index and selected_rock >= 0:
+				var rock: Dictionary = fog_state.rock_at(field_index, selected_rock)
+				if not rock.is_empty() and _fog_visible(rock["position"]):
+					_draw_rock_selection(map_canvas, rock, render_scale)
+			continue
 		if not ECONOMY.discovered(state, _me(), "fields", field_index):
 			if bool(field.get("antimatter", false)):
 				map_canvas.draw_string(font, center + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
@@ -4629,7 +4678,6 @@ func _draw_map() -> void:
 			var axis: Vector2 = Vector2.from_angle(visual_clock * 0.8 if field_live else 0.0)
 			map_canvas.draw_line(center - axis * star_radius * 4.0, center + axis * star_radius * 4.0, Color(glow, 0.45 + pulse * 0.4), maxf(1.0, star_radius * 0.45), true)
 			continue
-		celestial_view.draw_asteroid_chunks(field, viewport_bounds, render_scale, map_canvas, _screen_point)
 	for i in range(points.size()):
 		var pos: Vector2 = _screen_point(points[i])
 		if not ECONOMY.discovered(state, _me(), "planets", i):
