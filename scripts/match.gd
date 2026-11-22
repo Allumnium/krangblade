@@ -1334,6 +1334,10 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		if button.has_meta("auto_border"):
 			(button.get_meta("auto_border") as Control).visible = auto
 		_set_cost_tooltip(button, name_text + (" · %.1f s" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
+		if key in ECONOMY.RESOURCES and float(p["population"]) + ECONOMY.EPS < float(ECONOMY.building_population(key, current_level + 1)):
+			(button as CostButton).unmet_requirements.append(description.get_slice("\n", 0))
+		elif key == "warehouse" and eligible and float(p["population"]) + ECONOMY.EPS < float(ECONOMY.WAREHOUSE_POPULATIONS[current_level]):
+			(button as CostButton).unmet_requirements.append(description.get_slice("\n", 0))
 		if not eligible:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nUnavailable")
 		elif not can_build and key in ECONOMY.RESOURCES and not ECONOMY._has_job(p, "economy_building", key) and ECONOMY.construction_affordable(_state(), p, recipe):
@@ -1442,6 +1446,8 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		portrait.texture = hull_art.production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		_set_cost_tooltip(button, "%s · %.1f s\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard), kind)
+		if not ECONOMY.ship_origin_population_met(system, kind):
+			(button as CostButton).unmet_requirements.append(UI_TEXT.colony_population_requirement())
 		if not ECONOMY.yard_fits(system, selected_yard, kind):
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
 		if not operating:
@@ -1468,6 +1474,8 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 			if not eligible:
 				hint += "\nRequires " + ECONOMY.size_name(target_level - 1) + " shipyard"
 			_set_cost_tooltip(upgrade, hint, ECONOMY._cost("yard_upgrade", target_level), 0.0, _available_cost_resources(system, selected_yard))
+			if not operating:
+				(upgrade as CostButton).unmet_requirements.append(hint.get_slice("\n", 1))
 
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
@@ -3180,9 +3188,11 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var eligible: bool = false
 		var can_toggle: bool = false
 		var auto: bool = false
+		var population_met: bool = false
 		for ref in refs:
 			var system: Dictionary = state["planets"][ref.x]
 			eligible = eligible or _yard_build_available(system, ref.y, kind)
+			population_met = population_met or (ECONOMY.yard_fits(system, ref.y, kind) and ECONOMY.ship_origin_population_met(system, kind))
 			can_toggle = can_toggle or (ECONOMY.yard_fits(system, ref.y, kind) and (kind != "ship" or bool(system["home"])))
 			auto = auto or system["yards"][ref.y].get("autobuild", []).has(kind)
 		var button: Button = yard_commands[kind]
@@ -3193,6 +3203,8 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		portrait.texture = hull_art.production_icon(kind, _empire_color(_me()))
 		portrait.modulate = Color.WHITE if eligible else Color(0.55, 0.55, 0.55)
 		_set_cost_tooltip(button, "%s · Cost per ship\n1 per eligible yard\n%s\nRight-click: toggle autobuild" % [UI_TEXT.ship_kind_name(kind), UI_TEXT.ship_stats(kind)], ECONOMY.construction_cost(state["planets"][refs[0].x] if not refs.is_empty() else {}, kind, 1), float(ECONOMY.CREW_COSTS[kind]), available, kind)
+		if kind == "colony_ship" and not refs.is_empty() and not population_met:
+			(button as CostButton).unmet_requirements.append(UI_TEXT.colony_population_requirement())
 	var can_clear: bool = false
 	var can_upgrade: Dictionary = {2: false, 3: false}
 	for ref in refs:

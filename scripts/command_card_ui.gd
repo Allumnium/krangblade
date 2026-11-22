@@ -153,12 +153,14 @@ func refresh_info(viewport: Viewport) -> void:
 		description = title + ("\n" + description if not description.is_empty() else "")
 	var recipe: Dictionary = {}
 	var missing: Array[String] = []
+	var unmet: Array[String] = []
 	var crew_icon: Texture2D = null
 	var effect: String = ""
 	if control is CostButton:
 		var cost_button: CostButton = control as CostButton
 		recipe = cost_button.recipe
 		missing = cost_button.missing
+		unmet = cost_button.unmet_requirements
 		crew_icon = cost_button.crew_icon
 		effect = cost_button.effect_resource
 	# Match the actual command wing exactly, including on narrow windows.
@@ -172,7 +174,7 @@ func refresh_info(viewport: Viewport) -> void:
 		_info_host.hide()
 		_hovered = null
 		return
-	var signature: String = str([description, recipe, missing, effect, width, target_height, max_height])
+	var signature: String = str([description, recipe, missing, unmet, effect, width, target_height, max_height])
 	if _hovered != control or _signature != signature:
 		_hovered = control
 		_signature = signature
@@ -180,7 +182,7 @@ func refresh_info(viewport: Viewport) -> void:
 		_info.position = INFO_PADDING
 		_info.size = _info_host.size - INFO_PADDING * 2.0
 		_info.add_theme_font_size_override("normal_font_size", 12)
-		CostButton.fill_info(_info, description, recipe, missing, crew_icon, effect)
+		CostButton.fill_info(_info, description, recipe, missing, crew_icon, effect, unmet)
 		# Prefer the normal text size. Shrink only for longer descriptions;
 		# the panel can grow slightly, but never beyond 65% of the deck.
 		for font_size in [12, 11, 10]:

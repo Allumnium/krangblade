@@ -42,11 +42,14 @@ static func blaster_summary(kind: String) -> String:
 static func capital_weapon_summary(kind: String) -> String:
 	return "Lasers ×%d | %.0f dmg | 1s | R%.0f\nMissiles ×%d | %.0f dmg | %.0fs | R%.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE] + "\n" + blaster_summary(kind)
 
+static func colony_population_requirement() -> String:
+	return "Requires %.0f station population" % ECONOMY.COLONY_MIN_ORIGIN_POPULATION
+
 static func ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
 		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
-		"colony_ship": details = "Requires %.0f station population\nSettles a neutral system · %.0f settlers\nFarm %.0f t/s · Cargo %.0f t" % [ECONOMY.COLONY_MIN_ORIGIN_POPULATION, ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
+		"colony_ship": details = "%s\nSettles a neutral system · %.0f settlers\nFarm %.0f t/s · Cargo %.0f t" % [colony_population_requirement(), ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
 		"scout": details = "Fast reconnaissance · " + blaster_summary(kind)
 		"cruiser", "destroyer": details = capital_weapon_summary(kind)
 		"fighter": details = blaster_summary(kind)

@@ -5,6 +5,7 @@ const ECONOMY = preload("res://scripts/economy_rules.gd")
 
 var recipe: Dictionary = {}
 var missing: Array[String] = []
+var unmet_requirements: Array[String] = []
 var crew_icon: Texture2D
 var effect_resource: String = ""
 
@@ -13,6 +14,7 @@ func set_recipe(cost: Dictionary, crew: float, population_icon: Texture2D, avail
 	if not cost.is_empty():
 		recipe["GC"] = ECONOMY.construction_credit_cost(cost, kind)
 	missing.clear()
+	unmet_requirements.clear()
 	if crew > 0.0:
 		recipe["Population"] = crew
 		crew_icon = population_icon
@@ -22,7 +24,7 @@ func set_recipe(cost: Dictionary, crew: float, population_icon: Texture2D, avail
 				missing.append(resource)
 
 # Command cards use this renderer exclusively; no native custom tooltip.
-static func fill_info(label: RichTextLabel, description: String, costs_by_resource: Dictionary, shortages: Array[String], population_icon: Texture2D, yield_resource: String) -> void:
+static func fill_info(label: RichTextLabel, description: String, costs_by_resource: Dictionary, shortages: Array[String], population_icon: Texture2D, yield_resource: String, unmet: Array[String] = []) -> void:
 	label.clear()
 	var lines: PackedStringArray = description.split("\n", false)
 	if lines.is_empty():
@@ -66,7 +68,7 @@ static func fill_info(label: RichTextLabel, description: String, costs_by_resour
 			label.add_text("Upkeep: ")
 			label.add_image(HUD.resource_icon("GC", 24), 14, 14)
 			label.add_text(" " + detail.trim_prefix("Upkeep: ").trim_suffix(" GC/yr") + "/yr")
-		elif detail == "Insufficient local population":
+		elif detail == "Insufficient local population" or unmet.has(detail):
 			label.push_color(Color("#ff7777"))
 			label.add_text(detail)
 			label.pop()
