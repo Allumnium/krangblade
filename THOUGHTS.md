@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.8: Extract ten shared command-card presentation methods (grid, slot, fill, face, level badge, hints, fast hover and icon texture/cache) into per-match command_card_ui.gd. Preserve exact layout, icon SVGs, mouse handling, native construction tooltip and existing hotkey registration/dispatch. No simulation or Codex rule change. Static indentation and reference checks only; Godot, import, visual and peer validation pending.
+
 - v0.89.7: Move native construction cost tooltip widget and recipe/shortfall setup into cost_button.gd, and formatting plus read-only production/ship previews into ui_text.gd. Codex uses shared ship naming instead of its own mapping. Keep button hints, fast ordinary-command popup and selection dispatch unchanged. No rule changes. Static indentation/reference review only; actual Godot parsing, import stability, visual and peers pending.
 
 - v0.89.6: Extract tactical notification tracking to a per-client RefCounted module; match retains hit rectangles, territory-derived friendly sectors, projection and navigation. Existing warning texts, ordering, cooldowns, sequence handling and visibility predicates retained. Split scan, wage/damage and rogue detection into separate functions. No simulation, RPC or Codex rule changes. Static review only; Godot, visual and ENet pending. New script UID assigned and tracked; import stability pending.
