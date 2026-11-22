@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.17: User reported wide hover panel and confusing crystal increments (28.4K empire population vs 17.9K Cyris). Confirmed rate already scales by local station population (farms by planetary labor); two-decimal display hides small increments. Use exact wing width, actual incremental rate/local population first and muted 10k reference second; preserve additional decimals below 0.1. No underlying balance changes. Godot/visual/peer validation pending.
+
 - v0.89.16: Extract territory layer/shader, site/lane/influence textures and cache ownership, including friendly warning destinations, into territory_view.gd. Verify shader string byte-for-byte; preserve render ordering, graph/influence calls, fog binding and geometry formula. Match supplies camera, roster/colors and local player. No authoritative changes or Codex changes needed. Static review only; import, Godot parse, visual, benchmark and peer validation pending.
 
 - v0.89.15: Extract live/explored cells, revision and fog image ownership plus map exterior fog drawing into fog_of_war.gd. Match retains camera transforms, territory shader binding and ship visibility query; minimap reads the same mask. Preserve revision components, colors, cell size, update semantics and per-match lifetime. No authority or network changes, Codex unchanged. Static review only; Godot/visual/performance/peer tests pending.

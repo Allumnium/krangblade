@@ -149,12 +149,10 @@ func refresh_info(viewport: Viewport) -> void:
 		missing = cost_button.missing
 		crew_icon = cost_button.crew_icon
 		effect = cost_button.effect_resource
-	var bounds: Vector2 = viewport.get_visible_rect().size
-	# Keep the right edge flush with the command wing. A little extra width
-	# on narrow cards keeps text readable without covering the whole screen.
+	# Match the actual command wing exactly, including on narrow windows.
 	var right: float = _anchor.global_position.x + _anchor.size.x
 	var bottom: float = _anchor.global_position.y
-	var width: float = minf(maxf(300.0, _anchor.size.x), minf(right - 4.0, bounds.x - 8.0))
+	var width: float = _anchor.size.x
 	var available_height: float = maxf(0.0, bottom - 4.0)
 	var target_height: float = minf(roundf(_deck_slot.size.y * INFO_HEIGHT_RATIO), available_height)
 	var max_height: float = minf(roundf(_deck_slot.size.y * INFO_MAX_HEIGHT_RATIO), available_height)
