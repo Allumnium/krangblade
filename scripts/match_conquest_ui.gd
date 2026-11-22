@@ -115,7 +115,7 @@ func draw(state: Dictionary) -> void:
 			var key: String = objective["id"]
 			var done: bool = completed.has(key)
 			var tint: Color = Color("#8ee2a9") if done else Color.WHITE
-			objectives_overlay.draw_string(font, Vector2(x, y), "%s · %d CP" % [category.capitalize(), ECONOMY.reward_points(progress, category)], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
+			objectives_overlay.draw_string(font, Vector2(x, y), category.capitalize(), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
 			y += 23.0
 			var pos := Vector2(x, y)
 			var counter: String = objective["counter"]

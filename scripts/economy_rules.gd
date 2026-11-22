@@ -8749,7 +8749,7 @@ static func _update_objectives(state: Dictionary) -> void:
 				if not first.has(key):
 					first[key] = now
 				var winner: bool = float(first[key]) == now
-				var award: int = 2 if winner else 1
+				var award: int = 1
 				var category: String = objective_category(key)
 				progress["points"][category] = reward_points(progress, category) + award
 				var earned: Dictionary = progress.get("earned_points", {})
