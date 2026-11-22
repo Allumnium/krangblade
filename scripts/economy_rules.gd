@@ -11,6 +11,7 @@ const AVOIDANCE_LOOKAHEAD: float = 96.0
 const AVOIDANCE_CELL: float = 128.0
 const AVOIDANCE_BUCKET_LIMIT: int = 24
 const MAP = preload("res://scripts/planet_map.gd")
+const SECTOR_GEOMETRY = preload("res://scripts/sector_geometry.gd")
 const RESOURCES = ["Metals", "Organics", "Crystals"]
 const EXTRACTED = ["Metals", "Crystals"]
 const ACTIVE_PRODUCTION = RESOURCES
@@ -3302,7 +3303,7 @@ static func military_graph(state: Dictionary) -> Dictionary:
 	if not cached_military_graph.is_empty() and is_same(cached_military_source, map_data):
 		return cached_military_graph
 	cached_military_source = map_data
-	if not cached_military_graph.is_empty() and cached_military_map.get("points") == map_data["points"] and cached_military_map.get("edges") == map_data["edges"] and cached_military_map.get("field_positions") == _field_positions(map_data) and cached_military_map.get("field_edges") == map_data.get("field_edges", []):
+	if not cached_military_graph.is_empty() and cached_military_map.get("points") == map_data["points"] and cached_military_map.get("edges") == map_data["edges"] and cached_military_map.get("field_positions") == _field_positions(map_data) and cached_military_map.get("field_edges") == map_data.get("field_edges", []) and cached_military_map.get("size") == map_data.get("size", MAP.SIZE):
 		return cached_military_graph
 	var points: Array = map_data["points"].duplicate()
 	var edges: Array = map_data["edges"].duplicate()
@@ -3337,8 +3338,8 @@ static func military_graph(state: Dictionary) -> Dictionary:
 				squares.append(delta.length_squared())
 		sector_neighbors.append(neighbors)
 		sector_neighbor_squares.append(squares)
-	cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data), "field_edges": map_data.get("field_edges", []).duplicate(true)}
-	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors, "sector_neighbor_squares": sector_neighbor_squares, "system_count": map_data["points"].size()}
+	cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data), "field_edges": map_data.get("field_edges", []).duplicate(true), "size": map_data.get("size", MAP.SIZE)}
+	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors, "sector_neighbor_squares": sector_neighbor_squares, "system_count": map_data["points"].size(), "map_size": map_data.get("size", MAP.SIZE)}
 	_index_sector_bounds(cached_military_graph, base_radius)
 	_index_navigation_junctions(cached_military_graph)
 	return cached_military_graph
@@ -4260,7 +4261,7 @@ static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionar
 	var candidates: Array[int] = military_pois(state, int(ship["owner"]))
 	var budget: float = ship_speed(str(ship["kind"])) * dt
 	var waypoint: Vector2 = point
-	if not lane_direct(graph, pos, point, candidates):
+	if not lane_direct(graph, pos, point, candidates) and not friendly_sector_travel(state, graph, int(ship["owner"]), pos, point):
 		var paths: Dictionary = _military_paths(graph, node)
 		var origin: int = sector_at(graph, pos, candidates)
 		if origin < 0:
@@ -5218,8 +5219,7 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 		ship["route"] = []
 		ship["leg"] = 0.0
 		ship["dest"] = nav["node"]
-		_navigate(ship, destination, ship_speed(str(ship.get("kind", "ship"))) * dt)
-		if (ship["position"] as Vector2).distance_to(destination) <= EPS:
+		if _manual_travel(state, graph, ship, node, destination, dt):
 			ship["at"] = nav["node"]
 			if ship.has("arrival_heading"):
 				ship["heading"] = ship["arrival_heading"]
@@ -5331,8 +5331,8 @@ static func combat_position(state: Dictionary, graph: Dictionary, ship: Dictiona
 	var points: Array = graph["points"] if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"]
 	return _initial_position(points, ship)
 
-# Influence is presentation data derived from replicated physical state,
-# deliberately independent of ownership, access, conquest and combat.
+# Influence derives from physical state. Fully friendly influence also permits
+# manual navigation shortcuts; ownership and conquest remain separate.
 const INFLUENCE_CAP: float = 50.0
 const INFLUENCE_SPILLOVER: float = 0.05
 const INFLUENCE_SPILLOVER_MIN: float = 50.0
@@ -5375,35 +5375,44 @@ static func highway_regions(graph: Dictionary) -> Dictionary:
 	graph["highway_regions"] = layout
 	return layout
 
-# Core membership takes priority; overlapping highways award points to the
-# nearest centerline. A section boundary never changes navigation.
+# The political tessellation shares the original system/field/highway IDs.
+static func sector_geometry(graph: Dictionary) -> Dictionary:
+	if not graph.has("sector_geometry"):
+		graph["sector_geometry"] = SECTOR_GEOMETRY.build(graph["points"], graph["edges"], highway_regions(graph), graph.get("map_size", MAP.SIZE))
+	return graph["sector_geometry"]
+
 static func influence_region(graph: Dictionary, point: Vector2) -> int:
-	if not point.is_finite():
-		return -1
-	var points: Array = graph["points"]
-	var nearest: float = INF
-	var region: int = -1
-	for i in _sector_candidates(graph, point):
-		var d: float = point.distance_squared_to(points[i])
-		if d < nearest and d <= pow(float(graph["sector_radii"][i]) + EPS, 2.0) and sector_contains(graph, i, point):
-			nearest = d
-			region = i
-	if region >= 0:
-		return region
-	var edges: Array = graph["edges"]
-	var layout: Dictionary = highway_regions(graph)
-	for i in range(edges.size()):
-		var a: int = int(edges[i][0])
-		var b: int = int(edges[i][1])
-		var center: Vector2 = Geometry2D.get_closest_point_to_segment(point, points[a], points[b])
-		var d: float = point.distance_squared_to(center)
-		if d < nearest and d <= pow(lane_radius(graph, a, b) + EPS, 2.0):
-			nearest = d
-			var axis: Vector2 = (points[b] as Vector2) - (points[a] as Vector2)
-			var along: float = clampf((point - (points[a] as Vector2)).dot(axis) / maxf(axis.length_squared(), EPS), 0.0, 1.0)
-			var count: int = int(layout["counts"][i])
-			region = int(layout["starts"][i]) + mini(count - 1, floori(along * count))
-	return region
+	return SECTOR_GEOMETRY.region_at(sector_geometry(graph), point)
+
+# A friendly shortcut requires full-strength allied influence with no
+# competing empire. Sample the authoritative influence once per movement
+# phase, then test exact segments against the immutable cells.
+static func friendly_sector_travel(state: Dictionary, graph: Dictionary, player: int, origin: Vector2, destination: Vector2) -> bool:
+	var during_step: bool = is_same(graph, _sector_query_graph)
+	var by_player: Dictionary = graph.get("travel_permissions", {}) if during_step else {}
+	if not by_player.has(player) and (not during_step or not graph.has("travel_influence")):
+		var current: Array[Dictionary] = territory_influence(state, graph)
+		if not during_step:
+			return SECTOR_GEOMETRY.segment_allowed(sector_geometry(graph), origin, destination, _fully_friendly_cells(state, player, current))
+		graph["travel_influence"] = current
+	if not by_player.has(player):
+		by_player[player] = _fully_friendly_cells(state, player, graph["travel_influence"])
+		graph["travel_permissions"] = by_player
+	return SECTOR_GEOMETRY.segment_allowed(sector_geometry(graph), origin, destination, by_player[player])
+
+static func _fully_friendly_cells(state: Dictionary, player: int, weights: Array) -> Dictionary:
+	var allowed: Dictionary = {}
+	for i in range(weights.size()):
+		var friendly: float = 0.0
+		var competing: bool = false
+		for owner in weights[i]:
+			if empires_allied(state, player, int(owner)):
+				friendly += float(weights[i][owner])
+			elif float(weights[i][owner]) > EPS:
+				competing = true
+		if not competing and friendly >= INFLUENCE_CAP:
+			allowed[i] = true
+	return allowed
 
 static func territory_influence(state: Dictionary, graph: Dictionary, known_pois: Variant = null, region_cache: Dictionary = {}) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
@@ -5452,7 +5461,7 @@ static func territory_influence(state: Dictionary, graph: Dictionary, known_pois
 				var edge: Array = graph["edges"][layout["region_edges"][i - graph["points"].size()]]
 				known = known_pois.has(int(edge[0])) and known_pois.has(int(edge[1]))
 			visible.append(known)
-	return influence_spillover(result, layout["links"], visible)
+	return influence_spillover(result, sector_geometry(graph)["links"], visible)
 
 # Use only direct influence to decide direction and transfer amounts.
 # Incoming points never propagate again or change eligibility in this pass.
@@ -8430,6 +8439,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var combat_graph: Dictionary = military_graph(state)
 	_sector_query_cache.clear()
 	_sector_query_graph = combat_graph
+	combat_graph.erase("travel_influence")
+	combat_graph.erase("travel_permissions")
 	_update_planet_blockades(state, combat_graph)
 	for i in range((state["planets"] as Array).size()):
 		_work_planet(state, i, dt)
@@ -8464,6 +8475,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_update_tactical_orders(state, combat_graph)
 	var threat_index: Dictionary = {}
 	_combat(state, combat_graph, dt, threat_index)
+	combat_graph.erase("travel_influence")
+	combat_graph.erase("travel_permissions")
 	# Station destruction changes ownership during combat. Never use stale
 	# allied routes or permit a delivery into the destroyed stockpile.
 	var surviving_teams: Array[int] = planet_teams(state)
@@ -8700,6 +8713,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_profile_stage(profile, "Conquest / exploration", started)
 	_indexed_state = {}
 	_hulls_by_id.clear()
+	combat_graph.erase("travel_influence")
+	combat_graph.erase("travel_permissions")
 	_sector_query_graph = {}
 	_sector_query_cache.clear()
 

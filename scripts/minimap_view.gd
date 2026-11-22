@@ -140,28 +140,24 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 	for i in range(points.size()):
 		locations.append(_minimap_point(points[i], area))
 		known.append(ECONOMY.discovered(state, viewer, "planets" if i < count else "fields", i if i < count else i - count))
-		if known[i] and i < territory_view.tints.size() and territory_view.tints[i].a > 0.0:
-			var radius: float = clampf(territory_view.radius * area.size.x / map_size.call().x, 3.0, 12.0) * (1.0 if i < count else 0.68)
-			var influence: Color = territory_view.tints[i]
-			minimap.draw_circle(locations[i], radius, Color(influence, 0.30 * influence.a))
+	var geometry: Dictionary = ECONOMY.sector_geometry(graph)
+	for i in range(geometry["polygons"].size()):
+		var influence: Color = territory_view.tints[i] if i < territory_view.tints.size() else Color.TRANSPARENT
+		if influence.a <= 0.0:
+			continue
+		var polygon := PackedVector2Array()
+		for point in geometry["polygons"][i]:
+			polygon.append(_minimap_point(point, area))
+		if polygon.size() >= 3:
+			minimap.draw_colored_polygon(polygon, Color(influence, 0.30 * influence.a))
+	for border in geometry["borders"]:
+		minimap.draw_line(_minimap_point(border["a"], area), _minimap_point(border["b"], area), Color("#354958"), 1.0, true)
 	var edges: Array = graph["edges"]
-	var layout: Dictionary = ECONOMY.highway_regions(graph)
 	for i in range(edges.size()):
 		var a: int = int(edges[i][0])
 		var b: int = int(edges[i][1])
-		var sections: int = int(layout["counts"][i])
-		var width: float = clampf(2.0 * ECONOMY.lane_radius(graph, a, b) * area.size.x / map_size.call().x, 1.0, 8.0)
-		for j in range(sections):
-			var start: Vector2 = locations[a].lerp(locations[b], float(j) / sections)
-			var finish: Vector2 = locations[a].lerp(locations[b], float(j + 1) / sections)
-			var tint: Color = Color("#69869e") if known[a] and known[b] else Color("#182b3b")
-			var weight_index: int = int(layout["starts"][i]) + j
-			if known[a] and known[b] and weight_index < territory_view.tints.size():
-				var influence: Color = territory_view.tints[weight_index]
-				if influence.a > 0.0:
-					minimap.draw_line(start, finish, Color(influence, 0.45 * influence.a), width, true)
-				tint = tint.lerp(Color(influence, 1.0), influence.a)
-			minimap.draw_line(start, finish, tint, 1.0, true)
+		var tint: Color = Color("#69869e") if known[a] and known[b] else Color("#182b3b")
+		minimap.draw_line(locations[a], locations[b], tint, 1.0, true)
 	for i in range(points.size()):
 		var tint := Color("#40566b")
 		if i < count:

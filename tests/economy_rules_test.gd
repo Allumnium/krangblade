@@ -4399,8 +4399,23 @@ func _test_territory_influence() -> void:
 	assert(is_equal_approx(float(weights[4][1]), 3.5) and is_equal_approx(float(weights[4][2]), 0.1))
 	assert(ECON.territory_influence(state, graph, [0])[4].is_empty())
 	assert(ECON.territory_influence(state, graph, [1])[0].is_empty())
-	assert(weights.size() == 8 and weights[5] == {1: 1} and weights[6] == {2: 10} and weights[1].is_empty() and weights[2].is_empty())
-	assert(ECON.influence_region(graph, Vector2(4500, 600)) == 6)
+	assert(weights.size() == 8 and weights[5] == {1: 6} and weights[6] == {2: 10} and weights[1].is_empty() and weights[2].is_empty())
+	assert(ECON.influence_region(graph, Vector2(4500, 600)) == 5)
+	var geometry: Dictionary = ECON.sector_geometry(graph)
+	var area: float = 0.0
+	for polygon in geometry["polygons"]:
+		var signed_area: float = 0.0
+		for i in range(polygon.size()):
+			signed_area += polygon[i].cross(polygon[(i + 1) % polygon.size()])
+		area += absf(signed_area) * 0.5
+	assert(is_equal_approx(area, 50000000.0))
+	assert(ECON.influence_region(graph, Vector2(4500, 2500)) == 5)
+	var all_cells: Dictionary = {}
+	for i in range(geometry["polygons"].size()):
+		all_cells[i] = true
+	assert(ECON.SECTOR_GEOMETRY.segment_allowed(geometry, Vector2(500, 2500), Vector2(8500, 2500), all_cells))
+	all_cells.erase(5)
+	assert(not ECON.SECTOR_GEOMETRY.segment_allowed(geometry, Vector2(500, 2500), Vector2(8500, 2500), all_cells))
 	assert(ECON.lane_direct(graph, Vector2(4400, 600), Vector2(4600, 600), [0, 1, 2, 3]))
 	assert(not ECON.lane_direct(graph, Vector2(500, 500), Vector2(4500, 2500), [0, 1, 2, 3]))
 	var junction: Dictionary = {"points": [Vector2.ZERO, Vector2(100, 0), Vector2(50, 85)], "sector_radii": [60.0, 60.0, 60.0], "sector_cell_width": 60.0, "sector_neighbors": [[Vector2(100, 0), Vector2(50, 85)], [Vector2(-100, 0), Vector2(-50, 85)], [Vector2(-50, -85), Vector2(50, -85)]], "edges": [], "adjacent": [[], [], []]}
@@ -4411,17 +4426,26 @@ func _test_territory_influence() -> void:
 	var palette: Dictionary = {1: Color.RED, 2: Color.BLUE}
 	var mixed: Color = ECON.influence_color(weights[0], palette)
 	assert(is_equal_approx(mixed.r, 70.0 / 72.0) and is_equal_approx(mixed.b, 2.0 / 72.0) and mixed.a == 1.0)
-	assert(is_equal_approx(ECON.influence_color(weights[5], palette).a, 1.0 / 50.0))
+	assert(is_equal_approx(ECON.influence_color(weights[5], palette).a, 6.0 / 50.0))
 	assert(is_equal_approx(ECON.influence_color(weights[6], palette).a, 10.0 / 50.0))
 	assert(ECON.influence_color({}, palette).a == 0.0)
 	state["ships"][1]["position"] = Vector2(2500, 500)
 	weights = ECON.territory_influence(state, graph)
-	assert(weights[1] == {1: 1} and weights[5].is_empty() and weights[6] == {2: 10})
+	assert(weights[1] == {1: 1} and weights[5] == {1: 5} and weights[6] == {2: 10})
 	home["yards"].pop_back()
 	home["pds"][0] = {"hp": ECON.PDS_HP}
 	weights = ECON.territory_influence(state, graph)
 	assert(weights[0] == {1: 60, 2: 2} and home["owner"] == 1)
 	assert(ECON.territory_influence(bytes_to_var(var_to_bytes(state)), graph) == weights)
+	# Off-highway shortcut across fully friendly cells, then a competing
+	# empire enters the middle cell. Test authority policy, not HUD colors.
+	state["ships"] = []
+	for region in [0, 4, 1]:
+		for i in range(6):
+			state["ships"].append({"id": state["ships"].size() + 100, "owner": 1, "kind": "destroyer", "position": geometry["sites"][region]})
+	assert(ECON.friendly_sector_travel(state, graph, 1, Vector2(500, 2500), Vector2(2500, 2500)))
+	state["ships"].append({"id": 999, "owner": 2, "kind": "scout", "position": geometry["sites"][4]})
+	assert(not ECON.friendly_sector_travel(state, graph, 1, Vector2(500, 2500), Vector2(2500, 2500)))
 	# Stronger-to-weaker only, threshold inclusive, proportional mixed
 	# colors, multiple donors, equal totals and no second-hop propagation.
 	var raw: Array[Dictionary] = [{1: 400, 2: 100}, {2: 49}, {}, {1: 50}, {2: 50}, {2: 25}, {1: 49}]
