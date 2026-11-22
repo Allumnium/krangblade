@@ -106,8 +106,9 @@ func draw(state: Dictionary) -> void:
 	var x: float = maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH)
 	var y: float = header_height + 24.0
 	var clock: float = float(state.get("objective_clock", 0.0))
-	objectives_overlay.draw_string(font, Vector2(x, y), "OBJECTIVES", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
-	objectives_overlay.draw_line(Vector2(x, y + 5.0), Vector2(x + font.get_string_size("OBJECTIVES", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, y + 5.0), Color("#b8d9ef"), 1.0)
+	var heading_x: float = _heading_left(font, "OBJECTIVES")
+	objectives_overlay.draw_string(font, Vector2(heading_x, y), "OBJECTIVES", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
+	objectives_overlay.draw_line(Vector2(heading_x, y + 5.0), Vector2(map_canvas.size.x - 12.0, y + 5.0), Color("#b8d9ef"), 1.0)
 	y += 26.0
 	if objectives_expanded:
 		for objective in ECONOMY.active_objectives(progress, clock):
@@ -152,10 +153,10 @@ func _draw_conquest_scoreboard(state: Dictionary, font: Font, x: float, y: float
 	var width: float = maxf(1.0, edge - x)
 	var header_tint := Color("#b8d9ef")
 	var outline := Color("#101824")
-	var header_width: float = maxf(1.0, width - ceilf(font.get_height(13)) - 4.0)
-	objectives_overlay.draw_string_outline(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, header_width, 13, 4, outline)
-	objectives_overlay.draw_string(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, header_width, 13, header_tint)
-	objectives_overlay.draw_line(Vector2(x, y + 5.0), Vector2(x + minf(header_width, font.get_string_size("TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x), y + 5.0), header_tint, 1.0)
+	var heading_x: float = _heading_left(font, "TOTAL CONQUEST POINTS")
+	objectives_overlay.draw_string_outline(font, Vector2(heading_x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, outline)
+	objectives_overlay.draw_string(font, Vector2(heading_x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, header_tint)
+	objectives_overlay.draw_line(Vector2(heading_x, y + 5.0), Vector2(edge, y + 5.0), header_tint, 1.0)
 	if not conquest_scoreboard_expanded:
 		return
 	var roster: Dictionary = session.get("players")
@@ -201,6 +202,9 @@ func _style_objective_header_button(button: Button, accent: Color) -> void:
 	button.add_theme_stylebox_override("disabled", HUD.surface(Color("#101c29"), Color("#263748"), 1, 2))
 	button.add_theme_color_override("font_color", accent.lightened(0.25))
 
+func _heading_left(font: Font, heading: String) -> float:
+	return map_canvas.size.x - 12.0 - font.get_string_size(heading, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+
 func layout() -> void:
 	if conquest_buttons.is_empty():
 		return
@@ -209,10 +213,9 @@ func layout() -> void:
 	var font: Font = ThemeDB.fallback_font
 	var height: float = ceilf(font.get_height(13))
 	var upgrade_width: float = 52.0
-	var x: float = maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH)
 	var y: float = header_height + 24.0
 	objectives_toggle.visible = not state.is_empty()
-	objectives_toggle.position = Vector2(x + font.get_string_size("OBJECTIVES", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 4.0, roundf(y - font.get_ascent(13)))
+	objectives_toggle.position = Vector2(_heading_left(font, "OBJECTIVES") - height - 4.0, roundf(y - font.get_ascent(13)))
 	objectives_toggle.size = Vector2(height, height)
 	y += 26.0
 	var visible_categories: Array = []
@@ -233,7 +236,7 @@ func layout() -> void:
 		refresh.size = Vector2(height, height)
 		y += 52.0
 	conquest_scoreboard_toggle.visible = not state.is_empty()
-	conquest_scoreboard_toggle.position = Vector2(x + font.get_string_size("TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 4.0, roundf(y + 4.0 - font.get_ascent(13)))
+	conquest_scoreboard_toggle.position = Vector2(_heading_left(font, "TOTAL CONQUEST POINTS") - height - 4.0, roundf(y + 4.0 - font.get_ascent(13)))
 	conquest_scoreboard_toggle.size = Vector2(height, height)
 
 func _request_objective_refresh(category: String) -> void:

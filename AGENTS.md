@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.64: Right-align objective and lifetime CP headings with collapse controls on their left. Move combined personal notices, tactical warnings and all-chat above minimap, newest at bottom, ten-second fade when closed. Enter opens a translucent scrollable local history (250 messages); Enter sends chat, Esc closes, slash commands stay local. Debug-only /devmode, /help, /status, /speed and /clear share the panel; speed remains host/solo-only. Preserve clickable warning locations, no new RPC. Verify scrolling/focus, resize, fading/history dedup, alert navigation, debug/release and ENet.
+
 - v0.89.63: Every completed objective grants exactly 1 CP in its category, regardless of completion order or ties. Keep first-finisher metadata solely for existing presentation/audio. Category headers show names only; Upgrade hover and lifetime scoreboard remain. Verify first/tied/later payouts, no repeat award, spending and ENet synchronization.
 
 - v0.89.62: Assigned control-group tiles show the most numerous surviving ship type (alphabetical type key breaks ties) or structure portrait, followed by the exact membership count; unassigned tiles retain their key number. Size occupied tiles to fit the count, preserve numbered recall and hover hints, and reflow the existing shortcut layout when membership changes. Visual/runtime/peer validation pending.
@@ -84,7 +86,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - v0.89.23: A tiny +/− button at the right of the Total Conquest Points header collapses all table rows and column labels while leaving the title visible. Expanded by default, client-local per match; totals and objective controls unchanged.
 
-- v0.89.22: Simulation speed is developer-only. Debug builds expose it in the tilde console after `/devmode`, host/solo authority only; normal HUD and Codex omit speed controls. Perf remains available independently. Guard lazy dialogs and duplicate button-audio signal connections.
+- v0.89.22: Simulation speed is developer-only. Debug builds expose it in the shared chat panel after `/devmode` (v0.89.64), host/solo authority only; normal HUD and Codex omit speed controls. Perf remains available independently. Guard lazy dialogs and duplicate button-audio signal connections.
 
 - v0.89.21: Use the shared gold Galactic Credits icon (`HUD.resource_icon("GC", pixels)`) in the HUD and graphical command costs/upkeep. Keep GC units in plain-text explanations and Codex tables; credits are not a physical resource.
 
@@ -136,7 +138,7 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 - v0.77.0: Client-only synthesized prototype SFX: weapons, explosions, mining/repair/tractor and UI, orders, construction and notices. Reuse authority snapshots without extra packets; distance/zoom attenuation, 20 world + 4 reserved UI voices, per-cue caps and real-time throttles. Preserve Music/SFX settings. Optional replacement WAVs under assets/sfx named by cue. Do not replay initial snapshot sounds.
 
-- v0.76.0: Every owned station generates 1 t/yr Crystals independent of planets, staffing and blockade, subject to storage. Incubator base output 0.04 t/yr per level; asteroid yield unchanged. Fivefold existing Crystal costs including shield/cloak premiums; other materials unchanged. Enter opens public match chat, Enter sends, Esc cancels; validated authority messages appear in the top-center notices for 10 real seconds, including solo. Preserve lobby history separately.
+- v0.76.0: Every owned station generates 1 t/yr Crystals independent of planets, staffing and blockade, subject to storage. Incubator base output 0.04 t/yr per level; asteroid yield unchanged. Fivefold existing Crystal costs including shield/cloak premiums; other materials unchanged. Enter opens public match chat, Enter sends, Esc cancels; validated authority messages appear above the minimap for 10 real seconds (v0.89.64), including solo. Preserve lobby history separately.
 
 - v0.75.3: Empty Harvesters immediately abandon completed delivery routing and reenter normal work selection, preserving explicit non-delivery orders. Upgrade pulses while enabled. World HP/shield bars and selection shield meters hide independently at full capacity; numeric inspector stats remain.
 
