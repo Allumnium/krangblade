@@ -10,6 +10,13 @@ func _planetary_fixture(seed_value: int, players: int = 3, layout: String = "Gri
 	return map_data
 
 # Legacy material, crew and combat fixtures isolate those constraints.
+# Remove PDS batteries and station lasers/missiles so a fixture isolates hull behavior.
+func _disarm_structures(state: Dictionary) -> void:
+	for system in state["planets"]:
+		system["pds"].clear()
+		if ECON.has_station(system):
+			system["station"]["weapons"] = []
+
 func _funded_fixture(map_data: Dictionary, players: Dictionary, ordered: Array[int], starting_fleet: bool = true) -> Dictionary:
 	var state: Dictionary = ECON.create(map_data, players, ordered, starting_fleet)
 	for player in ordered:
@@ -2726,9 +2733,8 @@ func _initialize() -> void:
 	cp[4] = Vector2(190, 95)
 	var colonization: Dictionary = _funded_fixture(colony_map, players, ids, false)
 	# This compressed travel/race fixture tests colonization, not overlapping
-	# defensive ranges. Disable home batteries so the competing hulls survive.
-	for system in colonization["planets"]:
-		system["pds"].clear()
+	# defensive ranges. Disable home batteries and station weapons so the competing hulls survive.
+	_disarm_structures(colonization)
 	for index in [0, 2]:
 		colonization["planets"][index]["population"] = 150000.0
 		colonization["planets"][index]["yards"][0]["level"] = 2
@@ -2769,8 +2775,7 @@ func _initialize() -> void:
 	assert(int(loser["dest"]) == -1)
 	assert(int(loser["at"]) == loser_home and loser["route"].is_empty())
 	var distant: Dictionary = _funded_fixture(colony_map, players, ids, false)
-	for system in distant["planets"]:
-		system["pds"].clear()
+	_disarm_structures(distant)
 	var distant_ship: Dictionary = {"id": 999, "kind": "colony_ship", "owner": 1, "at": 0, "position": cp[0], "route": [], "leg": 0.0, "dest": -1}
 	distant["ships"].append(distant_ship)
 	assert(ECON.send_colony(distant, 1, 999, 4, true))
@@ -2820,7 +2825,7 @@ func _initialize() -> void:
 	assert(force_fleet[1]["dest"] == field_node)
 	assert(force_fleet[1]["route"] == [field_node])
 	ECON._move({"map": force_graph}, force_fleet[1], 0.5)
-	assert(is_equal_approx(float(force_fleet[1]["leg"]), 47.5))
+	assert(is_equal_approx(float(force_fleet[1]["leg"]), ECON.ship_speed("fighter") * 0.5))
 	var reversal_position: Vector2 = force_fleet[1]["position"]
 	assert(ECON.set_military(force_state, 1, "fighter", 0, 100))
 	ECON._allocate_fighters(force_state, force_graph, 1, force_fleet)
@@ -2840,9 +2845,8 @@ func _initialize() -> void:
 	print("PASS: normalized POI force allocation, nearest assignments and continuous reversal")
 	# Simultaneous burst fire: allies cannot be targeted; each blaster shot deals 1 HP.
 	var duel: Dictionary = _funded_fixture(force_map, players, ids, false)
-	# Isolate fighter-v-fighter combat from the starting planetary batteries.
-	for planet in duel["planets"]:
-		planet["pds"].clear()
+	# Isolate fighter-v-fighter combat from the starting planetary batteries and station weapons.
+	_disarm_structures(duel)
 	var duel_graph: Dictionary = ECON.military_graph(duel)
 	for owner_id in [1, 3]:
 		duel["ships"].append({"id": owner_id, "owner": owner_id, "kind": "fighter", "at": 0, "route": [], "leg": 0.0, "hp": 100.0, "dest": 0})
@@ -2954,7 +2958,8 @@ func _initialize() -> void:
 			for resource in ECON.RESOURCES:
 				startup_state["planets"][index]["stock"][resource] = 2000.0
 		var built: Dictionary = {2: {}, 3: {}}
-		for year in range(36):
+		# Medium-yard upgrade precedes the first Colony; measured first launches: Colony year 41, Fighter year 47.
+		for year in range(60):
 			ECON.step(startup_state, 1.0)
 			for craft in startup_state["ships"]:
 				if built.has(int(craft["owner"])):
@@ -3063,6 +3068,7 @@ func _initialize() -> void:
 		assert(craft["dest"] == 3)
 	# Fighters break off their lane to orbit opponents, then resume their original route.
 	var transit: Dictionary = _funded_fixture(ai_map, players, ids, false)
+	_disarm_structures(transit)
 	var travelling: Dictionary = {"id": 970, "owner": 2, "kind": "fighter", "at": 1, "route": [3], "leg": 400.0, "position": Vector2(400, 0), "dest": 3, "hp": 100.0}
 	var enemy: Dictionary = {"id": 971, "owner": 3, "kind": "fighter", "at": 3, "route": [], "leg": 0.0, "position": Vector2(450, 0), "dest": 3, "hp": 100.0}
 	transit["ships"] = [travelling, enemy]
@@ -3088,9 +3094,8 @@ func _initialize() -> void:
 	# Pursuit retains a fleeing civilian beyond laser range, obeys the speed
 	# budget and expires after three years even while the target remains nearby.
 	var chase: Dictionary = _funded_fixture(ai_map, players, ids, false)
-	# Isolate fighter pursuit behavior from longer-range fixed batteries.
-	for system in chase["planets"]:
-		system["pds"].clear()
+	# Isolate fighter pursuit behavior from fixed defenses.
+	_disarm_structures(chase)
 	var hunter: Dictionary = {"id": 980, "owner": 2, "kind": "fighter", "at": 1, "route": [0], "leg": 0.0, "position": Vector2(50, 0), "dest": 0, "hp": 100.0}
 	var prey: Dictionary = {"id": 981, "owner": 3, "kind": "colony_ship", "at": 1, "route": [3], "leg": 200.0, "position": Vector2(200, 0), "dest": 3, "hp": 100.0}
 	chase["ships"] = [hunter, prey]
@@ -3116,8 +3121,7 @@ func _initialize() -> void:
 	# Separate scenario: a live target leaves range, pursuit persists but
 	# laser damage does not. Explicitly reposition the fixture to model escape.
 	var distant_chase: Dictionary = _funded_fixture(ai_map, players, ids, false)
-	for system in distant_chase["planets"]:
-		system["pds"].clear()
+	_disarm_structures(distant_chase)
 	var distant_hunter: Dictionary = {"id": 982, "owner": 2, "kind": "fighter", "at": 1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "dest": 1, "hp": 100.0}
 	var fleeing: Dictionary = {"id": 983, "owner": 3, "kind": "fighter", "at": 1, "route": [3], "leg": 0.0, "position": Vector2(150, 0), "heading": Vector2.RIGHT, "dest": 3, "hp": 100.0, "retreating": true}
 	distant_chase["ships"] = [distant_hunter, fleeing]
@@ -3150,12 +3154,12 @@ func _initialize() -> void:
 	ECON._combat(distant_chase, distant_graph, 0.1)
 	assert(int(distant_hunter["pursuit_target"]) == -1)
 	print("PASS: bounded pursuit, escaping fighters, weapon range and route resumption")
-	# Basic construction is independent of the advanced crystal supply.
+	# Basic construction is independent of the advanced crystal supply; stations yield only baseline Crystals.
 	var bootstrap: Dictionary = _funded_fixture(graph, players, ids, false)
 	var industry: Dictionary = bootstrap["planets"][0]
 	for resource in ECON.RESOURCES:
 		if resource == "Crystals":
-			assert(is_zero_approx(ECON.rate(industry, resource)))
+			assert(is_equal_approx(ECON.rate(industry, resource), ECON.STATION_CRYSTALS_PER_YEAR))
 		else:
 			assert(ECON.rate(industry, resource) > 0.0)
 	var remaining_stock: Dictionary = industry["stock"].duplicate()
@@ -3366,7 +3370,8 @@ func _initialize() -> void:
 	var wound_position: Vector2 = wounded["position"]
 	ECON.step(recovery, 0.1)
 	assert((wounded["position"] as Vector2).x < wound_position.x)
-	assert(float(wounded["hp"]) == ECON.WITHDRAW_HP)
+	# Only passive regeneration applies away from a repair site.
+	assert(is_equal_approx(float(wounded["hp"]), ECON.WITHDRAW_HP + ECON.PASSIVE_REGEN * 0.1))
 	assert(not ECON._engaged(wounded))
 	for tick in range(200):
 		var before: Vector2 = wounded["position"]
@@ -3389,6 +3394,9 @@ func _initialize() -> void:
 	var crew_home: Dictionary = crew_state["planets"][0]
 	crew_home["population"] = 150000.0
 	crew_home["yards"][0]["level"] = 3
+	# Capital hulls cost Crystals; fund every recipe so this fixture isolates crew.
+	for resource in ECON.RESOURCES:
+		crew_home["stock"][resource] = 10000.0
 	for kind in ECON.SHIP_KINDS:
 		var people: float = float(ECON.CREW_COSTS[kind])
 		assert(people > 0.0)
@@ -3489,6 +3497,8 @@ func _initialize() -> void:
 	first_defense = ECON.pds_job(defended)
 	assert(ECON._advance(defended, first_defense, float(first_defense["work"])))
 	ECON._finish(defenses, 0, defended, first_defense)
+	# Measure the battery alone, without the station's built-in lasers and missile.
+	defended["station"]["weapons"] = []
 	var center: Vector2 = force_map["points"][0]
 	var defense_enemy: Dictionary = {"id": 40001, "owner": 3, "kind": "ship", "at": 0, "route": [], "leg": 0.0, "position": center + Vector2(100, 0), "hp": 100.0}
 	var friendly: Dictionary = {"id": 40002, "owner": 2, "kind": "ship", "at": 0, "route": [], "leg": 0.0, "position": center, "hp": 100.0}
@@ -3535,7 +3545,8 @@ func _initialize() -> void:
 	var access_map: Dictionary = multi_access["map"]
 	var access_points: Array = access_map["points"]
 	var access_center: Vector2 = (access_points[0] + access_points[1]) * 0.5
-	var access_field: Dictionary = {"anchor": 1, "access": [0, 1], "position": access_center, "radius": 40.0, "Metals": 1.0, "Crystals": 1.0, "chunks": [{"id": 92001, "position": access_center, "resource": "Crystals", "remaining": 20.0}]}
+	# One full Harvester hold keeps this long-distance fixture to a single round trip.
+	var access_field: Dictionary = {"anchor": 1, "access": [0, 1], "position": access_center, "radius": 40.0, "Metals": 1.0, "Crystals": 1.0, "chunks": [{"id": 92001, "position": access_center, "resource": "Crystals", "remaining": ECON.MINER_CAPACITY}]}
 	access_map["field_edges"] = []
 	access_map["fields"] = [access_field]
 	var access_home: Dictionary = multi_access["planets"][0]
@@ -3555,27 +3566,30 @@ func _initialize() -> void:
 		if not was_loaded and float(access_miner["cargo"]["Crystals"]) > ECON.EPS:
 			assert(is_equal_approx(float(access_home["stock"]["Crystals"]), float(multi_access["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
 			was_loaded = true
-		if float(access_home["stock"]["Crystals"]) - float(multi_access["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR >= 20.0 - ECON.EPS:
+		if float(access_home["stock"]["Crystals"]) - float(multi_access["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR >= ECON.MINER_CAPACITY - ECON.EPS:
 			assert((access_miner["position"] as Vector2).distance_to(ECON.station_position(multi_access, 0, float(multi_access["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.SHIP_CLEARANCE + ECON.EPS)
 			assert(ECON.local_flow(access_home, "Mining deliveries", "Crystals") > 0.0)
 			break
-	assert(was_loaded and is_equal_approx(float(access_home["stock"]["Crystals"]), 20.0 + float(multi_access["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
+	assert(was_loaded and is_equal_approx(float(access_home["stock"]["Crystals"]), ECON.MINER_CAPACITY + float(multi_access["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
 	var staffed_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var staffed_home: Dictionary = staffed_state["planets"][0]
 	staffed_home["yards"].append({"level": 1, "job": -1})
 	staffed_home["yards"].append({"level": 1, "job": -1})
-	staffed_home["population"] = 100.0
+	# Admission reserves the crew; a later resident shortfall leaves every shipyard unstaffed.
+	staffed_home["population"] = float(ECON.CREW_COSTS["fighter"]) + float(ECON.SHIPYARD_POPULATION[0])
 	assert(ECON.enqueue(staffed_state, 1, 0, "fighter"))
 	var staffed_order: Dictionary = staffed_home["queue"][0]
+	staffed_home["population"] = 100.0
 	ECON._work_planet(staffed_state, 0, 1.0)
 	assert(float(staffed_order["progress"]) == 0.0 and ECON.operational_shipyards(staffed_home) == 0)
 	assert(ECON.construction_blockers(staffed_home, staffed_order).has("Population"))
 	assert(ECON.local_flow(staffed_home, "Construction: fighter", "Metals") > 0.0)
-	staffed_home["population"] = 1000.0
+	staffed_home["population"] = float(ECON.CREW_COSTS["fighter"]) + float(ECON.SHIPYARD_POPULATION[0])
 	ECON._work_planet(staffed_state, 0, 1.0)
 	assert(float(staffed_order["progress"]) > 0.0 and ECON.operational_shipyards(staffed_home) == 1)
 	assert(is_zero_approx(ECON.local_flow(staffed_home, "Construction: fighter", "Metals")))
-	assert(ECON.local_flow(staffed_home, "Population", "Metals") > 0.0)
+	# Residents consume Organics only.
+	assert(ECON.local_flow(staffed_home, "Population", "Organics") > 0.0 and is_zero_approx(ECON.local_flow(staffed_home, "Population", "Metals")))
 	staffed_home["population"] = 6000.0
 	assert(ECON.operational_shipyards(staffed_home) == 2)
 	staffed_home["population"] = 21000.0

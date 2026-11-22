@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.20: Economy test main body completes. Fixture updates for current rules: fighter speed, station weapons isolated via _disarm_structures, Crystal station baseline, passive regen, funded crew recipes, crew-reserved staffing, one-hold long mining and Organics-only residents. Generated-map AI startup window 36 to 60 years (measured first Colony year 41, Fighter 47 on all four seeds: possible slow AI opening, playtest). 22 helper scenarios and two script errors remain.
+
 - v0.97.19: Repair stale economy test fixtures (yard classes, crew reservation, refunds, mining rate/hold, gradual dropoff, delivery pods, shipyard repeat, direct navigation routes, freighter kind). Root cause of the reported econ-test hang: a failed assert aborts _initialize so quit() never runs. Test-only; no gameplay change. Remaining failures continue from line ~2739.
 
 - v0.97.18: Split enqueue into _enqueue_admissible, _resolve_enqueue and _enqueue_yard_port; public signature and rejection order unchanged. Parser, determinism probe and economy failure signatures unchanged.
