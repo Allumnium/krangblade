@@ -89,6 +89,35 @@ func _draw_station_jobs(system: Dictionary, center: Vector2, radius: float, tint
 		map_canvas.draw_rect(bar, Color("#101a26"))
 		map_canvas.draw_rect(Rect2(bar.position, Vector2(bar.size.x * fraction, bar.size.y)), tint.lightened(0.35))
 
+# Preview lives only for the authoritative assembly, with no separate timer.
+func draw_colony_transform(ship: Dictionary, point: Vector2, heading: Vector2, scale: float, tint: Color, elapsed: float) -> void:
+	var fraction: float = clampf(float(ship["colony_transform_progress"]) / ECONOMY.COLONY_TRANSFORM_TIME, 0.0, 1.0)
+	var u: float = smoothstep(0.0, 1.0, fraction)
+	var radius: float = station_radius.call() * u
+	var frame := Color("#71869b")
+	if radius > 0.5:
+		map_canvas.draw_circle(point, radius, Color("#131e2b"), true, -1.0, true)
+		map_canvas.draw_arc(point, radius * 0.85, 0.0, TAU, 48, frame, maxf(1.0, radius * 0.22), true)
+		map_canvas.draw_arc(point, radius, 0.0, TAU, 48, tint.lightened(0.30), maxf(1.0, radius * 0.055), true)
+		map_canvas.draw_circle(point, radius * 0.32, Color("#293c51"), true, -1.0, true)
+		map_canvas.draw_arc(point, radius * 0.35, 0.0, TAU, 24, tint, maxf(1.0, radius * 0.07), true)
+		var axis: Vector2 = Vector2.from_angle(elapsed * 0.008)
+		var dock: Vector2 = point + (screen_point.call((ship["position"] as Vector2) + axis * 90.0) - screen_point.call(ship["position"])) * u
+		map_canvas.draw_line(point + axis * radius * 0.35, dock, frame, maxf(1.0, radius * 0.12), true)
+		var yard_scale: float = ship_scale.call(true) * u
+		for sign in [-1.0, 1.0]:
+			var rail: Array = [Vector2(-17, sign * 8), Vector2(-15, sign * 13), Vector2(-10, sign * 14), Vector2(10, sign * 14), Vector2(15, sign * 13), Vector2(17, sign * 8), Vector2(12, sign * 7), Vector2(-12, sign * 7)]
+			if yard_scale > 0.05:
+				var hull: PackedVector2Array = hull_art.polygon(dock, axis.orthogonal() * yard_scale, axis * yard_scale, rail)
+				map_canvas.draw_colored_polygon(hull, Color("#607387"))
+				hull.append(hull[0])
+				map_canvas.draw_polyline(hull, tint, maxf(0.65, yard_scale), true)
+	var texture: Texture2D = hull_art.hull_texture("colony_ship", tint, scale >= 0.42)
+	var half: float = hull_art.texture_half_size("colony_ship")
+	map_canvas.draw_set_transform(point, heading.angle(), Vector2.ONE * scale * lerpf(1.0, 0.35, u))
+	map_canvas.draw_texture_rect(texture, Rect2(-half, -half, half * 2.0, half * 2.0), false, Color(1.0, 1.0, 1.0, 1.0 - u))
+	map_canvas.draw_set_transform(Vector2.ZERO)
+
 func draw_station(state: Dictionary, index: int, tint: Color, elapsed: float, building_selection_kind: String, selected_buildings: Dictionary) -> void:
 	var system: Dictionary = state["planets"][index]
 	if not ECONOMY.has_station(system):

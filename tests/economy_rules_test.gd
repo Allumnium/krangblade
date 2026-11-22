@@ -743,7 +743,17 @@ func _test_manual_conversion_and_stats() -> void:
 	assert(is_equal_approx(float(colony["food_produced"]), ECON.COLONY_FARM_RATE))
 	assert(not ECON.issue_unit_order(state, 2, [90001], {"kind": "transform"}, false))
 	assert(ECON.issue_unit_order(state, 1, [90001], {"kind": "transform"}, false))
+	assert(not state["ships"].is_empty() and int(state["planets"][1]["owner"]) == 0)
+	assert(not ECON._work_colony(state, colony, 1000.0))
+	assert(colony["position"] == ECON.colony_station_position(state, 1, float(state["elapsed"])))
+	assert(not ECON._work_colony(state, colony, ECON.COLONY_TRANSFORM_TIME - 0.1))
+	assert(int(state["planets"][1]["owner"]) == 0 and not ECON.has_station(state["planets"][1]))
+	var replica: Dictionary = bytes_to_var(var_to_bytes(state))
+	assert(is_equal_approx(float(replica["ships"][0]["colony_transform_progress"]), ECON.COLONY_TRANSFORM_TIME - 0.1))
+	assert(ECON._work_colony(state, colony, 0.1))
+	ECON._remove_indexed_hull(state, colony)
 	assert(state["ships"].is_empty() and int(state["planets"][1]["owner"]) == 1)
+	assert(ECON.station_position(state, 1, float(state["elapsed"])) == colony["position"])
 	var source: Dictionary = {"kind": "miner", "cargo": {"Metals": 4.0}}
 	var target: Dictionary = {"kind": "ship", "cargo": {"Metals": 0.0}}
 	ECON._record_transfer(state, 1, source, 2, target, "Metals", 2.0)
@@ -796,7 +806,8 @@ func _test_nearest_colony_and_queued_hold() -> void:
 		if far.get("unit_order", {}).get("kind", "") == "colonize":
 			break
 	assert(far["unit_order"]["kind"] == "colonize" and far["unit_order"]["automatic"] and far["dest"] == 1 and far["route"] == [1])
-	assert(ECON._work_colony(state, far, 1000.0))
+	assert(not ECON._work_colony(state, far, 1000.0))
+	assert(ECON._work_colony(state, far, ECON.COLONY_TRANSFORM_TIME))
 	assert(int(state["planets"][1]["owner"]) == 1)
 	print("PASS: nearest available colony, queued hold and automatic settlement")
 
@@ -2555,16 +2566,16 @@ func _initialize() -> void:
 	assert(ECON.send_colony(colonization, 1, int(c1["id"]), 3))
 	assert(ECON.send_colony(colonization, 3, int(c2["id"]), 3, true))
 	assert(int(colonization["planets"][3]["owner"]) == 0)
-	var distance1: float = (c1["position"] as Vector2).distance_to(cp[3])
-	var distance2: float = (c2["position"] as Vector2).distance_to(cp[3])
-	var first_arrival: float = minf(distance1, distance2) / ECON.SHIP_SPEED
-	var winner: int = 1 if distance1 < distance2 else 3
+	var winner: int = -1
+	for tick in range(500):
+		ECON.step(colonization, 0.1)
+		winner = int(colonization["planets"][3]["owner"])
+		if winner > 0:
+			break
+		assert(not ECON.has_station(colonization["planets"][3]))
+	assert(winner in [1, 3])
 	var loser: Dictionary = c2 if winner == 1 else c1
 	var loser_home: int = 2 if winner == 1 else 0
-	ECON.step(colonization, first_arrival * 0.5)
-	assert(int(colonization["planets"][3]["owner"]) == 0)
-	ECON.step(colonization, first_arrival * 0.5 + 0.001)
-	assert(int(colonization["planets"][3]["owner"]) == winner)
 	assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION))
 	assert(int(colonization["planets"][3]["levels"]["Organics"]) == 1)
 	assert(colonization["ships"].size() == 1)
@@ -2586,7 +2597,10 @@ func _initialize() -> void:
 	assert(distant_ship["position"] == cp[0])
 	ECON.step(distant, 2.0)
 	assert(int(distant["planets"][3]["owner"]) == 0 and int(distant["planets"][4]["owner"]) == 0)
-	ECON.step(distant, 1.0)
+	for tick in range(500):
+		ECON.step(distant, 0.1)
+		if int(distant["planets"][4]["owner"]) == 1:
+			break
 	assert(int(distant["planets"][3]["owner"]) == 0 and int(distant["planets"][4]["owner"]) == 1)
 	print("PASS: colony construction, permissions, travel, neutral arrival and competing colonies")
 	# POI allocations reserve nearest fighters, including field destinations.
@@ -4672,7 +4686,8 @@ func _test_conquest() -> void:
 	var colony: Dictionary = {"id": 9901, "owner": 1, "kind": "colony_ship", "at": 1, "dest": -1, "route": [], "position": graph["points"][1], "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	state["ships"].append(colony)
 	assert(ECON.send_colony(state, 1, 9901, 1, true))
-	assert(ECON._work_colony(state, colony, 0.1))
+	assert(not ECON._work_colony(state, colony, 1000.0))
+	assert(ECON._work_colony(state, colony, ECON.COLONY_TRANSFORM_TIME))
 	assert(int(planet["owner"]) == 1 and ECON.has_station(planet) and planet["yards"].size() == 1)
 	assert(ECON.set_thresholds(state, 1, 1, "Metals", 10.0, 20.0))
 	assert(int(bytes_to_var(var_to_bytes(state))["planets"][1]["owner"]) == 1)
@@ -4993,7 +5008,8 @@ func _test_orbital_housing() -> void:
 	var settlement: Dictionary = {"id": 9902, "owner": 1, "kind": "colony_ship", "crew": ECON.COLONY_POPULATION, "at": index, "dest": -1, "route": [], "position": graph["points"][index], "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	state["ships"].append(settlement)
 	assert(ECON.send_colony(state, 1, 9902, index, true))
-	assert(ECON._work_colony(state, settlement, 0.1))
+	assert(not ECON._work_colony(state, settlement, 1000.0))
+	assert(ECON._work_colony(state, settlement, ECON.COLONY_TRANSFORM_TIME))
 	assert(int(p["owner"]) == 1 and float(p["population"]) == ECON.COLONY_POPULATION and ECON.has_station(p))
 	assert(ECON.eco_population(p) == ECON.COLONY_POPULATION)
 	state["ships"].erase(settlement)
