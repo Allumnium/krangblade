@@ -21,7 +21,6 @@ var resource_hover_label: Label
 var hovered_resource: String = ""
 var global_population_label: Label
 var global_credit_label: Label
-var global_credit_income_label: Label
 var year_label: Label
 
 func build(row: Container, label_factory: Callable, population_factory: Callable, snapshot_query: Callable, player_query: Callable, name_query: Callable) -> void:
@@ -56,6 +55,9 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
 		if i > 0:
 			strip.draw_line(Vector2(x, 0), Vector2(x, strip.size.y), Color("#081421"), 1.0)
 		x += w
+	_draw_trend(strip, resource)
+
+func _draw_trend(strip: Control, resource: String) -> void:
 	var trend: int = int(global_resource_trends.get(resource, 0))
 	if trend != 0:
 		var direction: float = 1.0 if trend > 0 else -1.0
@@ -125,10 +127,12 @@ func _build_credit_stat(parent: Container) -> void:
 	global_credit_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	global_credit_label.add_theme_color_override("font_color", HUD.CREDIT_COLOR)
 	balance_row.add_child(global_credit_label)
-	global_credit_income_label = make_label.call("+0/yr", 11)
-	global_credit_income_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	global_credit_income_label.add_theme_color_override("font_color", Color("#7cdb9b"))
-	balance_row.add_child(global_credit_income_label)
+	var strip := Control.new()
+	strip.custom_minimum_size.y = 14.0
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(strip)
+	global_resource_strips["credits"] = strip
+	strip.draw.connect(_draw_trend.bind(strip, "credits"))
 	global_resource_tiles["credits"] = tile
 
 func _global_stat(parent: Container, value: String, tint: Color, population: bool = false) -> Label:
@@ -171,7 +175,7 @@ func _empire_resource_delta(state: Dictionary, resource: String) -> float:
 			total += ECONOMY.net_rate(p, resource)
 	return total
 
-# Signed number of chevrons, relative to the capacity represented by the bar.
+# Signed number of chevrons relative to capacity or a treasury reference.
 static func _trend_count(annual: float, capacity: float) -> int:
 	if absf(annual) < 0.05 or capacity <= 0.0:
 		return 0
@@ -307,11 +311,13 @@ func refresh(state: Dictionary) -> void:
 	var totals: Dictionary = ECONOMY.empire_totals(state, local_player.call())
 	var credit_income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE - float(totals["upkeep"])
 	var unpaid: int = int(totals["unpaid_ships"])
-	global_credit_label.text = "%s%s" % [UI_TEXT.compact_amount(ECONOMY.credit_balance(state, local_player.call())), " !" if unpaid > 0 else ""]
+	var credit_balance: float = ECONOMY.credit_balance(state, local_player.call())
+	global_credit_label.text = "%s%s" % [UI_TEXT.compact_amount(credit_balance), " !" if unpaid > 0 else ""]
 	global_credit_label.add_theme_color_override("font_color", Color("#ff7777") if unpaid > 0 else HUD.CREDIT_COLOR)
-	var sign_text: String = "+" if credit_income > 0.0 else ("−" if credit_income < 0.0 else "")
-	global_credit_income_label.text = "(%s%s/yr)" % [sign_text, UI_TEXT.compact_amount(absf(credit_income))]
-	global_credit_income_label.add_theme_color_override("font_color", Color("#ff7777") if credit_income < 0.0 else (Color("#7cdb9b") if credit_income > 0.0 else Color.WHITE))
+	# Credits have no storage ceiling; normalize against the treasury, with
+	# the starting balance as a floor to avoid exaggerated near-zero trends.
+	global_resource_trends["credits"] = _trend_count(credit_income, maxf(credit_balance, ECONOMY.STARTING_GC))
+	global_resource_strips["credits"].queue_redraw()
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])
 		var annual: float = _empire_resource_delta(state, resource)
