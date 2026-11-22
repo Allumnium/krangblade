@@ -553,6 +553,8 @@ func _send_commands() -> void:
 		_fail("No reachable regular mining field for command test.")
 		return
 	session.call("request_miner_assignment", [own_miners[0]], mining_field)
+	var ore: Dictionary = initial["map"]["fields"][mining_field]["chunks"][0]
+	session.call("request_unit_orders", [{"ids": [own_miners[0]], "order": {"kind": "mine", "target": mining_field, "chunk": int(ore["id"])}}], false)
 	session.call("request_miner_assignment", [own_miners[0], enemy_miner], -1)
 	session.call("request_miner_assignment", [own_miners[0]], 999999)
 	session.call("request_fighter_move", [own_fighters[0]], field_node, true)

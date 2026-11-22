@@ -1046,7 +1046,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		command_card_ui.set_face(upgrade, "Upgrade", command_card_ui.icon("upgrade"))
 		yard_upgrades[target_level] = upgrade
 		hotkeys.register(upgrade, KEY_U if target_level == 2 else KEY_I, "Shipyard", "yard_upgrade" if target_level == 2 else "yard_upgrade_large", "Upgrade to " + class_name_text)
-	yard_top_slots.assign([yard_commands["miner"], yard_commands["fighter"], yard_commands["scout"], command_card_ui.add_spacer(grid)])
+	yard_top_slots.assign([yard_commands["scout"], yard_commands["fighter"], yard_commands["miner"], command_card_ui.add_spacer(grid)])
 	for i in range(8):
 		yard_row_spacers.append(command_card_ui.add_spacer(grid))
 	var station_button := _button("", _select_yard_station, grid)
@@ -3602,7 +3602,6 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		return
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var world: Vector2 = minimap_hint.get("world", _world_point(point))
-	var node: int = ECONOMY.sector_at(graph, world, ECONOMY.military_pois(state, _me()))
 	if patrol:
 		var anchor: int = ECONOMY.patrol_node(state, graph, _me(), world)
 		var fighters: Array[int] = []
@@ -3635,17 +3634,30 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 	var rock_id: int = -1
 	if contextual and not force_position and not minimap_hint.is_empty():
 		field = int(minimap_hint["field"])
-	elif contextual and not force_position and node >= state["planets"].size():
-		var candidate: int = node - state["planets"].size()
-		var data: Dictionary = state["map"]["fields"][candidate]
-		var distance: float = point.distance_to(_screen_point(data["position"]))
-		if distance <= maxf(9.0, float(data["radius"]) * _fit() * camera.zoom):
-			field = candidate
-			var best: float = INF
+	elif contextual and not force_position:
+		# Field extents can span several legacy sectors. Hit the actual
+		# known rock, not the closest bookkeeping node or bounding circle.
+		var best: float = INF
+		var scale: float = _fit() * camera.zoom
+		for candidate in range(state["map"]["fields"].size()):
+			if not ECONOMY.discovered(state, _me(), "fields", candidate):
+				continue
+			var data: Dictionary = fog_state.field_view(state, candidate, _map_size())
+			if data.is_empty():
+				continue
+			if bool(data.get("antimatter", false)):
+				if rock_id < 0 and point.distance_to(_screen_point(data["position"])) <= maxf(9.0, float(data["radius"]) * scale):
+					field = candidate
+				continue
+			if point.distance_to(_screen_point(data["position"])) > float(data["radius"]) * scale + 3.0:
+				continue
 			for rock in data.get("chunks", []):
+				var fraction: float = clampf(float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock.get("initial", rock["remaining"]))), 0.0, 1.0)
+				var hit_radius: float = maxf(2.5, float(rock.get("radius", 0.0)) * scale * sqrt(fraction))
 				var d: float = point.distance_to(_screen_point(rock["position"]))
-				if d < best and d <= maxf(5.0, float(rock.get("radius", 0.0)) * _fit() * camera.zoom):
+				if fraction > 0.0 and d < best and d <= hit_radius:
 					best = d
+					field = candidate
 					rock_id = int(rock["id"])
 	# Only a direct hit on a known neutral star is a settlement command.
 	# Empty space inside a legacy sector remains an ordinary move.
@@ -3693,7 +3705,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		elif wreck >= 0 and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
 			salvage_ids.append(id)
 			continue
-		elif field >= 0 and craft["kind"] == "miner" and not bool(state["map"]["fields"][field].get("antimatter", false)):
+		elif field >= 0 and rock_id >= 0 and craft["kind"] == "miner" and not bool(state["map"]["fields"][field].get("antimatter", false)):
 			order = {"kind": "mine", "target": field, "chunk": rock_id}
 		else:
 			var endpoint: Vector2 = ref.get("position", world)
