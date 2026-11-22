@@ -1317,9 +1317,7 @@ func _build_station_command_card(parent: Container) -> void:
 	station_commands.alignment = BoxContainer.ALIGNMENT_BEGIN
 	parent.add_child(station_commands)
 	station_primary_grid = command_card_ui.create_grid(station_commands)
-	station_select_yards_button = _station_button(station_primary_grid, "Select\nShipyards", "yard", _station_select_yards)
-	hotkeys.register(station_select_yards_button, KEY_Z, "Station", "station_port_1", "Select Shipyards")
-	for i in range(3):
+	for i in range(4):
 		command_card_ui.add_spacer(station_primary_grid)
 	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Reinforced\nPlating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
@@ -1334,9 +1332,11 @@ func _build_station_command_card(parent: Container) -> void:
 	command_card_ui.add_spacer(station_primary_grid)
 	for i in range(4):
 		command_card_ui.add_spacer(station_primary_grid)
+	# Bottom row: Select Shipyards, Build, Trade, empty.
+	station_select_yards_button = _station_button(station_primary_grid, "Select\nShipyards", "yard", _station_select_yards)
+	hotkeys.register(station_select_yards_button, KEY_Z, "Station", "station_port_1", "Select Shipyards")
 	hotkeys.register(_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")), KEY_B, "Station", "station_build", "Build")
 	hotkeys.register(_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")), KEY_T, "Station", "station_trade", "Trade")
-	command_card_ui.add_spacer(station_primary_grid)
 	command_card_ui.add_spacer(station_primary_grid)
 	station_build_grid = command_card_ui.create_grid(station_commands)
 	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "PDS", "yard": "Build\nShipyard"}
