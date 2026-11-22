@@ -22,6 +22,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 ## Engineering structure
 
+- [ ] v0.89.19: Verify README no longer becomes locally modified when opening Godot after pulling the whitespace-independent diagram.
+
 ### Code organization and maintainability
 
 User requested AI-friendly structure and fewer duplicate definitions. v0.89.4 documents the ownership map and pre-edit rules. Baseline v0.89.3 has 22,787 lines across 11 production scripts (counts include trailing newline), with match.gd and economy_rules.gd accounting for ~82%. Prioritize safe extraction over a broad rewrite. The following is a staged engineering plan; each unchecked item needs implementation and validation.
