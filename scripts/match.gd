@@ -4783,7 +4783,7 @@ func _draw_map() -> void:
 		var texture: Texture2D = hull_art.hull_texture(str(ship["kind"]), empire, scale >= 0.42)
 		if _shield_fraction(ship) > 0.0:
 			world_batches.queue_overview_hull(hull_art.shield_texture(str(ship["kind"])), point, direction.angle(), (hull_art.texture_half_size(str(ship["kind"])) + 8.0) * scale, cloaked)
-		if ship["kind"] != "science_ship":
+		if ship["kind"] != "science_ship" and not (ship["kind"] == "ship" and scale >= 0.42):
 			world_batches.queue_overview_hull(texture, point, direction.angle(), hull_art.texture_half_size(str(ship["kind"])) * scale, cloaked)
 		else:
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
@@ -4791,20 +4791,22 @@ func _draw_map() -> void:
 			map_canvas.draw_texture_rect(texture, Rect2(-half, -half, half * 2.0, half * 2.0), false)
 			map_canvas.draw_set_transform(Vector2.ZERO)
 		if ship["kind"] == "ship" and scale >= 0.42:
+			# Compose each close freighter's hull and opaque cargo as one
+			# draw sequence, not globally layered transparent bay batches.
+			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
 			var bays: Array = ECONOMY.freighter_cargo_bays(ship["cargo"])
 			for k in range(bays.size()):
 				var bay_center: Vector2 = hull_art.freighter_bay_center(k)
-				var module: Vector2 = point + direction * bay_center.x + side * bay_center.y
-				var half_length: float = 3.0
-				var corners := PackedVector2Array([module + direction * half_length + side * 3, module - direction * half_length + side * 3, module - direction * half_length - side * 3, module + direction * half_length - side * 3])
-				world_batches.queue_cargo_rect(corners, Color("#182333"))
-				var start: float = -half_length
+				map_canvas.draw_rect(Rect2(bay_center - Vector2(3.0, 3.0), Vector2(6.0, 6.0)), Color("#182333"))
+				var start: float = -3.0
 				for segment in bays[k]:
-					var end: float = minf(half_length, start + 2.0 * half_length * float(segment["amount"]) / ECONOMY.FREIGHTER_BAY_CAPACITY)
+					var end: float = minf(3.0, start + 6.0 * float(segment["amount"]) / ECONOMY.FREIGHTER_BAY_CAPACITY)
 					if (end - start) * scale >= 0.1:
-						var filled := PackedVector2Array([module + direction * end + side * 3, module + direction * start + side * 3, module + direction * start - side * 3, module + direction * end - side * 3])
-						world_batches.draw_cargo_segment(filled, HUD.COLORS[segment["resource"]])
+						var tint: Color = HUD.COLORS[segment["resource"]]
+						tint.a = 1.0
+						map_canvas.draw_rect(Rect2(bay_center + Vector2(start, -3.0), Vector2(end - start, 6.0)), tint.lightened(0.14))
 					start = end
+			map_canvas.draw_set_transform(Vector2.ZERO)
 		elif ship["kind"] == "science_ship":
 			map_canvas.draw_circle(point, maxf(1.0, 11.5 * scale), empire.darkened(0.4), true, -1.0, true)
 			map_canvas.draw_arc(point, 10.5 * scale, 0.0, TAU, 32, empire.lightened(0.5), maxf(0.8, scale), true)
