@@ -2259,6 +2259,35 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	p["farm_factor"] = 1.0 + FARM_VARIATION * sin(TAU * elapsed / FARM_CYCLE_SECONDS + float(p["farm_phase"]))
 	_update_population(p, dt)
 	p["demographic_rate"] = (float(p["population"]) - before_population) / maxf(EPS, dt)
+	_produce_planet_resources(state, p, dt)
+	_work_upgrade_deliveries(state, index, p, dt)
+	_work_station_queue(state, index, p, dt)
+	_refill_yard_autobuild(state, index, p)
+	_refill_continuous(state, index, p)
+	for category in p.get("pending_spending", {}):
+		for material in p["pending_spending"][category]:
+			_record_flow(p, str(category), str(material), float(p["pending_spending"][category][material]))
+	p.erase("pending_spending")
+	var assigned: Dictionary = _retain_yard_jobs(p)
+	for y in range((p["yards"] as Array).size()):
+		if not shipyard_operational(p, y):
+			continue
+		var yard: Dictionary = p["yards"][y]
+		var chosen: Dictionary = _next_yard_job(p, y, yard, assigned)
+		if chosen.is_empty():
+			yard["job"] = -1
+			continue
+		var id: int = int(chosen["id"])
+		yard["job"] = id
+		assigned[id] = true
+		var speed: float = 1.0 if chosen["kind"] == "yard_upgrade" else yard_speed(int(yard["level"]))
+		if military_hull(str(chosen["kind"])):
+			speed *= _rank_factor(p, "rank_assembly", 0.10)
+		if _advance(p, chosen, speed * dt, y):
+			_finish(state, index, p, chosen)
+			yard["job"] = -1
+
+static func _produce_planet_resources(state: Dictionary, p: Dictionary, dt: float) -> void:
 	# Only Organics feed residents. Metals and Crystals accumulate up to
 	# storage capacity; food production can satisfy demand even at capacity.
 	# Refunds may temporarily exceed capacity; never destroy returned materials.
@@ -2276,16 +2305,10 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		progress[metric] = float(progress.get(metric, 0.0)) + produced
 		_record_flow(p, "Population", resource, used)
 		p["stock"][resource] = maxf(0.0, stored + produced - used)
-	_work_upgrade_deliveries(state, index, p, dt)
-	_work_station_queue(state, index, p, dt)
-	_refill_yard_autobuild(state, index, p)
-	_refill_continuous(state, index, p)
-	for category in p.get("pending_spending", {}):
-		for material in p["pending_spending"][category]:
-			_record_flow(p, str(category), str(material), float(p["pending_spending"][category][material]))
-	p.erase("pending_spending")
+
+# Preserve active jobs. A started upgrade remains attached to its own yard even if blocked.
+static func _retain_yard_jobs(p: Dictionary) -> Dictionary:
 	var assigned: Dictionary = {}
-	# Preserve active jobs. A started upgrade remains attached to its own yard even if blocked.
 	for y in range((p["yards"] as Array).size()):
 		var yard: Dictionary = p["yards"][y]
 		if not shipyard_operational(p, y):
@@ -2301,59 +2324,43 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 				break
 		if not retained:
 			yard["job"] = -1
-	for y in range((p["yards"] as Array).size()):
-		if not shipyard_operational(p, y):
-			continue
-		var yard: Dictionary = p["yards"][y]
-		var chosen: Dictionary = {}
-		for item in p["queue"]:
-			if int(item["id"]) == int(yard["job"]):
-				# Earlier yards may have recruited population this tick.
-				if _possible(p, item, y) > EPS:
-					chosen = item
-				else:
-					assigned.erase(int(item["id"]))
-					yard["job"] = -1
-				break
-		if chosen.is_empty():
-			# Repeat hulls take turns in queue order, even if the next one
-			# is waiting for materials. Otherwise cheap hulls can repeatedly
-			# leapfrog a more expensive one and starve it. Manual orders and
-			# targeted upgrades retain their existing eligibility rules.
-			var repeat_seen: bool = false
-			var queue_full: bool = shipyard_queue_count(p, y) >= SHIPYARD_QUEUE_LIMIT
-			for item in p["queue"]:
-				if assigned.has(int(item["id"])):
-					continue
-				var upgrade: bool = item["kind"] == "yard_upgrade" and int(item["target"]) == y
-				var pinned: int = int(item.get("yard_slot", -1))
-				var hull: bool = int(item["size"]) > 0 and int(item["size"]) <= max_size(int(yard["level"])) and (pinned < 0 or pinned == y)
-				if hull and pinned < 0 and queue_full:
-					continue
-				# A population-blocked order never occupies the active slot,
-				# even when explicitly pinned to this yard. Keep it queued.
-				var possible: bool = (upgrade or hull) and _possible(p, item, y) > EPS
-				if hull and not possible:
-					continue
-				if hull and bool(item.get("automatic", false)):
-					if repeat_seen:
-						continue
-					repeat_seen = true
-				if possible:
-					chosen = item
-					break
-		if chosen.is_empty():
+	return assigned
+
+static func _next_yard_job(p: Dictionary, y: int, yard: Dictionary, assigned: Dictionary) -> Dictionary:
+	for item in p["queue"]:
+		if int(item["id"]) == int(yard["job"]):
+			# Earlier yards may have recruited population this tick.
+			if _possible(p, item, y) > EPS:
+				return item
+			assigned.erase(int(item["id"]))
 			yard["job"] = -1
+			break
+	# Repeat hulls take turns in queue order, even if the next one
+	# is waiting for materials. Otherwise cheap hulls can repeatedly
+	# leapfrog a more expensive one and starve it. Manual orders and
+	# targeted upgrades retain their existing eligibility rules.
+	var repeat_seen: bool = false
+	var queue_full: bool = shipyard_queue_count(p, y) >= SHIPYARD_QUEUE_LIMIT
+	for item in p["queue"]:
+		if assigned.has(int(item["id"])):
 			continue
-		var id: int = int(chosen["id"])
-		yard["job"] = id
-		assigned[id] = true
-		var speed: float = 1.0 if chosen["kind"] == "yard_upgrade" else yard_speed(int(yard["level"]))
-		if military_hull(str(chosen["kind"])):
-			speed *= _rank_factor(p, "rank_assembly", 0.10)
-		if _advance(p, chosen, speed * dt, y):
-			_finish(state, index, p, chosen)
-			yard["job"] = -1
+		var upgrade: bool = item["kind"] == "yard_upgrade" and int(item["target"]) == y
+		var pinned: int = int(item.get("yard_slot", -1))
+		var hull: bool = int(item["size"]) > 0 and int(item["size"]) <= max_size(int(yard["level"])) and (pinned < 0 or pinned == y)
+		if hull and pinned < 0 and queue_full:
+			continue
+		# A population-blocked order never occupies the active slot,
+		# even when explicitly pinned to this yard. Keep it queued.
+		var possible: bool = (upgrade or hull) and _possible(p, item, y) > EPS
+		if hull and not possible:
+			continue
+		if hull and bool(item.get("automatic", false)):
+			if repeat_seen:
+				continue
+			repeat_seen = true
+		if possible:
+			return item
+	return {}
 
 static func _cargo_total(ship: Dictionary) -> float:
 	var total: float = 0.0

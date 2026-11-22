@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.17: Split _work_planet into _produce_planet_resources, _retain_yard_jobs and _next_yard_job. No behavior change; parser, determinism probe and economy failure signatures unchanged.
+
 - v0.97.16: Split _ai_military_orders into _ai_reference_hull, _ai_scan_hostiles, _ai_attack_goal and _ai_assign_military. No behavior change; parser, determinism probe and economy failure signatures unchanged. Note: economy_rules_test hangs (not merely slow) after the tenfold asteroid fixture even with a 900 s timeout; pre-existing.
 
 - v0.97.15: Split _work_salvage into _salvage_pickup, _next_wreck_salvage, _salvage_delivery, _salvage_depot and _unload_salvage. No behavior change; parser, determinism probe and economy failure signatures unchanged.
