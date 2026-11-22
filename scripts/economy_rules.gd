@@ -1606,10 +1606,10 @@ static func shipyard_port_position(state: Dictionary, index: int, port: int, ela
 	return station_position(state, index, elapsed) + Vector2.from_angle(angle) * 90.0
 
 static func _rally_path(state: Dictionary, index: int, target: int) -> Array[int]:
-	var access: Array[int] = []
-	access.resize(state["map"]["points"].size())
-	access.fill(1)
-	return MAP.path(state["map"], access, 1, index, target)
+	var count: int = state["map"]["points"].size()
+	if index < 0 or target < 0 or index >= count or target >= count:
+		return []
+	return [index] if index == target else [index, target]
 
 static func set_shipyard_rally(state: Dictionary, player: int, index: int, slot: int, target: int, point: Vector2) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
@@ -1646,24 +1646,11 @@ static func _work_launch_rally(state: Dictionary, ship: Dictionary, dt: float) -
 		return false
 	var rally: Dictionary = ship["launch_rally"]
 	var fighter: bool = ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]
-	if fighter:
-		# Combat and emergency repair use the normal fighter movement branch.
-		# Retain the exact rally destination through these temporary detours.
-		if bool(ship.get("retreating", false)) or _engaged(ship):
-			return false
-		var graph: Dictionary = military_graph(state)
-		var node: int = int(rally["node"])
-		if int(ship.get("dest", -1)) != node:
-			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
-		if not (ship["route"] as Array).is_empty():
-			_move({"map": graph}, ship, dt)
-			return true
-		if not sector_contains(graph, node, ship["position"]):
-			_navigate(ship, graph["points"][node], ship_speed(str(ship.get("kind", "ship"))) * dt)
-			return true
-	elif not (ship["route"] as Array).is_empty():
-		_move(state, ship, dt)
-		return true
+	if fighter and (bool(ship.get("retreating", false)) or _engaged(ship)):
+		return false
+	# Rally directly to the exact point, even when far from the star.
+	ship["route"] = []
+	ship["leg"] = 0.0
 	# Arrive in the vicinity, not at a shared exact coordinate. Separation
 	# can otherwise keep a crowded fleet fighting the same arrival target.
 	var distance: float = (ship["position"] as Vector2).distance_to(rally["point"])
@@ -3366,82 +3353,46 @@ static func set_military(state: Dictionary, player: int, kind: String, node: int
 # Dijkstra from the destination: all military ships may traverse star lanes,
 # regardless of ownership. Fields use their existing service-system approach.
 static func _military_paths(graph: Dictionary, goal: int) -> Dictionary:
+	# Keep the compatibility shape for strategic callers, but no graph search.
 	if graph.has("paths") and graph["paths"].has(goal):
 		return graph["paths"][goal]
 	var points: Array = graph["points"]
-	var distances: Dictionary = {goal: 0.0}
+	var distances: Dictionary = {}
 	var next_hop: Dictionary = {}
-	var open: Array[int] = [goal]
-	var visited: Dictionary = {}
-	while not open.is_empty():
-		var current: int = open[0]
-		for node in open:
-			if float(distances[node]) < float(distances[current]):
-				current = node
-		open.erase(current)
-		visited[current] = true
-		for node in graph["adjacent"][current]:
-			if visited.has(node):
-				continue
-			var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[node])
-			if distance < float(distances.get(node, INF)):
-				distances[node] = distance
-				next_hop[node] = current
-				if not open.has(node):
-					open.append(node)
-	var result: Dictionary = {"distance": distances, "next": next_hop}
+	if goal >= 0 and goal < points.size():
+		var destination: Vector2 = points[goal]
+		for node in range(points.size()):
+			distances[node] = (points[node] as Vector2).distance_to(destination)
+			if node != goal:
+				next_hop[node] = goal
+	var result: Dictionary = {"goal": goal, "distance": distances, "next": next_hop}
 	if graph.has("paths"):
 		graph["paths"][goal] = result
 	return result
 
+
 static func _military_approach(graph: Dictionary, ship: Dictionary, paths: Dictionary) -> Dictionary:
 	var points: Array = graph["points"]
-	var here: int = int(ship["at"])
-	var distances: Dictionary = paths["distance"]
-	var route: Array = ship["route"]
+	var goal: int = int(paths["goal"])
 	var position: Vector2 = ship.get("position", _initial_position(points, ship))
-	# A stopped ship inside a corridor can depart through either endpoint,
-	# independent of which endpoint was retained as its routing hint.
-	if route.is_empty() and graph.has("sector_radii") and graph.has("edges") and not sector_contains(graph, here, position):
-		var lane: Vector2i = lane_at(graph, position)
-		if lane.x >= 0 and not sector_contains(graph, lane.x, position) and not sector_contains(graph, lane.y, position):
-			var cost_a: float = position.distance_to(points[lane.x]) + float(distances.get(lane.x, INF))
-			var cost_b: float = position.distance_to(points[lane.y]) + float(distances.get(lane.y, INF))
-			var anchor: int = lane.x if cost_a <= cost_b else lane.y
-			var other: int = lane.y if anchor == lane.x else lane.x
-			return {"distance": minf(cost_a, cost_b), "anchor": anchor, "reverse": false, "edge": true, "from_anchor": other}
-	var best: float = position.distance_to(points[here]) + float(distances.get(here, INF))
-	var reverse: bool = not route.is_empty() and position.distance_to(points[here]) > EPS
-	if not route.is_empty():
-		var other: int = int(route[0])
-		var forward: float = position.distance_to(points[other]) + float(distances.get(other, INF))
-		if forward <= best:
-			return {"distance": forward, "anchor": other, "reverse": false, "edge": true}
-	return {"distance": best, "anchor": here, "reverse": reverse, "edge": reverse}
+	var distance: float = INF
+	if goal >= 0 and goal < points.size():
+		distance = position.distance_to(points[goal])
+	return {"distance": distance, "anchor": goal, "reverse": false, "edge": false}
 
-static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, paths: Dictionary) -> void:
+
+static func _redirect_fighter(graph: Dictionary, ship: Dictionary, target: int, _paths: Dictionary) -> void:
 	_ensure_position(graph["points"], ship)
-	var approach: Dictionary = _military_approach(graph, ship, paths)
-	var anchor: int = int(approach["anchor"])
+	# Preserve actual hull position on redirects. The route is a single
+	# destination, with the last arrival anchor retained for compatibility.
 	var route: Array[int] = []
-	if bool(approach["edge"]):
-		if approach.has("from_anchor"):
-			ship["at"] = int(approach["from_anchor"])
-		elif bool(approach["reverse"]):
-			ship["at"] = int(ship["route"][0])
-		route.append(anchor)
-	else:
-		ship["leg"] = 0.0
-	var current: int = anchor
-	while current != target and paths["next"].has(current):
-		current = int(paths["next"][current])
-		route.append(current)
+	if int(ship["at"]) != target or (ship["position"] as Vector2).distance_to(graph["points"][target]) > EPS:
+		route.append(target)
 	ship["route"] = route
 	ship["leg"] = _lane_progress(graph["points"], ship)
 	ship["dest"] = target
 
-# Validate the entire selection before changing any order. Only owned fighters
-# can receive military movement orders, including during automatic repairs.
+
 static func command_fighters(state: Dictionary, player: int, ids: Array, target: int, move_only: bool = false) -> bool:
 	if ids.is_empty() or not military_pois(state, player).has(target):
 		return false
@@ -7660,9 +7611,16 @@ static func _coordinate_formations(state: Dictionary, graph: Dictionary, dt: flo
 		if length <= EPS:
 			continue
 		var progress: float = length
+		var aligned: bool = true
 		for craft in group:
 			var corrected: Vector2 = craft["position"] - _formation_offset(craft, axis)
-			progress = minf(progress, clampf((corrected - origin).dot(axis), 0.0, length))
+			var along: float = (corrected - origin).dot(axis)
+			if absf((corrected - origin).cross(axis)) > SHIP_SEPARATION_RADIUS * 2.0 or along < -SHIP_SEPARATION_RADIUS or along > length + SHIP_SEPARATION_RADIUS:
+				aligned = false
+				break
+			progress = minf(progress, clampf(along, 0.0, length))
+		if not aligned:
+			continue
 		var next_progress: float = minf(length, progress + ship_speed(str(first.get("kind", "ship"))) * FORMATION_TRAVEL_FRACTION * dt)
 		var arrived: bool = true
 		for craft in group:

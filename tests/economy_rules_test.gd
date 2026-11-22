@@ -2498,12 +2498,13 @@ func _initialize() -> void:
 	var reversal_position: Vector2 = force_fleet[1]["position"]
 	assert(ECON.set_military(force_state, 1, "fighter", 0, 100))
 	ECON._allocate_fighters(force_state, force_graph, 1, force_fleet)
-	assert(force_fleet[1]["at"] == field_node)
-	assert(force_fleet[1]["route"] == [3, 0])
-	assert(is_equal_approx(float(force_fleet[1]["leg"]), 52.5))
+	assert(force_fleet[1]["at"] == 3)
+	assert(force_fleet[1]["route"] == [0])
+	assert(is_zero_approx(float(force_fleet[1]["leg"])))
 	assert(force_fleet[1]["position"] == reversal_position)
 	ECON._move({"map": force_graph}, force_fleet[1], 0.1)
 	assert(is_equal_approx(reversal_position.distance_to(force_fleet[1]["position"]), ECON.ship_speed(str(force_fleet[1]["kind"])) * 0.1))
+	assert((force_fleet[1]["position"] as Vector2).is_equal_approx(reversal_position.move_toward(force_graph["points"][0], ECON.ship_speed(str(force_fleet[1]["kind"])) * 0.1)))
 	ECON._move({"map": force_graph}, force_fleet[1], 100.0)
 	assert(force_fleet[1]["at"] == 0 and force_fleet[1]["route"].is_empty())
 	assert(ECON.set_military(force_state, 1, "fighter", field_node, 100))
@@ -3690,7 +3691,7 @@ func _test_gap_position_orders() -> void:
 			ECON.step(state, 0.1)
 			assert(previous.distance_to(craft["position"]) <= ECON.ship_speed(kind) * 0.1 + 0.01)
 			if not reached_first:
-				assert(absf((craft["position"] as Vector2 - start).cross((gap - start).normalized())) < 0.1)
+				assert(absf(((craft["position"] as Vector2) - start).cross((gap - start).normalized())) < 0.1)
 			reached_first = reached_first or craft["position"].is_equal_approx(gap)
 			if reached_first and not craft.has("local_move_target") and craft["position"].is_equal_approx(second):
 				break
