@@ -48,6 +48,7 @@ const CELESTIAL_VIEW = preload("res://scripts/celestial_view.gd")
 const WORLD_EFFECTS = preload("res://scripts/world_effects.gd")
 const STRUCTURE_VIEW = preload("res://scripts/structure_view.gd")
 const ORDER_VIEW = preload("res://scripts/order_view.gd")
+const MINIMAP_VIEW = preload("res://scripts/minimap_view.gd")
 const TACTICAL_ALERTS = preload("res://scripts/tactical_alerts.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
@@ -75,6 +76,7 @@ var celestial_view := CELESTIAL_VIEW.new()
 var world_effects := WORLD_EFFECTS.new()
 var structure_view := STRUCTURE_VIEW.new()
 var order_view := ORDER_VIEW.new()
+var minimap_view := MINIMAP_VIEW.new()
 var settings := ConfigFile.new()
 var music_volume: float = 100.0
 var sfx_volume: float = 100.0
@@ -92,7 +94,6 @@ var inspector_slot: Control
 var overview_panel: PanelContainer
 var console_panel: PanelContainer
 var minimap: Control
-var minimap_pan_drag: bool = false
 var time_panel: PanelContainer
 var lens_column: VBoxContainer
 var console_columns: HBoxContainer
@@ -458,6 +459,7 @@ func _build_command_deck() -> void:
 	minimap.size_flags_horizontal = Control.SIZE_FILL
 	minimap.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	deck.add_child(minimap)
+	minimap_view.configure(minimap, map_canvas, session, territory_view, fog_state, ship_motion, _state, _map_size, _world_point, _me, _ship_poses, _fog_visible, _ship_visible, _empire_color)
 	minimap.draw.connect(_draw_minimap)
 	minimap.gui_input.connect(_minimap_input)
 	minimap.resized.connect(minimap.queue_redraw)
@@ -893,90 +895,23 @@ func _layout_command_grids() -> void:
 		grid.columns = clampi(floori(width / cell_width), 1, 3)
 	_layout_right_panel()
 
-func _minimap_area() -> Rect2:
-	var bounds: Vector2 = _map_size().max(Vector2.ONE)
-	var available: Vector2 = (minimap.size - Vector2(12, 12)).max(Vector2.ONE)
-	var scale: float = minf(available.x / bounds.x, available.y / bounds.y)
-	var extent: Vector2 = bounds * scale
-	return Rect2((minimap.size - extent) * 0.5, extent)
-
-func _minimap_point(point: Vector2, area: Rect2) -> Vector2:
-	return area.position + point / _map_size().max(Vector2.ONE) * area.size
-
 func _minimap_input(event: InputEvent) -> void:
 	if match_menu.visible or (is_instance_valid(codex) and codex.visible):
 		return
-	var move_camera: bool = false
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			minimap_pan_drag = event.pressed and pending_command.is_empty()
-			move_camera = minimap_pan_drag
-		if event.pressed and not _state().is_empty() and (event.button_index == MOUSE_BUTTON_RIGHT or (event.button_index == MOUSE_BUTTON_LEFT and not pending_command.is_empty())):
-			_minimap_order(event)
-			minimap.accept_event()
-			return
-	elif event is InputEventMouseMotion:
-		move_camera = minimap_pan_drag and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0
-	if move_camera and not _state().is_empty():
-		var area: Rect2 = _minimap_area()
-		var fraction: Vector2 = ((event.position - area.position) / area.size).clamp(Vector2.ZERO, Vector2.ONE)
-		var world: Vector2 = fraction * _map_size()
-		camera.following = false
-		_center_world(world)
-		_position_territory()
-		map_canvas.queue_redraw()
-		minimap.queue_redraw()
-	minimap.accept_event()
+	minimap_view.handle_input(event, pending_command, _minimap_order, _minimap_pan_to)
+
+func _minimap_pan_to(world: Vector2) -> void:
+	camera.following = false
+	_center_world(world)
+	_position_territory()
+	map_canvas.queue_redraw()
+	minimap.queue_redraw()
 
 func _minimap_order(mouse: InputEventMouseButton) -> void:
 	var state: Dictionary = _state()
-	var area: Rect2 = _minimap_area()
-	if not area.has_point(mouse.position):
+	var hint: Dictionary = minimap_view.order_hint(mouse, state, pending_command)
+	if hint.is_empty():
 		return
-	var world: Vector2 = (mouse.position - area.position) / area.size * _map_size()
-	var hint: Dictionary = {"world": world, "entity": -1, "field": -1, "wreck": -1}
-	var graph: Dictionary = ECONOMY.military_graph(state)
-	var count: int = state["planets"].size()
-	var nearest: float = 5.0
-	var node_hit: int = -1
-	# Star markers are background landmarks, not implicit destinations or
-	# station targets. Only actual entity/service orders use marker hits.
-	if not mouse.alt_pressed and pending_command not in ["move", "patrol", "guard", "rally"]:
-		var poses: Dictionary = _ship_poses(state)
-		nearest = 3.0
-		for id in poses:
-			var ship_point: Vector2 = poses[id]["world"]
-			var distance: float = mouse.position.distance_to(_minimap_point(ship_point, area))
-			if distance < nearest:
-				nearest = distance
-				hint["entity"] = id
-		if int(hint["entity"]) == -1:
-			nearest = 5.0
-			for node in ECONOMY.military_pois(state, _me()):
-				if node < count:
-					if not ECONOMY.has_station(state["planets"][node]):
-						continue
-					var station_point: Vector2 = ECONOMY.station_position(state, node, float(state["elapsed"]))
-					var distance: float = mouse.position.distance_to(_minimap_point(station_point, area))
-					if distance < nearest:
-						nearest = distance
-						node_hit = node
-						hint["entity"] = ECONOMY.station_target_id(state, node)
-						hint["field"] = -1
-				else:
-					var distance: float = mouse.position.distance_to(_minimap_point(graph["points"][node], area))
-					if distance < nearest:
-						nearest = distance
-						node_hit = node
-						hint["field"] = node - count
-						hint["entity"] = -1
-		if pending_command == "load" or (node_hit < 0 and int(hint["entity"]) == -1):
-			nearest = 3.0
-			for pile in state.get("salvage", {}).values():
-				var distance: float = mouse.position.distance_to(_minimap_point(pile["position"], area))
-				if distance < nearest:
-					nearest = distance
-					hint["wreck"] = int(pile["id"])
 	var point: Vector2 = _screen_point(hint["world"])
 	var mode: String = pending_command
 	if mode in ["repair", "unload", "load", "collect", "guard"]:
@@ -992,97 +927,7 @@ func _minimap_order(mouse: InputEventMouseButton) -> void:
 			_refresh_command_mode()
 
 func _draw_minimap() -> void:
-	var surface := Rect2(Vector2.ZERO, minimap.size)
-	minimap.draw_rect(surface, HUD.CONSOLE_BACKGROUND)
-	minimap.draw_rect(surface.grow(-0.5), Color("#345570"), false, 1.0)
-	var state: Dictionary = _state()
-	if state.is_empty() or minimap.size.x < 12.0 or minimap.size.y < 12.0:
-		return
-	var area: Rect2 = _minimap_area()
-	minimap.draw_rect(area, Color("#090f17"))
-	for i in range(1, 5):
-		var x: float = area.position.x + area.size.x * float(i) / 5.0
-		var y: float = area.position.y + area.size.y * float(i) / 5.0
-		minimap.draw_line(Vector2(x, area.position.y), Vector2(x, area.end.y), Color("#142437"))
-		minimap.draw_line(Vector2(area.position.x, y), Vector2(area.end.x, y), Color("#142437"))
-	var graph: Dictionary = ECONOMY.military_graph(state)
-	var points: Array = graph["points"]
-	var count: int = state["planets"].size()
-	var viewer: int = _me()
-	var locations: Array[Vector2] = []
-	var known: Array[bool] = []
-	for i in range(points.size()):
-		locations.append(_minimap_point(points[i], area))
-		known.append(ECONOMY.discovered(state, viewer, "planets" if i < count else "fields", i if i < count else i - count))
-		if known[i] and i < territory_view.tints.size() and territory_view.tints[i].a > 0.0:
-			var radius: float = clampf(territory_view.radius * area.size.x / _map_size().x, 3.0, 12.0) * (1.0 if i < count else 0.68)
-			var influence: Color = territory_view.tints[i]
-			minimap.draw_circle(locations[i], radius, Color(influence, 0.17 * influence.a))
-	var edges: Array = graph["edges"]
-	var layout: Dictionary = ECONOMY.highway_regions(graph)
-	for i in range(edges.size()):
-		var a: int = int(edges[i][0])
-		var b: int = int(edges[i][1])
-		var sections: int = int(layout["counts"][i])
-		var width: float = clampf(2.0 * ECONOMY.lane_radius(graph, a, b) * area.size.x / _map_size().x, 1.0, 8.0)
-		for j in range(sections):
-			var start: Vector2 = locations[a].lerp(locations[b], float(j) / sections)
-			var finish: Vector2 = locations[a].lerp(locations[b], float(j + 1) / sections)
-			var tint: Color = Color("#39546c") if known[a] and known[b] else Color("#182b3b")
-			var weight_index: int = int(layout["starts"][i]) + j
-			if known[a] and known[b] and weight_index < territory_view.tints.size():
-				var influence: Color = territory_view.tints[weight_index]
-				if influence.a > 0.0:
-					minimap.draw_line(start, finish, Color(influence, 0.25 * influence.a), width, true)
-				tint = tint.lerp(Color(influence, 1.0), influence.a)
-			minimap.draw_line(start, finish, tint, 1.0, true)
-	for i in range(points.size()):
-		var tint := Color("#34485a")
-		if i < count:
-			var owner: int = int(state["planets"][i]["owner"])
-			if known[i] and _fog_visible(points[i]):
-				tint = _empire_color(owner) if owner > 0 else Color("#a3b0bb")
-			minimap.draw_circle(locations[i], 2.4 if owner > 0 and known[i] else 1.8, tint)
-		elif known[i]:
-			var special: bool = bool(state["map"]["fields"][i - count].get("antimatter", false))
-			tint = HUD.COLORS[ECONOMY.ANTIMATTER] if special else Color("#b8a87a")
-			minimap.draw_rect(Rect2(locations[i] - Vector2.ONE * 1.8, Vector2.ONE * 3.6), tint, false, 1.0)
-		if (i < count and i == selected and selected_units.is_empty() and selected_field < 0) or (i >= count and i - count == selected_field):
-			minimap.draw_arc(locations[i], 4.5, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
-	for pile in state.get("salvage", {}).values():
-		if not _fog_visible(pile["position"]):
-			continue
-		var point: Vector2 = _minimap_point(pile["position"], area)
-		if area.has_point(point):
-			minimap.draw_circle(point, 1.0, HUD.COLORS[pile["resource"]])
-	if fog_state.texture != null:
-		var corner: Vector2 = _minimap_point(Vector2.ZERO, area)
-		var far: Vector2 = _minimap_point(_map_size(), area)
-		minimap.draw_texture_rect_region(fog_state.texture, Rect2(corner, far - corner), Rect2(Vector2.ZERO, _map_size() / ECONOMY.VISION_CELL))
-	# Mirror the main map's live hull visibility and interpolation; do not
-	# reveal undiscovered system ownership.
-	for ship in state["ships"]:
-		if not _ship_visible(state, ship):
-			continue
-		var id: int = int(ship["id"])
-		var world: Vector2 = ship_motion.world_position(ship, points, session)
-		var point: Vector2 = _minimap_point(world, area)
-		if area.has_point(point):
-			minimap.draw_circle(point, 1.5, _empire_color(int(ship["owner"])))
-			if selected_units.has(id):
-				minimap.draw_arc(point, 2.6, 0.0, TAU, 10, Color.WHITE, 1.0, true)
-	var corner: Vector2 = _minimap_point(_world_point(Vector2.ZERO), area)
-	var end: Vector2 = _minimap_point(_world_point(map_canvas.size), area)
-	var camera_rect := Rect2(corner, end - corner)
-	# Preserve a visible indicator at extreme close-up zoom levels.
-	var visible_extent: Vector2 = camera_rect.size.max(Vector2(3, 3))
-	var visible_rect := Rect2(camera_rect.get_center() - visible_extent * 0.5, visible_extent)
-	minimap.draw_rect(area, Color("#35536a"), false, 1.0)
-	var clipped: Rect2 = visible_rect.intersection(area)
-	if clipped.has_area():
-		minimap.draw_rect(clipped, Color(HUD.ACCENT, 0.08))
-		minimap.draw_rect(clipped, HUD.ACCENT, false, 1.2)
-
+	minimap_view.draw(selected, selected_units, selected_field)
 
 func _population_texture(pixels: int = 24) -> Texture2D:
 	if not population_icons.has(pixels):
