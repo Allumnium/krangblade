@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.39: Normalize Credits import UID and match script EOF to reported Godot editor output. Preserve import settings and gameplay; editor reopen verification pending. Avoid hand-authored noncanonical import UIDs and excess EOF blank lines.
+
 - v0.89.38: Extract selected entity portrait, health/shield and weapon readouts, multi-ship grid/cache and shared selection tile styling into selection_inspector.gd. Preserve creation order, responsive grid dimensions, label reparenting, tile selection callbacks and shared health queries. Match retains selection state, focus and detail panels. Static source parity checked; Godot import/parser, visual and peer checks pending. No gameplay or Codex changes.
 
 - v0.89.37: Extract logistics lens widget, toggle state, stock/population overlays, specialization badges and shipment arrows into logistics_view.gd. Preserve refresh/toggle order, existing team/discovery filters, route queries and shared celestial projection. The overlay still performs shipment route queries per redraw; benchmark before revising that path later. Static reverse-substitution parity checked; Godot import/parser, visual, peer and fleet validation pending. No gameplay or Codex changes.
