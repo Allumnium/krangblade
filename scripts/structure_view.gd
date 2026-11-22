@@ -46,12 +46,18 @@ func _draw_station_storage(system: Dictionary, center: Vector2, radius: float, e
 		var fill: float = clampf(float(system["stock"].get(resource, 0.0)) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system)), 0.0, 1.0) * ECONOMY.STATION_STORAGE_BAYS
 		for bay in range(ECONOMY.STATION_STORAGE_BAYS):
 			var point: Vector2 = bay_point(center, radius, elapsed, resource, bay)
-			var bounds := Rect2(point - Vector2.ONE * half, Vector2.ONE * half * 2.0)
-			map_canvas.draw_rect(bounds, Color("#111d2b"))
+			map_canvas.draw_circle(point, half, Color("#111d2b"), true, -1.0, true)
 			var fraction: float = clampf(fill - float(bay), 0.0, 1.0)
-			if fraction > 0.0:
-				map_canvas.draw_rect(Rect2(bounds.position + Vector2(0.0, bounds.size.y * (1.0 - fraction)), Vector2(bounds.size.x, bounds.size.y * fraction)), color.darkened(0.25))
-			map_canvas.draw_rect(bounds, color, false, maxf(0.8, radius * 0.018))
+			if fraction >= 1.0:
+				map_canvas.draw_circle(point, half, color.darkened(0.25), true, -1.0, true)
+			elif fraction > 0.0:
+				# Circular segment bounded by the horizontal fill level.
+				var angle: float = asin(1.0 - 2.0 * fraction)
+				var segment := PackedVector2Array()
+				for step in range(25):
+					segment.append(point + Vector2.from_angle(lerpf(angle, PI - angle, float(step) / 24.0)) * half)
+				map_canvas.draw_colored_polygon(segment, color.darkened(0.25))
+			map_canvas.draw_circle(point, half, color, false, maxf(0.8, radius * 0.018), true)
 
 # Show current production lanes, not queued future yard work.
 func _draw_station_jobs(system: Dictionary, center: Vector2, radius: float, tint: Color) -> void:
