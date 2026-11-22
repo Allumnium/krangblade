@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.89.38; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.89.40; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
@@ -35,6 +35,7 @@ Current layout (v0.89.38; update when responsibility moves). Use the named funct
 | `scripts/world_render_batches.gd` | Per-match GPU MultiMesh nodes, instance queues, shaders, texture/extent caches, buffer packing and capacity growth for hulls, beams, projectiles, exhaust, cargo, health and selection rings. Match supplies projected geometry and preserves reset and flush order. |
 | `scripts/celestial_view.gd` | Per-match system body and spacing cache, planet fades, predicted orbital clock, star/body textures, orbit/PDS art and asteroid mesh generation/lifetime. Match supplies projection and draw context; retains visibility, picking, system draw order and production delivery choreography. |
 | `scripts/world_effects.gd` | Per-match destruction event history, seeded hull fragments/sparks, laser and blaster drawing, cargo transfer animation history. Match supplies projection, public visual queries, target/bay resolution, timing and GPU submission context; authority state and draw order unchanged. |
+| `scripts/planet_traffic_view.gd` | Visual-only planetary production and upgrade-delivery cargo pods; shared read-only production source/rate queries. Match supplies projection, station radius, job icons and draw order. |
 | `scripts/structure_view.gd` | Station hub, storage bays, job icons/progress, drydock/shipyard art, construction and colony conversion animation; shared bay point geometry for cargo/production effects. Match supplies selection, projection, scale, health drawing and visibility; no new authoritative state. |
 | `scripts/order_view.gd` | Client order routes, shared group intent, target rings, queued destinations, hull ghosts and drag formation previews. Match supplies projection, geometry and selection queries, owns formation order generation and dispatch; simulation rules remain authoritative. |
 | `scripts/minimap_view.gd` | Minimap coordinate conversion, pointer drag tracking, entity/field/salvage hit hints and drawing of territory, highways, fog, ships and camera bounds. Match owns widget layout, modal gates, command dispatch and camera updates; shares existing fog, territory and motion caches. |

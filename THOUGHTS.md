@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.40 extracts planet production and upgrade-delivery cargo pod rendering plus shared read-only production source/rate queries into planet_traffic_view.gd; match retains system draw ordering and inspector presentation. Preserve resource colors, stock bay geometry, animation timing and inspector query behavior. Runtime/import/peer checks pending; no gameplay or Codex changes.
+
 - v0.89.39: Normalize Credits import UID and match script EOF to reported Godot editor output. Preserve import settings and gameplay; editor reopen verification pending. Avoid hand-authored noncanonical import UIDs and excess EOF blank lines.
 
 - v0.89.38: Extract selected entity portrait, health/shield and weapon readouts, multi-ship grid/cache and shared selection tile styling into selection_inspector.gd. Preserve creation order, responsive grid dimensions, label reparenting, tile selection callbacks and shared health queries. Match retains selection state, focus and detail panels. Static source parity checked; Godot import/parser, visual and peer checks pending. No gameplay or Codex changes.
