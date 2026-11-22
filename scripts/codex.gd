@@ -53,7 +53,7 @@ func _ready() -> void:
 	version.size_flags_horizontal = Control.SIZE_SHRINK_END
 	version.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	var close := Button.new()
-	close.text = "Close  ×"
+	close.text = "Close"
 	close.custom_minimum_size = Vector2(82, 32)
 	close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	close.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND

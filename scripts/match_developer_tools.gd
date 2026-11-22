@@ -161,6 +161,7 @@ func is_console_toggle_key(event: InputEventKey) -> bool:
 func build_console(owner: Control, make_button: Callable) -> void:
 	dev_console = Window.new()
 	dev_console.title = "Development console"
+	dev_console.borderless = true
 	dev_console.theme = owner.theme
 	dev_console.transient = true
 	dev_console.exclusive = true
@@ -175,6 +176,7 @@ func build_console(owner: Control, make_button: Callable) -> void:
 	dev_console.add_child(panel)
 	var content := VBoxContainer.new()
 	panel.add_child(content)
+	make_button.call("Close", dev_console.hide, content)
 	dev_console_output = TextEdit.new()
 	dev_console_output.editable = false
 	dev_console_output.focus_mode = Control.FOCUS_NONE
