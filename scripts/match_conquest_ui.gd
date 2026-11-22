@@ -16,7 +16,9 @@ var viewport_rect: Callable
 var conquest_buttons: Dictionary = {}
 var objective_refresh_buttons: Dictionary = {}
 var conquest_scoreboard_toggle: Button
-var conquest_scoreboard_expanded: bool = true
+var conquest_scoreboard_expanded: bool = false
+var objectives_toggle: Button
+var objectives_expanded: bool = true
 var conquest_category: String = "economic"
 var conquest_dialog: Window
 var conquest_cards: VBoxContainer
@@ -50,13 +52,21 @@ func build(owner: Control, session_node: Node, canvas: Control, overlay: Control
 		refresh.text = "↻"
 		refresh.pressed.connect(_request_objective_refresh.bind(category))
 		objective_refresh_buttons[category] = refresh
+	objectives_toggle = Button.new()
+	map_canvas.add_child(objectives_toggle)
+	objectives_toggle.z_index = 4
+	objectives_toggle.focus_mode = Control.FOCUS_NONE
+	_style_objective_header_button(objectives_toggle, HUD.ACCENT)
+	objectives_toggle.text = "−"
+	objectives_toggle.tooltip_text = "Collapse objectives"
+	objectives_toggle.pressed.connect(_toggle_objectives)
 	conquest_scoreboard_toggle = Button.new()
 	map_canvas.add_child(conquest_scoreboard_toggle)
 	conquest_scoreboard_toggle.z_index = 4
 	conquest_scoreboard_toggle.focus_mode = Control.FOCUS_NONE
 	_style_objective_header_button(conquest_scoreboard_toggle, HUD.ACCENT)
-	conquest_scoreboard_toggle.text = "−"
-	conquest_scoreboard_toggle.tooltip_text = "Collapse total conquest points"
+	conquest_scoreboard_toggle.text = "+"
+	conquest_scoreboard_toggle.tooltip_text = "Expand total conquest points"
 	conquest_scoreboard_toggle.pressed.connect(_toggle_conquest_scoreboard)
 	conquest_dialog = Window.new()
 	conquest_dialog.title = "Choose an upgrade"
@@ -96,28 +106,37 @@ func draw(state: Dictionary) -> void:
 	var y: float = header_height + 24.0
 	var clock: float = float(state.get("objective_clock", 0.0))
 	objectives_overlay.draw_string(font, Vector2(x, y), "OBJECTIVES", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
+	objectives_overlay.draw_line(Vector2(x, y + 5.0), Vector2(x + font.get_string_size("OBJECTIVES", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, y + 5.0), Color("#b8d9ef"), 1.0)
 	y += 26.0
-	for objective in ECONOMY.active_objectives(progress, clock):
-		var category: String = objective["track"]
-		var key: String = objective["id"]
-		var done: bool = completed.has(key)
-		var tint: Color = Color("#8ee2a9") if done else Color.WHITE
-		objectives_overlay.draw_string(font, Vector2(x, y), "%s · %d CP" % [category.capitalize(), ECONOMY.reward_points(progress, category)], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
-		y += 23.0
-		var pos := Vector2(x, y)
-		if not key.is_empty():
-			objectives_overlay.draw_rect(Rect2(pos + Vector2(0, -10), Vector2(10, 10)), tint, false, 1.0)
-			if done:
-				objectives_overlay.draw_polyline(PackedVector2Array([pos + Vector2(1, -6), pos + Vector2(4, -2), pos + Vector2(9, -9)]), tint, 2.0, true)
-			pos.x += 16.0
-		var counter: String = objective["counter"]
-		var counter_width: float = font.get_string_size(counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-		var label_width: float = maxf(40.0, map_canvas.size.x - 12.0 - counter_width - pos.x - 8.0)
-		objectives_overlay.draw_string_outline(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, 4, Color("#101824"))
-		objectives_overlay.draw_string(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, tint)
-		objectives_overlay.draw_string(font, Vector2(map_canvas.size.x - 12.0 - counter_width, y), counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
-		y += 29.0
+	if objectives_expanded:
+		for objective in ECONOMY.active_objectives(progress, clock):
+			var category: String = objective["track"]
+			var key: String = objective["id"]
+			var done: bool = completed.has(key)
+			var tint: Color = Color("#8ee2a9") if done else Color.WHITE
+			objectives_overlay.draw_string(font, Vector2(x, y), "%s · %d CP" % [category.capitalize(), ECONOMY.reward_points(progress, category)], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
+			y += 23.0
+			var pos := Vector2(x, y)
+			if not key.is_empty():
+				objectives_overlay.draw_rect(Rect2(pos + Vector2(0, -10), Vector2(10, 10)), tint, false, 1.0)
+				if done:
+					objectives_overlay.draw_polyline(PackedVector2Array([pos + Vector2(1, -6), pos + Vector2(4, -2), pos + Vector2(9, -9)]), tint, 2.0, true)
+				pos.x += 16.0
+			var counter: String = objective["counter"]
+			var counter_width: float = font.get_string_size(counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+			var label_width: float = maxf(40.0, map_canvas.size.x - 12.0 - counter_width - pos.x - 8.0)
+			objectives_overlay.draw_string_outline(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, 4, Color("#101824"))
+			objectives_overlay.draw_string(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, tint)
+			objectives_overlay.draw_string(font, Vector2(map_canvas.size.x - 12.0 - counter_width, y), counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
+			y += 29.0
 	_draw_conquest_scoreboard(state, font, x, y + 4.0)
+
+func _toggle_objectives() -> void:
+	objectives_expanded = not objectives_expanded
+	objectives_toggle.text = "−" if objectives_expanded else "+"
+	objectives_toggle.tooltip_text = "Collapse objectives" if objectives_expanded else "Expand objectives"
+	layout()
+	objectives_overlay.queue_redraw()
 
 func _toggle_conquest_scoreboard() -> void:
 	conquest_scoreboard_expanded = not conquest_scoreboard_expanded
@@ -186,14 +205,19 @@ func layout() -> void:
 	var font: Font = ThemeDB.fallback_font
 	var height: float = ceilf(font.get_height(13))
 	var upgrade_width: float = 52.0
-	var y: float = header_height + 24.0 + 26.0
+	var x: float = maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH)
+	var y: float = header_height + 24.0
+	objectives_toggle.visible = not state.is_empty()
+	objectives_toggle.position = Vector2(x + font.get_string_size("OBJECTIVES", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 4.0, roundf(y - font.get_ascent(13)))
+	objectives_toggle.size = Vector2(height, height)
+	y += 26.0
 	var visible_categories: Array = []
 	for objective in ECONOMY.active_objectives(progress, float(state.get("objective_clock", 0.0))):
 		visible_categories.append(objective["track"])
 	for category in ECONOMY.REWARD_CATEGORIES:
 		var button: Button = conquest_buttons[category]
 		var refresh: Button = objective_refresh_buttons[category]
-		button.visible = not state.is_empty() and visible_categories.has(category)
+		button.visible = objectives_expanded and not state.is_empty() and visible_categories.has(category)
 		refresh.visible = button.visible
 		if not button.visible:
 			continue
@@ -205,7 +229,7 @@ func layout() -> void:
 		refresh.size = Vector2(height, height)
 		y += 52.0
 	conquest_scoreboard_toggle.visible = not state.is_empty()
-	conquest_scoreboard_toggle.position = Vector2(map_canvas.size.x - 12.0 - height, roundf(y + 4.0 - font.get_ascent(13)))
+	conquest_scoreboard_toggle.position = Vector2(x + font.get_string_size("TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 4.0, roundf(y + 4.0 - font.get_ascent(13)))
 	conquest_scoreboard_toggle.size = Vector2(height, height)
 
 func _request_objective_refresh(category: String) -> void:
@@ -354,4 +378,3 @@ func _open_conquest_upgrades(category: String) -> void:
 	_refresh_reward_cards()
 	var viewport_size: Vector2 = viewport_rect.call().size
 	conquest_dialog.popup_centered(Vector2i(mini(780, int(viewport_size.x) - 32), mini(380, int(viewport_size.y) - 56)))
-
