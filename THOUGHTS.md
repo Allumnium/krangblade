@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.35: Extract formation preview, destination ghosts, target rings, command paths and shared intent drawing into order_view.gd. Preserve selection checks, authority query usage, draw order and route/target geometry; match retains drag state, order generation and dispatch. Existing private simulation query dependencies remain for later rules-interface cleanup. Static reverse-substitution parity checked; Godot import/parse, visual and peers pending. No gameplay or Codex changes.
+
 - v0.89.34: Group station navigation in bottom-row columns 1–3: Select Shipyards, Build, Trade. Preserve 4×4 fixed grid, upgrade positions, hotkeys and disabled state; verify in play with and without Dyson unlock. Codex updated; runtime validation pending.
 
 - v0.89.33: Extract station and shipyard geometry/art, construction, upgrade indicators, storage bays and colony conversion visual rendering into structure_view.gd. Station bay geometry stays single-source for production and cargo transfers. Preserve selection, visibility, detail thresholds, draw order and damage/shield display via existing callbacks. Reverse-substitution static parity checked (explicit default shield argument for Callable); no gameplay/Codex changes. Godot import, parse, visual, peers and fleet benchmarks pending.
