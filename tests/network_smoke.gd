@@ -669,7 +669,7 @@ func _check_economy_sync() -> void:
 				stop_sent = true
 				session.call("request_unit_orders", [{"ids": [hold_release_id], "order": {"kind": "stop"}}], false)
 			elif stop_sent and not bool(craft.get("holding", false)):
-				stop_verified = true
+				stop_verified = craft["route"].is_empty() and not craft.has("unit_order")
 		var own: Dictionary = state["planets"][home_index]
 		if not cancel_sent:
 			for item in own["queue"]:
