@@ -5,6 +5,28 @@ const HUD = preload("res://scripts/ui_theme.gd")
 const UI_TEXT = preload("res://scripts/ui_text.gd")
 const CostButton = preload("res://scripts/cost_button.gd")
 const COMMAND_CARD_UI = preload("res://scripts/command_card_ui.gd")
+const UI_COMMAND_DETAILS = {
+	"move": "Choose a destination in a discovered region. Cross sectors along highways. Shift queues the order.",
+	"stop": "Cancel current orders and stop. Shift queues the stop.",
+	"hold": "Keep position until released or given another order. Weapons still fire in range.",
+	"patrol": "Choose an endpoint to patrol back and forth from the current position; combat interrupts the route.",
+	"attack": "Choose a hostile target or destination to attack along the route. Attacking a neutral empire requires confirmation.",
+	"load": "Choose floating salvage to collect with an eligible cargo ship that has space.",
+	"unload": "Choose a friendly station or eligible ship to deliver cargo, or empty space to drop it.",
+	"repair": "Choose a friendly damaged ship or structure for your Harvesters to repair.",
+	"deliver_farm": "Unload harvested Organics early at a nearby station.",
+	"guard": "Choose a sector position to defend.",
+	"transform": "Establish a station in an eligible neutral system.",
+	"auto_wander": "Roam within the current sector when idle; other orders take priority.",
+	"auto_explore": "Scout connected sectors away from friendly ships and stations when idle.",
+	"auto_mine": "Automatically mine enabled asteroid resources and deliver cargo.",
+	"auto_salvage": "Collect nearby floating resources when safe and cargo space is available.",
+	"auto_repair": "Automatically repair nearby eligible damaged friendly units and structures.",
+	"auto_trade": "Move surplus cargo between stations and collect from mining or salvage sites.",
+	"auto_farm": "Produce Organics aboard the Colony and deliver full holds when idle.",
+	"auto_retreat": "Withdraw damaged armed ships to safety and resume orders after repair.",
+	"collect": "Select a Pulsar to collect antimatter; right-click toggles automatic collection."
+}
 const CODEX = preload("res://scripts/codex.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const PLANET = preload("res://assets/ui/planet.svg")
@@ -773,6 +795,7 @@ func _build_ui() -> void:
 	inspector_panel = PanelContainer.new()
 	inspector_slot.add_child(inspector_panel)
 	inspector_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	command_card_ui.setup_info(self, inspector_panel)
 	inspector_slot.resized.connect(_layout_right_panel)
 	# Both wings use the same fixed width; only the center expands.
 	inspector_panel.size_flags_horizontal = Control.SIZE_FILL
@@ -977,7 +1000,8 @@ func _build_ui() -> void:
 		var slider := TradeRange.new()
 		slider.custom_minimum_size.y = 26
 		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f t." % ECONOMY.TRADE_REFERENCE
+		slider.tooltip_text = "%s thresholds\nImport below the left handle; export above the right handle. 100%% = %.0f t." % [resource, ECONOMY.TRADE_REFERENCE]
+		command_card_ui.register_info(slider, str(resource) + " thresholds")
 		slider.committed.connect(_apply_thresholds.bind(resource))
 		logistics.add_child(slider)
 		trade_sliders[resource] = slider
@@ -991,14 +1015,16 @@ func _build_ui() -> void:
 		switch_inset.add_child(switches)
 		var incoming := CheckBox.new()
 		incoming.text = "Import"
-		incoming.tooltip_text = "Enable imports below the left threshold"
+		incoming.tooltip_text = "Import " + str(resource) + "\nEnable imports below the left threshold."
+		command_card_ui.register_info(incoming, "Import " + str(resource))
 		incoming.add_theme_font_size_override("font_size", 10)
 		_compact_trade_check(incoming)
 		incoming.button_pressed = true
 		switches.add_child(incoming)
 		var outgoing := CheckBox.new()
 		outgoing.text = "Export"
-		outgoing.tooltip_text = "Enable exports above the right threshold"
+		outgoing.tooltip_text = "Export " + str(resource) + "\nEnable exports above the right threshold."
+		command_card_ui.register_info(outgoing, "Export " + str(resource))
 		outgoing.add_theme_font_size_override("font_size", 10)
 		_compact_trade_check(outgoing)
 		outgoing.button_pressed = true
@@ -1609,7 +1635,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		yard_row_spacers.append(command_card_ui.add_spacer(grid))
 	var station_button := _button("", _select_yard_station, grid)
 	command_card_ui.set_face(station_button, "Select Space\nStation", command_card_ui.icon("select_station"))
-	command_card_ui.set_hint(station_button, "Select parent Space Station")
+	command_card_ui.set_hint(station_button, "Select Space Station\nReturn to this shipyard’s parent station and its construction commands.")
 	_register_command_hotkey(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
 	var navigation_spacer: Control = command_card_ui.add_spacer(grid)
 	var clear := _button("", func() -> void:
@@ -1618,13 +1644,13 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		for ref in _selected_yards(_state(), true):
 			session.call("request_shipyard_rally", ref.x, ref.y, -1, Vector2.ZERO), grid)
 	command_card_ui.set_face(clear, "Clear\nRally", command_card_ui.icon("clear_rally"))
-	command_card_ui.set_hint(clear, "Clear rally point")
+	command_card_ui.set_hint(clear, "Clear Rally\nNewly built ships no longer travel to a rally destination.")
 	yard_commands["clear"] = clear
 	_register_command_hotkey(clear, KEY_X, "Shipyard", "yard_clear", "Clear Rally")
 	var rally_button := CostButton.new()
 	command_card_ui.set_face(rally_button, "Rally", command_card_ui.icon("rally"))
 	rally_button.toggle_mode = true
-	command_card_ui.set_hint(rally_button, "Set Rally Point")
+	command_card_ui.set_hint(rally_button, "Rally\nChoose a destination for ships completed at the selected shipyards.")
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
@@ -1673,6 +1699,9 @@ func _select_yard_station() -> void:
 func _station_button(grid: GridContainer, caption: String, key: String, action: Callable) -> Button:
 	var button: Button = _button("", action, grid, true)
 	var art: TextureRect = command_card_ui.set_face(button, caption, command_card_ui.icon(key))
+	var navigation: Dictionary = {"build": "Build\nConstruct resource production, housing, storage, defenses or shipyards.", "trade": "Trade\nSet import and export thresholds for this station.", "return": "Return\nGo back to the station command card."}
+	if navigation.has(key):
+		command_card_ui.set_hint(button, navigation[key])
 	button.set_meta("portrait", art)
 	return button
 
@@ -2344,7 +2373,8 @@ func _refresh_field_commands(state: Dictionary, special: bool) -> void:
 		border.queue_redraw()
 		var caption: String = "Mining" if key == "enabled" else key
 		var hint: String = str(button.get_meta("hotkey", ""))
-		command_card_ui.set_hint(button, "%s · %s\nClick to toggle [%s]" % [caption, "On" if enabled else "Off", hint])
+		var detail: String = "Allow automatic mining in this field." if key == "enabled" else "Allow Harvesters to mine " + key + " here."
+		command_card_ui.set_hint(button, "%s · %s\n%s\nClick to toggle [%s]" % [caption, "On" if enabled else "Off", detail, hint])
 
 func _command_icon(path: String, pixels: int = 32) -> Texture2D:
 	var image := Image.new()
@@ -2354,13 +2384,13 @@ func _command_icon(path: String, pixels: int = 32) -> Texture2D:
 
 func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	var button := CostButton.new()
-	command_card_ui.enable_fast_tooltip(button)
+	command_card_ui.register_info(button, hint)
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 32)
 	button.focus_mode = Control.FOCUS_NONE
 	button.icon = command_card_ui.icon({"auto_repair": "repair", "auto_trade": "trade", "deliver_farm": "unload"}.get(id, id))
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	command_card_ui.set_hint(button, hint)
+	command_card_ui.set_hint(button, hint + "\n" + UI_COMMAND_DETAILS.get(id, ""))
 	button.toggle_mode = true
 	button.pressed.connect(action)
 	var slot: Control = command_card_ui.add_spacer(command_card)
@@ -2526,7 +2556,10 @@ func _refresh_autocast_cards() -> void:
 			status += " · %.1f s remaining%s" % [remaining / speed, " (paused)" if int(state.get("time_speed", 1)) == 0 else ""]
 		var shortcut: String = str(button.get_meta("hotkey", ""))
 		command_card_ui.set_hint(button, "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut])
-		command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nCooldown: %.1f s at 1×" % duration)
+		if duration > 0.0:
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nCooldown: %.1f s at 1×" % duration)
+		if mode in ["mine", "salvage", "repair", "trade", "wander"]:
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + UI_COMMAND_DETAILS.get(id, ""))
 		if mode == "wander":
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority.")
 		elif mode == "explore":
@@ -3851,6 +3884,7 @@ func _inspector_page(title_text: String) -> GridContainer:
 	station_trade.add_child(footer)
 	station_trade_back = _button("", _station_card_to.bind("primary"), footer)
 	command_card_ui.set_face(station_trade_back, "Return", command_card_ui.icon("return"))
+	command_card_ui.set_hint(station_trade_back, "Return\nGo back to the station command card.")
 	_register_command_hotkey(station_trade_back, KEY_ESCAPE, "Station Trade", "trade_return", "Return")
 	station_trade_back.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return page
@@ -6336,7 +6370,7 @@ func _build_global_selection_strip() -> void:
 		_register_command_hotkey(button, int(entry[3]), "General", entry[0], "Select all " + str(entry[1]).to_lower())
 	var empire_button: Button = _button("", _open_empire, global_selection_strip)
 	command_card_ui.set_face(empire_button, "Empire", _command_icon('<circle cx="16" cy="16" r="6"/><circle cx="5" cy="6" r="3"/><circle cx="27" cy="6" r="3"/><circle cx="16" cy="28" r="2"/><path d="M8 9L12 12M24 9L20 12M16 22V26"/>'))
-	command_card_ui.set_hint(empire_button, "Empire fleet planning")
+	command_card_ui.set_hint(empire_button, "Empire\nSet desired fleet counts and manage diplomatic relationships.")
 	_register_command_hotkey(empire_button, KEY_F4, "General", "empire", "Empire")
 	_build_empire_dialog()
 	global_selection_strip.resized.connect(_layout_console)
@@ -6458,6 +6492,7 @@ func _process(delta: float) -> void:
 	_sync_match_mouse_mode()
 	_keyboard_pan(delta)
 	_update_resource_hover()
+	command_card_ui.refresh_info(get_viewport())
 	if is_instance_valid(diagnostic_label):
 		diagnostic_elapsed += delta
 		if diagnostic_elapsed >= 1.0:

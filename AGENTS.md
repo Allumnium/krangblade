@@ -38,6 +38,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.9: All command-card actions use one instant, mouse-transparent hover information panel anchored above the right command wing. Show useful effects, requirements, costs, targeting, automation and relevant cooldowns; no separate cursor-following popup or delayed tooltip. Preserve non-command tooltips.
+
 - v0.82.2: Keep fixed command-card slots when technology buttons are hidden; Dyson Sphere reserves its cell regardless of unlock state.
 
 - v0.82.1: Scout Wander defaults on, Explore defaults off; enabling either disables the other at authority. Disabling Explore or enabling Wander cancels only active automatic exploration orders.
