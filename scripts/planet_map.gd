@@ -12,6 +12,7 @@ const DEFAULT_LAYOUT: String = "Radial"
 # Clearance from a starting system to the edge of a special field, before
 # the map's common travel-distance normalization.
 const ANTIMATTER_CLEARANCE: float = 700.0
+const ANTIMATTER_RADIUS: float = 96.0
 const ASTEROID_INVENTORY_MULTIPLIER: float = 10.0
 const MAX_CRYSTAL_SHARE: float = 0.2
 
@@ -272,12 +273,12 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			break
 		var remote: bool = true
 		for home in range(player_count):
-			if center.distance_to(points[home]) < ANTIMATTER_CLEARANCE + 48.0:
+			if center.distance_to(points[home]) < ANTIMATTER_CLEARANCE + ANTIMATTER_RADIUS:
 				remote = false
 				break
 		if not remote:
 			continue
-		var field: Dictionary = _field_at(center, 96.0, points, edges, fields, degrees, player_count)
+		var field: Dictionary = _field_at(center, ANTIMATTER_RADIUS, points, edges, fields, degrees, player_count)
 		if field.is_empty():
 			continue
 		field.merge({"Metals": 1.0, "Crystals": 1.0, "antimatter": true})
