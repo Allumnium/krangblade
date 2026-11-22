@@ -2281,7 +2281,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	field_command_grid.hide()
 	var kind: String = ship.get("kind", "ship")
 	var owner: int = int(ship["owner"])
-	ship_title.text = ("Rogue " if bool(ship.get("rogue", false)) else "") + UI_TEXT.ship_kind_name(kind)
+	ship_title.text = ("Pirate " if int(ship["owner"]) == ECONOMY.PIRATE_OWNER else ("Independent " if bool(ship.get("rogue", false)) else "")) + UI_TEXT.ship_kind_name(kind)
 	var route: Array = ship["route"]
 	var mode: String = ship.get("mining_mode", "idle")
 	var status: String = "Orbiting %s" % _system_name(int(ship["at"]))
@@ -2364,12 +2364,12 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	if kind == "warp_gate":
 		var destination: Dictionary = ECONOMY.warp_gate(state, owner, int(ship.get("warp_destination", -1)))
 		status = "Linked to %s" % _system_name(int(destination["at"])) if not destination.is_empty() else "Unlinked · deploy another gate"
-	if owner == _me() and ECONOMY.ship_upkeep(kind) > 0.0:
-		status += "\nUpkeep: %.0f GC/yr" % ECONOMY.ship_upkeep(kind)
+	if owner == _me() and ECONOMY.hull_upkeep(state, ship) > 0.0:
+		status += "\nUpkeep: %.0f GC/yr" % ECONOMY.hull_upkeep(state, ship)
 		if ship.has("unpaid_since"):
 			status += " · Unpaid %.1f yr" % ECONOMY.unpaid_wage_years(state, ship)
 	if bool(ship.get("rogue", false)):
-		status = "Independent · Defected over unpaid wages"
+		status = "Pirate · " + str(ship.get("pirate_phase", "roam")).capitalize() if int(ship["owner"]) == ECONOMY.PIRATE_OWNER else "Independent · Escaping empire territory"
 	var morphing: bool = ECONOMY.colony_morphing(ship)
 	if morphing:
 		ship_title.text = "Morphing · Space Station"
@@ -3019,6 +3019,8 @@ func _empire_color_index(owner: int) -> int:
 	return clampi(int(roster.get(owner, {}).get("color", 0)), 0, RULES.MAX_PLAYERS)
 
 func _empire_color(owner: int) -> Color:
+	if owner == ECONOMY.PIRATE_OWNER:
+		return Color("#85888b")
 	return COLORS[_empire_color_index(owner)]
 
 

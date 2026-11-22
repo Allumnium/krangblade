@@ -1594,7 +1594,12 @@ func _test_endless_conquest() -> void:
 	assert(int(second[2]) > int(first[2]))
 	var depot: Dictionary = state["planets"][0]
 	depot["conquest_rewards"] = ["rank_storage", "rank_storage"]
-	assert(is_equal_approx(ECON.storage_capacity(depot), 2200.0))
+	assert(is_equal_approx(ECON.storage_capacity(depot), 2320.0))
+	depot["conquest_rewards"] = ["storage"]
+	assert(is_equal_approx(ECON.storage_capacity(depot), 2400.0))
+	depot["conquest_rewards"] = ["rank_station", "rank_robotics"]
+	assert(is_equal_approx(ECON.station_max_hp(depot), ECON.STATION_HP * 1.10))
+	assert(ECON.yard_staff_required(depot, 0) == ceilf(float(ECON.SHIPYARD_POPULATION[0]) * 0.9))
 	var price: Dictionary = ECON.construction_cost({"conquest_rewards": ["rank_military_metal", "rank_military_metal"]}, "fighter", 1)
 	assert(float(price["Metals"]) == ceilf(270.0 / 1.06))
 	var damage: Dictionary = {}
@@ -1767,7 +1772,26 @@ func _test_rogue_defection() -> void:
 	ECON._check_unpaid_defections(state)
 	assert(int(state["rogue_events"][1]["total"]) == 1)
 	ECON.step(state, 0.1)
-	assert(hull["position"] == position and int(hull["owner"]) == 0)
+	assert(hull["position"] != position and int(hull["owner"]) == 0)
+	assert(hull["pirate_phase"] == "escape")
+	assert(not ECON.empires_hostile(state, 1, 0))
+	assert(ECON.empires_hostile(state, 1, ECON.PIRATE_OWNER))
+	assert(ECON._combat_groups_hostile(state, 1, ECON.PIRATE_COMBAT_GROUP))
+	assert(not ECON._combat_groups_hostile(state, ECON.PIRATE_COMBAT_GROUP, ECON.PIRATE_COMBAT_GROUP))
+	var undefended: Dictionary = {"id": 777, "owner": 2, "kind": "ship", "position": Vector2(500, 500)}
+	assert(ECON._pirate_pick_target(Vector2.ZERO, 1.0, [undefended], {}, [], 0, 0) == undefended)
+	var defenders: Dictionary = {}
+	ECON._spatial_insert(defenders, undefended["position"], ECON.PIRATE_DEFENSE_RANGE, {"kind": "destroyer", "position": undefended["position"]})
+	assert(ECON._pirate_pick_target(Vector2.ZERO, 1.0, [undefended], defenders, [], 0, 0).is_empty())
+	# Force the escaped state without introducing a new empire or a spawn.
+	var escape: Vector2 = ECON._pirate_escape_point(position, ECON._pirate_claims(state), state["map"]["size"], candidate)
+	assert(ECON._pirate_claim_depth(escape, ECON._pirate_claims(state), 100.0) <= ECON.EPS)
+	hull["position"] = escape
+	state.erase("_pirate_epoch")
+	ECON._pirate_decisions(state)
+	assert(int(hull["owner"]) == ECON.PIRATE_OWNER and hull["pirate_phase"] != "escape")
+	assert(not state["teams"].has(ECON.PIRATE_OWNER))
+	assert(not state["objectives"].has(ECON.PIRATE_OWNER))
 	print("PASS: deterministic defection, grace, neutral ownership, order cleanup, notice and simulation")
 
 func _initialize() -> void:
