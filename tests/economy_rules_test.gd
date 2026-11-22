@@ -3839,7 +3839,23 @@ func _test_resource_handoff() -> void:
 	for step in range(160):
 		var previous: Vector2 = traveling["position"]
 		ECON._navigate(traveling, destination, 10.0)
-		assert(Geometry2D.get_closest_point_to_segment(Vector2(250, 0), previous, traveling["position"]).distance_to(Vector2(250, 0)) >= 15.9)
+		assert(Geometry2D.get_closest_point_to_segment(Vector2(250, 0), previous, traveling["position"]).distance_to(Vector2(250, 0)) >= 19.9)
+		if (traveling["position"] as Vector2).distance_to(destination) < 0.1:
+			break
+	assert((traveling["position"] as Vector2).distance_to(destination) < 0.1)
+	# A staggered cluster forces a route around multiple adjacent disks.
+	var cluster: Array = [{"position": Vector2(300, 0), "radius": 300.0, "chunks": [{"position": Vector2(230, -45), "radius": 55.0}, {"position": Vector2(270, 65), "radius": 60.0}, {"position": Vector2(345, -45), "radius": 55.0}]}]
+	ECON._refresh_movement_fields(cluster)
+	traveling = {"kind": "ship", "position": Vector2.ZERO, "id": 9835}
+	ECON._rock_plan_budget = ECON.ROCK_PLAN_LIMIT
+	for tick in range(300):
+		ECON._rock_plan_tick += 1
+		ECON._rock_plan_budget = ECON.ROCK_PLAN_LIMIT
+		var previous: Vector2 = traveling["position"]
+		ECON._navigate(traveling, destination, 10.0)
+		assert(previous.distance_to(traveling["position"]) <= 10.0 + ECON.EPS)
+		for asteroid in cluster[0]["chunks"]:
+			assert(Geometry2D.get_closest_point_to_segment(asteroid["position"], previous, traveling["position"]).distance_to(asteroid["position"]) >= float(asteroid["radius"]) + ECON.ROCK_HARD_CLEARANCE - 0.1)
 		if (traveling["position"] as Vector2).distance_to(destination) < 0.1:
 			break
 	assert((traveling["position"] as Vector2).distance_to(destination) < 0.1)
