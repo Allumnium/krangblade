@@ -412,7 +412,7 @@ func _infrastructure() -> void:
 		var definition: Dictionary = E.ECONOMY_BUILDINGS[r]
 		rows.append([definition["name"], _recipe(definition["cost"]), "%.0f%% baseline" % (E.BUILDING_BONUS * 100.0)])
 	_table(["Building", "Cost", "Output bonus"], rows)
-	_body("Production buildings require %d residents per target level. Planetary mineral production has no fixed rate cap; deposits, population and storage still matter. Farms scale with food capacity and labor." % E.building_population("Metals", 1))
+	_body("Production buildings require %d local residents × target level squared. Planetary mineral production has no fixed rate cap; deposits, population and storage still matter. Farms scale with food capacity and labor." % E.building_population("Metals", 1))
 	_section("Shipyard modules")
 	_body("Station bottom row: Select Shipyards (Z), Build (B), Trade (T). Select Shipyards selects all completed local yards. Build → Build Shipyard (X) adds a yard at the next free port.")
 	rows = []

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.45: Production building population gates scale quadratically with target level: 5k, 20k, 45k, 80k, 125k. Supersedes v0.89.44 linear gates; costs unchanged. Updated threshold regression and Codex; runtime pending.
+
 - v0.89.44: Diagnostics icon below logistics lens, remove legacy Perf toolbar; production building thresholds 5,000 local residents per target level (was 500). Show local population and precise queued/population blockers. Deposit availability unchanged; Codex derives thresholds from rules. Runtime validation pending.
 
 - v0.89.43: Extract local control group storage, pruning, additive assignment and button refresh into control_group_manager.gd; match retains selection application, recall timing and layout. Runtime validation pending. No gameplay or Codex changes.
