@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.94.14: Shared command-card construction cost numbers use the standard white text when affordable and red for shortages, including GC. Preserve gold credit icon, treasury HUD color, upkeep, actual costs and validation. Codex remains accurate; visual/runtime checks pending.
+
 - v0.94.13: Fix repeated station storage polygon triangulation errors. Cull offscreen storage rings, approximate invisible quarter-pixel fill/empty caps with empty/full circles, use screen-size-dependent circular segment tessellation and validate triangulation before drawing. Preserve bay centers, counts, colors, stock and bottom-up fill. Codex already accurate. Check tiny/near-full fill across zoom levels, error log and FPS; Godot/visual/ENet pending.
 
 - v0.94.12: Colony settlement (Send Colony, queued colonize and Transform) flies directly to the normal station orbital position, then transforms over 30 simulation seconds at that orbit. The live ship owns progress until completion, when crew/cargo transfer once and the station/founding yard become operational. Interrupted/invalid orders clear progress; contested target remains neutral until completion. Draw expanding station ring and founding yard with fading colony hull; remove prior star-to-orbit slide. Verify 1×/5×, cancellation, competition, population conservation, peers and visual continuity; runtime pending.

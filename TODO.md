@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.94.14: Shared command-card construction cost numbers use the standard white text when affordable and red for shortages, including GC. Preserve gold credit icon, treasury HUD color, upkeep, actual costs and validation. Codex remains accurate; visual/runtime checks pending.
+
 - [ ] v0.94.13: Fix repeated station storage polygon triangulation errors. Cull offscreen storage rings, approximate invisible quarter-pixel fill/empty caps with empty/full circles, use screen-size-dependent circular segment tessellation and validate triangulation before drawing. Preserve bay centers, counts, colors, stock and bottom-up fill. Codex already accurate. Check tiny/near-full fill across zoom levels, error log and FPS; Godot/visual/ENet pending.
 
 - [ ] Latest user profile (2026-11-22, 7 FPS): simulation 35.55 ms; combat/repair 17.88 ms, other movement 8.24 ms, formations/orders 3.18 ms, economy 2.65 ms, civilian logistics 2.00 ms, conquest/exploration 1.28 ms, AI/routing 0.07 ms, match outcome 0.05 ms; encode/payload zero. Prioritize P1 combat/repair substage instrumentation and movement detour/contact/idle work profiling; compare seeded 1x/5x and fleet counts before choosing changes. Screenshot is an observation, not controlled benchmark; speed and hull count unspecified.

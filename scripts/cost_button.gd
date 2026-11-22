@@ -50,7 +50,7 @@ static func fill_info(label: RichTextLabel, description: String, costs_by_resour
 			if symbol != null:
 				label.add_image(symbol, 14, 14)
 				label.add_text(" ")
-			var amount_color: Color = Color("#ff7777") if shortages.has(resource) else (HUD.CREDIT_COLOR if resource == "GC" else HUD.TEXT)
+			var amount_color: Color = Color("#ff7777") if shortages.has(resource) else HUD.TEXT
 			label.push_color(amount_color)
 			label.add_text("%.0f%s" % [float(costs_by_resource[resource]), "" if resource in ["GC", "Population"] else "t"])
 			label.pop()
