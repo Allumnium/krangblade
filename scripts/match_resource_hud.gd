@@ -31,8 +31,8 @@ func build(row: Container, label_factory: Callable, population_factory: Callable
 	local_player = player_query
 	system_name = name_query
 	year_label = _global_stat(row, "%d A.D." % ECONOMY.START_YEAR, HUD.ACCENT)
-	_build_global_bar(row)
 	_build_credit_stat(row)
+	_build_global_bar(row)
 	global_population_label = _global_stat(row, "0", Color("#b9d9ed"), true)
 
 func is_built() -> bool:
@@ -61,7 +61,7 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
 		var direction: float = 1.0 if trend > 0 else -1.0
 		var count: int = absi(trend)
 		var span: float = count * 6.0
-		var left: float = clampf(width if trend > 0 else width - span, 1.0, maxf(1.0, strip.size.x - span - 1.0))
+		var left: float = (strip.size.x - span) * 0.5
 		var y: float = strip.size.y * 0.5
 		for i in range(count):
 			var center: float = left + 3.0 + i * 6.0
@@ -74,7 +74,7 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
 func _build_global_bar(stats: Container) -> void:
 	for resource in ECONOMY.RESOURCES:
 		var tile := PanelContainer.new()
-		tile.custom_minimum_size.x = 148.0
+		tile.custom_minimum_size.x = 104.0
 		tile.add_theme_stylebox_override("panel", HUD.surface(Color("#12233780"), Color("#28466100"), 4, 3))
 		stats.add_child(tile)
 		var stack := VBoxContainer.new()
@@ -107,14 +107,14 @@ func _build_global_bar(stats: Container) -> void:
 
 func _build_credit_stat(parent: Container) -> void:
 	var tile := PanelContainer.new()
-	tile.custom_minimum_size.x = 94.0
-	tile.add_theme_stylebox_override("panel", HUD.surface(Color("#12233780"), Color("#28466100"), 4, 3))
+	tile.custom_minimum_size.x = 80.0
+	tile.add_theme_stylebox_override("panel", HUD.surface(Color("#12233780"), Color("#28466100"), 2, 3))
 	parent.add_child(tile)
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 2)
 	tile.add_child(stack)
 	var balance_row := HBoxContainer.new()
-	balance_row.add_theme_constant_override("separation", 4)
+	balance_row.add_theme_constant_override("separation", 2)
 	balance_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(balance_row)
 	var credit_icon := TextureRect.new()
@@ -125,7 +125,7 @@ func _build_credit_stat(parent: Container) -> void:
 	global_credit_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	global_credit_label.add_theme_color_override("font_color", HUD.CREDIT_COLOR)
 	balance_row.add_child(global_credit_label)
-	global_credit_income_label = make_label.call("+0/yr", 12)
+	global_credit_income_label = make_label.call("+0/yr", 11)
 	global_credit_income_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	global_credit_income_label.add_theme_color_override("font_color", Color("#7cdb9b"))
 	balance_row.add_child(global_credit_income_label)
@@ -140,7 +140,7 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
 	label.add_theme_color_override("font_color", tint)
 	label.mouse_filter = Control.MOUSE_FILTER_PASS
 	if population:
-		tile.custom_minimum_size.x = 180.0
+		tile.custom_minimum_size.x = 104.0
 		label.clip_text = true
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var stack := VBoxContainer.new()
@@ -166,8 +166,16 @@ func _empire_resource_delta(state: Dictionary, resource: String) -> float:
 	var total: float = 0.0
 	for p in state.get("planets", []):
 		if int(p["owner"]) == local_player.call():
-			total += resource_delta(p, resource)
+			total += ECONOMY.net_rate(p, resource)
 	return total
+
+# Signed number of chevrons, relative to the capacity represented by the bar.
+static func _trend_count(annual: float, capacity: float) -> int:
+	if absf(annual) < 0.05 or capacity <= 0.0:
+		return 0
+	var ratio: float = absf(annual) / capacity
+	var count: int = 3 if ratio >= 0.02 else (2 if ratio >= 0.005 else 1)
+	return count if annual > 0.0 else -count
 
 static func set_resource_delta(label: Label, annual: float, parentheses: bool = false) -> void:
 	var displayed: float = 0.0 if absf(annual) < 0.05 else annual
@@ -205,10 +213,13 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 		var population_totals: Dictionary = ECONOMY.empire_totals(state, local_player.call())
 		var lines: PackedStringArray = ["Population · %s people" % UI_TEXT.compact_amount(float(population_totals["population"])), "Residents: %s · Ships: %s · Embarking: %s" % [UI_TEXT.compact_amount(float(population_totals["resident_population"])), UI_TEXT.compact_amount(float(population_totals["ship_population"])), UI_TEXT.compact_amount(float(population_totals["embarking_population"]))], "System · Population · Growth/yr"]
 		var ceiling: float = 0.0
+		var demographic: float = 0.0
 		for system in state["planets"]:
 			if int(system["owner"]) == local_player.call():
 				ceiling += ECONOMY.sustainable_population_capacity(system)
+				demographic += float(system.get("demographic_rate", ECONOMY.population_growth(system)))
 		lines.insert(1, "Resident sustainable capacity: %s people" % UI_TEXT.compact_amount(ceiling))
+		lines.insert(2, "Population growth: %+.2f/yr" % demographic)
 		for i in range(state["planets"].size()):
 			var p: Dictionary = state["planets"][i]
 			if int(p["owner"]) != local_player.call():
@@ -220,13 +231,13 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 	var totals: Dictionary = ECONOMY.empire_totals(state, local_player.call())
 	var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
 		"%.2f t in transit  /  %.0f t storage" % [float(totals["cargo"][resource]), float(totals["storage_reference"][resource])],
-		"Net: %+.2f t/yr" % _empire_resource_delta(state, resource)]
+		"Net (storage-limited): %+.2f t/yr" % _empire_resource_delta(state, resource)]
 	lines.append("System · Net | Production | Demand (t/yr)")
 	for i in range((state.get("planets", []) as Array).size()):
 		var p: Dictionary = state["planets"][i]
 		if int(p["owner"]) != local_player.call():
 			continue
-		lines.append("%s  %+.2f | %.2f | %.2f" % [system_name.call(i), resource_delta(p, resource), ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource)])
+		lines.append("%s  %+.2f | %.2f | %.2f" % [system_name.call(i), ECONOMY.net_rate(p, resource), ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource)])
 	return "\n".join(lines)
 
 func _local_breakdown(p: Dictionary, resource: String, selected: int) -> String:
@@ -305,9 +316,7 @@ func refresh(state: Dictionary) -> void:
 		global_resource_labels[resource].text = UI_TEXT.tons(value, 0, true)
 		var stored: float = float(totals["stock"][resource])
 		var reference: float = float(totals["storage_reference"][resource])
-		var ratio: float = absf(annual) / reference if reference > 0.0 else 0.0
-		var count: int = 0 if absf(annual) < 0.05 or reference <= 0.0 else (3 if ratio >= 0.02 else (2 if ratio >= 0.005 else 1))
-		global_resource_trends[resource] = count if annual > 0.0 else -count
+		global_resource_trends[resource] = _trend_count(annual, reference)
 		global_resource_fills[resource] = clampf(stored / reference, 0.0, 1.0) if reference > 0.0 else 0.0
 		var tile: PanelContainer = global_resource_tiles[resource]
 		var segments: Array = []
@@ -323,7 +332,6 @@ func refresh(state: Dictionary) -> void:
 		global_resource_segments[resource] = segments
 		global_resource_strips[resource].queue_redraw()
 		tile.tooltip_text = ""
-	global_population_label.text = "%s" % UI_TEXT.compact_amount(float(totals["population"]))
 	var population_total: float = float(totals["population"])
 	var population_segments: Array = []
 	var population_net: float = 0.0
@@ -341,7 +349,8 @@ func refresh(state: Dictionary) -> void:
 		population_segments.append({"name": "Fleet", "share": fleet_population / population_total, "index": -1, "color": Color("#5b90ba")})
 	population_ceiling += fleet_population
 	population_segments.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["share"] > b["share"] if a["share"] != b["share"] else a["index"] < b["index"])
-	global_population_label.text = "%s (%+.0f/yr)" % [UI_TEXT.compact_amount(population_total), population_net]
+	global_population_label.text = UI_TEXT.compact_amount(population_total)
+	global_resource_trends["population"] = _trend_count(population_net, population_ceiling)
 	global_population_label.tooltip_text = ""
 	global_resource_segments["population"] = population_segments
 	global_resource_fills["population"] = clampf(population_total / maxf(ECONOMY.EPS, population_ceiling), 0.0, 1.0)
