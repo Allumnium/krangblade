@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.94.15: Once Colony assembly begins, morphing is irreversible: reject replacement/queued orders, direct dispatch and autocast on authority, drop pending orders, prevent AI redirection and wage defection during assembly, reserve the site for the first morph and keep the hull vulnerable. Follow the orbit continuously until completion; display noncancelable progress bar and blank command card. Mixed fleet orders exclude morphing hulls. Single shipyard inspector reuses local station stock, production and population breakdown (including hover), alongside yard queue. Verify competing colonies, attempted cancellation/RPCs, progress and shipyard layout; runtime/ENet pending.
+
 - [ ] v0.94.14: Shared command-card construction cost numbers use the standard white text when affordable and red for shortages, including GC. Preserve gold credit icon, treasury HUD color, upkeep, actual costs and validation. Codex remains accurate; visual/runtime checks pending.
 
 - [ ] v0.94.13: Fix repeated station storage polygon triangulation errors. Cull offscreen storage rings, approximate invisible quarter-pixel fill/empty caps with empty/full circles, use screen-size-dependent circular segment tessellation and validate triangulation before drawing. Preserve bay centers, counts, colors, stock and bottom-up fill. Codex already accurate. Check tiny/near-full fill across zoom levels, error log and FPS; Godot/visual/ENet pending.

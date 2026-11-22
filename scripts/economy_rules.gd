@@ -596,7 +596,7 @@ static func _check_unpaid_defections(state: Dictionary) -> void:
 	var events: Dictionary = state.get("rogue_events", {})
 	for ship in state["ships"]:
 		var owner: int = int(ship["owner"])
-		if owner <= 0 or not state.get("galactic_credits", {}).has(owner) or not ship.has("unpaid_since") or ship_upkeep(str(ship["kind"])) <= 0.0:
+		if owner <= 0 or colony_morphing(ship) or not state.get("galactic_credits", {}).has(owner) or not ship.has("unpaid_since") or ship_upkeep(str(ship["kind"])) <= 0.0:
 			continue
 		if unpaid_wage_years(state, ship) + EPS < ROGUE_GRACE_YEARS or not _rogue_roll(seed_value, int(ship["id"]), epoch):
 			continue
@@ -699,11 +699,14 @@ static func planet_teams(state: Dictionary) -> Array[int]:
 static func has_station(system: Dictionary) -> bool:
 	return not system.get("station", {}).is_empty()
 
+static func colony_morphing(ship: Dictionary) -> bool:
+	return ship.get("kind", "") == "colony_ship" and ship.has("colony_transform_progress")
+
 static func colony_path(state: Dictionary, player: int, ship: Dictionary, target: int) -> Array[int]:
 	var planets: Array = state.get("planets", [])
 	if target < 0 or target >= planets.size() or int(planets[target]["owner"]) != 0 or has_station(planets[target]):
 		return []
-	if int(ship["owner"]) != player or ship.get("kind", "ship") != "colony_ship":
+	if int(ship["owner"]) != player or ship.get("kind", "ship") != "colony_ship" or colony_morphing(ship):
 		return []
 	var start: int = int(ship["at"])
 	if _combat_group(state, player) <= 0:
@@ -808,8 +811,16 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 	return true # consumed to establish the colony
 
 # Colony remains a normal, vulnerable hull until the entire conversion is complete.
-# Progress is replicated in the ship dictionary and removed on replacement orders.
+# Once assembly starts only destruction can interrupt it. Follow the
+# normal station orbit without steering or consuming new movement orders.
 static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool:
+	if colony_morphing(ship):
+		var site: int = int(ship["dest"])
+		var orbit: Vector2 = colony_station_position(state, site, float(state["elapsed"]))
+		ship["position"] = orbit
+		ship["navigation_target"] = orbit
+		ship["colony_transform_progress"] = minf(COLONY_TRANSFORM_TIME, float(ship["colony_transform_progress"]) + maxf(0.0, dt))
+		return _convert_colony(state, ship, site) if float(ship["colony_transform_progress"]) + EPS >= COLONY_TRANSFORM_TIME else false
 	if ship.get("unit_order", {}).get("kind", "") != "colonize":
 		ship.erase("colony_transform_progress")
 		if not ship["route"].is_empty():
@@ -848,13 +859,19 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 		ship["holding"] = true
 		ship["navigation_target"] = ship["position"]
 		return false
-	if not ship.has("colony_transform_progress"):
-		# Travel consumes this tick; begin assembly on the next tick.
-		ship["colony_transform_progress"] = 0.0
-		return false
-	ship["colony_transform_progress"] = minf(COLONY_TRANSFORM_TIME, float(ship["colony_transform_progress"]) + maxf(0.0, dt))
-	if float(ship["colony_transform_progress"]) + EPS >= COLONY_TRANSFORM_TIME:
-		return _convert_colony(state, ship, target)
+	# The first arriving Colony reserves the site until it finishes or dies.
+	for other in state["ships"]:
+		if colony_morphing(other) and int(other["dest"]) == target:
+			var return_route: Array[int] = []
+			return_route.assign(ship.get("return_path", []))
+			return_route.reverse()
+			ship["dest"] = -1
+			ship.erase("unit_order")
+			_set_route(ship, return_route)
+			return false
+	# Travel consumes this tick. Assembly discards queued successor orders.
+	ship.erase("order_queue")
+	ship["colony_transform_progress"] = 0.0
 	return false
 
 static func current_year(state: Dictionary) -> int:
@@ -3961,6 +3978,8 @@ static func command_service(state: Dictionary, player: int, ids: Array, order: D
 	return true
 
 static func supports_autocast(ship: Dictionary, mode: String) -> bool:
+	if colony_morphing(ship):
+		return false
 	match mode:
 		"explore": return ship.get("kind", "") == "scout"
 		"wander": return SHIP_KINDS.has(ship.get("kind", ""))
@@ -4749,11 +4768,11 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 		requested[id] = true
 	if requested.size() == 1 and is_same(state, _indexed_state):
 		var craft: Dictionary = _hulls_by_id.get(ids[0], {})
-		return [craft] if not craft.is_empty() and int(craft["owner"]) == player and craft.get("kind", "") != "warp_gate" else []
+		return [craft] if not craft.is_empty() and int(craft["owner"]) == player and craft.get("kind", "") != "warp_gate" and not colony_morphing(craft) else []
 	var units: Array = []
 	for ship in state["ships"]:
 		if requested.has(ship["id"]):
-			if int(ship["owner"]) != player or ship.get("kind", "") == "warp_gate":
+			if int(ship["owner"]) != player or ship.get("kind", "") == "warp_gate" or colony_morphing(ship):
 				return []
 			units.append(ship)
 	return units if units.size() == requested.size() else []
@@ -4930,6 +4949,8 @@ static func _unit_order_running(ship: Dictionary) -> bool:
 	return ship.has("launch_rally")
 
 static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictionary, order: Dictionary, append: bool) -> bool:
+	if colony_morphing(ship):
+		return false
 	var kind: String = str(order.get("kind", ""))
 	var owner: int = int(ship["owner"])
 	var fighter: bool = ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]
@@ -5183,7 +5204,7 @@ static func _extend_patrol_from_queue(state: Dictionary, graph: Dictionary, ship
 
 static func _advance_unit_orders(state: Dictionary, graph: Dictionary) -> void:
 	for ship in (state["ships"] as Array).duplicate():
-		if bool(ship.get("rogue", false)):
+		if bool(ship.get("rogue", false)) or colony_morphing(ship):
 			continue
 		_mark_sector_arrival(state, ship)
 		_extend_patrol_from_queue(state, graph, ship)
@@ -7260,10 +7281,10 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		# empire loses its last owned system.
 		var reserved: Dictionary = {}
 		for ship in state["ships"]:
-			if int(ship["owner"]) == player and ship.get("kind", "") == "colony_ship" and not (ship["route"] as Array).is_empty():
+			if int(ship["owner"]) == player and ship.get("kind", "") == "colony_ship" and (not (ship["route"] as Array).is_empty() or colony_morphing(ship)):
 				reserved[int(ship["dest"])] = true
 		for ship in state["ships"]:
-			if int(ship["owner"]) != player or ship.get("kind", "") != "colony_ship" or not (ship["route"] as Array).is_empty():
+			if int(ship["owner"]) != player or ship.get("kind", "") != "colony_ship" or not (ship["route"] as Array).is_empty() or colony_morphing(ship):
 				continue
 			var target: int = _ai_colony_target(state, player, ship, reserved)
 			if target >= 0 and send_colony(state, player, int(ship["id"]), target, true):
@@ -7287,7 +7308,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		if kind in ["fighter", "scout", "cruiser", "destroyer"]:
 			fighters.append(ship)
 		elif kind == "colony_ship":
-			if (ship["route"] as Array).is_empty():
+			if (ship["route"] as Array).is_empty() and not colony_morphing(ship):
 				idle_colonies.append(ship)
 			elif int(ship["dest"]) >= 0:
 				reserved[int(ship["dest"])] = true
@@ -8632,6 +8653,12 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			_work_warp_order(state, combat_graph, ship, dt)
 			if float(ship.get("warp_ready", 0.0)) > previous_warp:
 				combat_positions[int(ship["id"])] = ship["position"]
+			continue
+		if colony_morphing(ship):
+			if _work_colony(state, ship, dt):
+				_remove_indexed_hull(state, ship)
+			else:
+				repair_parked[int(ship["id"])] = true
 			continue
 		if ship.get("_handoff_delivery", false):
 			ship.erase("_handoff_delivery")
