@@ -42,6 +42,7 @@ const MATCH_DEVELOPER_TOOLS = preload("res://scripts/match_developer_tools.gd")
 const MATCH_CONQUEST_UI = preload("res://scripts/match_conquest_ui.gd")
 const MATCH_EMPIRE_UI = preload("res://scripts/match_empire_ui.gd")
 const MATCH_RESOURCE_HUD = preload("res://scripts/match_resource_hud.gd")
+const SHIP_MOTION_VIEW = preload("res://scripts/ship_motion_view.gd")
 const TACTICAL_ALERTS = preload("res://scripts/tactical_alerts.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
@@ -56,9 +57,6 @@ const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
 const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
 const OVERVIEW_SHIP_MAX_MULTIPLIER: float = 12.0
 const OVERVIEW_ART_NORMAL_ZOOM: float = 16.0
-const SNAPSHOT_SECONDS: float = 0.2
-const THRUST_FADE_RATE: float = 5.0
-const THRUST_DEAD_ZONE: float = 0.06
 const TRADE_MAX_EXTRA_HEIGHT: float = 48.0
 # Projected system radius in logical screen pixels, independent of selection.
 const PLANET_FADE_START: float = 40.0
@@ -73,6 +71,7 @@ var developer_tools := MATCH_DEVELOPER_TOOLS.new()
 var conquest_ui := MATCH_CONQUEST_UI.new()
 var empire_ui := MATCH_EMPIRE_UI.new()
 var resource_hud := MATCH_RESOURCE_HUD.new()
+var ship_motion := SHIP_MOTION_VIEW.new()
 var settings := ConfigFile.new()
 var music_volume: float = 100.0
 var sfx_volume: float = 100.0
@@ -92,9 +91,6 @@ var cargo_batch: MultiMeshInstance2D
 var cargo_glow_batch: MultiMeshInstance2D
 var cargo_entries: Array = []
 var cargo_glow_entries: Array = []
-var pose_frame: int = -1
-var pose_revision: Array = []
-var pose_world_cache: Dictionary = {}
 var beam_batch: MultiMeshInstance2D
 var projectile_batch: MultiMeshInstance2D
 var beam_instances: Array = []
@@ -154,8 +150,6 @@ var population_delta_label: Label
 var camera := CAMERA_VIEW.new()
 var drag_button: int = 0
 var hull_art := HULL_ART.new()
-var ship_visuals: Dictionary = {}
-var ship_offsets: Dictionary = {}
 const FIGHTER_MUZZLE: float = 12.0
 const MINER_MUZZLE: Vector2 = Vector2(10.0, 3.75)
 const DESTRUCTION_LIFETIME: float = 1.35
@@ -1115,8 +1109,7 @@ func _draw_minimap() -> void:
 		if not _ship_visible(state, ship):
 			continue
 		var id: int = int(ship["id"])
-		var visual: Dictionary = ship_visuals.get(id, {})
-		var world: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
+		var world: Vector2 = ship_motion.world_position(ship, points, session)
 		var point: Vector2 = _minimap_point(world, area)
 		if area.has_point(point):
 			minimap.draw_circle(point, 1.5, _empire_color(int(ship["owner"])))
@@ -2920,7 +2913,7 @@ func _refresh() -> void:
 		return
 	var state: Dictionary = _state()
 	_update_fog(state)
-	pose_frame = -1
+	ship_motion.invalidate_poses()
 	_sync_command_kind(state)
 	var phase: String = str(session.get("phase"))
 	if phase == "match" and not background_music.playing:
@@ -4906,15 +4899,6 @@ func _poi_name(node: int) -> String:
 	var fields: Array = _state().get("map", {}).get("fields", [])
 	return "Pulsar" if index < fields.size() and bool(fields[index].get("antimatter", false)) else "Asteroid Field"
 
-func _ship_position(ship: Dictionary, _points: Array) -> Vector2:
-	if ship.has("position"):
-		return ship["position"]
-	return ECONOMY.combat_position(_state(), ECONOMY.military_graph(_state()), ship)
-
-func _visual_position(visual: Dictionary) -> Vector2:
-	var duration: float = float(visual.get("duration", SNAPSHOT_SECONDS))
-	return (visual["from"] as Vector2).lerp(visual["to"], clampf(float(visual["age"]) / duration, 0.0, 1.0))
-
 # UI cues are local, while world cues use the same authority snapshots as
 # combat visuals. No audio events or additional network traffic are required.
 func _sound_button_added(node: Node) -> void:
@@ -4983,66 +4967,8 @@ func _on_economy_changed() -> void:
 	_sync_world_audio(state)
 	_refresh_territory(state)
 	_sync_tactical_alerts(state)
-	_sync_ship_visuals(state)
+	ship_motion.sync(state, session)
 	_refresh()
-
-func _sync_ship_visuals(state: Dictionary) -> void:
-	var updated: Dictionary = {}
-	if not state.is_empty():
-		var points: Array = state["map"]["points"]
-		var samples: Dictionary = session.get("motion_samples")
-		var guest: bool = not bool(session.get("is_solo")) and not multiplayer.is_server()
-		var duration: float = clampf(float(session.get("diagnostic_motion_gap_ms")) / 1000.0 * 1.2, 0.1, 0.3) if guest else SNAPSHOT_SECONDS
-		for ship in state["ships"]:
-			var id: int = int(ship["id"])
-			var sample: Dictionary = samples.get(id, {})
-			var target: Vector2 = sample.get("position", _ship_position(ship, points))
-			var heading: Vector2 = sample.get("heading", ship.get("heading", Vector2.UP))
-			var previous: Dictionary = ship_visuals.get(id, {})
-			var interval: float = duration if not sample.is_empty() else SNAPSHOT_SECONDS
-			# Authority revisions, not frame/packet-arrival timing, keep the
-			# acceleration estimate stable across rendering rates and peers.
-			var revision: int = int(sample.get("revision", session.get("motion_base_revision") if guest else session.get("motion_revision")))
-			var speed: int = int(state.get("time_speed", 1))
-			if previous.is_empty():
-				updated[id] = {"from": target, "to": target, "age": interval, "duration": interval, "heading": heading, "motion_revision": revision, "motion_point": target, "motion_speed": speed, "velocity": Vector2.ZERO, "thrust": 0.0}
-				continue
-			var prior_revision: int = int(previous.get("motion_revision", revision))
-			if speed <= 0 or int(previous.get("motion_speed", speed)) != speed or revision < prior_revision:
-				previous["velocity"] = Vector2.ZERO
-				previous["thrust"] = 0.0
-				previous["motion_revision"] = revision
-				previous["motion_point"] = target
-			elif revision > prior_revision:
-				var sample_dt: float = float(revision - prior_revision) * 0.1 * float(speed)
-				var velocity: Vector2 = (target - (previous.get("motion_point", target) as Vector2)) / maxf(0.1, sample_dt)
-				var old_velocity: Vector2 = previous.get("velocity", Vector2.ZERO)
-				var nominal: float = maxf(1.0, ECONOMY.ship_speed(str(ship["kind"])))
-				var delta_velocity: Vector2 = velocity - old_velocity
-				# Forward acceleration drives the main plume. Turning gets
-				# a smaller burst; braking and tiny position corrections do not.
-				var axis: Vector2 = velocity.normalized()
-				var forward_accel: float = maxf(0.0, delta_velocity.dot(axis))
-				var turning: float = absf(delta_velocity.cross(axis)) * 0.30
-				var impulse: float = (forward_accel + turning) * SNAPSHOT_SECONDS / (nominal * maxf(0.1, sample_dt))
-				var thrust: float = smoothstep(THRUST_DEAD_ZONE, 0.75, clampf(impulse, 0.0, 1.0))
-				thrust *= smoothstep(0.04, 0.25, velocity.length() / nominal)
-				previous["thrust"] = maxf(float(previous.get("thrust", 0.0)), thrust) if velocity.length() > nominal * 0.04 else 0.0
-				previous["velocity"] = velocity
-				previous["motion_revision"] = revision
-				previous["motion_point"] = target
-			previous["motion_speed"] = speed
-			if previous["to"] != target:
-				previous["from"] = _visual_position(previous)
-				previous["to"] = target
-				previous["age"] = 0.0
-				previous["duration"] = interval
-			previous["heading"] = heading
-			updated[id] = previous
-	ship_visuals = updated
-	for id in ship_offsets.keys():
-		if not updated.has(id):
-			ship_offsets.erase(id)
 
 func _layout_match_chat() -> void:
 	if not is_instance_valid(match_chat_edit):
@@ -5302,12 +5228,7 @@ func _process(delta: float) -> void:
 			if is_instance_valid(border) and border.is_visible_in_tree():
 				border.queue_redraw()
 	game_visual_clock += delta * float(_state().get("time_speed", 1))
-	for visual in ship_visuals.values():
-		var duration: float = float(visual.get("duration", SNAPSHOT_SECONDS))
-		if float(visual["age"]) < duration:
-			visual["age"] = minf(duration, float(visual["age"]) + delta)
-		# Exhaust decays even after interpolation reaches its destination.
-		visual["thrust"] = float(visual.get("thrust", 0.0)) * exp(-delta * THRUST_FADE_RATE)
+	ship_motion.advance(delta)
 	var state: Dictionary = _state()
 	if not state.is_empty():
 		_update_orbit_clock(state, delta)
@@ -5739,36 +5660,7 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 	camera.following = false
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
-	var frame: int = Engine.get_process_frames()
-	var revision: Array = [session.get("motion_revision"), session.get("motion_base_revision"), state.get("elapsed"), state["ships"].size(), state.get("time_speed")]
-	if delta <= 0.0 and pose_frame == frame and pose_revision == revision:
-		var projected: Dictionary = {}
-		for id in pose_world_cache:
-			var pose: Dictionary = pose_world_cache[id].duplicate()
-			pose["point"] = _screen_point(pose["world"])
-			projected[id] = pose
-		return projected
-	_sync_ship_visuals(state)
-	var points: Array = state["map"]["points"]
-	var poses: Dictionary = {}
-	for ship in state["ships"]:
-		if not _ship_visible(state, ship):
-			continue
-		var id: int = int(ship["id"])
-		var visual: Dictionary = ship_visuals.get(id, {})
-		var pos: Vector2 = _ship_position(ship, points) if visual.is_empty() else _visual_position(visual)
-		var direction: Vector2 = visual.get("heading", ship.get("heading", Vector2.UP))
-		var prior: Dictionary = ship_offsets.get(id, {"angle": direction.angle()})
-		var weight: float = 1.0 - exp(-delta / SNAPSHOT_SECONDS * 3.0)
-		var angle: float = lerp_angle(float(prior["angle"]), direction.angle(), weight)
-		if delta > 0.0 or not ship_offsets.has(id):
-			ship_offsets[id] = {"angle": angle}
-		var mining: bool = ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
-		poses[id] = {"point": _screen_point(pos), "world": pos, "direction": Vector2.from_angle(angle), "mining": mining, "kind": ship.get("kind", "")}
-	pose_frame = frame
-	pose_revision = revision
-	pose_world_cache = poses.duplicate(true)
-	return poses
+	return ship_motion.poses(state, delta, session, _ship_visible, _screen_point)
 
 func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 	if active_lens != "logistics":
@@ -6899,8 +6791,7 @@ func _draw_map() -> void:
 		var hull: Color = empire.lightened(0.35)
 		var side: Vector2 = direction.orthogonal() * scale
 		direction *= scale
-		var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
-		var thrust: float = float(visual.get("thrust", 0.0))
+		var thrust: float = ship_motion.thrust_for(int(ship["id"]))
 		if int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and thrust > 0.035:
 			_queue_exhaust(str(ship["kind"]), point, direction, scale, thrust, int(ship["id"]), viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
