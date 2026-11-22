@@ -57,6 +57,7 @@ Current layout (v0.94.0; update when responsibility moves). Use the named functi
 | `tests/economy_rules_test.gd`, `tests/lobby_rules_test.gd` | Rule regressions, seeded maps and semantic fixtures. |
 | `tests/solo_smoke.gd`, `tests/network_smoke.gd` | Real match lifecycle, authority, state replication and ENet peers. |
 | `tests/fleet_benchmark.gd`, `tests/contested_benchmark.gd`, `PERFORMANCE.md` | Fleet-scale and contested simulation measurement. |
+| `tests/determinism_probe.gd` | Seeded state-hash checkpoints proving refactors preserve simulation behavior. |
 | `tools/check_gdscript.py` | Discover and parse every tracked `.gd` file; run locally after `godot --headless --path . --import` using `python3 tools/check_gdscript.py` (optional `--godot /path/to/godot`). |
 | `.github/workflows/godot-validation.yml` | Version/indentation, import/metadata, parse, core and peer checks; currently manual dispatch only. |
 
@@ -329,6 +330,8 @@ Version 0.26.0: Destroyed ships drop all carried goods and independently roll a 
 Version 0.27.0: Right-click a hostile ship with selected owned fighters to focus attack. Fighters follow its last reachable lane destination, close locally when they share a sector, prioritize it when in weapon range, and resume normal attack-move when it is lost. Right-click a system or asteroid field remains attack-move, including automatic engagement and destruction of hostile defenses. Shift-right-click a POI orders each selected owned fighter to repeatedly patrol between its current lane origin and that POI. Movement, hold, salvage or unloading cancels tactical orders; emergency repair temporarily supersedes them. Selected orders display attack markers or patrol endpoints. AI uses actual lane distance to choose objectives and responders and excludes withdrawing fighters from combat-ready reserve calculations. No diplomacy or policy orders.
 
 Reproduce contested economy/combat benchmarks with `godot --headless --path . --script res://tests/contested_benchmark.gd`. These run seeded opposing AI matches for up to 900 simulation years with a coarse 1-year tick, reporting first expansion, first destruction, losses, peak fleets, ownership, stocks and victory. Use `-- --fine --duel-only` for the first radial duel at the real 0.1-year fixed step (omit `--duel-only` to test all three maps). Manual interaction and timing balance still require playtesting.
+
+Before and after a behavior-preserving refactor, run `godot --headless --path . --script res://tests/determinism_probe.gd -- --scenario=ai_match --ticks=3000 --every=1000` and `-- --scenario=battle --ticks=600 --every=100`; the `DETERMINISM` lines must match exactly.
 
 Version 0.27.1: Shipyards at subpixel overview scale use a compact owner-colored marker and construction/morph fills render only when their projected polygons can be triangulated. No simulation changes.
 

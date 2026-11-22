@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.3: Restore test baseline for refactoring. Fix duplicate loop variables that kept economy_rules_test.gd from parsing since v0.94.11; commit missing combat_kernels.gd.uid. Add tests/determinism_probe.gd: seeded AI match and two-empire battle print per-key state hashes at checkpoints; extractions must reproduce them exactly. economy_rules_test still has 24 failed assertions, 2 test-side script errors and a stall after line ~2214 (pending triage). No gameplay change.
+
 - [ ] v0.97.2: Extract ordered combat target block construction, laser/missile nearest-target kernels and simultaneous damage accumulation into combat_kernels.gd behind the existing EconomyRules facade. Preserve packed arrays, bounds, tie order, EPS, mutation order and all network contracts. No gameplay change; runtime/ENet and benchmark validation pending. Next: repair spatial queries and combat phase orchestration.
 
 - [ ] v0.97.1: All voluntary construction cancellations, including queued and active ship builds, return actual prepaid materials immediately to the originating station (allow temporary overflow), retain full GC and existing crew refunds, and create no salvage. Irreversible colony morphs and combat destruction unchanged. Queue hints, Codex and core assertions updated; Godot/ENet validation pending.

@@ -515,12 +515,12 @@ func _test_station_construction_queue() -> void:
 	ECON._refill_continuous(repeat_state, 0, repeat_station)
 	assert(repeat_station["queue"].size() == 2)
 	assert(ECON._has_job(repeat_station, "yard", "") and not ECON.pds_job(repeat_station).is_empty())
-	for job in (repeat_station["queue"] as Array).duplicate():
-		ECON._finish(repeat_state, 0, repeat_station, job)
+	for repeat_job in (repeat_station["queue"] as Array).duplicate():
+		ECON._finish(repeat_state, 0, repeat_station, repeat_job)
 	ECON._refill_continuous(repeat_state, 0, repeat_station)
 	assert(repeat_station["queue"].size() == 2)
-	for job in (repeat_station["queue"] as Array).duplicate():
-		ECON._finish(repeat_state, 0, repeat_station, job)
+	for repeat_job in (repeat_station["queue"] as Array).duplicate():
+		ECON._finish(repeat_state, 0, repeat_station, repeat_job)
 	ECON._refill_continuous(repeat_state, 0, repeat_station)
 	assert(ECON.next_shipyard_slot(repeat_station) == 0 and not repeat_station["continuous"]["yard"])
 	assert(not ECON.set_continuous(repeat_state, 1, 0, "yard", true))
@@ -558,10 +558,10 @@ func _test_station_construction_queue() -> void:
 	assert(blocked_station["stock"] == stock_before)
 	# Completing the first batch releases slots; remaining armed repeats
 	# can enter without overbooking or losing their preferences.
-	for job in (blocked_station["queue"] as Array).duplicate():
-		var repeat_key: String = "economy_building:" + str(job["target"]) if job["kind"] == "economy_building" else str(job["kind"])
+	for blocked_job in (blocked_station["queue"] as Array).duplicate():
+		var repeat_key: String = "economy_building:" + str(blocked_job["target"]) if blocked_job["kind"] == "economy_building" else str(blocked_job["kind"])
 		blocked_station["continuous"][repeat_key] = false
-		ECON._finish(blocked_state, 0, blocked_station, job)
+		ECON._finish(blocked_state, 0, blocked_station, blocked_job)
 	ECON._refill_continuous(blocked_state, 0, blocked_station)
 	assert(ECON.station_queue_count(blocked_station) == 3)
 	assert(ECON._has_job(blocked_station, "habitation", ""))
