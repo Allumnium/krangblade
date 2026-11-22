@@ -93,8 +93,7 @@ static func economy_building_effect(p: Dictionary, resource: String) -> String:
 		sample["eco_population"] = 0.0
 		sample["planet_blockaded"] = false
 	var base: float = ECONOMY.rate(reference_preview, resource) - ECONOMY.rate(reference, resource)
-	var local_population: float = ECONOMY.planetary_population(p) if resource == "Organics" else float(p["population"])
-	var result: String = "Yield: %s t/yr now (%s local)\nReference: %s t/yr %s 10k %s" % [signed_yield(actual), compact_amount(local_population), signed_yield(base), "at" if resource == "Organics" else "per", "planetary residents" if resource == "Organics" else "local residents"]
+	var result: String = "Yield: %s t/yr\nReference: %s t/yr %s 10k %s" % [signed_yield(actual), signed_yield(base), "at" if resource == "Organics" else "per", "planetary residents" if resource == "Organics" else "local residents"]
 	if resource == "Organics":
 		result += "\n+%s food-supported population" % compact_amount(ECONOMY.population_capacity(preview) - ECONOMY.population_capacity(p))
 	if bool(p.get("planet_blockaded", false)):
