@@ -40,21 +40,22 @@ func prepare_map(state: Dictionary) -> void:
 		asteroid_shape_cache.clear()
 		asteroid_cache_seed = seed_value
 
-# The placement radius is a broad-phase bound, NOT the shape of a belt.
-# Share the real immutable footprint across setup, the minimap and fog.
+# At overview scale, plot each actual rock, never its enclosing belt.
 static func draw_terrain_footprint(canvas: Control, field: Dictionary, offset: Vector2, scale: float, tint: Color) -> void:
-	var boundary := PackedVector2Array()
-	for vertex in field.get("outline", []):
-		boundary.append(offset + (vertex as Vector2) * scale)
-	if boundary.size() < 3:
-		return
-	if not Geometry2D.triangulate_polygon(boundary).is_empty():
-		canvas.draw_colored_polygon(boundary, tint)
-	else:
-		boundary.append(boundary[0])
-		canvas.draw_polyline(boundary, tint, 1.0, true)
+	var segments := PackedVector2Array()
+	var colors := PackedColorArray()
+	for rock in field.get("chunks", []):
+		var point: Vector2 = offset + (rock["position"] as Vector2) * scale
+		var fraction: float = clampf(float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock["initial"])), 0.0, 1.0)
+		var radius: float = maxf(0.42, float(rock["radius"]) * scale * 0.65 * sqrt(fraction))
+		var axis: Vector2 = Vector2.from_angle(float(rock["rotation"])) * radius
+		segments.append(point - axis)
+		segments.append(point + axis)
+		colors.append(Color("#b879a0") if rock["resource"] == "Crystals" else tint)
+	if not segments.is_empty():
+		canvas.draw_multiline_colors(segments, colors, 1.0, true)
 
-func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_point: Callable) -> void:
+func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_point: Callable, shading: float = 1.0, rotation_time: float = 0.0) -> void:
 	var rock_vertices := PackedVector3Array()
 	var rock_colors := PackedColorArray()
 	for chunk in field["chunks"]:
@@ -62,7 +63,17 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 		if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
 			continue
 		var fraction: float = float(chunk["remaining"]) / float(chunk["initial"])
-		var rock_radius: float = maxf(1.3, float(chunk["radius"]) * render_scale * sqrt(fraction))
+		var rock_radius: float = maxf(0.65, float(chunk["radius"]) * render_scale * sqrt(maxf(0.0, fraction)))
+		var variation: float = 0.5 + 0.5 * sin(float(chunk["rotation"]) * 3.0)
+		var tint: Color = Color("#50545a").lerp(Color("#6b5e51"), variation).darkened(1.0 - shading)
+		if rock_radius < 1.8:
+			var a: Vector2 = rock_pos + Vector2(-rock_radius, rock_radius * 0.65)
+			var b: Vector2 = rock_pos + Vector2(rock_radius, rock_radius * 0.45)
+			var c: Vector2 = rock_pos + Vector2(0.20, -rock_radius)
+			for point in [a, b, c]:
+				rock_vertices.append(Vector3(point.x, point.y, 0.0))
+				rock_colors.append(tint)
+			continue
 		var shape_key: Vector2 = chunk["position"]
 		if not asteroid_shape_cache.has(shape_key):
 			var unit_shape := PackedVector2Array()
@@ -70,13 +81,13 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 				var angle: float = TAU * float(k) / float(chunk["shape"].size()) + float(chunk["rotation"])
 				unit_shape.append(Vector2.from_angle(angle) * float(chunk["shape"][k]))
 			asteroid_shape_cache[shape_key] = {"vertices": unit_shape, "triangles": Geometry2D.triangulate_polygon(unit_shape)}
+		# Slow visual rotation; the collision envelope remains fixed and conservative.
+		var spin: float = rotation_time * 0.012 * sin(float(chunk["rotation"]) * 5.0) if rock_radius >= 2.5 else 0.0
 		var rock := PackedVector2Array()
 		var cached: Dictionary = asteroid_shape_cache[shape_key]
 		for vertex in cached["vertices"]:
-			rock.append(rock_pos + vertex * rock_radius)
+			rock.append(rock_pos + (vertex as Vector2).rotated(spin) * rock_radius)
 		# The ore is embedded in stone, not a solid resource-colored rock.
-		var variation: float = 0.5 + 0.5 * sin(float(chunk["rotation"]) * 3.0)
-		var tint: Color = Color("#50545a").lerp(Color("#6b5e51"), variation)
 		for index in cached["triangles"]:
 			var p: Vector2 = rock[index]
 			rock_vertices.append(Vector3(p.x, p.y, 0.0))
@@ -93,13 +104,13 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 			# Subtle pink flecks inside the rock, grouped into the same mesh.
 			var spots: int = 1 if rock_radius < 4.0 else 3
 			for spot in range(spots):
-				var angle: float = float(chunk["rotation"]) + float(spot) * 2.399963
+				var angle: float = float(chunk["rotation"]) + spin + float(spot) * 2.399963
 				var spot_center: Vector2 = rock_pos + Vector2.from_angle(angle) * rock_radius * (0.12 + 0.10 * float(spot))
 				var spot_radius: float = rock_radius * (0.11 + 0.025 * float(spot % 2))
 				for k in range(3):
 					var vertex: Vector2 = spot_center + Vector2.from_angle(angle + TAU * float(k) / 3.0) * spot_radius
 					rock_vertices.append(Vector3(vertex.x, vertex.y, 0.0))
-					rock_colors.append(Color("#cf8eae"))
+					rock_colors.append(Color("#cf8eae").darkened(1.0 - shading))
 	if not rock_vertices.is_empty():
 		var arrays: Array = []
 		arrays.resize(Mesh.ARRAY_MAX)

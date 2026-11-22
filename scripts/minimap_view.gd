@@ -103,7 +103,7 @@ func order_hint(mouse: InputEventMouseButton, state: Dictionary, pending_command
 						node_hit = node
 						hint["entity"] = ECONOMY.station_target_id(state, node)
 						hint["field"] = -1
-				else:
+				elif bool(state["map"]["fields"][node - count].get("antimatter", false)):
 					var distance: float = mouse.position.distance_to(_minimap_point(graph["points"][node], area))
 					if distance < nearest:
 						nearest = distance
@@ -128,7 +128,7 @@ func order_hint(mouse: InputEventMouseButton, state: Dictionary, pending_command
 					hint["wreck"] = int(pile["id"])
 	return hint
 
-func draw(selected: int, selected_units: Array[int], selected_field: int) -> void:
+func draw(selected: int, selected_units: Array[int], selected_field: int, selected_rock: int = -1) -> void:
 	var surface := Rect2(Vector2.ZERO, minimap.size)
 	minimap.draw_rect(surface, HUD.CONSOLE_BACKGROUND)
 	var state: Dictionary = state_query.call()
@@ -157,7 +157,7 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 		elif known[i] and bool(state["map"]["fields"][i - count].get("antimatter", false)):
 			tint = HUD.COLORS[ECONOMY.ANTIMATTER]
 			minimap.draw_rect(Rect2(locations[i] - Vector2.ONE * 1.8, Vector2.ONE * 3.6), tint, false, 1.0)
-		if (i < count and i == selected and selected_units.is_empty() and selected_field < 0) or (i >= count and i - count == selected_field):
+		if (i < count and i == selected and selected_units.is_empty() and selected_field < 0) or (i >= count and i - count == selected_field and selected_rock < 0):
 			minimap.draw_arc(locations[i], 4.5, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
 	for pile in state.get("salvage", {}).values():
 		if not fog_visible.call(pile["position"]):
@@ -175,13 +175,13 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 		var field: Dictionary = state["map"]["fields"][index]
 		if bool(field.get("antimatter", false)):
 			continue
-		var memory: Dictionary = fog_state.field_view(state, index, map_size.call())
-		if not memory.is_empty() and memory.get("chunks", []).is_empty():
-			continue
-		var tint := Color("#625950") if fog_visible.call(field["position"]) else Color("#443e39")
-		CELESTIAL.draw_terrain_footprint(minimap, field, area.position, terrain_scale, tint)
-		if index == selected_field:
-			minimap.draw_arc(locations[count + index], 4.5, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
+		var view: Dictionary = fog_state.rock_view(index)
+		CELESTIAL.draw_terrain_footprint(minimap, {"chunks": view.get("hidden", [])}, area.position, terrain_scale, Color("#504840"))
+		CELESTIAL.draw_terrain_footprint(minimap, {"chunks": view.get("live", [])}, area.position, terrain_scale, Color("#74675d"))
+		if index == selected_field and selected_rock >= 0:
+			var rock: Dictionary = fog_state.rock_at(index, selected_rock)
+			if not rock.is_empty():
+				minimap.draw_arc(_minimap_point(rock["position"], area), 3.0, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
 	# Mirror the main map's live hull visibility and interpolation; do not
 	# reveal undiscovered system ownership.
 	for ship in state["ships"]:
