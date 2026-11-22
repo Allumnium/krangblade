@@ -129,7 +129,7 @@ const SCIENCE_CAPACITY: float = 1.0
 const SCIENCE_COLLECTION_YEARS: float = 30.0
 const SHIPYARD_QUEUE_LIMIT = 8
 const MAX_SHIPYARD_LEVEL = 3
-const CREW_COSTS = {"ship": 4000.0, "colony_ship": COLONY_POPULATION, "fighter": 1000.0, "miner": 1500.0, "science_ship": 4000.0, "scout": 100.0, "cruiser": 3000.0, "destroyer": 8000.0}
+const CREW_COSTS = {"ship": 4000.0, "colony_ship": COLONY_POPULATION, "fighter": 1000.0, "miner": 1500.0, "science_ship": 4000.0, "scout": 200.0, "cruiser": 3000.0, "destroyer": 8000.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 200.0
 const YARD_HP: float = 1500.0
@@ -1051,7 +1051,7 @@ static func _cost(kind: String, level: int) -> Dictionary:
 		"fighter": return {"Metals": 270.0, "Organics": 10.0}
 		"miner": return {"Metals": 540.0, "Organics": 20.0}
 		"science_ship": return {"Metals": 900.0, "Organics": 30.0}
-		"scout": return {"Metals": 60.0, "Organics": 2.0}
+		"scout": return {"Metals": 120.0, "Organics": 4.0}
 		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0 * CRYSTAL_COST_MULTIPLIER}
 		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}
 		"yard":

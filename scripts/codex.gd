@@ -393,7 +393,7 @@ func _trade() -> void:
 	for i in range(E.WAREHOUSE_CAPACITIES.size()):
 		rows.append(["Base" if i == 0 else "Level %d" % i, "%.0f t" % float(E.WAREHOUSE_CAPACITIES[i]), "—" if i == 0 else _recipe(E.WAREHOUSE_COSTS[i - 1])])
 	_table(["Tier", "Capacity", "Cost"], rows)
-	_note("Empire totals include cargo in transit, but local construction uses delivered stock. Protect supply routes and avoid exporting essential food reserves.")
+	_note("Resource bars split station stock by system and show fleet cargo in blue. Local construction uses delivered stock only. Protect supply routes and avoid exporting essential food reserves.")
 
 func _expansion() -> void:
 	_body("Send a Colony to a reachable neutral system to automatically establish a station and shipyard on arrival. Transform (J) also works for a Colony already in neutral territory. All embarked settlers become the colony population, including at planetless systems; existing colonies cannot be freely claimed.")
