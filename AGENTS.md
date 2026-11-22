@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.41: Default Total Conquest Points to collapsed; place both compact +/− toggles directly after header text. Underline OBJECTIVES; keep it expanded by default and collapse independently, hiding category actions and moving scoreboard up. Client-local only.
+
 - v0.89.34: Station primary 4×4 command card bottom row is Select Shipyards (Z), Build (B), Trade (T), empty. Keep second-row upgrades and reserved Dyson slot unchanged; submenu Return remains bottom right.
 
 - v0.89.23: A tiny +/− button at the right of the Total Conquest Points header collapses all table rows and column labels while leaving the title visible. Expanded by default, client-local per match; totals and objective controls unchanged.

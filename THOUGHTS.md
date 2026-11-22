@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.41: Default Total Conquest Points to collapsed; place both compact +/− toggles directly after header text. Underline OBJECTIVES; keep it expanded by default and collapse independently, hiding category actions and moving scoreboard up. Client-local only. Visual and runtime checks pending.
+
 - v0.89.40 extracts planet production and upgrade-delivery cargo pod rendering plus shared read-only production source/rate queries into planet_traffic_view.gd; match retains system draw ordering and inspector presentation. Preserve resource colors, stock bay geometry, animation timing and inspector query behavior. Runtime/import/peer checks pending; no gameplay or Codex changes.
 
 - v0.89.39: Normalize Credits import UID and match script EOF to reported Godot editor output. Preserve import settings and gameplay; editor reopen verification pending. Avoid hand-authored noncanonical import UIDs and excess EOF blank lines.
