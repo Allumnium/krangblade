@@ -41,6 +41,7 @@ const SFX = preload("res://scripts/match_sfx.gd")
 const MATCH_AUDIO_TRACKER = preload("res://scripts/match_audio_tracker.gd")
 const MATCH_DEVELOPER_TOOLS = preload("res://scripts/match_developer_tools.gd")
 const MATCH_CONQUEST_UI = preload("res://scripts/match_conquest_ui.gd")
+const CONTROL_GROUP_MANAGER = preload("res://scripts/control_group_manager.gd")
 const MATCH_EMPIRE_UI = preload("res://scripts/match_empire_ui.gd")
 const MATCH_RESOURCE_HUD = preload("res://scripts/match_resource_hud.gd")
 const SHIP_MOTION_VIEW = preload("res://scripts/ship_motion_view.gd")
@@ -170,7 +171,7 @@ var selected_ship_id: int = -1
 var selected_units: Array[int] = []
 var command_kind: String = ""
 var command_selection: Array[int] = []
-var control_group_manager := preload("res://scripts/control_group_manager.gd").new()
+var control_group_manager := CONTROL_GROUP_MANAGER.new()
 var last_control_group_recall: int = -1
 var last_control_group_recall_ms: int = -1000
 var control_group_strip: HBoxContainer
@@ -3113,15 +3114,15 @@ func _build_control_group_strip() -> void:
 	for number in [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]:
 		var button := _button(str(number), _recall_control_group.bind(number), control_group_strip)
 		button.focus_mode = Control.FOCUS_NONE
-		button.custom_minimum_size = Vector2(20, 24)
+		button.custom_minimum_size = Vector2(CONTROL_GROUP_MANAGER.EMPTY_GROUP_WIDTH, 24)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.clip_text = true
 		button.expand_icon = true
-		button.add_theme_constant_override("icon_max_width", 14)
+		button.add_theme_constant_override("icon_max_width", CONTROL_GROUP_MANAGER.GROUP_ICON_WIDTH)
 		button.add_theme_font_size_override("font_size", 11)
 		button.disabled = true
 		control_group_manager.control_group_buttons[number] = button
-	control_group_strip.resized.connect(func() -> void: _refresh_control_groups(_state()))
+	control_group_strip.minimum_size_changed.connect(_layout_control_group_strip, CONNECT_DEFERRED)
 	_layout_control_group_strip()
 
 func _layout_control_group_strip() -> void:

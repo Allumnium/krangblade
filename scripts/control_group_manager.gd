@@ -1,6 +1,8 @@
 extends RefCounted
 ## Local match control group storage, pruning, assignment and button presentation.
 const ECONOMY = preload("res://scripts/economy_rules.gd")
+const GROUP_ICON_WIDTH: int = 16
+const EMPTY_GROUP_WIDTH: float = 20.0
 
 var control_groups: Dictionary = {}
 var control_group_buttons: Dictionary = {}
@@ -53,6 +55,10 @@ func assign(state: Dictionary, number: int, group: Dictionary, additive: bool, p
 		control_groups[number] = group
 
 func refresh(state: Dictionary, player: int, building_valid: Callable, hull_art: RefCounted, command_card_ui: RefCounted) -> void:
+	var ship_kinds: Dictionary = {}
+	for craft in state.get("ships", []):
+		if int(craft["owner"]) == player:
+			ship_kinds[int(craft["id"])] = str(craft["kind"])
 	for number in control_group_buttons:
 		var button: Button = control_group_buttons[number]
 		var group: Dictionary = prune(state, control_groups.get(number, {}), player, building_valid)
@@ -60,6 +66,8 @@ func refresh(state: Dictionary, player: int, building_valid: Callable, hull_art:
 			control_groups.erase(number)
 			button.text = str(number)
 			button.icon = null
+			button.alignment = HORIZONTAL_ALIGNMENT_CENTER
+			button.custom_minimum_size.x = EMPTY_GROUP_WIDTH
 			button.disabled = true
 			command_card_ui.set_hint(button, "Ctrl+%d to assign a selection" % number)
 			continue
@@ -68,11 +76,22 @@ func refresh(state: Dictionary, player: int, building_valid: Callable, hull_art:
 		var count: int = group["ids"].size() if kind == "units" else group["refs"].size()
 		var icon_kind: String = "station" if kind == "system" else kind
 		if kind == "units":
-			for craft in state["ships"]:
-				if group["ids"].has(int(craft["id"])):
-					icon_kind = craft["kind"]
-					break
-		button.text = "%d·%d" % [number, count] if button.size.x >= 34.0 else str(number)
-		button.icon = hull_art.selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
+			var counts: Dictionary = {}
+			var highest: int = 0
+			for id in group["ids"]:
+				var ship_kind: String = str(ship_kinds[id])
+				var members: int = int(counts.get(ship_kind, 0)) + 1
+				counts[ship_kind] = members
+				if members > highest or (members == highest and ship_kind < icon_kind):
+					highest = members
+					icon_kind = ship_kind
+		button.text = str(count)
+		button.icon = hull_art.selection_portrait_icon(icon_kind)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		var font: Font = button.get_theme_font("font")
+		var text_width: float = ceilf(font.get_string_size(button.text, HORIZONTAL_ALIGNMENT_LEFT, -1, button.get_theme_font_size("font_size")).x)
+		var padding: float = button.get_theme_stylebox("normal").get_minimum_size().x
+		button.custom_minimum_size.x = GROUP_ICON_WIDTH + text_width + padding + button.get_theme_constant("h_separation") + 2.0
 		button.disabled = false
 		command_card_ui.set_hint(button, "Group %d · %d %s\n%d: Select · Twice: Center\nCtrl+%d: Replace · Shift+%d: Add" % [number, count, "ships" if kind == "units" else "structures", number, number, number])
