@@ -139,8 +139,9 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 	for i in range(points.size()):
 		var tint := Color("#40566b")
 		if i < count:
-			var owner: int = int(state["planets"][i]["owner"])
-			if known[i] and fog_visible.call(points[i]):
+			var system: Dictionary = fog_state.system_view(state, i, map_size.call()) if known[i] else {}
+			var owner: int = int(system.get("owner", 0))
+			if not system.is_empty():
 				tint = empire_color.call(owner) if owner > 0 else Color("#a3b0bb")
 			minimap.draw_circle(locations[i], 2.4 if owner > 0 and known[i] else 1.8, tint)
 		elif known[i]:
