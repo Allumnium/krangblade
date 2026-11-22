@@ -1,6 +1,6 @@
 extends RefCounted
 ## Client-only command registry, key conflicts, badges and dispatch.
-## The match owns settings persistence and the editor dialog.
+## match_settings owns settings persistence and the editor dialog.
 var entries: Dictionary = {}
 var overrides: Dictionary = {}
 var _buttons_by_key: Dictionary = {}
