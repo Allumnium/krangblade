@@ -27,6 +27,7 @@ const MAP = preload("res://scripts/planet_map.gd")
 const SYSTEM_GEOMETRY = preload("res://scripts/system_geometry.gd")
 const COMBAT_KERNELS = preload("res://scripts/combat_kernels.gd")
 const COMBAT_FRAME = preload("res://scripts/combat_frame.gd")
+const STEP_FRAME = preload("res://scripts/step_frame.gd")
 const SECTOR_GEOMETRY = preload("res://scripts/sector_geometry.gd")
 const RESOURCES = ["Metals", "Organics", "Crystals"]
 const EXTRACTED = ["Metals", "Crystals"]
@@ -9201,6 +9202,36 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_rock_plan_budget = ROCK_PLAN_LIMIT
 	_refresh_movement_fields(state["map"].get("fields", []))
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
+	var frame: STEP_FRAME = STEP_FRAME.new()
+	frame.profile = profile
+	_step_economy(state, frame, dt)
+	started = _profile_stage(profile, "Economy", started)
+	_step_ai(state, frame, dt)
+	started = _profile_stage(profile, "AI / routing setup", started)
+	_step_combat(state, frame, dt)
+	started = _profile_stage(profile, "Combat / repair", started)
+	_step_formations(state, frame, dt)
+	started = _profile_stage(profile, "Formations / orders", started)
+	for ship in (state["ships"] as Array).duplicate():
+		_step_hull(state, frame, ship, dt)
+	_step_settle_movement(state, frame, dt)
+	if not profile.is_empty():
+		var now: int = Time.get_ticks_usec()
+		profile["Civilian logistics"] = int(profile.get("Civilian logistics", 0)) + frame.civilian_usec
+		profile["Other movement"] = int(profile.get("Other movement", 0)) + maxi(0, now - started - frame.civilian_usec)
+		started = now
+	_sync_operations(state)
+	update_exploration(state)
+	_update_objectives(state)
+	_profile_stage(profile, "Conquest / exploration", started)
+	_indexed_state = {}
+	_hulls_by_id.clear()
+	frame.graph.erase("travel_influence")
+	frame.graph.erase("travel_permissions")
+	_sector_query_graph = {}
+	_sector_query_cache.clear()
+
+static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 	_accrue_resident_taxes(state, dt)
 	_pay_fleet_upkeep(state, dt)
 	state["elapsed"] = float(state["elapsed"]) + dt
@@ -9211,6 +9242,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if float(state["elapsed"]) - float(transfer_events[key]["elapsed"]) > TRANSFER_EVENT_YEARS:
 			transfer_events.erase(key)
 	var combat_graph: Dictionary = military_graph(state)
+	frame.graph = combat_graph
 	_sector_query_cache.clear()
 	_sector_query_graph = combat_graph
 	combat_graph.erase("travel_influence")
@@ -9220,26 +9252,30 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		_work_planet(state, i, dt)
 	_refill_empire_fleets(state)
 	_begin_hull_index(state)
-	started = _profile_stage(profile, "Economy", started)
+
+static func _step_ai(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 	# Decide treaties before constructing any relation-dependent route or
 	# threat caches for this substep.
 	_dispatch_ai_diplomacy(state)
-	var teams: Array[int] = planet_teams(state)
+	frame.teams = planet_teams(state)
 	# Validate the static map and territory once per substep, not on each search.
-	var cache: Dictionary = {"civilian_routes": _civilian_route_cache(state, teams)}
+	frame.cache = {"civilian_routes": _civilian_route_cache(state, frame.teams)}
 	var budgets: Array = []
 	for field in state["map"].get("fields", []):
 		budgets.append({"Metals": field_limit(field, "Metals") * dt, "Crystals": field_limit(field, "Crystals") * dt, ANTIMATTER: field_limit(field, ANTIMATTER) * dt})
+	frame.budgets = budgets
 	var ai_now: float = float(state["elapsed"])
 	var ai_schedule: Dictionary = state.get("_ai_schedule", {})
 	for player in state.get("ai_players", []).duplicate():
 		if not state["ai_players"].has(player):
 			continue
 		if ai_now + EPS >= float(ai_schedule.get(player, 0.0)):
-			_ai_turn(state, combat_graph, int(player))
+			_ai_turn(state, frame.graph, int(player))
 			ai_schedule[player] = _next_ai_slot(ai_now, int(player))
 	state["_ai_schedule"] = ai_schedule
-	started = _profile_stage(profile, "AI / routing setup", started)
+
+static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
+	var combat_graph: Dictionary = frame.graph
 	for craft in state["ships"]:
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"], craft)
 	_passive_regeneration(state, dt)
@@ -9261,14 +9297,17 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	# Station destruction changes ownership during combat. Never use stale
 	# allied routes or permit a delivery into the destroyed stockpile.
 	var surviving_teams: Array[int] = planet_teams(state)
-	if surviving_teams != teams:
-		teams = surviving_teams
-		cache = {"civilian_routes": _civilian_route_cache(state, teams)}
+	if surviving_teams != frame.teams:
+		frame.teams = surviving_teams
+		frame.cache = {"civilian_routes": _civilian_route_cache(state, frame.teams)}
 	_prepare_withdrawals(state, combat_graph)
 	_update_salvage(state)
-	var salvage_busy: Dictionary = _salvage_combat_busy(state)
-	var salvage_cells: Dictionary = _salvage_cells(state.get("salvage", {}))
-	var salvage_threats: Dictionary = _reuse_combat_threats(state, combat_graph, threat_index)
+	frame.salvage_busy = _salvage_combat_busy(state)
+	frame.salvage_cells = _salvage_cells(state.get("salvage", {}))
+	frame.salvage_threats = _reuse_combat_threats(state, combat_graph, threat_index)
+	_step_resource_handoffs(state, frame, dt)
+
+static func _step_resource_handoffs(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 	var stage_receivers: Dictionary = {}
 	var receiver_order: int = 0
 	for craft in state["ships"]:
@@ -9280,18 +9319,19 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			receiver_order += 1
 	# Passive handoff is independent of route and job. Evaluate all hulls before movement.
 	for miner in state["ships"]:
-		if miner.get("kind", "") == "miner" and not bool(miner.get("rogue", false)) and not salvage_busy.has(int(miner["id"])):
+		if miner.get("kind", "") == "miner" and not bool(miner.get("rogue", false)) and not frame.salvage_busy.has(int(miner["id"])):
 			var receivers: Array = _handoff_candidates(stage_receivers.get(int(miner["owner"]), {}), miner["position"]) if _cargo_total(miner) > EPS else []
-			miner["_handoff_sent"] = _miner_handoff(state, combat_graph, miner, receivers, salvage_threats, dt)
-	var mining_receivers: Dictionary = {}
-	var mining_commitments: Dictionary = {}
+			miner["_handoff_sent"] = _miner_handoff(state, frame.graph, miner, receivers, frame.salvage_threats, dt)
+	var mining_receivers: Dictionary = frame.mining_receivers
 	for craft in state["ships"]:
 		if _mining_receiver_ready(state, craft):
 			var owner: int = int(craft["owner"])
 			if not mining_receivers.has(owner):
 				mining_receivers[owner] = {}
 			_spatial_insert(mining_receivers[owner], craft["resource_stage"]["point"], MINING_RENDEZVOUS_RANGE, craft)
-	started = _profile_stage(profile, "Combat / repair", started)
+
+static func _step_formations(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
+	var combat_graph: Dictionary = frame.graph
 	var fleets: Dictionary = {}
 	for craft in state["ships"]:
 		if craft.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
@@ -9310,201 +9350,234 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 					fighter["operation_target"] = int(fighter.get("at", 0))
 	_sync_operations(state)
 	_dispatch_operations(state, combat_graph)
-	var combat_positions: Dictionary = {}
+	var combat_positions: Dictionary = frame.combat_positions
 	for craft in state["ships"]:
 		combat_positions[int(craft["id"])] = craft["position"]
 	_begin_ship_avoidance(combat_positions)
 	_dispatch_explorers(state, combat_graph)
-	var idle_targets: Dictionary = _idle_formation_targets(state, combat_graph)
-	var coordinated: Dictionary = _coordinate_formations(state, combat_graph, dt)
-	var service_refs: Dictionary = service_targets(state)
-	var damaged_cells: Dictionary = _damaged_repair_cells(service_refs)
-	started = _profile_stage(profile, "Formations / orders", started)
-	var civilian_usec: int = 0
-	var repaired_hulls: Dictionary = {}
-	var repair_parked: Dictionary = {}
-	var wander_candidates: Dictionary = {}
-	for ship in (state["ships"] as Array).duplicate():
-		var initial_position: Vector2 = ship["position"]
-		if bool(ship.get("rogue", false)):
-			_work_pirate(state, ship, dt)
-			continue
-		if ship.get("kind", "") == "warp_gate":
-			continue
-		if ship.get("unit_order", {}).get("kind", "") == "warp_travel" and not bool(ship.get("retreating", false)):
-			var previous_warp: float = float(ship.get("warp_ready", 0.0))
-			_work_warp_order(state, combat_graph, ship, dt)
-			if float(ship.get("warp_ready", 0.0)) > previous_warp:
-				combat_positions[int(ship["id"])] = ship["position"]
-			continue
-		if colony_morphing(ship):
-			if _work_colony(state, ship, dt):
-				_remove_indexed_hull(state, ship)
-			else:
-				repair_parked[int(ship["id"])] = true
-			continue
-		if ship.get("_handoff_delivery", false):
-			ship.erase("_handoff_delivery")
-			continue
-		if ship.get("kind", "") == "colony_ship":
-			var previous_food: float = float(ship.get("food_produced", 0.0))
-			_grow_colony_cargo(ship, dt)
-			var produced: float = float(ship.get("food_produced", 0.0)) - previous_food
-			if produced > 0.0:
-				var progress: Dictionary = objective_progress(state, int(ship["owner"]))
-				progress["colony_food"] = float(progress.get("colony_food", 0.0)) + produced
-		var salvage_ship_id: int = int(ship["id"])
-		if bool(ship.get("retreating", false)) and armed(ship):
-			ship.erase("repair_target")
-			var before_hp: float = float(ship["hp"])
-			_work_withdrawal(state, combat_graph, ship, dt)
-			if float(ship["hp"]) > before_hp and ship["position"] == initial_position:
-				repair_parked[salvage_ship_id] = true
-			continue
-		if _stop_waiting(state, ship):
-			ship["navigation_target"] = ship["position"]
-			ship.erase("repair_target")
-			continue
-		ship.erase("stop_until")
-		if bool(ship.get("holding", false)) and ship.has("hold_heading"):
-			ship.erase("repair_target")
-			_work_local_hold(combat_graph, ship, dt)
-			continue
-		var follow: Dictionary = ship.get("unit_order", {})
-		var escort_far: bool = follow.get("kind", "") == "follow" and bool(follow.get("guard", false)) and (ship["position"] as Vector2).distance_to(service_refs.get(int(follow["target"]), {}).get("position", Vector2.INF)) > FOLLOW_DISTANCE * 2.0
-		if (escort_far or not (ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and _engaged(ship) and not bool(ship.get("holding", false)))) and _work_follow(state, combat_graph, ship, service_refs, dt):
-			continue
-		if ship.has("attack_order"):
-			var ref: Dictionary = service_refs.get(int(ship["attack_order"]), {})
-			if ref.is_empty() or not _hostile_hull(state, int(ship["owner"]), ref):
-				_clear_tactical_order(ship)
-				_finish_manual(ship)
-			else:
-				var point: Vector2 = ref["position"]
-				var node: int = int(ref["node"]) if int(ref["node"]) >= 0 else _attack_destination(combat_graph, ref["entity"])
-				if ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"] and (ship["position"] as Vector2).distance_to(point) <= LASER_RANGE:
-					_maneuver_fighter(ship, point, dt)
-				elif node >= 0:
-					_manual_travel(state, combat_graph, ship, node, point, dt, LASER_RANGE * 0.8)
-				continue
-		if _work_cargo_order(state, combat_graph, ship, service_refs, dt):
-			continue
-		if _work_launch_rally(state, ship, dt):
-			continue
-		var guard: Dictionary = ship.get("unit_order", {})
-		if guard.get("kind", "") == "guard" and (not _engaged(ship) or not sector_contains(combat_graph, int(guard["target"]), ship["position"])):
-			ship["guard_arrived"] = _manual_travel(state, combat_graph, ship, int(guard["target"]), guard["point"], dt, 8.0)
-			continue
-		if _work_local_move(combat_graph, ship, dt, state):
-			continue
-		if _work_salvage(state, combat_graph, ship, dt, salvage_busy.has(salvage_ship_id)):
-			continue
-		if _work_resource_stage(state, combat_graph, ship, teams, cache, salvage_threats, salvage_cells, salvage_busy, dt):
-			continue
-		# Each automatic job checks its own cooldown; explicit movement,
-		# follow, cargo orders and emergency withdrawal already take priority.
-		if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, damaged_cells):
-			if ship.has("repair_target") and dt > 0.0:
-				var recipient: int = int(ship["repair_target"])
-				if service_refs.get(recipient, {}).get("kind", "") == "ship":
-					repaired_hulls[recipient] = true
-			continue
+	frame.idle_targets = _idle_formation_targets(state, combat_graph)
+	frame.coordinated = _coordinate_formations(state, combat_graph, dt)
+	frame.service_refs = service_targets(state)
+	frame.damaged_cells = _damaged_repair_cells(frame.service_refs)
+
+## Runs one hull's highest-priority work for this substep. Hulls that stay
+## idle and unmoved become candidates for local wandering.
+static func _step_hull(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> void:
+	var initial_position: Vector2 = ship["position"]
+	if _step_hull_overrides(state, frame, ship, initial_position, dt):
+		return
+	if _step_hull_services(state, frame, ship, dt):
+		return
+	if _step_hull_routine(state, frame, ship, dt):
+		return
+	var ship_id: int = int(ship["id"])
+	# Only use the idle budget if the ship started and finished its
+	# work idle and did not already move this tick.
+	if frame.idle_targets.has(ship_id) and _is_idle_ship(ship) and autocast_ready(state, ship, "wander") and not frame.coordinated.has(ship_id) and ship["position"] == initial_position:
+		frame.wander_candidates[ship_id] = true
+
+## Pirate, warp, morph, withdrawal, stop, hold, follow and attack orders.
+## Returns true when the hull's work for this substep is complete.
+static func _step_hull_overrides(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, initial_position: Vector2, dt: float) -> bool:
+	var combat_graph: Dictionary = frame.graph
+	if bool(ship.get("rogue", false)):
+		_work_pirate(state, ship, dt)
+		return true
+	if ship.get("kind", "") == "warp_gate":
+		return true
+	if ship.get("unit_order", {}).get("kind", "") == "warp_travel" and not bool(ship.get("retreating", false)):
+		var previous_warp: float = float(ship.get("warp_ready", 0.0))
+		_work_warp_order(state, combat_graph, ship, dt)
+		if float(ship.get("warp_ready", 0.0)) > previous_warp:
+			frame.combat_positions[int(ship["id"])] = ship["position"]
+		return true
+	if colony_morphing(ship):
+		if _work_colony(state, ship, dt):
+			_remove_indexed_hull(state, ship)
+		else:
+			frame.repair_parked[int(ship["id"])] = true
+		return true
+	if ship.get("_handoff_delivery", false):
+		ship.erase("_handoff_delivery")
+		return true
+	if ship.get("kind", "") == "colony_ship":
+		var previous_food: float = float(ship.get("food_produced", 0.0))
+		_grow_colony_cargo(ship, dt)
+		var produced: float = float(ship.get("food_produced", 0.0)) - previous_food
+		if produced > 0.0:
+			var progress: Dictionary = objective_progress(state, int(ship["owner"]))
+			progress["colony_food"] = float(progress.get("colony_food", 0.0)) + produced
+	if bool(ship.get("retreating", false)) and armed(ship):
 		ship.erase("repair_target")
-		if ship.get("kind", "") == "colony_ship" and ship.get("unit_order", {}).get("kind", "") == "colonize":
-			if _work_colony(state, ship, dt):
-				_remove_indexed_hull(state, ship)
-			elif ship.has("colony_transform_progress"):
-				# Assembly is anchored to the orbit; contact pushes other hulls.
-				repair_parked[salvage_ship_id] = true
-			continue
-		if _work_opportunistic_salvage(state, combat_graph, ship, dt, salvage_busy, salvage_cells, coordinated.has(salvage_ship_id), salvage_threats):
-			continue
-		if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
-			_work_local_hold(combat_graph, ship, dt)
-			continue
-		if _work_science(state, combat_graph, ship, dt):
-			continue
-		if ship.get("kind", "ship") == "colony_ship":
-			if _begin_farm_delivery(state, ship):
-				_work_salvage(state, combat_graph, ship, dt)
-				continue
-			if _work_colony(state, ship, dt):
-				_remove_indexed_hull(state, ship)
-				continue
-		elif ship.get("kind", "ship") == "ship":
-			var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
-			# Allocate the needed mining support before offering excess
-			# idle freighters to interstation trade; never interrupt a haul.
-			var stage_due: bool = _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade") and float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0))
-			if stage_due and _choose_resource_stage(state, combat_graph, ship, teams, cache, salvage_threats, {}, true):
-				ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
-				continue
-			_work_ship(state, ship, teams, cache, dt)
-			if _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade") and float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)):
-				ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
-				_choose_resource_stage(state, combat_graph, ship, teams, cache, salvage_threats, salvage_cells)
-			if not profile.is_empty():
-				civilian_usec += Time.get_ticks_usec() - before
-		elif ship.get("kind", "ship") == "miner":
-			var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
-			if not _work_miner_rendezvous(state, combat_graph, ship, teams, cache, salvage_threats, mining_receivers, mining_commitments, dt):
-				_work_miner(state, ship, teams, cache, budgets, dt)
-			if not profile.is_empty():
-				civilian_usec += Time.get_ticks_usec() - before
-		elif ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
-			var target_id: int = int(ship.get("combat_target", -1))
-			var pursuit_id: int = int(ship.get("pursuit_target", -1))
-			if bool(ship.get("retreating", false)):
-				_work_withdrawal(state, combat_graph, ship, dt)
-			elif bool(ship.get("holding", false)):
-				ship["navigation_target"] = ship["position"]
-			elif bool(ship.get("attack_local", false)) and combat_positions.has(int(ship.get("attack_order", -1))):
-				var opponent: Vector2 = combat_positions[int(ship["attack_order"])]
-				if (ship["position"] as Vector2).distance_to(opponent) <= LASER_RANGE:
-					_maneuver_fighter(ship, opponent, dt)
-				else:
-					_navigate(ship, opponent, ship_speed(str(ship.get("kind", "ship"))) * dt)
-			elif coordinated.has(int(ship["id"])):
-				pass # Already moved as a group this tick.
-			elif combat_positions.has(pursuit_id):
-				_pursue_fighter(ship, combat_positions[pursuit_id], dt)
-				ship["leg"] = _lane_progress(combat_graph["points"], ship)
-			elif combat_positions.has(target_id) and not bool(ship.get("passing_fire", false)):
-				ship["pursuit_target"] = -1
-				ship["pursuit_left"] = 0.0
-				_maneuver_fighter(ship, combat_positions[target_id], dt)
-				ship["leg"] = _lane_progress(combat_graph["points"], ship)
-			else:
-				if not bool(ship.get("passing_fire", false)):
-					ship["combat_target"] = -1
-				ship["pursuit_target"] = -1
-				ship["pursuit_left"] = 0.0
-				var patrol_point: Vector2 = (ship["patrol_start_point"] if ship["patrol_returning"] else ship["patrol_end_point"]) if ship.has("patrol_from") else Vector2.INF
-				if patrol_point.is_finite():
-					ship["route"] = []
-					ship["leg"] = 0.0
-					_navigate(ship, patrol_point, ship_speed(str(ship.get("kind", "ship"))) * dt)
-					ship["patrol_arrived"] = (ship["position"] as Vector2).distance_to(patrol_point) <= EPS
-					if ship["patrol_arrived"]:
-						ship["at"] = int(ship["patrol_from"] if ship["patrol_returning"] else ship["patrol_to"])
-				elif not (ship["route"] as Array).is_empty():
-					_move_formation(combat_graph, ship, dt)
-		var ship_id: int = int(ship["id"])
-		# Only use the idle budget if the ship started and finished its
-		# work idle and did not already move this tick.
-		if idle_targets.has(ship_id) and _is_idle_ship(ship) and autocast_ready(state, ship, "wander") and not coordinated.has(ship_id) and ship["position"] == initial_position:
-			wander_candidates[ship_id] = true
+		var before_hp: float = float(ship["hp"])
+		_work_withdrawal(state, combat_graph, ship, dt)
+		if float(ship["hp"]) > before_hp and ship["position"] == initial_position:
+			frame.repair_parked[int(ship["id"])] = true
+		return true
+	if _stop_waiting(state, ship):
+		ship["navigation_target"] = ship["position"]
+		ship.erase("repair_target")
+		return true
+	ship.erase("stop_until")
+	if bool(ship.get("holding", false)) and ship.has("hold_heading"):
+		ship.erase("repair_target")
+		_work_local_hold(combat_graph, ship, dt)
+		return true
+	var service_refs: Dictionary = frame.service_refs
+	var follow: Dictionary = ship.get("unit_order", {})
+	var escort_far: bool = follow.get("kind", "") == "follow" and bool(follow.get("guard", false)) and (ship["position"] as Vector2).distance_to(service_refs.get(int(follow["target"]), {}).get("position", Vector2.INF)) > FOLLOW_DISTANCE * 2.0
+	if (escort_far or not (ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and _engaged(ship) and not bool(ship.get("holding", false)))) and _work_follow(state, combat_graph, ship, service_refs, dt):
+		return true
+	if ship.has("attack_order"):
+		var ref: Dictionary = service_refs.get(int(ship["attack_order"]), {})
+		if ref.is_empty() or not _hostile_hull(state, int(ship["owner"]), ref):
+			_clear_tactical_order(ship)
+			_finish_manual(ship)
+		else:
+			var point: Vector2 = ref["position"]
+			var node: int = int(ref["node"]) if int(ref["node"]) >= 0 else _attack_destination(combat_graph, ref["entity"])
+			if ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"] and (ship["position"] as Vector2).distance_to(point) <= LASER_RANGE:
+				_maneuver_fighter(ship, point, dt)
+			elif node >= 0:
+				_manual_travel(state, combat_graph, ship, node, point, dt, LASER_RANGE * 0.8)
+			return true
+	return false
+
+## Explicit cargo, rally, guard, move, salvage, staging, repair, colonize,
+## opportunistic salvage, hold and science work, in priority order.
+static func _step_hull_services(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> bool:
+	var combat_graph: Dictionary = frame.graph
+	var service_refs: Dictionary = frame.service_refs
+	var salvage_ship_id: int = int(ship["id"])
+	if _work_cargo_order(state, combat_graph, ship, service_refs, dt):
+		return true
+	if _work_launch_rally(state, ship, dt):
+		return true
+	var guard: Dictionary = ship.get("unit_order", {})
+	if guard.get("kind", "") == "guard" and (not _engaged(ship) or not sector_contains(combat_graph, int(guard["target"]), ship["position"])):
+		ship["guard_arrived"] = _manual_travel(state, combat_graph, ship, int(guard["target"]), guard["point"], dt, 8.0)
+		return true
+	if _work_local_move(combat_graph, ship, dt, state):
+		return true
+	if _work_salvage(state, combat_graph, ship, dt, frame.salvage_busy.has(salvage_ship_id)):
+		return true
+	if _work_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, frame.salvage_cells, frame.salvage_busy, dt):
+		return true
+	# Each automatic job checks its own cooldown; explicit movement,
+	# follow, cargo orders and emergency withdrawal already take priority.
+	if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, frame.damaged_cells):
+		if ship.has("repair_target") and dt > 0.0:
+			var recipient: int = int(ship["repair_target"])
+			if service_refs.get(recipient, {}).get("kind", "") == "ship":
+				frame.repaired_hulls[recipient] = true
+		return true
+	ship.erase("repair_target")
+	if ship.get("kind", "") == "colony_ship" and ship.get("unit_order", {}).get("kind", "") == "colonize":
+		if _work_colony(state, ship, dt):
+			_remove_indexed_hull(state, ship)
+		elif ship.has("colony_transform_progress"):
+			# Assembly is anchored to the orbit; contact pushes other hulls.
+			frame.repair_parked[salvage_ship_id] = true
+		return true
+	if _work_opportunistic_salvage(state, combat_graph, ship, dt, frame.salvage_busy, frame.salvage_cells, frame.coordinated.has(salvage_ship_id), frame.salvage_threats):
+		return true
+	if bool(ship.get("holding", false)) and not bool(ship.get("retreating", false)):
+		_work_local_hold(combat_graph, ship, dt)
+		return true
+	if _work_science(state, combat_graph, ship, dt):
+		return true
+	return false
+
+## Kind-specific autonomous work. Returns true only when a freighter took a
+## new resource stage, which skips the idle wander check like before.
+static func _step_hull_routine(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> bool:
+	var combat_graph: Dictionary = frame.graph
+	var profile: Dictionary = frame.profile
+	if ship.get("kind", "ship") == "colony_ship":
+		if _begin_farm_delivery(state, ship):
+			_work_salvage(state, combat_graph, ship, dt)
+			return true
+		if _work_colony(state, ship, dt):
+			_remove_indexed_hull(state, ship)
+			return true
+	elif ship.get("kind", "ship") == "ship":
+		var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
+		# Allocate the needed mining support before offering excess
+		# idle freighters to interstation trade; never interrupt a haul.
+		var stage_due: bool = _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade") and float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0))
+		if stage_due and _choose_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, {}, true):
+			ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
+			return true
+		_work_ship(state, ship, frame.teams, frame.cache, dt)
+		if _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade") and float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)):
+			ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
+			_choose_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, frame.salvage_cells)
+		if not profile.is_empty():
+			frame.civilian_usec += Time.get_ticks_usec() - before
+	elif ship.get("kind", "ship") == "miner":
+		var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
+		if not _work_miner_rendezvous(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, frame.mining_receivers, frame.mining_commitments, dt):
+			_work_miner(state, ship, frame.teams, frame.cache, frame.budgets, dt)
+		if not profile.is_empty():
+			frame.civilian_usec += Time.get_ticks_usec() - before
+	elif ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
+		_step_military_motion(state, frame, ship, dt)
+	return false
+
+static func _step_military_motion(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> void:
+	var combat_graph: Dictionary = frame.graph
+	var combat_positions: Dictionary = frame.combat_positions
+	var target_id: int = int(ship.get("combat_target", -1))
+	var pursuit_id: int = int(ship.get("pursuit_target", -1))
+	if bool(ship.get("retreating", false)):
+		_work_withdrawal(state, combat_graph, ship, dt)
+	elif bool(ship.get("holding", false)):
+		ship["navigation_target"] = ship["position"]
+	elif bool(ship.get("attack_local", false)) and combat_positions.has(int(ship.get("attack_order", -1))):
+		var opponent: Vector2 = combat_positions[int(ship["attack_order"])]
+		if (ship["position"] as Vector2).distance_to(opponent) <= LASER_RANGE:
+			_maneuver_fighter(ship, opponent, dt)
+		else:
+			_navigate(ship, opponent, ship_speed(str(ship.get("kind", "ship"))) * dt)
+	elif frame.coordinated.has(int(ship["id"])):
+		pass # Already moved as a group this tick.
+	elif combat_positions.has(pursuit_id):
+		_pursue_fighter(ship, combat_positions[pursuit_id], dt)
+		ship["leg"] = _lane_progress(combat_graph["points"], ship)
+	elif combat_positions.has(target_id) and not bool(ship.get("passing_fire", false)):
+		ship["pursuit_target"] = -1
+		ship["pursuit_left"] = 0.0
+		_maneuver_fighter(ship, combat_positions[target_id], dt)
+		ship["leg"] = _lane_progress(combat_graph["points"], ship)
+	else:
+		if not bool(ship.get("passing_fire", false)):
+			ship["combat_target"] = -1
+		ship["pursuit_target"] = -1
+		ship["pursuit_left"] = 0.0
+		var patrol_point: Vector2 = (ship["patrol_start_point"] if ship["patrol_returning"] else ship["patrol_end_point"]) if ship.has("patrol_from") else Vector2.INF
+		if patrol_point.is_finite():
+			ship["route"] = []
+			ship["leg"] = 0.0
+			_navigate(ship, patrol_point, ship_speed(str(ship.get("kind", "ship"))) * dt)
+			ship["patrol_arrived"] = (ship["position"] as Vector2).distance_to(patrol_point) <= EPS
+			if ship["patrol_arrived"]:
+				ship["at"] = int(ship["patrol_from"] if ship["patrol_returning"] else ship["patrol_to"])
+		elif not (ship["route"] as Array).is_empty():
+			_move_formation(combat_graph, ship, dt)
+
+static func _step_settle_movement(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
+	var repair_parked: Dictionary = frame.repair_parked
 	# Resolve wandering after every Harvester has had a chance to repair.
 	# This avoids dependence on whether the recipient precedes its healer
 	# in the fleet array. Explicit movement and other work remain legal.
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
-		if repaired_hulls.has(id) and _is_idle_ship(ship) and not _unit_order_running(ship) and ship["position"] == combat_positions.get(id):
+		if frame.repaired_hulls.has(id) and _is_idle_ship(ship) and not _unit_order_running(ship) and ship["position"] == frame.combat_positions.get(id):
 			repair_parked[id] = true
 		if repair_parked.has(id):
 			ship["navigation_target"] = ship["position"]
-		elif wander_candidates.has(id):
-			_navigate(ship, idle_targets[id], ship_speed(str(ship.get("kind", "ship"))) * dt)
+		elif frame.wander_candidates.has(id):
+			_navigate(ship, frame.idle_targets[id], ship_speed(str(ship.get("kind", "ship"))) * dt)
 		ship.erase("_handoff_sent")
 		_mark_sector_arrival(state, ship)
 		if ship.has("auto_cooldown_until") and float(ship["auto_cooldown_until"]) <= float(state["elapsed"]):
@@ -9514,24 +9587,9 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		if ship.has("wander_cooldown_override") and autocast_remaining(state, ship) <= EPS and not _unit_order_running(ship):
 			ship.erase("wander_cooldown_override")
 	avoidance_cells.clear()
-	_separate_ships(state, combat_graph, combat_positions, dt, repair_parked)
+	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked)
 	if dt > 0.0:
-		_resolve_ship_contacts(state, combat_graph, combat_positions, dt, repair_parked)
-	if not profile.is_empty():
-		var now: int = Time.get_ticks_usec()
-		profile["Civilian logistics"] = int(profile.get("Civilian logistics", 0)) + civilian_usec
-		profile["Other movement"] = int(profile.get("Other movement", 0)) + maxi(0, now - started - civilian_usec)
-		started = now
-	_sync_operations(state)
-	update_exploration(state)
-	_update_objectives(state)
-	_profile_stage(profile, "Conquest / exploration", started)
-	_indexed_state = {}
-	_hulls_by_id.clear()
-	combat_graph.erase("travel_influence")
-	combat_graph.erase("travel_permissions")
-	_sector_query_graph = {}
-	_sector_query_cache.clear()
+		_resolve_ship_contacts(state, frame.graph, frame.combat_positions, dt, repair_parked)
 
 const OPENING_OBJECTIVES = {"economic": "medium_shipyard", "military": "military_built"}
 
