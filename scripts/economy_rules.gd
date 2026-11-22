@@ -8267,13 +8267,41 @@ static func _ai_pursue_station_goal(state: Dictionary, player: int, index: int, 
 # Local hostile fighters determine defensive urgency; friendly systems and
 # allied ships never count as invasion targets or threats.
 static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: int, home: int, owned: Array[int], fighters: Array) -> void:
-	var team: int = _combat_group(state, player)
-	var planets: Array = state["planets"]
-	var points: Array = graph["points"]
 	var pois: Array[int] = military_pois(state, player)
 	# Repairing hulls cannot defend or form an attack cohort yet. Count
 	# only combat-ready ships until they return to the normal order loop.
 	var ready: Array = fighters.filter(func(craft: Dictionary) -> bool: return not bool(craft.get("retreating", false)))
+	var reference: Dictionary = _ai_reference_hull(state, graph, home, ready)
+	var threats: Dictionary = {}
+	var opportunities: Dictionary = {}
+	_ai_scan_hostiles(state, graph, player, owned, pois, threats, opportunities)
+	var defense: int = home
+	var danger: int = 0
+	for node in owned:
+		var pressure: int = int(threats.get(node, 0))
+		if pressure > danger:
+			defense = node
+			danger = pressure
+	var goal: int = _ai_attack_goal(state, graph, player, pois, opportunities, reference)
+	# Keep a three-fighter attack cohort affordable. Small empires attack
+	# together in peace and defend together when threatened.
+	var defense_weight: int = 100 if goal < 0 else 0
+	if goal >= 0:
+		if danger > 0:
+			defense_weight = 100 if ready.size() < 7 else 60
+		elif ready.size() >= 4:
+			defense_weight = 25
+	if not state.has("ai_objectives"):
+		state["ai_objectives"] = {}
+	state["ai_objectives"][player] = goal
+	var defenders: int = ceili(float(ready.size()) * defense_weight / 100.0)
+	if ready.size() - defenders < AI_WAVE_MIN:
+		defenders = ready.size()
+	_ai_assign_military(state, graph, player, ready, defense, goal, defenders)
+
+# The combat-ready hull nearest the cohort centroid stands in for the whole group when ranking objectives.
+static func _ai_reference_hull(state: Dictionary, graph: Dictionary, home: int, ready: Array) -> Dictionary:
+	var points: Array = graph["points"]
 	var center: Vector2 = points[home]
 	if not ready.is_empty():
 		center = Vector2.ZERO
@@ -8287,8 +8315,11 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 		if distance < reference_distance:
 			reference = craft
 			reference_distance = distance
-	var threats: Dictionary = {}
-	var opportunities: Dictionary = {}
+	return reference
+
+static func _ai_scan_hostiles(state: Dictionary, graph: Dictionary, player: int, owned: Array[int], pois: Array[int], threats: Dictionary, opportunities: Dictionary) -> void:
+	var planets: Array = state["planets"]
+	var points: Array = graph["points"]
 	for ship in state["ships"]:
 		if not empires_hostile(state, player, int(ship["owner"])):
 			continue
@@ -8307,13 +8338,8 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 		if node < planets.size() and empires_allied(state, player, int(planets[node]["owner"])):
 			continue
 		opportunities[node] = true
-	var defense: int = home
-	var danger: int = 0
-	for node in owned:
-		var pressure: int = int(threats.get(node, 0))
-		if pressure > danger:
-			defense = node
-			danger = pressure
+
+static func _ai_attack_goal(state: Dictionary, graph: Dictionary, player: int, pois: Array[int], opportunities: Dictionary, reference: Dictionary) -> int:
 	# Prefer a persistent hostile objective; only change it when the
 	# opportunity disappears. Neutral/field targets require enemy presence.
 	var goal: int = -1
@@ -8329,20 +8355,9 @@ static func _ai_military_orders(state: Dictionary, graph: Dictionary, player: in
 			if distance < nearest:
 				goal = node
 				nearest = distance
-	# Keep a three-fighter attack cohort affordable. Small empires attack
-	# together in peace and defend together when threatened.
-	var defense_weight: int = 100 if goal < 0 else 0
-	if goal >= 0:
-		if danger > 0:
-			defense_weight = 100 if ready.size() < 7 else 60
-		elif ready.size() >= 4:
-			defense_weight = 25
-	if not state.has("ai_objectives"):
-		state["ai_objectives"] = {}
-	state["ai_objectives"][player] = goal
-	var defenders: int = ceili(float(ready.size()) * defense_weight / 100.0)
-	if ready.size() - defenders < AI_WAVE_MIN:
-		defenders = ready.size()
+	return goal
+
+static func _ai_assign_military(state: Dictionary, graph: Dictionary, player: int, ready: Array, defense: int, goal: int, defenders: int) -> void:
 	# Select defenders closest to the threatened POI. Keep already assigned
 	# hulls stable where possible; every order uses the same authority path.
 	var ranked: Array = ready.duplicate()
