@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.9: Replace command hover timers and native popups with one mouse-transparent, right-wing-aligned information panel driven by hovered control and live hint/cost signature. Preserve separate non-command tooltips; add useful manual/auto order and navigation descriptions, positive cooldowns only, trade control hints. Review edge cases at narrow viewport and disabled buttons in Godot; runtime/visual/peer checks pending.
+
 - v0.89.8: Extract ten shared command-card presentation methods (grid, slot, fill, face, level badge, hints, fast hover and icon texture/cache) into per-match command_card_ui.gd. Preserve exact layout, icon SVGs, mouse handling, native construction tooltip and existing hotkey registration/dispatch. No simulation or Codex rule change. Static indentation and reference checks only; Godot, import, visual and peer validation pending.
 
 - v0.89.7: Move native construction cost tooltip widget and recipe/shortfall setup into cost_button.gd, and formatting plus read-only production/ship previews into ui_text.gd. Codex uses shared ship naming instead of its own mapping. Keep button hints, fast ordinary-command popup and selection dispatch unchanged. No rule changes. Static indentation/reference review only; actual Godot parsing, import stability, visual and peers pending.

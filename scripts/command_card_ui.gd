@@ -6,6 +6,12 @@ const CostButton = preload("res://scripts/cost_button.gd")
 
 # Per-match texture cache, keyed by command and requested pixel size.
 var _icons: Dictionary = {}
+var _info_host: Control
+var _anchor: Control
+var _info: PanelContainer
+var _hovered: Control
+var _signature: String = ""
+
 
 func create_grid(parent: Container) -> GridContainer:
 	var grid := GridContainer.new()
@@ -29,8 +35,7 @@ func fill_grid(grid: GridContainer) -> void:
 		add_spacer(grid)
 
 func set_face(button: Button, caption: String, picture: Texture2D) -> TextureRect:
-	# Construction cards use Godot's single native custom-tooltip path.
-	# Do not create a second timer-driven hover popup for these buttons.
+	register_info(button, caption.replace("\n", " "))
 	button.custom_minimum_size = Vector2(60, 60)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.focus_mode = Control.FOCUS_NONE
@@ -93,59 +98,65 @@ func _make_tooltip_mouse_transparent(node: Node) -> void:
 	for child in node.get_children():
 		_make_tooltip_mouse_transparent(child)
 
-func enable_fast_tooltip(button: Button) -> void:
-	if not button is CostButton:
+# All command hover information lives in one mouse-transparent overlay.
+func setup_info(parent: Control, anchor: Control) -> void:
+	_anchor = anchor
+	_info_host = Control.new()
+	_info_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info_host.z_index = 100
+	parent.add_child(_info_host)
+	_info_host.hide()
+
+func register_info(control: Control, title: String) -> void:
+	if not control.has_meta("command_hint"):
+		control.set_meta("command_hint", control.tooltip_text)
+	control.set_meta("command_title", title)
+	control.tooltip_text = ""
+	if control is CostButton:
+		(control as CostButton).fast_tooltip = true
+
+func refresh_info(viewport: Viewport) -> void:
+	if not is_instance_valid(_info_host) or not is_instance_valid(_anchor):
 		return
-	if button.has_meta("command_hint"):
+	var control: Control = viewport.gui_get_hovered_control()
+	while is_instance_valid(control) and not control.has_meta("command_title"):
+		control = control.get_parent() as Control
+	if not is_instance_valid(control) or not control.is_visible_in_tree():
+		_info_host.hide()
+		_hovered = null
 		return
-	button.set_meta("command_hint", button.tooltip_text)
-	button.tooltip_text = ""
-	(button as CostButton).fast_tooltip = true
-	var timer := Timer.new()
-	timer.one_shot = true
-	timer.wait_time = float(ProjectSettings.get_setting("gui/timers/tooltip_delay", 0.5)) * 0.5
-	button.add_child(timer)
-	var popup := PanelContainer.new()
-	popup.top_level = true
-	popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	popup.z_index = 100
-	popup.theme = HUD.compact()
-	popup.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-	button.add_child(popup)
-	popup.hide()
-	button.mouse_entered.connect(func() -> void: timer.start())
-	button.mouse_exited.connect(func() -> void:
-		timer.stop()
-		popup.hide())
-	button.visibility_changed.connect(func() -> void:
-		timer.stop()
-		popup.hide())
-	button.gui_input.connect(func(event: InputEvent) -> void:
-		if event is InputEventMouseButton and event.pressed:
-			timer.stop()
-			popup.hide())
-	timer.timeout.connect(func() -> void:
-		if not button.is_visible_in_tree() or not button.get_global_rect().has_point(button.get_global_mouse_position()) or str(button.get_meta("command_hint", "")).is_empty():
-			return
-		for child in popup.get_children():
-			popup.remove_child(child)
-			child.queue_free()
-		var content: Control = (button as CostButton)._make_custom_tooltip(str(button.get_meta("command_hint", ""))) as Control
-		if content == null:
-			var label := Label.new()
-			label.text = str(button.get_meta("command_hint", ""))
-			var panel := PanelContainer.new()
-			panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101b29"), Color("#6385a4"), 8, 3))
-			panel.add_child(label)
-			content = panel
-		popup.add_child(content)
-		_make_tooltip_mouse_transparent(content)
-		popup.reset_size()
-		var bounds: Vector2 = button.get_viewport_rect().size
-		var extent: Vector2 = popup.get_combined_minimum_size()
-		var cursor: Vector2 = button.get_global_mouse_position()
-		popup.global_position = Vector2(clampf(cursor.x + 14.0, 0.0, maxf(0.0, bounds.x - extent.x)), clampf(cursor.y - extent.y - 12.0, 0.0, maxf(0.0, bounds.y - extent.y)))
-		popup.show())
+	var title: String = str(control.get_meta("command_title"))
+	var description: String = str(control.get_meta("command_hint", ""))
+	if description.is_empty() or description.begins_with("["):
+		description = title + ("\n" + description if not description.is_empty() else "")
+	var recipe: Dictionary = {}
+	var missing: Array[String] = []
+	var crew_icon: Texture2D = null
+	var effect: String = ""
+	if control is CostButton:
+		var cost_button: CostButton = control as CostButton
+		recipe = cost_button.recipe
+		missing = cost_button.missing
+		crew_icon = cost_button.crew_icon
+		effect = cost_button.effect_resource
+	var bounds: Vector2 = viewport.get_visible_rect().size
+	var width: float = minf(maxf(320.0, _anchor.size.x), maxf(120.0, bounds.x - 16.0))
+	var signature: String = str([description, recipe, missing, effect, width])
+	if _hovered != control or _signature != signature:
+		_hovered = control
+		_signature = signature
+		if is_instance_valid(_info):
+			_info_host.remove_child(_info)
+			_info.queue_free()
+		_info = CostButton.build_info(description, recipe, missing, crew_icon, effect, width)
+		_make_tooltip_mouse_transparent(_info)
+		_info_host.add_child(_info)
+		_info.reset_size()
+	# Fixed right-wing alignment, independent of cursor position.
+	var extent: Vector2 = _info.size.max(_info.get_combined_minimum_size())
+	var right: float = _anchor.global_position.x + _anchor.size.x
+	_info_host.global_position = Vector2(clampf(right - extent.x, 4.0, maxf(4.0, bounds.x - extent.x - 4.0)), maxf(4.0, _anchor.global_position.y - extent.y - 5.0))
+	_info_host.show()
 
 func icon(kind: String, pixels: int = 64) -> Texture2D:
 	var key: String = "%s:%d" % [kind, pixels]
