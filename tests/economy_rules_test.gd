@@ -528,6 +528,50 @@ func _test_station_construction_queue() -> void:
 	ECON._finish(repeat_state, 0, repeat_station, ECON.pds_job(repeat_station))
 	ECON._refill_continuous(repeat_state, 0, repeat_station)
 	assert(ECON.next_pds(repeat_station) == -1 and not repeat_station["continuous"]["pds"])
+	# All station repeat preferences can be armed without funding or population.
+	var blocked_state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var blocked_station: Dictionary = blocked_state["planets"][0]
+	blocked_station["planet_count"] = 3
+	blocked_station["pds"] = {}
+	blocked_station["population"] = 0.0
+	for resource in ECON.RESOURCES:
+		blocked_station["stock"][resource] = 0.0
+		var repeat_key: String = "economy_building:" + resource
+		assert(ECON.station_repeat_available(blocked_station, repeat_key))
+		assert(not ECON.set_continuous(blocked_state, 2, 0, repeat_key, true))
+		assert(ECON.set_continuous(blocked_state, 1, 0, repeat_key, true))
+	for repeat_key in ["warehouse", "habitation", "pds", "yard"]:
+		assert(ECON.station_repeat_available(blocked_station, repeat_key))
+		assert(ECON.set_continuous(blocked_state, 1, 0, repeat_key, true))
+	ECON._refill_continuous(blocked_state, 0, blocked_station)
+	assert(blocked_station["queue"].is_empty())
+	for resource in ECON.RESOURCES:
+		blocked_station["stock"][resource] = 100000.0
+		blocked_station["abundance"][resource] = 1.0
+	blocked_station["population"] = 1000000.0
+	ECON._refill_continuous(blocked_state, 0, blocked_station)
+	ECON._refill_continuous(blocked_state, 0, blocked_station)
+	for resource in ECON.RESOURCES:
+		assert(ECON._has_job(blocked_station, "economy_building", resource))
+	for job_kind in ["warehouse", "habitation", "yard"]:
+		assert(ECON._has_job(blocked_station, job_kind, ""))
+	assert(not ECON.pds_job(blocked_station).is_empty())
+	assert(blocked_station["queue"].size() == 7)
+	var orbital_state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var orbital_station: Dictionary = orbital_state["planets"][0]
+	orbital_station["planetless"] = true
+	orbital_station["planet_count"] = 0
+	orbital_station["stock"]["Metals"] = 0.0
+	for repeat_key in ["economy_building:Metals", "economy_building:Organics", "economy_building:Crystals", "pds", "orbital_housing"]:
+		assert(ECON.set_continuous(orbital_state, 1, 0, repeat_key, true))
+	ECON._refill_continuous(orbital_state, 0, orbital_station)
+	assert(orbital_station["queue"].is_empty())
+	orbital_station["stock"]["Metals"] = 10000.0
+	ECON._refill_continuous(orbital_state, 0, orbital_station)
+	ECON._refill_continuous(orbital_state, 0, orbital_station)
+	assert(orbital_station["queue"].size() == 1 and ECON._has_job(orbital_station, "orbital_housing", ""))
+	assert(ECON.cancel(orbital_state, 1, 0, int(orbital_station["queue"][0]["id"])))
+	assert(not orbital_station["continuous"]["orbital_housing"])
 	print("PASS: sequential station FIFO, independent shipyards, carryover time, refunds and repeat")
 
 func _test_ai_capital_fleets() -> void:

@@ -1403,13 +1403,11 @@ static func production_modifier(system: Dictionary, resource: String) -> float:
 static func _continuous_target(p: Dictionary, key: String) -> Array:
 	if SHIP_KINDS.has(key):
 		return [key, ""]
-	if key in ["warehouse", "habitation"]:
-		return [key, ""] if key != "habitation" or has_planets(p) else []
-	if key in ["pds", "yard"]:
+	if key in ["warehouse", "habitation", "orbital_housing", "pds", "yard"]:
 		return [key, ""]
 	if key.begins_with("economy_building:"):
 		var resource: String = key.trim_prefix("economy_building:")
-		if ECONOMY_BUILDINGS.has(resource) and production_available(p, resource):
+		if ECONOMY_BUILDINGS.has(resource):
 			return ["economy", resource]
 	if key.begins_with("production:"):
 		var resource: String = key.trim_prefix("production:")
@@ -1421,19 +1419,19 @@ static func _continuous_target(p: Dictionary, key: String) -> Array:
 			return ["yard_upgrade", target]
 	return []
 
-# Structural eligibility deliberately excludes affordability and pending jobs:
-# repeat can be armed while saving for the next construction.
+# Repeat is a preference, not an admission to the construction queue.
+# Missing requirements are checked by enqueue; only completed caps stop repeat.
 static func station_repeat_available(p: Dictionary, key: String) -> bool:
 	match key:
 		"warehouse", "habitation":
-			return (key != "habitation" or has_planets(p)) and int(p.get(key + "_level", 0)) < 3
+			return int(p.get(key + "_level", 0)) < 3
+		"orbital_housing":
+			return not has_planets(p)
 		"pds":
-			return next_pds(p) >= 0
+			return not has_planets(p) or next_pds(p) >= 0
 		"yard":
 			return next_shipyard_slot(p) > 0
-	if key.begins_with("economy_building:"):
-		return production_available(p, key.trim_prefix("economy_building:"))
-	return false
+	return key.begins_with("economy_building:") and ECONOMY_BUILDINGS.has(key.trim_prefix("economy_building:"))
 
 static func set_continuous(state: Dictionary, player: int, index: int, kind: String, enabled: bool) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
@@ -1441,7 +1439,7 @@ static func set_continuous(state: Dictionary, player: int, index: int, kind: Str
 		return false
 	if enabled and kind.begins_with("yard_upgrade:") and int(p["yards"][int(kind.trim_prefix("yard_upgrade:"))]["level"]) >= MAX_SHIPYARD_LEVEL:
 		return false
-	if enabled and kind in ["warehouse", "habitation", "pds", "yard"] and not station_repeat_available(p, kind):
+	if enabled and (kind in ["warehouse", "habitation", "orbital_housing", "pds", "yard"] or kind.begins_with("economy_building:")) and not station_repeat_available(p, kind):
 		return false
 	p["continuous"][kind] = enabled
 	return true
@@ -1520,20 +1518,18 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 		var order: Array = _continuous_target(p, str(key))
 		if order.is_empty():
 			continue
-		if order[0] in ["warehouse", "habitation"]:
-			if int(p.get(str(order[0]) + "_level", 0)) >= 3:
+		if key in ["warehouse", "habitation", "orbital_housing", "pds", "yard"] or str(key).begins_with("economy_building:"):
+			if not station_repeat_available(p, str(key)):
 				p["continuous"][key] = false
-			elif enqueue(state, int(p["owner"]), index, "economy", order[0]):
-				p["queue"][-1]["automatic"] = true
-			continue
-		if order[0] in ["yard", "pds"]:
-			if not station_repeat_available(p, str(order[0])):
-				# A final queued yard already occupies its slot; allow cancellation
-				# to stop repeat normally, but never enqueue above the cap.
-				p["continuous"][key] = false
-			elif (order[0] == "yard" and _has_job(p, "yard", "")) or (order[0] == "pds" and not pds_job(p).is_empty()):
 				continue
-			elif enqueue(state, int(p["owner"]), index, order[0]):
+			var job_kind: String = "economy_building" if order[0] == "economy" else str(order[0])
+			if job_kind == "pds":
+				if not pds_job(p).is_empty():
+					continue
+			elif _has_job(p, job_kind, str(order[1])):
+				continue
+			var economy_job: bool = job_kind in ["warehouse", "habitation", "orbital_housing"]
+			if enqueue(state, int(p["owner"]), index, "economy" if economy_job else str(order[0]), job_kind if economy_job else str(order[1])):
 				p["queue"][-1]["automatic"] = true
 			continue
 		if SHIP_KINDS.has(order[0]):

@@ -1191,6 +1191,8 @@ func _station_build(key: String) -> void:
 	var p: Dictionary = _planet()
 	if p.is_empty() or int(p["owner"]) != _me() or station_selected_index != selected:
 		return
+	if not _any_selected_station_buildable(key, p):
+		return
 	if key == "housing" and building_selection_kind != "station":
 		key = "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
 	if key in ["yard", "pds"]:
@@ -1263,7 +1265,9 @@ func _station_repeat_key(p: Dictionary, key: String) -> String:
 		return "economy_building:" + key
 	if key in ["warehouse", "pds", "yard"]:
 		return key
-	return "habitation" if key == "housing" and ECONOMY.has_planets(p) else ""
+	if key == "housing":
+		return "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
+	return ""
 
 func _station_repeat_targets(state: Dictionary, key: String, indices: Array[int]) -> Dictionary:
 	var targets: Dictionary = {}
@@ -1275,7 +1279,7 @@ func _station_repeat_targets(state: Dictionary, key: String, indices: Array[int]
 	return targets
 
 func _station_repeat_input(event: InputEvent, key: String, button: Button) -> void:
-	if not event is InputEventMouseButton or event.button_index != MOUSE_BUTTON_RIGHT or not event.pressed or button.disabled or station_selected_index != selected:
+	if not event is InputEventMouseButton or event.button_index != MOUSE_BUTTON_RIGHT or not event.pressed or station_selected_index != selected:
 		return
 	var state: Dictionary = _state()
 	var targets: Dictionary = _station_repeat_targets(state, key, _owned_station_selection(state))
