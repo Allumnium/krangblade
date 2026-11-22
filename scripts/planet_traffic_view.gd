@@ -54,7 +54,7 @@ func draw_production(state: Dictionary, index: int, center: Vector2, radius: flo
 			continue
 		var sources: Array = production_sources(bodies, resource)
 		var color: Color = HUD.COLORS[resource]
-		var bay: int = clampi(floori(float(system["stock"][resource]) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system)) * ECONOMY.STATION_STORAGE_BAYS), 0, ECONOMY.STATION_STORAGE_BAYS - 1)
+		var bay: int = clampi(floori(float(system["stock"][resource]) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system, resource)) * ECONOMY.STATION_STORAGE_BAYS), 0, ECONOMY.STATION_STORAGE_BAYS - 1)
 		var destination: Vector2 = STRUCTURE_VIEW.bay_point(screen_point.call(ECONOMY.station_position(state, index, elapsed)), station_radius.call(), elapsed, resource, bay)
 		for slot in sources:
 			var origin: Vector2 = center + celestial_view.body_position(bodies[slot], radius, elapsed)

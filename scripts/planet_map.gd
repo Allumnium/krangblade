@@ -625,7 +625,7 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 				var trial: Vector2 = (lobe["position"] as Vector2) - center + Vector2.from_angle(rng.randf_range(0.0, TAU)) * sqrt(rng.randf()) * rock_radius * 0.89
 				var clearance: float = INF
 				for existing in chunks:
-					clearance = minf(clearance, (center + trial).distance_squared_to(existing["position"]))
+					clearance = minf(clearance, (center + trial).distance_to(existing["position"]) - float(existing["radius"]))
 				if clearance > best_clearance:
 					best_clearance = clearance
 					offset = trial
@@ -637,7 +637,7 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		for vertex in range(7 if special else rng.randi_range(5, 10)):
 			shape.append(rng.randf_range(0.62, 1.0))
 		chunks.append({"id": i, "position": center + offset, "resource": resource,
-			"remaining": amount, "initial": amount, "radius": rock_radius * size_factor,
+			"remaining": amount, "initial": amount, "radius": rock_radius * size_factor * (1.0 if special else 4.0),
 			"rotation": rng.randf_range(0.0, TAU), "shape": shape})
 	# Preserve the generated total while normalizing individual ore amounts.
 	# Otherwise random rock sizes and concentration can exceed the cap.
@@ -649,6 +649,11 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 			var amount: float = float(chunk["initial"]) * total * share / float(totals[ore])
 			chunk["initial"] = amount
 			chunk["remaining"] = amount
+	# Keep placement/strategic pool radius independent of rock geometry.
+	var rock_extent: float = radius
+	for chunk in chunks:
+		rock_extent = maxf(rock_extent, center.distance_to(chunk["position"]) + float(chunk["radius"]))
+	field["rock_extent"] = rock_extent
 	field["chunks"] = chunks
 
 static func blocked(a: Vector2, b: Vector2, fields: Array) -> bool:

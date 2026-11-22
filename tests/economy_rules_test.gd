@@ -417,11 +417,11 @@ func _test_miner_service_orders() -> void:
 	assert(ECON._work_salvage(state, graph, miner, 10.0))
 	assert(is_equal_approx(miner["cargo"]["Metals"], ECON.MINER_CAPACITY))
 	var depot: Dictionary = state["planets"][0]
-	depot["stock"]["Metals"] = ECON.storage_capacity(depot) - 3.0
+	depot["stock"]["Metals"] = ECON.storage_capacity(depot, "Metals") - 3.0
 	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "deposit", "target": station_id}, false))
 	miner["position"] = ECON.station_position(state, 0, 0.0)
 	assert(ECON._work_cargo_order(state, graph, miner, ECON.service_targets(state), 1.0))
-	assert(miner["cargo"]["Metals"] == ECON.MINER_CAPACITY - 3.0 and depot["stock"]["Metals"] == ECON.storage_capacity(depot))
+	assert(miner["cargo"]["Metals"] == ECON.MINER_CAPACITY - 3.0 and depot["stock"]["Metals"] == ECON.storage_capacity(depot, "Metals"))
 	assert(not ECON.can_deposit(state, miner, station_id))
 	assert(not ECON.can_deposit(state, miner, ECON.station_target_id(state, 1)))
 	# A focused attack ignores a closer hostile; focus can be a structure.
@@ -1943,7 +1943,7 @@ func _initialize() -> void:
 				assert(ECON.FIELD_RESOURCES.has(chunk["resource"]))
 				assert((chunk["resource"] == ECON.ANTIMATTER) == bool(field.get("antimatter", false)))
 				assert(float(chunk["remaining"]) > 0.0)
-				assert((field["position"] as Vector2).distance_to(chunk["position"]) + float(chunk["radius"]) < float(field["radius"]))
+				assert((field["position"] as Vector2).distance_to(chunk["position"]) + float(chunk["radius"]) <= float(field.get("rock_extent", field["radius"])) + ECON.EPS)
 		assert(bridge_distance / (bridges - cluster_ids.count(-1)) >= local_distance / locals - 0.01)
 		var seen: Dictionary = {0: true}
 		var frontier: Array = [0]
@@ -1986,13 +1986,13 @@ func _initialize() -> void:
 			assert(is_equal_approx(float(system["thresholds"][resource]["min"]), 50.0))
 			assert(is_equal_approx(float(system["thresholds"][resource]["max"]), 80.0))
 	var default_test: Dictionary = p.duplicate(true)
-	default_test["stock"]["Metals"] = 900.0
+	default_test["stock"]["Metals"] = 1900.0
 	assert(is_equal_approx(ECON._need(default_test, "Metals"), 100.0))
-	default_test["stock"]["Metals"] = 1000.0
+	default_test["stock"]["Metals"] = 2000.0
 	assert(is_zero_approx(ECON._need(default_test, "Metals")))
-	default_test["stock"]["Metals"] = 1600.0
+	default_test["stock"]["Metals"] = 3200.0
 	assert(is_zero_approx(ECON._surplus(default_test, "Metals")))
-	default_test["stock"]["Metals"] = 1700.0
+	default_test["stock"]["Metals"] = 3300.0
 	assert(is_equal_approx(ECON._surplus(default_test, "Metals"), 100.0))
 	for removed in ["Plastics", "Textiles", "Tech"]:
 		assert(not p["stock"].has(removed) and not p["levels"].has(removed))
@@ -2007,15 +2007,15 @@ func _initialize() -> void:
 	assert(ECON.set_thresholds(state, 1, 0, "Metals", 10, 20))
 	var trade_test: Dictionary = state["planets"][0]
 	var previous_stock: float = float(trade_test["stock"]["Metals"])
-	trade_test["stock"]["Metals"] = 175.0
+	trade_test["stock"]["Metals"] = 375.0
 	assert(is_equal_approx(ECON._need(trade_test, "Metals"), 25.0))
 	assert(is_zero_approx(ECON._surplus(trade_test, "Metals")))
-	trade_test["stock"]["Metals"] = 300.0
+	trade_test["stock"]["Metals"] = 600.0
 	assert(is_zero_approx(ECON._need(trade_test, "Metals")))
 	assert(is_zero_approx(ECON._surplus(trade_test, "Metals")))
-	trade_test["stock"]["Metals"] = 450.0
+	trade_test["stock"]["Metals"] = 850.0
 	assert(is_equal_approx(ECON._surplus(trade_test, "Metals"), 50.0))
-	trade_test["stock"]["Metals"] = 2250.0
+	trade_test["stock"]["Metals"] = 4250.0
 	assert(ECON.set_thresholds(state, 1, 0, "Metals", 0, 100))
 	assert(is_equal_approx(ECON._surplus(trade_test, "Metals"), 250.0))
 	trade_test["stock"]["Metals"] = previous_stock
@@ -3174,7 +3174,10 @@ func _initialize() -> void:
 		depot["thresholds"][resource]["min"] = 1.0
 		assert(ECON.civilian_stock_access(depot, resource) <= 20.0 + ECON.EPS)
 		depot["thresholds"][resource] = original
-	var limit: float = ECON.storage_capacity(depot)
+	assert(ECON.storage_capacity(depot, "Metals") == 4000.0)
+	assert(ECON.storage_capacity(depot, "Crystals") == 2000.0)
+	assert(float(ECON.empire_totals(warehouse_state, 1)["storage_reference"]["Metals"]) == 4000.0)
+	var limit: float = ECON.storage_capacity(depot, "Metals")
 	depot["stock"]["Metals"] = limit - 0.01
 	ECON._work_planet(warehouse_state, 0, 1.0)
 	assert(is_equal_approx(float(depot["stock"]["Metals"]), limit))
@@ -3198,7 +3201,7 @@ func _initialize() -> void:
 	ECON._work_planet(warehouse_state, 0, 1.0)
 	assert(ECON.storage_capacity(depot) == 2000.0 and ECON._has_job(depot, "warehouse", ""))
 	ECON._work_planet(warehouse_state, 0, ECON._work("warehouse", 1) - 1.0)
-	assert(ECON.storage_capacity(depot) == 5000.0)
+	assert(ECON.storage_capacity(depot) == 5000.0 and ECON.storage_capacity(depot, "Metals") == 5000.0)
 	for level in [1, 2]:
 		depot["population"] = float(ECON.WAREHOUSE_POPULATIONS[level])
 		for material in ECON.WAREHOUSE_COSTS[level]:
@@ -3895,17 +3898,17 @@ func _test_resource_handoff() -> void:
 	assert(ECON._work_resource_stage(staging, stage_graph, hauler, ECON.planet_teams(staging), {}, safe, ECON._salvage_cells(staging["salvage"]), {}, 0.1))
 	assert(hauler["salvage_delivery"] and not hauler.has("resource_stage"))
 	var depot: Dictionary = staging["planets"][0]
-	depot["stock"]["Metals"] = ECON.storage_capacity(depot)
+	depot["stock"]["Metals"] = ECON.storage_capacity(depot, "Metals")
 	hauler["position"] = Vector2(100, 0)
 	assert(ECON._work_salvage(staging, stage_graph, hauler, 100.0))
 	assert((hauler["position"] as Vector2).distance_to(ECON.station_position(staging, 0, float(staging["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.EPS)
 	assert(is_equal_approx(float(hauler["cargo"]["Metals"]), 5.0))
-	assert(is_equal_approx(float(depot["stock"]["Metals"]), ECON.storage_capacity(depot)))
+	assert(is_equal_approx(float(depot["stock"]["Metals"]), ECON.storage_capacity(depot, "Metals")))
 	depot["stock"]["Metals"] -= 5.0
 	staging["elapsed"] += 1.0
 	assert(ECON._work_salvage(staging, stage_graph, hauler, 100.0))
 	assert(ECON._cargo_total(hauler) <= ECON.EPS)
-	assert(is_equal_approx(float(depot["stock"]["Metals"]), ECON.storage_capacity(depot)))
+	assert(is_equal_approx(float(depot["stock"]["Metals"]), ECON.storage_capacity(depot, "Metals")))
 	print("PASS: physical resource handoff, ownership, capacity, staging threshold, refreshed loading timer and inactivity dispatch and freighter salvage rate")
 
 func _test_explore_without_cooldown() -> void:
@@ -4936,7 +4939,7 @@ func _test_crowded_dock_delivery() -> void:
 	assert(ECON.issue_unit_order(state, 1, [52103], {"kind": "guard", "target": 0, "point": Vector2.ZERO}, false))
 	assert(guard["unit_order"]["kind"] == "guard" and ECON._unit_order_running(guard))
 	state["ships"].erase(guard)
-	home["stock"]["Metals"] = ECON.storage_capacity(home) - 40.0
+	home["stock"]["Metals"] = ECON.storage_capacity(home, "Metals") - 40.0
 	var ship: Dictionary = {"id": 521, "owner": 1, "kind": "ship", "at": 0, "origin": 0, "route": [], "leg": 0.0, "dest": -1, "source": -1, "position": dock + Vector2.RIGHT * ECON.SHIP_CLEARANCE, "heading": Vector2.UP, "cargo": ECON.empty_stock(), "hp": ECON.SHIP_HP}
 	state["ships"].append(ship)
 	ship["cargo"]["Metals"] = 50.0
@@ -4947,13 +4950,13 @@ func _test_crowded_dock_delivery() -> void:
 	assert(is_equal_approx(float(ship["cargo"]["Metals"]), 50.0 - ECON.dropoff_rate("ship") * 0.01))
 	assert(ECON._work_salvage(state, graph, ship, 10.0))
 	assert(is_equal_approx(float(ship["cargo"]["Metals"]), 10.0))
-	assert(is_equal_approx(float(home["stock"]["Metals"]), ECON.storage_capacity(home)))
+	assert(is_equal_approx(float(home["stock"]["Metals"]), ECON.storage_capacity(home, "Metals")))
 	home["stock"]["Metals"] -= 10.0
 	state["elapsed"] += 1.0
 	ship["position"] = ECON.station_position(state, 0, float(state["elapsed"])) + Vector2.LEFT * ECON.SHIP_CLEARANCE
 	assert(ECON._work_salvage(state, graph, ship, 10.0))
 	assert(ECON._cargo_total(ship) <= ECON.EPS)
-	assert(is_equal_approx(float(home["stock"]["Metals"]), ECON.storage_capacity(home)))
+	assert(is_equal_approx(float(home["stock"]["Metals"]), ECON.storage_capacity(home, "Metals")))
 	ship["cargo"]["Metals"] = 20.0
 	home["stock"]["Metals"] -= 10.0
 	assert(ECON.issue_unit_order(state, 1, [521], {"kind": "deposit", "target": ECON.station_target_id(state, 0)}, false))

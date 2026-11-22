@@ -99,6 +99,8 @@ var inspector_slot: Control
 var overview_panel: PanelContainer
 var console_panel: PanelContainer
 var minimap: Control
+var match_timer_panel: PanelContainer
+var match_timer_label: Label
 var lens_column: VBoxContainer
 var console_columns: HBoxContainer
 var console_center: VBoxContainer
@@ -471,7 +473,23 @@ func _build_command_deck() -> void:
 	minimap.draw.connect(_draw_minimap)
 	minimap.gui_input.connect(_minimap_input)
 	minimap.resized.connect(minimap.queue_redraw)
-	notice_ui.attach_minimap(minimap)
+	# Attached above the map without taking any space from the deck.
+	match_timer_panel = PanelContainer.new()
+	match_timer_panel.theme = HUD.compact()
+	match_timer_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 2, 2))
+	match_timer_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	match_timer_panel.z_index = 4
+	add_child(match_timer_panel)
+	match_timer_label = _label("00:00", 11)
+	match_timer_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	match_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	match_timer_label.add_theme_color_override("font_color", HUD.MUTED)
+	match_timer_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	match_timer_panel.add_child(match_timer_label)
+	minimap.item_rect_changed.connect(_layout_match_timer)
+	match_timer_panel.resized.connect(_layout_match_timer)
+	notice_ui.attach_minimap(minimap, match_timer_panel)
+	_layout_match_timer()
 	# A persistent vertical lens strip belongs immediately beside the minimap.
 	lens_column = VBoxContainer.new()
 	lens_column.custom_minimum_size.x = LENS_STRIP_WIDTH
@@ -781,6 +799,12 @@ func _connect_match_ui_layout() -> void:
 	console_columns.resized.connect(console_profile.queue_redraw)
 	_layout_console()
 
+
+func _layout_match_timer() -> void:
+	if not is_instance_valid(match_timer_panel) or not is_instance_valid(minimap):
+		return
+	match_timer_panel.size = Vector2(maxf(64.0, match_timer_panel.get_combined_minimum_size().x), match_timer_panel.get_combined_minimum_size().y)
+	match_timer_panel.global_position = minimap.global_position - Vector2(0.0, match_timer_panel.size.y)
 
 func _layout_console() -> void:
 	if not is_instance_valid(console_panel) or not is_instance_valid(station_commands):
@@ -1336,12 +1360,12 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			eligible = level < 3
 			available = ECONOMY.warehouse_available(p)
 			work = ECONOMY._work("warehouse", level + 1)
-			description = "Maximum storage: %s per resource" % UI_TEXT.tons(ECONOMY.storage_capacity(p), 0)
+			description = "Storage: %s Metals · %s other resources" % [UI_TEXT.tons(ECONOMY.storage_capacity(p, "Metals"), 0), UI_TEXT.tons(ECONOMY.storage_capacity(p), 0)]
 			if eligible:
 				recipe = ECONOMY.WAREHOUSE_COSTS[level]
 				var preview: Dictionary = p.duplicate()
 				preview["warehouse_level"] = level + 1
-				description = "Requires %s population\n+%s storage per resource (%s total)" % [UI_TEXT.compact_amount(ECONOMY.WAREHOUSE_POPULATIONS[level]), UI_TEXT.tons(ECONOMY.storage_capacity(preview) - ECONOMY.storage_capacity(p), 0), UI_TEXT.tons(ECONOMY.storage_capacity(preview), 0)]
+				description = "Requires %s population\n+%s Metals · +%s other resources (%s each total)" % [UI_TEXT.compact_amount(ECONOMY.WAREHOUSE_POPULATIONS[level]), UI_TEXT.tons(ECONOMY.storage_capacity(preview, "Metals") - ECONOMY.storage_capacity(p, "Metals"), 0), UI_TEXT.tons(ECONOMY.storage_capacity(preview) - ECONOMY.storage_capacity(p), 0), UI_TEXT.tons(ECONOMY.storage_capacity(preview), 0)]
 		elif key == "housing":
 			kind = "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
 			var caption: Label = button.get_meta("caption")
@@ -1708,7 +1732,7 @@ func _draw_fog() -> void:
 		var field: Dictionary = state["map"]["fields"][index]
 		if bool(field.get("antimatter", false)):
 			continue
-		if not bounds.grow(float(field["radius"]) * scale + 4.0).has_point(_screen_point(field["position"])):
+		if not bounds.grow(float(field.get("rock_extent", field["radius"])) * scale + 4.0).has_point(_screen_point(field["position"])):
 			continue
 		var rocks: Array = fog_state.rock_view(index).get("hidden", [])
 		fog_asteroid_view.draw_asteroid_chunks({"chunks": rocks}, bounds, scale, fog_overlay, _screen_point, 0.66)
@@ -2530,7 +2554,7 @@ func _update_trade_stock(p: Dictionary) -> void:
 	for resource in ECONOMY.RESOURCES:
 		var slider: TradeRange = trade_sliders[resource]
 		var stock: float = float(p["stock"][resource])
-		var capacity: float = ECONOMY.storage_capacity(p)
+		var capacity: float = ECONOMY.storage_capacity(p, resource)
 		slider.set_stock(stock, capacity, HUD.COLORS[resource])
 		trade_stock_labels[resource].text = "%s / %s" % [UI_TEXT.tons(stock, 1, true), UI_TEXT.tons(capacity, 0, true)]
 		trade_stock_labels[resource].tooltip_text = "%.1f / %.0f t" % [stock, capacity]
@@ -2599,6 +2623,10 @@ func _refresh() -> void:
 		background_music.play()
 	elif phase != "match" and background_music.playing:
 		background_music.stop()
+	var seconds: int = maxi(0, floori(float(state.get("elapsed", 0.0))))
+	var clock: String = "%02d:%02d" % [floori(float(seconds) / 60.0), seconds % 60]
+	if match_timer_label.text != clock:
+		match_timer_label.text = clock
 	resource_hud.refresh(state)
 	conquest_ui.refresh(state)
 	if empire_ui.dialog_visible():
@@ -3259,7 +3287,7 @@ func _in_visible_playfield(point: Vector2) -> bool:
 		return false
 	if is_instance_valid(control_group_strip) and control_group_strip.get_global_rect().has_point(global_point):
 		return false
-	for panel in [minimap, lens_column, overview_panel, inspector_panel]:
+	for panel in [minimap, match_timer_panel, lens_column, overview_panel, inspector_panel]:
 		if panel.visible and panel.get_global_rect().has_point(global_point):
 			return false
 	return Rect2(Vector2.ZERO, map_canvas.size).has_point(point)
@@ -3669,7 +3697,7 @@ func _asteroid_hit(point: Vector2, state: Dictionary, mining: bool) -> Vector2i:
 				best = distance
 				result = Vector2i(index, -1)
 			continue
-		if distance > float(field["radius"]) * scale + 4.0 or (mining and not known):
+		if distance > float(field.get("rock_extent", field["radius"])) * scale + 4.0 or (mining and not known):
 			continue
 		for rock in fog_state.rock_view(index).get("chunks", []):
 			if mining and not bool(rock.get("surveyed", false)):
@@ -4649,7 +4677,7 @@ func _draw_map() -> void:
 	for field_index in range(fields.size()):
 		var field: Dictionary = fields[field_index]
 		var center: Vector2 = _screen_point(field["position"])
-		if not viewport_bounds.grow(float(field["radius"]) * render_scale * 2.0 + 40.0).has_point(center):
+		if not viewport_bounds.grow(float(field.get("rock_extent", field["radius"])) * render_scale * 2.0 + 40.0).has_point(center):
 			continue
 		if not bool(field.get("antimatter", false)):
 			var live_rocks: Array = fog_state.rock_view(field_index).get("live", [])
