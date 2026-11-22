@@ -4,14 +4,14 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.89.25; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.89.26; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
 | `project.godot`, `scenes/main.tscn`, `scenes/match.tscn` | Application config/version, GameSession autoload and scene entry points. |
 | `scripts/economy_rules.gd` | Authoritative simulation and canonical dictionaries: `create`, `step`; resource/population rules, recipes and queues (`building_cost`, `_work_station_queue`, `_work_planet`); cargo/mining and service (`_work_ship`, `_work_miner`, `_choose_delivery`); navigation/sector queries (`_path`, `_mining_path`, military graph); commands and orders; diplomacy (`diplomatic_relation`, `diplomacy_*`); combat and repair (`_combat`, `_prepare_withdrawals`); AI (`_ai_turn`, `_ai_diplomacy_turn`); objectives/rewards (`_update_objectives`, `_assign_category_objectives`). |
 | `scripts/game_session.gd` | Persistent lobby and match lifecycle, authority and ENet. `request_*` → `_rpc_*`/authority dispatch → simulation rules; `_economy_tick`, `_encode_replica`, `_rpc_economy` and motion roster handle timing and transport. Keep RPC endpoints on this persistent node. |
-| `scripts/match.gd` | Client match controller; `_build_ui` orchestrates named map, header, dialog, deck, inspector and Trade builders; `_refresh`, command cards/inspectors, input and selection, camera/projection, rendering (`_draw_map`, ship/station draw helpers), fog/territory, tactical alert presentation (`_sync_tactical_alerts` delegates to tracker), Empire/diplomacy and conquest UI. Never the owner of simulation mutations. |
+| `scripts/match.gd` | Client match controller; `_build_ui` orchestrates named map, header, dialog, deck, inspector and Trade builders; `_refresh`, command cards/inspectors, input and selection, camera/projection, rendering (`_draw_map`, ship/station draw helpers), fog/territory, tactical alert presentation (`_sync_tactical_alerts` delegates to tracker), Empire/diplomacy and conquest UI orchestration. Never the owner of simulation mutations. |
 | `scripts/ui_text.gd` | Shared display naming, numeric formatting, weapon/ship summaries and read-only economy building previews; used by match and Codex. |
 | `scripts/command_card_ui.gd` | Shared command-card grids, reserved slots, button faces, upgrade badges, hints and a single anchored instant command-information panel; owns per-match command icon cache. Match retains card-specific actions, layout decisions, hotkey registrations and selection. |
 | `scripts/camera_view.gd` | Client camera state, zoom limits/steps, pan, world/screen projection and selection framing math. Match supplies playfield geometry and selection targets; retains input routing. |
@@ -28,6 +28,7 @@ Current layout (v0.89.25; update when responsibility moves). Use the named funct
 | `scripts/codex.gd`, `scripts/match_sfx.gd` | Concise player guide derived from rules where possible; client-only audio synthesis, spatial gain and cue limits. |
 | `scripts/match_audio_tracker.gd` | Per-match snapshot audio history, construction and completion cue detection, objective cue coalescing, combat/service sound edges. Match supplies local player, spatial context, visibility callback and mixer; no gameplay mutations. |
 | `scripts/match_developer_tools.gd` | Local Perf overlay, sampling history, debug console, developer mode and speed buttons/commands. Match supplies session and widget factories, retains modal/input routing and deck geometry. Session validates speed changes and owns replicated metrics. |
+| `scripts/match_conquest_ui.gd` | Objective headers and counters, refresh/upgrade controls, collapsible lifetime CP scoreboard, upgrade dialog, card signature and pulse. Match supplies overlay, layout and player/color/icon queries, retains chat and tactical notices. Simulation and session own goals, rewards and authoritative requests. |
 | `scripts/match_session.gd` | Small roster holder; not configured as the current autoload. Check remaining references before changing/removing it. |
 | `tests/economy_rules_test.gd`, `tests/lobby_rules_test.gd` | Rule regressions, seeded maps and semantic fixtures. |
 | `tests/solo_smoke.gd`, `tests/network_smoke.gd` | Real match lifecycle, authority, state replication and ENet peers. |
