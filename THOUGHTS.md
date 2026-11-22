@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.91.3: Display the complete selected local ship/fleet Shift-order queue on a mouse-transparent overlay above fog and below the HUD. Draw shared active intent and numbered dashed legs, aggregate identical legs, retain distinct formation destinations/ghosts and label nonspatial or hidden/lost-target commands without inventing a destination. No changes to authority or network schema. Verify fast Shift queueing, mixed and divergent fleets, formation slots, fog, target loss, command completion, zoom and large fleets; runtime/visual/ENet pending.
+
 - v0.91.2: Fix the reported _launch_to_rally Array-to-Array[int] runtime error from v0.91.1: _rally_path constructs one explicitly typed integer array on every return branch. Extend existing shipyard rally semantic fixture for same-system, remote and invalid endpoints, plus direct remote launch travel. Runtime/ENet validation pending.
 
 - v0.91.1: Stage 2 free-space navigation: military deployments, AI fleet allocation/redirects, repair travel and launched rally movement now use direct destinations. Strategic distance estimates use actual hull positions; the legacy distance/next dictionary remains a compatibility adapter. Coordinated formations use their existing shared advance only when aligned; off-axis groups approach destination slots directly. Shipyard rally target eligibility remains unchanged. Civilian logistics, colonization, scout exploration and tactical proximity migration remain open. Runtime, benchmark and ENet validation pending.
