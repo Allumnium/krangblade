@@ -79,9 +79,17 @@ static func signed_yield(value: float) -> String:
 	var number: String = "%+.4f" % value if absf(value) < 0.001 else ("%+.3f" % value if absf(value) < 0.1 else "%+.2f" % value)
 	return number.rstrip("0").trim_suffix(".")
 
+static func permanent_station_blocker(p: Dictionary, key: String) -> String:
+	if key in ECONOMY.RESOURCES or key == "pds":
+		if not ECONOMY.has_planets(p):
+			return "Requires a planet — none in this system"
+		if key in ECONOMY.RESOURCES and not ECONOMY.production_available(p, key):
+			return "No planetary %s deposit" % key.to_lower()
+	return ""
+
 static func economy_building_effect(p: Dictionary, resource: String) -> String:
 	if not ECONOMY.production_available(p, resource):
-		return "Requires local production deposit" if resource != "Organics" else "Requires planets"
+		return permanent_station_blocker(p, resource)
 	var preview: Dictionary = p.duplicate()
 	var buildings: Dictionary = p.get("buildings", {}).duplicate()
 	buildings[resource] = int(buildings.get(resource, 0)) + 1
