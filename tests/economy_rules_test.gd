@@ -3752,6 +3752,24 @@ func _test_resource_handoff() -> void:
 	var depot_direction: Vector2 = rock.direction_to(ECON.station_position(rendezvous, 0, float(rendezvous["elapsed"])))
 	assert(absf(depot_direction.cross((berth - rock).normalized())) < 0.001 and depot_direction.dot(berth - rock) > 0.0)
 	assert(ECON._stage_worker_field(worker, 1) == 0 and ECON._stage_worker_field(worker, 2) == -1)
+	assert(ECON._stage_freighter_limit(0, 1000.0) == 0)
+	assert(ECON._stage_freighter_limit(10, 1000.0) > ECON._stage_freighter_limit(1, 1000.0))
+	assert(ECON._stage_freighter_limit(10, 10000.0) >= ECON._stage_freighter_limit(10, 1000.0))
+	var queued_a: Dictionary = helper.duplicate(true)
+	var queued_b: Dictionary = helper.duplicate(true)
+	queued_a["id"] = 9832
+	queued_b["id"] = 9833
+	queued_a["resource_stage"] = {"node": 2, "point": berth, "queued_at": 2.0}
+	queued_b["resource_stage"] = {"node": 2, "point": berth, "queued_at": 1.0}
+	rendezvous["ships"].append(queued_a)
+	rendezvous["ships"].append(queued_b)
+	var waiting: Array = ECON._stage_queue(rendezvous, helper, 2)
+	assert(waiting.size() == 2 and waiting[0]["id"] == queued_b["id"])
+	assert(ECON._stage_queue_position(berth, rock, 0) == berth)
+	assert(is_equal_approx(ECON._stage_queue_position(berth, rock, 1).distance_to(berth), ECON.RESOURCE_QUEUE_SPACING))
+	assert(ECON._stage_queue_position(berth, rock, 2).distance_to(rock) > berth.distance_to(rock))
+	rendezvous["ships"].erase(queued_a)
+	rendezvous["ships"].erase(queued_b)
 	worker["mining_mode"] = "delivery"
 	worker["field"] = -1
 	worker["last_mining_field"] = 0

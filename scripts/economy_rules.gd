@@ -82,6 +82,7 @@ const TRACTOR_RATE: float = 12.0
 const FREIGHTER_TRACTOR_RATE: float = TRACTOR_RATE * 0.25
 const RESOURCE_HANDOFF_RANGE: float = TRACTOR_RANGE * 2.0
 const RESOURCE_STAGE_SEARCH_YEARS: float = 2.0
+const RESOURCE_QUEUE_SPACING: float = 80.0
 const RESOURCE_PARTIAL_WAIT_YEARS: float = 8.0
 const SALVAGE_CHANCE: float = 0.75
 const SALVAGE_FRACTION: float = 0.20
@@ -2455,6 +2456,12 @@ static func _choose_delivery(state: Dictionary, ship: Dictionary, teams: Array[i
 	var best_source: int = -1
 	var best_dest: int = -1
 	var best_path: Array[int] = []
+	var assigned_routes: Dictionary = {}
+	for craft in state["ships"]:
+		if int(craft["id"]) == int(ship["id"]) or craft.get("kind", "") != "ship" or int(craft.get("source", -1)) < 0:
+			continue
+		var key := Vector2i(int(craft["source"]), int(craft.get("dest", -1)))
+		assigned_routes[key] = int(assigned_routes.get(key, 0)) + 1
 	for a in range(planets.size()):
 		if teams[a] != team:
 			continue
@@ -2467,6 +2474,8 @@ static func _choose_delivery(state: Dictionary, ship: Dictionary, teams: Array[i
 				continue
 			var second: Array[int] = _path(state, teams, team, a, b, cache)
 			var distance: float = first_length + station_position(state, a, float(state["elapsed"])).distance_to(station_position(state, b, float(state["elapsed"])))
+			# Prefer unserved routes over another freighter racing for the same stock.
+			distance *= 1.0 + float(assigned_routes.get(Vector2i(a, b), 0))
 			if distance < best:
 				best = distance
 				best_source = a
@@ -2517,6 +2526,9 @@ static func _clear_resource_stage(ship: Dictionary) -> void:
 	ship.erase("resource_loaded_at")
 
 static func _resource_haul(ship: Dictionary) -> void:
+	var stage: Dictionary = ship.get("resource_stage", {})
+	if not stage.is_empty() and not bool(stage.get("salvage_site", false)):
+		ship["resource_haul_node"] = int(stage["node"])
 	_clear_resource_stage(ship)
 	if _cargo_total(ship) > EPS:
 		ship["resource_haul"] = true
@@ -2596,7 +2608,37 @@ static func _stage_candidate(state: Dictionary, graph: Dictionary, ship: Diction
 	var distance: float = (ship["position"] as Vector2).distance_to(point)
 	return {"node": node, "anchor": anchor, "point": point, "path": path, "score": distance / maxf(1.0, demand)}
 
-static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, threats: Dictionary, cells: Dictionary) -> bool:
+# One receiving berth plus the estimated number of holds in transit.
+# Use conservative extraction estimates and the actual depot distance;
+# do not allocate indefinitely just because a site has active workers.
+static func _stage_freighter_limit(worker_count: int, depot_distance: float) -> int:
+	if worker_count <= 0:
+		return 0
+	var throughput: float = float(worker_count) * minf(MINER_RATE, MINER_CAPACITY / MINING_STAY)
+	var cycle: float = 2.0 * depot_distance / FREIGHTER_SPEED + CARGO_CAPACITY / dropoff_rate("ship") + RESOURCE_PARTIAL_WAIT_YEARS
+	return maxi(1, ceili(throughput * cycle / CARGO_CAPACITY) + 1)
+
+static func _stage_queue(state: Dictionary, ship: Dictionary, node: int) -> Array:
+	var waiting: Array = []
+	for craft in state["ships"]:
+		var stage: Dictionary = craft.get("resource_stage", {})
+		if int(craft["owner"]) == int(ship["owner"]) and int(stage.get("node", -1)) == node and not bool(stage.get("salvage_site", false)):
+			waiting.append(craft)
+	waiting.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var first: float = float(a["resource_stage"].get("queued_at", 0.0))
+		var second: float = float(b["resource_stage"].get("queued_at", 0.0))
+		return int(a["id"]) < int(b["id"]) if first == second else first < second)
+	return waiting
+
+static func _stage_queue_position(berth: Vector2, center: Vector2, rank: int) -> Vector2:
+	var outward: Vector2 = center.direction_to(berth)
+	if outward.is_zero_approx():
+		outward = Vector2.RIGHT
+	# Tangential arrival lane, with a slight outward slope. Loaded ships
+	# depart directly toward their depot instead of reversing along the line.
+	return berth + (outward.orthogonal() + outward * 0.25).normalized() * RESOURCE_QUEUE_SPACING * float(rank)
+
+static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, threats: Dictionary, cells: Dictionary, mining_only: bool = false) -> bool:
 	var owner: int = int(ship["owner"])
 	var best: Dictionary = {}
 	var best_score: float = INF
@@ -2611,6 +2653,9 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 		if other.has("resource_stage"):
 			var assigned: int = int(other["resource_stage"]["node"])
 			occupied[assigned] = int(occupied.get(assigned, 0)) + 1
+		elif bool(other.get("resource_haul", false)) and other.has("resource_haul_node"):
+			var hauling_node: int = int(other["resource_haul_node"])
+			occupied[hauling_node] = int(occupied.get(hauling_node, 0)) + 1
 		var field_index: int = _stage_worker_field(other, owner)
 		if field_index >= 0:
 			if not workers.has(field_index):
@@ -2645,6 +2690,13 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 				point = wait_point
 		if not point.is_finite():
 			continue
+		var depot_distance: float = INF
+		for resource in resources:
+			var depot: int = _mining_depot(state, ship, teams, _combat_group(state, owner), int(field["anchor"]), resource, cache, point)
+			if depot >= 0:
+				depot_distance = minf(depot_distance, point.distance_to(station_position(state, depot, float(state["elapsed"]))))
+		if not is_finite(depot_distance) or int(occupied.get(count + i, 0)) >= _stage_freighter_limit(active.size(), depot_distance):
+			continue
 		for anchor in field_access_systems(state["map"], field):
 			var candidate: Dictionary = _stage_candidate(state, graph, ship, teams, cache, threats, count + i, anchor, point, resources, demand)
 			if not candidate.is_empty() and float(candidate["score"]) < best_score:
@@ -2673,6 +2725,8 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 		if node < 0:
 			continue
 		var anchor: int = node if node < count else int(fields[node - count]["anchor"])
+		if mining_only or int(occupied.get(node, 0)) >= maxi(1, ceili(total / CARGO_CAPACITY)):
+			continue
 		var demand: float = 2.0 / (1.0 + float(occupied.get(node, 0)) * 4.0)
 		var candidate: Dictionary = _stage_candidate(state, graph, ship, teams, cache, threats, node, anchor, point, resources, demand)
 		if not candidate.is_empty() and float(candidate["score"]) < best_score:
@@ -2683,6 +2737,12 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 		return false
 	best.erase("path")
 	best.erase("score")
+	best["queued_at"] = float(state["elapsed"])
+	if not bool(best.get("salvage_site", false)):
+		var waiting: Array = _stage_queue(state, ship, int(best["node"]))
+		best["queue_rank"] = waiting.size()
+		if not waiting.is_empty():
+			best["point"] = waiting[0]["resource_stage"]["point"]
 	ship["resource_stage"] = best
 	ship["source"] = -1
 	ship["dest"] = -1
@@ -2734,33 +2794,56 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 			var field_index: int = node - state["planets"].size()
 			var fields: Array = state["map"].get("fields", [])
 			if field_index >= 0 and field_index < fields.size():
+				var waiting: Array = _stage_queue(state, ship, node)
+				var rank: int = waiting.find(ship)
+				stage["queue_rank"] = maxi(0, rank)
 				var nearest: float = INF
+				var worker_count: int = 0
+				var depot_distance: float = INF
 				for miner in state["ships"]:
 					if _stage_worker_field(miner, owner) != field_index:
 						continue
+					worker_count += 1
 					var wait_point: Vector2 = _stage_wait_point(state, graph, ship, miner, node, int(stage["anchor"]), teams, cache, threats)
 					if not wait_point.is_finite():
 						continue
-					var distance: float = (ship["position"] as Vector2).distance_squared_to(wait_point)
+					var distance: float = point.distance_squared_to(wait_point)
 					if distance < nearest:
 						nearest = distance
-						point = wait_point
+						if rank <= 0:
+							stage["point"] = wait_point
+					var chunk: Dictionary = _find_chunk(fields[field_index], int(miner.get("chunk", -1)))
+					var depot: int = _mining_depot(state, ship, teams, team, int(stage["anchor"]), str(chunk.get("resource", "Metals")), cache, wait_point)
+					if depot >= 0:
+						depot_distance = minf(depot_distance, wait_point.distance_to(station_position(state, depot, now)))
 				available = nearest < INF
-				if available:
-					stage["point"] = point
-					ship["navigation_target"] = point
+				if available and rank > 0:
+					stage["point"] = waiting[0]["resource_stage"]["point"]
+				if available and is_finite(depot_distance) and rank >= _stage_freighter_limit(worker_count, depot_distance) and _cargo_total(ship) <= EPS:
+					available = false
+				point = stage["point"]
 		if not available:
 			if _cargo_total(ship) > EPS:
 				_resource_haul(ship)
 			else:
 				_clear_resource_stage(ship)
 			return true
-		# Existing trade work takes priority over waiting with an empty hold.
-		if _cargo_total(ship) <= EPS and ship["route"].is_empty() and teams[int(ship["at"])] == team:
+		# Mining has a bounded allocation; only surplus salvage waiters
+		# abandon their site for an ordinary trade opportunity.
+		if bool(stage.get("salvage_site", false)) and _cargo_total(ship) <= EPS and ship["route"].is_empty() and teams[int(ship["at"])] == team:
 			_choose_delivery(state, ship, teams, team, cache)
 			if int(ship.get("source", -1)) >= 0:
 				ship.erase("resource_stage")
 				ship.erase("resource_loaded_at")
+				return true
+	if not bool(stage.get("salvage_site", false)):
+		var field_index: int = node - state["planets"].size()
+		if field_index >= 0 and field_index < _movement_fields.size():
+			var queue_point: Vector2 = _stage_queue_position(point, _movement_fields[field_index]["position"], int(stage.get("queue_rank", 0)))
+			if _salvage_safe(state, graph, owner, queue_point, node, threats):
+				point = queue_point
+			else:
+				_resource_haul(ship)
 				return true
 	ship["route"] = []
 	ship["leg"] = 0.0
@@ -2807,6 +2890,10 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 			continue
 		if (freighter["position"] as Vector2).distance_to(point) > RESOURCE_HANDOFF_RANGE or not _salvage_safe(state, graph, owner, freighter["position"], local_sector(graph, freighter), threats):
 			continue
+		var stage: Dictionary = freighter.get("resource_stage", {})
+		if not stage.is_empty() and not bool(stage.get("salvage_site", false)):
+			if int(stage.get("queue_rank", 0)) > 0 or (freighter["position"] as Vector2).distance_to(stage["point"]) > RESOURCE_QUEUE_SPACING * 0.5:
+				continue
 		for resource in RESOURCES + [ANTIMATTER]:
 			var amount: float = minf(budget - total, minf(cargo_free(freighter), float(miner["cargo"].get(resource, 0.0))))
 			if amount <= EPS:
@@ -5851,6 +5938,7 @@ static func _salvage_active(ship: Dictionary) -> bool:
 	return int(ship.get("salvage_target", -1)) >= 0 or bool(ship.get("salvage_delivery", false))
 
 static func _cancel_salvage_order(ship: Dictionary) -> void:
+	ship.erase("resource_haul_node")
 	ship.erase("resource_haul")
 	ship.erase("farm_auto_delivery")
 	ship.erase("salvage_target")
@@ -8746,6 +8834,12 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 				continue
 		elif ship.get("kind", "ship") == "ship":
 			var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
+			# Allocate the needed mining support before offering excess
+			# idle freighters to interstation trade; never interrupt a haul.
+			var stage_due: bool = _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade") and float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0))
+			if stage_due and _choose_resource_stage(state, combat_graph, ship, teams, cache, salvage_threats, {}, true):
+				ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
+				continue
 			_work_ship(state, ship, teams, cache, dt)
 			if _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade") and float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)):
 				ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
