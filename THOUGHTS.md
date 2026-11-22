@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.13: Extract authored hull outlines/panels, vertex conversions, freighter bay positions and four texture caches into hull_art.gd; match continues drawing and batching using the same geometry. Preserve per-match lifetime, cache keys, SVGs, scale values and shield classification. Static source/reference/indentation review; Godot parse, import, visual and peer checks pending. No Codex changes needed.
+
 - v0.89.12: Extract hotkey registry, override loading, scope conflicts, button badges and dispatch. Match retains settings persistence, hotkey editor and keyboard routing; new module receives settings and card UI explicitly. Preserve registered IDs, scope order and visible/enabled dispatch checks. No player-facing change; Godot/visual/peer validation pending.
 
 - v0.89.11: Extract nested TradeRange control into its own script with the same implementation, fields and committed signal. All match callers keep the existing typed preload alias; policy and authority dispatch remain unchanged. No Codex changes needed. Static source parity/indentation only; Godot import, parse, visual and peer checks pending.

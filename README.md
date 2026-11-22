@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.89.12; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.89.13; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
@@ -14,6 +14,7 @@ Current layout (v0.89.12; update when responsibility moves). Use the named funct
 | `scripts/match.gd` | Client match controller; `_build_ui` orchestrates named map, header, dialog, deck, inspector and Trade builders; `_refresh`, command cards/inspectors, input and selection, camera/projection, rendering (`_draw_map`, ship/station draw helpers), fog/territory, tactical alert presentation (`_sync_tactical_alerts` delegates to tracker), Empire/diplomacy and conquest UI. Never the owner of simulation mutations. |
 | `scripts/ui_text.gd` | Shared display naming, numeric formatting, weapon/ship summaries and read-only economy building previews; used by match and Codex. |
 | `scripts/command_card_ui.gd` | Shared command-card grids, reserved slots, button faces, upgrade badges, hints and a single anchored instant command-information panel; owns per-match command icon cache. Match retains card-specific actions, layout decisions, hotkey registrations and selection. |
+| `scripts/hull_art.gd` | Authored hull geometry, cargo bay positions, hull/portrait/shield SVG generation and per-match texture caches; map drawing and selection consume the same geometry. |
 | `scripts/command_hotkeys.gd` | Command registration, key scope/conflicts, persisted override loading, hotkey badges and dispatch; match owns editor dialog and settings save. |
 | `scripts/trade_range.gd` | Two-handle trade threshold control, stock display, drag/commit signal; controller supplies policy and dispatches authority requests. |
 | `scripts/cost_button.gd` | CostButton widget: recipe/shortfall state and graphical custom tooltip; shared information-panel content. Match supplies costs, crew icon and hotkey hints. |
