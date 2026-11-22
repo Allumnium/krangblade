@@ -201,7 +201,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 		var income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE
 		var upkeep: float = float(totals["upkeep"])
 		var unpaid: int = int(totals["unpaid_ships"])
-		var details: String = "Galactic Credits · %.2f GC\nResident taxes (%.0f%%/yr): +%.2f GC/yr\nFleet upkeep: −%.2f GC/yr\nNet recurring income: %+.2f GC/yr\nConstruction fees paid on ordering." % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, upkeep, income - upkeep]
+		var details: String = "Galactic Credits · %.2f GC\nResident taxes (%.1f%%/yr): +%.2f GC/yr\nFleet upkeep: −%.2f GC/yr\nNet recurring income: %+.2f GC/yr\nConstruction fees paid on ordering." % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, upkeep, income - upkeep]
 		if unpaid > 0:
 			details += "\nWARNING: %d ships have unpaid wages." % unpaid
 		return details

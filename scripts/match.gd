@@ -773,7 +773,6 @@ func _layout_console() -> void:
 	# horizontal line. Camera framing still uses the unobstructed play area.
 	map_canvas.offset_bottom = -8.0
 	territory_view.layer.offset_bottom = map_canvas.offset_bottom
-	developer_tools.layout_perf(height)
 	# Symmetric wings occupy at most 48% of the deck together at the
 	# usual window sizes. The center receives all remaining width.
 	var wing_width: float = clampf(floorf((size.x - 28.0 - LENS_STRIP_WIDTH) * 0.24), 180.0, 320.0)

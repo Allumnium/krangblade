@@ -8,6 +8,8 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 - [ ] v0.89.44: Playtest quadratic production population gating (v0.89.46; 30k base), precise blockers and diagnostics lens placement; run economy and peer checks.
 
+- [ ] v0.89.47: Diagnostics below Menu, horizontal common-scale simulation phase bars with exact values, separate network metrics; resident tax halved to 0.5% per year. Upkeep unchanged. Verify overlay fit and economy/peer checks.
+
 ## Agreed design direction — hidden global Revelations
 
 - [ ] Dynamic diplomacy: replace fixed team membership with independent bilateral relationships between empires. Allow overlapping, non-transitive mutual alliances, neutrality and multi-sided wars. Empires without an alliance or war start neutral, not hostile. Explicit war declaration or confirmed deliberate attack initiates war. Before an explicit attack on a neutral ship or station, show a declaration confirmation identifying the targeted empire; confirmation initiates war and issues the attack, cancellation leaves neutrality and discards the order. Ordinary movement, patrol and autonomous weapons never initiate war; area attack-move does not implicitly declare war. Reject attacks and declarations during an active truce. Either side may offer peace, requiring mutual agreement. Enforce a 100 simulation-year bilateral no-combat truce. Put diplomacy in Empire. Define war acts, queued orders, alliance formation/breaking, whether allies must join wars, lobby migration and victory semantics before implementation; validate ownership and treaty state at authority, including AI and real peers. Do not equate alliances with exclusive team IDs or assume friendship/hostility propagates along alliance chains.
