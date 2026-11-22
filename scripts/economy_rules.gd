@@ -3767,63 +3767,14 @@ static func _work_miner_rendezvous(state: Dictionary, graph: Dictionary, miner: 
 
 static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, budgets: Array, dt: float) -> void:
 	ship["mining_active"] = false
+	if state.has("diplomacy") and _miner_evacuated(state, ship, teams):
+		return
 	var mode: String = str(ship.get("mining_mode", "idle"))
-	if state.has("diplomacy"):
-		var group: int = _combat_group(state, int(ship["owner"]))
-		var hostile_here: bool = not _civilian_transit_allowed(state, group, teams[int(ship["at"])])
-		if hostile_here and mode in ["outbound", "mining"]:
-			ship["mining_mode"] = "return"
-			mode = "return"
-		elif mode in ["approach", "delivery", "idle"] and (not _civilian_route_safe(state, ship, teams, group) or (hostile_here and ship["route"].is_empty())):
-			_evacuate_civilian(state, ship, teams)
-			return
 	if mode == "idle":
-		if not bool(ship.get("manual_mine", false)) and not autocast_ready(state, ship, "mine"):
-			return
-		if (ship["route"] as Array).is_empty():
-			ship["dest"] = -1
-			ship["source"] = -1
-		if float(state["elapsed"]) + EPS >= float(ship.get("next_mining_search", 0.0)):
-			_choose_field(state, ship, teams, cache)
-			if ship.get("mining_mode", "idle") == "idle" and int(ship.get("assigned_field", -1)) < 0:
-				ship.erase("manual_mine")
-			# Idle fleets retry twice per game year instead of every tick.
-			ship["next_mining_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
+		_miner_idle(state, ship, teams, cache)
 		return
 	if mode == "delivery":
-		if _cargo_total(ship) <= EPS and not ship["route"].is_empty() and not _unit_order_running(ship):
-			# Finish the current legal lane before selecting new work.
-			if not _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
-				return
-		# A loaded miner with nowhere to unload can fly locally while
-		# waiting for storage. Reacquire a reachable depot before docking;
-		# never transfer cargo from an idle formation's position.
-		if (ship["route"] as Array).is_empty() and int(ship.get("dest", -1)) < 0:
-			var here: int = int(ship["at"])
-			var team: int = _combat_group(state, int(ship["owner"]))
-			# Even empty miners must keep retrying escape from hostile space.
-			if not _civilian_transit_allowed(state, team, teams[here]):
-				if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
-					ship["next_unload_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
-					_evacuate_civilian(state, ship, teams)
-				return
-			if _cargo_total(ship) <= EPS:
-				ship["mining_mode"] = "idle"
-				ship["field"] = -1
-				return
-			if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
-				ship["next_unload_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
-				for resource in RESOURCES + [ANTIMATTER]:
-					if float(ship["cargo"].get(resource, 0.0)) <= EPS:
-						continue
-					var depot: int = _mining_depot(state, ship, teams, team, here, resource, cache)
-					if depot >= 0:
-						ship["dest"] = depot
-						_set_route(ship, _mining_path(state, teams, team, here, depot, cache))
-						break
-			return
-		if _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
-			_unload_miner(state, ship, teams, cache, dt)
+		_miner_delivery(state, ship, teams, cache, dt)
 		return
 	var field_index: int = int(ship["field"])
 	var field: Dictionary = state["map"]["fields"][field_index]
@@ -3836,68 +3787,136 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 		ship["field_leg"] = 0.0
 		mode = "outbound"
 	var origin: Vector2 = _service_point(state, ship, anchor)
-	var target: Vector2 = ship["mining_target"]
-	var span: Vector2 = target - origin
 	_ensure_position(state["map"]["points"], ship)
 	if mode == "outbound":
-		var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
-		if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
-			ship["mining_mode"] = "return"
-			return
-		_navigate(ship, target, ship_speed(str(ship.get("kind", "ship"))) * dt)
-		ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
-		if (ship["position"] as Vector2) == target:
-			ship["mining_mode"] = "mining"
-			ship["mining_years"] = 0.0
+		_miner_outbound(state, ship, field, field_index, origin, dt)
+	elif mode == "mining":
+		_miner_extract(state, ship, field, field_index, budgets, dt)
+	elif mode == "return":
+		_miner_return(state, ship, teams, cache, field_index, anchor, dt)
+
+# Hostile presence turns active mining into a return trip and evacuates
+# vulnerable idle/delivery miners. Returns true when the tick is consumed.
+static func _miner_evacuated(state: Dictionary, ship: Dictionary, teams: Array[int]) -> bool:
+	var mode: String = str(ship.get("mining_mode", "idle"))
+	var group: int = _combat_group(state, int(ship["owner"]))
+	var hostile_here: bool = not _civilian_transit_allowed(state, group, teams[int(ship["at"])])
+	if hostile_here and mode in ["outbound", "mining"]:
+		ship["mining_mode"] = "return"
+	elif mode in ["approach", "delivery", "idle"] and (not _civilian_route_safe(state, ship, teams, group) or (hostile_here and ship["route"].is_empty())):
+		_evacuate_civilian(state, ship, teams)
+		return true
+	return false
+
+static func _miner_idle(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
+	if not bool(ship.get("manual_mine", false)) and not autocast_ready(state, ship, "mine"):
 		return
-	if mode == "mining":
-		ship["mining_years"] = float(ship.get("mining_years", 0.0)) + dt
-		# The same emitters cannot fire at a rock and a hostile hull at once.
-		# Keep the assignment and resume extraction when the threat is gone.
-		if _engaged(ship) or int(ship.get("yard_target", -1)) < -1:
-			return
-		var resources: Array[String] = _mining_resources(state, int(ship["owner"]), field_index)
-		var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
-		var available: bool = not chunk.is_empty() and resources.has(str(chunk["resource"]))
-		if available:
-			var resource: String = str(chunk["resource"])
-			var free: float = MINER_CAPACITY - _cargo_total(ship)
-			var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * _player_factor(state, int(ship["owner"]), "rank_extraction", 0.10) * float(field[resource]) * dt, float(budgets[field_index][resource]))))
-			ship["mining_active"] = amount > EPS
-			_cargo_stat(ship, "tons_picked", resource, amount)
-			ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
-			chunk["remaining"] = maxf(0.0, float(chunk["remaining"]) - amount)
-			budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
-			if float(chunk["remaining"]) <= EPS:
-				field["chunks"].erase(chunk)
-				available = false
-		var reassigned: bool = int(ship.get("assigned_field", -1)) >= 0 and (int(ship["assigned_field"]) != field_index or (int(ship.get("assigned_chunk", -1)) >= 0 and int(ship["assigned_chunk"]) != int(ship["chunk"])))
-		if float(ship["mining_years"]) >= MINING_STAY - EPS and (reassigned or not available or _cargo_total(ship) >= MINER_CAPACITY - 0.1):
-			ship["mining_mode"] = "return"
-		return
-	if mode == "return":
-		# Return directly to a useful owned warehouse from the actual rock.
-		ship["last_mining_field"] = field_index
-		ship["mining_mode"] = "delivery"
-		ship["field"] = -1
-		ship["route"] = []
-		ship["leg"] = 0.0
+	if (ship["route"] as Array).is_empty():
 		ship["dest"] = -1
 		ship["source"] = -1
+	if float(state["elapsed"]) + EPS >= float(ship.get("next_mining_search", 0.0)):
+		_choose_field(state, ship, teams, cache)
+		if ship.get("mining_mode", "idle") == "idle" and int(ship.get("assigned_field", -1)) < 0:
+			ship.erase("manual_mine")
+		# Idle fleets retry twice per game year instead of every tick.
+		ship["next_mining_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
+
+static func _miner_delivery(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
+	if _cargo_total(ship) <= EPS and not ship["route"].is_empty() and not _unit_order_running(ship):
+		# Finish the current legal lane before selecting new work.
+		if not _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
+			return
+	# A loaded miner with nowhere to unload can fly locally while
+	# waiting for storage. Reacquire a reachable depot before docking;
+	# never transfer cargo from an idle formation's position.
+	if (ship["route"] as Array).is_empty() and int(ship.get("dest", -1)) < 0:
+		var here: int = int(ship["at"])
 		var team: int = _combat_group(state, int(ship["owner"]))
-		for resource in RESOURCES + [ANTIMATTER]:
-			if float(ship["cargo"].get(resource, 0.0)) <= EPS:
-				continue
-			var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache)
-			if depot >= 0:
-				ship["dest"] = depot
-				ship["route"] = [depot]
-				if _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
-					_unload_miner(state, ship, teams, cache, dt)
-				return
+		# Even empty miners must keep retrying escape from hostile space.
+		if not _civilian_transit_allowed(state, team, teams[here]):
+			if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
+				ship["next_unload_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
+				_evacuate_civilian(state, ship, teams)
+			return
 		if _cargo_total(ship) <= EPS:
 			ship["mining_mode"] = "idle"
-			ship["next_mining_search"] = 0.0
+			ship["field"] = -1
+			return
+		if float(state["elapsed"]) + EPS >= float(ship.get("next_unload_search", 0.0)):
+			ship["next_unload_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
+			for resource in RESOURCES + [ANTIMATTER]:
+				if float(ship["cargo"].get(resource, 0.0)) <= EPS:
+					continue
+				var depot: int = _mining_depot(state, ship, teams, team, here, resource, cache)
+				if depot >= 0:
+					ship["dest"] = depot
+					_set_route(ship, _mining_path(state, teams, team, here, depot, cache))
+					break
+		return
+	if _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
+		_unload_miner(state, ship, teams, cache, dt)
+
+static func _miner_outbound(state: Dictionary, ship: Dictionary, field: Dictionary, field_index: int, origin: Vector2, dt: float) -> void:
+	var target: Vector2 = ship["mining_target"]
+	var span: Vector2 = target - origin
+	var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
+	if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
+		ship["mining_mode"] = "return"
+		return
+	_navigate(ship, target, ship_speed(str(ship.get("kind", "ship"))) * dt)
+	ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
+	if (ship["position"] as Vector2) == target:
+		ship["mining_mode"] = "mining"
+		ship["mining_years"] = 0.0
+
+static func _miner_extract(state: Dictionary, ship: Dictionary, field: Dictionary, field_index: int, budgets: Array, dt: float) -> void:
+	ship["mining_years"] = float(ship.get("mining_years", 0.0)) + dt
+	# The same emitters cannot fire at a rock and a hostile hull at once.
+	# Keep the assignment and resume extraction when the threat is gone.
+	if _engaged(ship) or int(ship.get("yard_target", -1)) < -1:
+		return
+	var resources: Array[String] = _mining_resources(state, int(ship["owner"]), field_index)
+	var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
+	var available: bool = not chunk.is_empty() and resources.has(str(chunk["resource"]))
+	if available:
+		var resource: String = str(chunk["resource"])
+		var free: float = MINER_CAPACITY - _cargo_total(ship)
+		var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * _player_factor(state, int(ship["owner"]), "rank_extraction", 0.10) * float(field[resource]) * dt, float(budgets[field_index][resource]))))
+		ship["mining_active"] = amount > EPS
+		_cargo_stat(ship, "tons_picked", resource, amount)
+		ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
+		chunk["remaining"] = maxf(0.0, float(chunk["remaining"]) - amount)
+		budgets[field_index][resource] = maxf(0.0, float(budgets[field_index][resource]) - amount)
+		if float(chunk["remaining"]) <= EPS:
+			field["chunks"].erase(chunk)
+			available = false
+	var reassigned: bool = int(ship.get("assigned_field", -1)) >= 0 and (int(ship["assigned_field"]) != field_index or (int(ship.get("assigned_chunk", -1)) >= 0 and int(ship["assigned_chunk"]) != int(ship["chunk"])))
+	if float(ship["mining_years"]) >= MINING_STAY - EPS and (reassigned or not available or _cargo_total(ship) >= MINER_CAPACITY - 0.1):
+		ship["mining_mode"] = "return"
+
+static func _miner_return(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, field_index: int, anchor: int, dt: float) -> void:
+	# Return directly to a useful owned warehouse from the actual rock.
+	ship["last_mining_field"] = field_index
+	ship["mining_mode"] = "delivery"
+	ship["field"] = -1
+	ship["route"] = []
+	ship["leg"] = 0.0
+	ship["dest"] = -1
+	ship["source"] = -1
+	var team: int = _combat_group(state, int(ship["owner"]))
+	for resource in RESOURCES + [ANTIMATTER]:
+		if float(ship["cargo"].get(resource, 0.0)) <= EPS:
+			continue
+		var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache)
+		if depot >= 0:
+			ship["dest"] = depot
+			ship["route"] = [depot]
+			if _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
+				_unload_miner(state, ship, teams, cache, dt)
+			return
+	if _cargo_total(ship) <= EPS:
+		ship["mining_mode"] = "idle"
+		ship["next_mining_search"] = 0.0
 
 static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
 	var here: int = int(ship["at"])
