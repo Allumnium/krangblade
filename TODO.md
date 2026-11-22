@@ -4,7 +4,7 @@ Living roadmap. Build a playable, low-micro galactic RTS with conventional direc
 
 Review AGENTS.md before work. This is a prioritized backlog, not blanket approval to invent mechanics. Numerical balance remains provisional. Earlier implementation history and the superseded policy roadmap are preserved in git (v0.17.36 and earlier).
 
-- [ ] v0.89.42: Verify rearranged HUD, control group strip alignment, persistent empty center/right panels and input blocking at varied resolutions.
+- [ ] v0.89.42: Verify rearranged HUD, control group and F1–F4 strip alignment (v0.89.51), persistent empty center/right panels and input blocking at varied resolutions.
 
 - [ ] v0.89.44: Playtest quadratic production population gating (v0.89.46; 30k base), precise blockers and diagnostics lens placement; run economy and peer checks.
 
