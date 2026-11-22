@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.48: Shorten command, resource and control tooltips; retain icon costs and yield. Ship construction GC fees scale 2× small, 3× medium, 4× large; material costs and wages unchanged. Visual table/icon follow-ups and runtime validation pending.
+
 - v0.89.47: Diagnostics below Menu, horizontal common-scale simulation phase bars with exact values, separate network metrics; resident tax halved to 0.5% per year. Upkeep unchanged. Verify overlay fit and economy/peer checks.
 
 - v0.89.46: Raise first production-building upgrade gate to 30,000 local residents; retain quadratic target-level scaling (30k, 120k, 270k, 480k). Costs unchanged. Opening growth/food bootstrap and AI pacing require playtesting.

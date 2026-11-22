@@ -632,7 +632,7 @@ func _map_layout_picker() -> OptionButton:
 	for layout in MAP.LAYOUTS:
 		picker.add_item(layout)
 	picker.select(0)
-	picker.tooltip_text = "Radial: connected outer and inner rings, inward spokes, central antimatter. Grid: lattice clusters. Hex Grid: small hex cells in separated clusters. Scramble: irregular clusters. All layouts keep antimatter away from starting systems."
+	picker.tooltip_text = "Galaxy layout"
 	return picker
 
 func _refresh_roster() -> void:

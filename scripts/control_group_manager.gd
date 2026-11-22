@@ -75,4 +75,4 @@ func refresh(state: Dictionary, player: int, building_valid: Callable, hull_art:
 		button.text = "%d·%d" % [number, count] if button.size.x >= 34.0 else str(number)
 		button.icon = hull_art.selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
 		button.disabled = false
-		command_card_ui.set_hint(button, "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace · Shift+%d to add" % [number, count, "ships" if kind == "units" else "structures", number, number, number])
+		command_card_ui.set_hint(button, "Group %d · %d %s\n%d: Select · Twice: Center\nCtrl+%d: Replace · Shift+%d: Add" % [number, count, "ships" if kind == "units" else "structures", number, number, number])

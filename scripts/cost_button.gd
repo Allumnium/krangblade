@@ -8,10 +8,10 @@ var missing: Array[String] = []
 var crew_icon: Texture2D
 var effect_resource: String = ""
 
-func set_recipe(cost: Dictionary, crew: float, population_icon: Texture2D, available: Dictionary) -> void:
+func set_recipe(cost: Dictionary, crew: float, population_icon: Texture2D, available: Dictionary, kind: String = "") -> void:
 	recipe = cost.duplicate()
 	if not cost.is_empty():
-		recipe["GC"] = ECONOMY.construction_credit_cost(cost)
+		recipe["GC"] = ECONOMY.construction_credit_cost(cost, kind)
 	missing.clear()
 	if crew > 0.0:
 		recipe["Population"] = crew

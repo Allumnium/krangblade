@@ -37,10 +37,10 @@ static func roman_level(level: int) -> String:
 	return result
 
 static func blaster_summary(kind: String) -> String:
-	return "Blasters ×%d · %.0f damage/shot · %d shots/burst · %.1f s on / %.1f s off · Range %.0f" % [ECONOMY.blaster_count(kind), ECONOMY.BLASTER_DAMAGE, ECONOMY.BLASTER_SHOTS, ECONOMY.BLASTER_BURST, ECONOMY.BLASTER_PAUSE, ECONOMY.LASER_RANGE]
+	return "Blasters ×%d | %.0f dmg ×%d | %.1fs/%.1fs | R%.0f" % [ECONOMY.blaster_count(kind), ECONOMY.BLASTER_DAMAGE, ECONOMY.BLASTER_SHOTS, ECONOMY.BLASTER_BURST, ECONOMY.BLASTER_PAUSE, ECONOMY.LASER_RANGE]
 
 static func capital_weapon_summary(kind: String) -> String:
-	return "Lasers ×%d · %.0f damage each · 1 s · Range %.0f\nMissiles ×%d · %.0f damage each · %.0f s · Range %.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE] + "\n" + blaster_summary(kind)
+	return "Lasers ×%d | %.0f dmg | 1s | R%.0f\nMissiles ×%d | %.0f dmg | %.0fs | R%.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE] + "\n" + blaster_summary(kind)
 
 static func ship_stats(kind: String) -> String:
 	var details: String = ""
@@ -93,7 +93,7 @@ static func economy_building_effect(p: Dictionary, resource: String) -> String:
 		sample["eco_population"] = 0.0
 		sample["planet_blockaded"] = false
 	var base: float = ECONOMY.rate(reference_preview, resource) - ECONOMY.rate(reference, resource)
-	var result: String = "Yield: %s t/yr\nReference: %s t/yr %s 10k %s" % [signed_yield(actual), signed_yield(base), "at" if resource == "Organics" else "per", "planetary residents" if resource == "Organics" else "local residents"]
+	var result: String = "Yield: %s t/yr\nReference: %s t/yr %s 10k %s" % [signed_yield(actual), signed_yield(base), "at" if resource == "Organics" else "per", "planetary pop." if resource == "Organics" else "pop."]
 	if resource == "Organics":
 		result += "\n+%s food-supported population" % compact_amount(ECONOMY.population_capacity(preview) - ECONOMY.population_capacity(p))
 	if bool(p.get("planet_blockaded", false)):

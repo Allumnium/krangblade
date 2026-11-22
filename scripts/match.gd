@@ -12,19 +12,19 @@ const FOG_OF_WAR = preload("res://scripts/fog_of_war.gd")
 const TERRITORY_VIEW = preload("res://scripts/territory_view.gd")
 const CAMERA_VIEW = preload("res://scripts/camera_view.gd")
 const UI_COMMAND_DETAILS = {
-	"move": "Choose a destination in a discovered region. Cross sectors along highways. Shift queues the order.",
-	"stop": "Cancel current orders and stop. Shift queues the stop.",
-	"hold": "Keep position until released or given another order. Weapons still fire in range.",
-	"patrol": "Choose an endpoint to patrol back and forth from the current position; combat interrupts the route.",
-	"attack": "Choose a hostile target or destination to attack along the route. Attacking a neutral empire requires confirmation.",
-	"load": "Choose floating salvage to collect with an eligible cargo ship that has space.",
-	"unload": "Choose a friendly station or eligible ship to deliver cargo, or empty space to drop it.",
-	"repair": "Choose a friendly damaged ship or structure for your Harvesters to repair.",
+	"move": "Move to a discovered destination via highways.",
+	"stop": "Cancel orders and stop.",
+	"hold": "Hold position; weapons remain active.",
+	"patrol": "Patrol between two points.",
+	"attack": "Attack or attack-move. Neutral targets require war confirmation.",
+	"load": "Collect floating salvage.",
+	"unload": "Deliver cargo or drop in space.",
+	"repair": "Repair a friendly ship or structure.",
 	"deliver_farm": "Unload harvested Organics early at a nearby station.",
 	"guard": "Choose a sector position to defend.",
 	"transform": "Establish a station in an eligible neutral system.",
-	"auto_wander": "Roam within the current sector when idle; other orders take priority.",
-	"auto_explore": "Scout connected sectors away from friendly ships and stations when idle.",
+	"auto_wander": "Roam locally when idle.",
+	"auto_explore": "Explore connected sectors away from allies when idle.",
 	"auto_mine": "Automatically mine enabled asteroid resources and deliver cargo.",
 	"auto_salvage": "Collect nearby floating resources when safe and cargo space is available.",
 	"auto_repair": "Automatically repair nearby eligible damaged friendly units and structures.",
@@ -711,7 +711,7 @@ func _build_trade_controls() -> void:
 		var slider := TradeRange.new()
 		slider.custom_minimum_size.y = 26
 		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		slider.tooltip_text = "%s thresholds\nImport below the left handle; export above the right handle. 100%% = %.0f t." % [resource, ECONOMY.TRADE_REFERENCE]
+		slider.tooltip_text = "%s thresholds\nImport below min · Export above max 100%% = %.0f t." % [resource, ECONOMY.TRADE_REFERENCE]
 		command_card_ui.register_info(slider, str(resource) + " thresholds")
 		slider.committed.connect(_apply_thresholds.bind(resource))
 		logistics.add_child(slider)
@@ -927,9 +927,9 @@ func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
 		bar.add_theme_stylebox_override("fill", HUD.surface(Color("#b56b35"), Color("#f2b57e"), 0, 3))
 		bar.tooltip_text = "Blocked: " + ", ".join(blocked)
 
-func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {}, crew: float = 0.0, available: Dictionary = {}) -> void:
+func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {}, crew: float = 0.0, available: Dictionary = {}, kind: String = "") -> void:
 	var cost_button: CostButton = button as CostButton
-	cost_button.set_recipe(cost, crew, _population_texture() if crew > 0.0 else null, available)
+	cost_button.set_recipe(cost, crew, _population_texture() if crew > 0.0 else null, available, kind)
 	var shortcut: String = str(button.get_meta("hotkey", ""))
 	command_card_ui.set_hint(button, description if shortcut.is_empty() else (description + "\n[" + shortcut + "]" if not description.is_empty() else "[" + shortcut + "]"))
 
@@ -1057,7 +1057,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		yard_row_spacers.append(command_card_ui.add_spacer(grid))
 	var station_button := _button("", _select_yard_station, grid)
 	command_card_ui.set_face(station_button, "Select Space\nStation", command_card_ui.icon("select_station"))
-	command_card_ui.set_hint(station_button, "Select Space Station\nReturn to this shipyard’s parent station and its construction commands.")
+	command_card_ui.set_hint(station_button, "Select parent station")
 	hotkeys.register(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
 	var navigation_spacer: Control = command_card_ui.add_spacer(grid)
 	var clear := _button("", func() -> void:
@@ -1066,13 +1066,13 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		for ref in _selected_yards(_state(), true):
 			session.call("request_shipyard_rally", ref.x, ref.y, -1, Vector2.ZERO), grid)
 	command_card_ui.set_face(clear, "Clear\nRally", command_card_ui.icon("clear_rally"))
-	command_card_ui.set_hint(clear, "Clear Rally\nNewly built ships no longer travel to a rally destination.")
+	command_card_ui.set_hint(clear, "Clear Rally")
 	yard_commands["clear"] = clear
 	hotkeys.register(clear, KEY_X, "Shipyard", "yard_clear", "Clear Rally")
 	var rally_button := CostButton.new()
 	command_card_ui.set_face(rally_button, "Rally", command_card_ui.icon("rally"))
 	rally_button.toggle_mode = true
-	command_card_ui.set_hint(rally_button, "Rally\nChoose a destination for ships completed at the selected shipyards.")
+	command_card_ui.set_hint(rally_button, "Rally\nDestination for new ships")
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
@@ -1121,7 +1121,7 @@ func _select_yard_station() -> void:
 func _station_button(grid: GridContainer, caption: String, key: String, action: Callable) -> Button:
 	var button: Button = _button("", action, grid, true)
 	var art: TextureRect = command_card_ui.set_face(button, caption, command_card_ui.icon(key))
-	var navigation: Dictionary = {"build": "Build\nConstruct resource production, housing, storage, defenses or shipyards.", "trade": "Trade\nSet import and export thresholds for this station.", "return": "Return\nGo back to the station command card."}
+	var navigation: Dictionary = {"build": "Build\nConstruct resource production, housing, storage, defenses or shipyards.", "trade": "Trade\nSet import and export thresholds for this station.", "return": "Return"}
 	if navigation.has(key):
 		command_card_ui.set_hint(button, navigation[key])
 	button.set_meta("portrait", art)
@@ -1281,7 +1281,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			recipe = ECONOMY.building_cost(p, key)
 			eligible = ECONOMY.production_available(p, key)
 			available = ECONOMY.building_available(p, key)
-			description = "Requires %s local population (%s present)\n%s" % [UI_TEXT.compact_amount(float(ECONOMY.building_population(key, current_level + 1))), UI_TEXT.compact_amount(float(p["population"])), UI_TEXT.economy_building_effect(p, key)]
+			description = "Population: %s required / %s present\n%s" % [UI_TEXT.compact_amount(float(ECONOMY.building_population(key, current_level + 1))), UI_TEXT.compact_amount(float(p["population"])), UI_TEXT.economy_building_effect(p, key)]
 		elif key == "warehouse":
 			var level: int = int(p.get("warehouse_level", 0))
 			current_level = level
@@ -1403,7 +1403,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	button.accept_event()
 
 func _yard_build_available(system: Dictionary, slot: int, kind: String) -> bool:
-	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.construction_affordable(_state(), system, ECONOMY.construction_cost(system, kind, 1)) and (kind != "ship" or bool(system["home"]))
+	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.construction_affordable(_state(), system, ECONOMY.construction_cost(system, kind, 1), kind) and (kind != "ship" or bool(system["home"]))
 
 func _build_at_yard(kind: String) -> void:
 	var state: Dictionary = _state()
@@ -1458,7 +1458,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = hull_art.production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
+		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard), kind)
 		if not ECONOMY.yard_fits(system, selected_yard, kind):
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
 		if not operating:
@@ -1550,10 +1550,10 @@ func _refresh_queue_tiles(queue: HFlowContainer, rows: Dictionary, system: Dicti
 			tile.add_theme_stylebox_override("normal", HUD.surface(Color("#172c3b"), Color("#db9b54") if blocked else HUD.ACCENT, 3, 3))
 		else:
 			tile.remove_theme_stylebox_override("normal")
-		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), ("Delivering" if job.has("delivery_slot") else ("Building" if id == active_id else "Queued")), percent, "\n" + widgets["bar"].tooltip_text if blocked else "", ("\nClick to cancel; materials become salvage" if ECONOMY.construction_leaves_salvage(job) else "\nClick to cancel and refund") if owned else ""]
+		tile.tooltip_text = "%s · %s (%.0f%%)%s%s" % [_job_name(job), ("Delivering" if job.has("delivery_slot") else ("Building" if id == active_id else "Queued")), percent, "\n" + widgets["bar"].tooltip_text if blocked else "", ("\nCancel: material salvage" if ECONOMY.construction_leaves_salvage(job) else "\nCancel: full refund") if owned else ""]
 
 		if float(job.get("credit_cost", 0.0)) > 0.0:
-			tile.tooltip_text += "\n%.0f GC prepaid%s" % [float(job["credit_cost"]), " · refunded on cancellation" if owned else ""]
+			tile.tooltip_text += "\n%.0f GC reserved%s" % [float(job["credit_cost"]), " · refunded on cancellation" if owned else ""]
 
 func _build_body_overview(parent: Container) -> void:
 	body_overview = VBoxContainer.new()
@@ -1934,19 +1934,15 @@ func _refresh_autocast_cards() -> void:
 		if remaining > ECONOMY.EPS:
 			status += " · %.1f s remaining%s" % [remaining / speed, " (paused)" if int(state.get("time_speed", 1)) == 0 else ""]
 		var shortcut: String = str(button.get_meta("hotkey", ""))
-		command_card_ui.set_hint(button, "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut])
+		command_card_ui.set_hint(button, "%s · %s\nToggle [%s]" % [title_text, status, shortcut])
 		if duration > 0.0:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nCooldown: %.1f s at 1×" % duration)
-		if mode in ["mine", "salvage", "repair", "trade", "wander"]:
+		if mode in ["mine", "salvage", "repair", "trade", "wander", "explore"]:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + UI_COMMAND_DETAILS.get(id, ""))
-		if mode == "wander":
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority.")
-		elif mode == "explore":
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nExplores connected sectors continuously when idle; no cooldown. Active orders and Hold take priority.")
-		elif mode == "collect":
-			command_card_ui.set_hint(button, "%s · Auto: %s\nLeft click [%s], then choose a Pulsar. Right click toggles autocast.\nCollects 1 unit in %.0f s at 1×; auto cooldown %.0f s." % [title_text, status, shortcut, ECONOMY.SCIENCE_COLLECTION_YEARS, duration])
+		if mode == "collect":
+			command_card_ui.set_hint(button, "%s · Auto: %s\n[%s] Select Pulsar · Right-click: Auto\n1 antimatter / %.0f s · Cooldown %.0f s" % [title_text, status, shortcut, ECONOMY.SCIENCE_COLLECTION_YEARS, duration])
 		elif mode == "retreat":
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nWithdraw to safety at %.0f%% hull; resume orders after full repair." % (100.0 * ECONOMY.WITHDRAW_HP / ECONOMY.SHIP_HP))
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRetreat at %.0f%% HP; resume after repair." % (100.0 * ECONOMY.WITHDRAW_HP / ECONOMY.SHIP_HP))
 		elif mode == "farm":
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nProduces %.0f t/s at 1×; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
 
@@ -2386,7 +2382,7 @@ func _inspector_page(title_text: String) -> GridContainer:
 	station_trade.add_child(footer)
 	station_trade_back = _button("", _station_card_to.bind("primary"), footer)
 	command_card_ui.set_face(station_trade_back, "Return", command_card_ui.icon("return"))
-	command_card_ui.set_hint(station_trade_back, "Return\nGo back to the station command card.")
+	command_card_ui.set_hint(station_trade_back, "Return")
 	hotkeys.register(station_trade_back, KEY_ESCAPE, "Station Trade", "trade_return", "Return")
 	station_trade_back.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return page
@@ -2442,7 +2438,7 @@ func _update_trade_stock(p: Dictionary) -> void:
 		slider.set_stock(stock, capacity, HUD.COLORS[resource])
 		trade_stock_labels[resource].text = "%s / %s" % [UI_TEXT.tons(stock, 1, true), UI_TEXT.tons(capacity, 0, true)]
 		trade_stock_labels[resource].tooltip_text = "%.1f / %.0f t" % [stock, capacity]
-		command_card_ui.set_hint(slider, "%s thresholds\nImport below the left handle; export above the right handle. 100%% = %.0f units." % [resource, capacity])
+		command_card_ui.set_hint(slider, "%s thresholds\nImport below min · Export above max 100%% = %.0f units." % [resource, capacity])
 		# Preserve this handle while dragging, even when a snapshot arrives.
 		if slider.active_handle < 0:
 			var t: Dictionary = p["thresholds"][resource]
@@ -3464,7 +3460,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = hull_art.production_icon(kind, _empire_color(_me()))
 		portrait.modulate = Color.WHITE if eligible else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [UI_TEXT.ship_kind_name(kind), UI_TEXT.ship_stats(kind)], ECONOMY.construction_cost(state["planets"][refs[0].x] if not refs.is_empty() else {}, kind, 1), float(ECONOMY.CREW_COSTS[kind]), available)
+		_set_cost_tooltip(button, "%s · Cost per ship\n1 per eligible yard\n%s\nRight-click: toggle autobuild" % [UI_TEXT.ship_kind_name(kind), UI_TEXT.ship_stats(kind)], ECONOMY.construction_cost(state["planets"][refs[0].x] if not refs.is_empty() else {}, kind, 1), float(ECONOMY.CREW_COSTS[kind]), available, kind)
 	var can_clear: bool = false
 	var can_upgrade: Dictionary = {2: false, 3: false}
 	for ref in refs:
@@ -4264,7 +4260,7 @@ func _build_global_selection_strip() -> void:
 		hotkeys.register(button, int(entry[3]), "General", entry[0], "Select all " + str(entry[1]).to_lower())
 	var empire_button: Button = _button("", _open_empire, global_selection_strip)
 	command_card_ui.set_face(empire_button, "Empire", _command_icon('<circle cx="16" cy="16" r="6"/><circle cx="5" cy="6" r="3"/><circle cx="27" cy="6" r="3"/><circle cx="16" cy="28" r="2"/><path d="M8 9L12 12M24 9L20 12M16 22V26"/>'))
-	command_card_ui.set_hint(empire_button, "Empire\nSet desired fleet counts and manage diplomatic relationships.")
+	command_card_ui.set_hint(empire_button, "Empire\nFleet management & diplomacy")
 	hotkeys.register(empire_button, KEY_F4, "General", "empire", "Empire")
 	empire_ui.build(self, session, _me, _empire_color, hull_art.selection_portrait_icon, _label)
 	global_selection_strip.resized.connect(_layout_console)
