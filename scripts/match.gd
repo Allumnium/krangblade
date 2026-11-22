@@ -397,6 +397,19 @@ func _build_match_header() -> void:
 	row.move_child(help, 1)
 	resource_hud.build(row, _label, _population_row, _state, _me, _system_name)
 	row.move_child(resource_hud.year_label.get_parent(), 2)
+	header_panel.minimum_size_changed.connect(_layout_match_header)
+	_layout_match_header()
+
+func _layout_match_header() -> void:
+	if not is_instance_valid(header_panel) or not is_instance_valid(map_canvas):
+		return
+	# Reserve the right column only when all header tiles fit at their minimum widths.
+	var reserved: float = MATCH_CONQUEST_UI.OBJECTIVES_WIDTH + 4.0
+	var alongside: bool = header_panel.get_combined_minimum_size().x <= map_canvas.size.x - reserved
+	header_panel.offset_right = -8.0 - (reserved if alongside else 0.0)
+	conquest_ui.header_height = 0.0 if alongside else HEADER_HEIGHT
+	conquest_ui.layout()
+	objectives_overlay.queue_redraw()
 
 
 func _build_match_dialogs() -> void:
@@ -508,6 +521,7 @@ func _build_command_deck() -> void:
 	inspector_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_card_ui.setup_info(self, inspector_panel, inspector_slot)
 	inspector_slot.resized.connect(_layout_right_panel)
+	inspector_slot.item_rect_changed.connect(_layout_control_group_strip)
 	# Both wings use the same fixed width; only the center expands.
 	inspector_panel.size_flags_horizontal = Control.SIZE_FILL
 	inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -2913,7 +2927,7 @@ func _projection_size() -> Vector2:
 	return Vector2(map_canvas.size.x, maxf(1.0, map_canvas.size.y - hud_height))
 
 func _map_resized() -> void:
-	conquest_ui.layout()
+	_layout_match_header()
 	_layout_match_chat()
 	# The world-space center is independent of screen dimensions.
 	camera.zoom = minf(camera.zoom, _max_zoom())
@@ -3113,15 +3127,23 @@ func _build_control_group_strip() -> void:
 func _layout_control_group_strip() -> void:
 	if not is_instance_valid(control_group_strip):
 		return
-	var center_width: float = console_center.size.x
-	var shortcut_width: float = global_selection_strip.get_combined_minimum_size().x + 6.0 if is_instance_valid(global_selection_strip) else 0.0
-	var strip_width: float = minf(540.0, maxf(control_group_strip.get_combined_minimum_size().x, center_width - shortcut_width))
-	control_group_strip.size = Vector2(strip_width, 26.0)
-	var deck_width: float = strip_width + shortcut_width
-	control_group_strip.global_position = console_center_spacer.global_position + Vector2(maxf(0.0, (center_width - deck_width) * 0.5), console_center_spacer.size.y + console_center.get_theme_constant("separation") - control_group_strip.size.y - 3.0)
+	var left: float = console_center_spacer.global_position.x
+	var right: float = inspector_slot.global_position.x if is_instance_valid(inspector_slot) else left + console_center.size.x
+	var bottom: float = console_center_spacer.global_position.y + console_center_spacer.size.y + console_center.get_theme_constant("separation") - 3.0
+	var group_min: float = control_group_strip.get_combined_minimum_size().x
+	var group_right: float = right
+	var group_bottom: float = bottom
 	if is_instance_valid(global_selection_strip):
 		global_selection_strip.size = global_selection_strip.get_combined_minimum_size()
-		global_selection_strip.global_position = control_group_strip.global_position + Vector2(control_group_strip.size.x + 6.0, control_group_strip.size.y - global_selection_strip.size.y)
+		global_selection_strip.global_position = Vector2(right - global_selection_strip.size.x, bottom - global_selection_strip.size.y)
+		group_right = global_selection_strip.global_position.x - 6.0
+		# At very narrow widths keep both strips usable without overlapping.
+		if group_right - left < group_min:
+			group_right = right
+			group_bottom = global_selection_strip.global_position.y - 3.0
+	var strip_width: float = minf(540.0, maxf(group_min, group_right - left))
+	control_group_strip.size = Vector2(strip_width, 26.0)
+	control_group_strip.global_position = Vector2(left + maxf(0.0, (group_right - left - control_group_strip.size.x) * 0.5), group_bottom - control_group_strip.size.y)
 
 func _prune_control_group(state: Dictionary, group: Dictionary) -> Dictionary:
 	return control_group_manager.prune(state, group, _me(), _building_valid)
@@ -4069,7 +4091,7 @@ func _layout_match_chat() -> void:
 	if not is_instance_valid(match_chat_edit):
 		return
 	var width: float = _notification_width()
-	match_chat_edit.position = Vector2((map_canvas.size.x - width) * 0.5, HEADER_HEIGHT + 2.0)
+	match_chat_edit.position = Vector2(_notification_left(width), HEADER_HEIGHT + 2.0)
 	match_chat_edit.size = Vector2(width, 28.0)
 
 func _close_match_chat() -> void:
@@ -4919,7 +4941,11 @@ func _draw_objectives_overlay() -> void:
 	_draw_conquest_notifications(state, ThemeDB.fallback_font, float(state.get("objective_clock", 0.0)))
 
 func _notification_width() -> float:
-	return clampf(map_canvas.size.x * 0.56, 80.0, 560.0)
+	var available: float = maxf(80.0, map_canvas.size.x - MATCH_CONQUEST_UI.OBJECTIVES_WIDTH - 8.0)
+	return minf(clampf(map_canvas.size.x * 0.56, 80.0, 560.0), available)
+
+func _notification_left(width: float) -> float:
+	return maxf(0.0, minf((map_canvas.size.x - width) * 0.5, map_canvas.size.x - MATCH_CONQUEST_UI.OBJECTIVES_WIDTH - 8.0 - width))
 
 # Keep every message on one invisible, centered column. Text shadows
 # preserve legibility without a background panel or individually centered cards.
@@ -4934,7 +4960,7 @@ func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -
 	var roster: Dictionary = session.get("players")
 	var y: float = HEADER_HEIGHT + 49.0 if match_chat_edit.visible else HEADER_HEIGHT + 34.0
 	var width: float = _notification_width() - 16.0
-	var left: float = (map_canvas.size.x - _notification_width()) * 0.5 + 8.0
+	var left: float = _notification_left(_notification_width()) + 8.0
 	var visible_count: int = 0
 	tactical_hit_rects.clear()
 	var now: int = Time.get_ticks_msec()

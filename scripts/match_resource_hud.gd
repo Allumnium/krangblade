@@ -86,12 +86,12 @@ func _build_global_bar(stats: Container) -> void:
 		HUD.fixed_icon(icon, HUD.resource_icon(resource, 18), 18)
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		line.add_child(icon)
-		var value: Label = make_label.call("0", 13)
+		var value: Label = make_label.call("0", 15)
 		value.autowrap_mode = TextServer.AUTOWRAP_OFF
 		value.clip_text = true
-		value.add_theme_font_size_override("font_size", 12)
+		value.add_theme_font_size_override("font_size", 15)
 		value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		value.add_theme_color_override("font_color", HUD.COLORS[resource])
 		line.add_child(value)
 		global_resource_labels[resource] = value
@@ -121,7 +121,7 @@ func _build_credit_stat(parent: Container) -> void:
 	HUD.fixed_icon(credit_icon, HUD.resource_icon("GC", 18), 18)
 	credit_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	balance_row.add_child(credit_icon)
-	global_credit_label = make_label.call("0", 12)
+	global_credit_label = make_label.call("0", 15)
 	global_credit_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	global_credit_label.add_theme_color_override("font_color", HUD.CREDIT_COLOR)
 	balance_row.add_child(global_credit_label)
@@ -141,6 +141,8 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
 	label.mouse_filter = Control.MOUSE_FILTER_PASS
 	if population:
 		tile.custom_minimum_size.x = 104.0
+		label.add_theme_font_size_override("font_size", 15)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		label.clip_text = true
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var stack := VBoxContainer.new()
