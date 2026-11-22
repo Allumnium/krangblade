@@ -678,8 +678,6 @@ static func nearest_idle_colony(state: Dictionary, player: int, target: int) -> 
 			continue
 		if ship.get("unit_order", {}).get("kind", "") == "colonize" and int(ship.get("dest", -1)) >= 0:
 			continue
-		if not ship.get("route", []).is_empty() and not bool(ship.get("farm_auto_delivery", false)) and not bool(ship.get("salvage_delivery", false)):
-			continue
 		var path: Array[int] = colony_path(state, player, ship, target)
 		if path.is_empty():
 			continue
