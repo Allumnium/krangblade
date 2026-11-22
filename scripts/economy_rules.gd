@@ -4679,10 +4679,7 @@ static func command_service(state: Dictionary, player: int, ids: Array, order: D
 		if not _valid_unit_order(state, graph, ship, order, false):
 			return false
 	for ship in units:
-		_cancel_salvage_order(ship)
-		_clear_tactical_order(ship)
-		_clear_local_hold(ship)
-		_interrupt_work(ship)
+		_reset_unit_for_order(ship)
 		_set_unit_order(state, ship, order.duplicate(true))
 		if order["kind"] == "repair":
 			ship["repair_order"] = order["target"]
@@ -5164,10 +5161,7 @@ static func command_attack(state: Dictionary, player: int, ids: Array, target_id
 	if units.is_empty() or units.any(func(craft: Dictionary) -> bool: return not armed(craft)):
 		return false
 	for craft in units:
-		_cancel_salvage_order(craft)
-		_clear_tactical_order(craft)
-		_clear_local_hold(craft)
-		_interrupt_work(craft)
+		_reset_unit_for_order(craft)
 		craft["attack_order"] = target_id
 		_set_unit_order(state, craft, {"kind": "attack", "target": target_id})
 	return true
@@ -5747,10 +5741,7 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 			return changed
 		"warp_travel":
 			for ship in _owned_units(state, player, ids):
-				_cancel_salvage_order(ship)
-				_clear_tactical_order(ship)
-				_clear_local_hold(ship)
-				_interrupt_work(ship)
+				_reset_unit_for_order(ship)
 				_finish_manual(ship)
 				_set_unit_order(state, ship, order.duplicate(true))
 			return true
@@ -5759,46 +5750,11 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 		"hold":
 			return command_hold_units(state, player, ids, false)
 		"transform":
-			var graph: Dictionary = military_graph(state)
-			var converted: bool = false
-			for ship in _owned_units(state, player, ids):
-				if can_transform_colony(state, graph, ship):
-					converted = send_colony(state, player, int(ship["id"]), local_sector(graph, ship), true) or converted
-			return converted
+			return _order_transform(state, player, ids)
 		"follow":
-			var units: Array = _owned_units(state, player, ids)
-			var refs: Dictionary = service_targets(state)
-			if units.is_empty() or units.any(func(ship: Dictionary) -> bool: return not _valid_follow_target(state, ship, target, refs)):
-				return false
-			for ship in units:
-				_cancel_salvage_order(ship)
-				_clear_tactical_order(ship)
-				_clear_local_hold(ship)
-				_interrupt_work(ship)
-				_set_unit_order(state, ship, order.duplicate(true))
-				# Retain an in-flight lane until the follow worker replans it.
-				ship["dest"] = -1
-				ship["move_only"] = not bool(order.get("guard", false))
-			return true
+			return _order_follow(state, player, ids, order, target)
 		"sector_entry":
-			var graph: Dictionary = military_graph(state)
-			var center: Vector2 = graph["points"][target]
-			var move_only: bool = bool(order.get("move_only", false))
-			var accepted: bool = command_local_position(state, player, ids, target, center, move_only)
-			if not accepted:
-				accepted = command_remote_position(state, player, ids, target, center, move_only)
-			if not accepted:
-				return false
-			for ship in _owned_units(state, player, ids):
-				var origin: Vector2 = ship["position"]
-				var route: Array = ship["route"]
-				if route.size() > 1:
-					origin = graph["points"][int(route[-2])]
-				var point: Vector2 = sector_entry_point(graph, target, origin)
-				ship["local_move_target"] = point
-				ship["navigation_target"] = point
-				ship["unit_order"] = {"kind": "sector_entry", "target": target, "move_only": move_only}
-			return true
+			return _order_sector_entry(state, player, ids, order, target)
 		"sector":
 			if _owned_fighters(state, player, ids).size() == ids.size():
 				return command_fighters(state, player, ids, target, bool(order.get("move_only", false)))
@@ -5821,10 +5777,7 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 			return accepted
 		"collect":
 			for ship in _owned_units(state, player, ids):
-				_cancel_salvage_order(ship)
-				_clear_tactical_order(ship)
-				_clear_local_hold(ship)
-				_interrupt_work(ship)
+				_reset_unit_for_order(ship)
 				_set_unit_order(state, ship, {"kind": "collect", "target": target})
 				ship["science_years"] = 0.0
 			return true
@@ -5839,16 +5792,68 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 		"colonize":
 			return ids.size() == 1 and send_colony(state, player, ids[0], target)
 		"position":
-			var accepted: bool = command_local_position(state, player, ids, target, order["point"], bool(order.get("move_only", false)))
-			if not accepted:
-				accepted = command_remote_position(state, player, ids, target, order["point"], bool(order.get("move_only", false)))
-			if accepted:
-				for ship in _owned_units(state, player, ids):
-					ship["unit_order"] = order.duplicate(true)
-					if order.has("heading"):
-						ship["arrival_heading"] = (order["heading"] as Vector2).normalized()
-			return accepted
+			return _order_position(state, player, ids, order, target)
 	return false
+
+# Shared preamble for orders that take over a hull: release salvage, tactical
+# orders, local hold and autonomous work, in this order.
+static func _reset_unit_for_order(ship: Dictionary) -> void:
+	_cancel_salvage_order(ship)
+	_clear_tactical_order(ship)
+	_clear_local_hold(ship)
+	_interrupt_work(ship)
+
+static func _order_transform(state: Dictionary, player: int, ids: Array) -> bool:
+	var graph: Dictionary = military_graph(state)
+	var converted: bool = false
+	for ship in _owned_units(state, player, ids):
+		if can_transform_colony(state, graph, ship):
+			converted = send_colony(state, player, int(ship["id"]), local_sector(graph, ship), true) or converted
+	return converted
+
+static func _order_follow(state: Dictionary, player: int, ids: Array, order: Dictionary, target: int) -> bool:
+	var units: Array = _owned_units(state, player, ids)
+	var refs: Dictionary = service_targets(state)
+	if units.is_empty() or units.any(func(ship: Dictionary) -> bool: return not _valid_follow_target(state, ship, target, refs)):
+		return false
+	for ship in units:
+		_reset_unit_for_order(ship)
+		_set_unit_order(state, ship, order.duplicate(true))
+		# Retain an in-flight lane until the follow worker replans it.
+		ship["dest"] = -1
+		ship["move_only"] = not bool(order.get("guard", false))
+	return true
+
+static func _order_sector_entry(state: Dictionary, player: int, ids: Array, order: Dictionary, target: int) -> bool:
+	var graph: Dictionary = military_graph(state)
+	var center: Vector2 = graph["points"][target]
+	var move_only: bool = bool(order.get("move_only", false))
+	var accepted: bool = command_local_position(state, player, ids, target, center, move_only)
+	if not accepted:
+		accepted = command_remote_position(state, player, ids, target, center, move_only)
+	if not accepted:
+		return false
+	for ship in _owned_units(state, player, ids):
+		var origin: Vector2 = ship["position"]
+		var route: Array = ship["route"]
+		if route.size() > 1:
+			origin = graph["points"][int(route[-2])]
+		var point: Vector2 = sector_entry_point(graph, target, origin)
+		ship["local_move_target"] = point
+		ship["navigation_target"] = point
+		ship["unit_order"] = {"kind": "sector_entry", "target": target, "move_only": move_only}
+	return true
+
+static func _order_position(state: Dictionary, player: int, ids: Array, order: Dictionary, target: int) -> bool:
+	var accepted: bool = command_local_position(state, player, ids, target, order["point"], bool(order.get("move_only", false)))
+	if not accepted:
+		accepted = command_remote_position(state, player, ids, target, order["point"], bool(order.get("move_only", false)))
+	if accepted:
+		for ship in _owned_units(state, player, ids):
+			ship["unit_order"] = order.duplicate(true)
+			if order.has("heading"):
+				ship["arrival_heading"] = (order["heading"] as Vector2).normalized()
+	return accepted
 
 # All mutation takes place on the authority. A pending command never reserves
 # salvage or changes the current route until it actually starts.
@@ -5977,10 +5982,7 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 		if not sector_contains(graph, node, ship["position"]) or bool(ship.get("retreating", false)):
 			return false
 	for ship in units:
-		_cancel_salvage_order(ship)
-		_clear_tactical_order(ship)
-		_clear_local_hold(ship)
-		_interrupt_work(ship)
+		_reset_unit_for_order(ship)
 		_set_unit_order(state, ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
 		ship["local_move_target"] = point
 		ship["local_move_sector"] = node
@@ -6013,10 +6015,7 @@ static func command_remote_position(state: Dictionary, player: int, ids: Array, 
 		if bool(ship.get("retreating", false)):
 			return false
 	for ship in units:
-		_cancel_salvage_order(ship)
-		_clear_tactical_order(ship)
-		_clear_local_hold(ship)
-		_interrupt_work(ship)
+		_reset_unit_for_order(ship)
 		var nav: Dictionary = _manual_nav(state, graph, ship, node)
 		ship["route"] = []
 		ship["leg"] = 0.0
@@ -7047,10 +7046,7 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		if piles.has(old) and int(piles[old]["claim"]) == int(best["id"]):
 			piles[old]["claim"] = -1
 		_release_auto_salvage(best, piles)
-		_cancel_salvage_order(best)
-		_clear_tactical_order(best)
-		_clear_local_hold(best)
-		_interrupt_work(best)
+		_reset_unit_for_order(best)
 		_set_unit_order(state, best, {"kind": "salvage", "target": id})
 		best["salvage_target"] = id
 		pile["claim"] = int(best["id"])

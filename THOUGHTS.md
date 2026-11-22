@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.13: Split _execute_unit_order: follow, sector entry, transform and position orders move into _order_* helpers; the repeated salvage/tactical/hold/work reset sequence becomes _reset_unit_for_order (six call sites, same call order). Determinism probe identical, economy failure set unchanged. No gameplay change; runtime/ENet pending.
+
 - v0.97.12: Split the 124-line _work_opportunistic_salvage into _salvage_nearby_cells, _nearest_salvage (ID tie-break unchanged), _approach_salvage and _finish_salvage_pickup. Claim order, threat computation and return values unchanged. Determinism probe identical, economy failure set unchanged. No gameplay change; runtime/ENet pending.
 
 - v0.97.11: Split freighter resource staging: _choose_resource_stage delegates to _stage_census, _best_mining_stage and _best_salvage_stage (salvage scan skipped when mining_only; pure, same result); _work_resource_stage delegates to _resource_stage_safe, _abandon_resource_stage, _salvage_site_available, _survey_mining_stage and _leave_loaded_stage. Strict-less scoring order unchanged. Determinism probe identical (helpers exercised in ai_match), economy failure set unchanged. No gameplay change; runtime/ENet pending.
