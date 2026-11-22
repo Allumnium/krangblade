@@ -45,12 +45,9 @@ func draw_sector_target(graph: Dictionary, node: int, tint: Color, drawn: Dictio
 	if node < 0 or node >= graph["points"].size() or drawn.has(node):
 		return
 	drawn[node] = true
-	var center: Vector2 = graph["points"][node]
-	var outline := PackedVector2Array()
-	for i in range(97):
-		var direction := Vector2.from_angle(TAU * float(i) / 96.0)
-		outline.append(screen_point.call(center + direction * ECONOMY.sector_limit(graph, node, direction)))
-	map_canvas.draw_polyline(outline, Color(tint, 0.9), 2.0, true)
+	var center: Vector2 = screen_point.call(graph["points"][node])
+	map_canvas.draw_arc(center, 12.0, 0.0, TAU, 24, Color(tint, 0.9), 1.5, true)
+	map_canvas.draw_circle(center, 2.0, tint)
 
 func draw_formation_preview(state: Dictionary, formation_button: int, formation_length: float, formation_mode: String, formation_path: PackedVector2Array, formation_orders: Callable, selected_owned_units: Callable) -> void:
 	if formation_button == 0 or formation_length <= 5.0:

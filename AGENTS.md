@@ -39,7 +39,9 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
-- v0.90.0: Continuous bounded Voronoi influence map: stable system/field/highway-midpoint sites, cached polygons and shared borders, actual polygon adjacency spillover, matching minimap. Keep existing local tactical disks and highway graph separate; manual shortcuts require full-strength exclusively friendly/allied influence over the whole segment. No new replication fields. Validate map coverage, visuals/fog, boundary ties, route fallback on influence loss, combat/AI, solo/ENet and fleet performance.
+- v0.90.2: Hide sector and highway borders, minimap grid/lanes and setup preview links; show localized soft player-color presence around visible infrastructure and fleets, shared with minimap. Asteroid boundaries only when selected; sector order outlines become target reticles. Keep existing hidden navigation, influence and tactical warning rules until free-space movement is migrated explicitly. Validate fog/cloak, scale, overlap, large-fleet performance, solo and ENet; visual/runtime validation pending.
+
+- v0.90.0 (hidden rules only; visual borders superseded by v0.90.2): Continuous bounded Voronoi influence map: stable system/field/highway-midpoint sites, cached polygons and shared borders, actual polygon adjacency spillover, matching minimap. Keep existing local tactical disks and highway graph separate; manual shortcuts require full-strength exclusively friendly/allied influence over the whole segment. No new replication fields. Validate map coverage, visuals/fog, boundary ties, route fallback on influence loss, combat/AI, solo/ENet and fleet performance.
 
 - v0.89.67: Replace inline numeric GC net income with centered white chevrons beneath balance, without storage fill. Share the resource chevron drawing and tiers; scale recurring net income to current treasury with STARTING_GC as the minimum reference (not a cap). Retain hover rates and unpaid wage warning. Visual/runtime validation pending.
 

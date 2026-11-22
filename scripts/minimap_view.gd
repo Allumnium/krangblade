@@ -126,11 +126,6 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 		return
 	var area: Rect2 = _minimap_area()
 	minimap.draw_rect(area, Color("#090f17"))
-	for i in range(1, 5):
-		var x: float = area.position.x + area.size.x * float(i) / 5.0
-		var y: float = area.position.y + area.size.y * float(i) / 5.0
-		minimap.draw_line(Vector2(x, area.position.y), Vector2(x, area.end.y), Color("#142437"))
-		minimap.draw_line(Vector2(area.position.x, y), Vector2(area.end.x, y), Color("#142437"))
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var points: Array = graph["points"]
 	var count: int = state["planets"].size()
@@ -140,24 +135,7 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 	for i in range(points.size()):
 		locations.append(_minimap_point(points[i], area))
 		known.append(ECONOMY.discovered(state, viewer, "planets" if i < count else "fields", i if i < count else i - count))
-	var geometry: Dictionary = ECONOMY.sector_geometry(graph)
-	for i in range(geometry["polygons"].size()):
-		var influence: Color = territory_view.tints[i] if i < territory_view.tints.size() else Color.TRANSPARENT
-		if influence.a <= 0.0:
-			continue
-		var polygon := PackedVector2Array()
-		for point in geometry["polygons"][i]:
-			polygon.append(_minimap_point(point, area))
-		if polygon.size() >= 3:
-			minimap.draw_colored_polygon(polygon, Color(influence, 0.30 * influence.a))
-	for border in geometry["borders"]:
-		minimap.draw_line(_minimap_point(border["a"], area), _minimap_point(border["b"], area), Color("#354958"), 1.0, true)
-	var edges: Array = graph["edges"]
-	for i in range(edges.size()):
-		var a: int = int(edges[i][0])
-		var b: int = int(edges[i][1])
-		var tint: Color = Color("#69869e") if known[a] and known[b] else Color("#182b3b")
-		minimap.draw_line(locations[a], locations[b], tint, 1.0, true)
+	territory_view.draw_presence(minimap, area.position, area.size)
 	for i in range(points.size()):
 		var tint := Color("#40566b")
 		if i < count:

@@ -1,21 +1,18 @@
 extends RefCounted
-## Cached political polygons; the simulation owns site IDs and geometry.
+## Smooth, local presence shading. No political polygon or highway rendering.
+## Navigation influence and warning destinations remain authoritative rule queries.
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 
 var friendly_sectors: Array[int] = []
 var layer: Control
 var radius: float = 1.0
-var tints: Array[Color] = []
 var region_graph: Dictionary = {}
 var _region_cache: Dictionary = {}
 var _mesh_root: Node2D
 var _fill_material: ShaderMaterial
-var _rim_material: ShaderMaterial
-var _fills: Array[Polygon2D] = []
-var _rims: Array[Line2D] = []
-var _border_data: Array = []
+var _gradient: GradientTexture2D
+var _presence: Array[Dictionary] = []
 var _extent: Vector2 = Vector2.ONE
-var _line_scale: float = 0.0
 
 func build(parent: Control) -> void:
 	layer = Control.new()
@@ -30,11 +27,23 @@ func build(parent: Control) -> void:
 	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_mesh_root = Node2D.new()
 	layer.add_child(_mesh_root)
-	_fill_material = _fog_material(false)
-	_rim_material = _fog_material(true)
+	_fill_material = _fog_material()
+	_mesh_root.material = _fill_material
+	_mesh_root.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_mesh_root.draw.connect(_draw_presence)
+	var ramp := Gradient.new()
+	ramp.offsets = PackedFloat32Array([0.0, 0.30, 0.65, 1.0])
+	ramp.colors = PackedColorArray([Color.WHITE, Color(1.0, 1.0, 1.0, 0.82), Color(1.0, 1.0, 1.0, 0.28), Color(1.0, 1.0, 1.0, 0.0)])
+	_gradient = GradientTexture2D.new()
+	_gradient.gradient = ramp
+	_gradient.width = 128
+	_gradient.height = 128
+	_gradient.fill = GradientTexture2D.FILL_RADIAL
+	_gradient.fill_from = Vector2(0.5, 0.5)
+	_gradient.fill_to = Vector2(1.0, 0.5)
 	_mesh_root.hide()
 
-func _fog_material(rim: bool) -> ShaderMaterial:
+func _fog_material() -> ShaderMaterial:
 	var shader := Shader.new()
 	shader.code = """
 shader_type canvas_item;
@@ -43,83 +52,43 @@ uniform sampler2D fog_data : filter_linear, repeat_disable;
 uniform vec2 fog_uv_scale = vec2(1.0);
 uniform vec2 map_extent = vec2(1.0);
 uniform bool fog_ready = false;
-uniform bool is_rim = false;
 varying vec2 world_point;
 void vertex() {
 	world_point = VERTEX;
 }
 void fragment() {
-	bool concealed = !fog_ready || texture(fog_data, world_point / map_extent * fog_uv_scale).a > 0.05;
-	if (concealed) {
-		COLOR = is_rim ? vec4(0.60, 0.68, 0.76, 0.17) : vec4(0.0);
+	if (!fog_ready || any(lessThan(world_point, vec2(0.0))) || any(greaterThan(world_point, map_extent))) {
+		COLOR.a = 0.0;
+	} else {
+		COLOR.a *= 1.0 - smoothstep(0.0, 0.05, texture(fog_data, world_point / map_extent * fog_uv_scale).a);
 	}
 }
 """
 	var material := ShaderMaterial.new()
 	material.shader = shader
-	material.set_shader_parameter("is_rim", rim)
 	return material
 
-func _rebuild_geometry(geometry: Dictionary, extent: Vector2) -> void:
-	for child in _mesh_root.get_children():
-		_mesh_root.remove_child(child)
-		child.queue_free()
-	_fills.clear()
-	_rims.clear()
-	_extent = extent.max(Vector2.ONE)
-	_line_scale = 0.0
-	for material in [_fill_material, _rim_material]:
-		material.set_shader_parameter("map_extent", _extent)
-	for polygon in geometry["polygons"]:
-		var fill := Polygon2D.new()
-		fill.polygon = polygon
-		fill.visible = polygon.size() >= 3
-		fill.material = _fill_material
-		fill.color = Color.TRANSPARENT
-		_mesh_root.add_child(fill)
-		_fills.append(fill)
-	_border_data = geometry["borders"]
-	for border in _border_data:
-		var line := Line2D.new()
-		line.points = PackedVector2Array([border["a"], border["b"]])
-		line.width = 1.0
-		line.antialiased = true
-		line.material = _rim_material
-		_mesh_root.add_child(line)
-		_rims.append(line)
-
-func _apply_tints() -> void:
-	for i in range(_fills.size()):
-		var tint: Color = tints[i]
-		_fills[i].color = Color(tint, tint.a * 0.10)
-	for i in range(_rims.size()):
-		var border: Dictionary = _border_data[i]
-		var a: Color = tints[int(border["left"])]
-		var b: Color = tints[int(border["right"])] if int(border["right"]) >= 0 else Color.TRANSPARENT
-		var neutral := Color("#99adbf")
-		var own: bool = a.a > 0.0 and b.a > 0.0 and Vector3(a.r, a.g, a.b).distance_to(Vector3(b.r, b.g, b.b)) < 0.06
-		var dominant: Color = a if a.a >= b.a else b
-		var hue: Color = neutral.lerp(Color(dominant, 1.0), dominant.a)
-		_rims[i].default_color = Color(hue, 0.15 if own else lerpf(0.18, 0.60, dominant.a))
-
-func refresh(state: Dictionary, local_player: int, map_size: Vector2, roster: Dictionary, empire_color: Callable) -> bool:
+func refresh(state: Dictionary, local_player: int, map_size: Vector2, empire_color: Callable, fog_visible: Callable, ship_visible: Callable) -> bool:
 	if state.is_empty():
 		_mesh_root.hide()
+		_presence.clear()
+		friendly_sectors.clear()
 		_region_cache.clear()
 		region_graph = {}
-		tints.clear()
 		return false
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var points: Array = graph["points"]
 	if points.is_empty():
 		_mesh_root.hide()
+		_presence.clear()
+		friendly_sectors.clear()
 		return false
 	if not is_same(region_graph, graph):
 		radius = ECONOMY.sector_base_radius(state["map"])
-		tints.clear()
 		_region_cache.clear()
 		region_graph = graph
-		_rebuild_geometry(ECONOMY.sector_geometry(graph), map_size)
+		_extent = map_size.max(Vector2.ONE)
+		_fill_material.set_shader_parameter("map_extent", _extent)
 	var known: Array[int] = ECONOMY.military_pois(state, local_player)
 	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph, known, _region_cache)
 	# Only known sectors with a friendly majority are warning destinations.
@@ -136,32 +105,72 @@ func refresh(state: Dictionary, local_player: int, map_size: Vector2, roster: Di
 				hostile += float(weights[index][owner])
 		if friendly > hostile or (index < state["planets"].size() and ECONOMY.has_station(state["planets"][index]) and ECONOMY.empires_allied(state, local_player, int(state["planets"][index]["owner"]))):
 			friendly_sectors.append(index)
-	var colors: Dictionary = {}
-	for player in roster:
-		colors[player] = empire_color.call(int(player))
-	var next_tints: Array[Color] = []
-	for weights_by_player in weights:
-		next_tints.append(ECONOMY.influence_color(weights_by_player, colors))
-	if next_tints == tints:
+
+	var next_presence: Array[Dictionary] = []
+	# Infrastructure casts a broad, soft area around its actual system.
+	for index in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][index]
+		var owner: int = int(system["owner"])
+		if owner <= 0 or not ECONOMY.discovered(state, local_player, "planets", index) or not fog_visible.call(points[index]):
+			continue
+		var strength: float = float(ECONOMY.system_presence_weight(system))
+		if strength > 0.0:
+			var fraction: float = clampf(strength / ECONOMY.INFLUENCE_CAP, 0.0, 1.0)
+			next_presence.append({"point": points[index], "radius": radius * lerpf(0.55, 1.0, fraction), "color": Color(empire_color.call(owner), lerpf(0.10, 0.28, fraction))})
+	# Aggregate nearby visible ships by player to bound draw count for large fleets.
+	# The weighted centroid tracks actual hull locations, not highway/sector sites.
+	var groups: Dictionary = {}
+	var cell_size: float = maxf(1.0, radius * 0.4)
+	for ship in state["ships"]:
+		var owner: int = int(ship["owner"])
+		if owner <= 0 or float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) <= 0.0 or not ship_visible.call(state, ship):
+			continue
+		var point: Vector2 = ECONOMY.combat_position(state, graph, ship)
+		var weight: float = float(ECONOMY.ship_presence_weight(ship))
+		var cell := Vector2i(floori(point.x / cell_size), floori(point.y / cell_size))
+		var key := Vector3i(cell.x, cell.y, owner)
+		var group: Vector3 = groups.get(key, Vector3.ZERO)
+		groups[key] = group + Vector3(point.x * weight, point.y * weight, weight)
+	for key in groups:
+		var group: Vector3 = groups[key]
+		var fraction: float = clampf(group.z / ECONOMY.INFLUENCE_CAP, 0.0, 1.0)
+		next_presence.append({"point": Vector2(group.x, group.y) / group.z, "radius": radius * lerpf(0.25, 0.72, fraction), "color": Color(empire_color.call(key.z), lerpf(0.075, 0.23, fraction))})
+	if next_presence == _presence and _mesh_root.visible:
 		return false
-	tints = next_tints
-	_apply_tints()
+	_presence = next_presence
 	_mesh_root.show()
+	_mesh_root.queue_redraw()
 	return true
 
+func _draw_presence() -> void:
+	draw_presence(_mesh_root, Vector2.ZERO, _extent, 1.0)
+
+# The same soft footprints are drawn on the minimap before its fog and markers.
+func draw_presence(canvas: CanvasItem, origin: Vector2, display_size: Vector2, opacity_scale: float = 1.5) -> void:
+	if _gradient == null:
+		return
+	var factor: Vector2 = display_size / _extent
+	var limits := Rect2(origin, display_size)
+	var texture_size := Vector2(_gradient.get_width(), _gradient.get_height())
+	for entry in _presence:
+		var center: Vector2 = origin + entry["point"] * factor
+		var spread: Vector2 = Vector2.ONE * float(entry["radius"]) * factor
+		var rect := Rect2(center - spread, spread * 2.0)
+		var clipped: Rect2 = rect.intersection(limits)
+		if not clipped.has_area():
+			continue
+		var source := Rect2((clipped.position - rect.position) / rect.size * texture_size, clipped.size / rect.size * texture_size)
+		var tint: Color = entry["color"]
+		tint.a = minf(1.0, tint.a * opacity_scale)
+		canvas.draw_texture_rect_region(_gradient, clipped, source, tint)
+
 func set_fog(texture: ImageTexture, uv_scale: Vector2) -> void:
-	for material in [_fill_material, _rim_material]:
-		material.set_shader_parameter("fog_data", texture)
-		material.set_shader_parameter("fog_uv_scale", uv_scale)
-		material.set_shader_parameter("fog_ready", true)
+	_fill_material.set_shader_parameter("fog_data", texture)
+	_fill_material.set_shader_parameter("fog_uv_scale", uv_scale)
+	_fill_material.set_shader_parameter("fog_ready", true)
 
 func set_geometry(origin: Vector2, display_size: Vector2) -> void:
 	var padding: Vector2 = Vector2.ONE * radius * 1.5
 	var factor: Vector2 = display_size / (_extent + padding * 2.0)
 	_mesh_root.position = origin + padding * factor
 	_mesh_root.scale = factor
-	var line_scale: float = 1.0 / maxf(0.00001, factor.x)
-	if not is_equal_approx(line_scale, _line_scale):
-		_line_scale = line_scale
-		for line in _rims:
-			line.width = line_scale * 1.2

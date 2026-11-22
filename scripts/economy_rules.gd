@@ -5375,6 +5375,18 @@ static func _fully_friendly_cells(state: Dictionary, player: int, weights: Array
 			allowed[i] = true
 	return allowed
 
+# Shared physical presence weights; no ownership changes or spatial rules.
+static func system_presence_weight(system: Dictionary) -> int:
+	var points: int = STATION_INFLUENCE if has_station(system) else 0
+	points += YARD_INFLUENCE * (system.get("yards", []) as Array).size()
+	var buildings: int = (system.get("pds", {}) as Dictionary).size() + int(system.get("orbital_housing", 0))
+	for count in system.get("buildings", {}).values():
+		buildings += int(count)
+	return points + BUILDING_INFLUENCE * buildings
+
+static func ship_presence_weight(ship: Dictionary) -> int:
+	return int(SHIP_INFLUENCE.get(ship["kind"], BUILDING_INFLUENCE if ship["kind"] == "warp_gate" else 1))
+
 static func territory_influence(state: Dictionary, graph: Dictionary, known_pois: Variant = null, region_cache: Dictionary = {}) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for i in range(int(highway_regions(graph)["size"])):
@@ -5384,18 +5396,13 @@ static func territory_influence(state: Dictionary, graph: Dictionary, known_pois
 		var owner: int = int(system["owner"])
 		if owner <= 0:
 			continue
-		var points: int = STATION_INFLUENCE if has_station(system) else 0
-		points += YARD_INFLUENCE * (system.get("yards", []) as Array).size()
-		var buildings: int = (system.get("pds", {}) as Dictionary).size() + int(system.get("orbital_housing", 0))
-		for count in system.get("buildings", {}).values():
-			buildings += int(count)
-		points += BUILDING_INFLUENCE * buildings
+		var points: int = system_presence_weight(system)
 		if points > 0:
 			result[i][owner] = points
 	var live_regions: Dictionary = {}
 	for ship in state["ships"]:
 		var owner: int = int(ship["owner"])
-		var weight: int = int(SHIP_INFLUENCE.get(ship["kind"], BUILDING_INFLUENCE if ship["kind"] == "warp_gate" else 1))
+		var weight: int = ship_presence_weight(ship)
 		if owner <= 0 or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) <= 0.0:
 			continue
 		var id: int = int(ship["id"])
