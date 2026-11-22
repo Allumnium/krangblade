@@ -3968,6 +3968,22 @@ func _test_precise_patrol() -> void:
 			returned = true
 			break
 	assert(reached and returned)
+	# Several adjacent patrol waypoints form one circuit, not independent orders.
+	var third := Vector2(1200, 1450)
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "patrol", "target": 0, "point": nearby}, false))
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "patrol", "target": 0, "point": third}, true))
+	assert(craft["patrol_waypoints"].size() == 2 and not craft.has("order_queue"))
+	var expected: Array = [nearby, third, start, nearby, third, start]
+	var reached_count: int = 0
+	for tick in range(2000):
+		ECON.step(state, 0.1)
+		if craft["position"] == expected[reached_count]:
+			reached_count += 1
+			if reached_count == expected.size():
+				break
+	assert(reached_count == expected.size() and craft.has("patrol_from"))
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "stop"}, false))
+	assert(not craft.has("patrol_waypoints") and not craft.has("patrol_index"))
 	# An exact patrol endpoint in free space is valid.
 	assert(ECON.patrol_node(state, graph, 1, Vector2(3400, 3000)) >= 0)
 	var remote := Vector2(4500, 2900)

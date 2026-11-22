@@ -378,14 +378,27 @@ func draw_queued_chains(canvas: CanvasItem, state: Dictionary, poses: Dictionary
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
 		var queue: Array = ship.get("order_queue", [])
-		if queue.is_empty() or not selected.has(id) or not poses.has(id) or int(ship["owner"]) != local_player.call():
+		var patrol_waypoints: Array = ship.get("patrol_waypoints", [])
+		if (queue.is_empty() and patrol_waypoints.is_empty()) or not selected.has(id) or not poses.has(id) or int(ship["owner"]) != local_player.call():
 			continue
 		var start: Vector2 = poses[id]["point"]
 		var anchor: Vector2 = Vector2.INF
 		var active: Dictionary = ship.get("unit_order", {})
 		var endpoint: Vector2 = Vector2.INF
 		var active_tint: Color = order_color(ship, active)
-		if ship.has("launch_rally"):
+		if not patrol_waypoints.is_empty():
+			var origin: Vector2 = screen_point.call(ship["patrol_start_point"])
+			var previous: Vector2 = origin
+			for waypoint_index in range(patrol_waypoints.size()):
+				var waypoint: Dictionary = patrol_waypoints[waypoint_index]
+				var waypoint_point: Vector2 = screen_point.call(waypoint["point"])
+				_add_queue_leg(legs, waypoint_index + 1, previous if waypoint_index > 0 else Vector2.INF, previous, waypoint_point, "patrol", active_tint, str(ship["kind"]), waypoint.get("heading", Vector2.ZERO), waypoint.has("heading"))
+				previous = waypoint_point
+			if queue.is_empty() or bool(ship.get("patrol_returning", false)):
+				_add_queue_leg(legs, 0, previous, previous, origin, "", active_tint, "", Vector2.ZERO, false)
+			start = origin if bool(ship.get("patrol_returning", false)) else previous
+			anchor = start
+		elif ship.has("launch_rally"):
 			endpoint = screen_point.call(ship["launch_rally"]["point"])
 			active_tint = Color("#ff605c")
 		elif ECONOMY._unit_order_running(ship):
@@ -403,7 +416,7 @@ func draw_queued_chains(canvas: CanvasItem, state: Dictionary, poses: Dictionary
 			var tint: Color = order_color(ship, pending)
 			var ghost: bool = endpoint.is_finite() and (kind == "position" and selected_units.size() == 1 or kind in ["position", "patrol"] and pending.has("heading"))
 			var heading: Vector2 = pending.get("heading", endpoint - start if endpoint.is_finite() else Vector2.ZERO)
-			_add_queue_leg(legs, index + 1, anchor, start, endpoint, kind, tint, str(ship["kind"]), heading, ghost)
+			_add_queue_leg(legs, patrol_waypoints.size() + index + 1, anchor, start, endpoint, kind, tint, str(ship["kind"]), heading, ghost)
 			if endpoint.is_finite():
 				start = endpoint
 				anchor = endpoint

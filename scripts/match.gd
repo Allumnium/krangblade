@@ -18,7 +18,7 @@ const UI_COMMAND_DETAILS = {
 	"move": "Move directly to any point inside the map.",
 	"stop": "Cancel orders and stop.",
 	"hold": "Hold position; weapons remain active.",
-	"patrol": "Patrol between two points.",
+	"patrol": "Patrol a route. Shift adds waypoints.",
 	"attack": "Attack or attack-move. Neutral targets require war confirmation.",
 	"load": "Collect floating salvage.",
 	"unload": "Deliver cargo or drop in space.",
@@ -4519,7 +4519,8 @@ func _draw_map() -> void:
 			if craft.has("patrol_from"):
 				var from: Vector2 = _screen_point(craft["patrol_start_point"])
 				var to: Vector2 = _screen_point(craft["patrol_end_point"])
-				order_view.draw_command_line(map_canvas, from, to, Color("#b880fa"))
+				if (craft.get("patrol_waypoints", []) as Array).is_empty():
+					order_view.draw_command_line(map_canvas, from, to, Color("#b880fa"))
 				order_view.draw_formation_order_ghost(craft, active_order, viewport_bounds.grow(60.0 * maxf(0.42, _ship_scale())))
 			elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
 				var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
