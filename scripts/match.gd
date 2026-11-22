@@ -169,12 +169,11 @@ var selected_ship_id: int = -1
 var selected_units: Array[int] = []
 var command_kind: String = ""
 var command_selection: Array[int] = []
-var control_groups: Dictionary = {}
+var control_group_manager := preload("res://scripts/control_group_manager.gd").new()
 var last_control_group_recall: int = -1
 var last_control_group_recall_ms: int = -1000
 var control_group_strip: HBoxContainer
 var global_selection_strip: VBoxContainer
-var control_group_buttons: Dictionary = {}
 var selection_start: Vector2 = Vector2.ZERO
 var selection_end: Vector2 = Vector2.ZERO
 var selecting_units: bool = false
@@ -2534,9 +2533,9 @@ func _refresh() -> void:
 			if int(planets[i]["owner"]) == _me() and bool(planets[i].get("home", false)):
 				initial_selection_done = true
 				selected = i
-				control_groups[1] = {"kind": "station", "refs": {Vector2i(i, 0): 0}}
+				control_group_manager.control_groups[1] = {"kind": "station", "refs": {Vector2i(i, 0): 0}}
 				if not planets[i]["yards"].is_empty():
-					control_groups[2] = {"kind": "shipyard", "refs": {Vector2i(i, 0): planets[i]["yards"].size()}}
+					control_group_manager.control_groups[2] = {"kind": "shipyard", "refs": {Vector2i(i, 0): planets[i]["yards"].size()}}
 				# Center the initial camera on the player's home system.
 				_frame_starting_sector(i)
 				# The first snapshot can arrive before the HUD containers have
@@ -3207,7 +3206,7 @@ func _build_control_group_strip() -> void:
 		button.add_theme_constant_override("icon_max_width", 14)
 		button.add_theme_font_size_override("font_size", 11)
 		button.disabled = true
-		control_group_buttons[number] = button
+		control_group_manager.control_group_buttons[number] = button
 	control_group_strip.resized.connect(func() -> void: _refresh_control_groups(_state()))
 	_layout_control_group_strip()
 
@@ -3219,31 +3218,8 @@ func _layout_control_group_strip() -> void:
 	control_group_strip.size = Vector2(strip_width, 26.0)
 	control_group_strip.global_position = console_center_spacer.global_position + Vector2((center_width - strip_width) * 0.5, console_center_spacer.size.y + console_center.get_theme_constant("separation") - control_group_strip.size.y - 3.0)
 
-func _control_ref_valid(state: Dictionary, ref: Vector2i, kind: String, expected_count: int) -> bool:
-	var planets: Array = state.get("planets", [])
-	if ref.x < 0 or ref.x >= planets.size() or int(planets[ref.x]["owner"]) != _me():
-		return false
-	if kind == "system":
-		return ECONOMY.has_station(planets[ref.x])
-	if kind == "planet":
-		return ref.y >= 0 and ref.y < int(planets[ref.x].get("planet_count", 0))
-	return _building_valid(state, ref, kind, expected_count)
-
 func _prune_control_group(state: Dictionary, group: Dictionary) -> Dictionary:
-	var kind: String = group.get("kind", "")
-	if kind == "units":
-		var ids: Array[int] = []
-		for craft in state.get("ships", []):
-			if int(craft["owner"]) == _me() and group["ids"].has(int(craft["id"])):
-				ids.append(int(craft["id"]))
-		return {} if ids.is_empty() else {"kind": kind, "ids": ids}
-	if kind.is_empty():
-		return {}
-	var refs: Dictionary = {}
-	for ref in group["refs"]:
-		if _control_ref_valid(state, ref, kind, int(group["refs"][ref])):
-			refs[ref] = group["refs"][ref]
-	return {} if refs.is_empty() else {"kind": kind, "refs": refs}
+	return control_group_manager.prune(state, group, _me(), _building_valid)
 
 func _current_control_group(state: Dictionary) -> Dictionary:
 	if not selected_units.is_empty():
@@ -3259,56 +3235,15 @@ func _current_control_group(state: Dictionary) -> Dictionary:
 func _assign_control_group(number: int, additive: bool = false) -> void:
 	last_control_group_recall = -1
 	var state: Dictionary = _state()
-	var group: Dictionary = _current_control_group(state)
-	if not group.is_empty():
-		if additive:
-			var previous: Dictionary = _prune_control_group(state, control_groups.get(number, {}))
-			if not previous.is_empty() and previous["kind"] != group["kind"]:
-				return
-			if not previous.is_empty():
-				if group["kind"] == "units":
-					var ids: Array = previous["ids"].duplicate()
-					for id in group["ids"]:
-						if not ids.has(id):
-							ids.append(id)
-					group["ids"] = ids
-				elif group["kind"] in ["shipyard", "station", "pds"]:
-					var refs: Dictionary = previous["refs"].duplicate()
-					refs.merge(group["refs"], true)
-					group["refs"] = refs
-				else:
-					return
-		control_groups[number] = group
+	control_group_manager.assign(state, number, _current_control_group(state), additive, _me(), _building_valid)
 	_refresh_control_groups(state)
 
 func _refresh_control_groups(state: Dictionary) -> void:
-	for number in control_group_buttons:
-		var button: Button = control_group_buttons[number]
-		var group: Dictionary = _prune_control_group(state, control_groups.get(number, {}))
-		if group.is_empty():
-			control_groups.erase(number)
-			button.text = str(number)
-			button.icon = null
-			button.disabled = true
-			command_card_ui.set_hint(button, "Ctrl+%d to assign a selection" % number)
-			continue
-		control_groups[number] = group
-		var kind: String = group["kind"]
-		var count: int = group["ids"].size() if kind == "units" else group["refs"].size()
-		var icon_kind: String = "station" if kind == "system" else kind
-		if kind == "units":
-			for craft in state["ships"]:
-				if group["ids"].has(int(craft["id"])):
-					icon_kind = craft["kind"]
-					break
-		button.text = "%d·%d" % [number, count] if button.size.x >= 34.0 else str(number)
-		button.icon = hull_art.selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
-		button.disabled = false
-		command_card_ui.set_hint(button, "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace · Shift+%d to add" % [number, count, "ships" if kind == "units" else "structures", number, number, number])
+	control_group_manager.refresh(state, _me(), _building_valid, hull_art, command_card_ui)
 
 func _recall_control_group(number: int, additive: bool = false) -> void:
 	var state: Dictionary = _state()
-	var group: Dictionary = _prune_control_group(state, control_groups.get(number, {}))
+	var group: Dictionary = _prune_control_group(state, control_group_manager.control_groups.get(number, {}))
 	if group.is_empty():
 		_refresh_control_groups(state)
 		return
