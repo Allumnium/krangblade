@@ -462,8 +462,33 @@ static func _refund_credits(state: Dictionary, player: int, amount: float) -> vo
 	if state.get("galactic_credits", {}).has(player) and is_finite(amount) and amount > 0.0:
 		state["galactic_credits"][player] = credit_balance(state, player) + amount
 
-static func construction_affordable(state: Dictionary, p: Dictionary, cost: Dictionary, kind: String = "") -> bool:
-	return ship_origin_population_met(p, kind) and affordable(p, cost) and can_pay_credits(state, int(p["owner"]), construction_credit_cost(cost, kind))
+# Unembarked crew is already committed to its paid job, but remains
+# part of resident population (tax, production, consumption) until work starts.
+static func reserved_construction_population(p: Dictionary) -> float:
+	var total: float = 0.0
+	for job in p.get("queue", []):
+		total += _remaining_crew(job)
+	return total
+
+static func _crew_staff_reserve(p: Dictionary, kind: String, yard_slot: int) -> float:
+	if yard_slot >= 0:
+		return float(SHIPYARD_POPULATION[yard_slot]) if yard_fits(p, yard_slot, kind) else INF
+	var reserve: float = INF
+	for slot in range(p.get("yards", []).size()):
+		if yard_fits(p, slot, kind):
+			reserve = minf(reserve, float(SHIPYARD_POPULATION[slot]))
+	return reserve
+
+static func available_crew_population(p: Dictionary, yard_slot: int = -1, kind: String = "") -> float:
+	var staff: float = float(SHIPYARD_POPULATION[yard_slot]) if yard_slot >= 0 and kind.is_empty() else _crew_staff_reserve(p, kind, yard_slot)
+	return maxf(0.0, float(p.get("population", 0.0)) - reserved_construction_population(p) - staff)
+
+static func ship_crew_available(p: Dictionary, kind: String, yard_slot: int = -1) -> bool:
+	var crew: float = float(CREW_COSTS.get(kind, 0.0))
+	return crew <= EPS or (available_crew_population(p, yard_slot, kind) + EPS >= crew)
+
+static func construction_affordable(state: Dictionary, p: Dictionary, cost: Dictionary, kind: String = "", yard_slot: int = -1) -> bool:
+	return ship_origin_population_met(p, kind) and ship_crew_available(p, kind, yard_slot) and affordable(p, cost) and can_pay_credits(state, int(p["owner"]), construction_credit_cost(cost, kind))
 
 static func ship_origin_population_met(p: Dictionary, kind: String) -> bool:
 	return kind != "colony_ship" or float(p.get("population", 0.0)) + EPS >= COLONY_MIN_ORIGIN_POPULATION
@@ -478,8 +503,8 @@ static func resident_tax_income(state: Dictionary, player: int) -> float:
 	return total
 
 # One pass over systems, independent of fleet size. Use starting residents
-# for each simulation substep; ship crews and reserved construction crew do
-# not contribute. Never mint funds for neutral or unregistered owners.
+# for each simulation substep; reserved crew remains taxable until embarked.
+# Ship crews and embarked construction crew do not contribute.
 static func _accrue_resident_taxes(state: Dictionary, dt: float) -> void:
 	if dt <= 0.0:
 		return
@@ -1229,7 +1254,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 		return false
 	if yard_slot != -1 and (not SHIP_KINDS.has(kind) or not shipyard_operational(p, yard_slot) or not yard_fits(p, yard_slot, kind)):
 		return false
-	if not ship_origin_population_met(p, kind):
+	if not ship_origin_population_met(p, kind) or not ship_crew_available(p, kind, yard_slot):
 		return false
 	if SHIP_KINDS.has(kind) and not has_fitting_yard(p, kind):
 		return false
@@ -1427,7 +1452,7 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 	var cycle: Dictionary = p.get("repeat_cycle", {})
 	var all_turns: bool = true
 	for key in keys:
-		if SHIP_KINDS.has(key) and ship_origin_population_met(p, str(key)) and _maintain_needed(state, index, p, str(key)) and not manual_hulls.has(key) and not cycle.has(key):
+		if SHIP_KINDS.has(key) and ship_origin_population_met(p, str(key)) and ship_crew_available(p, str(key)) and _maintain_needed(state, index, p, str(key)) and not manual_hulls.has(key) and not cycle.has(key):
 			all_turns = false
 	if not waiting and idle and all_turns:
 		cycle.clear()
@@ -1448,7 +1473,7 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 				p["queue"][-1]["automatic"] = true
 			continue
 		if SHIP_KINDS.has(order[0]):
-			if not ship_origin_population_met(p, str(order[0])):
+			if not ship_origin_population_met(p, str(order[0])) or not ship_crew_available(p, str(order[0])):
 				continue
 			if hull_waiting_for_funds or not has_fitting_yard(p, str(order[0])) or cycle.has(key) or manual_hulls.has(key):
 				continue
@@ -1492,7 +1517,7 @@ static func _refill_yard_autobuild(state: Dictionary, index: int, p: Dictionary)
 			continue
 		var yard: Dictionary = p["yards"][slot]
 		for kind in yard.get("autobuild", []):
-			if not yard_fits(p, slot, kind) or not ship_origin_population_met(p, kind):
+			if not yard_fits(p, slot, kind) or not ship_origin_population_met(p, kind) or not ship_crew_available(p, kind, slot):
 				continue
 			var exists: bool = false
 			for item in p["queue"]:
@@ -1608,16 +1633,12 @@ static func _possible(p: Dictionary, item: Dictionary, yard_slot: int = -1) -> f
 	var work: float = float(item["work"])
 	var possible: float = work - float(item["progress"])
 	var crew: float = _remaining_crew(item)
-	# Check the threshold before recruitment starts, not on every tick:
-	# the colony's own departing crew must not block its construction.
-	if float(item["progress"]) <= EPS and not ship_origin_population_met(p, str(item["kind"])):
-		return 0.0
+	# The origin population gate was already checked when the job was
+	# admitted. A reserved crew cannot be claimed by a new order.
+	# Actual resident losses after admission can still postpone embarkation.
 	if crew > EPS:
-		var reserve: float = SHIPYARD_POPULATION[0] if item["kind"] == "colony_ship" else 1.0
-		if yard_slot >= 0:
-			reserve = maxf(reserve, float(SHIPYARD_POPULATION[yard_slot]))
-		# A hull may only start/resume when the entire unpaid crew is
-		# available, without consuming the yard's operating population.
+		var slot: int = yard_slot if yard_slot >= 0 else int(item.get("yard_slot", -1))
+		var reserve: float = _crew_staff_reserve(p, str(item["kind"]), slot)
 		if float(p["population"]) + EPS < crew + reserve:
 			return 0.0
 	return maxf(0.0, possible)
@@ -1638,7 +1659,10 @@ static func construction_blockers(p: Dictionary, item: Dictionary, yard_slot: in
 
 static func _advance(p: Dictionary, item: Dictionary, work_budget: float, yard_slot: int = -1) -> bool:
 	var amount: float = minf(work_budget, _possible(p, item, yard_slot))
-	var crew: float = amount * float(item.get("population_cost", 0.0)) / float(item["work"])
+	if amount <= 0.0:
+		return float(item["progress"]) >= float(item["work"]) - EPS
+	# All remaining reserved residents embark on the first positive work.
+	var crew: float = _remaining_crew(item)
 	var eco: float = eco_population(p)
 	var eco_crew: float = minf(eco, crew)
 	p["eco_population"] = eco - eco_crew
