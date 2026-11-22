@@ -4701,7 +4701,7 @@ func _test_civilian_waiting_movement() -> void:
 	var home: Dictionary = state["planets"][0]
 	state["ships"].clear()
 	for kind in ["ship", "colony_ship", "miner"]:
-		var craft: Dictionary = {"id": 9800 + state["ships"].size(), "owner": 1, "kind": kind, "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": center, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "idle"}
+		var craft: Dictionary = {"id": 9800 + state["ships"].size(), "owner": 1, "kind": kind, "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": center, "heading": Vector2.UP, "hp": ECON.ship_max_hp(kind), "cargo": ECON.empty_stock(), "mining_mode": "idle"}
 		state["ships"].append(craft)
 	var miner: Dictionary = state["ships"][2]
 	miner["cargo"]["Crystals"] = 10.0
@@ -4711,6 +4711,8 @@ func _test_civilian_waiting_movement() -> void:
 	# movement while the existing loaded miner waits on a full warehouse.
 	for field in state["map"]["fields"]:
 		field["chunks"].clear()
+	# Opportunistic miner handoff (v0.53.7) would empty the waiting miner.
+	assert(ECON.set_autocast(state, 1, [9800], "trade", false))
 	var moved: Dictionary = {}
 	for tick in range(30):
 		for craft in state["ships"]:
@@ -4719,7 +4721,8 @@ func _test_civilian_waiting_movement() -> void:
 		ECON.step(state, 0.1)
 		for craft in state["ships"]:
 			var distance: float = (craft["position"] as Vector2).distance_to(craft["test_before"])
-			assert(distance <= ECON.ship_speed(str(craft["kind"])) * 0.1 + 0.01)
+			# Contact correction may add up to 15% of the step budget.
+			assert(distance <= ECON.ship_speed(str(craft["kind"])) * 0.1 * 1.15 + 0.01)
 			if distance > ECON.EPS:
 				moved[craft["id"]] = true
 	assert(moved.size() == 3)
@@ -4784,7 +4787,10 @@ func _test_depleted_field_routes() -> void:
 		for anchor in anchors:
 			assert(graph["edges"].has([anchor, node]))
 		field["chunks"].clear()
-		assert(ECON.military_graph(state)["adjacent"][node] == anchors)
+		# Field-to-field lanes (v0.35.0) extend adjacency; depletion keeps all of it.
+		assert(ECON.military_graph(state)["adjacent"][node] == graph["adjacent"][node])
+		for anchor in anchors:
+			assert((graph["adjacent"][node] as Array).has(anchor))
 		for anchor in anchors:
 			assert(ECON.military_graph(state)["edges"].has([anchor, node]))
 	var field_pos: Vector2 = graph["points"][count]
@@ -4814,7 +4820,8 @@ func _test_wide_patrol_rally_and_conquest() -> void:
 	for tick in range(80):
 		var before: Vector2 = state["ships"][0]["position"]
 		ECON.step(state, 0.5)
-		assert(before.distance_to(state["ships"][0]["position"]) <= ECON.ship_speed(str(state["ships"][0]["kind"])) * 0.5 + 0.01)
+		# Contact correction may add up to 15% of the step budget.
+		assert(before.distance_to(state["ships"][0]["position"]) <= ECON.ship_speed(str(state["ships"][0]["kind"])) * 0.5 * 1.15 + 0.01)
 		if int(state["ships"][0]["dest"]) == 1:
 			launched = true
 			break

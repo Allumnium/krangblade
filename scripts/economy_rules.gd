@@ -3899,10 +3899,12 @@ static func _miner_idle(state: Dictionary, ship: Dictionary, teams: Array[int], 
 		ship["next_mining_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
 
 static func _miner_delivery(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
+	var arrived: bool = false
 	if _cargo_total(ship) <= EPS and not ship["route"].is_empty() and not _unit_order_running(ship):
 		# Finish the current legal lane before selecting new work.
 		if not _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
 			return
+		arrived = true
 	# A loaded miner with nowhere to unload can fly locally while
 	# waiting for storage. Reacquire a reachable depot before docking;
 	# never transfer cargo from an idle formation's position.
@@ -3930,7 +3932,8 @@ static func _miner_delivery(state: Dictionary, ship: Dictionary, teams: Array[in
 					_set_route(ship, _mining_path(state, teams, team, here, depot, cache))
 					break
 		return
-	if _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
+	# The arrival above already spent this tick's movement budget.
+	if arrived or _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
 		_unload_miner(state, ship, teams, cache, dt)
 
 static func _miner_outbound(state: Dictionary, ship: Dictionary, field: Dictionary, field_index: int, origin: Vector2, dt: float) -> void:
