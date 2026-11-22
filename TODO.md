@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.96.7: Every empire opens with Economic: Upgrade a shipyard to Medium (one completed level-2 yard upgrade, not a queued job) and Military: Build 7 fighters (existing lifetime fighter counter). Both opening objectives can be rerolled via existing independent 60-second cooldown. Subsequent objectives use the normal eligible random draw after CP is spent; remove forced colony-chain successor but retain colony goals and their prerequisites. Codex and authority regression fixtures updated; runtime and ENet validation pending.
+
 - [ ] v0.96.6: Soften territory visuals only: world fill opacity 9.5% → 4.5%, rim 38% → 19%, white rim highlight 24% → 12%; minimap/setup baked alpha 45/95 → 28/65 (retain legibility at small scale). Claim geometry, colors, fog/visibility, influence, navigation and warning destinations unchanged. Visual verification pending.
 
 - [ ] v0.96.5: Cloaking Field requires three previously purchased military-category rewards (repeatable military ranks count; general/economic/tech do not). Existing unique claim, Scout effect and cost unchanged; eligibility checked by draft and authority purchase. Add subtle GPU parallax to existing three starfield layers, with depth factors 1.5%, 4.5%, 8.5% of screen-space camera travel plus slight logarithmic zoom. Cache camera uniforms; menu backdrop, haze, gameplay entities and networking unchanged. Codex and authority fixtures updated. Godot runtime, visual/FPS and multiplayer validation pending.
