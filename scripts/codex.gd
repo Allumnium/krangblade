@@ -387,11 +387,11 @@ func _trade() -> void:
 	_section("Trade thresholds")
 	_body("In the station Trade panel, the minimum slider is the desired import stock and the maximum slider marks the point above which goods may be exported. Both use local storage capacity; the Import and Export checkboxes toggle each independently.")
 	var base: float = E.WAREHOUSE_CAPACITIES[0]
-	_table(["Defaults at base storage", "Amount"], [["Import below %.0f%%" % E.DEFAULT_IMPORT_PERCENT, "%.0f t" % (base * E.DEFAULT_IMPORT_PERCENT / 100.0)], ["Export above %.0f%%" % E.DEFAULT_EXPORT_PERCENT, "%.0f t" % (base * E.DEFAULT_EXPORT_PERCENT / 100.0)], ["Freighter hold", "%.0f t" % E.CARGO_CAPACITY]])
+	_table(["Defaults at base storage", "Metals", "Other resources"], [["Import below %.0f%%" % E.DEFAULT_IMPORT_PERCENT, "%.0f t" % (E.BASE_METAL_CAPACITY * E.DEFAULT_IMPORT_PERCENT / 100.0), "%.0f t" % (base * E.DEFAULT_IMPORT_PERCENT / 100.0)], ["Export above %.0f%%" % E.DEFAULT_EXPORT_PERCENT, "%.0f t" % (E.BASE_METAL_CAPACITY * E.DEFAULT_EXPORT_PERCENT / 100.0), "%.0f t" % (base * E.DEFAULT_EXPORT_PERCENT / 100.0)], ["Freighter hold", "%.0f t" % E.CARGO_CAPACITY, "Shared"]])
 	_section("Warehouse capacity per resource")
 	var rows: Array = []
 	for i in range(E.WAREHOUSE_CAPACITIES.size()):
-		rows.append(["Base" if i == 0 else "Level %d" % i, "%.0f t" % float(E.WAREHOUSE_CAPACITIES[i]), "—" if i == 0 else _recipe(E.WAREHOUSE_COSTS[i - 1])])
+		rows.append(["Base" if i == 0 else "Level %d" % i, ("%.0f t Metals / %.0f t others" % [E.BASE_METAL_CAPACITY, base]) if i == 0 else "%.0f t" % float(E.WAREHOUSE_CAPACITIES[i]), "—" if i == 0 else _recipe(E.WAREHOUSE_COSTS[i - 1])])
 	_table(["Tier", "Capacity", "Cost"], rows)
 	_note("Resource bars split station stock by system and show fleet cargo in blue. Local construction uses delivered stock only. Protect supply routes and avoid exporting essential food reserves.")
 

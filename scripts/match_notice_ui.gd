@@ -18,6 +18,7 @@ var notice_seen: Dictionary = {}
 var map_canvas: Control
 var objectives_overlay: Control
 var minimap: Control
+var timer_panel: Control
 var session: Node
 var header_height: float
 var objectives_width: float
@@ -56,9 +57,12 @@ func build(canvas: Control, overlay: Control, session_node: Node, header: float,
 	match_chat_panel.hide()
 
 
-func attach_minimap(control: Control) -> void:
+func attach_minimap(control: Control, timer: Control = null) -> void:
 	minimap = control
+	timer_panel = timer
 	minimap.item_rect_changed.connect(layout)
+	if is_instance_valid(timer_panel):
+		timer_panel.item_rect_changed.connect(layout)
 
 func is_built() -> bool:
 	return is_instance_valid(match_chat_panel)
@@ -114,7 +118,7 @@ func _notification_left() -> float:
 	return minimap.global_position.x - map_canvas.global_position.x if is_instance_valid(minimap) else 8.0
 
 func _notification_bottom() -> float:
-	return minimap.global_position.y - map_canvas.global_position.y - 6.0 if is_instance_valid(minimap) else map_canvas.size.y * 0.6
+	return minimap.global_position.y - map_canvas.global_position.y - 6.0 - (timer_panel.size.y if is_instance_valid(timer_panel) else 0.0) if is_instance_valid(minimap) else map_canvas.size.y * 0.6
 
 func _append_notice(entry: Dictionary) -> void:
 	notice_history.append(entry)

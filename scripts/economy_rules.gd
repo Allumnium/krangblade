@@ -121,6 +121,7 @@ const TRADE_REFERENCE: float = 2000.0
 const DEFAULT_IMPORT_PERCENT: float = 50.0
 const DEFAULT_EXPORT_PERCENT: float = 80.0
 const WAREHOUSE_CAPACITIES = [2000.0, 5000.0, 12000.0, 30000.0]
+const BASE_METAL_CAPACITY: float = 4000.0
 # Each tier is 3x the previous one, with each price fitting in the
 # immediately preceding warehouse capacity.
 const WAREHOUSE_COSTS = [
@@ -426,11 +427,13 @@ static func _mining_resources(state: Dictionary, player: int, index: int) -> Arr
 	return resources
 
 ## Read-only player-wide holdings: stock plus the player's own cargo in transit.
-static func storage_capacity(p: Dictionary) -> float:
-	return float(WAREHOUSE_CAPACITIES[clampi(int(p.get("warehouse_level", 0)), 0, 3)]) * (1.0 + (1.0 if int(p["owner"]) != 0 and has_reward(p, "storage") else 0.0) + 0.05 * reward_rank(p.get("conquest_rewards", []), "rank_storage"))
+static func storage_capacity(p: Dictionary, resource: String = "Organics") -> float:
+	var level: int = clampi(int(p.get("warehouse_level", 0)), 0, 3)
+	var base: float = BASE_METAL_CAPACITY if level == 0 and resource == "Metals" else float(WAREHOUSE_CAPACITIES[level])
+	return base * (1.0 + (1.0 if int(p["owner"]) != 0 and has_reward(p, "storage") else 0.0) + 0.05 * reward_rank(p.get("conquest_rewards", []), "rank_storage"))
 
 static func storage_free(p: Dictionary, resource: String) -> float:
-	return maxf(0.0, storage_capacity(p) - float(p["stock"].get(resource, 0.0)))
+	return maxf(0.0, storage_capacity(p, resource) - float(p["stock"].get(resource, 0.0)))
 
 static func raw_antimatter_totals(state: Dictionary, player: int) -> Dictionary:
 	var stock: float = 0.0
@@ -619,7 +622,7 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 	var upkeep: float = 0.0
 	var unpaid_ships: int = 0
 	var embarking_population: float = 0.0
-	var capacity: float = 0.0
+	var storage_reference: Dictionary = empty_stock()
 	var planets: int = 0
 	var craft: int = 0
 	var logistics: int = 0
@@ -630,11 +633,11 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 		if int(planet["owner"]) != player:
 			continue
 		planets += 1
-		capacity += storage_capacity(planet)
 		population += float(planet["population"])
 		embarking_population += embarked_construction_population(planet)
 		for resource in RESOURCES:
 			stock[resource] = float(stock[resource]) + float(planet["stock"].get(resource, 0.0))
+			storage_reference[resource] = float(storage_reference[resource]) + storage_capacity(planet, resource)
 	for ship in state.get("ships", []):
 		if int(ship["owner"]) != player:
 			continue
@@ -656,9 +659,6 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 			cargo[resource] = float(cargo[resource]) + float(contents.get(resource, 0.0))
 	for resource in RESOURCES:
 		total[resource] = float(stock[resource]) + float(cargo[resource])
-	var storage_reference: Dictionary = empty_stock()
-	for resource in RESOURCES:
-		storage_reference[resource] = capacity
 	return {"stock": stock, "cargo": cargo, "resources": total, "storage_reference": storage_reference, "population": population + ship_population + embarking_population, "resident_population": population, "ship_population": ship_population, "embarking_population": embarking_population,
 		"planets": planets, "craft": craft, "logistics": logistics, "colonies": colonies, "fighters": fighters, "miners": miners,
 		"upkeep": upkeep, "unpaid_ships": unpaid_ships}
@@ -974,7 +974,7 @@ static func consumption(planet: Dictionary, resource: String) -> float:
 static func civilian_stock_access(planet: Dictionary, resource: String) -> float:
 	# Stock above the import target is reserved for trade and construction.
 	var threshold: float = float(planet["thresholds"][resource]["min"])
-	var reserve: float = storage_capacity(planet) * threshold / 100.0
+	var reserve: float = storage_capacity(planet, resource) * threshold / 100.0
 	return minf(maxf(0.0, float(planet["stock"][resource])), reserve)
 
 static func net_rate(planet: Dictionary, resource: String) -> float:
@@ -1939,7 +1939,7 @@ static func cargo_bay_count(kind: String) -> int:
 static func _transfer_bay(entity: Dictionary, resource: String, amount: float, outgoing: bool) -> int:
 	if entity.has("stock"):
 		var quantity: float = float(entity["stock"].get(resource, 0.0)) + amount * (-0.5 if outgoing else 0.5)
-		return clampi(floori(quantity / maxf(EPS, storage_capacity(entity)) * STATION_STORAGE_BAYS), 0, STATION_STORAGE_BAYS - 1)
+		return clampi(floori(quantity / maxf(EPS, storage_capacity(entity, resource)) * STATION_STORAGE_BAYS), 0, STATION_STORAGE_BAYS - 1)
 	var kind: String = str(entity["kind"])
 	var cargo: Dictionary = entity.get("cargo", {})
 	var offset: float = 0.0
@@ -2054,8 +2054,8 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	# Only Organics feed residents. Metals and Crystals accumulate up to
 	# storage capacity; food production can satisfy demand even at capacity.
 	# Refunds may temporarily exceed capacity; never destroy returned materials.
-	var capacity: float = storage_capacity(p)
 	for resource in ACTIVE_PRODUCTION:
+		var capacity: float = storage_capacity(p, resource)
 		var stored: float = float(p["stock"][resource])
 		var potential: float = rate(p, resource) * dt
 		var demand: float = consumption(p, resource) * dt
@@ -2189,12 +2189,12 @@ static func cargo_bays(cargo: Dictionary, capacity: float, count: int) -> Array:
 static func _need(p: Dictionary, resource: String) -> float:
 	if not bool(p["thresholds"][resource].get("import", true)):
 		return 0.0
-	return maxf(0.0, storage_capacity(p) * float(p["thresholds"][resource]["min"]) / 100.0 - float(p["stock"][resource]))
+	return maxf(0.0, storage_capacity(p, resource) * float(p["thresholds"][resource]["min"]) / 100.0 - float(p["stock"][resource]))
 
 static func _surplus(p: Dictionary, resource: String) -> float:
 	if not bool(p["thresholds"][resource].get("export", true)):
 		return 0.0
-	return maxf(0.0, float(p["stock"][resource]) - storage_capacity(p) * float(p["thresholds"][resource]["max"]) / 100.0)
+	return maxf(0.0, float(p["stock"][resource]) - storage_capacity(p, resource) * float(p["thresholds"][resource]["max"]) / 100.0)
 
 static func _opportunity(a: Dictionary, b: Dictionary) -> bool:
 	for r in RESOURCES:
@@ -7714,10 +7714,10 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		var price: Dictionary = building_cost(p, target) if action == "economy" else construction_cost(p, action, build_level)
 		# Capital hulls (and enabling upgrades) cannot fit the initial
 		# warehouse. Reserve a normal warehouse upgrade before saving.
-		var capacity_needed: float = 0.0
+		var capacity_blocked: bool = false
 		for resource in price:
-			capacity_needed = maxf(capacity_needed, float(price[resource]))
-		if capacity_needed > storage_capacity(p) + EPS:
+			capacity_blocked = capacity_blocked or float(price[resource]) > storage_capacity(p, str(resource)) + EPS
+		if capacity_blocked:
 			if warehouse_available(p):
 				enqueue(state, player, index, "economy", "warehouse")
 			continue

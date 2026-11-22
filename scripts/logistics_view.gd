@@ -73,7 +73,7 @@ func draw(state: Dictionary, font: Font) -> void:
 		for r in range(ECONOMY.RESOURCES.size()):
 			var resource: String = ECONOMY.RESOURCES[r]
 			var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 32.0) * scale
-			var fraction: float = clampf(float(system["stock"][resource]) / ECONOMY.storage_capacity(system), 0.0, 1.0)
+			var fraction: float = clampf(float(system["stock"][resource]) / ECONOMY.storage_capacity(system, resource), 0.0, 1.0)
 			logistics_overlay.draw_rect(Rect2(cell, Vector2(44, 14) * scale), Color("#263b5080"))
 			logistics_overlay.draw_rect(Rect2(cell, Vector2(44.0 * fraction, 14) * scale), HUD.COLORS[resource].darkened(0.4))
 			logistics_overlay.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13) * scale), false)

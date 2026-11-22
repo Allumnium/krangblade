@@ -43,7 +43,7 @@ func _draw_station_storage(system: Dictionary, center: Vector2, radius: float, e
 	var half: float = radius * 0.115
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 		var color: Color = HUD.COLORS[resource]
-		var fill: float = clampf(float(system["stock"].get(resource, 0.0)) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system)), 0.0, 1.0) * ECONOMY.STATION_STORAGE_BAYS
+		var fill: float = clampf(float(system["stock"].get(resource, 0.0)) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system, resource)), 0.0, 1.0) * ECONOMY.STATION_STORAGE_BAYS
 		for bay in range(ECONOMY.STATION_STORAGE_BAYS):
 			var point: Vector2 = bay_point(center, radius, elapsed, resource, bay)
 			map_canvas.draw_circle(point, half, Color("#111d2b"), true, -1.0, true)

@@ -976,7 +976,7 @@ func _check_economy_sync() -> void:
 				var slider: Control = sliders[resource]
 				var stock: float = float(home["stock"][resource])
 				var thresholds: Dictionary = home["thresholds"][resource]
-				if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.storage_capacity(home) * 100.0, 0.0, 100.0)) or not is_equal_approx(float(slider.get("lower")), float(thresholds["min"])) or not is_equal_approx(float(slider.get("upper")), float(thresholds["max"])):
+				if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.storage_capacity(home, resource) * 100.0, 0.0, 100.0)) or not is_equal_approx(float(slider.get("lower")), float(thresholds["min"])) or not is_equal_approx(float(slider.get("upper")), float(thresholds["max"])):
 					_fail("Replicated inventory or thresholds do not match the trade bars.")
 					return
 			var expected_sectors: Array[int] = []
