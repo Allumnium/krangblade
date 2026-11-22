@@ -9,6 +9,7 @@ const QUEUE_VIEW = preload("res://scripts/construction_queue_view.gd")
 const COMMAND_CARD_UI = preload("res://scripts/command_card_ui.gd")
 const COMMAND_HOTKEYS = preload("res://scripts/command_hotkeys.gd")
 const MATCH_SETTINGS = preload("res://scripts/match_settings.gd")
+const MATCH_NOTICE_UI = preload("res://scripts/match_notice_ui.gd")
 const HULL_ART = preload("res://scripts/hull_art.gd")
 const FOG_OF_WAR = preload("res://scripts/fog_of_war.gd")
 const TERRITORY_VIEW = preload("res://scripts/territory_view.gd")
@@ -89,7 +90,6 @@ var selection_inspector := SELECTION_INSPECTOR.new()
 var sound_mixer: Node
 var audio_tracker := MATCH_AUDIO_TRACKER.new()
 var alert_tracker := TACTICAL_ALERTS.new()
-var tactical_hit_rects: Array[Dictionary] = []
 var background_music: AudioStreamPlayer
 var map_canvas: Control
 var header_panel: PanelContainer
@@ -108,6 +108,7 @@ var empty_selection: Label
 var command_grids: Dictionary = {}
 var hotkeys := COMMAND_HOTKEYS.new()
 var match_settings := MATCH_SETTINGS.new()
+var notice_ui := MATCH_NOTICE_UI.new()
 var station_commands: VBoxContainer
 var station_primary_grid: GridContainer
 var station_select_yards_button: Button
@@ -135,14 +136,6 @@ var interaction_scroll: ScrollContainer
 var interaction_panel: VBoxContainer
 var logistics_overlay: Control
 var objectives_overlay: Control
-var match_chat_edit: LineEdit
-var match_chat_panel: PanelContainer
-var match_chat_log: RichTextLabel
-var match_chat_content: VBoxContainer
-var notice_history: Array[Dictionary] = []
-var notice_seen: Dictionary = {}
-const NOTICE_HISTORY_LIMIT: int = 250
-const NOTICE_LIFETIME_MS: int = 10000
 var send_colony_button: Button
 var selected: int = -1
 var selected_body: int = -1
@@ -256,7 +249,7 @@ func _ready() -> void:
 	session.connect("chat_changed", _sound_chat)
 	_build_ui()
 	if OS.is_debug_build():
-		developer_tools.build_chat_controls(match_chat_content, _button, _local_console_notice, _clear_notice_history)
+		developer_tools.build_chat_controls(notice_ui.match_chat_content, _button, notice_ui.local_console_notice, notice_ui.clear_history)
 	hotkeys.entries["focus"] = {"scope": "General", "title": "Focus selection", "default": KEY_F}
 	hotkeys.load_overrides(match_settings.settings, command_card_ui)
 	resource_hud.build_hover(self)
@@ -344,29 +337,6 @@ func _build_map_layers() -> void:
 	objectives_overlay.draw.connect(_draw_objectives_overlay)
 
 
-func _build_match_notices() -> void:
-	match_chat_panel = PanelContainer.new()
-	match_chat_panel.z_index = 6
-	match_chat_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928d9"), Color("#45617b"), 6, 4))
-	map_canvas.add_child(match_chat_panel)
-	match_chat_content = VBoxContainer.new()
-	match_chat_content.add_theme_constant_override("separation", 4)
-	match_chat_panel.add_child(match_chat_content)
-	match_chat_log = RichTextLabel.new()
-	match_chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	match_chat_log.add_theme_font_size_override("normal_font_size", 13)
-	match_chat_log.scroll_active = true
-	match_chat_log.scroll_following = true
-	match_chat_log.selection_enabled = true
-	match_chat_log.meta_clicked.connect(_jump_history_alert)
-	match_chat_content.add_child(match_chat_log)
-	match_chat_edit = LineEdit.new()
-	match_chat_edit.placeholder_text = "All chat · Enter sends · Esc closes"
-	match_chat_edit.max_length = 250
-	match_chat_content.add_child(match_chat_edit)
-	match_chat_panel.hide()
-	conquest_ui.build(self, session, map_canvas, objectives_overlay, HEADER_HEIGHT, _me, _empire_color_index, _empire_color, command_card_ui.icon)
-
 func _build_world_effect_batches() -> void:
 	world_batches.build(map_canvas)
 	structure_view.configure(map_canvas, world_batches, hull_art, command_card_ui, _screen_point, _station_radius, _job_icon, _draw_damage_bar, _shield_fraction, _ship_scale, _overview_art_multiplier)
@@ -374,6 +344,10 @@ func _build_world_effect_batches() -> void:
 	order_view.configure(map_canvas, hull_art, celestial_view, camera, _ship_scale, _screen_point, _station_radius, _planet_radius, _salvage_radius, _fit, _me)
 	map_canvas.resized.connect(_map_resized)
 
+
+func _build_match_notices() -> void:
+	notice_ui.build(map_canvas, objectives_overlay, session, HEADER_HEIGHT, MATCH_CONQUEST_UI.OBJECTIVES_WIDTH, _me, _empire_color_index, _jump_notice_location)
+	conquest_ui.build(self, session, map_canvas, objectives_overlay, HEADER_HEIGHT, _me, _empire_color_index, _empire_color, command_card_ui.icon)
 
 func _build_match_header() -> void:
 	header_panel = PanelContainer.new()
@@ -491,7 +465,7 @@ func _build_command_deck() -> void:
 	minimap.draw.connect(_draw_minimap)
 	minimap.gui_input.connect(_minimap_input)
 	minimap.resized.connect(minimap.queue_redraw)
-	minimap.item_rect_changed.connect(_layout_match_chat)
+	notice_ui.attach_minimap(minimap)
 	# A persistent vertical lens strip belongs immediately beside the minimap.
 	lens_column = VBoxContainer.new()
 	lens_column.custom_minimum_size.x = LENS_STRIP_WIDTH
@@ -2723,7 +2697,7 @@ func _projection_size() -> Vector2:
 
 func _map_resized() -> void:
 	_layout_match_header()
-	_layout_match_chat()
+	notice_ui.layout()
 	# The world-space center is independent of screen dimensions.
 	camera.zoom = minf(camera.zoom, _max_zoom())
 	map_canvas.queue_redraw()
@@ -3720,11 +3694,11 @@ func _finish_formation(point: Vector2) -> void:
 func _map_input(event: InputEvent) -> void:
 	if match_menu.visible or (is_instance_valid(codex) and codex.visible):
 		return
-	if is_instance_valid(match_chat_panel) and match_chat_panel.visible and match_chat_panel.get_global_rect().has_point(map_canvas.get_global_mouse_position()):
+	if notice_ui.contains_point(map_canvas.get_global_mouse_position()):
 		return
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
-		if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed and _jump_tactical_alert(mouse.position):
+		if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed and notice_ui.jump_tactical_alert(mouse.position):
 			map_canvas.accept_event()
 			return
 		if mouse.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
@@ -3826,7 +3800,7 @@ func _sound_click() -> void:
 
 func _sound_chat() -> void:
 	if str(session.get("phase")) == "match" and not session.get("match_chat").is_empty():
-		_sync_notice_history(_state())
+		notice_ui.sync_history(_state(), alert_tracker.alerts)
 		sound_mixer.play_cue("notice")
 
 func _sync_upgrade_audio(state: Dictionary) -> void:
@@ -3843,17 +3817,6 @@ func _sync_world_audio(state: Dictionary) -> void:
 
 func _alert_off_camera(point: Vector2) -> bool:
 	return not Rect2(Vector2(0, HEADER_HEIGHT), (_projection_size() - Vector2(0, HEADER_HEIGHT)).max(Vector2.ONE)).has_point(_screen_point(point))
-
-func _jump_tactical_alert(point: Vector2) -> bool:
-	for hit in tactical_hit_rects:
-		if (hit["rect"] as Rect2).has_point(point):
-			_jump_notice_location(hit["alert"])
-			return true
-	return false
-
-func _jump_history_alert(meta: Variant) -> void:
-	if meta is Dictionary:
-		_jump_notice_location(meta)
 
 func _jump_notice_location(alert: Dictionary) -> void:
 	var destination: Vector2 = alert["point"]
@@ -3874,7 +3837,7 @@ func _jump_notice_location(alert: Dictionary) -> void:
 func _sync_tactical_alerts(state: Dictionary) -> void:
 	if state.is_empty() or str(session.get("phase")) != "match":
 		alert_tracker.reset()
-		tactical_hit_rects.clear()
+		notice_ui.clear_hit_rects()
 		return
 	alert_tracker.sync(state, _me(), Time.get_ticks_msec(), territory_view.region_graph, territory_view.friendly_sectors, _alert_off_camera, _ship_visible, _ship_kind_name, _poi_name, Callable(sound_mixer, "play_cue"))
 
@@ -3884,47 +3847,32 @@ func _on_economy_changed() -> void:
 	_sync_world_audio(state)
 	_refresh_territory(state)
 	_sync_tactical_alerts(state)
-	_sync_notice_history(state)
+	notice_ui.sync_history(state, alert_tracker.alerts)
 	ship_motion.sync(state, session)
 	_refresh()
-
-func _layout_match_chat() -> void:
-	if not is_instance_valid(match_chat_panel) or not is_instance_valid(minimap):
-		return
-	var width: float = _notification_width()
-	var bottom: float = _notification_bottom()
-	var height: float = minf(300.0, maxf(80.0, bottom - HEADER_HEIGHT - 12.0))
-	match_chat_panel.size = Vector2(width, height)
-	match_chat_panel.position = Vector2(_notification_left(), bottom - match_chat_panel.size.y)
-
-func _close_match_chat() -> void:
-	if is_instance_valid(match_chat_panel):
-		match_chat_edit.release_focus()
-		match_chat_panel.hide()
-		match_chat_edit.clear()
 
 func _input(event: InputEvent) -> void:
 	if empire_ui.war_confirmation_visible():
 		return
-	if not event is InputEventKey or not event.pressed or event.echo or not is_instance_valid(match_chat_panel) or str(session.get("phase")) != "match":
+	if not event is InputEventKey or not event.pressed or event.echo or not notice_ui.is_built() or str(session.get("phase")) != "match":
 		return
 	var key: int = event.keycode
 	var enter: bool = key in [KEY_ENTER, KEY_KP_ENTER]
-	if match_chat_panel.visible:
+	if notice_ui.is_open():
 		if enter or key == KEY_ESCAPE:
-			var message: String = match_chat_edit.text.strip_edges()
+			var message: String = notice_ui.match_chat_edit.text.strip_edges()
 			if enter and message.begins_with("/"):
-				match_chat_edit.clear()
+				notice_ui.match_chat_edit.clear()
 				if OS.is_debug_build():
 					developer_tools.submit_command(message)
 				else:
-					_local_console_notice("Unknown command.")
-				_layout_match_chat()
-				match_chat_edit.grab_focus()
+					notice_ui.local_console_notice("Unknown command.")
+				notice_ui.layout()
+				notice_ui.match_chat_edit.grab_focus()
 			else:
 				if enter and not message.is_empty():
 					session.call("send_chat", message)
-				_close_match_chat()
+				notice_ui.close()
 			get_viewport().set_input_as_handled()
 		return
 	if not enter or event.alt_pressed or event.ctrl_pressed or event.meta_pressed or _dev_console_modal_open():
@@ -3932,18 +3880,13 @@ func _input(event: InputEvent) -> void:
 	var focus: Control = get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit:
 		return
-	_sync_notice_history(_state())
-	_layout_match_chat()
-	_rebuild_notice_log()
-	match_chat_panel.show()
-	match_chat_log.call_deferred("scroll_to_line", maxi(0, match_chat_log.get_line_count() - 1))
-	match_chat_edit.grab_focus()
+	notice_ui.open(_state(), alert_tracker.alerts)
 	get_viewport().set_input_as_handled()
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if empire_ui.war_confirmation_visible():
 		return
-	if (is_instance_valid(match_chat_panel) and match_chat_panel.visible):
+	if (notice_ui.is_open()):
 		return
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
@@ -4085,7 +4028,7 @@ func _select_all_military() -> void:
 func _keyboard_pan(delta: float) -> void:
 	if empire_ui.war_confirmation_visible():
 		return
-	if (is_instance_valid(match_chat_panel) and match_chat_panel.visible):
+	if (notice_ui.is_open()):
 		return
 	if str(session.get("phase")) != "match" or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible):
 		return
@@ -4114,7 +4057,7 @@ func _keyboard_pan(delta: float) -> void:
 
 func _sync_match_mouse_mode() -> void:
 	var active: bool = str(session.get("phase")) == "match" and get_window().has_focus()
-	var modal: bool = ((is_instance_valid(match_chat_panel) and match_chat_panel.visible)) or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible)
+	var modal: bool = ((notice_ui.is_open())) or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible)
 	var target: Input.MouseMode = Input.MOUSE_MODE_CONFINED if active and not modal else Input.MOUSE_MODE_VISIBLE
 	if Input.mouse_mode != target:
 		Input.mouse_mode = target
@@ -4742,129 +4685,7 @@ func _draw_objectives_overlay() -> void:
 	if state.is_empty():
 		return
 	conquest_ui.draw(state)
-	_draw_conquest_notifications(ThemeDB.fallback_font)
-
-func _notification_width() -> float:
-	var available: float = maxf(80.0, map_canvas.size.x - MATCH_CONQUEST_UI.OBJECTIVES_WIDTH - 16.0)
-	return minf(clampf(minimap.size.x + 80.0, 260.0, 420.0), available) if is_instance_valid(minimap) else minf(320.0, available)
-
-func _notification_left() -> float:
-	return minimap.global_position.x - map_canvas.global_position.x if is_instance_valid(minimap) else 8.0
-
-func _notification_bottom() -> float:
-	return minimap.global_position.y - map_canvas.global_position.y - 6.0 if is_instance_valid(minimap) else map_canvas.size.y * 0.6
-
-func _append_notice(entry: Dictionary) -> void:
-	notice_history.append(entry)
-	if notice_history.size() > NOTICE_HISTORY_LIMIT:
-		notice_history.pop_front()
-		if is_instance_valid(match_chat_panel) and match_chat_panel.visible:
-			_rebuild_notice_log()
-	elif is_instance_valid(match_chat_panel) and match_chat_panel.visible:
-		_append_notice_log(entry)
-
-func _append_notice_log(entry: Dictionary) -> void:
-	if not match_chat_log.get_parsed_text().is_empty():
-		match_chat_log.newline()
-	match_chat_log.push_color(entry["tint"])
-	if entry.has("alert"):
-		match_chat_log.push_meta(entry["alert"])
-	match_chat_log.add_text(entry["text"])
-	if entry.has("alert"):
-		match_chat_log.pop()
-	match_chat_log.pop()
-
-func _rebuild_notice_log() -> void:
-	match_chat_log.clear()
-	for entry in notice_history:
-		_append_notice_log(entry)
-
-func _local_console_notice(message: String) -> void:
-	_append_notice({"text": message, "tint": HUD.MUTED, "born": Time.get_ticks_msec()})
-
-func _clear_notice_history() -> void:
-	notice_history.clear()
-	match_chat_log.clear()
-	tactical_hit_rects.clear()
-	objectives_overlay.queue_redraw()
-
-func _sync_notice_history(state: Dictionary) -> void:
-	if not is_instance_valid(match_chat_panel) or str(session.get("phase")) != "match" or state.is_empty():
-		return
-	var now: int = Time.get_ticks_msec()
-	var current: Dictionary = {}
-	var incoming: Array[Dictionary] = []
-	for item in session.get("match_chat"):
-		var key: String = "chat:" + str([item["sender"], item["received_ms"], item["text"]])
-		current[key] = true
-		if not notice_seen.has(key):
-			var index: int = clampi(int(item.get("sender_color", _empire_color_index(int(item["sender"])))), 0, RULES.MAX_PLAYERS)
-			incoming.append({"text": str(item["text"]), "tint": COLORS[index], "born": int(item["received_ms"])})
-	for key in alert_tracker.alerts:
-		var alert: Dictionary = alert_tracker.alerts[key]
-		var identity: String = "alert:" + str([key, alert["born"]])
-		current[identity] = true
-		if not notice_seen.has(identity):
-			var tint := Color("#ffb16b") if str(key).begins_with("approach:") else Color("#ff7777")
-			incoming.append({"text": str(alert["text"]), "tint": tint, "born": int(alert["born"]), "alert": alert.duplicate(true)})
-	var roster: Dictionary = session.get("players")
-	for event in state.get("objective_events", []):
-		if int(event["player"]) != _me():
-			continue
-		var identity: String = "objective:" + str([event.get("objective", ""), event.get("reward", ""), event["elapsed"]])
-		current[identity] = true
-		if notice_seen.has(identity):
-			continue
-		var name_text: String = str(roster.get(event["player"], {}).get("name", "Player")).left(20)
-		var message: String
-		var tint := Color("#e9cb7c")
-		if event.has("reward"):
-			message = "%s acquired %s (Unique)" % [name_text, ECONOMY.CONQUEST_REWARDS[event["reward"]][0]]
-			tint = Color("#c7aaff")
-		else:
-			message = "%s completed %s · +%d CP" % [name_text, ECONOMY.objective_label(str(event["objective"])), int(event["award"])]
-			if not bool(event["first"]):
-				tint = Color("#b8d9ef")
-		incoming.append({"text": message, "tint": tint, "born": now})
-	notice_seen = current
-	incoming.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["born"]) < int(b["born"]))
-	for entry in incoming:
-		_append_notice(entry)
-
-func _draw_notice_text(font: Font, point: Vector2, message: String, width: float, tint: Color) -> float:
-	var height: float = font.get_multiline_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, width, 13).y
-	objectives_overlay.draw_multiline_string_outline(font, point, message, HORIZONTAL_ALIGNMENT_LEFT, width, 13, -1, 4, Color(0.04, 0.08, 0.13, tint.a))
-	objectives_overlay.draw_multiline_string(font, point, message, HORIZONTAL_ALIGNMENT_LEFT, width, 13, -1, tint)
-	return height
-
-func _draw_conquest_notifications(font: Font) -> void:
-	tactical_hit_rects.clear()
-	if is_instance_valid(match_chat_panel) and match_chat_panel.visible:
-		return
-	var bottom: float = _notification_bottom()
-	var width: float = _notification_width() - 12.0
-	var left: float = _notification_left() + 4.0
-	var now: int = Time.get_ticks_msec()
-	var visible_count: int = 0
-	for index in range(notice_history.size() - 1, -1, -1):
-		var entry: Dictionary = notice_history[index]
-		var age: int = now - int(entry["born"])
-		if age >= NOTICE_LIFETIME_MS:
-			continue
-		var message: String = entry["text"]
-		var height: float = font.get_multiline_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, width, 13).y
-		var top: float = bottom - height
-		if top < HEADER_HEIGHT + 8.0:
-			break
-		var tint: Color = entry["tint"]
-		tint.a = clampf(float(NOTICE_LIFETIME_MS - age) / 2000.0, 0.0, 1.0)
-		_draw_notice_text(font, Vector2(left, top + font.get_ascent(13)), message, width, tint)
-		if entry.has("alert"):
-			tactical_hit_rects.append({"rect": Rect2(left - 4.0, top, width + 8.0, height), "alert": entry["alert"]})
-		bottom = top - 6.0
-		visible_count += 1
-		if visible_count >= 5:
-			break
+	notice_ui.draw(ThemeDB.fallback_font)
 
 func _empire_name(id: int) -> String:
 	return empire_ui.empire_name(id)

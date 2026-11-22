@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.66: Extract chat widgets, notice history/dedup, fade drawing, hit rectangles and scroll lifecycle into match_notice_ui.gd. Match retains keyboard/modal gating, camera jump, authority chat dispatch and tactical tracker. Preserve existing layout, cap, timings, color and command behavior. Codex unchanged; runtime/peer validation pending.
+
 - v0.89.65: Extract local saved audio/camera preferences, config persistence and hotkey editor into match_settings.gd; preserve settings file, callbacks, widget creation order, conflicts and input gating. Match reads camera settings and retains menu lifecycle, key dispatch and music ownership. Codex verified unchanged; runtime/peer validation pending.
 
 - v0.89.64: Right-align objective and lifetime CP headings with collapse controls on their left. Move combined personal notices, tactical warnings and all-chat above minimap, newest at bottom, ten-second fade when closed. Enter opens a translucent scrollable local history (250 messages); Enter sends chat, Esc closes, slash commands stay local. Debug-only /devmode, /help, /status, /speed and /clear share the panel; speed remains host/solo-only. Preserve clickable warning locations, no new RPC. Verify scrolling/focus, resize, fading/history dedup, alert navigation, debug/release and ENet. Runtime and visual checks pending.
