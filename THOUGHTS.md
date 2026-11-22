@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.24: Repair remaining stale economy fixtures: isolate PDS fire from station lasers/missiles and assert dock-berth approach; derive doubled fighter crew (v0.82.0) and Crystal Incubator population gate (v0.89.46); direct civilian paths validate endpoints only (v0.94.0). Opening pacing smoke becomes a regression guard at current provisional balance (~200-215 yr first colony, 3 worlds, 6 fighters by year 360; identical on v0.97.2) versus original 180 yr/4 worlds/8 fighters targets: AI opening pacing needs playtest review. map_layouts still fails on a real generator bug (next).
+
 - v0.97.23: Empty miners finishing a delivery lane no longer spend a second movement budget in the same tick (moved up to 2x speed on arrival; verified pre-existing on v0.97.2). Repaired civilian-waiting, depleted-field and wide-patrol fixtures: hull max HP for freighters (avoids miner auto-repair parking), Auto-Trade off to isolate the waiting miner, field-to-field adjacency, and the 15% contact-correction budget. Runtime/ENet validation pending.
 
 - v0.97.22: Withdrawing armed hulls now steer to their repair station when an earlier direct order (patrol, remote position) already left dest at that station with no route; previously they froze in place until fully regenerated (verified pre-existing on v0.97.2). Repaired sector-entry, local-position and tactical-order fixtures for contact correction, regen-before-withdrawal, free-space attack retargeting and same-sector patrol. Runtime/ENet validation pending.
