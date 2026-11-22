@@ -2,6 +2,7 @@ extends Window
 ## Local, read-only game encyclopedia. No session or authority dependency.
 const E = preload("res://scripts/economy_rules.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
+const UI_TEXT = preload("res://scripts/ui_text.gd")
 const TOPICS = [
 	["Getting started", "Overview", "opening start strategy time victory basics"],
 	["Economy", "Resources", "metals organics crystals antimatter mining stock production galactic credits currency taxes treasury gc"],
@@ -424,14 +425,13 @@ func _infrastructure() -> void:
 func _ships() -> void:
 	_body("Small yards build Harvesters, Fighters and Scouts; Medium adds Freighters, Colonies and Cruisers; Large adds Science vessels and Destroyers. AI fleets build and deploy Cruisers and Destroyers as their economy matures. Scouts have one blaster, twice fighter speed and half fighter HP. Start with one Freighter. Costs are paid from the local station. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship details show crew, armed hull kills, cargo handling for cargo ships and Colony food production. Fighters, Cruisers, Destroyers and Scouts have no holds. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
-	var names := {"fighter": "Fighter", "miner": "Harvester", "ship": "Freighter", "colony_ship": "Colony", "science_ship": "Science vessel", "scout": "Scout", "cruiser": "Cruiser", "destroyer": "Destroyer"}
 	for kind in E.SHIP_KINDS:
-		rows.append([names[kind], E.size_name(E.ship_size(kind)), _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(E.ship_size(kind)))])
+		rows.append([UI_TEXT.ship_kind_name(kind), E.size_name(E.ship_size(kind)), _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(E.ship_size(kind)))])
 	_table(["Ship", "Class", "Cost", "Crew", "Time (min. yard)"], rows)
 	_section("Annual upkeep")
 	rows = []
 	for kind in E.SHIP_KINDS:
-		rows.append([names[kind], "%.0f GC/yr" % E.ship_upkeep(kind)])
+		rows.append([UI_TEXT.ship_kind_name(kind), "%.0f GC/yr" % E.ship_upkeep(kind)])
 	_table(["Ship", "Upkeep"], rows)
 	_section("Shipyard upgrades")
 	_body("Upgrade cards show current levels at top left; tooltips show the target level. Upgrade to Medium (U) or Large (I) in the corresponding row; locked ships remain hidden, then replace the upgrade with unlocked ships from column one. Higher shipyard levels increase construction speed and staffing requirements. Only station jobs show progress in the hub; yard production and upgrades appear in their own berths. Select Space Station returns to the parent station. Clear Rally / Rally occupy the bottom-right slots. Rally flags mark destinations for completed ships to their destination; idle fighters can engage enemies and civilian ships resume their jobs.")

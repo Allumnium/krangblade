@@ -2,6 +2,8 @@ extends Control
 ## Planet map and inspector. Host/solo session owns all simulation mutations.
 const MAP = preload("res://scripts/planet_map.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
+const UI_TEXT = preload("res://scripts/ui_text.gd")
+const CostButton = preload("res://scripts/cost_button.gd")
 const CODEX = preload("res://scripts/codex.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const PLANET = preload("res://assets/ui/planet.svg")
@@ -36,71 +38,6 @@ const PLANET_FADE_SECONDS: float = 0.22
 const STAR_TEXTURE_SIZE: int = 256
 const STAR_TEXTURE_CORE: float = 74.0
 const STAR_SPARK_COUNT: int = 9
-
-# Keep construction recipes graphical even in the engine's native tooltip
-# popup. Non-construction buttons still use the standard text tooltip.
-class CostButton extends Button:
-	var recipe: Dictionary = {}
-	var missing: Array[String] = []
-	var crew_icon: Texture2D
-	var effect_resource: String = ""
-	var fast_tooltip: bool = false
-
-	func _get_tooltip(_at_position: Vector2) -> String:
-		return "" if fast_tooltip else tooltip_text
-
-	func _make_custom_tooltip(for_text: String) -> Object:
-		if recipe.is_empty():
-			return null
-		var panel := PanelContainer.new()
-		panel.theme = HUD.compact()
-		panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101b29"), Color("#6385a4"), 8, 3))
-		var body := VBoxContainer.new()
-		body.add_theme_constant_override("separation", 6)
-		panel.add_child(body)
-		var lines: PackedStringArray = for_text.split("\n", true, 1)
-		var title := Label.new()
-		title.text = lines[0]
-		title.add_theme_color_override("font_color", HUD.ACCENT)
-		title.add_theme_font_size_override("font_size", 14)
-		body.add_child(title)
-		var costs := GridContainer.new()
-		costs.columns = mini(3, recipe.size())
-		costs.add_theme_constant_override("h_separation", 12)
-		costs.add_theme_constant_override("v_separation", 4)
-		body.add_child(costs)
-		for resource in recipe:
-			var pair := HBoxContainer.new()
-			pair.add_theme_constant_override("separation", 4)
-			costs.add_child(pair)
-			if resource != "GC":
-				var symbol := TextureRect.new()
-				HUD.fixed_icon(symbol, crew_icon if resource == "Population" else HUD.resource_icon(resource, 24), 24)
-				pair.add_child(symbol)
-			var amount := Label.new()
-			amount.text = "%.0f%s" % [float(recipe[resource]), " GC" if resource == "GC" else ("" if resource == "Population" else "t")]
-			if resource == "GC":
-				amount.add_theme_color_override("font_color", Color("#e7c76b"))
-			if missing.has(resource):
-				amount.add_theme_color_override("font_color", Color("#ff7777"))
-			pair.add_child(amount)
-		if lines.size() > 1:
-			for line in lines[1].split("\n", false):
-				var details := Label.new()
-				if line.begins_with("Yield: ") and not effect_resource.is_empty():
-					var benefit := HBoxContainer.new()
-					benefit.add_theme_constant_override("separation", 4)
-					body.add_child(benefit)
-					var symbol := TextureRect.new()
-					HUD.fixed_icon(symbol, HUD.resource_icon(effect_resource, 24), 24)
-					benefit.add_child(symbol)
-					details.text = line.trim_prefix("Yield: ")
-					details.add_theme_color_override("font_color", Color("#9fe3b5"))
-					benefit.add_child(details)
-				else:
-					details.text = line
-					body.add_child(details)
-		return panel
 
 var session: Node
 var settings := ConfigFile.new()
@@ -1425,17 +1362,7 @@ func _style_progress(bar: ProgressBar, p: Dictionary, job: Dictionary) -> void:
 
 func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {}, crew: float = 0.0, available: Dictionary = {}) -> void:
 	var cost_button: CostButton = button as CostButton
-	cost_button.recipe = cost.duplicate()
-	if not cost.is_empty():
-		cost_button.recipe["GC"] = ECONOMY.construction_credit_cost(cost)
-	cost_button.missing.clear()
-	if crew > 0.0:
-		cost_button.recipe["Population"] = crew
-		cost_button.crew_icon = _population_texture()
-	if not available.is_empty():
-		for resource in cost_button.recipe:
-			if float(available.get(resource, 0.0)) + ECONOMY.EPS < float(cost_button.recipe[resource]):
-				cost_button.missing.append(resource)
+	cost_button.set_recipe(cost, crew, _population_texture() if crew > 0.0 else null, available)
 	var shortcut: String = str(button.get_meta("hotkey", ""))
 	_set_button_hint(button, description if shortcut.is_empty() else (description + "\n[" + shortcut + "]" if not description.is_empty() else "[" + shortcut + "]"))
 
@@ -1445,24 +1372,6 @@ func _available_cost_resources(p: Dictionary, yard: int = -1) -> Dictionary:
 	var reserve: float = ECONOMY.SHIPYARD_POPULATION[yard] if yard >= 0 else 0.0
 	available["Population"] = maxf(0.0, float(p["population"]) - reserve)
 	return available
-
-func _blaster_summary(kind: String) -> String:
-	return "Blasters ×%d · %.0f damage/shot · %d shots/burst · %.1f s on / %.1f s off · Range %.0f" % [ECONOMY.blaster_count(kind), ECONOMY.BLASTER_DAMAGE, ECONOMY.BLASTER_SHOTS, ECONOMY.BLASTER_BURST, ECONOMY.BLASTER_PAUSE, ECONOMY.LASER_RANGE]
-
-func _capital_weapon_summary(kind: String) -> String:
-	return "Lasers ×%d · %.0f damage each · 1 s · Range %.0f\nMissiles ×%d · %.0f damage each · %.0f s · Range %.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE] + "\n" + _blaster_summary(kind)
-
-func _ship_stats(kind: String) -> String:
-	var details: String = ""
-	match kind:
-		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
-		"colony_ship": details = "Settles a neutral system · %.0f settlers\nFarm %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
-		"scout": details = "Fast reconnaissance · " + _blaster_summary(kind)
-		"cruiser", "destroyer": details = _capital_weapon_summary(kind)
-		"fighter": details = _blaster_summary(kind)
-		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s at 1× · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
-		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection at 1×" % ECONOMY.SCIENCE_COLLECTION_YEARS
-	return "%s\nHP %.0f · Speed %.0f/s (1×) · %s\nUpkeep: %.0f GC/yr" % [details, ECONOMY.ship_max_hp(kind), ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_upkeep(kind)]
 
 func _build_production_summary() -> void:
 	var header := HBoxContainer.new()
@@ -1510,42 +1419,6 @@ func _build_production_summary() -> void:
 		bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(bonus)
 		production_values[resource] = {"row": row, "stock": stock, "level": level, "rate": rate_label, "bonus": bonus}
-
-func _system_bonus_text(p: Dictionary) -> String:
-	var lines: PackedStringArray = []
-	var names: Dictionary = {"Metals": "Metal production", "Crystals": "Crystal production", "Organics": "Organics production"}
-	for resource in ECONOMY.ACTIVE_PRODUCTION:
-		var percent: int = roundi(ECONOMY.production_modifier(p, resource) * 100.0)
-		if percent != 100:
-			lines.append("%s %d%%" % [names[resource], percent])
-	var advanced: int = roundi(float(p.get("advanced_bonus", 1.0)) * 100.0)
-	if advanced != 100:
-		lines.append("Advanced manufacturing %d%% (future)" % advanced)
-	return "\n".join(lines)
-
-func _economy_building_effect(p: Dictionary, resource: String) -> String:
-	if not ECONOMY.production_available(p, resource):
-		return "Requires local production deposit" if resource != "Organics" else "Requires planets"
-	var preview: Dictionary = p.duplicate()
-	var buildings: Dictionary = p.get("buildings", {}).duplicate()
-	buildings[resource] = int(buildings.get(resource, 0)) + 1
-	preview["buildings"] = buildings
-	var actual: float = ECONOMY.rate(preview, resource) - ECONOMY.rate(p, resource)
-	# A reference population makes increments comparable; agriculture has
-	# nonlinear labor scaling, so describe a reference rather than a ratio.
-	var reference: Dictionary = p.duplicate()
-	var reference_preview: Dictionary = preview.duplicate()
-	for sample in [reference, reference_preview]:
-		sample["population"] = ECONOMY.HOME_POPULATION
-		sample["eco_population"] = 0.0
-		sample["planet_blockaded"] = false
-	var base: float = ECONOMY.rate(reference_preview, resource) - ECONOMY.rate(reference, resource)
-	var result: String = "Yield: %+.2f t/yr %s %s residents (%+.2f t/yr now)" % [base, "at" if resource == "Organics" else "per", _compact_amount(ECONOMY.HOME_POPULATION), actual]
-	if resource == "Organics":
-		result += "\n+%s food-supported population" % _compact_amount(ECONOMY.population_capacity(preview) - ECONOMY.population_capacity(p))
-	if bool(p.get("planet_blockaded", false)):
-		result += "\nPlanetary production blockaded"
-	return result
 
 func _body_name(system_index: int, slot: int) -> String:
 	var suffixes: Array[String] = ["I", "II", "III", "IV", "V", "VI"]
@@ -1766,16 +1639,6 @@ func _enable_fast_command_tooltip(button: Button) -> void:
 		popup.global_position = Vector2(clampf(cursor.x + 14.0, 0.0, maxf(0.0, bounds.x - extent.x)), clampf(cursor.y - extent.y - 12.0, 0.0, maxf(0.0, bounds.y - extent.y)))
 		popup.show())
 
-func _roman_level(level: int) -> String:
-	if level <= 0:
-		return "0"
-	var result: String = ""
-	for pair in [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]]:
-		while level >= int(pair[0]):
-			result += str(pair[1])
-			level -= int(pair[0])
-	return result
-
 func _upgrade_level_badge(button: Button, level: int) -> void:
 	var label: Label = button.get_meta("level_badge") as Label if button.has_meta("level_badge") else null
 	if not is_instance_valid(label):
@@ -1788,7 +1651,7 @@ func _upgrade_level_badge(button: Button, level: int) -> void:
 		button.add_child(label)
 		label.position = Vector2(3, 1)
 		button.set_meta("level_badge", label)
-	label.text = _roman_level(level)
+	label.text = UI_TEXT.roman_level(level)
 
 func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> TextureRect:
 	# Construction cards use Godot's single native custom-tooltip path.
@@ -1850,7 +1713,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 		grid.add_child(button)
 		yard_commands[kind] = button
-		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S, "science_ship": KEY_V, "scout": KEY_Q, "cruiser": KEY_E, "destroyer": KEY_F}[kind], "Shipyard", "yard_" + kind, _ship_kind_name(kind))
+		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S, "science_ship": KEY_V, "scout": KEY_Q, "cruiser": KEY_E, "destroyer": KEY_F}[kind], "Shipyard", "yard_" + kind, UI_TEXT.ship_kind_name(kind))
 	# Rows 1–3: Small, Medium and Large. A locked class shows only
 	# its next eligible upgrade; unlocked ships begin in column one.
 	for target_level in [2, 3]:
@@ -2153,7 +2016,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			recipe = ECONOMY.building_cost(p, key)
 			eligible = ECONOMY.production_available(p, key)
 			available = ECONOMY.building_available(p, key)
-			description = "Requires %s population\n%s" % [_compact_amount(float(ECONOMY.building_population(key, current_level + 1))), _economy_building_effect(p, key)]
+			description = "Requires %s population\n%s" % [UI_TEXT.compact_amount(float(ECONOMY.building_population(key, current_level + 1))), UI_TEXT.economy_building_effect(p, key)]
 		elif key == "warehouse":
 			var level: int = int(p.get("warehouse_level", 0))
 			current_level = level
@@ -2161,12 +2024,12 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			eligible = level < 3
 			available = ECONOMY.warehouse_available(p)
 			work = ECONOMY._work("warehouse", level + 1)
-			description = "Maximum storage: %s per resource" % _tons(ECONOMY.storage_capacity(p), 0)
+			description = "Maximum storage: %s per resource" % UI_TEXT.tons(ECONOMY.storage_capacity(p), 0)
 			if eligible:
 				recipe = ECONOMY.WAREHOUSE_COSTS[level]
 				var preview: Dictionary = p.duplicate()
 				preview["warehouse_level"] = level + 1
-				description = "Requires %s population\n+%s storage per resource (%s total)" % [_compact_amount(ECONOMY.WAREHOUSE_POPULATIONS[level]), _tons(ECONOMY.storage_capacity(preview) - ECONOMY.storage_capacity(p), 0), _tons(ECONOMY.storage_capacity(preview), 0)]
+				description = "Requires %s population\n+%s storage per resource (%s total)" % [UI_TEXT.compact_amount(ECONOMY.WAREHOUSE_POPULATIONS[level]), UI_TEXT.tons(ECONOMY.storage_capacity(preview) - ECONOMY.storage_capacity(p), 0), UI_TEXT.tons(ECONOMY.storage_capacity(preview), 0)]
 		elif key == "housing":
 			kind = "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
 			var caption: Label = button.get_meta("caption")
@@ -2180,7 +2043,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				eligible = level < 3
 				available = ECONOMY.habitation_available(p)
 				recipe = ECONOMY.habitation_cost(p) if eligible else {}
-				description = "+%s housing capacity (%s total)" % [_compact_amount(ECONOMY.habitation_capacity(p)), _compact_amount(ECONOMY.habitation_capacity(p) * 2.0)] if eligible else "Maximum housing: %s" % _compact_amount(ECONOMY.habitation_capacity(p))
+				description = "+%s housing capacity (%s total)" % [UI_TEXT.compact_amount(ECONOMY.habitation_capacity(p)), UI_TEXT.compact_amount(ECONOMY.habitation_capacity(p) * 2.0)] if eligible else "Maximum housing: %s" % UI_TEXT.compact_amount(ECONOMY.habitation_capacity(p))
 			else:
 				work = ECONOMY._work(kind, 1)
 				current_level = int(p.get("orbital_housing", 0))
@@ -2189,7 +2052,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				available = ECONOMY.orbital_housing_available(p)
 				var preview: Dictionary = p.duplicate()
 				preview["orbital_housing"] = current_level + 1
-				description = "+%s housing and residents\n+%.2f t/yr Organics" % [_compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
+				description = "+%s housing and residents\n+%.2f t/yr Organics" % [UI_TEXT.compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
 		elif key == "yard":
 			var slot: int = ECONOMY.next_shipyard_slot(p)
 			name_text = "Build Shipyard"
@@ -2204,7 +2067,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				var yards: Array = p["yards"].duplicate()
 				yards.append({})
 				preview["yards"] = yards
-				description = "Staffing: %s population\n+1 Small shipyard\n+%s housing and residents · +%.2f t/yr Organics" % [_compact_amount(ECONOMY.SHIPYARD_POPULATION[slot - 1]), _compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
+				description = "Staffing: %s population\n+1 Small shipyard\n+%s housing and residents · +%.2f t/yr Organics" % [UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[slot - 1]), UI_TEXT.compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
 		elif key == "pds":
 			name_text = "PDS"
 			current_level = p.get("pds", {}).size()
@@ -2215,7 +2078,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			description = "Defends one planet · %.0f damage · Range %.0f\nInvulnerable until station destroyed" % [ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
 		_upgrade_level_badge(button, current_level)
 		if key != "yard":
-			name_text += " " + _roman_level(current_level + (1 if eligible else 0))
+			name_text += " " + UI_TEXT.roman_level(current_level + (1 if eligible else 0))
 		var repeat_key: String = _station_repeat_key(p, key)
 		var auto: bool = not repeat_key.is_empty() and bool(p.get("continuous", {}).get(repeat_key, false))
 		available = owned and available and ECONOMY.construction_affordable(_state(), p, recipe)
@@ -2328,7 +2191,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = _production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [_ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), _ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
+		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
 		if not ECONOMY.yard_fits(system, selected_yard, kind):
 			_set_button_hint(button, _button_hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
 		if not operating:
@@ -2350,7 +2213,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		if level >= target_level:
 			_set_cost_tooltip(upgrade, ECONOMY.size_name(target_level) + " unlocked")
 		else:
-			var hint: String = "Upgrade to %s · %.0f s (1×)\nRequires %s resident population for this yard\nUnlocks %s ships · %.1f× build speed\n+%.0f HP · Fully repairs yard" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), _compact_amount(ECONOMY.SHIPYARD_POPULATION[selected_yard]), ECONOMY.size_name(target_level), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP]
+			var hint: String = "Upgrade to %s · %.0f s (1×)\nRequires %s resident population for this yard\nUnlocks %s ships · %.1f× build speed\n+%.0f HP · Fully repairs yard" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[selected_yard]), ECONOMY.size_name(target_level), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP]
 			if not eligible:
 				hint += "\nRequires " + ECONOMY.size_name(target_level - 1) + " shipyard"
 			_set_cost_tooltip(upgrade, hint, ECONOMY._cost("yard_upgrade", target_level), 0.0, _available_cost_resources(system, selected_yard))
@@ -2586,12 +2449,9 @@ func _selected_ship(state: Dictionary) -> Dictionary:
 			return ship
 	return {}
 
+# Keep a bound callable for the tactical alert tracker.
 func _ship_kind_name(kind: String) -> String:
-	if kind == "warp_gate":
-		return "Warp Gate"
-	if kind == "science_ship":
-		return "Science vessel"
-	return {"ship": "Freighter", "miner": "Harvester", "colony_ship": "Colony"}.get(kind, kind.replace("_", " ").capitalize())
+	return UI_TEXT.ship_kind_name(kind)
 
 func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
 	var points: Array = ECONOMY.military_graph(state)["points"] if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"]
@@ -3143,8 +3003,8 @@ func _refresh_weapon_details(ship: Dictionary, system: Dictionary, body_selected
 			parent = ship_overview
 			at = ship_detail.get_index() + 1
 			match str(ship["kind"]):
-				"cruiser", "destroyer": details = _capital_weapon_summary(str(ship["kind"]))
-				"scout", "fighter": details = _blaster_summary(str(ship["kind"]))
+				"cruiser", "destroyer": details = UI_TEXT.capital_weapon_summary(str(ship["kind"]))
+				"scout", "fighter": details = UI_TEXT.blaster_summary(str(ship["kind"]))
 				"miner": details = "Mining laser ×2\n%.0f damage each · 1 shot/s (1×) · Range %.0f\n+200%% vs asteroids · %.0f t/yr nominal" % [ECONOMY.MINER_LASER_DAMAGE / 2.0, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE]
 		elif not system.is_empty() and not yard_selected:
 			if body_selected and system.get("pds", {}).has(selected_body):
@@ -3228,7 +3088,7 @@ func _refresh_selection_tiles(state: Dictionary) -> void:
 		var shield: float = _shield_fraction(craft)
 		shield_bar.visible = shield >= 0.0 and shield < 1.0
 		shield_bar.value = maxf(0.0, shield)
-		tile.tooltip_text = "%s · HP %.0f / %.0f\nCrew: %s" % [_ship_kind_name(str(craft["kind"])), float(craft.get("hp", ECONOMY.ship_max_hp(str(craft["kind"])))), ECONOMY.ship_max_hp(str(craft["kind"])), _crew_text(float(craft.get("crew", 0.0)))]
+		tile.tooltip_text = "%s · HP %.0f / %.0f\nCrew: %s" % [UI_TEXT.ship_kind_name(str(craft["kind"])), float(craft.get("hp", ECONOMY.ship_max_hp(str(craft["kind"])))), ECONOMY.ship_max_hp(str(craft["kind"])), UI_TEXT.crew_text(float(craft.get("crew", 0.0)))]
 	for id in selection_tiles.keys():
 		if not living.has(id):
 			var tile: Button = selection_tiles[id]
@@ -3272,7 +3132,7 @@ func _refresh_field_panels(state: Dictionary) -> void:
 		ship_detail.text = "Depleted"
 	else:
 		var metals: int = roundi(100.0 * float(stock["Metals"]) / total)
-		ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, _tons(float(stock["Metals"])), 100 - metals, _tons(float(stock["Crystals"]))]
+		ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, UI_TEXT.tons(float(stock["Metals"])), 100 - metals, UI_TEXT.tons(float(stock["Crystals"]))]
 	var access_names: PackedStringArray = []
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	for anchor in graph["adjacent"][state["planets"].size() + selected_field]:
@@ -3288,14 +3148,11 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	if not special:
 		_refresh_field_commands(state, special)
 
-func _crew_text(crew: float) -> String:
-	return "%.0f" % crew
-
 func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	field_command_grid.hide()
 	var kind: String = ship.get("kind", "ship")
 	var owner: int = int(ship["owner"])
-	ship_title.text = ("Rogue " if bool(ship.get("rogue", false)) else "") + _ship_kind_name(kind)
+	ship_title.text = ("Rogue " if bool(ship.get("rogue", false)) else "") + UI_TEXT.ship_kind_name(kind)
 	var route: Array = ship["route"]
 	var mode: String = ship.get("mining_mode", "idle")
 	var status: String = "Orbiting %s" % _system_name(int(ship["at"]))
@@ -3347,7 +3204,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Guarding sector" if bool(ship.get("guard_arrived", false)) else "Moving to guard position"
 	if follow_order.get("kind", "") == "follow" and not bool(ship.get("retreating", false)):
 		var target_ship: Dictionary = ECONOMY.service_targets(state).get(int(follow_order["target"]), {}).get("entity", {})
-		status = ("%s %s" % ["Guarding" if bool(follow_order.get("guard", false)) else "Following", _ship_kind_name(str(target_ship.get("kind", "ship")))])
+		status = ("%s %s" % ["Guarding" if bool(follow_order.get("guard", false)) else "Following", UI_TEXT.ship_kind_name(str(target_ship.get("kind", "ship")))])
 	var wait_left: float = ECONOMY.autocast_remaining(state, ship, "wander")
 	if wait_left > ECONOMY.EPS and ECONOMY.autocast_enabled(ship, "wander") and ECONOMY._is_idle_ship(ship):
 		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)
@@ -3403,7 +3260,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft.get("cargo", {}).get(resource, 0.0))
 	if not multiple:
 		selected_crew = float(ship.get("crew", 0.0))
-	ship_population.text = ("Total crew: " if multiple else "Crew: ") + _crew_text(selected_crew)
+	ship_population.text = ("Total crew: " if multiple else "Crew: ") + UI_TEXT.crew_text(selected_crew)
 	ship_population.get_parent().show()
 	_sync_command_kind(state)
 	command_card.show()
@@ -3455,13 +3312,13 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		pending_command = ""
 	_refresh_command_mode()
 	fleet_title.visible = _command_kinds(state).size() > 1
-	fleet_title.text = "%s · Tab" % _ship_kind_name(command_kind)
+	fleet_title.text = "%s · Tab" % UI_TEXT.ship_kind_name(command_kind)
 	fleet_detail.visible = false
 	fleet_cargo_footer.visible = ECONOMY._cargo_total({"cargo": cargo}) > ECONOMY.EPS
 	if fleet_cargo_footer.visible:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			var amount: float = float(cargo.get(resource, 0.0))
-			fleet_cargo_labels[resource].text = _tons(amount, 1, true) if amount >= 1000.0 else (("%.1f" % amount).trim_suffix(".0") if amount >= 0.1 else "%.2f" % amount) + "t"
+			fleet_cargo_labels[resource].text = UI_TEXT.tons(amount, 1, true) if amount >= 1000.0 else (("%.1f" % amount).trim_suffix(".0") if amount >= 0.1 else "%.2f" % amount) + "t"
 			fleet_cargo_labels[resource].tooltip_text = "%.1f t" % amount
 			fleet_cargo_labels[resource].get_parent().visible = amount > ECONOMY.EPS
 
@@ -3974,11 +3831,6 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
 		tile.add_child(label)
 	return label
 
-func _tons(value: float, decimals: int = 1, compact: bool = false) -> String:
-	# Stocks and prices share one unit; preserve fractional small values.
-	var number: String = ("%.1f" % value).trim_suffix(".0") if decimals == 1 and absf(value) < 1000.0 else "%.0f" % value
-	return number + ("" if compact else " ") + "t"
-
 func _resource_delta(p: Dictionary, resource: String) -> float:
 	return ECONOMY.rate(p, resource) - ECONOMY.consumption(p, resource)
 
@@ -3991,19 +3843,10 @@ func _empire_resource_delta(state: Dictionary, resource: String) -> float:
 
 func _set_resource_delta(label: Label, annual: float, parentheses: bool = false) -> void:
 	var displayed: float = 0.0 if absf(annual) < 0.05 else annual
-	var amount: String = ("+" if displayed > 0.0 else "") + _tons(displayed, 1, true)
+	var amount: String = ("+" if displayed > 0.0 else "") + UI_TEXT.tons(displayed, 1, true)
 	label.text = ("(%s/yr)" % amount if displayed != 0.0 else "") if parentheses else amount
 	label.visible = not parentheses or displayed != 0.0
 	label.add_theme_color_override("font_color", Color("#7cdb9b") if displayed > 0.0 else (Color("#eb8585") if displayed < 0.0 else Color.WHITE))
-
-func _compact_amount(value: float) -> String:
-	if value >= 1000000000.0:
-		return "%.1fB" % (value / 1000000000.0)
-	if value >= 1000000.0:
-		return "%.1fM" % (value / 1000000.0)
-	if value >= 1000.0:
-		return "%.1fK" % (value / 1000.0)
-	return "%.0f" % value
 
 func _build_resource_hover() -> void:
 	resource_hover_panel = PanelContainer.new()
@@ -4032,12 +3875,12 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 		return details
 	if resource == "population":
 		var population_totals: Dictionary = ECONOMY.empire_totals(state, _me())
-		var lines: PackedStringArray = ["Population · %s people" % _compact_amount(float(population_totals["population"])), "Residents: %s · Ships: %s · Embarking: %s" % [_compact_amount(float(population_totals["resident_population"])), _compact_amount(float(population_totals["ship_population"])), _compact_amount(float(population_totals["embarking_population"]))], "Current local growth (people/yr)"]
+		var lines: PackedStringArray = ["Population · %s people" % UI_TEXT.compact_amount(float(population_totals["population"])), "Residents: %s · Ships: %s · Embarking: %s" % [UI_TEXT.compact_amount(float(population_totals["resident_population"])), UI_TEXT.compact_amount(float(population_totals["ship_population"])), UI_TEXT.compact_amount(float(population_totals["embarking_population"]))], "Current local growth (people/yr)"]
 		var ceiling: float = 0.0
 		for system in state["planets"]:
 			if int(system["owner"]) == _me():
 				ceiling += ECONOMY.sustainable_population_capacity(system)
-		lines.insert(1, "Resident sustainable capacity: %s people" % _compact_amount(ceiling))
+		lines.insert(1, "Resident sustainable capacity: %s people" % UI_TEXT.compact_amount(ceiling))
 		for i in range(state["planets"].size()):
 			var p: Dictionary = state["planets"][i]
 			if int(p["owner"]) != _me():
@@ -4122,15 +3965,15 @@ func _refresh_global_bar(state: Dictionary) -> void:
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
 	var credit_income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE - float(totals["upkeep"])
 	var unpaid: int = int(totals["unpaid_ships"])
-	global_credit_label.text = "%s GC%s" % [_compact_amount(ECONOMY.credit_balance(state, _me())), " !" if unpaid > 0 else ""]
+	global_credit_label.text = "%s GC%s" % [UI_TEXT.compact_amount(ECONOMY.credit_balance(state, _me())), " !" if unpaid > 0 else ""]
 	global_credit_label.add_theme_color_override("font_color", Color("#ff7777") if unpaid > 0 else Color("#e7c76b"))
 	var sign_text: String = "+" if credit_income > 0.0 else ("−" if credit_income < 0.0 else "")
-	global_credit_income_label.text = "%s%s GC/yr" % [sign_text, _compact_amount(absf(credit_income))]
+	global_credit_income_label.text = "%s%s GC/yr" % [sign_text, UI_TEXT.compact_amount(absf(credit_income))]
 	global_credit_income_label.add_theme_color_override("font_color", Color("#ff7777") if credit_income < 0.0 else (Color("#7cdb9b") if credit_income > 0.0 else Color.WHITE))
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])
 		var annual: float = _empire_resource_delta(state, resource)
-		global_resource_labels[resource].text = _tons(value, 0, true)
+		global_resource_labels[resource].text = UI_TEXT.tons(value, 0, true)
 		_set_resource_delta(global_resource_delta_labels[resource], annual, true)
 		var stored: float = float(totals["stock"][resource])
 		var reference: float = float(totals["storage_reference"][resource])
@@ -4149,7 +3992,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
 		global_resource_segments[resource] = segments
 		global_resource_strips[resource].queue_redraw()
 		tile.tooltip_text = ""
-	global_population_label.text = "%s" % _compact_amount(float(totals["population"]))
+	global_population_label.text = "%s" % UI_TEXT.compact_amount(float(totals["population"]))
 	var population_total: float = float(totals["population"])
 	var population_segments: Array = []
 	var population_net: float = 0.0
@@ -4167,7 +4010,7 @@ func _refresh_global_bar(state: Dictionary) -> void:
 		population_segments.append({"name": "Fleet", "share": fleet_population / population_total, "index": -1, "color": Color("#5b90ba")})
 	population_ceiling += fleet_population
 	population_segments.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["share"] > b["share"] if a["share"] != b["share"] else a["index"] < b["index"])
-	global_population_label.text = "%s (%+.0f/yr)" % [_compact_amount(population_total), population_net]
+	global_population_label.text = "%s (%+.0f/yr)" % [UI_TEXT.compact_amount(population_total), population_net]
 	global_population_label.tooltip_text = ""
 	global_resource_segments["population"] = population_segments
 	global_resource_fills["population"] = clampf(population_total / maxf(ECONOMY.EPS, population_ceiling), 0.0, 1.0)
@@ -4247,7 +4090,7 @@ func _update_trade_stock(p: Dictionary) -> void:
 		var stock: float = float(p["stock"][resource])
 		var capacity: float = ECONOMY.storage_capacity(p)
 		slider.set_stock(stock, capacity, HUD.COLORS[resource])
-		trade_stock_labels[resource].text = "%s / %s" % [_tons(stock, 1, true), _tons(capacity, 0, true)]
+		trade_stock_labels[resource].text = "%s / %s" % [UI_TEXT.tons(stock, 1, true), UI_TEXT.tons(capacity, 0, true)]
 		trade_stock_labels[resource].tooltip_text = "%.1f / %.0f t" % [stock, capacity]
 		slider.tooltip_text = "Import below the left handle; export above the right handle. 100%% = %.0f units." % capacity
 		# Preserve this handle while dragging, even when a snapshot arrives.
@@ -4459,7 +4302,7 @@ func _refresh() -> void:
 	system_owner_label.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
 	for resource in ECONOMY.RESOURCES:
 		var amount: float = float(p["stock"][resource])
-		production_values[resource]["stock"].text = _tons(amount)
+		production_values[resource]["stock"].text = UI_TEXT.tons(amount)
 		production_values[resource]["level"].text = str(int(p["levels"][resource]) + int(p.get("buildings", {}).get(resource, 0)))
 		var percent: int = roundi(100.0 * ECONOMY.production_modifier(p, resource))
 		var bonus: Label = production_values[resource]["bonus"]
@@ -4471,11 +4314,11 @@ func _refresh() -> void:
 	var population: float = float(p["population"])
 	var raw: float = float(p["stock"].get(ECONOMY.ANTIMATTER, 0.0))
 	raw_antimatter_label.visible = raw > ECONOMY.EPS
-	raw_antimatter_label.text = "Raw antimatter · %s" % _tons(raw)
+	raw_antimatter_label.text = "Raw antimatter · %s" % UI_TEXT.tons(raw)
 	raw_antimatter_label.tooltip_text = "%.1f t stored locally" % raw
-	population_label.text = "%s" % _compact_amount(population)
+	population_label.text = "%s" % UI_TEXT.compact_amount(population)
 	var change: float = float(p.get("demographic_rate", ECONOMY.population_growth(p))) - float(p.get("crew_rate", 0.0))
-	population_delta_label.text = "(%s%s/yr)" % ["+" if change >= 0.0 else "-", _compact_amount(absf(change))]
+	population_delta_label.text = "(%s%s/yr)" % ["+" if change >= 0.0 else "-", UI_TEXT.compact_amount(absf(change))]
 	population_delta_label.add_theme_color_override("font_color", Color("#7cdb9b") if change >= 0.0 else Color("#eb8585"))
 	population_label.tooltip_text = ""
 	_update_trade_stock(p)
@@ -5663,7 +5506,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = _production_icon(kind, _empire_color(_me()))
 		portrait.modulate = Color.WHITE if eligible else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [_ship_kind_name(kind), _ship_stats(kind)], ECONOMY.construction_cost(state["planets"][refs[0].x] if not refs.is_empty() else {}, kind, 1), float(ECONOMY.CREW_COSTS[kind]), available)
+		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [UI_TEXT.ship_kind_name(kind), UI_TEXT.ship_stats(kind)], ECONOMY.construction_cost(state["planets"][refs[0].x] if not refs.is_empty() else {}, kind, 1), float(ECONOMY.CREW_COSTS[kind]), available)
 	var can_clear: bool = false
 	var can_upgrade: Dictionary = {2: false, 3: false}
 	for ref in refs:
@@ -7398,7 +7241,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 			logistics_overlay.draw_rect(Rect2(cell, Vector2(44.0 * fraction, 14) * scale), HUD.COLORS[resource].darkened(0.4))
 			logistics_overlay.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13) * scale), false)
 			if scale >= 0.8:
-				logistics_overlay.draw_string(font, cell + Vector2(15, 11) * scale, _tons(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+				logistics_overlay.draw_string(font, cell + Vector2(15, 11) * scale, UI_TEXT.tons(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
 			var grade: int = ECONOMY.specialization_grade(system, resource)
 			if grade != 0 and scale >= 0.55:
 				var badge_pos: Vector2 = cell + Vector2(8, 16) * scale
@@ -9158,7 +9001,7 @@ func _refresh_empire(state: Dictionary) -> void:
 			var top := HBoxContainer.new()
 			body.add_child(top)
 			var name_label := Label.new()
-			name_label.text = _ship_kind_name(kind)
+			name_label.text = UI_TEXT.ship_kind_name(kind)
 			name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			top.add_child(name_label)
 			var counter := Label.new()
