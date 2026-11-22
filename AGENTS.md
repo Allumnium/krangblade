@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.94.6: Station storage bays use circular resource-colored outlines and proportional bottom-up circular fill, preserving bay positions, counts, colors and stock rules. Verify empty, partial and full bays at detail zoom; runtime/visual/ENet pending.
+
 - v0.94.5: All conquest reward effects use concise player-facing descriptions, HUD resource/population and command icons, separate green benefit and red cost rows, and Select buttons. Research effects reflect base additive bonuses or approximate marginal reductions for divisor-based ranks. Preserve actual costs, rewards, rarity and authority. Verify card wrapping at narrow resolutions and live reward availability; visual/runtime pending.
 
 - v0.94.4: All construction remains prepaid for local materials and GC. Hull admission atomically reserves the full crew via existing population_cost minus population_allocated; available crew excludes other reservations and preserves eligible shipyard staffing. Reserved residents still pay taxes, produce and consume at 0% progress; first positive work transfers the full crew out of resident population, counted once in construction crew. Preserve 50k colony origin resident gate, cancellation material policy, credits and crew refunds. Manual, group, repeat, per-yard and empire autoqueue share authority admission; command info reflects unreserved population. Actual resident losses after reservation can postpone embarkation without enabling overbooking. Update core regression assertions; Godot and ENet validation pending.
