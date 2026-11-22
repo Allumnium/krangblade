@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.94.7: Resource HUD bars include one blue fleet-cargo segment alongside existing station stock segments; total fill uses station storage capacity plus actual onboard cargo, while net trend remains storage-relative. Hover lists total, station stock/storage capacity and ship cargo. Scout base construction doubles to 120 Metals, 4 Organics, 244 GC and 200 crew; existing reward modifiers and discounts apply, work and upkeep unchanged. Verify empty/full/cargo-only bars, transfers, crew reservation, pricing and solo/ENet; runtime/visual pending.
+
 - v0.94.6: Station storage bays use circular resource-colored outlines and proportional bottom-up circular fill, preserving bay positions, counts, colors and stock rules. Verify empty, partial and full bays at detail zoom; runtime/visual/ENet pending.
 
 - v0.94.5: All conquest reward effects use concise player-facing descriptions, HUD resource/population and command icons, separate green benefit and red cost rows, and Select buttons. Research effects reflect base additive bonuses or approximate marginal reductions for divisor-based ranks. Preserve actual costs, rewards, rarity and authority. Verify card wrapping at narrow resolutions and live reward availability; visual/runtime pending.

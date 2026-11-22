@@ -235,8 +235,8 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 			lines.append("%s · %.0f · %+.2f/yr\n  %+.2f growth · %+.2f crew · %+.1f%% crowding · %+.1f%% food" % [system_name.call(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p))])
 		return "\n".join(lines)
 	var totals: Dictionary = ECONOMY.empire_totals(state, local_player.call())
-	var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
-		"%.2f t in transit  /  %.0f t storage" % [float(totals["cargo"][resource]), float(totals["storage_reference"][resource])],
+	var lines: PackedStringArray = ["%s · %.2f t total" % [resource, float(totals["resources"][resource])],
+		"Stations: %.2f / %.0f t · Ships: %.2f t" % [float(totals["stock"][resource]), float(totals["storage_reference"][resource]), float(totals["cargo"][resource])],
 		"Net (storage-limited): %+.2f t/yr" % _empire_resource_delta(state, resource)]
 	lines.append("System · Net | Production | Demand (t/yr)")
 	for i in range((state.get("planets", []) as Array).size()):
@@ -323,20 +323,24 @@ func refresh(state: Dictionary) -> void:
 		var annual: float = _empire_resource_delta(state, resource)
 		global_resource_labels[resource].text = UI_TEXT.tons(value, 0, true)
 		var stored: float = float(totals["stock"][resource])
+		var cargo: float = float(totals["cargo"][resource])
 		var reference: float = float(totals["storage_reference"][resource])
 		global_resource_trends[resource] = _trend_count(annual, reference)
-		global_resource_fills[resource] = clampf(stored / reference, 0.0, 1.0) if reference > 0.0 else 0.0
+		# Onboard stock occupies its own segment, not station storage.
+		global_resource_fills[resource] = clampf(value / maxf(ECONOMY.EPS, reference + cargo), 0.0, 1.0)
 		var tile: PanelContainer = global_resource_tiles[resource]
 		var segments: Array = []
-		if stored > ECONOMY.EPS:
+		if stored > 0.0 and value > 0.0:
 			for i in range(state.get("planets", []).size()):
 				var planet: Dictionary = state["planets"][i]
 				if int(planet["owner"]) != local_player.call():
 					continue
 				var quantity: float = float(planet["stock"][resource])
 				if quantity > 0.0:
-					segments.append({"name": system_name.call(i), "share": quantity / stored, "index": i})
+					segments.append({"name": system_name.call(i), "share": quantity / value, "index": i})
 			segments.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["share"] > b["share"] if a["share"] != b["share"] else a["index"] < b["index"])
+		if cargo > 0.0 and value > 0.0:
+			segments.append({"name": "Fleet", "share": cargo / value, "index": -1, "color": Color("#5b90ba")})
 		global_resource_segments[resource] = segments
 		global_resource_strips[resource].queue_redraw()
 		tile.tooltip_text = ""

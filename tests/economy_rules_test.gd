@@ -1349,7 +1349,7 @@ func _test_station_crystals() -> void:
 		var discounted: Dictionary = ECON.construction_cost({"station": {"dyson_sphere": true}}, kind, 1)
 		for resource in full:
 			assert(discounted[resource] == full[resource] * 0.5)
-	assert(ECON.construction_cost({"conquest_rewards": ["cloak"]}, "scout", 1)["Crystals"] == 36.0)
+	assert(ECON.construction_cost({"conquest_rewards": ["cloak"]}, "scout", 1)["Crystals"] == 72.0)
 	print("PASS: station baseline, planetary crystal rate, blockade and increased construction costs")
 
 func _test_sfx_rules() -> void:
@@ -1453,6 +1453,21 @@ func _test_galactic_credits() -> void:
 	print("PASS: independent Galactic Credits, resident taxes, ownership, pause and fresh matches")
 
 func _test_construction_credits() -> void:
+	var scout_state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var scout_home: Dictionary = scout_state["planets"][0]
+	var scout_cost: Dictionary = ECON.construction_cost(scout_home, "scout", 1)
+	assert(scout_cost == {"Metals": 120.0, "Organics": 4.0})
+	assert(ECON.construction_credit_cost(scout_cost, "scout") == 244.0)
+	scout_home["population"] = 100000.0
+	scout_home["stock"]["Metals"] = 120.0
+	scout_home["stock"]["Organics"] = 4.0
+	scout_state["galactic_credits"][1] = 243.0
+	assert(not ECON.enqueue(scout_state, 1, 0, "scout"))
+	scout_state["galactic_credits"][1] = 244.0
+	assert(ECON.enqueue(scout_state, 1, 0, "scout"))
+	assert(ECON.credit_balance(scout_state, 1) == 0.0)
+	assert(float(scout_home["stock"]["Metals"]) == 0.0 and float(scout_home["stock"]["Organics"]) == 0.0)
+	assert(float(scout_home["queue"][0]["population_cost"]) == 200.0 and ECON.reserved_construction_population(scout_home) == 200.0)
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
 	var home: Dictionary = state["planets"][0]
 	var fee: float = ECON.construction_credit_cost(ECON.construction_cost(home, "fighter", 1), "fighter")
