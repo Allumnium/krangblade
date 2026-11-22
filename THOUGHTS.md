@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.57: Extract construction queue flow, tile reconciliation, progress/blocker styling and job labels into construction_queue_view.gd. Match retains queue dictionaries, job icon callback, selection and cancellation dispatch. Runtime/peer validation pending.
+
 - v0.89.56: Shorten command captions to Plating, Lasers, Shipyards, Upgrade, Clear and Shipyard; preserve contextual tooltip details, hotkeys, slots and mechanics. Verify visual fit.
 
 - v0.89.55: Replace physical-resource header annual deltas with white directional chevrons at the storage fill edge. One below 0.5% capacity/yr, two from 0.5%, three from 2%; hide below 0.05 t/yr or without capacity. Keep precise hover breakdown and local rates. Credits and population unchanged. Verify contrast and fit at empty/full bars.
