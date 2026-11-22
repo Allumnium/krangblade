@@ -6,6 +6,7 @@ const CostButton = preload("res://scripts/cost_button.gd")
 
 # Per-match texture cache, keyed by command and requested pixel size.
 var _icons: Dictionary = {}
+var _unavailable_build_style: StyleBoxFlat = HUD.surface(Color("#0b1621"), Color("#263748"), 3, 5)
 const INFO_HEIGHT_RATIO: float = 0.55
 const INFO_MAX_HEIGHT_RATIO: float = 0.65
 const INFO_PADDING: Vector2 = Vector2(7.0, 5.0)
@@ -71,6 +72,17 @@ func set_face(button: Button, caption: String, picture: Texture2D) -> TextureRec
 	content.add_child(name_label)
 	button.set_meta("caption", name_label)
 	return art
+
+# Manual construction eligibility is independent of right-click automation.
+func set_build_available(button: Button, available: bool) -> void:
+	if button.has_meta("build_available") and bool(button.get_meta("build_available")) == available:
+		return
+	button.set_meta("build_available", available)
+	for style in ["normal", "hover", "pressed", "disabled"]:
+		if available:
+			button.remove_theme_stylebox_override(style)
+		else:
+			button.add_theme_stylebox_override(style, _unavailable_build_style)
 
 func set_level_badge(button: Button, level: int) -> void:
 	var label: Label = button.get_meta("level_badge") as Label if button.has_meta("level_badge") else null
