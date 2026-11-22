@@ -4,6 +4,7 @@ const MAP = preload("res://scripts/planet_map.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
 const UI_TEXT = preload("res://scripts/ui_text.gd")
 const CostButton = preload("res://scripts/cost_button.gd")
+const COMMAND_CARD_UI = preload("res://scripts/command_card_ui.gd")
 const CODEX = preload("res://scripts/codex.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const PLANET = preload("res://assets/ui/planet.svg")
@@ -124,7 +125,7 @@ var station_build_grid: GridContainer
 var station_trade: VBoxContainer
 var station_trade_back: Button
 var station_build_buttons: Dictionary = {}
-var station_icons: Dictionary = {}
+var command_card_ui := COMMAND_CARD_UI.new()
 var station_card: String = "primary"
 var station_selected_index: int = -1
 var station_queue: HFlowContainer
@@ -946,10 +947,10 @@ func _build_ui() -> void:
 	interaction_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	interaction_panel.add_theme_constant_override("separation", 8)
 	interaction_scroll.add_child(interaction_panel)
-	var neutral_grid: GridContainer = _ability_grid(interaction_panel)
+	var neutral_grid: GridContainer = command_card_ui.create_grid(interaction_panel)
 	send_colony_button = _station_button(neutral_grid, "Send\nColony", "transform", _send_colony)
-	_set_button_hint(send_colony_button, "Send the nearest idle Colony to this sector")
-	_fill_ability_grid(neutral_grid)
+	command_card_ui.set_hint(send_colony_button, "Send the nearest idle Colony to this sector")
+	command_card_ui.fill_grid(neutral_grid)
 	_build_station_command_card(body)
 	var trade_page: GridContainer = _inspector_page("Trade")
 	for resource in ECONOMY.RESOURCES:
@@ -1364,7 +1365,7 @@ func _set_cost_tooltip(button: Button, description: String, cost: Dictionary = {
 	var cost_button: CostButton = button as CostButton
 	cost_button.set_recipe(cost, crew, _population_texture() if crew > 0.0 else null, available)
 	var shortcut: String = str(button.get_meta("hotkey", ""))
-	_set_button_hint(button, description if shortcut.is_empty() else (description + "\n[" + shortcut + "]" if not description.is_empty() else "[" + shortcut + "]"))
+	command_card_ui.set_hint(button, description if shortcut.is_empty() else (description + "\n[" + shortcut + "]" if not description.is_empty() else "[" + shortcut + "]"))
 
 func _available_cost_resources(p: Dictionary, yard: int = -1) -> Dictionary:
 	var available: Dictionary = p["stock"].duplicate()
@@ -1550,11 +1551,11 @@ func _sync_hotkey_bindings() -> void:
 		var hint: String = _hotkey_name(key)
 		var old: String = str(button.get_meta("hotkey", ""))
 		if not old.is_empty():
-			_set_button_hint(button, _button_hint(button).replace("\n[" + old + "]", "").replace(" [" + old + "]", ""))
-			if _button_hint(button) == "[" + old + "]":
-				_set_button_hint(button, "")
+			command_card_ui.set_hint(button, command_card_ui.hint(button).replace("\n[" + old + "]", "").replace(" [" + old + "]", ""))
+			if command_card_ui.hint(button) == "[" + old + "]":
+				command_card_ui.set_hint(button, "")
 		button.set_meta("hotkey", hint)
-		_set_button_hint(button, _button_hint(button) + ("\n" if not _button_hint(button).is_empty() else "") + "[" + hint + "]")
+		command_card_ui.set_hint(button, command_card_ui.hint(button) + ("\n" if not command_card_ui.hint(button).is_empty() else "") + "[" + hint + "]")
 		var badge: Label = entry["badge"]
 		badge.text = hint
 		var shortcuts: Array = command_hotkeys.get(key, [])
@@ -1569,125 +1570,6 @@ func _trigger_command_hotkey(key: int) -> bool:
 			return true
 	return false
 
-func _button_hint(button: Button) -> String:
-	return str(button.get_meta("command_hint", "")) if button.has_meta("command_hint") else button.tooltip_text
-
-func _set_button_hint(button: Button, hint: String) -> void:
-	if button.has_meta("command_hint"):
-		button.set_meta("command_hint", hint)
-		button.tooltip_text = ""
-	else:
-		button.tooltip_text = hint
-
-func _make_tooltip_mouse_transparent(node: Node) -> void:
-	if node is Control:
-		(node as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for child in node.get_children():
-		_make_tooltip_mouse_transparent(child)
-
-func _enable_fast_command_tooltip(button: Button) -> void:
-	if not button is CostButton:
-		return
-	if button.has_meta("command_hint"):
-		return
-	button.set_meta("command_hint", button.tooltip_text)
-	button.tooltip_text = ""
-	(button as CostButton).fast_tooltip = true
-	var timer := Timer.new()
-	timer.one_shot = true
-	timer.wait_time = float(ProjectSettings.get_setting("gui/timers/tooltip_delay", 0.5)) * 0.5
-	button.add_child(timer)
-	var popup := PanelContainer.new()
-	popup.top_level = true
-	popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	popup.z_index = 100
-	popup.theme = HUD.compact()
-	popup.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-	button.add_child(popup)
-	popup.hide()
-	button.mouse_entered.connect(func() -> void: timer.start())
-	button.mouse_exited.connect(func() -> void:
-		timer.stop()
-		popup.hide())
-	button.visibility_changed.connect(func() -> void:
-		timer.stop()
-		popup.hide())
-	button.gui_input.connect(func(event: InputEvent) -> void:
-		if event is InputEventMouseButton and event.pressed:
-			timer.stop()
-			popup.hide())
-	timer.timeout.connect(func() -> void:
-		if not button.is_visible_in_tree() or not button.get_global_rect().has_point(button.get_global_mouse_position()) or str(button.get_meta("command_hint", "")).is_empty():
-			return
-		for child in popup.get_children():
-			popup.remove_child(child)
-			child.queue_free()
-		var content: Control = (button as CostButton)._make_custom_tooltip(str(button.get_meta("command_hint", ""))) as Control
-		if content == null:
-			var label := Label.new()
-			label.text = str(button.get_meta("command_hint", ""))
-			var panel := PanelContainer.new()
-			panel.add_theme_stylebox_override("panel", HUD.surface(Color("#101b29"), Color("#6385a4"), 8, 3))
-			panel.add_child(label)
-			content = panel
-		popup.add_child(content)
-		_make_tooltip_mouse_transparent(content)
-		popup.reset_size()
-		var bounds: Vector2 = button.get_viewport_rect().size
-		var extent: Vector2 = popup.get_combined_minimum_size()
-		var cursor: Vector2 = button.get_global_mouse_position()
-		popup.global_position = Vector2(clampf(cursor.x + 14.0, 0.0, maxf(0.0, bounds.x - extent.x)), clampf(cursor.y - extent.y - 12.0, 0.0, maxf(0.0, bounds.y - extent.y)))
-		popup.show())
-
-func _upgrade_level_badge(button: Button, level: int) -> void:
-	var label: Label = button.get_meta("level_badge") as Label if button.has_meta("level_badge") else null
-	if not is_instance_valid(label):
-		label = Label.new()
-		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		label.add_theme_font_size_override("font_size", 10)
-		label.add_theme_color_override("font_color", Color("#e3f3ff"))
-		label.add_theme_color_override("font_outline_color", Color("#101b29"))
-		label.add_theme_constant_override("outline_size", 3)
-		button.add_child(label)
-		label.position = Vector2(3, 1)
-		button.set_meta("level_badge", label)
-	label.text = UI_TEXT.roman_level(level)
-
-func _yard_ability_face(button: Button, caption: String, picture: Texture2D) -> TextureRect:
-	# Construction cards use Godot's single native custom-tooltip path.
-	# Do not create a second timer-driven hover popup for these buttons.
-	button.custom_minimum_size = Vector2(60, 60)
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.focus_mode = Control.FOCUS_NONE
-	button.icon = null
-	button.text = ""
-	var content := VBoxContainer.new()
-	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	content.add_theme_constant_override("separation", 0)
-	button.add_child(content)
-	content.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	content.offset_left = 2.0
-	content.offset_right = -2.0
-	content.offset_top = 2.0
-	content.offset_bottom = -2.0
-	var art := TextureRect.new()
-	art.texture = picture
-	art.custom_minimum_size = Vector2(0, 16)
-	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	art.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	content.add_child(art)
-	var name_label := Label.new()
-	name_label.text = caption
-	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name_label.add_theme_font_size_override("font_size", 11)
-	name_label.add_theme_color_override("font_color", Color.WHITE)
-	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	content.add_child(name_label)
-	button.set_meta("caption", name_label)
-	return art
-
 func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_scroll = VBoxContainer.new()
 	yard_command_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1695,12 +1577,12 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_card = VBoxContainer.new()
 	yard_command_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	yard_command_scroll.add_child(yard_command_card)
-	var grid: GridContainer = _ability_grid(yard_command_card)
+	var grid: GridContainer = command_card_ui.create_grid(yard_command_card)
 	yard_command_grid = grid
 	for kind in ECONOMY.SHIP_KINDS:
 		var button := CostButton.new()
 		var caption: String = {"ship": "Freighter", "colony_ship": "Colony", "fighter": "Fighter", "miner": "Harvester", "science_ship": "Science\nvessel", "scout": "Scout", "cruiser": "Cruiser", "destroyer": "Destroyer"}[kind]
-		var art: TextureRect = _yard_ability_face(button, caption, _production_icon(kind, HUD.ACCENT))
+		var art: TextureRect = command_card_ui.set_face(button, caption, _production_icon(kind, HUD.ACCENT))
 		button.set_meta("portrait", art)
 		button.pressed.connect(_build_at_yard.bind(kind))
 		button.gui_input.connect(_yard_build_input.bind(kind, button))
@@ -1719,30 +1601,30 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	for target_level in [2, 3]:
 		var upgrade: Button = _button("", _upgrade_selected_yards.bind(target_level), grid, true)
 		var class_name_text: String = ECONOMY.size_name(target_level)
-		_yard_ability_face(upgrade, "Upgrade\n" + class_name_text, _station_command_icon("upgrade"))
+		command_card_ui.set_face(upgrade, "Upgrade\n" + class_name_text, command_card_ui.icon("upgrade"))
 		yard_upgrades[target_level] = upgrade
 		_register_command_hotkey(upgrade, KEY_U if target_level == 2 else KEY_I, "Shipyard", "yard_upgrade" if target_level == 2 else "yard_upgrade_large", "Upgrade to " + class_name_text)
-	yard_top_slots.assign([yard_commands["miner"], yard_commands["fighter"], yard_commands["scout"], _station_spacer(grid)])
+	yard_top_slots.assign([yard_commands["miner"], yard_commands["fighter"], yard_commands["scout"], command_card_ui.add_spacer(grid)])
 	for i in range(8):
-		yard_row_spacers.append(_station_spacer(grid))
+		yard_row_spacers.append(command_card_ui.add_spacer(grid))
 	var station_button := _button("", _select_yard_station, grid)
-	_yard_ability_face(station_button, "Select Space\nStation", _station_command_icon("select_station"))
-	_set_button_hint(station_button, "Select parent Space Station")
+	command_card_ui.set_face(station_button, "Select Space\nStation", command_card_ui.icon("select_station"))
+	command_card_ui.set_hint(station_button, "Select parent Space Station")
 	_register_command_hotkey(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
-	var navigation_spacer: Control = _station_spacer(grid)
+	var navigation_spacer: Control = command_card_ui.add_spacer(grid)
 	var clear := _button("", func() -> void:
 		pending_command = ""
 		_refresh_command_mode()
 		for ref in _selected_yards(_state(), true):
 			session.call("request_shipyard_rally", ref.x, ref.y, -1, Vector2.ZERO), grid)
-	_yard_ability_face(clear, "Clear\nRally", _station_command_icon("clear_rally"))
-	_set_button_hint(clear, "Clear rally point")
+	command_card_ui.set_face(clear, "Clear\nRally", command_card_ui.icon("clear_rally"))
+	command_card_ui.set_hint(clear, "Clear rally point")
 	yard_commands["clear"] = clear
 	_register_command_hotkey(clear, KEY_X, "Shipyard", "yard_clear", "Clear Rally")
 	var rally_button := CostButton.new()
-	_yard_ability_face(rally_button, "Rally", _station_command_icon("rally"))
+	command_card_ui.set_face(rally_button, "Rally", command_card_ui.icon("rally"))
 	rally_button.toggle_mode = true
-	_set_button_hint(rally_button, "Set Rally Point")
+	command_card_ui.set_hint(rally_button, "Set Rally Point")
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
@@ -1788,77 +1670,9 @@ func _select_yard_station() -> void:
 	_select_building_ref(Vector2i(selected, 0), "station")
 
 # Shared command-card art. Keep silhouettes legible at compact native UI sizes.
-func _station_command_icon(kind: String, pixels: int = 64) -> Texture2D:
-	var key: String = "%s:%d" % [kind, pixels]
-	if station_icons.has(key):
-		return station_icons[key]
-	var paths: Dictionary = {
-		"auto_retreat": '<path fill="#f6aa79" d="M3 16L15 4V11H28V21H15V28Z"/><path stroke="#ffe5cc" stroke-width="2" d="M18 7L28 7M18 25L28 25"/>',
-		"auto_explore": '<circle cx="16" cy="16" r="13" fill="none" stroke="#8bd5ed" stroke-width="2"/><path d="M23 5L19 19L5 26L12 12Z" fill="#b4e9f9"/><circle cx="16" cy="16" r="2" fill="#122337"/>',
-		"auto_wander": '<path stroke="#8bd5ed" stroke-width="2.5" fill="none" d="M3 25Q9 4 17 17T29 4"/><circle cx="4" cy="25" r="3" fill="#e1f8ff"/><path fill="#b4e9f9" d="M16 9L24 18L19 28L16 24L11 28L11 17Z"/>',
-		"collect": '<circle cx="16" cy="16" r="10" fill="none" stroke="#ab92ff" stroke-width="3"/><circle cx="16" cy="16" r="5" fill="#e4c9ff"/><path stroke="#e4c9ff" stroke-width="2" d="M16 1V6M16 26V31M1 16H6M26 16H31"/>',
-		"auto_farm": '<path fill="#9ee6a1" d="M15 28V17Q3 18 3 5Q14 5 16 15Q18 3 29 3Q29 18 18 19V28Z"/><path stroke="#e5ffd6" stroke-width="1.8" d="M7 9L16 18L25 8"/>',
-		"auto_mine": '<path fill="#9fb8c9" d="M3 17L9 10L18 12L23 21L18 29L7 27Z"/><path fill="#dce8f3" d="M9 10L18 12L12 19L3 17Z"/><path stroke="#ffbd77" stroke-width="3" d="M28 3L17 14M30 10L21 19"/><path fill="#f1c892" d="M25 2L30 2L30 7Z"/>',
-		"auto_salvage": '<path fill="#9ccfc5" d="M4 4H8V14Q8 21 16 21Q24 21 24 14V4H28V15Q28 27 16 27Q4 27 4 15Z"/><path fill="#d3e4eb" d="M13 4L21 6L18 13L10 11Z"/><path fill="#ffcd81" d="M12 14L16 18L12 22L8 18Z"/>',
-		"move": '<path fill="#9ed9f6" d="M3 12H18V5L30 16L18 27V20H3Z"/><path fill="#edfaff" d="M5 13H19V9L26 15H5Z"/>',
-		"stop": '<rect x="6" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/><rect x="18" y="4" width="8" height="24" rx="1" fill="#d3e1eb"/>',
-		"transform": '<circle cx="16" cy="16" r="12" stroke="#a3d6e9" stroke-width="3" fill="none"/><rect x="12" y="12" width="8" height="8" fill="#a3d6e9"/><path d="M16 2V10M16 22V30M2 16H10M22 16H30" stroke="#a3d6e9" stroke-width="3"/>',
-		"guard": '<path fill="#a3d6e9" d="M16 2L29 7V17Q27 26 16 30Q5 26 3 17V7Z"/><path fill="#243d52" d="M16 7L24 10V17Q22 23 16 26Q10 23 8 17V10Z"/><path stroke="#a7e9c5" stroke-width="3" fill="none" d="M10 16L14 20L23 11"/>',
-		"hold": '<rect x="5" y="5" width="22" height="22" rx="2" fill="#c1d4e2"/><rect x="10" y="10" width="12" height="12" rx="1" fill="#334c60"/>',
-		"patrol": '<path fill="#bc9df1" d="M3 12A13 13 0 0 1 24 6L28 2V14H16L20 10A7 7 0 0 0 9 13ZM29 20A13 13 0 0 1 8 26L4 30V18H16L12 22A7 7 0 0 0 23 19Z"/>',
-		"attack": '<path stroke="#ff776f" stroke-width="2.6" fill="none" d="M16 2V9M16 23V30M2 16H9M23 16H30"/><circle cx="16" cy="16" r="10" fill="none" stroke="#ff9c8d" stroke-width="3"/><path d="M16 11L21 20L16 18L11 20Z" fill="#ffe1ca"/>',
-		"load": '<path fill="#8aa8c1" d="M3 19H29V29H3Z"/><path fill="#304c65" d="M6 22H26V26H6Z"/><path fill="#a7e9c5" d="M12 2H20V11H26L16 21L6 11H12Z"/>',
-		"unload": '<path fill="#8aa8c1" d="M3 21H29V29H3Z"/><path fill="#304c65" d="M6 23H26V27H6Z"/><path fill="#ffd186" d="M16 2L26 13H20V20H12V13H6Z"/>',
-		"repair": '<path fill="#a7e9c5" d="M12 3H20V12H29V20H20V29H12V20H3V12H12Z"/><path fill="#e0ffee" d="M13 4H19V13H27V15H13Z"/>',
-		"rally": '<path fill="#b4e9f9" d="M5 3H8V25H12V29H2V25H5Z"/><path fill="#ff9b83" d="M9 4L29 7L23 12L29 17L9 14Z"/><path fill="#ffded0" d="M10 5L26 8L23 10L10 8Z"/>',
-		"clear_rally": '<path fill="#8096a8" d="M5 3H8V25H12V29H2V25H5ZM9 4L28 7L23 12L28 17L9 14Z"/><path stroke="#162535" stroke-width="6" d="M16 16L29 29M29 16L16 29"/><path stroke="#ff8279" stroke-width="3.6" d="M16 16L29 29M29 16L16 29"/>',
-		"upgrade": '<path fill="#a5d9f5" d="M3 14L16 3L29 14V20L16 9L3 20ZM3 23L16 12L29 23V29L16 18L3 29Z"/><path fill="#effaff" d="M16 3L29 14V16L16 6L3 16V14Z"/>',
-		"select_station": '<circle cx="16" cy="16" r="12" fill="none" stroke="#a3c6e0" stroke-width="5"/><path fill="#8baec9" d="M14 1H18V11H14ZM14 21H18V31H14ZM1 14H11V18H1ZM21 14H31V18H21Z"/><circle cx="16" cy="16" r="6" fill="#d7f3ff"/><circle cx="16" cy="16" r="3" fill="#3c7798"/>',
-		"build": '<path fill="#bcd5e6" d="M2 26L15 13L12 10L19 3L29 13L22 20L19 17L6 30Z"/><path fill="#7c9ab0" d="M19 3L29 13L25 14L18 7Z"/><path fill="#ffca80" d="M3 4H10V7H3ZM3 9H6V14H3Z"/>',
-		"trade": '<path fill="#a2dfd0" d="M2 8H19V2L30 12L19 21V15H2Z"/><path fill="#efc98c" d="M30 24H13V30L2 20L13 11V17H30Z"/>',
-		"return": '<path fill="#bfd8ed" d="M2 12L13 2V9H20Q30 9 30 19V29H23V19Q23 16 20 16H13V23Z"/>',
-		"warehouse": '<path fill="#9ab5cb" d="M2 12L16 3L30 12V29H2Z"/><path fill="#d4e8f4" d="M2 12L16 3L30 12V15L16 7L2 15Z"/><path fill="#243a4d" d="M7 16H25V29H7Z"/><path fill="#d6b184" d="M9 19H15V24H9ZM17 19H23V24H17ZM9 25H23V28H9Z"/>',
-		"habitation": '<path fill="#b3cee0" d="M3 12H12V29H3ZM13 3H23V29H13ZM24 15H30V29H24Z"/><path fill="#36536a" d="M5 15H9V19H5ZM5 22H9V26H5ZM16 7H20V11H16ZM16 14H20V18H16ZM16 21H20V25H16ZM26 19H28V23H26Z"/><path fill="#9ce1ed" d="M16 7H20V11H16ZM5 22H9V26H5Z"/>',
-		"orbital_housing": '<circle cx="16" cy="16" r="13" fill="#41667b" stroke="#b3d6e8" stroke-width="2"/><path fill="#a0d5b7" d="M5 23Q16 11 27 23L23 27H9Z"/><path fill="#d4eef0" d="M9 21V13L16 7L23 13V21H19V16H13V21Z"/><path stroke="#b3d6e8" stroke-width="1.7" d="M1 16H5M27 16H31"/>',
-		"yard": '<path fill="#9ebacf" d="M3 3H10V29H3ZM22 3H29V29H22ZM10 3H22V7H10ZM10 25H22V29H10Z"/><path fill="#d4e9f5" d="M3 3H7V29H3ZM22 3H26V29H22Z"/><path fill="#5c8fae" d="M16 8L21 22L16 20L11 22Z"/><path fill="#ffd088" d="M5 10H9V13H5ZM23 10H27V13H23ZM5 20H9V23H5ZM23 20H27V23H23Z"/>',
-		"reinforced_plating": '<path fill="#a9c4d7" d="M16 2L29 7V17Q27 26 16 30Q5 26 3 17V7Z"/><path fill="#405a72" d="M16 7L24 10V17Q22 23 16 26Q10 23 8 17V10Z"/><path fill="#dbeaf4" d="M16 10L22 12V17Q20 21 16 23Q12 21 10 17V12Z"/>',
-		"dyson_sphere": '<circle cx="16" cy="16" r="12" fill="#e7ae54" stroke="#b6d4eb" stroke-width="2"/><ellipse cx="16" cy="16" rx="6" ry="12" fill="none" stroke="#e0eef9" stroke-width="2"/><path d="M4 16H28M7 10H25M7 22H25" stroke="#e0eef9" stroke-width="1.5"/>',
-		"laser_matrix": '<path fill="#829caf" d="M2 24L9 17L15 23L8 30ZM10 16L17 9L23 15L16 22Z"/><path stroke="#ff776f" stroke-width="4" d="M11 21L26 6M19 13L29 3"/><path stroke="#ffe9d8" stroke-width="1.3" d="M11 21L26 6M19 13L29 3"/>',
-		"pds": '<circle cx="15" cy="18" r="11" fill="#5c90ad"/><path fill="#97c3d8" d="M5 17Q15 10 25 17L24 22Q15 16 6 22Z"/><path fill="#b3ccdf" d="M12 4H25L29 8V13H19L15 19L10 16L15 10H12Z"/><path stroke="#ff8c75" stroke-width="2.5" d="M25 7L30 2"/><path fill="#eaf6fc" d="M18 6H24V9H18Z"/>',
-		"Metals": '<path fill="#9fb8c9" d="M2 17H30V29H2ZM5 6H10V18H5ZM13 2H18V18H13Z"/><path fill="#cbd9e3" d="M2 17L12 11V17L21 11V17L30 11V20H2Z"/><path fill="#344b60" d="M6 23H12V27H6ZM16 23H26V27H16Z"/><path fill="#ffd194" d="M5 6H10V9H5ZM13 2H18V5H13Z"/>',
-		"Organics": '<path fill="#658b72" d="M2 24Q2 9 16 5Q30 9 30 24V29H2Z"/><path fill="#a6e0b5" d="M3 24Q3 11 16 5Q29 11 29 24H26Q26 14 16 9Q6 14 6 24Z"/><path fill="#b8e28e" d="M16 25Q5 22 9 15Q16 16 16 21Q18 13 24 13Q27 21 17 25Z"/><path stroke="#d0eaca" stroke-width="1.5" d="M16 29V20"/>',
-		"Crystals": '<path fill="#849ab6" d="M3 13H29V28H3Z"/><path fill="#4a607a" d="M6 15H26V25H6Z"/><path fill="#bb9bf5" d="M16 2L24 11L20 23H12L8 11Z"/><path fill="#e7d6ff" d="M16 2L16 23L8 11Z"/><path fill="#c6deed" d="M3 26H29V29H3Z"/>'
-	}
-	var svg: String = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g stroke-linecap="round" stroke-linejoin="round">' + str(paths.get(kind, paths["build"])) + '</g></svg>'
-	var image := Image.new()
-	image.load_svg_from_string(svg, float(pixels) / 32.0)
-	station_icons[key] = ImageTexture.create_from_image(image)
-	return station_icons[key]
-
-func _ability_grid(parent: Container) -> GridContainer:
-	var grid := GridContainer.new()
-	grid.columns = 4
-	grid.add_theme_constant_override("h_separation", 3)
-	grid.add_theme_constant_override("v_separation", 3)
-	grid.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	grid.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	parent.add_child(grid)
-	return grid
-
-func _station_spacer(grid: GridContainer) -> Control:
-	var slot := Control.new()
-	slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_child(slot)
-	return slot
-
-func _fill_ability_grid(grid: GridContainer) -> void:
-	while grid.get_child_count() < 16:
-		_station_spacer(grid)
-
 func _station_button(grid: GridContainer, caption: String, key: String, action: Callable) -> Button:
 	var button: Button = _button("", action, grid, true)
-	var art: TextureRect = _yard_ability_face(button, caption, _station_command_icon(key))
+	var art: TextureRect = command_card_ui.set_face(button, caption, command_card_ui.icon(key))
 	button.set_meta("portrait", art)
 	return button
 
@@ -1867,29 +1681,29 @@ func _build_station_command_card(parent: Container) -> void:
 	station_commands.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	station_commands.alignment = BoxContainer.ALIGNMENT_BEGIN
 	parent.add_child(station_commands)
-	station_primary_grid = _ability_grid(station_commands)
+	station_primary_grid = command_card_ui.create_grid(station_commands)
 	station_select_yards_button = _station_button(station_primary_grid, "Select\nShipyards", "yard", _station_select_yards)
 	_register_command_hotkey(station_select_yards_button, KEY_Z, "Station", "station_port_1", "Select Shipyards")
 	for i in range(3):
-		_station_spacer(station_primary_grid)
+		command_card_ui.add_spacer(station_primary_grid)
 	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Reinforced\nPlating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
 	_register_command_hotkey(station_upgrade_buttons["reinforced_plating"], KEY_V, "Station", "station_plating", "Reinforced Plating")
 	_register_command_hotkey(station_upgrade_buttons["laser_matrix"], KEY_L, "Station", "station_matrix", "Laser Matrix")
 	var dyson_button: Button = _station_button(station_primary_grid, "Dyson\nSphere", "dyson_sphere", _station_upgrade_pressed.bind("dyson_sphere"))
-	var dyson_slot: Control = _station_spacer(station_primary_grid)
+	var dyson_slot: Control = command_card_ui.add_spacer(station_primary_grid)
 	dyson_slot.custom_minimum_size = dyson_button.custom_minimum_size
 	dyson_button.reparent(dyson_slot, false)
 	dyson_button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	station_upgrade_buttons["dyson_sphere"] = dyson_button
-	_station_spacer(station_primary_grid)
+	command_card_ui.add_spacer(station_primary_grid)
 	for i in range(4):
-		_station_spacer(station_primary_grid)
+		command_card_ui.add_spacer(station_primary_grid)
 	_register_command_hotkey(_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")), KEY_B, "Station", "station_build", "Build")
 	_register_command_hotkey(_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")), KEY_T, "Station", "station_trade", "Trade")
-	_station_spacer(station_primary_grid)
-	_station_spacer(station_primary_grid)
-	station_build_grid = _ability_grid(station_commands)
+	command_card_ui.add_spacer(station_primary_grid)
+	command_card_ui.add_spacer(station_primary_grid)
+	station_build_grid = command_card_ui.create_grid(station_commands)
 	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "PDS", "yard": "Build\nShipyard"}
 	for resource in ECONOMY.RESOURCES:
 		captions[resource] = str(ECONOMY.ECONOMY_BUILDINGS[resource]["name"]).replace(" ", "\n")
@@ -1908,10 +1722,10 @@ func _build_station_command_card(parent: Container) -> void:
 			button.set_meta("auto_border", border)
 	# Keep the fixed four-row grid and Return position with fewer resource cards.
 	for i in range(8 - ECONOMY.RESOURCES.size()):
-		_station_spacer(station_build_grid)
+		command_card_ui.add_spacer(station_build_grid)
 	# Return stays at the bottom right.
 	for i in range(3):
-		_station_spacer(station_build_grid)
+		command_card_ui.add_spacer(station_build_grid)
 	_register_command_hotkey(_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")), KEY_ESCAPE, "Station Build", "build_return", "Return")
 	station_trade = VBoxContainer.new()
 	station_trade.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1962,14 +1776,14 @@ func _station_upgrade_pressed(kind: String) -> void:
 
 func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 	station_select_yards_button.disabled = not owned or p["yards"].is_empty()
-	_set_button_hint(station_select_yards_button, "Select all %d completed shipyards at this station" % p["yards"].size())
+	command_card_ui.set_hint(station_select_yards_button, "Select all %d completed shipyards at this station" % p["yards"].size())
 	(station_select_yards_button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if station_select_yards_button.disabled else Color.WHITE
 	for kind in station_upgrade_buttons:
 		var button: Button = station_upgrade_buttons[kind]
 		if kind == "dyson_sphere":
 			button.visible = p.get("conquest_rewards", []).has(kind) or bool(p["station"].get(kind, false))
 		var installed: bool = bool(p["station"].get(kind, false))
-		_upgrade_level_badge(button, 1 if installed else 0)
+		command_card_ui.set_level_badge(button, 1 if installed else 0)
 		var pending: bool = ECONOMY._has_job(p, kind, "")
 		button.disabled = not owned or not _any_selected_station_buildable(kind, p)
 		var hint: String = "Reinforced Plating I · %.0f s (1×)\n+1,500 station HP" if kind == "reinforced_plating" else "Laser Matrix I · %.0f s (1×)\n+2 defensive lasers (4 total)"
@@ -1977,7 +1791,7 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 			hint = "Dyson Sphere · %.0f s (1×)\nRequires Dyson Sphere technology\n−50%% local ship material and GC costs"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if installed or pending:
-			_set_button_hint(button, _button_hint(button) + "\n" + ("Installed" if installed else "Building"))
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + ("Installed" if installed else "Building"))
 		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled and not installed else Color.WHITE
 
 func _station_repeat_key(p: Dictionary, key: String) -> String:
@@ -2034,7 +1848,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			kind = "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
 			var caption: Label = button.get_meta("caption")
 			caption.text = "Habitation" if kind == "habitation" else "Orbital\nhousing"
-			(button.get_meta("portrait") as TextureRect).texture = _station_command_icon(kind)
+			(button.get_meta("portrait") as TextureRect).texture = command_card_ui.icon(kind)
 			if kind == "habitation":
 				var level: int = int(p.get("habitation_level", 0))
 				work = ECONOMY._work(kind, level + 1)
@@ -2076,7 +1890,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			recipe = ECONOMY._cost("pds", 1)
 			work = ECONOMY._work("pds", 1)
 			description = "Defends one planet · %.0f damage · Range %.0f\nInvulnerable until station destroyed" % [ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
-		_upgrade_level_badge(button, current_level)
+		command_card_ui.set_level_badge(button, current_level)
 		if key != "yard":
 			name_text += " " + UI_TEXT.roman_level(current_level + (1 if eligible else 0))
 		var repeat_key: String = _station_repeat_key(p, key)
@@ -2088,11 +1902,11 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			(button.get_meta("auto_border") as Control).visible = auto
 		_set_cost_tooltip(button, name_text + (" · %.1f s (1×)" % work if not recipe.is_empty() else "") + "\n" + description, recipe, 0.0, _available_cost_resources(p))
 		if not eligible:
-			_set_button_hint(button, _button_hint(button) + "\nUnavailable")
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nUnavailable")
 		elif not available and ECONOMY.construction_affordable(_state(), p, recipe):
-			_set_button_hint(button, _button_hint(button) + "\nRequirements not met or already queued")
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequirements not met or already queued")
 		if not repeat_key.is_empty() and eligible:
-			_set_button_hint(button, _button_hint(button) + "\nRight-click: %s repeat" % ("Disable" if auto else "Enable"))
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRight-click: %s repeat" % ("Disable" if auto else "Enable"))
 
 func _draw_autobuild_border(border: Control) -> void:
 	var bounds := Rect2(Vector2.ONE * 2.0, border.size - Vector2.ONE * 4.0)
@@ -2193,14 +2007,14 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
 		if not ECONOMY.yard_fits(system, selected_yard, kind):
-			_set_button_hint(button, _button_hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
 		if not operating:
-			_set_button_hint(button, _button_hint(button) + "\nShipyard offline")
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nShipyard offline")
 		if kind == "ship" and not bool(system["home"]):
-			_set_button_hint(button, _button_hint(button) + "\nRequires home system")
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequires home system")
 		elif ECONOMY.shipyard_queue_count(system, selected_yard) >= ECONOMY.SHIPYARD_QUEUE_LIMIT:
-			_set_button_hint(button, _button_hint(button) + "\nQueue full (8/8)")
-		_set_button_hint(button, _button_hint(button) + "\nRight-click: %s autobuild" % ("Disable" if auto else "Enable"))
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nQueue full (8/8)")
+		command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRight-click: %s autobuild" % ("Disable" if auto else "Enable"))
 	var rally: Dictionary = yard.get("rally", {})
 	var rally_button: Button = yard_commands["rally"]
 	rally_button.disabled = not owned
@@ -2223,8 +2037,8 @@ func _job_icon(job: Dictionary, owner: int) -> Texture2D:
 	if ECONOMY.SHIP_KINDS.has(job["kind"]):
 		return _production_icon(str(job["kind"]), _empire_color(owner), 44)
 	if job["kind"] == "yard_upgrade":
-		return _station_command_icon("upgrade", 44)
-	return _station_command_icon(str(job["target"]) if job["kind"] in ["economy_building", "production"] else str(job["kind"]), 44)
+		return command_card_ui.icon("upgrade", 44)
+	return command_card_ui.icon(str(job["target"]) if job["kind"] in ["economy_building", "production"] else str(job["kind"]), 44)
 
 func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
 	var jobs: Array = []
@@ -2469,17 +2283,17 @@ func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
 	return remaining / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
 
 func _build_field_command_card(parent: Container) -> void:
-	field_command_grid = _ability_grid(parent)
+	field_command_grid = command_card_ui.create_grid(parent)
 	# Keep the bottom row for persistent modes, as on ship cards.
 	while field_command_grid.get_child_count() < 12:
-		_station_spacer(field_command_grid)
+		command_card_ui.add_spacer(field_command_grid)
 	for key in ["enabled", "Metals", "Crystals"]:
-		var slot: Control = _station_spacer(field_command_grid)
+		var slot: Control = command_card_ui.add_spacer(field_command_grid)
 		var button := Button.new()
 		slot.add_child(button)
 		var caption: String = "Mining" if key == "enabled" else key
-		var art: Texture2D = _station_command_icon("auto_mine") if key == "enabled" else HUD.resource_icon(key, 32)
-		_yard_ability_face(button, caption, art)
+		var art: Texture2D = command_card_ui.icon("auto_mine") if key == "enabled" else HUD.resource_icon(key, 32)
+		command_card_ui.set_face(button, caption, art)
 		button.custom_minimum_size = Vector2.ZERO
 		button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		button.toggle_mode = true
@@ -2494,7 +2308,7 @@ func _build_field_command_card(parent: Container) -> void:
 		button.set_meta("mode_border", border)
 		field_commands[key] = button
 		_register_command_hotkey(button, {"enabled": KEY_G, "Metals": KEY_M, "Crystals": KEY_C}[key], "Asteroid Field", "field_" + key, caption)
-	_fill_ability_grid(field_command_grid)
+	command_card_ui.fill_grid(field_command_grid)
 	field_command_grid.hide()
 
 func _draw_field_enabled_border(border: Control) -> void:
@@ -2530,7 +2344,7 @@ func _refresh_field_commands(state: Dictionary, special: bool) -> void:
 		border.queue_redraw()
 		var caption: String = "Mining" if key == "enabled" else key
 		var hint: String = str(button.get_meta("hotkey", ""))
-		_set_button_hint(button, "%s · %s\nClick to toggle [%s]" % [caption, "On" if enabled else "Off", hint])
+		command_card_ui.set_hint(button, "%s · %s\nClick to toggle [%s]" % [caption, "On" if enabled else "Off", hint])
 
 func _command_icon(path: String, pixels: int = 32) -> Texture2D:
 	var image := Image.new()
@@ -2540,16 +2354,16 @@ func _command_icon(path: String, pixels: int = 32) -> Texture2D:
 
 func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	var button := CostButton.new()
-	_enable_fast_command_tooltip(button)
+	command_card_ui.enable_fast_tooltip(button)
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 32)
 	button.focus_mode = Control.FOCUS_NONE
-	button.icon = _station_command_icon({"auto_repair": "repair", "auto_trade": "trade", "deliver_farm": "unload"}.get(id, id))
+	button.icon = command_card_ui.icon({"auto_repair": "repair", "auto_trade": "trade", "deliver_farm": "unload"}.get(id, id))
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_set_button_hint(button, hint)
+	command_card_ui.set_hint(button, hint)
 	button.toggle_mode = true
 	button.pressed.connect(action)
-	var slot: Control = _station_spacer(command_card)
+	var slot: Control = command_card_ui.add_spacer(command_card)
 	slot.add_child(button)
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	command_buttons[id] = button
@@ -2564,7 +2378,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
-	command_card = _ability_grid(parent)
+	command_card = command_card_ui.create_grid(parent)
 	_command_slot("move", "Move", _arm_command.bind("move"))
 	_command_slot("stop", "Stop", _stop_selected)
 	hold_button = _command_slot("hold", "Hold Position", _hold_selected)
@@ -2576,7 +2390,7 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	_command_slot("deliver_farm", "Deliver Organics to nearest station", _deliver_farm_selected)
 	for id in ["collect", "auto_farm", "auto_trade", "auto_repair", "auto_mine", "auto_salvage", "auto_wander", "auto_retreat", "auto_explore"]:
 		if id == "auto_retreat":
-			_fill_ability_grid(command_card)
+			command_card_ui.fill_grid(command_card)
 			_command_slot("guard", "Guard sector · return to the chosen point after combat", _arm_command.bind("guard"))
 			_command_slot("transform", "Transform into Space Station", _transform_selected)
 		var mode: String = AUTOCAST_SLOTS[id]
@@ -2711,18 +2525,18 @@ func _refresh_autocast_cards() -> void:
 		if remaining > ECONOMY.EPS:
 			status += " · %.1f s remaining%s" % [remaining / speed, " (paused)" if int(state.get("time_speed", 1)) == 0 else ""]
 		var shortcut: String = str(button.get_meta("hotkey", ""))
-		_set_button_hint(button, "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut])
-		_set_button_hint(button, _button_hint(button) + "\nCooldown: %.1f s at 1×" % duration)
+		command_card_ui.set_hint(button, "%s · %s\nLeft or right click to toggle [%s]" % [title_text, status, shortcut])
+		command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nCooldown: %.1f s at 1×" % duration)
 		if mode == "wander":
-			_set_button_hint(button, _button_hint(button) + "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority.")
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nEnabling bypasses Wander cooldown; active orders and Hold still take priority.")
 		elif mode == "explore":
-			_set_button_hint(button, _button_hint(button) + "\nExplores connected sectors continuously when idle; no cooldown. Active orders and Hold take priority.")
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nExplores connected sectors continuously when idle; no cooldown. Active orders and Hold take priority.")
 		elif mode == "collect":
-			_set_button_hint(button, "%s · Auto: %s\nLeft click [%s], then choose a Pulsar. Right click toggles autocast.\nCollects 1 unit in %.0f s at 1×; auto cooldown %.0f s." % [title_text, status, shortcut, ECONOMY.SCIENCE_COLLECTION_YEARS, duration])
+			command_card_ui.set_hint(button, "%s · Auto: %s\nLeft click [%s], then choose a Pulsar. Right click toggles autocast.\nCollects 1 unit in %.0f s at 1×; auto cooldown %.0f s." % [title_text, status, shortcut, ECONOMY.SCIENCE_COLLECTION_YEARS, duration])
 		elif mode == "retreat":
-			_set_button_hint(button, _button_hint(button) + "\nWithdraw to safety at %.0f%% hull; resume orders after full repair." % (100.0 * ECONOMY.WITHDRAW_HP / ECONOMY.SHIP_HP))
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nWithdraw to safety at %.0f%% hull; resume orders after full repair." % (100.0 * ECONOMY.WITHDRAW_HP / ECONOMY.SHIP_HP))
 		elif mode == "farm":
-			_set_button_hint(button, _button_hint(button) + "\nProduces %.0f t/s at 1×; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nProduces %.0f t/s at 1×; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
 
 func _arm_command(mode: String) -> void:
 	pending_command = mode if pending_command != mode else ""
@@ -3299,13 +3113,13 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			button.visible = button == transform
 			button.disabled = button != transform
 		transform.disabled = ECONOMY.warp_gate_choices(state, _me(), int(ship.get("id", -1))).is_empty() or owned_count == 0
-		_set_button_hint(transform, "Cycle link destination [J] · right-click an owned linked gate with ships to travel")
+		command_card_ui.set_hint(transform, "Cycle link destination [J] · right-click an owned linked gate with ships to travel")
 	elif science:
 		transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY.can_build_warp_gate(state, graph, craft))
-		_set_button_hint(transform, "Deploy Warp Gate [J] · 1 antimatter + %.0f GC; one gate per owned system" % ECONOMY.WARP_GATE_CREDIT_COST)
+		command_card_ui.set_hint(transform, "Deploy Warp Gate [J] · 1 antimatter + %.0f GC; one gate per owned system" % ECONOMY.WARP_GATE_CREDIT_COST)
 	else:
 		transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY._valid_unit_order(state, graph, craft, {"kind": "transform"}, true))
-		_set_button_hint(transform, "Transform into Space Station [J] · construction fee prepaid with colony ship")
+		command_card_ui.set_hint(transform, "Transform into Space Station [J] · construction fee prepaid with colony ship")
 	command_buttons["deliver_farm"].visible = has_farm
 	command_buttons["deliver_farm"].disabled = not loaded_farm
 	if not command_buttons.has(pending_command) or (command_buttons[pending_command] as Button).disabled:
@@ -4036,7 +3850,7 @@ func _inspector_page(title_text: String) -> GridContainer:
 	footer.alignment = BoxContainer.ALIGNMENT_END
 	station_trade.add_child(footer)
 	station_trade_back = _button("", _station_card_to.bind("primary"), footer)
-	_yard_ability_face(station_trade_back, "Return", _station_command_icon("return"))
+	command_card_ui.set_face(station_trade_back, "Return", command_card_ui.icon("return"))
 	_register_command_hotkey(station_trade_back, KEY_ESCAPE, "Station Trade", "trade_return", "Return")
 	station_trade_back.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return page
@@ -4545,7 +4359,7 @@ func _reset_hotkeys() -> void:
 func _set_mute_icon(button: Button, muted: bool) -> void:
 	var speaker: String = '<path d="M4 12H10L17 6V26L10 20H4Z"/>'
 	button.icon = _command_icon(speaker + ('<path d="M4 29L29 4"/>' if muted else '<path d="M21 11Q27 16 21 21M25 7Q32 16 25 25"/>'))
-	_set_button_hint(button, "Unmute" if muted else "Mute")
+	command_card_ui.set_hint(button, "Unmute" if muted else "Mute")
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 24)
 
@@ -4629,7 +4443,7 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
 	send_colony_button.visible = neutral
 	var id: int = ECONOMY.nearest_idle_colony(state, _me(), selected) if neutral else -1
 	send_colony_button.disabled = id < 0
-	_set_button_hint(send_colony_button, "Send nearest idle Colony to this sector" if id >= 0 else "No available idle Colonies")
+	command_card_ui.set_hint(send_colony_button, "Send nearest idle Colony to this sector" if id >= 0 else "No available idle Colonies")
 
 func _send_colony() -> void:
 	if not send_colony_button.disabled:
@@ -5248,7 +5062,7 @@ func _refresh_control_groups(state: Dictionary) -> void:
 			button.text = str(number)
 			button.icon = null
 			button.disabled = true
-			_set_button_hint(button, "Ctrl+%d to assign a selection" % number)
+			command_card_ui.set_hint(button, "Ctrl+%d to assign a selection" % number)
 			continue
 		control_groups[number] = group
 		var kind: String = group["kind"]
@@ -5262,7 +5076,7 @@ func _refresh_control_groups(state: Dictionary) -> void:
 		button.text = "%d·%d" % [number, count] if button.size.x >= 34.0 else str(number)
 		button.icon = _selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
 		button.disabled = false
-		_set_button_hint(button, "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace · Shift+%d to add" % [number, count, "ships" if kind == "units" else "structures", number, number, number])
+		command_card_ui.set_hint(button, "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace · Shift+%d to add" % [number, count, "ships" if kind == "units" else "structures", number, number, number])
 
 func _recall_control_group(number: int, additive: bool = false) -> void:
 	var state: Dictionary = _state()
@@ -5463,7 +5277,7 @@ func _refresh_building_group(state: Dictionary) -> void:
 		button.add_theme_color_override("icon_normal_color", tint)
 		button.add_theme_color_override("icon_hover_color", tint)
 		button.add_theme_color_override("icon_pressed_color", tint)
-		_set_button_hint(button, "%s · %.0f / %.0f HP%s" % [name_text, hp, maximum, "" if int(system["owner"]) == _me() else " · Foreign"])
+		command_card_ui.set_hint(button, "%s · %.0f / %.0f HP%s" % [name_text, hp, maximum, "" if int(system["owner"]) == _me() else " · Foreign"])
 
 func _select_building_tile(ref: Vector2i, kind: String) -> void:
 	if Input.is_key_pressed(KEY_SHIFT):
@@ -6517,12 +6331,12 @@ func _build_global_selection_strip() -> void:
 	for entry in [["stations", "Stations", "station", KEY_F1], ["army", "Army", "fighter", KEY_F2], ["shipyards", "Shipyards", "shipyard", KEY_F3]]:
 		var action: Callable = _select_all_military if entry[0] == "army" else _select_all_buildings.bind(entry[2])
 		var button: Button = _button("", action, global_selection_strip)
-		_yard_ability_face(button, entry[1], _selection_portrait_icon(entry[2]))
-		_set_button_hint(button, "Select all owned " + str(entry[1]).to_lower())
+		command_card_ui.set_face(button, entry[1], _selection_portrait_icon(entry[2]))
+		command_card_ui.set_hint(button, "Select all owned " + str(entry[1]).to_lower())
 		_register_command_hotkey(button, int(entry[3]), "General", entry[0], "Select all " + str(entry[1]).to_lower())
 	var empire_button: Button = _button("", _open_empire, global_selection_strip)
-	_yard_ability_face(empire_button, "Empire", _command_icon('<circle cx="16" cy="16" r="6"/><circle cx="5" cy="6" r="3"/><circle cx="27" cy="6" r="3"/><circle cx="16" cy="28" r="2"/><path d="M8 9L12 12M24 9L20 12M16 22V26"/>'))
-	_set_button_hint(empire_button, "Empire fleet planning")
+	command_card_ui.set_face(empire_button, "Empire", _command_icon('<circle cx="16" cy="16" r="6"/><circle cx="5" cy="6" r="3"/><circle cx="27" cy="6" r="3"/><circle cx="16" cy="28" r="2"/><path d="M8 9L12 12M24 9L20 12M16 22V26"/>'))
+	command_card_ui.set_hint(empire_button, "Empire fleet planning")
 	_register_command_hotkey(empire_button, KEY_F4, "General", "empire", "Empire")
 	_build_empire_dialog()
 	global_selection_strip.resized.connect(_layout_console)
@@ -7490,7 +7304,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			if int(job["id"]) != int(yard["job"]):
 				continue
 			if job["kind"] == "yard_upgrade":
-				var icon: Texture2D = _station_command_icon("upgrade")
+				var icon: Texture2D = command_card_ui.icon("upgrade")
 				var icon_size: float = 14.0 * scale
 				map_canvas.draw_texture_rect(icon, Rect2(point - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false)
 				var fraction: float = clampf(float(job["progress"]) / maxf(ECONOMY.EPS, float(job["work"])), 0.0, 1.0)
@@ -8712,7 +8526,7 @@ func _refresh_reward_cards() -> void:
 		content.add_theme_constant_override("separation", 6)
 		card.add_child(content)
 		var art := TextureRect.new()
-		HUD.fixed_icon(art, _station_command_icon(str(reward[4]), 48), 48)
+		HUD.fixed_icon(art, command_card_ui.icon(str(reward[4]), 48), 48)
 		art.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		content.add_child(art)
 		var rarity := Label.new()
