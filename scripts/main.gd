@@ -21,17 +21,11 @@ class MapPreview:
 		var scale_factor: float = minf(available.x / bounds.x, available.y / bounds.y)
 		var offset: Vector2 = (size - bounds * scale_factor) * 0.5
 		var colors: Array = get_meta("colors", [])
-		for edge in graph["edges"]:
-			draw_line(offset + points[edge[0]] * scale_factor, offset + points[edge[1]] * scale_factor, Color("#8299b3"), 1.3, true)
-		for edge in graph.get("field_edges", []):
-			draw_line(offset + graph["fields"][edge[0]]["position"] * scale_factor, offset + graph["fields"][edge[1]]["position"] * scale_factor, Color("#52677c"), 1.0, true)
 		for asteroid in graph["fields"]:
 			var center: Vector2 = offset + asteroid["position"] * scale_factor
 			var special: bool = bool(asteroid.get("antimatter", false))
 			var radius: float = maxf(4.0 if special else 2.0, float(asteroid["radius"]) * scale_factor)
 			var tint: Color = Color("#c295ff") if special else Color("#9b8566")
-			for anchor in asteroid.get("access", []):
-				draw_line(offset + points[anchor] * scale_factor, center, Color("#52677c"), 1.0, true)
 			draw_circle(center, radius, tint)
 			if special:
 				draw_arc(center, radius + 2.0, 0.0, TAU, 24, tint, 1.0, true)

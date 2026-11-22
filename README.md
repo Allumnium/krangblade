@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.90.1; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.90.2; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
@@ -16,8 +16,8 @@ Current layout (v0.90.1; update when responsibility moves). Use the named functi
 | `scripts/command_card_ui.gd` | Shared command-card grids, reserved slots, button faces, upgrade badges, hints and a single anchored instant command-information panel; owns per-match command icon cache. Match retains card-specific actions, layout decisions, hotkey registrations and selection. |
 | `scripts/camera_view.gd` | Client camera state, zoom limits/steps, pan, world/screen projection and selection framing math. Match supplies playfield geometry and selection targets; retains input routing. |
 | `scripts/system_geometry.gd` | Pure deterministic body generation, orbital position and system radius queries; economy_rules retains facade and balance constants. |
-| `scripts/sector_geometry.gd` | Immutable bounded Voronoi cells, shared borders, region lookup and exact segment permission tests. Economy owns cached geometry; territory and minimap consume it. |
-| `scripts/territory_view.gd` | Cached polygon fills, shared rims, fog masking, influence tint/cache and friendly warning destinations. Match supplies camera geometry, fog binding and player colors. |
+| `scripts/sector_geometry.gd` | Immutable bounded Voronoi cells, shared borders, region lookup and exact segment permission tests. Economy owns cached geometry for hidden navigation and influence. |
+| `scripts/territory_view.gd` | Soft local presence footprints shared with minimap, fog masking and friendly warning destinations; no sector outlines. Match supplies camera geometry, fog binding and player colors. |
 | `scripts/fog_of_war.gd` | Per-client live/explored vision cells, revision checks, mask texture and map fog rendering. Match supplies player, motion revision, camera geometry and territory shader bindings; minimap shares the mask. |
 | `scripts/hull_art.gd` | Authored hull geometry, cargo bay positions, hull/portrait/shield SVG generation and per-match texture caches; map drawing and selection consume the same geometry. |
 | `scripts/command_hotkeys.gd` | Command registration, key scope/conflicts, persisted override loading, hotkey badges and dispatch; match_settings owns editor dialog and settings save. |
@@ -43,7 +43,7 @@ Current layout (v0.90.1; update when responsibility moves). Use the named functi
 | `scripts/planet_traffic_view.gd` | Visual-only planetary production and upgrade-delivery cargo pods; shared read-only production source/rate queries. Match supplies projection, station radius, job icons and draw order. |
 | `scripts/structure_view.gd` | Station hub, storage bays, job icons/progress, drydock/shipyard art, construction and colony conversion animation; shared bay point geometry for cargo/production effects. Match supplies selection, projection, scale, health drawing and visibility; no new authoritative state. |
 | `scripts/order_view.gd` | Client order routes, shared group intent, target rings, queued destinations, hull ghosts and drag formation previews. Match supplies projection, geometry and selection queries, owns formation order generation and dispatch; simulation rules remain authoritative. |
-| `scripts/minimap_view.gd` | Minimap coordinate conversion, pointer drag tracking, entity/field/salvage hit hints and drawing of territory, highways, fog, ships and camera bounds. Match owns widget layout, modal gates, command dispatch and camera updates; shares existing fog, territory and motion caches. |
+| `scripts/minimap_view.gd` | Minimap coordinate conversion, pointer drag tracking, entity/field/salvage hit hints and drawing of presence, fog, ships and camera bounds. Match owns widget layout, modal gates, command dispatch and camera updates; shares existing fog, territory and motion caches. |
 | `scripts/logistics_view.gd` | Logistics lens toggle, station resource/population overlays and shipment aggregation/arrows. Match supplies widget factories, projection, shared celestial geometry and player queries; existing simulation routing and visibility predicates unchanged. |
 | `scripts/control_group_manager.gd` | Local control group storage, membership pruning, additive assignment and button presentation. Match retains selection application and recall timing/layout. |
 | `scripts/selection_inspector.gd` | Selected entity portrait, health/shield labels, weapon readouts and multi-ship tile grid/cache; shared tile style for building groups. Match retains selection/focus, detailed entity panels and authority commands; supplies existing hull and health queries. |

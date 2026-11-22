@@ -2278,9 +2278,10 @@ func _build_territory_layer() -> void:
 
 func _refresh_territory(state: Dictionary) -> void:
 	if state.is_empty():
-		territory_view.refresh(state, 0, Vector2.ZERO, {}, Callable())
+		territory_view.refresh(state, 0, Vector2.ZERO, Callable(), Callable(), Callable())
 		return
-	if territory_view.refresh(state, _me(), _map_size(), session.get("players"), _empire_color):
+	_update_fog(state)
+	if territory_view.refresh(state, _me(), _map_size(), _empire_color, _fog_visible, _ship_visible):
 		_position_territory()
 
 func _position_territory() -> void:
@@ -4369,9 +4370,9 @@ func _draw_map() -> void:
 		if not boundary.is_empty():
 			var special: bool = bool(field.get("antimatter", false))
 			var edge_tint: Color = HUD.COLORS[ECONOMY.ANTIMATTER] if special else Color("#b9ac77")
-			map_canvas.draw_colored_polygon(boundary, Color(edge_tint, 0.09))
-			boundary.append(boundary[0])
-			map_canvas.draw_polyline(boundary, HUD.ACCENT if selected_field == field_index else Color(edge_tint, 0.8 if special else 0.25), 1.5, true)
+			if selected_field == field_index:
+				boundary.append(boundary[0])
+				map_canvas.draw_polyline(boundary, HUD.ACCENT, 1.5, true)
 			if special:
 				map_canvas.draw_string(font, center + Vector2(-60, float(field["radius"]) * render_scale + 14.0), "Pulsar", HORIZONTAL_ALIGNMENT_CENTER, 120, 12, edge_tint)
 		if bool(field.get("antimatter", false)):
