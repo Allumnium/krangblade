@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.53: HUD refinement: 10% shorter deck, left-aligned queues, numeric HP unchanged, compact aligned shortcuts, passive header styling and inline GC, color-only population segments, objective progress strips, brighter minimap/explored fog and subtler logistics backgrounds. Preserve slots and commands; validate small windows and readability. Further icon and map hierarchy tuning after visual review.
+
 - v0.89.52: Empire dialog uses wide independent diplomacy and fleet columns, compact rows, sparse slider labels, numeric targets and explicit active/queued counts. Borderless in-game modals with internal labels/actions; no external title bar or X. Visual verification pending.
 
 - v0.89.51: F1–F4 shortcuts in a horizontal strip immediately right of control groups, 44px square rather than 60px, bottom aligned; unchanged actions and hotkeys. Visual/runtime validation pending.

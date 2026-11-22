@@ -69,12 +69,12 @@ func draw(state: Dictionary, font: Font) -> void:
 		var spacing: float = float(celestial_view.system_visual(i, state)["spacing"]) * fit_query.call() * camera.zoom
 		var scale: float = clampf(spacing / 150.0, 0.22, 1.0)
 		var origin: Vector2 = pos + Vector2(-94.0 * scale, radius + 5.0 * scale)
-		logistics_overlay.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(194, 34.0 + 32.0 * float(maxi(0, ceili(float(ECONOMY.RESOURCES.size()) / 3.0) - 1))) * scale), Color("#0c1928ec"))
+		logistics_overlay.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(194, 34.0 + 32.0 * float(maxi(0, ceili(float(ECONOMY.RESOURCES.size()) / 3.0) - 1))) * scale), Color("#0c192899"))
 		for r in range(ECONOMY.RESOURCES.size()):
 			var resource: String = ECONOMY.RESOURCES[r]
 			var cell: Vector2 = origin + Vector2(float(r % 3) * 47.0, floorf(float(r) / 3.0) * 32.0) * scale
 			var fraction: float = clampf(float(system["stock"][resource]) / ECONOMY.storage_capacity(system), 0.0, 1.0)
-			logistics_overlay.draw_rect(Rect2(cell, Vector2(44, 14) * scale), Color("#263b50"))
+			logistics_overlay.draw_rect(Rect2(cell, Vector2(44, 14) * scale), Color("#263b5080"))
 			logistics_overlay.draw_rect(Rect2(cell, Vector2(44.0 * fraction, 14) * scale), HUD.COLORS[resource].darkened(0.4))
 			logistics_overlay.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13) * scale), false)
 			if scale >= 0.8:
@@ -88,7 +88,7 @@ func draw(state: Dictionary, font: Font) -> void:
 		var pop_cell: Vector2 = origin + Vector2(141, 0) * scale
 		var population: float = float(system["population"])
 		var capacity: float = maxf(1.0, ECONOMY.sustainable_population_capacity(system))
-		logistics_overlay.draw_rect(Rect2(pop_cell, Vector2(50, 14) * scale), Color("#263b50"))
+		logistics_overlay.draw_rect(Rect2(pop_cell, Vector2(50, 14) * scale), Color("#263b5080"))
 		logistics_overlay.draw_rect(Rect2(pop_cell, Vector2(50 * clampf(population / capacity, 0.0, 1.0), 14) * scale), Color("#44647e"))
 		logistics_overlay.draw_texture_rect(population_texture.call(24), Rect2(pop_cell, Vector2(13, 13) * scale), false)
 		if scale >= 0.8:

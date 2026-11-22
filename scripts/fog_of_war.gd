@@ -29,7 +29,7 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 	for key in _explored:
 		var pixel: Vector2i = key - start
 		if Rect2i(Vector2i.ZERO, dimensions).has_point(pixel):
-			image.set_pixelv(pixel, Color(0.015, 0.025, 0.04, 0.62))
+			image.set_pixelv(pixel, Color(0.015, 0.025, 0.04, 0.48))
 	for key in _live:
 		var pixel: Vector2i = key - start
 		if Rect2i(Vector2i.ZERO, dimensions).has_point(pixel):

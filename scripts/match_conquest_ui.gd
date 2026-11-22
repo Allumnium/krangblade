@@ -118,17 +118,19 @@ func draw(state: Dictionary) -> void:
 			objectives_overlay.draw_string(font, Vector2(x, y), "%s · %d CP" % [category.capitalize(), ECONOMY.reward_points(progress, category)], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
 			y += 23.0
 			var pos := Vector2(x, y)
-			if not key.is_empty():
-				objectives_overlay.draw_rect(Rect2(pos + Vector2(0, -10), Vector2(10, 10)), tint, false, 1.0)
-				if done:
-					objectives_overlay.draw_polyline(PackedVector2Array([pos + Vector2(1, -6), pos + Vector2(4, -2), pos + Vector2(9, -9)]), tint, 2.0, true)
-				pos.x += 16.0
 			var counter: String = objective["counter"]
 			var counter_width: float = font.get_string_size(counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 			var label_width: float = maxf(40.0, map_canvas.size.x - 12.0 - counter_width - pos.x - 8.0)
 			objectives_overlay.draw_string_outline(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, 4, Color("#101824"))
 			objectives_overlay.draw_string(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, tint)
 			objectives_overlay.draw_string(font, Vector2(map_canvas.size.x - 12.0 - counter_width, y), counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
+			var parts: PackedStringArray = counter.split("/")
+			var fraction: float = 1.0 if done else 0.0
+			if parts.size() == 2 and parts[1].strip_edges().is_valid_float():
+				fraction = clampf(parts[0].strip_edges().to_float() / maxf(1.0, parts[1].strip_edges().to_float()), 0.0, 1.0)
+			var bar_width: float = map_canvas.size.x - x - 12.0
+			objectives_overlay.draw_rect(Rect2(Vector2(x, y + 4.0), Vector2(bar_width, 3.0)), Color("#263b50"))
+			objectives_overlay.draw_rect(Rect2(Vector2(x, y + 4.0), Vector2(bar_width * fraction, 3.0)), Color("#73c6ad") if category == "economic" else Color("#dfab77"))
 			y += 29.0
 	_draw_conquest_scoreboard(state, font, x, y + 4.0)
 

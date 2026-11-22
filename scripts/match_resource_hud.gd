@@ -58,23 +58,13 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
 			strip.draw_rect(Rect2(Vector2(x, 0), Vector2(w, strip.size.y)), segment["color"])
 		if i > 0:
 			strip.draw_line(Vector2(x, 0), Vector2(x, strip.size.y), Color("#081421"), 1.0)
-		var name_text: String = segment["name"]
-		var text_width: float = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		if text_width + 6.0 > w:
-			name_text = name_text.left(2)
-			text_width = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		if text_width + 6.0 > w:
-			name_text = name_text.left(1)
-			text_width = font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		if segments.size() > 1 and text_width + 6.0 <= w:
-			strip.draw_string(font, Vector2(x + (w - text_width) * 0.5, (strip.size.y - font.get_height(10)) * 0.5 + font.get_ascent(10)), name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#e3edf7"))
 		x += w
 
 func _build_global_bar(stats: Container) -> void:
 	for resource in ECONOMY.RESOURCES:
 		var tile := PanelContainer.new()
 		tile.custom_minimum_size.x = 148.0
-		tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#284661"), 4, 3))
+		tile.add_theme_stylebox_override("panel", HUD.surface(Color("#12233780"), Color("#28466100"), 4, 3))
 		stats.add_child(tile)
 		var stack := VBoxContainer.new()
 		stack.add_theme_constant_override("separation", 2)
@@ -113,7 +103,7 @@ func _build_global_bar(stats: Container) -> void:
 func _build_credit_stat(parent: Container) -> void:
 	var tile := PanelContainer.new()
 	tile.custom_minimum_size.x = 94.0
-	tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#284661"), 4, 3))
+	tile.add_theme_stylebox_override("panel", HUD.surface(Color("#12233780"), Color("#28466100"), 4, 3))
 	parent.add_child(tile)
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 2)
@@ -133,12 +123,12 @@ func _build_credit_stat(parent: Container) -> void:
 	global_credit_income_label = make_label.call("+0/yr", 12)
 	global_credit_income_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	global_credit_income_label.add_theme_color_override("font_color", Color("#7cdb9b"))
-	stack.add_child(global_credit_income_label)
+	balance_row.add_child(global_credit_income_label)
 	global_resource_tiles["credits"] = tile
 
 func _global_stat(parent: Container, value: String, tint: Color, population: bool = false) -> Label:
 	var tile := PanelContainer.new()
-	tile.add_theme_stylebox_override("panel", HUD.surface(Color("#122337"), Color("#284661"), 4, 3))
+	tile.add_theme_stylebox_override("panel", HUD.surface(Color("#12233780"), Color("#28466100"), 4, 3))
 	parent.add_child(tile)
 	var label: Label = make_label.call(value, 12)
 	label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -160,6 +150,7 @@ func _global_stat(parent: Container, value: String, tint: Color, population: boo
 		global_resource_strips["population"] = strip
 		strip.draw.connect(_draw_resource_fill.bind(strip, "population"))
 	else:
+		tile.add_theme_stylebox_override("panel", HUD.surface(Color.TRANSPARENT, Color.TRANSPARENT, 4, 3))
 		tile.add_child(label)
 	return label
 
@@ -301,7 +292,7 @@ func refresh(state: Dictionary) -> void:
 	global_credit_label.text = "%s%s" % [UI_TEXT.compact_amount(ECONOMY.credit_balance(state, local_player.call())), " !" if unpaid > 0 else ""]
 	global_credit_label.add_theme_color_override("font_color", Color("#ff7777") if unpaid > 0 else HUD.CREDIT_COLOR)
 	var sign_text: String = "+" if credit_income > 0.0 else ("−" if credit_income < 0.0 else "")
-	global_credit_income_label.text = "%s%s/yr" % [sign_text, UI_TEXT.compact_amount(absf(credit_income))]
+	global_credit_income_label.text = "(%s%s/yr)" % [sign_text, UI_TEXT.compact_amount(absf(credit_income))]
 	global_credit_income_label.add_theme_color_override("font_color", Color("#ff7777") if credit_income < 0.0 else (Color("#7cdb9b") if credit_income > 0.0 else Color.WHITE))
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])
