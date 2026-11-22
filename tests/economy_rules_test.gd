@@ -721,7 +721,19 @@ func _test_nearest_colony_and_queued_hold() -> void:
 			break
 	assert(far.get("holding", false) and far["position"].is_equal_approx(point))
 	assert(not far.has("order_queue"))
-	print("PASS: nearest idle colony dispatch and queued hold after movement")
+	assert(not ECON.issue_unit_order(state, 1, [100], {"kind": "colonize", "target": 0}, false))
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "position", "target": 0, "point": Vector2(200, 200), "move_only": true}, false))
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "colonize", "target": 1}, true))
+	assert(far["order_queue"][0]["kind"] == "colonize")
+	for tick in range(300):
+		ECON._work_local_move(graph, far, 0.1, state)
+		ECON._advance_unit_orders(state, graph)
+		if far.get("unit_order", {}).get("kind", "") == "colonize":
+			break
+	assert(far["unit_order"]["kind"] == "colonize" and far["unit_order"]["automatic"] and far["dest"] == 1 and far["route"] == [1])
+	assert(ECON._work_colony(state, far, 1000.0))
+	assert(int(state["planets"][1]["owner"]) == 1)
+	print("PASS: nearest available colony, queued hold and automatic settlement")
 
 func _test_stop_order() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], true)

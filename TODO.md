@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.94.3: Right-click known neutral star with selected Colony issues existing automatic colonize order; Shift appends, explicit Move/Alt preserves movement. Use fog memory and actual star hit (including minimap); host revalidates unclaimed target on issue and execution. Active selected Colony shows dotted command line and star-sized white ring. Multi-selection retains per-hull contextual commands. Core and peer fixtures extended; runtime/UI/ENet pending.
+
 - [ ] v0.94.2: Command info tracks unmet requirement lines separately from resource shortages; colony origin population line uses authoritative threshold for single and group shipyards, and production/warehouse/yard upgrade population gates are colored red independently of cost affordability. Tooltip signature includes gate state so color refreshes as population grows. Visual/runtime validation pending.
 
 - [ ] v0.94.1: Start with explored (not live) space at three times the initial visible territory radius; seed authoritative star/field discovery and reconstruct opening fog memories once. The only ship-activity exclusion for Send Colony is an active colonization assignment; dispatch cancels retreat and ignores previous sector ownership. Neutral-star selection rings hug the drawn star. Visual, runtime and ENet validation pending.

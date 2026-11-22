@@ -3498,6 +3498,25 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 				if d < best and d <= maxf(5.0, float(rock.get("radius", 0.0)) * _fit() * camera.zoom):
 					best = d
 					rock_id = int(rock["id"])
+	# Only a direct hit on a known neutral star is a settlement command.
+	# Empty space inside a legacy sector remains an ordinary move.
+	var colony_target: int = -1
+	if contextual and not force_position and not explicit_attack and ref.is_empty() and field < 0 and wreck < 0:
+		if not minimap_hint.is_empty():
+			colony_target = int(minimap_hint.get("star", -1))
+		else:
+			var closest: float = INF
+			for index in range(state["planets"].size()):
+				if not ECONOMY.discovered(state, _me(), "planets", index):
+					continue
+				var distance: float = point.distance_to(_screen_point(state["map"]["points"][index]))
+				if distance <= maxf(9.0, celestial_view.star_draw_radius(_planet_radius(index, state))) and distance < closest:
+					closest = distance
+					colony_target = index
+		if colony_target >= 0:
+			var system: Dictionary = fog_state.system_view(state, colony_target, _map_size())
+			if system.is_empty() or int(system.get("owner", -1)) != 0 or ECONOMY.has_station(system):
+				colony_target = -1
 	var entries: Array = []
 	var salvage_ids: Array[int] = []
 	for craft in state["ships"]:
@@ -3518,6 +3537,8 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			order = {"kind": "follow", "target": target, "guard": craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"]}
 		elif contextual and ref.get("kind") == "station" and ECONOMY.can_deposit(state, craft, target):
 			order = {"kind": "deposit", "target": target}
+		elif colony_target >= 0 and craft["kind"] == "colony_ship":
+			order = {"kind": "colonize", "target": colony_target}
 		elif field >= 0 and bool(state["map"]["fields"][field].get("antimatter", false)) and craft["kind"] == "science_ship" and ECONOMY._cargo_total(craft) <= ECONOMY.EPS:
 			order = {"kind": "collect", "target": field}
 		elif wreck >= 0 and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
@@ -4500,6 +4521,12 @@ func _draw_map() -> void:
 			elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
 				var destination: Vector2 = poses[int(active_order["target"])]["point"]
 				order_view.draw_command_route(order_graph, craft, start, destination, HUD.ACCENT)
+			elif active_order.get("kind", "") == "colonize" and ECONOMY._unit_order_running(craft):
+				var star: int = int(active_order["target"])
+				if star >= 0 and star < state["planets"].size():
+					var center: Vector2 = _screen_point(state["map"]["points"][star])
+					var ring: float = maxf(5.0, celestial_view.star_draw_radius(_planet_radius(star, state))) + 5.0
+					map_canvas.draw_arc(center, ring, 0.0, TAU, 48, Color(1.0, 1.0, 1.0, 0.9), 1.5, true)
 			elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY._unit_order_running(craft):
 				order_view.draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
 			elif active_order.get("kind", "") == "position" and ECONOMY._unit_order_running(craft):

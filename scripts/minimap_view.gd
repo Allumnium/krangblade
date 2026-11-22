@@ -73,13 +73,13 @@ func order_hint(mouse: InputEventMouseButton, state: Dictionary, pending_command
 	if not area.has_point(mouse.position):
 		return {}
 	var world: Vector2 = (mouse.position - area.position) / area.size * map_size.call()
-	var hint: Dictionary = {"world": world, "entity": -1, "field": -1, "wreck": -1}
+	var hint: Dictionary = {"world": world, "entity": -1, "field": -1, "wreck": -1, "star": -1}
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var count: int = state["planets"].size()
 	var nearest: float = 5.0
 	var node_hit: int = -1
-	# Star markers are background landmarks, not implicit destinations or
-	# station targets. Only actual entity/service orders use marker hits.
+	# Neutral star hits are contextual colony targets; other units retain
+	# ordinary coordinate movement. Actual entities take precedence.
 	if not mouse.alt_pressed and pending_command not in ["move", "patrol", "guard", "rally"]:
 		var poses: Dictionary = ship_poses.call(state, 0.0)
 		nearest = 3.0
@@ -109,6 +109,15 @@ func order_hint(mouse: InputEventMouseButton, state: Dictionary, pending_command
 						node_hit = node
 						hint["field"] = node - count
 						hint["entity"] = -1
+		if pending_command.is_empty() and node_hit < 0 and int(hint["entity"]) == -1:
+			nearest = 4.0
+			for index in range(count):
+				if not ECONOMY.discovered(state, local_player.call(), "planets", index):
+					continue
+				var distance: float = mouse.position.distance_to(_minimap_point(graph["points"][index], area))
+				if distance < nearest:
+					nearest = distance
+					hint["star"] = index
 		if pending_command == "load" or (node_hit < 0 and int(hint["entity"]) == -1):
 			nearest = 3.0
 			for pile in state.get("salvage", {}).values():

@@ -4822,7 +4822,7 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		"salvage":
 			return cargo_capacity(str(ship["kind"])) > EPS and state.get("salvage", {}).has(target)
 		"colonize":
-			return ship["kind"] == "colony_ship" and target >= 0 and target < state["planets"].size() and discovered(state, owner, "planets", target)
+			return not colony_path(state, owner, ship, target).is_empty()
 		"collect":
 			return _science_target_valid(state, graph, ship, target)
 		"mine":

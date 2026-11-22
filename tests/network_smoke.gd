@@ -296,6 +296,7 @@ func _phase_changed() -> void:
 						var farm: Dictionary = state["ships"].back()
 						farm["holding"] = true
 						farm["farm_auto"] = false
+						ECON._finish(state, index, system, {"id": 944000 + index, "kind": "colony_ship", "population_allocated": ECON.COLONY_POPULATION})
 						ECON._finish(state, index, system, {"id": 942000 + index, "kind": "science_ship"})
 						var science: Dictionary = state["ships"].back()
 						science["holding"] = true
@@ -589,6 +590,16 @@ func _send_commands() -> void:
 	session.call("request_shipyard_rally", home_index, 0, home_index, graph["points"][home_index])
 	session.call("request_shipyard_rally", (home_index + 1) % expected_players, 0, home_index, graph["points"][home_index])
 	session.call("request_autocast", [976000 + home_index], "explore", true)
+	var colony_candidates: Array[int] = []
+	for index in range(expected_players, initial["planets"].size()):
+		if int(initial["planets"][index]["owner"]) == 0 and not ECON.has_station(initial["planets"][index]):
+			colony_candidates.append(index)
+	if colony_candidates.size() >= expected_players:
+		var settle: int = colony_candidates[home_index]
+		var colony_id: int = 944000 + home_index
+		var move_point: Vector2 = graph["points"][home_index] + Vector2.RIGHT * minf(120.0, ECON.sector_limit(graph, home_index, Vector2.RIGHT) * 0.5)
+		session.call("request_unit_orders", [{"ids": [colony_id], "order": {"kind": "position", "target": home_index, "point": move_point, "move_only": true}}], false)
+		session.call("request_unit_orders", [{"ids": [colony_id], "order": {"kind": "colonize", "target": settle}}], true)
 	session.call("request_autocast", [939000 + home_index], "farm", true)
 	session.call("request_unit_orders", [{"ids": [939000 + home_index], "order": {"kind": "transform"}}], false)
 	session.call("request_unit_orders", [{"ids": [943000 + home_index], "order": {"kind": "guard", "target": home_index, "point": graph["points"][home_index]}}], false)
@@ -798,6 +809,7 @@ func _check_economy_sync() -> void:
 			var recipient_loaded: bool = false
 			var dock_delivered: int = 0
 			var farm_verified: bool = false
+			var colony_order_verified: bool = false
 			var science_verified: bool = false
 			var guard_verified: bool = false
 			var repair_toggled: bool = false
@@ -815,6 +827,10 @@ func _check_economy_sync() -> void:
 					guard_verified = craft.get("unit_order", {}).get("kind", "") == "guard" and int(craft["unit_order"]["target"]) == owner_home
 				if int(craft["id"]) == 942000 + owner_home:
 					science_verified = ECON.autocast_enabled(craft, "collect") and bool(craft.get("holding", false)) and ECON._cargo_total(craft) <= ECON.EPS
+				if int(craft["id"]) == 944000 + owner_home:
+					var active: Dictionary = craft.get("unit_order", {})
+					var pending: Array = craft.get("order_queue", [])
+					colony_order_verified = active.get("kind", "") == "colonize" and bool(active.get("automatic", false)) or pending.any(func(order: Dictionary) -> bool: return order.get("kind", "") == "colonize")
 				if int(craft["id"]) == 939000 + owner_home:
 					farm_verified = ECON.autocast_enabled(craft, "farm") and not ECON.supports_autocast(craft, "salvage") and float(craft["cargo"]["Organics"]) > ECON.EPS and ECON._cargo_total(craft) <= ECON.COLONY_CAPACITY + ECON.EPS
 				if int(craft["id"]) == 930000 + owner_home:
@@ -844,6 +860,7 @@ func _check_economy_sync() -> void:
 				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 14.0 - 0.001,
 				"crowded_dock_delivery": dock_delivered == 2,
 				"colony_farming": farm_verified,
+				"contextual_colony_queue": colony_order_verified,
 				"science_collect_toggle": science_verified,
 				"guard_order": guard_verified,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
