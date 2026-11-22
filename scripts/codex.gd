@@ -14,7 +14,7 @@ const TOPICS = [
 	["Fleet", "Ships & construction", "fighter miner colony logistics crew build queue costs shipyard"],
 	["Fleet", "Combat & defense", "laser pds armor plating matrix repair retreat"],
 	["Interface", "Controls & commands", "keyboard hotkeys camera movement patrol rally attack shift ctrl"],
-	["Interface", "Multiplayer & time", "host guest authority lobby teams ai pause speed"]
+	["Interface", "Multiplayer & time", "host guest authority lobby teams ai"]
 ]
 const SERIES_COLORS = [Color("#8ed779"), Color("#62cbe8"), Color("#e9bd76")]
 var search_box: LineEdit
@@ -455,7 +455,5 @@ func _controls() -> void:
 
 func _multiplayer() -> void:
 	_body("Up to eight independent empires start neutral. Empire (F4) manages mutual alliances, vision, trade permission (settlement pending), peace and war. Repair is always shared while allied. Explicit neutral attacks require confirmation; movement never declares war. Mutual peace imposes a 100-year truce. The host validates commands; guests view synchronized state. AI weighs known fleets, defenses, distance, other wars and potential allies before proposing alliances, peace or war.")
-	_section("Simulation clock")
-	_table(["Speed", "Simulation time"], [["Pause", "No simulated time passes"], ["1×", "1 year per second"], ["2×", "2 years per second"], ["5×", "5 years per second"]])
-	_body("Connected players can request shared time controls. The Codex and Menu are local interface windows; reading them does not pause a multiplayer match. Use the time controls if the match needs to stop.")
+	_body("The Codex and Menu are local interface windows; opening them does not pause a match.")
 	_note("Balance values are provisional during development. Hover commands for current costs and requirements.")

@@ -304,6 +304,8 @@ var system_owner_label: Label
 var leave: Button
 var match_menu: AcceptDialog
 var codex: Window
+var dev_mode: bool = false
+var dev_speed_row: HBoxContainer
 var dev_console: Window
 var dev_console_output: TextEdit
 var dev_console_entry: LineEdit
@@ -2841,14 +2843,6 @@ func _build_time_controls(parent: Container) -> void:
 	row.add_theme_constant_override("separation", 2)
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(row)
-	for speed in [0, 1, 2, 5]:
-		var label: String = "Ⅱ" if speed == 0 else "%d×" % speed
-		var button: Button = _button(label, _set_time_speed.bind(int(speed)), row)
-		button.toggle_mode = true
-		button.focus_mode = Control.FOCUS_NONE
-		button.custom_minimum_size = Vector2(26, 23)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		time_buttons[speed] = button
 	diagnostic_button = _button("Perf", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, row)
 	diagnostic_button.custom_minimum_size.y = 23
 	diagnostic_button.focus_mode = Control.FOCUS_NONE
@@ -2866,12 +2860,14 @@ func _build_time_controls(parent: Container) -> void:
 	diagnostic_label.hide()
 
 func _set_time_speed(speed: int) -> void:
+	if not dev_mode or not OS.is_debug_build():
+		return
 	session.call("request_time_speed", speed)
 	_refresh_time_controls(_state())
 
 func _refresh_time_controls(state: Dictionary) -> void:
 	var current: int = int(state.get("time_speed", 1))
-	var can_change: bool = str(session.get("phase")) == "match" and state.get("match_result", {}).is_empty()
+	var can_change: bool = dev_mode and (bool(session.get("is_solo")) or multiplayer.is_server()) and str(session.get("phase")) == "match" and state.get("match_result", {}).is_empty()
 	for speed in time_buttons:
 		var button: Button = time_buttons[speed]
 		var active: bool = int(speed) == current
@@ -5349,7 +5345,8 @@ func _visual_position(visual: Dictionary) -> Vector2:
 func _sound_button_added(node: Node) -> void:
 	if node is BaseButton and is_ancestor_of(node):
 		var button: BaseButton = node
-		button.pressed.connect(_sound_click)
+		if not button.pressed.is_connected(_sound_click):
+			button.pressed.connect(_sound_click)
 
 func _sound_click() -> void:
 	sound_mixer.play_cue("click")
@@ -5603,7 +5600,7 @@ func _input(event: InputEvent) -> void:
 		if _dev_console_toggle_key(event):
 			if dev_console.visible:
 				dev_console.hide()
-			elif not match_menu.visible and not empire_dialog.visible and not conquest_dialog.visible and not match_result_dialog.visible and not codex.visible and not hotkey_dialog.visible:
+			elif not _dev_console_modal_open():
 				_close_match_chat()
 				dev_console.popup_centered(Vector2i(540, 280))
 				dev_console_entry.grab_focus()
@@ -8223,6 +8220,12 @@ func _station_buildable(key: String, p: Dictionary) -> bool:
 	return ECONOMY.station_upgrade_available(p, key) and ECONOMY.construction_affordable(_state(), p, ECONOMY._cost(key, 1))
 
 # Local debug-build command registry. No evaluation and no development RPCs.
+func _dev_console_modal_open() -> bool:
+	for dialog in [match_menu, empire_dialog, conquest_dialog, match_result_dialog, codex, hotkey_dialog]:
+		if is_instance_valid(dialog) and dialog.visible:
+			return true
+	return false
+
 func _dev_console_toggle_key(event: InputEventKey) -> bool:
 	return event.physical_keycode == KEY_QUOTELEFT or event.keycode in [KEY_QUOTELEFT, KEY_ASCIITILDE]
 
@@ -8252,8 +8255,19 @@ func _build_dev_console() -> void:
 	dev_console_entry = LineEdit.new()
 	dev_console_entry.placeholder_text = "Enter command (help for commands)"
 	content.add_child(dev_console_entry)
+	dev_speed_row = HBoxContainer.new()
+	content.add_child(dev_speed_row)
+	for speed in [0, 1, 2, 5]:
+		var label: String = "Ⅱ" if speed == 0 else "%d×" % speed
+		var button: Button = _button(label, _set_time_speed.bind(int(speed)), dev_speed_row)
+		button.toggle_mode = true
+		button.focus_mode = Control.FOCUS_NONE
+		button.custom_minimum_size = Vector2(26, 23)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		time_buttons[speed] = button
+	dev_speed_row.hide()
 	dev_console_entry.text_submitted.connect(_dev_console_submit)
-	_dev_console_print("Development console — type help. Simulation commands are host/solo only.")
+	_dev_console_print("Development console — type /devmode to expose developer controls. Type help for commands.")
 
 func _dev_console_window_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and (_dev_console_toggle_key(event) or event.keycode == KEY_ESCAPE):
@@ -8273,15 +8287,22 @@ func _dev_console_submit(raw: String) -> void:
 		return
 	_dev_console_print("> " + raw)
 	match words[0].to_lower():
+		"/devmode":
+			dev_mode = not dev_mode
+			dev_speed_row.visible = dev_mode
+			_refresh_time_controls(_state())
+			_dev_console_print("Developer controls enabled." if dev_mode else "Developer controls hidden.")
 		"help":
-			_dev_console_print("help · clear · status · speed <0|1|2|5> (host/solo)")
+			_dev_console_print("help · clear · status · /devmode" + (" · speed <0|1|2|5> (host/solo)" if dev_mode else ""))
 		"clear":
 			dev_console_output.clear()
 		"status":
 			var state: Dictionary = session.get("economy")
 			_dev_console_print("Ships: %d | Speed: %dx | Elapsed years: %.1f" % [state.get("ships", []).size(), int(state.get("time_speed", 1)), float(state.get("elapsed", 0.0))])
 		"speed":
-			if not bool(session.get("is_solo")) and not multiplayer.is_server():
+			if not dev_mode:
+				_dev_console_print("Enable /devmode first.")
+			elif not bool(session.get("is_solo")) and not multiplayer.is_server():
 				_dev_console_print("Only the host can change simulation speed here.")
 			elif words.size() != 2 or not words[1].is_valid_int() or int(words[1]) not in [0, 1, 2, 5]:
 				_dev_console_print("Usage: speed <0|1|2|5>")

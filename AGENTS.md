@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.22: Simulation speed is developer-only. Debug builds expose it in the tilde console after `/devmode`, host/solo authority only; normal HUD and Codex omit speed controls. Perf remains available independently. Guard lazy dialogs and duplicate button-audio signal connections.
+
 - v0.89.21: Use the shared gold Galactic Credits icon (`HUD.resource_icon("GC", pixels)`) in the HUD and graphical command costs/upkeep. Keep GC units in plain-text explanations and Codex tables; credits are not a physical resource.
 
 - v0.89.14 (supersedes v0.89.9 layout): All command-card actions use one instant, mouse-transparent hover information panel with its width exactly matching the right command wing and bottom flush with its top. Display current incremental production first without a 'now' or local-population suffix, then a smaller reference rate; retain precision for small crystal yields. Explicitly bound height to roughly half the deck (55%, up to 65% for long text); no content-driven background extension. Remove native custom cost tooltips. Show useful effects, requirements, costs, targeting, automation and relevant cooldowns; no separate cursor-following popup or delayed tooltip. Preserve non-command tooltips.

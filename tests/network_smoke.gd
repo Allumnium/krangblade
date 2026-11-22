@@ -410,7 +410,7 @@ func _check_time_controls(state: Dictionary) -> bool:
 	var expected: int = TEST_SPEEDS[speed_stage]
 	var current: int = int(state.get("time_speed", -1))
 	if current != expected:
-		var speed_requester: bool = (role == "client" and home_index == 1) if expected == 2 else role == "host"
+		var speed_requester: bool = role == "host"
 		if speed_requester and speed_stage > 0:
 			var confirmed: int = 0
 			for system in state["planets"]:
@@ -426,8 +426,12 @@ func _check_time_controls(state: Dictionary) -> bool:
 			for peer in state["galactic_credits"]:
 				paused_credits[peer] = _reserved_credits(state, int(peer))
 			set_meta("paused_credits", paused_credits)
-			# Invalid values are rejected from both host and guest.
-			session.call("request_time_speed", 3 if role == "host" else 10)
+			# Invalid host values and valid guest requests are rejected.
+			if role == "host":
+				session.call("request_time_speed", 3)
+			else:
+				session.call("request_time_speed", 5)
+				session._rpc_time_speed.rpc_id(1, 5)
 			return false
 		if not is_equal_approx(float(state["elapsed"]), paused_elapsed):
 			_fail("Clock advanced while paused.")

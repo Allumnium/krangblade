@@ -1185,12 +1185,10 @@ func _mining_policy_for(id: int, index: int, enabled: bool, metals: bool, crysta
 # Any connected player may request a shared speed; the host validates and
 # publishes the canonical value.
 func request_time_speed(speed: int) -> void:
-	if phase != "match":
+	if phase != "match" or not OS.is_debug_build():
 		return
 	if is_solo or multiplayer.is_server():
 		_time_speed_for(1, speed)
-	else:
-		_rpc_time_speed.rpc_id(1, speed)
 
 @rpc("any_peer", "call_remote", "reliable")
 func _rpc_time_speed(speed: int) -> void:
@@ -1198,7 +1196,7 @@ func _rpc_time_speed(speed: int) -> void:
 		_time_speed_for(multiplayer.get_remote_sender_id(), speed)
 
 func _time_speed_for(id: int, speed: int) -> void:
-	if not _match_peer(id):
+	if id != 1 or not OS.is_debug_build() or not _match_peer(id):
 		return
 	if not economy.get("match_result", {}).is_empty() or not MATCH_SPEEDS.has(speed) or int(economy.get("time_speed", 1)) == speed:
 		return
