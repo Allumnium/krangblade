@@ -172,7 +172,7 @@ var control_group_manager := preload("res://scripts/control_group_manager.gd").n
 var last_control_group_recall: int = -1
 var last_control_group_recall_ms: int = -1000
 var control_group_strip: HBoxContainer
-var global_selection_strip: VBoxContainer
+var global_selection_strip: HBoxContainer
 var selection_start: Vector2 = Vector2.ZERO
 var selection_end: Vector2 = Vector2.ZERO
 var selecting_units: bool = false
@@ -781,8 +781,6 @@ func _layout_console() -> void:
 	inspector_panel.custom_minimum_size.x = wing_width
 	if is_instance_valid(control_group_strip):
 		_layout_control_group_strip()
-	if is_instance_valid(global_selection_strip):
-		global_selection_strip.position = Vector2(8.0, size.y + console_panel.offset_top - 3.0 - global_selection_strip.size.y)
 	# SC2-style raised wings: minimap and commands use the full deck height;
 	# selection details begin 20% lower, leaving more map visible centrally.
 	console_center_spacer.custom_minimum_size.y = roundf(height * 0.20)
@@ -3195,9 +3193,14 @@ func _layout_control_group_strip() -> void:
 	if not is_instance_valid(control_group_strip):
 		return
 	var center_width: float = console_center.size.x
-	var strip_width: float = minf(540.0, center_width)
+	var shortcut_width: float = global_selection_strip.get_combined_minimum_size().x + 6.0 if is_instance_valid(global_selection_strip) else 0.0
+	var strip_width: float = minf(540.0, maxf(control_group_strip.get_combined_minimum_size().x, center_width - shortcut_width))
 	control_group_strip.size = Vector2(strip_width, 26.0)
-	control_group_strip.global_position = console_center_spacer.global_position + Vector2((center_width - strip_width) * 0.5, console_center_spacer.size.y + console_center.get_theme_constant("separation") - control_group_strip.size.y - 3.0)
+	var deck_width: float = strip_width + shortcut_width
+	control_group_strip.global_position = console_center_spacer.global_position + Vector2(maxf(0.0, (center_width - deck_width) * 0.5), console_center_spacer.size.y + console_center.get_theme_constant("separation") - control_group_strip.size.y - 3.0)
+	if is_instance_valid(global_selection_strip):
+		global_selection_strip.size = global_selection_strip.get_combined_minimum_size()
+		global_selection_strip.global_position = control_group_strip.global_position + Vector2(control_group_strip.size.x + 6.0, control_group_strip.size.y - global_selection_strip.size.y)
 
 func _prune_control_group(state: Dictionary, group: Dictionary) -> Dictionary:
 	return control_group_manager.prune(state, group, _me(), _building_valid)
@@ -4247,7 +4250,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 func _build_global_selection_strip() -> void:
-	global_selection_strip = VBoxContainer.new()
+	global_selection_strip = HBoxContainer.new()
 	global_selection_strip.theme = HUD.compact()
 	global_selection_strip.z_index = 5
 	global_selection_strip.add_theme_constant_override("separation", 3)
@@ -4263,7 +4266,13 @@ func _build_global_selection_strip() -> void:
 	command_card_ui.set_hint(empire_button, "Empire\nFleet management & diplomacy")
 	hotkeys.register(empire_button, KEY_F4, "General", "empire", "Empire")
 	empire_ui.build(self, session, _me, _empire_color, hull_art.selection_portrait_icon, _label)
-	global_selection_strip.resized.connect(_layout_console)
+	for button in global_selection_strip.get_children():
+		button.custom_minimum_size = Vector2(44, 44)
+		var caption: Label = button.get_meta("caption")
+		caption.add_theme_font_size_override("font_size", 9)
+		caption.clip_text = true
+	global_selection_strip.resized.connect(_layout_control_group_strip)
+	_layout_control_group_strip()
 
 func _select_all_buildings(kind: String) -> void:
 	var state: Dictionary = _state()

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.51: F1–F4 shortcuts in a horizontal strip immediately right of control groups, 44px square rather than 60px, bottom aligned; unchanged actions and hotkeys. Visual/runtime validation pending.
+
 - v0.89.50: Stations gain one launcher using existing 120 damage, 1200 range, 12 s cooldown. All missiles apply full damage within 30 world units to hostile hulls and structures only via frozen combat cells. Station missile tracer uses station snapshot metadata. Runtime/peer validation pending.
 
 - v0.89.49: Allow direct manual navigation within enclosed three-sector junctions using cached Delaunay faces of mutually overlapping sector disks; retain existing region boundaries, discovery restrictions and open-space rejection. General multi-region smoothing and autonomous miner anchor detours remain follow-ups. Runtime checks pending.
