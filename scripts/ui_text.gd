@@ -66,6 +66,16 @@ static func system_bonus_text(p: Dictionary) -> String:
 		lines.append("Advanced manufacturing %d%% (future)" % advanced)
 	return "\n".join(lines)
 
+# Preserve meaningful small production increments instead of rounding
+# both the reference and local value to the same hundredth of a ton.
+static func signed_yield(value: float) -> String:
+	if is_zero_approx(value):
+		return "+0"
+	if absf(value) < 0.0001:
+		return "+<0.0001" if value > 0.0 else "−<0.0001"
+	var number: String = "%+.4f" % value if absf(value) < 0.001 else ("%+.3f" % value if absf(value) < 0.1 else "%+.2f" % value)
+	return number.rstrip("0").trim_suffix(".")
+
 static func economy_building_effect(p: Dictionary, resource: String) -> String:
 	if not ECONOMY.production_available(p, resource):
 		return "Requires local production deposit" if resource != "Organics" else "Requires planets"
@@ -83,7 +93,8 @@ static func economy_building_effect(p: Dictionary, resource: String) -> String:
 		sample["eco_population"] = 0.0
 		sample["planet_blockaded"] = false
 	var base: float = ECONOMY.rate(reference_preview, resource) - ECONOMY.rate(reference, resource)
-	var result: String = "Yield: %+.2f t/yr %s %s residents (%+.2f t/yr now)" % [base, "at" if resource == "Organics" else "per", compact_amount(ECONOMY.HOME_POPULATION), actual]
+	var local_population: float = ECONOMY.planetary_population(p) if resource == "Organics" else float(p["population"])
+	var result: String = "Yield: %s t/yr now (%s local)\nReference: %s t/yr %s 10k %s" % [signed_yield(actual), compact_amount(local_population), signed_yield(base), "at" if resource == "Organics" else "per", "planetary residents" if resource == "Organics" else "local residents"]
 	if resource == "Organics":
 		result += "\n+%s food-supported population" % compact_amount(ECONOMY.population_capacity(preview) - ECONOMY.population_capacity(p))
 	if bool(p.get("planet_blockaded", false)):

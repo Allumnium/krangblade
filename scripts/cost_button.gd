@@ -63,5 +63,9 @@ static func fill_info(label: RichTextLabel, description: String, costs_by_resour
 			label.push_color(Color("#9fe3b5"))
 			label.add_text(detail.trim_prefix("Yield: "))
 			label.pop()
+		elif detail.begins_with("Reference: "):
+			label.push_color(HUD.MUTED)
+			label.add_text(detail.trim_prefix("Reference: "))
+			label.pop()
 		else:
 			label.add_text(detail)
