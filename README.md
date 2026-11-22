@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.91.3; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.91.4; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
@@ -17,7 +17,7 @@ Current layout (v0.91.3; update when responsibility moves). Use the named functi
 | `scripts/camera_view.gd` | Client camera state, zoom limits/steps, pan, world/screen projection and selection framing math. Match supplies playfield geometry and selection targets; retains input routing. |
 | `scripts/system_geometry.gd` | Pure deterministic body generation, orbital position and system radius queries; economy_rules retains facade and balance constants. |
 | `scripts/sector_geometry.gd` | Immutable bounded Voronoi cells, shared borders, region lookup and exact segment permission tests. Economy owns cached geometry for hidden navigation and influence. |
-| `scripts/territory_view.gd` | Soft local presence footprints shared with minimap, fog masking and friendly warning destinations; no sector outlines. Match supplies camera geometry, fog binding and player colors. |
+| `scripts/territory_view.gd` | Cached building-only radial ownership fields, GPU smooth territory contours, matching minimap samples, last-observed infrastructure and separate legacy friendly warning destinations. Match supplies camera geometry, fog binding and player colors. |
 | `scripts/fog_of_war.gd` | Per-client live/explored vision cells, revision checks, mask texture and map fog rendering. Match supplies player, motion revision, camera geometry and territory shader bindings; minimap shares the mask. |
 | `scripts/hull_art.gd` | Authored hull geometry, cargo bay positions, hull/portrait/shield SVG generation and per-match texture caches; map drawing and selection consume the same geometry. |
 | `scripts/command_hotkeys.gd` | Command registration, key scope/conflicts, persisted override loading, hotkey badges and dispatch; match_settings owns editor dialog and settings save. |
