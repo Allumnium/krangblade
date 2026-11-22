@@ -42,6 +42,7 @@ Review AGENTS.md before work. This is a prioritized backlog, not blanket approva
 
 - [ ] v0.89.67: Replace inline numeric GC net income with centered white chevrons beneath balance, without storage fill. Share the resource chevron drawing and tiers; scale recurring net income to current treasury with STARTING_GC as the minimum reference (not a cap). Retain hover rates and unpaid wage warning. Visual/runtime validation pending.
 
+- [ ] v0.92.0: Completed infrastructure grants live vision over its full compact territory influence support (including merged claims) plus 160 world units. Preserve existing ship/structure sensors, cloak and alliance vision permissions. Uses shared radial reach and cached map radius; verify fog, discovery, loss of infrastructure and ENet. Runtime pending.
 - [ ] v0.91.11: Revert the v0.91.9 radius doubling across world, minimap and setup preview; retain reduced opacity. Visual validation pending.
 - [ ] v0.91.10: Solo and lobby map previews draw the shared cached minimap territory fields beneath stars and deposits, using actual starting infrastructure and roster colors. Refresh on map or ordered roster/color changes; no simulation or network changes. Verify preview alignment, recoloring and setup responsiveness; runtime pending.
 - [ ] v0.91.9: Double the visual building territory kernel radius; halve map and minimap fill and contour opacity. Preserve cached fields, fog memory and simulation rules. Profile rebuild cost and verify overlapping claims visually; runtime/ENet pending.
