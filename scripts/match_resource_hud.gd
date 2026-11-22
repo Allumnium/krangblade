@@ -238,12 +238,16 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 	var lines: PackedStringArray = ["%s · %.2f t total" % [resource, float(totals["resources"][resource])],
 		"Stations: %.2f / %.0f t · Ships: %.2f t" % [float(totals["stock"][resource]), float(totals["storage_reference"][resource]), float(totals["cargo"][resource])],
 		"Net (storage-limited): %+.2f t/yr" % _empire_resource_delta(state, resource)]
-	lines.append("System · Net | Production | Demand (t/yr)")
+	var food: bool = resource == "Organics"
+	lines.append("System · Net | Production | Food demand (t/yr)" if food else "System · Net | Production (t/yr)")
 	for i in range((state.get("planets", []) as Array).size()):
 		var p: Dictionary = state["planets"][i]
 		if int(p["owner"]) != local_player.call():
 			continue
-		lines.append("%s  %+.2f | %.2f | %.2f" % [system_name.call(i), ECONOMY.net_rate(p, resource), ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource)])
+		var row: String = "%s  %+.2f | %.2f" % [system_name.call(i), ECONOMY.net_rate(p, resource), ECONOMY.rate(p, resource)]
+		if food:
+			row += " | %.2f" % ECONOMY.consumption(p, resource)
+		lines.append(row)
 	return "\n".join(lines)
 
 func _local_breakdown(p: Dictionary, resource: String, selected: int) -> String:
@@ -252,6 +256,8 @@ func _local_breakdown(p: Dictionary, resource: String, selected: int) -> String:
 		var crew: float = float(p.get("crew_rate", 0.0))
 		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nFood reserve growth penalty: %+.1f%% (%.2f / %.0f t for full growth)\nOrganics: %.2f produced / %.2f consumed per year\nEco-Housing: %.0f / %.0f residents · +%.2f t/yr Organics" % [system_name.call(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p)), float(p["stock"]["Organics"]), ECONOMY.POPULATION_FOOD_RESERVE, ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics"), ECONOMY.eco_population(p), ECONOMY.eco_capacity(p), ECONOMY.eco_organics(p)]
 	var potential: float = ECONOMY.rate(p, resource)
+	if resource != "Organics":
+		return "%s · %.2f t stored\nProduction: %.2f t/yr\nNet: %+.2f t/yr\nOutput: %.1f%%" % [resource, float(p["stock"][resource]), potential, ECONOMY.net_rate(p, resource), 100.0 * ECONOMY.production_modifier(p, resource)]
 	var demand: float = ECONOMY.consumption(p, resource)
 	return "%s · %.2f t stored\nProduction: %.2f t/yr\nDemand: %.2f t/yr\nNet: %+.2f t/yr\nOutput: %.1f%%" % [resource, float(p["stock"][resource]), potential, demand, potential - demand, 100.0 * ECONOMY.production_modifier(p, resource)]
 

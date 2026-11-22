@@ -694,8 +694,9 @@ func _build_station_interaction(body: VBoxContainer) -> void:
 	interaction_panel.add_theme_constant_override("separation", 8)
 	interaction_scroll.add_child(interaction_panel)
 	var neutral_grid: GridContainer = command_card_ui.create_grid(interaction_panel)
-	send_colony_button = _station_button(neutral_grid, "Send\nColony", "transform", _send_colony)
+	send_colony_button = _station_button(neutral_grid, "Colonize", "transform", _send_colony)
 	command_card_ui.set_hint(send_colony_button, "Send the nearest available Colony to this sector")
+	hotkeys.register(send_colony_button, KEY_C, "Neutral System", "colonize", "Colonize")
 	command_card_ui.fill_grid(neutral_grid)
 	_build_station_command_card(body)
 
@@ -2770,8 +2771,10 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
 	var en_route: bool = neutral and ECONOMY.colony_en_route(state, _me(), selected)
 	send_colony_button.disabled = id < 0 or en_route
 	var caption: Label = send_colony_button.get_meta("caption")
-	caption.text = "Colony\nEn Route" if en_route else "Send\nColony"
-	command_card_ui.set_hint(send_colony_button, "Colony already en route" if en_route else ("Send nearest available Colony to this sector" if id >= 0 else "No available Colonies"))
+	caption.text = "Colony\nEn Route" if en_route else "Colonize"
+	var hint: String = "Colony already en route" if en_route else ("Send nearest available Colony to this sector" if id >= 0 else "No available Colonies")
+	var shortcut: String = str(send_colony_button.get_meta("hotkey", ""))
+	command_card_ui.set_hint(send_colony_button, hint if shortcut.is_empty() else hint + "\n[" + shortcut + "]")
 
 func _send_colony() -> void:
 	if not send_colony_button.disabled:
