@@ -7,6 +7,7 @@ static var cached_military_map: Dictionary = {}
 static var cached_military_source: Dictionary = {}
 # Ephemeral authoritative snapshot, active only during a movement substep.
 static var avoidance_cells: Dictionary = {}
+static var _movement_fields: Array = []
 const AVOIDANCE_LOOKAHEAD: float = 96.0
 const AVOIDANCE_CELL: float = 128.0
 const AVOIDANCE_BUCKET_LIMIT: int = 24
@@ -2181,13 +2182,44 @@ static func _avoidance_direction(ship: Dictionary, target: Vector2, budget: floa
 
 # The only movement integrator. Orders change targets, never current position.
 # Return the distance actually flown so a tick cannot exceed its travel budget.
+# Route around conservative field disks using short exterior arc chords.
+static func _field_detour(before: Vector2, target: Vector2, budget: float) -> Vector2:
+	var nearest: float = INF
+	var obstacle: Dictionary = {}
+	for field in _movement_fields:
+		var center: Vector2 = field["position"]
+		var radius: float = float(field["radius"]) + 8.0
+		if Geometry2D.get_closest_point_to_segment(center, before, target).distance_to(center) >= radius:
+			continue
+		var distance: float = before.distance_to(center) - radius
+		if distance < nearest:
+			nearest = distance
+			obstacle = field
+	if obstacle.is_empty():
+		return target
+	var center: Vector2 = obstacle["position"]
+	var radius: float = float(obstacle["radius"]) + 8.0
+	var radial: Vector2 = before - center
+	var axis: Vector2 = radial.normalized() if not radial.is_zero_approx() else Vector2.RIGHT
+	var desired: Vector2 = target - center
+	if radial.length() < radius + 2.0:
+		return center + axis * (radius + 24.0)
+	if desired.length() < radius:
+		return center + (desired.normalized() if not desired.is_zero_approx() else axis) * (radius + 24.0)
+	var turn: float = axis.angle_to(desired)
+	var side: float = 1.0 if turn >= 0.0 else -1.0
+	var angle: float = minf(0.12, maxf(0.015, budget / (radius + 24.0)))
+	return center + axis.rotated(side * angle) * (radius + 24.0)
+
 static func _navigate(ship: Dictionary, target: Vector2, budget: float) -> float:
 	ship["navigation_target"] = target
 	var before: Vector2 = ship["position"]
+	if ship.get("kind", "") != "miner" and not _movement_fields.is_empty():
+		target = _field_detour(before, target, budget)
 	var direct: Vector2 = before.direction_to(target)
 	var steering: Vector2 = _avoidance_direction(ship, target, budget)
 	var after: Vector2 = before.move_toward(target, maxf(0.0, budget))
-	if not steering.is_equal_approx(direct):
+	if not steering.is_equal_approx(direct) and (ship.get("kind", "") == "miner" or _movement_fields.is_empty()):
 		after = before + steering * minf(maxf(0.0, budget), before.distance_to(target))
 	var displacement: Vector2 = after - before
 	if not displacement.is_zero_approx():
@@ -8356,6 +8388,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 	return next
 
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
+	_movement_fields = state["map"].get("fields", [])
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	_accrue_resident_taxes(state, dt)
 	_pay_fleet_upkeep(state, dt)
