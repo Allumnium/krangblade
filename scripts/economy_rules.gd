@@ -8322,6 +8322,33 @@ static func _dispatch_cohorts(state: Dictionary, graph: Dictionary, home: int, g
 # when its members are reassigned together to another objective.
 static func _sync_operations(state: Dictionary) -> void:
 	var previous: Dictionary = state.get("operations", {})
+	var indexed: bool = is_same(state, _indexed_state)
+	var by_id: Dictionary = _hulls_by_id if indexed else {}
+	var current: Dictionary = _group_operations(state, by_id, indexed)
+	var prior_by_id: Dictionary = {}
+	var prior_members: Dictionary = {}
+	for old_operation in previous.values():
+		prior_by_id[int(old_operation["id"])] = old_operation
+	var reused: Dictionary = _reserve_operation_ids(state, current, previous)
+	for key in current:
+		var operation: Dictionary = current[key]
+		if int(operation["id"]) == 0:
+			_match_operation_id(state, operation, current, previous, reused, prior_members)
+		var old_slots: Dictionary = prior_by_id.get(int(operation["id"]), {}).get("slots", {})
+		var last_slot: int = _assign_formation_slots(operation, old_slots)
+		_classify_operation_members(operation, by_id)
+		var slots: Dictionary = operation["slots"]
+		for member in operation["members"]:
+			var craft: Dictionary = by_id[member]
+			craft["operation_id"] = int(operation["id"])
+			craft["formation_slot"] = int(slots[member])
+			craft["formation_size"] = (operation["members"] as Array).size()
+			craft["formation_extent"] = last_slot
+	state["operations"] = current
+
+## Groups armed hulls by owner, role and objective. Fills by_id when the
+## hull index is not active for this state.
+static func _group_operations(state: Dictionary, by_id: Dictionary, indexed: bool) -> Dictionary:
 	# Membership checks must not scan an entire wave for every hull.
 	var wave_members: Dictionary = {}
 	var ai_players: Dictionary = {}
@@ -8333,8 +8360,6 @@ static func _sync_operations(state: Dictionary) -> void:
 			members[member] = true
 		wave_members[owner] = members
 	var current: Dictionary = {}
-	var indexed: bool = is_same(state, _indexed_state)
-	var by_id: Dictionary = _hulls_by_id if indexed else {}
 	for ship in state["ships"]:
 		if bool(ship.get("rogue", false)) or ship.get("kind", "") not in ["fighter", "scout", "cruiser", "destroyer"]:
 			continue
@@ -8362,11 +8387,12 @@ static func _sync_operations(state: Dictionary) -> void:
 		operation["members"].append(ship_id)
 		operation["moving"] = bool(operation["moving"]) or (not (ship["route"] as Array).is_empty() and (not bool(ship.get("holding", false)) or bool(ship.get("retreating", false))))
 		operation["engaged"] = bool(operation["engaged"]) or _engaged(ship)
+	return current
+
+## Keeps persistent wave identities and same-key operation identities,
+## returning the set of IDs already claimed.
+static func _reserve_operation_ids(state: Dictionary, current: Dictionary, previous: Dictionary) -> Dictionary:
 	var reused: Dictionary = {}
-	var prior_by_id: Dictionary = {}
-	var prior_members: Dictionary = {}
-	for old_operation in previous.values():
-		prior_by_id[int(old_operation["id"])] = old_operation
 	# Reserve persistent wave identities before matching transient groups.
 	for wave_record in state.get("ai_waves", {}).values():
 		var persistent_id: int = int(wave_record.get("operation_id", 0))
@@ -8388,84 +8414,84 @@ static func _sync_operations(state: Dictionary) -> void:
 			operation["phase"] = old.get("phase", "assigned")
 			operation["deployed"] = old.get("deployed", []).duplicate()
 			reused[int(old["id"])] = true
-	for key in current:
-		var operation: Dictionary = current[key]
-		if int(operation["id"]) == 0:
-			var best_id: int = 0
-			var best_overlap: int = 0
-			for old_key in previous:
-				var old: Dictionary = previous[old_key]
-				var candidate: int = int(old["id"])
-				if reused.has(candidate) or current.has(old_key) or old["owner"] != operation["owner"] or old["role"] != operation["role"]:
-					continue
-				if not prior_members.has(candidate):
-					var member_set: Dictionary = {}
-					for member in old["members"]:
-						member_set[member] = true
-					prior_members[candidate] = member_set
-				var overlap: int = 0
-				for member in operation["members"]:
-					if prior_members[candidate].has(member):
-						overlap += 1
-				if overlap > best_overlap:
-					best_overlap = overlap
-					best_id = candidate
-			if best_id == 0:
-				best_id = int(state.get("next_operation_id", 1))
-				state["next_operation_id"] = best_id + 1
-			operation["id"] = best_id
-			reused[best_id] = true
-		var old_slots: Dictionary = prior_by_id.get(int(operation["id"]), {}).get("slots", {})
-		var slots: Dictionary = {}
-		var claimed: Dictionary = {}
-		# Retain surviving assignments; reinforcements fill vacant slots.
+	return reused
+
+## Inherits the unclaimed prior operation with the greatest member overlap,
+## or allocates a new ID.
+static func _match_operation_id(state: Dictionary, operation: Dictionary, current: Dictionary, previous: Dictionary, reused: Dictionary, prior_members: Dictionary) -> void:
+	var best_id: int = 0
+	var best_overlap: int = 0
+	for old_key in previous:
+		var old: Dictionary = previous[old_key]
+		var candidate: int = int(old["id"])
+		if reused.has(candidate) or current.has(old_key) or old["owner"] != operation["owner"] or old["role"] != operation["role"]:
+			continue
+		if not prior_members.has(candidate):
+			var member_set: Dictionary = {}
+			for member in old["members"]:
+				member_set[member] = true
+			prior_members[candidate] = member_set
+		var overlap: int = 0
 		for member in operation["members"]:
-			if old_slots.has(member):
-				var retained: int = int(old_slots[member])
-				slots[member] = retained
-				claimed[retained] = true
-		var free_slot: int = 0
-		var last_slot: int = 0
-		for member in operation["members"]:
-			if not slots.has(member):
-				while claimed.has(free_slot):
-					free_slot += 1
-				slots[member] = free_slot
-				claimed[free_slot] = true
-			last_slot = maxi(last_slot, int(slots[member]))
-		operation["slots"] = slots
-		var deployed: Array = []
-		var prior_deployed: Dictionary = {}
-		for member in operation["deployed"]:
-			prior_deployed[member] = true
-		var recovering: Array = []
-		var rallying: Array = []
-		var in_transit: Array = []
-		for member in operation["members"]:
-			var craft: Dictionary = by_id[member]
-			if bool(craft.get("retreating", false)):
-				recovering.append(member)
-			elif operation["role"] == "wave" or prior_deployed.has(member):
-				deployed.append(member)
-			elif operation["role"] == "reserve" or operation["phase"] in ["rallying", "deployed"]:
-				rallying.append(member)
-			if not (craft["route"] as Array).is_empty():
-				in_transit.append(member)
-		operation["deployed"] = deployed
-		operation["recovering"] = recovering
-		operation["rallying"] = rallying
-		operation["in_transit"] = in_transit
-		if operation["role"] == "wave":
-			operation["phase"] = "deployed"
-		elif operation["role"] == "reserve":
-			operation["phase"] = "rallying"
-		for member in operation["members"]:
-			var craft: Dictionary = by_id[member]
-			craft["operation_id"] = int(operation["id"])
-			craft["formation_slot"] = int(slots[member])
-			craft["formation_size"] = (operation["members"] as Array).size()
-			craft["formation_extent"] = last_slot
-	state["operations"] = current
+			if prior_members[candidate].has(member):
+				overlap += 1
+		if overlap > best_overlap:
+			best_overlap = overlap
+			best_id = candidate
+	if best_id == 0:
+		best_id = int(state.get("next_operation_id", 1))
+		state["next_operation_id"] = best_id + 1
+	operation["id"] = best_id
+	reused[best_id] = true
+
+## Retains surviving slot assignments; reinforcements fill vacant slots.
+## Returns the highest assigned slot.
+static func _assign_formation_slots(operation: Dictionary, old_slots: Dictionary) -> int:
+	var slots: Dictionary = {}
+	var claimed: Dictionary = {}
+	for member in operation["members"]:
+		if old_slots.has(member):
+			var retained: int = int(old_slots[member])
+			slots[member] = retained
+			claimed[retained] = true
+	var free_slot: int = 0
+	var last_slot: int = 0
+	for member in operation["members"]:
+		if not slots.has(member):
+			while claimed.has(free_slot):
+				free_slot += 1
+			slots[member] = free_slot
+			claimed[free_slot] = true
+		last_slot = maxi(last_slot, int(slots[member]))
+	operation["slots"] = slots
+	return last_slot
+
+static func _classify_operation_members(operation: Dictionary, by_id: Dictionary) -> void:
+	var deployed: Array = []
+	var prior_deployed: Dictionary = {}
+	for member in operation["deployed"]:
+		prior_deployed[member] = true
+	var recovering: Array = []
+	var rallying: Array = []
+	var in_transit: Array = []
+	for member in operation["members"]:
+		var craft: Dictionary = by_id[member]
+		if bool(craft.get("retreating", false)):
+			recovering.append(member)
+		elif operation["role"] == "wave" or prior_deployed.has(member):
+			deployed.append(member)
+		elif operation["role"] == "reserve" or operation["phase"] in ["rallying", "deployed"]:
+			rallying.append(member)
+		if not (craft["route"] as Array).is_empty():
+			in_transit.append(member)
+	operation["deployed"] = deployed
+	operation["recovering"] = recovering
+	operation["rallying"] = rallying
+	operation["in_transit"] = in_transit
+	if operation["role"] == "wave":
+		operation["phase"] = "deployed"
+	elif operation["role"] == "reserve":
+		operation["phase"] = "rallying"
 
 # Stable disk slots in a lane-relative coordinate frame. Large groups fit
 # inside the rally radius; movement always uses the authoritative integrator.
