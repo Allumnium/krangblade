@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.92.1: Send Colony displays Colony En Route and prevents duplicate automatic dispatch to the same world. Nearest available selection accepts local work and autonomous cargo delivery, excluding assigned colony travel, other sector routes and retreat. Host chooses using existing request. Verify rerouting, cargo retention, cancellation, arrival and ENet; runtime pending.
+
 Living roadmap. Build a playable, low-micro galactic RTS with conventional direct military control and autonomous physical logistics. Policies and regional card assignments are intentionally removed. Preserve the working RTS foundation while developing the agreed neutral diplomacy and hidden global Revelation direction below. Promissory notes and older endgame proposals remain subject to review. Target 10–30 minute matches at 1×, subject to playtesting.
 
 Review AGENTS.md before work. This is a prioritized backlog, not blanket approval to invent mechanics. Numerical balance remains provisional. Earlier implementation history and the superseded policy roadmap are preserved in git (v0.17.36 and earlier).
