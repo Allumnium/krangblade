@@ -7936,21 +7936,49 @@ static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, 
 static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 	var home: int = military_home(state, player)
 	if home < 0:
-		# A surviving colony hull can establish a new home even after the
-		# empire loses its last owned system.
-		var reserved: Dictionary = {}
-		for ship in state["ships"]:
-			if int(ship["owner"]) == player and ship.get("kind", "") == "colony_ship" and (not (ship["route"] as Array).is_empty() or colony_morphing(ship)):
-				reserved[int(ship["dest"])] = true
-		for ship in state["ships"]:
-			if int(ship["owner"]) != player or ship.get("kind", "") != "colony_ship" or not (ship["route"] as Array).is_empty() or colony_morphing(ship):
-				continue
-			var target: int = _ai_colony_target(state, player, ship, reserved)
-			if target >= 0 and send_colony(state, player, int(ship["id"]), target, true):
-				reserved[target] = true
+		_ai_resettle(state, player)
 		return
 	var planets: Array = state["planets"]
-	var team: int = _combat_group(state, player)
+	var census: Dictionary = _ai_census(state, player, home)
+	var owned: Array[int] = census["owned"]
+	var counts: Dictionary = census["counts"]
+	var reserved: Dictionary = census["reserved"]
+	for ship in census["idle_colonies"]:
+		var target: int = _ai_colony_target(state, player, ship, reserved)
+		if target >= 0 and send_colony(state, player, int(ship["id"]), target, true):
+			reserved[target] = true
+	var probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": home, "route": []}
+	var expansion: bool = _ai_colony_target(state, player, probe, reserved) >= 0
+	for index in owned:
+		var p: Dictionary = planets[index]
+		if not (p["queue"] as Array).is_empty():
+			continue
+		if not has_planets(p) and float(p["population"]) < ORBITAL_HOUSING_POPULATION:
+			enqueue(state, player, index, "economy", "orbital_housing")
+			continue
+		var goal: Array = _ai_station_goal(state, player, home, index, census, expansion)
+		if not (goal[0] as String).is_empty():
+			_ai_pursue_station_goal(state, player, index, goal[0], goal[1], counts)
+	_ai_military_orders(state, graph, player, home, owned, census["fighters"])
+
+## A surviving colony hull can establish a new home even after the empire
+## loses its last owned system.
+static func _ai_resettle(state: Dictionary, player: int) -> void:
+	var reserved: Dictionary = {}
+	for ship in state["ships"]:
+		if int(ship["owner"]) == player and ship.get("kind", "") == "colony_ship" and (not (ship["route"] as Array).is_empty() or colony_morphing(ship)):
+			reserved[int(ship["dest"])] = true
+	for ship in state["ships"]:
+		if int(ship["owner"]) != player or ship.get("kind", "") != "colony_ship" or not (ship["route"] as Array).is_empty() or colony_morphing(ship):
+			continue
+		var target: int = _ai_colony_target(state, player, ship, reserved)
+		if target >= 0 and send_colony(state, player, int(ship["id"]), target, true):
+			reserved[target] = true
+
+## Counts owned and queued hulls, reserved colony targets and useful mining
+## fields, and refreshes each owned station's trade thresholds.
+static func _ai_census(state: Dictionary, player: int, home: int) -> Dictionary:
+	var planets: Array = state["planets"]
 	var owned: Array[int] = []
 	var counts: Dictionary = {"ship": 0, "colony_ship": 0, "miner": 0, "fighter": 0, "science_ship": 0, "scout": 0, "cruiser": 0, "destroyer": 0}
 	var reserved: Dictionary = {}
@@ -7990,138 +8018,137 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		set_thresholds(state, player, index, "Metals", 10.0 if bool(p["home"]) else (35.0 if producer else 90.0), 40.0 if bool(p["home"]) else (60.0 if producer else 95.0))
 		var crystal_source: bool = production_available(p, "Crystals") and index != home
 		set_thresholds(state, player, index, "Crystals", 0.0 if crystal_source else 50.0, 5.0 if crystal_source else 90.0)
-	for ship in idle_colonies:
-		var target: int = _ai_colony_target(state, player, ship, reserved)
-		if target >= 0 and send_colony(state, player, int(ship["id"]), target, true):
-			reserved[target] = true
-	var probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": home, "route": []}
-	var expansion: bool = _ai_colony_target(state, player, probe, reserved) >= 0
-	for index in owned:
-		var p: Dictionary = planets[index]
-		if not (p["queue"] as Array).is_empty():
-			continue
-		if not has_planets(p) and float(p["population"]) < ORBITAL_HOUSING_POPULATION:
-			enqueue(state, player, index, "economy", "orbital_housing")
-			continue
-		var level: int = production_level(p, "Metals") + int(p.get("buildings", {}).get("Metals", 0))
-		var abundance: float = float(p["abundance"].get("Metals", 0.0))
-		var farm: int = production_level(p, "Organics") + int(p.get("buildings", {}).get("Organics", 0))
-		var action: String = ""
-		var target: String = ""
-		var has_yard: bool = operational_shipyards(p) > 0
-		# Select the next goal before checking funding. Save for that goal
-		# rather than continually buying cheaper ships or secondary upgrades.
-		if abundance > 0.0 and level == 0:
+	return {"owned": owned, "counts": counts, "reserved": reserved, "fighters": fighters, "idle_colonies": idle_colonies, "useful_fields": useful_fields}
+
+## Selects the station's next goal before checking funding, returning
+## [action, target]. The AI saves for that goal rather than continually
+## buying cheaper ships or secondary upgrades.
+static func _ai_station_goal(state: Dictionary, player: int, home: int, index: int, census: Dictionary, expansion: bool) -> Array:
+	var p: Dictionary = state["planets"][index]
+	var owned: Array[int] = census["owned"]
+	var counts: Dictionary = census["counts"]
+	var useful_fields: int = census["useful_fields"]
+	var level: int = production_level(p, "Metals") + int(p.get("buildings", {}).get("Metals", 0))
+	var abundance: float = float(p["abundance"].get("Metals", 0.0))
+	var farm: int = production_level(p, "Organics") + int(p.get("buildings", {}).get("Organics", 0))
+	var action: String = ""
+	var target: String = ""
+	var has_yard: bool = operational_shipyards(p) > 0
+	if abundance > 0.0 and level == 0:
+		action = "economy"
+		target = "Metals"
+	elif (index == home or has_fitting_yard(p, "ship")) and owned.size() > 1 and counts["ship"] == 0:
+		action = "ship"
+	elif has_yard and owned.size() > 1 and counts["fighter"] < mini(12, owned.size() * 2):
+		action = "fighter"
+	elif index == home and expansion and counts["colony_ship"] == 0:
+		if ship_origin_population_met(p, "colony_ship"):
+			action = "colony_ship"
+		elif population_capacity(p) < COLONY_MIN_ORIGIN_POPULATION:
 			action = "economy"
-			target = "Metals"
-		elif (index == home or has_fitting_yard(p, "ship")) and owned.size() > 1 and counts["ship"] == 0:
-			action = "ship"
-		elif has_yard and owned.size() > 1 and counts["fighter"] < mini(12, owned.size() * 2):
+			target = "Organics"
+	elif has_yard and counts["fighter"] == 0:
+		action = "fighter"
+	elif has_yard and useful_fields > 0 and counts["miner"] == 0:
+		action = "miner"
+	elif index == home and level < 2 and abundance > 0.0:
+		action = "economy"
+		target = "Metals"
+	elif has_yard and counts["fighter"] < AI_WAVE_MIN:
+		action = "fighter"
+	elif (index == home or has_fitting_yard(p, "ship")) and counts["ship"] < mini(12, owned.size() * 2) and owned.size() > 1:
+		action = "ship"
+	elif has_yard and expansion and counts["colony_ship"] < 3 and ship_origin_population_met(p, "colony_ship"):
+		var local_probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": index, "route": []}
+		if _ai_colony_target(state, player, local_probe, census["reserved"]) >= 0:
+			action = "colony_ship"
+	if action.is_empty():
+		# After basic defense, expansion and logistics, reserve a capital
+		# budget at the home yard. Other stations keep producing escorts.
+		var population: float = float(p["population"])
+		if index == home and has_yard and counts["fighter"] >= AI_WAVE_MIN and counts["cruiser"] < maxi(1, mini(4, owned.size())) and population >= yard_staff_required(p, 1) + CREW_COSTS["cruiser"]:
+			action = "cruiser"
+		elif index == home and has_yard and counts["cruiser"] > 0 and counts["destroyer"] < maxi(1, mini(3, ceili(float(owned.size()) / 2.0))) and population >= yard_staff_required(p, 2) + CREW_COSTS["destroyer"]:
+			action = "destroyer"
+		elif index != home and production_available(p, "Crystals") and production_level(p, "Crystals") == 0 and counts["fighter"] >= AI_WAVE_MIN:
+			action = "economy"
+			target = "Crystals"
+		elif has_yard and counts["fighter"] < maxi(3, mini(24, owned.size() * 2)):
 			action = "fighter"
-		elif index == home and expansion and counts["colony_ship"] == 0:
-			if ship_origin_population_met(p, "colony_ship"):
-				action = "colony_ship"
-			elif population_capacity(p) < COLONY_MIN_ORIGIN_POPULATION:
-				action = "economy"
-				target = "Organics"
-		elif has_yard and counts["fighter"] == 0:
-			action = "fighter"
-		elif has_yard and useful_fields > 0 and counts["miner"] == 0:
+		elif has_yard and useful_fields > 0 and counts["miner"] < mini(6, useful_fields * 2):
 			action = "miner"
-		elif index == home and level < 2 and abundance > 0.0:
+		elif abundance > 0.0 and level < 4:
 			action = "economy"
 			target = "Metals"
-		elif has_yard and counts["fighter"] < AI_WAVE_MIN:
+		elif has_planets(p) and farm < 3 and float(p["population"]) > population_capacity(p) * 0.8:
+			action = "economy"
+			target = "Organics"
+		elif (p["yards"] as Array).is_empty():
+			action = "yard"
+		elif counts["fighter"] < 32:
 			action = "fighter"
-		elif (index == home or has_fitting_yard(p, "ship")) and counts["ship"] < mini(12, owned.size() * 2) and owned.size() > 1:
-			action = "ship"
-		elif has_yard and expansion and counts["colony_ship"] < 3 and ship_origin_population_met(p, "colony_ship"):
-			var local_probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": index, "route": []}
-			if _ai_colony_target(state, player, local_probe, reserved) >= 0:
-				action = "colony_ship"
-		if action.is_empty():
-			# After basic defense, expansion and logistics, reserve a capital
-			# budget at the home yard. Other stations keep producing escorts.
-			var population: float = float(p["population"])
-			if index == home and has_yard and counts["fighter"] >= AI_WAVE_MIN and counts["cruiser"] < maxi(1, mini(4, owned.size())) and population >= yard_staff_required(p, 1) + CREW_COSTS["cruiser"]:
-				action = "cruiser"
-			elif index == home and has_yard and counts["cruiser"] > 0 and counts["destroyer"] < maxi(1, mini(3, ceili(float(owned.size()) / 2.0))) and population >= yard_staff_required(p, 2) + CREW_COSTS["destroyer"]:
-				action = "destroyer"
-			elif index != home and production_available(p, "Crystals") and production_level(p, "Crystals") == 0 and counts["fighter"] >= AI_WAVE_MIN:
-				action = "economy"
-				target = "Crystals"
-			elif has_yard and counts["fighter"] < maxi(3, mini(24, owned.size() * 2)):
-				action = "fighter"
-			elif has_yard and useful_fields > 0 and counts["miner"] < mini(6, useful_fields * 2):
-				action = "miner"
-			elif abundance > 0.0 and level < 4:
-				action = "economy"
-				target = "Metals"
-			elif has_planets(p) and farm < 3 and float(p["population"]) > population_capacity(p) * 0.8:
-				action = "economy"
-				target = "Organics"
-			elif (p["yards"] as Array).is_empty():
-				action = "yard"
-			elif counts["fighter"] < 32:
-				action = "fighter"
-			else:
-				for resource in ["Crystals"]:
-					if float(p["abundance"].get(resource, 0.0)) > 0.0 and production_level(p, resource) == 0:
-						action = "economy"
-						target = resource
-						break
-		if action.is_empty():
-			continue
-		if action in ["cruiser", "destroyer"]:
-			# Do not export the savings needed for capital construction.
-			set_thresholds(state, player, index, "Metals", 90.0, 100.0)
-		if SHIP_KINDS.has(action) and not has_fitting_yard(p, action):
-			if p["yards"].is_empty():
-				action = "yard"
-				target = ""
-			else:
-				var best_yard: int = 0
-				for slot in range(1, p["yards"].size()):
-					if int(p["yards"][slot]["level"]) > int(p["yards"][best_yard]["level"]):
-						best_yard = slot
-				action = "yard_upgrade"
-				target = str(best_yard)
-		var build_level: int = next_shipyard_slot(p) if action == "yard" else (int(p["yards"][int(target)]["level"]) + 1 if action == "yard_upgrade" else 1)
-		var price: Dictionary = building_cost(p, target) if action == "economy" else construction_cost(p, action, build_level)
-		# Capital hulls (and enabling upgrades) cannot fit the initial
-		# warehouse. Reserve a normal warehouse upgrade before saving.
-		var capacity_blocked: bool = false
-		for resource in price:
-			capacity_blocked = capacity_blocked or float(price[resource]) > storage_capacity(p, str(resource)) + EPS
-		if capacity_blocked:
-			if warehouse_available(p):
-				enqueue(state, player, index, "economy", "warehouse")
-			continue
-		if not affordable(p, price):
-			# Saving for an unaffordable hull must not leave mature systems
-			# waiting indefinitely for food or local extraction.
-			for resource in price:
-				if float(p["stock"][resource]) >= float(price[resource]) or not ECONOMY_BUILDINGS.has(resource):
-					continue
-				if resource == "Metals" and abundance <= EPS:
-					continue
-				var available_output: float = rate(p, resource)
-				if resource == "Organics":
-					available_output -= organics_demand(p)
-				if available_output >= 0.5:
-					continue
-				if int(p.get("buildings", {}).get(resource, 0)) >= 3:
-					continue
-				if affordable(p, building_cost(p, resource)) and enqueue(state, player, index, "economy", resource):
+		else:
+			for resource in ["Crystals"]:
+				if float(p["abundance"].get(resource, 0.0)) > 0.0 and production_level(p, resource) == 0:
+					action = "economy"
+					target = resource
 					break
-			continue
-		if not can_pay_credits(state, player, construction_credit_cost(price, action)):
-			continue
-		if float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
-			continue
-		if enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):
-			counts[action] += 1
-	_ai_military_orders(state, graph, player, home, owned, fighters)
+	return [action, target]
+
+## Funds and enqueues the chosen goal, substituting a shipyard or warehouse
+## prerequisite or a missing economy building when the goal is blocked.
+static func _ai_pursue_station_goal(state: Dictionary, player: int, index: int, action: String, target: String, counts: Dictionary) -> void:
+	var p: Dictionary = state["planets"][index]
+	var abundance: float = float(p["abundance"].get("Metals", 0.0))
+	if action in ["cruiser", "destroyer"]:
+		# Do not export the savings needed for capital construction.
+		set_thresholds(state, player, index, "Metals", 90.0, 100.0)
+	if SHIP_KINDS.has(action) and not has_fitting_yard(p, action):
+		if p["yards"].is_empty():
+			action = "yard"
+			target = ""
+		else:
+			var best_yard: int = 0
+			for slot in range(1, p["yards"].size()):
+				if int(p["yards"][slot]["level"]) > int(p["yards"][best_yard]["level"]):
+					best_yard = slot
+			action = "yard_upgrade"
+			target = str(best_yard)
+	var build_level: int = next_shipyard_slot(p) if action == "yard" else (int(p["yards"][int(target)]["level"]) + 1 if action == "yard_upgrade" else 1)
+	var price: Dictionary = building_cost(p, target) if action == "economy" else construction_cost(p, action, build_level)
+	# Capital hulls (and enabling upgrades) cannot fit the initial
+	# warehouse. Reserve a normal warehouse upgrade before saving.
+	var capacity_blocked: bool = false
+	for resource in price:
+		capacity_blocked = capacity_blocked or float(price[resource]) > storage_capacity(p, str(resource)) + EPS
+	if capacity_blocked:
+		if warehouse_available(p):
+			enqueue(state, player, index, "economy", "warehouse")
+		return
+	if not affordable(p, price):
+		# Saving for an unaffordable hull must not leave mature systems
+		# waiting indefinitely for food or local extraction.
+		for resource in price:
+			if float(p["stock"][resource]) >= float(price[resource]) or not ECONOMY_BUILDINGS.has(resource):
+				continue
+			if resource == "Metals" and abundance <= EPS:
+				continue
+			var available_output: float = rate(p, resource)
+			if resource == "Organics":
+				available_output -= organics_demand(p)
+			if available_output >= 0.5:
+				continue
+			if int(p.get("buildings", {}).get(resource, 0)) >= 3:
+				continue
+			if affordable(p, building_cost(p, resource)) and enqueue(state, player, index, "economy", resource):
+				break
+		return
+	if not can_pay_credits(state, player, construction_credit_cost(price, action)):
+		return
+	if float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
+		return
+	if enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):
+		counts[action] += 1
 
 # Choose strategic objectives on the AI clock, not every movement tick.
 # Local hostile fighters determine defensive urgency; friendly systems and

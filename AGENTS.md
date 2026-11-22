@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.6: Split the 193-line _ai_turn into _ai_resettle (homeless colony recovery), _ai_census (hull/queue counts, reserved targets, useful fields, thresholds), _ai_station_goal (ordered goal selection) and _ai_pursue_station_goal (prerequisite substitution, funding and enqueue). Shared counts dictionary keeps per-station enqueue visibility; drop an unused team local. Determinism probe identical, economy failure set unchanged. No gameplay change; runtime/ENet pending.
+
 - v0.97.5: Split the 339-line step into ordered stages sharing a per-substep step_frame.gd: _step_economy, _step_ai, _step_combat (+ _step_resource_handoffs), _step_formations, per-hull _step_hull (_step_hull_overrides, _step_hull_services, _step_hull_routine, _step_military_motion) and _step_settle_movement. Loop continue became return true so wander eligibility is unchanged. Determinism probe identical, economy failure set unchanged, battle tick p50 within 0.5%. No gameplay change; runtime/ENet pending.
 
 - v0.97.4: Split the 469-line _combat into frame-based stages: _build_combat_frame, _combat_hull (missiles, focused attack, lasers, structure fire), _fire_station_weapons, _fire_planetary_defenses and _resolve_combat_damage/_resolve_shipyard_damage. Per-step buffers live in a new combat_frame.gd data holder. Bodies, iteration and mutation order are unchanged; determinism probe (AI match and battle) is identical, economy test failure set unchanged, battle benchmark within noise. No gameplay change; runtime/ENet pending.
