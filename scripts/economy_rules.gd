@@ -1153,7 +1153,8 @@ static func affordable(p: Dictionary, cost: Dictionary) -> bool:
 
 # Minimum resident population to order the next production building.
 static func building_population(resource: String, level: int) -> int:
-	return int(ECONOMY_BUILDINGS[resource]["population"]) * maxi(1, level)
+	var tier: int = maxi(1, level)
+	return int(ECONOMY_BUILDINGS[resource]["population"]) * tier * tier
 
 static func building_available(p: Dictionary, resource: String) -> bool:
 	return building_blocker(p, resource).is_empty()
