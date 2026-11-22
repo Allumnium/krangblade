@@ -6,6 +6,7 @@ const UI_TEXT = preload("res://scripts/ui_text.gd")
 const CostButton = preload("res://scripts/cost_button.gd")
 const TradeRange = preload("res://scripts/trade_range.gd")
 const COMMAND_CARD_UI = preload("res://scripts/command_card_ui.gd")
+const COMMAND_HOTKEYS = preload("res://scripts/command_hotkeys.gd")
 const UI_COMMAND_DETAILS = {
 	"move": "Choose a destination in a discovered region. Cross sectors along highways. Shift queues the order.",
 	"stop": "Cancel current orders and stop. Shift queues the stop.",
@@ -130,9 +131,7 @@ var console_right_body: VBoxContainer
 var console_profile: Control
 var empty_selection: Label
 var command_grids: Dictionary = {}
-var command_hotkeys: Dictionary = {}
-var hotkey_entries: Dictionary = {}
-var hotkey_overrides: Dictionary = {}
+var hotkeys := COMMAND_HOTKEYS.new()
 var hotkey_dialog: AcceptDialog
 var hotkey_status: Label
 var hotkey_pickers: Dictionary = {}
@@ -453,8 +452,8 @@ func _ready() -> void:
 	_build_ui()
 	if OS.is_debug_build():
 		_build_dev_console()
-	hotkey_entries["focus"] = {"scope": "General", "title": "Focus selection", "default": KEY_F}
-	_load_hotkey_overrides()
+	hotkeys.entries["focus"] = {"scope": "General", "title": "Focus selection", "default": KEY_F}
+	hotkeys.load_overrides(settings, command_card_ui)
 	_build_resource_hover()
 	_apply_settings()
 	_on_economy_changed()
@@ -1488,82 +1487,6 @@ func _production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
 		production_icons[key] = ImageTexture.create_from_image(image)
 	return production_icons[key]
 
-func _register_command_hotkey(button: Button, key: int, scope: String, id: String, title_text: String) -> void:
-	var label := Label.new()
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	label.add_theme_font_size_override("font_size", 9)
-	label.add_theme_color_override("font_color", Color("#e3f3ff"))
-	label.add_theme_color_override("font_outline_color", Color("#101b29"))
-	label.add_theme_constant_override("outline_size", 3)
-	button.add_child(label)
-	label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	label.offset_left = -24.0
-	label.offset_right = -2.0
-	label.offset_top = 0.0
-	label.offset_bottom = 12.0
-	hotkey_entries[id] = {"scope": scope, "title": title_text, "default": key, "button": button, "badge": label}
-
-func _hotkey_value(id: String, overrides: Dictionary) -> int:
-	return int(overrides.get(id, hotkey_entries[id]["default"]))
-
-func _hotkey_name(key: int) -> String:
-	return "Esc" if key == KEY_ESCAPE else OS.get_keycode_string(key)
-
-func _hotkey_conflict(id: String, key: int, overrides: Dictionary) -> String:
-	var scope: String = hotkey_entries[id]["scope"]
-	for other in hotkey_entries:
-		if other == id:
-			continue
-		var other_scope: String = hotkey_entries[other]["scope"]
-		if (scope == other_scope or scope == "General" or other_scope == "General") and _hotkey_value(other, overrides) == key:
-			return str(hotkey_entries[other]["title"])
-	return ""
-
-func _load_hotkey_overrides() -> void:
-	var candidate: Dictionary = {}
-	for id in hotkey_entries:
-		var default_key: int = int(hotkey_entries[id]["default"])
-		var key: int = int(settings.get_value("hotkeys", id, default_key))
-		if default_key != KEY_ESCAPE and ((key >= KEY_A and key <= KEY_Z) or (key >= KEY_F1 and key <= KEY_F12)) and key != default_key:
-			candidate[id] = key
-	for id in candidate.keys():
-		if not _hotkey_conflict(id, int(candidate[id]), candidate).is_empty():
-			candidate.clear()
-			break
-	hotkey_overrides = candidate
-	_sync_hotkey_bindings()
-
-func _sync_hotkey_bindings() -> void:
-	command_hotkeys.clear()
-	for id in hotkey_entries:
-		var entry: Dictionary = hotkey_entries[id]
-		if not entry.has("button"):
-			continue
-		var button: Button = entry["button"]
-		var key: int = _hotkey_value(id, hotkey_overrides)
-		var hint: String = _hotkey_name(key)
-		var old: String = str(button.get_meta("hotkey", ""))
-		if not old.is_empty():
-			command_card_ui.set_hint(button, command_card_ui.hint(button).replace("\n[" + old + "]", "").replace(" [" + old + "]", ""))
-			if command_card_ui.hint(button) == "[" + old + "]":
-				command_card_ui.set_hint(button, "")
-		button.set_meta("hotkey", hint)
-		command_card_ui.set_hint(button, command_card_ui.hint(button) + ("\n" if not command_card_ui.hint(button).is_empty() else "") + "[" + hint + "]")
-		var badge: Label = entry["badge"]
-		badge.text = hint
-		var shortcuts: Array = command_hotkeys.get(key, [])
-		shortcuts.append(button)
-		command_hotkeys[key] = shortcuts
-
-func _trigger_command_hotkey(key: int) -> bool:
-	for candidate in command_hotkeys.get(key, []):
-		var button: Button = candidate
-		if is_instance_valid(button) and button.is_visible_in_tree() and not button.disabled:
-			button.pressed.emit()
-			return true
-	return false
-
 func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_scroll = VBoxContainer.new()
 	yard_command_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1589,7 +1512,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 		grid.add_child(button)
 		yard_commands[kind] = button
-		_register_command_hotkey(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S, "science_ship": KEY_V, "scout": KEY_Q, "cruiser": KEY_E, "destroyer": KEY_F}[kind], "Shipyard", "yard_" + kind, UI_TEXT.ship_kind_name(kind))
+		hotkeys.register(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S, "science_ship": KEY_V, "scout": KEY_Q, "cruiser": KEY_E, "destroyer": KEY_F}[kind], "Shipyard", "yard_" + kind, UI_TEXT.ship_kind_name(kind))
 	# Rows 1–3: Small, Medium and Large. A locked class shows only
 	# its next eligible upgrade; unlocked ships begin in column one.
 	for target_level in [2, 3]:
@@ -1597,14 +1520,14 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		var class_name_text: String = ECONOMY.size_name(target_level)
 		command_card_ui.set_face(upgrade, "Upgrade\n" + class_name_text, command_card_ui.icon("upgrade"))
 		yard_upgrades[target_level] = upgrade
-		_register_command_hotkey(upgrade, KEY_U if target_level == 2 else KEY_I, "Shipyard", "yard_upgrade" if target_level == 2 else "yard_upgrade_large", "Upgrade to " + class_name_text)
+		hotkeys.register(upgrade, KEY_U if target_level == 2 else KEY_I, "Shipyard", "yard_upgrade" if target_level == 2 else "yard_upgrade_large", "Upgrade to " + class_name_text)
 	yard_top_slots.assign([yard_commands["miner"], yard_commands["fighter"], yard_commands["scout"], command_card_ui.add_spacer(grid)])
 	for i in range(8):
 		yard_row_spacers.append(command_card_ui.add_spacer(grid))
 	var station_button := _button("", _select_yard_station, grid)
 	command_card_ui.set_face(station_button, "Select Space\nStation", command_card_ui.icon("select_station"))
 	command_card_ui.set_hint(station_button, "Select Space Station\nReturn to this shipyard’s parent station and its construction commands.")
-	_register_command_hotkey(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
+	hotkeys.register(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
 	var navigation_spacer: Control = command_card_ui.add_spacer(grid)
 	var clear := _button("", func() -> void:
 		pending_command = ""
@@ -1614,7 +1537,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	command_card_ui.set_face(clear, "Clear\nRally", command_card_ui.icon("clear_rally"))
 	command_card_ui.set_hint(clear, "Clear Rally\nNewly built ships no longer travel to a rally destination.")
 	yard_commands["clear"] = clear
-	_register_command_hotkey(clear, KEY_X, "Shipyard", "yard_clear", "Clear Rally")
+	hotkeys.register(clear, KEY_X, "Shipyard", "yard_clear", "Clear Rally")
 	var rally_button := CostButton.new()
 	command_card_ui.set_face(rally_button, "Rally", command_card_ui.icon("rally"))
 	rally_button.toggle_mode = true
@@ -1622,7 +1545,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	rally_button.pressed.connect(_arm_command.bind("rally"))
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
-	_register_command_hotkey(rally_button, KEY_Y, "Shipyard", "yard_rally", "Rally")
+	hotkeys.register(rally_button, KEY_Y, "Shipyard", "yard_rally", "Rally")
 	yard_bottom_slots.assign([station_button, navigation_spacer, clear, rally_button])
 	_layout_yard_classes(1, true, false)
 	yard_command_scroll.hide()
@@ -1680,13 +1603,13 @@ func _build_station_command_card(parent: Container) -> void:
 	parent.add_child(station_commands)
 	station_primary_grid = command_card_ui.create_grid(station_commands)
 	station_select_yards_button = _station_button(station_primary_grid, "Select\nShipyards", "yard", _station_select_yards)
-	_register_command_hotkey(station_select_yards_button, KEY_Z, "Station", "station_port_1", "Select Shipyards")
+	hotkeys.register(station_select_yards_button, KEY_Z, "Station", "station_port_1", "Select Shipyards")
 	for i in range(3):
 		command_card_ui.add_spacer(station_primary_grid)
 	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Reinforced\nPlating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Laser\nMatrix", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
-	_register_command_hotkey(station_upgrade_buttons["reinforced_plating"], KEY_V, "Station", "station_plating", "Reinforced Plating")
-	_register_command_hotkey(station_upgrade_buttons["laser_matrix"], KEY_L, "Station", "station_matrix", "Laser Matrix")
+	hotkeys.register(station_upgrade_buttons["reinforced_plating"], KEY_V, "Station", "station_plating", "Reinforced Plating")
+	hotkeys.register(station_upgrade_buttons["laser_matrix"], KEY_L, "Station", "station_matrix", "Laser Matrix")
 	var dyson_button: Button = _station_button(station_primary_grid, "Dyson\nSphere", "dyson_sphere", _station_upgrade_pressed.bind("dyson_sphere"))
 	var dyson_slot: Control = command_card_ui.add_spacer(station_primary_grid)
 	dyson_slot.custom_minimum_size = dyson_button.custom_minimum_size
@@ -1696,8 +1619,8 @@ func _build_station_command_card(parent: Container) -> void:
 	command_card_ui.add_spacer(station_primary_grid)
 	for i in range(4):
 		command_card_ui.add_spacer(station_primary_grid)
-	_register_command_hotkey(_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")), KEY_B, "Station", "station_build", "Build")
-	_register_command_hotkey(_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")), KEY_T, "Station", "station_trade", "Trade")
+	hotkeys.register(_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")), KEY_B, "Station", "station_build", "Build")
+	hotkeys.register(_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")), KEY_T, "Station", "station_trade", "Trade")
 	command_card_ui.add_spacer(station_primary_grid)
 	command_card_ui.add_spacer(station_primary_grid)
 	station_build_grid = command_card_ui.create_grid(station_commands)
@@ -1707,7 +1630,7 @@ func _build_station_command_card(parent: Container) -> void:
 	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds", "yard"]:
 		var button: Button = _station_button(station_build_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
 		station_build_buttons[key] = button
-		_register_command_hotkey(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_T, "yard": KEY_X}[key], "Station Build", "build_" + key, captions[key].replace("\n", " "))
+		hotkeys.register(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_T, "yard": KEY_X}[key], "Station Build", "build_" + key, captions[key].replace("\n", " "))
 		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing"]:
 			button.gui_input.connect(_station_repeat_input.bind(key, button))
 			var border := Control.new()
@@ -1723,7 +1646,7 @@ func _build_station_command_card(parent: Container) -> void:
 	# Return stays at the bottom right.
 	for i in range(3):
 		command_card_ui.add_spacer(station_build_grid)
-	_register_command_hotkey(_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")), KEY_ESCAPE, "Station Build", "build_return", "Return")
+	hotkeys.register(_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")), KEY_ESCAPE, "Station Build", "build_return", "Return")
 	station_trade = VBoxContainer.new()
 	station_trade.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	station_commands.add_child(station_trade)
@@ -2304,7 +2227,7 @@ func _build_field_command_card(parent: Container) -> void:
 		border.hide()
 		button.set_meta("mode_border", border)
 		field_commands[key] = button
-		_register_command_hotkey(button, {"enabled": KEY_G, "Metals": KEY_M, "Crystals": KEY_C}[key], "Asteroid Field", "field_" + key, caption)
+		hotkeys.register(button, {"enabled": KEY_G, "Metals": KEY_M, "Crystals": KEY_C}[key], "Asteroid Field", "field_" + key, caption)
 	command_card_ui.fill_grid(field_command_grid)
 	field_command_grid.hide()
 
@@ -2372,7 +2295,7 @@ func _command_slot(id: String, hint: String, action: Callable) -> Button:
 	active_border.draw.connect(_draw_active_command.bind(active_border))
 	active_border.visible = false
 	button.set_meta("active_border", active_border)
-	_register_command_hotkey(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K}[id], "Fleet", "fleet_" + id, hint)
+	hotkeys.register(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -3853,7 +3776,7 @@ func _inspector_page(title_text: String) -> GridContainer:
 	station_trade_back = _button("", _station_card_to.bind("primary"), footer)
 	command_card_ui.set_face(station_trade_back, "Return", command_card_ui.icon("return"))
 	command_card_ui.set_hint(station_trade_back, "Return\nGo back to the station command card.")
-	_register_command_hotkey(station_trade_back, KEY_ESCAPE, "Station Trade", "trade_return", "Return")
+	hotkeys.register(station_trade_back, KEY_ESCAPE, "Station Trade", "trade_return", "Return")
 	station_trade_back.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return page
 
@@ -4199,8 +4122,8 @@ func _save_settings() -> void:
 	settings.set_value("camera", "wheel_zoom", wheel_zoom_percent)
 	if settings.has_section("hotkeys"):
 		settings.erase_section("hotkeys")
-	for id in hotkey_overrides:
-		settings.set_value("hotkeys", id, hotkey_overrides[id])
+	for id in hotkeys.overrides:
+		settings.set_value("hotkeys", id, hotkeys.overrides[id])
 	settings.save("user://warbound_settings.cfg")
 	_apply_settings()
 
@@ -4297,8 +4220,8 @@ func _open_hotkey_editor() -> void:
 			var heading := _label(scope.to_upper(), 13)
 			heading.add_theme_color_override("font_color", HUD.ACCENT)
 			rows.add_child(heading)
-			for id in hotkey_entries:
-				var entry: Dictionary = hotkey_entries[id]
+			for id in hotkeys.entries:
+				var entry: Dictionary = hotkeys.entries[id]
 				if entry["scope"] != scope:
 					continue
 				var row := HBoxContainer.new()
@@ -4314,9 +4237,9 @@ func _open_hotkey_editor() -> void:
 					picker.disabled = true
 				else:
 					for key in range(KEY_A, KEY_Z + 1):
-						picker.add_item(_hotkey_name(key), key)
+						picker.add_item(hotkeys.key_name(key), key)
 					for key in range(KEY_F1, KEY_F12 + 1):
-						picker.add_item(_hotkey_name(key), key)
+						picker.add_item(hotkeys.key_name(key), key)
 				row.add_child(picker)
 				hotkey_pickers[id] = picker
 				picker.item_selected.connect(_hotkey_changed.bind(str(id), picker))
@@ -4332,28 +4255,28 @@ func _open_hotkey_editor() -> void:
 func _refresh_hotkey_pickers() -> void:
 	for id in hotkey_pickers:
 		var picker: OptionButton = hotkey_pickers[id]
-		var index: int = picker.get_item_index(_hotkey_value(id, hotkey_overrides))
+		var index: int = picker.get_item_index(hotkeys.value(id, hotkeys.overrides))
 		if index >= 0:
 			picker.select(index)
 
 func _hotkey_changed(index: int, id: String, picker: OptionButton) -> void:
 	var key: int = picker.get_item_id(index)
-	var conflict: String = _hotkey_conflict(id, key, hotkey_overrides)
+	var conflict: String = hotkeys.conflict(id, key, hotkeys.overrides)
 	if not conflict.is_empty():
-		hotkey_status.text = "%s is already assigned to %s." % [_hotkey_name(key), conflict]
+		hotkey_status.text = "%s is already assigned to %s." % [hotkeys.key_name(key), conflict]
 		_refresh_hotkey_pickers()
 		return
-	if key == int(hotkey_entries[id]["default"]):
-		hotkey_overrides.erase(id)
+	if key == int(hotkeys.entries[id]["default"]):
+		hotkeys.overrides.erase(id)
 	else:
-		hotkey_overrides[id] = key
-	_sync_hotkey_bindings()
+		hotkeys.overrides[id] = key
+	hotkeys.sync_bindings(command_card_ui)
 	_save_settings()
 	hotkey_status.text = "Saved."
 
 func _reset_hotkeys() -> void:
-	hotkey_overrides.clear()
-	_sync_hotkey_bindings()
+	hotkeys.overrides.clear()
+	hotkeys.sync_bindings(command_card_ui)
 	_refresh_hotkey_pickers()
 	_save_settings()
 	hotkey_status.text = "Default hotkeys restored."
@@ -6293,7 +6216,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			selecting_units = false
 			pending_command = ""
 			_refresh_command_mode()
-		elif not _trigger_command_hotkey(KEY_ESCAPE):
+		elif not hotkeys.trigger(KEY_ESCAPE):
 			_open_menu()
 		get_viewport().set_input_as_handled()
 		return
@@ -6316,11 +6239,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	elif key == KEY_TAB and _cycle_command_kind(event.shift_pressed):
 		pass
-	elif key == _hotkey_value("focus", hotkey_overrides):
+	elif key == hotkeys.value("focus", hotkeys.overrides):
 		_focus_selection()
-	elif key == _hotkey_value("army", hotkey_overrides):
+	elif key == hotkeys.value("army", hotkeys.overrides):
 		_select_all_military()
-	elif not _trigger_command_hotkey(key):
+	elif not hotkeys.trigger(key):
 		return
 	get_viewport().set_input_as_handled()
 
@@ -6335,11 +6258,11 @@ func _build_global_selection_strip() -> void:
 		var button: Button = _button("", action, global_selection_strip)
 		command_card_ui.set_face(button, entry[1], _selection_portrait_icon(entry[2]))
 		command_card_ui.set_hint(button, "Select all owned " + str(entry[1]).to_lower())
-		_register_command_hotkey(button, int(entry[3]), "General", entry[0], "Select all " + str(entry[1]).to_lower())
+		hotkeys.register(button, int(entry[3]), "General", entry[0], "Select all " + str(entry[1]).to_lower())
 	var empire_button: Button = _button("", _open_empire, global_selection_strip)
 	command_card_ui.set_face(empire_button, "Empire", _command_icon('<circle cx="16" cy="16" r="6"/><circle cx="5" cy="6" r="3"/><circle cx="27" cy="6" r="3"/><circle cx="16" cy="28" r="2"/><path d="M8 9L12 12M24 9L20 12M16 22V26"/>'))
 	command_card_ui.set_hint(empire_button, "Empire\nSet desired fleet counts and manage diplomatic relationships.")
-	_register_command_hotkey(empire_button, KEY_F4, "General", "empire", "Empire")
+	hotkeys.register(empire_button, KEY_F4, "General", "empire", "Empire")
 	_build_empire_dialog()
 	global_selection_strip.resized.connect(_layout_console)
 

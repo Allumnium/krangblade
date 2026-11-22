@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.12: Extract hotkey registry, override loading, scope conflicts, button badges and dispatch. Match retains settings persistence, hotkey editor and keyboard routing; new module receives settings and card UI explicitly. Preserve registered IDs, scope order and visible/enabled dispatch checks. No player-facing change; Godot/visual/peer validation pending.
+
 - v0.89.11: Extract nested TradeRange control into its own script with the same implementation, fields and committed signal. All match callers keep the existing typed preload alias; policy and authority dispatch remain unchanged. No Codex changes needed. Static source parity/indentation only; Godot import, parse, visual and peer checks pending.
 
 - v0.89.10: Partition match initialization into 13 named builders; verify concatenated original statement bodies match baseline exactly, keeping callback wiring, child order and layout unchanged. Controller still owns widgets; later extract cohesive panels. No player-facing changes; Codex remains accurate. Godot/visual/peer validation pending.
