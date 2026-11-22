@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.89.65; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.89.66; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
@@ -30,7 +30,8 @@ Current layout (v0.89.65; update when responsibility moves). Use the named funct
 | `scripts/codex.gd`, `scripts/match_sfx.gd` | Concise player guide derived from rules where possible; client-only audio synthesis, spatial gain and cue limits. |
 | `scripts/match_audio_tracker.gd` | Per-match snapshot audio history, construction and completion cue detection, objective cue coalescing, combat/service sound edges. Match supplies local player, spatial context, visibility callback and mixer; no gameplay mutations. |
 | `scripts/match_developer_tools.gd` | Local Perf overlay, sampling history, local slash command dispatch, developer mode and speed buttons embedded in shared chat. Match supplies session and widget factories, retains modal/input routing and deck geometry. Session validates speed changes and owns replicated metrics. |
-| `scripts/match_conquest_ui.gd` | Objective headers and counters, refresh/upgrade controls, collapsible lifetime CP scoreboard, upgrade dialog, card signature and pulse. Match supplies overlay, layout and player/color/icon queries, retains chat and tactical notices. Simulation and session own goals, rewards and authoritative requests. |
+| `scripts/match_notice_ui.gd` | Local chat/notification history, scroll panel, deduplication, fade and warning hit rectangles. Match supplies map/minimap geometry, player and alert inputs, camera jump callback and routes chat/keyboard. |
+| `scripts/match_conquest_ui.gd` | Objective headers and counters, refresh/upgrade controls, collapsible lifetime CP scoreboard, upgrade dialog, card signature and pulse. Match supplies overlay, layout and player/color/icon queries, retains overlay draw order. Simulation and session own goals, rewards and authoritative requests. |
 | `scripts/match_empire_ui.gd` | Local Empire window, fleet sliders and counts, diplomacy rows and war confirmation. Match supplies player/color/portrait/label queries, routes input and determines attack intent; GameSession validates all diplomacy and fleet commands. |
 | `scripts/match_resource_hud.gd` | Resource/year/population/credit header, storage strips, resource delta formatting and local/global hover details. Match supplies selection widgets and snapshot/player/system-name queries; uses the same delta helpers for the inspector. No authority mutations. |
 | `scripts/ship_motion_view.gd` | Client interpolation samples, acceleration-derived thrust, heading smoothing and shared per-frame world pose cache. Match supplies session, visibility and projection, drives cache invalidation and draws hulls/minimap/effects. No authority or transport mutations. |
