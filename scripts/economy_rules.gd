@@ -1606,10 +1606,14 @@ static func shipyard_port_position(state: Dictionary, index: int, port: int, ela
 	return station_position(state, index, elapsed) + Vector2.from_angle(angle) * 90.0
 
 static func _rally_path(state: Dictionary, index: int, target: int) -> Array[int]:
+	var route: Array[int] = []
 	var count: int = state["map"]["points"].size()
 	if index < 0 or target < 0 or index >= count or target >= count:
-		return []
-	return [index] if index == target else [index, target]
+		return route
+	route.append(index)
+	if index != target:
+		route.append(target)
+	return route
 
 static func set_shipyard_rally(state: Dictionary, player: int, index: int, slot: int, target: int, point: Vector2) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
