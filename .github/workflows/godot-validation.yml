@@ -142,18 +142,8 @@ jobs:
             echo "Commit generated resource .uid and asset .import sidecars."
             exit 1
           fi
-      - name: Parse scenes and network scripts
-        run: |
-          godot --headless --path . --check-only --script res://scripts/main.gd
-          godot --headless --path . --check-only --script res://scripts/match.gd
-          godot --headless --path . --check-only --script res://scripts/game_session.gd
-          godot --headless --path . --check-only --script res://scripts/lobby_rules.gd
-          godot --headless --path . --check-only --script res://scripts/planet_map.gd
-          godot --headless --path . --check-only --script res://scripts/economy_rules.gd
-          godot --headless --path . --check-only --script res://tests/economy_rules_test.gd
-          godot --headless --path . --check-only --script res://tests/contested_benchmark.gd
-          godot --headless --path . --check-only --script res://tests/solo_smoke.gd
-          godot --headless --path . --check-only --script res://tests/network_smoke.gd
+      - name: Parse all tracked GDScript files
+        run: python3 tools/check_gdscript.py
       - name: Lobby and territory rules
         run: |
           set -o pipefail
