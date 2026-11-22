@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.16: Extract territory layer/shader, site/lane/influence textures and cache ownership, including friendly warning destinations, into territory_view.gd. Verify shader string byte-for-byte; preserve render ordering, graph/influence calls, fog binding and geometry formula. Match supplies camera, roster/colors and local player. No authoritative changes or Codex changes needed. Static review only; import, Godot parse, visual, benchmark and peer validation pending.
+
 - v0.89.15: Extract live/explored cells, revision and fog image ownership plus map exterior fog drawing into fog_of_war.gd. Match retains camera transforms, territory shader binding and ship visibility query; minimap reads the same mask. Preserve revision components, colors, cell size, update semantics and per-match lifetime. No authority or network changes, Codex unchanged. Static review only; Godot/visual/performance/peer tests pending.
 
 - v0.89.14: User screenshot confirmed full-height detail panel and duplicate cost popup. Replace content-sized PanelContainer with fixed Panel and non-fitting RichTextLabel; 55% deck height, 65% maximum, explicitly positioned flush above command wing and clipped. Inline hotkey, graphical costs/yields, compact adaptive font. All actual recipe-bearing buttons are command cards; remove native custom tooltip callback and obsolete fast-tooltip flag entirely. Correct live Trade threshold refresh that wrote native tooltip_text. Static review only; check narrow-window text overflow, visual anchoring and peer tests in Godot.
