@@ -3517,6 +3517,8 @@ static func _clear_tactical_order(ship: Dictionary) -> void:
 	ship.erase("patrol_end_point")
 	ship.erase("patrol_returning")
 	ship.erase("patrol_arrived")
+	ship.erase("patrol_waypoints")
+	ship.erase("patrol_index")
 
 # Bilateral diplomacy is opt-in until the lobby, routing, trade, sight and
 # victory consumers migrate. A missing table retains legacy match behavior.
@@ -4519,7 +4521,21 @@ static func _update_tactical_orders(state: Dictionary, graph: Dictionary) -> voi
 				craft["operation_target"] = goal
 			continue
 		elif craft.has("patrol_from") and craft.get("patrol_arrived", false) and not _engaged(craft):
-			craft["patrol_returning"] = not bool(craft.get("patrol_returning", false))
+			var waypoints: Array = craft.get("patrol_waypoints", [])
+			if waypoints.is_empty():
+				craft["patrol_returning"] = not bool(craft.get("patrol_returning", false))
+			else:
+				var next_index: int = int(craft["patrol_index"]) + 1
+				if next_index >= waypoints.size():
+					craft["patrol_index"] = -1
+					craft["patrol_returning"] = true
+				else:
+					var waypoint: Dictionary = waypoints[next_index]
+					craft["patrol_index"] = next_index
+					craft["patrol_returning"] = false
+					craft["patrol_to"] = waypoint["target"]
+					craft["patrol_end_point"] = waypoint["point"]
+					craft["unit_order"] = waypoint.duplicate(true)
 			craft["patrol_arrived"] = false
 			goal = int(craft["patrol_from"]) if craft["patrol_returning"] else int(craft["patrol_to"])
 		if goal >= 0:
@@ -4741,7 +4757,10 @@ static func unit_order_origin(state: Dictionary, graph: Dictionary, ship: Dictio
 		if point.is_finite():
 			return point
 	var active: Vector2 = unit_order_point(state, graph, ship, ship.get("unit_order", {})) if _unit_order_running(ship) else Vector2.INF
-	if ship.has("patrol_from") and ship.get("patrol_returning", false):
+	var patrol_waypoints: Array = ship.get("patrol_waypoints", [])
+	if not patrol_waypoints.is_empty():
+		active = patrol_waypoints.back()["point"]
+	elif ship.has("patrol_from") and ship.get("patrol_returning", false):
 		active = ship["patrol_start_point"]
 	if not active.is_finite() and ship.has("launch_rally"):
 		active = ship["launch_rally"]["point"]
@@ -4767,7 +4786,9 @@ static func _unit_order_running(ship: Dictionary) -> bool:
 		"guard":
 			return (ship.get("order_queue", []) as Array).is_empty() or not bool(ship.get("guard_arrived", false)) or _engaged(ship)
 		"patrol":
-			return ship.has("patrol_from") and ((ship.get("order_queue", []) as Array).is_empty() or not ship.get("patrol_arrived", false) or _engaged(ship))
+			var waypoints: Array = ship.get("patrol_waypoints", [])
+			var more_legs: bool = not waypoints.is_empty() and not bool(ship.get("patrol_returning", false)) and int(ship.get("patrol_index", 0)) < waypoints.size() - 1
+			return ship.has("patrol_from") and ((ship.get("order_queue", []) as Array).is_empty() or more_legs or not ship.get("patrol_arrived", false) or _engaged(ship))
 		"salvage":
 			return int(ship.get("salvage_target", -1)) >= 0
 		"unload":
@@ -4993,10 +5014,12 @@ static func issue_unit_order(state: Dictionary, player: int, ids: Array, order: 
 	var accepted: bool = false
 	for ship in units:
 		var queue: Array = ship.get("order_queue", [])
-		if queue.size() + int(_unit_order_running(ship)) >= MAX_UNIT_ORDERS:
+		var active_count: int = maxi(int(_unit_order_running(ship)), (ship.get("patrol_waypoints", []) as Array).size())
+		if queue.size() + active_count >= MAX_UNIT_ORDERS:
 			continue
 		queue.append(order.duplicate(true))
 		ship["order_queue"] = queue
+		_extend_patrol_from_queue(state, graph, ship)
 		ship.erase("wander_cooldown_override")
 		ship["auto_cooldown_until"] = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
 		accepted = true
@@ -5010,26 +5033,58 @@ static func _mark_sector_arrival(state: Dictionary, ship: Dictionary) -> void:
 static func arrival_wait_remaining(state: Dictionary, ship: Dictionary) -> float:
 	return maxf(0.0, float(ship.get("arrival_wait_until", 0.0)) - float(state.get("elapsed", 0.0)))
 
+# Absorb only adjacent patrol orders, leaving unrelated FIFO successors intact.
+# This route is authority-owned, replicated with the hull and cleared with its tactical order.
+static func _extend_patrol_from_queue(state: Dictionary, graph: Dictionary, ship: Dictionary) -> void:
+	if not ship.has("patrol_from") or ship.get("unit_order", {}).get("kind", "") != "patrol":
+		return
+	var queue: Array = ship.get("order_queue", [])
+	if queue.is_empty() or queue[0].get("kind", "") != "patrol":
+		return
+	var waypoints: Array = ship.get("patrol_waypoints", [])
+	while not queue.is_empty() and queue[0].get("kind", "") == "patrol":
+		var pending: Dictionary = queue.pop_front()
+		if not _valid_unit_order(state, graph, ship, pending, true):
+			continue
+		pending["point"] = unit_order_point(state, graph, ship, pending)
+		if waypoints.is_empty():
+			waypoints.append((ship["unit_order"] as Dictionary).duplicate(true))
+			ship["patrol_index"] = -1 if bool(ship.get("patrol_returning", false)) else 0
+		waypoints.append(pending)
+	if not waypoints.is_empty():
+		ship["patrol_waypoints"] = waypoints
+	if queue.is_empty():
+		ship.erase("order_queue")
+	else:
+		ship["order_queue"] = queue
+
 static func _advance_unit_orders(state: Dictionary, graph: Dictionary) -> void:
 	for ship in (state["ships"] as Array).duplicate():
 		if bool(ship.get("rogue", false)):
 			continue
 		_mark_sector_arrival(state, ship)
+		_extend_patrol_from_queue(state, graph, ship)
 		if _unit_order_running(ship):
 			continue
 		if ship.get("unit_order", {}).get("kind", "") == "follow":
 			_finish_manual(ship)
 			ship.erase("follow_arrived")
+		var previous: Dictionary = ship.get("unit_order", {})
 		ship.erase("unit_order")
 		var queue: Array = ship.get("order_queue", [])
+		var dispatched: bool = false
 		while not queue.is_empty():
 			var order: Dictionary = queue.pop_front()
 			if _valid_unit_order(state, graph, ship, order, false) and _execute_unit_order(state, int(ship["owner"]), [ship["id"]], order):
+				dispatched = true
 				break
+		if not dispatched and previous.get("kind", "") == "patrol" and ship.has("patrol_from"):
+			ship["unit_order"] = previous
 		if queue.is_empty():
 			ship.erase("order_queue")
 		else:
 			ship["order_queue"] = queue
+		_extend_patrol_from_queue(state, graph, ship)
 
 static func _clear_local_move(ship: Dictionary) -> void:
 	ship.erase("local_move_target")
