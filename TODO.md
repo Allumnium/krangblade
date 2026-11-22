@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.4: Split the 469-line _combat into frame-based stages: _build_combat_frame, _combat_hull (missiles, focused attack, lasers, structure fire), _fire_station_weapons, _fire_planetary_defenses and _resolve_combat_damage/_resolve_shipyard_damage. Per-step buffers live in a new combat_frame.gd data holder. Bodies, iteration and mutation order are unchanged; determinism probe (AI match and battle) is identical, economy test failure set unchanged, battle benchmark within noise. No gameplay change; runtime/ENet pending.
+
 - [ ] v0.97.3: Restore test baseline for refactoring. Fix duplicate loop variables that kept economy_rules_test.gd from parsing since v0.94.11; commit missing combat_kernels.gd.uid. Add tests/determinism_probe.gd: seeded AI match and two-empire battle print per-key state hashes at checkpoints; extractions must reproduce them exactly. economy_rules_test still has 24 failed assertions, 2 test-side script errors and a stall after line ~2214 (pending triage). No gameplay change.
 
 - [ ] v0.97.2: Extract ordered combat target block construction, laser/missile nearest-target kernels and simultaneous damage accumulation into combat_kernels.gd behind the existing EconomyRules facade. Preserve packed arrays, bounds, tie order, EPS, mutation order and all network contracts. No gameplay change; runtime/ENet and benchmark validation pending. Next: repair spatial queries and combat phase orchestration.
