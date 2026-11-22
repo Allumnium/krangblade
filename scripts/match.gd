@@ -46,6 +46,7 @@ const SHIP_MOTION_VIEW = preload("res://scripts/ship_motion_view.gd")
 const WORLD_RENDER_BATCHES = preload("res://scripts/world_render_batches.gd")
 const CELESTIAL_VIEW = preload("res://scripts/celestial_view.gd")
 const WORLD_EFFECTS = preload("res://scripts/world_effects.gd")
+const PLANET_TRAFFIC = preload("res://scripts/planet_traffic_view.gd")
 const STRUCTURE_VIEW = preload("res://scripts/structure_view.gd")
 const ORDER_VIEW = preload("res://scripts/order_view.gd")
 const MINIMAP_VIEW = preload("res://scripts/minimap_view.gd")
@@ -76,6 +77,7 @@ var ship_motion := SHIP_MOTION_VIEW.new()
 var world_batches := WORLD_RENDER_BATCHES.new()
 var celestial_view := CELESTIAL_VIEW.new()
 var world_effects := WORLD_EFFECTS.new()
+var planet_traffic := PLANET_TRAFFIC.new()
 var structure_view := STRUCTURE_VIEW.new()
 var order_view := ORDER_VIEW.new()
 var minimap_view := MINIMAP_VIEW.new()
@@ -356,6 +358,7 @@ func _build_match_notices() -> void:
 func _build_world_effect_batches() -> void:
 	world_batches.build(map_canvas)
 	structure_view.configure(map_canvas, world_batches, hull_art, command_card_ui, _screen_point, _station_radius, _job_icon, _draw_damage_bar, _shield_fraction, _ship_scale, _overview_art_multiplier)
+	planet_traffic.configure(map_canvas, celestial_view, hull_art, _screen_point, _station_radius, _job_icon)
 	order_view.configure(map_canvas, hull_art, celestial_view, camera, _ship_scale, _screen_point, _station_radius, _planet_radius, _salvage_radius, _fit, _me)
 	map_canvas.resized.connect(_map_resized)
 
@@ -1601,10 +1604,10 @@ func _refresh_body_overview(system: Dictionary) -> void:
 	var bodies: Array = celestial_view.system_visual(selected, _state())["bodies"]
 	var lines: PackedStringArray = []
 	for resource in ECONOMY.ACTIVE_PRODUCTION:
-		var sources: Array = _planet_production_sources(bodies, resource)
+		var sources: Array = planet_traffic.production_sources(bodies, resource)
 		if not sources.has(selected_body):
 			continue
-		var output: float = _planet_production_rate(system, resource) / float(sources.size())
+		var output: float = planet_traffic.production_rate(system, resource) / float(sources.size())
 		lines.append("%s · %.2f t/yr" % [resource, output])
 	if lines.is_empty():
 		lines.append("No resource production")
@@ -3046,87 +3049,6 @@ func _zoom_at(point: Vector2, direction: float) -> void:
 func _planet_radius(index: int, state: Dictionary) -> float:
 	return celestial_view.system_world_radius(index, state) * _fit() * camera.zoom
 
-func _planet_production_sources(bodies: Array, resource: String) -> Array:
-	var sources: Array = []
-	for slot in range(bodies.size()):
-		if bodies[slot]["resource"] == resource:
-			sources.append(slot)
-	if sources.is_empty() and not bodies.is_empty():
-		sources.append(0)
-	return sources
-
-func _planet_production_rate(system: Dictionary, resource: String) -> float:
-	if not ECONOMY.has_station(system) or bool(system.get("planet_blockaded", false)):
-		return 0.0
-	var output: float = ECONOMY.local_flow(system, "Production", resource)
-	if resource == "Organics":
-		output = maxf(0.0, output - ECONOMY.eco_organics(system))
-	elif resource == "Crystals":
-		output = maxf(0.0, output - ECONOMY.STATION_CRYSTALS_PER_YEAR)
-	return output
-
-func _draw_planet_production(state: Dictionary, index: int, center: Vector2, radius: float, detail: float) -> void:
-	var system: Dictionary = state["planets"][index]
-	if detail < 0.05 or not ECONOMY.has_station(system) or bool(system.get("planet_blockaded", false)):
-		return
-	var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
-	if bodies.is_empty():
-		return
-	var elapsed: float = celestial_view.orbit_time(state)
-	for resource in ECONOMY.ACTIVE_PRODUCTION:
-		var output: float = _planet_production_rate(system, resource)
-		if output <= ECONOMY.EPS:
-			continue
-		var sources: Array = _planet_production_sources(bodies, resource)
-		var color: Color = HUD.COLORS[resource]
-		var bay: int = clampi(floori(float(system["stock"][resource]) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system)) * ECONOMY.STATION_STORAGE_BAYS), 0, ECONOMY.STATION_STORAGE_BAYS - 1)
-		var destination: Vector2 = STRUCTURE_VIEW.bay_point(_screen_point(ECONOMY.station_position(state, index, elapsed)), _station_radius(), elapsed, resource, bay)
-		for slot in sources:
-			var origin: Vector2 = center + celestial_view.body_position(bodies[slot], radius, elapsed)
-			var count: int = clampi(ceili(sqrt(output / float(sources.size()))), 1, 7)
-			for k in range(count):
-				var phase: float = fposmod(elapsed * 0.8 + float(k) / float(count) + float(slot) * 0.173, 1.0)
-				var point: Vector2 = origin.lerp(destination, phase)
-				var alpha: float = detail * smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.85, 1.0, phase))
-				_draw_planet_cargo_pod(point, origin.direction_to(destination), clampf(radius * 0.025, 2.0, 8.0) * 0.25, color, alpha)
-
-func _draw_planet_cargo_pod(point: Vector2, axis: Vector2, size_factor: float, color: Color, alpha: float) -> void:
-	var forward: Vector2 = axis * size_factor
-	var side: Vector2 = axis.orthogonal() * size_factor
-	var hull: PackedVector2Array = hull_art.polygon(point, forward, side, [Vector2(0.72, 0.32), Vector2(0.40, 0.48), Vector2(-0.55, 0.82), Vector2(-0.82, 0.61), Vector2(-0.82, -0.61), Vector2(-0.55, -0.82), Vector2(0.40, -0.48), Vector2(0.72, -0.32)])
-	map_canvas.draw_colored_polygon(hull, Color(Color("#a9bfd2"), alpha))
-	var cargo: PackedVector2Array = hull_art.polygon(point, forward, side, [Vector2(0.35, 0.30), Vector2(-0.58, 0.50), Vector2(-0.58, -0.50), Vector2(0.35, -0.30)])
-	map_canvas.draw_colored_polygon(cargo, Color(color, alpha))
-	for sign in [-1.0, 1.0]:
-		var jet: Vector2 = point - forward * 0.38 + side * sign * 0.79
-		map_canvas.draw_circle(jet, size_factor * 0.24, Color(Color("#526b80"), alpha), true)
-		map_canvas.draw_line(jet - forward * 0.18, jet - forward * 0.67, Color(Color("#a1eaff"), alpha * 0.85), maxf(0.2, size_factor * 0.20), true)
-
-func _draw_planet_upgrade_deliveries(state: Dictionary, index: int, center: Vector2, radius: float, detail: float) -> void:
-	if detail < 0.05:
-		return
-	var system: Dictionary = state["planets"][index]
-	var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
-	var elapsed: float = celestial_view.orbit_time(state)
-	for item in system["queue"]:
-		if not item.has("delivery_slot"):
-			continue
-		var slot: int = int(item["delivery_slot"])
-		if slot < 0 or slot >= bodies.size():
-			continue
-		var fraction: float = 1.0 - clampf(float(item["delivery_remaining"]) / ECONOMY.PLANET_UPGRADE_DELIVERY_TIME, 0.0, 1.0)
-		var origin: Vector2 = _screen_point(ECONOMY.station_position(state, index, elapsed))
-		var destination: Vector2 = center + celestial_view.body_position(bodies[slot], radius, elapsed)
-		var point: Vector2 = origin.lerp(destination, fraction)
-		var pod_size: float = clampf(radius * 0.025, 2.0, 8.0) * 0.75
-		var color: Color = HUD.COLORS.get(str(item["target"]), Color("#d7b774")) if item["kind"] in ["economy_building", "production"] else Color("#d7b774")
-		_draw_planet_cargo_pod(point, origin.direction_to(destination), pod_size, color, detail)
-		var icon: Texture2D = _job_icon(item, int(system["owner"]))
-		var icon_size: float = pod_size * 0.85
-		if icon_size >= 4.0:
-			map_canvas.draw_texture_rect(icon, Rect2(point - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, Color(1.0, 1.0, 1.0, detail))
-
-
 func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
 	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(pos):
 		return
@@ -3156,8 +3078,8 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 				if (index == selected and selected_body == slot) or (building_selection_kind == "pds" and selected_buildings.has(Vector2i(index, slot))):
 					world_batches.draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
-	_draw_planet_production(state, index, pos, radius, detail)
-	_draw_planet_upgrade_deliveries(state, index, pos, radius, detail)
+	planet_traffic.draw_production(state, index, pos, radius, detail)
+	planet_traffic.draw_upgrade_deliveries(state, index, pos, radius, detail)
 	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(camera.zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
 	celestial_view.draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity, map_canvas, visual_clock)
 	if bool(system.get("station", {}).get("dyson_sphere", false)):
