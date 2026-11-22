@@ -4380,6 +4380,11 @@ func _test_territory_influence() -> void:
 	assert(ECON.influence_region(graph, Vector2(4500, 600)) == 6)
 	assert(ECON.lane_direct(graph, Vector2(4400, 600), Vector2(4600, 600), [0, 1, 2, 3]))
 	assert(not ECON.lane_direct(graph, Vector2(500, 500), Vector2(4500, 2500), [0, 1, 2, 3]))
+	var junction: Dictionary = {"points": [Vector2.ZERO, Vector2(100, 0), Vector2(50, 85)], "sector_radii": [60.0, 60.0, 60.0], "sector_cell_width": 60.0, "sector_neighbors": [[Vector2(100, 0), Vector2(50, 85)], [Vector2(-100, 0), Vector2(-50, 85)], [Vector2(-50, -85), Vector2(50, -85)]], "edges": [], "adjacent": [[], [], []]}
+	ECON._index_navigation_junctions(junction)
+	assert(ECON.lane_direct(junction, Vector2(30, 25), Vector2(70, 25), [0, 1, 2]))
+	assert(not ECON.lane_direct(junction, Vector2(30, 25), Vector2(70, 25), [0, 1]))
+	assert(not ECON.lane_direct(junction, Vector2(30, 25), Vector2(50, -100), [0, 1, 2]))
 	var palette: Dictionary = {1: Color.RED, 2: Color.BLUE}
 	var mixed: Color = ECON.influence_color(weights[0], palette)
 	assert(is_equal_approx(mixed.r, 70.0 / 72.0) and is_equal_approx(mixed.b, 2.0 / 72.0) and mixed.a == 1.0)

@@ -3340,6 +3340,7 @@ static func military_graph(state: Dictionary) -> Dictionary:
 	cached_military_map = {"points": map_data["points"].duplicate(), "edges": map_data["edges"].duplicate(true), "field_positions": _field_positions(map_data), "field_edges": map_data.get("field_edges", []).duplicate(true)}
 	cached_military_graph = {"points": points, "edges": edges, "adjacent": adjacent, "paths": {}, "sector_radii": sector_radii, "sector_neighbors": sector_neighbors, "sector_neighbor_squares": sector_neighbor_squares, "system_count": map_data["points"].size()}
 	_index_sector_bounds(cached_military_graph, base_radius)
+	_index_navigation_junctions(cached_military_graph)
 	return cached_military_graph
 
 static func _field_positions(map_data: Dictionary) -> Array:
@@ -4261,6 +4262,8 @@ static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionar
 		var paths: Dictionary = _military_paths(graph, node)
 		var origin: int = sector_at(graph, pos, candidates)
 		if origin < 0:
+			origin = _junction_anchor(graph, pos, candidates)
+		if origin < 0:
 			var lane: Vector2i = lane_at(graph, pos, candidates)
 			if lane.x >= 0:
 				var cost_a: float = pos.distance_to(graph["points"][lane.x]) + float(paths["distance"].get(lane.x, INF))
@@ -4363,7 +4366,68 @@ static func lane_at(graph: Dictionary, point: Vector2, candidates: Array = []) -
 			result = Vector2i(a, b)
 	return result
 
+# Fill bounded junctions between three mutually touching sector disks.
+# Delaunay faces avoid filling the exterior or bridging distant clusters.
+static func _index_navigation_junctions(graph: Dictionary) -> void:
+	var points := PackedVector2Array(graph["points"])
+	var indices: PackedInt32Array = Geometry2D.triangulate_delaunay(points)
+	var cells: Dictionary = {}
+	var width: float = graph["sector_cell_width"]
+	for i in range(0, indices.size(), 3):
+		var nodes := Vector3i(indices[i], indices[i + 1], indices[i + 2])
+		var a: Vector2 = points[nodes.x]
+		var b: Vector2 = points[nodes.y]
+		var c: Vector2 = points[nodes.z]
+		var radii: Array = graph["sector_radii"]
+		if a.distance_to(b) > float(radii[nodes.x]) + float(radii[nodes.y]) or b.distance_to(c) > float(radii[nodes.y]) + float(radii[nodes.z]) or c.distance_to(a) > float(radii[nodes.z]) + float(radii[nodes.x]):
+			continue
+		var low: Vector2 = a.min(b).min(c) / width
+		var high: Vector2 = a.max(b).max(c) / width
+		for x in range(floori(low.x), floori(high.x) + 1):
+			for y in range(floori(low.y), floori(high.y) + 1):
+				var cell := Vector2i(x, y)
+				if not cells.has(cell):
+					cells[cell] = []
+				cells[cell].append(nodes)
+	graph["navigation_junction_cells"] = cells
+
+static func _navigation_junctions(graph: Dictionary, point: Vector2) -> Array:
+	if not graph.has("navigation_junction_cells"):
+		return []
+	var width: float = graph["sector_cell_width"]
+	return graph["navigation_junction_cells"].get(Vector2i(floori(point.x / width), floori(point.y / width)), [])
+
+static func _junction_contains(graph: Dictionary, nodes: Vector3i, point: Vector2, candidates: Array) -> bool:
+	if not candidates.has(nodes.x) or not candidates.has(nodes.y) or not candidates.has(nodes.z):
+		return false
+	var points: Array = graph["points"]
+	return Geometry2D.point_is_inside_triangle(point, points[nodes.x], points[nodes.y], points[nodes.z])
+
+static func _junction_anchor(graph: Dictionary, point: Vector2, candidates: Array) -> int:
+	var nearest: int = -1
+	var best: float = INF
+	for nodes in _navigation_junctions(graph, point):
+		if not _junction_contains(graph, nodes, point, candidates):
+			continue
+		for node in [nodes.x, nodes.y, nodes.z]:
+			var distance: float = point.distance_squared_to(graph["points"][node])
+			if distance < best or (distance == best and node < nearest):
+				nearest = node
+				best = distance
+	return nearest
+
 static func lane_direct(graph: Dictionary, origin: Vector2, destination: Vector2, candidates: Array) -> bool:
+	if not origin.is_finite() or not destination.is_finite():
+		return false
+	if _lane_direct_region(graph, origin, destination, candidates):
+		return true
+	# A triangle is convex, so crossing one enclosed junction is legal.
+	for nodes in _navigation_junctions(graph, origin):
+		if _junction_contains(graph, nodes, origin, candidates) and _junction_contains(graph, nodes, destination, candidates):
+			return true
+	return false
+
+static func _lane_direct_region(graph: Dictionary, origin: Vector2, destination: Vector2, candidates: Array) -> bool:
 	if not origin.is_finite() or not destination.is_finite():
 		return false
 	# A sector or corridor is convex. A shared region permits an exact straight leg.
@@ -4390,6 +4454,9 @@ static func patrol_node(state: Dictionary, graph: Dictionary, player: int, point
 		return node
 	if candidates.is_empty():
 		return -1
+	var junction: int = _junction_anchor(graph, point, candidates)
+	if junction >= 0:
+		return junction
 	var lane: Vector2i = lane_at(graph, point, candidates)
 	if lane.x < 0:
 		return -1
