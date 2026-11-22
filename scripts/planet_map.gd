@@ -366,6 +366,9 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			access.append(node)
 			degrees[node] += 1
 			field_degrees[option["field"]] += 1
+	# Grow ordinary deposits after allocating the legacy graph ports. The
+	# graph remains connected and every original resource site remains accessible.
+	_grow_asteroid_belts(fields, points, edges, bounds, rng)
 	var longest: float = 0.0
 	for edge in edges:
 		longest = maxf(longest, points[edge[0]].distance_to(points[edge[1]]))
@@ -375,6 +378,9 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	for field in fields:
 		field["position"] = (field["position"] as Vector2) * scale
 		field["radius"] = float(field["radius"]) * scale
+		for lobe in field.get("belt_lobes", []):
+			lobe["position"] = (lobe["position"] as Vector2) * scale
+			lobe["radius"] = float(lobe["radius"]) * scale
 		_populate_field(field, rng)
 		if bool(field.get("antimatter", false)):
 			field["Metals"] = 0.0
@@ -383,6 +389,105 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			for chunk in field["chunks"]:
 				chunk["resource"] = ANTIMATTER
 	return {"seed": seed_value, "layout": layout, "planetless": planetless_systems(seed_value, points.size(), edges, player_count), "antimatter_home_clearance": ANTIMATTER_CLEARANCE * scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "field_edges": field_edges, "size": bounds * scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": points.size()}
+
+# Each ridge is an open chain: a new lobe intersects only its previous
+# neighbor, never a different ridge, a star corridor, or the map boundary.
+# Consequently these obstacles cannot create a closed pocket of free space.
+static func _belt_lobe_clear(candidate: Dictionary, fields: Array, index: int, lobes: Array, points: Array[Vector2], edges: Array, bounds: Vector2) -> bool:
+	var center: Vector2 = candidate["position"]
+	var radius: float = float(candidate["radius"])
+	const GAP: float = 48.0
+	if not Rect2(Vector2.ONE * (radius + GAP), bounds - Vector2.ONE * (radius + GAP) * 2.0).has_point(center):
+		return false
+	for point in points:
+		if center.distance_to(point) < radius + 95.0:
+			return false
+	for edge in edges:
+		if Geometry2D.get_closest_point_to_segment(center, points[edge[0]], points[edge[1]]).distance_to(center) <= radius + GAP:
+			return false
+	for i in range(lobes.size() - 1):
+		if center.distance_to(lobes[i]["position"]) <= radius + float(lobes[i]["radius"]) + GAP:
+			return false
+	for other in range(fields.size()):
+		if other == index:
+			continue
+		var field: Dictionary = fields[other]
+		for lobe in field.get("belt_lobes", [{"position": field["position"], "radius": field["radius"]}]):
+			if center.distance_to(lobe["position"]) <= radius + float(lobe["radius"]) + GAP:
+				return false
+		# Keep legacy access to other resource sites open, too.
+		for anchor in field["access"]:
+			if Geometry2D.get_closest_point_to_segment(center, points[anchor], field["position"]).distance_to(center) <= radius + GAP:
+				return false
+	return true
+
+static func _grow_asteroid_belts(fields: Array, points: Array[Vector2], edges: Array, bounds: Vector2, rng: RandomNumberGenerator) -> void:
+	for index in range(fields.size()):
+		var field: Dictionary = fields[index]
+		if bool(field.get("antimatter", false)):
+			continue
+		var start: Vector2 = field["position"]
+		var initial_radius: float = float(field["radius"])
+		if not Rect2(Vector2.ONE * (initial_radius + 48.0), bounds - Vector2.ONE * (initial_radius + 48.0) * 2.0).has_point(start):
+			continue
+		var lobes: Array = [{"position": start, "radius": initial_radius}]
+		var axis: Vector2 = (start - points[int(field["anchor"])]).normalized()
+		if axis.is_zero_approx():
+			axis = Vector2.RIGHT
+		var goal: int = rng.randi_range(5, 10)
+		for step in range(1, goal):
+			var previous: Dictionary = lobes[-1]
+			var radius: float = rng.randf_range(105.0, 150.0)
+			var found: bool = false
+			var turn: float = rng.randf_range(-0.40, 0.40)
+			for adjustment in [0.0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]:
+				var direction: Vector2 = axis.rotated(turn + float(adjustment))
+				var center: Vector2 = previous["position"] + direction * (float(previous["radius"]) + radius) * 0.78
+				var candidate: Dictionary = {"position": center, "radius": radius}
+				if not _belt_lobe_clear(candidate, fields, index, lobes, points, edges, bounds):
+					continue
+				lobes.append(candidate)
+				axis = direction
+				found = true
+				break
+			if not found:
+				break
+		if lobes.size() < 2 or _belt_outline(lobes).is_empty():
+			continue
+		field["belt_lobes"] = lobes
+		for lobe in lobes:
+			field["radius"] = maxf(float(field["radius"]), start.distance_to(lobe["position"]) + float(lobe["radius"]))
+
+static func _belt_outline(lobes: Array) -> PackedVector2Array:
+	var outline := PackedVector2Array()
+	for lobe in lobes:
+		var ring := PackedVector2Array()
+		for vertex in range(16):
+			ring.append((lobe["position"] as Vector2) + Vector2.from_angle(TAU * float(vertex) / 16.0) * float(lobe["radius"]))
+		if outline.is_empty():
+			outline = ring
+		else:
+			var merged: Array[PackedVector2Array] = Geometry2D.merge_polygons(outline, ring)
+			if merged.size() == 1:
+				outline = merged[0]
+			else:
+				# Never substitute a convex hull that could close an open
+				# passage if the polygon union unexpectedly fails.
+				return PackedVector2Array()
+	return outline
+
+static func terrain_contains(field: Dictionary, point: Vector2) -> bool:
+	if field.has("belt_lobes"):
+		return Geometry2D.is_point_in_polygon(point, PackedVector2Array(field["outline"]))
+	return point.distance_to(field["position"]) <= float(field["radius"])
+
+static func polygon_blocks_segment(polygon: PackedVector2Array, a: Vector2, b: Vector2) -> bool:
+	if Geometry2D.is_point_in_polygon(a, polygon) or Geometry2D.is_point_in_polygon(b, polygon):
+		return true
+	for i in range(polygon.size()):
+		if Geometry2D.segment_intersects_segment(a, b, polygon[i], polygon[(i + 1) % polygon.size()]) != null:
+			return true
+	return false
 
 static func _field_at(center: Vector2, radius: float, points: Array[Vector2], edges: Array, fields: Array, degrees: Array[int], first_node: int, required_anchor: int = -1) -> Dictionary:
 	var field: Dictionary = _safe_field(center, radius, points, edges, fields)
@@ -474,8 +579,12 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		var length: float = rng.randf_range(0.65, 0.96)
 		outline.append(center + (Vector2.from_angle(angle) * Vector2(1.0, flatten) * radius * length).rotated(rotation))
 	field["outline"] = outline
+	var lobes: Array = field.get("belt_lobes", [])
+	if not lobes.is_empty():
+		outline.assign(Array(_belt_outline(lobes)))
+		field["outline"] = outline
 	var chunks: Array = []
-	var count: int = 4 * clampi(roundi(7.0 + radius / 100.0), 9, 28)
+	var count: int = 4 * clampi(roundi(7.0 + radius / 100.0), 9, 28) if lobes.is_empty() else lobes.size() * 36
 	var profile: float = rng.randf()
 	var special: bool = bool(field.get("antimatter", false))
 	# Seeded variety: some pure-metal fields, and other fields containing
@@ -499,6 +608,11 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		var angle: float = rng.randf_range(0.0, TAU)
 		var distance: float = sqrt(rng.randf()) * 0.52
 		var offset: Vector2 = (Vector2.from_angle(angle) * Vector2(1.0, flatten) * radius * distance).rotated(rotation)
+		var rock_radius: float = radius
+		if not lobes.is_empty():
+			var lobe: Dictionary = lobes[i % lobes.size()]
+			rock_radius = float(lobe["radius"])
+			offset = (lobe["position"] as Vector2) - center + Vector2.from_angle(angle) * sqrt(rng.randf()) * rock_radius * 0.90
 		var resource: String = "Metals" if slots[i] < metal_count else "Crystals"
 		var amount: float = rng.randf_range(90.0, 260.0) * float(field[resource]) * (1.0 if special else ASTEROID_INVENTORY_MULTIPLIER)
 		totals[resource] += amount
@@ -506,7 +620,7 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		for vertex in range(7):
 			shape.append(rng.randf_range(0.62, 1.0))
 		chunks.append({"id": i, "position": center + offset, "resource": resource,
-			"remaining": amount, "initial": amount, "radius": radius * 0.5 * rng.randf_range(0.045, 0.085),
+			"remaining": amount, "initial": amount, "radius": rock_radius * 0.5 * rng.randf_range(0.045, 0.085),
 			"rotation": rng.randf_range(0.0, TAU), "shape": shape})
 	# Preserve the generated total while normalizing individual ore amounts.
 	# Otherwise random rock sizes and concentration can exceed the cap.
@@ -523,7 +637,12 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 static func blocked(a: Vector2, b: Vector2, fields: Array) -> bool:
 	for field in fields:
 		var center: Vector2 = field["position"]
-		if Geometry2D.get_closest_point_to_segment(center, a, b).distance_to(center) <= float(field["radius"]):
+		if field.has("belt_lobes"):
+			for lobe in field["belt_lobes"]:
+				var lobe_center: Vector2 = lobe["position"]
+				if Geometry2D.get_closest_point_to_segment(lobe_center, a, b).distance_to(lobe_center) <= float(lobe["radius"]):
+					return true
+		elif Geometry2D.get_closest_point_to_segment(center, a, b).distance_to(center) <= float(field["radius"]):
 			return true
 	return false
 

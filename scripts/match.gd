@@ -3496,7 +3496,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 			if not ECONOMY.discovered(state, _me(), "fields", i):
 				continue
 			var distance: float = point.distance_to(_screen_point(fields[i]["position"]))
-			if distance <= maxf(9.0, float(fields[i]["radius"]) * _fit() * camera.zoom):
+			if (fields[i].has("belt_lobes") and MAP.terrain_contains(fields[i], _world_point(point))) or (not fields[i].has("belt_lobes") and distance <= maxf(9.0, float(fields[i]["radius"]) * _fit() * camera.zoom)):
 				selected_field = i
 				break
 	if selected_ship_id < 0 and selected_field < 0 and hit >= state["planets"].size():

@@ -1884,7 +1884,19 @@ func _initialize() -> void:
 			for resource in ECON.FIELD_RESOURCES:
 				assert(ECON.field_limit(field, resource) > 100.0 if float(ore[resource]) > 0.0 else is_zero_approx(ECON.field_limit(field, resource)))
 			assert(ECON.field_limit(field, "Organics") == 0.0)
-			assert(field["outline"].size() == 12)
+			assert(field["outline"].size() >= 12 if field.has("belt_lobes") else field["outline"].size() == 12)
+			if field.has("belt_lobes"):
+				var lobes: Array = field["belt_lobes"]
+				assert(lobes.size() >= 2 and field["chunks"].size() == lobes.size() * 36)
+				for lobe_index in range(lobes.size()):
+					var lobe: Dictionary = lobes[lobe_index]
+					var center: Vector2 = lobe["position"]
+					var radius: float = float(lobe["radius"])
+					assert(Rect2(Vector2.ONE * radius, clustered["size"] - Vector2.ONE * radius * 2.0).has_point(center))
+					if lobe_index > 0:
+						assert(center.distance_to(lobes[lobe_index - 1]["position"]) < radius + float(lobes[lobe_index - 1]["radius"]))
+					for earlier in range(lobe_index - 1):
+						assert(center.distance_to(lobes[earlier]["position"]) > radius + float(lobes[earlier]["radius"]))
 			assert(field["chunks"].size() >= 9)
 			var chunk_ids: Dictionary = {}
 			for chunk in field["chunks"]:
@@ -3741,6 +3753,21 @@ func _test_resource_handoff() -> void:
 	tight_fields[0]["chunks"].clear()
 	ECON._refresh_movement_fields(tight_fields)
 	assert(float(ECON._movement_fields[0]["radius"]) == 0.0)
+	var lobes: Array = [{"position": Vector2(250, 0), "radius": 100.0}, {"position": Vector2(400, 0), "radius": 100.0}]
+	var ridge: Dictionary = {"position": Vector2(250, 0), "radius": 250.0, "belt_lobes": lobes, "outline": Array(MAP._belt_outline(lobes)), "chunks": [{"position": Vector2(250, 0), "radius": 8.0}]}
+	assert(MAP.blocked(Vector2.ZERO, Vector2(700, 0), [ridge]))
+	assert(not MAP.blocked(Vector2(0, 180), Vector2(700, 180), [ridge]))
+	ECON._refresh_movement_fields([ridge])
+	assert(ECON._movement_fields[0].has("polygon"))
+	var traveling: Dictionary = {"kind": "ship", "position": Vector2.ZERO, "id": 9834}
+	var destination := Vector2(700, 0)
+	for step in range(160):
+		var previous: Vector2 = traveling["position"]
+		ECON._navigate(traveling, destination, 10.0)
+		assert(not MAP.polygon_blocks_segment(PackedVector2Array(ridge["outline"]), previous, traveling["position"]))
+		if (traveling["position"] as Vector2).distance_to(destination) < 0.1:
+			break
+	assert((traveling["position"] as Vector2).distance_to(destination) < 0.1)
 	# A worker deep inside the disk meets a hauler along its real depot route.
 	var rock := Vector2(3000, 1000)
 	var rendezvous_map: Dictionary = {"seed": 42, "points": [Vector2(1000, 1000), Vector2(6000, 1000)], "edges": [[0, 1]], "fields": [{"position": rock, "radius": 800.0, "anchor": 0, "access": [0], "Metals": 1.0, "Crystals": 0.0, "chunks": [{"id": 7, "position": rock, "resource": "Metals", "remaining": 24.0, "radius": 15.0}, {"id": 8, "position": rock + Vector2.RIGHT * 310.0, "resource": "Metals", "remaining": 24.0, "radius": 20.0}]}]}
