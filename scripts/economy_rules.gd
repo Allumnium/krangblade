@@ -1367,6 +1367,8 @@ static func _continuous_target(p: Dictionary, key: String) -> Array:
 		return [key, ""]
 	if key in ["warehouse", "habitation"]:
 		return [key, ""] if key != "habitation" or has_planets(p) else []
+	if key in ["pds", "yard"]:
+		return [key, ""]
 	if key.begins_with("economy_building:"):
 		var resource: String = key.trim_prefix("economy_building:")
 		if ECONOMY_BUILDINGS.has(resource) and production_available(p, resource):
@@ -1381,11 +1383,27 @@ static func _continuous_target(p: Dictionary, key: String) -> Array:
 			return ["yard_upgrade", target]
 	return []
 
+# Structural eligibility deliberately excludes affordability and pending jobs:
+# repeat can be armed while saving for the next construction.
+static func station_repeat_available(p: Dictionary, key: String) -> bool:
+	match key:
+		"warehouse", "habitation":
+			return (key != "habitation" or has_planets(p)) and int(p.get(key + "_level", 0)) < 3
+		"pds":
+			return next_pds(p) >= 0
+		"yard":
+			return next_shipyard_slot(p) > 0
+	if key.begins_with("economy_building:"):
+		return production_available(p, key.trim_prefix("economy_building:"))
+	return false
+
 static func set_continuous(state: Dictionary, player: int, index: int, kind: String, enabled: bool) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
 	if p.is_empty() or _continuous_target(p, kind).is_empty():
 		return false
 	if enabled and kind.begins_with("yard_upgrade:") and int(p["yards"][int(kind.trim_prefix("yard_upgrade:"))]["level"]) >= MAX_SHIPYARD_LEVEL:
+		return false
+	if enabled and kind in ["warehouse", "habitation", "pds", "yard"] and not station_repeat_available(p, kind):
 		return false
 	p["continuous"][kind] = enabled
 	return true
@@ -1468,6 +1486,16 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 			if int(p.get(str(order[0]) + "_level", 0)) >= 3:
 				p["continuous"][key] = false
 			elif enqueue(state, int(p["owner"]), index, "economy", order[0]):
+				p["queue"][-1]["automatic"] = true
+			continue
+		if order[0] in ["yard", "pds"]:
+			if not station_repeat_available(p, str(order[0])):
+				# A final queued yard already occupies its slot; allow cancellation
+				# to stop repeat normally, but never enqueue above the cap.
+				p["continuous"][key] = false
+			elif (order[0] == "yard" and _has_job(p, "yard", "")) or (order[0] == "pds" and not pds_job(p).is_empty()):
+				continue
+			elif enqueue(state, int(p["owner"]), index, order[0]):
 				p["queue"][-1]["automatic"] = true
 			continue
 		if SHIP_KINDS.has(order[0]):

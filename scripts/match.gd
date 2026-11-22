@@ -1139,7 +1139,7 @@ func _build_station_command_card(parent: Container) -> void:
 		var button: Button = _station_button(station_build_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
 		station_build_buttons[key] = button
 		hotkeys.register(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_T, "yard": KEY_X}[key], "Station Build", "build_" + key, captions[key].replace("\n", " "))
-		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing"]:
+		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing", "pds", "yard"]:
 			button.gui_input.connect(_station_repeat_input.bind(key, button))
 			var border := Control.new()
 			border.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1182,17 +1182,32 @@ func _station_build(key: String) -> void:
 	else:
 		_operation("economy", key)
 
+# Snapshot the active station group before dispatching requests or changing selection.
+func _owned_station_selection(state: Dictionary) -> Array[int]:
+	var result: Array[int] = []
+	if building_selection_kind == "station":
+		for ref in selected_buildings:
+			if _building_valid(state, ref, "station") and int(state["planets"][ref.x]["owner"]) == _me():
+				result.append(ref.x)
+	elif _building_valid(state, Vector2i(selected, 0), "station") and int(state["planets"][selected]["owner"]) == _me():
+		result.append(selected)
+	return result
+
 func _station_select_yards() -> void:
 	var state: Dictionary = _state()
-	var p: Dictionary = _planet()
-	if p.is_empty() or int(p["owner"]) != _me() or station_selected_index != selected or p["yards"].is_empty():
+	if station_selected_index != selected:
 		return
-	var system: int = selected
+	var refs: Dictionary = {}
+	for index in _owned_station_selection(state):
+		var count: int = state["planets"][index]["yards"].size()
+		for slot in range(count):
+			refs[Vector2i(index, slot)] = count
+	if refs.is_empty():
+		return
 	_clear_building_selection()
-	_set_building_primary(state, Vector2i(system, 0), "shipyard")
 	building_selection_kind = "shipyard"
-	for slot in range(p["yards"].size()):
-		selected_buildings[Vector2i(system, slot)] = p["yards"].size()
+	selected_buildings = refs
+	_set_building_primary(state, refs.keys()[0], "shipyard")
 	camera.following = false
 	pending_command = ""
 	_load_thresholds()
@@ -1203,8 +1218,12 @@ func _station_upgrade_pressed(kind: String) -> void:
 		_operation(kind)
 
 func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
-	station_select_yards_button.disabled = not owned or p["yards"].is_empty()
-	command_card_ui.set_hint(station_select_yards_button, "Select all %d completed shipyards at this station" % p["yards"].size())
+	var yard_count: int = 0
+	var state: Dictionary = _state()
+	for index in _owned_station_selection(state):
+		yard_count += state["planets"][index]["yards"].size()
+	station_select_yards_button.disabled = not owned or yard_count == 0
+	command_card_ui.set_hint(station_select_yards_button, "Select all %d completed shipyards at selected stations" % yard_count)
 	(station_select_yards_button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if station_select_yards_button.disabled else Color.WHITE
 	for kind in station_upgrade_buttons:
 		var button: Button = station_upgrade_buttons[kind]
@@ -1226,22 +1245,34 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 func _station_repeat_key(p: Dictionary, key: String) -> String:
 	if key in ECONOMY.RESOURCES:
 		return "economy_building:" + key
-	if key == "warehouse":
+	if key in ["warehouse", "pds", "yard"]:
 		return key
 	return "habitation" if key == "housing" and ECONOMY.has_planets(p) else ""
 
+func _station_repeat_targets(state: Dictionary, key: String, indices: Array[int]) -> Dictionary:
+	var targets: Dictionary = {}
+	for index in indices:
+		var p: Dictionary = state["planets"][index]
+		var repeat_key: String = _station_repeat_key(p, key)
+		if not repeat_key.is_empty() and (ECONOMY.station_repeat_available(p, repeat_key) or bool(p.get("continuous", {}).get(repeat_key, false))):
+			targets[index] = repeat_key
+	return targets
+
 func _station_repeat_input(event: InputEvent, key: String, button: Button) -> void:
-	if not event is InputEventMouseButton or event.button_index != MOUSE_BUTTON_RIGHT or not event.pressed or button.disabled:
+	if not event is InputEventMouseButton or event.button_index != MOUSE_BUTTON_RIGHT or not event.pressed or button.disabled or station_selected_index != selected:
 		return
-	var p: Dictionary = _planet()
-	if p.is_empty() or int(p["owner"]) != _me() or station_selected_index != selected:
-		return
-	var repeat_key: String = _station_repeat_key(p, key)
-	if not repeat_key.is_empty():
-		session.call("request_continuous", selected, repeat_key, not bool(p.get("continuous", {}).get(repeat_key, false)))
+	var state: Dictionary = _state()
+	var targets: Dictionary = _station_repeat_targets(state, key, _owned_station_selection(state))
+	var enable: bool = false
+	for index in targets:
+		enable = enable or not bool(state["planets"][index].get("continuous", {}).get(targets[index], false))
+	for index in targets:
+		session.call("request_continuous", index, targets[index], enable)
 	button.accept_event()
 
 func _refresh_station_build(p: Dictionary, owned: bool) -> void:
+	var state: Dictionary = _state()
+	var indices: Array[int] = _owned_station_selection(state) if owned else []
 	for key in station_build_buttons:
 		var button: Button = station_build_buttons[key]
 		var kind: String = key
@@ -1322,12 +1353,14 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		command_card_ui.set_level_badge(button, current_level)
 		if key != "yard":
 			name_text += " " + UI_TEXT.roman_level(current_level + (1 if eligible else 0))
-		var repeat_key: String = _station_repeat_key(p, key)
-		var auto: bool = not repeat_key.is_empty() and bool(p.get("continuous", {}).get(repeat_key, false))
+		var repeat_targets: Dictionary = _station_repeat_targets(state, key, indices)
+		var auto: bool = not repeat_targets.is_empty()
+		for index in repeat_targets:
+			auto = auto and bool(state["planets"][index].get("continuous", {}).get(repeat_targets[index], false))
 		available = owned and available and ECONOMY.construction_affordable(_state(), p, recipe)
 		var grouped: bool = building_selection_kind == "station" and selected_buildings.size() > 1
 		var can_build: bool = owned and (_any_selected_station_buildable(key, p) if grouped else available and eligible)
-		button.disabled = not owned or (not can_build if grouped else (not eligible or (repeat_key.is_empty() and not available)))
+		button.disabled = not owned or (not can_build and repeat_targets.is_empty())
 		command_card_ui.set_build_available(button, can_build)
 		(button.get_meta("portrait") as TextureRect).modulate = Color.WHITE if can_build else Color(0.55, 0.55, 0.55)
 		if button.has_meta("auto_border"):
@@ -1343,8 +1376,8 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			var reason: String = ECONOMY.building_blocker(p, key)
 			if not reason.is_empty():
 				command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + reason)
-		if not repeat_key.is_empty() and eligible:
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRight-click: %s repeat" % ("Disable" if auto else "Enable"))
+		if not repeat_targets.is_empty():
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRight-click: %s repeat (%d station%s)" % ["Disable" if auto else "Enable", repeat_targets.size(), "" if repeat_targets.size() == 1 else "s"])
 
 func _draw_autobuild_border(border: Control) -> void:
 	var bounds := Rect2(Vector2.ONE * 2.0, border.size - Vector2.ONE * 4.0)
@@ -2382,7 +2415,7 @@ func _update_trade_stock(p: Dictionary) -> void:
 		slider.set_stock(stock, capacity, HUD.COLORS[resource])
 		trade_stock_labels[resource].text = "%s / %s" % [UI_TEXT.tons(stock, 1, true), UI_TEXT.tons(capacity, 0, true)]
 		trade_stock_labels[resource].tooltip_text = "%.1f / %.0f t" % [stock, capacity]
-		command_card_ui.set_hint(slider, "%s thresholds\nImport below min · Export above max 100%% = %.0f units." % [resource, capacity])
+		command_card_ui.set_hint(slider, "%s thresholds\nImport below min · Export above max 100%% = %.0f units.%s" % [resource, capacity, "\nEdits apply to all selected owned stations; display shows primary station." if building_selection_kind == "station" and selected_buildings.size() > 1 else ""])
 		# Preserve this handle while dragging, even when a snapshot arrives.
 		if slider.active_handle < 0:
 			var t: Dictionary = p["thresholds"][resource]
@@ -2398,7 +2431,11 @@ func _update_trade_stock(p: Dictionary) -> void:
 
 func _apply_thresholds(minimum: float, maximum: float, resource: String) -> void:
 	var slider: TradeRange = trade_sliders[resource]
-	session.call("request_thresholds", selected, resource, minimum, maximum, slider.import_enabled, slider.export_enabled)
+	var indices: Array[int] = _owned_station_selection(_state())
+	var importing: bool = slider.import_enabled
+	var exporting: bool = slider.export_enabled
+	for index in indices:
+		session.call("request_thresholds", index, resource, minimum, maximum, importing, exporting)
 
 func _trade_toggle(_pressed: bool, resource: String) -> void:
 	var slider: TradeRange = trade_sliders[resource]
