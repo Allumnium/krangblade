@@ -155,6 +155,7 @@ func _draw_conquest_scoreboard(state: Dictionary, font: Font, x: float, y: float
 	var header_width: float = maxf(1.0, width - ceilf(font.get_height(13)) - 4.0)
 	objectives_overlay.draw_string_outline(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, header_width, 13, 4, outline)
 	objectives_overlay.draw_string(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, header_width, 13, header_tint)
+	objectives_overlay.draw_line(Vector2(x, y + 5.0), Vector2(x + minf(header_width, font.get_string_size("TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x), y + 5.0), header_tint, 1.0)
 	if not conquest_scoreboard_expanded:
 		return
 	var roster: Dictionary = session.get("players")

@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.61: Increase resource/population/GC balance labels to 15 px and left-align beside icons. Reserve the conquest column beside population; start objectives at the top when space permits, otherwise below the header. Keep notifications/chat left of objectives. Underline Total Conquest Points like Objectives. Anchor F1–F4 at the right wing's left edge; control groups remain to their left, with a stacked fallback in narrow windows. Visual/runtime/peer validation pending.
+
 - v0.89.60: Center white trend chevrons in resource and population bars; population retains total but drops numeric growth rate. Use existing capacity-aware net_rate for resource trends; full stores with surplus but no room contribute zero. Preserve demographic growth semantics and existing magnitude thresholds. Place GC before storage tiles; compact resource/population widths to 104 px and reduce GC minimum/padding. Hover retains precise rates. Visual/runtime/peer validation pending.
 
 - v0.89.59: Darken construction/upgrade command backgrounds whenever the corresponding manual build cannot start, including repeat-enabled and multi-selection cards. Preserve right-click automation and authority eligibility; omit redundant queued-upgrade hints. Check recovery when population or resources arrive, queue completion and mixed selections. Visual/runtime validation pending.
