@@ -26,7 +26,7 @@ func build_perf(owner: Control, parent: Container, make_button: Callable, make_l
 	diagnostic_button.add_theme_constant_override("icon_max_width", 24)
 	diagnostic_button.custom_minimum_size = Vector2.ONE * strip_width
 	diagnostic_button.focus_mode = Control.FOCUS_NONE
-	diagnostic_button.tooltip_text = "Toggle local performance diagnostics"
+	diagnostic_button.tooltip_text = "Diagnostics"
 	diagnostic_panel = VBoxContainer.new()
 	diagnostic_panel.z_index = 5
 	diagnostic_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -138,7 +138,7 @@ func update_perf(delta: float) -> void:
 					_diagnostic_bar("Reliable loss", float(net["loss"]), 100.0, "%")
 				if not authority:
 					diagnostic_label.text += "\n" + timing.strip_edges()
-				diagnostic_button.tooltip_text = "Toggle local performance diagnostics"
+				diagnostic_button.tooltip_text = "Diagnostics"
 
 			diagnostic_elapsed = 0.0
 

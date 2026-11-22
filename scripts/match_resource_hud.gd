@@ -201,13 +201,13 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 		var income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE
 		var upkeep: float = float(totals["upkeep"])
 		var unpaid: int = int(totals["unpaid_ships"])
-		var details: String = "Galactic Credits · %.2f GC\nResident taxes (%.1f%%/yr): +%.2f GC/yr\nFleet upkeep: −%.2f GC/yr\nNet recurring income: %+.2f GC/yr\nConstruction fees paid on ordering." % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, upkeep, income - upkeep]
+		var details: String = "Galactic Credits · %.2f GC\nResident taxes (%.1f%%/yr): +%.2f GC/yr\nFleet upkeep: −%.2f GC/yr\nNet recurring income: %+.2f GC/yr" % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, upkeep, income - upkeep]
 		if unpaid > 0:
 			details += "\nWARNING: %d ships have unpaid wages." % unpaid
 		return details
 	if resource == "population":
 		var population_totals: Dictionary = ECONOMY.empire_totals(state, local_player.call())
-		var lines: PackedStringArray = ["Population · %s people" % UI_TEXT.compact_amount(float(population_totals["population"])), "Residents: %s · Ships: %s · Embarking: %s" % [UI_TEXT.compact_amount(float(population_totals["resident_population"])), UI_TEXT.compact_amount(float(population_totals["ship_population"])), UI_TEXT.compact_amount(float(population_totals["embarking_population"]))], "Current local growth (people/yr)"]
+		var lines: PackedStringArray = ["Population · %s people" % UI_TEXT.compact_amount(float(population_totals["population"])), "Residents: %s · Ships: %s · Embarking: %s" % [UI_TEXT.compact_amount(float(population_totals["resident_population"])), UI_TEXT.compact_amount(float(population_totals["ship_population"])), UI_TEXT.compact_amount(float(population_totals["embarking_population"]))], "System · Population · Growth/yr"]
 		var ceiling: float = 0.0
 		for system in state["planets"]:
 			if int(system["owner"]) == local_player.call():
@@ -219,17 +219,18 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 				continue
 			var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 			var crew: float = float(p.get("crew_rate", 0.0))
-			lines.append("%s · %.0f · %+.2f/yr\n  %+.2f demographic · %+.2f crews · %+.1f%% overpopulation · %+.1f%% food reserve" % [system_name.call(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p))])
+			lines.append("%s · %.0f · %+.2f/yr\n  %+.2f growth · %+.2f crew · %+.1f%% crowding · %+.1f%% food" % [system_name.call(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p))])
 		return "\n".join(lines)
 	var totals: Dictionary = ECONOMY.empire_totals(state, local_player.call())
 	var lines: PackedStringArray = ["%s  ·  %.2f t stored" % [resource, float(totals["stock"][resource])],
 		"%.2f t in transit  /  %.0f t storage" % [float(totals["cargo"][resource]), float(totals["storage_reference"][resource])],
-		"Empire net: %+.2f t/yr" % _empire_resource_delta(state, resource)]
+		"Net: %+.2f t/yr" % _empire_resource_delta(state, resource)]
+	lines.append("System · Net | Production | Demand (t/yr)")
 	for i in range((state.get("planets", []) as Array).size()):
 		var p: Dictionary = state["planets"][i]
 		if int(p["owner"]) != local_player.call():
 			continue
-		lines.append("%s  %+.2f t/yr · %.2f production / %.2f demand" % [system_name.call(i), resource_delta(p, resource), ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource)])
+		lines.append("%s  %+.2f | %.2f | %.2f" % [system_name.call(i), resource_delta(p, resource), ECONOMY.rate(p, resource), ECONOMY.consumption(p, resource)])
 	return "\n".join(lines)
 
 func _local_breakdown(p: Dictionary, resource: String, selected: int) -> String:
@@ -239,7 +240,7 @@ func _local_breakdown(p: Dictionary, resource: String, selected: int) -> String:
 		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nFood reserve growth penalty: %+.1f%% (%.2f / %.0f t for full growth)\nOrganics: %.2f produced / %.2f consumed per year\nEco-Housing: %.0f / %.0f residents · +%.2f t/yr Organics" % [system_name.call(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p)), float(p["stock"]["Organics"]), ECONOMY.POPULATION_FOOD_RESERVE, ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics"), ECONOMY.eco_population(p), ECONOMY.eco_capacity(p), ECONOMY.eco_organics(p)]
 	var potential: float = ECONOMY.rate(p, resource)
 	var demand: float = ECONOMY.consumption(p, resource)
-	return "%s · %.2f t stored\nProduction: %.2f t/yr\nDemand: %.2f t/yr\nNet: %+.2f t/yr\nOutput: %.1f%% of baseline" % [resource, float(p["stock"][resource]), potential, demand, potential - demand, 100.0 * ECONOMY.production_modifier(p, resource)]
+	return "%s · %.2f t stored\nProduction: %.2f t/yr\nDemand: %.2f t/yr\nNet: %+.2f t/yr\nOutput: %.1f%%" % [resource, float(p["stock"][resource]), potential, demand, potential - demand, 100.0 * ECONOMY.production_modifier(p, resource)]
 
 func update_hover(owner: Control, codex: Window, station_details: VBoxContainer, overview_panel: PanelContainer, population_label: Label, production_values: Dictionary, selected: int, planet_query: Callable) -> void:
 	if not is_instance_valid(resource_hover_panel):

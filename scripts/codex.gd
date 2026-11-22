@@ -258,13 +258,13 @@ func _flow(names: Array) -> void:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
-func _recipe(cost: Dictionary) -> String:
+func _recipe(cost: Dictionary, kind: String = "") -> String:
 	var values: PackedStringArray = []
 	for resource in E.RESOURCES:
 		if cost.has(resource):
 			values.append("%.0f %s" % [float(cost[resource]), resource])
 	if not cost.is_empty():
-		values.append("%.0f GC" % E.construction_credit_cost(cost))
+		values.append("%.0f GC" % E.construction_credit_cost(cost, kind))
 	return " · ".join(values)
 
 func _resource_card(resource: String, description: String, display_name: String = "") -> void:
@@ -301,7 +301,7 @@ func _resources() -> void:
 		rows.append([r, "%.0f t" % float(E.STARTING_STOCK[r])])
 	_table(["Resource", "Stock"], rows)
 	_resource_card("GC", "Empire-wide currency. Start with %.0f GC; annual taxes equal %.1f%% of resident population. Ship crews are excluded. The gold icon marks credit costs and the HUD balance; the rate below is net taxes minus fleet upkeep." % [E.STARTING_GC, E.RESIDENT_TAX_RATE * 100.0], "Galactic Credits (GC)")
-	_body("Construction reserves GC and local materials immediately. Fee: %.0f%% of reference material value (rounded up). Cancel for a full GC refund; destroyed projects lose their fee. Colony transformation is prepaid; Warp Gates cost %.0f GC plus antimatter." % [E.CONSTRUCTION_CREDIT_FRACTION * 100.0, E.WARP_GATE_CREDIT_COST])
+	_body("Construction reserves GC and local materials immediately. Base fee: %.0f%% of material value (rounded up); small/medium/large ships pay 2×/3×/4×. Cancel for a full GC refund; destroyed projects lose their fee. Colony transformation is prepaid; Warp Gates cost %.0f GC plus antimatter." % [E.CONSTRUCTION_CREDIT_FRACTION * 100.0, E.WARP_GATE_CREDIT_COST])
 	_body("Completed ships require continuous GC upkeep. Taxes pay first, civilian ships before military ships. Unpaid wages trigger warnings; payment restores good standing. Stations and gates are upkeep-free.")
 	_body("After %.0f unpaid years, each ship has a %.1f%% chance per %.0f years of going rogue. It becomes neutral and leaves your control with its cargo and crew. No war is declared." % [E.ROGUE_GRACE_YEARS, E.ROGUE_CHANCE * 100.0, E.ROGUE_CHECK_YEARS])
 	_section("Raw antimatter")
@@ -425,7 +425,7 @@ func _ships() -> void:
 	_body("Small yards build Harvesters, Fighters and Scouts; Medium adds Freighters, Colonies and Cruisers; Large adds Science vessels and Destroyers. AI fleets build and deploy Cruisers and Destroyers as their economy matures. Scouts have one blaster, twice fighter speed and half fighter HP. Start with one Freighter. Materials come from the local station; credits come from the empire treasury. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship details show crew, armed hull kills, cargo handling for cargo ships and Colony food production. Fighters, Cruisers, Destroyers and Scouts have no holds. Crew embarks gradually; an underpopulated station may be unable to start or resume an order. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
 	for kind in E.SHIP_KINDS:
-		rows.append([UI_TEXT.ship_kind_name(kind), E.size_name(E.ship_size(kind)), _recipe(E._cost(kind, 1)), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(E.ship_size(kind)))])
+		rows.append([UI_TEXT.ship_kind_name(kind), E.size_name(E.ship_size(kind)), _recipe(E._cost(kind, 1), kind), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(E.ship_size(kind)))])
 	_table(["Ship", "Class", "Cost", "Crew", "Time (min. yard)"], rows)
 	_section("Annual upkeep")
 	rows = []

@@ -437,13 +437,13 @@ static func raw_antimatter_totals(state: Dictionary, player: int) -> Dictionary:
 static func credit_balance(state: Dictionary, player: int) -> float:
 	return float(state.get("galactic_credits", {}).get(player, 0.0))
 
-static func construction_credit_cost(materials: Dictionary) -> float:
+static func construction_credit_cost(materials: Dictionary, kind: String = "") -> float:
 	if materials.is_empty():
 		return 0.0
 	var value: float = 0.0
 	for resource in CONSTRUCTION_REFERENCE_VALUES:
 		value += float(materials.get(resource, 0.0)) * float(CONSTRUCTION_REFERENCE_VALUES[resource])
-	return maxf(1.0, ceilf(value * CONSTRUCTION_CREDIT_FRACTION))
+	return maxf(1.0, ceilf(value * CONSTRUCTION_CREDIT_FRACTION)) * (float(ship_size(kind) + 1) if SHIP_KINDS.has(kind) else 1.0)
 
 static func can_pay_credits(state: Dictionary, player: int, amount: float) -> bool:
 	return player > 0 and state.get("galactic_credits", {}).has(player) and is_finite(amount) and amount >= 0.0 and credit_balance(state, player) >= amount
@@ -458,8 +458,8 @@ static func _refund_credits(state: Dictionary, player: int, amount: float) -> vo
 	if state.get("galactic_credits", {}).has(player) and is_finite(amount) and amount > 0.0:
 		state["galactic_credits"][player] = credit_balance(state, player) + amount
 
-static func construction_affordable(state: Dictionary, p: Dictionary, cost: Dictionary) -> bool:
-	return affordable(p, cost) and can_pay_credits(state, int(p["owner"]), construction_credit_cost(cost))
+static func construction_affordable(state: Dictionary, p: Dictionary, cost: Dictionary, kind: String = "") -> bool:
+	return affordable(p, cost) and can_pay_credits(state, int(p["owner"]), construction_credit_cost(cost, kind))
 
 static func resident_tax_income(state: Dictionary, player: int) -> float:
 	var total: float = 0.0
@@ -1299,7 +1299,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 			level = int(p["levels"][target]) + 1
 		_: return false
 	var cost: Dictionary = building_cost(p, target) if kind == "economy_building" else construction_cost(p, kind, level)
-	var gc: float = construction_credit_cost(cost)
+	var gc: float = construction_credit_cost(cost, kind)
 	if not affordable(p, cost) or not _pay_credits(state, player, gc):
 		return false
 	var paid: Dictionary = empty_stock()
@@ -7217,7 +7217,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 				if affordable(p, building_cost(p, resource)) and enqueue(state, player, index, "economy", resource):
 					break
 			continue
-		if not can_pay_credits(state, player, construction_credit_cost(price)):
+		if not can_pay_credits(state, player, construction_credit_cost(price, action)):
 			continue
 		if float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
 			continue

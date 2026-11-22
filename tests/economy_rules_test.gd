@@ -1372,8 +1372,8 @@ func _test_galactic_credits() -> void:
 func _test_construction_credits() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
 	var home: Dictionary = state["planets"][0]
-	var fee: float = ECON.construction_credit_cost(ECON.construction_cost(home, "fighter", 1))
-	assert(fee == 275.0)
+	var fee: float = ECON.construction_credit_cost(ECON.construction_cost(home, "fighter", 1), "fighter")
+	assert(fee == 550.0)
 	state["galactic_credits"][1] = fee - 1.0
 	var before: Dictionary = home["stock"].duplicate()
 	var next_id: int = int(state["next_id"])
