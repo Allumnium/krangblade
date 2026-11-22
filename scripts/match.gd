@@ -509,7 +509,7 @@ func _build_command_deck() -> void:
 	# Both wings use the same fixed width; only the center expands.
 	inspector_panel.size_flags_horizontal = Control.SIZE_FILL
 	inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
+	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#28466100"), 3, 3))
 	developer_tools.build_perf(self, lens_column, _button, _label, _command_icon, LENS_STRIP_WIDTH)
 
 
@@ -530,7 +530,7 @@ func _build_selection_overview() -> VBoxContainer:
 	console_center.add_child(overview_panel)
 	overview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	overview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	overview_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
+	overview_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#28466100"), 3, 3))
 	var selection_content := VBoxContainer.new()
 	overview_panel.add_child(selection_content)
 	var selection_row := HBoxContainer.new()
@@ -769,7 +769,7 @@ func _layout_console() -> void:
 	if not is_instance_valid(console_panel) or not is_instance_valid(station_commands):
 		return
 	# Keep a stable, useful map at both normal and small window sizes.
-	var height: float = roundf(minf(clampf(size.y * 0.36, 220.0, 320.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0)))
+	var height: float = roundf(0.9 * minf(clampf(size.y * 0.36, 220.0, 320.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0)))
 	console_panel.offset_top = -8.0 - height
 	# Draw the space scene behind the HUD rather than clipping it at a
 	# horizontal line. Camera framing still uses the unobstructed play area.
@@ -829,7 +829,7 @@ func _draw_console_profile() -> void:
 	for rect in rects:
 		if rect.has_area():
 			console_profile.draw_rect(rect, fill)
-			console_profile.draw_rect(rect.grow(-0.5), edge, false, 1.0)
+			console_profile.draw_rect(rect.grow(-0.5), Color(edge, 0.35), false, 1.0)
 
 func _layout_command_grids() -> void:
 	var width: float = inspector_panel.size.x - 34.0
@@ -1011,8 +1011,8 @@ func _build_centered_queue(parent: Container) -> HFlowContainer:
 	queue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# Center the flow's minimum-height block in the space below the header.
 	# Filling the width lets each wrapped line stay centered independently.
-	queue.size_flags_vertical = Control.SIZE_EXPAND | Control.SIZE_SHRINK_CENTER
-	queue.alignment = FlowContainer.ALIGNMENT_CENTER
+	queue.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	queue.alignment = FlowContainer.ALIGNMENT_BEGIN
 	queue.add_theme_constant_override("h_separation", 6)
 	queue.add_theme_constant_override("v_separation", 6)
 	parent.add_child(queue)
@@ -1056,7 +1056,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	for i in range(8):
 		yard_row_spacers.append(command_card_ui.add_spacer(grid))
 	var station_button := _button("", _select_yard_station, grid)
-	command_card_ui.set_face(station_button, "Select Space\nStation", command_card_ui.icon("select_station"))
+	command_card_ui.set_face(station_button, "Station", command_card_ui.icon("select_station"))
 	command_card_ui.set_hint(station_button, "Select parent station")
 	hotkeys.register(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
 	var navigation_spacer: Control = command_card_ui.add_spacer(grid)
@@ -4273,10 +4273,10 @@ func _build_global_selection_strip() -> void:
 	hotkeys.register(empire_button, KEY_F4, "General", "empire", "Empire")
 	empire_ui.build(self, session, _me, _empire_color, hull_art.selection_portrait_icon, _label)
 	for button in global_selection_strip.get_children():
-		button.custom_minimum_size = Vector2(44, 44)
+		button.custom_minimum_size = Vector2(44, 26)
 		var caption: Label = button.get_meta("caption")
 		caption.add_theme_font_size_override("font_size", 9)
-		caption.clip_text = true
+		caption.hide()
 	global_selection_strip.resized.connect(_layout_control_group_strip)
 	_layout_control_group_strip()
 

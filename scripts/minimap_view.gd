@@ -121,7 +121,6 @@ func order_hint(mouse: InputEventMouseButton, state: Dictionary, pending_command
 func draw(selected: int, selected_units: Array[int], selected_field: int) -> void:
 	var surface := Rect2(Vector2.ZERO, minimap.size)
 	minimap.draw_rect(surface, HUD.CONSOLE_BACKGROUND)
-	minimap.draw_rect(surface.grow(-0.5), Color("#345570"), false, 1.0)
 	var state: Dictionary = state_query.call()
 	if state.is_empty() or minimap.size.x < 12.0 or minimap.size.y < 12.0:
 		return
@@ -144,7 +143,7 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 		if known[i] and i < territory_view.tints.size() and territory_view.tints[i].a > 0.0:
 			var radius: float = clampf(territory_view.radius * area.size.x / map_size.call().x, 3.0, 12.0) * (1.0 if i < count else 0.68)
 			var influence: Color = territory_view.tints[i]
-			minimap.draw_circle(locations[i], radius, Color(influence, 0.17 * influence.a))
+			minimap.draw_circle(locations[i], radius, Color(influence, 0.30 * influence.a))
 	var edges: Array = graph["edges"]
 	var layout: Dictionary = ECONOMY.highway_regions(graph)
 	for i in range(edges.size()):
@@ -155,16 +154,16 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 		for j in range(sections):
 			var start: Vector2 = locations[a].lerp(locations[b], float(j) / sections)
 			var finish: Vector2 = locations[a].lerp(locations[b], float(j + 1) / sections)
-			var tint: Color = Color("#39546c") if known[a] and known[b] else Color("#182b3b")
+			var tint: Color = Color("#69869e") if known[a] and known[b] else Color("#182b3b")
 			var weight_index: int = int(layout["starts"][i]) + j
 			if known[a] and known[b] and weight_index < territory_view.tints.size():
 				var influence: Color = territory_view.tints[weight_index]
 				if influence.a > 0.0:
-					minimap.draw_line(start, finish, Color(influence, 0.25 * influence.a), width, true)
+					minimap.draw_line(start, finish, Color(influence, 0.45 * influence.a), width, true)
 				tint = tint.lerp(Color(influence, 1.0), influence.a)
 			minimap.draw_line(start, finish, tint, 1.0, true)
 	for i in range(points.size()):
-		var tint := Color("#34485a")
+		var tint := Color("#40566b")
 		if i < count:
 			var owner: int = int(state["planets"][i]["owner"])
 			if known[i] and fog_visible.call(points[i]):
@@ -195,7 +194,7 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 		var world: Vector2 = ship_motion.world_position(ship, points, session)
 		var point: Vector2 = _minimap_point(world, area)
 		if area.has_point(point):
-			minimap.draw_circle(point, 1.5, empire_color.call(int(ship["owner"])))
+			minimap.draw_circle(point, 2.0, empire_color.call(int(ship["owner"])).lightened(0.2))
 			if selected_units.has(id):
 				minimap.draw_arc(point, 2.6, 0.0, TAU, 10, Color.WHITE, 1.0, true)
 	var corner: Vector2 = _minimap_point(world_point.call(Vector2.ZERO), area)
