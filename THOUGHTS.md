@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.15: Extract live/explored cells, revision and fog image ownership plus map exterior fog drawing into fog_of_war.gd. Match retains camera transforms, territory shader binding and ship visibility query; minimap reads the same mask. Preserve revision components, colors, cell size, update semantics and per-match lifetime. No authority or network changes, Codex unchanged. Static review only; Godot/visual/performance/peer tests pending.
+
 - v0.89.14: User screenshot confirmed full-height detail panel and duplicate cost popup. Replace content-sized PanelContainer with fixed Panel and non-fitting RichTextLabel; 55% deck height, 65% maximum, explicitly positioned flush above command wing and clipped. Inline hotkey, graphical costs/yields, compact adaptive font. All actual recipe-bearing buttons are command cards; remove native custom tooltip callback and obsolete fast-tooltip flag entirely. Correct live Trade threshold refresh that wrote native tooltip_text. Static review only; check narrow-window text overflow, visual anchoring and peer tests in Godot.
 
 - v0.89.13: Extract authored hull outlines/panels, vertex conversions, freighter bay positions and four texture caches into hull_art.gd; match continues drawing and batching using the same geometry. Preserve per-match lifetime, cache keys, SVGs, scale values and shield classification. Static source/reference/indentation review; Godot parse, import, visual and peer checks pending. No Codex changes needed.

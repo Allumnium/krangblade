@@ -8,6 +8,7 @@ const TradeRange = preload("res://scripts/trade_range.gd")
 const COMMAND_CARD_UI = preload("res://scripts/command_card_ui.gd")
 const COMMAND_HOTKEYS = preload("res://scripts/command_hotkeys.gd")
 const HULL_ART = preload("res://scripts/hull_art.gd")
+const FOG_OF_WAR = preload("res://scripts/fog_of_war.gd")
 const UI_COMMAND_DETAILS = {
 	"move": "Choose a destination in a discovered region. Cross sectors along highways. Shift queues the order.",
 	"stop": "Cancel current orders and stop. Shift queues the stop.",
@@ -1189,10 +1190,10 @@ func _draw_minimap() -> void:
 		var point: Vector2 = _minimap_point(pile["position"], area)
 		if area.has_point(point):
 			minimap.draw_circle(point, 1.0, HUD.COLORS[pile["resource"]])
-	if fog_texture != null:
+	if fog_state.texture != null:
 		var corner: Vector2 = _minimap_point(Vector2.ZERO, area)
 		var far: Vector2 = _minimap_point(_map_size(), area)
-		minimap.draw_texture_rect_region(fog_texture, Rect2(corner, far - corner), Rect2(Vector2.ZERO, _map_size() / ECONOMY.VISION_CELL))
+		minimap.draw_texture_rect_region(fog_state.texture, Rect2(corner, far - corner), Rect2(Vector2.ZERO, _map_size() / ECONOMY.VISION_CELL))
 	# Mirror the main map's live hull visibility and interpolation; do not
 	# reveal undiscovered system ownership.
 	for ship in state["ships"]:
@@ -1940,69 +1941,25 @@ func _build_fleet_cargo_row() -> void:
 		pair.add_child(amount)
 		fleet_cargo_labels[resource] = amount
 
-var fog_live: Dictionary = {}
-var fog_explored: Dictionary = {}
-var fog_texture: ImageTexture
-var fog_origin := Vector2.ZERO
-var fog_extent := Vector2.ZERO
-var fog_revision: Array = []
+var fog_state := FOG_OF_WAR.new()
 var fog_overlay: Control
 var sector_name_overlay: Control
 
 func _update_fog(state: Dictionary) -> void:
 	if state.is_empty():
 		return
-	var team: int = ECONOMY._combat_group(state, _me())
-	var revision: Array = [state.get("elapsed"), session.get("motion_revision"), team, state["ships"].size(), state.get("diplomacy_revision", 0)]
-	if revision == fog_revision:
-		return
-	fog_revision = revision
-	fog_live = ECONOMY.team_vision(state, team)
-	fog_explored.merge(fog_live, true)
-	var cell: float = ECONOMY.VISION_CELL
-	var start := Vector2i.ZERO
-	var finish: Vector2i = ECONOMY.vision_cell(_map_size())
-	var dimensions: Vector2i = finish - start + Vector2i.ONE
-	var image := Image.create(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.015, 0.025, 0.04, 0.96))
-	for key in fog_explored:
-		var pixel: Vector2i = key - start
-		if Rect2i(Vector2i.ZERO, dimensions).has_point(pixel):
-			image.set_pixelv(pixel, Color(0.015, 0.025, 0.04, 0.62))
-	for key in fog_live:
-		var pixel: Vector2i = key - start
-		if Rect2i(Vector2i.ZERO, dimensions).has_point(pixel):
-			image.set_pixelv(pixel, Color(0.0, 0.0, 0.0, 0.0))
-	if fog_texture == null or fog_texture.get_size() != Vector2(dimensions):
-		fog_texture = ImageTexture.create_from_image(image)
-	else:
-		fog_texture.update(image)
-	territory_material.set_shader_parameter("fog_data", fog_texture)
-	territory_material.set_shader_parameter("fog_uv_scale", _map_size() / (Vector2(dimensions) * cell))
-	territory_material.set_shader_parameter("fog_ready", true)
-	fog_origin = Vector2(start) * cell
-	fog_extent = Vector2(dimensions) * cell
+	if fog_state.update(state, _me(), session.get("motion_revision"), _map_size()):
+		territory_material.set_shader_parameter("fog_data", fog_state.texture)
+		territory_material.set_shader_parameter("fog_uv_scale", _map_size() / fog_state.extent)
+		territory_material.set_shader_parameter("fog_ready", true)
 
 func _fog_visible(point: Vector2) -> bool:
-	return point.is_finite() and Rect2(Vector2.ZERO, _map_size()).has_point(point) and fog_live.has(ECONOMY.vision_cell(point))
+	return fog_state.is_visible(point, _map_size())
 
 func _draw_fog() -> void:
-	if fog_texture == null:
+	if fog_state.texture == null:
 		return
-	var bounds := Rect2(Vector2.ZERO, map_canvas.size)
-	var map_rect := Rect2(_screen_point(Vector2.ZERO), _map_size() * _fit() * zoom)
-	var inside: Rect2 = bounds.intersection(map_rect)
-	var dark := Color(0.015, 0.025, 0.04, 0.96)
-	if not inside.has_area():
-		fog_overlay.draw_rect(bounds, dark)
-		return
-	# Cover every exterior pixel, independent of camera zoom or pan.
-	fog_overlay.draw_rect(Rect2(bounds.position, Vector2(bounds.size.x, inside.position.y)), dark)
-	fog_overlay.draw_rect(Rect2(Vector2(0, inside.end.y), Vector2(bounds.size.x, bounds.end.y - inside.end.y)), dark)
-	fog_overlay.draw_rect(Rect2(Vector2(0, inside.position.y), Vector2(inside.position.x, inside.size.y)), dark)
-	fog_overlay.draw_rect(Rect2(Vector2(inside.end.x, inside.position.y), Vector2(bounds.end.x - inside.end.x, inside.size.y)), dark)
-	var source := Rect2(Vector2.ZERO, _map_size() / ECONOMY.VISION_CELL)
-	fog_overlay.draw_texture_rect_region(fog_texture, map_rect, source)
+	fog_state.draw(fog_overlay, Rect2(Vector2.ZERO, map_canvas.size), Rect2(_screen_point(Vector2.ZERO), _map_size() * _fit() * zoom), _map_size())
 
 # Names are static generated map geography, not live tactical information.
 func _draw_sector_names() -> void:
