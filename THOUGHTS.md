@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.91.2: Fix the reported _launch_to_rally Array-to-Array[int] runtime error from v0.91.1: _rally_path constructs one explicitly typed integer array on every return branch. Extend existing shipyard rally semantic fixture for same-system, remote and invalid endpoints, plus direct remote launch travel. Runtime/ENet validation pending.
+
 - v0.91.1: Stage 2 free-space navigation: military deployments, AI fleet allocation/redirects, repair travel and launched rally movement now use direct destinations. Strategic distance estimates use actual hull positions; the legacy distance/next dictionary remains a compatibility adapter. Coordinated formations use their existing shared advance only when aligned; off-axis groups approach destination slots directly. Shipyard rally target eligibility remains unchanged. Civilian logistics, colonization, scout exploration and tactical proximity migration remain open. Runtime, benchmark and ENet validation pending.
 
 - v0.91.0: Stage 1 free-space navigation: exact position/formation, patrol, guard, follow and manual service travel use straight-line steering to bounded coordinates, regardless of discovery at the destination or territory influence. Known POIs are bookkeeping anchors only. Preserve target discovery/ownership checks, arrival, docking and queue semantics. Legacy POI routing, autonomous logistics, tactical sector restrictions and map graph remain pending migration. Runtime and ENet validation pending.

@@ -43,6 +43,12 @@ func _test_shipyard_rally() -> void:
 	system["yards"].append({"level": 1, "job": -1, "hp": ECON.YARD_HP})
 	for resource in ECON.RESOURCES:
 		system["stock"][resource] = 10000.0
+	# All branches must produce an actual typed integer array, including
+	# same-system launches, intersystem launches and invalid endpoints.
+	var local_path: Array[int] = ECON._rally_path(state, 0, 0)
+	var remote_path: Array[int] = ECON._rally_path(state, 0, 1)
+	var invalid_path: Array[int] = ECON._rally_path(state, 0, 2)
+	assert(local_path == [0] and remote_path == [0, 1] and invalid_path.is_empty())
 	var point := Vector2(100, 100)
 	assert(not ECON.set_shipyard_rally(state, 2, 0, 1, 0, point))
 	assert(not ECON.set_shipyard_rally(state, 1, 0, 99, 0, point))
@@ -57,6 +63,13 @@ func _test_shipyard_rally() -> void:
 	ECON._finish(state, 0, system, job)
 	var craft: Dictionary = state["ships"].back()
 	assert(craft.has("launch_rally") and not bool(craft.get("move_only", false)))
+	var remote_craft: Dictionary = craft.duplicate(true)
+	var remote_start: Vector2 = remote_craft["position"]
+	var remote_point: Vector2 = map["points"][1] + Vector2(0, 100)
+	ECON._launch_to_rally(state, remote_craft, {"node": 1, "point": remote_point})
+	assert(remote_craft["route"] == [1] and remote_craft["launch_rally"]["point"] == remote_point)
+	assert(ECON._work_launch_rally(state, remote_craft, 0.1))
+	assert((remote_craft["position"] as Vector2).is_equal_approx(remote_start.move_toward(remote_point, ECON.ship_speed("fighter") * 0.1)))
 	var graph: Dictionary = ECON.military_graph(state)
 	var enemy: Dictionary = {"id": 990001, "kind": "fighter", "owner": 2, "origin": 1, "at": 0, "position": (craft["position"] as Vector2) + Vector2.RIGHT * ECON.LASER_RANGE * 0.85, "route": [], "leg": 0.0, "dest": 0, "hp": ECON.SHIP_HP}
 	state["ships"] = [craft, enemy]
