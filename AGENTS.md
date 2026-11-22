@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.93.0: Double field radius (fourfold area), quadruple rock count using original rock sizes; expand placement search. Non-miners detour around conservative field disks during shared navigation. Interior target handling, formation/collision bypasses, depletion, map placement and ENet require further verification; runtime pending.
+
 - v0.92.1: Send Colony displays Colony En Route and prevents duplicate automatic dispatch to the same world. Nearest available selection accepts local work and autonomous cargo delivery, excluding assigned colony travel, other sector routes and retreat. Host chooses using existing request. Verify rerouting, cargo retention, cancellation, arrival and ENet; runtime pending.
 
 - v0.92.0: Completed infrastructure grants live vision over its full compact territory influence support (including merged claims) plus 160 world units. Preserve existing ship/structure sensors, cloak and alliance vision permissions. Uses shared radial reach and cached map radius; verify fog, discovery, loss of infrastructure and ENet. Runtime pending.

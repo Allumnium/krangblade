@@ -277,7 +277,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 				break
 		if not remote:
 			continue
-		var field: Dictionary = _field_at(center, 48.0, points, edges, fields, degrees, player_count)
+		var field: Dictionary = _field_at(center, 96.0, points, edges, fields, degrees, player_count)
 		if field.is_empty():
 			continue
 		field.merge({"Metals": 1.0, "Crystals": 1.0, "antimatter": true})
@@ -411,12 +411,12 @@ static func _field_at(center: Vector2, radius: float, points: Array[Vector2], ed
 
 static func _ordinary_field(anchor: int, points: Array[Vector2], edges: Array, fields: Array, degrees: Array[int], rng: RandomNumberGenerator, protected_pair: Array = []) -> Dictionary:
 	var start: float = rng.randf_range(0.0, TAU)
-	for ring in range(3):
+	for ring in range(5):
 		for angle in range(16):
-			var center: Vector2 = points[anchor] + Vector2.from_angle(start + TAU * float(angle) / 16.0) * (150.0 + float(ring) * 60.0)
-			if protected_pair.size() == 2 and Geometry2D.get_closest_point_to_segment(center, protected_pair[0]["position"], protected_pair[1]["position"]).distance_to(center) <= 42.0:
+			var center: Vector2 = points[anchor] + Vector2.from_angle(start + TAU * float(angle) / 16.0) * (190.0 + float(ring) * 60.0)
+			if protected_pair.size() == 2 and Geometry2D.get_closest_point_to_segment(center, protected_pair[0]["position"], protected_pair[1]["position"]).distance_to(center) <= 84.0:
 				continue
-			var field: Dictionary = _field_at(center, 42.0, points, edges, fields, degrees, 0, anchor)
+			var field: Dictionary = _field_at(center, 84.0, points, edges, fields, degrees, 0, anchor)
 			if not field.is_empty():
 				field.merge({"Metals": rng.randf_range(1.0, 2.0), "Crystals": rng.randf_range(1.0, 2.0)})
 				return field
@@ -475,7 +475,7 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		outline.append(center + (Vector2.from_angle(angle) * Vector2(1.0, flatten) * radius * length).rotated(rotation))
 	field["outline"] = outline
 	var chunks: Array = []
-	var count: int = clampi(roundi(7.0 + radius / 50.0), 9, 28)
+	var count: int = 4 * clampi(roundi(7.0 + radius / 100.0), 9, 28)
 	var profile: float = rng.randf()
 	var special: bool = bool(field.get("antimatter", false))
 	# Seeded variety: some pure-metal fields, and other fields containing
@@ -506,7 +506,7 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		for vertex in range(7):
 			shape.append(rng.randf_range(0.62, 1.0))
 		chunks.append({"id": i, "position": center + offset, "resource": resource,
-			"remaining": amount, "initial": amount, "radius": radius * rng.randf_range(0.045, 0.085),
+			"remaining": amount, "initial": amount, "radius": radius * 0.5 * rng.randf_range(0.045, 0.085),
 			"rotation": rng.randf_range(0.0, TAU), "shape": shape})
 	# Preserve the generated total while normalizing individual ore amounts.
 	# Otherwise random rock sizes and concentration can exceed the cap.
