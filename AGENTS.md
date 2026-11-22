@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.91.0: Stage 1 free-space navigation: exact position/formation, patrol, guard, follow and manual service travel use straight-line steering to bounded coordinates, regardless of discovery at the destination or territory influence. Known POIs are bookkeeping anchors only. Preserve target discovery/ownership checks, arrival, docking and queue semantics. Legacy POI routing, autonomous logistics, tactical sector restrictions and map graph remain pending migration. Runtime and ENet validation pending.
+
 - v0.90.2: Hide sector and highway borders, minimap grid/lanes and setup preview links; show localized soft player-color presence around visible infrastructure and fleets, shared with minimap. Asteroid boundaries only when selected; sector order outlines become target reticles. Keep existing hidden navigation, influence and tactical warning rules until free-space movement is migrated explicitly. Validate fog/cloak, scale, overlap, large-fleet performance, solo and ENet; visual/runtime validation pending.
 
 - v0.90.0 (hidden rules only; visual borders superseded by v0.90.2): Continuous bounded Voronoi influence map: stable system/field/highway-midpoint sites, cached polygons and shared borders, actual polygon adjacency spillover, matching minimap. Keep existing local tactical disks and highway graph separate; manual shortcuts require full-strength exclusively friendly/allied influence over the whole segment. No new replication fields. Validate map coverage, visuals/fog, boundary ties, route fallback on influence loss, combat/AI, solo/ENet and fleet performance.

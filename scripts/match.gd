@@ -15,7 +15,7 @@ const FOG_OF_WAR = preload("res://scripts/fog_of_war.gd")
 const TERRITORY_VIEW = preload("res://scripts/territory_view.gd")
 const CAMERA_VIEW = preload("res://scripts/camera_view.gd")
 const UI_COMMAND_DETAILS = {
-	"move": "Move to a discovered destination via highways.",
+	"move": "Move directly to any point inside the map.",
 	"stop": "Cancel orders and stop.",
 	"hold": "Hold position; weapons remain active.",
 	"patrol": "Patrol between two points.",
