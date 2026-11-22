@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.44: Diagnostics icon below logistics lens, remove legacy Perf toolbar; production building thresholds 5,000 local residents per target level (was 500). Show local population and precise queued/population blockers. Deposit availability unchanged; Codex derives thresholds from rules.
+
 - v0.89.42: Menu and Codex at top left, year immediately after Codex, resource/credit/population tiles at top right. Control groups centered immediately above the middle selection panel. Center and right command panel backgrounds remain visible and block map input even when selection/actions are absent; contextual content remains conditional.
 
 - v0.89.41: Default Total Conquest Points to collapsed; place both compact +/− toggles directly after header text. Underline OBJECTIVES; keep it expanded by default and collapse independently, hiding category actions and moving scoreboard up. Client-local only.

@@ -100,7 +100,6 @@ var inspector_slot: Control
 var overview_panel: PanelContainer
 var console_panel: PanelContainer
 var minimap: Control
-var time_panel: PanelContainer
 var lens_column: VBoxContainer
 var console_columns: HBoxContainer
 var console_center: VBoxContainer
@@ -509,17 +508,7 @@ func _build_command_deck() -> void:
 	inspector_panel.size_flags_horizontal = Control.SIZE_FILL
 	inspector_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inspector_panel.add_theme_stylebox_override("panel", HUD.surface(HUD.CONSOLE_BACKGROUND, Color("#284661"), 3, 3))
-	# Simulation controls are global, not contextual commands.
-	time_panel = PanelContainer.new()
-	time_panel.z_index = 4
-	add_child(time_panel)
-	time_panel.theme = HUD.compact()
-	time_panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0b1624"), Color("#345570"), 4, 3))
-	time_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	var time_toolbar := HBoxContainer.new()
-	time_toolbar.alignment = BoxContainer.ALIGNMENT_BEGIN
-	time_panel.add_child(time_toolbar)
-	developer_tools.build_perf(self, time_toolbar, _button, _label)
+	developer_tools.build_perf(self, lens_column, _button, _label, _command_icon, LENS_STRIP_WIDTH)
 
 
 func _build_right_body() -> void:
@@ -791,15 +780,10 @@ func _layout_console() -> void:
 	minimap.custom_minimum_size.x = wing_width
 	inspector_slot.custom_minimum_size.x = wing_width
 	inspector_panel.custom_minimum_size.x = wing_width
-	if is_instance_valid(time_panel):
-		time_panel.offset_left = 8.0
-		time_panel.offset_right = 8.0 + wing_width
-		time_panel.offset_bottom = console_panel.offset_top - 3.0
-		time_panel.offset_top = time_panel.offset_bottom - 31.0
 	if is_instance_valid(control_group_strip):
 		_layout_control_group_strip()
 	if is_instance_valid(global_selection_strip):
-		global_selection_strip.position = Vector2(8.0, size.y + console_panel.offset_top - 36.0 - global_selection_strip.size.y)
+		global_selection_strip.position = Vector2(8.0, size.y + console_panel.offset_top - 3.0 - global_selection_strip.size.y)
 	# SC2-style raised wings: minimap and commands use the full deck height;
 	# selection details begin 20% lower, leaving more map visible centrally.
 	console_center_spacer.custom_minimum_size.y = roundf(height * 0.20)
@@ -1298,7 +1282,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			recipe = ECONOMY.building_cost(p, key)
 			eligible = ECONOMY.production_available(p, key)
 			available = ECONOMY.building_available(p, key)
-			description = "Requires %s population\n%s" % [UI_TEXT.compact_amount(float(ECONOMY.building_population(key, current_level + 1))), UI_TEXT.economy_building_effect(p, key)]
+			description = "Requires %s local population (%s present)\n%s" % [UI_TEXT.compact_amount(float(ECONOMY.building_population(key, current_level + 1))), UI_TEXT.compact_amount(float(p["population"])), UI_TEXT.economy_building_effect(p, key)]
 		elif key == "warehouse":
 			var level: int = int(p.get("warehouse_level", 0))
 			current_level = level
@@ -1372,7 +1356,9 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		if not eligible:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nUnavailable")
 		elif not available and ECONOMY.construction_affordable(_state(), p, recipe):
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequirements not met or already queued")
+			var reason: String = ECONOMY.building_blocker(p, key) if key in ECONOMY.RESOURCES else "Requirements not met or already queued"
+			if not reason.is_empty():
+				command_card_ui.set_hint(button, command_card_ui.hint(button) + "\n" + reason)
 		if not repeat_key.is_empty() and eligible:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRight-click: %s repeat" % ("Disable" if auto else "Enable"))
 
@@ -3363,8 +3349,6 @@ func _in_visible_playfield(point: Vector2) -> bool:
 	# The center recess exposes a little more map than the reserved camera
 	# viewport. Include that space but not objects obscured by the console.
 	var global_point: Vector2 = map_canvas.get_global_transform() * point
-	if is_instance_valid(time_panel) and time_panel.get_global_rect().has_point(global_point):
-		return false
 	if is_instance_valid(global_selection_strip) and global_selection_strip.get_global_rect().has_point(global_point):
 		return false
 	if is_instance_valid(control_group_strip) and control_group_strip.get_global_rect().has_point(global_point):
