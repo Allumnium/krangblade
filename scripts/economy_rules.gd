@@ -1268,11 +1268,7 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 	var level: int = 1
 	var station_slot: int = 0
 	match kind:
-		"ship":
-			if not bool(p["home"]):
-				return false
-			target = ""
-		"colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer":
+		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer":
 			target = ""
 		"yard":
 			level = next_shipyard_slot(p)
@@ -1366,7 +1362,7 @@ static func production_modifier(system: Dictionary, resource: String) -> float:
 
 static func _continuous_target(p: Dictionary, key: String) -> Array:
 	if SHIP_KINDS.has(key):
-		return [key, ""] if key != "ship" or bool(p["home"]) else []
+		return [key, ""]
 	if key in ["warehouse", "habitation"]:
 		return [key, ""] if key != "habitation" or has_planets(p) else []
 	if key.begins_with("economy_building:"):
@@ -1499,7 +1495,7 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 
 static func set_yard_autobuild(state: Dictionary, player: int, index: int, slot: int, kind: String, enabled: bool) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
-	if p.is_empty() or slot < 0 or slot >= p["yards"].size() or not SHIP_KINDS.has(kind) or (kind == "ship" and not bool(p["home"])):
+	if p.is_empty() or slot < 0 or slot >= p["yards"].size() or not SHIP_KINDS.has(kind):
 		return false
 	var modes: Array = p["yards"][slot].get("autobuild", [])
 	if enabled and not yard_fits(p, slot, kind):
@@ -7211,7 +7207,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 		if abundance > 0.0 and level == 0:
 			action = "economy"
 			target = "Metals"
-		elif index == home and owned.size() > 1 and counts["ship"] == 0:
+		elif (index == home or has_fitting_yard(p, "ship")) and owned.size() > 1 and counts["ship"] == 0:
 			action = "ship"
 		elif has_yard and owned.size() > 1 and counts["fighter"] < mini(12, owned.size() * 2):
 			action = "fighter"
@@ -7230,7 +7226,7 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 			target = "Metals"
 		elif has_yard and counts["fighter"] < AI_WAVE_MIN:
 			action = "fighter"
-		elif index == home and counts["ship"] < mini(12, owned.size() * 2) and owned.size() > 1:
+		elif (index == home or has_fitting_yard(p, "ship")) and counts["ship"] < mini(12, owned.size() * 2) and owned.size() > 1:
 			action = "ship"
 		elif has_yard and expansion and counts["colony_ship"] < 3 and ship_origin_population_met(p, "colony_ship"):
 			var local_probe: Dictionary = {"kind": "colony_ship", "owner": player, "at": index, "route": []}
@@ -9386,7 +9382,7 @@ static func empire_ship_available(state: Dictionary, player: int, kind: String, 
 	if int(counts["live"].get(kind, 0)) + int(counts["queued"].get(kind, 0)) > 0:
 		return true
 	for p in state["planets"]:
-		if int(p["owner"]) == player and (kind != "ship" or bool(p["home"])) and has_fitting_yard(p, kind):
+		if int(p["owner"]) == player and has_fitting_yard(p, kind):
 			return true
 	return false
 
@@ -9421,7 +9417,7 @@ static func _refill_empire_fleets(state: Dictionary) -> void:
 				continue
 			for index in range(state["planets"].size()):
 				var p: Dictionary = state["planets"][index]
-				if int(p["owner"]) != int(player) or (kind == "ship" and not bool(p["home"])):
+				if int(p["owner"]) != int(player):
 					continue
 				for slot in range(p["yards"].size()):
 					if not shipyard_operational(p, slot) or not yard_fits(p, slot, kind):

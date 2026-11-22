@@ -1379,7 +1379,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	var enable: bool = false
 	for ref in refs:
 		var system: Dictionary = state["planets"][ref.x]
-		if not ECONOMY.yard_fits(system, ref.y, kind) or (kind == "ship" and not bool(system["home"])):
+		if not ECONOMY.yard_fits(system, ref.y, kind):
 			continue
 		eligible.append(ref)
 		enable = enable or not system["yards"][ref.y].get("autobuild", []).has(kind)
@@ -1388,7 +1388,7 @@ func _yard_build_input(event: InputEvent, kind: String, button: Button) -> void:
 	button.accept_event()
 
 func _yard_build_available(system: Dictionary, slot: int, kind: String) -> bool:
-	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.construction_affordable(_state(), system, ECONOMY.construction_cost(system, kind, 1), kind, slot) and (kind != "ship" or bool(system["home"]))
+	return ECONOMY.yard_fits(system, slot, kind) and ECONOMY.shipyard_operational(system, slot) and ECONOMY.shipyard_queue_count(system, slot) < ECONOMY.SHIPYARD_QUEUE_LIMIT and ECONOMY.construction_affordable(_state(), system, ECONOMY.construction_cost(system, kind, 1), kind, slot)
 
 func _build_at_yard(kind: String) -> void:
 	var state: Dictionary = _state()
@@ -1436,7 +1436,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	for kind in ECONOMY.SHIP_KINDS:
 		var button: Button = yard_commands[kind]
 		var recipe: Dictionary = ECONOMY.construction_cost(system, kind, 1)
-		button.disabled = not owned or not ECONOMY.yard_fits(system, selected_yard, kind) or (kind == "ship" and not bool(system["home"]))
+		button.disabled = not owned or not ECONOMY.yard_fits(system, selected_yard, kind)
 		var available: bool = owned and _yard_build_available(system, selected_yard, kind)
 		command_card_ui.set_build_available(button, available)
 		var auto: bool = yard.get("autobuild", []).has(kind)
@@ -1454,9 +1454,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequires %s shipyard (Lv %d)" % [ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_size(kind)])
 		if not operating:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nShipyard offline")
-		if kind == "ship" and not bool(system["home"]):
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRequires home system")
-		elif ECONOMY.shipyard_queue_count(system, selected_yard) >= ECONOMY.SHIPYARD_QUEUE_LIMIT:
+		if ECONOMY.shipyard_queue_count(system, selected_yard) >= ECONOMY.SHIPYARD_QUEUE_LIMIT:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nQueue full (8/8)")
 		command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRight-click: %s autobuild" % ("Disable" if auto else "Enable"))
 	var rally: Dictionary = yard.get("rally", {})
@@ -3198,7 +3196,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 			population_met = population_met or (ECONOMY.yard_fits(system, ref.y, kind) and ECONOMY.ship_origin_population_met(system, kind))
 			if ECONOMY.yard_fits(system, ref.y, kind):
 				crew_available = maxf(crew_available, ECONOMY.available_crew_population(system, ref.y, kind))
-			can_toggle = can_toggle or (ECONOMY.yard_fits(system, ref.y, kind) and (kind != "ship" or bool(system["home"])))
+			can_toggle = can_toggle or ECONOMY.yard_fits(system, ref.y, kind)
 			auto = auto or system["yards"][ref.y].get("autobuild", []).has(kind)
 		var button: Button = yard_commands[kind]
 		button.disabled = not can_toggle

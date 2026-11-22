@@ -650,7 +650,34 @@ func _test_ship_size_classes() -> void:
 	var event: Dictionary = state["cargo_transfers"]["101:102:Metals"]
 	assert(event["from_bay"] == 1 and event["to_bay"] == 2 and event["amount"] == 2.0)
 	assert(bytes_to_var(var_to_bytes(state))["cargo_transfers"] == state["cargo_transfers"])
-	print("PASS: ship classes, yard authority and cargo transfer metadata")
+	# A colony with a Medium yard can construct and automate Freighters.
+	var colony_state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
+	var colony: Dictionary = colony_state["planets"][1]
+	colony["owner"] = 1
+	colony["home"] = false
+	colony["station"] = {"hp": ECON.STATION_HP}
+	colony["population"] = 100000.0
+	colony["yards"] = [{"level": 1, "job": -1, "hp": ECON.YARD_HP, "station_slot": 1}]
+	for resource in ECON.RESOURCES:
+		colony["stock"][resource] = 100000.0
+	assert(not ECON.enqueue(colony_state, 1, 1, "ship", "", 0))
+	colony["yards"][0]["level"] = 2
+	assert(not ECON.enqueue(colony_state, 2, 1, "ship", "", 0))
+	var manual_state: Dictionary = colony_state.duplicate(true)
+	assert(ECON.enqueue(manual_state, 1, 1, "ship", "", 0))
+	var auto_state: Dictionary = colony_state.duplicate(true)
+	assert(ECON.set_yard_autobuild(auto_state, 1, 1, 0, "ship", true))
+	ECON._refill_yard_autobuild(auto_state, 1, auto_state["planets"][1])
+	assert(auto_state["planets"][1]["queue"][0]["kind"] == "ship")
+	var repeat_state: Dictionary = colony_state.duplicate(true)
+	assert(ECON.set_continuous(repeat_state, 1, 1, "ship", true))
+	ECON._refill_continuous(repeat_state, 1, repeat_state["planets"][1])
+	assert(repeat_state["planets"][1]["queue"][0]["kind"] == "ship")
+	colony_state["ships"] = []
+	assert(ECON.set_empire_target(colony_state, 1, "ship", 1))
+	ECON._refill_empire_fleets(colony_state)
+	assert(colony["queue"][0]["kind"] == "ship" and colony["queue"][0]["empire_auto"])
+	print("PASS: ship classes, non-home Freighter construction, yard authority and cargo transfer metadata")
 
 func _test_passive_health() -> void:
 	assert(ECON.ship_max_hp("scout") == 100.0 and ECON.ship_max_hp("fighter") == 200.0)
