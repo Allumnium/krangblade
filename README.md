@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.89.18; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.89.19; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
@@ -35,12 +35,10 @@ Current layout (v0.89.18; update when responsibility moves). Use the named funct
 
 ### Intended dependency direction
 
-```text
-main / match UI ── commands ──> GameSession ── validated dispatch ──> simulation
-       ^                           |                                  |
-       └──── read-only snapshots ──┘                    map / domain rules
-       └──── read-only rule queries (costs, eligibility, relationships)
-```
+- Commands: main / match UI → GameSession → validated simulation dispatch.
+- Snapshots: GameSession → main / match UI (read-only).
+- Rule queries: main / match UI → simulation (read-only costs, eligibility, relationships).
+- Simulation → map / domain rules.
 
 Do not make the simulation depend on UI or network transport. UI and AI must not reimplement authoritative eligibility or costs. Replicas and visual caches are derived; canonical gameplay state is mutated only by host/solo authority. Keep simulation step ordering, seeded randomness and cache lifetimes explicit.
 

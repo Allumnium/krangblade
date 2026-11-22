@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.19: Repeated user screenshot shows whitespace-only changes to the README dependency diagram on project load. Committed file uses LF and space-aligned lines; replace diagram with equivalent unindented Markdown relationships. Likely editor indentation normalization; exact local cause and recurrence not independently verified. No runtime changes.
+
 - v0.89.18: Move camera world center, zoom/follow state, pan, logarithmic zoom, projection and bounds-fitting math into camera_view.gd. Match supplies map/playfield geometry and retains selection tracking, input and redraw ordering. Shared scale constants have one owner. Preserve formulas and camera behavior; no Codex changes required. Godot, visual, performance and peer validation pending.
 
 - v0.89.17: User reported wide hover panel and confusing crystal increments (28.4K empire population vs 17.9K Cyris). Confirmed rate already scales by local station population (farms by planetary labor); two-decimal display hides small increments. Use exact wing width, actual incremental rate/local population first and muted 10k reference second; preserve additional decimals below 0.1. No underlying balance changes. Godot/visual/peer validation pending.
