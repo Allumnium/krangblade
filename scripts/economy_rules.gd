@@ -653,13 +653,7 @@ static func colony_path(state: Dictionary, player: int, ship: Dictionary, target
 		return []
 	if not discovered(state, player, "planets", target):
 		return []
-	var transit: Array[int] = []
-	transit.resize(planets.size())
-	transit.fill(team)
-	if state.has("diplomacy"):
-		transit = _civilian_access(state, teams, team)
-		transit[start] = team
-	return MAP.path(state["map"], transit, team, start, target)
+	return _rally_path(state, start, target)
 
 # Select on the authority, not from a stale client-side dropdown.
 static func colony_en_route(state: Dictionary, player: int, target: int) -> bool:
@@ -682,7 +676,7 @@ static func nearest_idle_colony(state: Dictionary, player: int, target: int) -> 
 		if path.is_empty():
 			continue
 		var pos: Vector2 = ship.get("position", state["map"]["points"][int(ship["at"])])
-		var distance: float = pos.distance_to(state["map"]["points"][path[0]]) + MAP.route_length(state["map"], path)
+		var distance: float = pos.distance_to(state["map"]["points"][target])
 		var id: int = int(ship["id"])
 		if distance < best or (is_equal_approx(distance, best) and (chosen < 0 or id < chosen)):
 			best = distance
@@ -2091,15 +2085,16 @@ static func _civilian_route_safe(state: Dictionary, ship: Dictionary, teams: Arr
 			return false
 	return true
 
+# Route arrays retain only origin and final system for existing job bookkeeping.
 static func _path(state: Dictionary, teams: Array[int], team: int, a: int, b: int, _cache: Dictionary) -> Array[int]:
-	var routes: Dictionary = _cache["civilian_routes"] if _cache.has("civilian_routes") else _civilian_route_cache(state, teams)
-	var key: String = "%d:%d:%d" % [team, a, b]
-	if not routes.has(key):
-		var access: Array[int] = _civilian_access(state, teams, team) if state.has("diplomacy") else teams
-		routes[key] = MAP.path(state["map"], access, team, a, b)
-	var result: Array[int] = []
-	result.assign(routes[key])
-	return result
+	if a < 0 or b < 0 or a >= teams.size() or b >= teams.size() or team <= 0:
+		return []
+	if state.has("diplomacy"):
+		if not _civilian_transit_allowed(state, team, teams[a]) or not _civilian_transit_allowed(state, team, teams[b]):
+			return []
+	elif teams[a] != team or teams[b] != team:
+		return []
+	return _rally_path(state, a, b)
 
 static func _civilian_route_cache(state: Dictionary, teams: Array[int]) -> Dictionary:
 	var map_data: Dictionary = state["map"]
@@ -2323,12 +2318,12 @@ static func _choose_delivery(state: Dictionary, ship: Dictionary, teams: Array[i
 		var first: Array[int] = _path(state, teams, team, here, a, cache)
 		if first.is_empty():
 			continue
-		var first_length: float = MAP.route_length(state["map"], first)
+		var first_length: float = (ship["position"] as Vector2).distance_to(station_position(state, a, float(state["elapsed"])))
 		for b in range(planets.size()):
 			if a == b or teams[b] != team or not _opportunity(planets[a], planets[b]):
 				continue
 			var second: Array[int] = _path(state, teams, team, a, b, cache)
-			var distance: float = first_length + MAP.route_length(state["map"], second)
+			var distance: float = first_length + station_position(state, a, float(state["elapsed"])).distance_to(station_position(state, b, float(state["elapsed"])))
 			if distance < best:
 				best = distance
 				best_source = a
@@ -2358,7 +2353,7 @@ static func _pick_loaded_destination(state: Dictionary, ship: Dictionary, teams:
 		var path: Array[int] = _path(state, teams, team, int(ship["at"]), i, cache)
 		if path.is_empty():
 			continue
-		var distance: float = MAP.route_length(state["map"], path)
+		var distance: float = (ship["position"] as Vector2).distance_to(station_position(state, i, float(state["elapsed"])))
 		if distance < best:
 			best = distance
 			best_dest = i
@@ -2412,9 +2407,7 @@ static func _stage_candidate(state: Dictionary, graph: Dictionary, ship: Diction
 			break
 	if not depot_exists:
 		return {}
-	var distance: float = MAP.route_length(state["map"], path) + (state["map"]["points"][anchor] as Vector2).distance_to(point)
-	if int(ship["at"]) == anchor:
-		distance = (ship["position"] as Vector2).distance_to(point)
+	var distance: float = (ship["position"] as Vector2).distance_to(point)
 	return {"node": node, "anchor": anchor, "point": point, "path": path, "score": distance / maxf(1.0, demand)}
 
 static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, threats: Dictionary, cells: Dictionary) -> bool:
@@ -2497,13 +2490,13 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 			best["salvage_site"] = true
 	if best.is_empty():
 		return false
-	var path: Array[int] = best["path"]
 	best.erase("path")
 	best.erase("score")
 	ship["resource_stage"] = best
 	ship["source"] = -1
 	ship["dest"] = -1
-	_set_route(ship, path)
+	ship["route"] = []
+	ship["leg"] = 0.0
 	ship["navigation_target"] = best["point"]
 	return true
 
@@ -2582,13 +2575,11 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 				ship.erase("resource_stage")
 				ship.erase("resource_loaded_at")
 				return true
-	if not ship["route"].is_empty():
-		_move(state, ship, dt)
-	else:
-		_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, (ship["position"] as Vector2).distance_to(point)))
-		# A staged logistics ship can still collect debris in beam range,
-		# but at its reduced rate. It waits for miners rather than chasing.
-		_work_opportunistic_salvage(state, graph, ship, dt, busy, cells, false, threats)
+	ship["route"] = []
+	ship["leg"] = 0.0
+	_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, (ship["position"] as Vector2).distance_to(point)))
+	# Wait for miners rather than chasing or flying through a star.
+	_work_opportunistic_salvage(state, graph, ship, dt, busy, cells, false, threats)
 	return true
 
 static func _dropoff_budget(ship: Dictionary, dt: float) -> float:
@@ -2749,66 +2740,23 @@ static func _find_chunk(field: Dictionary, id: int) -> Dictionary:
 			return chunk
 	return {}
 
-# One shortest-path tree per source/team per tick. Sparse adjacency avoids
-# scanning every lane for every candidate node and every asteroid field.
+# Harvesters fly directly; system IDs only describe job endpoints.
 static func _mining_path(state: Dictionary, teams: Array[int], team: int, start: int, goal: int, _cache: Dictionary) -> Array[int]:
-	if start < 0 or goal < 0 or start >= teams.size() or goal >= teams.size():
+	if start < 0 or goal < 0 or start >= teams.size() or goal >= teams.size() or team <= 0:
 		return []
 	if not _civilian_transit_allowed(state, team, teams[start]) or not _civilian_transit_allowed(state, team, teams[goal]):
 		return []
-	var cache: Dictionary = _cache["civilian_routes"] if _cache.has("civilian_routes") else _civilian_route_cache(state, teams)
-	var points: Array = state["map"]["points"]
-	if not cache.has("mine:adj"):
-		var adjacency: Array = []
-		for i in range(points.size()):
-			adjacency.append([])
-		for edge in state["map"]["edges"]:
-			adjacency[int(edge[0])].append(int(edge[1]))
-			adjacency[int(edge[1])].append(int(edge[0]))
-		cache["mine:adj"] = adjacency
-	var key: String = "mine:tree:%d:%d" % [team, start]
-	if not cache.has(key):
-		var adjacency: Array = cache["mine:adj"]
-		var distances: Dictionary = {start: 0.0}
-		var previous: Dictionary = {}
-		var open: Array[int] = [start]
-		var visited: Dictionary = {}
-		while not open.is_empty():
-			var current: int = open[0]
-			for candidate in open:
-				if float(distances[candidate]) < float(distances[current]):
-					current = candidate
-			open.erase(current)
-			visited[current] = true
-			for neighbor in adjacency[current]:
-				var next: int = int(neighbor)
-				if visited.has(next) or not _civilian_transit_allowed(state, team, teams[next]):
-					continue
-				var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[next])
-				if distance < float(distances.get(next, INF)):
-					distances[next] = distance
-					previous[next] = current
-					if not open.has(next):
-						open.append(next)
-		cache[key] = previous
-	var previous: Dictionary = cache[key]
-	var route: Array[int] = [goal]
-	var current: int = goal
-	while current != start:
-		if not previous.has(current):
-			return []
-		current = int(previous[current])
-		route.push_front(current)
-	return route
+	return _rally_path(state, start, goal)
 
-static func _mining_depot(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, anchor: int, resource: String, cache: Dictionary) -> int:
+static func _mining_depot(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, anchor: int, resource: String, _cache: Dictionary, point: Vector2 = Vector2.INF) -> int:
 	var best: float = INF
 	var chosen: int = -1
+	var origin: Vector2 = point if point.is_finite() else ship.get("position", state["map"]["points"][anchor])
 	for i in range((state["planets"] as Array).size()):
 		var p: Dictionary = state["planets"][i]
-		if int(p["owner"]) != int(ship["owner"]) or storage_free(p, resource) <= EPS:
+		if int(p["owner"]) != int(ship["owner"]) or not has_station(p) or storage_free(p, resource) <= EPS or not _civilian_transit_allowed(state, team, teams[i]):
 			continue
-		var distance: float = MAP.route_length(state["map"], _mining_path(state, teams, team, i, anchor, cache))
+		var distance: float = origin.distance_to(station_position(state, i, float(state["elapsed"])))
 		if distance < best:
 			best = distance
 			chosen = i
@@ -2905,7 +2853,6 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 	var team: int = _combat_group(state, owner)
 	var best: float = INF
 	var chosen: int = -1
-	var best_path: Array[int] = []
 	var best_chunk: Dictionary = {}
 	var best_anchor: int = -1
 	var assigned: int = int(ship.get("assigned_field", -1))
@@ -2933,28 +2880,21 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 		var access_key: String = "mine:access:%d" % i
 		if not cache.has(access_key):
 			cache[access_key] = field_access_systems(state["map"], field)
-		# A viable entrance in the current system wins over a detour
-		# through another system for this same field.
+		# Access anchors are eligibility metadata, never flight waypoints.
 		var entrances: Array = cache[access_key].duplicate()
 		var here: int = int(ship["at"])
 		if entrances.has(here):
 			entrances.erase(here)
 			entrances.push_front(here)
 		for anchor in entrances:
-			var local_viable: bool = false
 			var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor, cache)
 			if path.is_empty():
 				continue
 			var resources: Array[String] = _mining_resources(state, owner, i)
-			var approach: Vector2 = _service_point(state, ship, anchor)
-			var route_distance: float = MAP.route_length(state["map"], path)
 			var depots: Dictionary = {}
-			var return_distances: Dictionary = {}
 			for resource in resources:
-				var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache)
+				var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache, field["position"])
 				depots[resource] = depot
-				if depot >= 0:
-					return_distances[resource] = MAP.route_length(state["map"], _mining_path(state, teams, team, depot, anchor, cache))
 			for chunk in field.get("chunks", []):
 				if preferred >= 0 and int(chunk["id"]) != preferred:
 					continue
@@ -2963,28 +2903,29 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 				var depot: int = int(depots.get(chunk["resource"], -1))
 				if depot < 0:
 					continue
-				local_viable = true
-				var distance: float = route_distance + approach.distance_to(chunk["position"]) * 2.0 + float(return_distances[chunk["resource"]])
+				var rock: Vector2 = chunk["position"]
+				var distance: float = (ship["position"] as Vector2).distance_to(rock) + rock.distance_to(station_position(state, depot, float(state["elapsed"])))
 				if distance < best:
 					best = distance
 					chosen = i
-					best_path = path
 					best_chunk = chunk
 					best_anchor = anchor
-			if anchor == here and local_viable:
-				break
 	if chosen >= 0:
 		ship["field"] = chosen
 		ship["mining_anchor"] = best_anchor
 		ship["chunk"] = int(best_chunk["id"])
 		var rock: Vector2 = best_chunk["position"]
-		var radial: Vector2 = (_service_point(state, ship, best_anchor) - rock).normalized()
+		var radial: Vector2 = ((ship["position"] as Vector2) - rock).normalized()
 		if radial.is_zero_approx():
 			radial = Vector2.RIGHT
 		ship["mining_rock"] = rock
 		ship["mining_target"] = rock + radial * (float(best_chunk.get("radius", 0.0)) + 12.0)
-		ship["mining_mode"] = "approach"
-		_set_route(ship, best_path)
+		ship["mining_mode"] = "outbound"
+		ship["route"] = []
+		ship["leg"] = 0.0
+		ship["field_leg"] = 0.0
+		ship["source"] = -1
+		ship["dest"] = -1
 
 # Align retries to stable hull-specific slots. Initial searches and explicit
 # reset-to-zero requests remain immediate; subsequent retries are staggered.
@@ -3059,15 +3000,12 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 	var field: Dictionary = state["map"]["fields"][field_index]
 	var anchor: int = int(ship.get("mining_anchor", field["anchor"]))
 	if mode == "approach":
-		if _move(state, ship, dt):
-			var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
-			if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
-				ship["mining_mode"] = "idle"
-				ship["field"] = -1
-				return
-			ship["mining_mode"] = "outbound"
-			ship["field_leg"] = 0.0
-		return
+		# Compatibility with existing fixtures and in-flight jobs: skip the old star leg.
+		ship["route"] = []
+		ship["leg"] = 0.0
+		ship["mining_mode"] = "outbound"
+		ship["field_leg"] = 0.0
+		mode = "outbound"
 	var origin: Vector2 = _service_point(state, ship, anchor)
 	var target: Vector2 = ship["mining_target"]
 	var span: Vector2 = target - origin
@@ -3109,11 +3047,27 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 			ship["mining_mode"] = "return"
 		return
 	if mode == "return":
-		_navigate(ship, origin, ship_speed(str(ship.get("kind", "ship"))) * dt)
-		ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
-		if (ship["position"] as Vector2) == origin:
-			ship["mining_mode"] = "delivery"
-			_unload_miner(state, ship, teams, cache, dt)
+		# Return directly to a useful owned warehouse from the actual rock.
+		ship["mining_mode"] = "delivery"
+		ship["field"] = -1
+		ship["route"] = []
+		ship["leg"] = 0.0
+		ship["dest"] = -1
+		ship["source"] = -1
+		var team: int = _combat_group(state, int(ship["owner"]))
+		for resource in RESOURCES + [ANTIMATTER]:
+			if float(ship["cargo"].get(resource, 0.0)) <= EPS:
+				continue
+			var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache)
+			if depot >= 0:
+				ship["dest"] = depot
+				ship["route"] = [depot]
+				if _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
+					_unload_miner(state, ship, teams, cache, dt)
+				return
+		if _cargo_total(ship) <= EPS:
+			ship["mining_mode"] = "idle"
+			ship["next_mining_search"] = 0.0
 
 static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
 	var here: int = int(ship["at"])
@@ -6128,58 +6082,34 @@ static func command_unload_cargo(state: Dictionary, player: int, ids: Array) -> 
 		changed = true
 	return changed
 
-static func _salvage_depot_route(state: Dictionary, graph: Dictionary, ship: Dictionary, allow_full: bool = false) -> bool:
-	var fighter: bool = ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]
-	var nav: Dictionary = graph if fighter else state["map"]
-	var points: Array = nav["points"]
+static func _salvage_depot_route(state: Dictionary, _graph: Dictionary, ship: Dictionary, allow_full: bool = false) -> bool:
 	var owner: int = int(ship["owner"])
-	var team: int = _combat_group(state, owner)
-	if team == 0:
+	if _combat_group(state, owner) <= 0:
 		return false
-	var allowed: Array[int] = planet_teams(state)
-	allowed.resize(points.size())
-	for node in range(allowed.size()):
-		if node >= state["planets"].size() or _civilian_transit_allowed(state, team, allowed[node]):
-			allowed[node] = team
-	var origins: Array[int] = [int(ship["at"])]
-	var sector: int = local_sector(graph, ship)
-	if sector >= 0 and sector < points.size() and not origins.has(sector):
-		origins.append(sector)
-	if not ship["route"].is_empty() and not origins.has(int(ship["route"][0])):
-		origins.append(int(ship["route"][0]))
 	var best: float = INF
-	var chosen: Array[int] = []
-	for origin in origins:
-		if origin < 0 or origin >= points.size():
+	var chosen: int = -1
+	for node in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][node]
+		if int(system["owner"]) != owner or not has_station(system):
 			continue
-		var access: Array[int] = allowed.duplicate()
-		access[origin] = team
-		for node in range(state["planets"].size()):
-			var p: Dictionary = state["planets"][node]
-			if int(p["owner"]) != owner or not has_station(p):
-				continue
-			var useful: bool = false
-			for resource in RESOURCES + [ANTIMATTER]:
-				if float(ship.get("cargo", {}).get(resource, 0.0)) > EPS and storage_free(p, resource) > EPS:
-					useful = true
-					break
-			if not useful and not allow_full:
-				continue
-			var path: Array[int] = MAP.path(nav, access, team, origin, node)
-			if path.is_empty():
-				continue
-			var distance: float = (ship["position"] as Vector2).distance_to(points[origin]) + MAP.route_length(nav, path)
-			if distance < best:
-				best = distance
-				chosen = path
-	if chosen.is_empty():
+		var useful: bool = false
+		for resource in RESOURCES + [ANTIMATTER]:
+			if float(ship.get("cargo", {}).get(resource, 0.0)) > EPS and storage_free(system, resource) > EPS:
+				useful = true
+				break
+		if not useful and not allow_full:
+			continue
+		var distance: float = (ship["position"] as Vector2).distance_to(station_position(state, node, float(state["elapsed"])))
+		if distance < best:
+			best = distance
+			chosen = node
+	if chosen < 0:
 		return false
-	# Include the actual entry waypoint, not a direct shortcut to its neighbor.
-	ship["route"] = [] if chosen.size() == 1 and int(ship["at"]) == int(chosen.back()) else chosen
+	ship["route"] = [chosen]
 	ship["leg"] = 0.0
 	ship["source"] = -1
-	ship["dest"] = chosen.back()
-	ship["salvage_depot"] = chosen.back()
+	ship["dest"] = chosen
+	ship["salvage_depot"] = chosen
 	if ship["kind"] == "miner":
 		ship["mining_mode"] = "delivery"
 		ship["field"] = -1
@@ -7074,44 +7004,18 @@ static func _dispatch_ai_diplomacy(state: Dictionary) -> void:
 
 static func _ai_colony_target(state: Dictionary, player: int, ship: Dictionary, reserved: Dictionary) -> int:
 	var points: Array = state["map"]["points"]
-	var teams: Array[int] = planet_teams(state)
-	var team: int = _combat_group(state, player)
 	var here: int = int(ship["at"])
-	if team == 0 or ((not _civilian_transit_allowed(state, team, teams[here]) if state.has("diplomacy") else teams[here] != team) and military_home(state, player) >= 0):
-		return -1
-	var adjacency: Array = []
-	for i in range(points.size()):
-		adjacency.append([])
-	for edge in state["map"]["edges"]:
-		adjacency[edge[0]].append(edge[1])
-		adjacency[edge[1]].append(edge[0])
-	var distances: Dictionary = {here: 0.0}
-	var open: Array[int] = [here]
-	var visited: Dictionary = {}
+	var position: Vector2 = ship.get("position", points[here])
 	var best: float = INF
 	var target: int = -1
-	while not open.is_empty():
-		var current: int = open[0]
-		for node in open:
-			if float(distances[node]) < float(distances[current]):
-				current = node
-		open.erase(current)
-		visited[current] = true
-		for node in adjacency[current]:
-			if state.has("diplomacy") and not _civilian_transit_allowed(state, team, teams[node]):
-				continue
-			var distance: float = float(distances[current]) + (points[current] as Vector2).distance_to(points[node])
-			if teams[node] == 0:
-				if not reserved.has(node) and discovered(state, player, "planets", int(node)):
-					var richness: float = float(state["planets"][node]["abundance"].get("Metals", 0.0))
-					var score: float = distance / (1.0 + minf(richness, 2.0) * 0.15) * (1.0 if has_planets(state["planets"][node]) else 1.6)
-					if score < best:
-						best = score
-						target = int(node)
-			if not visited.has(node) and distance < float(distances.get(node, INF)):
-				distances[node] = distance
-				if not open.has(node):
-					open.append(node)
+	for node in range(state["planets"].size()):
+		if reserved.has(node) or colony_path(state, player, ship, node).is_empty():
+			continue
+		var richness: float = float(state["planets"][node]["abundance"].get("Metals", 0.0))
+		var score: float = position.distance_to(points[node]) / (1.0 + minf(richness, 2.0) * 0.15) * (1.0 if has_planets(state["planets"][node]) else 1.6)
+		if score < best:
+			best = score
+			target = node
 	return target
 
 static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
@@ -7968,14 +7872,16 @@ static func _dispatch_explorers(state: Dictionary, graph: Dictionary) -> void:
 		visits[node] = float(state["elapsed"])
 		var best: int = -1
 		var score: float = -INF
-		for candidate in graph["adjacent"][node]:
+		for candidate in range(state["planets"].size()):
+			if candidate == node:
+				continue
 			var age: float = minf(600.0, float(state["elapsed"]) - float(visits.get(candidate, -600.0)))
 			var friendly_occupancy: int = int(occupancy.get(Vector2i(team, candidate), 0))
 			if state.has("diplomacy"):
 				for ally in state["teams"]:
 					if int(ally) != team and empires_allied(state, team, int(ally)):
 						friendly_occupancy += int(occupancy.get(Vector2i(int(ally), candidate), 0))
-			var value: float = age - float(friendly_occupancy) * 80.0
+			var value: float = age - float(friendly_occupancy) * 80.0 - (craft["position"] as Vector2).distance_to(graph["points"][candidate]) / maxf(1.0, ship_speed("scout"))
 			if value > score:
 				score = value
 				best = candidate
@@ -8043,33 +7949,19 @@ static func _idle_formation_targets(state: Dictionary, _graph: Dictionary) -> Di
 static func _evacuate_civilian(state: Dictionary, ship: Dictionary, teams: Array[int]) -> bool:
 	var team: int = _combat_group(state, int(ship["owner"]))
 	var miner: bool = ship.get("kind", "") == "miner"
-	var points: Array = state["map"]["points"]
-	_ensure_position(points, ship)
-	var here: int = int(ship["at"])
-	var origins: Array[int] = [here]
-	if not (ship["route"] as Array).is_empty():
-		origins.append(int(ship["route"][0]))
+	_ensure_position(state["map"]["points"], ship)
 	var best: float = INF
-	var chosen: Array[int] = []
 	var destination: int = -1
-	for origin in origins:
-		if state.has("diplomacy") and origin != here and not _civilian_transit_allowed(state, team, teams[origin]):
+	for node in range(teams.size()):
+		var system: Dictionary = state["planets"][node]
+		if teams[node] != team or not has_station(system) or (miner and int(system["owner"]) != int(ship["owner"])):
 			continue
-		var allowed: Array[int] = _civilian_access(state, teams, team) if state.has("diplomacy") else teams.duplicate()
-		allowed[origin] = team
-		for node in range(teams.size()):
-			if teams[node] != team or (miner and int(state["planets"][node]["owner"]) != int(ship["owner"])):
-				continue
-			var path: Array[int] = _mining_path(state, allowed, team, origin, node, {}) if miner and not state.has("diplomacy") else MAP.path(state["map"], allowed, team, origin, node)
-			if path.is_empty():
-				continue
-			var distance: float = (ship["position"] as Vector2).distance_to(points[origin]) + MAP.route_length(state["map"], path)
-			if distance < best:
-				best = distance
-				chosen = path
-				destination = node
-	ship["route"] = chosen
-	ship["leg"] = _lane_progress(points, ship)
+		var distance: float = (ship["position"] as Vector2).distance_to(station_position(state, node, float(state["elapsed"])))
+		if distance < best:
+			best = distance
+			destination = node
+	ship["route"] = [destination] if destination >= 0 else []
+	ship["leg"] = 0.0
 	ship["source"] = -1
 	ship["dest"] = destination
 	if miner:
