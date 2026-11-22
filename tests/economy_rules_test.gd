@@ -792,7 +792,7 @@ func _test_manual_conversion_and_stats() -> void:
 	assert(ECON.issue_unit_order(state, 1, [90001], {"kind": "stop"}, true))
 	assert(colony["order_queue"].size() == 1)
 	assert(not ECON._work_colony(state, colony, 1000.0))
-	assert(colony["position"] == ECON.colony_station_position(state, 1, float(state["elapsed"])))
+	assert(colony["position"].is_equal_approx(ECON.colony_station_position(state, 1, float(state["elapsed"]), float(colony["unit_order"]["orbit_phase"]))))
 	assert(ECON.colony_morphing(colony))
 	assert(not ECON.issue_unit_order(state, 1, [90001], {"kind": "stop"}, false))
 	assert(not ECON.issue_unit_order(state, 1, [90001], {"kind": "stop"}, true))
@@ -806,10 +806,13 @@ func _test_manual_conversion_and_stats() -> void:
 	assert(int(state["planets"][1]["owner"]) == 0 and not ECON.has_station(state["planets"][1]))
 	var replica: Dictionary = bytes_to_var(var_to_bytes(state))
 	assert(is_equal_approx(float(replica["ships"][0]["colony_transform_progress"]), ECON.COLONY_TRANSFORM_TIME - 0.1))
+	assert(replica["ships"][0]["unit_order"]["orbit_phase"] == colony["unit_order"]["orbit_phase"])
+	state["elapsed"] += 0.1
 	assert(ECON._work_colony(state, colony, 0.1))
 	ECON._remove_indexed_hull(state, colony)
 	assert(state["ships"].is_empty() and int(state["planets"][1]["owner"]) == 1)
-	assert(ECON.station_position(state, 1, float(state["elapsed"])) == colony["position"])
+	assert(ECON.station_position(state, 1, float(state["elapsed"])).is_equal_approx(colony["position"]))
+	assert(state["planets"][1]["station"]["orbit_phase"] == colony["unit_order"]["orbit_phase"])
 	var source: Dictionary = {"kind": "miner", "cargo": {"Metals": 4.0}}
 	var target: Dictionary = {"kind": "ship", "cargo": {"Metals": 0.0}}
 	ECON._record_transfer(state, 1, source, 2, target, "Metals", 2.0)
@@ -836,6 +839,14 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	near["route"] = [0]
 	assert(ECON.nearest_idle_colony(state, 1, 2) == 101)
 	assert(ECON.send_colony(state, 1, 101, 2))
+	var star: Vector2 = map["points"][2]
+	var arrival: Vector2 = near["navigation_target"]
+	assert(arrival.x < star.x and is_equal_approx(arrival.y, star.y))
+	assert(arrival.is_equal_approx(ECON.unit_order_point(state, ECON.military_graph(state), near, near["unit_order"])))
+	for direction in [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]:
+		var approach: Vector2 = ECON.colony_approach_position(state, 2, star + direction * 2000.0)
+		assert((approach - star).normalized().is_equal_approx(direction))
+		assert(approach.distance_to(star) <= 145.0 + ECON.EPS)
 	assert(not near.get("retreating", false) and not near.has("repair_site"))
 	assert(ECON.nearest_idle_colony(state, 1, 2) == -1)
 	assert(ECON.nearest_idle_colony(state, 1, 1) == 100)
@@ -863,7 +874,10 @@ func _test_nearest_colony_and_queued_hold() -> void:
 			break
 	assert(far["unit_order"]["kind"] == "colonize" and far["unit_order"]["automatic"] and far["dest"] == 1 and far["route"] == [1])
 	assert(not ECON._work_colony(state, far, 1000.0))
+	var settlement: Vector2 = far["position"]
+	assert(settlement.x < float(map["points"][1].x) and ECON.colony_morphing(far))
 	assert(ECON._work_colony(state, far, ECON.COLONY_TRANSFORM_TIME))
+	assert(ECON.station_position(state, 1, float(state["elapsed"])).is_equal_approx(settlement))
 	assert(int(state["planets"][1]["owner"]) == 1)
 	print("PASS: nearest available colony, queued hold and automatic settlement")
 

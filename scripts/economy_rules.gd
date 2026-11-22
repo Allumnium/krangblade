@@ -755,7 +755,8 @@ static func send_colony(state: Dictionary, player: int, ship_id: int, target: in
 		ship.erase("withdrawal_objective")
 		_set_unit_order(state, ship, {"kind": "colonize", "target": target, "automatic": automatic})
 		ship["dest"] = target
-		ship["navigation_target"] = colony_station_position(state, target, float(state["elapsed"]))
+		_ensure_position(state["map"]["points"], ship)
+		ship["navigation_target"] = colony_approach_position(state, target, ship["position"])
 		ship["return_path"] = path.duplicate()
 		_clear_local_hold(ship)
 		_set_route(ship, path)
@@ -792,6 +793,10 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 	progress["colonies"][at] = true
 	colony["conquest_rewards"] = progress.get("rewards", []).duplicate()
 	colony["station"] = {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()]}
+	# The station inherits the committed morph's orbital phase, not a
+	# predetermined angle on the opposite side of the star.
+	if ship["unit_order"].has("orbit_phase"):
+		colony["station"]["orbit_phase"] = ship["unit_order"]["orbit_phase"]
 	# Settlement transfers the crew exactly once. The founding yard supplies
 	# housing, not an additional free population; planetless residents
 	# remain aboard orbital habitats even when above nominal capacity.
@@ -814,7 +819,7 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool:
 	if colony_morphing(ship):
 		var site: int = int(ship["dest"])
-		var orbit: Vector2 = colony_station_position(state, site, float(state["elapsed"]))
+		var orbit: Vector2 = colony_station_position(state, site, float(state["elapsed"]), float(ship.get("unit_order", {}).get("orbit_phase", INF)))
 		ship["position"] = orbit
 		ship["navigation_target"] = orbit
 		ship["colony_transform_progress"] = minf(COLONY_TRANSFORM_TIME, float(ship["colony_transform_progress"]) + maxf(0.0, dt))
@@ -847,7 +852,8 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 		ship.erase("colony_transform_progress")
 		_set_route(ship, back)
 		return false
-	var point: Vector2 = colony_station_position(state, target, float(state["elapsed"]))
+	_ensure_position(state["map"]["points"], ship)
+	var point: Vector2 = colony_approach_position(state, target, ship["position"])
 	if not _move(state, ship, dt, point, target):
 		ship.erase("colony_transform_progress")
 		return false
@@ -869,6 +875,8 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 			return false
 	# Travel consumes this tick. Assembly discards queued successor orders.
 	ship.erase("order_queue")
+	var center: Vector2 = state["map"]["points"][target]
+	ship["unit_order"]["orbit_phase"] = (point - center).angle() - float(state["elapsed"]) * 0.008
 	ship["colony_transform_progress"] = 0.0
 	return false
 
@@ -1722,12 +1730,27 @@ static func station_position(state: Dictionary, index: int, elapsed: float) -> V
 	return colony_station_position(state, index, elapsed)
 
 # Same orbital geometry before and after settlement, with no launch slide.
-static func colony_station_position(state: Dictionary, index: int, elapsed: float) -> Vector2:
+# Phase is simulation-owned and replicated in the active colonize order
+# during assembly, then in the station dictionary until its destruction.
+static func colony_station_position(state: Dictionary, index: int, elapsed: float, phase: float = INF) -> Vector2:
 	var center: Vector2 = state["map"]["points"][index]
-	var axis: Vector2 = Vector2.from_angle(float(index) * 2.399963 + elapsed * 0.008)
-	var graph: Dictionary = military_graph(state)
-	var radius: float = minf(145.0, sector_limit(graph, index, axis) * 0.5)
+	if not is_finite(phase):
+		phase = float(state["planets"][index].get("station", {}).get("orbit_phase", float(index) * 2.399963))
+	var axis: Vector2 = Vector2.from_angle(phase + elapsed * 0.008)
+	return _colony_orbit_point(state, index, center, axis)
+
+static func _colony_orbit_point(state: Dictionary, index: int, center: Vector2, axis: Vector2) -> Vector2:
+	var radius: float = minf(145.0, sector_limit(military_graph(state), index, axis) * 0.5)
 	return center + axis * radius
+
+# The nearest radial point on the normal orbit. Re-evaluate from the
+# actual hull position so detours never send it to the far side first.
+static func colony_approach_position(state: Dictionary, index: int, origin: Vector2) -> Vector2:
+	var center: Vector2 = state["map"]["points"][index]
+	var axis: Vector2 = center.direction_to(origin)
+	if axis.is_zero_approx():
+		return colony_station_position(state, index, float(state["elapsed"]))
+	return _colony_orbit_point(state, index, center, axis)
 
 static func shipyard_position(state: Dictionary, index: int, slot: int, elapsed: float) -> Vector2:
 	return shipyard_port_position(state, index, shipyard_port(state["planets"][index], slot), elapsed)
@@ -5025,7 +5048,9 @@ static func unit_order_point(state: Dictionary, graph: Dictionary, ship: Diction
 				return sector_entry_point(graph, target, ship["position"])
 		"colonize":
 			if target >= 0 and target < state["planets"].size():
-				return colony_station_position(state, target, float(state["elapsed"]))
+				if colony_morphing(ship) and ship.get("unit_order", {}) == order:
+					return colony_station_position(state, target, float(state["elapsed"]), float(order.get("orbit_phase", INF)))
+				return colony_approach_position(state, target, ship["position"])
 		"sector":
 			if target >= 0 and target < graph["points"].size():
 				return graph["points"][target]
