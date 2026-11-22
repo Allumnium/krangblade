@@ -9016,89 +9016,20 @@ static func _profile_stage(profile: Dictionary, stage: String, started: int) -> 
 static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary = {}) -> void:
 	if dt <= 0.0:
 		return
-	var cells: Dictionary = {}
 	var reach: float = SHIP_SEPARATION_RADIUS
-	var reach_squared: float = reach * reach
-	for ship in state["ships"]:
-		var id: int = int(ship["id"])
-		if not previous.has(id):
-			continue
-		var pos: Vector2 = previous[id]
-		var cell := Vector2i(floori(pos.x / reach), floori(pos.y / reach))
-		if not cells.has(cell):
-			cells[cell] = []
-		cells[cell].append(id)
-
+	var cells: Dictionary = _separation_cells(state, previous, reach)
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
 		if not previous.has(id) or repair_parked.has(id) or _stop_waiting(state, ship) or bool(ship.get("retreating", false)) or _salvage_active(ship):
 			continue
 		var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
+		if _separation_exempt(state, graph, ship, budget, reach):
+			continue
 		var before: Vector2 = previous[id]
 		var planned: Vector2 = ship["position"]
 		var held: bool = bool(ship.get("holding", false))
-		if held and ship.has("hold_heading"):
-			continue
 		var local_moving: bool = ship.has("local_move_target")
-		# Follow owns its movement budget, including close-range backing off.
-		if ship.get("unit_order", {}).get("kind", "") == "follow":
-			continue
-		# Waiting hulls remain precise obstacles, but combat/withdrawal can move.
-		var engaged: bool = _engaged(ship)
-		var idle: bool = false
-		if not engaged:
-			idle = _is_idle_ship(ship)
-			var can_wander: bool = idle and autocast_ready(state, ship, "wander")
-			if (arrival_wait_remaining(state, ship) > EPS and not can_wander) or (idle and not can_wander):
-				continue
-		# Preserve the exact endpoint and facing on the arrival tick only.
-		# The completed order is retired before next tick's ordinary wandering.
-		var order: Dictionary = ship.get("unit_order", {})
-		if not local_moving and order.get("kind", "") == "position" and planned == order.get("point", Vector2.INF):
-			continue
-		# Do not let repulsion prevent completion of a shared point order.
-		# The newly idle ships spread naturally after arrival.
-		if local_moving and planned.distance_to(ship["local_move_target"]) < reach * 2.0:
-			continue
-		var route: Array = ship["route"]
-		# Exact arrival at a waypoint is required by service and lane logic.
-		# Do not push docking or extracting civilian ships off their targets.
-		if not held:
-			if route.is_empty():
-				if not local_moving and not idle and not engaged:
-					continue
-				var at: int = int(ship["at"])
-				if at >= 0 and at < graph["points"].size() and planned.distance_to(graph["points"][at]) <= EPS:
-					continue
-			else:
-				var waypoint: Vector2 = graph["points"][int(route[0])]
-				if planned.distance_to(waypoint) < reach * 2.0 + budget:
-					continue
-		if not held and ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
-			continue
-		var force: Vector2 = Vector2.ZERO
-		var cell := Vector2i(floori(before.x / reach), floori(before.y / reach))
-		for x in range(-1, 2):
-			for y in range(-1, 2):
-				for other_id in cells.get(cell + Vector2i(x, y), []):
-					if int(other_id) == id:
-						continue
-					var offset: Vector2 = before - (previous[other_id] as Vector2)
-					var distance_squared: float = offset.length_squared()
-					if distance_squared >= reach_squared:
-						continue
-					var distance: float = offset.length()
-					var direction: Vector2
-					if distance <= EPS:
-						# Stable opposite directions even for exactly coincident hulls.
-						var low: int = mini(id, int(other_id))
-						var high: int = maxi(id, int(other_id))
-						direction = Vector2.from_angle(float(posmod(low * 97 + high * 193, 360)) * PI / 180.0)
-						if id > int(other_id):
-							direction = -direction
-					else:
-						direction = offset / distance
-					force += direction * (1.0 - distance / reach)
+		var force: Vector2 = _separation_force(id, before, cells, previous, reach)
 		if force.is_zero_approx():
 			continue
 		var movement: Vector2 = planned - before
@@ -9113,21 +9044,114 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		var sector: int = int(ship.get("local_move_sector", -1)) if local_moving else (int(ship.get("hold_sector", -1)) if held else local_sector(graph, ship))
 		if sector >= 0 and sector < graph["points"].size() and sector_contains(graph, sector, planned) and not sector_contains(graph, sector, candidate):
 			# Keep local orders and stationary ships inside their legal sector.
-			var lower: float = 0.0
-			var upper: float = 1.0
-			for iteration in range(12):
-				var fraction: float = (lower + upper) * 0.5
-				if sector_contains(graph, sector, planned.lerp(candidate, fraction)):
-					lower = fraction
-				else:
-					upper = fraction
-			candidate = planned.lerp(candidate, lower)
+			candidate = _clip_to_sector(graph, sector, planned, candidate)
 		var displacement: Vector2 = candidate - before
 		ship["position"] = candidate
 		if not displacement.is_zero_approx():
 			ship["heading"] = displacement.normalized()
-		if not route.is_empty():
+		if not (ship["route"] as Array).is_empty():
 			ship["leg"] = _lane_progress(graph["points"], ship)
+
+static func _separation_cells(state: Dictionary, previous: Dictionary, reach: float) -> Dictionary:
+	var cells: Dictionary = {}
+	for ship in state["ships"]:
+		var id: int = int(ship["id"])
+		if not previous.has(id):
+			continue
+		var pos: Vector2 = previous[id]
+		var cell := Vector2i(floori(pos.x / reach), floori(pos.y / reach))
+		if not cells.has(cell):
+			cells[cell] = []
+		cells[cell].append(id)
+	return cells
+
+## Hulls whose position this tick must stay exact: anchored holds, follow,
+## waiting or idle-without-wander hulls, arrival ticks, service waypoints
+## and working Harvesters.
+static func _separation_exempt(state: Dictionary, graph: Dictionary, ship: Dictionary, budget: float, reach: float) -> bool:
+	var planned: Vector2 = ship["position"]
+	var held: bool = bool(ship.get("holding", false))
+	if held and ship.has("hold_heading"):
+		return true
+	var local_moving: bool = ship.has("local_move_target")
+	# Follow owns its movement budget, including close-range backing off.
+	if ship.get("unit_order", {}).get("kind", "") == "follow":
+		return true
+	# Waiting hulls remain precise obstacles, but combat/withdrawal can move.
+	var engaged: bool = _engaged(ship)
+	var idle: bool = false
+	if not engaged:
+		idle = _is_idle_ship(ship)
+		var can_wander: bool = idle and autocast_ready(state, ship, "wander")
+		if (arrival_wait_remaining(state, ship) > EPS and not can_wander) or (idle and not can_wander):
+			return true
+	# Preserve the exact endpoint and facing on the arrival tick only.
+	# The completed order is retired before next tick's ordinary wandering.
+	var order: Dictionary = ship.get("unit_order", {})
+	if not local_moving and order.get("kind", "") == "position" and planned == order.get("point", Vector2.INF):
+		return true
+	# Do not let repulsion prevent completion of a shared point order.
+	# The newly idle ships spread naturally after arrival.
+	if local_moving and planned.distance_to(ship["local_move_target"]) < reach * 2.0:
+		return true
+	var route: Array = ship["route"]
+	# Exact arrival at a waypoint is required by service and lane logic.
+	# Do not push docking or extracting civilian ships off their targets.
+	if not held:
+		if route.is_empty():
+			if not local_moving and not idle and not engaged:
+				return true
+			var at: int = int(ship["at"])
+			if at >= 0 and at < graph["points"].size() and planned.distance_to(graph["points"][at]) <= EPS:
+				return true
+		else:
+			var waypoint: Vector2 = graph["points"][int(route[0])]
+			if planned.distance_to(waypoint) < reach * 2.0 + budget:
+				return true
+	if not held and ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["outbound", "mining", "return"]:
+		return true
+	return false
+
+## Summed linear falloff repulsion from neighbours' previous positions.
+static func _separation_force(id: int, before: Vector2, cells: Dictionary, previous: Dictionary, reach: float) -> Vector2:
+	var reach_squared: float = reach * reach
+	var force: Vector2 = Vector2.ZERO
+	var cell := Vector2i(floori(before.x / reach), floori(before.y / reach))
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			for other_id in cells.get(cell + Vector2i(x, y), []):
+				if int(other_id) == id:
+					continue
+				var offset: Vector2 = before - (previous[other_id] as Vector2)
+				var distance_squared: float = offset.length_squared()
+				if distance_squared >= reach_squared:
+					continue
+				var distance: float = offset.length()
+				var direction: Vector2
+				if distance <= EPS:
+					# Stable opposite directions even for exactly coincident hulls.
+					var low: int = mini(id, int(other_id))
+					var high: int = maxi(id, int(other_id))
+					direction = Vector2.from_angle(float(posmod(low * 97 + high * 193, 360)) * PI / 180.0)
+					if id > int(other_id):
+						direction = -direction
+				else:
+					direction = offset / distance
+				force += direction * (1.0 - distance / reach)
+	return force
+
+## Bisects the farthest point along planned -> candidate that stays inside
+## the sector, assuming planned is inside.
+static func _clip_to_sector(graph: Dictionary, sector: int, planned: Vector2, candidate: Vector2) -> Vector2:
+	var lower: float = 0.0
+	var upper: float = 1.0
+	for iteration in range(12):
+		var fraction: float = (lower + upper) * 0.5
+		if sector_contains(graph, sector, planned.lerp(candidate, fraction)):
+			lower = fraction
+		else:
+			upper = fraction
+	return planned.lerp(candidate, lower)
 
 # Apply a gentle push on the actual post-movement coordinates, including ships
 # exempt from soft steering. This is contact correction, not a new order;

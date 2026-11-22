@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.9: Split the 120-line _separate_ships into _separation_cells (spatial bucketing), _separation_exempt (order/state exemptions), _separation_force (neighbour push accumulation) and _clip_to_sector. Iteration order, budgets and clipping unchanged. Determinism probe identical, economy failure set unchanged, fleet benchmark within noise. No gameplay change; runtime/ENet pending.
+
 - v0.97.8: Split the 149-line _sync_operations into _group_operations (owner/role/objective grouping), _reserve_operation_ids (persistent wave and same-key IDs), _match_operation_id (greatest-overlap inheritance), _assign_formation_slots and _classify_operation_members. Iteration order, ID allocation and slot assignment unchanged. Determinism probe identical, economy failure set unchanged. No gameplay change; runtime/ENet pending.
 
 - v0.97.7: Restore project.godot after an open Godot editor rewrote it in canonical form during v0.97.6, dropping the [display] window/stretch/hidpi settings and gui snap_controls_to_pixels. File content identical to v0.97.5 apart from the version. No gameplay change.
