@@ -1,5 +1,7 @@
 # Warbound — star-system strategy RTS
 
+Map terrain (v0.95.0): ordinary asteroid fields can grow into continuous open ridges with more rocks; non-miners detour around the actual belt outline. Star corridors, map-edge passages and separation between belts prevent enclosed pockets. Pulsars retain their existing generation.
+
 Current economy (v0.94.18): residents consume Organics only. Metals and Crystals are for construction and trade, with no population drain. Material Efficiency is retired and Crystalline Synthesis has no civilian upkeep penalty. Select a discovered neutral system and press C (Colonize) to dispatch a Colony. Later version notes supersede historical mechanics below.
 
 Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three intended playable races. Only Empire is implemented. ENet multiplayer uses UDP 24567 (LAN/Tailscale); no Steam dependency.

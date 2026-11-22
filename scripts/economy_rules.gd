@@ -2288,14 +2288,78 @@ static func _refresh_movement_fields(fields: Array) -> void:
 		if _movement_field_counts[i] == chunks.size():
 			continue
 		_movement_field_counts[i] = chunks.size()
+		if field.has("belt_lobes") and not chunks.is_empty() and _movement_fields[i] is Dictionary and _movement_fields[i].has("polygon"):
+			continue
 		var center: Vector2 = field["position"]
 		var radius: float = float(field["radius"]) if bool(field.get("antimatter", false)) else 0.0
 		if not bool(field.get("antimatter", false)):
 			for rock in chunks:
 				radius = maxf(radius, center.distance_to(rock["position"]) + float(rock.get("radius", 0.0)))
 		_movement_fields[i] = {"position": center, "radius": radius}
+		if field.has("belt_lobes") and not chunks.is_empty():
+			# Keep a continuous ridge until the field is exhausted.
+			var outline := PackedVector2Array(field["outline"])
+			var collision: Array[PackedVector2Array] = Geometry2D.offset_polygon(outline, 8.0, Geometry2D.JOIN_ROUND)
+			var waypoints: Array[PackedVector2Array] = Geometry2D.offset_polygon(outline, 32.0, Geometry2D.JOIN_MITER)
+			if collision.size() == 1 and waypoints.size() == 1:
+				_movement_fields[i] = {"position": center, "radius": float(field["radius"]), "polygon": collision[0], "waypoints": waypoints[0]}
 
-# Route around tight field disks using short exterior arc chords.
+# Find the shortest exterior boundary walk for a connected nonconvex
+# belt. Visibility to a boundary waypoint is tested against its padded hull.
+static func _belt_detour(before: Vector2, target: Vector2, obstacle: Dictionary) -> Vector2:
+	var polygon: PackedVector2Array = obstacle["polygon"]
+	var vertices: PackedVector2Array = obstacle["waypoints"]
+	if Geometry2D.is_point_in_polygon(before, polygon) or Geometry2D.is_point_in_polygon(target, polygon):
+		var origin: Vector2 = before if Geometry2D.is_point_in_polygon(before, polygon) else target
+		var nearest: Vector2 = vertices[0]
+		for i in range(vertices.size()):
+			var point: Vector2 = Geometry2D.get_closest_point_to_segment(origin, vertices[i], vertices[(i + 1) % vertices.size()])
+			if point.distance_squared_to(origin) < nearest.distance_squared_to(origin):
+				nearest = point
+		if Geometry2D.is_point_in_polygon(before, polygon):
+			return nearest
+		target = nearest
+		if not MAP.polygon_blocks_segment(polygon, before, target):
+			return target
+	var prefix: Array[float] = [0.0]
+	for i in range(vertices.size()):
+		prefix.append(prefix[-1] + vertices[i].distance_to(vertices[(i + 1) % vertices.size()]))
+	var perimeter: float = prefix[-1]
+	var starts: Array[int] = []
+	var ends: Array[int] = []
+	for i in range(vertices.size()):
+		if not MAP.polygon_blocks_segment(polygon, before, vertices[i]):
+			starts.append(i)
+		if not MAP.polygon_blocks_segment(polygon, vertices[i], target):
+			ends.append(i)
+	var best: float = INF
+	var next: Vector2 = before
+	for a in starts:
+		for b in ends:
+			var clockwise: float = fposmod(prefix[b] - prefix[a], perimeter)
+			var counterclockwise: float = fposmod(prefix[a] - prefix[b], perimeter)
+			var distance: float = before.distance_to(vertices[a]) + minf(clockwise, counterclockwise) + vertices[b].distance_to(target)
+			var next_index: int = a
+			if before.distance_to(vertices[a]) < 0.1 and a != b:
+				next_index = posmod(a + (1 if clockwise <= counterclockwise else -1), vertices.size())
+			var candidate: Vector2 = vertices[next_index]
+			if distance < best and not candidate.is_equal_approx(before):
+				best = distance
+				next = candidate
+	return next
+
+static func _movement_obstacle_contains(obstacle: Dictionary, point: Vector2, clearance: float = 0.0) -> bool:
+	if obstacle.has("polygon"):
+		var poly: PackedVector2Array = obstacle["polygon"]
+		if Geometry2D.is_point_in_polygon(point, poly):
+			return true
+		for i in range(poly.size()):
+			if Geometry2D.get_closest_point_to_segment(point, poly[i], poly[(i + 1) % poly.size()]).distance_to(point) < clearance:
+				return true
+		return false
+	return float(obstacle["radius"]) > EPS and point.distance_to(obstacle["position"]) < float(obstacle["radius"]) + clearance
+
+# Route around tight field disks or the actual continuous belt outline.
 static func _field_detour(before: Vector2, target: Vector2, budget: float) -> Vector2:
 	var nearest: float = INF
 	var obstacle: Dictionary = {}
@@ -2307,11 +2371,22 @@ static func _field_detour(before: Vector2, target: Vector2, budget: float) -> Ve
 		if Geometry2D.get_closest_point_to_segment(center, before, target).distance_to(center) >= radius:
 			continue
 		var distance: float = before.distance_to(center) - radius
+		if field.has("polygon"):
+			var polygon: PackedVector2Array = field["polygon"]
+			if not MAP.polygon_blocks_segment(polygon, before, target):
+				continue
+			distance = 0.0 if Geometry2D.is_point_in_polygon(before, polygon) else INF
+			for i in range(polygon.size()):
+				var intersection: Variant = Geometry2D.segment_intersects_segment(before, target, polygon[i], polygon[(i + 1) % polygon.size()])
+				if intersection != null:
+					distance = minf(distance, before.distance_to(intersection))
 		if distance < nearest:
 			nearest = distance
 			obstacle = field
 	if obstacle.is_empty():
 		return target
+	if obstacle.has("polygon"):
+		return _belt_detour(before, target, obstacle)
 	var center: Vector2 = obstacle["position"]
 	var radius: float = float(obstacle["radius"]) + 8.0
 	var radial: Vector2 = before - center
@@ -2330,7 +2405,17 @@ static func _navigate(ship: Dictionary, target: Vector2, budget: float) -> float
 	ship["navigation_target"] = target
 	var before: Vector2 = ship["position"]
 	if ship.get("kind", "") != "miner" and not _movement_fields.is_empty():
-		target = _field_detour(before, target, budget)
+		var waypoint: Vector2 = _field_detour(before, target, budget)
+		# A detour to one ridge can itself encounter another ridge. Recheck
+		# the actual leg before movement, rather than cutting across it.
+		for attempt in range(4):
+			var checked: Vector2 = _field_detour(before, waypoint, budget)
+			if checked.is_equal_approx(waypoint):
+				break
+			waypoint = checked
+			if attempt == 3:
+				waypoint = before
+		target = waypoint
 	var direct: Vector2 = before.direction_to(target)
 	var steering: Vector2 = _avoidance_direction(ship, target, budget)
 	var after: Vector2 = before.move_toward(target, maxf(0.0, budget))
@@ -2553,7 +2638,18 @@ static func _stage_wait_point(state: Dictionary, graph: Dictionary, ship: Dictio
 	var offset: Vector2 = rock + toward * RESOURCE_HANDOFF_RANGE * 0.65
 	var center: Vector2 = field["position"]
 	var radius: float = float(field["radius"]) + 40.0
-	if float(field["radius"]) > EPS and offset.distance_to(center) < radius:
+	if field.has("polygon"):
+		# Exit the entire ridge along the worker's return ray, rather than
+		# the broad field bounding circle.
+		var boundary: PackedVector2Array = field["waypoints"]
+		var far: Vector2 = rock + toward * (rock.distance_to(center) + radius * 2.0)
+		var exit_distance: float = RESOURCE_HANDOFF_RANGE * 0.65
+		for i in range(boundary.size()):
+			var intersection: Variant = Geometry2D.segment_intersects_segment(rock, far, boundary[i], boundary[(i + 1) % boundary.size()])
+			if intersection != null:
+				exit_distance = maxf(exit_distance, rock.distance_to(intersection) + 12.0)
+		offset = rock + toward * exit_distance
+	elif float(field["radius"]) > EPS and offset.distance_to(center) < radius:
 		# Intersect the worker's real return ray with the outside of the
 		# navigation disk, rather than asking a Freighter to enter it.
 		var relative: Vector2 = rock - center
@@ -2562,7 +2658,7 @@ static func _stage_wait_point(state: Dictionary, graph: Dictionary, ship: Dictio
 		var exit: float = -projection + sqrt(maxf(0.0, discriminant))
 		offset = rock + toward * maxf(exit, RESOURCE_HANDOFF_RANGE * 0.65)
 	for obstacle in _movement_fields:
-		if float(obstacle["radius"]) > EPS and offset.distance_to(obstacle["position"]) < float(obstacle["radius"]) + 10.0:
+		if _movement_obstacle_contains(obstacle, offset, 10.0):
 			return Vector2.INF
 	if _salvage_safe(state, graph, int(ship["owner"]), offset, node, threats):
 		return offset
@@ -2818,7 +2914,12 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 		var field_index: int = node - state["planets"].size()
 		if field_index >= 0 and field_index < _movement_fields.size():
 			var queue_point: Vector2 = _stage_queue_position(point, _movement_fields[field_index]["position"], int(stage.get("queue_rank", 0)))
-			if _salvage_safe(state, graph, owner, queue_point, node, threats):
+			var clear: bool = true
+			for obstacle in _movement_fields:
+				if _movement_obstacle_contains(obstacle, queue_point, 10.0):
+					clear = false
+					break
+			if clear and _salvage_safe(state, graph, owner, queue_point, node, threats):
 				point = queue_point
 			else:
 				_resource_haul(ship)

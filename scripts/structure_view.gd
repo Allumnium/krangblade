@@ -288,4 +288,3 @@ func draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float, 
 			if u > 0.5 and not Geometry2D.triangulate_polygon(hull).is_empty():
 				map_canvas.draw_colored_polygon(hull, Color(tint.lightened(0.4), (u - 0.5) * 2.0))
 			break
-
