@@ -105,7 +105,7 @@ User requested AI-friendly structure and fewer duplicate definitions. v0.89.4 do
 
 - [ ] v0.78.4: Verify completed goal stays until all category CP is allocated, no immediate reroll completion, skipped lifetime tiers, independent categories, host/guest synchronization and mixed combat/civilian box selection (including Shift). Economy regression extended; runtime/manual pending.
 
-- [ ] v0.78.3: Verify eight-player CP scoreboard readability, updates after earning/spending, local-only conquest notifications and fanfares, host/guest public balances, no private draft leaks. Runtime/visual checks pending.
+- [ ] v0.78.3: Verify eight-player lifetime CP scoreboard readability, updates after earning/spending, inline +/− collapse/expand (v0.89.23) at different resolutions and through Tech unlock, local-only conquest notifications and fanfares, host/guest public balances, no private draft leaks. Runtime/visual checks pending.
 
 - [ ] v0.78.2: Manually verify the first F4 opening after match start matches subsequent openings, including small windows, unlocked ship types, scroll and Close/Esc. Runtime/visual pending.
 

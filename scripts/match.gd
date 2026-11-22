@@ -168,6 +168,8 @@ var objectives_overlay: Control
 var match_chat_edit: LineEdit
 var conquest_buttons: Dictionary = {}
 var objective_refresh_buttons: Dictionary = {}
+var conquest_scoreboard_toggle: Button
+var conquest_scoreboard_expanded: bool = true
 var conquest_category: String = "economic"
 var conquest_dialog: Window
 var conquest_cards: VBoxContainer
@@ -443,6 +445,14 @@ func _build_match_notices() -> void:
 		refresh.text = "↻"
 		refresh.pressed.connect(_request_objective_refresh.bind(category))
 		objective_refresh_buttons[category] = refresh
+	conquest_scoreboard_toggle = Button.new()
+	map_canvas.add_child(conquest_scoreboard_toggle)
+	conquest_scoreboard_toggle.z_index = 4
+	conquest_scoreboard_toggle.focus_mode = Control.FOCUS_NONE
+	_style_objective_header_button(conquest_scoreboard_toggle, HUD.ACCENT)
+	conquest_scoreboard_toggle.text = "−"
+	conquest_scoreboard_toggle.tooltip_text = "Collapse total conquest points"
+	conquest_scoreboard_toggle.pressed.connect(_toggle_conquest_scoreboard)
 	conquest_dialog = Window.new()
 	conquest_dialog.title = "Choose an upgrade"
 	conquest_dialog.theme = theme
@@ -7603,7 +7613,22 @@ func _draw_objectives_overlay() -> void:
 	_draw_conquest_scoreboard(state, font, x, y + 4.0)
 	_draw_conquest_notifications(state, font, clock)
 
+func _toggle_conquest_scoreboard() -> void:
+	conquest_scoreboard_expanded = not conquest_scoreboard_expanded
+	conquest_scoreboard_toggle.text = "−" if conquest_scoreboard_expanded else "+"
+	conquest_scoreboard_toggle.tooltip_text = "Collapse total conquest points" if conquest_scoreboard_expanded else "Expand total conquest points"
+	objectives_overlay.queue_redraw()
+
 func _draw_conquest_scoreboard(state: Dictionary, font: Font, x: float, y: float) -> void:
+	var edge: float = map_canvas.size.x - 12.0
+	var width: float = maxf(1.0, edge - x)
+	var header_tint := Color("#b8d9ef")
+	var outline := Color("#101824")
+	var header_width: float = maxf(1.0, width - ceilf(font.get_height(13)) - 4.0)
+	objectives_overlay.draw_string_outline(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, header_width, 13, 4, outline)
+	objectives_overlay.draw_string(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, header_width, 13, header_tint)
+	if not conquest_scoreboard_expanded:
+		return
 	var roster: Dictionary = session.get("players")
 	var all_progress: Dictionary = state.get("objectives", {})
 	var players: Array = state.get("teams", {}).keys()
@@ -7612,14 +7637,8 @@ func _draw_conquest_scoreboard(state: Dictionary, font: Font, x: float, y: float
 		var color_a: int = _empire_color_index(int(a))
 		var color_b: int = _empire_color_index(int(b))
 		return int(a) < int(b) if color_a == color_b else color_a < color_b)
-	var edge: float = map_canvas.size.x - 12.0
-	var width: float = maxf(1.0, edge - x)
 	var column: float = minf(58.0, width * 0.22)
 	var name_width: float = maxf(1.0, width - column * 3.0 - 8.0)
-	var header_tint := Color("#b8d9ef")
-	var outline := Color("#101824")
-	objectives_overlay.draw_string_outline(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, outline)
-	objectives_overlay.draw_string(font, Vector2(x, y), "TOTAL CONQUEST POINTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, header_tint)
 	y += 20.0
 	for index in range(ECONOMY.REWARD_CATEGORIES.size()):
 		var category: String = ECONOMY.REWARD_CATEGORIES[index]
@@ -7770,6 +7789,9 @@ func _layout_conquest_button() -> void:
 		refresh.position = Vector2(right - upgrade_width - height - 4.0, header_y)
 		refresh.size = Vector2(height, height)
 		y += 52.0
+	conquest_scoreboard_toggle.visible = not state.is_empty()
+	conquest_scoreboard_toggle.position = Vector2(map_canvas.size.x - 12.0 - height, roundf(y + 4.0 - font.get_ascent(13)))
+	conquest_scoreboard_toggle.size = Vector2(height, height)
 
 func _request_objective_refresh(category: String) -> void:
 	var progress: Dictionary = _state().get("objectives", {}).get(_me(), {})

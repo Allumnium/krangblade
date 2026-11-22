@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.23: A tiny +/− button at the right of the Total Conquest Points header collapses all table rows and column labels while leaving the title visible. Expanded by default, client-local per match; totals and objective controls unchanged.
+
 - v0.89.22: Simulation speed is developer-only. Debug builds expose it in the tilde console after `/devmode`, host/solo authority only; normal HUD and Codex omit speed controls. Perf remains available independently. Guard lazy dialogs and duplicate button-audio signal connections.
 
 - v0.89.21: Use the shared gold Galactic Credits icon (`HUD.resource_icon("GC", pixels)`) in the HUD and graphical command costs/upkeep. Keep GC units in plain-text explanations and Codex tables; credits are not a physical resource.
