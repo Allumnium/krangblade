@@ -1558,9 +1558,7 @@ var fog_overlay: Control
 var queued_order_overlay: Control
 
 func _update_fog(state: Dictionary) -> void:
-	if state.is_empty():
-		return
-	fog_state.update(state, _me(), session.get("motion_revision"), _map_size())
+	fog_state.update(state, _me(), session.get("motion_revision"), Vector2.ZERO if state.is_empty() else _map_size())
 
 func _fog_visible(point: Vector2) -> bool:
 	return fog_state.is_visible(point, _map_size())
@@ -2071,9 +2069,15 @@ func _select_tile(id: int) -> void:
 	_refresh()
 
 func _refresh_field_panels(state: Dictionary) -> void:
-	var field: Dictionary = state["map"]["fields"][selected_field]
-	var special: bool = bool(field.get("antimatter", false))
+	var field: Dictionary = fog_state.field_view(state, selected_field, _map_size())
 	ship_title.text = _poi_name(state["planets"].size() + selected_field)
+	if field.is_empty():
+		ship_detail.text = "No last-seen survey available"
+		field_command_grid.hide()
+		command_card.hide()
+		return
+	var remembered: bool = not _fog_visible(field["position"])
+	var special: bool = bool(field.get("antimatter", false))
 	var stock: Dictionary = ECONOMY.field_inventory(field)
 	var total: float = float(stock["Metals"]) + float(stock["Crystals"])
 	if special:
@@ -2087,6 +2091,8 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	for anchor in graph["adjacent"][state["planets"].size() + selected_field]:
 		access_names.append(_poi_name(anchor))
+	if remembered:
+		ship_detail.text += "\nLast seen"
 	ship_detail.tooltip_text = "%d chunks remaining · Access: %s" % [field["chunks"].size(), ", ".join(access_names)]
 	fleet_title.text = "Mining"
 	fleet_detail.hide()
@@ -2343,10 +2349,12 @@ func _state() -> Dictionary:
 	return session.get("economy")
 
 func _planet() -> Dictionary:
-	var planets: Array = _state().get("planets", [])
-	if selected < 0 or selected >= planets.size():
+	var state: Dictionary = _state()
+	if state.is_empty() or selected < 0 or selected >= state["planets"].size():
 		return {}
-	return planets[selected]
+	if not ECONOMY.discovered(state, _me(), "planets", selected):
+		return {}
+	return fog_state.system_view(state, selected, _map_size())
 
 func _me() -> int:
 	return 1 if bool(session.get("is_solo")) else multiplayer.get_unique_id()
@@ -2484,7 +2492,8 @@ func _refresh() -> void:
 		selected_yard = -1
 	# A claimed sector is represented by its station, not a second selectable
 	# sector entity. Keep explicit planet, yard and grouped selections intact.
-	if not other_selected and not body_selected and not yard_selected and not p.is_empty() and building_selection_kind.is_empty():
+	var system_live: bool = not p.is_empty() and _fog_visible(state["map"]["points"][selected])
+	if not other_selected and not body_selected and not yard_selected and system_live and building_selection_kind.is_empty():
 		if ECONOMY.has_station(p):
 			building_selection_kind = "station"
 			selected_buildings[Vector2i(selected, 0)] = 0
@@ -2502,7 +2511,7 @@ func _refresh() -> void:
 	body_overview.visible = body_selected and not grouped_buildings
 	yard_overview.visible = yard_selected and not grouped_buildings
 	_refresh_building_group(state)
-	var own_system: bool = not p.is_empty() and int(p.get("owner", -1)) == _me()
+	var own_system: bool = system_live and int(p.get("owner", -1)) == _me()
 	var owned_station: bool = not other_selected and not body_selected and not yard_selected and own_system and ECONOMY.has_station(p)
 	var right_needed: bool = field_selected or (ship_selected and state["ships"].any(func(craft: Dictionary) -> bool: return selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())) or (yard_selected and not _selected_yards(state, true).is_empty()) or owned_station or (not other_selected and not yard_selected and not body_selected and not grouped_buildings and not p.is_empty() and int(p["owner"]) == 0)
 	console_right_body.visible = right_needed
@@ -2550,7 +2559,7 @@ func _refresh() -> void:
 	if ship_selected:
 		_refresh_ship_panels(state, ship)
 		return
-	var owned: bool = not p.is_empty() and int(p["owner"]) == _me() and phase == "match"
+	var owned: bool = system_live and int(p["owner"]) == _me() and phase == "match"
 	_refresh_colony_choices(state, p, phase)
 	for slider in trade_sliders.values():
 		slider.enabled = owned
@@ -2574,8 +2583,8 @@ func _refresh() -> void:
 	info.tooltip_text = info.text + (" · Home" if bool(p["home"]) else "")
 	if ECONOMY.has_station(p):
 		info.tooltip_text += "\nSpace Station · %.0f / %.0f HP" % [float(p["station"]["hp"]), ECONOMY.station_max_hp(p)]
-	system_owner_label.text = name_text
-	system_owner_label.tooltip_text = name_text
+	system_owner_label.text = name_text if system_live else name_text + " · Last seen"
+	system_owner_label.tooltip_text = system_owner_label.text
 	system_owner_label.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
 	for resource in ECONOMY.RESOURCES:
 		var amount: float = float(p["stock"][resource])
@@ -2674,7 +2683,10 @@ func _leave() -> void:
 func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) -> void:
 	var neutral: bool = not p.is_empty() and int(p.get("owner", -1)) == 0 and phase == "match"
 	send_colony_button.visible = neutral
-	var id: int = ECONOMY.nearest_idle_colony(state, _me(), selected) if neutral else -1
+	# A hidden target must use last-known ownership; the host still validates
+	# the actual destination when the command is issued.
+	var preview: Dictionary = fog_state.observed_state(state, _map_size()) if neutral else state
+	var id: int = ECONOMY.nearest_idle_colony(preview, _me(), selected) if neutral else -1
 	send_colony_button.disabled = id < 0
 	command_card_ui.set_hint(send_colony_button, "Send nearest idle Colony to this sector" if id >= 0 else "No available idle Colonies")
 
@@ -2729,10 +2741,12 @@ func _zoom_at(point: Vector2, direction: float) -> void:
 func _planet_radius(index: int, state: Dictionary) -> float:
 	return celestial_view.system_world_radius(index, state) * _fit() * camera.zoom
 
-func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color) -> void:
+func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, tint: Color, remembered_time: float = -1.0) -> void:
 	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 32.0).has_point(pos):
 		return
 	var system: Dictionary = state["planets"][index]
+	var remembered: bool = remembered_time >= 0.0
+	var orbit_elapsed: float = remembered_time if remembered else celestial_view.orbit_time(state)
 	var color: Color = celestial_view.planet_color(system)
 	var star_radius: float = celestial_view.star_draw_radius(radius)
 	var star_color: Color = Color("#fff0c4").lerp(color.lightened(0.25), 0.30) if ECONOMY.has_planets(system) else Color("#8ea2bc")
@@ -2744,7 +2758,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 			var orbit: float = radius * float(body["orbit"])
 			if _show_system_rings(index):
 				celestial_view.draw_elliptical_orbit(pos, orbit, Color(tint, 0.20 * detail), map_canvas)
-			var point: Vector2 = pos + celestial_view.body_position(body, radius, celestial_view.orbit_time(state))
+			var point: Vector2 = pos + celestial_view.body_position(body, radius, orbit_elapsed)
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
@@ -2758,10 +2772,11 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 				if (index == selected and selected_body == slot) or (building_selection_kind == "pds" and selected_buildings.has(Vector2i(index, slot))):
 					world_batches.draw_selection_ring(point, body_radius + 4.0, Color(HUD.ACCENT, detail))
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
-	planet_traffic.draw_production(state, index, pos, radius, detail)
-	planet_traffic.draw_upgrade_deliveries(state, index, pos, radius, detail)
+	if not remembered:
+		planet_traffic.draw_production(state, index, pos, radius, detail)
+		planet_traffic.draw_upgrade_deliveries(state, index, pos, radius, detail)
 	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(camera.zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
-	celestial_view.draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity, map_canvas, visual_clock)
+	celestial_view.draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity, map_canvas, remembered_time if remembered else visual_clock)
 	if bool(system.get("station", {}).get("dyson_sphere", false)):
 		celestial_view.draw_pds_frame(pos, star_radius * 1.18, 1.0, map_canvas)
 		map_canvas.draw_arc(pos, star_radius * 1.35, 0.0, TAU, 48, Color("#e5b66c"), 1.5, true)
@@ -2777,7 +2792,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
 		for slot in system.get("pds", {}):
 			if int(slot) >= 0 and int(slot) < bodies.size():
-				var point: Vector2 = pos + celestial_view.body_position(bodies[int(slot)], radius, celestial_view.orbit_time(state))
+				var point: Vector2 = pos + celestial_view.body_position(bodies[int(slot)], radius, orbit_elapsed)
 				map_canvas.draw_circle(point, 2.0, Color(Color("#bdcbd6"), 1.0 - detail), true)
 	if detail < 0.3 and building_selection_kind == "pds":
 		# Retain a selection marker when F frames a distant battery group and
@@ -2785,7 +2800,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
 		for slot in system.get("pds", {}):
 			if selected_buildings.has(Vector2i(index, int(slot))) and int(slot) < bodies.size():
-				var point: Vector2 = pos + celestial_view.body_position(bodies[int(slot)], radius, celestial_view.orbit_time(state))
+				var point: Vector2 = pos + celestial_view.body_position(bodies[int(slot)], radius, orbit_elapsed)
 				world_batches.draw_selection_ring(point, 6.0)
 	if _show_system_rings(index):
 		map_canvas.draw_arc(pos, radius + 1.5, 0.0, TAU, 48, Color(tint, 0.65), 1.5, true)
@@ -2804,7 +2819,7 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 	var hit := Vector2i(-1, -1)
 	var nearest: float = INF
 	for index in range(state["planets"].size()):
-		if not ECONOMY.discovered(state, _me(), "planets", index):
+		if not ECONOMY.discovered(state, _me(), "planets", index) or not _fog_visible(state["map"]["points"][index]):
 			continue
 		var radius: float = _planet_radius(index, state)
 		if celestial_view.planet_detail_opacity(index, radius) < 0.3:
@@ -2988,6 +3003,8 @@ func _recall_control_group(number: int, additive: bool = false) -> void:
 func _building_valid(state: Dictionary, ref: Vector2i, kind: String, expected_count: int = -1) -> bool:
 	var planets: Array = state.get("planets", [])
 	if ref.x < 0 or ref.x >= planets.size() or ref.y < 0 or not ECONOMY.discovered(state, _me(), "planets", ref.x):
+		return false
+	if not _fog_visible(state["map"]["points"][ref.x]):
 		return false
 	var system: Dictionary = planets[ref.x]
 	if kind == "shipyard":
@@ -3324,15 +3341,25 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	if selected_ship_id < 0 and selected_field < 0 and hit >= state["planets"].size():
 		selected_field = hit - state["planets"].size()
 		hit = -1
+	# Direct star hits remain selectable independently of old sector geometry.
+	if selected_ship_id < 0 and selected_field < 0:
+		var closest: float = INF
+		for index in range(state["planets"].size()):
+			if not ECONOMY.discovered(state, _me(), "planets", index):
+				continue
+			var distance: float = point.distance_to(_screen_point(state["map"]["points"][index]))
+			if distance <= maxf(9.0, celestial_view.star_draw_radius(_planet_radius(index, state))) and distance < closest:
+				closest = distance
+				hit = index
 	selected = -1 if selected_ship_id >= 0 or selected_field >= 0 else hit
 	camera.following = false
 	var focused: Control = get_viewport().gui_get_focus_owner()
 	if is_instance_valid(focused):
 		focused.release_focus()
 	if selected >= 0:
-		var system: Dictionary = state["planets"][selected]
-		var owner: int = int(system["owner"])
-		if owner > 0 and ECONOMY.has_station(system) and ECONOMY._combat_group(state, owner) == ECONOMY._combat_group(state, _me()):
+		var system: Dictionary = fog_state.system_view(state, selected, _map_size())
+		var owner: int = int(system.get("owner", 0))
+		if _fog_visible(state["map"]["points"][selected]) and owner > 0 and ECONOMY.has_station(system) and ECONOMY._combat_group(state, owner) == ECONOMY._combat_group(state, _me()):
 			var ref := Vector2i(selected, 0)
 			_set_building_primary(state, ref, "station")
 			building_selection_kind = "station"
@@ -4352,6 +4379,7 @@ func _draw_map() -> void:
 	var points: Array = state["map"]["points"]
 	var font: Font = ThemeDB.fallback_font
 	var fields: Array = state["map"].get("fields", [])
+	var remembered_state: Dictionary = fog_state.observed_state(state, _map_size())
 	for field_index in range(fields.size()):
 		var field: Dictionary = fields[field_index]
 		var center: Vector2 = _screen_point(field["position"])
@@ -4360,7 +4388,9 @@ func _draw_map() -> void:
 		if not ECONOMY.discovered(state, _me(), "fields", field_index):
 			map_canvas.draw_string(font, center + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
 			continue
-		if not _fog_visible(field["position"]):
+		var field_live: bool = _fog_visible(field["position"])
+		field = fog_state.field_view(state, field_index, _map_size())
+		if field.is_empty():
 			continue
 		var boundary := PackedVector2Array()
 		for vertex in field["outline"]:
@@ -4374,12 +4404,12 @@ func _draw_map() -> void:
 			if special:
 				map_canvas.draw_string(font, center + Vector2(-60, float(field["radius"]) * render_scale + 14.0), "Pulsar", HORIZONTAL_ALIGNMENT_CENTER, 120, 12, edge_tint)
 		if bool(field.get("antimatter", false)):
-			var pulse: float = 0.5 + 0.5 * sin(visual_clock * 3.0)
+			var pulse: float = 0.5 + 0.5 * sin(visual_clock * 3.0) if field_live else 0.5
 			var star_radius: float = maxf(4.0, float(field["radius"]) * render_scale * 0.16)
 			var glow: Color = HUD.COLORS[ECONOMY.ANTIMATTER]
 			world_batches.draw_resource_glow(center, star_radius * 2.0, glow, 0.6 + pulse * 0.4)
 			map_canvas.draw_circle(center, star_radius, glow.lightened(0.7), true, -1.0, true)
-			var axis: Vector2 = Vector2.from_angle(visual_clock * 0.8)
+			var axis: Vector2 = Vector2.from_angle(visual_clock * 0.8 if field_live else 0.0)
 			map_canvas.draw_line(center - axis * star_radius * 4.0, center + axis * star_radius * 4.0, Color(glow, 0.45 + pulse * 0.4), maxf(1.0, star_radius * 0.45), true)
 			continue
 		celestial_view.draw_asteroid_chunks(field, viewport_bounds, render_scale, map_canvas, _screen_point)
@@ -4387,14 +4417,20 @@ func _draw_map() -> void:
 		var pos: Vector2 = _screen_point(points[i])
 		if not ECONOMY.discovered(state, _me(), "planets", i):
 			continue
-		if not _fog_visible(points[i]):
+		var live: bool = _fog_visible(points[i])
+		var system: Dictionary = fog_state.system_view(state, i, _map_size())
+		if system.is_empty():
+			# Discovery may precede the first local observation.
+			map_canvas.draw_circle(pos, 3.0, HUD.MUTED)
 			continue
-		var radius: float = _planet_radius(i, state)
-		var tint: Color = _empire_color(int(state["planets"][i]["owner"]))
-		_draw_system(i, state, pos, radius, tint)
-		if _fog_visible(ECONOMY.station_position(state, i, float(state["elapsed"]))):
-			structure_view.draw_station(state, i, tint, float(state["elapsed"]), building_selection_kind, selected_buildings)
-			structure_view.draw_shipyards(state, i, tint, float(state["elapsed"]), selected, selected_yard, building_selection_kind, selected_buildings)
+		var view: Dictionary = state if live else remembered_state
+		var seen_at: float = float(state["elapsed"]) if live else fog_state.observed_time(i)
+		var radius: float = _planet_radius(i, view)
+		var tint: Color = _empire_color(int(system["owner"]))
+		_draw_system(i, view, pos, radius, tint, -1.0 if live else seen_at)
+		if not live or _fog_visible(ECONOMY.station_position(state, i, float(state["elapsed"]))):
+			structure_view.draw_station(view, i, tint, seen_at, building_selection_kind, selected_buildings)
+			structure_view.draw_shipyards(view, i, tint, seen_at, selected, selected_yard, building_selection_kind, selected_buildings)
 		if _show_system_rings(i):
 			var phase: float = 0.6 + 0.35 * sin(visual_clock * 3.0)
 			for angle in range(4):
@@ -4463,7 +4499,7 @@ func _draw_map() -> void:
 				var destination: Vector2 = _screen_point(craft["local_move_target"])
 				order_view.draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
 	for index in range(points.size()):
-		if not ECONOMY.discovered(state, _me(), "planets", index):
+		if not ECONOMY.discovered(state, _me(), "planets", index) or not _fog_visible(points[index]):
 			continue
 		var system: Dictionary = state["planets"][index]
 		var station: Dictionary = system.get("station", {})

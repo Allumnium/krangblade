@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.91.7: Discovered systems and fields remain selectable and render dimmed last-observed infrastructure, orbital positions and asteroid inventories when outside live vision; inspectors use cached data with Last seen labels. No hidden ship ghosts or live production/weapon effects; remembered neutral systems expose Send Colony using last-known eligibility and existing authoritative dispatch. Cache is client-only, clears on map/viewer change, no wire fields. Validate scout reveal/loss, hidden construction/mining/depletion, neutral colonize, re-reveal, selection, fog/minimap and peer rendering. Runtime and visual checks pending.
+
 - v0.91.6: Colony ships recruit 25k crew and require 50k originating residents to enqueue and begin recruitment. Started construction can continue below 50k with sufficient remaining crew and yard operating reserve. Applies to player, AI, repeat orders and UI. Settlement transfers actual crew exactly, including planetless systems, with no free extra residents at founding. Regression fixtures updated; runtime and ENet pending.
 
 - v0.91.5: Use one dashed command-line style for active single/group routes, patrol, follow, rally, formation preview and queued legs. Preserve command-specific tint, active/queued opacity, numbers, ghosts and target rings. Keep weapon effects, physical warp links and flag artwork unchanged. Visual verification pending.

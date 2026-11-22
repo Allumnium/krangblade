@@ -9,10 +9,31 @@ var texture: ImageTexture
 var _origin := Vector2.ZERO
 var extent := Vector2.ZERO
 var _revision: Array = []
+var _map_identity: Array = []
+var _systems: Dictionary = {}
+var _fields: Dictionary = {}
+var _observed_at: Dictionary = {}
 
 func update(state: Dictionary, player: int, motion_revision: Variant, map_size: Vector2) -> bool:
 	if state.is_empty():
+		_live.clear()
+		_explored.clear()
+		_systems.clear()
+		_fields.clear()
+		_observed_at.clear()
+		_revision.clear()
+		_map_identity.clear()
+		texture = null
 		return false
+	var identity: Array = [player, state["map"].get("seed", 0), map_size, state["map"]["points"]]
+	if identity != _map_identity:
+		_map_identity = identity
+		_live.clear()
+		_explored.clear()
+		_systems.clear()
+		_fields.clear()
+		_observed_at.clear()
+		_revision.clear()
 	var team: int = ECONOMY._combat_group(state, player)
 	var revision: Array = [state.get("elapsed"), motion_revision, team, state["ships"].size(), state.get("diplomacy_revision", 0)]
 	if revision == _revision:
@@ -20,6 +41,7 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 	_revision = revision
 	_live = ECONOMY.team_vision(state, team)
 	_explored.merge(_live, true)
+	_observe_sites(state, player, map_size)
 	var cell: float = ECONOMY.VISION_CELL
 	var start := Vector2i.ZERO
 	var finish: Vector2i = ECONOMY.vision_cell(map_size)
@@ -41,6 +63,48 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 	_origin = Vector2(start) * cell
 	extent = Vector2(dimensions) * cell
 	return true
+
+# Site memory is presentation-only and never written back to replicated state.
+# Deep copies prevent in-place solo/host updates from changing remembered data.
+func _observe_sites(state: Dictionary, player: int, map_size: Vector2) -> void:
+	var points: Array = state["map"]["points"]
+	for index in range(state["planets"].size()):
+		if ECONOMY.discovered(state, player, "planets", index) and is_visible(points[index], map_size):
+			_systems[index] = (state["planets"][index] as Dictionary).duplicate(true)
+			_observed_at[index] = float(state["elapsed"])
+	var fields: Array = state["map"].get("fields", [])
+	for index in range(fields.size()):
+		if ECONOMY.discovered(state, player, "fields", index) and is_visible(fields[index]["position"], map_size):
+			_fields[index] = (fields[index] as Dictionary).duplicate(true)
+
+func system_view(state: Dictionary, index: int, map_size: Vector2) -> Dictionary:
+	if index < 0 or index >= state.get("planets", []).size():
+		return {}
+	if is_visible(state["map"]["points"][index], map_size):
+		return state["planets"][index]
+	return _systems.get(index, {})
+
+func field_view(state: Dictionary, index: int, map_size: Vector2) -> Dictionary:
+	var fields: Array = state.get("map", {}).get("fields", [])
+	if index < 0 or index >= fields.size():
+		return {}
+	if is_visible(fields[index]["position"], map_size):
+		return fields[index]
+	return _fields.get(index, {})
+
+func observed_time(index: int) -> float:
+	return float(_observed_at.get(index, 0.0))
+
+# A shallow view for structure rendering and colonization previews. Unknown
+# systems are neutral placeholders, not secretly read from current state.
+func observed_state(state: Dictionary, map_size: Vector2) -> Dictionary:
+	var view: Dictionary = state.duplicate()
+	var systems: Array = []
+	for index in range(state["planets"].size()):
+		var remembered: Dictionary = system_view(state, index, map_size)
+		systems.append(remembered if not remembered.is_empty() else {"owner": 0, "station": {}, "home": false})
+	view["planets"] = systems
+	return view
 
 func is_visible(point: Vector2, map_size: Vector2) -> bool:
 	return point.is_finite() and Rect2(Vector2.ZERO, map_size).has_point(point) and _live.has(ECONOMY.vision_cell(point))
