@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.15: Split _work_salvage into _salvage_pickup, _next_wreck_salvage, _salvage_delivery, _salvage_depot and _unload_salvage. No behavior change; parser, determinism probe and economy failure signatures unchanged.
+
 - v0.97.14: Restore original Follow order reset: Follow keeps existing tactical order (v0.97.13 helper also cleared it). Pre-existing on v0.97.2 baseline: solo_smoke fails at original line 146; two-peer ENet smoke times out missing station_plating, station_port_three, miner_deposited and objective checks; persistent_follow is timing-flaky. Parser and determinism probe pass.
 
 - v0.97.13: Split _execute_unit_order: follow, sector entry, transform and position orders move into _order_* helpers; the repeated salvage/tactical/hold/work reset sequence becomes _reset_unit_for_order (six call sites, same call order). Determinism probe identical, economy failure set unchanged. No gameplay change; runtime/ENet pending.

@@ -7115,57 +7115,91 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 	if cargo_capacity(str(ship["kind"])) <= EPS or bool(ship.get("retreating", false)):
 		_cancel_salvage_order(ship)
 		return false
-	var id: int = int(ship.get("salvage_target", -1))
-	if id >= 0:
-		var piles: Dictionary = state.get("salvage", {})
-		var pile: Dictionary = piles.get(id, {})
-		if pile.is_empty() or int(pile["claim"]) != int(ship["id"]):
-			if not pile.is_empty() and int(pile["claim"]) == int(ship["id"]):
-				pile["claim"] = -1
-			ship.erase("salvage_target")
-			if _cargo_total(ship) > EPS:
-				ship["salvage_delivery"] = true
-			return not busy
-		if busy:
-			return false
-		var point: Vector2 = pile["position"]
-		var pos: Vector2 = ship["position"]
-		if pos.distance_to(point) > TRACTOR_RANGE:
-			var node: int = patrol_node(state, graph, int(ship["owner"]), point)
-			if node < 0:
-				_cancel_salvage_order(ship)
-				return false
-			_manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE * 0.85)
-			return true
-		_collect_salvage(ship, pile, dt)
-		if float(pile["amount"]) <= EPS or cargo_free(ship) <= EPS:
-			pile["claim"] = -1
-			if float(pile["amount"]) <= EPS:
-				piles.erase(id)
-			ship.erase("salvage_target")
-			ship["tractor_active"] = false
-			# Sweep neighboring unclaimed debris from the same wreck until full.
-			if cargo_free(ship) > EPS:
-				var next: int = -1
-				var distance: float = INF
-				for candidate in piles:
-					var other: Dictionary = piles[candidate]
-					var d: float = point.distance_to(other["position"])
-					if d <= 80.0 and d < distance and int(other["claim"]) < 0 and _salvage_reachable(graph, ship, other["position"]):
-						next = int(candidate)
-						distance = d
-				if next >= 0:
-					ship["salvage_target"] = next
-					piles[next]["claim"] = int(ship["id"])
-					return true
-			ship["salvage_delivery"] = _cargo_total(ship) > EPS
-		return true
+	if int(ship.get("salvage_target", -1)) >= 0:
+		return _salvage_pickup(state, graph, ship, dt, busy)
 	# Deliver physically to an owned warehouse, respecting storage limits.
 	if busy and ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
 		return false
 	if _cargo_total(ship) <= EPS:
 		_cancel_salvage_order(ship)
 		return false
+	return _salvage_delivery(state, graph, ship, dt)
+
+static func _salvage_pickup(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, busy: bool) -> bool:
+	var id: int = int(ship.get("salvage_target", -1))
+	var piles: Dictionary = state.get("salvage", {})
+	var pile: Dictionary = piles.get(id, {})
+	if pile.is_empty() or int(pile["claim"]) != int(ship["id"]):
+		if not pile.is_empty() and int(pile["claim"]) == int(ship["id"]):
+			pile["claim"] = -1
+		ship.erase("salvage_target")
+		if _cargo_total(ship) > EPS:
+			ship["salvage_delivery"] = true
+		return not busy
+	if busy:
+		return false
+	var point: Vector2 = pile["position"]
+	var pos: Vector2 = ship["position"]
+	if pos.distance_to(point) > TRACTOR_RANGE:
+		var node: int = patrol_node(state, graph, int(ship["owner"]), point)
+		if node < 0:
+			_cancel_salvage_order(ship)
+			return false
+		_manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE * 0.85)
+		return true
+	_collect_salvage(ship, pile, dt)
+	if float(pile["amount"]) <= EPS or cargo_free(ship) <= EPS:
+		pile["claim"] = -1
+		if float(pile["amount"]) <= EPS:
+			piles.erase(id)
+		ship.erase("salvage_target")
+		ship["tractor_active"] = false
+		# Sweep neighboring unclaimed debris from the same wreck until full.
+		if cargo_free(ship) > EPS:
+			var next: int = _next_wreck_salvage(graph, ship, piles, point)
+			if next >= 0:
+				ship["salvage_target"] = next
+				piles[next]["claim"] = int(ship["id"])
+				return true
+		ship["salvage_delivery"] = _cargo_total(ship) > EPS
+	return true
+
+static func _next_wreck_salvage(graph: Dictionary, ship: Dictionary, piles: Dictionary, point: Vector2) -> int:
+	var next: int = -1
+	var distance: float = INF
+	for candidate in piles:
+		var other: Dictionary = piles[candidate]
+		var d: float = point.distance_to(other["position"])
+		if d <= 80.0 and d < distance and int(other["claim"]) < 0 and _salvage_reachable(graph, ship, other["position"]):
+			next = int(candidate)
+			distance = d
+	return next
+
+static func _salvage_delivery(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+	var depot: int = _salvage_depot(state, graph, ship)
+	if depot < 0:
+		return true
+	var military: bool = ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]
+	var nav: Dictionary = graph if military else state["map"]
+	var dock: Vector2 = station_position(state, depot, float(state["elapsed"]))
+	if not (ship["route"] as Array).is_empty():
+		_move(state if not military else {"map": nav, "ships": state["ships"]}, ship, dt, dock, depot, STATION_DOCK_RANGE)
+		if not ship["route"].is_empty():
+			return true
+	else:
+		var berth: Vector2 = _waiting_berth(state, ship, dock, STATION_DOCK_RANGE, dock.direction_to(ship["position"]))
+		_navigate(ship, berth, ship_speed(str(ship.get("kind", "ship"))) * dt)
+	if (ship["position"] as Vector2).distance_to(dock) > STATION_DOCK_RANGE + EPS:
+		return true
+	var budget: float = _unload_salvage(state, ship, depot, dt)
+	if _cargo_total(ship) <= EPS:
+		_cancel_salvage_order(ship)
+	elif budget > EPS:
+		ship.erase("salvage_depot")
+	return true
+
+# Returns the current valid depot, replanning on a throttled schedule; -1 means wait this tick.
+static func _salvage_depot(state: Dictionary, graph: Dictionary, ship: Dictionary) -> int:
 	var depot: int = int(ship.get("salvage_depot", -1))
 	var owner: int = int(ship["owner"])
 	var team: int = _combat_group(state, owner)
@@ -7176,26 +7210,18 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 		if not _civilian_transit_allowed(state, team, waypoint_team):
 			depot = -1
 			break
-	if depot < 0 or int(state["planets"][depot]["owner"]) != owner or not has_station(state["planets"][depot]):
-		ship.erase("salvage_depot")
-		if float(state["elapsed"]) + EPS < float(ship.get("next_salvage_search", 0.0)):
-			return true
-		ship["next_salvage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
-		if not _salvage_depot_route(state, graph, ship):
-			if ship.get("kind", "") not in ["ship", "colony_ship", "miner"] or not _salvage_depot_route(state, graph, ship, true):
-				return true
-		depot = int(ship["salvage_depot"])
-	var nav: Dictionary = graph if ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]
-	var dock: Vector2 = station_position(state, depot, float(state["elapsed"]))
-	if not (ship["route"] as Array).is_empty():
-		_move(state if ship["kind"] not in ["fighter", "scout", "cruiser", "destroyer"] else {"map": nav, "ships": state["ships"]}, ship, dt, dock, depot, STATION_DOCK_RANGE)
-		if not ship["route"].is_empty():
-			return true
-	else:
-		var berth: Vector2 = _waiting_berth(state, ship, dock, STATION_DOCK_RANGE, dock.direction_to(ship["position"]))
-		_navigate(ship, berth, ship_speed(str(ship.get("kind", "ship"))) * dt)
-	if (ship["position"] as Vector2).distance_to(dock) > STATION_DOCK_RANGE + EPS:
-		return true
+	if depot >= 0 and int(state["planets"][depot]["owner"]) == owner and has_station(state["planets"][depot]):
+		return depot
+	ship.erase("salvage_depot")
+	if float(state["elapsed"]) + EPS < float(ship.get("next_salvage_search", 0.0)):
+		return -1
+	ship["next_salvage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), 0.5)
+	if not _salvage_depot_route(state, graph, ship):
+		if ship.get("kind", "") not in ["ship", "colony_ship", "miner"] or not _salvage_depot_route(state, graph, ship, true):
+			return -1
+	return int(ship["salvage_depot"])
+
+static func _unload_salvage(state: Dictionary, ship: Dictionary, depot: int, dt: float) -> float:
 	var p: Dictionary = state["planets"][depot]
 	var budget: float = _dropoff_budget(ship, dt)
 	for resource in RESOURCES + [ANTIMATTER]:
@@ -7207,11 +7233,7 @@ static func _work_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary
 			var category: String = "Farm deliveries" if ship["kind"] == "colony_ship" else ("Resource deliveries" if bool(ship.get("resource_haul", false)) else "Salvage deliveries")
 			_record_flow(p, category, resource, amount)
 			budget -= amount
-	if _cargo_total(ship) <= EPS:
-		_cancel_salvage_order(ship)
-	elif budget > EPS:
-		ship.erase("salvage_depot")
-	return true
+	return budget
 
 static func _ship_hit(damage: Dictionary, killed_by: Dictionary, health: Dictionary, target: int, attacker: Dictionary, amount: float, hull_slots: Dictionary = {}, hull_health: PackedFloat64Array = PackedFloat64Array()) -> void:
 	COMBAT_KERNELS.ship_hit(damage, killed_by, health, target, attacker, amount, hull_slots, hull_health, EPS)
