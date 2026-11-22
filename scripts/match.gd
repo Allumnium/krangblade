@@ -4406,7 +4406,7 @@ func _draw_map() -> void:
 			var start: Vector2 = _screen_point(ECONOMY.shipyard_position(state, ref.x, ref.y, float(state["elapsed"])))
 			var target: Vector2 = _screen_point(rally["point"])
 			var rally_tint := Color("#ff605c")
-			map_canvas.draw_line(start, target, Color(rally_tint, 0.65), 1.5, true)
+			order_view.draw_command_line(map_canvas, start, target, Color(rally_tint, 0.65))
 			var pole_top: Vector2 = target + Vector2(0, -23)
 			var flag := PackedVector2Array([pole_top, pole_top + Vector2(15, 0), pole_top + Vector2(10, 5), pole_top + Vector2(15, 10), pole_top + Vector2(0, 10)])
 			map_canvas.draw_line(target, pole_top, Color("#111b26"), 4.0, true)
@@ -4442,7 +4442,7 @@ func _draw_map() -> void:
 			if craft.has("patrol_from"):
 				var from: Vector2 = _screen_point(craft["patrol_start_point"])
 				var to: Vector2 = _screen_point(craft["patrol_end_point"])
-				map_canvas.draw_dashed_line(from, to, Color("#b880fa"), 1.5, 4.0, true, true)
+				order_view.draw_command_line(map_canvas, from, to, Color("#b880fa"))
 				order_view.draw_formation_order_ghost(craft, active_order, viewport_bounds.grow(60.0 * maxf(0.42, _ship_scale())))
 			elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
 				var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
@@ -4451,7 +4451,7 @@ func _draw_map() -> void:
 				order_view.draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
 			elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
 				var destination: Vector2 = poses[int(active_order["target"])]["point"]
-				order_view.draw_command_route(order_graph, craft, start, destination, HUD.ACCENT, true)
+				order_view.draw_command_route(order_graph, craft, start, destination, HUD.ACCENT)
 			elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY._unit_order_running(craft):
 				order_view.draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
 			elif active_order.get("kind", "") == "position" and ECONOMY._unit_order_running(craft):

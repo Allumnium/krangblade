@@ -58,9 +58,11 @@ func draw_formation_preview(state: Dictionary, formation_button: int, formation_
 		return
 	var color: Color = Color("#b880fa") if formation_mode == "patrol" else Color("#ff605c") if formation_mode == "attack" else HUD.ACCENT
 	if selected_owned_units.call(state, formation_mode not in ["attack", "patrol"]).size() == 1:
-		map_canvas.draw_line(formation_path[0], formation_path[-1], color, 1.5, true)
+		draw_command_line(map_canvas, formation_path[0], formation_path[-1], color)
 	else:
-		map_canvas.draw_polyline(formation_path, color, 1.5, true)
+		# Preserve the drag shape, using the same command dash style.
+		for i in range(1, formation_path.size()):
+			draw_command_line(map_canvas, formation_path[i - 1], formation_path[i], color)
 	for entry in entries:
 		var order: Dictionary = entry["order"]
 		var point: Vector2 = screen_point.call(order["point"])
@@ -154,7 +156,12 @@ func order_color(ship: Dictionary, order: Dictionary) -> Color:
 	return HUD.ACCENT
 
 # Use the authoritative remaining route, never reconstruct a straight-line path.
-func draw_command_route(graph: Dictionary, ship: Dictionary, start: Vector2, finish: Vector2, tint: Color, dashed: bool = false) -> void:
+# Shared dash pattern for all order intent lines, in screen pixels.
+func draw_command_line(canvas: CanvasItem, start: Vector2, finish: Vector2, tint: Color) -> void:
+	if start.distance_to(finish) > 1.0:
+		canvas.draw_dashed_line(start, finish, tint, 1.5, 6.0, true, true)
+
+func draw_command_route(graph: Dictionary, ship: Dictionary, start: Vector2, finish: Vector2, tint: Color) -> void:
 	var cursor: Vector2 = start
 	var points: Array = graph["points"]
 	var route: Array = ship.get("route", [])
@@ -162,17 +169,9 @@ func draw_command_route(graph: Dictionary, ship: Dictionary, start: Vector2, fin
 		if int(node) < 0 or int(node) >= points.size():
 			continue
 		var waypoint: Vector2 = screen_point.call(points[int(node)])
-		if cursor.distance_to(waypoint) > 1.0:
-			if dashed:
-				map_canvas.draw_dashed_line(cursor, waypoint, Color(tint, 0.8), 1.5, 6.0, true, true)
-			else:
-				map_canvas.draw_line(cursor, waypoint, Color(tint, 0.8), 1.5, true)
+		draw_command_line(map_canvas, cursor, waypoint, Color(tint, 0.8))
 		cursor = waypoint
-	if cursor.distance_to(finish) > 1.0:
-		if dashed:
-			map_canvas.draw_dashed_line(cursor, finish, Color(tint, 0.8), 1.5, 6.0, true, true)
-		else:
-			map_canvas.draw_line(cursor, finish, Color(tint, 0.8), 1.5, true)
+	draw_command_line(map_canvas, cursor, finish, Color(tint, 0.8))
 
 func draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, poses: Dictionary, refs: Dictionary) -> void:
 	var order: Dictionary = ship.get("unit_order", {})
@@ -312,7 +311,7 @@ func draw_group_command_line(state: Dictionary, poses: Dictionary, refs: Diction
 	var finish: Vector2 = shared["point"]
 	if center.distance_to(finish) > 1.0:
 		# One direct intent indicator; individual ships may take different lanes.
-		map_canvas.draw_line(center, finish, Color(shared["tint"], 0.8), 1.5, true)
+		draw_command_line(map_canvas, center, finish, Color(shared["tint"], 0.8))
 
 # Drag placement orders already carry authoritative points and headings.
 # Draw their original hull slots independently of shared command-line targets.
@@ -422,11 +421,7 @@ func draw_queued_chains(canvas: CanvasItem, state: Dictionary, poses: Dictionary
 		var finish: Vector2 = endpoint if endpoint.is_finite() else start
 		var tint: Color = leg["tint"]
 		var step: int = int(leg["step"])
-		if start.distance_to(finish) > 1.0:
-			if step == 0:
-				canvas.draw_line(start, finish, Color(tint, 0.8), 1.5, true)
-			else:
-				canvas.draw_dashed_line(start, finish, Color(tint, 0.75), 1.5, 6.0, true, true)
+		draw_command_line(canvas, start, finish, Color(tint, 0.8 if step == 0 else 0.75))
 		if step == 0 or not viewport_bounds.grow(30.0).has_point(finish):
 			continue
 		var kind: String = leg["kind"]
