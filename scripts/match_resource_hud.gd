@@ -14,7 +14,7 @@ var global_resource_fills: Dictionary = {}
 var global_resource_segments: Dictionary = {}
 var global_resource_strips: Dictionary = {}
 var global_resource_labels: Dictionary = {}
-var global_resource_delta_labels: Dictionary = {}
+var global_resource_trends: Dictionary = {}
 var global_resource_tiles: Dictionary = {}
 var resource_hover_panel: PanelContainer
 var resource_hover_label: Label
@@ -45,11 +45,8 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
 	var fraction: float = float(global_resource_fills.get(resource, 0.0))
 	var segments: Array = global_resource_segments.get(resource, [])
 	strip.draw_rect(Rect2(Vector2.ZERO, strip.size), Color("#081421"))
-	if fraction <= 0.0 or segments.is_empty():
-		return
 	var width: float = strip.size.x * fraction
 	strip.draw_rect(Rect2(Vector2.ZERO, Vector2(width, strip.size.y)), Color(HUD.COLORS.get(resource, Color("#b9d9ed")), 0.38))
-	var font: Font = ThemeDB.fallback_font
 	var x: float = 0.0
 	for i in range(segments.size()):
 		var segment: Dictionary = segments[i]
@@ -59,6 +56,20 @@ func _draw_resource_fill(strip: Control, resource: String) -> void:
 		if i > 0:
 			strip.draw_line(Vector2(x, 0), Vector2(x, strip.size.y), Color("#081421"), 1.0)
 		x += w
+	var trend: int = int(global_resource_trends.get(resource, 0))
+	if trend != 0:
+		var direction: float = 1.0 if trend > 0 else -1.0
+		var count: int = absi(trend)
+		var span: float = count * 6.0
+		var left: float = clampf(width if trend > 0 else width - span, 1.0, maxf(1.0, strip.size.x - span - 1.0))
+		var y: float = strip.size.y * 0.5
+		for i in range(count):
+			var center: float = left + 3.0 + i * 6.0
+			var tail: float = center - direction * 2.0
+			var tip: float = center + direction * 2.0
+			strip.draw_line(Vector2(tail, y - 4.0), Vector2(tip, y), Color.WHITE, 1.5, true)
+			strip.draw_line(Vector2(tip, y), Vector2(tail, y + 4.0), Color.WHITE, 1.5, true)
+
 
 func _build_global_bar(stats: Container) -> void:
 	for resource in ECONOMY.RESOURCES:
@@ -84,12 +95,6 @@ func _build_global_bar(stats: Container) -> void:
 		value.add_theme_color_override("font_color", HUD.COLORS[resource])
 		line.add_child(value)
 		global_resource_labels[resource] = value
-		var delta: Label = make_label.call("0.0t", 12)
-		delta.autowrap_mode = TextServer.AUTOWRAP_OFF
-		delta.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		delta.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		line.add_child(delta)
-		global_resource_delta_labels[resource] = delta
 		global_resource_tiles[resource] = tile
 		global_resource_fills[resource] = 0.0
 		var strip := Control.new()
@@ -298,9 +303,11 @@ func refresh(state: Dictionary) -> void:
 		var value: float = float(totals["resources"][resource])
 		var annual: float = _empire_resource_delta(state, resource)
 		global_resource_labels[resource].text = UI_TEXT.tons(value, 0, true)
-		set_resource_delta(global_resource_delta_labels[resource], annual, true)
 		var stored: float = float(totals["stock"][resource])
 		var reference: float = float(totals["storage_reference"][resource])
+		var ratio: float = absf(annual) / reference if reference > 0.0 else 0.0
+		var count: int = 0 if absf(annual) < 0.05 or reference <= 0.0 else (3 if ratio >= 0.02 else (2 if ratio >= 0.005 else 1))
+		global_resource_trends[resource] = count if annual > 0.0 else -count
 		global_resource_fills[resource] = clampf(stored / reference, 0.0, 1.0) if reference > 0.0 else 0.0
 		var tile: PanelContainer = global_resource_tiles[resource]
 		var segments: Array = []
