@@ -66,6 +66,10 @@ static func fill_info(label: RichTextLabel, description: String, costs_by_resour
 			label.add_text("Upkeep: ")
 			label.add_image(HUD.resource_icon("GC", 24), 14, 14)
 			label.add_text(" " + detail.trim_prefix("Upkeep: ").trim_suffix(" GC/yr") + "/yr")
+		elif detail == "Insufficient local population":
+			label.push_color(Color("#ff7777"))
+			label.add_text(detail)
+			label.pop()
 		elif detail.begins_with("Reference: "):
 			label.push_color(HUD.MUTED)
 			label.add_text(detail.trim_prefix("Reference: "))
