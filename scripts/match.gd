@@ -47,6 +47,7 @@ const WORLD_RENDER_BATCHES = preload("res://scripts/world_render_batches.gd")
 const CELESTIAL_VIEW = preload("res://scripts/celestial_view.gd")
 const WORLD_EFFECTS = preload("res://scripts/world_effects.gd")
 const STRUCTURE_VIEW = preload("res://scripts/structure_view.gd")
+const ORDER_VIEW = preload("res://scripts/order_view.gd")
 const TACTICAL_ALERTS = preload("res://scripts/tactical_alerts.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
@@ -73,6 +74,7 @@ var world_batches := WORLD_RENDER_BATCHES.new()
 var celestial_view := CELESTIAL_VIEW.new()
 var world_effects := WORLD_EFFECTS.new()
 var structure_view := STRUCTURE_VIEW.new()
+var order_view := ORDER_VIEW.new()
 var settings := ConfigFile.new()
 var music_volume: float = 100.0
 var sfx_volume: float = 100.0
@@ -358,6 +360,7 @@ func _build_match_notices() -> void:
 func _build_world_effect_batches() -> void:
 	world_batches.build(map_canvas)
 	structure_view.configure(map_canvas, world_batches, hull_art, command_card_ui, _screen_point, _station_radius, _job_icon, _draw_damage_bar, _shield_fraction, _ship_scale, _overview_art_multiplier)
+	order_view.configure(map_canvas, hull_art, celestial_view, camera, _ship_scale, _screen_point, _station_radius, _planet_radius, _salvage_radius, _fit, _me)
 	map_canvas.resized.connect(_map_resized)
 
 
@@ -4460,43 +4463,6 @@ func _append_formation_point(point: Vector2, force: bool = false) -> void:
 		formation_path.remove_at(1)
 	formation_path.append(point)
 
-func _draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tint: Color) -> void:
-	var axis: Vector2 = heading.normalized() if not heading.is_zero_approx() else Vector2.UP
-	var scale: float = maxf(0.42, _ship_scale())
-	var shape: PackedVector2Array = hull_art.polygon(point, axis * scale, axis.orthogonal() * scale, HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE))
-	if not Geometry2D.triangulate_polygon(shape).is_empty():
-		map_canvas.draw_colored_polygon(shape, Color(tint, 0.24))
-	shape.append(shape[0])
-	map_canvas.draw_polyline(shape, Color(tint, 0.85), 1.0, true)
-
-func _draw_sector_target(graph: Dictionary, node: int, tint: Color, drawn: Dictionary) -> void:
-	if node < 0 or node >= graph["points"].size() or drawn.has(node):
-		return
-	drawn[node] = true
-	var center: Vector2 = graph["points"][node]
-	var outline := PackedVector2Array()
-	for i in range(97):
-		var direction := Vector2.from_angle(TAU * float(i) / 96.0)
-		outline.append(_screen_point(center + direction * ECONOMY.sector_limit(graph, node, direction)))
-	map_canvas.draw_polyline(outline, Color(tint, 0.9), 2.0, true)
-
-func _draw_formation_preview(state: Dictionary) -> void:
-	if formation_button == 0 or formation_length <= 5.0:
-		return
-	var entries: Array = _formation_orders(state)
-	if entries.is_empty():
-		return
-	var color: Color = Color("#b880fa") if formation_mode == "patrol" else Color("#ff605c") if formation_mode == "attack" else HUD.ACCENT
-	if _selected_owned_units(state, formation_mode not in ["attack", "patrol"]).size() == 1:
-		map_canvas.draw_line(formation_path[0], formation_path[-1], color, 1.5, true)
-	else:
-		map_canvas.draw_polyline(formation_path, color, 1.5, true)
-	for entry in entries:
-		var order: Dictionary = entry["order"]
-		var point: Vector2 = _screen_point(order["point"])
-		var heading: Vector2 = order["heading"]
-		_draw_destination_ghost(entry["hull"], point, heading, color if entry["valid"] else Color("#a88b83"))
-
 func _begin_formation(mouse: InputEventMouseButton) -> void:
 	formation_button = mouse.button_index
 	formation_path = PackedVector2Array([mouse.position])
@@ -4986,82 +4952,6 @@ func _draw_blaster_tracers(state: Dictionary, ship: Dictionary, poses: Dictionar
 func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, width: float) -> void:
 	world_effects.draw_ship_laser(ship, pose, endpoint, width, _ship_scale, _empire_color, world_batches)
 
-# Target indicators use authoritative entity IDs, not the ship's navigation
-# waypoint. They follow the interpolated pose and rendered structure geometry.
-func _target_ring_entity(state: Dictionary, poses: Dictionary, refs: Dictionary, id: int) -> Dictionary:
-	var ref: Dictionary = refs.get(id, {})
-	if ref.is_empty():
-		return {}
-	var center: Vector2 = poses[id]["point"] if poses.has(id) else _screen_point(ref["position"])
-	var radius: float = maxf(8.0, hull_art.ui_radius(str(ref.get("entity", {}).get("kind", ""))) * _ship_scale())
-	match str(ref["kind"]):
-		"station": radius = _station_radius() + 4.0
-		"yard": radius = maxf(8.0, 23.0 * _ship_scale(true) * pow(1.2, int(ref["entity"]["level"]) - 1))
-		"pds":
-			var node: int = int(ref["node"])
-			var slot: int = floori(float(-2 - id - state["planets"].size() * 3) / float(state["planets"].size()))
-			var system_radius: float = _planet_radius(node, state)
-			var body: Dictionary = celestial_view.system_visual(node, state)["bodies"][slot]
-			center = _screen_point(ref["repair_position"])
-			radius = maxf(6.0, system_radius * float(body["size"]) * 0.55 + 5.0)
-	return {"point": center, "radius": radius, "owner": ref["owner"]}
-
-func _ship_target_ring(state: Dictionary, poses: Dictionary, refs: Dictionary, ship: Dictionary) -> Dictionary:
-	var destination: int = -1
-	if bool(ship.get("retreating", false)):
-		destination = int(ship.get("repair_site", -1))
-		if destination >= 0:
-			return _target_ring_entity(state, poses, refs, ECONOMY.station_target_id(state, destination))
-		return {}
-	for key in ["attack_order", "combat_target", "pursuit_target", "yard_target", "repair_order", "repair_target"]:
-		var target: int = int(ship.get(key, -1))
-		if target != -1 and refs.has(target):
-			return _target_ring_entity(state, poses, refs, target)
-	var cargo: Dictionary = ship.get("cargo_order", {})
-	if cargo.get("kind", "") == "deposit":
-		return _target_ring_entity(state, poses, refs, int(cargo.get("target", -1)))
-	for key in ["salvage_target", "auto_salvage_target"]:
-		var pile: Dictionary = state.get("salvage", {}).get(int(ship.get(key, -1)), {})
-		if not pile.is_empty():
-			return {"point": _screen_point(pile["position"]), "radius": _salvage_radius(pile) + 5.0, "owner": 0}
-	if ship.has("local_move_target") or ship.has("launch_rally") or bool(ship.get("holding", false)):
-		return {}
-	if ship["kind"] == "miner" and ship.get("mining_mode", "") in ["approach", "outbound", "mining"]:
-		var field: int = int(ship.get("field", -1))
-		if field >= 0 and field < state["map"]["fields"].size():
-			var chunk: Dictionary = ECONOMY._find_chunk(state["map"]["fields"][field], int(ship.get("chunk", -1)))
-			if not chunk.is_empty():
-				var radius: float = float(chunk["radius"]) * _fit() * camera.zoom * sqrt(float(chunk["remaining"]) / float(chunk["initial"]))
-				return {"point": _screen_point(chunk["position"]), "radius": maxf(6.0, radius + 4.0), "owner": 0}
-	if bool(ship.get("salvage_delivery", false)):
-		destination = int(ship.get("salvage_depot", -1))
-	elif ship["kind"] == "miner" and ship.get("mining_mode", "") in ["return", "delivery"]:
-		destination = int(ship.get("mining_anchor", -1)) if ship.get("mining_mode", "") == "return" else int(ship.get("dest", -1))
-	elif ship["kind"] == "ship":
-		destination = int(ship.get("source", -1)) if int(ship.get("source", -1)) >= 0 else int(ship.get("dest", -1))
-	elif ship["kind"] == "colony_ship":
-		destination = int(ship.get("dest", -1))
-	if destination >= 0 and destination < state["planets"].size():
-		if refs.has(ECONOMY.station_target_id(state, destination)):
-			return _target_ring_entity(state, poses, refs, ECONOMY.station_target_id(state, destination))
-		return {"point": _screen_point(state["map"]["points"][destination]), "radius": maxf(8.0, celestial_view.star_draw_radius(_planet_radius(destination, state)) + 5.0), "owner": state["planets"][destination]["owner"]}
-	return {}
-
-func _draw_ship_target_rings(state: Dictionary, poses: Dictionary, refs: Dictionary) -> void:
-	var drawn: Dictionary = {}
-	for ship in state["ships"]:
-		if not selected_units.has(int(ship["id"])) and int(ship["id"]) != selected_ship_id:
-			continue
-		var target: Dictionary = _ship_target_ring(state, poses, refs, ship)
-		if target.is_empty() or drawn.has(target["point"]):
-			continue
-		drawn[target["point"]] = true
-		var owner: int = int(target["owner"])
-		var tint: Color = Color("#50a8ff") if ECONOMY._friendly_target(state, _me(), target) else (Color("#ff5058") if ECONOMY.empires_hostile(state, _me(), owner) else Color.WHITE)
-		var radius: float = float(target["radius"]) + 4.0
-		if Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 4.0).has_point(target["point"]):
-			map_canvas.draw_arc(target["point"], radius, 0.0, TAU, clampi(ceili(radius * 0.7), 24, 96), tint, 1.8, true)
-
 func _overview_art_multiplier(maximum: float = OVERVIEW_ART_MAX_MULTIPLIER) -> float:
 	# Wheel zoom is logarithmic; blend in the same space for a smooth
 	# overview-to-tactical transition, with exact maximum/1x endpoints.
@@ -5324,225 +5214,6 @@ func _draw_other_cargo(ship: Dictionary, point: Vector2, forward: Vector2, later
 				world_batches.draw_cargo_segment(fill, HUD.COLORS[segment["resource"]])
 			start = end
 
-func _order_color(ship: Dictionary, order: Dictionary) -> Color:
-	var kind: String = str(order.get("kind", ""))
-	if kind == "patrol":
-		return Color("#b880fa")
-	if ECONOMY.armed(ship) and (kind == "attack" or (kind in ["sector", "sector_entry", "position"] and not bool(order.get("move_only", false)))):
-		return Color("#ff605c")
-	if kind == "repair":
-		return Color("#55c88b")
-	return HUD.ACCENT
-
-# Use the authoritative remaining route, never reconstruct a straight-line path.
-func _draw_command_route(graph: Dictionary, ship: Dictionary, start: Vector2, finish: Vector2, tint: Color, dashed: bool = false) -> void:
-	var cursor: Vector2 = start
-	var points: Array = graph["points"]
-	var route: Array = ship.get("route", [])
-	for node in route:
-		if int(node) < 0 or int(node) >= points.size():
-			continue
-		var waypoint: Vector2 = _screen_point(points[int(node)])
-		if cursor.distance_to(waypoint) > 1.0:
-			if dashed:
-				map_canvas.draw_dashed_line(cursor, waypoint, Color(tint, 0.8), 1.5, 6.0, true, true)
-			else:
-				map_canvas.draw_line(cursor, waypoint, Color(tint, 0.8), 1.5, true)
-		cursor = waypoint
-	if cursor.distance_to(finish) > 1.0:
-		if dashed:
-			map_canvas.draw_dashed_line(cursor, finish, Color(tint, 0.8), 1.5, 6.0, true, true)
-		else:
-			map_canvas.draw_line(cursor, finish, Color(tint, 0.8), 1.5, true)
-
-func _draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, poses: Dictionary, refs: Dictionary) -> void:
-	var order: Dictionary = ship.get("unit_order", {})
-	var endpoint: Vector2 = Vector2.INF
-	var tint: Color = _order_color(ship, order)
-	var target: int = int(order.get("target", -1))
-	if bool(ship.get("retreating", false)):
-		var site: int = int(ship.get("repair_site", -1))
-		if site >= 0 and site < state["planets"].size():
-			endpoint = ECONOMY.station_position(state, site, float(state["elapsed"]))
-			tint = Color("#55c88b")
-	elif ship.has("patrol_from"):
-		endpoint = ship["patrol_start_point"] if bool(ship.get("patrol_returning", false)) else ship["patrol_end_point"]
-	elif order.get("kind", "") == "follow" and poses.has(target):
-		# The existing follow branch draws its own live line.
-		return
-	elif ship.has("launch_rally"):
-		# The existing rally branch draws its own line.
-		return
-	elif ship.has("local_move_target"):
-		endpoint = ship["local_move_target"]
-	elif ECONOMY._unit_order_running(ship):
-		endpoint = ECONOMY.unit_order_point(state, graph, ship, order)
-		if order.get("kind", "") in ["attack", "repair", "deposit"] and poses.has(target):
-			endpoint = Vector2.INF
-			_draw_command_route(graph, ship, start, poses[target]["point"], tint)
-			return
-	if not endpoint.is_finite():
-		var depot: int = int(ship.get("salvage_depot", ship.get("dest", -1)))
-		var repair: int = int(ship.get("repair_target", -1))
-		var salvage: int = int(ship.get("salvage_target", ship.get("auto_salvage_target", -1)))
-		var combat: int = int(ship.get("combat_target", -1))
-		if refs.has(repair):
-			endpoint = refs[repair].get("repair_position", refs[repair]["position"])
-			tint = Color("#55c88b")
-		elif poses.has(combat):
-			_draw_command_route(graph, ship, start, poses[combat]["point"], Color("#ff605c"))
-			return
-		elif state.get("salvage", {}).has(salvage):
-			endpoint = state["salvage"][salvage]["position"]
-		elif ship.has("resource_stage"):
-			endpoint = ship["resource_stage"]["point"]
-		elif ship.get("mining_mode", "") in ["outbound", "mining"] and ship.has("mining_target"):
-			endpoint = ship["mining_target"]
-		elif depot >= 0 and depot < state["planets"].size() and ECONOMY.has_station(state["planets"][depot]) and ship.get("kind", "") not in ["fighter", "scout", "cruiser", "destroyer"]:
-			endpoint = ECONOMY.station_position(state, depot, float(state["elapsed"]))
-		elif not ship["route"].is_empty():
-			var node: int = int(ship["route"].back())
-			if node >= 0 and node < graph["points"].size():
-				endpoint = graph["points"][node]
-		elif ship.has("hold_position") and bool(ship.get("holding", false)):
-			endpoint = ship["hold_position"]
-		else:
-			endpoint = ship.get("navigation_target", Vector2.INF)
-	if endpoint.is_finite():
-		var finish: Vector2 = _screen_point(endpoint)
-		_draw_command_route(graph, ship, start, finish, tint)
-
-# Shared orders use semantic targets, not individual route legs or formation
-# offsets. A sector-entry order has one sector despite differing approach points.
-func _group_command_target(state: Dictionary, graph: Dictionary, ship: Dictionary, poses: Dictionary, refs: Dictionary) -> Dictionary:
-	if bool(ship.get("holding", false)):
-		return {}
-	var order: Dictionary = ship.get("unit_order", {})
-	var kind: String = str(order.get("kind", ""))
-	var target: int = int(order.get("target", -1))
-	var endpoint: Vector2 = Vector2.INF
-	var tint: Color = _order_color(ship, order)
-	var signature: Array = [kind, target, bool(order.get("move_only", false)), bool(order.get("guard", false)), int(order.get("chunk", -1))]
-	if bool(ship.get("retreating", false)):
-		var site: int = int(ship.get("repair_site", -1))
-		if site < 0 or site >= state["planets"].size():
-			return {}
-		signature = ["withdraw", site]
-		endpoint = _screen_point(ECONOMY.station_position(state, site, float(state["elapsed"])))
-		tint = Color("#55c88b")
-	elif ship.has("launch_rally"):
-		signature = ["rally", ship["launch_rally"]["point"]]
-		endpoint = _screen_point(ship["launch_rally"]["point"])
-		tint = Color("#ff605c")
-	elif kind.is_empty() or not ECONOMY._unit_order_running(ship):
-		return {}
-	elif kind in ["sector", "sector_entry"]:
-		if target < 0 or target >= graph["points"].size():
-			return {}
-		endpoint = _screen_point(graph["points"][target])
-	elif kind == "patrol" and ship.has("patrol_from"):
-		var leg_end: Vector2 = ship["patrol_start_point"] if bool(ship.get("patrol_returning", false)) else ship["patrol_end_point"]
-		signature.append(leg_end)
-		endpoint = _screen_point(leg_end)
-	elif kind in ["follow", "attack", "repair", "deposit"]:
-		if poses.has(target):
-			endpoint = poses[target]["point"]
-		elif refs.has(target):
-			var ref: Dictionary = refs[target]
-			var world: Vector2 = ref.get("repair_position", ref["position"]) if kind == "repair" else ref["position"]
-			endpoint = _screen_point(world)
-		if kind == "follow":
-			tint = HUD.ACCENT
-	else:
-		var world: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
-		if world.is_finite():
-			endpoint = _screen_point(world)
-		# Point orders and automatically chosen unload destinations must
-		# actually agree; a shared sector alone is not enough.
-		signature.append(world)
-	if not endpoint.is_finite():
-		return {}
-	return {"signature": signature, "point": endpoint, "tint": tint}
-
-func _draw_group_command_line(state: Dictionary, poses: Dictionary, refs: Dictionary) -> void:
-	var graph: Dictionary = ECONOMY.military_graph(state)
-	var shared: Dictionary = {}
-	var center := Vector2.ZERO
-	var count: int = 0
-	for ship in state["ships"]:
-		var id: int = int(ship["id"])
-		if not selected_units.has(id):
-			continue
-		if not poses.has(id):
-			return
-		var command: Dictionary = _group_command_target(state, graph, ship, poses, refs)
-		if command.is_empty():
-			return
-		if shared.is_empty():
-			shared = command
-		elif command["signature"] != shared["signature"]:
-			return
-		# Use attack-move color if a mixed fleet has armed members.
-		elif command["tint"] == Color("#ff605c"):
-			shared["tint"] = command["tint"]
-		center += poses[id]["point"] as Vector2
-		count += 1
-	if count < 2 or count != selected_units.size():
-		return
-	center /= float(count)
-	var finish: Vector2 = shared["point"]
-	if center.distance_to(finish) > 1.0:
-		# One direct intent indicator; individual ships may take different lanes.
-		map_canvas.draw_line(center, finish, Color(shared["tint"], 0.8), 1.5, true)
-
-# Drag placement orders already carry authoritative points and headings.
-# Draw their original hull slots independently of shared command-line targets.
-func _draw_formation_order_ghost(ship: Dictionary, order: Dictionary, bounds: Rect2) -> void:
-	if order.get("kind", "") not in ["position", "patrol"] or not order.get("heading") is Vector2 or not order.get("point") is Vector2:
-		return
-	var world: Vector2 = order["point"]
-	if not world.is_finite():
-		return
-	var point: Vector2 = _screen_point(world)
-	if not bounds.has_point(point):
-		return
-	_draw_destination_ghost(str(ship["kind"]), point, order["heading"], _order_color(ship, order))
-
-func _draw_group_formation_ghosts(state: Dictionary, viewport_bounds: Rect2) -> void:
-	var bounds: Rect2 = viewport_bounds.grow(60.0 * maxf(0.42, _ship_scale()))
-	for ship in state["ships"]:
-		if not selected_units.has(int(ship["id"])) or int(ship["owner"]) != _me():
-			continue
-		var order: Dictionary = ship.get("unit_order", {})
-		# Preserve the planned patrol endpoint on either leg and the move
-		# destination through combat or repair. Completed orders disappear.
-		if (order.get("kind", "") == "position" and ship.has("local_move_target")) or (order.get("kind", "") == "patrol" and ship.has("patrol_from")):
-			_draw_formation_order_ghost(ship, order, bounds)
-		for queued in ship.get("order_queue", []):
-			_draw_formation_order_ghost(ship, queued, bounds)
-
-func _draw_queued_orders(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, drawn_sectors: Dictionary) -> void:
-	var order: Dictionary = ship.get("unit_order", {})
-	var endpoint: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
-	if ship.has("patrol_from") and ship.get("patrol_returning", false):
-		endpoint = ship["patrol_start_point"]
-	if endpoint.is_finite() and ECONOMY._unit_order_running(ship):
-		start = _screen_point(endpoint)
-	elif ship.has("launch_rally"):
-		start = _screen_point(ship["launch_rally"]["point"])
-	for pending in ship.get("order_queue", []):
-		endpoint = ECONOMY.unit_order_point(state, graph, ship, pending)
-		if not endpoint.is_finite():
-			continue
-		var finish: Vector2 = _screen_point(endpoint)
-		var tint: Color = _order_color(ship, pending)
-		if pending["kind"] in ["sector", "sector_entry"]:
-			_draw_sector_target(graph, int(pending["target"]), tint, drawn_sectors)
-		elif pending["kind"] == "position" or (pending["kind"] == "patrol" and pending.has("heading")):
-			_draw_destination_ghost(ship["kind"], finish, pending.get("heading", finish - start), tint)
-		map_canvas.draw_dashed_line(start, finish, Color(tint, 0.45), 1.0, 5.0, true, true)
-		start = finish
-
 func _transfer_anchor(state: Dictionary, poses: Dictionary, refs: Dictionary, id: int, resource: String, bay: int) -> Vector2:
 	var ref: Dictionary = refs.get(id, {})
 	if ref.get("kind", "") == "station":
@@ -5654,10 +5325,10 @@ func _draw_map() -> void:
 		var target: Dictionary = service_refs.get(int(gate.get("warp_destination", -1)), {}).get("entity", {})
 		if target.get("kind", "") == "warp_gate" and int(target["owner"]) == _me():
 			map_canvas.draw_line(_screen_point(gate["position"]), _screen_point(target["position"]), Color("#855bbf80"), 2.0, true)
-	_draw_ship_target_rings(state, poses, service_refs)
+	order_view.draw_ship_target_rings(state, poses, service_refs, selected_units, selected_ship_id)
 	if selected_units.size() > 1:
-		_draw_group_command_line(state, poses, service_refs)
-		_draw_group_formation_ghosts(state, viewport_bounds)
+		order_view.draw_group_command_line(state, poses, service_refs, selected_units)
+		order_view.draw_group_formation_ghosts(state, viewport_bounds, selected_units)
 	if selected_units.size() == 1:
 		var order_graph: Dictionary = ECONOMY.military_graph(state)
 		var drawn_sectors: Dictionary = {}
@@ -5667,33 +5338,33 @@ func _draw_map() -> void:
 				continue
 			var start: Vector2 = poses[id]["point"]
 			if selected_units.size() == 1:
-				_draw_single_command_line(state, order_graph, craft, start, poses, service_refs)
-			_draw_queued_orders(state, order_graph, craft, start, drawn_sectors)
+				order_view.draw_single_command_line(state, order_graph, craft, start, poses, service_refs)
+			order_view.draw_queued_orders(state, order_graph, craft, start, drawn_sectors)
 			var active_order: Dictionary = craft.get("unit_order", {})
-			var order_tint: Color = _order_color(craft, active_order)
+			var order_tint: Color = order_view.order_color(craft, active_order)
 			if craft.has("patrol_from"):
 				var from: Vector2 = _screen_point(craft["patrol_start_point"])
 				var to: Vector2 = _screen_point(craft["patrol_end_point"])
 				map_canvas.draw_dashed_line(from, to, Color("#b880fa"), 1.5, 4.0, true, true)
-				_draw_formation_order_ghost(craft, active_order, viewport_bounds.grow(60.0 * maxf(0.42, _ship_scale())))
+				order_view.draw_formation_order_ghost(craft, active_order, viewport_bounds.grow(60.0 * maxf(0.42, _ship_scale())))
 			elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
 				var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
 				var rally_tint := Color("#ff605c")
-				_draw_command_route(order_graph, craft, start, destination, rally_tint)
-				_draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
+				order_view.draw_command_route(order_graph, craft, start, destination, rally_tint)
+				order_view.draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
 			elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
 				var destination: Vector2 = poses[int(active_order["target"])]["point"]
-				_draw_command_route(order_graph, craft, start, destination, HUD.ACCENT, true)
+				order_view.draw_command_route(order_graph, craft, start, destination, HUD.ACCENT, true)
 			elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY._unit_order_running(craft):
-				_draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
+				order_view.draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
 			elif active_order.get("kind", "") == "position" and ECONOMY._unit_order_running(craft):
 				var endpoint: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
 				if endpoint.is_finite():
 					var destination: Vector2 = _screen_point(endpoint)
-					_draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
+					order_view.draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
 			elif craft.has("local_move_target") and not bool(craft.get("retreating", false)):
 				var destination: Vector2 = _screen_point(craft["local_move_target"])
-				_draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
+				order_view.draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
 	for index in range(points.size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
@@ -5887,7 +5558,7 @@ func _draw_map() -> void:
 	world_effects.draw_destructions(viewport_bounds, visual_clock, _ship_scale, _screen_point, world_batches)
 	world_batches.flush_world(visual_clock, hull_art)
 	world_effects.draw_cargo_transfers(state, poses, service_refs, viewport_bounds, visual_clock, _ship_scale, map_canvas, _transfer_anchor)
-	_draw_formation_preview(state)
+	order_view.draw_formation_preview(state, formation_button, formation_length, formation_mode, formation_path, _formation_orders, _selected_owned_units)
 	world_batches.flush_indicators()
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
