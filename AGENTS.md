@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.46: Raise first production-building upgrade gate to 30,000 local residents; retain quadratic target-level scaling (30k, 120k, 270k, 480k). Costs unchanged. Opening growth/food bootstrap and AI pacing require playtesting.
+
 - v0.89.45: Production building population gates scale quadratically with target level: 5k, 20k, 45k, 80k, 125k. Supersedes v0.89.44 linear gates; costs unchanged.
 
 - v0.89.44: Diagnostics icon below logistics lens, remove legacy Perf toolbar; production building thresholds 5,000 local residents per target level (was 500). Show local population and precise queued/population blockers. Deposit availability unchanged; Codex derives thresholds from rules.
