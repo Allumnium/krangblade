@@ -123,6 +123,7 @@ User requested AI-friendly structure and fewer duplicate definitions. v0.89.4 do
 
 - [ ] v0.82.2 / v0.89.34: Verify station bottom row remains Select Shipyards (Z), Build (B), Trade (T), empty before and after Dyson unlock; check single/grouped station selection, disabled Select Shipyards and unchanged hotkeys/Return slots.
 
+- [ ] v0.91.6: Colony ships recruit 25k crew and require 50k originating residents to enqueue and begin recruitment. Started construction can continue below 50k with sufficient remaining crew and yard operating reserve. Applies to player, AI, repeat orders and UI. Settlement transfers actual crew exactly, including planetless systems, with no free extra residents at founding. Regression fixtures updated; runtime and ENet pending.
 - [ ] v0.82.0: Validate mutually exclusive Scout Explore/Wander toggles (v0.82.1), route choice, manual interruption, multiple scouts, cooldown and peer ownership; doubled crew allocation, colony affordability and founding populations, AI pacing. Runtime pending.
 
 - [ ] v0.81.0: Validate invulnerable PDS fire and loss on station destruction; Dyson unlock eligibility, queue/cancel, affordability, all ship discounts and station loss, UI art and peer synchronization. Runtime pending.

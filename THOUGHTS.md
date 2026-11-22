@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.91.6: Colony ships recruit 25k crew and require 50k originating residents to enqueue and begin recruitment. Started construction can continue below 50k with sufficient remaining crew and yard operating reserve. Applies to player, AI, repeat orders and UI. Settlement transfers actual crew exactly, including planetless systems, with no free extra residents at founding. Regression fixtures updated; runtime and ENet pending.
+
 - v0.91.5: Use one dashed command-line style for active single/group routes, patrol, follow, rally, formation preview and queued legs. Preserve command-specific tint, active/queued opacity, numbers, ghosts and target rings. Keep weapon effects, physical warp links and flag artwork unchanged. Visual verification pending.
 
 - v0.91.4: Replace temporary fleet glow with cached building-only continuous territory fields. Compact radial contributions merge for each empire; strongest above threshold claims the point, neutral space remains empty, and GPU contours mark only external/rival boundaries. Same cached fields drive minimap. Track last-observed infrastructure through fog; rebuild on known building weight/ownership/color changes, not hull movement. Remove star name overlay; retain inspector names. Legacy tactical alerts/navigation remain independent. Tune provisional reach/strength/opacity and verify shader compatibility, fog, overlapping claims, large maps and real peers; runtime/visual validation pending.
