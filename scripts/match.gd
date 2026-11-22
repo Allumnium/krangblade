@@ -324,11 +324,6 @@ func _build_map_layers() -> void:
 	queued_order_overlay.z_index = 3
 	queued_order_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	queued_order_overlay.draw.connect(_draw_queued_order_overlay)
-	sector_name_overlay = Control.new()
-	map_canvas.add_child(sector_name_overlay)
-	sector_name_overlay.z_index = 3
-	sector_name_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	sector_name_overlay.draw.connect(_draw_sector_names)
 	logistics_overlay = Control.new()
 	map_canvas.add_child(logistics_overlay)
 	logistics_overlay.z_index = 3
@@ -1561,13 +1556,11 @@ var fog_state := FOG_OF_WAR.new()
 var territory_view := TERRITORY_VIEW.new()
 var fog_overlay: Control
 var queued_order_overlay: Control
-var sector_name_overlay: Control
 
 func _update_fog(state: Dictionary) -> void:
 	if state.is_empty():
 		return
-	if fog_state.update(state, _me(), session.get("motion_revision"), _map_size()):
-		territory_view.set_fog(fog_state.texture, _map_size() / fog_state.extent)
+	fog_state.update(state, _me(), session.get("motion_revision"), _map_size())
 
 func _fog_visible(point: Vector2) -> bool:
 	return fog_state.is_visible(point, _map_size())
@@ -1595,23 +1588,6 @@ func _draw_fog() -> void:
 	fog_state.draw(fog_overlay, Rect2(Vector2.ZERO, map_canvas.size), Rect2(_screen_point(Vector2.ZERO), _map_size() * _fit() * camera.zoom), _map_size())
 
 # Names are static generated map geography, not live tactical information.
-func _draw_sector_names() -> void:
-	var state: Dictionary = _state()
-	if state.is_empty():
-		return
-	var points: Array = state["map"]["points"]
-	var names: Array = state["map"]["names"]
-	var bounds := Rect2(Vector2.ZERO, map_canvas.size)
-	var font: Font = ThemeDB.fallback_font
-	for i in range(mini(points.size(), names.size())):
-		var pos: Vector2 = _screen_point(points[i])
-		var radius: float = celestial_view.star_draw_radius(_planet_radius(i, state))
-		var anchor: Vector2 = pos + Vector2(-80, -radius - 7)
-		if not bounds.intersects(Rect2(anchor - Vector2(0, 16), Vector2(160, 18))):
-			continue
-		var tint: Color = Color("#f4faff") if i == selected else Color(0.83, 0.89, 0.95, 0.8)
-		sector_name_overlay.draw_string(font, anchor, str(names[i]), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, tint)
-
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
 	var team: int = ECONOMY._combat_group(state, _me())
 	if ECONOMY._shares_group_vision(state, team, ECONOMY._combat_group(state, int(ship["owner"]))):
@@ -2301,15 +2277,14 @@ func _build_territory_layer() -> void:
 
 func _refresh_territory(state: Dictionary) -> void:
 	if state.is_empty():
-		territory_view.refresh(state, 0, Vector2.ZERO, Callable(), Callable(), Callable())
+		territory_view.refresh(state, 0, Vector2.ZERO, Callable(), Callable())
 		return
 	_update_fog(state)
-	if territory_view.refresh(state, _me(), _map_size(), _empire_color, _fog_visible, _ship_visible):
+	if territory_view.refresh(state, _me(), _map_size(), _empire_color, _fog_visible):
 		_position_territory()
 
 func _position_territory() -> void:
-	var padding: Vector2 = Vector2.ONE * territory_view.radius * 1.5
-	territory_view.set_geometry(_screen_point(-padding), (_map_size() + padding * 2.0) * _fit() * camera.zoom)
+	territory_view.set_geometry(_screen_point(Vector2.ZERO), _map_size() * _fit() * camera.zoom)
 
 func _show_system_rings(index: int) -> bool:
 	if index != selected or selected_body >= 0 or selected_yard >= 0 or not building_selection_kind.is_empty():
@@ -4362,7 +4337,6 @@ func _draw_map() -> void:
 	_update_fog(_state())
 	fog_overlay.queue_redraw()
 	queued_order_overlay.queue_redraw()
-	sector_name_overlay.queue_redraw()
 	logistics_overlay.queue_redraw()
 	objectives_overlay.queue_redraw()
 	celestial_view.begin_frame()

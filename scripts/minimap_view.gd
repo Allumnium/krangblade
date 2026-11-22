@@ -135,7 +135,7 @@ func draw(selected: int, selected_units: Array[int], selected_field: int) -> voi
 	for i in range(points.size()):
 		locations.append(_minimap_point(points[i], area))
 		known.append(ECONOMY.discovered(state, viewer, "planets" if i < count else "fields", i if i < count else i - count))
-	territory_view.draw_presence(minimap, area.position, area.size)
+	territory_view.draw_claims(minimap, area.position, area.size)
 	for i in range(points.size()):
 		var tint := Color("#40566b")
 		if i < count:
