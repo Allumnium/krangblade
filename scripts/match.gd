@@ -403,6 +403,7 @@ func _build_match_dialogs() -> void:
 	add_child(codex)
 	match_menu = AcceptDialog.new()
 	match_menu.title = "Menu"
+	match_menu.borderless = true
 	match_menu.theme = theme
 	match_menu.exclusive = true
 	match_menu.dialog_close_on_escape = true
@@ -415,6 +416,7 @@ func _build_match_dialogs() -> void:
 	match_menu.custom_action.connect(_menu_action)
 	_build_settings_menu()
 	match_result_dialog = AcceptDialog.new()
+	match_result_dialog.borderless = true
 	match_result_dialog.theme = theme
 	match_result_dialog.unresizable = true
 	match_result_dialog.ok_button_text = "Review map"
@@ -2737,6 +2739,7 @@ func _build_settings_menu() -> void:
 	options.add_theme_constant_override("separation", 12)
 	options.custom_minimum_size.x = 340
 	match_menu.add_child(options)
+	options.add_child(_label("Menu", 20))
 	for channel in ["Music", "SFX"]:
 		var row := HBoxContainer.new()
 		options.add_child(row)
@@ -2802,6 +2805,7 @@ func _open_hotkey_editor() -> void:
 	if not is_instance_valid(hotkey_dialog):
 		hotkey_dialog = AcceptDialog.new()
 		hotkey_dialog.title = "Hotkeys"
+		hotkey_dialog.borderless = true
 		hotkey_dialog.theme = theme
 		hotkey_dialog.exclusive = true
 		hotkey_dialog.transient = true
@@ -2810,6 +2814,7 @@ func _open_hotkey_editor() -> void:
 		match_menu.add_child(hotkey_dialog)
 		var body := VBoxContainer.new()
 		hotkey_dialog.add_child(body)
+		body.add_child(_label("Hotkeys", 20))
 		body.add_child(_label("Choose a key for each command. Keys may be reused on different cards.", 13))
 		var viewport_size: Vector2 = get_viewport_rect().size
 		var scroll := ScrollContainer.new()
@@ -2922,6 +2927,7 @@ func _refresh_match_result(state: Dictionary) -> void:
 			match_result_dialog.dialog_text = "No surviving empires." if team == 0 else "%s wins by conquest." % _empire_name(team)
 		else:
 			match_result_dialog.dialog_text = "No surviving teams." if team == 0 else "Team %d wins by conquest." % team
+		match_result_dialog.dialog_text = match_result_dialog.title + "\n" + match_result_dialog.dialog_text
 		match_result_dialog.ok_button_text = "Review map"
 		match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
 	elif result.is_empty() and state.get("eliminated", []).has(_me()) and not defeated_shown:
@@ -2929,7 +2935,7 @@ func _refresh_match_result(state: Dictionary) -> void:
 		if is_instance_valid(codex):
 			codex.hide()
 		match_result_dialog.title = "Empire defeated"
-		match_result_dialog.dialog_text = "Your empire has no remaining station or ship."
+		match_result_dialog.dialog_text = "Empire defeated\nYour empire has no remaining station or ship."
 		match_result_dialog.ok_button_text = "Observe match"
 		match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
 

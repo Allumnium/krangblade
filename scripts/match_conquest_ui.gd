@@ -70,6 +70,7 @@ func build(owner: Control, session_node: Node, canvas: Control, overlay: Control
 	conquest_scoreboard_toggle.pressed.connect(_toggle_conquest_scoreboard)
 	conquest_dialog = Window.new()
 	conquest_dialog.title = "Choose an upgrade"
+	conquest_dialog.borderless = true
 	conquest_dialog.theme = owner.theme
 	conquest_dialog.transient = true
 	conquest_dialog.exclusive = true

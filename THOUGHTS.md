@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.52: Empire dialog uses wide independent diplomacy and fleet columns, compact rows, sparse slider labels, numeric targets and explicit active/queued counts. Borderless in-game modals with internal labels/actions; no external title bar or X. Visual verification pending.
+
 - v0.89.51: F1–F4 shortcuts in a horizontal strip immediately right of control groups, 44px square rather than 60px, bottom aligned; unchanged actions and hotkeys. Visual/runtime validation pending.
 
 - v0.89.50: Stations gain one launcher using existing 120 damage, 1200 range, 12 s cooldown. All missiles apply full damage within 30 world units to hostile hulls and structures only via frozen combat cells. Station missile tracer uses station snapshot metadata. Runtime/peer validation pending.

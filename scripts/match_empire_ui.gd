@@ -42,7 +42,8 @@ func build(owner_node: Control, session_node: Node, player_query: Callable, colo
 	make_label = label_factory
 	# Size the window from the viewport, never from dynamically added rows.
 	empire_dialog = Window.new()
-	empire_dialog.title = "Empire · Fleet management"
+	empire_dialog.title = "Empire"
+	empire_dialog.borderless = true
 	empire_dialog.theme = owner.theme
 	empire_dialog.transient = true
 	empire_dialog.exclusive = true
@@ -60,34 +61,37 @@ func build(owner_node: Control, session_node: Node, player_query: Callable, colo
 	content.add_theme_constant_override("separation", 8)
 	background.add_child(content)
 	var heading := Label.new()
-	heading.text = "Empire management"
+	heading.text = "Empire"
 	heading.add_theme_font_size_override("font_size", 20)
 	content.add_child(heading)
-	var note := Label.new()
-	note.text = "Automatically build missing ships. Existing orders count toward targets."
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(note)
+	var split := HBoxContainer.new()
+	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.add_theme_constant_override("separation", 12)
+	content.add_child(split)
+	var diplomacy_scroll := ScrollContainer.new()
+	diplomacy_scroll.custom_minimum_size.x = 240
+	diplomacy_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	diplomacy_scroll.size_flags_stretch_ratio = 0.8
+	diplomacy_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	split.add_child(diplomacy_scroll)
+	diplomacy_rows = VBoxContainer.new()
+	diplomacy_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	diplomacy_rows.add_theme_constant_override("separation", 3)
+	diplomacy_scroll.add_child(diplomacy_rows)
+	split.add_child(VSeparator.new())
+	var fleet := VBoxContainer.new()
+	fleet.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fleet.size_flags_stretch_ratio = 1.4
+	split.add_child(fleet)
+	fleet.add_child(_label("Fleet targets", 18))
 	var scroll := ScrollContainer.new()
-	scroll.name = "FleetScroll"
-	# The list may grow, but the bounded scroll viewport keeps the
-	# header and footer inside the same window on the very first open.
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	content.add_child(scroll)
-	var sections := VBoxContainer.new()
-	sections.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sections.add_theme_constant_override("separation", 8)
-	scroll.add_child(sections)
-	diplomacy_rows = VBoxContainer.new()
-	diplomacy_rows.add_theme_constant_override("separation", 8)
-	diplomacy_rows.hide()
-	sections.add_child(diplomacy_rows)
-	sections.add_child(_label("Desired fleet composition", 18))
+	fleet.add_child(scroll)
 	empire_rows = VBoxContainer.new()
 	empire_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	empire_rows.add_theme_constant_override("separation", 8)
-	sections.add_child(empire_rows)
+	empire_rows.add_theme_constant_override("separation", 3)
+	scroll.add_child(empire_rows)
 	var close := Button.new()
 	close.text = "Close"
 	close.size_flags_horizontal = Control.SIZE_SHRINK_END
@@ -108,6 +112,7 @@ func confirm_war(other: int, ids: Array = [], target: int = -1) -> void:
 	war_confirmation = ConfirmationDialog.new()
 	var dialog: ConfirmationDialog = war_confirmation
 	dialog.title = "Declare war?"
+	dialog.borderless = true
 	dialog.dialog_text = "Declare war on %s?" % empire_name(other)
 	if not ids.is_empty():
 		dialog.dialog_text += "\nThe selected armed ships will attack."
@@ -140,7 +145,6 @@ func _refresh_diplomacy_rows(state: Dictionary) -> void:
 		return
 	var active: bool = state.has("diplomacy")
 	diplomacy_rows.visible = active
-	empire_dialog.title = "Empire · Diplomacy & fleet" if active else "Empire · Fleet management"
 	if not active:
 		diplomacy_signature = ""
 		return
@@ -239,7 +243,7 @@ func refresh(state: Dictionary) -> void:
 			panel.add_child(row)
 			var portrait := TextureRect.new()
 			portrait.texture = portrait_icon.call(kind)
-			portrait.custom_minimum_size = Vector2(40, 40)
+			portrait.custom_minimum_size = Vector2(28, 28)
 			portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 			row.add_child(portrait)
@@ -254,27 +258,39 @@ func refresh(state: Dictionary) -> void:
 			top.add_child(name_label)
 			var counter := Label.new()
 			top.add_child(counter)
+			var target_input := SpinBox.new()
+			target_input.min_value = 0
+			target_input.max_value = 500
+			target_input.step = 1
+			target_input.tooltip_text = "Target ships"
+			top.add_child(target_input)
 			var slider := HSlider.new()
 			slider.max_value = ECONOMY.EMPIRE_TARGET_STEPS.size() - 1
 			slider.step = 0.005
-			slider.tick_count = ECONOMY.EMPIRE_TARGET_STEPS.size()
+			slider.tick_count = 0
 			slider.ticks_on_borders = true
 			slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			body.add_child(slider)
 			var tick_labels := Control.new()
-			tick_labels.custom_minimum_size.y = 15
+			tick_labels.custom_minimum_size.y = 11
 			tick_labels.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			body.add_child(tick_labels)
 			tick_labels.draw.connect(_draw_empire_tick_labels.bind(tick_labels, slider))
 			tick_labels.resized.connect(tick_labels.queue_redraw)
 			slider.drag_ended.connect(_empire_slider_released.bind(kind, slider))
 			slider.value_changed.connect(_empire_preview.bind(kind, slider, counter))
-			empire_controls[kind] = {"slider": slider, "counter": counter}
+			slider.value_changed.connect(func(value: float) -> void: target_input.set_value_no_signal(ECONOMY.empire_target_at_tick(value)))
+			target_input.value_changed.connect(func(value: float) -> void:
+				slider.set_value_no_signal(ECONOMY.empire_target_tick(int(value)))
+				session.call("request_empire_target", kind, int(value)))
+			empire_controls[kind] = {"slider": slider, "counter": counter, "target": target_input}
 	for kind in empire_controls:
 		var entry: Dictionary = empire_controls[kind]
 		var slider: HSlider = entry["slider"]
 		var desired: int = int(targets.get(kind, 0))
-		if not slider.has_focus() and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		var target_input: SpinBox = entry["target"]
+		if not slider.has_focus() and not target_input.get_line_edit().has_focus() and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			target_input.set_value_no_signal(desired)
 			slider.set_value_no_signal(ECONOMY.empire_target_tick(desired))
 		var counter: Label = entry["counter"]
 		_empire_preview(slider.value, kind, slider, counter)
@@ -284,6 +300,8 @@ func _draw_empire_tick_labels(labels: Control, slider: HSlider) -> void:
 	var inset: float = slider.get_theme_icon("grabber").get_size().x * 0.5
 	var steps: Array = ECONOMY.EMPIRE_TARGET_STEPS
 	for index in range(steps.size()):
+		if int(steps[index]) not in [0, 10, 50, 100, 300, 500]:
+			continue
 		var caption: String = str(steps[index])
 		var width: float = font.get_string_size(caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 		var x: float = lerpf(inset, labels.size.x - inset, float(index) / float(steps.size() - 1))
@@ -294,7 +312,7 @@ func _empire_preview(value: float, kind: String, _slider: HSlider, counter: Labe
 	var live: int = int(counts["live"].get(kind, 0))
 	var queued: int = int(counts["queued"].get(kind, 0))
 	var desired: int = ECONOMY.empire_target_at_tick(value)
-	counter.text = "%d / %d  (+%d queued)" % [live, desired, queued]
+	counter.text = "%d active · %d queued" % [live, queued]
 	counter.modulate = Color("#8ee2a9") if live + queued >= desired else Color("#e9cb7c")
 
 func _empire_slider_released(changed: bool, kind: String, slider: HSlider) -> void:
@@ -306,7 +324,7 @@ func open() -> void:
 	if str(session.get("phase")) != "match":
 		return
 	var viewport: Vector2 = owner.get_viewport_rect().size
-	var target := Vector2i(maxi(1, mini(600, int(viewport.x) - 40)), maxi(1, mini(570, int(viewport.y) - 80)))
+	var target := Vector2i(maxi(1, mini(980, int(viewport.x) - 32)), maxi(1, mini(620, int(viewport.y) - 32)))
 	# Set the outer dimensions before populating the scroll content.
 	empire_dialog.size = target
 	refresh(_state())
