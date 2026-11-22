@@ -6,6 +6,7 @@ const CODEX = preload("res://scripts/codex.gd")
 const BACKDROP = preload("res://scripts/space_background.gd")
 const PLANET = preload("res://assets/ui/planet.svg")
 const SFX = preload("res://scripts/match_sfx.gd")
+const TACTICAL_ALERTS = preload("res://scripts/tactical_alerts.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
 const COLORS = RULES.EMPIRE_COLORS
@@ -113,18 +114,9 @@ var sound_destruction_sequence: int = 0
 var sound_objectives: Dictionary = {}
 var sound_hulls: Dictionary = {}
 var sound_structures: Dictionary = {}
-var tactical_alerts: Dictionary = {}
+var alert_tracker := TACTICAL_ALERTS.new()
 var tactical_hit_rects: Array[Dictionary] = []
-var tactical_durability: Dictionary = {}
-var tactical_positions: Dictionary = {}
 var tactical_friendly: Array[int] = []
-var tactical_next_scan: int = 0
-var tactical_last_damage_sequence: int = 0
-var rogue_notice_total: int = 0
-var tactical_initialized: bool = false
-const ALERT_APPROACH_RANGE: float = 1200.0
-const ALERT_LIFETIME_MS: int = 10000
-const ALERT_REPEAT_MS: int = 15000
 var background_music: AudioStreamPlayer
 var known_upgrade_jobs: Dictionary = {}
 var upgrade_audio_initialized: bool = false
@@ -6466,24 +6458,13 @@ func _sync_world_audio(state: Dictionary) -> void:
 func _alert_off_camera(point: Vector2) -> bool:
 	return not Rect2(Vector2(0, HEADER_HEIGHT), (_projection_size() - Vector2(0, HEADER_HEIGHT)).max(Vector2.ONE)).has_point(_screen_point(point))
 
-func _post_tactical_alert(key: String, message: String, point: Vector2, now: int, target_id: int = -1) -> void:
-	var previous: Dictionary = tactical_alerts.get(key, {})
-	if not previous.is_empty() and now - int(previous["born"]) < ALERT_REPEAT_MS:
-		if now - int(previous["born"]) < ALERT_LIFETIME_MS:
-			previous["text"] = message
-			previous["point"] = point
-			previous["target"] = target_id
-		return
-	tactical_alerts[key] = {"text": message, "point": point, "born": now, "target": target_id}
-	sound_mixer.play_cue("warning")
-
 func _jump_tactical_alert(point: Vector2) -> bool:
 	for hit in tactical_hit_rects:
 		if not (hit["rect"] as Rect2).has_point(point):
 			continue
 		var key: String = hit["key"]
-		var alert: Dictionary = tactical_alerts.get(key, {})
-		if alert.is_empty() or Time.get_ticks_msec() - int(alert["born"]) >= ALERT_LIFETIME_MS:
+		var alert: Dictionary = alert_tracker.alerts.get(key, {})
+		if alert.is_empty() or Time.get_ticks_msec() - int(alert["born"]) >= TACTICAL_ALERTS.LIFETIME_MS:
 			continue
 		var destination: Vector2 = alert["point"]
 		var target: int = int(alert["target"])
@@ -6504,121 +6485,10 @@ func _jump_tactical_alert(point: Vector2) -> bool:
 
 func _sync_tactical_alerts(state: Dictionary) -> void:
 	if state.is_empty() or str(session.get("phase")) != "match":
-		tactical_alerts.clear()
+		alert_tracker.reset()
 		tactical_hit_rects.clear()
-		tactical_durability.clear()
-		tactical_positions.clear()
-		tactical_initialized = false
-		tactical_next_scan = 0
-		tactical_last_damage_sequence = 0
-		rogue_notice_total = 0
 		return
-	var now: int = Time.get_ticks_msec()
-	for key in tactical_alerts.keys():
-		if now - int(tactical_alerts[key]["born"]) >= ALERT_REPEAT_MS:
-			tactical_alerts.erase(key)
-	var rogue_event: Dictionary = state.get("rogue_events", {}).get(_me(), {})
-	var total: int = int(rogue_event.get("total", 0))
-	if total > rogue_notice_total:
-		var count: int = total - rogue_notice_total
-		rogue_notice_total = total
-		var message: String = "%s went rogue due to unpaid wages!  ›" % _ship_kind_name(str(rogue_event["kind"])) if count == 1 else "%d ships went rogue due to unpaid wages!  ›" % count
-		# New batches must not be suppressed by the ordinary warning cooldown.
-		tactical_alerts["rogue_defection"] = {"text": message, "point": rogue_event["position"], "born": now, "target": -1}
-		sound_mixer.play_cue("warning")
-	var current: Dictionary = {}
-	var team: int = ECONOMY._combat_group(state, _me())
-	var unpaid_count: int = 0
-	var unpaid_example: Dictionary = {}
-	for ship in state["ships"]:
-		if int(ship["owner"]) == _me() and ship.has("unpaid_since"):
-			unpaid_count += 1
-			if unpaid_example.is_empty() or float(ship["unpaid_since"]) < float(unpaid_example["unpaid_since"]):
-				unpaid_example = ship
-		if ECONOMY._combat_group(state, int(ship["owner"])) != team:
-			continue
-		var id: int = int(ship["id"])
-		var point: Vector2 = ship["position"]
-		var health: Vector2 = Vector2(float(ship.get("hp", 0.0)), float(ship.get("shield", 0.0)))
-		var previous: Vector2 = tactical_durability.get(id, health)
-		current[id] = health
-		if tactical_initialized and (health.x < previous.x - ECONOMY.EPS or health.y < previous.y - ECONOMY.EPS) and _alert_off_camera(point):
-			var cell := Vector2i(floori(point.x / 1500.0), floori(point.y / 1500.0))
-			_post_tactical_alert("attack:%s" % str(cell), "Unit under attack!  ›", point, now, id)
-	for event in state.get("ship_destructions", []):
-		var sequence: int = int(event["sequence"])
-		if sequence <= tactical_last_damage_sequence:
-			continue
-		tactical_last_damage_sequence = sequence
-		var point: Vector2 = event["position"]
-		if tactical_initialized and ECONOMY._combat_group(state, int(event["owner"])) == team and _alert_off_camera(point):
-			var cell := Vector2i(floori(point.x / 1500.0), floori(point.y / 1500.0))
-			_post_tactical_alert("attack:%s" % str(cell), "Unit under attack!  ›", point, now)
-	if unpaid_count > 0:
-		_post_tactical_alert("unpaid_wages", "Insufficient GC: %d ship(s) unpaid  ›" % unpaid_count, unpaid_example["position"], now, int(unpaid_example["id"]))
-	else:
-		tactical_alerts.erase("unpaid_wages")
-	tactical_durability = current
-	tactical_initialized = true
-	if now < tactical_next_scan:
-		return
-	tactical_next_scan = now + 500
-	var graph: Dictionary = territory_region_graph
-	if graph.is_empty():
-		return
-	var points: Array = graph["points"]
-	# Build a temporary grid of friendly sector centers. Each visible hostile
-	# is counted once, at its nearest approaching friendly sector.
-	var cell_size: float = ALERT_APPROACH_RANGE
-	for index in tactical_friendly:
-		cell_size = maxf(cell_size, float(graph["sector_radii"][index]) + ALERT_APPROACH_RANGE)
-	var cells: Dictionary = {}
-	for index in tactical_friendly:
-		var center: Vector2 = points[index]
-		var cell := Vector2i(floori(center.x / cell_size), floori(center.y / cell_size))
-		if not cells.has(cell):
-			cells[cell] = []
-		cells[cell].append(index)
-	var positions: Dictionary = {}
-	var groups: Dictionary = {}
-	for ship in state["ships"]:
-		if not ECONOMY.military_hull(str(ship["kind"])) or not ECONOMY.empires_hostile(state, _me(), int(ship["owner"])) or not _ship_visible(state, ship):
-			continue
-		var id: int = int(ship["id"])
-		var point: Vector2 = ship["position"]
-		var previous: Vector2 = tactical_positions.get(id, point)
-		positions[id] = point
-		var movement: Vector2 = point - previous
-		if movement.length_squared() <= ECONOMY.EPS:
-			continue
-		var cell := Vector2i(floori(point.x / cell_size), floori(point.y / cell_size))
-		var best: int = -1
-		var best_distance: float = INF
-		for x in range(-1, 2):
-			for y in range(-1, 2):
-				for index in cells.get(cell + Vector2i(x, y), []):
-					var center: Vector2 = points[index]
-					var distance: float = point.distance_to(center)
-					if distance > float(graph["sector_radii"][index]) + ALERT_APPROACH_RANGE or distance >= best_distance:
-						continue
-					if sector_contains_for_alert(graph, index, point) or movement.normalized().dot(point.direction_to(center)) < 0.35:
-						continue
-					best = index
-					best_distance = distance
-		if best >= 0:
-			var group: Dictionary = groups.get(best, {"count": 0, "sum": Vector2.ZERO})
-			group["count"] = int(group["count"]) + 1
-			group["sum"] = (group["sum"] as Vector2) + point
-			groups[best] = group
-	tactical_positions = positions
-	for index in groups:
-		var group: Dictionary = groups[index]
-		var count: int = int(group["count"])
-		var label_text: String = "%d enemy combat unit%s approaching %s!  ›" % [count, "" if count == 1 else "s", _poi_name(index)]
-		_post_tactical_alert("approach:%d" % index, label_text, (group["sum"] as Vector2) / float(count), now)
-
-func sector_contains_for_alert(graph: Dictionary, index: int, point: Vector2) -> bool:
-	return ECONOMY.sector_contains(graph, index, point)
+	alert_tracker.sync(state, _me(), Time.get_ticks_msec(), territory_region_graph, tactical_friendly, _alert_off_camera, _ship_visible, _ship_kind_name, _poi_name, Callable(sound_mixer, "play_cue"))
 
 func _on_economy_changed() -> void:
 	var state: Dictionary = _state()
@@ -8825,15 +8695,15 @@ func _draw_conquest_notifications(state: Dictionary, font: Font, clock: float) -
 	var visible_count: int = 0
 	tactical_hit_rects.clear()
 	var now: int = Time.get_ticks_msec()
-	var keys: Array = tactical_alerts.keys()
-	keys.sort_custom(func(a, b) -> bool: return int(tactical_alerts[a]["born"]) > int(tactical_alerts[b]["born"]))
+	var keys: Array = alert_tracker.alerts.keys()
+	keys.sort_custom(func(a, b) -> bool: return int(alert_tracker.alerts[a]["born"]) > int(alert_tracker.alerts[b]["born"]))
 	for key in keys:
-		var alert: Dictionary = tactical_alerts[key]
+		var alert: Dictionary = alert_tracker.alerts[key]
 		var age: int = now - int(alert["born"])
-		if age >= ALERT_LIFETIME_MS:
+		if age >= TACTICAL_ALERTS.LIFETIME_MS:
 			continue
 		var tint := Color("#ffb16b") if str(key).begins_with("approach:") else Color("#ff7777")
-		tint.a = clampf(float(ALERT_LIFETIME_MS - age) / 2000.0, 0.0, 1.0)
+		tint.a = clampf(float(TACTICAL_ALERTS.LIFETIME_MS - age) / 2000.0, 0.0, 1.0)
 		var height: float = _draw_notice_text(font, Vector2(left, y), alert["text"], width, tint)
 		tactical_hit_rects.append({"key": key, "rect": Rect2(left - 5.0, y - font.get_ascent(13) - 2.0, width + 10.0, maxf(24.0, height + 6.0))})
 		y += maxf(24.0, height + 8.0)
