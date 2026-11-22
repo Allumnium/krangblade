@@ -39,6 +39,8 @@ Read this file, [TODO.md](TODO.md), [THOUGHTS.md](THOUGHTS.md), current reposito
 
 ## Interface and visual design
 
+- v0.89.50: Stations gain one launcher using existing 120 damage, 1200 range, 12 s cooldown. All missiles apply full damage within 30 world units to hostile hulls and structures only via frozen combat cells. Station missile tracer uses station snapshot metadata. Runtime/peer validation pending.
+
 - v0.89.48: Shorten command, resource and control tooltips; retain icon costs and yield. Ship construction GC fees scale 2× small, 3× medium, 4× large; material costs and wages unchanged. Visual table/icon follow-ups and runtime validation pending.
 
 - v0.89.47: Diagnostics below Menu, horizontal common-scale simulation phase bars with exact values, separate network metrics; resident tax halved to 0.5% per year. Upkeep unchanged. Verify overlay fit and economy/peer checks.
