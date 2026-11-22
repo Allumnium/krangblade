@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.21: Add shared Galactic Credits icon and color, use in HUD and cost/upkeep rows, retain plain GC units where no icon is appropriate. Review Codex economy, infrastructure, fleet, defense and controls against current rules; clarify net income, actual versus reference yield, local materials/empire credits, Dyson fee reduction and F1–F4. No authority changes. New SVG import metadata based on existing resource icon settings; Godot import, parse, visual and peer checks pending.
+
 - v0.89.20: Simplify all shared production-building yield labels to the signed incremental t/yr value, omitting the 'now (X local)' suffix. Keep the reference rate, precision, resource icons and local-population calculation. Codex explanation remains accurate. Static review only; visual validation pending.
 
 - v0.89.19: Repeated user screenshot shows whitespace-only changes to the README dependency diagram on project load. Committed file uses LF and space-aligned lines; replace diagram with equivalent unindented Markdown relationships. Likely editor indentation normalization; exact local cause and recurrence not independently verified. No runtime changes.
