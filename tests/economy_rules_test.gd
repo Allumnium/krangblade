@@ -236,9 +236,9 @@ func _test_yard_autobuild_and_station_approach() -> void:
 	assert(ECON.set_yard_autobuild(state, 1, 0, 0, "miner", false))
 	assert(ECON.cancel(state, 1, 0, int(p["queue"][1]["id"])))
 	assert(p["yards"][0]["autobuild"].is_empty())
-	for i in range(7):
+	for i in range(ECON.SHIPYARD_QUEUE_LIMIT - 1):
 		assert(ECON.enqueue(state, 1, 0, "fighter", "", 0))
-	assert(ECON.shipyard_queue_count(p, 0) == 8 and not ECON.enqueue(state, 1, 0, "fighter", "", 0))
+	assert(ECON.shipyard_queue_count(p, 0) == ECON.SHIPYARD_QUEUE_LIMIT and not ECON.enqueue(state, 1, 0, "fighter", "", 0))
 	assert(ECON.enqueue(state, 1, 0, "fighter", "", 1))
 	p["yards"][1]["level"] = 3
 	assert(not ECON.enqueue(state, 1, 0, "yard_upgrade", "1"))
@@ -551,12 +551,22 @@ func _test_station_construction_queue() -> void:
 	blocked_station["population"] = 1000000.0
 	ECON._refill_continuous(blocked_state, 0, blocked_station)
 	ECON._refill_continuous(blocked_state, 0, blocked_station)
-	for resource in ECON.RESOURCES:
-		assert(ECON._has_job(blocked_station, "economy_building", resource))
-	for job_kind in ["warehouse", "habitation", "yard"]:
-		assert(ECON._has_job(blocked_station, job_kind, ""))
+	assert(ECON.station_queue_count(blocked_station) == ECON.STATION_QUEUE_LIMIT)
+	assert(blocked_station["queue"].size() == ECON.STATION_QUEUE_LIMIT)
+	var stock_before: Dictionary = blocked_station["stock"].duplicate()
+	assert(not ECON.enqueue(blocked_state, 1, 0, "reinforced_plating"))
+	assert(blocked_station["stock"] == stock_before)
+	# Completing the first batch releases slots; remaining armed repeats
+	# can enter without overbooking or losing their preferences.
+	for job in (blocked_station["queue"] as Array).duplicate():
+		var repeat_key: String = "economy_building:" + str(job["target"]) if job["kind"] == "economy_building" else str(job["kind"])
+		blocked_station["continuous"][repeat_key] = false
+		ECON._finish(blocked_state, 0, blocked_station, job)
+	ECON._refill_continuous(blocked_state, 0, blocked_station)
+	assert(ECON.station_queue_count(blocked_station) == 3)
+	assert(ECON._has_job(blocked_station, "habitation", ""))
+	assert(ECON._has_job(blocked_station, "yard", ""))
 	assert(not ECON.pds_job(blocked_station).is_empty())
-	assert(blocked_station["queue"].size() == 7)
 	var orbital_state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var orbital_station: Dictionary = orbital_state["planets"][0]
 	orbital_station["planetless"] = true
@@ -2341,7 +2351,7 @@ func _initialize() -> void:
 	assert(int(p["yards"][0]["level"]) == 3)
 	assert(ECON.max_size(2) > ECON.max_size(1))
 
-	# Eight shipyard orders including the active job; repeat waits for space.
+	# Four shipyard orders including the active job; repeat waits for space.
 	var repeat_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var repeat_home: Dictionary = repeat_state["planets"][0]
 	repeat_home["warehouse_level"] = 3
@@ -2351,12 +2361,12 @@ func _initialize() -> void:
 	assert(not ECON.set_continuous(repeat_state, 2, 0, "fighter", true))
 	assert(not ECON.set_continuous(repeat_state, 1, 0, "yard", true))
 	assert(ECON.set_continuous(repeat_state, 1, 0, "fighter", true))
-	for i in range(8):
+	for i in range(ECON.SHIPYARD_QUEUE_LIMIT):
 		assert(ECON.enqueue(repeat_state, 1, 0, "ship"))
 	assert(not ECON.enqueue(repeat_state, 1, 0, "ship"))
 	assert(ECON.cancel(repeat_state, 1, 0, int(repeat_home["queue"][-1]["id"])))
 	ECON.step(repeat_state, 1.0)
-	assert(repeat_home["queue"].size() == 8)
+	assert(repeat_home["queue"].size() == ECON.SHIPYARD_QUEUE_LIMIT)
 	var repeat_id: int = int(repeat_home["queue"][-1]["id"])
 	assert(ECON.cancel(repeat_state, 1, 0, repeat_id))
 	assert(not repeat_home["continuous"]["fighter"])

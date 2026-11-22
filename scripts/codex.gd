@@ -405,7 +405,7 @@ func _expansion() -> void:
 	_note("A colony is a long-term economic investment. Food imports and local farming improve its growth, while fleets defend its shipping lanes.")
 
 func _infrastructure() -> void:
-	_body("Select a station and open Build. Infrastructure jobs advance in a prepaid sequential queue beside station resources. Canceling infrastructure or upgrades refunds all prepaid materials directly. Only canceled ship construction drops materials as persistent salvage. Shipyards have independent hull queues.")
+	_body("Select a station and open Build. Infrastructure jobs advance in a prepaid sequential queue beside station resources. Canceling infrastructure or upgrades refunds all prepaid materials directly. Only canceled ship construction drops materials as persistent salvage. Stations and individual shipyards each hold up to four construction jobs, including the active job. Repeat construction waits for an open slot. Shipyards have independent hull queues. Shift-queued unit orders are limited to four including the active order.")
 	_section("Resource production")
 	var rows: Array = []
 	for r in E.RESOURCES:

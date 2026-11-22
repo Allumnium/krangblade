@@ -1268,6 +1268,8 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 		if kind == "dyson_sphere":
 			hint = "Dyson Sphere · %.0f s\nRequires Dyson Sphere technology\n−50%% local ship material and GC costs"
 		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
+		if button.disabled and ECONOMY.station_queue_count(p) >= ECONOMY.STATION_QUEUE_LIMIT:
+			command_card_ui.add_build_blocker(button, "Station queue full (%d/%d)" % [ECONOMY.station_queue_count(p), ECONOMY.STATION_QUEUE_LIMIT])
 		if installed or pending:
 			command_card_ui.add_build_blocker(button, "Already installed" if installed else "Upgrade already queued")
 		if kind == "dyson_sphere" and not p.get("conquest_rewards", []).has(kind) and not installed:
@@ -1393,7 +1395,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		var auto: bool = not repeat_targets.is_empty()
 		for index in repeat_targets:
 			auto = auto and bool(state["planets"][index].get("continuous", {}).get(repeat_targets[index], false))
-		available = owned and available and ECONOMY.construction_affordable(_state(), p, recipe)
+		available = owned and available and ECONOMY.station_queue_count(p) < ECONOMY.STATION_QUEUE_LIMIT and ECONOMY.construction_affordable(_state(), p, recipe)
 		var grouped: bool = building_selection_kind == "station" and selected_buildings.size() > 1
 		var can_build: bool = owned and (_any_selected_station_buildable(key, p) if grouped else available and eligible)
 		var permanent_reason: String = UI_TEXT.permanent_station_blocker(p, key)
@@ -1427,6 +1429,8 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				command_card_ui.add_build_blocker(button, "PDS already queued")
 		elif key == "yard" and not eligible:
 			command_card_ui.add_build_blocker(button, description)
+		if not can_build and ECONOMY.station_queue_count(p) >= ECONOMY.STATION_QUEUE_LIMIT:
+			command_card_ui.add_build_blocker(button, "Station queue full (%d/%d)" % [ECONOMY.station_queue_count(p), ECONOMY.STATION_QUEUE_LIMIT])
 		if grouped and not can_build:
 			command_card_ui.add_build_blocker(button, "No selected station can build this now")
 		if not owned:
@@ -1590,7 +1594,7 @@ func _refresh_station_queue(system: Dictionary, owned: bool) -> void:
 		if int(job["size"]) == 0 and job["kind"] != "yard_upgrade":
 			jobs.append(job)
 	station_queue_panel.show()
-	station_queue_heading.text = "Queue (%d)" % jobs.size()
+	station_queue_heading.text = "Queue (%d/%d)" % [jobs.size(), ECONOMY.STATION_QUEUE_LIMIT]
 	var active_id: int = int(jobs[0]["id"]) if not jobs.is_empty() else -1
 	queue_view.refresh(station_queue, station_queue_rows, system, jobs, owned, active_id, _button, _cancel_job, _job_icon, _planet())
 
@@ -5028,6 +5032,8 @@ func _any_selected_station_buildable(key: String, primary: Dictionary) -> bool:
 	return false
 
 func _station_buildable(key: String, p: Dictionary) -> bool:
+	if ECONOMY.station_queue_count(p) >= ECONOMY.STATION_QUEUE_LIMIT:
+		return false
 	if key in ECONOMY.RESOURCES:
 		return ECONOMY.building_available(p, key) and ECONOMY.construction_affordable(_state(), p, ECONOMY.building_cost(p, key))
 	match key:

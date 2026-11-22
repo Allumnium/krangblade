@@ -80,13 +80,19 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 			for k in range(chunk["shape"].size()):
 				var angle: float = TAU * float(k) / float(chunk["shape"].size()) + float(chunk["rotation"])
 				unit_shape.append(Vector2.from_angle(angle) * float(chunk["shape"][k]))
-			asteroid_shape_cache[shape_key] = {"vertices": unit_shape, "triangles": Geometry2D.triangulate_polygon(unit_shape)}
-		# Slow visual rotation; the collision envelope remains fixed and conservative.
-		var spin: float = rotation_time * 0.012 * sin(float(chunk["rotation"]) * 5.0) if rock_radius >= 2.5 else 0.0
+			# Derive a stable, subtly varied spin from the seeded shape.
+			var signature: float = sin(float(chunk["rotation"]) * 5.0)
+			var rate: float = lerpf(0.003, 0.008, absf(signature)) * (1.0 if signature >= 0.0 else -1.0)
+			asteroid_shape_cache[shape_key] = {"vertices": unit_shape, "triangles": Geometry2D.triangulate_polygon(unit_shape), "spin_rate": rate}
 		var rock := PackedVector2Array()
 		var cached: Dictionary = asteroid_shape_cache[shape_key]
+		# One rotation basis per visible detailed rock, not per vertex.
+		var spin: float = rotation_time * float(cached["spin_rate"]) if rock_radius >= 2.5 else 0.0
+		var basis: Vector2 = Vector2.from_angle(spin) * rock_radius
+		var perpendicular: Vector2 = basis.orthogonal()
 		for vertex in cached["vertices"]:
-			rock.append(rock_pos + (vertex as Vector2).rotated(spin) * rock_radius)
+			var local_vertex: Vector2 = vertex
+			rock.append(rock_pos + basis * local_vertex.x + perpendicular * local_vertex.y)
 		# The ore is embedded in stone, not a solid resource-colored rock.
 		for index in cached["triangles"]:
 			var p: Vector2 = rock[index]
