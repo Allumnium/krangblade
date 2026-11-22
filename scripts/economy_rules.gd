@@ -1931,6 +1931,8 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 	if not SHIP_KINDS.has(item["kind"]) and int(p["owner"]) > 0:
 		var progress: Dictionary = objective_progress(state, int(p["owner"]))
 		progress["infrastructure_built"] = int(progress.get("infrastructure_built", 0)) + 1
+		if item["kind"] == "yard_upgrade" and int(item["level"]) == 2:
+			progress["medium_shipyards_completed"] = int(progress.get("medium_shipyards_completed", 0)) + 1
 	p["queue"].erase(item)
 
 static func cargo_bay_count(kind: String) -> int:
@@ -9144,12 +9146,14 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	_sector_query_graph = {}
 	_sector_query_cache.clear()
 
+const OPENING_OBJECTIVES = {"economic": "medium_shipyard", "military": "military_built"}
+
 static func objective_progress(state: Dictionary, player: int) -> Dictionary:
 	if not state.has("objectives"):
 		state["objectives"] = {}
 	var all_progress: Dictionary = state["objectives"]
 	if not all_progress.has(player):
-		all_progress[player] = {"colonies": {}, "metals": 0.0, "population": 0.0, "completed": {}, "points": {"economic": 0, "military": 0, "tech": 0}, "offers": {}, "active_goals": {"economic": "colony_ships", "military": "military_built"}, "goal_refresh": {}, "goal_draws": {}}
+		all_progress[player] = {"colonies": {}, "metals": 0.0, "population": 0.0, "completed": {}, "points": {"economic": 0, "military": 0, "tech": 0}, "offers": {}, "active_goals": OPENING_OBJECTIVES.duplicate(), "goal_refresh": {}, "goal_draws": {}}
 	return all_progress[player]
 
 static func embarked_construction_population(planet: Dictionary) -> float:
@@ -9634,6 +9638,7 @@ const OBJECTIVE_REFRESH_SECONDS: float = 60.0
 const OBJECTIVE_COMPLETE_SECONDS: float = 10.0
 # category, lifetime/current metric, target, label, required prior objective
 const OBJECTIVE_SPECS = {
+	"medium_shipyard": ["economic", "medium_shipyards_completed", 1, "Upgrade a shipyard to Medium", ""],
 	"colony_ships": ["economic", "colony_ships_built", 2, "Build 2 colony ships", ""],
 	"colonies": ["economic", "colonies", 2, "Colonize 2 systems", "colony_ships"],
 	"colonies_2": ["economic", "colonies", 4, "Colonize 4 systems", "colonies"],
@@ -9726,7 +9731,7 @@ static func _objective_row(progress: Dictionary, key: String) -> Dictionary:
 
 static func active_objectives(progress: Dictionary, _clock: float) -> Array:
 	var result: Array = []
-	var active: Dictionary = progress.get("active_goals", {"economic": "colony_ships", "military": "military_built"})
+	var active: Dictionary = progress.get("active_goals", OPENING_OBJECTIVES.duplicate())
 	for category in REWARD_CATEGORIES:
 		if category == "tech" and not objective_tech_unlocked(progress):
 			continue
@@ -9780,7 +9785,7 @@ static func _draw_objective(state: Dictionary, player: int, progress: Dictionary
 	return str(candidates[rng.randi_range(0, candidates.size() - 1)])
 
 static func _assign_category_objectives(state: Dictionary, player: int, progress: Dictionary) -> void:
-	var active: Dictionary = progress.get("active_goals", {"economic": "colony_ships", "military": "military_built"})
+	var active: Dictionary = progress.get("active_goals", OPENING_OBJECTIVES.duplicate())
 	var completed: Dictionary = progress["completed"]
 	for category in REWARD_CATEGORIES:
 		if category == "tech" and not objective_tech_unlocked(progress):
@@ -9788,11 +9793,7 @@ static func _assign_category_objectives(state: Dictionary, player: int, progress
 		var current: String = str(active.get(category, ""))
 		if reward_points(progress, category) > 0 or (not current.is_empty() and not completed.has(current)):
 			continue
-		# Continue the introductory colony chain before ordinary random goals.
-		if current == "colony_ships" and not completed.has("colonies") and not _objective_target_met(progress, "colonies"):
-			active[category] = "colonies"
-		else:
-			active[category] = _draw_objective(state, player, progress, category, current)
+		active[category] = _draw_objective(state, player, progress, category, current)
 	progress["active_goals"] = active
 
 static func objective_refresh_remaining(progress: Dictionary, category: String, clock: float) -> float:

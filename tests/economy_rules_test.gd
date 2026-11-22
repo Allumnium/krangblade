@@ -1251,16 +1251,28 @@ func _test_objective_holdings() -> void:
 	home["stock"]["Metals"] = 2900.0
 	var progress: Dictionary = ECON.objective_progress(state, 1)
 	assert(ECON.active_objectives(progress, 0.0).size() == 2)
-	assert(progress["active_goals"]["economic"] == "colony_ships")
-	progress["colony_ships_built"] = 2
+	assert(progress["active_goals"] == ECON.OPENING_OBJECTIVES)
+	var rival: Dictionary = ECON.objective_progress(state, 2)
+	assert(rival["active_goals"] == ECON.OPENING_OBJECTIVES)
+	assert(ECON.refresh_objective(state, 2, "economic", "medium_shipyard"))
+	assert(ECON.refresh_objective(state, 2, "military", "military_built"))
+	assert(rival["active_goals"]["economic"] != "medium_shipyard" and rival["active_goals"]["military"] != "military_built")
+	assert(progress["active_goals"] == ECON.OPENING_OBJECTIVES)
+	assert(ECON.enqueue(state, 1, 0, "yard_upgrade", "0"))
 	ECON._update_objectives(state)
-	assert(progress["completed"].has("colony_ships") and ECON.reward_points(progress, "economic") == 1)
+	assert(not progress["completed"].has("medium_shipyard") and ECON.reward_points(progress, "economic") == 0)
+	ECON._finish(state, 0, home, home["queue"][0])
+	assert(home["yards"][0]["level"] == 2)
+	# Restore metal holdings for the independent holdings assertions below.
+	home["stock"]["Metals"] = 2900.0
+	ECON._update_objectives(state)
+	assert(progress["completed"].has("medium_shipyard") and ECON.reward_points(progress, "economic") == 1)
 	assert(float(progress["population"]) == 80000.0 and float(progress["metals"]) == 3000.0)
 	assert(not progress["completed"].has("population") and not progress["completed"].has("metals"))
-	assert(not ECON.refresh_objective(state, 1, "economic", "colony_ships"))
+	assert(not ECON.refresh_objective(state, 1, "economic", "medium_shipyard"))
 	state["objective_clock"] = 11.0
 	ECON._update_objectives(state)
-	assert(progress["active_goals"]["economic"] == "colony_ships")
+	assert(progress["active_goals"]["economic"] == "medium_shipyard")
 	assert(ECON.reward_points(progress, "economic") == 1)
 	assert(not ECON.objective_candidates(progress, "economic").has("population"))
 	assert(not ECON.objective_candidates(progress, "economic").has("metals"))
@@ -1269,11 +1281,13 @@ func _test_objective_holdings() -> void:
 	ECON._update_objectives(state)
 	assert(ECON.reward_points(progress, "economic") == 0)
 	assert(ECON.lifetime_reward_points(progress, "economic") == 1)
-	assert(progress["active_goals"]["economic"] == "colonies")
+	var next_goal: String = progress["active_goals"]["economic"]
+	assert(next_goal != "medium_shipyard" and ECON.objective_category(next_goal) == "economic")
+	assert(int(progress["goal_draws"]["economic"]) == 1)
 	assert(ECON.objective_category("colonies") == "economic")
-	assert(ECON.refresh_objective(state, 1, "economic", "colonies"))
+	assert(ECON.refresh_objective(state, 1, "economic", next_goal))
 	var rerolled: String = progress["active_goals"]["economic"]
-	assert(rerolled != "colonies" and ECON.objective_category(rerolled) == "economic")
+	assert(rerolled != next_goal and ECON.objective_category(rerolled) == "economic")
 	assert(not ECON.refresh_objective(state, 1, "economic", rerolled))
 	assert(ECON.refresh_objective(state, 1, "military", "military_built"))
 	assert(ECON.objective_refresh_remaining(progress, "economic", 11.0) == 60.0)
@@ -1307,27 +1321,27 @@ func _test_objective_holdings() -> void:
 	ECON._update_objectives(state)
 	assert(progress["completed"].has("colony_food"))
 	assert(ECON.objective_tech_unlocked(progress))
-	print("PASS: one objective per category, colony prerequisites, current holdings, lifetime food, separate rerolls and cooldowns")
+	print("PASS: fixed opening objectives, completed medium yard, randomized successors, holdings, separate rerolls and cooldowns")
 
 func _test_objective_single_point() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}, 3: {"team": 3}}, [1, 2, 3], false)
 	# Two simultaneous finishers and one later finisher of the same goal.
 	for player in [1, 2]:
-		ECON.objective_progress(state, player)["colony_ships_built"] = 2
+		ECON.objective_progress(state, player)["medium_shipyards_completed"] = 1
 	ECON._update_objectives(state)
 	assert(ECON.reward_points(ECON.objective_progress(state, 3), "economic") == 0)
 	state["objective_clock"] = 11.0
-	ECON.objective_progress(state, 3)["colony_ships_built"] = 2
+	ECON.objective_progress(state, 3)["medium_shipyards_completed"] = 1
 	ECON._update_objectives(state)
 	ECON._update_objectives(state)
 	for player in [1, 2, 3]:
 		var progress: Dictionary = ECON.objective_progress(state, player)
-		assert(progress["completed"].has("colony_ships"))
+		assert(progress["completed"].has("medium_shipyard"))
 		assert(ECON.reward_points(progress, "economic") == 1)
 		assert(ECON.lifetime_reward_points(progress, "economic") == 1)
 		var completions: int = 0
 		for event in state["objective_events"]:
-			if int(event["player"]) == player and event.get("objective", "") == "colony_ships":
+			if int(event["player"]) == player and event.get("objective", "") == "medium_shipyard":
 				assert(int(event["award"]) == 1)
 				assert(bool(event["first"]) == (player != 3))
 				completions += 1
