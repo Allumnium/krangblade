@@ -3,15 +3,18 @@ extends RefCounted
 const TEXT := Color("#e2f0ff")
 const MUTED := Color("#8ca5be")
 const ACCENT := Color("#62cbe8")
+const CREDIT_COLOR := Color("#e7c76b")
 const CONSOLE_BACKGROUND := Color("#080c12")
 const COLORS = {
 	"Metals": Color("#c1cedc"), "Organics": Color("#8ed779"),
-	"Crystals": Color("#c8a2ff"), "Raw antimatter": Color("#f279d7")
+	"Crystals": Color("#c8a2ff"), "Raw antimatter": Color("#f279d7"),
+	"GC": CREDIT_COLOR
 }
 const ICONS = {
 	"Metals": preload("res://assets/ui/metals.svg"),
 	"Organics": preload("res://assets/ui/organics.svg"),
-	"Crystals": preload("res://assets/ui/crystals.svg")
+	"Crystals": preload("res://assets/ui/crystals.svg"),
+	"GC": preload("res://assets/ui/credits.svg")
 }
 
 # Rasterize fixed-size resource icons once at their actual HUD dimensions.

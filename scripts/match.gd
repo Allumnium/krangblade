@@ -2988,11 +2988,19 @@ func _build_credit_stat(parent: Container) -> void:
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 2)
 	tile.add_child(stack)
-	global_credit_label = _label("0 GC", 12)
+	var balance_row := HBoxContainer.new()
+	balance_row.add_theme_constant_override("separation", 4)
+	balance_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(balance_row)
+	var credit_icon := TextureRect.new()
+	HUD.fixed_icon(credit_icon, HUD.resource_icon("GC", 18), 18)
+	credit_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	balance_row.add_child(credit_icon)
+	global_credit_label = _label("0", 12)
 	global_credit_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	global_credit_label.add_theme_color_override("font_color", Color("#e7c76b"))
-	stack.add_child(global_credit_label)
-	global_credit_income_label = _label("+0 GC/yr", 12)
+	global_credit_label.add_theme_color_override("font_color", HUD.CREDIT_COLOR)
+	balance_row.add_child(global_credit_label)
+	global_credit_income_label = _label("+0/yr", 12)
 	global_credit_income_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	global_credit_income_label.add_theme_color_override("font_color", Color("#7cdb9b"))
 	stack.add_child(global_credit_income_label)
@@ -3159,10 +3167,10 @@ func _refresh_global_bar(state: Dictionary) -> void:
 	var totals: Dictionary = ECONOMY.empire_totals(state, _me())
 	var credit_income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE - float(totals["upkeep"])
 	var unpaid: int = int(totals["unpaid_ships"])
-	global_credit_label.text = "%s GC%s" % [UI_TEXT.compact_amount(ECONOMY.credit_balance(state, _me())), " !" if unpaid > 0 else ""]
-	global_credit_label.add_theme_color_override("font_color", Color("#ff7777") if unpaid > 0 else Color("#e7c76b"))
+	global_credit_label.text = "%s%s" % [UI_TEXT.compact_amount(ECONOMY.credit_balance(state, _me())), " !" if unpaid > 0 else ""]
+	global_credit_label.add_theme_color_override("font_color", Color("#ff7777") if unpaid > 0 else HUD.CREDIT_COLOR)
 	var sign_text: String = "+" if credit_income > 0.0 else ("−" if credit_income < 0.0 else "")
-	global_credit_income_label.text = "%s%s GC/yr" % [sign_text, UI_TEXT.compact_amount(absf(credit_income))]
+	global_credit_income_label.text = "%s%s/yr" % [sign_text, UI_TEXT.compact_amount(absf(credit_income))]
 	global_credit_income_label.add_theme_color_override("font_color", Color("#ff7777") if credit_income < 0.0 else (Color("#7cdb9b") if credit_income > 0.0 else Color.WHITE))
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])

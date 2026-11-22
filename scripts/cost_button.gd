@@ -44,14 +44,13 @@ static func fill_info(label: RichTextLabel, description: String, costs_by_resour
 		for resource in costs_by_resource:
 			if count > 0:
 				label.add_text("   ")
-			if resource != "GC":
-				var symbol: Texture2D = population_icon if resource == "Population" else HUD.resource_icon(resource, 24)
-				if symbol != null:
-					label.add_image(symbol, 14, 14)
-					label.add_text(" ")
-			var amount_color: Color = Color("#ff7777") if shortages.has(resource) else (Color("#e7c76b") if resource == "GC" else HUD.TEXT)
+			var symbol: Texture2D = population_icon if resource == "Population" else HUD.resource_icon(resource, 24)
+			if symbol != null:
+				label.add_image(symbol, 14, 14)
+				label.add_text(" ")
+			var amount_color: Color = Color("#ff7777") if shortages.has(resource) else (HUD.CREDIT_COLOR if resource == "GC" else HUD.TEXT)
 			label.push_color(amount_color)
-			label.add_text("%.0f%s" % [float(costs_by_resource[resource]), " GC" if resource == "GC" else ("" if resource == "Population" else "t")])
+			label.add_text("%.0f%s" % [float(costs_by_resource[resource]), "" if resource in ["GC", "Population"] else "t"])
 			label.pop()
 			count += 1
 	for index in range(1, lines.size()):
@@ -63,6 +62,10 @@ static func fill_info(label: RichTextLabel, description: String, costs_by_resour
 			label.push_color(Color("#9fe3b5"))
 			label.add_text(detail.trim_prefix("Yield: "))
 			label.pop()
+		elif detail.begins_with("Upkeep: ") and detail.ends_with(" GC/yr"):
+			label.add_text("Upkeep: ")
+			label.add_image(HUD.resource_icon("GC", 24), 14, 14)
+			label.add_text(" " + detail.trim_prefix("Upkeep: ").trim_suffix(" GC/yr") + "/yr")
 		elif detail.begins_with("Reference: "):
 			label.push_color(HUD.MUTED)
 			label.add_text(detail.trim_prefix("Reference: "))
