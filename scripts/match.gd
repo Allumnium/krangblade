@@ -7,6 +7,7 @@ const CostButton = preload("res://scripts/cost_button.gd")
 const TradeRange = preload("res://scripts/trade_range.gd")
 const COMMAND_CARD_UI = preload("res://scripts/command_card_ui.gd")
 const COMMAND_HOTKEYS = preload("res://scripts/command_hotkeys.gd")
+const HULL_ART = preload("res://scripts/hull_art.gd")
 const UI_COMMAND_DETAILS = {
 	"move": "Choose a destination in a discovered region. Cross sectors along highways. Shift queues the order.",
 	"stop": "Cancel current orders and stop. Shift queues the stop.",
@@ -165,118 +166,16 @@ var zoom: float = 1.0
 var camera_world: Vector2 = Vector2.INF
 var follow_units: bool = false
 var drag_button: int = 0
+var hull_art := HULL_ART.new()
 var ship_visuals: Dictionary = {}
 var ship_offsets: Dictionary = {}
 const SHIP_WORLD_SCALE: float = 1.5
 const FIGHTER_MUZZLE: float = 12.0
 const MINER_MUZZLE: Vector2 = Vector2(10.0, 3.75)
-const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(23, 4), Vector2(19, 8), Vector2(-20, 8), Vector2(-20, -8), Vector2(19, -8), Vector2(23, -4)]
 const DESTRUCTION_LIFETIME: float = 1.35
 const MAX_VISIBLE_DESTRUCTIONS: int = 32
 var last_destruction_sequence: int = 0
 var ship_destructions: Array = []
-# Authored top-down silhouette and interior panel geometry in hull-local
-# coordinates (forward, lateral). Freighter has five paired cargo rows.
-const HULL_OUTLINES: Dictionary = {
-	"scout": [Vector2(12, 0), Vector2(4, 2), Vector2(-2, 5), Vector2(-8, 5), Vector2(-6, 2), Vector2(-10, 1.8), Vector2(-10, -1.8), Vector2(-6, -2), Vector2(-8, -5), Vector2(-2, -5), Vector2(4, -2)],
-	"cruiser": [Vector2(25, 0), Vector2(19, 4), Vector2(13, 5), Vector2(6, 13), Vector2(-5, 13), Vector2(-9, 7), Vector2(-19, 7), Vector2(-25, 4), Vector2(-25, 0), Vector2(-25, -4), Vector2(-19, -7), Vector2(-9, -7), Vector2(-5, -13), Vector2(6, -13), Vector2(13, -5), Vector2(19, -4)],
-	"destroyer": [Vector2(44, 0), Vector2(38, 7), Vector2(32, 7), Vector2(29, 18), Vector2(20, 20), Vector2(8, 16), Vector2(1, 10), Vector2(-12, 10), Vector2(-18, 23), Vector2(-32, 23), Vector2(-40, 17), Vector2(-40, 9), Vector2(-44, 6), Vector2(-44, 0), Vector2(-44, -6), Vector2(-40, -9), Vector2(-40, -17), Vector2(-32, -23), Vector2(-18, -23), Vector2(-12, -10), Vector2(1, -10), Vector2(8, -16), Vector2(20, -20), Vector2(29, -18), Vector2(32, -7), Vector2(38, -7)],
-	"science_ship": [Vector2(14, 0), Vector2(12, 7), Vector2(7, 12), Vector2(0, 14), Vector2(-7, 12), Vector2(-12, 7), Vector2(-14, 0), Vector2(-12, -7), Vector2(-7, -12), Vector2(0, -14), Vector2(7, -12), Vector2(12, -7)],
-	"fighter": [Vector2(12, 0), Vector2(6, 2.5), Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-6, 3), Vector2(-10, 2.5), Vector2(-10, -2.5), Vector2(-6, -3), Vector2(-7, -7.5), Vector2(-3, -8), Vector2(2.5, -3), Vector2(6, -2.5)],
-	"miner": [Vector2(10, 5), Vector2(6, 5), Vector2(3, 7), Vector2(-5, 7), Vector2(-8, 4), Vector2(-8, -4), Vector2(-5, -7), Vector2(3, -7), Vector2(6, -5), Vector2(10, -5), Vector2(10, -2.5), Vector2(5, -2.5), Vector2(4, 0), Vector2(5, 2.5), Vector2(10, 2.5)],
-	"colony_ship": [Vector2(13, 0), Vector2(8, 3), Vector2(5, 3.5), Vector2(3, 6.5), Vector2(-5, 7), Vector2(-9, 4), Vector2(-11, 3), Vector2(-11, -3), Vector2(-9, -4), Vector2(-5, -7), Vector2(3, -6.5), Vector2(5, -3.5), Vector2(8, -3)]
-}
-const HULL_PANELS: Dictionary = {
-	"scout": [
-		[Color("#a3b8c9"), [Vector2(11, 0), Vector2(3, 1.5), Vector2(-7, 1.5), Vector2(-8, 0), Vector2(-7, -1.5), Vector2(3, -1.5)]],
-		[Color("#21364c"), [Vector2(5, 0), Vector2(1, 1.3), Vector2(-2, 1), Vector2(-2, -1), Vector2(1, -1.3)]],
-		[Color("#556e87"), [Vector2(-1, 2), Vector2(-3, 4.5), Vector2(-7, 4.5), Vector2(-5, 2)]],
-		[Color("#556e87"), [Vector2(-1, -2), Vector2(-3, -4.5), Vector2(-7, -4.5), Vector2(-5, -2)]],
-		[Color("#9de6ff"), [Vector2(-9, 1.3), Vector2(-10, 1.3), Vector2(-10, -1.3), Vector2(-9, -1.3)]]
-	],
-	"cruiser": [
-		[Color("#7189a2"), [Vector2(24, 0), Vector2(17, 3), Vector2(8, 4), Vector2(-19, 5), Vector2(-24, 0), Vector2(-19, -5), Vector2(8, -4), Vector2(17, -3)]],
-		[Color("#b3c7da"), [Vector2(18, 0), Vector2(9, 2.8), Vector2(-13, 3.5), Vector2(-19, 0), Vector2(-13, -3.5), Vector2(9, -2.8)]],
-		[Color("#21364c"), [Vector2(10, 0), Vector2(5, 2.1), Vector2(-1, 2.1), Vector2(-4, 0), Vector2(-1, -2.1), Vector2(5, -2.1)]],
-		[Color("#394f65"), [Vector2(12, 5), Vector2(5, 12), Vector2(-4, 12), Vector2(-8, 6)]],
-		[Color("#394f65"), [Vector2(12, -5), Vector2(5, -12), Vector2(-4, -12), Vector2(-8, -6)]],
-		[Color("#a9bed1"), [Vector2(8, 7), Vector2(4, 10), Vector2(-2, 10), Vector2(0, 7)]],
-		[Color("#a9bed1"), [Vector2(8, -7), Vector2(4, -10), Vector2(-2, -10), Vector2(0, -7)]],
-		[Color("#bfd0df"), [Vector2(17, 2), Vector2(20, 2), Vector2(20, 3.5), Vector2(17, 3.5)]],
-		[Color("#bfd0df"), [Vector2(17, -2), Vector2(20, -2), Vector2(20, -3.5), Vector2(17, -3.5)]],
-		[Color("#21364c"), [Vector2(-10, 3.8), Vector2(-18, 3.8), Vector2(-21, 5.5), Vector2(-10, 5.5)]],
-		[Color("#21364c"), [Vector2(-10, -3.8), Vector2(-18, -3.8), Vector2(-21, -5.5), Vector2(-10, -5.5)]],
-		[Color("#9de6ff"), [Vector2(-22, 1.8), Vector2(-25, 1.8), Vector2(-25, 3.6), Vector2(-22, 3.6)]],
-		[Color("#9de6ff"), [Vector2(-22, -1.8), Vector2(-25, -1.8), Vector2(-25, -3.6), Vector2(-22, -3.6)]]
-	],
-	"destroyer": [
-		[Color("#60758c"), [Vector2(43, 0), Vector2(33, 5), Vector2(20, 8), Vector2(-33, 7), Vector2(-43, 0), Vector2(-33, -7), Vector2(20, -8), Vector2(33, -5)]],
-		[Color("#b7c9db"), [Vector2(36, 0), Vector2(21, 4), Vector2(-13, 5), Vector2(-28, 0), Vector2(-13, -5), Vector2(21, -4)]],
-		[Color("#203247"), [Vector2(15, 0), Vector2(8, 3.5), Vector2(-2, 3.5), Vector2(-7, 0), Vector2(-2, -3.5), Vector2(8, -3.5)]],
-		[Color("#4b637a"), [Vector2(-9, 0), Vector2(-15, 5), Vector2(-28, 4), Vector2(-34, 0), Vector2(-28, -4), Vector2(-15, -5)]],
-		[Color("#9de6ff"), [Vector2(-41, 4), Vector2(-44, 4), Vector2(-44, -4), Vector2(-41, -4)]],
-		[Color("#394f65"), [Vector2(32, 8), Vector2(28, 17), Vector2(20, 19), Vector2(9, 15), Vector2(3, 9)]],
-		[Color("#394f65"), [Vector2(32, -8), Vector2(28, -17), Vector2(20, -19), Vector2(9, -15), Vector2(3, -9)]],
-		[Color("#a9bed1"), [Vector2(28, 9), Vector2(25, 15), Vector2(20, 16), Vector2(13, 13), Vector2(10, 9)]],
-		[Color("#a9bed1"), [Vector2(28, -9), Vector2(25, -15), Vector2(20, -16), Vector2(13, -13), Vector2(10, -9)]],
-		[Color("#bfd0df"), [Vector2(28, 11), Vector2(31, 11), Vector2(30, 14), Vector2(27, 14)]],
-		[Color("#bfd0df"), [Vector2(28, -11), Vector2(31, -11), Vector2(30, -14), Vector2(27, -14)]],
-		[Color("#bfd0df"), [Vector2(17, 15), Vector2(22, 15), Vector2(22, 17), Vector2(17, 17)]],
-		[Color("#bfd0df"), [Vector2(17, -15), Vector2(22, -15), Vector2(22, -17), Vector2(17, -17)]],
-		[Color("#263c52"), [Vector2(14, 6), Vector2(6, 6), Vector2(3, 9), Vector2(12, 9)]],
-		[Color("#263c52"), [Vector2(14, -6), Vector2(6, -6), Vector2(3, -9), Vector2(12, -9)]],
-		[Color("#7189a2"), [Vector2(-13, 9), Vector2(-19, 22), Vector2(-31, 22), Vector2(-39, 16), Vector2(-39, 9)]],
-		[Color("#7189a2"), [Vector2(-13, -9), Vector2(-19, -22), Vector2(-31, -22), Vector2(-39, -16), Vector2(-39, -9)]],
-		[Color("#a9bed1"), [Vector2(-18, 10), Vector2(-21, 19), Vector2(-30, 19), Vector2(-35, 15), Vector2(-32, 10)]],
-		[Color("#a9bed1"), [Vector2(-18, -10), Vector2(-21, -19), Vector2(-30, -19), Vector2(-35, -15), Vector2(-32, -10)]],
-		[Color("#24384d"), [Vector2(-23, 12), Vector2(-24, 17), Vector2(-30, 17), Vector2(-32, 13)]],
-		[Color("#24384d"), [Vector2(-23, -12), Vector2(-24, -17), Vector2(-30, -17), Vector2(-32, -13)]],
-		[Color("#9de6ff"), [Vector2(-36, 10), Vector2(-40, 10), Vector2(-40, 15), Vector2(-36, 15)]],
-		[Color("#9de6ff"), [Vector2(-36, -10), Vector2(-40, -10), Vector2(-40, -15), Vector2(-36, -15)]],
-		[Color("#8ea7bd"), [Vector2(-3, 6), Vector2(-9, 6), Vector2(-12, 8), Vector2(-3, 8)]],
-		[Color("#8ea7bd"), [Vector2(-3, -6), Vector2(-9, -6), Vector2(-12, -8), Vector2(-3, -8)]]
-	],
-	"science_ship": [[Color("#7e9eb9"), [Vector2(12, 0), Vector2(8, 8), Vector2(0, 12), Vector2(-8, 8), Vector2(-12, 0), Vector2(-8, -8), Vector2(0, -12), Vector2(8, -8)]], [Color("#23374d"), [Vector2(7, 0), Vector2(5, 5), Vector2(0, 7), Vector2(-5, 5), Vector2(-7, 0), Vector2(-5, -5), Vector2(0, -7), Vector2(5, -5)]]],
-	"fighter": [
-		[Color("#6b493e"), [Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-5, 3)]],
-		[Color("#6b493e"), [Vector2(2.5, -3), Vector2(-3, -8), Vector2(-7, -7.5), Vector2(-5, -3)]],
-		[Color("#ffcb9f"), [Vector2(11, 0), Vector2(5, 1.4), Vector2(-4, 1.5), Vector2(-7, 0), Vector2(-4, -1.5), Vector2(5, -1.4)]],
-		[Color("#203b52"), [Vector2(6, 0), Vector2(2, 1.7), Vector2(-1, 1.2), Vector2(-1, -1.2), Vector2(2, -1.7)]],
-		[Color("#e4a26f"), [Vector2(-3, 6), Vector2(-4.8, 7), Vector2(-6, 6), Vector2(-5, 4.5)]],
-		[Color("#e4a26f"), [Vector2(-3, -6), Vector2(-4.8, -7), Vector2(-6, -6), Vector2(-5, -4.5)]],
-		[Color("#263746"), [Vector2(-7, 2.2), Vector2(-10, 2.2), Vector2(-10, 0.4), Vector2(-7, 0.4)]],
-		[Color("#263746"), [Vector2(-7, -2.2), Vector2(-10, -2.2), Vector2(-10, -0.4), Vector2(-7, -0.4)]],
-		[Color("#a0eaff"), [Vector2(-9.3, 2), Vector2(-10, 2), Vector2(-10, 0.7), Vector2(-9.3, 0.7)]],
-		[Color("#a0eaff"), [Vector2(-9.3, -2), Vector2(-10, -2), Vector2(-10, -0.7), Vector2(-9.3, -0.7)]]
-	],
-	"miner": [
-		[Color("#66753e"), [Vector2(3, 6), Vector2(-4, 6), Vector2(-7, 3), Vector2(-3, 3), Vector2(2, 3)]],
-		[Color("#66753e"), [Vector2(3, -6), Vector2(-4, -6), Vector2(-7, -3), Vector2(-3, -3), Vector2(2, -3)]],
-		[Color("#dfe6ba"), [Vector2(4, 0), Vector2(2, 3), Vector2(-2, 3), Vector2(-4, 0), Vector2(-2, -3), Vector2(2, -3)]],
-		[Color("#203b52"), [Vector2(3, 0), Vector2(1, 1.7), Vector2(-1, 1.7), Vector2(-1, -1.7), Vector2(1, -1.7)]],
-		[Color("#344435"), [Vector2(-3, 5.5), Vector2(-5.5, 5.2), Vector2(-6, 3.4), Vector2(-3, 3.4)]],
-		[Color("#344435"), [Vector2(-3, -5.5), Vector2(-5.5, -5.2), Vector2(-6, -3.4), Vector2(-3, -3.4)]],
-		[Color("#b0f4a8"), [Vector2(9.5, 4.6), Vector2(7, 4.6), Vector2(7, 2.9), Vector2(9.5, 2.9)]],
-		[Color("#b0f4a8"), [Vector2(9.5, -4.6), Vector2(7, -4.6), Vector2(7, -2.9), Vector2(9.5, -2.9)]],
-		[Color("#9de6ff"), [Vector2(-7, 2.5), Vector2(-8, 2.5), Vector2(-8, -2.5), Vector2(-7, -2.5)]]
-	],
-	"colony_ship": [
-		[Color("#695a88"), [Vector2(3, 6.5), Vector2(-5, 7), Vector2(-8, 4), Vector2(-4, 3), Vector2(3, 3)]],
-		[Color("#695a88"), [Vector2(3, -6.5), Vector2(-5, -7), Vector2(-8, -4), Vector2(-4, -3), Vector2(3, -3)]],
-		[Color("#e0d5f5"), [Vector2(12, 0), Vector2(7, 2.4), Vector2(-7, 2.4), Vector2(-9, 0), Vector2(-7, -2.4), Vector2(7, -2.4)]],
-		[Color("#35465f"), [Vector2(9, 0), Vector2(5, 1.6), Vector2(3, 1.3), Vector2(3, -1.3), Vector2(5, -1.6)]],
-		[Color("#35465f"), [Vector2(2, 5.7), Vector2(-1, 5.7), Vector2(-1, 3.8), Vector2(2, 3.8)]],
-		[Color("#35465f"), [Vector2(-2, 5.8), Vector2(-5, 5.8), Vector2(-5, 3.8), Vector2(-2, 3.8)]],
-		[Color("#35465f"), [Vector2(2, -5.7), Vector2(-1, -5.7), Vector2(-1, -3.8), Vector2(2, -3.8)]],
-		[Color("#35465f"), [Vector2(-2, -5.8), Vector2(-5, -5.8), Vector2(-5, -3.8), Vector2(-2, -3.8)]],
-		[Color("#a9e5f2"), [Vector2(1.6, 5.3), Vector2(-0.6, 5.3), Vector2(-0.6, 4.5), Vector2(1.6, 4.5)]],
-		[Color("#a9e5f2"), [Vector2(-2.4, 5.3), Vector2(-4.6, 5.3), Vector2(-4.6, 4.5), Vector2(-2.4, 4.5)]],
-		[Color("#a9e5f2"), [Vector2(1.6, -5.3), Vector2(-0.6, -5.3), Vector2(-0.6, -4.5), Vector2(1.6, -4.5)]],
-		[Color("#a9e5f2"), [Vector2(-2.4, -5.3), Vector2(-4.6, -5.3), Vector2(-4.6, -4.5), Vector2(-2.4, -4.5)]],
-		[Color("#293b54"), [Vector2(-7, 2.8), Vector2(-11, 2.8), Vector2(-11, -2.8), Vector2(-7, -2.8)]],
-		[Color("#9de6ff"), [Vector2(-10, 2), Vector2(-11, 2), Vector2(-11, -2), Vector2(-10, -2)]]
-	]
-}
 var interaction_scroll: ScrollContainer
 var interaction_panel: VBoxContainer
 var logistics_lens: Button
@@ -369,9 +268,6 @@ var yard_top_slots: Array[Control] = []
 var yard_bottom_slots: Array[Control] = []
 var yard_row_spacers: Array[Control] = []
 var yard_layout_key := Vector3i(-1, -1, -1)
-var production_icons: Dictionary = {}
-var hull_textures: Dictionary = {}
-var shield_textures: Dictionary = {}
 var yard_queue: HFlowContainer
 var yard_queue_rows: Dictionary = {}
 var command_card: GridContainer
@@ -384,7 +280,6 @@ var selection_portrait: VBoxContainer
 var selection_portrait_art: TextureRect
 var selection_portrait_health: Label
 var selection_portrait_shield: Label
-var selection_portrait_icons: Dictionary = {}
 var fleet_cargo: HBoxContainer
 var fleet_cargo_footer: HBoxContainer
 var fleet_cargo_labels: Dictionary = {}
@@ -1445,48 +1340,6 @@ func _build_centered_queue(parent: Container) -> HFlowContainer:
 	parent.add_child(queue)
 	return queue
 
-func _freighter_bay_center(index: int) -> Vector2:
-	return Vector2(14.0 - float(floori(float(index) / 2.0)) * 7.0, -3.5 if index % 2 == 0 else 3.5)
-
-func _freighter_bay_vertices(index: int) -> Array:
-	var center: Vector2 = _freighter_bay_center(index)
-	return [center + Vector2(3, 3), center + Vector2(-3, 3), center + Vector2(-3, -3), center + Vector2(3, -3)]
-
-func _portrait_points(vertices: Array, factor: float = 1.0) -> String:
-	var coordinates: PackedStringArray = []
-	for vertex in vertices:
-		var v: Vector2 = vertex
-		coordinates.append("%.2f,%.2f" % [32.0 + v.y * 1.85 * factor, 32.0 - v.x * 1.85 * factor])
-	return " ".join(coordinates)
-
-func _hull_ui_radius(kind: String) -> float:
-	return float({"ship": 24.0, "cruiser": 27.0, "destroyer": 46.0, "warp_gate": 44.0}.get(kind, 15.0))
-
-func _portrait_scale(kind: String) -> float:
-	return float({"ship": 0.6, "cruiser": 0.52, "destroyer": 0.30}.get(kind, 1.0))
-
-func _hull_texture_half_size(kind: String) -> float:
-	return 50.0 if kind == "destroyer" else 40.0
-
-func _production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
-	var key: String = "%s:%s:%d" % [kind, tint.to_html(false), pixels]
-	if not production_icons.has(key):
-		var portrait_scale: float = _portrait_scale(kind)
-		var outline: String = _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE), portrait_scale)
-		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><g transform="translate(32 32) scale(1.13) translate(-32 -32)">'
-		art += '<polygon points="%s" fill="#18283c" stroke="#%s" stroke-width="1.8" stroke-linejoin="round"/>' % [outline, tint.lightened(0.35).to_html(false)]
-		for panel in HULL_PANELS.get(kind, []):
-			var color: Color = _hull_panel_color(tint, panel[0])
-			art += '<polygon points="%s" fill="#%s"/>' % [_portrait_points(panel[1], portrait_scale), color.lightened(0.12).to_html(false)]
-		if kind == "ship":
-			for bay in range(ECONOMY.FREIGHTER_BAY_COUNT):
-				art += '<polygon points="%s" fill="#32465c" stroke="#9bb6cb" stroke-width="0.8"/>' % _portrait_points(_freighter_bay_vertices(bay), 0.6)
-		art += '<polygon points="%s" fill="none" stroke="#%s" stroke-width="1.25" stroke-linejoin="round"/></g></svg>' % [outline, tint.lightened(0.50).to_html(false)]
-		var image := Image.new()
-		image.load_svg_from_string(art, float(pixels) / 64.0)
-		production_icons[key] = ImageTexture.create_from_image(image)
-	return production_icons[key]
-
 func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_scroll = VBoxContainer.new()
 	yard_command_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1499,7 +1352,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	for kind in ECONOMY.SHIP_KINDS:
 		var button := CostButton.new()
 		var caption: String = {"ship": "Freighter", "colony_ship": "Colony", "fighter": "Fighter", "miner": "Harvester", "science_ship": "Science\nvessel", "scout": "Scout", "cruiser": "Cruiser", "destroyer": "Destroyer"}[kind]
-		var art: TextureRect = command_card_ui.set_face(button, caption, _production_icon(kind, HUD.ACCENT))
+		var art: TextureRect = command_card_ui.set_face(button, caption, hull_art.production_icon(kind, HUD.ACCENT))
 		button.set_meta("portrait", art)
 		button.pressed.connect(_build_at_yard.bind(kind))
 		button.gui_input.connect(_yard_build_input.bind(kind, button))
@@ -1923,7 +1776,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var auto: bool = yard.get("autobuild", []).has(kind)
 		(button.get_meta("auto_border") as Control).visible = auto
 		var portrait: TextureRect = button.get_meta("portrait")
-		portrait.texture = _production_icon(kind, _empire_color(int(system["owner"])))
+		portrait.texture = hull_art.production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
 		_set_cost_tooltip(button, "%s · %.1f s (1×)\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard))
 		if not ECONOMY.yard_fits(system, selected_yard, kind):
@@ -1955,7 +1808,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 
 func _job_icon(job: Dictionary, owner: int) -> Texture2D:
 	if ECONOMY.SHIP_KINDS.has(job["kind"]):
-		return _production_icon(str(job["kind"]), _empire_color(owner), 44)
+		return hull_art.production_icon(str(job["kind"]), _empire_color(owner), 44)
 	if job["kind"] == "yard_upgrade":
 		return command_card_ui.icon("upgrade", 44)
 	return command_card_ui.icon(str(job["target"]) if job["kind"] in ["economy_building", "production"] else str(job["kind"]), 44)
@@ -2660,40 +2513,6 @@ func _shield_fraction(entity: Dictionary) -> float:
 func _health_color(fraction: float) -> Color:
 	return Color("#e45b60") if fraction < 0.2 else (Color("#eac64a") if fraction < 0.5 else Color("#55c88b"))
 
-func _selection_portrait_icon(kind: String) -> Texture2D:
-	if not selection_portrait_icons.has(kind):
-		# White wireframe art is tinted at runtime by current health, without
-		# recreating textures as combat snapshots arrive.
-		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64"><g fill="none" stroke="#ffffff" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">'
-		if kind == "station":
-			art += '<circle cx="32" cy="32" r="25"/><circle cx="32" cy="32" r="19"/><circle cx="32" cy="32" r="9"/>'
-			for slot in range(3):
-				art += '<g transform="rotate(%d 32 32)"><path d="M28 23V13H36V23M27 7V3H37V7"/></g>' % (120 * slot)
-			for segment in range(12):
-				art += '<path transform="rotate(%d 32 32)" d="M32 7V13" stroke-width="0.7"/>' % (30 * segment)
-		elif kind == "warp_gate":
-			art += '<circle cx="32" cy="32" r="27"/><circle cx="32" cy="32" r="20"/><circle cx="32" cy="32" r="14"/><path d="M32 5V12M32 52V59M5 32H12M52 32H59M13 13L18 18M46 46L51 51M13 51L18 46M46 18L51 13"/>'
-		elif kind == "shipyard":
-			# Open berth, paired gantries and cross braces match the map art.
-			art += '<path d="M12 5L7 10V54L12 59H22L25 51V13L22 5ZM52 5L57 10V54L52 59H42L39 51V13L42 5ZM22 8H42M22 56H42M22 13H42M22 51H42"/>'
-			for y in [19, 32, 45]:
-				art += '<rect x="10" y="%d" width="11" height="7"/><rect x="43" y="%d" width="11" height="7"/>' % [y - 3, y - 3]
-		elif kind in ["planet", "pds"]:
-			art += '<circle cx="32" cy="32" r="25"/><ellipse cx="32" cy="32" rx="11" ry="25" stroke-width="0.8"/><path d="M12 17Q32 26 52 17M7 32H57M12 47Q32 38 52 47" stroke-width="0.8"/>'
-			if kind == "pds":
-				art += '<circle cx="32" cy="32" r="28"/><path d="M32 1V7M32 57V63M1 32H7M57 32H63"/>'
-		else:
-			art += '<polygon points="%s"/>' % _portrait_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE), _portrait_scale(kind))
-			for panel in HULL_PANELS.get(kind, []):
-				art += '<polygon points="%s" stroke-width="0.55" opacity="0.68"/>' % _portrait_points(panel[1], _portrait_scale(kind))
-			if kind == "ship":
-				for bay in range(ECONOMY.FREIGHTER_BAY_COUNT):
-					art += '<polygon points="%s" stroke-width="0.7"/>' % _portrait_points(_freighter_bay_vertices(bay), 0.6)
-		var image := Image.new()
-		image.load_svg_from_string(art + '</g></svg>')
-		selection_portrait_icons[kind] = ImageTexture.create_from_image(image)
-	return selection_portrait_icons[kind]
-
 func _refresh_selection_portrait(ship: Dictionary, system: Dictionary, body_selected: bool, yard_selected: bool, grouped: bool) -> void:
 	var kind: String = ""
 	var hp: float = 0.0
@@ -2722,7 +2541,7 @@ func _refresh_selection_portrait(ship: Dictionary, system: Dictionary, body_sele
 	if kind.is_empty():
 		return
 	var tint: Color = _health_color(clampf(hp / maximum, 0.0, 1.0)) if maximum > 0.0 else HUD.MUTED
-	selection_portrait_art.texture = _selection_portrait_icon(kind)
+	selection_portrait_art.texture = hull_art.selection_portrait_icon(kind)
 	selection_portrait_art.modulate = tint
 	selection_portrait_health.visible = maximum > 0.0
 	selection_portrait_health.text = "%.0f / %.0f" % [hp, maximum] if maximum > 0.0 else ""
@@ -2762,7 +2581,7 @@ func _refresh_weapon_details(ship: Dictionary, system: Dictionary, body_selected
 func _selection_icon(kind: String, tint: Color) -> Texture2D:
 	var key: String = kind + ":" + tint.to_html(false)
 	if not selection_icons.has(key):
-		var points: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE)
+		var points: Array = HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE)
 		var coords: PackedStringArray = []
 		for vertex in points:
 			var v: Vector2 = vertex
@@ -4682,9 +4501,9 @@ func _draw_planet_production(state: Dictionary, index: int, center: Vector2, rad
 func _draw_planet_cargo_pod(point: Vector2, axis: Vector2, size_factor: float, color: Color, alpha: float) -> void:
 	var forward: Vector2 = axis * size_factor
 	var side: Vector2 = axis.orthogonal() * size_factor
-	var hull: PackedVector2Array = _hull_polygon(point, forward, side, [Vector2(0.72, 0.32), Vector2(0.40, 0.48), Vector2(-0.55, 0.82), Vector2(-0.82, 0.61), Vector2(-0.82, -0.61), Vector2(-0.55, -0.82), Vector2(0.40, -0.48), Vector2(0.72, -0.32)])
+	var hull: PackedVector2Array = hull_art.polygon(point, forward, side, [Vector2(0.72, 0.32), Vector2(0.40, 0.48), Vector2(-0.55, 0.82), Vector2(-0.82, 0.61), Vector2(-0.82, -0.61), Vector2(-0.55, -0.82), Vector2(0.40, -0.48), Vector2(0.72, -0.32)])
 	map_canvas.draw_colored_polygon(hull, Color(Color("#a9bfd2"), alpha))
-	var cargo: PackedVector2Array = _hull_polygon(point, forward, side, [Vector2(0.35, 0.30), Vector2(-0.58, 0.50), Vector2(-0.58, -0.50), Vector2(0.35, -0.30)])
+	var cargo: PackedVector2Array = hull_art.polygon(point, forward, side, [Vector2(0.35, 0.30), Vector2(-0.58, 0.50), Vector2(-0.58, -0.50), Vector2(0.35, -0.30)])
 	map_canvas.draw_colored_polygon(cargo, Color(color, alpha))
 	for sign in [-1.0, 1.0]:
 		var jet: Vector2 = point - forward * 0.38 + side * sign * 0.79
@@ -4999,7 +4818,7 @@ func _refresh_control_groups(state: Dictionary) -> void:
 					icon_kind = craft["kind"]
 					break
 		button.text = "%d·%d" % [number, count] if button.size.x >= 34.0 else str(number)
-		button.icon = _selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
+		button.icon = hull_art.selection_portrait_icon(icon_kind) if button.size.x >= 47.0 else null
 		button.disabled = false
 		command_card_ui.set_hint(button, "Group %d · %d %s\nPress %d to select · Twice to center · Ctrl+%d to replace · Shift+%d to add" % [number, count, "ships" if kind == "units" else "structures", number, number, number])
 
@@ -5198,7 +5017,7 @@ func _refresh_building_group(state: Dictionary) -> void:
 		var entity: Dictionary = system["station"] if kind == "station" else system["pds"][ref.y] if kind == "pds" else system["yards"][ref.y]
 		var hp: float = float(entity.get("hp", maximum))
 		var tint: Color = _health_color(clampf(hp / maximum, 0.0, 1.0))
-		button.icon = _selection_portrait_icon(kind)
+		button.icon = hull_art.selection_portrait_icon(kind)
 		button.add_theme_color_override("icon_normal_color", tint)
 		button.add_theme_color_override("icon_hover_color", tint)
 		button.add_theme_color_override("icon_pressed_color", tint)
@@ -5243,7 +5062,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		button.disabled = not can_toggle
 		(button.get_meta("auto_border") as Control).visible = auto
 		var portrait: TextureRect = button.get_meta("portrait")
-		portrait.texture = _production_icon(kind, _empire_color(_me()))
+		portrait.texture = hull_art.production_icon(kind, _empire_color(_me()))
 		portrait.modulate = Color.WHITE if eligible else Color(0.55, 0.55, 0.55)
 		_set_cost_tooltip(button, "%s · Cost per ship\nQueue one at every eligible owned shipyard\n%s\nRight-click: toggle autobuild" % [UI_TEXT.ship_kind_name(kind), UI_TEXT.ship_stats(kind)], ECONOMY.construction_cost(state["planets"][refs[0].x] if not refs.is_empty() else {}, kind, 1), float(ECONOMY.CREW_COSTS[kind]), available)
 	var can_clear: bool = false
@@ -5299,7 +5118,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	var ship_distance: float = INF
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance <= maxf(5.0, _hull_ui_radius(str(poses[id]["kind"])) * _ship_scale()) and distance < ship_distance:
+		if distance <= maxf(5.0, hull_art.ui_radius(str(poses[id]["kind"])) * _ship_scale()) and distance < ship_distance:
 			ship_distance = distance
 			ship_hit = int(id)
 	var next_ship: int = ship_hit
@@ -5461,7 +5280,7 @@ func _entity_hit(state: Dictionary, point: Vector2) -> int:
 	var poses: Dictionary = _ship_poses(state)
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance <= maxf(5.0, _hull_ui_radius(str(poses[id]["kind"])) * _ship_scale()) and distance < nearest:
+		if distance <= maxf(5.0, hull_art.ui_radius(str(poses[id]["kind"])) * _ship_scale()) and distance < nearest:
 			nearest = distance
 			target = int(id)
 	if target != -1:
@@ -5734,7 +5553,7 @@ func _append_formation_point(point: Vector2, force: bool = false) -> void:
 func _draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tint: Color) -> void:
 	var axis: Vector2 = heading.normalized() if not heading.is_zero_approx() else Vector2.UP
 	var scale: float = maxf(0.42, _ship_scale())
-	var shape: PackedVector2Array = _hull_polygon(point, axis * scale, axis.orthogonal() * scale, HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE))
+	var shape: PackedVector2Array = hull_art.polygon(point, axis * scale, axis.orthogonal() * scale, HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE))
 	if not Geometry2D.triangulate_polygon(shape).is_empty():
 		map_canvas.draw_colored_polygon(shape, Color(tint, 0.24))
 	shape.append(shape[0])
@@ -6256,7 +6075,7 @@ func _build_global_selection_strip() -> void:
 	for entry in [["stations", "Stations", "station", KEY_F1], ["army", "Army", "fighter", KEY_F2], ["shipyards", "Shipyards", "shipyard", KEY_F3]]:
 		var action: Callable = _select_all_military if entry[0] == "army" else _select_all_buildings.bind(entry[2])
 		var button: Button = _button("", action, global_selection_strip)
-		command_card_ui.set_face(button, entry[1], _selection_portrait_icon(entry[2]))
+		command_card_ui.set_face(button, entry[1], hull_art.selection_portrait_icon(entry[2]))
 		command_card_ui.set_hint(button, "Select all owned " + str(entry[1]).to_lower())
 		hotkeys.register(button, int(entry[3]), "General", entry[0], "Select all " + str(entry[1]).to_lower())
 	var empire_button: Button = _button("", _open_empire, global_selection_strip)
@@ -6468,50 +6287,6 @@ func _orbit_offset(slot: int, radius: float, time: float) -> Vector2:
 func _orbit_direction(offset: Vector2) -> Vector2:
 	return Vector2(-offset.y, offset.x).normalized()
 
-func _cached_hull_texture(kind: String, empire: Color, detailed: bool) -> Texture2D:
-	var key: String = "%s:%s:%s" % [kind, empire.to_html(false), str(detailed)]
-	if not hull_textures.has(key):
-		var vertices: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE if kind == "ship" else [Vector2(9, 0), Vector2(-6, 5), Vector2(-3, 0), Vector2(-6, -5)])
-		var outline: String = _hull_svg_points(vertices)
-		var half: float = _hull_texture_half_size(kind)
-		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="%s %s %s %s">' % [-half, -half, half * 2.0, half * 2.0]
-		art += '<polygon points="%s" fill="#%s"/>' % [outline, empire.lightened(0.35).to_html(false)]
-		if detailed and kind not in ["ship", "science_ship"]:
-			for panel in HULL_PANELS.get(kind, []):
-				art += '<polygon points="%s" fill="#%s"/>' % [_hull_svg_points(panel[1]), _hull_panel_color(empire, panel[0]).to_html(false)]
-		art += '<polygon points="%s" fill="none" stroke="#08111b" stroke-width="2.5" stroke-linejoin="round"/>' % outline
-		art += '<polygon points="%s" fill="none" stroke="#%s" stroke-width="1" stroke-linejoin="round"/></svg>' % [outline, empire.lightened(0.2).to_html(false)]
-		var image := Image.new()
-		image.load_svg_from_string(art)
-		hull_textures[key] = ImageTexture.create_from_image(image)
-	return hull_textures[key]
-
-func _shield_texture(kind: String) -> Texture2D:
-	if not shield_textures.has(kind):
-		var outline: String = _hull_svg_points(HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE))
-		var half: float = _hull_texture_half_size(kind) + 8.0
-		# Three soft bands and a bright rim, baked once per hull type.
-		var art: String = '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="%s %s %s %s"><g fill="none" stroke-linejoin="round">' % [-half, -half, half * 2.0, half * 2.0]
-		for band in [[4.0, 0.10], [2.75, 0.18], [1.75, 0.36], [0.7, 0.75]]:
-			art += '<polygon points="%s" stroke="#77ccff" stroke-width="%s" opacity="%s"/>' % [outline, band[0], band[1]]
-		art += '</g></svg>'
-		var image := Image.new()
-		image.load_svg_from_string(art)
-		shield_textures[kind] = ImageTexture.create_from_image(image)
-	return shield_textures[kind]
-
-func _hull_svg_points(vertices: Array) -> String:
-	var coordinates: PackedStringArray = []
-	for vertex in vertices:
-		coordinates.append("%.2f,%.2f" % [vertex.x, vertex.y])
-	return " ".join(coordinates)
-
-func _hull_panel_color(empire: Color, original: Color) -> Color:
-	# Use the original value contrast as a shading template, not its class
-	# hue; keep the dark cockpit and bright lights readable on every color.
-	var value: float = original.get_luminance()
-	return empire.darkened(0.72).lerp(empire.lightened(0.75), clampf(value, 0.0, 1.0))
-
 func _sync_destruction_effects(state: Dictionary) -> void:
 	while not ship_destructions.is_empty() and visual_clock - float(ship_destructions[0]["started"]) >= DESTRUCTION_LIFETIME:
 		ship_destructions.pop_front()
@@ -6527,14 +6302,14 @@ func _sync_destruction_effects(state: Dictionary) -> void:
 		var hull: Color = empire.lightened(0.35)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = sequence * 7919 + int(event["ship"])
-		var vertices: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE)
+		var vertices: Array = HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE)
 		if kind == "station":
 			vertices = []
 			for segment in range(16):
 				vertices.append(Vector2.from_angle(TAU * float(segment) / 16.0) * 12.0)
 		elif kind == "shipyard":
 			vertices = [Vector2(-12, -8), Vector2(12, -8), Vector2(12, 8), Vector2(-12, 8)]
-		var panels: Array = HULL_PANELS.get(kind, [])
+		var panels: Array = HULL_ART.HULL_PANELS.get(kind, [])
 		var edge_color: Color = _empire_color(int(event["owner"])).lightened(0.2)
 		var fragments: Array = []
 		for index in range(vertices.size()):
@@ -6552,7 +6327,7 @@ func _sync_destruction_effects(state: Dictionary) -> void:
 				center += vertex
 			center /= float(polygon.size())
 			for index in range(2):
-				sparks.append(_destruction_spark(center, _hull_panel_color(empire, panel[0]), rng))
+				sparks.append(_destruction_spark(center, hull_art.panel_color(empire, panel[0]), rng))
 		if panels.is_empty():
 			# The freighter has dark cargo wells and resource-colored bays.
 			for index in range(8):
@@ -6757,7 +6532,7 @@ func _target_ring_entity(state: Dictionary, poses: Dictionary, refs: Dictionary,
 	if ref.is_empty():
 		return {}
 	var center: Vector2 = poses[id]["point"] if poses.has(id) else _screen_point(ref["position"])
-	var radius: float = maxf(8.0, _hull_ui_radius(str(ref.get("entity", {}).get("kind", ""))) * _ship_scale())
+	var radius: float = maxf(8.0, hull_art.ui_radius(str(ref.get("entity", {}).get("kind", ""))) * _ship_scale())
 	match str(ref["kind"]):
 		"station": radius = _station_radius() + 4.0
 		"yard": radius = maxf(8.0, 23.0 * _ship_scale(true) * pow(1.2, int(ref["entity"]["level"]) - 1))
@@ -6825,12 +6600,6 @@ func _draw_ship_target_rings(state: Dictionary, poses: Dictionary, refs: Diction
 		var radius: float = float(target["radius"]) + 4.0
 		if Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 4.0).has_point(target["point"]):
 			map_canvas.draw_arc(target["point"], radius, 0.0, TAU, clampi(ceili(radius * 0.7), 24, 96), tint, 1.8, true)
-
-func _hull_polygon(origin: Vector2, forward: Vector2, lateral: Vector2, vertices: Array) -> PackedVector2Array:
-	var polygon := PackedVector2Array()
-	for vertex in vertices:
-		polygon.append(origin + forward * vertex.x + lateral * vertex.y)
-	return polygon
 
 func _overview_art_multiplier(maximum: float = OVERVIEW_ART_MAX_MULTIPLIER) -> float:
 	# Wheel zoom is logarithmic; blend in the same space for a smooth
@@ -7146,7 +6915,7 @@ func _draw_shipyard_construction(state: Dictionary, index: int, job: Dictionary,
 		return
 	for sign in [-1.0, 1.0]:
 		var rail: Array = [Vector2(-17, sign * 8), Vector2(-15, sign * 13), Vector2(-10, sign * 14), Vector2(10, sign * 14), Vector2(15, sign * 13), Vector2(17, sign * 8), Vector2(12, sign * 7), Vector2(-12, sign * 7)]
-		var hull: PackedVector2Array = _hull_polygon(point, forward, lateral, rail)
+		var hull: PackedVector2Array = hull_art.polygon(point, forward, lateral, rail)
 		for k in range(hull.size()):
 			var a: Vector2 = hull[k]
 			var b: Vector2 = hull[(k + 1) % hull.size()]
@@ -7201,14 +6970,14 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			var lateral: Vector2 = axis * scale
 			for sign in [-1.0, 1.0]:
 				var rail: Array = [Vector2(-17, sign * 8), Vector2(-15, sign * 13), Vector2(-10, sign * 14), Vector2(10, sign * 14), Vector2(15, sign * 13), Vector2(17, sign * 8), Vector2(12, sign * 7), Vector2(-12, sign * 7)]
-				var hull: PackedVector2Array = _hull_polygon(point, forward, lateral, rail)
+				var hull: PackedVector2Array = hull_art.polygon(point, forward, lateral, rail)
 				map_canvas.draw_colored_polygon(hull, Color("#607387"))
 				hull.append(hull[0])
 				map_canvas.draw_polyline(hull, tint, maxf(0.65, scale), true)
 				if scale >= 0.42:
 					for longitudinal in [-8.0, 1.0, 9.0]:
 						var module: Vector2 = point + forward * longitudinal + lateral * sign * 10.5
-						var panel: PackedVector2Array = _hull_polygon(module, forward, lateral, [Vector2(-3.5, -2), Vector2(3.5, -2), Vector2(3.5, 2), Vector2(-3.5, 2)])
+						var panel: PackedVector2Array = hull_art.polygon(module, forward, lateral, [Vector2(-3.5, -2), Vector2(3.5, -2), Vector2(3.5, 2), Vector2(-3.5, 2)])
 						map_canvas.draw_colored_polygon(panel, Color("#23384b"))
 						map_canvas.draw_line(module - forward * 2.4, module + forward * 2.4, Color("#b0d5e6"), maxf(0.65, scale), true)
 					for end in [-1.0, 1.0]:
@@ -7241,7 +7010,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			if not ECONOMY.SHIP_KINDS.has(job["kind"]):
 				continue
 			var u: float = clampf(float(job["progress"]) / float(job["work"]), 0.0, 1.0)
-			var shape: Array = HULL_OUTLINES.get(str(job["kind"]), FREIGHTER_OUTLINE)
+			var shape: Array = HULL_ART.HULL_OUTLINES.get(str(job["kind"]), HULL_ART.FREIGHTER_OUTLINE)
 			var hull := PackedVector2Array()
 			for vertex in shape:
 				hull.append(point + side * vertex.x * scale * 0.5 + axis * vertex.y * scale * 0.5)
@@ -7605,7 +7374,7 @@ func _transfer_anchor(state: Dictionary, poses: Dictionary, refs: Dictionary, id
 	var kind: String = str(pose["kind"])
 	var offset: Vector2 = Vector2.ZERO
 	if kind == "ship":
-		offset = _freighter_bay_center(bay)
+		offset = hull_art.freighter_bay_center(bay)
 	elif kind == "miner":
 		offset = Vector2(5.7, -4.8 if bay == 0 else 4.8)
 	elif kind == "colony_ship":
@@ -7690,7 +7459,7 @@ func _queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: flo
 	if not exhaust_extents.has(kind):
 		var rear: float = 0.0
 		var nose: float = 0.0
-		for vertex in HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE):
+		for vertex in HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE):
 			rear = minf(rear, vertex.x)
 			nose = maxf(nose, vertex.x)
 		exhaust_extents[kind] = Vector2(rear, maxf(0.5, (nose - rear) / 18.0))
@@ -7753,7 +7522,7 @@ func _flush_overview_hulls() -> void:
 			mm.mesh = quad
 			instance.multimesh = mm
 			instance.texture = texture
-			if shield_textures.values().has(texture):
+			if hull_art.is_shield_texture(texture):
 				instance.z_index = 1
 			map_canvas.add_child(instance)
 			overview_batches[texture] = instance
@@ -8098,15 +7867,15 @@ func _draw_map() -> void:
 					var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
 					map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
-			var radius: float = maxf(5.0, _hull_ui_radius(str(ship["kind"])) * scale)
+			var radius: float = maxf(5.0, hull_art.ui_radius(str(ship["kind"])) * scale)
 			_draw_selection_ring(point, radius)
 		# At a distant galaxy overview, the smallest authored edges can
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
-		_draw_damage_bar(point, _hull_ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
+		_draw_damage_bar(point, hull_art.ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
 		if bool(ship.get("cloaked", false)):
-			_draw_selection_ring(point, maxf(5.0, _hull_ui_radius(str(ship["kind"])) * scale + 2.0), Color("#b698ff80"))
+			_draw_selection_ring(point, maxf(5.0, hull_art.ui_radius(str(ship["kind"])) * scale + 2.0), Color("#b698ff80"))
 		if ship["kind"] == "warp_gate":
 			var gate_radius: float = maxf(5.0, 44.0 * scale)
 			map_canvas.draw_circle(point, gate_radius, Color("#382b58"), true, -1.0, true)
@@ -8117,20 +7886,20 @@ func _draw_map() -> void:
 		if scale < 0.15 * overview:
 			_queue_overview_hull(_overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview)
 			continue
-		var texture: Texture2D = _cached_hull_texture(str(ship["kind"]), empire, scale >= 0.42)
+		var texture: Texture2D = hull_art.hull_texture(str(ship["kind"]), empire, scale >= 0.42)
 		if _shield_fraction(ship) > 0.0:
-			_queue_overview_hull(_shield_texture(str(ship["kind"])), point, direction.angle(), (_hull_texture_half_size(str(ship["kind"])) + 8.0) * scale)
+			_queue_overview_hull(hull_art.shield_texture(str(ship["kind"])), point, direction.angle(), (hull_art.texture_half_size(str(ship["kind"])) + 8.0) * scale)
 		if ship["kind"] != "science_ship":
-			_queue_overview_hull(texture, point, direction.angle(), _hull_texture_half_size(str(ship["kind"])) * scale)
+			_queue_overview_hull(texture, point, direction.angle(), hull_art.texture_half_size(str(ship["kind"])) * scale)
 		else:
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
-			var half: float = _hull_texture_half_size(str(ship["kind"]))
+			var half: float = hull_art.texture_half_size(str(ship["kind"]))
 			map_canvas.draw_texture_rect(texture, Rect2(-half, -half, half * 2.0, half * 2.0), false)
 			map_canvas.draw_set_transform(Vector2.ZERO)
 		if ship["kind"] == "ship" and scale >= 0.42:
 			var bays: Array = ECONOMY.freighter_cargo_bays(ship["cargo"])
 			for k in range(bays.size()):
-				var bay_center: Vector2 = _freighter_bay_center(k)
+				var bay_center: Vector2 = hull_art.freighter_bay_center(k)
 				var module: Vector2 = point + direction * bay_center.x + side * bay_center.y
 				var half_length: float = 3.0
 				var corners := PackedVector2Array([module + direction * half_length + side * 3, module - direction * half_length + side * 3, module - direction * half_length - side * 3, module + direction * half_length - side * 3])
@@ -8730,7 +8499,7 @@ func _refresh_empire(state: Dictionary) -> void:
 			var row := HBoxContainer.new()
 			panel.add_child(row)
 			var portrait := TextureRect.new()
-			portrait.texture = _selection_portrait_icon(kind)
+			portrait.texture = hull_art.selection_portrait_icon(kind)
 			portrait.custom_minimum_size = Vector2(40, 40)
 			portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
