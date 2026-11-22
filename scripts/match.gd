@@ -10,6 +10,7 @@ const COMMAND_HOTKEYS = preload("res://scripts/command_hotkeys.gd")
 const HULL_ART = preload("res://scripts/hull_art.gd")
 const FOG_OF_WAR = preload("res://scripts/fog_of_war.gd")
 const TERRITORY_VIEW = preload("res://scripts/territory_view.gd")
+const CAMERA_VIEW = preload("res://scripts/camera_view.gd")
 const UI_COMMAND_DETAILS = {
 	"move": "Choose a destination in a discovered region. Cross sectors along highways. Shift queues the order.",
 	"stop": "Cancel current orders and stop. Shift queues the stop.",
@@ -45,16 +46,11 @@ const OVERVIEW_WIDTH: float = 286.0
 const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
-const KEYBOARD_PAN_SPEED: float = 420.0
 const AUTOCAST_SLOTS = {"auto_explore": "explore", "auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm", "collect": "collect", "auto_retreat": "retreat"}
 const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
-const MIN_ZOOM: float = 0.5
 const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
 const OVERVIEW_SHIP_MAX_MULTIPLIER: float = 12.0
 const OVERVIEW_ART_NORMAL_ZOOM: float = 16.0
-const OVERVIEW_MAX_ZOOM: float = 64.0
-const FIGHTER_HULL_LENGTH: float = 22.0
-const CLOSEUP_SCREEN_FRACTION: float = 0.6
 const SNAPSHOT_SECONDS: float = 0.2
 const THRUST_FADE_RATE: float = 5.0
 const THRUST_DEAD_ZONE: float = 0.06
@@ -152,14 +148,11 @@ var asteroid_cache_seed: int = -1
 var population_label: Label
 var raw_antimatter_label: Label
 var population_delta_label: Label
-var zoom: float = 1.0
-var camera_world: Vector2 = Vector2.INF
-var follow_units: bool = false
+var camera := CAMERA_VIEW.new()
 var drag_button: int = 0
 var hull_art := HULL_ART.new()
 var ship_visuals: Dictionary = {}
 var ship_offsets: Dictionary = {}
-const SHIP_WORLD_SCALE: float = 1.5
 const FIGHTER_MUZZLE: float = 12.0
 const MINER_MUZZLE: Vector2 = Vector2(10.0, 3.75)
 const DESTRUCTION_LIFETIME: float = 1.35
@@ -1045,7 +1038,7 @@ func _minimap_input(event: InputEvent) -> void:
 		var area: Rect2 = _minimap_area()
 		var fraction: Vector2 = ((event.position - area.position) / area.size).clamp(Vector2.ZERO, Vector2.ONE)
 		var world: Vector2 = fraction * _map_size()
-		follow_units = false
+		camera.following = false
 		_center_world(world)
 		_position_territory()
 		map_canvas.queue_redraw()
@@ -1528,7 +1521,7 @@ func _station_select_yards() -> void:
 	building_selection_kind = "shipyard"
 	for slot in range(p["yards"].size()):
 		selected_buildings[Vector2i(system, slot)] = p["yards"].size()
-	follow_units = false
+	camera.following = false
 	pending_command = ""
 	_load_thresholds()
 	_refresh()
@@ -1947,7 +1940,7 @@ func _fog_visible(point: Vector2) -> bool:
 func _draw_fog() -> void:
 	if fog_state.texture == null:
 		return
-	fog_state.draw(fog_overlay, Rect2(Vector2.ZERO, map_canvas.size), Rect2(_screen_point(Vector2.ZERO), _map_size() * _fit() * zoom), _map_size())
+	fog_state.draw(fog_overlay, Rect2(Vector2.ZERO, map_canvas.size), Rect2(_screen_point(Vector2.ZERO), _map_size() * _fit() * camera.zoom), _map_size())
 
 # Names are static generated map geography, not live tactical information.
 func _draw_sector_names() -> void:
@@ -2560,7 +2553,7 @@ func _select_tile(id: int) -> void:
 	selected_body = -1
 	selected_yard = -1
 	selected_field = -1
-	follow_units = false
+	camera.following = false
 	pending_command = ""
 	_refresh()
 
@@ -2939,7 +2932,7 @@ func _refresh_territory(state: Dictionary) -> void:
 
 func _position_territory() -> void:
 	var padding: Vector2 = Vector2.ONE * territory_view.radius * 1.5
-	territory_view.set_geometry(_screen_point(-padding), (_map_size() + padding * 2.0) * _fit() * zoom)
+	territory_view.set_geometry(_screen_point(-padding), (_map_size() + padding * 2.0) * _fit() * camera.zoom)
 
 func _show_system_rings(index: int) -> bool:
 	if index != selected or selected_body >= 0 or selected_yard >= 0 or not building_selection_kind.is_empty():
@@ -3395,7 +3388,7 @@ func _refresh() -> void:
 	var field_selected: bool = selected_field >= 0 and ECONOMY.discovered(state, _me(), "fields", selected_field)
 	var ship_selected: bool = not ship.is_empty()
 	if not ship_selected and not field_selected and p.is_empty():
-		follow_units = false
+		camera.following = false
 	var other_selected: bool = ship_selected or field_selected
 	var body_selected: bool = not other_selected and not p.is_empty() and selected_body >= 0 and selected_body < int(p.get("planet_count", 0))
 	if not body_selected:
@@ -3405,7 +3398,7 @@ func _refresh() -> void:
 	var yard_selected: bool = not other_selected and not body_selected and not p.is_empty() and selected_yard >= 0 and selected_yard < p.get("yards", []).size() and selected_yard_count == p.get("yards", []).size()
 	if not yard_selected:
 		if selected_yard >= 0:
-			follow_units = false
+			camera.following = false
 		selected_yard = -1
 	# A claimed sector is represented by its station, not a second selectable
 	# sector entity. Keep explicit planet, yard and grouped selections intact.
@@ -3839,9 +3832,7 @@ func _send_colony() -> void:
 		session.call("request_colonize", -1, selected)
 
 func _reset_view() -> void:
-	follow_units = false
-	zoom = 1.0
-	camera_world = Vector2.INF
+	camera.reset()
 	map_canvas.queue_redraw()
 
 # The bottom console reserves a fixed viewport, independent of selection.
@@ -3855,49 +3846,32 @@ func _map_resized() -> void:
 	_layout_conquest_button()
 	_layout_match_chat()
 	# The world-space center is independent of screen dimensions.
-	zoom = minf(zoom, _max_zoom())
+	camera.zoom = minf(camera.zoom, _max_zoom())
 	map_canvas.queue_redraw()
 
 func _map_size() -> Vector2:
 	return _state().get("map", {}).get("size", MAP.SIZE)
 
 func _fit() -> float:
-	var area: Vector2 = _projection_size() - Vector2(24, 52)
-	var bounds: Vector2 = _map_size()
-	return maxf(0.0001, minf(area.x / bounds.x, area.y / bounds.y))
+	return camera.fit(_projection_size(), _map_size())
 
 func _screen_point(point: Vector2) -> Vector2:
-	return _camera_center() + (point - _camera_world_center()) * _fit() * zoom
+	return camera.screen_point(point, _projection_size(), _map_size())
 
 func _world_point(point: Vector2) -> Vector2:
-	return _camera_world_center() + (point - _camera_center()) / (_fit() * zoom)
+	return camera.world_point(point, _projection_size(), _map_size())
 
 func _camera_world_center() -> Vector2:
-	return camera_world if camera_world.is_finite() else _map_size() * 0.5
+	return camera.world_center(_map_size())
 
 func _camera_center() -> Vector2:
 	return _projection_size() * 0.5
 
 func _max_zoom() -> float:
-	# Scale the close-up ceiling to the actual viewport and map fit. At
-	# maximum zoom a fighter is 60% of the full viewport width long.
-	var base_scale: float = maxf(0.0001, minf(SHIP_WORLD_SCALE * _fit() * OVERVIEW_MAX_ZOOM, 1.25))
-	var target_scale: float = size.x * CLOSEUP_SCREEN_FRACTION / FIGHTER_HULL_LENGTH
-	return OVERVIEW_MAX_ZOOM * maxf(1.0, target_scale / base_scale)
+	return camera.max_zoom(size.x, _projection_size(), _map_size())
 
 func _zoom_at(point: Vector2, direction: float) -> void:
-	var anchor: Vector2 = _camera_center() if follow_units else point
-	var world: Vector2 = _world_point(anchor)
-	var maximum: float = _max_zoom()
-	# Step in log space, with progressively finer percentage changes as
-	# the camera approaches its close-up limit (reversible in either direction).
-	var log_span: float = log(maximum / MIN_ZOOM)
-	var log_zoom: float = log(zoom / MIN_ZOOM)
-	var rate: float = (0.25 - 0.06) / log_span
-	var limit: float = 0.25 / rate
-	var next_log: float = limit - (limit - log_zoom) * exp(-rate * direction)
-	zoom = clampf(MIN_ZOOM * exp(next_log), MIN_ZOOM, maximum)
-	camera_world = world - (anchor - _camera_center()) / (_fit() * zoom)
+	camera.zoom_at(point, direction, size.x, _projection_size(), _map_size())
 	map_canvas.queue_redraw()
 
 func _system_visual(index: int, state: Dictionary) -> Dictionary:
@@ -3915,7 +3889,7 @@ func _system_visual(index: int, state: Dictionary) -> Dictionary:
 	return system_visuals[index]
 
 func _planet_radius(index: int, state: Dictionary) -> float:
-	return _system_world_radius(index, state) * _fit() * zoom
+	return _system_world_radius(index, state) * _fit() * camera.zoom
 
 func _system_world_radius(index: int, state: Dictionary) -> float:
 	var ideal: float = SYSTEM_WORLD_RADIUS * float(state["planets"][index].get("size_factor", 1.0))
@@ -4210,7 +4184,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 					map_canvas.draw_string(get_theme_default_font(), point + Vector2(-90.0, -body_radius - 7.0), _body_name(index, slot), HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(HUD.TEXT, detail))
 	_draw_planet_production(state, index, pos, radius, detail)
 	_draw_planet_upgrade_deliveries(state, index, pos, radius, detail)
-	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
+	var opacity: float = 1.0 - 0.4 * smoothstep(0.0, 1.0, log(maxf(camera.zoom, 1.0)) / log(maxf(_max_zoom(), 1.01)))
 	_draw_star(index, pos, star_radius, star_color, not ECONOMY.has_planets(system), opacity)
 	if bool(system.get("station", {}).get("dyson_sphere", false)):
 		_draw_pds_frame(pos, star_radius * 1.18, 1.0)
@@ -4330,7 +4304,7 @@ func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 
 func _station_radius() -> float:
 	# Scale the projected art, not its orbital position or simulation radius.
-	return maxf(5.0, 58.0 * _fit() * zoom * _overview_art_multiplier())
+	return maxf(5.0, 58.0 * _fit() * camera.zoom * _overview_art_multiplier())
 
 func _station_hit(point: Vector2, state: Dictionary) -> int:
 	var hit: int = -1
@@ -4485,7 +4459,7 @@ func _recall_control_group(number: int, additive: bool = false) -> void:
 	selected_field = -1
 	selected_ship_id = -1
 	selected_units.clear()
-	follow_units = false
+	camera.following = false
 	pending_command = ""
 	formation_button = 0
 	if kind == "units":
@@ -4564,7 +4538,7 @@ func _select_building_ref(ref: Vector2i, kind: String) -> void:
 	if kind == "station":
 		building_selection_kind = kind
 		selected_buildings[ref] = 0
-	follow_units = false
+	camera.following = false
 	pending_command = ""
 	_load_thresholds()
 	_refresh()
@@ -4623,7 +4597,7 @@ func _prune_building_selection(state: Dictionary) -> void:
 		_clear_building_selection()
 		selected_yard = -1
 		selected_body = -1
-		follow_units = false
+		camera.following = false
 		return
 	var current := Vector2i(selected, selected_yard if building_selection_kind == "shipyard" else 0 if building_selection_kind == "station" else selected_body)
 	if not selected_buildings.has(current):
@@ -4778,7 +4752,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 			selected_ship_id = -1
 			selected_units.clear()
 			selected_field = -1
-			follow_units = false
+			camera.following = false
 			if double_click:
 				_select_visible_buildings(state, yard_hit, "shipyard")
 			var focus: Control = get_viewport().gui_get_focus_owner()
@@ -4794,7 +4768,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 			_set_building_primary(state, ref, "station")
 			building_selection_kind = "station"
 			selected_buildings[ref] = 0
-			follow_units = false
+			camera.following = false
 			if double_click:
 				_select_visible_buildings(state, ref, "station")
 			_load_thresholds()
@@ -4804,7 +4778,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 		selected = body_hit.x
 		selected_yard = -1
 		selected_body = body_hit.y
-		follow_units = false
+		camera.following = false
 		selected_ship_id = -1
 		selected_units.clear()
 		selected_field = -1
@@ -4850,14 +4824,14 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 			if not ECONOMY.discovered(state, _me(), "fields", i):
 				continue
 			var distance: float = point.distance_to(_screen_point(fields[i]["position"]))
-			if distance <= maxf(9.0, float(fields[i]["radius"]) * _fit() * zoom):
+			if distance <= maxf(9.0, float(fields[i]["radius"]) * _fit() * camera.zoom):
 				selected_field = i
 				break
 	if selected_ship_id < 0 and selected_field < 0 and hit >= state["planets"].size():
 		selected_field = hit - state["planets"].size()
 		hit = -1
 	selected = -1 if selected_ship_id >= 0 or selected_field >= 0 else hit
-	follow_units = false
+	camera.following = false
 	var focused: Control = get_viewport().gui_get_focus_owner()
 	if is_instance_valid(focused):
 		focused.release_focus()
@@ -4904,7 +4878,7 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 		if not friendly_ids.has(id):
 			selected_units.erase(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
-	follow_units = false
+	camera.following = false
 	selected = -1
 	selected_body = -1
 	selected_yard = -1
@@ -4983,12 +4957,12 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		var candidate: int = node - state["planets"].size()
 		var data: Dictionary = state["map"]["fields"][candidate]
 		var distance: float = point.distance_to(_screen_point(data["position"]))
-		if distance <= maxf(9.0, float(data["radius"]) * _fit() * zoom):
+		if distance <= maxf(9.0, float(data["radius"]) * _fit() * camera.zoom):
 			field = candidate
 			var best: float = INF
 			for rock in data.get("chunks", []):
 				var d: float = point.distance_to(_screen_point(rock["position"]))
-				if d < best and d <= maxf(5.0, float(rock.get("radius", 0.0)) * _fit() * zoom):
+				if d < best and d <= maxf(5.0, float(rock.get("radius", 0.0)) * _fit() * camera.zoom):
 					best = d
 					rock_id = int(rock["id"])
 	var entries: Array = []
@@ -5239,7 +5213,7 @@ func _begin_formation(mouse: InputEventMouseButton) -> void:
 	formation_append = mouse.shift_pressed
 	formation_force_position = mouse.alt_pressed
 	selecting_units = false
-	follow_units = false
+	camera.following = false
 
 func _finish_formation(point: Vector2) -> void:
 	_append_formation_point(point, true)
@@ -5289,7 +5263,7 @@ func _map_input(event: InputEvent) -> void:
 		match mouse.button_index:
 			MOUSE_BUTTON_MIDDLE:
 				if mouse.pressed:
-					follow_units = false
+					camera.following = false
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
@@ -5335,7 +5309,7 @@ func _map_input(event: InputEvent) -> void:
 			if motion.button_mask == 0:
 				drag_button = 0
 			else:
-				camera_world = _camera_world_center() - motion.relative / (_fit() * zoom)
+				camera.world = _camera_world_center() - motion.relative / (_fit() * camera.zoom)
 	map_canvas.queue_redraw()
 	map_canvas.accept_event()
 
@@ -5377,7 +5351,7 @@ func _sound_chat() -> void:
 		sound_mixer.play_cue("notice")
 
 func _sound_gain(point: Vector2, center: Vector2, radius: float) -> float:
-	return SFX.spatial_gain(point.distance_to(center), radius, zoom)
+	return SFX.spatial_gain(point.distance_to(center), radius, camera.zoom)
 
 func _sync_upgrade_audio(state: Dictionary) -> void:
 	if state.is_empty() or str(session.get("phase")) != "match":
@@ -5431,7 +5405,7 @@ func _sync_world_audio(state: Dictionary) -> void:
 	var initial: bool = sound_elapsed < 0.0
 	var advanced: bool = not initial and now > sound_elapsed
 	var center: Vector2 = _camera_world_center()
-	var radius: float = clampf(_projection_size().length() / maxf(0.0001, _fit() * zoom) * 0.55, 650.0, 9000.0)
+	var radius: float = clampf(_projection_size().length() / maxf(0.0001, _fit() * camera.zoom) * 0.55, 650.0, 9000.0)
 	for event in state.get("ship_destructions", []):
 		var sequence: int = int(event["sequence"])
 		if sequence <= sound_destruction_sequence:
@@ -5518,7 +5492,7 @@ func _jump_tactical_alert(point: Vector2) -> bool:
 				if int(ship["id"]) == target:
 					destination = ship["position"]
 					break
-		follow_units = false
+		camera.following = false
 		formation_button = 0
 		selecting_units = false
 		_center_world(destination)
@@ -5754,7 +5728,7 @@ func _select_all_buildings(kind: String) -> void:
 		_set_building_primary(state, selected_buildings.keys()[0], kind)
 		_load_thresholds()
 	last_control_group_recall = -1
-	follow_units = false
+	camera.following = false
 	pending_command = ""
 	formation_button = 0
 	selecting_units = false
@@ -5778,7 +5752,7 @@ func _select_all_military() -> void:
 	var center_army: bool = last_control_group_recall == -2 and now - last_control_group_recall_ms <= 400
 	last_control_group_recall = -1 if center_army else -2
 	last_control_group_recall_ms = now
-	follow_units = false
+	camera.following = false
 	pending_command = ""
 	formation_button = 0
 	selecting_units = false
@@ -5828,8 +5802,7 @@ func _sync_match_mouse_mode() -> void:
 
 func _pan_camera(direction: Vector2, delta: float) -> void:
 	if not direction.is_zero_approx():
-		follow_units = false
-		camera_world = _camera_world_center() + direction * KEYBOARD_PAN_SPEED * delta / (_fit() * zoom)
+		camera.pan(direction, delta, _projection_size(), _map_size())
 		map_canvas.queue_redraw()
 
 func _process(delta: float) -> void:
@@ -5914,7 +5887,7 @@ func _process(delta: float) -> void:
 		orbit_seed = -1
 		planet_detail_alpha.clear()
 		planet_detail_seed = -1
-		follow_units = false
+		camera.following = false
 		ship_destructions.clear()
 		last_destruction_sequence = 0
 	if is_instance_valid(map_canvas):
@@ -6214,7 +6187,7 @@ func _ship_target_ring(state: Dictionary, poses: Dictionary, refs: Dictionary, s
 		if field >= 0 and field < state["map"]["fields"].size():
 			var chunk: Dictionary = ECONOMY._find_chunk(state["map"]["fields"][field], int(ship.get("chunk", -1)))
 			if not chunk.is_empty():
-				var radius: float = float(chunk["radius"]) * _fit() * zoom * sqrt(float(chunk["remaining"]) / float(chunk["initial"]))
+				var radius: float = float(chunk["radius"]) * _fit() * camera.zoom * sqrt(float(chunk["remaining"]) / float(chunk["initial"]))
 				return {"point": _screen_point(chunk["position"]), "radius": maxf(6.0, radius + 4.0), "owner": 0}
 	if bool(ship.get("salvage_delivery", false)):
 		destination = int(ship.get("salvage_depot", -1))
@@ -6248,32 +6221,28 @@ func _draw_ship_target_rings(state: Dictionary, poses: Dictionary, refs: Diction
 func _overview_art_multiplier(maximum: float = OVERVIEW_ART_MAX_MULTIPLIER) -> float:
 	# Wheel zoom is logarithmic; blend in the same space for a smooth
 	# overview-to-tactical transition, with exact maximum/1x endpoints.
-	var progress: float = clampf(log(maxf(zoom, MIN_ZOOM) / MIN_ZOOM) / log(OVERVIEW_ART_NORMAL_ZOOM / MIN_ZOOM), 0.0, 1.0)
+	var progress: float = clampf(log(maxf(camera.zoom, CAMERA_VIEW.MIN_ZOOM) / CAMERA_VIEW.MIN_ZOOM) / log(OVERVIEW_ART_NORMAL_ZOOM / CAMERA_VIEW.MIN_ZOOM), 0.0, 1.0)
 	return lerpf(maximum, 1.0, smoothstep(0.0, 1.0, progress))
 
 func _ship_scale(structure: bool = false) -> float:
 	# Preserve the authored close-up ceiling and camera framing.
-	var base: float = minf(SHIP_WORLD_SCALE * _fit() * minf(zoom, OVERVIEW_MAX_ZOOM), 1.25) * maxf(1.0, zoom / OVERVIEW_MAX_ZOOM)
+	var base: float = minf(CAMERA_VIEW.SHIP_WORLD_SCALE * _fit() * minf(camera.zoom, CAMERA_VIEW.OVERVIEW_MAX_ZOOM), 1.25) * maxf(1.0, camera.zoom / CAMERA_VIEW.OVERVIEW_MAX_ZOOM)
 	return base * _overview_art_multiplier(OVERVIEW_ART_MAX_MULTIPLIER if structure else OVERVIEW_SHIP_MAX_MULTIPLIER)
 
 func _focus_selection() -> void:
 	var state: Dictionary = _state()
 	if state.is_empty():
 		return
-	follow_units = true
+	camera.following = true
 	_follow_selection(state, _ship_poses(state))
 	_position_territory()
 	map_canvas.queue_redraw()
 
 func _bounds_zoom(bounds: Rect2) -> float:
-	# Fit the selection into the unobstructed play area with breathing room
-	# around silhouettes and selection indicators.
-	var available: Vector2 = _projection_size() * 0.78
-	var extent: Vector2 = bounds.size.max(Vector2.ONE)
-	return clampf(minf(available.x / extent.x, available.y / extent.y) / _fit(), MIN_ZOOM, _max_zoom())
+	return camera.bounds_zoom(bounds, size.x, _projection_size(), _map_size())
 
 func _center_world(point: Vector2) -> void:
-	camera_world = point
+	camera.world = point
 
 func _frame_starting_sector(index: int) -> void:
 	var state: Dictionary = _state()
@@ -6285,13 +6254,13 @@ func _frame_starting_sector(index: int) -> void:
 	for i in range(64):
 		var direction: Vector2 = Vector2.from_angle(TAU * float(i) / 64.0)
 		extent = extent.max((direction * ECONOMY.sector_limit(graph, index, direction)).abs())
-	zoom = _bounds_zoom(Rect2(-extent, extent * 2.0))
+	camera.zoom = _bounds_zoom(Rect2(-extent, extent * 2.0))
 	_center_world(state["map"]["points"][index])
 	_position_territory()
 	map_canvas.queue_redraw()
 
 func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool = false) -> void:
-	if (not follow_units and not center_only) or selecting_units or drag_button != 0 or str(session.get("phase")) != "match":
+	if (not camera.following and not center_only) or selecting_units or drag_button != 0 or str(session.get("phase")) != "match":
 		return
 	var ids: Array = selected_units if not selected_units.is_empty() else [selected_ship_id]
 	var positions: Array[Vector2] = []
@@ -6333,7 +6302,7 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 		else:
 			_center_world(center)
 		return
-	follow_units = false
+	camera.following = false
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
 	var frame: int = Engine.get_process_frames()
@@ -6382,7 +6351,7 @@ func _draw_logistics_lens(state: Dictionary, font: Font) -> void:
 		var radius: float = _station_radius()
 		if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 80.0).has_point(pos):
 			continue
-		var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * zoom
+		var spacing: float = float(_system_visual(i, state)["spacing"]) * _fit() * camera.zoom
 		var scale: float = clampf(spacing / 150.0, 0.22, 1.0)
 		var origin: Vector2 = pos + Vector2(-94.0 * scale, radius + 5.0 * scale)
 		logistics_overlay.draw_rect(Rect2(origin - Vector2.ONE * 3.0 * scale, Vector2(194, 34.0 + 32.0 * float(maxi(0, ceili(float(ECONOMY.RESOURCES.size()) / 3.0) - 1))) * scale), Color("#0c1928ec"))
@@ -6666,7 +6635,7 @@ func _draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float)
 			break
 
 func _salvage_radius(pile: Dictionary) -> float:
-	return maxf(3.0, sqrt(float(pile["amount"])) * 1.6 * _fit() * zoom)
+	return maxf(3.0, sqrt(float(pile["amount"])) * 1.6 * _fit() * camera.zoom)
 
 func _salvage_hit(state: Dictionary, point: Vector2) -> int:
 	var hit: int = -1
@@ -7223,7 +7192,7 @@ func _draw_map() -> void:
 		asteroid_shape_cache.clear()
 		asteroid_cache_seed = seed_value
 	var viewport_bounds := Rect2(Vector2.ZERO, map_canvas.size)
-	var render_scale: float = _fit() * zoom
+	var render_scale: float = _fit() * camera.zoom
 	var points: Array = state["map"]["points"]
 	var font: Font = ThemeDB.fallback_font
 	var fields: Array = state["map"].get("fields", [])
