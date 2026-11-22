@@ -12,6 +12,7 @@ var local_player: Callable
 var color_index: Callable
 var empire_color: Callable
 var reward_icon: Callable
+var population_icon: Callable
 var viewport_rect: Callable
 var conquest_buttons: Dictionary = {}
 var objective_refresh_buttons: Dictionary = {}
@@ -25,7 +26,7 @@ var conquest_cards: VBoxContainer
 var conquest_card_signature: String = ""
 var conquest_pulse_time: float = 0.0
 
-func build(owner: Control, session_node: Node, canvas: Control, overlay: Control, header: float, player_query: Callable, color_index_query: Callable, color_query: Callable, icon_query: Callable) -> void:
+func build(owner: Control, session_node: Node, canvas: Control, overlay: Control, header: float, player_query: Callable, color_index_query: Callable, color_query: Callable, icon_query: Callable, population_query: Callable) -> void:
 	session = session_node
 	map_canvas = canvas
 	objectives_overlay = overlay
@@ -34,6 +35,7 @@ func build(owner: Control, session_node: Node, canvas: Control, overlay: Control
 	color_index = color_index_query
 	empire_color = color_query
 	reward_icon = icon_query
+	population_icon = population_query
 	viewport_rect = owner.get_viewport_rect
 	for category in ECONOMY.REWARD_CATEGORIES:
 		var button := Button.new()
@@ -269,6 +271,43 @@ func refresh(state: Dictionary) -> void:
 		else:
 			_refresh_reward_cards()
 
+# Each effect gets a readable text line and a familiar HUD icon.
+func _effect_texture(line: String, fallback: String) -> Texture2D:
+	for resource in ["Metals", "Organics", "Crystals"]:
+		if line.contains(resource):
+			return HUD.resource_icon(resource, 16)
+	if line.contains("population"):
+		return population_icon.call(16)
+	if line.contains("antimatter"):
+		return reward_icon.call("collect", 16)
+	return reward_icon.call(fallback, 16)
+
+func _add_effect_rows(content: VBoxContainer, description: String, fallback: String, tint: Color) -> void:
+	for line in description.split("\n", false):
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 5)
+		content.add_child(row)
+		var art := TextureRect.new()
+		HUD.fixed_icon(art, _effect_texture(line, fallback), 16)
+		row.add_child(art)
+		var label := Label.new()
+		label.text = line
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.add_theme_font_size_override("font_size", 13)
+		label.add_theme_color_override("font_color", tint)
+		row.add_child(label)
+
+func _reward_effect(progress: Dictionary, key: String, description: String) -> String:
+	# These ranks divide costs/damage rather than subtracting a flat percent.
+	var step: float = 0.02 if key == "rank_armor" else 0.03
+	if key not in ["rank_upkeep", "rank_armor", "rank_science", "rank_civilian", "rank_military_metal", "rank_military_crystal"]:
+		return description
+	var rank: int = ECONOMY.reward_rank(progress.get("rewards", []), key)
+	var previous: float = 1.0 + step * rank
+	var reduction: float = 100.0 * (1.0 - previous / (previous + step))
+	return description + " (about %.1f%% less per purchase)" % reduction
+
 func _refresh_reward_cards() -> void:
 	var progress: Dictionary = session.get("economy").get("objectives", {}).get(local_player.call(), {})
 	var signature: String = conquest_category + str(ECONOMY.reward_offer(progress, conquest_category)) + str(ECONOMY.reward_generation(progress)) + str(ECONOMY.reward_points(progress, conquest_category))
@@ -311,7 +350,7 @@ func _refresh_reward_cards() -> void:
 		art.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		content.add_child(art)
 		var rarity := Label.new()
-		rarity.text = "UNIQUE · ONE PLAYER" if unique else ("RESEARCH · RANK %d" % (ECONOMY.reward_rank(progress.get("rewards", []), str(key)) + 1) if repeatable else "TECHNOLOGY")
+		rarity.text = "UNIQUE" if unique else ("RESEARCH · RANK %d" % (ECONOMY.reward_rank(progress.get("rewards", []), str(key)) + 1) if repeatable else "TECHNOLOGY")
 		rarity.add_theme_color_override("font_color", Color("#d2baff"))
 		rarity.add_theme_font_size_override("font_size", 11)
 		rarity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -325,26 +364,13 @@ func _refresh_reward_cards() -> void:
 		title_label.custom_minimum_size.y = 34
 		content.add_child(title_label)
 		content.add_child(HSeparator.new())
-		var benefit := Label.new()
-		benefit.text = reward[1]
-		benefit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		benefit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		benefit.add_theme_font_size_override("font_size", 13)
-		benefit.modulate = Color("#c8f3db")
-		content.add_child(benefit)
-		if not str(reward[2]).is_empty():
-			var drawback := Label.new()
-			drawback.text = reward[2]
-			drawback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			drawback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			drawback.add_theme_font_size_override("font_size", 12)
-			drawback.modulate = Color("#ffb4a4")
-			content.add_child(drawback)
+		_add_effect_rows(content, _reward_effect(progress, str(key), str(reward[1])), str(reward[4]), Color("#c8f3db"))
+		_add_effect_rows(content, str(reward[2]), str(reward[4]), Color("#ffb4a4"))
 		var spacer := Control.new()
 		spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		content.add_child(spacer)
 		var buy := Button.new()
-		buy.text = "SELECT · 1 CP"
+		buy.text = "Select"
 		buy.tooltip_text = "Only the first player to select this upgrade can acquire it." if unique else "Spend 1 conquest point"
 		buy.custom_minimum_size.y = 30
 		buy.disabled = points < 1

@@ -347,7 +347,7 @@ func _build_world_effect_batches() -> void:
 
 func _build_match_notices() -> void:
 	notice_ui.build(map_canvas, objectives_overlay, session, HEADER_HEIGHT, MATCH_CONQUEST_UI.OBJECTIVES_WIDTH, _me, _empire_color_index, _jump_notice_location)
-	conquest_ui.build(self, session, map_canvas, objectives_overlay, HEADER_HEIGHT, _me, _empire_color_index, _empire_color, command_card_ui.icon)
+	conquest_ui.build(self, session, map_canvas, objectives_overlay, HEADER_HEIGHT, _me, _empire_color_index, _empire_color, command_card_ui.icon, _population_texture)
 
 func _build_match_header() -> void:
 	header_panel = PanelContainer.new()
