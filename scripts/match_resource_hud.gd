@@ -208,7 +208,7 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 	if resource == "credits":
 		var balance: float = ECONOMY.credit_balance(state, local_player.call())
 		var totals: Dictionary = ECONOMY.empire_totals(state, local_player.call())
-		var income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE
+		var income: float = ECONOMY.resident_tax_income(state, int(local_player.call()))
 		var upkeep: float = float(totals["upkeep"])
 		var unpaid: int = int(totals["unpaid_ships"])
 		var details: String = "Galactic Credits · %.2f GC\nResident taxes (%.1f%%/yr): +%.2f GC/yr\nFleet upkeep: −%.2f GC/yr\nNet recurring income: %+.2f GC/yr" % [balance, ECONOMY.RESIDENT_TAX_RATE * 100.0, income, upkeep, income - upkeep]
@@ -315,7 +315,7 @@ func update_hover(owner: Control, codex: Window, station_details: VBoxContainer,
 func refresh(state: Dictionary) -> void:
 	year_label.text = "%d A.D." % ECONOMY.current_year(state)
 	var totals: Dictionary = ECONOMY.empire_totals(state, local_player.call())
-	var credit_income: float = float(totals["resident_population"]) * ECONOMY.RESIDENT_TAX_RATE - float(totals["upkeep"])
+	var credit_income: float = ECONOMY.resident_tax_income(state, int(local_player.call())) - float(totals["upkeep"])
 	var unpaid: int = int(totals["unpaid_ships"])
 	var credit_balance: float = ECONOMY.credit_balance(state, local_player.call())
 	global_credit_label.text = "%s%s" % [UI_TEXT.compact_amount(credit_balance), " !" if unpaid > 0 else ""]

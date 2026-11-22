@@ -35,6 +35,11 @@ const RESIDENT_TAX_RATE: float = 0.005
 const ROGUE_GRACE_YEARS: float = 60.0
 const ROGUE_CHECK_YEARS: float = 10.0
 const ROGUE_CHANCE: float = 0.005
+const PIRATE_OWNER: int = -1
+const PIRATE_COMBAT_GROUP: int = 2147483000
+const PIRATE_DECISION_YEARS: float = 3.0
+const PIRATE_GROUP_RANGE: float = 900.0
+const PIRATE_DEFENSE_RANGE: float = 1600.0
 # Annual operating wages for completed mobile hulls; structures are exempt.
 const SHIP_UPKEEP_GC = {"scout": 3.0, "miner": 9.0, "fighter": 15.0, "ship": 24.0, "colony_ship": 30.0, "science_ship": 30.0, "cruiser": 45.0, "destroyer": 105.0}
 # Fixed labor fee, independent of future fluctuating market prices.
@@ -325,7 +330,7 @@ static func team_vision(state: Dictionary, team: int) -> Dictionary:
 		if not _shares_group_vision(state, team, _combat_group(state, int(ship["owner"]))) or not ship.has("position"):
 			continue
 		var cell: Vector2i = vision_cell(ship["position"])
-		sources[cell] = maxf(float(sources.get(cell, 0.0)), sight_radius(str(ship["kind"])))
+		sources[cell] = maxf(float(sources.get(cell, 0.0)), sight_radius(str(ship["kind"])) * (_player_factor(state, int(ship["owner"]), "rank_sensor", 0.10) if military_hull(str(ship["kind"])) else 1.0))
 	for cell in sources:
 		_stamp_vision(cells, (Vector2(cell) + Vector2.ONE * 0.5) * VISION_CELL, float(sources[cell]))
 	var elapsed: float = float(state["elapsed"])
@@ -438,7 +443,7 @@ static func _mining_resources(state: Dictionary, player: int, index: int) -> Arr
 static func storage_capacity(p: Dictionary, resource: String = "Organics") -> float:
 	var level: int = clampi(int(p.get("warehouse_level", 0)), 0, 3)
 	var base: float = BASE_METAL_CAPACITY if level == 0 and resource == "Metals" else float(WAREHOUSE_CAPACITIES[level])
-	return base * (1.0 + (1.0 if int(p["owner"]) != 0 and has_reward(p, "storage") else 0.0) + 0.05 * reward_rank(p.get("conquest_rewards", []), "rank_storage"))
+	return base * (1.0 + (0.20 if int(p["owner"]) != 0 and has_reward(p, "storage") else 0.0) + 0.08 * reward_rank(p.get("conquest_rewards", []), "rank_storage"))
 
 static func storage_free(p: Dictionary, resource: String) -> float:
 	return maxf(0.0, storage_capacity(p, resource) - float(p["stock"].get(resource, 0.0)))
@@ -489,15 +494,15 @@ static func reserved_construction_population(p: Dictionary) -> float:
 
 static func _crew_staff_reserve(p: Dictionary, kind: String, yard_slot: int) -> float:
 	if yard_slot >= 0:
-		return float(SHIPYARD_POPULATION[yard_slot]) if yard_fits(p, yard_slot, kind) else INF
+		return yard_staff_required(p, yard_slot) if yard_fits(p, yard_slot, kind) else INF
 	var reserve: float = INF
 	for slot in range(p.get("yards", []).size()):
 		if yard_fits(p, slot, kind):
-			reserve = minf(reserve, float(SHIPYARD_POPULATION[slot]))
+			reserve = minf(reserve, yard_staff_required(p, slot))
 	return reserve
 
 static func available_crew_population(p: Dictionary, yard_slot: int = -1, kind: String = "") -> float:
-	var staff: float = float(SHIPYARD_POPULATION[yard_slot]) if yard_slot >= 0 and kind.is_empty() else _crew_staff_reserve(p, kind, yard_slot)
+	var staff: float = yard_staff_required(p, yard_slot) if yard_slot >= 0 and kind.is_empty() else _crew_staff_reserve(p, kind, yard_slot)
 	return maxf(0.0, float(p.get("population", 0.0)) - reserved_construction_population(p) - staff)
 
 static func ship_crew_available(p: Dictionary, kind: String, yard_slot: int = -1) -> bool:
@@ -516,7 +521,7 @@ static func resident_tax_income(state: Dictionary, player: int) -> float:
 		return total
 	for planet in state.get("planets", []):
 		if int(planet["owner"]) == player:
-			total += maxf(0.0, float(planet["population"])) * RESIDENT_TAX_RATE
+			total += maxf(0.0, float(planet["population"])) * RESIDENT_TAX_RATE * _rank_factor(planet, "rank_tax", 0.05)
 	return total
 
 # One pass over systems, independent of fleet size. Use starting residents
@@ -529,7 +534,7 @@ static func _accrue_resident_taxes(state: Dictionary, dt: float) -> void:
 	for planet in state.get("planets", []):
 		var owner: int = int(planet["owner"])
 		if owner > 0 and credits.has(owner):
-			credits[owner] = float(credits[owner]) + maxf(0.0, float(planet["population"])) * RESIDENT_TAX_RATE * dt
+			credits[owner] = float(credits[owner]) + maxf(0.0, float(planet["population"])) * RESIDENT_TAX_RATE * _rank_factor(planet, "rank_tax", 0.05) * dt
 
 static func ship_upkeep(kind: String) -> float:
 	return float(SHIP_UPKEEP_GC.get(kind, 0.0))
@@ -564,7 +569,7 @@ static func _pay_fleet_upkeep(state: Dictionary, dt: float) -> void:
 	for ship in state.get("ships", []):
 		var owner: int = int(ship["owner"])
 		var kind: String = str(ship.get("kind", ""))
-		var rate: float = ship_upkeep(kind)
+		var rate: float = hull_upkeep(state, ship)
 		if owner <= 0 or not credits.has(owner) or rate <= 0.0:
 			if ship.has("unpaid_since"):
 				ship.erase("unpaid_since")
@@ -574,9 +579,220 @@ static func _pay_fleet_upkeep(state: Dictionary, dt: float) -> void:
 		else:
 			_pay_hull_wages(credits, ship, rate * dt, now)
 	for ship in military:
-		_pay_hull_wages(credits, ship, ship_upkeep(str(ship["kind"])) * dt, now)
+		_pay_hull_wages(credits, ship, hull_upkeep(state, ship) * dt, now)
 
 # A seeded roll per hull and period, independent of simulation frame rate.
+# Pirates do not join teams, diplomacy, the economy or objective scoring.
+# Strategy is host-only and refreshed on a coarse clock. No new RPC.
+static func _pirate_power(ship: Dictionary) -> float:
+	var kind: String = str(ship.get("kind", ""))
+	var strength: float = float({"miner": 0.25, "scout": 0.4, "fighter": 1.0, "cruiser": 5.0, "destroyer": 9.0}.get(kind, 0.0))
+	return strength * clampf(float(ship.get("hp", ship_max_hp(kind))) / maxf(EPS, ship_max_hp(kind)), 0.0, 1.0)
+
+static func _pirate_claims(state: Dictionary) -> Array:
+	var claims: Array = []
+	var base: float = sector_base_radius(state["map"])
+	for index in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][index]
+		if int(system["owner"]) <= 0 or not has_station(system):
+			continue
+		var radius: float = maxf(territory_kernel_reach(base, system_presence_weight(system)) * 1.15, MISSILE_RANGE + 180.0)
+		claims.append({"point": state["map"]["points"][index], "radius": radius})
+	return claims
+
+static func _pirate_claim_depth(point: Vector2, claims: Array, extra: float = 0.0) -> float:
+	var depth: float = 0.0
+	for claim in claims:
+		depth += maxf(0.0, float(claim["radius"]) + extra - point.distance_to(claim["point"]))
+	return depth
+
+static func _pirate_escape_point(point: Vector2, claims: Array, bounds: Vector2, seed: int) -> Vector2:
+	var best: Vector2 = point
+	var score: float = INF
+	var margin := Vector2.ONE * 60.0
+	for ring in range(1, 13):
+		for i in range(16):
+			var angle: float = (float(i) + float(posmod(seed, 16)) / 16.0) * TAU / 16.0
+			var candidate: Vector2 = (point + Vector2.from_angle(angle) * float(ring) * 450.0).clamp(margin, bounds.max(margin * 2.0) - margin)
+			if not _point_clear_of_rocks(candidate):
+				continue
+			var depth: float = _pirate_claim_depth(candidate, claims, 100.0)
+			var value: float = point.distance_to(candidate) + depth * 100.0
+			if value < score:
+				score = value
+				best = candidate
+		if _pirate_claim_depth(best, claims, 100.0) <= EPS:
+			break
+	return best
+
+static func _pirate_defense(point: Vector2, cells: Dictionary, claims: Array) -> float:
+	# Count every nearby armed defender, even from a different empire.
+	var total: float = 0.3
+	var cell := Vector2i(floori(point.x / PIRATE_DEFENSE_RANGE), floori(point.y / PIRATE_DEFENSE_RANGE))
+	for y in range(-1, 2):
+		for x in range(-1, 2):
+			for craft in cells.get(cell + Vector2i(x, y), []):
+				if point.distance_squared_to(craft["position"]) <= PIRATE_DEFENSE_RANGE * PIRATE_DEFENSE_RANGE:
+					total += _pirate_power(craft)
+	for claim in claims:
+		if point.distance_squared_to(claim["point"]) < pow(float(claim["radius"]), 2.0):
+			total += 7.0
+	return total
+
+static func _pirate_pick_target(point: Vector2, power: float, targets: Array, cells: Dictionary, claims: Array, epoch: int, seed: int) -> Dictionary:
+	if power <= EPS or targets.is_empty():
+		return {}
+	var best: Dictionary = {}
+	var best_score: float = -INF
+	# Rotate a bounded sample across the full map. No fog filter and no
+	# per-tick pirate × empire-fleet Cartesian search.
+	var samples: int = mini(64, targets.size())
+	var start: int = posmod(epoch * 61 + seed, targets.size())
+	for i in range(samples):
+		var target: Dictionary = targets[(start + i) % targets.size()]
+		var location: Vector2 = target["position"]
+		var defense: float = _pirate_defense(location, cells, claims)
+		if defense * 1.5 > power:
+			continue
+		var priority: float = float({"ship": 4.0, "miner": 3.5, "colony_ship": 3.0, "science_ship": 2.5}.get(str(target["kind"]), 1.0))
+		var value: float = priority * 1500.0 - point.distance_to(location) - defense * 200.0
+		if value > best_score:
+			best_score = value
+			best = target
+	return best
+
+static func _pirate_decisions(state: Dictionary) -> void:
+	var epoch: int = floori(float(state["elapsed"]) / PIRATE_DECISION_YEARS)
+	if int(state.get("_pirate_epoch", -1)) == epoch:
+		return
+	state["_pirate_epoch"] = epoch
+	var pirates: Array = []
+	for craft in state["ships"]:
+		if bool(craft.get("rogue", false)):
+			pirates.append(craft)
+	if pirates.is_empty():
+		return
+	var claims: Array = _pirate_claims(state)
+	var bounds: Vector2 = state["map"]["size"]
+	var combat_cells: Dictionary = {}
+	var targets: Array = []
+	var pirate_cells: Dictionary = {}
+	for craft in state["ships"]:
+		if int(craft["owner"]) <= 0:
+			continue
+		targets.append(craft)
+		if armed(craft):
+			_spatial_insert(combat_cells, craft["position"], PIRATE_DEFENSE_RANGE, craft)
+	for craft in pirates:
+		var point: Vector2 = craft["position"]
+		if craft.get("pirate_phase", "escape") == "escape":
+			if _pirate_claim_depth(point, claims, 100.0) > EPS:
+				craft["pirate_goal"] = _pirate_escape_point(point, claims, bounds, int(craft["id"]))
+				continue
+			craft["owner"] = PIRATE_OWNER
+			craft["pirate_phase"] = "roam"
+		_spatial_insert(pirate_cells, point, PIRATE_GROUP_RANGE, craft)
+	var assigned: Dictionary = {}
+	for leader in pirates:
+		var leader_id: int = int(leader["id"])
+		if int(leader["owner"]) != PIRATE_OWNER or assigned.has(leader_id):
+			continue
+		var center: Vector2 = leader["position"]
+		var cell := Vector2i(floori(center.x / PIRATE_GROUP_RANGE), floori(center.y / PIRATE_GROUP_RANGE))
+		var group: Array = [leader]
+		assigned[leader_id] = true
+		var power: float = _pirate_power(leader)
+		for y in range(-1, 2):
+			for x in range(-1, 2):
+				for mate in pirate_cells.get(cell + Vector2i(x, y), []):
+					var mate_id: int = int(mate["id"])
+					if group.size() >= 12:
+						break
+					if assigned.has(mate_id) or center.distance_squared_to(mate["position"]) > PIRATE_GROUP_RANGE * PIRATE_GROUP_RANGE:
+						continue
+					assigned[mate_id] = true
+					group.append(mate)
+					power += _pirate_power(mate)
+		var threat: float = _pirate_defense(center, combat_cells, claims)
+		var victim: Dictionary = _pirate_pick_target(center, power, targets, combat_cells, claims, epoch, leader_id) if power >= threat * 1.5 else {}
+		var destination: Vector2 = center
+		var phase: String = "roam"
+		if not victim.is_empty():
+			destination = victim["position"]
+			phase = "hunt"
+		elif threat > 0.3 and power < threat * 1.5:
+			phase = "retreat"
+			var away: Vector2 = Vector2.ZERO
+			var threat_cell := Vector2i(floori(center.x / PIRATE_DEFENSE_RANGE), floori(center.y / PIRATE_DEFENSE_RANGE))
+			for y in range(-1, 2):
+				for x in range(-1, 2):
+					for foe in combat_cells.get(threat_cell + Vector2i(x, y), []):
+						var distance: float = center.distance_to(foe["position"])
+						if distance <= PIRATE_DEFENSE_RANGE:
+							away += (center - (foe["position"] as Vector2)).normalized() * _pirate_power(foe) / maxf(1.0, distance)
+			destination = _pirate_escape_point(center + away.normalized() * 1000.0, claims, bounds, leader_id)
+		else:
+			# Seek other nearby groups or a seeded open-space patrol point.
+			var nearest: float = INF
+			for y in range(-5, 6):
+				for x in range(-5, 6):
+					for other in pirate_cells.get(cell + Vector2i(x, y), []):
+						if assigned.has(int(other["id"])):
+							continue
+						var distance: float = center.distance_squared_to(other["position"])
+						if distance < nearest and distance < 4000.0 * 4000.0:
+							nearest = distance
+							destination = other["position"]
+			if nearest == INF:
+				var direction: Vector2 = Vector2.from_angle(float(posmod(leader_id * 31 + floori(float(epoch) / 4.0), 360)) * PI / 180.0)
+				destination = _pirate_escape_point(center + direction * 1100.0, claims, bounds, leader_id)
+		for i in range(group.size()):
+			var craft: Dictionary = group[i]
+			craft["pirate_phase"] = phase
+			craft["pirate_target"] = int(victim.get("id", -1))
+			craft["pirate_goal"] = (destination + Vector2.from_angle(float(i) * 2.399963) * (0.0 if i == 0 else 65.0)).clamp(Vector2.ZERO, bounds)
+			if phase != "hunt":
+				craft["combat_target"] = -1
+				craft["laser_until"] = -1.0
+
+static func _work_pirate(state: Dictionary, ship: Dictionary, dt: float) -> void:
+	var point: Vector2 = ship["position"]
+	var destination: Vector2 = ship.get("pirate_goal", point)
+	if ship.get("pirate_phase", "") == "hunt":
+		var target: Dictionary = _hulls_by_id.get(int(ship.get("pirate_target", -1)), {})
+		if not target.is_empty() and int(target["owner"]) > 0:
+			var live: Vector2 = target["position"]
+			var reach: float = LASER_RANGE * 0.75 if armed(ship) else LASER_RANGE * 2.0
+			destination = live.move_toward(point, reach)
+	_navigate(ship, destination, ship_speed(str(ship["kind"])) * dt)
+
+static func _pirate_fire(state: Dictionary, ship: Dictionary, positions: Dictionary, by_id: Dictionary, cells: Dictionary, teams: Dictionary, damage: Dictionary, killed_by: Dictionary, health: Dictionary, slots: Dictionary, hull_health: PackedFloat64Array, dt: float) -> void:
+	var target: int = int(ship.get("pirate_target", -1))
+	var id: int = int(ship["id"])
+	if ship.get("pirate_phase", "") != "hunt" or not armed(ship) or not by_id.has(target) or int(by_id[target]["owner"]) <= 0:
+		ship["combat_target"] = -1
+		return
+	var range_to: float = (positions[id] as Vector2).distance_to(positions[target])
+	var in_range: bool = range_to <= LASER_RANGE
+	ship["combat_target"] = target if in_range else -1
+	var cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
+	var laser: float = MINER_LASER_DAMAGE if ship["kind"] == "miner" else LASER_DAMAGE * capital_lasers(str(ship["kind"]))
+	if in_range and cooldown <= EPS and laser > 0.0:
+		_ship_hit(damage, killed_by, health, target, ship, laser, slots, hull_health)
+		ship["laser_until"] = float(state["elapsed"]) + 0.2
+		cooldown = 1.0
+	ship["laser_cooldown"] = cooldown
+	_fire_blaster(state, ship, target if in_range else -1, positions, damage, killed_by, health, dt, slots, hull_health)
+	var missile_cd: float = maxf(0.0, float(ship.get("missile_cooldown", 0.0)) - dt)
+	var launchers: int = missile_count(str(ship["kind"]))
+	if launchers > 0 and missile_cd <= EPS and range_to <= MISSILE_RANGE:
+		_missile_splash(state, cells, positions, teams, PIRATE_COMBAT_GROUP, target, ship, MISSILE_DAMAGE * launchers, damage, killed_by, health, slots, hull_health)
+		ship["missile_origin"] = positions[id]
+		ship["missile_endpoint"] = positions[target]
+		ship["missile_until"] = float(state["elapsed"]) + 0.65
+		missile_cd = MISSILE_COOLDOWN
+	ship["missile_cooldown"] = missile_cd
+
 static func _rogue_roll(seed_value: int, hull_id: int, epoch: int) -> bool:
 	return posmod(hash([seed_value, hull_id, epoch]), 1000000) < int(ROGUE_CHANCE * 1000000.0)
 
@@ -593,8 +809,8 @@ static func _make_rogue(ship: Dictionary) -> void:
 	ship.merge(retained)
 	ship.merge({"owner": 0, "rogue": true, "position": point, "heading": heading,
 		"navigation_target": point, "route": [], "leg": 0.0, "source": -1, "dest": -1,
-		"field": -1, "mining_mode": "idle", "field_leg": 0.0, "holding": true,
-		"hold_position": point, "hold_heading": heading})
+		"field": -1, "mining_mode": "idle", "field_leg": 0.0, "holding": false,
+		"pirate_phase": "escape"})
 
 # Only live bilateral-diplomacy matches use independent neutral hulls.
 # Aggregate one bounded, replicated notice per former owner per check.
@@ -650,7 +866,7 @@ static func empire_totals(state: Dictionary, player: int) -> Dictionary:
 		if int(ship["owner"]) != player:
 			continue
 		craft += 1
-		upkeep += ship_upkeep(str(ship.get("kind", "")))
+		upkeep += hull_upkeep(state, ship)
 		if ship.has("unpaid_since"):
 			unpaid_ships += 1
 		ship_population += float(ship.get("crew", 0.0))
@@ -835,7 +1051,7 @@ static func _work_colony(state: Dictionary, ship: Dictionary, dt: float) -> bool
 		var orbit: Vector2 = colony_station_position(state, site, float(state["elapsed"]), float(ship.get("unit_order", {}).get("orbit_phase", INF)))
 		ship["position"] = orbit
 		ship["navigation_target"] = orbit
-		ship["colony_transform_progress"] = minf(COLONY_TRANSFORM_TIME, float(ship["colony_transform_progress"]) + maxf(0.0, dt))
+		ship["colony_transform_progress"] = minf(COLONY_TRANSFORM_TIME, float(ship["colony_transform_progress"]) + maxf(0.0, dt) * _player_factor(state, int(ship["owner"]), "rank_colony", 0.15))
 		return _convert_colony(state, ship, site) if float(ship["colony_transform_progress"]) + EPS >= COLONY_TRANSFORM_TIME else false
 	if ship.get("unit_order", {}).get("kind", "") != "colonize":
 		ship.erase("colony_transform_progress")
@@ -921,7 +1137,7 @@ static func planetary_population(p: Dictionary) -> float:
 	return maxf(0.0, float(p.get("population", 0.0)) - eco_population(p))
 
 static func eco_organics(p: Dictionary) -> float:
-	return ECO_HOUSING_ORGANICS * eco_housing_count(p) * _rank_factor(p, "rank_orbital", 0.05) if int(p.get("owner", 0)) != 0 else 0.0
+	return ECO_HOUSING_ORGANICS * eco_housing_count(p) * (_rank_factor(p, "rank_orbital", 0.05) + 0.15 * reward_rank(p.get("conquest_rewards", []), "rank_synthetic")) if int(p.get("owner", 0)) != 0 else 0.0
 
 static func _add_eco_residents(p: Dictionary, count: float) -> void:
 	var residents: float = eco_population(p)
@@ -950,7 +1166,7 @@ static func overpopulation_penalty(planet: Dictionary, capacity_factor: float = 
 static func farm_potential(planet: Dictionary) -> float:
 	if int(planet["owner"]) == 0 or not has_planets(planet):
 		return 0.0
-	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0)) * (_rank_factor(planet, "rank_food", 0.05) + (0.5 if has_reward(planet, "agriculture") else 0.0))
+	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0)) * (_rank_factor(planet, "rank_food", 0.05) + (0.15 if has_reward(planet, "agriculture") else 0.0))
 
 static func population_capacity(planet: Dictionary) -> float:
 	return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
@@ -958,7 +1174,7 @@ static func population_capacity(planet: Dictionary) -> float:
 static func habitation_capacity(planet: Dictionary) -> float:
 	if not has_planets(planet):
 		return 0.0
-	return 500000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0))) * _rank_factor(planet, "rank_housing", 0.05)
+	return 500000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0))) * _rank_factor(planet, "rank_housing", 0.15)
 
 static func sustainable_population_capacity(planet: Dictionary) -> float:
 	return minf(population_capacity(planet), habitation_capacity(planet)) + eco_capacity(planet)
@@ -1011,9 +1227,9 @@ static func rate(planet: Dictionary, resource: String) -> float:
 	var base_rate: float = CRYSTALS_PER_LEVEL if resource == "Crystals" else PRODUCTION_PER_LEVEL
 	var output: float = base_rate * level * production_modifier(planet, resource) * labor
 	if resource == "Metals":
-		output *= _rank_factor(planet, "rank_metals", 0.05) + (0.5 if has_reward(planet, "industry") else 0.0)
+		output *= _rank_factor(planet, "rank_metals", 0.05) + (0.15 if has_reward(planet, "industry") else 0.0)
 	if resource == "Crystals":
-		output *= _rank_factor(planet, "rank_crystals", 0.05) + (1.0 if has_reward(planet, "crystals") else 0.0)
+		output *= _rank_factor(planet, "rank_crystals", 0.05) + (0.25 if has_reward(planet, "crystals") else 0.0)
 	return station_output + output
 
 static func food_growth_multiplier(planet: Dictionary) -> float:
@@ -1046,7 +1262,7 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 		growth_constant *= 1.0 - overpopulation_penalty(planet)
 	else:
 		growth_constant = 0.0
-	growth_constant *= _rank_factor(planet, "rank_growth", 0.05) + (0.5 if has_reward(planet, "population") else 0.0)
+	growth_constant *= _rank_factor(planet, "rank_growth", 0.05) + (0.15 if has_reward(planet, "population") else 0.0)
 	var growth_ceiling: float = current * exp(growth_constant * dt)
 	if next > growth_ceiling:
 		next = growth_ceiling
@@ -1147,7 +1363,7 @@ static func _get_owned(state: Dictionary, player: int, index: int) -> Dictionary
 const SHIPYARD_POPULATION = [500.0, 5000.0, 20000.0]
 
 static func shipyard_operational(p: Dictionary, index: int) -> bool:
-	return index >= 0 and index < (p.get("yards", []) as Array).size() and float(p["population"]) + EPS >= float(SHIPYARD_POPULATION[index])
+	return index >= 0 and index < (p.get("yards", []) as Array).size() and float(p["population"]) + EPS >= yard_staff_required(p, index)
 
 static func operational_shipyards(p: Dictionary) -> int:
 	var count: int = 0
@@ -1186,7 +1402,7 @@ static func shipyard_port_job(p: Dictionary, port: int) -> Dictionary:
 	return {}
 
 static func station_max_hp(p: Dictionary) -> float:
-	return REINFORCED_STATION_HP if bool(p.get("station", {}).get("reinforced_plating", false)) else STATION_HP
+	return (REINFORCED_STATION_HP if bool(p.get("station", {}).get("reinforced_plating", false)) else STATION_HP) * _rank_factor(p, "rank_station", 0.10)
 
 static func station_upgrade_available(p: Dictionary, kind: String) -> bool:
 	return STATION_UPGRADES.has(kind) and (kind != "dyson_sphere" or p.get("conquest_rewards", []).has("dyson_sphere")) and has_station(p) and not bool(p["station"].get(kind, false)) and not _has_job(p, kind, "") and affordable(p, _cost(kind, 1))
@@ -2018,7 +2234,7 @@ static func _work_upgrade_deliveries(state: Dictionary, index: int, p: Dictionar
 	for item in p["queue"].duplicate():
 		if not item.has("delivery_slot"):
 			continue
-		item["delivery_remaining"] = maxf(0.0, float(item["delivery_remaining"]) - dt)
+		item["delivery_remaining"] = maxf(0.0, float(item["delivery_remaining"]) - dt * _rank_factor(p, "rank_delivery", 0.10))
 		if float(item["delivery_remaining"]) <= EPS:
 			_finish(state, index, p, item)
 
@@ -2031,7 +2247,7 @@ static func station_construction_job(p: Dictionary) -> Dictionary:
 static func _work_station_queue(state: Dictionary, index: int, p: Dictionary, dt: float) -> void:
 	# Infrastructure shares one FIFO production lane per station, separate
 	# from its shipyards. Spend only unused time on the next job.
-	var remaining: float = dt
+	var remaining: float = dt * _rank_factor(p, "rank_building", 0.10)
 	while remaining > EPS:
 		var item: Dictionary = station_construction_job(p)
 		if item.is_empty():
@@ -2151,6 +2367,8 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 		yard["job"] = id
 		assigned[id] = true
 		var speed: float = 1.0 if chosen["kind"] == "yard_upgrade" else yard_speed(int(yard["level"]))
+		if military_hull(str(chosen["kind"])):
+			speed *= _rank_factor(p, "rank_assembly", 0.10)
 		if _advance(p, chosen, speed * dt, y):
 			_finish(state, index, p, chosen)
 			yard["job"] = -1
@@ -3141,7 +3359,7 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 	return true
 
 static func _dropoff_budget(ship: Dictionary, dt: float) -> float:
-	return maxf(0.0, dropoff_rate(str(ship["kind"])) * maxf(0.0, dt) - float(ship.get("_handoff_sent", 0.0)))
+	return maxf(0.0, dropoff_rate(str(ship["kind"])) * float(ship.get("reward_loading_factor", 1.0)) * maxf(0.0, dt) - float(ship.get("_handoff_sent", 0.0)))
 
 static func dropoff_rate(kind: String) -> float:
 	match kind:
@@ -3261,7 +3479,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 		ship["source"] = -1
 		ship["dest"] = -1
 	if int(ship["dest"]) == here and teams[here] == team and _cargo_total(ship) > EPS:
-		var budget: float = dropoff_rate("ship") * maxf(0.0, dt)
+		var budget: float = dropoff_rate("ship") * float(ship.get("reward_loading_factor", 1.0)) * maxf(0.0, dt)
 		for resource in RESOURCES + [ANTIMATTER]:
 			var capacity: float = storage_free(planets[here], resource) if resource == ANTIMATTER and int(planets[here]["owner"]) == int(ship["owner"]) else (0.0 if resource == ANTIMATTER else _need(planets[here], resource))
 			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), capacity))
@@ -3662,7 +3880,7 @@ static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], 
 		if available:
 			var resource: String = str(chunk["resource"])
 			var free: float = MINER_CAPACITY - _cargo_total(ship)
-			var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * float(field[resource]) * dt, float(budgets[field_index][resource]))))
+			var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * _player_factor(state, int(ship["owner"]), "rank_extraction", 0.10) * float(field[resource]) * dt, float(budgets[field_index][resource]))))
 			ship["mining_active"] = amount > EPS
 			_cargo_stat(ship, "tons_picked", resource, amount)
 			ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
@@ -4135,6 +4353,8 @@ static func diplomatic_relation(state: Dictionary, a: int, b: int) -> String:
 	return relation
 
 static func empires_hostile(state: Dictionary, a: int, b: int) -> bool:
+	if a == PIRATE_OWNER or b == PIRATE_OWNER:
+		return (a == PIRATE_OWNER and b > 0 and state["teams"].has(b)) or (b == PIRATE_OWNER and a > 0 and state["teams"].has(a))
 	return diplomatic_relation(state, a, b) == DIPLO_WAR
 
 static func empires_allied(state: Dictionary, a: int, b: int) -> bool:
@@ -4229,9 +4449,13 @@ static func diplomacy_set_permission(state: Dictionary, a: int, b: int, permissi
 # Legacy combat groups are teams. In bilateral matches they are individual
 # empires: cached hostile buckets must never merge allies transitively.
 static func _combat_group(state: Dictionary, owner: int) -> int:
+	if owner == PIRATE_OWNER:
+		return PIRATE_COMBAT_GROUP
 	return owner if state.has("diplomacy") and state["teams"].has(owner) else int(state["teams"].get(owner, 0))
 
 static func _combat_groups_hostile(state: Dictionary, a: int, b: int) -> bool:
+	if a == PIRATE_COMBAT_GROUP or b == PIRATE_COMBAT_GROUP:
+		return a > 0 and b > 0 and a != b
 	if state.has("diplomacy"):
 		return empires_hostile(state, a, b)
 	# Preserve historical bucket behavior, including unowned targets.
@@ -4290,7 +4514,7 @@ static func _passive_regeneration(state: Dictionary, dt: float) -> void:
 			_regenerate_hull(battery, PDS_HP, dt)
 
 static func armed(ship: Dictionary) -> bool:
-	return not bool(ship.get("rogue", false)) and ship.get("kind", "") in ["fighter", "miner", "cruiser", "destroyer", "scout"]
+	return (not bool(ship.get("rogue", false)) or int(ship.get("owner", 0)) == PIRATE_OWNER) and ship.get("kind", "") in ["fighter", "miner", "cruiser", "destroyer", "scout"]
 
 # Stable hull IDs and the existing disjoint structure target IDs. HP lives
 # in the actual entity dictionary, so repair never creates a new entity.
@@ -4815,7 +5039,7 @@ static func _work_science(state: Dictionary, graph: Dictionary, ship: Dictionary
 		_manual_travel(state, graph, ship, node, point, dt, reach * 0.65)
 		return true
 	ship["navigation_target"] = ship["position"]
-	ship["science_years"] = minf(SCIENCE_COLLECTION_YEARS, float(ship.get("science_years", 0.0)) + dt)
+	ship["science_years"] = minf(SCIENCE_COLLECTION_YEARS, float(ship.get("science_years", 0.0)) + dt * _player_factor(state, int(ship["owner"]), "rank_antimatter", 0.15))
 	if float(ship["science_years"]) >= SCIENCE_COLLECTION_YEARS - EPS:
 		var remaining: float = SCIENCE_CAPACITY
 		for chunk in field["chunks"]:
@@ -5068,7 +5292,7 @@ static func _update_tactical_orders(state: Dictionary, graph: Dictionary) -> voi
 	var by_id: Dictionary = {}
 	var paths: Dictionary = {}
 	for craft in state["ships"]:
-		if not armed(craft) or bool(craft.get("retreating", false)):
+		if bool(craft.get("rogue", false)) or not armed(craft) or bool(craft.get("retreating", false)):
 			continue
 		var goal: int = -1
 		var attack: int = int(craft.get("attack_order", -1))
@@ -6682,7 +6906,7 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 	return false
 
 static func _collect_salvage(ship: Dictionary, pile: Dictionary, dt: float) -> void:
-	var rate: float = FREIGHTER_TRACTOR_RATE if ship.get("kind", "") == "ship" else TRACTOR_RATE
+	var rate: float = (FREIGHTER_TRACTOR_RATE if ship.get("kind", "") == "ship" else TRACTOR_RATE) * float(ship.get("reward_loading_factor", 1.0))
 	var amount: float = minf(cargo_free(ship), minf(float(pile["amount"]), rate * dt))
 	if amount <= EPS:
 		return
@@ -7182,6 +7406,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	var damage: Dictionary = {}
 	for ship in ships:
 		if bool(ship.get("rogue", false)):
+			if int(ship["owner"]) == PIRATE_OWNER:
+				_pirate_fire(state, ship, positions, by_id, cells, team_by_id, damage, killed_by, health, hull_slots, hull_health, dt)
 			continue
 		var fighter: bool = ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]
 		var miner: bool = ship.get("kind", "") == "miner"
@@ -7233,7 +7459,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 							best = float(nearest[0])
 							missile_target = int(nearest[1])
 				if missile_target != -1:
-					_missile_splash(state, cells, positions, team_by_id, team, missile_target, ship, MISSILE_DAMAGE * launchers, damage, killed_by, health, hull_slots, hull_health)
+					_missile_splash(state, cells, positions, team_by_id, team, missile_target, ship, MISSILE_DAMAGE * launchers * _player_factor(state, int(ship["owner"]), "rank_missile", 0.10), damage, killed_by, health, hull_slots, hull_health)
 					missile_cd = MISSILE_COOLDOWN
 					ship["missile_origin"] = pos
 					ship["missile_endpoint"] = positions[missile_target]
@@ -7483,7 +7709,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		if damage.has(id):
 			_apply_reward_damage(ship, ship_max_hp(str(ship["kind"])), float(damage[id]), float(state["elapsed"]))
 			if float(ship["hp"]) <= EPS:
-				if killed_by.has(id) and SHIP_KINDS.has(ship["kind"]):
+				if killed_by.has(id) and SHIP_KINDS.has(ship["kind"]) and int(killed_by[id]["owner"]) > 0:
 					var attacker: Dictionary = killed_by[id]
 					var progress: Dictionary = objective_progress(state, int(attacker["owner"]))
 					progress["enemy_ships_destroyed"] = int(progress.get("enemy_ships_destroyed", 0)) + 1
@@ -7824,9 +8050,9 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 			# After basic defense, expansion and logistics, reserve a capital
 			# budget at the home yard. Other stations keep producing escorts.
 			var population: float = float(p["population"])
-			if index == home and has_yard and counts["fighter"] >= AI_WAVE_MIN and counts["cruiser"] < maxi(1, mini(4, owned.size())) and population >= SHIPYARD_POPULATION[1] + CREW_COSTS["cruiser"]:
+			if index == home and has_yard and counts["fighter"] >= AI_WAVE_MIN and counts["cruiser"] < maxi(1, mini(4, owned.size())) and population >= yard_staff_required(p, 1) + CREW_COSTS["cruiser"]:
 				action = "cruiser"
-			elif index == home and has_yard and counts["cruiser"] > 0 and counts["destroyer"] < maxi(1, mini(3, ceili(float(owned.size()) / 2.0))) and population >= SHIPYARD_POPULATION[2] + CREW_COSTS["destroyer"]:
+			elif index == home and has_yard and counts["cruiser"] > 0 and counts["destroyer"] < maxi(1, mini(3, ceili(float(owned.size()) / 2.0))) and population >= yard_staff_required(p, 2) + CREW_COSTS["destroyer"]:
 				action = "destroyer"
 			elif index != home and production_available(p, "Crystals") and production_level(p, "Crystals") == 0 and counts["fighter"] >= AI_WAVE_MIN:
 				action = "economy"
@@ -8406,7 +8632,7 @@ static func _work_withdrawal(state: Dictionary, graph: Dictionary, ship: Diction
 		return
 	var repair_time: float = maxf(0.0, dt - distance / ship_speed(str(ship.get("kind", "ship"))))
 	var maximum: float = ship_max_hp(str(ship["kind"]))
-	ship["hp"] = minf(maximum, float(ship.get("hp", maximum)) + REPAIR_PER_YEAR * repair_time)
+	ship["hp"] = minf(maximum, float(ship.get("hp", maximum)) + REPAIR_PER_YEAR * repair_time * _player_factor(state, int(ship["owner"]), "rank_repair", 0.15))
 	if float(ship["hp"]) >= maximum - EPS:
 		ship["hp"] = maximum
 		ship["retreating"] = false
@@ -9026,9 +9252,16 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"], craft)
 	_passive_regeneration(state, dt)
 	_refresh_reward_defenses(state, dt)
+	for craft in state["ships"]:
+		var loading: float = _player_factor(state, int(craft["owner"]), "rank_loading", 0.15)
+		if loading > 1.0:
+			craft["reward_loading_factor"] = loading
+		else:
+			craft.erase("reward_loading_factor")
 	_prepare_withdrawals(state, combat_graph)
 	_advance_unit_orders(state, combat_graph)
 	_update_tactical_orders(state, combat_graph)
+	_pirate_decisions(state)
 	var threat_index: Dictionary = {}
 	_combat(state, combat_graph, dt, threat_index)
 	combat_graph.erase("travel_influence")
@@ -9101,7 +9334,10 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var wander_candidates: Dictionary = {}
 	for ship in (state["ships"] as Array).duplicate():
 		var initial_position: Vector2 = ship["position"]
-		if ship.get("kind", "") == "warp_gate" or bool(ship.get("rogue", false)):
+		if bool(ship.get("rogue", false)):
+			_work_pirate(state, ship, dt)
+			continue
+		if ship.get("kind", "") == "warp_gate":
 			continue
 		if ship.get("unit_order", {}).get("kind", "") == "warp_travel" and not bool(ship.get("retreating", false)):
 			var previous_warp: float = float(ship.get("warp_ready", 0.0))
@@ -9393,11 +9629,28 @@ const REWARD_CATEGORIES = ["economic", "military", "tech"]
 const CLOAK_PRIOR_MILITARY_REWARDS: int = 3
 const UNIQUE_CONQUEST_REWARDS = ["cloak", "shield_3", "warp_gate", "crystals"]
 const CONQUEST_REWARDS = {
-	"industry": ["Industrial Revolution", "Planet Metals production +50%", "", "economic", "Metals"],
-	"crystals": ["Crystalline Synthesis", "Planet Crystals production +100%", "", "economic", "Crystals"],
-	"agriculture": ["Agricultural Revolution", "Planet Organics production +50%", "", "economic", "Organics"],
-	"population": ["Population Boom", "Maximum planet population growth +50%", "", "general", "habitation"],
-	"storage": ["Megastructures", "Station storage +100%", "", "general", "warehouse"],
+	"rank_extraction": ["Advanced Extraction","Asteroid mining rate +10% of base","","economic","Metals"],
+	"rank_loading": ["Automated Loading","Cargo handoff and unloading speed +15% of base","","economic","ship"],
+	"rank_building": ["Efficient Construction","Station construction speed +10% of base","","economic","warehouse"],
+	"rank_tax": ["Commercial Networks","Resident tax revenue +5% of base","","economic","Metals"],
+	"rank_upkeep": ["Fleet Administration","Fleet upkeep −5% initially (diminishing returns)","","economic","ship"],
+	"rank_colony": ["Colonial Engineering","Colony assembly speed +15% of base","","economic","colony_ship"],
+	"rank_assembly": ["Rapid Assembly","Military hull construction speed +10% of base","","military","fighter"],
+	"rank_missile": ["Missile Engineering","Military ship missile damage +10% of base","","military","attack"],
+	"rank_repair": ["Emergency Repairs","Ship repair at stations +15% of base","","military","repair"],
+	"rank_station": ["Reinforced Stations","Station maximum HP +10% of base","","military","reinforced_plating"],
+	"rank_sensor": ["Advanced Sensors","Military ship vision +10% of base","","military","scout"],
+	"rank_antimatter": ["Antimatter Engineering","Antimatter collection speed +15% of base","","tech","science_ship"],
+	"rank_robotics": ["Advanced Robotics","Shipyard staffing −10% initially (diminishing returns)","","tech","yard"],
+	"rank_delivery": ["Planetary Automation","Planetary upgrade delivery speed +10% of base","","tech","warehouse"],
+	"rank_synthetic": ["Synthetic Organics","Orbital Organics production +15% of base","","tech","Organics"],
+	"rank_reactor": ["Advanced Reactors","Crystal construction costs −10% initially (diminishing returns)","","tech","Crystals"],
+	"rank_stellar": ["Stellar Engineering","Dyson Sphere construction costs −20% initially (diminishing returns)","","tech","dyson_sphere"],
+	"industry": ["Industrial Revolution", "Planet Metals production +15%", "", "economic", "Metals"],
+	"crystals": ["Crystalline Synthesis", "Planet Crystals production +25%", "", "economic", "Crystals"],
+	"agriculture": ["Agricultural Revolution", "Planet Organics production +15%", "", "economic", "Organics"],
+	"population": ["Population Boom", "Maximum planet population growth +15%", "", "general", "habitation"],
+	"storage": ["Megastructures", "Station storage +20%", "", "general", "warehouse"],
 	"shield_1": ["Shields 1", "Military ship shields: 30% of hull HP\nStation shields: 50% of station HP", "Extra Crystals to build military ships: 20% of base Metals cost", "military", "guard"],
 	"shield_2": ["Shields 2", "Military ship shields: 60% of hull HP\nStation shields: 100% of station HP", "Extra Crystals to build military ships: 40% of base Metals cost", "military", "guard"],
 	"shield_3": ["Shields 3", "Military ship shields: 90% of hull HP\nStation shields: 150% of station HP", "Extra Crystals to build military ships: 60% of base Metals cost", "military", "guard"],
@@ -9409,16 +9662,28 @@ const CONQUEST_REWARDS = {
 	"rank_food": ["Cultivation", "Planet Organics production +5% of base", "", "economic", "Organics"],
 	"rank_growth": ["Medical Research", "Maximum planet population growth +5% of base", "", "economic", "habitation"],
 	"rank_orbital": ["Orbital Agriculture", "Orbital Organics production +5% of base", "", "economic", "Organics"],
-	"rank_storage": ["Expanded Warehouses", "Station storage +5% of base", "", "general", "warehouse"],
-	"rank_housing": ["Habitat Engineering", "Planet housing +5% of base", "", "general", "habitation"],
+	"rank_storage": ["Expanded Warehouses", "Station storage +8% of base", "", "general", "warehouse"],
+	"rank_housing": ["Habitat Engineering", "Planet housing +15% of base", "", "general", "habitation"],
 	"rank_crystals": ["Incubator Research", "Planet Crystals production +5% of base", "", "tech", "Crystals"],
 	"rank_science": ["Scientific Fabrication", "Science Ships cost less Metals", "", "tech", "science_ship"],
 	"rank_civilian": ["Civilian Fabrication", "Civilian ships cost less Metals", "", "tech", "ship"],
-	"rank_damage": ["Weapons Calibration", "Military weapon damage +2% of base", "", "military", "attack"],
+	"rank_damage": ["Weapons Calibration", "Military weapon damage +3% of base", "", "military", "attack"],
 	"rank_armor": ["Hull Materials", "Military ships take less hull damage", "Excludes cloaked Scouts", "military", "reinforced_plating"],
 	"rank_military_metal": ["Fleet Fabrication", "Military ships cost less Metals", "", "military", "Metals"],
 	"rank_military_crystal": ["Crystal Engineering", "Military ships cost less Crystals", "", "military", "Crystals"]
 }
+
+static func _player_rank(state: Dictionary, owner: int, key: String) -> int:
+	return state.get("objectives", {}).get(owner, {}).get("rewards", []).count(key)
+
+static func _player_factor(state: Dictionary, owner: int, key: String, amount: float) -> float:
+	return 1.0 + amount * _player_rank(state, owner, key)
+
+static func hull_upkeep(state: Dictionary, ship: Dictionary) -> float:
+	return ship_upkeep(str(ship.get("kind", ""))) / _player_factor(state, int(ship["owner"]), "rank_upkeep", 0.05 / 0.95)
+
+static func yard_staff_required(p: Dictionary, slot: int) -> float:
+	return ceilf(float(SHIPYARD_POPULATION[slot]) / _rank_factor(p, "rank_robotics", 1.0 / 0.9 - 1.0))
 
 static func reward_repeatable(key: String) -> bool:
 	return key.begins_with("rank_") and CONQUEST_REWARDS.has(key)
@@ -9522,7 +9787,10 @@ static func acquire_reward(state: Dictionary, player: int, key: String, generati
 	progress["offers"][category] = []
 	for system in state["planets"]:
 		if int(system["owner"]) == player:
+			var old_maximum: float = station_max_hp(system)
 			system["conquest_rewards"] = rewards.duplicate()
+			if has_station(system) and key == "rank_station":
+				system["station"]["hp"] = float(system["station"]["hp"]) + station_max_hp(system) - old_maximum
 	# Shared rewards cannot survive in another category's existing draft.
 	for other in REWARD_CATEGORIES:
 		if reward_offer(progress, other).has(key):
@@ -9662,6 +9930,11 @@ static func military_hull(kind: String) -> bool:
 
 static func construction_cost(p: Dictionary, kind: String, level: int) -> Dictionary:
 	var cost: Dictionary = _construction_cost_before_dyson(p, kind, level)
+	if cost.has("Crystals"):
+		cost["Crystals"] = ceilf(float(cost["Crystals"]) / _rank_factor(p, "rank_reactor", 1.0 / 0.9 - 1.0))
+	if kind == "dyson_sphere":
+		for resource in cost:
+			cost[resource] = ceilf(float(cost[resource]) / _rank_factor(p, "rank_stellar", 0.25))
 	if SHIP_KINDS.has(kind) and bool(p.get("station", {}).get("dyson_sphere", false)):
 		for resource in cost:
 			cost[resource] = float(cost[resource]) * 0.5
@@ -9714,7 +9987,7 @@ static func _refresh_reward_defenses(state: Dictionary, dt: float) -> void:
 		var rewards: Array = state.get("objectives", {}).get(player, {}).get("rewards", [])
 		levels[player] = shield_tier(rewards)
 		armors[player] = 1.0 - (0.85 if rewards.has("armor") else 1.0) / (1.0 + 0.02 * reward_rank(rewards, "rank_armor"))
-		damage_factors[player] = 1.0 + 0.02 * reward_rank(rewards, "rank_damage")
+		damage_factors[player] = 1.0 + 0.03 * reward_rank(rewards, "rank_damage")
 		cloaks[player] = rewards.has("cloak")
 	if not levels.values().any(func(level: int) -> bool: return level > 0) and not armors.values().any(func(value: float) -> bool: return value > 0.0) and not damage_factors.values().any(func(value: float) -> bool: return value > 1.0) and not cloaks.values().has(true):
 		return
@@ -9751,6 +10024,8 @@ const CLOAK_DETECTION_RANGE: float = 250.0
 const CLOAK_REVEAL_TIME: float = 5.0
 
 static func ship_visible_to_team(state: Dictionary, ship: Dictionary, team: int) -> bool:
+	if team == PIRATE_COMBAT_GROUP:
+		return true
 	if not bool(ship.get("cloaked", false)):
 		return true
 	if _shares_group_vision(state, team, _combat_group(state, int(ship.get("owner", -1)))):
