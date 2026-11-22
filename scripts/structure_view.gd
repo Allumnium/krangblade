@@ -38,7 +38,7 @@ static func bay_point(center: Vector2, radius: float, elapsed: float, resource: 
 	return center + Vector2.from_angle((float(slot) + 0.5) * TAU / float(resources.size() * ECONOMY.STATION_STORAGE_BAYS) + elapsed * 0.008) * radius * 0.71
 
 func _draw_station_storage(system: Dictionary, center: Vector2, radius: float, elapsed: float) -> void:
-	if radius < 8.0:
+	if radius < 8.0 or not Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 2.0).has_point(center):
 		return
 	var half: float = radius * 0.115
 	for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
@@ -48,15 +48,23 @@ func _draw_station_storage(system: Dictionary, center: Vector2, radius: float, e
 			var point: Vector2 = bay_point(center, radius, elapsed, resource, bay)
 			map_canvas.draw_circle(point, half, Color("#111d2b"), true, -1.0, true)
 			var fraction: float = clampf(fill - float(bay), 0.0, 1.0)
-			if fraction >= 1.0:
+			# Subpixel caps are visually negligible and can collapse to
+			# repeated or collinear vertices in the renderer.
+			var fill_height: float = fraction * half * 2.0
+			if half * 2.0 - fill_height <= 0.25:
 				map_canvas.draw_circle(point, half, color.darkened(0.25), true, -1.0, true)
-			elif fraction > 0.0:
-				# Circular segment bounded by the horizontal fill level.
-				var angle: float = asin(1.0 - 2.0 * fraction)
+			elif fill_height > 0.25:
+				# Approximate the circular segment at screen resolution rather
+				# than oversampling tiny arcs with a fixed 25 vertices.
+				var angle: float = asin(clampf(1.0 - 2.0 * fraction, -1.0, 1.0))
+				var arc_length: float = (PI - 2.0 * angle) * half
+				var steps: int = clampi(ceili(arc_length / 1.5), 2, 24)
 				var segment := PackedVector2Array()
-				for step in range(25):
-					segment.append(point + Vector2.from_angle(lerpf(angle, PI - angle, float(step) / 24.0)) * half)
-				map_canvas.draw_colored_polygon(segment, color.darkened(0.25))
+				for step in range(steps + 1):
+					segment.append(point + Vector2.from_angle(lerpf(angle, PI - angle, float(step) / float(steps))) * half)
+				# Never submit invalid geometry to the canvas renderer.
+				if not Geometry2D.triangulate_polygon(segment).is_empty():
+					map_canvas.draw_colored_polygon(segment, color.darkened(0.25))
 			map_canvas.draw_circle(point, half, color, false, maxf(0.8, radius * 0.018), true)
 
 # Show current production lanes, not queued future yard work.
