@@ -2,6 +2,7 @@ extends RefCounted
 ## Per-client live and explored fog cells with a shared map/minimap mask.
 ## This is presentation state, not authority or network visibility enforcement.
 const ECONOMY = preload("res://scripts/economy_rules.gd")
+const MAP = preload("res://scripts/planet_map.gd")
 
 var _live: Dictionary = {}
 var _explored: Dictionary = {}
@@ -34,6 +35,7 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 		_fields.clear()
 		_observed_at.clear()
 		_revision.clear()
+		_seed_starting_memory(state, player)
 	var team: int = ECONOMY._combat_group(state, player)
 	var revision: Array = [state.get("elapsed"), motion_revision, team, state["ships"].size(), state.get("diplomacy_revision", 0)]
 	if revision == _revision:
@@ -63,6 +65,40 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 	_origin = Vector2(start) * cell
 	extent = Vector2(dimensions) * cell
 	return true
+
+# Reconstruct the opening survey once; late snapshots must not expose
+# current enemy buildings, population or depleted ore outside live sight.
+func _seed_starting_memory(state: Dictionary, player: int) -> void:
+	var ordered: Array[int] = []
+	ordered.assign(state.get("starting_empires", []))
+	if ordered.is_empty():
+		return
+	var team: int = ECONOMY._combat_group(state, player)
+	var regions: Array = []
+	for region in state.get("starting_survey", []):
+		if ECONOMY._shares_group_vision(state, team, ECONOMY._combat_group(state, int(region["owner"]))):
+			regions.append(region)
+			ECONOMY._stamp_vision(_explored, region["center"], float(region["radius"]))
+	if regions.is_empty():
+		return
+	var players: Dictionary = {}
+	for owner in ordered:
+		players[owner] = {"team": int(state["teams"].get(owner, owner))}
+	var initial_map: Dictionary = state["map"]
+	if initial_map.has("layout"):
+		initial_map = MAP.generate(int(initial_map["seed"]), ordered.size(), str(initial_map["layout"]))
+	var initial: Dictionary = ECONOMY.create(initial_map, players, ordered, false)
+	for region in regions:
+		var center: Vector2 = region["center"]
+		var squared: float = float(region["radius"]) ** 2
+		for index in range(initial_map["points"].size()):
+			if center.distance_squared_to(initial_map["points"][index]) <= squared:
+				_systems[index] = (initial["planets"][index] as Dictionary).duplicate(true)
+				_observed_at[index] = 0.0
+		var fields: Array = initial_map.get("fields", [])
+		for index in range(fields.size()):
+			if center.distance_squared_to(fields[index]["position"]) <= squared:
+				_fields[index] = (fields[index] as Dictionary).duplicate(true)
 
 # Site memory is presentation-only and never written back to replicated state.
 # Deep copies prevent in-place solo/host updates from changing remembered data.
