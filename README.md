@@ -4,7 +4,7 @@ Godot 4.7.2, GDScript, Compatibility renderer. Empire is the first of three inte
 
 ## Source ownership map
 
-Current layout (v0.89.36; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
+Current layout (v0.89.37; update when responsibility moves). Use the named functions as search anchors rather than line numbers. This is the development map, not a description of planned gameplay.
 
 | File | Owns / where to look |
 | --- | --- |
@@ -38,6 +38,7 @@ Current layout (v0.89.36; update when responsibility moves). Use the named funct
 | `scripts/structure_view.gd` | Station hub, storage bays, job icons/progress, drydock/shipyard art, construction and colony conversion animation; shared bay point geometry for cargo/production effects. Match supplies selection, projection, scale, health drawing and visibility; no new authoritative state. |
 | `scripts/order_view.gd` | Client order routes, shared group intent, target rings, queued destinations, hull ghosts and drag formation previews. Match supplies projection, geometry and selection queries, owns formation order generation and dispatch; simulation rules remain authoritative. |
 | `scripts/minimap_view.gd` | Minimap coordinate conversion, pointer drag tracking, entity/field/salvage hit hints and drawing of territory, highways, fog, ships and camera bounds. Match owns widget layout, modal gates, command dispatch and camera updates; shares existing fog, territory and motion caches. |
+| `scripts/logistics_view.gd` | Logistics lens toggle, station resource/population overlays and shipment aggregation/arrows. Match supplies widget factories, projection, shared celestial geometry and player queries; existing simulation routing and visibility predicates unchanged. |
 | `scripts/match_session.gd` | Small roster holder; not configured as the current autoload. Check remaining references before changing/removing it. |
 | `tests/economy_rules_test.gd`, `tests/lobby_rules_test.gd` | Rule regressions, seeded maps and semantic fixtures. |
 | `tests/solo_smoke.gd`, `tests/network_smoke.gd` | Real match lifecycle, authority, state replication and ENet peers. |
