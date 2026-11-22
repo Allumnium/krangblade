@@ -132,7 +132,8 @@ const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer"]
 const SCIENCE_CAPACITY: float = 1.0
 const SCIENCE_COLLECTION_YEARS: float = 30.0
-const SHIPYARD_QUEUE_LIMIT = 8
+const SHIPYARD_QUEUE_LIMIT = 4
+const STATION_QUEUE_LIMIT = 4
 const MAX_SHIPYARD_LEVEL = 3
 const CREW_COSTS = {"ship": 4000.0, "colony_ship": COLONY_POPULATION, "fighter": 1000.0, "miner": 1500.0, "science_ship": 4000.0, "scout": 200.0, "cruiser": 3000.0, "destroyer": 8000.0}
 const MINING_STAY: float = 5.0
@@ -1275,6 +1276,14 @@ static func next_pds(p: Dictionary) -> int:
 			return slot
 	return -1
 
+# Include active infrastructure and pending planetary deliveries until finished.
+static func station_queue_count(p: Dictionary) -> int:
+	var count: int = 0
+	for item in p.get("queue", []):
+		if int(item["size"]) == 0 and item["kind"] != "yard_upgrade":
+			count += 1
+	return count
+
 static func shipyard_queue_count(p: Dictionary, slot: int) -> int:
 	var count: int = 0
 	var active: int = int(p["yards"][slot]["job"])
@@ -1300,6 +1309,8 @@ static func enqueue(state: Dictionary, player: int, index: int, kind: String, ta
 				total += 1
 		if total >= maxi(1, p["yards"].size()) * SHIPYARD_QUEUE_LIMIT or (yard_slot >= 0 and shipyard_queue_count(p, yard_slot) >= SHIPYARD_QUEUE_LIMIT):
 			return false
+	elif station_queue_count(p) >= STATION_QUEUE_LIMIT:
+		return false
 	var level: int = 1
 	var station_slot: int = 0
 	match kind:
@@ -5046,7 +5057,7 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 			units.append(ship)
 	return units if units.size() == requested.size() else []
 
-const MAX_UNIT_ORDERS: int = 30
+const MAX_UNIT_ORDERS: int = 4
 
 # Project previous ship/command origins onto the dragged axis to minimize
 # crossing, and choose the perpendicular closest to the group's travel.
