@@ -1608,10 +1608,10 @@ func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
 	var points: Array = ECONOMY.military_graph(state)["points"] if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"]
 	var pos: Vector2 = ECONOMY.combat_position(state, ECONOMY.military_graph(state), ship)
 	var mode: String = ship.get("mining_mode", "idle")
-	if mode == "outbound":
+	if mode in ["approach", "outbound"] and ship.has("mining_target"):
 		return pos.distance_to(ship["mining_target"]) / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
-	if mode == "return":
-		return pos.distance_to(points[int(ship["at"])]) / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
+	if mode == "delivery" and int(ship.get("dest", -1)) >= 0:
+		return pos.distance_to(ECONOMY.station_position(state, int(ship["dest"]), float(state["elapsed"]))) / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
 	var remaining: float = 0.0
 	for index in ship["route"]:
 		var next: Vector2 = points[int(index)]

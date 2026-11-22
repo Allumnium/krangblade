@@ -161,17 +161,8 @@ func draw_command_line(canvas: CanvasItem, start: Vector2, finish: Vector2, tint
 	if start.distance_to(finish) > 1.0:
 		canvas.draw_dashed_line(start, finish, tint, 1.5, 6.0, true, true)
 
-func draw_command_route(graph: Dictionary, ship: Dictionary, start: Vector2, finish: Vector2, tint: Color) -> void:
-	var cursor: Vector2 = start
-	var points: Array = graph["points"]
-	var route: Array = ship.get("route", [])
-	for node in route:
-		if int(node) < 0 or int(node) >= points.size():
-			continue
-		var waypoint: Vector2 = screen_point.call(points[int(node)])
-		draw_command_line(map_canvas, cursor, waypoint, Color(tint, 0.8))
-		cursor = waypoint
-	draw_command_line(map_canvas, cursor, finish, Color(tint, 0.8))
+func draw_command_route(_graph: Dictionary, _ship: Dictionary, start: Vector2, finish: Vector2, tint: Color) -> void:
+	draw_command_line(map_canvas, start, finish, Color(tint, 0.8))
 
 func draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dictionary, start: Vector2, poses: Dictionary, refs: Dictionary) -> void:
 	var order: Dictionary = ship.get("unit_order", {})
@@ -193,6 +184,10 @@ func draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dictio
 		return
 	elif ship.has("local_move_target"):
 		endpoint = ship["local_move_target"]
+	elif ship.get("kind", "") == "miner" and ship.get("mining_mode", "") in ["approach", "outbound", "mining"] and ship.has("mining_target"):
+		endpoint = ship["mining_target"]
+	elif ship.get("kind", "") == "miner" and ship.get("mining_mode", "") == "delivery" and int(ship.get("dest", -1)) >= 0:
+		endpoint = ECONOMY.station_position(state, int(ship["dest"]), float(state["elapsed"]))
 	elif ECONOMY._unit_order_running(ship):
 		endpoint = ECONOMY.unit_order_point(state, graph, ship, order)
 		if order.get("kind", "") in ["attack", "repair", "deposit"] and poses.has(target):

@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.94.0: Direct civilian navigation migration. Normal freighter, colony, miner delivery, evacuation and salvage routes retain destination only; miners fly from their actual position to a rock and back to a useful owned warehouse without field access-star stops. Resource staging and AI colony targeting use physical distance; scouts choose direct system objectives rather than lane neighbors. Retain endpoint permissions, dock range, cargo checks, integer route format and legacy map geometry for non-navigation consumers. Command line displays final intended destination (not obstacle detour). Verify direct travel, hostile exposure, docking, mining, old route fixtures, large fleets, asteroid detours and real peers; runtime pending.
+
 - [ ] v0.93.2: Color insufficient local population red in the command information panel, matching missing resource costs. Visual validation pending.
 
 - [ ] v0.93.0: Double field radius (fourfold area), quadruple rock count using original rock sizes; expand placement search. Non-miners detour around conservative field disks during shared navigation. Interior target handling, formation/collision bypasses, depletion, map placement and ENet require further verification; runtime pending.
