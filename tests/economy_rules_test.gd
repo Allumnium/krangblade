@@ -743,7 +743,25 @@ func _test_stop_order() -> void:
 	assert(ECON.issue_unit_order(state, 1, [id], {"kind": "position", "target": 0, "point": target, "move_only": false}, true))
 	assert(ECON.issue_unit_order(state, 1, [id], {"kind": "stop"}, false))
 	assert(not fighter.has("local_move_target") and not fighter.has("order_queue") and not bool(fighter["holding"]))
-	print("PASS: Stop cancels Hold, active movement and queued commands")
+	# Stop in free space with immediate Explore/Repair/Farm-like automation
+	# enabled: no return to a star during the explicit pause.
+	var scout: Dictionary = fighter.duplicate(true)
+	scout.merge({"id": 99501, "kind": "scout", "position": target + Vector2(1400, 1400), "at": 0, "wander_auto": false, "explore_auto": true, "hp": ECON.ship_max_hp("scout")}, true)
+	var colony: Dictionary = scout.duplicate(true)
+	colony.merge({"id": 99502, "kind": "colony_ship", "position": target + Vector2(1500, 1400), "explore_auto": false, "farm_auto": true, "cargo": ECON.empty_stock(), "hp": ECON.ship_max_hp("colony_ship")}, true)
+	colony["cargo"]["Organics"] = ECON.COLONY_CAPACITY
+	state["ships"] = [scout, colony]
+	var scout_point: Vector2 = scout["position"]
+	var colony_point: Vector2 = colony["position"]
+	assert(ECON.command_stop_units(state, 1, [99501, 99502]))
+	for tick in range(20):
+		ECON.step(state, 0.1)
+		assert(scout["position"] == scout_point and colony["position"] == colony_point)
+		assert(scout["route"].is_empty() and colony["route"].is_empty())
+	assert(ECON.set_autocast(state, 1, [99501], "wander", true))
+	var targets: Dictionary = ECON._idle_formation_targets(state, graph)
+	assert(targets.has(99501) and scout_point.distance_to(targets[99501]) <= ECON.WANDER_RADIUS)
+	print("PASS: Stop cancels orders, pauses automation in free space and Wander uses local anchor")
 
 func _test_combat_sector_presence() -> void:
 	var presence: Dictionary = {0: {1: true}, 1: {1: true, 2: true}, 2: {0: true}, 3: {2: true, 3: true}}
@@ -3327,7 +3345,7 @@ func _test_idle_formations() -> void:
 		for craft in state["ships"]:
 			assert((craft["position"] as Vector2).distance_to(before[craft["id"]]) <= ECON.ship_speed(str(craft["kind"])) * 0.1 + 0.01)
 			assert(int(craft["at"]) == 0 and (craft["route"] as Array).is_empty())
-			assert(ECON.sector_contains(graph, 0, craft["position"]))
+			assert((craft["position"] as Vector2).distance_to(center) <= ECON.WANDER_RADIUS + ECON.SHIP_SEPARATION_RADIUS)
 			furthest = maxf(furthest, (craft["position"] as Vector2).distance_to(center))
 	assert(furthest > ECON.AI_RALLY_RADIUS * 2.0)
 	var squad: Array = state["ships"]

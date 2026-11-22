@@ -158,6 +158,7 @@ const FOLLOW_DISTANCE: float = SHIP_SEPARATION_RADIUS * 2.0
 const RALLY_ARRIVAL_RADIUS: float = SHIP_SEPARATION_RADIUS * 2.0
 const SHIP_SEPARATION_STRENGTH: float = 0.15
 const FORMATION_RADIUS: float = 105.0
+const WANDER_RADIUS: float = 600.0
 const FORMATION_TRAVEL_FRACTION: float = 0.8
 const WITHDRAW_HP: float = 92.0
 const REPAIR_PER_YEAR: float = 20.0
@@ -3807,8 +3808,11 @@ static func autocast_remaining(state: Dictionary, ship: Dictionary, mode: String
 	var longest: float = maxf(arrival_wait_remaining(state, ship), maxf(0.0, float(ship.get("auto_cooldown_until", 0.0)) - float(state["elapsed"])))
 	return clampf(longest - (AUTOCAST_COOLDOWN_YEARS - duration), 0.0, duration)
 
+static func _stop_waiting(state: Dictionary, ship: Dictionary) -> bool:
+	return float(ship.get("stop_until", 0.0)) > float(state["elapsed"]) + EPS
+
 static func autocast_ready(state: Dictionary, ship: Dictionary, mode: String) -> bool:
-	return autocast_enabled(ship, mode) and autocast_remaining(state, ship, mode) <= EPS
+	return not _stop_waiting(state, ship) and autocast_enabled(ship, mode) and autocast_remaining(state, ship, mode) <= EPS
 
 static func set_autocast(state: Dictionary, player: int, ids: Array, mode: String, enabled: bool) -> bool:
 	var units: Array = _owned_units(state, player, ids)
@@ -3818,6 +3822,8 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 		return set_repair_auto(state, player, ids, enabled)
 	for ship in units:
 		ship[mode + "_auto"] = enabled
+		if enabled:
+			ship.erase("stop_until")
 		if ship.get("kind", "") == "scout" and enabled:
 			if mode == "explore":
 				ship["wander_auto"] = false
@@ -4606,6 +4612,8 @@ static func polyline_formation_slots(origins: Dictionary, stroke: PackedVector2A
 	return slots
 
 static func _set_unit_order(state: Dictionary, ship: Dictionary, order: Dictionary) -> void:
+	ship.erase("stop_until")
+	ship.erase("wander_anchor")
 	_clear_resource_stage(ship)
 	ship.erase("arrival_wait_until")
 	ship.erase("manual_mine")
@@ -5078,6 +5086,8 @@ static func command_stop_units(state: Dictionary, player: int, ids: Array) -> bo
 		_finish_manual(ship)
 		ship["navigation_target"] = ship["position"]
 		ship["arrival_wait_until"] = float(state["elapsed"]) + MOVE_ARRIVAL_WAIT_YEARS
+		ship["stop_until"] = ship["arrival_wait_until"]
+		ship["wander_anchor"] = ship["position"]
 	return true
 
 static func command_hold_units(state: Dictionary, player: int, ids: Array, release: bool) -> bool:
@@ -5155,26 +5165,19 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 			ship["leg"] = 0.0
 	return true
 
-static func _work_local_hold(graph: Dictionary, ship: Dictionary, dt: float) -> void:
+static func _work_local_hold(_graph: Dictionary, ship: Dictionary, dt: float) -> void:
 	if not ship.has("hold_position"):
 		ship["navigation_target"] = ship["position"]
 		return
-	var node: int = int(ship["hold_sector"])
 	if (ship["position"] as Vector2).distance_to(ship["hold_position"]) <= EPS:
 		ship["navigation_target"] = ship["hold_position"]
 		if ship.has("hold_heading"):
 			ship["heading"] = ship["hold_heading"]
 		ship.erase("move_only")
 		return
-	# Repair may have taken a fighter to another sector. Return by lanes.
-	if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and int(ship["at"]) != node and not sector_contains(graph, node, ship["position"]):
-		if int(ship.get("dest", -1)) != node:
-			_redirect_fighter(graph, ship, node, _military_paths(graph, node))
-		if (ship["route"] as Array).is_empty():
-			_navigate(ship, graph["points"][node], ship_speed(str(ship.get("kind", "ship"))) * dt)
-		else:
-			_move({"map": graph}, ship, dt)
-		return
+	# Return to the precise held coordinate, not the old sector center.
+	ship["route"] = []
+	ship["leg"] = 0.0
 	_navigate(ship, ship["hold_position"], ship_speed(str(ship.get("kind", "ship"))) * dt)
 	if (ship["position"] as Vector2).distance_to(ship["hold_position"]) <= EPS:
 		if ship.has("hold_heading"):
@@ -7938,18 +7941,21 @@ static func _dispatch_explorers(state: Dictionary, graph: Dictionary) -> void:
 		var key := Vector2i(team, best)
 		occupancy[key] = int(occupancy.get(key, 0)) + 1
 
-static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dictionary:
+static func _idle_formation_targets(state: Dictionary, _graph: Dictionary) -> Dictionary:
+	# Idle formations orbit their actual last idle position. Group nearby
+	# anchors only; distant ships sharing a legacy star index never converge.
 	var groups: Dictionary = {}
-	var stationary_teams: Dictionary = {}
 	for ship in state["ships"]:
-		if ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and (ship["route"] as Array).is_empty() and not bool(ship.get("retreating", false)):
-			var node: int = int(ship["at"])
-			if not stationary_teams.has(node):
-				stationary_teams[node] = {}
-			stationary_teams[node][_combat_group(state, int(ship["owner"]))] = true
-		if not _is_idle_ship(ship) or not autocast_ready(state, ship, "wander"):
+		if not _is_idle_ship(ship):
+			ship.erase("wander_anchor")
 			continue
-		var key: String = "%d:%s:%d:%d" % [int(ship["owner"]), str(ship.get("kind", "ship")), int(ship["at"]), int(ship.get("operation_id", 0))]
+		if not ship.has("wander_anchor"):
+			ship["wander_anchor"] = ship["position"]
+		if not autocast_ready(state, ship, "wander"):
+			continue
+		var anchor: Vector2 = ship["wander_anchor"]
+		var cell := Vector2i(floori(anchor.x / 120.0), floori(anchor.y / 120.0))
+		var key: Array = [int(ship["owner"]), str(ship["kind"]), cell]
 		if not groups.has(key):
 			groups[key] = []
 		groups[key].append(ship)
@@ -7958,37 +7964,24 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 		group.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["id"]) < int(b["id"]))
 		for first in range(0, group.size(), 3):
 			var leader: Dictionary = group[first]
-			var node: int = int(leader["at"])
-			var center: Vector2 = graph["points"][node]
+			var center: Vector2 = leader["wander_anchor"]
 			var seed: int = int(leader["id"]) % 97
-			var radius: float = float(graph["sector_radii"][node])
-			var compact: bool = false
-			if leader.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
-				var team: int = _combat_group(state, int(leader["owner"]))
-				var owner: int = int(state["planets"][node]["owner"]) if node < (state["planets"] as Array).size() else 0
-				var hostile_system: bool = empires_hostile(state, int(leader["owner"]), owner)
-				var hostile_presence: bool = _combat_sector_has_hostile(stationary_teams, node, team, state) if state.has("diplomacy") else (stationary_teams.get(node, {}) as Dictionary).size() > 1
-				compact = bool(leader.get("rally_pending", false)) or hostile_system or hostile_presence
-			var phase: float = float(state["elapsed"]) * ship_speed(str(leader.get("kind", "ship"))) / maxf(radius, 100.0)
-			var angle: float = float(seed) * 2.399963 + (float(state["elapsed"]) * 0.32 if compact else phase * 0.55)
+			var compact: bool = bool(leader.get("rally_pending", false))
+			var radius: float = minf(WANDER_RADIUS, AI_RALLY_RADIUS - 10.0) if compact else WANDER_RADIUS
+			var phase: float = float(state["elapsed"]) * ship_speed(str(leader["kind"])) / radius
+			var angle: float = float(seed) * 2.399963 + phase * 0.55
 			var radial: Vector2 = Vector2.from_angle(angle)
 			var direction: Vector2 = radial.orthogonal()
-			var extent: float = sector_limit(graph, node, radial)
-			var range_fraction: float = 0.52 + 0.43 * sin(phase * 0.41 + float(seed) * 1.713)
-			var distance: float = maxf(0.0, extent - 30.0) * range_fraction
-			if compact:
-				distance = minf(distance, 58.0 + 12.0 * float(seed % 3))
-			var anchor: Vector2 = radial * distance
+			var distance: float = radius * (0.52 + 0.43 * sin(phase * 0.41 + float(seed) * 1.713))
 			for i in range(first, mini(first + 3, group.size())):
 				var offset: int = i - first
 				var formation: Vector2 = Vector2.ZERO
 				if offset > 0:
 					formation = -direction * 22.0 + radial * (16.0 if offset == 1 else -16.0)
-				var relative: Vector2 = anchor + formation
-				var bound: float = sector_limit(graph, node, relative.normalized())
-				if compact:
-					bound = minf(bound, AI_RALLY_RADIUS - 10.0)
-				targets[int(group[i]["id"])] = center + relative.limit_length(maxf(0.0, bound - 1.0))
+				var target: Vector2 = center + (radial * distance + formation).limit_length(radius)
+				if state["map"].has("size"):
+					target = target.clamp(Vector2.ZERO, state["map"]["size"])
+				targets[int(group[i]["id"])] = target
 	return targets
 
 # Directly ordered fighters occupying a hostile system can transfer it.
@@ -7996,6 +7989,7 @@ static func _idle_formation_targets(state: Dictionary, graph: Dictionary) -> Dic
 # Find a safe escape route after a civilian's planned route becomes
 # hostile. Consider both ends of its existing leg without moving the hull.
 # Only the initial hostile waypoint may be used to leave hostile territory.
+
 static func _evacuate_civilian(state: Dictionary, ship: Dictionary, teams: Array[int]) -> bool:
 	var team: int = _combat_group(state, int(ship["owner"]))
 	var miner: bool = ship.get("kind", "") == "miner"
@@ -8124,7 +8118,7 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
-		if not previous.has(id) or repair_parked.has(id) or bool(ship.get("retreating", false)) or _salvage_active(ship):
+		if not previous.has(id) or repair_parked.has(id) or _stop_waiting(state, ship) or bool(ship.get("retreating", false)) or _salvage_active(ship):
 			continue
 		var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
 		var before: Vector2 = previous[id]
@@ -8296,7 +8290,7 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 			break
 		for i in correction_order:
 			var craft: Dictionary = ships[i]
-			if repair_parked.has(int(craft["id"])) or (bool(craft.get("holding", false)) and craft.has("hold_heading") and not bool(craft.get("retreating", false))):
+			if repair_parked.has(int(craft["id"])) or _stop_waiting(state, craft) or (bool(craft.get("holding", false)) and craft.has("hold_heading") and not bool(craft.get("retreating", false))):
 				continue
 			var point: Vector2 = craft["position"]
 			var budget: float = ship_speed(str(craft.get("kind", "ship"))) * dt
@@ -8479,6 +8473,11 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 			if float(ship["hp"]) > before_hp and ship["position"] == initial_position:
 				repair_parked[salvage_ship_id] = true
 			continue
+		if _stop_waiting(state, ship):
+			ship["navigation_target"] = ship["position"]
+			ship.erase("repair_target")
+			continue
+		ship.erase("stop_until")
 		if bool(ship.get("holding", false)) and ship.has("hold_heading"):
 			ship.erase("repair_target")
 			_work_local_hold(combat_graph, ship, dt)

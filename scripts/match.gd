@@ -2072,11 +2072,10 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	var field: Dictionary = fog_state.field_view(state, selected_field, _map_size())
 	ship_title.text = _poi_name(state["planets"].size() + selected_field)
 	if field.is_empty():
-		ship_detail.text = "No last-seen survey available"
+		ship_detail.text = "Survey unavailable"
 		field_command_grid.hide()
 		command_card.hide()
 		return
-	var remembered: bool = not _fog_visible(field["position"])
 	var special: bool = bool(field.get("antimatter", false))
 	var stock: Dictionary = ECONOMY.field_inventory(field)
 	var total: float = float(stock["Metals"]) + float(stock["Crystals"])
@@ -2091,8 +2090,6 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	for anchor in graph["adjacent"][state["planets"].size() + selected_field]:
 		access_names.append(_poi_name(anchor))
-	if remembered:
-		ship_detail.text += "\nLast seen"
 	ship_detail.tooltip_text = "%d chunks remaining · Access: %s" % [field["chunks"].size(), ", ".join(access_names)]
 	fleet_title.text = "Mining"
 	fleet_detail.hide()
@@ -2583,7 +2580,7 @@ func _refresh() -> void:
 	info.tooltip_text = info.text + (" · Home" if bool(p["home"]) else "")
 	if ECONOMY.has_station(p):
 		info.tooltip_text += "\nSpace Station · %.0f / %.0f HP" % [float(p["station"]["hp"]), ECONOMY.station_max_hp(p)]
-	system_owner_label.text = name_text if system_live else name_text + " · Last seen"
+	system_owner_label.text = name_text
 	system_owner_label.tooltip_text = system_owner_label.text
 	system_owner_label.add_theme_color_override("font_color", _empire_color(owner).lerp(HUD.MUTED, 0.28))
 	for resource in ECONOMY.RESOURCES:
