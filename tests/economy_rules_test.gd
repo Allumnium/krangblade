@@ -499,6 +499,35 @@ func _test_station_construction_queue() -> void:
 	assert(not ECON._has_job(p, "economy_building", "Metals"))
 	assert(ECON.station_construction_job(p)["kind"] == "habitation")
 	assert(is_equal_approx(float(ECON.station_construction_job(p)["progress"]), 0.5))
+	var repeat_state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var repeat_station: Dictionary = repeat_state["planets"][0]
+	repeat_station["planet_count"] = 3
+	repeat_station["pds"] = {}
+	repeat_station["stock"]["Metals"] = 0.0
+	assert(not ECON.set_continuous(repeat_state, 2, 0, "yard", true))
+	assert(ECON.set_continuous(repeat_state, 1, 0, "yard", true))
+	assert(ECON.set_continuous(repeat_state, 1, 0, "pds", true))
+	ECON._refill_continuous(repeat_state, 0, repeat_station)
+	assert(repeat_station["queue"].is_empty())
+	for resource in ECON.RESOURCES:
+		repeat_station["stock"][resource] = 100000.0
+	ECON._refill_continuous(repeat_state, 0, repeat_station)
+	ECON._refill_continuous(repeat_state, 0, repeat_station)
+	assert(repeat_station["queue"].size() == 2)
+	assert(ECON._has_job(repeat_station, "yard", "") and not ECON.pds_job(repeat_station).is_empty())
+	for job in (repeat_station["queue"] as Array).duplicate():
+		ECON._finish(repeat_state, 0, repeat_station, job)
+	ECON._refill_continuous(repeat_state, 0, repeat_station)
+	assert(repeat_station["queue"].size() == 2)
+	for job in (repeat_station["queue"] as Array).duplicate():
+		ECON._finish(repeat_state, 0, repeat_station, job)
+	ECON._refill_continuous(repeat_state, 0, repeat_station)
+	assert(ECON.next_shipyard_slot(repeat_station) == 0 and not repeat_station["continuous"]["yard"])
+	assert(not ECON.set_continuous(repeat_state, 1, 0, "yard", true))
+	assert(ECON.pds_job(repeat_station).size() > 0)
+	ECON._finish(repeat_state, 0, repeat_station, ECON.pds_job(repeat_station))
+	ECON._refill_continuous(repeat_state, 0, repeat_station)
+	assert(ECON.next_pds(repeat_station) == -1 and not repeat_station["continuous"]["pds"])
 	print("PASS: sequential station FIFO, independent shipyards, carryover time, refunds and repeat")
 
 func _test_ai_capital_fleets() -> void:
