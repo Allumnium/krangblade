@@ -6877,9 +6877,30 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 		return false
 	var limit: float = AUTO_SALVAGE_RANGE if idle and civilian and sector >= 0 else TRACTOR_RANGE
 	var reachable: Dictionary = _auto_salvage_sectors(state, graph, int(ship["owner"]), sector, threats) if idle and civilian else {}
-	var nearest: float = limit * limit + EPS
-	var best: int = -1
-	var best_node: int = -1
+	var found: Array = _nearest_salvage(state, graph, ship, piles, cells, limit, reachable, sector, civilian, threats)
+	var best: int = found[0]
+	var best_node: int = found[1]
+	if best < 0:
+		if civilian and idle and previously_collecting and _cargo_total(ship) > EPS:
+			ship["salvage_delivery"] = true
+			return true
+		return false
+	var pile: Dictionary = piles[best]
+	if mining_detour:
+		_interrupt_work(ship)
+		ship["route"] = []
+		ship["leg"] = 0.0
+		ship["mining_active"] = false
+	pile["claim"] = int(ship["id"])
+	ship["auto_salvage_target"] = best
+	var point: Vector2 = pile["position"]
+	if pos.distance_to(point) > TRACTOR_RANGE:
+		_approach_salvage(state, graph, ship, pos, point, sector, best_node, reachable, dt)
+		return true
+	return _finish_salvage_pickup(state, ship, piles, best, civilian, idle, dt)
+
+# Salvage grid cells within reach of pos, in deterministic scan order.
+static func _salvage_nearby_cells(cells: Dictionary, pos: Vector2, limit: float) -> Array:
 	var cell := Vector2i(floori(pos.x / SALVAGE_APPROACH_RANGE), floori(pos.y / SALVAGE_APPROACH_RANGE))
 	var reach: int = ceili(limit / SALVAGE_APPROACH_RANGE)
 	var nearby_cells: Array = []
@@ -6894,6 +6915,15 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 				var key: Vector2i = cell + Vector2i(x, y)
 				if cells.has(key):
 					nearby_cells.append(key)
+	return nearby_cells
+
+# Returns [pile_id, node] for the nearest unclaimed reachable pile (ID breaks ties), or [-1, -1].
+static func _nearest_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, piles: Dictionary, cells: Dictionary, limit: float, reachable: Dictionary, sector: int, civilian: bool, threats: Dictionary) -> Array:
+	var pos: Vector2 = ship["position"]
+	var nearest: float = limit * limit + EPS
+	var best: int = -1
+	var best_node: int = -1
+	var nearby_cells: Array = _salvage_nearby_cells(cells, pos, limit)
 	for key in nearby_cells:
 		for candidate in cells[key]:
 			if not piles.has(candidate) or int(piles[candidate]["claim"]) >= 0:
@@ -6912,32 +6942,23 @@ static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, sh
 			best = int(candidate)
 			best_node = node
 			nearest = distance
-	if best < 0:
-		if civilian and idle and previously_collecting and _cargo_total(ship) > EPS:
-			ship["salvage_delivery"] = true
-			return true
-		return false
+	return [best, best_node]
+
+static func _approach_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, pos: Vector2, point: Vector2, sector: int, best_node: int, reachable: Dictionary, dt: float) -> void:
+	ship["auto_salvage_origin"] = sector
+	var waypoint: int = int(reachable.get(best_node, best_node))
+	var approach: Vector2 = graph["points"][waypoint] if waypoint >= 0 and waypoint != best_node else point
+	var stop_range: float = TRACTOR_RANGE * 0.85 if approach == point else 0.0
+	_navigate(ship, approach, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, maxf(0.0, pos.distance_to(approach) - stop_range)))
+	# Keep civilian star anchors valid when crossing a field or sector.
+	var entered: int = sector_at(graph, ship["position"], reachable.keys(), sector)
+	if entered >= 0:
+		ship["at"] = entered if entered < state["planets"].size() else int(state["map"]["fields"][entered - state["planets"].size()]["anchor"])
+		ship["auto_salvage_origin"] = entered
+
+# Tractor the claimed pile; idle civilians keep collecting or switch to delivery.
+static func _finish_salvage_pickup(state: Dictionary, ship: Dictionary, piles: Dictionary, best: int, civilian: bool, idle: bool, dt: float) -> bool:
 	var pile: Dictionary = piles[best]
-	if mining_detour:
-		_interrupt_work(ship)
-		ship["route"] = []
-		ship["leg"] = 0.0
-		ship["mining_active"] = false
-	pile["claim"] = int(ship["id"])
-	ship["auto_salvage_target"] = best
-	var point: Vector2 = pile["position"]
-	if pos.distance_to(point) > TRACTOR_RANGE:
-		ship["auto_salvage_origin"] = sector
-		var waypoint: int = int(reachable.get(best_node, best_node))
-		var approach: Vector2 = graph["points"][waypoint] if waypoint >= 0 and waypoint != best_node else point
-		var stop_range: float = TRACTOR_RANGE * 0.85 if approach == point else 0.0
-		_navigate(ship, approach, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, maxf(0.0, pos.distance_to(approach) - stop_range)))
-		# Keep civilian star anchors valid when crossing a field or sector.
-		var entered: int = sector_at(graph, ship["position"], reachable.keys(), sector)
-		if entered >= 0:
-			ship["at"] = entered if entered < state["planets"].size() else int(state["map"]["fields"][entered - state["planets"].size()]["anchor"])
-			ship["auto_salvage_origin"] = entered
-		return true
 	var before_pickup: float = _cargo_total(ship)
 	_collect_salvage(ship, pile, dt)
 	if ship.has("resource_stage") and _cargo_total(ship) > before_pickup + EPS:
