@@ -301,7 +301,7 @@ func _add_effect_rows(content: VBoxContainer, description: String, fallback: Str
 func _reward_effect(progress: Dictionary, key: String, description: String) -> String:
 	# These ranks divide costs/damage rather than subtracting a flat percent.
 	var step: float = 0.02 if key == "rank_armor" else 0.03
-	if key not in ["rank_upkeep", "rank_armor", "rank_science", "rank_civilian", "rank_military_metal", "rank_military_crystal"]:
+	if key not in ["rank_armor", "rank_science", "rank_civilian", "rank_military_metal", "rank_military_crystal"]:
 		return description
 	var rank: int = ECONOMY.reward_rank(progress.get("rewards", []), key)
 	var previous: float = 1.0 + step * rank

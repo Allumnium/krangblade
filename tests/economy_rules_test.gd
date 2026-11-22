@@ -2201,7 +2201,7 @@ func _initialize() -> void:
 		assert(refund_home["queue"].is_empty())
 		var dropped: float = _cancelled_material(refunds, int(order["id"]), "Metals")
 		assert(is_equal_approx(dropped, float(order["allocated"]["Metals"]) if ECON.SHIP_KINDS.has(order["kind"]) else 0.0))
-		assert(is_equal_approx(float(refund_home["stock"]["Metals"]) + dropped, 10000.0 - ECON.consumption(refund_home, "Metals")))
+		assert(is_equal_approx(float(refund_home["stock"]["Metals"]) + dropped, 10000.0))
 		assert(int(refund_home["yards"][0]["job"]) == -1)
 	# Completed and pending shipyards share a hard three-slot limit.
 	var capped: Dictionary = _funded_fixture(graph, players, ids, false)
@@ -3104,19 +3104,20 @@ func _initialize() -> void:
 	print("PASS: multi-resource hulls, population gates and permanent local improvements")
 	var warehouse_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var depot: Dictionary = warehouse_state["planets"][0]
-	# Isolate legacy linear planetary demand from exempt housing residents.
+	# Only planetary residents consume food; materials remain untouched.
 	depot["yards"].clear()
 	depot["eco_population"] = 0.0
 	depot["population"] = ECON.HOME_POPULATION
 	assert(ECON.storage_capacity(depot) == 2000.0)
 	assert(ECON.rate(depot, "Crystals") == ECON.STATION_CRYSTALS_PER_YEAR and ECON.consumption(depot, "Crystals") == 0.0)
-	for resource in ["Metals", "Organics"]:
-		var demand: float = ECON.consumption(depot, resource)
-		assert(demand > 0.0)
-		depot["population"] = ECON.HOME_POPULATION * 2.0
-		assert(is_equal_approx(ECON.consumption(depot, resource), demand * 2.0))
-		depot["population"] = ECON.HOME_POPULATION
-	for resource in ["Metals", "Organics"]:
+	var demand: float = ECON.consumption(depot, "Organics")
+	assert(demand > 0.0)
+	depot["population"] = ECON.HOME_POPULATION * 2.0
+	assert(is_equal_approx(ECON.consumption(depot, "Organics"), demand * 2.0))
+	assert(ECON.consumption(depot, "Metals") == 0.0)
+	assert(ECON.consumption(depot, "Crystals") == 0.0)
+	depot["population"] = ECON.HOME_POPULATION
+	for resource in ["Organics"]:
 		var original: Dictionary = depot["thresholds"][resource].duplicate()
 		depot["thresholds"][resource]["min"] = 0.0
 		assert(is_zero_approx(ECON.civilian_stock_access(depot, resource)))
@@ -3134,7 +3135,10 @@ func _initialize() -> void:
 	depot["stock"]["Metals"] = 100.0
 	var metal_before: float = float(depot["stock"]["Metals"])
 	ECON._work_planet(warehouse_state, 0, 1.0)
-	assert(is_equal_approx(float(depot["stock"]["Metals"]), metal_before - ECON.consumption(depot, "Metals")))
+	assert(is_equal_approx(float(depot["stock"]["Metals"]), metal_before))
+	assert(ECON.local_flow(depot, "Population", "Metals") == 0.0)
+	assert(ECON.local_flow(depot, "Population", "Crystals") == 0.0)
+	assert(ECON.local_flow(depot, "Population", "Organics") > 0.0)
 	depot["stock"]["Metals"] = limit
 	assert(not ECON.enqueue(warehouse_state, 2, 0, "economy", "warehouse"))
 	assert(ECON.enqueue(warehouse_state, 1, 0, "economy", "warehouse"))
@@ -3160,7 +3164,7 @@ func _initialize() -> void:
 	assert(ECON.rate(depot, "Crystals") > 0.0)
 	depot["levels"]["Crystals"] = 10000
 	assert(ECON.rate(depot, "Crystals") > 100.0)
-	print("PASS: storage caps, three warehouse levels, advanced crystal extraction and linear consumption")
+	print("PASS: storage caps, three warehouse levels, advanced crystal extraction and food-only consumption")
 	# Formation slots are persistent, shared by AI/human operations, and
 	# actual world-space positions converge without exceeding ship speed.
 	var form: Dictionary = _funded_fixture(ai_map, players, ids, false)
@@ -5317,8 +5321,6 @@ func _test_recovery_economy() -> void:
 	assert(is_equal_approx(float(p["population"]), ECON.COLONY_MIN_ORIGIN_POPULATION - ECON.COLONY_POPULATION))
 	assert(ECON.cancel(state, 1, 0, int(colony_job["id"])))
 	assert(is_equal_approx(float(p["population"]), ECON.COLONY_MIN_ORIGIN_POPULATION))
-	p["warehouse_level"] = 2
-	assert(ECON.construction_reserve(p, "Metals") == 4500.0)
 	p["warehouse_level"] = 0
 	p["population"] = 1000000.0
 	p["stock"] = ECON.empty_stock()

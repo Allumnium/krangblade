@@ -39,8 +39,6 @@ const ECONOMY_BUILDINGS = {
 	"Organics": {"name": "Farms", "population": 30000, "cost": {"Metals": 240.0}},
 	"Crystals": {"name": "Incubator", "population": 30000, "cost": {"Metals": 240.0}}
 }
-const CONSTRUCTION_RESERVE: float = 500.0
-const CONSTRUCTION_PRODUCTION_SHARE: float = 0.1
 # Population is expressed in people (fractional values retained in simulation).
 const HOME_POPULATION: float = 10000.0
 const ORBITAL_HOUSING_POPULATION: float = 5000.0
@@ -127,7 +125,6 @@ const WAREHOUSE_COSTS = [
 	{"Metals": 4500.0}
 ]
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
-const CIVILIAN_CONSUMPTION = {"Metals": 0.1}
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer"]
 const SCIENCE_CAPACITY: float = 1.0
 const SCIENCE_COLLECTION_YEARS: float = 30.0
@@ -957,16 +954,9 @@ static func organics_demand(planet: Dictionary) -> float:
 	return planetary_population(planet) / POPULATION_PER_ORGANICS_RATE
 
 static func consumption(planet: Dictionary, resource: String) -> float:
-	if int(planet["owner"]) == 0 or not has_planets(planet):
+	if resource != "Organics" or int(planet["owner"]) == 0:
 		return 0.0
-	if resource == "Organics":
-		return organics_demand(planet)
-	var upkeep: float = 1.0
-	if resource == "Metals":
-		for key in ["crystals"]:
-			if has_reward(planet, key):
-				upkeep += 0.15
-	return float(CIVILIAN_CONSUMPTION.get(resource, 0.0)) * planetary_population(planet) / HOME_POPULATION * upkeep / (_rank_factor(planet, "rank_upkeep", 0.03) if resource == "Metals" else 1.0)
+	return organics_demand(planet)
 
 static func civilian_stock_access(planet: Dictionary, resource: String) -> float:
 	# Stock above the import target is reserved for trade and construction.
@@ -974,18 +964,10 @@ static func civilian_stock_access(planet: Dictionary, resource: String) -> float
 	var reserve: float = storage_capacity(planet) * threshold / 100.0
 	return minf(maxf(0.0, float(planet["stock"][resource])), reserve)
 
-static func construction_reserve(planet: Dictionary, resource: String) -> float:
-	# A shortage should not prevent saving for the next storage tier.
-	var tier: int = int(planet.get("warehouse_level", 0))
-	var next_cost: float = float(WAREHOUSE_COSTS[tier].get(resource, 0.0)) if tier < WAREHOUSE_COSTS.size() else 0.0
-	return minf(storage_capacity(planet), maxf(CONSTRUCTION_RESERVE, next_cost))
-
 static func net_rate(planet: Dictionary, resource: String) -> float:
 	var net: float = rate(planet, resource) - consumption(planet, resource)
 	if net > 0.0 and storage_free(planet, resource) <= EPS:
 		return 0.0
-	if net < 0.0 and resource != "Organics" and rate(planet, resource) > EPS and float(planet["stock"][resource]) < construction_reserve(planet, resource):
-		return rate(planet, resource) * CONSTRUCTION_PRODUCTION_SHARE
 	if net < 0.0 and civilian_stock_access(planet, resource) <= EPS:
 		return 0.0
 	return net
@@ -2031,20 +2013,16 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	p["farm_factor"] = 1.0 + FARM_VARIATION * sin(TAU * elapsed / FARM_CYCLE_SECONDS + float(p["farm_phase"]))
 	_update_population(p, dt)
 	p["demographic_rate"] = (float(p["population"]) - before_population) / maxf(EPS, dt)
-	# Residents consume Metals and Organics. Only net surplus can occupy
-	# free storage. At capacity production covers demand but stores no excess.
+	# Only Organics feed residents. Metals and Crystals accumulate up to
+	# storage capacity; food production can satisfy demand even at capacity.
 	# Refunds may temporarily exceed capacity; never destroy returned materials.
 	var capacity: float = storage_capacity(p)
-	var tier: int = int(p.get("warehouse_level", 0))
-	var next_costs: Dictionary = WAREHOUSE_COSTS[tier] if tier < WAREHOUSE_COSTS.size() else {}
 	for resource in ACTIVE_PRODUCTION:
 		var stored: float = float(p["stock"][resource])
 		var potential: float = rate(p, resource) * dt
 		var demand: float = consumption(p, resource) * dt
 		var reserve: float = capacity * float(p["thresholds"][resource]["min"]) / 100.0
 		var used: float = minf(demand, minf(maxf(0.0, stored), reserve) + potential)
-		if resource != "Organics" and potential > EPS and demand > potential and stored < minf(capacity, maxf(CONSTRUCTION_RESERVE, float(next_costs.get(resource, 0.0)))):
-			used = minf(used, potential * (1.0 - CONSTRUCTION_PRODUCTION_SHARE))
 		var produced: float = minf(potential, used + maxf(0.0, capacity - stored))
 		_record_flow(p, "Production", resource, produced)
 		var progress: Dictionary = objective_progress(state, int(p["owner"]))
@@ -7530,7 +7508,10 @@ static func _ai_turn(state: Dictionary, graph: Dictionary, player: int) -> void:
 					continue
 				if resource == "Metals" and abundance <= EPS:
 					continue
-				if rate(p, resource) - consumption(p, resource) >= 0.5:
+				var available_output: float = rate(p, resource)
+				if resource == "Organics":
+					available_output -= organics_demand(p)
+				if available_output >= 0.5:
 					continue
 				if int(p.get("buildings", {}).get(resource, 0)) >= 3:
 					continue
@@ -9019,7 +9000,7 @@ const REWARD_CATEGORIES = ["economic", "military", "tech"]
 const UNIQUE_CONQUEST_REWARDS = ["cloak", "shield_3", "warp_gate", "crystals"]
 const CONQUEST_REWARDS = {
 	"industry": ["Industrial Revolution", "Planet Metals production +50%", "", "economic", "Metals"],
-	"crystals": ["Crystalline Synthesis", "Planet Crystals production +100%", "Residents use 15% more Metals", "economic", "Crystals"],
+	"crystals": ["Crystalline Synthesis", "Planet Crystals production +100%", "", "economic", "Crystals"],
 	"agriculture": ["Agricultural Revolution", "Planet Organics production +50%", "", "economic", "Organics"],
 	"population": ["Population Boom", "Maximum planet population growth +50%", "", "general", "habitation"],
 	"storage": ["Megastructures", "Station storage +100%", "", "general", "warehouse"],
@@ -9036,7 +9017,6 @@ const CONQUEST_REWARDS = {
 	"rank_orbital": ["Orbital Agriculture", "Orbital Organics production +5% of base", "", "economic", "Organics"],
 	"rank_storage": ["Expanded Warehouses", "Station storage +5% of base", "", "general", "warehouse"],
 	"rank_housing": ["Habitat Engineering", "Planet housing +5% of base", "", "general", "habitation"],
-	"rank_upkeep": ["Material Efficiency", "Residents use less Metals", "", "general", "Metals"],
 	"rank_crystals": ["Incubator Research", "Planet Crystals production +5% of base", "", "tech", "Crystals"],
 	"rank_science": ["Scientific Fabrication", "Science Ships cost less Metals", "", "tech", "science_ship"],
 	"rank_civilian": ["Civilian Fabrication", "Civilian ships cost less Metals", "", "tech", "ship"],
