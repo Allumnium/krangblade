@@ -38,6 +38,7 @@ const BACKDROP = preload("res://scripts/space_background.gd")
 const PLANET = preload("res://assets/ui/planet.svg")
 const SFX = preload("res://scripts/match_sfx.gd")
 const MATCH_AUDIO_TRACKER = preload("res://scripts/match_audio_tracker.gd")
+const MATCH_DEVELOPER_TOOLS = preload("res://scripts/match_developer_tools.gd")
 const TACTICAL_ALERTS = preload("res://scripts/tactical_alerts.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
@@ -65,6 +66,7 @@ const STAR_TEXTURE_CORE: float = 74.0
 const STAR_SPARK_COUNT: int = 9
 
 var session: Node
+var developer_tools := MATCH_DEVELOPER_TOOLS.new()
 var settings := ConfigFile.new()
 var music_volume: float = 100.0
 var sfx_volume: float = 100.0
@@ -274,7 +276,6 @@ var global_population_label: Label
 var global_credit_label: Label
 var global_credit_income_label: Label
 var year_label: Label
-var time_buttons: Dictionary = {}
 var game_visual_clock: float = 0.0
 var transfer_visuals: Dictionary = {}
 var transfer_visual_seed: int = -1
@@ -301,11 +302,6 @@ var system_owner_label: Label
 var leave: Button
 var match_menu: AcceptDialog
 var codex: Window
-var dev_mode: bool = false
-var dev_speed_row: HBoxContainer
-var dev_console: Window
-var dev_console_output: TextEdit
-var dev_console_entry: LineEdit
 var match_result_dialog: AcceptDialog
 var match_result_shown: bool = false
 var defeated_shown: bool = false
@@ -314,6 +310,7 @@ var menu_exit: Button
 func _ready() -> void:
 	theme = HUD.create()
 	session = get_node("/root/GameSession")
+	developer_tools.session = session
 	session.connect("phase_changed", _refresh)
 	session.connect("status_changed", _refresh)
 	session.connect("economy_changed", _on_economy_changed)
@@ -328,7 +325,7 @@ func _ready() -> void:
 	session.connect("chat_changed", _sound_chat)
 	_build_ui()
 	if OS.is_debug_build():
-		_build_dev_console()
+		developer_tools.build_console(self, _button)
 	hotkeys.entries["focus"] = {"scope": "General", "title": "Focus selection", "default": KEY_F}
 	hotkeys.load_overrides(settings, command_card_ui)
 	_build_resource_hover()
@@ -640,7 +637,7 @@ func _build_command_deck() -> void:
 	var time_toolbar := HBoxContainer.new()
 	time_toolbar.alignment = BoxContainer.ALIGNMENT_BEGIN
 	time_panel.add_child(time_toolbar)
-	_build_time_controls(time_toolbar)
+	developer_tools.build_perf(self, time_toolbar, _button, _label)
 
 
 func _build_right_body() -> void:
@@ -910,8 +907,7 @@ func _layout_console() -> void:
 	# horizontal line. Camera framing still uses the unobstructed play area.
 	map_canvas.offset_bottom = -8.0
 	territory_view.layer.offset_bottom = map_canvas.offset_bottom
-	diagnostic_label.offset_bottom = -20.0 - height
-	diagnostic_label.offset_top = -44.0 - height
+	developer_tools.layout_perf(height)
 	# Symmetric wings occupy at most 48% of the deck together at the
 	# usual window sizes. The center receives all remaining width.
 	var wing_width: float = clampf(floorf((size.x - 28.0 - LENS_STRIP_WIDTH) * 0.24), 180.0, 320.0)
@@ -2836,55 +2832,6 @@ func _build_lens_buttons(parent: Container) -> void:
 	logistics_lens.focus_mode = Control.FOCUS_NONE
 	logistics_lens.tooltip_text = "Logistics lens · System resource storage"
 
-var diagnostic_label: Label
-var diagnostic_button: Button
-var diagnostic_elapsed: float = 0.0
-var diagnostic_last_bytes: int = -1
-var diagnostic_last_full_count: int = 0
-var diagnostic_last_motion_count: int = 0
-
-func _build_time_controls(parent: Container) -> void:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 2)
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	parent.add_child(row)
-	diagnostic_button = _button("Perf", func() -> void: diagnostic_label.visible = not diagnostic_label.visible, row)
-	diagnostic_button.custom_minimum_size.y = 23
-	diagnostic_button.focus_mode = Control.FOCUS_NONE
-	diagnostic_button.tooltip_text = "Toggle local performance diagnostics"
-	diagnostic_label = _label("", 11)
-	diagnostic_label.z_index = 5
-	add_child(diagnostic_label)
-	diagnostic_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	diagnostic_label.offset_left = -220
-	diagnostic_label.offset_right = 220
-	diagnostic_label.offset_top = -76
-	diagnostic_label.offset_bottom = -52
-	diagnostic_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	diagnostic_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	diagnostic_label.hide()
-
-func _set_time_speed(speed: int) -> void:
-	if not dev_mode or not OS.is_debug_build():
-		return
-	session.call("request_time_speed", speed)
-	_refresh_time_controls(_state())
-
-func _refresh_time_controls(state: Dictionary) -> void:
-	var current: int = int(state.get("time_speed", 1))
-	var can_change: bool = dev_mode and (bool(session.get("is_solo")) or multiplayer.is_server()) and str(session.get("phase")) == "match" and state.get("match_result", {}).is_empty()
-	for speed in time_buttons:
-		var button: Button = time_buttons[speed]
-		var active: bool = int(speed) == current
-		button.disabled = not can_change
-		button.set_pressed_no_signal(active)
-		# Keep the replicated speed visible even after the match ends.
-		if active:
-			button.add_theme_stylebox_override("disabled", button.get_theme_stylebox("pressed"))
-			button.add_theme_color_override("font_disabled_color", HUD.ACCENT)
-		else:
-			button.remove_theme_stylebox_override("disabled")
-			button.remove_theme_color_override("font_disabled_color")
 
 func _toggle_lens(kind: String) -> void:
 	_refresh()
@@ -3362,7 +3309,7 @@ func _refresh() -> void:
 	if is_instance_valid(empire_dialog) and empire_dialog.visible:
 		_refresh_empire(state)
 	_refresh_match_result(state)
-	_refresh_time_controls(state)
+	developer_tools.refresh_speed(state)
 	menu_exit.text = "Main menu" if bool(session.get("is_solo")) else ("Return to lobby" if multiplayer.is_server() else "Leave match")
 	if phase == "loading" and multiplayer.is_server():
 		menu_exit.text = "Cancel start"
@@ -5489,17 +5436,16 @@ func _close_match_chat() -> void:
 func _input(event: InputEvent) -> void:
 	if is_instance_valid(war_confirmation) and war_confirmation.visible:
 		return
-	if is_instance_valid(dev_console) and event is InputEventKey and event.pressed and not event.echo and str(session.get("phase")) == "match":
-		if _dev_console_toggle_key(event):
-			if dev_console.visible:
-				dev_console.hide()
+	if developer_tools.has_console() and event is InputEventKey and event.pressed and not event.echo and str(session.get("phase")) == "match":
+		if developer_tools.is_console_toggle_key(event):
+			if developer_tools.console_visible():
+				developer_tools.close_console()
 			elif not _dev_console_modal_open():
 				_close_match_chat()
-				dev_console.popup_centered(Vector2i(540, 280))
-				dev_console_entry.grab_focus()
+				developer_tools.open_console()
 			get_viewport().set_input_as_handled()
 			return
-		if dev_console.visible:
+		if developer_tools.console_visible():
 			return
 	if not event is InputEventKey or not event.pressed or event.echo or not is_instance_valid(match_chat_edit) or str(session.get("phase")) != "match":
 		return
@@ -5527,7 +5473,7 @@ func _input(event: InputEvent) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if is_instance_valid(war_confirmation) and war_confirmation.visible:
 		return
-	if is_instance_valid(dev_console) and dev_console.visible:
+	if developer_tools.console_visible():
 		return
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
@@ -5664,7 +5610,7 @@ func _select_all_military() -> void:
 func _keyboard_pan(delta: float) -> void:
 	if is_instance_valid(war_confirmation) and war_confirmation.visible:
 		return
-	if is_instance_valid(dev_console) and dev_console.visible:
+	if developer_tools.console_visible():
 		return
 	if str(session.get("phase")) != "match" or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible):
 		return
@@ -5693,7 +5639,7 @@ func _keyboard_pan(delta: float) -> void:
 
 func _sync_match_mouse_mode() -> void:
 	var active: bool = str(session.get("phase")) == "match" and get_window().has_focus()
-	var modal: bool = (is_instance_valid(dev_console) and dev_console.visible) or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible)
+	var modal: bool = (developer_tools.console_visible()) or match_menu.visible or (is_instance_valid(codex) and codex.visible) or (is_instance_valid(match_result_dialog) and match_result_dialog.visible)
 	var target: Input.MouseMode = Input.MOUSE_MODE_CONFINED if active and not modal else Input.MOUSE_MODE_VISIBLE
 	if Input.mouse_mode != target:
 		Input.mouse_mode = target
@@ -5718,37 +5664,7 @@ func _process(delta: float) -> void:
 	_keyboard_pan(delta)
 	_update_resource_hover()
 	command_card_ui.refresh_info(get_viewport())
-	if is_instance_valid(diagnostic_label):
-		diagnostic_elapsed += delta
-		if diagnostic_elapsed >= 1.0:
-			var authority: bool = bool(session.get("is_solo")) or multiplayer.is_server()
-			var bytes: int = int(session.get("diagnostic_sent_bytes" if authority else "diagnostic_received_bytes"))
-			var throughput: float = float(maxi(0, bytes - diagnostic_last_bytes)) / diagnostic_elapsed / 1024.0 if diagnostic_last_bytes >= 0 else 0.0
-			diagnostic_last_bytes = bytes
-			if diagnostic_label.visible:
-				var timing: String = " · sim %.2f ms · encode %.2f ms" % [float(session.get("diagnostic_sim_ms")), float(session.get("diagnostic_encode_ms"))] if authority else ""
-				var net: Dictionary = session.call("network_diagnostics")
-				if not net.is_empty():
-					timing += " · %.0f ms RTT · %.1f%% reliable loss" % [float(net["ping"]), float(net["loss"])]
-				if not authority:
-					var now: int = Time.get_ticks_msec()
-					var last_full: int = int(session.get("diagnostic_last_full_ms"))
-					var last_motion: int = int(session.get("diagnostic_last_motion_ms"))
-					var full_count: int = int(session.get("diagnostic_full_received"))
-					var motion_count: int = int(session.get("diagnostic_motion_received"))
-					timing += " · decode %.2f ms · state %.1f Hz / %s · motion %.1f Hz / %s" % [float(session.get("diagnostic_decode_ms")), float(maxi(0, full_count - diagnostic_last_full_count)) / diagnostic_elapsed, "%d ms" % (now - last_full) if last_full >= 0 else "—", float(maxi(0, motion_count - diagnostic_last_motion_count)) / diagnostic_elapsed, "%d ms" % (now - last_motion) if last_motion >= 0 else "—"]
-					diagnostic_last_full_count = full_count
-					diagnostic_last_motion_count = motion_count
-				var phases: Dictionary = session.get("diagnostic_sim_phases") if authority else {}
-				var ranked: Array = phases.keys()
-				ranked.sort_custom(func(a: String, b: String) -> bool: return int(phases[a]) > int(phases[b]))
-				var summary: PackedStringArray = []
-				for stage in ranked:
-					summary.append("%s %.1fms" % [stage, float(phases[stage]) / 1000.0])
-				var hotspot: String = (" · " + summary[0]) if not summary.is_empty() else ""
-				diagnostic_label.text = "%d FPS%s%s · %.1f KiB snapshot · %.1f KiB/s payload" % [Engine.get_frames_per_second(), timing, hotspot, float(session.get("diagnostic_snapshot_bytes")) / 1024.0, throughput]
-				diagnostic_button.tooltip_text = "Toggle local performance diagnostics\n" + "\n".join(summary)
-			diagnostic_elapsed = 0.0
+	developer_tools.update_perf(delta)
 	visual_clock += delta
 	for kind in ECONOMY.SHIP_KINDS:
 		if yard_commands.has(kind):
@@ -8131,88 +8047,3 @@ func _dev_console_modal_open() -> bool:
 			return true
 	return false
 
-func _dev_console_toggle_key(event: InputEventKey) -> bool:
-	return event.physical_keycode == KEY_QUOTELEFT or event.keycode in [KEY_QUOTELEFT, KEY_ASCIITILDE]
-
-func _build_dev_console() -> void:
-	dev_console = Window.new()
-	dev_console.title = "Development console"
-	dev_console.theme = theme
-	dev_console.transient = true
-	dev_console.exclusive = true
-	dev_console.unresizable = true
-	dev_console.visible = false
-	add_child(dev_console)
-	dev_console.close_requested.connect(dev_console.hide)
-	dev_console.window_input.connect(_dev_console_window_input)
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.add_theme_stylebox_override("panel", HUD.surface(Color("#0c1928"), Color("#45617b"), 8, 4))
-	dev_console.add_child(panel)
-	var content := VBoxContainer.new()
-	panel.add_child(content)
-	dev_console_output = TextEdit.new()
-	dev_console_output.editable = false
-	dev_console_output.focus_mode = Control.FOCUS_NONE
-	dev_console_output.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	dev_console_output.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	content.add_child(dev_console_output)
-	dev_console_entry = LineEdit.new()
-	dev_console_entry.placeholder_text = "Enter command (help for commands)"
-	content.add_child(dev_console_entry)
-	dev_speed_row = HBoxContainer.new()
-	content.add_child(dev_speed_row)
-	for speed in [0, 1, 2, 5]:
-		var label: String = "Ⅱ" if speed == 0 else "%d×" % speed
-		var button: Button = _button(label, _set_time_speed.bind(int(speed)), dev_speed_row)
-		button.toggle_mode = true
-		button.focus_mode = Control.FOCUS_NONE
-		button.custom_minimum_size = Vector2(26, 23)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		time_buttons[speed] = button
-	dev_speed_row.hide()
-	dev_console_entry.text_submitted.connect(_dev_console_submit)
-	_dev_console_print("Development console — type /devmode to expose developer controls. Type help for commands.")
-
-func _dev_console_window_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and (_dev_console_toggle_key(event) or event.keycode == KEY_ESCAPE):
-		dev_console.set_input_as_handled()
-		dev_console.hide()
-
-func _dev_console_print(value: String) -> void:
-	var output: String = dev_console_output.text + ("\n" if not dev_console_output.text.is_empty() else "") + value
-	dev_console_output.text = output.right(12000)
-	dev_console_output.set_caret_line(dev_console_output.get_line_count() - 1)
-	dev_console_output.scroll_vertical = dev_console_output.get_line_count()
-
-func _dev_console_submit(raw: String) -> void:
-	dev_console_entry.clear()
-	var words: PackedStringArray = raw.strip_edges().split(" ", false)
-	if words.is_empty() or not OS.is_debug_build():
-		return
-	_dev_console_print("> " + raw)
-	match words[0].to_lower():
-		"/devmode":
-			dev_mode = not dev_mode
-			dev_speed_row.visible = dev_mode
-			_refresh_time_controls(_state())
-			_dev_console_print("Developer controls enabled." if dev_mode else "Developer controls hidden.")
-		"help":
-			_dev_console_print("help · clear · status · /devmode" + (" · speed <0|1|2|5> (host/solo)" if dev_mode else ""))
-		"clear":
-			dev_console_output.clear()
-		"status":
-			var state: Dictionary = session.get("economy")
-			_dev_console_print("Ships: %d | Speed: %dx | Elapsed years: %.1f" % [state.get("ships", []).size(), int(state.get("time_speed", 1)), float(state.get("elapsed", 0.0))])
-		"speed":
-			if not dev_mode:
-				_dev_console_print("Enable /devmode first.")
-			elif not bool(session.get("is_solo")) and not multiplayer.is_server():
-				_dev_console_print("Only the host can change simulation speed here.")
-			elif words.size() != 2 or not words[1].is_valid_int() or int(words[1]) not in [0, 1, 2, 5]:
-				_dev_console_print("Usage: speed <0|1|2|5>")
-			else:
-				session.call("request_time_speed", int(words[1]))
-				_dev_console_print("Speed request: %sx" % words[1])
-		_:
-			_dev_console_print("Unknown command. Type help.")
