@@ -3817,6 +3817,13 @@ func _test_resource_handoff() -> void:
 	var depot_direction: Vector2 = rock.direction_to(ECON.station_position(rendezvous, 0, float(rendezvous["elapsed"])))
 	assert(absf(depot_direction.cross((berth - rock).normalized())) < 0.001 and depot_direction.dot(berth - rock) > 0.0)
 	assert(ECON._stage_worker_field(worker, 1) == 0 and ECON._stage_worker_field(worker, 2) == -1)
+	assert(ECON._mining_idle_limit(10000.0, 10.0) > ECON._mining_idle_limit(100.0, 10.0))
+	assert(ECON._mining_idle_limit(10000.0, 95.0) < ECON._mining_idle_limit(10000.0, 10.0))
+	assert(ECON._mining_idle_limit(1000000.0, 10.0) <= ECON.RESOURCE_MAX_IDLE_YEARS)
+	assert(ECON._mining_rendezvous_eta(rock, berth, berth) < ECON._mining_rendezvous_eta(rock, berth + Vector2.RIGHT * 2000.0, berth))
+	var loaded_worker: Dictionary = worker.duplicate(true)
+	loaded_worker["cargo"]["Metals"] = ECON.MINER_CAPACITY
+	assert(ECON._mining_pickup_eta(loaded_worker, berth, berth) < ECON._mining_pickup_eta(worker, berth, berth))
 	assert(ECON._stage_freighter_limit(0, 1000.0) == 0)
 	assert(ECON._stage_freighter_limit(10, 1000.0) > ECON._stage_freighter_limit(1, 1000.0))
 	assert(ECON._stage_freighter_limit(10, 10000.0) >= ECON._stage_freighter_limit(10, 1000.0))
@@ -3840,6 +3847,20 @@ func _test_resource_handoff() -> void:
 	worker["last_mining_field"] = 0
 	worker["cargo"]["Metals"] = 1.0
 	assert(ECON._stage_worker_field(worker, 1) == 0)
+	helper["resource_stage"] = {"node": 2, "anchor": 0, "point": berth + (berth - rock).normalized() * 100.0, "queue_rank": 0}
+	helper["position"] = helper["resource_stage"]["point"]
+	helper["trade_auto"] = true
+	var indexed: Dictionary = {1: {}}
+	ECON._spatial_insert(indexed[1], helper["position"], ECON.MINING_RENDEZVOUS_RANGE, helper)
+	var committed: Dictionary = {}
+	var worker_start: Vector2 = worker["position"]
+	assert(ECON._work_miner_rendezvous(rendezvous, rendezvous_graph, worker, ECON.planet_teams(rendezvous), {}, ECON._salvage_threats(rendezvous, rendezvous_graph), indexed, committed, 1.0))
+	assert((worker["position"] as Vector2).distance_to(helper["position"]) < worker_start.distance_to(helper["position"]))
+	assert(is_equal_approx(float(worker["cargo"]["Metals"]), 1.0) and is_equal_approx(float(committed[9831]), 1.0))
+	helper["cargo"]["Metals"] = ECON.CARGO_CAPACITY
+	assert(not ECON._work_miner_rendezvous(rendezvous, rendezvous_graph, worker, ECON.planet_teams(rendezvous), {}, ECON._salvage_threats(rendezvous, rendezvous_graph), indexed, {}, 1.0))
+	helper["cargo"]["Metals"] = 0.0
+	helper.erase("resource_stage")
 	worker["position"] = Vector2(1000, 1000)
 	assert(ECON._stage_worker_field(worker, 1) == -1)
 	var staging_map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}

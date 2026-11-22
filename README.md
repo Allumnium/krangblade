@@ -1,5 +1,7 @@
 # Warbound — star-system strategy RTS
 
+Mining logistics (v0.96.1): autonomous Freighters evaluate worker readiness, collection and depot travel time; loaded Harvesters seek nearby eligible Freighter rendezvous when faster than direct delivery. Existing physical transfer and internal mining-pool allocation remain.
+
 Map terrain (v0.96.0): individual asteroids are rendered, selectable and navigable independently; invisible generation pools remain for mining allocation. Non-Harvesters avoid nearby rock disks through a cached spatial index and swept step checks. Rock positions stay fixed with visual rotation; pulsars retain their exclusion disks.
 
 Current economy (v0.94.18): residents consume Organics only. Metals and Crystals are for construction and trade, with no population drain. Material Efficiency is retired and Crystalline Synthesis has no civilian upkeep penalty. Select a discovered neutral system and press C (Colonize) to dispatch a Colony. Later version notes supersede historical mechanics below.
