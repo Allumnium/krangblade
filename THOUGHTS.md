@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.89.32: Extract combat laser/blaster drawing, seeded destruction effects and cargo transfer animation history into world_effects.gd. Keep target/anchor queries, clocks and draw/flush order in match; preserve existing effect caps, seed reset, lazy scale queries after early exits and pose-direction update for miners. Static source parity checked; Godot import/parser, visual, peers and fleet benchmarks pending. No gameplay or Codex changes.
+
 - v0.89.31: Extract celestial geometry/spacing and surface caches, planet detail fades, predicted orbital clock, star/planet/PDS art and asteroid mesh building into celestial_view.gd. Preserve seed invalidation, frame mesh retention, shared geometry for targeting/picking, projection formulas and draw order; match retains field/system visibility, overlays and production delivery choreography. Reverse-substitution static parity checked; no simulation/Codex changes. Godot unavailable locally; import, parse, visual, fleet benchmarks and peers pending.
 
 - v0.89.30: Extract GPU MultiMesh instance queues/nodes, shader creation, texture and extent caches, capacity growth and buffer packing into world_render_batches.gd. Preserve node creation order, z-indices, per-frame reset, world flush before cargo transfers/formation and indicator flush afterward. Original method bodies and shader strings checked by reverse substitution; unchanged game rules/Codex. Godot import, parse, visuals, fleet benchmarks and peers pending; do not claim a performance improvement from extraction alone.
