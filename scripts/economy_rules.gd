@@ -5817,7 +5817,10 @@ static func _order_follow(state: Dictionary, player: int, ids: Array, order: Dic
 	if units.is_empty() or units.any(func(ship: Dictionary) -> bool: return not _valid_follow_target(state, ship, target, refs)):
 		return false
 	for ship in units:
-		_reset_unit_for_order(ship)
+		# Follow deliberately keeps any tactical order, so skip _reset_unit_for_order.
+		_cancel_salvage_order(ship)
+		_clear_local_hold(ship)
+		_interrupt_work(ship)
 		_set_unit_order(state, ship, order.duplicate(true))
 		# Retain an in-flight lane until the follow worker replans it.
 		ship["dest"] = -1
