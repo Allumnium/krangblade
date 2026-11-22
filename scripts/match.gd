@@ -5279,4 +5279,3 @@ func _dev_console_modal_open() -> bool:
 		if is_instance_valid(dialog) and dialog.visible:
 			return true
 	return false
-
