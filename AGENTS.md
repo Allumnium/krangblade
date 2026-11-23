@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.36: Extract base construction recipes, nominal work estimates and pending-job lookup into stateless construction_queries.gd behind EconomyRules wrappers, passing canonical multipliers/cost tables explicitly. All discounts, crew/GC reservation, queue validation and mutation remain authoritative in EconomyRules. Add isolated recipe assertions to manual CI and architecture index. Runtime/determinism and ENet pending.
+
 **Start here:** [ARCHITECTURE.md](ARCHITECTURE.md) describes ownership, simulation phase order, schema/cache lifetimes, test entry points and the finite cleanup exit criteria. Use it as the navigation index; the versioned notes below remain historical context and are not blanket authorization for new features.
 
 - v0.97.35: Add a concise architecture and state-ownership guide, a bounded cleanup checklist with acceptance gates and explicit deferred work, and an AGENTS navigation link. Preserve historical standing instructions; only the documentation/version changed.

@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.36: Extract base construction recipes, nominal work estimates and pending-job lookup into stateless construction_queries.gd behind EconomyRules wrappers, passing canonical multipliers/cost tables explicitly. All discounts, crew/GC reservation, queue validation and mutation remain authoritative in EconomyRules. Add isolated recipe assertions to manual CI and architecture index. Runtime/determinism and ENet pending.
+
 - v0.97.35: Add a concise architecture and state-ownership guide, a bounded cleanup checklist with acceptance gates and explicit deferred work, and an AGENTS navigation link. Preserve historical standing instructions; only the documentation/version changed.
 
 - v0.97.34: Replace all 59 direct match.gd calls to 16 underscore-prefixed EconomyRules helpers with named public query wrappers. Internal simulation helpers, argument signatures, validation and behavior remain unchanged. Add a static CI guard preventing new underscore-prefixed EconomyRules calls from match.gd. Gameplay/parser and multiplayer tests pending.

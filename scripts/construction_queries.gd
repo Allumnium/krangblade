@@ -1,0 +1,59 @@
+extends RefCounted
+## Stateless base construction recipes and nominal work. EconomyRules owns
+## discounts, staffing, credit reservations, queue admission and all mutations.
+
+static func base_work(kind: String, level: int) -> float:
+	match kind:
+		"ship": return 48.0
+		"colony_ship": return 102.0
+		"fighter": return 36.0
+		"miner": return 60.0
+		"science_ship": return 90.0
+		"scout": return 12.0
+		"cruiser": return 90.0
+		"destroyer": return 180.0
+		"yard": return 30.0
+		"pds": return 36.0
+		"dyson_sphere": return 300.0
+		"reinforced_plating", "laser_matrix": return 60.0
+		"yard_upgrade": return 15.0 * level
+		"production": return 10.0 * level
+		"warehouse": return 10.0 + 10.0 * level
+		"habitation": return 12.0 + 12.0 * level
+		"orbital_housing": return 30.0
+	return 1.0
+
+static func base_cost(kind: String, level: int, crystal_multiplier: float, upgrade_factor: float, warehouse_costs: Array, orbital_housing_cost: Dictionary) -> Dictionary:
+	# Explicit prototype values; the final costs/recipes are intentionally undefined.
+	match kind:
+		"ship": return {"Metals": 360.0, "Organics": 15.0}
+		"colony_ship": return {"Metals": 1200.0, "Organics": 30.0}
+		"fighter": return {"Metals": 270.0, "Organics": 10.0}
+		"miner": return {"Metals": 540.0, "Organics": 20.0}
+		"science_ship": return {"Metals": 900.0, "Organics": 30.0}
+		"scout": return {"Metals": 120.0, "Organics": 4.0}
+		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0 * crystal_multiplier}
+		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0 * crystal_multiplier}
+		"yard":
+			match level:
+				1: return {"Metals": 480.0}
+				2: return {"Metals": 2000.0, "Organics": 200.0, "Crystals": 200.0 * crystal_multiplier}
+				3: return {"Metals": 6000.0, "Organics": 600.0, "Crystals": 600.0 * crystal_multiplier}
+		"pds": return {"Metals": 540.0, "Organics": 60.0, "Crystals": 60.0 * crystal_multiplier}
+		"dyson_sphere": return {"Metals": 20000.0, "Crystals": 10000.0}
+		"reinforced_plating": return {"Metals": 4000.0}
+		"laser_matrix": return {"Metals": 2500.0, "Crystals": 800.0 * crystal_multiplier}
+		"yard_upgrade": return {"Metals": 240.0 * pow(upgrade_factor, float(maxi(0, level - 1)))}
+		"production": return {"Metals": 200.0 * pow(upgrade_factor, float(maxi(0, level - 1)))}
+		"warehouse": return warehouse_costs[level - 1].duplicate()
+		"habitation":
+			var factor: float = pow(3.0, level - 1)
+			return {"Metals": 600.0 * factor}
+		"orbital_housing": return orbital_housing_cost.duplicate()
+	return {}
+
+static func has_queued_job(planet: Dictionary, kind: String, target: String) -> bool:
+	for item in planet["queue"]:
+		if item["kind"] == kind and item["target"] == target:
+			return true
+	return false

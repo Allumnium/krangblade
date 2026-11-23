@@ -148,6 +148,8 @@ jobs:
         run: godot --headless --path . --script res://tests/snapshot_codec_test.gd
       - name: Enforce public simulation rule calls from match UI
         run: python3 tools/check_ui_rule_boundaries.py
+      - name: Pure base construction recipes
+        run: godot --headless --path . --script res://tests/construction_queries_test.gd
       - name: Lobby and territory rules
         run: |
           set -o pipefail
