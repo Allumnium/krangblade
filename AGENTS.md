@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.29: Behavior-preserving splits of _build_combat_frame, _fire_hull_lasers, _resolve_ship_contacts, create and _finish into focused helpers. Determinism probe identical; economy suite 0 failures; parser clean. Runtime/ENet not rerun.
+
 - v0.97.28: Behavior-preserving splits in economy_rules.gd: pirate decisions (group gathering, retreat, patrol, assignment), AI diplomacy choice (peace scoring, third-party pressure), local rock route planning (grid, start, goal, compaction), mining field choice (assignment validation, chunk search, target assignment) and continuous repeat refill (queue state, cycle refresh, station repeat). Economy suite 0 failures, determinism probe identical; no gameplay change.
 
 - v0.97.27: Fix Follow never arriving at large map coordinates (pre-existing since v0.51.2): float32 position rounding left followers stalled exactly at standoff reach, so follow_arrived and queued successors never triggered. Follow arrival now accepts a 0.5-unit tolerance. Regression sweeps 32 approach angles at far coordinates (8 stalls before, 0 after). Economy suite 0 failures, determinism probe identical, solo/ENet smoke pass.

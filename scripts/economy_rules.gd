@@ -215,38 +215,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 	for id in ordered:
 		teams[id] = int(players[id]["team"])
 	for i in range((map_data["points"] as Array).size()):
-		var stock: Dictionary = empty_stock()
-		var levels: Dictionary = empty_stock()
-		var abundance: Dictionary = {}
-		var bonuses: Dictionary = {"Organics": 1.0, "Crystals": 1.0}
-		for resource in ["Organics", "Crystals"]:
-			if rng.randf() < 0.5:
-				bonuses[resource] = rng.randf_range(1.1, 1.8)
-		var thresholds: Dictionary = {}
-		for resource in RESOURCES:
-			thresholds[resource] = {"min": DEFAULT_IMPORT_PERCENT, "max": DEFAULT_EXPORT_PERCENT}
-		for resource in EXTRACTED:
-			abundance[resource] = 0.1 if rng.randf() < 0.35 else rng.randf_range(0.5, 4.0)
-		var home: bool = i < ordered.size()
-		var owner: int = ordered[i] if home else 0
-		var yards: Array = []
-		if home:
-			# Bootstrap values are test data, not final economy balance.
-			abundance["Metals"] = maxf(1.0, float(abundance["Metals"]))
-			for resource in RESOURCES:
-				if resource != "Crystals":
-					levels[resource] = 1
-			stock = STARTING_STOCK.duplicate()
-			yards.append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1})
-		var richness: float = 0.0
-		for resource in EXTRACTED:
-			richness += float(abundance[resource])
-		richness += float(bonuses["Organics"]) - 1.0
-		# Environment is generated separately, not inferred from size or deposits.
-		var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
-		planets.append({"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION + ORBITAL_HOUSING_POPULATION if home else 0.0, "eco_population": ORBITAL_HOUSING_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
-			"abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
-			"station": {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()]} if home else {}, "yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {0: _new_pds()} if home else {}})
+		planets.append(_generate_system(rng, i, ordered))
 	var ai_players: Array[int] = []
 	for id in ordered:
 		if bool(players[id].get("ai", false)):
@@ -263,19 +232,62 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 			system["bonuses"]["Crystals"] = 1.0
 		planets[index]["planet_count"] = system_bodies(planets[index], int(map_data["seed"]), index).size()
 	if starting_fleet:
-		for index in range(ordered.size()):
-			var slot: int = 0
-			for kind in ["miner", "miner", "miner", "fighter", "fighter", "ship"]:
-				var id: int = int(state["next_id"])
-				state["next_id"] = id + 1
-				var offset: Vector2 = Vector2.from_angle(float(index) * 2.399963 + float(slot) * TAU / 6.0) * (SHIP_CLEARANCE * 1.8)
-				_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind], "spawn_offset": offset, "starting_fleet": true})
-				slot += 1
+		_spawn_starting_fleets(state, planets, ordered)
 	var credits: Dictionary = {}
 	for id in ordered:
 		credits[id] = STARTING_GC
 	state["galactic_credits"] = credits
 	state["starting_empires"] = ordered.duplicate()
+	state["starting_survey"] = _starting_survey_regions(map_data, planets, ordered)
+	_seed_starting_exploration(state)
+	update_exploration(state)
+	return state
+
+static func _generate_system(rng: RandomNumberGenerator, i: int, ordered: Array[int]) -> Dictionary:
+	var stock: Dictionary = empty_stock()
+	var levels: Dictionary = empty_stock()
+	var abundance: Dictionary = {}
+	var bonuses: Dictionary = {"Organics": 1.0, "Crystals": 1.0}
+	for resource in ["Organics", "Crystals"]:
+		if rng.randf() < 0.5:
+			bonuses[resource] = rng.randf_range(1.1, 1.8)
+	var thresholds: Dictionary = {}
+	for resource in RESOURCES:
+		thresholds[resource] = {"min": DEFAULT_IMPORT_PERCENT, "max": DEFAULT_EXPORT_PERCENT}
+	for resource in EXTRACTED:
+		abundance[resource] = 0.1 if rng.randf() < 0.35 else rng.randf_range(0.5, 4.0)
+	var home: bool = i < ordered.size()
+	var owner: int = ordered[i] if home else 0
+	var yards: Array = []
+	if home:
+		# Bootstrap values are test data, not final economy balance.
+		abundance["Metals"] = maxf(1.0, float(abundance["Metals"]))
+		for resource in RESOURCES:
+			if resource != "Crystals":
+				levels[resource] = 1
+		stock = STARTING_STOCK.duplicate()
+		yards.append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1})
+	var richness: float = 0.0
+	for resource in EXTRACTED:
+		richness += float(abundance[resource])
+	richness += float(bonuses["Organics"]) - 1.0
+	# Environment is generated separately, not inferred from size or deposits.
+	var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
+	return {"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION + ORBITAL_HOUSING_POPULATION if home else 0.0, "eco_population": ORBITAL_HOUSING_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
+		"abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
+		"station": {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()]} if home else {}, "yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {0: _new_pds()} if home else {}}
+
+static func _spawn_starting_fleets(state: Dictionary, planets: Array, ordered: Array[int]) -> void:
+	for index in range(ordered.size()):
+		var slot: int = 0
+		for kind in ["miner", "miner", "miner", "fighter", "fighter", "ship"]:
+			var id: int = int(state["next_id"])
+			state["next_id"] = id + 1
+			var offset: Vector2 = Vector2.from_angle(float(index) * 2.399963 + float(slot) * TAU / 6.0) * (SHIP_CLEARANCE * 1.8)
+			_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind], "spawn_offset": offset, "starting_fleet": true})
+			slot += 1
+
+static func _starting_survey_regions(map_data: Dictionary, planets: Array, ordered: Array[int]) -> Array:
 	var survey_regions: Array = []
 	var base_radius: float = sector_base_radius(map_data)
 	for index in range(ordered.size()):
@@ -284,10 +296,7 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 		var peak: float = lerpf(0.88, 1.65, development) * 64.0
 		var claim_radius: float = territory_kernel_reach(base_radius, weight) * sqrt(1.0 - sqrt(19.0 / peak))
 		survey_regions.append({"owner": ordered[index], "center": map_data["points"][index], "radius": claim_radius * 3.0})
-	state["starting_survey"] = survey_regions
-	_seed_starting_exploration(state)
-	update_exploration(state)
-	return state
+	return survey_regions
 
 # Client presentation vision is separate from strategic route discovery.
 const VISION_CELL: float = 80.0
@@ -2158,41 +2167,47 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			if int(item["level"]) >= MAX_SHIPYARD_LEVEL:
 				p["continuous"]["yard_upgrade:" + str(item["target"])] = false
 		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer":
-			var launch: Vector2 = station_position(state, index, float(state["elapsed"]))
-			var rally: Dictionary = {}
-			for slot in range(p["yards"].size()):
-				if int(p["yards"][slot]["job"]) == int(item["id"]):
-					launch = shipyard_position(state, index, slot, float(state["elapsed"]))
-					rally = p["yards"][slot].get("rally", {})
-					break
-			launch = _free_launch_position(state, index, launch, launch + (item.get("spawn_offset", Vector2.ZERO) as Vector2), int(item["id"]))
-			state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
-				"position": launch, "heading": Vector2.UP, "navigation_target": launch,
-				"route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": ship_max_hp(str(item["kind"])), "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
-			if is_same(state, _indexed_state):
-				_hulls_by_id[int(item["id"])] = state["ships"].back()
-			_launch_to_rally(state, state["ships"].back(), rally)
+			_launch_finished_hull(state, index, p, item)
 			if not bool(item.get("starting_fleet", false)):
-				var progress: Dictionary = objective_progress(state, int(p["owner"]))
-				if item["kind"] == "colony_ship":
-					progress["colony_ships_built"] = int(progress.get("colony_ships_built", 0)) + 1
-				elif military_hull(str(item["kind"])):
-					progress["military_built"] = int(progress.get("military_built", 0)) + 1
-					progress["military_investment"] = float(progress.get("military_investment", 0.0)) + float(_cost(str(item["kind"]), 1).get("Metals", 0.0))
-					if item["kind"] in ["cruiser", "destroyer"]:
-						progress["capital_built"] = int(progress.get("capital_built", 0)) + 1
-					elif item["kind"] == "fighter":
-						progress["fighters_built"] = int(progress.get("fighters_built", 0)) + 1
-				elif item["kind"] == "science_ship":
-					progress["science_built"] = int(progress.get("science_built", 0)) + 1
-				elif item["kind"] in ["miner", "ship"]:
-					progress["logistics_built"] = int(progress.get("logistics_built", 0)) + 1
+				_record_hull_built(state, int(p["owner"]), str(item["kind"]))
 	if not SHIP_KINDS.has(item["kind"]) and int(p["owner"]) > 0:
 		var progress: Dictionary = objective_progress(state, int(p["owner"]))
 		progress["infrastructure_built"] = int(progress.get("infrastructure_built", 0)) + 1
 		if item["kind"] == "yard_upgrade" and int(item["level"]) == 2:
 			progress["medium_shipyards_completed"] = int(progress.get("medium_shipyards_completed", 0)) + 1
 	p["queue"].erase(item)
+
+static func _launch_finished_hull(state: Dictionary, index: int, p: Dictionary, item: Dictionary) -> void:
+	var launch: Vector2 = station_position(state, index, float(state["elapsed"]))
+	var rally: Dictionary = {}
+	for slot in range(p["yards"].size()):
+		if int(p["yards"][slot]["job"]) == int(item["id"]):
+			launch = shipyard_position(state, index, slot, float(state["elapsed"]))
+			rally = p["yards"][slot].get("rally", {})
+			break
+	launch = _free_launch_position(state, index, launch, launch + (item.get("spawn_offset", Vector2.ZERO) as Vector2), int(item["id"]))
+	state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
+		"position": launch, "heading": Vector2.UP, "navigation_target": launch,
+		"route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": ship_max_hp(str(item["kind"])), "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
+	if is_same(state, _indexed_state):
+		_hulls_by_id[int(item["id"])] = state["ships"].back()
+	_launch_to_rally(state, state["ships"].back(), rally)
+
+static func _record_hull_built(state: Dictionary, owner: int, kind: String) -> void:
+	var progress: Dictionary = objective_progress(state, owner)
+	if kind == "colony_ship":
+		progress["colony_ships_built"] = int(progress.get("colony_ships_built", 0)) + 1
+	elif military_hull(kind):
+		progress["military_built"] = int(progress.get("military_built", 0)) + 1
+		progress["military_investment"] = float(progress.get("military_investment", 0.0)) + float(_cost(kind, 1).get("Metals", 0.0))
+		if kind in ["cruiser", "destroyer"]:
+			progress["capital_built"] = int(progress.get("capital_built", 0)) + 1
+		elif kind == "fighter":
+			progress["fighters_built"] = int(progress.get("fighters_built", 0)) + 1
+	elif kind == "science_ship":
+		progress["science_built"] = int(progress.get("science_built", 0)) + 1
+	elif kind in ["miner", "ship"]:
+		progress["logistics_built"] = int(progress.get("logistics_built", 0)) + 1
 
 static func cargo_bay_count(kind: String) -> int:
 	return FREIGHTER_BAY_COUNT if kind == "ship" else (2 if kind == "miner" else (5 if kind == "colony_ship" else 1))
@@ -7510,8 +7525,31 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 		cells[combat_cell].append(ship)
 	threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells, "positions": threat_positions, "teams": threat_teams, "ids": threat_ids}
 	threat_index["count"] = threat_count
+	var frame := COMBAT_FRAME.new()
+	frame.positions = positions
+	frame.by_id = by_id
+	frame.team_by_id = team_by_id
+	frame.health = health
+	frame.hull_slots = hull_slots
+	frame.hull_positions = hull_positions
+	frame.hull_health = hull_health
+	frame.hull_teams = hull_teams
+	frame.previous_targets = previous_targets
+	frame.ship_sectors = ship_sectors
+	frame.cells = cells
+	frame.sectors = sectors
+	frame.sector_teams = sector_teams
+	_index_combat_structures(state, frame)
+	return frame
+
+# Stations and shipyards share the frozen combat maps with hulls.
+static func _index_combat_structures(state: Dictionary, frame: COMBAT_FRAME) -> void:
 	var yard_targets: Dictionary = {}
 	var station_targets: Dictionary = {}
+	var positions: Dictionary = frame.positions
+	var health: Dictionary = frame.health
+	var team_by_id: Dictionary = frame.team_by_id
+	var cells: Dictionary = frame.cells
 	var system_count: int = (state["planets"] as Array).size()
 	for index in range(system_count):
 		var system: Dictionary = state["planets"][index]
@@ -7531,23 +7569,8 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 			positions[target_id] = pos
 			team_by_id[target_id] = _combat_group(state, int(system["owner"]))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "shipyard"})
-	var frame := COMBAT_FRAME.new()
-	frame.positions = positions
-	frame.by_id = by_id
-	frame.team_by_id = team_by_id
-	frame.health = health
 	frame.yard_targets = yard_targets
 	frame.station_targets = station_targets
-	frame.hull_slots = hull_slots
-	frame.hull_positions = hull_positions
-	frame.hull_health = hull_health
-	frame.hull_teams = hull_teams
-	frame.previous_targets = previous_targets
-	frame.ship_sectors = ship_sectors
-	frame.cells = cells
-	frame.sectors = sectors
-	frame.sector_teams = sector_teams
-	return frame
 
 # Weapon selection for one hull. Writes only that hull's combat fields and the
 # shared damage accumulators; never mutates another hull or the frame snapshot.
@@ -7666,57 +7689,16 @@ static func _fire_hull_lasers(state: Dictionary, frame: COMBAT_FRAME, ship: Dict
 	if moving_only or bool(ship.get("holding", false)) or (guard_node >= 0 and (ship_sectors[hull_slot] != guard_node or frame.sector_of(pursuit) != guard_node)):
 		pursuit = -1
 	if pursuit >= 0:
-		if ship_sectors[hull_slot] >= 0 and frame.sector_of(pursuit) == ship_sectors[hull_slot]:
-			remaining = PURSUIT_YEARS
-		if not by_id.has(pursuit) or not _combat_groups_hostile(state, team, _combat_group(state, int(by_id[pursuit]["owner"]))) or team == 0 or not ship_visible_to_team(state, by_id[pursuit], team):
-			pursuit = -1
-		elif remaining <= EPS:
-			# Do not immediately restart a timed-out chase while the same
-			# escaping hull is still in range. A fresh contact may engage.
-			blocked[pursuit] = true
-			pursuit = -1
-		elif by_id[pursuit].get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and not bool(by_id[pursuit].get("retreating", false)) and int(previous_targets[hull_slots[pursuit]]) == id and pos.distance_squared_to(positions[pursuit]) <= LASER_RANGE * LASER_RANGE:
-			pursuit = -1
-	var best: float = LASER_RANGE * LASER_RANGE
+		var checked: Array = _validate_pursuit(state, frame, id, pursuit, remaining, pos, team, hull_slot, blocked)
+		pursuit = int(checked[0])
+		remaining = float(checked[1])
 	var now: float = float(state["elapsed"])
 	var search_due: bool = _combat_search_due(ship, now)
-	var reusable: int = _reusable_laser_target(state, ship, by_id, positions, pos, now)
-	if reusable >= 0:
-		target = reusable
-	elif team != 0 and search_due:
-		ship["_next_laser_refresh"] = _next_search_slot(now, int(ship["id"]) % 2 * 2, 0.2)
-		if not frame.laser_blocks.has(team):
-			frame.laser_blocks[team] = {}
-		var team_blocks: Dictionary = frame.laser_blocks[team]
-		for x in range(-1, 2):
-			for y in range(-1, 2):
-				var key: Vector2i = cell + Vector2i(x, y)
-				if not team_blocks.has(key):
-					team_blocks[key] = _laser_blocks(_hostile_bucket(state, frame.cells, frame.hostile_cache, key, team, frame.team_by_id), positions)
-				var nearest: Array = _laser_block_nearest(team_blocks[key], positions, pos, best, target)
-				best = float(nearest[0])
-				target = int(nearest[1])
-	if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target >= 0 and not blocked.has(target) and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[hull_slots[target]])):
-		pursuit = target
-		remaining = PURSUIT_YEARS
-	# A previously engaged fighter may escape the firing envelope before
-	# the next scan; its departure is still a valid pursuit trigger.
-	var prior: int = int(previous_targets[hull_slot])
-	if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and by_id.has(prior) and not blocked.has(prior) and team != 0 and _combat_groups_hostile(state, team, _combat_group(state, int(by_id[prior]["owner"]))) and ship_visible_to_team(state, by_id[prior], team) and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[hull_slots[prior]])):
-		pursuit = prior
-		remaining = PURSUIT_YEARS
-	if search_due and fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0 and target < 0 and _combat_sector_has_hostile(frame.sector_teams, int(ship_sectors[hull_slot]), team, state):
-		if team > 0:
-			if not frame.pursuit_blocks.has(team):
-				frame.pursuit_blocks[team] = {}
-			var team_blocks: Dictionary = frame.pursuit_blocks[team]
-			var sector: int = int(ship_sectors[hull_slot])
-			if not team_blocks.has(sector):
-				var candidates: Array = _hostile_bucket(state, frame.sectors, frame.sector_hostile_cache, sector, team, frame.team_by_id, true)
-				team_blocks[sector] = _laser_blocks(candidates, positions)
-			var nearest: Array = _laser_block_nearest(team_blocks[sector], positions, pos, INF, -1)
-			pursuit = int(nearest[1])
-		if pursuit >= 0:
+	target = _scan_laser_target(state, frame, ship, pos, team, cell, now, search_due)
+	if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0:
+		var acquired: int = _acquire_pursuit(state, frame, pos, team, hull_slot, target, blocked, search_due)
+		if acquired >= 0:
+			pursuit = acquired
 			remaining = PURSUIT_YEARS
 	if guard_node >= 0:
 		var guarded: int = guard_node
@@ -7758,6 +7740,78 @@ static func _fire_hull_lasers(state: Dictionary, frame: COMBAT_FRAME, ship: Dict
 		# Two tick slots at the normal 0.1 simulation step.
 		ship["_next_combat_search"] = _next_search_slot(now, int(ship["id"]) % 2 * 2, 0.2)
 	_fire_blaster(state, ship, target if target >= 0 else int(ship["yard_target"]), positions, frame.damage, frame.killed_by, frame.health, dt, hull_slots, frame.hull_health)
+
+# Keep a pursuit only while it remains hostile, visible and worth chasing.
+static func _validate_pursuit(state: Dictionary, frame: COMBAT_FRAME, id: int, pursuit: int, remaining: float, pos: Vector2, team: int, hull_slot: int, blocked: Dictionary) -> Array:
+	var positions: Dictionary = frame.positions
+	var by_id: Dictionary = frame.by_id
+	var hull_slots: Dictionary = frame.hull_slots
+	var previous_targets: PackedInt64Array = frame.previous_targets
+	var ship_sectors: PackedInt32Array = frame.ship_sectors
+	if ship_sectors[hull_slot] >= 0 and frame.sector_of(pursuit) == ship_sectors[hull_slot]:
+		remaining = PURSUIT_YEARS
+	if not by_id.has(pursuit) or not _combat_groups_hostile(state, team, _combat_group(state, int(by_id[pursuit]["owner"]))) or team == 0 or not ship_visible_to_team(state, by_id[pursuit], team):
+		pursuit = -1
+	elif remaining <= EPS:
+		# Do not immediately restart a timed-out chase while the same
+		# escaping hull is still in range. A fresh contact may engage.
+		blocked[pursuit] = true
+		pursuit = -1
+	elif by_id[pursuit].get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and not bool(by_id[pursuit].get("retreating", false)) and int(previous_targets[hull_slots[pursuit]]) == id and pos.distance_squared_to(positions[pursuit]) <= LASER_RANGE * LASER_RANGE:
+		pursuit = -1
+	return [pursuit, remaining]
+
+static func _scan_laser_target(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, pos: Vector2, team: int, cell: Vector2i, now: float, search_due: bool) -> int:
+	var positions: Dictionary = frame.positions
+	var by_id: Dictionary = frame.by_id
+	var target: int = -1
+	var best: float = LASER_RANGE * LASER_RANGE
+	var reusable: int = _reusable_laser_target(state, ship, by_id, positions, pos, now)
+	if reusable >= 0:
+		target = reusable
+	elif team != 0 and search_due:
+		ship["_next_laser_refresh"] = _next_search_slot(now, int(ship["id"]) % 2 * 2, 0.2)
+		if not frame.laser_blocks.has(team):
+			frame.laser_blocks[team] = {}
+		var team_blocks: Dictionary = frame.laser_blocks[team]
+		for x in range(-1, 2):
+			for y in range(-1, 2):
+				var key: Vector2i = cell + Vector2i(x, y)
+				if not team_blocks.has(key):
+					team_blocks[key] = _laser_blocks(_hostile_bucket(state, frame.cells, frame.hostile_cache, key, team, frame.team_by_id), positions)
+				var nearest: Array = _laser_block_nearest(team_blocks[key], positions, pos, best, target)
+				best = float(nearest[0])
+				target = int(nearest[1])
+	return target
+
+# Start a new chase when the current or prior target flees, or, on a search
+# tick, from the nearest hostile hull in the same sector.
+static func _acquire_pursuit(state: Dictionary, frame: COMBAT_FRAME, pos: Vector2, team: int, hull_slot: int, target: int, blocked: Dictionary, search_due: bool) -> int:
+	var positions: Dictionary = frame.positions
+	var by_id: Dictionary = frame.by_id
+	var hull_slots: Dictionary = frame.hull_slots
+	var previous_targets: PackedInt64Array = frame.previous_targets
+	var ship_sectors: PackedInt32Array = frame.ship_sectors
+	if target >= 0:
+		if not blocked.has(target) and _fleeing(by_id[target], positions[target] - pos, int(previous_targets[hull_slots[target]])):
+			return target
+		return -1
+	# A previously engaged fighter may escape the firing envelope before
+	# the next scan; its departure is still a valid pursuit trigger.
+	var prior: int = int(previous_targets[hull_slot])
+	if by_id.has(prior) and not blocked.has(prior) and team != 0 and _combat_groups_hostile(state, team, _combat_group(state, int(by_id[prior]["owner"]))) and ship_visible_to_team(state, by_id[prior], team) and _fleeing(by_id[prior], positions[prior] - pos, int(previous_targets[hull_slots[prior]])):
+		return prior
+	if not search_due or team <= 0 or not _combat_sector_has_hostile(frame.sector_teams, int(ship_sectors[hull_slot]), team, state):
+		return -1
+	if not frame.pursuit_blocks.has(team):
+		frame.pursuit_blocks[team] = {}
+	var team_blocks: Dictionary = frame.pursuit_blocks[team]
+	var sector: int = int(ship_sectors[hull_slot])
+	if not team_blocks.has(sector):
+		var candidates: Array = _hostile_bucket(state, frame.sectors, frame.sector_hostile_cache, sector, team, frame.team_by_id, true)
+		team_blocks[sector] = _laser_blocks(candidates, positions)
+	var nearest: Array = _laser_block_nearest(team_blocks[sector], positions, pos, INF, -1)
+	return int(nearest[1])
 
 # With no hostile hull or pursuit, lasers fall back to the nearest hostile
 # shipyard in the surrounding combat cells.
@@ -9364,10 +9418,10 @@ static func _separation_force(id: int, before: Vector2, cells: Dictionary, previ
 
 ## Bisects the farthest point along planned -> candidate that stays inside
 ## the sector, assuming planned is inside.
-static func _clip_to_sector(graph: Dictionary, sector: int, planned: Vector2, candidate: Vector2) -> Vector2:
+static func _clip_to_sector(graph: Dictionary, sector: int, planned: Vector2, candidate: Vector2, iterations: int = 12) -> Vector2:
 	var lower: float = 0.0
 	var upper: float = 1.0
-	for iteration in range(12):
+	for iteration in range(iterations):
 		var fraction: float = (lower + upper) * 0.5
 		if sector_contains(graph, sector, planned.lerp(candidate, fraction)):
 			lower = fraction
@@ -9398,14 +9452,7 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 	for iteration in range(SHIP_CLEARANCE_PASSES):
 		var cells: Dictionary = {}
 		var bounds: Dictionary = {}
-		for i in range(ships.size()):
-			var point: Vector2 = ships[i]["position"]
-			var cell := Vector2i(floori(point.x / reach), floori(point.y / reach))
-			if not cells.has(cell):
-				cells[cell] = []
-			cells[cell].append(i)
-			var box: Rect2 = bounds.get(cell, Rect2(point, Vector2.ZERO))
-			bounds[cell] = box.expand(point)
+		_index_contact_cells(ships, reach, cells, bounds)
 		corrections.fill(Vector2.ZERO)
 		touched.fill(0)
 		var correction_order: Array[int] = []
@@ -9447,32 +9494,39 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 						corrections[j] -= push
 		if correction_order.is_empty():
 			break
-		for i in correction_order:
-			var craft: Dictionary = ships[i]
-			if repair_parked.has(int(craft["id"])) or _stop_waiting(state, craft) or (bool(craft.get("holding", false)) and craft.has("hold_heading") and not bool(craft.get("retreating", false))):
-				continue
-			var point: Vector2 = craft["position"]
-			var budget: float = ship_speed(str(craft.get("kind", "ship"))) * dt
-			var before: Vector2 = previous.get(int(craft["id"]), point)
-			var candidate: Vector2 = point + (corrections[i] as Vector2).limit_length(budget * 0.15)
-			if before.distance_to(point) <= budget + EPS:
-				candidate = before + (candidate - before).limit_length(budget)
-			var sector: int = local_sector(graph, craft)
-			if sector >= 0 and sector_contains(graph, sector, point) and not sector_contains(graph, sector, candidate):
-				var low: float = 0.0
-				var high: float = 1.0
-				for step_index in range(10):
-					var fraction: float = (low + high) * 0.5
-					if sector_contains(graph, sector, point.lerp(candidate, fraction)):
-						low = fraction
-					else:
-						high = fraction
-				candidate = point.lerp(candidate, low)
-			if craft.get("kind", "") != "miner" and not _rock_cells.is_empty():
-				candidate = _clip_rock_step(point, candidate)
-			craft["position"] = candidate
-			if not craft["route"].is_empty():
-				craft["leg"] = _lane_progress(graph["points"], craft)
+		_apply_contact_corrections(state, graph, previous, dt, repair_parked, corrections, correction_order)
+
+static func _index_contact_cells(ships: Array, reach: float, cells: Dictionary, bounds: Dictionary) -> void:
+	for i in range(ships.size()):
+		var point: Vector2 = ships[i]["position"]
+		var cell := Vector2i(floori(point.x / reach), floori(point.y / reach))
+		if not cells.has(cell):
+			cells[cell] = []
+		cells[cell].append(i)
+		var box: Rect2 = bounds.get(cell, Rect2(point, Vector2.ZERO))
+		bounds[cell] = box.expand(point)
+
+# Move each touched hull by its bounded share of the accumulated push.
+static func _apply_contact_corrections(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary, corrections: PackedVector2Array, correction_order: Array[int]) -> void:
+	var ships: Array = state["ships"]
+	for i in correction_order:
+		var craft: Dictionary = ships[i]
+		if repair_parked.has(int(craft["id"])) or _stop_waiting(state, craft) or (bool(craft.get("holding", false)) and craft.has("hold_heading") and not bool(craft.get("retreating", false))):
+			continue
+		var point: Vector2 = craft["position"]
+		var budget: float = ship_speed(str(craft.get("kind", "ship"))) * dt
+		var before: Vector2 = previous.get(int(craft["id"]), point)
+		var candidate: Vector2 = point + (corrections[i] as Vector2).limit_length(budget * 0.15)
+		if before.distance_to(point) <= budget + EPS:
+			candidate = before + (candidate - before).limit_length(budget)
+		var sector: int = local_sector(graph, craft)
+		if sector >= 0 and sector_contains(graph, sector, point) and not sector_contains(graph, sector, candidate):
+			candidate = _clip_to_sector(graph, sector, point, candidate, 10)
+		if craft.get("kind", "") != "miner" and not _rock_cells.is_empty():
+			candidate = _clip_rock_step(point, candidate)
+		craft["position"] = candidate
+		if not craft["route"].is_empty():
+			craft["leg"] = _lane_progress(graph["points"], craft)
 
 static func _update_planet_blockades(state: Dictionary, graph: Dictionary) -> void:
 	for system in state["planets"]:
