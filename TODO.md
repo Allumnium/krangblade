@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.36: Extract base construction recipes, nominal work estimates and pending-job lookup into stateless construction_queries.gd behind EconomyRules wrappers, passing canonical multipliers/cost tables explicitly. All discounts, crew/GC reservation, queue validation and mutation remain authoritative in EconomyRules. Add isolated recipe assertions to manual CI and architecture index. Runtime/determinism and ENet pending.
+
 ## Final high-value cleanup pass (approved 2026-11-22)
 
 **Stopping rule:** Resume gameplay development once the targeted boundaries below are verified, not when every file or helper is small. Refactors must be deterministic and behavior-preserving; use separate PRs for gameplay fixes. [ARCHITECTURE.md](ARCHITECTURE.md) is the onboarding map.
@@ -10,7 +12,7 @@
 - [x] Replace the 59 match UI calls to underscored economy helpers with public queries (v0.97.34; parser/runtime pending).
 - [x] Document current simulation, session and presentation ownership, critical state, cache lifetimes and test commands (v0.97.35).
 - [ ] **Validation gate:** Run manual Godot validation and resolve failures in new modules and tests; confirm solo, 2-peer, 3-peer, loading-disconnect, host-leave and 8-peer stress. Restore automatic PR/main CI triggers after a successful full pass.
-- [ ] **Selective simulation extraction:** Move a meaningful, dependency-isolated construction/recipe or similar domain into a module, preserving a single source of truth. Do not split every helper or add circular preloads.
+- [x] **Selective simulation extraction:** Move canonical construction recipes and nominal work into a pure domain module (v0.97.36). Existing authority-side wrappers preserve the public contract; runtime validation remains part of the validation gate.
 - [ ] **Performance gate:** Re-profile combat/repair and movement (1× and 5×; representative seeded fleet sizes) before further packed-state or spatial-index changes.
 - [ ] **Handoff:** Reassess necessity of splitting the 369-line match draw orchestrator and 20-byte motion packing **only if they obstruct a planned feature or fail profiling**. Do not rewrite stable UI/network code for size alone.
 

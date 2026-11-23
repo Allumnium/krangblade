@@ -28,6 +28,7 @@ const MAP = preload("res://scripts/planet_map.gd")
 const SYSTEM_GEOMETRY = preload("res://scripts/system_geometry.gd")
 const COMBAT_KERNELS = preload("res://scripts/combat_kernels.gd")
 const REPAIR_QUERIES = preload("res://scripts/repair_queries.gd")
+const CONSTRUCTION_QUERIES = preload("res://scripts/construction_queries.gd")
 const COMBAT_FRAME = preload("res://scripts/combat_frame.gd")
 const STEP_FRAME = preload("res://scripts/step_frame.gd")
 const SECTOR_GEOMETRY = preload("res://scripts/sector_geometry.gd")
@@ -1332,60 +1333,13 @@ static func yard_speed(level: int) -> float:
 	return 6.0 * level
 
 static func _has_job(planet: Dictionary, kind: String, target: String) -> bool:
-	for item in planet["queue"]:
-		if item["kind"] == kind and item["target"] == target:
-			return true
-	return false
+	return CONSTRUCTION_QUERIES.has_queued_job(planet, kind, target)
 
 static func _cost(kind: String, level: int) -> Dictionary:
-	# Explicit prototype values; the final costs/recipes are intentionally undefined.
-	match kind:
-		"ship": return {"Metals": 360.0, "Organics": 15.0}
-		"colony_ship": return {"Metals": 1200.0, "Organics": 30.0}
-		"fighter": return {"Metals": 270.0, "Organics": 10.0}
-		"miner": return {"Metals": 540.0, "Organics": 20.0}
-		"science_ship": return {"Metals": 900.0, "Organics": 30.0}
-		"scout": return {"Metals": 120.0, "Organics": 4.0}
-		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0 * CRYSTAL_COST_MULTIPLIER}
-		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}
-		"yard":
-			match level:
-				1: return {"Metals": 480.0}
-				2: return {"Metals": 2000.0, "Organics": 200.0, "Crystals": 200.0 * CRYSTAL_COST_MULTIPLIER}
-				3: return {"Metals": 6000.0, "Organics": 600.0, "Crystals": 600.0 * CRYSTAL_COST_MULTIPLIER}
-		"pds": return {"Metals": 540.0, "Organics": 60.0, "Crystals": 60.0 * CRYSTAL_COST_MULTIPLIER}
-		"dyson_sphere": return {"Metals": 20000.0, "Crystals": 10000.0}
-		"reinforced_plating": return {"Metals": 4000.0}
-		"laser_matrix": return {"Metals": 2500.0, "Crystals": 800.0 * CRYSTAL_COST_MULTIPLIER}
-		"yard_upgrade": return {"Metals": 240.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
-		"production": return {"Metals": 200.0 * pow(UPGRADE_COST_FACTOR, float(maxi(0, level - 1)))}
-		"warehouse": return WAREHOUSE_COSTS[level - 1].duplicate()
-		"habitation":
-			var factor: float = pow(3.0, level - 1)
-			return {"Metals": 600.0 * factor}
-		"orbital_housing": return ORBITAL_HOUSING_COST.duplicate()
-	return {}
+	return CONSTRUCTION_QUERIES.base_cost(kind, level, CRYSTAL_COST_MULTIPLIER, UPGRADE_COST_FACTOR, WAREHOUSE_COSTS, ORBITAL_HOUSING_COST)
 
 static func _work(kind: String, level: int) -> float:
-	match kind:
-		"ship": return 48.0
-		"colony_ship": return 102.0
-		"fighter": return 36.0
-		"miner": return 60.0
-		"science_ship": return 90.0
-		"scout": return 12.0
-		"cruiser": return 90.0
-		"destroyer": return 180.0
-		"yard": return 30.0
-		"pds": return 36.0
-		"dyson_sphere": return 300.0
-		"reinforced_plating", "laser_matrix": return 60.0
-		"yard_upgrade": return 15.0 * level
-		"production": return 10.0 * level
-		"warehouse": return 10.0 + 10.0 * level
-		"habitation": return 12.0 + 12.0 * level
-		"orbital_housing": return 30.0
-	return 1.0
+	return CONSTRUCTION_QUERIES.base_work(kind, level)
 
 static func _get_owned(state: Dictionary, player: int, index: int) -> Dictionary:
 	var planets: Array = state.get("planets", [])

@@ -8,7 +8,7 @@
 |---|---|---|
 | Authoritative gameplay state and validation | `scripts/economy_rules.gd` (`create`, `step`, request validators) | Sole source of truth for ownership, costs, diplomacy, progression, simulation mutations and outcomes |
 | Simulation scratch data | `scripts/step_frame.gd`, `scripts/combat_frame.gd` | Created for a substep/combat pass; never persisted as an independent state or replicated |
-| Pure gameplay helpers | `scripts/combat_kernels.gd`, `scripts/repair_queries.gd`, `scripts/system_geometry.gd`, `scripts/sector_geometry.gd` | No scene ownership, RPC dispatch or separate simulation authority; keep ordered tie-breaking intact |
+| Pure gameplay helpers | `scripts/combat_kernels.gd`, `scripts/repair_queries.gd`, `scripts/construction_queries.gd`, `scripts/system_geometry.gd`, `scripts/sector_geometry.gd` | No scene ownership, RPC dispatch or separate simulation authority; keep ordered tie-breaking intact |
 | Lobby, host authority and RPCs | `scripts/game_session.gd` (autoload `GameSession`) | Retains request validation routing, peer checks, simulation timing, snapshot revision and recovery |
 | Snapshot compression | `scripts/snapshot_codec.gd` | Pure map-ore and planet-template deltas and replica encode/decode; GameSession owns wire templates and fallbacks |
 | Match input, UI and rendering orchestration | `scripts/match.gd` | Read-only previews via public EconomyRules queries; submit commands through GameSession, not local mutations |
@@ -65,6 +65,7 @@ After `godot --headless --path . --import`:
 
 - `python3 tools/check_gdscript.py` — parses every tracked GDScript.
 - `python3 tools/check_ui_rule_boundaries.py` — rejects private EconomyRules calls from match UI.
+- `godot --headless --path . --script res://tests/construction_queries_test.gd` — base work/recipe costs, queue lookup and immutable input recipes.
 - `godot --headless --path . --script res://tests/snapshot_codec_test.gd` — codec round trip, full-state fallback and malformed-input guards.
 - `godot --headless --path . --script res://tests/economy_rules_test.gd` — economy, navigation, combat, construction and related invariants.
 - `python3 tools/check_determinism.py` — independent-process seeded AI and battle state hash equality, **same version only**.
