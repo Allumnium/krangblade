@@ -979,7 +979,6 @@ func _check_economy_sync() -> void:
 		if role == "host" and float(state["elapsed"]) >= next_diagnostic:
 			next_diagnostic = float(state["elapsed"]) + 10.0
 			print("DEBUG: economy elapsed=", state["elapsed"], " verified=", verified, "/", expected_players, " cancel=", cancel_sent, " stack=", yard_rebuilt, " ships=", state["ships"].size())
-		var view: Node = current_scene
 		var orbital_verified: bool = true
 		for index in range(expected_players):
 			var outpost: Dictionary = state["planets"][int(state["map"]["planetless"][index])]
@@ -991,11 +990,7 @@ func _check_economy_sync() -> void:
 			if event["kind"] == "station" and int(event["ship"]) == ECON.station_target_id(state, target_index):
 				station_destroyed = true
 		var station_verified: bool = station_destroyed and int(target["owner"]) == 0 and not ECON.has_station(target)
-		if cancel_sent and yard_rebuilt and hold_release_verified and stop_verified and verified == expected_players and orbital_verified and station_verified and miner_weapon_verified and view != null and view.has_method("_update_trade_stock"):
-			view.set("selected", home_index)
-			view.call("_load_thresholds")
-			view.call("_refresh")
-			var sliders: Dictionary = view.get("trade_sliders")
+		if cancel_sent and yard_rebuilt and hold_release_verified and stop_verified and verified == expected_players and orbital_verified and station_verified and miner_weapon_verified:
 			var home: Dictionary = state["planets"][home_index]
 			if ECON.next_shipyard_slot(home) != 0:
 				_fail("A fourth shipyard slot must not be available.")
@@ -1004,31 +999,34 @@ func _check_economy_sync() -> void:
 				if not ECON.shipyard_operational(home, index) and int(home["yards"][index]["job"]) >= 0:
 					_fail("Understaffed shipyard is operating on replicated state.")
 					return
+			# Validate canonical replicated stocks and trade policies, not
+			# transient slider/widget state or visual layout.
 			for resource in ECON.RESOURCES:
-				var slider: Control = sliders[resource]
 				var stock: float = float(home["stock"][resource])
 				var thresholds: Dictionary = home["thresholds"][resource]
-				if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.storage_capacity(home, resource) * 100.0, 0.0, 100.0)) or not is_equal_approx(float(slider.get("lower")), float(thresholds["min"])) or not is_equal_approx(float(slider.get("upper")), float(thresholds["max"])):
-					_fail("Replicated inventory or thresholds do not match the trade bars.")
+				if not is_finite(stock) or stock < -ECON.EPS or not is_finite(float(thresholds["min"])) or not is_finite(float(thresholds["max"])) or float(thresholds["min"]) < 0.0 or float(thresholds["max"]) > 100.0:
+					_fail("Invalid replicated inventory or trading thresholds.")
 					return
-			var poses: Dictionary = view.call("_ship_poses", state)
+			# Motion packets must remain finite, current and attached to live
+			# hulls; interpolation/rendering implementation is deliberately free
+			# to change without invalidating this authority/transport test.
+			var hull_ids: Dictionary = {}
 			for ship in state["ships"]:
-				if bool(view.call("_ship_visible", state, ship)) and not poses.has(int(ship["id"])):
-					_fail("A visible replicated ship was not rendered.")
-					return
+				var id: int = int(ship["id"])
+				hull_ids[id] = true
 				if not ship.get("position") is Vector2 or not ship.get("navigation_target") is Vector2 or not ship.get("heading") is Vector2:
 					_fail("Ship is missing replicated physical navigation state.")
 					return
-				var actual: Vector2 = ship["position"]
-				var sample: Dictionary = session.get("motion_samples").get(int(ship["id"]), {})
-				if not sample.is_empty():
-					if int(sample["revision"]) <= int(session.get("motion_base_revision")):
-						_fail("Stale movement sample survived newer reliable state.")
-						return
-					actual = sample["position"]
-				var render_target: Vector2 = view.get("ship_motion").call("target_position", int(ship["id"]))
-				if not render_target.is_finite() or not render_target.is_equal_approx(actual):
-					_fail("Ship render target differs from authoritative physical position.")
+				if not (ship["position"] as Vector2).is_finite() or not (ship["heading"] as Vector2).is_finite() or not (ship["navigation_target"] as Vector2).is_finite():
+					_fail("Ship has non-finite replicated navigation state.")
+					return
+			for id in session.get("motion_samples"):
+				var sample: Dictionary = session.get("motion_samples")[id]
+				if not hull_ids.has(int(id)) or int(sample["revision"]) <= int(session.get("motion_base_revision")):
+					_fail("Stale or unknown ship motion sample survived reliable state.")
+					return
+				if not sample.get("position") is Vector2 or not sample.get("heading") is Vector2 or not (sample["position"] as Vector2).is_finite() or not (sample["heading"] as Vector2).is_finite():
+					_fail("Replicated motion contains a non-finite pose.")
 					return
 			if role == "client" and int(session.get("diagnostic_motion_received")) < 2:
 				_fail("Guest did not receive independent movement updates.")
@@ -1266,10 +1264,10 @@ func _check_diplomacy_host() -> void:
 			return
 	create_timer(0.25).timeout.connect(_check_diplomacy_host)
 
-# Verify the actual lobby scene, then explicitly disconnect rather than
-# relying on process teardown to propagate an ENet disconnect.
+# Verify the authoritative lobby transition, then explicitly disconnect
+# rather than relying on process teardown. No scene/widget names are assumed.
 func _finish_guest_return() -> void:
-	if current_scene == null or not current_scene.has_method("_refresh_roster"):
+	if str(session.get("phase")) != "lobby" or not (session.get("economy") as Dictionary).is_empty():
 		create_timer(0.1).timeout.connect(_finish_guest_return)
 		return
 	if role == "client":

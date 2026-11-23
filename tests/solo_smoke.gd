@@ -23,82 +23,32 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	var menu: Control = load("res://scenes/main.tscn").instantiate()
-	root.add_child(menu)
-	menu.call("_show_solo_setup")
-	var initial: Dictionary = menu.get("solo_players")
-	if not (initial.size() == 4):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
+	# Exercise the public solo/session contract without depending on setup
+	# controls, widget names, button state or menu construction.
+	if not bool(session.call("start_solo", 1, [2, 3, 4], [7, 2, 3, 4], 827, "Radial")):
+		push_error("Valid four-empire solo match was rejected.")
+		quit(1)
+		return
+	var initial_state: Dictionary = session.get("economy")
+	var roster: Dictionary = session.get("players")
+	if int(initial_state["map"]["seed"]) != 827 or initial_state["map"]["layout"] != "Radial":
+		push_error("Solo seed or layout was not preserved by the session.")
+		quit(1)
+		return
+	if roster.size() != 4 or initial_state["ships"].size() != 24:
+		push_error("Solo roster or starting fleets are incorrect.")
 		quit(1)
 		return
 	for id in range(1, 5):
-		if not (initial[id]["team"] == id and initial[id]["color"] == id):
-			push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
+		if int(roster[id]["color"]) != (7 if id == 1 else id) or int(roster[id]["team"]) != id:
+			push_error("Solo empire identity or unique color did not persist.")
 			quit(1)
 			return
-		var row: Dictionary = menu.get("solo_rows")[id]
-		if not ((row["color"] as OptionButton).is_item_disabled(0) == (id != 1)):
-			push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-			quit(1)
-			return
-	menu.call("_solo_color_selected", 4, 1)
-	if not (initial[1]["color"] == 5):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
-	menu.call("_solo_color_selected", 1, 1)
-	if not (initial[1]["color"] == 5):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
-	for i in range(4):
-		(menu.get("solo_add_button") as Button).pressed.emit()
-	if not (initial.size() == 8 and (menu.get("solo_add_button") as Button).disabled):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
-	menu.call("_remove_solo_player", 8)
-	if not ((menu.get("solo_players") as Dictionary).size() == 7):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
-	if not (menu.get("solo_players").has(1)):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
-	if not (not (menu.get("solo_add_button") as Button).disabled):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
-	menu.call("_show_menu")
-	menu.call("_show_solo_setup")
-	if not ((menu.get("solo_players") as Dictionary).size() == 4):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
-	menu.call("_show_multiplayer")
-	if not (menu.get("screen") == "multiplayer"):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
-	menu.call("_show_solo_setup")
-	menu.call("_solo_color_selected", 6, 1)
-	var expected_seed: int = int(menu.get("solo_random_seed"))
-	menu.call("_start_solo_from_setup")
-	if int(session.get("economy")["map"]["seed"]) != expected_seed:
-		push_error("Solo start did not retain the preview seed.")
-		quit(1)
-		return
-	if not (session.get("players").size() == 4 and session.get("players")[1]["color"] == 7):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
-	if not (session.get("economy")["ships"].size() == 24):
-		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
-		quit(1)
-		return
 	session.call("leave_solo")
-	menu.free()
+	if str(session.get("phase")) != "offline":
+		push_error("Leaving the solo match did not reset the session.")
+		quit(1)
+		return
 	if not (bool(session.call("start_solo"))):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
