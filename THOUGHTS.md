@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.37: Make smoke tests independent of UI widgets: replace solo menu row/button checks with public GameSession roster/seed/starting-fleet validation; replace network trade-slider, rendered ship-pose, and private lobby-view checks with authoritative inventory/trading, finite motion/revision and lobby-state invariants. Remove exact objective-description text assertion. Preserve construction, colony, chat, diplomacy, replication, and network scenarios. Godot/runtime and real ENet not executed in this environment.
+
 - v0.97.36: Extract base construction recipes, nominal work estimates and pending-job lookup into stateless construction_queries.gd behind EconomyRules wrappers, passing canonical multipliers/cost tables explicitly. All discounts, crew/GC reservation, queue validation and mutation remain authoritative in EconomyRules. Add isolated recipe assertions to manual CI and architecture index. Runtime/determinism and ENet pending.
 
 - v0.97.35: Add a concise architecture and state-ownership guide, a bounded cleanup checklist with acceptance gates and explicit deferred work, and an AGENTS navigation link. Preserve historical standing instructions; only the documentation/version changed.

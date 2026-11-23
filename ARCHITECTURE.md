@@ -59,6 +59,10 @@ The authoritative `state: Dictionary` is initialized by `EconomyRules.create`. K
 5. Update only relevant tests and documentation in the same versioned commit. Every commit bumps `project.godot`, with a matching `vMAJOR.MINOR.PATCH:` title. Keep unrelated balance and UI changes out of structural PRs.
 6. Verify Godot parser/import, economic rules, solo startup, real ENet peers and targeted benchmarks. Report unrun tests explicitly. Existing CI is deliberately manual-only until the final pass is validated.
 
+## Regression test policy
+
+Automated validation protects **gameplay contracts, system invariants, authority and replication**, not UI geometry. Avoid asserting control names, hierarchy, disabled-state layout, labels, text content, pixel positions, sizes, styling, or interpolation internals in core/solo/ENet smoke tests. Test commands and resulting state via `GameSession` and `EconomyRules`; use visual playtesting or separate non-gating screenshots for appearance reviews. Preserve actual multiplayer connect/disconnect, objective, construction, resource and motion protocol coverage. Gameplay-relevant world-space positions (navigation arrival, collision avoidance, weapon ranges) remain valid simulation tests.
+
 ## Test entry points
 
 After `godot --headless --path . --import`:

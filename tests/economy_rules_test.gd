@@ -1597,7 +1597,6 @@ func _test_endless_conquest() -> void:
 			progress["completed"][next] = 0.0
 			assert(not ECON.objective_candidates(progress, category).is_empty())
 	var starter: Dictionary = {"military_built": 30, "fighters_built": 6}
-	assert(ECON.objective_spec("military_built")[3] == "Build 7 fighters")
 	assert(not ECON._objective_target_met(starter, "military_built"))
 	starter["fighters_built"] = 7
 	assert(ECON._objective_target_met(starter, "military_built"))
