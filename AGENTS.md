@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.34: Replace all 59 direct match.gd calls to 16 underscore-prefixed EconomyRules helpers with named public query wrappers. Internal simulation helpers, argument signatures, validation and behavior remain unchanged. Add a static CI guard preventing new underscore-prefixed EconomyRules calls from match.gd. Gameplay/parser and multiplayer tests pending.
+
 - v0.97.33: Extract the session's stateless map-ore delta, planet-template compaction, full-fallback and replica encode/restore algorithms into snapshot_codec.gd. GameSession retains public/private wrappers, all RPC signatures, peer validation, revision/timing, snapshot template lifetime and recovery policy. Add isolated codec round-trip and malformed-input regressions to manual CI. Wire schema and simulation unchanged; Godot/ENet validation pending.
 
 - v0.97.32: Extract stateless repair-damage checks, ordered repair target spatial buckets and cooldown readiness into repair_queries.gd, retaining EconomyRules wrappers, simulation call order, target iteration order, epsilon and all gameplay/network interfaces. No state or cache is owned by the module. Runtime, deterministic replay and ENet validation pending.
