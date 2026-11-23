@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.33: Extract the session's stateless map-ore delta, planet-template compaction, full-fallback and replica encode/restore algorithms into snapshot_codec.gd. GameSession retains public/private wrappers, all RPC signatures, peer validation, revision/timing, snapshot template lifetime and recovery policy. Add isolated codec round-trip and malformed-input regressions to manual CI. Wire schema and simulation unchanged; Godot/ENet validation pending.
+
 - v0.97.32: Extract stateless repair-damage checks, ordered repair target spatial buckets and cooldown readiness into repair_queries.gd, retaining EconomyRules wrappers, simulation call order, target iteration order, epsilon and all gameplay/network interfaces. No state or cache is owned by the module. Runtime, deterministic replay and ENet validation pending.
 
 - v0.97.31: Add a deterministic replay guard to manual Godot validation: independent-process seeded AI and 400-hull battle runs must produce matching parsed state-hash checkpoints, failing on missing output, Godot errors, mismatches or timeouts. Keep CI triggers manual-only until the agreed final cleanup gate. Runtime/ENet not executed locally; pending workflow run.
