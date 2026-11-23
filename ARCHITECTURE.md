@@ -76,6 +76,10 @@ After `godot --headless --path . --import`:
 - `godot --headless --path . --script res://tests/solo_smoke.gd` — scene/startup authority.
 - `.github/workflows/godot-validation.yml` — complete manual workflow: imports, parser, core and solo tests, 2/3-player ENet, disconnect scenarios, 8-player manual stress. The required aggregate `validate` job must pass before automatic triggers are restored.
 
+## Performance measurement (informational, not a release gate)
+
+Run `python3 tools/profile_simulation.py --godot godot --output performance-baseline.json` after importing the project, then compare identical fleet sizes, seeds, scenarios and tick counts on **the same machine** after any performance work. The driver uses `tests/fleet_benchmark.gd` unchanged: 500/1000-hull battle and logistics cases at 1× and 5×, a fixed seed, 100 simulation frames per case. Customize with `--ships 500,2500 --seeds 827,123 --scenarios battle,logistics --speeds 1,5 --ticks 100`. Outputs per-case frame p50/p95/p99, combat/repair and movement stage percentiles, CPU/engine and estimated simulated substeps per wall-clock second. This is a **headless CPU simulation benchmark**, not a graphical FPS measurement. Do not assert fixed millisecond budgets in CI or treat incomparable hardware results as regressions. Running it is optional and it does not affect the aggregate `validate` job.
+
 ## Stop conditions and deliberate non-goals
 
 Finish the dedicated cleanup when (a) pure domain responsibilities and client/network boundaries are clear, (b) full manually dispatched validation is green, (c) hot-loop performance is measured, and (d) future features can be implemented without spelunking through unrelated systems. **Do not pursue a zero-line monolith, one-file-per-function, complete ECS rewrite, packed-state migration or UI rewrite merely for aesthetics.** The `match.gd` draw orchestrator and movement packet packing are acceptable to leave in their current controller if they remain stable and measurable.
