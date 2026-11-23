@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.31: Add a deterministic replay guard to manual Godot validation: independent-process seeded AI and 400-hull battle runs must produce matching parsed state-hash checkpoints, failing on missing output, Godot errors, mismatches or timeouts. Keep CI triggers manual-only until the agreed final cleanup gate. Runtime/ENet not executed locally; pending workflow run.
+
 - v0.97.30: Behavior-preserving splits of command_miners, _valid_unit_order, territory_claims, _ai_station_goal and _work_resource_stage into focused helpers. Parser clean, determinism identical, economy suite 0 failures, solo and ENet two-peer smoke pass.
 
 - v0.97.29: Behavior-preserving splits of _build_combat_frame, _fire_hull_lasers, _resolve_ship_contacts, create and _finish into focused helpers. Determinism probe identical; economy suite 0 failures; parser clean. Runtime/ENet not rerun.

@@ -152,6 +152,8 @@ jobs:
         run: |
           set -o pipefail
           timeout 90s godot --headless --path . --script res://tests/economy_rules_test.gd 2>&1 | awk '{ print; fflush(); if ($0 ~ /SCRIPT ERROR:|Assertion failed/) { failed=1; remaining=8 } else if (failed && --remaining <= 0) exit 1 } END { if (failed) exit 1 }'
+      - name: Check deterministic replay in independent Godot processes
+        run: python3 tools/check_determinism.py
       - name: Solo match smoke test
         run: |
           set -o pipefail
