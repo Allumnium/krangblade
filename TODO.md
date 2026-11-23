@@ -1,5 +1,23 @@
 # Warbound — development TODO
 
+## Final high-value cleanup pass (approved 2026-11-22)
+
+**Stopping rule:** Resume gameplay development once the targeted boundaries below are verified, not when every file or helper is small. Refactors must be deterministic and behavior-preserving; use separate PRs for gameplay fixes. [ARCHITECTURE.md](ARCHITECTURE.md) is the onboarding map.
+
+- [x] Restore the seeded economy/solo/two-peer baseline (v0.97.26–v0.97.30; recorded passing).
+- [x] Add independent-process determinism replay and static UI API checks (v0.97.31, v0.97.34; committed but CI execution pending).
+- [x] Extract pure repair queries and snapshot encoding without changing their callers' public contracts (v0.97.32–v0.97.33; runtime tests pending).
+- [x] Replace the 59 match UI calls to underscored economy helpers with public queries (v0.97.34; parser/runtime pending).
+- [x] Document current simulation, session and presentation ownership, critical state, cache lifetimes and test commands (v0.97.35).
+- [ ] **Validation gate:** Run manual Godot validation and resolve failures in new modules and tests; confirm solo, 2-peer, 3-peer, loading-disconnect, host-leave and 8-peer stress. Restore automatic PR/main CI triggers after a successful full pass.
+- [ ] **Selective simulation extraction:** Move a meaningful, dependency-isolated construction/recipe or similar domain into a module, preserving a single source of truth. Do not split every helper or add circular preloads.
+- [ ] **Performance gate:** Re-profile combat/repair and movement (1× and 5×; representative seeded fleet sizes) before further packed-state or spatial-index changes.
+- [ ] **Handoff:** Reassess necessity of splitting the 369-line match draw orchestrator and 20-byte motion packing **only if they obstruct a planned feature or fail profiling**. Do not rewrite stable UI/network code for size alone.
+
+**Deferred:** Whole-entity rewrite, speculative packed-array migration, cosmetic file-size targets and unmeasured combat optimization. Independent gameplay bugs (blocked asteroid anchors, held freighter handoffs) remain separate gameplay work.
+
+- [ ] v0.97.35: Add a concise architecture and state-ownership guide, a bounded cleanup checklist with acceptance gates and explicit deferred work, and an AGENTS navigation link. Preserve historical standing instructions; only the documentation/version changed.
+
 - [ ] v0.97.34: Replace all 59 direct match.gd calls to 16 underscore-prefixed EconomyRules helpers with named public query wrappers. Internal simulation helpers, argument signatures, validation and behavior remain unchanged. Add a static CI guard preventing new underscore-prefixed EconomyRules calls from match.gd. Gameplay/parser and multiplayer tests pending.
 
 - [ ] v0.97.33: Extract the session's stateless map-ore delta, planet-template compaction, full-fallback and replica encode/restore algorithms into snapshot_codec.gd. GameSession retains public/private wrappers, all RPC signatures, peer validation, revision/timing, snapshot template lifetime and recovery policy. Add isolated codec round-trip and malformed-input regressions to manual CI. Wire schema and simulation unchanged; Godot/ENet validation pending.
