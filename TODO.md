@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.27: Fix Follow never arriving at large map coordinates (pre-existing since v0.51.2): float32 position rounding left followers stalled exactly at standoff reach, so follow_arrived and queued successors never triggered. Follow arrival now accepts a 0.5-unit tolerance. Regression sweeps 32 approach angles at far coordinates (8 stalls before, 0 after). Economy suite 0 failures, determinism probe identical, solo/ENet smoke pass.
+
 - [ ] v0.97.26: Repair stale solo and ENet smoke fixtures: freeze objective clock in pause check, Medium yard for Colony, distance-derived colonization/AI budgets; ENet stages station jobs within the 4-entry queue, finishes at 5x so sequential construction completes, retires removed territory_last overlay assertion, checks only fog-visible ships, records rogue/pirate observation once, refreshes a Military objective (v0.78.4 rejects refresh with unspent CP), and checks tax income rather than spendable balance. Solo and two-peer ENet smoke pass (6 consecutive ENet runs); three-peer not run.
 
 - [ ] v0.97.25: Fix pulsar home clearance regression from v0.93.0: pulsar placement margin used the old 48-unit radius after fields doubled to 96, so some seeds (e.g. Grid seed 31, 6 players) placed a pulsar edge closer than the agreed 700 pre-normalization units to a home system. Placement now uses the shared ANTIMATTER_RADIUS. Affected seeds generate different maps; all economy tests pass (98), determinism probe identical.

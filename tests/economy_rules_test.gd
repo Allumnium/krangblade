@@ -3819,6 +3819,22 @@ func _test_follow_order() -> void:
 	state["ships"].erase(leader)
 	ECON.step(state, 0.1)
 	assert(follower.get("unit_order", {}).get("kind", "") != "follow")
+	# At large coordinates float32 cannot close a sub-unit gap; a follower
+	# approaching its standoff edge must still count as arrived.
+	var far_map: Dictionary = {"seed": 42, "points": [Vector2(18000, 22000), Vector2(20000, 22000)], "edges": [[0, 1]], "fields": []}
+	var stalls: int = 0
+	for angle_step in range(32):
+		var far_state: Dictionary = _funded_fixture(far_map, {1: {"team": 1}}, [1], false)
+		far_state["ships"].clear()
+		var leader_point := Vector2(18141.43, 22192.86)
+		for k in range(2):
+			far_state["ships"].append({"id": 9844 + k, "owner": 1, "kind": "fighter" if k == 0 else "colony_ship", "origin": 0, "at": 0, "dest": 0, "source": -1, "route": [], "leg": 0.0, "position": leader_point + Vector2.from_angle(float(angle_step) * TAU / 32.0) * 130.0 if k == 0 else leader_point, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "wander_auto": false, "salvage_auto": false})
+		assert(ECON.issue_unit_order(far_state, 1, [9844], {"kind": "follow", "target": 9845, "guard": true}, false))
+		for tick in range(40):
+			ECON.step(far_state, 0.1)
+		if not bool(far_state["ships"][0].get("follow_arrived", false)):
+			stalls += 1
+	assert(stalls == 0)
 	print("PASS: persistent friendly follow, standoff, lane travel, cycle/ownership validation and cancellation")
 
 func _test_resource_handoff() -> void:

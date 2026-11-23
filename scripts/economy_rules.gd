@@ -179,6 +179,9 @@ const SHIP_CLEARANCE: float = 32.0
 const STATION_DOCK_RANGE: float = 128.0
 const SHIP_CLEARANCE_PASSES: int = 1
 const FOLLOW_DISTANCE: float = SHIP_SEPARATION_RADIUS * 2.0
+# Float32 positions cannot close sub-unit gaps at large map coordinates, so the
+# standoff-limited final step could otherwise stop just outside reach forever.
+const FOLLOW_ARRIVAL_TOLERANCE: float = 0.5
 const RALLY_ARRIVAL_RADIUS: float = SHIP_SEPARATION_RADIUS * 2.0
 const SHIP_SEPARATION_STRENGTH: float = 0.15
 const FORMATION_RADIUS: float = 105.0
@@ -5042,8 +5045,8 @@ static func _work_follow(state: Dictionary, graph: Dictionary, ship: Dictionary,
 	# one point while retaining a predictable near-target standoff.
 	var reach: float = FOLLOW_DISTANCE + float(int(ship["id"]) % 4) * SHIP_SEPARATION_RADIUS * 0.5
 	var distance: float = pos.distance_to(point)
-	ship["follow_arrived"] = distance <= reach + EPS
-	if distance <= reach + EPS:
+	ship["follow_arrived"] = distance <= reach + FOLLOW_ARRIVAL_TOLERANCE
+	if distance <= reach + FOLLOW_ARRIVAL_TOLERANCE:
 		ship.erase("move_only")
 		ship["navigation_target"] = pos
 		# If the target comes towards us, make room without jittering on
@@ -5062,7 +5065,7 @@ static func _work_follow(state: Dictionary, graph: Dictionary, ship: Dictionary,
 	# move, limiting the final step to the current standoff distance.
 	var budget_dt: float = minf(dt, maxf(0.0, distance - reach) / ship_speed(str(ship.get("kind", "ship"))))
 	_manual_travel(state, graph, ship, node, point, budget_dt, reach)
-	ship["follow_arrived"] = (ship["position"] as Vector2).distance_to(point) <= reach + EPS
+	ship["follow_arrived"] = (ship["position"] as Vector2).distance_to(point) <= reach + FOLLOW_ARRIVAL_TOLERANCE
 	return true
 
 # Pulsars retain the finite reservoir and navigation nodes of the old deposits.
