@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.28: Behavior-preserving splits in economy_rules.gd: pirate decisions (group gathering, retreat, patrol, assignment), AI diplomacy choice (peace scoring, third-party pressure), local rock route planning (grid, start, goal, compaction), mining field choice (assignment validation, chunk search, target assignment) and continuous repeat refill (queue state, cycle refresh, station repeat). Economy suite 0 failures, determinism probe identical; no gameplay change.
+
 - [ ] v0.97.27: Fix Follow never arriving at large map coordinates (pre-existing since v0.51.2): float32 position rounding left followers stalled exactly at standoff reach, so follow_arrived and queued successors never triggered. Follow arrival now accepts a 0.5-unit tolerance. Regression sweeps 32 approach angles at far coordinates (8 stalls before, 0 after). Economy suite 0 failures, determinism probe identical, solo/ENet smoke pass.
 
 - [ ] v0.97.26: Repair stale solo and ENet smoke fixtures: freeze objective clock in pause check, Medium yard for Colony, distance-derived colonization/AI budgets; ENet stages station jobs within the 4-entry queue, finishes at 5x so sequential construction completes, retires removed territory_last overlay assertion, checks only fog-visible ships, records rogue/pirate observation once, refreshes a Military objective (v0.78.4 rejects refresh with unspent CP), and checks tax income rather than spendable balance. Solo and two-peer ENet smoke pass (6 consecutive ENet runs); three-peer not run.

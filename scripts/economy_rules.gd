@@ -16,6 +16,7 @@ const ROCK_HARD_CLEARANCE: float = 12.0
 const ROCK_PREFERRED_CLEARANCE: float = 26.0
 const ROCK_ROUTE_CELL: float = 24.0
 const ROCK_ROUTE_HALF: int = 24
+const ROCK_ROUTE_NO_CELL: Vector2i = Vector2i(1073741824, 1073741824)
 const ROCK_PLAN_LIMIT: int = 12
 static var _rock_routes: Dictionary = {}
 static var _rock_plan_budget: int = ROCK_PLAN_LIMIT
@@ -705,20 +706,10 @@ static func _pirate_decisions(state: Dictionary) -> void:
 			continue
 		var center: Vector2 = leader["position"]
 		var cell := Vector2i(floori(center.x / PIRATE_GROUP_RANGE), floori(center.y / PIRATE_GROUP_RANGE))
-		var group: Array = [leader]
-		assigned[leader_id] = true
+		var group: Array = _pirate_gather_group(leader, cell, pirate_cells, assigned)
 		var power: float = _pirate_power(leader)
-		for y in range(-1, 2):
-			for x in range(-1, 2):
-				for mate in pirate_cells.get(cell + Vector2i(x, y), []):
-					var mate_id: int = int(mate["id"])
-					if group.size() >= 12:
-						break
-					if assigned.has(mate_id) or center.distance_squared_to(mate["position"]) > PIRATE_GROUP_RANGE * PIRATE_GROUP_RANGE:
-						continue
-					assigned[mate_id] = true
-					group.append(mate)
-					power += _pirate_power(mate)
+		for k in range(1, group.size()):
+			power += _pirate_power(group[k])
 		var threat: float = _pirate_defense(center, combat_cells, claims)
 		var victim: Dictionary = _pirate_pick_target(center, power, targets, combat_cells, claims, epoch, leader_id) if power >= threat * 1.5 else {}
 		var destination: Vector2 = center
@@ -728,38 +719,65 @@ static func _pirate_decisions(state: Dictionary) -> void:
 			phase = "hunt"
 		elif threat > 0.3 and power < threat * 1.5:
 			phase = "retreat"
-			var away: Vector2 = Vector2.ZERO
-			var threat_cell := Vector2i(floori(center.x / PIRATE_DEFENSE_RANGE), floori(center.y / PIRATE_DEFENSE_RANGE))
-			for y in range(-1, 2):
-				for x in range(-1, 2):
-					for foe in combat_cells.get(threat_cell + Vector2i(x, y), []):
-						var distance: float = center.distance_to(foe["position"])
-						if distance <= PIRATE_DEFENSE_RANGE:
-							away += (center - (foe["position"] as Vector2)).normalized() * _pirate_power(foe) / maxf(1.0, distance)
-			destination = _pirate_escape_point(center + away.normalized() * 1000.0, claims, bounds, leader_id)
+			destination = _pirate_retreat_point(center, combat_cells, claims, bounds, leader_id)
 		else:
-			# Seek other nearby groups or a seeded open-space patrol point.
-			var nearest: float = INF
-			for y in range(-5, 6):
-				for x in range(-5, 6):
-					for other in pirate_cells.get(cell + Vector2i(x, y), []):
-						if assigned.has(int(other["id"])):
-							continue
-						var distance: float = center.distance_squared_to(other["position"])
-						if distance < nearest and distance < 4000.0 * 4000.0:
-							nearest = distance
-							destination = other["position"]
-			if nearest == INF:
-				var direction: Vector2 = Vector2.from_angle(float(posmod(leader_id * 31 + floori(float(epoch) / 4.0), 360)) * PI / 180.0)
-				destination = _pirate_escape_point(center + direction * 1100.0, claims, bounds, leader_id)
-		for i in range(group.size()):
-			var craft: Dictionary = group[i]
-			craft["pirate_phase"] = phase
-			craft["pirate_target"] = int(victim.get("id", -1))
-			craft["pirate_goal"] = (destination + Vector2.from_angle(float(i) * 2.399963) * (0.0 if i == 0 else 65.0)).clamp(Vector2.ZERO, bounds)
-			if phase != "hunt":
-				craft["combat_target"] = -1
-				craft["laser_until"] = -1.0
+			destination = _pirate_patrol_point(center, cell, pirate_cells, assigned, claims, bounds, leader_id, epoch)
+		_pirate_assign_group(group, phase, int(victim.get("id", -1)), destination, bounds)
+
+static func _pirate_gather_group(leader: Dictionary, cell: Vector2i, pirate_cells: Dictionary, assigned: Dictionary) -> Array:
+	var center: Vector2 = leader["position"]
+	var group: Array = [leader]
+	assigned[int(leader["id"])] = true
+	for y in range(-1, 2):
+		for x in range(-1, 2):
+			for mate in pirate_cells.get(cell + Vector2i(x, y), []):
+				var mate_id: int = int(mate["id"])
+				if group.size() >= 12:
+					break
+				if assigned.has(mate_id) or center.distance_squared_to(mate["position"]) > PIRATE_GROUP_RANGE * PIRATE_GROUP_RANGE:
+					continue
+				assigned[mate_id] = true
+				group.append(mate)
+	return group
+
+static func _pirate_retreat_point(center: Vector2, combat_cells: Dictionary, claims: Array, bounds: Vector2, leader_id: int) -> Vector2:
+	var away: Vector2 = Vector2.ZERO
+	var threat_cell := Vector2i(floori(center.x / PIRATE_DEFENSE_RANGE), floori(center.y / PIRATE_DEFENSE_RANGE))
+	for y in range(-1, 2):
+		for x in range(-1, 2):
+			for foe in combat_cells.get(threat_cell + Vector2i(x, y), []):
+				var distance: float = center.distance_to(foe["position"])
+				if distance <= PIRATE_DEFENSE_RANGE:
+					away += (center - (foe["position"] as Vector2)).normalized() * _pirate_power(foe) / maxf(1.0, distance)
+	return _pirate_escape_point(center + away.normalized() * 1000.0, claims, bounds, leader_id)
+
+# Seek other nearby unassigned groups or a seeded open-space patrol point.
+static func _pirate_patrol_point(center: Vector2, cell: Vector2i, pirate_cells: Dictionary, assigned: Dictionary, claims: Array, bounds: Vector2, leader_id: int, epoch: int) -> Vector2:
+	var destination: Vector2 = center
+	var nearest: float = INF
+	for y in range(-5, 6):
+		for x in range(-5, 6):
+			for other in pirate_cells.get(cell + Vector2i(x, y), []):
+				if assigned.has(int(other["id"])):
+					continue
+				var distance: float = center.distance_squared_to(other["position"])
+				if distance < nearest and distance < 4000.0 * 4000.0:
+					nearest = distance
+					destination = other["position"]
+	if nearest == INF:
+		var direction: Vector2 = Vector2.from_angle(float(posmod(leader_id * 31 + floori(float(epoch) / 4.0), 360)) * PI / 180.0)
+		destination = _pirate_escape_point(center + direction * 1100.0, claims, bounds, leader_id)
+	return destination
+
+static func _pirate_assign_group(group: Array, phase: String, target_id: int, destination: Vector2, bounds: Vector2) -> void:
+	for i in range(group.size()):
+		var craft: Dictionary = group[i]
+		craft["pirate_phase"] = phase
+		craft["pirate_target"] = target_id
+		craft["pirate_goal"] = (destination + Vector2.from_angle(float(i) * 2.399963) * (0.0 if i == 0 else 65.0)).clamp(Vector2.ZERO, bounds)
+		if phase != "hunt":
+			craft["combat_target"] = -1
+			craft["laser_until"] = -1.0
 
 static func _work_pirate(state: Dictionary, ship: Dictionary, dt: float) -> void:
 	var point: Vector2 = ship["position"]
@@ -1734,9 +1752,45 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 	for key in p.get("maintain", {}):
 		if not keys.has(key):
 			keys.append(key)
-	# Shipyards share one repeat cycle. Once every turn has started, the next
-	# cycle may start on any idle shipyard, even while a slower hull is active.
-	# Independent infrastructure upgrades must not consume turns in this cycle.
+	var queue_state: Dictionary = _repeat_queue_state(p)
+	var active: Dictionary = queue_state["active"]
+	var manual_hulls: Dictionary = queue_state["manual_hulls"]
+	var cycle: Dictionary = p.get("repeat_cycle", {})
+	_refresh_repeat_cycle(state, index, p, keys, cycle, queue_state)
+	var hull_waiting_for_funds: bool = false
+	for key in keys:
+		if not _maintain_needed(state, index, p, str(key)):
+			continue
+		var order: Array = _continuous_target(p, str(key))
+		if order.is_empty():
+			continue
+		if key in ["warehouse", "habitation", "orbital_housing", "pds", "yard"] or str(key).begins_with("economy_building:"):
+			_refill_station_repeat(state, index, p, str(key), order)
+			continue
+		if SHIP_KINDS.has(order[0]):
+			if not ship_origin_population_met(p, str(order[0])) or not ship_crew_available(p, str(order[0])):
+				continue
+			if hull_waiting_for_funds or not has_fitting_yard(p, str(order[0])) or cycle.has(key) or manual_hulls.has(key):
+				continue
+			# Do not duplicate a waiting order if its repeat toggle was
+			# switched off and on during the same cycle.
+			if _has_waiting_hull(p, str(key), active):
+				cycle[key] = true
+				continue
+		elif _has_job(p, "economy_building" if order[0] == "economy" else order[0], order[1]):
+			continue
+		if enqueue(state, int(p["owner"]), index, order[0], order[1]):
+			p["queue"][-1]["automatic"] = true
+			if SHIP_KINDS.has(order[0]):
+				cycle[key] = true
+		elif SHIP_KINDS.has(order[0]):
+			hull_waiting_for_funds = true
+	p["repeat_cycle"] = cycle
+
+# Shipyards share one repeat cycle. Once every turn has started, the next
+# cycle may start on any idle shipyard, even while a slower hull is active.
+# Independent infrastructure upgrades must not consume turns in this cycle.
+static func _repeat_queue_state(p: Dictionary) -> Dictionary:
 	var active: Dictionary = {}
 	var idle: bool = false
 	for yard in p["yards"]:
@@ -1755,61 +1809,39 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 				waiting = true
 		else:
 			manual_hulls[item["kind"]] = true
-	var cycle: Dictionary = p.get("repeat_cycle", {})
+	return {"active": active, "idle": idle, "waiting": waiting, "manual_hulls": manual_hulls}
+
+static func _refresh_repeat_cycle(state: Dictionary, index: int, p: Dictionary, keys: Array, cycle: Dictionary, queue_state: Dictionary) -> void:
+	var manual_hulls: Dictionary = queue_state["manual_hulls"]
 	var all_turns: bool = true
 	for key in keys:
 		if SHIP_KINDS.has(key) and ship_origin_population_met(p, str(key)) and ship_crew_available(p, str(key)) and _maintain_needed(state, index, p, str(key)) and not manual_hulls.has(key) and not cycle.has(key):
 			all_turns = false
-	if not waiting and idle and all_turns:
+	if not bool(queue_state["waiting"]) and bool(queue_state["idle"]) and all_turns:
 		cycle.clear()
 	for key in cycle.keys():
 		if not _maintain_needed(state, index, p, str(key)):
 			cycle.erase(key)
-	var hull_waiting_for_funds: bool = false
-	for key in keys:
-		if not _maintain_needed(state, index, p, str(key)):
-			continue
-		var order: Array = _continuous_target(p, str(key))
-		if order.is_empty():
-			continue
-		if key in ["warehouse", "habitation", "orbital_housing", "pds", "yard"] or str(key).begins_with("economy_building:"):
-			if not station_repeat_available(p, str(key)):
-				p["continuous"][key] = false
-				continue
-			var job_kind: String = "economy_building" if order[0] == "economy" else str(order[0])
-			if job_kind == "pds":
-				if not pds_job(p).is_empty():
-					continue
-			elif _has_job(p, job_kind, str(order[1])):
-				continue
-			var economy_job: bool = job_kind in ["warehouse", "habitation", "orbital_housing"]
-			if enqueue(state, int(p["owner"]), index, "economy" if economy_job else str(order[0]), job_kind if economy_job else str(order[1])):
-				p["queue"][-1]["automatic"] = true
-			continue
-		if SHIP_KINDS.has(order[0]):
-			if not ship_origin_population_met(p, str(order[0])) or not ship_crew_available(p, str(order[0])):
-				continue
-			if hull_waiting_for_funds or not has_fitting_yard(p, str(order[0])) or cycle.has(key) or manual_hulls.has(key):
-				continue
-			# Do not duplicate a waiting order if its repeat toggle was
-			# switched off and on during the same cycle.
-			var existing: bool = false
-			for item in p["queue"]:
-				if item["kind"] == key and not active.has(int(item["id"])):
-					existing = true
-					break
-			if existing:
-				cycle[key] = true
-				continue
-		elif _has_job(p, "economy_building" if order[0] == "economy" else order[0], order[1]):
-			continue
-		if enqueue(state, int(p["owner"]), index, order[0], order[1]):
-			p["queue"][-1]["automatic"] = true
-			if SHIP_KINDS.has(order[0]):
-				cycle[key] = true
-		elif SHIP_KINDS.has(order[0]):
-			hull_waiting_for_funds = true
-	p["repeat_cycle"] = cycle
+
+static func _refill_station_repeat(state: Dictionary, index: int, p: Dictionary, key: String, order: Array) -> void:
+	if not station_repeat_available(p, key):
+		p["continuous"][key] = false
+		return
+	var job_kind: String = "economy_building" if order[0] == "economy" else str(order[0])
+	if job_kind == "pds":
+		if not pds_job(p).is_empty():
+			return
+	elif _has_job(p, job_kind, str(order[1])):
+		return
+	var economy_job: bool = job_kind in ["warehouse", "habitation", "orbital_housing"]
+	if enqueue(state, int(p["owner"]), index, "economy" if economy_job else str(order[0]), job_kind if economy_job else str(order[1])):
+		p["queue"][-1]["automatic"] = true
+
+static func _has_waiting_hull(p: Dictionary, key: String, active: Dictionary) -> bool:
+	for item in p["queue"]:
+		if item["kind"] == key and not active.has(int(item["id"])):
+			return true
+	return false
 
 static func set_yard_autobuild(state: Dictionary, player: int, index: int, slot: int, kind: String, enabled: bool) -> bool:
 	var p: Dictionary = _get_owned(state, player, index)
@@ -2636,6 +2668,23 @@ static func _rock_segment_clear(before: Vector2, after: Vector2, clearance: floa
 # resulting waypoints rather than rebuilding a grid every movement tick.
 static func _plan_rock_route(before: Vector2, target: Vector2, clearance: float) -> Array:
 	var half: int = ROCK_ROUTE_HALF
+	var grid: AStarGrid2D = _rock_route_grid(before, clearance)
+	var goal: Vector2 = (target - before) / ROCK_ROUTE_CELL
+	var limit: float = float(half - 1)
+	goal *= minf(1.0, limit / maxf(1.0, maxf(absf(goal.x), absf(goal.y))))
+	var start: Vector2i = _rock_route_start(grid, before)
+	if start == ROCK_ROUTE_NO_CELL:
+		return []
+	var goal_id: Vector2i = _rock_route_goal(grid, goal, half)
+	if goal_id == ROCK_ROUTE_NO_CELL:
+		return []
+	var ids: Array[Vector2i] = grid.get_id_path(start, goal_id, false)
+	if ids.is_empty():
+		return []
+	return _compact_rock_route(grid, ids, before, start, clearance)
+
+static func _rock_route_grid(before: Vector2, clearance: float) -> AStarGrid2D:
+	var half: int = ROCK_ROUTE_HALF
 	var region := Rect2i(Vector2i(-half, -half), Vector2i(half * 2 + 1, half * 2 + 1))
 	var grid := AStarGrid2D.new()
 	grid.region = region
@@ -2657,48 +2706,49 @@ static func _plan_rock_route(before: Vector2, target: Vector2, clearance: float)
 				var cell := Vector2i(x, y)
 				if (before + Vector2(cell) * ROCK_ROUTE_CELL).distance_squared_to(center) < radius * radius:
 					grid.set_point_solid(cell)
-	var goal: Vector2 = (target - before) / ROCK_ROUTE_CELL
-	var limit: float = float(half - 1)
-	goal *= minf(1.0, limit / maxf(1.0, maxf(absf(goal.x), absf(goal.y))))
-	var goal_id := Vector2i(goal.round())
-	# Choose a nearby reachable start if contact or a narrow gap has put
-	# the hull inside the preferred margin. Actual movement stays swept.
+	return grid
+
+# Choose a nearby reachable start if contact or a narrow gap has put
+# the hull inside the preferred margin. Actual movement stays swept.
+static func _rock_route_start(grid: AStarGrid2D, before: Vector2) -> Vector2i:
 	var start := Vector2i.ZERO
-	if grid.is_point_solid(start):
-		var closest: float = INF
-		for y in range(-4, 5):
-			for x in range(-4, 5):
-				var cell := Vector2i(x, y)
-				if grid.is_point_solid(cell):
-					continue
-				var point: Vector2 = grid.get_point_position(cell)
-				var distance: float = Vector2(cell).length_squared()
-				if distance < closest and _clip_rock_step(before, point).is_equal_approx(point):
-					start = cell
-					closest = distance
-		if closest == INF:
-			return []
-	# Select the closest open grid point to the requested endpoint.
-	if grid.is_point_solid(goal_id):
-		var original_goal: Vector2i = goal_id
-		var closest: float = INF
-		for y in range(maxi(-half, original_goal.y - 6), mini(half, original_goal.y + 6) + 1):
-			for x in range(maxi(-half, original_goal.x - 6), mini(half, original_goal.x + 6) + 1):
-				var cell := Vector2i(x, y)
-				var distance: float = (Vector2(cell) - goal).length_squared()
-				if not grid.is_point_solid(cell) and distance < closest:
-					goal_id = cell
-					closest = distance
-		if closest == INF:
-			return []
-	var ids: Array[Vector2i] = grid.get_id_path(start, goal_id, false)
-	if ids.is_empty():
-		return []
+	if not grid.is_point_solid(start):
+		return start
+	var closest: float = INF
+	for y in range(-4, 5):
+		for x in range(-4, 5):
+			var cell := Vector2i(x, y)
+			if grid.is_point_solid(cell):
+				continue
+			var point: Vector2 = grid.get_point_position(cell)
+			var distance: float = Vector2(cell).length_squared()
+			if distance < closest and _clip_rock_step(before, point).is_equal_approx(point):
+				start = cell
+				closest = distance
+	return ROCK_ROUTE_NO_CELL if closest == INF else start
+
+# Select the closest open grid point to the requested endpoint.
+static func _rock_route_goal(grid: AStarGrid2D, goal: Vector2, half: int) -> Vector2i:
+	var goal_id := Vector2i(goal.round())
+	if not grid.is_point_solid(goal_id):
+		return goal_id
+	var original_goal: Vector2i = goal_id
+	var closest: float = INF
+	for y in range(maxi(-half, original_goal.y - 6), mini(half, original_goal.y + 6) + 1):
+		for x in range(maxi(-half, original_goal.x - 6), mini(half, original_goal.x + 6) + 1):
+			var cell := Vector2i(x, y)
+			var distance: float = (Vector2(cell) - goal).length_squared()
+			if not grid.is_point_solid(cell) and distance < closest:
+				goal_id = cell
+				closest = distance
+	return ROCK_ROUTE_NO_CELL if closest == INF else goal_id
+
+# Compact the route using actual swept geometry rather than walking
+# cell-by-cell; never shortcut across a rock.
+static func _compact_rock_route(grid: AStarGrid2D, ids: Array[Vector2i], before: Vector2, start: Vector2i, clearance: float) -> Array:
 	var route: Array = []
 	if start != Vector2i.ZERO:
 		route.append(grid.get_point_position(start))
-	# Compact the route using actual swept geometry rather than walking
-	# cell-by-cell; never shortcut across a rock.
 	var anchor: Vector2 = before if route.is_empty() else route.back()
 	var next: int = 1
 	while next < ids.size():
@@ -3690,29 +3740,36 @@ static func command_miners(state: Dictionary, player: int, ids: Array, field_ind
 	return true
 
 static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
+	_validate_mining_assignment(state, ship)
+	var best: Dictionary = _best_mining_chunk(state, ship, teams, cache, int(ship.get("assigned_field", -1)), int(ship.get("assigned_chunk", -1)))
+	if not best.is_empty():
+		_assign_mining_chunk(ship, int(best["field"]), int(best["anchor"]), best["chunk"])
+
+# Drop explicit field or rock assignments that no longer have usable ore.
+static func _validate_mining_assignment(state: Dictionary, ship: Dictionary) -> void:
+	var assigned: int = int(ship.get("assigned_field", -1))
+	if assigned < 0:
+		return
+	var owner: int = int(ship["owner"])
+	var preferred: int = int(ship.get("assigned_chunk", -1))
+	var usable: bool = false
+	var preferred_usable: bool = false
+	for chunk in state["map"].get("fields", [])[assigned].get("chunks", []):
+		if float(chunk["remaining"]) > EPS and _mining_resources(state, owner, assigned).has(str(chunk["resource"])):
+			usable = true
+			if int(chunk["id"]) == preferred:
+				preferred_usable = true
+	if not usable:
+		ship["assigned_field"] = -1
+	if not preferred_usable:
+		ship["assigned_chunk"] = -1
+
+static func _best_mining_chunk(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, assigned: int, preferred: int) -> Dictionary:
 	var fields: Array = state["map"].get("fields", [])
 	var owner: int = int(ship["owner"])
 	var team: int = _combat_group(state, owner)
-	var best: float = INF
-	var chosen: int = -1
-	var best_chunk: Dictionary = {}
-	var best_anchor: int = -1
-	var assigned: int = int(ship.get("assigned_field", -1))
-	var preferred: int = int(ship.get("assigned_chunk", -1))
-	if assigned >= 0:
-		var usable: bool = false
-		var preferred_usable: bool = false
-		for chunk in fields[assigned].get("chunks", []):
-			if float(chunk["remaining"]) > EPS and _mining_resources(state, owner, assigned).has(str(chunk["resource"])):
-				usable = true
-				if int(chunk["id"]) == preferred:
-					preferred_usable = true
-		if not usable:
-			assigned = -1
-			ship["assigned_field"] = -1
-		if not preferred_usable:
-			preferred = -1
-			ship["assigned_chunk"] = -1
+	var best_distance: float = INF
+	var best: Dictionary = {}
 	for i in range(fields.size()):
 		if assigned >= 0 and i != assigned:
 			continue
@@ -3735,8 +3792,7 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 			var resources: Array[String] = _mining_resources(state, owner, i)
 			var depots: Dictionary = {}
 			for resource in resources:
-				var depot: int = _mining_depot(state, ship, teams, team, anchor, resource, cache, field["position"])
-				depots[resource] = depot
+				depots[resource] = _mining_depot(state, ship, teams, team, anchor, resource, cache, field["position"])
 			for chunk in field.get("chunks", []):
 				if preferred >= 0 and int(chunk["id"]) != preferred:
 					continue
@@ -3747,28 +3803,28 @@ static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int]
 					continue
 				var rock: Vector2 = chunk["position"]
 				var distance: float = (ship["position"] as Vector2).distance_to(rock) + rock.distance_to(station_position(state, depot, float(state["elapsed"])))
-				if distance < best:
-					best = distance
-					chosen = i
-					best_chunk = chunk
-					best_anchor = anchor
-	if chosen >= 0:
-		ship.erase("last_mining_field")
-		ship["field"] = chosen
-		ship["mining_anchor"] = best_anchor
-		ship["chunk"] = int(best_chunk["id"])
-		var rock: Vector2 = best_chunk["position"]
-		var radial: Vector2 = ((ship["position"] as Vector2) - rock).normalized()
-		if radial.is_zero_approx():
-			radial = Vector2.RIGHT
-		ship["mining_rock"] = rock
-		ship["mining_target"] = rock + radial * (float(best_chunk.get("radius", 0.0)) + 12.0)
-		ship["mining_mode"] = "outbound"
-		ship["route"] = []
-		ship["leg"] = 0.0
-		ship["field_leg"] = 0.0
-		ship["source"] = -1
-		ship["dest"] = -1
+				if distance < best_distance:
+					best_distance = distance
+					best = {"field": i, "chunk": chunk, "anchor": anchor}
+	return best
+
+static func _assign_mining_chunk(ship: Dictionary, field_index: int, anchor: int, chunk: Dictionary) -> void:
+	ship.erase("last_mining_field")
+	ship["field"] = field_index
+	ship["mining_anchor"] = anchor
+	ship["chunk"] = int(chunk["id"])
+	var rock: Vector2 = chunk["position"]
+	var radial: Vector2 = ((ship["position"] as Vector2) - rock).normalized()
+	if radial.is_zero_approx():
+		radial = Vector2.RIGHT
+	ship["mining_rock"] = rock
+	ship["mining_target"] = rock + radial * (float(chunk.get("radius", 0.0)) + 12.0)
+	ship["mining_mode"] = "outbound"
+	ship["route"] = []
+	ship["leg"] = 0.0
+	ship["field_leg"] = 0.0
+	ship["source"] = -1
+	ship["dest"] = -1
 
 # Align retries to stable hull-specific slots. Initial searches and explicit
 # reset-to-zero requests remain immediate; subsequent retries are staggered.
@@ -7984,55 +8040,61 @@ static func _ai_diplomacy_choice(state: Dictionary, player: int, estimates: Dict
 		var distance: float = float(rival["distance"])
 		var proximity: float = clampf(1.0 - distance / AI_DIPLOMACY_DISTANCE, 0.0, 1.0)
 		var entry: Dictionary = state["diplomacy"].get(_diplomacy_pair(player, other), {})
-		var action: String = ""
-		var score: float = 0.0
+		var choice: Dictionary = {}
 		if relation == DIPLO_WAR:
-			if int(entry.get("peace_offer", 0)) == player:
-				continue
-			var other_fronts: float = maxf(0.0, enemy_burden - rival_power)
-			# Opportunity cost: peace frees fleets for defense or a better war.
-			var pressure: float = (rival_power + other_fronts * 0.8) / own_power
-			var limited_gain: bool = int(rival["stations"]) == 0 or proximity < 0.2
-			var incoming: bool = int(entry.get("peace_offer", 0)) == other
-			if pressure > 1.2 or (wars > 1 and pressure > 0.85) or (limited_gain and (incoming or wars > 1 or fleet < 3.0)):
-				action = "peace"
-				score = 3.0 + minf(3.0, pressure) + (1.0 if incoming else 0.0)
+			choice = _ai_peace_choice(entry, player, other, rival, rival_power, proximity, own_power, enemy_burden, wars, fleet)
 		elif relation == DIPLO_NEUTRAL:
-			var common_threat: float = 0.0
-			var intervention: float = 0.0
-			var ally_conflict: bool = false
-			for third_id in rivals:
-				var third: int = int(third_id)
-				if third in [player, other]:
-					continue
-				var third_power: float = _ai_rival_power(estimates[third])
-				if empires_allied(state, other, third) and not empires_allied(state, player, third):
-					# Allies need not join a war; price the possibility, not certainty.
-					intervention += third_power * 0.35
-				if empires_allied(state, player, third) and empires_hostile(state, other, third):
-					ally_conflict = true
-				if empires_hostile(state, player, third) and empires_hostile(state, other, third):
-					common_threat += third_power
-				elif not empires_allied(state, other, third) and not empires_allied(state, player, third) and third_power > own_power * 1.5 and third_power > rival_power * 1.2:
-					common_threat += third_power * 0.5
+			var third: Dictionary = _ai_third_party_pressure(state, estimates, rivals, player, other, own_power, rival_power)
 			var incoming: bool = int(entry.get("alliance_offer", 0)) == other
-			if allies < AI_DIPLOMACY_MAX_ALLIES and not ally_conflict and int(entry.get("alliance_offer", 0)) != player:
-				var coalition_value: float = common_threat / own_power
+			if allies < AI_DIPLOMACY_MAX_ALLIES and not bool(third["ally_conflict"]) and int(entry.get("alliance_offer", 0)) != player:
+				var coalition_value: float = float(third["common_threat"]) / own_power
 				# Accept useful cooperation even before a common enemy fires.
 				if coalition_value > 0.65 or (incoming and wars > 0 and rival_power >= own_power * 0.65) or (incoming and proximity > 0.25 and rival_power >= own_power * 0.75):
-					action = "alliance"
-					score = 2.0 + minf(3.0, coalition_value) + (0.5 if incoming else 0.0)
+					choice = {"action": "alliance", "score": 2.0 + minf(3.0, coalition_value) + (0.5 if incoming else 0.0)}
 			# Require a real, reachable visible station and a substantial
 			# offensive advantage; never declare due to ordinary movement.
-			var expected_cost: float = rival_power + enemy_burden * 0.8 + intervention
+			var expected_cost: float = rival_power + enemy_burden * 0.8 + float(third["intervention"])
 			var advantage: float = fleet / maxf(1.0, expected_cost)
-			if action.is_empty() and now >= AI_DIPLOMACY_OPENING and wars < 2 and int(own["stations"]) > 0 and int(rival["stations"]) > 0 and proximity > 0.0 and fleet >= 6.0 and advantage > 1.35:
-				action = "declare_war"
-				score = minf(4.0, advantage) + proximity - 0.5 * wars
+			if choice.is_empty() and now >= AI_DIPLOMACY_OPENING and wars < 2 and int(own["stations"]) > 0 and int(rival["stations"]) > 0 and proximity > 0.0 and fleet >= 6.0 and advantage > 1.35:
+				choice = {"action": "declare_war", "score": minf(4.0, advantage) + proximity - 0.5 * wars}
+		var action: String = str(choice.get("action", ""))
+		var score: float = float(choice.get("score", 0.0))
 		if not action.is_empty() and score > best_score:
 			best_score = score
 			best = {"action": action, "other": other}
 	return best
+
+static func _ai_peace_choice(entry: Dictionary, player: int, other: int, rival: Dictionary, rival_power: float, proximity: float, own_power: float, enemy_burden: float, wars: int, fleet: float) -> Dictionary:
+	if int(entry.get("peace_offer", 0)) == player:
+		return {}
+	var other_fronts: float = maxf(0.0, enemy_burden - rival_power)
+	# Opportunity cost: peace frees fleets for defense or a better war.
+	var pressure: float = (rival_power + other_fronts * 0.8) / own_power
+	var limited_gain: bool = int(rival["stations"]) == 0 or proximity < 0.2
+	var incoming: bool = int(entry.get("peace_offer", 0)) == other
+	if pressure > 1.2 or (wars > 1 and pressure > 0.85) or (limited_gain and (incoming or wars > 1 or fleet < 3.0)):
+		return {"action": "peace", "score": 3.0 + minf(3.0, pressure) + (1.0 if incoming else 0.0)}
+	return {}
+
+static func _ai_third_party_pressure(state: Dictionary, estimates: Dictionary, rivals: Array, player: int, other: int, own_power: float, rival_power: float) -> Dictionary:
+	var common_threat: float = 0.0
+	var intervention: float = 0.0
+	var ally_conflict: bool = false
+	for third_id in rivals:
+		var third: int = int(third_id)
+		if third in [player, other]:
+			continue
+		var third_power: float = _ai_rival_power(estimates[third])
+		if empires_allied(state, other, third) and not empires_allied(state, player, third):
+			# Allies need not join a war; price the possibility, not certainty.
+			intervention += third_power * 0.35
+		if empires_allied(state, player, third) and empires_hostile(state, other, third):
+			ally_conflict = true
+		if empires_hostile(state, player, third) and empires_hostile(state, other, third):
+			common_threat += third_power
+		elif not empires_allied(state, other, third) and not empires_allied(state, player, third) and third_power > own_power * 1.5 and third_power > rival_power * 1.2:
+			common_threat += third_power * 0.5
+	return {"common_threat": common_threat, "intervention": intervention, "ally_conflict": ally_conflict}
 
 static func _ai_diplomacy_turn(state: Dictionary, player: int) -> bool:
 	if not state.has("diplomacy") or not state.get("ai_players", []).has(player) or state.get("eliminated", []).has(player) or not state.get("match_result", {}).is_empty():

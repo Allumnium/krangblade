@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.28: Behavior-preserving splits in economy_rules.gd: pirate decisions (group gathering, retreat, patrol, assignment), AI diplomacy choice (peace scoring, third-party pressure), local rock route planning (grid, start, goal, compaction), mining field choice (assignment validation, chunk search, target assignment) and continuous repeat refill (queue state, cycle refresh, station repeat). Economy suite 0 failures, determinism probe identical; no gameplay change.
+
 - v0.97.27: Fix Follow never arriving at large map coordinates (pre-existing since v0.51.2): float32 position rounding left followers stalled exactly at standoff reach, so follow_arrived and queued successors never triggered. Follow arrival now accepts a 0.5-unit tolerance. Regression sweeps 32 approach angles at far coordinates (8 stalls before, 0 after). Economy suite 0 failures, determinism probe identical, solo/ENet smoke pass.
 
 - Observation (unverified in play, found while repairing ENet smoke): a held Freighter still accepts opportunistic miner handoffs but never delivers while held, so cargo can sit aboard indefinitely. Possible remedy: skip handoffs to held receivers. Also: some asteroid field anchors sit inside rock disks after v0.96.4 radius growth; verify anchor-based targeting/staging is unaffected.
