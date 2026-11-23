@@ -142,6 +142,8 @@ func _run() -> void:
 	var frozen: Dictionary = state.duplicate(true)
 	for i in range(4):
 		session.call("_economy_tick")
+	# Objective cooldowns use the authority real-time clock, which runs while paused (v0.75.0).
+	frozen["objective_clock"] = state.get("objective_clock", 0.0)
 	if not (state == frozen):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
@@ -185,6 +187,8 @@ func _run() -> void:
 		return
 	planets[0]["population"] = 150000.0
 	planets[0]["levels"]["Organics"] = 3
+	# Colony and Freighter hulls require a Medium shipyard (v0.55.0).
+	planets[0]["yards"][0]["level"] = 2
 	session.call("request_operation", 0, "colony_ship")
 	for i in range(ceili(ECON._work("colony_ship", 1) / ECON.yard_speed(1) / 0.1) + 1):
 		session.call("_economy_tick")
@@ -197,7 +201,10 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	for i in range(1020):
+	# The default solo seed is random; budget for actual travel plus the orbital assembly.
+	var colony_hull: Dictionary = state["ships"][0]
+	var travel: float = (colony_hull["position"] as Vector2).distance_to(state["map"]["points"][neighbor]) / ECON.ship_speed("colony_ship")
+	for i in range(ceili((travel * 1.5 + ECON.COLONY_TRANSFORM_TIME) / 0.1) + 1020):
 		session.call("_economy_tick")
 		if int(planets[neighbor]["owner"]) == 1:
 			break
@@ -293,7 +300,9 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	for i in range(250):
+	# AI first upgrades to the Medium shipyard that Colony hulls require (v0.55.0).
+	var colony_budget: float = float(setup["planets"][1]["queue"][0]["work"]) + ECON._work("colony_ship", 1) / ECON.yard_speed(2)
+	for i in range(ceili(colony_budget * 2.0 / 0.1)):
 		session.call("_economy_tick")
 		if [2, 3].all(func(player: int) -> bool: return setup["ships"].any(func(ship: Dictionary) -> bool: return int(ship["owner"]) == player and ship["kind"] == "colony_ship")):
 			break

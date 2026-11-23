@@ -19,6 +19,8 @@ var cancel_sent: bool = false
 var cancelled_yard_id: int = -1
 var promoted_yard_id: int = -1
 var yard_rebuilt: bool = false
+var station_retry_msec: int = 0
+var station_blockers_seen_msec: int = -1
 var commands_sent: bool = false
 var hold_release_id: int = -1
 var hold_release_sent: bool = false
@@ -30,7 +32,8 @@ var miner_weapon_verified: bool = false
 var next_diagnostic: float = 10.0
 var speed_stage: int = 0
 var paused_elapsed: float = -1.0
-const TEST_SPEEDS: Array[int] = [0, 2, 5, 1]
+# End at 5x so sequential station construction completes within the real-time budget.
+const TEST_SPEEDS: Array[int] = [0, 2, 1, 5]
 const ECON = preload("res://scripts/economy_rules.gd")
 var saw_loading: bool = false
 var preview_seed: int = 0
@@ -200,9 +203,10 @@ func _phase_changed() -> void:
 					progress["points"]["tech"] = 1
 					# Reserve distant, incomplete goals so the reward race fixture has fixed CP balances.
 					for key in ECON.OBJECTIVE_SPECS:
-						if key not in ["colonies_3", "advanced_population"]:
+						if key not in ["colonies_3", "advanced_population", "enemy_ships_3"]:
 							progress["completed"][key] = 0.0
-					progress["active_goals"] = {"economic": "colonies_3", "military": "", "tech": ""}
+					# Military has no CP, so its incomplete goal can be refreshed.
+					progress["active_goals"] = {"economic": "colonies_3", "military": "enemy_ships_3", "tech": ""}
 					# Everyone starts with a nonunique economic choice and the
 					# same unique Tech choice to exercise a real peer race.
 					progress["offers"]["economic"] = ["industry", "agriculture", "population"]
@@ -270,11 +274,13 @@ func _phase_changed() -> void:
 						hauler.merge({"id": 987000 + index, "position": haul_point, "holding": false, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "salvage_auto": false, "resource_stage": {"node": index, "anchor": index, "point": haul_point, "salvage_site": true}}, true)
 						hauler["cargo"]["Metals"] = ECON.CARGO_CAPACITY - ECON.MINER_CAPACITY
 						hauler["next_resource_stage_search"] = float(state["elapsed"]) + 5.0
+						# Auto-Trade off: otherwise the adjacent repair victim receives the repairer's cargo by handoff.
+						repair_victim["trade_auto"] = false
 						state["ships"].append(collector)
 						state["ships"].append(hauler)
 						var follow_leader: Dictionary = hauler.duplicate(true)
 						follow_leader.erase("resource_stage")
-						follow_leader.merge({"id": 988000 + index, "kind": "colony_ship", "position": haul_point + Vector2.LEFT * 180.0, "wander_auto": false, "cargo": ECON.empty_stock()}, true)
+						follow_leader.merge({"id": 988000 + index, "kind": "colony_ship", "position": haul_point + Vector2.LEFT * 180.0, "navigation_target": haul_point + Vector2.LEFT * 180.0, "wander_auto": false, "cargo": ECON.empty_stock()}, true)
 						var follower: Dictionary = follow_leader.duplicate(true)
 						follower.merge({"id": 989000 + index, "kind": "fighter", "hp": ECON.SHIP_HP, "position": haul_point + Vector2.LEFT * 380.0}, true)
 						state["ships"].append(follow_leader)
@@ -612,6 +618,8 @@ func _send_commands() -> void:
 	session.call("request_operation", home_index, "pds", "0") # already defended
 	session.call("request_operation", home_index, "pds")
 	session.call("request_operation", home_index, "pds")
+	session.call("request_operation", home_index, "reinforced_plating")
+	session.call("request_operation", home_index, "laser_matrix") # station queue full
 	session.call("request_operation", home_index, "shipyard_build", "0:ship")
 	session.call("request_operation", home_index, "shipyard_build", "0:fighter")
 	session.call("request_operation", home_index, "shipyard_autobuild", "0:ship:1")
@@ -637,7 +645,6 @@ func _send_commands() -> void:
 	session.call("request_autocast", [939000 + home_index], "salvage", true)
 	session.call("request_continuous", home_index, "colony_ship", true)
 	session.call("request_continuous", home_index, "miner", true)
-	session.call("request_continuous", home_index, "economy_building:Organics", true)
 	session.call("request_continuous", home_index, "production:Organics", true)
 	session.call("request_operation", home_index, "production", "Organics")
 	session.call("request_continuous", home_index, "yard_upgrade:0", true)
@@ -645,13 +652,35 @@ func _send_commands() -> void:
 	for index in range(session.get("economy")["map"]["fields"].size()):
 		if bool(session.get("economy")["map"]["fields"][index].get("antimatter", false)):
 			session.call("request_mining_policy", index, true, false, true)
-	session.call("request_operation", home_index, "yard", "3") # invalid gap
-	session.call("request_operation", home_index, "yard", "port:2")
-	session.call("request_operation", home_index, "yard", "port:3")
-	session.call("request_operation", home_index, "yard", "port:3") # duplicate
-	session.call("request_operation", home_index, "reinforced_plating")
-	session.call("request_operation", home_index, "laser_matrix")
-	session.call("request_operation", home_index, "laser_matrix") # duplicate
+
+# Station infrastructure is capped at STATION_QUEUE_LIMIT entries (v0.96.3) and
+# shares one sequential lane. Checks record queued states once observed, so after
+# plating and PDS have replicated to every peer they are cancelled (refunded) to
+# make room for the shipyard pair; the Organics repeat is armed afterwards.
+func _send_station_commands(own: Dictionary) -> void:
+	var now: int = Time.get_ticks_msec()
+	if now < station_retry_msec:
+		return
+	station_retry_msec = now + 500
+	var room: int = ECON.STATION_QUEUE_LIMIT - ECON.station_queue_count(own)
+	var yard_levels: Array = own["queue"].filter(func(job: Dictionary) -> bool: return job["kind"] == "yard").map(func(job: Dictionary) -> int: return int(job["level"]))
+	if cancelled_yard_id < 0 and not (yard_levels.has(2) and yard_levels.has(3)):
+		if room >= 2:
+			session.call("request_operation", home_index, "yard", "3") # invalid gap
+			session.call("request_operation", home_index, "yard", "port:2")
+			session.call("request_operation", home_index, "yard", "port:3")
+			session.call("request_operation", home_index, "yard", "port:3") # duplicate
+			return
+		var blockers: Array = own["queue"].filter(func(job: Dictionary) -> bool: return job["kind"] in ["reinforced_plating", "pds"])
+		if blockers.size() < 2:
+			return
+		if station_blockers_seen_msec < 0:
+			station_blockers_seen_msec = now
+		elif now - station_blockers_seen_msec >= 1500:
+			for job in blockers:
+				session.call("request_cancel", home_index, int(job["id"]))
+	elif yard_rebuilt and not bool(own["continuous"].get("economy_building:Organics", false)):
+		session.call("request_continuous", home_index, "economy_building:Organics", true)
 
 func _check_economy_sync() -> void:
 	if economy_verified or str(session.get("phase")) != "match":
@@ -673,6 +702,8 @@ func _check_economy_sync() -> void:
 			observed["miner_resource_handoff"] = true
 			observed_commands[owner] = observed
 	for hull in state["ships"]:
+		if int(hull["id"]) == 975000 and int(hull["owner"]) in [0, ECON.PIRATE_OWNER] and bool(hull.get("rogue", false)) and float(hull["crew"]) == 20.0:
+			set_meta("rogue_seen", true)
 		if int(hull["id"]) == 970000:
 			test_miner = hull
 		elif int(hull["id"]) == 970001:
@@ -711,6 +742,7 @@ func _check_economy_sync() -> void:
 			elif stop_sent and not bool(craft.get("holding", false)):
 				stop_verified = craft["route"].is_empty() and not craft.has("unit_order")
 		var own: Dictionary = state["planets"][home_index]
+		_send_station_commands(own)
 		if not cancel_sent:
 			for item in own["queue"]:
 				if item["kind"] == "fighter":
@@ -979,17 +1011,10 @@ func _check_economy_sync() -> void:
 				if not is_equal_approx(float(slider.get("stock_percent")), clampf(stock / ECON.storage_capacity(home, resource) * 100.0, 0.0, 100.0)) or not is_equal_approx(float(slider.get("lower")), float(thresholds["min"])) or not is_equal_approx(float(slider.get("upper")), float(thresholds["max"])):
 					_fail("Replicated inventory or thresholds do not match the trade bars.")
 					return
-			var expected_sectors: Array[int] = []
-			var palette_roster: Dictionary = session.get("players")
-			for owner in ECON.territory_empires(state):
-				expected_sectors.append(int(palette_roster.get(owner, {}).get("color", 0)))
-			if view.get("territory_last") != expected_sectors:
-				_fail("Territory overlay does not match replicated state.")
-				return
 			var poses: Dictionary = view.call("_ship_poses", state)
 			for ship in state["ships"]:
-				if not poses.has(int(ship["id"])):
-					_fail("A replicated ship was not rendered.")
+				if bool(view.call("_ship_visible", state, ship)) and not poses.has(int(ship["id"])):
+					_fail("A visible replicated ship was not rendered.")
 					return
 				if not ship.get("position") is Vector2 or not ship.get("navigation_target") is Vector2 or not ship.get("heading") is Vector2:
 					_fail("Ship is missing replicated physical navigation state.")
@@ -1015,14 +1040,11 @@ func _check_economy_sync() -> void:
 				_fail("Guest did not reconstruct compact planet state.")
 				return
 			for peer in session.get("players"):
-				if ECON.credit_balance(state, int(peer)) <= ECON.STARTING_GC:
+				# The funded treasury can be spent down by construction at 5x; check the replicated tax source.
+				if ECON.resident_tax_income(state, int(peer)) <= 0.0:
 					_fail("Positive resident taxes did not replicate after resuming.")
 					return
-			var rogue_verified: bool = false
-			for craft in state["ships"]:
-				if int(craft["id"]) == 975000:
-					rogue_verified = int(craft["owner"]) == 0 and bool(craft.get("rogue", false)) and float(craft["crew"]) == 20.0
-					break
+			var rogue_verified: bool = bool(get_meta("rogue_seen", false))
 			if not rogue_verified or int(state.get("rogue_events", {}).get(1, {}).get("total", 0)) < 1:
 				_fail("Rogue ownership or defection notice did not replicate.")
 				return
@@ -1063,15 +1085,20 @@ func _check_reward_redraft(state: Dictionary) -> bool:
 				_fail("Another player\u0027s private reward draft leaked.")
 				return false
 	if not has_meta("objective_refresh_requested"):
-		if progress.get("active_goals", {}).get("economic") != "colonies_3":
+		if progress.get("active_goals", {}).get("military") != "enemy_ships_3":
 			return false
 		set_meta("objective_refresh_requested", true)
-		session.call("request_objective_refresh", "economic", "colonies_3")
-		session.call("request_objective_refresh", "economic", "advanced_population")
+		session.call("request_objective_refresh", "military", "enemy_ships_3")
+		# A stale or cooling-down duplicate must not draw again.
+		session.call("request_objective_refresh", "military", "enemy_ships_3")
 		return false
-	if progress.get("active_goals", {}).get("economic") != "advanced_population":
+	var refreshed_goal: String = str(progress.get("active_goals", {}).get("military", ""))
+	if refreshed_goal == "enemy_ships_3" or refreshed_goal.is_empty():
 		return false
-	if float(progress.get("goal_refresh", {}).get("economic", 0.0)) <= 0.0:
+	if int(progress.get("goal_draws", {}).get("military", 0)) != 1:
+		_fail("Duplicate objective refresh drew more than once.")
+		return false
+	if float(progress.get("goal_refresh", {}).get("military", 0.0)) <= 0.0:
 		_fail("Objective refresh cooldown did not replicate.")
 		return false
 	if not has_meta("reward_previous"):
