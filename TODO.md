@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.30: Behavior-preserving splits of command_miners, _valid_unit_order, territory_claims, _ai_station_goal and _work_resource_stage into focused helpers. Parser clean, determinism identical, economy suite 0 failures, solo and ENet two-peer smoke pass.
+
 - [ ] v0.97.29: Behavior-preserving splits of _build_combat_frame, _fire_hull_lasers, _resolve_ship_contacts, create and _finish into focused helpers. Determinism probe identical; economy suite 0 failures; parser clean. Runtime/ENet not rerun.
 
 - [ ] v0.97.28: Behavior-preserving splits in economy_rules.gd: pirate decisions (group gathering, retreat, patrol, assignment), AI diplomacy choice (peace scoring, third-party pressure), local rock route planning (grid, start, goal, compaction), mining field choice (assignment validation, chunk search, target assignment) and continuous repeat refill (queue state, cycle refresh, station repeat). Economy suite 0 failures, determinism probe identical; no gameplay change.

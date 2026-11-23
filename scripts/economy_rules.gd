@@ -3349,41 +3349,10 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 			_resource_haul(ship)
 			return true
 	if now >= float(ship.get("next_resource_stage_search", 0.0)):
-		ship["next_resource_stage_search"] = _next_search_slot(now, int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
-		var available: bool = false
-		var pickup_eta: float = INF
-		var return_distance: float = INF
-		if bool(stage.get("salvage_site", false)):
-			available = _salvage_site_available(state, point)
-		else:
-			var field_index: int = node - state["planets"].size()
-			var fields: Array = state["map"].get("fields", [])
-			if field_index >= 0 and field_index < fields.size():
-				var survey: Array = _survey_mining_stage(state, graph, ship, teams, cache, threats, stage, node, team, field_index, now)
-				available = survey[0]
-				pickup_eta = survey[1]
-				return_distance = survey[2]
-				point = stage["point"]
-		if not bool(stage.get("salvage_site", false)) and _cargo_total(ship) > EPS:
-			if _leave_loaded_stage(state, graph, ship, teams, cache, threats, team, node, available, pickup_eta, return_distance, now):
-				return true
-		if available and not bool(stage.get("salvage_site", false)) and int(stage.get("queue_rank", 0)) == 0 and _cargo_total(ship) <= EPS and pickup_eta > 5.0:
-			if _choose_resource_stage(state, graph, ship, teams, cache, threats, {}, true, node, pickup_eta - 3.0):
-				return true
-		if not available:
-			if _cargo_total(ship) > EPS:
-				_resource_haul(ship)
-			else:
-				_clear_resource_stage(ship)
+		var refreshed: Array = _refresh_resource_stage(state, graph, ship, teams, cache, threats, stage, point, node, team, now)
+		if refreshed[0]:
 			return true
-		# Mining has a bounded allocation; only surplus salvage waiters
-		# abandon their site for an ordinary trade opportunity.
-		if bool(stage.get("salvage_site", false)) and _cargo_total(ship) <= EPS and ship["route"].is_empty() and teams[int(ship["at"])] == team:
-			_choose_delivery(state, ship, teams, team, cache)
-			if int(ship.get("source", -1)) >= 0:
-				ship.erase("resource_stage")
-				ship.erase("resource_loaded_at")
-				return true
+		point = refreshed[1]
 	if not bool(stage.get("salvage_site", false)):
 		var field_index: int = node - state["planets"].size()
 		if field_index >= 0 and field_index < _movement_fields.size():
@@ -3399,6 +3368,45 @@ static func _work_resource_stage(state: Dictionary, graph: Dictionary, ship: Dic
 	# Meet the selected worker; recalculate its berth on staggered searches.
 	_work_opportunistic_salvage(state, graph, ship, dt, busy, cells, false, threats)
 	return true
+
+## Staggered re-survey of a staged site; returns [handled, berth point].
+static func _refresh_resource_stage(state: Dictionary, graph: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, threats: Dictionary, stage: Dictionary, point: Vector2, node: int, team: int, now: float) -> Array:
+	ship["next_resource_stage_search"] = _next_search_slot(now, int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
+	var available: bool = false
+	var pickup_eta: float = INF
+	var return_distance: float = INF
+	if bool(stage.get("salvage_site", false)):
+		available = _salvage_site_available(state, point)
+	else:
+		var field_index: int = node - state["planets"].size()
+		var fields: Array = state["map"].get("fields", [])
+		if field_index >= 0 and field_index < fields.size():
+			var survey: Array = _survey_mining_stage(state, graph, ship, teams, cache, threats, stage, node, team, field_index, now)
+			available = survey[0]
+			pickup_eta = survey[1]
+			return_distance = survey[2]
+			point = stage["point"]
+	if not bool(stage.get("salvage_site", false)) and _cargo_total(ship) > EPS:
+		if _leave_loaded_stage(state, graph, ship, teams, cache, threats, team, node, available, pickup_eta, return_distance, now):
+			return [true, point]
+	if available and not bool(stage.get("salvage_site", false)) and int(stage.get("queue_rank", 0)) == 0 and _cargo_total(ship) <= EPS and pickup_eta > 5.0:
+		if _choose_resource_stage(state, graph, ship, teams, cache, threats, {}, true, node, pickup_eta - 3.0):
+			return [true, point]
+	if not available:
+		if _cargo_total(ship) > EPS:
+			_resource_haul(ship)
+		else:
+			_clear_resource_stage(ship)
+		return [true, point]
+	# Mining has a bounded allocation; only surplus salvage waiters
+	# abandon their site for an ordinary trade opportunity.
+	if bool(stage.get("salvage_site", false)) and _cargo_total(ship) <= EPS and ship["route"].is_empty() and teams[int(ship["at"])] == team:
+		_choose_delivery(state, ship, teams, team, cache)
+		if int(ship.get("source", -1)) >= 0:
+			ship.erase("resource_stage")
+			ship.erase("resource_loaded_at")
+			return [true, point]
+	return [false, point]
 
 static func _resource_stage_safe(state: Dictionary, graph: Dictionary, ship: Dictionary, teams: Array[int], team: int, point: Vector2, node: int, threats: Dictionary) -> bool:
 	var owner: int = int(ship["owner"])
@@ -3689,70 +3697,82 @@ static func field_access_systems(map_data: Dictionary, field: Dictionary) -> Arr
 static func command_miners(state: Dictionary, player: int, ids: Array, field_index: int, chunk_id: int = -1) -> bool:
 	if ids.is_empty() or not state["teams"].has(player) or field_index < -1 or chunk_id < -1 or (field_index == -1 and chunk_id != -1):
 		return false
-	var fields: Array = state["map"].get("fields", [])
-	if field_index >= fields.size():
+	if field_index >= state["map"].get("fields", []).size():
 		return false
+	var selected: Array = _selected_owned_miners(state, player, ids)
+	if selected.is_empty():
+		return false
+	if field_index >= 0 and not _miners_can_work_field(state, player, selected, field_index, chunk_id):
+		return false
+	for ship in selected:
+		_reassign_miner(state, ship, field_index, chunk_id)
+	return true
+
+static func _selected_owned_miners(state: Dictionary, player: int, ids: Array) -> Array:
 	var requested: Dictionary = {}
 	for id in ids:
 		if not id is int or requested.has(id):
-			return false
+			return []
 		requested[id] = true
 	var selected: Array = []
 	for ship in state["ships"]:
 		if requested.has(ship["id"]):
 			if int(ship["owner"]) != player or ship.get("kind", "") != "miner":
-				return false
+				return []
 			selected.append(ship)
 	if selected.size() != requested.size():
+		return []
+	return selected
+
+static func _miners_can_work_field(state: Dictionary, player: int, selected: Array, field_index: int, chunk_id: int) -> bool:
+	if not discovered(state, player, "fields", field_index):
 		return false
-	if field_index >= 0:
-		if not discovered(state, player, "fields", field_index):
-			return false
-		var field: Dictionary = fields[field_index]
-		var resources: Array[String] = _mining_resources(state, player, field_index)
-		var useful: bool = false
-		for chunk in field.get("chunks", []):
-			if (chunk_id < 0 or int(chunk["id"]) == chunk_id) and resources.has(str(chunk["resource"])) and float(chunk["remaining"]) > EPS:
-				useful = true
-				break
-		if not useful:
-			return false
-		var teams: Array[int] = planet_teams(state)
-		var team: int = _combat_group(state, player)
-		for ship in selected:
-			var reachable: bool = false
-			for anchor in field_access_systems(state["map"], field):
-				if _mining_path(state, teams, team, int(ship["at"]), anchor, {}).is_empty():
-					continue
-				for depot in range(state["planets"].size()):
-					if int(state["planets"][depot]["owner"]) == player and not _mining_path(state, teams, team, anchor, depot, {}).is_empty():
-						reachable = true
-						break
-				if reachable:
-					break
-			if not reachable:
-				return false
+	var field: Dictionary = state["map"]["fields"][field_index]
+	var resources: Array[String] = _mining_resources(state, player, field_index)
+	var useful: bool = false
+	for chunk in field.get("chunks", []):
+		if (chunk_id < 0 or int(chunk["id"]) == chunk_id) and resources.has(str(chunk["resource"])) and float(chunk["remaining"]) > EPS:
+			useful = true
+			break
+	if not useful:
+		return false
+	var teams: Array[int] = planet_teams(state)
+	var team: int = _combat_group(state, player)
 	for ship in selected:
-		_cancel_salvage_order(ship)
-		_clear_tactical_order(ship)
-		_clear_local_hold(ship)
-		_set_unit_order(state, ship, {"kind": "mine", "target": field_index, "chunk": chunk_id})
-		ship["manual_mine"] = field_index >= 0
-		ship["assigned_field"] = field_index
-		ship["assigned_chunk"] = chunk_id
-		ship["next_mining_search"] = 0.0
-		# Preserve physical position, carried ore and the minimum extraction stay.
-		if field_index >= 0 and (int(ship.get("field", -1)) != field_index or (chunk_id >= 0 and int(ship.get("chunk", -1)) != chunk_id)):
-			var mode: String = str(ship.get("mining_mode", "idle"))
-			if mode == "approach":
-				var route: Array = ship["route"]
-				if not route.is_empty():
-					ship["route"] = route.slice(0, 1)
-				ship["mining_mode"] = "delivery"
-				ship["field"] = -1
-			elif mode == "outbound":
-				ship["mining_mode"] = "return"
+		var reachable: bool = false
+		for anchor in field_access_systems(state["map"], field):
+			if _mining_path(state, teams, team, int(ship["at"]), anchor, {}).is_empty():
+				continue
+			for depot in range(state["planets"].size()):
+				if int(state["planets"][depot]["owner"]) == player and not _mining_path(state, teams, team, anchor, depot, {}).is_empty():
+					reachable = true
+					break
+			if reachable:
+				break
+		if not reachable:
+			return false
 	return true
+
+static func _reassign_miner(state: Dictionary, ship: Dictionary, field_index: int, chunk_id: int) -> void:
+	_cancel_salvage_order(ship)
+	_clear_tactical_order(ship)
+	_clear_local_hold(ship)
+	_set_unit_order(state, ship, {"kind": "mine", "target": field_index, "chunk": chunk_id})
+	ship["manual_mine"] = field_index >= 0
+	ship["assigned_field"] = field_index
+	ship["assigned_chunk"] = chunk_id
+	ship["next_mining_search"] = 0.0
+	# Preserve physical position, carried ore and the minimum extraction stay.
+	if field_index >= 0 and (int(ship.get("field", -1)) != field_index or (chunk_id >= 0 and int(ship.get("chunk", -1)) != chunk_id)):
+		var mode: String = str(ship.get("mining_mode", "idle"))
+		if mode == "approach":
+			var route: Array = ship["route"]
+			if not route.is_empty():
+				ship["route"] = route.slice(0, 1)
+			ship["mining_mode"] = "delivery"
+			ship["field"] = -1
+		elif mode == "outbound":
+			ship["mining_mode"] = "return"
 
 static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
 	_validate_mining_assignment(state, ship)
@@ -5791,18 +5811,26 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		return cargo_capacity(str(ship["kind"])) > EPS and order.get("point") is Vector2 and patrol_node(state, graph, owner, order["point"]) >= 0
 	if not order.get("target", null) is int:
 		return false
+	return _valid_targeted_unit_order(state, graph, ship, order, append, fighter)
+
+static func _valid_order_heading(heading: Variant) -> bool:
+	return heading is Vector2 and (heading as Vector2).is_finite() and not (heading as Vector2).is_zero_approx()
+
+static func _valid_targeted_unit_order(state: Dictionary, graph: Dictionary, ship: Dictionary, order: Dictionary, append: bool, fighter: bool) -> bool:
+	var kind: String = str(order.get("kind", ""))
+	var owner: int = int(ship["owner"])
 	var target: int = order["target"]
 	match kind:
 		"position":
 			if not order.get("point", null) is Vector2 or not _position_target_valid(state, graph, owner, target, order["point"]):
 				return false
-			if order.has("heading") and (not order["heading"] is Vector2 or not (order["heading"] as Vector2).is_finite() or (order["heading"] as Vector2).is_zero_approx()):
+			if order.has("heading") and not _valid_order_heading(order["heading"]):
 				return false
 			return not bool(ship.get("retreating", false)) or append
 		"guard":
 			return fighter and military_pois(state, owner).has(target) and order.get("point") is Vector2 and _position_target_valid(state, graph, owner, target, order["point"])
 		"patrol":
-			if order.has("heading") and (not order["heading"] is Vector2 or not (order["heading"] as Vector2).is_finite() or (order["heading"] as Vector2).is_zero_approx()):
+			if order.has("heading") and not _valid_order_heading(order["heading"]):
 				return false
 			return fighter and military_pois(state, owner).has(target) and (not order.has("point") or (order["point"] is Vector2 and _position_target_valid(state, graph, owner, target, order["point"])))
 		"sector_entry":
@@ -6513,6 +6541,26 @@ static func territory_claims(state: Dictionary) -> Array[int]:
 	var presence: Dictionary = {}
 	var contested: Dictionary = {}
 	var near_ship: Dictionary = {}
+	_territory_fighter_presence(state, graph, claims, presence, contested, near_ship)
+	for node in presence:
+		if claims[node] <= 0:
+			continue
+		if state.has("diplomacy"):
+			if _combat_sector_has_hostile(presence, node, claims[node], state):
+				contested[node] = true
+		elif claims[node] != int(presence[node]):
+			contested[node] = true
+	for ship in state["ships"]:
+		var target: int = int(ship.get("combat_target", -1))
+		if target >= 0 and near_ship.has(target) and (not state.has("diplomacy") or _hostile_hull(state, int(ship["owner"]), service_targets(state, target).get(target, {}))):
+			contested[near_ship[int(ship["id"])]] = true
+			contested[near_ship[target]] = true
+	for node in contested:
+		claims[node] = 0
+	return claims
+
+static func _territory_fighter_presence(state: Dictionary, graph: Dictionary, claims: Array[int], presence: Dictionary, contested: Dictionary, near_ship: Dictionary) -> void:
+	var points: Array = graph["points"]
 	for ship in state["ships"]:
 		var kind: String = ship.get("kind", "")
 		var position: Vector2 = combat_position(state, graph, ship)
@@ -6548,22 +6596,6 @@ static func territory_claims(state: Dictionary) -> Array[int]:
 				if presence.has(node) and int(presence[node]) != team:
 					contested[node] = true
 				presence[node] = team
-	for node in presence:
-		if claims[node] <= 0:
-			continue
-		if state.has("diplomacy"):
-			if _combat_sector_has_hostile(presence, node, claims[node], state):
-				contested[node] = true
-		elif claims[node] != int(presence[node]):
-			contested[node] = true
-	for ship in state["ships"]:
-		var target: int = int(ship.get("combat_target", -1))
-		if target >= 0 and near_ship.has(target) and (not state.has("diplomacy") or _hostile_hull(state, int(ship["owner"]), service_targets(state, target).get(target, {}))):
-			contested[near_ship[int(ship["id"])]] = true
-			contested[near_ship[target]] = true
-	for node in contested:
-		claims[node] = 0
-	return claims
 
 # Empire color derives from the system's actual owner, never a ship.
 static func territory_empires(state: Dictionary) -> Array[int]:
@@ -8290,7 +8322,6 @@ static func _ai_station_goal(state: Dictionary, player: int, home: int, index: i
 	var useful_fields: int = census["useful_fields"]
 	var level: int = production_level(p, "Metals") + int(p.get("buildings", {}).get("Metals", 0))
 	var abundance: float = float(p["abundance"].get("Metals", 0.0))
-	var farm: int = production_level(p, "Organics") + int(p.get("buildings", {}).get("Organics", 0))
 	var action: String = ""
 	var target: String = ""
 	var has_yard: bool = operational_shipyards(p) > 0
@@ -8323,36 +8354,50 @@ static func _ai_station_goal(state: Dictionary, player: int, home: int, index: i
 		if _ai_colony_target(state, player, local_probe, census["reserved"]) >= 0:
 			action = "colony_ship"
 	if action.is_empty():
-		# After basic defense, expansion and logistics, reserve a capital
-		# budget at the home yard. Other stations keep producing escorts.
-		var population: float = float(p["population"])
-		if index == home and has_yard and counts["fighter"] >= AI_WAVE_MIN and counts["cruiser"] < maxi(1, mini(4, owned.size())) and population >= yard_staff_required(p, 1) + CREW_COSTS["cruiser"]:
-			action = "cruiser"
-		elif index == home and has_yard and counts["cruiser"] > 0 and counts["destroyer"] < maxi(1, mini(3, ceili(float(owned.size()) / 2.0))) and population >= yard_staff_required(p, 2) + CREW_COSTS["destroyer"]:
-			action = "destroyer"
-		elif index != home and production_available(p, "Crystals") and production_level(p, "Crystals") == 0 and counts["fighter"] >= AI_WAVE_MIN:
-			action = "economy"
-			target = "Crystals"
-		elif has_yard and counts["fighter"] < maxi(3, mini(24, owned.size() * 2)):
-			action = "fighter"
-		elif has_yard and useful_fields > 0 and counts["miner"] < mini(6, useful_fields * 2):
-			action = "miner"
-		elif abundance > 0.0 and level < 4:
-			action = "economy"
-			target = "Metals"
-		elif has_planets(p) and farm < 3 and float(p["population"]) > population_capacity(p) * 0.8:
-			action = "economy"
-			target = "Organics"
-		elif (p["yards"] as Array).is_empty():
-			action = "yard"
-		elif counts["fighter"] < 32:
-			action = "fighter"
-		else:
-			for resource in ["Crystals"]:
-				if float(p["abundance"].get(resource, 0.0)) > 0.0 and production_level(p, resource) == 0:
-					action = "economy"
-					target = resource
-					break
+		return _ai_late_station_goal(p, home, index, census)
+	return [action, target]
+
+## Fallback goal once basic defense, expansion and logistics are covered.
+static func _ai_late_station_goal(p: Dictionary, home: int, index: int, census: Dictionary) -> Array:
+	var owned: Array[int] = census["owned"]
+	var counts: Dictionary = census["counts"]
+	var useful_fields: int = census["useful_fields"]
+	var level: int = production_level(p, "Metals") + int(p.get("buildings", {}).get("Metals", 0))
+	var abundance: float = float(p["abundance"].get("Metals", 0.0))
+	var farm: int = production_level(p, "Organics") + int(p.get("buildings", {}).get("Organics", 0))
+	var has_yard: bool = operational_shipyards(p) > 0
+	var action: String = ""
+	var target: String = ""
+	# After basic defense, expansion and logistics, reserve a capital
+	# budget at the home yard. Other stations keep producing escorts.
+	var population: float = float(p["population"])
+	if index == home and has_yard and counts["fighter"] >= AI_WAVE_MIN and counts["cruiser"] < maxi(1, mini(4, owned.size())) and population >= yard_staff_required(p, 1) + CREW_COSTS["cruiser"]:
+		action = "cruiser"
+	elif index == home and has_yard and counts["cruiser"] > 0 and counts["destroyer"] < maxi(1, mini(3, ceili(float(owned.size()) / 2.0))) and population >= yard_staff_required(p, 2) + CREW_COSTS["destroyer"]:
+		action = "destroyer"
+	elif index != home and production_available(p, "Crystals") and production_level(p, "Crystals") == 0 and counts["fighter"] >= AI_WAVE_MIN:
+		action = "economy"
+		target = "Crystals"
+	elif has_yard and counts["fighter"] < maxi(3, mini(24, owned.size() * 2)):
+		action = "fighter"
+	elif has_yard and useful_fields > 0 and counts["miner"] < mini(6, useful_fields * 2):
+		action = "miner"
+	elif abundance > 0.0 and level < 4:
+		action = "economy"
+		target = "Metals"
+	elif has_planets(p) and farm < 3 and float(p["population"]) > population_capacity(p) * 0.8:
+		action = "economy"
+		target = "Organics"
+	elif (p["yards"] as Array).is_empty():
+		action = "yard"
+	elif counts["fighter"] < 32:
+		action = "fighter"
+	else:
+		for resource in ["Crystals"]:
+			if float(p["abundance"].get(resource, 0.0)) > 0.0 and production_level(p, resource) == 0:
+				action = "economy"
+				target = resource
+				break
 	return [action, target]
 
 ## Funds and enqueues the chosen goal, substituting a shipyard or warehouse
