@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.32: Extract stateless repair-damage checks, ordered repair target spatial buckets and cooldown readiness into repair_queries.gd, retaining EconomyRules wrappers, simulation call order, target iteration order, epsilon and all gameplay/network interfaces. No state or cache is owned by the module. Runtime, deterministic replay and ENet validation pending.
+
 - [ ] v0.97.31: Add a deterministic replay guard to manual Godot validation: independent-process seeded AI and 400-hull battle runs must produce matching parsed state-hash checkpoints, failing on missing output, Godot errors, mismatches or timeouts. Keep CI triggers manual-only until the agreed final cleanup gate. Runtime/ENet not executed locally; pending workflow run.
 
 - [ ] v0.97.30: Behavior-preserving splits of command_miners, _valid_unit_order, territory_claims, _ai_station_goal and _work_resource_stage into focused helpers. Parser clean, determinism identical, economy suite 0 failures, solo and ENet two-peer smoke pass.

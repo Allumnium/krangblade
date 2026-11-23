@@ -27,6 +27,7 @@ const AVOIDANCE_BUCKET_LIMIT: int = 24
 const MAP = preload("res://scripts/planet_map.gd")
 const SYSTEM_GEOMETRY = preload("res://scripts/system_geometry.gd")
 const COMBAT_KERNELS = preload("res://scripts/combat_kernels.gd")
+const REPAIR_QUERIES = preload("res://scripts/repair_queries.gd")
 const COMBAT_FRAME = preload("res://scripts/combat_frame.gd")
 const STEP_FRAME = preload("res://scripts/step_frame.gd")
 const SECTOR_GEOMETRY = preload("res://scripts/sector_geometry.gd")
@@ -4772,7 +4773,7 @@ static func _cargo_target_allowed(state: Dictionary, owner: int, target: Diction
 	return _friendly_target(state, owner, target)
 
 static func _damaged(target: Dictionary) -> bool:
-	return not target.is_empty() and float(target["entity"].get("hp", target["max_hp"])) < float(target["max_hp"]) - EPS
+	return REPAIR_QUERIES.is_damaged(target, EPS)
 
 static func can_deposit(state: Dictionary, ship: Dictionary, target_id: int) -> bool:
 	var ref: Dictionary = service_targets(state, target_id).get(target_id, {})
@@ -4986,29 +4987,13 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 	return true
 
 static func _damaged_repair_cells(targets: Dictionary) -> Dictionary:
-	var cells: Dictionary = {}
-	var order: int = 0
-	for id in targets:
-		var ref: Dictionary = targets[id]
-		if _damaged(ref):
-			_spatial_insert(cells, ref.get("repair_position", ref["position"]), MINER_REPAIR_SEARCH, [order, id])
-		order += 1
-	return cells
+	return REPAIR_QUERIES.damaged_cells(targets, MINER_REPAIR_SEARCH, EPS)
 
 static func _nearby_repair_ids(cells: Dictionary, point: Vector2) -> Array:
-	var cell := Vector2i(floori(point.x / MINER_REPAIR_SEARCH), floori(point.y / MINER_REPAIR_SEARCH))
-	var entries: Array = []
-	for x in range(-1, 2):
-		for y in range(-1, 2):
-			entries.append_array(cells.get(cell + Vector2i(x, y), []))
-	entries.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) < int(b[0]))
-	var ids: Array = []
-	for entry in entries:
-		ids.append(entry[1])
-	return ids
+	return REPAIR_QUERIES.nearby_ids(cells, point, MINER_REPAIR_SEARCH)
 
 static func _repair_retry_due(ship: Dictionary, now: float) -> bool:
-	return now + EPS >= float(ship.get("_next_repair_search", 0.0))
+	return REPAIR_QUERIES.retry_due(ship, now, EPS)
 
 static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float, damaged_cells: Variant = null) -> bool:
 	if ship["kind"] != "miner":
