@@ -1286,13 +1286,13 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 			button.visible = p.get("conquest_rewards", []).has(kind) or bool(p["station"].get(kind, false))
 		var installed: bool = bool(p["station"].get(kind, false))
 		command_card_ui.set_level_badge(button, 1 if installed else 0)
-		var pending: bool = ECONOMY._has_job(p, kind, "")
+		var pending: bool = ECONOMY.has_queued_job(p, kind, "")
 		button.disabled = not owned or not _any_selected_station_buildable(kind, p)
 		command_card_ui.set_build_available(button, not button.disabled)
 		var hint: String = "Plating I · %.0f s\n+1,500 station HP" if kind == "reinforced_plating" else "Lasers I · %.0f s\n+2 defensive lasers (4 total)"
 		if kind == "dyson_sphere":
 			hint = "Dyson Sphere · %.0f s\nRequires Dyson Sphere technology\n−50%% local ship material and GC costs"
-		_set_cost_tooltip(button, hint % ECONOMY._work(kind, 1), ECONOMY._cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
+		_set_cost_tooltip(button, hint % ECONOMY.nominal_work(kind, 1), ECONOMY.base_recipe_cost(kind, 1) if not installed and not pending else {}, 0.0, _available_cost_resources(p))
 		if button.disabled and ECONOMY.station_queue_count(p) >= ECONOMY.STATION_QUEUE_LIMIT:
 			command_card_ui.add_build_blocker(button, "Station queue full (%d/%d)" % [ECONOMY.station_queue_count(p), ECONOMY.STATION_QUEUE_LIMIT])
 		if installed or pending:
@@ -1360,7 +1360,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			name_text = "Warehouse"
 			eligible = level < 3
 			available = ECONOMY.warehouse_available(p)
-			work = ECONOMY._work("warehouse", level + 1)
+			work = ECONOMY.nominal_work("warehouse", level + 1)
 			description = "Storage: %s Metals · %s other resources" % [UI_TEXT.tons(ECONOMY.storage_capacity(p, "Metals"), 0), UI_TEXT.tons(ECONOMY.storage_capacity(p), 0)]
 			if eligible:
 				recipe = ECONOMY.WAREHOUSE_COSTS[level]
@@ -1374,7 +1374,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			(button.get_meta("portrait") as TextureRect).texture = command_card_ui.icon(kind)
 			if kind == "habitation":
 				var level: int = int(p.get("habitation_level", 0))
-				work = ECONOMY._work(kind, level + 1)
+				work = ECONOMY.nominal_work(kind, level + 1)
 				current_level = level
 				name_text = "Habitation"
 				eligible = level < 3
@@ -1382,7 +1382,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				recipe = ECONOMY.habitation_cost(p) if eligible else {}
 				description = "+%s housing capacity (%s total)" % [UI_TEXT.compact_amount(ECONOMY.habitation_capacity(p)), UI_TEXT.compact_amount(ECONOMY.habitation_capacity(p) * 2.0)] if eligible else "Maximum housing: %s" % UI_TEXT.compact_amount(ECONOMY.habitation_capacity(p))
 			else:
-				work = ECONOMY._work(kind, 1)
+				work = ECONOMY.nominal_work(kind, 1)
 				current_level = int(p.get("orbital_housing", 0))
 				name_text = "Orbital Eco-Housing"
 				recipe = ECONOMY.ORBITAL_HOUSING_COST
@@ -1395,8 +1395,8 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			name_text = "Build Shipyard"
 			eligible = slot > 0
 			if eligible:
-				recipe = ECONOMY._cost("yard", slot)
-				work = ECONOMY._work("yard", slot)
+				recipe = ECONOMY.base_recipe_cost("yard", slot)
+				work = ECONOMY.nominal_work("yard", slot)
 			available = eligible
 			description = "All shipyard slots occupied"
 			if eligible:
@@ -1410,8 +1410,8 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			current_level = p.get("pds", {}).size()
 			eligible = ECONOMY.next_pds(p) >= 0
 			available = eligible and ECONOMY.pds_job(p).is_empty()
-			recipe = ECONOMY._cost("pds", 1)
-			work = ECONOMY._work("pds", 1)
+			recipe = ECONOMY.base_recipe_cost("pds", 1)
+			work = ECONOMY.nominal_work("pds", 1)
 			description = "Defends one planet · %.0f damage · Range %.0f\nInvulnerable until station destroyed" % [ECONOMY.PDS_DAMAGE, ECONOMY.PDS_RANGE]
 		command_card_ui.set_level_badge(button, current_level)
 		if key != "yard":
@@ -1438,12 +1438,12 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 		elif key in ECONOMY.RESOURCES:
 			if float(p["population"]) + ECONOMY.EPS < float(ECONOMY.building_population(key, current_level + 1)):
 				command_card_ui.add_build_blocker(button, description.get_slice("\n", 0))
-			if ECONOMY._has_job(p, "economy_building", key):
+			if ECONOMY.has_queued_job(p, "economy_building", key):
 				command_card_ui.add_build_blocker(button, "Upgrade already queued")
 		elif key == "warehouse" or kind == "habitation":
 			if not eligible:
 				command_card_ui.add_build_blocker(button, "Maximum level reached")
-			elif ECONOMY._has_job(p, kind, ""):
+			elif ECONOMY.has_queued_job(p, kind, ""):
 				command_card_ui.add_build_blocker(button, "Upgrade already queued")
 			if key == "warehouse" and eligible and float(p["population"]) + ECONOMY.EPS < float(ECONOMY.WAREHOUSE_POPULATIONS[current_level]):
 				command_card_ui.add_build_blocker(button, description.get_slice("\n", 0))
@@ -1527,7 +1527,7 @@ func _yard_can_upgrade(system: Dictionary, slot: int) -> bool:
 	for job in system["queue"]:
 		if job["kind"] == "yard_upgrade" and int(job["target"]) == slot:
 			return false
-	return ECONOMY.construction_affordable(_state(), system, ECONOMY._cost("yard_upgrade", int(system["yards"][slot]["level"]) + 1))
+	return ECONOMY.construction_affordable(_state(), system, ECONOMY.base_recipe_cost("yard_upgrade", int(system["yards"][slot]["level"]) + 1))
 
 func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 	var yard: Dictionary = system["yards"][selected_yard]
@@ -1561,7 +1561,7 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 		var portrait: TextureRect = button.get_meta("portrait")
 		portrait.texture = hull_art.production_icon(kind, _empire_color(int(system["owner"])))
 		portrait.modulate = Color.WHITE if available else Color(0.55, 0.55, 0.55)
-		_set_cost_tooltip(button, "%s · %.1f s\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY._work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard), kind)
+		_set_cost_tooltip(button, "%s · %.1f s\n%s" % [UI_TEXT.ship_kind_name(kind), ECONOMY.nominal_work(kind, 1) / ECONOMY.yard_speed(level), UI_TEXT.ship_stats(kind)], recipe, float(ECONOMY.CREW_COSTS[kind]), _available_cost_resources(system, selected_yard), kind)
 		if not ECONOMY.ship_origin_population_met(system, kind):
 			(button as CostButton).unmet_requirements.append(UI_TEXT.colony_population_requirement())
 		if not ECONOMY.ship_crew_available(system, kind, selected_yard):
@@ -1590,17 +1590,17 @@ func _refresh_yard_overview(system: Dictionary, owned: bool) -> void:
 			_set_cost_tooltip(upgrade, ECONOMY.size_name(target_level) + " unlocked")
 			command_card_ui.add_build_blocker(upgrade, "Already unlocked")
 		else:
-			var hint: String = "Upgrade to %s · %.0f s\nRequires %s resident population for this yard\nUnlocks %s ships · %.1f× build speed\n+%.0f HP · Fully repairs yard" % [ECONOMY.size_name(target_level), ECONOMY._work("yard_upgrade", target_level), UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[selected_yard]), ECONOMY.size_name(target_level), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP]
+			var hint: String = "Upgrade to %s · %.0f s\nRequires %s resident population for this yard\nUnlocks %s ships · %.1f× build speed\n+%.0f HP · Fully repairs yard" % [ECONOMY.size_name(target_level), ECONOMY.nominal_work("yard_upgrade", target_level), UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[selected_yard]), ECONOMY.size_name(target_level), ECONOMY.yard_speed(target_level) / ECONOMY.yard_speed(1), ECONOMY.YARD_HP]
 			if not eligible:
 				hint += "\nRequires " + ECONOMY.size_name(target_level - 1) + " shipyard"
-			_set_cost_tooltip(upgrade, hint, ECONOMY._cost("yard_upgrade", target_level), 0.0, _available_cost_resources(system, selected_yard))
+			_set_cost_tooltip(upgrade, hint, ECONOMY.base_recipe_cost("yard_upgrade", target_level), 0.0, _available_cost_resources(system, selected_yard))
 			if not operating:
 				command_card_ui.add_build_blocker(upgrade, hint.get_slice("\n", 1))
 			if not eligible:
 				command_card_ui.add_build_blocker(upgrade, "Requires " + ECONOMY.size_name(target_level - 1) + " shipyard")
 			if ECONOMY.shipyard_queue_count(system, selected_yard) >= ECONOMY.SHIPYARD_QUEUE_LIMIT:
 				command_card_ui.add_build_blocker(upgrade, "Shipyard queue full")
-			if ECONOMY._has_job(system, "yard_upgrade", str(selected_yard)):
+			if ECONOMY.has_queued_job(system, "yard_upgrade", str(selected_yard)):
 				command_card_ui.add_build_blocker(upgrade, "Upgrade already queued")
 			if not owned:
 				command_card_ui.add_build_blocker(upgrade, "Requires an owned shipyard")
@@ -1749,8 +1749,8 @@ func _draw_rock_selection(canvas: Control, rock: Dictionary, scale: float) -> vo
 
 # Names are static generated map geography, not live tactical information.
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
-	var team: int = ECONOMY._combat_group(state, _me())
-	if ECONOMY._shares_group_vision(state, team, ECONOMY._combat_group(state, int(ship["owner"]))):
+	var team: int = ECONOMY.combat_group(state, _me())
+	if ECONOMY.shares_group_vision(state, team, ECONOMY.combat_group(state, int(ship["owner"]))):
 		return true
 	return _fog_visible(ship.get("position", Vector2.INF)) and ECONOMY.ship_visible_to_team(state, ship, team)
 
@@ -2049,7 +2049,7 @@ func _active_command(ship: Dictionary) -> String:
 		return ""
 	if bool(ship.get("holding", false)):
 		return "hold"
-	if not ECONOMY._unit_order_running(ship):
+	if not ECONOMY.unit_order_running(ship):
 		return ""
 	var order: Dictionary = ship.get("unit_order", {})
 	match str(order.get("kind", "")):
@@ -2133,7 +2133,7 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 				field = node - state["planets"].size()
 		var eligible: Array[int] = []
 		for craft in _autocast_units(state, "collect"):
-			if ECONOMY._science_target_valid(state, graph, craft, field):
+			if ECONOMY.science_target_valid(state, graph, craft, field):
 				eligible.append(int(craft["id"]))
 		_issue_order(eligible, {"kind": "collect", "target": field}, append)
 	elif mode == "repair":
@@ -2149,9 +2149,9 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 		var owned: Array[int] = _selected_owned_units(state)
 		var orders: Array = []
 		for ship in state["ships"]:
-			if not owned.has(int(ship["id"])) or ECONOMY._cargo_total(ship) <= ECONOMY.EPS:
+			if not owned.has(int(ship["id"])) or ECONOMY.cargo_total(ship) <= ECONOMY.EPS:
 				continue
-			if ECONOMY._friendly_target(state, _me(), ref):
+			if ECONOMY.friendly_service_target(state, _me(), ref):
 				if ECONOMY.can_deposit(state, ship, target):
 					orders.append({"ids": [ship["id"]], "order": {"kind": "deposit", "target": target}})
 			else:
@@ -2299,7 +2299,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Stationed at %s" % _poi_name(int(ship["at"])) if route.is_empty() else "%s\nETA %.1f yr" % [_poi_name(int(route.back())), _remaining_years(state, ship)]
 	if bool(ship.get("retreating", false)):
 		var site: int = int(ship.get("repair_site", -1))
-		status = "Repairing" if route.is_empty() and site >= 0 and (ship["position"] as Vector2).distance_to(ECONOMY.station_position(state, site, float(state["elapsed"]))) <= ECONOMY.STATION_REPAIR_RANGE + ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), owner, site) else "Withdrawing"
+		status = "Repairing" if route.is_empty() and site >= 0 and (ship["position"] as Vector2).distance_to(ECONOMY.station_position(state, site, float(state["elapsed"]))) <= ECONOMY.STATION_REPAIR_RANGE + ECONOMY.EPS and ECONOMY.repair_site_safe(state, ECONOMY.military_graph(state), owner, site) else "Withdrawing"
 	elif int(ship.get("pursuit_target", -1)) >= 0:
 		status = "Pursuing"
 	elif bool(ship.get("holding", false)):
@@ -2337,14 +2337,14 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		var target_ship: Dictionary = ECONOMY.service_targets(state).get(int(follow_order["target"]), {}).get("entity", {})
 		status = ("%s %s" % ["Guarding" if bool(follow_order.get("guard", false)) else "Following", UI_TEXT.ship_kind_name(str(target_ship.get("kind", "ship")))])
 	var wait_left: float = ECONOMY.autocast_remaining(state, ship, "wander")
-	if wait_left > ECONOMY.EPS and ECONOMY.autocast_enabled(ship, "wander") and ECONOMY._is_idle_ship(ship):
+	if wait_left > ECONOMY.EPS and ECONOMY.autocast_enabled(ship, "wander") and ECONOMY.is_idle_ship(ship):
 		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)
 	if kind == "colony_ship":
 		if bool(ship.get("salvage_delivery", false)):
 			status = "Delivering Organics" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for storage"
 		status += "\nOrganics %.1f / %.0f t · %s" % [float(ship["cargo"].get("Organics", 0.0)), ECONOMY.COLONY_CAPACITY, "Farming" if ECONOMY.autocast_enabled(ship, "farm") and not bool(ship.get("salvage_delivery", false)) and ECONOMY.cargo_free(ship) > ECONOMY.EPS else "Farm idle"]
 	if kind == "science_ship":
-		if ECONOMY._cargo_total(ship) > ECONOMY.EPS:
+		if ECONOMY.cargo_total(ship) > ECONOMY.EPS:
 			status += "\nAntimatter secured · 1 unit"
 		elif ship.get("unit_order", {}).get("kind", "") == "collect":
 			var years: float = float(ship.get("science_years", 0.0))
@@ -2393,7 +2393,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			continue
 		selected_crew += float(craft.get("crew", 0.0))
 		owned_count += int(int(craft["owner"]) == _me())
-		loaded_owned = loaded_owned or (int(craft["owner"]) == _me() and ECONOMY._cargo_total(craft) > ECONOMY.EPS)
+		loaded_owned = loaded_owned or (int(craft["owner"]) == _me() and ECONOMY.cargo_total(craft) > ECONOMY.EPS)
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			cargo[resource] = float(cargo.get(resource, 0.0)) + float(craft.get("cargo", {}).get(resource, 0.0))
 	if not multiple:
@@ -2411,12 +2411,12 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	var has_miners: bool = not _selected_miners().is_empty()
 	for craft in state["ships"]:
 		if _command_member(craft):
-			loaded_owned = loaded_owned or ECONOMY._cargo_total(craft) > ECONOMY.EPS
+			loaded_owned = loaded_owned or ECONOMY.cargo_total(craft) > ECONOMY.EPS
 			combat_owned = combat_owned or ECONOMY.armed(craft)
 			can_load = can_load or (ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS)
 			has_cargo_hold = has_cargo_hold or ECONOMY.supports_autocast(craft, "salvage")
 			has_farm = has_farm or craft["kind"] == "colony_ship"
-			loaded_farm = loaded_farm or (craft["kind"] == "colony_ship" and ECONOMY._cargo_total(craft) > ECONOMY.EPS)
+			loaded_farm = loaded_farm or (craft["kind"] == "colony_ship" and ECONOMY.cargo_total(craft) > ECONOMY.EPS)
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_miners) and (id not in ["load", "unload"] or has_cargo_hold)
@@ -2442,7 +2442,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY.can_build_warp_gate(state, graph, craft))
 		command_card_ui.set_hint(transform, "Deploy Warp Gate [J] · 1 antimatter + %.0f GC; one gate per owned system" % ECONOMY.WARP_GATE_CREDIT_COST)
 	else:
-		transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY._valid_unit_order(state, graph, craft, {"kind": "transform"}, true))
+		transform.disabled = not state["ships"].any(func(craft: Dictionary) -> bool: return _command_member(craft) and ECONOMY.unit_order_valid(state, graph, craft, {"kind": "transform"}, true))
 		command_card_ui.set_hint(transform, "Transform into Space Station [J] · construction fee prepaid with colony ship")
 	command_buttons["deliver_farm"].visible = has_farm
 	command_buttons["deliver_farm"].disabled = not loaded_farm
@@ -2452,7 +2452,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	fleet_title.visible = _command_kinds(state).size() > 1
 	fleet_title.text = "%s · Tab" % UI_TEXT.ship_kind_name(command_kind)
 	fleet_detail.visible = false
-	fleet_cargo_footer.visible = ECONOMY._cargo_total({"cargo": cargo}) > ECONOMY.EPS
+	fleet_cargo_footer.visible = ECONOMY.cargo_total({"cargo": cargo}) > ECONOMY.EPS
 	if fleet_cargo_footer.visible:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			var amount: float = float(cargo.get(resource, 0.0))
@@ -2829,7 +2829,7 @@ func _refresh_match_result(state: Dictionary) -> void:
 		if is_instance_valid(codex):
 			codex.hide()
 		var team: int = int(result["team"])
-		var mine: int = ECONOMY._combat_group(state, _me())
+		var mine: int = ECONOMY.combat_group(state, _me())
 		match_result_dialog.title = "Draw" if team == 0 else ("Victory" if mine == team else "Defeat")
 		if result.has("winner"):
 			match_result_dialog.dialog_text = "No surviving empires." if team == 0 else "%s wins by conquest." % _empire_name(team)
@@ -3442,7 +3442,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 		var upgrade: Button = yard_upgrades[target_level]
 		upgrade.disabled = not can_upgrade[target_level]
 		command_card_ui.set_build_available(upgrade, not upgrade.disabled)
-		_set_cost_tooltip(upgrade, "Upgrade eligible %s shipyards to %s\nUnlocks next ship class · Faster construction\nFully repairs each yard" % [ECONOMY.size_name(target_level - 1), ECONOMY.size_name(target_level)], ECONOMY._cost("yard_upgrade", target_level), 0.0, available)
+		_set_cost_tooltip(upgrade, "Upgrade eligible %s shipyards to %s\nUnlocks next ship class · Faster construction\nFully repairs each yard" % [ECONOMY.size_name(target_level - 1), ECONOMY.size_name(target_level)], ECONOMY.base_recipe_cost("yard_upgrade", target_level), 0.0, available)
 		if upgrade.disabled:
 			var reasons: Array[String] = []
 			for ref in refs:
@@ -3453,7 +3453,7 @@ func _refresh_group_yard_commands(state: Dictionary) -> void:
 					reasons.append("Insufficient shipyard staffing")
 				if ECONOMY.shipyard_queue_count(system, ref.y) >= ECONOMY.SHIPYARD_QUEUE_LIMIT and not reasons.has("Shipyard queue full"):
 					reasons.append("Shipyard queue full")
-				if ECONOMY._has_job(system, "yard_upgrade", str(ref.y)) and not reasons.has("Upgrade already queued"):
+				if ECONOMY.has_queued_job(system, "yard_upgrade", str(ref.y)) and not reasons.has("Upgrade already queued"):
 					reasons.append("Upgrade already queued")
 			for reason in reasons:
 				command_card_ui.add_build_blocker(upgrade, reason)
@@ -3571,13 +3571,13 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 				selected_units.append(selected_ship_id)
 			if double_click:
 				var kind: String = str(craft["kind"])
-				var team: int = ECONOMY._combat_group(state, _me())
-				if ECONOMY._combat_group(state, int(craft["owner"])) != team:
+				var team: int = ECONOMY.combat_group(state, _me())
+				if ECONOMY.combat_group(state, int(craft["owner"])) != team:
 					selected_units.clear()
 					selected_ship_id = -1
 				for other in state["ships"]:
 					var id: int = int(other["id"])
-					if ECONOMY._combat_group(state, int(other["owner"])) == team and other["kind"] == kind and poses.has(id) and _in_visible_playfield(poses[id]["point"]) and not selected_units.has(id):
+					if ECONOMY.combat_group(state, int(other["owner"])) == team and other["kind"] == kind and poses.has(id) and _in_visible_playfield(poses[id]["point"]) and not selected_units.has(id):
 						selected_units.append(id)
 				if not selected_units.is_empty():
 					selected_ship_id = selected_units[0]
@@ -3609,7 +3609,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	if selected >= 0:
 		var system: Dictionary = fog_state.system_view(state, selected, _map_size())
 		var owner: int = int(system.get("owner", 0))
-		if _fog_visible(state["map"]["points"][selected]) and owner > 0 and ECONOMY.has_station(system) and ECONOMY._combat_group(state, owner) == ECONOMY._combat_group(state, _me()):
+		if _fog_visible(state["map"]["points"][selected]) and owner > 0 and ECONOMY.has_station(system) and ECONOMY.combat_group(state, owner) == ECONOMY.combat_group(state, _me()):
 			var ref := Vector2i(selected, 0)
 			_set_building_primary(state, ref, "station")
 			building_selection_kind = "station"
@@ -3627,12 +3627,12 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	if not additive:
 		selected_units.clear()
 	var poses: Dictionary = _ship_poses(state)
-	var team: int = ECONOMY._combat_group(state, _me())
+	var team: int = ECONOMY.combat_group(state, _me())
 	var friendly_ids: Dictionary = {}
 	var combat_ids: Dictionary = {}
 	var boxed: Array[int] = []
 	for craft in state.get("ships", []):
-		if ECONOMY._combat_group(state, int(craft["owner"])) != team or craft.get("kind", "") == "warp_gate":
+		if ECONOMY.combat_group(state, int(craft["owner"])) != team or craft.get("kind", "") == "warp_gate":
 			continue
 		friendly_ids[int(craft["id"])] = true
 		var id: int = int(craft["id"])
@@ -3785,11 +3785,11 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		var armed: bool = ECONOMY.armed(craft)
 		if explicit_attack and not armed:
 			continue
-		if not ref.is_empty() and armed and ECONOMY._hostile_hull(state, _me(), ref):
+		if not ref.is_empty() and armed and ECONOMY.hostile_hull(state, _me(), ref):
 			order = {"kind": "attack", "target": target}
-		elif contextual and ref.get("entity", {}).get("kind", "") == "warp_gate" and int(ref.get("owner", -1)) == _me() and ECONOMY._warp_order_valid(state, craft, target):
+		elif contextual and ref.get("entity", {}).get("kind", "") == "warp_gate" and int(ref.get("owner", -1)) == _me() and ECONOMY.warp_order_valid(state, craft, target):
 			order = {"kind": "warp_travel", "target": target}
-		elif contextual and ref.get("kind") == "ship" and ECONOMY._friendly_target(state, _me(), ref):
+		elif contextual and ref.get("kind") == "ship" and ECONOMY.friendly_service_target(state, _me(), ref):
 			if id == target:
 				continue
 			order = {"kind": "follow", "target": target, "guard": craft["kind"] in ["fighter", "scout", "cruiser", "destroyer"]}
@@ -3797,7 +3797,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 			order = {"kind": "deposit", "target": target}
 		elif colony_target >= 0 and craft["kind"] == "colony_ship":
 			order = {"kind": "colonize", "target": colony_target}
-		elif field >= 0 and bool(state["map"]["fields"][field].get("antimatter", false)) and craft["kind"] == "science_ship" and ECONOMY._cargo_total(craft) <= ECONOMY.EPS:
+		elif field >= 0 and bool(state["map"]["fields"][field].get("antimatter", false)) and craft["kind"] == "science_ship" and ECONOMY.cargo_total(craft) <= ECONOMY.EPS:
 			order = {"kind": "collect", "target": field}
 		elif wreck >= 0 and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
 			salvage_ids.append(id)
@@ -3916,7 +3916,7 @@ func _transform_selected() -> void:
 		_issue_order(ids, {"kind": "warp_build"})
 		return
 	for ship in state["ships"]:
-		if _command_member(ship) and ECONOMY._valid_unit_order(state, graph, ship, {"kind": "transform"}, Input.is_key_pressed(KEY_SHIFT)):
+		if _command_member(ship) and ECONOMY.unit_order_valid(state, graph, ship, {"kind": "transform"}, Input.is_key_pressed(KEY_SHIFT)):
 			ids.append(int(ship["id"]))
 	if not ids.is_empty():
 		_issue_order(ids, {"kind": "transform"}, Input.is_key_pressed(KEY_SHIFT))
@@ -3924,7 +3924,7 @@ func _transform_selected() -> void:
 func _deliver_farm_selected() -> void:
 	var ids: Array[int] = []
 	for ship in _state().get("ships", []):
-		if ship["kind"] == "colony_ship" and _command_member(ship) and ECONOMY._cargo_total(ship) > ECONOMY.EPS:
+		if ship["kind"] == "colony_ship" and _command_member(ship) and ECONOMY.cargo_total(ship) > ECONOMY.EPS:
 			ids.append(int(ship["id"]))
 	pending_command = ""
 	_issue_order(ids, {"kind": "unload"}, Input.is_key_pressed(KEY_SHIFT))
@@ -3961,14 +3961,14 @@ func _formation_orders(state: Dictionary) -> Array:
 			heading = ship.get("heading", Vector2.UP)
 		var node: int = ECONOMY.patrol_node(state, graph, _me(), point)
 		var order: Dictionary = {"kind": "patrol" if formation_mode == "patrol" else "position", "target": node, "point": point, "move_only": formation_mode != "attack", "heading": heading}
-		entries.append({"ids": owned, "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
+		entries.append({"ids": owned, "order": order, "hull": ship["kind"], "valid": ECONOMY.unit_order_valid(state, graph, ship, order, formation_append)})
 		return entries
 	for slot in ECONOMY.polyline_formation_slots(origins, stroke):
 		var ship: Dictionary = ships[slot["id"]]
 		var point: Vector2 = slot["point"]
 		var node: int = ECONOMY.patrol_node(state, graph, _me(), point)
 		var order: Dictionary = {"kind": "patrol" if formation_mode == "patrol" else "position", "target": node, "point": point, "move_only": formation_mode != "attack", "heading": slot["heading"]}
-		entries.append({"ids": [ship["id"]], "order": order, "hull": ship["kind"], "valid": ECONOMY._valid_unit_order(state, graph, ship, order, formation_append)})
+		entries.append({"ids": [ship["id"]], "order": order, "hull": ship["kind"], "valid": ECONOMY.unit_order_valid(state, graph, ship, order, formation_append)})
 	return entries
 
 func _append_formation_point(point: Vector2, force: bool = false) -> void:
@@ -4800,15 +4800,15 @@ func _draw_map() -> void:
 			elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
 				var destination: Vector2 = poses[int(active_order["target"])]["point"]
 				order_view.draw_command_route(order_graph, craft, start, destination, HUD.ACCENT)
-			elif active_order.get("kind", "") == "colonize" and ECONOMY._unit_order_running(craft):
+			elif active_order.get("kind", "") == "colonize" and ECONOMY.unit_order_running(craft):
 				var star: int = int(active_order["target"])
 				if star >= 0 and star < state["planets"].size():
 					var center: Vector2 = _screen_point(state["map"]["points"][star])
 					var ring: float = maxf(5.0, celestial_view.star_draw_radius(_planet_radius(star, state))) + 5.0
 					map_canvas.draw_arc(center, ring, 0.0, TAU, 48, Color(1.0, 1.0, 1.0, 0.9), 1.5, true)
-			elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY._unit_order_running(craft):
+			elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY.unit_order_running(craft):
 				order_view.draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
-			elif active_order.get("kind", "") == "position" and ECONOMY._unit_order_running(craft):
+			elif active_order.get("kind", "") == "position" and ECONOMY.unit_order_running(craft):
 				var endpoint: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
 				if endpoint.is_finite():
 					var destination: Vector2 = _screen_point(endpoint)
@@ -4900,7 +4900,7 @@ func _draw_map() -> void:
 			var site: int = int(ship.get("repair_site", -1))
 			if site >= 0 and site < state["planets"].size():
 				var world: Vector2 = ECONOMY.station_position(state, site, float(state["elapsed"]))
-				if int(ship["at"]) == site and (ship["position"] as Vector2).distance_to(world) <= ECONOMY.STATION_REPAIR_RANGE + ECONOMY.EPS and ECONOMY._repair_site_safe(state, ECONOMY.military_graph(state), int(ship["owner"]), site):
+				if int(ship["at"]) == site and (ship["position"] as Vector2).distance_to(world) <= ECONOMY.STATION_REPAIR_RANGE + ECONOMY.EPS and ECONOMY.repair_site_safe(state, ECONOMY.military_graph(state), int(ship["owner"]), site):
 					var hub: Vector2 = _screen_point(ECONOMY.station_position(state, site, celestial_view.orbit_time(state)))
 					var end: Vector2 = poses[shooter]["point"]
 					var aim: Vector2 = hub.direction_to(end)
@@ -4933,7 +4933,7 @@ func _draw_map() -> void:
 		if not viewport_bounds.grow(maxf(32.0, 80.0 * scale)).has_point(point):
 			continue
 		var direction: Vector2 = pose["direction"]
-		if not bool(ship.get("holding", false)) and ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and not ECONOMY._engaged(ship) and int(ship.get("yard_target", -1)) >= -1:
+		if not bool(ship.get("holding", false)) and ship.get("mining_mode", "") == "mining" and ship.has("mining_rock") and not ECONOMY.ship_engaged(ship) and int(ship.get("yard_target", -1)) >= -1:
 			var aim: Vector2 = _screen_point(ship["mining_rock"]) - point
 			if not aim.is_zero_approx():
 				direction = aim.normalized()
@@ -4946,7 +4946,7 @@ func _draw_map() -> void:
 		var thrust: float = ship_motion.thrust_for(int(ship["id"]))
 		if not cloaked and int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and thrust > 0.035:
 			world_batches.queue_exhaust(str(ship["kind"]), point, direction, scale, thrust, int(ship["id"]), viewport_bounds)
-		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY._salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
+		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
 				var emitter: Vector2 = point + direction * WORLD_EFFECTS.MINER_MUZZLE.x + side * sign * WORLD_EFFECTS.MINER_MUZZLE.y
@@ -5078,10 +5078,10 @@ func _station_buildable(key: String, p: Dictionary) -> bool:
 			return ECONOMY.orbital_housing_available(p) and ECONOMY.construction_affordable(_state(), p, ECONOMY.ORBITAL_HOUSING_COST)
 		"yard":
 			var level: int = ECONOMY.next_shipyard_slot(p)
-			return level > 0 and ECONOMY.construction_affordable(_state(), p, ECONOMY._cost("yard", level))
+			return level > 0 and ECONOMY.construction_affordable(_state(), p, ECONOMY.base_recipe_cost("yard", level))
 		"pds":
-			return ECONOMY.next_pds(p) >= 0 and ECONOMY.pds_job(p).is_empty() and ECONOMY.construction_affordable(_state(), p, ECONOMY._cost("pds", 1))
-	return ECONOMY.station_upgrade_available(p, key) and ECONOMY.construction_affordable(_state(), p, ECONOMY._cost(key, 1))
+			return ECONOMY.next_pds(p) >= 0 and ECONOMY.pds_job(p).is_empty() and ECONOMY.construction_affordable(_state(), p, ECONOMY.base_recipe_cost("pds", 1))
+	return ECONOMY.station_upgrade_available(p, key) and ECONOMY.construction_affordable(_state(), p, ECONOMY.base_recipe_cost(key, 1))
 
 # Local debug-build command registry. No evaluation and no development RPCs.
 func _dev_console_modal_open() -> bool:

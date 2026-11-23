@@ -10767,3 +10767,54 @@ static func _refill_empire_fleets(state: Dictionary) -> void:
 						break
 				if needed <= 0:
 					break
+
+# Supported read-only rule queries for the presentation layer.
+# Preserve the original internal helpers to keep simulation call sites stable.
+
+static func has_queued_job(planet: Dictionary, kind: String, target: String) -> bool:
+	return _has_job(planet, kind, target)
+
+static func nominal_work(kind: String, level: int) -> float:
+	return _work(kind, level)
+
+static func base_recipe_cost(kind: String, level: int) -> Dictionary:
+	return _cost(kind, level)
+
+static func combat_group(state: Dictionary, owner: int) -> int:
+	return _combat_group(state, owner)
+
+static func shares_group_vision(state: Dictionary, viewer: int, source: int) -> bool:
+	return _shares_group_vision(state, viewer, source)
+
+static func unit_order_running(ship: Dictionary) -> bool:
+	return _unit_order_running(ship)
+
+static func science_target_valid(state: Dictionary, graph: Dictionary, ship: Dictionary, index: int) -> bool:
+	return _science_target_valid(state, graph, ship, index)
+
+static func cargo_total(ship: Dictionary) -> float:
+	return _cargo_total(ship)
+
+static func friendly_service_target(state: Dictionary, owner: int, target: Dictionary) -> bool:
+	return _friendly_target(state, owner, target)
+
+static func repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, site: int) -> bool:
+	return _repair_site_safe(state, graph, owner, site)
+
+static func is_idle_ship(ship: Dictionary) -> bool:
+	return _is_idle_ship(ship)
+
+static func unit_order_valid(state: Dictionary, graph: Dictionary, ship: Dictionary, order: Dictionary, append: bool) -> bool:
+	return _valid_unit_order(state, graph, ship, order, append)
+
+static func hostile_hull(state: Dictionary, player: int, target: Dictionary) -> bool:
+	return _hostile_hull(state, player, target)
+
+static func warp_order_valid(state: Dictionary, ship: Dictionary, source: int) -> bool:
+	return _warp_order_valid(state, ship, source)
+
+static func ship_engaged(ship: Dictionary) -> bool:
+	return _engaged(ship)
+
+static func salvage_active(ship: Dictionary) -> bool:
+	return _salvage_active(ship)
