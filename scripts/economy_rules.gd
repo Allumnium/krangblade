@@ -78,6 +78,13 @@ const ACTIVE_PRODUCTION = RESOURCES
 const STARTING_STOCK = {"Metals": 1650.0, "Organics": 300.0, "Crystals": 0.0}
 const STARTING_GC: float = 5000.0
 const RESIDENT_TAX_RATE: float = 0.005
+# Derived slow-rate coefficients only. Live stock, residents and credits are
+# still integrated at every authoritative substep.
+const ECONOMY_RATE_INTERVAL: float = 0.4
+static var _economy_rate_state: Dictionary = {}
+static var _economy_rate_roster: Array = []
+static var _economy_rate_entries: Dictionary = {}
+static var _economy_wage_entries: Dictionary = {}
 const ROGUE_GRACE_YEARS: float = 60.0
 const ROGUE_CHECK_YEARS: float = 10.0
 const ROGUE_CHANCE: float = 0.005
@@ -586,14 +593,18 @@ static func resident_tax_income(state: Dictionary, player: int) -> float:
 # One pass over systems, independent of fleet size. Use starting residents
 # for each simulation substep; reserved crew remains taxable until embarked.
 # Ship crews and embarked construction crew do not contribute.
-static func _accrue_resident_taxes(state: Dictionary, dt: float) -> void:
+static func _accrue_resident_taxes(state: Dictionary, dt: float, bases: Dictionary = {}) -> void:
 	if dt <= 0.0:
 		return
 	var credits: Dictionary = state.get("galactic_credits", {})
-	for planet in state.get("planets", []):
+	var planets: Array = state.get("planets", [])
+	for index in range(planets.size()):
+		var planet: Dictionary = planets[index]
 		var owner: int = int(planet["owner"])
 		if owner > 0 and credits.has(owner):
-			credits[owner] = float(credits[owner]) + maxf(0.0, float(planet["population"])) * RESIDENT_TAX_RATE * _rank_factor(planet, "rank_tax", 0.05) * dt
+			var basis: Dictionary = bases.get(index, {})
+			var factor: float = _rank_factor(planet, "rank_tax", 0.05) if basis.is_empty() else float(basis["tax"])
+			credits[owner] = float(credits[owner]) + maxf(0.0, float(planet["population"])) * RESIDENT_TAX_RATE * factor * dt
 
 static func ship_upkeep(kind: String) -> float:
 	return float(SHIP_UPKEEP_GC.get(kind, 0.0))
@@ -617,7 +628,7 @@ static func _pay_hull_wages(credits: Dictionary, ship: Dictionary, amount: float
 
 # Taxes are collected first. Civilian hulls get priority over military hulls,
 # then stable fleet order within each group. No per-hull sorting or timers.
-static func _pay_fleet_upkeep(state: Dictionary, dt: float) -> void:
+static func _pay_fleet_upkeep(state: Dictionary, dt: float, wage_tables: Dictionary = {}) -> void:
 	if dt <= 0.0:
 		return
 	var credits: Dictionary = state.get("galactic_credits", {})
@@ -628,7 +639,7 @@ static func _pay_fleet_upkeep(state: Dictionary, dt: float) -> void:
 	for ship in state.get("ships", []):
 		var owner: int = int(ship["owner"])
 		var kind: String = str(ship.get("kind", ""))
-		var rate: float = hull_upkeep(state, ship)
+		var rate: float = _scheduled_wage_rate(state, ship, wage_tables)
 		if owner <= 0 or not credits.has(owner) or rate <= 0.0:
 			if ship.has("unpaid_since"):
 				ship.erase("unpaid_since")
@@ -638,7 +649,7 @@ static func _pay_fleet_upkeep(state: Dictionary, dt: float) -> void:
 		else:
 			_pay_hull_wages(credits, ship, rate * dt, now)
 	for ship in military:
-		_pay_hull_wages(credits, ship, hull_upkeep(state, ship) * dt, now)
+		_pay_hull_wages(credits, ship, _scheduled_wage_rate(state, ship, wage_tables) * dt, now)
 
 # A seeded roll per hull and period, independent of simulation frame rate.
 # Pirates do not join teams, diplomacy, the economy or objective scoring.
@@ -1239,13 +1250,21 @@ static func overpopulation_penalty(planet: Dictionary, capacity_factor: float = 
 	var fraction: float = clampf(planetary_population(planet) / (habitation_capacity(planet) * capacity_factor), 0.0, 1.0)
 	return pow(fraction, 3.0)
 
-static func farm_potential(planet: Dictionary) -> float:
+static func _farm_base(planet: Dictionary) -> float:
+	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics")
+
+static func _farm_bonus(planet: Dictionary) -> float:
+	return _rank_factor(planet, "rank_food", 0.05) + (0.15 if has_reward(planet, "agriculture") else 0.0)
+
+static func farm_potential(planet: Dictionary, basis: Dictionary = {}) -> float:
 	if int(planet["owner"]) == 0 or not has_planets(planet):
 		return 0.0
-	return ORGANICS_PER_LEVEL * production_level(planet, "Organics") * production_modifier(planet, "Organics") * float(planet.get("farm_factor", 1.0)) * (_rank_factor(planet, "rank_food", 0.05) + (0.15 if has_reward(planet, "agriculture") else 0.0))
+	var base: float = _farm_base(planet) if basis.is_empty() else float(basis["farm_base"])
+	var bonus: float = _farm_bonus(planet) if basis.is_empty() else float(basis["farm_bonus"])
+	return base * float(planet.get("farm_factor", 1.0)) * bonus
 
-static func population_capacity(planet: Dictionary) -> float:
-	return farm_potential(planet) * POPULATION_PER_ORGANICS_RATE
+static func population_capacity(planet: Dictionary, basis: Dictionary = {}) -> float:
+	return farm_potential(planet, basis) * POPULATION_PER_ORGANICS_RATE
 
 static func habitation_capacity(planet: Dictionary) -> float:
 	if not has_planets(planet):
@@ -1285,28 +1304,35 @@ static func net_rate(planet: Dictionary, resource: String) -> float:
 		return 0.0
 	return net
 
-static func rate(planet: Dictionary, resource: String) -> float:
+static func _industrial_base(planet: Dictionary, resource: String) -> float:
+	var base_rate: float = CRYSTALS_PER_LEVEL if resource == "Crystals" else PRODUCTION_PER_LEVEL
+	return base_rate * production_level(planet, resource) * production_modifier(planet, resource)
+
+static func _industrial_bonus(planet: Dictionary, resource: String) -> float:
+	if resource == "Metals":
+		return _rank_factor(planet, "rank_metals", 0.05) + (0.15 if has_reward(planet, "industry") else 0.0)
+	if resource == "Crystals":
+		return _rank_factor(planet, "rank_crystals", 0.05) + (0.25 if has_reward(planet, "crystals") else 0.0)
+	return 1.0
+
+static func rate(planet: Dictionary, resource: String, basis: Dictionary = {}) -> float:
 	var station_output: float = STATION_CRYSTALS_PER_YEAR if resource == "Crystals" and int(planet["owner"]) != 0 and has_station(planet) else 0.0
 	if bool(planet.get("planet_blockaded", false)) and has_planets(planet):
 		return eco_organics(planet) if resource == "Organics" else station_output
 	if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0 or (not has_planets(planet) and resource in ["Metals", "Crystals"]):
 		return station_output
-	var level: int = production_level(planet, resource)
 	if resource == "Organics":
 		# Small populations still produce a surplus; farm capacity limits output.
-		var capacity: float = population_capacity(planet)
+		var farm: float = farm_potential(planet, basis)
+		var capacity: float = farm * POPULATION_PER_ORGANICS_RATE
 		if capacity <= EPS:
 			return eco_organics(planet)
 		var labor: float = sqrt(clampf(planetary_population(planet) / capacity, 0.0, 1.0))
-		return farm_potential(planet) * labor + eco_organics(planet)
+		return farm * labor + eco_organics(planet)
 	var labor: float = population_multiplier(planet)
-	var base_rate: float = CRYSTALS_PER_LEVEL if resource == "Crystals" else PRODUCTION_PER_LEVEL
-	var output: float = base_rate * level * production_modifier(planet, resource) * labor
-	if resource == "Metals":
-		output *= _rank_factor(planet, "rank_metals", 0.05) + (0.15 if has_reward(planet, "industry") else 0.0)
-	if resource == "Crystals":
-		output *= _rank_factor(planet, "rank_crystals", 0.05) + (0.25 if has_reward(planet, "crystals") else 0.0)
-	return station_output + output
+	var base: float = _industrial_base(planet, resource) if basis.is_empty() else float(basis["base"][resource])
+	var bonus: float = _industrial_bonus(planet, resource) if basis.is_empty() else float(basis["bonus"][resource])
+	return station_output + base * labor * bonus
 
 static func food_growth_multiplier(planet: Dictionary) -> float:
 	# Orbital residents are self-sufficient; only terrestrial growth is food-limited.
@@ -1314,7 +1340,10 @@ static func food_growth_multiplier(planet: Dictionary) -> float:
 		return 1.0
 	return clampf(float(planet["stock"].get("Organics", 0.0)) / POPULATION_FOOD_RESERVE, 0.0, 1.0)
 
-static func _update_population(planet: Dictionary, dt: float) -> void:
+static func _growth_bonus(planet: Dictionary) -> float:
+	return _rank_factor(planet, "rank_growth", 0.05) + (0.15 if has_reward(planet, "population") else 0.0)
+
+static func _update_population(planet: Dictionary, dt: float, basis: Dictionary = {}) -> void:
 	var eco: float = eco_population(planet)
 	if not has_planets(planet):
 		planet["population_velocity"] = 0.0
@@ -1323,7 +1352,8 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 	# Exact solution of x'' + 2*w*x' + w*w*(x-target) = 0
 	# for a constant target during this tick. Stable even for large dt.
 	var current: float = planetary_population(planet)
-	var target: float = minf(population_capacity(planet), habitation_capacity(planet))
+	var housing: float = habitation_capacity(planet) if basis.is_empty() else float(basis["housing"])
+	var target: float = minf(population_capacity(planet, basis), housing)
 	var velocity: float = population_growth(planet)
 	var error: float = current - target
 	var omega: float = POPULATION_RESPONSE
@@ -1334,17 +1364,17 @@ static func _update_population(planet: Dictionary, dt: float) -> void:
 	# Far below equilibrium, limit positive growth to a 60-year doubling at full food reserves.
 	# Near capacity the damped response takes over without a hard population cap.
 	var growth_constant: float = log(2.0) / POPULATION_DOUBLING_YEARS * food_growth_multiplier(planet)
-	if current < habitation_capacity(planet):
-		growth_constant *= 1.0 - overpopulation_penalty(planet)
+	if current < housing:
+		growth_constant *= 1.0 - pow(clampf(current / housing, 0.0, 1.0), 3.0)
 	else:
 		growth_constant = 0.0
-	growth_constant *= _rank_factor(planet, "rank_growth", 0.05) + (0.15 if has_reward(planet, "population") else 0.0)
+	growth_constant *= _growth_bonus(planet) if basis.is_empty() else float(basis["growth"])
 	var growth_ceiling: float = current * exp(growth_constant * dt)
 	if next > growth_ceiling:
 		next = growth_ceiling
 		next_velocity = growth_constant * next
 	# A food shortfall prevents positive growth even with demographic momentum.
-	var food_available: float = civilian_stock_access(planet, "Organics") + rate(planet, "Organics") * dt
+	var food_available: float = civilian_stock_access(planet, "Organics") + rate(planet, "Organics", basis) * dt
 	if food_available + EPS < organics_demand(planet) * dt:
 		next = minf(next, current)
 		next_velocity = minf(next_velocity, 0.0)
@@ -2326,7 +2356,7 @@ static func _work_station_queue(state: Dictionary, index: int, p: Dictionary, dt
 		else:
 			_finish(state, index, p, item)
 
-static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
+static func _work_planet(state: Dictionary, index: int, dt: float, basis: Dictionary = {}) -> void:
 	var p: Dictionary = state["planets"][index]
 	if int(p["owner"]) == 0 or not has_station(p):
 		return
@@ -2336,9 +2366,9 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	var before_population: float = float(p["population"])
 	var elapsed: float = float(state["elapsed"])
 	p["farm_factor"] = 1.0 + FARM_VARIATION * sin(TAU * elapsed / FARM_CYCLE_SECONDS + float(p["farm_phase"]))
-	_update_population(p, dt)
+	_update_population(p, dt, basis)
 	p["demographic_rate"] = (float(p["population"]) - before_population) / maxf(EPS, dt)
-	_produce_planet_resources(state, p, dt)
+	_produce_planet_resources(state, p, dt, basis)
 	if not p["queue"].is_empty():
 		_work_upgrade_deliveries(state, index, p, dt)
 		_work_station_queue(state, index, p, dt)
@@ -2373,14 +2403,14 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 			_finish(state, index, p, chosen)
 			yard["job"] = -1
 
-static func _produce_planet_resources(state: Dictionary, p: Dictionary, dt: float) -> void:
+static func _produce_planet_resources(state: Dictionary, p: Dictionary, dt: float, basis: Dictionary = {}) -> void:
 	# Only Organics feed residents. Metals and Crystals accumulate up to
 	# storage capacity; food production can satisfy demand even at capacity.
 	# Refunds may temporarily exceed capacity; never destroy returned materials.
 	for resource in ACTIVE_PRODUCTION:
 		var capacity: float = storage_capacity(p, resource)
 		var stored: float = float(p["stock"][resource])
-		var potential: float = rate(p, resource) * dt
+		var potential: float = rate(p, resource, basis) * dt
 		var demand: float = consumption(p, resource) * dt
 		var reserve: float = capacity * float(p["thresholds"][resource]["min"]) / 100.0
 		var used: float = minf(demand, minf(maxf(0.0, stored), reserve) + potential)
@@ -10294,7 +10324,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 		next += AI_INTERVAL
 	return next
 
-static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true, persistent_avoidance_enabled: bool = true, persistent_combat_enabled: bool = true, persistent_logistics_enabled: bool = true) -> void:
+static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true, persistent_avoidance_enabled: bool = true, persistent_combat_enabled: bool = true, persistent_logistics_enabled: bool = true, economy_rates_enabled: bool = true) -> void:
 	_begin_deadline_schedule(state, deadline_schedule_enabled)
 	_rock_plan_tick += 1
 	if not is_same(state, _trajectory_state) or not is_same(state["ships"], _trajectory_roster):
@@ -10313,7 +10343,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	frame.persistent_avoidance_enabled = persistent_avoidance_enabled
 	frame.persistent_combat_enabled = persistent_combat_enabled
 	frame.persistent_logistics_enabled = persistent_logistics_enabled
-	_step_economy(state, frame, dt)
+	_step_economy(state, frame, dt, economy_rates_enabled)
 	started = _profile_stage(profile, "Economy", started)
 	_step_ai(state, frame, dt)
 	started = _profile_stage(profile, "AI / routing setup", started)
@@ -10406,9 +10436,84 @@ static func _expire_auto_cooldowns(state: Dictionary) -> void:
 		else:
 			_cooldown_deadlines.schedule(id, deadline)
 
-static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
-	_accrue_resident_taxes(state, dt)
-	_pay_fleet_upkeep(state, dt)
+# Slow coefficients depend only on infrastructure, immutable map factors and
+# rewards. Compare live inputs on every substep, including in-place edits.
+# Population, stocks, blockades and farm variation are deliberately not cached.
+static func _economy_rate_inputs(p: Dictionary) -> Array:
+	return [p["owner"], p.get("planetless", false), p.get("size_factor", 1.0), p.get("habitation_level", 0),
+		p["levels"], p.get("buildings", {}), p["bonuses"], p["abundance"], p.get("conquest_rewards", [])]
+
+static func _rate_entry_due(entry: Dictionary, now: float, inputs: Array) -> bool:
+	return entry.is_empty() or now + EPS >= float(entry["due"]) or now < float(entry["sampled"]) or inputs != entry["inputs"]
+
+static func _prepare_economy_rates(state: Dictionary, enabled: bool) -> Dictionary:
+	if not enabled or not is_same(state, _economy_rate_state) or not is_same(state["planets"], _economy_rate_roster):
+		_economy_rate_entries.clear()
+		_economy_wage_entries.clear()
+		_economy_rate_state = state if enabled else {}
+		_economy_rate_roster = state["planets"] if enabled else []
+	if not enabled:
+		return {}
+	var now: float = float(state["elapsed"])
+	var bases: Dictionary = {}
+	for index in range((state["planets"] as Array).size()):
+		var p: Dictionary = state["planets"][index]
+		if int(p["owner"]) <= 0 or not has_station(p):
+			_economy_rate_entries.erase(index)
+			continue
+		var inputs: Array = _economy_rate_inputs(p)
+		var entry: Dictionary = _economy_rate_entries.get(index, {})
+		if _rate_entry_due(entry, now, inputs):
+			var base: Dictionary = {}
+			var bonus: Dictionary = {}
+			for resource in EXTRACTED:
+				base[resource] = _industrial_base(p, resource)
+				bonus[resource] = _industrial_bonus(p, resource)
+			entry = {"sampled": now, "due": now + ECONOMY_RATE_INTERVAL, "inputs": inputs.duplicate(true),
+				"basis": {"base": base, "bonus": bonus, "farm_base": _farm_base(p), "farm_bonus": _farm_bonus(p),
+					"housing": habitation_capacity(p), "growth": _growth_bonus(p), "tax": _rank_factor(p, "rank_tax", 0.05)}}
+			_economy_rate_entries[index] = entry
+		bases[index] = entry["basis"]
+	# Remove retired slots (normally the map has a fixed system count).
+	for index in _economy_rate_entries.keys():
+		if int(index) >= (state["planets"] as Array).size():
+			_economy_rate_entries.erase(index)
+	return bases
+
+static func _prepare_wage_tables(state: Dictionary, enabled: bool) -> Dictionary:
+	if not enabled:
+		return {}
+	var now: float = float(state["elapsed"])
+	var tables: Dictionary = {}
+	for owner in state.get("galactic_credits", {}):
+		if int(owner) <= 0:
+			continue
+		var inputs: Array = [state.get("objectives", {}).get(owner, {}).get("rewards", [])]
+		var entry: Dictionary = _economy_wage_entries.get(owner, {})
+		if _rate_entry_due(entry, now, inputs):
+			var factor: float = _player_factor(state, int(owner), "rank_upkeep", 0.05 / 0.95)
+			var rates: Dictionary = {}
+			for kind in SHIP_UPKEEP_GC:
+				rates[kind] = ship_upkeep(kind) / factor
+			entry = {"sampled": now, "due": now + ECONOMY_RATE_INTERVAL, "inputs": inputs.duplicate(true), "rates": rates}
+			_economy_wage_entries[owner] = entry
+		tables[owner] = entry["rates"]
+	for owner in _economy_wage_entries.keys():
+		if not tables.has(owner):
+			_economy_wage_entries.erase(owner)
+	return tables
+
+static func _scheduled_wage_rate(state: Dictionary, ship: Dictionary, tables: Dictionary) -> float:
+	var owner: int = int(ship["owner"])
+	if not tables.has(owner):
+		return hull_upkeep(state, ship)
+	return float(tables[owner].get(str(ship.get("kind", "")), 0.0))
+
+static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float, economy_rates_enabled: bool = true) -> void:
+	var bases: Dictionary = _prepare_economy_rates(state, economy_rates_enabled)
+	var wage_tables: Dictionary = _prepare_wage_tables(state, economy_rates_enabled)
+	_accrue_resident_taxes(state, dt, bases)
+	_pay_fleet_upkeep(state, dt, wage_tables)
 	state["elapsed"] = float(state["elapsed"]) + dt
 	if dt > 0.0:
 		_check_unpaid_defections(state)
@@ -10421,7 +10526,7 @@ static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float) -> vo
 	combat_graph.erase("travel_permissions")
 	_update_planet_blockades(state, combat_graph)
 	for i in range((state["planets"] as Array).size()):
-		_work_planet(state, i, dt)
+		_work_planet(state, i, dt, bases.get(i, {}))
 	_refill_empire_fleets(state)
 	_begin_hull_index(state)
 
