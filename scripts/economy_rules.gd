@@ -9928,49 +9928,65 @@ static func _profile_stage(profile: Dictionary, stage: String, started: int) -> 
 # Gentle neighborhood steering, not rigid collision or additional travel.
 # All hulls are obstacles; ships performing precise service actions are
 # not displaced. Use the same pre-movement snapshot for every pair.
-static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary = {}, persistent: bool = false) -> void:
+static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary = {}, persistent: bool = false, prepared_cells: Variant = null, contact_snapshot: Variant = null) -> void:
 	if dt <= 0.0:
 		return
 	var reach: float = SHIP_SEPARATION_RADIUS
-	var cells: Dictionary = _separation_cells(state, previous, reach, persistent)
+	var cells: Dictionary = _separation_cells(state, previous, reach, persistent) if prepared_cells == null else prepared_cells
 	var isolated: Dictionary = {}
-	for ship in state["ships"]:
-		var id: int = int(ship["id"])
-		if not previous.has(id):
-			continue
-		if persistent and _isolated_spatial_cell(previous[id], reach, cells, isolated):
-			continue
-		if repair_parked.has(id) or _stop_waiting(state, ship) or bool(ship.get("retreating", false)) or _salvage_active(ship):
-			continue
-		var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
-		if _separation_exempt(state, graph, ship, budget, reach):
-			continue
-		var before: Vector2 = previous[id]
-		var planned: Vector2 = ship["position"]
-		var held: bool = bool(ship.get("holding", false))
-		var local_moving: bool = ship.has("local_move_target")
-		var force: Vector2 = _separation_force(id, before, cells, previous, reach)
-		if force.is_zero_approx():
-			continue
-		var movement: Vector2 = planned - before
-		if movement.length() > budget + EPS:
-			continue
-		# A shared hold point is a group anchor. Ease attraction near it
-		# so repulsion does not fight a full-speed return to the same pixel.
-		if held and ship.has("hold_position") and before.distance_to(ship["hold_position"]) < reach * 2.0:
-			movement *= 0.25
-		var push: Vector2 = force.limit_length(1.0) * budget * SHIP_SEPARATION_STRENGTH
-		var candidate: Vector2 = before + (movement + push).limit_length(budget)
-		var sector: int = int(ship.get("local_move_sector", -1)) if local_moving else (int(ship.get("hold_sector", -1)) if held else local_sector(graph, ship))
-		if sector >= 0 and sector < graph["points"].size() and sector_contains(graph, sector, planned) and not sector_contains(graph, sector, candidate):
-			# Keep local orders and stationary ships inside their legal sector.
-			candidate = _clip_to_sector(graph, sector, planned, candidate)
-		var displacement: Vector2 = candidate - before
-		ship["position"] = candidate
-		if not displacement.is_zero_approx():
-			ship["heading"] = displacement.normalized()
-		if not (ship["route"] as Array).is_empty():
-			ship["leg"] = _lane_progress(graph["points"], ship)
+	var ships: Array = state["ships"]
+	var collect_contacts: bool = persistent and contact_snapshot != null and ships.size() >= 2
+	var bounds: Dictionary = {}
+	if collect_contacts:
+		_contact_index.begin()
+	for i in range(ships.size()):
+		var ship: Dictionary = ships[i]
+		_separate_hull(state, graph, ship, previous, dt, repair_parked, persistent, cells, isolated, reach)
+		# Separation changes only this hull. Its final position can be
+		# collected now, in the same order as the former contact build.
+		if collect_contacts:
+			_append_persistent_contact(i, ship["position"], SHIP_CLEARANCE, bounds)
+	if collect_contacts:
+		contact_snapshot["cells"] = _contact_index.finish()
+		contact_snapshot["bounds"] = bounds
+
+static func _separate_hull(state: Dictionary, graph: Dictionary, ship: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary, persistent: bool, cells: Dictionary, isolated: Dictionary, reach: float) -> void:
+	var id: int = int(ship["id"])
+	if not previous.has(id):
+		return
+	if persistent and _isolated_spatial_cell(previous[id], reach, cells, isolated):
+		return
+	if repair_parked.has(id) or _stop_waiting(state, ship) or bool(ship.get("retreating", false)) or _salvage_active(ship):
+		return
+	var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
+	if _separation_exempt(state, graph, ship, budget, reach):
+		return
+	var before: Vector2 = previous[id]
+	var planned: Vector2 = ship["position"]
+	var held: bool = bool(ship.get("holding", false))
+	var local_moving: bool = ship.has("local_move_target")
+	var force: Vector2 = _separation_force(id, before, cells, previous, reach)
+	if force.is_zero_approx():
+		return
+	var movement: Vector2 = planned - before
+	if movement.length() > budget + EPS:
+		return
+	# A shared hold point is a group anchor. Ease attraction near it
+	# so repulsion does not fight a full-speed return to the same pixel.
+	if held and ship.has("hold_position") and before.distance_to(ship["hold_position"]) < reach * 2.0:
+		movement *= 0.25
+	var push: Vector2 = force.limit_length(1.0) * budget * SHIP_SEPARATION_STRENGTH
+	var candidate: Vector2 = before + (movement + push).limit_length(budget)
+	var sector: int = int(ship.get("local_move_sector", -1)) if local_moving else (int(ship.get("hold_sector", -1)) if held else local_sector(graph, ship))
+	if sector >= 0 and sector < graph["points"].size() and sector_contains(graph, sector, planned) and not sector_contains(graph, sector, candidate):
+		# Keep local orders and stationary ships inside their legal sector.
+		candidate = _clip_to_sector(graph, sector, planned, candidate)
+	var displacement: Vector2 = candidate - before
+	ship["position"] = candidate
+	if not displacement.is_zero_approx():
+		ship["heading"] = displacement.normalized()
+	if not (ship["route"] as Array).is_empty():
+		ship["leg"] = _lane_progress(graph["points"], ship)
 
 # An occupied singleton cell with no occupied adjacent cell cannot have
 # any interaction at this cell width. Cache only within the frozen pass.
@@ -10113,7 +10129,7 @@ static func _contact_bucket_near(point: Vector2, bounds: Rect2, cutoff_squared: 
 	# Conservative margin avoids rejecting boundary pairs due to rounding.
 	return point.distance_squared_to(nearest) <= cutoff_squared + maxf(0.001, cutoff_squared * 0.0001)
 
-static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float = 0.1, repair_parked: Dictionary = {}, persistent: bool = false) -> void:
+static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float = 0.1, repair_parked: Dictionary = {}, persistent: bool = false, prepared_snapshot: Dictionary = {}) -> void:
 	var ships: Array = state["ships"]
 	if ships.size() < 2:
 		return
@@ -10129,7 +10145,10 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 	for iteration in range(SHIP_CLEARANCE_PASSES):
 		var cells: Dictionary = {}
 		var bounds: Dictionary = {}
-		if persistent:
+		if persistent and iteration == 0 and prepared_snapshot.has("cells"):
+			cells = prepared_snapshot["cells"]
+			bounds = prepared_snapshot["bounds"]
+		elif persistent:
 			cells = _refresh_persistent_contact_cells(ships, reach, bounds)
 		else:
 			_index_contact_cells(ships, reach, cells, bounds)
@@ -10185,12 +10204,14 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 static func _refresh_persistent_contact_cells(ships: Array, reach: float, bounds: Dictionary) -> Dictionary:
 	_contact_index.begin()
 	for i in range(ships.size()):
-		var point: Vector2 = ships[i]["position"]
-		var cell := Vector2i(floori(point.x / reach), floori(point.y / reach))
-		_contact_index.append(cell, i)
-		var box: Rect2 = bounds.get(cell, Rect2(point, Vector2.ZERO))
-		bounds[cell] = box.expand(point)
+		_append_persistent_contact(i, ships[i]["position"], reach, bounds)
 	return _contact_index.finish()
+
+static func _append_persistent_contact(slot: int, point: Vector2, reach: float, bounds: Dictionary) -> void:
+	var cell := Vector2i(floori(point.x / reach), floori(point.y / reach))
+	_contact_index.append(cell, slot)
+	var box: Rect2 = bounds.get(cell, Rect2(point, Vector2.ZERO))
+	bounds[cell] = box.expand(point)
 
 static func _index_contact_cells(ships: Array, reach: float, cells: Dictionary, bounds: Dictionary) -> void:
 	for i in range(ships.size()):
@@ -10864,6 +10885,10 @@ static func _step_military_motion(state: Dictionary, frame: STEP_FRAME, ship: Di
 
 static func _step_settle_movement(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 	var repair_parked: Dictionary = frame.repair_parked
+	var fuse_spatial: bool = frame.persistent_avoidance_enabled and dt > 0.0
+	if fuse_spatial:
+		_begin_contact_indexes(state)
+		_separation_index.begin()
 	# Resolve wandering after every Harvester has had a chance to repair.
 	# This avoids dependence on whether the recipient precedes its healer
 	# in the fleet array. Explicit movement and other work remain legal.
@@ -10883,15 +10908,23 @@ static func _step_settle_movement(state: Dictionary, frame: STEP_FRAME, dt: floa
 			ship.erase("arrival_wait_until")
 		if ship.has("wander_cooldown_override") and autocast_remaining(state, ship) <= EPS and not _unit_order_running(ship):
 			ship.erase("wander_cooldown_override")
+		# Hull work (including warp and removal) is complete. The original
+		# separation snapshot uses these surviving IDs and frozen positions.
+		if fuse_spatial and frame.combat_positions.has(id):
+			var point: Vector2 = frame.combat_positions[id]
+			var cell := Vector2i(floori(point.x / SHIP_SEPARATION_RADIUS), floori(point.y / SHIP_SEPARATION_RADIUS))
+			_separation_index.append(cell, id)
 	# Expired cooldowns read as zero before and after erasure. Settlement
 	# has no cross-hull dependency on these keys; retire only due IDs here,
 	# before separation and contact use the settled state.
 	if frame.deadline_schedule_enabled:
 		_expire_auto_cooldowns(state)
 	_end_ship_avoidance()
-	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked, frame.persistent_avoidance_enabled)
+	var prepared_cells: Variant = _separation_index.finish() if fuse_spatial else null
+	var contact_snapshot: Dictionary = {}
+	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked, frame.persistent_avoidance_enabled, prepared_cells, contact_snapshot if fuse_spatial else null)
 	if dt > 0.0:
-		_resolve_ship_contacts(state, frame.graph, frame.combat_positions, dt, repair_parked, frame.persistent_avoidance_enabled)
+		_resolve_ship_contacts(state, frame.graph, frame.combat_positions, dt, repair_parked, frame.persistent_avoidance_enabled, contact_snapshot)
 
 const OPENING_OBJECTIVES = {"economic": "medium_shipyard", "military": "military_built"}
 
