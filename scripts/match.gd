@@ -81,6 +81,13 @@ var ship_motion := SHIP_MOTION_VIEW.new()
 var world_batches := WORLD_RENDER_BATCHES.new()
 var celestial_view := CELESTIAL_VIEW.new()
 var fog_asteroid_view := CELESTIAL_VIEW.new()
+# Draw callbacks are synchronous; camera geometry is fixed for their duration.
+var _draw_projection_active: bool = false
+var _draw_projection_size: Vector2
+var _draw_map_size: Vector2
+var _draw_world_center: Vector2
+var _draw_fit: float
+var _draw_zoom: float
 var world_effects := WORLD_EFFECTS.new()
 var planet_traffic := PLANET_TRAFFIC.new()
 var structure_view := STRUCTURE_VIEW.new()
@@ -1717,6 +1724,11 @@ func _draw_queued_order_overlay() -> void:
 	order_view.draw_queued_chains(queued_order_overlay, state, _ship_poses(state), ECONOMY.service_targets(state), selected_units, Rect2(Vector2.ZERO, map_canvas.size), _fog_visible)
 
 func _draw_fog() -> void:
+	_begin_draw_projection()
+	_draw_fog_content()
+	_draw_projection_active = false
+
+func _draw_fog_content() -> void:
 	if fog_state.texture == null:
 		return
 	var offset: Vector2 = _screen_point(Vector2.ZERO)
@@ -1736,7 +1748,7 @@ func _draw_fog() -> void:
 		if not bounds.grow(float(field.get("rock_extent", field["radius"])) * scale + 4.0).has_point(_screen_point(field["position"])):
 			continue
 		var rocks: Array = fog_state.rock_view(index).get("hidden", [])
-		fog_asteroid_view.draw_asteroid_chunks({"chunks": rocks}, bounds, scale, fog_overlay, _screen_point, 0.66)
+		fog_asteroid_view.draw_asteroid_chunks({"chunks": rocks}, bounds, scale, fog_overlay, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, 0.66, 0.0, index)
 		if selected_field == index and selected_rock >= 0:
 			var rock: Dictionary = fog_state.rock_at(index, selected_rock)
 			if not rock.is_empty() and not _fog_visible(rock["position"]):
@@ -2908,6 +2920,8 @@ func _reset_view() -> void:
 
 # The bottom console reserves a fixed viewport, independent of selection.
 func _projection_size() -> Vector2:
+	if _draw_projection_active:
+		return _draw_projection_size
 	# Reserve the console footprint for camera framing, but let stars and
 	# planets continue rendering underneath its opaque stepped panels.
 	var hud_height: float = console_panel.size.y + 8.0 if is_instance_valid(console_panel) else 0.0
@@ -2921,18 +2935,35 @@ func _map_resized() -> void:
 	map_canvas.queue_redraw()
 
 func _map_size() -> Vector2:
+	if _draw_projection_active:
+		return _draw_map_size
 	return _state().get("map", {}).get("size", MAP.SIZE)
 
 func _fit() -> float:
+	if _draw_projection_active:
+		return _draw_fit
 	return camera.fit(_projection_size(), _map_size())
 
+func _begin_draw_projection() -> void:
+	_draw_projection_active = false
+	_draw_projection_size = _projection_size()
+	_draw_map_size = _map_size()
+	_draw_fit = camera.fit(_draw_projection_size, _draw_map_size)
+	_draw_world_center = camera.world_center(_draw_map_size)
+	_draw_zoom = camera.zoom
+	_draw_projection_active = true
+
 func _screen_point(point: Vector2) -> Vector2:
+	if _draw_projection_active:
+		return _draw_projection_size * 0.5 + (point - _draw_world_center) * _draw_fit * _draw_zoom
 	return camera.screen_point(point, _projection_size(), _map_size())
 
 func _world_point(point: Vector2) -> Vector2:
 	return camera.world_point(point, _projection_size(), _map_size())
 
 func _camera_world_center() -> Vector2:
+	if _draw_projection_active:
+		return _draw_world_center
 	return camera.world_center(_map_size())
 
 func _camera_center() -> Vector2:
@@ -4660,6 +4691,11 @@ func _transfer_anchor(state: Dictionary, poses: Dictionary, refs: Dictionary, id
 	return (pose["point"] as Vector2) + (axis * offset.x + axis.orthogonal() * offset.y) * _ship_scale()
 
 func _draw_map() -> void:
+	_begin_draw_projection()
+	_draw_map_content()
+	_draw_projection_active = false
+
+func _draw_map_content() -> void:
 	_update_fog(_state())
 	fog_overlay.queue_redraw()
 	queued_order_overlay.queue_redraw()
@@ -4686,7 +4722,7 @@ func _draw_map() -> void:
 			continue
 		if not bool(field.get("antimatter", false)):
 			var live_rocks: Array = fog_state.rock_view(field_index).get("live", [])
-			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _screen_point, 1.0, celestial_view.orbit_time(state))
+			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, 1.0, celestial_view.orbit_time(state))
 			if selected_field == field_index and selected_rock >= 0:
 				var rock: Dictionary = fog_state.rock_at(field_index, selected_rock)
 				if not rock.is_empty() and _fog_visible(rock["position"]):
