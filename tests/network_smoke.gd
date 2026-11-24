@@ -7,6 +7,7 @@ var expected_players: int = 2
 var saw_match: bool = false
 var started: bool = false
 var finishing: bool = false
+var guest_return_scheduled: bool = false
 var ready_sent: bool = false
 var color_requested: bool = false
 var expected_color: int = 0
@@ -39,7 +40,7 @@ var saw_loading: bool = false
 var preview_seed: int = 0
 var mode: String = "normal"
 var threaded_start_elapsed: float = 0.0
-var threaded_guest_id: int = -1
+var threaded_guest_ids: Array[int] = []
 var threaded_client_stage: int = 0
 var threaded_host_stage: int = 0
 const MAP = preload("res://scripts/planet_map.gd")
@@ -406,8 +407,7 @@ func _phase_changed() -> void:
 				return
 			finishing = true
 			if role == "client":
-				session.call("leave_session")
-				_pass()
+				call_deferred("_finish_guest_return")
 			else:
 				_wait_for_guest_completion()
 		elif (mode == "drop-loading" and role == "host") or (mode == "normal" and saw_match):
@@ -444,15 +444,17 @@ func _begin_threaded_network_check(state: Dictionary) -> void:
 	print("DEBUG: threaded smoke role=", role, " active=", session.get("threaded_authority_active"), " elapsed=", threaded_start_elapsed)
 	if role == "host":
 		var ordered: Array[int] = RULES.ordered_peers(session.get("players"))
-		if ordered.size() != 2:
-			_fail("Threaded smoke requires exactly one guest.")
+		if ordered.size() != expected_players:
+			_fail("Threaded smoke roster size does not match the test.")
 			return
-		threaded_guest_id = ordered[1]
+		for i in range(1, ordered.size()):
+			threaded_guest_ids.append(ordered[i])
 		_check_threaded_host()
 	else:
-		threaded_guest_id = session.multiplayer.get_unique_id()
+		var self_id: int = session.multiplayer.get_unique_id()
+		threaded_guest_ids.append(self_id)
 		for index in range(state["planets"].size()):
-			if int(state["planets"][index]["owner"]) == session.multiplayer.get_unique_id() and bool(state["planets"][index]["home"]):
+			if int(state["planets"][index]["owner"]) == self_id and bool(state["planets"][index]["home"]):
 				home_index = index
 				break
 		if home_index < 0:
@@ -469,11 +471,11 @@ func _check_threaded_client() -> void:
 		print("DEBUG: threaded guest requests replicated threshold update")
 		session.call("request_thresholds", home_index, "Crystals", 7.0, 93.0)
 		threaded_client_stage = 1
-	elif threaded_client_stage == 1 and _threaded_thresholds_match(state, 7.0, 93.0) and speed == 2:
+	elif threaded_client_stage == 1 and _threaded_thresholds_match(state, threaded_guest_ids[0], 7.0, 93.0) and speed == 2:
 		print("DEBUG: threaded guest observed threshold update and 2x snapshot")
 		session.call("request_thresholds", home_index, "Crystals", 8.0, 92.0)
 		threaded_client_stage = 2
-	elif threaded_client_stage == 2 and _threaded_thresholds_match(state, 8.0, 92.0) and speed == 1:
+	elif threaded_client_stage == 2 and _threaded_thresholds_match(state, threaded_guest_ids[0], 8.0, 92.0) and speed == 1:
 		print("DEBUG: threaded guest observed 1x snapshot")
 		session.call("request_thresholds", home_index, "Crystals", 9.0, 91.0)
 		threaded_client_stage = 3
@@ -493,9 +495,10 @@ func _check_threaded_host() -> void:
 	elif threaded_host_stage == 2:
 		expected_minimum = 9.0
 		expected_maximum = 91.0
-	for system in state.get("planets", []):
-		if int(system.get("owner", 0)) == threaded_guest_id and bool(system.get("home", false)):
-			guest_acknowledged = _threaded_thresholds_match(state, expected_minimum, expected_maximum)
+	guest_acknowledged = not threaded_guest_ids.is_empty()
+	for guest_id in threaded_guest_ids:
+		if not _threaded_thresholds_match(state, guest_id, expected_minimum, expected_maximum):
+			guest_acknowledged = false
 			break
 	if threaded_host_stage == 0 and speed == 1 and guest_acknowledged:
 		print("DEBUG: threaded host accepted guest command; requesting 2x")
@@ -511,9 +514,9 @@ func _check_threaded_host() -> void:
 		return
 	create_timer(0.1).timeout.connect(_check_threaded_host)
 
-func _threaded_thresholds_match(state: Dictionary, minimum: float, maximum: float) -> bool:
+func _threaded_thresholds_match(state: Dictionary, guest_id: int, minimum: float, maximum: float) -> bool:
 	for system in state.get("planets", []):
-		if int(system.get("owner", 0)) != threaded_guest_id or not bool(system.get("home", false)):
+		if int(system.get("owner", 0)) != guest_id or not bool(system.get("home", false)):
 			continue
 		var thresholds: Dictionary = system["thresholds"]["Crystals"]
 		return is_equal_approx(float(thresholds["min"]), minimum) and is_equal_approx(float(thresholds["max"]), maximum)
@@ -524,7 +527,7 @@ func _threaded_thresholds_match(state: Dictionary, minimum: float, maximum: floa
 func _network_timeout() -> void:
 	if session != null and str(session.get("phase")) == "match":
 		var state: Dictionary = session.get("economy")
-		print("DEBUG: timeout role=", role, " mode=", mode, " players=", expected_players, " game_years=", state.get("elapsed"), " verified=", economy_verified, " stage=", speed_stage, " threaded_active=", session.get("threaded_authority_active"), " threaded_client_stage=", threaded_client_stage, " threaded_host_stage=", threaded_host_stage)
+		print("DEBUG: timeout role=", role, " mode=", mode, " players=", expected_players, " game_years=", state.get("elapsed"), " verified=", economy_verified, " stage=", speed_stage, " threaded_active=", session.get("threaded_authority_active"), " threaded_client_stage=", threaded_client_stage, " threaded_host_stage=", threaded_host_stage, " threaded_guest_ids=", threaded_guest_ids)
 		var graph: Dictionary = ECON.military_graph(state)
 		var threats: Dictionary = ECON._salvage_threats(state, graph)
 		for node in range(state["planets"].size()):
@@ -1447,6 +1450,18 @@ func _check_diplomacy_host() -> void:
 func _finish_guest_return() -> void:
 	if str(session.get("phase")) != "lobby" or not (session.get("economy") as Dictionary).is_empty():
 		create_timer(0.1).timeout.connect(_finish_guest_return)
+		return
+	if role != "client":
+		_pass()
+		return
+	if not guest_return_scheduled:
+		var ordered: Array[int] = RULES.ordered_peers(session.get("players"))
+		var guest_order: int = ordered.find(session.multiplayer.get_unique_id()) - 1
+		if guest_order < 0:
+			_fail("Guest is missing from the returned lobby roster.")
+			return
+		guest_return_scheduled = true
+		create_timer(float(guest_order) * 0.25).timeout.connect(_finish_guest_return)
 		return
 	if role == "client":
 		session.call("leave_session")

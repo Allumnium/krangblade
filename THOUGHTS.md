@@ -1,10 +1,8 @@
 # Warbound — active thoughts
 
-- v0.97.77: The eight-peer normal ENet smoke passes, but the host log reports three `Unable to send packet on channel 0, max channels: 0` errors during teardown. Cause is unconfirmed; trace the disconnect-time send/flush path before treating teardown as clean.
-
 - v0.97.75: Set project-wide rendering cap to 120 FPS using application/run/max_fps and disable VSync so the monitor refresh rate does not impose a lower cap during performance testing. Keep physics/simulation cadence, threaded authority and explicit CI benchmark CLI frame limits unchanged. Runtime FPS not measured.
 
-- v0.97.70: The optional Windows x86_64 targeting extension now builds against Godot 4.7.2 and the pinned godot-cpp revision; clean import and native targeting parity pass. Same-machine target-scale samples show no meaningful native speedup, so it remains opt-in. Threaded multiplayer stress and graphical frame-time measurements remain open.
+- v0.97.70: The optional Windows x86_64 targeting extension builds against Godot 4.7.2 and the pinned godot-cpp revision; clean import and native targeting parity pass. Same-machine target-scale samples show no meaningful native speedup, so it remains opt-in. Graphical frame-time measurements remain open.
 
 - v0.97.69: Eliminate repeated economy/fleet scans. Build a lazy phase-local origin/kind census only for actual maintain targets, reconcile appended construction launches before subsequent queries, retain live queue eligibility; share one live/queued census across active empire refill owners. Fuse precombat hull position initialization, passive HP regeneration and loading-reward refresh, sharing the latter by owner; keep structure regeneration and shield work before combat. No cadence, balance, navigation, UI/Codex or wire changes. Defer dormant population, conquest rate and full-storage micro-optimizations unless measured. Add semantic census and fused/reference regressions. Runtime/ENet/benchmarks pending.
 
