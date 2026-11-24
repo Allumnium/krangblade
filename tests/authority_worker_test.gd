@@ -99,7 +99,7 @@ func _run() -> void:
 
 	# Actual session command routing, publication, tick queue and teardown.
 	var session: Node = root.get_node("GameSession")
-	session.set("threaded_authority_requested", true)
+	_check(bool(session.get("threaded_authority_requested")), "threaded authority must be requested by default")
 	session.set("is_solo", true)
 	session.call("_activate_match", roster, 426)
 	(session.get("economy_timer") as Timer).stop()
