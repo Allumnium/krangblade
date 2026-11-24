@@ -3889,6 +3889,10 @@ func _test_resource_handoff() -> void:
 			assert(float(freighter["resource_loaded_at"]) == float(state["elapsed"]))
 			assert(freighter.has("resource_stage") and not freighter.get("salvage_delivery", false))
 	assert(is_equal_approx(ECON._cargo_total(freighter), ECON.CARGO_CAPACITY))
+	# Cargo stats and the source/target event survive delivery state changes.
+	assert(float(miner.get("tons_dropped", 0.0)) >= ECON.MINER_CAPACITY)
+	assert(float(freighter.get("tons_picked", 0.0)) >= ECON.CARGO_CAPACITY)
+	assert(state.get("cargo_transfers", {}).has("9820:9821:Metals"))
 	assert(not freighter.has("resource_stage") and bool(freighter["salvage_delivery"]))
 	var pile: Dictionary = {"resource": "Metals", "amount": 100.0}
 	miner["cargo"] = ECON.empty_stock()

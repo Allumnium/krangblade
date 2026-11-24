@@ -722,8 +722,22 @@ func _check_economy_sync() -> void:
 			handoff_collectors[int(hull["owner"])] = hull
 		elif hull_id >= 987000 and hull_id < 987100:
 			handoff_haulers[int(hull["owner"])] = hull
+	# An actual transfer is the invariant, not a momentary pair of cargo
+	# readings. The receiver can start hauling before a replica displays both
+	# an empty miner and a completely full Freighter in one snapshot.
+	# Cargo totals persist on hulls; the bounded event is extra direct evidence.
 	for owner in handoff_collectors:
-		if handoff_haulers.has(owner) and ECON._cargo_total(handoff_collectors[owner]) <= ECON.EPS and ECON._cargo_total(handoff_haulers[owner]) >= ECON.CARGO_CAPACITY - ECON.EPS:
+		if not handoff_haulers.has(owner):
+			continue
+		var miner: Dictionary = handoff_collectors[owner]
+		var hauler: Dictionary = handoff_haulers[owner]
+		var source_id: int = int(miner["id"])
+		var target_id: int = int(hauler["id"])
+		var transfer_key: String = "%d:%d:Metals" % [source_id, target_id]
+		var transfer: Dictionary = state.get("cargo_transfers", {}).get(transfer_key, {})
+		var matching_event: bool = not transfer.is_empty() and int(transfer.get("source", -1)) == source_id and int(transfer.get("target", -1)) == target_id and str(transfer.get("resource", "")) == "Metals" and float(transfer.get("amount", 0.0)) > ECON.EPS
+		var lasting_stats: bool = float(miner.get("tons_dropped", 0.0)) >= ECON.MINER_CAPACITY - ECON.EPS and float(hauler.get("tons_picked", 0.0)) >= ECON.MINER_CAPACITY - ECON.EPS
+		if matching_event or lasting_stats:
 			var observed: Dictionary = observed_commands.get(owner, {})
 			observed["miner_resource_handoff"] = true
 			observed_commands[owner] = observed
