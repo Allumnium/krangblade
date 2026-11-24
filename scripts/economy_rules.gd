@@ -9960,6 +9960,189 @@ static func _reroute_after_capture(state: Dictionary, index: int) -> void:
 # A one-empire sandbox never auto-ends.
 # Authority-only substep; publication, RPCs and clock remain in GameSession.
 # A future worker must exclusively own state and all static rule caches.
+# Server peer membership is checked in GameSession before dispatch.
+# Recheck gameplay eligibility against the current authoritative state.
+const AUTHORITY_MATCH_SPEEDS: Array[int] = [0, 1, 2, 5]
+
+static func _authority_active_player(state: Dictionary, id: int) -> bool:
+	return state.get("teams", {}).has(id) and state.get("match_result", {}).is_empty() and not state.get("eliminated", []).has(id)
+
+# The same command implementations serve synchronous and worker modes.
+static func authority_colonize_for(state: Dictionary, id: int, ship_id: int, target: int) -> bool:
+	if not _authority_active_player(state, id):
+		return false
+	if ship_id == -1:
+		ship_id = nearest_idle_colony(state, id, target)
+	if ship_id >= 0 and send_colony(state, id, ship_id, target):
+		return true
+	return false
+
+static func authority_fighter_move_for(state: Dictionary, id: int, ids: Array, target: int, move_only: bool = false) -> bool:
+	if _authority_active_player(state, id) and command_fighters(state, id, ids, target, move_only):
+		return true
+	return false
+
+static func authority_tactical_order_for(state: Dictionary, id: int, ids: Array, kind: String, target: int) -> bool:
+	if not _authority_active_player(state, id):
+		return false
+	var accepted: bool = false
+	match kind:
+		"attack":
+			accepted = command_attack(state, id, ids, target)
+		"patrol":
+			accepted = command_patrol(state, id, ids, target)
+	if accepted:
+		return true
+	return false
+
+static func authority_miner_assignment_for(state: Dictionary, id: int, ids: Array, field: int, chunk: int) -> bool:
+	if _authority_active_player(state, id) and command_miners(state, id, ids, field, chunk):
+		return true
+	return false
+
+static func authority_fighter_hold_for(state: Dictionary, id: int, ids: Array) -> bool:
+	if _authority_active_player(state, id) and hold_fighters(state, id, ids):
+		return true
+	return false
+
+static func authority_local_position_for(state: Dictionary, id: int, ids: Array, node: int, point: Vector2, move_only: bool = false) -> bool:
+	if _authority_active_player(state, id) and command_local_position(state, id, ids, node, point, move_only):
+		return true
+	return false
+
+static func authority_salvage_for(state: Dictionary, id: int, ids: Array, target: int) -> bool:
+	if _authority_active_player(state, id) and command_salvage(state, id, ids, target):
+		return true
+	return false
+
+static func authority_unload_cargo_for(state: Dictionary, id: int, ids: Array) -> bool:
+	if _authority_active_player(state, id) and command_unload_cargo(state, id, ids):
+		return true
+	return false
+
+static func authority_unit_hold_for(state: Dictionary, id: int, ids: Array, release: bool) -> bool:
+	if _authority_active_player(state, id) and command_hold_units(state, id, ids, release):
+		return true
+	return false
+
+static func authority_unit_orders_for(state: Dictionary, id: int, orders: Array, append: bool) -> bool:
+	if not _authority_active_player(state, id) or orders.size() > state["ships"].size():
+		return false
+	var changed: bool = false
+	for entry in orders:
+		if entry is Dictionary and entry.get("ids") is Array and entry.get("order") is Dictionary:
+			changed = issue_unit_order(state, id, entry["ids"], entry["order"], append) or changed
+	if changed:
+		return true
+	return false
+
+static func authority_diplomacy_for(state: Dictionary, id: int, action: String, other: int, enabled: bool) -> bool:
+	if not _authority_active_player(state, id):
+		return false
+	var changed: bool = false
+	match action:
+		"declare_war": changed = diplomacy_declare_war(state, id, other)
+		"peace": changed = diplomacy_offer_peace(state, id, other)
+		"alliance": changed = diplomacy_offer_alliance(state, id, other)
+		"break_alliance": changed = diplomacy_break_alliance(state, id, other)
+		"vision", "trade": changed = diplomacy_set_permission(state, id, other, action, enabled)
+	if changed:
+		return true
+	return false
+
+static func authority_confirmed_attack_for(state: Dictionary, id: int, other: int, ids: Array, target: int) -> bool:
+	if _authority_active_player(state, id) and ids.size() <= state["ships"].size() and diplomacy_confirm_attack(state, id, other, ids, target):
+		return true
+	return false
+
+static func authority_autocast_for(state: Dictionary, id: int, ids: Array, mode: String, enabled: bool) -> bool:
+	if _authority_active_player(state, id) and set_autocast(state, id, ids, mode, enabled):
+		return true
+	return false
+
+static func authority_repair_auto_for(state: Dictionary, id: int, ids: Array, enabled: bool) -> bool:
+	if _authority_active_player(state, id) and set_repair_auto(state, id, ids, enabled):
+		return true
+	return false
+
+static func authority_operation_for(state: Dictionary, id: int, index: int, kind: String, target: String) -> bool:
+	if not _authority_active_player(state, id) or kind == "production":
+		return false
+	if kind == "shipyard_build":
+		var parts: PackedStringArray = target.split(":")
+		if parts.size() == 2 and parts[0].is_valid_int() and int(parts[0]) >= 0 and SHIP_KINDS.has(parts[1]) and enqueue(state, id, index, parts[1], "", int(parts[0])):
+			return true
+		return false
+	if kind == "shipyard_autobuild":
+		var parts: PackedStringArray = target.split(":")
+		if parts.size() == 3 and parts[0].is_valid_int() and parts[2] in ["0", "1"] and set_yard_autobuild(state, id, index, int(parts[0]), parts[1], parts[2] == "1"):
+			return true
+		return false
+	if enqueue(state, id, index, kind, target):
+		return true
+	return false
+
+static func authority_shipyard_rally_for(state: Dictionary, id: int, index: int, slot: int, target: int, point: Vector2) -> bool:
+	if _authority_active_player(state, id) and set_shipyard_rally(state, id, index, slot, target, point):
+		return true
+	return false
+
+static func authority_maintain_for(state: Dictionary, id: int, index: int, kind: String, amount: int) -> bool:
+	if _authority_active_player(state, id) and set_maintain(state, id, index, kind, amount):
+		return true
+	return false
+
+static func authority_continuous_for(state: Dictionary, id: int, index: int, kind: String, enabled: bool) -> bool:
+	if not kind.begins_with("production:") and _authority_active_player(state, id) and set_continuous(state, id, index, kind, enabled):
+		return true
+	return false
+
+static func authority_cancel_for(state: Dictionary, id: int, index: int, job_id: int) -> bool:
+	if _authority_active_player(state, id) and cancel(state, id, index, job_id):
+		return true
+	return false
+
+static func authority_thresholds_for(state: Dictionary, id: int, index: int, resource: String, minimum: float, maximum: float, importing: bool = true, exporting: bool = true) -> bool:
+	if _authority_active_player(state, id) and set_thresholds(state, id, index, resource, minimum, maximum, importing, exporting):
+		return true
+	return false
+
+static func authority_mining_policy_for(state: Dictionary, id: int, index: int, enabled: bool, metals: bool, crystals: bool) -> bool:
+	if _authority_active_player(state, id) and set_mining_policy(state, id, index, enabled, metals, crystals):
+		return true
+	return false
+
+static func authority_time_speed_for(state: Dictionary, id: int, speed: int) -> bool:
+	if id != 1 or not OS.is_debug_build() or not state.get("teams", {}).has(id):
+		return false
+	if not state.get("match_result", {}).is_empty() or not AUTHORITY_MATCH_SPEEDS.has(speed) or int(state.get("time_speed", 1)) == speed:
+		return false
+	state["time_speed"] = speed
+	return true
+
+static func authority_conquest_reward_for(state: Dictionary, id: int, key: String, generation: int, category: String) -> bool:
+	if _authority_active_player(state, id) and acquire_reward(state, id, key, generation, category):
+		return true
+	return false
+
+static func authority_objective_refresh_for(state: Dictionary, id: int, category: String, expected: String) -> bool:
+	if _authority_active_player(state, id) and refresh_objective(state, id, category, expected):
+		return true
+	return false
+
+static func authority_empire_target_for(state: Dictionary, id: int, kind: String, amount: int) -> bool:
+	if _authority_active_player(state, id) and set_empire_target(state, id, kind, amount):
+		return true
+	return false
+
+# Verify independent static storage before enabling a worker.
+static var _authority_cache_probe: int = 0
+
+static func swap_authority_cache_probe(value: int) -> int:
+	var prior: int = _authority_cache_probe
+	_authority_cache_probe = value
+	return prior
+
 static func advance_authority_substep(state: Dictionary, dt: float, profile: Dictionary = {}) -> bool:
 	var diplomatic_revision: int = int(state.get("diplomacy_revision", 0))
 	step(state, dt, profile)

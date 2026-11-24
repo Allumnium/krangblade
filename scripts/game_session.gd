@@ -11,10 +11,11 @@ signal lobbies_changed
 
 const RULES = preload("res://scripts/lobby_rules.gd")
 const ECONOMY = preload("res://scripts/economy_rules.gd")
+const AUTHORITY_WORKER = preload("res://scripts/authority_worker.gd")
 const SNAPSHOT_CODEC = preload("res://scripts/snapshot_codec.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 const SIM_STEP: float = 0.1
-const MATCH_SPEEDS: Array[int] = [0, 1, 2, 5]
+const MATCH_SPEEDS = ECONOMY.AUTHORITY_MATCH_SPEEDS
 const SNAPSHOT_INTERVAL: float = 0.2 # Local authority UI refresh.
 const REPLICATION_INTERVAL: float = 0.5
 # 57 records x 20 bytes = 1140 bytes, leaving room for RPC/ENet headers.
@@ -38,6 +39,16 @@ var match_chat: Array[Dictionary] = []
 var last_message: Dictionary = {}
 var owners: Array[int] = []
 var economy: Dictionary = {}
+# In threaded mode economy is a detached presentation/replication snapshot.
+# Only the worker owns mutable authority; main-thread jobs contain values.
+var threaded_authority_requested: bool = bool(ProjectSettings.get_setting("warbound/performance/threaded_authority", false)) or OS.get_cmdline_user_args().has("--warbound-threaded")
+var threaded_authority_active: bool = false
+var _authority_worker := AUTHORITY_WORKER.new()
+var _authority_jobs: Array[Dictionary] = []
+var _authority_tick_queued: bool = false
+var _authority_publishing: bool = false
+var diagnostic_worker_overruns: int = 0
+var diagnostic_worker_snapshot_ms: float = 0.0
 var is_solo: bool = false
 var map_layout: String = MAP.DEFAULT_LAYOUT
 var lobby_map_seed: int = 0
@@ -200,6 +211,7 @@ func leave_session() -> void:
 	_status("Disconnected.")
 
 func _reset_network() -> void:
+	_stop_authority_worker()
 	match_chat.clear()
 	stop_lobby_browser()
 	if discovery_host != null:
@@ -678,6 +690,7 @@ func _rpc_begin(begin_round: int, snapshot: Dictionary, map_seed: int, layout: S
 	_activate_match(snapshot, map_seed)
 
 func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
+	_stop_authority_worker()
 	match_chat.clear()
 	last_message.clear()
 	lobby_map_seed = map_seed
@@ -719,6 +732,10 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 		replication_planet_template = _planet_template(economy["planets"])
 	_refresh_motion_roster()
 	owners = ECONOMY.planet_teams(economy)
+	if threaded_authority_requested and (is_solo or multiplayer.is_server()):
+		threaded_authority_active = _authority_worker.start(economy)
+		if not threaded_authority_active:
+			push_warning("Warbound threaded authority unavailable; using synchronous simulation.")
 	_set_phase("match")
 	_status("Match in progress")
 	if is_solo or multiplayer.is_server():
@@ -761,6 +778,7 @@ func _rpc_return(match_round: int, snapshot: Dictionary) -> void:
 		_back_to_lobby(snapshot, "Host returned everyone to the lobby.")
 
 func _back_to_lobby(snapshot: Dictionary, reason: String) -> void:
+	_stop_authority_worker()
 	players = snapshot.duplicate(true)
 	loaded.clear()
 	economy_timer.stop()
@@ -792,11 +810,11 @@ func _rpc_colonize(ship_id: int, target: int) -> void:
 		_colonize_for(multiplayer.get_remote_sender_id(), ship_id, target)
 
 func _colonize_for(id: int, ship_id: int, target: int) -> void:
-	if not _active_player(id):
+	if not _match_peer(id):
 		return
-	if ship_id == -1:
-		ship_id = ECONOMY.nearest_idle_colony(economy, id, target)
-	if ship_id >= 0 and ECONOMY.send_colony(economy, id, ship_id, target):
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_colonize_for", [id, ship_id, target])
+	elif ECONOMY.authority_colonize_for(economy, id, ship_id, target):
 		_publish_economy()
 
 func request_fighter_move(ids: Array, target: int, move_only: bool = false) -> void:
@@ -813,7 +831,11 @@ func _rpc_fighter_move(ids: Array, target: int, move_only: bool = false) -> void
 		_fighter_move_for(multiplayer.get_remote_sender_id(), ids, target, move_only)
 
 func _fighter_move_for(id: int, ids: Array, target: int, move_only: bool = false) -> void:
-	if _active_player(id) and ECONOMY.command_fighters(economy, id, ids, target, move_only):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_fighter_move_for", [id, ids, target, move_only])
+	elif ECONOMY.authority_fighter_move_for(economy, id, ids, target, move_only):
 		_publish_economy()
 
 func request_tactical_order(ids: Array, kind: String, target: int) -> void:
@@ -830,15 +852,11 @@ func _rpc_tactical_order(ids: Array, kind: String, target: int) -> void:
 		_tactical_order_for(multiplayer.get_remote_sender_id(), ids, kind, target)
 
 func _tactical_order_for(id: int, ids: Array, kind: String, target: int) -> void:
-	if not _active_player(id):
+	if not _match_peer(id):
 		return
-	var accepted: bool = false
-	match kind:
-		"attack":
-			accepted = ECONOMY.command_attack(economy, id, ids, target)
-		"patrol":
-			accepted = ECONOMY.command_patrol(economy, id, ids, target)
-	if accepted:
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_tactical_order_for", [id, ids, kind, target])
+	elif ECONOMY.authority_tactical_order_for(economy, id, ids, kind, target):
 		_publish_economy()
 
 func request_miner_assignment(ids: Array, field: int, chunk: int = -1) -> void:
@@ -855,7 +873,11 @@ func _rpc_miner_assignment(ids: Array, field: int, chunk: int) -> void:
 		_miner_assignment_for(multiplayer.get_remote_sender_id(), ids, field, chunk)
 
 func _miner_assignment_for(id: int, ids: Array, field: int, chunk: int) -> void:
-	if _active_player(id) and ECONOMY.command_miners(economy, id, ids, field, chunk):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_miner_assignment_for", [id, ids, field, chunk])
+	elif ECONOMY.authority_miner_assignment_for(economy, id, ids, field, chunk):
 		_publish_economy()
 
 func request_fighter_hold(ids: Array) -> void:
@@ -872,7 +894,11 @@ func _rpc_fighter_hold(ids: Array) -> void:
 		_fighter_hold_for(multiplayer.get_remote_sender_id(), ids)
 
 func _fighter_hold_for(id: int, ids: Array) -> void:
-	if _active_player(id) and ECONOMY.hold_fighters(economy, id, ids):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_fighter_hold_for", [id, ids])
+	elif ECONOMY.authority_fighter_hold_for(economy, id, ids):
 		_publish_economy()
 
 func request_local_position(ids: Array, node: int, point: Vector2, move_only: bool = false) -> void:
@@ -889,7 +915,11 @@ func _rpc_local_position(ids: Array, node: int, point: Vector2, move_only: bool 
 		_local_position_for(multiplayer.get_remote_sender_id(), ids, node, point, move_only)
 
 func _local_position_for(id: int, ids: Array, node: int, point: Vector2, move_only: bool = false) -> void:
-	if _active_player(id) and ECONOMY.command_local_position(economy, id, ids, node, point, move_only):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_local_position_for", [id, ids, node, point, move_only])
+	elif ECONOMY.authority_local_position_for(economy, id, ids, node, point, move_only):
 		_publish_economy()
 
 func request_salvage(ids: Array, target: int) -> void:
@@ -906,7 +936,11 @@ func _rpc_salvage(ids: Array, target: int) -> void:
 		_salvage_for(multiplayer.get_remote_sender_id(), ids, target)
 
 func _salvage_for(id: int, ids: Array, target: int) -> void:
-	if _active_player(id) and ECONOMY.command_salvage(economy, id, ids, target):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_salvage_for", [id, ids, target])
+	elif ECONOMY.authority_salvage_for(economy, id, ids, target):
 		_publish_economy()
 
 func request_unload_cargo(ids: Array) -> void:
@@ -923,7 +957,11 @@ func _rpc_unload_cargo(ids: Array) -> void:
 		_unload_cargo_for(multiplayer.get_remote_sender_id(), ids)
 
 func _unload_cargo_for(id: int, ids: Array) -> void:
-	if _active_player(id) and ECONOMY.command_unload_cargo(economy, id, ids):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_unload_cargo_for", [id, ids])
+	elif ECONOMY.authority_unload_cargo_for(economy, id, ids):
 		_publish_economy()
 
 func request_unit_hold(ids: Array, release: bool) -> void:
@@ -940,7 +978,11 @@ func _rpc_unit_hold(ids: Array, release: bool) -> void:
 		_unit_hold_for(multiplayer.get_remote_sender_id(), ids, release)
 
 func _unit_hold_for(id: int, ids: Array, release: bool) -> void:
-	if _active_player(id) and ECONOMY.command_hold_units(economy, id, ids, release):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_unit_hold_for", [id, ids, release])
+	elif ECONOMY.authority_unit_hold_for(economy, id, ids, release):
 		_publish_economy()
 
 func request_unit_orders(orders: Array, append: bool = false) -> void:
@@ -957,13 +999,11 @@ func _rpc_unit_orders(orders: Array, append: bool) -> void:
 		_unit_orders_for(multiplayer.get_remote_sender_id(), orders, append)
 
 func _unit_orders_for(id: int, orders: Array, append: bool) -> void:
-	if not _active_player(id) or orders.size() > economy["ships"].size():
+	if not _match_peer(id):
 		return
-	var changed: bool = false
-	for entry in orders:
-		if entry is Dictionary and entry.get("ids") is Array and entry.get("order") is Dictionary:
-			changed = ECONOMY.issue_unit_order(economy, id, entry["ids"], entry["order"], append) or changed
-	if changed:
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_unit_orders_for", [id, orders, append])
+	elif ECONOMY.authority_unit_orders_for(economy, id, orders, append):
 		_publish_economy()
 
 # No ordinary movement or attack RPC can change diplomatic state.
@@ -982,16 +1022,11 @@ func _rpc_diplomacy(request_round: int, action: String, other: int, enabled: boo
 		_diplomacy_for(multiplayer.get_remote_sender_id(), action, other, enabled)
 
 func _diplomacy_for(id: int, action: String, other: int, enabled: bool) -> void:
-	if not _active_player(id):
+	if not _match_peer(id):
 		return
-	var changed: bool = false
-	match action:
-		"declare_war": changed = ECONOMY.diplomacy_declare_war(economy, id, other)
-		"peace": changed = ECONOMY.diplomacy_offer_peace(economy, id, other)
-		"alliance": changed = ECONOMY.diplomacy_offer_alliance(economy, id, other)
-		"break_alliance": changed = ECONOMY.diplomacy_break_alliance(economy, id, other)
-		"vision", "trade": changed = ECONOMY.diplomacy_set_permission(economy, id, other, action, enabled)
-	if changed:
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_diplomacy_for", [id, action, other, enabled])
+	elif ECONOMY.authority_diplomacy_for(economy, id, action, other, enabled):
 		_publish_economy()
 
 func request_confirmed_attack(other: int, ids: Array, target: int) -> void:
@@ -1008,7 +1043,11 @@ func _rpc_confirmed_attack(request_round: int, other: int, ids: Array, target: i
 		_confirmed_attack_for(multiplayer.get_remote_sender_id(), other, ids, target)
 
 func _confirmed_attack_for(id: int, other: int, ids: Array, target: int) -> void:
-	if _active_player(id) and ids.size() <= economy["ships"].size() and ECONOMY.diplomacy_confirm_attack(economy, id, other, ids, target):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_confirmed_attack_for", [id, other, ids, target])
+	elif ECONOMY.authority_confirmed_attack_for(economy, id, other, ids, target):
 		_publish_economy()
 
 func request_autocast(ids: Array, mode: String, enabled: bool) -> void:
@@ -1025,7 +1064,11 @@ func _rpc_autocast(ids: Array, mode: String, enabled: bool) -> void:
 		_autocast_for(multiplayer.get_remote_sender_id(), ids, mode, enabled)
 
 func _autocast_for(id: int, ids: Array, mode: String, enabled: bool) -> void:
-	if _active_player(id) and ECONOMY.set_autocast(economy, id, ids, mode, enabled):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_autocast_for", [id, ids, mode, enabled])
+	elif ECONOMY.authority_autocast_for(economy, id, ids, mode, enabled):
 		_publish_economy()
 
 func request_repair_auto(ids: Array, enabled: bool) -> void:
@@ -1042,7 +1085,11 @@ func _rpc_repair_auto(ids: Array, enabled: bool) -> void:
 		_repair_auto_for(multiplayer.get_remote_sender_id(), ids, enabled)
 
 func _repair_auto_for(id: int, ids: Array, enabled: bool) -> void:
-	if _active_player(id) and ECONOMY.set_repair_auto(economy, id, ids, enabled):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_repair_auto_for", [id, ids, enabled])
+	elif ECONOMY.authority_repair_auto_for(economy, id, ids, enabled):
 		_publish_economy()
 
 func _active_player(id: int) -> bool:
@@ -1065,19 +1112,11 @@ func _rpc_operation(index: int, kind: String, target: String) -> void:
 		_operation_for(multiplayer.get_remote_sender_id(), index, kind, target)
 
 func _operation_for(id: int, index: int, kind: String, target: String) -> void:
-	if not _active_player(id) or kind == "production":
+	if not _match_peer(id):
 		return
-	if kind == "shipyard_build":
-		var parts: PackedStringArray = target.split(":")
-		if parts.size() == 2 and parts[0].is_valid_int() and int(parts[0]) >= 0 and ECONOMY.SHIP_KINDS.has(parts[1]) and ECONOMY.enqueue(economy, id, index, parts[1], "", int(parts[0])):
-			_publish_economy()
-		return
-	if kind == "shipyard_autobuild":
-		var parts: PackedStringArray = target.split(":")
-		if parts.size() == 3 and parts[0].is_valid_int() and parts[2] in ["0", "1"] and ECONOMY.set_yard_autobuild(economy, id, index, int(parts[0]), parts[1], parts[2] == "1"):
-			_publish_economy()
-		return
-	if ECONOMY.enqueue(economy, id, index, kind, target):
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_operation_for", [id, index, kind, target])
+	elif ECONOMY.authority_operation_for(economy, id, index, kind, target):
 		_publish_economy()
 
 func request_shipyard_rally(index: int, slot: int, target: int, point: Vector2) -> void:
@@ -1094,7 +1133,11 @@ func _rpc_shipyard_rally(index: int, slot: int, target: int, point: Vector2) -> 
 		_shipyard_rally_for(multiplayer.get_remote_sender_id(), index, slot, target, point)
 
 func _shipyard_rally_for(id: int, index: int, slot: int, target: int, point: Vector2) -> void:
-	if _active_player(id) and ECONOMY.set_shipyard_rally(economy, id, index, slot, target, point):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_shipyard_rally_for", [id, index, slot, target, point])
+	elif ECONOMY.authority_shipyard_rally_for(economy, id, index, slot, target, point):
 		_publish_economy()
 
 func request_maintain(index: int, kind: String, amount: int) -> void:
@@ -1111,7 +1154,11 @@ func _rpc_maintain(index: int, kind: String, amount: int) -> void:
 		_maintain_for(multiplayer.get_remote_sender_id(), index, kind, amount)
 
 func _maintain_for(id: int, index: int, kind: String, amount: int) -> void:
-	if _active_player(id) and ECONOMY.set_maintain(economy, id, index, kind, amount):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_maintain_for", [id, index, kind, amount])
+	elif ECONOMY.authority_maintain_for(economy, id, index, kind, amount):
 		_publish_economy()
 
 func request_continuous(index: int, kind: String, enabled: bool) -> void:
@@ -1128,7 +1175,11 @@ func _rpc_continuous(index: int, kind: String, enabled: bool) -> void:
 		_continuous_for(multiplayer.get_remote_sender_id(), index, kind, enabled)
 
 func _continuous_for(id: int, index: int, kind: String, enabled: bool) -> void:
-	if not kind.begins_with("production:") and _active_player(id) and ECONOMY.set_continuous(economy, id, index, kind, enabled):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_continuous_for", [id, index, kind, enabled])
+	elif ECONOMY.authority_continuous_for(economy, id, index, kind, enabled):
 		_publish_economy()
 
 func request_cancel(index: int, job_id: int) -> void:
@@ -1145,7 +1196,11 @@ func _rpc_cancel(index: int, job_id: int) -> void:
 		_cancel_for(multiplayer.get_remote_sender_id(), index, job_id)
 
 func _cancel_for(id: int, index: int, job_id: int) -> void:
-	if _active_player(id) and ECONOMY.cancel(economy, id, index, job_id):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_cancel_for", [id, index, job_id])
+	elif ECONOMY.authority_cancel_for(economy, id, index, job_id):
 		_publish_economy()
 
 func request_thresholds(index: int, resource: String, minimum: float, maximum: float, importing: bool = true, exporting: bool = true) -> void:
@@ -1162,7 +1217,11 @@ func _rpc_thresholds(index: int, resource: String, minimum: float, maximum: floa
 		_thresholds_for(multiplayer.get_remote_sender_id(), index, resource, minimum, maximum, importing, exporting)
 
 func _thresholds_for(id: int, index: int, resource: String, minimum: float, maximum: float, importing: bool = true, exporting: bool = true) -> void:
-	if _active_player(id) and ECONOMY.set_thresholds(economy, id, index, resource, minimum, maximum, importing, exporting):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_thresholds_for", [id, index, resource, minimum, maximum, importing, exporting])
+	elif ECONOMY.authority_thresholds_for(economy, id, index, resource, minimum, maximum, importing, exporting):
 		_publish_economy()
 
 func request_mining_policy(index: int, enabled: bool, metals: bool, crystals: bool) -> void:
@@ -1179,7 +1238,11 @@ func _rpc_mining_policy(index: int, enabled: bool, metals: bool, crystals: bool)
 		_mining_policy_for(multiplayer.get_remote_sender_id(), index, enabled, metals, crystals)
 
 func _mining_policy_for(id: int, index: int, enabled: bool, metals: bool, crystals: bool) -> void:
-	if _active_player(id) and ECONOMY.set_mining_policy(economy, id, index, enabled, metals, crystals):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_mining_policy_for", [id, index, enabled, metals, crystals])
+	elif ECONOMY.authority_mining_policy_for(economy, id, index, enabled, metals, crystals):
 		_publish_economy()
 
 # Any connected player may request a shared speed; the host validates and
@@ -1196,12 +1259,12 @@ func _rpc_time_speed(speed: int) -> void:
 		_time_speed_for(multiplayer.get_remote_sender_id(), speed)
 
 func _time_speed_for(id: int, speed: int) -> void:
-	if id != 1 or not OS.is_debug_build() or not _match_peer(id):
+	if not _match_peer(id):
 		return
-	if not economy.get("match_result", {}).is_empty() or not MATCH_SPEEDS.has(speed) or int(economy.get("time_speed", 1)) == speed:
-		return
-	economy["time_speed"] = speed
-	_publish_economy()
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_time_speed_for", [id, speed])
+	elif ECONOMY.authority_time_speed_for(economy, id, speed):
+		_publish_economy()
 
 var diagnostic_sim_ms: float = 0.0
 var diagnostic_sim_phases: Dictionary = {}
@@ -1236,6 +1299,16 @@ func network_diagnostics() -> Dictionary:
 func _economy_tick() -> void:
 	if phase != "match" or not (is_solo or multiplayer.is_server()):
 		return
+	if threaded_authority_active:
+		# Never accumulate an unbounded catch-up queue. At overload the
+		# simulation slows, rather than dropping substeps inside a batch.
+		if _authority_tick_queued:
+			diagnostic_worker_overruns += 1
+			return
+		_authority_tick_queued = true
+		_authority_jobs.append({"kind": "tick", "dt": SIM_STEP})
+		_pump_authority_jobs()
+		return
 	economy["objective_clock"] = float(economy.get("objective_clock", 0.0)) + SIM_STEP
 	var speed: int = int(economy.get("time_speed", 1))
 	# Pause stops the simulation, but not accepted orders or replication.
@@ -1250,6 +1323,10 @@ func _economy_tick() -> void:
 	diagnostic_sim_ms = float(Time.get_ticks_usec() - started) / 1000.0
 	profile.erase("enabled")
 	diagnostic_sim_phases = profile
+	_finish_economy_tick(speed)
+
+# Publication and all ENet work stay on the main thread in both modes.
+func _finish_economy_tick(speed: int) -> void:
 	snapshot_elapsed += SIM_STEP
 	if snapshot_elapsed >= SNAPSHOT_INTERVAL - 0.00001:
 		snapshot_elapsed = 0.0
@@ -1262,8 +1339,71 @@ func _economy_tick() -> void:
 		_send_motion()
 	_flush_economy()
 
+# A single FIFO orders tick and command intents. Peer membership is
+# checked at receipt and again before submission; gameplay checks run on
+# the current authoritative state, never on the displayed snapshot.
+func _dispatch_authority_command(method: String, args: Array) -> void:
+	if not threaded_authority_active or not _match_peer(int(args[0])):
+		return
+	_authority_jobs.append({"kind": "command", "method": method, "args": args.duplicate(true)})
+	_pump_authority_jobs()
+
+func _pump_authority_jobs() -> void:
+	if not threaded_authority_active or _authority_publishing or _authority_worker.busy():
+		return
+	while not _authority_jobs.is_empty():
+		var job: Dictionary = _authority_jobs.pop_front()
+		if job["kind"] == "tick":
+			_authority_tick_queued = false
+		elif not _match_peer(int(job["args"][0])):
+			continue
+		if _authority_worker.submit(job):
+			return
+		# Submit can fail only if lifecycle invariants were violated.
+		push_error("Authority worker rejected a queued job.")
+		return
+
+func _process(_delta: float) -> void:
+	if not threaded_authority_active:
+		return
+	var result: Dictionary = _authority_worker.take_result()
+	if result.is_empty():
+		return
+	_authority_publishing = true
+	if result["kind"] == "command":
+		if bool(result["accepted"]):
+			economy = result["snapshot"]
+			_publish_economy()
+	else:
+		motion_revision += 1
+		diagnostic_sim_ms = float(result["sim_ms"])
+		diagnostic_sim_phases = result["profile"]
+		diagnostic_worker_snapshot_ms = float(result["snapshot_ms"])
+		for snapshot in result["urgent"]:
+			economy = snapshot
+			_publish_economy()
+			if not threaded_authority_active:
+				break
+		if threaded_authority_active:
+			economy = result["snapshot"]
+			_finish_economy_tick(int(result["speed"]))
+	_authority_publishing = false
+	_pump_authority_jobs()
+
+func _stop_authority_worker() -> void:
+	threaded_authority_active = false
+	_authority_jobs.clear()
+	_authority_tick_queued = false
+	_authority_publishing = false
+	_authority_worker.stop()
+	diagnostic_worker_overruns = 0
+	diagnostic_worker_snapshot_ms = 0.0
+
+func _exit_tree() -> void:
+	_stop_authority_worker()
+
 func _publish_economy(urgent: bool = true) -> void:
-	# Local UI stays synchronous. Accepted commands bypass the slow state clock.
+	# Accepted commands bypass the slow state clock; snapshots never expose worker state.
 	snapshot_revision += 1
 	if urgent:
 		urgent_snapshot_revision = snapshot_revision
@@ -1497,7 +1637,11 @@ func _rpc_conquest_reward(key: String, generation: int, category: String) -> voi
 		_conquest_reward_for(multiplayer.get_remote_sender_id(), key, generation, category)
 
 func _conquest_reward_for(id: int, key: String, generation: int, category: String) -> void:
-	if _active_player(id) and ECONOMY.acquire_reward(economy, id, key, generation, category):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_conquest_reward_for", [id, key, generation, category])
+	elif ECONOMY.authority_conquest_reward_for(economy, id, key, generation, category):
 		_publish_economy()
 
 func request_objective_refresh(category: String, expected: String) -> void:
@@ -1514,7 +1658,11 @@ func _rpc_objective_refresh(category: String, expected: String) -> void:
 		_objective_refresh_for(multiplayer.get_remote_sender_id(), category, expected)
 
 func _objective_refresh_for(id: int, category: String, expected: String) -> void:
-	if _active_player(id) and ECONOMY.refresh_objective(economy, id, category, expected):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_objective_refresh_for", [id, category, expected])
+	elif ECONOMY.authority_objective_refresh_for(economy, id, category, expected):
 		_publish_economy()
 
 func request_empire_target(kind: String, amount: int) -> void:
@@ -1531,5 +1679,9 @@ func _rpc_empire_target(kind: String, amount: int) -> void:
 		_empire_target_for(multiplayer.get_remote_sender_id(), kind, amount)
 
 func _empire_target_for(id: int, kind: String, amount: int) -> void:
-	if _active_player(id) and ECONOMY.set_empire_target(economy, id, kind, amount):
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_empire_target_for", [id, kind, amount])
+	elif ECONOMY.authority_empire_target_for(economy, id, kind, amount):
 		_publish_economy()
