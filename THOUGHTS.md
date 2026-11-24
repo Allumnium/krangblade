@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.44: Complete durable real-ENet resource handoff verification by consuming the observed authoritative transfer flag in each empire's command-check dictionary; remove the redundant simultaneous miner-empty/Freighter-full snapshot gate, which could still fail after a valid haul. Preserve event, cumulative cargo statistics, all peer and construction requirements. Test-only; runtime 3-/8-peer validation pending.
+
 - v0.97.43: Make real-ENet miner-to-Freighter handoff validation observe authoritative source/target cargo transfer events or persistent dropped/picked statistics rather than relying on simultaneous transient cargo snapshots. Add economy regression assertions for transfer records and cumulative cargo accounting. Keep every command, throughput and peer-validation requirement intact. No gameplay/network schema changes; rerun pending.
 
 - v0.97.42: Archive 64 historical v0.94–v0.97.30 change entries from the top of AGENTS.md into THOUGHTS_ARCHIVE.md without changing their wording or removing the standing workflow/UI/design instructions. Keep recent notes and a direct archive link for AI agents. Documentation-only; game and CI untouched.
