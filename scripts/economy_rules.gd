@@ -2198,13 +2198,21 @@ static func _record_transfer(state: Dictionary, source_id: int, source: Dictiona
 	_cargo_stat(source, "tons_dropped", resource, amount)
 	_cargo_stat(target, "tons_picked", resource, amount)
 	var events: Dictionary = state.get("cargo_transfers", {})
+	var scheduled: bool = is_same(state, _deadline_state)
+	if scheduled:
+		_sync_transfer_deadlines(events)
 	var key: String = "%d:%d:%s" % [source_id, target_id, resource]
 	if not events.has(key) and events.size() >= TRANSFER_EVENT_LIMIT:
-		events.erase(events.keys()[0])
+		var evicted: String = events.keys()[0]
+		events.erase(evicted)
+		if scheduled:
+			_transfer_deadlines.cancel(evicted)
 	var seq: int = int(state.get("cargo_transfer_seq", 0)) + 1
 	state["cargo_transfer_seq"] = seq
 	events[key] = {"source": source_id, "target": target_id, "resource": resource, "amount": amount, "from_bay": _transfer_bay(source, resource, amount, true), "to_bay": _transfer_bay(target, resource, amount, false), "elapsed": float(state["elapsed"]), "seq": seq}
 	state["cargo_transfers"] = events
+	if scheduled:
+		_transfer_deadlines.schedule(key, float(state["elapsed"]))
 
 static func _record_flow(p: Dictionary, category: String, resource: String, amount: float) -> void:
 	if amount <= EPS or not p.has("flows"):
@@ -4773,13 +4781,24 @@ enum MotionSleep { AWAKE, STOPPED, HELD, IDLE_MILITARY }
 static var _motion_sleep_state: Dictionary = {}
 static var _motion_sleep_roster: Array = []
 static var _motion_sleep_modes: Dictionary = {}
+# Independent deadline calendars, derived from the current authority only.
+static var _deadline_state: Dictionary = {}
+static var _deadline_roster: Array = []
+static var _deadline_events: Dictionary = {}
+static var _cooldown_deadlines = STEP_FRAME.DeadlineCalendar.new()
+static var _transfer_deadlines = STEP_FRAME.DeadlineCalendar.new()
 
 # Scope derived references to one authority step; never serialize them.
 static func _begin_hull_index(state: Dictionary) -> void:
 	_indexed_state = state
 	_hulls_by_id.clear()
 	for ship in state["ships"]:
-		_hulls_by_id[int(ship["id"])] = ship
+		var id: int = int(ship["id"])
+		_hulls_by_id[id] = ship
+		# Reconcile externally restored or fixture-edited deadlines during
+		# the existing roster pass, not by polling a second fleet-wide loop.
+		if is_same(state, _deadline_state) and ship.has("auto_cooldown_until"):
+			_cooldown_deadlines.schedule(id, float(ship["auto_cooldown_until"]))
 
 static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
 	if ship.get("kind", "") == "warp_gate":
@@ -4789,6 +4808,8 @@ static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
 	state["ships"].erase(ship)
 	if is_same(state, _motion_sleep_state):
 		_motion_sleep_modes.erase(int(ship["id"]))
+	if is_same(state, _deadline_state):
+		_cooldown_deadlines.cancel(int(ship["id"]))
 	if is_same(state, _indexed_state):
 		_hulls_by_id.erase(int(ship["id"]))
 
@@ -5722,6 +5743,12 @@ static func polyline_formation_slots(origins: Dictionary, stroke: PackedVector2A
 		slots.append({"id": ids[i], "point": point, "heading": heading})
 	return slots
 
+static func _set_auto_cooldown(state: Dictionary, ship: Dictionary) -> void:
+	var deadline: float = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
+	ship["auto_cooldown_until"] = deadline
+	if is_same(state, _deadline_state):
+		_cooldown_deadlines.schedule(int(ship["id"]), deadline)
+
 static func _set_unit_order(state: Dictionary, ship: Dictionary, order: Dictionary) -> void:
 	ship.erase("colony_transform_progress")
 	ship.erase("stop_until")
@@ -5731,7 +5758,7 @@ static func _set_unit_order(state: Dictionary, ship: Dictionary, order: Dictiona
 	ship.erase("manual_mine")
 	ship.erase("wander_cooldown_override")
 	ship.erase("follow_arrived")
-	ship["auto_cooldown_until"] = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
+	_set_auto_cooldown(state, ship)
 	ship.erase("order_queue")
 	if order.is_empty():
 		ship.erase("unit_order")
@@ -6083,7 +6110,7 @@ static func issue_unit_order(state: Dictionary, player: int, ids: Array, order: 
 		ship["order_queue"] = queue
 		_extend_patrol_from_queue(state, graph, ship)
 		ship.erase("wander_cooldown_override")
-		ship["auto_cooldown_until"] = float(state["elapsed"]) + AUTOCAST_COOLDOWN_YEARS
+		_set_auto_cooldown(state, ship)
 		accepted = true
 	return accepted
 
@@ -9810,7 +9837,8 @@ static func _next_ai_slot(now: float, player: int) -> float:
 		next += AI_INTERVAL
 	return next
 
-static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true) -> void:
+static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true) -> void:
+	_begin_deadline_schedule(state, deadline_schedule_enabled)
 	_rock_plan_tick += 1
 	_rock_plan_budget = ROCK_PLAN_LIMIT
 	_rock_route_queries.clear()
@@ -9819,6 +9847,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	var frame: STEP_FRAME = STEP_FRAME.new()
 	frame.profile = profile
 	frame.motion_sleep_enabled = motion_sleep_enabled
+	frame.deadline_schedule_enabled = deadline_schedule_enabled
 	_step_economy(state, frame, dt)
 	started = _profile_stage(profile, "Economy", started)
 	_step_ai(state, frame, dt)
@@ -9848,16 +9877,76 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	_sector_query_graph = {}
 	_sector_query_cache.clear()
 
+# Calendars store only keys and timestamps. The canonical dictionaries
+# remain authoritative and are rebuilt on state/roster replacement.
+static func _begin_deadline_schedule(state: Dictionary, enabled: bool) -> void:
+	if not enabled:
+		_deadline_state = {}
+		_deadline_roster = []
+		_deadline_events = {}
+		_cooldown_deadlines.clear()
+		_transfer_deadlines.clear()
+		return
+	if not is_same(state, _deadline_state):
+		_deadline_state = state
+		_deadline_roster = []
+		_deadline_events = {}
+		_cooldown_deadlines.clear()
+		_transfer_deadlines.clear()
+	if not is_same(state["ships"], _deadline_roster):
+		_deadline_roster = state["ships"]
+		_cooldown_deadlines.clear()
+		# The existing hull index pass will populate live deadlines.
+
+static func _sync_transfer_deadlines(events: Dictionary) -> void:
+	if is_same(events, _deadline_events) and _transfer_deadlines.size() == events.size():
+		return
+	_deadline_events = events
+	_transfer_deadlines.clear()
+	for key in events:
+		_transfer_deadlines.schedule(key, float(events[key]["elapsed"]))
+
+static func _expire_transfer_events(state: Dictionary, scheduled: bool) -> void:
+	if not state.has("cargo_transfers"):
+		return
+	var events: Dictionary = state["cargo_transfers"]
+	var now: float = float(state["elapsed"])
+	if not scheduled:
+		for key in events.keys():
+			if now - float(events[key]["elapsed"]) > TRANSFER_EVENT_YEARS:
+				events.erase(key)
+		return
+	_sync_transfer_deadlines(events)
+	# Compare using the original subtraction, including strict equality
+	# at the lifetime boundary; do not round to a tick or add epsilon.
+	for key in _transfer_deadlines.take_due(now, TRANSFER_EVENT_YEARS, true):
+		if not events.has(key):
+			continue
+		var born: float = float(events[key]["elapsed"])
+		if now - born > TRANSFER_EVENT_YEARS:
+			events.erase(key)
+		else:
+			_transfer_deadlines.schedule(key, born)
+
+static func _expire_auto_cooldowns(state: Dictionary) -> void:
+	var now: float = float(state["elapsed"])
+	for id in _cooldown_deadlines.take_due(now):
+		var ship: Dictionary = _hulls_by_id.get(id, {})
+		if not ship.has("auto_cooldown_until"):
+			continue
+		var deadline: float = float(ship["auto_cooldown_until"])
+		if deadline <= now:
+			ship.erase("auto_cooldown_until")
+		else:
+			_cooldown_deadlines.schedule(id, deadline)
+
 static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 	_accrue_resident_taxes(state, dt)
 	_pay_fleet_upkeep(state, dt)
 	state["elapsed"] = float(state["elapsed"]) + dt
 	if dt > 0.0:
 		_check_unpaid_defections(state)
-	var transfer_events: Dictionary = state.get("cargo_transfers", {})
-	for key in transfer_events.keys():
-		if float(state["elapsed"]) - float(transfer_events[key]["elapsed"]) > TRANSFER_EVENT_YEARS:
-			transfer_events.erase(key)
+	_expire_transfer_events(state, frame.deadline_schedule_enabled)
 	var combat_graph: Dictionary = military_graph(state)
 	frame.graph = combat_graph
 	_sector_query_cache.clear()
@@ -10286,12 +10375,17 @@ static func _step_settle_movement(state: Dictionary, frame: STEP_FRAME, dt: floa
 			_navigate(ship, frame.idle_targets[id], ship_speed(str(ship.get("kind", "ship"))) * dt)
 		ship.erase("_handoff_sent")
 		_mark_sector_arrival(state, ship)
-		if ship.has("auto_cooldown_until") and float(ship["auto_cooldown_until"]) <= float(state["elapsed"]):
+		if not frame.deadline_schedule_enabled and ship.has("auto_cooldown_until") and float(ship["auto_cooldown_until"]) <= float(state["elapsed"]):
 			ship.erase("auto_cooldown_until")
 		if ship.has("arrival_wait_until") and arrival_wait_remaining(state, ship) <= EPS and ship.get("unit_order", {}).get("kind", "") != "sector":
 			ship.erase("arrival_wait_until")
 		if ship.has("wander_cooldown_override") and autocast_remaining(state, ship) <= EPS and not _unit_order_running(ship):
 			ship.erase("wander_cooldown_override")
+	# Expired cooldowns read as zero before and after erasure. Settlement
+	# has no cross-hull dependency on these keys; retire only due IDs here,
+	# before separation and contact use the settled state.
+	if frame.deadline_schedule_enabled:
+		_expire_auto_cooldowns(state)
 	avoidance_cells.clear()
 	_avoidance_neighborhoods.clear()
 	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked)

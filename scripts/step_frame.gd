@@ -7,6 +7,7 @@ var civilian_usec: int = 0
 # Motion-only sleep fast path; diagnostics are not authoritative state.
 var motion_sleep_enabled: bool = false
 var motion_sleep_skips: int = 0
+var deadline_schedule_enabled: bool = false
 
 # Routing and civilian caches valid for this substep.
 var graph: Dictionary = {}
@@ -40,3 +41,69 @@ var repair_neighborhoods: Dictionary = {}
 var repaired_hulls: Dictionary = {}
 var repair_parked: Dictionary = {}
 var wander_candidates: Dictionary = {}
+
+# Timestamp-bucket calendar. Equal deadlines share a bucket; rescheduling
+# replaces the old entry rather than accumulating stale heap nodes. Only
+# inspect buckets when the earliest deadline changes or becomes due.
+class DeadlineCalendar:
+	var _by_key: Dictionary = {}
+	var _buckets: Dictionary = {}
+	var _earliest: float = INF
+	var _dirty_minimum: bool = false
+
+	func size() -> int:
+		return _by_key.size()
+
+	func clear() -> void:
+		_by_key.clear()
+		_buckets.clear()
+		_earliest = INF
+		_dirty_minimum = false
+
+	func cancel(key: Variant) -> void:
+		if not _by_key.has(key):
+			return
+		var old: float = float(_by_key[key])
+		_by_key.erase(key)
+		var bucket: Dictionary = _buckets[old]
+		bucket.erase(key)
+		if bucket.is_empty():
+			_buckets.erase(old)
+			if old == _earliest:
+				_dirty_minimum = true
+
+	func schedule(key: Variant, timestamp: float) -> void:
+		if _by_key.has(key) and float(_by_key[key]) == timestamp:
+			return
+		cancel(key)
+		_by_key[key] = timestamp
+		if not _buckets.has(timestamp):
+			_buckets[timestamp] = {}
+		_buckets[timestamp][key] = true
+		if timestamp < _earliest:
+			_earliest = timestamp
+			_dirty_minimum = false
+
+	func _refresh_minimum() -> void:
+		if not _dirty_minimum:
+			return
+		_earliest = INF
+		for timestamp in _buckets:
+			_earliest = minf(_earliest, float(timestamp))
+		_dirty_minimum = false
+
+	func take_due(now: float, lifetime: float = 0.0, strict_age: bool = false) -> Array:
+		var due: Array = []
+		_refresh_minimum()
+		while not _buckets.is_empty():
+			var ready: bool = now - _earliest > lifetime if strict_age else _earliest <= now
+			if not ready:
+				break
+			var bucket: Dictionary = _buckets[_earliest]
+			for key in bucket:
+				due.append(key)
+				_by_key.erase(key)
+			_buckets.erase(_earliest)
+			_dirty_minimum = true
+			_refresh_minimum()
+		return due
