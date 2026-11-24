@@ -1108,6 +1108,29 @@ func _test_handoff_candidates() -> void:
 	assert(ECON._handoff_candidates(cells, Vector2(-1, 0), neighborhoods).size() == 1)
 	assert(ECON._handoff_candidates({}, Vector2.ZERO, {}).is_empty())
 
+func _test_postcombat_hull_index() -> void:
+	var fighter: Dictionary = {"id": 11, "kind": "fighter", "owner": 2, "position": Vector2.ZERO, "combat_target": 13}
+	var miner: Dictionary = {"id": 13, "kind": "miner", "owner": 1, "position": Vector2.ZERO}
+	var first: Dictionary = {"id": 15, "kind": "ship", "owner": 1, "position": Vector2(10, 0)}
+	var second: Dictionary = {"id": 16, "kind": "ship", "owner": 1, "position": Vector2(-10, 0)}
+	var rogue: Dictionary = {"id": 17, "kind": "ship", "owner": 1, "position": Vector2.ZERO, "rogue": true}
+	var scout: Dictionary = {"id": 18, "kind": "scout", "owner": 2, "position": Vector2.ZERO}
+	var state: Dictionary = {"ships": [fighter, first, miner, rogue, second, scout], "planets": [{"pds": {0: {"target": 16}}}]}
+	var frame = ECON.STEP_FRAME.new()
+	ECON._index_postcombat_hulls(state, frame)
+	assert(frame.salvage_busy == ECON._salvage_combat_busy(state))
+	assert(frame.salvage_busy.has(13) and frame.salvage_busy.has(16))
+	assert(frame.handoff_miners == [miner] and frame.freighters == [first, second])
+	assert(frame.military_fleets[2] == [fighter, scout])
+	assert(ECON._handoff_candidates(frame.handoff_receivers[1], Vector2.ZERO) == [first, second])
+	first["cargo"] = {"Metals": 3.0}
+	assert(frame.freighters[0]["cargo"]["Metals"] == 3.0)
+	state["ships"].erase(first)
+	var survivors = ECON.STEP_FRAME.new()
+	ECON._index_postcombat_hulls(state, survivors)
+	assert(survivors.freighters == [second] and ECON._handoff_candidates(survivors.handoff_receivers[1], Vector2.ZERO) == [second])
+	print("PASS: shared postcombat survivor index, ordering and live cargo references")
+
 func _test_repair_cells() -> void:
 	var radius: float = ECON.MINER_REPAIR_SEARCH
 	var targets: Dictionary = {
@@ -1938,6 +1961,7 @@ func _initialize() -> void:
 	_test_missile_blocks()
 	_test_laser_blocks()
 	_test_hostile_buckets()
+	_test_postcombat_hull_index()
 	_test_repair_cells()
 	_test_handoff_candidates()
 	_test_spatial_buckets()
@@ -3496,6 +3520,19 @@ func _initialize() -> void:
 	recovery["ships"].append(hostile_repair)
 	assert(not ECON._repair_site_safe(recovery, recovery_graph, 2, 1))
 	assert(not ECON._cached_repair_site_safe(recovery, recovery_graph, 2, 1, {}))
+	var dock: Vector2 = ECON.station_position(recovery, 1, float(recovery["elapsed"]))
+	for offset in [Vector2.ZERO, Vector2(-ECON.REPAIR_SAFE_RADIUS, 0), Vector2(ECON.REPAIR_SAFE_RADIUS + 1.0, 0), Vector2(-5000, -5000)]:
+		hostile_repair["position"] = dock + offset
+		var threat_cells: Variant = ECON._withdrawal_threat_cells(recovery)
+		assert(threat_cells != null)
+		assert(ECON._repair_site_safe(recovery, recovery_graph, 2, 1, threat_cells) == ECON._repair_site_safe(recovery, recovery_graph, 2, 1))
+	hostile_repair["position"] = dock
+	hostile_repair["kind"] = "miner"
+	assert(ECON._repair_site_safe(recovery, recovery_graph, 2, 1, ECON._withdrawal_threat_cells(recovery)))
+	hostile_repair["kind"] = "fighter"
+	hostile_repair.erase("position")
+	assert(ECON._withdrawal_threat_cells(recovery) == null)
+	hostile_repair["position"] = dock
 	print("PASS: shared lane pacing, safe individual withdrawal, full repair and rejoining")
 	var crew_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var crew_home: Dictionary = crew_state["planets"][0]

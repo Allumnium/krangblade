@@ -15,6 +15,12 @@ var budgets: Array = []
 var salvage_busy: Dictionary = {}
 var salvage_cells: Dictionary = {}
 var salvage_threats: Dictionary = {}
+# Ordered survivor subsets built once after combat, before resource handoffs.
+# Entries are live references; no membership changes before fleet allocation.
+var handoff_receivers: Dictionary = {}
+var handoff_miners: Array = []
+var freighters: Array = []
+var military_fleets: Dictionary = {}
 var mining_receivers: Dictionary = {}
 var mining_commitments: Dictionary = {}
 

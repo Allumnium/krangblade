@@ -48,6 +48,8 @@ The authoritative `state: Dictionary` is initialized by `EconomyRules.create`. K
 
 `EconomyRules` also maintains **ephemeral static caches** for military/civilian routing, asteroid avoidance and indexed hull lookups. Cache validity is coupled to step phases, rock depletion, ownership changes and destruction. Treat cache invalidation as part of any refactor, not an incidental optimization. Do not persist per-step indexes in snapshots.
 
+The post-combat survivor working set in `StepFrame` shares ordered hull references and handoff buckets across salvage, logistics and military allocation, after combat resolution and the second withdrawal pass. It retains live entity references, not frozen cargo/eligibility. Withdrawal planning uses an independent, lazy spatial index per preparation pass, never for movement-time safety. Formation movement and subsequent service positions remain separate because those phases change positions.
+
 `GameSession` owns `economy`, `round_id`, `snapshot_revision`, reliable snapshot/template bookkeeping and visual `motion_samples`. The first reliable state conveys generated map/planet templates; later packets may send compact ore and planet changes, and decoding falls back to full states if incompatible. `snapshot_codec.gd` must preserve wire keys such as `_wire_ore`, `_wire_map_template`, `_wire_planets_compact` and `_wire_planet_template`. Movement packets remain **20 bytes per ship**, at most **57 records per batch**; GameSession owns RPC permissions, revision filters and finite-vector checks. Do not alter message schemas casually.
 
 ## Making changes safely

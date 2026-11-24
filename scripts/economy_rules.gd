@@ -6736,18 +6736,24 @@ static func _update_salvage(state: Dictionary) -> void:
 static func _salvage_combat_busy(state: Dictionary) -> Dictionary:
 	var busy: Dictionary = {}
 	for craft in state["ships"]:
-		if bool(craft.get("retreating", false)) or _engaged(craft) or int(craft.get("yard_target", -1)) < -1:
-			busy[int(craft["id"])] = true
-		for key in ["combat_target", "pursuit_target"]:
-			var target: int = int(craft.get(key, -1))
-			if target >= 0:
-				busy[target] = true
+		_mark_hull_salvage_busy(craft, busy)
+	_mark_pds_salvage_busy(state, busy)
+	return busy
+
+static func _mark_hull_salvage_busy(craft: Dictionary, busy: Dictionary) -> void:
+	if bool(craft.get("retreating", false)) or _engaged(craft) or int(craft.get("yard_target", -1)) < -1:
+		busy[int(craft["id"])] = true
+	for key in ["combat_target", "pursuit_target"]:
+		var target: int = int(craft.get(key, -1))
+		if target >= 0:
+			busy[target] = true
+
+static func _mark_pds_salvage_busy(state: Dictionary, busy: Dictionary) -> void:
 	for system in state["planets"]:
 		for battery in system.get("pds", {}).values():
 			var target: int = int(battery.get("target", -1))
 			if target >= 0:
 				busy[target] = true
-	return busy
 
 static func _salvage_cells(piles: Dictionary) -> Dictionary:
 	var cells: Dictionary = {}
@@ -8924,29 +8930,52 @@ static func _coordinate_formations(state: Dictionary, graph: Dictionary, dt: flo
 				craft["leg"] = 0.0
 	return moved
 
-static func _repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, site: int) -> bool:
+# Build only when a hull needs withdrawal planning. The two preparation
+# phases each own a fresh index; missing/invalid positions use the old scan.
+static func _withdrawal_threat_cells(state: Dictionary) -> Variant:
+	var cells: Dictionary = {}
+	for other in state["ships"]:
+		if other.get("kind", "") not in ["fighter", "scout", "cruiser", "destroyer"]:
+			continue
+		var point: Vector2 = other.get("position", Vector2.INF)
+		if not point.is_finite():
+			return null
+		_spatial_insert(cells, point, REPAIR_SAFE_RADIUS, other)
+	return cells
+
+static func _repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, site: int, threat_cells: Variant = null) -> bool:
 	if site < 0 or site >= (state["planets"] as Array).size():
 		return false
 	var planet: Dictionary = state["planets"][site]
 	if not has_station(planet) or (not diplomacy_allows(state, owner, int(planet["owner"]), "repair") if state.has("diplomacy") else int(planet["owner"]) != owner):
 		return false
 	var center: Vector2 = station_position(state, site, float(state["elapsed"]))
+	if threat_cells != null and center.is_finite():
+		var cell := Vector2i(floori(center.x / REPAIR_SAFE_RADIUS), floori(center.y / REPAIR_SAFE_RADIUS))
+		# Conservative extra cell for floating-point boundary rounding.
+		# The original inclusive distance and hostility tests remain exact.
+		for x in range(-2, 3):
+			for y in range(-2, 3):
+				for other in threat_cells.get(cell + Vector2i(x, y), []):
+					if empires_hostile(state, owner, int(other["owner"])) and combat_position(state, graph, other).distance_to(center) <= REPAIR_SAFE_RADIUS:
+						return false
+		return true
 	for other in state["ships"]:
 		if other.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] and empires_hostile(state, owner, int(other["owner"])) and combat_position(state, graph, other).distance_to(center) <= REPAIR_SAFE_RADIUS:
 			return false
 	return true
 
-static func _cached_repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, site: int, safety: Dictionary) -> bool:
+static func _cached_repair_site_safe(state: Dictionary, graph: Dictionary, owner: int, site: int, safety: Dictionary, threat_cells: Variant = null) -> bool:
 	var key := Vector2i(owner, site)
 	if not safety.has(key):
-		safety[key] = _repair_site_safe(state, graph, owner, site)
+		safety[key] = _repair_site_safe(state, graph, owner, site, threat_cells)
 	return bool(safety[key])
 
-static func _nearest_repair_site(state: Dictionary, graph: Dictionary, ship: Dictionary, paths: Dictionary, safety: Dictionary = {}) -> int:
+static func _nearest_repair_site(state: Dictionary, graph: Dictionary, ship: Dictionary, paths: Dictionary, safety: Dictionary = {}, threat_cells: Variant = null) -> int:
 	var best: int = -1
 	var distance: float = INF
 	for site in range((state["planets"] as Array).size()):
-		if not _cached_repair_site_safe(state, graph, int(ship["owner"]), site, safety):
+		if not _cached_repair_site_safe(state, graph, int(ship["owner"]), site, safety, threat_cells):
 			continue
 		if not paths.has(site):
 			paths[site] = _military_paths(graph, site)
@@ -8963,15 +8992,20 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 	# Positions and station ownership are fixed during withdrawal planning.
 	# Rebuild after combat; movement-time safety still checks live positions.
 	var safety: Dictionary = {}
+	var threat_cells: Variant = null
+	var threat_index_ready: bool = false
 	for ship in state["ships"]:
 		if not armed(ship):
 			continue
 		var withdrawing: bool = bool(ship.get("retreating", false))
 		if not withdrawing and (not autocast_enabled(ship, "retreat") or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) > ship_max_hp(str(ship["kind"])) * WITHDRAW_HP / SHIP_HP):
 			continue
+		if not threat_index_ready:
+			threat_cells = _withdrawal_threat_cells(state)
+			threat_index_ready = true
 		var site: int = int(ship.get("repair_site", -1))
-		if not withdrawing or not _cached_repair_site_safe(state, graph, int(ship["owner"]), site, safety):
-			var replacement: int = _nearest_repair_site(state, graph, ship, paths, safety)
+		if not withdrawing or not _cached_repair_site_safe(state, graph, int(ship["owner"]), site, safety, threat_cells):
+			var replacement: int = _nearest_repair_site(state, graph, ship, paths, safety, threat_cells)
 			if replacement < 0:
 				if withdrawing:
 					ship["retreating"] = false
@@ -9719,27 +9753,45 @@ static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> voi
 		frame.cache = {"civilian_routes": _civilian_route_cache(state, frame.teams)}
 	_prepare_withdrawals(state, combat_graph)
 	_update_salvage(state)
-	frame.salvage_busy = _salvage_combat_busy(state)
+	_index_postcombat_hulls(state, frame)
 	frame.salvage_cells = _salvage_cells(state.get("salvage", {}))
 	frame.salvage_threats = _reuse_combat_threats(state, combat_graph, threat_index)
 	_step_resource_handoffs(state, frame, dt)
 
-static func _step_resource_handoffs(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
-	var stage_receivers: Dictionary = {}
+# One ordered survivor pass for salvage safety, logistics and fleet allocation.
+# After combat/withdrawal and before handoffs, membership and position are fixed.
+# Keep live hull references; eligibility, cargo and orders are checked at use.
+static func _index_postcombat_hulls(state: Dictionary, frame: STEP_FRAME) -> void:
 	var receiver_order: int = 0
 	for craft in state["ships"]:
-		if craft.get("kind", "") == "ship" and not bool(craft.get("rogue", false)):
+		_mark_hull_salvage_busy(craft, frame.salvage_busy)
+		var kind: String = str(craft.get("kind", ""))
+		if kind == "ship":
+			if bool(craft.get("rogue", false)):
+				continue
+			frame.freighters.append(craft)
 			var owner: int = int(craft["owner"])
-			if not stage_receivers.has(owner):
-				stage_receivers[owner] = {}
-			_spatial_insert(stage_receivers[owner], craft["position"], RESOURCE_HANDOFF_RANGE, [receiver_order, craft])
+			if not frame.handoff_receivers.has(owner):
+				frame.handoff_receivers[owner] = {}
+			_spatial_insert(frame.handoff_receivers[owner], craft["position"], RESOURCE_HANDOFF_RANGE, [receiver_order, craft])
 			receiver_order += 1
+		elif kind == "miner" and not bool(craft.get("rogue", false)):
+			frame.handoff_miners.append(craft)
+		elif kind in ["fighter", "scout", "cruiser", "destroyer"]:
+			var player: int = int(craft["owner"])
+			if not frame.military_fleets.has(player):
+				frame.military_fleets[player] = []
+			frame.military_fleets[player].append(craft)
+	_mark_pds_salvage_busy(state, frame.salvage_busy)
+
+static func _step_resource_handoffs(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
+	var stage_receivers: Dictionary = frame.handoff_receivers
 	# Passive handoff is independent of route and job. Evaluate all hulls before movement.
 	# Membership and positions are frozen here; cargo and eligibility are
 	# still checked live for each transfer, in the original fleet order.
 	var receiver_neighborhoods: Dictionary = {}
-	for miner in state["ships"]:
-		if miner.get("kind", "") == "miner" and not bool(miner.get("rogue", false)) and not frame.salvage_busy.has(int(miner["id"])):
+	for miner in frame.handoff_miners:
+		if not frame.salvage_busy.has(int(miner["id"])):
 			var receivers: Array = []
 			if _cargo_total(miner) > EPS:
 				var owner: int = int(miner["owner"])
@@ -9748,7 +9800,7 @@ static func _step_resource_handoffs(state: Dictionary, frame: STEP_FRAME, dt: fl
 				receivers = _handoff_candidates(stage_receivers.get(owner, {}), miner["position"], receiver_neighborhoods[owner])
 			miner["_handoff_sent"] = _miner_handoff(state, frame.graph, miner, receivers, frame.salvage_threats, dt)
 	var mining_receivers: Dictionary = frame.mining_receivers
-	for craft in state["ships"]:
+	for craft in frame.freighters:
 		if _mining_receiver_ready(state, craft):
 			var owner: int = int(craft["owner"])
 			if not mining_receivers.has(owner):
@@ -9757,13 +9809,7 @@ static func _step_resource_handoffs(state: Dictionary, frame: STEP_FRAME, dt: fl
 
 static func _step_formations(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 	var combat_graph: Dictionary = frame.graph
-	var fleets: Dictionary = {}
-	for craft in state["ships"]:
-		if craft.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
-			var player: int = int(craft["owner"])
-			if not fleets.has(player):
-				fleets[player] = []
-			fleets[player].append(craft)
+	var fleets: Dictionary = frame.military_fleets
 	for player in fleets:
 		# Legacy allocation fixtures still exercise routing; live games use
 		# individual commands. Unordered reinforcements stay at their origin.
