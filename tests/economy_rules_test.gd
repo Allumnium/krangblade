@@ -1828,6 +1828,54 @@ func _test_reusable_laser_target() -> void:
 	ship["attack_order"] = 8
 	assert(ECON._reusable_laser_target(state, ship, by_id, positions, Vector2.ZERO, 1.1) == -1)
 
+func _test_persistent_contact_indexes() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var points: Array[Vector2] = [Vector2(-100, -100), Vector2(100, 200), Vector2(100, 200), Vector2(140, 200), Vector2(500, 500)]
+	for slot in range(points.size()):
+		var craft: Dictionary = {"id": 19001 + slot, "kind": "fighter", "owner": 1, "at": 0, "route": [], "position": points[slot], "holding": true, "hold_position": points[slot], "hold_sector": 0}
+		state["ships"].append(craft)
+	var graph: Dictionary = ECON.military_graph(state)
+	var retained: Array = []
+	for tick in range(6):
+		if tick == 2:
+			state["ships"][0]["position"] = Vector2(110, 200)
+		elif tick == 3:
+			state["ships"].reverse()
+		elif tick == 4:
+			state["ships"].pop_back()
+		elif tick == 5:
+			state["ships"] = state["ships"].duplicate(true)
+		var previous: Dictionary = {}
+		for craft in state["ships"]:
+			previous[craft["id"]] = craft["position"]
+		var cells: Dictionary = ECON._separation_cells(state, previous, ECON.SHIP_SEPARATION_RADIUS, true)
+		var expected: Dictionary = ECON._separation_cells(state, previous, ECON.SHIP_SEPARATION_RADIUS)
+		assert(cells == expected and cells.keys() == expected.keys())
+		var far_cell := Vector2i(floori(-100.0 / ECON.SHIP_SEPARATION_RADIUS), floori(-100.0 / ECON.SHIP_SEPARATION_RADIUS))
+		if tick == 0:
+			retained = cells[far_cell]
+		elif tick == 1:
+			assert(is_same(retained, cells[far_cell]))
+		var isolated: Dictionary = {}
+		for id in previous:
+			if ECON._isolated_spatial_cell(previous[id], ECON.SHIP_SEPARATION_RADIUS, cells, isolated):
+				assert(ECON._separation_force(id, previous[id], cells, previous, ECON.SHIP_SEPARATION_RADIUS) == Vector2.ZERO)
+		var reference: Dictionary = state.duplicate(true)
+		ECON._separate_ships(state, graph, previous, 0.1, {}, true)
+		ECON._separate_ships(reference, graph, previous, 0.1)
+		assert(state == reference)
+		var bounds: Dictionary = {}
+		var reference_bounds: Dictionary = {}
+		var reference_cells: Dictionary = {}
+		ECON._index_contact_cells(state["ships"], ECON.SHIP_CLEARANCE, reference_cells, reference_bounds)
+		var contact_cells: Dictionary = ECON._refresh_persistent_contact_cells(state["ships"], ECON.SHIP_CLEARANCE, bounds)
+		assert(contact_cells == reference_cells and contact_cells.keys() == reference_cells.keys() and bounds == reference_bounds)
+		ECON._resolve_ship_contacts(state, graph, previous, 0.1, {}, true)
+		ECON._resolve_ship_contacts(reference, graph, previous)
+		assert(state == reference)
+	print("PASS: retained separation/contact buckets, isolated hulls, bounds and correction parity")
+
 func _test_contact_bucket_bounds() -> void:
 	var bounds := Rect2(Vector2(10, 10), Vector2(10, 10))
 	assert(ECON._contact_bucket_near(Vector2(15, 15), bounds, 25.0))
@@ -2601,6 +2649,7 @@ func _initialize() -> void:
 	_test_sector_inner_fast_path()
 	_test_ai_slots()
 	_test_contact_bucket_bounds()
+	_test_persistent_contact_indexes()
 	_test_reusable_laser_target()
 	_test_combat_search_due()
 	_test_combat_activity_fast_paths()

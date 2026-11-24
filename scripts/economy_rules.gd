@@ -59,6 +59,10 @@ static var _combat_index_state: Dictionary = {}
 static var _combat_index_roster: Array = []
 static var _combat_cell_index = STEP_FRAME.OrderedHullBuckets.new()
 static var _combat_sector_index = STEP_FRAME.OrderedHullBuckets.new()
+static var _contact_index_state: Dictionary = {}
+static var _contact_index_roster: Array = []
+static var _separation_index = STEP_FRAME.OrderedHullBuckets.new()
+static var _contact_index = STEP_FRAME.OrderedHullBuckets.new()
 static var _repair_index_state: Dictionary = {}
 static var _repair_index_roster: Array = []
 static var _repair_index = REPAIR_QUERIES.PersistentDamagedIndex.new()
@@ -9914,14 +9918,19 @@ static func _profile_stage(profile: Dictionary, stage: String, started: int) -> 
 # Gentle neighborhood steering, not rigid collision or additional travel.
 # All hulls are obstacles; ships performing precise service actions are
 # not displaced. Use the same pre-movement snapshot for every pair.
-static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary = {}) -> void:
+static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary = {}, persistent: bool = false) -> void:
 	if dt <= 0.0:
 		return
 	var reach: float = SHIP_SEPARATION_RADIUS
-	var cells: Dictionary = _separation_cells(state, previous, reach)
+	var cells: Dictionary = _separation_cells(state, previous, reach, persistent)
+	var isolated: Dictionary = {}
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
-		if not previous.has(id) or repair_parked.has(id) or _stop_waiting(state, ship) or bool(ship.get("retreating", false)) or _salvage_active(ship):
+		if not previous.has(id):
+			continue
+		if persistent and _isolated_spatial_cell(previous[id], reach, cells, isolated):
+			continue
+		if repair_parked.has(id) or _stop_waiting(state, ship) or bool(ship.get("retreating", false)) or _salvage_active(ship):
 			continue
 		var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
 		if _separation_exempt(state, graph, ship, budget, reach):
@@ -9953,18 +9962,49 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		if not (ship["route"] as Array).is_empty():
 			ship["leg"] = _lane_progress(graph["points"], ship)
 
-static func _separation_cells(state: Dictionary, previous: Dictionary, reach: float) -> Dictionary:
+# An occupied singleton cell with no occupied adjacent cell cannot have
+# any interaction at this cell width. Cache only within the frozen pass.
+static func _isolated_spatial_cell(point: Vector2, reach: float, cells: Dictionary, cache: Dictionary) -> bool:
+	var cell := Vector2i(floori(point.x / reach), floori(point.y / reach))
+	if cache.has(cell):
+		return bool(cache[cell])
+	var alone: bool = cells.get(cell, []).size() == 1
+	if alone:
+		for x in range(-1, 2):
+			for y in range(-1, 2):
+				if (x != 0 or y != 0) and cells.has(cell + Vector2i(x, y)):
+					alone = false
+					break
+			if not alone:
+				break
+	cache[cell] = alone
+	return alone
+
+static func _begin_contact_indexes(state: Dictionary) -> void:
+	if not is_same(state, _contact_index_state) or not is_same(state["ships"], _contact_index_roster):
+		_contact_index_state = state
+		_contact_index_roster = state["ships"]
+		_separation_index.clear()
+		_contact_index.clear()
+
+static func _separation_cells(state: Dictionary, previous: Dictionary, reach: float, persistent: bool = false) -> Dictionary:
 	var cells: Dictionary = {}
+	if persistent:
+		_begin_contact_indexes(state)
+		_separation_index.begin()
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
 		if not previous.has(id):
 			continue
 		var pos: Vector2 = previous[id]
 		var cell := Vector2i(floori(pos.x / reach), floori(pos.y / reach))
-		if not cells.has(cell):
-			cells[cell] = []
-		cells[cell].append(id)
-	return cells
+		if persistent:
+			_separation_index.append(cell, id)
+		else:
+			if not cells.has(cell):
+				cells[cell] = []
+			cells[cell].append(id)
+	return _separation_index.finish() if persistent else cells
 
 ## Hulls whose position this tick must stay exact: anchored holds, follow,
 ## waiting or idle-without-wander hulls, arrival ticks, service waypoints
@@ -10063,10 +10103,12 @@ static func _contact_bucket_near(point: Vector2, bounds: Rect2, cutoff_squared: 
 	# Conservative margin avoids rejecting boundary pairs due to rounding.
 	return point.distance_squared_to(nearest) <= cutoff_squared + maxf(0.001, cutoff_squared * 0.0001)
 
-static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float = 0.1, repair_parked: Dictionary = {}) -> void:
+static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float = 0.1, repair_parked: Dictionary = {}, persistent: bool = false) -> void:
 	var ships: Array = state["ships"]
 	if ships.size() < 2:
 		return
+	if persistent:
+		_begin_contact_indexes(state)
 	var reach: float = SHIP_CLEARANCE
 	var cutoff_squared: float = (reach - EPS) * (reach - EPS)
 	# Reuse dense indexed scratch arrays across contact passes.
@@ -10077,13 +10119,19 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 	for iteration in range(SHIP_CLEARANCE_PASSES):
 		var cells: Dictionary = {}
 		var bounds: Dictionary = {}
-		_index_contact_cells(ships, reach, cells, bounds)
+		if persistent:
+			cells = _refresh_persistent_contact_cells(ships, reach, bounds)
+		else:
+			_index_contact_cells(ships, reach, cells, bounds)
+		var isolated: Dictionary = {}
 		corrections.fill(Vector2.ZERO)
 		touched.fill(0)
 		var correction_order: Array[int] = []
 		for i in range(ships.size()):
 			var a: Dictionary = ships[i]
 			var pa: Vector2 = a["position"]
+			if persistent and _isolated_spatial_cell(pa, reach, cells, isolated):
+				continue
 			var cell := Vector2i(floori(pa.x / reach), floori(pa.y / reach))
 			for x in range(-1, 2):
 				for y in range(-1, 2):
@@ -10120,6 +10168,19 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 		if correction_order.is_empty():
 			break
 		_apply_contact_corrections(state, graph, previous, dt, repair_parked, corrections, correction_order)
+
+# Contact slots refer to this pass's roster order, never stable IDs.
+# Reconcile after separation (and every contact iteration); bounds must
+# always be calculated from current positions, even inside the same cell.
+static func _refresh_persistent_contact_cells(ships: Array, reach: float, bounds: Dictionary) -> Dictionary:
+	_contact_index.begin()
+	for i in range(ships.size()):
+		var point: Vector2 = ships[i]["position"]
+		var cell := Vector2i(floori(point.x / reach), floori(point.y / reach))
+		_contact_index.append(cell, i)
+		var box: Rect2 = bounds.get(cell, Rect2(point, Vector2.ZERO))
+		bounds[cell] = box.expand(point)
+	return _contact_index.finish()
 
 static func _index_contact_cells(ships: Array, reach: float, cells: Dictionary, bounds: Dictionary) -> void:
 	for i in range(ships.size()):
@@ -10774,9 +10835,9 @@ static func _step_settle_movement(state: Dictionary, frame: STEP_FRAME, dt: floa
 	if frame.deadline_schedule_enabled:
 		_expire_auto_cooldowns(state)
 	_end_ship_avoidance()
-	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked)
+	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked, frame.persistent_avoidance_enabled)
 	if dt > 0.0:
-		_resolve_ship_contacts(state, frame.graph, frame.combat_positions, dt, repair_parked)
+		_resolve_ship_contacts(state, frame.graph, frame.combat_positions, dt, repair_parked, frame.persistent_avoidance_enabled)
 
 const OPENING_OBJECTIVES = {"economic": "medium_shipyard", "military": "military_built"}
 
