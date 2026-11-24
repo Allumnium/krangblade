@@ -1383,6 +1383,24 @@ func _test_repair_retry_due() -> void:
 	assert(not ECON._repair_retry_due(ship, 1.2))
 	assert(ECON._repair_retry_due(ship, 1.5))
 
+func _test_retry_dispatch_fast_path() -> void:
+	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}}, [1], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var miner: Dictionary = {"id": 92011, "kind": "miner", "owner": 1, "position": Vector2.ZERO, "repair_target": 1, "_next_repair_search": 2.0}
+	state["elapsed"] = 1.0
+	assert(not ECON._work_miner_repair(state, graph, miner, {}, 0.1, {}))
+	assert(not miner.has("repair_target") and miner["_next_repair_search"] == 2.0)
+	var planet: Dictionary = state["planets"][0]
+	planet["queue"].clear()
+	for yard in planet["yards"]:
+		yard["job"] = 999999
+	ECON._work_planet(state, 0, 0.1)
+	assert(planet["queue"].is_empty())
+	for yard in planet["yards"]:
+		assert(int(yard["job"]) == -1)
+	print("PASS: not-due repair retry and empty construction assignment")
+
 func _test_combat_activity_fast_paths() -> void:
 	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -2222,6 +2240,7 @@ func _initialize() -> void:
 	_test_reusable_laser_target()
 	_test_combat_search_due()
 	_test_combat_activity_fast_paths()
+	_test_retry_dispatch_fast_path()
 	_test_repair_retry_due()
 	_test_search_slots()
 	_test_pursuit_blocks()

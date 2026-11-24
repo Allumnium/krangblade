@@ -2297,14 +2297,21 @@ static func _work_planet(state: Dictionary, index: int, dt: float) -> void:
 	_update_population(p, dt)
 	p["demographic_rate"] = (float(p["population"]) - before_population) / maxf(EPS, dt)
 	_produce_planet_resources(state, p, dt)
-	_work_upgrade_deliveries(state, index, p, dt)
-	_work_station_queue(state, index, p, dt)
+	if not p["queue"].is_empty():
+		_work_upgrade_deliveries(state, index, p, dt)
+		_work_station_queue(state, index, p, dt)
 	_refill_yard_autobuild(state, index, p)
 	_refill_continuous(state, index, p)
 	for category in p.get("pending_spending", {}):
 		for material in p["pending_spending"][category]:
 			_record_flow(p, str(category), str(material), float(p["pending_spending"][category][material]))
 	p.erase("pending_spending")
+	# Refills may have created a job this very tick. Only skip assignment
+	# and progress queries after they have run; clear stale yard slots.
+	if p["queue"].is_empty():
+		for yard in p["yards"]:
+			yard["job"] = -1
+		return
 	var assigned: Dictionary = _retain_yard_jobs(p)
 	for y in range((p["yards"] as Array).size()):
 		if not shipyard_operational(p, y):
@@ -5100,6 +5107,10 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 		return false
 	ship.erase("repair_target")
 	var explicit: bool = ship.has("repair_order")
+	# An automatic repair retry cannot run early, regardless of eligibility.
+	# Explicit orders and the unindexed reference path bypass this deadline.
+	if not explicit and damaged_cells != null and not _repair_retry_due(ship, float(state["elapsed"])):
+		return false
 	if not explicit and (not autocast_ready(state, ship, "repair") or (_unit_order_running(ship) and ship.get("unit_order", {}).get("kind", "") != "mine") or bool(ship.get("holding", false)) or _salvage_active(ship)):
 		return false
 	var target_id: int = int(ship.get("repair_order", -1))
@@ -5110,10 +5121,6 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 		return false
 	var pos: Vector2 = ship["position"]
 	if not explicit:
-		# Only throttle unsuccessful automatic searches. Active repairs and
-		# explicit orders retain their original per-step behavior.
-		if damaged_cells != null and not _repair_retry_due(ship, float(state["elapsed"])):
-			return false
 		var best: float = MINER_REPAIR_SEARCH * MINER_REPAIR_SEARCH
 		for id in (targets.keys() if damaged_cells == null else _nearby_repair_ids(damaged_cells, pos, repair_neighborhoods)):
 			if id == ship["id"]:
@@ -7882,6 +7889,19 @@ static func _fire_hull_lasers(state: Dictionary, frame: COMBAT_FRAME, ship: Dict
 	var id: int = int(ship["id"])
 	var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 	var target: int = -1
+	var now: float = float(state["elapsed"])
+	var search_due: bool = _combat_search_due(ship, now)
+	# No retained or previous target, no pursuit cleanup, and no due
+	# search: only the ordinary cooldown and normalized fields remain.
+	if frame.activity_bounds_ready and not search_due and int(previous_targets[hull_slot]) == -1 and ship.get("pursuit_blocked", {}).is_empty():
+		ship["pursuit_target"] = -1
+		ship["pursuit_left"] = 0.0
+		ship["pursuit_blocked"] = ship.get("pursuit_blocked", {})
+		ship["combat_target"] = -1
+		ship["laser_cooldown"] = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
+		ship["yard_target"] = -1
+		_fire_blaster(state, ship, -1, positions, frame.damage, frame.killed_by, frame.health, dt, hull_slots, frame.hull_health)
+		return
 	var guard: Dictionary = ship.get("unit_order", {})
 	var guard_node: int = int(guard["target"]) if guard.get("kind", "") == "guard" else -1
 	var pursuit: int = int(ship.get("pursuit_target", -1)) if fighter else -1
@@ -7896,8 +7916,6 @@ static func _fire_hull_lasers(state: Dictionary, frame: COMBAT_FRAME, ship: Dict
 		var checked: Array = _validate_pursuit(state, frame, id, pursuit, remaining, pos, team, hull_slot, blocked)
 		pursuit = int(checked[0])
 		remaining = float(checked[1])
-	var now: float = float(state["elapsed"])
-	var search_due: bool = _combat_search_due(ship, now)
 	target = _scan_laser_target(state, frame, ship, pos, team, cell, now, search_due)
 	if fighter and not moving_only and not bool(ship.get("holding", false)) and pursuit < 0:
 		var acquired: int = _acquire_pursuit(state, frame, pos, team, hull_slot, target, blocked, search_due)
@@ -10299,12 +10317,13 @@ static func _step_hull_routine(state: Dictionary, frame: STEP_FRAME, ship: Dicti
 		var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 		# Allocate the needed mining support before offering excess
 		# idle freighters to interstation trade; never interrupt a haul.
-		var stage_due: bool = _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade") and float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0))
+		# Check the existing strict retry deadline before costly eligibility.
+		var stage_due: bool = float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)) and _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade")
 		if stage_due and _choose_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, {}, true):
 			ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
 			return true
 		_work_ship(state, ship, frame.teams, frame.cache, dt)
-		if _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade") and float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)):
+		if float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)) and _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade"):
 			ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
 			_choose_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, frame.salvage_cells)
 		if not profile.is_empty():
