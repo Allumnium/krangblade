@@ -11,6 +11,7 @@ var direct_order_dispatches: int = 0
 var deadline_schedule_enabled: bool = false
 var persistent_avoidance_enabled: bool = false
 var persistent_combat_enabled: bool = false
+var persistent_logistics_enabled: bool = false
 
 # Routing and civilian caches valid for this substep.
 var graph: Dictionary = {}
@@ -72,6 +73,23 @@ class OrderedHullBuckets:
 			bucket.append(hull)
 		elif not is_same(bucket[slot], hull):
 			bucket[slot] = hull
+		_counts[key] = slot + 1
+
+	# Ordered handoff entries wrap a live hull reference. Compare both
+	# order and identity, not dictionary value equality.
+	func append_ordered_hull(key: Variant, order: int, hull: Dictionary) -> void:
+		var slot: int = int(_counts.get(key, 0))
+		if slot == 0:
+			if not _retained.has(key):
+				_retained[key] = []
+			_active[key] = _retained[key]
+		var bucket: Array = _active[key]
+		if slot == bucket.size():
+			bucket.append([order, hull])
+		else:
+			var entry: Array = bucket[slot]
+			if entry[0] != order or not is_same(entry[1], hull):
+				bucket[slot] = [order, hull]
 		_counts[key] = slot + 1
 
 	func finish() -> Dictionary:
