@@ -146,4 +146,3 @@ func _scan_approaches(state: Dictionary, player: int, now: int, graph: Dictionar
 		var count: int = int(group["count"])
 		var label_text: String = "%d enemy combat unit%s approaching %s!  ›" % [count, "" if count == 1 else "s", poi_name.call(index)]
 		_post("approach:%d" % index, label_text, (group["sum"] as Vector2) / float(count), now, play_cue)
-
