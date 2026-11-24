@@ -20,6 +20,10 @@ static func damaged_cells(targets: Dictionary, width: float, epsilon: float) -> 
 	return cells
 
 static func nearby_ids(cells: Dictionary, point: Vector2, width: float, neighborhoods: Dictionary = {}) -> Array:
+	# No damaged targets in the frozen service snapshot. The caller still
+	# performs explicit repairs and advances unsuccessful retry deadlines.
+	if cells.is_empty():
+		return []
 	var cell := Vector2i(floori(point.x / width), floori(point.y / width))
 	if neighborhoods.has(cell):
 		return neighborhoods[cell]
