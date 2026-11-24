@@ -7,10 +7,16 @@ static var cached_military_map: Dictionary = {}
 static var cached_military_source: Dictionary = {}
 # Ephemeral authoritative snapshot, active only during a movement substep.
 static var avoidance_cells: Dictionary = {}
+static var _avoidance_neighborhoods: Dictionary = {}
 static var _movement_fields: Array = []
 static var _movement_field_source: Array = []
 static var _movement_field_counts: Array[int] = []
 static var _rock_cells: Dictionary = {}
+# Ordered broad-phase candidates, valid until the rock index is rebuilt.
+static var _rock_windows: Dictionary = {}
+const ROCK_WINDOW_CACHE_LIMIT: int = 4096
+# Exact route requests within a substep; never share mutable ship routes.
+static var _rock_route_queries: Dictionary = {}
 const ROCK_CELL: float = 192.0
 const ROCK_HARD_CLEARANCE: float = 12.0
 const ROCK_PREFERRED_CLEARANCE: float = 26.0
@@ -2502,6 +2508,7 @@ static func _ensure_position(points: Array, ship: Dictionary) -> void:
 # Build once from the common pre-movement positions, not once per hull.
 static func _begin_ship_avoidance(positions: Dictionary) -> void:
 	avoidance_cells.clear()
+	_avoidance_neighborhoods.clear()
 	for id in positions:
 		var point: Vector2 = positions[id]
 		var cell := Vector2i(floori(point.x / AVOIDANCE_CELL), floori(point.y / AVOIDANCE_CELL))
@@ -2510,6 +2517,18 @@ static func _begin_ship_avoidance(positions: Dictionary) -> void:
 		# Bound worst-case work in dense swarms; contact correction remains soft.
 		if avoidance_cells[cell].size() < AVOIDANCE_BUCKET_LIMIT:
 			avoidance_cells[cell].append([id, point])
+
+# Read-only view of the frozen movement snapshot. Preserve the original
+# x/y cell traversal and per-bucket insertion order, including ties.
+static func _avoidance_neighborhood(cell: Vector2i) -> Array:
+	if _avoidance_neighborhoods.has(cell):
+		return _avoidance_neighborhoods[cell]
+	var entries: Array = []
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			entries.append_array(avoidance_cells.get(cell + Vector2i(x, y), []))
+	_avoidance_neighborhoods[cell] = entries
+	return entries
 
 static func _avoidance_direction(ship: Dictionary, target: Vector2, budget: float) -> Vector2:
 	var before: Vector2 = ship["position"]
@@ -2521,23 +2540,21 @@ static func _avoidance_direction(ship: Dictionary, target: Vector2, budget: floa
 	var cell := Vector2i(floori(before.x / AVOIDANCE_CELL), floori(before.y / AVOIDANCE_CELL))
 	var nearest: float = INF
 	var blocker: Vector2 = Vector2.ZERO
-	for x in range(-1, 2):
-		for y in range(-1, 2):
-			for entry in avoidance_cells.get(cell + Vector2i(x, y), []):
-				if int(entry[0]) == int(ship["id"]):
-					continue
-				var other: Vector2 = entry[1]
-				# Shared endpoints must remain reachable: leave final precision
-				# docking, extraction, formation and hold to their existing rules.
-				if other.distance_squared_to(target) <= SHIP_CLEARANCE * SHIP_CLEARANCE:
-					continue
-				var offset: Vector2 = other - before
-				var forward: float = offset.dot(axis)
-				if forward <= EPS or forward > lookahead or absf(axis.cross(offset)) >= SHIP_CLEARANCE:
-					continue
-				if forward < nearest:
-					nearest = forward
-					blocker = offset
+	for entry in _avoidance_neighborhood(cell):
+		if int(entry[0]) == int(ship["id"]):
+			continue
+		var other: Vector2 = entry[1]
+		# Shared endpoints must remain reachable: leave final precision
+		# docking, extraction, formation and hold to their existing rules.
+		if other.distance_squared_to(target) <= SHIP_CLEARANCE * SHIP_CLEARANCE:
+			continue
+		var offset: Vector2 = other - before
+		var forward: float = offset.dot(axis)
+		if forward <= EPS or forward > lookahead or absf(axis.cross(offset)) >= SHIP_CLEARANCE:
+			continue
+		if forward < nearest:
+			nearest = forward
+			blocker = offset
 	if nearest == INF:
 		return axis
 	# Steer toward a tangent on the open side. A centered head-on contact
@@ -2568,6 +2585,8 @@ static func _refresh_movement_fields(fields: Array) -> void:
 	_movement_fields.clear()
 	_movement_field_counts.clear()
 	_rock_cells.clear()
+	_rock_windows.clear()
+	_rock_route_queries.clear()
 	for field in fields:
 		var center: Vector2 = field["position"]
 		var special: bool = bool(field.get("antimatter", false))
@@ -2606,6 +2625,18 @@ static func _rocks_near(a: Vector2, b: Vector2) -> Array:
 	var last: Vector2i = _rock_cell(a.max(b))
 	if first == last:
 		return _rock_cells.get(first, [])
+	# Exact cell bounds, not rounded trajectories. Nearby ships can share
+	# the same candidates while retaining individual swept geometry tests.
+	var key := Vector4i(first.x, first.y, last.x, last.y)
+	if _rock_windows.has(key):
+		return _rock_windows[key]
+	var result: Array = _collect_rock_window(first, last)
+	# Bound retained memory; large or crowded requests use the same fallback.
+	if _rock_windows.size() < ROCK_WINDOW_CACHE_LIMIT and last.x - first.x <= 8 and last.y - first.y <= 8 and result.size() <= 256:
+		_rock_windows[key] = result
+	return result
+
+static func _collect_rock_window(first: Vector2i, last: Vector2i) -> Array:
 	var result: Array = []
 	var seen: Dictionary = {}
 	for y in range(first.y, last.y + 1):
@@ -2637,6 +2668,20 @@ static func _rock_segment_clear(before: Vector2, after: Vector2, clearance: floa
 # bounded search only when the short direct leg is obstructed; cache the
 # resulting waypoints rather than rebuilding a grid every movement tick.
 static func _plan_rock_route(before: Vector2, target: Vector2, clearance: float) -> Array:
+	# The search grid is centered on the exact start. Only identical
+	# endpoints and clearance may share a computed route; the caller still
+	# consumes its original planning slot and owns its waypoint array.
+	var key := Vector4(before.x, before.y, target.x, target.y)
+	var by_clearance: Dictionary = _rock_route_queries.get(key, {})
+	if by_clearance.has(clearance):
+		return (by_clearance[clearance] as Array).duplicate()
+	var route: Array = _compute_rock_route(before, target, clearance)
+	if _rock_route_queries.size() < ROCK_PLAN_LIMIT * 2:
+		by_clearance[clearance] = route.duplicate()
+		_rock_route_queries[key] = by_clearance
+	return route
+
+static func _compute_rock_route(before: Vector2, target: Vector2, clearance: float) -> Array:
 	var half: int = ROCK_ROUTE_HALF
 	var grid: AStarGrid2D = _rock_route_grid(before, clearance)
 	var goal: Vector2 = (target - before) / ROCK_ROUTE_CELL
@@ -8849,8 +8894,11 @@ static func _coordinate_formations(state: Dictionary, graph: Dictionary, dt: flo
 			continue
 		var progress: float = length
 		var aligned: bool = true
+		var offsets: Array[Vector2] = []
 		for craft in group:
-			var corrected: Vector2 = craft["position"] - _formation_offset(craft, axis)
+			var offset: Vector2 = _formation_offset(craft, axis)
+			offsets.append(offset)
+			var corrected: Vector2 = craft["position"] - offset
 			var along: float = (corrected - origin).dot(axis)
 			if absf((corrected - origin).cross(axis)) > SHIP_SEPARATION_RADIUS * 2.0 or along < -SHIP_SEPARATION_RADIUS or along > length + SHIP_SEPARATION_RADIUS:
 				aligned = false
@@ -8860,8 +8908,9 @@ static func _coordinate_formations(state: Dictionary, graph: Dictionary, dt: flo
 			continue
 		var next_progress: float = minf(length, progress + ship_speed(str(first.get("kind", "ship"))) * FORMATION_TRAVEL_FRACTION * dt)
 		var arrived: bool = true
-		for craft in group:
-			var offset: Vector2 = _formation_offset(craft, axis)
+		for i in range(group.size()):
+			var craft: Dictionary = group[i]
+			var offset: Vector2 = offsets[i]
 			var corrected: Vector2 = craft["position"] - offset
 			var own_progress: float = clampf((corrected - origin).dot(axis), 0.0, length)
 			var target: Vector2 = origin + axis * maxf(own_progress, next_progress) + offset
@@ -9567,6 +9616,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
 	_rock_plan_tick += 1
 	_rock_plan_budget = ROCK_PLAN_LIMIT
+	_rock_route_queries.clear()
 	_refresh_movement_fields(state["map"].get("fields", []))
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	var frame: STEP_FRAME = STEP_FRAME.new()
@@ -9962,6 +10012,7 @@ static func _step_settle_movement(state: Dictionary, frame: STEP_FRAME, dt: floa
 		if ship.has("wander_cooldown_override") and autocast_remaining(state, ship) <= EPS and not _unit_order_running(ship):
 			ship.erase("wander_cooldown_override")
 	avoidance_cells.clear()
+	_avoidance_neighborhoods.clear()
 	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked)
 	if dt > 0.0:
 		_resolve_ship_contacts(state, frame.graph, frame.combat_positions, dt, repair_parked)

@@ -722,6 +722,54 @@ func _test_local_avoidance() -> void:
 	ECON.avoidance_cells.clear()
 	print("PASS: forward avoidance, movement budget, unobstructed path and shared endpoint")
 
+func _test_shared_navigation_queries() -> void:
+	# Preserve neighbor traversal order, including negative cells and ties.
+	var positions: Dictionary = {11: Vector2(30, 0), 12: Vector2(-30, 0), 13: Vector2(40, 0), 14: Vector2(500, 0)}
+	ECON._begin_ship_avoidance(positions)
+	var cell := Vector2i.ZERO
+	var reference: Array = []
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			reference.append_array(ECON.avoidance_cells.get(cell + Vector2i(x, y), []))
+	var candidates: Array = ECON._avoidance_neighborhood(cell)
+	assert(candidates == reference and is_same(candidates, ECON._avoidance_neighborhood(cell)))
+	assert(candidates.size() == 3 and int(candidates[0][0]) == 12)
+	ECON._begin_ship_avoidance({21: Vector2.ZERO})
+	assert(ECON._avoidance_neighborhood(cell) == [[21, Vector2.ZERO]])
+	ECON._begin_ship_avoidance({})
+
+	var fields: Array = [{"position": Vector2(250, 0), "radius": 300.0, "chunks": [{"position": Vector2(250, 0), "radius": 35.0}, {"position": Vector2(350, 0), "radius": 30.0}]}]
+	ECON._refresh_movement_fields(fields)
+	var a := Vector2(-10, 0)
+	var b := Vector2(500, 0)
+	var rocks: Array = ECON._rocks_near(a, b)
+	assert(rocks.size() == 2)
+	assert(rocks == ECON._collect_rock_window(ECON._rock_cell(a.min(b)), ECON._rock_cell(a.max(b))))
+	assert(is_same(rocks, ECON._rocks_near(b, a)))
+	assert(is_same(rocks, ECON._rocks_near(a + Vector2(1, 1), b + Vector2(1, 1))))
+	assert(not ECON._rock_segment_clear(a, b, ECON.ROCK_HARD_CLEARANCE))
+	var clear_start := Vector2(-10, 150)
+	var clear_end := Vector2(500, 150)
+	assert(ECON._rock_segment_clear(clear_start, clear_end, ECON.ROCK_HARD_CLEARANCE))
+	var clearance: float = ECON.ROCK_PREFERRED_CLEARANCE + 8.0
+	var reference_route: Array = ECON._compute_rock_route(a, b, clearance)
+	var route: Array = ECON._plan_rock_route(a, b, clearance)
+	assert(not reference_route.is_empty() and route == reference_route)
+	var second: Array = ECON._plan_rock_route(a, b, clearance)
+	assert(second == route and not is_same(second, route))
+	route.clear()
+	assert(ECON._plan_rock_route(a, b, clearance) == reference_route)
+	assert(ECON._plan_rock_route(a, b, clearance + 4.0) == ECON._compute_rock_route(a, b, clearance + 4.0))
+	var shifted_start: Vector2 = a + Vector2(1, 0)
+	assert(ECON._plan_rock_route(shifted_start, b, clearance) == ECON._compute_rock_route(shifted_start, b, clearance))
+	fields[0]["chunks"].clear()
+	ECON._refresh_movement_fields(fields)
+	assert(ECON._rocks_near(a, b).is_empty())
+	assert(ECON._rock_segment_clear(a, b, ECON.ROCK_HARD_CLEARANCE))
+	assert(ECON._plan_rock_route(a, b, clearance) == ECON._compute_rock_route(a, b, clearance))
+	ECON._refresh_movement_fields([])
+	print("PASS: shared navigation candidates, exact route copies and depletion invalidation")
+
 func _test_ship_size_classes() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
@@ -1907,6 +1955,7 @@ func _initialize() -> void:
 	_test_passive_health()
 	_test_ship_size_classes()
 	_test_local_avoidance()
+	_test_shared_navigation_queries()
 	_test_station_defense_and_ports()
 	_test_station_construction_queue()
 	_test_ai_timed_orbital_housing()
