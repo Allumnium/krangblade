@@ -1862,7 +1862,8 @@ func _test_persistent_contact_indexes() -> void:
 			if ECON._isolated_spatial_cell(previous[id], ECON.SHIP_SEPARATION_RADIUS, cells, isolated):
 				assert(ECON._separation_force(id, previous[id], cells, previous, ECON.SHIP_SEPARATION_RADIUS) == Vector2.ZERO)
 		var reference: Dictionary = state.duplicate(true)
-		ECON._separate_ships(state, graph, previous, 0.1, {}, true)
+		var prepared_contacts: Dictionary = {}
+		ECON._separate_ships(state, graph, previous, 0.1, {}, true, cells, prepared_contacts)
 		ECON._separate_ships(reference, graph, previous, 0.1)
 		assert(state == reference)
 		var bounds: Dictionary = {}
@@ -1871,7 +1872,8 @@ func _test_persistent_contact_indexes() -> void:
 		ECON._index_contact_cells(state["ships"], ECON.SHIP_CLEARANCE, reference_cells, reference_bounds)
 		var contact_cells: Dictionary = ECON._refresh_persistent_contact_cells(state["ships"], ECON.SHIP_CLEARANCE, bounds)
 		assert(contact_cells == reference_cells and contact_cells.keys() == reference_cells.keys() and bounds == reference_bounds)
-		ECON._resolve_ship_contacts(state, graph, previous, 0.1, {}, true)
+		assert(prepared_contacts["cells"] == reference_cells and prepared_contacts["cells"].keys() == reference_cells.keys() and prepared_contacts["bounds"] == reference_bounds)
+		ECON._resolve_ship_contacts(state, graph, previous, 0.1, {}, true, prepared_contacts)
 		ECON._resolve_ship_contacts(reference, graph, previous)
 		assert(state == reference)
 	print("PASS: retained separation/contact buckets, isolated hulls, bounds and correction parity")
