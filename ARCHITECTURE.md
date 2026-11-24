@@ -78,6 +78,8 @@ Client map and fog drawing each own a synchronous projection snapshot (viewport/
 
 Fog retains its mask image for a map identity and repaints only changed live-vision cells (departures become explored, arrivals transparent). Initial survey and identity changes rebuild the entire mask; observation of sites and rocks remains independent of image upload. Minimap terrain retains packed line geometry per field/live-hidden layer using the immutable observed rock arrays and current minimap geometry; the shared celestial footprint generator also serves the setup preview. These caches contain no newly hidden live ore.
 
+Independent multi-rate work: an unsuccessful autonomous empty-cargo Freighter trade selection sets the optional simulation-owned `_next_trade_search` hull deadline (0.4 years). Only the idle search waits; first search, successful selection, active routes/cargo, manual interruption and trade toggles clear it. The deadline follows existing hull lifetime and optional snapshot fields; no RPC change. `deadline_schedule_enabled=false` selects immediate retries. Stations without repeat targets clear stale repeat cycles without constructing assignment maps; yards with no autobuild skip eligibility. Resource and population integration, active orders and interaction sampling remain at the original substep frequency. No new staggered scheduling.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

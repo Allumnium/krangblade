@@ -1577,6 +1577,44 @@ func _test_civilian_activity_fast_paths() -> void:
 		ECON._choose_delivery(state, reference, teams, 1, {}, false)
 		assert(optimized == reference, "Trade activity mismatch in scenario %d" % scenario)
 		assert((int(optimized["source"]) >= 0) == (scenario in [1, 2]))
+	# Failed idle searches use a coarse independent clock, while the
+	# reference route selector and newly enabled automation remain live.
+	for planet in planets:
+		for resource in ECON.RESOURCES:
+			planet["stock"][resource] = ECON.storage_capacity(planet, resource) * 0.5
+			planet["thresholds"][resource]["import"] = true
+			planet["thresholds"][resource]["export"] = true
+	state["elapsed"] = 10.0
+	ECON._search_idle_trade(state, ship, teams, 1, {}, true)
+	assert(is_equal_approx(float(ship["_next_trade_search"]), 10.4))
+	planets[0]["stock"]["Metals"] = ECON.storage_capacity(planets[0], "Metals")
+	planets[1]["stock"]["Metals"] = 0.0
+	var reference_trade: Dictionary = ship.duplicate(true)
+	ECON._search_idle_trade(state, reference_trade, teams, 1, {}, false)
+	assert(int(reference_trade["source"]) >= 0)
+	state["elapsed"] = 10.2
+	ECON._search_idle_trade(state, ship, teams, 1, {}, true)
+	assert(int(ship["source"]) < 0 and is_equal_approx(float(ship["_next_trade_search"]), 10.4))
+	state["elapsed"] = 10.4
+	ECON._search_idle_trade(state, ship, teams, 1, {}, true)
+	assert(int(ship["source"]) == int(reference_trade["source"]) and int(ship["dest"]) == int(reference_trade["dest"]))
+	assert(not ship.has("_next_trade_search"))
+	# Toggle and manual interruption wake idle work without waiting.
+	ship["_next_trade_search"] = 99.0
+	assert(ECON.set_autocast(state, 1, [92001], "trade", true))
+	assert(not ship.has("_next_trade_search"))
+	ship["_next_trade_search"] = 99.0
+	ECON._interrupt_work(ship)
+	assert(not ship.has("_next_trade_search"))
+	ship["route"] = []
+	# No configured repeats means no assignment scan, including stale cycles.
+	var p: Dictionary = planets[0]
+	p["continuous"] = {}
+	p["maintain"] = {}
+	p["repeat_cycle"] = {"fighter": true}
+	var prior_queue: Array = p["queue"].duplicate(true)
+	ECON._refill_continuous(state, 0, p)
+	assert(p["repeat_cycle"].is_empty() and p["queue"] == prior_queue)
 	var graph: Dictionary = ECON.military_graph(state)
 	var unchanged: Dictionary = ship.duplicate(true)
 	assert(not ECON._choose_resource_stage(state, graph, ship, teams, {}, {}, {}, true))
