@@ -61,7 +61,10 @@ func _begin() -> void:
 		return
 	session.connect("phase_changed", _phase_changed)
 	session.connect("roster_changed", _roster_changed)
-	create_timer(65.0).timeout.connect(func() -> void: _fail("Network smoke test timed out."))
+	# Multi-peer stress has much less CPU per Godot process on CI runners.
+	# Preserve every check; only the wall-clock validation budget scales.
+	var deadline: float = 65.0 if expected_players <= 2 else (180.0 if expected_players <= 3 else 330.0)
+	create_timer(deadline).timeout.connect(_network_timeout)
 	if role == "host":
 		if not bool(session.call("host_game", "TestHost")):
 			_fail("Could not host.")
@@ -271,7 +274,9 @@ func _phase_changed() -> void:
 						collector.merge({"id": 986000 + index, "position": haul_point, "holding": false, "cargo": ECON.empty_stock(), "mine_auto": false, "salvage_auto": false, "repair_auto": false, "wander_auto": false}, true)
 						collector["cargo"]["Metals"] = ECON.MINER_CAPACITY
 						var hauler: Dictionary = repair_victim.duplicate(true)
-						hauler.merge({"id": 987000 + index, "position": haul_point, "holding": false, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "salvage_auto": false, "resource_stage": {"node": index, "anchor": index, "point": haul_point, "salvage_site": true}}, true)
+						# The handoff receiver must be healthy: a 200-HP freighter has 400 max HP
+						# and may abandon staging to seek repairs before a multi-peer transfer.
+						hauler.merge({"id": 987000 + index, "position": haul_point, "holding": false, "hp": ECON.ship_max_hp("ship"), "cargo": ECON.empty_stock(), "salvage_auto": false, "resource_stage": {"node": index, "anchor": index, "point": haul_point, "salvage_site": true}}, true)
 						hauler["cargo"]["Metals"] = ECON.CARGO_CAPACITY - ECON.MINER_CAPACITY
 						hauler["next_resource_stage_search"] = float(state["elapsed"]) + 5.0
 						# Auto-Trade off: otherwise the adjacent repair victim receives the repairer's cargo by handoff.
@@ -310,7 +315,7 @@ func _phase_changed() -> void:
 						for dock_slot in range(2):
 							var docked: Dictionary = repair_victim.duplicate(true)
 							var dock_point: Vector2 = ECON.station_position(state, index, float(state["elapsed"])) + Vector2.from_angle(float(dock_slot) * PI) * ECON.SHIP_CLEARANCE
-							docked.merge({"id": 941000 + index * 2 + dock_slot, "position": dock_point, "holding": false, "cargo": ECON.empty_stock(), "hp": ECON.SHIP_HP, "salvage_delivery": true, "salvage_depot": index, "dest": index, "salvage_auto": false, "trade_auto": false, "wander_auto": false}, true)
+							docked.merge({"id": 941000 + index * 2 + dock_slot, "position": dock_point, "holding": false, "cargo": ECON.empty_stock(), "hp": ECON.ship_max_hp("ship"), "salvage_delivery": true, "salvage_depot": index, "dest": index, "salvage_auto": false, "trade_auto": false, "wander_auto": false}, true)
 							docked["cargo"][ECON.ANTIMATTER] = 1.0
 							state["ships"].append(docked)
 						# Separate focus-fire hull so the existing movement and hold
@@ -386,6 +391,27 @@ func _phase_changed() -> void:
 			create_timer(0.8 if role == "host" else 0.2).timeout.connect(_pass)
 		else:
 			_fail("Connection closed before expected transition.")
+
+# On failure expose fixture state, not UI details, to separate transport stalls
+# from a legitimate refusal to hand off while a receiver is damaged or threatened.
+func _network_timeout() -> void:
+	if session != null and str(session.get("phase")) == "match":
+		var state: Dictionary = session.get("economy")
+		print("DEBUG: timeout role=", role, " players=", expected_players, " game_years=", state.get("elapsed"), " verified=", economy_verified, " stage=", speed_stage)
+		if role == "host":
+			for planet in state.get("planets", []):
+				if not bool(planet.get("home", false)):
+					continue
+				var owner: int = int(planet["owner"])
+				var observed: Dictionary = observed_commands.get(owner, {})
+				if observed.has("miner_resource_handoff"):
+					continue
+				var node: int = state["planets"].find(planet)
+				for ship in state.get("ships", []):
+					if int(ship["id"]) not in [986000 + node, 987000 + node]:
+						continue
+					print("DEBUG: handoff owner=", owner, " hull=", ship["id"], " hp=", ship.get("hp"), " pos=", ship.get("position"), " cargo=", ship.get("cargo"), " engaged=", ECON._engaged(ship), " retreat=", ship.get("retreating", false), " hold=", ship.get("holding", false), " stage=", ship.get("resource_stage", {}), " dest=", ship.get("dest", -1))
+	_fail("Network smoke test timed out.")
 
 func _prepare_commands() -> void:
 	var state: Dictionary = session.get("economy")
