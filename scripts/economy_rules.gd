@@ -141,6 +141,7 @@ const TRACTOR_RATE: float = 12.0
 const FREIGHTER_TRACTOR_RATE: float = TRACTOR_RATE * 0.25
 const RESOURCE_HANDOFF_RANGE: float = TRACTOR_RANGE * 2.0
 const RESOURCE_STAGE_SEARCH_YEARS: float = 2.0
+const IDLE_TRADE_RETRY_YEARS: float = 0.4
 const RESOURCE_QUEUE_SPACING: float = 80.0
 const RESOURCE_PARTIAL_WAIT_YEARS: float = 8.0
 const MINING_RENDEZVOUS_RANGE: float = 1600.0
@@ -1756,10 +1757,16 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 	for key in p.get("maintain", {}):
 		if not keys.has(key):
 			keys.append(key)
+	var cycle: Dictionary = p.get("repeat_cycle", {})
+	# With no repeat targets, no queue assignment can be created. The
+	# reference cycle refresh would also remove every old cycle key.
+	if keys.is_empty():
+		cycle.clear()
+		p["repeat_cycle"] = cycle
+		return
 	var queue_state: Dictionary = _repeat_queue_state(p)
 	var active: Dictionary = queue_state["active"]
 	var manual_hulls: Dictionary = queue_state["manual_hulls"]
-	var cycle: Dictionary = p.get("repeat_cycle", {})
 	_refresh_repeat_cycle(state, index, p, keys, cycle, queue_state)
 	var hull_waiting_for_funds: bool = false
 	for key in keys:
@@ -1863,10 +1870,11 @@ static func set_yard_autobuild(state: Dictionary, player: int, index: int, slot:
 
 static func _refill_yard_autobuild(state: Dictionary, index: int, p: Dictionary) -> void:
 	for slot in range(p["yards"].size()):
-		if not shipyard_operational(p, slot):
-			continue
 		var yard: Dictionary = p["yards"][slot]
-		for kind in yard.get("autobuild", []):
+		var automatic: Array = yard.get("autobuild", [])
+		if automatic.is_empty() or not shipyard_operational(p, slot):
+			continue
+		for kind in automatic:
 			if not yard_fits(p, slot, kind) or not ship_origin_population_met(p, kind) or not ship_crew_available(p, kind, slot):
 				continue
 			var exists: bool = false
@@ -3951,7 +3959,22 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 			miner["_handoff_delivery"] = true
 	return total
 
-static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float) -> void:
+# Only failed autonomous empty-cargo searches are rate limited. Explicit
+# orders, loaded cargo, active routes and arrival work remain incremental.
+# Use an absolute simulation-time deadline (not wall time or frame count).
+static func _search_idle_trade(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, cache: Dictionary, scheduled: bool) -> void:
+	var now: float = float(state["elapsed"])
+	if scheduled and now + EPS < float(ship.get("_next_trade_search", 0.0)):
+		return
+	ship.erase("_next_trade_search")
+	_choose_delivery(state, ship, teams, team, cache)
+	if scheduled and int(ship.get("source", -1)) < 0:
+		ship["_next_trade_search"] = now + IDLE_TRADE_RETRY_YEARS
+
+static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, dt: float, scheduled: bool = false) -> void:
+	# Active work, a new order or a cargo arrival invalidates an idle retry.
+	if not ship["route"].is_empty() or int(ship.get("source", -1)) >= 0 or int(ship.get("dest", -1)) >= 0 or _cargo_total(ship) > EPS or not scheduled:
+		ship.erase("_next_trade_search")
 	var team: int = _combat_group(state, int(ship["owner"]))
 	if state.has("diplomacy") and not _civilian_route_safe(state, ship, teams, team):
 		_evacuate_civilian(state, ship, teams)
@@ -4016,7 +4039,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 	else:
 		ship["source"] = -1
 		ship["dest"] = -1
-		_choose_delivery(state, ship, teams, team, cache)
+		_search_idle_trade(state, ship, teams, team, cache, scheduled)
 
 static func field_limit(field: Dictionary, resource: String) -> float:
 	return FIELD_MINING_LIMIT * float(field.get(resource, 0.0)) if FIELD_RESOURCES.has(resource) else 0.0
@@ -5286,8 +5309,10 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 			ship.erase("repair_site")
 			ship.erase("withdrawal_objective")
 			ship["dest"] = -1
-		if mode == "trade" and not enabled:
-			_clear_resource_stage(ship)
+		if mode == "trade":
+			ship.erase("_next_trade_search")
+			if not enabled:
+				_clear_resource_stage(ship)
 		if mode == "collect" and not enabled and ship.get("unit_order", {}).get("kind", "") == "collect" and bool(ship.get("unit_order", {}).get("automatic", false)):
 			ship.erase("unit_order")
 			ship.erase("science_years")
@@ -5464,6 +5489,7 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 # A manual command interrupts civilian work, retaining cargo and player
 # mining preferences. On completion automation chooses a fresh legal job.
 static func _interrupt_work(ship: Dictionary) -> void:
+	ship.erase("_next_trade_search")
 	_clear_resource_stage(ship)
 	if ship["kind"] in ["fighter", "scout", "cruiser", "destroyer"]:
 		ship["direct_order"] = true
@@ -5642,6 +5668,7 @@ static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionar
 
 
 static func _finish_manual(ship: Dictionary) -> void:
+	ship.erase("_next_trade_search")
 	ship["route"] = []
 	ship["leg"] = 0.0
 	ship["dest"] = -1 if ship["kind"] not in ["fighter", "scout", "cruiser", "destroyer"] else int(ship["at"])
@@ -10826,7 +10853,7 @@ static func _step_hull_routine(state: Dictionary, frame: STEP_FRAME, ship: Dicti
 		if stage_due and _choose_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, {}, true):
 			ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
 			return true
-		_work_ship(state, ship, frame.teams, frame.cache, dt)
+		_work_ship(state, ship, frame.teams, frame.cache, dt, frame.deadline_schedule_enabled)
 		if float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)) and _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade"):
 			ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
 			_choose_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, frame.salvage_cells)
