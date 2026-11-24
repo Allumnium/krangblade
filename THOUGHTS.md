@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.42: Archive 64 historical v0.94–v0.97.30 change entries from the top of AGENTS.md into THOUGHTS_ARCHIVE.md without changing their wording or removing the standing workflow/UI/design instructions. Keep recent notes and a direct archive link for AI agents. Documentation-only; game and CI untouched.
+
 - v0.97.41: Prevent a local variable shadow in the ENet smoke harness by naming the per-scenario timeout separately from the lobby discovery deadline. No gameplay or test assertion changes. Godot parser and multiplayer validation pending.
 
 - v0.97.40: Repair multi-peer ENet stress fixtures from run #395: initialize staged/dock freighters at actual 400-HP max instead of half health (which could trigger repair/retreat and abort resource handoffs), retain every construction and handoff assertion, increase wall-clock budgets for 3-/8-process jobs on shared CI runners, and print per-hull handoff state on timeout. No gameplay changes. Godot/runtime and rerun of multi-peer CI pending.
