@@ -1768,7 +1768,27 @@ static func set_maintain(state: Dictionary, player: int, index: int, kind: Strin
 	p["continuous"][kind] = false
 	return true
 
-static func _maintain_needed(state: Dictionary, index: int, p: Dictionary, key: String) -> bool:
+# One lazy census for the station-work phase. No hull ownership/removal
+# occurs inside that phase; completed construction only appends new hulls.
+# Catch those launches before the next query, while queue counts stay live.
+static func _repeat_origin_counts(state: Dictionary, census: Dictionary) -> Dictionary:
+	var ships: Array = state["ships"]
+	if not census.has("counts") or int(census["scanned"]) > ships.size():
+		census["counts"] = {}
+		census["scanned"] = 0
+	var counts: Dictionary = census["counts"]
+	for slot in range(int(census["scanned"]), ships.size()):
+		var ship: Dictionary = ships[slot]
+		var origin: Vector2i = Vector2i(int(ship["owner"]), int(ship.get("origin", -1)))
+		if not counts.has(origin):
+			counts[origin] = {}
+		var kinds: Dictionary = counts[origin]
+		var kind: String = str(ship["kind"])
+		kinds[kind] = int(kinds.get(kind, 0)) + 1
+	census["scanned"] = ships.size()
+	return counts
+
+static func _maintain_needed(state: Dictionary, index: int, p: Dictionary, key: String, census: Dictionary = {}) -> bool:
 	if bool(p["continuous"].get(key, false)):
 		return true
 	if not SHIP_KINDS.has(key):
@@ -1776,13 +1796,14 @@ static func _maintain_needed(state: Dictionary, index: int, p: Dictionary, key: 
 	var target: int = int(p.get("maintain", {}).get(key, 0))
 	if target <= 0:
 		return false
-	var count: int = origin_count(state, index, key)
+	var counts: Dictionary = _repeat_origin_counts(state, census)
+	var count: int = int(counts.get(Vector2i(int(p["owner"]), index), {}).get(key, 0))
 	for item in p["queue"]:
 		if item["kind"] == key:
 			count += 1
 	return count < target
 
-static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> void:
+static func _refill_continuous(state: Dictionary, index: int, p: Dictionary, census: Dictionary = {}) -> void:
 	var keys: Array = p["continuous"].keys()
 	for key in p.get("maintain", {}):
 		if not keys.has(key):
@@ -1797,10 +1818,10 @@ static func _refill_continuous(state: Dictionary, index: int, p: Dictionary) -> 
 	var queue_state: Dictionary = _repeat_queue_state(p)
 	var active: Dictionary = queue_state["active"]
 	var manual_hulls: Dictionary = queue_state["manual_hulls"]
-	_refresh_repeat_cycle(state, index, p, keys, cycle, queue_state)
+	_refresh_repeat_cycle(state, index, p, keys, cycle, queue_state, census)
 	var hull_waiting_for_funds: bool = false
 	for key in keys:
-		if not _maintain_needed(state, index, p, str(key)):
+		if not _maintain_needed(state, index, p, str(key), census):
 			continue
 		var order: Array = _continuous_target(p, str(key))
 		if order.is_empty():
@@ -1852,16 +1873,16 @@ static func _repeat_queue_state(p: Dictionary) -> Dictionary:
 			manual_hulls[item["kind"]] = true
 	return {"active": active, "idle": idle, "waiting": waiting, "manual_hulls": manual_hulls}
 
-static func _refresh_repeat_cycle(state: Dictionary, index: int, p: Dictionary, keys: Array, cycle: Dictionary, queue_state: Dictionary) -> void:
+static func _refresh_repeat_cycle(state: Dictionary, index: int, p: Dictionary, keys: Array, cycle: Dictionary, queue_state: Dictionary, census: Dictionary = {}) -> void:
 	var manual_hulls: Dictionary = queue_state["manual_hulls"]
 	var all_turns: bool = true
 	for key in keys:
-		if SHIP_KINDS.has(key) and ship_origin_population_met(p, str(key)) and ship_crew_available(p, str(key)) and _maintain_needed(state, index, p, str(key)) and not manual_hulls.has(key) and not cycle.has(key):
+		if SHIP_KINDS.has(key) and ship_origin_population_met(p, str(key)) and ship_crew_available(p, str(key)) and _maintain_needed(state, index, p, str(key), census) and not manual_hulls.has(key) and not cycle.has(key):
 			all_turns = false
 	if not bool(queue_state["waiting"]) and bool(queue_state["idle"]) and all_turns:
 		cycle.clear()
 	for key in cycle.keys():
-		if not _maintain_needed(state, index, p, str(key)):
+		if not _maintain_needed(state, index, p, str(key), census):
 			cycle.erase(key)
 
 static func _refill_station_repeat(state: Dictionary, index: int, p: Dictionary, key: String, order: Array) -> void:
@@ -2356,7 +2377,7 @@ static func _work_station_queue(state: Dictionary, index: int, p: Dictionary, dt
 		else:
 			_finish(state, index, p, item)
 
-static func _work_planet(state: Dictionary, index: int, dt: float, basis: Dictionary = {}) -> void:
+static func _work_planet(state: Dictionary, index: int, dt: float, basis: Dictionary = {}, census: Dictionary = {}) -> void:
 	var p: Dictionary = state["planets"][index]
 	if int(p["owner"]) == 0 or not has_station(p):
 		return
@@ -2373,7 +2394,7 @@ static func _work_planet(state: Dictionary, index: int, dt: float, basis: Dictio
 		_work_upgrade_deliveries(state, index, p, dt)
 		_work_station_queue(state, index, p, dt)
 	_refill_yard_autobuild(state, index, p)
-	_refill_continuous(state, index, p)
+	_refill_continuous(state, index, p, census)
 	for category in p.get("pending_spending", {}):
 		for material in p["pending_spending"][category]:
 			_record_flow(p, str(category), str(material), float(p["pending_spending"][category][material]))
@@ -5121,6 +5142,9 @@ static func _regenerate_hull(entity: Dictionary, maximum: float, dt: float) -> v
 static func _passive_regeneration(state: Dictionary, dt: float) -> void:
 	for ship in state["ships"]:
 		_regenerate_hull(ship, ship_max_hp(str(ship["kind"])), dt)
+	_regenerate_structures(state, dt)
+
+static func _regenerate_structures(state: Dictionary, dt: float) -> void:
 	for system in state["planets"]:
 		if has_station(system):
 			_regenerate_hull(system["station"], station_max_hp(system), dt)
@@ -10525,8 +10549,9 @@ static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float, econo
 	combat_graph.erase("travel_influence")
 	combat_graph.erase("travel_permissions")
 	_update_planet_blockades(state, combat_graph)
+	var census: Dictionary = {}
 	for i in range((state["planets"] as Array).size()):
-		_work_planet(state, i, dt, bases.get(i, {}))
+		_work_planet(state, i, dt, bases.get(i, {}), census)
 	_refill_empire_fleets(state)
 	_begin_hull_index(state)
 
@@ -10551,18 +10576,28 @@ static func _step_ai(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 			ai_schedule[player] = _next_ai_slot(ai_now, int(player))
 	state["_ai_schedule"] = ai_schedule
 
-static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
-	var combat_graph: Dictionary = frame.graph
+# Position initialization, passive HP and loading reward touch independent
+# fields. Share their hull traversal; keep structure/shield work before
+# withdrawal and combat. Reward inputs cannot change during this pass.
+static func _prepare_combat_hulls(state: Dictionary, combat_graph: Dictionary, dt: float) -> void:
+	var loading_by_owner: Dictionary = {}
 	for craft in state["ships"]:
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else state["map"]["points"], craft)
-	_passive_regeneration(state, dt)
-	_refresh_reward_defenses(state, dt)
-	for craft in state["ships"]:
-		var loading: float = _player_factor(state, int(craft["owner"]), "rank_loading", 0.15)
+		_regenerate_hull(craft, ship_max_hp(str(craft["kind"])), dt)
+		var owner: int = int(craft["owner"])
+		if not loading_by_owner.has(owner):
+			loading_by_owner[owner] = _player_factor(state, owner, "rank_loading", 0.15)
+		var loading: float = float(loading_by_owner[owner])
 		if loading > 1.0:
 			craft["reward_loading_factor"] = loading
 		else:
 			craft.erase("reward_loading_factor")
+
+static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
+	var combat_graph: Dictionary = frame.graph
+	_prepare_combat_hulls(state, combat_graph, dt)
+	_regenerate_structures(state, dt)
+	_refresh_reward_defenses(state, dt)
 	_prepare_withdrawals(state, combat_graph)
 	_advance_unit_orders(state, combat_graph)
 	_update_tactical_orders(state, combat_graph)
@@ -11823,16 +11858,44 @@ static func set_empire_target(state: Dictionary, player: int, kind: String, amou
 	state["empire_targets"] = targets
 	return true
 
+# All active empire targets share one census at the original refill boundary.
+# Enqueuing for one owner cannot change another owner's live/queued totals.
+static func _empire_target_counts(state: Dictionary) -> Dictionary:
+	var counts: Dictionary = {}
+	for owner in state.get("empire_targets", {}):
+		if not state["empire_targets"][owner].is_empty():
+			counts[int(owner)] = {"live": {}, "queued": {}}
+	if counts.is_empty():
+		return counts
+	for ship in state["ships"]:
+		var owner: int = int(ship["owner"])
+		if not counts.has(owner) or not SHIP_KINDS.has(ship["kind"]):
+			continue
+		var live: Dictionary = counts[owner]["live"]
+		var kind: String = str(ship["kind"])
+		live[kind] = int(live.get(kind, 0)) + 1
+	for p in state["planets"]:
+		var owner: int = int(p["owner"])
+		if not counts.has(owner):
+			continue
+		var queued: Dictionary = counts[owner]["queued"]
+		for job in p["queue"]:
+			var kind: String = str(job["kind"])
+			if SHIP_KINDS.has(kind):
+				queued[kind] = int(queued.get(kind, 0)) + 1
+	return counts
+
 static func _refill_empire_fleets(state: Dictionary) -> void:
 	var now: float = float(state["elapsed"])
 	if now + EPS < float(state.get("_next_empire_refill", 0.0)):
 		return
 	state["_next_empire_refill"] = now + 0.5
+	var all_counts: Dictionary = _empire_target_counts(state)
 	for player in state.get("empire_targets", {}):
 		var fleet: Dictionary = state["empire_targets"][player]
 		if fleet.is_empty():
 			continue
-		var counts: Dictionary = empire_fleet_counts(state, int(player))
+		var counts: Dictionary = all_counts[int(player)]
 		for kind in fleet:
 			var needed: int = int(fleet[kind]) - int(counts["live"].get(kind, 0)) - int(counts["queued"].get(kind, 0))
 			if needed <= 0:
