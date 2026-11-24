@@ -937,6 +937,68 @@ func _test_shared_navigation_queries() -> void:
 	ECON._refresh_movement_fields([])
 	print("PASS: shared navigation candidates, exact route copies and depletion invalidation")
 
+func _test_persistent_avoidance_index() -> void:
+	var state: Dictionary = {"ships": []}
+	var positions: Dictionary = {11: Vector2(30, 0), 12: Vector2(-30, 0), 13: Vector2(40, 0), 14: Vector2(500, 0)}
+	# More than the original bucket cap; the first 24 in insertion order
+	# remain the exact candidates even as earlier entries leave.
+	for id in range(100, 130):
+		positions[id] = Vector2(60, 10)
+	var cell := Vector2i.ZERO
+	var prior_bucket: Array = []
+	var prior_neighbors: Array = []
+	for tick in range(9):
+		match tick:
+			1:
+				positions[11] = Vector2(31, 1)
+			2:
+				positions[11] = Vector2(-150, 1)
+			3:
+				positions.erase(13)
+			4:
+				positions[13] = Vector2(40, 0)
+			5:
+				positions[12] = Vector2(129, 0)
+			6:
+				positions[14] = Vector2(-1000, 0)
+			7:
+				positions.clear()
+			8:
+				positions = {11: Vector2(-30, -30), 22: Vector2(0, 0)}
+		# Independent complete rebuild, with exact candidate order and pose.
+		ECON._begin_ship_avoidance(positions)
+		var reference_cells: Dictionary = ECON.avoidance_cells.duplicate(true)
+		var expected: Dictionary = {}
+		for x in range(-3, 5):
+			for y in range(-2, 3):
+				var query := Vector2i(x, y)
+				expected[query] = ECON._avoidance_neighborhood(query).duplicate(true)
+		ECON._begin_persistent_ship_avoidance(state, positions)
+		assert(ECON.avoidance_cells == reference_cells)
+		for query in expected:
+			assert(ECON._avoidance_neighborhood(query) == expected[query])
+		var neighbors: Array = ECON._avoidance_neighborhood(cell)
+		if tick == 0:
+			prior_bucket = ECON.avoidance_cells[cell]
+			prior_neighbors = neighbors
+		elif tick == 1:
+			assert(is_same(prior_bucket, ECON.avoidance_cells[cell]))
+			assert(is_same(prior_neighbors, neighbors))
+			assert(neighbors[1] == [11, Vector2(31, 1)])
+		elif tick == 2:
+			assert(not is_same(prior_neighbors, neighbors))
+		ECON._end_ship_avoidance()
+		assert(ECON.avoidance_cells.is_empty() and ECON._avoidance_neighborhoods.is_empty())
+	# Replacing the authority/roster must never expose cached old candidates.
+	state["ships"] = []
+	ECON._begin_persistent_ship_avoidance(state, {99: Vector2(10, 0)})
+	assert(ECON._avoidance_neighborhood(cell) == [[99, Vector2(10, 0)]])
+	ECON._end_ship_avoidance()
+	ECON._begin_persistent_ship_avoidance({"ships": []}, {})
+	assert(ECON._avoidance_neighborhood(cell).is_empty())
+	ECON._end_ship_avoidance()
+	print("PASS: persistent movement buckets, ordered capped candidates, live poses and snapshot lifecycle")
+
 func _test_ship_size_classes() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
@@ -1118,7 +1180,7 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	assert(int(state["planets"][1]["owner"]) == 1)
 	print("PASS: nearest available colony, queued hold and automatic settlement")
 
-func _motion_sleep_trace(enabled: bool, schedule_enabled: bool = true) -> Array:
+func _motion_sleep_trace(enabled: bool, schedule_enabled: bool = true, persistent_avoidance: bool = true) -> Array:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	var craft: Dictionary = {"id": 55001, "kind": "fighter", "owner": 1, "origin": 0, "at": 0, "dest": 0, "source": -1, "route": [], "leg": 0.0, "position": Vector2(100, 200), "heading": Vector2.LEFT, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock(), "wander_auto": false}
@@ -1130,7 +1192,7 @@ func _motion_sleep_trace(enabled: bool, schedule_enabled: bool = true) -> Array:
 			assert(ECON.command_stop_units(state, 1, [55001]))
 		elif tick == 45:
 			assert(ECON.issue_unit_order(state, 1, [55001], {"kind": "position", "target": 0, "point": Vector2(150, 200), "move_only": true}, false))
-		ECON.step(state, 0.1, {}, enabled, schedule_enabled)
+		ECON.step(state, 0.1, {}, enabled, schedule_enabled, persistent_avoidance)
 		trace.append(state.duplicate(true))
 	return trace
 
@@ -1178,6 +1240,7 @@ func _test_deadline_calendars() -> void:
 
 func _test_motion_sleep_wake() -> void:
 	assert(_motion_sleep_trace(true) == _motion_sleep_trace(false))
+	assert(_motion_sleep_trace(true, true, true) == _motion_sleep_trace(true, true, false))
 	var state: Dictionary = {"elapsed": 1.0, "ships": []}
 	var point := Vector2(100, 200)
 	var ship: Dictionary = {"id": 501, "kind": "fighter", "owner": 1, "position": point, "heading": Vector2.LEFT, "navigation_target": point, "route": [], "holding": true, "hold_position": point, "hold_heading": Vector2.LEFT}
@@ -2493,6 +2556,7 @@ func _initialize() -> void:
 	_test_ship_size_classes()
 	_test_local_avoidance()
 	_test_shared_navigation_queries()
+	_test_persistent_avoidance_index()
 	_test_direct_trajectory_samples()
 	_test_exact_tick_trajectories()
 	_test_general_angle_windows()

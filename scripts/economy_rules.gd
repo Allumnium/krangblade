@@ -8,6 +8,12 @@ static var cached_military_source: Dictionary = {}
 # Ephemeral authoritative snapshot, active only during a movement substep.
 static var avoidance_cells: Dictionary = {}
 static var _avoidance_neighborhoods: Dictionary = {}
+# Persistent derived storage; exposed only during the frozen movement phase.
+static var _avoidance_index_state: Dictionary = {}
+static var _avoidance_index_roster: Array = []
+static var _persistent_avoidance_cells: Dictionary = {}
+static var _persistent_avoidance_neighborhoods: Dictionary = {}
+const AVOIDANCE_NEIGHBORHOOD_LIMIT: int = 4096
 static var _movement_fields: Array = []
 static var _movement_field_source: Array = []
 static var _movement_field_counts: Array[int] = []
@@ -2533,8 +2539,8 @@ static func _ensure_position(points: Array, ship: Dictionary) -> void:
 
 # Build once from the common pre-movement positions, not once per hull.
 static func _begin_ship_avoidance(positions: Dictionary) -> void:
-	avoidance_cells.clear()
-	_avoidance_neighborhoods.clear()
+	# Independent reference rebuild, including callers outside a full step.
+	_end_ship_avoidance()
 	for id in positions:
 		var point: Vector2 = positions[id]
 		var cell := Vector2i(floori(point.x / AVOIDANCE_CELL), floori(point.y / AVOIDANCE_CELL))
@@ -2543,6 +2549,65 @@ static func _begin_ship_avoidance(positions: Dictionary) -> void:
 		# Bound worst-case work in dense swarms; contact correction remains soft.
 		if avoidance_cells[cell].size() < AVOIDANCE_BUCKET_LIMIT:
 			avoidance_cells[cell].append([id, point])
+
+# Detach the active snapshot without destroying retained storage. Movement
+# outside the original phase must see the same empty index as before.
+static func _end_ship_avoidance() -> void:
+	avoidance_cells = {}
+	_avoidance_neighborhoods = {}
+
+static func _invalidate_avoidance_cell(cell: Vector2i) -> void:
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			_persistent_avoidance_neighborhoods.erase(cell + Vector2i(x, y))
+
+# Reconcile ordered capped slots with the *same* frozen positions and
+# insertion order used by the reference build. Retain bucket/entry arrays
+# across steps. Neighborhoods contain references to the same entry arrays:
+# a coordinate-only refresh is visible without rebuilding the neighborhood.
+# A changed ID, order or size invalidates every affected neighboring query.
+static func _begin_persistent_ship_avoidance(state: Dictionary, positions: Dictionary) -> void:
+	_end_ship_avoidance()
+	if not is_same(state, _avoidance_index_state) or not is_same(state["ships"], _avoidance_index_roster):
+		_avoidance_index_state = state
+		_avoidance_index_roster = state["ships"]
+		_persistent_avoidance_cells.clear()
+		_persistent_avoidance_neighborhoods.clear()
+	var counts: Dictionary = {}
+	var changed: Dictionary = {}
+	for id in positions:
+		var point: Vector2 = positions[id]
+		var cell := Vector2i(floori(point.x / AVOIDANCE_CELL), floori(point.y / AVOIDANCE_CELL))
+		var slot: int = int(counts.get(cell, 0))
+		if slot >= AVOIDANCE_BUCKET_LIMIT:
+			continue
+		counts[cell] = slot + 1
+		if not _persistent_avoidance_cells.has(cell):
+			_persistent_avoidance_cells[cell] = []
+		var bucket: Array = _persistent_avoidance_cells[cell]
+		if slot == bucket.size():
+			bucket.append([id, point])
+			changed[cell] = true
+		else:
+			var entry: Array = bucket[slot]
+			if entry[0] != id:
+				bucket[slot] = [id, point]
+				changed[cell] = true
+			elif entry[1] != point:
+				entry[1] = point
+	for cell in _persistent_avoidance_cells.keys():
+		var count: int = int(counts.get(cell, 0))
+		var bucket: Array = _persistent_avoidance_cells[cell]
+		if count == 0:
+			_persistent_avoidance_cells.erase(cell)
+			changed[cell] = true
+		elif bucket.size() != count:
+			bucket.resize(count)
+			changed[cell] = true
+	for cell in changed:
+		_invalidate_avoidance_cell(cell)
+	avoidance_cells = _persistent_avoidance_cells
+	_avoidance_neighborhoods = _persistent_avoidance_neighborhoods
 
 # Read-only view of the frozen movement snapshot. Preserve the original
 # x/y cell traversal and per-bucket insertion order, including ties.
@@ -2553,7 +2618,8 @@ static func _avoidance_neighborhood(cell: Vector2i) -> Array:
 	for x in range(-1, 2):
 		for y in range(-1, 2):
 			entries.append_array(avoidance_cells.get(cell + Vector2i(x, y), []))
-	_avoidance_neighborhoods[cell] = entries
+	if _avoidance_neighborhoods.size() < AVOIDANCE_NEIGHBORHOOD_LIMIT:
+		_avoidance_neighborhoods[cell] = entries
 	return entries
 
 static func _avoidance_direction(ship: Dictionary, target: Vector2, budget: float) -> Vector2:
@@ -10072,7 +10138,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 		next += AI_INTERVAL
 	return next
 
-static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true) -> void:
+static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true, persistent_avoidance_enabled: bool = true) -> void:
 	_begin_deadline_schedule(state, deadline_schedule_enabled)
 	_rock_plan_tick += 1
 	if not is_same(state, _trajectory_state) or not is_same(state["ships"], _trajectory_roster):
@@ -10088,6 +10154,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	frame.profile = profile
 	frame.motion_sleep_enabled = motion_sleep_enabled
 	frame.deadline_schedule_enabled = deadline_schedule_enabled
+	frame.persistent_avoidance_enabled = persistent_avoidance_enabled
 	_step_economy(state, frame, dt)
 	started = _profile_stage(profile, "Economy", started)
 	_step_ai(state, frame, dt)
@@ -10320,7 +10387,10 @@ static func _step_formations(state: Dictionary, frame: STEP_FRAME, dt: float) ->
 	var combat_positions: Dictionary = frame.combat_positions
 	for craft in state["ships"]:
 		combat_positions[int(craft["id"])] = craft["position"]
-	_begin_ship_avoidance(combat_positions)
+	if frame.persistent_avoidance_enabled:
+		_begin_persistent_ship_avoidance(state, combat_positions)
+	else:
+		_begin_ship_avoidance(combat_positions)
 	_dispatch_explorers(state, combat_graph)
 	frame.idle_targets = _idle_formation_targets(state, combat_graph)
 	frame.coordinated = _coordinate_formations(state, combat_graph, dt)
@@ -10653,8 +10723,7 @@ static func _step_settle_movement(state: Dictionary, frame: STEP_FRAME, dt: floa
 	# before separation and contact use the settled state.
 	if frame.deadline_schedule_enabled:
 		_expire_auto_cooldowns(state)
-	avoidance_cells.clear()
-	_avoidance_neighborhoods.clear()
+	_end_ship_avoidance()
 	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked)
 	if dt > 0.0:
 		_resolve_ship_contacts(state, frame.graph, frame.combat_positions, dt, repair_parked)

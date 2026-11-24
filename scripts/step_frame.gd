@@ -9,6 +9,7 @@ var motion_sleep_enabled: bool = false
 var motion_sleep_skips: int = 0
 var direct_order_dispatches: int = 0
 var deadline_schedule_enabled: bool = false
+var persistent_avoidance_enabled: bool = false
 
 # Routing and civilian caches valid for this substep.
 var graph: Dictionary = {}
