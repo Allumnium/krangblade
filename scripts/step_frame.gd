@@ -45,7 +45,7 @@ var repaired_hulls: Dictionary = {}
 var repair_parked: Dictionary = {}
 var wander_candidates: Dictionary = {}
 
-# Retain hull-only bucket arrays while rebuilding the exact key-order view.
+# Retain ordered bucket arrays while rebuilding the exact key-order view.
 # The returned view is valid only until the next begin on this index.
 class OrderedHullBuckets:
 	var _retained: Dictionary = {}
@@ -61,7 +61,7 @@ class OrderedHullBuckets:
 		_active = {}
 		_counts.clear()
 
-	func append(key: Variant, hull: Dictionary) -> void:
+	func append(key: Variant, hull: Variant) -> void:
 		var slot: int = int(_counts.get(key, 0))
 		if slot == 0:
 			if not _retained.has(key):
