@@ -6557,12 +6557,9 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 	var node: int = int(ship["local_move_sector"])
 	var destination: Vector2 = ship["local_move_target"]
 	if not state.is_empty():
-		var nav: Dictionary = _manual_nav(state, graph, ship, node)
-		ship["route"] = []
-		ship["leg"] = 0.0
-		ship["dest"] = nav["node"]
+		# _manual_travel already normalizes route/destination and assigns
+		# the resolved node on arrival; do not resolve navigation twice.
 		if _manual_travel(state, graph, ship, node, destination, dt):
-			ship["at"] = nav["node"]
 			if ship.has("arrival_heading"):
 				ship["heading"] = ship["arrival_heading"]
 			_clear_local_move(ship)
@@ -10380,6 +10377,26 @@ static func _motion_sleep_mode(state: Dictionary, frame: STEP_FRAME, ship: Dicti
 		return MotionSleep.AWAKE
 	return MotionSleep.IDLE_MILITARY
 
+# A military position order returns from the original dispatcher before
+# any automatic salvage, repair, science or routine work. Prove that all
+# earlier branches are inactive, then call the very same movement/arrival
+# routine. The guards are live on every substep, not a cached order type.
+# Navigation still checks the rock corridor and nearby hulls (and falls
+# back to detours); combat and contact settlement remain independent.
+static func _try_direct_order_dispatch(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> bool:
+	if not ship.has("local_move_target") or not military_hull(str(ship.get("kind", ""))):
+		return false
+	if bool(ship.get("rogue", false)) or bool(ship.get("retreating", false)) or bool(ship.get("_handoff_delivery", false)) or bool(ship.get("holding", false)) or ship.has("stop_until") or _stop_waiting(state, ship):
+		return false
+	if ship.has("attack_order") or ship.has("cargo_order") or ship.has("launch_rally") or _engaged(ship):
+		return false
+	var order_kind: String = str(ship.get("unit_order", {}).get("kind", ""))
+	if order_kind not in ["position", "sector_entry", ""]:
+		return false
+	# _work_local_move has the same arrival and queued-order semantics
+	# as before, including reanchoring any invalid predictive trajectory.
+	return _work_local_move(frame.graph, ship, dt, state)
+
 static func _step_hull(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> void:
 	if not frame.motion_sleep_enabled:
 		_step_hull_active(state, frame, ship, dt)
@@ -10393,7 +10410,12 @@ static func _step_hull(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, d
 		return
 	if prior_mode != MotionSleep.AWAKE:
 		_motion_sleep_modes.erase(id)
-	_step_hull_active(state, frame, ship, dt)
+	if _try_direct_order_dispatch(state, frame, ship, dt):
+		frame.direct_order_dispatches += 1
+		# Arrival can immediately make the hull eligible for idle sleep.
+		# Retain the original classification below for that transition.
+	else:
+		_step_hull_active(state, frame, ship, dt)
 	# Avoid reclassifying expensive civilian routines unless explicitly held
 	# or stopped. Colonies must still grow food; morphs must still progress.
 	if military_hull(str(ship.get("kind", ""))) or bool(ship.get("holding", false)) or ship.has("stop_until"):

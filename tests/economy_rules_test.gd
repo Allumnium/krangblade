@@ -1235,6 +1235,62 @@ func _test_motion_sleep_wake() -> void:
 	assert(ECON._motion_sleep_modes.is_empty())
 	print("PASS: persistent motion sleep, exact hold state, stop deadline and wake guards")
 
+func _test_direct_order_dispatch() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
+	var craft: Dictionary = {"id": 55002, "kind": "fighter", "owner": 1, "origin": 0, "at": 0, "dest": 0, "source": -1, "route": [], "leg": 0.0, "position": Vector2(100, 200), "heading": Vector2.LEFT, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock(), "wander_auto": false}
+	state["ships"] = [craft]
+	var graph: Dictionary = ECON.military_graph(state)
+	var goal := Vector2(400, 200)
+	assert(ECON.issue_unit_order(state, 1, [55002], {"kind": "position", "target": 0, "point": goal, "move_only": true}, false))
+	var expected: Dictionary = craft.duplicate(true)
+	ECON._refresh_movement_fields([])
+	ECON._begin_motion_sleep(state)
+	var frame = ECON.STEP_FRAME.new()
+	frame.graph = graph
+	frame.motion_sleep_enabled = true
+	var reference = ECON.STEP_FRAME.new()
+	reference.graph = graph
+	for tick in range(40):
+		var start: Vector2 = craft["position"]
+		var positions: Dictionary = {55002: start}
+		if tick == 3:
+			positions[55003] = start + Vector2(55, 0)
+		ECON._begin_ship_avoidance(positions)
+		ECON._step_hull(state, frame, craft, 0.1)
+		ECON._step_hull_active(state, reference, expected, 0.1)
+		assert(craft == expected)
+		if not craft.has("local_move_target"):
+			break
+	assert(frame.direct_order_dispatches > 2 and not craft.has("local_move_target"))
+	assert((craft["position"] as Vector2).distance_to(goal) <= ECON.EPS)
+	# A live higher-priority event must take the full dispatcher. Test
+	# eligibility without executing invalid synthetic cargo/attack orders.
+	assert(ECON.issue_unit_order(state, 1, [55002], {"kind": "position", "target": 0, "point": Vector2(100, 200), "move_only": true}, false))
+	for key in ["rogue", "retreating", "_handoff_delivery", "holding", "stop_until", "attack_order", "cargo_order", "launch_rally"]:
+		var present: bool = craft.has(key)
+		var old: Variant = craft.get(key)
+		craft[key] = true
+		assert(not ECON._try_direct_order_dispatch(state, frame, craft, 0.1), "Must wake on %s" % key)
+		if present:
+			craft[key] = old
+		else:
+			craft.erase(key)
+	craft["combat_target"] = 999
+	craft["passing_fire"] = false
+	assert(not ECON._try_direct_order_dispatch(state, frame, craft, 0.1))
+	craft["combat_target"] = -1
+	craft["pursuit_target"] = 999
+	assert(not ECON._try_direct_order_dispatch(state, frame, craft, 0.1))
+	craft["pursuit_target"] = -1
+	var order: Dictionary = craft.get("unit_order", {}).duplicate(true)
+	for kind in ["follow", "guard", "warp_travel"]:
+		craft["unit_order"] = {"kind": kind}
+		assert(not ECON._try_direct_order_dispatch(state, frame, craft, 0.1))
+	craft["unit_order"] = order
+	ECON._begin_ship_avoidance({})
+	print("PASS: explicit movement dispatch parity, arrival, contact and higher-priority wake guards")
+
 func _test_stop_order() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], true)
 	var fighter: Dictionary = {}
@@ -2429,6 +2485,7 @@ func _initialize() -> void:
 	_test_ai_strategic_diplomacy()
 	_test_stop_order()
 	_test_motion_sleep_wake()
+	_test_direct_order_dispatch()
 	_test_deadline_calendars()
 	_test_nearest_colony_and_queued_hold()
 	_test_manual_conversion_and_stats()
