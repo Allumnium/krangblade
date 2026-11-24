@@ -29,9 +29,14 @@ func start(initial_state: Dictionary) -> bool:
 			# Some engine builds may reuse cached script resources. In the
 			# editor, compile an anonymous copy before starting any thread.
 			_rules = null
-			if not ECON.source_code.is_empty():
+			# A preloaded GDScript class exposes its static API, not Script
+			# resource properties. Read the editor source file explicitly.
+			var source: String = ""
+			if FileAccess.file_exists("res://scripts/economy_rules.gd"):
+				source = FileAccess.get_file_as_string("res://scripts/economy_rules.gd")
+			if not source.is_empty():
 				var isolated := GDScript.new()
-				isolated.source_code = ECON.source_code
+				isolated.source_code = source
 				if isolated.reload() == OK and _independent_rules(isolated):
 					_rules = isolated
 			if _rules == null:
