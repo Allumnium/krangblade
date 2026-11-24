@@ -2703,6 +2703,7 @@ func _initialize() -> void:
 	_test_gap_position_orders()
 	_test_autocast_modes()
 	_test_resource_handoff()
+	_test_persistent_logistics_indexes()
 	_test_follow_order()
 	_test_blaster_bursts()
 	_test_conquest()
@@ -4684,6 +4685,62 @@ func _test_follow_order() -> void:
 			stalls += 1
 	assert(stalls == 0)
 	print("PASS: persistent friendly follow, standoff, lane travel, cycle/ownership validation and cancellation")
+
+func _test_persistent_logistics_indexes() -> void:
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
+	var graph: Dictionary = ECON.military_graph(state)
+	var point: Vector2 = graph["points"][0]
+	var miner: Dictionary = {"id": 9820, "owner": 1, "kind": "miner", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": point, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "mining_mode": "delivery"}
+	var freighter: Dictionary = {"id": 9821, "owner": 1, "kind": "ship", "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": point, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock(), "trade_auto": true, "resource_stage": {"node": 0, "anchor": 0, "point": point}}
+	var other: Dictionary = freighter.duplicate(true)
+	other["id"] = 9822
+	state["ships"] = [miner, freighter, other]
+	var retained: Array = []
+	var piles: Dictionary = {1: {"position": Vector2.ZERO}, 2: {"position": Vector2(-1, 0)}}
+	for tick in range(7):
+		match tick:
+			2:
+				freighter["position"] = point + Vector2.RIGHT * ECON.RESOURCE_HANDOFF_RANGE * 3.0
+				freighter["resource_stage"]["point"] = freighter["position"]
+				piles[1]["position"] = Vector2(5000, 0)
+			3:
+				state["ships"].reverse()
+				other["resource_stage"]["queue_rank"] = 1
+				piles.erase(2)
+			4:
+				other["rogue"] = true
+			5:
+				state["ships"].erase(other)
+				piles.clear()
+			6:
+				state["ships"] = state["ships"].duplicate(true)
+		miner = state["ships"][0] if state["ships"][0]["kind"] == "miner" else state["ships"][-1]
+		miner["cargo"]["Metals"] = 1.0
+		var reference: Dictionary = state.duplicate(true)
+		var frame = ECON.STEP_FRAME.new()
+		frame.persistent_logistics_enabled = true
+		frame.graph = graph
+		frame.salvage_threats = ECON._salvage_threats(state, graph)
+		var expected = ECON.STEP_FRAME.new()
+		expected.graph = ECON.military_graph(reference)
+		expected.salvage_threats = ECON._salvage_threats(reference, expected.graph)
+		ECON._index_postcombat_hulls(state, frame)
+		ECON._index_postcombat_hulls(reference, expected)
+		assert(frame.handoff_receivers == expected.handoff_receivers)
+		assert(frame.handoff_receivers.keys() == expected.handoff_receivers.keys())
+		var candidates: Array = ECON._handoff_candidates(frame.handoff_receivers.get(1, {}), point)
+		assert(candidates == ECON._handoff_candidates(expected.handoff_receivers.get(1, {}), point))
+		var cell := Vector2i(floori(point.x / ECON.RESOURCE_HANDOFF_RANGE), floori(point.y / ECON.RESOURCE_HANDOFF_RANGE))
+		if tick == 0:
+			retained = frame.handoff_receivers[1][cell]
+		elif tick == 1:
+			assert(is_same(retained, frame.handoff_receivers[1][cell]))
+		assert(ECON._salvage_cells(piles, true) == ECON._salvage_cells(piles))
+		ECON._step_resource_handoffs(state, frame, 0.01)
+		ECON._step_resource_handoffs(reference, expected, 0.01)
+		assert(frame.mining_receivers == expected.mining_receivers)
+		assert(state == reference)
+	print("PASS: retained logistics candidates, ordered handoffs, live cargo and salvage membership")
 
 func _test_resource_handoff() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)

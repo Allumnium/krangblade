@@ -63,6 +63,11 @@ static var _contact_index_state: Dictionary = {}
 static var _contact_index_roster: Array = []
 static var _separation_index = STEP_FRAME.OrderedHullBuckets.new()
 static var _contact_index = STEP_FRAME.OrderedHullBuckets.new()
+static var _logistics_index_state: Dictionary = {}
+static var _logistics_index_roster: Array = []
+static var _handoff_indexes: Dictionary = {}
+static var _rendezvous_indexes: Dictionary = {}
+static var _salvage_index = STEP_FRAME.OrderedHullBuckets.new()
 static var _repair_index_state: Dictionary = {}
 static var _repair_index_roster: Array = []
 static var _repair_index = REPAIR_QUERIES.PersistentDamagedIndex.new()
@@ -7165,15 +7170,20 @@ static func _mark_pds_salvage_busy(state: Dictionary, busy: Dictionary) -> void:
 			if target >= 0:
 				busy[target] = true
 
-static func _salvage_cells(piles: Dictionary) -> Dictionary:
+static func _salvage_cells(piles: Dictionary, persistent: bool = false) -> Dictionary:
 	var cells: Dictionary = {}
+	if persistent:
+		_salvage_index.begin()
 	for id in piles:
 		var point: Vector2 = piles[id]["position"]
 		var cell := Vector2i(floori(point.x / SALVAGE_APPROACH_RANGE), floori(point.y / SALVAGE_APPROACH_RANGE))
-		if not cells.has(cell):
-			cells[cell] = []
-		cells[cell].append(id)
-	return cells
+		if persistent:
+			_salvage_index.append(cell, id)
+		else:
+			if not cells.has(cell):
+				cells[cell] = []
+			cells[cell].append(id)
+	return _salvage_index.finish() if persistent else cells
 
 static func _release_auto_salvage(ship: Dictionary, piles: Dictionary) -> void:
 	var id: int = int(ship.get("auto_salvage_target", -1))
@@ -10236,7 +10246,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 		next += AI_INTERVAL
 	return next
 
-static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true, persistent_avoidance_enabled: bool = true, persistent_combat_enabled: bool = true) -> void:
+static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true, persistent_avoidance_enabled: bool = true, persistent_combat_enabled: bool = true, persistent_logistics_enabled: bool = true) -> void:
 	_begin_deadline_schedule(state, deadline_schedule_enabled)
 	_rock_plan_tick += 1
 	if not is_same(state, _trajectory_state) or not is_same(state["ships"], _trajectory_roster):
@@ -10254,6 +10264,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	frame.deadline_schedule_enabled = deadline_schedule_enabled
 	frame.persistent_avoidance_enabled = persistent_avoidance_enabled
 	frame.persistent_combat_enabled = persistent_combat_enabled
+	frame.persistent_logistics_enabled = persistent_logistics_enabled
 	_step_economy(state, frame, dt)
 	started = _profile_stage(profile, "Economy", started)
 	_step_ai(state, frame, dt)
@@ -10416,15 +10427,43 @@ static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> voi
 	_prepare_withdrawals(state, combat_graph)
 	_update_salvage(state)
 	_index_postcombat_hulls(state, frame)
-	frame.salvage_cells = _salvage_cells(state.get("salvage", {}))
+	frame.salvage_cells = _salvage_cells(state.get("salvage", {}), frame.persistent_logistics_enabled)
 	frame.salvage_threats = _reuse_combat_threats(state, combat_graph, threat_index)
 	_step_resource_handoffs(state, frame, dt)
 
 # One ordered survivor pass for salvage safety, logistics and fleet allocation.
 # After combat/withdrawal and before handoffs, membership and position are fixed.
 # Keep live hull references; eligibility, cargo and orders are checked at use.
+# Each index is retained only for one authority/roster. Owner maps are
+# refreshed in original first-encounter order; departed owners are retired.
+static func _begin_logistics_indexes(state: Dictionary) -> void:
+	if not is_same(state, _logistics_index_state) or not is_same(state["ships"], _logistics_index_roster):
+		_logistics_index_state = state
+		_logistics_index_roster = state["ships"]
+		_handoff_indexes.clear()
+		_rendezvous_indexes.clear()
+		_salvage_index.clear()
+
+static func _logistics_owner_index(indexes: Dictionary, active: Dictionary, owner: int) -> Variant:
+	if not active.has(owner):
+		if not indexes.has(owner):
+			indexes[owner] = STEP_FRAME.OrderedHullBuckets.new()
+		indexes[owner].begin()
+		active[owner] = indexes[owner]
+	return active[owner]
+
+static func _finish_logistics_owner_indexes(indexes: Dictionary, active: Dictionary, result: Dictionary) -> void:
+	for owner in active:
+		result[owner] = active[owner].finish()
+	for owner in indexes.keys():
+		if not active.has(owner):
+			indexes.erase(owner)
+
 static func _index_postcombat_hulls(state: Dictionary, frame: STEP_FRAME) -> void:
 	var receiver_order: int = 0
+	var active: Dictionary = {}
+	if frame.persistent_logistics_enabled:
+		_begin_logistics_indexes(state)
 	for craft in state["ships"]:
 		_mark_hull_salvage_busy(craft, frame.salvage_busy)
 		var kind: String = str(craft.get("kind", ""))
@@ -10433,9 +10472,14 @@ static func _index_postcombat_hulls(state: Dictionary, frame: STEP_FRAME) -> voi
 				continue
 			frame.freighters.append(craft)
 			var owner: int = int(craft["owner"])
-			if not frame.handoff_receivers.has(owner):
-				frame.handoff_receivers[owner] = {}
-			_spatial_insert(frame.handoff_receivers[owner], craft["position"], RESOURCE_HANDOFF_RANGE, [receiver_order, craft])
+			if frame.persistent_logistics_enabled:
+				var point: Vector2 = craft["position"]
+				var cell := Vector2i(floori(point.x / RESOURCE_HANDOFF_RANGE), floori(point.y / RESOURCE_HANDOFF_RANGE))
+				_logistics_owner_index(_handoff_indexes, active, owner).append_ordered_hull(cell, receiver_order, craft)
+			else:
+				if not frame.handoff_receivers.has(owner):
+					frame.handoff_receivers[owner] = {}
+				_spatial_insert(frame.handoff_receivers[owner], craft["position"], RESOURCE_HANDOFF_RANGE, [receiver_order, craft])
 			receiver_order += 1
 		elif kind == "miner" and not bool(craft.get("rogue", false)):
 			frame.handoff_miners.append(craft)
@@ -10444,6 +10488,8 @@ static func _index_postcombat_hulls(state: Dictionary, frame: STEP_FRAME) -> voi
 			if not frame.military_fleets.has(player):
 				frame.military_fleets[player] = []
 			frame.military_fleets[player].append(craft)
+	if frame.persistent_logistics_enabled:
+		_finish_logistics_owner_indexes(_handoff_indexes, active, frame.handoff_receivers)
 	_mark_pds_salvage_busy(state, frame.salvage_busy)
 
 static func _step_resource_handoffs(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
@@ -10462,12 +10508,20 @@ static func _step_resource_handoffs(state: Dictionary, frame: STEP_FRAME, dt: fl
 				receivers = _handoff_candidates(stage_receivers.get(owner, {}), miner["position"], receiver_neighborhoods[owner])
 			miner["_handoff_sent"] = _miner_handoff(state, frame.graph, miner, receivers, frame.salvage_threats, dt)
 	var mining_receivers: Dictionary = frame.mining_receivers
+	var active: Dictionary = {}
 	for craft in frame.freighters:
 		if _mining_receiver_ready(state, craft):
 			var owner: int = int(craft["owner"])
-			if not mining_receivers.has(owner):
-				mining_receivers[owner] = {}
-			_spatial_insert(mining_receivers[owner], craft["resource_stage"]["point"], MINING_RENDEZVOUS_RANGE, craft)
+			if frame.persistent_logistics_enabled:
+				var point: Vector2 = craft["resource_stage"]["point"]
+				var cell := Vector2i(floori(point.x / MINING_RENDEZVOUS_RANGE), floori(point.y / MINING_RENDEZVOUS_RANGE))
+				_logistics_owner_index(_rendezvous_indexes, active, owner).append(cell, craft)
+			else:
+				if not mining_receivers.has(owner):
+					mining_receivers[owner] = {}
+				_spatial_insert(mining_receivers[owner], craft["resource_stage"]["point"], MINING_RENDEZVOUS_RANGE, craft)
+	if frame.persistent_logistics_enabled:
+		_finish_logistics_owner_indexes(_rendezvous_indexes, active, mining_receivers)
 
 static func _step_formations(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 	var combat_graph: Dictionary = frame.graph
