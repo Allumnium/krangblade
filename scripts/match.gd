@@ -4484,8 +4484,10 @@ func _fighter_beam_origin(pose: Dictionary) -> Vector2:
 func _draw_blaster_tracers(state: Dictionary, ship: Dictionary, poses: Dictionary) -> void:
 	world_effects.draw_blaster_tracers(state, ship, poses, celestial_view, _screen_point, _empire_color, _ship_scale, world_batches)
 
-func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, width: float) -> void:
-	world_effects.draw_ship_laser(ship, pose, endpoint, width, _ship_scale, _empire_color, world_batches)
+func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, width: float) -> Dictionary:
+	var draw_pose: Dictionary = pose.duplicate()
+	world_effects.draw_ship_laser(ship, draw_pose, endpoint, width, _ship_scale, _empire_color, world_batches)
+	return draw_pose
 
 func _overview_art_multiplier(maximum: float = OVERVIEW_ART_MAX_MULTIPLIER) -> float:
 	# Wheel zoom is logarithmic; blend in the same space for a smooth
@@ -4798,6 +4800,7 @@ func _draw_map_content() -> void:
 			flag.append(flag[0])
 			map_canvas.draw_polyline(flag, Color("#111b26"), 1.0, true)
 	var poses: Dictionary = _ship_poses(state)
+	var pose_overrides: Dictionary = {}
 	_draw_salvage(state, poses, viewport_bounds, font)
 	var service_refs: Dictionary = ECONOMY.service_targets(state)
 	for gate in state["ships"]:
@@ -4888,10 +4891,11 @@ func _draw_map_content() -> void:
 				origin += celestial_view.body_position(celestial_view.system_visual(index, state)["bodies"][slot], radius, celestial_view.orbit_time(state))
 			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
-		if not _ship_visible(state, ship):
-			continue
 		var shooter: int = int(ship["id"])
-		_draw_blaster_tracers(state, ship, poses)
+		if not poses.has(shooter):
+			continue
+		if ship.has("blaster_fired"):
+			_draw_blaster_tracers(state, ship, poses)
 		if float(ship.get("missile_until", -1.0)) >= float(state["elapsed"]) and ship.has("missile_endpoint"):
 			var a: Vector2 = _screen_point(ship["missile_origin"])
 			var b: Vector2 = _screen_point(ship["missile_endpoint"])
@@ -4916,11 +4920,11 @@ func _draw_map_content() -> void:
 				var index: int = floori(float(encoded) / 3.0)
 				var slot: int = posmod(encoded, 3)
 				if slot < state["planets"][index]["yards"].size():
-					_draw_ship_laser(ship, poses[shooter], _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), 1.5)
+					pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), _screen_point(ECONOMY.shipyard_position(state, index, slot, float(state["elapsed"]))), 1.5)
 			elif encoded >= count * 9:
 				var station_index: int = encoded - count * 9
 				if station_index < count and ECONOMY.has_station(state["planets"][station_index]):
-					_draw_ship_laser(ship, poses[shooter], _screen_point(ECONOMY.station_position(state, station_index, float(state["elapsed"]))), 1.5)
+					pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), _screen_point(ECONOMY.station_position(state, station_index, float(state["elapsed"]))), 1.5)
 			else:
 				var pds_index: int = posmod(encoded - count * 3, count)
 				var pds_slot: int = floori(float(encoded - count * 3) / float(count))
@@ -4929,9 +4933,9 @@ func _draw_map_content() -> void:
 					var pds_radius: float = _planet_radius(pds_index, state)
 					if celestial_view.planet_detail_opacity(pds_index, pds_radius) >= 0.5:
 						endpoint += celestial_view.body_position(celestial_view.system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, celestial_view.orbit_time(state))
-					_draw_ship_laser(ship, poses[shooter], endpoint, 1.5)
+					pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), endpoint, 1.5)
 		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
-			_draw_ship_laser(ship, poses[shooter], poses[target]["point"], 1.0)
+			pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), poses[target]["point"], 1.0)
 		if bool(ship.get("retreating", false)) and poses.has(shooter) and (ship["route"] as Array).is_empty():
 			var site: int = int(ship.get("repair_site", -1))
 			if site >= 0 and site < state["planets"].size():
@@ -4956,16 +4960,26 @@ func _draw_map_content() -> void:
 			if not axis.is_zero_approx():
 				if bool(ship.get("holding", false)):
 					axis = poses[shooter]["direction"]
-				poses[shooter]["direction"] = axis
+				var repair_pose: Dictionary = pose_overrides.get(shooter, poses[shooter]).duplicate()
+				repair_pose["direction"] = axis
+				pose_overrides[shooter] = repair_pose
 				for side in [-1.0, 1.0]:
 					var muzzle: Vector2 = origin + (axis * WORLD_EFFECTS.MINER_MUZZLE.x + axis.orthogonal() * side * WORLD_EFFECTS.MINER_MUZZLE.y) * _ship_scale()
 					world_batches.queue_beam(muzzle, endpoint, Color("#59e8a4"), 1.4)
+	var ship_scale: float = _ship_scale()
+	var ship_overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
+	var ship_metrics_cache: Dictionary = {}
+	var owner_color_cache: Dictionary = {}
+	var hull_color_cache: Dictionary = {}
 	for ship in state["ships"]:
 		if not poses.has(int(ship["id"])):
 			continue
-		var pose: Dictionary = poses[int(ship["id"])]
+		var ship_id: int = int(ship["id"])
+		var kind: String = str(ship["kind"])
+		var owner: int = int(ship["owner"])
+		var pose: Dictionary = pose_overrides.get(ship_id, poses[ship_id])
 		var point: Vector2 = pose["point"]
-		var scale: float = _ship_scale()
+		var scale: float = ship_scale
 		if not viewport_bounds.grow(maxf(32.0, 80.0 * scale)).has_point(point):
 			continue
 		var direction: Vector2 = pose["direction"]
@@ -4973,15 +4987,24 @@ func _draw_map_content() -> void:
 			var aim: Vector2 = _screen_point(ship["mining_rock"]) - point
 			if not aim.is_zero_approx():
 				direction = aim.normalized()
-		var route: Array = ship["route"]
-		var empire: Color = _empire_color(int(ship["owner"]))
-		var hull: Color = empire.lightened(0.35)
+		var empire: Color
+		if owner_color_cache.has(owner):
+			empire = owner_color_cache[owner]
+		else:
+			empire = _empire_color(owner)
+			owner_color_cache[owner] = empire
+		var hull: Color
+		if hull_color_cache.has(owner):
+			hull = hull_color_cache[owner]
+		else:
+			hull = empire.lightened(0.35)
+			hull_color_cache[owner] = hull
 		var side: Vector2 = direction.orthogonal() * scale
 		direction *= scale
 		var cloaked: bool = bool(ship.get("cloaked", false))
-		var thrust: float = ship_motion.thrust_for(int(ship["id"]))
+		var thrust: float = ship_motion.thrust_for(ship_id)
 		if not cloaked and int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and thrust > 0.035:
-			world_batches.queue_exhaust(str(ship["kind"]), point, direction, scale, thrust, int(ship["id"]), viewport_bounds)
+			world_batches.queue_exhaust(kind, point, direction, scale, thrust, ship_id, viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
@@ -4993,37 +5016,43 @@ func _draw_map_content() -> void:
 					var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
 					map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
 		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
-			var radius: float = maxf(5.0, hull_art.ui_radius(str(ship["kind"])) * scale)
+			var radius: float = maxf(5.0, hull_art.ui_radius(kind) * scale)
 			world_batches.draw_selection_ring(point, radius)
 		# At a distant galaxy overview, the smallest authored edges can
 		# collapse into an invalid polygon after projection. Keep the hull
 		# visible and owner-colored rather than drawing degenerate geometry.
-		var overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
-		_draw_damage_bar(point, hull_art.ui_radius(str(ship["kind"])) * scale, float(ship.get("hp", ECONOMY.ship_max_hp(str(ship["kind"])))) / ECONOMY.ship_max_hp(str(ship["kind"])), _shield_fraction(ship))
-		if ship["kind"] == "colony_ship" and ship.has("colony_transform_progress"):
+		var metrics: Dictionary = ship_metrics_cache.get(kind, {})
+		if metrics.is_empty():
+			metrics = {"radius": hull_art.ui_radius(kind), "max_hp": ECONOMY.ship_max_hp(kind), "half_size": hull_art.texture_half_size(kind)}
+			ship_metrics_cache[kind] = metrics
+		var radius: float = float(metrics["radius"])
+		var maximum_hp: float = float(metrics["max_hp"])
+		var half_size: float = float(metrics["half_size"])
+		var shield: float = _shield_fraction(ship)
+		_draw_damage_bar(point, radius * scale, float(ship.get("hp", maximum_hp)) / maximum_hp, shield)
+		if kind == "colony_ship" and ship.has("colony_transform_progress"):
 			structure_view.draw_colony_transform(ship, point, direction.normalized(), scale, empire, float(state["elapsed"]))
 			continue
-		if ship["kind"] == "warp_gate":
+		if kind == "warp_gate":
 			var gate_radius: float = maxf(5.0, 44.0 * scale)
 			map_canvas.draw_circle(point, gate_radius, Color("#382b58"), true, -1.0, true)
 			map_canvas.draw_arc(point, gate_radius, 0.0, TAU, 32, empire, maxf(1.0, scale * 2.0), true)
 			map_canvas.draw_arc(point, gate_radius * 0.72, 0.0, TAU, 32, Color("#b998ff"), maxf(1.0, scale * 2.0), true)
 			map_canvas.draw_circle(point, gate_radius * 0.48, Color("#151225"), true, -1.0, true)
 			continue
-		if scale < 0.15 * overview:
-			world_batches.queue_overview_hull(world_batches.overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / overview) * overview, cloaked)
+		if scale < 0.15 * ship_overview:
+			world_batches.queue_overview_hull(world_batches.overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / ship_overview) * ship_overview, cloaked)
 			continue
-		var texture: Texture2D = hull_art.hull_texture(str(ship["kind"]), empire, scale >= 0.42)
-		if _shield_fraction(ship) > 0.0:
-			world_batches.queue_overview_hull(hull_art.shield_texture(str(ship["kind"])), point, direction.angle(), (hull_art.texture_half_size(str(ship["kind"])) + 8.0) * scale, cloaked)
-		if ship["kind"] != "science_ship" and not (ship["kind"] == "ship" and scale >= 0.42):
-			world_batches.queue_overview_hull(texture, point, direction.angle(), hull_art.texture_half_size(str(ship["kind"])) * scale, cloaked)
+		var texture: Texture2D = hull_art.hull_texture(kind, empire, scale >= 0.42)
+		if shield > 0.0:
+			world_batches.queue_overview_hull(hull_art.shield_texture(kind), point, direction.angle(), (half_size + 8.0) * scale, cloaked)
+		if kind != "science_ship" and not (kind == "ship" and scale >= 0.42):
+			world_batches.queue_overview_hull(texture, point, direction.angle(), half_size * scale, cloaked)
 		else:
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
-			var half: float = hull_art.texture_half_size(str(ship["kind"]))
-			map_canvas.draw_texture_rect(texture, Rect2(-half, -half, half * 2.0, half * 2.0), false)
+			map_canvas.draw_texture_rect(texture, Rect2(-half_size, -half_size, half_size * 2.0, half_size * 2.0), false)
 			map_canvas.draw_set_transform(Vector2.ZERO)
-		if ship["kind"] == "ship" and scale >= 0.42:
+		if kind == "ship" and scale >= 0.42:
 			# Compose each close freighter's hull and opaque cargo as one
 			# draw sequence, not globally layered transparent bay batches.
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
@@ -5040,7 +5069,7 @@ func _draw_map_content() -> void:
 						map_canvas.draw_rect(Rect2(bay_center + Vector2(start, -3.0), Vector2(end - start, 6.0)), tint.lightened(0.14))
 					start = end
 			map_canvas.draw_set_transform(Vector2.ZERO)
-		elif ship["kind"] == "science_ship":
+		elif kind == "science_ship":
 			map_canvas.draw_circle(point, maxf(1.0, 11.5 * scale), empire.darkened(0.4), true, -1.0, true)
 			map_canvas.draw_arc(point, 10.5 * scale, 0.0, TAU, 32, empire.lightened(0.5), maxf(0.8, scale), true)
 			map_canvas.draw_circle(point, maxf(0.9, 6.0 * scale), Color("#101d30"), true, -1.0, true)
@@ -5056,7 +5085,12 @@ func _draw_map_content() -> void:
 			_draw_other_cargo(ship, point, direction, side)
 	world_effects.draw_destructions(viewport_bounds, visual_clock, _ship_scale, _screen_point, world_batches)
 	world_batches.flush_world(visual_clock, hull_art)
-	world_effects.draw_cargo_transfers(state, poses, service_refs, viewport_bounds, visual_clock, _ship_scale, map_canvas, _transfer_anchor)
+	var transfer_poses: Dictionary = poses
+	if not pose_overrides.is_empty():
+		transfer_poses = poses.duplicate()
+		for id in pose_overrides:
+			transfer_poses[id] = pose_overrides[id]
+	world_effects.draw_cargo_transfers(state, transfer_poses, service_refs, viewport_bounds, visual_clock, _ship_scale, map_canvas, _transfer_anchor)
 	order_view.draw_formation_preview(state, formation_button, formation_length, formation_mode, formation_path, _formation_orders, _selected_owned_units)
 	world_batches.flush_indicators()
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:

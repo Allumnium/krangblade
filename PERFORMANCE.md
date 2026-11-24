@@ -52,4 +52,23 @@ Godot 4.7.2, project v0.97.78, the same Windows/Ryzen 5 7600X system, seed 827, 
 
 The 1x logistics case was repeated three times: each slowest batch was tick 0, with 4.9–5.0 seconds attributed to Civilian logistics. The 5x case also spikes at tick 0 (5.0 seconds in Civilian logistics). Later batches are much lower, but still miss the 100 ms budget; this synthetic cold-start workload is not a steady-state measurement. The exact subroutine behind the initial route/work selection spike remains unprofiled.
 
-Two-/three-/eight-peer normal ENet and threaded-authority smokes pass locally, as do the two-peer loading/host-disconnect cases. The earlier `max channels: 0` errors were reproduced when the smoke clients disconnected simultaneously after the lobby transition; staggering their test teardown produced clean host/client logs in both eight-peer normal and threaded runs. This was a harness teardown race, not a match simulation failure. Higher-count battle/swarm/logistics profiles and graphical frame-time capture remain outstanding. Record renderer, resolution, zoom, network conditions and hardware with graphical runs. The current initiative acceptance target is 60 FPS and sustained 10 Hz at 2,000 ships at 1x and 1,000 ships at 5x; do not infer this from headless results.
+Two-/three-/eight-peer normal ENet and threaded-authority smokes pass locally, as do the two-peer loading/host-disconnect cases. The earlier `max channels: 0` errors were reproduced when the smoke clients disconnected simultaneously after the lobby transition; staggering their test teardown produced clean host/client logs in both eight-peer normal and threaded runs. This was a harness teardown race, not a match simulation failure. Higher-count battle/swarm/logistics profiles and combined live-simulation/rendering capture remain outstanding. The current initiative acceptance target is 60 FPS and sustained 10 Hz at 2,000 ships at 1x and 1,000 ships at 5x; do not infer this from isolated graphics or headless results.
+
+## Initial match-scene render samples (v0.97.79)
+
+Run with the project window (not `--headless`) to exercise the real match renderer. The harness stops the economy timer, disables fog, injects a seeded synthetic fleet, disables camera panning, warms up for 30 frames, measures frame intervals, and writes a screenshot under Godot's `user://` directory. It does not measure live simulation, AI, ENet, or background workload.
+
+```sh
+godot --path . --script res://tests/fleet_render_benchmark.gd -- --ships=2000 --frames=300 --zoom=5
+```
+
+Godot 4.7.2 stable, Windows, Compatibility renderer, 1280×720, AMD Ryzen 5 7600X, NVIDIA GeForce RTX 5060 Ti, seed 827. All 2,000 synthetic fighter poses were visible.
+
+| Ships | Zoom | Frames | p50 ms | p95 ms | p99 ms | max ms | Frames >16.67 ms | Avg draw calls |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 5 | 100 | 8.331 | 8.353 | 8.394 | 8.402 | 0/100 | 368 |
+| 100 | 5 | 300 | 8.329 | 9.166 | 10.325 | 11.467 | 0/300 | 467 |
+| 2,000 | 5 | 300 | 82.916 | 92.407 | 99.621 | 105.171 | 300/300 | 2,367 |
+| 2,000 | 0.1 | 100 | 78.115 | 86.553 | 99.569 | 106.264 | 100/100 | 2,225 |
+
+The 100-ship sample remained below the 16.67 ms frame budget. The 2,000-ship sample improved from a prior 107.968 ms p95 capture to 92.407 ms p95 after pose-cache and drawing-loop changes, but still misses 60 FPS on every measured frame. The lower-zoom diagnostic is not directly comparable in sample length; it indicates that simply reducing detailed hull size does not remove the large-fleet cost. Screenshot paths are printed by the harness. These are isolated renderer measurements, not initiative acceptance results.

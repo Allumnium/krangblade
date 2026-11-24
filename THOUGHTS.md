@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.80: A real match-scene render capture measures 100 ships at 9.166 ms p95 and 2,000 ships at 92.407 ms p95 (300 frames, zoom 5, simulation stopped). At 2,000 ships, lowering zoom to 0.1 still measured 86.553 ms p95, so detailed hull rendering/overdraw alone does not explain the cost; the remaining per-ship render path needs profiling. These are isolated graphics samples, not combined gameplay acceptance.
+
 - v0.97.79: The synthetic 1,000-ship logistics benchmark repeatedly spends about 5 seconds in Civilian logistics on tick 0 (both 1x and 5x), while later batches are lower but still exceed the target. `fleet_benchmark.gd` now reports the slowest tick and phase totals; further subphase profiling is needed before attributing the spike to a specific route/search function.
 
 - v0.97.75: Set project-wide rendering cap to 120 FPS using application/run/max_fps and disable VSync so the monitor refresh rate does not impose a lower cap during performance testing. Keep physics/simulation cadence, threaded authority and explicit CI benchmark CLI frame limits unchanged. Runtime FPS not measured.

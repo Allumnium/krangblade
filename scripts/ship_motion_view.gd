@@ -11,17 +11,31 @@ var pose_revision: Array = []
 var pose_world_cache: Dictionary = {}
 var ship_visuals: Dictionary = {}
 var ship_offsets: Dictionary = {}
+var sync_revision: Array = []
+var active_visual_ids: Array[int] = []
 
 func invalidate_poses() -> void:
 	pose_frame = -1
 
 func advance(delta: float) -> void:
-	for visual in ship_visuals.values():
+	if delta <= 0.0 or active_visual_ids.is_empty():
+		return
+	var remaining: Array[int] = []
+	for id in active_visual_ids:
+		if not ship_visuals.has(id):
+			continue
+		var visual: Dictionary = ship_visuals[id]
 		var duration: float = float(visual.get("duration", SNAPSHOT_SECONDS))
 		if float(visual["age"]) < duration:
 			visual["age"] = minf(duration, float(visual["age"]) + delta)
 		# Exhaust decays even after interpolation reaches its destination.
-		visual["thrust"] = float(visual.get("thrust", 0.0)) * exp(-delta * THRUST_FADE_RATE)
+		var thrust: float = float(visual.get("thrust", 0.0)) * exp(-delta * THRUST_FADE_RATE)
+		visual["thrust"] = thrust
+		if float(visual["age"]) < duration or thrust > 0.001:
+			remaining.append(id)
+		else:
+			visual["thrust"] = 0.0
+	active_visual_ids = remaining
 
 func world_position(ship: Dictionary, points: Array, session: Node) -> Vector2:
 	var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
@@ -36,7 +50,19 @@ func target_position(id: int) -> Vector2:
 	return visual.get("to", Vector2.INF)
 
 func sync(state: Dictionary, session: Node) -> void:
+	var signature: Array = [
+		session.get("motion_revision"),
+		session.get("motion_base_revision"),
+		state.get("elapsed"),
+		state.get("ships", []).size(),
+		state.get("time_speed"),
+		session.get("diagnostic_motion_gap_ms"),
+	]
+	if signature == sync_revision:
+		return
+	sync_revision = signature
 	var updated: Dictionary = {}
+	var next_active_ids: Array[int] = []
 	if not state.is_empty():
 		var points: Array = state["map"]["points"]
 		var samples: Dictionary = session.get("motion_samples")
@@ -88,7 +114,10 @@ func sync(state: Dictionary, session: Node) -> void:
 				previous["duration"] = interval
 			previous["heading"] = heading
 			updated[id] = previous
+			if float(previous["age"]) < float(previous["duration"]) or float(previous.get("thrust", 0.0)) > 0.001:
+				next_active_ids.append(id)
 	ship_visuals = updated
+	active_visual_ids = next_active_ids
 	for id in ship_offsets.keys():
 		if not updated.has(id):
 			ship_offsets.erase(id)
@@ -97,12 +126,7 @@ func poses(state: Dictionary, delta: float, session: Node, ship_visible: Callabl
 	var frame: int = Engine.get_process_frames()
 	var revision: Array = [session.get("motion_revision"), session.get("motion_base_revision"), state.get("elapsed"), state["ships"].size(), state.get("time_speed")]
 	if delta <= 0.0 and pose_frame == frame and pose_revision == revision:
-		var projected: Dictionary = {}
-		for id in pose_world_cache:
-			var pose: Dictionary = pose_world_cache[id].duplicate()
-			pose["point"] = screen_point.call(pose["world"])
-			projected[id] = pose
-		return projected
+		return pose_world_cache
 	sync(state, session)
 	var points: Array = state["map"]["points"]
 	var poses: Dictionary = {}
@@ -122,7 +146,7 @@ func poses(state: Dictionary, delta: float, session: Node, ship_visible: Callabl
 		poses[id] = {"point": screen_point.call(pos), "world": pos, "direction": Vector2.from_angle(angle), "mining": mining, "kind": ship.get("kind", "")}
 	pose_frame = frame
 	pose_revision = revision
-	pose_world_cache = poses.duplicate(true)
+	pose_world_cache = poses
 	return poses
 
 func _ship_position(ship: Dictionary, _points: Array, session: Node) -> Vector2:
