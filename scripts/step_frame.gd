@@ -30,6 +30,8 @@ var idle_targets: Dictionary = {}
 var coordinated: Dictionary = {}
 var service_refs: Dictionary = {}
 var damaged_cells: Dictionary = {}
+# Frozen repair candidates only; target damage and friendliness stay live.
+var repair_neighborhoods: Dictionary = {}
 
 # Movement settlement inputs gathered during hull work.
 var repaired_hulls: Dictionary = {}
