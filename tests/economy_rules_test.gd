@@ -2767,7 +2767,47 @@ func _test_rogue_defection() -> void:
 	assert(not state["objectives"].has(ECON.PIRATE_OWNER))
 	print("PASS: deterministic defection, grace, neutral ownership, order cleanup, notice and simulation")
 
+func _test_optional_native_kernels() -> void:
+	var kernels = preload("res://scripts/combat_kernels.gd")
+	if not ClassDB.class_exists("WarboundNativeKernels"):
+		assert(not OS.get_cmdline_user_args().has("--warbound-native-kernels"), "Native parity requested without extension")
+		return
+	var native: RefCounted = ClassDB.instantiate("WarboundNativeKernels") as RefCounted
+	assert(native != null)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 827
+	var candidates: Array = []
+	var positions: Dictionary = {}
+	for id in range(-3, 96):
+		candidates.append({"id": id})
+		positions[id] = Vector2(rng.randf_range(-1000.0, 1000.0), rng.randf_range(-1000.0, 1000.0))
+	positions[1] = Vector2(10, 0)
+	positions[2] = Vector2(-10, 0)
+	positions[3] = Vector2(10.00001, 0)
+	var blocks: Array = kernels.laser_blocks(candidates, positions, true)
+	for sample in range(100):
+		var point: Vector2 = Vector2.ZERO if sample == 0 else Vector2(rng.randf_range(-1200.0, 1200.0), rng.randf_range(-1200.0, 1200.0))
+		var best: float = INF if sample % 2 == 0 else 10000.0
+		assert(native.call("laser_block_nearest", blocks, point, best, -1) == kernels.laser_block_nearest_reference(blocks, point, best, -1))
+		for focused in [false, true]:
+			assert(native.call("missile_block_nearest", blocks, point, best, -1, focused, 2) == kernels.missile_block_nearest_reference(blocks, point, best, -1, focused, 2))
+	assert(native.call("laser_block_nearest", [], Vector2.ZERO, INF, -1) == [INF, -1])
+	print("PASS: optional native targeting parity")
+
+func _test_authority_substep_boundary() -> void:
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
+	var reference: Dictionary = state.duplicate(true)
+	var revision: int = int(reference.get("diplomacy_revision", 0))
+	ECON.step(reference, 0.1)
+	var treaty: bool = revision != int(reference.get("diplomacy_revision", 0))
+	var outcome: bool = ECON.update_match_outcome(reference)
+	assert(ECON.advance_authority_substep(state, 0.1) == (treaty or outcome))
+	assert(state == reference)
+	print("PASS: authority substep boundary parity")
+
 func _initialize() -> void:
+	_test_optional_native_kernels()
+	_test_authority_substep_boundary()
 	_test_rogue_defection()
 	_test_fleet_upkeep()
 	_test_shared_economy_censuses()

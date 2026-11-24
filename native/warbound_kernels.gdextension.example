@@ -1,0 +1,8 @@
+[configuration]
+entry_symbol = "warbound_kernels_init"
+compatibility_minimum = "4.7"
+reloadable = false
+
+[libraries]
+linux.x86_64 = "res://native/bin/libwarbound_kernels.so"
+windows.x86_64 = "res://native/bin/warbound_kernels.dll"

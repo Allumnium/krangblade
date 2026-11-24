@@ -14,3 +14,13 @@ Thumbs.db
 
 # Game exports
 /builds/
+
+# Optional local native extension builds
+/native/godot-cpp/
+/native/bin/
+/native/*.gdextension
+/native/*.gdextension.uid
+/native/.sconsign*
+/native/src/*.o
+/native/src/*.os
+/native/src/*.obj

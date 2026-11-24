@@ -1,0 +1,12 @@
+# Build from native/ with matching godot-cpp checkout.
+env = SConscript("godot-cpp/SConstruct", {"api_version": "4.7"})
+if env["platform"] not in ("linux", "windows") or env["arch"] != "x86_64":
+    print("Initial native backend supports Linux and Windows x86_64.")
+    Exit(1)
+# Preserve the reference floating-point expression ordering.
+if env["platform"] == "windows" and not env.get("use_mingw", False):
+    env.Append(CXXFLAGS=["/fp:strict"])
+else:
+    env.Append(CXXFLAGS=["-ffp-contract=off"])
+library = env.SharedLibrary("bin/warbound_kernels", ["src/warbound_kernels.cpp"])
+Default(library)

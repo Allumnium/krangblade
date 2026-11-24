@@ -1243,13 +1243,7 @@ func _economy_tick() -> void:
 	var started: int = Time.get_ticks_usec()
 	var profile: Dictionary = {"enabled": true}
 	for i in range(speed):
-		var diplomatic_revision: int = int(economy.get("diplomacy_revision", 0))
-		ECONOMY.step(economy, SIM_STEP, profile)
-		var treaty_changed: bool = diplomatic_revision != int(economy.get("diplomacy_revision", 0))
-		var outcome_started: int = Time.get_ticks_usec()
-		var changed: bool = ECONOMY.update_match_outcome(economy)
-		profile["Match outcome"] = int(profile.get("Match outcome", 0)) + Time.get_ticks_usec() - outcome_started
-		if changed or treaty_changed:
+		if ECONOMY.advance_authority_substep(economy, SIM_STEP, profile):
 			_publish_economy()
 			if not economy["match_result"].is_empty():
 				break
