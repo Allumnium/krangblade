@@ -120,13 +120,20 @@ func update_perf(delta: float) -> void:
 				for stage in ranked:
 					summary.append("%s %.1fms" % [stage, float(phases[stage]) / 1000.0])
 				diagnostic_label.text = "%d FPS\n%.1f KiB snapshot · %.1f KiB/s payload" % [Engine.get_frames_per_second(), float(session.get("diagnostic_snapshot_bytes")) / 1024.0, throughput]
+				var threaded: bool = authority and bool(session.get("threaded_authority_active"))
+				if threaded:
+					diagnostic_label.text += "\nWorker · %d overruns" % int(session.get("diagnostic_worker_overruns"))
 				for child in diagnostic_bars.get_children():
 					diagnostic_bars.remove_child(child)
 					child.queue_free()
 				var timing_max: float = maxf(1.0, float(session.get("diagnostic_sim_ms")) if authority else float(session.get("diagnostic_decode_ms")))
 				if authority:
 					timing_max = maxf(timing_max, float(session.get("diagnostic_encode_ms")))
-					_diagnostic_bar("Simulation", float(session.get("diagnostic_sim_ms")), timing_max, "ms")
+					if threaded:
+						timing_max = maxf(timing_max, float(session.get("diagnostic_worker_snapshot_ms")))
+					_diagnostic_bar("Simulation (worker)" if threaded else "Simulation", float(session.get("diagnostic_sim_ms")), timing_max, "ms")
+					if threaded:
+						_diagnostic_bar("Worker snapshot", float(session.get("diagnostic_worker_snapshot_ms")), timing_max, "ms")
 					_diagnostic_bar("Encode", float(session.get("diagnostic_encode_ms")), timing_max, "ms")
 				else:
 					_diagnostic_bar("Decode", float(session.get("diagnostic_decode_ms")), timing_max, "ms")
