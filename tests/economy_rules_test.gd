@@ -2835,6 +2835,7 @@ func _test_mining_selection() -> void:
 	print("PASS: mining selection preserves access and rock ties, preferred rock, live depletion and storage wakeups")
 
 func _initialize() -> void:
+	_test_vision_span_stamping()
 	_test_mining_selection()
 	if OS.get_cmdline_user_args().has("--mining-selection-only"):
 		quit()
@@ -6965,3 +6966,15 @@ func _test_ai_strategic_diplomacy() -> void:
 	assert(ECON._ai_diplomacy_turn(fresh, 1))
 	assert(ECON.empires_allied(fresh, 1, 2) and ECON.empires_hostile(fresh, 2, 3))
 	print("PASS: strategic AI opening, intervention risk, overextension, truce and mutual alliance")
+
+func _test_vision_span_stamping() -> void:
+	var sources: Dictionary = {Vector2i(0, 0): 1000.0, Vector2i(3, -2): 1000.0, Vector2i(-40, 7): 2700.0, Vector2i(5, 1): 850.0, Vector2i(120, 90): 1100.0, Vector2i(-3, -60): 1500.0, Vector2i(30, 30): 1234.5}
+	var reference: Dictionary = {}
+	for cell: Vector2i in sources:
+		ECON._stamp_vision(reference, (Vector2(cell) + Vector2.ONE * 0.5) * ECON.VISION_CELL, float(sources[cell]))
+	var spans: Dictionary = {}
+	ECON._stamp_cell_sources(spans, sources)
+	assert(spans.size() == reference.size())
+	for cell: Vector2i in reference:
+		assert(spans.has(cell))
+	print("PASS: span vision stamping matches per-cell disks")

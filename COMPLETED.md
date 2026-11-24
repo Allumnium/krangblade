@@ -2,6 +2,7 @@
 
 ## Performance
 
+- 2026-11-24 — v0.97.85: Span-stamped ship fog vision with per-owner memoization and limited command-card refreshes to selected roster entries. Fog per publication about 66 ? 17 ms; live 2,000-ship 1x frame p95 156.5 ? 99.4 ms; economy rules regression (including new span parity test) passes. Acceptance remains open in TODO.md.
 - 2026-11-24 — v0.97.84: Batched minimap hull dots, froze pose projection, memoized pose vision and cached service targets/hull textures. Stopped 2,000-ship render p95 74.8 → 35.8 ms (draw calls 2,367 → 368); economy rules regression passes. Acceptance remains open in TODO.md.
 - 2026-11-24 — v0.97.71–v0.97.74: Verified the independent authority worker, default threaded mode, worker/parser fixes and synchronous-reference compatibility with Godot 4.7.2 parsing, the authority-worker regression and two-peer threaded ENet command/snapshot/teardown smoke. Registered threaded smoke in manual validation; 3/8-peer threaded checks are recorded in v0.97.78, while graphical performance remains tracked in TODO.md.
 - 2026-11-24 — v0.97.70: Built the optional Windows x86_64 native extension with Godot 4.7.2 and godot-cpp `7fd5c4bc3efda6487fd6e6486c50016faa622f92`; moved project-generated object output under the ignored dependency checkout to prevent Godot OBJ import errors. Clean import and native targeting parity pass. Target-scale headless samples show no meaningful native speedup; backend remains opt-in.

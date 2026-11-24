@@ -152,9 +152,14 @@ func _selection_icon(kind: String, tint: Color) -> Texture2D:
 
 func refresh_tiles(state: Dictionary, selected_units: Array[int], selected_ship_id: int, select_tile: Callable) -> void:
 	var living: Dictionary = {}
-	for craft in state.get("ships", []):
+	var wanted: Dictionary = {}
+	for id in selected_units:
+		wanted[id] = true
+	if selected_ship_id >= 0:
+		wanted[selected_ship_id] = true
+	for craft in state.get("ships", []) if not wanted.is_empty() else []:
 		var id: int = int(craft["id"])
-		if not selected_units.has(id) and id != selected_ship_id:
+		if not wanted.has(id):
 			continue
 		living[id] = true
 		var tile: Button

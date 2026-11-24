@@ -382,6 +382,57 @@ static func _stamp_vision(cells: Dictionary, point: Vector2, radius: float) -> v
 			if ((Vector2(cell) + Vector2.ONE * 0.5) * VISION_CELL).distance_squared_to(point) <= radius * radius:
 				cells[cell] = true
 
+# Equivalent to _stamp_vision at each source cell center: offsets between
+# cell centers are exact, so each radius has one row-span shape. Overlapping
+# spans are merged per row instead of probing every disk cell.
+static func _stamp_cell_sources(cells: Dictionary, sources: Dictionary) -> void:
+	var shapes: Dictionary = {}
+	var rows: Dictionary = {}
+	for source: Vector2i in sources:
+		var radius: float = float(sources[source])
+		var shape: PackedInt32Array = shapes.get(radius, PackedInt32Array())
+		if shape.is_empty():
+			shape = _vision_row_spans(radius)
+			shapes[radius] = shape
+		var reach: int = (shape.size() - 1) / 2
+		for row in range(shape.size()):
+			var half: int = shape[row]
+			if half < 0:
+				continue
+			var y: int = source.y - reach + row
+			if not rows.has(y):
+				rows[y] = []
+			rows[y].append(Vector2i(source.x - half, source.x + half))
+	for y: int in rows:
+		var spans: Array = rows[y]
+		spans.sort()
+		var start: int = spans[0].x
+		var end: int = spans[0].y
+		for index in range(1, spans.size() + 1):
+			if index < spans.size() and spans[index].x <= end + 1:
+				end = maxi(end, spans[index].y)
+				continue
+			for x in range(start, end + 1):
+				cells[Vector2i(x, y)] = true
+			if index < spans.size():
+				start = spans[index].x
+				end = spans[index].y
+
+# Per-row half widths (-1 for empty rows) using the _stamp_vision predicate.
+static func _vision_row_spans(radius: float) -> PackedInt32Array:
+	var reach: int = ceili(radius / VISION_CELL)
+	var origin: Vector2 = Vector2.ONE * 0.5 * VISION_CELL
+	var spans := PackedInt32Array()
+	for dy in range(-reach, reach + 1):
+		var half: int = -1
+		for dx in range(0, reach + 1):
+			if ((Vector2(Vector2i(dx, dy)) + Vector2.ONE * 0.5) * VISION_CELL).distance_squared_to(origin) <= radius * radius:
+				half = dx
+			else:
+				break
+		spans.append(half)
+	return spans
+
 # In bilateral mode, group IDs are empire IDs. Only direct consenting
 # allies contribute live sensor coverage, never an ally's ally.
 static func _shares_group_vision(state: Dictionary, viewer: int, source: int) -> bool:
@@ -394,13 +445,23 @@ static func team_vision(state: Dictionary, team: int) -> Dictionary:
 	if team <= 0:
 		return cells
 	var sources: Dictionary = {}
+	var owner_shares: Dictionary = {}
+	var owner_sensor: Dictionary = {}
 	for ship in state.get("ships", []):
-		if not _shares_group_vision(state, team, _combat_group(state, int(ship["owner"]))) or not ship.has("position"):
+		var owner: int = int(ship["owner"])
+		if not owner_shares.has(owner):
+			owner_shares[owner] = _shares_group_vision(state, team, _combat_group(state, owner))
+		if not bool(owner_shares[owner]) or not ship.has("position"):
 			continue
+		var kind: String = str(ship["kind"])
+		var factor: float = 1.0
+		if military_hull(kind):
+			if not owner_sensor.has(owner):
+				owner_sensor[owner] = _player_factor(state, owner, "rank_sensor", 0.10)
+			factor = float(owner_sensor[owner])
 		var cell: Vector2i = vision_cell(ship["position"])
-		sources[cell] = maxf(float(sources.get(cell, 0.0)), sight_radius(str(ship["kind"])) * (_player_factor(state, int(ship["owner"]), "rank_sensor", 0.10) if military_hull(str(ship["kind"])) else 1.0))
-	for cell in sources:
-		_stamp_vision(cells, (Vector2(cell) + Vector2.ONE * 0.5) * VISION_CELL, float(sources[cell]))
+		sources[cell] = maxf(float(sources.get(cell, 0.0)), sight_radius(kind) * factor)
+	_stamp_cell_sources(cells, sources)
 	var elapsed: float = float(state["elapsed"])
 	var base_radius: float = sector_base_radius(state["map"])
 	for index in range(state["planets"].size()):

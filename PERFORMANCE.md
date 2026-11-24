@@ -128,3 +128,14 @@ Same harness and hardware as above, 200 measured frames.
 | Live threaded | 1,000 | 5x | 18.5 | 25.2 | 370 | 1.66 | 530.3 |
 
 Before this change the stopped 2,000-ship sample measured 74.8 ms p95 with about 2,367 draw calls. Temporary probes showed the minimap at 20 ms (one draw call per hull), pose rebuild at 16.7 ms and the ship loop at 10.9 ms. The minimap now submits all hull dots in one triangle array from the frame pose cache; poses use one frozen projection and a per-owner shared-vision memo; service targets are cached per snapshot/motion revision; the ship loop caches hull textures per kind/owner. Live 2,000-ship p95 is dominated by frames that coincide with batch publication; simulation throughput is unchanged and both targets still fail.
+
+## Publish-frame spikes (v0.97.85)
+
+Same harness, 200 measured live frames. Temporary probes showed frames coinciding with a batch publication spent about 80 ms in the territory/fog refresh, mainly `team_vision` at about 63 ms. Ship vision now stamps per-row cell spans of the same disk predicate, with per-owner share/sensor memoization (economy-rules parity test against per-cell stamping). Selected-unit command-card refreshes scan only selected roster entries rather than calling `selected_units.has()` for every hull.
+
+| Ships | Speed | Frame p50 ms | Frame p95 ms | Frame p99 ms | Batches/s |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2,000 | 1x | 35.1 | 99.4 | 105.2 | 3.48 |
+| 1,000 | 5x | 18.1 | 23.1 | 54.6 | 1.55 |
+
+Fog per publication fell from about 66 to 17 ms. Remaining per-publication main-thread work is about 55 ms (fog 17, HUD/inspector refresh about 15, territory warnings about 10, motion sync about 8, tactical alerts about 4). Simulation throughput is unchanged and is now the dominant unmet target.
