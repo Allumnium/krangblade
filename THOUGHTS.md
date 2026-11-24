@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.83: Combined live-threaded dense-fighter captures fail both budgets: 2,000 at 1x measures frame p95 176.752 ms and 3.036 completed batches/s; 1,000 at 5x measures 79.562 ms and 1.672 batches/s. Both retain every synthetic hull and avoid unpaid behavior; worker overruns show simulation slowing instead of accumulating unlimited queued ticks. No AI, opposing combat or ENet is included. Isolate CPU rendering versus GPU/minimap work before choosing the next render change.
+
 - v0.97.82: Mining depot choice and candidate scores use the field center, not the access anchor. Scoring once at the first reachable anchor preserves tie order. The new 1,000-ship logistics runs measure 1x p95 126.916 ms (49/100 misses) and 5x p95 823.579 ms (100/100 misses). All phases measured lower than the prior session, so the whole-run improvement cannot be attributed solely to anchor deduplication. Miner selection still takes 1,013 ms in a short detailed startup profile.
 
 - v0.97.80: A real match-scene render capture measures 100 ships at 9.166 ms p95 and 2,000 ships at 92.407 ms p95 (300 frames, zoom 5, simulation stopped). At 2,000 ships, lowering zoom to 0.1 still measured 86.553 ms p95, so detailed hull rendering/overdraw alone does not explain the cost; the remaining per-ship render path needs profiling. These are isolated graphics samples, not combined gameplay acceptance.

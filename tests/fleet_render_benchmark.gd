@@ -20,6 +20,8 @@ func _run() -> void:
 	var frame_count: int = 300
 	var seed_value: int = 827
 	var zoom: float = 5.0
+	var live: bool = false
+	var speed: int = 1
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--ships="):
 			ship_count = int(arg.get_slice("=", 1))
@@ -29,8 +31,12 @@ func _run() -> void:
 			seed_value = int(arg.get_slice("=", 1))
 		elif arg.begins_with("--zoom="):
 			zoom = float(arg.get_slice("=", 1))
-	if ship_count < 1 or frame_count < 30:
-		push_error("Render benchmark requires at least one ship and 30 frames.")
+		elif arg == "--live":
+			live = true
+		elif arg.begins_with("--speed="):
+			speed = int(arg.get_slice("=", 1))
+	if ship_count < 1 or frame_count < 30 or speed not in [1, 5]:
+		push_error("Render benchmark requires at least one ship, 30 frames and speed 1 or 5.")
 		quit(2)
 		return
 
@@ -98,15 +104,55 @@ func _run() -> void:
 	var home_screen: Vector2 = match_scene.call("_screen_point", home)
 	var visible_pose_count: int = (match_scene.call("_ship_poses", state) as Dictionary).size()
 
+	if live:
+		state["time_speed"] = speed
+		# Synthetic hulls must not enter the unpaid/defection path while
+		# measuring normal simulation and rendering throughput.
+		state["galactic_credits"][1] = 1000000000.0
+		var worker: Object = session.get("_authority_worker")
+		if not bool(worker.call("start", state)):
+			push_error("Could not start independent authority worker for live benchmark.")
+			quit(1)
+			return
+		session.set("threaded_authority_active", true)
+		session.get("economy_timer").start()
 	var samples: Array[float] = []
 	var draw_call_samples: Array[float] = []
+	var sim_samples: Array[float] = []
+	var snapshot_samples: Array[float] = []
+	var first_revision: int = int(session.get("motion_revision"))
+	var observed_revision: int = first_revision
+	var initial_elapsed: float = float(state["elapsed"])
+	var minimum_ships: int = ship_count
+	var peak_ships: int = ship_count
 	var previous_usec: int = Time.get_ticks_usec()
+	var measurement_started: int = previous_usec
 	for _frame in range(frame_count):
 		await process_frame
 		var now_usec: int = Time.get_ticks_usec()
 		samples.append(float(now_usec - previous_usec) / 1000.0)
 		draw_call_samples.append(float(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
 		previous_usec = now_usec
+		if live and int(session.get("motion_revision")) != observed_revision:
+			observed_revision = int(session.get("motion_revision"))
+			sim_samples.append(float(session.get("diagnostic_sim_ms")))
+			snapshot_samples.append(float(session.get("diagnostic_worker_snapshot_ms")))
+			var published: Dictionary = session.get("economy")
+			minimum_ships = mini(minimum_ships, published["ships"].size())
+			peak_ships = maxi(peak_ships, published["ships"].size())
+	var measurement_seconds: float = float(previous_usec - measurement_started) / 1000000.0
+	var final_state: Dictionary = session.get("economy")
+	var completed_batches: int = int(session.get("motion_revision")) - first_revision
+	var worker_overruns: int = int(session.get("diagnostic_worker_overruns"))
+	var final_elapsed: float = float(final_state["elapsed"])
+	var final_ships: int = final_state["ships"].size()
+	if live:
+		session.get("economy_timer").stop()
+		session.call("_stop_authority_worker")
+		if sim_samples.is_empty() or final_elapsed <= initial_elapsed:
+			push_error("Live benchmark did not observe a completed advancing simulation batch.")
+			quit(1)
+			return
 	var screenshot_path: String = "user://fleet_render_%d_%d.png" % [ship_count, Time.get_ticks_msec()]
 	var screenshot_error: int = root.get_texture().get_image().save_png(screenshot_path)
 	if screenshot_error != OK:
@@ -119,7 +165,7 @@ func _run() -> void:
 		"cpu": OS.get_processor_name(),
 		"gpu": RenderingServer.get_video_adapter_name(),
 		"window": DisplayServer.window_get_size(),
-		"mode": "match_render_only_simulation_stopped",
+		"mode": "match_live_threaded_simulation" if live else "match_render_only_simulation_stopped",
 		"seed": seed_value,
 		"ships": ship_count,
 		"camera_zoom": camera.get("zoom"),
@@ -136,5 +182,18 @@ func _run() -> void:
 		"frames_over_16_67ms": samples.filter(func(sample: float) -> bool: return sample > 16.67).size(),
 		"screenshot": ProjectSettings.globalize_path(screenshot_path),
 	}
+	if live:
+		result["speed"] = speed
+		result["final_ships"] = final_ships
+		result["minimum_ships"] = minimum_ships
+		result["peak_ships"] = peak_ships
+		result["measurement_seconds"] = measurement_seconds
+		result["completed_simulation_batches"] = completed_batches
+		result["completed_batches_per_second"] = float(completed_batches) / measurement_seconds
+		result["simulation_years_advanced"] = final_elapsed - initial_elapsed
+		result["simulation_batch_ms"] = _stats(sim_samples)
+		result["worker_snapshot_ms"] = _stats(snapshot_samples)
+		result["worker_overruns"] = worker_overruns
+		result["simulation_batches_over_100ms"] = sim_samples.filter(func(sample: float) -> bool: return sample > 100.0).size()
 	print("FLEET_RENDER " + JSON.stringify(result))
 	quit()

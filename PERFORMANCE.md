@@ -96,3 +96,23 @@ Same Godot/hardware/seed and 1,000 ships throughout each 100-batch sample:
 | logistics | 5x | 720.295 | 823.579 | 871.301 | 1,564.590 | 100/100 |
 
 A separate three-tick detailed run measured miner selection at 1,013.250 ms, including 411.215 ms scoring, 335.132 ms depot search and 16.841 ms access checks. Both throughput samples still fail acceptance. Other phases also ran faster than the previous session, so these sequential measurements are not a controlled estimate of the optimization's isolated speedup. No combined rendering, worker, AI or ENet workload is measured here.
+
+## Combined live-threaded captures (v0.97.83)
+
+Use `--live` to start an independent authority worker on the seeded synthetic render fleet; omit it to retain the simulation-stopped mode.
+
+```sh
+godot --path . --script res://tests/fleet_render_benchmark.gd -- --ships=2000 --frames=300 --zoom=5 --live --speed=1
+godot --path . --script res://tests/fleet_render_benchmark.gd -- --ships=1000 --frames=300 --zoom=5 --live --speed=5
+```
+
+Godot 4.7.2, Windows, Ryzen 5 7600X, RTX 5060 Ti, Compatibility renderer, 1280x720, seed 827. These are dense, same-owner Fighter fleets in a solo match, with synthetic treasury funding to avoid unpaid/defection behavior. Renderer warmup occurs before starting simulation; the measurement includes simulation startup, movement, snapshot publication and interpolation. No AI, opposing combat, logistics or ENet is included. All ships remain alive throughout each sample. These are short target-scale probes, not sustained late-game acceptance.
+
+| Ships | Speed | Seconds | Frames | Frame p50 ms | Frame p95 ms | Frames >16.67 ms | Completed batches | Batches/s | Sim p95 ms | Batches >100 ms | Worker overruns | Copy p95 ms |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2,000 | 1x | 30.636 | 300 | 78.180 | 176.752 | 300/300 | 93 | 3.036 | 251.687 | 93/93 | 200 | 15.148 |
+| 1,000 | 5x | 12.560 | 300 | 38.255 | 79.562 | 300/300 | 21 | 1.672 | 583.574 | 21/21 | 103 | 6.785 |
+
+Published simulation advance was 9.3 and 10.5 years respectively; one 1x batch advances 0.1 years and one 5x batch advances 0.5 years. Every frame and observed batch misses its budget. Completed throughput is far below 10 batches/s; worker overload coalescing slows simulation. Snapshot-copy time is reported separately from simulation work. Screenshots confirm the dense fleet and HUD are rendered; they do not establish long-session interaction or internet behavior.
+
+The small 100-ship live startup/teardown check completed nine batches at 11.612 ms maximum simulation time with zero worker overruns. The unchanged paused mode completed 100 frames with 8.358 ms p95 and no frames over 16.67 ms. No full suite or CI run was performed for this test-harness increment.
