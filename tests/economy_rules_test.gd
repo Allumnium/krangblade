@@ -2573,6 +2573,56 @@ func _test_construction_credits() -> void:
 	assert(auto_home["queue"].is_empty() and ECON.credit_balance(auto_state, 1) == 0.0)
 	print("PASS: construction GC reservations, insufficient funds, ownership, cancellation, repricing, autoqueue and completion")
 
+func _test_economy_rate_schedule() -> void:
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
+	var p: Dictionary = state["planets"][0]
+	var first: Dictionary = ECON._prepare_economy_rates(state, true)[0]
+	var wages: Dictionary = ECON._prepare_wage_tables(state, true)
+	state["elapsed"] = 0.1
+	p["population"] = 17000.0
+	p["farm_factor"] = 0.91
+	assert(is_same(first, ECON._prepare_economy_rates(state, true)[0]))
+	for resource in ECON.RESOURCES:
+		assert(ECON.rate(p, resource, first) == ECON.rate(p, resource))
+	var reference: Dictionary = p.duplicate(true)
+	var scheduled: Dictionary = p.duplicate(true)
+	ECON._update_population(reference, 0.1)
+	ECON._update_population(scheduled, 0.1, first)
+	assert(reference == scheduled)
+	# Live food, blockades and storage remain authoritative, not sampled.
+	p["planet_blockaded"] = true
+	for resource in ECON.RESOURCES:
+		assert(ECON.rate(p, resource, first) == ECON.rate(p, resource))
+	p["planet_blockaded"] = false
+	p["levels"]["Metals"] = 2
+	var changed: Dictionary = ECON._prepare_economy_rates(state, true)[0]
+	assert(not is_same(first, changed))
+	assert(ECON.rate(p, "Metals", changed) == ECON.rate(p, "Metals"))
+	p["conquest_rewards"] = ["rank_tax", "rank_growth"]
+	var rewarded: Dictionary = ECON._prepare_economy_rates(state, true)[0]
+	assert(not is_same(changed, rewarded))
+	p["conquest_rewards"].append("rank_tax")
+	var edited: Dictionary = ECON._prepare_economy_rates(state, true)[0]
+	assert(float(edited["tax"]) > float(rewarded["tax"]))
+	ECON.objective_progress(state, 1)["rewards"] = ["rank_upkeep"]
+	var discounted: Dictionary = ECON._prepare_wage_tables(state, true)
+	assert(float(discounted[1]["fighter"]) < float(wages[1]["fighter"]))
+	state["elapsed"] = 0.6
+	assert(not is_same(edited, ECON._prepare_economy_rates(state, true)[0]))
+	var control: Dictionary = state.duplicate(true)
+	state["galactic_credits"][1] = 1.0
+	control["galactic_credits"][1] = 1.0
+	ECON._accrue_resident_taxes(state, 0.1, ECON._prepare_economy_rates(state, true))
+	ECON._pay_fleet_upkeep(state, 0.1, ECON._prepare_wage_tables(state, true))
+	ECON._accrue_resident_taxes(control, 0.1)
+	ECON._pay_fleet_upkeep(control, 0.1)
+	assert(state == control)
+	# Reference path and authority replacement must not retain stale inputs.
+	assert(ECON._prepare_economy_rates(state, false).is_empty())
+	assert(not is_same(edited, ECON._prepare_economy_rates(control, true)[0]))
+	ECON._prepare_economy_rates(control, false)
+	print("PASS: slow economy coefficient reuse, live input wakeups, population and wage parity")
+
 func _test_fleet_upkeep() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
 	assert(float(ECON.empire_totals(state, 1)["upkeep"]) == 81.0)
@@ -2667,6 +2717,7 @@ func _test_rogue_defection() -> void:
 func _initialize() -> void:
 	_test_rogue_defection()
 	_test_fleet_upkeep()
+	_test_economy_rate_schedule()
 	_test_construction_credits()
 	_test_galactic_credits()
 	_test_endless_conquest()
