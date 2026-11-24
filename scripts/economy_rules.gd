@@ -17,6 +17,11 @@ static var _rock_windows: Dictionary = {}
 const ROCK_WINDOW_CACHE_LIMIT: int = 4096
 # Exact route requests within a substep; never share mutable ship routes.
 static var _rock_route_queries: Dictionary = {}
+# Persistent certificates for empty rock corridors. Actual trajectory
+# samples retain the old integrator's arithmetic at every substep.
+static var _direct_rock_corridors: Dictionary = {}
+const DIRECT_CORRIDOR_LOOKAHEAD: float = 768.0
+const DIRECT_CORRIDOR_LIMIT: int = 10000
 const ROCK_CELL: float = 192.0
 const ROCK_HARD_CLEARANCE: float = 12.0
 const ROCK_PREFERRED_CLEARANCE: float = 26.0
@@ -2602,6 +2607,7 @@ static func _refresh_movement_fields(fields: Array) -> void:
 	_rock_cells.clear()
 	_rock_windows.clear()
 	_rock_route_queries.clear()
+	_direct_rock_corridors.clear()
 	for field in fields:
 		var center: Vector2 = field["position"]
 		var special: bool = bool(field.get("antimatter", false))
@@ -2893,10 +2899,70 @@ static func _clip_rock_step(before: Vector2, after: Vector2) -> Vector2:
 		return probe
 	return candidate
 
-static func _navigate(ship: Dictionary, target: Vector2, budget: float) -> float:
+# A direct segment is legal only if the existing frozen avoidance
+# neighborhood contains no other hull that could change its steering.
+# The subsequent separation/contact passes still run for every ship.
+static func _direct_hull_corridor_clear(ship: Dictionary, before: Vector2) -> bool:
+	if avoidance_cells.is_empty() or bool(ship.get("holding", false)):
+		return true
+	var cell := Vector2i(floori(before.x / AVOIDANCE_CELL), floori(before.y / AVOIDANCE_CELL))
+	var entries: Array = _avoidance_neighborhood(cell)
+	return entries.is_empty() or (entries.size() == 1 and int(entries[0][0]) == int(ship.get("id", -1)))
+
+# Prove a bounded cell rectangle has no indexed obstacles. The certificate
+# covers the full original lookahead and the actual step (not just its end).
+# It remains valid until the existing obstacle-index refresh, and may be
+# reused on later samples or changed commands only when fully contained.
+static func _direct_rock_corridor_clear(id: int, before: Vector2, target: Vector2, after: Vector2, budget: float) -> bool:
+	if id < 0 or _rock_routes.has(id) or budget <= EPS or before.is_equal_approx(target):
+		return false
+	var end: Vector2 = before.move_toward(target, maxf(budget + 96.0, 240.0))
+	var first: Vector2i = _rock_cell(before.min(end).min(after))
+	var last: Vector2i = _rock_cell(before.max(end).max(after))
+	if _direct_rock_corridors.has(id):
+		var known: Rect2i = _direct_rock_corridors[id]
+		if known.has_point(first) and known.has_point(last):
+			return true
+	# Predict a longer obstacle-free corridor, but never reject a clear
+	# short step solely because there may be an obstacle further ahead.
+	var far_end: Vector2 = before.move_toward(target, maxf(budget + 96.0, DIRECT_CORRIDOR_LOOKAHEAD))
+	var far_first: Vector2i = _rock_cell(before.min(far_end)).min(first)
+	var far_last: Vector2i = _rock_cell(before.max(far_end)).max(last)
+	if far_last.x - far_first.x <= 8 and far_last.y - far_first.y <= 8 and _empty_rock_rectangle(far_first, far_last):
+		if _direct_rock_corridors.size() < DIRECT_CORRIDOR_LIMIT or _direct_rock_corridors.has(id):
+			_direct_rock_corridors[id] = Rect2i(far_first, far_last - far_first + Vector2i.ONE)
+		return true
+	return false
+
+static func _empty_rock_rectangle(first: Vector2i, last: Vector2i) -> bool:
+	for y in range(first.y, last.y + 1):
+		for x in range(first.x, last.x + 1):
+			if _rock_cells.has(Vector2i(x, y)):
+				return false
+	return true
+
+static func _direct_motion_sample(ship: Dictionary, before: Vector2, target: Vector2, budget: float, avoid_rocks: bool) -> Variant:
+	if not before.is_finite() or not target.is_finite() or not is_finite(budget) or budget < 0.0:
+		return null
+	if not _direct_hull_corridor_clear(ship, before):
+		return null
+	var after: Vector2 = before.move_toward(target, budget)
+	if avoid_rocks:
+		if not _direct_rock_corridor_clear(int(ship.get("id", -1)), before, target, after, budget):
+			return null
+		# Preserve the exact empty-sweep interpolation used by _clip_rock_step.
+		if (after - before).length_squared() > EPS * EPS:
+			after = before.lerp(after, 1.0)
+	return after
+
+static func _navigate(ship: Dictionary, target: Vector2, budget: float, direct_fast_path: bool = true) -> float:
 	ship["navigation_target"] = target
 	var before: Vector2 = ship["position"]
 	var avoid_rocks: bool = ship.get("kind", "") != "miner" and not _rock_cells.is_empty()
+	if direct_fast_path:
+		var sample: Variant = _direct_motion_sample(ship, before, target, budget, avoid_rocks)
+		if sample != null:
+			return _commit_motion_sample(ship, before, sample)
 	if avoid_rocks:
 		target = _field_detour(before, target, budget, int(ship.get("id", -1)))
 	var direct: Vector2 = before.direction_to(target)
@@ -2909,6 +2975,9 @@ static func _navigate(ship: Dictionary, target: Vector2, budget: float) -> float
 			after = steered
 	if avoid_rocks:
 		after = _clip_rock_step(before, after)
+	return _commit_motion_sample(ship, before, after)
+
+static func _commit_motion_sample(ship: Dictionary, before: Vector2, after: Vector2) -> float:
 	var displacement: Vector2 = after - before
 	if not displacement.is_zero_approx():
 		ship["heading"] = displacement.normalized()
@@ -4813,6 +4882,7 @@ static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
 			if other.get("kind", "") == "warp_gate" and int(other.get("warp_destination", -1)) == int(ship["id"]):
 				other["warp_destination"] = -1
 	state["ships"].erase(ship)
+	_direct_rock_corridors.erase(int(ship["id"]))
 	if is_same(state, _motion_sleep_state):
 		_motion_sleep_modes.erase(int(ship["id"]))
 	if is_same(state, _deadline_state):
