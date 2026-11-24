@@ -10,6 +10,7 @@ var motion_sleep_skips: int = 0
 var direct_order_dispatches: int = 0
 var deadline_schedule_enabled: bool = false
 var persistent_avoidance_enabled: bool = false
+var persistent_combat_enabled: bool = false
 
 # Routing and civilian caches valid for this substep.
 var graph: Dictionary = {}
@@ -43,6 +44,46 @@ var repair_neighborhoods: Dictionary = {}
 var repaired_hulls: Dictionary = {}
 var repair_parked: Dictionary = {}
 var wander_candidates: Dictionary = {}
+
+# Retain hull-only bucket arrays while rebuilding the exact key-order view.
+# The returned view is valid only until the next begin on this index.
+class OrderedHullBuckets:
+	var _retained: Dictionary = {}
+	var _active: Dictionary = {}
+	var _counts: Dictionary = {}
+
+	func clear() -> void:
+		_retained.clear()
+		_active = {}
+		_counts.clear()
+
+	func begin() -> void:
+		_active = {}
+		_counts.clear()
+
+	func append(key: Variant, hull: Dictionary) -> void:
+		var slot: int = int(_counts.get(key, 0))
+		if slot == 0:
+			if not _retained.has(key):
+				_retained[key] = []
+			_active[key] = _retained[key]
+		var bucket: Array = _active[key]
+		if slot == bucket.size():
+			bucket.append(hull)
+		elif not is_same(bucket[slot], hull):
+			bucket[slot] = hull
+		_counts[key] = slot + 1
+
+	func finish() -> Dictionary:
+		for key in _retained.keys():
+			var count: int = int(_counts.get(key, 0))
+			if count == 0:
+				_retained.erase(key)
+			else:
+				var bucket: Array = _retained[key]
+				if bucket.size() != count:
+					bucket.resize(count)
+		return _active
 
 # Timestamp-bucket calendar. Equal deadlines share a bucket; rescheduling
 # replaces the old entry rather than accumulating stale heap nodes. Only
