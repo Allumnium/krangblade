@@ -7,6 +7,7 @@ const MAP = preload("res://scripts/planet_map.gd")
 var _live: Dictionary = {}
 var _explored: Dictionary = {}
 var texture: ImageTexture
+var _mask_image: Image
 var _origin := Vector2.ZERO
 var extent := Vector2.ZERO
 var _revision: Array = []
@@ -31,10 +32,12 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 		_revision.clear()
 		_map_identity.clear()
 		texture = null
+		_mask_image = null
 		return false
 	var identity: Array = [player, state["map"].get("seed", 0), map_size, state["map"]["points"]]
 	if identity != _map_identity:
 		_map_identity = identity
+		_mask_image = null
 		_live.clear()
 		_explored.clear()
 		_systems.clear()
@@ -54,31 +57,48 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 	if revision == _revision:
 		return false
 	_revision = revision
+	var prior_live: Dictionary = _live
 	_live = ECONOMY.team_vision(state, team)
 	_explored.merge(_live, true)
 	_observe_sites(state, player, map_size)
 	_observe_rocks(state, map_size)
-	var cell: float = ECONOMY.VISION_CELL
-	var start := Vector2i.ZERO
-	var finish: Vector2i = ECONOMY.vision_cell(map_size)
-	var dimensions: Vector2i = finish - start + Vector2i.ONE
-	var image := Image.create(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.015, 0.025, 0.04, 0.96))
-	for key in _explored:
-		var pixel: Vector2i = key - start
-		if Rect2i(Vector2i.ZERO, dimensions).has_point(pixel):
-			image.set_pixelv(pixel, Color(0.015, 0.025, 0.04, 0.48))
-	for key in _live:
-		var pixel: Vector2i = key - start
-		if Rect2i(Vector2i.ZERO, dimensions).has_point(pixel):
-			image.set_pixelv(pixel, Color(0.0, 0.0, 0.0, 0.0))
-	if texture == null or texture.get_size() != Vector2(dimensions):
-		texture = ImageTexture.create_from_image(image)
-	else:
-		texture.update(image)
-	_origin = Vector2(start) * cell
-	extent = Vector2(dimensions) * cell
+	_update_mask(prior_live, map_size)
 	return true
+
+# The explored set only grows until map identity changes. A cell leaving
+# live vision becomes explored, and a newly live cell becomes transparent.
+# Keep the exact original colors and bounds; do not upload unchanged masks.
+func _update_mask(prior_live: Dictionary, map_size: Vector2) -> void:
+	var dimensions: Vector2i = ECONOMY.vision_cell(map_size) + Vector2i.ONE
+	var bounds := Rect2i(Vector2i.ZERO, dimensions)
+	var explored_color := Color(0.015, 0.025, 0.04, 0.48)
+	var live_color := Color(0.0, 0.0, 0.0, 0.0)
+	var rebuild: bool = _mask_image == null or _mask_image.get_size() != dimensions
+	var changed: bool = rebuild
+	if rebuild:
+		_mask_image = Image.create(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8)
+		_mask_image.fill(Color(0.015, 0.025, 0.04, 0.96))
+		for key in _explored:
+			if bounds.has_point(key):
+				_mask_image.set_pixelv(key, explored_color)
+		for key in _live:
+			if bounds.has_point(key):
+				_mask_image.set_pixelv(key, live_color)
+	else:
+		for key in prior_live:
+			if not _live.has(key) and bounds.has_point(key):
+				_mask_image.set_pixelv(key, explored_color)
+				changed = true
+		for key in _live:
+			if not prior_live.has(key) and bounds.has_point(key):
+				_mask_image.set_pixelv(key, live_color)
+				changed = true
+	if texture == null or texture.get_size() != Vector2(dimensions):
+		texture = ImageTexture.create_from_image(_mask_image)
+	elif changed:
+		texture.update(_mask_image)
+	_origin = Vector2.ZERO
+	extent = Vector2(dimensions) * ECONOMY.VISION_CELL
 
 # Reconstruct the opening survey once; late snapshots must not expose
 # current enemy buildings, population or depleted ore outside live sight.
@@ -163,11 +183,10 @@ func _observe_rocks(state: Dictionary, map_size: Vector2) -> void:
 		var hidden_rocks: Array = []
 		for id in memory.keys():
 			var rock: Dictionary = memory[id]
-			if is_visible(rock["position"], map_size):
-				if not live_ids.has(id):
-					memory.erase(id)
-					continue
+			if live_ids.has(id):
 				visible_rocks.append(rock)
+			elif is_visible(rock["position"], map_size):
+				memory.erase(id)
 			else:
 				hidden_rocks.append(rock)
 		_rock_views[index] = {"live": visible_rocks, "hidden": hidden_rocks, "chunks": visible_rocks + hidden_rocks}

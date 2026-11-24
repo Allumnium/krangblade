@@ -76,6 +76,8 @@ Combat uses separate persistent ordered hull-only cell and sector arrays (`StepF
 
 Client map and fog drawing each own a synchronous projection snapshot (viewport/map size, world center, fit and zoom), released when the callback returns. Asteroid vertices use the same projection arithmetic directly rather than invoking the camera for every rock. The fog celestial renderer retains a single static hidden-rock mesh per field while the exact projection and immutable observed chunks are unchanged; map seed changes clear the cache. Live rotating rock meshes and fog observation rules remain independent. No authoritative state or wire changes.
 
+Fog retains its mask image for a map identity and repaints only changed live-vision cells (departures become explored, arrivals transparent). Initial survey and identity changes rebuild the entire mask; observation of sites and rocks remains independent of image upload. Minimap terrain retains packed line geometry per field/live-hidden layer using the immutable observed rock arrays and current minimap geometry; the shared celestial footprint generator also serves the setup preview. These caches contain no newly hidden live ore.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

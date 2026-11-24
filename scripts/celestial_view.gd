@@ -45,9 +45,14 @@ func prepare_map(state: Dictionary) -> void:
 
 # At overview scale, plot each actual rock, never its enclosing belt.
 static func draw_terrain_footprint(canvas: Control, field: Dictionary, offset: Vector2, scale: float, tint: Color) -> void:
+	var geometry: Dictionary = terrain_footprint(field.get("chunks", []), offset, scale, tint)
+	if not geometry["segments"].is_empty():
+		canvas.draw_multiline_colors(geometry["segments"], geometry["colors"], 1.0, true)
+
+static func terrain_footprint(chunks: Array, offset: Vector2, scale: float, tint: Color) -> Dictionary:
 	var segments := PackedVector2Array()
 	var colors := PackedColorArray()
-	for rock in field.get("chunks", []):
+	for rock in chunks:
 		var point: Vector2 = offset + (rock["position"] as Vector2) * scale
 		var fraction: float = clampf(float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock["initial"])), 0.0, 1.0)
 		var radius: float = maxf(0.42, float(rock["radius"]) * scale * 0.65 * sqrt(fraction))
@@ -55,8 +60,7 @@ static func draw_terrain_footprint(canvas: Control, field: Dictionary, offset: V
 		segments.append(point - axis)
 		segments.append(point + axis)
 		colors.append(Color("#b879a0") if rock["resource"] == "Crystals" else tint)
-	if not segments.is_empty():
-		canvas.draw_multiline_colors(segments, colors, 1.0, true)
+	return {"segments": segments, "colors": colors}
 
 func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, shading: float = 1.0, rotation_time: float = 0.0, static_field: int = -1) -> void:
 	var chunks: Array = field["chunks"]
