@@ -951,7 +951,7 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	assert(int(state["planets"][1]["owner"]) == 1)
 	print("PASS: nearest available colony, queued hold and automatic settlement")
 
-func _motion_sleep_trace(enabled: bool) -> Array:
+func _motion_sleep_trace(enabled: bool, schedule_enabled: bool = true) -> Array:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	var craft: Dictionary = {"id": 55001, "kind": "fighter", "owner": 1, "origin": 0, "at": 0, "dest": 0, "source": -1, "route": [], "leg": 0.0, "position": Vector2(100, 200), "heading": Vector2.LEFT, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock(), "wander_auto": false}
@@ -963,9 +963,51 @@ func _motion_sleep_trace(enabled: bool) -> Array:
 			assert(ECON.command_stop_units(state, 1, [55001]))
 		elif tick == 45:
 			assert(ECON.issue_unit_order(state, 1, [55001], {"kind": "position", "target": 0, "point": Vector2(150, 200), "move_only": true}, false))
-		ECON.step(state, 0.1, {}, enabled)
+		ECON.step(state, 0.1, {}, enabled, schedule_enabled)
 		trace.append(state.duplicate(true))
 	return trace
+
+func _test_deadline_calendars() -> void:
+	var calendar = ECON.STEP_FRAME.DeadlineCalendar.new()
+	calendar.schedule("a", 2.0)
+	calendar.schedule("b", 2.0)
+	calendar.schedule("c", 1.0)
+	calendar.schedule("c", 3.0)
+	assert(calendar.size() == 3 and calendar.take_due(1.0).is_empty())
+	assert(calendar.take_due(2.0) == ["a", "b"])
+	calendar.cancel("c")
+	assert(calendar.size() == 0 and calendar.take_due(100.0).is_empty())
+	calendar.schedule("boundary", 1.0)
+	assert(calendar.take_due(7.0, 6.0, true).is_empty())
+	assert(calendar.take_due(7.000001, 6.0, true) == ["boundary"])
+	# Authoritative event overwrite, strict lifetime, cap eviction and
+	# state replacement must match the original full dictionary scan.
+	var state: Dictionary = {"elapsed": 0.0, "ships": []}
+	var source: Dictionary = {"kind": "miner", "cargo": {"Metals": 5.0}}
+	var target: Dictionary = {"kind": "ship", "cargo": {"Metals": 0.0}}
+	ECON._begin_deadline_schedule(state, true)
+	for i in range(ECON.TRANSFER_EVENT_LIMIT + 2):
+		ECON._record_transfer(state, i, source, 1000, target, "Metals", 1.0)
+	assert(state["cargo_transfers"].size() == ECON.TRANSFER_EVENT_LIMIT)
+	assert(not state["cargo_transfers"].has("0:1000:Metals"))
+	state["elapsed"] = 3.0
+	ECON._record_transfer(state, 2, source, 1000, target, "Metals", 1.0)
+	var reference: Dictionary = state.duplicate(true)
+	for now in [6.0, 6.1, 9.0, 9.1]:
+		state["elapsed"] = now
+		reference["elapsed"] = now
+		ECON._expire_transfer_events(state, true)
+		ECON._expire_transfer_events(reference, false)
+		assert(state == reference)
+	assert(state["cargo_transfers"].is_empty())
+	# A loaded/replaced state is rebuilt from canonical fields.
+	var restored: Dictionary = {"elapsed": 10.0, "ships": [], "cargo_transfers": {"x": {"elapsed": 1.0}}}
+	ECON._begin_deadline_schedule(restored, true)
+	ECON._expire_transfer_events(restored, true)
+	assert(restored["cargo_transfers"].is_empty())
+	ECON._begin_deadline_schedule(restored, false)
+	assert(_motion_sleep_trace(true, true) == _motion_sleep_trace(true, false))
+	print("PASS: deadline calendar rescheduling, strict expiry, transfer cap and reference state parity")
 
 func _test_motion_sleep_wake() -> void:
 	assert(_motion_sleep_trace(true) == _motion_sleep_trace(false))
@@ -2201,6 +2243,7 @@ func _initialize() -> void:
 	_test_ai_strategic_diplomacy()
 	_test_stop_order()
 	_test_motion_sleep_wake()
+	_test_deadline_calendars()
 	_test_nearest_colony_and_queued_hold()
 	_test_manual_conversion_and_stats()
 	_test_passive_health()
