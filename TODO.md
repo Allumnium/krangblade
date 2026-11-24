@@ -1,6 +1,6 @@
 # Warbound — development TODO
 
-- [ ] v0.97.76: Complete remaining acceptance with broader battle/swarm/logistics profiles and graphical frame-time capture. Normal 2-/3-/8-peer, threaded 2-/3-/8-peer, and 2-peer loading/host-disconnect ENet checks pass; staggered test-client teardown removed the prior 8-peer send errors. Windows native compilation/parity pass, but target-scale headless batches still miss 100 ms (see PERFORMANCE.md).
+- [ ] v0.97.76: Complete remaining acceptance with higher-count battle/swarm/logistics profiles and graphical frame-time capture. The 1,000-ship logistics first-tick spike is localized to Civilian logistics but its subroutine remains unknown. Normal 2-/3-/8-peer, threaded 2-/3-/8-peer, and 2-peer loading/host-disconnect ENet checks pass; staggered test-client teardown removed the prior 8-peer send errors. Windows native compilation/parity pass, but target-scale headless batches still miss 100 ms (see PERFORMANCE.md).
 
 - [ ] v0.97.75: Set project-wide rendering cap to 120 FPS using application/run/max_fps and disable VSync so the monitor refresh rate does not impose a lower cap during performance testing. Keep physics/simulation cadence, threaded authority and explicit CI benchmark CLI frame limits unchanged. Runtime FPS not measured.
 

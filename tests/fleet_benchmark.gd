@@ -63,6 +63,8 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 	var misses: int = 0
 	var peak: int = count
 	var minimum: int = count
+	var slowest_tick: Dictionary = {}
+	var slowest_ms: float = -1.0
 	var memory_start: int = OS.get_static_memory_usage()
 	for tick in range(ticks):
 		var profile: Dictionary = {"Economy": 0}
@@ -72,6 +74,12 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 		var ms: float = float(Time.get_ticks_usec() - start) / 1000.0
 		samples.append(ms)
 		misses += int(ms > 100.0)
+		if ms > slowest_ms:
+			slowest_ms = ms
+			var phase_ms: Dictionary = {}
+			for key in profile:
+				phase_ms[key] = float(profile[key]) / 1000.0
+			slowest_tick = {"index": tick, "ms": ms, "phases_ms": phase_ms}
 		for key in profile:
 			if not phase_samples.has(key):
 				phase_samples[key] = []
@@ -81,4 +89,4 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 	var phases: Dictionary = {}
 	for key in phase_samples:
 		phases[key] = _stats(phase_samples[key])
-	print("FLEET_BENCH " + JSON.stringify({"version": ProjectSettings.get_setting("application/config/version"), "engine": Engine.get_version_info()["string"], "cpu": OS.get_processor_name(), "cpu_threads": OS.get_processor_count(), "os": OS.get_name(), "mode": "headless_simulation", "seed": seed_value, "scenario": scenario, "players": 8, "speed": speed, "ticks": ticks, "initial_ships": count, "minimum_ships": minimum, "peak_ships": peak, "final_ships": state["ships"].size(), "deadline_misses": misses, "tick_ms": _stats(samples), "phases_ms": phases, "static_memory_start_bytes": memory_start, "static_memory_end_bytes": OS.get_static_memory_usage()}))
+	print("FLEET_BENCH " + JSON.stringify({"version": ProjectSettings.get_setting("application/config/version"), "engine": Engine.get_version_info()["string"], "cpu": OS.get_processor_name(), "cpu_threads": OS.get_processor_count(), "os": OS.get_name(), "mode": "headless_simulation", "seed": seed_value, "scenario": scenario, "players": 8, "speed": speed, "ticks": ticks, "initial_ships": count, "minimum_ships": minimum, "peak_ships": peak, "final_ships": state["ships"].size(), "deadline_misses": misses, "tick_ms": _stats(samples), "phases_ms": phases, "slowest_tick": slowest_tick, "static_memory_start_bytes": memory_start, "static_memory_end_bytes": OS.get_static_memory_usage()}))

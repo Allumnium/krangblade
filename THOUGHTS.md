@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.79: The synthetic 1,000-ship logistics benchmark repeatedly spends about 5 seconds in Civilian logistics on tick 0 (both 1x and 5x), while later batches are lower but still exceed the target. `fleet_benchmark.gd` now reports the slowest tick and phase totals; further subphase profiling is needed before attributing the spike to a specific route/search function.
+
 - v0.97.75: Set project-wide rendering cap to 120 FPS using application/run/max_fps and disable VSync so the monitor refresh rate does not impose a lower cap during performance testing. Keep physics/simulation cadence, threaded authority and explicit CI benchmark CLI frame limits unchanged. Runtime FPS not measured.
 
 - v0.97.70: The optional Windows x86_64 targeting extension builds against Godot 4.7.2 and the pinned godot-cpp revision; clean import and native targeting parity pass. Same-machine target-scale samples show no meaningful native speedup, so it remains opt-in. Graphical frame-time measurements remain open.
