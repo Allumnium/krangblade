@@ -63,8 +63,8 @@ func _begin() -> void:
 	session.connect("roster_changed", _roster_changed)
 	# Multi-peer stress has much less CPU per Godot process on CI runners.
 	# Preserve every check; only the wall-clock validation budget scales.
-	var deadline: float = 65.0 if expected_players <= 2 else (180.0 if expected_players <= 3 else 330.0)
-	create_timer(deadline).timeout.connect(_network_timeout)
+	var smoke_timeout_seconds: float = 65.0 if expected_players <= 2 else (180.0 if expected_players <= 3 else 330.0)
+	create_timer(smoke_timeout_seconds).timeout.connect(_network_timeout)
 	if role == "host":
 		if not bool(session.call("host_game", "TestHost")):
 			_fail("Could not host.")

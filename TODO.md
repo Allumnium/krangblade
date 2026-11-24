@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.41: Prevent a local variable shadow in the ENet smoke harness by naming the per-scenario timeout separately from the lobby discovery deadline. No gameplay or test assertion changes. Godot parser and multiplayer validation pending.
+
 - [ ] v0.97.40: Repair multi-peer ENet stress fixtures from run #395: initialize staged/dock freighters at actual 400-HP max instead of half health (which could trigger repair/retreat and abort resource handoffs), retain every construction and handoff assertion, increase wall-clock budgets for 3-/8-process jobs on shared CI runners, and print per-hull handoff state on timeout. No gameplay changes. Godot/runtime and rerun of multi-peer CI pending.
 
 - [ ] Re-run full manual GitHub Actions validation after v0.97.40 fixture correction; run #395 stalled at `miner_resource_handoff` for one of three empires, while 8-player test only reached ~40 simulation years before the 65-second timeout and remained short of sequential construction checks. This is **not** yet confirmed fixed until a successful 3-/8-player run: https://github.com/Allumnium/krangblade/actions/runs/45320109745

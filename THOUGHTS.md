@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.41: Prevent a local variable shadow in the ENet smoke harness by naming the per-scenario timeout separately from the lobby discovery deadline. No gameplay or test assertion changes. Godot parser and multiplayer validation pending.
+
 - v0.97.40: Repair multi-peer ENet stress fixtures from run #395: initialize staged/dock freighters at actual 400-HP max instead of half health (which could trigger repair/retreat and abort resource handoffs), retain every construction and handoff assertion, increase wall-clock budgets for 3-/8-process jobs on shared CI runners, and print per-hull handoff state on timeout. No gameplay changes. Godot/runtime and rerun of multi-peer CI pending.
 
 - v0.97.39: Clarify connected GitHub repository access and GitHub Actions read/log capabilities in AGENTS.md, record run #395's actual failing 3-/8-player ENet results, and note the project-only memory continuity model. Documentation only; no game code or test changes.
