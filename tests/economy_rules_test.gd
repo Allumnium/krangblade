@@ -1047,9 +1047,18 @@ func _test_handoff_candidates() -> void:
 	ECON._spatial_insert(cells, Vector2(radius, 0), radius, [0, {"id": 10}])
 	ECON._spatial_insert(cells, Vector2(-1, 0), radius, [1, {"id": 20}])
 	ECON._spatial_insert(cells, Vector2(radius * 4, 0), radius, [2, {"id": 30}])
-	var candidates: Array = ECON._handoff_candidates(cells, Vector2.ZERO)
+	var neighborhoods: Dictionary = {}
+	var candidates: Array = ECON._handoff_candidates(cells, Vector2.ZERO, neighborhoods)
 	assert(candidates.size() == 2)
 	assert(candidates[0]["id"] == 10 and candidates[1]["id"] == 20)
+	var shared: Array = ECON._handoff_candidates(cells, Vector2(radius * 0.5, 0), neighborhoods)
+	assert(is_same(candidates, shared))
+	assert(shared == ECON._handoff_candidates(cells, Vector2(radius * 0.5, 0)))
+	candidates[0]["cargo"] = {"Metals": 12.0}
+	assert(shared[0]["cargo"]["Metals"] == 12.0)
+	assert(ECON._handoff_candidates(cells, Vector2(radius * 4, 0), neighborhoods)[0]["id"] == 30)
+	assert(ECON._handoff_candidates(cells, Vector2(-1, 0), neighborhoods).size() == 1)
+	assert(ECON._handoff_candidates({}, Vector2.ZERO, {}).is_empty())
 
 func _test_repair_cells() -> void:
 	var radius: float = ECON.MINER_REPAIR_SEARCH
@@ -1221,6 +1230,50 @@ func _test_indexed_hostile_bucket() -> void:
 	for team in range(3):
 		assert(ECON._hostile_bucket(state, buckets, {}, 0, team, teams) == ECON._hostile_bucket(state, buckets, {}, 0, team))
 		assert(ECON._hostile_bucket(state, buckets, {}, 0, team, teams, true) == ECON._hostile_bucket(state, buckets, {}, 0, team, teams).filter(func(enemy: Dictionary) -> bool: return int(teams[enemy["id"]]) > 0))
+
+func _test_shared_combat_neighborhoods() -> void:
+	var state: Dictionary = {"teams": {1: 1, 2: 2, 3: 1}}
+	var frame = ECON.COMBAT_FRAME.new()
+	var radius: float = ECON.LASER_RANGE
+	var records: Array = [
+		[9, 2, Vector2(-radius * 0.5, 0)],
+		[-5, 2, Vector2(-radius * 0.25, 0)],
+		[4, 2, Vector2(radius * 0.5, 0)],
+		[-3, 2, Vector2(radius * 0.25, 0)],
+		[12, 3, Vector2.ZERO],
+		[-8, 1, Vector2.ZERO],
+		[18, 2, Vector2(radius * 5, 0)]
+	]
+	for record in records:
+		var id: int = record[0]
+		var owner: int = record[1]
+		var point: Vector2 = record[2]
+		frame.positions[id] = point
+		frame.team_by_id[id] = state["teams"][owner]
+		ECON._spatial_insert(frame.cells, point, radius, {"id": id, "owner": owner})
+	for team in [1, 2, 0]:
+		for cell in [Vector2i.ZERO, Vector2i(-1, 0), Vector2i(5, 0), Vector2i(10, 10)]:
+			var shared: Array = ECON._laser_neighborhood_blocks(state, frame, cell, team)
+			assert(is_same(shared, ECON._laser_neighborhood_blocks(state, frame, cell, team)))
+			var structures: Array = ECON._structure_neighborhood(state, frame, cell, team)
+			assert(is_same(structures, ECON._structure_neighborhood(state, frame, cell, team)))
+			var expected_structures: Array = []
+			for offset in [Vector2.ZERO, Vector2(radius * 0.5, radius * 0.5)]:
+				var point: Vector2 = Vector2(cell) * radius + offset
+				var nearest: Array = [radius * radius, -1]
+				var reference_cache: Dictionary = {}
+				expected_structures.clear()
+				for x in range(-1, 2):
+					for y in range(-1, 2):
+						var candidates: Array = ECON._hostile_bucket(state, frame.cells, reference_cache, cell + Vector2i(x, y), team, frame.team_by_id)
+						nearest = ECON._laser_block_nearest(ECON._laser_blocks(candidates, frame.positions), frame.positions, point, float(nearest[0]), int(nearest[1]))
+						for candidate in candidates:
+							var id: int = int(candidate["id"])
+							if id < 0 and team != 0 and int(frame.team_by_id[id]) != team:
+								expected_structures.append(id)
+				assert(ECON._laser_block_nearest(shared, frame.positions, point, radius * radius, -1) == nearest)
+				assert(structures == expected_structures)
+	print("PASS: shared combat neighborhoods preserve ordered targets, ties and team filtering")
 
 func _test_packed_threat_records() -> void:
 	var radius: float = ECON.REPAIR_SAFE_RADIUS
@@ -1822,6 +1875,7 @@ func _initialize() -> void:
 	_test_empire_targets()
 	_test_packed_threat_records()
 	_test_indexed_hostile_bucket()
+	_test_shared_combat_neighborhoods()
 	_test_reuse_combat_threats()
 	_test_shared_threat_index()
 	_test_sector_query_cache()

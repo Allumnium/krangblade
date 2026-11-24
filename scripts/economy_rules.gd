@@ -3459,8 +3459,10 @@ static func dropoff_rate(kind: String) -> float:
 	return TRACTOR_RATE * 20.0
 
 # Build once before movement; entries retain authoritative fleet order.
-static func _handoff_candidates(cells: Dictionary, point: Vector2) -> Array:
+static func _handoff_candidates(cells: Dictionary, point: Vector2, neighborhoods: Dictionary = {}) -> Array:
 	var cell := Vector2i(floori(point.x / RESOURCE_HANDOFF_RANGE), floori(point.y / RESOURCE_HANDOFF_RANGE))
+	if neighborhoods.has(cell):
+		return neighborhoods[cell]
 	var ordered: Array = []
 	for x in range(-1, 2):
 		for y in range(-1, 2):
@@ -3470,6 +3472,7 @@ static func _handoff_candidates(cells: Dictionary, point: Vector2) -> Array:
 	var result: Array = []
 	for entry in ordered:
 		result.append(entry[1])
+	neighborhoods[cell] = result
 	return result
 
 static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictionary, receivers: Array, threats: Dictionary, dt: float) -> float:
@@ -7742,18 +7745,31 @@ static func _scan_laser_target(state: Dictionary, frame: COMBAT_FRAME, ship: Dic
 		target = reusable
 	elif team != 0 and search_due:
 		ship["_next_laser_refresh"] = _next_search_slot(now, int(ship["id"]) % 2 * 2, 0.2)
-		if not frame.laser_blocks.has(team):
-			frame.laser_blocks[team] = {}
-		var team_blocks: Dictionary = frame.laser_blocks[team]
-		for x in range(-1, 2):
-			for y in range(-1, 2):
-				var key: Vector2i = cell + Vector2i(x, y)
-				if not team_blocks.has(key):
-					team_blocks[key] = _laser_blocks(_hostile_bucket(state, frame.cells, frame.hostile_cache, key, team, frame.team_by_id), positions)
-				var nearest: Array = _laser_block_nearest(team_blocks[key], positions, pos, best, target)
-				best = float(nearest[0])
-				target = int(nearest[1])
+		var nearest: Array = _laser_block_nearest(_laser_neighborhood_blocks(state, frame, cell, team), positions, pos, best, target)
+		target = int(nearest[1])
 	return target
+
+# All hulls in one cell querying the same team see the same ordered blocks.
+# Preserve the old x/y traversal, per-cell block boundaries and lazy hostile
+# bucket population; range and approximate tie resolution stay per attacker.
+static func _laser_neighborhood_blocks(state: Dictionary, frame: COMBAT_FRAME, cell: Vector2i, team: int) -> Array:
+	if not frame.laser_neighborhoods.has(team):
+		frame.laser_neighborhoods[team] = {}
+	var neighborhoods: Dictionary = frame.laser_neighborhoods[team]
+	if neighborhoods.has(cell):
+		return neighborhoods[cell]
+	if not frame.laser_blocks.has(team):
+		frame.laser_blocks[team] = {}
+	var team_blocks: Dictionary = frame.laser_blocks[team]
+	var blocks: Array = []
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			var key: Vector2i = cell + Vector2i(x, y)
+			if not team_blocks.has(key):
+				team_blocks[key] = _laser_blocks(_hostile_bucket(state, frame.cells, frame.hostile_cache, key, team, frame.team_by_id), frame.positions)
+			blocks.append_array(team_blocks[key])
+	neighborhoods[cell] = blocks
+	return blocks
 
 # Start a new chase when the current or prior target flees, or, on a search
 # tick, from the nearest hostile hull in the same sector.
@@ -7788,21 +7804,35 @@ static func _acquire_pursuit(state: Dictionary, frame: COMBAT_FRAME, pos: Vector
 # shipyard in the surrounding combat cells.
 static func _fire_hull_at_structures(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, pos: Vector2, team: int, cell: Vector2i, weapon_damage: float, cooldown: float) -> void:
 	var nearest: float = LASER_RANGE * LASER_RANGE
-	for x in range(-1, 2):
-		for y in range(-1, 2):
-			for other in _hostile_bucket(state, frame.cells, frame.hostile_cache, cell + Vector2i(x, y), team, frame.team_by_id):
-				var yard_id: int = int(other["id"])
-				if yard_id >= 0 or team == 0 or int(frame.team_by_id[int(other["id"])]) == team:
-					continue
-				var distance: float = pos.distance_squared_to(frame.positions[yard_id])
-				if distance < nearest:
-					nearest = distance
-					ship["yard_target"] = yard_id
+	for candidate_id in _structure_neighborhood(state, frame, cell, team):
+		var distance: float = pos.distance_squared_to(frame.positions[candidate_id])
+		if distance < nearest:
+			nearest = distance
+			ship["yard_target"] = candidate_id
 	var yard_id: int = int(ship["yard_target"])
 	if yard_id < -1 and weapon_damage > 0.0 and cooldown <= EPS:
 		_ship_hit(frame.damage, frame.killed_by, frame.health, yard_id, ship, weapon_damage, frame.hull_slots, frame.hull_health)
 		ship["laser_cooldown"] = 1.0
 		ship["yard_laser_until"] = float(state["elapsed"]) + 0.2
+
+# A structure fallback must not scan every hostile hull again. Filter the
+# same cached buckets once per team/cell, keeping their exact tie order.
+static func _structure_neighborhood(state: Dictionary, frame: COMBAT_FRAME, cell: Vector2i, team: int) -> Array:
+	if not frame.structure_neighborhoods.has(team):
+		frame.structure_neighborhoods[team] = {}
+	var neighborhoods: Dictionary = frame.structure_neighborhoods[team]
+	if neighborhoods.has(cell):
+		return neighborhoods[cell]
+	var ids: Array = []
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			for other in _hostile_bucket(state, frame.cells, frame.hostile_cache, cell + Vector2i(x, y), team, frame.team_by_id):
+				var id: int = int(other["id"])
+				if id >= 0 or team == 0 or int(frame.team_by_id[id]) == team:
+					continue
+				ids.append(id)
+	neighborhoods[cell] = ids
+	return ids
 
 # Each matrix emitter has its own cooldown and fires from the station.
 static func _fire_station_weapons(state: Dictionary, frame: COMBAT_FRAME, dt: float) -> void:
@@ -9655,9 +9685,17 @@ static func _step_resource_handoffs(state: Dictionary, frame: STEP_FRAME, dt: fl
 			_spatial_insert(stage_receivers[owner], craft["position"], RESOURCE_HANDOFF_RANGE, [receiver_order, craft])
 			receiver_order += 1
 	# Passive handoff is independent of route and job. Evaluate all hulls before movement.
+	# Membership and positions are frozen here; cargo and eligibility are
+	# still checked live for each transfer, in the original fleet order.
+	var receiver_neighborhoods: Dictionary = {}
 	for miner in state["ships"]:
 		if miner.get("kind", "") == "miner" and not bool(miner.get("rogue", false)) and not frame.salvage_busy.has(int(miner["id"])):
-			var receivers: Array = _handoff_candidates(stage_receivers.get(int(miner["owner"]), {}), miner["position"]) if _cargo_total(miner) > EPS else []
+			var receivers: Array = []
+			if _cargo_total(miner) > EPS:
+				var owner: int = int(miner["owner"])
+				if not receiver_neighborhoods.has(owner):
+					receiver_neighborhoods[owner] = {}
+				receivers = _handoff_candidates(stage_receivers.get(owner, {}), miner["position"], receiver_neighborhoods[owner])
 			miner["_handoff_sent"] = _miner_handoff(state, frame.graph, miner, receivers, frame.salvage_threats, dt)
 	var mining_receivers: Dictionary = frame.mining_receivers
 	for craft in state["ships"]:
