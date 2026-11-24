@@ -1180,7 +1180,7 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	assert(int(state["planets"][1]["owner"]) == 1)
 	print("PASS: nearest available colony, queued hold and automatic settlement")
 
-func _motion_sleep_trace(enabled: bool, schedule_enabled: bool = true, persistent_avoidance: bool = true) -> Array:
+func _motion_sleep_trace(enabled: bool, schedule_enabled: bool = true, persistent_avoidance: bool = true, persistent_combat: bool = true) -> Array:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	var craft: Dictionary = {"id": 55001, "kind": "fighter", "owner": 1, "origin": 0, "at": 0, "dest": 0, "source": -1, "route": [], "leg": 0.0, "position": Vector2(100, 200), "heading": Vector2.LEFT, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock(), "wander_auto": false}
@@ -1192,7 +1192,7 @@ func _motion_sleep_trace(enabled: bool, schedule_enabled: bool = true, persisten
 			assert(ECON.command_stop_units(state, 1, [55001]))
 		elif tick == 45:
 			assert(ECON.issue_unit_order(state, 1, [55001], {"kind": "position", "target": 0, "point": Vector2(150, 200), "move_only": true}, false))
-		ECON.step(state, 0.1, {}, enabled, schedule_enabled, persistent_avoidance)
+		ECON.step(state, 0.1, {}, enabled, schedule_enabled, persistent_avoidance, persistent_combat)
 		trace.append(state.duplicate(true))
 	return trace
 
@@ -1241,6 +1241,7 @@ func _test_deadline_calendars() -> void:
 func _test_motion_sleep_wake() -> void:
 	assert(_motion_sleep_trace(true) == _motion_sleep_trace(false))
 	assert(_motion_sleep_trace(true, true, true) == _motion_sleep_trace(true, true, false))
+	assert(_motion_sleep_trace(true, true, true, true) == _motion_sleep_trace(true, true, true, false))
 	var state: Dictionary = {"elapsed": 1.0, "ships": []}
 	var point := Vector2(100, 200)
 	var ship: Dictionary = {"id": 501, "kind": "fighter", "owner": 1, "position": point, "heading": Vector2.LEFT, "navigation_target": point, "route": [], "holding": true, "hold_position": point, "hold_heading": Vector2.LEFT}
@@ -1588,6 +1589,83 @@ func _test_civilian_activity_fast_paths() -> void:
 	assert(not miner.has("auto_salvage_origin"))
 	print("PASS: civilian no-work paths, live trade opportunities and original route selection")
 
+func _test_persistent_combat_buckets() -> void:
+	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var origin: Vector2 = ECON.station_position(state, 0, 0.0)
+	var craft: Dictionary = {"id": 19101, "kind": "fighter", "owner": 1, "at": 0, "position": origin, "heading": Vector2.RIGHT, "route": [], "leg": 0.0, "dest": 0, "source": -1, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock()}
+	var other: Dictionary = craft.duplicate(true)
+	other["id"] = 19102
+	other["owner"] = 2
+	other["position"] = origin
+	state["ships"] = [craft, other]
+	var graph: Dictionary = ECON.military_graph(state)
+	var prior: Array = []
+	for tick in range(6):
+		if tick == 2:
+			other["position"] = Vector2(-5000, -5000)
+		elif tick == 3:
+			state["ships"].reverse()
+		elif tick == 4:
+			state["ships"].erase(craft)
+		elif tick == 5:
+			state["ships"] = [craft.duplicate(true), other]
+		var reference = ECON._build_combat_frame(state, graph, state["ships"], {}, false)
+		var actual = ECON._build_combat_frame(state, graph, state["ships"], {}, true)
+		assert(actual.cells == reference.cells and actual.cells.keys() == reference.cells.keys())
+		assert(actual.sectors == reference.sectors and actual.sectors.keys() == reference.sectors.keys())
+		assert(actual.positions == reference.positions and actual.team_by_id == reference.team_by_id)
+		var point: Vector2 = actual.positions[19101] if actual.positions.has(19101) else origin
+		var cell := Vector2i(floori(point.x / ECON.LASER_RANGE), floori(point.y / ECON.LASER_RANGE))
+		if tick == 0:
+			prior = ECON._combat_cell_index._retained[cell]
+			assert(prior.size() == 2)
+		elif tick == 1:
+			assert(is_same(prior, ECON._combat_cell_index._retained[cell]) and prior.size() == 2)
+		for bucket in ECON._combat_cell_index._retained.values():
+			for hull in bucket:
+				assert(int(hull["id"]) > 0)
+	print("PASS: persistent combat cells/sectors, structure isolation and exact order")
+
+func _test_persistent_repair_index() -> void:
+	var radius: float = ECON.MINER_REPAIR_SEARCH
+	var targets: Dictionary = {
+		10: {"position": Vector2(10, 0), "entity": {"hp": 1.0}, "max_hp": 10.0},
+		20: {"position": Vector2(-10, 0), "entity": {"hp": 1.0}, "max_hp": 10.0},
+		30: {"position": Vector2.ZERO, "entity": {"hp": 10.0}, "max_hp": 10.0}}
+	var index = ECON.REPAIR_QUERIES.PersistentDamagedIndex.new()
+	var prior: Array = []
+	for tick in range(7):
+		match tick:
+			1:
+				targets[10]["position"] = Vector2(20, 0)
+			2:
+				targets[10]["entity"]["hp"] = 10.0
+			3:
+				targets[30]["entity"]["hp"] = 1.0
+			4:
+				targets[20]["repair_position"] = Vector2(radius * 5, 0)
+			5:
+				targets.erase(10)
+			6:
+				targets.clear()
+		index.refresh(targets, radius, ECON.EPS, ECON.REPAIR_QUERIES.is_damaged)
+		var reference: Dictionary = ECON._damaged_repair_cells(targets)
+		assert(index.cells == reference)
+		for x in range(-2, 7):
+			var point := Vector2(x * radius, 0)
+			assert(ECON._nearby_repair_ids(index.cells, point, index.neighborhoods) == ECON._nearby_repair_ids(reference, point, {}))
+		var ids: Array = ECON._nearby_repair_ids(index.cells, Vector2.ZERO, index.neighborhoods)
+		if tick == 0:
+			prior = ids
+		elif tick == 1:
+			assert(is_same(prior, ids))
+		elif tick == 2:
+			assert(ids == [20] and not is_same(prior, ids))
+	index.clear()
+	assert(index.cells.is_empty() and index.neighborhoods.is_empty())
+	print("PASS: persistent repair candidates, live damage, movement and order invalidation")
+
 func _test_repair_cells() -> void:
 	var radius: float = ECON.MINER_REPAIR_SEARCH
 	var targets: Dictionary = {
@@ -1711,8 +1789,8 @@ func _test_combat_activity_fast_paths() -> void:
 				for ship in current["ships"]:
 					if int(ship["id"]) == 102:
 						ship["position"] = point
-		ECON._combat(state, graph, 0.1)
-		ECON._combat(reference, reference_graph, 0.1, {}, false)
+		ECON._combat(state, graph, 0.1, {}, true, true)
+		ECON._combat(reference, reference_graph, 0.1, {}, false, false)
 		assert(state == reference, "Combat activity mismatch at tick %d" % tick)
 	var frame = ECON.COMBAT_FRAME.new()
 	frame.activity_bounds_ready = true
@@ -2526,6 +2604,7 @@ func _initialize() -> void:
 	_test_reusable_laser_target()
 	_test_combat_search_due()
 	_test_combat_activity_fast_paths()
+	_test_persistent_combat_buckets()
 	_test_retry_dispatch_fast_path()
 	_test_repair_retry_due()
 	_test_search_slots()
@@ -2535,6 +2614,7 @@ func _initialize() -> void:
 	_test_hostile_buckets()
 	_test_postcombat_hull_index()
 	_test_repair_cells()
+	_test_persistent_repair_index()
 	_test_civilian_activity_fast_paths()
 	_test_handoff_candidates()
 	_test_spatial_buckets()

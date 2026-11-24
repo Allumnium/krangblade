@@ -54,6 +54,14 @@ const REPAIR_QUERIES = preload("res://scripts/repair_queries.gd")
 const CONSTRUCTION_QUERIES = preload("res://scripts/construction_queries.gd")
 const COMBAT_FRAME = preload("res://scripts/combat_frame.gd")
 const STEP_FRAME = preload("res://scripts/step_frame.gd")
+# Separate retained indexes at their original frozen snapshot boundaries.
+static var _combat_index_state: Dictionary = {}
+static var _combat_index_roster: Array = []
+static var _combat_cell_index = STEP_FRAME.OrderedHullBuckets.new()
+static var _combat_sector_index = STEP_FRAME.OrderedHullBuckets.new()
+static var _repair_index_state: Dictionary = {}
+static var _repair_index_roster: Array = []
+static var _repair_index = REPAIR_QUERIES.PersistentDamagedIndex.new()
 const SECTOR_GEOMETRY = preload("res://scripts/sector_geometry.gd")
 const RESOURCES = ["Metals", "Organics", "Crystals"]
 const EXTRACTED = ["Metals", "Crystals"]
@@ -7881,9 +7889,9 @@ static func _combat_search_due(ship: Dictionary, now: float) -> bool:
 # One simultaneous resolution per step: freeze positions and health, let every
 # hull and structure choose targets and accumulate damage, then apply it all.
 # Phase order and ship iteration order are part of the simulation contract.
-static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}, activity_fast_paths: bool = true) -> void:
+static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}, activity_fast_paths: bool = true, persistent_buckets: bool = false) -> void:
 	var ships: Array = state["ships"]
-	var frame: COMBAT_FRAME = _build_combat_frame(state, graph, ships, threat_index)
+	var frame: COMBAT_FRAME = _build_combat_frame(state, graph, ships, threat_index, persistent_buckets)
 	# Optional reference path for state-equivalence tests.
 	frame.activity_bounds_ready = activity_fast_paths
 	_detect_cloaked(state, ships, frame.cells, frame.positions, frame.team_by_id)
@@ -7895,7 +7903,15 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 
 # Freeze hull/structure positions, health and spatial buckets; also publish the
 # armed-hull threat snapshot consumed later by civilian safety checks.
-static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Array, threat_index: Dictionary) -> COMBAT_FRAME:
+static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Array, threat_index: Dictionary, persistent_buckets: bool = false) -> COMBAT_FRAME:
+	if persistent_buckets:
+		if not is_same(state, _combat_index_state) or not is_same(ships, _combat_index_roster):
+			_combat_index_state = state
+			_combat_index_roster = ships
+			_combat_cell_index.clear()
+			_combat_sector_index.clear()
+		_combat_cell_index.begin()
+		_combat_sector_index.begin()
 	var positions: Dictionary = {}
 	# Combat needs a frozen reference map until simultaneous damage resolves.
 	var indexed: bool = is_same(state, _indexed_state)
@@ -7960,15 +7976,24 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 			sector = sector_at(graph, pos, range(graph["points"].size()))
 		ship_sectors[slot] = sector
 		if sector >= 0:
-			if not sectors.has(sector):
-				sectors[sector] = []
-			sectors[sector].append(ship)
+			if persistent_buckets:
+				_combat_sector_index.append(sector, ship)
+			else:
+				if not sectors.has(sector):
+					sectors[sector] = []
+				sectors[sector].append(ship)
 			if not sector_teams.has(sector):
 				sector_teams[sector] = {}
 			sector_teams[sector][int(team_by_id[id])] = true
-		if not cells.has(combat_cell):
-			cells[combat_cell] = []
-		cells[combat_cell].append(ship)
+		if persistent_buckets:
+			_combat_cell_index.append(combat_cell, ship)
+		else:
+			if not cells.has(combat_cell):
+				cells[combat_cell] = []
+			cells[combat_cell].append(ship)
+	if persistent_buckets:
+		cells = _combat_cell_index.finish()
+		sectors = _combat_sector_index.finish()
 	threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells, "positions": threat_positions, "teams": threat_teams, "ids": threat_ids}
 	threat_index["count"] = threat_count
 	var frame := COMBAT_FRAME.new()
@@ -7986,18 +8011,30 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 	frame.sectors = sectors
 	frame.sector_teams = sector_teams
 	frame.activity_bounds = activity_bounds
-	_index_combat_structures(state, frame)
+	_index_combat_structures(state, frame, persistent_buckets)
 	frame.activity_bounds_ready = true
 	return frame
 
 # Stations and shipyards share the frozen combat maps with hulls.
-static func _index_combat_structures(state: Dictionary, frame: COMBAT_FRAME) -> void:
+# Detach a retained hull bucket before adding its first structure.
+static func _insert_combat_structure(cells: Dictionary, point: Vector2, entry: Dictionary, detached: Dictionary, persistent_buckets: bool) -> void:
+	var cell := Vector2i(floori(point.x / LASER_RANGE), floori(point.y / LASER_RANGE))
+	if not cells.has(cell):
+		cells[cell] = []
+		detached[cell] = true
+	elif persistent_buckets and not detached.has(cell):
+		cells[cell] = (cells[cell] as Array).duplicate()
+		detached[cell] = true
+	cells[cell].append(entry)
+
+static func _index_combat_structures(state: Dictionary, frame: COMBAT_FRAME, persistent_buckets: bool = false) -> void:
 	var yard_targets: Dictionary = {}
 	var station_targets: Dictionary = {}
 	var positions: Dictionary = frame.positions
 	var health: Dictionary = frame.health
 	var team_by_id: Dictionary = frame.team_by_id
 	var cells: Dictionary = frame.cells
+	var detached: Dictionary = {}
 	var system_count: int = (state["planets"] as Array).size()
 	for index in range(system_count):
 		var system: Dictionary = state["planets"][index]
@@ -8008,7 +8045,7 @@ static func _index_combat_structures(state: Dictionary, frame: COMBAT_FRAME) -> 
 			health[target_id] = _effective_health(system["station"], station_max_hp(system))
 			positions[target_id] = pos
 			team_by_id[target_id] = _combat_group(state, int(system["owner"]))
-			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "station"})
+			_insert_combat_structure(cells, pos, {"id": target_id, "owner": system["owner"], "kind": "station"}, detached, persistent_buckets)
 			_include_combat_activity_cell(frame.activity_bounds, int(team_by_id[target_id]), Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE)))
 		for slot in range(system["yards"].size()):
 			var target_id: int = -2 - index * 3 - slot
@@ -8017,7 +8054,7 @@ static func _index_combat_structures(state: Dictionary, frame: COMBAT_FRAME) -> 
 			health[target_id] = float(system["yards"][slot].get("hp", YARD_HP * int(system["yards"][slot]["level"])))
 			positions[target_id] = pos
 			team_by_id[target_id] = _combat_group(state, int(system["owner"]))
-			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "shipyard"})
+			_insert_combat_structure(cells, pos, {"id": target_id, "owner": system["owner"], "kind": "shipyard"}, detached, persistent_buckets)
 			_include_combat_activity_cell(frame.activity_bounds, int(team_by_id[target_id]), Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE)))
 	frame.yard_targets = yard_targets
 	frame.station_targets = station_targets
@@ -10138,7 +10175,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 		next += AI_INTERVAL
 	return next
 
-static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true, persistent_avoidance_enabled: bool = true) -> void:
+static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true, persistent_avoidance_enabled: bool = true, persistent_combat_enabled: bool = true) -> void:
 	_begin_deadline_schedule(state, deadline_schedule_enabled)
 	_rock_plan_tick += 1
 	if not is_same(state, _trajectory_state) or not is_same(state["ships"], _trajectory_roster):
@@ -10155,6 +10192,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	frame.motion_sleep_enabled = motion_sleep_enabled
 	frame.deadline_schedule_enabled = deadline_schedule_enabled
 	frame.persistent_avoidance_enabled = persistent_avoidance_enabled
+	frame.persistent_combat_enabled = persistent_combat_enabled
 	_step_economy(state, frame, dt)
 	started = _profile_stage(profile, "Economy", started)
 	_step_ai(state, frame, dt)
@@ -10305,7 +10343,7 @@ static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> voi
 	_update_tactical_orders(state, combat_graph)
 	_pirate_decisions(state)
 	var threat_index: Dictionary = {}
-	_combat(state, combat_graph, dt, threat_index)
+	_combat(state, combat_graph, dt, threat_index, true, frame.persistent_combat_enabled)
 	combat_graph.erase("travel_influence")
 	combat_graph.erase("travel_permissions")
 	# Station destruction changes ownership during combat. Never use stale
@@ -10395,7 +10433,19 @@ static func _step_formations(state: Dictionary, frame: STEP_FRAME, dt: float) ->
 	frame.idle_targets = _idle_formation_targets(state, combat_graph)
 	frame.coordinated = _coordinate_formations(state, combat_graph, dt)
 	frame.service_refs = service_targets(state)
-	frame.damaged_cells = _damaged_repair_cells(frame.service_refs)
+	if frame.persistent_combat_enabled:
+		if not is_same(state, _repair_index_state) or not is_same(state["ships"], _repair_index_roster):
+			_repair_index_state = state
+			_repair_index_roster = state["ships"]
+			_repair_index.clear()
+		if frame.handoff_miners.is_empty():
+			_repair_index.clear()
+		else:
+			_repair_index.refresh(frame.service_refs, MINER_REPAIR_SEARCH, EPS, REPAIR_QUERIES.is_damaged)
+			frame.damaged_cells = _repair_index.cells
+			frame.repair_neighborhoods = _repair_index.neighborhoods
+	else:
+		frame.damaged_cells = _damaged_repair_cells(frame.service_refs)
 
 ## Runs one hull's highest-priority work for this substep. Hulls that stay
 ## idle and unmoved become candidates for local wandering.
