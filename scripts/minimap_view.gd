@@ -7,6 +7,15 @@ const TERRITORY_VIEW = preload("res://scripts/territory_view.gd")
 const FOG_OF_WAR = preload("res://scripts/fog_of_war.gd")
 const CELESTIAL = preload("res://scripts/celestial_view.gd")
 const SHIP_MOTION_VIEW = preload("res://scripts/ship_motion_view.gd")
+const MINIMAP_HULL_SIDES: int = 10
+const MINIMAP_HULL_RADIUS: float = 2.0
+static var _hull_rim: PackedVector2Array = _make_hull_rim()
+
+static func _make_hull_rim() -> PackedVector2Array:
+	var rim := PackedVector2Array()
+	for k in range(MINIMAP_HULL_SIDES):
+		rim.append(Vector2.from_angle(TAU * float(k) / float(MINIMAP_HULL_SIDES)) * MINIMAP_HULL_RADIUS)
+	return rim
 
 var minimap: Control
 var map_canvas: Control
@@ -200,17 +209,44 @@ func draw(selected: int, selected_units: Array[int], selected_field: int, select
 			if not rock.is_empty():
 				minimap.draw_arc(_minimap_point(rock["position"], area), 3.0, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
 	# Mirror the main map's live hull visibility and interpolation; do not
-	# reveal undiscovered system ownership.
-	for ship in state["ships"]:
-		if not ship_visible.call(state, ship):
+	# reveal undiscovered system ownership. Reuse this frame's pose cache and
+	# submit every hull dot as one triangle batch.
+	var hull_points := PackedVector2Array()
+	var hull_colors := PackedColorArray()
+	var hull_indices := PackedInt32Array()
+	var owner_tints: Dictionary = {}
+	var selected_lookup: Dictionary = {}
+	for id in selected_units:
+		selected_lookup[id] = true
+	var selected_points: Array[Vector2] = []
+	var poses: Dictionary = ship_poses.call(state, 0.0)
+	for id in poses:
+		var pose: Dictionary = poses[id]
+		var point: Vector2 = _minimap_point(pose["world"], area)
+		if not area.has_point(point):
 			continue
-		var id: int = int(ship["id"])
-		var world: Vector2 = ship_motion.world_position(ship, points, session)
-		var point: Vector2 = _minimap_point(world, area)
-		if area.has_point(point):
-			minimap.draw_circle(point, 2.0, empire_color.call(int(ship["owner"])).lightened(0.2))
-			if selected_units.has(id):
-				minimap.draw_arc(point, 2.6, 0.0, TAU, 10, Color.WHITE, 1.0, true)
+		var owner: int = int(pose["owner"])
+		var tint: Color
+		if owner_tints.has(owner):
+			tint = owner_tints[owner]
+		else:
+			tint = (empire_color.call(owner) as Color).lightened(0.2)
+			owner_tints[owner] = tint
+		var base: int = hull_points.size()
+		hull_points.append(point)
+		hull_colors.append(tint)
+		for k in range(MINIMAP_HULL_SIDES):
+			hull_points.append(point + _hull_rim[k])
+			hull_colors.append(tint)
+			hull_indices.append(base)
+			hull_indices.append(base + 1 + k)
+			hull_indices.append(base + 1 + (k + 1) % MINIMAP_HULL_SIDES)
+		if selected_lookup.has(id):
+			selected_points.append(point)
+	if not hull_indices.is_empty():
+		RenderingServer.canvas_item_add_triangle_array(minimap.get_canvas_item(), hull_indices, hull_points, hull_colors)
+	for point in selected_points:
+		minimap.draw_arc(point, 2.6, 0.0, TAU, 10, Color.WHITE, 1.0, true)
 	var corner: Vector2 = _minimap_point(world_point.call(Vector2.ZERO), area)
 	var end: Vector2 = _minimap_point(world_point.call(map_canvas.size), area)
 	var camera_rect := Rect2(corner, end - corner)

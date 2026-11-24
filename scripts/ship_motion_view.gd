@@ -122,7 +122,9 @@ func sync(state: Dictionary, session: Node) -> void:
 		if not updated.has(id):
 			ship_offsets.erase(id)
 
-func poses(state: Dictionary, delta: float, session: Node, ship_visible: Callable, screen_point: Callable) -> Dictionary:
+# projection, when supplied, is [half_size, world_center, fit, zoom] and
+# reproduces screen_point arithmetic without a call per hull.
+func poses(state: Dictionary, delta: float, session: Node, ship_visible: Callable, screen_point: Callable, projection: Array = []) -> Dictionary:
 	var frame: int = Engine.get_process_frames()
 	var revision: Array = [session.get("motion_revision"), session.get("motion_base_revision"), state.get("elapsed"), state["ships"].size(), state.get("time_speed")]
 	if delta <= 0.0 and pose_frame == frame and pose_revision == revision:
@@ -130,6 +132,12 @@ func poses(state: Dictionary, delta: float, session: Node, ship_visible: Callabl
 	sync(state, session)
 	var points: Array = state["map"]["points"]
 	var poses: Dictionary = {}
+	var weight: float = 1.0 - exp(-delta / SNAPSHOT_SECONDS * 3.0)
+	var projected: bool = projection.size() == 4
+	var half_size: Vector2 = projection[0] if projected else Vector2.ZERO
+	var world_center: Vector2 = projection[1] if projected else Vector2.ZERO
+	var fit: float = projection[2] if projected else 1.0
+	var zoom: float = projection[3] if projected else 1.0
 	for ship in state["ships"]:
 		if not ship_visible.call(state, ship):
 			continue
@@ -137,13 +145,13 @@ func poses(state: Dictionary, delta: float, session: Node, ship_visible: Callabl
 		var visual: Dictionary = ship_visuals.get(id, {})
 		var pos: Vector2 = _ship_position(ship, points, session) if visual.is_empty() else _visual_position(visual)
 		var direction: Vector2 = visual.get("heading", ship.get("heading", Vector2.UP))
-		var prior: Dictionary = ship_offsets.get(id, {"angle": direction.angle()})
-		var weight: float = 1.0 - exp(-delta / SNAPSHOT_SECONDS * 3.0)
-		var angle: float = lerp_angle(float(prior["angle"]), direction.angle(), weight)
+		var target_angle: float = direction.angle()
+		var angle: float = lerp_angle(float(ship_offsets.get(id, target_angle)), target_angle, weight)
 		if delta > 0.0 or not ship_offsets.has(id):
-			ship_offsets[id] = {"angle": angle}
+			ship_offsets[id] = angle
 		var mining: bool = ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") in ["outbound", "mining", "return"]
-		poses[id] = {"point": screen_point.call(pos), "world": pos, "direction": Vector2.from_angle(angle), "mining": mining, "kind": ship.get("kind", "")}
+		var point: Vector2 = half_size + (pos - world_center) * fit * zoom if projected else screen_point.call(pos)
+		poses[id] = {"point": point, "world": pos, "direction": Vector2.from_angle(angle), "mining": mining, "kind": ship.get("kind", ""), "owner": int(ship["owner"])}
 	pose_frame = frame
 	pose_revision = revision
 	pose_world_cache = poses

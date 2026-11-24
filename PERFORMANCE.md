@@ -116,3 +116,15 @@ Godot 4.7.2, Windows, Ryzen 5 7600X, RTX 5060 Ti, Compatibility renderer, 1280x7
 Published simulation advance was 9.3 and 10.5 years respectively; one 1x batch advances 0.1 years and one 5x batch advances 0.5 years. Every frame and observed batch misses its budget. Completed throughput is far below 10 batches/s; worker overload coalescing slows simulation. Snapshot-copy time is reported separately from simulation work. Screenshots confirm the dense fleet and HUD are rendered; they do not establish long-session interaction or internet behavior.
 
 The small 100-ship live startup/teardown check completed nine batches at 11.612 ms maximum simulation time with zero worker overruns. The unchanged paused mode completed 100 frames with 8.358 ms p95 and no frames over 16.67 ms. No full suite or CI run was performed for this test-harness increment.
+
+## Render path batching (v0.97.84)
+
+Same harness and hardware as above, 200 measured frames.
+
+| Mode | Ships | Speed | Frame p50 ms | Frame p95 ms | 2D draw calls | Batches/s | Sim p50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Simulation stopped | 2,000 | - | 32.3 | 35.8 | 368 | - | - |
+| Live threaded | 2,000 | 1x | 36.9 | 156.5 | 370 | 3.04 | 231.1 |
+| Live threaded | 1,000 | 5x | 18.5 | 25.2 | 370 | 1.66 | 530.3 |
+
+Before this change the stopped 2,000-ship sample measured 74.8 ms p95 with about 2,367 draw calls. Temporary probes showed the minimap at 20 ms (one draw call per hull), pose rebuild at 16.7 ms and the ship loop at 10.9 ms. The minimap now submits all hull dots in one triangle array from the frame pose cache; poses use one frozen projection and a per-owner shared-vision memo; service targets are cached per snapshot/motion revision; the ship loop caches hull textures per kind/owner. Live 2,000-ship p95 is dominated by frames that coincide with batch publication; simulation throughput is unchanged and both targets still fail.

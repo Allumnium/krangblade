@@ -83,6 +83,12 @@ var celestial_view := CELESTIAL_VIEW.new()
 var fog_asteroid_view := CELESTIAL_VIEW.new()
 # Draw callbacks are synchronous; camera geometry is fixed for their duration.
 var _draw_projection_active: bool = false
+var _pose_vision_memo: Dictionary = {}
+var _pose_vision_team: int = 0
+# Full service target map reused until the authority publishes a change.
+var _service_refs_cache: Dictionary = {}
+var _service_refs_state: Dictionary = {}
+var _service_refs_signature: Array = []
 var _draw_projection_size: Vector2
 var _draw_map_size: Vector2
 var _draw_world_center: Vector2
@@ -1721,7 +1727,7 @@ func _draw_queued_order_overlay() -> void:
 			break
 	if not has_queue:
 		return
-	order_view.draw_queued_chains(queued_order_overlay, state, _ship_poses(state), ECONOMY.service_targets(state), selected_units, Rect2(Vector2.ZERO, map_canvas.size), _fog_visible)
+	order_view.draw_queued_chains(queued_order_overlay, state, _ship_poses(state), _frame_service_refs(state), selected_units, Rect2(Vector2.ZERO, map_canvas.size), _fog_visible)
 
 func _draw_fog() -> void:
 	_begin_draw_projection()
@@ -4580,7 +4586,34 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 	camera.following = false
 
 func _ship_poses(state: Dictionary, delta: float = 0.0) -> Dictionary:
-	return ship_motion.poses(state, delta, session, _ship_visible, _screen_point)
+	_pose_vision_memo.clear()
+	_pose_vision_team = ECONOMY.combat_group(state, _me())
+	# Freeze the same projection once instead of per hull.
+	var was_active: bool = _draw_projection_active
+	if not was_active:
+		_begin_draw_projection()
+	var projection: Array = [_draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom]
+	_draw_projection_active = was_active
+	return ship_motion.poses(state, delta, session, _pose_ship_visible, _screen_point, projection)
+
+func _frame_service_refs(state: Dictionary) -> Dictionary:
+	var signature: Array = [session.get("snapshot_revision"), session.get("motion_revision"), state.get("elapsed"), state["ships"].size()]
+	if not is_same(state, _service_refs_state) or signature != _service_refs_signature:
+		_service_refs_cache = ECONOMY.service_targets(state)
+		_service_refs_state = state
+		_service_refs_signature = signature
+	return _service_refs_cache
+
+# _ship_visible with the owner's shared-vision result memoized per pose pass.
+func _pose_ship_visible(state: Dictionary, ship: Dictionary) -> bool:
+	var owner: int = int(ship["owner"])
+	var shared: Variant = _pose_vision_memo.get(owner)
+	if shared == null:
+		shared = ECONOMY.shares_group_vision(state, _pose_vision_team, ECONOMY.combat_group(state, owner))
+		_pose_vision_memo[owner] = shared
+	if bool(shared):
+		return true
+	return _fog_visible(ship.get("position", Vector2.INF)) and ECONOMY.ship_visible_to_team(state, ship, _pose_vision_team)
 
 func _salvage_radius(pile: Dictionary) -> float:
 	return maxf(3.0, sqrt(float(pile["amount"])) * 1.6 * _fit() * camera.zoom)
@@ -4802,7 +4835,7 @@ func _draw_map_content() -> void:
 	var poses: Dictionary = _ship_poses(state)
 	var pose_overrides: Dictionary = {}
 	_draw_salvage(state, poses, viewport_bounds, font)
-	var service_refs: Dictionary = ECONOMY.service_targets(state)
+	var service_refs: Dictionary = _frame_service_refs(state)
 	for gate in state["ships"]:
 		if gate.get("kind", "") != "warp_gate" or int(gate["owner"]) != _me():
 			continue
@@ -4971,6 +5004,12 @@ func _draw_map_content() -> void:
 	var ship_metrics_cache: Dictionary = {}
 	var owner_color_cache: Dictionary = {}
 	var hull_color_cache: Dictionary = {}
+	var hull_texture_cache: Dictionary = {}
+	var detailed_hulls: bool = ship_scale >= 0.42
+	var simulation_running: bool = int(state.get("time_speed", 1)) > 0
+	var selected_lookup: Dictionary = {}
+	for id in selected_units:
+		selected_lookup[id] = true
 	for ship in state["ships"]:
 		if not poses.has(int(ship["id"])):
 			continue
@@ -5003,7 +5042,7 @@ func _draw_map_content() -> void:
 		direction *= scale
 		var cloaked: bool = bool(ship.get("cloaked", false))
 		var thrust: float = ship_motion.thrust_for(ship_id)
-		if not cloaked and int(state.get("time_speed", 1)) > 0 and scale >= 0.65 and thrust > 0.035:
+		if not cloaked and simulation_running and scale >= 0.65 and thrust > 0.035:
 			world_batches.queue_exhaust(kind, point, direction, scale, thrust, ship_id, viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
@@ -5015,7 +5054,7 @@ func _draw_map_content() -> void:
 					var age: float = fposmod(visual_clock * 4.0 + float(k) * 0.33 + sign * 0.12, 1.0)
 					var spark: Vector2 = impact - direction * age * 6.0 + side * sign * age * float(k + 1) * 2.0
 					map_canvas.draw_circle(spark, maxf(0.7, scale * (1.0 - age)), Color(1.0, 0.85, 0.45, 1.0 - age), false)
-		if int(ship["id"]) == selected_ship_id or selected_units.has(int(ship["id"])):
+		if ship_id == selected_ship_id or selected_lookup.has(ship_id):
 			var radius: float = maxf(5.0, hull_art.ui_radius(kind) * scale)
 			world_batches.draw_selection_ring(point, radius)
 		# At a distant galaxy overview, the smallest authored edges can
@@ -5043,7 +5082,14 @@ func _draw_map_content() -> void:
 		if scale < 0.15 * ship_overview:
 			world_batches.queue_overview_hull(world_batches.overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / ship_overview) * ship_overview, cloaked)
 			continue
-		var texture: Texture2D = hull_art.hull_texture(kind, empire, scale >= 0.42)
+		# hull_texture formats a string key; resolve it once per kind/owner.
+		var owner_textures: Dictionary = hull_texture_cache.get(kind, {})
+		if owner_textures.is_empty():
+			hull_texture_cache[kind] = owner_textures
+		var texture: Texture2D = owner_textures.get(owner)
+		if texture == null:
+			texture = hull_art.hull_texture(kind, empire, detailed_hulls)
+			owner_textures[owner] = texture
 		if shield > 0.0:
 			world_batches.queue_overview_hull(hull_art.shield_texture(kind), point, direction.angle(), (half_size + 8.0) * scale, cloaked)
 		if kind != "science_ship" and not (kind == "ship" and scale >= 0.42):
