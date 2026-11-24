@@ -4,6 +4,9 @@ extends RefCounted
 
 var profile: Dictionary = {}
 var civilian_usec: int = 0
+# Motion-only sleep fast path; diagnostics are not authoritative state.
+var motion_sleep_enabled: bool = false
+var motion_sleep_skips: int = 0
 
 # Routing and civilian caches valid for this substep.
 var graph: Dictionary = {}

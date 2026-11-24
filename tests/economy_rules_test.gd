@@ -951,6 +951,81 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	assert(int(state["planets"][1]["owner"]) == 1)
 	print("PASS: nearest available colony, queued hold and automatic settlement")
 
+func _motion_sleep_trace(enabled: bool) -> Array:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
+	var craft: Dictionary = {"id": 55001, "kind": "fighter", "owner": 1, "origin": 0, "at": 0, "dest": 0, "source": -1, "route": [], "leg": 0.0, "position": Vector2(100, 200), "heading": Vector2.LEFT, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock(), "wander_auto": false}
+	state["ships"] = [craft]
+	var trace: Array = []
+	assert(ECON.command_hold_units(state, 1, [55001], false))
+	for tick in range(65):
+		if tick == 5:
+			assert(ECON.command_stop_units(state, 1, [55001]))
+		elif tick == 45:
+			assert(ECON.issue_unit_order(state, 1, [55001], {"kind": "position", "target": 0, "point": Vector2(150, 200), "move_only": true}, false))
+		ECON.step(state, 0.1, {}, enabled)
+		trace.append(state.duplicate(true))
+	return trace
+
+func _test_motion_sleep_wake() -> void:
+	assert(_motion_sleep_trace(true) == _motion_sleep_trace(false))
+	var state: Dictionary = {"elapsed": 1.0, "ships": []}
+	var point := Vector2(100, 200)
+	var ship: Dictionary = {"id": 501, "kind": "fighter", "owner": 1, "position": point, "heading": Vector2.LEFT, "navigation_target": point, "route": [], "holding": true, "hold_position": point, "hold_heading": Vector2.LEFT}
+	state["ships"] = [ship]
+	ECON._begin_motion_sleep(state)
+	var frame = ECON.STEP_FRAME.new()
+	frame.motion_sleep_enabled = true
+	var reference = ECON.STEP_FRAME.new()
+	var expected: Dictionary = ship.duplicate(true)
+	ECON._step_hull(state, frame, ship, 0.1)
+	ECON._step_hull_active(state, reference, expected, 0.1)
+	assert(ship == expected and frame.motion_sleep_skips == 0)
+	var next_frame = ECON.STEP_FRAME.new()
+	next_frame.motion_sleep_enabled = true
+	ECON._step_hull(state, next_frame, ship, 0.1)
+	assert(next_frame.motion_sleep_skips == 1 and ship == expected)
+	# A changed facing must run the full normalization, even while held.
+	ship["heading"] = Vector2.RIGHT
+	expected["heading"] = Vector2.RIGHT
+	ECON._step_hull(state, next_frame, ship, 0.1)
+	ECON._step_hull_active(state, reference, expected, 0.1)
+	assert(ship == expected and ship["heading"] == Vector2.LEFT and next_frame.motion_sleep_skips == 1)
+	ship.erase("holding")
+	ship.erase("hold_heading")
+	ship.erase("hold_position")
+	ship["stop_until"] = 2.0
+	ECON._step_hull(state, next_frame, ship, 0.1)
+	assert(ECON._motion_sleep_modes[501] == ECON.MotionSleep.STOPPED)
+	state["elapsed"] = 1.9
+	ECON._step_hull(state, next_frame, ship, 0.1)
+	assert(next_frame.motion_sleep_skips == 2)
+	state["elapsed"] = 2.0
+	assert(ECON._motion_sleep_mode(state, next_frame, ship) == ECON.MotionSleep.AWAKE)
+	ship.erase("stop_until")
+	ship["combat_target"] = -1
+	ship["pursuit_target"] = -1
+	ship["pursuit_left"] = 0.0
+	assert(ECON._motion_sleep_mode(state, next_frame, ship) == ECON.MotionSleep.IDLE_MILITARY)
+	for key in ["attack_order", "local_move_target", "cargo_order", "repair_order", "launch_rally", "auto_salvage_target", "auto_salvage_origin", "unit_order"]:
+		ship[key] = {} if key == "unit_order" else 1
+		assert(ECON._motion_sleep_mode(state, next_frame, ship) == ECON.MotionSleep.AWAKE)
+		ship.erase(key)
+	next_frame.idle_targets[501] = point
+	assert(ECON._motion_sleep_mode(state, next_frame, ship) == ECON.MotionSleep.AWAKE)
+	next_frame.idle_targets.clear()
+	ship["pursuit_target"] = 99
+	assert(ECON._motion_sleep_mode(state, next_frame, ship) == ECON.MotionSleep.AWAKE)
+	ship["pursuit_target"] = -1
+	ship["kind"] = "colony_ship"
+	ship["stop_until"] = 3.0
+	assert(ECON._motion_sleep_mode(state, next_frame, ship) == ECON.MotionSleep.AWAKE)
+	ECON._remove_indexed_hull(state, ship)
+	assert(not ECON._motion_sleep_modes.has(501))
+	ECON._begin_motion_sleep({"elapsed": 0.0, "ships": []})
+	assert(ECON._motion_sleep_modes.is_empty())
+	print("PASS: persistent motion sleep, exact hold state, stop deadline and wake guards")
+
 func _test_stop_order() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], true)
 	var fighter: Dictionary = {}
@@ -2125,6 +2200,7 @@ func _initialize() -> void:
 	_test_bilateral_conquest()
 	_test_ai_strategic_diplomacy()
 	_test_stop_order()
+	_test_motion_sleep_wake()
 	_test_nearest_colony_and_queued_hold()
 	_test_manual_conversion_and_stats()
 	_test_passive_health()
