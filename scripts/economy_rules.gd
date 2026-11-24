@@ -4300,35 +4300,41 @@ static func _best_mining_chunk(state: Dictionary, ship: Dictionary, teams: Array
 		if entrances.has(here):
 			entrances.erase(here)
 			entrances.push_front(here)
+		var reachable_anchor: int = -1
 		for anchor in entrances:
 			var path_started: int = Time.get_ticks_usec() if detailed_profile else 0
 			var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor, cache)
 			if detailed_profile:
 				path_usec += Time.get_ticks_usec() - path_started
-			if path.is_empty():
-				continue
-			var depots: Dictionary = {}
-			var depot_positions: Dictionary = {}
-			for resource in resources:
-				var depot_started: int = Time.get_ticks_usec() if detailed_profile else 0
-				var depot_index: int = _mining_depot(state, ship, teams, team, anchor, resource, cache, field["position"])
-				depots[resource] = depot_index
-				if depot_index >= 0:
-					depot_positions[resource] = station_position(state, depot_index, float(state["elapsed"]))
-				if detailed_profile:
-					depot_usec += Time.get_ticks_usec() - depot_started
-			var scoring_started: int = Time.get_ticks_usec() if detailed_profile else 0
-			for chunk in eligible_chunks:
-				var chunk_depot: int = int(depots.get(chunk["resource"], -1))
-				if chunk_depot < 0:
-					continue
-				var rock: Vector2 = chunk["position"]
-				var distance: float = (ship["position"] as Vector2).distance_to(rock) + rock.distance_to(depot_positions[chunk["resource"]])
-				if distance < best_distance:
-					best_distance = distance
-					best = {"field": i, "chunk": chunk, "anchor": anchor}
+			if not path.is_empty():
+				reachable_anchor = anchor
+				break
+		if reachable_anchor < 0:
+			continue
+		# Field-center depot selection and rock scoring do not depend on
+		# the access anchor; equal scores retain the first reachable one.
+		var depots: Dictionary = {}
+		var depot_positions: Dictionary = {}
+		for resource in resources:
+			var depot_started: int = Time.get_ticks_usec() if detailed_profile else 0
+			var depot_index: int = _mining_depot(state, ship, teams, team, reachable_anchor, resource, cache, field["position"])
+			depots[resource] = depot_index
+			if depot_index >= 0:
+				depot_positions[resource] = station_position(state, depot_index, float(state["elapsed"]))
 			if detailed_profile:
-				scoring_usec += Time.get_ticks_usec() - scoring_started
+				depot_usec += Time.get_ticks_usec() - depot_started
+		var scoring_started: int = Time.get_ticks_usec() if detailed_profile else 0
+		for chunk in eligible_chunks:
+			var chunk_depot: int = int(depots.get(chunk["resource"], -1))
+			if chunk_depot < 0:
+				continue
+			var rock: Vector2 = chunk["position"]
+			var distance: float = (ship["position"] as Vector2).distance_to(rock) + rock.distance_to(depot_positions[chunk["resource"]])
+			if distance < best_distance:
+				best_distance = distance
+				best = {"field": i, "chunk": chunk, "anchor": reachable_anchor}
+		if detailed_profile:
+			scoring_usec += Time.get_ticks_usec() - scoring_started
 	if detailed_profile:
 		profile["Miner access path"] = int(profile.get("Miner access path", 0)) + path_usec
 		profile["Miner depot search"] = int(profile.get("Miner depot search", 0)) + depot_usec

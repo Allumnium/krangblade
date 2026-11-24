@@ -2805,7 +2805,40 @@ func _test_authority_substep_boundary() -> void:
 	assert(state == reference)
 	print("PASS: authority substep boundary parity")
 
+func _test_mining_selection() -> void:
+	var rock := Vector2(200, 0)
+	var map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(1000, 0), Vector2(2000, 0)], "edges": [[0, 1], [1, 2]], "fields": [{"anchor": 1, "access": [1, 2], "position": rock, "radius": 40.0, "Metals": 1.0, "Crystals": 0.0, "chunks": [{"id": 7, "position": rock, "resource": "Metals", "remaining": 10.0}, {"id": 8, "position": rock, "resource": "Metals", "remaining": 10.0}]}]}
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
+	state.erase("diplomacy")
+	state["fog_of_war"] = false
+	var ship: Dictionary = {"owner": 1, "at": 0, "position": Vector2.ZERO}
+	var teams: Array[int] = [1, 2, 1]
+	var cache: Dictionary = {}
+	var best: Dictionary = ECON._best_mining_chunk(state, ship, teams, cache, -1, -1)
+	assert(int(best.get("anchor", -1)) == 2 and int(best["chunk"]["id"]) == 7)
+	teams[1] = 1
+	best = ECON._best_mining_chunk(state, ship, teams, cache, -1, -1)
+	assert(int(best.get("anchor", -1)) == 1 and int(best["chunk"]["id"]) == 7)
+	best = ECON._best_mining_chunk(state, ship, teams, cache, 0, 8)
+	assert(int(best["chunk"]["id"]) == 8)
+	state["map"]["fields"][0]["chunks"][0]["remaining"] = 0.0
+	best = ECON._best_mining_chunk(state, ship, teams, cache, -1, -1)
+	assert(int(best["chunk"]["id"]) == 8)
+	var home: Dictionary = state["planets"][0]
+	home["stock"]["Metals"] = ECON.storage_capacity(home, "Metals")
+	assert(ECON._best_mining_chunk(state, ship, teams, cache, -1, -1).is_empty())
+	home["stock"]["Metals"] = 0.0
+	best = ECON._best_mining_chunk(state, ship, teams, cache, -1, -1)
+	assert(int(best["chunk"]["id"]) == 8)
+	state["map"]["fields"][0]["chunks"][1]["remaining"] = 0.0
+	assert(ECON._best_mining_chunk(state, ship, teams, cache, -1, -1).is_empty())
+	print("PASS: mining selection preserves access and rock ties, preferred rock, live depletion and storage wakeups")
+
 func _initialize() -> void:
+	_test_mining_selection()
+	if OS.get_cmdline_user_args().has("--mining-selection-only"):
+		quit()
+		return
 	_test_optional_native_kernels()
 	_test_authority_substep_boundary()
 	_test_rogue_defection()

@@ -83,3 +83,16 @@ Godot 4.7.2, Windows, Ryzen 5 7600X, seed 827, eight synthetic players. The per-
 | logistics | 1,000 | 5x | 100 | 946.480 | 1,056.529 | 2,432.823 | 100/100 |
 
 The 1x cold-start batch is 1,852.020 ms, down from the earlier 5,237.772 ms sample. An opt-in three-tick subprofile attributes 1,724.985 ms of the first batch to Civilian logistics, with 1,538.844 ms in miner field selection: 653.207 ms candidate scoring, 371.957 ms depot search, and 20.228 ms access-path work. This identifies the startup bottleneck but does not meet the 100 ms budget; steady 1x batches also miss it. The 5x logistics run likewise misses on all measured batches. A per-rock depot-distance cache experiment increased the startup batch to 2,342.356 ms and was discarded.
+
+## Mining access deduplication (v0.97.82)
+
+Depot choice and rock scores are anchor-independent when a field-center origin is supplied. Evaluate them only for the first reachable access anchor; retain original field/chunk order and live depot/storage/ore checks. Focused validation: `tests/economy_rules_test.gd -- --mining-selection-only` passes skipped access anchors, access/rock ties, preferred rocks, depletion and full-storage recovery.
+
+Same Godot/hardware/seed and 1,000 ships throughout each 100-batch sample:
+
+| Scenario | Speed | p50 ms | p95 ms | p99 ms | max ms | Misses |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| logistics | 1x | 99.652 | 126.916 | 134.819 | 1,179.527 | 49/100 |
+| logistics | 5x | 720.295 | 823.579 | 871.301 | 1,564.590 | 100/100 |
+
+A separate three-tick detailed run measured miner selection at 1,013.250 ms, including 411.215 ms scoring, 335.132 ms depot search and 16.841 ms access checks. Both throughput samples still fail acceptance. Other phases also ran faster than the previous session, so these sequential measurements are not a controlled estimate of the optimization's isolated speedup. No combined rendering, worker, AI or ENet workload is measured here.

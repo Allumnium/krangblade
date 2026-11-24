@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.82: Mining depot choice and candidate scores use the field center, not the access anchor. Scoring once at the first reachable anchor preserves tie order. The new 1,000-ship logistics runs measure 1x p95 126.916 ms (49/100 misses) and 5x p95 823.579 ms (100/100 misses). All phases measured lower than the prior session, so the whole-run improvement cannot be attributed solely to anchor deduplication. Miner selection still takes 1,013 ms in a short detailed startup profile.
+
 - v0.97.80: A real match-scene render capture measures 100 ships at 9.166 ms p95 and 2,000 ships at 92.407 ms p95 (300 frames, zoom 5, simulation stopped). At 2,000 ships, lowering zoom to 0.1 still measured 86.553 ms p95, so detailed hull rendering/overdraw alone does not explain the cost; the remaining per-ship render path needs profiling. These are isolated graphics samples, not combined gameplay acceptance.
 
 - v0.97.80: Miner field selection caused the synthetic 1,000-ship logistics cold-start spike. Candidate-list and station-position reuse lowered the 1x tick-0 time from about 5.2 s to 1.852 s; miner field selection still uses 1.539 s (653 ms candidate scoring, 372 ms depot search). Later 1x batches remain above 100 ms, and the 5x logistics p95 is 1,056.529 ms. A per-rock depot-distance cache was slower and was discarded. Profile further before selecting the next optimization.
