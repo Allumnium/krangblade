@@ -1,6 +1,8 @@
 # Warbound — development TODO
 
-- [ ] Investigate GitHub Actions run #395 on v0.97.38: gate/core and all 2-player ENet variants passed; 3-player normal and 8-player normal failed. Read failed job logs and address root causes before marking the validation gate complete. Historical run: https://github.com/Allumnium/krangblade/actions/runs/45320109745
+- [ ] v0.97.40: Repair multi-peer ENet stress fixtures from run #395: initialize staged/dock freighters at actual 400-HP max instead of half health (which could trigger repair/retreat and abort resource handoffs), retain every construction and handoff assertion, increase wall-clock budgets for 3-/8-process jobs on shared CI runners, and print per-hull handoff state on timeout. No gameplay changes. Godot/runtime and rerun of multi-peer CI pending.
+
+- [ ] Re-run full manual GitHub Actions validation after v0.97.40 fixture correction; run #395 stalled at `miner_resource_handoff` for one of three empires, while 8-player test only reached ~40 simulation years before the 65-second timeout and remained short of sequential construction checks. This is **not** yet confirmed fixed until a successful 3-/8-player run: https://github.com/Allumnium/krangblade/actions/runs/45320109745
 
 - [x] v0.97.39: Clarify connected GitHub repository access and GitHub Actions read/log capabilities in AGENTS.md, record run #395's actual failing 3-/8-player ENet results, and note the project-only memory continuity model. Documentation only; no game code or test changes.
 

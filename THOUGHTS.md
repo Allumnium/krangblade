@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.40: Repair multi-peer ENet stress fixtures from run #395: initialize staged/dock freighters at actual 400-HP max instead of half health (which could trigger repair/retreat and abort resource handoffs), retain every construction and handoff assertion, increase wall-clock budgets for 3-/8-process jobs on shared CI runners, and print per-hull handoff state on timeout. No gameplay changes. Godot/runtime and rerun of multi-peer CI pending.
+
 - v0.97.39: Clarify connected GitHub repository access and GitHub Actions read/log capabilities in AGENTS.md, record run #395's actual failing 3-/8-player ENet results, and note the project-only memory continuity model. Documentation only; no game code or test changes.
 
 - v0.97.38: Add tools/profile_simulation.py to run repeatable, non-gating seeded fleet benchmarks across battle/logistics, representative fleet sizes and 1×/5× speeds. It collects the existing phase/tick percentiles and throughput estimates with engine/CPU metadata, optionally writes full JSON, and fails only for invalid or unsuccessful runs—not for performance thresholds. No simulation mechanics or UI assertions changed; Godot benchmarks pending.

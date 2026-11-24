@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.40: Repair multi-peer ENet stress fixtures from run #395: initialize staged/dock freighters at actual 400-HP max instead of half health (which could trigger repair/retreat and abort resource handoffs), retain every construction and handoff assertion, increase wall-clock budgets for 3-/8-process jobs on shared CI runners, and print per-hull handoff state on timeout. No gameplay changes. Godot/runtime and rerun of multi-peer CI pending.
+
 ## GitHub repository and validation access
 
 - **Connected GitHub access is available for this project.** The canonical repository is `Allumnium/krangblade`. At the beginning of every Warbound development chat, use the GitHub connector to read this `AGENTS.md`, inspect current `main`, check outstanding pull requests, and consult `TODO.md` and `THOUGHTS.md`. Use the connector to read/edit files, create commits/PRs and merge approved changes. Do **not** claim GitHub is inaccessible, assume a new chat lacks the connection, or ask the user to switch sessions without first inspecting and attempting the available GitHub tools.
