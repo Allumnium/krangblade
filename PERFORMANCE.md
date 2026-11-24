@@ -139,3 +139,16 @@ Same harness, 200 measured live frames. Temporary probes showed frames coincidin
 | 1,000 | 5x | 18.1 | 23.1 | 54.6 | 1.55 |
 
 Fog per publication fell from about 66 to 17 ms. Remaining per-publication main-thread work is about 55 ms (fog 17, HUD/inspector refresh about 15, territory warnings about 10, motion sync about 8, tactical alerts about 4). Simulation throughput is unchanged and is now the dominant unmet target.
+
+## Simulation profile (v0.97.86)
+
+Headless step probe, 2,000 same-owner fighters on 1x (about 218 ms per batch): movement 92 ms (`_step_hull` 57, settlement 36), combat/repair 69 ms with no enemies present (frame build 21, per-hull combat 21, withdrawals 8, threat reuse 7), formations/orders 31 ms, conquest/exploration 12 ms, economy 11 ms. Nearly every fighter steers through `_move_formation` ? `_navigate` (about 16 ?s each); the predictive direct-travel fast path never qualifies in this dense converging fleet. Cost is diffuse per-hull Dictionary work, roughly 100 ?s per hull per tick.
+
+v0.97.86 replaces per-call literal containers (`ship_max_hp` table and 38 military/armed kind arrays) with constants and avoids a per-hull `range()` allocation in the combat frame sector fallback.
+
+| Ships | Speed | Frame p50 ms | Frame p95 ms | Frame p99 ms | Batch p50 ms | Batches/s |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2,000 | 1x | 35.7 | 96.1 | 106.4 | 214.2 | 3.56 |
+| 1,000 | 5x | ? | ? | ? | ? | 1.82 |
+
+Meeting 10 Hz at 2,000 hulls requires roughly a 2x simulation speedup at 1x and about 5x at 1,000 hulls on 5x. Further constant-factor GDScript trimming yields only a few percent; the remaining path is structural (packed per-hull arrays for movement/combat/formations, or native kernels enabled by default after parity).
