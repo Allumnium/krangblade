@@ -2,9 +2,9 @@
 
 - v0.97.80: A real match-scene render capture measures 100 ships at 9.166 ms p95 and 2,000 ships at 92.407 ms p95 (300 frames, zoom 5, simulation stopped). At 2,000 ships, lowering zoom to 0.1 still measured 86.553 ms p95, so detailed hull rendering/overdraw alone does not explain the cost; the remaining per-ship render path needs profiling. These are isolated graphics samples, not combined gameplay acceptance.
 
-- v0.97.79: The synthetic 1,000-ship logistics benchmark repeatedly spends about 5 seconds in Civilian logistics on tick 0 (both 1x and 5x), while later batches are lower but still exceed the target. `fleet_benchmark.gd` now reports the slowest tick and phase totals; further subphase profiling is needed before attributing the spike to a specific route/search function.
+- v0.97.80: Miner field selection caused the synthetic 1,000-ship logistics cold-start spike. Candidate-list and station-position reuse lowered the 1x tick-0 time from about 5.2 s to 1.852 s; miner field selection still uses 1.539 s (653 ms candidate scoring, 372 ms depot search). Later 1x batches remain above 100 ms, and the 5x logistics p95 is 1,056.529 ms. A per-rock depot-distance cache was slower and was discarded. Profile further before selecting the next optimization.
 
-- v0.97.75: Set project-wide rendering cap to 120 FPS using application/run/max_fps and disable VSync so the monitor refresh rate does not impose a lower cap during performance testing. Keep physics/simulation cadence, threaded authority and explicit CI benchmark CLI frame limits unchanged. Runtime FPS not measured.
+- v0.97.75: The project-level 120 FPS cap and VSync-off settings are present; actual display FPS still requires a combined live-render measurement. The isolated 2,000-ship capture remains far below the 60 FPS target.
 
 - v0.97.70: The optional Windows x86_64 targeting extension builds against Godot 4.7.2 and the pinned godot-cpp revision; clean import and native targeting parity pass. Same-machine target-scale samples show no meaningful native speedup, so it remains opt-in. Graphical frame-time measurements remain open.
 

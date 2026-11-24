@@ -13,6 +13,7 @@ func _initialize() -> void:
 	var ticks: int = 100
 	var seed_value: int = 827
 	var speed: int = 1
+	var detailed_profile: bool = false
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--ships="):
 			counts = [int(arg.get_slice("=", 1))]
@@ -24,6 +25,8 @@ func _initialize() -> void:
 			seed_value = int(arg.get_slice("=", 1))
 		elif arg.begins_with("--speed="):
 			speed = int(arg.get_slice("=", 1))
+		elif arg == "--profile-detail":
+			detailed_profile = true
 	if ticks < 1 or speed not in [1, 5] or int(counts[0]) < 1:
 		push_error("Invalid benchmark options")
 		quit(2)
@@ -34,10 +37,10 @@ func _initialize() -> void:
 			quit(2)
 			return
 		for count in counts:
-			_run_case(int(count), str(scenario), ticks, seed_value, speed)
+			_run_case(int(count), str(scenario), ticks, seed_value, speed, detailed_profile)
 	quit()
 
-func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed: int) -> void:
+func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed: int, detailed_profile: bool) -> void:
 	var roster: Dictionary = {}
 	var players: Array[int] = []
 	for owner in range(1, 9):
@@ -68,6 +71,8 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 	var memory_start: int = OS.get_static_memory_usage()
 	for tick in range(ticks):
 		var profile: Dictionary = {"Economy": 0}
+		if detailed_profile:
+			profile["_detail"] = true
 		var start: int = Time.get_ticks_usec()
 		for substep in range(speed):
 			ECON.step(state, 0.1, profile)
@@ -78,9 +83,13 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 			slowest_ms = ms
 			var phase_ms: Dictionary = {}
 			for key in profile:
+				if key == "_detail":
+					continue
 				phase_ms[key] = float(profile[key]) / 1000.0
 			slowest_tick = {"index": tick, "ms": ms, "phases_ms": phase_ms}
 		for key in profile:
+			if key == "_detail":
+				continue
 			if not phase_samples.has(key):
 				phase_samples[key] = []
 			phase_samples[key].append(float(profile[key]) / 1000.0)

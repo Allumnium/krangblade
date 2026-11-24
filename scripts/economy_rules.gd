@@ -4229,9 +4229,9 @@ static func _reassign_miner(state: Dictionary, ship: Dictionary, field_index: in
 		elif mode == "outbound":
 			ship["mining_mode"] = "return"
 
-static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
+static func _choose_field(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, profile: Dictionary = {}) -> void:
 	_validate_mining_assignment(state, ship)
-	var best: Dictionary = _best_mining_chunk(state, ship, teams, cache, int(ship.get("assigned_field", -1)), int(ship.get("assigned_chunk", -1)))
+	var best: Dictionary = _best_mining_chunk(state, ship, teams, cache, int(ship.get("assigned_field", -1)), int(ship.get("assigned_chunk", -1)), profile)
 	if not best.is_empty():
 		_assign_mining_chunk(ship, int(best["field"]), int(best["anchor"]), best["chunk"])
 
@@ -4254,28 +4254,39 @@ static func _validate_mining_assignment(state: Dictionary, ship: Dictionary) -> 
 	if not preferred_usable:
 		ship["assigned_chunk"] = -1
 
-static func _best_mining_chunk(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, assigned: int, preferred: int) -> Dictionary:
+static func _best_mining_chunk(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, assigned: int, preferred: int, profile: Dictionary = {}) -> Dictionary:
 	var fields: Array = state["map"].get("fields", [])
 	var owner: int = int(ship["owner"])
 	var team: int = _combat_group(state, owner)
+	var detailed_profile: bool = bool(profile.get("_detail", false))
 	var best_distance: float = INF
 	var best: Dictionary = {}
+	var path_usec: int = 0
+	var depot_usec: int = 0
+	var scoring_usec: int = 0
 	for i in range(fields.size()):
 		if assigned >= 0 and i != assigned:
 			continue
 		var field: Dictionary = fields[i]
-		if not discovered(state, owner, "fields", i):
-			continue
-		var resources: Array[String] = _mining_resources(state, owner, i)
+		var candidate_key: String = "mine:candidates:%d:%d" % [owner, i]
+		if not cache.has(candidate_key):
+			var field_resources: Array[String] = _mining_resources(state, owner, i) if discovered(state, owner, "fields", i) else []
+			var field_chunks: Array = []
+			for chunk in field.get("chunks", []):
+				if field_resources.has(str(chunk["resource"])) and float(chunk["remaining"]) > EPS:
+					field_chunks.append(chunk)
+			cache[candidate_key] = {"resources": field_resources, "chunks": field_chunks}
+		var field_candidates: Dictionary = cache[candidate_key]
+		var resources: Array[String] = field_candidates["resources"]
 		if resources.is_empty():
 			continue
-		# Filter once in original rock order. A depleted or excluded field
-		# cannot yield a mining job, regardless of routes or depot capacity.
+		# Cached references retain original order; live depletion is checked
+		# each search because earlier hulls may consume the same rock.
 		var eligible_chunks: Array = []
-		for chunk in field.get("chunks", []):
+		for chunk in field_candidates["chunks"]:
 			if preferred >= 0 and int(chunk["id"]) != preferred:
 				continue
-			if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
+			if float(chunk["remaining"]) <= EPS:
 				continue
 			eligible_chunks.append(chunk)
 		if eligible_chunks.is_empty():
@@ -4290,21 +4301,38 @@ static func _best_mining_chunk(state: Dictionary, ship: Dictionary, teams: Array
 			entrances.erase(here)
 			entrances.push_front(here)
 		for anchor in entrances:
+			var path_started: int = Time.get_ticks_usec() if detailed_profile else 0
 			var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor, cache)
+			if detailed_profile:
+				path_usec += Time.get_ticks_usec() - path_started
 			if path.is_empty():
 				continue
 			var depots: Dictionary = {}
+			var depot_positions: Dictionary = {}
 			for resource in resources:
-				depots[resource] = _mining_depot(state, ship, teams, team, anchor, resource, cache, field["position"])
+				var depot_started: int = Time.get_ticks_usec() if detailed_profile else 0
+				var depot_index: int = _mining_depot(state, ship, teams, team, anchor, resource, cache, field["position"])
+				depots[resource] = depot_index
+				if depot_index >= 0:
+					depot_positions[resource] = station_position(state, depot_index, float(state["elapsed"]))
+				if detailed_profile:
+					depot_usec += Time.get_ticks_usec() - depot_started
+			var scoring_started: int = Time.get_ticks_usec() if detailed_profile else 0
 			for chunk in eligible_chunks:
-				var depot: int = int(depots.get(chunk["resource"], -1))
-				if depot < 0:
+				var chunk_depot: int = int(depots.get(chunk["resource"], -1))
+				if chunk_depot < 0:
 					continue
 				var rock: Vector2 = chunk["position"]
-				var distance: float = (ship["position"] as Vector2).distance_to(rock) + rock.distance_to(station_position(state, depot, float(state["elapsed"])))
+				var distance: float = (ship["position"] as Vector2).distance_to(rock) + rock.distance_to(depot_positions[chunk["resource"]])
 				if distance < best_distance:
 					best_distance = distance
 					best = {"field": i, "chunk": chunk, "anchor": anchor}
+			if detailed_profile:
+				scoring_usec += Time.get_ticks_usec() - scoring_started
+	if detailed_profile:
+		profile["Miner access path"] = int(profile.get("Miner access path", 0)) + path_usec
+		profile["Miner depot search"] = int(profile.get("Miner depot search", 0)) + depot_usec
+		profile["Miner candidate distances"] = int(profile.get("Miner candidate distances", 0)) + scoring_usec
 	return best
 
 static func _assign_mining_chunk(ship: Dictionary, field_index: int, anchor: int, chunk: Dictionary) -> void:
@@ -4400,13 +4428,13 @@ static func _work_miner_rendezvous(state: Dictionary, graph: Dictionary, miner: 
 	_navigate(miner, meeting, minf(MINER_SPEED * dt, maxf(0.0, distance - RESOURCE_HANDOFF_RANGE * 0.65)))
 	return true
 
-static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, budgets: Array, dt: float) -> void:
+static func _work_miner(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, budgets: Array, dt: float, profile: Dictionary = {}) -> void:
 	ship["mining_active"] = false
 	if state.has("diplomacy") and _miner_evacuated(state, ship, teams):
 		return
 	var mode: String = str(ship.get("mining_mode", "idle"))
 	if mode == "idle":
-		_miner_idle(state, ship, teams, cache)
+		_miner_idle(state, ship, teams, cache, profile)
 		return
 	if mode == "delivery":
 		_miner_delivery(state, ship, teams, cache, dt)
@@ -4443,14 +4471,18 @@ static func _miner_evacuated(state: Dictionary, ship: Dictionary, teams: Array[i
 		return true
 	return false
 
-static func _miner_idle(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary) -> void:
+static func _miner_idle(state: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, profile: Dictionary = {}) -> void:
+	var detailed_profile: bool = bool(profile.get("_detail", false))
 	if not bool(ship.get("manual_mine", false)) and not autocast_ready(state, ship, "mine"):
 		return
 	if (ship["route"] as Array).is_empty():
 		ship["dest"] = -1
 		ship["source"] = -1
 	if float(state["elapsed"]) + EPS >= float(ship.get("next_mining_search", 0.0)):
-		_choose_field(state, ship, teams, cache)
+		var search_started: int = Time.get_ticks_usec() if detailed_profile else 0
+		_choose_field(state, ship, teams, cache, profile)
+		if detailed_profile:
+			profile["Miner field selection"] = int(profile.get("Miner field selection", 0)) + Time.get_ticks_usec() - search_started
 		if ship.get("mining_mode", "idle") == "idle" and int(ship.get("assigned_field", -1)) < 0:
 			ship.erase("manual_mine")
 		# Idle fleets retry twice per game year instead of every tick.
@@ -11178,6 +11210,7 @@ static func _step_hull_services(state: Dictionary, frame: STEP_FRAME, ship: Dict
 static func _step_hull_routine(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> bool:
 	var combat_graph: Dictionary = frame.graph
 	var profile: Dictionary = frame.profile
+	var detailed_profile: bool = bool(profile.get("_detail", false))
 	if ship.get("kind", "ship") == "colony_ship":
 		if _begin_farm_delivery(state, ship):
 			_work_salvage(state, combat_graph, ship, dt)
@@ -11191,21 +11224,44 @@ static func _step_hull_routine(state: Dictionary, frame: STEP_FRAME, ship: Dicti
 		# idle freighters to interstation trade; never interrupt a haul.
 		# Check the existing strict retry deadline before costly eligibility.
 		var stage_due: bool = float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)) and _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade")
-		if stage_due and _choose_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, {}, true):
-			ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
-			return true
+		if stage_due:
+			var search_started: int = Time.get_ticks_usec() if detailed_profile else 0
+			var staged: bool = _choose_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, {}, true)
+			if detailed_profile:
+				profile["Freighter staging search"] = int(profile.get("Freighter staging search", 0)) + Time.get_ticks_usec() - search_started
+			if staged:
+				ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
+				if not profile.is_empty():
+					frame.civilian_usec += Time.get_ticks_usec() - before
+				return true
+		var work_started: int = Time.get_ticks_usec() if detailed_profile else 0
 		_work_ship(state, ship, frame.teams, frame.cache, dt, frame.deadline_schedule_enabled)
+		if detailed_profile:
+			profile["Freighter routine"] = int(profile.get("Freighter routine", 0)) + Time.get_ticks_usec() - work_started
 		if float(state["elapsed"]) >= float(ship.get("next_resource_stage_search", 0.0)) and _is_idle_ship(ship) and ship.get("order_queue", []).is_empty() and _cargo_total(ship) <= EPS and autocast_ready(state, ship, "trade"):
 			ship["next_resource_stage_search"] = _next_search_slot(float(state["elapsed"]), int(ship["id"]), RESOURCE_STAGE_SEARCH_YEARS)
+			var retry_started: int = Time.get_ticks_usec() if detailed_profile else 0
 			_choose_resource_stage(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, frame.salvage_cells)
+			if detailed_profile:
+				profile["Freighter staging search"] = int(profile.get("Freighter staging search", 0)) + Time.get_ticks_usec() - retry_started
 		if not profile.is_empty():
 			frame.civilian_usec += Time.get_ticks_usec() - before
 	elif ship.get("kind", "ship") == "miner":
 		var before: int = Time.get_ticks_usec() if not profile.is_empty() else 0
-		if not _work_miner_rendezvous(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, frame.mining_receivers, frame.mining_commitments, dt):
-			_work_miner(state, ship, frame.teams, frame.cache, frame.budgets, dt)
+		var rendezvous_started: int = Time.get_ticks_usec() if detailed_profile else 0
+		var rendezvous_worked: bool = _work_miner_rendezvous(state, combat_graph, ship, frame.teams, frame.cache, frame.salvage_threats, frame.mining_receivers, frame.mining_commitments, dt)
+		if detailed_profile:
+			profile["Miner rendezvous"] = int(profile.get("Miner rendezvous", 0)) + Time.get_ticks_usec() - rendezvous_started
+		if not rendezvous_worked:
+			var autonomous_started: int = Time.get_ticks_usec() if detailed_profile else 0
+			_work_miner(state, ship, frame.teams, frame.cache, frame.budgets, dt, profile)
+			if detailed_profile:
+				profile["Miner autonomous work"] = int(profile.get("Miner autonomous work", 0)) + Time.get_ticks_usec() - autonomous_started
 		if not profile.is_empty():
-			frame.civilian_usec += Time.get_ticks_usec() - before
+			var miner_usec: int = Time.get_ticks_usec() - before
+			if detailed_profile:
+				profile["Miner work"] = int(profile.get("Miner work", 0)) + miner_usec
+			frame.civilian_usec += miner_usec
 	elif ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]:
 		_step_military_motion(state, frame, ship, dt)
 	return false

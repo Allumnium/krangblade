@@ -6,7 +6,7 @@ Run from the project root with Godot 4.7.2:
 godot --headless --path . --script res://tests/fleet_benchmark.gd -- --ships=500 --scenario=dispersed --ticks=100
 ```
 
-Omit --ships or --scenario to run all five sizes (500, 1000, 2500, 5000, 10000) or all four scenarios (dispersed, battle, swarm, logistics). Options: --seed=827, --ticks=100, --speed=1 or --speed=5. Start with small isolated runs; dense cases may be expensive. Save FLEET_BENCH JSON lines and compare identical options/build configuration/hardware. Each sample is a batch of one or five 0.1-year simulation substeps; a deadline miss is a batch above 100 ms. Percentiles use nearest rank. Phase timing is existing simulation instrumentation, not an exhaustive breakdown; the slowest_tick field records the worst batch's index and phase times. Initial population is synthetic, not paid construction; casualties are not replaced and actual hull counts are reported. Static memory may be unavailable in release builds. No rendering, AI, ENet or background workload is measured by this harness.
+Omit --ships or --scenario to run all five sizes (500, 1000, 2500, 5000, 10000) or all four scenarios (dispersed, battle, swarm, logistics). Options: --seed=827, --ticks=100, --speed=1 or --speed=5. Add --profile-detail for opt-in miner/freighter subphase timings; this adds timer overhead and should not be used for comparable throughput samples. Start with small isolated runs; dense cases may be expensive. Save FLEET_BENCH JSON lines and compare identical options/build configuration/hardware. Each sample is a batch of one or five 0.1-year simulation substeps; a deadline miss is a batch above 100 ms. Percentiles use nearest rank. Phase timing is existing simulation instrumentation, not an exhaustive breakdown; the slowest_tick field records the worst batch's index and phase times. Initial population is synthetic, not paid construction; casualties are not replaced and actual hull counts are reported. Static memory may be unavailable in release builds. No rendering, AI, ENet or background workload is measured by this harness.
 
 ## Initial headless samples (2026-11-24)
 
@@ -72,3 +72,14 @@ Godot 4.7.2 stable, Windows, Compatibility renderer, 1280×720, AMD Ryzen 5 7600
 | 2,000 | 0.1 | 100 | 78.115 | 86.553 | 99.569 | 106.264 | 100/100 | 2,225 |
 
 The 100-ship sample remained below the 16.67 ms frame budget. The 2,000-ship sample improved from a prior 107.968 ms p95 capture to 92.407 ms p95 after pose-cache and drawing-loop changes, but still misses 60 FPS on every measured frame. The lower-zoom diagnostic is not directly comparable in sample length; it indicates that simply reducing detailed hull size does not remove the large-fleet cost. Screenshot paths are printed by the harness. These are isolated renderer measurements, not initiative acceptance results.
+
+## Miner startup follow-up (v0.97.80)
+
+Godot 4.7.2, Windows, Ryzen 5 7600X, seed 827, eight synthetic players. The per-step mining candidate cache retains original chunk order and checks live depletion; station positions are evaluated once per resource/access search rather than once per rock. The economy rule regression fixture passed, including miner target, multi-access anchor, depleted-field and route cases.
+
+| Scenario | Ships | Speed | Ticks | p50 ms | p95 ms | max ms | Misses |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| logistics | 1,000 | 1x | 100 | 135.853 | 167.942 | 1,852.020 | 100/100 |
+| logistics | 1,000 | 5x | 100 | 946.480 | 1,056.529 | 2,432.823 | 100/100 |
+
+The 1x cold-start batch is 1,852.020 ms, down from the earlier 5,237.772 ms sample. An opt-in three-tick subprofile attributes 1,724.985 ms of the first batch to Civilian logistics, with 1,538.844 ms in miner field selection: 653.207 ms candidate scoring, 371.957 ms depot search, and 20.228 ms access-path work. This identifies the startup bottleneck but does not meet the 100 ms budget; steady 1x batches also miss it. The 5x logistics run likewise misses on all measured batches. A per-rock depot-distance cache experiment increased the startup batch to 2,342.356 ms and was discarded.
