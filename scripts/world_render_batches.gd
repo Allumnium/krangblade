@@ -28,6 +28,23 @@ var cloaked_overview_instances: Dictionary = {}
 var overview_dot_textures: Dictionary = {}
 var resource_glow_texture: Texture2D
 
+# Persistent packed transform staging, one stream per texture/opacity.
+class HullInstanceStream:
+	var buffer := PackedFloat32Array()
+	var count: int = 0
+
+	func append_transform(t: Transform2D) -> void:
+		if count * 8 >= buffer.size():
+			buffer.resize(maxi(64, count * 2) * 8)
+		var offset: int = count * 8
+		buffer[offset] = t.x.x
+		buffer[offset + 1] = t.y.x
+		buffer[offset + 3] = t.origin.x
+		buffer[offset + 4] = t.x.y
+		buffer[offset + 5] = t.y.y
+		buffer[offset + 7] = t.origin.y
+		count += 1
+
 func build(canvas: Control) -> void:
 	map_canvas = canvas
 	_build_exhaust_batch()
@@ -57,10 +74,12 @@ func begin_frame() -> void:
 	projectile_batch.hide()
 	exhaust_instances.clear()
 	exhaust_batch.hide()
-	overview_instances.clear()
+	for stream in overview_instances.values():
+		stream.count = 0
 	for batch in overview_batches.values():
 		batch.hide()
-	cloaked_overview_instances.clear()
+	for stream in cloaked_overview_instances.values():
+		stream.count = 0
 	for batch in cloaked_overview_batches.values():
 		batch.hide()
 
@@ -304,8 +323,9 @@ func overview_dot_texture(tint: Color) -> Texture2D:
 func queue_overview_hull(texture: Texture2D, point: Vector2, angle: float, extent: float, cloaked: bool = false) -> void:
 	var instances: Dictionary = cloaked_overview_instances if cloaked else overview_instances
 	if not instances.has(texture):
-		instances[texture] = []
-	instances[texture].append(Transform2D(angle, Vector2.ONE * extent * 2.0, 0.0, point))
+		instances[texture] = HullInstanceStream.new()
+	var stream: HullInstanceStream = instances[texture]
+	stream.append_transform(Transform2D(angle, Vector2.ONE * extent * 2.0, 0.0, point))
 
 func _flush_overview_hulls(hull_art: HULL_ART) -> void:
 	_flush_hull_batches(hull_art, overview_instances, overview_batches, 1.0)
@@ -313,7 +333,9 @@ func _flush_overview_hulls(hull_art: HULL_ART) -> void:
 
 func _flush_hull_batches(hull_art: HULL_ART, instances: Dictionary, batches: Dictionary, opacity: float) -> void:
 	for texture in instances:
-		var transforms: Array = instances[texture]
+		var stream: HullInstanceStream = instances[texture]
+		if stream.count == 0:
+			continue
 		if not batches.has(texture):
 			var instance := MultiMeshInstance2D.new()
 			var quad := QuadMesh.new()
@@ -330,20 +352,10 @@ func _flush_hull_batches(hull_art: HULL_ART, instances: Dictionary, batches: Dic
 			batches[texture] = instance
 		var batch: MultiMeshInstance2D = batches[texture]
 		var mesh: MultiMesh = batch.multimesh
-		if mesh.instance_count < transforms.size():
-			mesh.instance_count = maxi(transforms.size(), maxi(64, mesh.instance_count * 2))
-		var buffer := PackedFloat32Array()
-		buffer.resize(mesh.instance_count * 8)
-		for i in range(transforms.size()):
-			var t: Transform2D = transforms[i]
-			var offset: int = i * 8
-			buffer[offset] = t.x.x
-			buffer[offset + 1] = t.y.x
-			buffer[offset + 3] = t.origin.x
-			buffer[offset + 4] = t.x.y
-			buffer[offset + 5] = t.y.y
-			buffer[offset + 7] = t.origin.y
-		mesh.buffer = buffer
-		mesh.visible_instance_count = transforms.size()
+		var capacity: int = stream.buffer.size() >> 3
+		if mesh.instance_count != capacity:
+			mesh.instance_count = capacity
+		mesh.buffer = stream.buffer
+		mesh.visible_instance_count = stream.count
 		batch.show()
 

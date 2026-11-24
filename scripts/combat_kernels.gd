@@ -1,6 +1,19 @@
 extends RefCounted
 ## Ordered combat target kernels and simultaneous damage accumulation.
 ## No state ownership, scene dependencies or cache lifetime changes.
+# Native is opt-in until cross-platform deterministic parity is validated.
+static var _native_checked: bool = false
+static var _native: RefCounted
+
+static func _native_backend() -> RefCounted:
+	if not _native_checked:
+		_native_checked = true
+		if OS.get_cmdline_user_args().has("--warbound-native-kernels"):
+			if ClassDB.class_exists("WarboundNativeKernels"):
+				_native = ClassDB.instantiate("WarboundNativeKernels") as RefCounted
+			if _native == null:
+				push_warning("Warbound native kernels unavailable; using GDScript.")
+	return _native
 
 static func ship_hit(damage: Dictionary, killed_by: Dictionary, health: Dictionary, target: int, attacker: Dictionary, amount: float, hull_slots: Dictionary, hull_health: PackedFloat64Array, epsilon: float) -> void:
 	var before: float = float(damage.get(target, 0.0))
@@ -37,6 +50,12 @@ static func laser_blocks(candidates: Array, positions: Dictionary, include_struc
 	return blocks
 
 static func laser_block_nearest(blocks: Array, _positions: Dictionary, pos: Vector2, best: float, target: int) -> Array:
+	var backend: RefCounted = _native_backend()
+	if backend != null:
+		return backend.call("laser_block_nearest", blocks, pos, best, target)
+	return laser_block_nearest_reference(blocks, pos, best, target)
+
+static func laser_block_nearest_reference(blocks: Array, pos: Vector2, best: float, target: int) -> Array:
 	for block in blocks:
 		var low: Vector2 = block[0]
 		var high: Vector2 = block[1]
@@ -55,6 +74,12 @@ static func laser_block_nearest(blocks: Array, _positions: Dictionary, pos: Vect
 	return [best, target]
 
 static func missile_block_nearest(blocks: Array, _positions: Dictionary, pos: Vector2, best: float, target: int, focused: bool, focus_id: int) -> Array:
+	var backend: RefCounted = _native_backend()
+	if backend != null:
+		return backend.call("missile_block_nearest", blocks, pos, best, target, focused, focus_id)
+	return missile_block_nearest_reference(blocks, pos, best, target, focused, focus_id)
+
+static func missile_block_nearest_reference(blocks: Array, pos: Vector2, best: float, target: int, focused: bool, focus_id: int) -> Array:
 	for block in blocks:
 		var low: Vector2 = block[0]
 		var high: Vector2 = block[1]

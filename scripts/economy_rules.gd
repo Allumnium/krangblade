@@ -9958,6 +9958,18 @@ static func _reroute_after_capture(state: Dictionary, index: int) -> void:
 # Eliminate only when all stations and hulls are gone. Bilateral mode
 # retains conquest as a last-empire fallback, without transitive winners.
 # A one-empire sandbox never auto-ends.
+# Authority-only substep; publication, RPCs and clock remain in GameSession.
+# A future worker must exclusively own state and all static rule caches.
+static func advance_authority_substep(state: Dictionary, dt: float, profile: Dictionary = {}) -> bool:
+	var diplomatic_revision: int = int(state.get("diplomacy_revision", 0))
+	step(state, dt, profile)
+	var treaty_changed: bool = diplomatic_revision != int(state.get("diplomacy_revision", 0))
+	var outcome_started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
+	var changed: bool = update_match_outcome(state)
+	if not profile.is_empty():
+		profile["Match outcome"] = int(profile.get("Match outcome", 0)) + Time.get_ticks_usec() - outcome_started
+	return changed or treaty_changed
+
 static func update_match_outcome(state: Dictionary) -> bool:
 	if not state.get("match_result", {}).is_empty():
 		return false
@@ -10233,13 +10245,19 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 			cells = _refresh_persistent_contact_cells(ships, reach, bounds)
 		else:
 			_index_contact_cells(ships, reach, cells, bounds)
+		# Frozen positions are dense until the correction commit.
+		var contact_positions := PackedVector2Array()
+		if persistent:
+			contact_positions.resize(ships.size())
+			for slot in range(ships.size()):
+				contact_positions[slot] = ships[slot]["position"]
 		var isolated: Dictionary = {}
 		corrections.fill(Vector2.ZERO)
 		touched.fill(0)
 		var correction_order: Array[int] = []
 		for i in range(ships.size()):
 			var a: Dictionary = ships[i]
-			var pa: Vector2 = a["position"]
+			var pa: Vector2 = contact_positions[i] if persistent else a["position"]
 			if persistent and _isolated_spatial_cell(pa, reach, cells, isolated):
 				continue
 			var cell := Vector2i(floori(pa.x / reach), floori(pa.y / reach))
@@ -10251,8 +10269,7 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 					for j in cells[key]:
 						if int(j) <= i:
 							continue
-						var b: Dictionary = ships[j]
-						var pb: Vector2 = b["position"]
+						var pb: Vector2 = contact_positions[j] if persistent else ships[j]["position"]
 						var offset: Vector2 = pa - pb
 						if offset.length_squared() >= cutoff_squared:
 							continue
@@ -10260,6 +10277,7 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 						var direction: Vector2
 						if distance <= EPS:
 							# Side-step a head-on approach; stable IDs break exact ties.
+							var b: Dictionary = ships[j]
 							var old_a: Vector2 = previous.get(int(a["id"]), pa)
 							var old_b: Vector2 = previous.get(int(b["id"]), pb)
 							var prior: Vector2 = old_a - old_b
