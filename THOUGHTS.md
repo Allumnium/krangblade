@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.47: Share ordered laser block neighborhoods and structure-only fallback candidates per combat team/cell, and passive freighter handoff neighborhoods per owner/cell. Preserve the original per-cell block/tie order and live per-hull range, cargo and eligibility checks; caches are phase-local and never serialized. Extend economy regression coverage for reference target parity, negative cells, ties and shared live cargo references. No intended gameplay or Codex changes; runtime, ENet and comparative benchmarks pending.
+
 - 2026-11-24 / v0.97.46 — Large-fleet architecture refinement: approved predictive movement, activity-based exact fast paths, shared fleet computations and deterministic independent scheduling. See TODO.md large-fleet program. Risk: naive sleeping or changed phase/cadence can alter combat, service or RNG outcomes; retain full-path fallback and prove parity before enabling each fast path. No gameplay changes made.
 
 - v0.97.45: Capture informational seeded combat/logistics performance baselines automatically as artifacts on manually dispatched Godot validation runs. The independent profile job samples 500/1000 hulls at 1×/5× without frame-time pass/fail thresholds; aggregate gameplay/ENet validate remains unchanged and does not depend on profiling. CI remains manual-only. No gameplay changes; manual run pending.

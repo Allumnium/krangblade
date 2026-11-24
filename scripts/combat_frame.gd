@@ -28,6 +28,9 @@ var hostile_cache: Dictionary = {}
 var positive_hostile_cache: Dictionary = {}
 var sector_hostile_cache: Dictionary = {}
 var laser_blocks: Dictionary = {}
+# Ordered neighborhood views are read-only and last only this combat pass.
+var laser_neighborhoods: Dictionary = {}
+var structure_neighborhoods: Dictionary = {}
 var missile_blocks: Dictionary = {}
 var pursuit_blocks: Dictionary = {}
 
