@@ -823,6 +823,72 @@ func _test_exact_tick_trajectories() -> void:
 	ECON._direct_trajectories.clear()
 	print("PASS: exact absolute-tick travel, immediate obstacle/contact fallback, arrival and reanchoring")
 
+func _test_general_angle_windows() -> void:
+	var fields: Array = [{"position": Vector2(8000, 8000), "radius": 50.0, "chunks": [{"position": Vector2(8000, 8000), "radius": 30.0}]}]
+	ECON._refresh_movement_fields(fields)
+	ECON._direct_trajectories.clear()
+	var craft: Dictionary = {"id": 1801, "kind": "fighter", "position": Vector2(-310.25, -71.75), "heading": Vector2.UP}
+	var reference: Dictionary = craft.duplicate(true)
+	var goal := Vector2(2100.75, 1040.125)
+	var budget: float = 12.54
+	var reused: int = 0
+	for tick in range(200, 224):
+		ECON._trajectory_tick = tick
+		ECON._begin_ship_avoidance({1801: craft["position"]})
+		var actual: float = ECON._navigate(craft, goal, budget)
+		var expected: float = ECON._navigate(reference, goal, budget, false)
+		assert(actual == expected and craft == reference)
+		var record: Dictionary = ECON._direct_trajectories.get(1801, {})
+		if record.has("samples") and int(record["anchor_tick"]) < tick:
+			reused += 1
+	assert(reused > 0, "Arbitrary-angle fixture must consume a predicted window")
+	# Start a guaranteed short window within the certified corridor, then
+	# insert a blocker along the direct approach before consuming it.
+	var start: Vector2 = craft["position"]
+	goal = start + Vector2(280, 105)
+	ECON._trajectory_tick = 224
+	ECON._begin_ship_avoidance({1801: start})
+	assert(ECON._navigate(craft, goal, budget) == ECON._navigate(reference, goal, budget, false))
+	assert(craft == reference)
+	ECON._trajectory_tick = 225
+	start = craft["position"]
+	ECON._begin_ship_avoidance({1801: start})
+	assert(ECON._navigate(craft, goal, budget) == ECON._navigate(reference, goal, budget, false))
+	assert(craft == reference and ECON._direct_trajectories.get(1801, {}).has("samples"))
+	ECON._trajectory_tick = 226
+	start = craft["position"]
+	var blocker: Vector2 = start + start.direction_to(goal) * 55.0
+	ECON._begin_ship_avoidance({1801: start, 1802: blocker})
+	assert(ECON._navigate(craft, goal, budget) == ECON._navigate(reference, goal, budget, false))
+	assert(craft == reference and not ECON._direct_trajectories.has(1801))
+	# Restart after a displacement; changes of target and budget also
+	# discard old samples. A newly indexed rock forces full avoidance.
+	for tick in range(227, 231):
+		ECON._trajectory_tick = tick
+		if tick == 228:
+			budget = 7.125
+		elif tick == 229:
+			craft["position"] += Vector2(2, -3)
+			reference["position"] = craft["position"]
+		elif tick == 230:
+			goal += Vector2(-15, 25)
+		ECON._begin_ship_avoidance({1801: craft["position"]})
+		assert(ECON._navigate(craft, goal, budget) == ECON._navigate(reference, goal, budget, false))
+		assert(craft == reference)
+	start = craft["position"]
+	fields[0]["chunks"].append({"position": start + start.direction_to(goal) * 75.0, "radius": 30.0})
+	ECON._refresh_movement_fields(fields)
+	assert(not ECON._direct_trajectories.has(1801))
+	ECON._trajectory_tick = 231
+	ECON._begin_ship_avoidance({1801: start})
+	assert(ECON._direct_motion_sample(craft, start, goal, budget, true) == null)
+	assert(not ECON._direct_trajectories.has(1801))
+	ECON._refresh_movement_fields([])
+	ECON._begin_ship_avoidance({})
+	ECON._trajectory_tick = -1
+	ECON._direct_trajectories.clear()
+	print("PASS: arbitrary-angle exact samples, window reuse, contact and asteroid invalidation")
+
 func _test_shared_navigation_queries() -> void:
 	# Preserve neighbor traversal order, including negative cells and ties.
 	var positions: Dictionary = {11: Vector2(30, 0), 12: Vector2(-30, 0), 13: Vector2(40, 0), 14: Vector2(500, 0)}
@@ -2372,6 +2438,7 @@ func _initialize() -> void:
 	_test_shared_navigation_queries()
 	_test_direct_trajectory_samples()
 	_test_exact_tick_trajectories()
+	_test_general_angle_windows()
 	_test_station_defense_and_ports()
 	_test_station_construction_queue()
 	_test_ai_timed_orbital_housing()

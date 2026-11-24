@@ -27,6 +27,7 @@ static var _trajectory_roster: Array = []
 static var _trajectory_tick: int = -1
 const DIRECT_CORRIDOR_LOOKAHEAD: float = 768.0
 const DIRECT_CORRIDOR_LIMIT: int = 10000
+const DIRECT_WINDOW_STEPS: int = 8
 const ROCK_CELL: float = 192.0
 const ROCK_HARD_CLEARANCE: float = 12.0
 const ROCK_PREFERRED_CLEARANCE: float = 26.0
@@ -2982,7 +2983,7 @@ static func _direct_trajectory_sample(id: int, before: Vector2, target: Vector2,
 		_direct_trajectories.erase(id)
 		return null
 	var record: Dictionary = _direct_trajectories.get(id, {})
-	if not record.is_empty() and (record["last_tick"] != tick - 1 or record["last_position"] != before or record["target"] != target or record["budget"] != budget):
+	if not record.is_empty() and (record.has("samples") or record["last_tick"] != tick - 1 or record["last_position"] != before or record["target"] != target or record["budget"] != budget):
 		_direct_trajectories.erase(id)
 		record = {}
 	if record.is_empty():
@@ -3006,6 +3007,78 @@ static func _direct_trajectory_sample(id: int, before: Vector2, target: Vector2,
 		record["last_position"] = after
 	return after
 
+# General-angle motion cannot safely use origin + velocity * ticks:
+# repeated Vector2 rounding is part of the authoritative integrator.
+# Instead, certify a short sequence of its exact future empty-sweep samples.
+# Only try inside an existing broad rock certificate. If the *entire*
+# remaining destination is enclosed, all lookaheads and swept steps are
+# enclosed too. Otherwise require a conservative bound around the window.
+# The samples are indexed by absolute tick; no gameplay step is skipped.
+static func _new_direct_window(id: int, before: Vector2, target: Vector2, budget: float, tick: int) -> Dictionary:
+	if budget <= EPS or budget > DIRECT_CORRIDOR_LOOKAHEAD / float(DIRECT_WINDOW_STEPS) or before.is_equal_approx(target) or not _direct_rock_corridors.has(id) or _rock_routes.has(id):
+		return {}
+	var known: Rect2i = _direct_rock_corridors[id]
+	# Bound work and avoid speculative samples near an uncertified edge.
+	# The exact per-sample cell check below remains the final proof.
+	var reach: float = budget * DIRECT_WINDOW_STEPS + maxf(budget + 96.0, 240.0)
+	var extent := Vector2.ONE * reach
+	var lower: Vector2 = before.min(target).max(before - extent)
+	var upper: Vector2 = before.max(target).min(before + extent)
+	if not known.has_point(_rock_cell(lower)) or not known.has_point(_rock_cell(upper)):
+		return {}
+	var samples := PackedVector2Array()
+	var cursor: Vector2 = before
+	for index in range(DIRECT_WINDOW_STEPS):
+		# _field_detour does not consult rocks at approximate arrival, but
+		# the normal sweep still does. Let the ordinary path handle it.
+		if cursor.is_equal_approx(target):
+			break
+		var lookahead: Vector2 = cursor.move_toward(target, maxf(budget + 96.0, 240.0))
+		var after: Vector2 = cursor.move_toward(target, budget)
+		var first: Vector2i = _rock_cell(cursor.min(lookahead).min(after))
+		var last: Vector2i = _rock_cell(cursor.max(lookahead).max(after))
+		if not known.has_point(first) or not known.has_point(last):
+			break
+		if (after - cursor).length_squared() > EPS * EPS:
+			after = cursor.lerp(after, 1.0)
+		if after == cursor:
+			break
+		samples.append(after)
+		cursor = after
+		if cursor == target:
+			break
+	# Avoid retaining a prediction that cannot be reused.
+	if samples.size() < 2:
+		return {}
+	return {"samples": samples, "target": target, "budget": budget, "anchor_tick": tick, "last_tick": tick - 1, "last_position": before}
+
+static func _direct_window_sample(id: int, before: Vector2, target: Vector2, budget: float, tick: int) -> Variant:
+	if id < 0 or tick < 0:
+		return null
+	var record: Dictionary = _direct_trajectories.get(id, {})
+	if not record.is_empty() and (not record.has("samples") or record["last_tick"] != tick - 1 or record["last_position"] != before or record["target"] != target or record["budget"] != budget or _rock_routes.has(id) or not _direct_rock_corridors.has(id)):
+		_direct_trajectories.erase(id)
+		record = {}
+	if record.is_empty():
+		if _direct_trajectories.size() >= DIRECT_CORRIDOR_LIMIT:
+			return null
+		record = _new_direct_window(id, before, target, budget, tick)
+		if record.is_empty():
+			return null
+		_direct_trajectories[id] = record
+	var samples: PackedVector2Array = record["samples"]
+	var index: int = tick - int(record["anchor_tick"])
+	if index < 0 or index >= samples.size():
+		_direct_trajectories.erase(id)
+		return null
+	var after: Vector2 = samples[index]
+	if index + 1 == samples.size() or after == target:
+		_direct_trajectories.erase(id)
+	else:
+		record["last_tick"] = tick
+		record["last_position"] = after
+	return after
+
 static func _direct_motion_sample(ship: Dictionary, before: Vector2, target: Vector2, budget: float, avoid_rocks: bool) -> Variant:
 	var id: int = int(ship.get("id", -1))
 	if not before.is_finite() or not target.is_finite() or not is_finite(budget) or budget < 0.0:
@@ -3014,6 +3087,12 @@ static func _direct_motion_sample(ship: Dictionary, before: Vector2, target: Vec
 	if not _direct_hull_corridor_clear(ship, before):
 		_direct_trajectories.erase(id)
 		return null
+	# General-angle windows already include the exact empty-rock sweep.
+	# The live hull-neighborhood guard above must pass on every sample.
+	if avoid_rocks and before.x != target.x and before.y != target.y:
+		var window_sample: Variant = _direct_window_sample(id, before, target, budget, _trajectory_tick)
+		if window_sample != null:
+			return window_sample
 	var predicted: Variant = _direct_trajectory_sample(id, before, target, budget, _trajectory_tick)
 	var after: Vector2 = before.move_toward(target, budget) if predicted == null else predicted
 	if avoid_rocks:
