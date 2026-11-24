@@ -2623,6 +2623,59 @@ func _test_economy_rate_schedule() -> void:
 	ECON._prepare_economy_rates(control, false)
 	print("PASS: slow economy coefficient reuse, live input wakeups, population and wage parity")
 
+func _test_shared_economy_censuses() -> void:
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
+	state["empire_targets"] = {1: {"fighter": 4}, 2: {"miner": 4}}
+	var p: Dictionary = state["planets"][0]
+	p["maintain"] = {"fighter": 100, "miner": 100}
+	var census: Dictionary = {}
+	assert(ECON._maintain_needed(state, 0, p, "fighter", census))
+	var before: int = state["ships"].size()
+	assert(int(census["scanned"]) == before)
+	var count: int = ECON.origin_count(state, 0, "fighter")
+	var new_hull: Dictionary = {"owner": 1, "origin": 0, "kind": "fighter"}
+	state["ships"].append(new_hull)
+	var counts: Dictionary = ECON._repeat_origin_counts(state, census)
+	assert(int(counts[Vector2i(1, 0)]["fighter"]) == count + 1)
+	assert(int(census["scanned"]) == before + 1)
+	assert(ECON._maintain_needed(state, 0, p, "miner", census))
+	p["queue"].append({"kind": "fighter"})
+	p["maintain"]["fighter"] = count + 2
+	assert(not ECON._maintain_needed(state, 0, p, "fighter", census))
+	var shared: Dictionary = ECON._empire_target_counts(state)
+	for owner in [1, 2]:
+		assert(shared[owner] == ECON.empire_fleet_counts(state, owner))
+	state["empire_targets"].clear()
+	assert(ECON._empire_target_counts(state).is_empty())
+	print("PASS: shared origin and empire census, live queues and completed launches")
+
+func _test_fused_combat_preparation() -> void:
+	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
+	ECON.objective_progress(state, 1)["rewards"] = ["rank_loading", "shield_1"]
+	var first: Dictionary = state["ships"][0]
+	first.erase("position")
+	first["hp"] = 10.0
+	for craft in state["ships"]:
+		craft["reward_loading_factor"] = 2.0
+	var reference: Dictionary = state.duplicate(true)
+	var graph: Dictionary = ECON.military_graph(state)
+	var reference_graph: Dictionary = ECON.military_graph(reference)
+	for craft in reference["ships"]:
+		ECON._ensure_position(reference_graph["points"] if craft.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"] else reference["map"]["points"], craft)
+	ECON._passive_regeneration(reference, 0.1)
+	ECON._refresh_reward_defenses(reference, 0.1)
+	for craft in reference["ships"]:
+		var loading: float = ECON._player_factor(reference, int(craft["owner"]), "rank_loading", 0.15)
+		if loading > 1.0:
+			craft["reward_loading_factor"] = loading
+		else:
+			craft.erase("reward_loading_factor")
+	ECON._prepare_combat_hulls(state, graph, 0.1)
+	ECON._regenerate_structures(state, 0.1)
+	ECON._refresh_reward_defenses(state, 0.1)
+	assert(state["ships"] == reference["ships"] and state["planets"] == reference["planets"])
+	print("PASS: fused hull preparation preserves positions, regeneration and loading rewards")
+
 func _test_fleet_upkeep() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
 	assert(float(ECON.empire_totals(state, 1)["upkeep"]) == 81.0)
@@ -2717,6 +2770,8 @@ func _test_rogue_defection() -> void:
 func _initialize() -> void:
 	_test_rogue_defection()
 	_test_fleet_upkeep()
+	_test_shared_economy_censuses()
+	_test_fused_combat_preparation()
 	_test_economy_rate_schedule()
 	_test_construction_credits()
 	_test_galactic_credits()
