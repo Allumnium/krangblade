@@ -908,8 +908,6 @@ func _check_economy_sync() -> void:
 			var assigned_miners: int = 0
 			var auto_salvage: bool = false
 			var follow_verified: bool = false
-			var resource_handoff: bool = false
-			var recipient_loaded: bool = false
 			var dock_delivered: int = 0
 			var farm_verified: bool = false
 			var colony_order_verified: bool = false
@@ -940,10 +938,6 @@ func _check_economy_sync() -> void:
 					auto_salvage = bool(craft.get("holding", false)) and is_equal_approx(float(craft["cargo"]["Crystals"]), 2.0)
 				if int(craft["id"]) == 989000 + owner_home:
 					follow_verified = craft.get("unit_order", {}).get("kind", "") == "follow" and bool(craft["unit_order"].get("guard", false)) and int(craft["unit_order"]["target"]) == 988000 + owner_home and bool(craft.get("follow_arrived", false))
-				if int(craft["id"]) == 986000 + owner_home:
-					resource_handoff = ECON._cargo_total(craft) <= ECON.EPS
-				if int(craft["id"]) == 987000 + owner_home:
-					recipient_loaded = ECON._cargo_total(craft) >= ECON.CARGO_CAPACITY - ECON.EPS
 				if int(craft["id"]) == 980000 + owner_home:
 					repair_toggled = not ECON.autocast_enabled(craft, "repair") and not ECON.autocast_enabled(craft, "mine") and ECON.autocast_enabled(craft, "salvage") and not ECON.autocast_enabled(craft, "wander")
 					deposited = float(craft["cargo"].get(ECON.ANTIMATTER, 0.0)) <= ECON.EPS and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 17.0 - ECON.EPS
@@ -968,7 +962,7 @@ func _check_economy_sync() -> void:
 				"guard_order": guard_verified,
 				"automatic_salvage": auto_salvage and not state.get("salvage", {}).has(940000 + owner_home),
 				"miner_repair_toggle": repair_toggled,
-				"miner_resource_handoff": resource_handoff and recipient_loaded,
+				"miner_resource_handoff": bool(observed_commands.get(owner, {}).get("miner_resource_handoff", false)),
 				"persistent_follow": follow_verified,
 				"miner_repaired": repaired,
 				"miner_deposited": deposited,
