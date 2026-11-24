@@ -74,6 +74,8 @@ Combat uses separate persistent ordered hull-only cell and sector arrays (`StepF
 
 `GameSession` owns `economy`, `round_id`, `snapshot_revision`, reliable snapshot/template bookkeeping and visual `motion_samples`. The first reliable state conveys generated map/planet templates; later packets may send compact ore and planet changes, and decoding falls back to full states if incompatible. `snapshot_codec.gd` must preserve wire keys such as `_wire_ore`, `_wire_map_template`, `_wire_planets_compact` and `_wire_planet_template`. Movement packets remain **20 bytes per ship**, at most **57 records per batch**; GameSession owns RPC permissions, revision filters and finite-vector checks. Do not alter message schemas casually.
 
+Client map and fog drawing each own a synchronous projection snapshot (viewport/map size, world center, fit and zoom), released when the callback returns. Asteroid vertices use the same projection arithmetic directly rather than invoking the camera for every rock. The fog celestial renderer retains a single static hidden-rock mesh per field while the exact projection and immutable observed chunks are unchanged; map seed changes clear the cache. Live rotating rock meshes and fog observation rules remain independent. No authoritative state or wire changes.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

@@ -13,6 +13,8 @@ const STAR_SPARK_COUNT: int = 9
 
 var asteroid_shape_cache: Dictionary = {}
 var asteroid_frame_meshes: Array[ArrayMesh] = []
+# Hidden rocks are static last-seen snapshots. One retained mesh per field.
+var asteroid_static_meshes: Dictionary = {}
 var asteroid_cache_seed: int = -1
 var orbit_visual_time: float = -1.0
 var orbit_sample_time: float = -1.0
@@ -38,6 +40,7 @@ func prepare_map(state: Dictionary) -> void:
 	var seed_value: int = int(state["map"]["seed"])
 	if asteroid_cache_seed != seed_value:
 		asteroid_shape_cache.clear()
+		asteroid_static_meshes.clear()
 		asteroid_cache_seed = seed_value
 
 # At overview scale, plot each actual rock, never its enclosing belt.
@@ -55,11 +58,25 @@ static func draw_terrain_footprint(canvas: Control, field: Dictionary, offset: V
 	if not segments.is_empty():
 		canvas.draw_multiline_colors(segments, colors, 1.0, true)
 
-func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_point: Callable, shading: float = 1.0, rotation_time: float = 0.0) -> void:
+func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, shading: float = 1.0, rotation_time: float = 0.0, static_field: int = -1) -> void:
+	var chunks: Array = field["chunks"]
+	# Only the fog layer supplies static_field. Its entries are immutable
+	# observations replaced by FogOfWar when visibility or ore changes.
+	var signature: Array = []
+	if static_field >= 0:
+		signature = [viewport_bounds, screen_center, world_center, projection_fit, projection_zoom, render_scale, shading, rotation_time]
+		var retained: Dictionary = asteroid_static_meshes.get(static_field, {})
+		if not retained.is_empty() and retained["signature"] == signature and retained["chunks"] == chunks:
+			var previous_mesh: ArrayMesh = retained["mesh"]
+			if previous_mesh != null:
+				map_canvas.draw_mesh(previous_mesh, null)
+			return
 	var rock_vertices := PackedVector3Array()
 	var rock_colors := PackedColorArray()
-	for chunk in field["chunks"]:
-		var rock_pos: Vector2 = screen_point.call(chunk["position"])
+	for chunk in chunks:
+		# Same arithmetic/order as CameraView.screen_point, without a
+		# per-rock Callable, camera lookup or viewport/fit calculation.
+		var rock_pos: Vector2 = screen_center + ((chunk["position"] as Vector2) - world_center) * projection_fit * projection_zoom
 		if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
 			continue
 		var fraction: float = float(chunk["remaining"]) / float(chunk["initial"])
@@ -81,13 +98,13 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 				var angle: float = TAU * float(k) / float(chunk["shape"].size()) + float(chunk["rotation"])
 				unit_shape.append(Vector2.from_angle(angle) * float(chunk["shape"][k]))
 			# Derive a stable, subtly varied spin from the seeded shape.
-			var signature: float = sin(float(chunk["rotation"]) * 5.0)
+			var spin_signature: float = sin(float(chunk["rotation"]) * 5.0)
 			# Keep most slow; a seeded minority rotates a little faster.
 			var variety: float = fposmod(sin(shape_key.dot(Vector2(0.013, 0.021))) * 43758.5453, 1.0)
-			var speed: float = lerpf(0.003, 0.009, absf(signature))
+			var speed: float = lerpf(0.003, 0.009, absf(spin_signature))
 			if variety < 0.30:
 				speed *= lerpf(1.5, 2.5, variety / 0.30)
-			var rate: float = speed * (1.0 if signature >= 0.0 else -1.0)
+			var rate: float = speed * (1.0 if spin_signature >= 0.0 else -1.0)
 			asteroid_shape_cache[shape_key] = {"vertices": unit_shape, "triangles": Geometry2D.triangulate_polygon(unit_shape), "spin_rate": rate}
 		var rock := PackedVector2Array()
 		var cached: Dictionary = asteroid_shape_cache[shape_key]
@@ -122,15 +139,18 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 					var vertex: Vector2 = spot_center + Vector2.from_angle(angle + TAU * float(k) / 3.0) * spot_radius
 					rock_vertices.append(Vector3(vertex.x, vertex.y, 0.0))
 					rock_colors.append(Color("#cf8eae").darkened(1.0 - shading))
+	var mesh: ArrayMesh = null
 	if not rock_vertices.is_empty():
 		var arrays: Array = []
 		arrays.resize(Mesh.ARRAY_MAX)
 		arrays[Mesh.ARRAY_VERTEX] = rock_vertices
 		arrays[Mesh.ARRAY_COLOR] = rock_colors
-		var mesh := ArrayMesh.new()
+		mesh = ArrayMesh.new()
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 		asteroid_frame_meshes.append(mesh)
 		map_canvas.draw_mesh(mesh, null)
+	if static_field >= 0:
+		asteroid_static_meshes[static_field] = {"signature": signature, "chunks": chunks, "mesh": mesh}
 
 func system_visual(index: int, state: Dictionary) -> Dictionary:
 	var seed_value: int = int(state["map"]["seed"])
