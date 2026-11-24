@@ -197,10 +197,6 @@ func _phase_changed() -> void:
 		if mode == "normal":
 			if role == "host":
 				var ordered: Array[int] = RULES.ordered_peers(roster)
-				# Explicit fixture wars enable the existing combat assertions.
-				for i in range(ordered.size()):
-					for j in range(i + 1, ordered.size()):
-						assert(ECON.diplomacy_declare_war(state, ordered[i], ordered[j]))
 				for peer in ordered:
 					# Fund the existing large construction fixture after checking opening balances.
 					state["galactic_credits"][peer] = 100000.0
@@ -231,25 +227,51 @@ func _phase_changed() -> void:
 				target["stock"]["Metals"] = 100.0
 				var assault: Dictionary = {"id": 960000, "kind": "fighter", "owner": ordered[0], "origin": 0, "at": target_index, "dest": target_index, "operation_target": target_index, "route": [], "leg": 0.0, "position": ECON.station_position(state, target_index, 0.0), "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock()}
 				state["ships"].append(assault)
-				# A separate neutral system isolates mining-laser combat from
-				# the home command fixtures and station assault.
+				# A safe neutral system isolates cargo handoff from home-sector
+				# hostilities and the station assault.
 				var remote: int = -1
 				var clearance: float = -1.0
+				var remote_graph: Dictionary = ECON.military_graph(state)
+				var remote_threats: Dictionary = ECON._salvage_threats(state, remote_graph)
 				for candidate in range(state["planets"].size()):
-					if int(state["planets"][candidate]["owner"]) != 0:
+					if candidate == target_index or int(state["planets"][candidate]["owner"]) != 0:
+						continue
+					var candidate_point: Vector2 = state["map"]["points"][candidate]
+					var safe_for_all: bool = true
+					for peer in ordered:
+						if not ECON._salvage_safe(state, remote_graph, peer, candidate_point, candidate, remote_threats):
+							safe_for_all = false
+							break
+					if not safe_for_all:
 						continue
 					var nearest: float = INF
 					for occupied in range(state["planets"].size()):
 						if int(state["planets"][occupied]["owner"]) != 0:
-							nearest = minf(nearest, (state["map"]["points"][candidate] as Vector2).distance_to(state["map"]["points"][occupied]))
+							nearest = minf(nearest, candidate_point.distance_to(state["map"]["points"][occupied]))
 					if nearest > clearance:
 						remote = candidate
 						clearance = nearest
-				assert(remote >= 0)
+				assert(remote >= 0, "No neutral remote system is safe for every peer's fixture.")
 				var test_point: Vector2 = state["map"]["points"][remote]
+				var combat_site: int = -1
+				var combat_clearance: float = -1.0
+				for combat_candidate in range(state["planets"].size()):
+					if combat_candidate == remote or int(state["planets"][combat_candidate]["owner"]) != 0:
+						continue
+					var combat_candidate_point: Vector2 = state["map"]["points"][combat_candidate]
+					var combat_nearest: float = INF
+					for combat_occupied in range(state["planets"].size()):
+						if int(state["planets"][combat_occupied]["owner"]) != 0:
+							combat_nearest = minf(combat_nearest, combat_candidate_point.distance_to(state["map"]["points"][combat_occupied]))
+					if combat_nearest > combat_clearance:
+						combat_site = combat_candidate
+						combat_clearance = combat_nearest
+				if combat_site < 0:
+					combat_site = target_index
+				var combat_point: Vector2 = state["map"]["points"][combat_site]
 				for slot in range(2):
 					var kind: String = "miner" if slot == 0 else "ship"
-					var hull: Dictionary = {"id": 970000 + slot, "kind": kind, "owner": ordered[slot], "origin": slot, "at": remote, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": test_point + Vector2.RIGHT * 100.0 * slot, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock()}
+					var hull: Dictionary = {"id": 970000 + slot, "kind": kind, "owner": ordered[slot], "origin": slot, "at": combat_site, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": combat_point + Vector2.RIGHT * 100.0 * slot, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock()}
 					hull["cargo"]["Metals"] = ECON.cargo_capacity(kind)
 					state["ships"].append(hull)
 				for system in state["planets"]:
@@ -272,23 +294,24 @@ func _phase_changed() -> void:
 						repair_victim.merge({"id": 990000 + index, "kind": "ship", "position": repair_point + Vector2.RIGHT * 40, "hp": ECON.FREIGHTER_HP - 12.0, "cargo": ECON.empty_stock()}, true)
 						state["ships"].append(repairer)
 						state["ships"].append(repair_victim)
-						var haul_point: Vector2 = graph["points"][index] + Vector2.UP * minf(200.0, ECON.sector_limit(graph, index, Vector2.UP) * 0.4)
+						var handoff_point: Vector2 = test_point
 						var collector: Dictionary = repairer.duplicate(true)
-						collector.merge({"id": 986000 + index, "position": haul_point, "holding": false, "cargo": ECON.empty_stock(), "mine_auto": false, "salvage_auto": false, "repair_auto": false, "wander_auto": false}, true)
+						collector.merge({"id": 986000 + index, "at": remote, "position": handoff_point, "holding": true, "cargo": ECON.empty_stock(), "mine_auto": false, "salvage_auto": false, "repair_auto": false, "wander_auto": false}, true)
 						collector["cargo"]["Metals"] = ECON.MINER_CAPACITY
 						var hauler: Dictionary = repair_victim.duplicate(true)
 						# The handoff receiver must be healthy: a 200-HP freighter has 400 max HP
 						# and may abandon staging to seek repairs before a multi-peer transfer.
-						hauler.merge({"id": 987000 + index, "position": haul_point, "holding": false, "hp": ECON.ship_max_hp("ship"), "cargo": ECON.empty_stock(), "salvage_auto": false, "resource_stage": {"node": index, "anchor": index, "point": haul_point, "salvage_site": true}}, true)
+						hauler.merge({"id": 987000 + index, "at": remote, "position": handoff_point, "holding": true, "trade_auto": true, "hp": ECON.ship_max_hp("ship"), "cargo": ECON.empty_stock(), "salvage_auto": false, "resource_stage": {"node": remote, "anchor": remote, "point": handoff_point, "salvage_site": true}}, true)
 						hauler["cargo"]["Metals"] = ECON.CARGO_CAPACITY - ECON.MINER_CAPACITY
 						hauler["next_resource_stage_search"] = float(state["elapsed"]) + 5.0
 						# Auto-Trade off: otherwise the adjacent repair victim receives the repairer's cargo by handoff.
 						repair_victim["trade_auto"] = false
 						state["ships"].append(collector)
 						state["ships"].append(hauler)
+						var haul_point: Vector2 = graph["points"][index] + Vector2.UP * minf(200.0, ECON.sector_limit(graph, index, Vector2.UP) * 0.4)
 						var follow_leader: Dictionary = hauler.duplicate(true)
 						follow_leader.erase("resource_stage")
-						follow_leader.merge({"id": 988000 + index, "kind": "colony_ship", "position": haul_point + Vector2.LEFT * 180.0, "navigation_target": haul_point + Vector2.LEFT * 180.0, "wander_auto": false, "cargo": ECON.empty_stock()}, true)
+						follow_leader.merge({"id": 988000 + index, "kind": "colony_ship", "at": index, "position": haul_point + Vector2.LEFT * 180.0, "navigation_target": haul_point + Vector2.LEFT * 180.0, "hp": ECON.ship_max_hp("colony_ship"), "wander_auto": false, "cargo": ECON.empty_stock()}, true)
 						var follower: Dictionary = follow_leader.duplicate(true)
 						follower.merge({"id": 989000 + index, "kind": "fighter", "hp": ECON.SHIP_HP, "position": haul_point + Vector2.LEFT * 380.0}, true)
 						state["ships"].append(follow_leader)
@@ -401,19 +424,25 @@ func _network_timeout() -> void:
 	if session != null and str(session.get("phase")) == "match":
 		var state: Dictionary = session.get("economy")
 		print("DEBUG: timeout role=", role, " players=", expected_players, " game_years=", state.get("elapsed"), " verified=", economy_verified, " stage=", speed_stage)
-		if role == "host":
-			for planet in state.get("planets", []):
-				if not bool(planet.get("home", false)):
-					continue
-				var owner: int = int(planet["owner"])
-				var observed: Dictionary = observed_commands.get(owner, {})
-				if observed.has("miner_resource_handoff"):
-					continue
-				var node: int = state["planets"].find(planet)
-				for ship in state.get("ships", []):
-					if int(ship["id"]) not in [986000 + node, 987000 + node]:
-						continue
-					print("DEBUG: handoff owner=", owner, " hull=", ship["id"], " hp=", ship.get("hp"), " pos=", ship.get("position"), " cargo=", ship.get("cargo"), " engaged=", ECON._engaged(ship), " retreat=", ship.get("retreating", false), " hold=", ship.get("holding", false), " stage=", ship.get("resource_stage", {}), " dest=", ship.get("dest", -1))
+		var graph: Dictionary = ECON.military_graph(state)
+		var threats: Dictionary = ECON._salvage_threats(state, graph)
+		for node in range(state["planets"].size()):
+			if not bool(state["planets"][node].get("home", false)):
+				continue
+			var owner: int = int(state["planets"][node]["owner"])
+			var miner_id: int = 986000 + node
+			var hauler_id: int = 987000 + node
+			var miner: Dictionary = {}
+			var hauler: Dictionary = {}
+			for ship in state.get("ships", []):
+				if int(ship["id"]) == miner_id:
+					miner = ship
+				elif int(ship["id"]) == hauler_id:
+					hauler = ship
+			if miner.is_empty() or hauler.is_empty():
+				continue
+			var transfer_key: String = "%d:%d:Metals" % [miner_id, hauler_id]
+			print("DEBUG: handoff owner=", owner, " miner_cargo=", miner.get("cargo"), " hauler_cargo=", hauler.get("cargo"), " dist=", (miner["position"] as Vector2).distance_to(hauler["position"]), " safe=", ECON._salvage_safe(state, graph, owner, miner["position"], ECON.local_sector(graph, miner), threats), "/", ECON._salvage_safe(state, graph, owner, hauler["position"], ECON.local_sector(graph, hauler), threats), " trade=", ECON.autocast_enabled(hauler, "trade"), " engaged=", ECON._engaged(miner), "/", ECON._engaged(hauler), " transfer=", state.get("cargo_transfers", {}).get(transfer_key, {}), " stats=", miner.get("tons_dropped", 0.0), "/", hauler.get("tons_picked", 0.0))
 	_fail("Network smoke test timed out.")
 
 func _prepare_commands() -> void:
@@ -744,6 +773,17 @@ func _check_economy_sync() -> void:
 			var observed: Dictionary = observed_commands.get(owner, {})
 			observed["miner_resource_handoff"] = true
 			observed_commands[owner] = observed
+	var fixture_peers: Array[int] = RULES.ordered_peers(session.get("players"))
+	var all_handoffs_verified: bool = not fixture_peers.is_empty()
+	for fixture_peer in fixture_peers:
+		if not bool(observed_commands.get(fixture_peer, {}).get("miner_resource_handoff", false)):
+			all_handoffs_verified = false
+	if role == "host" and all_handoffs_verified and not bool(get_meta("fixture_wars_declared", false)):
+		for i in range(fixture_peers.size()):
+			for j in range(i + 1, fixture_peers.size()):
+				assert(ECON.diplomacy_declare_war(state, fixture_peers[i], fixture_peers[j]))
+		set_meta("fixture_wars_declared", true)
+		session.call("_publish_economy")
 	for hull in state["ships"]:
 		if int(hull["id"]) == 975000 and int(hull["owner"]) in [0, ECON.PIRATE_OWNER] and bool(hull.get("rogue", false)) and float(hull["crew"]) == 20.0:
 			set_meta("rogue_seen", true)

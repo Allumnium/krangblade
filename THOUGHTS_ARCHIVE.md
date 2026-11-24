@@ -1,5 +1,9 @@
 # Warbound — thoughts archive
 
+### v0.97.76 — ENet smoke fixture reliability (resolved 2026-11-24)
+- **Original observation:** The Colony replication fixture retained Freighter HP. Three-peer handoff checks were also blocked by home-sector danger, overlap with the combat fixture, and declaring wars before the handoff.
+- **Resolution:** Use the Colony's canonical maximum HP; stage each handoff pair at a safe neutral system, keep it stationary, separate combat fixtures, and declare wars after all peers verify transfers. Godot 4.7.2 parser plus normal 2- and 3-peer ENet runs passed; host and guests printed PASS.
+
 ### v0.40.0 — Station upgrade construction time (resolved v0.42.0)
 - **Original observation:** Station and shipyard queues share tile rendering but retain separate infrastructure/production work. Former instant manual station upgrades now finish on the next fixed tick; they are observable and cancellable during pause without adding meaningful balance time. Consider longer construction periods only if requested after playtesting. Verify narrow build-card captions and trade footer.
 - **Resolution:** Warehouse, habitation and orbital eco-housing now take substantial time in the existing queue, including AI expansion. Regression coverage confirms no immediate completion and multiplayer paused queue replication. Narrow layout and pacing remain playtest acceptance items.
