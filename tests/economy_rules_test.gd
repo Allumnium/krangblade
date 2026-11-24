@@ -758,6 +758,71 @@ func _test_direct_trajectory_samples() -> void:
 		assert(step_distance == reference_distance and craft == reference)
 	print("PASS: exact direct trajectory samples, command changes, obstacle invalidation and contact fallback")
 
+func _test_exact_tick_trajectories() -> void:
+	var fields: Array = [{"position": Vector2(3000, 0), "radius": 50.0, "chunks": [{"position": Vector2(3000, 0), "radius": 30.0}]}]
+	ECON._refresh_movement_fields(fields)
+	ECON._direct_trajectories.clear()
+	var craft: Dictionary = {"id": 1701, "kind": "fighter", "position": Vector2(-100, 20), "heading": Vector2.UP}
+	var reference: Dictionary = craft.duplicate(true)
+	var goal := Vector2(500, 20)
+	var budget: float = 2.5
+	for tick in range(100, 120):
+		ECON._trajectory_tick = tick
+		ECON._begin_ship_avoidance({1701: craft["position"]})
+		assert(ECON._navigate(craft, goal, budget) == ECON._navigate(reference, goal, budget, false))
+		assert(craft == reference and ECON._direct_trajectories[1701]["anchor_tick"] == 100)
+	# Skipped tick, changed command, changed budget and external displacement
+	# each start a new prediction from the authoritative pose.
+	for tick in [122, 123, 124, 125]:
+		ECON._trajectory_tick = tick
+		if tick == 123:
+			goal = Vector2(-500, 20)
+		elif tick == 124:
+			budget = 1.25
+		elif tick == 125:
+			craft["position"] += Vector2(5, 0)
+			reference["position"] = craft["position"]
+		ECON._begin_ship_avoidance({1701: craft["position"]})
+		assert(ECON._navigate(craft, goal, budget) == ECON._navigate(reference, goal, budget, false))
+		assert(craft == reference and ECON._direct_trajectories[1701]["anchor_tick"] == tick)
+	# A hull appearing on the route uses the original steering immediately.
+	var start: Vector2 = craft["position"]
+	ECON._trajectory_tick = 126
+	ECON._begin_ship_avoidance({1701: start, 1702: start + Vector2(-50, 0)})
+	assert(ECON._navigate(craft, goal, budget) == ECON._navigate(reference, goal, budget, false))
+	assert(craft == reference and not ECON._direct_trajectories.has(1701))
+	assert((craft["position"] as Vector2).y != start.y)
+	# Reestablish a clean cardinal leg, then introduce a rock.
+	craft["position"] = Vector2(0, 0)
+	reference["position"] = craft["position"]
+	goal = Vector2(500, 0)
+	ECON._trajectory_tick = 127
+	ECON._begin_ship_avoidance({1701: craft["position"]})
+	assert(ECON._navigate(craft, goal, 5.0) == ECON._navigate(reference, goal, 5.0, false))
+	assert(craft == reference and ECON._direct_trajectories.has(1701))
+	fields[0]["chunks"].append({"position": Vector2(100, 0), "radius": 30.0})
+	ECON._refresh_movement_fields(fields)
+	assert(not ECON._direct_trajectories.has(1701))
+	ECON._trajectory_tick = 128
+	ECON._begin_ship_avoidance({1701: craft["position"]})
+	assert(ECON._direct_motion_sample(craft, craft["position"], goal, 5.0, true) == null)
+	assert(not ECON._direct_trajectories.has(1701))
+	ECON._refresh_movement_fields([])
+	ECON._begin_ship_avoidance({})
+	# A negative vertical leg, exact arrival, and non-lattice/diagonal fallback.
+	craft["position"] = Vector2(12, 12)
+	reference = craft.duplicate(true)
+	for tick in range(129, 135):
+		ECON._trajectory_tick = tick
+		assert(ECON._navigate(craft, Vector2(12, 1), 2.0) == ECON._navigate(reference, Vector2(12, 1), 2.0, false))
+		assert(craft == reference)
+	assert(craft["position"] == Vector2(12, 1) and not ECON._direct_trajectories.has(1701))
+	assert(ECON._new_direct_trajectory(Vector2.ZERO, Vector2(100, 100), 1.0, 140).is_empty())
+	assert(ECON._new_direct_trajectory(Vector2.ZERO, Vector2(100, 0), 12.54, 140).is_empty())
+	ECON._trajectory_tick = -1
+	ECON._direct_trajectories.clear()
+	print("PASS: exact absolute-tick travel, immediate obstacle/contact fallback, arrival and reanchoring")
+
 func _test_shared_navigation_queries() -> void:
 	# Preserve neighbor traversal order, including negative cells and ties.
 	var positions: Dictionary = {11: Vector2(30, 0), 12: Vector2(-30, 0), 13: Vector2(40, 0), 14: Vector2(500, 0)}
@@ -2306,6 +2371,7 @@ func _initialize() -> void:
 	_test_local_avoidance()
 	_test_shared_navigation_queries()
 	_test_direct_trajectory_samples()
+	_test_exact_tick_trajectories()
 	_test_station_defense_and_ports()
 	_test_station_construction_queue()
 	_test_ai_timed_orbital_housing()

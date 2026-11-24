@@ -20,6 +20,11 @@ static var _rock_route_queries: Dictionary = {}
 # Persistent certificates for empty rock corridors. Actual trajectory
 # samples retain the old integrator's arithmetic at every substep.
 static var _direct_rock_corridors: Dictionary = {}
+# Derived fixed-step trajectories; never authoritative or serialized.
+static var _direct_trajectories: Dictionary = {}
+static var _trajectory_state: Dictionary = {}
+static var _trajectory_roster: Array = []
+static var _trajectory_tick: int = -1
 const DIRECT_CORRIDOR_LOOKAHEAD: float = 768.0
 const DIRECT_CORRIDOR_LIMIT: int = 10000
 const ROCK_CELL: float = 192.0
@@ -2608,6 +2613,7 @@ static func _refresh_movement_fields(fields: Array) -> void:
 	_rock_windows.clear()
 	_rock_route_queries.clear()
 	_direct_rock_corridors.clear()
+	_direct_trajectories.clear()
 	for field in fields:
 		var center: Vector2 = field["position"]
 		var special: bool = bool(field.get("antimatter", false))
@@ -2941,14 +2947,78 @@ static func _empty_rock_rectangle(first: Vector2i, last: Vector2i) -> bool:
 				return false
 	return true
 
+# A fixed-step cardinal leg on a bounded binary lattice admits exact
+# absolute-tick evaluation. All coordinates on the moving axis are exact
+# float32 values; a separation of at most 4096 lattice units has an exact
+# squared length, so the original move_toward direction is exactly +/-1.
+# Other directions/budgets must keep the incremental reference arithmetic.
+static func _new_direct_trajectory(before: Vector2, target: Vector2, budget: float, tick: int) -> Dictionary:
+	if budget <= EPS or before == target or (before.x != target.x and before.y != target.y):
+		return {}
+	var horizontal: bool = before.y == target.y
+	var start_axis: float = before.x if horizontal else before.y
+	var end_axis: float = target.x if horizontal else target.y
+	for scale in [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0]:
+		var start_units: float = start_axis * scale
+		var end_units: float = end_axis * scale
+		var step_units: float = budget * scale
+		var span: float = absf(end_units - start_units)
+		if maxf(absf(start_units), absf(end_units)) > 4194304.0 or span > 4096.0:
+			break
+		if step_units >= span:
+			return {}
+		if start_units != floorf(start_units) or end_units != floorf(end_units) or step_units != floorf(step_units) or step_units < 1.0:
+			continue
+		return {"target": target, "budget": budget, "horizontal": horizontal, "scale": scale, "origin_units": int(start_units), "span": int(span), "step_units": int(step_units), "sign": 1 if end_units > start_units else -1, "anchor_tick": tick, "last_tick": tick - 1, "last_position": before}
+	return {}
+
+# A command/speed change, skipped or duplicate movement tick, or any
+# displacement from contact, warp or another movement phase reanchors
+# at the live pose. An obstacle always discards the prediction.
+static func _direct_trajectory_sample(id: int, before: Vector2, target: Vector2, budget: float, tick: int) -> Variant:
+	if tick < 0 or id < 0:
+		return null
+	if before.x != target.x and before.y != target.y:
+		_direct_trajectories.erase(id)
+		return null
+	var record: Dictionary = _direct_trajectories.get(id, {})
+	if not record.is_empty() and (record["last_tick"] != tick - 1 or record["last_position"] != before or record["target"] != target or record["budget"] != budget):
+		_direct_trajectories.erase(id)
+		record = {}
+	if record.is_empty():
+		if _direct_trajectories.size() >= DIRECT_CORRIDOR_LIMIT:
+			return null
+		record = _new_direct_trajectory(before, target, budget, tick)
+		if record.is_empty():
+			return null
+		_direct_trajectories[id] = record
+	var advance: int = mini(int(record["span"]), int(record["step_units"]) * (tick - int(record["anchor_tick"]) + 1))
+	var coordinate: float = float(int(record["origin_units"]) + int(record["sign"]) * advance) / float(record["scale"])
+	var after: Vector2 = before
+	if bool(record["horizontal"]):
+		after.x = coordinate
+	else:
+		after.y = coordinate
+	if after == target:
+		_direct_trajectories.erase(id)
+	else:
+		record["last_tick"] = tick
+		record["last_position"] = after
+	return after
+
 static func _direct_motion_sample(ship: Dictionary, before: Vector2, target: Vector2, budget: float, avoid_rocks: bool) -> Variant:
+	var id: int = int(ship.get("id", -1))
 	if not before.is_finite() or not target.is_finite() or not is_finite(budget) or budget < 0.0:
+		_direct_trajectories.erase(id)
 		return null
 	if not _direct_hull_corridor_clear(ship, before):
+		_direct_trajectories.erase(id)
 		return null
-	var after: Vector2 = before.move_toward(target, budget)
+	var predicted: Variant = _direct_trajectory_sample(id, before, target, budget, _trajectory_tick)
+	var after: Vector2 = before.move_toward(target, budget) if predicted == null else predicted
 	if avoid_rocks:
-		if not _direct_rock_corridor_clear(int(ship.get("id", -1)), before, target, after, budget):
+		if not _direct_rock_corridor_clear(id, before, target, after, budget):
+			_direct_trajectories.erase(id)
 			return null
 		# Preserve the exact empty-sweep interpolation used by _clip_rock_step.
 		if (after - before).length_squared() > EPS * EPS:
@@ -4883,6 +4953,7 @@ static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
 				other["warp_destination"] = -1
 	state["ships"].erase(ship)
 	_direct_rock_corridors.erase(int(ship["id"]))
+	_direct_trajectories.erase(int(ship["id"]))
 	if is_same(state, _motion_sleep_state):
 		_motion_sleep_modes.erase(int(ship["id"]))
 	if is_same(state, _deadline_state):
@@ -9928,6 +9999,11 @@ static func _next_ai_slot(now: float, player: int) -> float:
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true) -> void:
 	_begin_deadline_schedule(state, deadline_schedule_enabled)
 	_rock_plan_tick += 1
+	if not is_same(state, _trajectory_state) or not is_same(state["ships"], _trajectory_roster):
+		_direct_trajectories.clear()
+		_trajectory_state = state
+		_trajectory_roster = state["ships"]
+	_trajectory_tick = _rock_plan_tick
 	_rock_plan_budget = ROCK_PLAN_LIMIT
 	_rock_route_queries.clear()
 	_refresh_movement_fields(state["map"].get("fields", []))
@@ -9964,6 +10040,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	frame.graph.erase("travel_permissions")
 	_sector_query_graph = {}
 	_sector_query_cache.clear()
+	_trajectory_tick = -1
 
 # Calendars store only keys and timestamps. The canonical dictionaries
 # remain authoritative and are rebuilt on state/roster replacement.
