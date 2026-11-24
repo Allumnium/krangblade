@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.46: Record the approved behavior-preserving large-fleet optimization priorities: predictive movement, activity-based exact work elimination, shared fleet computations and deterministic independent subsystem scheduling. Documentation only; no gameplay, protocol or simulation cadence change. Benchmark and validate each implementation slice; defer broad economy/GPU/native rewrites unless measured.
+
 - v0.97.45: Capture informational seeded combat/logistics performance baselines automatically as artifacts on manually dispatched Godot validation runs. The independent profile job samples 500/1000 hulls at 1×/5× without frame-time pass/fail thresholds; aggregate gameplay/ENet validate remains unchanged and does not depend on profiling. CI remains manual-only. No gameplay changes; manual run pending.
 
 - v0.97.44: Complete durable real-ENet resource handoff verification by consuming the observed authoritative transfer flag in each empire's command-check dictionary; remove the redundant simultaneous miner-empty/Freighter-full snapshot gate, which could still fail after a valid haul. Preserve event, cumulative cargo statistics, all peer and construction requirements. Test-only; runtime 3-/8-peer validation pending.
