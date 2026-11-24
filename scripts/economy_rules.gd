@@ -4991,13 +4991,13 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 static func _damaged_repair_cells(targets: Dictionary) -> Dictionary:
 	return REPAIR_QUERIES.damaged_cells(targets, MINER_REPAIR_SEARCH, EPS)
 
-static func _nearby_repair_ids(cells: Dictionary, point: Vector2) -> Array:
-	return REPAIR_QUERIES.nearby_ids(cells, point, MINER_REPAIR_SEARCH)
+static func _nearby_repair_ids(cells: Dictionary, point: Vector2, neighborhoods: Dictionary = {}) -> Array:
+	return REPAIR_QUERIES.nearby_ids(cells, point, MINER_REPAIR_SEARCH, neighborhoods)
 
 static func _repair_retry_due(ship: Dictionary, now: float) -> bool:
 	return REPAIR_QUERIES.retry_due(ship, now, EPS)
 
-static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float, damaged_cells: Variant = null) -> bool:
+static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float, damaged_cells: Variant = null, repair_neighborhoods: Dictionary = {}) -> bool:
 	if ship["kind"] != "miner":
 		return false
 	ship.erase("repair_target")
@@ -5017,7 +5017,7 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 		if damaged_cells != null and not _repair_retry_due(ship, float(state["elapsed"])):
 			return false
 		var best: float = MINER_REPAIR_SEARCH * MINER_REPAIR_SEARCH
-		for id in (targets.keys() if damaged_cells == null else _nearby_repair_ids(damaged_cells, pos)):
+		for id in (targets.keys() if damaged_cells == null else _nearby_repair_ids(damaged_cells, pos, repair_neighborhoods)):
 			if id == ship["id"]:
 				continue
 			var candidate: Dictionary = targets[id]
@@ -7369,15 +7369,31 @@ static func _ship_hit(damage: Dictionary, killed_by: Dictionary, health: Diction
 # Damage is authoritative and simultaneous with other weapons; projectile
 # tracer metadata is compact and rides the existing combat snapshot.
 # Use the frozen combat spatial index, including structures, for missile splash.
-static func _missile_splash(state: Dictionary, cells: Dictionary, positions: Dictionary, teams: Dictionary, team: int, target: int, attacker: Dictionary, amount: float, damage: Dictionary, killed_by: Dictionary, health: Dictionary, hull_slots: Dictionary, hull_health: PackedFloat64Array) -> void:
+# Same-team missiles striking the same frozen target have identical
+# splash recipients. Preserve traversal order and do not filter by visibility.
+static func _missile_splash_ids(state: Dictionary, cells: Dictionary, positions: Dictionary, teams: Dictionary, team: int, target: int, groups: Dictionary = {}) -> Array:
+	var key: Array = [team, target]
+	if groups.has(key):
+		return groups[key]
 	var impact: Vector2 = positions[target]
 	var cell := Vector2i(floori(impact.x / LASER_RANGE), floori(impact.y / LASER_RANGE))
+	var ids: Array = []
 	for x in range(-1, 2):
 		for y in range(-1, 2):
 			for other in cells.get(cell + Vector2i(x, y), []):
 				var id: int = int(other["id"])
 				if _combat_groups_hostile(state, team, int(teams[id])) and impact.distance_squared_to(positions[id]) <= MISSILE_SPLASH_RADIUS * MISSILE_SPLASH_RADIUS:
-					_ship_hit(damage, killed_by, health, id, attacker, amount, hull_slots, hull_health)
+					ids.append(id)
+	# Bound retained memory in unusually dense combat.
+	if groups.size() < 4096 and ids.size() <= 256:
+		groups[key] = ids
+	return ids
+
+static func _missile_splash(state: Dictionary, cells: Dictionary, positions: Dictionary, teams: Dictionary, team: int, target: int, attacker: Dictionary, amount: float, damage: Dictionary, killed_by: Dictionary, health: Dictionary, hull_slots: Dictionary, hull_health: PackedFloat64Array, groups: Dictionary = {}) -> void:
+	for id in _missile_splash_ids(state, cells, positions, teams, team, target, groups):
+		# Do not aggregate hits: per-attacker multipliers, damage ordering
+		# and lethal-hit attribution must remain unchanged.
+		_ship_hit(damage, killed_by, health, id, attacker, amount, hull_slots, hull_health)
 
 static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, positions: Dictionary, damage: Dictionary, killed_by: Dictionary, health: Dictionary, dt: float, hull_slots: Dictionary = {}, hull_health: PackedFloat64Array = PackedFloat64Array()) -> void:
 	var mounts: int = blaster_count(str(ship["kind"]))
@@ -7645,28 +7661,42 @@ static func _fire_hull_missiles(state: Dictionary, frame: COMBAT_FRAME, ship: Di
 		var best: float = MISSILE_RANGE * MISSILE_RANGE
 		var focus_id: int = int(ship.get("attack_order", -1))
 		var missile_cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
-		var reach: int = ceili(MISSILE_RANGE / LASER_RANGE)
 		if team > 0:
-			if not frame.missile_blocks.has(team):
-				frame.missile_blocks[team] = {}
-			var team_blocks: Dictionary = frame.missile_blocks[team]
 			var focused: bool = ship.has("attack_order")
-			for x in range(-reach, reach + 1):
-				for y in range(-reach, reach + 1):
-					var key: Vector2i = missile_cell + Vector2i(x, y)
-					if not team_blocks.has(key):
-						var candidates: Array = _hostile_bucket(state, frame.cells, frame.positive_hostile_cache, key, team, frame.team_by_id, true)
-						team_blocks[key] = _laser_blocks(candidates, positions, true)
-					var nearest: Array = _missile_block_nearest(team_blocks[key], positions, pos, best, missile_target, focused, focus_id)
-					best = float(nearest[0])
-					missile_target = int(nearest[1])
+			var nearest: Array = _missile_block_nearest(_missile_neighborhood_blocks(state, frame, missile_cell, team), positions, pos, best, missile_target, focused, focus_id)
+			missile_target = int(nearest[1])
 		if missile_target != -1:
-			_missile_splash(state, frame.cells, positions, frame.team_by_id, team, missile_target, ship, MISSILE_DAMAGE * launchers * _player_factor(state, int(ship["owner"]), "rank_missile", 0.10), frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health)
+			_missile_splash(state, frame.cells, positions, frame.team_by_id, team, missile_target, ship, MISSILE_DAMAGE * launchers * _player_factor(state, int(ship["owner"]), "rank_missile", 0.10), frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health, frame.missile_splash_groups)
 			missile_cd = MISSILE_COOLDOWN
 			ship["missile_origin"] = pos
 			ship["missile_endpoint"] = positions[missile_target]
 			ship["missile_until"] = float(state["elapsed"]) + 0.65
 	ship["missile_cooldown"] = missile_cd
+
+# Auto-group missile broad-phase work by team and origin cell. Keep
+# original per-cell blocks and order: equal-distance missiles prefer the
+# last matching candidate, unlike lasers. Focus and range remain per hull.
+static func _missile_neighborhood_blocks(state: Dictionary, frame: COMBAT_FRAME, cell: Vector2i, team: int) -> Array:
+	if not frame.missile_neighborhoods.has(team):
+		frame.missile_neighborhoods[team] = {}
+	var neighborhoods: Dictionary = frame.missile_neighborhoods[team]
+	if neighborhoods.has(cell):
+		return neighborhoods[cell]
+	if not frame.missile_blocks.has(team):
+		frame.missile_blocks[team] = {}
+	var team_blocks: Dictionary = frame.missile_blocks[team]
+	var blocks: Array = []
+	var reach: int = ceili(MISSILE_RANGE / LASER_RANGE)
+	for x in range(-reach, reach + 1):
+		for y in range(-reach, reach + 1):
+			var key: Vector2i = cell + Vector2i(x, y)
+			if not team_blocks.has(key):
+				var candidates: Array = _hostile_bucket(state, frame.cells, frame.positive_hostile_cache, key, team, frame.team_by_id, true)
+				team_blocks[key] = _laser_blocks(candidates, frame.positions, true)
+			blocks.append_array(team_blocks[key])
+	if neighborhoods.size() < 1024 and blocks.size() <= 512:
+		neighborhoods[cell] = blocks
+	return blocks
 
 # Explicit attack is focus fire, never attack-move: even when another
 # hostile is closer, only the ordered entity may receive damage.
@@ -7919,7 +7949,7 @@ static func _fire_station_weapons(state: Dictionary, frame: COMBAT_FRAME, dt: fl
 			if missile_target >= 0:
 				# Station damage uses the same simultaneous resolution as hull missiles.
 				var attacker: Dictionary = {"owner": system["owner"]}
-				_missile_splash(state, frame.cells, positions, team_by_id, team, missile_target, attacker, MISSILE_DAMAGE * STATION_MISSILE_COUNT, damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health)
+				_missile_splash(state, frame.cells, positions, team_by_id, team, missile_target, attacker, MISSILE_DAMAGE * STATION_MISSILE_COUNT, damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health, frame.missile_splash_groups)
 				missile_cd = MISSILE_COOLDOWN
 				station["missile_origin"] = origin
 				station["missile_endpoint"] = positions[missile_target]
@@ -9936,7 +9966,7 @@ static func _step_hull_services(state: Dictionary, frame: STEP_FRAME, ship: Dict
 		return true
 	# Each automatic job checks its own cooldown; explicit movement,
 	# follow, cargo orders and emergency withdrawal already take priority.
-	if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, frame.damaged_cells):
+	if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, frame.damaged_cells, frame.repair_neighborhoods):
 		if ship.has("repair_target") and dt > 0.0:
 			var recipient: int = int(ship["repair_target"])
 			if service_refs.get(recipient, {}).get("kind", "") == "ship":

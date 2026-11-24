@@ -32,6 +32,8 @@ var laser_blocks: Dictionary = {}
 var laser_neighborhoods: Dictionary = {}
 var structure_neighborhoods: Dictionary = {}
 var missile_blocks: Dictionary = {}
+var missile_neighborhoods: Dictionary = {}
+var missile_splash_groups: Dictionary = {}
 var pursuit_blocks: Dictionary = {}
 
 # Simultaneous damage accumulation and lethal-hit attribution.

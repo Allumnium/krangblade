@@ -19,8 +19,10 @@ static func damaged_cells(targets: Dictionary, width: float, epsilon: float) -> 
 		order += 1
 	return cells
 
-static func nearby_ids(cells: Dictionary, point: Vector2, width: float) -> Array:
+static func nearby_ids(cells: Dictionary, point: Vector2, width: float, neighborhoods: Dictionary = {}) -> Array:
 	var cell := Vector2i(floori(point.x / width), floori(point.y / width))
+	if neighborhoods.has(cell):
+		return neighborhoods[cell]
 	var entries: Array = []
 	for x in range(-1, 2):
 		for y in range(-1, 2):
@@ -29,6 +31,8 @@ static func nearby_ids(cells: Dictionary, point: Vector2, width: float) -> Array
 	var ids: Array = []
 	for entry in entries:
 		ids.append(entry[1])
+	if neighborhoods.size() < 4096 and ids.size() <= 256:
+		neighborhoods[cell] = ids
 	return ids
 
 static func retry_due(ship: Dictionary, now: float, epsilon: float) -> bool:

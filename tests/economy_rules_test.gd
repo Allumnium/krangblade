@@ -1138,7 +1138,15 @@ func _test_repair_cells() -> void:
 		20: {"position": Vector2(-radius * 4, 0), "repair_position": Vector2(-1, 0), "entity": {"hp": 1.0}, "max_hp": 10.0},
 		30: {"position": Vector2.ZERO, "entity": {"hp": 10.0}, "max_hp": 10.0},
 		40: {"position": Vector2(radius * 4, 0), "entity": {"hp": 1.0}, "max_hp": 10.0}}
-	assert(ECON._nearby_repair_ids(ECON._damaged_repair_cells(targets), Vector2.ZERO) == [10, 20])
+	var cells: Dictionary = ECON._damaged_repair_cells(targets)
+	var neighborhoods: Dictionary = {}
+	var ids: Array = ECON._nearby_repair_ids(cells, Vector2.ZERO, neighborhoods)
+	assert(ids == [10, 20])
+	assert(is_same(ids, ECON._nearby_repair_ids(cells, Vector2(radius * 0.5, 0), neighborhoods)))
+	assert(ECON._nearby_repair_ids(cells, Vector2(radius * 4, 0), neighborhoods) == [40])
+	targets[10]["entity"]["hp"] = 10.0
+	assert(not ECON._damaged(targets[ids[0]]))
+	assert(ECON._nearby_repair_ids(ECON._damaged_repair_cells(targets), Vector2.ZERO, {}) == [20])
 
 func _test_hostile_buckets() -> void:
 	var state: Dictionary = {"teams": {1: 1, 2: 1, 3: 2}}
@@ -1301,6 +1309,49 @@ func _test_indexed_hostile_bucket() -> void:
 	for team in range(3):
 		assert(ECON._hostile_bucket(state, buckets, {}, 0, team, teams) == ECON._hostile_bucket(state, buckets, {}, 0, team))
 		assert(ECON._hostile_bucket(state, buckets, {}, 0, team, teams, true) == ECON._hostile_bucket(state, buckets, {}, 0, team, teams).filter(func(enemy: Dictionary) -> bool: return int(teams[enemy["id"]]) > 0))
+
+func _test_shared_missile_groups() -> void:
+	var state: Dictionary = {"teams": {1: 1, 2: 2, 3: 1}}
+	var frame = ECON.COMBAT_FRAME.new()
+	var records: Array = [[10, 2, Vector2(-10, 0)], [20, 2, Vector2(10, 0)], [-2, 2, Vector2(0, 15)], [30, 3, Vector2.ZERO], [40, 2, Vector2(200, 0)], [50, 0, Vector2.ZERO]]
+	for record in records:
+		var id: int = record[0]
+		var owner: int = record[1]
+		var point: Vector2 = record[2]
+		frame.positions[id] = point
+		frame.team_by_id[id] = state["teams"].get(owner, 0)
+		ECON._spatial_insert(frame.cells, point, ECON.LASER_RANGE, {"id": id, "owner": owner})
+	var cell := Vector2i.ZERO
+	var blocks: Array = ECON._missile_neighborhood_blocks(state, frame, cell, 1)
+	assert(is_same(blocks, ECON._missile_neighborhood_blocks(state, frame, cell, 1)))
+	var reach: int = ceili(ECON.MISSILE_RANGE / ECON.LASER_RANGE)
+	for focused in [false, true]:
+		for focus_id in [10, 20, -2, 999]:
+			for point in [Vector2.ZERO, Vector2(50, 0)]:
+				var expected: Array = [ECON.MISSILE_RANGE * ECON.MISSILE_RANGE, -1]
+				var cache: Dictionary = {}
+				for x in range(-reach, reach + 1):
+					for y in range(-reach, reach + 1):
+						var candidates: Array = ECON._hostile_bucket(state, frame.cells, cache, cell + Vector2i(x, y), 1, frame.team_by_id, true)
+						expected = ECON._missile_block_nearest(ECON._laser_blocks(candidates, frame.positions, true), frame.positions, point, float(expected[0]), int(expected[1]), focused, focus_id)
+				assert(ECON._missile_block_nearest(blocks, frame.positions, point, ECON.MISSILE_RANGE * ECON.MISSILE_RANGE, -1, focused, focus_id) == expected)
+	var groups: Dictionary = {}
+	var ids: Array = ECON._missile_splash_ids(state, frame.cells, frame.positions, frame.team_by_id, 1, 10, groups)
+	assert(ids == [10, 20, -2, 50])
+	assert(is_same(ids, ECON._missile_splash_ids(state, frame.cells, frame.positions, frame.team_by_id, 1, 10, groups)))
+	assert(ECON._missile_splash_ids(state, frame.cells, frame.positions, frame.team_by_id, 2, 10, groups) == [30, 50])
+	var damage: Dictionary = {}
+	var killed: Dictionary = {}
+	var health: Dictionary = {10: 15.0, 20: 15.0, -2: 15.0, 50: 15.0}
+	var first: Dictionary = {"id": 100, "owner": 1, "reward_damage_multiplier": 0.5}
+	var second: Dictionary = {"id": 101, "owner": 1}
+	ECON._missile_splash(state, frame.cells, frame.positions, frame.team_by_id, 1, 10, first, 10.0, damage, killed, health, {}, PackedFloat64Array(), groups)
+	assert(damage[10] == 5.0 and killed.is_empty())
+	ECON._missile_splash(state, frame.cells, frame.positions, frame.team_by_id, 1, 10, second, 10.0, damage, killed, health, {}, PackedFloat64Array(), groups)
+	for id in ids:
+		assert(damage[id] == 15.0 and killed[id] == second)
+	assert(not damage.has(30) and not damage.has(40))
+	print("PASS: automatic missile groups preserve target ties, splash and individual lethal credit")
 
 func _test_shared_combat_neighborhoods() -> void:
 	var state: Dictionary = {"teams": {1: 1, 2: 2, 3: 1}}
@@ -1947,6 +1998,7 @@ func _initialize() -> void:
 	_test_packed_threat_records()
 	_test_indexed_hostile_bucket()
 	_test_shared_combat_neighborhoods()
+	_test_shared_missile_groups()
 	_test_reuse_combat_threats()
 	_test_shared_threat_index()
 	_test_sector_query_cache()
