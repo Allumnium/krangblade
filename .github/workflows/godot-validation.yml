@@ -104,7 +104,7 @@ jobs:
                   same_config = without_version(base) == without_version(head)
                   eligible = eligible and same_config
                   fast = fast and same_config
-          cases = [{"count": 2, "mode": "normal"}]
+          cases = [{"count": 2, "mode": "normal"}, {"count": 2, "mode": "threaded"}]
           if not fast:
               cases += [{"count": 3, "mode": "normal"}, {"count": 2, "mode": "drop-loading"}, {"count": 2, "mode": "host-leave"}]
           if os.environ["EVENT"] == "workflow_dispatch":

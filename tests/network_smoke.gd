@@ -1,6 +1,6 @@
 extends SceneTree
-## Run with --script res://tests/network_smoke.gd -- host 2
-## or --script res://tests/network_smoke.gd -- client 2 1
+## Run with --script res://tests/network_smoke.gd -- host 2 [normal|threaded]
+## or --script res://tests/network_smoke.gd -- client 2 1 [normal|threaded]
 var session: Node
 var role: String = ""
 var expected_players: int = 2
@@ -38,6 +38,10 @@ const ECON = preload("res://scripts/economy_rules.gd")
 var saw_loading: bool = false
 var preview_seed: int = 0
 var mode: String = "normal"
+var threaded_start_elapsed: float = 0.0
+var threaded_guest_id: int = -1
+var threaded_client_stage: int = 0
+var threaded_host_stage: int = 0
 const MAP = preload("res://scripts/planet_map.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
 
@@ -59,9 +63,9 @@ func _begin() -> void:
 	if session == null:
 		_fail("GameSession autoload is missing.")
 		return
-	# Legacy ENet fixtures directly mutate canonical host state. Preserve
-	# their assertions on the synchronous path until fixture setup is ported.
-	session.set("threaded_authority_requested", false)
+	# The detailed fixture mutates canonical state; the threaded mode exercises
+	# only public ENet commands and detached snapshots.
+	session.set("threaded_authority_requested", mode == "threaded")
 	session.connect("phase_changed", _phase_changed)
 	session.connect("roster_changed", _roster_changed)
 	# Multi-peer stress has much less CPU per Godot process on CI runners.
@@ -193,6 +197,9 @@ func _phase_changed() -> void:
 				return
 		if owners.size() != state["map"]["points"].size() or state["map"]["cluster_sizes"].size() != MAP.cluster_count_for(expected_players, _expected_layout()):
 			_fail("Wrong territory count.")
+			return
+		if mode == "threaded":
+			_begin_threaded_network_check(state)
 			return
 		if mode == "normal":
 			if role == "host":
@@ -393,7 +400,17 @@ func _phase_changed() -> void:
 			elif mode == "normal":
 				create_timer(0.25).timeout.connect(_return_after_all_verified)
 	elif phase == "lobby" and saw_loading and not finishing:
-		if (mode == "drop-loading" and role == "host") or (mode == "normal" and saw_match):
+		if mode == "threaded" and saw_match:
+			if bool(session.get("threaded_authority_active")) or not (session.get("economy") as Dictionary).is_empty():
+				_fail("Threaded authority or match state survived lobby return.")
+				return
+			finishing = true
+			if role == "client":
+				session.call("leave_session")
+				_pass()
+			else:
+				_wait_for_guest_completion()
+		elif (mode == "drop-loading" and role == "host") or (mode == "normal" and saw_match):
 			if mode == "normal" and not economy_verified:
 				_fail("Never verified all multiplayer command and replication checks before return.")
 				return
@@ -418,12 +435,96 @@ func _phase_changed() -> void:
 		else:
 			_fail("Connection closed before expected transition.")
 
+func _begin_threaded_network_check(state: Dictionary) -> void:
+	var expected_active: bool = role == "host"
+	if not bool(session.get("threaded_authority_requested")) or bool(session.get("threaded_authority_active")) != expected_active:
+		_fail("Threaded authority request or host-only worker activation is incorrect.")
+		return
+	threaded_start_elapsed = float(state.get("elapsed", 0.0))
+	print("DEBUG: threaded smoke role=", role, " active=", session.get("threaded_authority_active"), " elapsed=", threaded_start_elapsed)
+	if role == "host":
+		var ordered: Array[int] = RULES.ordered_peers(session.get("players"))
+		if ordered.size() != 2:
+			_fail("Threaded smoke requires exactly one guest.")
+			return
+		threaded_guest_id = ordered[1]
+		_check_threaded_host()
+	else:
+		threaded_guest_id = session.multiplayer.get_unique_id()
+		for index in range(state["planets"].size()):
+			if int(state["planets"][index]["owner"]) == session.multiplayer.get_unique_id() and bool(state["planets"][index]["home"]):
+				home_index = index
+				break
+		if home_index < 0:
+			_fail("Threaded guest has no home system.")
+			return
+		_check_threaded_client()
+
+func _check_threaded_client() -> void:
+	if str(session.get("phase")) != "match":
+		return
+	var state: Dictionary = session.get("economy")
+	var speed: int = int(state.get("time_speed", -1))
+	if threaded_client_stage == 0 and float(state.get("elapsed", 0.0)) > threaded_start_elapsed and speed == 1:
+		print("DEBUG: threaded guest requests replicated threshold update")
+		session.call("request_thresholds", home_index, "Crystals", 7.0, 93.0)
+		threaded_client_stage = 1
+	elif threaded_client_stage == 1 and _threaded_thresholds_match(state, 7.0, 93.0) and speed == 2:
+		print("DEBUG: threaded guest observed threshold update and 2x snapshot")
+		session.call("request_thresholds", home_index, "Crystals", 8.0, 92.0)
+		threaded_client_stage = 2
+	elif threaded_client_stage == 2 and _threaded_thresholds_match(state, 8.0, 92.0) and speed == 1:
+		print("DEBUG: threaded guest observed 1x snapshot")
+		session.call("request_thresholds", home_index, "Crystals", 9.0, 91.0)
+		threaded_client_stage = 3
+	create_timer(0.1).timeout.connect(_check_threaded_client)
+
+func _check_threaded_host() -> void:
+	if str(session.get("phase")) != "match":
+		return
+	var state: Dictionary = session.get("economy")
+	var speed: int = int(state.get("time_speed", -1))
+	var guest_acknowledged: bool = false
+	var expected_minimum: float = 7.0
+	var expected_maximum: float = 93.0
+	if threaded_host_stage == 1:
+		expected_minimum = 8.0
+		expected_maximum = 92.0
+	elif threaded_host_stage == 2:
+		expected_minimum = 9.0
+		expected_maximum = 91.0
+	for system in state.get("planets", []):
+		if int(system.get("owner", 0)) == threaded_guest_id and bool(system.get("home", false)):
+			guest_acknowledged = _threaded_thresholds_match(state, expected_minimum, expected_maximum)
+			break
+	if threaded_host_stage == 0 and speed == 1 and guest_acknowledged:
+		print("DEBUG: threaded host accepted guest command; requesting 2x")
+		session.call("request_time_speed", 2)
+		threaded_host_stage = 1
+	elif threaded_host_stage == 1 and speed == 2 and guest_acknowledged:
+		print("DEBUG: threaded host observed guest acknowledgment; requesting 1x")
+		session.call("request_time_speed", 1)
+		threaded_host_stage = 2
+	elif threaded_host_stage == 2 and speed == 1 and guest_acknowledged:
+		print("PASS: threaded authority command and detached snapshot round trip over ENet")
+		session.call("return_to_lobby")
+		return
+	create_timer(0.1).timeout.connect(_check_threaded_host)
+
+func _threaded_thresholds_match(state: Dictionary, minimum: float, maximum: float) -> bool:
+	for system in state.get("planets", []):
+		if int(system.get("owner", 0)) != threaded_guest_id or not bool(system.get("home", false)):
+			continue
+		var thresholds: Dictionary = system["thresholds"]["Crystals"]
+		return is_equal_approx(float(thresholds["min"]), minimum) and is_equal_approx(float(thresholds["max"]), maximum)
+	return false
+
 # On failure expose fixture state, not UI details, to separate transport stalls
 # from a legitimate refusal to hand off while a receiver is damaged or threatened.
 func _network_timeout() -> void:
 	if session != null and str(session.get("phase")) == "match":
 		var state: Dictionary = session.get("economy")
-		print("DEBUG: timeout role=", role, " players=", expected_players, " game_years=", state.get("elapsed"), " verified=", economy_verified, " stage=", speed_stage)
+		print("DEBUG: timeout role=", role, " mode=", mode, " players=", expected_players, " game_years=", state.get("elapsed"), " verified=", economy_verified, " stage=", speed_stage, " threaded_active=", session.get("threaded_authority_active"), " threaded_client_stage=", threaded_client_stage, " threaded_host_stage=", threaded_host_stage)
 		var graph: Dictionary = ECON.military_graph(state)
 		var threats: Dictionary = ECON._salvage_threats(state, graph)
 		for node in range(state["planets"].size()):

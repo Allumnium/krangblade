@@ -4,7 +4,12 @@ Experimental, not required to play, not enabled by default. Initial implementati
 
 ## Local build (Linux or Windows x86_64)
 
-Install SCons and a supported C++ compiler. In this directory, place a matching Godot 4.7-compatible godot-cpp checkout at godot-cpp/; pin the tested revision for reproducible builds. See the [official GDExtension guide](https://docs.godotengine.org/en/latest/tutorials/scripting/cpp/gdextension_cpp_example.html). Use the same single/double engine precision as the Godot executable (the project uses standard precision).
+Install SCons and a supported C++ compiler. The Windows x86_64 build was verified with Godot 4.7.2, SCons 4.11.1, and godot-cpp commit `7fd5c4bc3efda6487fd6e6486c50016faa622f92` (standard 64-bit precision). To reproduce from the project root:
+
+    git clone --filter=blob:none --depth 1 https://github.com/godotengine/godot-cpp.git native/godot-cpp
+    git -C native/godot-cpp checkout 7fd5c4bc3efda6487fd6e6486c50016faa622f92
+
+See the [official GDExtension guide](https://docs.godotengine.org/en/latest/tutorials/scripting/cpp/gdextension_cpp_example.html). On Windows, build from a Visual Studio Developer prompt. The project object file is emitted under the ignored godot-cpp checkout so Godot will not scan it as an OBJ model.
 
 Run from native/:
 
@@ -17,8 +22,8 @@ Run from the project root (replace godot with the actual executable):
     godot --headless --editor --path . --import --quit
     godot --headless --path . --script res://tests/economy_rules_test.gd -- --warbound-native-kernels
 
-The parity test fails if native is explicitly requested but absent. Compare seeded replay hashes and fleet benchmarks with and without --warbound-native-kernels (append after --). For a game run:
+The parity test fails if native is explicitly requested but absent. Compare seeded replay hashes and fleet benchmarks with and without `--warbound-native-kernels` (append after `--`). Native targeting parity passes on the verified build, but one target-scale headless comparison showed no meaningful speedup; keep the extension opt-in. For a game run:
 
     godot --path . -- --warbound-native-kernels
 
-The flag is local, opt-in, not a multiplayer setting. No default activation until compiled and verified on supported platforms. Missing extension falls back to GDScript; remove the local descriptor if its library is missing. Native compilation, engine parity, ENet and speedup are not yet verified.
+The flag is local, opt-in, not a multiplayer setting. No default activation until compiled and verified on supported platforms. Missing extension falls back to GDScript; remove the local descriptor if its library is missing. Native compilation and targeting parity are verified on the documented Windows build. Native-plus-threaded operation, other platforms and any speedup remain unverified.

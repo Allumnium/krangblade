@@ -24,4 +24,17 @@ Godot 4.7.2 stable, Windows, AMD Ryzen 5 7600X (12 logical processors), seed 827
 
 The 2,000-ship 1x and 1,000-ship 5x dispersed targets miss the 100 ms batch budget on every measured tick. The logistics run had one large outlier (2,474.214 ms in its Civilian logistics phase); investigate with repeated profiles before attributing it to a stable hotspot. These samples establish a headless baseline only, not a graphics or real-time acceptance result.
 
-Broader high-count/workload coverage, threaded ENet and graphical frame-time capture remain unverified. A native C++ source and SCons build recipe exist, but no `godot-cpp/` checkout, SCons, or C++ compiler is available in this environment, so native compilation was not attempted. Phase 1 remains open until representative graphical, mixed AI, production/repair/salvage and real peer tests are available. Record renderer, resolution, zoom, network conditions and hardware with those separate runs. Reference target: 60 FPS p95 and sustained 10 Hz at 1x with 5,000 hulls; do not infer this from headless results alone.
+## Repeated target samples and native parity (2026-11-24)
+
+Godot 4.7.2, Windows, AMD Ryzen 5 7600X, seed 827, eight synthetic non-AI players, 100 ticks. `native` uses the optional Windows x86_64 extension; `GDScript` is the reference path. Times are milliseconds per batch; combat and movement columns are phase p50.
+
+| Scenario | Ships | Speed | Backend | p50 ms | p95 ms | p99 ms | max ms | Combat p50 | Movement p50 | Misses |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| dispersed | 2,000 | 1x | GDScript | 313.385 | 339.465 | 467.357 | 515.077 | 130.977 | 106.239 | 100/100 |
+| dispersed | 2,000 | 1x | native | 312.762 | 336.487 | 437.967 | 439.151 | 128.842 | 106.808 | 100/100 |
+| dispersed | 1,000 | 5x | GDScript | 575.027 | 777.689 | 816.518 | 925.608 | 241.928 | 194.215 | 100/100 |
+| dispersed | 1,000 | 5x | native | 579.165 | 771.278 | 786.455 | 971.661 | 245.728 | 196.036 | 100/100 |
+
+The optional extension built and its targeting-parity tests passed. The same-machine runs show less than a 1% p95 difference, within run-to-run variation; they do not demonstrate a native speedup, so the backend remains opt-in. The largest measured phases are Combat / repair and Other movement. Both target workloads still exceed the 100 ms batch budget on every tick.
+
+Two-peer normal ENet, two-peer loading/host disconnect, three-peer normal ENet, eight-peer normal ENet, and a separate two-peer threaded-authority ENet smoke all pass locally. The eight-peer host emitted three `Unable to send packet on channel 0, max channels: 0` errors during teardown despite all peers passing; investigate the disconnect-time send path. Three/eight-peer threaded stress, broader battle/swarm/logistics profiles, and graphical frame-time capture remain outstanding. Record renderer, resolution, zoom, network conditions and hardware with graphical runs. The current initiative acceptance target is 60 FPS and sustained 10 Hz at 2,000 ships at 1x and 1,000 ships at 5x; do not infer this from headless results.
