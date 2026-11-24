@@ -2985,9 +2985,52 @@ static func _move(state: Dictionary, ship: Dictionary, dt: float, explicit_dock:
 		return (ship["position"] as Vector2).distance_to(dock) <= (dock_range if explicit_dock.is_finite() or (state.has("planets") and has_station(state["planets"][here])) else 0.0) + EPS
 	return true
 
-static func _choose_delivery(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, cache: Dictionary) -> void:
+# Live stock preflight: one resource-mask pass over the stations, before
+# counting assigned freighters or evaluating routes. Do not cache across hulls:
+# another hull may have loaded or unloaded since the preceding search.
+static func _trade_opportunity_masks(planets: Array, teams: Array[int], team: int) -> Dictionary:
+	var sources: Dictionary = {}
+	var destinations: Dictionary = {}
+	var earlier_sources: int = 0
+	var earlier_destinations: int = 0
+	var possible: bool = false
+	for node in range(planets.size()):
+		if teams[node] != team:
+			continue
+		var source_mask: int = 0
+		var destination_mask: int = 0
+		for resource_index in range(RESOURCES.size()):
+			var resource: String = RESOURCES[resource_index]
+			if _surplus(planets[node], resource) > EPS:
+				source_mask |= 1 << resource_index
+			if _need(planets[node], resource) > EPS:
+				destination_mask |= 1 << resource_index
+		if source_mask != 0:
+			sources[node] = source_mask
+		if destination_mask != 0:
+			destinations[node] = destination_mask
+		# Different stations only; matching masks at one node cannot create a job.
+		if (source_mask & earlier_destinations) != 0 or (destination_mask & earlier_sources) != 0:
+			possible = true
+		earlier_sources |= source_mask
+		earlier_destinations |= destination_mask
+	return {"sources": sources, "destinations": destinations, "possible": possible}
+
+static func _choose_delivery(state: Dictionary, ship: Dictionary, teams: Array[int], team: int, cache: Dictionary, activity_fast_paths: bool = true) -> void:
 	var planets: Array = state["planets"]
 	var here: int = int(ship["at"])
+	var source_nodes: Array = range(planets.size())
+	var destination_nodes: Array = source_nodes
+	var source_masks: Dictionary = {}
+	var destination_masks: Dictionary = {}
+	if activity_fast_paths:
+		var opportunities: Dictionary = _trade_opportunity_masks(planets, teams, team)
+		if not bool(opportunities["possible"]):
+			return
+		source_masks = opportunities["sources"]
+		destination_masks = opportunities["destinations"]
+		source_nodes = source_masks.keys()
+		destination_nodes = destination_masks.keys()
 	var best: float = INF
 	var best_source: int = -1
 	var best_dest: int = -1
@@ -2998,15 +3041,22 @@ static func _choose_delivery(state: Dictionary, ship: Dictionary, teams: Array[i
 			continue
 		var key := Vector2i(int(craft["source"]), int(craft.get("dest", -1)))
 		assigned_routes[key] = int(assigned_routes.get(key, 0)) + 1
-	for a in range(planets.size()):
+	for a in source_nodes:
 		if teams[a] != team:
 			continue
 		var first: Array[int] = _path(state, teams, team, here, a, cache)
 		if first.is_empty():
 			continue
 		var first_length: float = (ship["position"] as Vector2).distance_to(station_position(state, a, float(state["elapsed"])))
-		for b in range(planets.size()):
-			if a == b or teams[b] != team or not _opportunity(planets[a], planets[b]):
+		for b in destination_nodes:
+			if a == b or teams[b] != team:
+				continue
+			# Masks are computed from the same predicates as _opportunity,
+			# in original station order. The reference path retains the old scan.
+			if activity_fast_paths:
+				if (int(source_masks[a]) & int(destination_masks[b])) == 0:
+					continue
+			elif not _opportunity(planets[a], planets[b]):
 				continue
 			var second: Array[int] = _path(state, teams, team, a, b, cache)
 			var distance: float = first_length + station_position(state, a, float(state["elapsed"])).distance_to(station_position(state, b, float(state["elapsed"])))
@@ -3189,6 +3239,10 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 	var owner: int = int(ship["owner"])
 	var fields: Array = state["map"].get("fields", [])
 	_refresh_movement_fields(fields)
+	# With neither a mining field nor an indexed salvage site, no stage
+	# can be assigned. Preserve the obstacle refresh at its old boundary.
+	if fields.is_empty() and (mining_only or cells.is_empty() or state.get("salvage", {}).is_empty()):
+		return false
 	var census: Dictionary = _stage_census(state, ship, owner)
 	var workers: Dictionary = census["workers"]
 	var occupied: Dictionary = census["occupied"]
@@ -3236,6 +3290,8 @@ static func _stage_census(state: Dictionary, ship: Dictionary, owner: int) -> Di
 
 # Returns [best_candidate, best_score] over discovered fields with active workers.
 static func _best_mining_stage(state: Dictionary, graph: Dictionary, ship: Dictionary, teams: Array[int], cache: Dictionary, threats: Dictionary, workers: Dictionary, occupied: Dictionary, excluded_node: int, max_pickup_years: float) -> Array:
+	if workers.is_empty():
+		return [{}, INF]
 	var owner: int = int(ship["owner"])
 	var fields: Array = state["map"].get("fields", [])
 	var count: int = state["planets"].size()
@@ -3521,6 +3577,10 @@ static func _handoff_candidates(cells: Dictionary, point: Vector2, neighborhoods
 	return result
 
 static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictionary, receivers: Array, threats: Dictionary, dt: float) -> float:
+	# No recipient means no transfer or handoff state change. Skip safety
+	# geometry entirely; the caller still records the zero transfer.
+	if receivers.is_empty():
+		return 0.0
 	if miner.get("kind", "") != "miner" or _cargo_total(miner) <= EPS or bool(miner.get("retreating", false)) or _engaged(miner) or miner.has("repair_order"):
 		return 0.0
 	var owner: int = int(miner["owner"])
@@ -3812,7 +3872,21 @@ static func _best_mining_chunk(state: Dictionary, ship: Dictionary, teams: Array
 		if assigned >= 0 and i != assigned:
 			continue
 		var field: Dictionary = fields[i]
-		if not discovered(state, owner, "fields", i) or _mining_resources(state, owner, i).is_empty():
+		if not discovered(state, owner, "fields", i):
+			continue
+		var resources: Array[String] = _mining_resources(state, owner, i)
+		if resources.is_empty():
+			continue
+		# Filter once in original rock order. A depleted or excluded field
+		# cannot yield a mining job, regardless of routes or depot capacity.
+		var eligible_chunks: Array = []
+		for chunk in field.get("chunks", []):
+			if preferred >= 0 and int(chunk["id"]) != preferred:
+				continue
+			if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
+				continue
+			eligible_chunks.append(chunk)
+		if eligible_chunks.is_empty():
 			continue
 		var access_key: String = "mine:access:%d" % i
 		if not cache.has(access_key):
@@ -3827,15 +3901,10 @@ static func _best_mining_chunk(state: Dictionary, ship: Dictionary, teams: Array
 			var path: Array[int] = _mining_path(state, teams, team, int(ship["at"]), anchor, cache)
 			if path.is_empty():
 				continue
-			var resources: Array[String] = _mining_resources(state, owner, i)
 			var depots: Dictionary = {}
 			for resource in resources:
 				depots[resource] = _mining_depot(state, ship, teams, team, anchor, resource, cache, field["position"])
-			for chunk in field.get("chunks", []):
-				if preferred >= 0 and int(chunk["id"]) != preferred:
-					continue
-				if not resources.has(str(chunk["resource"])) or float(chunk["remaining"]) <= EPS:
-					continue
+			for chunk in eligible_chunks:
 				var depot: int = int(depots.get(chunk["resource"], -1))
 				if depot < 0:
 					continue
@@ -6970,14 +7039,17 @@ static func _auto_salvage_sectors(state: Dictionary, graph: Dictionary, owner: i
 static func _work_opportunistic_salvage(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, busy: Dictionary, cells: Dictionary, coordinated: bool, threats: Dictionary = {}) -> bool:
 	var piles: Dictionary = state.get("salvage", {})
 	var previously_collecting: bool = ship.has("auto_salvage_target")
+	# A clean hull cannot begin salvage when there is no debris. Retain the
+	# existing cleanup/delivery path for any hull with prior salvage metadata.
+	if piles.is_empty() and not previously_collecting:
+		ship.erase("auto_salvage_origin")
+		return false
 	var prior_origin: int = int(ship.get("auto_salvage_origin", -1))
 	_release_auto_salvage(ship, piles)
 	ship.erase("auto_salvage_origin")
 	if not autocast_ready(state, ship, "salvage"):
 		return false
 	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or _salvage_active(ship) or bool(ship.get("move_only", false)) or busy.has(int(ship["id"])):
-		return false
-	if piles.is_empty() and not previously_collecting:
 		return false
 	var pos: Vector2 = ship["position"]
 	var idle: bool = not coordinated and _is_idle_ship(ship) and not _unit_order_running(ship) and ship.get("order_queue", []).is_empty()

@@ -1131,6 +1131,60 @@ func _test_postcombat_hull_index() -> void:
 	assert(survivors.freighters == [second] and ECON._handoff_candidates(survivors.handoff_receivers[1], Vector2.ZERO) == [second])
 	print("PASS: shared postcombat survivor index, ordering and live cargo references")
 
+func _test_civilian_activity_fast_paths() -> void:
+	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}}, [1], false)
+	var teams: Array[int] = [1, 1, 1]
+	for planet in state["planets"]:
+		planet["owner"] = 1
+		for resource in ECON.RESOURCES:
+			planet["thresholds"][resource] = {"min": 25.0, "max": 75.0, "import": true, "export": true}
+			planet["stock"][resource] = ECON.storage_capacity(planet, resource) * 0.5
+	var ship: Dictionary = {"id": 92001, "kind": "ship", "owner": 1, "at": 0, "position": Vector2.ZERO, "source": -1, "dest": -1, "route": [], "leg": 0.0, "cargo": ECON.empty_stock()}
+	var assigned: Dictionary = ship.duplicate(true)
+	assigned["id"] = 92002
+	assigned["source"] = 0
+	assigned["dest"] = 1
+	state["ships"] = [ship, assigned]
+	var planets: Array = state["planets"]
+	assert(not ECON._trade_opportunity_masks(planets, teams, 1)["possible"])
+	for scenario in range(6):
+		for planet in planets:
+			for resource in ECON.RESOURCES:
+				planet["stock"][resource] = ECON.storage_capacity(planet, resource) * 0.5
+				planet["thresholds"][resource]["import"] = true
+				planet["thresholds"][resource]["export"] = true
+		# Empty opportunities, matching stock changes, competing routes,
+		# mismatched resources, disabled export and disabled import.
+		if scenario > 0:
+			planets[0]["stock"]["Metals"] = ECON.storage_capacity(planets[0], "Metals")
+			planets[1]["stock"]["Crystals" if scenario == 3 else "Metals"] = 0.0
+		if scenario == 2:
+			planets[2]["stock"]["Metals"] = 0.0
+		if scenario == 4:
+			planets[0]["thresholds"]["Metals"]["export"] = false
+		if scenario == 5:
+			planets[1]["thresholds"]["Metals"]["import"] = false
+		var masks: Dictionary = ECON._trade_opportunity_masks(planets, teams, 1)
+		assert(bool(masks["possible"]) == (scenario in [1, 2]))
+		var optimized: Dictionary = ship.duplicate(true)
+		var reference: Dictionary = ship.duplicate(true)
+		ECON._choose_delivery(state, optimized, teams, 1, {})
+		ECON._choose_delivery(state, reference, teams, 1, {}, false)
+		assert(optimized == reference, "Trade activity mismatch in scenario %d" % scenario)
+		assert((int(optimized["source"]) >= 0) == (scenario in [1, 2]))
+	var graph: Dictionary = ECON.military_graph(state)
+	var unchanged: Dictionary = ship.duplicate(true)
+	assert(not ECON._choose_resource_stage(state, graph, ship, teams, {}, {}, {}, true))
+	assert(ship == unchanged)
+	var miner: Dictionary = {"id": 92003, "kind": "miner", "owner": 1, "cargo": ECON.empty_stock(), "auto_salvage_origin": 2}
+	miner["cargo"]["Metals"] = 5.0
+	assert(ECON._miner_handoff(state, graph, miner, [], {}, 0.1) == 0.0)
+	assert(miner["cargo"]["Metals"] == 5.0)
+	assert(not ECON._work_opportunistic_salvage(state, graph, miner, 0.1, {}, {}, false))
+	assert(not miner.has("auto_salvage_origin"))
+	print("PASS: civilian no-work paths, live trade opportunities and original route selection")
+
 func _test_repair_cells() -> void:
 	var radius: float = ECON.MINER_REPAIR_SEARCH
 	var targets: Dictionary = {
@@ -1147,6 +1201,7 @@ func _test_repair_cells() -> void:
 	targets[10]["entity"]["hp"] = 10.0
 	assert(not ECON._damaged(targets[ids[0]]))
 	assert(ECON._nearby_repair_ids(ECON._damaged_repair_cells(targets), Vector2.ZERO, {}) == [20])
+	assert(ECON._nearby_repair_ids({}, Vector2.ZERO, {}).is_empty())
 
 func _test_hostile_buckets() -> void:
 	var state: Dictionary = {"teams": {1: 1, 2: 1, 3: 2}}
@@ -2058,6 +2113,7 @@ func _initialize() -> void:
 	_test_hostile_buckets()
 	_test_postcombat_hull_index()
 	_test_repair_cells()
+	_test_civilian_activity_fast_paths()
 	_test_handoff_candidates()
 	_test_spatial_buckets()
 	_test_salvage_center_cache()
