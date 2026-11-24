@@ -50,6 +50,8 @@ The authoritative `state: Dictionary` is initialized by `EconomyRules.create`. K
 
 The post-combat survivor working set in `StepFrame` shares ordered hull references and handoff buckets across salvage, logistics and military allocation, after combat resolution and the second withdrawal pass. It retains live entity references, not frozen cargo/eligibility. Withdrawal planning uses an independent, lazy spatial index per preparation pass, never for movement-time safety. Formation movement and subsequent service positions remain separate because those phases change positions.
 
+Combat activity envelopes are conservative bounds over the original integer combat cells, grouped by combat team and rebuilt each combat pass. They may prove a weapon search empty, never select a target or suppress a logical deadline. If a window overlaps hostile occupancy, the existing exact scan runs; pursuit, cooldowns, cloak and combat bookkeeping retain their cadence. The reference combat path can disable envelope filtering for parity tests.
+
 `GameSession` owns `economy`, `round_id`, `snapshot_revision`, reliable snapshot/template bookkeeping and visual `motion_samples`. The first reliable state conveys generated map/planet templates; later packets may send compact ore and planet changes, and decoding falls back to full states if incompatible. `snapshot_codec.gd` must preserve wire keys such as `_wire_ore`, `_wire_map_template`, `_wire_planets_compact` and `_wire_planet_template`. Movement packets remain **20 bytes per ship**, at most **57 records per batch**; GameSession owns RPC permissions, revision filters and finite-vector checks. Do not alter message schemas casually.
 
 ## Making changes safely

@@ -22,6 +22,10 @@ var ship_sectors := PackedInt32Array()
 var cells: Dictionary = {}
 var sectors: Dictionary = {}
 var sector_teams: Dictionary = {}
+# Conservative team occupancy envelopes for this combat snapshot only.
+var activity_bounds: Dictionary = {}
+var activity_hostile_bounds: Dictionary = {}
+var activity_bounds_ready: bool = false
 
 # Lazily filled per-team target caches.
 var hostile_cache: Dictionary = {}

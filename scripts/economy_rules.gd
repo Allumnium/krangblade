@@ -6045,6 +6045,10 @@ static func _extend_patrol_from_queue(state: Dictionary, graph: Dictionary, ship
 
 static func _advance_unit_orders(state: Dictionary, graph: Dictionary) -> void:
 	for ship in (state["ships"] as Array).duplicate():
+		# Without an active or queued order, every branch below is a no-op.
+		# Check live keys at the original phase, so new orders wake immediately.
+		if not ship.has("unit_order") and not ship.has("order_queue"):
+			continue
 		if bool(ship.get("rogue", false)) or colony_morphing(ship):
 			continue
 		_mark_sector_arrival(state, ship)
@@ -7480,9 +7484,11 @@ static func _combat_search_due(ship: Dictionary, now: float) -> bool:
 # One simultaneous resolution per step: freeze positions and health, let every
 # hull and structure choose targets and accumulate damage, then apply it all.
 # Phase order and ship iteration order are part of the simulation contract.
-static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}) -> void:
+static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}, activity_fast_paths: bool = true) -> void:
 	var ships: Array = state["ships"]
 	var frame: COMBAT_FRAME = _build_combat_frame(state, graph, ships, threat_index)
+	# Optional reference path for state-equivalence tests.
+	frame.activity_bounds_ready = activity_fast_paths
 	_detect_cloaked(state, ships, frame.cells, frame.positions, frame.team_by_id)
 	for ship in ships:
 		_combat_hull(state, frame, ship, dt)
@@ -7513,6 +7519,7 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 	var cells: Dictionary = {}
 	var sectors: Dictionary = {}
 	var sector_teams: Dictionary = {}
+	var activity_bounds: Dictionary = {}
 	var threat_sectors: Dictionary = {}
 	var threat_cells: Dictionary = {}
 	var threat_positions := PackedVector2Array()
@@ -7534,6 +7541,7 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 		previous_targets[slot] = int(ship.get("combat_target", -1))
 		var sector: int = local_sector(graph, ship)
 		var combat_cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+		_include_combat_activity_cell(activity_bounds, hull_teams[slot], combat_cell)
 		if armed(ship) and ship.get("position", Vector2.INF).is_finite():
 			var threat_team: int = int(team_by_id[id])
 			threat_index[id] = [_threat_sector_signature(ship), sector, threat_team]
@@ -7580,7 +7588,9 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 	frame.cells = cells
 	frame.sectors = sectors
 	frame.sector_teams = sector_teams
+	frame.activity_bounds = activity_bounds
 	_index_combat_structures(state, frame)
+	frame.activity_bounds_ready = true
 	return frame
 
 # Stations and shipyards share the frozen combat maps with hulls.
@@ -7602,6 +7612,7 @@ static func _index_combat_structures(state: Dictionary, frame: COMBAT_FRAME) -> 
 			positions[target_id] = pos
 			team_by_id[target_id] = _combat_group(state, int(system["owner"]))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "station"})
+			_include_combat_activity_cell(frame.activity_bounds, int(team_by_id[target_id]), Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE)))
 		for slot in range(system["yards"].size()):
 			var target_id: int = -2 - index * 3 - slot
 			var pos: Vector2 = shipyard_position(state, index, slot, float(state["elapsed"]))
@@ -7610,8 +7621,37 @@ static func _index_combat_structures(state: Dictionary, frame: COMBAT_FRAME) -> 
 			positions[target_id] = pos
 			team_by_id[target_id] = _combat_group(state, int(system["owner"]))
 			_spatial_insert(cells, pos, LASER_RANGE, {"id": target_id, "owner": system["owner"], "kind": "shipyard"})
+			_include_combat_activity_cell(frame.activity_bounds, int(team_by_id[target_id]), Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE)))
 	frame.yard_targets = yard_targets
 	frame.station_targets = station_targets
+
+# Conservative occupancy envelopes in the very same integer cells as
+# weapon acquisition. A disjoint window proves the original scan empty.
+# Include every hull/structure, even cloaked or unarmed ones.
+static func _include_combat_activity_cell(bounds: Dictionary, team: int, cell: Vector2i) -> void:
+	var point_rect := Rect2i(cell, Vector2i.ONE)
+	if not bounds.has(team):
+		bounds[team] = point_rect
+	else:
+		var previous: Rect2i = bounds[team]
+		if not previous.has_point(cell):
+			bounds[team] = previous.merge(point_rect)
+
+static func _combat_window_may_have_hostile(state: Dictionary, frame: COMBAT_FRAME, team: int, cell: Vector2i, reach: int, positive_only: bool = false) -> bool:
+	if not frame.activity_bounds_ready:
+		return true
+	var cache_key := Vector2i(team, int(positive_only))
+	if not frame.activity_hostile_bounds.has(cache_key):
+		var hostile_bounds: Array = []
+		for other_team in frame.activity_bounds:
+			if (not positive_only or int(other_team) > 0) and _combat_groups_hostile(state, team, int(other_team)):
+				hostile_bounds.append(frame.activity_bounds[other_team])
+		frame.activity_hostile_bounds[cache_key] = hostile_bounds
+	var window := Rect2i(cell - Vector2i.ONE * reach, Vector2i.ONE * (reach * 2 + 1))
+	for rect in frame.activity_hostile_bounds[cache_key]:
+		if window.intersects(rect):
+			return true
+	return false
 
 # Weapon selection for one hull. Writes only that hull's combat fields and the
 # shared damage accumulators; never mutates another hull or the frame snapshot.
@@ -7677,6 +7717,8 @@ static func _fire_hull_missiles(state: Dictionary, frame: COMBAT_FRAME, ship: Di
 # original per-cell blocks and order: equal-distance missiles prefer the
 # last matching candidate, unlike lasers. Focus and range remain per hull.
 static func _missile_neighborhood_blocks(state: Dictionary, frame: COMBAT_FRAME, cell: Vector2i, team: int) -> Array:
+	if not _combat_window_may_have_hostile(state, frame, team, cell, ceili(MISSILE_RANGE / LASER_RANGE), true):
+		return []
 	if not frame.missile_neighborhoods.has(team):
 		frame.missile_neighborhoods[team] = {}
 	var neighborhoods: Dictionary = frame.missile_neighborhoods[team]
@@ -7834,6 +7876,8 @@ static func _scan_laser_target(state: Dictionary, frame: COMBAT_FRAME, ship: Dic
 # Preserve the old x/y traversal, per-cell block boundaries and lazy hostile
 # bucket population; range and approximate tie resolution stay per attacker.
 static func _laser_neighborhood_blocks(state: Dictionary, frame: COMBAT_FRAME, cell: Vector2i, team: int) -> Array:
+	if not _combat_window_may_have_hostile(state, frame, team, cell, 1):
+		return []
 	if not frame.laser_neighborhoods.has(team):
 		frame.laser_neighborhoods[team] = {}
 	var neighborhoods: Dictionary = frame.laser_neighborhoods[team]
@@ -7899,6 +7943,8 @@ static func _fire_hull_at_structures(state: Dictionary, frame: COMBAT_FRAME, shi
 # A structure fallback must not scan every hostile hull again. Filter the
 # same cached buckets once per team/cell, keeping their exact tie order.
 static func _structure_neighborhood(state: Dictionary, frame: COMBAT_FRAME, cell: Vector2i, team: int) -> Array:
+	if not _combat_window_may_have_hostile(state, frame, team, cell, 1):
+		return []
 	if not frame.structure_neighborhoods.has(team):
 		frame.structure_neighborhoods[team] = {}
 	var neighborhoods: Dictionary = frame.structure_neighborhoods[team]
@@ -7936,16 +7982,17 @@ static func _fire_station_weapons(state: Dictionary, frame: COMBAT_FRAME, dt: fl
 			var missile_target: int = -1
 			var missile_best: float = MISSILE_RANGE * MISSILE_RANGE
 			var missile_reach: int = ceili(MISSILE_RANGE / LASER_RANGE)
-			for x in range(-missile_reach, missile_reach + 1):
-				for y in range(-missile_reach, missile_reach + 1):
-					for other in _hostile_bucket(state, frame.cells, frame.positive_hostile_cache, cell + Vector2i(x, y), team, team_by_id, true):
-						var other_id: int = int(other["id"])
-						if other_id < 0:
-							continue
-						var distance: float = origin.distance_squared_to(positions[other_id])
-						if distance < missile_best or (distance <= missile_best and (missile_target < 0 or other_id < missile_target)):
-							missile_target = other_id
-							missile_best = distance
+			if _combat_window_may_have_hostile(state, frame, team, cell, missile_reach, true):
+				for x in range(-missile_reach, missile_reach + 1):
+					for y in range(-missile_reach, missile_reach + 1):
+						for other in _hostile_bucket(state, frame.cells, frame.positive_hostile_cache, cell + Vector2i(x, y), team, team_by_id, true):
+							var other_id: int = int(other["id"])
+							if other_id < 0:
+								continue
+							var distance: float = origin.distance_squared_to(positions[other_id])
+							if distance < missile_best or (distance <= missile_best and (missile_target < 0 or other_id < missile_target)):
+								missile_target = other_id
+								missile_best = distance
 			if missile_target >= 0:
 				# Station damage uses the same simultaneous resolution as hull missiles.
 				var attacker: Dictionary = {"owner": system["owner"]}
@@ -7957,16 +8004,17 @@ static func _fire_station_weapons(state: Dictionary, frame: COMBAT_FRAME, dt: fl
 		station["missile_cooldown"] = missile_cd
 		var target: int = -1
 		var best: float = LASER_RANGE * LASER_RANGE
-		for x in range(-1, 2):
-			for y in range(-1, 2):
-				for other in _hostile_bucket(state, frame.cells, frame.hostile_cache, cell + Vector2i(x, y), team, team_by_id):
-					var other_id: int = int(other["id"])
-					if other_id < 0 or int(team_by_id[int(other["id"])]) == team:
-						continue
-					var distance: float = origin.distance_squared_to(positions[other_id])
-					if distance < best or (distance <= best and (target < 0 or other_id < target)):
-						target = other_id
-						best = distance
+		if _combat_window_may_have_hostile(state, frame, team, cell, 1):
+			for x in range(-1, 2):
+				for y in range(-1, 2):
+					for other in _hostile_bucket(state, frame.cells, frame.hostile_cache, cell + Vector2i(x, y), team, team_by_id):
+						var other_id: int = int(other["id"])
+						if other_id < 0 or int(team_by_id[int(other["id"])]) == team:
+							continue
+						var distance: float = origin.distance_squared_to(positions[other_id])
+						if distance < best or (distance <= best and (target < 0 or other_id < target)):
+							target = other_id
+							best = distance
 		for weapon in weapons:
 			if int(weapon["target"]) != target:
 				weapon["laser_until"] = -1.0
@@ -7997,18 +8045,19 @@ static func _fire_planetary_defenses(state: Dictionary, graph: Dictionary, frame
 		var target: int = -1
 		var best: float = PDS_RANGE * PDS_RANGE
 		var reach: int = ceili(PDS_RANGE / LASER_RANGE)
-		for x in range(-reach, reach + 1):
-			for y in range(-reach, reach + 1):
-				for other in _hostile_bucket(state, frame.cells, frame.hostile_cache, cell + Vector2i(x, y), team, team_by_id):
-					if int(team_by_id[int(other["id"])]) == team:
-						continue
-					var other_id: int = int(other["id"])
-					if other_id < 0:
-						continue
-					var distance: float = origin.distance_squared_to(positions[other_id])
-					if distance < best or (distance <= best and (target < 0 or other_id < target)):
-						target = other_id
-						best = distance
+		if _combat_window_may_have_hostile(state, frame, team, cell, reach):
+			for x in range(-reach, reach + 1):
+				for y in range(-reach, reach + 1):
+					for other in _hostile_bucket(state, frame.cells, frame.hostile_cache, cell + Vector2i(x, y), team, team_by_id):
+						if int(team_by_id[int(other["id"])]) == team:
+							continue
+						var other_id: int = int(other["id"])
+						if other_id < 0:
+							continue
+						var distance: float = origin.distance_squared_to(positions[other_id])
+						if distance < best or (distance <= best and (target < 0 or other_id < target)):
+							target = other_id
+							best = distance
 		for battery in defenses.values():
 			if int(battery["target"]) != target:
 				battery["laser_until"] = -1.0
@@ -8030,6 +8079,10 @@ static func _resolve_combat_damage(state: Dictionary, graph: Dictionary, frame: 
 	for target in killed_by:
 		var attacker: Dictionary = killed_by[target]
 		attacker["kills"] = int(attacker.get("kills", 0)) + 1
+	# Nothing was hit. Cloak cleanup above still runs at the original time;
+	# no need to duplicate or scan the hull/structure damage lists.
+	if damage.is_empty():
+		return
 	for ship in ships.duplicate():
 		var id: int = int(ship["id"])
 		if damage.has(id):

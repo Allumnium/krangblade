@@ -1211,6 +1211,48 @@ func _test_repair_retry_due() -> void:
 	assert(not ECON._repair_retry_due(ship, 1.2))
 	assert(ECON._repair_retry_due(ship, 1.5))
 
+func _test_combat_activity_fast_paths() -> void:
+	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var craft: Dictionary = {"id": 101, "kind": "cruiser", "owner": 1, "at": 0, "position": Vector2(20, 0), "heading": Vector2.RIGHT, "route": [], "leg": 0.0, "dest": 0, "source": -1, "hp": ECON.ship_max_hp("cruiser"), "cargo": ECON.empty_stock(), "missile_cooldown": 0.1, "laser_cooldown": 0.1, "blaster_cooldown": 0.1}
+	var hostile: Dictionary = craft.duplicate(true)
+	hostile["id"] = 102
+	hostile["owner"] = 2
+	hostile["at"] = 1
+	hostile["position"] = Vector2(5000, 0)
+	state["ships"] = [craft, hostile]
+	var reference: Dictionary = state.duplicate(true)
+	var graph: Dictionary = ECON.military_graph(state)
+	var reference_graph: Dictionary = ECON.military_graph(reference)
+	# Real combat state, including station cooldowns and search deadlines,
+	# must match the original search path on every substep.
+	for tick in range(18):
+		state["elapsed"] = float(tick + 1) * 0.1
+		reference["elapsed"] = state["elapsed"]
+		if tick in [5, 10, 14]:
+			var point: Vector2 = Vector2(100, 0) if tick == 5 else (Vector2(-100, 0) if tick == 10 else Vector2(5000, 0))
+			for current in [state, reference]:
+				for ship in current["ships"]:
+					if int(ship["id"]) == 102:
+						ship["position"] = point
+		ECON._combat(state, graph, 0.1)
+		ECON._combat(reference, reference_graph, 0.1, {}, false)
+		assert(state == reference, "Combat activity mismatch at tick %d" % tick)
+	var frame = ECON.COMBAT_FRAME.new()
+	frame.activity_bounds_ready = true
+	ECON._include_combat_activity_cell(frame.activity_bounds, 1, Vector2i.ZERO)
+	ECON._include_combat_activity_cell(frame.activity_bounds, 2, Vector2i(-8, 0))
+	ECON._include_combat_activity_cell(frame.activity_bounds, 0, Vector2i(1, 0))
+	var legacy: Dictionary = {"teams": {1: 1, 2: 2}}
+	assert(not ECON._combat_window_may_have_hostile(legacy, frame, 1, Vector2i.ZERO, 7, true))
+	assert(ECON._combat_window_may_have_hostile(legacy, frame, 1, Vector2i.ZERO, 8, true))
+	assert(ECON._combat_window_may_have_hostile(legacy, frame, 1, Vector2i.ZERO, 1))
+	assert(not ECON._combat_window_may_have_hostile(legacy, frame, 1, Vector2i.ZERO, 0))
+	assert(not ECON._combat_window_may_have_hostile(legacy, frame, 1, Vector2i(40, 0), 1))
+	frame.activity_bounds_ready = false
+	assert(ECON._combat_window_may_have_hostile(legacy, frame, 1, Vector2i(40, 0), 1))
+	print("PASS: combat inactivity fast paths preserve full-scan state and wake on contact")
+
 func _test_combat_search_due() -> void:
 	var ship: Dictionary = {"_next_combat_search": 1.2}
 	assert(not ECON._combat_search_due(ship, 1.1))
@@ -2007,6 +2049,7 @@ func _initialize() -> void:
 	_test_contact_bucket_bounds()
 	_test_reusable_laser_target()
 	_test_combat_search_due()
+	_test_combat_activity_fast_paths()
 	_test_repair_retry_due()
 	_test_search_slots()
 	_test_pursuit_blocks()
