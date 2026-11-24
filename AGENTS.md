@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.43: Make real-ENet miner-to-Freighter handoff validation observe authoritative source/target cargo transfer events or persistent dropped/picked statistics rather than relying on simultaneous transient cargo snapshots. Add economy regression assertions for transfer records and cumulative cargo accounting. Keep every command, throughput and peer-validation requirement intact. No gameplay/network schema changes; rerun pending.
+
 - v0.97.42: Archive 64 historical v0.94–v0.97.30 change entries from the top of AGENTS.md into THOUGHTS_ARCHIVE.md without changing their wording or removing the standing workflow/UI/design instructions. Keep recent notes and a direct archive link for AI agents. Documentation-only; game and CI untouched.
 
 - v0.97.41: Prevent a local variable shadow in the ENet smoke harness by naming the per-scenario timeout separately from the lobby discovery deadline. No gameplay or test assertion changes. Godot parser and multiplayer validation pending.
