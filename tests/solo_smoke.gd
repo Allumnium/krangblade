@@ -7,6 +7,9 @@ func _initialize() -> void:
 
 func _run() -> void:
 	var session: Node = root.get_node("GameSession")
+	# This legacy fixture mutates canonical state and manually advances ticks.
+	# Keep it on the synchronous reference path; worker tests cover async state.
+	session.set("threaded_authority_requested", false)
 	if bool(session.call("start_solo", 1, [], [], 827, "invalid")):
 		push_error("Invalid solo map layout accepted")
 		quit(1)

@@ -41,7 +41,7 @@ var owners: Array[int] = []
 var economy: Dictionary = {}
 # In threaded mode economy is a detached presentation/replication snapshot.
 # Only the worker owns mutable authority; main-thread jobs contain values.
-var threaded_authority_requested: bool = bool(ProjectSettings.get_setting("warbound/performance/threaded_authority", false)) or OS.get_cmdline_user_args().has("--warbound-threaded")
+var threaded_authority_requested: bool = not OS.get_cmdline_user_args().has("--warbound-synchronous") and (bool(ProjectSettings.get_setting("warbound/performance/threaded_authority", true)) or OS.get_cmdline_user_args().has("--warbound-threaded"))
 var threaded_authority_active: bool = false
 var _authority_worker := AUTHORITY_WORKER.new()
 var _authority_jobs: Array[Dictionary] = []

@@ -59,6 +59,9 @@ func _begin() -> void:
 	if session == null:
 		_fail("GameSession autoload is missing.")
 		return
+	# Legacy ENet fixtures directly mutate canonical host state. Preserve
+	# their assertions on the synchronous path until fixture setup is ported.
+	session.set("threaded_authority_requested", false)
 	session.connect("phase_changed", _phase_changed)
 	session.connect("roster_changed", _roster_changed)
 	# Multi-peer stress has much less CPU per Godot process on CI runners.
