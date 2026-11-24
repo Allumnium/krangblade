@@ -54,6 +54,8 @@ Combat activity envelopes are conservative bounds over the original integer comb
 
 Civilian trade preflight derives ordered resource masks from live stock and threshold predicates for each search; it must not persist negative results across hull work because transfers can create or remove opportunities within a substep. Mining filters unusable chunks before route/depot checks. Empty candidate fast paths retain existing caller deadlines and explicit-job cleanup.
 
+Motion sleep is a derived, state/roster-scoped registry of stable hull IDs and last certified no-op dispatch modes. It is never serialized. Only normalized explicit Hold, active Stop and idle military motion can sleep; the same live guard runs at the original hull work boundary, and changes or expiry fall back to the full path immediately. Combat, economy, service indexing, repair, separation/contact and deadline settlement are not suspended. Removal retires the entry; state/roster replacement resets it. A reference step option disables this optimization for parity tests. This is not yet a general event-driven scheduler.
+
 `GameSession` owns `economy`, `round_id`, `snapshot_revision`, reliable snapshot/template bookkeeping and visual `motion_samples`. The first reliable state conveys generated map/planet templates; later packets may send compact ore and planet changes, and decoding falls back to full states if incompatible. `snapshot_codec.gd` must preserve wire keys such as `_wire_ore`, `_wire_map_template`, `_wire_planets_compact` and `_wire_planet_template`. Movement packets remain **20 bytes per ship**, at most **57 records per batch**; GameSession owns RPC permissions, revision filters and finite-vector checks. Do not alter message schemas casually.
 
 ## Making changes safely

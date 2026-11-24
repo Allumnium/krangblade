@@ -4767,6 +4767,12 @@ static func armed(ship: Dictionary) -> bool:
 # in the actual entity dictionary, so repair never creates a new entity.
 static var _indexed_state: Dictionary = {}
 static var _hulls_by_id: Dictionary = {}
+# Derived motion-dispatch sleep registry, scoped to one authoritative state.
+# No entity references or new replicated fields; wake predicates are live.
+enum MotionSleep { AWAKE, STOPPED, HELD, IDLE_MILITARY }
+static var _motion_sleep_state: Dictionary = {}
+static var _motion_sleep_roster: Array = []
+static var _motion_sleep_modes: Dictionary = {}
 
 # Scope derived references to one authority step; never serialize them.
 static func _begin_hull_index(state: Dictionary) -> void:
@@ -4781,6 +4787,8 @@ static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
 			if other.get("kind", "") == "warp_gate" and int(other.get("warp_destination", -1)) == int(ship["id"]):
 				other["warp_destination"] = -1
 	state["ships"].erase(ship)
+	if is_same(state, _motion_sleep_state):
+		_motion_sleep_modes.erase(int(ship["id"]))
 	if is_same(state, _indexed_state):
 		_hulls_by_id.erase(int(ship["id"]))
 
@@ -9802,7 +9810,7 @@ static func _next_ai_slot(now: float, player: int) -> float:
 		next += AI_INTERVAL
 	return next
 
-static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void:
+static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true) -> void:
 	_rock_plan_tick += 1
 	_rock_plan_budget = ROCK_PLAN_LIMIT
 	_rock_route_queries.clear()
@@ -9810,6 +9818,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	var started: int = Time.get_ticks_usec() if not profile.is_empty() else 0
 	var frame: STEP_FRAME = STEP_FRAME.new()
 	frame.profile = profile
+	frame.motion_sleep_enabled = motion_sleep_enabled
 	_step_economy(state, frame, dt)
 	started = _profile_stage(profile, "Economy", started)
 	_step_ai(state, frame, dt)
@@ -9818,6 +9827,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}) -> void
 	started = _profile_stage(profile, "Combat / repair", started)
 	_step_formations(state, frame, dt)
 	started = _profile_stage(profile, "Formations / orders", started)
+	if motion_sleep_enabled:
+		_begin_motion_sleep(state)
 	for ship in (state["ships"] as Array).duplicate():
 		_step_hull(state, frame, ship, dt)
 	_step_settle_movement(state, frame, dt)
@@ -9988,7 +9999,76 @@ static func _step_formations(state: Dictionary, frame: STEP_FRAME, dt: float) ->
 
 ## Runs one hull's highest-priority work for this substep. Hulls that stay
 ## idle and unmoved become candidates for local wandering.
+# Persistent classification, not a second simulation. Replacing the
+# state or roster invalidates the entire registry. Dead IDs are removed
+# by the canonical removal path; fixture edits are also pruned.
+static func _begin_motion_sleep(state: Dictionary) -> void:
+	if not is_same(state, _motion_sleep_state) or not is_same(state["ships"], _motion_sleep_roster):
+		_motion_sleep_modes.clear()
+		_motion_sleep_state = state
+		_motion_sleep_roster = state["ships"]
+	elif _motion_sleep_modes.size() > _motion_sleep_roster.size():
+		for id in _motion_sleep_modes.keys():
+			if not _hulls_by_id.has(id):
+				_motion_sleep_modes.erase(id)
+
+# A sleeping hull skips only its movement/service dispatch. It remains
+# in every authoritative combat, service, vision and collision index.
+# These predicates certify that the original path has no observable
+# mutation left to perform, including metadata normalization.
+static func _motion_sleep_mode(state: Dictionary, frame: STEP_FRAME, ship: Dictionary) -> MotionSleep:
+	var kind: String = str(ship.get("kind", ""))
+	if kind in ["colony_ship", "warp_gate"] or bool(ship.get("rogue", false)) or bool(ship.get("retreating", false)) or bool(ship.get("_handoff_delivery", false)):
+		return MotionSleep.AWAKE
+	if ship.get("unit_order", {}).get("kind", "") == "warp_travel":
+		return MotionSleep.AWAKE
+	if _stop_waiting(state, ship):
+		if not ship.has("repair_target") and ship.get("navigation_target") == ship["position"]:
+			return MotionSleep.STOPPED
+		return MotionSleep.AWAKE
+	if ship.has("stop_until"):
+		return MotionSleep.AWAKE # The original dispatch must retire the deadline.
+	if bool(ship.get("holding", false)):
+		if ship.has("hold_heading") and not ship.has("repair_target") and not ship.has("move_only") and ship.get("hold_position") == ship["position"] and ship.get("navigation_target") == ship["position"] and ship.get("heading") == ship["hold_heading"]:
+			return MotionSleep.HELD
+		return MotionSleep.AWAKE
+	# Military hulls have zero cargo capacity and no civilian automatic
+	# work. Only the already-normalized, stationary branch may sleep.
+	if not military_hull(kind) or ship.has("unit_order") or not ship.get("order_queue", []).is_empty() or not (ship["route"] as Array).is_empty():
+		return MotionSleep.AWAKE
+	if ship.has("attack_order") or bool(ship.get("attack_local", false)) or ship.has("patrol_from") or ship.has("launch_rally") or ship.has("local_move_target") or ship.has("cargo_order") or ship.has("repair_order") or ship.has("repair_target"):
+		return MotionSleep.AWAKE
+	if _salvage_active(ship) or ship.has("auto_salvage_target") or ship.has("auto_salvage_origin") or bool(ship.get("passing_fire", false)):
+		return MotionSleep.AWAKE
+	if ship.get("combat_target") != -1 or ship.get("pursuit_target") != -1 or ship.get("pursuit_left") != 0.0:
+		return MotionSleep.AWAKE
+	var id: int = int(ship["id"])
+	if frame.idle_targets.has(id) or frame.coordinated.has(id):
+		return MotionSleep.AWAKE
+	return MotionSleep.IDLE_MILITARY
+
 static func _step_hull(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> void:
+	if not frame.motion_sleep_enabled:
+		_step_hull_active(state, frame, ship, dt)
+		return
+	var id: int = int(ship["id"])
+	var prior_mode: int = int(_motion_sleep_modes.get(id, MotionSleep.AWAKE))
+	# A new command, enemy, displacement, cooldown expiry or new wander
+	# target is checked at the original boundary, even for persistent sleepers.
+	if prior_mode != MotionSleep.AWAKE and int(_motion_sleep_mode(state, frame, ship)) == prior_mode:
+		frame.motion_sleep_skips += 1
+		return
+	if prior_mode != MotionSleep.AWAKE:
+		_motion_sleep_modes.erase(id)
+	_step_hull_active(state, frame, ship, dt)
+	# Avoid reclassifying expensive civilian routines unless explicitly held
+	# or stopped. Colonies must still grow food; morphs must still progress.
+	if military_hull(str(ship.get("kind", ""))) or bool(ship.get("holding", false)) or ship.has("stop_until"):
+		var next_mode: MotionSleep = _motion_sleep_mode(state, frame, ship)
+		if next_mode != MotionSleep.AWAKE:
+			_motion_sleep_modes[id] = next_mode
+
+static func _step_hull_active(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> void:
 	var initial_position: Vector2 = ship["position"]
 	if _step_hull_overrides(state, frame, ship, initial_position, dt):
 		return
