@@ -722,6 +722,42 @@ func _test_local_avoidance() -> void:
 	ECON.avoidance_cells.clear()
 	print("PASS: forward avoidance, movement budget, unobstructed path and shared endpoint")
 
+func _test_direct_trajectory_samples() -> void:
+	var fields: Array = [{"position": Vector2(3000, 0), "radius": 50.0, "chunks": [{"position": Vector2(3000, 0), "radius": 30.0}]}]
+	ECON._refresh_movement_fields(fields)
+	var craft: Dictionary = {"id": 701, "kind": "fighter", "position": Vector2(-500, 100), "heading": Vector2.UP}
+	var reference: Dictionary = craft.duplicate(true)
+	var target := Vector2(1500, 200)
+	for tick in range(40):
+		ECON._begin_ship_avoidance({701: craft["position"], 702: Vector2(-5000, -5000)})
+		if tick == 20:
+			target = Vector2(-700, -200)
+		var budget: float = 23.7 if tick % 2 == 0 else 11.3
+		var actual: float = ECON._navigate(craft, target, budget)
+		var expected: float = ECON._navigate(reference, target, budget, false)
+		assert(actual == expected and craft == reference)
+	assert(ECON._direct_rock_corridors.has(701))
+	# A new obstacle invalidates the certificate; a nearby hull or cached
+	# detour must force the original steering path immediately.
+	var start: Vector2 = craft["position"]
+	var goal: Vector2 = start + Vector2(500, 0)
+	fields[0]["chunks"].append({"position": start + Vector2(100, 0), "radius": 30.0})
+	ECON._refresh_movement_fields(fields)
+	assert(not ECON._direct_rock_corridors.has(701))
+	assert(ECON._direct_motion_sample(craft, start, goal, 10.0, true) == null)
+	ECON._begin_ship_avoidance({701: start, 702: start + Vector2(50, 0)})
+	assert(ECON._direct_motion_sample(craft, start, goal, 10.0, false) == null)
+	ECON._refresh_movement_fields([])
+	var actual: float = ECON._navigate(craft, goal, 10.0)
+	var expected: float = ECON._navigate(reference, goal, 10.0, false)
+	assert(actual == expected and craft == reference)
+	ECON._begin_ship_avoidance({})
+	for budget in [0.0, 0.001, 1000.0]:
+		var step_distance: float = ECON._navigate(craft, goal, budget)
+		var reference_distance: float = ECON._navigate(reference, goal, budget, false)
+		assert(step_distance == reference_distance and craft == reference)
+	print("PASS: exact direct trajectory samples, command changes, obstacle invalidation and contact fallback")
+
 func _test_shared_navigation_queries() -> void:
 	# Preserve neighbor traversal order, including negative cells and ties.
 	var positions: Dictionary = {11: Vector2(30, 0), 12: Vector2(-30, 0), 13: Vector2(40, 0), 14: Vector2(500, 0)}
@@ -2269,6 +2305,7 @@ func _initialize() -> void:
 	_test_ship_size_classes()
 	_test_local_avoidance()
 	_test_shared_navigation_queries()
+	_test_direct_trajectory_samples()
 	_test_station_defense_and_ports()
 	_test_station_construction_queue()
 	_test_ai_timed_orbital_housing()
