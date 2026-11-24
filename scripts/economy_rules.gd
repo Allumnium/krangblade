@@ -1,5 +1,7 @@
 extends RefCounted
 ## Development-only balance configuration. No advanced recipes have been defined.
+# Single source of truth for accepted authoritative time-speed values.
+const AUTHORITY_MATCH_SPEEDS: Array[int] = [0, 1, 2, 5]
 static var cached_civilian_routes: Dictionary = {}
 static var cached_route_topology: Dictionary = {}
 static var cached_military_graph: Dictionary = {}
@@ -9962,8 +9964,6 @@ static func _reroute_after_capture(state: Dictionary, index: int) -> void:
 # A future worker must exclusively own state and all static rule caches.
 # Server peer membership is checked in GameSession before dispatch.
 # Recheck gameplay eligibility against the current authoritative state.
-const AUTHORITY_MATCH_SPEEDS: Array[int] = [0, 1, 2, 5]
-
 static func _authority_active_player(state: Dictionary, id: int) -> bool:
 	return state.get("teams", {}).has(id) and state.get("match_result", {}).is_empty() and not state.get("eliminated", []).has(id)
 

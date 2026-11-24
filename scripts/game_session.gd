@@ -15,7 +15,6 @@ const AUTHORITY_WORKER = preload("res://scripts/authority_worker.gd")
 const SNAPSHOT_CODEC = preload("res://scripts/snapshot_codec.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 const SIM_STEP: float = 0.1
-const MATCH_SPEEDS = ECONOMY.AUTHORITY_MATCH_SPEEDS
 const SNAPSHOT_INTERVAL: float = 0.2 # Local authority UI refresh.
 const REPLICATION_INTERVAL: float = 0.5
 # 57 records x 20 bytes = 1140 bytes, leaving room for RPC/ENet headers.
