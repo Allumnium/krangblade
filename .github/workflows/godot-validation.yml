@@ -236,6 +236,35 @@ jobs:
           }
           run_case "$PLAYER_COUNT" "$CASE_MODE"
 
+  # Informational profiling is independent of the gameplay/network gate.
+  # It runs on explicit manual dispatch and never asserts hardware-specific
+  # millisecond thresholds or changes the required validate job.
+  profile:
+    needs: gate
+    if: ${{ github.event_name == 'workflow_dispatch' && needs.gate.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+      - name: Import
+        run: godot --headless --path . --import
+      - name: Capture representative headless simulation timings
+        run: python3 tools/profile_simulation.py --ships 500,1000 --scenarios battle,logistics --speeds 1,5 --seeds 827 --ticks 100 --timeout 300 --output performance-baseline.json
+      - name: Publish non-gating performance baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warbound-headless-profile-${{ github.run_number }}
+          path: performance-baseline.json
+          if-no-files-found: warn
+          retention-days: 30
+
   # Keep the aggregate check required. Only the verified docs gate may skip tests.
   validate:
     runs-on: ubuntu-latest
