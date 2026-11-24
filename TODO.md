@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.75: Set project-wide rendering cap to 120 FPS using application/run/max_fps and disable VSync so the monitor refresh rate does not impose a lower cap during performance testing. Keep physics/simulation cadence, threaded authority and explicit CI benchmark CLI frame limits unchanged. Runtime FPS not measured.
+
 - [ ] v0.97.74: Remove unused GameSession alias of EconomyRules.AUTHORITY_MATCH_SPEEDS after reported missing-member parser error; keep the sole typed speed constant at the top of EconomyRules and validate only in the shared authority handler. Verify all 25 queued command names, 25 typed synchronous call sites and substep definition plus authority handler callees against the rules source. Threaded default unchanged. Godot parser/runtime and ENet still unverified; if additional missing-member diagnostics appear, inspect the first EconomyRules parse error and reload the editor rather than bypassing typed validation.
 
 - [ ] v0.97.73: Fix reported authority_worker.gd parser error (Cannot find member source_code in preloaded EconomyRules class). Read editor source through FileAccess for anonymous-script fallback instead of accessing Script metadata on a statically resolved class. Keep independent cache probe, default threaded authority, and synchronous fallback when source or independent loading is unavailable. Static checks only; Godot parsing/runtime and threaded ENet pending.
