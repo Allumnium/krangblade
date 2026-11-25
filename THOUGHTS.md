@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.88: Swarm headless median falls to 494 ms on local Linux vs 649 ms at v0.97.86, but all samples miss the batch deadline. Dispersed 5x tail variance prevents reliable isolated speedup claims. Packed separation uses frozen slots, not canonical positions. Next high-impact step is native contact/separation/avoidance with threaded parity; local pinned godot-cpp and SCons/build dependency absent. Continue toward single authoritative hot-field storage rather than adding redundant permanent writable copies.
+
 - v0.97.87: Packed contact staging is a useful kernel boundary but does not change canonical hull dictionaries. Next investigate packed soft separation and the dominant movement/formation costs; do not add a second writable ship state. Local Godot works from user-provided Linux executable and matching checkout. Native compilation requires godot-cpp; graphical measurements on this container are not comparable to the Windows GPU baseline. Investigate existing ObjectDB exit warnings separately.
 
 - v0.97.83: Combined live-threaded dense-fighter captures fail both budgets: 2,000 at 1x measures frame p95 176.752 ms and 3.036 completed batches/s; 1,000 at 5x measures 79.562 ms and 1.672 batches/s. Both retain every synthetic hull and avoid unpaid behavior; worker overruns show simulation slowing instead of accumulating unlimited queued ticks. No AI, opposing combat or ENet is included. Isolate CPU rendering versus GPU/minimap work before choosing the next render change.

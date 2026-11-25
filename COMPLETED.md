@@ -2,6 +2,7 @@
 
 ## Performance
 
+- 2026-11-25 — v0.97.88: Packed soft separation with ordered dense slots, exact force/reference comparisons, full economy regression, identical 50/100-tick battle replay, snapshot codec/construction/lobby, authority worker, solo and 2/3-peer threaded ENet checks passed locally. ObjectDB exit warnings and a three-peer host ENet channel error at teardown remain. Swarm median 494 ms; acceptance remains open.
 - 2026-11-25 — v0.97.87: Packed contact accumulation and demand-driven service/threat/exploration indexes; Linux Godot 4.7.2 economy and focused regressions, original battle replay equality, worker, solo, two-peer synchronous/threaded ENet passed. Teardown warnings remain; comparative throughput and structural acceptance remain open.
 - 2026-11-24 — v0.97.86: Profiled per-phase simulation cost and replaced hot literal kind/HP containers with constants. Live 2,000-ship 1x 3.48 → 3.56 batches/s, 1,000-ship 5x 1.55 → 1.82; economy rules regression passes. Acceptance remains open in TODO.md.
 - 2026-11-24 — v0.97.85: Span-stamped ship fog vision with per-owner memoization and limited command-card refreshes to selected roster entries. Fog per publication about 66 ? 17 ms; live 2,000-ship 1x frame p95 156.5 ? 99.4 ms; economy rules regression (including new span parity test) passes. Acceptance remains open in TODO.md.

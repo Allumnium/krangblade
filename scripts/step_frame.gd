@@ -240,3 +240,74 @@ class ContactBatch:
 						correction_order.append(int(j))
 					corrections[i] += push
 					corrections[j] -= push
+
+# Frozen pre-movement poses and ordered dense-slot neighborhoods. Slots are
+# valid only for this survivor roster/pass; IDs resolve coincident ties.
+class SeparationBatch:
+	var ids := PackedInt64Array()
+	var positions := PackedVector2Array()
+	var present := PackedByteArray()
+	var _reach: float = 0.0
+	var _reach_squared: float = 0.0
+	var _index := OrderedHullBuckets.new()
+	var _cells: Dictionary = {}
+	var _neighborhoods: Dictionary = {}
+
+	func begin(count: int, reach: float) -> void:
+		ids.resize(count)
+		positions.resize(count)
+		present.resize(count)
+		present.fill(0)
+		_reach = reach
+		_reach_squared = reach * reach
+		_index.begin()
+		_neighborhoods.clear()
+
+	func append(slot: int, id: int, point: Vector2) -> void:
+		ids[slot] = id
+		positions[slot] = point
+		present[slot] = 1
+		_index.append(_cell(point), slot)
+
+	func finish() -> void:
+		_cells = _index.finish()
+
+	func _cell(point: Vector2) -> Vector2i:
+		return Vector2i(floori(point.x / _reach), floori(point.y / _reach))
+
+	func neighbors(slot: int) -> PackedInt32Array:
+		var cell: Vector2i = _cell(positions[slot])
+		if not _neighborhoods.has(cell):
+			var slots := PackedInt32Array()
+			for x in range(-1, 2):
+				for y in range(-1, 2):
+					var key: Vector2i = cell + Vector2i(x, y)
+					if _cells.has(key):
+						for other in _cells[key]:
+							slots.append(int(other))
+			_neighborhoods[cell] = slots
+		return _neighborhoods[cell]
+
+	func force(slot: int, epsilon: float) -> Vector2:
+		var before: Vector2 = positions[slot]
+		var id: int = ids[slot]
+		var result := Vector2.ZERO
+		for other in neighbors(slot):
+			if other == slot:
+				continue
+			var offset: Vector2 = before - positions[other]
+			if offset.length_squared() >= _reach_squared:
+				continue
+			var distance: float = offset.length()
+			var direction: Vector2
+			if distance <= epsilon:
+				var other_id: int = ids[other]
+				var low: int = mini(id, other_id)
+				var high: int = maxi(id, other_id)
+				direction = Vector2.from_angle(float(posmod(low * 97 + high * 193, 360)) * PI / 180.0)
+				if id > other_id:
+					direction = -direction
+			else:
+				direction = offset / distance
+			result += direction * (1.0 - distance / _reach)
+		return result

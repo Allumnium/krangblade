@@ -1899,9 +1899,18 @@ func _test_persistent_contact_indexes() -> void:
 		for id in previous:
 			if ECON._isolated_spatial_cell(previous[id], ECON.SHIP_SEPARATION_RADIUS, cells, isolated):
 				assert(ECON._separation_force(id, previous[id], cells, previous, ECON.SHIP_SEPARATION_RADIUS) == Vector2.ZERO)
+		var batch = preload("res://scripts/step_frame.gd").SeparationBatch.new()
+		batch.begin(state["ships"].size(), ECON.SHIP_SEPARATION_RADIUS)
+		for slot in range(state["ships"].size()):
+			var id: int = int(state["ships"][slot]["id"])
+			batch.append(slot, id, previous[id])
+		batch.finish()
+		for slot in range(state["ships"].size()):
+			var id: int = int(state["ships"][slot]["id"])
+			assert(batch.force(slot, ECON.EPS) == ECON._separation_force(id, previous[id], cells, previous, ECON.SHIP_SEPARATION_RADIUS))
 		var reference: Dictionary = state.duplicate(true)
 		var prepared_contacts: Dictionary = {}
-		ECON._separate_ships(state, graph, previous, 0.1, {}, true, cells, prepared_contacts)
+		ECON._separate_ships(state, graph, previous, 0.1, {}, true, cells, prepared_contacts, batch)
 		ECON._separate_ships(reference, graph, previous, 0.1)
 		assert(state == reference)
 		var bounds: Dictionary = {}
