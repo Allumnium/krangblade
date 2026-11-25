@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.90: Exact grouped fog sensor rows and detached ship-only coverage cache reduce publication work; targeted dense kernel 22.194→6.940 ms. Full combined render, current-main integrated regression/ENet and acceptance remain open. Continue native batch integration, authoritative packed fields and compact publication; avoid additional minor tweaks without profiling.
+
 - [ ] v0.97.89: Packed steering candidate slots replace the production nested avoidance arrays. Ordered cap, nearest tie, exact steering and corridor parity pass. Next native batch integration with threaded parity and persistent canonical hot fields; acceptance remains open (swarm median 470 ms, dispersed 938 ms; see PERFORMANCE.md).
 
 - [ ] v0.97.88 packed movement migration: contact and soft separation now consume reused dense ID/pose buffers; exact force/reference checks. Next move whole ordered movement geometry workloads into native kernels and integrate with threaded authority; establish persistent canonical hot-field lifecycle. See PERFORMANCE.md for Linux comparison (swarm median 494 ms, dispersed 903 ms; targets unmet).

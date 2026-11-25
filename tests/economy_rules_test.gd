@@ -7030,3 +7030,43 @@ func _test_vision_span_stamping() -> void:
 	for cell: Vector2i in reference:
 		assert(spans.has(cell))
 	print("PASS: span vision stamping matches per-cell disks")
+	# Dense horizontal runs, gaps bridged by different row half-widths,
+	# negative coordinates and mixed radii must match the per-cell predicate.
+	var dense: Dictionary = {}
+	for y in range(-8, 9):
+		for x in range(-25, 26):
+			if posmod(x, 11) != 0:
+				dense[Vector2i(x, y)] = 1000.0 if y % 3 != 0 else 850.0
+	var expected: Dictionary = {}
+	for cell: Vector2i in dense:
+		ECON._stamp_vision(expected, (Vector2(cell) + Vector2.ONE * 0.5) * ECON.VISION_CELL, float(dense[cell]))
+	var actual: Dictionary = {}
+	ECON._stamp_cell_sources(actual, dense)
+	assert(actual == expected)
+	var map: Dictionary = _planetary_fixture(827, 2)
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	ECON.initialize_diplomacy(state)
+	state["ships"] = [{"id": 1, "kind": "fighter", "owner": 1, "position": Vector2(-4000, -4000)}, {"id": 2, "kind": "scout", "owner": 2, "position": Vector2(-8000, -8000)}]
+	var cache: Dictionary = {}
+	for tick in range(7):
+		if tick == 1:
+			state["ships"][0]["position"] += Vector2(1, 1)
+		elif tick == 2:
+			state["ships"][0]["position"] += Vector2(160, 0)
+		elif tick == 3:
+			state["ships"][0]["kind"] = "scout"
+		elif tick == 4:
+			assert(ECON.diplomacy_offer_alliance(state, 1, 2))
+			assert(ECON.diplomacy_offer_alliance(state, 2, 1))
+		elif tick == 5:
+			assert(ECON.diplomacy_set_permission(state, 2, 1, "vision", false))
+		elif tick == 6:
+			state["ships"].clear()
+		state["elapsed"] = float(tick)
+		var cached: Dictionary = ECON.team_vision(state, 1, cache)
+		assert(cached == ECON.team_vision(state, 1))
+		# Published coverage must not alias the retained ship-only cells.
+		cached.clear()
+		assert(ECON.team_vision(state, 1, cache) == ECON.team_vision(state, 1))
+	print("PASS: grouped vision spans and detached ship-mask cache across movement, radius, alliances and removal")
+

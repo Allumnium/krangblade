@@ -86,6 +86,8 @@ The contact pass now reuses `StepFrame.ContactBatch`: dense roster-ordered IDs, 
 
 `StepFrame.AvoidanceBatch` replaces the production nested movement-avoidance entries with packed IDs/positions and ordered capped slot neighborhoods. It stages from the original frozen pre-movement positions; the nearest-blocker kernel uses no hull dictionaries and preserves exact tie, endpoint, hold and corridor checks. The old full dictionary rebuild remains an independent reference. The batch is derived, detached at settlement, and never serialized.
 
+Equal-radius adjacent ship sensor source cells are grouped into horizontal runs before disk row expansion. The exact union remains the same. `FogOfWar` owns an optional detached ship-only coverage cache, keyed by the freshly computed source-cell/radius dictionary; all structure sight and current sharing/sensor eligibility remain live. It clears on empty state/map identity change and never serializes or shares with authority. Callers without the optional cache compute the same coverage.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

@@ -5,6 +5,7 @@ const ECONOMY = preload("res://scripts/economy_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 
 var _live: Dictionary = {}
+var _ship_vision_cache: Dictionary = {}
 var _explored: Dictionary = {}
 var texture: ImageTexture
 var _mask_image: Image
@@ -22,6 +23,7 @@ var _observed_at: Dictionary = {}
 func update(state: Dictionary, player: int, motion_revision: Variant, map_size: Vector2) -> bool:
 	if state.is_empty():
 		_live.clear()
+		_ship_vision_cache.clear()
 		_explored.clear()
 		_systems.clear()
 		_fields.clear()
@@ -39,6 +41,7 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 		_map_identity = identity
 		_mask_image = null
 		_live.clear()
+		_ship_vision_cache.clear()
 		_explored.clear()
 		_systems.clear()
 		_fields.clear()
@@ -58,7 +61,7 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 		return false
 	_revision = revision
 	var prior_live: Dictionary = _live
-	_live = ECONOMY.team_vision(state, team)
+	_live = ECONOMY.team_vision(state, team, _ship_vision_cache)
 	_explored.merge(_live, true)
 	_observe_sites(state, player, map_size)
 	_observe_rocks(state, map_size)
