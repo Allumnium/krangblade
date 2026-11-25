@@ -1916,6 +1916,43 @@ func _test_persistent_contact_indexes() -> void:
 		assert(state == reference)
 	print("PASS: retained separation/contact buckets, isolated hulls, bounds and correction parity")
 
+func _test_demand_driven_movement_indexes() -> void:
+	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var craft: Dictionary = {"id": 19101, "kind": "fighter", "owner": 1, "at": 0, "position": Vector2(20, 0), "heading": Vector2.RIGHT, "route": [], "leg": 0.0, "dest": 0, "source": -1, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock()}
+	var follower: Dictionary = craft.duplicate(true)
+	follower["id"] = 19102
+	var hostile: Dictionary = craft.duplicate(true)
+	hostile["id"] = 19103
+	hostile["owner"] = 2
+	state["ships"] = [craft, follower, hostile]
+	var graph: Dictionary = ECON.military_graph(state)
+	assert(ECON._movement_service_targets(state).is_empty())
+	follower["unit_order"] = {"kind": "follow", "target": 19101}
+	craft["unit_order"] = {"kind": "follow", "target": 19102}
+	hostile["attack_order"] = ECON.station_target_id(state, 0)
+	var all: Dictionary = ECON.service_targets(state)
+	var subset: Dictionary = ECON._movement_service_targets(state)
+	assert(subset.size() == 3 and subset[19101] == all[19101] and subset[19102] == all[19102] and subset[hostile["attack_order"]] == all[hostile["attack_order"]])
+	assert(not ECON._valid_follow_target(state, craft, 19102, subset))
+	craft.erase("unit_order")
+	assert(ECON._valid_follow_target(state, follower, 19101, ECON._movement_service_targets(state)))
+	var threat_index: Dictionary = {}
+	var skipped: Dictionary = {}
+	var original = ECON._build_combat_frame(state, graph, state["ships"], threat_index)
+	var reduced = ECON._build_combat_frame(state, graph, state["ships"], skipped, true, false)
+	assert(skipped.is_empty() and not threat_index.is_empty())
+	assert(original.positions == reduced.positions and original.hull_health == reduced.hull_health and original.cells == reduced.cells and original.sectors == reduced.sectors)
+	var miner: Dictionary = craft.duplicate(true)
+	miner["id"] = 19104
+	miner["kind"] = "miner"
+	state["ships"].append(miner)
+	assert(ECON._prepare_combat_hulls(state, graph, 0.0))
+	assert(ECON._movement_service_targets(state) == ECON.service_targets(state))
+	state["ships"].erase(miner)
+	assert(not ECON._prepare_combat_hulls(state, graph, 0.0))
+	print("PASS: demand-driven service and threat snapshots, follow chains and Harvester wake")
+
 func _test_contact_bucket_bounds() -> void:
 	var bounds := Rect2(Vector2(10, 10), Vector2(10, 10))
 	assert(ECON._contact_bucket_near(Vector2(15, 15), bounds, 25.0))
@@ -2835,6 +2872,12 @@ func _test_mining_selection() -> void:
 	print("PASS: mining selection preserves access and rock ties, preferred rock, live depletion and storage wakeups")
 
 func _initialize() -> void:
+	_test_demand_driven_movement_indexes()
+	if OS.get_cmdline_user_args().has("--performance-migration-only"):
+		_test_persistent_contact_indexes()
+		_test_combat_activity_fast_paths()
+		quit()
+		return
 	_test_vision_span_stamping()
 	_test_mining_selection()
 	if OS.get_cmdline_user_args().has("--mining-selection-only"):

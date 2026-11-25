@@ -80,6 +80,8 @@ Fog retains its mask image for a map identity and repaints only changed live-vis
 
 Independent multi-rate work: an unsuccessful autonomous empty-cargo Freighter trade selection sets the optional simulation-owned `_next_trade_search` hull deadline (0.4 years). Only the idle search waits; first search, successful selection, active routes/cargo, manual interruption and trade toggles clear it. The deadline follows existing hull lifetime and optional snapshot fields; no RPC change. `deadline_schedule_enabled=false` selects immediate retries. Stations without repeat targets clear stale repeat cycles without constructing assignment maps; yards with no autobuild skip eligibility. Resource and population integration, active orders and interaction sampling remain at the original substep frequency. No new staggered scheduling.
 
+The contact pass now reuses `StepFrame.ContactBatch`: dense roster-ordered IDs, frozen current/prior positions, correction vectors and first-touch order. Its owner stages poses during separation and applies results through existing authority constraints. This is derived scratch, not canonical storage; it is never serialized. Civilian threat snapshots are demand-driven, service snapshots can filter explicit target IDs when no Harvester exists, and exploration occupancy is skipped without eligible scouts.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

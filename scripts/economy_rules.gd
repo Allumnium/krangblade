@@ -65,6 +65,7 @@ static var _contact_index_state: Dictionary = {}
 static var _contact_index_roster: Array = []
 static var _separation_index = STEP_FRAME.OrderedHullBuckets.new()
 static var _contact_index = STEP_FRAME.OrderedHullBuckets.new()
+static var _contact_batch = STEP_FRAME.ContactBatch.new()
 static var _logistics_index_state: Dictionary = {}
 static var _logistics_index_roster: Array = []
 static var _handoff_indexes: Dictionary = {}
@@ -5305,7 +5306,7 @@ static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
 	if is_same(state, _indexed_state):
 		_hulls_by_id.erase(int(ship["id"]))
 
-static func service_targets(state: Dictionary, only_id: int = -1) -> Dictionary:
+static func service_targets(state: Dictionary, only_id: int = -1, requested: Variant = null) -> Dictionary:
 	var targets: Dictionary = {}
 	var hulls: Array = state["ships"]
 	if only_id >= 0 and is_same(state, _indexed_state):
@@ -5313,7 +5314,7 @@ static func service_targets(state: Dictionary, only_id: int = -1) -> Dictionary:
 	elif only_id < -1:
 		hulls = []
 	for ship in hulls:
-		if only_id != -1 and int(ship["id"]) != only_id:
+		if (only_id != -1 and int(ship["id"]) != only_id) or (requested != null and not requested.has(int(ship["id"]))):
 			continue
 		var position: Vector2 = ship.get("position", Vector2.INF)
 		if not position.is_finite():
@@ -5324,19 +5325,19 @@ static func service_targets(state: Dictionary, only_id: int = -1) -> Dictionary:
 	var count: int = state["planets"].size()
 	for node in range(count):
 		var p: Dictionary = state["planets"][node]
-		if has_station(p) and (only_id == -1 or only_id == station_target_id(state, node)):
+		if has_station(p) and (only_id == -1 or only_id == station_target_id(state, node)) and (requested == null or requested.has(station_target_id(state, node))):
 			targets[station_target_id(state, node)] = {"owner": p["owner"], "entity": p["station"], "position": station_position(state, node, float(state["elapsed"])), "max_hp": station_max_hp(p), "node": node, "kind": "station"}
 		for slot in range(p["yards"].size()):
-			if only_id != -1 and only_id != -2 - node * 3 - slot:
+			if (only_id != -1 and only_id != -2 - node * 3 - slot) or (requested != null and not requested.has(-2 - node * 3 - slot)):
 				continue
 			var yard: Dictionary = p["yards"][slot]
 			targets[-2 - node * 3 - slot] = {"owner": p["owner"], "entity": yard, "position": shipyard_position(state, node, slot, float(state["elapsed"])), "max_hp": YARD_HP * int(yard["level"]), "node": node, "kind": "yard"}
 		var defenses: Dictionary = p.get("pds", {})
 		if not defenses.is_empty():
-			if only_id != -1:
+			if only_id != -1 or requested != null:
 				var matching: bool = false
 				for slot in defenses:
-					if only_id == -2 - count * 3 - int(slot) * count - node:
+					if (only_id == -1 or only_id == -2 - count * 3 - int(slot) * count - node) and (requested == null or requested.has(-2 - count * 3 - int(slot) * count - node)):
 						matching = true
 						break
 				if not matching:
@@ -5344,7 +5345,7 @@ static func service_targets(state: Dictionary, only_id: int = -1) -> Dictionary:
 			var bodies: Array = system_bodies(p, int(state["map"]["seed"]), node)
 			var radius: float = system_world_radius(state, node)
 			for slot in defenses:
-				if only_id != -1 and only_id != -2 - count * 3 - int(slot) * count - node:
+				if (only_id != -1 and only_id != -2 - count * 3 - int(slot) * count - node) or (requested != null and not requested.has(-2 - count * 3 - int(slot) * count - node)):
 					continue
 				if int(slot) < 0 or int(slot) >= bodies.size():
 					continue
@@ -5353,6 +5354,25 @@ static func service_targets(state: Dictionary, only_id: int = -1) -> Dictionary:
 				# Keep established system-centered combat range; repairs use the actual battery.
 				targets[-2 - count * 3 - int(slot) * count - node] = {"owner": p["owner"], "entity": defenses[slot], "position": center, "repair_position": point, "max_hp": PDS_HP, "node": node, "kind": "pds"}
 	return targets
+
+# Movement uses a frozen service snapshot. With no Harvester, every reader
+# names a target explicitly (all active follow-chain links are included).
+# Harvester auto-repair can select any damaged entity, so retain the full view.
+static func _movement_service_targets(state: Dictionary) -> Dictionary:
+	var requested: Dictionary = {}
+	for craft in state["ships"]:
+		if craft.get("kind", "") == "miner":
+			return service_targets(state)
+		if craft.has("attack_order"):
+			requested[int(craft["attack_order"])] = true
+		if craft.has("cargo_order"):
+			requested[int(craft["cargo_order"].get("target", -1))] = true
+		var order: Dictionary = craft.get("unit_order", {})
+		if order.get("kind", "") == "follow":
+			requested[int(order["target"])] = true
+	if requested.is_empty():
+		return {}
+	return service_targets(state, -1, requested)
 
 static func _friendly_target(state: Dictionary, owner: int, target: Dictionary) -> bool:
 	return not target.is_empty() and empires_allied(state, owner, int(target.get("owner", 0)))
@@ -8089,9 +8109,9 @@ static func _combat_search_due(ship: Dictionary, now: float) -> bool:
 # One simultaneous resolution per step: freeze positions and health, let every
 # hull and structure choose targets and accumulate damage, then apply it all.
 # Phase order and ship iteration order are part of the simulation contract.
-static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}, activity_fast_paths: bool = true, persistent_buckets: bool = false) -> void:
+static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}, activity_fast_paths: bool = true, persistent_buckets: bool = false, collect_threats: bool = true) -> void:
 	var ships: Array = state["ships"]
-	var frame: COMBAT_FRAME = _build_combat_frame(state, graph, ships, threat_index, persistent_buckets)
+	var frame: COMBAT_FRAME = _build_combat_frame(state, graph, ships, threat_index, persistent_buckets, collect_threats)
 	# Optional reference path for state-equivalence tests.
 	frame.activity_bounds_ready = activity_fast_paths
 	_detect_cloaked(state, ships, frame.cells, frame.positions, frame.team_by_id)
@@ -8103,7 +8123,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 
 # Freeze hull/structure positions, health and spatial buckets; also publish the
 # armed-hull threat snapshot consumed later by civilian safety checks.
-static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Array, threat_index: Dictionary, persistent_buckets: bool = false) -> COMBAT_FRAME:
+static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Array, threat_index: Dictionary, persistent_buckets: bool = false, collect_threats: bool = true) -> COMBAT_FRAME:
 	if persistent_buckets:
 		if not is_same(state, _combat_index_state) or not is_same(ships, _combat_index_roster):
 			_combat_index_state = state
@@ -8156,7 +8176,7 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 		var sector: int = local_sector(graph, ship)
 		var combat_cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
 		_include_combat_activity_cell(activity_bounds, hull_teams[slot], combat_cell)
-		if armed(ship) and ship.get("position", Vector2.INF).is_finite():
+		if collect_threats and armed(ship) and ship.get("position", Vector2.INF).is_finite():
 			var threat_team: int = int(team_by_id[id])
 			threat_index[id] = [_threat_sector_signature(ship), sector, threat_team]
 			threat_count += 1
@@ -8197,8 +8217,9 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 	if persistent_buckets:
 		cells = _combat_cell_index.finish()
 		sectors = _combat_sector_index.finish()
-	threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells, "positions": threat_positions, "teams": threat_teams, "ids": threat_ids}
-	threat_index["count"] = threat_count
+	if collect_threats:
+		threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells, "positions": threat_positions, "teams": threat_teams, "ids": threat_ids}
+		threat_index["count"] = threat_count
 	var frame := COMBAT_FRAME.new()
 	frame.positions = positions
 	frame.by_id = by_id
@@ -9922,6 +9943,11 @@ static func _dispatch_explorers(state: Dictionary, graph: Dictionary) -> void:
 	var occupancy: Dictionary = {}
 	var scouts: Array = []
 	for craft in state["ships"]:
+		if craft.get("kind", "") == "scout" and _is_idle_ship(craft) and craft.get("order_queue", []).is_empty() and not _unit_order_running(craft) and autocast_ready(state, craft, "explore"):
+			scouts.append(craft)
+	if scouts.is_empty():
+		return
+	for craft in state["ships"]:
 		var team: int = _combat_group(state, int(craft["owner"]))
 		var node: int = int(craft.get("at", -1))
 		var key := Vector2i(team, node)
@@ -9929,10 +9955,6 @@ static func _dispatch_explorers(state: Dictionary, graph: Dictionary) -> void:
 		if bool(craft.get("unit_order", {}).get("exploration", false)) and not craft.get("route", []).is_empty():
 			var destination := Vector2i(team, int(craft.get("dest", node)))
 			occupancy[destination] = int(occupancy.get(destination, 0)) + 1
-		if craft.get("kind", "") == "scout" and _is_idle_ship(craft) and craft.get("order_queue", []).is_empty() and not _unit_order_running(craft) and autocast_ready(state, craft, "explore"):
-			scouts.append(craft)
-	if scouts.is_empty():
-		return
 	for node in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][node]
 		if has_station(system):
@@ -10321,16 +10343,21 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 	var bounds: Dictionary = {}
 	if collect_contacts:
 		_contact_index.begin()
+		_contact_batch.begin(ships.size())
 	for i in range(ships.size()):
 		var ship: Dictionary = ships[i]
 		_separate_hull(state, graph, ship, previous, dt, repair_parked, persistent, cells, isolated, reach)
 		# Separation changes only this hull. Its final position can be
 		# collected now, in the same order as the former contact build.
 		if collect_contacts:
-			_append_persistent_contact(i, ship["position"], SHIP_CLEARANCE, bounds)
+			var point: Vector2 = ship["position"]
+			var id: int = int(ship["id"])
+			_append_persistent_contact(i, point, SHIP_CLEARANCE, bounds)
+			_contact_batch.set_pose(i, id, point, previous.get(id, point))
 	if collect_contacts:
 		contact_snapshot["cells"] = _contact_index.finish()
 		contact_snapshot["bounds"] = bounds
+		contact_snapshot["batch"] = _contact_batch
 
 static func _separate_hull(state: Dictionary, graph: Dictionary, ship: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary, persistent: bool, cells: Dictionary, isolated: Dictionary, reach: float) -> void:
 	var id: int = int(ship["id"])
@@ -10521,9 +10548,10 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 	var cutoff_squared: float = (reach - EPS) * (reach - EPS)
 	# Reuse dense indexed scratch arrays across contact passes.
 	var corrections := PackedVector2Array()
-	corrections.resize(ships.size())
 	var touched := PackedByteArray()
-	touched.resize(ships.size())
+	if not persistent:
+		corrections.resize(ships.size())
+		touched.resize(ships.size())
 	for iteration in range(SHIP_CLEARANCE_PASSES):
 		var cells: Dictionary = {}
 		var bounds: Dictionary = {}
@@ -10534,21 +10562,28 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 			cells = _refresh_persistent_contact_cells(ships, reach, bounds)
 		else:
 			_index_contact_cells(ships, reach, cells, bounds)
-		# Frozen positions are dense until the correction commit.
-		var contact_positions := PackedVector2Array()
 		if persistent:
-			contact_positions.resize(ships.size())
-			for slot in range(ships.size()):
-				contact_positions[slot] = ships[slot]["position"]
-		var isolated: Dictionary = {}
+			# The fused separation pass already staged the exact same pose/ID
+			# snapshot. Other callers and future iterations refresh it here.
+			if iteration != 0 or not is_same(prepared_snapshot.get("batch"), _contact_batch):
+				_contact_batch.begin(ships.size())
+				for slot in range(ships.size()):
+					var craft: Dictionary = ships[slot]
+					var point: Vector2 = craft["position"]
+					var id: int = int(craft["id"])
+					_contact_batch.set_pose(slot, id, point, previous.get(id, point))
+			_contact_batch.accumulate(cells, bounds, reach, EPS)
+			if _contact_batch.correction_order.is_empty():
+				break
+			_apply_contact_corrections(state, graph, previous, dt, repair_parked, _contact_batch.corrections, _contact_batch.correction_order)
+			continue
+		# Independent dictionary-based reference for semantic parity tests.
 		corrections.fill(Vector2.ZERO)
 		touched.fill(0)
 		var correction_order: Array[int] = []
 		for i in range(ships.size()):
 			var a: Dictionary = ships[i]
-			var pa: Vector2 = contact_positions[i] if persistent else a["position"]
-			if persistent and _isolated_spatial_cell(pa, reach, cells, isolated):
-				continue
+			var pa: Vector2 = a["position"]
 			var cell := Vector2i(floori(pa.x / reach), floori(pa.y / reach))
 			for x in range(-1, 2):
 				for y in range(-1, 2):
@@ -10558,7 +10593,7 @@ static func _resolve_ship_contacts(state: Dictionary, graph: Dictionary, previou
 					for j in cells[key]:
 						if int(j) <= i:
 							continue
-						var pb: Vector2 = contact_positions[j] if persistent else ships[j]["position"]
+						var pb: Vector2 = ships[j]["position"]
 						var offset: Vector2 = pa - pb
 						if offset.length_squared() >= cutoff_squared:
 							continue
@@ -10886,9 +10921,12 @@ static func _step_ai(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 # Position initialization, passive HP and loading reward touch independent
 # fields. Share their hull traversal; keep structure/shield work before
 # withdrawal and combat. Reward inputs cannot change during this pass.
-static func _prepare_combat_hulls(state: Dictionary, combat_graph: Dictionary, dt: float) -> void:
+static func _prepare_combat_hulls(state: Dictionary, combat_graph: Dictionary, dt: float) -> bool:
 	var loading_by_owner: Dictionary = {}
+	var needs_threats: bool = false
 	for craft in state["ships"]:
+		if not needs_threats and craft.get("kind", "") in ["ship", "miner"]:
+			needs_threats = true
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") in MILITARY_KINDS else state["map"]["points"], craft)
 		_regenerate_hull(craft, ship_max_hp(str(craft["kind"])), dt)
 		var owner: int = int(craft["owner"])
@@ -10899,10 +10937,11 @@ static func _prepare_combat_hulls(state: Dictionary, combat_graph: Dictionary, d
 			craft["reward_loading_factor"] = loading
 		else:
 			craft.erase("reward_loading_factor")
+	return needs_threats
 
 static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 	var combat_graph: Dictionary = frame.graph
-	_prepare_combat_hulls(state, combat_graph, dt)
+	var needs_threats: bool = _prepare_combat_hulls(state, combat_graph, dt)
 	_regenerate_structures(state, dt)
 	_refresh_reward_defenses(state, dt)
 	_prepare_withdrawals(state, combat_graph)
@@ -10910,7 +10949,7 @@ static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> voi
 	_update_tactical_orders(state, combat_graph)
 	_pirate_decisions(state)
 	var threat_index: Dictionary = {}
-	_combat(state, combat_graph, dt, threat_index, true, frame.persistent_combat_enabled)
+	_combat(state, combat_graph, dt, threat_index, true, frame.persistent_combat_enabled, needs_threats or not frame.persistent_combat_enabled)
 	combat_graph.erase("travel_influence")
 	combat_graph.erase("travel_permissions")
 	# Station destruction changes ownership during combat. Never use stale
@@ -10923,7 +10962,10 @@ static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> voi
 	_update_salvage(state)
 	_index_postcombat_hulls(state, frame)
 	frame.salvage_cells = _salvage_cells(state.get("salvage", {}), frame.persistent_logistics_enabled)
-	frame.salvage_threats = _reuse_combat_threats(state, combat_graph, threat_index)
+	# Only Harvester/Freighter safety reads frozen threat geometry. Combat
+	# cannot launch new hulls; the surviving civilian lists are the wake guard.
+	if not frame.persistent_combat_enabled or not frame.handoff_miners.is_empty() or not frame.freighters.is_empty():
+		frame.salvage_threats = _reuse_combat_threats(state, combat_graph, threat_index)
 	_step_resource_handoffs(state, frame, dt)
 
 # One ordered survivor pass for salvage safety, logistics and fleet allocation.
@@ -11042,7 +11084,7 @@ static func _step_formations(state: Dictionary, frame: STEP_FRAME, dt: float) ->
 	_dispatch_explorers(state, combat_graph)
 	frame.idle_targets = _idle_formation_targets(state, combat_graph)
 	frame.coordinated = _coordinate_formations(state, combat_graph, dt)
-	frame.service_refs = service_targets(state)
+	frame.service_refs = _movement_service_targets(state) if frame.persistent_combat_enabled else service_targets(state)
 	if frame.persistent_combat_enabled:
 		if not is_same(state, _repair_index_state) or not is_same(state["ships"], _repair_index_roster):
 			_repair_index_state = state

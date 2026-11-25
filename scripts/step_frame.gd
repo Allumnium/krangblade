@@ -168,3 +168,75 @@ class DeadlineCalendar:
 			_dirty_minimum = true
 			_refresh_minimum()
 		return due
+
+# Frozen contact workload. Dense slots follow the authoritative roster order;
+# no entity Dictionary is read by the pair kernel. The owner reuses this
+# buffer at the original separation/contact boundary and commits corrections
+# through the existing movement rules. Never serialize or share across workers.
+class ContactBatch:
+	var ids := PackedInt64Array()
+	var positions := PackedVector2Array()
+	var previous := PackedVector2Array()
+	var corrections := PackedVector2Array()
+	var touched := PackedByteArray()
+	var correction_order: Array[int] = []
+
+	func begin(count: int) -> void:
+		ids.resize(count)
+		positions.resize(count)
+		previous.resize(count)
+		corrections.resize(count)
+		touched.resize(count)
+
+	func set_pose(slot: int, id: int, point: Vector2, before: Vector2) -> void:
+		ids[slot] = id
+		positions[slot] = point
+		previous[slot] = before
+
+	# Keep x/y cell and roster traversal order, including first-touch order.
+	# Share candidate bucket lists for all slots in a cell; the bounding-box
+	# check still uses each hull's exact position.
+	func accumulate(cells: Dictionary, bounds: Dictionary, reach: float, epsilon: float) -> void:
+		corrections.fill(Vector2.ZERO)
+		touched.fill(0)
+		correction_order.clear()
+		var neighborhoods: Dictionary = {}
+		var cutoff_squared: float = (reach - epsilon) * (reach - epsilon)
+		var margin: float = maxf(0.001, cutoff_squared * 0.0001)
+		for i in range(positions.size()):
+			var pa: Vector2 = positions[i]
+			var cell := Vector2i(floori(pa.x / reach), floori(pa.y / reach))
+			if not neighborhoods.has(cell):
+				var buckets: Array = []
+				for x in range(-1, 2):
+					for y in range(-1, 2):
+						var key: Vector2i = cell + Vector2i(x, y)
+						if bounds.has(key):
+							buckets.append([bounds[key], cells[key]])
+				neighborhoods[cell] = buckets
+			for bucket in neighborhoods[cell]:
+				var box: Rect2 = bucket[0]
+				if pa.distance_squared_to(pa.clamp(box.position, box.end)) > cutoff_squared + margin:
+					continue
+				for j in bucket[1]:
+					if int(j) <= i:
+						continue
+					var offset: Vector2 = pa - positions[j]
+					if offset.length_squared() >= cutoff_squared:
+						continue
+					var distance: float = offset.length()
+					var direction: Vector2
+					if distance <= epsilon:
+						var prior: Vector2 = previous[i] - previous[j]
+						direction = prior.normalized().orthogonal() if prior.length_squared() > epsilon else Vector2.from_angle(float(posmod(ids[i] * 97 + ids[j] * 193, 360)) * PI / 180.0)
+					else:
+						direction = offset / distance
+					var push: Vector2 = direction * (reach - distance) * 0.12
+					if touched[i] == 0:
+						touched[i] = 1
+						correction_order.append(i)
+					if touched[j] == 0:
+						touched[j] = 1
+						correction_order.append(int(j))
+					corrections[i] += push
+					corrections[j] -= push
