@@ -152,3 +152,19 @@ v0.97.86 replaces per-call literal containers (`ship_max_hp` table and 38 milita
 | 1,000 | 5x | ? | ? | ? | ? | 1.82 |
 
 Meeting 10 Hz at 2,000 hulls requires roughly a 2x simulation speedup at 1x and about 5x at 1,000 hulls on 5x. Further constant-factor GDScript trimming yields only a few percent; the remaining path is structural (packed per-hull arrays for movement/combat/formations, or native kernels enabled by default after parity).
+
+
+## Local Linux packed movement batches (v0.97.87–88)
+
+Godot 4.7.2, Linux container, Intel Xeon Platinum 8573C (5 logical processors exposed), seed 827, eight synthetic players, headless only. The user supplied the executable and matching checkout. Sequential short samples from the v0.97.86 baseline and staged v0.97.87–88 code (version string was bumped after measurement). Do not compare absolute times with the Windows/GPU captures above; shared-container timing is variable.
+
+| Scenario | Ships | Speed | Batches | Version | p50 ms | p95 ms | Other movement p50 ms | Misses |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| swarm | 2,000 | 1x | 40 | 0.97.86 | 649.367 | 808.978 | 442.813 | 40/40 |
+| swarm | 2,000 | 1x | 40 | 0.97.87 | 580.122 | 655.443 | 412.794 | 40/40 |
+| swarm | 2,000 | 1x | 40 | 0.97.88 | 494.189 | 546.051 | 329.954 | 40/40 |
+| dispersed | 1,000 | 5x | 20 | 0.97.86 | 981.321 | 1073.165 | 351.653 | 20/20 |
+| dispersed | 1,000 | 5x | 20 | 0.97.87 | 881.947 | 1930.334 | 341.500 | 20/20 |
+| dispersed | 1,000 | 5x | 20 | 0.97.88 | 903.210 | 1317.648 | 347.357 | 20/20 |
+
+All 2,000 swarm hulls survived; all dispersed samples ended with 977 hulls. Swarm median falls 24% across both changes, movement median 25%. Dispersed medians improve 8% across both changes but tail timings are variable and the second pass alone did not improve the median. Neither workload achieves the 100 ms batch budget; no FPS claim. Packed contact and separation are reusable phase-local computational batches, not authoritative storage.

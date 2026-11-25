@@ -82,6 +82,8 @@ Independent multi-rate work: an unsuccessful autonomous empty-cargo Freighter tr
 
 The contact pass now reuses `StepFrame.ContactBatch`: dense roster-ordered IDs, frozen current/prior positions, correction vectors and first-touch order. Its owner stages poses during separation and applies results through existing authority constraints. This is derived scratch, not canonical storage; it is never serialized. Civilian threat snapshots are demand-driven, service snapshots can filter explicit target IDs when no Harvester exists, and exploration occupancy is skipped without eligible scouts.
 
+`StepFrame.SeparationBatch` now retains ordered roster-slot buckets, packed stable IDs and frozen previous positions. The settlement loop stages survivors and marks missing prior poses absent; neighborhood slots preserve x/y and roster traversal. The force kernel reads only this frozen batch, and EconomyRules still owns eligibility, clipping, movement commit and heading updates. Independent dictionary reference remains for parity. Neither movement batch is canonical ship storage.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

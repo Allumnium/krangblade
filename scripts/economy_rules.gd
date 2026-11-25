@@ -66,6 +66,7 @@ static var _contact_index_roster: Array = []
 static var _separation_index = STEP_FRAME.OrderedHullBuckets.new()
 static var _contact_index = STEP_FRAME.OrderedHullBuckets.new()
 static var _contact_batch = STEP_FRAME.ContactBatch.new()
+static var _separation_batch = STEP_FRAME.SeparationBatch.new()
 static var _logistics_index_state: Dictionary = {}
 static var _logistics_index_roster: Array = []
 static var _handoff_indexes: Dictionary = {}
@@ -10332,13 +10333,25 @@ static func _profile_stage(profile: Dictionary, stage: String, started: int) -> 
 # Gentle neighborhood steering, not rigid collision or additional travel.
 # All hulls are obstacles; ships performing precise service actions are
 # not displaced. Use the same pre-movement snapshot for every pair.
-static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary = {}, persistent: bool = false, prepared_cells: Variant = null, contact_snapshot: Variant = null) -> void:
+static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary = {}, persistent: bool = false, prepared_cells: Variant = null, contact_snapshot: Variant = null, prepared_batch: Variant = null) -> void:
 	if dt <= 0.0:
 		return
 	var reach: float = SHIP_SEPARATION_RADIUS
-	var cells: Dictionary = _separation_cells(state, previous, reach, persistent) if prepared_cells == null else prepared_cells
-	var isolated: Dictionary = {}
 	var ships: Array = state["ships"]
+	var batch: STEP_FRAME.SeparationBatch = null
+	var cells: Dictionary = {}
+	if persistent:
+		batch = prepared_batch
+		if batch == null:
+			batch = _separation_batch
+			batch.begin(ships.size(), reach)
+			for slot in range(ships.size()):
+				var id: int = int(ships[slot]["id"])
+				if previous.has(id):
+					batch.append(slot, id, previous[id])
+			batch.finish()
+	else:
+		cells = _separation_cells(state, previous, reach) if prepared_cells == null else prepared_cells
 	var collect_contacts: bool = persistent and contact_snapshot != null and ships.size() >= 2
 	var bounds: Dictionary = {}
 	if collect_contacts:
@@ -10346,7 +10359,7 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		_contact_batch.begin(ships.size())
 	for i in range(ships.size()):
 		var ship: Dictionary = ships[i]
-		_separate_hull(state, graph, ship, previous, dt, repair_parked, persistent, cells, isolated, reach)
+		_separate_hull(state, graph, ship, previous, dt, repair_parked, cells, reach, batch, i)
 		# Separation changes only this hull. Its final position can be
 		# collected now, in the same order as the former contact build.
 		if collect_contacts:
@@ -10359,11 +10372,12 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 		contact_snapshot["bounds"] = bounds
 		contact_snapshot["batch"] = _contact_batch
 
-static func _separate_hull(state: Dictionary, graph: Dictionary, ship: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary, persistent: bool, cells: Dictionary, isolated: Dictionary, reach: float) -> void:
+static func _separate_hull(state: Dictionary, graph: Dictionary, ship: Dictionary, previous: Dictionary, dt: float, repair_parked: Dictionary, cells: Dictionary, reach: float, batch: STEP_FRAME.SeparationBatch, slot: int) -> void:
 	var id: int = int(ship["id"])
-	if not previous.has(id):
-		return
-	if persistent and _isolated_spatial_cell(previous[id], reach, cells, isolated):
+	if batch != null:
+		if batch.present[slot] == 0 or batch.neighbors(slot).size() <= 1:
+			return
+	elif not previous.has(id):
 		return
 	if repair_parked.has(id) or _stop_waiting(state, ship) or bool(ship.get("retreating", false)) or _salvage_active(ship):
 		return
@@ -10374,7 +10388,7 @@ static func _separate_hull(state: Dictionary, graph: Dictionary, ship: Dictionar
 	var planned: Vector2 = ship["position"]
 	var held: bool = bool(ship.get("holding", false))
 	var local_moving: bool = ship.has("local_move_target")
-	var force: Vector2 = _separation_force(id, before, cells, previous, reach)
+	var force: Vector2 = batch.force(slot, EPS) if batch != null else _separation_force(id, before, cells, previous, reach)
 	if force.is_zero_approx():
 		return
 	var movement: Vector2 = planned - before
@@ -11428,11 +11442,13 @@ static func _step_settle_movement(state: Dictionary, frame: STEP_FRAME, dt: floa
 	var fuse_spatial: bool = frame.persistent_avoidance_enabled and dt > 0.0
 	if fuse_spatial:
 		_begin_contact_indexes(state)
-		_separation_index.begin()
+		_separation_batch.begin(state["ships"].size(), SHIP_SEPARATION_RADIUS)
 	# Resolve wandering after every Harvester has had a chance to repair.
 	# This avoids dependence on whether the recipient precedes its healer
 	# in the fleet array. Explicit movement and other work remain legal.
-	for ship in state["ships"]:
+	var ships: Array = state["ships"]
+	for slot in range(ships.size()):
+		var ship: Dictionary = ships[slot]
 		var id: int = int(ship["id"])
 		if frame.repaired_hulls.has(id) and _is_idle_ship(ship) and not _unit_order_running(ship) and ship["position"] == frame.combat_positions.get(id):
 			repair_parked[id] = true
@@ -11451,18 +11467,17 @@ static func _step_settle_movement(state: Dictionary, frame: STEP_FRAME, dt: floa
 		# Hull work (including warp and removal) is complete. The original
 		# separation snapshot uses these surviving IDs and frozen positions.
 		if fuse_spatial and frame.combat_positions.has(id):
-			var point: Vector2 = frame.combat_positions[id]
-			var cell := Vector2i(floori(point.x / SHIP_SEPARATION_RADIUS), floori(point.y / SHIP_SEPARATION_RADIUS))
-			_separation_index.append(cell, id)
+			_separation_batch.append(slot, id, frame.combat_positions[id])
 	# Expired cooldowns read as zero before and after erasure. Settlement
 	# has no cross-hull dependency on these keys; retire only due IDs here,
 	# before separation and contact use the settled state.
 	if frame.deadline_schedule_enabled:
 		_expire_auto_cooldowns(state)
 	_end_ship_avoidance()
-	var prepared_cells: Variant = _separation_index.finish() if fuse_spatial else null
+	if fuse_spatial:
+		_separation_batch.finish()
 	var contact_snapshot: Dictionary = {}
-	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked, frame.persistent_avoidance_enabled, prepared_cells, contact_snapshot if fuse_spatial else null)
+	_separate_ships(state, frame.graph, frame.combat_positions, dt, repair_parked, frame.persistent_avoidance_enabled, null, contact_snapshot if fuse_spatial else null, _separation_batch if fuse_spatial else null)
 	if dt > 0.0:
 		_resolve_ship_contacts(state, frame.graph, frame.combat_positions, dt, repair_parked, frame.persistent_avoidance_enabled, contact_snapshot)
 

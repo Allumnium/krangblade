@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.97.88: Reuse packed pre-movement IDs and positions, roster-slot cell buckets and ordered packed neighborhood slots for soft separation; stage in the existing settlement loop, preserve missing-position guards, exact repulsion and collision constraints, and retain independent dictionary reference. Linux headless swarm median 649.367 → 494.189 ms across v0.97.87–88; dispersed 981.321 → 903.210 ms with variable tails. No cadence, gameplay or wire changes; authoritative packed storage and native work remain open.
+
 - v0.97.87: Reuse packed contact-pair buffers and ordered cell neighborhoods; stage exact current/prior poses during separation, commit via existing movement constraints. Build civilian threat snapshots only with civilian readers, service references only for active explicit target IDs (full view for Harvesters), and exploration occupancy only when an eligible scout needs it. Preserve simulation phase order, tie-breaking and wire schema. Linux Godot 4.7.2 import, economy regression, battle replay parity, authority worker, solo and two-peer synchronous/threaded ENet pass; ObjectDB teardown warnings remain. This is a derived batch, not yet an authoritative packed unit store.
 
 - v0.97.75: Set project-wide rendering cap to 120 FPS using application/run/max_fps and disable VSync so the monitor refresh rate does not impose a lower cap during performance testing. Keep physics/simulation cadence, threaded authority and explicit CI benchmark CLI frame limits unchanged. Runtime FPS not measured.
