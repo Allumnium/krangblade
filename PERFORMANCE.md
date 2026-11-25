@@ -180,3 +180,16 @@ Same Linux container, Godot 4.7.2, seed 827 and benchmark options as the precedi
 | dispersed | 1,000 | 5x | 20 | 938.362 | 1029.791 | 379.314 | 20/20 |
 
 Swarm keeps 2,000 hulls and dispersed ends with 977, matching prior samples. Swarm median is 4.9% below v0.97.88 and 27.6% below v0.97.86; dispersed median is 3.9% higher than v0.97.88 despite a lower p95. No graphical FPS claim; both workloads miss the deadline. Packed steering slots are a derived snapshot, not authoritative state.
+
+
+## Grouped vision coverage (v0.97.90)
+
+Local Linux Godot 4.7.2, supplied v0.97.86 checkout plus the isolated vision patch. Compare original row-span kernel and grouped kernel in the same process, 15 alternating runs, seed 827, 2,000 randomly sampled source coordinates with 1000/1500 world-unit radii, duplicate cells collapsed. The dense case samples integer cells from [-30,30] on both axes, sparse [-200,200]. Exact mask equality verified.
+
+| Workload | Unique cells | Coverage cells | Before median ms | After median ms |
+| --- | ---: | ---: | ---: | ---: |
+| Dense source union | 1537 | 8767 | 22.194 | 6.940 |
+| Sparse source union | 1990 | 177979 | 57.657 | 54.267 |
+| Stationary 2,000-fighter full vision (grouped uncached vs cached) | — | — | 9.931 | 6.040 |
+
+The cache sample uses generated Grid map, two empires, 2,000 same-owner fighters sampled in a 4800×4800 world-unit square, advancing elapsed 0.1 per call. Structures remain live. The isolated patch passes focused coverage/diplomacy/removal/alias parity, full economy, worker and solo regression on the supplied older checkout; exact integrated main, ENet and graphics not rerun. No FPS or full-simulation throughput claim.

@@ -386,23 +386,53 @@ static func _stamp_vision(cells: Dictionary, point: Vector2, radius: float) -> v
 # cell centers are exact, so each radius has one row-span shape. Overlapping
 # spans are merged per row instead of probing every disk cell.
 static func _stamp_cell_sources(cells: Dictionary, sources: Dictionary) -> void:
-	var shapes: Dictionary = {}
-	var rows: Dictionary = {}
+	var source_rows: Dictionary = {}
+	# A run of adjacent equal-radius source cells expands into one interval
+	# per disk row, exactly the union of the individual source intervals.
 	for source: Vector2i in sources:
 		var radius: float = float(sources[source])
-		var shape: PackedInt32Array = shapes.get(radius, PackedInt32Array())
-		if shape.is_empty():
-			shape = _vision_row_spans(radius)
-			shapes[radius] = shape
+		if not source_rows.has(radius):
+			source_rows[radius] = {}
+		var group: Dictionary = source_rows[radius]
+		if not group.has(source.y):
+			group[source.y] = []
+		group[source.y].append(source.x)
+	var rows: Dictionary = {}
+	for radius in source_rows:
+		var shape: PackedInt32Array = _vision_row_spans(float(radius))
 		var reach: int = (shape.size() - 1) / 2
-		for row in range(shape.size()):
-			var half: int = shape[row]
-			if half < 0:
-				continue
-			var y: int = source.y - reach + row
-			if not rows.has(y):
-				rows[y] = []
-			rows[y].append(Vector2i(source.x - half, source.x + half))
+		for y in source_rows[radius]:
+			var xs: Array = source_rows[radius][y]
+			xs.sort()
+			# Merge adjacent centers once, before expanding by each half-width.
+			var runs: Array[Vector2i] = []
+			var first: int = xs[0]
+			var last: int = first
+			for index in range(1, xs.size()):
+				var x: int = xs[index]
+				if x > last + 1:
+					runs.append(Vector2i(first, last))
+					first = x
+				last = x
+			runs.append(Vector2i(first, last))
+			for row in range(shape.size()):
+				var half: int = shape[row]
+				if half < 0:
+					continue
+				var target_y: int = int(y) - reach + row
+				if not rows.has(target_y):
+					rows[target_y] = []
+				var spans: Array = rows[target_y]
+				# Gaps bridged by this disk row can also be merged immediately.
+				var start: int = runs[0].x - half
+				var end: int = runs[0].y + half
+				for index in range(1, runs.size()):
+					var next_start: int = runs[index].x - half
+					if next_start > end + 1:
+						spans.append(Vector2i(start, end))
+						start = next_start
+					end = runs[index].y + half
+				spans.append(Vector2i(start, end))
 	for y: int in rows:
 		var spans: Array = rows[y]
 		spans.sort()
@@ -440,7 +470,10 @@ static func _shares_group_vision(state: Dictionary, viewer: int, source: int) ->
 		return diplomacy_allows(state, viewer, source, "vision")
 	return viewer > 0 and viewer == source
 
-static func team_vision(state: Dictionary, team: int) -> Dictionary:
+# Optional client-owned cache stores only ship-cell coverage, not structures
+# or live visibility decisions. Rebuild the exact source map every call so
+# movement, owner/sensor changes and removals cannot leave stale coverage.
+static func team_vision(state: Dictionary, team: int, ship_cache: Variant = null) -> Dictionary:
 	var cells: Dictionary = {}
 	if team <= 0:
 		return cells
@@ -461,7 +494,14 @@ static func team_vision(state: Dictionary, team: int) -> Dictionary:
 			factor = float(owner_sensor[owner])
 		var cell: Vector2i = vision_cell(ship["position"])
 		sources[cell] = maxf(float(sources.get(cell, 0.0)), sight_radius(kind) * factor)
-	_stamp_cell_sources(cells, sources)
+	if ship_cache != null and ship_cache.get("sources") == sources and ship_cache.has("cells"):
+		cells = ship_cache["cells"].duplicate()
+	else:
+		_stamp_cell_sources(cells, sources)
+		if ship_cache != null:
+			ship_cache["sources"] = sources
+			# Structure sight mutates the result below; cache only the ship mask.
+			ship_cache["cells"] = cells.duplicate()
 	var elapsed: float = float(state["elapsed"])
 	var base_radius: float = sector_base_radius(state["map"])
 	for index in range(state["planets"].size()):
