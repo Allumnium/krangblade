@@ -88,6 +88,8 @@ The contact pass now reuses `StepFrame.ContactBatch`: dense roster-ordered IDs, 
 
 Equal-radius adjacent ship sensor source cells are grouped into horizontal runs before disk row expansion. The exact union remains the same. `FogOfWar` owns an optional detached ship-only coverage cache, keyed by the freshly computed source-cell/radius dictionary; all structure sight and current sharing/sensor eligibility remain live. It clears on empty state/map identity change and never serializes or shares with authority. Callers without the optional cache compute the same coverage.
 
+Voronoi `sector_geometry.gd` builds a bounded immutable nearest-region candidate grid for maps with at least 32 sites. Each bin retains ordered site IDs whose minimum distance to an expanded query rectangle can compete with the farthest-corner bound of a known candidate. Conservative margins keep boundary candidates. `region_at` still uses exact squared-distance comparison in original ID order; small/unindexable geometry uses the linear reference. Polygon clipping, borders, links, segment checks and map extent remain unchanged. The index is derived topology, not serialized state.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

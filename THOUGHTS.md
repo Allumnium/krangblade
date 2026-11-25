@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.91: Voronoi region lookup now scans 14–18 candidates rather than roughly 300–370 sites in tested eight-player maps. Conservative exact-query bounds preserve ties and out-of-map behavior; the grid has a one-time ~14 ms construction cost on Grid. Full 2,000-ship influence median 44→9.7 ms in isolated local fixture; verify representative live host/client publication before FPS claims. Current upload is v0.97.86, so later movement changes are not covered by the isolated patch validation.
+
 - v0.97.90: Grouped vision rows show a significant isolated dense-mask speedup, little sparse benefit, and stationary ship-mask reuse. These are not measured frame or simulation throughput results. Local upload is v0.97.86; tests of this isolated patch do not cover the integrated v0.97.89 movement migrations. Native dependency still unavailable; ObjectDB exit warning remains. Consider an exact spatial candidate index for Voronoi region queries in warning/influence paths, but profile and preserve ties.
 
 - v0.97.89: Packed avoidance completes the three frozen movement geometry buffers (steering, soft separation, contacts), removing nested steering entries from production. Swarm improves 494→470 ms; dispersed median worsens 903→938 ms while p95 improves 1318→1030 ms. No reliable across-workload improvement or acceptance claim. Next migrate whole movement workloads into native code; Godot-cpp checkout and SCons are absent and local download DNS fails. Do not mistake the three derived batches for canonical packed unit storage.

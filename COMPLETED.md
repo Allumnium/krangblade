@@ -2,6 +2,7 @@
 
 ## Performance
 
+- 2026-11-25 — v0.97.91: Immutable indexed nearest-region queries. Local exact comparison across all four layouts, focused region and territory behavior tests and authority worker pass on supplied checkout plus isolated patches. Complete territory influence 2,000 ships median 9.723 ms vs 44.022 ms. Integrated validation and acceptance remain open.
 - 2026-11-25 — v0.97.90: Grouped sensor rows and detached ship-only vision reuse; exact coverage and cache tests, economy suite, worker and solo pass on supplied v0.97.86 checkout plus isolated patch. Dense kernel median 6.940 ms vs 22.194 ms; integrated validation and graphical acceptance remain open.
 - 2026-11-25 — v0.97.89: Packed steering candidate slots replace nested production entries. Local Godot import, focused steering/corridor/contact parity, full economy, identical battle checkpoints, authority worker, solo and two-peer threaded ENet passed. ObjectDB exit warnings on solo/client remain. Swarm median 470 ms; dispersed 938 ms with lower p95 and worse median than v0.97.88. Acceptance remains open.
 - 2026-11-25 — v0.97.88: Packed soft separation with ordered dense slots, exact force/reference comparisons, full economy regression, identical 50/100-tick battle replay, snapshot codec/construction/lobby, authority worker, solo and 2/3-peer threaded ENet checks passed locally. ObjectDB exit warnings and a three-peer host ENet channel error at teardown remain. Swarm median 494 ms; acceptance remains open.
