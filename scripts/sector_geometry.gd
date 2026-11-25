@@ -69,7 +69,7 @@ static func build(points: Array, edges: Array, layout: Dictionary, extent: Vecto
 				if not linked.has(pair):
 					linked[pair] = true
 					links.append(pair)
-	return {"sites": sites, "polygons": polygons, "bounds": bounds, "borders": borders, "links": links, "extent": extent}
+	return {"sites": sites, "polygons": polygons, "bounds": bounds, "borders": borders, "links": links, "extent": extent, "region_query_grid": _build_region_query_grid(sites, extent)}
 
 static func _clip(polygon: PackedVector2Array, midpoint: Vector2, normal: Vector2) -> PackedVector2Array:
 	var result := PackedVector2Array()
@@ -93,13 +93,70 @@ static func _append_distinct(polygon: PackedVector2Array, point: Vector2) -> voi
 	if polygon.is_empty() or polygon[-1].distance_squared_to(point) > EPS * EPS:
 		polygon.append(point)
 
+# Conservative candidate bins for the exact nearest-site query. Use an
+# expanded rectangle and squared-distance margin to keep borderline sites;
+# candidate order remains original site order (the reference tie-break).
+static func _build_region_query_grid(sites: Array, extent: Vector2) -> Dictionary:
+	if sites.size() < 32 or not extent.is_finite() or extent.x <= 0.0 or extent.y <= 0.0:
+		return {}
+	for site in sites:
+		if not site.is_finite():
+			return {}
+	var resolution: int = clampi(ceili(sqrt(float(sites.size()))), 8, 32)
+	var width: Vector2 = extent / float(resolution)
+	if width.x <= 0.0 or width.y <= 0.0:
+		return {}
+	var padding: float = maxf(1.0, maxf(extent.x, extent.y) * 0.0001)
+	var bins: Array[PackedInt32Array] = []
+	for y in range(resolution):
+		for x in range(resolution):
+			var low: Vector2 = Vector2(x, y) * width - Vector2.ONE * padding
+			var high: Vector2 = Vector2(x + 1, y + 1) * width + Vector2.ONE * padding
+			var center: Vector2 = (low + high) * 0.5
+			var nearest: int = _nearest_site(sites, center)
+			if nearest < 0:
+				return {}
+			var site: Vector2 = sites[nearest]
+			var farthest := Vector2(maxf(absf(site.x - low.x), absf(site.x - high.x)), maxf(absf(site.y - low.y), absf(site.y - high.y)))
+			var upper: float = farthest.length_squared()
+			if not is_finite(upper):
+				return {}
+			var margin: float = maxf(1.0, upper * 0.0001)
+			var candidates := PackedInt32Array()
+			for index in range(sites.size()):
+				var other: Vector2 = sites[index]
+				if other.distance_squared_to(other.clamp(low, high)) <= upper + margin:
+					candidates.append(index)
+			if candidates.is_empty():
+				return {}
+			bins.append(candidates)
+	return {"resolution": resolution, "width": width, "bins": bins}
+
+static func _nearest_site(sites: Array, point: Vector2) -> int:
+	var best: float = INF
+	var result: int = -1
+	for i in range(sites.size()):
+		var distance: float = point.distance_squared_to(sites[i])
+		if distance < best:
+			best = distance
+			result = i
+	return result
+
 static func region_at(geometry: Dictionary, point: Vector2) -> int:
 	if not point.is_finite() or not Rect2(Vector2.ZERO, geometry["extent"]).has_point(point):
 		return -1
+	var sites: Array = geometry["sites"]
+	var grid: Dictionary = geometry.get("region_query_grid", {})
+	if grid.is_empty():
+		return _nearest_site(sites, point)
+	var resolution: int = grid["resolution"]
+	var width: Vector2 = grid["width"]
+	var x: int = clampi(floori(point.x / width.x), 0, resolution - 1)
+	var y: int = clampi(floori(point.y / width.y), 0, resolution - 1)
+	var candidates: PackedInt32Array = grid["bins"][y * resolution + x]
 	var best: float = INF
 	var result: int = -1
-	var sites: Array = geometry["sites"]
-	for i in range(sites.size()):
+	for i in candidates:
 		var distance: float = point.distance_squared_to(sites[i])
 		if distance < best:
 			best = distance

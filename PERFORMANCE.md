@@ -193,3 +193,17 @@ Local Linux Godot 4.7.2, supplied v0.97.86 checkout plus the isolated vision pat
 | Stationary 2,000-fighter full vision (grouped uncached vs cached) | — | — | 9.931 | 6.040 |
 
 The cache sample uses generated Grid map, two empires, 2,000 same-owner fighters sampled in a 4800×4800 world-unit square, advancing elapsed 0.1 per call. Structures remain live. The isolated patch passes focused coverage/diplomacy/removal/alias parity, full economy, worker and solo regression on the supplied older checkout; exact integrated main, ENet and graphics not rerun. No FPS or full-simulation throughput claim.
+
+
+## Indexed Voronoi region queries (v0.97.91)
+
+Godot 4.7.2 Linux, supplied v0.97.86 checkout with isolated vision/region patches, seed 827, eight-player generated maps. Each layout compares the indexed path with the original linear query on identical uniformly sampled positions, bin boundaries ±0.001 and adjacent site midpoints. All 85,276 queries match. One sequential timing of each workload; exact original site order/tie handling retained.
+
+| Layout | Sites | Queries | Linear ms | Indexed ms | Mean candidates/bin |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Grid | 315 | 21286 | 420.472 | 36.573 | 14.04 |
+| Radial | 288 | 21154 | 392.908 | 43.047 | 18.16 |
+| Hex Grid | 368 | 21567 | 499.767 | 40.163 | 15.49 |
+| Scramble | 298 | 21269 | 391.068 | 42.995 | 18.29 |
+
+Grid index construction median of five runs 14.035 ms (whole geometry including index 266.592 ms in one separate run). Complete territory_influence on 2,000 synthetic fighters uniformly distributed across the Grid map, eight owners, fresh region cache each call, 15 alternating reference/indexed samples: median 44.022→9.723 ms; exact influence equality. These are not whole-simulation or graphical frame timings. Focused region/territory tests and worker regression pass on isolated local checkout. Main integration, ENet and graphical acceptance remain open.

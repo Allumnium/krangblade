@@ -2880,6 +2880,11 @@ func _test_mining_selection() -> void:
 	print("PASS: mining selection preserves access and rock ties, preferred rock, live depletion and storage wakeups")
 
 func _initialize() -> void:
+	if OS.get_cmdline_user_args().has("--region-index-only"):
+		_test_region_query_index()
+		_test_territory_influence()
+		quit()
+		return
 	_test_demand_driven_movement_indexes()
 	if OS.get_cmdline_user_args().has("--performance-migration-only"):
 		_test_persistent_avoidance_index()
@@ -2979,6 +2984,7 @@ func _initialize() -> void:
 	_test_follow_order()
 	_test_blaster_bursts()
 	_test_conquest()
+	_test_region_query_index()
 	_test_territory_influence()
 	_test_conquest_resistance_and_evacuation()
 	_test_soft_separation()
@@ -6089,6 +6095,51 @@ func _test_blaster_bursts() -> void:
 	assert(ECON.blaster_count("cruiser") == 3 and ECON.blaster_count("destroyer") == 4)
 	assert(ECON.armed({"kind": "scout"}) and ECON.capital_lasers("fighter") == 0)
 	print("PASS: blaster mounts, four-shot burst and half-second pause")
+
+func _test_region_query_index() -> void:
+	var geo = ECON.SECTOR_GEOMETRY
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 827
+	var roster: Dictionary = {}
+	var ids: Array[int] = []
+	for id in range(1, 9):
+		roster[id] = {"team": id}
+		ids.append(id)
+	for layout in ["Grid", "Radial", "Hex Grid", "Scramble"]:
+		var state: Dictionary = ECON.create(MAP.generate(827, 8, layout), roster, ids, false)
+		var geometry: Dictionary = ECON.sector_geometry(ECON.military_graph(state))
+		var grid: Dictionary = geometry["region_query_grid"]
+		assert(not grid.is_empty())
+		var reference: Dictionary = geometry.duplicate()
+		reference.erase("region_query_grid")
+		var extent: Vector2 = geometry["extent"]
+		var width: Vector2 = grid["width"]
+		var sites: Array = geometry["sites"]
+		for sample in range(1000):
+			var point := Vector2(rng.randf_range(0.0, extent.x), rng.randf_range(0.0, extent.y))
+			assert(geo.region_at(geometry, point) == geo.region_at(reference, point))
+		for x in range(grid["resolution"]):
+			for y in range(grid["resolution"]):
+				var boundary: Vector2 = Vector2(x, y) * width
+				for offset in [Vector2.ZERO, Vector2(0.001, -0.001), Vector2(-0.001, 0.001)]:
+					assert(geo.region_at(geometry, boundary + offset) == geo.region_at(reference, boundary + offset))
+		for i in range(sites.size() - 1):
+			var midpoint: Vector2 = (sites[i] + sites[i + 1]) * 0.5
+			assert(geo.region_at(geometry, midpoint) == geo.region_at(reference, midpoint))
+		for point in [Vector2.INF, Vector2(-1, 0), extent, Vector2(extent.x, 0.0)]:
+			assert(geo.region_at(geometry, point) == -1)
+	# Exact nearest-distance ties, including coincident sites, retain the
+	# lowest original ID even when the index prunes distant candidates.
+	var sites: Array[Vector2] = [Vector2(100, 100), Vector2(300, 100), Vector2(100, 100)]
+	for i in range(32):
+		sites.append(Vector2(1000 + i * 100, 1000))
+	var extent := Vector2(5000, 2000)
+	var geometry: Dictionary = {"sites": sites, "extent": extent, "region_query_grid": geo._build_region_query_grid(sites, extent)}
+	assert(not geometry["region_query_grid"].is_empty())
+	assert(geo.region_at(geometry, Vector2(200, 100)) == 0)
+	assert(geo.region_at(geometry, Vector2(100, 100)) == 0)
+	assert(geo.region_at(geometry, Vector2(200.01, 100)) == 1)
+	print("PASS: indexed nearest Voronoi sites, exact ties, grid boundaries and out-of-map queries")
 
 func _test_territory_influence() -> void:
 	var map: Dictionary = {"seed": 42, "size": Vector2(10000, 5000), "points": [Vector2(500, 500), Vector2(2500, 500), Vector2(6500, 500), Vector2(8500, 500)], "edges": [[0, 1], [1, 2], [2, 3]], "fields": []}

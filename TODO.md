@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.91: Immutable nearest-region candidate bins improve territory influence on moving fleets; local 2,000-ship full influence median 44.022→9.723 ms. Focused exact region/territory parity and worker pass; integrated main/ENet and live graphical/throughput acceptance still required. Retain native and authoritative unit-storage work as priorities.
+
 - [ ] v0.97.90: Exact grouped fog sensor rows and detached ship-only coverage cache reduce publication work; targeted dense kernel 22.194→6.940 ms. Full combined render, current-main integrated regression/ENet and acceptance remain open. Continue native batch integration, authoritative packed fields and compact publication; avoid additional minor tweaks without profiling.
 
 - [ ] v0.97.89: Packed steering candidate slots replace the production nested avoidance arrays. Ordered cap, nearest tie, exact steering and corridor parity pass. Next native batch integration with threaded parity and persistent canonical hot fields; acceptance remains open (swarm median 470 ms, dispersed 938 ms; see PERFORMANCE.md).
