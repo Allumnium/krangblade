@@ -168,3 +168,15 @@ Godot 4.7.2, Linux container, Intel Xeon Platinum 8573C (5 logical processors ex
 | dispersed | 1,000 | 5x | 20 | 0.97.88 | 903.210 | 1317.648 | 347.357 | 20/20 |
 
 All 2,000 swarm hulls survived; all dispersed samples ended with 977 hulls. Swarm median falls 24% across both changes, movement median 25%. Dispersed medians improve 8% across both changes but tail timings are variable and the second pass alone did not improve the median. Neither workload achieves the 100 ms batch budget; no FPS claim. Packed contact and separation are reusable phase-local computational batches, not authoritative storage.
+
+
+## Packed steering candidates (v0.97.89)
+
+Same Linux container, Godot 4.7.2, seed 827 and benchmark options as the preceding section. Sequential headless runs; shared-container timing variance remains. Full economy regression and original battle replay hashes at 50/100 ticks match.
+
+| Scenario | Ships | Speed | Batches | p50 ms | p95 ms | Other movement p50 ms | Misses |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| swarm | 2,000 | 1x | 40 | 470.074 | 526.333 | 311.504 | 40/40 |
+| dispersed | 1,000 | 5x | 20 | 938.362 | 1029.791 | 379.314 | 20/20 |
+
+Swarm keeps 2,000 hulls and dispersed ends with 977, matching prior samples. Swarm median is 4.9% below v0.97.88 and 27.6% below v0.97.86; dispersed median is 3.9% higher than v0.97.88 despite a lower p95. No graphical FPS claim; both workloads miss the deadline. Packed steering slots are a derived snapshot, not authoritative state.

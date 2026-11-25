@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.97.89: Packed steering candidate slots replace the production nested avoidance arrays. Ordered cap, nearest tie, exact steering and corridor parity pass. Next native batch integration with threaded parity and persistent canonical hot fields; acceptance remains open (swarm median 470 ms, dispersed 938 ms; see PERFORMANCE.md).
+
 - [ ] v0.97.88 packed movement migration: contact and soft separation now consume reused dense ID/pose buffers; exact force/reference checks. Next move whole ordered movement geometry workloads into native kernels and integrate with threaded authority; establish persistent canonical hot-field lifecycle. See PERFORMANCE.md for Linux comparison (swarm median 494 ms, dispersed 903 ms; targets unmet).
 
 - [ ] Approved structural migration sequence: authoritative packed hot unit fields (stable ID/slot lifecycle and single writer); native batch movement/collision/formations with threaded compatibility and parity; activity-driven combat and subsystem rates; revision-based publication; persistent GPU buffers; measured multicore work. v0.97.87 completes a reusable contact batch and demand-driven threat/service/exploration indexes, not authoritative packed storage. Keep 2,000 ships at 1x and 1,000 at 5x at sustained 10 batches/s and 60 FPS as acceptance targets; add representative AI, combat, logistics and multiplayer load. No rule changes without explicit approval.

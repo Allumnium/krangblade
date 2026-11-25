@@ -945,8 +945,6 @@ func _test_persistent_avoidance_index() -> void:
 	for id in range(100, 130):
 		positions[id] = Vector2(60, 10)
 	var cell := Vector2i.ZERO
-	var prior_bucket: Array = []
-	var prior_neighbors: Array = []
 	for tick in range(9):
 		match tick:
 			1:
@@ -967,37 +965,38 @@ func _test_persistent_avoidance_index() -> void:
 				positions = {11: Vector2(-30, -30), 22: Vector2(0, 0)}
 		# Independent complete rebuild, with exact candidate order and pose.
 		ECON._begin_ship_avoidance(positions)
-		var reference_cells: Dictionary = ECON.avoidance_cells.duplicate(true)
 		var expected: Dictionary = {}
+		var steering: Array[Vector2] = []
+		var corridors: Array[bool] = []
+		var craft: Dictionary = {"id": 11, "position": Vector2(0, 0)}
+		var targets: Array[Vector2] = [Vector2(500, 0), Vector2(-500, 0), Vector2(30, 0), Vector2(100, 100), Vector2(-100, -100)]
 		for x in range(-3, 5):
 			for y in range(-2, 3):
 				var query := Vector2i(x, y)
 				expected[query] = ECON._avoidance_neighborhood(query).duplicate(true)
+		for target in targets:
+			steering.append(ECON._avoidance_direction(craft, target, 8.0))
+			corridors.append(ECON._direct_hull_corridor_clear(craft, target))
 		ECON._begin_persistent_ship_avoidance(state, positions)
-		assert(ECON.avoidance_cells == reference_cells)
 		for query in expected:
-			assert(ECON._avoidance_neighborhood(query) == expected[query])
-		var neighbors: Array = ECON._avoidance_neighborhood(cell)
-		if tick == 0:
-			prior_bucket = ECON.avoidance_cells[cell]
-			prior_neighbors = neighbors
-		elif tick == 1:
-			assert(is_same(prior_bucket, ECON.avoidance_cells[cell]))
-			assert(is_same(prior_neighbors, neighbors))
-			assert(neighbors[1] == [11, Vector2(31, 1)])
-		elif tick == 2:
-			assert(not is_same(prior_neighbors, neighbors))
+			var actual: Array = []
+			for slot in ECON._avoidance_batch.neighbors(query):
+				actual.append([ECON._avoidance_batch.ids[slot], ECON._avoidance_batch.positions[slot]])
+			assert(actual == expected[query])
+		for i in range(targets.size()):
+			assert(ECON._avoidance_direction(craft, targets[i], 8.0) == steering[i])
+			assert(ECON._direct_hull_corridor_clear(craft, targets[i]) == corridors[i])
 		ECON._end_ship_avoidance()
-		assert(ECON.avoidance_cells.is_empty() and ECON._avoidance_neighborhoods.is_empty())
+		assert(not ECON._packed_avoidance_active and ECON.avoidance_cells.is_empty())
 	# Replacing the authority/roster must never expose cached old candidates.
 	state["ships"] = []
 	ECON._begin_persistent_ship_avoidance(state, {99: Vector2(10, 0)})
-	assert(ECON._avoidance_neighborhood(cell) == [[99, Vector2(10, 0)]])
-	ECON._end_ship_avoidance()
+	assert(ECON._avoidance_batch.clear_corridor(cell, 99))
+	assert(not ECON._avoidance_batch.clear_corridor(cell, 11))
 	ECON._begin_persistent_ship_avoidance({"ships": []}, {})
-	assert(ECON._avoidance_neighborhood(cell).is_empty())
+	assert(ECON._avoidance_batch.neighbors(cell).is_empty())
 	ECON._end_ship_avoidance()
-	print("PASS: persistent movement buckets, ordered capped candidates, live poses and snapshot lifecycle")
+	print("PASS: packed movement buckets, ordered capped candidates, steering and snapshot lifecycle")
 
 func _test_ship_size_classes() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1), {1: {"team": 1}}, [1], false)
@@ -2883,6 +2882,7 @@ func _test_mining_selection() -> void:
 func _initialize() -> void:
 	_test_demand_driven_movement_indexes()
 	if OS.get_cmdline_user_args().has("--performance-migration-only"):
+		_test_persistent_avoidance_index()
 		_test_persistent_contact_indexes()
 		_test_combat_activity_fast_paths()
 		quit()

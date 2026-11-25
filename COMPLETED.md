@@ -2,6 +2,7 @@
 
 ## Performance
 
+- 2026-11-25 — v0.97.89: Packed steering candidate slots replace nested production entries. Local Godot import, focused steering/corridor/contact parity, full economy, identical battle checkpoints, authority worker, solo and two-peer threaded ENet passed. ObjectDB exit warnings on solo/client remain. Swarm median 470 ms; dispersed 938 ms with lower p95 and worse median than v0.97.88. Acceptance remains open.
 - 2026-11-25 — v0.97.88: Packed soft separation with ordered dense slots, exact force/reference comparisons, full economy regression, identical 50/100-tick battle replay, snapshot codec/construction/lobby, authority worker, solo and 2/3-peer threaded ENet checks passed locally. ObjectDB exit warnings and a three-peer host ENet channel error at teardown remain. Swarm median 494 ms; acceptance remains open.
 - 2026-11-25 — v0.97.87: Packed contact accumulation and demand-driven service/threat/exploration indexes; Linux Godot 4.7.2 economy and focused regressions, original battle replay equality, worker, solo, two-peer synchronous/threaded ENet passed. Teardown warnings remain; comparative throughput and structural acceptance remain open.
 - 2026-11-24 — v0.97.86: Profiled per-phase simulation cost and replaced hot literal kind/HP containers with constants. Live 2,000-ship 1x 3.48 → 3.56 batches/s, 1,000-ship 5x 1.55 → 1.82; economy rules regression passes. Acceptance remains open in TODO.md.
