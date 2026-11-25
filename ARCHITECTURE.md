@@ -84,6 +84,8 @@ The contact pass now reuses `StepFrame.ContactBatch`: dense roster-ordered IDs, 
 
 `StepFrame.SeparationBatch` now retains ordered roster-slot buckets, packed stable IDs and frozen previous positions. The settlement loop stages survivors and marks missing prior poses absent; neighborhood slots preserve x/y and roster traversal. The force kernel reads only this frozen batch, and EconomyRules still owns eligibility, clipping, movement commit and heading updates. Independent dictionary reference remains for parity. Neither movement batch is canonical ship storage.
 
+`StepFrame.AvoidanceBatch` replaces the production nested movement-avoidance entries with packed IDs/positions and ordered capped slot neighborhoods. It stages from the original frozen pre-movement positions; the nearest-blocker kernel uses no hull dictionaries and preserves exact tie, endpoint, hold and corridor checks. The old full dictionary rebuild remains an independent reference. The batch is derived, detached at settlement, and never serialized.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

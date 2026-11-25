@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.89: Packed avoidance completes the three frozen movement geometry buffers (steering, soft separation, contacts), removing nested steering entries from production. Swarm improves 494→470 ms; dispersed median worsens 903→938 ms while p95 improves 1318→1030 ms. No reliable across-workload improvement or acceptance claim. Next migrate whole movement workloads into native code; Godot-cpp checkout and SCons are absent and local download DNS fails. Do not mistake the three derived batches for canonical packed unit storage.
+
 - v0.97.88: Swarm headless median falls to 494 ms on local Linux vs 649 ms at v0.97.86, but all samples miss the batch deadline. Dispersed 5x tail variance prevents reliable isolated speedup claims. Packed separation uses frozen slots, not canonical positions. Next high-impact step is native contact/separation/avoidance with threaded parity; local pinned godot-cpp and SCons/build dependency absent. Continue toward single authoritative hot-field storage rather than adding redundant permanent writable copies.
 
 - v0.97.87: Packed contact staging is a useful kernel boundary but does not change canonical hull dictionaries. Next investigate packed soft separation and the dominant movement/formation costs; do not add a second writable ship state. Local Godot works from user-provided Linux executable and matching checkout. Native compilation requires godot-cpp; graphical measurements on this container are not comparable to the Windows GPU baseline. Investigate existing ObjectDB exit warnings separately.

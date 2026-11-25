@@ -311,3 +311,73 @@ class SeparationBatch:
 				direction = offset / distance
 			result += direction * (1.0 - distance / _reach)
 		return result
+
+# Frozen, capped steering candidates. The packed arrays are indexed by
+# snapshot insertion order, not by stable entity ID. Rebuild membership at
+# the original phase boundary and cache ordered neighbor slots per cell.
+class AvoidanceBatch:
+	var ids := PackedInt64Array()
+	var positions := PackedVector2Array()
+	var _index := OrderedHullBuckets.new()
+	var _cells: Dictionary = {}
+	var _neighborhoods: Dictionary = {}
+
+	func refresh(source: Dictionary, width: float, cap: int) -> void:
+		ids.resize(source.size())
+		positions.resize(source.size())
+		_index.begin()
+		_neighborhoods.clear()
+		var counts: Dictionary = {}
+		var slot: int = 0
+		for id in source:
+			var point: Vector2 = source[id]
+			var cell := Vector2i(floori(point.x / width), floori(point.y / width))
+			var count: int = int(counts.get(cell, 0))
+			if count >= cap:
+				continue
+			counts[cell] = count + 1
+			ids[slot] = int(id)
+			positions[slot] = point
+			_index.append(cell, slot)
+			slot += 1
+		_cells = _index.finish()
+
+	func neighbors(cell: Vector2i) -> PackedInt32Array:
+		if _neighborhoods.has(cell):
+			return _neighborhoods[cell]
+		var slots := PackedInt32Array()
+		for x in range(-1, 2):
+			for y in range(-1, 2):
+				var key: Vector2i = cell + Vector2i(x, y)
+				if _cells.has(key):
+					for slot in _cells[key]:
+						slots.append(int(slot))
+		if _neighborhoods.size() < 4096:
+			_neighborhoods[cell] = slots
+		return slots
+
+	func clear_corridor(cell: Vector2i, id: int) -> bool:
+		var slots: PackedInt32Array = neighbors(cell)
+		return slots.is_empty() or (slots.size() == 1 and ids[slots[0]] == id)
+
+	# Preserve first nearest tie and shared-endpoint exemptions. Reject a
+	# candidate that cannot beat the current forward distance before doing
+	# the cross product and endpoint distance calculation.
+	func blocker(cell: Vector2i, id: int, before: Vector2, target: Vector2, axis: Vector2, lookahead: float, clearance: float, epsilon: float) -> Vector2:
+		var nearest: float = INF
+		var result := Vector2.ZERO
+		var clearance_squared: float = clearance * clearance
+		for slot in neighbors(cell):
+			if ids[slot] == id:
+				continue
+			var other: Vector2 = positions[slot]
+			var offset: Vector2 = other - before
+			var forward: float = offset.dot(axis)
+			if forward <= epsilon or forward > lookahead or forward >= nearest:
+				continue
+			if absf(axis.cross(offset)) >= clearance or other.distance_squared_to(target) <= clearance_squared:
+				continue
+			if forward < nearest:
+				nearest = forward
+				result = offset
+		return result

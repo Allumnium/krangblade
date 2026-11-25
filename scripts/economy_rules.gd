@@ -11,10 +11,7 @@ static var cached_military_source: Dictionary = {}
 static var avoidance_cells: Dictionary = {}
 static var _avoidance_neighborhoods: Dictionary = {}
 # Persistent derived storage; exposed only during the frozen movement phase.
-static var _avoidance_index_state: Dictionary = {}
-static var _avoidance_index_roster: Array = []
-static var _persistent_avoidance_cells: Dictionary = {}
-static var _persistent_avoidance_neighborhoods: Dictionary = {}
+static var _packed_avoidance_active: bool = false
 const AVOIDANCE_NEIGHBORHOOD_LIMIT: int = 4096
 static var _movement_fields: Array = []
 static var _movement_field_source: Array = []
@@ -67,6 +64,7 @@ static var _separation_index = STEP_FRAME.OrderedHullBuckets.new()
 static var _contact_index = STEP_FRAME.OrderedHullBuckets.new()
 static var _contact_batch = STEP_FRAME.ContactBatch.new()
 static var _separation_batch = STEP_FRAME.SeparationBatch.new()
+static var _avoidance_batch = STEP_FRAME.AvoidanceBatch.new()
 static var _logistics_index_state: Dictionary = {}
 static var _logistics_index_roster: Array = []
 static var _handoff_indexes: Dictionary = {}
@@ -2694,61 +2692,16 @@ static func _begin_ship_avoidance(positions: Dictionary) -> void:
 # Detach the active snapshot without destroying retained storage. Movement
 # outside the original phase must see the same empty index as before.
 static func _end_ship_avoidance() -> void:
+	_packed_avoidance_active = false
 	avoidance_cells = {}
 	_avoidance_neighborhoods = {}
 
-static func _invalidate_avoidance_cell(cell: Vector2i) -> void:
-	for x in range(-1, 2):
-		for y in range(-1, 2):
-			_persistent_avoidance_neighborhoods.erase(cell + Vector2i(x, y))
-
-# Reconcile ordered capped slots with the *same* frozen positions and
-# insertion order used by the reference build. Retain bucket/entry arrays
-# across steps. Neighborhoods contain references to the same entry arrays:
-# a coordinate-only refresh is visible without rebuilding the neighborhood.
-# A changed ID, order or size invalidates every affected neighboring query.
-static func _begin_persistent_ship_avoidance(state: Dictionary, positions: Dictionary) -> void:
+# Rebuild the frozen capped slot view in retained packed storage. No hull
+# dictionaries or mutable entry arrays are accessed by steering queries.
+static func _begin_persistent_ship_avoidance(_state: Dictionary, positions: Dictionary) -> void:
 	_end_ship_avoidance()
-	if not is_same(state, _avoidance_index_state) or not is_same(state["ships"], _avoidance_index_roster):
-		_avoidance_index_state = state
-		_avoidance_index_roster = state["ships"]
-		_persistent_avoidance_cells.clear()
-		_persistent_avoidance_neighborhoods.clear()
-	var counts: Dictionary = {}
-	var changed: Dictionary = {}
-	for id in positions:
-		var point: Vector2 = positions[id]
-		var cell := Vector2i(floori(point.x / AVOIDANCE_CELL), floori(point.y / AVOIDANCE_CELL))
-		var slot: int = int(counts.get(cell, 0))
-		if slot >= AVOIDANCE_BUCKET_LIMIT:
-			continue
-		counts[cell] = slot + 1
-		if not _persistent_avoidance_cells.has(cell):
-			_persistent_avoidance_cells[cell] = []
-		var bucket: Array = _persistent_avoidance_cells[cell]
-		if slot == bucket.size():
-			bucket.append([id, point])
-			changed[cell] = true
-		else:
-			var entry: Array = bucket[slot]
-			if entry[0] != id:
-				bucket[slot] = [id, point]
-				changed[cell] = true
-			elif entry[1] != point:
-				entry[1] = point
-	for cell in _persistent_avoidance_cells.keys():
-		var count: int = int(counts.get(cell, 0))
-		var bucket: Array = _persistent_avoidance_cells[cell]
-		if count == 0:
-			_persistent_avoidance_cells.erase(cell)
-			changed[cell] = true
-		elif bucket.size() != count:
-			bucket.resize(count)
-			changed[cell] = true
-	for cell in changed:
-		_invalidate_avoidance_cell(cell)
-	avoidance_cells = _persistent_avoidance_cells
-	_avoidance_neighborhoods = _persistent_avoidance_neighborhoods
+	_avoidance_batch.refresh(positions, AVOIDANCE_CELL, AVOIDANCE_BUCKET_LIMIT)
+	_packed_avoidance_active = true
 
 # Read-only view of the frozen movement snapshot. Preserve the original
 # x/y cell traversal and per-bucket insertion order, including ties.
@@ -2767,10 +2720,13 @@ static func _avoidance_direction(ship: Dictionary, target: Vector2, budget: floa
 	var before: Vector2 = ship["position"]
 	var distance: float = before.distance_to(target)
 	var axis: Vector2 = before.direction_to(target)
-	if avoidance_cells.is_empty() or budget <= EPS or distance <= SHIP_CLEARANCE * 0.5 or bool(ship.get("holding", false)):
+	if (not _packed_avoidance_active and avoidance_cells.is_empty()) or budget <= EPS or distance <= SHIP_CLEARANCE * 0.5 or bool(ship.get("holding", false)):
 		return axis
 	var lookahead: float = minf(distance, AVOIDANCE_LOOKAHEAD)
 	var cell := Vector2i(floori(before.x / AVOIDANCE_CELL), floori(before.y / AVOIDANCE_CELL))
+	if _packed_avoidance_active:
+		var packed_blocker: Vector2 = _avoidance_batch.blocker(cell, int(ship["id"]), before, target, axis, lookahead, SHIP_CLEARANCE, EPS)
+		return _steer_around_blocker(axis, packed_blocker) if packed_blocker != Vector2.ZERO else axis
 	var nearest: float = INF
 	var blocker: Vector2 = Vector2.ZERO
 	for entry in _avoidance_neighborhood(cell):
@@ -2790,6 +2746,9 @@ static func _avoidance_direction(ship: Dictionary, target: Vector2, budget: floa
 			blocker = offset
 	if nearest == INF:
 		return axis
+	return _steer_around_blocker(axis, blocker)
+
+static func _steer_around_blocker(axis: Vector2, blocker: Vector2) -> Vector2:
 	# Steer toward a tangent on the open side. A centered head-on contact
 	# always passes on the ship's own right; no symmetric stop or hard wall.
 	var lateral: float = axis.cross(blocker)
@@ -3117,9 +3076,13 @@ static func _clip_rock_step(before: Vector2, after: Vector2) -> Vector2:
 # neighborhood contains no other hull that could change its steering.
 # The subsequent separation/contact passes still run for every ship.
 static func _direct_hull_corridor_clear(ship: Dictionary, before: Vector2) -> bool:
-	if avoidance_cells.is_empty() or bool(ship.get("holding", false)):
+	if bool(ship.get("holding", false)):
 		return true
 	var cell := Vector2i(floori(before.x / AVOIDANCE_CELL), floori(before.y / AVOIDANCE_CELL))
+	if _packed_avoidance_active:
+		return _avoidance_batch.clear_corridor(cell, int(ship.get("id", -1)))
+	if avoidance_cells.is_empty():
+		return true
 	var entries: Array = _avoidance_neighborhood(cell)
 	return entries.is_empty() or (entries.size() == 1 and int(entries[0][0]) == int(ship.get("id", -1)))
 
