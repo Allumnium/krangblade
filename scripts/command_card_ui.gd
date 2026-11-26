@@ -215,6 +215,7 @@ func icon(kind: String, pixels: int = 64) -> Texture2D:
 	if _icons.has(key):
 		return _icons[key]
 	var paths: Dictionary = {
+		"build_wall": '<path fill="#a7bccd" d="M2 12H8V20H2ZM24 12H30V20H24ZM8 14H24V18H8Z"/><path stroke="#e5f5ff" stroke-width="2" d="M8 16H24"/>',
 		"build_cannon": '<path fill="#d6b779" d="M4 12H20V7H29V17H20V21H4Z"/><path stroke="#433d35" stroke-width="2" d="M10 12V21"/>',
 		"upgrade_cannon": '<path fill="#b4e6ab" d="M16 3L27 14H21V28H11V14H5Z"/>',
 		"build_depot": '<path fill="#9fc7d8" d="M4 7H28V25H4Z"/><path stroke="#273c50" stroke-width="2" d="M12 7V25M20 7V25M4 16H28"/>',
