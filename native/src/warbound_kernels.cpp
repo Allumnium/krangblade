@@ -8,11 +8,13 @@
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 using namespace godot;
@@ -59,6 +61,8 @@ class WarboundNativeKernels : public RefCounted {
 
 protected:
     static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("avoidance_blocker", "ids", "positions", "slots", "id", "before", "target", "axis", "lookahead", "clearance", "epsilon"),
+                             &WarboundNativeKernels::avoidance_blocker);
         ClassDB::bind_method(D_METHOD("separation_batch", "ids", "positions", "active", "cells", "reach", "epsilon"),
                              &WarboundNativeKernels::separation_batch);
         ClassDB::bind_method(D_METHOD("contact_batch", "ids", "positions", "previous", "cells", "bounds", "reach", "epsilon"),
@@ -70,6 +74,34 @@ protected:
     }
 
 public:
+    // One live movement query over frozen ordered candidates. Targets may
+    // change during movement, so do not precompute or reorder queries.
+    Vector2 avoidance_blocker(const PackedInt64Array &ids, const PackedVector2Array &positions,
+                              const PackedInt32Array &slots, int64_t id, Vector2 before,
+                              Vector2 target, Vector2 axis, double lookahead, double clearance,
+                              double epsilon) const {
+        const int64_t *stable_ids = ids.ptr();
+        const Vector2 *points = positions.ptr();
+        const int32_t *ordered = slots.ptr();
+        const double clearance_squared = clearance * clearance;
+        double nearest = std::numeric_limits<double>::infinity();
+        Vector2 result;
+        for (int64_t i = 0; i < slots.size(); ++i) {
+            const int32_t slot = ordered[i];
+            if (stable_ids[slot] == id) continue;
+            const Vector2 other = points[slot];
+            const Vector2 offset = other - before;
+            const double forward = offset.dot(axis);
+            if (forward <= epsilon || forward > lookahead || forward >= nearest) continue;
+            if (std::abs(axis.cross(offset)) >= clearance || other.distance_squared_to(target) <= clearance_squared) continue;
+            if (forward < nearest) {
+                nearest = forward;
+                result = offset;
+            }
+        }
+        return result;
+    }
+
     // Each recipient sums the same ordered frozen neighbors. Inactive hulls
     // remain obstacles; only their own force evaluation is omitted.
     PackedVector2Array separation_batch(const PackedInt64Array &ids, const PackedVector2Array &positions,

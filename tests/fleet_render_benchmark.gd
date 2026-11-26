@@ -120,6 +120,8 @@ func _run() -> void:
 	var draw_call_samples: Array[float] = []
 	var sim_samples: Array[float] = []
 	var snapshot_samples: Array[float] = []
+	var apply_samples: Array[float] = []
+	var publish_samples: Array[float] = []
 	var first_revision: int = int(session.get("motion_revision"))
 	var observed_revision: int = first_revision
 	var initial_elapsed: float = float(state["elapsed"])
@@ -137,6 +139,8 @@ func _run() -> void:
 			observed_revision = int(session.get("motion_revision"))
 			sim_samples.append(float(session.get("diagnostic_sim_ms")))
 			snapshot_samples.append(float(session.get("diagnostic_worker_snapshot_ms")))
+			apply_samples.append(float(session.get("diagnostic_worker_apply_ms")))
+			publish_samples.append(float(session.get("diagnostic_worker_publish_ms")))
 			var published: Dictionary = session.get("economy")
 			minimum_ships = mini(minimum_ships, published["ships"].size())
 			peak_ships = maxi(peak_ships, published["ships"].size())
@@ -193,6 +197,8 @@ func _run() -> void:
 		result["simulation_years_advanced"] = final_elapsed - initial_elapsed
 		result["simulation_batch_ms"] = _stats(sim_samples)
 		result["worker_snapshot_ms"] = _stats(snapshot_samples)
+		result["worker_main_thread_apply_ms"] = _stats(apply_samples)
+		result["worker_main_thread_publish_ms"] = _stats(publish_samples)
 		result["worker_overruns"] = worker_overruns
 		result["simulation_batches_over_100ms"] = sim_samples.filter(func(sample: float) -> bool: return sample > 100.0).size()
 	print("FLEET_RENDER " + JSON.stringify(result))

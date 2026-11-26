@@ -3096,6 +3096,26 @@ func _test_optional_native_kernels() -> void:
 			var expected: Vector2 = separation.force(slot, ECON.EPS) if active[slot] != 0 else Vector2.ZERO
 			assert(forces[slot] == expected, "Native separation mismatch at sample %d slot %d" % [sample, slot])
 	print("PASS: optional native separation exact force, missing slot and inactive obstacle parity")
+	assert(native.has_method("avoidance_blocker"), "Native avoidance blocker missing; rebuild extension")
+	var avoidance = preload("res://scripts/step_frame.gd").AvoidanceBatch.new()
+	var width: float = ECON.AVOIDANCE_CELL
+	var candidates_by_id: Dictionary = {}
+	for id in range(1, 241):
+		candidates_by_id[id] = Vector2(rng.randf_range(-width * 2.0, width * 2.0), rng.randf_range(-width * 2.0, width * 2.0))
+	candidates_by_id[1] = Vector2(30, 3)
+	candidates_by_id[2] = Vector2(30, -3)
+	avoidance.refresh(candidates_by_id, width, ECON.AVOIDANCE_BUCKET_LIMIT)
+	for sample in range(600):
+		var before := Vector2.ZERO if sample == 0 else Vector2(rng.randf_range(-width * 3.0, width * 3.0), rng.randf_range(-width * 3.0, width * 3.0))
+		var target := Vector2(500, 0) if sample == 0 else before + Vector2(rng.randf_range(-width * 3.0, width * 3.0), rng.randf_range(-width * 3.0, width * 3.0))
+		var axis: Vector2 = before.direction_to(target)
+		var lookahead: float = minf(before.distance_to(target), ECON.AVOIDANCE_LOOKAHEAD)
+		var cell := Vector2i(floori(before.x / width), floori(before.y / width))
+		var slots: PackedInt32Array = avoidance.neighbors(cell)
+		var id: int = sample % 241
+		var expected: Vector2 = avoidance.blocker_reference(slots, id, before, target, axis, lookahead, ECON.SHIP_CLEARANCE, ECON.EPS)
+		assert(native.call("avoidance_blocker", avoidance.ids, avoidance.positions, slots, id, before, target, axis, lookahead, ECON.SHIP_CLEARANCE, ECON.EPS) == expected)
+	print("PASS: optional native steering blocker exact ordered query parity")
 
 func _test_authority_substep_boundary() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
@@ -3189,6 +3209,7 @@ func _test_shared_formation_batches() -> void:
 func _initialize() -> void:
 	if OS.get_cmdline_user_args().has("--native-kernels-only"):
 		_test_optional_native_kernels()
+		_test_persistent_avoidance_index()
 		_test_persistent_contact_indexes()
 		quit()
 		return

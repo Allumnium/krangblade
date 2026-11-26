@@ -377,10 +377,19 @@ class AvoidanceBatch:
 	# candidate that cannot beat the current forward distance before doing
 	# the cross product and endpoint distance calculation.
 	func blocker(cell: Vector2i, id: int, before: Vector2, target: Vector2, axis: Vector2, lookahead: float, clearance: float, epsilon: float) -> Vector2:
+		var slots: PackedInt32Array = neighbors(cell)
+		if slots.is_empty() or (slots.size() == 1 and ids[slots[0]] == id):
+			return Vector2.ZERO
+		var backend: RefCounted = NATIVE_KERNELS.native_backend()
+		if backend != null and backend.has_method("avoidance_blocker"):
+			return backend.call("avoidance_blocker", ids, positions, slots, id, before, target, axis, lookahead, clearance, epsilon)
+		return blocker_reference(slots, id, before, target, axis, lookahead, clearance, epsilon)
+
+	func blocker_reference(slots: PackedInt32Array, id: int, before: Vector2, target: Vector2, axis: Vector2, lookahead: float, clearance: float, epsilon: float) -> Vector2:
 		var nearest: float = INF
 		var result := Vector2.ZERO
 		var clearance_squared: float = clearance * clearance
-		for slot in neighbors(cell):
+		for slot in slots:
 			if ids[slot] == id:
 				continue
 			var other: Vector2 = positions[slot]

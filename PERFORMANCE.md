@@ -292,3 +292,27 @@ Godot 4.7.2, Linux Xeon Platinum 8573C (5 logical CPUs), seed 827, eight synthet
 | 2,000 dispersed | Contact + separation | 399.732 | 440.118 | 450.998 | 150.611 | 20/20 | 1994 |
 
 Swarm p50 drops 11.7%, movement p50 17.9%; dispersed median lower but severe baseline spikes confound tail comparison. Short single-machine sample, no FPS or 100ms deadline acceptance. Native full economy reached final PASS and exited 0 with no assertion errors; focused force/state parity, exact 50/100-tick battle checkpoints, native worker, solo, two- and three-peer threaded ENet, two-peer loading-disconnect and host-leave pass. Some peer exits still report ObjectDB leaks. No Windows build, graphical or 5x scale comparison in this slice.
+
+## Revised-scale steering and publication profiling (2026-11-26, v0.97.99)
+
+User reports >30 FPS during real 1v1 50-v-50 play; guest lag infrequent if any (hardware/build and frame percentiles unspecified). Primary target is stable 60 FPS for realistic multiplayer, not 2,000–5,000 ships. Linux Godot 4.7.2, Xeon Platinum 8573C, 5 logical CPUs, seed 827, 8 synthetic empires, 40 sequential 1x swarm batches at each size. Same v0.97.99 code and native flag; swap old contact/separation-only library with new steering blocker library. Times in ms.
+
+| Hulls | Library | Total p50 | Total p95 | Movement p50 | Misses (>100 ms) |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 100 | Old | 16.708 | 21.889 | 8.567 | 0/40 |
+| 100 | New | 19.346 | 33.665 | 8.332 | 0/40 |
+| 400 | Old | 66.773 | 108.213 | 39.509 | 5/40 |
+| 400 | New | 63.001 | 83.655 | 33.601 | 2/40 |
+| 800 | Old | 163.645 | 271.437 | 102.116 | 40/40 |
+| 800 | New | 124.175 | 142.269 | 71.061 | 40/40 |
+
+Small-count total median regresses; dense 400/800 results improve, but short sequential samples are noisy. Native remains opt-in, Windows build pending.
+
+Live graphical diagnostic: same Linux CPU, Xvfb/llvmpipe software OpenGL, 1280x720, zoom 5, 180 measured frames, seed 827, native enabled, solo synthetic allied fleet, 1x. This is not a hardware FPS or multiplayer acceptance test. Publication includes synchronous UI callbacks; main-thread application includes publication (not additive); per-observed-batch samples include zero on nonpublication batches.
+
+| Hulls | Frame p95 | Sim batch p95 | Worker snapshot p95 | Main-thread apply p95 | Publication p95 | Batches/s |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 181.068 | 43.138 | 8.017 | 49.185 | 49.164 | 8.85 |
+| 400 | 181.604 | 112.499 | 9.426 | 46.365 | 46.347 | 7.07 |
+
+Publication is a measured main-thread stall worth isolating by subscriber and reducing without changing urgent updates. No graphical FPS acceptance claim. Focused native geometry, exact battle replay, authority worker, solo and two-peer threaded ENet passed; full economy not repeated for this slice, Windows and broader peer/5x acceptance open; ObjectDB exit warnings persist.
