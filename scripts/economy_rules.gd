@@ -3403,6 +3403,7 @@ static func _navigate(ship: Dictionary, target: Vector2, budget: float, direct_f
 	ship["navigation_target"] = target
 	var before: Vector2 = ship["position"]
 	var avoid_rocks: bool = ship.get("kind", "") != "miner" and not _rock_cells.is_empty()
+	target = _wall_detour(ship, before, target, budget)
 	if direct_fast_path:
 		var sample: Variant = _direct_motion_sample(ship, before, target, budget, avoid_rocks)
 		if sample != null:
@@ -6931,6 +6932,13 @@ static func _site_source(state: Dictionary, graph: Dictionary, owner: int, point
 static var _combat_wall_grid: Dictionary = {}
 static var _movement_wall_grid: Dictionary = {}
 static var _movement_wall_state: Dictionary = {}
+# Plan only for hulls approaching a blocked corridor. The normal swept
+# intersection remains the final authority for every movement correction.
+const WALL_NAV_CLEARANCE: float = 40.0
+const WALL_NAV_MAX_SEGMENTS: int = 64
+const WALL_NAV_MAX_POINTS: int = 96
+const WALL_NAV_PLAN_LIMIT: int = 4
+static var _wall_nav_budget: int = WALL_NAV_PLAN_LIMIT
 
 static func wall_grid(state: Dictionary) -> Dictionary:
 	var nodes: Dictionary = {}
@@ -6985,8 +6993,133 @@ static func wall_first_hit(state: Dictionary, grid: Dictionary, owner: int, a: V
 					continue
 				if distance < best or (distance == best and id < int(result.get("id", 2147483647))):
 					best = distance
-					result = {"id": id, "owner": wall_owner, "point": point}
+					result = {"id": id, "owner": wall_owner, "point": point, "wall": wall}
 	return result
+
+# Explore the connected blocking component via endpoint cells, not the full
+# ship roster. Candidate points occupy free angular wedges at ends/corners.
+static func _wall_navigation_points(state: Dictionary, grid: Dictionary, owner: int, first: Dictionary, avoid_rocks: bool) -> Array[Vector2]:
+	var pending: Array = [first]
+	var visited: Dictionary = {}
+	var nodes: Dictionary = {}
+	while not pending.is_empty():
+		var wall: Dictionary = pending.pop_back()
+		var id: int = int(wall["id"])
+		if visited.has(id):
+			continue
+		if visited.size() >= WALL_NAV_MAX_SEGMENTS:
+			return []
+		visited[id] = true
+		for side in ["a", "b"]:
+			var other_side: String = "b" if side == "a" else "a"
+			var point: Vector2 = wall["wall_" + side]
+			var direction: Vector2 = point.direction_to(wall["wall_" + other_side])
+			if not nodes.has(point):
+				nodes[point] = []
+			nodes[point].append(fposmod(direction.angle(), TAU))
+			var cell := Vector2i(floori(point.x / WALL_MAX_LENGTH), floori(point.y / WALL_MAX_LENGTH))
+			for neighbor in grid.get(cell, []):
+				if visited.has(int(neighbor["id"])) or open_borders(state, int(neighbor["owner"]), owner):
+					continue
+				if point == neighbor["wall_a"] or point == neighbor["wall_b"]:
+					pending.append(neighbor)
+	var points: Array[Vector2] = []
+	var bounds: Vector2 = state["map"]["size"]
+	for point in nodes:
+		var angles: Array = nodes[point]
+		angles.sort()
+		# Straight internal joints are not useful detour vertices.
+		if angles.size() == 2 and absf(float(angles[1]) - float(angles[0]) - PI) <= 0.001:
+			continue
+		for index in range(angles.size()):
+			var a: float = float(angles[index])
+			var b: float = float(angles[index + 1]) if index + 1 < angles.size() else float(angles[0]) + TAU
+			if b - a <= 0.001:
+				continue
+			var candidate: Vector2 = point + Vector2.from_angle((a + b) * 0.5) * WALL_NAV_CLEARANCE
+			if candidate.x < 0.0 or candidate.y < 0.0 or candidate.x > bounds.x or candidate.y > bounds.y:
+				continue
+			if avoid_rocks and not _point_clear_of_rocks(candidate, 8.0):
+				continue
+			if points.size() >= WALL_NAV_MAX_POINTS:
+				return []
+			points.append(candidate)
+	return points
+
+# Bounded deterministic A* on visible corner points. All edges are checked
+# against current permissions and all walls in the swept spatial cells.
+static func wall_navigation_route(state: Dictionary, grid: Dictionary, owner: int, start: Vector2, target: Vector2, avoid_rocks: bool = false) -> Array[Vector2]:
+	var hit: Dictionary = wall_first_hit(state, grid, owner, start, target, true)
+	if hit.is_empty():
+		return [target]
+	var points: Array[Vector2] = [start, target]
+	points.append_array(_wall_navigation_points(state, grid, owner, hit["wall"], avoid_rocks))
+	var cost: Dictionary = {0: 0.0}
+	var parent: Dictionary = {}
+	var closed: Dictionary = {}
+	while true:
+		var current: int = -1
+		var best: float = INF
+		for index in cost:
+			if closed.has(index):
+				continue
+			var score: float = float(cost[index]) + points[index].distance_to(target)
+			if score < best:
+				best = score
+				current = int(index)
+		if current < 0:
+			return []
+		if current == 1:
+			var route: Array[Vector2] = []
+			while current != 0:
+				route.push_front(points[current])
+				current = int(parent[current])
+			return route
+		closed[current] = true
+		for next in range(1, points.size()):
+			if closed.has(next):
+				continue
+			var distance: float = float(cost[current]) + points[current].distance_to(points[next])
+			if distance >= float(cost.get(next, INF)):
+				continue
+			if not wall_first_hit(state, grid, owner, points[current], points[next], true).is_empty():
+				continue
+			cost[next] = distance
+			parent[next] = current
+	return []
+
+static func _wall_detour(ship: Dictionary, before: Vector2, target: Vector2, budget: float) -> Vector2:
+	if _movement_wall_grid.is_empty():
+		ship.erase("_wall_detour")
+		return target
+	if budget <= EPS or before.is_equal_approx(target):
+		return target
+	var owner: int = int(ship["owner"])
+	var cached: Dictionary = ship.get("_wall_detour", {})
+	if not cached.is_empty() and (cached["target"] as Vector2).distance_to(target) > WALL_NAV_CLEARANCE:
+		cached = {}
+		ship.erase("_wall_detour")
+	var route: Array = cached.get("route", [])
+	while not route.is_empty() and before.distance_to(route.front()) <= 1.0:
+		route.pop_front()
+	if not route.is_empty():
+		if wall_first_hit(_movement_wall_state, _movement_wall_grid, owner, before, target, true).is_empty():
+			ship.erase("_wall_detour")
+			return target
+		var waypoint: Vector2 = route.front()
+		if wall_first_hit(_movement_wall_state, _movement_wall_grid, owner, before, waypoint, true).is_empty():
+			return waypoint
+		route.clear()
+	var probe: Vector2 = before.move_toward(target, maxf(budget + WALL_NAV_CLEARANCE, 180.0))
+	if wall_first_hit(_movement_wall_state, _movement_wall_grid, owner, before, probe, true).is_empty():
+		ship.erase("_wall_detour")
+		return target
+	if _wall_nav_budget <= 0 or _rock_plan_tick < int(cached.get("retry", 0)):
+		return target
+	_wall_nav_budget -= 1
+	var planned: Array[Vector2] = wall_navigation_route(_movement_wall_state, _movement_wall_grid, owner, before, target, ship.get("kind", "") != "miner" and not _rock_cells.is_empty())
+	ship["_wall_detour"] = {"target": target, "route": planned, "retry": _rock_plan_tick + 12}
+	return planned.front() if not planned.is_empty() else target
 
 static func _clip_wall_move(ship: Dictionary, before: Vector2, after: Vector2) -> Vector2:
 	if _movement_wall_grid.is_empty():
@@ -11959,6 +12092,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	started = _profile_stage(profile, "Combat / repair", started)
 	_movement_wall_state = state
 	_movement_wall_grid = wall_grid(state)
+	_wall_nav_budget = WALL_NAV_PLAN_LIMIT
 	_step_formations(state, frame, dt)
 	started = _profile_stage(profile, "Formations / orders", started)
 	if motion_sleep_enabled:

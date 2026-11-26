@@ -3,7 +3,42 @@ extends SceneTree
 const QUERIES = preload("res://scripts/construction_queries.gd")
 const ECON = preload("res://scripts/economy_rules.gd")
 
+func _wall_segment(id: int, a: Vector2, b: Vector2) -> Dictionary:
+	return {"id": id, "owner": 2, "kind": "wall_segment", "wall_a": a, "wall_b": b, "build_progress": 1.0, "hp": 100.0}
+
+func _wall_fixture(segments: Array) -> Dictionary:
+	var nodes: Dictionary = {}
+	var entities: Array = []
+	for wall in segments:
+		for side in ["a", "b"]:
+			var point: Vector2 = wall["wall_" + side]
+			if not nodes.has(point):
+				nodes[point] = 100 + nodes.size()
+				entities.append({"id": nodes[point], "owner": 2, "kind": "wall_node", "build_progress": 1.0, "hp": 100.0})
+			wall["wall_" + side + "_id"] = nodes[point]
+		entities.append(wall)
+	return {"ships": entities, "teams": {1: 1, 2: 2}, "diplomacy": {}, "elapsed": 0.0, "map": {"size": Vector2(2000, 2000)}}
+
+func _test_wall_navigation() -> void:
+	var start := Vector2(400, 800)
+	var goal := Vector2(1200, 800)
+	var state: Dictionary = _wall_fixture([_wall_segment(1, Vector2(800, 400), Vector2(800, 800)), _wall_segment(2, Vector2(800, 800), Vector2(800, 1200))])
+	var grid: Dictionary = ECON.wall_grid(state)
+	assert(not ECON.wall_first_hit(state, grid, 1, start, goal, true).is_empty())
+	var route: Array = ECON.wall_navigation_route(state, grid, 1, start, goal)
+	assert(route.size() >= 2 and route.back() == goal)
+	var previous: Vector2 = start
+	for waypoint in route:
+		assert(ECON.wall_first_hit(state, grid, 1, previous, waypoint, true).is_empty())
+		previous = waypoint
+	assert(ECON.diplomacy_set_permission(state, 2, 1, "open_borders", true))
+	assert(ECON.wall_navigation_route(state, grid, 1, start, goal) == [goal])
+	assert(not ECON.wall_first_hit(state, grid, 1, start, goal, false).is_empty())
+	var ring: Dictionary = _wall_fixture([_wall_segment(1, Vector2(800, 600), Vector2(1200, 600)), _wall_segment(2, Vector2(1200, 600), Vector2(1200, 1000)), _wall_segment(3, Vector2(1200, 1000), Vector2(800, 1000)), _wall_segment(4, Vector2(800, 1000), Vector2(800, 600))])
+	assert(ECON.wall_navigation_route(ring, ECON.wall_grid(ring), 1, start, Vector2(1000, 800)).is_empty())
+
 func _initialize() -> void:
+	_test_wall_navigation()
 	for kind in ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "yard", "pds", "dyson_sphere", "reinforced_plating", "laser_matrix", "yard_upgrade", "production", "warehouse", "habitation", "orbital_housing"]:
 		for level in range(1, 4):
 			var expected: Dictionary = ECON._cost(kind, level)

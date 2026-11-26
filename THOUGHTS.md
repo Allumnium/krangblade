@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.108.0: Use bounded deterministic visibility graph detours around connected wall ends and corners, stagger route planning across four hulls per simulation step, preserve final swept clipping and existing navigation target. Focused geometry fixtures added; large/complex components, mixed rocks, runtime, performance and real ENet pending.
+
 - v0.107.1: Use authoritative wall impact endpoints for ship, station and PDS beams; prevent duplicate beams through walls. Correct outdated Codex descriptions of walls and freight. Visual/runtime/ENet validation pending.
 
 - v0.107.0: Idle trade-enabled freighters can collect site escrow from source stations, rendezvous with an active constructor, and hand over resources; only constructors advance construction. Automated depot routes transfer station export surplus into owned depots and fulfill station import demand from depot stock. Manual orders clear autonomous freight jobs, preserving carried cargo. Same-owner only; no depot policy UI; multi-source per-site escrow and lost cargo recovery remain follow-up. Runtime and peer validation pending.
