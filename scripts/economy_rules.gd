@@ -6654,10 +6654,10 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		return not append and ship["kind"] == "construction_ship" and order.get("start") is Vector2 and order.get("point") is Vector2 and not _wall_plan(state, graph, owner, order["start"], order["point"]).is_empty()
 	if kind in ["build_depot", "build_cannon"]:
 		var structure: String = "resource_depot" if kind == "build_depot" else "defense_cannon"
-		return not append and ship["kind"] == "construction_ship" and order.get("point") is Vector2 and _site_source(state, graph, owner, order["point"], structure) >= 0
+		return not append and ship["kind"] == "construction_ship" and order.get("point") is Vector2 and not _site_plan(state, graph, owner, order["point"], structure).is_empty()
 	if kind == "upgrade_cannon":
 		var cannon: Dictionary = service_targets(state, int(order.get("target", -1))).get(int(order.get("target", -1)), {}).get("entity", {}) if order.get("target") is int else {}
-		return not append and ship["kind"] == "construction_ship" and cannon.get("kind", "") == "defense_cannon" and int(cannon.get("owner", 0)) == owner and static_complete(cannon) and cannon_level(cannon) < 3 and _site_source(state, graph, owner, cannon["position"], "defense_cannon", cannon_level(cannon) + 1, int(cannon["id"])) >= 0
+		return not append and ship["kind"] == "construction_ship" and cannon.get("kind", "") == "defense_cannon" and int(cannon.get("owner", 0)) == owner and static_complete(cannon) and cannon_level(cannon) < 3 and not _site_plan(state, graph, owner, cannon["position"], "defense_cannon", cannon_level(cannon) + 1, int(cannon["id"])).is_empty()
 	if kind == "cancel_site":
 		var site: Dictionary = service_targets(state, int(order.get("target", -1))).get(int(order.get("target", -1)), {}).get("entity", {}) if order.get("target") is int else {}
 		return not append and ship["kind"] == "construction_ship" and is_static_structure(site) and int(site.get("owner", 0)) == owner and not static_complete(site)
@@ -6898,34 +6898,57 @@ static func hull_max_hp(ship: Dictionary) -> float:
 	var maximum: float = ship_max_hp(str(ship.get("kind", "")))
 	return maximum * lerpf(0.1, 1.0, clampf(float(ship.get("build_progress", 0.0)), 0.0, 1.0)) if is_static_structure(ship) else maximum
 
-static func _site_source(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, kind: String, level: int = 1, ignore_id: int = -1) -> int:
+# Each site owns per-station escrow. Plan against detached stock so admission
+# fails atomically even when multiple stations or wall components are involved.
+static func _construction_stocks(state: Dictionary, owner: int) -> Dictionary:
+	var stocks: Dictionary = {}
+	for index in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][index]
+		if has_station(system) and int(system["owner"]) == owner:
+			stocks[index] = system["stock"].duplicate()
+	return stocks
+
+static func _plan_site_materials(state: Dictionary, point: Vector2, recipe: Dictionary, stocks: Dictionary, partial: bool = false) -> Dictionary:
+	var distances: Dictionary = {}
+	var positions: Dictionary = {}
+	for index in stocks:
+		positions[index] = station_position(state, int(index), float(state["elapsed"]))
+		distances[index] = point.distance_squared_to(positions[index])
+	var ordered: Array = stocks.keys()
+	ordered.sort_custom(func(a: int, b: int) -> bool: return distances[a] < distances[b] or (distances[a] == distances[b] and a < b))
+	var remaining: Dictionary = recipe.duplicate()
+	var plan: Dictionary = {}
+	for index in ordered:
+		var cargo: Dictionary = {}
+		for resource in recipe:
+			var amount: float = minf(float(remaining[resource]), maxf(0.0, float(stocks[index].get(resource, 0.0))))
+			if amount > EPS:
+				cargo[resource] = amount
+				remaining[resource] -= amount
+		if not cargo.is_empty():
+			plan[index] = {"point": positions[index], "cargo": cargo}
+		if _cargo_total({"cargo": remaining}) <= EPS:
+			break
+	if not partial and _cargo_total({"cargo": remaining}) > EPS:
+		return {}
+	for index in plan:
+		for resource in plan[index]["cargo"]:
+			stocks[index][resource] -= float(plan[index]["cargo"][resource])
+	return plan
+
+static func _site_plan(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, kind: String, level: int = 1, ignore_id: int = -1) -> Dictionary:
 	if patrol_node(state, graph, owner, point) < 0 or kind not in STATIC_SITE_KINDS:
-		return -1
+		return {}
 	_refresh_movement_fields(state["map"].get("fields", []))
 	if not _point_clear_of_rocks(point, 8.0):
-		return -1
+		return {}
 	for craft in state["ships"]:
 		if is_static_structure(craft) and int(craft["id"]) != ignore_id and (craft["position"] as Vector2).distance_to(point) < 65.0:
-			return -1
-	var recipe: Dictionary = static_recipe(kind, level)
-	var best: float = INF
-	var source: int = -1
-	for i in range(state["planets"].size()):
-		var p: Dictionary = state["planets"][i]
-		if has_station(p) and point.distance_to(station_position(state, i, float(state["elapsed"]))) < 80.0:
-			return -1
-		if int(p["owner"]) != owner or not has_station(p):
-			continue
-		var available: bool = true
-		for resource in recipe:
-			if float(p["stock"].get(resource, 0.0)) + EPS < float(recipe[resource]):
-				available = false
-				break
-		var distance: float = point.distance_squared_to(station_position(state, i, float(state["elapsed"])))
-		if available and distance >= 80.0 * 80.0 and distance < best:
-			best = distance
-			source = i
-	return source
+			return {}
+	for index in range(state["planets"].size()):
+		if has_station(state["planets"][index]) and point.distance_to(station_position(state, index, float(state["elapsed"]))) < 80.0:
+			return {}
+	return _plan_site_materials(state, point, static_recipe(kind, level), _construction_stocks(state, owner))
 
 # Plan all nodes and segments against a shadow copy of station resources.
 # IDs are reserved in plan order and the live stock changes only on success.
@@ -7157,24 +7180,7 @@ static func _wall_snap(state: Dictionary, owner: int, point: Vector2) -> Diction
 			nearest = candidate
 	return nearest
 
-static func _wall_plan_source(state: Dictionary, owner: int, point: Vector2, recipe: Dictionary, stocks: Dictionary) -> int:
-	var best: float = INF
-	var result: int = -1
-	for index in stocks:
-		var stock: Dictionary = stocks[index]
-		var affordable: bool = true
-		for resource in recipe:
-			if float(stock.get(resource, 0.0)) + EPS < float(recipe[resource]):
-				affordable = false
-				break
-		var distance: float = point.distance_squared_to(station_position(state, int(index), float(state["elapsed"])))
-		if affordable and distance < best:
-			best = distance
-			result = int(index)
-	if result >= 0:
-		for resource in recipe:
-			stocks[result][resource] -= float(recipe[resource])
-	return result
+
 
 static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: Vector2, end: Vector2) -> Array:
 	if not start.is_finite() or not end.is_finite():
@@ -7189,11 +7195,7 @@ static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: 
 	if points.is_empty():
 		return []
 	_refresh_movement_fields(state["map"].get("fields", []))
-	var stocks: Dictionary = {}
-	for index in range(state["planets"].size()):
-		var system: Dictionary = state["planets"][index]
-		if has_station(system) and int(system["owner"]) == owner:
-			stocks[index] = system["stock"].duplicate()
+	var stocks: Dictionary = _construction_stocks(state, owner)
 	var plan: Array = []
 	var nodes: Array = []
 	var next: int = int(state["next_id"])
@@ -7212,10 +7214,10 @@ static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: 
 		for index in range(state["planets"].size()):
 			if has_station(state["planets"][index]) and point.distance_to(station_position(state, index, float(state["elapsed"]))) < 80.0:
 				return []
-		var source: int = _wall_plan_source(state, owner, point, static_recipe("wall_node"), stocks)
-		if source < 0:
+		var reservations: Dictionary = _plan_site_materials(state, point, static_recipe("wall_node"), stocks)
+		if reservations.is_empty():
 			return []
-		plan.append({"id": next, "kind": "wall_node", "position": point, "source": source})
+		plan.append({"id": next, "kind": "wall_node", "position": point, "reservations": reservations})
 		nodes.append({"id": next, "position": point})
 		next += 1
 	for index in range(1, nodes.size()):
@@ -7232,10 +7234,10 @@ static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: 
 				if (left == int(a["id"]) and right == int(b["id"])) or (left == int(b["id"]) and right == int(a["id"])):
 					return []
 		var middle: Vector2 = (pa + pb) * 0.5
-		var source: int = _wall_plan_source(state, owner, middle, static_recipe("wall_segment"), stocks)
-		if source < 0:
+		var reservations: Dictionary = _plan_site_materials(state, middle, static_recipe("wall_segment"), stocks)
+		if reservations.is_empty():
 			return []
-		plan.append({"id": next, "kind": "wall_segment", "position": middle, "source": source, "wall_a_id": a["id"], "wall_b_id": b["id"], "wall_a": pa, "wall_b": pb})
+		plan.append({"id": next, "kind": "wall_segment", "position": middle, "reservations": reservations, "wall_a_id": a["id"], "wall_b_id": b["id"], "wall_a": pa, "wall_b": pb})
 		next += 1
 	return plan
 
@@ -7245,7 +7247,7 @@ static func _place_wall_chain(state: Dictionary, owner: int, start: Vector2, end
 	if plan.is_empty():
 		return false
 	for item in plan:
-		var site: Dictionary = _create_static_site(state, graph, owner, item["position"], item["kind"], int(item["source"]))
+		var site: Dictionary = _create_static_site(state, graph, owner, item["position"], item["kind"], item["reservations"])
 		if item["kind"] == "wall_segment":
 			for key in ["wall_a_id", "wall_b_id", "wall_a", "wall_b"]:
 				site[key] = item[key]
@@ -7254,21 +7256,30 @@ static func _place_wall_chain(state: Dictionary, owner: int, start: Vector2, end
 
 static func _place_static_site(state: Dictionary, owner: int, point: Vector2, kind: String) -> bool:
 	var graph: Dictionary = military_graph(state)
-	var source: int = _site_source(state, graph, owner, point, kind)
-	if source < 0:
+	var plan: Dictionary = _site_plan(state, graph, owner, point, kind)
+	if plan.is_empty():
 		return false
-	_create_static_site(state, graph, owner, point, kind, source)
+	_create_static_site(state, graph, owner, point, kind, plan)
 	return true
 
-static func _create_static_site(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, kind: String, source: int) -> Dictionary:
+static func _reserve_site_materials(state: Dictionary, site: Dictionary, plan: Dictionary) -> void:
+	var reservations: Dictionary = site["build_reservations"]
+	for source in plan:
+		if not reservations.has(source):
+			reservations[source] = {"point": plan[source]["point"], "cargo": {}}
+		var reserved: Dictionary = reservations[source]["cargo"]
+		for resource in plan[source]["cargo"]:
+			var amount: float = float(plan[source]["cargo"][resource])
+			state["planets"][source]["stock"][resource] -= amount
+			reserved[resource] = float(reserved.get(resource, 0.0)) + amount
+
+static func _create_static_site(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, kind: String, plan: Dictionary) -> Dictionary:
 	var recipe: Dictionary = static_recipe(kind)
-	var stock: Dictionary = state["planets"][source]["stock"]
-	for resource in recipe:
-		stock[resource] -= float(recipe[resource])
 	var id: int = int(state["next_id"])
 	state["next_id"] = id + 1
 	var anchor: int = patrol_node(state, graph, owner, point)
-	var site: Dictionary = {"id": id, "kind": kind, "owner": owner, "origin": source, "at": anchor, "position": point, "navigation_target": point, "heading": Vector2.UP, "route": [], "leg": 0.0, "source": -1, "dest": -1, "crew": 0.0, "cargo": empty_stock(), "hp": ship_max_hp(kind) * 0.1, "build_progress": 0.0, "build_recipe": recipe, "build_reserved": recipe.duplicate(), "build_delivered": empty_stock(), "build_source": source, "build_source_point": station_position(state, source, float(state["elapsed"]))}
+	var site: Dictionary = {"id": id, "kind": kind, "owner": owner, "origin": int(plan.keys()[0]), "at": anchor, "position": point, "navigation_target": point, "heading": Vector2.UP, "route": [], "leg": 0.0, "source": -1, "dest": -1, "crew": 0.0, "cargo": empty_stock(), "hp": ship_max_hp(kind) * 0.1, "build_progress": 0.0, "build_recipe": recipe, "build_reservations": {}, "build_delivered": empty_stock()}
+	_reserve_site_materials(state, site, plan)
 	state["ships"].append(site)
 	_register_indexed_hull(state, site)
 	return site
@@ -7278,39 +7289,82 @@ static func _upgrade_cannon(state: Dictionary, owner: int, target: int) -> bool:
 	if site.get("kind", "") != "defense_cannon" or int(site.get("owner", 0)) != owner or not static_complete(site) or cannon_level(site) >= 3:
 		return false
 	var level: int = cannon_level(site) + 1
-	var source: int = _site_source(state, military_graph(state), owner, site["position"], "defense_cannon", level, target)
-	if source < 0:
+	var plan: Dictionary = _site_plan(state, military_graph(state), owner, site["position"], "defense_cannon", level, target)
+	if plan.is_empty():
 		return false
-	var recipe: Dictionary = static_recipe("defense_cannon", level)
-	for resource in recipe:
-		state["planets"][source]["stock"][resource] -= float(recipe[resource])
 	site["build_progress"] = 0.0
-	site["build_recipe"] = recipe
-	site["build_reserved"] = recipe.duplicate()
+	site["build_recipe"] = static_recipe("defense_cannon", level)
+	site["build_reservations"] = {}
 	site["build_delivered"] = empty_stock()
-	site["build_source"] = source
-	site["build_source_point"] = station_position(state, source, float(state["elapsed"]))
+	_reserve_site_materials(state, site, plan)
 	return true
 
-# Refund unused source-side materials, dropping overflow or lost-source stock
-# physically at the former origin. Delivered construction material becomes salvage.
+static func _site_reserved_total(site: Dictionary) -> float:
+	var total: float = 0.0
+	for record in site.get("build_reservations", {}).values():
+		total += _cargo_total(record)
+	return total
+
+static func _site_pickup_source(state: Dictionary, ship: Dictionary, site: Dictionary) -> int:
+	var best: float = INF
+	var selected: int = -1
+	for source in site["build_reservations"]:
+		var p: Dictionary = state["planets"][source]
+		if int(p["owner"]) != int(site["owner"]) or not has_station(p) or _cargo_total(site["build_reservations"][source]) <= EPS:
+			continue
+		var distance: float = (ship["position"] as Vector2).distance_squared_to(station_position(state, int(source), float(state["elapsed"])))
+		if distance < best or (distance == best and int(source) < selected):
+			best = distance
+			selected = int(source)
+	return selected
+
+static func _load_site_materials(state: Dictionary, ship: Dictionary, site: Dictionary, source: int, dt: float) -> void:
+	var record: Dictionary = site["build_reservations"][source]
+	var reserved: Dictionary = record["cargo"]
+	var budget: float = _dropoff_budget(ship, dt)
+	for resource in site["build_recipe"]:
+		var amount: float = minf(budget, minf(cargo_free(ship), float(reserved.get(resource, 0.0))))
+		if amount <= EPS:
+			continue
+		_record_transfer(state, station_target_id(state, source), state["planets"][source], int(ship["id"]), ship, resource, amount)
+		reserved[resource] -= amount
+		ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
+		budget -= amount
+	if _cargo_total(record) <= EPS:
+		site["build_reservations"].erase(source)
+
+# Refund each origin separately. A lost station's escrow falls at its last
+# position; delivered construction material becomes salvage at the site.
 static func _refund_site(state: Dictionary, site: Dictionary, drop_delivered: bool) -> void:
-	var source: int = int(site.get("build_source", -1))
-	var reserved: Dictionary = site.get("build_reserved", {})
-	var overflow: Dictionary = empty_stock()
-	for resource in reserved:
-		var amount: float = float(reserved[resource])
-		if source >= 0 and source < state["planets"].size():
-			var p: Dictionary = state["planets"][source]
-			if int(p["owner"]) == int(site["owner"]) and has_station(p):
+	var reservations: Dictionary = site.get("build_reservations", {})
+	for source in reservations:
+		var record: Dictionary = reservations[source]
+		var overflow: Dictionary = empty_stock()
+		var p: Dictionary = state["planets"][source]
+		var valid: bool = int(p["owner"]) == int(site["owner"]) and has_station(p)
+		for resource in record["cargo"]:
+			var amount: float = float(record["cargo"][resource])
+			if valid:
 				var refund: float = minf(amount, storage_free(p, resource))
 				p["stock"][resource] += refund
 				amount -= refund
-		overflow[resource] = amount
-		reserved[resource] = 0.0
-	_drop_carried(state, {"id": site["id"], "position": site.get("build_source_point", site["position"]), "cargo": overflow})
+			overflow[resource] = amount
+		var point: Vector2 = station_position(state, int(source), float(state["elapsed"])) if valid else record["point"]
+		_drop_carried(state, {"id": site["id"], "position": point, "cargo": overflow})
+	reservations.clear()
 	if drop_delivered:
 		_drop_carried(state, {"id": site["id"], "position": site["position"], "cargo": site.get("build_delivered", {}).duplicate()})
+
+static func _lose_site_station_escrow(state: Dictionary, source: int, point: Vector2) -> void:
+	for site in state["ships"]:
+		if not is_static_structure(site) or static_complete(site):
+			continue
+		var reservations: Dictionary = site.get("build_reservations", {})
+		if not reservations.has(source):
+			continue
+		var record: Dictionary = reservations[source]
+		_drop_carried(state, {"id": site["id"], "position": point, "cargo": record["cargo"]})
+		reservations.erase(source)
 
 static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
 	if dt <= 0.0 or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty():
@@ -7330,13 +7384,12 @@ static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dicti
 	ship["construction_target"] = site["id"]
 	var recipe: Dictionary = site["build_recipe"]
 	var delivered: Dictionary = site["build_delivered"]
-	var reserved: Dictionary = site["build_reserved"]
 	var useful_cargo: bool = false
 	for resource in recipe:
 		if float(delivered.get(resource, 0.0)) + EPS < float(recipe[resource]) and float(ship["cargo"].get(resource, 0.0)) > EPS:
 			useful_cargo = true
 			break
-	if useful_cargo and (not bool(ship.get("construction_loading", false)) or cargo_free(ship) <= EPS or _cargo_total({"cargo": reserved}) <= EPS):
+	if useful_cargo and (not bool(ship.get("construction_loading", false)) or cargo_free(ship) <= EPS or _site_reserved_total(site) <= EPS):
 		ship.erase("construction_loading")
 		var point: Vector2 = site["position"]
 		var node: int = patrol_node(state, graph, int(ship["owner"]), point)
@@ -7370,24 +7423,19 @@ static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dicti
 		if node >= 0:
 			_manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE)
 		return true
-	var source: int = int(site["build_source"])
-	var p: Dictionary = state["planets"][source]
-	if int(p["owner"]) != int(ship["owner"]) or not has_station(p):
-		return false
-	if cargo_free(ship) <= EPS:
+	var source: int = _site_pickup_source(state, ship, site)
+	if source < 0 or cargo_free(ship) <= EPS:
+		ship.erase("construction_loading")
 		return false
 	var source_point: Vector2 = station_position(state, source, float(state["elapsed"]))
 	if not _manual_travel(state, graph, ship, source, source_point, dt, STATION_DOCK_RANGE):
 		return true
 	ship["construction_loading"] = true
-	var budget: float = _dropoff_budget(ship, dt)
-	for resource in recipe:
-		var amount: float = minf(budget, minf(cargo_free(ship), float(reserved.get(resource, 0.0))))
-		if amount <= EPS:
-			continue
-		reserved[resource] -= amount
-		ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
-		budget -= amount
+	_load_site_materials(state, ship, site, source, dt)
+	# A partial shipment is still useful; do not chase another station
+	# while already carrying construction material.
+	if not site["build_reservations"].has(source):
+		ship.erase("construction_loading")
 	return true
 
 # Construction freight uses the existing reservation at the source station.
@@ -7417,25 +7465,13 @@ static func _work_construction_freight(state: Dictionary, graph: Dictionary, shi
 	if builder.is_empty() or site.is_empty() or static_complete(site) or int(builder["owner"]) != owner or int(site["owner"]) != owner or int(builder.get("construction_target", -1)) != int(site["id"]) or _unit_order_running(builder) or bool(builder.get("holding", false)):
 		_clear_static_freight(ship)
 		return false
-	var reserved: Dictionary = site["build_reserved"]
 	if not bool(ship.get("construction_supply_loaded", false)):
-		var source: int = int(site["build_source"])
-		var p: Dictionary = state["planets"][source]
-		if int(p["owner"]) != owner or not has_station(p):
-			_clear_static_freight(ship)
-			return false
-		if cargo_free(ship) > EPS and _cargo_total({"cargo": reserved}) > EPS:
+		var source: int = _site_pickup_source(state, ship, site)
+		if source >= 0 and cargo_free(ship) > EPS:
 			if not _manual_travel(state, graph, ship, source, station_position(state, source, float(state["elapsed"])), dt, STATION_DOCK_RANGE):
 				return true
-			var budget: float = _dropoff_budget(ship, dt)
-			for resource in site["build_recipe"]:
-				var amount: float = minf(budget, minf(cargo_free(ship), float(reserved.get(resource, 0.0))))
-				if amount <= EPS:
-					continue
-				reserved[resource] -= amount
-				ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
-				budget -= amount
-			if cargo_free(ship) > EPS and _cargo_total({"cargo": reserved}) > EPS:
+			_load_site_materials(state, ship, site, source, dt)
+			if cargo_free(ship) > EPS and site["build_reservations"].has(source):
 				return true
 		ship["construction_supply_loaded"] = true
 	if _cargo_total(ship) <= EPS:
@@ -7532,7 +7568,7 @@ static func _try_static_freight(state: Dictionary, graph: Dictionary, ship: Dict
 		if candidate.get("kind", "") != "construction_ship" or int(candidate["owner"]) != owner or _unit_order_running(candidate) or bool(candidate.get("holding", false)):
 			continue
 		var site: Dictionary = _static_freight_entity(state, int(candidate.get("construction_target", -1)))
-		if site.is_empty() or static_complete(site) or _cargo_total({"cargo": site["build_reserved"]}) <= EPS or _construction_freight_waiting(state, candidate, int(site["id"])):
+		if site.is_empty() or static_complete(site) or _site_reserved_total(site) <= EPS or _construction_freight_waiting(state, candidate, int(site["id"])):
 			continue
 		var distance: float = (ship["position"] as Vector2).distance_squared_to(candidate["position"])
 		if distance < best:
@@ -8376,6 +8412,7 @@ static func _destroy_station(state: Dictionary, graph: Dictionary, index: int) -
 		return
 	var owner: int = int(p["owner"])
 	var point: Vector2 = station_position(state, index, float(state["elapsed"]))
+	_lose_site_station_escrow(state, index, point)
 	var salvage: Dictionary = empty_stock()
 	for resource in RESOURCES + [ANTIMATTER]:
 		salvage[resource] = float(p["stock"].get(resource, 0.0)) * STATION_SALVAGE_FRACTION

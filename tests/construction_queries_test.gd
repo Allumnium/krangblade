@@ -2,6 +2,7 @@ extends SceneTree
 ## Base recipe tests run independently of multiplayer scenes.
 const QUERIES = preload("res://scripts/construction_queries.gd")
 const ECON = preload("res://scripts/economy_rules.gd")
+const MAP = preload("res://scripts/planet_map.gd")
 
 func _wall_segment(id: int, a: Vector2, b: Vector2) -> Dictionary:
 	return {"id": id, "owner": 2, "kind": "wall_segment", "wall_a": a, "wall_b": b, "build_progress": 1.0, "hp": 100.0}
@@ -37,8 +38,31 @@ func _test_wall_navigation() -> void:
 	var ring: Dictionary = _wall_fixture([_wall_segment(1, Vector2(800, 600), Vector2(1200, 600)), _wall_segment(2, Vector2(1200, 600), Vector2(1200, 1000)), _wall_segment(3, Vector2(1200, 1000), Vector2(800, 1000)), _wall_segment(4, Vector2(800, 1000), Vector2(800, 600))])
 	assert(ECON.wall_navigation_route(ring, ECON.wall_grid(ring), 1, start, Vector2(1000, 800)).is_empty())
 
+func _test_multi_source_materials() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(712, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	state["planets"][1]["owner"] = 1
+	state["planets"][0]["stock"] = {"Metals": 350.0, "Crystals": 0.0, "Organics": 0.0}
+	state["planets"][1]["stock"] = {"Metals": 250.0, "Crystals": 40.0, "Organics": 0.0}
+	var point: Vector2 = ECON.station_position(state, 0, 0.0) + Vector2(100, 100)
+	var stocks: Dictionary = ECON._construction_stocks(state, 1)
+	var before: Dictionary = stocks.duplicate(true)
+	assert(ECON._plan_site_materials(state, point, {"Metals": 601.0}, stocks).is_empty())
+	assert(stocks == before)
+	var recipe: Dictionary = ECON.static_recipe("resource_depot")
+	var plan: Dictionary = ECON._plan_site_materials(state, point, recipe, stocks)
+	assert(plan.size() == 2 and plan[0]["cargo"]["Metals"] == 350.0 and plan[1]["cargo"]["Crystals"] == 40.0)
+	assert(state["planets"][0]["stock"]["Metals"] == 350.0)
+	var site: Dictionary = {"id": 100, "owner": 1, "position": point, "build_reservations": {}, "build_recipe": recipe}
+	ECON._reserve_site_materials(state, site, plan)
+	assert(ECON._site_reserved_total(site) == 640.0)
+	assert(state["planets"][0]["stock"]["Metals"] == 0.0 and state["planets"][1]["stock"]["Crystals"] == 0.0)
+	ECON._refund_site(state, site, false)
+	assert(ECON._site_reserved_total(site) == 0.0)
+	assert(state["planets"][0]["stock"]["Metals"] == 350.0 and state["planets"][1]["stock"]["Metals"] == 250.0 and state["planets"][1]["stock"]["Crystals"] == 40.0)
+
 func _initialize() -> void:
 	_test_wall_navigation()
+	_test_multi_source_materials()
 	for kind in ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "yard", "pds", "dyson_sphere", "reinforced_plating", "laser_matrix", "yard_upgrade", "production", "warehouse", "habitation", "orbital_housing"]:
 		for level in range(1, 4):
 			var expected: Dictionary = ECON._cost(kind, level)
