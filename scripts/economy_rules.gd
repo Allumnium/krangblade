@@ -5915,6 +5915,8 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 # A manual command interrupts civilian work, retaining cargo and player
 # mining preferences. On completion automation chooses a fresh legal job.
 static func _interrupt_work(ship: Dictionary) -> void:
+	for key in ["construction_supply_builder", "construction_supply_site", "construction_supply_loaded", "depot_freight"]:
+		ship.erase(key)
 	ship.erase("_next_trade_search")
 	_clear_resource_stage(ship)
 	if ship["kind"] in MILITARY_KINDS:
@@ -7228,6 +7230,13 @@ static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dicti
 			_refund_site(state, site, false)
 			ship.erase("construction_target")
 		return true
+	if _construction_freight_waiting(state, ship, int(site["id"])):
+		ship.erase("construction_loading")
+		var point: Vector2 = site["position"]
+		var node: int = patrol_node(state, graph, int(ship["owner"]), point)
+		if node >= 0:
+			_manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE)
+		return true
 	var source: int = int(site["build_source"])
 	var p: Dictionary = state["planets"][source]
 	if int(p["owner"]) != int(ship["owner"]) or not has_station(p):
@@ -7247,6 +7256,187 @@ static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dicti
 		ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
 		budget -= amount
 	return true
+
+# Construction freight uses the existing reservation at the source station.
+# The constructor remains the only entity that advances the build queue.
+static func _construction_freight_waiting(state: Dictionary, builder: Dictionary, site_id: int) -> bool:
+	for freighter in state["ships"]:
+		if int(freighter.get("construction_supply_builder", -1)) == int(builder["id"]) and int(freighter.get("construction_supply_site", -1)) == site_id and not bool(freighter.get("holding", false)):
+			return true
+	return false
+
+static func _clear_static_freight(ship: Dictionary) -> void:
+	for key in ["construction_supply_builder", "construction_supply_site", "construction_supply_loaded", "depot_freight"]:
+		ship.erase(key)
+	_finish_manual(ship)
+
+static func _static_freight_entity(state: Dictionary, id: int) -> Dictionary:
+	if id < 0:
+		return {}
+	return service_targets(state, id).get(id, {}).get("entity", {})
+
+static func _work_construction_freight(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+	if not ship.has("construction_supply_builder"):
+		return false
+	var owner: int = int(ship["owner"])
+	var builder: Dictionary = _static_freight_entity(state, int(ship["construction_supply_builder"]))
+	var site: Dictionary = _static_freight_entity(state, int(ship["construction_supply_site"]))
+	if builder.is_empty() or site.is_empty() or static_complete(site) or int(builder["owner"]) != owner or int(site["owner"]) != owner or int(builder.get("construction_target", -1)) != int(site["id"]) or _unit_order_running(builder) or bool(builder.get("holding", false)):
+		_clear_static_freight(ship)
+		return false
+	var reserved: Dictionary = site["build_reserved"]
+	if not bool(ship.get("construction_supply_loaded", false)):
+		var source: int = int(site["build_source"])
+		var p: Dictionary = state["planets"][source]
+		if int(p["owner"]) != owner or not has_station(p):
+			_clear_static_freight(ship)
+			return false
+		if cargo_free(ship) > EPS and _cargo_total({"cargo": reserved}) > EPS:
+			if not _manual_travel(state, graph, ship, source, station_position(state, source, float(state["elapsed"])), dt, STATION_DOCK_RANGE):
+				return true
+			var budget: float = _dropoff_budget(ship, dt)
+			for resource in site["build_recipe"]:
+				var amount: float = minf(budget, minf(cargo_free(ship), float(reserved.get(resource, 0.0))))
+				if amount <= EPS:
+					continue
+				reserved[resource] -= amount
+				ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
+				budget -= amount
+			if cargo_free(ship) > EPS and _cargo_total({"cargo": reserved}) > EPS:
+				return true
+		ship["construction_supply_loaded"] = true
+	if _cargo_total(ship) <= EPS:
+		_clear_static_freight(ship)
+		return false
+	var point: Vector2 = builder["position"]
+	var node: int = patrol_node(state, graph, owner, point)
+	if node < 0 or not _manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE):
+		return true
+	var budget: float = _dropoff_budget(ship, dt)
+	for resource in site["build_recipe"]:
+		var remaining: float = maxf(0.0, float(site["build_recipe"][resource]) - float(site["build_delivered"].get(resource, 0.0)) - float(builder["cargo"].get(resource, 0.0)))
+		var amount: float = minf(budget, minf(cargo_free(builder), minf(remaining, float(ship["cargo"].get(resource, 0.0)))))
+		if amount <= EPS:
+			continue
+		_record_transfer(state, int(ship["id"]), ship, int(builder["id"]), builder, resource, amount)
+		ship["cargo"][resource] -= amount
+		builder["cargo"][resource] = float(builder["cargo"].get(resource, 0.0)) + amount
+		budget -= amount
+	if _cargo_total(ship) <= EPS:
+		_clear_static_freight(ship)
+	return true
+
+# A depot is an independent buffer. Only station export surplus is sent to
+# it; only station import demand is served from it, avoiding storage loops.
+static func _depot_freight_amount(p: Dictionary, depot: Dictionary, resource: String, to_depot: bool) -> float:
+	if to_depot:
+		return minf(_surplus(p, resource), depot_free(depot, resource))
+	return minf(_need(p, resource), float(depot["cargo"].get(resource, 0.0)))
+
+static func _work_depot_freight(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+	var job: Dictionary = ship.get("depot_freight", {})
+	if job.is_empty():
+		return false
+	var owner: int = int(ship["owner"])
+	var depot: Dictionary = _static_freight_entity(state, int(job["depot"]))
+	var index: int = int(job["station"])
+	var p: Dictionary = state["planets"][index]
+	var resource: String = job["resource"]
+	var to_depot: bool = bool(job["to_depot"])
+	if depot.is_empty() or not static_complete(depot) or int(depot["owner"]) != owner or int(p["owner"]) != owner or not has_station(p):
+		_clear_static_freight(ship)
+		return false
+	var loaded: bool = bool(job.get("loaded", false))
+	var at_depot: bool = loaded == to_depot
+	var point: Vector2 = depot["position"] if at_depot else station_position(state, index, float(state["elapsed"]))
+	var node: int = patrol_node(state, graph, owner, point) if at_depot else index
+	if node < 0 or not _manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE if at_depot else STATION_DOCK_RANGE):
+		return true
+	var budget: float = _dropoff_budget(ship, dt)
+	var storage: Dictionary = depot["cargo"] if at_depot else p["stock"]
+	var entity: Dictionary = depot if at_depot else p
+	var entity_id: int = int(depot["id"]) if at_depot else station_target_id(state, index)
+	if not loaded:
+		var available: float = _depot_freight_amount(p, depot, resource, to_depot)
+		var amount: float = minf(budget, minf(cargo_free(ship), available))
+		if amount > EPS:
+			_record_transfer(state, entity_id, entity, int(ship["id"]), ship, resource, amount)
+			storage[resource] -= amount
+			ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
+			if not at_depot:
+				_record_flow(p, "Exports", resource, amount)
+		if cargo_free(ship) <= EPS or available - amount <= EPS:
+			if _cargo_total(ship) <= EPS:
+				_clear_static_freight(ship)
+			else:
+				job["loaded"] = true
+	else:
+		var capacity: float = depot_free(depot, resource) if at_depot else minf(storage_free(p, resource), _need(p, resource))
+		var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), capacity))
+		if amount > EPS:
+			_record_transfer(state, int(ship["id"]), ship, entity_id, entity, resource, amount)
+			storage[resource] = float(storage.get(resource, 0.0)) + amount
+			ship["cargo"][resource] -= amount
+			if not at_depot:
+				_record_flow(p, "Imports", resource, amount)
+		if float(ship["cargo"].get(resource, 0.0)) <= EPS or capacity - amount <= EPS:
+			_clear_static_freight(ship)
+	return true
+
+static func _try_static_freight(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+	if not autocast_ready(state, ship, "trade") or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty() or bool(ship.get("holding", false)):
+		return false
+	if _work_construction_freight(state, graph, ship, dt) or _work_depot_freight(state, graph, ship, dt):
+		return true
+	if not _is_idle_ship(ship) or _cargo_total(ship) > EPS or float(state["elapsed"]) < float(ship.get("next_static_freight_search", 0.0)):
+		return false
+	ship["next_static_freight_search"] = float(state["elapsed"]) + RESOURCE_STAGE_SEARCH_YEARS
+	var owner: int = int(ship["owner"])
+	var best_builder: Dictionary = {}
+	var best_site: Dictionary = {}
+	var best: float = INF
+	for candidate in state["ships"]:
+		if candidate.get("kind", "") != "construction_ship" or int(candidate["owner"]) != owner or _unit_order_running(candidate) or bool(candidate.get("holding", false)):
+			continue
+		var site: Dictionary = _static_freight_entity(state, int(candidate.get("construction_target", -1)))
+		if site.is_empty() or static_complete(site) or _cargo_total({"cargo": site["build_reserved"]}) <= EPS or _construction_freight_waiting(state, candidate, int(site["id"])):
+			continue
+		var distance: float = (ship["position"] as Vector2).distance_squared_to(candidate["position"])
+		if distance < best:
+			best = distance
+			best_builder = candidate
+			best_site = site
+	if not best_builder.is_empty():
+		ship["construction_supply_builder"] = best_builder["id"]
+		ship["construction_supply_site"] = best_site["id"]
+		ship["construction_supply_loaded"] = false
+		return _work_construction_freight(state, graph, ship, dt)
+	# Prefer fulfilling demand over storing excess, and choose short routes.
+	var best_job: Dictionary = {}
+	best = INF
+	for depot in state["ships"]:
+		if depot.get("kind", "") != "resource_depot" or not static_complete(depot) or int(depot["owner"]) != owner:
+			continue
+		for index in range(state["planets"].size()):
+			var p: Dictionary = state["planets"][index]
+			if int(p["owner"]) != owner or not has_station(p):
+				continue
+			var station_point: Vector2 = station_position(state, index, float(state["elapsed"]))
+			for resource in RESOURCES:
+				for to_depot in [false, true]:
+					if _depot_freight_amount(p, depot, resource, to_depot) <= EPS:
+						continue
+					var pickup: Vector2 = station_point if to_depot else depot["position"]
+					var distance: float = (ship["position"] as Vector2).distance_to(pickup) + station_point.distance_to(depot["position"])
+					if to_depot:
+						distance += 10000.0
+					if distance < best:
+						best = distance
+						best_job = {"depot": depot["id"], "station": index, "resource": resource, "to_depot": to_depot, "loaded": false}
+	if best_job.is_empty():
+		return false
+	ship["depot_freight"] = best_job
+	return _work_depot_freight(state, graph, ship, dt)
 
 static func _work_depot_pickup(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
 	if not ship.has("depot_pickup"):
@@ -12370,6 +12560,8 @@ static func _step_hull_services(state: Dictionary, frame: STEP_FRAME, ship: Dict
 	if _work_local_move(combat_graph, ship, dt, state):
 		return true
 	if _work_depot_pickup(state, combat_graph, ship, dt):
+		return true
+	if ship.get("kind", "") == "ship" and _try_static_freight(state, combat_graph, ship, dt):
 		return true
 	if ship.get("kind", "") == "construction_ship" and _work_construction(state, combat_graph, ship, dt):
 		return true

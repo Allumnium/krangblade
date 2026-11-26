@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.107.0: Idle trade-enabled freighters can collect site escrow from source stations, rendezvous with an active constructor, and hand over resources; only constructors advance construction. Automated depot routes transfer station export surplus into owned depots and fulfill station import demand from depot stock. Manual orders clear autonomous freight jobs, preserving carried cargo. Same-owner only; no depot policy UI; multi-source per-site escrow and lost cargo recovery remain follow-up. Runtime and peer validation pending.
+
 - v0.106.0: Indexed completed wall segments block non-permitted movement and non-allied weapon fire; neutral walls absorb without damage, hostile walls take intercepted hits. Blaster, laser, missiles (including splash), railgun, cannon, pirate, station and PDS paths integrated. Drag now uses full-length segments then remainder. No pathfinding detour; runtime, laser visual endpoint polish and peer validation pending.
 
 - v0.105.0: Physical wall construction: Z click node or drag connected chain (450 max segment length, 24 per drag, endpoint snap 40), independent node/segment recipes and HP (1800/3200), atomic shadow-stock reservation, geometry/rock checks, node removal cascades segments, no crew/territory, preview/render and Codex. Wall interception not enabled yet; actual movement/weapon pass next. Runtime and real ENet pending.
