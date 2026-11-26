@@ -90,6 +90,8 @@ Equal-radius adjacent ship sensor source cells are grouped into horizontal runs 
 
 Voronoi `sector_geometry.gd` builds a bounded immutable nearest-region candidate grid for maps with at least 32 sites. Each bin retains ordered site IDs whose minimum distance to an expanded query rectangle can compete with the farthest-corner bound of a known candidate. Conservative margins keep boundary candidates. `region_at` still uses exact squared-distance comparison in original ID order; small/unindexable geometry uses the linear reference. Polygon clipping, borders, links, segment checks and map extent remain unchanged. The index is derived topology, not serialized state.
 
+The private authority worker now opens `begin_authority_hull_scope` on its isolated rules script before its first job and closes it on thread stop. The existing live ID→hull dictionary references persist across jobs; launch/removal helpers update membership, and derived monotonic order tokens permit direct small ordered command/service subsets. Roster identity/count mismatch forces reconciliation; externally editable synchronous/fixture state retains per-step rebuild. Cooldown calendars reconcile on scope/state/roster setup and ordinary schedule/removal writes. Canonical hull dictionaries still own every gameplay field; no separate packed authority or replicated schema is introduced. Do not mutate the private roster directly or share its references across the mailbox.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

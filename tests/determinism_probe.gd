@@ -24,11 +24,16 @@ func _initialize() -> void:
 		push_error("Unknown scenario")
 		quit(2)
 		return
+	var retained: bool = OS.get_cmdline_user_args().has("--retained-hull-scope")
+	if retained:
+		ECON.begin_authority_hull_scope(state)
 	for tick in range(1, ticks + 1):
 		ECON.step(state, 0.1)
 		ECON.update_match_outcome(state)
 		if tick % every == 0 or tick == ticks:
 			_report(tick, state)
+	if retained:
+		ECON.end_authority_hull_scope()
 	quit()
 
 func _create(scenario: String, seed_value: int) -> Dictionary:

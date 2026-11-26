@@ -207,3 +207,16 @@ Godot 4.7.2 Linux, supplied v0.97.86 checkout with isolated vision/region patche
 | Scramble | 298 | 21269 | 391.068 | 42.995 | 18.29 |
 
 Grid index construction median of five runs 14.035 ms (whole geometry including index 266.592 ms in one separate run). Complete territory_influence on 2,000 synthetic fighters uniformly distributed across the Grid map, eight owners, fresh region cache each call, 15 alternating reference/indexed samples: median 44.022→9.723 ms; exact influence equality. These are not whole-simulation or graphical frame timings. Focused region/territory tests and worker regression pass on isolated local checkout. Main integration, ENet and graphical acceptance remain open.
+
+
+## Retained private authority hull index (v0.97.93)
+
+Local Godot 4.7.2 Linux; supplied v0.97.86 checkout with isolated retained-index and selective service query patch. Reproduce with `godot --headless --path . --script res://tests/retained_index_probe.gd`. 2,000 synthetic same-owner fighter dictionaries, eight requested hull IDs in scrambled order, 15 samples of 100 calls each; median per-call microseconds on same process, alternating unscoped and retained paths. Both paths include the same equality assertions; retained index construction is outside reuse measurements. Both service cases use the same hull-only structure-skip optimization. This is an isolated kernel/query comparison, not a whole-engine performance result.
+
+| Query | Defensive scan/rebuild (µs) | Retained/indexed (µs) |
+| --- | ---: | ---: |
+| Stable-ID index preparation | 583.31 | 0.54 |
+| Ownership validation, eight selected hulls | 200.40 | 12.66 |
+| Service references, eight requested hulls | 385.41 | 18.90 |
+
+The private scope built its roster index once in the probe. Focused lifecycle tests check launch/removal, live references, owner changes, mixed hull/structure target order, deadline restoration/expiry and scope teardown. Seed 827 400-hull battle replay with/without `--retained-hull-scope` matches complete state hashes at tick 50 (261 survivors, 2283687648) and tick 100 (198 survivors, 2608373067). Worker reference parity and 2-peer threaded ENet checks pass; existing ObjectDB exit warnings remain. Latest-main integration and combined fleet deadlines/FPS not measured. OPT-2 remains open: no canonical packed hot fields or stable dense slot compaction yet.

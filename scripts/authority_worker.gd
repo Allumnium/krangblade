@@ -106,6 +106,7 @@ func stop() -> void:
 	_in_flight = false
 
 func _run(state: Dictionary) -> void:
+	_rules.call("begin_authority_hull_scope", state)
 	while true:
 		_wake.wait()
 		_mutex.lock()
@@ -114,6 +115,7 @@ func _run(state: Dictionary) -> void:
 		_request = {}
 		_mutex.unlock()
 		if stopping:
+			_rules.call("end_authority_hull_scope")
 			return
 		if job.is_empty():
 			continue

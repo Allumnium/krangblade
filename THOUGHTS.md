@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.97.93: OPT-2 advances the private worker's live ID index and order tokens. The measured isolated preparation and small-query improvements are not a frame or full simulation speedup. Retained scope assumes exclusive roster mutation via canonical launch/removal helpers; public mutable fixture paths still rebuild. Roster identity/count fallback is not a general same-count mutation detector. Canonical typed slots/hot fields remain next; native compilation still blocked (godot-cpp, SCons, download DNS). No new gameplay mechanics.
+
 - v0.97.92: Optimization backlog reconciliation approved; use OPT-1–7 and OPT-V1–2 in TODO.md as the active source of work. Archived versioned notes are evidence/history, not independent assignments. Current native build dependency and latest-main correctness/scale acceptance remain unresolved; no new measurements in this documentation-only pass. Avoid repeating completed slices or assuming any optimization phase is fully accepted.
 
 - v0.97.91: Voronoi region lookup now scans 14–18 candidates rather than roughly 300–370 sites in tested eight-player maps. Conservative exact-query bounds preserve ties and out-of-map behavior; the grid has a one-time ~14 ms construction cost on Grid. Full 2,000-ship influence median 44→9.7 ms in isolated local fixture; verify representative live host/client publication before FPS claims. Current upload is v0.97.86, so later movement changes are not covered by the isolated patch validation.

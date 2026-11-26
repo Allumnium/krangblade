@@ -2346,8 +2346,7 @@ static func _launch_finished_hull(state: Dictionary, index: int, p: Dictionary, 
 	state["ships"].append({"id": int(item["id"]), "kind": str(item["kind"]), "owner": int(p["owner"]), "origin": index, "at": index,
 		"position": launch, "heading": Vector2.UP, "navigation_target": launch,
 		"route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": ship_max_hp(str(item["kind"])), "crew": float(item.get("population_allocated", 0.0)), "cargo": empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
-	if is_same(state, _indexed_state):
-		_hulls_by_id[int(item["id"])] = state["ships"].back()
+	_register_indexed_hull(state, state["ships"].back())
 	_launch_to_rally(state, state["ships"].back(), rally)
 
 static func _record_hull_built(state: Dictionary, owner: int, kind: String) -> void:
@@ -5270,6 +5269,17 @@ static func armed(ship: Dictionary) -> bool:
 # in the actual entity dictionary, so repair never creates a new entity.
 static var _indexed_state: Dictionary = {}
 static var _hulls_by_id: Dictionary = {}
+# Only the worker's private state may retain live references across jobs.
+# Public/synchronous callers and fixtures keep the defensive per-step rebuild.
+static var _retained_hull_state: Dictionary = {}
+static var _indexed_hull_roster: Array = []
+# Monotonic private-roster order tokens survive deletion without shifting
+# every later hull. They are derived indexes, not replicated IDs or hot data.
+static var _hull_order_by_id: Dictionary = {}
+static var _next_hull_order: int = 0
+const INDEXED_HULL_SUBSET_LIMIT: int = 32
+static var _hull_index_rebuilds: int = 0
+static var _hull_deadlines_need_sync: bool = true
 # Derived motion-dispatch sleep registry, scoped to one authoritative state.
 # No entity references or new replicated fields; wake predicates are live.
 enum MotionSleep { AWAKE, STOPPED, HELD, IDLE_MILITARY }
@@ -5283,17 +5293,68 @@ static var _deadline_events: Dictionary = {}
 static var _cooldown_deadlines = STEP_FRAME.DeadlineCalendar.new()
 static var _transfer_deadlines = STEP_FRAME.DeadlineCalendar.new()
 
-# Scope derived references to one authority step; never serialize them.
-static func _begin_hull_index(state: Dictionary) -> void:
-	_indexed_state = state
+# The worker owns this roster and routes every launch/removal through the
+# existing lifecycle helpers. No client or fixture may mutate it directly.
+# Start/stop on the authority thread, not on the main thread or per tick.
+static func begin_authority_hull_scope(state: Dictionary) -> void:
+	assert(_retained_hull_state.is_empty())
+	_retained_hull_state = state
+	_hull_index_rebuilds = 0
+	_indexed_state = {}
+	_begin_hull_index(state)
+
+static func end_authority_hull_scope() -> void:
+	if is_same(_retained_hull_state, _deadline_state):
+		_begin_deadline_schedule(_retained_hull_state, false)
+	_retained_hull_state = {}
+	_end_hull_index()
+
+static func _end_hull_index() -> void:
+	_indexed_state = {}
+	_indexed_hull_roster = []
 	_hulls_by_id.clear()
+	_hull_order_by_id.clear()
+	_next_hull_order = 0
+
+# Rebuild for public callers (who can edit fixtures in place). In the private
+# scope, append/remove hooks preserve the live dictionary references and order.
+# Roster identity/count changes conservatively force a fresh scan.
+static func _begin_hull_index(state: Dictionary) -> void:
+	var retained: bool = is_same(state, _retained_hull_state)
+	var reuse: bool = retained and is_same(state, _indexed_state) and is_same(state["ships"], _indexed_hull_roster) and _hulls_by_id.size() == state["ships"].size()
+	var deadlines_active: bool = is_same(state, _deadline_state)
+	if reuse and (not deadlines_active or not _hull_deadlines_need_sync):
+		return
+	if not reuse:
+		_indexed_state = state
+		_indexed_hull_roster = state["ships"]
+		_hulls_by_id.clear()
+		_hull_order_by_id.clear()
+		_next_hull_order = 0
+		_hull_index_rebuilds += 1
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
-		_hulls_by_id[id] = ship
-		# Reconcile externally restored or fixture-edited deadlines during
-		# the existing roster pass, not by polling a second fleet-wide loop.
-		if is_same(state, _deadline_state) and ship.has("auto_cooldown_until"):
+		if not reuse:
+			_hulls_by_id[id] = ship
+			if retained:
+				_hull_order_by_id[id] = _next_hull_order
+				_next_hull_order += 1
+		# Restore deadlines on scope/state/roster setup. Public callers keep
+		# the original per-step reconciliation for externally edited fields.
+		if deadlines_active and ship.has("auto_cooldown_until"):
 			_cooldown_deadlines.schedule(id, float(ship["auto_cooldown_until"]))
+	if deadlines_active:
+		_hull_deadlines_need_sync = false
+
+static func _register_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
+	if is_same(state, _indexed_state):
+		var id: int = int(ship["id"])
+		_hulls_by_id[id] = ship
+		if is_same(state, _retained_hull_state):
+			_hull_order_by_id[id] = _next_hull_order
+			_next_hull_order += 1
+	if is_same(state, _deadline_state) and ship.has("auto_cooldown_until"):
+		_cooldown_deadlines.schedule(int(ship["id"]), float(ship["auto_cooldown_until"]))
 
 static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
 	if ship.get("kind", "") == "warp_gate":
@@ -5309,6 +5370,29 @@ static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
 		_cooldown_deadlines.cancel(int(ship["id"]))
 	if is_same(state, _indexed_state):
 		_hulls_by_id.erase(int(ship["id"]))
+		_hull_order_by_id.erase(int(ship["id"]))
+
+# Only use direct subsets for the worker's retained roster, never arbitrary
+# mutable fixture arrays. A small sorted subset preserves roster order; large
+# selections keep the existing linear path rather than sorting the whole fleet.
+static func _can_index_hull_subset(state: Dictionary, requested: Dictionary) -> bool:
+	if not is_same(state, _retained_hull_state) or not is_same(state, _indexed_state) or requested.size() > INDEXED_HULL_SUBSET_LIMIT or requested.size() >= _hulls_by_id.size():
+		return false
+	for id in requested:
+		if not id is int:
+			return false
+	return true
+
+static func _ordered_indexed_hull_subset(requested: Dictionary) -> Array:
+	var ids: Array = []
+	for id in requested:
+		if _hull_order_by_id.has(id):
+			ids.append(id)
+	ids.sort_custom(func(a: int, b: int) -> bool: return int(_hull_order_by_id[a]) < int(_hull_order_by_id[b]))
+	var hulls: Array = []
+	for id in ids:
+		hulls.append(_hulls_by_id[id])
+	return hulls
 
 static func service_targets(state: Dictionary, only_id: int = -1, requested: Variant = null) -> Dictionary:
 	var targets: Dictionary = {}
@@ -5317,6 +5401,8 @@ static func service_targets(state: Dictionary, only_id: int = -1, requested: Var
 		hulls = [_hulls_by_id[only_id]] if _hulls_by_id.has(only_id) else []
 	elif only_id < -1:
 		hulls = []
+	elif only_id == -1 and requested is Dictionary and _can_index_hull_subset(state, requested):
+		hulls = _ordered_indexed_hull_subset(requested)
 	for ship in hulls:
 		if (only_id != -1 and int(ship["id"]) != only_id) or (requested != null and not requested.has(int(ship["id"]))):
 			continue
@@ -5326,6 +5412,14 @@ static func service_targets(state: Dictionary, only_id: int = -1, requested: Var
 		targets[ship["id"]] = {"owner": ship["owner"], "entity": ship, "position": position, "max_hp": ship_max_hp(str(ship["kind"])), "node": -1, "kind": "ship"}
 	if only_id >= 0:
 		return targets
+	if only_id == -1 and requested is Dictionary:
+		var needs_structures: bool = false
+		for id in requested:
+			if not id is int or int(id) < -1:
+				needs_structures = true
+				break
+		if not needs_structures:
+			return targets
 	var count: int = state["planets"].size()
 	for node in range(count):
 		var p: Dictionary = state["planets"][node]
@@ -6205,7 +6299,8 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 		var craft: Dictionary = _hulls_by_id.get(ids[0], {})
 		return [craft] if not craft.is_empty() and int(craft["owner"]) == player and craft.get("kind", "") != "warp_gate" and not colony_morphing(craft) else []
 	var units: Array = []
-	for ship in state["ships"]:
+	var candidates: Array = _ordered_indexed_hull_subset(requested) if _can_index_hull_subset(state, requested) else state["ships"]
+	for ship in candidates:
 		if requested.has(ship["id"]):
 			if int(ship["owner"]) != player or ship.get("kind", "") == "warp_gate" or colony_morphing(ship):
 				return []
@@ -10709,6 +10804,9 @@ static func _next_ai_slot(now: float, player: int) -> float:
 
 static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_sleep_enabled: bool = true, deadline_schedule_enabled: bool = true, persistent_avoidance_enabled: bool = true, persistent_combat_enabled: bool = true, persistent_logistics_enabled: bool = true, economy_rates_enabled: bool = true) -> void:
 	_begin_deadline_schedule(state, deadline_schedule_enabled)
+	# Before economy work, repair any unexpected private roster replacement.
+	if is_same(state, _retained_hull_state) and (not is_same(state["ships"], _indexed_hull_roster) or _hulls_by_id.size() != state["ships"].size()):
+		_begin_hull_index(state)
 	_rock_plan_tick += 1
 	if not is_same(state, _trajectory_state) or not is_same(state["ships"], _trajectory_roster):
 		_direct_trajectories.clear()
@@ -10748,8 +10846,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	update_exploration(state)
 	_update_objectives(state)
 	_profile_stage(profile, "Conquest / exploration", started)
-	_indexed_state = {}
-	_hulls_by_id.clear()
+	if not is_same(state, _retained_hull_state):
+		_end_hull_index()
 	frame.graph.erase("travel_influence")
 	frame.graph.erase("travel_permissions")
 	_sector_query_graph = {}
@@ -10760,6 +10858,7 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 # remain authoritative and are rebuilt on state/roster replacement.
 static func _begin_deadline_schedule(state: Dictionary, enabled: bool) -> void:
 	if not enabled:
+		_hull_deadlines_need_sync = true
 		_deadline_state = {}
 		_deadline_roster = []
 		_deadline_events = {}
@@ -10767,6 +10866,7 @@ static func _begin_deadline_schedule(state: Dictionary, enabled: bool) -> void:
 		_transfer_deadlines.clear()
 		return
 	if not is_same(state, _deadline_state):
+		_hull_deadlines_need_sync = true
 		_deadline_state = state
 		_deadline_roster = []
 		_deadline_events = {}
@@ -10775,6 +10875,7 @@ static func _begin_deadline_schedule(state: Dictionary, enabled: bool) -> void:
 	if not is_same(state["ships"], _deadline_roster):
 		_deadline_roster = state["ships"]
 		_cooldown_deadlines.clear()
+		_hull_deadlines_need_sync = true
 		# The existing hull index pass will populate live deadlines.
 
 static func _sync_transfer_deadlines(events: Dictionary) -> void:
