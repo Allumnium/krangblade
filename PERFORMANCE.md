@@ -236,3 +236,19 @@ Godot 4.7.2 Linux, same supplied v0.97.86 checkout on Xeon Platinum 8573C (5 exp
 | battle | 1000 | 1x | 12 | patched fallback | 218.099 | 633.273 | 75.484 | 257.715 |
 
 All samples retained the initial ship count, all batches missed 100 ms. Peaceful median combat/repair fell 40% (33.558 ms per 1x batch) and 33% (96.763 ms per 5x batch) respectively, while total medians fell 3.4% and 9.1%. Active battle total median rose 0.6%; tail times are worse in all three whole-batch samples. Small sample count and shared-container variation limit inference; do not claim improved tails, graphics or general speedup. Repeat same-machine integrated workloads for acceptance. Focused regressions verify exact serialized hull/structure state and threat snapshots with bilateral neutrality, legacy teams, cloaking, war declaration, previous target, pirates, explicit orders, hostile structures, retreat/move-only and mixed civilian readers. Full economy and actual worker, solo and 50/100-tick AI/battle reference replays pass on isolated checkout. Two-peer threaded ENet host and client returned PASS/exit 0; the host reported two ObjectDB instances leaked at exit. Native dependencies unavailable; full current-main integration remains open.
+
+
+## Shared empty-rock halos and accepted sweep reuse (v0.97.95)
+
+Godot 4.7.2 Linux, AMD EPYC 9V74 (5 reported logical CPUs; container CPU quota 4), supplied v0.97.86 checkout at 72d96f4 plus isolated patch. Verified exact affected source regions against v0.97.94 main before and after applying the patch. All comparisons use the same local checkout and seed 827, eight players, original fleet harness, sequential baseline and patched runs; no concurrent tests during performance runs. This is not a combined v0.97.95 main benchmark.
+
+| Scenario | Ships | Speed | Batches | Path | Total p50 ms | Total p95 ms | Other movement p50 ms | Other movement p95 ms | Misses |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| swarm | 2000 | 1x | 16 | reference | 419.844 | 465.501 | 285.646 | — | 16/16 |
+| swarm | 2000 | 1x | 16 | patched | 388.262 | 454.520 | 257.396 | 314.650 | 16/16 |
+| swarm | 2000 | 1x | 20 | reference | 470.303 | 526.129 | 310.239 | 371.332 | 20/20 |
+| swarm | 2000 | 1x | 20 | patched | 431.067 | 474.280 | 288.024 | 341.891 | 20/20 |
+| dispersed | 1000 | 5x | 12 | reference | 677.266 | 715.400 | 220.144 | 255.058 | 12/12 |
+| dispersed | 1000 | 5x | 12 | patched | 683.307 | 780.090 | 221.827 | 248.653 | 12/12 |
+
+Swarm retains all 2,000 hulls, dispersed ends at 991 in both paths. Swarm total median improves 7.5% and 8.3% in two short sequential runs; repeat movement median improves 7.2%. Dispersed total median worsens 0.9%, p95 worsens; no universal improvement claim. All miss the 100 ms budget; no graphical measurements. Focused 600-case exact crowded navigation comparisons across cell boundaries/budgets plus cached-route and obstacle insertion/depletion parity pass. Full economy regression exits 0 with no script/assertion errors; seeded battle checkpoints match original at ticks 50 and 100 (261/198 survivors, hashes 2283687648/2608373067). Authority-worker and solo tests exit 0 and print PASS; solo reports two leaked ObjectDB instances at exit. Real 2-peer threaded smoke host/client exit 0 and print PASS. Current-main integrated validation, native build and performance acceptance remain open.

@@ -19,6 +19,8 @@ static var _movement_field_counts: Array[int] = []
 static var _rock_cells: Dictionary = {}
 # Ordered broad-phase candidates, valid until the rock index is rebuilt.
 static var _rock_windows: Dictionary = {}
+# Shared obstacle-free origin cells, independent of ship heading/neighbor steering.
+static var _empty_rock_halos: Dictionary = {}
 const ROCK_WINDOW_CACHE_LIMIT: int = 4096
 # Exact route requests within a substep; never share mutable ship routes.
 static var _rock_route_queries: Dictionary = {}
@@ -2816,6 +2818,7 @@ static func _refresh_movement_fields(fields: Array) -> void:
 	_movement_fields.clear()
 	_movement_field_counts.clear()
 	_rock_cells.clear()
+	_empty_rock_halos.clear()
 	_rock_windows.clear()
 	_rock_route_queries.clear()
 	_direct_rock_corridors.clear()
@@ -3313,7 +3316,22 @@ static func _direct_motion_sample(ship: Dictionary, before: Vector2, target: Vec
 			after = before.lerp(after, 1.0)
 	return after
 
-static func _navigate(ship: Dictionary, target: Vector2, budget: float, direct_fast_path: bool = true) -> float:
+# Every possible lookahead and actual steered step is inside this padded
+# five-by-five origin-cell neighborhood when the travel budget is bounded.
+# The rock index already includes all obstacle disks and clearance padding.
+# Share the proof across crowded hulls; cached per-hull detours still win.
+static func _shared_empty_rock_halo(before: Vector2, target: Vector2, budget: float, id: int) -> bool:
+	if not is_finite(budget) or budget <= EPS or budget + 96.0 > ROCK_CELL * 2.0 - 1.0 or not before.is_finite() or not target.is_finite() or _rock_routes.has(id):
+		return false
+	var cell: Vector2i = _rock_cell(before)
+	if _empty_rock_halos.has(cell):
+		return bool(_empty_rock_halos[cell])
+	var clear: bool = _empty_rock_rectangle(cell - Vector2i(2, 2), cell + Vector2i(2, 2))
+	if _empty_rock_halos.size() < ROCK_WINDOW_CACHE_LIMIT:
+		_empty_rock_halos[cell] = clear
+	return clear
+
+static func _navigate(ship: Dictionary, target: Vector2, budget: float, direct_fast_path: bool = true, shared_rock_fast_path: bool = true) -> float:
 	ship["navigation_target"] = target
 	var before: Vector2 = ship["position"]
 	var avoid_rocks: bool = ship.get("kind", "") != "miner" and not _rock_cells.is_empty()
@@ -3321,7 +3339,8 @@ static func _navigate(ship: Dictionary, target: Vector2, budget: float, direct_f
 		var sample: Variant = _direct_motion_sample(ship, before, target, budget, avoid_rocks)
 		if sample != null:
 			return _commit_motion_sample(ship, before, sample)
-	if avoid_rocks:
+	var empty_halo: bool = avoid_rocks and shared_rock_fast_path and _shared_empty_rock_halo(before, target, budget, int(ship.get("id", -1)))
+	if avoid_rocks and not empty_halo:
 		target = _field_detour(before, target, budget, int(ship.get("id", -1)))
 	var direct: Vector2 = before.direction_to(target)
 	# Do not steer away from a planned safe corridor to dodge a hull.
@@ -3329,11 +3348,20 @@ static func _navigate(ship: Dictionary, target: Vector2, budget: float, direct_f
 	var after: Vector2 = before.move_toward(target, maxf(0.0, budget))
 	if not steering.is_equal_approx(direct):
 		var steered: Vector2 = before + steering * minf(maxf(0.0, budget), before.distance_to(target))
-		if not avoid_rocks or _clip_rock_step(before, steered).is_equal_approx(steered):
+		if not avoid_rocks:
 			after = steered
+		else:
+			var clipped: Vector2 = _empty_rock_sweep(before, steered) if empty_halo else _clip_rock_step(before, steered)
+			if clipped.is_equal_approx(steered):
+				# The original final sweep uses the same before/steered pair.
+				return _commit_motion_sample(ship, before, clipped)
 	if avoid_rocks:
-		after = _clip_rock_step(before, after)
+		after = _empty_rock_sweep(before, after) if empty_halo else _clip_rock_step(before, after)
 	return _commit_motion_sample(ship, before, after)
+
+# Preserve the exact reference sweep arithmetic even in an empty cell halo.
+static func _empty_rock_sweep(before: Vector2, after: Vector2) -> Vector2:
+	return after if (after - before).length_squared() <= EPS * EPS else before.lerp(after, 1.0)
 
 static func _commit_motion_sample(ship: Dictionary, before: Vector2, after: Vector2) -> float:
 	var displacement: Vector2 = after - before

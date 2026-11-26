@@ -94,6 +94,8 @@ The private authority worker now opens `begin_authority_hull_scope` on its isola
 
 At the original combat boundary, `_peaceful_combat_possible` checks actual hull/structure owners, current group hostility and live rogue/cloak/target/order/pursuit guards. When no interaction is possible, `_combat` skips full target/health/sector/cell geometry and uses the existing hull stance, retreat and blaster processing plus exact inactive weapon metadata/deadline writes; station/PDS and cloak cleanup still run. If civilian threats are requested the existing frame builder runs in threat-only mode, retaining its exact ordered positions, groups, local-sector signatures and cells. No persistent peace certificate; the full combat path wakes on the same substep whenever proof fails. No new replicated state or reduced update rate.
 
+`_shared_empty_rock_halo` shares a bounded 5x5 origin-cell obstacle absence proof with all eligible movement requests, including crowded hulls. The original 240-unit (or budget+96) detour lookahead and any budget-limited steered step are contained in the certified padded index area. Existing detours, large/invalid budgets and occupied halos use the ordinary detour/sweep path. Every rock-index rebuild clears the bounded cache; no movement/contact eligibility changes. The integrator preserves exact empty-sweep lerp and commits the already calculated accepted steered sweep rather than repeating it. No authoritative or serialized fields added.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.
