@@ -5020,10 +5020,10 @@ func _draw_map_content() -> void:
 		for emitter in range(weapons.size()):
 			var weapon: Dictionary = weapons[emitter]
 			var target: int = int(weapon["target"])
-			if not poses.has(target) or float(weapon["laser_until"]) < float(state["elapsed"]):
+			if (not poses.has(target) and not weapon.has("wall_laser_endpoint")) or float(weapon["laser_until"]) < float(state["elapsed"]):
 				continue
 			var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, float(state["elapsed"])))
-			var endpoint: Vector2 = poses[target]["point"]
+			var endpoint: Vector2 = _screen_point(weapon["wall_laser_endpoint"]) if weapon.has("wall_laser_endpoint") else poses[target]["point"]
 			var offset: Vector2 = center.direction_to(endpoint).orthogonal() * (float(emitter) * 2.0 - float(weapons.size() - 1)) * 4.0 * _ship_scale(true)
 			_draw_owned_laser(center + offset, endpoint, int(system["owner"]), 1.5)
 		var defenses: Dictionary = state["planets"][index].get("pds", {})
@@ -5033,12 +5033,13 @@ func _draw_map_content() -> void:
 		for slot in defenses:
 			var battery: Dictionary = defenses[slot]
 			var target: int = int(battery["target"])
-			if not poses.has(target) or float(battery["laser_until"]) < float(state["elapsed"]):
+			if (not poses.has(target) and not battery.has("wall_laser_endpoint")) or float(battery["laser_until"]) < float(state["elapsed"]):
 				continue
 			var origin: Vector2 = _screen_point(points[index])
 			if celestial_view.planet_detail_opacity(index, radius) >= 0.5:
 				origin += celestial_view.body_position(celestial_view.system_visual(index, state)["bodies"][slot], radius, celestial_view.orbit_time(state))
-			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
+			var endpoint: Vector2 = _screen_point(battery["wall_laser_endpoint"]) if battery.has("wall_laser_endpoint") else poses[target]["point"]
+			_draw_owned_laser(origin, endpoint, int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
 		var shooter: int = int(ship["id"])
 		if not poses.has(shooter):
@@ -5069,7 +5070,10 @@ func _draw_map_content() -> void:
 				world_batches.queue_projectile(tip, 2.0, Color("#fff2d2"))
 		var target: int = int(ship.get("combat_target", -1))
 		var yard_target: int = int(ship.get("yard_target", -1))
-		if poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
+		var wall_beam: bool = ship.has("wall_laser_endpoint") and float(ship.get("wall_laser_until", -1.0)) >= float(state["elapsed"])
+		if wall_beam:
+			pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), _screen_point(ship["wall_laser_endpoint"]), 1.5 if yard_target < -1 else 1.0)
+		if not wall_beam and poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
 			var encoded: int = -2 - yard_target
 			var count: int = (state["planets"] as Array).size()
 			if encoded < count * 3:
@@ -5090,7 +5094,7 @@ func _draw_map_content() -> void:
 					if celestial_view.planet_detail_opacity(pds_index, pds_radius) >= 0.5:
 						endpoint += celestial_view.body_position(celestial_view.system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, celestial_view.orbit_time(state))
 					pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), endpoint, 1.5)
-		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
+		if not wall_beam and poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
 			pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), poses[target]["point"], 1.0)
 		if bool(ship.get("retreating", false)) and poses.has(shooter) and (ship["route"] as Array).is_empty():
 			var site: int = int(ship.get("repair_site", -1))

@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.107.1: Use authoritative wall impact endpoints for ship, station and PDS beams; prevent duplicate beams through walls. Correct outdated Codex descriptions of walls and freight. Visual/runtime/ENet validation pending.
+
 - v0.107.0: Idle trade-enabled freighters can collect site escrow from source stations, rendezvous with an active constructor, and hand over resources; only constructors advance construction. Automated depot routes transfer station export surplus into owned depots and fulfill station import demand from depot stock. Manual orders clear autonomous freight jobs, preserving carried cargo. Same-owner only; no depot policy UI; multi-source per-site escrow and lost cargo recovery remain follow-up. Runtime and peer validation pending.
 
 - v0.106.0: Indexed completed wall segments block non-permitted movement and non-allied weapon fire; neutral walls absorb without damage, hostile walls take intercepted hits. Blaster, laser, missiles (including splash), railgun, cannon, pirate, station and PDS paths integrated. Drag now uses full-length segments then remainder. No pathfinding detour; runtime, laser visual endpoint polish and peer validation pending.
