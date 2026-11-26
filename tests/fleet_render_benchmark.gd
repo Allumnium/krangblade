@@ -122,6 +122,7 @@ func _run() -> void:
 	var snapshot_samples: Array[float] = []
 	var apply_samples: Array[float] = []
 	var publish_samples: Array[float] = []
+	var subscriber_samples: Dictionary = {}
 	var first_revision: int = int(session.get("motion_revision"))
 	var observed_revision: int = first_revision
 	var initial_elapsed: float = float(state["elapsed"])
@@ -141,6 +142,12 @@ func _run() -> void:
 			snapshot_samples.append(float(session.get("diagnostic_worker_snapshot_ms")))
 			apply_samples.append(float(session.get("diagnostic_worker_apply_ms")))
 			publish_samples.append(float(session.get("diagnostic_worker_publish_ms")))
+			if publish_samples.back() > 0.0:
+				for key in match_scene.get("publication_profile"):
+					if not subscriber_samples.has(key):
+						var series: Array[float] = []
+						subscriber_samples[key] = series
+					subscriber_samples[key].append(float(match_scene.get("publication_profile")[key]))
 			var published: Dictionary = session.get("economy")
 			minimum_ships = mini(minimum_ships, published["ships"].size())
 			peak_ships = maxi(peak_ships, published["ships"].size())
@@ -199,6 +206,10 @@ func _run() -> void:
 		result["worker_snapshot_ms"] = _stats(snapshot_samples)
 		result["worker_main_thread_apply_ms"] = _stats(apply_samples)
 		result["worker_main_thread_publish_ms"] = _stats(publish_samples)
+		var subscriber_stats: Dictionary = {}
+		for key in subscriber_samples:
+			subscriber_stats[key] = _stats(subscriber_samples[key])
+		result["publication_subscribers_ms"] = subscriber_stats
 		result["worker_overruns"] = worker_overruns
 		result["simulation_batches_over_100ms"] = sim_samples.filter(func(sample: float) -> bool: return sample > 100.0).size()
 	print("FLEET_RENDER " + JSON.stringify(result))

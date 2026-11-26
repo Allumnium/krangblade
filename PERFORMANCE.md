@@ -316,3 +316,16 @@ Live graphical diagnostic: same Linux CPU, Xvfb/llvmpipe software OpenGL, 1280x7
 | 400 | 181.604 | 112.499 | 9.426 | 46.365 | 46.347 | 7.07 |
 
 Publication is a measured main-thread stall worth isolating by subscriber and reducing without changing urgent updates. No graphical FPS acceptance claim. Focused native geometry, exact battle replay, authority worker, solo and two-peer threaded ENet passed; full economy not repeated for this slice, Windows and broader peer/5x acceptance open; ObjectDB exit warnings persist.
+
+## Developer speed control publication invalidation (2026-11-26, v0.97.100)
+
+Same Linux Godot 4.7.2/Xeon 8573C software OpenGL (Xvfb/llvmpipe), 1280x720, zoom 5, seed 827, 120 measured frames per run, live solo threaded synthetic allied fleet, 1x, native enabled throughout. Same instrumented source and native library; only swap the previous unconditional speed control refresh vs guarded writes. The hidden developer speed buttons previously wrote theme overrides on every publication, even unchanged; these invalidate theme/layout caches. The new code checks actual button state/style, rather than skipping whole refreshes by time. No simulation or network cadence changes.
+
+| Hulls | Refresh | Speed controls p50 | Inspector p50 | Publication p95 | Frame p50 | Frame p95 | Batches/s |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | Old | 10.918 | 14.768 | 29.407 | 54.186 | 80.991 | 9.93 |
+| 100 | Guarded | 0.018 | 3.542 | 16.095 | 51.868 | 80.552 | 9.96 |
+| 400 | Old | 11.734 | 18.261 | 39.842 | 97.846 | 144.028 | 6.58 |
+| 400 | Guarded | 0.018 | 5.965 | 33.066 | 93.477 | 146.741 | 7.43 |
+
+Times in ms. Subscriber stats sample the last synchronous callback on observed publishing batches; nested fog and speed-control values are subsets, not additive. Publication includes all callbacks, per-observed-batch with zeros on nonpublishing batches. Fog p50 in guarded runs 6.950/8.060 ms, territory+fog p50 8.100/11.466 ms. 400 frame maximum rises 177.197→227.831 ms and publication maximum rises 50.875→71.013 ms; short sequential measurements do not establish improved frame tails or stable hardware FPS. Focused speed-control test checks theme invalidations, local toggle recovery, authority speed and match eligibility; no pixel or layout assertions. Added to manual validation. Import, changed-script parsing, exact 50/100-tick battle replay, authority worker, solo, two-peer threaded ENet passed (exit 0); peer ObjectDB warnings and live-render exit resource warnings persist. Full economy, 3/8-peer, Windows and hardware acceptance not rerun. Next isolate fog observation and visibility stamp costs; retain immediate authoritative state and discovery semantics.

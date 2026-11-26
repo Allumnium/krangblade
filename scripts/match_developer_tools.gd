@@ -81,15 +81,25 @@ func refresh_speed(state: Dictionary) -> void:
 	for speed in time_buttons:
 		var button: Button = time_buttons[speed]
 		var active: bool = int(speed) == current
-		button.disabled = not can_change
-		button.set_pressed_no_signal(active)
-		# Keep the replicated speed visible even after the match ends.
+		if button.disabled == can_change:
+			button.disabled = not can_change
+		# A rejected request can leave a locally toggled button out of sync.
+		# Always reconcile actual state, even when the authority speed is unchanged.
+		if button.button_pressed != active:
+			button.set_pressed_no_signal(active)
+		# Theme override writes invalidate layout/theme caches even on hidden
+		# controls. Only change overrides when their actual values differ.
 		if active:
-			button.add_theme_stylebox_override("disabled", button.get_theme_stylebox("pressed"))
-			button.add_theme_color_override("font_disabled_color", HUD.ACCENT)
+			var pressed_style: StyleBox = button.get_theme_stylebox("pressed")
+			if not button.has_theme_stylebox_override("disabled") or not is_same(button.get_theme_stylebox("disabled"), pressed_style):
+				button.add_theme_stylebox_override("disabled", pressed_style)
+			if not button.has_theme_color_override("font_disabled_color") or button.get_theme_color("font_disabled_color") != HUD.ACCENT:
+				button.add_theme_color_override("font_disabled_color", HUD.ACCENT)
 		else:
-			button.remove_theme_stylebox_override("disabled")
-			button.remove_theme_color_override("font_disabled_color")
+			if button.has_theme_stylebox_override("disabled"):
+				button.remove_theme_stylebox_override("disabled")
+			if button.has_theme_color_override("font_disabled_color"):
+				button.remove_theme_color_override("font_disabled_color")
 
 func update_perf(delta: float) -> void:
 	if is_instance_valid(diagnostic_label):
