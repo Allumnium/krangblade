@@ -505,20 +505,62 @@ static func team_vision(state: Dictionary, team: int, ship_cache: Variant = null
 			# Structure sight mutates the result below; cache only the ship mask.
 			ship_cache["cells"] = cells.duplicate()
 	var elapsed: float = float(state["elapsed"])
-	var base_radius: float = sector_base_radius(state["map"])
+	var base_radius: float
+	if ship_cache != null and ship_cache.get("base_points") == state["map"]["points"] and ship_cache.has("base_radius"):
+		base_radius = float(ship_cache["base_radius"])
+	else:
+		base_radius = sector_base_radius(state["map"])
+		if ship_cache != null:
+			# Geometry is normally immutable; detach the key to detect replacements or edits.
+			ship_cache["base_points"] = (state["map"]["points"] as Array).duplicate()
+			ship_cache["base_radius"] = base_radius
+	var fixed_sources: Dictionary = {}
+	var moving_sources: Array[Vector2] = []
+	var moving_radii: Array[float] = []
 	for index in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][index]
 		if not _shares_group_vision(state, team, _combat_group(state, int(system["owner"]))):
 			continue
+		var point: Vector2 = state["map"]["points"][index]
 		var weight: int = system_presence_weight(system)
 		if weight > 0:
-			_stamp_vision(cells, state["map"]["points"][index], territory_kernel_reach(base_radius, weight) + TERRITORY_VISION_MARGIN)
+			var radius: float = territory_kernel_reach(base_radius, weight) + TERRITORY_VISION_MARGIN
+			if ship_cache == null:
+				_stamp_vision(cells, point, radius)
+			else:
+				fixed_sources[point] = maxf(float(fixed_sources.get(point, 0.0)), radius)
 		if has_station(system):
-			_stamp_vision(cells, station_position(state, index, elapsed), STATION_SIGHT)
+			var station: Vector2 = station_position(state, index, elapsed)
+			if ship_cache == null:
+				_stamp_vision(cells, station, STATION_SIGHT)
+			else:
+				moving_sources.append(station)
+				moving_radii.append(STATION_SIGHT)
 		for slot in range(system["yards"].size()):
-			_stamp_vision(cells, shipyard_position(state, index, slot, elapsed), YARD_SIGHT)
+			var yard: Vector2 = shipyard_position(state, index, slot, elapsed)
+			if ship_cache == null:
+				_stamp_vision(cells, yard, YARD_SIGHT)
+			else:
+				moving_sources.append(yard)
+				moving_radii.append(YARD_SIGHT)
 		if not system.get("pds", {}).is_empty():
-			_stamp_vision(cells, state["map"]["points"][index], PDS_SIGHT)
+			if ship_cache == null:
+				_stamp_vision(cells, point, PDS_SIGHT)
+			else:
+				fixed_sources[point] = maxf(float(fixed_sources.get(point, 0.0)), PDS_SIGHT)
+	if ship_cache != null:
+		# Exact union keyed by live eligible centers and radii. Population,
+		# ownership, diplomacy and construction can invalidate it immediately.
+		if ship_cache.get("fixed_sources") != fixed_sources or not ship_cache.has("fixed_cells"):
+			var fixed_cells: Dictionary = {}
+			for point: Vector2 in fixed_sources:
+				_stamp_vision(fixed_cells, point, float(fixed_sources[point]))
+			ship_cache["fixed_sources"] = fixed_sources
+			ship_cache["fixed_cells"] = fixed_cells
+		cells.merge(ship_cache["fixed_cells"], true)
+		# Orbiting sources still use the live exact positions each call.
+		for i in range(moving_sources.size()):
+			_stamp_vision(cells, moving_sources[i], moving_radii[i])
 	return cells
 
 static func discovered(state: Dictionary, player: int, kind: String, index: int) -> bool:

@@ -19,6 +19,7 @@ var _rock_memory: Array = []
 var _rock_views: Array = []
 var _initial_map: Dictionary = {}
 var _observed_at: Dictionary = {}
+var profile: Dictionary = {}
 
 func update(state: Dictionary, player: int, motion_revision: Variant, map_size: Vector2) -> bool:
 	if state.is_empty():
@@ -60,12 +61,24 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 	if revision == _revision:
 		return false
 	_revision = revision
+	profile.clear()
+	var started: int = Time.get_ticks_usec()
 	var prior_live: Dictionary = _live
 	_live = ECONOMY.team_vision(state, team, _ship_vision_cache)
-	_explored.merge(_live, true)
+	profile["vision"] = float(Time.get_ticks_usec() - started) / 1000.0
+	started = Time.get_ticks_usec()
+	var coverage_changed: bool = _live != prior_live
+	if coverage_changed:
+		_explored.merge(_live, true)
 	_observe_sites(state, player, map_size)
+	profile["sites"] = float(Time.get_ticks_usec() - started) / 1000.0
+	started = Time.get_ticks_usec()
 	_observe_rocks(state, map_size)
-	_update_mask(prior_live, map_size)
+	profile["rocks"] = float(Time.get_ticks_usec() - started) / 1000.0
+	started = Time.get_ticks_usec()
+	if coverage_changed or _mask_image == null:
+		_update_mask(prior_live, map_size)
+	profile["mask"] = float(Time.get_ticks_usec() - started) / 1000.0
 	return true
 
 # The explored set only grows until map identity changes. A cell leaving
