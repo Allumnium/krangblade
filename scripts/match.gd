@@ -2157,7 +2157,7 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 	elif mode == "repair":
 		var target: int = _entity_hit(_state(), point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
 		if target != -1:
-			var miners: Array[int] = _selected_miners()
+			var miners: Array[int] = _selected_repairers()
 			miners.erase(target)
 			_issue_order(miners, {"kind": "repair", "target": target}, append)
 	elif mode == "unload":
@@ -2362,6 +2362,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			status = "Delivering Organics" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for storage"
 		status += "\nOrganics %.1f / %.0f t · %s" % [float(ship["cargo"].get("Organics", 0.0)), ECONOMY.COLONY_CAPACITY, "Farming" if ECONOMY.autocast_enabled(ship, "farm") and not bool(ship.get("salvage_delivery", false)) and ECONOMY.cargo_free(ship) > ECONOMY.EPS else "Farm idle"]
 	if kind == "science_ship":
+		if ship.has("repair_target") or ship.has("repair_order"):
+			status = "Repairing" if ship.has("repair_target") else "Approaching repair target"
 		if ECONOMY.cargo_total(ship) > ECONOMY.EPS:
 			status += "\nAntimatter secured · 1 unit"
 		elif ship.get("unit_order", {}).get("kind", "") == "collect":
@@ -2426,7 +2428,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	var has_cargo_hold: bool = false
 	var has_farm: bool = false
 	var loaded_farm: bool = false
-	var has_miners: bool = not _selected_miners().is_empty()
+	var has_repairers: bool = not _selected_repairers().is_empty()
 	for craft in _selected_ship_entries(state):
 		if _command_entry(craft):
 			loaded_owned = loaded_owned or ECONOMY.cargo_total(craft) > ECONOMY.EPS
@@ -2437,19 +2439,19 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			loaded_farm = loaded_farm or (craft["kind"] == "colony_ship" and ECONOMY.cargo_total(craft) > ECONOMY.EPS)
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
-		button.visible = (id != "repair" or has_miners) and (id not in ["load", "unload"] or has_cargo_hold)
-		button.disabled = command_kind.is_empty() or owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not _selected_ship_entries(state).any(func(craft: Dictionary) -> bool: return _command_entry(craft) and craft["kind"] in ECONOMY.MILITARY_KINDS)) or (id == "repair" and not has_miners) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+		button.visible = (id != "repair" or has_repairers) and (id not in ["load", "unload"] or has_cargo_hold)
+		button.disabled = command_kind.is_empty() or owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not _selected_ship_entries(state).any(func(craft: Dictionary) -> bool: return _command_entry(craft) and craft["kind"] in ECONOMY.MILITARY_KINDS)) or (id == "repair" and not has_repairers) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
 	var transform: Button = command_buttons["transform"]
 	var transform_extra: Control = command_card.get_child(17)
-	var transform_slot: Control = transform_extra if has_miners else command_card.get_child(7)
+	var transform_slot: Control = transform_extra if has_repairers else command_card.get_child(7)
 	if transform.get_parent() != transform_slot:
 		transform.reparent(transform_slot, false)
 		transform.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	transform_extra.visible = has_farm and has_miners
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var science: bool = command_kind == "science_ship" and state.get("objectives", {}).get(_me(), {}).get("rewards", []).has("warp_gate")
 	var gate: bool = command_kind == "warp_gate"
 	transform.visible = has_farm or science or gate
+	transform_extra.visible = transform.visible and has_repairers
 	if gate:
 		for button in command_buttons.values():
 			button.visible = button == transform
@@ -3928,10 +3930,10 @@ func _cycle_command_kind(reverse: bool) -> bool:
 	_refresh()
 	return true
 
-func _selected_miners() -> Array[int]:
+func _selected_repairers() -> Array[int]:
 	var miners: Array[int] = []
 	for craft in _selected_ship_entries(_state()):
-		if _command_entry(craft) and craft["kind"] == "miner":
+		if _command_entry(craft) and ECONOMY.supports_autocast(craft, "repair"):
 			miners.append(int(craft["id"]))
 	return miners
 

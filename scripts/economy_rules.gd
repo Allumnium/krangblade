@@ -169,6 +169,7 @@ const AUTO_SALVAGE_HOPS: int = 2
 const MINER_LASER_DAMAGE: float = 2.0
 const MINER_ASTEROID_MULTIPLIER: float = 1.5
 const MINER_REPAIR_RATE: float = 10.0
+const SCIENCE_REPAIR_RATE: float = 20.0
 const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
 const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED # Map-scale reference speed.
@@ -5571,7 +5572,7 @@ static func service_targets(state: Dictionary, only_id: int = -1, requested: Var
 static func _movement_service_targets(state: Dictionary) -> Dictionary:
 	var requested: Dictionary = {}
 	for craft in state["ships"]:
-		if craft.get("kind", "") == "miner":
+		if supports_autocast(craft, "repair"):
 			return service_targets(state)
 		if craft.has("attack_order"):
 			requested[int(craft["attack_order"])] = true
@@ -5639,7 +5640,8 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 	match mode:
 		"explore": return ship.get("kind", "") == "scout"
 		"wander": return SHIP_KINDS.has(ship.get("kind", ""))
-		"mine", "repair": return ship.get("kind", "") == "miner"
+		"mine": return ship.get("kind", "") == "miner"
+		"repair": return ship.get("kind", "") in ["miner", "science_ship"]
 		"salvage": return ship.get("kind", "") in ["ship", "miner"]
 		"trade": return ship.get("kind", "") == "ship"
 		"farm": return ship.get("kind", "") == "colony_ship"
@@ -5734,7 +5736,7 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 
 static func set_repair_auto(state: Dictionary, player: int, ids: Array, enabled: bool) -> bool:
 	var units: Array = _owned_units(state, player, ids)
-	if units.is_empty() or units.any(func(ship: Dictionary) -> bool: return ship["kind"] != "miner"):
+	if units.is_empty() or units.any(func(ship: Dictionary) -> bool: return not supports_autocast(ship, "repair")):
 		return false
 	for ship in units:
 		ship["repair_auto"] = enabled
@@ -5820,7 +5822,7 @@ static func _repair_retry_due(ship: Dictionary, now: float) -> bool:
 	return REPAIR_QUERIES.retry_due(ship, now, EPS)
 
 static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dictionary, targets: Dictionary, dt: float, damaged_cells: Variant = null, repair_neighborhoods: Dictionary = {}) -> bool:
-	if ship["kind"] != "miner":
+	if not supports_autocast(ship, "repair"):
 		return false
 	ship.erase("repair_target")
 	var explicit: bool = ship.has("repair_order")
@@ -5867,7 +5869,7 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 			_navigate(ship, point, minf(ship_speed(str(ship.get("kind", "ship"))) * dt, pos.distance_to(point) - LASER_RANGE * 0.8))
 	else:
 		var entity: Dictionary = ref["entity"]
-		entity["hp"] = minf(float(ref["max_hp"]), float(entity.get("hp", ref["max_hp"])) + MINER_REPAIR_RATE * dt)
+		entity["hp"] = minf(float(ref["max_hp"]), float(entity.get("hp", ref["max_hp"])) + (SCIENCE_REPAIR_RATE if ship["kind"] == "science_ship" else MINER_REPAIR_RATE) * dt)
 		ship["repair_target"] = target_id
 		ship["mining_active"] = false
 		ship["navigation_target"] = ship["position"]
@@ -6665,7 +6667,7 @@ static func _valid_targeted_unit_order(state: Dictionary, graph: Dictionary, shi
 			return armed(ship) and _hostile_hull(state, owner, service_targets(state, target).get(target, {}))
 		"repair":
 			var ref: Dictionary = service_targets(state, target).get(target, {})
-			return ship["kind"] == "miner" and target != int(ship["id"]) and _friendly_target(state, owner, ref) and _damaged(ref)
+			return supports_autocast(ship, "repair") and target != int(ship["id"]) and _friendly_target(state, owner, ref) and _damaged(ref)
 		"deposit":
 			return can_deposit(state, ship, target)
 		"salvage":
@@ -11437,6 +11439,8 @@ static func _index_postcombat_hulls(state: Dictionary, frame: STEP_FRAME) -> voi
 	for craft in state["ships"]:
 		_mark_hull_salvage_busy(craft, frame.salvage_busy)
 		var kind: String = str(craft.get("kind", ""))
+		if supports_autocast(craft, "repair") and not bool(craft.get("rogue", false)):
+			frame.has_repairers = true
 		if kind == "ship":
 			if bool(craft.get("rogue", false)):
 				continue
@@ -11523,7 +11527,7 @@ static func _step_formations(state: Dictionary, frame: STEP_FRAME, dt: float) ->
 			_repair_index_state = state
 			_repair_index_roster = state["ships"]
 			_repair_index.clear()
-		if frame.handoff_miners.is_empty():
+		if not frame.has_repairers:
 			_repair_index.clear()
 		else:
 			_repair_index.refresh(frame.service_refs, MINER_REPAIR_SEARCH, EPS, REPAIR_QUERIES.is_damaged)
@@ -11731,7 +11735,7 @@ static func _step_hull_services(state: Dictionary, frame: STEP_FRAME, ship: Dict
 		return true
 	# Each automatic job checks its own cooldown; explicit movement,
 	# follow, cargo orders and emergency withdrawal already take priority.
-	if ship.get("kind", "ship") == "miner" and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, frame.damaged_cells, frame.repair_neighborhoods):
+	if supports_autocast(ship, "repair") and (ship.has("repair_order") or not _engaged(ship) and int(ship.get("yard_target", -1)) == -1) and _work_miner_repair(state, combat_graph, ship, service_refs, dt, frame.damaged_cells, frame.repair_neighborhoods):
 		if ship.has("repair_target") and dt > 0.0:
 			var recipient: int = int(ship["repair_target"])
 			if service_refs.get(recipient, {}).get("kind", "") == "ship":
@@ -12397,8 +12401,7 @@ static func ship_visible_to_team(state: Dictionary, ship: Dictionary, team: int)
 	return false
 
 static func _detect_cloaked(state: Dictionary, ships: Array, cells: Dictionary, positions: Dictionary, team_by_id: Dictionary) -> void:
-	var reach: int = ceili(CLOAK_DETECTION_RANGE / LASER_RANGE)
-	var range_squared: float = CLOAK_DETECTION_RANGE * CLOAK_DETECTION_RANGE
+	var reach: int = ceili(maxf(STATION_SIGHT, maxf(sight_radius("science_ship"), CLOAK_DETECTION_RANGE)) / LASER_RANGE)
 	for ship in ships:
 		if not bool(ship.get("cloaked", false)):
 			continue
@@ -12414,7 +12417,9 @@ static func _detect_cloaked(state: Dictionary, ships: Array, cells: Dictionary, 
 					var sensor_team: int = int(team_by_id[sensor_id])
 					if sensor_team <= 0 or sensor_team == team or detected.has(sensor_team):
 						continue
-					if pos.distance_squared_to(positions[sensor_id]) <= range_squared:
+					var sensor_kind: String = str(sensor.get("kind", ""))
+					var radius: float = STATION_SIGHT if sensor_kind == "station" else (sight_radius("science_ship") if sensor_kind == "science_ship" else CLOAK_DETECTION_RANGE)
+					if pos.distance_squared_to(positions[sensor_id]) <= radius * radius:
 						detected.append(sensor_team)
 		ship["cloak_detected"] = detected
 

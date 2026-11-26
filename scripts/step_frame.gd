@@ -28,6 +28,7 @@ var salvage_threats: Dictionary = {}
 # Entries are live references; no membership changes before fleet allocation.
 var handoff_receivers: Dictionary = {}
 var handoff_miners: Array = []
+var has_repairers: bool = false
 var freighters: Array = []
 var military_fleets: Dictionary = {}
 var mining_receivers: Dictionary = {}
