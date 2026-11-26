@@ -964,6 +964,54 @@ func _test_general_angle_windows() -> void:
 	ECON._direct_trajectories.clear()
 	print("PASS: arbitrary-angle exact samples, window reuse, contact and asteroid invalidation")
 
+func _test_shared_empty_rock_halos() -> void:
+	var fields: Array = [{"position": Vector2(8000, 8000), "radius": 40.0, "chunks": [{"position": Vector2(8000, 8000), "radius": 30.0}]}]
+	ECON._refresh_movement_fields(fields)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 827
+	for i in range(600):
+		# Include exact/near cell edges, negative coordinates and long/short legs.
+		var before := Vector2(float(i % 11 - 5) * ECON.ROCK_CELL + (0.001 if i % 2 == 0 else -0.001), rng.randf_range(-700.0, 700.0))
+		var goal: Vector2 = before + Vector2.from_angle(rng.randf_range(-PI, PI)) * rng.randf_range(0.0, 1200.0)
+		var budget: float = [0.0, 0.001, 12.54, 83.0, 287.0, 288.0, 500.0][i % 7]
+		var craft: Dictionary = {"id": 701, "kind": "fighter", "position": before, "heading": Vector2.UP, "holding": i % 9 == 0}
+		var reference: Dictionary = craft.duplicate(true)
+		# Crowding disqualifies the isolated predictive path; steering remains live.
+		ECON._begin_ship_avoidance({701: before, 702: before + before.direction_to(goal) * 35.0, 703: before + Vector2(-22, 11)})
+		assert(ECON._navigate(craft, goal, budget, false, true) == ECON._navigate(reference, goal, budget, false, false))
+		assert(craft == reference)
+	assert(not ECON._empty_rock_halos.is_empty())
+	var start := Vector2.ZERO
+	var target := Vector2(400, 0)
+	assert(ECON._shared_empty_rock_halo(start, target, 12.0, 701))
+	ECON._rock_routes[701] = {"target": target, "route": [Vector2(0, 100)], "retry": 1000}
+	assert(not ECON._shared_empty_rock_halo(start, target, 12.0, 701))
+	ECON._rock_routes.erase(701)
+	fields[0]["chunks"].append({"position": Vector2(80, 0), "radius": 28.0})
+	ECON._refresh_movement_fields(fields)
+	assert(ECON._empty_rock_halos.is_empty())
+	assert(not ECON._shared_empty_rock_halo(start, target, 12.0, 701))
+	var craft: Dictionary = {"id": 701, "kind": "fighter", "position": start, "heading": Vector2.UP}
+	var reference: Dictionary = craft.duplicate(true)
+	ECON._begin_ship_avoidance({701: start, 702: Vector2(35, 0)})
+	# Preserve the planner's budget and cached route state in the reference.
+	var saved_budget: int = ECON._rock_plan_budget
+	var saved_routes: Dictionary = ECON._rock_routes.duplicate(true)
+	var flown: float = ECON._navigate(craft, target, 12.0, false, true)
+	var actual_routes: Dictionary = ECON._rock_routes.duplicate(true)
+	var actual_budget: int = ECON._rock_plan_budget
+	ECON._rock_plan_budget = saved_budget
+	ECON._rock_routes = saved_routes
+	assert(flown == ECON._navigate(reference, target, 12.0, false, false))
+	assert(craft == reference and actual_routes == ECON._rock_routes and actual_budget == ECON._rock_plan_budget)
+	fields[0]["chunks"].pop_back()
+	ECON._refresh_movement_fields(fields)
+	ECON._rock_routes.erase(701)
+	assert(ECON._shared_empty_rock_halo(start, target, 12.0, 701))
+	ECON._refresh_movement_fields([])
+	ECON._begin_ship_avoidance({})
+	print("PASS: shared empty rock halos, exact crowded steering, cached detour and obstacle insertion/depletion")
+
 func _test_shared_navigation_queries() -> void:
 	# Preserve neighbor traversal order, including negative cells and ties.
 	var positions: Dictionary = {11: Vector2(30, 0), 12: Vector2(-30, 0), 13: Vector2(40, 0), 14: Vector2(500, 0)}
@@ -3047,6 +3095,10 @@ func _test_mining_selection() -> void:
 	print("PASS: mining selection preserves access and rock ties, preferred rock, live depletion and storage wakeups")
 
 func _initialize() -> void:
+	_test_shared_empty_rock_halos()
+	if OS.get_cmdline_user_args().has("--rock-halo-only"):
+		quit()
+		return
 	_test_peaceful_combat_phase()
 	if OS.get_cmdline_user_args().has("--peaceful-combat-only"):
 		quit()
