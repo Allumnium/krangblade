@@ -8,6 +8,6 @@ if env["platform"] == "windows" and not env.get("use_mingw", False):
     env.Append(CXXFLAGS=["/fp:strict"])
 else:
     env.Append(CXXFLAGS=["-ffp-contract=off"])
-objects = env.Object("godot-cpp/build/warbound_kernels", "src/warbound_kernels.cpp")
+objects = env.SharedObject("godot-cpp/build/warbound_kernels", "src/warbound_kernels.cpp")
 library = env.SharedLibrary("bin/warbound_kernels", objects)
 Default(library)

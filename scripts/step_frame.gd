@@ -1,6 +1,7 @@
 extends RefCounted
 ## Per-substep working set shared by the EconomyRules.step stages.
 ## Created and discarded inside one step call; never serialized.
+const NATIVE_KERNELS = preload("res://scripts/combat_kernels.gd")
 
 var profile: Dictionary = {}
 var civilian_usec: int = 0
@@ -197,6 +198,15 @@ class ContactBatch:
 	# Share candidate bucket lists for all slots in a cell; the bounding-box
 	# check still uses each hull's exact position.
 	func accumulate(cells: Dictionary, bounds: Dictionary, reach: float, epsilon: float) -> void:
+		var backend: RefCounted = NATIVE_KERNELS.native_backend()
+		if backend != null and backend.has_method("contact_batch"):
+			var result: Array = backend.call("contact_batch", ids, positions, previous, cells, bounds, reach, epsilon)
+			corrections = result[0]
+			correction_order.assign(result[1])
+			return
+		accumulate_reference(cells, bounds, reach, epsilon)
+
+	func accumulate_reference(cells: Dictionary, bounds: Dictionary, reach: float, epsilon: float) -> void:
 		corrections.fill(Vector2.ZERO)
 		touched.fill(0)
 		correction_order.clear()

@@ -5,7 +5,7 @@ extends RefCounted
 static var _native_checked: bool = false
 static var _native: RefCounted
 
-static func _native_backend() -> RefCounted:
+static func native_backend() -> RefCounted:
 	if not _native_checked:
 		_native_checked = true
 		if OS.get_cmdline_user_args().has("--warbound-native-kernels"):
@@ -50,7 +50,7 @@ static func laser_blocks(candidates: Array, positions: Dictionary, include_struc
 	return blocks
 
 static func laser_block_nearest(blocks: Array, _positions: Dictionary, pos: Vector2, best: float, target: int) -> Array:
-	var backend: RefCounted = _native_backend()
+	var backend: RefCounted = native_backend()
 	if backend != null:
 		return backend.call("laser_block_nearest", blocks, pos, best, target)
 	return laser_block_nearest_reference(blocks, pos, best, target)
@@ -74,7 +74,7 @@ static func laser_block_nearest_reference(blocks: Array, pos: Vector2, best: flo
 	return [best, target]
 
 static func missile_block_nearest(blocks: Array, _positions: Dictionary, pos: Vector2, best: float, target: int, focused: bool, focus_id: int) -> Array:
-	var backend: RefCounted = _native_backend()
+	var backend: RefCounted = native_backend()
 	if backend != null:
 		return backend.call("missile_block_nearest", blocks, pos, best, target, focused, focus_id)
 	return missile_block_nearest_reference(blocks, pos, best, target, focused, focus_id)

@@ -16,14 +16,13 @@ var _in_flight: bool = false
 func start(initial_state: Dictionary) -> bool:
 	if _thread != null:
 		return false
-	# Native + threaded mode needs its own cross-platform validation first.
-	if OS.get_cmdline_user_args().has("--warbound-native-kernels"):
-		push_warning("Threaded authority and native kernels cannot yet be enabled together.")
-		return false
+	# Initialize the immutable, stateless backend on the main thread before
+	# any worker can read the shared dependency's cached reference.
+	ECON.COMBAT_KERNELS.native_backend()
 	if _rules == null:
 		# Static simulation caches must not be shared with client read queries.
-		# Dependencies have no mutable simulation caches except the optional
-		# native backend, which is disabled for this initial worker.
+		# Dependencies have no mutable simulation caches; the optional native
+		# backend is initialized above and owns no simulation state.
 		_rules = ResourceLoader.load("res://scripts/economy_rules.gd", "GDScript", ResourceLoader.CACHE_MODE_IGNORE) as GDScript
 		if not _independent_rules(_rules):
 			# Some engine builds may reuse cached script resources. In the
