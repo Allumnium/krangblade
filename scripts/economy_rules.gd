@@ -1026,6 +1026,13 @@ static func _pirate_fire(state: Dictionary, ship: Dictionary, positions: Diction
 		ship["missile_until"] = float(state["elapsed"]) + 0.65
 		missile_cd = MISSILE_COOLDOWN
 	ship["missile_cooldown"] = missile_cd
+	if railgun_count(str(ship["kind"])) > 0:
+		var railgun_cd: float = maxf(0.0, float(ship.get("railgun_cooldown", 0.0)) - dt)
+		if railgun_cd <= EPS and range_to <= RAILGUN_RANGE:
+			_ship_hit(damage, killed_by, health, target, ship, RAILGUN_DAMAGE, slots, hull_health)
+			_record_railgun_shot(state, ship, positions[id], positions[target])
+			railgun_cd = RAILGUN_COOLDOWN
+		ship["railgun_cooldown"] = railgun_cd
 
 static func _rogue_roll(seed_value: int, hull_id: int, epoch: int) -> bool:
 	return posmod(hash([seed_value, hull_id, epoch]), 1000000) < int(ROGUE_CHANCE * 1000000.0)
@@ -5289,6 +5296,10 @@ const STATION_MISSILE_COUNT: int = 1
 const MISSILE_RANGE: float = 1200.0
 const MISSILE_DAMAGE: float = 120.0
 const MISSILE_COOLDOWN: float = 12.0
+const RAILGUN_RANGE: float = MISSILE_RANGE * 2.0
+const RAILGUN_DAMAGE: float = MISSILE_DAMAGE * 4.0
+const RAILGUN_COOLDOWN: float = MISSILE_COOLDOWN * 1.25
+const RAILGUN_EFFECT_YEARS: float = 0.35
 
 const BLASTER_DAMAGE: float = 1.0
 const BLASTER_SHOTS: int = 4
@@ -5305,6 +5316,9 @@ static func capital_lasers(kind: String) -> int:
 
 static func missile_count(kind: String) -> int:
 	return int({"cruiser": 1, "destroyer": 2}.get(kind, 0))
+
+static func railgun_count(kind: String) -> int:
+	return 1 if kind == "destroyer" else 0
 
 const SHIP_MAX_HP = {"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "warp_gate": WARP_GATE_HP}
 const MILITARY_KINDS = ["fighter", "scout", "cruiser", "destroyer"]
@@ -8587,9 +8601,46 @@ static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionar
 	var pos: Vector2 = frame.hull_positions[hull_slot]
 	var team: int = frame.hull_teams[hull_slot]
 	_fire_hull_missiles(state, frame, ship, pos, team, dt)
+	_fire_hull_railgun(state, frame, ship, pos, team, dt)
 	if _fire_focused_attack(state, frame, ship, pos, team, hull_slot, weapon_damage, dt):
 		return
 	_fire_hull_lasers(state, frame, ship, fighter, moving_only, pos, team, hull_slot, weapon_damage, dt)
+
+# Long-range single-target siege fire shares the frozen combat frame and
+# simultaneous damage accumulator, but not the missile splash or upgrades.
+static func _fire_hull_railgun(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, pos: Vector2, team: int, dt: float) -> void:
+	if railgun_count(str(ship["kind"])) == 0:
+		return
+	var cooldown: float = maxf(0.0, float(ship.get("railgun_cooldown", 0.0)) - dt)
+	var target: int = -1
+	var best: float = RAILGUN_RANGE * RAILGUN_RANGE
+	if cooldown <= EPS and team > 0:
+		if ship.has("attack_order"):
+			var focus: int = int(ship["attack_order"])
+			if frame.positions.has(focus) and int(frame.team_by_id.get(focus, 0)) > 0 and _combat_groups_hostile(state, team, int(frame.team_by_id[focus])) and (not frame.by_id.has(focus) or ship_visible_to_team(state, frame.by_id[focus], team)) and pos.distance_squared_to(frame.positions[focus]) <= best:
+				target = focus
+		else:
+			var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+			var reach: int = ceili(RAILGUN_RANGE / LASER_RANGE)
+			if _combat_window_may_have_hostile(state, frame, team, cell, reach, true):
+				for x in range(-reach, reach + 1):
+					for y in range(-reach, reach + 1):
+						for candidate in _hostile_bucket(state, frame.cells, frame.positive_hostile_cache, cell + Vector2i(x, y), team, frame.team_by_id, true):
+							var candidate_id: int = int(candidate["id"])
+							var distance: float = pos.distance_squared_to(frame.positions[candidate_id])
+							if distance < best or (distance == best and (target == -1 or candidate_id < target)):
+								best = distance
+								target = candidate_id
+		if target != -1:
+			_ship_hit(frame.damage, frame.killed_by, frame.health, target, ship, RAILGUN_DAMAGE, frame.hull_slots, frame.hull_health)
+			_record_railgun_shot(state, ship, pos, frame.positions[target])
+			cooldown = RAILGUN_COOLDOWN
+	ship["railgun_cooldown"] = cooldown
+
+static func _record_railgun_shot(state: Dictionary, ship: Dictionary, origin: Vector2, endpoint: Vector2) -> void:
+	ship["railgun_origin"] = origin
+	ship["railgun_endpoint"] = endpoint
+	ship["railgun_until"] = float(state["elapsed"]) + RAILGUN_EFFECT_YEARS
 
 static func _fire_hull_missiles(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, pos: Vector2, team: int, dt: float) -> void:
 	var launchers: int = missile_count(str(ship["kind"]))
@@ -8681,6 +8732,8 @@ static func _normalize_inactive_lasers(ship: Dictionary, dt: float) -> void:
 static func _advance_peaceful_weapons(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, dt: float) -> void:
 	if missile_count(str(ship["kind"])) > 0:
 		ship["missile_cooldown"] = maxf(0.0, float(ship.get("missile_cooldown", 0.0)) - dt)
+	if railgun_count(str(ship["kind"])) > 0:
+		ship["railgun_cooldown"] = maxf(0.0, float(ship.get("railgun_cooldown", 0.0)) - dt)
 	var now: float = float(state["elapsed"])
 	var search_due: bool = _combat_search_due(ship, now)
 	if search_due:
