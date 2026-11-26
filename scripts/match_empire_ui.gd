@@ -196,6 +196,11 @@ func _refresh_diplomacy_rows(state: Dictionary) -> void:
 		actions.add_theme_constant_override("h_separation", 4)
 		actions.add_theme_constant_override("v_separation", 4)
 		column.add_child(actions)
+		if relation != ECONOMY.DIPLO_WAR:
+			var grant: bool = ECONOMY.open_borders(state, me, other)
+			var incoming: bool = ECONOMY.open_borders(state, other, me)
+			var border_button: Button = _diplomacy_button(actions, "Open Borders: " + ("On" if grant else "Off"), _diplomacy_action.bind("open_borders", other, not grant))
+			border_button.tooltip_text = "Allow their ships through your future walls. Their permission: " + ("Open" if incoming else "Closed") + ". Does not authorize attacks."
 		match relation:
 			ECONOMY.DIPLO_NEUTRAL:
 				var proposer: int = int(entry.get("alliance_offer", 0))
