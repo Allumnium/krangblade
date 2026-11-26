@@ -11,7 +11,7 @@ const TOPICS = [
 	["Economy", "Trade & storage", "freighter logistics import export warehouse thresholds blockade"],
 	["Expansion", "Colonization & territory", "settlement colony neutral systems conquest planetless"],
 	["Expansion", "Stations & infrastructure", "build upgrades housing refinery farms incubator warehouse"],
-	["Fleet", "Ships & construction", "fighter miner colony logistics crew build queue costs shipyard"],
+	["Fleet", "Ships & construction", "fighter miner colony logistics crew build queue costs shipyard constructor depot"],
 	["Fleet", "Combat & defense", "laser pds armor plating matrix repair retreat"],
 	["Interface", "Controls & commands", "keyboard hotkeys camera movement patrol rally attack shift ctrl"],
 	["Interface", "Multiplayer & time", "host guest authority lobby teams ai"]
@@ -422,11 +422,13 @@ func _infrastructure() -> void:
 	_body("Warehouse upgrades expand storage; habitation increases terrestrial housing capacity. Orbital Eco-Housing adds self-sufficient residents in planetless systems. Additional shipyards also supply eco-housing.")
 
 func _ships() -> void:
-	_body("Small yards build Harvesters, Fighters and Scouts; Medium adds Freighters, Colonies and Cruisers; Large adds Science vessels, Destroyers and Railgun Ships. Any owned system with a suitable yard can build Freighters. AI fleets build Cruisers, Destroyers and Railgun Ships as their economy matures. Scouts have one blaster, twice fighter speed and half fighter HP. Start with one Freighter. Materials come from the local station; credits come from the empire treasury. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship details show crew, armed hull kills, cargo handling for cargo ships and Colony food production. Military hulls have no holds. Full crew, materials and GC are reserved before an order is accepted. Reserved crew remains productive and taxable at 0% construction, then embarks in full when work starts. An actual population loss or destroyed yard can delay work; cancelling releases reserved residents or returns embarked crew. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
+	_body("Small yards build Harvesters, Fighters, Scouts and Construction Ships; Medium adds Freighters, Colonies and Cruisers; Large adds Science vessels, Destroyers and Railgun Ships. Any owned system with a suitable yard can build Freighters. AI fleets build Cruisers, Destroyers and Railgun Ships as their economy matures. Scouts have one blaster, twice fighter speed and half fighter HP. Start with one Freighter. Materials come from the local station; credits come from the empire treasury. Freighters have ten 10 t bays. Harvesters travel slower; fighters are 20% faster than freighters. Ship details show crew, armed hull kills, cargo handling for cargo ships and Colony food production. Military hulls have no holds. Full crew, materials and GC are reserved before an order is accepted. Reserved crew remains productive and taxable at 0% construction, then embarks in full when work starts. An actual population loss or destroyed yard can delay work; cancelling releases reserved residents or returns embarked crew. Canceled hulls drop all prepaid materials at the yard; crew returns. Eligible orders may repeat.")
 	var rows: Array = []
 	for kind in E.SHIP_KINDS:
 		rows.append([UI_TEXT.ship_kind_name(kind), E.size_name(E.ship_size(kind)), _recipe(E._cost(kind, 1), kind), "%.0f" % float(E.CREW_COSTS[kind]), "%.0f yr" % (E._work(kind, 1) / E.yard_speed(E.ship_size(kind)))])
 	_table(["Ship", "Class", "Cost", "Crew", "Time (min. yard)"], rows)
+	_section("Construction Ships and depots")
+	_body("Select a Construction Ship, Build Resource Depot (F), then click a valid map position. Materials are reserved at one owned station; nearby constructors haul them physically. Cancel unfinished work (Y) then select the site; undelivered source stock is refunded and delivered materials become salvage. Completed depots have no crew or territory influence. Freighters and constructors use Load (L) and Drop Cargo (D) to collect and deposit at completed owned depots. Each resource has an independent fixed capacity: 2000 Metals, 4000 Organics, 500 Crystals and 2 antimatter.")
 	_section("Annual upkeep")
 	rows = []
 	for kind in E.SHIP_KINDS:

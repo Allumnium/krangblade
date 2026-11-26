@@ -13,6 +13,7 @@ static func base_work(kind: String, level: int) -> float:
 		"cruiser": return 90.0
 		"destroyer": return 180.0
 		"railgun_ship": return 120.0
+		"construction_ship": return 48.0
 		"yard": return 30.0
 		"pds": return 36.0
 		"dyson_sphere": return 300.0
@@ -36,6 +37,7 @@ static func base_cost(kind: String, level: int, crystal_multiplier: float, upgra
 		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0 * crystal_multiplier}
 		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0 * crystal_multiplier}
 		"railgun_ship": return {"Metals": 2100.0, "Organics": 60.0, "Crystals": 120.0 * crystal_multiplier}
+		"construction_ship": return {"Metals": 420.0, "Organics": 20.0}
 		"yard":
 			match level:
 				1: return {"Metals": 480.0}

@@ -1064,7 +1064,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	yard_command_grid = grid
 	for kind in ECONOMY.SHIP_KINDS:
 		var button := CostButton.new()
-		var caption: String = {"ship": "Freighter", "colony_ship": "Colony", "fighter": "Fighter", "miner": "Harvester", "science_ship": "Science\nvessel", "scout": "Scout", "cruiser": "Cruiser", "destroyer": "Destroyer", "railgun_ship": "Railgun"}[kind]
+		var caption: String = {"ship": "Freighter", "colony_ship": "Colony", "fighter": "Fighter", "miner": "Harvester", "science_ship": "Science\nvessel", "scout": "Scout", "cruiser": "Cruiser", "destroyer": "Destroyer", "railgun_ship": "Railgun", "construction_ship": "Constructor"}[kind]
 		var art: TextureRect = command_card_ui.set_face(button, caption, hull_art.production_icon(kind, HUD.ACCENT))
 		button.set_meta("portrait", art)
 		button.pressed.connect(_build_at_yard.bind(kind))
@@ -1078,7 +1078,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		button.set_meta("auto_border", border)
 		grid.add_child(button)
 		yard_commands[kind] = button
-		hotkeys.register(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S, "science_ship": KEY_V, "scout": KEY_Q, "cruiser": KEY_E, "destroyer": KEY_F, "railgun_ship": KEY_G}[kind], "Shipyard", "yard_" + kind, UI_TEXT.ship_kind_name(kind))
+		hotkeys.register(button, {"ship": KEY_D, "colony_ship": KEY_C, "fighter": KEY_A, "miner": KEY_S, "science_ship": KEY_V, "scout": KEY_Q, "cruiser": KEY_E, "destroyer": KEY_F, "railgun_ship": KEY_G, "construction_ship": KEY_H}[kind], "Shipyard", "yard_" + kind, UI_TEXT.ship_kind_name(kind))
 	# Rows 1–3: Small, Medium and Large. A locked class shows only
 	# its next eligible upgrade; unlocked ships begin in column one.
 	for target_level in [2, 3]:
@@ -1087,7 +1087,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 		command_card_ui.set_face(upgrade, "Upgrade", command_card_ui.icon("upgrade"))
 		yard_upgrades[target_level] = upgrade
 		hotkeys.register(upgrade, KEY_U if target_level == 2 else KEY_I, "Shipyard", "yard_upgrade" if target_level == 2 else "yard_upgrade_large", "Upgrade to " + class_name_text)
-	yard_top_slots.assign([yard_commands["scout"], yard_commands["fighter"], yard_commands["miner"], command_card_ui.add_spacer(grid)])
+	yard_top_slots.assign([yard_commands["scout"], yard_commands["fighter"], yard_commands["miner"], yard_commands["construction_ship"]])
 	for i in range(8):
 		yard_row_spacers.append(command_card_ui.add_spacer(grid))
 	var station_button := _button("", _select_yard_station, grid)
@@ -1892,7 +1892,7 @@ func _command_slot(id: String, hint: String, action: Callable, existing_slot: Co
 	active_border.draw.connect(_draw_active_command.bind(active_border))
 	active_border.visible = false
 	button.set_meta("active_border", active_border)
-	hotkeys.register(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K, "scan": KEY_Q}[id], "Fleet", "fleet_" + id, hint)
+	hotkeys.register(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K, "scan": KEY_Q, "build_depot": KEY_F, "cancel_site": KEY_Y}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -1931,6 +1931,8 @@ func _build_command_card(parent: VBoxContainer) -> void:
 
 	# Science vessels cannot load cargo; Scan shares that existing slot.
 	_command_slot("scan", "Scan · launch a cloaked reconnaissance probe", _arm_command.bind("scan"), command_card.get_child(5)).hide()
+	_command_slot("build_depot", "Build Resource Depot · 600 Metals, 40 Crystals", _arm_command.bind("build_depot"), command_card.get_child(4)).hide()
+	_command_slot("cancel_site", "Cancel unfinished construction", _arm_command.bind("cancel_site"), command_card.get_child(8)).hide()
 
 func _autocast_units(state: Dictionary, mode: String) -> Array:
 	var units: Array = []
@@ -2127,7 +2129,15 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 	elif mode == "load":
 		var state: Dictionary = _state()
 		var wreck: int = _salvage_hit(state, point) if minimap_hint.is_empty() else int(minimap_hint["wreck"])
-		if wreck >= 0:
+		var target: int = _entity_hit(state, point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
+		var depot: Dictionary = ECONOMY.service_targets(state, target).get(target, {}).get("entity", {})
+		if depot.get("kind", "") == "resource_depot" and ECONOMY.static_complete(depot):
+			var loaders: Array[int] = []
+			for craft in _selected_ship_entries(state):
+				if _command_entry(craft) and craft["kind"] in ["ship", "construction_ship"] and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
+					loaders.append(int(craft["id"]))
+			_issue_order(loaders, {"kind": "load_depot", "target": target}, false)
+		elif wreck >= 0:
 			var eligible: Array[int] = []
 			for craft in _selected_ship_entries(state):
 				if _command_entry(craft) and ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS:
@@ -2157,6 +2167,12 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 			if ECONOMY.science_target_valid(state, graph, craft, field):
 				eligible.append(int(craft["id"]))
 		_issue_order(eligible, {"kind": "collect", "target": field}, append)
+	elif mode == "build_depot":
+		_issue_order(_selected_owned_units(_state()), {"kind": "build_depot", "point": minimap_hint.get("world", _world_point(point))}, false)
+	elif mode == "cancel_site":
+		var target: int = _entity_hit(_state(), point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
+		if target >= 0:
+			_issue_order(_selected_owned_units(_state()), {"kind": "cancel_site", "target": target}, false)
 	elif mode == "scan":
 		var scan_state: Dictionary = _state()
 		var world: Vector2 = minimap_hint.get("world", _world_point(point))
@@ -2380,6 +2396,14 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		elif ship.get("unit_order", {}).get("kind", "") == "collect":
 			var years: float = float(ship.get("science_years", 0.0))
 			status = "Collecting antimatter · %.1f / %.0f yr" % [years, ECONOMY.SCIENCE_COLLECTION_YEARS] if years > 0.0 else "Approaching Pulsar"
+	if kind == "construction_ship" and ship.has("construction_target"):
+		status = "Servicing construction site"
+	if ECONOMY.is_static_structure(ship):
+		status = "Construction: %.0f%%" % (float(ship.get("build_progress", 0.0)) * 100.0)
+		if ECONOMY.static_complete(ship):
+			status = "Resource Depot"
+			for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
+				status += "\n%s: %.1f / %.1f t" % [resource, float(ship["cargo"].get(resource, 0.0)), ECONOMY.depot_capacity(resource)]
 	if kind == "probe":
 		status = "Scan active · %.1f yr remaining" % maxf(0.0, float(ship["probe_expires"]) - float(state["elapsed"])) if ship.has("probe_expires") else "En route to scan point"
 	if bool(ship.get("cloak_equipped", false)):
@@ -2446,14 +2470,20 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		if _command_entry(craft):
 			loaded_owned = loaded_owned or ECONOMY.cargo_total(craft) > ECONOMY.EPS
 			combat_owned = combat_owned or ECONOMY.armed(craft)
-			can_load = can_load or (ECONOMY.supports_autocast(craft, "salvage") and ECONOMY.cargo_free(craft) > ECONOMY.EPS)
-			has_cargo_hold = has_cargo_hold or ECONOMY.supports_autocast(craft, "salvage")
+			can_load = can_load or ((ECONOMY.supports_autocast(craft, "salvage") or craft["kind"] == "construction_ship") and ECONOMY.cargo_free(craft) > ECONOMY.EPS)
+			has_cargo_hold = has_cargo_hold or ECONOMY.supports_autocast(craft, "salvage") or craft["kind"] == "construction_ship"
 			has_farm = has_farm or craft["kind"] == "colony_ship"
 			loaded_farm = loaded_farm or (craft["kind"] == "colony_ship" and ECONOMY.cargo_total(craft) > ECONOMY.EPS)
 	for id in command_buttons:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_repairers) and (id not in ["load", "unload"] or has_cargo_hold)
 		button.disabled = command_kind.is_empty() or owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not _selected_ship_entries(state).any(func(craft: Dictionary) -> bool: return _command_entry(craft) and craft["kind"] in ECONOMY.MILITARY_KINDS)) or (id == "repair" and not has_repairers) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
+	for build_id in ["build_depot", "cancel_site"]:
+		command_buttons[build_id].visible = command_kind == "construction_ship"
+		command_buttons[build_id].disabled = not command_buttons[build_id].visible or owned_count == 0
+	if command_kind == "construction_ship":
+		command_buttons["attack"].hide()
+		command_buttons["patrol"].hide()
 	var scan: Button = command_buttons["scan"]
 	scan.visible = command_kind == "science_ship"
 	scan.disabled = not scan.visible or not _selected_ship_entries(state).any(func(craft: Dictionary) -> bool: return _command_entry(craft) and ECONOMY.science_scan_ready(state, craft))
@@ -3892,7 +3922,7 @@ func _command_kinds(state: Dictionary) -> Array[String]:
 	var kinds: Array[String] = []
 	for craft in state.get("ships", []):
 		var kind: String = str(craft["kind"])
-		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and kind != "probe" and not ECONOMY.colony_morphing(craft) and not kinds.has(kind):
+		if selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me() and kind != "probe" and not ECONOMY.is_static_structure(craft) and not ECONOMY.colony_morphing(craft) and not kinds.has(kind):
 			kinds.append(kind)
 	kinds.sort()
 	return kinds
@@ -3919,7 +3949,7 @@ func _selected_ship_entries(state: Dictionary) -> Array:
 
 # Command eligibility for a ship from _selected_ship_entries.
 func _command_entry(craft: Dictionary) -> bool:
-	return int(craft["owner"]) == _me() and craft.get("kind", "") != "probe" and not ECONOMY.colony_morphing(craft) and str(craft["kind"]) == command_kind
+	return int(craft["owner"]) == _me() and craft.get("kind", "") != "probe" and not ECONOMY.is_static_structure(craft) and not ECONOMY.colony_morphing(craft) and str(craft["kind"]) == command_kind
 
 func _cycle_command_kind(reverse: bool) -> bool:
 	var state: Dictionary = _state()
@@ -3957,7 +3987,7 @@ func _selected_repairers() -> Array[int]:
 func _selected_owned_units(state: Dictionary, all_types: bool = false) -> Array[int]:
 	var owned: Array[int] = []
 	for craft in _selected_ship_entries(state):
-		if craft.get("kind", "") not in ["warp_gate", "probe"] and not ECONOMY.colony_morphing(craft) and (_command_entry(craft) or (all_types and selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())):
+		if craft.get("kind", "") not in ["warp_gate", "probe"] and not ECONOMY.is_static_structure(craft) and not ECONOMY.colony_morphing(craft) and (_command_entry(craft) or (all_types and selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())):
 			owned.append(int(craft["id"]))
 	return owned
 
@@ -4123,7 +4153,7 @@ func _map_input(event: InputEvent) -> void:
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
-					if pending_command in ["repair", "unload", "load", "rally", "collect", "guard", "scan"]:
+					if pending_command in ["repair", "unload", "load", "rally", "collect", "guard", "scan", "build_depot", "cancel_site"]:
 						_execute_pending_command(mouse.position, mouse.shift_pressed)
 					elif not pending_command.is_empty() and pending_command not in ["move", "attack", "patrol"]:
 						pending_command = ""

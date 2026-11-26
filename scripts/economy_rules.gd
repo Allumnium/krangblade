@@ -98,7 +98,7 @@ const PIRATE_DECISION_YEARS: float = 3.0
 const PIRATE_GROUP_RANGE: float = 900.0
 const PIRATE_DEFENSE_RANGE: float = 1600.0
 # Annual operating wages for completed mobile hulls; structures are exempt.
-const SHIP_UPKEEP_GC = {"scout": 3.0, "miner": 9.0, "fighter": 15.0, "ship": 24.0, "colony_ship": 30.0, "science_ship": 30.0, "cruiser": 45.0, "destroyer": 105.0, "railgun_ship": 60.0}
+const SHIP_UPKEEP_GC = {"scout": 3.0, "miner": 9.0, "fighter": 15.0, "ship": 24.0, "colony_ship": 30.0, "science_ship": 30.0, "cruiser": 45.0, "destroyer": 105.0, "railgun_ship": 60.0, "construction_ship": 18.0}
 # Fixed labor fee, independent of future fluctuating market prices.
 const CONSTRUCTION_CREDIT_FRACTION: float = 0.5
 const CONSTRUCTION_REFERENCE_VALUES = {"Metals": 2.0, "Organics": 1.0, "Crystals": 8.0}
@@ -184,7 +184,7 @@ const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
 const AUTOCAST_MODES = ["explore", "wander", "mine", "salvage", "repair", "trade", "farm", "collect", "retreat"]
 const SHIP_SIZE: int = 1 # Legacy small-class reference.
-const SHIP_SIZES = {"fighter": 1, "miner": 1, "ship": 2, "colony_ship": 2, "science_ship": 3, "scout": 1, "cruiser": 2, "destroyer": 3, "railgun_ship": 3}
+const SHIP_SIZES = {"fighter": 1, "miner": 1, "ship": 2, "colony_ship": 2, "science_ship": 3, "scout": 1, "cruiser": 2, "destroyer": 3, "railgun_ship": 3, "construction_ship": 1}
 const STATION_STORAGE_BAYS: int = 3
 const TRANSFER_EVENT_LIMIT: int = 192
 const TRANSFER_EVENT_YEARS: float = 6.0
@@ -205,13 +205,18 @@ const WAREHOUSE_COSTS = [
 	{"Metals": 4500.0}
 ]
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
-const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship"]
+const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship", "construction_ship"]
+const CONSTRUCTION_SHIP_CAPACITY: float = 180.0
+const DEPOT_REFERENCE_BUDGET: float = 4000.0
+const DEPOT_ANTIMATTER_CAPACITY: float = 2.0
+const STATIC_SITE_KINDS = ["resource_depot"]
+const DEPOT_HP: float = 1200.0
 const SCIENCE_CAPACITY: float = 1.0
 const SCIENCE_COLLECTION_YEARS: float = 30.0
 const SHIPYARD_QUEUE_LIMIT = 4
 const STATION_QUEUE_LIMIT = 4
 const MAX_SHIPYARD_LEVEL = 3
-const CREW_COSTS = {"ship": 4000.0, "colony_ship": COLONY_POPULATION, "fighter": 1000.0, "miner": 1500.0, "science_ship": 4000.0, "scout": 200.0, "cruiser": 3000.0, "destroyer": 8000.0, "railgun_ship": 4000.0}
+const CREW_COSTS = {"ship": 4000.0, "colony_ship": COLONY_POPULATION, "fighter": 1000.0, "miner": 1500.0, "science_ship": 4000.0, "scout": 200.0, "cruiser": 3000.0, "destroyer": 8000.0, "railgun_ship": 4000.0, "construction_ship": 2000.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 200.0
 const YARD_HP: float = 1500.0
@@ -1784,7 +1789,7 @@ static func _resolve_enqueue(p: Dictionary, kind: String, target: String) -> Dic
 	var level: int = 1
 	var station_slot: int = 0
 	match kind:
-		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship":
+		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship", "construction_ship":
 			target = ""
 		"yard":
 			level = next_shipyard_slot(p)
@@ -2378,7 +2383,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			p["yards"][int(item["target"])]["hp"] = YARD_HP * int(item["level"])
 			if int(item["level"]) >= MAX_SHIPYARD_LEVEL:
 				p["continuous"]["yard_upgrade:" + str(item["target"])] = false
-		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship":
+		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship", "construction_ship":
 			_launch_finished_hull(state, index, p, item)
 			if not bool(item.get("starting_fleet", false)):
 				_record_hull_built(state, int(p["owner"]), str(item["kind"]))
@@ -2666,6 +2671,8 @@ static func _cargo_total(ship: Dictionary) -> float:
 static func cargo_capacity(kind: String) -> float:
 	match kind:
 		"miner": return MINER_CAPACITY
+		"construction_ship": return CONSTRUCTION_SHIP_CAPACITY
+		"resource_depot": return 0.0
 		"science_ship": return SCIENCE_CAPACITY
 		"fighter", "scout", "cruiser", "destroyer", "railgun_ship", "warp_gate", "probe": return 0.0
 		"colony_ship": return COLONY_CAPACITY
@@ -3449,6 +3456,8 @@ static func ship_speed(kind: String) -> float:
 		"cruiser": return FIGHTER_SPEED * 0.8
 		"destroyer": return FIGHTER_SPEED * 0.6
 		"railgun_ship": return FIGHTER_SPEED * 0.65
+		"construction_ship": return FREIGHTER_SPEED * 0.8
+		"resource_depot": return 0.0
 	return SHIP_SPEED
 
 static func _waiting_berth(state: Dictionary, ship: Dictionary, center: Vector2, reach: float, preferred: Vector2) -> Vector2:
@@ -5353,7 +5362,7 @@ static func missile_count(kind: String) -> int:
 static func railgun_count(kind: String) -> int:
 	return 1 if kind in ["destroyer", "railgun_ship"] else 0
 
-const SHIP_MAX_HP = {"probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
+const SHIP_MAX_HP = {"resource_depot": DEPOT_HP, "construction_ship": 500.0, "probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
 const MILITARY_KINDS = ["fighter", "scout", "cruiser", "destroyer", "railgun_ship"]
 const ARMED_KINDS = ["fighter", "miner", "cruiser", "destroyer", "scout", "railgun_ship"]
 
@@ -5367,7 +5376,7 @@ static func _regenerate_hull(entity: Dictionary, maximum: float, dt: float) -> v
 
 static func _passive_regeneration(state: Dictionary, dt: float) -> void:
 	for ship in state["ships"]:
-		_regenerate_hull(ship, ship_max_hp(str(ship["kind"])), dt)
+		_regenerate_hull(ship, hull_max_hp(ship), dt)
 	_regenerate_structures(state, dt)
 
 static func _regenerate_structures(state: Dictionary, dt: float) -> void:
@@ -5526,7 +5535,7 @@ static func service_targets(state: Dictionary, only_id: int = -1, requested: Var
 		var position: Vector2 = ship.get("position", Vector2.INF)
 		if not position.is_finite():
 			continue
-		targets[ship["id"]] = {"owner": ship["owner"], "entity": ship, "position": position, "max_hp": ship_max_hp(str(ship["kind"])), "node": -1, "kind": "ship"}
+		targets[ship["id"]] = {"owner": ship["owner"], "entity": ship, "position": position, "max_hp": hull_max_hp(ship), "node": -1, "kind": "ship"}
 	if only_id >= 0:
 		return targets
 	if only_id == -1 and requested is Dictionary:
@@ -5611,6 +5620,11 @@ static func can_deposit(state: Dictionary, ship: Dictionary, target_id: int) -> 
 	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or target_id == int(ship["id"]) or not _cargo_target_allowed(state, int(ship["owner"]), ref) or _cargo_total(ship) <= EPS:
 		return false
 	if ref["kind"] == "ship":
+		if ref["entity"].get("kind", "") == "resource_depot":
+			for resource in RESOURCES + [ANTIMATTER]:
+				if float(ship["cargo"].get(resource, 0.0)) > EPS and depot_free(ref["entity"], resource) > EPS:
+					return true
+			return false
 		return cargo_free(ref["entity"]) > EPS
 	if ref["kind"] != "station":
 		return false
@@ -5800,7 +5814,7 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		var stock: Dictionary = depot["stock"] if ref["kind"] == "station" else depot["cargo"]
 		var budget: float = _dropoff_budget(ship, dt)
 		for resource in RESOURCES + [ANTIMATTER]:
-			var free: float = storage_free(depot, resource) if ref["kind"] == "station" else cargo_free(depot)
+			var free: float = storage_free(depot, resource) if ref["kind"] == "station" else (depot_free(depot, resource) if depot.get("kind", "") == "resource_depot" else cargo_free(depot))
 			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), free))
 			if amount <= EPS:
 				continue
@@ -5810,7 +5824,7 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 			budget -= amount
 			if ref["kind"] == "station":
 				_record_flow(depot, "Manual deliveries", resource, amount)
-		if _cargo_total(ship) > EPS and (ref["kind"] == "station" or cargo_free(depot) > EPS):
+		if _cargo_total(ship) > EPS and (ref["kind"] == "station" or can_deposit(state, ship, int(order["target"]))):
 			return true # wait in range for released capacity; a new order can interrupt
 	ship.erase("cargo_order")
 	_finish_manual(ship)
@@ -6415,12 +6429,12 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 		requested[id] = true
 	if requested.size() == 1 and is_same(state, _indexed_state):
 		var craft: Dictionary = _hulls_by_id.get(ids[0], {})
-		return [craft] if not craft.is_empty() and int(craft["owner"]) == player and craft.get("kind", "") not in ["warp_gate", "probe"] and not colony_morphing(craft) else []
+		return [craft] if not craft.is_empty() and int(craft["owner"]) == player and craft.get("kind", "") not in ["warp_gate", "probe"] and not is_static_structure(craft) and not colony_morphing(craft) else []
 	var units: Array = []
 	var candidates: Array = _ordered_indexed_hull_subset(requested) if _can_index_hull_subset(state, requested) else state["ships"]
 	for ship in candidates:
 		if requested.has(ship["id"]):
-			if int(ship["owner"]) != player or ship.get("kind", "") in ["warp_gate", "probe"] or colony_morphing(ship):
+			if int(ship["owner"]) != player or ship.get("kind", "") in ["warp_gate", "probe"] or is_static_structure(ship) or colony_morphing(ship):
 				return []
 			units.append(ship)
 	return units if units.size() == requested.size() else []
@@ -6614,8 +6628,16 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		return not append and can_build_warp_gate(state, graph, ship)
 	if kind == "warp_travel":
 		return not append and order.get("target") is int and _warp_order_valid(state, ship, int(order["target"]))
-	if ship.get("kind", "") in ["warp_gate", "probe"]:
+	if ship.get("kind", "") in ["warp_gate", "probe"] or is_static_structure(ship):
 		return false
+	if kind == "build_depot":
+		return not append and ship["kind"] == "construction_ship" and order.get("point") is Vector2 and _site_source(state, graph, owner, order["point"], "resource_depot") >= 0
+	if kind == "cancel_site":
+		var site: Dictionary = service_targets(state, int(order.get("target", -1))).get(int(order.get("target", -1)), {}).get("entity", {}) if order.get("target") is int else {}
+		return not append and ship["kind"] == "construction_ship" and is_static_structure(site) and int(site.get("owner", 0)) == owner and not static_complete(site)
+	if kind == "load_depot":
+		var depot: Dictionary = service_targets(state, int(order.get("target", -1))).get(int(order.get("target", -1)), {}).get("entity", {}) if order.get("target") is int else {}
+		return not append and ship["kind"] in ["ship", "construction_ship"] and depot.get("kind", "") == "resource_depot" and static_complete(depot) and int(depot.get("owner", 0)) == owner and cargo_free(ship) > EPS
 	if kind == "scan":
 		return not append and science_scan_ready(state, ship) and order.get("point") is Vector2 and patrol_node(state, graph, owner, order["point"]) >= 0
 	if kind in ["stop", "hold"]:
@@ -6689,6 +6711,21 @@ static func _valid_targeted_unit_order(state: Dictionary, graph: Dictionary, shi
 static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
+		"build_depot":
+			return _place_static_site(state, player, order["point"], "resource_depot")
+		"cancel_site":
+			var site: Dictionary = service_targets(state, target).get(target, {}).get("entity", {})
+			if not is_static_structure(site) or static_complete(site) or int(site["owner"]) != player:
+				return false
+			_refund_site(state, site, true)
+			_remove_indexed_hull(state, site)
+			return true
+		"load_depot":
+			for ship in _owned_units(state, player, ids):
+				_reset_unit_for_order(ship)
+				_finish_manual(ship)
+				ship["depot_pickup"] = target
+			return true
 		"scan":
 			return _launch_scan_probes(state, player, ids, order["point"])
 		"warp_build":
@@ -6756,6 +6793,7 @@ static func _execute_unit_order(state: Dictionary, player: int, ids: Array, orde
 # Shared preamble for orders that take over a hull: release salvage, tactical
 # orders, local hold and autonomous work, in this order.
 static func _reset_unit_for_order(ship: Dictionary) -> void:
+	ship.erase("depot_pickup")
 	_cancel_salvage_order(ship)
 	_clear_tactical_order(ship)
 	_clear_local_hold(ship)
@@ -6786,6 +6824,183 @@ static func _launch_scan_probes(state: Dictionary, player: int, ids: Array, poin
 		state["ships"].append(probe)
 		_register_indexed_hull(state, probe)
 		vessel["scan_ready_at"] = float(state["elapsed"]) + SCAN_COOLDOWN
+	return true
+
+# Static construction shares the authoritative entity IDs, combat damage, snapshots
+# and ship movement. Reserved stock is held at its origin, never teleported to a site.
+static func is_static_structure(ship: Dictionary) -> bool:
+	return ship.get("kind", "") in STATIC_SITE_KINDS
+
+static func static_complete(site: Dictionary) -> bool:
+	return float(site.get("build_progress", 0.0)) >= 1.0 - EPS
+
+static func depot_capacity(resource: String) -> float:
+	return DEPOT_ANTIMATTER_CAPACITY if resource == ANTIMATTER else DEPOT_REFERENCE_BUDGET / maxf(EPS, float(CONSTRUCTION_REFERENCE_VALUES.get(resource, 1.0)))
+
+static func depot_free(site: Dictionary, resource: String) -> float:
+	return maxf(0.0, depot_capacity(resource) - float(site.get("cargo", {}).get(resource, 0.0))) if static_complete(site) else 0.0
+
+static func static_recipe(kind: String) -> Dictionary:
+	return {"Metals": 600.0, "Crystals": 40.0} if kind == "resource_depot" else {}
+
+static func hull_max_hp(ship: Dictionary) -> float:
+	var maximum: float = ship_max_hp(str(ship.get("kind", "")))
+	return maximum * lerpf(0.1, 1.0, clampf(float(ship.get("build_progress", 0.0)), 0.0, 1.0)) if is_static_structure(ship) else maximum
+
+static func _site_source(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, kind: String) -> int:
+	if patrol_node(state, graph, owner, point) < 0 or kind not in STATIC_SITE_KINDS:
+		return -1
+	for craft in state["ships"]:
+		if is_static_structure(craft) and (craft["position"] as Vector2).distance_to(point) < 65.0:
+			return -1
+	var recipe: Dictionary = static_recipe(kind)
+	var best: float = INF
+	var source: int = -1
+	for i in range(state["planets"].size()):
+		var p: Dictionary = state["planets"][i]
+		if int(p["owner"]) != owner or not has_station(p):
+			continue
+		var available: bool = true
+		for resource in recipe:
+			if float(p["stock"].get(resource, 0.0)) + EPS < float(recipe[resource]):
+				available = false
+				break
+		var distance: float = point.distance_squared_to(station_position(state, i, float(state["elapsed"])))
+		if available and distance >= 80.0 * 80.0 and distance < best:
+			best = distance
+			source = i
+	return source
+
+static func _place_static_site(state: Dictionary, owner: int, point: Vector2, kind: String) -> bool:
+	var graph: Dictionary = military_graph(state)
+	var source: int = _site_source(state, graph, owner, point, kind)
+	if source < 0:
+		return false
+	var recipe: Dictionary = static_recipe(kind)
+	var stock: Dictionary = state["planets"][source]["stock"]
+	for resource in recipe:
+		stock[resource] -= float(recipe[resource])
+	var id: int = int(state["next_id"])
+	state["next_id"] = id + 1
+	var anchor: int = patrol_node(state, graph, owner, point)
+	var site: Dictionary = {"id": id, "kind": kind, "owner": owner, "origin": source, "at": anchor, "position": point, "navigation_target": point, "heading": Vector2.UP, "route": [], "leg": 0.0, "source": -1, "dest": -1, "crew": 0.0, "cargo": empty_stock(), "hp": ship_max_hp(kind) * 0.1, "build_progress": 0.0, "build_recipe": recipe, "build_reserved": recipe.duplicate(), "build_delivered": empty_stock(), "build_source": source, "build_source_point": station_position(state, source, float(state["elapsed"]))}
+	state["ships"].append(site)
+	_register_indexed_hull(state, site)
+	return true
+
+# Refund unused source-side materials, dropping overflow or lost-source stock
+# physically at the former origin. Delivered construction material becomes salvage.
+static func _refund_site(state: Dictionary, site: Dictionary, drop_delivered: bool) -> void:
+	var source: int = int(site.get("build_source", -1))
+	var reserved: Dictionary = site.get("build_reserved", {})
+	var overflow: Dictionary = empty_stock()
+	for resource in reserved:
+		var amount: float = float(reserved[resource])
+		if source >= 0 and source < state["planets"].size():
+			var p: Dictionary = state["planets"][source]
+			if int(p["owner"]) == int(site["owner"]) and has_station(p):
+				var refund: float = minf(amount, storage_free(p, resource))
+				p["stock"][resource] += refund
+				amount -= refund
+		overflow[resource] = amount
+		reserved[resource] = 0.0
+	_drop_carried(state, {"id": site["id"], "position": site.get("build_source_point", site["position"]), "cargo": overflow})
+	if drop_delivered:
+		_drop_carried(state, {"id": site["id"], "position": site["position"], "cargo": site.get("build_delivered", {}).duplicate()})
+
+static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+	if dt <= 0.0 or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty():
+		return false
+	var site: Dictionary = {}
+	var best: float = INF
+	for candidate in state["ships"]:
+		if is_static_structure(candidate) and not static_complete(candidate) and int(candidate["owner"]) == int(ship["owner"]):
+			var distance: float = (ship["position"] as Vector2).distance_squared_to(candidate["position"])
+			if distance < best:
+				site = candidate
+				best = distance
+	if site.is_empty():
+		ship.erase("construction_loading")
+		ship.erase("construction_target")
+		return false
+	ship["construction_target"] = site["id"]
+	var recipe: Dictionary = site["build_recipe"]
+	var delivered: Dictionary = site["build_delivered"]
+	var reserved: Dictionary = site["build_reserved"]
+	var useful_cargo: bool = false
+	for resource in recipe:
+		if float(delivered.get(resource, 0.0)) + EPS < float(recipe[resource]) and float(ship["cargo"].get(resource, 0.0)) > EPS:
+			useful_cargo = true
+			break
+	if useful_cargo and (not bool(ship.get("construction_loading", false)) or cargo_free(ship) <= EPS or _cargo_total({"cargo": reserved}) <= EPS):
+		ship.erase("construction_loading")
+		var point: Vector2 = site["position"]
+		var node: int = patrol_node(state, graph, int(ship["owner"]), point)
+		if node < 0 or not _manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE):
+			return true
+		var budget: float = _dropoff_budget(ship, dt)
+		var before: float = hull_max_hp(site)
+		var total: float = 0.0
+		var supplied: float = 0.0
+		for resource in recipe:
+			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), maxf(0.0, float(recipe[resource]) - float(delivered.get(resource, 0.0)))))
+			ship["cargo"][resource] -= amount
+			delivered[resource] = float(delivered.get(resource, 0.0)) + amount
+			budget -= amount
+			total += float(recipe[resource])
+			supplied += float(delivered[resource])
+		site["build_progress"] = clampf(supplied / maxf(EPS, total), 0.0, 1.0)
+		site["hp"] = minf(hull_max_hp(site), float(site["hp"]) + hull_max_hp(site) - before)
+		if static_complete(site):
+			_refund_site(state, site, false)
+			ship.erase("construction_target")
+		return true
+	var source: int = int(site["build_source"])
+	var p: Dictionary = state["planets"][source]
+	if int(p["owner"]) != int(ship["owner"]) or not has_station(p):
+		return false
+	if cargo_free(ship) <= EPS:
+		return false
+	var source_point: Vector2 = station_position(state, source, float(state["elapsed"]))
+	if not _manual_travel(state, graph, ship, source, source_point, dt, STATION_DOCK_RANGE):
+		return true
+	ship["construction_loading"] = true
+	var budget: float = _dropoff_budget(ship, dt)
+	for resource in recipe:
+		var amount: float = minf(budget, minf(cargo_free(ship), float(reserved.get(resource, 0.0))))
+		if amount <= EPS:
+			continue
+		reserved[resource] -= amount
+		ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
+		budget -= amount
+	return true
+
+static func _work_depot_pickup(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
+	if not ship.has("depot_pickup"):
+		return false
+	var target: int = int(ship["depot_pickup"])
+	var depot: Dictionary = service_targets(state, target).get(target, {}).get("entity", {})
+	if depot.get("kind", "") != "resource_depot" or not static_complete(depot) or int(depot.get("owner", 0)) != int(ship["owner"]):
+		ship.erase("depot_pickup")
+		return false
+	var point: Vector2 = depot["position"]
+	var node: int = patrol_node(state, graph, int(ship["owner"]), point)
+	if node < 0:
+		ship.erase("depot_pickup")
+		return false
+	if not _manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE):
+		return true
+	var budget: float = _dropoff_budget(ship, dt)
+	for resource in RESOURCES + [ANTIMATTER]:
+		var amount: float = minf(budget, minf(cargo_free(ship), float(depot["cargo"].get(resource, 0.0))))
+		if amount > EPS:
+			_record_transfer(state, target, depot, int(ship["id"]), ship, resource, amount)
+			depot["cargo"][resource] -= amount
+			ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
+			budget -= amount
+	if cargo_free(ship) <= EPS or _cargo_total(depot) <= EPS:
+		ship.erase("depot_pickup")
+		_finish_manual(ship)
 	return true
 
 static func _work_probe(state: Dictionary, ship: Dictionary, dt: float) -> void:
@@ -7307,6 +7522,8 @@ static func system_presence_weight(system: Dictionary) -> int:
 	return points + BUILDING_INFLUENCE * buildings
 
 static func ship_presence_weight(ship: Dictionary) -> int:
+	if is_static_structure(ship) or ship.get("kind", "") == "probe":
+		return 0
 	return int(SHIP_INFLUENCE.get(ship["kind"], BUILDING_INFLUENCE if ship["kind"] == "warp_gate" else 1))
 
 static func territory_influence(state: Dictionary, graph: Dictionary, known_pois: Variant = null, region_cache: Dictionary = {}, spill_cache: Variant = null) -> Array[Dictionary]:
@@ -7331,7 +7548,7 @@ static func territory_influence(state: Dictionary, graph: Dictionary, known_pois
 	for ship in state["ships"]:
 		var owner: int = int(ship["owner"])
 		var weight: int = ship_presence_weight(ship)
-		if owner <= 0 or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) <= 0.0:
+		if owner <= 0 or weight <= 0 or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) <= 0.0:
 			continue
 		var id: int = int(ship["id"])
 		var point: Vector2 = combat_position(state, graph, ship)
@@ -8499,7 +8716,7 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 			if not indexed:
 				by_id[id] = ship
 			team_by_id[id] = team
-			hull_health[slot] = _effective_health(ship, ship_max_hp(str(ship["kind"])))
+			hull_health[slot] = _effective_health(ship, hull_max_hp(ship))
 			hull_slots[id] = slot
 			hull_positions[slot] = pos
 			hull_teams[slot] = team
@@ -9158,12 +9375,14 @@ static func _resolve_combat_damage(state: Dictionary, graph: Dictionary, frame: 
 	for ship in ships.duplicate():
 		var id: int = int(ship["id"])
 		if damage.has(id):
-			_apply_reward_damage(ship, ship_max_hp(str(ship["kind"])), float(damage[id]), float(state["elapsed"]))
+			_apply_reward_damage(ship, hull_max_hp(ship), float(damage[id]), float(state["elapsed"]))
 			if float(ship["hp"]) <= EPS:
 				if killed_by.has(id) and SHIP_KINDS.has(ship["kind"]) and int(killed_by[id]["owner"]) > 0:
 					var attacker: Dictionary = killed_by[id]
 					var progress: Dictionary = objective_progress(state, int(attacker["owner"]))
 					progress["enemy_ships_destroyed"] = int(progress.get("enemy_ships_destroyed", 0)) + 1
+				if is_static_structure(ship) and not static_complete(ship):
+					_refund_site(state, ship, true)
 				_record_ship_destruction(state, graph, ship)
 				_remove_indexed_hull(state, ship)
 	_resolve_shipyard_damage(state, graph, frame.yard_targets, damage)
@@ -9447,7 +9666,7 @@ static func _ai_resettle(state: Dictionary, player: int) -> void:
 static func _ai_census(state: Dictionary, player: int, home: int) -> Dictionary:
 	var planets: Array = state["planets"]
 	var owned: Array[int] = []
-	var counts: Dictionary = {"ship": 0, "colony_ship": 0, "miner": 0, "fighter": 0, "science_ship": 0, "scout": 0, "cruiser": 0, "destroyer": 0, "railgun_ship": 0}
+	var counts: Dictionary = {"ship": 0, "colony_ship": 0, "miner": 0, "fighter": 0, "science_ship": 0, "scout": 0, "cruiser": 0, "destroyer": 0, "railgun_ship": 0, "construction_ship": 0}
 	var reserved: Dictionary = {}
 	var fighters: Array = []
 	var idle_colonies: Array = []
@@ -11417,7 +11636,7 @@ static func _prepare_combat_hulls(state: Dictionary, combat_graph: Dictionary, d
 		if not needs_threats and craft.get("kind", "") in ["ship", "miner"]:
 			needs_threats = true
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") in MILITARY_KINDS else state["map"]["points"], craft)
-		_regenerate_hull(craft, ship_max_hp(str(craft["kind"])), dt)
+		_regenerate_hull(craft, hull_max_hp(craft), dt)
 		var owner: int = int(craft["owner"])
 		if not loading_by_owner.has(owner):
 			loading_by_owner[owner] = _player_factor(state, owner, "rank_loading", 0.15)
@@ -11635,7 +11854,7 @@ static func _motion_sleep_mode(state: Dictionary, frame: STEP_FRAME, ship: Dicti
 		return MotionSleep.AWAKE
 	if _salvage_active(ship) or ship.has("auto_salvage_target") or ship.has("auto_salvage_origin") or bool(ship.get("passing_fire", false)):
 		return MotionSleep.AWAKE
-	if ship.get("combat_target") != -1 or ship.get("pursuit_target") != -1 or ship.get("pursuit_left") != 0.0:
+	if ship.has("railgun_target_point") or ship.get("combat_target") != -1 or ship.get("pursuit_target") != -1 or ship.get("pursuit_left") != 0.0:
 		return MotionSleep.AWAKE
 	var id: int = int(ship["id"])
 	if frame.idle_targets.has(id) or frame.coordinated.has(id):
@@ -11663,6 +11882,9 @@ static func _try_direct_order_dispatch(state: Dictionary, frame: STEP_FRAME, shi
 	return _work_local_move(frame.graph, ship, dt, state)
 
 static func _step_hull(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> void:
+	if is_static_structure(ship):
+		frame.repair_parked[int(ship["id"])] = true
+		return
 	if ship.get("kind", "") == "probe":
 		_work_probe(state, ship, dt)
 		if ship.has("probe_expires"):
@@ -11767,7 +11989,9 @@ static func _step_hull_overrides(state: Dictionary, frame: STEP_FRAME, ship: Dic
 		else:
 			var point: Vector2 = ref["position"]
 			var node: int = int(ref["node"]) if int(ref["node"]) >= 0 else _attack_destination(combat_graph, ref["entity"])
-			if ship["kind"] in MILITARY_KINDS and (ship["position"] as Vector2).distance_to(point) <= LASER_RANGE:
+			if ship["kind"] == "railgun_ship":
+				_siege_standoff(ship, point, dt)
+			elif ship["kind"] in MILITARY_KINDS and (ship["position"] as Vector2).distance_to(point) <= LASER_RANGE:
 				_maneuver_fighter(ship, point, dt)
 			elif node >= 0:
 				_manual_travel(state, combat_graph, ship, node, point, dt, LASER_RANGE * 0.8)
@@ -11789,6 +12013,10 @@ static func _step_hull_services(state: Dictionary, frame: STEP_FRAME, ship: Dict
 		ship["guard_arrived"] = _manual_travel(state, combat_graph, ship, int(guard["target"]), guard["point"], dt, 8.0)
 		return true
 	if _work_local_move(combat_graph, ship, dt, state):
+		return true
+	if _work_depot_pickup(state, combat_graph, ship, dt):
+		return true
+	if ship.get("kind", "") == "construction_ship" and _work_construction(state, combat_graph, ship, dt):
 		return true
 	if _work_salvage(state, combat_graph, ship, dt, frame.salvage_busy.has(salvage_ship_id)):
 		return true
