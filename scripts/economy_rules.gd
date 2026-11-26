@@ -1030,7 +1030,7 @@ static func _pirate_fire(state: Dictionary, ship: Dictionary, positions: Diction
 	var cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
 	var laser: float = MINER_LASER_DAMAGE if ship["kind"] == "miner" else LASER_DAMAGE * capital_lasers(str(ship["kind"]))
 	if in_range and cooldown <= EPS and laser > 0.0:
-		_ship_hit(damage, killed_by, health, target, ship, laser, slots, hull_health)
+		_wall_laser_hit(state, positions[id], positions[target], target, ship, laser, damage, killed_by, health, slots, hull_health)
 		ship["laser_until"] = float(state["elapsed"]) + 0.2
 		cooldown = 1.0
 	ship["laser_cooldown"] = cooldown
@@ -1038,17 +1038,16 @@ static func _pirate_fire(state: Dictionary, ship: Dictionary, positions: Diction
 	var missile_cd: float = maxf(0.0, float(ship.get("missile_cooldown", 0.0)) - dt)
 	var launchers: int = missile_count(str(ship["kind"]))
 	if launchers > 0 and missile_cd <= EPS and range_to <= MISSILE_RANGE:
-		_missile_splash(state, cells, positions, teams, PIRATE_COMBAT_GROUP, target, ship, MISSILE_DAMAGE * launchers, damage, killed_by, health, slots, hull_health)
+		ship["missile_endpoint"] = _missile_splash(state, cells, positions, teams, PIRATE_COMBAT_GROUP, target, ship, MISSILE_DAMAGE * launchers, damage, killed_by, health, slots, hull_health)
 		ship["missile_origin"] = positions[id]
-		ship["missile_endpoint"] = positions[target]
 		ship["missile_until"] = float(state["elapsed"]) + 0.65
 		missile_cd = MISSILE_COOLDOWN
 	ship["missile_cooldown"] = missile_cd
 	if railgun_count(str(ship["kind"])) > 0:
 		var railgun_cd: float = maxf(0.0, float(ship.get("railgun_cooldown", 0.0)) - dt)
 		if railgun_cd <= EPS and range_to <= RAILGUN_RANGE:
-			_ship_hit(damage, killed_by, health, target, ship, RAILGUN_DAMAGE, slots, hull_health)
-			_record_railgun_shot(state, ship, positions[id], positions[target])
+			var impact: Vector2 = _weapon_hit(state, positions[id], positions[target], target, ship, RAILGUN_DAMAGE, damage, killed_by, health, slots, hull_health)
+			_record_railgun_shot(state, ship, positions[id], impact)
 			railgun_cd = RAILGUN_COOLDOWN
 		ship["railgun_cooldown"] = railgun_cd
 
@@ -3433,6 +3432,7 @@ static func _empty_rock_sweep(before: Vector2, after: Vector2) -> Vector2:
 	return after if (after - before).length_squared() <= EPS * EPS else before.lerp(after, 1.0)
 
 static func _commit_motion_sample(ship: Dictionary, before: Vector2, after: Vector2) -> float:
+	after = _clip_wall_move(ship, before, after)
 	var displacement: Vector2 = after - before
 	if not displacement.is_zero_approx():
 		ship["heading"] = displacement.normalized()
@@ -6926,6 +6926,75 @@ static func _site_source(state: Dictionary, graph: Dictionary, owner: int, point
 
 # Plan all nodes and segments against a shadow copy of station resources.
 # IDs are reserved in plan order and the live stock changes only on success.
+static var _combat_wall_grid: Dictionary = {}
+static var _movement_wall_grid: Dictionary = {}
+static var _movement_wall_state: Dictionary = {}
+
+static func wall_grid(state: Dictionary) -> Dictionary:
+	var nodes: Dictionary = {}
+	var segments: Array = []
+	for entity in state["ships"]:
+		if not static_complete(entity) or float(entity.get("hp", 0.0)) <= EPS:
+			continue
+		if entity.get("kind", "") == "wall_node":
+			nodes[int(entity["id"])] = true
+		elif entity.get("kind", "") == "wall_segment":
+			segments.append(entity)
+	var grid: Dictionary = {}
+	for wall in segments:
+		if not nodes.has(int(wall["wall_a_id"])) or not nodes.has(int(wall["wall_b_id"])):
+			continue
+		var a: Vector2 = wall["wall_a"]
+		var b: Vector2 = wall["wall_b"]
+		var lo := Vector2i(floori(minf(a.x, b.x) / WALL_MAX_LENGTH), floori(minf(a.y, b.y) / WALL_MAX_LENGTH))
+		var hi := Vector2i(floori(maxf(a.x, b.x) / WALL_MAX_LENGTH), floori(maxf(a.y, b.y) / WALL_MAX_LENGTH))
+		for x in range(lo.x, hi.x + 1):
+			for y in range(lo.y, hi.y + 1):
+				var key := Vector2i(x, y)
+				if not grid.has(key):
+					grid[key] = []
+				grid[key].append(wall)
+	return grid
+
+static func wall_first_hit(state: Dictionary, grid: Dictionary, owner: int, a: Vector2, b: Vector2, movement: bool) -> Dictionary:
+	if grid.is_empty() or a.is_equal_approx(b):
+		return {}
+	var lo := Vector2i(floori(minf(a.x, b.x) / WALL_MAX_LENGTH), floori(minf(a.y, b.y) / WALL_MAX_LENGTH))
+	var hi := Vector2i(floori(maxf(a.x, b.x) / WALL_MAX_LENGTH), floori(maxf(a.y, b.y) / WALL_MAX_LENGTH))
+	var visited: Dictionary = {}
+	var best: float = INF
+	var result: Dictionary = {}
+	for x in range(lo.x, hi.x + 1):
+		for y in range(lo.y, hi.y + 1):
+			for wall in grid.get(Vector2i(x, y), []):
+				var id: int = int(wall["id"])
+				if visited.has(id):
+					continue
+				visited[id] = true
+				var wall_owner: int = int(wall["owner"])
+				if owner == wall_owner or (open_borders(state, wall_owner, owner) if movement else empires_allied(state, owner, wall_owner)):
+					continue
+				var intersection: Variant = Geometry2D.segment_intersects_segment(a, b, wall["wall_a"], wall["wall_b"])
+				if intersection == null:
+					continue
+				var point: Vector2 = intersection
+				var distance: float = a.distance_squared_to(point)
+				if movement and distance <= EPS * EPS:
+					continue
+				if distance < best or (distance == best and id < int(result.get("id", 2147483647))):
+					best = distance
+					result = {"id": id, "owner": wall_owner, "point": point}
+	return result
+
+static func _clip_wall_move(ship: Dictionary, before: Vector2, after: Vector2) -> Vector2:
+	if _movement_wall_grid.is_empty():
+		return after
+	var hit: Dictionary = wall_first_hit(_movement_wall_state, _movement_wall_grid, int(ship["owner"]), before, after, true)
+	if hit.is_empty():
+		return after
+	var point: Vector2 = hit["point"]
+	return before.move_toward(point, maxf(0.0, before.distance_to(point) - 4.0))
+
 static func wall_chain_points(start: Vector2, end: Vector2) -> PackedVector2Array:
 	var result := PackedVector2Array()
 	if not start.is_finite() or not end.is_finite():
@@ -6938,7 +7007,7 @@ static func wall_chain_points(start: Vector2, end: Vector2) -> PackedVector2Arra
 		return result
 	var count: int = ceili(distance / WALL_MAX_LENGTH)
 	for index in range(1, count + 1):
-		result.append(start.lerp(end, float(index) / float(count)))
+		result.append(start.move_toward(end, minf(distance, float(index) * WALL_MAX_LENGTH)))
 	return result
 
 static func _wall_snap(state: Dictionary, owner: int, point: Vector2) -> Dictionary:
@@ -8699,6 +8768,36 @@ static func _unload_salvage(state: Dictionary, ship: Dictionary, depot: int, dt:
 			budget -= amount
 	return budget
 
+# Neutral walls absorb shots without damage or changing diplomacy.
+static func _weapon_hit(state: Dictionary, origin: Vector2, endpoint: Vector2, target: int, attacker: Dictionary, amount: float, damage: Dictionary, killed_by: Dictionary, health: Dictionary, slots: Dictionary, hull_health: PackedFloat64Array) -> Vector2:
+	var hit: Dictionary = wall_first_hit(state, _combat_wall_grid, int(attacker["owner"]), origin, endpoint, false)
+	if not hit.is_empty():
+		if empires_hostile(state, int(attacker["owner"]), int(hit["owner"])):
+			_ship_hit(damage, killed_by, health, int(hit["id"]), attacker, amount, slots, hull_health)
+		return hit["point"]
+	_ship_hit(damage, killed_by, health, target, attacker, amount, slots, hull_health)
+	return endpoint
+
+static func _wall_laser_hit(state: Dictionary, origin: Vector2, endpoint: Vector2, target: int, attacker: Dictionary, amount: float, damage: Dictionary, killed_by: Dictionary, health: Dictionary, slots: Dictionary, hull_health: PackedFloat64Array) -> void:
+	var impact: Vector2 = _weapon_hit(state, origin, endpoint, target, attacker, amount, damage, killed_by, health, slots, hull_health)
+	if not impact.is_equal_approx(endpoint):
+		attacker["wall_laser_endpoint"] = impact
+		attacker["wall_laser_until"] = float(state["elapsed"]) + 0.2
+	else:
+		attacker.erase("wall_laser_endpoint")
+		attacker.erase("wall_laser_until")
+
+static func _station_laser_hit(state: Dictionary, origin: Vector2, endpoint: Vector2, owner: int, target: int, amount: float, damage: Dictionary, weapon: Dictionary) -> void:
+	var hit: Dictionary = wall_first_hit(state, _combat_wall_grid, owner, origin, endpoint, false)
+	if hit.is_empty():
+		damage[target] = float(damage.get(target, 0.0)) + amount
+		weapon.erase("wall_laser_endpoint")
+	else:
+		weapon["wall_laser_endpoint"] = hit["point"]
+		if empires_hostile(state, owner, int(hit["owner"])):
+			var wall_id: int = int(hit["id"])
+			damage[wall_id] = float(damage.get(wall_id, 0.0)) + amount
+
 static func _ship_hit(damage: Dictionary, killed_by: Dictionary, health: Dictionary, target: int, attacker: Dictionary, amount: float, hull_slots: Dictionary = {}, hull_health: PackedFloat64Array = PackedFloat64Array()) -> void:
 	COMBAT_KERNELS.ship_hit(damage, killed_by, health, target, attacker, amount, hull_slots, hull_health, EPS)
 
@@ -8726,11 +8825,21 @@ static func _missile_splash_ids(state: Dictionary, cells: Dictionary, positions:
 		groups[key] = ids
 	return ids
 
-static func _missile_splash(state: Dictionary, cells: Dictionary, positions: Dictionary, teams: Dictionary, team: int, target: int, attacker: Dictionary, amount: float, damage: Dictionary, killed_by: Dictionary, health: Dictionary, hull_slots: Dictionary, hull_health: PackedFloat64Array, groups: Dictionary = {}) -> void:
+static func _missile_splash(state: Dictionary, cells: Dictionary, positions: Dictionary, teams: Dictionary, team: int, target: int, attacker: Dictionary, amount: float, damage: Dictionary, killed_by: Dictionary, health: Dictionary, hull_slots: Dictionary, hull_health: PackedFloat64Array, groups: Dictionary = {}, origin: Vector2 = Vector2.INF) -> Vector2:
+	var endpoint: Vector2 = positions[target]
+	var start: Vector2 = origin if origin.is_finite() else positions.get(int(attacker.get("id", -1)), endpoint)
+	var hit: Dictionary = wall_first_hit(state, _combat_wall_grid, int(attacker["owner"]), start, endpoint, false)
+	if not hit.is_empty():
+		if empires_hostile(state, int(attacker["owner"]), int(hit["owner"])):
+			_ship_hit(damage, killed_by, health, int(hit["id"]), attacker, amount, hull_slots, hull_health)
+		return hit["point"]
 	for id in _missile_splash_ids(state, cells, positions, teams, team, target, groups):
+		if not wall_first_hit(state, _combat_wall_grid, int(attacker["owner"]), endpoint, positions[id], false).is_empty():
+			continue
 		# Do not aggregate hits: per-attacker multipliers, damage ordering
 		# and lethal-hit attribution must remain unchanged.
 		_ship_hit(damage, killed_by, health, id, attacker, amount, hull_slots, hull_health)
+	return endpoint
 
 static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, positions: Dictionary, damage: Dictionary, killed_by: Dictionary, health: Dictionary, dt: float, hull_slots: Dictionary = {}, hull_health: PackedFloat64Array = PackedFloat64Array()) -> void:
 	var mounts: int = blaster_count(str(ship["kind"]))
@@ -8744,9 +8853,8 @@ static func _fire_blaster(state: Dictionary, ship: Dictionary, target: int, posi
 			ship["blaster_shot"] = 0
 		return
 	while next < dt - EPS:
-		_ship_hit(damage, killed_by, health, target, ship, BLASTER_DAMAGE * mounts, hull_slots, hull_health)
 		ship["blaster_origin"] = positions[ship["id"]]
-		ship["blaster_endpoint"] = positions[target]
+		ship["blaster_endpoint"] = _weapon_hit(state, positions[ship["id"]], positions[target], target, ship, BLASTER_DAMAGE * mounts, damage, killed_by, health, hull_slots, hull_health)
 		ship["blaster_fired"] = float(state["elapsed"]) - dt + next
 		ship["blaster_visual_shot"] = shot
 		if bool(ship.get("cloak_equipped", false)):
@@ -8844,6 +8952,7 @@ static func _peaceful_combat_possible(state: Dictionary, ships: Array) -> bool:
 # Phase order and ship iteration order are part of the simulation contract.
 static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}, activity_fast_paths: bool = true, persistent_buckets: bool = false, collect_threats: bool = true) -> void:
 	var ships: Array = state["ships"]
+	_combat_wall_grid = {}
 	if activity_fast_paths and _peaceful_combat_possible(state, ships):
 		# Preserve the exact civilian threat snapshot when requested, but
 		# omit target, damage, sector fallback and structure geometry.
@@ -8855,6 +8964,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 		_fire_planetary_defenses(state, graph, empty_frame, dt)
 		_resolve_combat_damage(state, graph, empty_frame, ships)
 		return
+	_combat_wall_grid = wall_grid(state)
 	var frame: COMBAT_FRAME = _build_combat_frame(state, graph, ships, threat_index, persistent_buckets, collect_threats)
 	# Optional reference path for state-equivalence tests.
 	frame.activity_bounds_ready = activity_fast_paths
@@ -8864,6 +8974,7 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 	_fire_station_weapons(state, frame, dt)
 	_fire_planetary_defenses(state, graph, frame, dt)
 	_resolve_combat_damage(state, graph, frame, ships)
+	_combat_wall_grid = {}
 
 # Freeze hull/structure positions, health and spatial buckets; also publish the
 # armed-hull threat snapshot consumed later by civilian safety checks.
@@ -9139,9 +9250,8 @@ static func _fire_defense_cannon(state: Dictionary, frame: COMBAT_FRAME, cannon:
 					target = id
 	if target == -1:
 		return
-	_ship_hit(frame.damage, frame.killed_by, frame.health, target, cannon, cannon_damage(cannon), frame.hull_slots, frame.hull_health)
+	cannon["cannon_endpoint"] = _weapon_hit(state, pos, frame.positions[target], target, cannon, cannon_damage(cannon), frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health)
 	cannon["cannon_cooldown"] = CANNON_COOLDOWN
-	cannon["cannon_endpoint"] = frame.positions[target]
 	cannon["cannon_until"] = float(state["elapsed"]) + 0.3
 
 # Long-range single-target siege fire shares the frozen combat frame and
@@ -9175,8 +9285,8 @@ static func _fire_hull_railgun(state: Dictionary, frame: COMBAT_FRAME, ship: Dic
 		if siege and target != -1:
 			ship["railgun_target_point"] = frame.positions[target]
 		if target != -1 and cooldown <= EPS:
-			_ship_hit(frame.damage, frame.killed_by, frame.health, target, ship, RAILGUN_DAMAGE, frame.hull_slots, frame.hull_health)
-			_record_railgun_shot(state, ship, pos, frame.positions[target])
+			var impact: Vector2 = _weapon_hit(state, pos, frame.positions[target], target, ship, RAILGUN_DAMAGE, frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health)
+			_record_railgun_shot(state, ship, pos, impact)
 			cooldown = RAILGUN_COOLDOWN
 	ship["railgun_cooldown"] = cooldown
 
@@ -9201,10 +9311,9 @@ static func _fire_hull_missiles(state: Dictionary, frame: COMBAT_FRAME, ship: Di
 			var nearest: Array = _missile_block_nearest(_missile_neighborhood_blocks(state, frame, missile_cell, team), positions, pos, best, missile_target, focused, focus_id)
 			missile_target = int(nearest[1])
 		if missile_target != -1:
-			_missile_splash(state, frame.cells, positions, frame.team_by_id, team, missile_target, ship, MISSILE_DAMAGE * launchers * _player_factor(state, int(ship["owner"]), "rank_missile", 0.10), frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health, frame.missile_splash_groups)
+			ship["missile_endpoint"] = _missile_splash(state, frame.cells, positions, frame.team_by_id, team, missile_target, ship, MISSILE_DAMAGE * launchers * _player_factor(state, int(ship["owner"]), "rank_missile", 0.10), frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health, frame.missile_splash_groups)
 			missile_cd = MISSILE_COOLDOWN
 			ship["missile_origin"] = pos
-			ship["missile_endpoint"] = positions[missile_target]
 			ship["missile_until"] = float(state["elapsed"]) + 0.65
 	ship["missile_cooldown"] = missile_cd
 
@@ -9252,7 +9361,7 @@ static func _fire_focused_attack(state: Dictionary, frame: COMBAT_FRAME, ship: D
 	ship["laser_until"] = -1.0 if int(frame.previous_targets[hull_slot]) != int(ship["combat_target"]) else ship.get("laser_until", -1.0)
 	var focus_cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
 	if in_range and weapon_damage > 0.0 and focus_cooldown <= EPS:
-		_ship_hit(frame.damage, frame.killed_by, frame.health, focus, ship, weapon_damage, frame.hull_slots, frame.hull_health)
+		_wall_laser_hit(state, pos, positions[focus], focus, ship, weapon_damage, frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health)
 		focus_cooldown = 1.0
 		ship["laser_until" if focus >= 0 else "yard_laser_until"] = float(state["elapsed"]) + 0.2
 	ship["laser_cooldown"] = focus_cooldown
@@ -9351,7 +9460,7 @@ static func _fire_hull_lasers(state: Dictionary, frame: COMBAT_FRAME, ship: Dict
 	ship["combat_target"] = target
 	var cooldown: float = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
 	if target >= 0 and weapon_damage > 0.0 and cooldown <= EPS:
-		_ship_hit(frame.damage, frame.killed_by, frame.health, target, ship, weapon_damage, hull_slots, frame.hull_health)
+		_wall_laser_hit(state, pos, positions[target], target, ship, weapon_damage, frame.damage, frame.killed_by, frame.health, hull_slots, frame.hull_health)
 		cooldown = 1.0
 		ship["laser_until"] = float(state["elapsed"]) + 0.2
 	ship["laser_cooldown"] = cooldown
@@ -9463,7 +9572,7 @@ static func _fire_hull_at_structures(state: Dictionary, frame: COMBAT_FRAME, shi
 			ship["yard_target"] = candidate_id
 	var yard_id: int = int(ship["yard_target"])
 	if yard_id < -1 and weapon_damage > 0.0 and cooldown <= EPS:
-		_ship_hit(frame.damage, frame.killed_by, frame.health, yard_id, ship, weapon_damage, frame.hull_slots, frame.hull_health)
+		_wall_laser_hit(state, pos, frame.positions[yard_id], yard_id, ship, weapon_damage, frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health)
 		ship["laser_cooldown"] = 1.0
 		ship["yard_laser_until"] = float(state["elapsed"]) + 0.2
 
@@ -9523,10 +9632,9 @@ static func _fire_station_weapons(state: Dictionary, frame: COMBAT_FRAME, dt: fl
 			if missile_target >= 0:
 				# Station damage uses the same simultaneous resolution as hull missiles.
 				var attacker: Dictionary = {"owner": system["owner"]}
-				_missile_splash(state, frame.cells, positions, team_by_id, team, missile_target, attacker, MISSILE_DAMAGE * STATION_MISSILE_COUNT, damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health, frame.missile_splash_groups)
+				station["missile_endpoint"] = _missile_splash(state, frame.cells, positions, team_by_id, team, missile_target, attacker, MISSILE_DAMAGE * STATION_MISSILE_COUNT, damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health, frame.missile_splash_groups, origin)
 				missile_cd = MISSILE_COOLDOWN
 				station["missile_origin"] = origin
-				station["missile_endpoint"] = positions[missile_target]
 				station["missile_until"] = float(state["elapsed"]) + 0.65
 		station["missile_cooldown"] = missile_cd
 		var target: int = -1
@@ -9548,7 +9656,7 @@ static func _fire_station_weapons(state: Dictionary, frame: COMBAT_FRAME, dt: fl
 			weapon["target"] = target
 			var cooldown: float = maxf(0.0, float(weapon["cooldown"]) - dt)
 			if target >= 0 and cooldown <= EPS:
-				damage[target] = float(damage.get(target, 0.0)) + LASER_DAMAGE
+				_station_laser_hit(state, origin, positions[target], int(system["owner"]), target, LASER_DAMAGE, damage, weapon)
 				cooldown = 1.0
 				weapon["laser_until"] = float(state["elapsed"]) + 0.2
 			weapon["cooldown"] = cooldown
@@ -9591,7 +9699,7 @@ static func _fire_planetary_defenses(state: Dictionary, graph: Dictionary, frame
 			battery["target"] = target
 			var cooldown: float = maxf(0.0, float(battery["cooldown"]) - dt)
 			if target >= 0 and cooldown <= EPS:
-				damage[target] = float(damage.get(target, 0.0)) + PDS_DAMAGE
+				_station_laser_hit(state, origin, positions[target], int(system["owner"]), target, PDS_DAMAGE, damage, battery)
 				cooldown = 1.0
 				battery["laser_until"] = float(state["elapsed"]) + 0.2
 			battery["cooldown"] = cooldown
@@ -11328,6 +11436,7 @@ static func _apply_separation(graph: Dictionary, ship: Dictionary, before: Vecto
 	if sector >= 0 and sector < graph["points"].size() and sector_contains(graph, sector, planned) and not sector_contains(graph, sector, candidate):
 		# Keep local orders and stationary ships inside their legal sector.
 		candidate = _clip_to_sector(graph, sector, planned, candidate)
+	candidate = _clip_wall_move(ship, before, candidate)
 	var displacement: Vector2 = candidate - before
 	ship["position"] = candidate
 	if not displacement.is_zero_approx():
@@ -11602,7 +11711,7 @@ static func _apply_contact_corrections(state: Dictionary, graph: Dictionary, pre
 			candidate = _clip_to_sector(graph, sector, point, candidate, 10)
 		if craft.get("kind", "") != "miner" and not _rock_cells.is_empty():
 			candidate = _clip_rock_step(point, candidate)
-		craft["position"] = candidate
+		craft["position"] = _clip_wall_move(craft, point, candidate)
 		if not craft["route"].is_empty():
 			craft["leg"] = _lane_progress(graph["points"], craft)
 
@@ -11658,6 +11767,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	started = _profile_stage(profile, "AI / routing setup", started)
 	_step_combat(state, frame, dt)
 	started = _profile_stage(profile, "Combat / repair", started)
+	_movement_wall_state = state
+	_movement_wall_grid = wall_grid(state)
 	_step_formations(state, frame, dt)
 	started = _profile_stage(profile, "Formations / orders", started)
 	if motion_sleep_enabled:
@@ -11665,6 +11776,8 @@ static func step(state: Dictionary, dt: float, profile: Dictionary = {}, motion_
 	for ship in (state["ships"] as Array).duplicate():
 		_step_hull(state, frame, ship, dt)
 	_step_settle_movement(state, frame, dt)
+	_movement_wall_grid = {}
+	_movement_wall_state = {}
 	if not profile.is_empty():
 		var now: int = Time.get_ticks_usec()
 		profile["Civilian logistics"] = int(profile.get("Civilian logistics", 0)) + frame.civilian_usec
