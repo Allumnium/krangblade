@@ -38,6 +38,16 @@ func _test_wall_navigation() -> void:
 	var ring: Dictionary = _wall_fixture([_wall_segment(1, Vector2(800, 600), Vector2(1200, 600)), _wall_segment(2, Vector2(1200, 600), Vector2(1200, 1000)), _wall_segment(3, Vector2(1200, 1000), Vector2(800, 1000)), _wall_segment(4, Vector2(800, 1000), Vector2(800, 600))])
 	assert(ECON.wall_navigation_route(ring, ECON.wall_grid(ring), 1, start, Vector2(1000, 800)).is_empty())
 
+	var staggered: Dictionary = _wall_fixture([_wall_segment(1, Vector2(800, 0), Vector2(800, 400)), _wall_segment(2, Vector2(800, 400), Vector2(800, 800)), _wall_segment(3, Vector2(800, 800), Vector2(800, 1200)), _wall_segment(4, Vector2(800, 1200), Vector2(800, 1400)), _wall_segment(5, Vector2(1200, 600), Vector2(1200, 1000)), _wall_segment(6, Vector2(1200, 1000), Vector2(1200, 1400)), _wall_segment(7, Vector2(1200, 1400), Vector2(1200, 1800)), _wall_segment(8, Vector2(1200, 1800), Vector2(1200, 2000))])
+	var staggered_grid: Dictionary = ECON.wall_grid(staggered)
+	var staggered_goal := Vector2(1600, 800)
+	var staggered_route: Array = ECON.wall_navigation_route(staggered, staggered_grid, 1, start, staggered_goal)
+	assert(staggered_route.size() >= 3 and staggered_route.back() == staggered_goal)
+	previous = start
+	for waypoint in staggered_route:
+		assert(ECON.wall_first_hit(staggered, staggered_grid, 1, previous, waypoint, true).is_empty())
+		previous = waypoint
+
 func _test_multi_source_materials() -> void:
 	var state: Dictionary = ECON.create(MAP.generate(712, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	state["planets"][1]["owner"] = 1

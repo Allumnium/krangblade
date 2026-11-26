@@ -7045,7 +7045,7 @@ static func wall_first_hit(state: Dictionary, grid: Dictionary, owner: int, a: V
 
 # Explore the connected blocking component via endpoint cells, not the full
 # ship roster. Candidate points occupy free angular wedges at ends/corners.
-static func _wall_navigation_points(state: Dictionary, grid: Dictionary, owner: int, first: Dictionary, avoid_rocks: bool) -> Array[Vector2]:
+static func _wall_navigation_points(state: Dictionary, grid: Dictionary, owner: int, first: Dictionary, avoid_rocks: bool, expanded: Dictionary) -> Array[Vector2]:
 	var pending: Array = [first]
 	var visited: Dictionary = {}
 	var nodes: Dictionary = {}
@@ -7057,6 +7057,7 @@ static func _wall_navigation_points(state: Dictionary, grid: Dictionary, owner: 
 		if visited.size() >= WALL_NAV_MAX_SEGMENTS:
 			return []
 		visited[id] = true
+		expanded[id] = true
 		for side in ["a", "b"]:
 			var other_side: String = "b" if side == "a" else "a"
 			var point: Vector2 = wall["wall_" + side]
@@ -7100,44 +7101,64 @@ static func wall_navigation_route(state: Dictionary, grid: Dictionary, owner: in
 	if hit.is_empty():
 		return [target]
 	var points: Array[Vector2] = [start, target]
-	points.append_array(_wall_navigation_points(state, grid, owner, hit["wall"], avoid_rocks))
-	var cost: Dictionary = {0: 0.0}
-	var parent: Dictionary = {}
-	var closed: Dictionary = {}
-	while true:
-		var current: int = -1
-		var best: float = INF
-		for index in cost:
-			if closed.has(index):
-				continue
-			var score: float = float(cost[index]) + points[index].distance_to(target)
-			if score < best:
-				best = score
-				current = int(index)
-		if current < 0:
+	var expanded: Dictionary = {}
+	var blocker: Dictionary = hit["wall"]
+	# Expand additional disconnected components only when the current
+	# visibility graph cannot reach the goal. Bound both retries and vertices.
+	for attempt in range(8):
+		for point in _wall_navigation_points(state, grid, owner, blocker, avoid_rocks, expanded):
+			if not points.has(point):
+				if points.size() >= WALL_NAV_MAX_POINTS:
+					return []
+				points.append(point)
+		var cost: Dictionary = {0: 0.0}
+		var parent: Dictionary = {}
+		var closed: Dictionary = {}
+		var next_blocker: Dictionary = {}
+		var blocker_distance: float = INF
+		while true:
+			var current: int = -1
+			var best: float = INF
+			for index in cost:
+				if closed.has(index):
+					continue
+				var score: float = float(cost[index]) + points[index].distance_to(target)
+				if score < best:
+					best = score
+					current = int(index)
+			if current < 0:
+				break
+			if current == 1:
+				var route: Array[Vector2] = []
+				while current != 0:
+					route.push_front(points[current])
+					current = int(parent[current])
+				return route
+			closed[current] = true
+			for next in range(1, points.size()):
+				if closed.has(next):
+					continue
+				var distance: float = float(cost[current]) + points[current].distance_to(points[next])
+				if distance >= float(cost.get(next, INF)):
+					continue
+				var obstruction: Dictionary = wall_first_hit(state, grid, owner, points[current], points[next], true)
+				if not obstruction.is_empty():
+					var score: float = distance + points[next].distance_to(target)
+					if not expanded.has(obstruction["id"]) and score < blocker_distance:
+						blocker_distance = score
+						next_blocker = obstruction["wall"]
+					continue
+				cost[next] = distance
+				parent[next] = current
+		if next_blocker.is_empty():
 			return []
-		if current == 1:
-			var route: Array[Vector2] = []
-			while current != 0:
-				route.push_front(points[current])
-				current = int(parent[current])
-			return route
-		closed[current] = true
-		for next in range(1, points.size()):
-			if closed.has(next):
-				continue
-			var distance: float = float(cost[current]) + points[current].distance_to(points[next])
-			if distance >= float(cost.get(next, INF)):
-				continue
-			if not wall_first_hit(state, grid, owner, points[current], points[next], true).is_empty():
-				continue
-			cost[next] = distance
-			parent[next] = current
+		blocker = next_blocker
 	return []
 
 static func _wall_detour(ship: Dictionary, before: Vector2, target: Vector2, budget: float) -> Vector2:
 	if _movement_wall_grid.is_empty():
-		ship.erase("_wall_detour")
+		if ship.has("_wall_detour"):
+			ship.erase("_wall_detour")
 		return target
 	if budget <= EPS or before.is_equal_approx(target):
 		return target
