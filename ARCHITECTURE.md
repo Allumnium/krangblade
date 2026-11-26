@@ -92,6 +92,8 @@ Voronoi `sector_geometry.gd` builds a bounded immutable nearest-region candidate
 
 The private authority worker now opens `begin_authority_hull_scope` on its isolated rules script before its first job and closes it on thread stop. The existing live ID→hull dictionary references persist across jobs; launch/removal helpers update membership, and derived monotonic order tokens permit direct small ordered command/service subsets. Roster identity/count mismatch forces reconciliation; externally editable synchronous/fixture state retains per-step rebuild. Cooldown calendars reconcile on scope/state/roster setup and ordinary schedule/removal writes. Canonical hull dictionaries still own every gameplay field; no separate packed authority or replicated schema is introduced. Do not mutate the private roster directly or share its references across the mailbox.
 
+At the original combat boundary, `_peaceful_combat_possible` checks actual hull/structure owners, current group hostility and live rogue/cloak/target/order/pursuit guards. When no interaction is possible, `_combat` skips full target/health/sector/cell geometry and uses the existing hull stance, retreat and blaster processing plus exact inactive weapon metadata/deadline writes; station/PDS and cloak cleanup still run. If civilian threats are requested the existing frame builder runs in threat-only mode, retaining its exact ordered positions, groups, local-sector signatures and cells. No persistent peace certificate; the full combat path wakes on the same substep whenever proof fails. No new replicated state or reduced update rate.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

@@ -1877,6 +1877,98 @@ func _test_retry_dispatch_fast_path() -> void:
 		assert(int(yard["job"]) == -1)
 	print("PASS: not-due repair retry and empty construction assignment")
 
+func _test_peaceful_combat_phase() -> void:
+	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 1}}, [1, 2], false)
+	var craft: Dictionary = {"id": 19101, "kind": "fighter", "owner": 1, "at": 0, "position": Vector2(20, 0), "heading": Vector2.RIGHT, "route": [], "leg": 0.0, "dest": 0, "source": -1, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock(), "blaster_cooldown": 0.35, "laser_cooldown": 0.4}
+	var cruiser: Dictionary = craft.duplicate(true)
+	cruiser["id"] = 19102
+	cruiser["kind"] = "cruiser"
+	cruiser["owner"] = 2
+	cruiser["hp"] = ECON.ship_max_hp("cruiser")
+	cruiser["missile_cooldown"] = 0.3
+	cruiser["move_only"] = true
+	cruiser["local_move_target"] = Vector2(400, 0)
+	var scout: Dictionary = craft.duplicate(true)
+	scout["id"] = 19103
+	scout["kind"] = "scout"
+	scout["retreating"] = true
+	scout["hp"] = ECON.ship_max_hp("scout")
+	state["ships"] = [craft, cruiser, scout]
+	var reference: Dictionary = state.duplicate(true)
+	var graph: Dictionary = ECON.military_graph(state)
+	var reference_graph: Dictionary = ECON.military_graph(reference)
+	for tick in range(16):
+		state["elapsed"] = float(tick + 1) * 0.1
+		reference["elapsed"] = state["elapsed"]
+		if tick == 4:
+			for current in [state, reference]:
+				ECON.initialize_diplomacy(current)
+		if tick == 6:
+			for current in [state, reference]:
+				current["ships"][0]["cloaked"] = true
+		if tick == 7:
+			for current in [state, reference]:
+				current["ships"][0]["cloaked"] = false
+		if tick == 8:
+			for current in [state, reference]:
+				current["ships"][0]["combat_target"] = 19102
+		if tick == 10:
+			for current in [state, reference]:
+				assert(ECON.diplomacy_declare_war(current, 1, 2))
+		if tick == 11:
+			for current in [state, reference]:
+				current["ships"][1]["position"] = Vector2(25, 0)
+		var peaceful: bool = ECON._peaceful_combat_possible(state, state["ships"])
+		if tick in [0, 1, 2, 3, 4, 5, 7, 9]:
+			assert(peaceful, "peaceful proof unexpectedly rejected at %d" % tick)
+		if tick in [6, 8, 10, 11]:
+			assert(not peaceful, "peaceful proof failed to wake at %d" % tick)
+		var threats: Dictionary = {}
+		var reference_threats: Dictionary = {}
+		ECON._combat(state, graph, 0.1, threats, true, true, false)
+		ECON._combat(reference, reference_graph, 0.1, reference_threats, false, false, false)
+		assert(state == reference and var_to_str(state) == var_to_str(reference), "peaceful combat changed state at %d" % tick)
+		assert(threats.is_empty() and reference_threats.is_empty())
+	# Civilian safety receives the same ordered threat geometry, including
+	# negative cell coordinates, when no combat interaction is possible.
+	var peaceful_state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 1}}, [1, 2], false)
+	var fresh: Dictionary = {"id": 19201, "kind": "fighter", "owner": 1, "at": 0, "position": Vector2(-180, -360), "heading": Vector2.RIGHT, "route": [], "leg": 0.0, "dest": 0, "source": -1, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock()}
+	var miner: Dictionary = fresh.duplicate(true)
+	miner["id"] = 19202
+	miner["kind"] = "miner"
+	miner["position"] = Vector2(180.01, -0.01)
+	var freighter: Dictionary = fresh.duplicate(true)
+	freighter["id"] = 19203
+	freighter["kind"] = "ship"
+	freighter["owner"] = 2
+	peaceful_state["ships"] = [fresh, miner, freighter]
+	var full: Dictionary = peaceful_state.duplicate(true)
+	var peaceful_graph: Dictionary = ECON.military_graph(peaceful_state)
+	var full_graph: Dictionary = ECON.military_graph(full)
+	assert(ECON._peaceful_combat_possible(peaceful_state, peaceful_state["ships"]))
+	for tick in range(6):
+		peaceful_state["elapsed"] = float(tick + 1) * 0.1
+		full["elapsed"] = peaceful_state["elapsed"]
+		var threats: Dictionary = {}
+		var reference_threats: Dictionary = {}
+		ECON._combat(peaceful_state, peaceful_graph, 0.1, threats, true, true, true)
+		ECON._combat(full, full_graph, 0.1, reference_threats, false, false, true)
+		assert(threats == reference_threats and var_to_str(threats) == var_to_str(reference_threats))
+		assert(peaceful_state == full and var_to_str(peaceful_state) == var_to_str(full))
+		assert(ECON._reuse_combat_threats(peaceful_state, peaceful_graph, threats) == ECON._reuse_combat_threats(full, full_graph, reference_threats))
+	# A pirate, explicit attack, or hostile structure is sufficient to wake.
+	fresh["rogue"] = true
+	assert(not ECON._peaceful_combat_possible(peaceful_state, peaceful_state["ships"]))
+	fresh.erase("rogue")
+	fresh["attack_order"] = 19203
+	assert(not ECON._peaceful_combat_possible(peaceful_state, peaceful_state["ships"]))
+	fresh.erase("attack_order")
+	peaceful_state["teams"][2] = 2
+	freighter["owner"] = 1
+	assert(not ECON._peaceful_combat_possible(peaceful_state, peaceful_state["ships"]))
+	print("PASS: peaceful combat exact timers, neutrality, cloak/target/war wake, civilian threat parity and hostile structures")
+
 func _test_combat_activity_fast_paths() -> void:
 	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -2955,6 +3047,10 @@ func _test_mining_selection() -> void:
 	print("PASS: mining selection preserves access and rock ties, preferred rock, live depletion and storage wakeups")
 
 func _initialize() -> void:
+	_test_peaceful_combat_phase()
+	if OS.get_cmdline_user_args().has("--peaceful-combat-only"):
+		quit()
+		return
 	_test_retained_authority_hull_scope()
 	if OS.get_cmdline_user_args().has("--retained-hull-scope-only"):
 		quit()
