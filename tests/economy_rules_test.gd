@@ -2313,6 +2313,11 @@ func _test_destroyer_railgun() -> void:
 	assert(ECON.RAILGUN_RANGE == 2.0 * ECON.MISSILE_RANGE and ECON.RAILGUN_DAMAGE == 4.0 * ECON.MISSILE_DAMAGE)
 	assert(ECON.RAILGUN_COOLDOWN == 1.25 * ECON.MISSILE_COOLDOWN)
 	assert(ECON.railgun_count("destroyer") == 1 and ECON.railgun_count("cruiser") == 0)
+	assert(ECON.railgun_count("railgun_ship") == 1 and ECON.military_hull("railgun_ship"))
+	assert(ECON.blaster_count("railgun_ship") == 0 and ECON.capital_lasers("railgun_ship") == 0 and ECON.missile_count("railgun_ship") == 0)
+	assert(ECON.ship_size("railgun_ship") == 3 and ECON.cargo_capacity("railgun_ship") == 0.0)
+	for resource in ECON._cost("railgun_ship", 1):
+		assert(float(ECON._cost("railgun_ship", 1)[resource]) < float(ECON._cost("destroyer", 1)[resource]))
 	ECON._fire_hull_railgun(state, frame, craft, Vector2.ZERO, 1, 0.1)
 	assert(frame.damage == {10: ECON.RAILGUN_DAMAGE})
 	assert(craft["railgun_endpoint"] == frame.positions[10])
@@ -2330,7 +2335,11 @@ func _test_destroyer_railgun() -> void:
 	ECON._fire_hull_railgun(state, frame, craft, Vector2.ZERO, 1, 0.1)
 	assert(frame.damage == {10: ECON.RAILGUN_DAMAGE, -2: ECON.RAILGUN_DAMAGE})
 	assert(craft["railgun_endpoint"] == frame.positions[-2])
-	print("PASS: Destroyer railgun range, single-target damage, cooldown, allied safety and structure focus")
+	var siege: Dictionary = {"id": 101, "owner": 1, "kind": "railgun_ship", "railgun_cooldown": 5.0}
+	ECON._fire_hull_railgun(state, frame, siege, Vector2.ZERO, 1, 0.1)
+	assert(siege["railgun_target_point"] == frame.positions[10])
+	assert(frame.damage == {10: ECON.RAILGUN_DAMAGE, -2: ECON.RAILGUN_DAMAGE})
+	print("PASS: railgun range, single-target damage, cooldown, allied safety, structure focus and siege target retention")
 
 func _test_shared_combat_neighborhoods() -> void:
 	var state: Dictionary = {"teams": {1: 1, 2: 2, 3: 1}}

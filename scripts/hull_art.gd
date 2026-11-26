@@ -5,6 +5,7 @@ const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(23, 4), Vector2(19, 8), Vecto
 # Authored top-down silhouette and interior panel geometry in hull-local
 # coordinates (forward, lateral). Freighter has five paired cargo rows.
 const HULL_OUTLINES: Dictionary = {
+	"railgun_ship": [Vector2(33, 0), Vector2(27, 3), Vector2(9, 3), Vector2(6, 9), Vector2(-12, 12), Vector2(-26, 9), Vector2(-30, 5), Vector2(-30, -5), Vector2(-26, -9), Vector2(-12, -12), Vector2(6, -9), Vector2(9, -3), Vector2(27, -3)],
 	"scout": [Vector2(12, 0), Vector2(4, 2), Vector2(-2, 5), Vector2(-8, 5), Vector2(-6, 2), Vector2(-10, 1.8), Vector2(-10, -1.8), Vector2(-6, -2), Vector2(-8, -5), Vector2(-2, -5), Vector2(4, -2)],
 	"cruiser": [Vector2(25, 0), Vector2(19, 4), Vector2(13, 5), Vector2(6, 13), Vector2(-5, 13), Vector2(-9, 7), Vector2(-19, 7), Vector2(-25, 4), Vector2(-25, 0), Vector2(-25, -4), Vector2(-19, -7), Vector2(-9, -7), Vector2(-5, -13), Vector2(6, -13), Vector2(13, -5), Vector2(19, -4)],
 	"destroyer": [Vector2(44, 0), Vector2(38, 7), Vector2(32, 7), Vector2(29, 18), Vector2(20, 20), Vector2(8, 16), Vector2(1, 10), Vector2(-12, 10), Vector2(-18, 23), Vector2(-32, 23), Vector2(-40, 17), Vector2(-40, 9), Vector2(-44, 6), Vector2(-44, 0), Vector2(-44, -6), Vector2(-40, -9), Vector2(-40, -17), Vector2(-32, -23), Vector2(-18, -23), Vector2(-12, -10), Vector2(1, -10), Vector2(8, -16), Vector2(20, -20), Vector2(29, -18), Vector2(32, -7), Vector2(38, -7)],
@@ -14,6 +15,7 @@ const HULL_OUTLINES: Dictionary = {
 	"colony_ship": [Vector2(13, 0), Vector2(8, 3), Vector2(5, 3.5), Vector2(3, 6.5), Vector2(-5, 7), Vector2(-9, 4), Vector2(-11, 3), Vector2(-11, -3), Vector2(-9, -4), Vector2(-5, -7), Vector2(3, -6.5), Vector2(5, -3.5), Vector2(8, -3)]
 }
 const HULL_PANELS: Dictionary = {
+	"railgun_ship": [[Color("#98b8d0"), [Vector2(31, 0), Vector2(8, 2), Vector2(-18, 3), Vector2(-18, -3), Vector2(8, -2)]], [Color("#384d63"), [Vector2(5, 7), Vector2(-12, 10), Vector2(-26, 7), Vector2(-26, -7), Vector2(-12, -10), Vector2(5, -7)]], [Color("#b5dfff"), [Vector2(27, 1), Vector2(3, 1), Vector2(3, -1), Vector2(27, -1)]]],
 	"scout": [
 		[Color("#a3b8c9"), [Vector2(11, 0), Vector2(3, 1.5), Vector2(-7, 1.5), Vector2(-8, 0), Vector2(-7, -1.5), Vector2(3, -1.5)]],
 		[Color("#21364c"), [Vector2(5, 0), Vector2(1, 1.3), Vector2(-2, 1), Vector2(-2, -1), Vector2(1, -1.3)]],
@@ -125,10 +127,10 @@ func portrait_points(vertices: Array, factor: float = 1.0) -> String:
 	return " ".join(coordinates)
 
 func ui_radius(kind: String) -> float:
-	return float({"ship": 24.0, "cruiser": 27.0, "destroyer": 46.0, "warp_gate": 44.0}.get(kind, 15.0))
+	return float({"ship": 24.0, "cruiser": 27.0, "destroyer": 46.0, "railgun_ship": 33.0, "warp_gate": 44.0}.get(kind, 15.0))
 
 func portrait_scale(kind: String) -> float:
-	return float({"ship": 0.6, "cruiser": 0.52, "destroyer": 0.30}.get(kind, 1.0))
+	return float({"ship": 0.6, "cruiser": 0.52, "destroyer": 0.30, "railgun_ship": 0.42}.get(kind, 1.0))
 
 func texture_half_size(kind: String) -> float:
 	return 50.0 if kind == "destroyer" else 40.0

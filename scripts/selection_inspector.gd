@@ -119,6 +119,7 @@ func refresh_weapons(ship: Dictionary, system: Dictionary, body_selected: bool, 
 			at = ship_detail.get_index() + 1
 			match str(ship["kind"]):
 				"cruiser", "destroyer": details = UI_TEXT.capital_weapon_summary(str(ship["kind"]))
+				"railgun_ship": details = UI_TEXT.railgun_summary(str(ship["kind"]))
 				"scout", "fighter": details = UI_TEXT.blaster_summary(str(ship["kind"]))
 				"miner": details = "Mining laser ×2\n%.0f damage each · 1 shot/s (1×) · Range %.0f\n+200%% vs asteroids · %.0f t/yr nominal" % [ECONOMY.MINER_LASER_DAMAGE / 2.0, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE]
 		elif not system.is_empty() and not yard_selected:
@@ -143,7 +144,7 @@ func _selection_icon(kind: String, tint: Color) -> Texture2D:
 		var coords: PackedStringArray = []
 		for vertex in points:
 			var v: Vector2 = vertex
-			var factor: float = float({"ship": 0.60, "cruiser": 0.54, "destroyer": 0.31}.get(kind, 1.0))
+			var factor: float = float({"ship": 0.60, "cruiser": 0.54, "destroyer": 0.31, "railgun_ship": 0.42}.get(kind, 1.0))
 			coords.append("%.2f,%.2f" % [16.0 + v.y * factor, 16.0 - v.x * factor])
 		var image := Image.new()
 		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><polygon points="%s" fill="none" stroke="#%s" stroke-width="1.8" stroke-linejoin="round"/></svg>' % [" ".join(coords), tint.to_html(false)])
