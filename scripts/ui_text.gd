@@ -7,6 +7,8 @@ static func ship_kind_name(kind: String) -> String:
 		return "Warp Gate"
 	if kind == "science_ship":
 		return "Science vessel"
+	if kind == "railgun_ship":
+		return "Railgun Ship"
 	return {"ship": "Freighter", "miner": "Harvester", "colony_ship": "Colony"}.get(kind, kind.replace("_", " ").capitalize())
 
 static func tons(value: float, decimals: int = 1, compact: bool = false) -> String:
@@ -39,10 +41,13 @@ static func roman_level(level: int) -> String:
 static func blaster_summary(kind: String) -> String:
 	return "Blasters ×%d | %.0f dmg ×%d | %.1fs/%.1fs | R%.0f" % [ECONOMY.blaster_count(kind), ECONOMY.BLASTER_DAMAGE, ECONOMY.BLASTER_SHOTS, ECONOMY.BLASTER_BURST, ECONOMY.BLASTER_PAUSE, ECONOMY.LASER_RANGE]
 
+static func railgun_summary(kind: String) -> String:
+	return "Railgun ×%d | %.0f dmg | %.0fs | R%.0f" % [ECONOMY.railgun_count(kind), ECONOMY.RAILGUN_DAMAGE, ECONOMY.RAILGUN_COOLDOWN, ECONOMY.RAILGUN_RANGE]
+
 static func capital_weapon_summary(kind: String) -> String:
 	var summary: String = "Lasers ×%d | %.0f dmg | 1s | R%.0f\nMissiles ×%d | %.0f dmg | %.0fs | R%.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE] + "\n" + blaster_summary(kind)
 	if ECONOMY.railgun_count(kind) > 0:
-		summary += "\nRailgun ×%d | %.0f dmg | %.0fs | R%.0f" % [ECONOMY.railgun_count(kind), ECONOMY.RAILGUN_DAMAGE, ECONOMY.RAILGUN_COOLDOWN, ECONOMY.RAILGUN_RANGE]
+		summary += "\n" + railgun_summary(kind)
 	return summary
 
 static func colony_population_requirement() -> String:
@@ -55,6 +60,7 @@ static func ship_stats(kind: String) -> String:
 		"colony_ship": details = "%s\nSettles a neutral system · %.0f settlers\nFarm %.0f t/s · Cargo %.0f t" % [colony_population_requirement(), ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
 		"scout": details = "Fast reconnaissance · " + blaster_summary(kind)
 		"cruiser", "destroyer": details = capital_weapon_summary(kind)
+		"railgun_ship": details = railgun_summary(kind)
 		"fighter": details = blaster_summary(kind)
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection" % ECONOMY.SCIENCE_COLLECTION_YEARS

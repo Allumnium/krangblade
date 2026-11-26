@@ -98,7 +98,7 @@ const PIRATE_DECISION_YEARS: float = 3.0
 const PIRATE_GROUP_RANGE: float = 900.0
 const PIRATE_DEFENSE_RANGE: float = 1600.0
 # Annual operating wages for completed mobile hulls; structures are exempt.
-const SHIP_UPKEEP_GC = {"scout": 3.0, "miner": 9.0, "fighter": 15.0, "ship": 24.0, "colony_ship": 30.0, "science_ship": 30.0, "cruiser": 45.0, "destroyer": 105.0}
+const SHIP_UPKEEP_GC = {"scout": 3.0, "miner": 9.0, "fighter": 15.0, "ship": 24.0, "colony_ship": 30.0, "science_ship": 30.0, "cruiser": 45.0, "destroyer": 105.0, "railgun_ship": 60.0}
 # Fixed labor fee, independent of future fluctuating market prices.
 const CONSTRUCTION_CREDIT_FRACTION: float = 0.5
 const CONSTRUCTION_REFERENCE_VALUES = {"Metals": 2.0, "Organics": 1.0, "Crystals": 8.0}
@@ -180,7 +180,7 @@ const MINING_SALVAGE_COOLDOWN_YEARS: float = 5.0
 const MOVE_ARRIVAL_WAIT_YEARS: float = AUTOCAST_COOLDOWN_YEARS
 const AUTOCAST_MODES = ["explore", "wander", "mine", "salvage", "repair", "trade", "farm", "collect", "retreat"]
 const SHIP_SIZE: int = 1 # Legacy small-class reference.
-const SHIP_SIZES = {"fighter": 1, "miner": 1, "ship": 2, "colony_ship": 2, "science_ship": 3, "scout": 1, "cruiser": 2, "destroyer": 3}
+const SHIP_SIZES = {"fighter": 1, "miner": 1, "ship": 2, "colony_ship": 2, "science_ship": 3, "scout": 1, "cruiser": 2, "destroyer": 3, "railgun_ship": 3}
 const STATION_STORAGE_BAYS: int = 3
 const TRANSFER_EVENT_LIMIT: int = 192
 const TRANSFER_EVENT_YEARS: float = 6.0
@@ -201,13 +201,13 @@ const WAREHOUSE_COSTS = [
 	{"Metals": 4500.0}
 ]
 const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
-const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer"]
+const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship"]
 const SCIENCE_CAPACITY: float = 1.0
 const SCIENCE_COLLECTION_YEARS: float = 30.0
 const SHIPYARD_QUEUE_LIMIT = 4
 const STATION_QUEUE_LIMIT = 4
 const MAX_SHIPYARD_LEVEL = 3
-const CREW_COSTS = {"ship": 4000.0, "colony_ship": COLONY_POPULATION, "fighter": 1000.0, "miner": 1500.0, "science_ship": 4000.0, "scout": 200.0, "cruiser": 3000.0, "destroyer": 8000.0}
+const CREW_COSTS = {"ship": 4000.0, "colony_ship": COLONY_POPULATION, "fighter": 1000.0, "miner": 1500.0, "science_ship": 4000.0, "scout": 200.0, "cruiser": 3000.0, "destroyer": 8000.0, "railgun_ship": 4000.0}
 const MINING_STAY: float = 5.0
 const SHIP_HP: float = 200.0
 const YARD_HP: float = 1500.0
@@ -365,7 +365,7 @@ const PDS_SIGHT: float = 1000.0
 static func sight_radius(kind: String) -> float:
 	match kind:
 		"scout": return 2700.0
-		"cruiser", "destroyer": return 1500.0
+		"cruiser", "destroyer", "railgun_ship": return 1500.0
 		"fighter": return 1000.0
 		"warp_gate": return 1200.0
 		_: return 850.0
@@ -803,7 +803,7 @@ static func _pay_fleet_upkeep(state: Dictionary, dt: float, wage_tables: Diction
 # Strategy is host-only and refreshed on a coarse clock. No new RPC.
 static func _pirate_power(ship: Dictionary) -> float:
 	var kind: String = str(ship.get("kind", ""))
-	var strength: float = float({"miner": 0.25, "scout": 0.4, "fighter": 1.0, "cruiser": 5.0, "destroyer": 9.0}.get(kind, 0.0))
+	var strength: float = float({"miner": 0.25, "scout": 0.4, "fighter": 1.0, "cruiser": 5.0, "destroyer": 9.0, "railgun_ship": 5.0}.get(kind, 0.0))
 	return strength * clampf(float(ship.get("hp", ship_max_hp(kind))) / maxf(EPS, ship_max_hp(kind)), 0.0, 1.0)
 
 static func _pirate_claims(state: Dictionary) -> Array:
@@ -1780,7 +1780,7 @@ static func _resolve_enqueue(p: Dictionary, kind: String, target: String) -> Dic
 	var level: int = 1
 	var station_slot: int = 0
 	match kind:
-		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer":
+		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship":
 			target = ""
 		"yard":
 			level = next_shipyard_slot(p)
@@ -2374,7 +2374,7 @@ static func _finish(state: Dictionary, index: int, p: Dictionary, item: Dictiona
 			p["yards"][int(item["target"])]["hp"] = YARD_HP * int(item["level"])
 			if int(item["level"]) >= MAX_SHIPYARD_LEVEL:
 				p["continuous"]["yard_upgrade:" + str(item["target"])] = false
-		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer":
+		"ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship":
 			_launch_finished_hull(state, index, p, item)
 			if not bool(item.get("starting_fleet", false)):
 				_record_hull_built(state, int(p["owner"]), str(item["kind"]))
@@ -2407,7 +2407,7 @@ static func _record_hull_built(state: Dictionary, owner: int, kind: String) -> v
 	elif military_hull(kind):
 		progress["military_built"] = int(progress.get("military_built", 0)) + 1
 		progress["military_investment"] = float(progress.get("military_investment", 0.0)) + float(_cost(kind, 1).get("Metals", 0.0))
-		if kind in ["cruiser", "destroyer"]:
+		if kind in ["cruiser", "destroyer", "railgun_ship"]:
 			progress["capital_built"] = int(progress.get("capital_built", 0)) + 1
 		elif kind == "fighter":
 			progress["fighters_built"] = int(progress.get("fighters_built", 0)) + 1
@@ -2663,7 +2663,7 @@ static func cargo_capacity(kind: String) -> float:
 	match kind:
 		"miner": return MINER_CAPACITY
 		"science_ship": return SCIENCE_CAPACITY
-		"fighter", "scout", "cruiser", "destroyer", "warp_gate": return 0.0
+		"fighter", "scout", "cruiser", "destroyer", "railgun_ship", "warp_gate": return 0.0
 		"colony_ship": return COLONY_CAPACITY
 	return CARGO_CAPACITY
 
@@ -3443,6 +3443,7 @@ static func ship_speed(kind: String) -> float:
 		"scout": return FIGHTER_SPEED * 2.0
 		"cruiser": return FIGHTER_SPEED * 0.8
 		"destroyer": return FIGHTER_SPEED * 0.6
+		"railgun_ship": return FIGHTER_SPEED * 0.65
 	return SHIP_SPEED
 
 static func _waiting_berth(state: Dictionary, ship: Dictionary, center: Vector2, reach: float, preferred: Vector2) -> Vector2:
@@ -5318,11 +5319,11 @@ static func missile_count(kind: String) -> int:
 	return int({"cruiser": 1, "destroyer": 2}.get(kind, 0))
 
 static func railgun_count(kind: String) -> int:
-	return 1 if kind == "destroyer" else 0
+	return 1 if kind in ["destroyer", "railgun_ship"] else 0
 
-const SHIP_MAX_HP = {"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "warp_gate": WARP_GATE_HP}
-const MILITARY_KINDS = ["fighter", "scout", "cruiser", "destroyer"]
-const ARMED_KINDS = ["fighter", "miner", "cruiser", "destroyer", "scout"]
+const SHIP_MAX_HP = {"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
+const MILITARY_KINDS = ["fighter", "scout", "cruiser", "destroyer", "railgun_ship"]
+const ARMED_KINDS = ["fighter", "miner", "cruiser", "destroyer", "scout", "railgun_ship"]
 
 static func ship_max_hp(kind: String) -> float:
 	return float(SHIP_MAX_HP.get(kind, SHIP_HP))
@@ -7140,7 +7141,7 @@ static func combat_position(state: Dictionary, graph: Dictionary, ship: Dictiona
 const INFLUENCE_CAP: float = 50.0
 const INFLUENCE_SPILLOVER: float = 0.05
 const INFLUENCE_SPILLOVER_MIN: float = 50.0
-const SHIP_INFLUENCE = {"scout": 1, "fighter": 2, "cruiser": 5, "destroyer": 10, "miner": 1, "ship": 1, "colony_ship": 1, "science_ship": 1}
+const SHIP_INFLUENCE = {"scout": 1, "fighter": 2, "cruiser": 5, "destroyer": 10, "railgun_ship": 5, "miner": 1, "ship": 1, "colony_ship": 1, "science_ship": 1}
 const STATION_INFLUENCE: int = 30
 const YARD_INFLUENCE: int = 20
 const BUILDING_INFLUENCE: int = 10
@@ -7425,7 +7426,7 @@ static func territory_empires(state: Dictionary) -> Array[int]:
 	return owners
 
 static func _engaged(ship: Dictionary) -> bool:
-	return (int(ship.get("combat_target", -1)) >= 0 and not bool(ship.get("passing_fire", false))) or int(ship.get("pursuit_target", -1)) >= 0
+	return ((int(ship.get("combat_target", -1)) >= 0 or ship.has("railgun_target_point")) and not bool(ship.get("passing_fire", false))) or int(ship.get("pursuit_target", -1)) >= 0
 
 # Civilian hulls do not pursue, even if armed. A fighter fleeing along a route (or
 # explicitly withdrawing in a future retreat system) is also eligible.
@@ -8592,6 +8593,7 @@ static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionar
 		ship["laser_until"] = -1.0
 		ship["yard_target"] = -1
 		ship["yard_laser_until"] = -1.0
+		ship.erase("railgun_target_point")
 		_fire_blaster(state, ship, -1, frame.positions, frame.damage, frame.killed_by, frame.health, dt, frame.hull_slots, frame.hull_health)
 		return
 	if peaceful:
@@ -8602,6 +8604,9 @@ static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionar
 	var team: int = frame.hull_teams[hull_slot]
 	_fire_hull_missiles(state, frame, ship, pos, team, dt)
 	_fire_hull_railgun(state, frame, ship, pos, team, dt)
+	if ship["kind"] == "railgun_ship":
+		_normalize_inactive_lasers(ship, dt)
+		return
 	if _fire_focused_attack(state, frame, ship, pos, team, hull_slot, weapon_damage, dt):
 		return
 	_fire_hull_lasers(state, frame, ship, fighter, moving_only, pos, team, hull_slot, weapon_damage, dt)
@@ -8614,7 +8619,10 @@ static func _fire_hull_railgun(state: Dictionary, frame: COMBAT_FRAME, ship: Dic
 	var cooldown: float = maxf(0.0, float(ship.get("railgun_cooldown", 0.0)) - dt)
 	var target: int = -1
 	var best: float = RAILGUN_RANGE * RAILGUN_RANGE
-	if cooldown <= EPS and team > 0:
+	var siege: bool = ship["kind"] == "railgun_ship"
+	if siege:
+		ship.erase("railgun_target_point")
+	if (cooldown <= EPS or siege) and team > 0:
 		if ship.has("attack_order"):
 			var focus: int = int(ship["attack_order"])
 			if frame.positions.has(focus) and int(frame.team_by_id.get(focus, 0)) > 0 and _combat_groups_hostile(state, team, int(frame.team_by_id[focus])) and (not frame.by_id.has(focus) or ship_visible_to_team(state, frame.by_id[focus], team)) and pos.distance_squared_to(frame.positions[focus]) <= best:
@@ -8631,7 +8639,9 @@ static func _fire_hull_railgun(state: Dictionary, frame: COMBAT_FRAME, ship: Dic
 							if distance < best or (distance == best and (target == -1 or candidate_id < target)):
 								best = distance
 								target = candidate_id
-		if target != -1:
+		if siege and target != -1:
+			ship["railgun_target_point"] = frame.positions[target]
+		if target != -1 and cooldown <= EPS:
 			_ship_hit(frame.damage, frame.killed_by, frame.health, target, ship, RAILGUN_DAMAGE, frame.hull_slots, frame.hull_health)
 			_record_railgun_shot(state, ship, pos, frame.positions[target])
 			cooldown = RAILGUN_COOLDOWN
@@ -8734,6 +8744,7 @@ static func _advance_peaceful_weapons(state: Dictionary, frame: COMBAT_FRAME, sh
 		ship["missile_cooldown"] = maxf(0.0, float(ship.get("missile_cooldown", 0.0)) - dt)
 	if railgun_count(str(ship["kind"])) > 0:
 		ship["railgun_cooldown"] = maxf(0.0, float(ship.get("railgun_cooldown", 0.0)) - dt)
+		ship.erase("railgun_target_point")
 	var now: float = float(state["elapsed"])
 	var search_due: bool = _combat_search_due(ship, now)
 	if search_due:
@@ -9164,7 +9175,7 @@ static func _ai_diplomatic_estimates(state: Dictionary, player: int) -> Dictiona
 		var point: Vector2 = craft.get("position", Vector2.INF)
 		if owner != player and ((fog and (not point.is_finite() or not vision.has(vision_cell(point)))) or not ship_visible_to_team(state, craft, player)):
 			continue
-		var weight: float = float({"miner": 0.25, "scout": 0.4, "fighter": 1.0, "cruiser": 5.0, "destroyer": 9.0}.get(kind, 0.0))
+		var weight: float = float({"miner": 0.25, "scout": 0.4, "fighter": 1.0, "cruiser": 5.0, "destroyer": 9.0, "railgun_ship": 5.0}.get(kind, 0.0))
 		weight *= clampf(float(craft.get("hp", ship_max_hp(kind))) / ship_max_hp(kind), 0.0, 1.0)
 		weight *= 0.4 if bool(craft.get("retreating", false)) else 1.0
 		estimates[owner]["fleet"] += weight
@@ -9358,7 +9369,7 @@ static func _ai_resettle(state: Dictionary, player: int) -> void:
 static func _ai_census(state: Dictionary, player: int, home: int) -> Dictionary:
 	var planets: Array = state["planets"]
 	var owned: Array[int] = []
-	var counts: Dictionary = {"ship": 0, "colony_ship": 0, "miner": 0, "fighter": 0, "science_ship": 0, "scout": 0, "cruiser": 0, "destroyer": 0}
+	var counts: Dictionary = {"ship": 0, "colony_ship": 0, "miner": 0, "fighter": 0, "science_ship": 0, "scout": 0, "cruiser": 0, "destroyer": 0, "railgun_ship": 0}
 	var reserved: Dictionary = {}
 	var fighters: Array = []
 	var idle_colonies: Array = []
@@ -9461,6 +9472,8 @@ static func _ai_late_station_goal(p: Dictionary, home: int, index: int, census: 
 		action = "cruiser"
 	elif index == home and has_yard and counts["cruiser"] > 0 and counts["destroyer"] < maxi(1, mini(3, ceili(float(owned.size()) / 2.0))) and population >= yard_staff_required(p, 2) + CREW_COSTS["destroyer"]:
 		action = "destroyer"
+	elif index == home and has_yard and counts["destroyer"] > 0 and counts["railgun_ship"] < maxi(1, mini(3, owned.size())) and population >= yard_staff_required(p, 2) + CREW_COSTS["railgun_ship"]:
+		action = "railgun_ship"
 	elif index != home and production_available(p, "Crystals") and production_level(p, "Crystals") == 0 and counts["fighter"] >= AI_WAVE_MIN:
 		action = "economy"
 		target = "Crystals"
@@ -9491,7 +9504,7 @@ static func _ai_late_station_goal(p: Dictionary, home: int, index: int, census: 
 static func _ai_pursue_station_goal(state: Dictionary, player: int, index: int, action: String, target: String, counts: Dictionary) -> void:
 	var p: Dictionary = state["planets"][index]
 	var abundance: float = float(p["abundance"].get("Metals", 0.0))
-	if action in ["cruiser", "destroyer"]:
+	if action in ["cruiser", "destroyer", "railgun_ship"]:
 		# Do not export the savings needed for capital construction.
 		set_thresholds(state, player, index, "Metals", 90.0, 100.0)
 	if SHIP_KINDS.has(action) and not has_fitting_yard(p, action):
@@ -10208,6 +10221,17 @@ static func _dispatch_operations(state: Dictionary, graph: Dictionary) -> void:
 # Local combat flight temporarily overrides lane navigation, without changing
 # its queued waypoints or teleporting back on disengagement. All maneuvers
 # use positions captured before any hull moves this tick.
+static func _siege_standoff(ship: Dictionary, opponent: Vector2, dt: float) -> void:
+	var position: Vector2 = ship["position"]
+	var radial: Vector2 = position - opponent
+	var direction: Vector2 = radial.normalized() if radial.length_squared() > EPS else Vector2.from_angle(float(int(ship["id"]) % 64) * 2.399963)
+	var distance: float = radial.length()
+	var preferred: float = RAILGUN_RANGE * 0.9
+	if distance < preferred * 0.9 or distance > RAILGUN_RANGE:
+		_navigate(ship, opponent + direction * preferred, ship_speed(str(ship["kind"])) * dt)
+	else:
+		ship["navigation_target"] = position
+
 static func _maneuver_fighter(ship: Dictionary, opponent: Vector2, dt: float) -> void:
 	var position: Vector2 = ship["position"]
 	var radial: Vector2 = position - opponent
@@ -10267,7 +10291,7 @@ static func ship_activity(ship: Dictionary) -> ShipActivity:
 		return ShipActivity.MINING if kind == "miner" else ShipActivity.WORKING
 	if int(ship.get("source", -1)) >= 0:
 		return ShipActivity.HAULING
-	if dest >= 0 and kind != "fighter" and kind != "scout" and kind != "cruiser" and kind != "destroyer":
+	if dest >= 0 and kind not in MILITARY_KINDS:
 		return ShipActivity.MOVING
 	return ShipActivity.IDLE
 
@@ -11773,6 +11797,8 @@ static func _step_military_motion(state: Dictionary, frame: STEP_FRAME, ship: Di
 		_work_withdrawal(state, combat_graph, ship, dt)
 	elif bool(ship.get("holding", false)):
 		ship["navigation_target"] = ship["position"]
+	elif ship.get("kind", "") == "railgun_ship" and ship.has("railgun_target_point") and not bool(ship.get("passing_fire", false)):
+		_siege_standoff(ship, ship["railgun_target_point"], dt)
 	elif bool(ship.get("attack_local", false)) and combat_positions.has(int(ship.get("attack_order", -1))):
 		var opponent: Vector2 = combat_positions[int(ship["attack_order"])]
 		if (ship["position"] as Vector2).distance_to(opponent) <= LASER_RANGE:

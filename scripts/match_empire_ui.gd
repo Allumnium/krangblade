@@ -226,7 +226,7 @@ func refresh(state: Dictionary) -> void:
 	var counts: Dictionary = ECONOMY.empire_fleet_counts(state, _me())
 	var targets: Dictionary = state.get("empire_targets", {}).get(_me(), {})
 	var visible_kinds: Array = []
-	for kind in ["scout", "fighter", "miner", "ship", "colony_ship", "science_ship", "cruiser", "destroyer"]:
+	for kind in ["scout", "fighter", "miner", "ship", "colony_ship", "science_ship", "cruiser", "destroyer", "railgun_ship"]:
 		if ECONOMY.empire_ship_available(state, _me(), kind, counts) or targets.has(kind):
 			visible_kinds.append(kind)
 	var signature: String = str(visible_kinds)
