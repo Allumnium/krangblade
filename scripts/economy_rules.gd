@@ -209,7 +209,12 @@ const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "
 const CONSTRUCTION_SHIP_CAPACITY: float = 180.0
 const DEPOT_REFERENCE_BUDGET: float = 4000.0
 const DEPOT_ANTIMATTER_CAPACITY: float = 2.0
-const STATIC_SITE_KINDS = ["resource_depot", "defense_cannon"]
+const STATIC_SITE_KINDS = ["resource_depot", "defense_cannon", "wall_node", "wall_segment"]
+const WALL_MAX_LENGTH: float = 450.0
+const WALL_SNAP_RADIUS: float = 40.0
+const WALL_MAX_SEGMENTS: int = 24
+const WALL_NODE_HP: float = 1800.0
+const WALL_SEGMENT_HP: float = 3200.0
 const CANNON_HP = [1000.0, 1750.0, 2700.0]
 const CANNON_DAMAGE = [80.0, 140.0, 220.0]
 const CANNON_RANGE = [600.0, 800.0, 1000.0]
@@ -2676,7 +2681,7 @@ static func cargo_capacity(kind: String) -> float:
 	match kind:
 		"miner": return MINER_CAPACITY
 		"construction_ship": return CONSTRUCTION_SHIP_CAPACITY
-		"resource_depot", "defense_cannon": return 0.0
+		"resource_depot", "defense_cannon", "wall_node", "wall_segment": return 0.0
 		"science_ship": return SCIENCE_CAPACITY
 		"fighter", "scout", "cruiser", "destroyer", "railgun_ship", "warp_gate", "probe": return 0.0
 		"colony_ship": return COLONY_CAPACITY
@@ -3461,7 +3466,7 @@ static func ship_speed(kind: String) -> float:
 		"destroyer": return FIGHTER_SPEED * 0.6
 		"railgun_ship": return FIGHTER_SPEED * 0.65
 		"construction_ship": return FREIGHTER_SPEED * 0.8
-		"resource_depot", "defense_cannon": return 0.0
+		"resource_depot", "defense_cannon", "wall_node", "wall_segment": return 0.0
 	return SHIP_SPEED
 
 static func _waiting_berth(state: Dictionary, ship: Dictionary, center: Vector2, reach: float, preferred: Vector2) -> Vector2:
@@ -5366,7 +5371,7 @@ static func missile_count(kind: String) -> int:
 static func railgun_count(kind: String) -> int:
 	return 1 if kind in ["destroyer", "railgun_ship"] else 0
 
-const SHIP_MAX_HP = {"resource_depot": DEPOT_HP, "construction_ship": 500.0, "defense_cannon": 1000.0, "probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
+const SHIP_MAX_HP = {"resource_depot": DEPOT_HP, "construction_ship": 500.0, "defense_cannon": 1000.0, "wall_node": WALL_NODE_HP, "wall_segment": WALL_SEGMENT_HP, "probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
 const MILITARY_KINDS = ["fighter", "scout", "cruiser", "destroyer", "railgun_ship"]
 const ARMED_KINDS = ["fighter", "miner", "cruiser", "destroyer", "scout", "railgun_ship"]
 
@@ -5487,6 +5492,14 @@ static func _register_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
 		_cooldown_deadlines.schedule(int(ship["id"]), float(ship["auto_cooldown_until"]))
 
 static func _remove_indexed_hull(state: Dictionary, ship: Dictionary) -> void:
+	if ship.get("kind", "") == "wall_node":
+		var node_id: int = int(ship["id"])
+		for attached in state["ships"].duplicate():
+			if attached.get("kind", "") == "wall_segment" and (int(attached["wall_a_id"]) == node_id or int(attached["wall_b_id"]) == node_id):
+				if not static_complete(attached):
+					_refund_site(state, attached, true)
+				attached["wall_removed"] = true
+				_remove_indexed_hull(state, attached)
 	if ship.get("kind", "") == "warp_gate":
 		for other in state["ships"]:
 			if other.get("kind", "") == "warp_gate" and int(other.get("warp_destination", -1)) == int(ship["id"]):
@@ -6634,6 +6647,8 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		return not append and order.get("target") is int and _warp_order_valid(state, ship, int(order["target"]))
 	if ship.get("kind", "") in ["warp_gate", "probe"] or is_static_structure(ship):
 		return false
+	if kind == "build_wall":
+		return not append and ship["kind"] == "construction_ship" and order.get("start") is Vector2 and order.get("point") is Vector2 and not _wall_plan(state, graph, owner, order["start"], order["point"]).is_empty()
 	if kind in ["build_depot", "build_cannon"]:
 		var structure: String = "resource_depot" if kind == "build_depot" else "defense_cannon"
 		return not append and ship["kind"] == "construction_ship" and order.get("point") is Vector2 and _site_source(state, graph, owner, order["point"], structure) >= 0
@@ -6719,6 +6734,8 @@ static func _valid_targeted_unit_order(state: Dictionary, graph: Dictionary, shi
 static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
+		"build_wall":
+			return _place_wall_chain(state, player, order["start"], order["point"])
 		"build_depot", "build_cannon":
 			return _place_static_site(state, player, order["point"], "resource_depot" if order["kind"] == "build_depot" else "defense_cannon")
 		"upgrade_cannon":
@@ -6866,6 +6883,8 @@ static func cannon_damage(site: Dictionary) -> float:
 static func static_recipe(kind: String, level: int = 1) -> Dictionary:
 	match kind:
 		"resource_depot": return {"Metals": 600.0, "Crystals": 40.0}
+		"wall_node": return {"Metals": 180.0}
+		"wall_segment": return {"Metals": 300.0, "Crystals": 10.0}
 		"defense_cannon":
 			return [{"Metals": 500.0, "Crystals": 60.0}, {"Metals": 800.0, "Crystals": 100.0}, {"Metals": 1300.0, "Crystals": 180.0}][clampi(level - 1, 0, 2)]
 	return {}
@@ -6878,6 +6897,9 @@ static func hull_max_hp(ship: Dictionary) -> float:
 
 static func _site_source(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, kind: String, level: int = 1, ignore_id: int = -1) -> int:
 	if patrol_node(state, graph, owner, point) < 0 or kind not in STATIC_SITE_KINDS:
+		return -1
+	_refresh_movement_fields(state["map"].get("fields", []))
+	if not _point_clear_of_rocks(point, 8.0):
 		return -1
 	for craft in state["ships"]:
 		if is_static_structure(craft) and int(craft["id"]) != ignore_id and (craft["position"] as Vector2).distance_to(point) < 65.0:
@@ -6902,11 +6924,139 @@ static func _site_source(state: Dictionary, graph: Dictionary, owner: int, point
 			source = i
 	return source
 
+# Plan all nodes and segments against a shadow copy of station resources.
+# IDs are reserved in plan order and the live stock changes only on success.
+static func wall_chain_points(start: Vector2, end: Vector2) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	if not start.is_finite() or not end.is_finite():
+		return result
+	var distance: float = start.distance_to(end)
+	if distance > WALL_MAX_LENGTH * WALL_MAX_SEGMENTS:
+		return result
+	result.append(start)
+	if distance < 12.0:
+		return result
+	var count: int = ceili(distance / WALL_MAX_LENGTH)
+	for index in range(1, count + 1):
+		result.append(start.lerp(end, float(index) / float(count)))
+	return result
+
+static func _wall_snap(state: Dictionary, owner: int, point: Vector2) -> Dictionary:
+	var nearest: Dictionary = {}
+	var best: float = WALL_SNAP_RADIUS * WALL_SNAP_RADIUS
+	for candidate in state["ships"]:
+		if candidate.get("kind", "") != "wall_node" or int(candidate["owner"]) != owner:
+			continue
+		var distance: float = point.distance_squared_to(candidate["position"])
+		if distance < best:
+			best = distance
+			nearest = candidate
+	return nearest
+
+static func _wall_plan_source(state: Dictionary, owner: int, point: Vector2, recipe: Dictionary, stocks: Dictionary) -> int:
+	var best: float = INF
+	var result: int = -1
+	for index in stocks:
+		var stock: Dictionary = stocks[index]
+		var affordable: bool = true
+		for resource in recipe:
+			if float(stock.get(resource, 0.0)) + EPS < float(recipe[resource]):
+				affordable = false
+				break
+		var distance: float = point.distance_squared_to(station_position(state, int(index), float(state["elapsed"])))
+		if affordable and distance < best:
+			best = distance
+			result = int(index)
+	if result >= 0:
+		for resource in recipe:
+			stocks[result][resource] -= float(recipe[resource])
+	return result
+
+static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: Vector2, end: Vector2) -> Array:
+	if not start.is_finite() or not end.is_finite():
+		return []
+	var first: Dictionary = _wall_snap(state, owner, start)
+	var last: Dictionary = _wall_snap(state, owner, end)
+	if not first.is_empty():
+		start = first["position"]
+	if not last.is_empty():
+		end = last["position"]
+	var points: PackedVector2Array = wall_chain_points(start, end)
+	if points.is_empty():
+		return []
+	_refresh_movement_fields(state["map"].get("fields", []))
+	var stocks: Dictionary = {}
+	for index in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][index]
+		if has_station(system) and int(system["owner"]) == owner:
+			stocks[index] = system["stock"].duplicate()
+	var plan: Array = []
+	var nodes: Array = []
+	var next: int = int(state["next_id"])
+	for point in points:
+		if patrol_node(state, graph, owner, point) < 0 or not _point_clear_of_rocks(point, 8.0):
+			return []
+		var found: Dictionary = _wall_snap(state, owner, point)
+		if not found.is_empty():
+			if not nodes.is_empty() and int(nodes.back()["id"]) == int(found["id"]):
+				return []
+			nodes.append({"id": found["id"], "position": found["position"]})
+			continue
+		for craft in state["ships"]:
+			if is_static_structure(craft) and craft.get("kind", "") != "wall_segment" and point.distance_to(craft["position"]) < WALL_SNAP_RADIUS:
+				return []
+		for index in range(state["planets"].size()):
+			if has_station(state["planets"][index]) and point.distance_to(station_position(state, index, float(state["elapsed"]))) < 80.0:
+				return []
+		var source: int = _wall_plan_source(state, owner, point, static_recipe("wall_node"), stocks)
+		if source < 0:
+			return []
+		plan.append({"id": next, "kind": "wall_node", "position": point, "source": source})
+		nodes.append({"id": next, "position": point})
+		next += 1
+	for index in range(1, nodes.size()):
+		var a: Dictionary = nodes[index - 1]
+		var b: Dictionary = nodes[index]
+		var pa: Vector2 = a["position"]
+		var pb: Vector2 = b["position"]
+		if pa.distance_to(pb) > WALL_MAX_LENGTH + EPS or pa.distance_to(pb) < 12.0 or not _clip_rock_step(pa, pb).is_equal_approx(pb):
+			return []
+		for craft in state["ships"]:
+			if craft.get("kind", "") == "wall_segment":
+				var left: int = int(craft["wall_a_id"])
+				var right: int = int(craft["wall_b_id"])
+				if (left == int(a["id"]) and right == int(b["id"])) or (left == int(b["id"]) and right == int(a["id"])):
+					return []
+		var middle: Vector2 = (pa + pb) * 0.5
+		var source: int = _wall_plan_source(state, owner, middle, static_recipe("wall_segment"), stocks)
+		if source < 0:
+			return []
+		plan.append({"id": next, "kind": "wall_segment", "position": middle, "source": source, "wall_a_id": a["id"], "wall_b_id": b["id"], "wall_a": pa, "wall_b": pb})
+		next += 1
+	return plan
+
+static func _place_wall_chain(state: Dictionary, owner: int, start: Vector2, end: Vector2) -> bool:
+	var graph: Dictionary = military_graph(state)
+	var plan: Array = _wall_plan(state, graph, owner, start, end)
+	if plan.is_empty():
+		return false
+	for item in plan:
+		var site: Dictionary = _create_static_site(state, graph, owner, item["position"], item["kind"], int(item["source"]))
+		if item["kind"] == "wall_segment":
+			for key in ["wall_a_id", "wall_b_id", "wall_a", "wall_b"]:
+				site[key] = item[key]
+			site["heading"] = (site["wall_a"] as Vector2).direction_to(site["wall_b"])
+	return true
+
 static func _place_static_site(state: Dictionary, owner: int, point: Vector2, kind: String) -> bool:
 	var graph: Dictionary = military_graph(state)
 	var source: int = _site_source(state, graph, owner, point, kind)
 	if source < 0:
 		return false
+	_create_static_site(state, graph, owner, point, kind, source)
+	return true
+
+static func _create_static_site(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, kind: String, source: int) -> Dictionary:
 	var recipe: Dictionary = static_recipe(kind)
 	var stock: Dictionary = state["planets"][source]["stock"]
 	for resource in recipe:
@@ -6917,7 +7067,7 @@ static func _place_static_site(state: Dictionary, owner: int, point: Vector2, ki
 	var site: Dictionary = {"id": id, "kind": kind, "owner": owner, "origin": source, "at": anchor, "position": point, "navigation_target": point, "heading": Vector2.UP, "route": [], "leg": 0.0, "source": -1, "dest": -1, "crew": 0.0, "cargo": empty_stock(), "hp": ship_max_hp(kind) * 0.1, "build_progress": 0.0, "build_recipe": recipe, "build_reserved": recipe.duplicate(), "build_delivered": empty_stock(), "build_source": source, "build_source_point": station_position(state, source, float(state["elapsed"]))}
 	state["ships"].append(site)
 	_register_indexed_hull(state, site)
-	return true
+	return site
 
 static func _upgrade_cannon(state: Dictionary, owner: int, target: int) -> bool:
 	var site: Dictionary = service_targets(state, target).get(target, {}).get("entity", {})
@@ -9461,6 +9611,8 @@ static func _resolve_combat_damage(state: Dictionary, graph: Dictionary, frame: 
 	if damage.is_empty():
 		return
 	for ship in ships.duplicate():
+		if bool(ship.get("wall_removed", false)):
+			continue
 		var id: int = int(ship["id"])
 		if damage.has(id):
 			_apply_reward_damage(ship, hull_max_hp(ship), float(damage[id]), float(state["elapsed"]))
@@ -11041,7 +11193,7 @@ static func update_match_outcome(state: Dictionary) -> bool:
 	# reconnaissance probe cannot prevent defeat.
 	for ship in state["ships"]:
 		var owner: int = int(ship["owner"])
-		if owner > 0 and ship.get("kind", "") != "probe":
+		if owner > 0 and ship.get("kind", "") != "probe" and not is_static_structure(ship):
 			viable[owner] = true
 	var eliminated: Array = state.get("eliminated", [])
 	var changed: bool = false
@@ -11458,6 +11610,8 @@ static func _update_planet_blockades(state: Dictionary, graph: Dictionary) -> vo
 	for system in state["planets"]:
 		system["planet_blockaded"] = false
 	for craft in state["ships"]:
+		if is_static_structure(craft) or craft.get("kind", "") == "probe":
+			continue
 		_ensure_position(graph["points"], craft)
 		var node: int = local_sector(graph, craft)
 		if node < 0 or node >= state["planets"].size():

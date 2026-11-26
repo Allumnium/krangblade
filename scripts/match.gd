@@ -229,6 +229,8 @@ var yard_queue_rows: Dictionary = {}
 var command_card: GridContainer
 var command_buttons: Dictionary = {}
 var pending_command: String = ""
+var wall_drag_start: Vector2 = Vector2.INF
+var wall_drag_end: Vector2 = Vector2.INF
 var fleet_cargo: HBoxContainer
 var fleet_cargo_footer: HBoxContainer
 var fleet_cargo_labels: Dictionary = {}
@@ -1892,7 +1894,7 @@ func _command_slot(id: String, hint: String, action: Callable, existing_slot: Co
 	active_border.draw.connect(_draw_active_command.bind(active_border))
 	active_border.visible = false
 	button.set_meta("active_border", active_border)
-	hotkeys.register(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K, "scan": KEY_Q, "build_depot": KEY_F, "cancel_site": KEY_Y, "build_cannon": KEY_I, "upgrade_cannon": KEY_O}[id], "Fleet", "fleet_" + id, hint)
+	hotkeys.register(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K, "scan": KEY_Q, "build_depot": KEY_F, "cancel_site": KEY_Y, "build_cannon": KEY_I, "upgrade_cannon": KEY_O, "build_wall": KEY_Z}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -1935,6 +1937,7 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	_command_slot("cancel_site", "Cancel unfinished construction", _arm_command.bind("cancel_site"), command_card.get_child(8)).hide()
 	_command_slot("build_cannon", "Build Defense Cannon · 500 Metals, 60 Crystals", _arm_command.bind("build_cannon"), command_card.get_child(3)).hide()
 	_command_slot("upgrade_cannon", "Upgrade completed Defense Cannon", _arm_command.bind("upgrade_cannon"), command_card.get_child(7)).hide()
+	_command_slot("build_wall", "Build Wall · click node or drag a connected chain", _arm_command.bind("build_wall"), command_card.get_child(9)).hide()
 
 func _autocast_units(state: Dictionary, mode: String) -> Array:
 	var units: Array = []
@@ -2063,6 +2066,8 @@ func _refresh_autocast_cards() -> void:
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nProduces %.0f t/s; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
 
 func _arm_command(mode: String) -> void:
+	wall_drag_start = Vector2.INF
+	wall_drag_end = Vector2.INF
 	pending_command = mode if pending_command != mode else ""
 	_refresh_command_mode()
 
@@ -2406,6 +2411,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			status = "Defense Cannon Lv %d · %.0f damage · R%.0f" % [ECONOMY.cannon_level(ship), ECONOMY.cannon_damage(ship), ECONOMY.cannon_range(ship)]
 			if not ECONOMY.static_complete(ship):
 				status += "\nConstruction: %.0f%%" % (float(ship.get("build_progress", 0.0)) * 100.0)
+		elif kind in ["wall_node", "wall_segment"]:
+			status = ("Wall Node" if kind == "wall_node" else "Wall Segment") + (" · Complete" if ECONOMY.static_complete(ship) else " · %.0f%%" % (float(ship["build_progress"]) * 100.0))
 		elif ECONOMY.static_complete(ship):
 			status = "Resource Depot"
 			for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
@@ -2484,7 +2491,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_repairers) and (id not in ["load", "unload"] or has_cargo_hold)
 		button.disabled = command_kind.is_empty() or owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not _selected_ship_entries(state).any(func(craft: Dictionary) -> bool: return _command_entry(craft) and craft["kind"] in ECONOMY.MILITARY_KINDS)) or (id == "repair" and not has_repairers) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
-	for build_id in ["build_depot", "cancel_site", "build_cannon", "upgrade_cannon"]:
+	for build_id in ["build_depot", "cancel_site", "build_cannon", "upgrade_cannon", "build_wall"]:
 		command_buttons[build_id].visible = command_kind == "construction_ship"
 		command_buttons[build_id].disabled = not command_buttons[build_id].visible or owned_count == 0
 	if command_kind == "construction_ship":
@@ -4167,6 +4174,19 @@ func _map_input(event: InputEvent) -> void:
 					elif selected_yard >= 0:
 						_set_rally_at(mouse.position)
 			MOUSE_BUTTON_LEFT:
+				if pending_command == "build_wall":
+					if mouse.pressed:
+						wall_drag_start = _world_point(mouse.position)
+						wall_drag_end = wall_drag_start
+					elif wall_drag_start.is_finite():
+						_issue_order(_selected_owned_units(_state()), {"kind": "build_wall", "start": wall_drag_start, "point": _world_point(mouse.position)}, false)
+						wall_drag_start = Vector2.INF
+						wall_drag_end = Vector2.INF
+						pending_command = ""
+						_refresh_command_mode()
+					map_canvas.queue_redraw()
+					map_canvas.accept_event()
+					return
 				if not pending_command.is_empty():
 					if mouse.pressed:
 						selecting_units = false
@@ -4193,7 +4213,9 @@ func _map_input(event: InputEvent) -> void:
 					_zoom_at(mouse.position, -match_settings.wheel_zoom_percent / 100.0)
 	elif event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event
-		if formation_button != 0:
+		if pending_command == "build_wall" and wall_drag_start.is_finite():
+			wall_drag_end = _world_point(motion.position)
+		elif formation_button != 0:
 			_append_formation_point(motion.position)
 		elif selecting_units:
 			selection_end = motion.position
@@ -5173,6 +5195,10 @@ func _draw_map_content() -> void:
 		if kind == "colony_ship" and ship.has("colony_transform_progress"):
 			structure_view.draw_colony_transform(ship, point, direction.normalized(), scale, empire, float(state["elapsed"]))
 			continue
+		if kind == "wall_segment":
+			var wall_color: Color = empire if ECONOMY.static_complete(ship) else Color(empire, 0.35)
+			map_canvas.draw_line(_screen_point(ship["wall_a"]), _screen_point(ship["wall_b"]), wall_color, maxf(2.0, scale * 5.0), true)
+			continue
 		if kind == "warp_gate":
 			var gate_radius: float = maxf(5.0, 44.0 * scale)
 			map_canvas.draw_circle(point, gate_radius, Color("#382b58"), true, -1.0, true)
@@ -5240,6 +5266,13 @@ func _draw_map_content() -> void:
 	world_effects.draw_cargo_transfers(state, transfer_poses, service_refs, viewport_bounds, visual_clock, _ship_scale, map_canvas, _transfer_anchor)
 	order_view.draw_formation_preview(state, formation_button, formation_length, formation_mode, formation_path, _formation_orders, _selected_owned_units)
 	world_batches.flush_indicators()
+	if pending_command == "build_wall" and wall_drag_start.is_finite() and wall_drag_end.is_finite():
+		var preview: PackedVector2Array = ECONOMY.wall_chain_points(wall_drag_start, wall_drag_end)
+		for index in range(preview.size()):
+			var screen: Vector2 = _screen_point(preview[index])
+			if index > 0:
+				map_canvas.draw_line(_screen_point(preview[index - 1]), screen, Color("#73dbec"), 2.0, true)
+			map_canvas.draw_circle(screen, 5.0, Color("#a1eaf4"))
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
 		map_canvas.draw_rect(rect, Color(HUD.ACCENT, 0.12))

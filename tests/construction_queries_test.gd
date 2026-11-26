@@ -13,6 +13,12 @@ func _initialize() -> void:
 	assert(ECON.static_recipe("defense_cannon", 3)["Metals"] > ECON.static_recipe("defense_cannon", 2)["Metals"])
 	assert(ECON.cannon_damage({"structure_level": 3}) > ECON.cannon_damage({"structure_level": 2}))
 	assert(ECON.hull_max_hp({"kind": "defense_cannon", "structure_level": 2, "build_progress": 0.0}) == ECON.CANNON_HP[1])
+	var wall_points: PackedVector2Array = ECON.wall_chain_points(Vector2.ZERO, Vector2(1000, 0))
+	assert(wall_points.size() == 4 and wall_points[0] == Vector2.ZERO and wall_points[-1] == Vector2(1000, 0))
+	for index in range(1, wall_points.size()):
+		assert(wall_points[index].distance_to(wall_points[index - 1]) <= ECON.WALL_MAX_LENGTH)
+	assert(ECON.wall_chain_points(Vector2.ZERO, Vector2.ZERO).size() == 1)
+	assert(ECON.wall_chain_points(Vector2.ZERO, Vector2(100000, 0)).is_empty())
 	assert(ECON.ship_size("construction_ship") == 1)
 	assert(ECON.cargo_capacity("construction_ship") == 180.0)
 	assert(ECON.depot_capacity("Metals") == 2000.0)
