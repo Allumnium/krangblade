@@ -6874,6 +6874,30 @@ static func depot_capacity(resource: String) -> float:
 static func depot_free(site: Dictionary, resource: String) -> float:
 	return maxf(0.0, depot_capacity(resource) - float(site.get("cargo", {}).get(resource, 0.0))) if static_complete(site) else 0.0
 
+# Depot policy governs automated trade only; manual cargo commands retain
+# the full physical capacity. A floor/ceiling pair avoids inverted policies.
+static func depot_policy(site: Dictionary, resource: String) -> Dictionary:
+	return site.get("depot_policy", {}).get(resource, {"floor": 0.0, "ceiling": 100.0, "receive": true, "dispatch": true})
+
+static func set_depot_policy(state: Dictionary, owner: int, id: int, resource: String, floor_percent: float, ceiling_percent: float, receive: bool, dispatch: bool) -> bool:
+	if not RESOURCES.has(resource) or not is_finite(floor_percent) or not is_finite(ceiling_percent) or floor_percent < 0.0 or ceiling_percent > 100.0 or floor_percent > ceiling_percent:
+		return false
+	var depot: Dictionary = _static_freight_entity(state, id)
+	if depot.get("kind", "") != "resource_depot" or int(depot.get("owner", 0)) != owner or not static_complete(depot):
+		return false
+	var policies: Dictionary = depot.get("depot_policy", {})
+	policies[resource] = {"floor": floor_percent, "ceiling": ceiling_percent, "receive": receive, "dispatch": dispatch}
+	depot["depot_policy"] = policies
+	return true
+
+static func depot_receive_capacity(depot: Dictionary, resource: String) -> float:
+	var policy: Dictionary = depot_policy(depot, resource)
+	return minf(depot_free(depot, resource), maxf(0.0, depot_capacity(resource) * float(policy["ceiling"]) / 100.0 - float(depot["cargo"].get(resource, 0.0)))) if bool(policy["receive"]) else 0.0
+
+static func depot_dispatch_stock(depot: Dictionary, resource: String) -> float:
+	var policy: Dictionary = depot_policy(depot, resource)
+	return maxf(0.0, float(depot["cargo"].get(resource, 0.0)) - depot_capacity(resource) * float(policy["floor"]) / 100.0) if bool(policy["dispatch"]) and static_complete(depot) else 0.0
+
 static func cannon_level(site: Dictionary) -> int:
 	return clampi(int(site.get("structure_level", 0)), 0, 3)
 
@@ -7592,8 +7616,8 @@ static func _work_construction_freight(state: Dictionary, graph: Dictionary, shi
 # it; only station import demand is served from it, avoiding storage loops.
 static func _depot_freight_amount(p: Dictionary, depot: Dictionary, resource: String, to_depot: bool) -> float:
 	if to_depot:
-		return minf(_surplus(p, resource), depot_free(depot, resource))
-	return minf(_need(p, resource), float(depot["cargo"].get(resource, 0.0)))
+		return minf(_surplus(p, resource), depot_receive_capacity(depot, resource))
+	return minf(_need(p, resource), depot_dispatch_stock(depot, resource))
 
 static func _work_depot_freight(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
 	var job: Dictionary = ship.get("depot_freight", {})
@@ -7605,8 +7629,9 @@ static func _work_depot_freight(state: Dictionary, graph: Dictionary, ship: Dict
 	var p: Dictionary = state["planets"][index]
 	var resource: String = job["resource"]
 	var to_depot: bool = bool(job["to_depot"])
-	if depot.is_empty() or not static_complete(depot) or int(depot["owner"]) != owner or int(p["owner"]) != owner or not has_station(p):
+	if depot.get("kind", "") != "resource_depot" or not static_complete(depot) or int(depot["owner"]) != owner or int(p["owner"]) != owner or not has_station(p):
 		_clear_static_freight(ship)
+		_resource_haul(ship)
 		return false
 	var loaded: bool = bool(job.get("loaded", false))
 	var at_depot: bool = loaded == to_depot
@@ -7633,7 +7658,7 @@ static func _work_depot_freight(state: Dictionary, graph: Dictionary, ship: Dict
 			else:
 				job["loaded"] = true
 	else:
-		var capacity: float = depot_free(depot, resource) if at_depot else minf(storage_free(p, resource), _need(p, resource))
+		var capacity: float = depot_receive_capacity(depot, resource) if at_depot else minf(storage_free(p, resource), _need(p, resource))
 		var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), capacity))
 		if amount > EPS:
 			_record_transfer(state, int(ship["id"]), ship, entity_id, entity, resource, amount)
@@ -7643,6 +7668,7 @@ static func _work_depot_freight(state: Dictionary, graph: Dictionary, ship: Dict
 				_record_flow(p, "Imports", resource, amount)
 		if float(ship["cargo"].get(resource, 0.0)) <= EPS or capacity - amount <= EPS:
 			_clear_static_freight(ship)
+			_resource_haul(ship)
 	return true
 
 static func _try_static_freight(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
@@ -11692,6 +11718,9 @@ static func authority_thresholds_for(state: Dictionary, id: int, index: int, res
 	if _authority_active_player(state, id) and set_thresholds(state, id, index, resource, minimum, maximum, importing, exporting):
 		return true
 	return false
+
+static func authority_depot_policy_for(state: Dictionary, id: int, depot_id: int, resource: String, floor_percent: float, ceiling_percent: float, receive: bool, dispatch: bool) -> bool:
+	return _authority_active_player(state, id) and set_depot_policy(state, id, depot_id, resource, floor_percent, ceiling_percent, receive, dispatch)
 
 static func authority_mining_policy_for(state: Dictionary, id: int, index: int, enabled: bool, metals: bool, crystals: bool) -> bool:
 	if _authority_active_player(state, id) and set_mining_policy(state, id, index, enabled, metals, crystals):

@@ -212,6 +212,9 @@ var ship_population: Label
 var colony_morph_progress: ProgressBar
 var fleet_scroll: ScrollContainer
 var fleet_overview: VBoxContainer
+var depot_controls: VBoxContainer
+var depot_policy_rows: Dictionary = {}
+var depot_policy_id: int = -1
 var fleet_title: Label
 var fleet_detail: Label
 var hold_button: Button
@@ -647,6 +650,7 @@ func _build_fleet_and_yard_cards(body: VBoxContainer, selection_content: VBoxCon
 	fleet_detail = _label("", 14)
 	ship_overview.add_child(fleet_detail)
 	_build_command_card(fleet_overview)
+	_build_depot_controls(fleet_overview)
 	_build_yard_command_card(body)
 	fleet_cargo_footer = HBoxContainer.new()
 	selection_content.add_child(fleet_cargo_footer)
@@ -666,6 +670,64 @@ func _build_fleet_and_yard_cards(body: VBoxContainer, selection_content: VBoxCon
 	fleet_cargo_footer.hide()
 	_build_field_command_card(fleet_overview)
 
+
+func _build_depot_controls(parent: VBoxContainer) -> void:
+	depot_controls = VBoxContainer.new()
+	parent.add_child(depot_controls)
+	depot_controls.add_child(_label("Automatic logistics", 13))
+	for resource in ECONOMY.RESOURCES:
+		depot_controls.add_child(_label(resource, 11))
+		var rows: Dictionary = {}
+		for key in ["receive", "dispatch"]:
+			var row := HBoxContainer.new()
+			depot_controls.add_child(row)
+			var check := CheckBox.new()
+			check.text = "Receive up to" if key == "receive" else "Dispatch above"
+			check.add_theme_font_size_override("font_size", 10)
+			_compact_trade_check(check)
+			check.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(check)
+			var percent := SpinBox.new()
+			percent.min_value = 0.0
+			percent.max_value = 100.0
+			percent.step = 1.0
+			percent.suffix = "%"
+			row.add_child(percent)
+			rows[key] = {"check": check, "percent": percent}
+			check.toggled.connect(_depot_policy_changed.bind(resource, key))
+			percent.value_changed.connect(_depot_policy_changed.bind(resource, key))
+		depot_policy_rows[resource] = rows
+	depot_controls.hide()
+
+func _refresh_depot_controls(ship: Dictionary, phase: String) -> void:
+	var available: bool = selected_units.size() == 1 and ship.get("kind", "") == "resource_depot" and int(ship.get("owner", 0)) == _me() and ECONOMY.static_complete(ship) and phase == "match"
+	depot_controls.visible = available
+	var id: int = int(ship.get("id", -1)) if available else -1
+	var changed: bool = depot_policy_id != id
+	depot_policy_id = id
+	if not available:
+		return
+	for resource in ECONOMY.RESOURCES:
+		var policy: Dictionary = ECONOMY.depot_policy(ship, resource)
+		for key in ["receive", "dispatch"]:
+			var controls: Dictionary = depot_policy_rows[resource][key]
+			var percent: SpinBox = controls["percent"]
+			controls["check"].set_pressed_no_signal(bool(policy[key]))
+			if changed or not percent.get_line_edit().has_focus():
+				percent.set_value_no_signal(float(policy["ceiling" if key == "receive" else "floor"]))
+
+func _depot_policy_changed(_value: Variant, resource: String, key: String) -> void:
+	if depot_policy_id < 0 or not depot_controls.visible:
+		return
+	var rows: Dictionary = depot_policy_rows[resource]
+	var floor_control: SpinBox = rows["dispatch"]["percent"]
+	var ceiling_control: SpinBox = rows["receive"]["percent"]
+	if floor_control.value > ceiling_control.value:
+		if key == "receive":
+			floor_control.set_value_no_signal(ceiling_control.value)
+		else:
+			ceiling_control.set_value_no_signal(floor_control.value)
+	session.call("request_depot_policy", depot_policy_id, resource, floor_control.value, ceiling_control.value, rows["receive"]["check"].button_pressed, rows["dispatch"]["check"].button_pressed)
 
 func _build_station_overview() -> void:
 	var system_header := HBoxContainer.new()
@@ -2823,6 +2885,7 @@ func _refresh() -> void:
 	fleet_scroll.visible = other_selected
 	fleet_overview.visible = other_selected
 	field_command_grid.visible = field_selected
+	_refresh_depot_controls(ship, phase)
 	fleet_title.visible = other_selected
 	fleet_detail.visible = other_selected
 	fleet_cargo_footer.hide()

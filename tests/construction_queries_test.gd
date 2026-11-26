@@ -88,7 +88,24 @@ func _test_supply_recovery() -> void:
 	ECON._refund_site(state, site, false)
 	assert(state["planets"][0]["stock"]["Metals"] == 200.0 and builder["cargo"]["Metals"] == 30.0)
 
+func _test_depot_policy() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(714, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var depot: Dictionary = {"id": 100, "kind": "resource_depot", "owner": 1, "build_progress": 1.0, "position": Vector2(200, 200), "hp": 1200.0, "cargo": {"Metals": 500.0}}
+	state["ships"].append(depot)
+	assert(ECON.depot_receive_capacity(depot, "Metals") == 1500.0)
+	assert(ECON.depot_dispatch_stock(depot, "Metals") == 500.0)
+	assert(not ECON.set_depot_policy(state, 2, 100, "Metals", 10.0, 70.0, true, true))
+	assert(not ECON.set_depot_policy(state, 1, 100, "Metals", 80.0, 70.0, true, true))
+	assert(not ECON.set_depot_policy(state, 1, 100, ECON.ANTIMATTER, 0.0, 100.0, true, true))
+	assert(ECON.set_depot_policy(state, 1, 100, "Metals", 10.0, 70.0, true, true))
+	assert(ECON.depot_receive_capacity(depot, "Metals") == 900.0)
+	assert(ECON.depot_dispatch_stock(depot, "Metals") == 300.0)
+	assert(ECON.set_depot_policy(state, 1, 100, "Metals", 10.0, 70.0, false, false))
+	assert(ECON.depot_receive_capacity(depot, "Metals") == 0.0 and ECON.depot_dispatch_stock(depot, "Metals") == 0.0)
+	assert(ECON.depot_free(depot, "Metals") == 1500.0)
+
 func _initialize() -> void:
+	_test_depot_policy()
 	_test_supply_recovery()
 	_test_wall_navigation()
 	_test_multi_source_materials()

@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.111.0: Owned completed depots expose per-resource receive/dispatch switches and ceiling/floor controls in the existing selection wing. Default full/zero preserves original auto trade; manual cargo unchanged, loaded surplus rerouted physically. Owner and finite range validation through host/worker command; semantic assertions added, runtime and peer validation pending.
+
 - v0.110.0: Reconcile recipe minus delivered material, station escrow and actual cargo on active assigned hulls every four game years while a constructor works; reserve only missing stock, permit partial replenishment, preserve salvage and interrupted cargo. Keep viable site assignments stable, release invalid freight, route excess cargo to owned storage. Focused destruction/interruption/duplicate-debit fixtures added; runtime and real peer validation pending.
 
 - v0.109.0: Use deterministic nearest-first per-station escrow for all static sites, upgrades and atomic wall chains; physical pickups debit only the chosen source. Cancel/refund each origin independently and drop lost station escrow at destruction. Added split-stock and atomic rejection fixtures. Lost transit supply recovery and runtime/ENet pending.
