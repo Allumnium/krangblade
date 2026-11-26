@@ -11,6 +11,7 @@ var friendly_sectors: Array[int] = []
 var layer: Control
 var region_graph: Dictionary = {}
 var _region_cache: Dictionary = {}
+var _spill_cache: Dictionary = {}
 var _mesh_root: Node2D
 var _fill_material: ShaderMaterial
 var _extent: Vector2 = Vector2.ONE
@@ -114,6 +115,7 @@ func refresh(state: Dictionary, local_player: int, map_size: Vector2, empire_col
 		_minimap_texture = null
 		friendly_sectors.clear()
 		_region_cache.clear()
+		_spill_cache.clear()
 		region_graph = {}
 		_viewer = 0
 		return false
@@ -126,6 +128,7 @@ func refresh(state: Dictionary, local_player: int, map_size: Vector2, empire_col
 	if not is_same(region_graph, graph) or _viewer != local_player:
 		_base_radius = ECONOMY.sector_base_radius(state["map"])
 		_region_cache.clear()
+		_spill_cache.clear()
 		_observed.clear()
 		_signature.clear()
 		region_graph = graph
@@ -163,8 +166,10 @@ func refresh(state: Dictionary, local_player: int, map_size: Vector2, empire_col
 
 func _refresh_warning_destinations(state: Dictionary, local_player: int, graph: Dictionary) -> void:
 	var points: Array = graph["points"]
-	var known: Array[int] = ECONOMY.military_pois(state, local_player)
-	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph, known, _region_cache)
+	var known: Dictionary = {}
+	for node in ECONOMY.military_pois(state, local_player):
+		known[node] = true
+	var weights: Array[Dictionary] = ECONOMY.territory_influence(state, graph, known, _region_cache, _spill_cache)
 	# Only known sectors with a friendly majority are warning destinations.
 	friendly_sectors.clear()
 	for index in range(points.size()):
