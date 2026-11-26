@@ -3073,6 +3073,29 @@ func _test_optional_native_kernels() -> void:
 		var result: Array = native.call("contact_batch", batch.ids, batch.positions, batch.previous, cells, bounds, ECON.SHIP_CLEARANCE, ECON.EPS)
 		assert(result[0] == batch.corrections and result[1] == batch.correction_order, "Native contact correction/order mismatch at sample %d" % sample)
 	print("PASS: optional native contact batch exact correction and first-touch parity")
+	assert(native.has_method("separation_batch"), "Native separation batch missing; rebuild extension")
+	var separation = preload("res://scripts/step_frame.gd").SeparationBatch.new()
+	for sample in range(12):
+		var count: int = 0 if sample == 0 else 180
+		var reach: float = ECON.SHIP_SEPARATION_RADIUS
+		separation.begin(count, reach)
+		var active := PackedByteArray()
+		active.resize(count)
+		for slot in range(count):
+			if slot % 11 == 0:
+				continue
+			var point := Vector2(rng.randf_range(-reach * 3.0, reach * 3.0), rng.randf_range(-reach * 3.0, reach * 3.0))
+			if slot % 13 == 0:
+				point = Vector2.ZERO
+			separation.append(slot, 5000 - slot, point)
+			active[slot] = 1 if slot % 5 != 0 else 0
+		separation.finish()
+		var forces: PackedVector2Array = separation.native_forces(native, active, ECON.EPS)
+		assert(forces.size() == count)
+		for slot in range(count):
+			var expected: Vector2 = separation.force(slot, ECON.EPS) if active[slot] != 0 else Vector2.ZERO
+			assert(forces[slot] == expected, "Native separation mismatch at sample %d slot %d" % [sample, slot])
+	print("PASS: optional native separation exact force, missing slot and inactive obstacle parity")
 
 func _test_authority_substep_boundary() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
@@ -3164,6 +3187,11 @@ func _test_shared_formation_batches() -> void:
 	print("PASS: shared formation batches, ordered membership, slot reuse, casualty and non-cardinal projection parity")
 
 func _initialize() -> void:
+	if OS.get_cmdline_user_args().has("--native-kernels-only"):
+		_test_optional_native_kernels()
+		_test_persistent_contact_indexes()
+		quit()
+		return
 	_test_shared_formation_batches()
 	if OS.get_cmdline_user_args().has("--formation-batch-only"):
 		quit()

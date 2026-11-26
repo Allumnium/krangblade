@@ -298,6 +298,9 @@ class SeparationBatch:
 			_neighborhoods[cell] = slots
 		return _neighborhoods[cell]
 
+	func native_forces(backend: RefCounted, active: PackedByteArray, epsilon: float) -> PackedVector2Array:
+		return backend.call("separation_batch", ids, positions, active, _cells, _reach, epsilon)
+
 	func force(slot: int, epsilon: float) -> Vector2:
 		var before: Vector2 = positions[slot]
 		var id: int = ids[slot]

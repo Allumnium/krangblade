@@ -10572,9 +10572,29 @@ static func _separate_ships(state: Dictionary, graph: Dictionary, previous: Dict
 	if collect_contacts:
 		_contact_index.begin()
 		_contact_batch.begin(ships.size())
+	# Eligibility reads only the current hull, elapsed clock and static graph.
+	# Freeze it before geometry, then settle in the original roster order.
+	var backend: RefCounted = COMBAT_KERNELS.native_backend() if batch != null else null
+	var native: bool = backend != null and backend.has_method("separation_batch")
+	var budgets := PackedFloat64Array()
+	var active := PackedByteArray()
+	var forces := PackedVector2Array()
+	if native:
+		budgets.resize(ships.size())
+		active.resize(ships.size())
+		for i in range(ships.size()):
+			if batch.present[i] != 0:
+				var budget: float = _separation_budget(state, graph, ships[i], dt, repair_parked, reach)
+				budgets[i] = budget
+				active[i] = 1 if budget >= 0.0 else 0
+		forces = batch.native_forces(backend, active, EPS)
 	for i in range(ships.size()):
 		var ship: Dictionary = ships[i]
-		_separate_hull(state, graph, ship, previous, dt, repair_parked, cells, reach, batch, i)
+		if native:
+			if active[i] != 0:
+				_apply_separation(graph, ship, previous[ship["id"]], budgets[i], reach, forces[i])
+		else:
+			_separate_hull(state, graph, ship, previous, dt, repair_parked, cells, reach, batch, i)
 		# Separation changes only this hull. Its final position can be
 		# collected now, in the same order as the former contact build.
 		if collect_contacts:
@@ -10594,18 +10614,25 @@ static func _separate_hull(state: Dictionary, graph: Dictionary, ship: Dictionar
 			return
 	elif not previous.has(id):
 		return
-	if repair_parked.has(id) or _stop_waiting(state, ship) or bool(ship.get("retreating", false)) or _salvage_active(ship):
-		return
-	var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
-	if _separation_exempt(state, graph, ship, budget, reach):
+	var budget: float = _separation_budget(state, graph, ship, dt, repair_parked, reach)
+	if budget < 0.0:
 		return
 	var before: Vector2 = previous[id]
+	var force: Vector2 = batch.force(slot, EPS) if batch != null else _separation_force(id, before, cells, previous, reach)
+	_apply_separation(graph, ship, before, budget, reach, force)
+
+static func _separation_budget(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float, repair_parked: Dictionary, reach: float) -> float:
+	if repair_parked.has(int(ship["id"])) or _stop_waiting(state, ship) or bool(ship.get("retreating", false)) or _salvage_active(ship):
+		return -1.0
+	var budget: float = ship_speed(str(ship.get("kind", "ship"))) * dt
+	return -1.0 if _separation_exempt(state, graph, ship, budget, reach) else budget
+
+static func _apply_separation(graph: Dictionary, ship: Dictionary, before: Vector2, budget: float, reach: float, force: Vector2) -> void:
+	if force.is_zero_approx():
+		return
 	var planned: Vector2 = ship["position"]
 	var held: bool = bool(ship.get("holding", false))
 	var local_moving: bool = ship.has("local_move_target")
-	var force: Vector2 = batch.force(slot, EPS) if batch != null else _separation_force(id, before, cells, previous, reach)
-	if force.is_zero_approx():
-		return
 	var movement: Vector2 = planned - before
 	if movement.length() > budget + EPS:
 		return

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 using namespace godot;
 
@@ -58,6 +59,8 @@ class WarboundNativeKernels : public RefCounted {
 
 protected:
     static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("separation_batch", "ids", "positions", "active", "cells", "reach", "epsilon"),
+                             &WarboundNativeKernels::separation_batch);
         ClassDB::bind_method(D_METHOD("contact_batch", "ids", "positions", "previous", "cells", "bounds", "reach", "epsilon"),
                              &WarboundNativeKernels::contact_batch);
         ClassDB::bind_method(D_METHOD("laser_block_nearest", "blocks", "pos", "best", "target"),
@@ -67,6 +70,66 @@ protected:
     }
 
 public:
+    // Each recipient sums the same ordered frozen neighbors. Inactive hulls
+    // remain obstacles; only their own force evaluation is omitted.
+    PackedVector2Array separation_batch(const PackedInt64Array &ids, const PackedVector2Array &positions,
+                                       const PackedByteArray &active, const Dictionary &cells,
+                                       double reach, double epsilon) const {
+        PackedVector2Array forces;
+        forces.resize(positions.size());
+        forces.fill(Vector2());
+        Vector2 *out = forces.ptrw();
+        const Vector2 *points = positions.ptr();
+        const int64_t *stable_ids = ids.ptr();
+        const uint8_t *enabled = active.ptr();
+        const double cutoff = reach * reach;
+        const Array keys = cells.keys();
+        std::vector<int64_t> neighbors;
+        for (int64_t c = 0; c < keys.size(); ++c) {
+            const Vector2i cell = keys[c];
+            const Array recipients = cells[cell];
+            bool any = false;
+            for (int64_t k = 0; k < recipients.size(); ++k) {
+                if (enabled[int64_t(recipients[k])]) { any = true; break; }
+            }
+            if (!any) continue;
+            neighbors.clear();
+            for (int x = -1; x <= 1; ++x) {
+                for (int y = -1; y <= 1; ++y) {
+                    const Vector2i key = cell + Vector2i(x, y);
+                    if (!cells.has(key)) continue;
+                    const Array bucket = cells[key];
+                    for (int64_t k = 0; k < bucket.size(); ++k) neighbors.push_back(int64_t(bucket[k]));
+                }
+            }
+            if (neighbors.size() <= 1) continue;
+            for (int64_t k = 0; k < recipients.size(); ++k) {
+                const int64_t i = recipients[k];
+                if (!enabled[i]) continue;
+                Vector2 sum;
+                for (const int64_t j : neighbors) {
+                    if (j == i) continue;
+                    const Vector2 offset = points[i] - points[j];
+                    if (offset.length_squared() >= cutoff) continue;
+                    const double distance = offset.length();
+                    Vector2 direction;
+                    if (distance <= epsilon) {
+                        const int64_t low = std::min(stable_ids[i], stable_ids[j]);
+                        const int64_t high = std::max(stable_ids[i], stable_ids[j]);
+                        const int64_t angle = ((low % 360 * 97 + high % 360 * 193) % 360 + 360) % 360;
+                        direction = Vector2::from_angle(real_t(double(angle) * 3.14159265358979323846 / 180.0));
+                        if (stable_ids[i] > stable_ids[j]) direction = -direction;
+                    } else {
+                        direction = offset / real_t(distance);
+                    }
+                    sum += direction * real_t(1.0 - distance / reach);
+                }
+                out[i] = sum;
+            }
+        }
+        return forces;
+    }
+
     // Frozen pass. Iterate the same roster, x/y neighborhood and bucket order
     // as the reference; only GDScript applies the resulting movement.
     Array contact_batch(const PackedInt64Array &ids, const PackedVector2Array &positions,

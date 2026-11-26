@@ -279,3 +279,16 @@ Godot 4.7.2, Intel Xeon Platinum 8573C (5 logical CPUs), Linux, pinned godot-cpp
 | 2,000 dispersed | Native | 407.247 | 489.529 | 521.031 | 153.732 | 20/20 | 1994 |
 
 Short sample supports a dense movement benefit but dispersed tail regresses; repeat and validate Windows before default activation. No render, 5x, or integrated scale acceptance. Initial concurrent samples discarded. Exact replay and focused parity on current checkout; native full economy timed out near final case, solo and two-peer threaded ENet passed. Latest GitHub Actions run #395 remains historical failure; CI remains manual-only.
+
+## Linux native separation A/B (2026-11-26, v0.97.98)
+
+Godot 4.7.2, Linux Xeon Platinum 8573C (5 logical CPUs), seed 827, eight synthetic empires, 20 sequential 1x batches per backend. Same v0.97.98 source in both runs; swap the v0.97.97 contact-only library (separation method absent, GDScript fallback) for v0.97.98 contact+separation library. Other Godot tests paused during timing. Native opt-in in both cases. Times in ms, not FPS.
+
+| Scenario | Backend | p50 | p95 | p99 / max | Other movement p50 | Misses | Final hulls |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2,000 swarm | Contact only | 382.841 | 463.059 | 469.268 | 256.986 | 20/20 | 2000 |
+| 2,000 swarm | Contact + separation | 337.891 | 359.832 | 376.529 | 211.076 | 20/20 | 2000 |
+| 2,000 dispersed | Contact only | 438.731 | 1002.334 | 1601.755 | 166.744 | 20/20 | 1994 |
+| 2,000 dispersed | Contact + separation | 399.732 | 440.118 | 450.998 | 150.611 | 20/20 | 1994 |
+
+Swarm p50 drops 11.7%, movement p50 17.9%; dispersed median lower but severe baseline spikes confound tail comparison. Short single-machine sample, no FPS or 100ms deadline acceptance. Native full economy reached final PASS and exited 0 with no assertion errors; focused force/state parity, exact 50/100-tick battle checkpoints, native worker, solo, two- and three-peer threaded ENet, two-peer loading-disconnect and host-leave pass. Some peer exits still report ObjectDB leaks. No Windows build, graphical or 5x scale comparison in this slice.
