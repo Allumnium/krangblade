@@ -9,6 +9,10 @@ static func ship_kind_name(kind: String) -> String:
 		return "Science vessel"
 	if kind == "railgun_ship":
 		return "Railgun Ship"
+	if kind == "construction_ship":
+		return "Construction Ship"
+	if kind == "resource_depot":
+		return "Resource Depot"
 	return {"ship": "Freighter", "miner": "Harvester", "colony_ship": "Colony"}.get(kind, kind.replace("_", " ").capitalize())
 
 static func tons(value: float, decimals: int = 1, compact: bool = false) -> String:
@@ -61,6 +65,7 @@ static func ship_stats(kind: String) -> String:
 		"scout": details = "Fast reconnaissance · " + blaster_summary(kind)
 		"cruiser", "destroyer": details = capital_weapon_summary(kind)
 		"railgun_ship": details = railgun_summary(kind)
+		"construction_ship": details = "Builds static structures by physical delivery · Cargo %.0f t" % ECONOMY.CONSTRUCTION_SHIP_CAPACITY
 		"fighter": details = blaster_summary(kind)
 		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection\nRepair %.0f HP/yr · Cloak detection R%.0f\nScan: %.0f yr lifetime / %.0f yr cooldown" % [ECONOMY.SCIENCE_COLLECTION_YEARS, ECONOMY.SCIENCE_REPAIR_RATE, ECONOMY.sight_radius(kind), ECONOMY.PROBE_LIFETIME, ECONOMY.SCAN_COOLDOWN]
