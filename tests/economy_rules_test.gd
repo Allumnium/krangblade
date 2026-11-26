@@ -42,6 +42,81 @@ func _test_hull_index() -> void:
 	ECON._hulls_by_id.clear()
 	print("PASS: live indexed hull references, ownership and removal")
 
+func _test_retained_authority_hull_scope() -> void:
+	var state: Dictionary = _funded_fixture(_planetary_fixture(426), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
+	var craft: Dictionary = state["ships"][0]
+	var id: int = int(craft["id"])
+	craft["auto_cooldown_until"] = 2.0
+	ECON.begin_authority_hull_scope(state)
+	assert(ECON._hull_index_rebuilds == 1)
+	assert(is_same(ECON._hulls_by_id[id], craft))
+	ECON._begin_deadline_schedule(state, true)
+	ECON._begin_hull_index(state)
+	assert(ECON._hull_index_rebuilds == 1 and ECON._cooldown_deadlines.size() == 1)
+	for i in range(3):
+		ECON._begin_deadline_schedule(state, true)
+		ECON._begin_hull_index(state)
+	assert(ECON._hull_index_rebuilds == 1)
+	# A normal authority launch enters the retained index immediately.
+	var next_id: int = int(state["next_id"])
+	state["next_id"] = next_id + 1
+	ECON._launch_finished_hull(state, 0, state["planets"][0], {"id": next_id, "kind": "fighter"})
+	var launched: Dictionary = state["ships"].back()
+	assert(is_same(ECON._hulls_by_id[next_id], launched))
+	var second: Dictionary = state["ships"][1]
+	var second_id: int = int(second["id"])
+	var first_owner: int = int(craft["owner"])
+	assert(ECON._owned_units(state, first_owner, [next_id, second_id, id]) == [craft, second, launched])
+	assert(ECON._owned_units(state, first_owner, [next_id, 999999]).is_empty())
+	assert(ECON._owned_units(state, first_owner, [next_id, next_id]).is_empty())
+	var wanted: Dictionary = {next_id: true, id: true, 999999: true, -1: true}
+	assert(ECON.service_targets(state, -1, wanted).keys() == [id, next_id])
+	wanted[ECON.station_target_id(state, 0)] = true
+	var full: Dictionary = ECON.service_targets(state)
+	var filtered: Dictionary = {}
+	for target in full:
+		if wanted.has(target):
+			filtered[target] = full[target]
+	var subset: Dictionary = ECON.service_targets(state, -1, wanted)
+	assert(subset == filtered and subset.keys() == filtered.keys())
+	ECON._set_auto_cooldown(state, launched)
+	assert(ECON._cooldown_deadlines.size() == 2)
+	# References see live movement and owner changes without an index rebuild.
+	craft["owner"] = 2
+	craft["position"] = Vector2(12, 34)
+	assert(ECON.service_targets(state, id)[id]["position"] == Vector2(12, 34))
+	assert(ECON._owned_units(state, 2, [id]).size() == 1)
+	assert(ECON._owned_units(state, 1, [id]).is_empty())
+	ECON._remove_indexed_hull(state, launched)
+	assert(not ECON._hulls_by_id.has(next_id) and ECON._cooldown_deadlines.size() == 1)
+	ECON._begin_hull_index(state)
+	assert(ECON._hull_index_rebuilds == 1)
+	state["elapsed"] = 2.0
+	ECON._expire_auto_cooldowns(state)
+	assert(not craft.has("auto_cooldown_until"))
+	# Restoring the roster is a conservative fallback, not normal worker work.
+	state["ships"] = state["ships"].duplicate(true)
+	state["ships"].reverse()
+	ECON._begin_deadline_schedule(state, true)
+	ECON._begin_hull_index(state)
+	assert(ECON._hull_index_rebuilds == 2)
+	var ids: Array = []
+	for survivor in state["ships"]:
+		ids.append(survivor["id"])
+		assert(is_same(ECON._hulls_by_id[survivor["id"]], survivor))
+	assert(ECON._hulls_by_id.keys() == ids and not is_same(ECON._hulls_by_id[id], craft))
+	assert(ECON._ordered_indexed_hull_subset({id: true, second_id: true}) == [ECON._hulls_by_id[second_id], ECON._hulls_by_id[id]])
+	ECON.end_authority_hull_scope()
+	assert(ECON._hulls_by_id.is_empty() and ECON._indexed_state.is_empty() and ECON._retained_hull_state.is_empty())
+	assert(ECON._cooldown_deadlines.size() == 0 and ECON._hull_order_by_id.is_empty())
+	# Unscoped fixtures can still replace an entity in place, even at equal count.
+	var replacement: Dictionary = state["ships"][0].duplicate(true)
+	state["ships"][0] = replacement
+	ECON._begin_hull_index(state)
+	assert(is_same(ECON._hulls_by_id[replacement["id"]], replacement))
+	ECON._end_hull_index()
+	print("PASS: retained authority hull lifecycle, launch/removal, live references, deadline sync and teardown")
+
 func _test_shipyard_rally() -> void:
 	var map: Dictionary = {"seed": 426, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -2880,6 +2955,10 @@ func _test_mining_selection() -> void:
 	print("PASS: mining selection preserves access and rock ties, preferred rock, live depletion and storage wakeups")
 
 func _initialize() -> void:
+	_test_retained_authority_hull_scope()
+	if OS.get_cmdline_user_args().has("--retained-hull-scope-only"):
+		quit()
+		return
 	if OS.get_cmdline_user_args().has("--region-index-only"):
 		_test_region_query_index()
 		_test_territory_influence()

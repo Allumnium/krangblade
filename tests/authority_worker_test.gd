@@ -55,6 +55,17 @@ func _run() -> void:
 		_check(false, "isolated worker could not start")
 		quit(1)
 		return
+	# A group command before the first tick must use the private roster and
+	# match the public full scan, regardless of requested-ID order.
+	var ids: Array = []
+	for craft in initial["ships"]:
+		if int(craft["owner"]) == 1 and craft["kind"] == "fighter":
+			ids.push_front(craft["id"])
+	_check(ids.size() == 2, "group command fixture missing fighters")
+	_check(worker.submit({"kind": "command", "method": "authority_unit_hold_for", "args": [1, ids, false]}), "initial group hold rejected")
+	var held: Dictionary = await _await_result(worker)
+	_check(ECON.authority_unit_hold_for(reference, 1, ids, false), "reference group hold rejected")
+	_check(bool(held.get("accepted", false)) and held.get("snapshot", {}) == reference, "indexed group hold differs from public scan")
 	var initial_tick: int = ECON._rock_plan_tick
 	_check(worker.submit({"kind": "tick", "dt": 0.1}), "initial tick rejected")
 	_check(not worker.submit({"kind": "tick", "dt": 0.1}), "second in-flight job accepted")
