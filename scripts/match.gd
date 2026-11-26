@@ -4968,6 +4968,11 @@ func _draw_map_content() -> void:
 			continue
 		if ship.has("blaster_fired"):
 			_draw_blaster_tracers(state, ship, poses)
+		if float(ship.get("railgun_until", -1.0)) >= float(state["elapsed"]) and ship.has("railgun_endpoint"):
+			var rail_origin: Vector2 = _screen_point(ship["railgun_origin"])
+			var rail_end: Vector2 = _screen_point(ship["railgun_endpoint"])
+			world_batches.queue_beam(rail_origin, rail_end, Color("#739dff"), 4.0)
+			world_batches.queue_beam(rail_origin, rail_end, Color("#e7f2ff"), 1.5)
 		if float(ship.get("missile_until", -1.0)) >= float(state["elapsed"]) and ship.has("missile_endpoint"):
 			var a: Vector2 = _screen_point(ship["missile_origin"])
 			var b: Vector2 = _screen_point(ship["missile_endpoint"])

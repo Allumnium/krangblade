@@ -40,7 +40,10 @@ static func blaster_summary(kind: String) -> String:
 	return "Blasters ×%d | %.0f dmg ×%d | %.1fs/%.1fs | R%.0f" % [ECONOMY.blaster_count(kind), ECONOMY.BLASTER_DAMAGE, ECONOMY.BLASTER_SHOTS, ECONOMY.BLASTER_BURST, ECONOMY.BLASTER_PAUSE, ECONOMY.LASER_RANGE]
 
 static func capital_weapon_summary(kind: String) -> String:
-	return "Lasers ×%d | %.0f dmg | 1s | R%.0f\nMissiles ×%d | %.0f dmg | %.0fs | R%.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE] + "\n" + blaster_summary(kind)
+	var summary: String = "Lasers ×%d | %.0f dmg | 1s | R%.0f\nMissiles ×%d | %.0f dmg | %.0fs | R%.0f" % [ECONOMY.capital_lasers(kind), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.missile_count(kind), ECONOMY.MISSILE_DAMAGE, ECONOMY.MISSILE_COOLDOWN, ECONOMY.MISSILE_RANGE] + "\n" + blaster_summary(kind)
+	if ECONOMY.railgun_count(kind) > 0:
+		summary += "\nRailgun ×%d | %.0f dmg | %.0fs | R%.0f" % [ECONOMY.railgun_count(kind), ECONOMY.RAILGUN_DAMAGE, ECONOMY.RAILGUN_COOLDOWN, ECONOMY.RAILGUN_RANGE]
+	return summary
 
 static func colony_population_requirement() -> String:
 	return "Requires %.0f station population" % ECONOMY.COLONY_MIN_ORIGIN_POPULATION

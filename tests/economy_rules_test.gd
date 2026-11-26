@@ -2297,6 +2297,41 @@ func _test_shared_missile_groups() -> void:
 	assert(not damage.has(30) and not damage.has(40))
 	print("PASS: automatic missile groups preserve target ties, splash and individual lethal credit")
 
+func _test_destroyer_railgun() -> void:
+	var state: Dictionary = {"teams": {1: 1, 2: 2, 3: 1}, "elapsed": 10.0}
+	var frame = ECON.COMBAT_FRAME.new()
+	var records: Array = [[10, 2, Vector2(1800, 0)], [20, 2, Vector2(1810, 0)], [-2, 2, Vector2(2400, 0)], [30, 3, Vector2(100, 0)], [40, 2, Vector2(2401, 0)]]
+	for record in records:
+		var id: int = record[0]
+		var owner: int = record[1]
+		var point: Vector2 = record[2]
+		frame.positions[id] = point
+		frame.team_by_id[id] = state["teams"][owner]
+		frame.health[id] = 1000.0
+		ECON._spatial_insert(frame.cells, point, ECON.LASER_RANGE, {"id": id, "owner": owner})
+	var craft: Dictionary = {"id": 100, "owner": 1, "kind": "destroyer"}
+	assert(ECON.RAILGUN_RANGE == 2.0 * ECON.MISSILE_RANGE and ECON.RAILGUN_DAMAGE == 4.0 * ECON.MISSILE_DAMAGE)
+	assert(ECON.RAILGUN_COOLDOWN == 1.25 * ECON.MISSILE_COOLDOWN)
+	assert(ECON.railgun_count("destroyer") == 1 and ECON.railgun_count("cruiser") == 0)
+	ECON._fire_hull_railgun(state, frame, craft, Vector2.ZERO, 1, 0.1)
+	assert(frame.damage == {10: ECON.RAILGUN_DAMAGE})
+	assert(craft["railgun_endpoint"] == frame.positions[10])
+	assert(craft["railgun_cooldown"] == ECON.RAILGUN_COOLDOWN)
+	ECON._fire_hull_railgun(state, frame, craft, Vector2.ZERO, 1, 0.1)
+	assert(frame.damage == {10: ECON.RAILGUN_DAMAGE})
+	craft["railgun_cooldown"] = 0.0
+	craft["attack_order"] = 40
+	ECON._fire_hull_railgun(state, frame, craft, Vector2.ZERO, 1, 0.1)
+	assert(frame.damage == {10: ECON.RAILGUN_DAMAGE})
+	craft["attack_order"] = 30
+	ECON._fire_hull_railgun(state, frame, craft, Vector2.ZERO, 1, 0.1)
+	assert(frame.damage == {10: ECON.RAILGUN_DAMAGE})
+	craft["attack_order"] = -2
+	ECON._fire_hull_railgun(state, frame, craft, Vector2.ZERO, 1, 0.1)
+	assert(frame.damage == {10: ECON.RAILGUN_DAMAGE, -2: ECON.RAILGUN_DAMAGE})
+	assert(craft["railgun_endpoint"] == frame.positions[-2])
+	print("PASS: Destroyer railgun range, single-target damage, cooldown, allied safety and structure focus")
+
 func _test_shared_combat_neighborhoods() -> void:
 	var state: Dictionary = {"teams": {1: 1, 2: 2, 3: 1}}
 	var frame = ECON.COMBAT_FRAME.new()
@@ -3269,6 +3304,7 @@ func _initialize() -> void:
 	_test_indexed_hostile_bucket()
 	_test_shared_combat_neighborhoods()
 	_test_shared_missile_groups()
+	_test_destroyer_railgun()
 	_test_reuse_combat_threats()
 	_test_shared_threat_index()
 	_test_sector_query_cache()
