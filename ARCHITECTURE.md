@@ -96,6 +96,8 @@ At the original combat boundary, `_peaceful_combat_possible` checks actual hull/
 
 `_shared_empty_rock_halo` shares a bounded 5x5 origin-cell obstacle absence proof with all eligible movement requests, including crowded hulls. The original 240-unit (or budget+96) detour lookahead and any budget-limited steered step are contained in the certified padded index area. Existing detours, large/invalid budgets and occupied halos use the ordinary detour/sweep path. Every rock-index rebuild clears the bounded cache; no movement/contact eligibility changes. The integrator preserves exact empty-sweep lerp and commits the already calculated accepted steered sweep rather than repeating it. No authoritative or serialized fields added.
 
+Operation grouping uses phase-local compact owner/role/target keys, with canonical string fallback for values outside signed 32-bit range. Published operation keys and insertion order are unchanged. Exact unchanged sorted slot membership reuses a detached layout, while changed memberships retain original vacancy assignment. Classification and formation metadata stamping share the ordered member pass. Coordinated lanes use packed frozen offsets and projections; each hull still performs the ordinary live navigation, progress and arrival checks using the shared lane axis and length. These are phase-local derived computations, not a second authority or canonical packed hull store.
+
 ## Making changes safely
 
 1. Identify the authoritative owner and approved gameplay requirement in AGENTS/TODO; keep speculative ideas in THOUGHTS until agreed.

@@ -252,3 +252,17 @@ Godot 4.7.2 Linux, AMD EPYC 9V74 (5 reported logical CPUs; container CPU quota 4
 | dispersed | 1000 | 5x | 12 | patched | 683.307 | 780.090 | 221.827 | 248.653 | 12/12 |
 
 Swarm retains all 2,000 hulls, dispersed ends at 991 in both paths. Swarm total median improves 7.5% and 8.3% in two short sequential runs; repeat movement median improves 7.2%. Dispersed total median worsens 0.9%, p95 worsens; no universal improvement claim. All miss the 100 ms budget; no graphical measurements. Focused 600-case exact crowded navigation comparisons across cell boundaries/budgets plus cached-route and obstacle insertion/depletion parity pass. Full economy regression exits 0 with no script/assertion errors; seeded battle checkpoints match original at ticks 50 and 100 (261/198 survivors, hashes 2283687648/2608373067). Authority-worker and solo tests exit 0 and print PASS; solo reports two leaked ObjectDB instances at exit. Real 2-peer threaded smoke host/client exit 0 and print PASS. Current-main integrated validation, native build and performance acceptance remain open.
+
+
+## Shared operation and lane formation batches (v0.97.96)
+
+Godot 4.7.2 Linux, AMD EPYC 9V74, 5 exposed logical CPUs, supplied v0.97.86 checkout plus isolated formation patch. Exact affected main source region matches the tested baseline and patch. Seed 827, eight same-team players, ordinary simulation and physics-independent fixed steps. The added opt-in `formation` scenario places eight independently ordered groups on real map lanes, with assigned slots and staggered initial progress. All existing scenario defaults unchanged; run `godot --headless --path . --script res://tests/fleet_benchmark.gd -- --ships=2000 --scenario=formation --ticks=20 --speed=1` or select formation in tools/profile_simulation.py.
+
+| Scenario | Ships | Speed | Batches | Path | Total p50 ms | Total p95 ms | Formations/orders p50 ms | Conquest/exploration p50 ms |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| formation | 2000 | 1x | 20 | reference | 312.234 | 344.340 | 53.224 | 14.758 |
+| formation | 2000 | 1x | 20 | patched | 300.765 | 345.561 | 48.068 | 12.702 |
+| swarm | 2000 | 1x | 16 | reference | 408.440 | 474.208 | 32.621 | 13.999 |
+| swarm | 2000 | 1x | 16 | patched | 408.368 | 490.321 | 32.083 | 12.174 |
+
+Sequential short same-checkout samples, no concurrent tests during benchmark runs. All retain 2,000 hulls and miss every 100 ms deadline. Formation total median improves 3.7%, formation/order phase 9.7%; final conquest/exploration phase includes the second operation sync. Swarm median essentially flat. Neither total p95 improves; short shared-container samples do not establish universal speedup or improved tail latency. Focused exact state/serialized insertion-order parity includes unsorted IDs, large owner fallback, stable slots, casualty/reinforcement and non-cardinal lane projections; full economy suite, actual worker, solo and 2-peer threaded ENet pass, seed 827 battle checkpoint hashes identical at ticks 50 and 100. Solo, host and client each report two ObjectDB instances leaked at exit. Current-main integrated validation, native dependencies, graphical FPS and canonical packed hot fields remain open.

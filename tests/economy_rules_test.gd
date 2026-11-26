@@ -3094,7 +3094,60 @@ func _test_mining_selection() -> void:
 	assert(ECON._best_mining_chunk(state, ship, teams, cache, -1, -1).is_empty())
 	print("PASS: mining selection preserves access and rock ties, preferred rock, live depletion and storage wakeups")
 
+func _test_shared_formation_batches() -> void:
+	# Use an unsorted roster, mixed owners, roles and a 64-bit owner to
+	# exercise compact lookup and canonical string-key fallback.
+	var state: Dictionary = {"ships": [], "operations": {}, "next_operation_id": 1, "ai_players": [2], "ai_waves": {2: {"members": [7], "target": 2, "home": 0}}}
+	for spec in [[9, 1, 1], [4, 1, 1], [7, 2, 2], [3, 2, 1], [6, 4294967297, 1]]:
+		state["ships"].append({"id": spec[0], "owner": spec[1], "kind": "fighter", "at": 0, "dest": spec[2], "position": Vector2.ZERO, "route": [spec[2]], "leg": 0.0})
+	ECON._sync_operations(state)
+	assert(state["operations"].keys() == ["1:allocation:1", "2:wave:2", "2:reserve:0", "4294967297:allocation:1"])
+	assert(state["operations"]["1:allocation:1"]["members"] == [4, 9])
+	var old: Dictionary = state["operations"]
+	var layout: Dictionary = old["1:allocation:1"]["slots"]
+	ECON._sync_operations(state)
+	assert(state["operations"] == old and var_to_str(state["operations"]) == var_to_str(old))
+	assert(not is_same(state["operations"]["1:allocation:1"]["slots"], layout))
+	state["ships"].remove_at(1)
+	state["ships"].append({"id": 11, "owner": 1, "kind": "fighter", "at": 0, "dest": 1, "position": Vector2.ZERO, "route": [1], "leg": 0.0})
+	ECON._sync_operations(state)
+	assert(state["operations"]["1:allocation:1"]["slots"] == {9: 1, 11: 0})
+	assert(layout == {4: 0, 9: 1})
+	# Compare the packed projection path with the original arithmetic for
+	# a non-cardinal shared lane, including heading and progress updates.
+	var points: Array = [Vector2(100, 200), Vector2(1300, 1700)]
+	var graph: Dictionary = {"points": points}
+	var axis: Vector2 = (points[1] - points[0]).normalized()
+	var length: float = points[0].distance_to(points[1])
+	var fleet: Array = []
+	for i in range(9):
+		var craft: Dictionary = {"id": 100 + i, "owner": 1, "kind": "fighter", "at": 0, "dest": 1, "route": [1], "leg": 0.0, "formation_size": 9, "formation_slot": i, "formation_extent": 8, "heading": Vector2.UP}
+		craft["position"] = points[0] + axis * float(i * 9) + ECON._formation_offset(craft, axis)
+		fleet.append(craft)
+	var reference: Array = fleet.duplicate(true)
+	ECON._refresh_movement_fields([])
+	ECON._begin_ship_avoidance({})
+	for tick in range(12):
+		var progress: float = length
+		for craft in reference:
+			var corrected: Vector2 = craft["position"] - ECON._formation_offset(craft, axis)
+			progress = minf(progress, clampf((corrected - points[0]).dot(axis), 0.0, length))
+		var next_progress: float = minf(length, progress + ECON.ship_speed("fighter") * ECON.FORMATION_TRAVEL_FRACTION * 0.1)
+		for craft in reference:
+			var offset: Vector2 = ECON._formation_offset(craft, axis)
+			var corrected: Vector2 = craft["position"] - offset
+			var own: float = clampf((corrected - points[0]).dot(axis), 0.0, length)
+			ECON._navigate(craft, points[0] + axis * maxf(own, next_progress) + offset, ECON.ship_speed("fighter") * 0.1)
+			craft["leg"] = ECON._lane_progress(points, craft)
+		assert(ECON._coordinate_formations({"ships": fleet}, graph, 0.1).size() == fleet.size())
+		assert(fleet == reference and var_to_str(fleet) == var_to_str(reference))
+	print("PASS: shared formation batches, ordered membership, slot reuse, casualty and non-cardinal projection parity")
+
 func _initialize() -> void:
+	_test_shared_formation_batches()
+	if OS.get_cmdline_user_args().has("--formation-batch-only"):
+		quit()
+		return
 	_test_shared_empty_rock_halos()
 	if OS.get_cmdline_user_args().has("--rock-halo-only"):
 		quit()

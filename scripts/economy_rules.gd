@@ -9622,14 +9622,7 @@ static func _sync_operations(state: Dictionary) -> void:
 			_match_operation_id(state, operation, current, previous, reused, prior_members)
 		var old_slots: Dictionary = prior_by_id.get(int(operation["id"]), {}).get("slots", {})
 		var last_slot: int = _assign_formation_slots(operation, old_slots)
-		_classify_operation_members(operation, by_id)
-		var slots: Dictionary = operation["slots"]
-		for member in operation["members"]:
-			var craft: Dictionary = by_id[member]
-			craft["operation_id"] = int(operation["id"])
-			craft["formation_slot"] = int(slots[member])
-			craft["formation_size"] = (operation["members"] as Array).size()
-			craft["formation_extent"] = last_slot
+		_classify_operation_members(operation, by_id, last_slot)
 	state["operations"] = current
 
 ## Groups armed hulls by owner, role and objective. Fills by_id when the
@@ -9646,6 +9639,9 @@ static func _group_operations(state: Dictionary, by_id: Dictionary, indexed: boo
 			members[member] = true
 		wave_members[owner] = members
 	var current: Dictionary = {}
+	# Dense value keys avoid formatting a serialized operation key per hull.
+	# Only the canonical string keys are published, in original roster order.
+	var group_lookup: Dictionary = {}
 	for ship in state["ships"]:
 		if bool(ship.get("rogue", false)) or ship.get("kind", "") not in MILITARY_KINDS:
 			continue
@@ -9654,19 +9650,28 @@ static func _group_operations(state: Dictionary, by_id: Dictionary, indexed: boo
 		if target < 0:
 			target = int(ship["at"])
 		var role: String = "hold" if bool(ship.get("holding", false)) else "allocation"
+		var role_index: int = 0 if role == "hold" else 1
 		if ai_players.has(owner) and not bool(ship.get("direct_order", false)):
 			var wave: Dictionary = state.get("ai_waves", {}).get(owner, {})
 			role = "wave" if wave_members.get(owner, {}).has(int(ship["id"])) else "reserve"
+			role_index = 2 if role == "wave" else 3
 			# An explicitly assigned objective remains stable while the craft
 			# pursues enemies or takes a detour to repair.
 			if role == "wave" and int(wave.get("target", -1)) >= 0:
 				target = int(wave["target"])
 			elif role == "reserve" and int(wave.get("home", -1)) >= 0:
 				target = int(wave["home"])
-		var key: String = "%d:%s:%d" % [owner, role, target]
-		if not current.has(key):
-			current[key] = {"id": 0, "owner": owner, "target": target, "role": role, "members": [], "moving": false, "engaged": false, "phase": "assigned", "deployed": []}
-		var operation: Dictionary = current[key]
+		var lookup_key: Variant
+		if owner >= -2147483648 and owner <= 2147483647 and target >= -2147483648 and target <= 2147483647:
+			lookup_key = Vector3i(owner, role_index, target)
+		else:
+			lookup_key = "%d:%s:%d" % [owner, role, target]
+		if not group_lookup.has(lookup_key):
+			var key: String = "%d:%s:%d" % [owner, role, target]
+			var created: Dictionary = {"id": 0, "owner": owner, "target": target, "role": role, "members": [], "moving": false, "engaged": false, "phase": "assigned", "deployed": []}
+			current[key] = created
+			group_lookup[lookup_key] = created
+		var operation: Dictionary = group_lookup[lookup_key]
 		var ship_id: int = int(ship["id"])
 		if not indexed:
 			by_id[ship_id] = ship
@@ -9733,6 +9738,12 @@ static func _match_operation_id(state: Dictionary, operation: Dictionary, curren
 ## Retains surviving slot assignments; reinforcements fill vacant slots.
 ## Returns the highest assigned slot.
 static func _assign_formation_slots(operation: Dictionary, old_slots: Dictionary) -> int:
+	# Unchanged sorted membership preserves slot values and insertion order.
+	# Reuse the layout with a detached shallow copy; casualties or new members
+	# still fill vacancies with the original ordered assignment algorithm.
+	if not old_slots.is_empty() and old_slots.keys() == operation["members"]:
+		operation["slots"] = old_slots.duplicate()
+		return maxi(0, int(old_slots.values().max()))
 	var slots: Dictionary = {}
 	var claimed: Dictionary = {}
 	for member in operation["members"]:
@@ -9752,8 +9763,11 @@ static func _assign_formation_slots(operation: Dictionary, old_slots: Dictionary
 	operation["slots"] = slots
 	return last_slot
 
-static func _classify_operation_members(operation: Dictionary, by_id: Dictionary) -> void:
+static func _classify_operation_members(operation: Dictionary, by_id: Dictionary, last_slot: int) -> void:
 	var deployed: Array = []
+	var slots: Dictionary = operation["slots"]
+	var formation_size: int = operation["members"].size()
+	var operation_id: int = int(operation["id"])
 	var prior_deployed: Dictionary = {}
 	for member in operation["deployed"]:
 		prior_deployed[member] = true
@@ -9770,6 +9784,12 @@ static func _classify_operation_members(operation: Dictionary, by_id: Dictionary
 			rallying.append(member)
 		if not (craft["route"] as Array).is_empty():
 			in_transit.append(member)
+		# These fields are not consulted by member classification. Stamp in
+		# the same ordered member pass instead of repeating all ID lookups.
+		craft["operation_id"] = operation_id
+		craft["formation_slot"] = int(slots[member])
+		craft["formation_size"] = formation_size
+		craft["formation_extent"] = last_slot
 	operation["deployed"] = deployed
 	operation["recovering"] = recovering
 	operation["rallying"] = rallying
@@ -9846,7 +9866,8 @@ static func _coordinate_formations(state: Dictionary, graph: Dictionary, dt: flo
 			continue
 		var progress: float = length
 		var aligned: bool = true
-		var offsets: Array[Vector2] = []
+		var offsets := PackedVector2Array()
+		var projections := PackedFloat64Array()
 		for craft in group:
 			var offset: Vector2 = _formation_offset(craft, axis)
 			offsets.append(offset)
@@ -9855,7 +9876,9 @@ static func _coordinate_formations(state: Dictionary, graph: Dictionary, dt: flo
 			if absf((corrected - origin).cross(axis)) > SHIP_SEPARATION_RADIUS * 2.0 or along < -SHIP_SEPARATION_RADIUS or along > length + SHIP_SEPARATION_RADIUS:
 				aligned = false
 				break
-			progress = minf(progress, clampf(along, 0.0, length))
+			var own_progress: float = clampf(along, 0.0, length)
+			projections.append(own_progress)
+			progress = minf(progress, own_progress)
 		if not aligned:
 			continue
 		var next_progress: float = minf(length, progress + ship_speed(str(first.get("kind", "ship"))) * FORMATION_TRAVEL_FRACTION * dt)
@@ -9863,11 +9886,10 @@ static func _coordinate_formations(state: Dictionary, graph: Dictionary, dt: flo
 		for i in range(group.size()):
 			var craft: Dictionary = group[i]
 			var offset: Vector2 = offsets[i]
-			var corrected: Vector2 = craft["position"] - offset
-			var own_progress: float = clampf((corrected - origin).dot(axis), 0.0, length)
-			var target: Vector2 = origin + axis * maxf(own_progress, next_progress) + offset
+			# Frozen slot projections were computed before any member moved.
+			var target: Vector2 = origin + axis * maxf(projections[i], next_progress) + offset
 			_navigate(craft, target, ship_speed(str(craft.get("kind", "ship"))) * dt)
-			craft["leg"] = _lane_progress(points, craft)
+			craft["leg"] = clampf(((craft["position"] as Vector2) - origin).dot(axis), 0.0, length)
 			arrived = arrived and (craft["position"] as Vector2).distance_to(endpoint + offset) <= EPS
 			moved[int(craft["id"])] = true
 		if arrived:

@@ -32,7 +32,7 @@ func _initialize() -> void:
 		quit(2)
 		return
 	for scenario in scenarios:
-		if scenario not in ["dispersed", "battle", "swarm", "logistics", "peaceful_mixed"]:
+		if scenario not in ["dispersed", "battle", "swarm", "logistics", "peaceful_mixed", "formation"]:
 			push_error("Unknown scenario")
 			quit(2)
 			return
@@ -45,7 +45,7 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 	var players: Array[int] = []
 	for owner in range(1, 9):
 		players.append(owner)
-		roster[owner] = {"team": 1 if scenario == "swarm" else owner, "ai": false}
+		roster[owner] = {"team": 1 if scenario in ["swarm", "formation"] else owner, "ai": false}
 	var state: Dictionary = ECON.create(MAP.generate(seed_value, 8, "Radial"), roster, players, false)
 	if scenario == "peaceful_mixed":
 		ECON.initialize_diplomacy(state)
@@ -53,6 +53,7 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var points: Array = state["map"]["points"]
+	var graph: Dictionary = ECON.military_graph(state) if scenario == "formation" else {}
 	for i in range(count):
 		var owner: int = i % 8 + 1
 		var node: int = owner - 1 if scenario == "logistics" else i % points.size()
@@ -66,6 +67,23 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 		var position: Vector2 = points[node] + Vector2.from_angle(rng.randf_range(0.0, TAU)) * sqrt(rng.randf()) * radius
 		state["ships"].append({"id": i + 1, "kind": kind, "owner": owner, "origin": owner - 1, "at": node, "position": position, "heading": Vector2.UP, "navigation_target": position, "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": ECON.ship_max_hp(kind), "crew": 0.0, "cargo": ECON.empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})
 	state["next_id"] = count + 1
+	if scenario == "formation":
+		# Eight same-team, independently ordered formations on real lanes.
+		# Begin with aligned slots and staggered progress; retain all ordinary
+		# combat, obstacle, separation and contact processing during the run.
+		for craft in state["ships"]:
+			var origin: int = int(craft["owner"]) - 1
+			var destination: int = int(graph["adjacent"][origin][0])
+			craft["at"] = origin
+			craft["dest"] = destination
+			craft["operation_target"] = destination
+			craft["route"] = [destination]
+		ECON._sync_operations(state)
+		for craft in state["ships"]:
+			var origin: Vector2 = graph["points"][int(craft["at"])]
+			var axis: Vector2 = origin.direction_to(graph["points"][int(craft["dest"])])
+			craft["position"] = origin + axis * float(int(craft["id"]) % 17) + ECON._formation_offset(craft, axis)
+			craft["navigation_target"] = craft["position"]
 	var samples: Array = []
 	var phase_samples: Dictionary = {}
 	var misses: int = 0
