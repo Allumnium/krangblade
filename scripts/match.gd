@@ -1892,7 +1892,7 @@ func _command_slot(id: String, hint: String, action: Callable, existing_slot: Co
 	active_border.draw.connect(_draw_active_command.bind(active_border))
 	active_border.visible = false
 	button.set_meta("active_border", active_border)
-	hotkeys.register(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K, "scan": KEY_Q, "build_depot": KEY_F, "cancel_site": KEY_Y}[id], "Fleet", "fleet_" + id, hint)
+	hotkeys.register(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K, "scan": KEY_Q, "build_depot": KEY_F, "cancel_site": KEY_Y, "build_cannon": KEY_I, "upgrade_cannon": KEY_O}[id], "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -1933,6 +1933,8 @@ func _build_command_card(parent: VBoxContainer) -> void:
 	_command_slot("scan", "Scan · launch a cloaked reconnaissance probe", _arm_command.bind("scan"), command_card.get_child(5)).hide()
 	_command_slot("build_depot", "Build Resource Depot · 600 Metals, 40 Crystals", _arm_command.bind("build_depot"), command_card.get_child(4)).hide()
 	_command_slot("cancel_site", "Cancel unfinished construction", _arm_command.bind("cancel_site"), command_card.get_child(8)).hide()
+	_command_slot("build_cannon", "Build Defense Cannon · 500 Metals, 60 Crystals", _arm_command.bind("build_cannon"), command_card.get_child(3)).hide()
+	_command_slot("upgrade_cannon", "Upgrade completed Defense Cannon", _arm_command.bind("upgrade_cannon"), command_card.get_child(7)).hide()
 
 func _autocast_units(state: Dictionary, mode: String) -> Array:
 	var units: Array = []
@@ -2167,12 +2169,12 @@ func _execute_pending_command(point: Vector2, append: bool = false, minimap_hint
 			if ECONOMY.science_target_valid(state, graph, craft, field):
 				eligible.append(int(craft["id"]))
 		_issue_order(eligible, {"kind": "collect", "target": field}, append)
-	elif mode == "build_depot":
-		_issue_order(_selected_owned_units(_state()), {"kind": "build_depot", "point": minimap_hint.get("world", _world_point(point))}, false)
-	elif mode == "cancel_site":
+	elif mode in ["build_depot", "build_cannon"]:
+		_issue_order(_selected_owned_units(_state()), {"kind": mode, "point": minimap_hint.get("world", _world_point(point))}, false)
+	elif mode in ["cancel_site", "upgrade_cannon"]:
 		var target: int = _entity_hit(_state(), point) if minimap_hint.is_empty() else int(minimap_hint["entity"])
 		if target >= 0:
-			_issue_order(_selected_owned_units(_state()), {"kind": "cancel_site", "target": target}, false)
+			_issue_order(_selected_owned_units(_state()), {"kind": mode, "target": target}, false)
 	elif mode == "scan":
 		var scan_state: Dictionary = _state()
 		var world: Vector2 = minimap_hint.get("world", _world_point(point))
@@ -2400,7 +2402,11 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status = "Servicing construction site"
 	if ECONOMY.is_static_structure(ship):
 		status = "Construction: %.0f%%" % (float(ship.get("build_progress", 0.0)) * 100.0)
-		if ECONOMY.static_complete(ship):
+		if kind == "defense_cannon":
+			status = "Defense Cannon Lv %d · %.0f damage · R%.0f" % [ECONOMY.cannon_level(ship), ECONOMY.cannon_damage(ship), ECONOMY.cannon_range(ship)]
+			if not ECONOMY.static_complete(ship):
+				status += "\nConstruction: %.0f%%" % (float(ship.get("build_progress", 0.0)) * 100.0)
+		elif ECONOMY.static_complete(ship):
 			status = "Resource Depot"
 			for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 				status += "\n%s: %.1f / %.1f t" % [resource, float(ship["cargo"].get(resource, 0.0)), ECONOMY.depot_capacity(resource)]
@@ -2478,7 +2484,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_repairers) and (id not in ["load", "unload"] or has_cargo_hold)
 		button.disabled = command_kind.is_empty() or owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not _selected_ship_entries(state).any(func(craft: Dictionary) -> bool: return _command_entry(craft) and craft["kind"] in ECONOMY.MILITARY_KINDS)) or (id == "repair" and not has_repairers) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
-	for build_id in ["build_depot", "cancel_site"]:
+	for build_id in ["build_depot", "cancel_site", "build_cannon", "upgrade_cannon"]:
 		command_buttons[build_id].visible = command_kind == "construction_ship"
 		command_buttons[build_id].disabled = not command_buttons[build_id].visible or owned_count == 0
 	if command_kind == "construction_ship":
@@ -4153,7 +4159,7 @@ func _map_input(event: InputEvent) -> void:
 				drag_button = MOUSE_BUTTON_MIDDLE if mouse.pressed else 0
 			MOUSE_BUTTON_RIGHT:
 				if mouse.pressed:
-					if pending_command in ["repair", "unload", "load", "rally", "collect", "guard", "scan", "build_depot", "cancel_site"]:
+					if pending_command in ["repair", "unload", "load", "rally", "collect", "guard", "scan", "build_depot", "cancel_site", "build_cannon", "upgrade_cannon"]:
 						_execute_pending_command(mouse.position, mouse.shift_pressed)
 					elif not pending_command.is_empty() and pending_command not in ["move", "attack", "patrol"]:
 						pending_command = ""
@@ -5015,6 +5021,8 @@ func _draw_map_content() -> void:
 		var shooter: int = int(ship["id"])
 		if not poses.has(shooter):
 			continue
+		if float(ship.get("cannon_until", -1.0)) >= float(state["elapsed"]) and ship.has("cannon_endpoint"):
+			world_batches.queue_beam(poses[shooter]["point"], _screen_point(ship["cannon_endpoint"]), Color("#f4be64"), 3.0)
 		if ship.has("blaster_fired"):
 			_draw_blaster_tracers(state, ship, poses)
 		if float(ship.get("railgun_until", -1.0)) >= float(state["elapsed"]) and ship.has("railgun_endpoint"):
@@ -5158,7 +5166,7 @@ func _draw_map_content() -> void:
 			metrics = {"radius": hull_art.ui_radius(kind), "max_hp": ECONOMY.ship_max_hp(kind), "half_size": hull_art.texture_half_size(kind)}
 			ship_metrics_cache[kind] = metrics
 		var radius: float = float(metrics["radius"])
-		var maximum_hp: float = float(metrics["max_hp"])
+		var maximum_hp: float = ECONOMY.hull_max_hp(ship) if ECONOMY.is_static_structure(ship) else float(metrics["max_hp"])
 		var half_size: float = float(metrics["half_size"])
 		var shield: float = _shield_fraction(ship)
 		_draw_damage_bar(point, radius * scale, float(ship.get("hp", maximum_hp)) / maximum_hp, shield)

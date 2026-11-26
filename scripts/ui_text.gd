@@ -13,6 +13,8 @@ static func ship_kind_name(kind: String) -> String:
 		return "Construction Ship"
 	if kind == "resource_depot":
 		return "Resource Depot"
+	if kind == "defense_cannon":
+		return "Defense Cannon"
 	return {"ship": "Freighter", "miner": "Harvester", "colony_ship": "Colony"}.get(kind, kind.replace("_", " ").capitalize())
 
 static func tons(value: float, decimals: int = 1, compact: bool = false) -> String:

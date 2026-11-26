@@ -77,7 +77,7 @@ func refresh_portrait(ship: Dictionary, system: Dictionary, body_selected: bool,
 	var maximum: float = 0.0
 	if not ship.is_empty() and selection_count <= 1:
 		kind = str(ship["kind"])
-		maximum = ECONOMY.ship_max_hp(str(ship["kind"]))
+		maximum = ECONOMY.hull_max_hp(ship)
 		hp = float(ship.get("hp", maximum))
 	elif not grouped and not system.is_empty():
 		if yard_selected:
