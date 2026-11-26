@@ -60,7 +60,36 @@ func _test_multi_source_materials() -> void:
 	assert(ECON._site_reserved_total(site) == 0.0)
 	assert(state["planets"][0]["stock"]["Metals"] == 350.0 and state["planets"][1]["stock"]["Metals"] == 250.0 and state["planets"][1]["stock"]["Crystals"] == 40.0)
 
+func _test_supply_recovery() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(713, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	state["planets"][0]["stock"]["Metals"] = 200.0
+	var point: Vector2 = ECON.station_position(state, 0, 0.0)
+	var site: Dictionary = {"id": 100, "owner": 1, "position": point, "build_recipe": {"Metals": 180.0}, "build_delivered": {"Metals": 50.0}, "build_reservations": {}}
+	var builder: Dictionary = {"id": 101, "owner": 1, "kind": "construction_ship", "position": point, "construction_target": 100, "cargo": {"Metals": 30.0}}
+	var freighter: Dictionary = {"id": 102, "owner": 1, "kind": "ship", "position": point, "construction_supply_site": 100, "construction_supply_builder": 101, "cargo": {"Metals": 100.0}}
+	state["ships"] = [builder, freighter]
+	assert(ECON._site_shortfall(state, site).is_empty())
+	ECON._recover_site_materials(state, site)
+	assert(state["planets"][0]["stock"]["Metals"] == 200.0)
+	state["ships"].erase(freighter)
+	assert(ECON._site_shortfall(state, site)["Metals"] == 100.0)
+	state["elapsed"] = ECON.CONSTRUCTION_RECOVERY_YEARS
+	ECON._recover_site_materials(state, site)
+	assert(ECON._site_reserved_total(site) == 100.0 and state["planets"][0]["stock"]["Metals"] == 100.0)
+	state["elapsed"] += ECON.CONSTRUCTION_RECOVERY_YEARS
+	ECON._recover_site_materials(state, site)
+	assert(ECON._site_reserved_total(site) == 100.0 and state["planets"][0]["stock"]["Metals"] == 100.0)
+	builder["holding"] = true
+	assert(ECON._site_shortfall(state, site)["Metals"] == 30.0)
+	state["elapsed"] += ECON.CONSTRUCTION_RECOVERY_YEARS
+	ECON._recover_site_materials(state, site)
+	assert(ECON._site_reserved_total(site) == 130.0 and state["planets"][0]["stock"]["Metals"] == 70.0)
+	# Returning cargo is not created by recovery. Cancel refunds only escrow.
+	ECON._refund_site(state, site, false)
+	assert(state["planets"][0]["stock"]["Metals"] == 200.0 and builder["cargo"]["Metals"] == 30.0)
+
 func _initialize() -> void:
+	_test_supply_recovery()
 	_test_wall_navigation()
 	_test_multi_source_materials()
 	for kind in ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "yard", "pds", "dyson_sphere", "reinforced_plating", "laser_matrix", "yard_upgrade", "production", "warehouse", "habitation", "orbital_housing"]:

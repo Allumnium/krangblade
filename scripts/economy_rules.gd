@@ -5916,7 +5916,7 @@ static func _work_miner_repair(state: Dictionary, graph: Dictionary, ship: Dicti
 # A manual command interrupts civilian work, retaining cargo and player
 # mining preferences. On completion automation chooses a fresh legal job.
 static func _interrupt_work(ship: Dictionary) -> void:
-	for key in ["construction_supply_builder", "construction_supply_site", "construction_supply_loaded", "depot_freight"]:
+	for key in ["construction_target", "construction_loading", "construction_supply_builder", "construction_supply_site", "construction_supply_loaded", "depot_freight", "_wall_detour"]:
 		ship.erase(key)
 	ship.erase("_next_trade_search")
 	_clear_resource_stage(ship)
@@ -7296,6 +7296,7 @@ static func _upgrade_cannon(state: Dictionary, owner: int, target: int) -> bool:
 	site["build_recipe"] = static_recipe("defense_cannon", level)
 	site["build_reservations"] = {}
 	site["build_delivered"] = empty_stock()
+	site.erase("_next_supply_recovery")
 	_reserve_site_materials(state, site, plan)
 	return true
 
@@ -7366,30 +7367,101 @@ static func _lose_site_station_escrow(state: Dictionary, source: int, point: Vec
 		_drop_carried(state, {"id": site["id"], "position": point, "cargo": record["cargo"]})
 		reservations.erase(source)
 
+# A shipment is counted only while it is aboard a living, assigned hull
+# that can actually continue the job. No independent in-flight stock ledger.
+const CONSTRUCTION_RECOVERY_YEARS: float = 4.0
+
+static func _construction_available(state: Dictionary, ship: Dictionary) -> bool:
+	return not bool(ship.get("rogue", false)) and not bool(ship.get("holding", false)) and not _stop_waiting(state, ship) and not _unit_order_running(ship) and ship.get("order_queue", []).is_empty() and not ship.has("cargo_order") and not ship.has("depot_pickup") and not ship.has("launch_rally") and not _salvage_active(ship)
+
+static func _useful_site_cargo(ship: Dictionary, site: Dictionary) -> bool:
+	for resource in site["build_recipe"]:
+		if float(site["build_delivered"].get(resource, 0.0)) + EPS < float(site["build_recipe"][resource]) and float(ship.get("cargo", {}).get(resource, 0.0)) > EPS:
+			return true
+	return false
+
+static func _site_shortfall(state: Dictionary, site: Dictionary) -> Dictionary:
+	var shortage: Dictionary = {}
+	for resource in site["build_recipe"]:
+		var needed: float = float(site["build_recipe"][resource]) - float(site["build_delivered"].get(resource, 0.0))
+		for record in site["build_reservations"].values():
+			needed -= float(record["cargo"].get(resource, 0.0))
+		if needed > EPS:
+			shortage[resource] = needed
+	if shortage.is_empty():
+		return shortage
+	var builders: Dictionary = {}
+	var transports: Array = []
+	var site_id: int = int(site["id"])
+	var owner: int = int(site["owner"])
+	for craft in state["ships"]:
+		if int(craft["owner"]) != owner or not _construction_available(state, craft):
+			continue
+		if craft.get("kind", "") == "construction_ship" and int(craft.get("construction_target", -1)) == site_id:
+			builders[int(craft["id"])] = true
+			transports.append(craft)
+		elif craft.get("kind", "") == "ship" and int(craft.get("construction_supply_site", -1)) == site_id and autocast_enabled(craft, "trade"):
+			transports.append(craft)
+	for craft in transports:
+		if craft["kind"] == "ship" and not builders.has(int(craft.get("construction_supply_builder", -1))):
+			continue
+		for resource in shortage.keys():
+			var needed: float = float(shortage[resource]) - float(craft["cargo"].get(resource, 0.0))
+			if needed <= EPS:
+				shortage.erase(resource)
+			else:
+				shortage[resource] = needed
+	return shortage
+
+static func _recover_site_materials(state: Dictionary, site: Dictionary) -> void:
+	var now: float = float(state["elapsed"])
+	if now + EPS < float(site.get("_next_supply_recovery", 0.0)):
+		return
+	site["_next_supply_recovery"] = now + CONSTRUCTION_RECOVERY_YEARS
+	var shortage: Dictionary = _site_shortfall(state, site)
+	if shortage.is_empty():
+		return
+	# Buy only genuinely missing material from current owned stock. A
+	# partial replacement may be reserved now and the rest produced later.
+	var plan: Dictionary = _plan_site_materials(state, site["position"], shortage, _construction_stocks(state, int(site["owner"])), true)
+	_reserve_site_materials(state, site, plan)
+
+static func _construction_site_workable(state: Dictionary, ship: Dictionary, site: Dictionary) -> bool:
+	return _useful_site_cargo(ship, site) or _site_reserved_total(site) > EPS or _construction_freight_waiting(state, ship, int(site["id"]))
+
 static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
-	if dt <= 0.0 or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty():
+	if dt <= 0.0 or not _construction_available(state, ship):
 		return false
 	var site: Dictionary = {}
 	var best: float = INF
+	var best_workable: bool = false
+	var active_id: int = int(ship.get("construction_target", -1))
 	for candidate in state["ships"]:
-		if is_static_structure(candidate) and not static_complete(candidate) and int(candidate["owner"]) == int(ship["owner"]):
-			var distance: float = (ship["position"] as Vector2).distance_squared_to(candidate["position"])
-			if distance < best:
-				site = candidate
-				best = distance
+		if not is_static_structure(candidate) or static_complete(candidate) or int(candidate["owner"]) != int(ship["owner"]):
+			continue
+		var workable: bool = _construction_site_workable(state, ship, candidate)
+		if workable and int(candidate["id"]) == active_id:
+			site = candidate
+			break
+		var distance: float = (ship["position"] as Vector2).distance_squared_to(candidate["position"])
+		if site.is_empty() or (workable and not best_workable) or (workable == best_workable and distance < best):
+			site = candidate
+			best = distance
+			best_workable = workable
 	if site.is_empty():
 		ship.erase("construction_loading")
 		ship.erase("construction_target")
+		if _cargo_total(ship) > EPS:
+			_resource_haul(ship)
 		return false
+	if int(site["id"]) != active_id:
+		ship.erase("construction_loading")
 	ship["construction_target"] = site["id"]
+	_recover_site_materials(state, site)
 	var recipe: Dictionary = site["build_recipe"]
 	var delivered: Dictionary = site["build_delivered"]
-	var useful_cargo: bool = false
-	for resource in recipe:
-		if float(delivered.get(resource, 0.0)) + EPS < float(recipe[resource]) and float(ship["cargo"].get(resource, 0.0)) > EPS:
-			useful_cargo = true
-			break
-	if useful_cargo and (not bool(ship.get("construction_loading", false)) or cargo_free(ship) <= EPS or _site_reserved_total(site) <= EPS):
+	var useful_cargo: bool = _useful_site_cargo(ship, site)
+	if useful_cargo and (not bool(ship.get("construction_loading", false)) or cargo_free(ship) <= EPS or _site_pickup_source(state, ship, site) < 0 or _construction_freight_waiting(state, ship, int(site["id"]))):
 		ship.erase("construction_loading")
 		var point: Vector2 = site["position"]
 		var node: int = patrol_node(state, graph, int(ship["owner"]), point)
@@ -7416,6 +7488,13 @@ static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dicti
 			_refund_site(state, site, false)
 			ship.erase("construction_target")
 		return true
+	if not useful_cargo and _cargo_total(ship) > EPS:
+		# Irrelevant cargo would block pickup or rendezvous. Unload it via
+		# existing physical warehouse delivery before resuming construction.
+		ship.erase("construction_loading")
+		ship.erase("construction_target")
+		_resource_haul(ship)
+		return false
 	if _construction_freight_waiting(state, ship, int(site["id"])):
 		ship.erase("construction_loading")
 		var point: Vector2 = site["position"]
@@ -7442,7 +7521,7 @@ static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dicti
 # The constructor remains the only entity that advances the build queue.
 static func _construction_freight_waiting(state: Dictionary, builder: Dictionary, site_id: int) -> bool:
 	for freighter in state["ships"]:
-		if int(freighter.get("construction_supply_builder", -1)) == int(builder["id"]) and int(freighter.get("construction_supply_site", -1)) == site_id and not bool(freighter.get("holding", false)):
+		if int(freighter.get("construction_supply_builder", -1)) == int(builder["id"]) and int(freighter.get("construction_supply_site", -1)) == site_id and int(freighter["owner"]) == int(builder["owner"]) and _construction_available(state, freighter) and autocast_enabled(freighter, "trade"):
 			return true
 	return false
 
@@ -7462,8 +7541,10 @@ static func _work_construction_freight(state: Dictionary, graph: Dictionary, shi
 	var owner: int = int(ship["owner"])
 	var builder: Dictionary = _static_freight_entity(state, int(ship["construction_supply_builder"]))
 	var site: Dictionary = _static_freight_entity(state, int(ship["construction_supply_site"]))
-	if builder.is_empty() or site.is_empty() or static_complete(site) or int(builder["owner"]) != owner or int(site["owner"]) != owner or int(builder.get("construction_target", -1)) != int(site["id"]) or _unit_order_running(builder) or bool(builder.get("holding", false)):
+	if builder.is_empty() or site.is_empty() or static_complete(site) or int(builder["owner"]) != owner or int(site["owner"]) != owner or int(builder.get("construction_target", -1)) != int(site["id"]) or not _construction_available(state, builder):
 		_clear_static_freight(ship)
+		if _cargo_total(ship) > EPS:
+			_resource_haul(ship)
 		return false
 	if not bool(ship.get("construction_supply_loaded", false)):
 		var source: int = _site_pickup_source(state, ship, site)
@@ -7476,6 +7557,18 @@ static func _work_construction_freight(state: Dictionary, graph: Dictionary, shi
 		ship["construction_supply_loaded"] = true
 	if _cargo_total(ship) <= EPS:
 		_clear_static_freight(ship)
+		return false
+	# Do not strand a freighter if the recipient already carries all of
+	# the remaining materials. Its cargo is ordinary physical stock.
+	var useful: bool = false
+	for resource in site["build_recipe"]:
+		var remaining: float = float(site["build_recipe"][resource]) - float(site["build_delivered"].get(resource, 0.0)) - float(builder["cargo"].get(resource, 0.0))
+		if remaining > EPS and float(ship["cargo"].get(resource, 0.0)) > EPS:
+			useful = true
+			break
+	if not useful:
+		_clear_static_freight(ship)
+		_resource_haul(ship)
 		return false
 	var point: Vector2 = builder["position"]
 	var node: int = patrol_node(state, graph, owner, point)
@@ -7553,7 +7646,7 @@ static func _work_depot_freight(state: Dictionary, graph: Dictionary, ship: Dict
 	return true
 
 static func _try_static_freight(state: Dictionary, graph: Dictionary, ship: Dictionary, dt: float) -> bool:
-	if not autocast_ready(state, ship, "trade") or _unit_order_running(ship) or not ship.get("order_queue", []).is_empty() or bool(ship.get("holding", false)):
+	if not autocast_ready(state, ship, "trade") or not _construction_available(state, ship):
 		return false
 	if _work_construction_freight(state, graph, ship, dt) or _work_depot_freight(state, graph, ship, dt):
 		return true
@@ -7565,7 +7658,7 @@ static func _try_static_freight(state: Dictionary, graph: Dictionary, ship: Dict
 	var best_site: Dictionary = {}
 	var best: float = INF
 	for candidate in state["ships"]:
-		if candidate.get("kind", "") != "construction_ship" or int(candidate["owner"]) != owner or _unit_order_running(candidate) or bool(candidate.get("holding", false)):
+		if candidate.get("kind", "") != "construction_ship" or int(candidate["owner"]) != owner or not _construction_available(state, candidate):
 			continue
 		var site: Dictionary = _static_freight_entity(state, int(candidate.get("construction_target", -1)))
 		if site.is_empty() or static_complete(site) or _site_reserved_total(site) <= EPS or _construction_freight_waiting(state, candidate, int(site["id"])):
