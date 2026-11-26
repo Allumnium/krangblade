@@ -215,6 +215,7 @@ func icon(kind: String, pixels: int = 64) -> Texture2D:
 	if _icons.has(key):
 		return _icons[key]
 	var paths: Dictionary = {
+		"scan": '<circle cx="16" cy="16" r="12" fill="none" stroke="#a7e9c5" stroke-width="2"/><path d="M16 16L25 7M16 2V8M16 24V30M2 16H8M24 16H30" stroke="#d9f8ff" stroke-width="2"/><circle cx="16" cy="16" r="4" fill="#c7efff"/>',
 		"auto_retreat": '<path fill="#f6aa79" d="M3 16L15 4V11H28V21H15V28Z"/><path stroke="#ffe5cc" stroke-width="2" d="M18 7L28 7M18 25L28 25"/>',
 		"auto_explore": '<circle cx="16" cy="16" r="13" fill="none" stroke="#8bd5ed" stroke-width="2"/><path d="M23 5L19 19L5 26L12 12Z" fill="#b4e9f9"/><circle cx="16" cy="16" r="2" fill="#122337"/>',
 		"auto_wander": '<path stroke="#8bd5ed" stroke-width="2.5" fill="none" d="M3 25Q9 4 17 17T29 4"/><circle cx="4" cy="25" r="3" fill="#e1f8ff"/><path fill="#b4e9f9" d="M16 9L24 18L19 28L16 24L11 28L11 17Z"/>',

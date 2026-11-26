@@ -428,6 +428,33 @@ func _test_repair_pauses_wander() -> void:
 		assert(is_equal_approx(float(patient["hp"]), ECON.ship_max_hp("scout")) and patient["position"] != point)
 	print("PASS: active repair rates, idle recipient motion pause, automatic wander resumption in either fleet order")
 
+func _test_science_probe() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var vessel: Dictionary = {"id": 101, "owner": 1, "kind": "science_ship", "at": 0, "position": Vector2(500, 0), "heading": Vector2.RIGHT, "route": [], "leg": 0.0, "dest": -1, "source": -1, "hp": ECON.ship_max_hp("science_ship"), "cargo": ECON.empty_stock()}
+	state["ships"] = [vessel]
+	state["next_id"] = 1000
+	var point := Vector2(600, 0)
+	assert(not ECON.issue_unit_order(state, 2, [101], {"kind": "scan", "point": point}, false))
+	assert(not ECON.issue_unit_order(state, 1, [101], {"kind": "scan", "point": Vector2.INF}, false))
+	assert(ECON.issue_unit_order(state, 1, [101], {"kind": "scan", "point": point}, false))
+	var probe: Dictionary = state["ships"].back()
+	assert(probe["kind"] == "probe" and probe["cloaked"] and probe["position"] == vessel["position"] and probe["crew"] == 0.0)
+	assert(not ECON.issue_unit_order(state, 1, [1000], {"kind": "stop"}, false))
+	assert(not ECON.issue_unit_order(state, 1, [101], {"kind": "scan", "point": point}, false))
+	assert(ECON.ship_visible_to_team(state, probe, 1) and not ECON.ship_visible_to_team(state, probe, 2))
+	assert(not probe.has("probe_expires"))
+	probe["position"] = point
+	ECON._work_probe(state, probe, 0.0)
+	assert(probe["probe_expires"] == float(state["elapsed"]) + ECON.PROBE_LIFETIME)
+	state["elapsed"] = float(probe["probe_expires"]) - 1.0
+	assert(not ECON._probe_expired(state, probe))
+	state["elapsed"] = float(probe["probe_expires"])
+	assert(ECON._probe_expired(state, probe) and ECON.science_scan_ready(state, vessel))
+	ECON._prepare_combat_hulls(state, ECON.military_graph(state), 0.0)
+	assert(state["ships"].size() == 1)
+	print("PASS: probe launch ownership, cooldown, command rejection, cloak and expiration")
+
 func _test_science_repair() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -3403,6 +3430,7 @@ func _initialize() -> void:
 	_test_ai_capital_fleets()
 	_test_miner_service_orders()
 	_test_science_repair()
+	_test_science_probe()
 	_test_repair_pauses_wander()
 	_test_mining_lasers()
 	_test_yard_autobuild_and_station_approach()
