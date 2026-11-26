@@ -5236,7 +5236,10 @@ static func diplomacy_offer_alliance(state: Dictionary, a: int, b: int) -> bool:
 	if proposer == b:
 		_write_diplomacy(state, a, b, {"relation": DIPLO_ALLIED, "vision": {a: true, b: true}, "trade": {a: true, b: true}})
 	else:
-		_write_diplomacy(state, a, b, {"relation": DIPLO_NEUTRAL, "alliance_offer": a})
+		var offer: Dictionary = entry.duplicate(true)
+		offer["relation"] = DIPLO_NEUTRAL
+		offer["alliance_offer"] = a
+		_write_diplomacy(state, a, b, offer)
 	return true
 
 static func diplomacy_break_alliance(state: Dictionary, a: int, b: int) -> bool:
@@ -5245,7 +5248,22 @@ static func diplomacy_break_alliance(state: Dictionary, a: int, b: int) -> bool:
 	_write_diplomacy(state, a, b, {"relation": DIPLO_NEUTRAL})
 	return true
 
+# Directional permission: the wall owner grants a particular empire passage.
+# This never changes hostility, vision, trade, repair or weapons authorization.
+static func open_borders(state: Dictionary, wall_owner: int, visitor: int) -> bool:
+	if wall_owner > 0 and wall_owner == visitor:
+		return true
+	if not _valid_diplomacy_pair(state, wall_owner, visitor) or empires_hostile(state, wall_owner, visitor):
+		return false
+	var allied: bool = empires_allied(state, wall_owner, visitor)
+	if not state.has("diplomacy"):
+		return allied
+	var entry: Dictionary = state["diplomacy"].get(_diplomacy_pair(wall_owner, visitor), {})
+	return bool(entry.get("open_borders", {}).get(wall_owner, allied))
+
 static func diplomacy_allows(state: Dictionary, a: int, b: int, permission: String) -> bool:
+	if permission == "open_borders":
+		return open_borders(state, a, b)
 	if permission not in ["vision", "trade", "repair"] or not empires_allied(state, a, b):
 		return false
 	if a == b or permission == "repair" or not state.has("diplomacy"):
@@ -5255,6 +5273,15 @@ static func diplomacy_allows(state: Dictionary, a: int, b: int, permission: Stri
 	return bool(preferences.get(a, true)) and bool(preferences.get(b, true))
 
 static func diplomacy_set_permission(state: Dictionary, a: int, b: int, permission: String, enabled: bool) -> bool:
+	if permission == "open_borders":
+		if not _can_change_diplomacy(state, a, b) or empires_hostile(state, a, b) or open_borders(state, a, b) == enabled:
+			return false
+		var border_entry: Dictionary = state["diplomacy"].get(_diplomacy_pair(a, b), {}).duplicate(true)
+		var border_grants: Dictionary = border_entry.get("open_borders", {})
+		border_grants[a] = enabled
+		border_entry["open_borders"] = border_grants
+		_write_diplomacy(state, a, b, border_entry)
+		return true
 	if permission not in ["vision", "trade"] or not _can_change_diplomacy(state, a, b) or not empires_allied(state, a, b):
 		return false
 	var entry: Dictionary = state["diplomacy"][_diplomacy_pair(a, b)].duplicate(true)
@@ -10533,7 +10560,7 @@ static func authority_diplomacy_for(state: Dictionary, id: int, action: String, 
 		"peace": changed = diplomacy_offer_peace(state, id, other)
 		"alliance": changed = diplomacy_offer_alliance(state, id, other)
 		"break_alliance": changed = diplomacy_break_alliance(state, id, other)
-		"vision", "trade": changed = diplomacy_set_permission(state, id, other, action, enabled)
+		"vision", "trade", "open_borders": changed = diplomacy_set_permission(state, id, other, action, enabled)
 	if changed:
 		return true
 	return false
