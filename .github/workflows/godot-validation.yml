@@ -146,6 +146,8 @@ jobs:
         run: python3 tools/check_gdscript.py
       - name: Developer speed refresh idempotence
         run: timeout 30s godot --headless --path . --script res://tests/developer_speed_refresh_test.gd
+      - name: Fog coverage cache and mask parity
+        run: timeout 40s godot --headless --path . --script res://tests/fog_coverage_cache_test.gd
       - name: Snapshot codec round-trip regressions
         run: godot --headless --path . --script res://tests/snapshot_codec_test.gd
       - name: Enforce public simulation rule calls from match UI

@@ -2489,6 +2489,8 @@ func _refresh_territory(state: Dictionary) -> void:
 	_update_fog(state)
 	if _profiling_publication:
 		publication_profile["fog"] = float(Time.get_ticks_usec() - fog_started) / 1000.0
+		for key in fog_state.profile:
+			publication_profile["fog_" + key] = fog_state.profile[key]
 	if territory_view.refresh(state, _me(), _map_size(), _empire_color, _fog_visible):
 		_position_territory()
 
