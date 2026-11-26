@@ -428,6 +428,28 @@ func _test_repair_pauses_wander() -> void:
 		assert(is_equal_approx(float(patient["hp"]), ECON.ship_max_hp("scout")) and patient["position"] != point)
 	print("PASS: active repair rates, idle recipient motion pause, automatic wander resumption in either fleet order")
 
+func _test_science_repair() -> void:
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
+	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var vessel: Dictionary = {"id": 101, "owner": 1, "kind": "science_ship", "origin": 0, "at": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2(500, 0), "heading": Vector2.UP, "hp": 100.0, "cargo": ECON.empty_stock(), "wander_auto": false}
+	var patient: Dictionary = vessel.duplicate(true)
+	patient.merge({"id": 102, "kind": "ship", "hp": 70.0, "position": Vector2(550, 0), "trade_auto": false}, true)
+	var enemy: Dictionary = patient.duplicate(true)
+	enemy.merge({"id": 103, "owner": 2}, true)
+	state["ships"] = [vessel, patient, enemy]
+	var graph: Dictionary = ECON.military_graph(state)
+	assert(ECON.supports_autocast(vessel, "repair"))
+	assert(not ECON.issue_unit_order(state, 1, [101], {"kind": "repair", "target": 101}, false))
+	assert(not ECON.issue_unit_order(state, 1, [101], {"kind": "repair", "target": 103}, false))
+	assert(ECON._work_miner_repair(state, graph, vessel, ECON._movement_service_targets(state), 1.0))
+	assert(patient["hp"] == 70.0 + ECON.SCIENCE_REPAIR_RATE and vessel["hp"] == 100.0 and enemy["hp"] == 70.0)
+	assert(ECON.set_repair_auto(state, 1, [101], false))
+	assert(not ECON._work_miner_repair(state, graph, vessel, ECON.service_targets(state), 1.0))
+	assert(ECON.issue_unit_order(state, 1, [101], {"kind": "repair", "target": 102}, false))
+	assert(ECON._work_miner_repair(state, graph, vessel, ECON.service_targets(state), 1.0))
+	assert(patient["hp"] == 70.0 + 2.0 * ECON.SCIENCE_REPAIR_RATE)
+	print("PASS: Science Vessel auto/manual repair, ownership, no self-repair and enemy rejection")
+
 func _test_miner_service_orders() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0), Vector2(10000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
 	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
@@ -2667,6 +2689,21 @@ func _test_cloaking() -> void:
 	ECON._detect_cloaked(state, state["ships"], cells, positions, teams)
 	assert(not ECON.ship_visible_to_team(state, scout, 2) and ECON.ship_visible_to_team(state, scout, 1))
 	assert(not ECON._hostile_hull(state, 2, scout))
+	enemy["kind"] = "science_ship"
+	ECON._detect_cloaked(state, state["ships"], cells, positions, teams)
+	assert(ECON.ship_visible_to_team(state, scout, 2))
+	enemy["kind"] = "fighter"
+	var station: Dictionary = {"id": -2, "owner": 2, "kind": "station"}
+	positions[-2] = Vector2(ECON.STATION_SIGHT - 1.0, 0.0)
+	teams[-2] = 2
+	ECON._spatial_insert(cells, positions[-2], ECON.LASER_RANGE, station)
+	ECON._detect_cloaked(state, state["ships"], cells, positions, teams)
+	assert(ECON.ship_visible_to_team(state, scout, 2))
+	cells.clear()
+	ECON._spatial_insert(cells, scout["position"], ECON.LASER_RANGE, scout)
+	ECON._spatial_insert(cells, enemy["position"], ECON.LASER_RANGE, enemy)
+	ECON._detect_cloaked(state, state["ships"], cells, positions, teams)
+	assert(not ECON.ship_visible_to_team(state, scout, 2))
 	ECON._fire_blaster(state, scout, int(enemy["id"]), positions, {}, {}, {enemy["id"]: 100.0}, 0.1)
 	assert(float(scout["cloak_reveal_until"]) > float(state["elapsed"]))
 	ECON._refresh_reward_defenses(state, 0.0)
@@ -3365,6 +3402,7 @@ func _initialize() -> void:
 	_test_ai_timed_orbital_housing()
 	_test_ai_capital_fleets()
 	_test_miner_service_orders()
+	_test_science_repair()
 	_test_repair_pauses_wander()
 	_test_mining_lasers()
 	_test_yard_autobuild_and_station_approach()
