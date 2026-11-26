@@ -3053,6 +3053,26 @@ func _test_optional_native_kernels() -> void:
 			assert(native.call("missile_block_nearest", blocks, point, best, -1, focused, 2) == kernels.missile_block_nearest_reference(blocks, point, best, -1, focused, 2))
 	assert(native.call("laser_block_nearest", [], Vector2.ZERO, INF, -1) == [INF, -1])
 	print("PASS: optional native targeting parity")
+	assert(native.has_method("contact_batch"), "Native contact batch missing; rebuild extension")
+	var batch = preload("res://scripts/step_frame.gd").ContactBatch.new()
+	for sample in range(12):
+		var count: int = 0 if sample == 0 else 180
+		batch.begin(count)
+		var ships: Array = []
+		var cells: Dictionary = {}
+		var bounds: Dictionary = {}
+		for slot in range(count):
+			var point := Vector2(rng.randf_range(-50.0, 50.0), rng.randf_range(-50.0, 50.0))
+			if slot % 13 == 0:
+				point = Vector2.ZERO
+			var before: Vector2 = point if sample % 2 == 0 else point + Vector2(slot % 5, slot % 7)
+			batch.set_pose(slot, 2000 + slot, point, before)
+			ships.append({"position": point})
+		ECON._index_contact_cells(ships, ECON.SHIP_CLEARANCE, cells, bounds)
+		batch.accumulate_reference(cells, bounds, ECON.SHIP_CLEARANCE, ECON.EPS)
+		var result: Array = native.call("contact_batch", batch.ids, batch.positions, batch.previous, cells, bounds, ECON.SHIP_CLEARANCE, ECON.EPS)
+		assert(result[0] == batch.corrections and result[1] == batch.correction_order, "Native contact correction/order mismatch at sample %d" % sample)
+	print("PASS: optional native contact batch exact correction and first-touch parity")
 
 func _test_authority_substep_boundary() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])

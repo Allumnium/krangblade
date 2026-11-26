@@ -266,3 +266,16 @@ Godot 4.7.2 Linux, AMD EPYC 9V74, 5 exposed logical CPUs, supplied v0.97.86 chec
 | swarm | 2000 | 1x | 16 | patched | 408.368 | 490.321 | 32.083 | 12.174 |
 
 Sequential short same-checkout samples, no concurrent tests during benchmark runs. All retain 2,000 hulls and miss every 100 ms deadline. Formation total median improves 3.7%, formation/order phase 9.7%; final conquest/exploration phase includes the second operation sync. Swarm median essentially flat. Neither total p95 improves; short shared-container samples do not establish universal speedup or improved tail latency. Focused exact state/serialized insertion-order parity includes unsorted IDs, large owner fallback, stable slots, casualty/reinforcement and non-cardinal lane projections; full economy suite, actual worker, solo and 2-peer threaded ENet pass, seed 827 battle checkpoint hashes identical at ticks 50 and 100. Solo, host and client each report two ObjectDB instances leaked at exit. Current-main integrated validation, native dependencies, graphical FPS and canonical packed hot fields remain open.
+
+## Current-checkout Linux native contact comparison (2026-11-26, v0.97.97)
+
+Godot 4.7.2, Intel Xeon Platinum 8573C (5 logical CPUs), Linux, pinned godot-cpp and SCons 4.11.1, seed 827, eight synthetic empires, 20 sequential uncontended 1x batches per backend, no detailed profiling. Native includes the existing targeting kernels and new contact accumulation. Timings are milliseconds, not FPS.
+
+| Scenario | Backend | p50 | p95 | p99 / max | Other movement p50 | Misses | Final hulls |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2,000 swarm | GDScript | 415.342 | 653.209 | 666.339 | 293.565 | 20/20 | 2000 |
+| 2,000 swarm | Native | 384.633 | 427.720 | 480.902 | 256.214 | 20/20 | 2000 |
+| 2,000 dispersed | GDScript | 417.291 | 455.155 | 467.677 | 163.778 | 20/20 | 1994 |
+| 2,000 dispersed | Native | 407.247 | 489.529 | 521.031 | 153.732 | 20/20 | 1994 |
+
+Short sample supports a dense movement benefit but dispersed tail regresses; repeat and validate Windows before default activation. No render, 5x, or integrated scale acceptance. Initial concurrent samples discarded. Exact replay and focused parity on current checkout; native full economy timed out near final case, solo and two-peer threaded ENet passed. Latest GitHub Actions run #395 remains historical failure; CI remains manual-only.
