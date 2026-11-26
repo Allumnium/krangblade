@@ -8205,11 +8205,47 @@ static func _reusable_laser_target(state: Dictionary, ship: Dictionary, by_id: D
 static func _combat_search_due(ship: Dictionary, now: float) -> bool:
 	return ship.has("attack_order") or int(ship.get("combat_target", -1)) >= 0 or int(ship.get("pursuit_target", -1)) >= 0 or int(ship.get("yard_target", -1)) < -1 or now + EPS >= float(ship.get("_next_combat_search", 0.0))
 
+# Prove an empty combat interaction graph from the current phase, before
+# building any hull position/health/sector/cell buffers. No persistent
+# certificate: diplomacy, structures, cloaking or orders wake immediately.
+static func _peaceful_combat_possible(state: Dictionary, ships: Array) -> bool:
+	var owners: Dictionary = {}
+	for ship in ships:
+		# Keep the full path for any target cleanup, detection or pirate logic.
+		if bool(ship.get("rogue", false)) or bool(ship.get("cloaked", false)) or ship.has("attack_order") or int(ship.get("combat_target", -1)) != -1 or int(ship.get("pursuit_target", -1)) != -1 or int(ship.get("yard_target", -1)) != -1 or not ship.get("pursuit_blocked", {}).is_empty():
+			return false
+		owners[int(ship["owner"])] = true
+	for system in state["planets"]:
+		if has_station(system) or not system["yards"].is_empty() or not system.get("pds", {}).is_empty() or not system.get("station", {}).get("weapons", []).is_empty():
+			owners[int(system["owner"])] = true
+	var groups: Dictionary = {}
+	for owner in owners:
+		var team: int = _combat_group(state, int(owner))
+		if team <= 0 or team == PIRATE_COMBAT_GROUP:
+			return false
+		groups[team] = true
+	for team in groups:
+		for other in groups:
+			if _combat_groups_hostile(state, int(team), int(other)):
+				return false
+	return true
+
 # One simultaneous resolution per step: freeze positions and health, let every
 # hull and structure choose targets and accumulate damage, then apply it all.
 # Phase order and ship iteration order are part of the simulation contract.
 static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_index: Dictionary = {}, activity_fast_paths: bool = true, persistent_buckets: bool = false, collect_threats: bool = true) -> void:
 	var ships: Array = state["ships"]
+	if activity_fast_paths and _peaceful_combat_possible(state, ships):
+		# Preserve the exact civilian threat snapshot when requested, but
+		# omit target, damage, sector fallback and structure geometry.
+		var empty_frame: COMBAT_FRAME = _build_combat_frame(state, graph, ships, threat_index, false, true, true) if collect_threats else COMBAT_FRAME.new()
+		empty_frame.activity_bounds_ready = true
+		for ship in ships:
+			_combat_hull(state, empty_frame, ship, dt, true)
+		_fire_station_weapons(state, empty_frame, dt)
+		_fire_planetary_defenses(state, graph, empty_frame, dt)
+		_resolve_combat_damage(state, graph, empty_frame, ships)
+		return
 	var frame: COMBAT_FRAME = _build_combat_frame(state, graph, ships, threat_index, persistent_buckets, collect_threats)
 	# Optional reference path for state-equivalence tests.
 	frame.activity_bounds_ready = activity_fast_paths
@@ -8222,8 +8258,8 @@ static func _combat(state: Dictionary, graph: Dictionary, dt: float, threat_inde
 
 # Freeze hull/structure positions, health and spatial buckets; also publish the
 # armed-hull threat snapshot consumed later by civilian safety checks.
-static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Array, threat_index: Dictionary, persistent_buckets: bool = false, collect_threats: bool = true) -> COMBAT_FRAME:
-	if persistent_buckets:
+static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Array, threat_index: Dictionary, persistent_buckets: bool = false, collect_threats: bool = true, threat_only: bool = false) -> COMBAT_FRAME:
+	if persistent_buckets and not threat_only:
 		if not is_same(state, _combat_index_state) or not is_same(ships, _combat_index_roster):
 			_combat_index_state = state
 			_combat_index_roster = ships
@@ -8233,7 +8269,7 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 		_combat_sector_index.begin()
 	var positions: Dictionary = {}
 	# Combat needs a frozen reference map until simultaneous damage resolves.
-	var indexed: bool = is_same(state, _indexed_state)
+	var indexed: bool = not threat_only and is_same(state, _indexed_state)
 	var by_id: Dictionary = _hulls_by_id.duplicate() if indexed else {}
 	var team_by_id: Dictionary = {}
 	var hull_slots: Dictionary = {}
@@ -8242,11 +8278,12 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 	var hull_teams := PackedInt32Array()
 	var previous_targets := PackedInt64Array()
 	var ship_sectors := PackedInt32Array()
-	hull_positions.resize(ships.size())
-	hull_health.resize(ships.size())
-	hull_teams.resize(ships.size())
-	previous_targets.resize(ships.size())
-	ship_sectors.resize(ships.size())
+	if not threat_only:
+		hull_positions.resize(ships.size())
+		hull_health.resize(ships.size())
+		hull_teams.resize(ships.size())
+		previous_targets.resize(ships.size())
+		ship_sectors.resize(ships.size())
 	var health: Dictionary = {}
 	var cells: Dictionary = {}
 	var sectors: Dictionary = {}
@@ -8260,23 +8297,28 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 	var threat_count: int = 0
 	var all_sectors: Array = []
 	for ship in ships:
+		var needs_threat: bool = collect_threats and armed(ship) and ship.get("position", Vector2.INF).is_finite()
+		if threat_only and not needs_threat:
+			continue
 		var id: int = int(ship["id"])
 		var pos: Vector2 = combat_position(state, graph, ship)
-		positions[id] = pos
-		if not indexed:
-			by_id[id] = ship
-		team_by_id[id] = _combat_group(state, int(ship["owner"]))
-		var slot: int = hull_slots.size()
-		hull_health[slot] = _effective_health(ship, ship_max_hp(str(ship["kind"])))
-		hull_slots[id] = slot
-		hull_positions[slot] = pos
-		hull_teams[slot] = int(team_by_id[id])
-		previous_targets[slot] = int(ship.get("combat_target", -1))
+		var team: int = _combat_group(state, int(ship["owner"]))
 		var sector: int = local_sector(graph, ship)
 		var combat_cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
-		_include_combat_activity_cell(activity_bounds, hull_teams[slot], combat_cell)
-		if collect_threats and armed(ship) and ship.get("position", Vector2.INF).is_finite():
-			var threat_team: int = int(team_by_id[id])
+		var slot: int = hull_slots.size()
+		if not threat_only:
+			positions[id] = pos
+			if not indexed:
+				by_id[id] = ship
+			team_by_id[id] = team
+			hull_health[slot] = _effective_health(ship, ship_max_hp(str(ship["kind"])))
+			hull_slots[id] = slot
+			hull_positions[slot] = pos
+			hull_teams[slot] = team
+			previous_targets[slot] = int(ship.get("combat_target", -1))
+			_include_combat_activity_cell(activity_bounds, team, combat_cell)
+		if needs_threat:
+			var threat_team: int = team
 			threat_index[id] = [_threat_sector_signature(ship), sector, threat_team]
 			threat_count += 1
 			if sector >= 0:
@@ -8292,6 +8334,8 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 			threat_positions.append(pos)
 			threat_teams.append(threat_team)
 			threat_ids.append(id)
+		if threat_only:
+			continue
 		if sector < 0:
 			if all_sectors.is_empty():
 				all_sectors = range(graph["points"].size())
@@ -8313,13 +8357,15 @@ static func _build_combat_frame(state: Dictionary, graph: Dictionary, ships: Arr
 			if not cells.has(combat_cell):
 				cells[combat_cell] = []
 			cells[combat_cell].append(ship)
-	if persistent_buckets:
+	if persistent_buckets and not threat_only:
 		cells = _combat_cell_index.finish()
 		sectors = _combat_sector_index.finish()
 	if collect_threats:
 		threat_index["snapshot"] = {"sectors": threat_sectors, "cells": threat_cells, "positions": threat_positions, "teams": threat_teams, "ids": threat_ids}
 		threat_index["count"] = threat_count
 	var frame := COMBAT_FRAME.new()
+	if threat_only:
+		return frame
 	frame.positions = positions
 	frame.by_id = by_id
 	frame.team_by_id = team_by_id
@@ -8412,7 +8458,7 @@ static func _combat_window_may_have_hostile(state: Dictionary, frame: COMBAT_FRA
 
 # Weapon selection for one hull. Writes only that hull's combat fields and the
 # shared damage accumulators; never mutates another hull or the frame snapshot.
-static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, dt: float) -> void:
+static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, dt: float, peaceful: bool = false) -> void:
 	if bool(ship.get("rogue", false)):
 		if int(ship["owner"]) == PIRATE_OWNER:
 			_pirate_fire(state, ship, frame.positions, frame.by_id, frame.cells, frame.team_by_id, frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health, dt)
@@ -8427,7 +8473,7 @@ static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionar
 	var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or ship.get("unit_order", {}).get("kind", "") == "follow" or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
 	if not moving_only:
 		ship.erase("move_only")
-	elif fighter and not bool(ship.get("holding", false)) and _combat_sector_has_hostile(frame.sector_teams, int(frame.ship_sectors[frame.hull_slots[int(ship["id"])]]), _combat_group(state, int(ship["owner"])), state):
+	elif not peaceful and fighter and not bool(ship.get("holding", false)) and _combat_sector_has_hostile(frame.sector_teams, int(frame.ship_sectors[frame.hull_slots[int(ship["id"])]]), _combat_group(state, int(ship["owner"])), state):
 		moving_only = false
 	ship["passing_fire"] = moving_only and fighter
 	if bool(ship.get("retreating", false)) or ship.has("cargo_order") or ship.has("repair_order"):
@@ -8438,6 +8484,9 @@ static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionar
 		ship["yard_target"] = -1
 		ship["yard_laser_until"] = -1.0
 		_fire_blaster(state, ship, -1, frame.positions, frame.damage, frame.killed_by, frame.health, dt, frame.hull_slots, frame.hull_health)
+		return
+	if peaceful:
+		_advance_peaceful_weapons(state, frame, ship, dt)
 		return
 	var hull_slot: int = int(frame.hull_slots[int(ship["id"])])
 	var pos: Vector2 = frame.hull_positions[hull_slot]
@@ -8523,6 +8572,29 @@ static func _fire_focused_attack(state: Dictionary, frame: COMBAT_FRAME, ship: D
 
 # Nearest-hostile lasers, bounded pursuit, guard limits and the structure
 # fallback. Laser and blaster share the selected target.
+# Same field order and defaults as the inactive full-frame laser path.
+static func _normalize_inactive_lasers(ship: Dictionary, dt: float) -> void:
+	ship["pursuit_target"] = -1
+	ship["pursuit_left"] = 0.0
+	ship["pursuit_blocked"] = ship.get("pursuit_blocked", {})
+	ship["combat_target"] = -1
+	ship["laser_cooldown"] = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
+	ship["yard_target"] = -1
+
+# No target is possible. Advance the same ordinary timer/metadata writes
+# without computing a sector, cell, health slot or target candidate list.
+static func _advance_peaceful_weapons(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, dt: float) -> void:
+	if missile_count(str(ship["kind"])) > 0:
+		ship["missile_cooldown"] = maxf(0.0, float(ship.get("missile_cooldown", 0.0)) - dt)
+	var now: float = float(state["elapsed"])
+	var search_due: bool = _combat_search_due(ship, now)
+	if search_due:
+		ship["_next_laser_refresh"] = _next_search_slot(now, int(ship["id"]) % 2 * 2, 0.2)
+	_normalize_inactive_lasers(ship, dt)
+	if search_due:
+		ship["_next_combat_search"] = _next_search_slot(now, int(ship["id"]) % 2 * 2, 0.2)
+	_fire_blaster(state, ship, -1, frame.positions, frame.damage, frame.killed_by, frame.health, dt, frame.hull_slots, frame.hull_health)
+
 static func _fire_hull_lasers(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, fighter: bool, moving_only: bool, pos: Vector2, team: int, hull_slot: int, weapon_damage: float, dt: float) -> void:
 	var positions: Dictionary = frame.positions
 	var by_id: Dictionary = frame.by_id
@@ -8537,12 +8609,7 @@ static func _fire_hull_lasers(state: Dictionary, frame: COMBAT_FRAME, ship: Dict
 	# No retained or previous target, no pursuit cleanup, and no due
 	# search: only the ordinary cooldown and normalized fields remain.
 	if frame.activity_bounds_ready and not search_due and int(previous_targets[hull_slot]) == -1 and ship.get("pursuit_blocked", {}).is_empty():
-		ship["pursuit_target"] = -1
-		ship["pursuit_left"] = 0.0
-		ship["pursuit_blocked"] = ship.get("pursuit_blocked", {})
-		ship["combat_target"] = -1
-		ship["laser_cooldown"] = maxf(0.0, float(ship.get("laser_cooldown", 0.0)) - dt)
-		ship["yard_target"] = -1
+		_normalize_inactive_lasers(ship, dt)
 		_fire_blaster(state, ship, -1, positions, frame.damage, frame.killed_by, frame.health, dt, hull_slots, frame.hull_health)
 		return
 	var guard: Dictionary = ship.get("unit_order", {})

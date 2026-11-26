@@ -32,7 +32,7 @@ func _initialize() -> void:
 		quit(2)
 		return
 	for scenario in scenarios:
-		if scenario not in ["dispersed", "battle", "swarm", "logistics"]:
+		if scenario not in ["dispersed", "battle", "swarm", "logistics", "peaceful_mixed"]:
 			push_error("Unknown scenario")
 			quit(2)
 			return
@@ -47,6 +47,8 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 		players.append(owner)
 		roster[owner] = {"team": 1 if scenario == "swarm" else owner, "ai": false}
 	var state: Dictionary = ECON.create(MAP.generate(seed_value, 8, "Radial"), roster, players, false)
+	if scenario == "peaceful_mixed":
+		ECON.initialize_diplomacy(state)
 	state["fog_of_war"] = false
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
@@ -57,6 +59,9 @@ func _run_case(count: int, scenario: String, ticks: int, seed_value: int, speed:
 		if scenario in ["battle", "swarm"]:
 			node = 0
 		var kind: String = ["miner", "ship", "fighter", "colony_ship"][i % 4] if scenario == "logistics" else "fighter"
+		if scenario == "peaceful_mixed" and (i >> 3) % 20 < 2:
+			kind = "miner" if (i >> 3) % 20 == 0 else "ship"
+			node = owner - 1
 		var radius: float = 300.0 if scenario in ["battle", "swarm"] else 800.0
 		var position: Vector2 = points[node] + Vector2.from_angle(rng.randf_range(0.0, TAU)) * sqrt(rng.randf()) * radius
 		state["ships"].append({"id": i + 1, "kind": kind, "owner": owner, "origin": owner - 1, "at": node, "position": position, "heading": Vector2.UP, "navigation_target": position, "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": ECON.ship_max_hp(kind), "crew": 0.0, "cargo": ECON.empty_stock(), "field": -1, "mining_mode": "idle", "field_leg": 0.0})

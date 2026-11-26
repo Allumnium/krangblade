@@ -220,3 +220,19 @@ Local Godot 4.7.2 Linux; supplied v0.97.86 checkout with isolated retained-index
 | Service references, eight requested hulls | 385.41 | 18.90 |
 
 The private scope built its roster index once in the probe. Focused lifecycle tests check launch/removal, live references, owner changes, mixed hull/structure target order, deadline restoration/expiry and scope teardown. Seed 827 400-hull battle replay with/without `--retained-hull-scope` matches complete state hashes at tick 50 (261 survivors, 2283687648) and tick 100 (198 survivors, 2608373067). Worker reference parity and 2-peer threaded ENet checks pass; existing ObjectDB exit warnings remain. Latest-main integration and combined fleet deadlines/FPS not measured. OPT-2 remains open: no canonical packed hot fields or stable dense slot compaction yet.
+
+
+## Peaceful combat phase elimination (v0.97.94)
+
+Godot 4.7.2 Linux, same supplied v0.97.86 checkout on Xeon Platinum 8573C (5 exposed logical CPUs) plus the existing v0.97.87 demand-driven combat-threat gate on both sides, with the isolated v0.97.94 patch on the second side. Affected combat source regions of v0.97.93 main were verified identical to the local pre-patch regions, and the resulting patch and added regression body match locally tested text. This does not establish whole-current-main runtime parity. Same seed 827, eight players, sequential reference then optimized samples, no concurrent benchmark/test runs. `tests/fleet_benchmark.gd` and `tools/profile_simulation.py` now accept opt-in `peaceful_mixed`: distinct neutral empires, dispersed fighters and roughly 10% miners/freighters distributed across the eight owners, fog disabled as for other fixtures. Default benchmark scenarios unchanged.
+
+| Scenario | Ships | Speed | Batches | Path | Total p50 ms | Total p95 ms | Combat/repair p50 ms | Combat/repair p95 ms |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| swarm | 2000 | 1x | 20 | reference | 564.553 | 658.267 | 83.817 | 95.866 |
+| swarm | 2000 | 1x | 20 | peaceful path | 545.184 | 784.261 | 50.259 | 88.718 |
+| peaceful_mixed | 1000 | 5x | 12 | reference | 1072.342 | 1674.710 | 294.073 | 322.073 |
+| peaceful_mixed | 1000 | 5x | 12 | peaceful path | 975.013 | 1822.525 | 197.310 | 400.960 |
+| battle | 1000 | 1x | 12 | reference | 216.879 | 343.055 | 72.040 | 138.282 |
+| battle | 1000 | 1x | 12 | patched fallback | 218.099 | 633.273 | 75.484 | 257.715 |
+
+All samples retained the initial ship count, all batches missed 100 ms. Peaceful median combat/repair fell 40% (33.558 ms per 1x batch) and 33% (96.763 ms per 5x batch) respectively, while total medians fell 3.4% and 9.1%. Active battle total median rose 0.6%; tail times are worse in all three whole-batch samples. Small sample count and shared-container variation limit inference; do not claim improved tails, graphics or general speedup. Repeat same-machine integrated workloads for acceptance. Focused regressions verify exact serialized hull/structure state and threat snapshots with bilateral neutrality, legacy teams, cloaking, war declaration, previous target, pirates, explicit orders, hostile structures, retreat/move-only and mixed civilian readers. Full economy and actual worker, solo and 50/100-tick AI/battle reference replays pass on isolated checkout. Two-peer threaded ENet host and client returned PASS/exit 0; the host reported two ObjectDB instances leaked at exit. Native dependencies unavailable; full current-main integration remains open.

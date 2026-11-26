@@ -67,7 +67,7 @@ def main():
     try:
         ships = options(args.ships, int)
         scenarios = options(args.scenarios, str,
-                            {"battle", "logistics", "swarm", "dispersed"})
+                            {"battle", "logistics", "swarm", "dispersed", "peaceful_mixed"})
         speeds = options(args.speeds, int, {1, 5})
         seeds = options(args.seeds, int)
         if min(ships) < 1 or args.ticks < 1 or args.timeout < 1:
