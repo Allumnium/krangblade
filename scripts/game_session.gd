@@ -48,6 +48,10 @@ var _authority_tick_queued: bool = false
 var _authority_publishing: bool = false
 var diagnostic_worker_overruns: int = 0
 var diagnostic_worker_snapshot_ms: float = 0.0
+# Local timings: applying a worker result includes synchronous UI signals,
+# snapshot encoding and motion sends; publication is a subset of that time.
+var diagnostic_worker_apply_ms: float = 0.0
+var diagnostic_worker_publish_ms: float = 0.0
 var is_solo: bool = false
 var map_layout: String = MAP.DEFAULT_LAYOUT
 var lobby_map_seed: int = 0
@@ -1368,6 +1372,8 @@ func _process(_delta: float) -> void:
 	var result: Dictionary = _authority_worker.take_result()
 	if result.is_empty():
 		return
+	var apply_started: int = Time.get_ticks_usec()
+	diagnostic_worker_publish_ms = 0.0
 	_authority_publishing = true
 	if result["kind"] == "command":
 		if bool(result["accepted"]):
@@ -1387,6 +1393,7 @@ func _process(_delta: float) -> void:
 			economy = result["snapshot"]
 			_finish_economy_tick(int(result["speed"]))
 	_authority_publishing = false
+	diagnostic_worker_apply_ms = float(Time.get_ticks_usec() - apply_started) / 1000.0
 	_pump_authority_jobs()
 
 func _stop_authority_worker() -> void:
@@ -1397,18 +1404,23 @@ func _stop_authority_worker() -> void:
 	_authority_worker.stop()
 	diagnostic_worker_overruns = 0
 	diagnostic_worker_snapshot_ms = 0.0
+	diagnostic_worker_apply_ms = 0.0
+	diagnostic_worker_publish_ms = 0.0
 
 func _exit_tree() -> void:
 	_stop_authority_worker()
 
 func _publish_economy(urgent: bool = true) -> void:
 	# Accepted commands bypass the slow state clock; snapshots never expose worker state.
+	var publish_started: int = Time.get_ticks_usec() if _authority_publishing else 0
 	snapshot_revision += 1
 	if urgent:
 		urgent_snapshot_revision = snapshot_revision
 	owners = ECONOMY.planet_teams(economy)
 	owners_changed.emit()
 	economy_changed.emit()
+	if publish_started != 0:
+		diagnostic_worker_publish_ms += float(Time.get_ticks_usec() - publish_started) / 1000.0
 
 func _flush_economy() -> void:
 	if is_solo:
