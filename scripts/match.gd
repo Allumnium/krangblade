@@ -2485,7 +2485,10 @@ func _refresh_territory(state: Dictionary) -> void:
 	if state.is_empty():
 		territory_view.refresh(state, 0, Vector2.ZERO, Callable(), Callable())
 		return
+	var fog_started: int = Time.get_ticks_usec() if _profiling_publication else 0
 	_update_fog(state)
+	if _profiling_publication:
+		publication_profile["fog"] = float(Time.get_ticks_usec() - fog_started) / 1000.0
 	if territory_view.refresh(state, _me(), _map_size(), _empire_color, _fog_visible):
 		_position_territory()
 
@@ -2651,7 +2654,10 @@ func _refresh() -> void:
 	if empire_ui.dialog_visible():
 		empire_ui.refresh(state)
 	_refresh_match_result(state)
+	var speed_started: int = Time.get_ticks_usec() if _profiling_publication else 0
 	developer_tools.refresh_speed(state)
+	if _profiling_publication:
+		publication_profile["developer_speed"] = float(Time.get_ticks_usec() - speed_started) / 1000.0
 	menu_exit.text = "Main menu" if bool(session.get("is_solo")) else ("Return to lobby" if multiplayer.is_server() else "Leave match")
 	if phase == "loading" and multiplayer.is_server():
 		menu_exit.text = "Cancel start"
@@ -4210,15 +4216,31 @@ func _sync_tactical_alerts(state: Dictionary) -> void:
 		return
 	alert_tracker.sync(state, _me(), Time.get_ticks_msec(), territory_view.region_graph, territory_view.friendly_sectors, _alert_off_camera, _ship_visible, _ship_kind_name, _poi_name, Callable(sound_mixer, "play_cue"))
 
+var publication_profile: Dictionary = {}
+var _profiling_publication: bool = false
+
 func _on_economy_changed() -> void:
+	publication_profile.clear()
+	_profiling_publication = true
 	var state: Dictionary = _state()
+	var started: int = Time.get_ticks_usec()
 	_sync_upgrade_audio(state)
 	_sync_world_audio(state)
+	publication_profile["audio"] = float(Time.get_ticks_usec() - started) / 1000.0
+	started = Time.get_ticks_usec()
 	_refresh_territory(state)
+	publication_profile["territory_fog"] = float(Time.get_ticks_usec() - started) / 1000.0
+	started = Time.get_ticks_usec()
 	_sync_tactical_alerts(state)
 	notice_ui.sync_history(state, alert_tracker.alerts)
+	publication_profile["alerts_history"] = float(Time.get_ticks_usec() - started) / 1000.0
+	started = Time.get_ticks_usec()
 	ship_motion.sync(state, session)
+	publication_profile["motion"] = float(Time.get_ticks_usec() - started) / 1000.0
+	started = Time.get_ticks_usec()
 	_refresh()
+	publication_profile["inspector"] = float(Time.get_ticks_usec() - started) / 1000.0
+	_profiling_publication = false
 
 func _input(event: InputEvent) -> void:
 	if empire_ui.war_confirmation_visible():
