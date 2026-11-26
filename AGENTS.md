@@ -1,5 +1,7 @@
 # Warbound — standing project instructions
 
+- v0.106.0: Indexed completed wall segments block non-permitted movement and non-allied weapon fire; neutral walls absorb without damage, hostile walls take intercepted hits. Blaster, laser, missiles (including splash), railgun, cannon, pirate, station and PDS paths integrated. Drag now uses full-length segments then remainder. No pathfinding detour; runtime, laser visual endpoint polish and peer validation pending.
+
 - v0.105.0: Physical wall construction: Z click node or drag connected chain (450 max segment length, 24 per drag, endpoint snap 40), independent node/segment recipes and HP (1800/3200), atomic shadow-stock reservation, geometry/rock checks, node removal cascades segments, no crew/territory, preview/render and Codex. Wall interception not enabled yet; actual movement/weapon pass next. Runtime and real ENet pending.
 
 - v0.104.0: Defense Cannon uses shared physical construction, fixed anchored structure, three levels (1000/1750/2700 HP, 80/140/220 damage, 600/800/1000 range, 2-year cooldown); upgrades reserve material and preserve previous level while supplied; cancel upgrade retains existing cannon. Hostile visible targets only, simultaneous damage, cannon beam, constructor I/O commands use unused patrol/repair slots, Codex. Static HP display and Construction Ship empire count fixed. Runtime/ENet pending; wall interception and freight automation remain.
