@@ -212,6 +212,9 @@ var ship_population: Label
 var colony_morph_progress: ProgressBar
 var fleet_scroll: ScrollContainer
 var fleet_overview: VBoxContainer
+var depot_controls: VBoxContainer
+var depot_policy_rows: Dictionary = {}
+var depot_policy_id: int = -1
 var fleet_title: Label
 var fleet_detail: Label
 var hold_button: Button
@@ -647,6 +650,7 @@ func _build_fleet_and_yard_cards(body: VBoxContainer, selection_content: VBoxCon
 	fleet_detail = _label("", 14)
 	ship_overview.add_child(fleet_detail)
 	_build_command_card(fleet_overview)
+	_build_depot_controls(fleet_overview)
 	_build_yard_command_card(body)
 	fleet_cargo_footer = HBoxContainer.new()
 	selection_content.add_child(fleet_cargo_footer)
@@ -666,6 +670,64 @@ func _build_fleet_and_yard_cards(body: VBoxContainer, selection_content: VBoxCon
 	fleet_cargo_footer.hide()
 	_build_field_command_card(fleet_overview)
 
+
+func _build_depot_controls(parent: VBoxContainer) -> void:
+	depot_controls = VBoxContainer.new()
+	parent.add_child(depot_controls)
+	depot_controls.add_child(_label("Automatic logistics", 13))
+	for resource in ECONOMY.RESOURCES:
+		depot_controls.add_child(_label(resource, 11))
+		var rows: Dictionary = {}
+		for key in ["receive", "dispatch"]:
+			var row := HBoxContainer.new()
+			depot_controls.add_child(row)
+			var check := CheckBox.new()
+			check.text = "Receive up to" if key == "receive" else "Dispatch above"
+			check.add_theme_font_size_override("font_size", 10)
+			_compact_trade_check(check)
+			check.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(check)
+			var percent := SpinBox.new()
+			percent.min_value = 0.0
+			percent.max_value = 100.0
+			percent.step = 1.0
+			percent.suffix = "%"
+			row.add_child(percent)
+			rows[key] = {"check": check, "percent": percent}
+			check.toggled.connect(_depot_policy_changed.bind(resource, key))
+			percent.value_changed.connect(_depot_policy_changed.bind(resource, key))
+		depot_policy_rows[resource] = rows
+	depot_controls.hide()
+
+func _refresh_depot_controls(ship: Dictionary, phase: String) -> void:
+	var available: bool = selected_units.size() == 1 and ship.get("kind", "") == "resource_depot" and int(ship.get("owner", 0)) == _me() and ECONOMY.static_complete(ship) and phase == "match"
+	depot_controls.visible = available
+	var id: int = int(ship.get("id", -1)) if available else -1
+	var changed: bool = depot_policy_id != id
+	depot_policy_id = id
+	if not available:
+		return
+	for resource in ECONOMY.RESOURCES:
+		var policy: Dictionary = ECONOMY.depot_policy(ship, resource)
+		for key in ["receive", "dispatch"]:
+			var controls: Dictionary = depot_policy_rows[resource][key]
+			var percent: SpinBox = controls["percent"]
+			controls["check"].set_pressed_no_signal(bool(policy[key]))
+			if changed or not percent.get_line_edit().has_focus():
+				percent.set_value_no_signal(float(policy["ceiling" if key == "receive" else "floor"]))
+
+func _depot_policy_changed(_value: Variant, resource: String, key: String) -> void:
+	if depot_policy_id < 0 or not depot_controls.visible:
+		return
+	var rows: Dictionary = depot_policy_rows[resource]
+	var floor_control: SpinBox = rows["dispatch"]["percent"]
+	var ceiling_control: SpinBox = rows["receive"]["percent"]
+	if floor_control.value > ceiling_control.value:
+		if key == "receive":
+			floor_control.set_value_no_signal(ceiling_control.value)
+		else:
+			ceiling_control.set_value_no_signal(floor_control.value)
+	session.call("request_depot_policy", depot_policy_id, resource, floor_control.value, ceiling_control.value, rows["receive"]["check"].button_pressed, rows["dispatch"]["check"].button_pressed)
 
 func _build_station_overview() -> void:
 	var system_header := HBoxContainer.new()
@@ -2823,6 +2885,7 @@ func _refresh() -> void:
 	fleet_scroll.visible = other_selected
 	fleet_overview.visible = other_selected
 	field_command_grid.visible = field_selected
+	_refresh_depot_controls(ship, phase)
 	fleet_title.visible = other_selected
 	fleet_detail.visible = other_selected
 	fleet_cargo_footer.hide()
@@ -5020,10 +5083,10 @@ func _draw_map_content() -> void:
 		for emitter in range(weapons.size()):
 			var weapon: Dictionary = weapons[emitter]
 			var target: int = int(weapon["target"])
-			if not poses.has(target) or float(weapon["laser_until"]) < float(state["elapsed"]):
+			if (not poses.has(target) and not weapon.has("wall_laser_endpoint")) or float(weapon["laser_until"]) < float(state["elapsed"]):
 				continue
 			var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, float(state["elapsed"])))
-			var endpoint: Vector2 = poses[target]["point"]
+			var endpoint: Vector2 = _screen_point(weapon["wall_laser_endpoint"]) if weapon.has("wall_laser_endpoint") else poses[target]["point"]
 			var offset: Vector2 = center.direction_to(endpoint).orthogonal() * (float(emitter) * 2.0 - float(weapons.size() - 1)) * 4.0 * _ship_scale(true)
 			_draw_owned_laser(center + offset, endpoint, int(system["owner"]), 1.5)
 		var defenses: Dictionary = state["planets"][index].get("pds", {})
@@ -5033,12 +5096,13 @@ func _draw_map_content() -> void:
 		for slot in defenses:
 			var battery: Dictionary = defenses[slot]
 			var target: int = int(battery["target"])
-			if not poses.has(target) or float(battery["laser_until"]) < float(state["elapsed"]):
+			if (not poses.has(target) and not battery.has("wall_laser_endpoint")) or float(battery["laser_until"]) < float(state["elapsed"]):
 				continue
 			var origin: Vector2 = _screen_point(points[index])
 			if celestial_view.planet_detail_opacity(index, radius) >= 0.5:
 				origin += celestial_view.body_position(celestial_view.system_visual(index, state)["bodies"][slot], radius, celestial_view.orbit_time(state))
-			_draw_owned_laser(origin, poses[target]["point"], int(state["planets"][index]["owner"]), 2.0)
+			var endpoint: Vector2 = _screen_point(battery["wall_laser_endpoint"]) if battery.has("wall_laser_endpoint") else poses[target]["point"]
+			_draw_owned_laser(origin, endpoint, int(state["planets"][index]["owner"]), 2.0)
 	for ship in state["ships"]:
 		var shooter: int = int(ship["id"])
 		if not poses.has(shooter):
@@ -5069,7 +5133,10 @@ func _draw_map_content() -> void:
 				world_batches.queue_projectile(tip, 2.0, Color("#fff2d2"))
 		var target: int = int(ship.get("combat_target", -1))
 		var yard_target: int = int(ship.get("yard_target", -1))
-		if poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
+		var wall_beam: bool = ship.has("wall_laser_endpoint") and float(ship.get("wall_laser_until", -1.0)) >= float(state["elapsed"])
+		if wall_beam:
+			pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), _screen_point(ship["wall_laser_endpoint"]), 1.5 if yard_target < -1 else 1.0)
+		if not wall_beam and poses.has(shooter) and yard_target < -1 and float(ship.get("yard_laser_until", -1.0)) >= float(state["elapsed"]):
 			var encoded: int = -2 - yard_target
 			var count: int = (state["planets"] as Array).size()
 			if encoded < count * 3:
@@ -5090,7 +5157,7 @@ func _draw_map_content() -> void:
 					if celestial_view.planet_detail_opacity(pds_index, pds_radius) >= 0.5:
 						endpoint += celestial_view.body_position(celestial_view.system_visual(pds_index, state)["bodies"][pds_slot], pds_radius, celestial_view.orbit_time(state))
 					pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), endpoint, 1.5)
-		if poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
+		if not wall_beam and poses.has(shooter) and poses.has(target) and float(ship.get("laser_until", 0.0)) >= float(state["elapsed"]):
 			pose_overrides[shooter] = _draw_ship_laser(ship, pose_overrides.get(shooter, poses[shooter]), poses[target]["point"], 1.0)
 		if bool(ship.get("retreating", false)) and poses.has(shooter) and (ship["route"] as Array).is_empty():
 			var site: int = int(ship.get("repair_site", -1))

@@ -1,5 +1,17 @@
 # Warbound — standing project instructions
 
+- v0.111.1: Extend bounded detour search to additional blocking disconnected components, retaining wall clipping and deterministic search order. Added staggered-wall semantic assertion. Static review only; runtime/performance/peer checks remain.
+
+- v0.111.0: Owned completed depots expose per-resource receive/dispatch switches and ceiling/floor controls in the existing selection wing. Default full/zero preserves original auto trade; manual cargo unchanged, loaded surplus rerouted physically. Owner and finite range validation through host/worker command; semantic assertions added, runtime and peer validation pending.
+
+- v0.110.0: Reconcile recipe minus delivered material, station escrow and actual cargo on active assigned hulls every four game years while a constructor works; reserve only missing stock, permit partial replenishment, preserve salvage and interrupted cargo. Keep viable site assignments stable, release invalid freight, route excess cargo to owned storage. Focused destruction/interruption/duplicate-debit fixtures added; runtime and real peer validation pending.
+
+- v0.109.0: Use deterministic nearest-first per-station escrow for all static sites, upgrades and atomic wall chains; physical pickups debit only the chosen source. Cancel/refund each origin independently and drop lost station escrow at destruction. Added split-stock and atomic rejection fixtures. Lost transit supply recovery and runtime/ENet pending.
+
+- v0.108.0: Use bounded deterministic visibility graph detours around connected wall ends and corners, stagger route planning across four hulls per simulation step, preserve final swept clipping and existing navigation target. Focused geometry fixtures added; large/complex components, mixed rocks, runtime, performance and real ENet pending.
+
+- v0.107.1: Use authoritative wall impact endpoints for ship, station and PDS beams; prevent duplicate beams through walls. Correct outdated Codex descriptions of walls and freight. Visual/runtime/ENet validation pending.
+
 - v0.107.0: Idle trade-enabled freighters can collect site escrow from source stations, rendezvous with an active constructor, and hand over resources; only constructors advance construction. Automated depot routes transfer station export surplus into owned depots and fulfill station import demand from depot stock. Manual orders clear autonomous freight jobs, preserving carried cargo. Same-owner only; no depot policy UI; multi-source per-site escrow and lost cargo recovery remain follow-up. Runtime and peer validation pending.
 
 - v0.106.0: Indexed completed wall segments block non-permitted movement and non-allied weapon fire; neutral walls absorb without damage, hostile walls take intercepted hits. Blaster, laser, missiles (including splash), railgun, cannon, pirate, station and PDS paths integrated. Drag now uses full-length segments then remainder. No pathfinding detour; runtime, laser visual endpoint polish and peer validation pending.

@@ -1227,6 +1227,27 @@ func _thresholds_for(id: int, index: int, resource: String, minimum: float, maxi
 	elif ECONOMY.authority_thresholds_for(economy, id, index, resource, minimum, maximum, importing, exporting):
 		_publish_economy()
 
+func request_depot_policy(depot_id: int, resource: String, floor_percent: float, ceiling_percent: float, receive: bool, dispatch: bool) -> void:
+	if phase != "match":
+		return
+	if is_solo or multiplayer.is_server():
+		_depot_policy_for(1, depot_id, resource, floor_percent, ceiling_percent, receive, dispatch)
+	else:
+		_rpc_depot_policy.rpc_id(1, depot_id, resource, floor_percent, ceiling_percent, receive, dispatch)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_depot_policy(depot_id: int, resource: String, floor_percent: float, ceiling_percent: float, receive: bool, dispatch: bool) -> void:
+	if multiplayer.is_server():
+		_depot_policy_for(multiplayer.get_remote_sender_id(), depot_id, resource, floor_percent, ceiling_percent, receive, dispatch)
+
+func _depot_policy_for(id: int, depot_id: int, resource: String, floor_percent: float, ceiling_percent: float, receive: bool, dispatch: bool) -> void:
+	if not _match_peer(id):
+		return
+	if threaded_authority_active:
+		_dispatch_authority_command("authority_depot_policy_for", [id, depot_id, resource, floor_percent, ceiling_percent, receive, dispatch])
+	elif ECONOMY.authority_depot_policy_for(economy, id, depot_id, resource, floor_percent, ceiling_percent, receive, dispatch):
+		_publish_economy()
+
 func request_mining_policy(index: int, enabled: bool, metals: bool, crystals: bool) -> void:
 	if phase != "match":
 		return
