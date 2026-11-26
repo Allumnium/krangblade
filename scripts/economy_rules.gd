@@ -7216,7 +7216,13 @@ static func system_presence_weight(system: Dictionary) -> int:
 static func ship_presence_weight(ship: Dictionary) -> int:
 	return int(SHIP_INFLUENCE.get(ship["kind"], BUILDING_INFLUENCE if ship["kind"] == "warp_gate" else 1))
 
-static func territory_influence(state: Dictionary, graph: Dictionary, known_pois: Variant = null, region_cache: Dictionary = {}) -> Array[Dictionary]:
+static func territory_influence(state: Dictionary, graph: Dictionary, known_pois: Variant = null, region_cache: Dictionary = {}, spill_cache: Variant = null) -> Array[Dictionary]:
+	# The optional client-only cache belongs to a single graph. The
+	# authoritative navigation caller keeps the original uncached path.
+	if spill_cache != null and not is_same(spill_cache.get("graph"), graph):
+		spill_cache.clear()
+		region_cache.clear()
+		spill_cache["graph"] = graph
 	var result: Array[Dictionary] = []
 	for i in range(int(highway_regions(graph)["size"])):
 		result.append({})
@@ -7258,7 +7264,26 @@ static func territory_influence(state: Dictionary, graph: Dictionary, known_pois
 				var edge: Array = graph["edges"][layout["region_edges"][i - graph["points"].size()]]
 				known = known_pois.has(int(edge[0])) and known_pois.has(int(edge[1]))
 			visible.append(known)
-	return influence_spillover(result, sector_geometry(graph)["links"], visible)
+	if spill_cache == null:
+		return influence_spillover(result, sector_geometry(graph)["links"], visible)
+	# Movement within a region need not invalidate spillover. Exact direct
+	# totals, visibility and owner iteration order are the complete inputs.
+	if spill_cache.get("direct") == result and spill_cache.get("visible") == visible:
+		var same_order: bool = true
+		for i in range(result.size()):
+			if result[i].keys() != spill_cache["direct"][i].keys():
+				same_order = false
+				break
+		if same_order:
+			return spill_cache["weights"]
+	var weights: Array[Dictionary] = influence_spillover(result, sector_geometry(graph)["links"], visible)
+	for region_weights in weights:
+		region_weights.make_read_only()
+	weights.make_read_only()
+	spill_cache["direct"] = result
+	spill_cache["visible"] = visible
+	spill_cache["weights"] = weights
+	return weights
 
 # Use only direct influence to decide direction and transfer amounts.
 # Incoming points never propagate again or change eligibility in this pass.

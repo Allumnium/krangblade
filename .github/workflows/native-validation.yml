@@ -1,0 +1,111 @@
+name: Native kernel validation
+
+# Keep validation explicitly manual during the optimization closeout.
+on:
+  workflow_dispatch:
+
+jobs:
+  native:
+    name: Native ${{ matrix.platform }} x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            library: native/bin/libwarbound_kernels.so
+          - os: windows-latest
+            platform: windows
+            library: native/bin/warbound_kernels.dll
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+      - name: Build pinned native library
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install scons==4.11.1
+          git init native/godot-cpp
+          git -C native/godot-cpp remote add origin https://github.com/godotengine/godot-cpp.git
+          git -C native/godot-cpp fetch --depth 1 origin 7fd5c4bc3efda6487fd6e6486c50016faa622f92
+          git -C native/godot-cpp checkout --detach FETCH_HEAD
+          (cd native && scons platform=${{ matrix.platform }} target=template_release arch=x86_64 build_profile=build_profile.json -j4)
+          test -f "${{ matrix.library }}"
+          cp native/warbound_kernels.gdextension.example native/warbound_kernels.gdextension
+      - name: Import and validate native/reference parity
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, subprocess
+          flag = "--warbound-native-kernels"
+          def run(args, required=()):
+              result = subprocess.run(["godot", "--headless", "--path", ".", *args], text=True, capture_output=True, timeout=180)
+              output = result.stdout + "\n" + result.stderr
+              print(output, flush=True)
+              if result.returncode or any(x in output for x in ("SCRIPT ERROR:", "Assertion failed", "Parse Error:")) or not all(x in output for x in required):
+                  raise SystemExit("Godot validation failed: " + str(args))
+              return output
+          run(["--editor", "--import", "--quit"])
+          run(["--script", "res://tests/economy_rules_test.gd", "--", "--native-kernels-only", flag],
+              ("PASS: optional native targeting parity", "PASS: optional native contact batch", "PASS: optional native separation", "PASS: optional native steering blocker"))
+          run(["--script", "res://tests/authority_worker_test.gd", "--", flag], ("PASS:",))
+          run(["--script", "res://tests/solo_smoke.gd", "--", flag], ("PASS:",))
+          args = ["--script", "res://tests/determinism_probe.gd", "--", "--scenario=battle", "--ticks=100", "--every=50"]
+          def checkpoints(extra):
+              output = run(args + extra)
+              records = [json.loads(line[len("DETERMINISM "):]) for line in output.splitlines() if line.startswith("DETERMINISM ")]
+              if [record["tick"] for record in records] != [50, 100]:
+                  raise SystemExit("Missing battle replay checkpoints")
+              return records
+          if checkpoints([]) != checkpoints([flag]):
+              raise SystemExit("Native/reference battle replay mismatch")
+          PY
+      - name: Two-peer threaded native ENet
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, subprocess, tempfile, time
+          base = ["godot", "--headless", "--max-fps", "60", "--path", ".", "--script", "res://tests/network_smoke.gd", "--"]
+          with tempfile.TemporaryDirectory() as folder:
+              processes = []
+              streams = []
+              try:
+                  for role, args in (("host", ["host", "2", "threaded"]), ("client", ["client", "2", "1", "threaded"])):
+                      path = pathlib.Path(folder) / (role + ".log")
+                      stream = path.open("w", encoding="utf-8")
+                      streams.append(stream)
+                      process = subprocess.Popen(base + args + ["--warbound-native-kernels"], stdout=stream, stderr=subprocess.STDOUT)
+                      processes.append((process, path))
+                      if role == "host":
+                          time.sleep(2)
+                  for process, path in processes:
+                      result = process.wait(timeout=90)
+                      output = path.read_text(encoding="utf-8", errors="replace")
+                      print(output, flush=True)
+                      if result or "PASS: network" not in output or "SCRIPT ERROR:" in output or "Assertion failed" in output:
+                          raise SystemExit("Native ENet validation failed")
+              finally:
+                  for process, path in processes:
+                      if process.poll() is None:
+                          process.kill()
+                          process.wait()
+                  for stream in streams:
+                      stream.close()
+          PY
+      - name: Upload validated optional native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: warbound-native-${{ matrix.platform }}-x86_64
+          path: |
+            ${{ matrix.library }}
+            native/warbound_kernels.gdextension
+          if-no-files-found: error

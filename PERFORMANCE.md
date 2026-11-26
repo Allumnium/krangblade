@@ -342,3 +342,17 @@ Linux Godot 4.7.2, software OpenGL Xvfb/llvmpipe, same instrumented live benchma
 | 400 | Cached | 6.007 | 9.618 | 5.790 | 2.181 | 21.963 | 107.820 | 9.06 |
 
 Times in ms; fog subphases overlap the total fog timing and should not be added to it. Median fog changes modestly; reference 400-hull tail spikes make magnitude uncertain. Software rendering is diagnostic, not hardware or real-peer FPS acceptance. Focused exact vision union, detached cache, changing coverage pixel alpha and unchanged-coverage live observation regression passed; import, worker, solo and two-peer threaded ENet passed. 50/100-tick battle checkpoints match v0.97.100 exactly (2283687648 / 2608373067). Solo still reports two ObjectDB exit leaks. Full economy and 3/8-peer tests not rerun.
+
+
+## v0.97.102 — bounded snapshot and territory closeout
+
+Snapshot-only A/B, before territory cache, Godot 4.7.2 Linux, Xeon Platinum 8573C (5 logical CPUs), llvmpipe software OpenGL/Xvfb, 1280x720, zoom 5, seed 827, solo allied fighter swarm, 1x, native enabled, 120 frames. All values ms except batches/s.
+
+| Ships | Copy p50 old/new | Copy p95 old/new | Publication p95 old/new | Frame p95 old/new | Batches/s old/new |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 2.322 / 1.494 | 8.240 / 6.428 | 21.588 / 15.053 | 142.279 / 62.006 | 9.15 / 10.02 |
+| 400 | 4.562 / 4.443 | 8.323 / 5.974 | 26.188 / 25.741 | 108.527 / 117.733 | 8.53 / 8.38 |
+
+100-ship baseline had severe spikes; 400-ship overall frame tail and throughput worsened. Copy improvement is measurable, global FPS improvement is not established. Territory spillover tested for exact parity and invalidation, not separately timed. No hardware FPS acceptance.
+
+v0.97.102 (optimization implementation closeout): Reuse a detached recursively read-only map in worker publications while exact map values match; mutable gameplay records remain independently copied. Ore/geometry edits replace the map and worker stop clears it. Client territory reuses identical spillover inputs with graph identity, visibility, direct region sums and key order checks; authoritative uncached path unchanged. Full native-enabled economy, focused territory and snapshot lifecycle, import, lobby, construction, fog, speed, snapshot codec, worker, solo, exact native/reference 50/100-tick battle hashes, and 2/4/8-peer threaded ENet gameplay checks pass on Linux Godot 4.7.2. ObjectDB warnings and post-round packet-send errors remain. Snapshot-only live software-rendered A/B at 100/400 ships improves copy p95 8.240→6.428 / 8.323→5.974 ms; no standalone territory timing or hardware FPS acceptance. Manual pinned Windows/Linux native workflow prepared, not run; native remains opt-in. Stop speculative optimization implementation; retain validation and measured regression fixes only. Defer broader packed authority, prediction/scheduling, GPU, replication and multicore redesigns until realistic profiling justifies them.

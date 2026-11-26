@@ -10,6 +10,9 @@ var _wake := Semaphore.new()
 var _request: Dictionary = {}
 var _result: Dictionary = {}
 var _stopping: bool = false
+# A detached, recursively read-only map copy may be shared by published
+# snapshots. Only the worker reads or replaces this reference while active.
+var _snapshot_map: Dictionary = {}
 # Main-thread-only bookkeeping; never read on the worker.
 var _in_flight: bool = false
 
@@ -102,6 +105,7 @@ func stop() -> void:
 	_thread = null
 	_request = {}
 	_result = {}
+	_snapshot_map = {}
 	_in_flight = false
 
 func _run(state: Dictionary) -> void:
@@ -124,6 +128,32 @@ func _run(state: Dictionary) -> void:
 			_result = result
 		_mutex.unlock()
 
+# No mutable authority container crosses the mailbox. Freeze only the map
+# copy, not the live map; ore changes create a new detached version. The
+# other gameplay records remain independent mutable copies as before.
+func _freeze_map_values(value: Variant) -> void:
+	if value is Dictionary:
+		for child in value.values():
+			_freeze_map_values(child)
+		value.make_read_only()
+	elif value is Array:
+		for child in value:
+			_freeze_map_values(child)
+		value.make_read_only()
+
+func _copy_snapshot(state: Dictionary) -> Dictionary:
+	var live_map: Dictionary = state["map"]
+	if not _snapshot_map.is_read_only() or _snapshot_map != live_map:
+		_snapshot_map = live_map.duplicate(true)
+		_freeze_map_values(_snapshot_map)
+	var snapshot: Dictionary = state.duplicate()
+	for key in state:
+		if key == "map":
+			snapshot[key] = _snapshot_map
+		elif state[key] is Dictionary or state[key] is Array:
+			snapshot[key] = state[key].duplicate(true)
+	return snapshot
+
 func _execute(state: Dictionary, job: Dictionary) -> Dictionary:
 	var result: Dictionary = {"kind": job["kind"], "thread_id": OS.get_thread_caller_id()}
 	if job["kind"] == "command":
@@ -131,7 +161,7 @@ func _execute(state: Dictionary, job: Dictionary) -> Dictionary:
 		var accepted: bool = bool(_rules.callv(str(job["method"]), [state] + job["args"]))
 		result["accepted"] = accepted
 		if accepted:
-			result["snapshot"] = state.duplicate(true)
+			result["snapshot"] = _copy_snapshot(state)
 		return result
 	var dt: float = float(job["dt"])
 	state["objective_clock"] = float(state.get("objective_clock", 0.0)) + dt
@@ -143,7 +173,7 @@ func _execute(state: Dictionary, job: Dictionary) -> Dictionary:
 	for i in range(speed):
 		if bool(_rules.call("advance_authority_substep", state, dt, profile)):
 			var urgent_copy_started: int = Time.get_ticks_usec()
-			urgent.append(state.duplicate(true))
+			urgent.append(_copy_snapshot(state))
 			snapshot_usec += Time.get_ticks_usec() - urgent_copy_started
 			if not state["match_result"].is_empty():
 				break
@@ -153,7 +183,7 @@ func _execute(state: Dictionary, job: Dictionary) -> Dictionary:
 	result["speed"] = speed
 	result["urgent"] = urgent
 	var copy_started: int = Time.get_ticks_usec()
-	result["snapshot"] = state.duplicate(true)
+	result["snapshot"] = _copy_snapshot(state)
 	snapshot_usec += Time.get_ticks_usec() - copy_started
 	result["snapshot_ms"] = float(snapshot_usec) / 1000.0
 	return result

@@ -42,7 +42,26 @@ func _reference_tick(state: Dictionary, dt: float) -> void:
 		if ECON.advance_authority_substep(state, dt) and not state["match_result"].is_empty():
 			break
 
+func _test_snapshot_map_reuse() -> void:
+	var worker = WORKER.new()
+	var source: Dictionary = {"map": {"points": [Vector2.ZERO], "fields": [{"chunks": [{"id": 1, "remaining": 10.0}]}]}, "ships": [{"id": 1, "hp": 10.0}]}
+	var first: Dictionary = worker._copy_snapshot(source)
+	var second: Dictionary = worker._copy_snapshot(source)
+	_check(first == source and second == source, "map copy differs from reference")
+	_check(is_same(first["map"], second["map"]), "unchanged map was copied again")
+	_check(first["map"].is_read_only() and first["map"]["fields"].is_read_only() and first["map"]["fields"][0]["chunks"][0].is_read_only(), "published nested map can be mutated")
+	_check(not source["map"].is_read_only() and not source["map"]["fields"][0]["chunks"][0].is_read_only(), "live map was frozen")
+	second["ships"][0]["hp"] = 5.0
+	_check(first["ships"][0]["hp"] == 10.0 and source["ships"][0]["hp"] == 10.0, "mutable gameplay records shared")
+	source["map"]["fields"][0]["chunks"][0]["remaining"] = 9.0
+	var changed: Dictionary = worker._copy_snapshot(source)
+	_check(changed == source and not is_same(changed["map"], first["map"]), "ore change did not replace cached map")
+	_check(first["map"]["fields"][0]["chunks"][0]["remaining"] == 10.0, "old snapshot ore changed")
+	source["map"]["fields"][0]["chunks"].clear()
+	_check(worker._copy_snapshot(source) == source and changed["map"]["fields"][0]["chunks"].size() == 1, "rock removal leaked into previous map")
+
 func _run() -> void:
+	_test_snapshot_map_reuse()
 	var roster: Dictionary = _roster()
 	var initial: Dictionary = ECON.create(MAP.generate(827, 2, "Grid"), roster, [1, 2])
 	ECON.initialize_diplomacy(initial)

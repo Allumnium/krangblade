@@ -6575,6 +6575,29 @@ func _test_territory_influence() -> void:
 	assert(added[2].is_empty() and added[3] == raw[3] and added[4] == raw[4])
 	assert(added[5] == {1: 22.5, 2: 30.0} and added[6] == raw[6])
 	assert(raw[1] == {2: 49} and raw[5] == {2: 25})
+	# Client-only spillover cache: same region motion reuses exact output,
+	# but every changed contribution and discovery boundary remains live.
+	var known: Dictionary = {0: true, 1: true, 2: true, 3: true}
+	var regions: Dictionary = {}
+	var spill: Dictionary = {}
+	var first: Array[Dictionary] = ECON.territory_influence(state, graph, known, regions, spill)
+	assert(first == ECON.territory_influence(state, graph, known))
+	assert(first.is_read_only() and first[0].is_read_only())
+	state["ships"][0]["position"] += Vector2(1, 1)
+	var same: Array[Dictionary] = ECON.territory_influence(state, graph, known, regions, spill)
+	assert(is_same(first, same) and same == ECON.territory_influence(state, graph, known))
+	for change in range(7):
+		match change:
+			0: state["ships"][0]["position"] = geometry["sites"][2]
+			1: state["ships"][0]["owner"] = 2
+			2: state["ships"][0]["hp"] = 0.0
+			3: state["ships"].pop_back()
+			4: home["yards"].clear()
+			5: known.erase(1)
+			6: graph = graph.duplicate(true)
+		var cached: Array[Dictionary] = ECON.territory_influence(state, graph, known, regions, spill)
+		var reference: Array[Dictionary] = ECON.territory_influence(state, graph, known)
+		assert(cached == reference and var_to_str(cached) == var_to_str(reference))
 	print("PASS: physical sector/highway influence, infrastructure, normalized mixed colors, saturation cap, one-hop spillover and snapshot parity")
 
 func _test_conquest() -> void:
