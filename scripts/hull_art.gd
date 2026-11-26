@@ -6,6 +6,7 @@ const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(23, 4), Vector2(19, 8), Vecto
 # coordinates (forward, lateral). Freighter has five paired cargo rows.
 const HULL_OUTLINES: Dictionary = {
 	"construction_ship": [Vector2(22, -10), Vector2(12, -10), Vector2(12, -5), Vector2(-18, -10), Vector2(-24, -5), Vector2(-24, 5), Vector2(-18, 10), Vector2(12, 5), Vector2(12, 10), Vector2(22, 10), Vector2(16, 0)],
+	"defense_cannon": [Vector2(25, -8), Vector2(25, 8), Vector2(10, 8), Vector2(8, 20), Vector2(-15, 20), Vector2(-22, 10), Vector2(-22, -10), Vector2(-15, -20), Vector2(8, -20), Vector2(10, -8)],
 	"resource_depot": [Vector2(22, -16), Vector2(28, -8), Vector2(28, 8), Vector2(22, 16), Vector2(-22, 16), Vector2(-28, 8), Vector2(-28, -8), Vector2(-22, -16)],
 	"probe": [Vector2(8, 0), Vector2(3, 5), Vector2(-4, 5), Vector2(-7, 0), Vector2(-4, -5), Vector2(3, -5)],
 	"railgun_ship": [Vector2(33, 0), Vector2(27, 3), Vector2(9, 3), Vector2(6, 9), Vector2(-12, 12), Vector2(-26, 9), Vector2(-30, 5), Vector2(-30, -5), Vector2(-26, -9), Vector2(-12, -12), Vector2(6, -9), Vector2(9, -3), Vector2(27, -3)],
@@ -19,6 +20,7 @@ const HULL_OUTLINES: Dictionary = {
 }
 const HULL_PANELS: Dictionary = {
 	"construction_ship": [[Color("#d6ad6f"), [Vector2(17, -8), Vector2(9, -8), Vector2(-16, -5), Vector2(-16, 5), Vector2(9, 8), Vector2(17, 8), Vector2(8, 0)]]],
+	"defense_cannon": [[Color("#b6c2cf"), [Vector2(22, -5), Vector2(22, 5), Vector2(-11, 5), Vector2(-11, -5)]], [Color("#745b3c"), [Vector2(5, -15), Vector2(5, 15), Vector2(-15, 15), Vector2(-15, -15)]]],
 	"resource_depot": [[Color("#a2b5c9"), [Vector2(20, -12), Vector2(20, 12), Vector2(-20, 12), Vector2(-20, -12)]], [Color("#40546a"), [Vector2(12, -8), Vector2(12, 8), Vector2(-12, 8), Vector2(-12, -8)]]],
 	"probe": [[Color("#9bd9dc"), [Vector2(6, 0), Vector2(1, 3), Vector2(-4, 0), Vector2(1, -3)]]],
 	"railgun_ship": [[Color("#98b8d0"), [Vector2(31, 0), Vector2(8, 2), Vector2(-18, 3), Vector2(-18, -3), Vector2(8, -2)]], [Color("#384d63"), [Vector2(5, 7), Vector2(-12, 10), Vector2(-26, 7), Vector2(-26, -7), Vector2(-12, -10), Vector2(5, -7)]], [Color("#b5dfff"), [Vector2(27, 1), Vector2(3, 1), Vector2(3, -1), Vector2(27, -1)]]],

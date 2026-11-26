@@ -429,6 +429,12 @@ func _ships() -> void:
 	_table(["Ship", "Class", "Cost", "Crew", "Time (min. yard)"], rows)
 	_section("Construction Ships and depots")
 	_body("Select a Construction Ship, Build Resource Depot (F), then click a valid map position. Materials are reserved at one owned station; nearby constructors haul them physically. Cancel unfinished work (Y) then select the site; undelivered source stock is refunded and delivered materials become salvage. Completed depots have no crew or territory influence. Freighters and constructors use Load (L) and Drop Cargo (D) to collect and deposit at completed owned depots. Each resource has an independent fixed capacity: 2000 Metals, 4000 Organics, 500 Crystals and 2 antimatter.")
+	_section("Defense Cannons")
+	_body("Construction Ships use Build Cannon (I) to place a static defense cannon and Upgrade Cannon (O) to select a completed cannon below level III. Physical resource delivery completes upgrades; the previous level remains operational during upgrades. Cannons fire automatically at hostile visible targets only, with no crew or territory influence.")
+	var cannon_rows: Array = []
+	for level in range(1, 4):
+		cannon_rows.append([str(level), _recipe(E.static_recipe("defense_cannon", level), ""), "%.0f" % E.CANNON_HP[level - 1], "%.0f" % E.CANNON_DAMAGE[level - 1], "%.0f" % E.CANNON_RANGE[level - 1]])
+	_table(["Level", "Materials", "HP", "Damage", "Range"], cannon_rows)
 	_section("Annual upkeep")
 	rows = []
 	for kind in E.SHIP_KINDS:

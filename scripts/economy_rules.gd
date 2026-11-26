@@ -209,7 +209,11 @@ const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "
 const CONSTRUCTION_SHIP_CAPACITY: float = 180.0
 const DEPOT_REFERENCE_BUDGET: float = 4000.0
 const DEPOT_ANTIMATTER_CAPACITY: float = 2.0
-const STATIC_SITE_KINDS = ["resource_depot"]
+const STATIC_SITE_KINDS = ["resource_depot", "defense_cannon"]
+const CANNON_HP = [1000.0, 1750.0, 2700.0]
+const CANNON_DAMAGE = [80.0, 140.0, 220.0]
+const CANNON_RANGE = [600.0, 800.0, 1000.0]
+const CANNON_COOLDOWN: float = 2.0
 const DEPOT_HP: float = 1200.0
 const SCIENCE_CAPACITY: float = 1.0
 const SCIENCE_COLLECTION_YEARS: float = 30.0
@@ -2672,7 +2676,7 @@ static func cargo_capacity(kind: String) -> float:
 	match kind:
 		"miner": return MINER_CAPACITY
 		"construction_ship": return CONSTRUCTION_SHIP_CAPACITY
-		"resource_depot": return 0.0
+		"resource_depot", "defense_cannon": return 0.0
 		"science_ship": return SCIENCE_CAPACITY
 		"fighter", "scout", "cruiser", "destroyer", "railgun_ship", "warp_gate", "probe": return 0.0
 		"colony_ship": return COLONY_CAPACITY
@@ -3457,7 +3461,7 @@ static func ship_speed(kind: String) -> float:
 		"destroyer": return FIGHTER_SPEED * 0.6
 		"railgun_ship": return FIGHTER_SPEED * 0.65
 		"construction_ship": return FREIGHTER_SPEED * 0.8
-		"resource_depot": return 0.0
+		"resource_depot", "defense_cannon": return 0.0
 	return SHIP_SPEED
 
 static func _waiting_berth(state: Dictionary, ship: Dictionary, center: Vector2, reach: float, preferred: Vector2) -> Vector2:
@@ -5362,7 +5366,7 @@ static func missile_count(kind: String) -> int:
 static func railgun_count(kind: String) -> int:
 	return 1 if kind in ["destroyer", "railgun_ship"] else 0
 
-const SHIP_MAX_HP = {"resource_depot": DEPOT_HP, "construction_ship": 500.0, "probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
+const SHIP_MAX_HP = {"resource_depot": DEPOT_HP, "construction_ship": 500.0, "defense_cannon": 1000.0, "probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
 const MILITARY_KINDS = ["fighter", "scout", "cruiser", "destroyer", "railgun_ship"]
 const ARMED_KINDS = ["fighter", "miner", "cruiser", "destroyer", "scout", "railgun_ship"]
 
@@ -5389,7 +5393,7 @@ static func _regenerate_structures(state: Dictionary, dt: float) -> void:
 			_regenerate_hull(battery, PDS_HP, dt)
 
 static func armed(ship: Dictionary) -> bool:
-	return (not bool(ship.get("rogue", false)) or int(ship.get("owner", 0)) == PIRATE_OWNER) and ship.get("kind", "") in ARMED_KINDS
+	return (not bool(ship.get("rogue", false)) or int(ship.get("owner", 0)) == PIRATE_OWNER) and (ship.get("kind", "") in ARMED_KINDS or (ship.get("kind", "") == "defense_cannon" and cannon_level(ship) > 0))
 
 # Stable hull IDs and the existing disjoint structure target IDs. HP lives
 # in the actual entity dictionary, so repair never creates a new entity.
@@ -5664,7 +5668,7 @@ static func supports_autocast(ship: Dictionary, mode: String) -> bool:
 		"trade": return ship.get("kind", "") == "ship"
 		"farm": return ship.get("kind", "") == "colony_ship"
 		"collect": return ship.get("kind", "") == "science_ship"
-		"retreat": return armed(ship)
+		"retreat": return not is_static_structure(ship) and armed(ship)
 	return false
 
 static func autocast_enabled(ship: Dictionary, mode: String) -> bool:
@@ -6630,8 +6634,12 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		return not append and order.get("target") is int and _warp_order_valid(state, ship, int(order["target"]))
 	if ship.get("kind", "") in ["warp_gate", "probe"] or is_static_structure(ship):
 		return false
-	if kind == "build_depot":
-		return not append and ship["kind"] == "construction_ship" and order.get("point") is Vector2 and _site_source(state, graph, owner, order["point"], "resource_depot") >= 0
+	if kind in ["build_depot", "build_cannon"]:
+		var structure: String = "resource_depot" if kind == "build_depot" else "defense_cannon"
+		return not append and ship["kind"] == "construction_ship" and order.get("point") is Vector2 and _site_source(state, graph, owner, order["point"], structure) >= 0
+	if kind == "upgrade_cannon":
+		var cannon: Dictionary = service_targets(state, int(order.get("target", -1))).get(int(order.get("target", -1)), {}).get("entity", {}) if order.get("target") is int else {}
+		return not append and ship["kind"] == "construction_ship" and cannon.get("kind", "") == "defense_cannon" and int(cannon.get("owner", 0)) == owner and static_complete(cannon) and cannon_level(cannon) < 3 and _site_source(state, graph, owner, cannon["position"], "defense_cannon", cannon_level(cannon) + 1, int(cannon["id"])) >= 0
 	if kind == "cancel_site":
 		var site: Dictionary = service_targets(state, int(order.get("target", -1))).get(int(order.get("target", -1)), {}).get("entity", {}) if order.get("target") is int else {}
 		return not append and ship["kind"] == "construction_ship" and is_static_structure(site) and int(site.get("owner", 0)) == owner and not static_complete(site)
@@ -6711,14 +6719,20 @@ static func _valid_targeted_unit_order(state: Dictionary, graph: Dictionary, shi
 static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
-		"build_depot":
-			return _place_static_site(state, player, order["point"], "resource_depot")
+		"build_depot", "build_cannon":
+			return _place_static_site(state, player, order["point"], "resource_depot" if order["kind"] == "build_depot" else "defense_cannon")
+		"upgrade_cannon":
+			return _upgrade_cannon(state, player, target)
 		"cancel_site":
 			var site: Dictionary = service_targets(state, target).get(target, {}).get("entity", {})
 			if not is_static_structure(site) or static_complete(site) or int(site["owner"]) != player:
 				return false
 			_refund_site(state, site, true)
-			_remove_indexed_hull(state, site)
+			if site.get("kind", "") == "defense_cannon" and cannon_level(site) > 0:
+				site["build_progress"] = 1.0
+				site["build_delivered"] = empty_stock()
+			else:
+				_remove_indexed_hull(state, site)
 			return true
 		"load_depot":
 			for ship in _owned_units(state, player, ids):
@@ -6840,24 +6854,41 @@ static func depot_capacity(resource: String) -> float:
 static func depot_free(site: Dictionary, resource: String) -> float:
 	return maxf(0.0, depot_capacity(resource) - float(site.get("cargo", {}).get(resource, 0.0))) if static_complete(site) else 0.0
 
-static func static_recipe(kind: String) -> Dictionary:
-	return {"Metals": 600.0, "Crystals": 40.0} if kind == "resource_depot" else {}
+static func cannon_level(site: Dictionary) -> int:
+	return clampi(int(site.get("structure_level", 0)), 0, 3)
+
+static func cannon_range(site: Dictionary) -> float:
+	return float(CANNON_RANGE[cannon_level(site) - 1]) if cannon_level(site) > 0 else 0.0
+
+static func cannon_damage(site: Dictionary) -> float:
+	return float(CANNON_DAMAGE[cannon_level(site) - 1]) if cannon_level(site) > 0 else 0.0
+
+static func static_recipe(kind: String, level: int = 1) -> Dictionary:
+	match kind:
+		"resource_depot": return {"Metals": 600.0, "Crystals": 40.0}
+		"defense_cannon":
+			return [{"Metals": 500.0, "Crystals": 60.0}, {"Metals": 800.0, "Crystals": 100.0}, {"Metals": 1300.0, "Crystals": 180.0}][clampi(level - 1, 0, 2)]
+	return {}
 
 static func hull_max_hp(ship: Dictionary) -> float:
+	if ship.get("kind", "") == "defense_cannon" and cannon_level(ship) > 0:
+		return float(CANNON_HP[cannon_level(ship) - 1])
 	var maximum: float = ship_max_hp(str(ship.get("kind", "")))
 	return maximum * lerpf(0.1, 1.0, clampf(float(ship.get("build_progress", 0.0)), 0.0, 1.0)) if is_static_structure(ship) else maximum
 
-static func _site_source(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, kind: String) -> int:
+static func _site_source(state: Dictionary, graph: Dictionary, owner: int, point: Vector2, kind: String, level: int = 1, ignore_id: int = -1) -> int:
 	if patrol_node(state, graph, owner, point) < 0 or kind not in STATIC_SITE_KINDS:
 		return -1
 	for craft in state["ships"]:
-		if is_static_structure(craft) and (craft["position"] as Vector2).distance_to(point) < 65.0:
+		if is_static_structure(craft) and int(craft["id"]) != ignore_id and (craft["position"] as Vector2).distance_to(point) < 65.0:
 			return -1
-	var recipe: Dictionary = static_recipe(kind)
+	var recipe: Dictionary = static_recipe(kind, level)
 	var best: float = INF
 	var source: int = -1
 	for i in range(state["planets"].size()):
 		var p: Dictionary = state["planets"][i]
+		if has_station(p) and point.distance_to(station_position(state, i, float(state["elapsed"]))) < 80.0:
+			return -1
 		if int(p["owner"]) != owner or not has_station(p):
 			continue
 		var available: bool = true
@@ -6886,6 +6917,25 @@ static func _place_static_site(state: Dictionary, owner: int, point: Vector2, ki
 	var site: Dictionary = {"id": id, "kind": kind, "owner": owner, "origin": source, "at": anchor, "position": point, "navigation_target": point, "heading": Vector2.UP, "route": [], "leg": 0.0, "source": -1, "dest": -1, "crew": 0.0, "cargo": empty_stock(), "hp": ship_max_hp(kind) * 0.1, "build_progress": 0.0, "build_recipe": recipe, "build_reserved": recipe.duplicate(), "build_delivered": empty_stock(), "build_source": source, "build_source_point": station_position(state, source, float(state["elapsed"]))}
 	state["ships"].append(site)
 	_register_indexed_hull(state, site)
+	return true
+
+static func _upgrade_cannon(state: Dictionary, owner: int, target: int) -> bool:
+	var site: Dictionary = service_targets(state, target).get(target, {}).get("entity", {})
+	if site.get("kind", "") != "defense_cannon" or int(site.get("owner", 0)) != owner or not static_complete(site) or cannon_level(site) >= 3:
+		return false
+	var level: int = cannon_level(site) + 1
+	var source: int = _site_source(state, military_graph(state), owner, site["position"], "defense_cannon", level, target)
+	if source < 0:
+		return false
+	var recipe: Dictionary = static_recipe("defense_cannon", level)
+	for resource in recipe:
+		state["planets"][source]["stock"][resource] -= float(recipe[resource])
+	site["build_progress"] = 0.0
+	site["build_recipe"] = recipe
+	site["build_reserved"] = recipe.duplicate()
+	site["build_delivered"] = empty_stock()
+	site["build_source"] = source
+	site["build_source_point"] = station_position(state, source, float(state["elapsed"]))
 	return true
 
 # Refund unused source-side materials, dropping overflow or lost-source stock
@@ -6952,6 +7002,10 @@ static func _work_construction(state: Dictionary, graph: Dictionary, ship: Dicti
 		site["build_progress"] = clampf(supplied / maxf(EPS, total), 0.0, 1.0)
 		site["hp"] = minf(hull_max_hp(site), float(site["hp"]) + hull_max_hp(site) - before)
 		if static_complete(site):
+			if site["kind"] == "defense_cannon":
+				var old_max: float = hull_max_hp(site)
+				site["structure_level"] = mini(3, cannon_level(site) + 1)
+				site["hp"] = minf(hull_max_hp(site), float(site["hp"]) + hull_max_hp(site) - old_max)
 			_refund_site(state, site, false)
 			ship.erase("construction_target")
 		return true
@@ -8864,6 +8918,9 @@ static func _combat_window_may_have_hostile(state: Dictionary, frame: COMBAT_FRA
 # Weapon selection for one hull. Writes only that hull's combat fields and the
 # shared damage accumulators; never mutates another hull or the frame snapshot.
 static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionary, dt: float, peaceful: bool = false) -> void:
+	if ship.get("kind", "") == "defense_cannon":
+		_fire_defense_cannon(state, frame, ship, dt, peaceful)
+		return
 	if bool(ship.get("rogue", false)):
 		if int(ship["owner"]) == PIRATE_OWNER:
 			_pirate_fire(state, ship, frame.positions, frame.by_id, frame.cells, frame.team_by_id, frame.damage, frame.killed_by, frame.health, frame.hull_slots, frame.hull_health, dt)
@@ -8905,6 +8962,37 @@ static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionar
 	if _fire_focused_attack(state, frame, ship, pos, team, hull_slot, weapon_damage, dt):
 		return
 	_fire_hull_lasers(state, frame, ship, fighter, moving_only, pos, team, hull_slot, weapon_damage, dt)
+
+# Cannon fire is part of the same simultaneous damage frame as ship weapons.
+static func _fire_defense_cannon(state: Dictionary, frame: COMBAT_FRAME, cannon: Dictionary, dt: float, peaceful: bool) -> void:
+	if cannon_level(cannon) <= 0:
+		return
+	var cooldown: float = maxf(0.0, float(cannon.get("cannon_cooldown", 0.0)) - dt)
+	cannon["cannon_cooldown"] = cooldown
+	if peaceful or cooldown > EPS:
+		return
+	var pos: Vector2 = cannon["position"]
+	var team: int = _combat_group(state, int(cannon["owner"]))
+	var cell := Vector2i(floori(pos.x / LASER_RANGE), floori(pos.y / LASER_RANGE))
+	var reach: int = ceili(cannon_range(cannon) / LASER_RANGE)
+	if team <= 0 or not _combat_window_may_have_hostile(state, frame, team, cell, reach):
+		return
+	var target: int = -1
+	var best: float = cannon_range(cannon) * cannon_range(cannon)
+	for x in range(-reach, reach + 1):
+		for y in range(-reach, reach + 1):
+			for candidate in _hostile_bucket(state, frame.cells, frame.hostile_cache, cell + Vector2i(x, y), team, frame.team_by_id):
+				var id: int = int(candidate["id"])
+				var distance: float = pos.distance_squared_to(frame.positions[id])
+				if distance < best or (distance == best and (target == -1 or id < target)):
+					best = distance
+					target = id
+	if target == -1:
+		return
+	_ship_hit(frame.damage, frame.killed_by, frame.health, target, cannon, cannon_damage(cannon), frame.hull_slots, frame.hull_health)
+	cannon["cannon_cooldown"] = CANNON_COOLDOWN
+	cannon["cannon_endpoint"] = frame.positions[target]
+	cannon["cannon_until"] = float(state["elapsed"]) + 0.3
 
 # Long-range single-target siege fire shares the frozen combat frame and
 # simultaneous damage accumulator, but not the missile splash or upgrades.
