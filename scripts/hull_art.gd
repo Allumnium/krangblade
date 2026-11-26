@@ -5,6 +5,7 @@ const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(23, 4), Vector2(19, 8), Vecto
 # Authored top-down silhouette and interior panel geometry in hull-local
 # coordinates (forward, lateral). Freighter has five paired cargo rows.
 const HULL_OUTLINES: Dictionary = {
+	"probe": [Vector2(8, 0), Vector2(3, 5), Vector2(-4, 5), Vector2(-7, 0), Vector2(-4, -5), Vector2(3, -5)],
 	"railgun_ship": [Vector2(33, 0), Vector2(27, 3), Vector2(9, 3), Vector2(6, 9), Vector2(-12, 12), Vector2(-26, 9), Vector2(-30, 5), Vector2(-30, -5), Vector2(-26, -9), Vector2(-12, -12), Vector2(6, -9), Vector2(9, -3), Vector2(27, -3)],
 	"scout": [Vector2(12, 0), Vector2(4, 2), Vector2(-2, 5), Vector2(-8, 5), Vector2(-6, 2), Vector2(-10, 1.8), Vector2(-10, -1.8), Vector2(-6, -2), Vector2(-8, -5), Vector2(-2, -5), Vector2(4, -2)],
 	"cruiser": [Vector2(25, 0), Vector2(19, 4), Vector2(13, 5), Vector2(6, 13), Vector2(-5, 13), Vector2(-9, 7), Vector2(-19, 7), Vector2(-25, 4), Vector2(-25, 0), Vector2(-25, -4), Vector2(-19, -7), Vector2(-9, -7), Vector2(-5, -13), Vector2(6, -13), Vector2(13, -5), Vector2(19, -4)],
@@ -15,6 +16,7 @@ const HULL_OUTLINES: Dictionary = {
 	"colony_ship": [Vector2(13, 0), Vector2(8, 3), Vector2(5, 3.5), Vector2(3, 6.5), Vector2(-5, 7), Vector2(-9, 4), Vector2(-11, 3), Vector2(-11, -3), Vector2(-9, -4), Vector2(-5, -7), Vector2(3, -6.5), Vector2(5, -3.5), Vector2(8, -3)]
 }
 const HULL_PANELS: Dictionary = {
+	"probe": [[Color("#9bd9dc"), [Vector2(6, 0), Vector2(1, 3), Vector2(-4, 0), Vector2(1, -3)]]],
 	"railgun_ship": [[Color("#98b8d0"), [Vector2(31, 0), Vector2(8, 2), Vector2(-18, 3), Vector2(-18, -3), Vector2(8, -2)]], [Color("#384d63"), [Vector2(5, 7), Vector2(-12, 10), Vector2(-26, 7), Vector2(-26, -7), Vector2(-12, -10), Vector2(5, -7)]], [Color("#b5dfff"), [Vector2(27, 1), Vector2(3, 1), Vector2(3, -1), Vector2(27, -1)]]],
 	"scout": [
 		[Color("#a3b8c9"), [Vector2(11, 0), Vector2(3, 1.5), Vector2(-7, 1.5), Vector2(-8, 0), Vector2(-7, -1.5), Vector2(3, -1.5)]],

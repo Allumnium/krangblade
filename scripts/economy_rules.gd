@@ -170,6 +170,9 @@ const MINER_LASER_DAMAGE: float = 2.0
 const MINER_ASTEROID_MULTIPLIER: float = 1.5
 const MINER_REPAIR_RATE: float = 10.0
 const SCIENCE_REPAIR_RATE: float = 20.0
+const SCAN_COOLDOWN: float = 30.0
+const PROBE_LIFETIME: float = 30.0
+const PROBE_HP: float = 80.0
 const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
 const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED # Map-scale reference speed.
@@ -2664,7 +2667,7 @@ static func cargo_capacity(kind: String) -> float:
 	match kind:
 		"miner": return MINER_CAPACITY
 		"science_ship": return SCIENCE_CAPACITY
-		"fighter", "scout", "cruiser", "destroyer", "railgun_ship", "warp_gate": return 0.0
+		"fighter", "scout", "cruiser", "destroyer", "railgun_ship", "warp_gate", "probe": return 0.0
 		"colony_ship": return COLONY_CAPACITY
 	return CARGO_CAPACITY
 
@@ -3438,6 +3441,7 @@ static func _service_point(state: Dictionary, ship: Dictionary, index: int) -> V
 static func ship_speed(kind: String) -> float:
 	match kind:
 		"warp_gate": return 0.0
+		"probe": return FIGHTER_SPEED * 2.0
 		"miner": return MINER_SPEED
 		"ship": return FREIGHTER_SPEED
 		"fighter": return FIGHTER_SPEED
@@ -5349,7 +5353,7 @@ static func missile_count(kind: String) -> int:
 static func railgun_count(kind: String) -> int:
 	return 1 if kind in ["destroyer", "railgun_ship"] else 0
 
-const SHIP_MAX_HP = {"ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
+const SHIP_MAX_HP = {"probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
 const MILITARY_KINDS = ["fighter", "scout", "cruiser", "destroyer", "railgun_ship"]
 const ARMED_KINDS = ["fighter", "miner", "cruiser", "destroyer", "scout", "railgun_ship"]
 
@@ -6411,12 +6415,12 @@ static func _owned_units(state: Dictionary, player: int, ids: Array) -> Array:
 		requested[id] = true
 	if requested.size() == 1 and is_same(state, _indexed_state):
 		var craft: Dictionary = _hulls_by_id.get(ids[0], {})
-		return [craft] if not craft.is_empty() and int(craft["owner"]) == player and craft.get("kind", "") != "warp_gate" and not colony_morphing(craft) else []
+		return [craft] if not craft.is_empty() and int(craft["owner"]) == player and craft.get("kind", "") not in ["warp_gate", "probe"] and not colony_morphing(craft) else []
 	var units: Array = []
 	var candidates: Array = _ordered_indexed_hull_subset(requested) if _can_index_hull_subset(state, requested) else state["ships"]
 	for ship in candidates:
 		if requested.has(ship["id"]):
-			if int(ship["owner"]) != player or ship.get("kind", "") == "warp_gate" or colony_morphing(ship):
+			if int(ship["owner"]) != player or ship.get("kind", "") in ["warp_gate", "probe"] or colony_morphing(ship):
 				return []
 			units.append(ship)
 	return units if units.size() == requested.size() else []
@@ -6610,8 +6614,10 @@ static func _valid_unit_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		return not append and can_build_warp_gate(state, graph, ship)
 	if kind == "warp_travel":
 		return not append and order.get("target") is int and _warp_order_valid(state, ship, int(order["target"]))
-	if ship.get("kind", "") == "warp_gate":
+	if ship.get("kind", "") in ["warp_gate", "probe"]:
 		return false
+	if kind == "scan":
+		return not append and science_scan_ready(state, ship) and order.get("point") is Vector2 and patrol_node(state, graph, owner, order["point"]) >= 0
 	if kind in ["stop", "hold"]:
 		return true
 	if ship["kind"] == "science_ship" and kind in ["unload", "drop", "deposit", "salvage"]:
@@ -6683,6 +6689,8 @@ static func _valid_targeted_unit_order(state: Dictionary, graph: Dictionary, shi
 static func _execute_unit_order(state: Dictionary, player: int, ids: Array, order: Dictionary) -> bool:
 	var target: int = int(order.get("target", -1))
 	match order["kind"]:
+		"scan":
+			return _launch_scan_probes(state, player, ids, order["point"])
 		"warp_build":
 			var graph: Dictionary = military_graph(state)
 			var changed: bool = false
@@ -6752,6 +6760,47 @@ static func _reset_unit_for_order(ship: Dictionary) -> void:
 	_clear_tactical_order(ship)
 	_clear_local_hold(ship)
 	_interrupt_work(ship)
+
+# Scan is an immediate ability, not a movement order. Probes use normal
+# authoritative hull snapshots but cannot receive unit commands.
+static func science_scan_ready(state: Dictionary, ship: Dictionary) -> bool:
+	return ship.get("kind", "") == "science_ship" and not bool(ship.get("rogue", false)) and not bool(ship.get("retreating", false)) and float(state.get("elapsed", 0.0)) + EPS >= float(ship.get("scan_ready_at", 0.0))
+
+static func _launch_scan_probes(state: Dictionary, player: int, ids: Array, point: Vector2) -> bool:
+	var units: Array = _owned_units(state, player, ids)
+	var graph: Dictionary = military_graph(state)
+	var anchor: int = patrol_node(state, graph, player, point)
+	if units.is_empty() or anchor < 0 or units.any(func(ship: Dictionary) -> bool: return not science_scan_ready(state, ship)):
+		return false
+	for vessel in units:
+		var id: int = int(state["next_id"])
+		state["next_id"] = id + 1
+		var origin: Vector2 = vessel["position"]
+		var start_node: int = patrol_node(state, graph, player, origin)
+		if start_node < 0:
+			start_node = anchor
+		var heading: Vector2 = origin.direction_to(point)
+		if heading.is_zero_approx():
+			heading = Vector2.UP
+		var probe: Dictionary = {"id": id, "kind": "probe", "owner": player, "origin": start_node, "at": start_node, "position": origin, "heading": heading, "navigation_target": point, "route": [], "leg": 0.0, "source": -1, "dest": -1, "hp": PROBE_HP, "crew": 0.0, "cargo": empty_stock(), "cloaked": true, "probe_destination": point, "probe_anchor": anchor}
+		state["ships"].append(probe)
+		_register_indexed_hull(state, probe)
+		vessel["scan_ready_at"] = float(state["elapsed"]) + SCAN_COOLDOWN
+	return true
+
+static func _work_probe(state: Dictionary, ship: Dictionary, dt: float) -> void:
+	if ship.has("probe_expires"):
+		ship["navigation_target"] = ship["position"]
+		return
+	var point: Vector2 = ship["probe_destination"]
+	_navigate(ship, point, ship_speed("probe") * dt)
+	if (ship["position"] as Vector2).distance_to(point) <= EPS:
+		ship["probe_expires"] = float(state["elapsed"]) + PROBE_LIFETIME
+		ship["at"] = int(ship["probe_anchor"])
+		ship["navigation_target"] = ship["position"]
+
+static func _probe_expired(state: Dictionary, ship: Dictionary) -> bool:
+	return ship.get("kind", "") == "probe" and float(state["elapsed"]) + EPS >= float(ship.get("probe_expires", INF))
 
 static func _order_transform(state: Dictionary, player: int, ids: Array) -> bool:
 	var graph: Dictionary = military_graph(state)
@@ -9407,7 +9456,7 @@ static func _ai_census(state: Dictionary, player: int, home: int) -> Dictionary:
 		if int(ship["owner"]) != player:
 			continue
 		var kind: String = ship["kind"]
-		if kind == "warp_gate":
+		if not SHIP_KINDS.has(kind):
 			continue
 		counts[kind] += 1
 		if kind in MILITARY_KINDS:
@@ -10681,10 +10730,11 @@ static func update_match_outcome(state: Dictionary) -> bool:
 		var owner: int = int(planet["owner"])
 		if owner > 0 and has_station(planet):
 			viable[owner] = true
-	# A fleet remains in play even when every station has fallen.
+	# A fleet remains in play even when every station has fallen. A free
+	# reconnaissance probe cannot prevent defeat.
 	for ship in state["ships"]:
 		var owner: int = int(ship["owner"])
-		if owner > 0:
+		if owner > 0 and ship.get("kind", "") != "probe":
 			viable[owner] = true
 	var eliminated: Array = state.get("eliminated", [])
 	var changed: bool = false
@@ -11359,7 +11409,11 @@ static func _step_ai(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 static func _prepare_combat_hulls(state: Dictionary, combat_graph: Dictionary, dt: float) -> bool:
 	var loading_by_owner: Dictionary = {}
 	var needs_threats: bool = false
+	var expired_probes: Array = []
 	for craft in state["ships"]:
+		if _probe_expired(state, craft):
+			expired_probes.append(craft)
+			continue
 		if not needs_threats and craft.get("kind", "") in ["ship", "miner"]:
 			needs_threats = true
 		_ensure_position(combat_graph["points"] if craft.get("kind", "") in MILITARY_KINDS else state["map"]["points"], craft)
@@ -11372,6 +11426,8 @@ static func _prepare_combat_hulls(state: Dictionary, combat_graph: Dictionary, d
 			craft["reward_loading_factor"] = loading
 		else:
 			craft.erase("reward_loading_factor")
+	for probe in expired_probes:
+		_remove_indexed_hull(state, probe)
 	return needs_threats
 
 static func _step_combat(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
@@ -11607,6 +11663,11 @@ static func _try_direct_order_dispatch(state: Dictionary, frame: STEP_FRAME, shi
 	return _work_local_move(frame.graph, ship, dt, state)
 
 static func _step_hull(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> void:
+	if ship.get("kind", "") == "probe":
+		_work_probe(state, ship, dt)
+		if ship.has("probe_expires"):
+			frame.repair_parked[int(ship["id"])] = true
+		return
 	if not frame.motion_sleep_enabled:
 		_step_hull_active(state, frame, ship, dt)
 		return
