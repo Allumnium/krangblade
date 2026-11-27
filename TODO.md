@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.121.2: Verify star-facing hull/rock highlights at multiple rotations, dark-side contrast, metallic and procedural planet terminators, station structural shading, impact lights, shader compilation, hardware FPS and peer smoke. No runtime validation yet.
+
 - [ ] v0.121.1: Validate all nine metal planet atlas cells and matched material maps in Godot, confirm stellar terminator/eclipses, fog memory and selection, commit genuine Godot import metadata when available; verify runtime/peer/FPS. No simulation changes.
 
 - [ ] v0.121.0: Check ship lighting behind planets and Freighter map response, planet orbits/PDS placement, close dense rings, mixed site occupancy and guaranteed homes, star/field connectivity and protected Pulsar counts across seeds/layouts, mining balance, shader/import, solo/ENet and rendered FPS. Runtime unrun.
