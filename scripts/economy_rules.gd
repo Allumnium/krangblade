@@ -125,7 +125,6 @@ const POPULATION_DOUBLING_YEARS: float = 60.0
 const POPULATION_FOOD_RESERVE: float = 20.0
 const PRODUCTION_PER_LEVEL: float = 0.4
 const CRYSTALS_PER_LEVEL: float = 0.01
-const STATION_CRYSTALS_PER_YEAR: float = 0.15
 const CRYSTAL_COST_MULTIPLIER: float = 4.0
 const ORGANICS_PER_LEVEL: float = 0.4
 # Food production and demand both halve; population capacity stays unchanged.
@@ -335,20 +334,17 @@ static func _generate_system(rng: RandomNumberGenerator, i: int, ordered: Array[
 	if home:
 		# Bootstrap values are test data, not final economy balance.
 		abundance["Metals"] = maxf(1.0, float(abundance["Metals"]))
-		for resource in RESOURCES:
-			if resource != "Crystals":
-				levels[resource] = 1
+		# Starting stock and fleet are supplied; all production and yards must be built.
 		stock = STARTING_STOCK.duplicate()
-		yards.append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1})
 	var richness: float = 0.0
 	for resource in EXTRACTED:
 		richness += float(abundance[resource])
 	richness += float(bonuses["Organics"]) - 1.0
 	# Environment is generated separately, not inferred from size or deposits.
 	var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
-	return {"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION + ORBITAL_HOUSING_POPULATION if home else 0.0, "eco_population": ORBITAL_HOUSING_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
+	return {"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION + ORBITAL_HOUSING_POPULATION if home else 0.0, "eco_population": 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
 		"abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
-		"station": {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()]} if home else {}, "yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {0: _new_pds()} if home else {}}
+		"station": {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()]} if home else {}, "yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {}}
 
 static func _spawn_starting_fleets(state: Dictionary, planets: Array, ordered: Array[int]) -> void:
 	for index in range(ordered.size()):
@@ -1292,17 +1288,12 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 	# predetermined angle on the opposite side of the star.
 	if ship["unit_order"].has("orbit_phase"):
 		colony["station"]["orbit_phase"] = ship["unit_order"]["orbit_phase"]
-	# Settlement transfers the crew exactly once. The founding yard supplies
-	# housing, not an additional free population; planetless residents
-	# remain aboard orbital habitats even when above nominal capacity.
+	# Settlement transfers crew exactly once. No free production or yard.
+	# Planetless settlers remain aboard the founding station.
 	var settlers: float = maxf(0.0, float(ship.get("crew", 0.0)))
 	colony["population"] = settlers
-	colony["eco_population"] = minf(settlers, ORBITAL_HOUSING_POPULATION) if has_planets(colony) else settlers
+	colony["eco_population"] = 0.0 if has_planets(colony) else settlers
 	colony["population_velocity"] = 0.0
-	colony["yards"].append({"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1})
-	if has_planets(colony):
-		for resource in ["Metals", "Organics"]:
-			colony["levels"][resource] = 1
 	for resource in RESOURCES + [ANTIMATTER]:
 		var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
 		colony["stock"][resource] = float(colony["stock"].get(resource, 0.0)) + amount
@@ -1403,7 +1394,7 @@ static func planetary_population(p: Dictionary) -> float:
 	return maxf(0.0, float(p.get("population", 0.0)) - eco_population(p))
 
 static func eco_organics(p: Dictionary) -> float:
-	return ECO_HOUSING_ORGANICS * eco_housing_count(p) * (_rank_factor(p, "rank_orbital", 0.05) + 0.15 * reward_rank(p.get("conquest_rewards", []), "rank_synthetic")) if int(p.get("owner", 0)) != 0 else 0.0
+	return ECO_HOUSING_ORGANICS * int(p.get("orbital_housing", 0)) * (_rank_factor(p, "rank_orbital", 0.05) + 0.15 * reward_rank(p.get("conquest_rewards", []), "rank_synthetic")) if int(p.get("owner", 0)) != 0 else 0.0
 
 static func _add_eco_residents(p: Dictionary, count: float) -> void:
 	var residents: float = eco_population(p)
@@ -1495,11 +1486,10 @@ static func _industrial_bonus(planet: Dictionary, resource: String) -> float:
 	return 1.0
 
 static func rate(planet: Dictionary, resource: String, basis: Dictionary = {}) -> float:
-	var station_output: float = STATION_CRYSTALS_PER_YEAR if resource == "Crystals" and int(planet["owner"]) != 0 and has_station(planet) else 0.0
-	if bool(planet.get("planet_blockaded", false)) and has_planets(planet):
-		return eco_organics(planet) if resource == "Organics" else station_output
-	if not ACTIVE_PRODUCTION.has(resource) or int(planet["owner"]) == 0 or (not has_planets(planet) and resource in ["Metals", "Crystals"]):
-		return station_output
+	if not has_station(planet) or int(planet["owner"]) == 0 or not ACTIVE_PRODUCTION.has(resource):
+		return 0.0
+	if bool(planet.get("planet_blockaded", false)) or not has_planets(planet):
+		return eco_organics(planet) if resource == "Organics" else 0.0
 	if resource == "Organics":
 		# Small populations still produce a surplus; farm capacity limits output.
 		var farm: float = farm_potential(planet, basis)
@@ -1511,7 +1501,7 @@ static func rate(planet: Dictionary, resource: String, basis: Dictionary = {}) -
 	var labor: float = population_multiplier(planet)
 	var base: float = _industrial_base(planet, resource) if basis.is_empty() else float(basis["base"][resource])
 	var bonus: float = _industrial_bonus(planet, resource) if basis.is_empty() else float(basis["bonus"][resource])
-	return station_output + base * labor * bonus
+	return base * labor * bonus
 
 static func food_growth_multiplier(planet: Dictionary) -> float:
 	# Orbital residents are self-sufficient; only terrestrial growth is food-limited.
@@ -1533,7 +1523,14 @@ static func _update_population(planet: Dictionary, dt: float, basis: Dictionary 
 	var current: float = planetary_population(planet)
 	var housing: float = habitation_capacity(planet) if basis.is_empty() else float(basis["housing"])
 	var target: float = minf(population_capacity(planet, basis), housing)
+	# Stockpiled/imported food can sustain residents while a farm is built.
+	# It does not raise the long-term growth target above existing residents.
+	var food_available: float = civilian_stock_access(planet, "Organics") + rate(planet, "Organics", basis) * dt
+	if food_available + EPS >= organics_demand(planet) * dt:
+		target = maxf(target, minf(current, housing))
 	var velocity: float = population_growth(planet)
+	if target >= current and velocity < 0.0:
+		velocity = 0.0
 	var error: float = current - target
 	var omega: float = POPULATION_RESPONSE
 	var slope: float = velocity + omega * error
@@ -1553,7 +1550,6 @@ static func _update_population(planet: Dictionary, dt: float, basis: Dictionary 
 		next = growth_ceiling
 		next_velocity = growth_constant * next
 	# A food shortfall prevents positive growth even with demographic momentum.
-	var food_available: float = civilian_stock_access(planet, "Organics") + rate(planet, "Organics", basis) * dt
 	if food_available + EPS < organics_demand(planet) * dt:
 		next = minf(next, current)
 		next_velocity = minf(next_velocity, 0.0)
@@ -1693,7 +1689,7 @@ static func affordable(p: Dictionary, cost: Dictionary) -> bool:
 # Minimum resident population to order the next production building.
 static func building_population(resource: String, level: int) -> int:
 	var tier: int = maxi(1, level)
-	return int(ECONOMY_BUILDINGS[resource]["population"]) * tier * tier
+	return 100 if tier == 1 else int(ECONOMY_BUILDINGS[resource]["population"]) * tier * tier
 
 static func building_available(p: Dictionary, resource: String) -> bool:
 	return building_blocker(p, resource).is_empty()
@@ -10580,7 +10576,7 @@ static func _ai_census(state: Dictionary, player: int, home: int) -> Dictionary:
 		for job in p["queue"]:
 			if SHIP_KINDS.has(job["kind"]):
 				counts[job["kind"]] += 1
-		var producer: bool = int(p["levels"]["Metals"]) > 0
+		var producer: bool = production_level(p, "Metals") > 0
 		set_thresholds(state, player, index, "Metals", 10.0 if bool(p["home"]) else (35.0 if producer else 90.0), 40.0 if bool(p["home"]) else (60.0 if producer else 95.0))
 		var crystal_source: bool = production_available(p, "Crystals") and index != home
 		set_thresholds(state, player, index, "Crystals", 0.0 if crystal_source else 50.0, 5.0 if crystal_source else 90.0)
@@ -10599,9 +10595,14 @@ static func _ai_station_goal(state: Dictionary, player: int, home: int, index: i
 	var action: String = ""
 	var target: String = ""
 	var has_yard: bool = operational_shipyards(p) > 0
-	if abundance > 0.0 and level == 0:
+	if has_planets(p) and production_level(p, "Organics") == 0:
+		action = "economy"
+		target = "Organics"
+	elif abundance > 0.0 and level == 0:
 		action = "economy"
 		target = "Metals"
+	elif (p["yards"] as Array).is_empty():
+		action = "yard"
 	elif (index == home or has_fitting_yard(p, "ship")) and owned.size() > 1 and counts["ship"] == 0:
 		action = "ship"
 	elif has_yard and owned.size() > 1 and counts["fighter"] < mini(12, owned.size() * 2):

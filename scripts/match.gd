@@ -1477,11 +1477,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			available = eligible
 			description = "All shipyard slots occupied"
 			if eligible:
-				var preview: Dictionary = p.duplicate()
-				var yards: Array = p["yards"].duplicate()
-				yards.append({})
-				preview["yards"] = yards
-				description = "Staffing: %s population\n+1 Small shipyard\n+%s housing and residents · +%.2f/yr Organics" % [UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[slot - 1]), UI_TEXT.compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
+				description = "Staffing: %s population\n+1 Small shipyard\n+%s housing and residents" % [UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[slot - 1]), UI_TEXT.compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION)]
 		elif key == "pds":
 			name_text = "PDS"
 			current_level = p.get("pds", {}).size()

@@ -152,6 +152,12 @@ jobs:
         run: godot --headless --path . --script res://tests/snapshot_codec_test.gd
       - name: Enforce public simulation rule calls from match UI
         run: python3 tools/check_ui_rule_boundaries.py
+      - name: Explicit resource production and numerical balance
+        run: |
+          set -o pipefail
+          for test in explicit_production_test numerical_rebalance_test; do
+            timeout 90s godot --headless --path . --script res://tests/${test}.gd 2>&1 | awk '{ print; fflush(); if ($0 ~ /SCRIPT ERROR:|Assertion failed/) { failed=1; remaining=8 } else if (failed && --remaining <= 0) exit 1 } END { if (failed) exit 1 }'
+          done
       - name: Construction recipes and physical static structures
         run: |
           set -o pipefail

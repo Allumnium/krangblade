@@ -36,8 +36,6 @@ func production_rate(system: Dictionary, resource: String) -> float:
 	var output: float = ECONOMY.local_flow(system, "Production", resource)
 	if resource == "Organics":
 		output = maxf(0.0, output - ECONOMY.eco_organics(system))
-	elif resource == "Crystals":
-		output = maxf(0.0, output - ECONOMY.STATION_CRYSTALS_PER_YEAR)
 	return output
 
 func draw_production(state: Dictionary, index: int, center: Vector2, radius: float, detail: float) -> void:
