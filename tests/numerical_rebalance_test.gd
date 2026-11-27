@@ -10,10 +10,15 @@ func _initialize() -> void:
 	assert(home["population"] == 150.0 and E.credit_balance(state, 1) == 500.0)
 	assert(home["stock"] == {"Metals": 165.0, "Organics": 30.0, "Crystals": 0.0})
 	assert(E.storage_capacity(home, "Metals") == 400.0 and E.storage_capacity(home, "Organics") == 200.0)
+	var fleet: Dictionary = E.create(M.generate(827, 1, "Grid"), {1: {"team": 1}}, [1])
+	assert(E.resident_tax_income(fleet, 1) == 15.0)
+	assert(is_equal_approx(E.resident_tax_income(fleet, 1) - float(E.empire_totals(fleet, 1)["upkeep"]), 6.5))
+	var fees: Dictionary = {"scout": 10, "fighter": 15, "ship": 25, "construction_ship": 20, "miner": 25, "science_ship": 50, "colony_ship": 75, "cruiser": 100, "railgun_ship": 125, "destroyer": 150}
 	var metals: Dictionary = {"scout": 10, "fighter": 25, "ship": 50, "construction_ship": 40, "miner": 50, "science_ship": 100, "colony_ship": 150, "cruiser": 200, "railgun_ship": 200, "destroyer": 300}
 	for kind in metals:
 		var price: Dictionary = E.construction_cost(home, kind, 1)
 		assert(price["Metals"] == metals[kind])
+		assert(E.construction_credit_cost(price, kind) == float(fees[kind]))
 		assert(float(price.get("Organics", 0.0)) == (10.0 if kind == "colony_ship" else 0.0))
 		for reward_set in [[], ["rank_military_metal", "shield_1", "armor"], ["rank_civilian"]]:
 			var rewarded: Dictionary = E.construction_cost({"conquest_rewards": reward_set, "station": {"dyson_sphere": true}}, kind, 1)
@@ -31,7 +36,7 @@ func _initialize() -> void:
 	var job: Dictionary = home["queue"][0]
 	assert(home["stock"]["Metals"] == 140.0 and home["stock"]["Organics"] == 30.0)
 	assert(job["population_cost"] == 10.0 and E.reserved_construction_population(home) == 10.0)
-	assert(E.credit_balance(state, 1) == 450.0 and E.cancel(state, 1, 0, job["id"]))
+	assert(E.credit_balance(state, 1) == 485.0 and E.cancel(state, 1, 0, job["id"]))
 	assert(E.credit_balance(state, 1) == 500.0 and E.reserved_construction_population(home) == 0.0)
 	assert(E.enqueue(state, 1, 0, "fighter"))
 	for _year in range(30):

@@ -2850,28 +2850,28 @@ func _test_galactic_credits() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2])
 	assert(ECON.credit_balance(state, 1) == 500.0 and ECON.credit_balance(state, 2) == 500.0)
 	assert(state["galactic_credits"].size() == 2 and ECON.credit_balance(state, 0) == 0.0)
-	assert(ECON.resident_tax_income(state, 1) == 7.5)
+	assert(ECON.resident_tax_income(state, 1) == 15.0)
 	assert(float(ECON.empire_totals(state, 1)["ship_population"]) > 0.0)
 	# Isolate income from AI spending.
 	state["ai_players"].clear()
 	ECON.step(state, 0.1)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 499.9))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 499.9))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 500.65))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 500.65))
 	state["planets"][0]["population"] = 200.0
 	state["planets"][1]["population"] = 100.0
 	state["planets"][2]["population"] = 5000.0
 	assert(int(state["planets"][2]["owner"]) == 0)
 	ECON._accrue_resident_taxes(state, 0.0)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 499.9))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 500.65))
 	ECON._accrue_resident_taxes(state, 2.5)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 524.9))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 512.4))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 550.65))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 525.65))
 	assert(not state["galactic_credits"].has(0))
 	state["planets"][0]["owner"] = 2
 	ECON._accrue_resident_taxes(state, 1.0)
 	assert(ECON.resident_tax_income(state, 1) == 0.0)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 524.9))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 527.4))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 550.65))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 555.65))
 	var fresh: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	assert(ECON.credit_balance(fresh, 1) == 500.0 and ECON.credit_balance(fresh, 2) == 500.0)
 	print("PASS: independent Galactic Credits, resident taxes, ownership, pause and fresh matches")
@@ -2881,13 +2881,13 @@ func _test_construction_credits() -> void:
 	var scout_home: Dictionary = scout_state["planets"][0]
 	var scout_cost: Dictionary = ECON.construction_cost(scout_home, "scout", 1)
 	assert(scout_cost == {"Metals": 10.0})
-	assert(ECON.construction_credit_cost(scout_cost, "scout") == 20.0)
+	assert(ECON.construction_credit_cost(scout_cost, "scout") == 10.0)
 	scout_home["population"] = 1000.0
 	scout_home["stock"]["Metals"] = 10.0
 	scout_home["stock"]["Organics"] = 0.0
-	scout_state["galactic_credits"][1] = 19.0
+	scout_state["galactic_credits"][1] = 9.0
 	assert(not ECON.enqueue(scout_state, 1, 0, "scout"))
-	scout_state["galactic_credits"][1] = 20.0
+	scout_state["galactic_credits"][1] = 10.0
 	assert(ECON.enqueue(scout_state, 1, 0, "scout"))
 	assert(ECON.credit_balance(scout_state, 1) == 0.0)
 	assert(float(scout_home["stock"]["Metals"]) == 0.0 and float(scout_home["stock"]["Organics"]) == 0.0)
@@ -2895,7 +2895,7 @@ func _test_construction_credits() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
 	var home: Dictionary = state["planets"][0]
 	var fee: float = ECON.construction_credit_cost(ECON.construction_cost(home, "fighter", 1), "fighter")
-	assert(fee == 50.0)
+	assert(fee == 15.0)
 	state["galactic_credits"][1] = fee - 1.0
 	var before: Dictionary = home["stock"].duplicate()
 	var next_id: int = int(state["next_id"])
@@ -3076,7 +3076,7 @@ func _test_fleet_upkeep() -> void:
 	assert(int(ECON.empire_totals(state, 1)["unpaid_ships"]) == 0)
 	# No cash reserve needed if concurrent taxes cover current wages.
 	state["ships"] = [fighter, miner]
-	state["planets"][0]["population"] = 50.0
+	state["planets"][0]["population"] = 25.0
 	ECON._accrue_resident_taxes(state, 1.0)
 	ECON._pay_fleet_upkeep(state, 1.0)
 	assert(ECON.credit_balance(state, 1) == 0.0 and not fighter.has("unpaid_since"))

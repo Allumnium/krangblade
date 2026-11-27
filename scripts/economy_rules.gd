@@ -81,7 +81,7 @@ const EXTRACTED = ["Metals", "Crystals"]
 const ACTIVE_PRODUCTION = RESOURCES
 const STARTING_STOCK = {"Metals": 165.0, "Organics": 30.0, "Crystals": 0.0}
 const STARTING_GC: float = 500.0
-const RESIDENT_TAX_RATE: float = 0.05
+const RESIDENT_TAX_RATE: float = 0.1
 # Derived slow-rate coefficients only. Live stock, residents and credits are
 # still integrated at every authoritative substep.
 const ECONOMY_RATE_INTERVAL: float = 0.4
@@ -99,7 +99,10 @@ const PIRATE_GROUP_RANGE: float = 900.0
 const PIRATE_DEFENSE_RANGE: float = 1600.0
 # Annual operating wages for completed mobile hulls; structures are exempt.
 const SHIP_UPKEEP_GC = {"scout": 0.5, "miner": 1.0, "fighter": 1.5, "ship": 2.5, "colony_ship": 3.0, "science_ship": 3.0, "cruiser": 4.5, "destroyer": 10.0, "railgun_ship": 6.0, "construction_ship": 2.0}
-# Fixed labor fee, independent of future fluctuating market prices.
+# Nominal hull fees make credits primarily an upkeep constraint.
+# Material discounts/surcharges proportionally modify the fee.
+const SHIP_CONSTRUCTION_GC = {"scout": 10.0, "miner": 25.0, "fighter": 15.0, "ship": 25.0, "colony_ship": 75.0, "science_ship": 50.0, "cruiser": 100.0, "destroyer": 150.0, "railgun_ship": 125.0, "construction_ship": 20.0}
+# Fixed infrastructure labor fee, independent of future market prices.
 const CONSTRUCTION_CREDIT_FRACTION: float = 0.5
 const CONSTRUCTION_REFERENCE_VALUES = {"Metals": 2.0, "Organics": 1.0, "Crystals": 8.0}
 const WARP_GATE_CREDIT_COST: float = 100.0
@@ -708,7 +711,14 @@ static func construction_credit_cost(materials: Dictionary, kind: String = "") -
 	var value: float = 0.0
 	for resource in CONSTRUCTION_REFERENCE_VALUES:
 		value += float(materials.get(resource, 0.0)) * float(CONSTRUCTION_REFERENCE_VALUES[resource])
-	return rounded_price(value * CONSTRUCTION_CREDIT_FRACTION * (float(ship_size(kind) + 1) if SHIP_KINDS.has(kind) else 1.0))
+	if SHIP_CONSTRUCTION_GC.has(kind):
+		var base: Dictionary = _cost(kind, 1)
+		var base_value: float = 0.0
+		for resource in CONSTRUCTION_REFERENCE_VALUES:
+			base_value += float(base.get(resource, 0.0)) * float(CONSTRUCTION_REFERENCE_VALUES[resource])
+		if base_value > EPS:
+			return rounded_price(float(SHIP_CONSTRUCTION_GC[kind]) * value / base_value)
+	return rounded_price(value * CONSTRUCTION_CREDIT_FRACTION)
 
 static func can_pay_credits(state: Dictionary, player: int, amount: float) -> bool:
 	return player > 0 and state.get("galactic_credits", {}).has(player) and is_finite(amount) and amount >= 0.0 and credit_balance(state, player) >= amount
