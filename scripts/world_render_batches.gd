@@ -32,9 +32,7 @@ var lamp_glow_batch: MultiMeshInstance2D
 var lamp_glow_entries: Array = []
 const HULL_LIGHTING = preload("res://assets/shaders/world_hull_lighting.gdshader")
 var vector_lighting: ShaderMaterial
-var science_lighting: ShaderMaterial
-var fighter_lighting: ShaderMaterial
-var freighter_lighting: ShaderMaterial
+var authored_lighting: Dictionary = {}
 var world_lights: Array = []
 var shadow_discs: Array = []
 var shadow_uniforms := PackedVector4Array()
@@ -103,7 +101,8 @@ func set_world_lights(lights: Array, blockers: Array = []) -> void:
 		var tint: Color = entry[2]
 		positions[i] = Vector4(pos.x, pos.y, float(entry[1]) * radius_scale, float(entry[3]))
 		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0 if entry.size() > 5 and bool(entry[5]) else 0.0)
-	var materials: Array = [vector_lighting, science_lighting, fighter_lighting, freighter_lighting, planet_lighting]
+	var materials: Array = [vector_lighting, planet_lighting]
+	materials.append_array(authored_lighting.values())
 	materials.append_array(metal_planet_lighting)
 	for material in materials:
 		material.set_shader_parameter("light_points", positions)
@@ -147,9 +146,9 @@ class HullInstanceStream:
 func build(canvas: Control) -> void:
 	map_canvas = canvas
 	vector_lighting = _lighting_material("")
-	science_lighting = _lighting_material("science_ship")
-	fighter_lighting = _lighting_material("fighter")
-	freighter_lighting = _lighting_material("ship")
+	authored_lighting.clear()
+	for kind in HULL_ART.AUTHORED_SPRITE_KINDS:
+		authored_lighting[kind] = _lighting_material(kind)
 	planet_lighting = _lighting_material("")
 	planet_lighting.set_shader_parameter("spherical_surface", true)
 	_build_metal_planet_materials()
@@ -501,7 +500,7 @@ func _flush_hull_batches(hull_art: HULL_ART, instances: Dictionary, batches: Dic
 				instance.z_index = 1
 			elif not hull_art.sprite_kind(texture).is_empty():
 				var kind: String = hull_art.sprite_kind(texture)
-				instance.material = fighter_lighting if kind == "fighter" else freighter_lighting if kind == "ship" else science_lighting
+				instance.material = authored_lighting.get(kind, vector_lighting)
 				instance.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 			elif not overview_dot_textures.values().has(texture):
 				instance.material = vector_lighting

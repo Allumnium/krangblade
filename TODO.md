@@ -2,7 +2,9 @@
 
 ## Approved command and observation changes (2026-11-27)
 
-- [ ] v0.121.9: Verify corrected asteroid directional lighting at all rotations and belt distances, ambient tuning, doubled belt target/clearance, one-star sites, default lens, owned commandable box/Shift selection, expanded all-hull rendered regression and future asset coverage. Add actual rock and procedural structure fixtures; run full import/parse, gameplay, FPS and peer checks.
+- [ ] v0.121.10: Run real asteroid atlas and all-hull direction captures with authored-map completeness guard; inspect results. Separate immediate-mode structure fixtures still needed when introducing their authored art.
+
+- [ ] v0.121.9: Verify corrected asteroid directional lighting at all rotations and belt distances, ambient tuning, doubled belt target/clearance, one-star sites, default lens, owned commandable box/Shift selection, expanded all-hull rendered regression and future asset coverage. Add procedural structure fixtures; run full import/parse, gameplay, FPS and peer checks.
 
 - [ ] v0.121.8: Verify smooth three-cohort asteroid orbits, pause/speed changes, visual picking and mining alignment, static field behavior, compact replicas and rendered FPS/real peers.
 
