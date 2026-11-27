@@ -1,11 +1,32 @@
 extends SceneTree
 const ECON = preload("res://scripts/economy_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
+const MOTION_VIEW = preload("res://scripts/ship_motion_view.gd")
 
 func _initialize() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
+	# Test the effect contract, not exact visual dimensions or tuning.
+	var motion = MOTION_VIEW.new()
+	var cruise: float = MOTION_VIEW.cruise_thrust(1.0)
+	if not (MOTION_VIEW.cruise_thrust(0.0) == 0.0 and MOTION_VIEW.cruise_thrust(0.01) == 0.0 and cruise > 0.0 and cruise < 1.0):
+		push_error("Cruise exhaust must be absent at rest and weaker than full acceleration.")
+		quit(1)
+		return
+	motion.ship_visuals[1] = {"age": 0.2, "duration": 0.2, "thrust": 0.8, "cruise": cruise}
+	motion.active_visual_ids.append(1)
+	var flare: float = motion.thrust_for(1)
+	motion.advance(5.0)
+	if not (flare > cruise and is_equal_approx(motion.thrust_for(1), cruise) and motion.active_visual_ids.is_empty()):
+		push_error("Acceleration must fade to sustained cruise without keeping an active interpolation job.")
+		quit(1)
+		return
+	motion.ship_visuals[1]["cruise"] = 0.0
+	if motion.thrust_for(1) != 0.0:
+		push_error("Stopped ships must have no exhaust.")
+		quit(1)
+		return
 	var session: Node = root.get_node("GameSession")
 	# This legacy fixture mutates canonical state and manually advances ticks.
 	# Keep it on the synchronous reference path; worker tests cover async state.
