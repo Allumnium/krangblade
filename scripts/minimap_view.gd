@@ -191,7 +191,7 @@ func draw(selected: int, selected_units: Array[int], selected_field: int, select
 		var corner: Vector2 = _minimap_point(Vector2.ZERO, area)
 		var far: Vector2 = _minimap_point(map_size.call(), area)
 		minimap.draw_texture_rect_region(fog_state.texture, Rect2(corner, far - corner), Rect2(Vector2.ZERO, map_size.call() / ECONOMY.VISION_CELL))
-	# Terrain is public geography even where the fog mask is opaque.
+	# Only observed asteroid locations appear; remembered ore remains dim.
 	var terrain_scale: float = area.size.x / maxf(1.0, float(map_size.call().x))
 	var terrain_signature: Array = [state["map"]["seed"], area, terrain_scale, state["map"].get("fields", []).size()]
 	if terrain_signature != _terrain_signature:

@@ -147,10 +147,12 @@ func _seed_starting_memory(state: Dictionary, player: int) -> void:
 		for index in range(fields.size()):
 			if center.distance_squared_to(fields[index]["position"]) <= squared:
 				_fields[index] = (fields[index] as Dictionary).duplicate(true)
-			if index < _rock_memory.size():
-				for asteroid in _rock_memory[index].values():
+			if index < _rock_memory.size() and not bool(fields[index].get("antimatter", false)):
+				for asteroid in fields[index].get("chunks", []):
 					if center.distance_squared_to(asteroid["position"]) <= squared:
-						asteroid["surveyed"] = true
+						var observed: Dictionary = asteroid.duplicate()
+						observed["surveyed"] = true
+						_rock_memory[index][int(asteroid["id"])] = observed
 
 # Site memory is presentation-only and never written back to replicated state.
 # Deep copies prevent in-place solo/host updates from changing remembered data.
@@ -165,17 +167,11 @@ func _observe_sites(state: Dictionary, player: int, map_size: Vector2) -> void:
 		if bool(fields[index].get("antimatter", false)) and ECONOMY.discovered(state, player, "fields", index) and is_visible(fields[index]["position"], map_size):
 			_fields[index] = (fields[index] as Dictionary).duplicate(true)
 
-# Each rock has its own last-seen inventory and depletion state. Initial
-# geography is reconstructed from the seed, never from hidden live ore.
+# Only surveyed rocks enter memory. Starting survey seeds historical ore;
+# other rocks enter on actual sight, never from unexplored geography.
 func _seed_rock_memory() -> void:
 	for field in _initial_map.get("fields", []):
-		var memory: Dictionary = {}
-		if not bool(field.get("antimatter", false)):
-			for chunk in field.get("chunks", []):
-				var initial: Dictionary = chunk.duplicate()
-				initial["surveyed"] = false
-				memory[int(chunk["id"])] = initial
-		_rock_memory.append(memory)
+		_rock_memory.append({})
 		_rock_views.append({})
 
 func _observe_rocks(state: Dictionary, map_size: Vector2) -> void:
@@ -205,7 +201,9 @@ func _observe_rocks(state: Dictionary, map_size: Vector2) -> void:
 				memory.erase(id)
 			else:
 				hidden_rocks.append(rock)
-		_rock_views[index] = {"live": visible_rocks, "hidden": hidden_rocks, "chunks": visible_rocks + hidden_rocks}
+		# Only last-observed rocks populate the minimap memory. The main view
+		# consumes live only; no concatenated per-frame terrain list is needed.
+		_rock_views[index] = {"live": visible_rocks, "hidden": hidden_rocks}
 
 func rock_view(index: int) -> Dictionary:
 	if index < 0 or index >= _rock_views.size():

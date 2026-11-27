@@ -2887,44 +2887,41 @@ static func _steer_around_blocker(axis: Vector2, blocker: Vector2) -> Vector2:
 
 # The only movement integrator. Orders change targets, never current position.
 # Return the distance actually flown so a tick cannot exceed its travel budget.
-# Pool bounds are logistics metadata only. Index each surviving rock once
-# (and each pulsar exclusion disk). Rebuild only on map/depletion changes.
+# Ordinary asteroid chunks are logistics-only, not obstacles. The special
+# Pulsar exclusion disks retain their existing collision/navigation behavior.
+# Rebuild the exclusion index only on map replacement; ore depletion changes
+# only the corresponding field's logistics extent, not any route certificate.
 static func _refresh_movement_fields(fields: Array) -> void:
-	var dirty: bool = not is_same(fields, _movement_field_source) or _movement_fields.size() != fields.size()
-	if not dirty:
-		for i in range(fields.size()):
-			if _movement_field_counts[i] != fields[i].get("chunks", []).size():
-				dirty = true
-				break
-	if not dirty:
-		return
-	# Depletion only removes obstacles; already safe routes remain usable.
-	if not is_same(fields, _movement_field_source):
+	var new_map: bool = not is_same(fields, _movement_field_source) or _movement_fields.size() != fields.size()
+	if new_map:
+		_movement_field_source = fields
+		_movement_fields.clear()
+		_movement_field_counts.clear()
+		_movement_fields.resize(fields.size())
+		_movement_field_counts.resize(fields.size())
 		_rock_routes.clear()
-	_movement_field_source = fields
-	_movement_fields.clear()
-	_movement_field_counts.clear()
-	_rock_cells.clear()
-	_empty_rock_halos.clear()
-	_rock_windows.clear()
-	_rock_route_queries.clear()
-	_direct_rock_corridors.clear()
-	_direct_trajectories.clear()
-	for field in fields:
+		_rock_cells.clear()
+		_empty_rock_halos.clear()
+		_rock_windows.clear()
+		_rock_route_queries.clear()
+		_direct_rock_corridors.clear()
+		_direct_trajectories.clear()
+	for index in range(fields.size()):
+		var field: Dictionary = fields[index]
+		var chunks: Array = field.get("chunks", [])
+		if not new_map and _movement_field_counts[index] == chunks.size():
+			continue
 		var center: Vector2 = field["position"]
 		var special: bool = bool(field.get("antimatter", false))
 		var radius: float = float(field["radius"]) if special else 0.0
-		var chunks: Array = field.get("chunks", [])
-		_movement_field_counts.append(chunks.size())
+		_movement_field_counts[index] = chunks.size()
 		if special:
-			_index_rock(center, radius)
+			if new_map:
+				_index_rock(center, radius)
 		else:
 			for rock in chunks:
-				var point: Vector2 = rock["position"]
-				var rock_radius: float = float(rock.get("radius", 0.0))
-				radius = maxf(radius, center.distance_to(point) + rock_radius)
-				_index_rock(point, rock_radius)
-		_movement_fields.append({"position": center, "radius": radius})
+				radius = maxf(radius, center.distance_to(rock["position"]) + float(rock.get("radius", 0.0)))
+		_movement_fields[index] = {"position": center, "radius": radius}
 
 static func _rock_cell(point: Vector2) -> Vector2i:
 	return Vector2i(floori(point.x / ROCK_CELL), floori(point.y / ROCK_CELL))
@@ -2972,6 +2969,8 @@ static func _collect_rock_window(first: Vector2i, last: Vector2i) -> Array:
 	return result
 
 static func _point_clear_of_rocks(point: Vector2, clearance: float = ROCK_PREFERRED_CLEARANCE) -> bool:
+	if _rock_cells.is_empty():
+		return true
 	for obstacle in _rock_cells.get(_rock_cell(point), []):
 		if point.distance_squared_to(obstacle["position"]) < pow(float(obstacle["radius"]) + clearance, 2.0):
 			return false
@@ -3163,6 +3162,8 @@ static func _field_detour(before: Vector2, target: Vector2, budget: float, ship_
 # Sweep the actual step, including ship-avoidance steering, so large ticks
 # cannot tunnel through a rock. Allow an overlapping hull to move outward.
 static func _clip_rock_step(before: Vector2, after: Vector2) -> Vector2:
+	if _rock_cells.is_empty():
+		return after
 	var allowed: float = 1.0
 	var delta: Vector2 = after - before
 	if delta.length_squared() <= EPS * EPS:
@@ -3721,8 +3722,7 @@ static func _stage_wait_point(state: Dictionary, graph: Dictionary, ship: Dictio
 	if toward.is_zero_approx():
 		toward = Vector2.RIGHT
 	var offset: Vector2 = rock + toward * RESOURCE_HANDOFF_RANGE * 0.65
-	# Find a nearby clear berth along the real depot direction, rather than
-	# forcing the Freighter outside an invisible belt.
+	# Only a Pulsar exclusion disk can obstruct this otherwise direct berth.
 	for attempt in range(5):
 		if _point_clear_of_rocks(offset):
 			break
@@ -3803,7 +3803,7 @@ static func _choose_resource_stage(state: Dictionary, graph: Dictionary, ship: D
 	var fields: Array = state["map"].get("fields", [])
 	_refresh_movement_fields(fields)
 	# With neither a mining field nor an indexed salvage site, no stage
-	# can be assigned. Preserve the obstacle refresh at its old boundary.
+	# can be assigned.
 	if fields.is_empty() and (mining_only or cells.is_empty() or state.get("salvage", {}).is_empty()):
 		return false
 	var census: Dictionary = _stage_census(state, ship, owner)
@@ -12757,8 +12757,8 @@ static func _motion_sleep_mode(state: Dictionary, frame: STEP_FRAME, ship: Dicti
 # any automatic salvage, repair, science or routine work. Prove that all
 # earlier branches are inactive, then call the very same movement/arrival
 # routine. The guards are live on every substep, not a cached order type.
-# Navigation still checks the rock corridor and nearby hulls (and falls
-# back to detours); combat and contact settlement remain independent.
+# Navigation still checks Pulsar exclusion disks, walls and nearby hulls;
+# ordinary asteroids are traversable. Contact settlement remains independent.
 static func _try_direct_order_dispatch(state: Dictionary, frame: STEP_FRAME, ship: Dictionary, dt: float) -> bool:
 	if not ship.has("local_move_target") or not military_hull(str(ship.get("kind", ""))):
 		return false
