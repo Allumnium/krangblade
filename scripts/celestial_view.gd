@@ -146,8 +146,8 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 	var sprite_uvs := PackedVector2Array()
 	var pixel: Vector2 = Vector2(0.5, 0.5) / Vector2(ROCK_ATLAS.get_size())
 	for chunk in chunks:
-		var shape_key: Vector2 = chunk["position"]
-		var rock_pos: Vector2 = screen_center + (shape_key - world_center) * projection_fit * projection_zoom
+		var shape_key := Vector2i(field_index, int(chunk["id"]))
+		var rock_pos: Vector2 = screen_center + ((chunk["position"] as Vector2) - world_center) * projection_fit * projection_zoom
 		if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
 			continue
 		var fraction: float = clampf(float(chunk["remaining"]) / maxf(ECONOMY.EPS, float(chunk["initial"])), 0.0, 1.0)
@@ -163,7 +163,7 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 			continue
 		if not asteroid_shape_cache.has(shape_key):
 			var spin_signature: float = sin(float(chunk["rotation"]) * 5.0)
-			var variety: float = fposmod(sin(shape_key.dot(Vector2(0.013, 0.021))) * 43758.5453, 1.0)
+			var variety: float = fposmod(sin(Vector2(shape_key).dot(Vector2(0.013, 0.021))) * 43758.5453, 1.0)
 			var speed: float = deg_to_rad(lerpf(0.15, 0.5, variety))
 			asteroid_shape_cache[shape_key] = speed * (1.0 if spin_signature >= 0.0 else -1.0)
 		var spin: float = float(chunk["rotation"]) + rotation_time * float(asteroid_shape_cache[shape_key])

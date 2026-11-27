@@ -32,9 +32,6 @@ var fog_visible: Callable
 var ship_visible: Callable
 var empire_color: Callable
 var minimap_pan_drag: bool = false
-# Derived geometry keyed by field/layer, never live hidden ore.
-var _terrain_geometry: Dictionary = {}
-var _terrain_signature: Array = []
 
 func configure(surface: Control, canvas: Control, session_node: Node, territory: TERRITORY_VIEW, fog: FOG_OF_WAR, motion: SHIP_MOTION_VIEW, snapshot_query: Callable, size_query: Callable, world_query: Callable, player_query: Callable, pose_query: Callable, fog_query: Callable, visibility_query: Callable, color_query: Callable) -> void:
 	minimap = surface
@@ -140,16 +137,6 @@ func order_hint(mouse: InputEventMouseButton, state: Dictionary, pending_command
 					hint["wreck"] = int(pile["id"])
 	return hint
 
-func _draw_terrain_layer(key: Vector2i, chunks: Array, offset: Vector2, scale: float, tint: Color) -> void:
-	var entry: Dictionary = _terrain_geometry.get(key, {})
-	# FogOfWar replaces observations instead of editing them in place.
-	if entry.is_empty() or entry["chunks"] != chunks:
-		entry = CELESTIAL.terrain_footprint(chunks, offset, scale, tint)
-		entry["chunks"] = chunks
-		_terrain_geometry[key] = entry
-	if not entry["segments"].is_empty():
-		minimap.draw_multiline_colors(entry["segments"], entry["colors"], 1.0, true)
-
 func draw(selected: int, selected_units: Array[int], selected_field: int, selected_rock: int = -1) -> void:
 	var surface := Rect2(Vector2.ZERO, minimap.size)
 	minimap.draw_rect(surface, HUD.CONSOLE_BACKGROUND)
@@ -179,7 +166,7 @@ func draw(selected: int, selected_units: Array[int], selected_field: int, select
 		elif known[i] and bool(state["map"]["fields"][i - count].get("antimatter", false)):
 			tint = HUD.COLORS[ECONOMY.ANTIMATTER]
 			minimap.draw_rect(Rect2(locations[i] - Vector2.ONE * 1.8, Vector2.ONE * 3.6), tint, false, 1.0)
-		if (i < count and i == selected and selected_units.is_empty() and selected_field < 0) or (i >= count and i - count == selected_field and selected_rock < 0):
+		if (i < count and i == selected and selected_units.is_empty() and selected_field < 0) or (i >= count and i - count == selected_field and selected_rock < 0 and bool(state["map"]["fields"][i - count].get("antimatter", false))):
 			minimap.draw_arc(locations[i], 4.5, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
 	for pile in state.get("salvage", {}).values():
 		if not fog_visible.call(pile["position"]):
@@ -191,23 +178,6 @@ func draw(selected: int, selected_units: Array[int], selected_field: int, select
 		var corner: Vector2 = _minimap_point(Vector2.ZERO, area)
 		var far: Vector2 = _minimap_point(map_size.call(), area)
 		minimap.draw_texture_rect_region(fog_state.texture, Rect2(corner, far - corner), Rect2(Vector2.ZERO, map_size.call() / ECONOMY.VISION_CELL))
-	# Only observed asteroid locations appear; remembered ore remains dim.
-	var terrain_scale: float = area.size.x / maxf(1.0, float(map_size.call().x))
-	var terrain_signature: Array = [state["map"]["seed"], area, terrain_scale, state["map"].get("fields", []).size()]
-	if terrain_signature != _terrain_signature:
-		_terrain_signature = terrain_signature
-		_terrain_geometry.clear()
-	for index in range(state["map"].get("fields", []).size()):
-		var field: Dictionary = state["map"]["fields"][index]
-		if bool(field.get("antimatter", false)):
-			continue
-		var view: Dictionary = fog_state.rock_view(index)
-		_draw_terrain_layer(Vector2i(index, 0), view.get("hidden", []), area.position, terrain_scale, Color("#504840"))
-		_draw_terrain_layer(Vector2i(index, 1), view.get("live", []), area.position, terrain_scale, Color("#74675d"))
-		if index == selected_field and selected_rock >= 0:
-			var rock: Dictionary = fog_state.rock_at(index, selected_rock)
-			if not rock.is_empty():
-				minimap.draw_arc(_minimap_point(rock["position"], area), 3.0, 0.0, TAU, 12, HUD.ACCENT, 1.0, true)
 	# Mirror the main map's live hull visibility and interpolation; do not
 	# reveal undiscovered system ownership. Reuse this frame's pose cache and
 	# submit every hull dot as one triangle batch.

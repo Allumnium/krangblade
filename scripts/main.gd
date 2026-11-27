@@ -42,8 +42,7 @@ class MapPreview:
 				var tint := Color("#c295ff")
 				draw_circle(center, radius, tint)
 				draw_arc(center, radius + 2.0, 0.0, TAU, 24, tint, 1.0, true)
-			else:
-				CELESTIAL.draw_terrain_footprint(self, asteroid, offset, scale_factor, Color("#514b47"))
+
 		for index in range(points.size()):
 			var position: Vector2 = offset + points[index] * scale_factor
 			var home: bool = index < colors.size()

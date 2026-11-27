@@ -3543,7 +3543,14 @@ func _initialize() -> void:
 		assert(not (clustered["fields"] as Array).is_empty())
 		for edge in clustered["edges"]:
 			assert(not MAP.blocked(cluster_points[edge[0]], cluster_points[edge[1]], clustered["fields"]))
+		var ring_count: int = 0
 		for field in clustered["fields"]:
+			if field.has("orbit_center"):
+				ring_count += 1
+				assert(field["orbit_center"] == cluster_points[int(field["anchor"])])
+				assert(field["chunks"].size() >= MAP.ORBIT_ROCK_MIN and field["chunks"].size() <= MAP.ORBIT_ROCK_MAX)
+				for rock in field["chunks"]:
+					assert(is_equal_approx((rock["position"] as Vector2).distance_to(field["orbit_center"]), (rock["orbit_offset"] as Vector2).length()))
 			var ore: Dictionary = ECON.field_inventory(field)
 			if not bool(field.get("antimatter", false)):
 				var total: float = float(ore["Metals"]) + float(ore["Crystals"])
@@ -3585,6 +3592,7 @@ func _initialize() -> void:
 				assert((chunk["resource"] == ECON.ANTIMATTER) == bool(field.get("antimatter", false)))
 				assert(float(chunk["remaining"]) > 0.0)
 				assert((field["position"] as Vector2).distance_to(chunk["position"]) + float(chunk["radius"]) <= float(field.get("rock_extent", field["radius"])) + ECON.EPS)
+		assert(ring_count == cluster_points.size())
 		assert(bridge_distance / (bridges - cluster_ids.count(-1)) >= local_distance / locals - 0.01)
 		var seen: Dictionary = {0: true}
 		var frontier: Array = [0]
@@ -5714,6 +5722,7 @@ func _test_explore_without_cooldown() -> void:
 
 func _test_autocast_modes() -> void:
 	_test_exploration_area_priority()
+	_test_orbital_asteroids()
 	_test_explore_without_cooldown()
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
@@ -7042,13 +7051,14 @@ func _test_map_layouts() -> void:
 					var links: Array[int] = ECON.field_access_systems(galaxy, field)
 					assert(links.size() >= 1 and links.size() <= MAP.MAX_CONNECTIONS)
 					assert(links.has(int(field["anchor"])))
-					for anchor in links:
-						total_degrees[anchor] += 1
+					if not field.has("orbit_center"):
+						for anchor in links:
+							total_degrees[anchor] += 1
 				for degree in total_degrees:
 					assert(degree <= MAP.MAX_CONNECTIONS)
 				var graph: Dictionary = ECON.military_graph({"map": galaxy})
-				for neighbors in graph["adjacent"]:
-					assert(neighbors.size() <= MAP.MAX_CONNECTIONS)
+				for index in range(graph["adjacent"].size()):
+					assert(graph["adjacent"][index].size() <= MAP.MAX_CONNECTIONS + int(index < points.size()))
 				var central_nodes: Array[int] = []
 				for index in range(galaxy["fields"].size()):
 					if galaxy["fields"][index].get("antimatter", false):
@@ -7646,3 +7656,27 @@ func _test_exploration_area_priority() -> void:
 	ranked = ECON._explore_rank(dim, spacing, seen, live, reserved, Vector2(450, 150), 110.0, {}, 0.0)
 	assert(not ranked.is_empty() and ranked[0][3] != first)
 	print("PASS: unknown-first area coverage, dark-area fallback and reservations")
+
+func _test_orbital_asteroids() -> void:
+	var map_data: Dictionary = MAP.generate(827, 2, "Grid")
+	var original: Dictionary = map_data.duplicate(true)
+	var ring: Dictionary = map_data["fields"][0]
+	var rock: Dictionary = ring["chunks"][0]
+	var first: Vector2 = rock["position"]
+	var radius: float = (rock["orbit_offset"] as Vector2).length()
+	MAP.update_asteroid_orbits(map_data, 80.0)
+	assert(rock["position"] != first)
+	assert(is_equal_approx((rock["position"] as Vector2).distance_to(ring["orbit_center"]), radius))
+	var current: Vector2 = rock["position"]
+	MAP.update_asteroid_orbits(map_data, 80.5)
+	assert(rock["position"] == current)
+	MAP.update_asteroid_orbits(map_data, 0.0)
+	assert(map_data == original)
+	var codec = preload("res://scripts/snapshot_codec.gd")
+	MAP.update_asteroid_orbits(map_data, 80.0)
+	var changes: Variant = codec.encode_map_ore(map_data, original)
+	assert(changes != null)
+	var restored: Dictionary = codec.restore_map_ore(original, changes)
+	MAP.update_asteroid_orbits(restored, 80.0)
+	assert(restored == map_data)
+	print("PASS: deterministic orbit movement and compact ore replication")

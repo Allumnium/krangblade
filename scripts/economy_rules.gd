@@ -2935,6 +2935,10 @@ static func _refresh_movement_fields(fields: Array) -> void:
 		if special:
 			if new_map:
 				_index_rock(center, radius)
+		elif field.has("orbit_center"):
+			# A conservative invariant bound covers the moving ring without
+			# invalidating logistics caches every orbital update.
+			radius = float(field.get("rock_extent", field["radius"])) if not chunks.is_empty() else 0.0
 		else:
 			for rock in chunks:
 				radius = maxf(radius, center.distance_to(rock["position"]) + float(rock.get("radius", 0.0)))
@@ -4735,13 +4739,23 @@ static func _miner_delivery(state: Dictionary, ship: Dictionary, teams: Array[in
 	if arrived or _move(state, ship, dt, Vector2.INF, -1, STATION_DOCK_RANGE):
 		_unload_miner(state, ship, teams, cache, dt)
 
-static func _miner_outbound(state: Dictionary, ship: Dictionary, field: Dictionary, field_index: int, origin: Vector2, dt: float) -> void:
+static func _follow_mining_rock(ship: Dictionary, chunk: Dictionary) -> Vector2:
+	var rock: Vector2 = chunk["position"]
+	var old_rock: Vector2 = ship.get("mining_rock", rock)
 	var target: Vector2 = ship["mining_target"]
-	var span: Vector2 = target - origin
+	if rock != old_rock:
+		target += rock - old_rock
+		ship["mining_rock"] = rock
+		ship["mining_target"] = target
+	return target
+
+static func _miner_outbound(state: Dictionary, ship: Dictionary, field: Dictionary, field_index: int, origin: Vector2, dt: float) -> void:
 	var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
 	if chunk.is_empty() or not _mining_resources(state, int(ship["owner"]), field_index).has(str(chunk["resource"])):
 		ship["mining_mode"] = "return"
 		return
+	var target: Vector2 = _follow_mining_rock(ship, chunk) if field.has("orbit_center") else ship["mining_target"]
+	var span: Vector2 = target - origin
 	_navigate(ship, target, ship_speed(str(ship.get("kind", "ship"))) * dt)
 	ship["field_leg"] = clampf(((ship["position"] as Vector2) - origin).dot(span) / maxf(EPS, span.length_squared()), 0.0, 1.0)
 	if (ship["position"] as Vector2) == target:
@@ -4758,6 +4772,12 @@ static func _miner_extract(state: Dictionary, ship: Dictionary, field: Dictionar
 	var chunk: Dictionary = _find_chunk(field, int(ship["chunk"]))
 	var available: bool = not chunk.is_empty() and resources.has(str(chunk["resource"]))
 	if available:
+		if field.has("orbit_center"):
+			var target: Vector2 = _follow_mining_rock(ship, chunk)
+			if (ship["position"] as Vector2).distance_to(target) > 1.0:
+				_navigate(ship, target, ship_speed(str(ship.get("kind", "ship"))) * dt)
+				if (ship["position"] as Vector2).distance_to(target) > 1.0:
+					return
 		var resource: String = str(chunk["resource"])
 		var free: float = MINER_CAPACITY - _cargo_total(ship)
 		var amount: float = minf(free, minf(float(chunk["remaining"]), minf(MINER_RATE * _player_factor(state, int(ship["owner"]), "rank_extraction", 0.10) * float(field[resource]) * dt, float(budgets[field_index][resource]))))
@@ -12741,7 +12761,10 @@ static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float, econo
 	_accrue_base_galactic_income(state, dt)
 	_accrue_resident_taxes(state, dt, bases)
 	_pay_fleet_upkeep(state, dt, wage_tables)
-	state["elapsed"] = float(state["elapsed"]) + dt
+	var previous_elapsed: float = float(state["elapsed"])
+	state["elapsed"] = previous_elapsed + dt
+	if floori(previous_elapsed / MAP.ASTEROID_ORBIT_STEP + 0.00001) != floori(float(state["elapsed"]) / MAP.ASTEROID_ORBIT_STEP + 0.00001):
+		MAP.update_asteroid_orbits(state["map"], float(state["elapsed"]))
 	if dt > 0.0:
 		_check_unpaid_defections(state)
 	_expire_transfer_events(state, frame.deadline_schedule_enabled)

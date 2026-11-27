@@ -198,7 +198,7 @@ func _observe_rocks(state: Dictionary, map_size: Vector2) -> void:
 			if is_visible(chunk["position"], map_size):
 				var id: int = int(chunk["id"])
 				var previous: Dictionary = memory.get(id, {})
-				if not bool(previous.get("surveyed", false)) or previous.get("remaining", -1.0) != chunk["remaining"]:
+				if not bool(previous.get("surveyed", false)) or previous.get("remaining", -1.0) != chunk["remaining"] or previous.get("position") != chunk["position"]:
 					var observed: Dictionary = chunk.duplicate()
 					observed["surveyed"] = true
 					memory[id] = observed
