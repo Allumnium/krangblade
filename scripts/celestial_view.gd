@@ -160,6 +160,7 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 	var sprite_vertices := PackedVector3Array()
 	var sprite_colors := PackedColorArray()
 	var sprite_uvs := PackedVector2Array()
+	var pixel: Vector2 = Vector2(0.5, 0.5) / Vector2(ROCK_ATLAS.get_size())
 	for chunk in chunks:
 		var shape_key: Vector2 = chunk["position"]
 		var rock_pos: Vector2 = screen_center + (shape_key - world_center) * projection_fit * projection_zoom
@@ -193,7 +194,6 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 		var corners: Array[Vector2] = [rock_pos - basis - side, rock_pos + basis - side, rock_pos + basis + side, rock_pos - basis + side]
 		var tile: int = asteroid_tile(int(chunk["id"]))
 		var cell := Vector2(tile % ROCK_GRID, floori(float(tile) / ROCK_GRID)) / float(ROCK_GRID)
-		var pixel: Vector2 = Vector2(0.5, 0.5) / Vector2(ROCK_ATLAS.get_size())
 		var uv_min: Vector2 = cell + pixel
 		var uv_max: Vector2 = cell + Vector2.ONE / float(ROCK_GRID) - pixel
 		var uvs: Array[Vector2] = [uv_min, Vector2(uv_max.x, uv_min.y), uv_max, Vector2(uv_min.x, uv_max.y)]

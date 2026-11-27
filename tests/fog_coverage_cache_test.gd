@@ -2,11 +2,21 @@ extends SceneTree
 const ECON = preload("res://scripts/economy_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 const FOG = preload("res://scripts/fog_of_war.gd")
+const CELESTIAL = preload("res://scripts/celestial_view.gd")
 
 func _initialize() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
+	# Art variant assignment is independent of observation, resource and time.
+	var tiles: Dictionary = {}
+	for id in range(64):
+		var tile: int = CELESTIAL.asteroid_tile(id)
+		assert(tile >= 0 and tile < 64)
+		assert(tile == CELESTIAL.asteroid_tile(id + 64))
+		tiles[tile] = true
+	assert(tiles.size() == 64)
+	assert(CELESTIAL.ROCK_ATLAS.get_size() == Vector2(256, 256))
 	var state: Dictionary = ECON.create(MAP.generate(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	ECON.initialize_diplomacy(state)
 	var cache: Dictionary = {}

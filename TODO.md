@@ -2,7 +2,7 @@
 
 ## Approved art and audio overhaul (2026-11-27)
 
-- [ ] v0.116.0 adds the 64-variant asteroid atlas, material maps, directional lighting and Crystal veins; confirm atlas alignment, depletion scale, LOD, fog memory, shader/import metadata, and realistic rendered FPS. Physical geometry and economy unchanged.
+- [ ] v0.116.0 adds the 64-variant asteroid atlas, material maps, directional lighting and Crystal veins; v0.116.1 verifies PNG dimensions statically and adds tile coverage assertions. Run the existing fog regression; confirm atlas alignment, depletion scale, LOD, fog memory, shader/import metadata, and realistic rendered FPS. Physical geometry and economy unchanged.
 
 - [ ] v0.115.0 integrates Science Vessel sprite and all supplied maps, bounded ambient/stellar/ship lighting and randomized repeating match playlist; confirm material map conventions, visually check directional lighting, cargo, portraits, fog/selection, audio transitions, import metadata and actual GPU performance at realistic fleet counts. Expand authored assets and lighting for planets, stations, other hulls and effects as supplied. Keep lighting client-only.
 - [ ] v0.115.1 updates solo fleet counts and adds initial Science Vessel, stock, credit and objective assertions; run these and real peer parity. Verify initial economy pacing, and migrate other legacy starting-fleet assumptions as required. Batched ship lamps, nearest-light cap, planet shading, actual sprite portrait and foreground Antimatter cargo also need visual/runtime acceptance.
