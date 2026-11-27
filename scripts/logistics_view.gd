@@ -18,7 +18,7 @@ var local_player: Callable
 var population_texture: Callable
 var refresh_match: Callable
 var logistics_lens: Button
-var active_lens: String = "logistics"
+var active_lens: String = ""
 
 func configure(canvas: Control, overlay: Control, celestial: CELESTIAL_VIEW, camera_view: CAMERA_VIEW, projection: Callable, radius_query: Callable, fit: Callable, player_query: Callable, icon_query: Callable, refresh_query: Callable) -> void:
 	map_canvas = canvas
@@ -41,6 +41,7 @@ func build(parent: Container, strip_width: float, make_button: Callable, make_ic
 	logistics_lens.add_theme_constant_override("icon_max_width", 24)
 	logistics_lens.custom_minimum_size = Vector2.ONE * strip_width
 	logistics_lens.toggle_mode = true
+	logistics_lens.set_pressed_no_signal(active_lens == "logistics")
 	logistics_lens.focus_mode = Control.FOCUS_NONE
 	logistics_lens.tooltip_text = "Logistics lens · System resource storage"
 

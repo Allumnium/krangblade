@@ -21,7 +21,7 @@ vec3 compress_highlights(vec3 rgb) {
 	}
 	return rgb;
 }
-vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albedo, float specular, vec3 ambient, float ao) {
+vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec2 local_offset, vec3 albedo, float specular, vec3 ambient, float ao) {
 	vec3 diffuse_light = ambient;
 	vec3 shine = vec3(0.0);
 	for (int i = 0; i < 16; i++) {
@@ -36,7 +36,13 @@ vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albe
 		float height = stellar ? max(0.001, length(delta) * 0.18) : max(0.001, radius * 0.10);
 		vec3 direction = normalize(vec3(dot(delta, axis_x), -dot(delta, axis_y), height));
 		float lambert = max(0.0, dot(normal, direction));
-		vec3 energy = light_colors[i].rgb * strength;
+		float visibility = 1.0;
+		if (stellar) {
+			float facing = smoothstep(-0.55, 0.55, dot(local_offset, direction.xy));
+			visibility = mix(0.15, 1.0, facing);
+			lambert = mix(lambert, 0.08 + 0.82 * facing, 0.80);
+		}
+		vec3 energy = light_colors[i].rgb * strength * visibility;
 		diffuse_light += energy * lambert;
 		vec3 half_vector = normalize(direction + vec3(0.0, 0.0, 1.0));
 		shine += energy * pow(max(0.0, dot(normal, half_vector)), 24.0) * specular * 0.12;
@@ -54,6 +60,19 @@ void vertex() {
 	crystal = COLOR.b;
 }
 void fragment() {
+	// Recover the signed UV axes from the actual rotated rock quad.
+	vec2 axis_x = surface_axis_x;
+	vec2 axis_y = surface_axis_y;
+	vec2 ux = dFdx(UV);
+	vec2 uy = dFdy(UV);
+	vec2 px = dFdx(surface_position);
+	vec2 py = dFdy(surface_position);
+	float det = ux.x * uy.y - ux.y * uy.x;
+	if (abs(det) > 0.00000001) {
+		axis_x = normalize((px * uy.y - py * ux.y) / det);
+		axis_y = normalize((py * ux.x - px * uy.x) / det);
+	}
+	vec2 local_offset = (fract(UV * 8.0) - vec2(0.5)) * vec2(2.0, -2.0);
 	vec4 base = texture(TEXTURE, UV);
 	if (base.a <= 0.001) { discard; }
 	vec3 diffuse = base.rgb;
@@ -68,6 +87,6 @@ void fragment() {
 	vec3 normal = normalize(texture(normal_map, UV).rgb * 2.0 - 1.0 + vec3(-dx * 0.08, dy * 0.08, 0.28));
 	float ao = mix(0.68, 1.0, texture(occlusion_map, UV).r);
 	float specular = texture(specular_map, UV).r;
-	vec3 lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, normal, diffuse, specular, vec3(0.030, 0.035, 0.045), ao);
+	vec3 lit = surface_lighting(surface_position, axis_x, axis_y, normal, local_offset, diffuse, specular, vec3(0.16, 0.17, 0.19), ao);
 	COLOR = vec4(clamp(compress_highlights(lit), vec3(0.0), vec3(1.0)), base.a);
 }

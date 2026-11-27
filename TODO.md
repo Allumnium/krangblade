@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.121.9: Verify corrected asteroid directional lighting at all rotations and belt distances, ambient tuning, doubled belt target/clearance, one-star sites, default lens, owned commandable box/Shift selection, expanded all-hull rendered regression and future asset coverage. Add actual rock and procedural structure fixtures; run full import/parse, gameplay, FPS and peer checks.
+
 - [ ] v0.121.8: Verify smooth three-cohort asteroid orbits, pause/speed changes, visual picking and mining alignment, static field behavior, compact replicas and rendered FPS/real peers.
 
 - [ ] v0.121.7: Confirm revised star-facing broad illumination on all real ship sprites in game and strict rendered regression (all 192 correct), check actual hardware FPS and peers. Offline asset calculation 192/192 and translated synthetic GPU probe 8/8 passed; not a substitute for real-sprite rendered verification.

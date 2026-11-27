@@ -94,7 +94,7 @@ void vertex() {
 	surface_axis_x = normalize(transform[0].xy);
 	surface_axis_y = normalize(transform[1].xy);
 	modulation = COLOR;
-	illumination = vec3(0.025, 0.030, 0.040);
+	illumination = vec3(0.16, 0.17, 0.19);
 	// Legacy vector hulls retain the inexpensive per-instance path.
 	if (!authored_sprite && !spherical_surface) {
 		for (int i = 0; i < 16; i++) {
@@ -150,7 +150,7 @@ void fragment() {
 			ao = mix(0.72, 1.0, texture(occlusion_map, UV).r);
 			specular = texture(specular_map, UV).r * 0.50;
 		}
-		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, geometric, vec2(0.0), base.rgb, specular, vec3(0.035, 0.035, 0.045), ao);
+		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, geometric, vec2(0.0), base.rgb, specular, vec3(0.16, 0.17, 0.19), ao);
 	} else if (authored_sprite) {
 		vec3 n = texture(normal_map, UV).rgb * 2.0 - 1.0;
 		// The three exported hull normal maps encode lateral slopes
@@ -165,7 +165,7 @@ void fragment() {
 		float specular = texture(specular_map, UV).r;
 		// _v is an offline preview, not a material input. TEXTURE is the
 		// empire-decaled diffuse map; only explicit world lights emit light.
-		lit = surface_lighting(ship_pos, ship_axis_x, ship_axis_y, n, n, (UV - vec2(0.5)) * vec2(2.0, -2.0), base.rgb, specular * 0.45, vec3(0.035, 0.040, 0.050), ao);
+		lit = surface_lighting(ship_pos, ship_axis_x, ship_axis_y, n, n, (UV - vec2(0.5)) * vec2(2.0, -2.0), base.rgb, specular * 0.45, vec3(0.16, 0.17, 0.19), ao);
 		// Identical low self-lit surface detail for every authored hull; no idle plume or extra light source.
 		lit += base.rgb * 0.012;
 	}

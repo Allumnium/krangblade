@@ -19,7 +19,7 @@ const ASTEROID_RADIUS_SCALE: float = 0.4
 const ASTEROID_MAX_RADIUS: float = 24.0
 const ORBIT_ROCK_MIN: int = 64
 const ORBIT_ROCK_MAX: int = 80
-const ORBIT_WORLD_RADIUS: float = 900.0
+const ORBIT_WORLD_RADIUS: float = 1800.0
 const STAR_SITE_CHANCE: float = 0.30
 const ASTEROID_SITE_CHANCE: float = 0.35
 const ASTEROID_ORBIT_STEP: float = 1.0
@@ -67,7 +67,8 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	var radial: bool = layout == "Radial"
 	var grid: bool = layout == "Grid"
 	var hex: bool = layout == "Hex Grid"
-	# Individual stars, not clusters. Each layout keeps its own geometry.
+	# Each occupied stellar site contains exactly one independent star.
+	# Legacy empty cluster metadata is retained only for snapshot compatibility.
 	var count: int = player_count * PATTERN_SITES_PER_PLAYER
 	var spacing: float = 950.0
 	var raw: Array[Vector2] = []
