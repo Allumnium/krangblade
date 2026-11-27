@@ -78,7 +78,7 @@ func draw(state: Dictionary, font: Font) -> void:
 			logistics_overlay.draw_rect(Rect2(cell, Vector2(44.0 * fraction, 14) * scale), HUD.COLORS[resource].darkened(0.4))
 			logistics_overlay.draw_texture_rect(HUD.ICONS[resource], Rect2(cell, Vector2(13, 13) * scale), false)
 			if scale >= 0.8:
-				logistics_overlay.draw_string(font, cell + Vector2(15, 11) * scale, UI_TEXT.tons(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+				logistics_overlay.draw_string(font, cell + Vector2(15, 11) * scale, UI_TEXT.resource_amount(float(system["stock"][resource]), 0, true), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
 			var grade: int = ECONOMY.specialization_grade(system, resource)
 			if grade != 0 and scale >= 0.55:
 				var badge_pos: Vector2 = cell + Vector2(8, 16) * scale

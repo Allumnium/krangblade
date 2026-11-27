@@ -21,10 +21,10 @@ static func ship_kind_name(kind: String) -> String:
 		return "Wall Segment"
 	return {"ship": "Freighter", "miner": "Harvester", "colony_ship": "Colony"}.get(kind, kind.replace("_", " ").capitalize())
 
-static func tons(value: float, decimals: int = 1, compact: bool = false) -> String:
-	# Stocks and prices share one unit; preserve fractional small values.
-	var number: String = ("%.1f" % value).trim_suffix(".0") if decimals == 1 and absf(value) < 1000.0 else "%.0f" % value
-	return number + ("" if compact else " ") + "t"
+static func resource_amount(value: float, decimals: int = 0, _compact: bool = false) -> String:
+	# Whole stocks and prices; fractional rates only when explicitly requested.
+	var number: String = (("%.2f" if decimals >= 2 else "%.1f") % value).rstrip("0").trim_suffix(".") if decimals > 0 else "%.0f" % value
+	return number
 
 static func compact_amount(value: float) -> String:
 	if value >= 1000000000.0:
@@ -49,7 +49,7 @@ static func roman_level(level: int) -> String:
 	return result
 
 static func blaster_summary(kind: String) -> String:
-	return "Blasters ×%d | %.0f dmg ×%d | %.1fs/%.1fs | R%.0f" % [ECONOMY.blaster_count(kind), ECONOMY.BLASTER_DAMAGE, ECONOMY.BLASTER_SHOTS, ECONOMY.BLASTER_BURST, ECONOMY.BLASTER_PAUSE, ECONOMY.LASER_RANGE]
+	return "Blasters ×%d | %.1f dmg ×%d | %.1fs/%.1fs | R%.0f" % [ECONOMY.blaster_count(kind), ECONOMY.BLASTER_DAMAGE, ECONOMY.BLASTER_SHOTS, ECONOMY.BLASTER_BURST, ECONOMY.BLASTER_PAUSE, ECONOMY.LASER_RANGE]
 
 static func railgun_summary(kind: String) -> String:
 	return "Railgun ×%d | %.0f dmg | %.0fs | R%.0f" % [ECONOMY.railgun_count(kind), ECONOMY.RAILGUN_DAMAGE, ECONOMY.RAILGUN_COOLDOWN, ECONOMY.RAILGUN_RANGE]
@@ -66,16 +66,16 @@ static func colony_population_requirement() -> String:
 static func ship_stats(kind: String) -> String:
 	var details: String = ""
 	match kind:
-		"ship": details = "Transports resources · Cargo %.0f t" % ECONOMY.CARGO_CAPACITY
-		"colony_ship": details = "%s\nSettles a neutral system · %.0f settlers\nFarm %.0f t/s · Cargo %.0f t" % [colony_population_requirement(), ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
+		"ship": details = "Transports resources · Cargo %.0f" % ECONOMY.CARGO_CAPACITY
+		"colony_ship": details = "%s\nSettles a neutral system · %.0f settlers\nFarm %.1f/s · Cargo %.0f" % [colony_population_requirement(), ECONOMY.COLONY_POPULATION, ECONOMY.COLONY_FARM_RATE, ECONOMY.COLONY_CAPACITY]
 		"scout": details = "Fast reconnaissance · " + blaster_summary(kind)
 		"cruiser", "destroyer": details = capital_weapon_summary(kind)
 		"railgun_ship": details = railgun_summary(kind)
-		"construction_ship": details = "Builds static structures by physical delivery · Cargo %.0f t" % ECONOMY.CONSTRUCTION_SHIP_CAPACITY
+		"construction_ship": details = "Builds static structures by physical delivery · Cargo %.0f" % ECONOMY.CONSTRUCTION_SHIP_CAPACITY
 		"fighter": details = blaster_summary(kind)
-		"miner": details = "Damage %.0f · Range %.0f · Mining %.0f t/s · Cargo %.0f t" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
+		"miner": details = "Damage %.1f · Range %.0f · Mining %.1f/s · Cargo %.0f" % [ECONOMY.MINER_LASER_DAMAGE, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE, ECONOMY.MINER_CAPACITY]
 		"science_ship": details = "Pulsar collector · 1 antimatter · %.0f s collection\nRepair %.0f HP/yr · Cloak detection R%.0f\nScan: %.0f yr lifetime / %.0f yr cooldown" % [ECONOMY.SCIENCE_COLLECTION_YEARS, ECONOMY.SCIENCE_REPAIR_RATE, ECONOMY.sight_radius(kind), ECONOMY.PROBE_LIFETIME, ECONOMY.SCAN_COOLDOWN]
-	return "%s\nHP %.0f · Speed %.0f/s · %s\nUpkeep: %.0f GC/yr" % [details, ECONOMY.ship_max_hp(kind), ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_upkeep(kind)]
+	return "%s\nHP %.0f · Speed %.0f/s · %s\nUpkeep: %.1f GC/yr" % [details, ECONOMY.ship_max_hp(kind), ECONOMY.ship_speed(kind), ECONOMY.size_name(ECONOMY.ship_size(kind)), ECONOMY.ship_upkeep(kind)]
 
 static func system_bonus_text(p: Dictionary) -> String:
 	var lines: PackedStringArray = []
@@ -90,7 +90,7 @@ static func system_bonus_text(p: Dictionary) -> String:
 	return "\n".join(lines)
 
 # Preserve meaningful small production increments instead of rounding
-# both the reference and local value to the same hundredth of a ton.
+# both the reference and local value to the same hundredth of a unit.
 static func signed_yield(value: float) -> String:
 	if is_zero_approx(value):
 		return "+0"
@@ -124,7 +124,7 @@ static func economy_building_effect(p: Dictionary, resource: String) -> String:
 		sample["eco_population"] = 0.0
 		sample["planet_blockaded"] = false
 	var base: float = ECONOMY.rate(reference_preview, resource) - ECONOMY.rate(reference, resource)
-	var result: String = "Yield: %s t/yr\nReference: %s t/yr %s 10k %s" % [signed_yield(actual), signed_yield(base), "at" if resource == "Organics" else "per", "planetary pop." if resource == "Organics" else "pop."]
+	var result: String = "Yield: %s/yr\nReference: %s/yr %s 100 %s" % [signed_yield(actual), signed_yield(base), "at" if resource == "Organics" else "per", "planetary pop." if resource == "Organics" else "pop."]
 	if resource == "Organics":
 		result += "\n+%s food-supported population" % compact_amount(ECONOMY.population_capacity(preview) - ECONOMY.population_capacity(p))
 	if bool(p.get("planet_blockaded", false)):

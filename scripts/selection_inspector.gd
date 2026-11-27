@@ -121,7 +121,7 @@ func refresh_weapons(ship: Dictionary, system: Dictionary, body_selected: bool, 
 				"cruiser", "destroyer": details = UI_TEXT.capital_weapon_summary(str(ship["kind"]))
 				"railgun_ship": details = UI_TEXT.railgun_summary(str(ship["kind"]))
 				"scout", "fighter": details = UI_TEXT.blaster_summary(str(ship["kind"]))
-				"miner": details = "Mining laser ×2\n%.0f damage each · 1 shot/s (1×) · Range %.0f\n+200%% vs asteroids · %.0f t/yr nominal" % [ECONOMY.MINER_LASER_DAMAGE / 2.0, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE]
+				"miner": details = "Mining laser ×2\n%.1f damage each · 1 shot/s (1×) · Range %.0f\n+200%% vs asteroids · %.1f/yr nominal" % [ECONOMY.MINER_LASER_DAMAGE / 2.0, ECONOMY.LASER_RANGE, ECONOMY.MINER_RATE]
 		elif not system.is_empty() and not yard_selected:
 			if body_selected and system.get("pds", {}).has(selected_body):
 				parent = body_status.get_parent()
@@ -130,7 +130,7 @@ func refresh_weapons(ship: Dictionary, system: Dictionary, body_selected: bool, 
 			elif not body_selected and building_selection_kind == "station" and ECONOMY.has_station(system):
 				parent = planet_overview
 				at = 1
-				details = "Station lasers ×%d\n%.0f damage each · 1 shot/s (1×) · Range %.0f" % [system["station"].get("weapons", []).size(), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
+				details = "Station lasers ×%d\n%.1f damage each · 1 shot/s (1×) · Range %.0f" % [system["station"].get("weapons", []).size(), ECONOMY.LASER_DAMAGE, ECONOMY.LASER_RANGE]
 	if weapon_details.get_parent() != parent:
 		weapon_details.reparent(parent, false)
 		parent.move_child(weapon_details, at)

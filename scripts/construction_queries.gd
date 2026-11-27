@@ -25,34 +25,34 @@ static func base_work(kind: String, level: int) -> float:
 		"orbital_housing": return 30.0
 	return 1.0
 
-static func base_cost(kind: String, level: int, crystal_multiplier: float, upgrade_factor: float, warehouse_costs: Array, orbital_housing_cost: Dictionary) -> Dictionary:
+static func base_cost(kind: String, level: int, _crystal_multiplier: float, upgrade_factor: float, warehouse_costs: Array, orbital_housing_cost: Dictionary) -> Dictionary:
 	# Explicit prototype values; the final costs/recipes are intentionally undefined.
 	match kind:
-		"ship": return {"Metals": 360.0, "Organics": 15.0}
-		"colony_ship": return {"Metals": 1200.0, "Organics": 30.0}
-		"fighter": return {"Metals": 270.0, "Organics": 10.0}
-		"miner": return {"Metals": 540.0, "Organics": 20.0}
-		"science_ship": return {"Metals": 900.0, "Organics": 30.0}
-		"scout": return {"Metals": 120.0, "Organics": 4.0}
-		"cruiser": return {"Metals": 1800.0, "Organics": 60.0, "Crystals": 80.0 * crystal_multiplier}
-		"destroyer": return {"Metals": 3800.0, "Organics": 120.0, "Crystals": 200.0 * crystal_multiplier}
-		"railgun_ship": return {"Metals": 2100.0, "Organics": 60.0, "Crystals": 120.0 * crystal_multiplier}
-		"construction_ship": return {"Metals": 420.0, "Organics": 20.0}
+		"ship": return {"Metals": 50.0}
+		"colony_ship": return {"Metals": 150.0, "Organics": 10.0}
+		"fighter": return {"Metals": 25.0}
+		"miner": return {"Metals": 50.0}
+		"science_ship": return {"Metals": 100.0}
+		"scout": return {"Metals": 10.0}
+		"cruiser": return {"Metals": 200.0, "Crystals": 25.0}
+		"destroyer": return {"Metals": 300.0, "Crystals": 75.0}
+		"railgun_ship": return {"Metals": 200.0, "Crystals": 50.0}
+		"construction_ship": return {"Metals": 40.0}
 		"yard":
 			match level:
-				1: return {"Metals": 480.0}
-				2: return {"Metals": 2000.0, "Organics": 200.0, "Crystals": 200.0 * crystal_multiplier}
-				3: return {"Metals": 6000.0, "Organics": 600.0, "Crystals": 600.0 * crystal_multiplier}
-		"pds": return {"Metals": 540.0, "Organics": 60.0, "Crystals": 60.0 * crystal_multiplier}
-		"dyson_sphere": return {"Metals": 20000.0, "Crystals": 10000.0}
-		"reinforced_plating": return {"Metals": 4000.0}
-		"laser_matrix": return {"Metals": 2500.0, "Crystals": 800.0 * crystal_multiplier}
-		"yard_upgrade": return {"Metals": 240.0 * pow(upgrade_factor, float(maxi(0, level - 1)))}
-		"production": return {"Metals": 200.0 * pow(upgrade_factor, float(maxi(0, level - 1)))}
+				1: return {"Metals": 50.0}
+				2: return {"Metals": 200.0, "Crystals": 75.0}
+				3: return {"Metals": 600.0, "Crystals": 250.0}
+		"pds": return {"Metals": 50.0, "Crystals": 25.0}
+		"dyson_sphere": return {"Metals": 2000.0, "Crystals": 1000.0}
+		"reinforced_plating": return {"Metals": 400.0}
+		"laser_matrix": return {"Metals": 250.0, "Crystals": 300.0}
+		"yard_upgrade": return {"Metals": 25.0 * pow(upgrade_factor, float(maxi(0, level - 1)))}
+		"production": return {"Metals": 25.0 * pow(upgrade_factor, float(maxi(0, level - 1)))}
 		"warehouse": return warehouse_costs[level - 1].duplicate()
 		"habitation":
 			var factor: float = pow(3.0, level - 1)
-			return {"Metals": 600.0 * factor}
+			return {"Metals": 75.0 * factor}
 		"orbital_housing": return orbital_housing_cost.duplicate()
 	return {}
 
