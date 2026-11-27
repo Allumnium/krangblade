@@ -5,6 +5,7 @@ const ECONOMY = preload("res://scripts/economy_rules.gd")
 const SNAPSHOT_SECONDS: float = 0.2
 const THRUST_FADE_RATE: float = 5.0
 const THRUST_DEAD_ZONE: float = 0.06
+const CRUISE_THRUST_MAX: float = 0.28
 
 var pose_frame: int = -1
 var pose_revision: Array = []
@@ -28,7 +29,8 @@ func advance(delta: float) -> void:
 		var duration: float = float(visual.get("duration", SNAPSHOT_SECONDS))
 		if float(visual["age"]) < duration:
 			visual["age"] = minf(duration, float(visual["age"]) + delta)
-		# Exhaust decays even after interpolation reaches its destination.
+		# Acceleration flare decays after interpolation; cruise intensity
+		# remains until a new authoritative velocity sample changes it.
 		var thrust: float = float(visual.get("thrust", 0.0)) * exp(-delta * THRUST_FADE_RATE)
 		visual["thrust"] = thrust
 		if float(visual["age"]) < duration or thrust > 0.001:
@@ -41,9 +43,15 @@ func world_position(ship: Dictionary, points: Array, session: Node) -> Vector2:
 	var visual: Dictionary = ship_visuals.get(int(ship["id"]), {})
 	return _ship_position(ship, points, session) if visual.is_empty() else _visual_position(visual)
 
+# Cruise intensity scales with observed speed; suppress tiny corrections.
+static func cruise_thrust(speed_ratio: float) -> float:
+	return CRUISE_THRUST_MAX * smoothstep(0.04, 0.55, speed_ratio)
+
 func thrust_for(id: int) -> float:
 	var visual: Dictionary = ship_visuals.get(id, {})
-	return float(visual.get("thrust", 0.0))
+	var cruise: float = float(visual.get("cruise", 0.0))
+	# Blend the transient acceleration flare above the sustained baseline.
+	return lerpf(cruise, 1.0, clampf(float(visual.get("thrust", 0.0)), 0.0, 1.0))
 
 func target_position(id: int) -> Vector2:
 	var visual: Dictionary = ship_visuals.get(id, {})
@@ -80,12 +88,14 @@ func sync(state: Dictionary, session: Node) -> void:
 			var revision: int = int(sample.get("revision", session.get("motion_base_revision") if guest else session.get("motion_revision")))
 			var speed: int = int(state.get("time_speed", 1))
 			if previous.is_empty():
-				updated[id] = {"from": target, "to": target, "age": interval, "duration": interval, "heading": heading, "motion_revision": revision, "motion_point": target, "motion_speed": speed, "velocity": Vector2.ZERO, "thrust": 0.0}
+				updated[id] = {"from": target, "to": target, "age": interval, "duration": interval, "heading": heading, "motion_revision": revision, "motion_point": target, "motion_speed": speed, "velocity": Vector2.ZERO, "thrust": 0.0, "cruise": 0.0}
 				continue
 			var prior_revision: int = int(previous.get("motion_revision", revision))
 			if speed <= 0 or int(previous.get("motion_speed", speed)) != speed or revision < prior_revision:
 				previous["velocity"] = Vector2.ZERO
 				previous["thrust"] = 0.0
+				previous["cruise"] = 0.0
+				previous["motion_speed"] = speed
 				previous["motion_revision"] = revision
 				previous["motion_point"] = target
 			elif revision > prior_revision:
@@ -101,8 +111,10 @@ func sync(state: Dictionary, session: Node) -> void:
 				var turning: float = absf(delta_velocity.cross(axis)) * 0.30
 				var impulse: float = (forward_accel + turning) * SNAPSHOT_SECONDS / (nominal * maxf(0.1, sample_dt))
 				var thrust: float = smoothstep(THRUST_DEAD_ZONE, 0.75, clampf(impulse, 0.0, 1.0))
-				thrust *= smoothstep(0.04, 0.25, velocity.length() / nominal)
-				previous["thrust"] = maxf(float(previous.get("thrust", 0.0)), thrust) if velocity.length() > nominal * 0.04 else 0.0
+				var speed_ratio: float = velocity.length() / nominal
+				thrust *= smoothstep(0.04, 0.25, speed_ratio)
+				previous["cruise"] = cruise_thrust(speed_ratio)
+				previous["thrust"] = maxf(float(previous.get("thrust", 0.0)), thrust) if speed_ratio > 0.04 else 0.0
 				previous["velocity"] = velocity
 				previous["motion_revision"] = revision
 				previous["motion_point"] = target
