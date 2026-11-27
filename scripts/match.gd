@@ -371,6 +371,7 @@ func _build_map_layers() -> void:
 	fog_overlay.draw.connect(_draw_fog)
 	queued_order_overlay = Control.new()
 	map_canvas.add_child(queued_order_overlay)
+	queued_order_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	queued_order_overlay.z_index = 3
 	queued_order_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	queued_order_overlay.draw.connect(_draw_queued_order_overlay)
@@ -391,7 +392,7 @@ func _build_world_effect_batches() -> void:
 	world_batches.build(map_canvas)
 	structure_view.configure(map_canvas, world_batches, hull_art, command_card_ui, _screen_point, _station_radius, _job_icon, _draw_damage_bar, _shield_fraction, _ship_scale, _overview_art_multiplier)
 	planet_traffic.configure(map_canvas, celestial_view, hull_art, _screen_point, _station_radius, _job_icon)
-	order_view.configure(map_canvas, hull_art, celestial_view, camera, _ship_scale, _screen_point, _station_radius, _planet_radius, _salvage_radius, _fit, _me)
+	order_view.configure(queued_order_overlay, hull_art, celestial_view, camera, _ship_scale, _screen_point, _station_radius, _planet_radius, _salvage_radius, _fit, _me, _fog_visible)
 	map_canvas.resized.connect(_map_resized)
 
 
@@ -1796,23 +1797,103 @@ func _fog_visible(point: Vector2) -> bool:
 	return fog_state.is_visible(point, _map_size())
 
 func _draw_queued_order_overlay() -> void:
-	var state: Dictionary = _state()
-	if state.is_empty() or selected_units.is_empty():
+	if session == null:
 		return
+	var state: Dictionary = _state()
+	if state.is_empty():
+		return
+	_begin_draw_projection()
+	_draw_command_overlay_content(state)
+	_draw_projection_active = false
+
+# Command intent is UI, not world geometry. Keep it above all fog, including
+# unexplored space, while limiting live entity targets to observed information.
+func _draw_command_overlay_content(state: Dictionary) -> void:
+	var viewport_bounds := Rect2(Vector2.ZERO, map_canvas.size)
+	var poses: Dictionary = _ship_poses(state)
+	var service_refs: Dictionary = {}
+	var all_refs: Dictionary = _frame_service_refs(state)
+	for id in all_refs:
+		var ref: Dictionary = all_refs[id]
+		var own: bool = int(ref.get("owner", -1)) == _me()
+		var visible: bool = poses.has(id) if ref.get("kind", "") == "ship" else _fog_visible(ref.get("position", Vector2.INF))
+		if own or visible:
+			service_refs[id] = ref
 	_draw_construction_preview(state)
-	# Skip resolving service references when nothing selected has a queue.
-	var selected: Dictionary = {}
-	for id in selected_units:
-		selected[id] = true
-	var has_queue: bool = false
-	for ship in state["ships"]:
-		if selected.has(int(ship["id"])) and not ship.get("order_queue", []).is_empty():
-			has_queue = true
-			break
+	for ref in _selected_yards(state, true):
+		var rally: Dictionary = state["planets"][ref.x]["yards"][ref.y].get("rally", {})
+		if not rally.is_empty():
+			var start: Vector2 = _screen_point(ECONOMY.shipyard_position(state, ref.x, ref.y, float(state["elapsed"])))
+			var target: Vector2 = _screen_point(rally["point"])
+			var rally_tint := Color("#ff605c")
+			order_view.draw_command_line(queued_order_overlay, start, target, Color(rally_tint, 0.65))
+			var pole_top: Vector2 = target + Vector2(0, -23)
+			var flag := PackedVector2Array([pole_top, pole_top + Vector2(15, 0), pole_top + Vector2(10, 5), pole_top + Vector2(15, 10), pole_top + Vector2(0, 10)])
+			queued_order_overlay.draw_line(target, pole_top, Color("#111b26"), 4.0, true)
+			queued_order_overlay.draw_line(target, pole_top, rally_tint, 2.0, true)
+			queued_order_overlay.draw_colored_polygon(flag, rally_tint)
+			flag.append(flag[0])
+			queued_order_overlay.draw_polyline(flag, Color("#111b26"), 1.0, true)
+	for gate in state["ships"]:
+		if gate.get("kind", "") != "warp_gate" or int(gate["owner"]) != _me():
+			continue
+		var target: Dictionary = service_refs.get(int(gate.get("warp_destination", -1)), {}).get("entity", {})
+		if target.get("kind", "") == "warp_gate" and int(target["owner"]) == _me():
+			queued_order_overlay.draw_line(_screen_point(gate["position"]), _screen_point(target["position"]), Color("#855bbf80"), 2.0, true)
+	order_view.draw_ship_target_rings(state, poses, service_refs, selected_units, selected_ship_id)
 	if selected_units.size() > 1:
-		order_view.draw_group_command_line(state, _ship_poses(state), _frame_service_refs(state), selected_units, queued_order_overlay)
-	if has_queue:
-		order_view.draw_queued_chains(queued_order_overlay, state, _ship_poses(state), _frame_service_refs(state), selected_units, Rect2(Vector2.ZERO, map_canvas.size), _fog_visible)
+		order_view.draw_group_formation_ghosts(state, viewport_bounds, selected_units)
+	if selected_units.size() == 1:
+		var order_graph: Dictionary = ECONOMY.military_graph(state)
+		var drawn_sectors: Dictionary = {}
+		for craft in state["ships"]:
+			var id: int = int(craft["id"])
+			if not selected_units.has(id) or not poses.has(id) or int(craft["owner"]) != _me():
+				continue
+			var start: Vector2 = poses[id]["point"]
+			if selected_units.size() == 1:
+				order_view.draw_single_command_line(state, order_graph, craft, start, poses, service_refs)
+			var active_order: Dictionary = craft.get("unit_order", {})
+			var order_tint: Color = order_view.order_color(craft, active_order)
+			if craft.has("patrol_from"):
+				var from: Vector2 = _screen_point(craft["patrol_start_point"])
+				var to: Vector2 = _screen_point(craft["patrol_end_point"])
+				if (craft.get("patrol_waypoints", []) as Array).is_empty():
+					order_view.draw_command_line(queued_order_overlay, from, to, Color("#b880fa"))
+				order_view.draw_formation_order_ghost(craft, active_order, viewport_bounds.grow(60.0 * maxf(0.42, _ship_scale())))
+			elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
+				var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
+				var rally_tint := Color("#ff605c")
+				order_view.draw_command_route(order_graph, craft, start, destination, rally_tint)
+				order_view.draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
+			elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
+				var destination: Vector2 = poses[int(active_order["target"])]["point"]
+				order_view.draw_command_route(order_graph, craft, start, destination, HUD.ACCENT)
+			elif active_order.get("kind", "") == "colonize" and ECONOMY.unit_order_running(craft):
+				var star: int = int(active_order["target"])
+				if star >= 0 and star < state["planets"].size():
+					var center: Vector2 = _screen_point(state["map"]["points"][star])
+					queued_order_overlay.draw_arc(center, 4.5, 0.0, TAU, 20, Color(1.0, 1.0, 1.0, 0.65), 0.9, true)
+			elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY.unit_order_running(craft):
+				order_view.draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
+			elif active_order.get("kind", "") == "position" and ECONOMY.unit_order_running(craft):
+				var endpoint: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
+				if endpoint.is_finite():
+					var destination: Vector2 = _screen_point(endpoint)
+					order_view.draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
+			elif craft.has("local_move_target") and not bool(craft.get("retreating", false)):
+				var destination: Vector2 = _screen_point(craft["local_move_target"])
+				order_view.draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
+	if selected_units.size() > 1:
+		order_view.draw_group_command_line(state, poses, service_refs, selected_units, queued_order_overlay)
+	if not selected_units.is_empty():
+		# The queue renderer cheaply skips ships without queued/patrol legs.
+		order_view.draw_queued_chains(queued_order_overlay, state, poses, service_refs, selected_units, viewport_bounds, _fog_visible)
+	order_view.draw_formation_preview(state, formation_button, formation_length, formation_mode, formation_path, _formation_orders, _selected_owned_units)
+	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
+		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
+		queued_order_overlay.draw_rect(rect, Color(HUD.ACCENT, 0.12))
+		queued_order_overlay.draw_rect(rect, HUD.ACCENT, false, 1.0)
 
 func _draw_construction_preview(state: Dictionary) -> void:
 	if pending_command not in ["build_depot", "build_cannon", "build_wall"] or match_menu.visible or (is_instance_valid(codex) and codex.visible):
@@ -5035,73 +5116,9 @@ func _draw_map_content() -> void:
 			for angle in range(4):
 				var start: float = float(angle) * TAU / 4.0 + 0.1
 				map_canvas.draw_arc(pos, maxf(5.0, celestial_view.star_draw_radius(radius)) + 8.0, start, start + 1.15, 14, Color(HUD.ACCENT, phase), 2.0, true)
-	for ref in _selected_yards(state):
-		var rally: Dictionary = state["planets"][ref.x]["yards"][ref.y].get("rally", {})
-		if not rally.is_empty():
-			var start: Vector2 = _screen_point(ECONOMY.shipyard_position(state, ref.x, ref.y, float(state["elapsed"])))
-			var target: Vector2 = _screen_point(rally["point"])
-			var rally_tint := Color("#ff605c")
-			order_view.draw_command_line(map_canvas, start, target, Color(rally_tint, 0.65))
-			var pole_top: Vector2 = target + Vector2(0, -23)
-			var flag := PackedVector2Array([pole_top, pole_top + Vector2(15, 0), pole_top + Vector2(10, 5), pole_top + Vector2(15, 10), pole_top + Vector2(0, 10)])
-			map_canvas.draw_line(target, pole_top, Color("#111b26"), 4.0, true)
-			map_canvas.draw_line(target, pole_top, rally_tint, 2.0, true)
-			map_canvas.draw_colored_polygon(flag, rally_tint)
-			flag.append(flag[0])
-			map_canvas.draw_polyline(flag, Color("#111b26"), 1.0, true)
 	var pose_overrides: Dictionary = {}
 	_draw_salvage(state, poses, viewport_bounds, font)
 	var service_refs: Dictionary = _frame_service_refs(state)
-	for gate in state["ships"]:
-		if gate.get("kind", "") != "warp_gate" or int(gate["owner"]) != _me():
-			continue
-		var target: Dictionary = service_refs.get(int(gate.get("warp_destination", -1)), {}).get("entity", {})
-		if target.get("kind", "") == "warp_gate" and int(target["owner"]) == _me():
-			map_canvas.draw_line(_screen_point(gate["position"]), _screen_point(target["position"]), Color("#855bbf80"), 2.0, true)
-	order_view.draw_ship_target_rings(state, poses, service_refs, selected_units, selected_ship_id)
-	if selected_units.size() > 1:
-		order_view.draw_group_formation_ghosts(state, viewport_bounds, selected_units)
-	if selected_units.size() == 1:
-		var order_graph: Dictionary = ECONOMY.military_graph(state)
-		var drawn_sectors: Dictionary = {}
-		for craft in state["ships"]:
-			var id: int = int(craft["id"])
-			if not selected_units.has(id) or not poses.has(id):
-				continue
-			var start: Vector2 = poses[id]["point"]
-			if selected_units.size() == 1:
-				order_view.draw_single_command_line(state, order_graph, craft, start, poses, service_refs)
-			var active_order: Dictionary = craft.get("unit_order", {})
-			var order_tint: Color = order_view.order_color(craft, active_order)
-			if craft.has("patrol_from"):
-				var from: Vector2 = _screen_point(craft["patrol_start_point"])
-				var to: Vector2 = _screen_point(craft["patrol_end_point"])
-				if (craft.get("patrol_waypoints", []) as Array).is_empty():
-					order_view.draw_command_line(map_canvas, from, to, Color("#b880fa"))
-				order_view.draw_formation_order_ghost(craft, active_order, viewport_bounds.grow(60.0 * maxf(0.42, _ship_scale())))
-			elif craft.has("launch_rally") and not bool(craft.get("retreating", false)):
-				var destination: Vector2 = _screen_point(craft["launch_rally"]["point"])
-				var rally_tint := Color("#ff605c")
-				order_view.draw_command_route(order_graph, craft, start, destination, rally_tint)
-				order_view.draw_destination_ghost(craft["kind"], destination, destination - start, rally_tint)
-			elif active_order.get("kind", "") == "follow" and poses.has(int(active_order["target"])):
-				var destination: Vector2 = poses[int(active_order["target"])]["point"]
-				order_view.draw_command_route(order_graph, craft, start, destination, HUD.ACCENT)
-			elif active_order.get("kind", "") == "colonize" and ECONOMY.unit_order_running(craft):
-				var star: int = int(active_order["target"])
-				if star >= 0 and star < state["planets"].size():
-					var center: Vector2 = _screen_point(state["map"]["points"][star])
-					map_canvas.draw_arc(center, 4.5, 0.0, TAU, 20, Color(1.0, 1.0, 1.0, 0.65), 0.9, true)
-			elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY.unit_order_running(craft):
-				order_view.draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
-			elif active_order.get("kind", "") == "position" and ECONOMY.unit_order_running(craft):
-				var endpoint: Vector2 = ECONOMY.unit_order_point(state, order_graph, craft, active_order)
-				if endpoint.is_finite():
-					var destination: Vector2 = _screen_point(endpoint)
-					order_view.draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
-			elif craft.has("local_move_target") and not bool(craft.get("retreating", false)):
-				var destination: Vector2 = _screen_point(craft["local_move_target"])
-				order_view.draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
 	for index in range(points.size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index) or not _fog_visible(points[index]):
 			continue
@@ -5368,12 +5385,7 @@ func _draw_map_content() -> void:
 		for id in pose_overrides:
 			transfer_poses[id] = pose_overrides[id]
 	world_effects.draw_cargo_transfers(state, transfer_poses, service_refs, viewport_bounds, visual_clock, _ship_scale, map_canvas, _transfer_anchor)
-	order_view.draw_formation_preview(state, formation_button, formation_length, formation_mode, formation_path, _formation_orders, _selected_owned_units)
 	world_batches.flush_indicators()
-	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
-		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
-		map_canvas.draw_rect(rect, Color(HUD.ACCENT, 0.12))
-		map_canvas.draw_rect(rect, HUD.ACCENT, false, 1.0)
 
 func _draw_logistics_overlay() -> void:
 	if session == null:
