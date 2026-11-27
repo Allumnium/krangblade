@@ -108,7 +108,7 @@ func draw_colony_transform(ship: Dictionary, point: Vector2, heading: Vector2, s
 		map_canvas.draw_arc(point, radius * 0.85, 0.0, TAU, 48, frame, maxf(1.0, radius * 0.22), true)
 		map_canvas.draw_arc(point, radius, 0.0, TAU, 48, tint.lightened(0.30), maxf(1.0, radius * 0.055), true)
 		map_canvas.draw_circle(point, radius * 0.32, Color("#293c51"), true, -1.0, true)
-		map_canvas.draw_arc(point, radius * 0.35, 0.0, TAU, 24, tint, maxf(1.0, radius * 0.07), true)
+		map_canvas.draw_arc(point, radius * 0.35, 0.0, TAU, 24, tint.darkened(1.0 - illumination), maxf(1.0, radius * 0.07), true)
 		var axis: Vector2 = Vector2.from_angle(elapsed * 0.008)
 		var dock: Vector2 = point + (screen_point.call((ship["position"] as Vector2) + axis * 90.0) - screen_point.call(ship["position"])) * u
 		map_canvas.draw_line(point + axis * radius * 0.35, dock, frame, maxf(1.0, radius * 0.12), true)
@@ -157,7 +157,7 @@ func draw_station(state: Dictionary, index: int, tint: Color, elapsed: float, bu
 		var side: Vector2 = axis.orthogonal()
 		map_canvas.draw_line(center + axis * radius * 0.35, center + axis * radius * 0.87, frame.darkened(0.3), maxf(1.0, radius * 0.13), true)
 		var port: Vector2 = center + axis * radius
-		map_canvas.draw_line(port - side * radius * 0.18, port + side * radius * 0.18, tint, maxf(1.0, radius * 0.07), true)
+		map_canvas.draw_line(port - side * radius * 0.18, port + side * radius * 0.18, tint.darkened(1.0 - world_batches.light_level(port, axis, center)), maxf(1.0, radius * 0.07), true)
 		var yard_index: int = ECONOMY.shipyard_at_port(system, slot + 1)
 		if yard_index >= 0:
 			var dock: Vector2 = screen_point.call(ECONOMY.shipyard_position(state, index, yard_index, elapsed))
@@ -167,7 +167,7 @@ func draw_station(state: Dictionary, index: int, tint: Color, elapsed: float, bu
 			var a: float = float(segment) * TAU / 12.0 + elapsed * 0.008
 			var direction: Vector2 = Vector2.from_angle(a)
 			map_canvas.draw_line(center + direction * radius * 0.74, center + direction * radius * 0.95, Color("#1a293a").darkened(1.0 - illumination), maxf(1.0, radius * 0.05), true)
-			map_canvas.draw_circle(center + direction * radius * 0.88, maxf(0.8, radius * 0.035), tint)
+			map_canvas.draw_circle(center + direction * radius * 0.88, maxf(0.8, radius * 0.035), tint.darkened(1.0 - world_batches.light_level(center + direction * radius * 0.88, direction, center)))
 	_draw_station_storage(system, center, radius, elapsed)
 	_draw_station_jobs(system, center, radius, tint)
 	if selected_station:

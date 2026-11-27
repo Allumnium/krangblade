@@ -122,6 +122,8 @@ func light_level(point: Vector2, normal: Vector2 = Vector2.ZERO, _receiver: Vect
 			continue
 		var facing: float = 1.0 if normal.is_zero_approx() else 0.035 + 0.965 * maxf(0.0, normal.dot(delta.normalized()))
 		amount += falloff * falloff * float(entry[3]) * facing
+	if amount > 0.72:
+		amount = 0.72 + 0.28 * (1.0 - exp(-(amount - 0.72) / 0.28))
 	return clampf(amount, 0.035, 1.0)
 
 

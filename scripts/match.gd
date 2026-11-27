@@ -4968,7 +4968,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 		if not bounds.grow(radius).has_point(pos):
 			continue
 		var tint: Color = Color("#ffe6bb") if ECONOMY.has_planets(state["planets"][index]) else Color("#a7c9ff")
-		_keep_near_light(stars, [pos, radius, tint, 2.4, center.distance_squared_to(pos), true])
+		_keep_near_light(stars, [pos, radius, tint, 1.55, center.distance_squared_to(pos), true])
 		world_batches.draw_resource_glow(pos, minf(radius, 240.0), tint, 0.15)
 		# Only nearby visible planets cast eclipses, and only onto other planets.
 		if not _fog_visible(points[index]):

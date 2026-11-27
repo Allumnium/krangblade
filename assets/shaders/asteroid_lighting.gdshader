@@ -14,6 +14,13 @@ varying float crystal;
 // Every point light contributes its own diffuse and specular terms, in
 // the same canvas space as the submitted light coordinates. A finite
 // height prevents singularities at the projected source center.
+vec3 compress_highlights(vec3 rgb) {
+	float peak = max(rgb.r, max(rgb.g, rgb.b));
+	if (peak > 0.72) {
+		rgb *= (0.72 + 0.28 * (1.0 - exp(-(peak - 0.72) / 0.28))) / peak;
+	}
+	return rgb;
+}
 vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albedo, float specular, vec3 ambient, float ao) {
 	vec3 diffuse_light = ambient;
 	vec3 shine = vec3(0.0);
@@ -26,13 +33,13 @@ vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albe
 		float falloff = 1.0 - sqrt(distance_sq) / radius;
 		float strength = falloff * falloff * light_points[i].w;
 		bool stellar = light_colors[i].a > 0.5;
-		float height = stellar ? max(0.1, length(delta) * 0.08) : max(1.0, radius * 0.10);
+		float height = stellar ? max(0.001, length(delta) * 0.18) : max(0.001, radius * 0.10);
 		vec3 direction = normalize(vec3(dot(delta, axis_x), -dot(delta, axis_y), height));
 		float lambert = max(0.0, dot(normal, direction));
 		vec3 energy = light_colors[i].rgb * strength;
-		diffuse_light += energy * (0.015 + lambert);
+		diffuse_light += energy * lambert;
 		vec3 half_vector = normalize(direction + vec3(0.0, 0.0, 1.0));
-		shine += energy * pow(max(0.0, dot(normal, half_vector)), 16.0) * specular * 0.22;
+		shine += energy * pow(max(0.0, dot(normal, half_vector)), 24.0) * specular * 0.12;
 	}
 	return albedo * diffuse_light * ao + shine;
 }
@@ -58,9 +65,9 @@ void fragment() {
 	vec2 cell_max = cell_min + vec2(0.125) - pixel;
 	float dx = texture(height_map, clamp(UV + vec2(pixel.x, 0.0), cell_min, cell_max)).r - texture(height_map, clamp(UV - vec2(pixel.x, 0.0), cell_min, cell_max)).r;
 	float dy = texture(height_map, clamp(UV + vec2(0.0, pixel.y), cell_min, cell_max)).r - texture(height_map, clamp(UV - vec2(0.0, pixel.y), cell_min, cell_max)).r;
-	vec3 normal = normalize(texture(normal_map, UV).rgb * 2.0 - 1.0 + vec3(-dx * 0.20, dy * 0.20, 0.15));
+	vec3 normal = normalize(texture(normal_map, UV).rgb * 2.0 - 1.0 + vec3(-dx * 0.08, dy * 0.08, 0.28));
 	float ao = mix(0.68, 1.0, texture(occlusion_map, UV).r);
 	float specular = texture(specular_map, UV).r;
 	vec3 lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, normal, diffuse, specular, vec3(0.030, 0.035, 0.045), ao);
-	COLOR = vec4(clamp(lit, vec3(0.0), vec3(1.0)), base.a);
+	COLOR = vec4(clamp(compress_highlights(lit), vec3(0.0), vec3(1.0)), base.a);
 }

@@ -39,7 +39,14 @@ varying vec4 modulation;
 // Every point light contributes its own diffuse and specular terms, in
 // the same canvas space as the submitted light coordinates. A finite
 // height prevents singularities at the projected source center.
-vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albedo, float specular, vec3 ambient, float ao) {
+vec3 compress_highlights(vec3 rgb) {
+	float peak = max(rgb.r, max(rgb.g, rgb.b));
+	if (peak > 0.72) {
+		rgb *= (0.72 + 0.28 * (1.0 - exp(-(peak - 0.72) / 0.28))) / peak;
+	}
+	return rgb;
+}
+vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 geometric_normal, vec2 local_offset, vec3 albedo, float specular, vec3 ambient, float ao) {
 	vec3 diffuse_light = ambient;
 	vec3 shine = vec3(0.0);
 	for (int i = 0; i < 16; i++) {
@@ -52,13 +59,23 @@ vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albe
 		float strength = falloff * falloff * light_points[i].w;
 		bool stellar = light_colors[i].a > 0.5;
 		if (stellar && spherical_surface) { strength *= stellar_visibility(pos, light_points[i].xy, receiver_center); }
-		float height = stellar ? max(0.1, length(delta) * 0.08) : max(1.0, radius * 0.10);
-		vec3 direction = normalize(vec3(dot(delta, axis_x), -dot(delta, axis_y), height));
+		// A sphere sees a stable incoming stellar direction across its disc.
+		// Hulls retain local point-light directions for nearby impacts/plumes.
+		vec2 ray = stellar && spherical_surface ? light_points[i].xy - receiver_center : delta;
+		float height = stellar ? max(0.001, length(ray) * (spherical_surface ? 0.045 : 0.18)) : max(0.001, radius * 0.10);
+		vec3 direction = normalize(vec3(dot(ray, axis_x), -dot(ray, axis_y), height));
+		float visibility = 1.0;
+		if (spherical_surface) {
+			visibility = smoothstep(0.0, 0.16, dot(geometric_normal, direction));
+		} else if (stellar) {
+			// Broad hull silhouette shading prevents isolated bright pixels on the far side.
+			visibility = mix(0.18, 1.0, smoothstep(-0.7, 0.35, dot(local_offset, direction.xy)));
+		}
 		float lambert = max(0.0, dot(normal, direction));
-		vec3 energy = light_colors[i].rgb * strength;
-		diffuse_light += energy * (0.015 + lambert);
+		vec3 energy = light_colors[i].rgb * strength * visibility;
+		diffuse_light += energy * lambert;
 		vec3 half_vector = normalize(direction + vec3(0.0, 0.0, 1.0));
-		shine += energy * pow(max(0.0, dot(normal, half_vector)), 16.0) * specular * 0.22;
+		shine += energy * pow(max(0.0, dot(normal, half_vector)), 24.0) * specular * 0.12;
 	}
 	return albedo * diffuse_light * ao + shine;
 }
@@ -79,7 +96,7 @@ void vertex() {
 			vec2 delta = light_points[i].xy - center;
 			float f = max(0.0, 1.0 - length(delta) / max(1.0, light_points[i].z));
 			vec2 radial = surface_position - center;
-			float facing = 0.30 + 0.70 * max(0.0, dot(normalize(radial + vec2(0.0001)), normalize(delta + vec2(0.0001))));
+			float facing = 0.08 + 0.92 * max(0.0, dot(normalize(radial + vec2(0.0001)), normalize(delta + vec2(0.0001))));
 			illumination += light_colors[i].rgb * f * f * light_points[i].w * facing;
 		}
 	}
@@ -87,10 +104,11 @@ void vertex() {
 void fragment() {
 	vec4 base = texture(TEXTURE, UV);
 	if (base.a <= 0.001) { discard; }
-	vec3 lit = base.rgb * min(illumination, vec3(1.25));
+	vec3 lit = base.rgb * illumination;
 	if (spherical_surface) {
 		vec2 q = (UV - vec2(0.5)) * 2.0;
-		vec3 n = normalize(vec3(q.x, -q.y, sqrt(max(0.0, 1.0 - dot(q, q)))));
+		vec3 geometric = normalize(vec3(q.x, -q.y, sqrt(max(0.0, 1.0 - dot(q, q)))));
+		vec3 n = geometric;
 		float ao = 1.0;
 		float specular = 0.0;
 		if (authored_sprite) {
@@ -100,27 +118,27 @@ void fragment() {
 			vec2 pixel = TEXTURE_PIXEL_SIZE;
 			float dx = texture(height_map, UV + vec2(pixel.x, 0.0)).r - texture(height_map, UV - vec2(pixel.x, 0.0)).r;
 			float dy = texture(height_map, UV + vec2(0.0, pixel.y)).r - texture(height_map, UV - vec2(0.0, pixel.y)).r;
-			relief = normalize(relief + vec3(-dx * 0.10, dy * 0.10, 0.15));
-			n = normalize(mix(n, relief, 0.45));
+			relief = normalize(relief + vec3(-dx * 0.06, dy * 0.06, 0.15));
+			// Perturb only the tangent plane; the atlas cannot replace the sphere normal.
+			vec3 tangent_relief = relief - geometric * dot(relief, geometric);
+			n = normalize(geometric + tangent_relief * 0.18);
 			ao = mix(0.72, 1.0, texture(occlusion_map, UV).r);
 			specular = texture(specular_map, UV).r * 0.50;
 		}
-		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, base.rgb, specular, vec3(0.035, 0.035, 0.045), ao);
+		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, geometric, vec2(0.0), base.rgb, specular, vec3(0.035, 0.035, 0.045), ao);
 	} else if (authored_sprite) {
 		vec3 n = texture(normal_map, UV).rgb * 2.0 - 1.0;
 		vec2 pixel = TEXTURE_PIXEL_SIZE;
 		float dx = texture(height_map, UV + vec2(pixel.x, 0.0)).r - texture(height_map, UV - vec2(pixel.x, 0.0)).r;
 		float dy = texture(height_map, UV + vec2(0.0, pixel.y)).r - texture(height_map, UV - vec2(0.0, pixel.y)).r;
-		n = normalize(n + vec3(-dx * 0.12, dy * 0.12, 0.24));
+		n = normalize(n + vec3(-dx * 0.05, dy * 0.05, 0.38));
 		float ao = mix(0.62, 1.0, texture(occlusion_map, UV).r);
 		float specular = texture(specular_map, UV).r;
 		// _v is an offline preview, not a material input. TEXTURE is the
 		// empire-decaled diffuse map; only explicit world lights emit light.
-		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, base.rgb, specular * 0.65, vec3(0.035, 0.040, 0.050), ao);
+		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, n, (UV - vec2(0.5)) * vec2(2.0, -2.0), base.rgb, specular * 0.45, vec3(0.035, 0.040, 0.050), ao);
 		// Identical low self-lit surface detail for every authored hull; no idle plume or extra light source.
-		lit += base.rgb * 0.035;
-		float peak = max(lit.r, max(lit.g, lit.b));
-		if (peak > 0.75) { lit *= (0.75 + 0.25 * (1.0 - exp(-(peak - 0.75) / 0.25))) / peak; }
+		lit += base.rgb * 0.012;
 	}
-	COLOR = vec4(clamp(lit, vec3(0.0), vec3(1.0)), base.a) * modulation;
+	COLOR = vec4(clamp(compress_highlights(lit), vec3(0.0), vec3(1.0)), base.a) * modulation;
 }
