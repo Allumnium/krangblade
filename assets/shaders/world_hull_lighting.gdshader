@@ -8,6 +8,29 @@ uniform sampler2D specular_map : filter_nearest;
 uniform vec4 light_points[16];
 uniform vec4 light_colors[16];
 uniform int light_count = 0;
+uniform vec4 shadow_discs[8];
+uniform int shadow_count = 0;
+// Localized, soft 2D eclipse approximation. Do not shadow a receiver
+// with its own bounding disc or with an occluder behind the light.
+float stellar_visibility(vec2 pos, vec2 light_pos, vec2 receiver) {
+	vec2 ray = light_pos - pos;
+	float length_sq = max(0.0001, dot(ray, ray));
+	float visibility = 1.0;
+	for (int j = 0; j < 8; j++) {
+		if (j >= shadow_count) { break; }
+		vec2 center = shadow_discs[j].xy;
+		float radius = shadow_discs[j].z;
+		if (distance(receiver, center) <= radius + 0.5) { continue; }
+		float t = dot(center - pos, ray) / length_sq;
+		if (t <= 0.0 || t >= 1.0) { continue; }
+		float clearance = distance(center, pos + ray * t);
+		visibility = min(visibility, smoothstep(radius * 0.72, radius * 1.12, clearance));
+	}
+	return visibility;
+}
+uniform bool spherical_surface = false;
+varying vec2 receiver_center;
+
 varying vec3 illumination;
 varying vec2 surface_position;
 varying vec2 surface_axis_x;
@@ -27,12 +50,15 @@ vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albe
 		if (distance_sq >= radius * radius) { continue; }
 		float falloff = 1.0 - sqrt(distance_sq) / radius;
 		float strength = falloff * falloff * light_points[i].w;
-		vec3 direction = normalize(vec3(dot(delta, axis_x), -dot(delta, axis_y), max(1.0, radius * 0.18)));
+		bool stellar = light_colors[i].a > 0.5;
+		if (stellar) { strength *= stellar_visibility(pos, light_points[i].xy, receiver_center); }
+		float height = stellar ? max(0.1, length(delta) * 0.08) : max(1.0, radius * 0.10);
+		vec3 direction = normalize(vec3(dot(delta, axis_x), -dot(delta, axis_y), height));
 		float lambert = max(0.0, dot(normal, direction));
 		vec3 energy = light_colors[i].rgb * strength;
-		diffuse_light += energy * (0.08 + lambert);
+		diffuse_light += energy * (0.015 + lambert);
 		vec3 half_vector = normalize(direction + vec3(0.0, 0.0, 1.0));
-		shine += energy * pow(max(0.0, dot(normal, half_vector)), 12.0) * specular * 0.35;
+		shine += energy * pow(max(0.0, dot(normal, half_vector)), 16.0) * specular * 0.22;
 	}
 	return albedo * diffuse_light * ao + shine;
 }
@@ -40,18 +66,22 @@ vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albe
 void vertex() {
 	mat4 transform = CANVAS_MATRIX * MODEL_MATRIX;
 	vec2 center = transform[3].xy;
+	receiver_center = center;
 	surface_position = (transform * vec4(VERTEX, 0.0, 1.0)).xy;
 	surface_axis_x = normalize(transform[0].xy);
 	surface_axis_y = normalize(transform[1].xy);
 	modulation = COLOR;
 	illumination = vec3(0.025, 0.030, 0.040);
 	// Legacy vector hulls retain the inexpensive per-instance path.
-	if (!authored_sprite) {
+	if (!authored_sprite && !spherical_surface) {
 		for (int i = 0; i < 16; i++) {
 			if (i >= light_count) { break; }
 			vec2 delta = light_points[i].xy - center;
 			float f = max(0.0, 1.0 - length(delta) / max(1.0, light_points[i].z));
-			illumination += light_colors[i].rgb * f * f * light_points[i].w;
+			vec2 radial = surface_position - center;
+			float facing = 0.30 + 0.70 * max(0.0, dot(normalize(radial + vec2(0.0001)), normalize(delta + vec2(0.0001))));
+			float visible = light_colors[i].a > 0.5 ? stellar_visibility(center, light_points[i].xy, center) : 1.0;
+			illumination += light_colors[i].rgb * f * f * light_points[i].w * facing * visible;
 		}
 	}
 }
@@ -59,7 +89,11 @@ void fragment() {
 	vec4 base = texture(TEXTURE, UV);
 	if (base.a <= 0.001) { discard; }
 	vec3 lit = base.rgb * min(illumination, vec3(1.25));
-	if (authored_sprite) {
+	if (spherical_surface) {
+		vec2 q = (UV - vec2(0.5)) * 2.0;
+		vec3 n = normalize(vec3(q.x, -q.y, sqrt(max(0.0, 1.0 - dot(q, q)))));
+		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, base.rgb, 0.0, vec3(0.035, 0.035, 0.045), 1.0);
+	} else if (authored_sprite) {
 		vec3 n = texture(normal_map, UV).rgb * 2.0 - 1.0;
 		vec2 pixel = TEXTURE_PIXEL_SIZE;
 		float dx = texture(height_map, UV + vec2(pixel.x, 0.0)).r - texture(height_map, UV - vec2(pixel.x, 0.0)).r;

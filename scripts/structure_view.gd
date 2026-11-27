@@ -138,8 +138,18 @@ func draw_station(state: Dictionary, index: int, tint: Color, elapsed: float, bu
 	# Orbital hub with circular habitat/industrial ring, central docking
 	# berth, and three fixed module attachment arms on its rotating frame.
 	map_canvas.draw_circle(center, radius, Color("#131e2b").darkened(1.0 - illumination), true, -1.0, true)
-	map_canvas.draw_arc(center, radius * 0.85, 0.0, TAU, 48, frame, maxf(2.0, radius * 0.22), true)
-	map_canvas.draw_arc(center, radius, 0.0, TAU, 48, tint, maxf(1.0, radius * 0.055), true)
+	# Segment the ring into a few directional surface samples. Storage
+	# symbols, job cues, selection and health remain presentation overlays.
+	if radius >= 8.0:
+		for segment in range(16):
+			var start: float = float(segment) * TAU / 16.0
+			var axis: Vector2 = Vector2.from_angle(start + PI / 16.0)
+			var lit: float = world_batches.light_level(center + axis * radius * 0.85, axis, center)
+			map_canvas.draw_arc(center, radius * 0.85, start, start + TAU / 16.0, 4, Color("#71869b").darkened(1.0 - lit), maxf(2.0, radius * 0.22), true)
+			map_canvas.draw_arc(center, radius, start, start + TAU / 16.0, 4, tint.darkened(1.0 - lit), maxf(1.0, radius * 0.055), true)
+	else:
+		map_canvas.draw_arc(center, radius * 0.85, 0.0, TAU, 48, frame, maxf(2.0, radius * 0.22), true)
+		map_canvas.draw_arc(center, radius, 0.0, TAU, 48, tint.darkened(1.0 - illumination), maxf(1.0, radius * 0.055), true)
 	map_canvas.draw_circle(center, radius * 0.32, Color("#293c51").darkened(1.0 - illumination), true, -1.0, true)
 	map_canvas.draw_arc(center, radius * 0.35, 0.0, TAU, 24, tint, maxf(1.0, radius * 0.07), true)
 	for slot in range(3):
@@ -241,15 +251,16 @@ func draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float, 
 			for sign in [-1.0, 1.0]:
 				var rail: Array = [Vector2(-17, sign * 8), Vector2(-15, sign * 13), Vector2(-10, sign * 14), Vector2(10, sign * 14), Vector2(15, sign * 13), Vector2(17, sign * 8), Vector2(12, sign * 7), Vector2(-12, sign * 7)]
 				var hull: PackedVector2Array = hull_art.polygon(point, forward, lateral, rail)
-				map_canvas.draw_colored_polygon(hull, Color("#607387").darkened(1.0 - illumination))
+				var rail_light: float = world_batches.light_level(point + lateral * sign * 10.5, axis * sign, point)
+				map_canvas.draw_colored_polygon(hull, Color("#607387").darkened(1.0 - rail_light))
 				hull.append(hull[0])
-				map_canvas.draw_polyline(hull, tint, maxf(0.65, scale), true)
+				map_canvas.draw_polyline(hull, tint.darkened(1.0 - rail_light), maxf(0.65, scale), true)
 				if scale >= 0.42:
 					for longitudinal in [-8.0, 1.0, 9.0]:
 						var module: Vector2 = point + forward * longitudinal + lateral * sign * 10.5
 						var panel: PackedVector2Array = hull_art.polygon(module, forward, lateral, [Vector2(-3.5, -2), Vector2(3.5, -2), Vector2(3.5, 2), Vector2(-3.5, 2)])
-						map_canvas.draw_colored_polygon(panel, Color("#23384b").darkened(1.0 - illumination))
-						map_canvas.draw_line(module - forward * 2.4, module + forward * 2.4, Color("#b0d5e6").darkened(1.0 - illumination), maxf(0.65, scale), true)
+						map_canvas.draw_colored_polygon(panel, Color("#23384b").darkened(1.0 - rail_light))
+						map_canvas.draw_line(module - forward * 2.4, module + forward * 2.4, Color("#b0d5e6").darkened(1.0 - rail_light), maxf(0.65, scale), true)
 					for end in [-1.0, 1.0]:
 						var clamp_origin: Vector2 = point + forward * end * 14.0 + lateral * sign * 8.0
 						map_canvas.draw_line(clamp_origin, clamp_origin - lateral * sign * 3.0, Color("#d6a965").darkened(1.0 - illumination), maxf(1.0, 2.0 * scale), true)

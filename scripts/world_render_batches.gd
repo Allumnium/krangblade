@@ -35,6 +35,9 @@ var science_lighting: ShaderMaterial
 var fighter_lighting: ShaderMaterial
 var freighter_lighting: ShaderMaterial
 var world_lights: Array = []
+var shadow_discs: Array = []
+var shadow_uniforms := PackedVector4Array()
+var planet_lighting: ShaderMaterial
 
 func _lighting_material(kind: String) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
@@ -63,30 +66,52 @@ func _freighter_map(atlas: Texture2D) -> Texture2D:
 func _fighter_map(atlas: Texture2D) -> Texture2D:
 	return ImageTexture.create_from_image(HULL_ART.sprite_cell(atlas, HULL_ART.FIGHTER_GRID, HULL_ART.FIGHTER_GRID))
 
-func set_world_lights(lights: Array) -> void:
+func set_world_lights(lights: Array, blockers: Array = []) -> void:
 	world_lights = lights
+	shadow_discs = blockers
 	var positions := PackedVector4Array()
 	var colors := PackedVector4Array()
 	var canvas_transform: Transform2D = map_canvas.get_global_transform_with_canvas()
 	var radius_scale: float = canvas_transform.x.length()
 	positions.resize(16)
 	colors.resize(16)
+	shadow_uniforms.resize(8)
+	for i in range(mini(8, blockers.size())):
+		var pos: Vector2 = canvas_transform * (blockers[i][0] as Vector2)
+		shadow_uniforms[i] = Vector4(pos.x, pos.y, float(blockers[i][1]) * radius_scale, 0.0)
 	for i in range(mini(16, lights.size())):
 		var entry: Array = lights[i]
 		var pos: Vector2 = canvas_transform * (entry[0] as Vector2)
 		var tint: Color = entry[2]
 		positions[i] = Vector4(pos.x, pos.y, float(entry[1]) * radius_scale, float(entry[3]))
-		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0)
-	for material in [vector_lighting, science_lighting, fighter_lighting, freighter_lighting]:
+		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0 if entry.size() > 5 and bool(entry[5]) else 0.0)
+	for material in [vector_lighting, science_lighting, fighter_lighting, freighter_lighting, planet_lighting]:
 		material.set_shader_parameter("light_points", positions)
 		material.set_shader_parameter("light_colors", colors)
 		material.set_shader_parameter("light_count", mini(16, lights.size()))
+		material.set_shader_parameter("shadow_discs", shadow_uniforms)
+		material.set_shader_parameter("shadow_count", mini(8, blockers.size()))
 
-func light_level(point: Vector2) -> float:
+func light_level(point: Vector2, normal: Vector2 = Vector2.ZERO, receiver: Vector2 = Vector2.INF) -> float:
 	var amount: float = 0.035
+	var center: Vector2 = receiver if receiver.is_finite() else point
 	for entry in world_lights:
-		var falloff: float = maxf(0.0, 1.0 - point.distance_to(entry[0]) / maxf(1.0, float(entry[1])))
-		amount += falloff * falloff * float(entry[3])
+		var delta: Vector2 = (entry[0] as Vector2) - point
+		var falloff: float = maxf(0.0, 1.0 - delta.length() / maxf(1.0, float(entry[1])))
+		if falloff <= 0.0:
+			continue
+		var visibility: float = 1.0
+		if entry.size() > 5 and bool(entry[5]):
+			for disc in shadow_discs:
+				var at: Vector2 = disc[0]
+				var radius: float = disc[1]
+				if center.distance_to(at) <= radius + 0.5:
+					continue
+				var t: float = (at - point).dot(delta) / maxf(0.0001, delta.length_squared())
+				if t > 0.0 and t < 1.0:
+					visibility = minf(visibility, smoothstep(radius * 0.72, radius * 1.12, at.distance_to(point + delta * t)))
+		var facing: float = 1.0 if normal.is_zero_approx() else 0.035 + 0.965 * maxf(0.0, normal.dot(delta.normalized()))
+		amount += falloff * falloff * float(entry[3]) * facing * visibility
 	return clampf(amount, 0.035, 1.0)
 
 
@@ -113,6 +138,8 @@ func build(canvas: Control) -> void:
 	science_lighting = _lighting_material("science_ship")
 	fighter_lighting = _lighting_material("fighter")
 	freighter_lighting = _lighting_material("ship")
+	planet_lighting = _lighting_material("")
+	planet_lighting.set_shader_parameter("spherical_surface", true)
 	_build_exhaust_batch()
 	lamp_glow_batch = _build_effect_batch(false)
 	lamp_glow_batch.texture = _resource_glow()
@@ -350,7 +377,7 @@ void fragment() {
 	float phase = fract(t * 5.0 - visual_time * 4.5 + plume.y);
 	float sparks = (1.0 - smoothstep(0.06, 0.22, abs(phase - 0.5))) * (1.0 - smoothstep(0.12, 0.35, y)) * taper;
 	float alpha = clamp(plume.x * (0.34 * sheath + 0.9 * core + 0.45 * sparks), 0.0, 1.0);
-	COLOR = vec4(mix(engine_tint, mix(engine_tint, vec3(1.0), 0.55), core), alpha * 0.8);
+	COLOR = vec4(mix(engine_tint, mix(engine_tint, vec3(1.0), 0.28), core), alpha * 0.46);
 }
 """
 	var material := ShaderMaterial.new()
@@ -371,22 +398,27 @@ func _exhaust_extent(kind: String) -> Vector2:
 
 # Use the same plume geometry for emitted light and the rendered exhaust.
 func engine_center(kind: String, point: Vector2, direction: Vector2, scale: float) -> Vector2:
-	return point + direction.normalized() * _exhaust_extent(kind).x * scale
+	var nozzle: Vector2 = HULL_ART.paired_nozzle(kind)
+	return point + direction.normalized() * (nozzle.x if not nozzle.is_zero_approx() else _exhaust_extent(kind).x) * scale
 
 func exhaust_center(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float) -> Vector2:
 	var extent: Vector2 = _exhaust_extent(kind)
-	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
+	var plume_length: float = extent.y * lerpf(3.0, 14.0, thrust) * scale
 	return engine_center(kind, point, direction, scale) - direction.normalized() * plume_length * 0.5
 
 func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float, id: int, bounds: Rect2, tint: Color = Color.WHITE) -> void:
 	var extent: Vector2 = _exhaust_extent(kind)
 	var engine: Vector2 = engine_center(kind, point, direction, scale)
-	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
-	var plume_width: float = extent.y * lerpf(0.8, 2.1, thrust) * scale
-	if not bounds.grow(maxf(24.0, plume_length + 8.0)).has_point(engine):
+	var plume_length: float = extent.y * lerpf(3.0, 14.0, thrust) * scale
+	var nozzle: Vector2 = HULL_ART.paired_nozzle(kind)
+	var paired: bool = not nozzle.is_zero_approx()
+	var plume_width: float = extent.y * lerpf(0.65, 1.35, thrust) * scale * (0.62 if paired else 1.0)
+	if not bounds.grow(maxf(24.0, plume_length + nozzle.y * scale + 8.0)).has_point(engine):
 		return
 	var center: Vector2 = exhaust_center(kind, point, direction, scale, thrust)
-	exhaust_instances.append([Transform2D(direction.angle(), Vector2(plume_length, plume_width * 2.0), 0.0, center), thrust, fposmod(float(id) * 0.173, 1.0), tint])
+	for sign in ([-1.0, 1.0] if paired else [0.0]):
+		var at: Vector2 = center + direction.normalized().orthogonal() * nozzle.y * sign * scale
+		exhaust_instances.append([Transform2D(direction.angle(), Vector2(plume_length, plume_width * 2.0), 0.0, at), thrust, fposmod(float(id) * 0.173 + sign * 0.15, 1.0), tint])
 
 func _flush_exhaust(visual_clock: float) -> void:
 	if exhaust_instances.is_empty():

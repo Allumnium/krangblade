@@ -7,6 +7,27 @@ uniform sampler2D specular_map : filter_nearest;
 uniform vec4 light_points[16];
 uniform vec4 light_colors[16];
 uniform int light_count = 0;
+uniform vec4 shadow_discs[8];
+uniform int shadow_count = 0;
+// Localized, soft 2D eclipse approximation. Do not shadow a receiver
+// with its own bounding disc or with an occluder behind the light.
+float stellar_visibility(vec2 pos, vec2 light_pos, vec2 receiver) {
+	vec2 ray = light_pos - pos;
+	float length_sq = max(0.0001, dot(ray, ray));
+	float visibility = 1.0;
+	for (int j = 0; j < 8; j++) {
+		if (j >= shadow_count) { break; }
+		vec2 center = shadow_discs[j].xy;
+		float radius = shadow_discs[j].z;
+		if (distance(receiver, center) <= radius + 0.5) { continue; }
+		float t = dot(center - pos, ray) / length_sq;
+		if (t <= 0.0 || t >= 1.0) { continue; }
+		float clearance = distance(center, pos + ray * t);
+		visibility = min(visibility, smoothstep(radius * 0.72, radius * 1.12, clearance));
+	}
+	return visibility;
+}
+
 varying vec2 surface_position;
 varying vec2 surface_axis_x;
 varying vec2 surface_axis_y;
@@ -25,12 +46,15 @@ vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albe
 		if (distance_sq >= radius * radius) { continue; }
 		float falloff = 1.0 - sqrt(distance_sq) / radius;
 		float strength = falloff * falloff * light_points[i].w;
-		vec3 direction = normalize(vec3(dot(delta, axis_x), -dot(delta, axis_y), max(1.0, radius * 0.18)));
+		bool stellar = light_colors[i].a > 0.5;
+		if (stellar) { strength *= stellar_visibility(pos, light_points[i].xy, pos); }
+		float height = stellar ? max(0.1, length(delta) * 0.08) : max(1.0, radius * 0.10);
+		vec3 direction = normalize(vec3(dot(delta, axis_x), -dot(delta, axis_y), height));
 		float lambert = max(0.0, dot(normal, direction));
 		vec3 energy = light_colors[i].rgb * strength;
-		diffuse_light += energy * (0.08 + lambert);
+		diffuse_light += energy * (0.015 + lambert);
 		vec3 half_vector = normalize(direction + vec3(0.0, 0.0, 1.0));
-		shine += energy * pow(max(0.0, dot(normal, half_vector)), 12.0) * specular * 0.35;
+		shine += energy * pow(max(0.0, dot(normal, half_vector)), 16.0) * specular * 0.22;
 	}
 	return albedo * diffuse_light * ao + shine;
 }

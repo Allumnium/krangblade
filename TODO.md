@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.120.2: Validate dynamic planet day/night shading, star-facing ship/rock/structure normals, limited planet/station eclipses and self-shadow avoidance, freighter heading and paired nozzle placement, low-intensity acceleration, pause/fog, GPU frame time, Godot parse/import and peer smoke. Full mesh cast shadows remain outside this approximation.
+
 - [ ] v0.120.1: Verify full-bleed match render alignment at all edges, independent HUD margins, cursor/picking/ghosts, camera clamping at all zooms and aspect ratios, minimap viewport and resize; check windowed and fullscreen visually, run parse/startup/peer smoke.
 
 - [ ] v0.120.0: Verify no idle plume light, owner-tinted softer thrust, orbit-line removal, neutral Colonize autocast across pause/build/defeat/manual orders/peers, distributed map connectivity and Pulsar counts, larger ore rings, mining/expansion pacing and visual/FPS acceptance. Runtime unrun.
