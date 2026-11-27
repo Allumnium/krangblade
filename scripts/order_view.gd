@@ -277,7 +277,7 @@ func _group_command_target(state: Dictionary, graph: Dictionary, ship: Dictionar
 		return {}
 	return {"signature": signature, "point": endpoint, "tint": tint}
 
-func draw_group_command_line(state: Dictionary, poses: Dictionary, refs: Dictionary, selected_units: Array[int]) -> void:
+func draw_group_command_line(state: Dictionary, poses: Dictionary, refs: Dictionary, selected_units: Array[int], canvas: CanvasItem) -> void:
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var groups: Dictionary = {}
 	var selected: Dictionary = {}
@@ -305,10 +305,10 @@ func draw_group_command_line(state: Dictionary, poses: Dictionary, refs: Diction
 		var finish: Vector2 = shared["point"]
 		var tint: Color = shared["tint"]
 		if center.distance_to(finish) > 1.0:
-			draw_command_line(map_canvas, center, finish, Color(tint, 0.8))
+			draw_command_line(canvas, center, finish, Color(tint, 0.8))
 		if not marked.has(finish) and bounds.grow(5.0).has_point(finish):
 			marked[finish] = true
-			draw_command_target(map_canvas, finish, tint)
+			draw_command_target(canvas, finish, tint)
 
 func draw_command_target(canvas: CanvasItem, point: Vector2, tint: Color) -> void:
 	canvas.draw_arc(point, 4.5, 0.0, TAU, 20, Color(tint, 0.65), 0.9, true)

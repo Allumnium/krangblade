@@ -1811,9 +1811,10 @@ func _draw_queued_order_overlay() -> void:
 		if selected.has(int(ship["id"])) and not ship.get("order_queue", []).is_empty():
 			has_queue = true
 			break
-	if not has_queue:
-		return
-	order_view.draw_queued_chains(queued_order_overlay, state, _ship_poses(state), _frame_service_refs(state), selected_units, Rect2(Vector2.ZERO, map_canvas.size), _fog_visible)
+	if selected_units.size() > 1:
+		order_view.draw_group_command_line(state, _ship_poses(state), _frame_service_refs(state), selected_units, queued_order_overlay)
+	if has_queue:
+		order_view.draw_queued_chains(queued_order_overlay, state, _ship_poses(state), _frame_service_refs(state), selected_units, Rect2(Vector2.ZERO, map_canvas.size), _fog_visible)
 
 func _draw_fog() -> void:
 	_begin_draw_projection()
@@ -4936,7 +4937,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 				radius_px = (35.0 + 45.0 * thrust) * scale
 				strength += 1.15 * thrust
 			else:
-				pos -= direction * 8.0 * scale
+				pos = world_batches.engine_center(str(ship["kind"]), pos, direction, scale)
 			if bounds.grow(radius_px).has_point(pos):
 				_keep_near_light(lamps, [pos, radius_px, Color("#75d6ee"), strength, center.distance_squared_to(pos)])
 	world_batches.set_world_lights(stars + lamps)
@@ -5069,7 +5070,6 @@ func _draw_map_content() -> void:
 			map_canvas.draw_line(_screen_point(gate["position"]), _screen_point(target["position"]), Color("#855bbf80"), 2.0, true)
 	order_view.draw_ship_target_rings(state, poses, service_refs, selected_units, selected_ship_id)
 	if selected_units.size() > 1:
-		order_view.draw_group_command_line(state, poses, service_refs, selected_units)
 		order_view.draw_group_formation_ghosts(state, viewport_bounds, selected_units)
 	if selected_units.size() == 1:
 		var order_graph: Dictionary = ECONOMY.military_graph(state)
@@ -5278,12 +5278,16 @@ func _draw_map_content() -> void:
 		var cloaked: bool = bool(ship.get("cloaked", false))
 		var thrust: float = ship_motion.thrust_for(ship_id)
 		if not cloaked and scale >= 0.65 and not ECONOMY.is_static_structure(ship):
-			var lamp: Vector2 = point - direction * 8.0
-			world_batches.queue_lamp_glow(lamp, 18.0 * scale, Color("#75d6ee"), 0.35 + thrust * 0.25)
-		if not cloaked and simulation_running and scale >= 0.65 and thrust > 0.035 and not ECONOMY.is_static_structure(ship):
-			world_batches.queue_exhaust(kind, point, direction, scale, thrust, ship_id, viewport_bounds)
-			var plume_center: Vector2 = world_batches.exhaust_center(kind, point, direction, scale, thrust)
-			world_batches.queue_lamp_glow(plume_center, (18.0 + 20.0 * thrust) * scale, Color("#75d6ee"), 0.15 + 0.60 * thrust)
+			# Match the same interpolated heading used by the light prepass.
+			# Weapon/mining pose overrides must not detach the glow from its plume.
+			var engine_axis: Vector2 = poses[ship_id]["direction"]
+			if simulation_running and thrust > 0.035:
+				world_batches.queue_exhaust(kind, point, engine_axis, scale, thrust, ship_id, viewport_bounds)
+				var plume_center: Vector2 = world_batches.exhaust_center(kind, point, engine_axis, scale, thrust)
+				world_batches.queue_lamp_glow(plume_center, (18.0 + 20.0 * thrust) * scale, Color("#75d6ee"), 0.35 + 0.60 * thrust)
+			else:
+				var lamp: Vector2 = world_batches.engine_center(kind, point, engine_axis, scale)
+				world_batches.queue_lamp_glow(lamp, 18.0 * scale, Color("#75d6ee"), 0.35)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:

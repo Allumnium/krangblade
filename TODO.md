@@ -2,6 +2,8 @@
 
 ## Approved art and audio overhaul (2026-11-27)
 
+- [ ] v0.118.4 corrects light coordinate space, per-source surface response and emissive masking, centers additive engine/plume glow, and draws group movement markers above fog. Validate with close-up rotation, multiple lights, pause, zoom, normal/height convention, GPU costs and actual multiplayer. Cast shadows not implemented.
+
 - [ ] v0.118.3 restores group command target rings, removes combat-only box-selection preference, and adds thrust-dependent plume illumination. Verify mixed/foreign/Shift selection and owned-only dispatch, shared and differing destinations, fog/cloak and stop/pause behavior, and rendered fleet performance.
 
 - [ ] v0.118.2 integrates the first of 16 Fighter sprite styles and all six cropped material maps. Verify atlas alignment, heading, shield/engine placement, team tint, portraits and fleet rendering. Future ship sheets default to the first/top-left variant; retain remaining designs for eventual player-selectable styles (not implemented).
