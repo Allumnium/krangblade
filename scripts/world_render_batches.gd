@@ -89,29 +89,19 @@ func set_world_lights(lights: Array, blockers: Array = []) -> void:
 		material.set_shader_parameter("light_points", positions)
 		material.set_shader_parameter("light_colors", colors)
 		material.set_shader_parameter("light_count", mini(16, lights.size()))
-		material.set_shader_parameter("shadow_discs", shadow_uniforms)
-		material.set_shader_parameter("shadow_count", mini(8, blockers.size()))
+		if material == planet_lighting:
+			material.set_shader_parameter("shadow_discs", shadow_uniforms)
+			material.set_shader_parameter("shadow_count", mini(8, blockers.size()))
 
-func light_level(point: Vector2, normal: Vector2 = Vector2.ZERO, receiver: Vector2 = Vector2.INF) -> float:
+func light_level(point: Vector2, normal: Vector2 = Vector2.ZERO, _receiver: Vector2 = Vector2.INF) -> float:
 	var amount: float = 0.035
-	var center: Vector2 = receiver if receiver.is_finite() else point
 	for entry in world_lights:
 		var delta: Vector2 = (entry[0] as Vector2) - point
 		var falloff: float = maxf(0.0, 1.0 - delta.length() / maxf(1.0, float(entry[1])))
 		if falloff <= 0.0:
 			continue
-		var visibility: float = 1.0
-		if entry.size() > 5 and bool(entry[5]):
-			for disc in shadow_discs:
-				var at: Vector2 = disc[0]
-				var radius: float = disc[1]
-				if center.distance_to(at) <= radius + 0.5:
-					continue
-				var t: float = (at - point).dot(delta) / maxf(0.0001, delta.length_squared())
-				if t > 0.0 and t < 1.0:
-					visibility = minf(visibility, smoothstep(radius * 0.72, radius * 1.12, at.distance_to(point + delta * t)))
 		var facing: float = 1.0 if normal.is_zero_approx() else 0.035 + 0.965 * maxf(0.0, normal.dot(delta.normalized()))
-		amount += falloff * falloff * float(entry[3]) * facing * visibility
+		amount += falloff * falloff * float(entry[3]) * facing
 	return clampf(amount, 0.035, 1.0)
 
 

@@ -34,7 +34,7 @@ func _rock_material() -> ShaderMaterial:
 		asteroid_material.set_shader_parameter("specular_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_s.png"))
 	return asteroid_material
 
-func set_asteroid_lights(canvas: Control, lights: Array, blockers: PackedVector4Array, blocker_count: int) -> void:
+func set_asteroid_lights(canvas: Control, lights: Array) -> void:
 	var positions := PackedVector4Array()
 	var colors := PackedVector4Array()
 	var canvas_transform: Transform2D = canvas.get_global_transform_with_canvas()
@@ -52,8 +52,6 @@ func set_asteroid_lights(canvas: Control, lights: Array, blockers: PackedVector4
 	material.set_shader_parameter("light_points", positions)
 	material.set_shader_parameter("light_colors", colors)
 	material.set_shader_parameter("light_count", count)
-	material.set_shader_parameter("shadow_discs", blockers)
-	material.set_shader_parameter("shadow_count", mini(8, blocker_count))
 
 func _show_asteroid_mesh(canvas: Control, field_index: int, mesh: ArrayMesh) -> void:
 	if mesh == null:

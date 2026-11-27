@@ -4970,7 +4970,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 		var tint: Color = Color("#ffe6bb") if ECONOMY.has_planets(state["planets"][index]) else Color("#a7c9ff")
 		_keep_near_light(stars, [pos, radius, tint, 2.4, center.distance_squared_to(pos), true])
 		world_batches.draw_resource_glow(pos, minf(radius, 240.0), tint, 0.15)
-		# Limit visual eclipse casters to nearby visible planets and stations.
+		# Only nearby visible planets cast eclipses, and only onto other planets.
 		if not _fog_visible(points[index]):
 			continue
 		var system_radius: float = _planet_radius(index, state)
@@ -4980,12 +4980,6 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 				var disc_radius: float = system_radius * float(body["size"]) * 0.55
 				if disc_radius >= 5.0 and bounds.grow(disc_radius * 2.0).has_point(at):
 					_keep_near_light(blockers, [at, disc_radius, null, 0.0, center.distance_squared_to(at)])
-		if ECONOMY.has_station(state["planets"][index]):
-			var station_world: Vector2 = ECONOMY.station_position(state, index, float(state["elapsed"]))
-			var at: Vector2 = _screen_point(station_world)
-			var disc_radius: float = _station_radius()
-			if disc_radius >= 10.0 and _fog_visible(station_world) and bounds.grow(disc_radius * 2.0).has_point(at):
-				_keep_near_light(blockers, [at, disc_radius, null, 0.0, center.distance_squared_to(at)])
 	var scale: float = _ship_scale()
 	var running: bool = int(state.get("time_speed", 1)) > 0
 	if scale >= 0.325:
@@ -5043,7 +5037,7 @@ func _draw_map_content() -> void:
 	var points: Array = state["map"]["points"]
 	var poses: Dictionary = _ship_poses(state)
 	_prepare_world_lighting(state, points, poses, viewport_bounds, render_scale)
-	celestial_view.set_asteroid_lights(map_canvas, world_batches.world_lights, world_batches.shadow_uniforms, world_batches.shadow_discs.size())
+	celestial_view.set_asteroid_lights(map_canvas, world_batches.world_lights)
 	var font: Font = ThemeDB.fallback_font
 	var fields: Array = state["map"].get("fields", [])
 	var remembered_state: Dictionary = fog_state.observed_state(state, _map_size())
