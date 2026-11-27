@@ -391,7 +391,7 @@ func _run_lighting_test() -> void:
 	var batches = LIGHT_BATCHES.new()
 	batches.build(canvas)
 	var celestial = LIGHT_CELESTIAL.new()
-	var star := Vector2(viewport.size) * 0.5
+	var star := Vector2(viewport.size) * 0.5 - Vector2(18.0, 12.0)
 	var tint := Color("#ffe6bb")
 	# Draw the actual star art. No fog, selection, exhaust or impact lights.
 	canvas.draw.connect(func() -> void:
@@ -405,6 +405,8 @@ func _run_lighting_test() -> void:
 	# at two rendered sizes. Keep ring populations independent of heading.
 	for size_index in range(2):
 		var extent: float = 44.0 if size_index == 0 else 32.0
+		canvas.position = Vector2.ZERO if size_index == 0 else Vector2(23.0, -17.0)
+		var capture_star: Vector2 = canvas.get_global_transform_with_canvas() * star
 		for rotation_index in range(4):
 			var samples: Array[Dictionary] = []
 			batches.begin_frame()
@@ -417,7 +419,7 @@ func _run_lighting_test() -> void:
 					var heading: float = PI * 0.5 * float(rotation_index)
 					var center: Vector2 = star + Vector2.from_angle(bearing) * radius
 					batches.queue_overview_hull(texture, center, heading + HULL_ART.sprite_heading_offset(kind), extent)
-					samples.append({"kind": kind, "center": center, "extent": extent, "bearing_deg": bearing_index * 45, "heading_deg": rotation_index * 90})
+					samples.append({"kind": kind, "center": canvas.get_global_transform_with_canvas() * center, "extent": extent, "bearing_deg": bearing_index * 45, "heading_deg": rotation_index * 90})
 			batches.set_world_lights([])
 			batches.flush_world(0.0, art)
 			var materials: Dictionary = {}
@@ -439,7 +441,7 @@ func _run_lighting_test() -> void:
 			if reference.save_png(prefix + "_reference.png") != OK or dark.save_png(prefix + "_ambient.png") != OK or lit.save_png(prefix + "_stellar.png") != OK:
 				all_valid = false
 			for sample in samples:
-				var result: Dictionary = _lighting_measure(reference, dark, lit, sample, star)
+				var result: Dictionary = _lighting_measure(reference, dark, lit, sample, capture_star)
 				results.append(result)
 				if not result["valid"]:
 					all_valid = false
@@ -447,7 +449,7 @@ func _run_lighting_test() -> void:
 					print("LIGHTING SUSPECT ", JSON.stringify(result))
 	var groups: Dictionary = {}
 	# Score the broad lighting orientation, not individual decorative
-	# pixels. Report every inverted case even if its group passes.
+	# pixels. Fail any inverted case, not just systematic group inversions.
 	for kind in kinds:
 		for size_index in range(2):
 			for heading_index in range(4):
@@ -463,11 +465,11 @@ func _run_lighting_test() -> void:
 					count += 1 if result["correct_side"] else 0
 					near += float(result["near"])
 					far += float(result["far"])
-				var passed: bool = valid == 8 and count >= 6 and near > far * 1.15
+				var passed: bool = valid == 8 and count == 8 and near > far * 1.15
 				groups[key] = {"pass": passed, "valid": valid, "correct_side": count, "near_sum": near, "far_sum": far}
 				all_valid = all_valid and passed
 				print("LIGHTING GROUP ", key, " ", JSON.stringify(groups[key]))
-	var report := {"passed": all_valid, "case_count": results.size(), "groups": groups, "cases": results, "criterion": "8 valid bearings per group; >=6 correct; aggregate near response >1.15*far response"}
+	var report := {"passed": all_valid, "case_count": results.size(), "groups": groups, "cases": results, "criterion": "8 valid and 8 correct bearings per group; aggregate near response >1.15*far response"}
 	var file := FileAccess.open(output.path_join("report.json"), FileAccess.WRITE)
 	if file == null:
 		push_error("Could not write lighting report.")
