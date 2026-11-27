@@ -27,14 +27,10 @@ func _initialize() -> void:
 	assert(E.ship_max_hp("fighter") == 20.0 and E.STATION_HP == 500.0)
 	assert(U.resource_amount(25.0) == "25" and U.resource_amount(0.02, 2) == "0.02")
 	assert(E.OBJECTIVE_SPECS["metals"][2] == 300 and E.OBJECTIVE_SPECS["population"][2] == 800)
-	assert(home["yards"].is_empty() and home["pds"].is_empty() and home["buildings"].is_empty())
+	assert(home["yards"].size() == 1 and home["yards"][0]["level"] == 1 and home["pds"].is_empty() and home["buildings"].is_empty())
 	for resource in E.RESOURCES:
 		assert(E.production_level(home, resource) == 0 and E.rate(home, resource) == 0.0)
-	assert(not E.enqueue(state, 1, 0, "fighter"))
-	assert(E.enqueue(state, 1, 0, "yard"))
-	for _year in range(31):
-		E.step(state, 1.0)
-	assert(home["yards"].size() == 1 and E.eco_organics(home) == 0.0)
+	assert(E.shipyard_operational(home, 0) and E.eco_organics(home) == 0.0)
 	assert(home["stock"]["Crystals"] == 0.0 and home["population"] >= 150.0)
 	var before_stock: Dictionary = home["stock"].duplicate()
 	var before_gc: float = E.credit_balance(state, 1)

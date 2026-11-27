@@ -2,6 +2,8 @@
 
 ## Approved art and audio overhaul (2026-11-27)
 
+- [ ] v0.118.0 restores initial Small yards, adds base GC income, tightens asteroid clusters, softens selection/order indicators and boosts emissive contrast. Validate starting net GC, colony population conservation, actual visual balance and legacy fixtures; no runtime execution yet.
+
 - [ ] v0.117.1 adds varying radius ceiling and synthetic fog observation/depletion regression (unrun). v0.117.0 removes ordinary asteroid collision and avoidance, retains Pulsar exclusions, reduces rock radius and slows real-time spin, hides unsurveyed minimap rocks and all non-live world rocks, and eliminates hidden-rock rendering. Run migrated direct travel, logistics, fog, wall, solo and real ENet regressions; compare realistic movement/render FPS and confirm relative asteroid/planet scale.
 
 - [ ] v0.116.0 adds the 64-variant asteroid atlas, material maps, directional lighting and Crystal veins; v0.116.1 verifies PNG dimensions statically and adds tile coverage assertions. Run the existing fog regression; confirm atlas alignment, depletion scale, LOD, fog memory, shader/import metadata, and realistic rendered FPS. Physical geometry and economy unchanged.

@@ -38,17 +38,17 @@ func draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tint
 	var scale: float = maxf(0.42, ship_scale.call(false))
 	var shape: PackedVector2Array = hull_art.polygon(point, axis * scale, axis.orthogonal() * scale, HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE))
 	if not Geometry2D.triangulate_polygon(shape).is_empty():
-		surface.draw_colored_polygon(shape, Color(tint, 0.24))
+		surface.draw_colored_polygon(shape, Color(tint, 0.15))
 	shape.append(shape[0])
-	surface.draw_polyline(shape, Color(tint, 0.85), 1.0, true)
+	surface.draw_polyline(shape, Color(tint, 0.60), 0.8, true)
 
 func draw_sector_target(graph: Dictionary, node: int, tint: Color, drawn: Dictionary) -> void:
 	if node < 0 or node >= graph["points"].size() or drawn.has(node):
 		return
 	drawn[node] = true
 	var center: Vector2 = screen_point.call(graph["points"][node])
-	map_canvas.draw_arc(center, 12.0, 0.0, TAU, 24, Color(tint, 0.9), 1.5, true)
-	map_canvas.draw_circle(center, 2.0, tint)
+	map_canvas.draw_arc(center, 4.5, 0.0, TAU, 20, Color(tint, 0.60), 0.9, true)
+	map_canvas.draw_circle(center, 1.0, Color(tint, 0.65))
 
 func draw_formation_preview(state: Dictionary, formation_button: int, formation_length: float, formation_mode: String, formation_path: PackedVector2Array, formation_orders: Callable, selected_owned_units: Callable) -> void:
 	if formation_button == 0 or formation_length <= 5.0:
@@ -141,9 +141,9 @@ func draw_ship_target_rings(state: Dictionary, poses: Dictionary, refs: Dictiona
 		drawn[target["point"]] = true
 		var owner: int = int(target["owner"])
 		var tint: Color = Color("#50a8ff") if ECONOMY._friendly_target(state, local_player.call(), target) else (Color("#ff5058") if ECONOMY.empires_hostile(state, local_player.call(), owner) else Color.WHITE)
-		var radius: float = float(target["radius"]) + 4.0
+		var radius: float = 4.5
 		if Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 4.0).has_point(target["point"]):
-			map_canvas.draw_arc(target["point"], radius, 0.0, TAU, clampi(ceili(radius * 0.7), 24, 96), tint, 1.8, true)
+			map_canvas.draw_arc(target["point"], radius, 0.0, TAU, 20, Color(tint, 0.65), 0.9, true)
 
 func order_color(ship: Dictionary, order: Dictionary) -> Color:
 	var kind: String = str(order.get("kind", ""))
@@ -159,7 +159,7 @@ func order_color(ship: Dictionary, order: Dictionary) -> Color:
 # Shared dash pattern for all order intent lines, in screen pixels.
 func draw_command_line(canvas: CanvasItem, start: Vector2, finish: Vector2, tint: Color) -> void:
 	if start.distance_to(finish) > 1.0:
-		canvas.draw_dashed_line(start, finish, tint, 1.5, 6.0, true, true)
+		canvas.draw_dashed_line(start, finish, Color(tint, tint.a * 0.72), 1.0, 5.0, true, true)
 
 func draw_command_route(_graph: Dictionary, _ship: Dictionary, start: Vector2, finish: Vector2, tint: Color) -> void:
 	draw_command_line(map_canvas, start, finish, Color(tint, 0.8))
@@ -439,7 +439,7 @@ func draw_queued_chains(canvas: CanvasItem, state: Dictionary, poses: Dictionary
 		markers[marker_key] = true
 		if bool(leg["ghost"]):
 			draw_destination_ghost(leg["hull"], finish, leg["heading"], tint, canvas)
-		canvas.draw_arc(finish, 8.0, 0.0, TAU, 20, Color(tint, 0.95), 1.5, true)
+		canvas.draw_arc(finish, 4.5, 0.0, TAU, 20, Color(tint, 0.65), 0.9, true)
 		var slot: int = int(label_slots.get(finish, 0))
 		label_slots[finish] = slot + 1
 		var label_text: String = str(step)

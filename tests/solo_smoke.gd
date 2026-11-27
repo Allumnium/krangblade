@@ -147,11 +147,8 @@ func _run() -> void:
 	state["galactic_credits"][1] = 3000.0
 	planets[0]["levels"]["Organics"] = 3
 	# Colony and Freighter hulls require a Medium shipyard (v0.55.0).
-	session.call("request_operation", 0, "yard")
-	for i in range(ceili(ECON._work("yard", 1) / 0.1) + 1):
-		session.call("_economy_tick")
-	if planets[0]["yards"].size() != 1:
-		push_error("First shipyard must be built explicitly.")
+	if planets[0]["yards"].size() != 1 or planets[0]["yards"][0]["level"] != 1:
+		push_error("Starting Small shipyard missing.")
 		quit(1)
 		return
 	planets[0]["yards"][0]["level"] = 2
@@ -182,7 +179,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (planets[neighbor]["yards"].is_empty()):
+	if not (planets[neighbor]["yards"].size() == 1 and planets[neighbor]["yards"][0]["level"] == 1):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return

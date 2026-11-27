@@ -1831,7 +1831,7 @@ func _draw_fog_content() -> void:
 func _draw_rock_selection(canvas: Control, rock: Dictionary, scale: float) -> void:
 	var fraction: float = float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock["initial"]))
 	var radius: float = maxf(4.0, float(rock["radius"]) * scale * sqrt(clampf(fraction, 0.0, 1.0)) + 3.0)
-	canvas.draw_arc(_screen_point(rock["position"]), radius, 0.0, TAU, 24, HUD.ACCENT, 1.0, true)
+	canvas.draw_arc(_screen_point(rock["position"]), radius, 0.0, TAU, 24, Color(HUD.ACCENT, 0.70), 0.8, true)
 
 # Names are static generated map geography, not live tactical information.
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
@@ -3143,7 +3143,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
-					var planet_light: float = maxf(0.60, world_batches.light_level(point))
+					var planet_light: float = maxf(0.30, world_batches.light_level(point))
 					map_canvas.draw_texture_rect(celestial_view.body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(planet_light, planet_light, planet_light, detail))
 				else:
 					map_canvas.draw_circle(point, body_radius, Color(celestial_view.body_base_color(body).darkened(0.18), detail), true)
@@ -4928,7 +4928,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 			continue
 		var tint: Color = Color("#ffe6bb") if ECONOMY.has_planets(state["planets"][index]) else Color("#a7c9ff")
 		_keep_near_light(stars, [pos, radius, tint, 0.95, center.distance_squared_to(pos)])
-		world_batches.draw_resource_glow(pos, minf(radius, 240.0), tint, 0.08)
+		world_batches.draw_resource_glow(pos, minf(radius, 240.0), tint, 0.15)
 	var scale: float = _ship_scale()
 	if scale >= 0.65:
 		for ship in state["ships"]:
@@ -4940,7 +4940,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 			if not bounds.grow(40.0 * scale).has_point(pos):
 				continue
 			pos -= (pose["direction"] as Vector2) * 8.0 * scale
-			_keep_near_light(lamps, [pos, 35.0 * scale, Color("#75d6ee"), 0.24, center.distance_squared_to(pos)])
+			_keep_near_light(lamps, [pos, 35.0 * scale, Color("#75d6ee"), 0.48, center.distance_squared_to(pos)])
 	world_batches.set_world_lights(stars + lamps)
 
 func _keep_near_light(lights: Array, entry: Array) -> void:
@@ -5034,7 +5034,7 @@ func _draw_map_content() -> void:
 		var detail: float = _draw_system(i, view, pos, radius, tint, -1.0 if live else seen_at)
 		if not live or _fog_visible(ECONOMY.station_position(state, i, float(state["elapsed"]))):
 			var station_light: float = world_batches.light_level(_screen_point(ECONOMY.station_position(view, i, seen_at)))
-			var lit_tint: Color = tint.darkened((1.0 - station_light) * 0.45)
+			var lit_tint: Color = tint.darkened((1.0 - station_light) * 0.65)
 			structure_view.draw_station(view, i, lit_tint, seen_at, building_selection_kind, selected_buildings)
 			structure_view.draw_shipyards(view, i, lit_tint, seen_at, selected, selected_yard, building_selection_kind, selected_buildings)
 		# Incoming resource pods must remain visible as they cross the
@@ -5103,8 +5103,7 @@ func _draw_map_content() -> void:
 				var star: int = int(active_order["target"])
 				if star >= 0 and star < state["planets"].size():
 					var center: Vector2 = _screen_point(state["map"]["points"][star])
-					var ring: float = maxf(5.0, celestial_view.star_draw_radius(_planet_radius(star, state))) + 5.0
-					map_canvas.draw_arc(center, ring, 0.0, TAU, 48, Color(1.0, 1.0, 1.0, 0.9), 1.5, true)
+					map_canvas.draw_arc(center, 4.5, 0.0, TAU, 20, Color(1.0, 1.0, 1.0, 0.65), 0.9, true)
 			elif active_order.get("kind", "") in ["sector", "sector_entry"] and ECONOMY.unit_order_running(craft):
 				order_view.draw_sector_target(order_graph, int(active_order["target"]), order_tint, drawn_sectors)
 			elif active_order.get("kind", "") == "position" and ECONOMY.unit_order_running(craft):
@@ -5282,7 +5281,7 @@ func _draw_map_content() -> void:
 		var thrust: float = ship_motion.thrust_for(ship_id)
 		if not cloaked and scale >= 0.65 and not ECONOMY.is_static_structure(ship):
 			var lamp: Vector2 = point - direction * 8.0
-			world_batches.queue_lamp_glow(lamp, 14.0 * scale, Color("#75d6ee"), 0.18 + thrust * 0.13)
+			world_batches.queue_lamp_glow(lamp, 18.0 * scale, Color("#75d6ee"), 0.35 + thrust * 0.25)
 		if not cloaked and simulation_running and scale >= 0.65 and thrust > 0.035:
 			world_batches.queue_exhaust(kind, point, direction, scale, thrust, ship_id, viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
