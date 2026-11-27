@@ -377,16 +377,36 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 				chunk["initial"] = chunk["remaining"]
 	return {"seed": seed_value, "layout": layout, "planetless": planetless_systems(seed_value, points.size(), edges, player_count), "antimatter_home_clearance": ANTIMATTER_CLEARANCE * scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "field_edges": field_edges, "size": bounds * scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": points.size()}
 
-# Derive moving geometry from immutable offsets and a coarse simulation
-# clock. One transform per ring, no physics bodies or replicated positions.
+# Existing seeded spin is uniform and immutable: use it to assign each
+# rock to one of three mixed-speed cohorts without new RNG or wire state.
+static func asteroid_orbit_group(rock: Dictionary) -> int:
+	return clampi(floori(float(rock.get("rotation", 0.0)) / TAU * 3.0), 0, 2)
+
+static func asteroid_orbit_transforms(field: Dictionary, elapsed: float) -> Array[Transform2D]:
+	var transforms: Array[Transform2D] = []
+	if not field.has("orbit_center"):
+		return transforms
+	var phase: float = maxf(0.0, elapsed) * float(field["orbit_rate"])
+	var center: Vector2 = field["orbit_center"]
+	for factor in [0.9, 1.0, 1.1]:
+		transforms.append(Transform2D(fposmod(phase * float(factor), TAU), center))
+	return transforms
+
+static func asteroid_orbit_position(rock: Dictionary, transforms: Array[Transform2D]) -> Vector2:
+	if transforms.is_empty() or not rock.has("orbit_offset"):
+		return rock["position"]
+	return transforms[asteroid_orbit_group(rock)] * (rock["orbit_offset"] as Vector2)
+
+# Authority and compact replica keep the same inexpensive coarse updates.
+# Presentation evaluates these same transforms at the continuous planet clock.
 static func update_asteroid_orbits(map_data: Dictionary, elapsed: float) -> void:
 	var time: float = floorf(maxf(0.0, elapsed) / ASTEROID_ORBIT_STEP + 0.00001) * ASTEROID_ORBIT_STEP
 	for field in map_data.get("fields", []):
 		if not field.has("orbit_center"):
 			continue
-		var transform := Transform2D(fposmod(time * float(field["orbit_rate"]), TAU), field["orbit_center"])
+		var transforms: Array[Transform2D] = asteroid_orbit_transforms(field, time)
 		for rock in field.get("chunks", []):
-			rock["position"] = transform * (rock["orbit_offset"] as Vector2)
+			rock["position"] = asteroid_orbit_position(rock, transforms)
 
 static func _belt_outline(lobes: Array) -> PackedVector2Array:
 	var outline := PackedVector2Array()

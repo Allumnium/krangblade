@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.121.8: Verify smooth three-cohort asteroid orbits, pause/speed changes, visual picking and mining alignment, static field behavior, compact replicas and rendered FPS/real peers.
+
 - [ ] v0.121.7: Confirm revised star-facing broad illumination on all real ship sprites in game and strict rendered regression (all 192 correct), check actual hardware FPS and peers. Offline asset calculation 192/192 and translated synthetic GPU probe 8/8 passed; not a substitute for real-sprite rendered verification.
 
 - [x] Isolated Godot 4.7.2 GPU shader probe: 8/8 correct bearings; 0/8 with deliberately inverted normals (v0.121.6 evidence).
