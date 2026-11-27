@@ -69,9 +69,15 @@ vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 geom
 			visibility = smoothstep(0.0, 0.16, dot(geometric_normal, direction));
 		} else if (stellar) {
 			// Broad hull silhouette shading prevents isolated bright pixels on the far side.
-			visibility = mix(0.18, 1.0, smoothstep(-0.7, 0.35, dot(local_offset, direction.xy)));
+			visibility = mix(0.15, 1.0, smoothstep(-0.55, 0.55, dot(local_offset, direction.xy)));
 		}
 		float lambert = max(0.0, dot(normal, direction));
+		if (stellar && authored_sprite && !spherical_surface) {
+			// Broad illumination follows the actual star-facing half of the hull.
+			// Authored normals provide detail, not the direction of the terminator.
+			float facing = smoothstep(-0.55, 0.55, dot(local_offset, direction.xy));
+			lambert = mix(lambert, 0.08 + 0.82 * facing, 0.80);
+		}
 		vec3 energy = light_colors[i].rgb * strength * visibility;
 		diffuse_light += energy * lambert;
 		vec3 half_vector = normalize(direction + vec3(0.0, 0.0, 1.0));
@@ -109,7 +115,8 @@ void fragment() {
 	vec2 ship_axis_x = surface_axis_x;
 	vec2 ship_axis_y = surface_axis_y;
 	if (authored_sprite && !spherical_surface) {
-		ship_pos = SCREEN_UV / SCREEN_PIXEL_SIZE;
+		// Keep fragment positions in the same canvas space as the submitted lights.
+		ship_pos = surface_position;
 		vec2 ux = dFdx(UV);
 		vec2 uy = dFdy(UV);
 		vec2 px = dFdx(ship_pos);
