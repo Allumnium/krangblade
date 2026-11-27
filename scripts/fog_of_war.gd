@@ -5,6 +5,7 @@ const ECONOMY = preload("res://scripts/economy_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 
 var _live: Dictionary = {}
+var observing: bool = false
 var _ship_vision_cache: Dictionary = {}
 var _explored: Dictionary = {}
 var texture: ImageTexture
@@ -23,6 +24,7 @@ var profile: Dictionary = {}
 
 func update(state: Dictionary, player: int, motion_revision: Variant, map_size: Vector2) -> bool:
 	if state.is_empty():
+		observing = false
 		_live.clear()
 		_ship_vision_cache.clear()
 		_explored.clear()
@@ -57,10 +59,20 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 		_seed_rock_memory()
 		_seed_starting_memory(state, player)
 	var team: int = ECONOMY._combat_group(state, player)
-	var revision: Array = [state.get("elapsed"), motion_revision, team, state["ships"].size(), state.get("diplomacy_revision", 0)]
+	var next_observing: bool = state.get("eliminated", []).has(player)
+	var revision: Array = [state.get("elapsed"), motion_revision, team, state["ships"].size(), state.get("diplomacy_revision", 0), next_observing]
 	if revision == _revision:
 		return false
 	_revision = revision
+	if next_observing:
+		observing = true
+		texture = null
+		_mask_image = null
+		_observe_rocks(state, map_size)
+		return true
+	if observing:
+		_mask_image = null
+	observing = false
 	profile.clear()
 	var started: int = Time.get_ticks_usec()
 	var prior_live: Dictionary = _live
@@ -245,7 +257,7 @@ func observed_state(state: Dictionary, map_size: Vector2) -> Dictionary:
 	return view
 
 func is_visible(point: Vector2, map_size: Vector2) -> bool:
-	return point.is_finite() and Rect2(Vector2.ZERO, map_size).has_point(point) and _live.has(ECONOMY.vision_cell(point))
+	return point.is_finite() and Rect2(Vector2.ZERO, map_size).has_point(point) and (observing or _live.has(ECONOMY.vision_cell(point)))
 
 func draw(overlay: Control, bounds: Rect2, map_rect: Rect2, map_size: Vector2) -> void:
 	if texture == null:

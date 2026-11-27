@@ -587,7 +587,7 @@ static func discovered(state: Dictionary, player: int, kind: String, index: int)
 	var team: int = _combat_group(state, player) if state.has("teams") else 0
 	if team <= 0 or index < 0:
 		return false
-	if not bool(state.get("fog_of_war", DEFAULT_FOG_OF_WAR)):
+	if state.get("eliminated", []).has(player) or not bool(state.get("fog_of_war", DEFAULT_FOG_OF_WAR)):
 		if kind == "planets":
 			return index < (state.get("planets", []) as Array).size()
 		if kind == "fields":
@@ -756,14 +756,14 @@ static func ship_origin_population_met(p: Dictionary, kind: String) -> bool:
 	return kind != "colony_ship" or float(p.get("population", 0.0)) + EPS >= COLONY_MIN_ORIGIN_POPULATION
 
 static func base_galactic_income(state: Dictionary, player: int) -> float:
-	return BASE_GALACTIC_INCOME if player > 0 and state.get("galactic_credits", {}).has(player) else 0.0
+	return BASE_GALACTIC_INCOME if player > 0 and state.get("galactic_credits", {}).has(player) and not state.get("eliminated", []).has(player) else 0.0
 
 static func _accrue_base_galactic_income(state: Dictionary, dt: float) -> void:
 	if dt <= 0.0:
 		return
 	var credits: Dictionary = state.get("galactic_credits", {})
 	for owner in credits:
-		if int(owner) > 0:
+		if int(owner) > 0 and not state.get("eliminated", []).has(owner):
 			credits[owner] = float(credits[owner]) + BASE_GALACTIC_INCOME * dt
 
 static func resident_tax_income(state: Dictionary, player: int) -> float:
@@ -5160,6 +5160,7 @@ static func command_fighters(state: Dictionary, player: int, ids: Array, target:
 	for ship in selected:
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
+		_cancel_auto_withdrawal(ship)
 		_set_unit_order(state, ship, {"kind": "sector", "target": target, "move_only": move_only})
 		ship["direct_order"] = true
 		_clear_local_hold(ship)
@@ -6742,7 +6743,7 @@ static func _valid_targeted_unit_order(state: Dictionary, graph: Dictionary, shi
 				return false
 			if order.has("heading") and not _valid_order_heading(order["heading"]):
 				return false
-			return not bool(ship.get("retreating", false)) or append
+			return true
 		"guard":
 			return fighter and military_pois(state, owner).has(target) and order.get("point") is Vector2 and _position_target_valid(state, graph, owner, target, order["point"])
 		"patrol":
@@ -6750,7 +6751,7 @@ static func _valid_targeted_unit_order(state: Dictionary, graph: Dictionary, shi
 				return false
 			return fighter and military_pois(state, owner).has(target) and (not order.has("point") or (order["point"] is Vector2 and _position_target_valid(state, graph, owner, target, order["point"])))
 		"sector_entry":
-			if target < 0 or target >= state["planets"].size() or not military_pois(state, owner).has(target) or bool(ship.get("retreating", false)):
+			if target < 0 or target >= state["planets"].size() or not military_pois(state, owner).has(target):
 				return false
 			var nav: Dictionary = _manual_nav(state, graph, ship, target)
 			return sector_contains(graph, target, ship["position"]) or _military_paths(nav["graph"], nav["node"])["distance"].has(int(ship["at"]))
@@ -7845,7 +7846,9 @@ static func _order_follow(state: Dictionary, player: int, ids: Array, order: Dic
 	if units.is_empty() or units.any(func(ship: Dictionary) -> bool: return not _valid_follow_target(state, ship, target, refs)):
 		return false
 	for ship in units:
-		# Follow deliberately keeps any tactical order, so skip _reset_unit_for_order.
+		# Follow replaces old attack intent; guard-follow still permits combat.
+		_cancel_auto_withdrawal(ship)
+		_clear_tactical_order(ship)
 		_cancel_salvage_order(ship)
 		_clear_local_hold(ship)
 		_interrupt_work(ship)
@@ -8014,9 +8017,10 @@ static func command_local_position(state: Dictionary, player: int, ids: Array, n
 	if units.is_empty():
 		return false
 	for ship in units:
-		if not sector_contains(graph, node, ship["position"]) or bool(ship.get("retreating", false)):
+		if not sector_contains(graph, node, ship["position"]):
 			return false
 	for ship in units:
+		_cancel_auto_withdrawal(ship)
 		_reset_unit_for_order(ship)
 		_set_unit_order(state, ship, {"kind": "position", "target": node, "point": point, "move_only": move_only})
 		ship["local_move_target"] = point
@@ -8047,9 +8051,7 @@ static func command_remote_position(state: Dictionary, player: int, ids: Array, 
 	if units.is_empty() or not _position_target_valid(state, graph, player, node, point):
 		return false
 	for ship in units:
-		if bool(ship.get("retreating", false)):
-			return false
-	for ship in units:
+		_cancel_auto_withdrawal(ship)
 		_reset_unit_for_order(ship)
 		var nav: Dictionary = _manual_nav(state, graph, ship, node)
 		ship["route"] = []
@@ -8072,7 +8074,7 @@ static func command_stop_units(state: Dictionary, player: int, ids: Array) -> bo
 		return false
 	var graph: Dictionary = military_graph(state)
 	for ship in units:
-		var retreating: bool = bool(ship.get("retreating", false))
+		_cancel_auto_withdrawal(ship)
 		var sector: int = local_sector(graph, ship)
 		_cancel_salvage_order(ship)
 		_clear_tactical_order(ship)
@@ -8087,9 +8089,6 @@ static func command_stop_units(state: Dictionary, player: int, ids: Array) -> bo
 		ship["laser_until"] = -1.0
 		ship["yard_target"] = -1
 		ship["yard_laser_until"] = -1.0
-		# Emergency repair travel retains its route and destination.
-		if retreating:
-			continue
 		if sector >= 0 and (ship["kind"] in MILITARY_KINDS or sector < state["planets"].size()):
 			ship["at"] = sector
 		_interrupt_work(ship)
@@ -8105,6 +8104,8 @@ static func command_hold_units(state: Dictionary, player: int, ids: Array, relea
 	if units.is_empty():
 		return false
 	for ship in units:
+		if not release:
+			_cancel_auto_withdrawal(ship)
 		_set_unit_order(state, ship, {})
 		ship.erase("launch_rally")
 		_cancel_salvage_order(ship)
@@ -8132,7 +8133,7 @@ static func _work_local_move(graph: Dictionary, ship: Dictionary, dt: float, sta
 	if not ship.has("local_move_target") or bool(ship.get("retreating", false)):
 		return false
 	var fighter: bool = ship.get("kind", "") in MILITARY_KINDS
-	if fighter and _engaged(ship):
+	if fighter and _engaged(ship) and not _priority_travel(ship):
 		return false
 	var node: int = int(ship["local_move_sector"])
 	var destination: Vector2 = ship["local_move_target"]
@@ -8534,7 +8535,28 @@ static func territory_empires(state: Dictionary) -> Array[int]:
 			owners[i] = int(state["planets"][i]["owner"])
 	return owners
 
+# Direct Move and Follow cannot be interrupted by autonomous pursuit.
+static func _priority_travel(ship: Dictionary) -> bool:
+	var order: Dictionary = ship.get("unit_order", {})
+	if order.get("kind", "") == "follow":
+		return not bool(order.get("guard", false))
+	if order.get("kind", "") in ["position", "sector_entry", "sector"]:
+		return bool(order.get("move_only", false)) and (ship.has("local_move_target") or not ship.get("route", []).is_empty())
+	return bool(ship.get("move_only", false)) and ship.has("local_move_target")
+
+static func _cancel_auto_withdrawal(ship: Dictionary) -> void:
+	if not bool(ship.get("retreating", false)):
+		return
+	ship["retreating"] = false
+	ship.erase("repair_site")
+	ship.erase("withdrawal_objective")
+	ship["route"] = []
+	ship["leg"] = 0.0
+	ship["dest"] = -1
+
 static func _engaged(ship: Dictionary) -> bool:
+	if _priority_travel(ship):
+		return false
 	return ((int(ship.get("combat_target", -1)) >= 0 or ship.has("railgun_target_point")) and not bool(ship.get("passing_fire", false))) or int(ship.get("pursuit_target", -1)) >= 0
 
 # Civilian hulls do not pursue, even if armed. A fighter fleeing along a route (or
@@ -9738,11 +9760,10 @@ static func _combat_hull(state: Dictionary, frame: COMBAT_FRAME, ship: Dictionar
 	if miner:
 		ship["mining_active"] = false
 	var weapon_damage: float = MINER_LASER_DAMAGE if miner else LASER_DAMAGE * float(capital_lasers(str(ship["kind"])))
-	var moving_only: bool = bool(ship.get("move_only", false)) and (ship.has("launch_rally") or ship.has("local_move_target") or ship.get("unit_order", {}).get("kind", "") == "follow" or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS))
+	var moving_only: bool = _priority_travel(ship) or (bool(ship.get("move_only", false)) and (ship.has("launch_rally") or not (ship["route"] as Array).is_empty() or (ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > EPS)))
 	if not moving_only:
 		ship.erase("move_only")
-	elif not peaceful and fighter and not bool(ship.get("holding", false)) and _combat_sector_has_hostile(frame.sector_teams, int(frame.ship_sectors[frame.hull_slots[int(ship["id"])]]), _combat_group(state, int(ship["owner"])), state):
-		moving_only = false
+
 	ship["passing_fire"] = moving_only and fighter
 	if bool(ship.get("retreating", false)) or ship.has("cargo_order") or ship.has("repair_order"):
 		ship["combat_target"] = -1
@@ -11293,6 +11314,8 @@ static func _prepare_withdrawals(state: Dictionary, graph: Dictionary) -> void:
 	for ship in state["ships"]:
 		if not armed(ship):
 			continue
+		if _priority_travel(ship) or bool(ship.get("holding", false)) or _stop_waiting(state, ship):
+			continue
 		var withdrawing: bool = bool(ship.get("retreating", false))
 		if not withdrawing and (not autocast_enabled(ship, "retreat") or float(ship.get("hp", ship_max_hp(str(ship["kind"])))) > ship_max_hp(str(ship["kind"])) * WITHDRAW_HP / SHIP_HP):
 			continue
@@ -11850,12 +11873,13 @@ static func update_match_outcome(state: Dictionary) -> bool:
 		var owner: int = int(planet["owner"])
 		if owner > 0 and has_station(planet):
 			viable[owner] = true
-	# A fleet remains in play even when every station has fallen. A free
-	# reconnaissance probe cannot prevent defeat.
-	for ship in state["ships"]:
-		var owner: int = int(ship["owner"])
-		if owner > 0 and ship.get("kind", "") != "probe" and not is_static_structure(ship):
-			viable[owner] = true
+	# Preserve the colony-recovery exception, not indefinite survival by ordinary hulls.
+	var colonizable: bool = state["planets"].any(func(system: Dictionary) -> bool: return int(system["owner"]) == 0 and has_planets(system) and not has_station(system))
+	if colonizable:
+		for ship in state["ships"]:
+			var owner: int = int(ship["owner"])
+			if owner > 0 and ship.get("kind", "") == "colony_ship":
+				viable[owner] = true
 	var eliminated: Array = state.get("eliminated", [])
 	var changed: bool = false
 	for player in state["teams"]:
@@ -11865,6 +11889,15 @@ static func update_match_outcome(state: Dictionary) -> bool:
 		changed = true
 		state["ai_waves"].erase(player)
 		state["ai_players"].erase(player)
+		for ship in state["ships"]:
+			if int(ship["owner"]) == player and not is_static_structure(ship) and ship.get("kind", "") != "probe" and not colony_morphing(ship):
+				_cancel_auto_withdrawal(ship)
+				_reset_unit_for_order(ship)
+				_set_unit_order(state, ship, {})
+				_finish_manual(ship)
+				ship.erase("operation_id")
+				ship.erase("operation_slot")
+				ship["navigation_target"] = ship.get("position", Vector2.ZERO)
 	state["eliminated"] = eliminated
 	if starting_teams.size() < 2:
 		return changed
@@ -12889,7 +12922,7 @@ static func _step_hull_overrides(state: Dictionary, frame: STEP_FRAME, ship: Dic
 	var service_refs: Dictionary = frame.service_refs
 	var follow: Dictionary = ship.get("unit_order", {})
 	var escort_far: bool = follow.get("kind", "") == "follow" and bool(follow.get("guard", false)) and (ship["position"] as Vector2).distance_to(service_refs.get(int(follow["target"]), {}).get("position", Vector2.INF)) > FOLLOW_DISTANCE * 2.0
-	if (escort_far or not (ship.get("kind", "") in MILITARY_KINDS and _engaged(ship) and not bool(ship.get("holding", false)))) and _work_follow(state, combat_graph, ship, service_refs, dt):
+	if (escort_far or _priority_travel(ship) or not (ship.get("kind", "") in MILITARY_KINDS and _engaged(ship) and not bool(ship.get("holding", false)))) and _work_follow(state, combat_graph, ship, service_refs, dt):
 		return true
 	if ship.has("attack_order"):
 		var ref: Dictionary = service_refs.get(int(ship["attack_order"]), {})

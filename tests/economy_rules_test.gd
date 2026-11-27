@@ -1583,8 +1583,7 @@ func _test_combat_sector_presence() -> void:
 	assert(ECON._combat_sector_has_hostile(presence, 1, 2))
 	assert(ECON._combat_sector_has_hostile(presence, 3, 2))
 	assert(ECON._combat_sector_has_hostile(presence, 3, 3))
-	# Preserve passing-fire behavior: friendly-only move stays move-only,
-	# while a hostile in the same sector permits normal pursuit.
+	# Explicit Move stays move-only even with hostile hulls in the sector.
 	var map_data: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = _funded_fixture(map_data, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var craft: Dictionary = {"id": 101, "kind": "fighter", "owner": 1, "at": 0, "position": Vector2(20, 0), "heading": Vector2.RIGHT, "route": [1], "leg": 0.0, "dest": 1, "source": -1, "hp": ECON.ship_max_hp("fighter"), "cargo": ECON.empty_stock(), "move_only": true}
@@ -1598,8 +1597,9 @@ func _test_combat_sector_presence() -> void:
 	assert(bool(craft.get("passing_fire", false)))
 	ally["owner"] = 2
 	ECON._combat(state, graph, 0.1)
-	assert(not bool(craft.get("passing_fire", false)))
-	print("PASS: indexed combat sector team presence and move-only behavior")
+	assert(bool(craft.get("passing_fire", false)) and int(craft.get("pursuit_target", -1)) == -1)
+	assert(not ECON._engaged(craft))
+	print("PASS: indexed combat sector team presence and explicit move priority")
 
 # Compare the old idle predicate against activity classification for
 # representative state transitions, including overlapping orders.
@@ -7259,24 +7259,20 @@ func _test_match_elimination() -> void:
 	var fighter: Dictionary = {"id": 11001, "kind": "fighter", "owner": 2, "at": 1, "route": [], "dest": -1}
 	state["ships"].append(fighter)
 	state["ships"].erase(colony)
-	assert(not ECON.update_match_outcome(state))
-	assert(state["ships"].has(fighter) and not state.get("eliminated", []).has(2))
-	state["ships"].erase(fighter)
 	assert(ECON.update_match_outcome(state))
+	assert(state["ships"].has(fighter) and int(fighter["owner"]) == 2)
 	assert(state["eliminated"].has(2) and state.get("match_result", {}).is_empty())
 	var last_ship: Dictionary = {"id": 11002, "kind": "miner", "owner": 3, "at": 2, "route": [], "dest": -1}
 	state["ships"].append(last_ship)
 	state["planets"][2]["owner"] = 1
-	assert(not ECON.update_match_outcome(state))
-	assert(state["ships"].has(last_ship) and state.get("match_result", {}).is_empty())
-	state["ships"].erase(last_ship)
 	assert(ECON.update_match_outcome(state))
+	assert(state["ships"].has(last_ship) and int(last_ship["owner"]) == 3)
 	assert(state["match_result"]["team"] == 1 and int(state["time_speed"]) == 0)
 	assert(not ECON.update_match_outcome(state))
 	assert(bytes_to_var(var_to_bytes(state))["match_result"] == state["match_result"])
 	var solo: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	assert(not ECON.update_match_outcome(solo) and solo.get("match_result", {}).is_empty())
-	print("PASS: colony recovery, allied survival, elimination, conquest victory and sandbox")
+	print("PASS: colony recovery, surviving autonomous fleets, elimination, conquest victory and sandbox")
 
 func _test_building_population_requirements() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
