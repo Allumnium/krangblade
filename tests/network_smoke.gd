@@ -227,6 +227,12 @@ func _phase_changed() -> void:
 					outpost["station"] = {"hp": ECON.STATION_HP}
 					for resource in ECON.ORBITAL_HOUSING_COST:
 						outpost["stock"][resource] = ECON.ORBITAL_HOUSING_COST[resource]
+					var depot_node: int = int(state["map"]["planetless"][index])
+					var depot_point: Vector2 = state["map"]["points"][depot_node] + Vector2(250, 250)
+					var depot: Dictionary = {"id": 996000 + index, "kind": "resource_depot", "owner": ordered[index], "origin": depot_node, "at": depot_node, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": depot_point, "heading": Vector2.UP, "hp": ECON.DEPOT_HP, "build_progress": 1.0, "crew": 0.0, "cargo": ECON.empty_stock()}
+					state["ships"].append(depot)
+					for resource in ECON.RESOURCES:
+						assert(ECON.set_depot_policy(state, ordered[index], depot["id"], resource, 0.0, 100.0, false, false))
 				# Isolate station destruction from the home-system RPC scenarios.
 				var target_index: int = int(state["map"]["planetless"][expected_players])
 				var target: Dictionary = state["planets"][target_index]
@@ -629,6 +635,27 @@ func _check_time_controls(state: Dictionary) -> bool:
 			if not is_equal_approx(_reserved_credits(state, int(peer)), float(get_meta("paused_credits")[peer])):
 				_fail("Treasury plus reservations changed while paused.")
 				return false
+		# A real peer can edit only its own depot; invalid and foreign edits must be ignored.
+		if not bool(get_meta("depot_policy_sent", false)):
+			set_meta("depot_policy_sent", true)
+			session.call("request_depot_policy", 996000 + home_index, "Metals", 10.0 + home_index, 70.0, false, false)
+			session.call("request_depot_policy", 996000 + home_index, "Metals", 90.0, 70.0, true, true)
+			session.call("request_depot_policy", 996000 + (home_index + 1) % expected_players, "Crystals", 20.0, 40.0, true, true)
+			return false
+		var depot_count: int = 0
+		for craft in state["ships"]:
+			var fixture_index: int = int(craft["id"]) - 996000
+			if fixture_index < 0 or fixture_index >= expected_players:
+				continue
+			var metals: Dictionary = ECON.depot_policy(craft, "Metals")
+			var crystals: Dictionary = ECON.depot_policy(craft, "Crystals")
+			if crystals != {"floor": 0.0, "ceiling": 100.0, "receive": false, "dispatch": false}:
+				_fail("Foreign depot policy was accepted.")
+				return false
+			if metals == {"floor": 10.0 + fixture_index, "ceiling": 70.0, "receive": false, "dispatch": false}:
+				depot_count += 1
+		if depot_count != expected_players:
+			return false
 		# Queue and cancel a timed station purchase on every peer
 		# while paused, so the replicated queue and salvage are observable.
 		var outpost_index: int = int(state["map"]["planetless"][home_index])
