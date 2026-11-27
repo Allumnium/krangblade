@@ -349,10 +349,10 @@ static func _generate_system(rng: RandomNumberGenerator, i: int, ordered: Array[
 static func _spawn_starting_fleets(state: Dictionary, planets: Array, ordered: Array[int]) -> void:
 	for index in range(ordered.size()):
 		var slot: int = 0
-		for kind in ["miner", "miner", "miner", "fighter", "fighter", "ship"]:
+		for kind in ["miner", "miner", "miner", "fighter", "fighter", "ship", "science_ship"]:
 			var id: int = int(state["next_id"])
 			state["next_id"] = id + 1
-			var offset: Vector2 = Vector2.from_angle(float(index) * 2.399963 + float(slot) * TAU / 6.0) * (SHIP_CLEARANCE * 1.8)
+			var offset: Vector2 = Vector2.from_angle(float(index) * 2.399963 + float(slot) * TAU / 7.0) * (SHIP_CLEARANCE * 1.8)
 			_finish(state, index, planets[index], {"id": id, "kind": kind, "population_allocated": CREW_COSTS[kind], "spawn_offset": offset, "starting_fleet": true})
 			slot += 1
 

@@ -27,6 +27,50 @@ var cloaked_overview_batches: Dictionary = {}
 var cloaked_overview_instances: Dictionary = {}
 var overview_dot_textures: Dictionary = {}
 var resource_glow_texture: Texture2D
+var lamp_glow_batch: MultiMeshInstance2D
+var lamp_glow_entries: Array = []
+const HULL_LIGHTING = preload("res://assets/shaders/world_hull_lighting.gdshader")
+var vector_lighting: ShaderMaterial
+var science_lighting: ShaderMaterial
+var world_lights: Array = []
+
+func _lighting_material(science: bool) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = HULL_LIGHTING
+	material.set_shader_parameter("science", science)
+	if science:
+		material.set_shader_parameter("diffuse_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_d.png"))
+		material.set_shader_parameter("normal_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_n.png"))
+		material.set_shader_parameter("occlusion_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_o.png"))
+		material.set_shader_parameter("height_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_p.png"))
+		material.set_shader_parameter("specular_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_s.png"))
+		material.set_shader_parameter("detail_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_v.png"))
+	return material
+
+func set_world_lights(lights: Array) -> void:
+	world_lights = lights
+	var positions := PackedVector4Array()
+	var colors := PackedVector4Array()
+	positions.resize(16)
+	colors.resize(16)
+	for i in range(mini(16, lights.size())):
+		var entry: Array = lights[i]
+		var pos: Vector2 = map_canvas.get_global_transform() * (entry[0] as Vector2)
+		var tint: Color = entry[2]
+		positions[i] = Vector4(pos.x, pos.y, float(entry[1]), float(entry[3]))
+		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0)
+	for material in [vector_lighting, science_lighting]:
+		material.set_shader_parameter("light_points", positions)
+		material.set_shader_parameter("light_colors", colors)
+		material.set_shader_parameter("light_count", mini(16, lights.size()))
+
+func light_level(point: Vector2) -> float:
+	var amount: float = 0.37
+	for entry in world_lights:
+		var falloff: float = maxf(0.0, 1.0 - point.distance_to(entry[0]) / maxf(1.0, float(entry[1])))
+		amount += falloff * falloff * float(entry[3])
+	return clampf(amount, 0.37, 1.0)
+
 
 # Persistent packed transform staging, one stream per texture/opacity.
 class HullInstanceStream:
@@ -47,7 +91,11 @@ class HullInstanceStream:
 
 func build(canvas: Control) -> void:
 	map_canvas = canvas
+	vector_lighting = _lighting_material(false)
+	science_lighting = _lighting_material(true)
 	_build_exhaust_batch()
+	lamp_glow_batch = _build_effect_batch(false)
+	lamp_glow_batch.texture = _resource_glow()
 	beam_batch = _build_effect_batch(false)
 	projectile_batch = _build_effect_batch(true)
 	health_batch = _build_effect_batch(false)
@@ -60,6 +108,8 @@ func build(canvas: Control) -> void:
 	cargo_glow_batch.z_index = 1
 
 func begin_frame() -> void:
+	lamp_glow_entries.clear()
+	lamp_glow_batch.hide()
 	health_entries.clear()
 	ring_entries.clear()
 	health_batch.hide()
@@ -84,6 +134,7 @@ func begin_frame() -> void:
 		batch.hide()
 
 func flush_world(visual_clock: float, hull_art: HULL_ART) -> void:
+	_flush_effect_batch(lamp_glow_batch, lamp_glow_entries)
 	_flush_exhaust(visual_clock)
 	_flush_effect_batch(beam_batch, beam_instances)
 	_flush_effect_batch(projectile_batch, projectile_instances)
@@ -210,6 +261,16 @@ func _resource_glow() -> Texture2D:
 			image.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
 	resource_glow_texture = ImageTexture.create_from_image(image)
 	return resource_glow_texture
+
+func queue_lamp_glow(point: Vector2, radius: float, tint: Color, strength: float) -> void:
+	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius).has_point(point):
+		return
+	lamp_glow_entries.append([Transform2D(0.0, Vector2.ONE * radius * 2.0, 0.0, point), Color(tint, strength)])
+
+func queue_cargo_light(point: Vector2, radius: float, tint: Color, strength: float) -> void:
+	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius).has_point(point):
+		return
+	cargo_glow_entries.append([Transform2D(0.0, Vector2.ONE * radius * 2.0, 0.0, point), Color(tint, strength)])
 
 func draw_resource_glow(point: Vector2, radius: float, tint: Color, strength: float) -> void:
 	var extent: float = maxf(1.5, radius)
@@ -348,6 +409,11 @@ func _flush_hull_batches(hull_art: HULL_ART, instances: Dictionary, batches: Dic
 			instance.self_modulate = Color(1.0, 1.0, 1.0, opacity)
 			if hull_art.is_shield_texture(texture):
 				instance.z_index = 1
+			elif hull_art.is_science_texture(texture):
+				instance.material = science_lighting
+				instance.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			elif not overview_dot_textures.values().has(texture):
+				instance.material = vector_lighting
 			map_canvas.add_child(instance)
 			batches[texture] = instance
 		var batch: MultiMeshInstance2D = batches[texture]

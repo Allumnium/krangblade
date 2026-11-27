@@ -105,6 +105,32 @@ var sound_mixer: Node
 var audio_tracker := MATCH_AUDIO_TRACKER.new()
 var alert_tracker := TACTICAL_ALERTS.new()
 var background_music: AudioStreamPlayer
+const MATCH_TRACKS = [preload("res://assets/music/peaceful3.mp3"), preload("res://assets/music/Frontier Echoes.mp3")]
+var music_order: Array[int] = []
+var last_music_track: int = -1
+var music_rng := RandomNumberGenerator.new()
+
+func _play_next_music() -> void:
+	if not is_inside_tree() or session == null or str(session.get("phase")) != "match":
+		return
+	if music_order.is_empty():
+		for index in range(MATCH_TRACKS.size()):
+			music_order.append(index)
+		for index in range(music_order.size() - 1, 0, -1):
+			var other: int = music_rng.randi_range(0, index)
+			var saved: int = music_order[index]
+			music_order[index] = music_order[other]
+			music_order[other] = saved
+		if music_order.size() > 1 and music_order.back() == last_music_track:
+			var saved: int = music_order[0]
+			music_order[0] = music_order.back()
+			music_order[music_order.size() - 1] = saved
+	last_music_track = music_order.pop_back()
+	var track := MATCH_TRACKS[last_music_track].duplicate() as AudioStreamMP3
+	track.loop = false
+	background_music.stream = track
+	background_music.play()
+
 var map_canvas: Control
 var space_backdrop: ColorRect
 var header_panel: PanelContainer
@@ -266,7 +292,8 @@ func _ready() -> void:
 	session.connect("economy_changed", _on_economy_changed)
 	sound_mixer = SFX.new()
 	background_music = AudioStreamPlayer.new()
-	background_music.stream = preload("res://assets/music/peaceful3.mp3")
+	music_rng.randomize()
+	background_music.finished.connect(_play_next_music)
 	add_child(background_music)
 	match_settings.configure(background_music, hotkeys, command_card_ui, _label, _button, _command_icon, get_viewport_rect)
 	match_settings.load_settings()
@@ -2764,7 +2791,7 @@ func _refresh() -> void:
 	_sync_command_kind(state)
 	var phase: String = str(session.get("phase"))
 	if phase == "match" and not background_music.playing:
-		background_music.play()
+		_play_next_music()
 	elif phase != "match" and background_music.playing:
 		background_music.stop()
 	var seconds: int = maxi(0, floori(float(state.get("elapsed", 0.0))))
@@ -3135,7 +3162,8 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
-					map_canvas.draw_texture_rect(celestial_view.body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(1.0, 1.0, 1.0, detail))
+					var planet_light: float = maxf(0.60, world_batches.light_level(point))
+					map_canvas.draw_texture_rect(celestial_view.body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(planet_light, planet_light, planet_light, detail))
 				else:
 					map_canvas.draw_circle(point, body_radius, Color(celestial_view.body_base_color(body).darkened(0.18), detail), true)
 				if system.get("pds", {}).has(slot):
@@ -4905,6 +4933,45 @@ func _draw_map() -> void:
 	_draw_map_content()
 	_draw_projection_active = false
 
+# Client-only light sources, using the already visibility-filtered hull poses.
+func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary, bounds: Rect2, render_scale: float) -> void:
+	var stars: Array = []
+	var lamps: Array = []
+	var center: Vector2 = bounds.get_center()
+	var radius: float = maxf(12.0, 1600.0 * render_scale)
+	for index in range(points.size()):
+		if not ECONOMY.discovered(state, _me(), "planets", index):
+			continue
+		var pos: Vector2 = _screen_point(points[index])
+		if not bounds.grow(radius).has_point(pos):
+			continue
+		var tint: Color = Color("#ffe6bb") if ECONOMY.has_planets(state["planets"][index]) else Color("#a7c9ff")
+		_keep_near_light(stars, [pos, radius, tint, 0.95, center.distance_squared_to(pos)])
+		world_batches.draw_resource_glow(pos, minf(radius, 240.0), tint, 0.08)
+	var scale: float = _ship_scale()
+	if scale >= 0.65:
+		for ship in state["ships"]:
+			var id: int = int(ship["id"])
+			if not poses.has(id) or bool(ship.get("cloaked", false)) or ECONOMY.is_static_structure(ship):
+				continue
+			var pose: Dictionary = poses[id]
+			var pos: Vector2 = pose["point"]
+			if not bounds.grow(40.0 * scale).has_point(pos):
+				continue
+			pos -= (pose["direction"] as Vector2) * 8.0 * scale
+			_keep_near_light(lamps, [pos, 35.0 * scale, Color("#75d6ee"), 0.24, center.distance_squared_to(pos)])
+	world_batches.set_world_lights(stars + lamps)
+
+func _keep_near_light(lights: Array, entry: Array) -> void:
+	if lights.size() >= 8 and float(entry[4]) >= float(lights.back()[4]):
+		return
+	var index: int = lights.size()
+	while index > 0 and float(entry[4]) < float(lights[index - 1][4]):
+		index -= 1
+	lights.insert(index, entry)
+	if lights.size() > 8:
+		lights.pop_back()
+
 func _draw_map_content() -> void:
 	_update_fog(_state())
 	fog_overlay.queue_redraw()
@@ -4922,6 +4989,8 @@ func _draw_map_content() -> void:
 	var viewport_bounds := Rect2(Vector2.ZERO, map_canvas.size)
 	var render_scale: float = _fit() * camera.zoom
 	var points: Array = state["map"]["points"]
+	var poses: Dictionary = _ship_poses(state)
+	_prepare_world_lighting(state, points, poses, viewport_bounds, render_scale)
 	var font: Font = ThemeDB.fallback_font
 	var fields: Array = state["map"].get("fields", [])
 	var remembered_state: Dictionary = fog_state.observed_state(state, _map_size())
@@ -4932,7 +5001,7 @@ func _draw_map_content() -> void:
 			continue
 		if not bool(field.get("antimatter", false)):
 			var live_rocks: Array = fog_state.rock_view(field_index).get("live", [])
-			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, 1.0, celestial_view.orbit_time(state))
+			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, world_batches.light_level(center), celestial_view.orbit_time(state))
 			if selected_field == field_index and selected_rock >= 0:
 				var rock: Dictionary = fog_state.rock_at(field_index, selected_rock)
 				if not rock.is_empty() and _fog_visible(rock["position"]):
@@ -4982,8 +5051,10 @@ func _draw_map_content() -> void:
 		var tint: Color = _empire_color(int(system["owner"]))
 		var detail: float = _draw_system(i, view, pos, radius, tint, -1.0 if live else seen_at)
 		if not live or _fog_visible(ECONOMY.station_position(state, i, float(state["elapsed"]))):
-			structure_view.draw_station(view, i, tint, seen_at, building_selection_kind, selected_buildings)
-			structure_view.draw_shipyards(view, i, tint, seen_at, selected, selected_yard, building_selection_kind, selected_buildings)
+			var station_light: float = world_batches.light_level(_screen_point(ECONOMY.station_position(view, i, seen_at)))
+			var lit_tint: Color = tint.darkened((1.0 - station_light) * 0.45)
+			structure_view.draw_station(view, i, lit_tint, seen_at, building_selection_kind, selected_buildings)
+			structure_view.draw_shipyards(view, i, lit_tint, seen_at, selected, selected_yard, building_selection_kind, selected_buildings)
 		# Incoming resource pods must remain visible as they cross the
 		# opaque station hull and enter its storage bays.
 		if live and detail >= 0.05:
@@ -5007,7 +5078,6 @@ func _draw_map_content() -> void:
 			map_canvas.draw_colored_polygon(flag, rally_tint)
 			flag.append(flag[0])
 			map_canvas.draw_polyline(flag, Color("#111b26"), 1.0, true)
-	var poses: Dictionary = _ship_poses(state)
 	var pose_overrides: Dictionary = {}
 	_draw_salvage(state, poses, viewport_bounds, font)
 	var service_refs: Dictionary = _frame_service_refs(state)
@@ -5228,6 +5298,9 @@ func _draw_map_content() -> void:
 		direction *= scale
 		var cloaked: bool = bool(ship.get("cloaked", false))
 		var thrust: float = ship_motion.thrust_for(ship_id)
+		if not cloaked and scale >= 0.65 and not ECONOMY.is_static_structure(ship):
+			var lamp: Vector2 = point - direction * 8.0
+			world_batches.queue_lamp_glow(lamp, 14.0 * scale, Color("#75d6ee"), 0.18 + thrust * 0.13)
 		if not cloaked and simulation_running and scale >= 0.65 and thrust > 0.035:
 			world_batches.queue_exhaust(kind, point, direction, scale, thrust, ship_id, viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
@@ -5282,11 +5355,14 @@ func _draw_map_content() -> void:
 			owner_textures[owner] = texture
 		if shield > 0.0:
 			world_batches.queue_overview_hull(hull_art.shield_texture(kind), point, direction.angle(), (half_size + 8.0) * scale, cloaked)
-		if kind != "science_ship" and not (kind == "ship" and scale >= 0.42):
-			world_batches.queue_overview_hull(texture, point, direction.angle(), half_size * scale, cloaked)
+		if not (kind == "ship" and scale >= 0.42):
+			# Source sprite faces up; the existing hull coordinate system faces right.
+			var art_angle: float = direction.angle() + (PI * 0.5 if kind == "science_ship" else 0.0)
+			world_batches.queue_overview_hull(texture, point, art_angle, half_size * scale, cloaked)
 		else:
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
-			map_canvas.draw_texture_rect(texture, Rect2(-half_size, -half_size, half_size * 2.0, half_size * 2.0), false)
+			var illumination: float = world_batches.light_level(point)
+			map_canvas.draw_texture_rect(texture, Rect2(-half_size, -half_size, half_size * 2.0, half_size * 2.0), false, Color(illumination, illumination, illumination))
 			map_canvas.draw_set_transform(Vector2.ZERO)
 		if kind == "ship" and scale >= 0.42:
 			# Compose each close freighter's hull and opaque cargo as one
@@ -5306,17 +5382,15 @@ func _draw_map_content() -> void:
 					start = end
 			map_canvas.draw_set_transform(Vector2.ZERO)
 		elif kind == "science_ship":
-			map_canvas.draw_circle(point, maxf(1.0, 11.5 * scale), empire.darkened(0.4), true, -1.0, true)
-			map_canvas.draw_arc(point, 10.5 * scale, 0.0, TAU, 32, empire.lightened(0.5), maxf(0.8, scale), true)
-			map_canvas.draw_circle(point, maxf(0.9, 6.0 * scale), Color("#101d30"), true, -1.0, true)
 			if float(ship.get("cargo", {}).get(ECONOMY.ANTIMATTER, 0.0)) >= 1.0 - ECONOMY.EPS:
 				var tint: Color = HUD.COLORS[ECONOMY.ANTIMATTER]
 				var pulse: float = 0.5 + 0.5 * sin(visual_clock * 4.0)
-				world_batches.draw_resource_glow(point, maxf(2.0, 8.0 * scale), tint, 0.7 + 0.3 * pulse)
-				map_canvas.draw_circle(point, maxf(1.0, (2.5 + pulse) * scale), tint.lightened(0.5), true, -1.0, true)
+				# The cargo sits above the sprite, not underneath its opaque panels.
+				world_batches.queue_cargo_light(point, maxf(2.0, 8.0 * scale), tint, 0.7 + 0.3 * pulse)
+				world_batches.queue_cargo_light(point, maxf(1.0, (2.5 + pulse) * scale), tint.lightened(0.5), 1.0)
 				for k in range(3):
 					var angle: float = visual_clock * 2.0 + TAU * float(k) / 3.0
-					map_canvas.draw_circle(point + Vector2.from_angle(angle) * 5.0 * scale, maxf(0.7, scale), tint, true, -1.0, true)
+					world_batches.queue_cargo_light(point + Vector2.from_angle(angle) * 5.0 * scale, maxf(0.7, scale), tint, 1.0)
 		elif scale >= 0.42:
 			_draw_other_cargo(ship, point, direction, side)
 	world_effects.draw_destructions(viewport_bounds, visual_clock, _ship_scale, _screen_point, world_batches)

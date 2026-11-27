@@ -1,5 +1,10 @@
 # Warbound — development TODO
 
+## Approved art and audio overhaul (2026-11-27)
+
+- [ ] v0.115.0 integrates Science Vessel sprite and all supplied maps, bounded ambient/stellar/ship lighting and randomized repeating match playlist; confirm material map conventions, visually check directional lighting, cargo, portraits, fog/selection, audio transitions, import metadata and actual GPU performance at realistic fleet counts. Expand authored assets and lighting for planets, stations, other hulls and effects as supplied. Keep lighting client-only.
+- [ ] v0.115.1 updates solo fleet counts and adds initial Science Vessel, stock, credit and objective assertions; run these and real peer parity. Verify initial economy pacing, and migrate other legacy starting-fleet assumptions as required. Batched ship lamps, nearest-light cap, planet shading, actual sprite portrait and foreground Antimatter cargo also need visual/runtime acceptance.
+
 ## Approved economic pacing and explicit production (2026-11-27)
 
 - [x] v0.114.0 removes free production and infrastructure from home and newly founded stations, including starter yards/PDS and base Crystal income. Maintain starting fleet, stocks and integral station defenses. Explicit production buildings, dedicated orbital Eco-Housing and built Colony Ships generate materials; stockpiled food supports residents before farms complete. AI bootstraps Farms, Refineries, then Shipyards; focused and solo tests pass.

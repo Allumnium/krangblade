@@ -24,3 +24,6 @@ Thumbs.db
 /native/src/*.o
 /native/src/*.os
 /native/src/*.obj
+
+# Krita and other editor backup files
+*~
