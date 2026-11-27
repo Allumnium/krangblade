@@ -3170,7 +3170,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
-					celestial_view.draw_lit_body(map_canvas, Vector2i(index, slot), body, point, body_radius, detail, world_batches.planet_lighting)
+					celestial_view.draw_lit_body(map_canvas, Vector2i(index, slot), body, point, body_radius, detail, world_batches.planet_material(body))
 				else:
 					map_canvas.draw_circle(point, body_radius, Color(celestial_view.body_base_color(body).darkened(0.18), detail), true)
 				if system.get("pds", {}).has(slot):
