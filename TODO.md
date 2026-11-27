@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.119.1 switches scouts to unknown-area-first then currently dark-area exploration. Verify coverage versus fog, blocked-route fallback, multiple scouts, manual interruption, sample cost and authority/guest parity.
+
 - [ ] v0.119.0 prioritizes direct Move over autonomous pursuit and makes defeat preserve surviving autonomous fleets and enable spectator vision. Verify move/attack-move, withdrawal, queued commands, colony recovery, wage/pirate conversion and multiplayer spectators.
 
 ## Approved art and audio overhaul (2026-11-27)
