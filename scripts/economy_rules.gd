@@ -211,8 +211,11 @@ const CONSTRUCTION_SHIP_CAPACITY: float = 20.0
 const DEPOT_REFERENCE_BUDGET: float = 400.0
 const ANTIMATTER_HOLDER_CAPACITY: float = 1.0
 const STATIC_SITE_KINDS = ["resource_depot", "defense_cannon", "wall_node", "wall_segment"]
-const WALL_MAX_LENGTH: float = 450.0
-const WALL_SNAP_RADIUS: float = 40.0
+const WALL_MAX_LENGTH: float = 112.5
+const WALL_SNAP_RADIUS: float = 10.0
+const WALL_MIN_SEGMENT_LENGTH: float = 3.0
+const WALL_STRUCTURE_CLEARANCE: float = 40.0
+const WALL_GRID_CELL: float = 450.0
 const WALL_MAX_SEGMENTS: int = 24
 const WALL_NODE_HP: float = 175.0
 const WALL_SEGMENT_HP: float = 300.0
@@ -7070,8 +7073,8 @@ static func wall_grid(state: Dictionary) -> Dictionary:
 			continue
 		var a: Vector2 = wall["wall_a"]
 		var b: Vector2 = wall["wall_b"]
-		var lo := Vector2i(floori(minf(a.x, b.x) / WALL_MAX_LENGTH), floori(minf(a.y, b.y) / WALL_MAX_LENGTH))
-		var hi := Vector2i(floori(maxf(a.x, b.x) / WALL_MAX_LENGTH), floori(maxf(a.y, b.y) / WALL_MAX_LENGTH))
+		var lo := Vector2i(floori(minf(a.x, b.x) / WALL_GRID_CELL), floori(minf(a.y, b.y) / WALL_GRID_CELL))
+		var hi := Vector2i(floori(maxf(a.x, b.x) / WALL_GRID_CELL), floori(maxf(a.y, b.y) / WALL_GRID_CELL))
 		for x in range(lo.x, hi.x + 1):
 			for y in range(lo.y, hi.y + 1):
 				var key := Vector2i(x, y)
@@ -7083,8 +7086,8 @@ static func wall_grid(state: Dictionary) -> Dictionary:
 static func wall_first_hit(state: Dictionary, grid: Dictionary, owner: int, a: Vector2, b: Vector2, movement: bool) -> Dictionary:
 	if grid.is_empty() or a.is_equal_approx(b):
 		return {}
-	var lo := Vector2i(floori(minf(a.x, b.x) / WALL_MAX_LENGTH), floori(minf(a.y, b.y) / WALL_MAX_LENGTH))
-	var hi := Vector2i(floori(maxf(a.x, b.x) / WALL_MAX_LENGTH), floori(maxf(a.y, b.y) / WALL_MAX_LENGTH))
+	var lo := Vector2i(floori(minf(a.x, b.x) / WALL_GRID_CELL), floori(minf(a.y, b.y) / WALL_GRID_CELL))
+	var hi := Vector2i(floori(maxf(a.x, b.x) / WALL_GRID_CELL), floori(maxf(a.y, b.y) / WALL_GRID_CELL))
 	var visited: Dictionary = {}
 	var best: float = INF
 	var result: Dictionary = {}
@@ -7132,7 +7135,7 @@ static func _wall_navigation_points(state: Dictionary, grid: Dictionary, owner: 
 			if not nodes.has(point):
 				nodes[point] = []
 			nodes[point].append(fposmod(direction.angle(), TAU))
-			var cell := Vector2i(floori(point.x / WALL_MAX_LENGTH), floori(point.y / WALL_MAX_LENGTH))
+			var cell := Vector2i(floori(point.x / WALL_GRID_CELL), floori(point.y / WALL_GRID_CELL))
 			for neighbor in grid.get(cell, []):
 				if visited.has(int(neighbor["id"])) or open_borders(state, int(neighbor["owner"]), owner):
 					continue
@@ -7273,11 +7276,13 @@ static func wall_chain_points(start: Vector2, end: Vector2) -> PackedVector2Arra
 	if distance > WALL_MAX_LENGTH * WALL_MAX_SEGMENTS:
 		return result
 	result.append(start)
-	if distance < 12.0:
+	if distance < WALL_MIN_SEGMENT_LENGTH:
 		return result
 	var count: int = ceili(distance / WALL_MAX_LENGTH)
 	for index in range(1, count + 1):
 		result.append(start.move_toward(end, minf(distance, float(index) * WALL_MAX_LENGTH)))
+	if result.size() > 2 and result[-2].distance_to(end) < WALL_MIN_SEGMENT_LENGTH:
+		result[-2] = end.move_toward(start, WALL_MIN_SEGMENT_LENGTH + EPS)
 	return result
 
 static func _wall_snap(state: Dictionary, owner: int, point: Vector2) -> Dictionary:
@@ -7294,9 +7299,10 @@ static func _wall_snap(state: Dictionary, owner: int, point: Vector2) -> Diction
 
 
 
-static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: Vector2, end: Vector2) -> Array:
+# Read-only snapped geometry shared by the client hologram and authority.
+static func wall_preview_points(state: Dictionary, owner: int, start: Vector2, end: Vector2) -> PackedVector2Array:
 	if not start.is_finite() or not end.is_finite():
-		return []
+		return PackedVector2Array()
 	var first: Dictionary = _wall_snap(state, owner, start)
 	var last: Dictionary = _wall_snap(state, owner, end)
 	if not first.is_empty():
@@ -7304,6 +7310,14 @@ static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: 
 	if not last.is_empty():
 		end = last["position"]
 	var points: PackedVector2Array = wall_chain_points(start, end)
+	for i in range(points.size()):
+		var found: Dictionary = _wall_snap(state, owner, points[i])
+		if not found.is_empty():
+			points[i] = found["position"]
+	return points
+
+static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: Vector2, end: Vector2) -> Array:
+	var points: PackedVector2Array = wall_preview_points(state, owner, start, end)
 	if points.is_empty():
 		return []
 	_refresh_movement_fields(state["map"].get("fields", []))
@@ -7321,7 +7335,7 @@ static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: 
 			nodes.append({"id": found["id"], "position": found["position"]})
 			continue
 		for craft in state["ships"]:
-			if is_static_structure(craft) and craft.get("kind", "") != "wall_segment" and point.distance_to(craft["position"]) < WALL_SNAP_RADIUS:
+			if is_static_structure(craft) and craft.get("kind", "") != "wall_segment" and point.distance_to(craft["position"]) < (WALL_SNAP_RADIUS if craft.get("kind", "") == "wall_node" else WALL_STRUCTURE_CLEARANCE):
 				return []
 		for index in range(state["planets"].size()):
 			if has_station(state["planets"][index]) and point.distance_to(station_position(state, index, float(state["elapsed"]))) < 80.0:
@@ -7337,7 +7351,7 @@ static func _wall_plan(state: Dictionary, graph: Dictionary, owner: int, start: 
 		var b: Dictionary = nodes[index]
 		var pa: Vector2 = a["position"]
 		var pb: Vector2 = b["position"]
-		if pa.distance_to(pb) > WALL_MAX_LENGTH + EPS or pa.distance_to(pb) < 12.0 or not _clip_rock_step(pa, pb).is_equal_approx(pb):
+		if pa.distance_to(pb) > WALL_MAX_LENGTH + EPS or pa.distance_to(pb) < WALL_MIN_SEGMENT_LENGTH or not _clip_rock_step(pa, pb).is_equal_approx(pb):
 			return []
 		for craft in state["ships"]:
 			if craft.get("kind", "") == "wall_segment":

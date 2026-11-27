@@ -33,6 +33,7 @@ const HULL_LIGHTING = preload("res://assets/shaders/world_hull_lighting.gdshader
 var vector_lighting: ShaderMaterial
 var science_lighting: ShaderMaterial
 var fighter_lighting: ShaderMaterial
+var freighter_lighting: ShaderMaterial
 var world_lights: Array = []
 
 func _lighting_material(kind: String) -> ShaderMaterial:
@@ -49,7 +50,15 @@ func _lighting_material(kind: String) -> ShaderMaterial:
 		material.set_shader_parameter("occlusion_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_o.png")))
 		material.set_shader_parameter("height_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_p.png")))
 		material.set_shader_parameter("specular_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_s.png")))
+	elif kind == "ship":
+		material.set_shader_parameter("normal_map", _freighter_map(preload("res://assets/sprites/freighters/pixellab-top-down-white-large-space-shi-1795760979407_n.png")))
+		material.set_shader_parameter("occlusion_map", _freighter_map(preload("res://assets/sprites/freighters/pixellab-top-down-white-large-space-shi-1795760979407_o.png")))
+		material.set_shader_parameter("height_map", _freighter_map(preload("res://assets/sprites/freighters/pixellab-top-down-white-large-space-shi-1795760979407_p.png")))
+		material.set_shader_parameter("specular_map", _freighter_map(preload("res://assets/sprites/freighters/pixellab-top-down-white-large-space-shi-1795760979407_s.png")))
 	return material
+
+func _freighter_map(atlas: Texture2D) -> Texture2D:
+	return ImageTexture.create_from_image(HULL_ART.sprite_cell(atlas, HULL_ART.FREIGHTER_GRID, HULL_ART.FREIGHTER_GRID))
 
 func _fighter_map(atlas: Texture2D) -> Texture2D:
 	return ImageTexture.create_from_image(HULL_ART.sprite_cell(atlas, HULL_ART.FIGHTER_GRID, HULL_ART.FIGHTER_GRID))
@@ -68,7 +77,7 @@ func set_world_lights(lights: Array) -> void:
 		var tint: Color = entry[2]
 		positions[i] = Vector4(pos.x, pos.y, float(entry[1]) * radius_scale, float(entry[3]))
 		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0)
-	for material in [vector_lighting, science_lighting, fighter_lighting]:
+	for material in [vector_lighting, science_lighting, fighter_lighting, freighter_lighting]:
 		material.set_shader_parameter("light_points", positions)
 		material.set_shader_parameter("light_colors", colors)
 		material.set_shader_parameter("light_count", mini(16, lights.size()))
@@ -103,6 +112,7 @@ func build(canvas: Control) -> void:
 	vector_lighting = _lighting_material("")
 	science_lighting = _lighting_material("science_ship")
 	fighter_lighting = _lighting_material("fighter")
+	freighter_lighting = _lighting_material("ship")
 	_build_exhaust_batch()
 	lamp_glow_batch = _build_effect_batch(false)
 	lamp_glow_batch.texture = _resource_glow()
@@ -437,7 +447,8 @@ func _flush_hull_batches(hull_art: HULL_ART, instances: Dictionary, batches: Dic
 			if hull_art.is_shield_texture(texture):
 				instance.z_index = 1
 			elif not hull_art.sprite_kind(texture).is_empty():
-				instance.material = fighter_lighting if hull_art.sprite_kind(texture) == "fighter" else science_lighting
+				var kind: String = hull_art.sprite_kind(texture)
+				instance.material = fighter_lighting if kind == "fighter" else freighter_lighting if kind == "ship" else science_lighting
 				instance.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 			elif not overview_dot_textures.values().has(texture):
 				instance.material = vector_lighting

@@ -69,7 +69,7 @@ func sync_destructions(state: Dictionary, visual_clock: float, empire_color: Cal
 					sparks.append(_destruction_spark(Vector2(rng.randf_range(-8.0, 8.0), rng.randf_range(-5.0, 5.0)), HUD.COLORS.get(resource, hull), rng))
 		for index in range(5):
 			sparks.append(_destruction_spark(Vector2.ZERO, hull, rng))
-		ship_destructions.append({"position": event["position"], "angle": angle, "started": visual_clock, "fragments": fragments, "sparks": sparks, "scale": 3.2 if kind == "station" else 1.0, "structure": not ECONOMY.SHIP_KINDS.has(kind)})
+		ship_destructions.append({"position": event["position"], "angle": angle, "started": visual_clock, "fragments": fragments, "sparks": sparks, "scale": 3.2 if kind == "station" else HULL_ART.visual_scale(kind), "structure": not ECONOMY.SHIP_KINDS.has(kind)})
 		if ship_destructions.size() > MAX_VISIBLE_DESTRUCTIONS:
 			ship_destructions.pop_front()
 

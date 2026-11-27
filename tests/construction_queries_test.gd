@@ -305,9 +305,15 @@ func _initialize() -> void:
 	assert(ECON.cannon_damage({"structure_level": 3}) > ECON.cannon_damage({"structure_level": 2}))
 	assert(ECON.hull_max_hp({"kind": "defense_cannon", "structure_level": 2, "build_progress": 0.0}) == ECON.CANNON_HP[1])
 	var wall_points: PackedVector2Array = ECON.wall_chain_points(Vector2.ZERO, Vector2(1000, 0))
-	assert(wall_points.size() == 4 and wall_points[0] == Vector2.ZERO and wall_points[-1] == Vector2(1000, 0))
+	assert(wall_points.size() == 10 and wall_points[0] == Vector2.ZERO and wall_points[-1] == Vector2(1000, 0))
 	for index in range(1, wall_points.size()):
 		assert(wall_points[index].distance_to(wall_points[index - 1]) <= ECON.WALL_MAX_LENGTH)
+	assert(ECON.WALL_MAX_LENGTH == 112.5 and ECON.WALL_SNAP_RADIUS == 10.0)
+	var near_boundary: PackedVector2Array = ECON.wall_chain_points(Vector2.ZERO, Vector2(113, 0))
+	assert(near_boundary.size() == 3 and near_boundary[-1].distance_to(near_boundary[-2]) >= ECON.WALL_MIN_SEGMENT_LENGTH)
+	var snap_state: Dictionary = {"ships": [{"kind": "wall_node", "owner": 1, "position": Vector2(5, 0)}]}
+	var preview: PackedVector2Array = ECON.wall_preview_points(snap_state, 1, Vector2.ZERO, Vector2(100, 0))
+	assert(preview[0] == Vector2(5, 0) and preview[-1] == Vector2(100, 0))
 	assert(ECON.wall_chain_points(Vector2.ZERO, Vector2.ZERO).size() == 1)
 	assert(ECON.wall_chain_points(Vector2.ZERO, Vector2(100000, 0)).is_empty())
 	assert(ECON.ship_size("construction_ship") == 1)

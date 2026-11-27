@@ -3,6 +3,8 @@ extends RefCounted
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const SCIENCE_SPRITE = preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_d.png")
 const FIGHTER_SPRITE = preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_d.png")
+const FREIGHTER_SPRITE = preload("res://assets/sprites/freighters/pixellab-top-down-white-large-space-shi-1795760979407_d.png")
+const FREIGHTER_GRID: int = 4
 const FIGHTER_GRID: int = 4
 # Default to the first (top-left) design for every hull. Other variants
 # remain authored assets; no style selection or replicated state yet.
@@ -11,7 +13,17 @@ var sprite_textures: Dictionary = {}
 var sprite_kinds: Dictionary = {}
 
 static func has_authored_sprite(kind: String) -> bool:
-	return kind in ["science_ship", "fighter"]
+	return kind in ["science_ship", "fighter", "ship"]
+
+static func visual_scale(kind: String) -> float:
+	match kind:
+		"science_ship": return 2.0
+		"ship": return 1.5
+		"wall_node": return 0.25
+	return 1.0
+
+static func sprite_heading_offset(kind: String) -> float:
+	return PI * 0.5 if kind == "ship" else -PI * 0.5 if has_authored_sprite(kind) else 0.0
 
 static func sprite_cell(atlas: Texture2D, columns: int, rows: int, variant: int = DEFAULT_SPRITE_VARIANT) -> Image:
 	var source: Image = atlas.get_image()
@@ -25,6 +37,8 @@ static func sprite_cell(atlas: Texture2D, columns: int, rows: int, variant: int 
 static func sprite_image(kind: String) -> Image:
 	if kind == "fighter":
 		return sprite_cell(FIGHTER_SPRITE, FIGHTER_GRID, FIGHTER_GRID)
+	if kind == "ship":
+		return sprite_cell(FREIGHTER_SPRITE, FREIGHTER_GRID, FREIGHTER_GRID)
 	return SCIENCE_SPRITE.get_image()
 
 func sprite_texture(kind: String, empire: Color) -> Texture2D:
@@ -41,8 +55,8 @@ func sprite_texture(kind: String, empire: Color) -> Texture2D:
 					var value: float = maxf(c.r, maxf(c.g, c.b))
 					var accent := Color(empire.r * value, empire.g * value, empire.b * value, c.a)
 					# Recolor the authored decals, not neutral hull plating.
-					# Fighter trim is red; Science Vessel trim is cyan.
-					var trim: bool = c.r > maxf(c.g, c.b) * 1.20 and c.r - minf(c.g, c.b) > 0.08 if kind == "fighter" else minf(c.g, c.b) > c.r * 1.16 and maxf(c.g, c.b) - c.r > 0.07
+					# Fighter/Freighter trim is red; Science Vessel trim is cyan.
+					var trim: bool = c.r > maxf(c.g, c.b) * 1.20 and c.r - minf(c.g, c.b) > 0.08 if kind in ["fighter", "ship"] else minf(c.g, c.b) > c.r * 1.16 and maxf(c.g, c.b) - c.r > 0.07
 					if trim:
 						image.set_pixel(x, y, c.lerp(accent, 0.94))
 		var texture: Texture2D = ImageTexture.create_from_image(image)
@@ -57,6 +71,7 @@ const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(23, 4), Vector2(19, 8), Vecto
 # Authored top-down silhouette and interior panel geometry in hull-local
 # coordinates (forward, lateral). Freighter has five paired cargo rows.
 const HULL_OUTLINES: Dictionary = {
+	"ship": [Vector2(29, -6), Vector2(29, 6), Vector2(19, 11), Vector2(-15, 11), Vector2(-16, 16), Vector2(-28, 16), Vector2(-30, 9), Vector2(-30, -9), Vector2(-28, -16), Vector2(-16, -16), Vector2(-15, -11), Vector2(19, -11)],
 	"construction_ship": [Vector2(22, -10), Vector2(12, -10), Vector2(12, -5), Vector2(-18, -10), Vector2(-24, -5), Vector2(-24, 5), Vector2(-18, 10), Vector2(12, 5), Vector2(12, 10), Vector2(22, 10), Vector2(16, 0)],
 	"wall_node": [Vector2(14, -10), Vector2(14, 10), Vector2(5, 17), Vector2(-5, 17), Vector2(-14, 10), Vector2(-14, -10), Vector2(-5, -17), Vector2(5, -17)],
 	"wall_segment": [Vector2(18, -4), Vector2(18, 4), Vector2(-18, 4), Vector2(-18, -4)],
@@ -190,7 +205,7 @@ func portrait_points(vertices: Array, factor: float = 1.0) -> String:
 	return " ".join(coordinates)
 
 func ui_radius(kind: String) -> float:
-	return float({"ship": 24.0, "cruiser": 27.0, "destroyer": 46.0, "railgun_ship": 33.0, "warp_gate": 44.0}.get(kind, 15.0))
+	return float({"ship": 32.0, "cruiser": 27.0, "destroyer": 46.0, "railgun_ship": 33.0, "warp_gate": 44.0}.get(kind, 15.0))
 
 func portrait_scale(kind: String) -> float:
 	return float({"ship": 0.6, "cruiser": 0.52, "destroyer": 0.30, "railgun_ship": 0.42}.get(kind, 1.0))
@@ -200,6 +215,8 @@ func texture_half_size(kind: String) -> float:
 		return 15.0
 	if kind == "science_ship":
 		return 18.0
+	if kind == "ship":
+		return 32.0
 	return 50.0 if kind == "destroyer" else 40.0
 
 func production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
