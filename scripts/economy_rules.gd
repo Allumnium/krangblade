@@ -79,9 +79,9 @@ const SECTOR_GEOMETRY = preload("res://scripts/sector_geometry.gd")
 const RESOURCES = ["Metals", "Organics", "Crystals"]
 const EXTRACTED = ["Metals", "Crystals"]
 const ACTIVE_PRODUCTION = RESOURCES
-const STARTING_STOCK = {"Metals": 1650.0, "Organics": 300.0, "Crystals": 0.0}
-const STARTING_GC: float = 5000.0
-const RESIDENT_TAX_RATE: float = 0.005
+const STARTING_STOCK = {"Metals": 165.0, "Organics": 30.0, "Crystals": 0.0}
+const STARTING_GC: float = 500.0
+const RESIDENT_TAX_RATE: float = 0.05
 # Derived slow-rate coefficients only. Live stock, residents and credits are
 # still integrated at every authoritative substep.
 const ECONOMY_RATE_INTERVAL: float = 0.4
@@ -98,37 +98,38 @@ const PIRATE_DECISION_YEARS: float = 3.0
 const PIRATE_GROUP_RANGE: float = 900.0
 const PIRATE_DEFENSE_RANGE: float = 1600.0
 # Annual operating wages for completed mobile hulls; structures are exempt.
-const SHIP_UPKEEP_GC = {"scout": 3.0, "miner": 9.0, "fighter": 15.0, "ship": 24.0, "colony_ship": 30.0, "science_ship": 30.0, "cruiser": 45.0, "destroyer": 105.0, "railgun_ship": 60.0, "construction_ship": 18.0}
+const SHIP_UPKEEP_GC = {"scout": 0.5, "miner": 1.0, "fighter": 1.5, "ship": 2.5, "colony_ship": 3.0, "science_ship": 3.0, "cruiser": 4.5, "destroyer": 10.0, "railgun_ship": 6.0, "construction_ship": 2.0}
 # Fixed labor fee, independent of future fluctuating market prices.
 const CONSTRUCTION_CREDIT_FRACTION: float = 0.5
 const CONSTRUCTION_REFERENCE_VALUES = {"Metals": 2.0, "Organics": 1.0, "Crystals": 8.0}
-const WARP_GATE_CREDIT_COST: float = 1000.0
+const WARP_GATE_CREDIT_COST: float = 100.0
 const BUILDING_BONUS: float = 0.25
 const UPGRADE_COST_FACTOR: float = 3.0
 # Provisional repeatable local production infrastructure; no self-input recipes.
 const ECONOMY_BUILDINGS = {
-	"Metals": {"name": "Refinery", "population": 30000, "cost": {"Organics": 90.0}},
-	"Organics": {"name": "Farms", "population": 30000, "cost": {"Metals": 240.0}},
-	"Crystals": {"name": "Incubator", "population": 30000, "cost": {"Metals": 240.0}}
+	"Metals": {"name": "Refinery", "population": 300, "cost": {"Organics": 10.0}},
+	"Organics": {"name": "Farms", "population": 300, "cost": {"Metals": 25.0}},
+	"Crystals": {"name": "Incubator", "population": 300, "cost": {"Metals": 25.0}}
 }
-# Population is expressed in people (fractional values retained in simulation).
-const HOME_POPULATION: float = 10000.0
-const ORBITAL_HOUSING_POPULATION: float = 5000.0
-const ECO_HOUSING_ORGANICS: float = 0.2
-const ORBITAL_HOUSING_COST: Dictionary = {"Metals": 180.0}
-const COLONY_POPULATION: float = 25000.0
+# Population is measured in Pop (one Pop represents 100 people).
+# All material quantities are unitless; fractional quantities remain authoritative.
+const HOME_POPULATION: float = 100.0
+const ORBITAL_HOUSING_POPULATION: float = 50.0
+const ECO_HOUSING_ORGANICS: float = 0.02
+const ORBITAL_HOUSING_COST: Dictionary = {"Metals": 25.0}
+const COLONY_POPULATION: float = 250.0
 const COLONY_TRANSFORM_TIME: float = 30.0
-const COLONY_MIN_ORIGIN_POPULATION: float = 50000.0
+const COLONY_MIN_ORIGIN_POPULATION: float = 500.0
 const POPULATION_DOUBLING_YEARS: float = 60.0
 # Fixed full-growth food reserve, independent of warehouse size and trade policy.
-const POPULATION_FOOD_RESERVE: float = 200.0
-const PRODUCTION_PER_LEVEL: float = 4.0
-const CRYSTALS_PER_LEVEL: float = 0.06
-const STATION_CRYSTALS_PER_YEAR: float = 1.25
+const POPULATION_FOOD_RESERVE: float = 20.0
+const PRODUCTION_PER_LEVEL: float = 0.4
+const CRYSTALS_PER_LEVEL: float = 0.01
+const STATION_CRYSTALS_PER_YEAR: float = 0.15
 const CRYSTAL_COST_MULTIPLIER: float = 4.0
-const ORGANICS_PER_LEVEL: float = 4.0
+const ORGANICS_PER_LEVEL: float = 0.4
 # Food production and demand both halve; population capacity stays unchanged.
-const POPULATION_PER_ORGANICS_RATE: float = 25000.0
+const POPULATION_PER_ORGANICS_RATE: float = 2500.0
 # Critically damped demographic response (seconds = years).
 const POPULATION_RESPONSE: float = 0.065
 const FARM_VARIATION: float = 0.05
@@ -142,14 +143,14 @@ const MINED_RESOURCES = ["Metals", "Crystals"]
 const ANTIMATTER = MAP.ANTIMATTER
 const FIELD_RESOURCES = ["Metals", "Crystals", ANTIMATTER]
 # Provisional per-resource ceilings, independent of unlimited upgrade levels.
-const FIELD_MINING_LIMIT: float = 200.0
-const MINER_CAPACITY: float = 10.0
+const FIELD_MINING_LIMIT: float = 20.0
+const MINER_CAPACITY: float = 5.0
 const FIGHTER_CAPACITY: float = 0.0
-const COLONY_CAPACITY: float = 100.0
-const COLONY_FARM_RATE: float = 5.0
+const COLONY_CAPACITY: float = 25.0
+const COLONY_FARM_RATE: float = 0.5
 const TRACTOR_RANGE: float = 90.0
-const TRACTOR_RATE: float = 12.0
-const FREIGHTER_TRACTOR_RATE: float = TRACTOR_RATE * 0.25
+const TRACTOR_RATE: float = 2.0
+const FREIGHTER_TRACTOR_RATE: float = 1.0
 const RESOURCE_HANDOFF_RANGE: float = TRACTOR_RANGE * 2.0
 const RESOURCE_STAGE_SEARCH_YEARS: float = 2.0
 const IDLE_TRADE_RETRY_YEARS: float = 0.4
@@ -164,17 +165,17 @@ const SALVAGE_MAX_LIFETIME: float = 180.0
 const SALVAGE_APPROACH_RANGE: float = TRACTOR_RANGE * 2.0
 const AUTO_SALVAGE_RANGE: float = 4000.0
 const AUTO_SALVAGE_HOPS: int = 2
-# The pair of mining lasers deals one combined volley per year. One point
-# of damage to a resource chunk removes one ton, subject to field limits.
-const MINER_LASER_DAMAGE: float = 2.0
+# The pair of mining lasers deals one combined volley per year.
+# Extraction is balanced independently of combat damage.
+const MINER_LASER_DAMAGE: float = 0.2
 const MINER_ASTEROID_MULTIPLIER: float = 1.5
-const MINER_REPAIR_RATE: float = 10.0
-const SCIENCE_REPAIR_RATE: float = 20.0
+const MINER_REPAIR_RATE: float = 1.0
+const SCIENCE_REPAIR_RATE: float = 2.0
 const SCAN_COOLDOWN: float = 30.0
 const PROBE_LIFETIME: float = 30.0
-const PROBE_HP: float = 80.0
+const PROBE_HP: float = 10.0
 const MINER_REPAIR_SEARCH: float = LASER_RANGE * 2.0
-const MINER_RATE: float = MINER_LASER_DAMAGE * MINER_ASTEROID_MULTIPLIER
+const MINER_RATE: float = 0.5
 const SHIP_SPEED: float = MAP.TRAVEL_SPEED # Map-scale reference speed.
 const MINER_SPEED: float = SHIP_SPEED * 0.8
 const FREIGHTER_SPEED: float = SHIP_SPEED * 1.1
@@ -192,53 +193,53 @@ const MAX_SHIPYARDS: int = 3
 const EPS: float = 0.00001
 const DEFAULT_FOG_OF_WAR: bool = false
 # Starting storage capacity per resource; warehouse upgrades increase it.
-const TRADE_REFERENCE: float = 2000.0
+const TRADE_REFERENCE: float = 200.0
 const DEFAULT_IMPORT_PERCENT: float = 50.0
 const DEFAULT_EXPORT_PERCENT: float = 80.0
-const WAREHOUSE_CAPACITIES = [2000.0, 5000.0, 12000.0, 30000.0]
-const BASE_METAL_CAPACITY: float = 4000.0
+const WAREHOUSE_CAPACITIES = [200.0, 500.0, 1200.0, 3000.0]
+const BASE_METAL_CAPACITY: float = 400.0
 # Each tier is 3x the previous one, with each price fitting in the
 # immediately preceding warehouse capacity.
 const WAREHOUSE_COSTS = [
-	{"Metals": 500.0},
-	{"Metals": 1500.0},
-	{"Metals": 4500.0}
+	{"Metals": 50.0},
+	{"Metals": 150.0},
+	{"Metals": 450.0}
 ]
-const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
+const WAREHOUSE_POPULATIONS = [100, 500, 1500]
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship", "construction_ship"]
-const CONSTRUCTION_SHIP_CAPACITY: float = 180.0
-const DEPOT_REFERENCE_BUDGET: float = 4000.0
+const CONSTRUCTION_SHIP_CAPACITY: float = 20.0
+const DEPOT_REFERENCE_BUDGET: float = 400.0
 const ANTIMATTER_HOLDER_CAPACITY: float = 1.0
 const STATIC_SITE_KINDS = ["resource_depot", "defense_cannon", "wall_node", "wall_segment"]
 const WALL_MAX_LENGTH: float = 450.0
 const WALL_SNAP_RADIUS: float = 40.0
 const WALL_MAX_SEGMENTS: int = 24
-const WALL_NODE_HP: float = 1800.0
-const WALL_SEGMENT_HP: float = 3200.0
-const CANNON_HP = [1000.0, 1750.0, 2700.0]
-const CANNON_DAMAGE = [80.0, 140.0, 220.0]
+const WALL_NODE_HP: float = 175.0
+const WALL_SEGMENT_HP: float = 300.0
+const CANNON_HP = [100.0, 175.0, 275.0]
+const CANNON_DAMAGE = [10.0, 15.0, 20.0]
 const CANNON_RANGE = [600.0, 800.0, 1000.0]
 const CANNON_COOLDOWN: float = 2.0
-const DEPOT_HP: float = 1200.0
+const DEPOT_HP: float = 125.0
 const SCIENCE_CAPACITY: float = 1.0
 const SCIENCE_COLLECTION_YEARS: float = 30.0
 const SHIPYARD_QUEUE_LIMIT = 4
 const STATION_QUEUE_LIMIT = 4
 const MAX_SHIPYARD_LEVEL = 3
-const CREW_COSTS = {"ship": 4000.0, "colony_ship": COLONY_POPULATION, "fighter": 1000.0, "miner": 1500.0, "science_ship": 4000.0, "scout": 200.0, "cruiser": 3000.0, "destroyer": 8000.0, "railgun_ship": 4000.0, "construction_ship": 2000.0}
+const CREW_COSTS = {"ship": 25.0, "colony_ship": COLONY_POPULATION, "fighter": 10.0, "miner": 15.0, "science_ship": 25.0, "scout": 5.0, "cruiser": 25.0, "destroyer": 75.0, "railgun_ship": 50.0, "construction_ship": 20.0}
 const MINING_STAY: float = 5.0
-const SHIP_HP: float = 200.0
-const YARD_HP: float = 1500.0
+const SHIP_HP: float = 20.0
+const YARD_HP: float = 150.0
 const FREIGHTER_HP: float = SHIP_HP * 2.0
-const PASSIVE_REGEN: float = 1.0 / 3.0
-const STATION_HP: float = 5000.0
-const REINFORCED_STATION_HP: float = STATION_HP + 1500.0
+const PASSIVE_REGEN: float = 1.0 / 30.0
+const STATION_HP: float = 500.0
+const REINFORCED_STATION_HP: float = STATION_HP + 150.0
 const STATION_LASER_COUNT: int = 2
 const STATION_UPGRADES = ["reinforced_plating", "laser_matrix", "dyson_sphere"]
 const STATION_SALVAGE_FRACTION: float = 0.20
-const LASER_DAMAGE: float = 18.0
+const LASER_DAMAGE: float = 2.0
 const PDS_DAMAGE: float = LASER_DAMAGE * 2.0
-const PDS_HP: float = 300.0
+const PDS_HP: float = 30.0
 const LASER_RANGE: float = 180.0
 const PDS_RANGE: float = LASER_RANGE * 2.0
 const PURSUIT_YEARS: float = 3.0
@@ -260,8 +261,8 @@ const SHIP_SEPARATION_STRENGTH: float = 0.15
 const FORMATION_RADIUS: float = 105.0
 const WANDER_RADIUS: float = 600.0
 const FORMATION_TRAVEL_FRACTION: float = 0.8
-const WITHDRAW_HP: float = 92.0
-const REPAIR_PER_YEAR: float = 20.0
+const WITHDRAW_HP: float = 9.2
+const REPAIR_PER_YEAR: float = 2.0
 const STATION_REPAIR_RANGE: float = LASER_RANGE
 const REPAIR_SAFE_RADIUS: float = LASER_RANGE * 2.0
 static func system_bodies(system: Dictionary, seed_value: int, index: int) -> Array:
@@ -696,13 +697,18 @@ static func raw_antimatter_totals(state: Dictionary, player: int) -> Dictionary:
 static func credit_balance(state: Dictionary, player: int) -> float:
 	return float(state.get("galactic_credits", {}).get(player, 0.0))
 
+# Positive purchase requirements never round to zero. Round only prices,
+# never live inventories, yields, transfers or refunds.
+static func rounded_price(amount: float) -> float:
+	return maxf(5.0, roundf(amount / 5.0) * 5.0) if amount > 0.0 else 0.0
+
 static func construction_credit_cost(materials: Dictionary, kind: String = "") -> float:
 	if materials.is_empty():
 		return 0.0
 	var value: float = 0.0
 	for resource in CONSTRUCTION_REFERENCE_VALUES:
 		value += float(materials.get(resource, 0.0)) * float(CONSTRUCTION_REFERENCE_VALUES[resource])
-	return maxf(1.0, ceilf(value * CONSTRUCTION_CREDIT_FRACTION)) * (float(ship_size(kind) + 1) if SHIP_KINDS.has(kind) else 1.0)
+	return rounded_price(value * CONSTRUCTION_CREDIT_FRACTION * (float(ship_size(kind) + 1) if SHIP_KINDS.has(kind) else 1.0))
 
 static func can_pay_credits(state: Dictionary, player: int, amount: float) -> bool:
 	return player > 0 and state.get("galactic_credits", {}).has(player) and is_finite(amount) and amount >= 0.0 and credit_balance(state, player) >= amount
@@ -1410,7 +1416,7 @@ static func _regenerate_eco(p: Dictionary, dt: float, residents: float) -> void:
 	# repopulated. Full habitats do not add free residents each tick.
 	var next: float = residents
 	if residents < capacity:
-		next = minf(capacity, maxf(1.0, residents) * exp(log(2.0) * dt / POPULATION_DOUBLING_YEARS))
+		next = minf(capacity, maxf(0.01, residents) * exp(log(2.0) * dt / POPULATION_DOUBLING_YEARS))
 	p["eco_population"] = next
 	p["population"] = float(p["population"]) + next - residents
 
@@ -1442,7 +1448,7 @@ static func population_capacity(planet: Dictionary, basis: Dictionary = {}) -> f
 static func habitation_capacity(planet: Dictionary) -> float:
 	if not has_planets(planet):
 		return 0.0
-	return 500000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0))) * _rank_factor(planet, "rank_housing", 0.15)
+	return 5000.0 * float(planet.get("size_factor", 1.0)) * pow(2.0, int(planet.get("habitation_level", 0))) * _rank_factor(planet, "rank_housing", 0.15)
 
 static func sustainable_population_capacity(planet: Dictionary) -> float:
 	return minf(population_capacity(planet), habitation_capacity(planet)) + eco_capacity(planet)
@@ -1592,7 +1598,7 @@ static func _get_owned(state: Dictionary, player: int, index: int) -> Dictionary
 	return planets[index]
 
 # Reserve a slot as soon as construction is ordered.
-const SHIPYARD_POPULATION = [500.0, 5000.0, 20000.0]
+const SHIPYARD_POPULATION = [5.0, 50.0, 200.0]
 
 static func shipyard_operational(p: Dictionary, index: int) -> bool:
 	return index >= 0 and index < (p.get("yards", []) as Array).size() and float(p["population"]) + EPS >= yard_staff_required(p, index)
@@ -1666,7 +1672,7 @@ static func _compact_shipyard_orders(state: Dictionary, p: Dictionary, removed_l
 # Gates apply to new local production orders, not completed infrastructure.
 # All three resources use the ordinary local population gate.
 static func production_population(_resource: String, level: int) -> int:
-	return maxi(1000, 10000 * (level - 1))
+	return maxi(10, 100 * (level - 1))
 
 static func production_available(p: Dictionary, resource: String) -> bool:
 	if not has_planets(p) and resource in ["Metals", "Crystals", "Organics"]:
@@ -1709,7 +1715,7 @@ static func warehouse_available(p: Dictionary) -> bool:
 
 static func habitation_cost(p: Dictionary) -> Dictionary:
 	var factor: float = pow(3.0, int(p.get("habitation_level", 0)))
-	return {"Metals": 600.0 * factor}
+	return {"Metals": 75.0 * factor}
 
 static func habitation_available(p: Dictionary) -> bool:
 	return has_planets(p) and int(p.get("habitation_level", 0)) < 3 and not _has_job(p, "habitation", "") and affordable(p, habitation_cost(p))
@@ -4115,7 +4121,7 @@ static func _dropoff_budget(ship: Dictionary, dt: float) -> float:
 
 static func dropoff_rate(kind: String) -> float:
 	match kind:
-		"miner": return 120.0 # Independent of extraction balance.
+		"miner": return 12.0 # Independent of extraction balance.
 		"ship": return FREIGHTER_TRACTOR_RATE * 20.0
 		"colony_ship": return COLONY_FARM_RATE * 20.0
 	return TRACTOR_RATE * 20.0
@@ -5363,14 +5369,14 @@ static func _attack_destination(graph: Dictionary, target: Dictionary) -> int:
 const MISSILE_SPLASH_RADIUS: float = 30.0
 const STATION_MISSILE_COUNT: int = 1
 const MISSILE_RANGE: float = 1200.0
-const MISSILE_DAMAGE: float = 120.0
+const MISSILE_DAMAGE: float = 12.0
 const MISSILE_COOLDOWN: float = 12.0
 const RAILGUN_RANGE: float = MISSILE_RANGE * 2.0
 const RAILGUN_DAMAGE: float = MISSILE_DAMAGE * 4.0
 const RAILGUN_COOLDOWN: float = MISSILE_COOLDOWN * 1.25
 const RAILGUN_EFFECT_YEARS: float = 0.35
 
-const BLASTER_DAMAGE: float = 1.0
+const BLASTER_DAMAGE: float = 0.1
 const BLASTER_SHOTS: int = 4
 const BLASTER_BURST: float = 1.0
 const BLASTER_PAUSE: float = 0.5
@@ -5389,7 +5395,7 @@ static func missile_count(kind: String) -> int:
 static func railgun_count(kind: String) -> int:
 	return 1 if kind in ["destroyer", "railgun_ship"] else 0
 
-const SHIP_MAX_HP = {"resource_depot": DEPOT_HP, "construction_ship": 500.0, "defense_cannon": 1000.0, "wall_node": WALL_NODE_HP, "wall_segment": WALL_SEGMENT_HP, "probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 1600.0, "destroyer": 3200.0, "railgun_ship": 1400.0, "warp_gate": WARP_GATE_HP}
+const SHIP_MAX_HP = {"resource_depot": DEPOT_HP, "construction_ship": 50.0, "defense_cannon": 100.0, "wall_node": WALL_NODE_HP, "wall_segment": WALL_SEGMENT_HP, "probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 160.0, "destroyer": 320.0, "railgun_ship": 140.0, "warp_gate": WARP_GATE_HP}
 const MILITARY_KINDS = ["fighter", "scout", "cruiser", "destroyer", "railgun_ship"]
 const ARMED_KINDS = ["fighter", "miner", "cruiser", "destroyer", "scout", "railgun_ship"]
 
@@ -6932,11 +6938,11 @@ static func cannon_damage(site: Dictionary) -> float:
 
 static func static_recipe(kind: String, level: int = 1) -> Dictionary:
 	match kind:
-		"resource_depot": return {"Metals": 600.0, "Crystals": 40.0}
-		"wall_node": return {"Metals": 180.0}
-		"wall_segment": return {"Metals": 300.0, "Crystals": 10.0}
+		"resource_depot": return {"Metals": 75.0, "Crystals": 5.0}
+		"wall_node": return {"Metals": 20.0}
+		"wall_segment": return {"Metals": 25.0}
 		"defense_cannon":
-			return [{"Metals": 500.0, "Crystals": 60.0}, {"Metals": 800.0, "Crystals": 100.0}, {"Metals": 1300.0, "Crystals": 180.0}][clampi(level - 1, 0, 2)]
+			return [{"Metals": 50.0, "Crystals": 5.0}, {"Metals": 75.0, "Crystals": 10.0}, {"Metals": 125.0, "Crystals": 20.0}][clampi(level - 1, 0, 2)]
 	return {}
 
 static func hull_max_hp(ship: Dictionary) -> float:
@@ -10711,7 +10717,7 @@ static func _ai_pursue_station_goal(state: Dictionary, player: int, index: int, 
 			var available_output: float = rate(p, resource)
 			if resource == "Organics":
 				available_output -= organics_demand(p)
-			if available_output >= 0.5:
+			if available_output >= 0.05:
 				continue
 			if int(p.get("buildings", {}).get(resource, 0)) >= 3:
 				continue
@@ -10720,7 +10726,7 @@ static func _ai_pursue_station_goal(state: Dictionary, player: int, index: int, 
 		return
 	if not can_pay_credits(state, player, construction_credit_cost(price, action)):
 		return
-	if float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 1.0:
+	if float(p["population"]) < float(CREW_COSTS.get(action, 0.0)) + 0.01:
 		return
 	if enqueue(state, player, index, action, target) and SHIP_KINDS.has(action):
 		counts[action] += 1
@@ -13359,7 +13365,7 @@ static func acquire_reward(state: Dictionary, player: int, key: String, generati
 		_refresh_reward_defenses(state, 0.0)
 	return true
 
-const WARP_GATE_HP: float = 10000.0
+const WARP_GATE_HP: float = 1000.0
 const WARP_RANGE: float = 180.0
 const WARP_COOLDOWN: float = 10.0
 
@@ -13472,13 +13478,15 @@ static func military_hull(kind: String) -> bool:
 static func construction_cost(p: Dictionary, kind: String, level: int) -> Dictionary:
 	var cost: Dictionary = _construction_cost_before_dyson(p, kind, level)
 	if cost.has("Crystals"):
-		cost["Crystals"] = ceilf(float(cost["Crystals"]) / _rank_factor(p, "rank_reactor", 1.0 / 0.9 - 1.0))
+		cost["Crystals"] = float(cost["Crystals"]) / _rank_factor(p, "rank_reactor", 1.0 / 0.9 - 1.0)
 	if kind == "dyson_sphere":
 		for resource in cost:
-			cost[resource] = ceilf(float(cost[resource]) / _rank_factor(p, "rank_stellar", 0.25))
+			cost[resource] = float(cost[resource]) / _rank_factor(p, "rank_stellar", 0.25)
 	if SHIP_KINDS.has(kind) and bool(p.get("station", {}).get("dyson_sphere", false)):
 		for resource in cost:
 			cost[resource] = float(cost[resource]) * 0.5
+	for resource in cost:
+		cost[resource] = rounded_price(float(cost[resource]))
 	return cost
 
 static func _construction_cost_before_dyson(p: Dictionary, kind: String, level: int) -> Dictionary:
@@ -13487,22 +13495,22 @@ static func _construction_cost_before_dyson(p: Dictionary, kind: String, level: 
 		var rewards: Array = p.get("conquest_rewards", [])
 		var metal: float = float(cost.get("Metals", 0.0))
 		if kind == "scout" and rewards.has("cloak"):
-			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.15 * CRYSTAL_COST_MULTIPLIER)
+			cost["Crystals"] = float(cost.get("Crystals", 0.0)) + (metal * 0.15 * CRYSTAL_COST_MULTIPLIER)
 		else:
 			var tier: int = shield_tier(rewards)
 			if tier > 0:
-				cost["Crystals"] = float(cost.get("Crystals", 0.0)) + ceilf(metal * 0.05 * tier * CRYSTAL_COST_MULTIPLIER)
+				cost["Crystals"] = float(cost.get("Crystals", 0.0)) + (metal * 0.05 * tier * CRYSTAL_COST_MULTIPLIER)
 			if rewards.has("armor"):
-				cost["Metals"] = ceilf(metal * 1.15)
+				cost["Metals"] = metal * 1.15
 		for resource in ["Metals", "Crystals"]:
 			if cost.has(resource):
-				cost[resource] = ceilf(float(cost[resource]) / _rank_factor(p, "rank_military_metal" if resource == "Metals" else "rank_military_crystal", 0.03))
+				cost[resource] = float(cost[resource]) / _rank_factor(p, "rank_military_metal" if resource == "Metals" else "rank_military_crystal", 0.03)
 		return cost
 	if kind in ["ship", "miner", "colony_ship", "science_ship"] and cost.has("Metals"):
 		var efficiency: float = _rank_factor(p, "rank_civilian", 0.03)
 		if kind == "science_ship":
 			efficiency += 0.03 * reward_rank(p.get("conquest_rewards", []), "rank_science")
-		cost["Metals"] = ceilf(float(cost["Metals"]) / efficiency)
+		cost["Metals"] = float(cost["Metals"]) / efficiency
 	return cost
 
 static func _update_shield(entity: Dictionary, maximum: float, now: float, dt: float) -> void:
@@ -13620,16 +13628,16 @@ const OBJECTIVE_SPECS = {
 	"colonies_2": ["economic", "colonies", 4, "Colonize 4 systems", "colonies"],
 	"colonies_3": ["economic", "colonies", 8, "Colonize 8 systems", "colonies_2"],
 	"advanced_colonies": ["economic", "colonies", 12, "Colonize 12 systems", "colonies_3"],
-	"colony_food": ["economic", "colony_food", 1000, "Produce 1kt colony ship food", ""],
-	"colony_food_2": ["economic", "colony_food", 3000, "Produce 3kt colony ship food", "colony_food"],
-	"metals": ["economic", "metals", 3000, "Have 3kt Metals", ""],
-	"metals_2": ["economic", "metals", 6000, "Have 6kt Metals", "metals"],
-	"metals_3": ["economic", "metals", 10000, "Have 10kt Metals", "metals_2"],
-	"advanced_metals": ["economic", "metals", 20000, "Have 20kt Metals", "metals_3"],
-	"population": ["economic", "population", 80000, "Reach 80k population", ""],
-	"population_2": ["economic", "population", 200000, "Reach 200k population", "population"],
-	"population_3": ["economic", "population", 500000, "Reach 500k population", "population_2"],
-	"advanced_population": ["economic", "population", 1000000, "Reach 1M population", "population_3"],
+	"colony_food": ["economic", "colony_food", 100, "Produce 100 colony ship food", ""],
+	"colony_food_2": ["economic", "colony_food", 300, "Produce 300 colony ship food", "colony_food"],
+	"metals": ["economic", "metals", 300, "Have 300 Metals", ""],
+	"metals_2": ["economic", "metals", 600, "Have 600 Metals", "metals"],
+	"metals_3": ["economic", "metals", 1000, "Have 1k Metals", "metals_2"],
+	"advanced_metals": ["economic", "metals", 2000, "Have 2k Metals", "metals_3"],
+	"population": ["economic", "population", 800, "Reach 800 Pop", ""],
+	"population_2": ["economic", "population", 2000, "Reach 2k Pop", "population"],
+	"population_3": ["economic", "population", 5000, "Reach 5k Pop", "population_2"],
+	"advanced_population": ["economic", "population", 10000, "Reach 10k Pop", "population_3"],
 	"military_built": ["military", "fighters_built", 7, "Build 7 fighters", ""],
 	"military_built_2": ["military", "military_built", 15, "Build 15 military ships", "military_built"],
 	"military_built_3": ["military", "military_built", 30, "Build 30 military ships", "military_built_2"],
@@ -13642,18 +13650,18 @@ const OBJECTIVE_SPECS = {
 
 # category, first lifetime target, incremental step, label format, fixed prerequisite
 const REPEAT_OBJECTIVES = {
-	"colony_food": ["economic", 5000, 2000, "Produce %st colony ship food", "colony_food_2"],
+	"colony_food": ["economic", 500, 200, "Produce %s colony ship food", "colony_food_2"],
 	"colony_ships_built": ["economic", 4, 2, "Build %s colony ships", "colony_ships"],
-	"produced_metals": ["economic", 5000, 3000, "Produce %st Metals", ""],
-	"produced_organics": ["economic", 5000, 3000, "Produce %st Organics", ""],
+	"produced_metals": ["economic", 500, 300, "Produce %s Metals", ""],
+	"produced_organics": ["economic", 500, 300, "Produce %s Organics", ""],
 	"logistics_built": ["economic", 5, 4, "Build %s logistics ships", ""],
 	"military_built": ["military", 45, 15, "Build %s military ships", "military_built_3"],
 	"enemy_ships_destroyed": ["military", 45, 15, "Destroy %s enemy ships", "enemy_ships_3"],
-	"military_investment": ["military", 2500, 2000, "Build %st of base-metal military hulls", "military_built"],
+	"military_investment": ["military", 250, 200, "Build %s of base-metal military hulls", "military_built"],
 	"capital_built": ["military", 3, 3, "Build %s capital ships", "military_built"],
 	"fighters_built": ["military", 12, 8, "Build %s fighters", "military_built"],
 	"antimatter_processed": ["tech", 6, 2, "Process %s antimatter", "antimatter_2"],
-	"produced_crystals": ["tech", 150, 100, "Produce %st Crystals", ""],
+	"produced_crystals": ["tech", 15, 10, "Produce %s Crystals", ""],
 	"science_built": ["tech", 2, 2, "Build %s science ships", ""],
 	"infrastructure_built": ["tech", 8, 5, "Complete %s infrastructure projects", ""]
 }

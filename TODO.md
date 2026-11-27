@@ -2,6 +2,8 @@
 
 ## Approved gameplay rebalance — simpler numbers (2026-11-26)
 
+Draft v0.113.0 implements the initial new scale across the simulation, recipes, presentation and objectives. Do not close these acceptance items until the full migrated regression suite, current-main physical-construction tests and actual peer tests pass. Playtesting and economic balance refinement remain expected. Focused contract and solo checks pass; funded AI pacing passes all three seeds.
+
 - [ ] Replace bulk tonnage with unlabeled resource units: nominal 10 old tons per unit; starting Metals 165, Organics 30, base Metal storage 400. Preserve fractional simulation quantities, show whole inventories and useful fractional rates. Standard base costs 25 increments, smaller exceptions 5. Round modified costs as appropriate; no zeroing positive requirements unintentionally.
 - [ ] Population in Pop (100 old people per Pop): home terrestrial 100, orbital 50, total 150, colony crew 250, origin 500. Rescale staffing, production, growth, housing, tax, objectives and AI. GC initial 500; rescale fees, upkeep and affordability consistently.
 - [ ] Ship Metals: Scout 10, Fighter 25, Freighter 50, Construction Ship 40, Harvester 50, Science Vessel 100, Colony 150, Cruiser 200, Railgun Ship 200, Destroyer 300. Remove ordinary ship Organics costs; Colony retains 10. Provisional Pop crews and Crystal recipes as agreed in discussion; rebalance shipyard and upgrade costs, yields, extraction and freight throughput. Freighter 100 units (10 each of ten bays), Constructor 20, Harvester 5, Colony 25; depot Metals 200, Organics 400, Crystals 50.

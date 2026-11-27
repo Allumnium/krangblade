@@ -177,15 +177,15 @@ func _empire_resource_delta(state: Dictionary, resource: String) -> float:
 
 # Signed number of chevrons relative to capacity or a treasury reference.
 static func _trend_count(annual: float, capacity: float) -> int:
-	if absf(annual) < 0.05 or capacity <= 0.0:
+	if absf(annual) < 0.005 or capacity <= 0.0:
 		return 0
 	var ratio: float = absf(annual) / capacity
 	var count: int = 3 if ratio >= 0.02 else (2 if ratio >= 0.005 else 1)
 	return count if annual > 0.0 else -count
 
 static func set_resource_delta(label: Label, annual: float, parentheses: bool = false) -> void:
-	var displayed: float = 0.0 if absf(annual) < 0.05 else annual
-	var amount: String = ("+" if displayed > 0.0 else "") + UI_TEXT.tons(displayed, 1, true)
+	var displayed: float = 0.0 if absf(annual) < 0.005 else annual
+	var amount: String = ("+" if displayed > 0.0 else "") + UI_TEXT.resource_amount(displayed, 2, true)
 	label.text = ("(%s/yr)" % amount if displayed != 0.0 else "") if parentheses else amount
 	label.visible = not parentheses or displayed != 0.0
 	label.add_theme_color_override("font_color", Color("#7cdb9b") if displayed > 0.0 else (Color("#eb8585") if displayed < 0.0 else Color.WHITE))
@@ -235,11 +235,11 @@ func _resource_breakdown(state: Dictionary, resource: String) -> String:
 			lines.append("%s · %.0f · %+.2f/yr\n  %+.2f growth · %+.2f crew · %+.1f%% crowding · %+.1f%% food" % [system_name.call(i), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p))])
 		return "\n".join(lines)
 	var totals: Dictionary = ECONOMY.empire_totals(state, local_player.call())
-	var lines: PackedStringArray = ["%s · %.2f t total" % [resource, float(totals["resources"][resource])],
-		"Stations: %.2f / %.0f t · Ships: %.2f t" % [float(totals["stock"][resource]), float(totals["storage_reference"][resource]), float(totals["cargo"][resource])],
-		"Net (storage-limited): %+.2f t/yr" % _empire_resource_delta(state, resource)]
+	var lines: PackedStringArray = ["%s · %.2f total" % [resource, float(totals["resources"][resource])],
+		"Stations: %.2f / %.0f · Ships: %.2f" % [float(totals["stock"][resource]), float(totals["storage_reference"][resource]), float(totals["cargo"][resource])],
+		"Net (storage-limited): %+.2f/yr" % _empire_resource_delta(state, resource)]
 	var food: bool = resource == "Organics"
-	lines.append("System · Net | Production | Food demand (t/yr)" if food else "System · Net | Production (t/yr)")
+	lines.append("System · Net | Production | Food demand (/yr)" if food else "System · Net | Production (/yr)")
 	for i in range((state.get("planets", []) as Array).size()):
 		var p: Dictionary = state["planets"][i]
 		if int(p["owner"]) != local_player.call():
@@ -254,12 +254,12 @@ func _local_breakdown(p: Dictionary, resource: String, selected: int) -> String:
 	if resource == "population":
 		var growth: float = float(p.get("demographic_rate", ECONOMY.population_growth(p)))
 		var crew: float = float(p.get("crew_rate", 0.0))
-		return "%s · %.0f people\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nFood reserve growth penalty: %+.1f%% (%.2f / %.0f t for full growth)\nOrganics: %.2f produced / %.2f consumed per year\nEco-Housing: %.0f / %.0f residents · +%.2f t/yr Organics" % [system_name.call(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p)), float(p["stock"]["Organics"]), ECONOMY.POPULATION_FOOD_RESERVE, ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics"), ECONOMY.eco_population(p), ECONOMY.eco_capacity(p), ECONOMY.eco_organics(p)]
+		return "%s · %.0f Pop\n%+.2f/yr net\n%+.2f demographic change\n%+.2f ship crews\nOverpopulation penalty: %+.1f%%\nFood reserve growth penalty: %+.1f%% (%.2f / %.0f for full growth)\nOrganics: %.2f produced / %.2f consumed per year\nEco-Housing: %.0f / %.0f Pop · +%.2f/yr Organics" % [system_name.call(selected), float(p["population"]), growth - crew, growth, -crew, -100.0 * ECONOMY.overpopulation_penalty(p), -100.0 * (1.0 - ECONOMY.food_growth_multiplier(p)), float(p["stock"]["Organics"]), ECONOMY.POPULATION_FOOD_RESERVE, ECONOMY.rate(p, "Organics"), ECONOMY.consumption(p, "Organics"), ECONOMY.eco_population(p), ECONOMY.eco_capacity(p), ECONOMY.eco_organics(p)]
 	var potential: float = ECONOMY.rate(p, resource)
 	if resource != "Organics":
-		return "%s · %.2f t stored\nProduction: %.2f t/yr\nNet: %+.2f t/yr\nOutput: %.1f%%" % [resource, float(p["stock"][resource]), potential, ECONOMY.net_rate(p, resource), 100.0 * ECONOMY.production_modifier(p, resource)]
+		return "%s · %.2f stored\nProduction: %.2f/yr\nNet: %+.2f/yr\nOutput: %.1f%%" % [resource, float(p["stock"][resource]), potential, ECONOMY.net_rate(p, resource), 100.0 * ECONOMY.production_modifier(p, resource)]
 	var demand: float = ECONOMY.consumption(p, resource)
-	return "%s · %.2f t stored\nProduction: %.2f t/yr\nDemand: %.2f t/yr\nNet: %+.2f t/yr\nOutput: %.1f%%" % [resource, float(p["stock"][resource]), potential, demand, potential - demand, 100.0 * ECONOMY.production_modifier(p, resource)]
+	return "%s · %.2f stored\nProduction: %.2f/yr\nDemand: %.2f/yr\nNet: %+.2f/yr\nOutput: %.1f%%" % [resource, float(p["stock"][resource]), potential, demand, potential - demand, 100.0 * ECONOMY.production_modifier(p, resource)]
 
 func update_hover(owner: Control, codex: Window, station_details: VBoxContainer, overview_panel: PanelContainer, population_label: Label, production_values: Dictionary, selected: int, planet_query: Callable) -> void:
 	if not is_instance_valid(resource_hover_panel):
@@ -327,7 +327,7 @@ func refresh(state: Dictionary) -> void:
 	for resource in ECONOMY.RESOURCES:
 		var value: float = float(totals["resources"][resource])
 		var annual: float = _empire_resource_delta(state, resource)
-		global_resource_labels[resource].text = UI_TEXT.tons(value, 0, true)
+		global_resource_labels[resource].text = UI_TEXT.resource_amount(value, 0, true)
 		var stored: float = float(totals["stock"][resource])
 		var cargo: float = float(totals["cargo"][resource])
 		var reference: float = float(totals["storage_reference"][resource])

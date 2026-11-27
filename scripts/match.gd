@@ -826,7 +826,7 @@ func _build_trade_controls() -> void:
 		var slider := TradeRange.new()
 		slider.custom_minimum_size.y = 26
 		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		slider.tooltip_text = "%s thresholds\nImport below min · Export above max 100%% = %.0f t." % [resource, ECONOMY.TRADE_REFERENCE]
+		slider.tooltip_text = "%s thresholds\nImport below min · Export above max 100%% = %.0f." % [resource, ECONOMY.TRADE_REFERENCE]
 		command_card_ui.register_info(slider, str(resource) + " thresholds")
 		slider.committed.connect(_apply_thresholds.bind(resource))
 		logistics.add_child(slider)
@@ -1438,12 +1438,12 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			eligible = level < 3
 			available = ECONOMY.warehouse_available(p)
 			work = ECONOMY.nominal_work("warehouse", level + 1)
-			description = "Storage: %s Metals · %s other resources" % [UI_TEXT.tons(ECONOMY.storage_capacity(p, "Metals"), 0), UI_TEXT.tons(ECONOMY.storage_capacity(p), 0)]
+			description = "Storage: %s Metals · %s other resources" % [UI_TEXT.resource_amount(ECONOMY.storage_capacity(p, "Metals"), 0), UI_TEXT.resource_amount(ECONOMY.storage_capacity(p), 0)]
 			if eligible:
 				recipe = ECONOMY.WAREHOUSE_COSTS[level]
 				var preview: Dictionary = p.duplicate()
 				preview["warehouse_level"] = level + 1
-				description = "Requires %s population\n+%s Metals · +%s other resources (%s each total)" % [UI_TEXT.compact_amount(ECONOMY.WAREHOUSE_POPULATIONS[level]), UI_TEXT.tons(ECONOMY.storage_capacity(preview, "Metals") - ECONOMY.storage_capacity(p, "Metals"), 0), UI_TEXT.tons(ECONOMY.storage_capacity(preview) - ECONOMY.storage_capacity(p), 0), UI_TEXT.tons(ECONOMY.storage_capacity(preview), 0)]
+				description = "Requires %s population\n+%s Metals · +%s other resources (%s each total)" % [UI_TEXT.compact_amount(ECONOMY.WAREHOUSE_POPULATIONS[level]), UI_TEXT.resource_amount(ECONOMY.storage_capacity(preview, "Metals") - ECONOMY.storage_capacity(p, "Metals"), 0), UI_TEXT.resource_amount(ECONOMY.storage_capacity(preview) - ECONOMY.storage_capacity(p), 0), UI_TEXT.resource_amount(ECONOMY.storage_capacity(preview), 0)]
 		elif key == "housing":
 			kind = "habitation" if ECONOMY.has_planets(p) else "orbital_housing"
 			var caption: Label = button.get_meta("caption")
@@ -1466,7 +1466,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				available = ECONOMY.orbital_housing_available(p)
 				var preview: Dictionary = p.duplicate()
 				preview["orbital_housing"] = current_level + 1
-				description = "+%s housing and residents\n+%.2f t/yr Organics" % [UI_TEXT.compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
+				description = "+%s housing and residents\n+%.2f/yr Organics" % [UI_TEXT.compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
 		elif key == "yard":
 			var slot: int = ECONOMY.next_shipyard_slot(p)
 			name_text = "Build Shipyard"
@@ -1481,7 +1481,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 				var yards: Array = p["yards"].duplicate()
 				yards.append({})
 				preview["yards"] = yards
-				description = "Staffing: %s population\n+1 Small shipyard\n+%s housing and residents · +%.2f t/yr Organics" % [UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[slot - 1]), UI_TEXT.compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
+				description = "Staffing: %s population\n+1 Small shipyard\n+%s housing and residents · +%.2f/yr Organics" % [UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[slot - 1]), UI_TEXT.compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION), ECONOMY.eco_organics(preview) - ECONOMY.eco_organics(p)]
 		elif key == "pds":
 			name_text = "PDS"
 			current_level = p.get("pds", {}).size()
@@ -1736,7 +1736,7 @@ func _refresh_body_overview(system: Dictionary) -> void:
 		if not sources.has(selected_body):
 			continue
 		var output: float = planet_traffic.production_rate(system, resource) / float(sources.size())
-		lines.append("%s · %.2f t/yr" % [resource, output])
+		lines.append("%s · %.2f/yr" % [resource, output])
 	if lines.is_empty():
 		lines.append("No resource production")
 	if bool(system.get("planet_blockaded", false)):
@@ -2125,7 +2125,7 @@ func _refresh_autocast_cards() -> void:
 		elif mode == "retreat":
 			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nRetreat at %.0f%% HP; resume after repair." % (100.0 * ECONOMY.WITHDRAW_HP / ECONOMY.SHIP_HP))
 		elif mode == "farm":
-			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nProduces %.0f t/s; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
+			command_card_ui.set_hint(button, command_card_ui.hint(button) + "\nProduces %.1f/s; delivers a full hold when idle." % ECONOMY.COLONY_FARM_RATE)
 
 func _arm_command(mode: String) -> void:
 	wall_drag_start = Vector2.INF
@@ -2349,7 +2349,7 @@ func _refresh_field_panels(state: Dictionary) -> void:
 	if selected_rock >= 0:
 		var rock: Dictionary = fog_state.rock_at(selected_field, selected_rock)
 		ship_title.text = "Asteroid"
-		ship_detail.text = "Unsurveyed" if not bool(rock.get("surveyed", false)) else "%s · %s" % [str(rock["resource"]), UI_TEXT.tons(float(rock["remaining"]))]
+		ship_detail.text = "Unsurveyed" if not bool(rock.get("surveyed", false)) else "%s · %s" % [str(rock["resource"]), UI_TEXT.resource_amount(float(rock["remaining"]))]
 		ship_detail.tooltip_text = ""
 		fleet_title.hide()
 		fleet_detail.hide()
@@ -2375,7 +2375,7 @@ func _refresh_field_panels(state: Dictionary) -> void:
 		ship_detail.text = "Depleted"
 	else:
 		var metals: int = roundi(100.0 * float(stock["Metals"]) / total)
-		ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, UI_TEXT.tons(float(stock["Metals"])), 100 - metals, UI_TEXT.tons(float(stock["Crystals"]))]
+		ship_detail.text = "Metals ~%d%% · %s\nCrystals ~%d%% · %s" % [metals, UI_TEXT.resource_amount(float(stock["Metals"])), 100 - metals, UI_TEXT.resource_amount(float(stock["Crystals"]))]
 	var access_names: PackedStringArray = []
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	for anchor in graph["adjacent"][state["planets"].size() + selected_field]:
@@ -2456,7 +2456,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	if kind == "colony_ship":
 		if bool(ship.get("salvage_delivery", false)):
 			status = "Delivering Organics" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for storage"
-		status += "\nOrganics %.1f / %.0f t · %s" % [float(ship["cargo"].get("Organics", 0.0)), ECONOMY.COLONY_CAPACITY, "Farming" if ECONOMY.autocast_enabled(ship, "farm") and not bool(ship.get("salvage_delivery", false)) and ECONOMY.cargo_free(ship) > ECONOMY.EPS else "Farm idle"]
+		status += "\nOrganics %.1f / %.0f · %s" % [float(ship["cargo"].get("Organics", 0.0)), ECONOMY.COLONY_CAPACITY, "Farming" if ECONOMY.autocast_enabled(ship, "farm") and not bool(ship.get("salvage_delivery", false)) and ECONOMY.cargo_free(ship) > ECONOMY.EPS else "Farm idle"]
 	if kind == "science_ship":
 		if ship.has("repair_target") or ship.has("repair_order"):
 			status = "Repairing" if ship.has("repair_target") else "Approaching repair target"
@@ -2478,7 +2478,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		elif ECONOMY.static_complete(ship):
 			status = "Resource Depot"
 			for resource in ECONOMY.RESOURCES:
-				status += "\n%s: %.1f / %.1f t" % [resource, float(ship["cargo"].get(resource, 0.0)), ECONOMY.depot_capacity(resource)]
+				status += "\n%s: %.1f / %.1f" % [resource, float(ship["cargo"].get(resource, 0.0)), ECONOMY.depot_capacity(resource)]
 	if kind == "probe":
 		status = "Scan active · %.1f yr remaining" % maxf(0.0, float(ship["probe_expires"]) - float(state["elapsed"])) if ship.has("probe_expires") else "En route to scan point"
 	if bool(ship.get("cloak_equipped", false)):
@@ -2488,9 +2488,9 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	if ECONOMY.cargo_capacity(kind) > ECONOMY.EPS:
 		var picked: float = float(ship.get("tons_picked", 0.0))
 		var dropped: float = float(ship.get("tons_dropped", 0.0))
-		status += "\nCargo handled: %.1f t (↑ %.1f / ↓ %.1f)" % [picked + dropped, picked, dropped]
+		status += "\nCargo handled: %.1f (↑ %.1f / ↓ %.1f)" % [picked + dropped, picked, dropped]
 	if kind == "colony_ship":
-		status += "\nFood produced: %.1f t" % float(ship.get("food_produced", 0.0))
+		status += "\nFood produced: %.1f" % float(ship.get("food_produced", 0.0))
 		if ECONOMY.can_transform_colony(state, ECONOMY.military_graph(state), ship):
 			status += "\nReady to establish station"
 	if kind == "warp_gate":
@@ -2598,8 +2598,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	if fleet_cargo_footer.visible:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			var amount: float = float(cargo.get(resource, 0.0))
-			fleet_cargo_labels[resource].text = "%.0f" % amount if resource == ECONOMY.ANTIMATTER else (UI_TEXT.tons(amount, 1, true) if amount >= 1000.0 else (("%.1f" % amount).trim_suffix(".0") if amount >= 0.1 else "%.2f" % amount) + "t")
-			fleet_cargo_labels[resource].tooltip_text = "%.0f items" % amount if resource == ECONOMY.ANTIMATTER else "%.1f t" % amount
+			fleet_cargo_labels[resource].text = "%.0f" % amount
+			fleet_cargo_labels[resource].tooltip_text = "%.0f items" % amount if resource == ECONOMY.ANTIMATTER else "%.1f" % amount
 			fleet_cargo_labels[resource].get_parent().visible = amount > ECONOMY.EPS
 
 func _build_territory_layer() -> void:
@@ -2704,8 +2704,8 @@ func _update_trade_stock(p: Dictionary) -> void:
 		var stock: float = float(p["stock"][resource])
 		var capacity: float = ECONOMY.storage_capacity(p, resource)
 		slider.set_stock(stock, capacity, HUD.COLORS[resource])
-		trade_stock_labels[resource].text = "%s / %s" % [UI_TEXT.tons(stock, 1, true), UI_TEXT.tons(capacity, 0, true)]
-		trade_stock_labels[resource].tooltip_text = "%.1f / %.0f t" % [stock, capacity]
+		trade_stock_labels[resource].text = "%s / %s" % [UI_TEXT.resource_amount(stock, 0, true), UI_TEXT.resource_amount(capacity, 0, true)]
+		trade_stock_labels[resource].tooltip_text = "%.1f / %.0f" % [stock, capacity]
 		command_card_ui.set_hint(slider, "%s thresholds\nImport below min · Export above max 100%% = %.0f units.%s" % [resource, capacity, "\nEdits apply to all selected owned stations; display shows primary station." if building_selection_kind == "station" and selected_buildings.size() > 1 else ""])
 		# Preserve this handle while dragging, even when a snapshot arrives.
 		if slider.active_handle < 0:
@@ -2947,7 +2947,7 @@ func _refresh() -> void:
 func _refresh_local_resources(p: Dictionary) -> void:
 	for resource in ECONOMY.RESOURCES:
 		var amount: float = float(p["stock"][resource])
-		production_values[resource]["stock"].text = UI_TEXT.tons(amount)
+		production_values[resource]["stock"].text = UI_TEXT.resource_amount(amount)
 		production_values[resource]["level"].text = str(int(p["levels"][resource]) + int(p.get("buildings", {}).get(resource, 0)))
 		var percent: int = roundi(100.0 * ECONOMY.production_modifier(p, resource))
 		var bonus: Label = production_values[resource]["bonus"]
@@ -4847,7 +4847,7 @@ func _draw_salvage(state: Dictionary, poses: Dictionary, viewport_bounds: Rect2,
 				map_canvas.draw_line(poses[claimant]["point"], point, Color(color, 0.45), 1.0, true)
 		if int(pile["id"]) == hovered:
 			var remaining: float = maxf(0.0, float(pile.get("expires_at", float(pile["born"]) + ECONOMY.SALVAGE_MAX_LIFETIME)) - float(state["elapsed"]))
-			map_canvas.draw_string(font, point + Vector2(9, -9), "%s · %.1f t · %ds%s" % [pile["resource"], float(pile["amount"]), ceili(remaining), " · Claimed" if claimant >= 0 else ""], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint.lightened(0.35))
+			map_canvas.draw_string(font, point + Vector2(9, -9), "%s · %.1f · %ds%s" % [pile["resource"], float(pile["amount"]), ceili(remaining), " · Claimed" if claimant >= 0 else ""], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint.lightened(0.35))
 
 # Bays represent equal shares of each hull’s capacity, with partial resource-colored fills.
 # Preserve the authored bay geometry independently of cargo balance.

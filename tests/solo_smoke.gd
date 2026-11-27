@@ -238,7 +238,10 @@ func _run() -> void:
 			quit(1)
 			return
 	for index in [1, 2]:
-		setup["planets"][index]["population"] = 150000.0
+		setup["planets"][index]["population"] = 1500.0
+		setup["planets"][index]["stock"]["Metals"] = 400.0
+		setup["planets"][index]["stock"]["Crystals"] = 75.0
+		setup["galactic_credits"][index + 1] = 2000.0
 		setup["planets"][index]["levels"]["Organics"] = 3
 	session.call("_economy_tick")
 	if not (not setup["planets"][1]["queue"].is_empty()):

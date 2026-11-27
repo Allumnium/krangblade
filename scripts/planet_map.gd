@@ -13,7 +13,7 @@ const DEFAULT_LAYOUT: String = "Radial"
 # the map's common travel-distance normalization.
 const ANTIMATTER_CLEARANCE: float = 700.0
 const ANTIMATTER_RADIUS: float = 96.0
-const ASTEROID_INVENTORY_MULTIPLIER: float = 10.0
+const ASTEROID_INVENTORY_MULTIPLIER: float = 1.0
 const MAX_CRYSTAL_SHARE: float = 0.2
 
 static func valid_layout(layout: String) -> bool:
