@@ -2,11 +2,24 @@ extends SceneTree
 const ECON = preload("res://scripts/economy_rules.gd")
 const MAP = preload("res://scripts/planet_map.gd")
 const MOTION_VIEW = preload("res://scripts/ship_motion_view.gd")
+const HULL_ART = preload("res://scripts/hull_art.gd")
 
 func _initialize() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
+	var art = HULL_ART.new()
+	var first: Image = HULL_ART.sprite_cell(HULL_ART.FIGHTER_SPRITE, HULL_ART.FIGHTER_GRID, HULL_ART.FIGHTER_GRID, 0)
+	var fighter: Image = HULL_ART.sprite_image("fighter")
+	if first.is_empty() or first.get_data() != fighter.get_data():
+		push_error("Fighter must use the first atlas cell.")
+		quit(1)
+		return
+	var texture: Texture2D = art.hull_texture("fighter", Color.WHITE, true)
+	if art.sprite_kind(texture) != "fighter" or art.production_icon("fighter", Color.WHITE) != texture or art.hull_texture("fighter", Color.WHITE, false) != texture:
+		push_error("Fighter sprite must be shared across world and production variants.")
+		quit(1)
+		return
 	# Test the effect contract, not exact visual dimensions or tuning.
 	var motion = MOTION_VIEW.new()
 	var cruise: float = MOTION_VIEW.cruise_thrust(1.0)

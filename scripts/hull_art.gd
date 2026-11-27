@@ -2,12 +2,37 @@ extends RefCounted
 ## Client-only canonical hull silhouettes and texture caches for portraits, shields and world art.
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const SCIENCE_SPRITE = preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586.png")
-var science_textures: Dictionary = {}
+const FIGHTER_SPRITE = preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423.png")
+const FIGHTER_GRID: int = 4
+# Default to the first (top-left) design for every hull. Other variants
+# remain authored assets; no style selection or replicated state yet.
+const DEFAULT_SPRITE_VARIANT: int = 0
+var sprite_textures: Dictionary = {}
+var sprite_kinds: Dictionary = {}
 
-func science_texture(empire: Color) -> Texture2D:
-	var key: String = empire.to_html(false)
-	if not science_textures.has(key):
-		var image: Image = SCIENCE_SPRITE.get_image()
+static func has_authored_sprite(kind: String) -> bool:
+	return kind in ["science_ship", "fighter"]
+
+static func sprite_cell(atlas: Texture2D, columns: int, rows: int, variant: int = DEFAULT_SPRITE_VARIANT) -> Image:
+	var source: Image = atlas.get_image()
+	if source.is_compressed():
+		source.decompress()
+	var cell := Vector2i(source.get_width() / columns, source.get_height() / rows)
+	var index: int = clampi(variant, 0, columns * rows - 1)
+	var origin := Vector2i(index % columns, floori(float(index) / float(columns))) * cell
+	return source.get_region(Rect2i(origin, cell))
+
+static func sprite_image(kind: String) -> Image:
+	if kind == "fighter":
+		return sprite_cell(FIGHTER_SPRITE, FIGHTER_GRID, FIGHTER_GRID)
+	return SCIENCE_SPRITE.get_image()
+
+func sprite_texture(kind: String, empire: Color) -> Texture2D:
+	var key: String = "%s:%s" % [kind, empire.to_html(false)]
+	if not sprite_textures.has(key):
+		var image: Image = sprite_image(kind)
+		if image.is_compressed():
+			image.decompress()
 		image.convert(Image.FORMAT_RGBA8)
 		for y in range(image.get_height()):
 			for x in range(image.get_width()):
@@ -15,12 +40,18 @@ func science_texture(empire: Color) -> Texture2D:
 				if c.a > 0.0:
 					var value: float = maxf(c.r, maxf(c.g, c.b))
 					var accent := Color(empire.r * value, empire.g * value, empire.b * value, c.a)
-					image.set_pixel(x, y, c.lerp(accent, 0.30))
-		science_textures[key] = ImageTexture.create_from_image(image)
-	return science_textures[key]
+					# Use the authored red trim for stronger empire identification.
+					var strength: float = 0.30
+					if kind == "fighter" and c.r > maxf(c.g, c.b) * 1.25:
+						strength = 0.82
+					image.set_pixel(x, y, c.lerp(accent, strength))
+		var texture: Texture2D = ImageTexture.create_from_image(image)
+		sprite_textures[key] = texture
+		sprite_kinds[texture] = kind
+	return sprite_textures[key]
 
-func is_science_texture(texture: Texture2D) -> bool:
-	return science_textures.values().has(texture)
+func sprite_kind(texture: Texture2D) -> String:
+	return str(sprite_kinds.get(texture, ""))
 
 const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(23, 4), Vector2(19, 8), Vector2(-20, 8), Vector2(-20, -8), Vector2(19, -8), Vector2(23, -4)]
 # Authored top-down silhouette and interior panel geometry in hull-local
@@ -37,7 +68,7 @@ const HULL_OUTLINES: Dictionary = {
 	"cruiser": [Vector2(25, 0), Vector2(19, 4), Vector2(13, 5), Vector2(6, 13), Vector2(-5, 13), Vector2(-9, 7), Vector2(-19, 7), Vector2(-25, 4), Vector2(-25, 0), Vector2(-25, -4), Vector2(-19, -7), Vector2(-9, -7), Vector2(-5, -13), Vector2(6, -13), Vector2(13, -5), Vector2(19, -4)],
 	"destroyer": [Vector2(44, 0), Vector2(38, 7), Vector2(32, 7), Vector2(29, 18), Vector2(20, 20), Vector2(8, 16), Vector2(1, 10), Vector2(-12, 10), Vector2(-18, 23), Vector2(-32, 23), Vector2(-40, 17), Vector2(-40, 9), Vector2(-44, 6), Vector2(-44, 0), Vector2(-44, -6), Vector2(-40, -9), Vector2(-40, -17), Vector2(-32, -23), Vector2(-18, -23), Vector2(-12, -10), Vector2(1, -10), Vector2(8, -16), Vector2(20, -20), Vector2(29, -18), Vector2(32, -7), Vector2(38, -7)],
 	"science_ship": [Vector2(14, 0), Vector2(12, 7), Vector2(7, 12), Vector2(0, 14), Vector2(-7, 12), Vector2(-12, 7), Vector2(-14, 0), Vector2(-12, -7), Vector2(-7, -12), Vector2(0, -14), Vector2(7, -12), Vector2(12, -7)],
-	"fighter": [Vector2(12, 0), Vector2(6, 2.5), Vector2(2.5, 3), Vector2(-3, 8), Vector2(-7, 7.5), Vector2(-6, 3), Vector2(-10, 2.5), Vector2(-10, -2.5), Vector2(-6, -3), Vector2(-7, -7.5), Vector2(-3, -8), Vector2(2.5, -3), Vector2(6, -2.5)],
+	"fighter": [Vector2(10, 3), Vector2(5, 5), Vector2(3, 9), Vector2(5, 11), Vector2(-2, 14), Vector2(-7, 11), Vector2(-6, 5), Vector2(-11, 4), Vector2(-11, -4), Vector2(-6, -5), Vector2(-7, -11), Vector2(-2, -14), Vector2(5, -11), Vector2(3, -9), Vector2(5, -5), Vector2(10, -3)],
 	"miner": [Vector2(10, 5), Vector2(6, 5), Vector2(3, 7), Vector2(-5, 7), Vector2(-8, 4), Vector2(-8, -4), Vector2(-5, -7), Vector2(3, -7), Vector2(6, -5), Vector2(10, -5), Vector2(10, -2.5), Vector2(5, -2.5), Vector2(4, 0), Vector2(5, 2.5), Vector2(10, 2.5)],
 	"colony_ship": [Vector2(13, 0), Vector2(8, 3), Vector2(5, 3.5), Vector2(3, 6.5), Vector2(-5, 7), Vector2(-9, 4), Vector2(-11, 3), Vector2(-11, -3), Vector2(-9, -4), Vector2(-5, -7), Vector2(3, -6.5), Vector2(5, -3.5), Vector2(8, -3)]
 }
@@ -165,13 +196,15 @@ func portrait_scale(kind: String) -> float:
 	return float({"ship": 0.6, "cruiser": 0.52, "destroyer": 0.30, "railgun_ship": 0.42}.get(kind, 1.0))
 
 func texture_half_size(kind: String) -> float:
+	if kind == "fighter":
+		return 15.0
 	if kind == "science_ship":
 		return 18.0
 	return 50.0 if kind == "destroyer" else 40.0
 
 func production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
-	if kind == "science_ship":
-		return science_texture(tint)
+	if has_authored_sprite(kind):
+		return sprite_texture(kind, tint)
 	var key: String = "%s:%s:%d" % [kind, tint.to_html(false), pixels]
 	if not production_icons.has(key):
 		var portrait_factor: float = portrait_scale(kind)
@@ -191,9 +224,11 @@ func production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
 	return production_icons[key]
 
 func selection_portrait_icon(kind: String) -> Texture2D:
-	if kind == "science_ship" and not selection_portrait_icons.has(kind):
+	if has_authored_sprite(kind) and not selection_portrait_icons.has(kind):
 		# Preserve the existing health-tinted portrait contract using the new art.
-		var source: Image = SCIENCE_SPRITE.get_image()
+		var source: Image = sprite_image(kind)
+		if source.is_compressed():
+			source.decompress()
 		var image := Image.create(source.get_width(), source.get_height(), false, Image.FORMAT_RGBA8)
 		for y in range(source.get_height()):
 			for x in range(source.get_width()):
@@ -240,8 +275,8 @@ func selection_portrait_icon(kind: String) -> Texture2D:
 	return selection_portrait_icons[kind]
 
 func hull_texture(kind: String, empire: Color, detailed: bool) -> Texture2D:
-	if kind == "science_ship":
-		return science_texture(empire)
+	if has_authored_sprite(kind):
+		return sprite_texture(kind, empire)
 	var key: String = "%s:%s:%s" % [kind, empire.to_html(false), str(detailed)]
 	if not hull_textures.has(key):
 		var vertices: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE if kind == "ship" else [Vector2(9, 0), Vector2(-6, 5), Vector2(-3, 0), Vector2(-6, -5)])

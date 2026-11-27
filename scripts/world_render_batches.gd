@@ -32,20 +32,31 @@ var lamp_glow_entries: Array = []
 const HULL_LIGHTING = preload("res://assets/shaders/world_hull_lighting.gdshader")
 var vector_lighting: ShaderMaterial
 var science_lighting: ShaderMaterial
+var fighter_lighting: ShaderMaterial
 var world_lights: Array = []
 
-func _lighting_material(science: bool) -> ShaderMaterial:
+func _lighting_material(kind: String) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = HULL_LIGHTING
-	material.set_shader_parameter("science", science)
-	if science:
+	material.set_shader_parameter("authored_sprite", HULL_ART.has_authored_sprite(kind))
+	if kind == "science_ship":
 		material.set_shader_parameter("diffuse_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_d.png"))
 		material.set_shader_parameter("normal_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_n.png"))
 		material.set_shader_parameter("occlusion_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_o.png"))
 		material.set_shader_parameter("height_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_p.png"))
 		material.set_shader_parameter("specular_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_s.png"))
 		material.set_shader_parameter("detail_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_v.png"))
+	elif kind == "fighter":
+		material.set_shader_parameter("diffuse_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_d.png")))
+		material.set_shader_parameter("normal_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_n.png")))
+		material.set_shader_parameter("occlusion_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_o.png")))
+		material.set_shader_parameter("height_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_p.png")))
+		material.set_shader_parameter("specular_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_s.png")))
+		material.set_shader_parameter("detail_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_v.png")))
 	return material
+
+func _fighter_map(atlas: Texture2D) -> Texture2D:
+	return ImageTexture.create_from_image(HULL_ART.sprite_cell(atlas, HULL_ART.FIGHTER_GRID, HULL_ART.FIGHTER_GRID))
 
 func set_world_lights(lights: Array) -> void:
 	world_lights = lights
@@ -59,7 +70,7 @@ func set_world_lights(lights: Array) -> void:
 		var tint: Color = entry[2]
 		positions[i] = Vector4(pos.x, pos.y, float(entry[1]), float(entry[3]))
 		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0)
-	for material in [vector_lighting, science_lighting]:
+	for material in [vector_lighting, science_lighting, fighter_lighting]:
 		material.set_shader_parameter("light_points", positions)
 		material.set_shader_parameter("light_colors", colors)
 		material.set_shader_parameter("light_count", mini(16, lights.size()))
@@ -91,8 +102,9 @@ class HullInstanceStream:
 
 func build(canvas: Control) -> void:
 	map_canvas = canvas
-	vector_lighting = _lighting_material(false)
-	science_lighting = _lighting_material(true)
+	vector_lighting = _lighting_material("")
+	science_lighting = _lighting_material("science_ship")
+	fighter_lighting = _lighting_material("fighter")
 	_build_exhaust_batch()
 	lamp_glow_batch = _build_effect_batch(false)
 	lamp_glow_batch.texture = _resource_glow()
@@ -409,8 +421,8 @@ func _flush_hull_batches(hull_art: HULL_ART, instances: Dictionary, batches: Dic
 			instance.self_modulate = Color(1.0, 1.0, 1.0, opacity)
 			if hull_art.is_shield_texture(texture):
 				instance.z_index = 1
-			elif hull_art.is_science_texture(texture):
-				instance.material = science_lighting
+			elif not hull_art.sprite_kind(texture).is_empty():
+				instance.material = fighter_lighting if hull_art.sprite_kind(texture) == "fighter" else science_lighting
 				instance.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 			elif not overview_dot_textures.values().has(texture):
 				instance.material = vector_lighting
