@@ -17,9 +17,8 @@ var job_icon: Callable
 var draw_damage_bar: Callable
 var shield_fraction: Callable
 var ship_scale: Callable
-var overview_multiplier: Callable
 
-func configure(canvas: Control, batches: WORLD_RENDER_BATCHES, art: HULL_ART, cards: COMMAND_CARD_UI, projection: Callable, radius_query: Callable, icon_query: Callable, damage_draw: Callable, shield_query: Callable, scale_query: Callable, overview_query: Callable) -> void:
+func configure(canvas: Control, batches: WORLD_RENDER_BATCHES, art: HULL_ART, cards: COMMAND_CARD_UI, projection: Callable, radius_query: Callable, icon_query: Callable, damage_draw: Callable, shield_query: Callable, scale_query: Callable) -> void:
 	map_canvas = canvas
 	world_batches = batches
 	hull_art = art
@@ -30,7 +29,6 @@ func configure(canvas: Control, batches: WORLD_RENDER_BATCHES, art: HULL_ART, ca
 	draw_damage_bar = damage_draw
 	shield_fraction = shield_query
 	ship_scale = scale_query
-	overview_multiplier = overview_query
 
 static func bay_point(center: Vector2, radius: float, elapsed: float, resource: String, bay: int) -> Vector2:
 	var resources: Array = ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]
@@ -120,7 +118,7 @@ func draw_colony_transform(ship: Dictionary, point: Vector2, heading: Vector2, s
 				map_canvas.draw_colored_polygon(hull, Color("#607387"))
 				hull.append(hull[0])
 				map_canvas.draw_polyline(hull, tint, maxf(0.65, yard_scale), true)
-	var texture: Texture2D = hull_art.hull_texture("colony_ship", tint, scale >= 0.42)
+	var texture: Texture2D = hull_art.hull_texture("colony_ship", tint, true)
 	var half: float = hull_art.texture_half_size("colony_ship")
 	map_canvas.draw_set_transform(point, heading.angle(), Vector2.ONE * scale * lerpf(1.0, 0.35, u))
 	map_canvas.draw_texture_rect(texture, Rect2(-half, -half, half * 2.0, half * 2.0), false, Color(1.0, 1.0, 1.0, 1.0 - u))
@@ -145,29 +143,29 @@ func draw_station(state: Dictionary, index: int, tint: Color, elapsed: float, bu
 			var start: float = float(segment) * TAU / 16.0
 			var axis: Vector2 = Vector2.from_angle(start + PI / 16.0)
 			var lit: float = world_batches.light_level(center + axis * radius * 0.85, axis, center)
-			map_canvas.draw_arc(center, radius * 0.85, start, start + TAU / 16.0, 4, Color("#71869b").darkened(1.0 - lit), maxf(2.0, radius * 0.22), true)
-			map_canvas.draw_arc(center, radius, start, start + TAU / 16.0, 4, tint.darkened(1.0 - lit), maxf(1.0, radius * 0.055), true)
+			map_canvas.draw_arc(center, radius * 0.85, start, start + TAU / 16.0, 4, Color("#71869b").darkened(1.0 - lit), radius * 0.22, true)
+			map_canvas.draw_arc(center, radius, start, start + TAU / 16.0, 4, tint.darkened(1.0 - lit), radius * 0.055, true)
 	else:
-		map_canvas.draw_arc(center, radius * 0.85, 0.0, TAU, 48, frame, maxf(2.0, radius * 0.22), true)
-		map_canvas.draw_arc(center, radius, 0.0, TAU, 48, tint.darkened(1.0 - illumination), maxf(1.0, radius * 0.055), true)
+		map_canvas.draw_arc(center, radius * 0.85, 0.0, TAU, 48, frame, radius * 0.22, true)
+		map_canvas.draw_arc(center, radius, 0.0, TAU, 48, tint.darkened(1.0 - illumination), radius * 0.055, true)
 	map_canvas.draw_circle(center, radius * 0.32, Color("#293c51").darkened(1.0 - illumination), true, -1.0, true)
-	map_canvas.draw_arc(center, radius * 0.35, 0.0, TAU, 24, tint.darkened(1.0 - illumination), maxf(1.0, radius * 0.07), true)
+	map_canvas.draw_arc(center, radius * 0.35, 0.0, TAU, 24, tint.darkened(1.0 - illumination), radius * 0.07, true)
 	for slot in range(3):
 		var axis: Vector2 = Vector2.from_angle(float(slot) * TAU / 3.0 + elapsed * 0.008)
 		var side: Vector2 = axis.orthogonal()
-		map_canvas.draw_line(center + axis * radius * 0.35, center + axis * radius * 0.87, frame.darkened(0.3), maxf(1.0, radius * 0.13), true)
+		map_canvas.draw_line(center + axis * radius * 0.35, center + axis * radius * 0.87, frame.darkened(0.3), radius * 0.13, true)
 		var port: Vector2 = center + axis * radius
-		map_canvas.draw_line(port - side * radius * 0.18, port + side * radius * 0.18, tint.darkened(1.0 - world_batches.light_level(port, axis, center)), maxf(1.0, radius * 0.07), true)
+		map_canvas.draw_line(port - side * radius * 0.18, port + side * radius * 0.18, tint.darkened(1.0 - world_batches.light_level(port, axis, center)), radius * 0.07, true)
 		var yard_index: int = ECONOMY.shipyard_at_port(system, slot + 1)
 		if yard_index >= 0:
 			var dock: Vector2 = screen_point.call(ECONOMY.shipyard_position(state, index, yard_index, elapsed))
-			map_canvas.draw_line(port, dock, frame, maxf(1.0, radius * 0.12), true)
+			map_canvas.draw_line(port, dock, frame, radius * 0.12, true)
 	if radius >= 12.0:
 		for segment in range(12):
 			var a: float = float(segment) * TAU / 12.0 + elapsed * 0.008
 			var direction: Vector2 = Vector2.from_angle(a)
-			map_canvas.draw_line(center + direction * radius * 0.74, center + direction * radius * 0.95, Color("#1a293a").darkened(1.0 - illumination), maxf(1.0, radius * 0.05), true)
-			map_canvas.draw_circle(center + direction * radius * 0.88, maxf(0.8, radius * 0.035), tint.darkened(1.0 - world_batches.light_level(center + direction * radius * 0.88, direction, center)))
+			map_canvas.draw_line(center + direction * radius * 0.74, center + direction * radius * 0.95, Color("#1a293a").darkened(1.0 - illumination), radius * 0.05, true)
+			map_canvas.draw_circle(center + direction * radius * 0.88, radius * 0.035, tint.darkened(1.0 - world_batches.light_level(center + direction * radius * 0.88, direction, center)))
 	_draw_station_storage(system, center, radius, elapsed)
 	_draw_station_jobs(system, center, radius, tint)
 	if selected_station:
@@ -189,24 +187,21 @@ func _draw_shipyard_construction(state: Dictionary, index: int, job: Dictionary,
 	var angle: float = float(port - 1) * TAU / 3.0 + elapsed * 0.008
 	var lateral: Vector2 = Vector2.from_angle(angle) * scale
 	var forward: Vector2 = lateral.orthogonal()
-	if scale < 0.15 * overview_multiplier.call():
-		map_canvas.draw_rect(Rect2(point - Vector2.ONE, Vector2.ONE * 2.0), Color(tint, 0.25 + u * 0.75))
-		return
 	for sign in [-1.0, 1.0]:
 		var rail: Array = [Vector2(-17, sign * 8), Vector2(-15, sign * 13), Vector2(-10, sign * 14), Vector2(10, sign * 14), Vector2(15, sign * 13), Vector2(17, sign * 8), Vector2(12, sign * 7), Vector2(-12, sign * 7)]
 		var hull: PackedVector2Array = hull_art.polygon(point, forward, lateral, rail)
 		for k in range(hull.size()):
 			var a: Vector2 = hull[k]
 			var b: Vector2 = hull[(k + 1) % hull.size()]
-			map_canvas.draw_line(a, b, Color(tint, 0.18), maxf(0.65, scale), true)
+			map_canvas.draw_line(a, b, Color(tint, 0.18), scale, true)
 			var part: float = clampf(u * 2.0 * float(hull.size()) - float(k), 0.0, 1.0)
 			if part > 0.0:
-				map_canvas.draw_line(a, a.lerp(b, part), tint.lightened(0.4), maxf(0.65, scale), true)
-		if u > 0.5:
+				map_canvas.draw_line(a, a.lerp(b, part), tint.lightened(0.4), scale, true)
+		if u > 0.5 and not Geometry2D.triangulate_polygon(hull).is_empty():
 			map_canvas.draw_colored_polygon(hull, Color(Color("#607387"), (u - 0.5) * 2.0))
 	for end in [-1.0, 1.0]:
 		var bridge: Vector2 = point + forward * end * 16.0
-		map_canvas.draw_line(bridge - lateral * 8.5, bridge + lateral * 8.5, Color(tint, clampf(u * 2.0, 0.18, 1.0)), maxf(0.65, scale), true)
+		map_canvas.draw_line(bridge - lateral * 8.5, bridge + lateral * 8.5, Color(tint, clampf(u * 2.0, 0.18, 1.0)), scale, true)
 
 func draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float, selected: int, selected_yard: int, building_selection_kind: String, selected_buildings: Dictionary) -> void:
 	var planet: Dictionary = state["planets"][index]
@@ -222,12 +217,6 @@ func draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float, 
 		var point: Vector2 = screen_point.call(ECONOMY.shipyard_position(state, index, slot, elapsed))
 		if not Rect2(Vector2.ZERO, map_canvas.size).grow(maxf(16.0, 32.0 * scale)).has_point(point):
 			continue
-		if scale < 0.15 * overview_multiplier.call():
-			var half_size: float = overview_multiplier.call()
-			map_canvas.draw_rect(Rect2(point - Vector2.ONE * half_size, Vector2.ONE * half_size * 2.0), tint.lightened(0.25))
-			if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
-				world_batches.draw_selection_ring(point, 9.0)
-			continue
 		var illumination: float = world_batches.light_level(point)
 		var conversion: float = clampf((elapsed - float(yard.get("converted_at", -100.0))) / 3.0, 0.0, 1.0)
 		var frame: PackedVector2Array = PackedVector2Array([point - axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale - side * 17.0 * scale, point + axis * 11.0 * scale + side * 17.0 * scale, point - axis * 11.0 * scale + side * 17.0 * scale])
@@ -241,7 +230,7 @@ func draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float, 
 				map_canvas.draw_colored_polygon(frame, Color(tint.lightened(0.35), 1.0 - conversion))
 		if conversion < 1.0:
 			for k in range(4):
-				map_canvas.draw_line(frame[k], frame[(k + 1) % 4], tint, maxf(0.8, 2.0 * scale), true)
+				map_canvas.draw_line(frame[k], frame[(k + 1) % 4], tint, 2.0 * scale, true)
 		else:
 			# Industrial drydock: open central berth, two reinforced gantries,
 			# habitat pods, end clamps and work lights. Draw the large
@@ -252,26 +241,27 @@ func draw_shipyards(state: Dictionary, index: int, tint: Color, elapsed: float, 
 				var rail: Array = [Vector2(-17, sign * 8), Vector2(-15, sign * 13), Vector2(-10, sign * 14), Vector2(10, sign * 14), Vector2(15, sign * 13), Vector2(17, sign * 8), Vector2(12, sign * 7), Vector2(-12, sign * 7)]
 				var hull: PackedVector2Array = hull_art.polygon(point, forward, lateral, rail)
 				var rail_light: float = world_batches.light_level(point + lateral * sign * 10.5, axis * sign, point)
-				map_canvas.draw_colored_polygon(hull, Color("#607387").darkened(1.0 - rail_light))
+				if not Geometry2D.triangulate_polygon(hull).is_empty():
+					map_canvas.draw_colored_polygon(hull, Color("#607387").darkened(1.0 - rail_light))
 				hull.append(hull[0])
-				map_canvas.draw_polyline(hull, tint.darkened(1.0 - rail_light), maxf(0.65, scale), true)
+				map_canvas.draw_polyline(hull, tint.darkened(1.0 - rail_light), scale, true)
 				if scale >= 0.42:
 					for longitudinal in [-8.0, 1.0, 9.0]:
 						var module: Vector2 = point + forward * longitudinal + lateral * sign * 10.5
 						var panel: PackedVector2Array = hull_art.polygon(module, forward, lateral, [Vector2(-3.5, -2), Vector2(3.5, -2), Vector2(3.5, 2), Vector2(-3.5, 2)])
 						map_canvas.draw_colored_polygon(panel, Color("#23384b").darkened(1.0 - rail_light))
-						map_canvas.draw_line(module - forward * 2.4, module + forward * 2.4, Color("#b0d5e6").darkened(1.0 - rail_light), maxf(0.65, scale), true)
+						map_canvas.draw_line(module - forward * 2.4, module + forward * 2.4, Color("#b0d5e6").darkened(1.0 - rail_light), scale, true)
 					for end in [-1.0, 1.0]:
 						var clamp_origin: Vector2 = point + forward * end * 14.0 + lateral * sign * 8.0
-						map_canvas.draw_line(clamp_origin, clamp_origin - lateral * sign * 3.0, Color("#d6a965").darkened(1.0 - illumination), maxf(1.0, 2.0 * scale), true)
-						map_canvas.draw_circle(clamp_origin, maxf(0.75, scale), tint)
+						map_canvas.draw_line(clamp_origin, clamp_origin - lateral * sign * 3.0, Color("#d6a965").darkened(1.0 - illumination), 2.0 * scale, true)
+						map_canvas.draw_circle(clamp_origin, scale, tint)
 			for end in [-1.0, 1.0]:
 				var bridge: Vector2 = point + forward * end * 16.0
-				map_canvas.draw_line(bridge - lateral * 8.5, bridge + lateral * 8.5, Color("#829aad").darkened(1.0 - illumination), maxf(0.8, 2.0 * scale), true)
+				map_canvas.draw_line(bridge - lateral * 8.5, bridge + lateral * 8.5, Color("#829aad").darkened(1.0 - illumination), 2.0 * scale, true)
 			if scale >= 0.42:
 				for end in [-1.0, 1.0]:
 					var light: Vector2 = point + forward * end * 16.0
-					map_canvas.draw_line(light - lateral * 3.0, light + lateral * 3.0, tint, maxf(0.7, scale), true)
+					map_canvas.draw_line(light - lateral * 3.0, light + lateral * 3.0, tint, scale, true)
 		if (selected == index and selected_yard == slot) or (building_selection_kind == "shipyard" and selected_buildings.has(Vector2i(index, slot))):
 			world_batches.draw_selection_ring(point, maxf(9.0, 23.0 * scale))
 		var health: float = float(yard.get("hp", ECONOMY.YARD_HP * int(yard["level"]))) / (ECONOMY.YARD_HP * int(yard["level"]))

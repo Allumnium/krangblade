@@ -4,7 +4,6 @@ extends RefCounted
 const KEYBOARD_PAN_SPEED: float = 420.0
 const MIN_ZOOM: float = 1.0 / 1.10
 const MAP_EDGE_MARGIN: float = 0.05
-const OVERVIEW_MAX_ZOOM: float = 64.0
 const FIGHTER_HULL_LENGTH: float = 22.0
 const CLOSEUP_SCREEN_FRACTION: float = 0.6
 const SHIP_WORLD_SCALE: float = 1.5
@@ -50,11 +49,13 @@ func screen_point(point: Vector2, projection_size: Vector2, map_size: Vector2) -
 func world_point(point: Vector2, projection_size: Vector2, map_size: Vector2) -> Vector2:
 	return world_center(map_size) + (point - projection_size * 0.5) / (fit(projection_size, map_size) * zoom)
 
+static func ship_art_scale(projection_fit: float, camera_zoom: float) -> float:
+	return SHIP_WORLD_SCALE * projection_fit * camera_zoom
+
 func max_zoom(viewport_width: float, projection_size: Vector2, map_size: Vector2) -> float:
-	# Preserve the existing fighter close-up scale.
-	var base_scale: float = maxf(0.0001, minf(SHIP_WORLD_SCALE * fit(projection_size, map_size) * OVERVIEW_MAX_ZOOM, 1.25))
+	# Keep the fighter close-up framing with the same linear art projection.
 	var target_scale: float = viewport_width * CLOSEUP_SCREEN_FRACTION / FIGHTER_HULL_LENGTH
-	return OVERVIEW_MAX_ZOOM * maxf(1.0, target_scale / base_scale)
+	return maxf(MIN_ZOOM * 1.01, target_scale / ship_art_scale(fit(projection_size, map_size), 1.0))
 
 func zoom_at(point: Vector2, direction: float, viewport_width: float, projection_size: Vector2, map_size: Vector2) -> void:
 	var anchor: Vector2 = projection_size * 0.5 if following else point

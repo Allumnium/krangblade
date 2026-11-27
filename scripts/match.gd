@@ -66,9 +66,6 @@ const YARD_WIDTH: float = 252.0
 const HEADER_HEIGHT: float = 54.0
 const LENS_STRIP_WIDTH: float = 32.0
 const AUTOCAST_SLOTS = {"auto_explore": "explore", "auto_wander": "wander", "auto_mine": "mine", "auto_salvage": "salvage", "auto_repair": "repair", "auto_trade": "trade", "auto_farm": "farm", "collect": "collect", "auto_retreat": "retreat"}
-const OVERVIEW_ART_MAX_MULTIPLIER: float = 4.0
-const OVERVIEW_SHIP_MAX_MULTIPLIER: float = 12.0
-const OVERVIEW_ART_NORMAL_ZOOM: float = 16.0
 const TRADE_MAX_EXTRA_HEIGHT: float = 48.0
 # Projected system radius in logical screen pixels, independent of selection.
 
@@ -390,7 +387,7 @@ func _build_map_layers() -> void:
 
 func _build_world_effect_batches() -> void:
 	world_batches.build(map_canvas)
-	structure_view.configure(map_canvas, world_batches, hull_art, command_card_ui, _screen_point, _station_radius, _job_icon, _draw_damage_bar, _shield_fraction, _ship_scale, _overview_art_multiplier)
+	structure_view.configure(map_canvas, world_batches, hull_art, command_card_ui, _screen_point, _station_radius, _job_icon, _draw_damage_bar, _shield_fraction, _ship_scale)
 	planet_traffic.configure(map_canvas, celestial_view, hull_art, _screen_point, _station_radius, _job_icon)
 	order_view.configure(queued_order_overlay, hull_art, celestial_view, camera, _ship_scale, _screen_point, _station_radius, _planet_radius, _salvage_radius, _fit, _me, _fog_visible)
 	map_canvas.resized.connect(_map_resized)
@@ -3158,17 +3155,14 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 	var star_radius: float = celestial_view.star_draw_radius(radius)
 	var star_color: Color = Color("#fff0c4").lerp(color.lightened(0.25), 0.30) if ECONOMY.has_planets(system) else Color("#8ea2bc")
 	var detail: float = celestial_view.planet_detail_opacity(index, radius)
-	if detail > 0.001:
-		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
-		for slot in range(bodies.size()):
-			var body: Dictionary = bodies[slot]
-			var point: Vector2 = pos + celestial_view.body_position(body, radius, orbit_elapsed)
-			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
-			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
-				if body_radius >= 5.0:
-					celestial_view.draw_lit_body(map_canvas, Vector2i(index, slot), body, point, body_radius, detail, world_batches.planet_material(body))
-				else:
-					map_canvas.draw_circle(point, body_radius, Color(celestial_view.body_base_color(body).darkened(0.18), detail), true)
+	var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
+	for slot in range(bodies.size()):
+		var body: Dictionary = bodies[slot]
+		var point: Vector2 = pos + celestial_view.body_position(body, radius, orbit_elapsed)
+		var body_radius: float = radius * float(body["size"]) * 0.55
+		if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
+			celestial_view.draw_lit_body(map_canvas, Vector2i(index, slot), body, point, body_radius, 1.0, world_batches.planet_material(body))
+			if detail > 0.001:
 				if system.get("pds", {}).has(slot):
 					celestial_view.draw_pds_frame(point, body_radius, detail, map_canvas)
 					if detail >= 0.5:
@@ -3192,15 +3186,13 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		map_canvas.draw_arc(pos, star_radius + 3.0, -PI * 0.8, PI * 0.8, 18, Color(Color("#bdcbd6"), 1.0 - detail), 1.5, true)
 	if detail < 0.999:
 		# A small battery marker stays on its actual planet even at overview zoom.
-		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
 		for slot in system.get("pds", {}):
 			if int(slot) >= 0 and int(slot) < bodies.size():
 				var point: Vector2 = pos + celestial_view.body_position(bodies[int(slot)], radius, orbit_elapsed)
 				map_canvas.draw_circle(point, 2.0, Color(Color("#bdcbd6"), 1.0 - detail), true)
 	if detail < 0.3 and building_selection_kind == "pds":
 		# Retain a selection marker when F frames a distant battery group and
-		# the individual planet surfaces fade out at overview zoom.
-		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
+		# the individual planet surfaces are subpixel at overview zoom.
 		for slot in system.get("pds", {}):
 			if selected_buildings.has(Vector2i(index, int(slot))) and int(slot) < bodies.size():
 				var point: Vector2 = pos + celestial_view.body_position(bodies[int(slot)], radius, orbit_elapsed)
@@ -3237,7 +3229,7 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 		for slot in range(bodies.size()):
 			var body: Dictionary = bodies[slot]
 			var position: Vector2 = center + celestial_view.body_position(body, radius, celestial_view.orbit_time(state))
-			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
+			var body_radius: float = radius * float(body["size"]) * 0.55
 			var distance: float = point.distance_to(position)
 			if distance <= body_radius + 3.0 and distance < nearest:
 				hit = Vector2i(index, slot)
@@ -3247,8 +3239,6 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 	var hit := Vector2i(-1, -1)
 	var nearest: float = INF
-	if _ship_scale(true) < 0.14:
-		return hit
 	var elapsed: float = float(state["elapsed"])
 	for index in range(state["planets"].size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):
@@ -3268,7 +3258,7 @@ func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 
 func _station_radius() -> float:
 	# Scale the projected art, not its orbital position or simulation radius.
-	return maxf(5.0, 58.0 * _fit() * camera.zoom * _overview_art_multiplier())
+	return 58.0 * _fit() * camera.zoom
 
 func _station_hit(point: Vector2, state: Dictionary) -> int:
 	var hit: int = -1
@@ -4723,16 +4713,8 @@ func _draw_ship_laser(ship: Dictionary, pose: Dictionary, endpoint: Vector2, wid
 	world_effects.draw_ship_laser(ship, draw_pose, endpoint, width, _ship_scale, _empire_color, world_batches)
 	return draw_pose
 
-func _overview_art_multiplier(maximum: float = OVERVIEW_ART_MAX_MULTIPLIER) -> float:
-	# Wheel zoom is logarithmic; blend in the same space for a smooth
-	# overview-to-tactical transition, with exact maximum/1x endpoints.
-	var progress: float = clampf(log(maxf(camera.zoom, CAMERA_VIEW.MIN_ZOOM) / CAMERA_VIEW.MIN_ZOOM) / log(OVERVIEW_ART_NORMAL_ZOOM / CAMERA_VIEW.MIN_ZOOM), 0.0, 1.0)
-	return lerpf(maximum, 1.0, smoothstep(0.0, 1.0, progress))
-
-func _ship_scale(structure: bool = false) -> float:
-	# Preserve the authored close-up ceiling and camera framing.
-	var base: float = minf(CAMERA_VIEW.SHIP_WORLD_SCALE * _fit() * minf(camera.zoom, CAMERA_VIEW.OVERVIEW_MAX_ZOOM), 1.25) * maxf(1.0, camera.zoom / CAMERA_VIEW.OVERVIEW_MAX_ZOOM)
-	return base * _overview_art_multiplier(OVERVIEW_ART_MAX_MULTIPLIER if structure else OVERVIEW_SHIP_MAX_MULTIPLIER)
+func _ship_scale(_structure: bool = false) -> float:
+	return CAMERA_VIEW.ship_art_scale(_fit(), camera.zoom)
 
 func _focus_selection() -> void:
 	var state: Dictionary = _state()
@@ -5085,7 +5067,7 @@ func _draw_map_content() -> void:
 				map_canvas.draw_string(font, center + Vector2(-60, float(field["radius"]) * render_scale + 14.0), "Pulsar", HORIZONTAL_ALIGNMENT_CENTER, 120, 12, edge_tint)
 		if bool(field.get("antimatter", false)):
 			var pulse: float = 0.5 + 0.5 * sin(visual_clock * 3.0) if field_live else 0.5
-			var star_radius: float = maxf(4.0, float(field["radius"]) * render_scale * 0.16)
+			var star_radius: float = float(field["radius"]) * render_scale * 0.16
 			var glow: Color = HUD.COLORS[ECONOMY.ANTIMATTER]
 			world_batches.draw_resource_glow(center, star_radius * 2.0, glow, 0.6 + pulse * 0.4)
 			map_canvas.draw_circle(center, star_radius, glow.lightened(0.7), true, -1.0, true)
@@ -5245,12 +5227,9 @@ func _draw_map_content() -> void:
 					var muzzle: Vector2 = origin + (axis * WORLD_EFFECTS.MINER_MUZZLE.x + axis.orthogonal() * side * WORLD_EFFECTS.MINER_MUZZLE.y) * _ship_scale()
 					world_batches.queue_beam(muzzle, endpoint, Color("#59e8a4"), 1.4)
 	var ship_scale: float = _ship_scale()
-	var ship_overview: float = _overview_art_multiplier(OVERVIEW_SHIP_MAX_MULTIPLIER)
 	var ship_metrics_cache: Dictionary = {}
 	var owner_color_cache: Dictionary = {}
-	var hull_color_cache: Dictionary = {}
 	var hull_texture_cache: Dictionary = {}
-	var detailed_hulls: bool = ship_scale >= 0.42
 	var simulation_running: bool = int(state.get("time_speed", 1)) > 0
 	var selected_lookup: Dictionary = {}
 	for id in selected_units:
@@ -5277,12 +5256,6 @@ func _draw_map_content() -> void:
 		else:
 			empire = _empire_color(owner)
 			owner_color_cache[owner] = empire
-		var hull: Color
-		if hull_color_cache.has(owner):
-			hull = hull_color_cache[owner]
-		else:
-			hull = empire.lightened(0.35)
-			hull_color_cache[owner] = hull
 		var side: Vector2 = direction.orthogonal() * scale
 		direction *= scale
 		var cloaked: bool = bool(ship.get("cloaked", false))
@@ -5310,9 +5283,7 @@ func _draw_map_content() -> void:
 		if ship_id == selected_ship_id or selected_lookup.has(ship_id):
 			var radius: float = maxf(5.0, hull_art.ui_radius(kind) * scale)
 			world_batches.draw_selection_ring(point, radius)
-		# At a distant galaxy overview, the smallest authored edges can
-		# collapse into an invalid polygon after projection. Keep the hull
-		# visible and owner-colored rather than drawing degenerate geometry.
+		# All zoom levels use the same world-space hull and rear flag anchor.
 		var metrics: Dictionary = ship_metrics_cache.get(kind, {})
 		if metrics.is_empty():
 			metrics = {"radius": hull_art.ui_radius(kind), "max_hp": ECONOMY.ship_max_hp(kind), "half_size": hull_art.texture_half_size(kind), "flag_offset": hull_art.ship_flag_offset(kind)}
@@ -5327,17 +5298,14 @@ func _draw_map_content() -> void:
 			continue
 		if kind == "wall_segment":
 			var wall_color: Color = empire if ECONOMY.static_complete(ship) else Color(empire, 0.35)
-			map_canvas.draw_line(_screen_point(ship["wall_a"]), _screen_point(ship["wall_b"]), wall_color, maxf(2.0, scale * 5.0), true)
+			map_canvas.draw_line(_screen_point(ship["wall_a"]), _screen_point(ship["wall_b"]), wall_color, scale * 5.0, true)
 			continue
 		if kind == "warp_gate":
-			var gate_radius: float = maxf(5.0, 44.0 * scale)
+			var gate_radius: float = 44.0 * scale
 			map_canvas.draw_circle(point, gate_radius, Color("#382b58"), true, -1.0, true)
-			map_canvas.draw_arc(point, gate_radius, 0.0, TAU, 32, empire, maxf(1.0, scale * 2.0), true)
-			map_canvas.draw_arc(point, gate_radius * 0.72, 0.0, TAU, 32, Color("#b998ff"), maxf(1.0, scale * 2.0), true)
+			map_canvas.draw_arc(point, gate_radius, 0.0, TAU, 32, empire, scale * 2.0, true)
+			map_canvas.draw_arc(point, gate_radius * 0.72, 0.0, TAU, 32, Color("#b998ff"), scale * 2.0, true)
 			map_canvas.draw_circle(point, gate_radius * 0.48, Color("#151225"), true, -1.0, true)
-			continue
-		if scale < 0.15 * ship_overview:
-			world_batches.queue_overview_hull(world_batches.overview_dot_texture(hull), point, 0.0, maxf(0.8, 6.0 * scale / ship_overview) * ship_overview, cloaked)
 			continue
 		# hull_texture formats a string key; resolve it once per kind/owner.
 		var owner_textures: Dictionary = hull_texture_cache.get(kind, {})
@@ -5345,7 +5313,7 @@ func _draw_map_content() -> void:
 			hull_texture_cache[kind] = owner_textures
 		var texture: Texture2D = owner_textures.get(owner)
 		if texture == null:
-			texture = hull_art.hull_texture(kind, empire, detailed_hulls)
+			texture = hull_art.hull_texture(kind, empire, true)
 			owner_textures[owner] = texture
 		if shield > 0.0:
 			world_batches.queue_overview_hull(hull_art.shield_texture(kind), point, direction.angle(), (half_size + 8.0) * scale, cloaked)
@@ -5353,7 +5321,7 @@ func _draw_map_content() -> void:
 		world_batches.queue_overview_hull(texture, point, art_angle, half_size * scale, cloaked)
 		if logistics_view.ship_flags_enabled and owner > 0 and not bool(ship.get("rogue", false)) and not ECONOMY.is_static_structure(ship) and kind != "probe":
 			var flag_at: Vector2 = point + direction * float(metrics["flag_offset"])
-			world_batches.queue_ship_flag(flag_at, clampf(1.6 * scale, 1.1, 4.0), Color(empire.lightened(0.18), 0.45 if cloaked else 1.0))
+			world_batches.queue_ship_flag(flag_at, WORLD_RENDER_BATCHES.SHIP_FLAG_RADIUS, Color(empire.lightened(0.18), 0.45 if cloaked else 1.0))
 		if kind == "ship" and scale >= 0.42:
 			# Foreground bay fills on the authored hull. Preserve fractional cargo
 			# and ten independent display bays in the existing cargo batch.

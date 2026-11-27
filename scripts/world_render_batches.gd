@@ -7,6 +7,7 @@ const CELESTIAL_VIEW = preload("res://scripts/celestial_view.gd")
 const CLOAK_OPACITY: float = 0.30
 
 var map_canvas: Control
+const SHIP_FLAG_RADIUS: float = 2.0
 var ship_flag_batch: MultiMeshInstance2D
 var ship_flag_entries: Array = []
 var health_batch: MultiMeshInstance2D
@@ -28,7 +29,6 @@ var overview_batches: Dictionary = {}
 var overview_instances: Dictionary = {}
 var cloaked_overview_batches: Dictionary = {}
 var cloaked_overview_instances: Dictionary = {}
-var overview_dot_textures: Dictionary = {}
 var resource_glow_texture: Texture2D
 var lamp_glow_batch: MultiMeshInstance2D
 var lamp_glow_entries: Array = []
@@ -472,14 +472,6 @@ func _flush_exhaust(visual_clock: float) -> void:
 	(exhaust_batch.material as ShaderMaterial).set_shader_parameter("visual_time", visual_clock)
 	exhaust_batch.show()
 
-func overview_dot_texture(tint: Color) -> Texture2D:
-	var key: String = tint.to_html(false)
-	if not overview_dot_textures.has(key):
-		var image := Image.new()
-		image.load_svg_from_string('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="31" fill="#%s"/></svg>' % key)
-		overview_dot_textures[key] = ImageTexture.create_from_image(image)
-	return overview_dot_textures[key]
-
 func queue_overview_hull(texture: Texture2D, point: Vector2, angle: float, extent: float, cloaked: bool = false) -> void:
 	var instances: Dictionary = cloaked_overview_instances if cloaked else overview_instances
 	if not instances.has(texture):
@@ -512,7 +504,7 @@ func _flush_hull_batches(hull_art: HULL_ART, instances: Dictionary, batches: Dic
 				var kind: String = hull_art.sprite_kind(texture)
 				instance.material = authored_lighting.get(kind, vector_lighting)
 				instance.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-			elif not overview_dot_textures.values().has(texture):
+			else:
 				instance.material = vector_lighting
 			map_canvas.add_child(instance)
 			batches[texture] = instance

@@ -20,7 +20,6 @@ const METAL_PLANET_VARIANTS: int = 9
 const METAL_PLANET_CELL: int = 64
 const METAL_PLANET_DIFFUSE = preload("res://assets/sprites/metal_planet/pixellab-top-down-lustrous-grey-rocky-p-1795763765639_d.png")
 const ROCK_GRID: int = 8
-const ROCK_SPRITE_MIN_RADIUS: float = 2.5
 var asteroid_sprite_nodes: Dictionary = {}
 var planet_sprite_nodes: Dictionary = {}
 var metal_planet_textures: Dictionary = {}
@@ -91,7 +90,6 @@ static func _rock_mesh(vertices: PackedVector3Array, colors: PackedColorArray, u
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	return mesh
 
-var asteroid_frame_meshes: Array[ArrayMesh] = []
 var asteroid_cache_seed: int = -1
 var orbit_visual_time: float = -1.0
 var orbit_sample_time: float = -1.0
@@ -111,7 +109,6 @@ func reset_clocks() -> void:
 	planet_detail_seed = -1
 
 func begin_frame() -> void:
-	asteroid_frame_meshes.clear()
 	for instance in asteroid_sprite_nodes.values():
 		if is_instance_valid(instance):
 			instance.hide()
@@ -152,10 +149,8 @@ static func terrain_footprint(chunks: Array, offset: Vector2, scale: float, tint
 		colors.append(Color("#b879a0") if rock["resource"] == "Crystals" else tint)
 	return {"segments": segments, "colors": colors}
 
-func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, shading: float = 1.0, rotation_time: float = 0.0, field_index: int = -1, orbit_transforms: Array[Transform2D] = []) -> void:
+func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, _shading: float = 1.0, rotation_time: float = 0.0, field_index: int = -1, orbit_transforms: Array[Transform2D] = []) -> void:
 	var chunks: Array = field["chunks"]
-	var rock_vertices := PackedVector3Array()
-	var rock_colors := PackedColorArray()
 	var sprite_vertices := PackedVector3Array()
 	var sprite_colors := PackedColorArray()
 	var sprite_uvs := PackedVector2Array()
@@ -166,16 +161,10 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 		if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
 			continue
 		var fraction: float = clampf(float(chunk["remaining"]) / maxf(ECONOMY.EPS, float(chunk["initial"])), 0.0, 1.0)
-		var rock_radius: float = maxf(0.65, float(chunk["radius"]) * render_scale * sqrt(fraction))
-		var crystal: bool = chunk["resource"] == "Crystals"
-		if rock_radius < ROCK_SPRITE_MIN_RADIUS:
-			# Keep distant terrain cheap and legible, with the same resource cue.
-			var variation: float = 0.5 + 0.5 * sin(float(chunk["rotation"]) * 3.0)
-			var tint: Color = (Color("#b879a0") if crystal else Color("#50545a").lerp(Color("#6b5e51"), variation)).darkened(1.0 - shading)
-			for point in [rock_pos + Vector2(-rock_radius, rock_radius * 0.65), rock_pos + Vector2(rock_radius, rock_radius * 0.45), rock_pos + Vector2(0.20, -rock_radius)]:
-				rock_vertices.append(Vector3(point.x, point.y, 0.0))
-				rock_colors.append(tint)
+		var rock_radius: float = float(chunk["radius"]) * render_scale * sqrt(fraction)
+		if rock_radius <= 0.0:
 			continue
+		var crystal: bool = chunk["resource"] == "Crystals"
 		if not asteroid_shape_cache.has(shape_key):
 			var spin_signature: float = sin(float(chunk["rotation"]) * 5.0)
 			var variety: float = fposmod(sin(Vector2(shape_key).dot(Vector2(0.013, 0.021))) * 43758.5453, 1.0)
@@ -202,10 +191,6 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 			sprite_vertices.append(Vector3(point.x, point.y, 0.0))
 			sprite_colors.append(meta)
 			sprite_uvs.append(uvs[vertex])
-	var mesh: ArrayMesh = _rock_mesh(rock_vertices, rock_colors)
-	if mesh != null:
-		asteroid_frame_meshes.append(mesh)
-		map_canvas.draw_mesh(mesh, null)
 	var sprites: ArrayMesh = _rock_mesh(sprite_vertices, sprite_colors, sprite_uvs)
 	_show_asteroid_mesh(map_canvas, field_index, sprites)
 
@@ -410,10 +395,6 @@ func draw_star(index: int, pos: Vector2, radius: float, tint: Color, cool: bool,
 	var viewport := Rect2(Vector2.ZERO, map_canvas.size)
 	var extent: float = radius * float(STAR_TEXTURE_SIZE) / (2.0 * STAR_TEXTURE_CORE)
 	if not viewport.grow(extent + 3.0).has_point(pos):
-		return
-	if radius < 2.0:
-		# Keep the smallest overview stars clean and cheap.
-		map_canvas.draw_circle(pos, maxf(0.75, radius), Color(tint.lightened(0.22), opacity), true, -1.0, true)
 		return
 	var texture: Texture2D = _star_texture(cool)
 	var rotation: float = float(index) * 2.399963 + visual_clock * (0.012 + 0.003 * float(index % 5))
