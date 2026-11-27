@@ -1836,6 +1836,8 @@ func _draw_rock_selection(canvas: Control, rock: Dictionary, scale: float) -> vo
 
 # Names are static generated map geography, not live tactical information.
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
+	if state.get("eliminated", []).has(_me()):
+		return true
 	var team: int = ECONOMY.combat_group(state, _me())
 	if ECONOMY.shares_group_vision(state, team, ECONOMY.combat_group(state, int(ship["owner"]))):
 		return true
@@ -2999,7 +3001,7 @@ func _refresh_match_result(state: Dictionary) -> void:
 		if is_instance_valid(codex):
 			codex.hide()
 		match_result_dialog.title = "Empire defeated"
-		match_result_dialog.dialog_text = "Empire defeated\nYour empire has no remaining station or ship."
+		match_result_dialog.dialog_text = "Empire defeated\nYour remaining ships will continue autonomously."
 		match_result_dialog.ok_button_text = "Observe match"
 		match_result_dialog.popup_centered.call_deferred(Vector2i(320, 140))
 
@@ -4778,6 +4780,8 @@ func _frame_service_refs(state: Dictionary) -> Dictionary:
 
 # _ship_visible with the owner's shared-vision result memoized per pose pass.
 func _pose_ship_visible(state: Dictionary, ship: Dictionary) -> bool:
+	if fog_state.observing:
+		return true
 	var owner: int = int(ship["owner"])
 	var shared: Variant = _pose_vision_memo.get(owner)
 	if shared == null:

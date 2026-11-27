@@ -1,5 +1,9 @@
 # Warbound — development TODO
 
+## Approved command and observation changes (2026-11-27)
+
+- [ ] v0.119.0 prioritizes direct Move over autonomous pursuit and makes defeat preserve surviving autonomous fleets and enable spectator vision. Verify move/attack-move, withdrawal, queued commands, colony recovery, wage/pirate conversion and multiplayer spectators.
+
 ## Approved art and audio overhaul (2026-11-27)
 
 - [ ] v0.118.5 corrects material suffix contract and team decals, reduces ambient, adds weapon-impact lights. Validate all sprite imports, palette masks, impact timing/visibility, actual shader compile and GPU cost; no runtime checks yet.
