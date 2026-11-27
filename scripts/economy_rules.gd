@@ -5210,6 +5210,7 @@ static func initialize_diplomacy(state: Dictionary) -> bool:
 	# Legacy team exploration cannot be attributed to individual empires.
 	# Rebuild from their own stations rather than leaking former team data.
 	state["explored"] = {}
+	state.erase("_scout_coverage")
 	_seed_starting_exploration(state)
 	update_exploration(state)
 	return true
@@ -5761,11 +5762,14 @@ static func set_autocast(state: Dictionary, player: int, ids: Array, mode: Strin
 		if ship.get("kind", "") == "scout" and enabled:
 			if mode == "explore":
 				ship["wander_auto"] = false
+				ship.erase("explore_retry_at")
+				ship.erase("explore_blocked")
 				ship.erase("wander_cooldown_override")
 			elif mode == "wander":
 				ship["explore_auto"] = false
 		if ((mode == "explore" and not enabled) or (mode == "wander" and enabled)) and bool(ship.get("unit_order", {}).get("exploration", false)):
 			ship.erase("unit_order")
+			_clear_local_move(ship)
 			_finish_manual(ship)
 			ship["navigation_target"] = ship["position"]
 		if mode == "retreat" and not enabled and bool(ship.get("retreating", false)):
@@ -11516,61 +11520,271 @@ static func ship_activity(ship: Dictionary) -> ShipActivity:
 static func _is_idle_ship(ship: Dictionary) -> bool:
 	return ship_activity(ship) == ShipActivity.IDLE
 
-# Select adjacent connected sectors by low allied occupancy and oldest visit.
+# Private authority history: bounded coarse area samples, not POI visits.
+# A byte per cell/group; independent of fine client fog texture updates.
+const EXPLORE_SAMPLE_MIN: float = VISION_CELL * 4.0
+const EXPLORE_MAX_AXIS: int = 96
+const EXPLORE_SAMPLE_YEARS: float = 2.0
+const EXPLORE_RETRY_YEARS: float = 4.0
+const EXPLORE_BLOCK_YEARS: float = 60.0
+const EXPLORE_ROUTE_CHECKS: int = 12
+
+static func _explore_geometry(state: Dictionary) -> Dictionary:
+	var size: Vector2 = state["map"].get("size", Vector2.ZERO)
+	if size.x <= 0.0 or size.y <= 0.0:
+		for point in state["map"]["points"]:
+			size = size.max(point)
+		size += Vector2.ONE * sight_radius("scout")
+	var dim := Vector2i(clampi(ceili(size.x / EXPLORE_SAMPLE_MIN), 1, EXPLORE_MAX_AXIS), clampi(ceili(size.y / EXPLORE_SAMPLE_MIN), 1, EXPLORE_MAX_AXIS))
+	return {"dim": dim, "spacing": size / Vector2(dim), "size": size}
+
+static func _explore_point(cell: Vector2i, spacing: Vector2) -> Vector2:
+	return (Vector2(cell) + Vector2.ONE * 0.5) * spacing
+
+static func _explore_mask(dim: Vector2i) -> PackedByteArray:
+	var mask := PackedByteArray()
+	mask.resize(dim.x * dim.y)
+	return mask
+
+static func _explore_stamp(mask: PackedByteArray, dim: Vector2i, spacing: Vector2, point: Vector2, radius: float) -> PackedByteArray:
+	var low := Vector2i(maxi(0, floori((point.x - radius) / spacing.x)), maxi(0, floori((point.y - radius) / spacing.y)))
+	var high := Vector2i(mini(dim.x - 1, floori((point.x + radius) / spacing.x)), mini(dim.y - 1, floori((point.y + radius) / spacing.y)))
+	var squared: float = radius * radius
+	for y in range(low.y, high.y + 1):
+		var dy: float = (float(y) + 0.5) * spacing.y - point.y
+		var remaining: float = squared - dy * dy
+		if remaining < 0.0:
+			continue
+		var half: float = sqrt(remaining)
+		var left: int = maxi(low.x, ceili((point.x - half) / spacing.x - 0.5))
+		var right: int = mini(high.x, floori((point.x + half) / spacing.x - 0.5))
+		for x in range(left, right + 1):
+			mask[y * dim.x + x] = 1
+	return mask
+
+static func _explore_union(first: PackedByteArray, second: PackedByteArray) -> PackedByteArray:
+	for i in range(first.size()):
+		if second[i] != 0:
+			first[i] = 1
+	return first
+
+static func _explore_update_coverage(state: Dictionary, force: bool = false) -> Dictionary:
+	var now: float = float(state["elapsed"])
+	var record: Dictionary = state.get("_scout_coverage", {})
+	if not force and not record.is_empty() and now + EPS < float(record["next_sample"]):
+		return record
+	var geometry: Dictionary = _explore_geometry(state)
+	var dim: Vector2i = geometry["dim"]
+	var spacing: Vector2 = geometry["spacing"]
+	var fresh: bool = record.is_empty() or record.get("size") != geometry["size"]
+	var seen: Dictionary = {} if fresh else record["seen"]
+	var groups: Dictionary = {}
+	for owner in state["teams"]:
+		var group: int = _combat_group(state, int(owner))
+		if group > 0 and not groups.has(group):
+			groups[group] = _explore_mask(dim)
+	var sensors: Dictionary = {}
+	var factors: Dictionary = {}
+	for ship in state["ships"]:
+		var owner: int = int(ship["owner"])
+		var group: int = _combat_group(state, owner)
+		if not groups.has(group) or not ship.has("position"):
+			continue
+		var radius: float = sight_radius(str(ship["kind"]))
+		if military_hull(str(ship["kind"])):
+			if not factors.has(owner):
+				factors[owner] = _player_factor(state, owner, "rank_sensor", 0.10)
+			radius *= float(factors[owner])
+		var key: Vector2i = vision_cell(ship["position"])
+		if not sensors.has(group):
+			sensors[group] = {}
+		var by_cell: Dictionary = sensors[group]
+		by_cell[key] = maxf(float(by_cell.get(key, 0.0)), radius)
+	for group in sensors:
+		var mask: PackedByteArray = groups[group]
+		for cell in sensors[group]:
+			mask = _explore_stamp(mask, dim, spacing, (Vector2(cell) + Vector2.ONE * 0.5) * VISION_CELL, float(sensors[group][cell]))
+		groups[group] = mask
+	var base_radius: float = sector_base_radius(state["map"])
+	for index in range(state["planets"].size()):
+		var system: Dictionary = state["planets"][index]
+		var group: int = _combat_group(state, int(system["owner"]))
+		if not groups.has(group):
+			continue
+		var mask: PackedByteArray = groups[group]
+		var point: Vector2 = state["map"]["points"][index]
+		var weight: int = system_presence_weight(system)
+		if weight > 0:
+			mask = _explore_stamp(mask, dim, spacing, point, territory_kernel_reach(base_radius, weight) + TERRITORY_VISION_MARGIN)
+		if has_station(system):
+			mask = _explore_stamp(mask, dim, spacing, station_position(state, index, now), STATION_SIGHT)
+		for slot in range(system["yards"].size()):
+			mask = _explore_stamp(mask, dim, spacing, shipyard_position(state, index, slot, now), YARD_SIGHT)
+		if not system.get("pds", {}).is_empty():
+			mask = _explore_stamp(mask, dim, spacing, point, PDS_SIGHT)
+		groups[group] = mask
+	var live: Dictionary = {}
+	for group in groups:
+		var current: PackedByteArray = groups[group].duplicate()
+		var history: PackedByteArray = seen.get(group, _explore_mask(dim))
+		for ally in groups:
+			if ally != group and _shares_group_vision(state, int(group), int(ally)):
+				current = _explore_union(current, groups[ally])
+		if fresh:
+			for region in state.get("starting_survey", []):
+				if _shares_group_vision(state, int(group), _combat_group(state, int(region["owner"]))):
+					history = _explore_stamp(history, dim, spacing, region["center"], float(region["radius"]))
+		seen[group] = _explore_union(history, current)
+		live[group] = current
+	record = {"size": geometry["size"], "dim": dim, "spacing": spacing, "seen": seen, "live": live, "next_sample": now + EXPLORE_SAMPLE_YEARS}
+	state["_scout_coverage"] = record
+	return record
+
+# Prefix sums evaluate each candidate's sensor disk by row instead of
+# comparing every sample in that disk. Rank unknown area strictly first.
+static func _explore_rank(dim: Vector2i, spacing: Vector2, seen: PackedByteArray, live: PackedByteArray, reserved: PackedByteArray, origin: Vector2, radius: float, blocked: Dictionary, now: float) -> Array:
+	var stride: int = dim.x + 1
+	var unknown_prefix := PackedInt32Array()
+	var dark_prefix := PackedInt32Array()
+	unknown_prefix.resize(stride * dim.y)
+	dark_prefix.resize(stride * dim.y)
+	for y in range(dim.y):
+		var offset: int = y * stride
+		for x in range(dim.x):
+			var i: int = y * dim.x + x
+			unknown_prefix[offset + x + 1] = unknown_prefix[offset + x] + int(seen[i] == 0 and reserved[i] == 0)
+			dark_prefix[offset + x + 1] = dark_prefix[offset + x] + int(live[i] == 0 and reserved[i] == 0)
+	var reach: int = mini(dim.y - 1, floori(radius / spacing.y))
+	var half_widths := PackedInt32Array()
+	for dy in range(-reach, reach + 1):
+		half_widths.append(floori(sqrt(maxf(0.0, radius * radius - pow(float(dy) * spacing.y, 2.0))) / spacing.x))
+	var candidates: Array = []
+	for y in range(dim.y):
+		for x in range(dim.x):
+			var cell := Vector2i(x, y)
+			if float(blocked.get(cell, -1.0)) > now:
+				continue
+			var point: Vector2 = _explore_point(cell, spacing)
+			var distance: float = origin.distance_squared_to(point)
+			if distance < pow(minf(spacing.x, spacing.y) * 0.35, 2.0):
+				continue
+			var unknown: int = 0
+			var dark: int = 0
+			for yy in range(maxi(0, y - reach), mini(dim.y - 1, y + reach) + 1):
+				var half: int = half_widths[yy - y + reach]
+				var left: int = yy * stride + maxi(0, x - half)
+				var right: int = yy * stride + mini(dim.x - 1, x + half) + 1
+				unknown += unknown_prefix[right] - unknown_prefix[left]
+				dark += dark_prefix[right] - dark_prefix[left]
+			if unknown > 0 or dark > 0:
+				candidates.append([unknown, dark, distance, cell])
+	candidates.sort_custom(func(a, b):
+		if a[0] != b[0]:
+			return a[0] > b[0]
+		if a[1] != b[1]:
+			return a[1] > b[1]
+		if a[2] != b[2]:
+			return a[2] < b[2]
+		var ac: Vector2i = a[3]
+		var bc: Vector2i = b[3]
+		return ac.y < bc.y or (ac.y == bc.y and ac.x < bc.x))
+	return candidates
+
 static func _dispatch_explorers(state: Dictionary, graph: Dictionary) -> void:
-	var occupancy: Dictionary = {}
+	var record: Dictionary = _explore_update_coverage(state)
+	var now: float = float(state["elapsed"])
+	var dim: Vector2i = record["dim"]
+	var spacing: Vector2 = record["spacing"]
 	var scouts: Array = []
+	var reservations: Dictionary = {}
 	for craft in state["ships"]:
-		if craft.get("kind", "") == "scout" and _is_idle_ship(craft) and craft.get("order_queue", []).is_empty() and not _unit_order_running(craft) and autocast_ready(state, craft, "explore"):
+		if craft.get("kind", "") != "scout" or not autocast_ready(state, craft, "explore"):
+			continue
+		var order: Dictionary = craft.get("unit_order", {})
+		if bool(order.get("exploration", false)) and craft.has("local_move_target") and not bool(craft.get("retreating", false)) and not _engaged(craft):
+			var progress: Dictionary = craft.get("explore_progress", {})
+			if progress.is_empty():
+				craft["explore_progress"] = {"point": craft["position"], "time": now}
+			elif now >= float(progress["time"]) + 12.0:
+				if (craft["position"] as Vector2).distance_to(progress["point"]) < VISION_CELL:
+					var blocked: Dictionary = craft.get("explore_blocked", {})
+					var cell := Vector2i((craft["local_move_target"] as Vector2) / spacing)
+					blocked[cell] = now + EXPLORE_BLOCK_YEARS
+					craft["explore_blocked"] = blocked
+					_clear_local_move(craft)
+					_finish_manual(craft)
+					craft.erase("unit_order")
+					craft.erase("explore_progress")
+				else:
+					craft["explore_progress"] = {"point": craft["position"], "time": now}
+		if _unit_order_running(craft) and bool(order.get("exploration", false)) and craft.has("local_move_target"):
+			var group: int = _combat_group(state, int(craft["owner"]))
+			if not reservations.has(group):
+				reservations[group] = _explore_mask(dim)
+			reservations[group] = _explore_stamp(reservations[group], dim, spacing, craft["local_move_target"], sight_radius("scout") * _player_factor(state, int(craft["owner"]), "rank_sensor", 0.10))
+		elif _is_idle_ship(craft) and craft.get("order_queue", []).is_empty() and not _unit_order_running(craft) and now >= float(craft.get("explore_retry_at", -1.0)):
 			scouts.append(craft)
 	if scouts.is_empty():
 		return
-	for craft in state["ships"]:
-		var team: int = _combat_group(state, int(craft["owner"]))
-		var node: int = int(craft.get("at", -1))
-		var key := Vector2i(team, node)
-		occupancy[key] = int(occupancy.get(key, 0)) + 1
-		if bool(craft.get("unit_order", {}).get("exploration", false)) and not craft.get("route", []).is_empty():
-			var destination := Vector2i(team, int(craft.get("dest", node)))
-			occupancy[destination] = int(occupancy.get(destination, 0)) + 1
-	for node in range(state["planets"].size()):
-		var system: Dictionary = state["planets"][node]
-		if has_station(system):
-			var key := Vector2i(_combat_group(state, int(system["owner"])), node)
-			occupancy[key] = int(occupancy.get(key, 0)) + 8 + system["yards"].size()
+	record = _explore_update_coverage(state, true)
+	_refresh_movement_fields(state["map"].get("fields", []))
+	var walls: Dictionary = wall_grid(state) if not is_same(_movement_wall_state, state) else _movement_wall_grid
 	for craft in scouts:
-		var node: int = int(craft["at"])
-		if node < 0 or node >= graph["adjacent"].size():
+		var owner: int = int(craft["owner"])
+		var group: int = _combat_group(state, owner)
+		if not record["seen"].has(group):
 			continue
-		var team: int = _combat_group(state, int(craft["owner"]))
-		var visits: Dictionary = craft.get("explore_visits", {})
-		visits[node] = float(state["elapsed"])
-		var best: int = -1
-		var score: float = -INF
-		for candidate in range(state["planets"].size()):
-			if candidate == node:
+		var origin: Vector2 = craft["position"]
+		var radius: float = sight_radius("scout") * _player_factor(state, owner, "rank_sensor", 0.10)
+		var reserved: PackedByteArray = _explore_mask(dim)
+		for ally in reservations:
+			if _shares_group_vision(state, group, int(ally)):
+				reserved = _explore_union(reserved, reservations[ally])
+		var blocked: Dictionary = craft.get("explore_blocked", {})
+		for cell in blocked.keys():
+			if float(blocked[cell]) <= now:
+				blocked.erase(cell)
+		var candidates: Array = _explore_rank(dim, spacing, record["seen"][group], record["live"][group], reserved, origin, radius, blocked, now)
+		var target := Vector2.INF
+		var anchor: int = -1
+		var checks: int = 0
+		for candidate in candidates:
+			var cell: Vector2i = candidate[3]
+			var point: Vector2 = _explore_point(cell, spacing)
+			if not _point_clear_of_rocks(point):
+				blocked[cell] = now + EXPLORE_BLOCK_YEARS
 				continue
-			var age: float = minf(600.0, float(state["elapsed"]) - float(visits.get(candidate, -600.0)))
-			var friendly_occupancy: int = int(occupancy.get(Vector2i(team, candidate), 0))
-			if state.has("diplomacy"):
-				for ally in state["teams"]:
-					if int(ally) != team and empires_allied(state, team, int(ally)):
-						friendly_occupancy += int(occupancy.get(Vector2i(int(ally), candidate), 0))
-			var value: float = age - float(friendly_occupancy) * 80.0 - (craft["position"] as Vector2).distance_to(graph["points"][candidate]) / maxf(1.0, ship_speed("scout"))
-			if value > score:
-				score = value
-				best = candidate
-		if best < 0:
+			if not walls.is_empty() and not wall_first_hit(state, walls, owner, origin, point, true).is_empty():
+				if checks >= EXPLORE_ROUTE_CHECKS:
+					continue
+				checks += 1
+				if wall_navigation_route(state, walls, owner, origin, point, not _rock_cells.is_empty()).is_empty():
+					blocked[cell] = now + EXPLORE_BLOCK_YEARS
+					continue
+			anchor = patrol_node(state, graph, owner, point)
+			if anchor >= 0:
+				target = point
+				break
+		craft["explore_blocked"] = blocked
+		if anchor < 0 or not target.is_finite():
+			craft["explore_retry_at"] = now + EXPLORE_RETRY_YEARS
 			continue
-		craft["explore_visits"] = visits
-		_clear_local_hold(craft)
-		_set_unit_order(state, craft, {"kind": "sector", "target": best, "move_only": true, "exploration": true})
+		_reset_unit_for_order(craft)
+		_set_unit_order(state, craft, {"kind": "position", "target": anchor, "point": target, "move_only": true, "exploration": true})
+		craft["local_move_target"] = target
+		craft["local_move_sector"] = anchor
+		craft["navigation_target"] = target
+		craft["dest"] = anchor
+		craft["operation_target"] = anchor
+		craft["route"] = []
+		craft["leg"] = 0.0
 		craft["direct_order"] = true
 		craft["move_only"] = true
-		craft["operation_target"] = best
-		_redirect_fighter(graph, craft, best, _military_paths(graph, best))
-		var key := Vector2i(team, best)
-		occupancy[key] = int(occupancy.get(key, 0)) + 1
+		craft["explore_progress"] = {"point": origin, "time": now}
+		craft.erase("explore_retry_at")
+		if not reservations.has(group):
+			reservations[group] = _explore_mask(dim)
+		reservations[group] = _explore_stamp(reservations[group], dim, spacing, target, radius)
 
 static func _idle_formation_targets(state: Dictionary, _graph: Dictionary) -> Dictionary:
 	# Idle formations orbit their actual last idle position. Group nearby

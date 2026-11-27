@@ -93,6 +93,7 @@ static func encode_replica(state: Dictionary, template: Dictionary, needs_templa
 	wire.erase("ai_waves")
 	wire.erase("next_operation_id")
 	wire.erase("_pirate_epoch")
+	wire.erase("_scout_coverage")
 	var compact_planets: Array = compact_planets(state["planets"], planet_template)
 	if not compact_planets.is_empty():
 		wire["planets"] = compact_planets

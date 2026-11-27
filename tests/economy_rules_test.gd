@@ -1295,7 +1295,7 @@ func _test_manual_conversion_and_stats() -> void:
 	print("PASS: manual conversion, lifetime transfer and production counters, lethal hit attribution")
 
 func _test_nearest_colony_and_queued_hold() -> void:
-	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": []}
+	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(2000, 0), Vector2(4000, 0)], "edges": [[0, 1], [1, 2]], "fields": [], "size": Vector2(20000, 14000)}
 	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}}, [1], false)
 	var far: Dictionary = {"id": 100, "owner": 1, "kind": "colony_ship", "at": 0, "origin": 0, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": Vector2.ZERO, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "cargo": ECON.empty_stock()}
 	var near: Dictionary = far.duplicate(true)
@@ -5696,22 +5696,24 @@ func _test_explore_without_cooldown() -> void:
 	assert(scout["route"].is_empty())
 	scout["holding"] = false
 	ECON._dispatch_explorers(state, graph)
-	assert(int(scout["dest"]) == 1 and bool(scout["unit_order"]["exploration"]))
-	# An in-flight route must not be replaced.
+	assert(bool(scout["unit_order"]["exploration"]) and scout["unit_order"]["kind"] == "position")
+	var first: Vector2 = scout["local_move_target"]
+	assert(first.is_finite() and not graph["points"].has(first))
 	ECON._dispatch_explorers(state, graph)
-	assert(int(scout["dest"]) == 1)
-	# Simulate a sector arrival with a fresh shared cooldown.
-	scout["at"] = 1
-	scout["position"] = graph["points"][1]
-	scout["route"] = []
+	assert(scout["local_move_target"] == first)
+	scout["at"] = scout["dest"]
+	scout["position"] = first
+	ECON._clear_local_move(scout)
+	ECON._finish_manual(scout)
 	scout["arrival_wait_until"] = 100.0
 	ECON._dispatch_explorers(state, graph)
-	assert(int(scout["dest"]) == 2 and bool(scout["unit_order"]["exploration"]))
+	assert(bool(scout["unit_order"]["exploration"]) and scout["local_move_target"] != first)
 	assert(ECON.set_autocast(state, 1, [9812], "wander", true))
-	assert(not ECON.autocast_enabled(scout, "explore") and scout["route"].is_empty())
+	assert(not ECON.autocast_enabled(scout, "explore") and scout["route"].is_empty() and not scout.has("local_move_target"))
 	print("PASS: Explore starts and continues without cooldown; ownership, Hold and Wander exclusivity")
 
 func _test_autocast_modes() -> void:
+	_test_exploration_area_priority()
 	_test_explore_without_cooldown()
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var graph: Dictionary = ECON.military_graph(state)
@@ -7624,3 +7626,23 @@ func _test_vision_span_stamping() -> void:
 		assert(ECON.team_vision(state, 1, cache) == ECON.team_vision(state, 1))
 	print("PASS: grouped vision spans and detached ship-mask cache across movement, radius, alliances and removal")
 
+
+func _test_exploration_area_priority() -> void:
+	var dim := Vector2i(9, 3)
+	var spacing := Vector2(100.0, 100.0)
+	var seen: PackedByteArray = ECON._explore_mask(dim)
+	seen.fill(1)
+	var live: PackedByteArray = ECON._explore_mask(dim)
+	var reserved: PackedByteArray = ECON._explore_mask(dim)
+	seen[1 * dim.x + 8] = 0
+	var ranked: Array = ECON._explore_rank(dim, spacing, seen, live, reserved, Vector2(50, 150), 110.0, {}, 0.0)
+	assert(not ranked.is_empty() and int(ranked[0][0]) == 1 and (ranked[0][3] as Vector2i).x >= 7)
+	seen.fill(1)
+	live = ECON._explore_stamp(live, dim, spacing, Vector2(450, 150), 110.0)
+	ranked = ECON._explore_rank(dim, spacing, seen, live, reserved, Vector2(450, 150), 110.0, {}, 0.0)
+	assert(not ranked.is_empty() and int(ranked[0][0]) == 0 and int(ranked[0][1]) > 0)
+	var first: Vector2i = ranked[0][3]
+	reserved = ECON._explore_stamp(reserved, dim, spacing, ECON._explore_point(first, spacing), 110.0)
+	ranked = ECON._explore_rank(dim, spacing, seen, live, reserved, Vector2(450, 150), 110.0, {}, 0.0)
+	assert(not ranked.is_empty() and ranked[0][3] != first)
+	print("PASS: unknown-first area coverage, dark-area fallback and reservations")

@@ -1480,6 +1480,7 @@ func _rpc_snapshot_ack(ack_round: int, revision: int) -> void:
 func _public_reward_snapshot(state: Dictionary) -> Dictionary:
 	var result: Dictionary = state.duplicate()
 	result.erase("_ai_diplomacy_schedule")
+	result.erase("_scout_coverage")
 	var public_objectives: Dictionary = {}
 	for id in state.get("objectives", {}):
 		var progress: Dictionary = state["objectives"][id].duplicate()
