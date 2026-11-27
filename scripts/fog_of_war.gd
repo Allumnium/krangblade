@@ -105,7 +105,7 @@ func _update_mask(prior_live: Dictionary, map_size: Vector2) -> void:
 	var changed: bool = rebuild
 	if rebuild:
 		_mask_image = Image.create(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8)
-		_mask_image.fill(Color(0.015, 0.025, 0.04, 0.96))
+		_mask_image.fill(Color(0.015, 0.025, 0.04, 1.0))
 		for key in _explored:
 			if bounds.has_point(key):
 				_mask_image.set_pixelv(key, explored_color)
@@ -256,6 +256,9 @@ func observed_state(state: Dictionary, map_size: Vector2) -> Dictionary:
 	view["planets"] = systems
 	return view
 
+func is_explored(point: Vector2, map_size: Vector2) -> bool:
+	return point.is_finite() and Rect2(Vector2.ZERO, map_size).has_point(point) and (observing or _explored.has(ECONOMY.vision_cell(point)) or _live.has(ECONOMY.vision_cell(point)))
+
 func is_visible(point: Vector2, map_size: Vector2) -> bool:
 	return point.is_finite() and Rect2(Vector2.ZERO, map_size).has_point(point) and (observing or _live.has(ECONOMY.vision_cell(point)))
 
@@ -263,7 +266,7 @@ func draw(overlay: Control, bounds: Rect2, map_rect: Rect2, map_size: Vector2) -
 	if texture == null:
 		return
 	var inside: Rect2 = bounds.intersection(map_rect)
-	var dark := Color(0.015, 0.025, 0.04, 0.96)
+	var dark := Color(0.015, 0.025, 0.04, 1.0)
 	if not inside.has_area():
 		overlay.draw_rect(bounds, dark)
 		return

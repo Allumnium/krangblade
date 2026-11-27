@@ -19,6 +19,7 @@ static func system_bodies(system: Dictionary, seed_value: int, index: int, extra
 	richness += organic
 	var count: int = clampi(roundi(2.0 + richness * 0.64 + rng.randf_range(-0.65, 0.65)), 2, 6)
 	var bodies: Array = []
+	var system_speed: float = 0.825
 	for i in range(count):
 		var total: float = 0.8
 		for resource in weights:
@@ -30,8 +31,15 @@ static func system_bodies(system: Dictionary, seed_value: int, index: int, extra
 			if choice < 0.0:
 				material = resource
 				break
-		bodies.append({"resource": material, "orbit": lerpf(0.38, 0.90, float(i) / float(count - 1)),
-			"phase": rng.randf_range(0.0, TAU), "speed": rng.randf_range(0.65, 1.0) / (1.0 + float(i) * 0.42),
+		var orbit: float = lerpf(0.38, 0.90, float(i) / float(count - 1))
+		var phase: float = rng.randf_range(0.0, TAU)
+		# Preserve the existing seeded draws; share one stellar speed factor
+		# so angular velocity always decreases as orbital radius increases.
+		var speed_sample: float = rng.randf_range(0.65, 1.0)
+		if i == 0:
+			system_speed = speed_sample
+		bodies.append({"resource": material, "orbit": orbit,
+			"phase": phase, "speed": system_speed * pow(0.38 / orbit, 1.5),
 			"size": rng.randf_range(0.035, 0.095), "surface_seed": rng.randi_range(1, 2147483646),
 			"surface_angle": rng.randf_range(0.0, TAU), "muted": rng.randf_range(0.0, 0.65), "bands": rng.randf() < 0.3})
 	return bodies
@@ -48,5 +56,13 @@ static func system_world_radius(state: Dictionary, index: int, base_radius: floa
 	for i in range(points.size()):
 		if i != index:
 			closest = minf(closest, (points[index] as Vector2).distance_to(points[i]))
-	return minf(base_radius * float(state["planets"][index].get("size_factor", 1.0)), closest * 0.39)
+	var radius: float = minf(base_radius * float(state["planets"][index].get("size_factor", 1.0)), closest * 0.39)
+	# Generated rings are indexed by their anchor; keep outer planets inside
+	# even a belt squeezed by the edge or a neighboring Pulsar.
+	var fields: Array = state["map"].get("fields", [])
+	if index < fields.size():
+		var field: Dictionary = fields[index]
+		if field.has("orbit_center") and int(field.get("anchor", -1)) == index:
+			radius = minf(radius, float(field["orbit_radius"]) * 0.90)
+	return radius
 

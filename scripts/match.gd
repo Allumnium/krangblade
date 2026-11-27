@@ -1868,21 +1868,6 @@ func _selected_ship(state: Dictionary) -> Dictionary:
 func _ship_kind_name(kind: String) -> String:
 	return UI_TEXT.ship_kind_name(kind)
 
-func _remaining_years(state: Dictionary, ship: Dictionary) -> float:
-	var points: Array = ECONOMY.military_graph(state)["points"] if ship.get("kind", "") in ECONOMY.MILITARY_KINDS else state["map"]["points"]
-	var pos: Vector2 = ECONOMY.combat_position(state, ECONOMY.military_graph(state), ship)
-	var mode: String = ship.get("mining_mode", "idle")
-	if mode in ["approach", "outbound"] and ship.has("mining_target"):
-		return pos.distance_to(ship["mining_target"]) / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
-	if mode == "delivery" and int(ship.get("dest", -1)) >= 0:
-		return pos.distance_to(ECONOMY.station_position(state, int(ship["dest"]), float(state["elapsed"]))) / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
-	var remaining: float = 0.0
-	for index in ship["route"]:
-		var next: Vector2 = points[int(index)]
-		remaining += pos.distance_to(next)
-		pos = next
-	return remaining / ECONOMY.ship_speed(str(ship.get("kind", "ship")))
-
 func _build_field_command_card(parent: Container) -> void:
 	field_command_grid = command_card_ui.create_grid(parent)
 	# Keep the bottom row for persistent modes, as on ship cards.
@@ -2416,77 +2401,12 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	var kind: String = ship.get("kind", "ship")
 	var owner: int = int(ship["owner"])
 	ship_title.text = ("Pirate " if int(ship["owner"]) == ECONOMY.PIRATE_OWNER else ("Independent " if bool(ship.get("rogue", false)) else "")) + UI_TEXT.ship_kind_name(kind)
-	var route: Array = ship["route"]
-	var mode: String = ship.get("mining_mode", "idle")
-	var status: String = "Orbiting %s" % _system_name(int(ship["at"]))
-	if not route.is_empty():
-		status = "%s → %s\nETA %.1f yr" % [_system_name(int(ship["at"])), _system_name(int(route.back())), _remaining_years(state, ship)]
-	elif mode in ["outbound", "return"]:
-		status = ("To field" if mode == "outbound" else "Returning") + "\nETA %.1f yr" % _remaining_years(state, ship)
-	elif mode == "mining":
-		status = "Mining %s\n%.1f / 5 yr" % [_poi_name(state["planets"].size() + int(ship["field"])), minf(5.0, float(ship.get("mining_years", 0.0)))]
-	elif kind == "miner" and mode == "delivery":
-		status = "Waiting for storage"
-	elif kind == "miner" and mode == "idle":
-		status = "Waiting for accessible ore / storage"
-	if kind == "fighter":
-		status = "Stationed at %s" % _poi_name(int(ship["at"])) if route.is_empty() else "%s\nETA %.1f yr" % [_poi_name(int(route.back())), _remaining_years(state, ship)]
-	if bool(ship.get("retreating", false)):
-		var site: int = int(ship.get("repair_site", -1))
-		status = "Repairing" if route.is_empty() and site >= 0 and (ship["position"] as Vector2).distance_to(ECONOMY.station_position(state, site, float(state["elapsed"]))) <= ECONOMY.STATION_REPAIR_RANGE + ECONOMY.EPS and ECONOMY.repair_site_safe(state, ECONOMY.military_graph(state), owner, site) else "Withdrawing"
-	elif int(ship.get("pursuit_target", -1)) >= 0:
-		status = "Pursuing"
-	elif bool(ship.get("holding", false)):
-		status = "Moving to hold position" if ship.has("hold_position") and (ship["position"] as Vector2).distance_to(ship["hold_position"]) > ECONOMY.EPS else "Holding position"
-	elif int(ship.get("combat_target", -1)) >= 0:
-		status = "Engaged"
-	elif ship.has("local_move_target"):
-		status = "Moving · ETA %.1f yr" % ((ship["position"] as Vector2).distance_to(ship["local_move_target"]) / ECONOMY.ship_speed(str(ship.get("kind", "ship"))))
-	if not bool(ship.get("retreating", false)):
-		if ship.has("attack_order"):
-			status = "Attacking target"
-		elif ship.has("repair_target") or ship.has("repair_order"):
-			status = "Repairing" if ship.has("repair_target") else "Approaching repair target"
-		elif ship.has("cargo_order"):
-			status = "Dropping cargo" if ship["cargo_order"]["kind"] == "drop" else "Delivering cargo"
-		elif ship.has("patrol_from"):
-			status = "Patrolling → %s" % _poi_name(int(ship["operation_target"]))
-	if int(ship.get("salvage_target", -1)) >= 0:
-		status = "Collecting salvage" if bool(ship.get("tractor_active", false)) else "Approaching salvage"
-	elif bool(ship.get("salvage_delivery", false)):
-		status = "Delivering salvage" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for salvage storage"
-	elif int(ship.get("auto_salvage_target", -1)) >= 0:
-		status += " · Salvaging" if bool(ship.get("tractor_active", false)) else " · Approaching debris"
-	if ship.has("colony_transform_progress"):
-		status = "Transforming into station · %.0f%%" % (100.0 * float(ship["colony_transform_progress"]) / ECONOMY.COLONY_TRANSFORM_TIME)
-	if ship.has("resource_stage"):
-		var stage: Dictionary = ship["resource_stage"]
-		status = "Approaching resource site" if (ship["position"] as Vector2).distance_to(stage["point"]) > ECONOMY.RESOURCE_HANDOFF_RANGE else "Awaiting resource cargo"
-	elif bool(ship.get("resource_haul", false)):
-		status = "Hauling resources" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for resource storage"
-	var follow_order: Dictionary = ship.get("unit_order", {})
-	if follow_order.get("kind", "") == "guard" and not bool(ship.get("retreating", false)):
-		status = "Guarding sector" if bool(ship.get("guard_arrived", false)) else "Moving to guard position"
-	if follow_order.get("kind", "") == "follow" and not bool(ship.get("retreating", false)):
-		var target_ship: Dictionary = ECONOMY.service_targets(state).get(int(follow_order["target"]), {}).get("entity", {})
-		status = ("%s %s" % ["Guarding" if bool(follow_order.get("guard", false)) else "Following", UI_TEXT.ship_kind_name(str(target_ship.get("kind", "ship")))])
-	var wait_left: float = ECONOMY.autocast_remaining(state, ship, "wander")
-	if wait_left > ECONOMY.EPS and ECONOMY.autocast_enabled(ship, "wander") and ECONOMY.is_idle_ship(ship):
-		status = "Awaiting orders · %.0f yr" % ceilf(wait_left)
+	# Details describe the hull and its statistics, not the current order.
+	var status: String = ""
 	if kind == "colony_ship":
-		if bool(ship.get("salvage_delivery", false)):
-			status = "Delivering Organics" if int(ship.get("salvage_depot", -1)) >= 0 else "Waiting for storage"
-		status += "\nOrganics %.1f / %.0f · %s" % [float(ship["cargo"].get("Organics", 0.0)), ECONOMY.COLONY_CAPACITY, "Farming" if ECONOMY.autocast_enabled(ship, "farm") and not bool(ship.get("salvage_delivery", false)) and ECONOMY.cargo_free(ship) > ECONOMY.EPS else "Farm idle"]
-	if kind == "science_ship":
-		if ship.has("repair_target") or ship.has("repair_order"):
-			status = "Repairing" if ship.has("repair_target") else "Approaching repair target"
-		if ECONOMY.cargo_total(ship) > ECONOMY.EPS:
-			status += "\nAntimatter secured · 1 unit"
-		elif ship.get("unit_order", {}).get("kind", "") == "collect":
-			var years: float = float(ship.get("science_years", 0.0))
-			status = "Collecting antimatter · %.1f / %.0f yr" % [years, ECONOMY.SCIENCE_COLLECTION_YEARS] if years > 0.0 else "Approaching Pulsar"
-	if kind == "construction_ship" and ship.has("construction_target"):
-		status = "Servicing construction site"
+		status = "Organics %.1f / %.0f" % [float(ship["cargo"].get("Organics", 0.0)), ECONOMY.COLONY_CAPACITY]
+	elif kind == "science_ship" and ECONOMY.cargo_total(ship) > ECONOMY.EPS:
+		status = "Antimatter: 1 unit"
 	if ECONOMY.is_static_structure(ship):
 		status = "Construction: %.0f%%" % (float(ship.get("build_progress", 0.0)) * 100.0)
 		if kind == "defense_cannon":
@@ -2499,10 +2419,6 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			status = "Resource Depot"
 			for resource in ECONOMY.RESOURCES:
 				status += "\n%s: %.1f / %.1f" % [resource, float(ship["cargo"].get(resource, 0.0)), ECONOMY.depot_capacity(resource)]
-	if kind == "probe":
-		status = "Scan active · %.1f yr remaining" % maxf(0.0, float(ship["probe_expires"]) - float(state["elapsed"])) if ship.has("probe_expires") else "En route to scan point"
-	if bool(ship.get("cloak_equipped", false)):
-		status += "\nCloaked" if bool(ship.get("cloaked", false)) else "\nCloak recharging"
 	if ECONOMY.armed(ship):
 		status += "\nKills: %d" % int(ship.get("kills", 0))
 	if ECONOMY.cargo_capacity(kind) > ECONOMY.EPS:
@@ -2511,8 +2427,6 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status += "\nCargo handled: %.1f (↑ %.1f / ↓ %.1f)" % [picked + dropped, picked, dropped]
 	if kind == "colony_ship":
 		status += "\nFood produced: %.1f" % float(ship.get("food_produced", 0.0))
-		if ECONOMY.can_transform_colony(state, ECONOMY.military_graph(state), ship):
-			status += "\nReady to establish station"
 	if kind == "warp_gate":
 		var destination: Dictionary = ECONOMY.warp_gate(state, owner, int(ship.get("warp_destination", -1)))
 		status = "Linked to %s" % _system_name(int(destination["at"])) if not destination.is_empty() else "Unlinked · deploy another gate"
@@ -2520,20 +2434,18 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		status += "\nUpkeep: %.0f GC/yr" % ECONOMY.hull_upkeep(state, ship)
 		if ship.has("unpaid_since"):
 			status += " · Unpaid %.1f yr" % ECONOMY.unpaid_wage_years(state, ship)
-	if bool(ship.get("rogue", false)):
-		status = "Pirate · " + str(ship.get("pirate_phase", "roam")).capitalize() if int(ship["owner"]) == ECONOMY.PIRATE_OWNER else "Independent · Escaping empire territory"
 	var morphing: bool = ECONOMY.colony_morphing(ship)
 	if morphing:
 		ship_title.text = "Morphing · Space Station"
-		status = "Transforming into station"
-	ship_detail.text = status
+		status = ""
+	ship_detail.text = status.strip_edges()
 	ship_detail.tooltip_text = ""
 	var multiple: bool = selected_units.size() > 1
 	colony_morph_progress.visible = morphing and not multiple
 	if morphing:
 		colony_morph_progress.value = 100.0 * float(ship["colony_transform_progress"]) / ECONOMY.COLONY_TRANSFORM_TIME
 	ship_title.visible = not multiple
-	ship_detail.visible = not multiple
+	ship_detail.visible = not multiple and not ship_detail.text.is_empty()
 	fleet_title.text = "Fleet"
 	fleet_detail.visible = true
 	var owned_count: int = 0
@@ -4972,10 +4884,10 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 	var stars: Array = []
 	var lamps: Array = []
 	var center: Vector2 = bounds.get_center()
-	var radius: float = maxf(12.0, 3600.0 * render_scale)
+	var radius: float = maxf(12.0, 10800.0 * render_scale)
 	var blockers: Array = []
 	for index in range(points.size()):
-		if not ECONOMY.discovered(state, _me(), "planets", index):
+		if not ECONOMY.discovered(state, _me(), "planets", index) or not fog_state.is_explored(points[index], _map_size()):
 			continue
 		var pos: Vector2 = _screen_point(points[index])
 		if not bounds.grow(radius).has_point(pos):
@@ -5383,7 +5295,7 @@ func _draw_map_content() -> void:
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var metrics: Dictionary = ship_metrics_cache.get(kind, {})
 		if metrics.is_empty():
-			metrics = {"radius": hull_art.ui_radius(kind), "max_hp": ECONOMY.ship_max_hp(kind), "half_size": hull_art.texture_half_size(kind)}
+			metrics = {"radius": hull_art.ui_radius(kind), "max_hp": ECONOMY.ship_max_hp(kind), "half_size": hull_art.texture_half_size(kind), "flag_offset": hull_art.ship_flag_offset(kind)}
 			ship_metrics_cache[kind] = metrics
 		var radius: float = float(metrics["radius"])
 		var maximum_hp: float = ECONOMY.hull_max_hp(ship) if ECONOMY.is_static_structure(ship) else float(metrics["max_hp"])
@@ -5419,6 +5331,9 @@ func _draw_map_content() -> void:
 			world_batches.queue_overview_hull(hull_art.shield_texture(kind), point, direction.angle(), (half_size + 8.0) * scale, cloaked)
 		var art_angle: float = direction.angle() + HULL_ART.sprite_heading_offset(kind)
 		world_batches.queue_overview_hull(texture, point, art_angle, half_size * scale, cloaked)
+		if logistics_view.ship_flags_enabled and owner > 0 and not bool(ship.get("rogue", false)) and not ECONOMY.is_static_structure(ship) and kind != "probe":
+			var flag_at: Vector2 = point + direction * float(metrics["flag_offset"])
+			world_batches.queue_ship_flag(flag_at, clampf(1.6 * scale, 1.1, 4.0), Color(empire.lightened(0.18), 0.45 if cloaked else 1.0))
 		if kind == "ship" and scale >= 0.42:
 			# Foreground bay fills on the authored hull. Preserve fractional cargo
 			# and ten independent display bays in the existing cargo batch.

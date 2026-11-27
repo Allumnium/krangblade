@@ -135,7 +135,8 @@ const POPULATION_RESPONSE: float = 0.065
 const FARM_VARIATION: float = 0.05
 const FARM_CYCLE_SECONDS: float = 100.0
 const START_YEAR: int = 2850
-const SYSTEM_WORLD_RADIUS: float = 600.0
+const SYSTEM_WORLD_RADIUS: float = 1800.0
+const STATION_ORBIT_RADIUS: float = 435.0
 const CARGO_CAPACITY: float = 100.0
 const FREIGHTER_BAY_COUNT: int = 10
 const FREIGHTER_BAY_CAPACITY: float = CARGO_CAPACITY / FREIGHTER_BAY_COUNT
@@ -2316,7 +2317,7 @@ static func colony_station_position(state: Dictionary, index: int, elapsed: floa
 	return _colony_orbit_point(state, index, center, axis)
 
 static func _colony_orbit_point(state: Dictionary, index: int, center: Vector2, axis: Vector2) -> Vector2:
-	var radius: float = minf(145.0, sector_limit(military_graph(state), index, axis) * 0.5)
+	var radius: float = minf(STATION_ORBIT_RADIUS, sector_limit(military_graph(state), index, axis) * 0.5)
 	return center + axis * radius
 
 # The nearest radial point on the normal orbit. Re-evaluate from the

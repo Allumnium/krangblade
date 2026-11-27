@@ -19,6 +19,8 @@ var population_texture: Callable
 var refresh_match: Callable
 var logistics_lens: Button
 var active_lens: String = ""
+var ship_flags_enabled: bool = true
+var ship_flags_lens: Button
 
 func configure(canvas: Control, overlay: Control, celestial: CELESTIAL_VIEW, camera_view: CAMERA_VIEW, projection: Callable, radius_query: Callable, fit: Callable, player_query: Callable, icon_query: Callable, refresh_query: Callable) -> void:
 	map_canvas = canvas
@@ -44,6 +46,21 @@ func build(parent: Container, strip_width: float, make_button: Callable, make_ic
 	logistics_lens.set_pressed_no_signal(active_lens == "logistics")
 	logistics_lens.focus_mode = Control.FOCUS_NONE
 	logistics_lens.tooltip_text = "Logistics lens · System resource storage"
+	ship_flags_lens = make_button.call("", _toggle_ship_flags, parent, false)
+	ship_flags_lens.icon = make_icon.call('<path d="M16 3L26 24L16 20L6 24Z"/><circle cx="16" cy="25" r="4" fill="#fff"/>', 32)
+	ship_flags_lens.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ship_flags_lens.expand_icon = true
+	ship_flags_lens.add_theme_constant_override("icon_max_width", 24)
+	ship_flags_lens.custom_minimum_size = Vector2.ONE * strip_width
+	ship_flags_lens.toggle_mode = true
+	ship_flags_lens.focus_mode = Control.FOCUS_NONE
+	ship_flags_lens.tooltip_text = "Ship flags · Empire-colored identification lights"
+	ship_flags_lens.set_pressed_no_signal(ship_flags_enabled)
+
+func _toggle_ship_flags() -> void:
+	ship_flags_enabled = not ship_flags_enabled
+	ship_flags_lens.set_pressed_no_signal(ship_flags_enabled)
+	map_canvas.queue_redraw()
 
 
 func _toggle_lens(kind: String) -> void:

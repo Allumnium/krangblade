@@ -66,7 +66,7 @@ func _run() -> void:
 			for x in range(dimensions.x):
 				var cell := Vector2i(x, y)
 				var alpha: float = image.get_pixelv(cell).a
-				var expected_alpha: float = 0.0 if expected.has(cell) else (0.48 if fog._explored.has(cell) else 0.96)
+				var expected_alpha: float = 0.0 if expected.has(cell) else (0.48 if fog._explored.has(cell) else 1.0)
 				assert(absf(alpha - expected_alpha) <= 1.0 / 255.0 + 0.00001, "Fog mask differs")
 		# Identical coverage at a new publication must still observe current visible data.
 		var visible_index: int = -1
