@@ -1810,15 +1810,17 @@ func _draw_queued_order_overlay() -> void:
 # unexplored space, while limiting live entity targets to observed information.
 func _draw_command_overlay_content(state: Dictionary) -> void:
 	var viewport_bounds := Rect2(Vector2.ZERO, map_canvas.size)
-	var poses: Dictionary = _ship_poses(state)
+	var poses: Dictionary = {}
 	var service_refs: Dictionary = {}
 	var all_refs: Dictionary = _frame_service_refs(state)
-	for id in all_refs:
-		var ref: Dictionary = all_refs[id]
-		var own: bool = int(ref.get("owner", -1)) == _me()
-		var visible: bool = poses.has(id) if ref.get("kind", "") == "ship" else _fog_visible(ref.get("position", Vector2.INF))
-		if own or visible:
-			service_refs[id] = ref
+	if not selected_units.is_empty():
+		poses = _ship_poses(state)
+		for id in all_refs:
+			var ref: Dictionary = all_refs[id]
+			var own: bool = int(ref.get("owner", -1)) == _me()
+			var visible: bool = poses.has(id) if ref.get("kind", "") == "ship" else _fog_visible(ref.get("position", Vector2.INF))
+			if own or visible:
+				service_refs[id] = ref
 	_draw_construction_preview(state)
 	for ref in _selected_yards(state, true):
 		var rally: Dictionary = state["planets"][ref.x]["yards"][ref.y].get("rally", {})
@@ -1837,10 +1839,11 @@ func _draw_command_overlay_content(state: Dictionary) -> void:
 	for gate in state["ships"]:
 		if gate.get("kind", "") != "warp_gate" or int(gate["owner"]) != _me():
 			continue
-		var target: Dictionary = service_refs.get(int(gate.get("warp_destination", -1)), {}).get("entity", {})
+		var target: Dictionary = all_refs.get(int(gate.get("warp_destination", -1)), {}).get("entity", {})
 		if target.get("kind", "") == "warp_gate" and int(target["owner"]) == _me():
 			queued_order_overlay.draw_line(_screen_point(gate["position"]), _screen_point(target["position"]), Color("#855bbf80"), 2.0, true)
-	order_view.draw_ship_target_rings(state, poses, service_refs, selected_units, selected_ship_id)
+	if not selected_units.is_empty():
+		order_view.draw_ship_target_rings(state, poses, service_refs, selected_units, selected_ship_id)
 	if selected_units.size() > 1:
 		order_view.draw_group_formation_ghosts(state, viewport_bounds, selected_units)
 	if selected_units.size() == 1:
@@ -1881,7 +1884,7 @@ func _draw_command_overlay_content(state: Dictionary) -> void:
 				if endpoint.is_finite():
 					var destination: Vector2 = _screen_point(endpoint)
 					order_view.draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
-			elif craft.has("local_move_target") and not bool(craft.get("retreating", false)):
+			elif craft.has("local_move_target") and not bool(craft.get("retreating", false)) and active_order.get("kind", "") not in ["attack", "follow", "repair", "deposit", "salvage", "mine", "warp_travel"]:
 				var destination: Vector2 = _screen_point(craft["local_move_target"])
 				order_view.draw_destination_ghost(craft["kind"], destination, active_order.get("heading", destination - start), order_tint)
 	if selected_units.size() > 1:
