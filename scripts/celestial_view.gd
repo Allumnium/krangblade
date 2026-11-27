@@ -11,7 +11,79 @@ const STAR_TEXTURE_SIZE: int = 256
 const STAR_TEXTURE_CORE: float = 74.0
 const STAR_SPARK_COUNT: int = 9
 
+const ROCK_ATLAS = preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903.png")
+const ROCK_LIGHTING = preload("res://assets/shaders/asteroid_lighting.gdshader")
+const ROCK_GRID: int = 8
+const ROCK_SPRITE_MIN_RADIUS: float = 2.5
+var asteroid_sprite_nodes: Dictionary = {}
+var asteroid_material: ShaderMaterial
 var asteroid_shape_cache: Dictionary = {}
+
+# Stable atlas choice: never uses simulation RNG or mutable ore amount.
+static func asteroid_tile(id: int) -> int:
+	return posmod(id * 37 + 17, ROCK_GRID * ROCK_GRID)
+
+func _rock_material() -> ShaderMaterial:
+	if asteroid_material == null:
+		asteroid_material = ShaderMaterial.new()
+		asteroid_material.shader = ROCK_LIGHTING
+		asteroid_material.set_shader_parameter("diffuse_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_d.png"))
+		asteroid_material.set_shader_parameter("normal_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_n.png"))
+		asteroid_material.set_shader_parameter("occlusion_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_o.png"))
+		asteroid_material.set_shader_parameter("height_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_p.png"))
+		asteroid_material.set_shader_parameter("specular_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_s.png"))
+		asteroid_material.set_shader_parameter("detail_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_v.png"))
+	return asteroid_material
+
+func set_asteroid_lights(canvas: Control, lights: Array) -> void:
+	var positions := PackedVector4Array()
+	var colors := PackedVector4Array()
+	positions.resize(16)
+	colors.resize(16)
+	var count: int = mini(16, lights.size())
+	for i in range(count):
+		var entry: Array = lights[i]
+		var pos: Vector2 = canvas.get_global_transform() * (entry[0] as Vector2)
+		var tint: Color = entry[2]
+		positions[i] = Vector4(pos.x, pos.y, float(entry[1]), float(entry[3]))
+		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0)
+	var material: ShaderMaterial = _rock_material()
+	material.set_shader_parameter("light_points", positions)
+	material.set_shader_parameter("light_colors", colors)
+	material.set_shader_parameter("light_count", count)
+
+func _show_asteroid_mesh(canvas: Control, field_index: int, mesh: ArrayMesh, remembered: bool) -> void:
+	if mesh == null:
+		return
+	var instance: MeshInstance2D = asteroid_sprite_nodes.get(field_index)
+	if not is_instance_valid(instance):
+		instance = MeshInstance2D.new()
+		instance.name = "AsteroidAtlas_%d" % field_index
+		instance.texture = ROCK_ATLAS
+		instance.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		instance.material = _rock_material()
+		# Live terrain precedes ships, effects and the fog; memory is drawn
+		# over the fog exactly as its previous procedural geometry was.
+		instance.show_behind_parent = not remembered
+		canvas.add_child(instance)
+		asteroid_sprite_nodes[field_index] = instance
+	if instance.mesh != mesh:
+		instance.mesh = mesh
+	instance.show()
+
+static func _rock_mesh(vertices: PackedVector3Array, colors: PackedColorArray, uvs: PackedVector2Array = PackedVector2Array()) -> ArrayMesh:
+	if vertices.is_empty():
+		return null
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_COLOR] = colors
+	if not uvs.is_empty():
+		arrays[Mesh.ARRAY_TEX_UV] = uvs
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
 var asteroid_frame_meshes: Array[ArrayMesh] = []
 # Hidden rocks are static last-seen snapshots. One retained mesh per field.
 var asteroid_static_meshes: Dictionary = {}
@@ -35,12 +107,19 @@ func reset_clocks() -> void:
 
 func begin_frame() -> void:
 	asteroid_frame_meshes.clear()
+	for instance in asteroid_sprite_nodes.values():
+		if is_instance_valid(instance):
+			instance.hide()
 
 func prepare_map(state: Dictionary) -> void:
 	var seed_value: int = int(state["map"]["seed"])
 	if asteroid_cache_seed != seed_value:
 		asteroid_shape_cache.clear()
 		asteroid_static_meshes.clear()
+		for instance in asteroid_sprite_nodes.values():
+			if is_instance_valid(instance):
+				instance.queue_free()
+		asteroid_sprite_nodes.clear()
 		asteroid_cache_seed = seed_value
 
 # At overview scale, plot each actual rock, never its enclosing belt.
@@ -62,99 +141,80 @@ static func terrain_footprint(chunks: Array, offset: Vector2, scale: float, tint
 		colors.append(Color("#b879a0") if rock["resource"] == "Crystals" else tint)
 	return {"segments": segments, "colors": colors}
 
-func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, shading: float = 1.0, rotation_time: float = 0.0, static_field: int = -1) -> void:
+func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, shading: float = 1.0, rotation_time: float = 0.0, static_field: int = -1, field_index: int = -1) -> void:
 	var chunks: Array = field["chunks"]
-	# Only the fog layer supplies static_field. Its entries are immutable
-	# observations replaced by FogOfWar when visibility or ore changes.
+	var remembered: bool = static_field >= 0
+	var key: int = static_field if remembered else field_index
 	var signature: Array = []
-	if static_field >= 0:
+	if remembered:
 		signature = [viewport_bounds, screen_center, world_center, projection_fit, projection_zoom, render_scale, shading, rotation_time]
 		var retained: Dictionary = asteroid_static_meshes.get(static_field, {})
 		if not retained.is_empty() and retained["signature"] == signature and retained["chunks"] == chunks:
 			var previous_mesh: ArrayMesh = retained["mesh"]
 			if previous_mesh != null:
 				map_canvas.draw_mesh(previous_mesh, null)
+			_show_asteroid_mesh(map_canvas, key, retained["sprites"], true)
 			return
 	var rock_vertices := PackedVector3Array()
 	var rock_colors := PackedColorArray()
+	var sprite_vertices := PackedVector3Array()
+	var sprite_colors := PackedColorArray()
+	var sprite_uvs := PackedVector2Array()
 	for chunk in chunks:
-		# Same arithmetic/order as CameraView.screen_point, without a
-		# per-rock Callable, camera lookup or viewport/fit calculation.
-		var rock_pos: Vector2 = screen_center + ((chunk["position"] as Vector2) - world_center) * projection_fit * projection_zoom
+		var shape_key: Vector2 = chunk["position"]
+		var rock_pos: Vector2 = screen_center + (shape_key - world_center) * projection_fit * projection_zoom
 		if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
 			continue
-		var fraction: float = float(chunk["remaining"]) / float(chunk["initial"])
-		var rock_radius: float = maxf(0.65, float(chunk["radius"]) * render_scale * sqrt(maxf(0.0, fraction)))
-		var variation: float = 0.5 + 0.5 * sin(float(chunk["rotation"]) * 3.0)
-		var tint: Color = Color("#50545a").lerp(Color("#6b5e51"), variation).darkened(1.0 - shading)
-		if rock_radius < 1.8:
-			var a: Vector2 = rock_pos + Vector2(-rock_radius, rock_radius * 0.65)
-			var b: Vector2 = rock_pos + Vector2(rock_radius, rock_radius * 0.45)
-			var c: Vector2 = rock_pos + Vector2(0.20, -rock_radius)
-			for point in [a, b, c]:
+		var fraction: float = clampf(float(chunk["remaining"]) / maxf(ECONOMY.EPS, float(chunk["initial"])), 0.0, 1.0)
+		var rock_radius: float = maxf(0.65, float(chunk["radius"]) * render_scale * sqrt(fraction))
+		var crystal: bool = chunk["resource"] == "Crystals"
+		if rock_radius < ROCK_SPRITE_MIN_RADIUS:
+			# Keep distant terrain cheap and legible, with the same resource cue.
+			var variation: float = 0.5 + 0.5 * sin(float(chunk["rotation"]) * 3.0)
+			var tint: Color = (Color("#b879a0") if crystal else Color("#50545a").lerp(Color("#6b5e51"), variation)).darkened(1.0 - shading)
+			for point in [rock_pos + Vector2(-rock_radius, rock_radius * 0.65), rock_pos + Vector2(rock_radius, rock_radius * 0.45), rock_pos + Vector2(0.20, -rock_radius)]:
 				rock_vertices.append(Vector3(point.x, point.y, 0.0))
 				rock_colors.append(tint)
 			continue
-		var shape_key: Vector2 = chunk["position"]
 		if not asteroid_shape_cache.has(shape_key):
-			var unit_shape := PackedVector2Array()
-			for k in range(chunk["shape"].size()):
-				var angle: float = TAU * float(k) / float(chunk["shape"].size()) + float(chunk["rotation"])
-				unit_shape.append(Vector2.from_angle(angle) * float(chunk["shape"][k]))
-			# Derive a stable, subtly varied spin from the seeded shape.
 			var spin_signature: float = sin(float(chunk["rotation"]) * 5.0)
-			# Keep most slow; a seeded minority rotates a little faster.
 			var variety: float = fposmod(sin(shape_key.dot(Vector2(0.013, 0.021))) * 43758.5453, 1.0)
 			var speed: float = lerpf(0.003, 0.009, absf(spin_signature))
 			if variety < 0.30:
 				speed *= lerpf(1.5, 2.5, variety / 0.30)
-			var rate: float = speed * (1.0 if spin_signature >= 0.0 else -1.0)
-			asteroid_shape_cache[shape_key] = {"vertices": unit_shape, "triangles": Geometry2D.triangulate_polygon(unit_shape), "spin_rate": rate}
-		var rock := PackedVector2Array()
-		var cached: Dictionary = asteroid_shape_cache[shape_key]
-		# One rotation basis per visible detailed rock, not per vertex.
-		var spin: float = rotation_time * float(cached["spin_rate"]) if rock_radius >= 2.5 else 0.0
-		var basis: Vector2 = Vector2.from_angle(spin) * rock_radius
-		var perpendicular: Vector2 = basis.orthogonal()
-		for vertex in cached["vertices"]:
-			var local_vertex: Vector2 = vertex
-			rock.append(rock_pos + basis * local_vertex.x + perpendicular * local_vertex.y)
-		# The ore is embedded in stone, not a solid resource-colored rock.
-		for index in cached["triangles"]:
-			var p: Vector2 = rock[index]
-			rock_vertices.append(Vector3(p.x, p.y, 0.0))
-			rock_colors.append(tint)
-		# Batch thin edge quads, retaining the existing screen-space width.
-		for k in range(rock.size()):
-			var p: Vector2 = rock[k]
-			var q: Vector2 = rock[(k + 1) % rock.size()]
-			var normal: Vector2 = (q - p).normalized().orthogonal() * 0.4
-			for v in [p - normal, q - normal, q + normal, p - normal, q + normal, p + normal]:
-				rock_vertices.append(Vector3(v.x, v.y, 0.0))
-				rock_colors.append(tint.lightened(0.12))
-		if chunk["resource"] == "Crystals" and rock_radius >= 1.8:
-			# Subtle pink flecks inside the rock, grouped into the same mesh.
-			var spots: int = 1 if rock_radius < 4.0 else 3
-			for spot in range(spots):
-				var angle: float = float(chunk["rotation"]) + spin + float(spot) * 2.399963
-				var spot_center: Vector2 = rock_pos + Vector2.from_angle(angle) * rock_radius * (0.12 + 0.10 * float(spot))
-				var spot_radius: float = rock_radius * (0.11 + 0.025 * float(spot % 2))
-				for k in range(3):
-					var vertex: Vector2 = spot_center + Vector2.from_angle(angle + TAU * float(k) / 3.0) * spot_radius
-					rock_vertices.append(Vector3(vertex.x, vertex.y, 0.0))
-					rock_colors.append(Color("#cf8eae").darkened(1.0 - shading))
-	var mesh: ArrayMesh = null
-	if not rock_vertices.is_empty():
-		var arrays: Array = []
-		arrays.resize(Mesh.ARRAY_MAX)
-		arrays[Mesh.ARRAY_VERTEX] = rock_vertices
-		arrays[Mesh.ARRAY_COLOR] = rock_colors
-		mesh = ArrayMesh.new()
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+			asteroid_shape_cache[shape_key] = speed * (1.0 if spin_signature >= 0.0 else -1.0)
+		var spin: float = float(chunk["rotation"]) + rotation_time * float(asteroid_shape_cache[shape_key])
+		var axis: Vector2 = Vector2.from_angle(spin)
+		# Atlas cells have transparent padding; preserve approximately the
+		# same physical-radius scale, without modifying collision geometry.
+		var extent: float = rock_radius * 1.16
+		var basis: Vector2 = axis * extent
+		var side: Vector2 = basis.orthogonal()
+		var corners: Array[Vector2] = [rock_pos - basis - side, rock_pos + basis - side, rock_pos + basis + side, rock_pos - basis + side]
+		var tile: int = asteroid_tile(int(chunk["id"]))
+		var cell := Vector2(tile % ROCK_GRID, floori(float(tile) / ROCK_GRID)) / float(ROCK_GRID)
+		var pixel: Vector2 = Vector2(0.5, 0.5) / Vector2(ROCK_ATLAS.get_size())
+		var uv_min: Vector2 = cell + pixel
+		var uv_max: Vector2 = cell + Vector2.ONE / float(ROCK_GRID) - pixel
+		var uvs: Array[Vector2] = [uv_min, Vector2(uv_max.x, uv_min.y), uv_max, Vector2(uv_min.x, uv_max.y)]
+		# Store the rotation and resource flag as vertex data for the shader.
+		# Alpha is intentionally one; memory is identified by its material.
+		var meta := Color(axis.x * 0.5 + 0.5, axis.y * 0.5 + 0.5, 1.0 if crystal else 0.0, 1.0)
+		for vertex in [0, 1, 2, 0, 2, 3]:
+			var point: Vector2 = corners[vertex]
+			sprite_vertices.append(Vector3(point.x, point.y, 0.0))
+			sprite_colors.append(meta)
+			sprite_uvs.append(uvs[vertex])
+	var mesh: ArrayMesh = _rock_mesh(rock_vertices, rock_colors)
+	if mesh != null:
 		asteroid_frame_meshes.append(mesh)
 		map_canvas.draw_mesh(mesh, null)
-	if static_field >= 0:
-		asteroid_static_meshes[static_field] = {"signature": signature, "chunks": chunks, "mesh": mesh}
+	var sprites: ArrayMesh = _rock_mesh(sprite_vertices, sprite_colors, sprite_uvs)
+	if remembered:
+		_rock_material().set_shader_parameter("remembered", true)
+	_show_asteroid_mesh(map_canvas, key, sprites, remembered)
+	if remembered:
+		asteroid_static_meshes[static_field] = {"signature": signature, "chunks": chunks, "mesh": mesh, "sprites": sprites}
 
 func system_visual(index: int, state: Dictionary) -> Dictionary:
 	var seed_value: int = int(state["map"]["seed"])

@@ -1822,6 +1822,7 @@ func _draw_fog() -> void:
 	_draw_projection_active = false
 
 func _draw_fog_content() -> void:
+	fog_asteroid_view.begin_frame()
 	if fog_state.texture == null:
 		return
 	var offset: Vector2 = _screen_point(Vector2.ZERO)
@@ -1832,7 +1833,6 @@ func _draw_fog_content() -> void:
 	if state.is_empty():
 		return
 	# Draw last-seen/initial individual rocks over the fog, not belt polygons.
-	fog_asteroid_view.begin_frame()
 	fog_asteroid_view.prepare_map(state)
 	for index in range(state["map"].get("fields", []).size()):
 		var field: Dictionary = state["map"]["fields"][index]
@@ -4991,6 +4991,7 @@ func _draw_map_content() -> void:
 	var points: Array = state["map"]["points"]
 	var poses: Dictionary = _ship_poses(state)
 	_prepare_world_lighting(state, points, poses, viewport_bounds, render_scale)
+	celestial_view.set_asteroid_lights(map_canvas, world_batches.world_lights)
 	var font: Font = ThemeDB.fallback_font
 	var fields: Array = state["map"].get("fields", [])
 	var remembered_state: Dictionary = fog_state.observed_state(state, _map_size())
@@ -5001,7 +5002,7 @@ func _draw_map_content() -> void:
 			continue
 		if not bool(field.get("antimatter", false)):
 			var live_rocks: Array = fog_state.rock_view(field_index).get("live", [])
-			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, world_batches.light_level(center), celestial_view.orbit_time(state))
+			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, world_batches.light_level(center), celestial_view.orbit_time(state), -1, field_index)
 			if selected_field == field_index and selected_rock >= 0:
 				var rock: Dictionary = fog_state.rock_at(field_index, selected_rock)
 				if not rock.is_empty() and _fog_visible(rock["position"]):
