@@ -33,15 +33,31 @@ func configure(canvas: Control, art: HULL_ART, celestial: CELESTIAL_VIEW, camera
 	fit_query = fit
 	local_player = player_query
 
-func draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tint: Color, canvas: CanvasItem = null) -> void:
+func draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tint: Color, canvas: CanvasItem = null, exact_scale: bool = false) -> void:
 	var surface: CanvasItem = map_canvas if canvas == null else canvas
 	var axis: Vector2 = heading.normalized() if not heading.is_zero_approx() else Vector2.UP
-	var scale: float = maxf(0.42, ship_scale.call(false))
+	var base_scale: float = ship_scale.call(false)
+	var scale: float = (base_scale if exact_scale else maxf(0.42, base_scale)) * HULL_ART.visual_scale(kind)
 	var shape: PackedVector2Array = hull_art.polygon(point, axis * scale, axis.orthogonal() * scale, HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE))
+	_draw_ghost_polygon(surface, shape, tint)
+
+func _draw_ghost_polygon(surface: CanvasItem, shape: PackedVector2Array, tint: Color) -> void:
 	if not Geometry2D.triangulate_polygon(shape).is_empty():
 		surface.draw_colored_polygon(shape, Color(tint, 0.15))
 	shape.append(shape[0])
 	surface.draw_polyline(shape, Color(tint, 0.60), 0.8, true)
+
+func draw_wall_preview(points: PackedVector2Array, canvas: CanvasItem) -> void:
+	var width: float = maxf(2.0, float(ship_scale.call(false)) * 5.0)
+	for i in range(1, points.size()):
+		var a: Vector2 = screen_point.call(points[i - 1])
+		var b: Vector2 = screen_point.call(points[i])
+		if a.is_equal_approx(b):
+			continue
+		var side: Vector2 = a.direction_to(b).orthogonal() * width * 0.5
+		_draw_ghost_polygon(canvas, PackedVector2Array([a + side, b + side, b - side, a - side]), HUD.ACCENT)
+	for point in points:
+		draw_destination_ghost("wall_node", screen_point.call(point), Vector2.UP, HUD.ACCENT, canvas, true)
 
 func draw_sector_target(graph: Dictionary, node: int, tint: Color, drawn: Dictionary) -> void:
 	if node < 0 or node >= graph["points"].size() or drawn.has(node):
@@ -77,7 +93,8 @@ func _target_ring_entity(state: Dictionary, poses: Dictionary, refs: Dictionary,
 	if ref.is_empty():
 		return {}
 	var center: Vector2 = poses[id]["point"] if poses.has(id) else screen_point.call(ref["position"])
-	var radius: float = maxf(8.0, hull_art.ui_radius(str(ref.get("entity", {}).get("kind", ""))) * ship_scale.call(false))
+	var hull_kind: String = str(ref.get("entity", {}).get("kind", ""))
+	var radius: float = maxf(8.0, hull_art.ui_radius(hull_kind) * ship_scale.call(false) * HULL_ART.visual_scale(hull_kind))
 	match str(ref["kind"]):
 		"station": radius = station_radius.call() + 4.0
 		"yard": radius = maxf(8.0, 23.0 * ship_scale.call(true) * pow(1.2, int(ref["entity"]["level"]) - 1))

@@ -1802,6 +1802,7 @@ func _draw_queued_order_overlay() -> void:
 	var state: Dictionary = _state()
 	if state.is_empty() or selected_units.is_empty():
 		return
+	_draw_construction_preview(state)
 	# Skip resolving service references when nothing selected has a queue.
 	var selected: Dictionary = {}
 	for id in selected_units:
@@ -1815,6 +1816,21 @@ func _draw_queued_order_overlay() -> void:
 		order_view.draw_group_command_line(state, _ship_poses(state), _frame_service_refs(state), selected_units, queued_order_overlay)
 	if has_queue:
 		order_view.draw_queued_chains(queued_order_overlay, state, _ship_poses(state), _frame_service_refs(state), selected_units, Rect2(Vector2.ZERO, map_canvas.size), _fog_visible)
+
+func _draw_construction_preview(state: Dictionary) -> void:
+	if pending_command not in ["build_depot", "build_cannon", "build_wall"] or match_menu.visible or (is_instance_valid(codex) and codex.visible):
+		return
+	var mouse: Vector2 = map_canvas.get_local_mouse_position()
+	if not _in_visible_playfield(mouse) or notice_ui.contains_point(map_canvas.get_global_mouse_position()):
+		return
+	var point: Vector2 = _world_point(mouse)
+	if pending_command == "build_wall":
+		var start: Vector2 = wall_drag_start if wall_drag_start.is_finite() else point
+		var points: PackedVector2Array = ECONOMY.wall_preview_points(state, _me(), start, point)
+		order_view.draw_wall_preview(points, queued_order_overlay)
+	else:
+		var kind: String = "resource_depot" if pending_command == "build_depot" else "defense_cannon"
+		order_view.draw_destination_ghost(kind, mouse, Vector2.UP, HUD.ACCENT, queued_order_overlay, true)
 
 func _draw_fog() -> void:
 	_begin_draw_projection()
@@ -3678,7 +3694,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	var ship_distance: float = INF
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance <= maxf(5.0, hull_art.ui_radius(str(poses[id]["kind"])) * _ship_scale()) and distance < ship_distance:
+		if distance <= maxf(5.0, hull_art.ui_radius(str(poses[id]["kind"])) * _ship_scale() * HULL_ART.visual_scale(str(poses[id]["kind"]))) and distance < ship_distance:
 			ship_distance = distance
 			ship_hit = int(id)
 	var next_ship: int = ship_hit
@@ -3836,7 +3852,7 @@ func _entity_hit(state: Dictionary, point: Vector2) -> int:
 	var poses: Dictionary = _ship_poses(state)
 	for id in poses:
 		var distance: float = point.distance_to(poses[id]["point"])
-		if distance <= maxf(5.0, hull_art.ui_radius(str(poses[id]["kind"])) * _ship_scale()) and distance < nearest:
+		if distance <= maxf(5.0, hull_art.ui_radius(str(poses[id]["kind"])) * _ship_scale() * HULL_ART.visual_scale(str(poses[id]["kind"]))) and distance < nearest:
 			nearest = distance
 			target = int(id)
 	if target != -1:
@@ -4925,7 +4941,7 @@ func _transfer_anchor(state: Dictionary, poses: Dictionary, refs: Dictionary, id
 	elif kind == "colony_ship":
 		offset = Vector2(4.0 - float(bay) * 2.65, 0.0)
 	var axis: Vector2 = pose["direction"]
-	return (pose["point"] as Vector2) + (axis * offset.x + axis.orthogonal() * offset.y) * _ship_scale()
+	return (pose["point"] as Vector2) + (axis * offset.x + axis.orthogonal() * offset.y) * _ship_scale() * HULL_ART.visual_scale(kind)
 
 func _draw_map() -> void:
 	_begin_draw_projection()
@@ -4956,18 +4972,19 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 				continue
 			var pose: Dictionary = poses[id]
 			var pos: Vector2 = pose["point"]
-			if not bounds.grow(120.0 * scale).has_point(pos):
+			var hull_scale: float = scale * HULL_ART.visual_scale(str(ship["kind"]))
+			if not bounds.grow(120.0 * hull_scale).has_point(pos):
 				continue
 			var direction: Vector2 = pose["direction"]
 			var thrust: float = ship_motion.thrust_for(id) if running else 0.0
-			var radius_px: float = 52.0 * scale
+			var radius_px: float = 52.0 * hull_scale
 			var strength: float = 0.30
 			if thrust > 0.035:
-				pos = world_batches.exhaust_center(str(ship["kind"]), pos, direction, scale, thrust)
-				radius_px = (52.0 + 45.0 * thrust) * scale
+				pos = world_batches.exhaust_center(str(ship["kind"]), pos, direction, hull_scale, thrust)
+				radius_px = (52.0 + 45.0 * thrust) * hull_scale
 				strength += 1.15 * thrust
 			else:
-				pos = world_batches.engine_center(str(ship["kind"]), pos, direction, scale)
+				pos = world_batches.engine_center(str(ship["kind"]), pos, direction, hull_scale)
 			if bounds.grow(radius_px).has_point(pos):
 				_keep_near_light(lamps, [pos, radius_px, Color("#75d6ee"), strength, center.distance_squared_to(pos)])
 	var impacts: Array = world_effects.impact_lights(state, poses, _frame_service_refs(state), bounds, scale, celestial_view.orbit_time(state), _screen_point, _fog_visible, _empire_color)
@@ -5288,7 +5305,7 @@ func _draw_map_content() -> void:
 		var owner: int = int(ship["owner"])
 		var pose: Dictionary = pose_overrides.get(ship_id, poses[ship_id])
 		var point: Vector2 = pose["point"]
-		var scale: float = ship_scale
+		var scale: float = ship_scale * HULL_ART.visual_scale(kind)
 		if not viewport_bounds.grow(maxf(32.0, 80.0 * scale)).has_point(point):
 			continue
 		var direction: Vector2 = pose["direction"]
@@ -5375,32 +5392,22 @@ func _draw_map_content() -> void:
 			owner_textures[owner] = texture
 		if shield > 0.0:
 			world_batches.queue_overview_hull(hull_art.shield_texture(kind), point, direction.angle(), (half_size + 8.0) * scale, cloaked)
-		if not (kind == "ship" and scale >= 0.42):
-			# Source sprite faces up; the existing hull coordinate system faces right.
-			var art_angle: float = direction.angle() - (PI * 0.5 if HULL_ART.has_authored_sprite(kind) else 0.0)
-			world_batches.queue_overview_hull(texture, point, art_angle, half_size * scale, cloaked)
-		else:
-			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
-			var illumination: float = world_batches.light_level(point)
-			map_canvas.draw_texture_rect(texture, Rect2(-half_size, -half_size, half_size * 2.0, half_size * 2.0), false, Color(illumination, illumination, illumination))
-			map_canvas.draw_set_transform(Vector2.ZERO)
+		var art_angle: float = direction.angle() + HULL_ART.sprite_heading_offset(kind)
+		world_batches.queue_overview_hull(texture, point, art_angle, half_size * scale, cloaked)
 		if kind == "ship" and scale >= 0.42:
-			# Compose each close freighter's hull and opaque cargo as one
-			# draw sequence, not globally layered transparent bay batches.
-			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
+			# Foreground bay fills on the authored hull. Preserve fractional cargo
+			# and ten independent display bays in the existing cargo batch.
 			var bays: Array = ECONOMY.freighter_cargo_bays(ship["cargo"])
 			for k in range(bays.size()):
-				var bay_center: Vector2 = hull_art.freighter_bay_center(k)
-				map_canvas.draw_rect(Rect2(bay_center - Vector2(3.0, 3.0), Vector2(6.0, 6.0)), Color("#182333"))
+				var offset: Vector2 = hull_art.freighter_bay_center(k)
+				var bay_center: Vector2 = point + direction * offset.x + side * offset.y
 				var start: float = -3.0
 				for segment in bays[k]:
 					var end: float = minf(3.0, start + 6.0 * float(segment["amount"]) / ECONOMY.FREIGHTER_BAY_CAPACITY)
 					if (end - start) * scale >= 0.1:
-						var tint: Color = HUD.COLORS[segment["resource"]]
-						tint.a = 1.0
-						map_canvas.draw_rect(Rect2(bay_center + Vector2(start, -3.0), Vector2(end - start, 6.0)), tint.lightened(0.14))
+						var corners := PackedVector2Array([bay_center + direction * end + side * 3.0, bay_center + direction * start + side * 3.0, bay_center + direction * start - side * 3.0, bay_center + direction * end - side * 3.0])
+						world_batches.draw_cargo_segment(corners, HUD.COLORS[segment["resource"]])
 					start = end
-			map_canvas.draw_set_transform(Vector2.ZERO)
 		elif kind == "science_ship":
 			if float(ship.get("cargo", {}).get(ECONOMY.ANTIMATTER, 0.0)) >= 1.0 - ECONOMY.EPS:
 				var tint: Color = HUD.COLORS[ECONOMY.ANTIMATTER]
@@ -5423,13 +5430,6 @@ func _draw_map_content() -> void:
 	world_effects.draw_cargo_transfers(state, transfer_poses, service_refs, viewport_bounds, visual_clock, _ship_scale, map_canvas, _transfer_anchor)
 	order_view.draw_formation_preview(state, formation_button, formation_length, formation_mode, formation_path, _formation_orders, _selected_owned_units)
 	world_batches.flush_indicators()
-	if pending_command == "build_wall" and wall_drag_start.is_finite() and wall_drag_end.is_finite():
-		var preview: PackedVector2Array = ECONOMY.wall_chain_points(wall_drag_start, wall_drag_end)
-		for index in range(preview.size()):
-			var screen: Vector2 = _screen_point(preview[index])
-			if index > 0:
-				map_canvas.draw_line(_screen_point(preview[index - 1]), screen, Color("#73dbec"), 2.0, true)
-			map_canvas.draw_circle(screen, 5.0, Color("#a1eaf4"))
 	if selecting_units and selection_start.distance_to(selection_end) > 5.0:
 		var rect: Rect2 = Rect2(selection_start, selection_end - selection_start).abs()
 		map_canvas.draw_rect(rect, Color(HUD.ACCENT, 0.12))
