@@ -6,6 +6,7 @@ const HUD = preload("res://scripts/ui_theme.gd")
 const HULL_ART = preload("res://scripts/hull_art.gd")
 const CELESTIAL_VIEW = preload("res://scripts/celestial_view.gd")
 const CAMERA_VIEW = preload("res://scripts/camera_view.gd")
+const MIN_FORMATION_DRAG: float = 12.0
 
 var map_canvas: Control
 var hull_art: HULL_ART
@@ -51,7 +52,7 @@ func draw_sector_target(graph: Dictionary, node: int, tint: Color, drawn: Dictio
 	map_canvas.draw_circle(center, 1.0, Color(tint, 0.65))
 
 func draw_formation_preview(state: Dictionary, formation_button: int, formation_length: float, formation_mode: String, formation_path: PackedVector2Array, formation_orders: Callable, selected_owned_units: Callable) -> void:
-	if formation_button == 0 or formation_length <= 5.0:
+	if formation_button == 0 or formation_length < MIN_FORMATION_DRAG:
 		return
 	var entries: Array = formation_orders.call(state)
 	if entries.is_empty():

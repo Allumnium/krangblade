@@ -102,6 +102,8 @@ func dialog_visible() -> bool:
 	return is_instance_valid(conquest_dialog) and conquest_dialog.visible
 
 func draw(state: Dictionary) -> void:
+	if state.get("eliminated", []).has(local_player.call()):
+		return
 	var progress: Dictionary = state.get("objectives", {}).get(local_player.call(), {})
 	var completed: Dictionary = progress.get("completed", {})
 	var font: Font = ThemeDB.fallback_font
@@ -216,7 +218,8 @@ func layout() -> void:
 	var height: float = ceilf(font.get_height(13))
 	var upgrade_width: float = 52.0
 	var y: float = header_height + 24.0
-	objectives_toggle.visible = not state.is_empty()
+	var active: bool = not state.is_empty() and not state.get("eliminated", []).has(local_player.call())
+	objectives_toggle.visible = active
 	objectives_toggle.position = Vector2(_heading_left(font, "OBJECTIVES") - height - 4.0, roundf(y - font.get_ascent(13)))
 	objectives_toggle.size = Vector2(height, height)
 	y += 26.0
@@ -226,7 +229,7 @@ func layout() -> void:
 	for category in ECONOMY.REWARD_CATEGORIES:
 		var button: Button = conquest_buttons[category]
 		var refresh: Button = objective_refresh_buttons[category]
-		button.visible = objectives_expanded and not state.is_empty() and visible_categories.has(category)
+		button.visible = objectives_expanded and active and visible_categories.has(category)
 		refresh.visible = button.visible
 		if not button.visible:
 			continue
@@ -237,7 +240,7 @@ func layout() -> void:
 		refresh.position = Vector2(right - upgrade_width - height - 4.0, header_y)
 		refresh.size = Vector2(height, height)
 		y += 52.0
-	conquest_scoreboard_toggle.visible = not state.is_empty()
+	conquest_scoreboard_toggle.visible = active
 	conquest_scoreboard_toggle.position = Vector2(_heading_left(font, "TOTAL CONQUEST POINTS") - height - 4.0, roundf(y + 4.0 - font.get_ascent(13)))
 	conquest_scoreboard_toggle.size = Vector2(height, height)
 
@@ -265,7 +268,7 @@ func refresh(state: Dictionary) -> void:
 		refresh.tooltip_text = "Refresh available in %d s" % ceili(remaining) if remaining > 0.0 else "Randomize this objective · 60 s cooldown"
 	layout()
 	if is_instance_valid(conquest_dialog) and conquest_dialog.visible:
-		if ECONOMY.reward_points(progress, conquest_category) <= 0:
+		if state.get("eliminated", []).has(local_player.call()) or ECONOMY.reward_points(progress, conquest_category) <= 0:
 			conquest_dialog.hide()
 			conquest_card_signature = ""
 		else:

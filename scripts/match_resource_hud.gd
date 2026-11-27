@@ -271,7 +271,7 @@ func update_hover(owner: Control, codex: Window, station_details: VBoxContainer,
 	var mouse: Vector2 = owner.get_global_mouse_position()
 	var resource: String = ""
 	for key in global_resource_tiles:
-		if global_resource_tiles[key].get_global_rect().has_point(mouse):
+		if global_resource_tiles[key].is_visible_in_tree() and global_resource_tiles[key].get_global_rect().has_point(mouse):
 			resource = key
 			break
 	var local_visible: bool = station_details.is_visible_in_tree() and overview_panel.get_global_rect().has_point(mouse) and not planet_query.call().is_empty()
@@ -319,6 +319,13 @@ func refresh(state: Dictionary) -> void:
 	var credit_income: float = ECONOMY.base_galactic_income(state, int(local_player.call())) + ECONOMY.resident_tax_income(state, int(local_player.call())) - float(totals["upkeep"])
 	var unpaid: int = int(totals["unpaid_ships"])
 	var credit_balance: float = ECONOMY.credit_balance(state, local_player.call())
+	var any_resources: bool = credit_balance != 0.0 or float(totals["population"]) != 0.0
+	for resource in ECONOMY.RESOURCES:
+		any_resources = any_resources or float(totals["resources"][resource]) != 0.0
+	for tile in global_resource_tiles.values():
+		tile.visible = any_resources
+	if not any_resources and is_instance_valid(resource_hover_panel):
+		resource_hover_panel.hide()
 	global_credit_label.text = "%s%s" % [UI_TEXT.compact_amount(credit_balance), " !" if unpaid > 0 else ""]
 	global_credit_label.add_theme_color_override("font_color", Color("#ff7777") if unpaid > 0 else HUD.CREDIT_COLOR)
 	# Credits have no storage ceiling; normalize against the treasury, with

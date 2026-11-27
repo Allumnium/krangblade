@@ -7271,7 +7271,14 @@ func _test_match_elimination() -> void:
 	var fighter: Dictionary = {"id": 11001, "kind": "fighter", "owner": 2, "at": 1, "route": [], "dest": -1}
 	state["ships"].append(fighter)
 	state["ships"].erase(colony)
+	state["galactic_credits"][2] = 125.0
+	var ally_before: float = ECON.credit_balance(state, 3)
 	assert(ECON.update_match_outcome(state))
+	assert(ECON.credit_balance(state, 2) == 0.0)
+	assert(is_equal_approx(ECON.credit_balance(state, 3), ally_before + 125.0))
+	assert(state["defeat_credit_transfers"][2] == {3: 125.0})
+	assert(not ECON.update_match_outcome(state))
+	assert(is_equal_approx(ECON.credit_balance(state, 3), ally_before + 125.0))
 	assert(state["ships"].has(fighter) and int(fighter["owner"]) == 2)
 	assert(state["eliminated"].has(2) and state.get("match_result", {}).is_empty())
 	var last_ship: Dictionary = {"id": 11002, "kind": "miner", "owner": 3, "at": 2, "route": [], "dest": -1}
@@ -7284,7 +7291,17 @@ func _test_match_elimination() -> void:
 	assert(bytes_to_var(var_to_bytes(state))["match_result"] == state["match_result"])
 	var solo: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	assert(not ECON.update_match_outcome(solo) and solo.get("match_result", {}).is_empty())
-	print("PASS: colony recovery, surviving autonomous fleets, elimination, conquest victory and sandbox")
+	# Direct payout regression: equal fractional shares, no enemy or simultaneously
+	# defeated ally receives GC, and no eligible ally retains the original balance.
+	var distribution: Dictionary = {"teams": {1: 1, 2: 1, 3: 1, 4: 1, 5: 2}, "galactic_credits": {1: 101.0, 2: 0.0, 3: 0.0, 4: 11.0, 5: 12.0}}
+	ECON._distribute_defeat_credits(distribution, 1, {2: true, 3: true, 5: true}, [1])
+	assert(ECON.credit_balance(distribution, 1) == 0.0)
+	assert(ECON.credit_balance(distribution, 2) == 50.5 and ECON.credit_balance(distribution, 3) == 50.5)
+	assert(ECON.credit_balance(distribution, 4) == 11.0 and ECON.credit_balance(distribution, 5) == 12.0)
+	assert(distribution["defeat_credit_transfers"][1] == {2: 50.5, 3: 50.5})
+	ECON._distribute_defeat_credits(distribution, 4, {5: true}, [1, 4])
+	assert(ECON.credit_balance(distribution, 4) == 11.0 and not distribution["defeat_credit_transfers"].has(4))
+	print("PASS: colony recovery, surviving autonomous fleets, elimination, allied GC distribution, conquest victory and sandbox")
 
 func _test_building_population_requirements() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
@@ -7543,6 +7560,8 @@ func _test_bilateral_conquest() -> void:
 	state["planets"][1]["station"] = {}
 	assert(ECON.update_match_outcome(state))
 	assert(state["eliminated"].has(2) and int(state["match_result"]["winner"]) == 1)
+	assert(ECON.credit_balance(state, 2) == 0.0)
+	assert(state.get("defeat_credit_transfers", {}).has(2))
 	print("PASS: bilateral conquest evaluates surviving empires independently")
 
 func _test_ai_strategic_diplomacy() -> void:
