@@ -1512,6 +1512,7 @@ func _rpc_economy(update_round: int, revision: int, pose_revision: int, compress
 		if restored.is_empty():
 			_request_snapshot_recovery(revision)
 			return
+		MAP.update_asteroid_orbits(restored, float(snapshot.get("elapsed", 0.0)))
 		snapshot["map"] = restored
 	elif not snapshot.has("map"):
 		_request_snapshot_recovery(revision)

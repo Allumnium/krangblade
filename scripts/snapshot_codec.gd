@@ -37,6 +37,8 @@ static func encode_map_ore(live: Dictionary, template: Dictionary) -> Variant:
 			if active.size() != rock.size():
 				return null
 			for key in active:
+				if key == "position" and base_field.has("orbit_center") and rock.has("orbit_offset"):
+					continue
 				if key != "remaining" and active[key] != rock.get(key):
 					return null
 			var remaining: float = float(active["remaining"])
