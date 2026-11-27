@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.121.4: Verify all three authored hulls face the correct light side at 0/90/180/270 degrees, at multiple zooms and near impact/plume lights, preserving material crop, dark-side contrast, planet-only eclipses, shader compilation, hardware FPS and peer smoke.
+
 - [ ] v0.121.3: Re-run Godot parse and verify colony transformation and completed station shading after fixing illumination scope regression.
 
 - [ ] v0.121.2: Verify star-facing hull/rock highlights at multiple rotations, dark-side contrast, metallic and procedural planet terminators, station structural shading, impact lights, shader compilation, hardware FPS and peer smoke. No runtime validation yet.
