@@ -404,6 +404,11 @@ func _run_lighting_test() -> void:
 	for kind in ECON.SHIP_KINDS + HULL_ART.HULL_OUTLINES.keys() + HULL_ART.AUTHORED_SPRITE_KINDS:
 		if not kinds.has(str(kind)):
 			kinds.append(str(kind))
+	kinds.append("asteroid")
+	var rock_reference_shader := Shader.new()
+	rock_reference_shader.code = "shader_type canvas_item; render_mode unshaded; void fragment() { COLOR = texture(TEXTURE, UV); }"
+	var rock_reference := ShaderMaterial.new()
+	rock_reference.shader = rock_reference_shader
 	var results: Array[Dictionary] = []
 	var all_valid: bool = true
 	# All eight azimuths for each hull at four distinct absolute headings,
@@ -416,28 +421,59 @@ func _run_lighting_test() -> void:
 			for rotation_index in range(4):
 				var samples: Array[Dictionary] = []
 				batches.begin_frame()
+				celestial.begin_frame()
+				var rocks: Array = []
 				for kind_index in range(page_start, mini(page_start + 3, kinds.size())):
 					var kind: String = kinds[kind_index]
-					var texture: Texture2D = art.hull_texture(kind, Color("#63a9df"), true)
+					var texture: Texture2D = null
+					if kind != "asteroid":
+						texture = art.hull_texture(kind, Color("#63a9df"), true)
 					var radius: float = 175.0 + 150.0 * float(kind_index - page_start)
 					for bearing_index in range(8):
 						var bearing: float = TAU * float(bearing_index) / 8.0
 						var heading: float = PI * 0.5 * float(rotation_index)
 						var center: Vector2 = star + Vector2.from_angle(bearing) * radius
-						batches.queue_overview_hull(texture, center, heading + HULL_ART.sprite_heading_offset(kind), extent)
+						if kind == "asteroid":
+							rocks.append({"id": bearing_index, "position": center, "remaining": 1.0, "initial": 1.0, "radius": extent / 1.16, "resource": "Metals", "rotation": heading})
+						else:
+							batches.queue_overview_hull(texture, center, heading + HULL_ART.sprite_heading_offset(kind), extent)
 						samples.append({"kind": kind, "center": canvas.get_global_transform_with_canvas() * center, "extent": extent, "bearing_deg": bearing_index * 45, "heading_deg": rotation_index * 90})
 				batches.set_world_lights([])
+				celestial.set_asteroid_lights(canvas, [])
+				if not rocks.is_empty():
+					celestial.draw_asteroid_chunks({"chunks": rocks}, Rect2(Vector2.ZERO, canvas.size), 1.0, canvas, Vector2.ZERO, Vector2.ZERO, 1.0, 1.0, 1.0, 0.0, 0)
 				batches.flush_world(0.0, art)
 				var materials: Dictionary = {}
 				for texture in batches.overview_batches:
 					var instance: MultiMeshInstance2D = batches.overview_batches[texture]
+					if instance.visible and HULL_ART.has_authored_sprite(art.sprite_kind(texture)):
+						var material: ShaderMaterial = instance.material as ShaderMaterial
+						if material == null:
+							push_error("Missing authored lighting material: " + art.sprite_kind(texture))
+							quit(1)
+							return
+						for parameter in ["normal_map", "height_map", "occlusion_map", "specular_map"]:
+							var image_map: Texture2D = material.get_shader_parameter(parameter) as Texture2D
+							if image_map == null or image_map.get_size() != texture.get_size():
+								push_error("Missing/mismatched map %s for %s" % [parameter, art.sprite_kind(texture)])
+								quit(1)
+								return
 					materials[texture] = instance.material
 					instance.material = null
+				var rock_instance: MeshInstance2D = celestial.asteroid_sprite_nodes.get(0) if not rocks.is_empty() else null
+				var rock_material: Material = null
+				if is_instance_valid(rock_instance):
+					rock_material = rock_instance.material
+					rock_instance.material = rock_reference
 				var reference: Image = await _lighting_capture(viewport)
 				for texture in materials:
 					batches.overview_batches[texture].material = materials[texture]
+				if is_instance_valid(rock_instance):
+					rock_instance.material = rock_material
 				var dark: Image = await _lighting_capture(viewport)
-				batches.set_world_lights([[star, 1600.0, tint, 1.55, 0.0, true]])
+				var lights: Array = [[star, 1600.0, tint, 1.55, 0.0, true]]
+				batches.set_world_lights(lights)
+				celestial.set_asteroid_lights(canvas, lights)
 				var lit: Image = await _lighting_capture(viewport)
 				if reference == null or dark == null or lit == null or reference.is_empty() or dark.is_empty() or lit.is_empty():
 					push_error("Lighting test did not obtain rendered pixels.")
