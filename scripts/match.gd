@@ -358,11 +358,8 @@ func _build_map_layers() -> void:
 	map_canvas = Control.new()
 	add_child(map_canvas)
 	map_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	map_canvas.offset_left = 8
-	map_canvas.offset_top = 0
-	map_canvas.offset_right = -8
-	map_canvas.offset_bottom = -8
-	map_canvas.clip_contents = false
+	# The scene is full-bleed; only HUD controls have a safe-area inset.
+	map_canvas.clip_contents = true
 	map_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	map_canvas.gui_input.connect(_map_input)
 	map_canvas.draw.connect(_draw_map)
@@ -444,7 +441,7 @@ func _layout_match_header() -> void:
 		return
 	# Reserve the right column only when all header tiles fit at their minimum widths.
 	var reserved: float = 0.0 if _state().get("eliminated", []).has(_me()) else MATCH_CONQUEST_UI.OBJECTIVES_WIDTH + 4.0
-	var alongside: bool = header_panel.get_combined_minimum_size().x <= map_canvas.size.x - reserved
+	var alongside: bool = header_panel.get_combined_minimum_size().x <= maxf(0.0, size.x - 16.0 - reserved)
 	header_panel.offset_right = -8.0 - (reserved if alongside else 0.0)
 	conquest_ui.header_height = 0.0 if alongside else HEADER_HEIGHT
 	conquest_ui.layout()
@@ -514,7 +511,7 @@ func _build_command_deck() -> void:
 	minimap.size_flags_horizontal = Control.SIZE_FILL
 	minimap.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	deck.add_child(minimap)
-	minimap_view.configure(minimap, map_canvas, session, territory_view, fog_state, ship_motion, _state, _map_size, _world_point, _me, _ship_poses, _fog_visible, _ship_visible, _empire_color)
+	minimap_view.configure(minimap, session, territory_view, fog_state, ship_motion, _state, _map_size, _projection_size, _world_point, _me, _ship_poses, _fog_visible, _ship_visible, _empire_color)
 	minimap.draw.connect(_draw_minimap)
 	minimap.gui_input.connect(_minimap_input)
 	minimap.resized.connect(minimap.queue_redraw)
@@ -895,6 +892,7 @@ func _build_trade_controls() -> void:
 
 func _connect_match_ui_layout() -> void:
 	resized.connect(_layout_console)
+	console_panel.resized.connect(_map_resized, CONNECT_DEFERRED)
 	inspector_panel.resized.connect(_layout_command_grids)
 	inspector_slot.resized.connect(_layout_command_grids)
 	inspector_panel.resized.connect(console_profile.queue_redraw)
@@ -917,10 +915,8 @@ func _layout_console() -> void:
 	# Keep a stable, useful map at both normal and small window sizes.
 	var height: float = roundf(0.9 * minf(clampf(size.y * 0.36, 220.0, 320.0), maxf(135.0, size.y - HEADER_HEIGHT - 180.0)))
 	console_panel.offset_top = -8.0 - height
-	# Draw the space scene behind the HUD rather than clipping it at a
-	# horizontal line. Camera framing still uses the unobstructed play area.
-	map_canvas.offset_bottom = -8.0
-	territory_view.layer.offset_bottom = map_canvas.offset_bottom
+	# The scene still draws behind the stepped HUD. Only the camera's
+	# projection reserves the bottom deck; world layers stay full-screen.
 	# Symmetric wings occupy at most 48% of the deck together at the
 	# usual window sizes. The center receives all remaining width.
 	var wing_width: float = clampf(floorf((size.x - 28.0 - LENS_STRIP_WIDTH) * 0.24), 180.0, 320.0)
@@ -3104,9 +3100,12 @@ func _projection_size() -> Vector2:
 func _map_resized() -> void:
 	_layout_match_header()
 	notice_ui.layout()
-	# The world-space center is independent of screen dimensions.
+	# Resize changes the world-space extent, not the requested camera target.
 	camera.zoom = minf(camera.zoom, _max_zoom())
+	camera.constrain(_projection_size(), _map_size())
 	map_canvas.queue_redraw()
+	if is_instance_valid(minimap):
+		minimap.queue_redraw()
 
 func _map_size() -> Vector2:
 	if _draw_projection_active:
@@ -4306,7 +4305,7 @@ func _map_input(event: InputEvent) -> void:
 			if motion.button_mask == 0:
 				drag_button = 0
 			else:
-				camera.world = _camera_world_center() - motion.relative / (_fit() * camera.zoom)
+				_center_world(_camera_world_center() - motion.relative / (_fit() * camera.zoom))
 	map_canvas.queue_redraw()
 	map_canvas.accept_event()
 
@@ -4743,7 +4742,7 @@ func _bounds_zoom(bounds: Rect2) -> float:
 	return camera.bounds_zoom(bounds, size.x, _projection_size(), _map_size())
 
 func _center_world(point: Vector2) -> void:
-	camera.world = point
+	camera.set_world_center(point, _projection_size(), _map_size())
 
 func _frame_starting_sector(index: int) -> void:
 	var state: Dictionary = _state()

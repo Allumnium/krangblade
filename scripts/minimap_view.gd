@@ -18,7 +18,7 @@ static func _make_hull_rim() -> PackedVector2Array:
 	return rim
 
 var minimap: Control
-var map_canvas: Control
+var projection_size: Callable
 var session: Node
 var territory_view: TERRITORY_VIEW
 var fog_state: FOG_OF_WAR
@@ -33,9 +33,9 @@ var ship_visible: Callable
 var empire_color: Callable
 var minimap_pan_drag: bool = false
 
-func configure(surface: Control, canvas: Control, session_node: Node, territory: TERRITORY_VIEW, fog: FOG_OF_WAR, motion: SHIP_MOTION_VIEW, snapshot_query: Callable, size_query: Callable, world_query: Callable, player_query: Callable, pose_query: Callable, fog_query: Callable, visibility_query: Callable, color_query: Callable) -> void:
+func configure(surface: Control, session_node: Node, territory: TERRITORY_VIEW, fog: FOG_OF_WAR, motion: SHIP_MOTION_VIEW, snapshot_query: Callable, size_query: Callable, projection_query: Callable, world_query: Callable, player_query: Callable, pose_query: Callable, fog_query: Callable, visibility_query: Callable, color_query: Callable) -> void:
 	minimap = surface
-	map_canvas = canvas
+	projection_size = projection_query
 	session = session_node
 	territory_view = territory
 	fog_state = fog
@@ -218,7 +218,8 @@ func draw(selected: int, selected_units: Array[int], selected_field: int, select
 	for point in selected_points:
 		minimap.draw_arc(point, 2.6, 0.0, TAU, 10, Color.WHITE, 1.0, true)
 	var corner: Vector2 = _minimap_point(world_point.call(Vector2.ZERO), area)
-	var end: Vector2 = _minimap_point(world_point.call(map_canvas.size), area)
+	# Show the stable camera framing area, excluding the bottom deck.
+	var end: Vector2 = _minimap_point(world_point.call(projection_size.call()), area)
 	var camera_rect := Rect2(corner, end - corner)
 	# Preserve a visible indicator at extreme close-up zoom levels.
 	var visible_extent: Vector2 = camera_rect.size.max(Vector2(3, 3))
