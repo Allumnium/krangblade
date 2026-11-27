@@ -174,6 +174,21 @@ func sync_history(state: Dictionary, alerts: Dictionary) -> void:
 			var tint := Color("#ffb16b") if str(key).begins_with("approach:") else Color("#ff7777")
 			incoming.append({"text": str(alert["text"]), "tint": tint, "born": int(alert["born"]), "alert": alert.duplicate(true)})
 	var roster: Dictionary = session.get("players")
+	var transfers: Dictionary = state.get("defeat_credit_transfers", {})
+	for defeated in transfers:
+		var identity: String = "defeat_gc:" + str(defeated)
+		current[identity] = true
+		if notice_seen.has(identity):
+			continue
+		var payouts: Dictionary = transfers[defeated]
+		var total: float = 0.0
+		for amount in payouts.values():
+			total += float(amount)
+		var name_text: String = str(roster.get(defeated, {}).get("name", "Player")).left(20)
+		var message: String = "%s defeated · %.2f GC shared among %d allies" % [name_text, total, payouts.size()]
+		if payouts.has(local_player.call()):
+			message += " · You received %.2f GC" % float(payouts[local_player.call()])
+		incoming.append({"text": message, "tint": Color("#e9cb7c"), "born": now})
 	for event in state.get("objective_events", []):
 		if int(event["player"]) != local_player.call():
 			continue

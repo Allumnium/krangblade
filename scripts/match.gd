@@ -443,7 +443,7 @@ func _layout_match_header() -> void:
 	if not is_instance_valid(header_panel) or not is_instance_valid(map_canvas):
 		return
 	# Reserve the right column only when all header tiles fit at their minimum widths.
-	var reserved: float = MATCH_CONQUEST_UI.OBJECTIVES_WIDTH + 4.0
+	var reserved: float = 0.0 if _state().get("eliminated", []).has(_me()) else MATCH_CONQUEST_UI.OBJECTIVES_WIDTH + 4.0
 	var alongside: bool = header_panel.get_combined_minimum_size().x <= map_canvas.size.x - reserved
 	header_panel.offset_right = -8.0 - (reserved if alongside else 0.0)
 	conquest_ui.header_height = 0.0 if alongside else HEADER_HEIGHT
@@ -2784,6 +2784,7 @@ func _refresh() -> void:
 		match_timer_label.text = clock
 	resource_hud.refresh(state)
 	conquest_ui.refresh(state)
+	_refresh_global_selection_buttons(state)
 	if empire_ui.dialog_visible():
 		empire_ui.refresh(state)
 	_refresh_match_result(state)
@@ -4116,7 +4117,7 @@ func _unload_selected() -> void:
 func _formation_orders(state: Dictionary) -> Array:
 	var entries: Array = []
 	var owned: Array[int] = _selected_owned_units(state, formation_mode not in ["attack", "patrol"])
-	if owned.is_empty() or formation_length <= 5.0:
+	if owned.is_empty() or formation_length < ORDER_VIEW.MIN_FORMATION_DRAG:
 		return entries
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var stroke := PackedVector2Array()
@@ -4492,6 +4493,31 @@ func _build_global_selection_strip() -> void:
 		caption.add_theme_font_size_override("font_size", 10)
 	global_selection_strip.resized.connect(_layout_control_group_strip)
 	_layout_control_group_strip()
+
+func _refresh_global_selection_buttons(state: Dictionary) -> void:
+	if not is_instance_valid(global_selection_strip):
+		return
+	var has_station: bool = false
+	var has_army: bool = false
+	var has_yard: bool = false
+	var player: int = _me()
+	for system in state.get("planets", []):
+		if int(system["owner"]) != player:
+			continue
+		has_station = has_station or ECONOMY.has_station(system)
+		has_yard = has_yard or not system["yards"].is_empty()
+		if has_station and has_yard:
+			break
+	for craft in state.get("ships", []):
+		if int(craft["owner"]) == player and craft["kind"] in ECONOMY.MILITARY_KINDS:
+			has_army = true
+			break
+	var station_button: Button = global_selection_strip.get_child(0)
+	var army_button: Button = global_selection_strip.get_child(1)
+	var yard_button: Button = global_selection_strip.get_child(2)
+	station_button.disabled = not has_station
+	army_button.disabled = not has_army
+	yard_button.disabled = not has_yard
 
 func _select_all_buildings(kind: String) -> void:
 	var state: Dictionary = _state()
@@ -4930,15 +4956,15 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 				continue
 			var pose: Dictionary = poses[id]
 			var pos: Vector2 = pose["point"]
-			if not bounds.grow(90.0 * scale).has_point(pos):
+			if not bounds.grow(120.0 * scale).has_point(pos):
 				continue
 			var direction: Vector2 = pose["direction"]
 			var thrust: float = ship_motion.thrust_for(id) if running else 0.0
-			var radius_px: float = 35.0 * scale
-			var strength: float = 0.12
+			var radius_px: float = 52.0 * scale
+			var strength: float = 0.30
 			if thrust > 0.035:
 				pos = world_batches.exhaust_center(str(ship["kind"]), pos, direction, scale, thrust)
-				radius_px = (35.0 + 45.0 * thrust) * scale
+				radius_px = (52.0 + 45.0 * thrust) * scale
 				strength += 1.15 * thrust
 			else:
 				pos = world_batches.engine_center(str(ship["kind"]), pos, direction, scale)
@@ -5293,10 +5319,10 @@ func _draw_map_content() -> void:
 			if simulation_running and thrust > 0.035:
 				world_batches.queue_exhaust(kind, point, engine_axis, scale, thrust, ship_id, viewport_bounds)
 				var plume_center: Vector2 = world_batches.exhaust_center(kind, point, engine_axis, scale, thrust)
-				world_batches.queue_lamp_glow(plume_center, (18.0 + 20.0 * thrust) * scale, Color("#75d6ee"), 0.35 + 0.60 * thrust)
+				world_batches.queue_lamp_glow(plume_center, (27.0 + 20.0 * thrust) * scale, Color("#75d6ee"), 0.45 + 0.50 * thrust)
 			else:
 				var lamp: Vector2 = world_batches.engine_center(kind, point, engine_axis, scale)
-				world_batches.queue_lamp_glow(lamp, 18.0 * scale, Color("#75d6ee"), 0.12)
+				world_batches.queue_lamp_glow(lamp, 27.0 * scale, Color("#75d6ee"), 0.30)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
@@ -5351,7 +5377,7 @@ func _draw_map_content() -> void:
 			world_batches.queue_overview_hull(hull_art.shield_texture(kind), point, direction.angle(), (half_size + 8.0) * scale, cloaked)
 		if not (kind == "ship" and scale >= 0.42):
 			# Source sprite faces up; the existing hull coordinate system faces right.
-			var art_angle: float = direction.angle() + (PI * 0.5 if HULL_ART.has_authored_sprite(kind) else 0.0)
+			var art_angle: float = direction.angle() - (PI * 0.5 if HULL_ART.has_authored_sprite(kind) else 0.0)
 			world_batches.queue_overview_hull(texture, point, art_angle, half_size * scale, cloaked)
 		else:
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)

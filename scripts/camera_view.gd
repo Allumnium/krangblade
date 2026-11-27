@@ -2,7 +2,7 @@ extends RefCounted
 ## Client camera state and world/screen projection. No node or selection dependencies.
 ## View geometry is supplied by the match controller, preserving HUD framing.
 const KEYBOARD_PAN_SPEED: float = 420.0
-const MIN_ZOOM: float = 0.5
+const MIN_ZOOM: float = 1.0 / 1.10
 const OVERVIEW_MAX_ZOOM: float = 64.0
 const FIGHTER_HULL_LENGTH: float = 22.0
 const CLOSEUP_SCREEN_FRACTION: float = 0.6

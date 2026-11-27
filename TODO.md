@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.119.3 observer UI, empty shortcuts/resource bar, allied defeat GC, zoom and formation thresholds, ship heading and lamps: run elimination/replica and UI smoke; verify multiple simultaneous defeats, zero/no-allies cases, notification deduplication, close-up sprite/material alignment and rendered FPS.
+
 - [ ] v0.119.2 replaces ordinary asteroid ridges with per-star orbital rings plus sparse static deposits; remove ordinary asteroid overview markers. Verify rings fit nearby systems, moving mining berths, seeded generation, compact ore reconstruction, Pulsar protection, visibility and rendered/authority FPS.
 
 - [ ] v0.119.1 switches scouts to unknown-area-first then currently dark-area exploration. Verify coverage versus fog, blocked-route fallback, multiple scouts, manual interruption, sample cost and authority/guest parity.

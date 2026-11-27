@@ -11897,7 +11897,7 @@ static func _reroute_after_capture(state: Dictionary, index: int) -> void:
 		_evacuate_civilian(state, ship, teams)
 
 # Match-only outcome evaluation, invoked by the authoritative session.
-# Eliminate only when all stations and hulls are gone. Bilateral mode
+# Eliminate when no stations or colony recovery options remain. Bilateral mode
 # retains conquest as a last-empire fallback, without transitive winners.
 # A one-empire sandbox never auto-ends.
 # Authority-only substep; publication, RPCs and clock remain in GameSession.
@@ -12096,6 +12096,33 @@ static func advance_authority_substep(state: Dictionary, dt: float, profile: Dic
 		profile["Match outcome"] = int(profile.get("Match outcome", 0)) + Time.get_ticks_usec() - outcome_started
 	return changed or treaty_changed
 
+# A player can only be defeated once. Use the complete viability census so
+# simultaneous defeats cannot receive one another's treasuries.
+static func _distribute_defeat_credits(state: Dictionary, player: int, viable: Dictionary, eliminated: Array) -> void:
+	var balance: float = credit_balance(state, player)
+	if balance <= 0.0:
+		return
+	var allies: Array[int] = []
+	for candidate in state["teams"]:
+		var id: int = int(candidate)
+		if id != player and viable.has(id) and not eliminated.has(id) and empires_allied(state, player, id):
+			allies.append(id)
+	if allies.is_empty():
+		return
+	allies.sort()
+	var share: float = balance / float(allies.size())
+	var distributed: float = 0.0
+	var payouts: Dictionary = {}
+	for i in range(allies.size()):
+		var amount: float = balance - distributed if i == allies.size() - 1 else share
+		_refund_credits(state, allies[i], amount)
+		payouts[allies[i]] = amount
+		distributed += amount
+	state["galactic_credits"][player] = 0.0
+	var transfers: Dictionary = state.get("defeat_credit_transfers", {})
+	transfers[player] = payouts
+	state["defeat_credit_transfers"] = transfers
+
 static func update_match_outcome(state: Dictionary) -> bool:
 	if not state.get("match_result", {}).is_empty():
 		return false
@@ -12120,6 +12147,7 @@ static func update_match_outcome(state: Dictionary) -> bool:
 		if viable.has(player) or eliminated.has(player):
 			continue
 		eliminated.append(player)
+		_distribute_defeat_credits(state, int(player), viable, eliminated)
 		changed = true
 		state["ai_waves"].erase(player)
 		state["ai_players"].erase(player)
