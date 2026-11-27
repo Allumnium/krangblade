@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [x] Isolated Godot 4.7.2 GPU shader probe: 8/8 correct bearings; 0/8 with deliberately inverted normals (v0.121.6 evidence).
+
 - [ ] v0.121.5: Run rendered ship lighting workflow, inspect 192 scores and PNGs, calibrate broad orientation threshold if justified by actual renders; investigate every systematic inversion. GPU and peer checks remain pending.
 
 - [ ] v0.121.4: Verify all three authored hulls face the correct light side at 0/90/180/270 degrees, at multiple zooms and near impact/plume lights, preserving material crop, dark-side contrast, planet-only eclipses, shader compilation, hardware FPS and peer smoke.
