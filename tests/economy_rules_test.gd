@@ -1331,7 +1331,7 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	for direction in [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]:
 		var approach: Vector2 = ECON.colony_approach_position(state, 2, star + direction * 2000.0)
 		assert((approach - star).normalized().is_equal_approx(direction))
-		assert(approach.distance_to(star) <= 145.0 + ECON.EPS)
+		assert(approach.distance_to(star) <= maxf(ECON.STATION_ORBIT_RADIUS, ECON.system_world_radius(state, 2) * 0.13 + 100.0) + ECON.EPS)
 	assert(not near.get("retreating", false) and not near.has("repair_site"))
 	assert(ECON.nearest_idle_colony(state, 1, 2) == -1)
 	assert(ECON.nearest_idle_colony(state, 1, 1) == 100)
@@ -3838,8 +3838,12 @@ func _initialize() -> void:
 	assert(rich_bodies == ECON.system_bodies(rich, 123, 0))
 	for body in poor_bodies:
 		assert(body["resource"] == "")
+	var prior_speed: float = INF
 	for body in rich_bodies:
 		assert(float(body["orbit"]) + float(body["size"]) < 1.0)
+		assert(float(body["speed"]) < prior_speed)
+		prior_speed = float(body["speed"])
+		assert(is_equal_approx(float(body["speed"]) * pow(float(body["orbit"]) / 0.38, 1.5), float(rich_bodies[0]["speed"])))
 	# Materials are prepaid atomically; work and crew remain time-dependent.
 	var saved_population: float = float(p["population"])
 	p["population"] = saved_population

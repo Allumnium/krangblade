@@ -7,6 +7,8 @@ const CELESTIAL_VIEW = preload("res://scripts/celestial_view.gd")
 const CLOAK_OPACITY: float = 0.30
 
 var map_canvas: Control
+var ship_flag_batch: MultiMeshInstance2D
+var ship_flag_entries: Array = []
 var health_batch: MultiMeshInstance2D
 var ring_batch: MultiMeshInstance2D
 var health_entries: Array = []
@@ -170,8 +172,12 @@ func build(canvas: Control) -> void:
 	cargo_glow_batch.texture = _resource_glow()
 	cargo_batch.z_index = 1
 	cargo_glow_batch.z_index = 1
+	ship_flag_batch = _build_effect_batch(true)
+	ship_flag_batch.z_index = 1
 
 func begin_frame() -> void:
+	ship_flag_entries.clear()
+	ship_flag_batch.hide()
 	lamp_glow_entries.clear()
 	lamp_glow_batch.hide()
 	health_entries.clear()
@@ -205,10 +211,14 @@ func flush_world(visual_clock: float, hull_art: HULL_ART) -> void:
 	_flush_overview_hulls(hull_art)
 	_flush_effect_batch(cargo_batch, cargo_entries)
 	_flush_effect_batch(cargo_glow_batch, cargo_glow_entries)
+	_flush_effect_batch(ship_flag_batch, ship_flag_entries)
 
 func flush_indicators() -> void:
 	_flush_effect_batch(health_batch, health_entries)
 	_flush_effect_batch(ring_batch, ring_entries)
+
+func queue_ship_flag(point: Vector2, radius: float, tint: Color) -> void:
+	ship_flag_entries.append([Transform2D(0.0, Vector2.ONE * radius * 2.0, 0.0, point), tint])
 
 func queue_health_rect(rect: Rect2, tint: Color) -> void:
 	if rect.size.x <= 0.0 or not rect.intersects(Rect2(Vector2.ZERO, map_canvas.size), true):

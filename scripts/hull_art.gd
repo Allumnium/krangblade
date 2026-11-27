@@ -200,6 +200,19 @@ var hull_textures: Dictionary = {}
 var shield_textures: Dictionary = {}
 var selection_portrait_icons: Dictionary = {}
 
+func ship_flag_offset(kind: String) -> float:
+	# Forward-axis coordinates; freighter cargo bays end at -17.
+	if kind == "ship":
+		return -23.0
+	if kind == "fighter":
+		return -7.0
+	if kind == "science_ship":
+		return -10.0
+	var rear: float = 0.0
+	for vertex in HULL_OUTLINES.get(kind, []):
+		rear = minf(rear, (vertex as Vector2).x)
+	return rear * 0.70
+
 func freighter_bay_center(index: int) -> Vector2:
 	return Vector2(14.0 - float(floori(float(index) / 2.0)) * 7.0, -3.5 if index % 2 == 0 else 3.5)
 
