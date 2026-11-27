@@ -102,6 +102,24 @@ void vertex() {
 	}
 }
 void fragment() {
+	// Recover the actual rendered UV axes for authored ship quads. This
+	// includes MultiMesh rotation and any mirrored mesh UV convention.
+	// Evaluate derivatives before discarding transparent edge fragments.
+	vec2 ship_pos = surface_position;
+	vec2 ship_axis_x = surface_axis_x;
+	vec2 ship_axis_y = surface_axis_y;
+	if (authored_sprite && !spherical_surface) {
+		ship_pos = SCREEN_UV / SCREEN_PIXEL_SIZE;
+		vec2 ux = dFdx(UV);
+		vec2 uy = dFdy(UV);
+		vec2 px = dFdx(ship_pos);
+		vec2 py = dFdy(ship_pos);
+		float det = ux.x * uy.y - ux.y * uy.x;
+		if (abs(det) > 0.00000001) {
+			ship_axis_x = normalize((px * uy.y - py * ux.y) / det);
+			ship_axis_y = normalize((py * ux.x - px * uy.x) / det);
+		}
+	}
 	vec4 base = texture(TEXTURE, UV);
 	if (base.a <= 0.001) { discard; }
 	vec3 lit = base.rgb * illumination;
@@ -128,6 +146,10 @@ void fragment() {
 		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, geometric, vec2(0.0), base.rgb, specular, vec3(0.035, 0.035, 0.045), ao);
 	} else if (authored_sprite) {
 		vec3 n = texture(normal_map, UV).rgb * 2.0 - 1.0;
+		// The three exported hull normal maps encode lateral slopes
+		// opposite to the outward height normal in our tangent space.
+		// Correct the normal, not the light or the geometric facing gate.
+		n.xy = -n.xy;
 		vec2 pixel = TEXTURE_PIXEL_SIZE;
 		float dx = texture(height_map, UV + vec2(pixel.x, 0.0)).r - texture(height_map, UV - vec2(pixel.x, 0.0)).r;
 		float dy = texture(height_map, UV + vec2(0.0, pixel.y)).r - texture(height_map, UV - vec2(0.0, pixel.y)).r;
@@ -136,7 +158,7 @@ void fragment() {
 		float specular = texture(specular_map, UV).r;
 		// _v is an offline preview, not a material input. TEXTURE is the
 		// empire-decaled diffuse map; only explicit world lights emit light.
-		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, n, (UV - vec2(0.5)) * vec2(2.0, -2.0), base.rgb, specular * 0.45, vec3(0.035, 0.040, 0.050), ao);
+		lit = surface_lighting(ship_pos, ship_axis_x, ship_axis_y, n, n, (UV - vec2(0.5)) * vec2(2.0, -2.0), base.rgb, specular * 0.45, vec3(0.035, 0.040, 0.050), ao);
 		// Identical low self-lit surface detail for every authored hull; no idle plume or extra light source.
 		lit += base.rgb * 0.012;
 	}
