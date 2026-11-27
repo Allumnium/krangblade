@@ -3170,8 +3170,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
-					var planet_light: float = world_batches.light_level(point)
-					map_canvas.draw_texture_rect(celestial_view.body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(planet_light, planet_light, planet_light, detail))
+					celestial_view.draw_lit_body(map_canvas, Vector2i(index, slot), body, point, body_radius, detail, world_batches.planet_lighting)
 				else:
 					map_canvas.draw_circle(point, body_radius, Color(celestial_view.body_base_color(body).darkened(0.18), detail), true)
 				if system.get("pds", {}).has(slot):
@@ -4960,7 +4959,8 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 	var stars: Array = []
 	var lamps: Array = []
 	var center: Vector2 = bounds.get_center()
-	var radius: float = maxf(12.0, 1600.0 * render_scale)
+	var radius: float = maxf(12.0, 2400.0 * render_scale)
+	var blockers: Array = []
 	for index in range(points.size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):
 			continue
@@ -4968,8 +4968,24 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 		if not bounds.grow(radius).has_point(pos):
 			continue
 		var tint: Color = Color("#ffe6bb") if ECONOMY.has_planets(state["planets"][index]) else Color("#a7c9ff")
-		_keep_near_light(stars, [pos, radius, tint, 0.95, center.distance_squared_to(pos)])
+		_keep_near_light(stars, [pos, radius, tint, 2.4, center.distance_squared_to(pos), true])
 		world_batches.draw_resource_glow(pos, minf(radius, 240.0), tint, 0.15)
+		# Limit visual eclipse casters to nearby visible planets and stations.
+		if not _fog_visible(points[index]):
+			continue
+		var system_radius: float = _planet_radius(index, state)
+		if celestial_view.planet_detail_opacity(index, system_radius) > 0.05:
+			for body in celestial_view.system_visual(index, state)["bodies"]:
+				var at: Vector2 = pos + celestial_view.body_position(body, system_radius, celestial_view.orbit_time(state))
+				var disc_radius: float = system_radius * float(body["size"]) * 0.55
+				if disc_radius >= 5.0 and bounds.grow(disc_radius * 2.0).has_point(at):
+					_keep_near_light(blockers, [at, disc_radius, null, 0.0, center.distance_squared_to(at)])
+		if ECONOMY.has_station(state["planets"][index]):
+			var station_world: Vector2 = ECONOMY.station_position(state, index, float(state["elapsed"]))
+			var at: Vector2 = _screen_point(station_world)
+			var disc_radius: float = _station_radius()
+			if disc_radius >= 10.0 and _fog_visible(station_world) and bounds.grow(disc_radius * 2.0).has_point(at):
+				_keep_near_light(blockers, [at, disc_radius, null, 0.0, center.distance_squared_to(at)])
 	var scale: float = _ship_scale()
 	var running: bool = int(state.get("time_speed", 1)) > 0
 	if scale >= 0.325:
@@ -4987,8 +5003,8 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 			if thrust <= 0.035:
 				continue
 			pos = world_batches.exhaust_center(str(ship["kind"]), pos, direction, hull_scale, thrust)
-			var radius_px: float = (40.0 + 35.0 * thrust) * hull_scale
-			var strength: float = 1.05 * thrust
+			var radius_px: float = (22.0 + 18.0 * thrust) * hull_scale
+			var strength: float = 0.32 * thrust
 			if bounds.grow(radius_px).has_point(pos):
 				_keep_near_light(lamps, [pos, radius_px, _empire_color(int(ship["owner"])), strength, center.distance_squared_to(pos)])
 	var impacts: Array = world_effects.impact_lights(state, poses, _frame_service_refs(state), bounds, scale, celestial_view.orbit_time(state), _screen_point, _fog_visible, _empire_color)
@@ -4996,7 +5012,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 	# local navigation lamps. Add one glow per retained impact.
 	for entry in impacts:
 		world_batches.queue_lamp_glow(entry[0], float(entry[1]) * 0.55, entry[2], minf(0.9, float(entry[3])))
-	world_batches.set_world_lights(stars + impacts + lamps.slice(0, maxi(0, 16 - stars.size() - impacts.size())))
+	world_batches.set_world_lights((stars + impacts + lamps.slice(0, maxi(0, 16 - stars.size() - impacts.size()))).slice(0, 16), blockers)
 
 func _keep_near_light(lights: Array, entry: Array) -> void:
 	if lights.size() >= 8 and float(entry[4]) >= float(lights.back()[4]):
@@ -5027,7 +5043,7 @@ func _draw_map_content() -> void:
 	var points: Array = state["map"]["points"]
 	var poses: Dictionary = _ship_poses(state)
 	_prepare_world_lighting(state, points, poses, viewport_bounds, render_scale)
-	celestial_view.set_asteroid_lights(map_canvas, world_batches.world_lights)
+	celestial_view.set_asteroid_lights(map_canvas, world_batches.world_lights, world_batches.shadow_uniforms, world_batches.shadow_discs.size())
 	var font: Font = ThemeDB.fallback_font
 	var fields: Array = state["map"].get("fields", [])
 	var remembered_state: Dictionary = fog_state.observed_state(state, _map_size())
@@ -5088,10 +5104,8 @@ func _draw_map_content() -> void:
 		var tint: Color = _empire_color(int(system["owner"]))
 		var detail: float = _draw_system(i, view, pos, radius, tint, -1.0 if live else seen_at)
 		if not live or _fog_visible(ECONOMY.station_position(state, i, float(state["elapsed"]))):
-			var station_light: float = world_batches.light_level(_screen_point(ECONOMY.station_position(view, i, seen_at)))
-			var lit_tint: Color = tint.darkened(1.0 - station_light)
-			structure_view.draw_station(view, i, lit_tint, seen_at, building_selection_kind, selected_buildings)
-			structure_view.draw_shipyards(view, i, lit_tint, seen_at, selected, selected_yard, building_selection_kind, selected_buildings)
+			structure_view.draw_station(view, i, tint, seen_at, building_selection_kind, selected_buildings)
+			structure_view.draw_shipyards(view, i, tint, seen_at, selected, selected_yard, building_selection_kind, selected_buildings)
 		# Incoming resource pods must remain visible as they cross the
 		# opaque station hull and enter its storage bays.
 		if live and detail >= 0.05:
@@ -5340,7 +5354,9 @@ func _draw_map_content() -> void:
 			if simulation_running and thrust > 0.035:
 				world_batches.queue_exhaust(kind, point, engine_axis, scale, thrust, ship_id, viewport_bounds, empire)
 				var plume_center: Vector2 = world_batches.exhaust_center(kind, point, engine_axis, scale, thrust)
-				world_batches.queue_lamp_glow(plume_center, (20.0 + 16.0 * thrust) * scale, empire, 0.72 * thrust)
+				var nozzle: Vector2 = HULL_ART.paired_nozzle(kind)
+				for sign in ([-1.0, 1.0] if not nozzle.is_zero_approx() else [0.0]):
+					world_batches.queue_lamp_glow(plume_center + engine_axis.normalized().orthogonal() * nozzle.y * sign * scale, (9.0 + 8.0 * thrust) * scale, empire, (0.16 if sign != 0.0 else 0.25) * thrust)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:

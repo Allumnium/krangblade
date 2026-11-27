@@ -16,6 +16,7 @@ const ROCK_LIGHTING = preload("res://assets/shaders/asteroid_lighting.gdshader")
 const ROCK_GRID: int = 8
 const ROCK_SPRITE_MIN_RADIUS: float = 2.5
 var asteroid_sprite_nodes: Dictionary = {}
+var planet_sprite_nodes: Dictionary = {}
 var asteroid_material: ShaderMaterial
 var asteroid_shape_cache: Dictionary = {}
 
@@ -33,7 +34,7 @@ func _rock_material() -> ShaderMaterial:
 		asteroid_material.set_shader_parameter("specular_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_s.png"))
 	return asteroid_material
 
-func set_asteroid_lights(canvas: Control, lights: Array) -> void:
+func set_asteroid_lights(canvas: Control, lights: Array, blockers: PackedVector4Array, blocker_count: int) -> void:
 	var positions := PackedVector4Array()
 	var colors := PackedVector4Array()
 	var canvas_transform: Transform2D = canvas.get_global_transform_with_canvas()
@@ -46,11 +47,13 @@ func set_asteroid_lights(canvas: Control, lights: Array) -> void:
 		var pos: Vector2 = canvas_transform * (entry[0] as Vector2)
 		var tint: Color = entry[2]
 		positions[i] = Vector4(pos.x, pos.y, float(entry[1]) * radius_scale, float(entry[3]))
-		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0)
+		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0 if entry.size() > 5 and bool(entry[5]) else 0.0)
 	var material: ShaderMaterial = _rock_material()
 	material.set_shader_parameter("light_points", positions)
 	material.set_shader_parameter("light_colors", colors)
 	material.set_shader_parameter("light_count", count)
+	material.set_shader_parameter("shadow_discs", blockers)
+	material.set_shader_parameter("shadow_count", mini(8, blocker_count))
 
 func _show_asteroid_mesh(canvas: Control, field_index: int, mesh: ArrayMesh) -> void:
 	if mesh == null:
@@ -107,6 +110,9 @@ func begin_frame() -> void:
 	for instance in asteroid_sprite_nodes.values():
 		if is_instance_valid(instance):
 			instance.hide()
+	for instance in planet_sprite_nodes.values():
+		if is_instance_valid(instance):
+			instance.hide()
 
 func prepare_map(state: Dictionary) -> void:
 	var seed_value: int = int(state["map"]["seed"])
@@ -116,6 +122,10 @@ func prepare_map(state: Dictionary) -> void:
 			if is_instance_valid(instance):
 				instance.queue_free()
 		asteroid_sprite_nodes.clear()
+		for instance in planet_sprite_nodes.values():
+			if is_instance_valid(instance):
+				instance.queue_free()
+		planet_sprite_nodes.clear()
 		asteroid_cache_seed = seed_value
 
 # At overview scale, plot each actual rock, never its enclosing belt.
@@ -273,6 +283,22 @@ func body_base_color(body: Dictionary) -> Color:
 	return base.lerp(Color("#7b8790"), float(body["muted"]) * (0.22 if not material.is_empty() else 0.65))
 
 # Generate a unique shaded surface once per visible body; no separate highlight dot.
+# Reuse one shared sphere material and one cached sprite per visible body.
+# Albedo textures are generated once; the day/night boundary follows lights.
+func draw_lit_body(canvas: Control, key: Vector2i, body: Dictionary, point: Vector2, radius: float, opacity: float, material: ShaderMaterial) -> void:
+	var sprite: Sprite2D = planet_sprite_nodes.get(key)
+	if not is_instance_valid(sprite):
+		sprite = Sprite2D.new()
+		sprite.texture = body_texture(body)
+		sprite.material = material
+		sprite.show_behind_parent = true
+		canvas.add_child(sprite)
+		planet_sprite_nodes[key] = sprite
+	sprite.position = point
+	sprite.scale = Vector2.ONE * (radius * 2.0 / float(sprite.texture.get_width()))
+	sprite.modulate = Color(1.0, 1.0, 1.0, opacity)
+	sprite.show()
+
 func body_texture(body: Dictionary) -> Texture2D:
 	if body.has("texture"):
 		return body["texture"]
@@ -283,7 +309,6 @@ func body_texture(body: Dictionary) -> Texture2D:
 	var image := Image.create(96, 96, false, Image.FORMAT_RGBA8)
 	var base: Color = body_base_color(body)
 	var highlight: Color = base.lightened(0.48)
-	var light := Vector3(-0.55, -0.45, 0.70).normalized()
 	var angle: float = float(body["surface_angle"])
 	var bands: bool = bool(body["bands"])
 	for y in range(96):
@@ -298,8 +323,7 @@ func body_texture(body: Dictionary) -> Texture2D:
 			var terrain: float = grain * 0.7
 			if bands:
 				terrain = sin(uv.y * 29.0 + grain * 2.0) * 0.24 + grain * 0.2
-			var diffuse: float = maxf(0.0, Vector3(q.x, q.y, z).dot(light))
-			var color: Color = base.lerp(highlight, maxf(0.0, terrain) * 0.7).darkened(clampf(0.74 - diffuse * 0.64 - terrain * 0.18, 0.0, 0.85))
+			var color: Color = base.lerp(highlight, maxf(0.0, terrain) * 0.7).darkened(clampf(0.10 - terrain * 0.30, 0.0, 0.30))
 			color.a = clampf((1.0 - sqrt(rr)) * 47.0, 0.0, 1.0)
 			image.set_pixel(x, y, color)
 	body["texture"] = ImageTexture.create_from_image(image)

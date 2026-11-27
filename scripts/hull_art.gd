@@ -23,7 +23,15 @@ static func visual_scale(kind: String) -> float:
 	return 1.0
 
 static func sprite_heading_offset(kind: String) -> float:
-	return PI * 0.5 if kind == "ship" else -PI * 0.5 if has_authored_sprite(kind) else 0.0
+	return -PI * 0.5 if has_authored_sprite(kind) else 0.0
+
+# Nozzle positions in forward/lateral hull-local units, measured from
+# the first diffuse atlas cells. Other hulls use their rear silhouette.
+static func paired_nozzle(kind: String) -> Vector2:
+	match kind:
+		"fighter": return Vector2(-10.5, 4.0)
+		"ship": return Vector2(-24.0, 8.0)
+	return Vector2.ZERO
 
 static func sprite_cell(atlas: Texture2D, columns: int, rows: int, variant: int = DEFAULT_SPRITE_VARIANT) -> Image:
 	var source: Image = atlas.get_image()
