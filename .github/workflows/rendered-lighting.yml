@@ -1,0 +1,38 @@
+name: Rendered ship lighting regression
+
+on:
+  workflow_dispatch:
+
+jobs:
+  lighting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      WARBOUND_LIGHTING_OUTPUT: ${{ github.workspace }}/lighting-artifacts
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+      - name: Install virtual display and Mesa
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libgl1-mesa-dri
+      - name: Import
+        run: godot --headless --path . --import
+      - name: Render and score ship lighting
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$WARBOUND_LIGHTING_OUTPUT"
+          timeout 180s xvfb-run -a -s "-screen 0 1280x1024x24" godot --path . --rendering-method gl_compatibility --script res://tests/solo_smoke.gd -- --lighting-test 2>&1 | tee "$WARBOUND_LIGHTING_OUTPUT/run.log"
+          if grep -E 'SCRIPT ERROR:|Shader compilation failed|Shader compilation error|SHADER ERROR:' "$WARBOUND_LIGHTING_OUTPUT/run.log"; then exit 1; fi
+          test -s "$WARBOUND_LIGHTING_OUTPUT/report.json"
+      - name: Upload lighting screenshots and scores
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-ship-lighting
+          path: lighting-artifacts/
+          if-no-files-found: warn
