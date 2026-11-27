@@ -5282,7 +5282,7 @@ func _draw_map_content() -> void:
 		if not cloaked and scale >= 0.65 and not ECONOMY.is_static_structure(ship):
 			var lamp: Vector2 = point - direction * 8.0
 			world_batches.queue_lamp_glow(lamp, 18.0 * scale, Color("#75d6ee"), 0.35 + thrust * 0.25)
-		if not cloaked and simulation_running and scale >= 0.65 and thrust > 0.035:
+		if not cloaked and simulation_running and scale >= 0.65 and thrust > 0.035 and not ECONOMY.is_static_structure(ship):
 			world_batches.queue_exhaust(kind, point, direction, scale, thrust, ship_id, viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
