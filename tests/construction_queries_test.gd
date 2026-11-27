@@ -315,7 +315,7 @@ func _initialize() -> void:
 	assert(ECON.depot_capacity("Metals") == 2000.0)
 	assert(ECON.depot_capacity("Organics") == 4000.0)
 	assert(ECON.depot_capacity("Crystals") == 500.0)
-	assert(ECON.depot_capacity(ECON.ANTIMATTER) == 2.0)
+	assert(ECON.depot_capacity(ECON.ANTIMATTER) == 0.0)
 	assert(ECON.ship_presence_weight({"kind": "resource_depot"}) == 0)
 	assert(ECON.hull_max_hp({"kind": "resource_depot", "build_progress": 0.0}) == ECON.DEPOT_HP * 0.1)
 	assert(QUERIES.base_work("fighter", 1) == 36.0)

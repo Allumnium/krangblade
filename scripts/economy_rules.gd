@@ -208,7 +208,7 @@ const WAREHOUSE_POPULATIONS = [10000, 50000, 150000]
 const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "scout", "cruiser", "destroyer", "railgun_ship", "construction_ship"]
 const CONSTRUCTION_SHIP_CAPACITY: float = 180.0
 const DEPOT_REFERENCE_BUDGET: float = 4000.0
-const DEPOT_ANTIMATTER_CAPACITY: float = 2.0
+const ANTIMATTER_HOLDER_CAPACITY: float = 1.0
 const STATIC_SITE_KINDS = ["resource_depot", "defense_cannon", "wall_node", "wall_segment"]
 const WALL_MAX_LENGTH: float = 450.0
 const WALL_SNAP_RADIUS: float = 40.0
@@ -672,6 +672,8 @@ static func _mining_resources(state: Dictionary, player: int, index: int) -> Arr
 
 ## Read-only player-wide holdings: stock plus the player's own cargo in transit.
 static func storage_capacity(p: Dictionary, resource: String = "Organics") -> float:
+	if resource == ANTIMATTER:
+		return ANTIMATTER_HOLDER_CAPACITY
 	var level: int = clampi(int(p.get("warehouse_level", 0)), 0, 3)
 	var base: float = BASE_METAL_CAPACITY if level == 0 and resource == "Metals" else float(WAREHOUSE_CAPACITIES[level])
 	return base * (1.0 + (0.20 if int(p["owner"]) != 0 and has_reward(p, "storage") else 0.0) + 0.08 * reward_rank(p.get("conquest_rewards", []), "rank_storage"))
@@ -2689,6 +2691,21 @@ static func cargo_capacity(kind: String) -> float:
 static func cargo_free(ship: Dictionary) -> float:
 	return maxf(0.0, cargo_capacity(str(ship.get("kind", "ship"))) - _cargo_total(ship))
 
+# Antimatter is a single physical item, not a divisible commodity. It
+# still needs room in an eligible hold, and cannot occupy depot storage.
+static func cargo_resource_free(ship: Dictionary, resource: String) -> float:
+	var free: float = cargo_free(ship)
+	if resource == ANTIMATTER:
+		return minf(free, maxf(0.0, ANTIMATTER_HOLDER_CAPACITY - float(ship.get("cargo", {}).get(resource, 0.0))))
+	return free
+
+# A positive transfer opportunity moves a whole item at once. Ordinary
+# material transfers retain their existing throughput and precision.
+static func _transfer_quantity(resource: String, available: float, free: float, budget: float) -> float:
+	if resource == ANTIMATTER:
+		return 1.0 if available >= 1.0 and free >= 1.0 - EPS and budget > EPS else 0.0
+	return minf(budget, minf(available, free))
+
 # Pack the shared tonnage into equal display bays, not resource-specific limits.
 static func freighter_cargo_bays(cargo: Dictionary) -> Array:
 	return cargo_bays(cargo, CARGO_CAPACITY, FREIGHTER_BAY_COUNT)
@@ -3627,7 +3644,7 @@ static func _pick_loaded_destination(state: Dictionary, ship: Dictionary, teams:
 		var useful: bool = false
 		for resource in RESOURCES + [ANTIMATTER]:
 			var capacity: float = storage_free(planets[i], resource) if resource == ANTIMATTER and int(planets[i]["owner"]) == int(ship["owner"]) else (0.0 if resource == ANTIMATTER else _need(planets[i], resource))
-			if float(ship["cargo"].get(resource, 0.0)) > EPS and capacity > EPS:
+			if _transfer_quantity(resource, float(ship["cargo"].get(resource, 0.0)), capacity, 1.0) > EPS:
 				useful = true
 				break
 		if not useful:
@@ -4143,7 +4160,7 @@ static func _miner_handoff(state: Dictionary, graph: Dictionary, miner: Dictiona
 			if int(stage.get("queue_rank", 0)) > 0:
 				continue
 		for resource in RESOURCES + [ANTIMATTER]:
-			var amount: float = minf(budget - total, minf(cargo_free(freighter), float(miner["cargo"].get(resource, 0.0))))
+			var amount: float = _transfer_quantity(resource, float(miner["cargo"].get(resource, 0.0)), cargo_resource_free(freighter, resource), budget - total)
 			if amount <= EPS:
 				continue
 			_record_transfer(state, int(miner["id"]), miner, int(freighter["id"]), freighter, resource, amount)
@@ -4239,7 +4256,7 @@ static func _work_ship(state: Dictionary, ship: Dictionary, teams: Array[int], c
 		var budget: float = dropoff_rate("ship") * float(ship.get("reward_loading_factor", 1.0)) * maxf(0.0, dt)
 		for resource in RESOURCES + [ANTIMATTER]:
 			var capacity: float = storage_free(planets[here], resource) if resource == ANTIMATTER and int(planets[here]["owner"]) == int(ship["owner"]) else (0.0 if resource == ANTIMATTER else _need(planets[here], resource))
-			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), capacity))
+			var amount: float = _transfer_quantity(resource, float(ship["cargo"].get(resource, 0.0)), capacity, budget)
 			if amount <= EPS:
 				continue
 			_record_transfer(state, int(ship["id"]), ship, station_target_id(state, here), planets[here], resource, amount)
@@ -4776,7 +4793,7 @@ static func _unload_miner(state: Dictionary, ship: Dictionary, teams: Array[int]
 			return
 		var budget: float = _dropoff_budget(ship, dt)
 		for resource in RESOURCES + [ANTIMATTER]:
-			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), storage_free(local, resource)))
+			var amount: float = _transfer_quantity(resource, float(ship["cargo"].get(resource, 0.0)), storage_free(local, resource), budget)
 			if amount <= 0.0:
 				continue
 			_record_transfer(state, int(ship["id"]), ship, station_target_id(state, here), local, resource, amount)
@@ -5638,17 +5655,17 @@ static func can_deposit(state: Dictionary, ship: Dictionary, target_id: int) -> 
 	if cargo_capacity(str(ship.get("kind", "ship"))) <= EPS or target_id == int(ship["id"]) or not _cargo_target_allowed(state, int(ship["owner"]), ref) or _cargo_total(ship) <= EPS:
 		return false
 	if ref["kind"] == "ship":
-		if ref["entity"].get("kind", "") == "resource_depot":
-			for resource in RESOURCES + [ANTIMATTER]:
-				if float(ship["cargo"].get(resource, 0.0)) > EPS and depot_free(ref["entity"], resource) > EPS:
-					return true
-			return false
-		return cargo_free(ref["entity"]) > EPS
+		var receiver: Dictionary = ref["entity"]
+		for resource in RESOURCES + [ANTIMATTER]:
+			var free: float = depot_free(receiver, resource) if receiver.get("kind", "") == "resource_depot" else cargo_resource_free(receiver, resource)
+			if _transfer_quantity(resource, float(ship["cargo"].get(resource, 0.0)), free, 1.0) > EPS:
+				return true
+		return false
 	if ref["kind"] != "station":
 		return false
 	var p: Dictionary = state["planets"][ref["node"]]
 	for resource in RESOURCES + [ANTIMATTER]:
-		if float(ship["cargo"].get(resource, 0.0)) > EPS and storage_free(p, resource) > EPS:
+		if _transfer_quantity(resource, float(ship["cargo"].get(resource, 0.0)), storage_free(p, resource), 1.0) > EPS:
 			return true
 	return false
 
@@ -5832,8 +5849,8 @@ static func _work_cargo_order(state: Dictionary, graph: Dictionary, ship: Dictio
 		var stock: Dictionary = depot["stock"] if ref["kind"] == "station" else depot["cargo"]
 		var budget: float = _dropoff_budget(ship, dt)
 		for resource in RESOURCES + [ANTIMATTER]:
-			var free: float = storage_free(depot, resource) if ref["kind"] == "station" else (depot_free(depot, resource) if depot.get("kind", "") == "resource_depot" else cargo_free(depot))
-			var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), free))
+			var free: float = storage_free(depot, resource) if ref["kind"] == "station" else (depot_free(depot, resource) if depot.get("kind", "") == "resource_depot" else cargo_resource_free(depot, resource))
+			var amount: float = _transfer_quantity(resource, float(ship["cargo"].get(resource, 0.0)), free, budget)
 			if amount <= EPS:
 				continue
 			_record_transfer(state, int(ship["id"]), ship, int(order["target"]), depot, resource, amount)
@@ -6063,16 +6080,18 @@ static func _work_science(state: Dictionary, graph: Dictionary, ship: Dictionary
 	ship["navigation_target"] = ship["position"]
 	ship["science_years"] = minf(SCIENCE_COLLECTION_YEARS, float(ship.get("science_years", 0.0)) + dt * _player_factor(state, int(ship["owner"]), "rank_antimatter", 0.15))
 	if float(ship["science_years"]) >= SCIENCE_COLLECTION_YEARS - EPS:
-		var remaining: float = SCIENCE_CAPACITY
+		var collected: bool = false
 		for chunk in field["chunks"]:
-			if chunk["resource"] != ANTIMATTER:
-				continue
-			var taken: float = minf(remaining, float(chunk["remaining"]))
-			chunk["remaining"] -= taken
-			remaining -= taken
-			if remaining <= EPS:
+			if chunk["resource"] == ANTIMATTER and float(chunk["remaining"]) >= 1.0:
+				chunk["remaining"] -= 1.0
+				collected = true
 				break
-		ship["cargo"][ANTIMATTER] = SCIENCE_CAPACITY
+		if not collected:
+			ship.erase("science_years")
+			ship.erase("unit_order")
+			_finish_manual(ship)
+			return true
+		ship["cargo"][ANTIMATTER] = 1.0
 		var progress: Dictionary = objective_progress(state, int(ship["owner"]))
 		progress["antimatter_processed"] = int(progress.get("antimatter_processed", 0)) + 1
 		ship.erase("science_years")
@@ -6873,7 +6892,7 @@ static func static_complete(site: Dictionary) -> bool:
 	return float(site.get("build_progress", 0.0)) >= 1.0 - EPS
 
 static func depot_capacity(resource: String) -> float:
-	return DEPOT_ANTIMATTER_CAPACITY if resource == ANTIMATTER else DEPOT_REFERENCE_BUDGET / maxf(EPS, float(CONSTRUCTION_REFERENCE_VALUES.get(resource, 1.0)))
+	return DEPOT_REFERENCE_BUDGET / maxf(EPS, float(CONSTRUCTION_REFERENCE_VALUES[resource])) if RESOURCES.has(resource) else 0.0
 
 static func depot_free(site: Dictionary, resource: String) -> float:
 	return maxf(0.0, depot_capacity(resource) - float(site.get("cargo", {}).get(resource, 0.0))) if static_complete(site) else 0.0
@@ -7767,7 +7786,7 @@ static func _work_depot_pickup(state: Dictionary, graph: Dictionary, ship: Dicti
 	if not _manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE):
 		return true
 	var budget: float = _dropoff_budget(ship, dt)
-	for resource in RESOURCES + [ANTIMATTER]:
+	for resource in RESOURCES:
 		var amount: float = minf(budget, minf(cargo_free(ship), float(depot["cargo"].get(resource, 0.0))))
 		if amount > EPS:
 			_record_transfer(state, target, depot, int(ship["id"]), ship, resource, amount)
@@ -8549,7 +8568,7 @@ static func _drop_salvage(state: Dictionary, ship: Dictionary, position: Vector2
 	state["salvage"] = piles
 
 # The station is the sole ownership anchor. Its stock is physically lost:
-# exactly 20% of each stored resource becomes normal drifting salvage.
+# 20% of bulk stock and any indivisible antimatter item become salvage.
 static func _destroy_station(state: Dictionary, graph: Dictionary, index: int) -> void:
 	var p: Dictionary = state["planets"][index]
 	if not has_station(p):
@@ -8559,7 +8578,7 @@ static func _destroy_station(state: Dictionary, graph: Dictionary, index: int) -
 	_lose_site_station_escrow(state, index, point)
 	var salvage: Dictionary = empty_stock()
 	for resource in RESOURCES + [ANTIMATTER]:
-		salvage[resource] = float(p["stock"].get(resource, 0.0)) * STATION_SALVAGE_FRACTION
+		salvage[resource] = float(p["stock"].get(resource, 0.0)) * (1.0 if resource == ANTIMATTER else STATION_SALVAGE_FRACTION)
 		p["stock"][resource] = 0.0
 	_record_ship_destruction(state, graph, {"id": station_target_id(state, index), "kind": "station", "owner": owner, "position": point, "heading": Vector2.UP, "cargo": salvage})
 	for slot in range(p["yards"].size()):
@@ -8967,6 +8986,9 @@ static func _nearest_salvage(state: Dictionary, graph: Dictionary, ship: Diction
 		for candidate in cells[key]:
 			if not piles.has(candidate) or int(piles[candidate]["claim"]) >= 0:
 				continue
+			var candidate_pile: Dictionary = piles[candidate]
+			if candidate_pile["resource"] == ANTIMATTER and _transfer_quantity(ANTIMATTER, float(candidate_pile["amount"]), cargo_resource_free(ship, ANTIMATTER), 1.0) <= EPS:
+				continue
 			var point: Vector2 = piles[candidate]["position"]
 			if piles[candidate].has("dropped_by") and (int(piles[candidate]["dropped_by"]) == int(ship["id"]) or float(state["elapsed"]) - float(piles[candidate]["born"]) < 2.0):
 				continue
@@ -9003,7 +9025,7 @@ static func _finish_salvage_pickup(state: Dictionary, ship: Dictionary, piles: D
 	if ship.has("resource_stage") and _cargo_total(ship) > before_pickup + EPS:
 		ship["resource_loaded_at"] = float(state["elapsed"])
 	if civilian and idle:
-		if float(pile["amount"]) > EPS and cargo_free(ship) > EPS:
+		if _transfer_quantity(str(pile["resource"]), float(pile["amount"]), cargo_resource_free(ship, str(pile["resource"])), 1.0) > EPS:
 			return true
 		_release_auto_salvage(ship, piles)
 		if float(pile["amount"]) <= EPS:
@@ -9012,7 +9034,7 @@ static func _finish_salvage_pickup(state: Dictionary, ship: Dictionary, piles: D
 		return true
 	if ship.get("kind", "") == "miner" and ship.get("mining_mode", "idle") == "idle" and (ship["route"] as Array).is_empty() and not bool(ship.get("holding", false)):
 		ship["mining_mode"] = "delivery"
-	if float(pile["amount"]) <= EPS or cargo_free(ship) <= EPS:
+	if _transfer_quantity(str(pile["resource"]), float(pile["amount"]), cargo_resource_free(ship, str(pile["resource"])), 1.0) <= EPS:
 		_release_auto_salvage(ship, piles)
 		if float(pile["amount"]) <= EPS:
 			piles.erase(best)
@@ -9020,12 +9042,12 @@ static func _finish_salvage_pickup(state: Dictionary, ship: Dictionary, piles: D
 
 static func _collect_salvage(ship: Dictionary, pile: Dictionary, dt: float) -> void:
 	var rate: float = (FREIGHTER_TRACTOR_RATE if ship.get("kind", "") == "ship" else TRACTOR_RATE) * float(ship.get("reward_loading_factor", 1.0))
-	var amount: float = minf(cargo_free(ship), minf(float(pile["amount"]), rate * dt))
+	var resource: String = pile["resource"]
+	var amount: float = _transfer_quantity(resource, float(pile["amount"]), cargo_resource_free(ship, resource), rate * dt)
 	if amount <= EPS:
 		return
 	if not ship.has("cargo"):
 		ship["cargo"] = empty_stock()
-	var resource: String = pile["resource"]
 	_cargo_stat(ship, "tons_picked", resource, amount)
 	ship["cargo"][resource] = float(ship["cargo"].get(resource, 0.0)) + amount
 	pile["amount"] -= amount
@@ -9071,7 +9093,7 @@ static func command_salvage(state: Dictionary, player: int, ids: Array, target: 
 		var best: Dictionary = {}
 		var distance: float = INF
 		for ship in units:
-			if not supports_autocast(ship, "salvage") or cargo_free(ship) <= EPS or bool(ship.get("retreating", false)) or patrol_node(state, graph, player, pile["position"]) < 0:
+			if not supports_autocast(ship, "salvage") or _transfer_quantity(str(pile["resource"]), float(pile["amount"]), cargo_resource_free(ship, str(pile["resource"])), 1.0) <= EPS or bool(ship.get("retreating", false)) or patrol_node(state, graph, player, pile["position"]) < 0:
 				continue
 			var d: float = (ship["position"] as Vector2).distance_squared_to(pile["position"])
 			if d < distance:
@@ -9185,7 +9207,7 @@ static func _salvage_pickup(state: Dictionary, graph: Dictionary, ship: Dictiona
 		_manual_travel(state, graph, ship, node, point, dt, TRACTOR_RANGE * 0.85)
 		return true
 	_collect_salvage(ship, pile, dt)
-	if float(pile["amount"]) <= EPS or cargo_free(ship) <= EPS:
+	if _transfer_quantity(str(pile["resource"]), float(pile["amount"]), cargo_resource_free(ship, str(pile["resource"])), 1.0) <= EPS:
 		pile["claim"] = -1
 		if float(pile["amount"]) <= EPS:
 			piles.erase(id)
@@ -9207,7 +9229,7 @@ static func _next_wreck_salvage(graph: Dictionary, ship: Dictionary, piles: Dict
 	for candidate in piles:
 		var other: Dictionary = piles[candidate]
 		var d: float = point.distance_to(other["position"])
-		if d <= 80.0 and d < distance and int(other["claim"]) < 0 and _salvage_reachable(graph, ship, other["position"]):
+		if d <= 80.0 and d < distance and int(other["claim"]) < 0 and _transfer_quantity(str(other["resource"]), float(other["amount"]), cargo_resource_free(ship, str(other["resource"])), 1.0) > EPS and _salvage_reachable(graph, ship, other["position"]):
 			next = int(candidate)
 			distance = d
 	return next
@@ -9262,7 +9284,7 @@ static func _unload_salvage(state: Dictionary, ship: Dictionary, depot: int, dt:
 	var p: Dictionary = state["planets"][depot]
 	var budget: float = _dropoff_budget(ship, dt)
 	for resource in RESOURCES + [ANTIMATTER]:
-		var amount: float = minf(budget, minf(float(ship["cargo"].get(resource, 0.0)), storage_free(p, resource)))
+		var amount: float = _transfer_quantity(resource, float(ship["cargo"].get(resource, 0.0)), storage_free(p, resource), budget)
 		if amount > EPS:
 			_record_transfer(state, int(ship["id"]), ship, station_target_id(state, depot), p, resource, amount)
 			ship["cargo"][resource] -= amount

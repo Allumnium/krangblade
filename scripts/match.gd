@@ -2477,7 +2477,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 			status = ("Wall Node" if kind == "wall_node" else "Wall Segment") + (" · Complete" if ECONOMY.static_complete(ship) else " · %.0f%%" % (float(ship["build_progress"]) * 100.0))
 		elif ECONOMY.static_complete(ship):
 			status = "Resource Depot"
-			for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
+			for resource in ECONOMY.RESOURCES:
 				status += "\n%s: %.1f / %.1f t" % [resource, float(ship["cargo"].get(resource, 0.0)), ECONOMY.depot_capacity(resource)]
 	if kind == "probe":
 		status = "Scan active · %.1f yr remaining" % maxf(0.0, float(ship["probe_expires"]) - float(state["elapsed"])) if ship.has("probe_expires") else "En route to scan point"
@@ -2598,8 +2598,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	if fleet_cargo_footer.visible:
 		for resource in ECONOMY.RESOURCES + [ECONOMY.ANTIMATTER]:
 			var amount: float = float(cargo.get(resource, 0.0))
-			fleet_cargo_labels[resource].text = UI_TEXT.tons(amount, 1, true) if amount >= 1000.0 else (("%.1f" % amount).trim_suffix(".0") if amount >= 0.1 else "%.2f" % amount) + "t"
-			fleet_cargo_labels[resource].tooltip_text = "%.1f t" % amount
+			fleet_cargo_labels[resource].text = "%.0f" % amount if resource == ECONOMY.ANTIMATTER else (UI_TEXT.tons(amount, 1, true) if amount >= 1000.0 else (("%.1f" % amount).trim_suffix(".0") if amount >= 0.1 else "%.2f" % amount) + "t")
+			fleet_cargo_labels[resource].tooltip_text = "%.0f items" % amount if resource == ECONOMY.ANTIMATTER else "%.1f t" % amount
 			fleet_cargo_labels[resource].get_parent().visible = amount > ECONOMY.EPS
 
 func _build_territory_layer() -> void:
@@ -2959,8 +2959,8 @@ func _refresh_local_resources(p: Dictionary) -> void:
 	var population: float = float(p["population"])
 	var raw: float = float(p["stock"].get(ECONOMY.ANTIMATTER, 0.0))
 	raw_antimatter_label.visible = raw > ECONOMY.EPS
-	raw_antimatter_label.text = "Raw antimatter · %s" % UI_TEXT.tons(raw)
-	raw_antimatter_label.tooltip_text = "%.1f t stored locally" % raw
+	raw_antimatter_label.text = "Antimatter · %.0f" % raw
+	raw_antimatter_label.tooltip_text = "%.0f / 1 item stored locally" % raw
 	population_label.text = "%s" % UI_TEXT.compact_amount(population)
 	var change: float = float(p.get("demographic_rate", ECONOMY.population_growth(p))) - float(p.get("crew_rate", 0.0))
 	population_delta_label.text = "(%s%s/yr)" % ["+" if change >= 0.0 else "-", UI_TEXT.compact_amount(absf(change))]
