@@ -114,7 +114,85 @@ func _test_depot_policy() -> void:
 	assert(ECON.depot_receive_capacity(depot, "Metals") == 0.0 and ECON.depot_dispatch_stock(depot, "Metals") == 0.0)
 	assert(ECON.depot_free(depot, "Metals") == 1500.0)
 
+func _test_physical_construction() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(715, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	state["planets"][1]["owner"] = 1
+	state["planets"][0]["stock"] = {"Metals": 350.0, "Crystals": 0.0, "Organics": 0.0}
+	state["planets"][1]["stock"] = {"Metals": 250.0, "Crystals": 40.0, "Organics": 0.0}
+	var dock: Vector2 = ECON.station_position(state, 0, 0.0)
+	var point: Vector2 = dock + Vector2(250, 250)
+	var graph: Dictionary = ECON.military_graph(state)
+	var builder: Dictionary = {"id": 100, "kind": "construction_ship", "owner": 1, "origin": 0, "at": 0, "position": dock, "navigation_target": dock, "heading": Vector2.UP, "route": [], "leg": 0.0, "source": -1, "dest": -1, "crew": 0.0, "cargo": ECON.empty_stock(), "hp": ECON.ship_max_hp("construction_ship"), "wander_auto": false}
+	state["ships"] = [builder]
+	state["next_id"] = 101
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "build_depot", "point": point}, false))
+	var site: Dictionary = state["ships"].back()
+	assert(ECON._site_reserved_total(site) == 640.0 and site["build_progress"] == 0.0)
+	var saw_partial: bool = false
+	var visited_second: bool = false
+	for tick in range(5000):
+		ECON._rock_plan_tick += 1
+		ECON._rock_plan_budget = ECON.ROCK_PLAN_LIMIT
+		ECON._rock_route_queries.clear()
+		var before: Vector2 = builder["position"]
+		var delivered: Dictionary = site["build_delivered"].duplicate()
+		ECON._work_construction(state, graph, builder, 0.5)
+		assert(before.distance_to(builder["position"]) <= ECON.ship_speed("construction_ship") * 0.5 + 0.01)
+		if delivered != site["build_delivered"]:
+			assert((builder["position"] as Vector2).distance_to(point) <= ECON.TRACTOR_RANGE + 0.01)
+		if (builder["position"] as Vector2).distance_to(ECON.station_position(state, 1, float(state["elapsed"]))) <= ECON.STATION_DOCK_RANGE + 0.01:
+			visited_second = true
+		if site["build_progress"] > ECON.EPS and not ECON.static_complete(site):
+			saw_partial = true
+		for resource in site["build_recipe"]:
+			var total: float = float(site["build_delivered"].get(resource, 0.0)) + float(builder["cargo"].get(resource, 0.0))
+			for record in site["build_reservations"].values():
+				total += float(record["cargo"].get(resource, 0.0))
+			assert(is_equal_approx(total, float(site["build_recipe"][resource])))
+		if ECON.static_complete(site):
+			break
+		state["elapsed"] += 0.5
+	assert(saw_partial and visited_second and ECON.static_complete(site))
+	assert(is_equal_approx(float(site["hp"]), ECON.DEPOT_HP) and ECON._cargo_total(builder) <= ECON.EPS)
+	print("PASS: physical multi-station construction, movement budget and per-resource conservation")
+
+func _test_wall_movement_and_weapons() -> void:
+	var start := Vector2(400, 800)
+	var goal := Vector2(1200, 800)
+	var state: Dictionary = _wall_fixture([_wall_segment(1, Vector2(800, 400), Vector2(800, 800)), _wall_segment(2, Vector2(800, 800), Vector2(800, 1200))])
+	var grid: Dictionary = ECON.wall_grid(state)
+	ECON._refresh_movement_fields([])
+	ECON._movement_wall_state = state
+	ECON._movement_wall_grid = grid
+	var ship: Dictionary = {"id": 200, "kind": "fighter", "owner": 1, "position": start, "heading": Vector2.RIGHT, "navigation_target": goal}
+	for tick in range(200):
+		ECON._wall_nav_budget = ECON.WALL_NAV_PLAN_LIMIT
+		ECON._rock_plan_tick += 1
+		var before: Vector2 = ship["position"]
+		ECON._navigate(ship, goal, 20.0, false)
+		assert(before.distance_to(ship["position"]) <= 20.01)
+		assert(ECON.wall_first_hit(state, grid, 1, before, ship["position"], true).is_empty())
+		if (ship["position"] as Vector2).is_equal_approx(goal):
+			break
+	ECON._movement_wall_grid = {}
+	ECON._movement_wall_state = {}
+	assert((ship["position"] as Vector2).is_equal_approx(goal))
+	ECON._combat_wall_grid = grid
+	var damage: Dictionary = {}
+	var health: Dictionary = {1: 100.0, 2: 100.0, 201: 100.0}
+	var slots: Dictionary = {}
+	var packed_health := PackedFloat64Array()
+	var impact: Vector2 = ECON._weapon_hit(state, start, goal, 201, ship, 10.0, damage, {}, health, slots, packed_health)
+	assert(impact == Vector2(800, 800) and damage.is_empty())
+	assert(ECON.diplomacy_declare_war(state, 1, 2))
+	ECON._wall_laser_hit(state, start, goal, 201, ship, 10.0, damage, {}, health, slots, packed_health)
+	assert(damage.get(1, 0.0) == 10.0 and not damage.has(201) and ship["wall_laser_endpoint"] == impact)
+	ECON._combat_wall_grid = {}
+	print("PASS: wall detour movement, neutral interception, hostile damage and laser impact endpoint")
+
 func _initialize() -> void:
+	_test_physical_construction()
+	_test_wall_movement_and_weapons()
 	_test_depot_policy()
 	_test_supply_recovery()
 	_test_wall_navigation()
