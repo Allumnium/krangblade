@@ -848,7 +848,7 @@ func _test_local_avoidance() -> void:
 	print("PASS: forward avoidance, movement budget, unobstructed path and shared endpoint")
 
 func _test_direct_trajectory_samples() -> void:
-	var fields: Array = [{"position": Vector2(3000, 0), "radius": 50.0, "chunks": [{"position": Vector2(3000, 0), "radius": 30.0}]}]
+	var fields: Array = [{"position": Vector2(3000, 0), "radius": 50.0, "antimatter": true, "chunks": []}]
 	ECON._refresh_movement_fields(fields)
 	var craft: Dictionary = {"id": 701, "kind": "fighter", "position": Vector2(-500, 100), "heading": Vector2.UP}
 	var reference: Dictionary = craft.duplicate(true)
@@ -866,7 +866,7 @@ func _test_direct_trajectory_samples() -> void:
 	# detour must force the original steering path immediately.
 	var start: Vector2 = craft["position"]
 	var goal: Vector2 = start + Vector2(500, 0)
-	fields[0]["chunks"].append({"position": start + Vector2(100, 0), "radius": 30.0})
+	fields.append({"position": start + Vector2(100, 0), "radius": 30.0, "antimatter": true, "chunks": []})
 	ECON._refresh_movement_fields(fields)
 	assert(not ECON._direct_rock_corridors.has(701))
 	assert(ECON._direct_motion_sample(craft, start, goal, 10.0, true) == null)
@@ -884,7 +884,7 @@ func _test_direct_trajectory_samples() -> void:
 	print("PASS: exact direct trajectory samples, command changes, obstacle invalidation and contact fallback")
 
 func _test_exact_tick_trajectories() -> void:
-	var fields: Array = [{"position": Vector2(3000, 0), "radius": 50.0, "chunks": [{"position": Vector2(3000, 0), "radius": 30.0}]}]
+	var fields: Array = [{"position": Vector2(3000, 0), "radius": 50.0, "antimatter": true, "chunks": []}]
 	ECON._refresh_movement_fields(fields)
 	ECON._direct_trajectories.clear()
 	var craft: Dictionary = {"id": 1701, "kind": "fighter", "position": Vector2(-100, 20), "heading": Vector2.UP}
@@ -925,7 +925,7 @@ func _test_exact_tick_trajectories() -> void:
 	ECON._begin_ship_avoidance({1701: craft["position"]})
 	assert(ECON._navigate(craft, goal, 5.0) == ECON._navigate(reference, goal, 5.0, false))
 	assert(craft == reference and ECON._direct_trajectories.has(1701))
-	fields[0]["chunks"].append({"position": Vector2(100, 0), "radius": 30.0})
+	fields.append({"position": Vector2(100, 0), "radius": 30.0, "antimatter": true, "chunks": []})
 	ECON._refresh_movement_fields(fields)
 	assert(not ECON._direct_trajectories.has(1701))
 	ECON._trajectory_tick = 128
@@ -949,7 +949,7 @@ func _test_exact_tick_trajectories() -> void:
 	print("PASS: exact absolute-tick travel, immediate obstacle/contact fallback, arrival and reanchoring")
 
 func _test_general_angle_windows() -> void:
-	var fields: Array = [{"position": Vector2(8000, 8000), "radius": 50.0, "chunks": [{"position": Vector2(8000, 8000), "radius": 30.0}]}]
+	var fields: Array = [{"position": Vector2(8000, 8000), "radius": 50.0, "antimatter": true, "chunks": []}]
 	ECON._refresh_movement_fields(fields)
 	ECON._direct_trajectories.clear()
 	var craft: Dictionary = {"id": 1801, "kind": "fighter", "position": Vector2(-310.25, -71.75), "heading": Vector2.UP}
@@ -1001,7 +1001,7 @@ func _test_general_angle_windows() -> void:
 		assert(ECON._navigate(craft, goal, budget) == ECON._navigate(reference, goal, budget, false))
 		assert(craft == reference)
 	start = craft["position"]
-	fields[0]["chunks"].append({"position": start + start.direction_to(goal) * 75.0, "radius": 30.0})
+	fields.append({"position": start + start.direction_to(goal) * 75.0, "radius": 30.0, "antimatter": true, "chunks": []})
 	ECON._refresh_movement_fields(fields)
 	assert(not ECON._direct_trajectories.has(1801))
 	ECON._trajectory_tick = 231
@@ -1012,10 +1012,10 @@ func _test_general_angle_windows() -> void:
 	ECON._begin_ship_avoidance({})
 	ECON._trajectory_tick = -1
 	ECON._direct_trajectories.clear()
-	print("PASS: arbitrary-angle exact samples, window reuse, contact and asteroid invalidation")
+	print("PASS: arbitrary-angle exact samples, window reuse, contact and Pulsar invalidation")
 
 func _test_shared_empty_rock_halos() -> void:
-	var fields: Array = [{"position": Vector2(8000, 8000), "radius": 40.0, "chunks": [{"position": Vector2(8000, 8000), "radius": 30.0}]}]
+	var fields: Array = [{"position": Vector2(8000, 8000), "radius": 40.0, "antimatter": true, "chunks": []}]
 	ECON._refresh_movement_fields(fields)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 827
@@ -1037,7 +1037,7 @@ func _test_shared_empty_rock_halos() -> void:
 	ECON._rock_routes[701] = {"target": target, "route": [Vector2(0, 100)], "retry": 1000}
 	assert(not ECON._shared_empty_rock_halo(start, target, 12.0, 701))
 	ECON._rock_routes.erase(701)
-	fields[0]["chunks"].append({"position": Vector2(80, 0), "radius": 28.0})
+	fields.append({"position": Vector2(80, 0), "radius": 28.0, "antimatter": true, "chunks": []})
 	ECON._refresh_movement_fields(fields)
 	assert(ECON._empty_rock_halos.is_empty())
 	assert(not ECON._shared_empty_rock_halo(start, target, 12.0, 701))
@@ -1054,7 +1054,7 @@ func _test_shared_empty_rock_halos() -> void:
 	ECON._rock_routes = saved_routes
 	assert(flown == ECON._navigate(reference, target, 12.0, false, false))
 	assert(craft == reference and actual_routes == ECON._rock_routes and actual_budget == ECON._rock_plan_budget)
-	fields[0]["chunks"].pop_back()
+	fields.pop_back()
 	ECON._refresh_movement_fields(fields)
 	ECON._rock_routes.erase(701)
 	assert(ECON._shared_empty_rock_halo(start, target, 12.0, 701))
@@ -1078,7 +1078,7 @@ func _test_shared_navigation_queries() -> void:
 	assert(ECON._avoidance_neighborhood(cell) == [[21, Vector2.ZERO]])
 	ECON._begin_ship_avoidance({})
 
-	var fields: Array = [{"position": Vector2(250, 0), "radius": 300.0, "chunks": [{"position": Vector2(250, 0), "radius": 35.0}, {"position": Vector2(350, 0), "radius": 30.0}]}]
+	var fields: Array = [{"position": Vector2(250, 0), "radius": 35.0, "antimatter": true, "chunks": []}, {"position": Vector2(350, 0), "radius": 30.0, "antimatter": true, "chunks": []}]
 	ECON._refresh_movement_fields(fields)
 	var a := Vector2(-10, 0)
 	var b := Vector2(500, 0)
@@ -1102,7 +1102,7 @@ func _test_shared_navigation_queries() -> void:
 	assert(ECON._plan_rock_route(a, b, clearance + 4.0) == ECON._compute_rock_route(a, b, clearance + 4.0))
 	var shifted_start: Vector2 = a + Vector2(1, 0)
 	assert(ECON._plan_rock_route(shifted_start, b, clearance) == ECON._compute_rock_route(shifted_start, b, clearance))
-	fields[0]["chunks"].clear()
+	fields.clear()
 	ECON._refresh_movement_fields(fields)
 	assert(ECON._rocks_near(a, b).is_empty())
 	assert(ECON._rock_segment_clear(a, b, ECON.ROCK_HARD_CLEARANCE))
@@ -4247,7 +4247,7 @@ func _initialize() -> void:
 	assert(is_zero_approx(float(miner["cargo"]["Organics"])))
 	assert(ECON._cargo_total(miner) <= ECON.MINER_CAPACITY + ECON.EPS)
 	assert(float(mine_home["size_factor"]) >= 0.86 and float(mine_home["size_factor"]) <= 1.18)
-	print("PASS: asteroid route obstacles, mining ceiling and physical mineral delivery")
+	print("PASS: mineral routes, mining ceiling and physical mineral delivery")
 
 	# Physical, mixed cargo from an owned planet to an allied one. No hostile transit.
 	var test_map: Dictionary = _planetary_fixture(123, 3, "Grid")
@@ -5549,56 +5549,39 @@ func _test_resource_handoff() -> void:
 	ECON._collect_salvage(freighter, pile, 0.5)
 	assert(is_equal_approx(ECON._cargo_total(freighter), ECON._cargo_total(miner) * ECON.FREIGHTER_TRACTOR_RATE / ECON.TRACTOR_RATE))
 	assert(is_equal_approx(float(pile["amount"]) + ECON._cargo_total(miner) + ECON._cargo_total(freighter), 100.0))
-	# Logistics bounds follow surviving rocks; collision only checks the individual rock disks.
+	# Logistics bounds still follow surviving rocks; only Pulsars obstruct.
 	var tight_fields: Array = [{"position": Vector2(1000, 0), "radius": 600.0, "chunks": [{"position": Vector2(1150, 0), "radius": 20.0}, {"position": Vector2(800, 0), "radius": 10.0}]}]
 	ECON._refresh_movement_fields(tight_fields)
 	assert(float(ECON._movement_fields[0]["radius"]) == 210.0)
-	assert(ECON._field_detour(Vector2(0, 350), Vector2(2000, 350), 10.0) == Vector2(2000, 350))
-	assert(ECON._field_detour(Vector2(700, 0), Vector2(2000, 0), 10.0) != Vector2(2000, 0))
+	assert(ECON._rock_cells.is_empty())
+	assert(ECON._field_detour(Vector2(700, 0), Vector2(2000, 0), 10.0) == Vector2(2000, 0))
 	tight_fields[0]["chunks"].pop_back()
 	ECON._refresh_movement_fields(tight_fields)
 	assert(float(ECON._movement_fields[0]["radius"]) == 170.0)
 	tight_fields[0]["chunks"].clear()
 	ECON._refresh_movement_fields(tight_fields)
 	assert(float(ECON._movement_fields[0]["radius"]) == 0.0)
-	assert(ECON._point_clear_of_rocks(Vector2(1150, 0)))
-	assert(ECON._field_detour(Vector2(1100, 0), Vector2(1200, 0), 10.0) == Vector2(1200, 0))
-	var lobes: Array = [{"position": Vector2(250, 0), "radius": 100.0}, {"position": Vector2(400, 0), "radius": 100.0}]
-	var ridge: Dictionary = {"position": Vector2(250, 0), "radius": 250.0, "belt_lobes": lobes, "outline": Array(MAP._belt_outline(lobes)), "chunks": [{"position": Vector2(250, 0), "radius": 8.0}]}
-	assert(MAP.blocked(Vector2.ZERO, Vector2(700, 0), [ridge]))
-	assert(not MAP.blocked(Vector2(0, 180), Vector2(700, 180), [ridge]))
-	ECON._refresh_movement_fields([ridge])
-	assert(not ECON._movement_fields[0].has("polygon"))
-	assert(ECON._point_clear_of_rocks(Vector2(400, 0)))
-	assert(not ECON._point_clear_of_rocks(Vector2(250, 0)))
-	assert(ECON._clip_rock_step(Vector2(200, 0), Vector2(300, 0)).x < 235.0)
-	assert(ECON._clip_rock_step(Vector2(200, 60), Vector2(500, 60)) == Vector2(500, 60))
-	var traveling: Dictionary = {"kind": "ship", "position": Vector2.ZERO, "id": 9834}
-	var destination := Vector2(700, 0)
-	for step in range(160):
-		var previous: Vector2 = traveling["position"]
-		ECON._navigate(traveling, destination, 10.0)
-		assert(Geometry2D.get_closest_point_to_segment(Vector2(250, 0), previous, traveling["position"]).distance_to(Vector2(250, 0)) >= 19.9)
-		if (traveling["position"] as Vector2).distance_to(destination) < 0.1:
-			break
-	assert((traveling["position"] as Vector2).distance_to(destination) < 0.1)
-	# A staggered cluster forces a route around multiple adjacent disks.
-	var cluster: Array = [{"position": Vector2(300, 0), "radius": 300.0, "chunks": [{"position": Vector2(230, -45), "radius": 55.0}, {"position": Vector2(270, 65), "radius": 60.0}, {"position": Vector2(345, -45), "radius": 55.0}]}]
+	var cluster: Array = [{"position": Vector2(300, 0), "radius": 300.0, "chunks": [{"position": Vector2(230, 0), "radius": 55.0}, {"position": Vector2(270, 0), "radius": 60.0}, {"position": Vector2(345, 0), "radius": 55.0}]}]
 	ECON._refresh_movement_fields(cluster)
-	traveling = {"kind": "ship", "position": Vector2.ZERO, "id": 9835}
-	ECON._rock_plan_budget = ECON.ROCK_PLAN_LIMIT
-	for tick in range(300):
-		ECON._rock_plan_tick += 1
-		ECON._rock_plan_budget = ECON.ROCK_PLAN_LIMIT
-		var previous: Vector2 = traveling["position"]
-		ECON._navigate(traveling, destination, 10.0)
-		# Vector2 is single precision; allow its rounding at this scale.
-		assert(previous.distance_to(traveling["position"]) <= 10.0 + 0.001)
-		for asteroid in cluster[0]["chunks"]:
-			assert(Geometry2D.get_closest_point_to_segment(asteroid["position"], previous, traveling["position"]).distance_to(asteroid["position"]) >= float(asteroid["radius"]) + ECON.ROCK_HARD_CLEARANCE - 0.1)
-		if (traveling["position"] as Vector2).distance_to(destination) < 0.1:
-			break
-	assert((traveling["position"] as Vector2).distance_to(destination) < 0.1)
+	ECON._begin_ship_avoidance({})
+	assert(ECON._point_clear_of_rocks(Vector2(230, 0)))
+	assert(ECON._clip_rock_step(Vector2.ZERO, Vector2(700, 0)) == Vector2(700, 0))
+	for kind in ECON.SHIP_KINDS + ["probe"]:
+		var traveling: Dictionary = {"kind": kind, "position": Vector2.ZERO, "id": 9834}
+		var destination := Vector2(700, 0)
+		for tick in range(70):
+			assert(is_equal_approx(ECON._navigate(traveling, destination, 10.0), 10.0))
+			assert(traveling["position"] == Vector2(float(tick + 1) * 10.0, 0))
+		assert(traveling["position"] == destination)
+	# Retain special exclusion and do not invalidate its index on ordinary depletion.
+	cluster.append({"position": Vector2(1000, 0), "radius": 40.0, "antimatter": true, "chunks": []})
+	ECON._refresh_movement_fields(cluster)
+	assert(not ECON._point_clear_of_rocks(Vector2(1000, 0)))
+	assert(ECON._clip_rock_step(Vector2(900, 0), Vector2(1100, 0)).x < 960.0)
+	var old_cells: Dictionary = ECON._rock_cells.duplicate(true)
+	cluster[0]["chunks"].clear()
+	ECON._refresh_movement_fields(cluster)
+	assert(ECON._rock_cells == old_cells)
 	# A worker meets a hauler along its real depot route, not a pool boundary.
 	var rock := Vector2(3000, 1000)
 	var rendezvous_map: Dictionary = {"seed": 42, "points": [Vector2(1000, 1000), Vector2(6000, 1000)], "edges": [[0, 1]], "fields": [{"position": rock, "radius": 800.0, "anchor": 0, "access": [0], "Metals": 1.0, "Crystals": 0.0, "chunks": [{"id": 7, "position": rock, "resource": "Metals", "remaining": 24.0, "radius": 15.0}, {"id": 8, "position": rock + Vector2.RIGHT * 310.0, "resource": "Metals", "remaining": 24.0, "radius": 20.0}]}]}

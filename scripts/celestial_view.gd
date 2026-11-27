@@ -52,7 +52,7 @@ func set_asteroid_lights(canvas: Control, lights: Array) -> void:
 	material.set_shader_parameter("light_colors", colors)
 	material.set_shader_parameter("light_count", count)
 
-func _show_asteroid_mesh(canvas: Control, field_index: int, mesh: ArrayMesh, remembered: bool) -> void:
+func _show_asteroid_mesh(canvas: Control, field_index: int, mesh: ArrayMesh) -> void:
 	if mesh == null:
 		return
 	var instance: MeshInstance2D = asteroid_sprite_nodes.get(field_index)
@@ -62,9 +62,8 @@ func _show_asteroid_mesh(canvas: Control, field_index: int, mesh: ArrayMesh, rem
 		instance.texture = ROCK_ATLAS
 		instance.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		instance.material = _rock_material()
-		# Live terrain precedes ships, effects and the fog; memory is drawn
-		# over the fog exactly as its previous procedural geometry was.
-		instance.show_behind_parent = not remembered
+		# Live terrain precedes ships, effects and the fog.
+		instance.show_behind_parent = true
 		canvas.add_child(instance)
 		asteroid_sprite_nodes[field_index] = instance
 	if instance.mesh != mesh:
@@ -85,8 +84,6 @@ static func _rock_mesh(vertices: PackedVector3Array, colors: PackedColorArray, u
 	return mesh
 
 var asteroid_frame_meshes: Array[ArrayMesh] = []
-# Hidden rocks are static last-seen snapshots. One retained mesh per field.
-var asteroid_static_meshes: Dictionary = {}
 var asteroid_cache_seed: int = -1
 var orbit_visual_time: float = -1.0
 var orbit_sample_time: float = -1.0
@@ -115,7 +112,6 @@ func prepare_map(state: Dictionary) -> void:
 	var seed_value: int = int(state["map"]["seed"])
 	if asteroid_cache_seed != seed_value:
 		asteroid_shape_cache.clear()
-		asteroid_static_meshes.clear()
 		for instance in asteroid_sprite_nodes.values():
 			if is_instance_valid(instance):
 				instance.queue_free()
@@ -141,20 +137,8 @@ static func terrain_footprint(chunks: Array, offset: Vector2, scale: float, tint
 		colors.append(Color("#b879a0") if rock["resource"] == "Crystals" else tint)
 	return {"segments": segments, "colors": colors}
 
-func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, shading: float = 1.0, rotation_time: float = 0.0, static_field: int = -1, field_index: int = -1) -> void:
+func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, shading: float = 1.0, rotation_time: float = 0.0, field_index: int = -1) -> void:
 	var chunks: Array = field["chunks"]
-	var remembered: bool = static_field >= 0
-	var key: int = static_field if remembered else field_index
-	var signature: Array = []
-	if remembered:
-		signature = [viewport_bounds, screen_center, world_center, projection_fit, projection_zoom, render_scale, shading, rotation_time]
-		var retained: Dictionary = asteroid_static_meshes.get(static_field, {})
-		if not retained.is_empty() and retained["signature"] == signature and retained["chunks"] == chunks:
-			var previous_mesh: ArrayMesh = retained["mesh"]
-			if previous_mesh != null:
-				map_canvas.draw_mesh(previous_mesh, null)
-			_show_asteroid_mesh(map_canvas, key, retained["sprites"], true)
-			return
 	var rock_vertices := PackedVector3Array()
 	var rock_colors := PackedColorArray()
 	var sprite_vertices := PackedVector3Array()
@@ -180,9 +164,7 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 		if not asteroid_shape_cache.has(shape_key):
 			var spin_signature: float = sin(float(chunk["rotation"]) * 5.0)
 			var variety: float = fposmod(sin(shape_key.dot(Vector2(0.013, 0.021))) * 43758.5453, 1.0)
-			var speed: float = lerpf(0.003, 0.009, absf(spin_signature))
-			if variety < 0.30:
-				speed *= lerpf(1.5, 2.5, variety / 0.30)
+			var speed: float = deg_to_rad(lerpf(0.15, 0.5, variety))
 			asteroid_shape_cache[shape_key] = speed * (1.0 if spin_signature >= 0.0 else -1.0)
 		var spin: float = float(chunk["rotation"]) + rotation_time * float(asteroid_shape_cache[shape_key])
 		var axis: Vector2 = Vector2.from_angle(spin)
@@ -198,7 +180,7 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 		var uv_max: Vector2 = cell + Vector2.ONE / float(ROCK_GRID) - pixel
 		var uvs: Array[Vector2] = [uv_min, Vector2(uv_max.x, uv_min.y), uv_max, Vector2(uv_min.x, uv_max.y)]
 		# Store the rotation and resource flag as vertex data for the shader.
-		# Alpha is intentionally one; memory is identified by its material.
+		# Alpha is intentionally one; the shader uses atlas transparency.
 		var meta := Color(axis.x * 0.5 + 0.5, axis.y * 0.5 + 0.5, 1.0 if crystal else 0.0, 1.0)
 		for vertex in [0, 1, 2, 0, 2, 3]:
 			var point: Vector2 = corners[vertex]
@@ -210,11 +192,7 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 		asteroid_frame_meshes.append(mesh)
 		map_canvas.draw_mesh(mesh, null)
 	var sprites: ArrayMesh = _rock_mesh(sprite_vertices, sprite_colors, sprite_uvs)
-	if remembered:
-		_rock_material().set_shader_parameter("remembered", true)
-	_show_asteroid_mesh(map_canvas, key, sprites, remembered)
-	if remembered:
-		asteroid_static_meshes[static_field] = {"signature": signature, "chunks": chunks, "mesh": mesh, "sprites": sprites}
+	_show_asteroid_mesh(map_canvas, field_index, sprites)
 
 func system_visual(index: int, state: Dictionary) -> Dictionary:
 	var seed_value: int = int(state["map"]["seed"])

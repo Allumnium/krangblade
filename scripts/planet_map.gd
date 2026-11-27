@@ -14,6 +14,8 @@ const DEFAULT_LAYOUT: String = "Radial"
 const ANTIMATTER_CLEARANCE: float = 700.0
 const ANTIMATTER_RADIUS: float = 96.0
 const ASTEROID_INVENTORY_MULTIPLIER: float = 1.0
+const ASTEROID_RADIUS_SCALE: float = 0.4
+const ASTEROID_MAX_RADIUS: float = 24.0
 const MAX_CRYSTAL_SHARE: float = 0.2
 
 static func valid_layout(layout: String) -> bool:
@@ -642,6 +644,12 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		chunks.append({"id": i, "position": center + offset, "resource": resource,
 			"remaining": amount, "initial": amount, "radius": rock_radius * size_factor * (1.0 if special else 4.0),
 			"rotation": rng.randf_range(0.0, TAU), "shape": shape})
+	# Apply visual/harvesting radius reduction after seeded placement so rock
+	# locations, counts, RNG consumption and resource quantities do not change.
+	if not special:
+		for chunk in chunks:
+			var original: float = float(chunk["radius"])
+			chunk["radius"] = minf(original * ASTEROID_RADIUS_SCALE, ASTEROID_MAX_RADIUS)
 	# Preserve the generated total while normalizing individual ore amounts.
 	# Otherwise random rock sizes and concentration can exceed the cap.
 	if crystal_count > 0:

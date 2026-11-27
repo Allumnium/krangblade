@@ -9,7 +9,6 @@ uniform sampler2D detail_map : source_color, filter_nearest;
 uniform vec4 light_points[16];
 uniform vec4 light_colors[16];
 uniform int light_count = 0;
-uniform bool remembered = false;
 varying vec3 incoming_light;
 varying vec3 local_light;
 varying float light_strength;
@@ -22,8 +21,7 @@ void vertex() {
 	incoming_light = vec3(0.0);
 	local_light = vec3(0.0, 0.0, 1.0);
 	light_strength = 0.0;
-	if (!remembered) {
-		for (int i = 0; i < 16; i++) {
+	for (int i = 0; i < 16; i++) {
 			if (i >= light_count) { break; }
 			vec2 delta = light_points[i].xy - world;
 			float f = max(0.0, 1.0 - length(delta) / max(1.0, light_points[i].z));
@@ -34,7 +32,6 @@ void vertex() {
 				local_light = normalize(vec3(dot(dir, axis), -dot(dir, side), 0.7));
 				light_strength = strength;
 			}
-		}
 	}
 }
 void fragment() {
@@ -52,9 +49,6 @@ void fragment() {
 	vec3 lit = diffuse * (vec3(0.38, 0.40, 0.44) + incoming_light * (0.25 + lambert)) * ao + vec3(spec * light_strength * 0.23);
 	vec3 veins = texture(detail_map, UV).rgb;
 	float ore = smoothstep(0.015, 0.19, veins.g - max(veins.r, veins.b) * 0.75) * crystal;
-	lit += vec3(0.62, 0.19, 0.42) * ore * (remembered ? 0.45 : 0.85);
-	if (remembered) {
-		lit = diffuse * 0.48 * ao + vec3(0.62, 0.19, 0.42) * ore * 0.45;
-	}
+	lit += vec3(0.62, 0.19, 0.42) * ore * 0.85;
 	COLOR = vec4(clamp(lit, vec3(0.0), vec3(1.0)), base.a);
 }

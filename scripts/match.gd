@@ -80,7 +80,6 @@ var resource_hud := MATCH_RESOURCE_HUD.new()
 var ship_motion := SHIP_MOTION_VIEW.new()
 var world_batches := WORLD_RENDER_BATCHES.new()
 var celestial_view := CELESTIAL_VIEW.new()
-var fog_asteroid_view := CELESTIAL_VIEW.new()
 # Draw callbacks are synchronous; camera geometry is fixed for their duration.
 var _draw_projection_active: bool = false
 var _pose_vision_memo: Dictionary = {}
@@ -1822,30 +1821,12 @@ func _draw_fog() -> void:
 	_draw_projection_active = false
 
 func _draw_fog_content() -> void:
-	fog_asteroid_view.begin_frame()
 	if fog_state.texture == null:
 		return
 	var offset: Vector2 = _screen_point(Vector2.ZERO)
 	var scale: float = _fit() * camera.zoom
 	var bounds := Rect2(Vector2.ZERO, map_canvas.size)
 	fog_state.draw(fog_overlay, bounds, Rect2(offset, _map_size() * scale), _map_size())
-	var state: Dictionary = _state()
-	if state.is_empty():
-		return
-	# Draw last-seen/initial individual rocks over the fog, not belt polygons.
-	fog_asteroid_view.prepare_map(state)
-	for index in range(state["map"].get("fields", []).size()):
-		var field: Dictionary = state["map"]["fields"][index]
-		if bool(field.get("antimatter", false)):
-			continue
-		if not bounds.grow(float(field.get("rock_extent", field["radius"])) * scale + 4.0).has_point(_screen_point(field["position"])):
-			continue
-		var rocks: Array = fog_state.rock_view(index).get("hidden", [])
-		fog_asteroid_view.draw_asteroid_chunks({"chunks": rocks}, bounds, scale, fog_overlay, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, 0.66, 0.0, index)
-		if selected_field == index and selected_rock >= 0:
-			var rock: Dictionary = fog_state.rock_at(index, selected_rock)
-			if not rock.is_empty() and not _fog_visible(rock["position"]):
-				_draw_rock_selection(fog_overlay, rock, scale)
 
 func _draw_rock_selection(canvas: Control, rock: Dictionary, scale: float) -> void:
 	var fraction: float = float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock["initial"]))
@@ -2838,7 +2819,7 @@ func _refresh() -> void:
 		ship = _selected_ship(state)
 	_prune_building_selection(state)
 	var p: Dictionary = _planet()
-	if selected_field >= 0 and selected_rock >= 0 and fog_state.rock_at(selected_field, selected_rock).is_empty():
+	if selected_field >= 0 and selected_rock >= 0 and (fog_state.rock_at(selected_field, selected_rock).is_empty() or not _fog_visible(fog_state.rock_at(selected_field, selected_rock).get("position", Vector2.INF))):
 		selected_field = -1
 		selected_rock = -1
 	var field_selected: bool = selected_field >= 0 and (selected_rock >= 0 or ECONOMY.discovered(state, _me(), "fields", selected_field))
@@ -3896,7 +3877,7 @@ func _asteroid_hit(point: Vector2, state: Dictionary, mining: bool) -> Vector2i:
 			continue
 		if distance > float(field.get("rock_extent", field["radius"])) * scale + 4.0 or (mining and not known):
 			continue
-		for rock in fog_state.rock_view(index).get("chunks", []):
+		for rock in fog_state.rock_view(index).get("live", []):
 			if mining and not bool(rock.get("surveyed", false)):
 				continue
 			var fraction: float = clampf(float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock["initial"])), 0.0, 1.0)
@@ -5002,7 +4983,7 @@ func _draw_map_content() -> void:
 			continue
 		if not bool(field.get("antimatter", false)):
 			var live_rocks: Array = fog_state.rock_view(field_index).get("live", [])
-			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, world_batches.light_level(center), celestial_view.orbit_time(state), -1, field_index)
+			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, world_batches.light_level(center), visual_clock, field_index)
 			if selected_field == field_index and selected_rock >= 0:
 				var rock: Dictionary = fog_state.rock_at(field_index, selected_rock)
 				if not rock.is_empty() and _fog_visible(rock["position"]):

@@ -53,6 +53,12 @@ func _run() -> void:
 		assert(ECON.team_vision(state, 1, cache) == expected, "Published coverage aliases retained cache")
 		fog.update(state, 1, tick, size)
 		assert(fog._live == expected)
+		for index in range(state["map"].get("fields", []).size()):
+			var view: Dictionary = fog.rock_view(index)
+			for rock in view.get("live", []):
+				assert(fog.is_visible(rock["position"], size) and bool(rock.get("surveyed", false)))
+			for rock in view.get("hidden", []):
+				assert(not fog.is_visible(rock["position"], size) and bool(rock.get("surveyed", false)))
 		var image: Image = fog._mask_image
 		var dimensions: Vector2i = image.get_size()
 		for y in range(dimensions.y):
