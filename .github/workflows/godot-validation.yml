@@ -152,8 +152,10 @@ jobs:
         run: godot --headless --path . --script res://tests/snapshot_codec_test.gd
       - name: Enforce public simulation rule calls from match UI
         run: python3 tools/check_ui_rule_boundaries.py
-      - name: Pure base construction recipes
-        run: godot --headless --path . --script res://tests/construction_queries_test.gd
+      - name: Construction recipes and physical static structures
+        run: |
+          set -o pipefail
+          timeout 90s godot --headless --path . --script res://tests/construction_queries_test.gd 2>&1 | awk '{ print; fflush(); if ($0 ~ /SCRIPT ERROR:|Assertion failed/) { failed=1; remaining=8 } else if (failed && --remaining <= 0) exit 1 } END { if (failed) exit 1 }'
       - name: Lobby and territory rules
         run: |
           set -o pipefail

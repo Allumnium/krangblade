@@ -6090,7 +6090,11 @@ static func _manual_travel(state: Dictionary, graph: Dictionary, ship: Dictionar
 	if military_hull(str(ship["kind"])):
 		ship["operation_target"] = node
 	_navigate(ship, point, minf(budget, maxf(0.0, pos.distance_to(point) - reach)))
-	if (ship["position"] as Vector2).distance_to(point) <= reach + EPS:
+	# Vector2 stores single-precision coordinates in the standard engine.
+	# At large map coordinates, an exact reach-boundary step can round just
+	# outside EPS and then have too little remaining travel to move at all.
+	# Keep the tolerance tiny and local to physical arrival checks.
+	if (ship["position"] as Vector2).distance_to(point) <= reach + (0.01 if reach > 0.0 else EPS):
 		ship["at"] = nav["node"]
 		return true
 	return false

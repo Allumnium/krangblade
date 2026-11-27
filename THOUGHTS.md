@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.111.2: Godot 4.7.2 runtime validation exposed a single-precision reach-boundary stall in physical delivery. Use a 0.01-world-unit tolerance only for positive-reach manual travel; preserve zero-reach semantics. Update legacy idle and blaster fixtures for the Railgun Ship and wall ownership. Add physical multi-station material conservation, actual wall detour movement and neutral/hostile weapon interception/laser endpoint tests. Import, 63-script parse, focused tests, solo, worker, fog, snapshot, lobby, UI boundary, independent seeded replay and real 2-player normal/threaded and 4-player threaded ENet passed during the validation pass; larger peers and visual hardware acceptance remain.
+
 - v0.111.1: Extend bounded detour search to additional blocking disconnected components, retaining wall clipping and deterministic search order. Added staggered-wall semantic assertion. Static review only; runtime/performance/peer checks remain.
 
 - v0.111.0: Owned completed depots expose per-resource receive/dispatch switches and ceiling/floor controls in the existing selection wing. Default full/zero preserves original auto trade; manual cargo unchanged, loaded surplus rerouted physically. Owner and finite range validation through host/worker command; semantic assertions added, runtime and peer validation pending.

@@ -1605,7 +1605,7 @@ func _test_combat_sector_presence() -> void:
 func _legacy_idle_ship(ship: Dictionary) -> bool:
 	if ship.get("unit_order", {}).get("kind", "") in ["follow", "guard"] or ship.has("resource_stage") or ECON._salvage_active(ship) or ship.has("local_move_target") or ship.has("launch_rally") or ship.has("patrol_from") or ship.has("attack_order") or ship.has("cargo_order") or ship.has("repair_order") or ship.has("repair_target"):
 		return false
-	var fighter: bool = ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer"]
+	var fighter: bool = ship.get("kind", "") in ["fighter", "scout", "cruiser", "destroyer", "railgun_ship"]
 	var mode: String = str(ship.get("mining_mode", "idle"))
 	var waiting_miner: bool = ship.get("kind", "") == "miner" and mode == "delivery" and int(ship.get("dest", -1)) < 0
 	return (ship["route"] as Array).is_empty() and (mode == "idle" or waiting_miner) and (fighter or int(ship.get("dest", -1)) < 0) and int(ship.get("source", -1)) < 0 and not ECON._engaged(ship) and not bool(ship.get("retreating", false)) and not bool(ship.get("holding", false))
@@ -6536,7 +6536,7 @@ func _test_blaster_bursts() -> void:
 	for kind in ["scout", "fighter", "cruiser", "destroyer"]:
 		var mounts: int = ECON.blaster_count(kind)
 		var state: Dictionary = {"elapsed": 0.0}
-		var ship: Dictionary = {"id": 1, "kind": kind}
+		var ship: Dictionary = {"id": 1, "kind": kind, "owner": 1}
 		var damage: Dictionary = {}
 		var positions: Dictionary = {1: Vector2.ZERO, 2: Vector2(100, 0)}
 		var health: Dictionary = {2: 1000.0}
