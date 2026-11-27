@@ -14,6 +14,7 @@ const DEFAULT_LAYOUT: String = "Radial"
 const ANTIMATTER_CLEARANCE: float = 700.0
 const ANTIMATTER_RADIUS: float = 96.0
 const ASTEROID_INVENTORY_MULTIPLIER: float = 1.0
+const ASTEROID_CLUSTER_SCALE: float = 0.55
 const ASTEROID_RADIUS_SCALE: float = 0.4
 const ASTEROID_MAX_RADIUS: float = 24.0
 const MAX_CRYSTAL_SHARE: float = 0.2
@@ -617,7 +618,7 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 	var totals: Dictionary = {"Metals": 0.0, "Crystals": 0.0}
 	for i in range(count):
 		var angle: float = rng.randf_range(0.0, TAU)
-		var distance: float = sqrt(rng.randf()) * (0.52 if special else 0.59)
+		var distance: float = sqrt(rng.randf()) * (0.52 if special else 0.59 * ASTEROID_CLUSTER_SCALE)
 		var offset: Vector2 = (Vector2.from_angle(angle) * Vector2(1.0, flatten) * radius * distance).rotated(rotation)
 		var rock_radius: float = radius
 		if not lobes.is_empty():
@@ -627,10 +628,10 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 			# an organic distribution instead of an artificial grid.
 			var best_clearance: float = -1.0
 			for attempt in range(6):
-				var trial: Vector2 = (lobe["position"] as Vector2) - center + Vector2.from_angle(rng.randf_range(0.0, TAU)) * sqrt(rng.randf()) * rock_radius * 0.89
+				var trial: Vector2 = (lobe["position"] as Vector2) - center + Vector2.from_angle(rng.randf_range(0.0, TAU)) * sqrt(rng.randf()) * rock_radius * 0.89 * (1.0 if special else ASTEROID_CLUSTER_SCALE)
 				var clearance: float = INF
 				for existing in chunks:
-					clearance = minf(clearance, (center + trial).distance_to(existing["position"]) - float(existing["radius"]))
+					clearance = minf(clearance, (center + trial).distance_to(existing["position"]) - (float(existing["radius"]) if special else minf(float(existing["radius"]) * ASTEROID_RADIUS_SCALE, ASTEROID_MAX_RADIUS)))
 				if clearance > best_clearance:
 					best_clearance = clearance
 					offset = trial
@@ -644,8 +645,8 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 		chunks.append({"id": i, "position": center + offset, "resource": resource,
 			"remaining": amount, "initial": amount, "radius": rock_radius * size_factor * (1.0 if special else 4.0),
 			"rotation": rng.randf_range(0.0, TAU), "shape": shape})
-	# Apply visual/harvesting radius reduction after seeded placement so rock
-	# locations, counts, RNG consumption and resource quantities do not change.
+	# Apply the visual/harvesting radius reduction after placement; the tighter
+	# cluster sampling above does not change counts, RNG draws or resource quantities.
 	if not special:
 		for chunk in chunks:
 			var original: float = float(chunk["radius"])

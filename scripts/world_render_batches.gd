@@ -65,11 +65,11 @@ func set_world_lights(lights: Array) -> void:
 		material.set_shader_parameter("light_count", mini(16, lights.size()))
 
 func light_level(point: Vector2) -> float:
-	var amount: float = 0.37
+	var amount: float = 0.20
 	for entry in world_lights:
 		var falloff: float = maxf(0.0, 1.0 - point.distance_to(entry[0]) / maxf(1.0, float(entry[1])))
 		amount += falloff * falloff * float(entry[3])
-	return clampf(amount, 0.37, 1.0)
+	return clampf(amount, 0.20, 1.0)
 
 
 # Persistent packed transform staging, one stream per texture/opacity.
@@ -233,9 +233,9 @@ void fragment() {
 	float angle = atan(p.y, p.x);
 	float count = clamp(floor(6.2831853 * radius / 9.0 + 0.5), 6.0, 128.0);
 	float phase = fract(angle / 6.2831853 * count);
-	float rim = 1.0 - smoothstep(0.25, 1.25, abs(length(p) - radius));
+	float rim = 1.0 - smoothstep(0.12, 0.85, abs(length(p) - radius));
 	float dash = 1.0 - smoothstep(0.67, 0.75, phase);
-	COLOR.a *= rim * dash;
+	COLOR.a *= rim * dash * 0.72;
 }
 """
 	var material := ShaderMaterial.new()

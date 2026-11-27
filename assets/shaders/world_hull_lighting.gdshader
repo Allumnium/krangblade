@@ -18,7 +18,7 @@ void vertex() {
 	vec2 center = MODEL_MATRIX[3].xy;
 	vec2 axis_x = normalize(MODEL_MATRIX[0].xy);
 	vec2 axis_y = normalize(MODEL_MATRIX[1].xy);
-	illumination = vec3(0.32, 0.35, 0.40);
+	illumination = vec3(0.16, 0.19, 0.23);
 	local_light = vec3(0.0, 0.0, 1.0);
 	directional_strength = 0.0;
 	modulation = COLOR;
@@ -49,8 +49,8 @@ void fragment() {
 		float ndl = max(0.0, dot(n, local_light));
 		float spec = pow(max(0.0, dot(n, normalize(local_light + vec3(0.0, 0.0, 1.0)))), 12.0) * texture(specular_map, UV).r;
 		vec3 emissive = max(texture(detail_map, UV).rgb - diffuse * 0.65, vec3(0.0));
-		lit = mix(base.rgb, diffuse, 0.20) * (vec3(0.28, 0.31, 0.36) + max(illumination - vec3(0.32, 0.35, 0.40), vec3(0.0)) * (0.3 + ndl)) * ao;
-		lit += vec3(spec * directional_strength * 0.42) + emissive * 0.65;
+		lit = mix(base.rgb, diffuse, 0.20) * (vec3(0.14, 0.17, 0.21) + max(illumination - vec3(0.16, 0.19, 0.23), vec3(0.0)) * (0.3 + ndl)) * ao;
+		lit += vec3(spec * directional_strength * 0.42) + emissive * 1.25;
 	}
 	COLOR = vec4(clamp(lit, vec3(0.0), vec3(1.0)), base.a) * modulation;
 }

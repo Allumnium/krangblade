@@ -81,6 +81,7 @@ const EXTRACTED = ["Metals", "Crystals"]
 const ACTIVE_PRODUCTION = RESOURCES
 const STARTING_STOCK = {"Metals": 165.0, "Organics": 30.0, "Crystals": 0.0}
 const STARTING_GC: float = 500.0
+const BASE_GALACTIC_INCOME: float = 12.0
 const RESIDENT_TAX_RATE: float = 0.05
 # Derived slow-rate coefficients only. Live stock, residents and credits are
 # still integrated at every authoritative substep.
@@ -334,17 +335,21 @@ static func _generate_system(rng: RandomNumberGenerator, i: int, ordered: Array[
 	if home:
 		# Bootstrap values are test data, not final economy balance.
 		abundance["Metals"] = maxf(1.0, float(abundance["Metals"]))
-		# Starting stock and fleet are supplied; all production and yards must be built.
+		# Each new station includes one Small shipyard; production is explicit.
 		stock = STARTING_STOCK.duplicate()
+		yards.append(_starting_shipyard())
 	var richness: float = 0.0
 	for resource in EXTRACTED:
 		richness += float(abundance[resource])
 	richness += float(bonuses["Organics"]) - 1.0
 	# Environment is generated separately, not inferred from size or deposits.
 	var advanced: float = rng.randf_range(1.1, 1.6) if rng.randf() < 0.3 else 1.0
-	return {"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION + ORBITAL_HOUSING_POPULATION if home else 0.0, "eco_population": 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
+	return {"size_factor": lerpf(0.86, 1.18, clampf(richness / 6.8, 0.0, 1.0)), "advanced_bonus": advanced, "owner": owner, "home": home, "population": HOME_POPULATION + ORBITAL_HOUSING_POPULATION if home else 0.0, "eco_population": ORBITAL_HOUSING_POPULATION if home else 0.0, "population_velocity": 0.0, "farm_phase": float(i) * 2.399963, "farm_factor": 1.0, "stock": stock, "levels": levels,
 		"abundance": abundance, "bonuses": bonuses, "thresholds": thresholds,
 		"station": {"hp": STATION_HP, "weapons": [_new_pds(), _new_pds()]} if home else {}, "yards": yards, "queue": [], "continuous": {}, "buildings": {}, "warehouse_level": 0, "pds": {}}
+
+static func _starting_shipyard() -> Dictionary:
+	return {"level": 1, "job": -1, "hp": YARD_HP, "station_slot": 1}
 
 static func _spawn_starting_fleets(state: Dictionary, planets: Array, ordered: Array[int]) -> void:
 	for index in range(ordered.size()):
@@ -749,6 +754,17 @@ static func construction_affordable(state: Dictionary, p: Dictionary, cost: Dict
 
 static func ship_origin_population_met(p: Dictionary, kind: String) -> bool:
 	return kind != "colony_ship" or float(p.get("population", 0.0)) + EPS >= COLONY_MIN_ORIGIN_POPULATION
+
+static func base_galactic_income(state: Dictionary, player: int) -> float:
+	return BASE_GALACTIC_INCOME if player > 0 and state.get("galactic_credits", {}).has(player) else 0.0
+
+static func _accrue_base_galactic_income(state: Dictionary, dt: float) -> void:
+	if dt <= 0.0:
+		return
+	var credits: Dictionary = state.get("galactic_credits", {})
+	for owner in credits:
+		if int(owner) > 0:
+			credits[owner] = float(credits[owner]) + BASE_GALACTIC_INCOME * dt
 
 static func resident_tax_income(state: Dictionary, player: int) -> float:
 	var total: float = 0.0
@@ -1288,11 +1304,12 @@ static func _convert_colony(state: Dictionary, ship: Dictionary, at: int) -> boo
 	# predetermined angle on the opposite side of the star.
 	if ship["unit_order"].has("orbit_phase"):
 		colony["station"]["orbit_phase"] = ship["unit_order"]["orbit_phase"]
-	# Settlement transfers crew exactly once. No free production or yard.
+	# Settlement transfers crew exactly once. The free yard adds capacity, not people.
+	colony["yards"] = [_starting_shipyard()]
 	# Planetless settlers remain aboard the founding station.
 	var settlers: float = maxf(0.0, float(ship.get("crew", 0.0)))
 	colony["population"] = settlers
-	colony["eco_population"] = 0.0 if has_planets(colony) else settlers
+	colony["eco_population"] = minf(settlers, ORBITAL_HOUSING_POPULATION) if has_planets(colony) else settlers
 	colony["population_velocity"] = 0.0
 	for resource in RESOURCES + [ANTIMATTER]:
 		var amount: float = float(ship.get("cargo", {}).get(resource, 0.0))
@@ -12474,6 +12491,7 @@ static func _scheduled_wage_rate(state: Dictionary, ship: Dictionary, tables: Di
 static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float, economy_rates_enabled: bool = true) -> void:
 	var bases: Dictionary = _prepare_economy_rates(state, economy_rates_enabled)
 	var wage_tables: Dictionary = _prepare_wage_tables(state, economy_rates_enabled)
+	_accrue_base_galactic_income(state, dt)
 	_accrue_resident_taxes(state, dt, bases)
 	_pay_fleet_upkeep(state, dt, wage_tables)
 	state["elapsed"] = float(state["elapsed"]) + dt

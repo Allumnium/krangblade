@@ -46,9 +46,9 @@ void fragment() {
 	float ao = mix(0.68, 1.0, texture(occlusion_map, UV).r);
 	float lambert = max(0.0, dot(normal, normalize(local_light)));
 	float spec = pow(max(0.0, dot(normal, normalize(local_light + vec3(0.0, 0.0, 1.0)))), 14.0) * texture(specular_map, UV).r;
-	vec3 lit = diffuse * (vec3(0.38, 0.40, 0.44) + incoming_light * (0.25 + lambert)) * ao + vec3(spec * light_strength * 0.23);
+	vec3 lit = diffuse * (vec3(0.19, 0.21, 0.24) + incoming_light * (0.25 + lambert)) * ao + vec3(spec * light_strength * 0.23);
 	vec3 veins = texture(detail_map, UV).rgb;
 	float ore = smoothstep(0.015, 0.19, veins.g - max(veins.r, veins.b) * 0.75) * crystal;
-	lit += vec3(0.62, 0.19, 0.42) * ore * 0.85;
+	lit += vec3(0.62, 0.19, 0.42) * ore * 1.4;
 	COLOR = vec4(clamp(lit, vec3(0.0), vec3(1.0)), base.a);
 }

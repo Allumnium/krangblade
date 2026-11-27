@@ -2855,23 +2855,23 @@ func _test_galactic_credits() -> void:
 	# Isolate income from AI spending.
 	state["ai_players"].clear()
 	ECON.step(state, 0.1)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 499.9))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 499.9))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 500.8))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 500.8))
 	state["planets"][0]["population"] = 200.0
 	state["planets"][1]["population"] = 100.0
 	state["planets"][2]["population"] = 5000.0
 	assert(int(state["planets"][2]["owner"]) == 0)
 	ECON._accrue_resident_taxes(state, 0.0)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 499.9))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 500.8))
 	ECON._accrue_resident_taxes(state, 2.5)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 524.9))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 512.4))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 525.8))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 513.3))
 	assert(not state["galactic_credits"].has(0))
 	state["planets"][0]["owner"] = 2
 	ECON._accrue_resident_taxes(state, 1.0)
 	assert(ECON.resident_tax_income(state, 1) == 0.0)
-	assert(is_equal_approx(ECON.credit_balance(state, 1), 524.9))
-	assert(is_equal_approx(ECON.credit_balance(state, 2), 527.4))
+	assert(is_equal_approx(ECON.credit_balance(state, 1), 525.8))
+	assert(is_equal_approx(ECON.credit_balance(state, 2), 528.3))
 	var fresh: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	assert(ECON.credit_balance(fresh, 1) == 500.0 and ECON.credit_balance(fresh, 2) == 500.0)
 	print("PASS: independent Galactic Credits, resident taxes, ownership, pause and fresh matches")
@@ -5038,7 +5038,7 @@ func _initialize() -> void:
 		assert(opening["planets"][opening_home]["population"] == ECON.HOME_POPULATION + ECON.ORBITAL_HOUSING_POPULATION)
 		var starting_defenses: Dictionary = opening["planets"][opening_home]["pds"]
 		assert(starting_defenses.is_empty())
-		assert(opening["planets"][opening_home]["yards"].is_empty())
+		assert(opening["planets"][opening_home]["yards"].size() == 1 and opening["planets"][opening_home]["yards"][0]["level"] == 1)
 		assert(opening["planets"][opening_home]["station"]["weapons"].size() == 2)
 	for planet in opening["planets"]:
 		if not planet["home"]:
