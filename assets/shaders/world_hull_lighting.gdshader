@@ -1,6 +1,6 @@
 shader_type canvas_item;
 render_mode unshaded;
-uniform bool science = false;
+uniform bool authored_sprite = false;
 uniform sampler2D diffuse_map : source_color, filter_nearest;
 uniform sampler2D normal_map : filter_nearest;
 uniform sampler2D occlusion_map : filter_nearest;
@@ -38,7 +38,7 @@ void vertex() {
 void fragment() {
 	vec4 base = texture(TEXTURE, UV);
 	vec3 lit = base.rgb * min(illumination, vec3(1.25));
-	if (science) {
+	if (authored_sprite) {
 		vec3 diffuse = texture(diffuse_map, UV).rgb;
 		vec3 n = texture(normal_map, UV).rgb * 2.0 - 1.0;
 		vec2 pixel = TEXTURE_PIXEL_SIZE;

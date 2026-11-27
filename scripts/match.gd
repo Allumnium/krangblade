@@ -5338,7 +5338,7 @@ func _draw_map_content() -> void:
 			world_batches.queue_overview_hull(hull_art.shield_texture(kind), point, direction.angle(), (half_size + 8.0) * scale, cloaked)
 		if not (kind == "ship" and scale >= 0.42):
 			# Source sprite faces up; the existing hull coordinate system faces right.
-			var art_angle: float = direction.angle() + (PI * 0.5 if kind == "science_ship" else 0.0)
+			var art_angle: float = direction.angle() + (PI * 0.5 if HULL_ART.has_authored_sprite(kind) else 0.0)
 			world_batches.queue_overview_hull(texture, point, art_angle, half_size * scale, cloaked)
 		else:
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)

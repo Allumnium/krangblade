@@ -2,6 +2,8 @@
 
 ## Approved art and audio overhaul (2026-11-27)
 
+- [ ] v0.118.2 integrates the first of 16 Fighter sprite styles and all six cropped material maps. Verify atlas alignment, heading, shield/engine placement, team tint, portraits and fleet rendering. Future ship sheets default to the first/top-left variant; retain remaining designs for eventual player-selectable styles (not implemented).
+
 - [ ] v0.118.1 keeps subtle velocity-based cruise exhaust with stronger acceleration flares. Run smoke checks and verify appearance, stop/pause/speed changes, guest interpolation and moving-fleet render cost.
 
 - [ ] v0.118.0 restores initial Small yards, adds base GC income, tightens asteroid clusters, softens selection/order indicators and boosts emissive contrast. Validate starting net GC, colony population conservation, actual visual balance and legacy fixtures; no runtime execution yet.
