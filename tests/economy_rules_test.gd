@@ -3511,11 +3511,16 @@ func _initialize() -> void:
 		assert(not MAP.path(graph, all_friendly, 1, 0, i).is_empty())
 	# Seeded unclustered maps retain connected capped routes.
 	var crystal_shares: Dictionary = {}
+	var rolled_neutral_stars: int = 0
+	var neutral_sites: int = 0
+	var pattern_clusters: int = 0
 	for seed_value in range(24):
 		var player_count: int = seed_value % 8 + 1
 		var clustered: Dictionary = _planetary_fixture(seed_value, player_count, "Grid")
 		var cluster_points: Array = clustered["points"]
-		assert(cluster_points.size() == player_count * MAP.SYSTEMS_PER_PLAYER)
+		assert(cluster_points.size() >= player_count * 4 + 2 and cluster_points.size() < player_count * MAP.PATTERN_SITES_PER_PLAYER)
+		rolled_neutral_stars += cluster_points.size() - player_count
+		neutral_sites += player_count * (MAP.PATTERN_SITES_PER_PLAYER - 1)
 		assert(clustered["cluster_sizes"].is_empty())
 		assert(clustered["clusters"].count(-1) == cluster_points.size())
 		var longest: float = 0.0
@@ -3534,10 +3539,14 @@ func _initialize() -> void:
 			assert(not MAP.blocked(cluster_points[edge[0]], cluster_points[edge[1]], clustered["fields"]))
 		var ring_count: int = 0
 		for field in clustered["fields"]:
+			if field.get("pattern_cluster", false):
+				pattern_clusters += 1
+				assert(not field.has("orbit_center") and not field.get("antimatter", false))
 			if field.has("orbit_center"):
 				ring_count += 1
 				assert(field["orbit_center"] == cluster_points[int(field["anchor"])])
 				assert(field["chunks"].size() >= MAP.ORBIT_ROCK_MIN and field["chunks"].size() <= MAP.ORBIT_ROCK_MAX)
+				assert(float(field["orbit_radius"]) <= MAP.ORBIT_WORLD_RADIUS * 1.10 + ECON.EPS)
 				for rock in field["chunks"]:
 					assert(is_equal_approx((rock["position"] as Vector2).distance_to(field["orbit_center"]), (rock["orbit_offset"] as Vector2).length()))
 			var ore: Dictionary = ECON.field_inventory(field)
@@ -3597,6 +3606,9 @@ func _initialize() -> void:
 					frontier.append(next)
 		assert(seen.size() == cluster_points.size())
 	assert(crystal_shares.has(0) and crystal_shares.size() >= 5)
+	assert(pattern_clusters > 0)
+	var neutral_star_fraction: float = float(rolled_neutral_stars) / float(neutral_sites)
+	assert(neutral_star_fraction >= 0.22 and neutral_star_fraction <= 0.40)
 	print("PASS: rescaled asteroid inventory, seeded metal-rich fields and crystal share cap")
 	var players: Dictionary = {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}
 	var ids: Array[int] = [1, 2, 3]
@@ -6955,7 +6967,7 @@ func _test_map_layouts() -> void:
 				for home in range(player_count):
 					assert(not galaxy["planetless"].has(home))
 				assert(galaxy["cluster_sizes"].is_empty())
-				assert(galaxy["points"].size() == player_count * MAP.SYSTEMS_PER_PLAYER)
+				assert(galaxy["points"].size() >= player_count * 4 + 2 and galaxy["points"].size() < player_count * MAP.PATTERN_SITES_PER_PLAYER)
 				var points: Array = galaxy["points"]
 				var degrees: Array[int] = []
 				degrees.resize(points.size())

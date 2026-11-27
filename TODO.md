@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.121.0: Check ship lighting behind planets and Freighter map response, planet orbits/PDS placement, close dense rings, mixed site occupancy and guaranteed homes, star/field connectivity and protected Pulsar counts across seeds/layouts, mining balance, shader/import, solo/ENet and rendered FPS. Runtime unrun.
+
 - [ ] v0.120.2: Validate dynamic planet day/night shading, star-facing ship/rock/structure normals, limited planet/station eclipses and self-shadow avoidance, freighter heading and paired nozzle placement, low-intensity acceleration, pause/fog, GPU frame time, Godot parse/import and peer smoke. Full mesh cast shadows remain outside this approximation.
 
 - [ ] v0.120.1: Verify full-bleed match render alignment at all edges, independent HUD margins, cursor/picking/ghosts, camera clamping at all zooms and aspect ratios, minimap viewport and resize; check windowed and fullscreen visually, run parse/startup/peer smoke.

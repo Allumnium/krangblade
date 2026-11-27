@@ -1,6 +1,6 @@
 # Warbound — star-system strategy RTS
 
-Current map generation (v0.120.0): individual widely spaced stars, eight per player, without spatial clusters; radial rings, square grid, staggered hex grid and jittered Scramble retain distinct layouts. Longest star link is 125 travel years; asteroid rings sit farther from stars. Right-click Colonize on a neutral star to automatically dispatch an available Colony Ship.
+Current map generation (v0.121.0): radial, square, staggered hex and jittered Scramble patterns have 24 candidate sites per player, guaranteed homes, a 30% neutral star roll and a 35% asteroid-field candidate roll; remaining sites are empty, with a minimum viable neutral star count and capped field access. Longest star link remains 125 travel years. Orbital ore belts are closer to stars and denser. Right-click Colonize on a neutral star to automatically dispatch an available Colony Ship.
 
 Mining logistics (v0.96.1): autonomous Freighters evaluate worker readiness, collection and depot travel time; loaded Harvesters seek nearby eligible Freighter rendezvous when faster than direct delivery. Existing physical transfer and internal mining-pool allocation remain.
 

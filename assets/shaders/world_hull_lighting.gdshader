@@ -51,7 +51,7 @@ vec3 surface_lighting(vec2 pos, vec2 axis_x, vec2 axis_y, vec3 normal, vec3 albe
 		float falloff = 1.0 - sqrt(distance_sq) / radius;
 		float strength = falloff * falloff * light_points[i].w;
 		bool stellar = light_colors[i].a > 0.5;
-		if (stellar) { strength *= stellar_visibility(pos, light_points[i].xy, receiver_center); }
+		if (stellar && spherical_surface) { strength *= stellar_visibility(pos, light_points[i].xy, receiver_center); }
 		float height = stellar ? max(0.1, length(delta) * 0.08) : max(1.0, radius * 0.10);
 		vec3 direction = normalize(vec3(dot(delta, axis_x), -dot(delta, axis_y), height));
 		float lambert = max(0.0, dot(normal, direction));
@@ -80,8 +80,7 @@ void vertex() {
 			float f = max(0.0, 1.0 - length(delta) / max(1.0, light_points[i].z));
 			vec2 radial = surface_position - center;
 			float facing = 0.30 + 0.70 * max(0.0, dot(normalize(radial + vec2(0.0001)), normalize(delta + vec2(0.0001))));
-			float visible = light_colors[i].a > 0.5 ? stellar_visibility(center, light_points[i].xy, center) : 1.0;
-			illumination += light_colors[i].rgb * f * f * light_points[i].w * facing * visible;
+			illumination += light_colors[i].rgb * f * f * light_points[i].w * facing;
 		}
 	}
 }
@@ -98,12 +97,16 @@ void fragment() {
 		vec2 pixel = TEXTURE_PIXEL_SIZE;
 		float dx = texture(height_map, UV + vec2(pixel.x, 0.0)).r - texture(height_map, UV - vec2(pixel.x, 0.0)).r;
 		float dy = texture(height_map, UV + vec2(0.0, pixel.y)).r - texture(height_map, UV - vec2(0.0, pixel.y)).r;
-		n = normalize(n + vec3(-dx * 0.20, dy * 0.20, 0.15));
+		n = normalize(n + vec3(-dx * 0.12, dy * 0.12, 0.24));
 		float ao = mix(0.62, 1.0, texture(occlusion_map, UV).r);
 		float specular = texture(specular_map, UV).r;
 		// _v is an offline preview, not a material input. TEXTURE is the
 		// empire-decaled diffuse map; only explicit world lights emit light.
-		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, base.rgb, specular, vec3(0.025, 0.030, 0.040), ao);
+		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, base.rgb, specular * 0.65, vec3(0.035, 0.040, 0.050), ao);
+		// Identical low self-lit surface detail for every authored hull; no idle plume or extra light source.
+		lit += base.rgb * 0.035;
+		float peak = max(lit.r, max(lit.g, lit.b));
+		if (peak > 0.75) { lit *= (0.75 + 0.25 * (1.0 - exp(-(peak - 0.75) / 0.25))) / peak; }
 	}
 	COLOR = vec4(clamp(lit, vec3(0.0), vec3(1.0)), base.a) * modulation;
 }
