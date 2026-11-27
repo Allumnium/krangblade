@@ -108,7 +108,7 @@ func draw_colony_transform(ship: Dictionary, point: Vector2, heading: Vector2, s
 		map_canvas.draw_arc(point, radius * 0.85, 0.0, TAU, 48, frame, maxf(1.0, radius * 0.22), true)
 		map_canvas.draw_arc(point, radius, 0.0, TAU, 48, tint.lightened(0.30), maxf(1.0, radius * 0.055), true)
 		map_canvas.draw_circle(point, radius * 0.32, Color("#293c51"), true, -1.0, true)
-		map_canvas.draw_arc(point, radius * 0.35, 0.0, TAU, 24, tint.darkened(1.0 - illumination), maxf(1.0, radius * 0.07), true)
+		map_canvas.draw_arc(point, radius * 0.35, 0.0, TAU, 24, tint, maxf(1.0, radius * 0.07), true)
 		var axis: Vector2 = Vector2.from_angle(elapsed * 0.008)
 		var dock: Vector2 = point + (screen_point.call((ship["position"] as Vector2) + axis * 90.0) - screen_point.call(ship["position"])) * u
 		map_canvas.draw_line(point + axis * radius * 0.35, dock, frame, maxf(1.0, radius * 0.12), true)
@@ -151,7 +151,7 @@ func draw_station(state: Dictionary, index: int, tint: Color, elapsed: float, bu
 		map_canvas.draw_arc(center, radius * 0.85, 0.0, TAU, 48, frame, maxf(2.0, radius * 0.22), true)
 		map_canvas.draw_arc(center, radius, 0.0, TAU, 48, tint.darkened(1.0 - illumination), maxf(1.0, radius * 0.055), true)
 	map_canvas.draw_circle(center, radius * 0.32, Color("#293c51").darkened(1.0 - illumination), true, -1.0, true)
-	map_canvas.draw_arc(center, radius * 0.35, 0.0, TAU, 24, tint, maxf(1.0, radius * 0.07), true)
+	map_canvas.draw_arc(center, radius * 0.35, 0.0, TAU, 24, tint.darkened(1.0 - illumination), maxf(1.0, radius * 0.07), true)
 	for slot in range(3):
 		var axis: Vector2 = Vector2.from_angle(float(slot) * TAU / 3.0 + elapsed * 0.008)
 		var side: Vector2 = axis.orthogonal()
