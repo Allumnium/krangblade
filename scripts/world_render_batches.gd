@@ -114,7 +114,7 @@ func set_world_lights(lights: Array, blockers: Array = []) -> void:
 			material.set_shader_parameter("shadow_count", mini(8, blockers.size()))
 
 func light_level(point: Vector2, normal: Vector2 = Vector2.ZERO, _receiver: Vector2 = Vector2.INF) -> float:
-	var amount: float = 0.035
+	var amount: float = 0.16
 	for entry in world_lights:
 		var delta: Vector2 = (entry[0] as Vector2) - point
 		var falloff: float = maxf(0.0, 1.0 - delta.length() / maxf(1.0, float(entry[1])))
@@ -124,7 +124,7 @@ func light_level(point: Vector2, normal: Vector2 = Vector2.ZERO, _receiver: Vect
 		amount += falloff * falloff * float(entry[3]) * facing
 	if amount > 0.72:
 		amount = 0.72 + 0.28 * (1.0 - exp(-(amount - 0.72) / 0.28))
-	return clampf(amount, 0.035, 1.0)
+	return clampf(amount, 0.16, 1.0)
 
 
 # Persistent packed transform staging, one stream per texture/opacity.

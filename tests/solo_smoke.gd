@@ -398,7 +398,12 @@ func _run_lighting_test() -> void:
 		celestial.draw_star(0, star, 44.0, tint, false, 1.0, canvas, 0.0)
 	)
 	canvas.queue_redraw()
-	var kinds: Array[String] = ["fighter", "science_ship", "ship"]
+	var kinds: Array[String] = []
+	# Include every gameplay hull, vector structure and authored material.
+	# New assets registered here automatically enter all direction cases.
+	for kind in ECON.SHIP_KINDS + HULL_ART.HULL_OUTLINES.keys() + HULL_ART.AUTHORED_SPRITE_KINDS:
+		if not kinds.has(str(kind)):
+			kinds.append(str(kind))
 	var results: Array[Dictionary] = []
 	var all_valid: bool = true
 	# All eight azimuths for each hull at four distinct absolute headings,
@@ -407,46 +412,47 @@ func _run_lighting_test() -> void:
 		var extent: float = 44.0 if size_index == 0 else 32.0
 		canvas.position = Vector2.ZERO if size_index == 0 else Vector2(23.0, -17.0)
 		var capture_star: Vector2 = canvas.get_global_transform_with_canvas() * star
-		for rotation_index in range(4):
-			var samples: Array[Dictionary] = []
-			batches.begin_frame()
-			for kind_index in range(kinds.size()):
-				var kind: String = kinds[kind_index]
-				var texture: Texture2D = art.hull_texture(kind, Color("#63a9df"), true)
-				var radius: float = 175.0 + 150.0 * float(kind_index)
-				for bearing_index in range(8):
-					var bearing: float = TAU * float(bearing_index) / 8.0
-					var heading: float = PI * 0.5 * float(rotation_index)
-					var center: Vector2 = star + Vector2.from_angle(bearing) * radius
-					batches.queue_overview_hull(texture, center, heading + HULL_ART.sprite_heading_offset(kind), extent)
-					samples.append({"kind": kind, "center": canvas.get_global_transform_with_canvas() * center, "extent": extent, "bearing_deg": bearing_index * 45, "heading_deg": rotation_index * 90})
-			batches.set_world_lights([])
-			batches.flush_world(0.0, art)
-			var materials: Dictionary = {}
-			for texture in batches.overview_batches:
-				var instance: MultiMeshInstance2D = batches.overview_batches[texture]
-				materials[texture] = instance.material
-				instance.material = null
-			var reference: Image = await _lighting_capture(viewport)
-			for texture in materials:
-				batches.overview_batches[texture].material = materials[texture]
-			var dark: Image = await _lighting_capture(viewport)
-			batches.set_world_lights([[star, 1600.0, tint, 1.55, 0.0, true]])
-			var lit: Image = await _lighting_capture(viewport)
-			if reference == null or dark == null or lit == null or reference.is_empty() or dark.is_empty() or lit.is_empty():
-				push_error("Lighting test did not obtain rendered pixels.")
-				quit(1)
-				return
-			var prefix: String = "%s/size%d_heading%d" % [output, size_index, rotation_index * 90]
-			if reference.save_png(prefix + "_reference.png") != OK or dark.save_png(prefix + "_ambient.png") != OK or lit.save_png(prefix + "_stellar.png") != OK:
-				all_valid = false
-			for sample in samples:
-				var result: Dictionary = _lighting_measure(reference, dark, lit, sample, capture_star)
-				results.append(result)
-				if not result["valid"]:
+		for page_start in range(0, kinds.size(), 3):
+			for rotation_index in range(4):
+				var samples: Array[Dictionary] = []
+				batches.begin_frame()
+				for kind_index in range(page_start, mini(page_start + 3, kinds.size())):
+					var kind: String = kinds[kind_index]
+					var texture: Texture2D = art.hull_texture(kind, Color("#63a9df"), true)
+					var radius: float = 175.0 + 150.0 * float(kind_index - page_start)
+					for bearing_index in range(8):
+						var bearing: float = TAU * float(bearing_index) / 8.0
+						var heading: float = PI * 0.5 * float(rotation_index)
+						var center: Vector2 = star + Vector2.from_angle(bearing) * radius
+						batches.queue_overview_hull(texture, center, heading + HULL_ART.sprite_heading_offset(kind), extent)
+						samples.append({"kind": kind, "center": canvas.get_global_transform_with_canvas() * center, "extent": extent, "bearing_deg": bearing_index * 45, "heading_deg": rotation_index * 90})
+				batches.set_world_lights([])
+				batches.flush_world(0.0, art)
+				var materials: Dictionary = {}
+				for texture in batches.overview_batches:
+					var instance: MultiMeshInstance2D = batches.overview_batches[texture]
+					materials[texture] = instance.material
+					instance.material = null
+				var reference: Image = await _lighting_capture(viewport)
+				for texture in materials:
+					batches.overview_batches[texture].material = materials[texture]
+				var dark: Image = await _lighting_capture(viewport)
+				batches.set_world_lights([[star, 1600.0, tint, 1.55, 0.0, true]])
+				var lit: Image = await _lighting_capture(viewport)
+				if reference == null or dark == null or lit == null or reference.is_empty() or dark.is_empty() or lit.is_empty():
+					push_error("Lighting test did not obtain rendered pixels.")
+					quit(1)
+					return
+				var prefix: String = "%s/page%d_size%d_heading%d" % [output, page_start / 3, size_index, rotation_index * 90]
+				if reference.save_png(prefix + "_reference.png") != OK or dark.save_png(prefix + "_ambient.png") != OK or lit.save_png(prefix + "_stellar.png") != OK:
 					all_valid = false
-				if not result["correct_side"]:
-					print("LIGHTING SUSPECT ", JSON.stringify(result))
+				for sample in samples:
+					var result: Dictionary = _lighting_measure(reference, dark, lit, sample, capture_star)
+					results.append(result)
+					if not result["valid"]:
+						all_valid = false
+					if not result["correct_side"]:
+						print("LIGHTING SUSPECT ", JSON.stringify(result))
 	var groups: Dictionary = {}
 	# Score the broad lighting orientation, not individual decorative
 	# pixels. Fail any inverted case, not just systematic group inversions.
@@ -469,7 +475,8 @@ func _run_lighting_test() -> void:
 				groups[key] = {"pass": passed, "valid": valid, "correct_side": count, "near_sum": near, "far_sum": far}
 				all_valid = all_valid and passed
 				print("LIGHTING GROUP ", key, " ", JSON.stringify(groups[key]))
-	var report := {"passed": all_valid, "case_count": results.size(), "groups": groups, "cases": results, "criterion": "8 valid and 8 correct bearings per group; aggregate near response >1.15*far response"}
+	all_valid = all_valid and results.size() == kinds.size() * 64
+	var report := {"passed": all_valid, "kinds": kinds, "case_count": results.size(), "groups": groups, "cases": results, "criterion": "8 valid and 8 correct bearings per group; aggregate near response >1.15*far response"}
 	var file := FileAccess.open(output.path_join("report.json"), FileAccess.WRITE)
 	if file == null:
 		push_error("Could not write lighting report.")

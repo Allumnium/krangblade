@@ -3828,10 +3828,16 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	if not additive:
 		selected_units.clear()
 	var poses: Dictionary = _ship_poses(state)
-	# All visible hulls in the rectangle are selectable, regardless of role
-	# or allegiance. Owned-unit dispatch still filters command recipients.
+	# Keep only commandable hulls in a box selection, including Shift-add.
+	var commandable: Dictionary = {}
 	for craft in state.get("ships", []):
-		if craft.get("kind", "") == "warp_gate":
+		if _is_commandable_ship(craft):
+			commandable[int(craft["id"])] = true
+	for id in selected_units.duplicate():
+		if not commandable.has(id):
+			selected_units.erase(id)
+	for craft in state.get("ships", []):
+		if not commandable.has(int(craft["id"])):
 			continue
 		var id: int = int(craft["id"])
 		if poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
@@ -4042,9 +4048,12 @@ func _selected_ship_entries(state: Dictionary) -> Array:
 			entries.append(craft)
 	return entries
 
-# Command eligibility for a ship from _selected_ship_entries.
+# Shared eligibility for box selection and command dispatch, independent of active type.
+func _is_commandable_ship(craft: Dictionary) -> bool:
+	return int(craft["owner"]) == _me() and craft.get("kind", "") not in ["warp_gate", "probe"] and not ECONOMY.is_static_structure(craft) and not ECONOMY.colony_morphing(craft)
+
 func _command_entry(craft: Dictionary) -> bool:
-	return int(craft["owner"]) == _me() and craft.get("kind", "") != "probe" and not ECONOMY.is_static_structure(craft) and not ECONOMY.colony_morphing(craft) and str(craft["kind"]) == command_kind
+	return _is_commandable_ship(craft) and str(craft["kind"]) == command_kind
 
 func _cycle_command_kind(reverse: bool) -> bool:
 	var state: Dictionary = _state()
@@ -4082,7 +4091,7 @@ func _selected_repairers() -> Array[int]:
 func _selected_owned_units(state: Dictionary, all_types: bool = false) -> Array[int]:
 	var owned: Array[int] = []
 	for craft in _selected_ship_entries(state):
-		if craft.get("kind", "") not in ["warp_gate", "probe"] and not ECONOMY.is_static_structure(craft) and not ECONOMY.colony_morphing(craft) and (_command_entry(craft) or (all_types and selected_units.has(int(craft["id"])) and int(craft["owner"]) == _me())):
+		if _is_commandable_ship(craft) and (all_types or _command_entry(craft)):
 			owned.append(int(craft["id"]))
 	return owned
 
@@ -4963,7 +4972,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 	var stars: Array = []
 	var lamps: Array = []
 	var center: Vector2 = bounds.get_center()
-	var radius: float = maxf(12.0, 2400.0 * render_scale)
+	var radius: float = maxf(12.0, 3600.0 * render_scale)
 	var blockers: Array = []
 	for index in range(points.size()):
 		if not ECONOMY.discovered(state, _me(), "planets", index):

@@ -12,8 +12,10 @@ const DEFAULT_SPRITE_VARIANT: int = 0
 var sprite_textures: Dictionary = {}
 var sprite_kinds: Dictionary = {}
 
+const AUTHORED_SPRITE_KINDS: Array[String] = ["science_ship", "fighter", "ship"]
+
 static func has_authored_sprite(kind: String) -> bool:
-	return kind in ["science_ship", "fighter", "ship"]
+	return kind in AUTHORED_SPRITE_KINDS
 
 static func visual_scale(kind: String) -> float:
 	match kind:
