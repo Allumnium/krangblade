@@ -196,7 +196,7 @@ func _phase_changed() -> void:
 			if miners != 3 or fighters != 2 or freighters != 1:
 				_fail("Starting fleet did not replicate.")
 				return
-		if owners.size() != state["map"]["points"].size() or state["map"]["cluster_sizes"].size() != MAP.cluster_count_for(expected_players, _expected_layout()):
+		if owners.size() != state["map"]["points"].size() or not state["map"]["cluster_sizes"].is_empty():
 			_fail("Wrong territory count.")
 			return
 		if mode == "threaded":
