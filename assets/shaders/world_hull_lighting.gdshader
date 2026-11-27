@@ -1,12 +1,10 @@
 shader_type canvas_item;
 render_mode unshaded;
 uniform bool authored_sprite = false;
-uniform sampler2D diffuse_map : source_color, filter_nearest;
 uniform sampler2D normal_map : filter_nearest;
 uniform sampler2D occlusion_map : filter_nearest;
 uniform sampler2D height_map : filter_nearest;
 uniform sampler2D specular_map : filter_nearest;
-uniform sampler2D detail_map : source_color, filter_nearest;
 uniform vec4 light_points[16];
 uniform vec4 light_colors[16];
 uniform int light_count = 0;
@@ -46,7 +44,7 @@ void vertex() {
 	surface_axis_x = normalize(transform[0].xy);
 	surface_axis_y = normalize(transform[1].xy);
 	modulation = COLOR;
-	illumination = vec3(0.16, 0.19, 0.23);
+	illumination = vec3(0.025, 0.030, 0.040);
 	// Legacy vector hulls retain the inexpensive per-instance path.
 	if (!authored_sprite) {
 		for (int i = 0; i < 16; i++) {
@@ -62,7 +60,6 @@ void fragment() {
 	if (base.a <= 0.001) { discard; }
 	vec3 lit = base.rgb * min(illumination, vec3(1.25));
 	if (authored_sprite) {
-		vec3 diffuse = texture(diffuse_map, UV).rgb;
 		vec3 n = texture(normal_map, UV).rgb * 2.0 - 1.0;
 		vec2 pixel = TEXTURE_PIXEL_SIZE;
 		float dx = texture(height_map, UV + vec2(pixel.x, 0.0)).r - texture(height_map, UV - vec2(pixel.x, 0.0)).r;
@@ -70,11 +67,9 @@ void fragment() {
 		n = normalize(n + vec3(-dx * 0.20, dy * 0.20, 0.15));
 		float ao = mix(0.62, 1.0, texture(occlusion_map, UV).r);
 		float specular = texture(specular_map, UV).r;
-		// The bright-detail map includes ordinary hull pixels. Only its
-		// positive difference from diffuse is an emissive contribution.
-		vec3 emissive = max(texture(detail_map, UV).rgb - diffuse, vec3(0.0));
-		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, mix(base.rgb, diffuse, 0.20), specular, vec3(0.14, 0.17, 0.21), ao);
-		lit += emissive * 1.25;
+		// _v is an offline preview, not a material input. TEXTURE is the
+		// empire-decaled diffuse map; only explicit world lights emit light.
+		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, base.rgb, specular, vec3(0.025, 0.030, 0.040), ao);
 	}
 	COLOR = vec4(clamp(lit, vec3(0.0), vec3(1.0)), base.a) * modulation;
 }

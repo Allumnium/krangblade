@@ -1,8 +1,8 @@
 extends RefCounted
 ## Client-only canonical hull silhouettes and texture caches for portraits, shields and world art.
 const ECONOMY = preload("res://scripts/economy_rules.gd")
-const SCIENCE_SPRITE = preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586.png")
-const FIGHTER_SPRITE = preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423.png")
+const SCIENCE_SPRITE = preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_d.png")
+const FIGHTER_SPRITE = preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_d.png")
 const FIGHTER_GRID: int = 4
 # Default to the first (top-left) design for every hull. Other variants
 # remain authored assets; no style selection or replicated state yet.
@@ -40,11 +40,11 @@ func sprite_texture(kind: String, empire: Color) -> Texture2D:
 				if c.a > 0.0:
 					var value: float = maxf(c.r, maxf(c.g, c.b))
 					var accent := Color(empire.r * value, empire.g * value, empire.b * value, c.a)
-					# Use the authored red trim for stronger empire identification.
-					var strength: float = 0.30
-					if kind == "fighter" and c.r > maxf(c.g, c.b) * 1.25:
-						strength = 0.82
-					image.set_pixel(x, y, c.lerp(accent, strength))
+					# Recolor the authored decals, not neutral hull plating.
+					# Fighter trim is red; Science Vessel trim is cyan.
+					var trim: bool = c.r > maxf(c.g, c.b) * 1.20 and c.r - minf(c.g, c.b) > 0.08 if kind == "fighter" else minf(c.g, c.b) > c.r * 1.16 and maxf(c.g, c.b) - c.r > 0.07
+					if trim:
+						image.set_pixel(x, y, c.lerp(accent, 0.94))
 		var texture: Texture2D = ImageTexture.create_from_image(image)
 		sprite_textures[key] = texture
 		sprite_kinds[texture] = kind

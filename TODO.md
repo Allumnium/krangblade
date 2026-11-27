@@ -2,6 +2,8 @@
 
 ## Approved art and audio overhaul (2026-11-27)
 
+- [ ] v0.118.5 corrects material suffix contract and team decals, reduces ambient, adds weapon-impact lights. Validate all sprite imports, palette masks, impact timing/visibility, actual shader compile and GPU cost; no runtime checks yet.
+
 - [ ] v0.118.4 corrects light coordinate space, per-source surface response and emissive masking, centers additive engine/plume glow, and draws group movement markers above fog. Validate with close-up rotation, multiple lights, pause, zoom, normal/height convention, GPU costs and actual multiplayer. Cast shadows not implemented.
 
 - [ ] v0.118.3 restores group command target rings, removes combat-only box-selection preference, and adds thrust-dependent plume illumination. Verify mixed/foreign/Shift selection and owned-only dispatch, shared and differing destinations, fog/cloak and stop/pause behavior, and rendered fleet performance.

@@ -40,19 +40,15 @@ func _lighting_material(kind: String) -> ShaderMaterial:
 	material.shader = HULL_LIGHTING
 	material.set_shader_parameter("authored_sprite", HULL_ART.has_authored_sprite(kind))
 	if kind == "science_ship":
-		material.set_shader_parameter("diffuse_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_d.png"))
 		material.set_shader_parameter("normal_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_n.png"))
 		material.set_shader_parameter("occlusion_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_o.png"))
 		material.set_shader_parameter("height_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_p.png"))
 		material.set_shader_parameter("specular_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_s.png"))
-		material.set_shader_parameter("detail_map", preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586_v.png"))
 	elif kind == "fighter":
-		material.set_shader_parameter("diffuse_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_d.png")))
 		material.set_shader_parameter("normal_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_n.png")))
 		material.set_shader_parameter("occlusion_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_o.png")))
 		material.set_shader_parameter("height_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_p.png")))
 		material.set_shader_parameter("specular_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_s.png")))
-		material.set_shader_parameter("detail_map", _fighter_map(preload("res://assets/sprites/fighters/pixellab-top-down-white-large-space-shi-1795757475423_v.png")))
 	return material
 
 func _fighter_map(atlas: Texture2D) -> Texture2D:
@@ -78,11 +74,11 @@ func set_world_lights(lights: Array) -> void:
 		material.set_shader_parameter("light_count", mini(16, lights.size()))
 
 func light_level(point: Vector2) -> float:
-	var amount: float = 0.20
+	var amount: float = 0.035
 	for entry in world_lights:
 		var falloff: float = maxf(0.0, 1.0 - point.distance_to(entry[0]) / maxf(1.0, float(entry[1])))
 		amount += falloff * falloff * float(entry[3])
-	return clampf(amount, 0.20, 1.0)
+	return clampf(amount, 0.035, 1.0)
 
 
 # Persistent packed transform staging, one stream per texture/opacity.
