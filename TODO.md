@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.121.15: Validate doubled actual orbital radii and counts, four-radius edge margin in all layouts, compact replica generation, longer travel and mining economics, fog mask size/overview FPS and peers; verify no planet→station production pods and retained upgrade deliveries.
+
 - [ ] v0.121.14: Verify linear world-space hull/structure/celestial sizes across zoom and map dimensions, constant flag pixels, hit tolerance and cargo placement, subpixel rendering without polygon errors, overview FPS with full sprite batches, full parse and peer smoke.
 
 - [ ] v0.121.13: Verify active/queued move, patrol, formation, construction and rally ghosts/lines across unexplored and remembered fog; verify hidden enemy targets do not leak, selection rectangle and projection across pan/zoom, Godot parse and peer smoke.

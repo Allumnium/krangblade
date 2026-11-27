@@ -5088,14 +5088,10 @@ func _draw_map_content() -> void:
 		var seen_at: float = float(state["elapsed"]) if live else fog_state.observed_time(i)
 		var radius: float = _planet_radius(i, view)
 		var tint: Color = _empire_color(int(system["owner"]))
-		var detail: float = _draw_system(i, view, pos, radius, tint, -1.0 if live else seen_at)
+		_draw_system(i, view, pos, radius, tint, -1.0 if live else seen_at)
 		if not live or _fog_visible(ECONOMY.station_position(state, i, float(state["elapsed"]))):
 			structure_view.draw_station(view, i, tint, seen_at, building_selection_kind, selected_buildings)
 			structure_view.draw_shipyards(view, i, tint, seen_at, selected, selected_yard, building_selection_kind, selected_buildings)
-		# Incoming resource pods must remain visible as they cross the
-		# opaque station hull and enter its storage bays.
-		if live and detail >= 0.05:
-			planet_traffic.draw_production(state, i, pos, radius, detail)
 		if _show_system_rings(i):
 			var phase: float = 0.6 + 0.35 * sin(visual_clock * 3.0)
 			for angle in range(4):

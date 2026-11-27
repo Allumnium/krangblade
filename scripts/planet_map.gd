@@ -3,7 +3,8 @@ extends RefCounted
 const SIZE := Vector2(2200, 1500)
 
 const TRAVEL_SPEED: float = 95.0
-const LONGEST_LINK_YEARS: float = 125.0
+const LONGEST_LINK_YEARS: float = 250.0
+const SYSTEM_SPACING_MULTIPLIER: float = 2.0
 const MAX_CONNECTIONS: int = 3
 const EXTRA_LINK_CHANCE: float = 0.35
 const ANTIMATTER := "Raw antimatter"
@@ -17,9 +18,10 @@ const ASTEROID_INVENTORY_MULTIPLIER: float = 1.0
 const ASTEROID_CLUSTER_SCALE: float = 0.55
 const ASTEROID_RADIUS_SCALE: float = 0.4
 const ASTEROID_MAX_RADIUS: float = 24.0
-const ORBIT_ROCK_MIN: int = 64
-const ORBIT_ROCK_MAX: int = 80
-const ORBIT_WORLD_RADIUS: float = 5400.0
+const ORBIT_ROCK_MIN: int = 128
+const ORBIT_ROCK_MAX: int = 160
+const ORBIT_WORLD_RADIUS: float = 10800.0
+const STAR_EDGE_BELT_RADII: float = 4.0
 const STAR_SITE_CHANCE: float = 0.30
 const ASTEROID_SITE_CHANCE: float = 0.35
 const ASTEROID_ORBIT_STEP: float = 1.0
@@ -331,6 +333,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	for edge in edges:
 		longest = maxf(longest, points[edge[0]].distance_to(points[edge[1]]))
 	var scale: float = LONGEST_LINK_YEARS * TRAVEL_SPEED / maxf(longest, 1.0)
+	var static_scale: float = scale / SYSTEM_SPACING_MULTIPLIER
 	# One orbital resource pool per star. These additional logical mining
 	# access spurs do not consume a physical star-to-star route port.
 	var rings: Array = []
@@ -356,17 +359,33 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 		edge[0] += rings.size()
 		edge[1] += rings.size()
 	fields = rings + fields
+	# Pad the raw layout only after belt radii are chosen. This preserves
+	# seeded ring sizes and relative star positions while enforcing the
+	# absolute world-space edge margin, including the largest jittered ring.
+	var required_margin: float = ORBIT_WORLD_RADIUS / scale
+	for ring in rings:
+		required_margin = maxf(required_margin, float(ring["orbit_radius"]))
+	required_margin = required_margin * STAR_EDGE_BELT_RADII + 1.0
+	var padding := Vector2.ZERO
+	for point in points:
+		padding.x = maxf(padding.x, required_margin - minf(point.x, bounds.x - point.x))
+		padding.y = maxf(padding.y, required_margin - minf(point.y, bounds.y - point.y))
+	bounds += padding * 2.0
 	for index in range(points.size()):
-		points[index] *= scale
+		points[index] = (points[index] + padding) * scale
 	for field in fields:
-		field["position"] = (field["position"] as Vector2) * scale
-		field["radius"] = float(field["radius"]) * scale
-		if field.has("orbit_center"):
-			field["orbit_center"] = (field["orbit_center"] as Vector2) * scale
+		var raw_center: Vector2 = field["position"]
+		var center: Vector2 = (raw_center + padding) * scale
+		var orbital: bool = field.has("orbit_center")
+		var local_scale: float = scale if orbital else static_scale
+		field["position"] = center
+		field["radius"] = float(field["radius"]) * local_scale
+		if orbital:
+			field["orbit_center"] = ((field["orbit_center"] as Vector2) + padding) * scale
 			field["orbit_radius"] = float(field["orbit_radius"]) * scale
 		for lobe in field.get("belt_lobes", []):
-			lobe["position"] = (lobe["position"] as Vector2) * scale
-			lobe["radius"] = float(lobe["radius"]) * scale
+			lobe["position"] = center + ((lobe["position"] as Vector2) - raw_center) * local_scale
+			lobe["radius"] = float(lobe["radius"]) * local_scale
 		_populate_field(field, rng)
 		if bool(field.get("antimatter", false)):
 			field["Metals"] = 0.0
