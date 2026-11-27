@@ -3,7 +3,7 @@ extends RefCounted
 const SIZE := Vector2(2200, 1500)
 
 const TRAVEL_SPEED: float = 95.0
-const LONGEST_LINK_YEARS: float = 100.0
+const LONGEST_LINK_YEARS: float = 125.0
 const MAX_CONNECTIONS: int = 3
 const EXTRA_LINK_CHANCE: float = 0.35
 const ANTIMATTER := "Raw antimatter"
@@ -27,12 +27,8 @@ static func valid_layout(layout: String) -> bool:
 
 const SYSTEMS_PER_PLAYER: int = 8
 
-static func cluster_count_for(player_count: int, layout: String) -> int:
-	if layout == "Hex Grid":
-		return player_count
-	if layout == "Radial":
-		return 2 if player_count == 1 else maxi(3, player_count) * 2
-	return player_count * 2
+static func cluster_count_for(_player_count: int, _layout: String) -> int:
+	return 0
 
 static func planetless_systems(seed_value: int, count: int, edges: Array, homes: int) -> Array[int]:
 	var rng := RandomNumberGenerator.new()
@@ -67,193 +63,99 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 	var radial: bool = layout == "Radial"
 	var grid: bool = layout == "Grid"
 	var hex: bool = layout == "Hex Grid"
-	var sectors: int = maxi(3, player_count)
-	var group_count: int = sectors * 2 if radial else cluster_count_for(player_count, layout)
-	var centers: Array[Vector2] = []
-	var sizes: Array[int] = []
-	var groups: Array = []
-	var columns: int = ceili(sqrt(float(group_count)))
-	var rows: int = ceili(float(group_count) / columns)
-	var spacing: float = 1600.0 if hex else (1400.0 if grid else 2100.0)
-	var bounds: Vector2 = Vector2(columns, rows) * spacing
-	if hex:
-		bounds = Vector2(columns + 0.5, 1.0 + (rows - 1) * sqrt(3.0) * 0.5) * spacing
+	# Individual stars, not clusters. Each layout keeps its own geometry.
+	var count: int = player_count * SYSTEMS_PER_PLAYER
+	var spacing: float = 1600.0
+	var raw: Array[Vector2] = []
+	var raw_edges: Array = []
+	var bounds: Vector2
 	var rotation: float = rng.randf_range(0.0, TAU)
 	if radial:
-		var inner: float = maxf(1600.0, 1800.0 / (2.0 * sin(PI / float(sectors))))
-		var outer: float = inner + 1700.0
-		bounds = Vector2.ONE * (outer + 1400.0) * 2.0
+		var per_ring: int = count / 2
+		var inner: float = maxf(spacing, spacing / (2.0 * sin(PI / float(per_ring))))
+		var outer: float = inner + spacing
+		bounds = Vector2.ONE * (outer + spacing) * 2.0
 		for ring in range(2):
-			for sector in range(sectors):
-				var angle: float = rotation + TAU * float(sector) / sectors + rng.randf_range(-0.15, 0.15)
-				var radius: float = (outer if ring == 0 else inner) * rng.randf_range(0.9, 1.1)
-				centers.append(bounds * 0.5 + Vector2.from_angle(angle) * radius)
+			for k in range(per_ring):
+				var angle: float = rotation + TAU * float(k) / float(per_ring)
+				raw.append(bounds * 0.5 + Vector2.from_angle(angle) * (outer if ring == 0 else inner))
+				raw_edges.append([ring * per_ring + k, ring * per_ring + (k + 1) % per_ring])
+		# Two connected rings, with spare ports for deposits.
+		raw_edges.append([1, per_ring + 1])
 	else:
-		var candidates: Array[Vector2] = []
-		for index in range(group_count):
-			var row: int = index / columns
-			var lattice: Vector2 = Vector2(float(index % columns) + 0.5, float(row) + 0.5)
-			if hex:
-				lattice = Vector2(lattice.x + float(row % 2) * 0.5, 0.5 + float(row) * sqrt(3.0) * 0.5)
-			var jitter: float = 0.0 if grid or hex else 0.25
-			candidates.append(lattice * spacing + Vector2(rng.randf_range(-jitter, jitter), rng.randf_range(-jitter, jitter)) * spacing)
-		centers.append(candidates.pop_at(rng.randi_range(0, candidates.size() - 1)))
-		while centers.size() < player_count:
+		var columns: int = ceili(sqrt(float(count)))
+		var rows: int = ceili(float(count) / float(columns))
+		bounds = Vector2(columns + 1.0, rows + 1.0) * spacing
+		for row in range(rows):
+			var row_count: int = mini(columns, count - raw.size())
+			for k in range(row_count):
+				var col: int = k if row % 2 == 0 else columns - 1 - k
+				var pos := Vector2(float(col) + 0.75, float(row) + 0.75)
+				if hex:
+					pos.x += float(row % 2) * 0.5
+					pos.y = 0.75 + float(row) * sqrt(3.0) * 0.5
+				if not grid and not hex:
+					pos += Vector2(rng.randf_range(-0.15, 0.15), rng.randf_range(-0.15, 0.15))
+				raw.append(pos * spacing)
+				if raw.size() > 1:
+					raw_edges.append([raw.size() - 2, raw.size() - 1])
+	# Assign spread-out homes first; every home retains a neutral neighbor.
+	var home_raw: Array[int] = []
+	if radial:
+		for player in range(player_count):
+			home_raw.append(player * 4)
+	else:
+		var candidates: Array[int] = []
+		for k in range(0, count, 2):
+			candidates.append(k)
+		home_raw.append(candidates.pop_at(rng.randi_range(0, candidates.size() - 1)))
+		while home_raw.size() < player_count:
 			var best: int = 0
 			var best_distance: float = -1.0
-			for index in range(candidates.size()):
+			for k in range(candidates.size()):
 				var nearest: float = INF
-				for center in centers:
-					nearest = minf(nearest, candidates[index].distance_squared_to(center))
+				for home in home_raw:
+					nearest = minf(nearest, raw[candidates[k]].distance_squared_to(raw[home]))
 				if nearest > best_distance:
 					best_distance = nearest
-					best = index
-			centers.append(candidates.pop_at(best))
-		centers.append_array(candidates)
-	for group in range(group_count):
-		groups.append([])
-		sizes.append(6 if hex else (1 if radial and player_count == 1 else (2 if radial and player_count == 2 else 3)))
-	if not radial and not hex:
-		for group in range(0, group_count - 1, 2):
-			if rng.randf() < 0.65 or grid:
-				var shift: int = 1 if rng.randf() < 0.5 else -1
-				sizes[group] += shift
-				sizes[group + 1] -= shift
+					best = k
+			home_raw.append(candidates.pop_at(best))
+	var order: Array[int] = home_raw.duplicate()
+	for k in range(count):
+		if not home_raw.has(k):
+			order.append(k)
 	var points: Array[Vector2] = []
+	var remap: Dictionary = {}
 	var clusters: Array[int] = []
-	var local_points: Array = []
-	for group in range(group_count):
-		var positions: Array[Vector2] = []
-		var center: Vector2 = centers[group]
-		var angle: float = rng.randf_range(0.0, TAU)
-		if hex:
-			var radius: float = 460.0
-			for index in range(6):
-				var direction: float = TAU * float(index) / 6.0
-				positions.append(center + Vector2.from_angle(direction) * radius)
-		elif grid:
-			# Each cluster occupies a two-by-two patch on the finer square lattice.
-			var offsets: Array[Vector2] = [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]
-			var start: int = rng.randi_range(0, 3)
-			for index in range(sizes[group]):
-				positions.append(center + offsets[(start + index) % 4] * spacing * 0.15)
-		else:
-			positions.append(center)
-			for index in range(1, sizes[group]):
-				var candidate: Vector2 = center
-				var best_clearance: float = -1.0
-				for attempt in range(80):
-					var trial: Vector2 = center + Vector2.from_angle(rng.randf_range(0.0, TAU)) * rng.randf_range(120.0, 460.0)
-					var nearest: float = INF
-					for other in positions:
-						nearest = minf(nearest, trial.distance_to(other))
-					if nearest > best_clearance:
-						best_clearance = nearest
-						candidate = trial
-					if nearest >= 125.0:
-						break
-				positions.append(candidate)
-		local_points.append(positions)
-	for group in range(player_count):
-		points.append(local_points[group][0])
-		clusters.append(group)
-		groups[group].append(points.size() - 1)
-	for group in range(group_count):
-		for index in range(1 if group < player_count else 0, sizes[group]):
-			points.append(local_points[group][index])
-			clusters.append(group)
-			groups[group].append(points.size() - 1)
+	var sizes: Array[int] = []
+	for k in order:
+		remap[k] = points.size()
+		points.append(raw[k])
+		clusters.append(-1)
 	var edges: Array = []
 	var degrees: Array[int] = []
-	degrees.resize(points.size())
+	degrees.resize(count)
 	degrees.fill(0)
-	for group in groups:
-		if hex or (grid and group.size() == 4):
-			for index in range(group.size()):
-				var first: int = group[index]
-				var second: int = group[(index + 1) % group.size()]
-				_add_edge(edges, degrees, [mini(first, second), maxi(first, second)])
-		else:
-			var connected: Array = [group[0]]
-			while connected.size() < group.size():
-				var pair: Array = _closest_pair(points, connected, group, connected, degrees, points.size())
-				_add_edge(edges, degrees, pair)
-				connected.append(pair[1] if connected.has(pair[0]) else pair[0])
-	if radial:
-		var bridges: Array = []
-		for sector in range(sectors):
-			bridges.append([sector, (sector + 1) % sectors])
-			bridges.append([sector + sectors, (sector + 1) % sectors + sectors])
-			if player_count > 1 or sector < 2:
-				bridges.append([sector, sector + sectors])
-		_connect_radial_bridges(points, groups, bridges, edges, degrees)
-	else:
-		var joined: Array = [0]
-		var connected_groups: Dictionary = {}
-		while joined.size() < group_count:
-			var best_pair: Array = []
-			var best_group: int = -1
-			var best_from: int = -1
-			var best_distance: float = INF
-			for first in joined:
-				for second in range(group_count):
-					if joined.has(second):
-						continue
-					var pair: Array = _closest_pair(points, groups[first], groups[second], [], degrees, points.size())
-					if pair.is_empty():
-						continue
-					var distance: float = points[pair[0]].distance_squared_to(points[pair[1]])
-					# Prefer lattice neighbors over diagonal or skipping links.
-					if (grid or hex) and centers[first].distance_to(centers[second]) > spacing * 1.05:
-						distance += bounds.length_squared()
-					if distance < best_distance:
-						best_distance = distance
-						best_pair = pair
-						best_group = second
-						best_from = first
-			_add_edge(edges, degrees, best_pair)
-			connected_groups[Vector2i(mini(best_from, best_group), maxi(best_from, best_group))] = true
-			joined.append(best_group)
-		if grid or hex:
-			_add_lattice_bridges(points, centers, groups, spacing, connected_groups, edges, degrees, player_count)
-	if radial and player_count == 1:
-		for index in range(clusters.size()):
-			clusters[index] = 0 if clusters[index] < sectors else 1
-		sizes = [sectors, sectors]
-	var target: int = mini(player_count * SYSTEMS_PER_PLAYER, points.size() + roundi(float(points.size()) * 0.25))
-	while points.size() < target:
-		var best_edge: int = -1
-		var best_distance: float = -1.0
-		for index in range(edges.size()):
-			var edge: Array = edges[index]
-			if clusters[edge[0]] >= 0 and clusters[edge[0]] == clusters[edge[1]]:
+	for edge in raw_edges:
+		var a: int = remap[edge[0]]
+		var b: int = remap[edge[1]]
+		_add_edge(edges, degrees, [mini(a, b), maxi(a, b)])
+	# Short alternate routes without consuming every neutral deposit port.
+	if not radial:
+		for a in range(player_count, count):
+			if a % 3 != 0 or degrees[a] >= MAX_CONNECTIONS:
 				continue
-			var distance: float = points[edge[0]].distance_squared_to(points[edge[1]])
-			if distance > best_distance:
-				best_distance = distance
-				best_edge = index
-		if best_edge >= 0:
-			var edge: Array = edges[best_edge]
-			var point: Vector2 = points[edge[0]].lerp(points[edge[1]], 0.5 if grid or hex else rng.randf_range(0.36, 0.64))
-			var node: int = points.size()
-			points.append(point)
-			clusters.append(-1)
-			degrees.append(2)
-			edges[best_edge] = [edge[0], node]
-			edges.append([edge[1], node])
-		else:
-			var anchor: int = -1
-			for index in range(points.size()):
-				if degrees[index] < MAX_CONNECTIONS and (anchor < 0 or degrees[index] < degrees[anchor]):
-					anchor = index
-			var direction: Vector2 = (points[anchor] - centers[0]).normalized()
-			if direction.is_zero_approx():
-				direction = Vector2.RIGHT
-			var node: int = points.size()
-			points.append(points[anchor] + direction * rng.randf_range(270.0, 430.0))
-			clusters.append(-1)
-			degrees.append(0)
-			_add_edge(edges, degrees, [anchor, node])
+			var best: int = -1
+			var distance: float = spacing * 1.15
+			for b in range(a + 1, count):
+				if degrees[b] >= MAX_CONNECTIONS or b % 3 == 0 or edges.has([a, b]) or edges.has([b, a]):
+					continue
+				var span: float = points[a].distance_to(points[b])
+				if span < distance:
+					best = b
+					distance = span
+			if best >= 0:
+				_add_edge(edges, degrees, [a, best])
 	# Place deposits against actual remaining ports, not nominal cluster counts.
 	var fields: Array = []
 	var special_sites: Array[Vector2] = []
@@ -267,7 +169,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 		for index in range(player_count, points.size()):
 			for ring in range(1, 4):
 				for angle in range(12):
-					special_sites.append(points[index] + Vector2.from_angle(TAU * float(angle) / 12.0) * (110.0 + 85.0 * ring))
+					special_sites.append(points[index] + Vector2.from_angle(TAU * float(angle) / 12.0) * (340.0 + 105.0 * ring))
 		for index in range(special_sites.size() - 1, 0, -1):
 			var other: int = rng.randi_range(0, index)
 			var swap: Vector2 = special_sites[index]
@@ -367,10 +269,10 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			if other != anchor:
 				nearest = minf(nearest, center.distance_to(points[other]))
 		var edge_clearance: float = minf(minf(center.x, center.y), minf(bounds.x - center.x, bounds.y - center.y))
-		var room: float = minf(nearest * 0.42, edge_clearance * 0.78)
+		var room: float = minf(nearest * 0.44, edge_clearance * 0.78)
 		for special in specials:
 			room = minf(room, (center.distance_to(special["position"]) - float(special["radius"])) * 0.72)
-		var orbit_radius: float = maxf(12.0, minf(260.0, room * rng.randf_range(0.68, 0.86)))
+		var orbit_radius: float = maxf(12.0, minf(650.0, room * rng.randf_range(0.86, 0.96)))
 		var phase: float = rng.randf_range(0.0, TAU)
 		var node: Vector2 = center + Vector2.from_angle(phase) * orbit_radius * 0.45
 		var rate: float = rng.randf_range(0.0015, 0.0035) * (1.0 if rng.randf() < 0.5 else -1.0)

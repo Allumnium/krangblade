@@ -820,7 +820,8 @@ func _build_station_interaction(body: VBoxContainer) -> void:
 	interaction_scroll.add_child(interaction_panel)
 	var neutral_grid: GridContainer = command_card_ui.create_grid(interaction_panel)
 	send_colony_button = _station_button(neutral_grid, "Colonize", "transform", _send_colony)
-	command_card_ui.set_hint(send_colony_button, "Send the nearest available Colony to this sector")
+	send_colony_button.gui_input.connect(_colonize_autocast_input)
+	command_card_ui.set_hint(send_colony_button, "Send the nearest available Colony to this sector. Right-click to send a Colony as soon as one is available.")
 	hotkeys.register(send_colony_button, KEY_C, "Neutral System", "colonize", "Colonize")
 	command_card_ui.fill_grid(neutral_grid)
 	_build_station_command_card(body)
@@ -3065,12 +3066,22 @@ func _refresh_colony_choices(state: Dictionary, p: Dictionary, phase: String) ->
 	var preview: Dictionary = fog_state.observed_state(state, _map_size()) if neutral else state
 	var id: int = ECONOMY.nearest_idle_colony(preview, _me(), selected) if neutral else -1
 	var en_route: bool = neutral and ECONOMY.colony_en_route(state, _me(), selected)
-	send_colony_button.disabled = id < 0 or en_route
+	var auto: bool = ECONOMY.colonize_autocast_enabled(state, _me(), selected)
+	# Keep the right-click target enabled even without an available hull.
+	send_colony_button.disabled = not neutral or state.get("eliminated", []).has(_me())
 	var caption: Label = send_colony_button.get_meta("caption")
-	caption.text = "Colony\nEn Route" if en_route else "Colonize"
+	caption.text = "Colony\nEn Route" if en_route else ("Colonize\nAuto" if auto else "Colonize")
+	caption.modulate = HUD.ACCENT if auto else Color.WHITE
 	var hint: String = "Colony already en route" if en_route else ("Send nearest available Colony to this sector" if id >= 0 else "No available Colonies")
+	hint += "\nRight-click: send a Colony Ship as soon as one is available · Auto: " + ("On" if auto else "Off")
 	var shortcut: String = str(send_colony_button.get_meta("hotkey", ""))
 	command_card_ui.set_hint(send_colony_button, hint if shortcut.is_empty() else hint + "\n[" + shortcut + "]")
+
+func _colonize_autocast_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not send_colony_button.disabled:
+		var enabled: bool = ECONOMY.colonize_autocast_enabled(_state(), _me(), selected)
+		session.call("request_colonize", -3 if enabled else -2, selected)
+		send_colony_button.accept_event()
 
 func _send_colony() -> void:
 	if not send_colony_button.disabled:
@@ -3156,9 +3167,6 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 		var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
 		for slot in range(bodies.size()):
 			var body: Dictionary = bodies[slot]
-			var orbit: float = radius * float(body["orbit"])
-			if _show_system_rings(index):
-				celestial_view.draw_elliptical_orbit(pos, orbit, Color(tint, 0.20 * detail), map_canvas)
 			var point: Vector2 = pos + celestial_view.body_position(body, radius, orbit_elapsed)
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
@@ -4965,7 +4973,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 		world_batches.draw_resource_glow(pos, minf(radius, 240.0), tint, 0.15)
 	var scale: float = _ship_scale()
 	var running: bool = int(state.get("time_speed", 1)) > 0
-	if scale >= 0.65:
+	if scale >= 0.325:
 		for ship in state["ships"]:
 			var id: int = int(ship["id"])
 			if not poses.has(id) or bool(ship.get("cloaked", false)) or ECONOMY.is_static_structure(ship):
@@ -4973,20 +4981,17 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 			var pose: Dictionary = poses[id]
 			var pos: Vector2 = pose["point"]
 			var hull_scale: float = scale * HULL_ART.visual_scale(str(ship["kind"]))
-			if not bounds.grow(120.0 * hull_scale).has_point(pos):
+			if hull_scale < 0.65 or not bounds.grow(120.0 * hull_scale).has_point(pos):
 				continue
 			var direction: Vector2 = pose["direction"]
 			var thrust: float = ship_motion.thrust_for(id) if running else 0.0
-			var radius_px: float = 52.0 * hull_scale
-			var strength: float = 0.30
-			if thrust > 0.035:
-				pos = world_batches.exhaust_center(str(ship["kind"]), pos, direction, hull_scale, thrust)
-				radius_px = (52.0 + 45.0 * thrust) * hull_scale
-				strength += 1.15 * thrust
-			else:
-				pos = world_batches.engine_center(str(ship["kind"]), pos, direction, hull_scale)
+			if thrust <= 0.035:
+				continue
+			pos = world_batches.exhaust_center(str(ship["kind"]), pos, direction, hull_scale, thrust)
+			var radius_px: float = (40.0 + 35.0 * thrust) * hull_scale
+			var strength: float = 1.05 * thrust
 			if bounds.grow(radius_px).has_point(pos):
-				_keep_near_light(lamps, [pos, radius_px, Color("#75d6ee"), strength, center.distance_squared_to(pos)])
+				_keep_near_light(lamps, [pos, radius_px, _empire_color(int(ship["owner"])), strength, center.distance_squared_to(pos)])
 	var impacts: Array = world_effects.impact_lights(state, poses, _frame_service_refs(state), bounds, scale, celestial_view.orbit_time(state), _screen_point, _fog_visible, _empire_color)
 	# Keep the total 16-source shader budget; hits take precedence over
 	# local navigation lamps. Add one glow per retained impact.
@@ -5334,12 +5339,9 @@ func _draw_map_content() -> void:
 			# Weapon/mining pose overrides must not detach the glow from its plume.
 			var engine_axis: Vector2 = poses[ship_id]["direction"]
 			if simulation_running and thrust > 0.035:
-				world_batches.queue_exhaust(kind, point, engine_axis, scale, thrust, ship_id, viewport_bounds)
+				world_batches.queue_exhaust(kind, point, engine_axis, scale, thrust, ship_id, viewport_bounds, empire)
 				var plume_center: Vector2 = world_batches.exhaust_center(kind, point, engine_axis, scale, thrust)
-				world_batches.queue_lamp_glow(plume_center, (27.0 + 20.0 * thrust) * scale, Color("#75d6ee"), 0.45 + 0.50 * thrust)
-			else:
-				var lamp: Vector2 = world_batches.engine_center(kind, point, engine_axis, scale)
-				world_batches.queue_lamp_glow(lamp, 27.0 * scale, Color("#75d6ee"), 0.30)
+				world_batches.queue_lamp_glow(plume_center, (20.0 + 16.0 * thrust) * scale, empire, 0.72 * thrust)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:

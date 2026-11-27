@@ -1251,6 +1251,50 @@ static func nearest_idle_colony(state: Dictionary, player: int, target: int) -> 
 			chosen = id
 	return chosen
 
+static func colonize_autocast_enabled(state: Dictionary, player: int, target: int) -> bool:
+	return state.get("colonize_autocast", {}).get(player, []).has(target)
+
+static func _set_colonize_autocast(state: Dictionary, player: int, target: int, enabled: bool) -> bool:
+	var planets: Array = state["planets"]
+	if target < 0 or target >= planets.size():
+		return false
+	var policies: Dictionary = state.get("colonize_autocast", {})
+	var targets: Array = policies.get(player, [])
+	if enabled:
+		if int(planets[target]["owner"]) != 0 or has_station(planets[target]) or not discovered(state, player, "planets", target):
+			return false
+		if not targets.has(target):
+			targets.append(target)
+	else:
+		targets.erase(target)
+	if targets.is_empty():
+		policies.erase(player)
+	else:
+		policies[player] = targets
+	state["colonize_autocast"] = policies
+	return true
+
+static func _step_colonize_autocast(state: Dictionary) -> void:
+	var policies: Dictionary = state.get("colonize_autocast", {})
+	if policies.is_empty():
+		return
+	var players: Array = policies.keys()
+	players.sort()
+	for player in players:
+		if not _authority_active_player(state, int(player)):
+			policies.erase(player)
+			continue
+		var targets: Array = policies[player]
+		for target in targets.duplicate():
+			if int(state["planets"][target]["owner"]) != 0 or has_station(state["planets"][target]):
+				targets.erase(target)
+				continue
+			var id: int = nearest_idle_colony(state, int(player), int(target))
+			if id >= 0:
+				send_colony(state, int(player), id, int(target))
+		if targets.is_empty():
+			policies.erase(player)
+
 static func send_colony(state: Dictionary, player: int, ship_id: int, target: int, automatic: bool = true) -> bool:
 	for ship in state["ships"]:
 		if int(ship["id"]) != ship_id:
@@ -11925,6 +11969,9 @@ static func _authority_active_player(state: Dictionary, id: int) -> bool:
 static func authority_colonize_for(state: Dictionary, id: int, ship_id: int, target: int) -> bool:
 	if not _authority_active_player(state, id):
 		return false
+	# Existing reliable colonize RPC: -2 enables, -3 disables persistent target autocast.
+	if ship_id in [-2, -3]:
+		return _set_colonize_autocast(state, id, target, ship_id == -2)
 	if ship_id == -1:
 		ship_id = nearest_idle_colony(state, id, target)
 	if ship_id >= 0 and send_colony(state, id, ship_id, target):
@@ -12822,6 +12869,7 @@ static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float, econo
 		_work_planet(state, i, dt, bases.get(i, {}), census)
 	_refill_empire_fleets(state)
 	_begin_hull_index(state)
+	_step_colonize_autocast(state)
 
 static func _step_ai(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
 	# Decide treaties before constructing any relation-dependent route or

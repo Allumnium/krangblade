@@ -1304,6 +1304,20 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	state["fog_of_war"] = false
 	assert(state["starting_survey"].size() == 1 and float(state["starting_survey"][0]["radius"]) > ECON.sector_base_radius(map))
 	assert(ECON.nearest_idle_colony(state, 1, 2) == 101)
+	var waiting: Dictionary = state.duplicate(true)
+	waiting["ships"] = []
+	assert(not ECON.authority_colonize_for(waiting, 1, -2, 0))
+	assert(ECON.authority_colonize_for(waiting, 1, -2, 2))
+	assert(ECON.colonize_autocast_enabled(waiting, 1, 2))
+	ECON._step_colonize_autocast(waiting)
+	assert(ECON.colonize_autocast_enabled(waiting, 1, 2))
+	waiting["ships"] = [near.duplicate(true), far.duplicate(true)]
+	ECON._step_colonize_autocast(waiting)
+	assert(ECON.colony_en_route(waiting, 1, 2))
+	ECON._step_colonize_autocast(waiting)
+	assert(waiting["ships"][1].get("unit_order", {}).get("kind", "") != "colonize")
+	assert(ECON.authority_colonize_for(waiting, 1, -3, 2))
+	assert(not ECON.colonize_autocast_enabled(waiting, 1, 2) and ECON.colony_en_route(waiting, 1, 2))
 	near["holding"] = true
 	near["retreating"] = true
 	near["repair_site"] = 0
@@ -3495,50 +3509,25 @@ func _initialize() -> void:
 	all_friendly.fill(1)
 	for i in range(graph["points"].size()):
 		assert(not MAP.path(graph, all_friendly, 1, 0, i).is_empty())
-	# Seeded clusters are internally connected and connected by sparse bridges.
+	# Seeded unclustered maps retain connected capped routes.
 	var crystal_shares: Dictionary = {}
 	for seed_value in range(24):
 		var player_count: int = seed_value % 8 + 1
 		var clustered: Dictionary = _planetary_fixture(seed_value, player_count, "Grid")
-		var cluster_ids: Array = clustered["clusters"]
 		var cluster_points: Array = clustered["points"]
-		var local_distance: float = 0.0
-		var bridge_distance: float = 0.0
-		var locals: int = 0
-		var bridges: int = 0
+		assert(cluster_points.size() == player_count * MAP.SYSTEMS_PER_PLAYER)
+		assert(clustered["cluster_sizes"].is_empty())
+		assert(clustered["clusters"].count(-1) == cluster_points.size())
 		var longest: float = 0.0
 		var degrees: Array[int] = []
 		degrees.resize(cluster_points.size())
 		degrees.fill(0)
 		for edge in clustered["edges"]:
-			var length: float = cluster_points[edge[0]].distance_to(cluster_points[edge[1]])
-			longest = maxf(longest, length)
+			longest = maxf(longest, cluster_points[edge[0]].distance_to(cluster_points[edge[1]]))
 			degrees[edge[0]] += 1
 			degrees[edge[1]] += 1
-			if cluster_ids[edge[0]] >= 0 and cluster_ids[edge[0]] == cluster_ids[edge[1]]:
-				locals += 1
-				local_distance += length
-			else:
-				bridges += 1
-				bridge_distance += length
-		assert(bridges >= MAP.cluster_count_for(player_count, "Grid") - 1 + cluster_ids.count(-1))
-		assert(clustered["cluster_sizes"].size() == MAP.cluster_count_for(player_count, "Grid"))
-		assert(cluster_points.size() <= player_count * MAP.SYSTEMS_PER_PLAYER)
-		for cluster_size in clustered["cluster_sizes"]:
-			assert(cluster_size >= 2 and cluster_size <= 4)
-		assert(clustered["edges"].size() >= cluster_points.size() - 1)
-		assert(clustered["edges"].size() >= cluster_points.size()) # square cells create alternate routes
-		assert(degrees.count(3) <= int(clustered["max_junctions"]))
 		for degree in degrees:
 			assert(degree >= 1 and degree <= MAP.MAX_CONNECTIONS)
-		for home in range(player_count):
-			assert(clustered["cluster_sizes"][cluster_ids[home]] >= 2)
-			var neutral_neighbor: bool = false
-			for i in range(player_count, cluster_points.size()):
-				if MAP.linked(clustered, home, i):
-					neutral_neighbor = true
-					break
-			assert(neutral_neighbor)
 		assert(is_equal_approx(longest / ECON.SHIP_SPEED, MAP.LONGEST_LINK_YEARS))
 		assert(not (clustered["fields"] as Array).is_empty())
 		for edge in clustered["edges"]:
@@ -3593,7 +3582,6 @@ func _initialize() -> void:
 				assert(float(chunk["remaining"]) > 0.0)
 				assert((field["position"] as Vector2).distance_to(chunk["position"]) + float(chunk["radius"]) <= float(field.get("rock_extent", field["radius"])) + ECON.EPS)
 		assert(ring_count == cluster_points.size())
-		assert(bridge_distance / (bridges - cluster_ids.count(-1)) >= local_distance / locals - 0.01)
 		var seen: Dictionary = {0: true}
 		var frontier: Array = [0]
 		while not frontier.is_empty():
@@ -3608,8 +3596,6 @@ func _initialize() -> void:
 					seen[next] = true
 					frontier.append(next)
 		assert(seen.size() == cluster_points.size())
-		for i in range(player_count):
-			assert(cluster_ids[i] == i)
 	assert(crystal_shares.has(0) and crystal_shares.size() >= 5)
 	print("PASS: rescaled asteroid inventory, seeded metal-rich fields and crystal share cap")
 	var players: Dictionary = {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}
@@ -6968,46 +6954,8 @@ func _test_map_layouts() -> void:
 				assert(galaxy["planetless"].size() == floori(float(galaxy["points"].size()) * 0.5))
 				for home in range(player_count):
 					assert(not galaxy["planetless"].has(home))
-				assert(galaxy["cluster_sizes"].size() == MAP.cluster_count_for(player_count, layout))
-				assert(galaxy["points"].size() <= player_count * MAP.SYSTEMS_PER_PLAYER)
-				if layout == "Radial" and player_count > 1:
-					var sectors: int = maxi(3, player_count)
-					var bridges: Dictionary = _cluster_links(galaxy)
-					for sector in range(sectors):
-						var next: int = (sector + 1) % sectors
-						assert(bridges.has(Vector2i(mini(sector, next), maxi(sector, next))))
-						assert(bridges.has(Vector2i(sectors + mini(sector, next), sectors + maxi(sector, next))))
-						assert(bridges.has(Vector2i(sector, sector + sectors)))
-				if layout == "Hex Grid":
-					for group in range(galaxy["cluster_sizes"].size()):
-						var local_degrees: Dictionary = {}
-						for node in range(galaxy["points"].size()):
-							if galaxy["clusters"][node] == group:
-								local_degrees[node] = 0
-						assert(local_degrees.size() == 6)
-						for edge in galaxy["edges"]:
-							if local_degrees.has(edge[0]) and local_degrees.has(edge[1]):
-								local_degrees[edge[0]] += 1
-								local_degrees[edge[1]] += 1
-						for degree in local_degrees.values():
-							assert(degree == 2)
-				if layout == "Grid" or layout == "Hex Grid":
-					# Fine grid cells are regular, and neighboring blocks form
-					# cycles rather than only a spanning tree.
-					var local_length: float = 0.0
-					for edge in galaxy["edges"]:
-						var a: int = edge[0]
-						var b: int = edge[1]
-						if galaxy["clusters"][a] < 0 or galaxy["clusters"][a] != galaxy["clusters"][b]:
-							continue
-						var delta: Vector2 = galaxy["points"][a] - galaxy["points"][b]
-						if local_length == 0.0:
-							local_length = delta.length()
-						assert(is_equal_approx(delta.length(), local_length))
-						if layout == "Grid":
-							assert(absf(delta.x) < 0.01 or absf(delta.y) < 0.01)
-					if (layout == "Grid" and player_count >= 2) or (layout == "Hex Grid" and player_count >= 3):
-						assert(_cluster_links(galaxy).size() >= galaxy["cluster_sizes"].size())
+				assert(galaxy["cluster_sizes"].is_empty())
+				assert(galaxy["points"].size() == player_count * MAP.SYSTEMS_PER_PLAYER)
 				var points: Array = galaxy["points"]
 				var degrees: Array[int] = []
 				degrees.resize(points.size())
@@ -7024,13 +6972,7 @@ func _test_map_layouts() -> void:
 					assert(not MAP.blocked(points[edge[0]], points[edge[1]], galaxy["fields"]))
 					longest = maxf(longest, (points[edge[0]] as Vector2).distance_to(points[edge[1]]))
 				assert(is_equal_approx(longest / MAP.TRAVEL_SPEED, MAP.LONGEST_LINK_YEARS))
-				var clustered_count: int = 0
-				for group in range(galaxy["cluster_sizes"].size()):
-					var members: int = galaxy["clusters"].count(group)
-					assert(members == int(galaxy["cluster_sizes"][group]) and members >= 2)
-					clustered_count += members
-				assert(clustered_count + galaxy["clusters"].count(-1) == points.size())
-				assert(absi(galaxy["clusters"].count(-1) - roundi(float(points.size()) * 0.2)) <= 1)
+				assert(galaxy["clusters"].count(-1) == points.size())
 				assert(degrees.count(3) <= int(galaxy["max_junctions"]))
 				for degree in degrees:
 					assert(degree > 0 and degree <= MAP.MAX_CONNECTIONS)
@@ -7044,7 +6986,6 @@ func _test_map_layouts() -> void:
 							frontier.append(neighbor)
 				assert(seen.size() == points.size())
 				for home in range(player_count):
-					assert(galaxy["clusters"][home] == home)
 					assert(adjacency[home].any(func(node: int) -> bool: return node >= player_count))
 				var total_degrees: Array[int] = degrees.duplicate()
 				for field in galaxy["fields"]:

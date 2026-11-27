@@ -323,6 +323,7 @@ func _build_exhaust_batch() -> void:
 	exhaust_batch = MultiMeshInstance2D.new()
 	var mesh := MultiMesh.new()
 	mesh.transform_format = MultiMesh.TRANSFORM_2D
+	mesh.use_colors = true
 	mesh.use_custom_data = true
 	var quad := QuadMesh.new()
 	quad.size = Vector2.ONE
@@ -334,8 +335,10 @@ shader_type canvas_item;
 render_mode unshaded;
 uniform float visual_time;
 varying vec4 plume;
+varying vec3 engine_tint;
 void vertex() {
 	plume = INSTANCE_CUSTOM;
+	engine_tint = COLOR.rgb;
 }
 void fragment() {
 	float t = 1.0 - UV.x;
@@ -347,7 +350,7 @@ void fragment() {
 	float phase = fract(t * 5.0 - visual_time * 4.5 + plume.y);
 	float sparks = (1.0 - smoothstep(0.06, 0.22, abs(phase - 0.5))) * (1.0 - smoothstep(0.12, 0.35, y)) * taper;
 	float alpha = clamp(plume.x * (0.34 * sheath + 0.9 * core + 0.45 * sparks), 0.0, 1.0);
-	COLOR = vec4(mix(vec3(0.15, 0.62, 1.0), vec3(0.8, 0.96, 1.0), core), alpha);
+	COLOR = vec4(mix(engine_tint, mix(engine_tint, vec3(1.0), 0.55), core), alpha * 0.8);
 }
 """
 	var material := ShaderMaterial.new()
@@ -375,7 +378,7 @@ func exhaust_center(kind: String, point: Vector2, direction: Vector2, scale: flo
 	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
 	return engine_center(kind, point, direction, scale) - direction.normalized() * plume_length * 0.5
 
-func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float, id: int, bounds: Rect2) -> void:
+func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float, id: int, bounds: Rect2, tint: Color = Color.WHITE) -> void:
 	var extent: Vector2 = _exhaust_extent(kind)
 	var engine: Vector2 = engine_center(kind, point, direction, scale)
 	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
@@ -383,7 +386,7 @@ func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: floa
 	if not bounds.grow(maxf(24.0, plume_length + 8.0)).has_point(engine):
 		return
 	var center: Vector2 = exhaust_center(kind, point, direction, scale, thrust)
-	exhaust_instances.append([Transform2D(direction.angle(), Vector2(plume_length, plume_width * 2.0), 0.0, center), thrust, fposmod(float(id) * 0.173, 1.0)])
+	exhaust_instances.append([Transform2D(direction.angle(), Vector2(plume_length, plume_width * 2.0), 0.0, center), thrust, fposmod(float(id) * 0.173, 1.0), tint])
 
 func _flush_exhaust(visual_clock: float) -> void:
 	if exhaust_instances.is_empty():
@@ -392,19 +395,24 @@ func _flush_exhaust(visual_clock: float) -> void:
 	if mesh.instance_count < exhaust_instances.size():
 		mesh.instance_count = maxi(exhaust_instances.size(), maxi(64, mesh.instance_count * 2))
 	var buffer := PackedFloat32Array()
-	buffer.resize(mesh.instance_count * 12)
+	buffer.resize(mesh.instance_count * 16)
 	for i in range(exhaust_instances.size()):
 		var entry: Array = exhaust_instances[i]
 		var t: Transform2D = entry[0]
-		var offset: int = i * 12
+		var offset: int = i * 16
 		buffer[offset] = t.x.x
 		buffer[offset + 1] = t.y.x
 		buffer[offset + 3] = t.origin.x
 		buffer[offset + 4] = t.x.y
 		buffer[offset + 5] = t.y.y
 		buffer[offset + 7] = t.origin.y
-		buffer[offset + 8] = entry[1]
-		buffer[offset + 9] = entry[2]
+		var tint: Color = entry[3]
+		buffer[offset + 8] = tint.r
+		buffer[offset + 9] = tint.g
+		buffer[offset + 10] = tint.b
+		buffer[offset + 11] = 1.0
+		buffer[offset + 12] = entry[1]
+		buffer[offset + 13] = entry[2]
 	mesh.buffer = buffer
 	mesh.visible_instance_count = exhaust_instances.size()
 	(exhaust_batch.material as ShaderMaterial).set_shader_parameter("visual_time", visual_clock)

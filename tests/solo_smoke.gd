@@ -163,7 +163,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (state["map"]["cluster_sizes"].size() == MAP.cluster_count_for(1, MAP.DEFAULT_LAYOUT)):
+	if not (state["map"]["cluster_sizes"].is_empty()):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
@@ -256,7 +256,7 @@ func _run() -> void:
 		push_error("Explicit solo map layout not applied")
 		quit(1)
 		return
-	if not (setup["map"]["cluster_sizes"].size() == MAP.cluster_count_for(3, "Grid")):
+	if not (setup["map"]["cluster_sizes"].is_empty()):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
