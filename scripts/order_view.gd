@@ -19,8 +19,9 @@ var planet_radius: Callable
 var salvage_radius: Callable
 var fit_query: Callable
 var local_player: Callable
+var target_visible: Callable
 
-func configure(canvas: Control, art: HULL_ART, celestial: CELESTIAL_VIEW, camera_view: CAMERA_VIEW, scale_query: Callable, projection: Callable, station_query: Callable, planet_query: Callable, salvage_query: Callable, fit: Callable, player_query: Callable) -> void:
+func configure(canvas: Control, art: HULL_ART, celestial: CELESTIAL_VIEW, camera_view: CAMERA_VIEW, scale_query: Callable, projection: Callable, station_query: Callable, planet_query: Callable, salvage_query: Callable, fit: Callable, player_query: Callable, visibility_query: Callable) -> void:
 	map_canvas = canvas
 	hull_art = art
 	celestial_view = celestial
@@ -32,6 +33,7 @@ func configure(canvas: Control, art: HULL_ART, celestial: CELESTIAL_VIEW, camera
 	salvage_radius = salvage_query
 	fit_query = fit
 	local_player = player_query
+	target_visible = visibility_query
 
 func draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tint: Color, canvas: CanvasItem = null, exact_scale: bool = false) -> void:
 	var surface: CanvasItem = map_canvas if canvas == null else canvas
@@ -123,7 +125,7 @@ func _ship_target_ring(state: Dictionary, poses: Dictionary, refs: Dictionary, s
 		return _target_ring_entity(state, poses, refs, int(cargo.get("target", -1)))
 	for key in ["salvage_target", "auto_salvage_target"]:
 		var pile: Dictionary = state.get("salvage", {}).get(int(ship.get(key, -1)), {})
-		if not pile.is_empty():
+		if not pile.is_empty() and target_visible.call(pile["position"]):
 			return {"point": screen_point.call(pile["position"]), "radius": salvage_radius.call(pile) + 5.0, "owner": 0}
 	if ship.has("local_move_target") or ship.has("launch_rally") or bool(ship.get("holding", false)):
 		return {}
@@ -131,7 +133,7 @@ func _ship_target_ring(state: Dictionary, poses: Dictionary, refs: Dictionary, s
 		var field: int = int(ship.get("field", -1))
 		if field >= 0 and field < state["map"]["fields"].size():
 			var chunk: Dictionary = ECONOMY._find_chunk(state["map"]["fields"][field], int(ship.get("chunk", -1)))
-			if not chunk.is_empty():
+			if not chunk.is_empty() and target_visible.call(chunk["position"]):
 				var radius: float = float(chunk["radius"]) * fit_query.call() * camera.zoom * sqrt(float(chunk["remaining"]) / float(chunk["initial"]))
 				return {"point": screen_point.call(chunk["position"]), "radius": maxf(6.0, radius + 4.0), "owner": 0}
 	if bool(ship.get("salvage_delivery", false)):
@@ -145,13 +147,15 @@ func _ship_target_ring(state: Dictionary, poses: Dictionary, refs: Dictionary, s
 	if destination >= 0 and destination < state["planets"].size():
 		if refs.has(ECONOMY.station_target_id(state, destination)):
 			return _target_ring_entity(state, poses, refs, ECONOMY.station_target_id(state, destination))
+		if not ECONOMY.discovered(state, local_player.call(), "planets", destination):
+			return {}
 		return {"point": screen_point.call(state["map"]["points"][destination]), "radius": maxf(8.0, celestial_view.star_draw_radius(planet_radius.call(destination, state)) + 5.0), "owner": state["planets"][destination]["owner"]}
 	return {}
 
 func draw_ship_target_rings(state: Dictionary, poses: Dictionary, refs: Dictionary, selected_units: Array[int], selected_ship_id: int) -> void:
 	var drawn: Dictionary = {}
 	for ship in state["ships"]:
-		if not selected_units.has(int(ship["id"])) and int(ship["id"]) != selected_ship_id:
+		if int(ship["owner"]) != local_player.call() or (not selected_units.has(int(ship["id"])) and int(ship["id"]) != selected_ship_id):
 			continue
 		var target: Dictionary = _ship_target_ring(state, poses, refs, ship)
 		if target.is_empty() or drawn.has(target["point"]):
@@ -187,6 +191,8 @@ func draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dictio
 	var endpoint: Vector2 = Vector2.INF
 	var tint: Color = order_color(ship, order)
 	var target: int = int(order.get("target", -1))
+	if order.get("kind", "") in ["attack", "follow", "repair", "deposit", "warp_travel"] and not refs.has(target) and not poses.has(target):
+		return
 	if bool(ship.get("retreating", false)):
 		var site: int = int(ship.get("repair_site", -1))
 		if site >= 0 and site < state["planets"].size():
@@ -223,7 +229,7 @@ func draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dictio
 		elif poses.has(combat):
 			draw_command_route(graph, ship, start, poses[combat]["point"], Color("#ff605c"))
 			return
-		elif state.get("salvage", {}).has(salvage):
+		elif state.get("salvage", {}).has(salvage) and target_visible.call(state["salvage"][salvage]["position"]):
 			endpoint = state["salvage"][salvage]["position"]
 		elif ship.has("resource_stage"):
 			endpoint = ship["resource_stage"]["point"]
@@ -239,7 +245,7 @@ func draw_single_command_line(state: Dictionary, graph: Dictionary, ship: Dictio
 			endpoint = ship["hold_position"]
 		else:
 			endpoint = ship.get("navigation_target", Vector2.INF)
-	if endpoint.is_finite():
+	if endpoint.is_finite() and (order.get("kind", "") not in ["salvage", "mine"] or target_visible.call(endpoint)):
 		var finish: Vector2 = screen_point.call(endpoint)
 		draw_command_route(graph, ship, start, finish, tint)
 
@@ -286,7 +292,7 @@ func _group_command_target(state: Dictionary, graph: Dictionary, ship: Dictionar
 			tint = HUD.ACCENT
 	else:
 		var world: Vector2 = ECONOMY.unit_order_point(state, graph, ship, order)
-		if world.is_finite():
+		if world.is_finite() and (kind not in ["salvage", "mine"] or target_visible.call(world)):
 			endpoint = screen_point.call(world)
 		# Point orders and automatically chosen unload destinations must
 		# actually agree; a shared sector alone is not enough.
