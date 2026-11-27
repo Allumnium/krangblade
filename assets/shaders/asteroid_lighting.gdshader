@@ -1,11 +1,9 @@
 shader_type canvas_item;
 render_mode unshaded;
-uniform sampler2D diffuse_map : source_color, filter_nearest;
 uniform sampler2D normal_map : filter_nearest;
 uniform sampler2D occlusion_map : filter_nearest;
 uniform sampler2D height_map : filter_nearest;
 uniform sampler2D specular_map : filter_nearest;
-uniform sampler2D detail_map : source_color, filter_nearest;
 uniform vec4 light_points[16];
 uniform vec4 light_colors[16];
 uniform int light_count = 0;
@@ -49,7 +47,10 @@ void vertex() {
 void fragment() {
 	vec4 base = texture(TEXTURE, UV);
 	if (base.a <= 0.001) { discard; }
-	vec3 diffuse = mix(base.rgb, texture(diffuse_map, UV).rgb, 0.5);
+	vec3 diffuse = base.rgb;
+	// Resource coloration is a diffuse mineral tint, not preview emission.
+	float ore = smoothstep(0.16, 0.45, dot(diffuse, vec3(0.299, 0.587, 0.114))) * crystal;
+	diffuse = mix(diffuse, vec3(0.72, 0.26, 0.47) * max(0.3, length(diffuse)), ore * 0.8);
 	vec2 pixel = TEXTURE_PIXEL_SIZE;
 	vec2 cell_min = floor(UV * 8.0) / 8.0 + pixel * 0.5;
 	vec2 cell_max = cell_min + vec2(0.125) - pixel;
@@ -58,9 +59,6 @@ void fragment() {
 	vec3 normal = normalize(texture(normal_map, UV).rgb * 2.0 - 1.0 + vec3(-dx * 0.20, dy * 0.20, 0.15));
 	float ao = mix(0.68, 1.0, texture(occlusion_map, UV).r);
 	float specular = texture(specular_map, UV).r;
-	vec3 lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, normal, diffuse, specular, vec3(0.19, 0.21, 0.24), ao);
-	vec3 veins = texture(detail_map, UV).rgb;
-	float ore = smoothstep(0.015, 0.19, veins.g - max(veins.r, veins.b) * 0.75) * crystal;
-	lit += vec3(0.62, 0.19, 0.42) * ore * 1.4;
+	vec3 lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, normal, diffuse, specular, vec3(0.030, 0.035, 0.045), ao);
 	COLOR = vec4(clamp(lit, vec3(0.0), vec3(1.0)), base.a);
 }

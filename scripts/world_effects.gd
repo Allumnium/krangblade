@@ -189,3 +189,81 @@ func draw_cargo_transfers(state: Dictionary, poses: Dictionary, refs: Dictionary
 			map_canvas.draw_circle(point, radius * 2.0, Color(color, alpha * 0.18), true, -1.0, true)
 			map_canvas.draw_rect(Rect2(point - Vector2.ONE * radius, Vector2.ONE * radius * 2.0), Color(color.lightened(0.2), alpha))
 
+
+# Read the same replicated visual hit endpoints as the weapon renderer.
+# No new combat events or simulation mutations. Limit retained flashes to 4.
+func _impact_entry(lights: Array, world: Vector2, color: Color, strength: float, radius: float, bounds: Rect2, project: Callable, visible: Callable) -> void:
+	if strength <= 0.0 or not world.is_finite() or not visible.call(world):
+		return
+	var point: Vector2 = project.call(world)
+	if not bounds.grow(radius).has_point(point):
+		return
+	var distance: float = bounds.get_center().distance_squared_to(point)
+	var priority: float = distance / maxf(0.1, strength)
+	# Merge multiple simultaneous hits on the same target.
+	for entry in lights:
+		if (entry[0] as Vector2).distance_squared_to(point) < 9.0:
+			entry[3] = minf(2.5, maxf(float(entry[3]), strength) + 0.15)
+			return
+	var index: int = lights.size()
+	while index > 0 and priority < float(lights[index - 1][4]):
+		index -= 1
+	if index >= 4:
+		return
+	lights.insert(index, [point, radius, color, strength, priority])
+	if lights.size() > 4:
+		lights.pop_back()
+
+func _impact_target(id: int, poses: Dictionary, refs: Dictionary) -> Vector2:
+	if poses.has(id):
+		return poses[id]["world"]
+	var ref: Dictionary = refs.get(id, {})
+	if ref.get("kind", "") == "ship":
+		return Vector2.INF
+	return ref.get("position", Vector2.INF)
+
+func impact_lights(state: Dictionary, poses: Dictionary, refs: Dictionary, bounds: Rect2, scale: float, now: float, project: Callable, visible: Callable, empire_color: Callable) -> Array:
+	var lights: Array = []
+	if scale < 0.42:
+		return lights
+	var elapsed: float = float(state["elapsed"])
+	var radius: float = maxf(15.0, 48.0 * scale)
+	for ship in state["ships"]:
+		if not poses.has(int(ship["id"])):
+			continue
+		var tint: Color = empire_color.call(int(ship["owner"]))
+		if ship.has("blaster_fired") and ship.has("blaster_endpoint"):
+			var age: float = now - float(ship["blaster_fired"])
+			for prior in range(int(ship.get("blaster_visual_shot", 0)) + 1):
+				var since_hit: float = age + float(prior) * ECONOMY.BLASTER_SHOT_INTERVAL - ECONOMY.BLASTER_TRAVEL
+				if since_hit >= 0.0 and since_hit < 0.18:
+					_impact_entry(lights, ship["blaster_endpoint"], tint, 1.3 * (1.0 - since_hit / 0.18), radius, bounds, project, visible)
+		for prefix in ["railgun", "cannon", "wall_laser"]:
+			if ship.has(prefix + "_endpoint") and float(ship.get(prefix + "_until", -1.0)) >= elapsed:
+				_impact_entry(lights, ship[prefix + "_endpoint"], tint, 1.5, radius, bounds, project, visible)
+		if ship.has("missile_endpoint"):
+			var since_hit: float = now - float(ship.get("missile_until", -10.0))
+			if since_hit >= 0.0 and since_hit < 0.35:
+				_impact_entry(lights, ship["missile_endpoint"], Color("#ffad65"), 2.5 * (1.0 - since_hit / 0.35), radius * 1.8, bounds, project, visible)
+		if ship.get("kind", "") not in ["scout", "fighter"]:
+			if float(ship.get("laser_until", -1.0)) >= elapsed:
+				_impact_entry(lights, _impact_target(int(ship.get("combat_target", -1)), poses, refs), tint, 1.1, radius, bounds, project, visible)
+			if float(ship.get("yard_laser_until", -1.0)) >= elapsed:
+				_impact_entry(lights, _impact_target(int(ship.get("yard_target", -1)), poses, refs), tint, 1.1, radius, bounds, project, visible)
+	for index in range(state["planets"].size()):
+		if not visible.call(state["map"]["points"][index]):
+			continue
+		var system: Dictionary = state["planets"][index]
+		var tint: Color = empire_color.call(int(system["owner"]))
+		var station: Dictionary = system.get("station", {})
+		if station.has("missile_endpoint"):
+			var since_hit: float = now - float(station.get("missile_until", -10.0))
+			if since_hit >= 0.0 and since_hit < 0.35:
+				_impact_entry(lights, station["missile_endpoint"], Color("#ffad65"), 2.5 * (1.0 - since_hit / 0.35), radius * 1.8, bounds, project, visible)
+		var weapons: Array = station.get("weapons", []).duplicate()
+		weapons.append_array(system.get("pds", {}).values())
+		for weapon in weapons:
+			if float(weapon.get("laser_until", -1.0)) >= elapsed:
+				var target: Vector2 = weapon.get("wall_laser_endpoint", _impact_target(int(weapon.get("target", -1)), poses, refs))
+				_impact_entry(lights, target, tint, 1.4, radius, bounds, project, visible)
+	return lights

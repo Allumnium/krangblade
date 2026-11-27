@@ -11,7 +11,7 @@ const STAR_TEXTURE_SIZE: int = 256
 const STAR_TEXTURE_CORE: float = 74.0
 const STAR_SPARK_COUNT: int = 9
 
-const ROCK_ATLAS = preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903.png")
+const ROCK_ATLAS = preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_d.png")
 const ROCK_LIGHTING = preload("res://assets/shaders/asteroid_lighting.gdshader")
 const ROCK_GRID: int = 8
 const ROCK_SPRITE_MIN_RADIUS: float = 2.5
@@ -27,12 +27,10 @@ func _rock_material() -> ShaderMaterial:
 	if asteroid_material == null:
 		asteroid_material = ShaderMaterial.new()
 		asteroid_material.shader = ROCK_LIGHTING
-		asteroid_material.set_shader_parameter("diffuse_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_d.png"))
 		asteroid_material.set_shader_parameter("normal_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_n.png"))
 		asteroid_material.set_shader_parameter("occlusion_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_o.png"))
 		asteroid_material.set_shader_parameter("height_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_p.png"))
 		asteroid_material.set_shader_parameter("specular_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_s.png"))
-		asteroid_material.set_shader_parameter("detail_map", preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_v.png"))
 	return asteroid_material
 
 func set_asteroid_lights(canvas: Control, lights: Array) -> void:

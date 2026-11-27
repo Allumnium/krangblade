@@ -3144,7 +3144,7 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
-					var planet_light: float = maxf(0.30, world_batches.light_level(point))
+					var planet_light: float = world_batches.light_level(point)
 					map_canvas.draw_texture_rect(celestial_view.body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(planet_light, planet_light, planet_light, detail))
 				else:
 					map_canvas.draw_circle(point, body_radius, Color(celestial_view.body_base_color(body).darkened(0.18), detail), true)
@@ -4931,7 +4931,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 			var direction: Vector2 = pose["direction"]
 			var thrust: float = ship_motion.thrust_for(id) if running else 0.0
 			var radius_px: float = 35.0 * scale
-			var strength: float = 0.48
+			var strength: float = 0.12
 			if thrust > 0.035:
 				pos = world_batches.exhaust_center(str(ship["kind"]), pos, direction, scale, thrust)
 				radius_px = (35.0 + 45.0 * thrust) * scale
@@ -4940,7 +4940,12 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 				pos = world_batches.engine_center(str(ship["kind"]), pos, direction, scale)
 			if bounds.grow(radius_px).has_point(pos):
 				_keep_near_light(lamps, [pos, radius_px, Color("#75d6ee"), strength, center.distance_squared_to(pos)])
-	world_batches.set_world_lights(stars + lamps)
+	var impacts: Array = world_effects.impact_lights(state, poses, _frame_service_refs(state), bounds, scale, celestial_view.orbit_time(state), _screen_point, _fog_visible, _empire_color)
+	# Keep the total 16-source shader budget; hits take precedence over
+	# local navigation lamps. Add one glow per retained impact.
+	for entry in impacts:
+		world_batches.queue_lamp_glow(entry[0], float(entry[1]) * 0.55, entry[2], minf(0.9, float(entry[3])))
+	world_batches.set_world_lights(stars + impacts + lamps.slice(0, maxi(0, 16 - stars.size() - impacts.size())))
 
 func _keep_near_light(lights: Array, entry: Array) -> void:
 	if lights.size() >= 8 and float(entry[4]) >= float(lights.back()[4]):
@@ -5033,7 +5038,7 @@ func _draw_map_content() -> void:
 		var detail: float = _draw_system(i, view, pos, radius, tint, -1.0 if live else seen_at)
 		if not live or _fog_visible(ECONOMY.station_position(state, i, float(state["elapsed"]))):
 			var station_light: float = world_batches.light_level(_screen_point(ECONOMY.station_position(view, i, seen_at)))
-			var lit_tint: Color = tint.darkened((1.0 - station_light) * 0.65)
+			var lit_tint: Color = tint.darkened(1.0 - station_light)
 			structure_view.draw_station(view, i, lit_tint, seen_at, building_selection_kind, selected_buildings)
 			structure_view.draw_shipyards(view, i, lit_tint, seen_at, selected, selected_yard, building_selection_kind, selected_buildings)
 		# Incoming resource pods must remain visible as they cross the
@@ -5287,7 +5292,7 @@ func _draw_map_content() -> void:
 				world_batches.queue_lamp_glow(plume_center, (18.0 + 20.0 * thrust) * scale, Color("#75d6ee"), 0.35 + 0.60 * thrust)
 			else:
 				var lamp: Vector2 = world_batches.engine_center(kind, point, engine_axis, scale)
-				world_batches.queue_lamp_glow(lamp, 18.0 * scale, Color("#75d6ee"), 0.35)
+				world_batches.queue_lamp_glow(lamp, 18.0 * scale, Color("#75d6ee"), 0.12)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
