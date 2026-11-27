@@ -3162,7 +3162,8 @@ func _draw_system(index: int, state: Dictionary, pos: Vector2, radius: float, ti
 			var body_radius: float = maxf(1.4, radius * float(body["size"]) * 0.55)
 			if Rect2(Vector2.ZERO, map_canvas.size).grow(body_radius).has_point(point):
 				if body_radius >= 5.0:
-					map_canvas.draw_texture_rect(celestial_view.body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(1.0, 1.0, 1.0, detail))
+					var planet_light: float = maxf(0.60, world_batches.light_level(point))
+					map_canvas.draw_texture_rect(celestial_view.body_texture(body), Rect2(point - Vector2.ONE * body_radius, Vector2.ONE * body_radius * 2.0), false, Color(planet_light, planet_light, planet_light, detail))
 				else:
 					map_canvas.draw_circle(point, body_radius, Color(celestial_view.body_base_color(body).darkened(0.18), detail), true)
 				if system.get("pds", {}).has(slot):
@@ -4945,7 +4946,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 		if not bounds.grow(radius).has_point(pos):
 			continue
 		var tint: Color = Color("#ffe6bb") if ECONOMY.has_planets(state["planets"][index]) else Color("#a7c9ff")
-		stars.append([pos, radius, tint, 0.95, center.distance_squared_to(pos)])
+		_keep_near_light(stars, [pos, radius, tint, 0.95, center.distance_squared_to(pos)])
 		world_batches.draw_resource_glow(pos, minf(radius, 240.0), tint, 0.08)
 	var scale: float = _ship_scale()
 	if scale >= 0.65:
@@ -4958,10 +4959,18 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 			if not bounds.grow(40.0 * scale).has_point(pos):
 				continue
 			pos -= (pose["direction"] as Vector2) * 8.0 * scale
-			lamps.append([pos, 35.0 * scale, Color("#75d6ee"), 0.24, center.distance_squared_to(pos)])
-	stars.sort_custom(func(a, b): return a[4] < b[4])
-	lamps.sort_custom(func(a, b): return a[4] < b[4])
-	world_batches.set_world_lights(stars.slice(0, 8) + lamps.slice(0, 8))
+			_keep_near_light(lamps, [pos, 35.0 * scale, Color("#75d6ee"), 0.24, center.distance_squared_to(pos)])
+	world_batches.set_world_lights(stars + lamps)
+
+func _keep_near_light(lights: Array, entry: Array) -> void:
+	if lights.size() >= 8 and float(entry[4]) >= float(lights.back()[4]):
+		return
+	var index: int = lights.size()
+	while index > 0 and float(entry[4]) < float(lights[index - 1][4]):
+		index -= 1
+	lights.insert(index, entry)
+	if lights.size() > 8:
+		lights.pop_back()
 
 func _draw_map_content() -> void:
 	_update_fog(_state())
@@ -5291,7 +5300,7 @@ func _draw_map_content() -> void:
 		var thrust: float = ship_motion.thrust_for(ship_id)
 		if not cloaked and scale >= 0.65 and not ECONOMY.is_static_structure(ship):
 			var lamp: Vector2 = point - direction * 8.0
-			world_batches.draw_resource_glow(lamp, 14.0 * scale, Color("#75d6ee"), 0.18 + thrust * 0.13)
+			world_batches.queue_lamp_glow(lamp, 14.0 * scale, Color("#75d6ee"), 0.18 + thrust * 0.13)
 		if not cloaked and simulation_running and scale >= 0.65 and thrust > 0.035:
 			world_batches.queue_exhaust(kind, point, direction, scale, thrust, ship_id, viewport_bounds)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
@@ -5347,7 +5356,9 @@ func _draw_map_content() -> void:
 		if shield > 0.0:
 			world_batches.queue_overview_hull(hull_art.shield_texture(kind), point, direction.angle(), (half_size + 8.0) * scale, cloaked)
 		if not (kind == "ship" and scale >= 0.42):
-			world_batches.queue_overview_hull(texture, point, direction.angle(), half_size * scale, cloaked)
+			# Source sprite faces up; the existing hull coordinate system faces right.
+			var art_angle: float = direction.angle() + (PI * 0.5 if kind == "science_ship" else 0.0)
+			world_batches.queue_overview_hull(texture, point, art_angle, half_size * scale, cloaked)
 		else:
 			map_canvas.draw_set_transform(point, direction.angle(), Vector2.ONE * scale)
 			var illumination: float = world_batches.light_level(point)
@@ -5374,11 +5385,12 @@ func _draw_map_content() -> void:
 			if float(ship.get("cargo", {}).get(ECONOMY.ANTIMATTER, 0.0)) >= 1.0 - ECONOMY.EPS:
 				var tint: Color = HUD.COLORS[ECONOMY.ANTIMATTER]
 				var pulse: float = 0.5 + 0.5 * sin(visual_clock * 4.0)
-				world_batches.draw_resource_glow(point, maxf(2.0, 8.0 * scale), tint, 0.7 + 0.3 * pulse)
-				map_canvas.draw_circle(point, maxf(1.0, (2.5 + pulse) * scale), tint.lightened(0.5), true, -1.0, true)
+				# The cargo sits above the sprite, not underneath its opaque panels.
+				world_batches.queue_cargo_light(point, maxf(2.0, 8.0 * scale), tint, 0.7 + 0.3 * pulse)
+				world_batches.queue_cargo_light(point, maxf(1.0, (2.5 + pulse) * scale), tint.lightened(0.5), 1.0)
 				for k in range(3):
 					var angle: float = visual_clock * 2.0 + TAU * float(k) / 3.0
-					map_canvas.draw_circle(point + Vector2.from_angle(angle) * 5.0 * scale, maxf(0.7, scale), tint, true, -1.0, true)
+					world_batches.queue_cargo_light(point + Vector2.from_angle(angle) * 5.0 * scale, maxf(0.7, scale), tint, 1.0)
 		elif scale >= 0.42:
 			_draw_other_cargo(ship, point, direction, side)
 	world_effects.draw_destructions(viewport_bounds, visual_clock, _ship_scale, _screen_point, world_batches)

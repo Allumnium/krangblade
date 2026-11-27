@@ -3,6 +3,15 @@ const E = preload("res://scripts/economy_rules.gd")
 const M = preload("res://scripts/planet_map.gd")
 
 func _initialize() -> void:
+	var opening: Dictionary = E.create(M.generate(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2, "ai": true}}, [1, 2])
+	assert(opening["ships"].size() == 14)
+	for owner in [1, 2]:
+		var science: Array = opening["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) == owner and craft["kind"] == "science_ship")
+		assert(science.size() == 1)
+		assert(float(science[0]["crew"]) == float(E.CREW_COSTS["science_ship"]))
+		assert(int(E.objective_progress(opening, owner).get("science_built", 0)) == 0)
+		assert(opening["planets"][owner - 1]["stock"] == E.STARTING_STOCK or opening["planets"][owner - 1]["stock"]["Metals"] == E.STARTING_STOCK["Metals"])
+		assert(E.credit_balance(opening, owner) == E.STARTING_GC)
 	var state: Dictionary = E.create(M.generate(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var p: Dictionary = state["planets"][0]
 	assert(p["yards"].is_empty() and p["pds"].is_empty() and p["buildings"].is_empty())

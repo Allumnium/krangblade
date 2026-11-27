@@ -191,6 +191,21 @@ func production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
 	return production_icons[key]
 
 func selection_portrait_icon(kind: String) -> Texture2D:
+	if kind == "science_ship" and not selection_portrait_icons.has(kind):
+		# Preserve the existing health-tinted portrait contract using the new art.
+		var source: Image = SCIENCE_SPRITE.get_image()
+		var image := Image.create(source.get_width(), source.get_height(), false, Image.FORMAT_RGBA8)
+		for y in range(source.get_height()):
+			for x in range(source.get_width()):
+				var pixel: Color = source.get_pixel(x, y)
+				if pixel.a <= 0.0:
+					continue
+				var edge: bool = x == 0 or y == 0 or x == source.get_width() - 1 or y == source.get_height() - 1
+				if not edge:
+					edge = minf(minf(source.get_pixel(x - 1, y).a, source.get_pixel(x + 1, y).a), minf(source.get_pixel(x, y - 1).a, source.get_pixel(x, y + 1).a)) < 0.5
+				var alpha: float = pixel.a if edge else pixel.a * lerpf(0.18, 0.80, pixel.get_luminance())
+				image.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
+		selection_portrait_icons[kind] = ImageTexture.create_from_image(image)
 	if not selection_portrait_icons.has(kind):
 		# White wireframe art is tinted at runtime by current health, without
 		# recreating textures as combat snapshots arrive.

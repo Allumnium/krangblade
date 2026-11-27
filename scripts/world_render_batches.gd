@@ -27,6 +27,8 @@ var cloaked_overview_batches: Dictionary = {}
 var cloaked_overview_instances: Dictionary = {}
 var overview_dot_textures: Dictionary = {}
 var resource_glow_texture: Texture2D
+var lamp_glow_batch: MultiMeshInstance2D
+var lamp_glow_entries: Array = []
 const HULL_LIGHTING = preload("res://assets/shaders/world_hull_lighting.gdshader")
 var vector_lighting: ShaderMaterial
 var science_lighting: ShaderMaterial
@@ -92,6 +94,8 @@ func build(canvas: Control) -> void:
 	vector_lighting = _lighting_material(false)
 	science_lighting = _lighting_material(true)
 	_build_exhaust_batch()
+	lamp_glow_batch = _build_effect_batch(false)
+	lamp_glow_batch.texture = _resource_glow()
 	beam_batch = _build_effect_batch(false)
 	projectile_batch = _build_effect_batch(true)
 	health_batch = _build_effect_batch(false)
@@ -104,6 +108,8 @@ func build(canvas: Control) -> void:
 	cargo_glow_batch.z_index = 1
 
 func begin_frame() -> void:
+	lamp_glow_entries.clear()
+	lamp_glow_batch.hide()
 	health_entries.clear()
 	ring_entries.clear()
 	health_batch.hide()
@@ -128,6 +134,7 @@ func begin_frame() -> void:
 		batch.hide()
 
 func flush_world(visual_clock: float, hull_art: HULL_ART) -> void:
+	_flush_effect_batch(lamp_glow_batch, lamp_glow_entries)
 	_flush_exhaust(visual_clock)
 	_flush_effect_batch(beam_batch, beam_instances)
 	_flush_effect_batch(projectile_batch, projectile_instances)
@@ -254,6 +261,16 @@ func _resource_glow() -> Texture2D:
 			image.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
 	resource_glow_texture = ImageTexture.create_from_image(image)
 	return resource_glow_texture
+
+func queue_lamp_glow(point: Vector2, radius: float, tint: Color, strength: float) -> void:
+	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius).has_point(point):
+		return
+	lamp_glow_entries.append([Transform2D(0.0, Vector2.ONE * radius * 2.0, 0.0, point), Color(tint, strength)])
+
+func queue_cargo_light(point: Vector2, radius: float, tint: Color, strength: float) -> void:
+	if not Rect2(Vector2.ZERO, map_canvas.size).grow(radius).has_point(point):
+		return
+	cargo_glow_entries.append([Transform2D(0.0, Vector2.ONE * radius * 2.0, 0.0, point), Color(tint, strength)])
 
 func draw_resource_glow(point: Vector2, radius: float, tint: Color, strength: float) -> void:
 	var extent: float = maxf(1.5, radius)
