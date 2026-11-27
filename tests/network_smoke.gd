@@ -303,7 +303,7 @@ func _phase_changed() -> void:
 						var graph: Dictionary = ECON.military_graph(state)
 						var repair_point: Vector2 = graph["points"][index] + Vector2.DOWN * minf(350.0, ECON.sector_limit(graph, index, Vector2.DOWN) * 0.5)
 						var repairer: Dictionary = {"id": 980000 + index, "kind": "miner", "owner": system["owner"], "origin": index, "at": index, "dest": -1, "source": -1, "route": [], "leg": 0.0, "position": repair_point, "heading": Vector2.UP, "hp": ECON.SHIP_HP, "holding": true, "cargo": ECON.empty_stock(), "mining_mode": "delivery", "field": -1}
-						repairer["cargo"][ECON.ANTIMATTER] = 3.0
+						repairer["cargo"][ECON.ANTIMATTER] = 1.0
 						var repair_victim: Dictionary = repairer.duplicate(true)
 						repair_victim.merge({"id": 990000 + index, "kind": "ship", "position": repair_point + Vector2.RIGHT * 40, "hp": ECON.FREIGHTER_HP - 12.0, "cargo": ECON.empty_stock()}, true)
 						state["ships"].append(repairer)
@@ -330,17 +330,24 @@ func _phase_changed() -> void:
 						follower.merge({"id": 989000 + index, "kind": "fighter", "hp": ECON.SHIP_HP, "position": haul_point + Vector2.LEFT * 380.0}, true)
 						state["ships"].append(follow_leader)
 						state["ships"].append(follower)
-						var point: Vector2 = graph["points"][index] + Vector2.RIGHT * minf(150.0, ECON.sector_limit(graph, index, Vector2.RIGHT) * 0.5)
+						var outpost_node: int = int(state["map"]["planetless"][index])
+						var point: Vector2 = ECON.station_position(state, outpost_node, float(state["elapsed"])) + Vector2.RIGHT * 80.0
+						var salvage_craft: Dictionary = repair_victim.duplicate(true)
+						salvage_craft.merge({"id": 911000 + index, "origin": outpost_node, "at": outpost_node, "position": point, "holding": true, "cargo": ECON.empty_stock(), "hp": ECON.FREIGHTER_HP, "salvage_auto": false, "trade_auto": false, "wander_auto": false}, true)
+						state["ships"].append(salvage_craft)
 						var pile_id: int = 910000 + index
-						state["salvage"][pile_id] = {"id": pile_id, "resource": ECON.ANTIMATTER, "amount": 12.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
+						state["salvage"][pile_id] = {"id": pile_id, "resource": ECON.ANTIMATTER, "amount": 1.0, "origin": point, "position": point, "drift": Vector2.ZERO, "born": 0.0, "claim": -1}
 						# A separate held hull passively collects a local pile, without RPCs.
 						ECON._finish(state, index, system, {"id": 930000 + index, "kind": "ship", "population_allocated": ECON.CREW_COSTS["ship"]})
 						var auto_craft: Dictionary = state["ships"].back()
 						auto_craft["holding"] = true
-						var auto_point: Vector2 = graph["points"][index] + Vector2.LEFT * ECON.sector_limit(graph, index, Vector2.LEFT) * 0.8
+						var auto_point: Vector2 = graph["points"][outpost_node] + Vector2.LEFT * ECON.sector_limit(graph, outpost_node, Vector2.LEFT) * 0.8
+						auto_craft["at"] = outpost_node
+						auto_craft["origin"] = outpost_node
+						auto_craft["trade_auto"] = false
 						auto_craft["position"] = auto_point
 						auto_craft["hold_position"] = auto_point
-						auto_craft["hold_sector"] = index
+						auto_craft["hold_sector"] = outpost_node
 						var auto_pile_id: int = 940000 + index
 						state["salvage"][auto_pile_id] = {"id": auto_pile_id, "resource": "Crystals", "amount": 2.0, "origin": auto_point, "position": auto_point, "drift": Vector2.ZERO, "born": 0.0, "expires_at": 105.0, "claim": -1}
 						ECON._finish(state, index, system, {"id": 939000 + index, "kind": "colony_ship"})
@@ -354,9 +361,9 @@ func _phase_changed() -> void:
 						# Dock-separated freighters must deliver without exact-center arrival.
 						for dock_slot in range(2):
 							var docked: Dictionary = repair_victim.duplicate(true)
-							var dock_point: Vector2 = ECON.station_position(state, index, float(state["elapsed"])) + Vector2.from_angle(float(dock_slot) * PI) * ECON.SHIP_CLEARANCE
-							docked.merge({"id": 941000 + index * 2 + dock_slot, "position": dock_point, "holding": false, "cargo": ECON.empty_stock(), "hp": ECON.ship_max_hp("ship"), "salvage_delivery": true, "salvage_depot": index, "dest": index, "salvage_auto": false, "trade_auto": false, "wander_auto": false}, true)
-							docked["cargo"][ECON.ANTIMATTER] = 1.0
+							var dock_point: Vector2 = ECON.station_position(state, outpost_node, float(state["elapsed"])) + Vector2.from_angle(float(dock_slot) * PI) * ECON.SHIP_CLEARANCE
+							docked.merge({"id": 941000 + index * 2 + dock_slot, "position": dock_point, "holding": false, "cargo": ECON.empty_stock(), "hp": ECON.ship_max_hp("ship"), "salvage_delivery": true, "origin": outpost_node, "at": outpost_node, "salvage_depot": outpost_node, "dest": outpost_node, "salvage_auto": false, "trade_auto": false, "wander_auto": false}, true)
+							docked["cargo"]["Crystals"] = 1.0
 							state["ships"].append(docked)
 						# Separate focus-fire hull so the existing movement and hold
 						# scenarios remain independent of this command.
@@ -699,6 +706,7 @@ func _check_time_controls(state: Dictionary) -> bool:
 		session.call("request_salvage", [900000 + home_index, other], 910000 + home_index)
 		session.call("request_unload_cargo", [other])
 		session.call("request_salvage", [900000 + home_index], 910000 + home_index)
+		session.call("request_salvage", [911000 + home_index], 910000 + home_index)
 	if speed_stage < TEST_SPEEDS.size() - 1:
 		session.call("request_thresholds", home_index, "Crystals", 12.0 + float(speed_stage), 25.0)
 	speed_stage += 1
@@ -1114,7 +1122,7 @@ func _check_economy_sync() -> void:
 					follow_verified = craft.get("unit_order", {}).get("kind", "") == "follow" and bool(craft["unit_order"].get("guard", false)) and int(craft["unit_order"]["target"]) == 988000 + owner_home and bool(craft.get("follow_arrived", false))
 				if int(craft["id"]) == 980000 + owner_home:
 					repair_toggled = not ECON.autocast_enabled(craft, "repair") and not ECON.autocast_enabled(craft, "mine") and ECON.autocast_enabled(craft, "salvage") and not ECON.autocast_enabled(craft, "wander")
-					deposited = float(craft["cargo"].get(ECON.ANTIMATTER, 0.0)) <= ECON.EPS and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 17.0 - ECON.EPS
+					deposited = float(craft["cargo"].get(ECON.ANTIMATTER, 0.0)) <= ECON.EPS and is_equal_approx(float(system["stock"].get(ECON.ANTIMATTER, 0.0)), 1.0)
 				if int(craft["id"]) == 990000 + owner_home:
 					repaired = float(craft["hp"]) >= ECON.FREIGHTER_HP - ECON.EPS
 			var checks: Dictionary = {
@@ -1128,7 +1136,7 @@ func _check_economy_sync() -> void:
 				"patrol": patrol_verified,
 				"attack_target": attack_verified,
 				"unit_order_queue": order_queue_verified,
-				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and float(system["stock"].get(ECON.ANTIMATTER, 0.0)) >= 14.0 - 0.001,
+				"salvage_delivery": not state.get("salvage", {}).has(910000 + owner_home) and is_equal_approx(float(state["planets"][int(state["map"]["planetless"][owner_home])]["stock"].get(ECON.ANTIMATTER, 0.0)), 1.0),
 				"crowded_dock_delivery": dock_delivered == 2,
 				"colony_farming": farm_verified,
 				"contextual_colony_queue": colony_order_verified,

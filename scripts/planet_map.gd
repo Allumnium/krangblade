@@ -389,6 +389,8 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 			field[ANTIMATTER] = 1.0
 			for chunk in field["chunks"]:
 				chunk["resource"] = ANTIMATTER
+				chunk["remaining"] = floorf(float(chunk["remaining"]))
+				chunk["initial"] = chunk["remaining"]
 	return {"seed": seed_value, "layout": layout, "planetless": planetless_systems(seed_value, points.size(), edges, player_count), "antimatter_home_clearance": ANTIMATTER_CLEARANCE * scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "field_edges": field_edges, "size": bounds * scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": points.size()}
 
 # Each ridge is an open chain: a new lobe intersects only its previous

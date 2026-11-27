@@ -3461,6 +3461,7 @@ func _initialize() -> void:
 	_test_local_position_orders()
 	_test_tactical_orders()
 	_test_precise_patrol()
+	_test_indivisible_antimatter()
 	_test_salvage()
 	_test_opportunistic_salvage()
 	_test_remote_salvage()
@@ -6091,12 +6092,37 @@ func _test_precise_patrol() -> void:
 	assert(reached and not craft.has("patrol_from") and craft["unit_order"]["kind"] == "sector")
 	print("PASS: exact local and open-space patrol, return, queue and input validation")
 
+func _test_indivisible_antimatter() -> void:
+	var state: Dictionary = _funded_fixture(_planetary_fixture(705, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var p: Dictionary = state["planets"][0]
+	var craft: Dictionary = {"id": 999, "kind": "ship", "owner": 1, "position": ECON.station_position(state, 0, 0.0), "cargo": ECON.empty_stock()}
+	var item: Dictionary = {"resource": ECON.ANTIMATTER, "amount": 1.0}
+	var second: Dictionary = item.duplicate()
+	assert(ECON.storage_capacity(p, ECON.ANTIMATTER) == 1.0)
+	assert(ECON.depot_capacity(ECON.ANTIMATTER) == 0.0)
+	ECON._collect_salvage(craft, item, 0.001)
+	assert(item["amount"] == 0.0 and craft["cargo"][ECON.ANTIMATTER] == 1.0)
+	ECON._collect_salvage(craft, second, 1.0)
+	assert(second["amount"] == 1.0 and craft["cargo"][ECON.ANTIMATTER] == 1.0)
+	ECON._unload_salvage(state, craft, 0, 0.001)
+	assert(craft["cargo"][ECON.ANTIMATTER] == 0.0 and p["stock"][ECON.ANTIMATTER] == 1.0)
+	ECON._collect_salvage(craft, second, 0.001)
+	ECON._unload_salvage(state, craft, 0, 10.0)
+	assert(craft["cargo"][ECON.ANTIMATTER] == 1.0 and p["stock"][ECON.ANTIMATTER] == 1.0)
+	var almost_full: Dictionary = {"kind": "ship", "cargo": {"Metals": ECON.CARGO_CAPACITY - 0.5}}
+	assert(ECON._transfer_quantity(ECON.ANTIMATTER, 1.0, ECON.cargo_resource_free(almost_full, ECON.ANTIMATTER), 1.0) == 0.0)
+	for field in state["map"]["fields"]:
+		if bool(field.get("antimatter", false)):
+			for chunk in field["chunks"]:
+				assert(float(chunk["remaining"]) == floorf(float(chunk["remaining"])))
+	print("PASS: indivisible antimatter pickup, single-item storage and blocked second delivery")
+
 func _test_salvage() -> void:
 	var map: Dictionary = {"seed": 42, "points": [Vector2.ZERO, Vector2(5000, 0)], "edges": [[0, 1]], "fields": []}
 	var state: Dictionary = _funded_fixture(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
 	var graph: Dictionary = ECON.military_graph(state)
 	var wreck: Dictionary = {"id": 99, "owner": 2, "kind": "ship", "at": 0, "position": Vector2.ZERO, "route": [], "leg": 0.0, "cargo": ECON.empty_stock()}
-	wreck["cargo"][ECON.ANTIMATTER] = 1.25
+	wreck["cargo"][ECON.ANTIMATTER] = 1.0
 	wreck["cargo"]["Metals"] = 5.0
 	ECON._record_ship_destruction(state, graph, wreck)
 	var recipe: Dictionary = ECON._cost("ship", 1)
@@ -6109,7 +6135,7 @@ func _test_salvage() -> void:
 		var resource: String = pile["resource"]
 		recovered[resource] = float(pile["amount"])
 		assert(float(pile["amount"]) <= float(wreck["cargo"].get(resource, 0.0)) + float(recipe.get(resource, 0.0)) * 0.2 + 0.0001)
-	assert(is_equal_approx(recovered[ECON.ANTIMATTER], 1.25) and recovered["Metals"] >= 5.0)
+	assert(is_equal_approx(recovered[ECON.ANTIMATTER], 1.0) and recovered["Metals"] >= 5.0)
 	var first_pile: Dictionary = state["salvage"].values()[0]
 	var initial_point: Vector2 = first_pile["position"]
 	state["elapsed"] = 2.0
@@ -6726,7 +6752,7 @@ func _test_conquest() -> void:
 	attacker["position"] = ECON.station_position(state, 1, 0.0)
 	attacker["blaster_cooldown"] = 0.0
 	attacker["blaster_shot"] = 0
-	planet["stock"][ECON.ANTIMATTER] = 50.0
+	planet["stock"][ECON.ANTIMATTER] = 1.0
 	var stock: Dictionary = planet["stock"].duplicate()
 	ECON._combat(state, graph, 1.0)
 	assert(int(planet["owner"]) == 0 and not ECON.has_station(planet) and planet["yards"].is_empty())
@@ -6736,7 +6762,7 @@ func _test_conquest() -> void:
 	for pile in state["salvage"].values():
 		dropped[pile["resource"]] = float(dropped.get(pile["resource"], 0.0)) + float(pile["amount"])
 	for resource in ECON.RESOURCES + [ECON.ANTIMATTER]:
-		assert(is_equal_approx(float(dropped.get(resource, 0.0)), float(stock.get(resource, 0.0)) * 0.2))
+		assert(is_equal_approx(float(dropped.get(resource, 0.0)), float(stock.get(resource, 0.0)) * (1.0 if resource == ECON.ANTIMATTER else 0.2)))
 		assert(float(planet["stock"].get(resource, 0.0)) == 0.0)
 	for tick in range(30):
 		ECON.step(state, 1.0)
