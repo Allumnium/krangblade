@@ -60,8 +60,28 @@ func _test_snapshot_map_reuse() -> void:
 	source["map"]["fields"][0]["chunks"].clear()
 	_check(worker._copy_snapshot(source) == source and changed["map"]["fields"][0]["chunks"].size() == 1, "rock removal leaked into previous map")
 
+func _test_depot_policy_worker() -> void:
+	var initial: Dictionary = ECON.create(MAP.generate(718, 2, "Grid"), _roster(), [1, 2])
+	var depot: Dictionary = {"id": 999000, "kind": "resource_depot", "owner": 2, "build_progress": 1.0, "position": Vector2(200, 200), "hp": ECON.DEPOT_HP, "cargo": ECON.empty_stock()}
+	initial["ships"].append(depot)
+	var reference: Dictionary = initial.duplicate(true)
+	var worker = WORKER.new()
+	if not worker.start(initial):
+		_check(false, "depot worker start failed")
+		return
+	_check(worker.submit({"kind": "command", "method": "authority_depot_policy_for", "args": [1, 999000, "Metals", 10.0, 60.0, true, false]}), "foreign depot command submission failed")
+	var rejected: Dictionary = await _await_result(worker)
+	_check(not bool(rejected.get("accepted", true)), "foreign depot policy accepted")
+	_check(worker.submit({"kind": "command", "method": "authority_depot_policy_for", "args": [2, 999000, "Metals", 10.0, 60.0, true, false]}), "owned depot command submission failed")
+	var accepted: Dictionary = await _await_result(worker)
+	_check(ECON.authority_depot_policy_for(reference, 2, 999000, "Metals", 10.0, 60.0, true, false), "reference depot policy rejected")
+	_check(bool(accepted.get("accepted", false)) and accepted.get("snapshot", {}) == reference, "worker depot policy differs from reference")
+	_check(not depot.has("depot_policy"), "worker mutated original depot")
+	worker.stop()
+
 func _run() -> void:
 	_test_snapshot_map_reuse()
+	await _test_depot_policy_worker()
 	var roster: Dictionary = _roster()
 	var initial: Dictionary = ECON.create(MAP.generate(827, 2, "Grid"), roster, [1, 2])
 	ECON.initialize_diplomacy(initial)

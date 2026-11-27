@@ -190,7 +190,105 @@ func _test_wall_movement_and_weapons() -> void:
 	ECON._combat_wall_grid = {}
 	print("PASS: wall detour movement, neutral interception, hostile damage and laser impact endpoint")
 
+func _freight_hull(id: int, kind: String, position: Vector2) -> Dictionary:
+	return {"id": id, "kind": kind, "owner": 1, "origin": 0, "at": 0, "position": position, "navigation_target": position, "heading": Vector2.UP, "route": [], "leg": 0.0, "source": -1, "dest": -1, "crew": 0.0, "cargo": ECON.empty_stock(), "hp": ECON.ship_max_hp(kind), "wander_auto": false}
+
+func _advance_freight_fixture(state: Dictionary) -> void:
+	state["elapsed"] += 0.5
+	ECON._rock_plan_tick += 1
+	ECON._rock_plan_budget = ECON.ROCK_PLAN_LIMIT
+	ECON._rock_route_queries.clear()
+
+func _test_physical_freight() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(716, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var dock: Vector2 = ECON.station_position(state, 0, 0.0)
+	var point: Vector2 = dock + Vector2(250, 250)
+	var graph: Dictionary = ECON.military_graph(state)
+	var builder: Dictionary = _freight_hull(100, "construction_ship", point)
+	var freight: Dictionary = _freight_hull(101, "ship", dock)
+	state["ships"] = [builder, freight]
+	state["next_id"] = 102
+	state["planets"][0]["stock"] = {"Metals": 600.0, "Crystals": 40.0, "Organics": 0.0}
+	assert(ECON.issue_unit_order(state, 1, [100], {"kind": "build_depot", "point": point}, false))
+	var site: Dictionary = state["ships"].back()
+	builder["construction_target"] = site["id"]
+	var transferred: bool = false
+	for tick in range(3000):
+		var progress: float = site["build_progress"]
+		var before: float = ECON._cargo_total(builder)
+		ECON._try_static_freight(state, graph, freight, 0.5)
+		assert(site["build_progress"] == progress)
+		if ECON._cargo_total(builder) > before + ECON.EPS:
+			transferred = true
+			assert((freight["position"] as Vector2).distance_to(builder["position"]) <= ECON.TRACTOR_RANGE + 0.01)
+		ECON._work_construction(state, graph, builder, 0.5)
+		for resource in site["build_recipe"]:
+			var total: float = float(site["build_delivered"].get(resource, 0.0)) + float(builder["cargo"].get(resource, 0.0)) + float(freight["cargo"].get(resource, 0.0))
+			for record in site["build_reservations"].values():
+				total += float(record["cargo"].get(resource, 0.0))
+			assert(is_equal_approx(total, float(site["build_recipe"][resource])))
+		if ECON.static_complete(site):
+			break
+		_advance_freight_fixture(state)
+	assert(transferred and ECON.static_complete(site))
+	print("PASS: physical freighter rendezvous, constructor-only progress and material conservation")
+
+func _test_physical_depot() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(717, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	var dock: Vector2 = ECON.station_position(state, 0, 0.0)
+	var point: Vector2 = dock + Vector2(250, 250)
+	var graph: Dictionary = ECON.military_graph(state)
+	var freight: Dictionary = _freight_hull(100, "ship", dock)
+	var depot: Dictionary = _freight_hull(101, "resource_depot", point)
+	depot["build_progress"] = 1.0
+	depot["cargo"]["Metals"] = 500.0
+	state["ships"] = [freight, depot]
+	var p: Dictionary = state["planets"][0]
+	for resource in ECON.RESOURCES:
+		assert(ECON.set_depot_policy(state, 1, 101, resource, 0.0, 100.0, false, false))
+	assert(ECON.set_depot_policy(state, 1, 101, "Metals", 20.0, 30.0, true, false))
+	assert(ECON.set_thresholds(state, 1, 0, "Metals", 0.0, 0.0, false, true))
+	p["stock"]["Metals"] = 200.0
+	var total: float = 700.0
+	for tick in range(2000):
+		ECON._try_static_freight(state, graph, freight, 0.5)
+		assert(is_equal_approx(total, p["stock"]["Metals"] + depot["cargo"]["Metals"] + freight["cargo"]["Metals"]))
+		assert(depot["cargo"]["Metals"] <= 600.0 + ECON.EPS)
+		if is_equal_approx(float(depot["cargo"]["Metals"]), 600.0) and not freight.has("depot_freight"):
+			break
+		_advance_freight_fixture(state)
+	assert(is_equal_approx(float(depot["cargo"]["Metals"]), 600.0))
+	assert(ECON._cargo_total(freight) <= ECON.EPS)
+	assert(ECON.set_depot_policy(state, 1, 101, "Metals", 20.0, 30.0, false, true))
+	assert(ECON.set_thresholds(state, 1, 0, "Metals", 100.0, 100.0, true, false))
+	for tick in range(2000):
+		ECON._try_static_freight(state, graph, freight, 0.5)
+		assert(is_equal_approx(total, p["stock"]["Metals"] + depot["cargo"]["Metals"] + freight["cargo"]["Metals"]))
+		assert(depot["cargo"]["Metals"] >= 400.0 - ECON.EPS)
+		if is_equal_approx(float(depot["cargo"]["Metals"]), 400.0) and not freight.has("depot_freight"):
+			break
+		_advance_freight_fixture(state)
+	assert(is_equal_approx(float(depot["cargo"]["Metals"]), 400.0))
+	assert(is_equal_approx(float(p["stock"]["Metals"]), 300.0))
+	# Interrupt an active shipment without losing cargo or leaving a stale job.
+	assert(ECON.set_depot_policy(state, 1, 101, "Metals", 0.0, 100.0, true, false))
+	assert(ECON.set_thresholds(state, 1, 0, "Metals", 0.0, 0.0, false, true))
+	for tick in range(2000):
+		ECON._try_static_freight(state, graph, freight, 0.5)
+		if freight.has("depot_freight") and ECON._cargo_total(freight) > ECON.EPS:
+			break
+		_advance_freight_fixture(state)
+	assert(freight.has("depot_freight") and ECON._cargo_total(freight) > ECON.EPS)
+	var retained: Dictionary = freight["cargo"].duplicate()
+	assert(ECON.set_autocast(state, 1, [100], "trade", false))
+	assert(not freight.has("depot_freight") and freight["cargo"] == retained)
+	assert(not ECON._try_static_freight(state, graph, freight, 0.5))
+	assert(freight["cargo"] == retained)
+	print("PASS: automatic depot receiving ceiling, dispatch floor, physical stock conservation and interruption")
+
 func _initialize() -> void:
+	_test_physical_freight()
+	_test_physical_depot()
 	_test_physical_construction()
 	_test_wall_movement_and_weapons()
 	_test_depot_policy()
