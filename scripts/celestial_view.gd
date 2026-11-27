@@ -38,14 +38,16 @@ func _rock_material() -> ShaderMaterial:
 func set_asteroid_lights(canvas: Control, lights: Array) -> void:
 	var positions := PackedVector4Array()
 	var colors := PackedVector4Array()
+	var canvas_transform: Transform2D = canvas.get_global_transform_with_canvas()
+	var radius_scale: float = canvas_transform.x.length()
 	positions.resize(16)
 	colors.resize(16)
 	var count: int = mini(16, lights.size())
 	for i in range(count):
 		var entry: Array = lights[i]
-		var pos: Vector2 = canvas.get_global_transform() * (entry[0] as Vector2)
+		var pos: Vector2 = canvas_transform * (entry[0] as Vector2)
 		var tint: Color = entry[2]
-		positions[i] = Vector4(pos.x, pos.y, float(entry[1]), float(entry[3]))
+		positions[i] = Vector4(pos.x, pos.y, float(entry[1]) * radius_scale, float(entry[3]))
 		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0)
 	var material: ShaderMaterial = _rock_material()
 	material.set_shader_parameter("light_points", positions)

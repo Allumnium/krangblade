@@ -62,13 +62,15 @@ func set_world_lights(lights: Array) -> void:
 	world_lights = lights
 	var positions := PackedVector4Array()
 	var colors := PackedVector4Array()
+	var canvas_transform: Transform2D = map_canvas.get_global_transform_with_canvas()
+	var radius_scale: float = canvas_transform.x.length()
 	positions.resize(16)
 	colors.resize(16)
 	for i in range(mini(16, lights.size())):
 		var entry: Array = lights[i]
-		var pos: Vector2 = map_canvas.get_global_transform() * (entry[0] as Vector2)
+		var pos: Vector2 = canvas_transform * (entry[0] as Vector2)
 		var tint: Color = entry[2]
-		positions[i] = Vector4(pos.x, pos.y, float(entry[1]), float(entry[3]))
+		positions[i] = Vector4(pos.x, pos.y, float(entry[1]) * radius_scale, float(entry[3]))
 		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0)
 	for material in [vector_lighting, science_lighting, fighter_lighting]:
 		material.set_shader_parameter("light_points", positions)
@@ -108,6 +110,11 @@ func build(canvas: Control) -> void:
 	_build_exhaust_batch()
 	lamp_glow_batch = _build_effect_batch(false)
 	lamp_glow_batch.texture = _resource_glow()
+	var glow_shader := Shader.new()
+	glow_shader.code = "shader_type canvas_item; render_mode unshaded, blend_add;"
+	var glow_material := ShaderMaterial.new()
+	glow_material.shader = glow_shader
+	lamp_glow_batch.material = glow_material
 	beam_batch = _build_effect_batch(false)
 	projectile_batch = _build_effect_batch(true)
 	health_batch = _build_effect_batch(false)
@@ -343,7 +350,7 @@ void fragment() {
 	map_canvas.add_child(exhaust_batch)
 	exhaust_batch.hide()
 
-func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float, id: int, bounds: Rect2) -> void:
+func _exhaust_extent(kind: String) -> Vector2:
 	if not exhaust_extents.has(kind):
 		var rear: float = 0.0
 		var nose: float = 0.0
@@ -351,13 +358,25 @@ func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: floa
 			rear = minf(rear, vertex.x)
 			nose = maxf(nose, vertex.x)
 		exhaust_extents[kind] = Vector2(rear, maxf(0.5, (nose - rear) / 18.0))
-	var extent: Vector2 = exhaust_extents[kind]
-	var engine: Vector2 = point + direction * extent.x
+	return exhaust_extents[kind]
+
+# Use the same plume geometry for emitted light and the rendered exhaust.
+func engine_center(kind: String, point: Vector2, direction: Vector2, scale: float) -> Vector2:
+	return point + direction.normalized() * _exhaust_extent(kind).x * scale
+
+func exhaust_center(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float) -> Vector2:
+	var extent: Vector2 = _exhaust_extent(kind)
+	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
+	return engine_center(kind, point, direction, scale) - direction.normalized() * plume_length * 0.5
+
+func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float, id: int, bounds: Rect2) -> void:
+	var extent: Vector2 = _exhaust_extent(kind)
+	var engine: Vector2 = engine_center(kind, point, direction, scale)
 	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
 	var plume_width: float = extent.y * lerpf(0.8, 2.1, thrust) * scale
 	if not bounds.grow(maxf(24.0, plume_length + 8.0)).has_point(engine):
 		return
-	var center: Vector2 = engine - direction.normalized() * plume_length * 0.5
+	var center: Vector2 = exhaust_center(kind, point, direction, scale, thrust)
 	exhaust_instances.append([Transform2D(direction.angle(), Vector2(plume_length, plume_width * 2.0), 0.0, center), thrust, fposmod(float(id) * 0.173, 1.0)])
 
 func _flush_exhaust(visual_clock: float) -> void:

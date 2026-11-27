@@ -143,7 +143,7 @@ func draw_ship_target_rings(state: Dictionary, poses: Dictionary, refs: Dictiona
 		var tint: Color = Color("#50a8ff") if ECONOMY._friendly_target(state, local_player.call(), target) else (Color("#ff5058") if ECONOMY.empires_hostile(state, local_player.call(), owner) else Color.WHITE)
 		var radius: float = 4.5
 		if Rect2(Vector2.ZERO, map_canvas.size).grow(radius + 4.0).has_point(target["point"]):
-			map_canvas.draw_arc(target["point"], radius, 0.0, TAU, 20, Color(tint, 0.65), 0.9, true)
+			draw_command_target(map_canvas, target["point"], tint)
 
 func order_color(ship: Dictionary, order: Dictionary) -> Color:
 	var kind: String = str(order.get("kind", ""))
@@ -277,36 +277,41 @@ func _group_command_target(state: Dictionary, graph: Dictionary, ship: Dictionar
 		return {}
 	return {"signature": signature, "point": endpoint, "tint": tint}
 
-func draw_group_command_line(state: Dictionary, poses: Dictionary, refs: Dictionary, selected_units: Array[int]) -> void:
+func draw_group_command_line(state: Dictionary, poses: Dictionary, refs: Dictionary, selected_units: Array[int], canvas: CanvasItem) -> void:
 	var graph: Dictionary = ECONOMY.military_graph(state)
-	var shared: Dictionary = {}
-	var center := Vector2.ZERO
-	var count: int = 0
+	var groups: Dictionary = {}
+	var selected: Dictionary = {}
+	for id in selected_units:
+		selected[id] = true
 	for ship in state["ships"]:
 		var id: int = int(ship["id"])
-		if not selected_units.has(id):
+		if not selected.has(id) or not poses.has(id) or int(ship["owner"]) != local_player.call():
 			continue
-		if not poses.has(id):
-			return
 		var command: Dictionary = _group_command_target(state, graph, ship, poses, refs)
 		if command.is_empty():
-			return
-		if shared.is_empty():
-			shared = command
-		elif command["signature"] != shared["signature"]:
-			return
-		# Use attack-move color if a mixed fleet has armed members.
-		elif command["tint"] == Color("#ff605c"):
+			continue
+		var signature: Array = command["signature"]
+		if not groups.has(signature):
+			groups[signature] = {"point": command["point"], "tint": command["tint"], "sum": Vector2.ZERO, "count": 0}
+		var shared: Dictionary = groups[signature]
+		if command["tint"] == Color("#ff605c"):
 			shared["tint"] = command["tint"]
-		center += poses[id]["point"] as Vector2
-		count += 1
-	if count < 2 or count != selected_units.size():
-		return
-	center /= float(count)
-	var finish: Vector2 = shared["point"]
-	if center.distance_to(finish) > 1.0:
-		# One direct intent indicator; individual ships may take different lanes.
-		draw_command_line(map_canvas, center, finish, Color(shared["tint"], 0.8))
+		shared["sum"] += poses[id]["point"] as Vector2
+		shared["count"] = int(shared["count"]) + 1
+	var marked: Dictionary = {}
+	var bounds := Rect2(Vector2.ZERO, map_canvas.size)
+	for shared in groups.values():
+		var center: Vector2 = shared["sum"] / float(shared["count"])
+		var finish: Vector2 = shared["point"]
+		var tint: Color = shared["tint"]
+		if center.distance_to(finish) > 1.0:
+			draw_command_line(canvas, center, finish, Color(tint, 0.8))
+		if not marked.has(finish) and bounds.grow(5.0).has_point(finish):
+			marked[finish] = true
+			draw_command_target(canvas, finish, tint)
+
+func draw_command_target(canvas: CanvasItem, point: Vector2, tint: Color) -> void:
+	canvas.draw_arc(point, 4.5, 0.0, TAU, 20, Color(tint, 0.65), 0.9, true)
 
 # Drag placement orders already carry authoritative points and headings.
 # Draw their original hull slots independently of shared command-line targets.
@@ -439,7 +444,7 @@ func draw_queued_chains(canvas: CanvasItem, state: Dictionary, poses: Dictionary
 		markers[marker_key] = true
 		if bool(leg["ghost"]):
 			draw_destination_ghost(leg["hull"], finish, leg["heading"], tint, canvas)
-		canvas.draw_arc(finish, 4.5, 0.0, TAU, 20, Color(tint, 0.65), 0.9, true)
+		draw_command_target(canvas, finish, tint)
 		var slot: int = int(label_slots.get(finish, 0))
 		label_slots[finish] = slot + 1
 		var label_text: String = str(step)
