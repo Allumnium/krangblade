@@ -1,8 +1,13 @@
 # Warbound — development TODO
 
+## Approved economic pacing and explicit production (2026-11-27)
+
+- [x] v0.114.0 removes free production and infrastructure from home and newly founded stations, including starter yards/PDS and base Crystal income. Maintain starting fleet, stocks and integral station defenses. Explicit production buildings, dedicated orbital Eco-Housing and built Colony Ships generate materials; stockpiled food supports residents before farms complete. AI bootstraps Farms, Refineries, then Shipyards; focused and solo tests pass.
+- [ ] Tune normal unfunded empires to opening 0–2 min, first colony and 7–10 military hulls 2–4, specialization 4–8, major conflict 8–15, endgame 15–30 at 1×. Rush viable, station defenses deter elimination; developed colony supports 20–30 fighters or equivalent plus civilian fleet. Expansion higher potential, concentrated investment viable with diminishing returns; mining leads early, industry grows later; Crystals constrain advanced technology; deposits exhaust without excessive micro, starting potential comparable. Credits chiefly constrain upkeep; consider tax and explicit fee rebalance. Verify actual peer openings and migrate old fixture assumptions; no new currencies/fleet caps.
+
 ## Approved gameplay rebalance — simpler numbers (2026-11-26)
 
-Draft v0.113.0 implements the initial new scale across the simulation, recipes, presentation and objectives. Do not close these acceptance items until the full migrated regression suite, current-main physical-construction tests and actual peer tests pass. Playtesting and economic balance refinement remain expected. Focused contract and solo checks pass; funded AI pacing passes all three seeds.
+Merged v0.113.0 implements the initial new scale across the simulation, recipes, presentation and objectives. Do not close these acceptance items until the full migrated regression suite, current-main physical-construction tests and actual peer tests pass. Playtesting and economic balance refinement remain expected. Focused contract and solo checks pass; funded AI pacing passes all three seeds.
 
 - [ ] Replace bulk tonnage with unlabeled resource units: nominal 10 old tons per unit; starting Metals 165, Organics 30, base Metal storage 400. Preserve fractional simulation quantities, show whole inventories and useful fractional rates. Standard base costs 25 increments, smaller exceptions 5. Round modified costs as appropriate; no zeroing positive requirements unintentionally.
 - [ ] Population in Pop (100 old people per Pop): home terrestrial 100, orbital 50, total 150, colony crew 250, origin 500. Rescale staffing, production, growth, housing, tax, objectives and AI. GC initial 500; rescale fees, upkeep and affordability consistently.

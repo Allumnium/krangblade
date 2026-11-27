@@ -138,9 +138,18 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	planets[0]["population"] = 150000.0
+	planets[0]["population"] = 1500.0
+	planets[0]["stock"]["Metals"] = 400.0
+	state["galactic_credits"][1] = 3000.0
 	planets[0]["levels"]["Organics"] = 3
 	# Colony and Freighter hulls require a Medium shipyard (v0.55.0).
+	session.call("request_operation", 0, "yard")
+	for i in range(ceili(ECON._work("yard", 1) / 0.1) + 1):
+		session.call("_economy_tick")
+	if planets[0]["yards"].size() != 1:
+		push_error("First shipyard must be built explicitly.")
+		quit(1)
+		return
 	planets[0]["yards"][0]["level"] = 2
 	session.call("request_operation", 0, "colony_ship")
 	for i in range(ceili(ECON._work("colony_ship", 1) / ECON.yard_speed(1) / 0.1) + 1):
@@ -169,7 +178,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (planets[neighbor]["yards"].size() == 1):
+	if not (planets[neighbor]["yards"].is_empty()):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
@@ -257,7 +266,7 @@ func _run() -> void:
 		quit(1)
 		return
 	# AI first upgrades to the Medium shipyard that Colony hulls require (v0.55.0).
-	var colony_budget: float = float(setup["planets"][1]["queue"][0]["work"]) + ECON._work("colony_ship", 1) / ECON.yard_speed(2)
+	var colony_budget: float = 150.0 + ECON._work("colony_ship", 1) / ECON.yard_speed(2)
 	for i in range(ceili(colony_budget * 2.0 / 0.1)):
 		session.call("_economy_tick")
 		if [2, 3].all(func(player: int) -> bool: return setup["ships"].any(func(ship: Dictionary) -> bool: return int(ship["owner"]) == player and ship["kind"] == "colony_ship")):

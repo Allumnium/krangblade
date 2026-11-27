@@ -27,14 +27,25 @@ func _initialize() -> void:
 	assert(E.ship_max_hp("fighter") == 20.0 and E.STATION_HP == 500.0)
 	assert(U.resource_amount(25.0) == "25" and U.resource_amount(0.02, 2) == "0.02")
 	assert(E.OBJECTIVE_SPECS["metals"][2] == 300 and E.OBJECTIVE_SPECS["population"][2] == 800)
+	assert(home["yards"].is_empty() and home["pds"].is_empty() and home["buildings"].is_empty())
+	for resource in E.RESOURCES:
+		assert(E.production_level(home, resource) == 0 and E.rate(home, resource) == 0.0)
+	assert(not E.enqueue(state, 1, 0, "fighter"))
+	assert(E.enqueue(state, 1, 0, "yard"))
+	for _year in range(31):
+		E.step(state, 1.0)
+	assert(home["yards"].size() == 1 and E.eco_organics(home) == 0.0)
+	assert(home["stock"]["Crystals"] == 0.0 and home["population"] >= 150.0)
+	var before_stock: Dictionary = home["stock"].duplicate()
+	var before_gc: float = E.credit_balance(state, 1)
 	assert(E.enqueue(state, 1, 0, "fighter"))
 	var job: Dictionary = home["queue"][0]
-	assert(home["stock"]["Metals"] == 140.0 and home["stock"]["Organics"] == 30.0)
+	assert(home["stock"]["Metals"] == before_stock["Metals"] - 25.0 and home["stock"]["Organics"] == before_stock["Organics"])
 	assert(job["population_cost"] == 10.0 and E.reserved_construction_population(home) == 10.0)
-	assert(E.credit_balance(state, 1) == 450.0 and E.cancel(state, 1, 0, job["id"]))
-	assert(E.credit_balance(state, 1) == 500.0 and E.reserved_construction_population(home) == 0.0)
+	assert(E.credit_balance(state, 1) == before_gc - 50.0 and E.cancel(state, 1, 0, job["id"]))
+	assert(E.credit_balance(state, 1) == before_gc and E.reserved_construction_population(home) == 0.0)
 	assert(E.enqueue(state, 1, 0, "fighter"))
-	for _year in range(30):
+	for _year in range(40):
 		E.step(state, 1.0)
 	assert(state["ships"].any(func(ship: Dictionary) -> bool: return ship["kind"] == "fighter" and ship["owner"] == 1))
 	print("PASS: numerical balance contract, rounded costs, capacities, crew reservations, cancellation and actual construction")

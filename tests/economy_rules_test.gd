@@ -2742,16 +2742,16 @@ func _test_station_crystals() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 1, "Grid"), {1: {"team": 1}}, [1], false)
 	var home: Dictionary = state["planets"][0]
 	home["levels"]["Crystals"] = 0
-	assert(ECON.rate(home, "Crystals") == 0.15)
+	assert(ECON.rate(home, "Crystals") == 0.0)
 	ECON._work_planet(state, 0, 3.0)
-	assert(is_equal_approx(float(home["stock"]["Crystals"]), 0.45))
+	assert(is_equal_approx(float(home["stock"]["Crystals"]), 0.0))
 	home["levels"]["Crystals"] = 1
-	var expected: float = 0.15 + 0.01 * ECON.production_modifier(home, "Crystals") * ECON.population_multiplier(home)
+	var expected: float = ECON.CRYSTALS_PER_LEVEL * ECON.production_modifier(home, "Crystals") * ECON.population_multiplier(home)
 	assert(is_equal_approx(ECON.rate(home, "Crystals"), expected))
 	home["planet_blockaded"] = true
-	assert(ECON.rate(home, "Crystals") == 0.15)
+	assert(ECON.rate(home, "Crystals") == 0.0)
 	home["planetless"] = true
-	assert(ECON.rate(home, "Crystals") == 0.15)
+	assert(ECON.rate(home, "Crystals") == 0.0)
 	home["station"] = {}
 	home["owner"] = 0
 	assert(ECON.rate(home, "Crystals") == 0.0)
@@ -2765,7 +2765,7 @@ func _test_station_crystals() -> void:
 		for resource in full:
 			assert(discounted[resource] == ECON.rounded_price(full[resource] * 0.5))
 	assert(ECON.construction_cost({"conquest_rewards": ["cloak"]}, "scout", 1)["Crystals"] == 5.0)
-	print("PASS: station baseline, planetary crystal rate, blockade and increased construction costs")
+	print("PASS: no station baseline, planetary crystal rate, blockade and increased construction costs")
 
 func _test_sfx_rules() -> void:
 	var mixer = preload("res://scripts/match_sfx.gd")
@@ -4227,7 +4227,7 @@ func _initialize() -> void:
 	assert(is_equal_approx(float(mine_home["stock"]["Metals"]), after_build + ECON.MINER_RATE * 3.0))
 	assert(ECON._find_chunk(mineral["map"]["fields"][0], 7).is_empty())
 	assert(is_zero_approx(float(ECON.field_inventory(mineral["map"]["fields"][0])["Metals"])))
-	assert(is_equal_approx(float(mine_home["stock"]["Crystals"]), float(mineral["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
+	assert(is_zero_approx(float(mine_home["stock"]["Crystals"])))
 	assert(is_zero_approx(float(miner["cargo"]["Crystals"])))
 	assert(ECON.set_mining_policy(mineral, 1, 0, true, false, true))
 	# The ship may have been wandering away from its dock while no ore
@@ -4235,9 +4235,9 @@ func _initialize() -> void:
 	var approach_years: int = ceili((miner["position"] as Vector2).distance_to(mineral_points[0]) / ECON.ship_speed(str(miner["kind"])))
 	for i in range(20 + approach_years):
 		ECON.step(mineral, 1.0)
-		if float(mine_home["stock"]["Crystals"]) - float(mineral["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR >= ECON.MINER_RATE * 3.0 - ECON.EPS:
+		if float(mine_home["stock"]["Crystals"]) >= ECON.MINER_RATE * 3.0 - ECON.EPS:
 			break
-	assert(is_equal_approx(float(mine_home["stock"]["Crystals"]), ECON.MINER_RATE * 3.0 + float(mineral["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
+	assert(is_equal_approx(float(mine_home["stock"]["Crystals"]), ECON.MINER_RATE * 3.0))
 	assert((mineral["map"]["fields"][0]["chunks"] as Array).is_empty())
 	assert(is_zero_approx(float(ECON.field_inventory(mineral["map"]["fields"][0])["Crystals"])))
 	assert(ECON.set_mining_policy(mineral, 1, 0, false, false, true))
@@ -4286,7 +4286,7 @@ func _initialize() -> void:
 	assert(is_equal_approx(float(first["cargo"]["Metals"]), 4.0))
 	assert(float(first["cargo"]["Crystals"]) >= 6.0)
 	assert(is_zero_approx(float(second["cargo"]["Metals"])))
-	assert(is_equal_approx(float(ally["stock"]["Crystals"]), float(transport["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
+	assert(is_zero_approx(float(ally["stock"]["Crystals"])))
 	assert(is_equal_approx(float(ally["stock"]["Metals"]), 0.0))
 	ECON.step(transport, 0.1)
 	assert(is_equal_approx(float(ally["stock"]["Metals"]), 0.0))
@@ -4301,7 +4301,7 @@ func _initialize() -> void:
 		ECON.step(transport, 0.1)
 	assert((first["position"] as Vector2).distance_to(ECON.station_position(transport, 1, float(transport["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.SHIP_CLEARANCE + ECON.EPS)
 	assert(is_equal_approx(float(ally["stock"]["Metals"]), 4.0))
-	assert(float(ally["stock"]["Crystals"]) >= 6.0 + float(transport["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR - ECON.EPS)
+	assert(float(ally["stock"]["Crystals"]) >= 6.0 - ECON.EPS)
 	assert(is_equal_approx(float(hostile["stock"]["Metals"]), 0.0))
 	# Colony hulls use shipyards, travel before ownership changes, and cannot be stolen.
 	var colony_map: Dictionary = _planetary_fixture(12, 3, "Grid")
@@ -4344,7 +4344,7 @@ func _initialize() -> void:
 	var loser: Dictionary = c2 if winner == 1 else c1
 	var loser_home: int = 2 if winner == 1 else 0
 	assert(is_equal_approx(float(colonization["planets"][3]["population"]), ECON.COLONY_POPULATION))
-	assert(int(colonization["planets"][3]["levels"]["Organics"]) == 1)
+	assert(int(colonization["planets"][3]["levels"]["Organics"]) == 0)
 	assert(colonization["ships"].size() == 1)
 	assert(colonization["ship_destructions"].is_empty())
 	for i in range(20):
@@ -4735,12 +4735,12 @@ func _initialize() -> void:
 	ECON._combat(distant_chase, distant_graph, 0.1)
 	assert(int(distant_hunter["pursuit_target"]) == -1)
 	print("PASS: bounded pursuit, escaping fighters, weapon range and route resumption")
-	# Basic construction is independent of the advanced crystal supply; stations yield only baseline Crystals.
+	# Basic construction is independent of the advanced crystal supply; stations have no baseline Crystals.
 	var bootstrap: Dictionary = _funded_fixture(graph, players, ids, false)
 	var industry: Dictionary = bootstrap["planets"][0]
 	for resource in ECON.RESOURCES:
 		if resource == "Crystals":
-			assert(is_equal_approx(ECON.rate(industry, resource), ECON.STATION_CRYSTALS_PER_YEAR))
+			assert(is_equal_approx(ECON.rate(industry, resource), 0.0))
 		else:
 			assert(ECON.rate(industry, resource) > 0.0)
 	var remaining_stock: Dictionary = industry["stock"].duplicate()
@@ -4818,7 +4818,7 @@ func _initialize() -> void:
 	depot["eco_population"] = 0.0
 	depot["population"] = ECON.HOME_POPULATION
 	assert(ECON.storage_capacity(depot) == 2000.0)
-	assert(ECON.rate(depot, "Crystals") == ECON.STATION_CRYSTALS_PER_YEAR and ECON.consumption(depot, "Crystals") == 0.0)
+	assert(ECON.rate(depot, "Crystals") == 0.0 and ECON.consumption(depot, "Crystals") == 0.0)
 	var demand: float = ECON.consumption(depot, "Organics")
 	assert(demand > 0.0)
 	depot["population"] = ECON.HOME_POPULATION * 2.0
@@ -5036,8 +5036,9 @@ func _initialize() -> void:
 		assert(opening["planets"][opening_home]["stock"] == ECON.STARTING_STOCK)
 		assert(opening["planets"][opening_home]["population"] == ECON.HOME_POPULATION + ECON.ORBITAL_HOUSING_POPULATION)
 		var starting_defenses: Dictionary = opening["planets"][opening_home]["pds"]
-		assert(starting_defenses.size() == 1 and starting_defenses.has(0))
-		assert(float(starting_defenses[0]["hp"]) == ECON.PDS_HP)
+		assert(starting_defenses.is_empty())
+		assert(opening["planets"][opening_home]["yards"].is_empty())
+		assert(opening["planets"][opening_home]["station"]["weapons"].size() == 2)
 	for planet in opening["planets"]:
 		if not planet["home"]:
 			assert(planet["pds"].is_empty())
@@ -5131,9 +5132,9 @@ func _initialize() -> void:
 	ECON._finish(neutral_mine, 0, neutral_depot, {"id": 90101, "kind": "miner", "population_allocated": 30.0})
 	for tick in range(1600):
 		ECON.step(neutral_mine, 0.5)
-		if float(neutral_depot["stock"]["Crystals"]) - float(neutral_mine["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR >= 20.0 - ECON.EPS:
+		if float(neutral_depot["stock"]["Crystals"]) >= 20.0 - ECON.EPS:
 			break
-	assert(is_equal_approx(float(neutral_depot["stock"]["Crystals"]), 20.0 + float(neutral_mine["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
+	assert(is_equal_approx(float(neutral_depot["stock"]["Crystals"]), 20.0))
 	assert(ECON.field_inventory(neutral_map["fields"][0])["Crystals"] == 0.0)
 	var multi_access: Dictionary = _funded_fixture(mineral_map.duplicate(true), players, ids, false)
 	var access_map: Dictionary = multi_access["map"]
@@ -5158,13 +5159,13 @@ func _initialize() -> void:
 	for tick in range(1600):
 		ECON.step(multi_access, 0.5)
 		if not was_loaded and float(access_miner["cargo"]["Crystals"]) > ECON.EPS:
-			assert(is_equal_approx(float(access_home["stock"]["Crystals"]), float(multi_access["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
+			assert(is_zero_approx(float(access_home["stock"]["Crystals"])))
 			was_loaded = true
-		if float(access_home["stock"]["Crystals"]) - float(multi_access["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR >= ECON.MINER_CAPACITY - ECON.EPS:
+		if float(access_home["stock"]["Crystals"]) >= ECON.MINER_CAPACITY - ECON.EPS:
 			assert((access_miner["position"] as Vector2).distance_to(ECON.station_position(multi_access, 0, float(multi_access["elapsed"]))) <= ECON.STATION_DOCK_RANGE + ECON.SHIP_CLEARANCE + ECON.EPS)
 			assert(ECON.local_flow(access_home, "Mining deliveries", "Crystals") > 0.0)
 			break
-	assert(was_loaded and is_equal_approx(float(access_home["stock"]["Crystals"]), ECON.MINER_CAPACITY + float(multi_access["elapsed"]) * ECON.STATION_CRYSTALS_PER_YEAR))
+	assert(was_loaded and is_equal_approx(float(access_home["stock"]["Crystals"]), ECON.MINER_CAPACITY))
 	var staffed_state: Dictionary = _funded_fixture(graph, players, ids, false)
 	var staffed_home: Dictionary = staffed_state["planets"][0]
 	staffed_home["yards"].append({"level": 1, "job": -1})
@@ -6430,7 +6431,7 @@ func _test_civilian_waiting_movement() -> void:
 			if ECON._cargo_total(miner) <= ECON.EPS:
 				break
 	assert(float(miner["cargo"]["Crystals"]) <= ECON.EPS)
-	assert(is_equal_approx(float(home["stock"]["Crystals"]), 10.0 + (float(state["elapsed"]) - opened_at) * ECON.STATION_CRYSTALS_PER_YEAR))
+	assert(is_equal_approx(float(home["stock"]["Crystals"]), 10.0))
 	print("PASS: idle civilian flight and waiting-miner physical delivery")
 	# Empty miners can evacuate directly without requiring a friendly lane.
 	var trapped_map: Dictionary = {"seed": 827, "points": [Vector2.ZERO, Vector2(570, 0), Vector2(190, 0), Vector2(380, 0)], "edges": [[0, 2], [2, 3], [1, 3]], "fields": []}
@@ -7130,7 +7131,7 @@ func _test_orbital_housing() -> void:
 		ECON._work_planet(state, index, 1.0)
 	assert(float(p["population"]) == ECON.COLONY_POPULATION + 2.0 * ECON.ORBITAL_HOUSING_POPULATION)
 	for resource in ECON.RESOURCES:
-		var expected: float = float(stock[resource]) + (3.0 * ECON.ECO_HOUSING_ORGANICS * 30.0 if resource == "Organics" else (30.0 * ECON.STATION_CRYSTALS_PER_YEAR if resource == "Crystals" else 0.0))
+		var expected: float = float(stock[resource]) + (2.0 * ECON.ECO_HOUSING_ORGANICS * 30.0 if resource == "Organics" else 0.0)
 		assert(is_equal_approx(float(p["stock"][resource]), expected))
 	for resource in ECON.RESOURCES:
 		assert(ECON.consumption(p, resource) == 0.0)
@@ -7143,10 +7144,10 @@ func _test_eco_regrowth() -> void:
 	var galaxy: Dictionary = MAP.generate(827, 1, "Grid")
 	var state: Dictionary = _funded_fixture(galaxy, {1: {"team": 1}}, [1], false)
 	var home: Dictionary = state["planets"][0]
-	assert(ECON.eco_capacity(home) == 50.0)
-	assert(ECON.eco_population(home) == 50.0 and ECON.planetary_population(home) == ECON.HOME_POPULATION)
-	assert(is_equal_approx(ECON.eco_organics(home), 0.02))
-	assert(is_equal_approx(ECON.organics_demand(home), ECON.HOME_POPULATION / ECON.POPULATION_PER_ORGANICS_RATE))
+	assert(ECON.eco_capacity(home) == 0.0)
+	assert(ECON.eco_population(home) == 0.0 and ECON.planetary_population(home) == 150.0)
+	assert(ECON.eco_organics(home) == 0.0)
+	assert(is_equal_approx(ECON.organics_demand(home), 150.0 / ECON.POPULATION_PER_ORGANICS_RATE))
 	assert(not ECON.enqueue(state, 1, 0, "economy", "orbital_housing"))
 	var index: int = galaxy["planetless"][0]
 	var p: Dictionary = state["planets"][index]
@@ -7161,11 +7162,11 @@ func _test_eco_regrowth() -> void:
 	ECON._finish(state, index, p, job)
 	assert(ECON.eco_population(p) == 50.0 and ECON.eco_capacity(p) == 50.0)
 	assert(ECON.shipyard_operational(p, 0))
-	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.02))
+	assert(ECON.rate(p, "Organics") == 0.0)
 	assert(ECON.enqueue(state, 1, index, "economy", "orbital_housing"))
 	ECON._work_planet(state, index, ECON._work("orbital_housing", 1))
 	assert(ECON.eco_capacity(p) == 100.0 and float(p["population"]) == 100.0)
-	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.04))
+	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.02))
 	assert(ECON.enqueue(state, 1, index, "fighter"))
 	job = p["queue"][0]
 	assert(ECON._advance(p, job, float(job["work"])))
@@ -7183,7 +7184,7 @@ func _test_eco_regrowth() -> void:
 	assert(float(p["population"]) == 100.0)
 	assert(ECON.consumption(p, "Organics") == 0.0)
 	assert(ECON.overpopulation_penalty(p) == 0.0)
-	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.04))
+	assert(is_equal_approx(ECON.rate(p, "Organics"), 0.02))
 	# Level upgrades do not create another housing module.
 	ECON._finish(state, index, p, {"kind": "yard_upgrade", "target": "0", "level": 2})
 	assert(ECON.eco_capacity(p) == 100.0 and float(p["population"]) == 100.0)
