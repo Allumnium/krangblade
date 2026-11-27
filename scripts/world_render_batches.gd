@@ -343,7 +343,7 @@ void fragment() {
 	map_canvas.add_child(exhaust_batch)
 	exhaust_batch.hide()
 
-func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float, id: int, bounds: Rect2) -> void:
+func _exhaust_extent(kind: String) -> Vector2:
 	if not exhaust_extents.has(kind):
 		var rear: float = 0.0
 		var nose: float = 0.0
@@ -351,13 +351,22 @@ func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: floa
 			rear = minf(rear, vertex.x)
 			nose = maxf(nose, vertex.x)
 		exhaust_extents[kind] = Vector2(rear, maxf(0.5, (nose - rear) / 18.0))
-	var extent: Vector2 = exhaust_extents[kind]
-	var engine: Vector2 = point + direction * extent.x
+	return exhaust_extents[kind]
+
+# Use the same plume geometry for emitted light and the rendered exhaust.
+func exhaust_center(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float) -> Vector2:
+	var extent: Vector2 = _exhaust_extent(kind)
+	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
+	return point + direction.normalized() * (extent.x * scale - plume_length * 0.5)
+
+func queue_exhaust(kind: String, point: Vector2, direction: Vector2, scale: float, thrust: float, id: int, bounds: Rect2) -> void:
+	var extent: Vector2 = _exhaust_extent(kind)
+	var engine: Vector2 = point + direction.normalized() * extent.x * scale
 	var plume_length: float = extent.y * lerpf(4.0, 20.0, thrust) * scale
 	var plume_width: float = extent.y * lerpf(0.8, 2.1, thrust) * scale
 	if not bounds.grow(maxf(24.0, plume_length + 8.0)).has_point(engine):
 		return
-	var center: Vector2 = engine - direction.normalized() * plume_length * 0.5
+	var center: Vector2 = exhaust_center(kind, point, direction, scale, thrust)
 	exhaust_instances.append([Transform2D(direction.angle(), Vector2(plume_length, plume_width * 2.0), 0.0, center), thrust, fposmod(float(id) * 0.173, 1.0)])
 
 func _flush_exhaust(visual_clock: float) -> void:

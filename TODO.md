@@ -2,6 +2,8 @@
 
 ## Approved art and audio overhaul (2026-11-27)
 
+- [ ] v0.118.3 restores group command target rings, removes combat-only box-selection preference, and adds thrust-dependent plume illumination. Verify mixed/foreign/Shift selection and owned-only dispatch, shared and differing destinations, fog/cloak and stop/pause behavior, and rendered fleet performance.
+
 - [ ] v0.118.2 integrates the first of 16 Fighter sprite styles and all six cropped material maps. Verify atlas alignment, heading, shield/engine placement, team tint, portraits and fleet rendering. Future ship sheets default to the first/top-left variant; retain remaining designs for eventual player-selectable styles (not implemented).
 
 - [ ] v0.118.1 keeps subtle velocity-based cruise exhaust with stronger acceleration flares. Run smoke checks and verify appearance, stop/pause/speed changes, guest interpolation and moving-fleet render cost.

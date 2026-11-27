@@ -3802,27 +3802,14 @@ func _select_box(rect: Rect2, additive: bool) -> void:
 	if not additive:
 		selected_units.clear()
 	var poses: Dictionary = _ship_poses(state)
-	var team: int = ECONOMY.combat_group(state, _me())
-	var friendly_ids: Dictionary = {}
-	var combat_ids: Dictionary = {}
-	var boxed: Array[int] = []
+	# All visible hulls in the rectangle are selectable, regardless of role
+	# or allegiance. Owned-unit dispatch still filters command recipients.
 	for craft in state.get("ships", []):
-		if ECONOMY.combat_group(state, int(craft["owner"])) != team or craft.get("kind", "") == "warp_gate":
+		if craft.get("kind", "") == "warp_gate":
 			continue
-		friendly_ids[int(craft["id"])] = true
 		var id: int = int(craft["id"])
-		if ECONOMY.military_hull(str(craft["kind"])):
-			combat_ids[id] = true
-		if poses.has(id) and rect.has_point(poses[id]["point"]):
-			boxed.append(id)
-	var combat_in_box: bool = boxed.any(func(id: int) -> bool: return combat_ids.has(id))
-	for id in boxed:
-		if (not combat_in_box or combat_ids.has(id)) and not selected_units.has(id):
+		if poses.has(id) and rect.has_point(poses[id]["point"]) and not selected_units.has(id):
 			selected_units.append(id)
-	# Shift-box must not retain a previously inspected enemy.
-	for id in selected_units.duplicate():
-		if not friendly_ids.has(id):
-			selected_units.erase(id)
 	selected_ship_id = selected_units[0] if not selected_units.is_empty() else -1
 	camera.following = false
 	selected = -1
@@ -4930,6 +4917,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 		_keep_near_light(stars, [pos, radius, tint, 0.95, center.distance_squared_to(pos)])
 		world_batches.draw_resource_glow(pos, minf(radius, 240.0), tint, 0.15)
 	var scale: float = _ship_scale()
+	var running: bool = int(state.get("time_speed", 1)) > 0
 	if scale >= 0.65:
 		for ship in state["ships"]:
 			var id: int = int(ship["id"])
@@ -4937,10 +4925,20 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 				continue
 			var pose: Dictionary = poses[id]
 			var pos: Vector2 = pose["point"]
-			if not bounds.grow(40.0 * scale).has_point(pos):
+			if not bounds.grow(90.0 * scale).has_point(pos):
 				continue
-			pos -= (pose["direction"] as Vector2) * 8.0 * scale
-			_keep_near_light(lamps, [pos, 35.0 * scale, Color("#75d6ee"), 0.48, center.distance_squared_to(pos)])
+			var direction: Vector2 = pose["direction"]
+			var thrust: float = ship_motion.thrust_for(id) if running else 0.0
+			var radius_px: float = 35.0 * scale
+			var strength: float = 0.48
+			if thrust > 0.035:
+				pos = world_batches.exhaust_center(str(ship["kind"]), pos, direction, scale, thrust)
+				radius_px = (35.0 + 45.0 * thrust) * scale
+				strength += 1.15 * thrust
+			else:
+				pos -= direction * 8.0 * scale
+			if bounds.grow(radius_px).has_point(pos):
+				_keep_near_light(lamps, [pos, radius_px, Color("#75d6ee"), strength, center.distance_squared_to(pos)])
 	world_batches.set_world_lights(stars + lamps)
 
 func _keep_near_light(lights: Array, entry: Array) -> void:
@@ -5284,6 +5282,8 @@ func _draw_map_content() -> void:
 			world_batches.queue_lamp_glow(lamp, 18.0 * scale, Color("#75d6ee"), 0.35 + thrust * 0.25)
 		if not cloaked and simulation_running and scale >= 0.65 and thrust > 0.035 and not ECONOMY.is_static_structure(ship):
 			world_batches.queue_exhaust(kind, point, direction, scale, thrust, ship_id, viewport_bounds)
+			var plume_center: Vector2 = world_batches.exhaust_center(kind, point, direction, scale, thrust)
+			world_batches.queue_lamp_glow(plume_center, (18.0 + 20.0 * thrust) * scale, Color("#75d6ee"), 0.15 + 0.60 * thrust)
 		if bool(ship.get("mining_active", false)) and ship.get("mining_mode", "") == "mining" and not ECONOMY.salvage_active(ship) and not bool(ship.get("holding", false)) and ship.has("mining_rock") and viewport_bounds.grow(maxf(32.0, 14.0 * scale)).has_point(point) and scale >= 0.65:
 			var rock: Vector2 = _screen_point(ship["mining_rock"])
 			for sign in [-1.0, 1.0]:
