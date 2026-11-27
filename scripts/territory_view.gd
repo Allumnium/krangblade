@@ -31,10 +31,7 @@ func build(parent: Control) -> void:
 	layer.z_index = 0
 	parent.add_child(layer)
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	layer.offset_left = 8
-	layer.offset_top = 0
-	layer.offset_right = -8
-	layer.offset_bottom = -8
+	# Match world-canvas origin and extent, not the HUD inset.
 	layer.clip_contents = true
 	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_mesh_root = Node2D.new()

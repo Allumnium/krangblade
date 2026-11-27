@@ -3,6 +3,9 @@ extends RefCounted
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
 const OBJECTIVES_WIDTH: float = 328.0
+# Preserve existing HUD placement independently of the full-bleed map.
+const HUD_INSET: float = 8.0
+const CONTENT_RIGHT_MARGIN: float = HUD_INSET + 12.0
 
 var session: Node
 var map_canvas: Control
@@ -107,12 +110,12 @@ func draw(state: Dictionary) -> void:
 	var progress: Dictionary = state.get("objectives", {}).get(local_player.call(), {})
 	var completed: Dictionary = progress.get("completed", {})
 	var font: Font = ThemeDB.fallback_font
-	var x: float = maxf(8.0, map_canvas.size.x - OBJECTIVES_WIDTH)
+	var x: float = maxf(HUD_INSET + 8.0, map_canvas.size.x - HUD_INSET - OBJECTIVES_WIDTH)
 	var y: float = header_height + 24.0
 	var clock: float = float(state.get("objective_clock", 0.0))
 	var heading_x: float = _heading_left(font, "OBJECTIVES")
 	objectives_overlay.draw_string(font, Vector2(heading_x, y), "OBJECTIVES", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8d9ef"))
-	objectives_overlay.draw_line(Vector2(heading_x, y + 5.0), Vector2(map_canvas.size.x - 12.0, y + 5.0), Color("#b8d9ef"), 1.0)
+	objectives_overlay.draw_line(Vector2(heading_x, y + 5.0), Vector2(map_canvas.size.x - CONTENT_RIGHT_MARGIN, y + 5.0), Color("#b8d9ef"), 1.0)
 	y += 26.0
 	if objectives_expanded:
 		for objective in ECONOMY.active_objectives(progress, clock):
@@ -125,15 +128,15 @@ func draw(state: Dictionary) -> void:
 			var pos := Vector2(x, y)
 			var counter: String = objective["counter"]
 			var counter_width: float = font.get_string_size(counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-			var label_width: float = maxf(40.0, map_canvas.size.x - 12.0 - counter_width - pos.x - 8.0)
+			var label_width: float = maxf(40.0, map_canvas.size.x - CONTENT_RIGHT_MARGIN - counter_width - pos.x - 8.0)
 			objectives_overlay.draw_string_outline(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, 4, Color("#101824"))
 			objectives_overlay.draw_string(font, pos, objective["label"], HORIZONTAL_ALIGNMENT_LEFT, label_width, 12, tint)
-			objectives_overlay.draw_string(font, Vector2(map_canvas.size.x - 12.0 - counter_width, y), counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
+			objectives_overlay.draw_string(font, Vector2(map_canvas.size.x - CONTENT_RIGHT_MARGIN - counter_width, y), counter, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tint)
 			var parts: PackedStringArray = counter.split("/")
 			var fraction: float = 1.0 if done else 0.0
 			if parts.size() == 2 and parts[1].strip_edges().is_valid_float():
 				fraction = clampf(parts[0].strip_edges().to_float() / maxf(1.0, parts[1].strip_edges().to_float()), 0.0, 1.0)
-			var bar_width: float = map_canvas.size.x - x - 12.0
+			var bar_width: float = map_canvas.size.x - x - CONTENT_RIGHT_MARGIN
 			objectives_overlay.draw_rect(Rect2(Vector2(x, y + 4.0), Vector2(bar_width, 3.0)), Color("#263b50"))
 			objectives_overlay.draw_rect(Rect2(Vector2(x, y + 4.0), Vector2(bar_width * fraction, 3.0)), Color("#73c6ad") if category == "economic" else Color("#dfab77"))
 			y += 29.0
@@ -153,7 +156,7 @@ func _toggle_conquest_scoreboard() -> void:
 	objectives_overlay.queue_redraw()
 
 func _draw_conquest_scoreboard(state: Dictionary, font: Font, x: float, y: float) -> void:
-	var edge: float = map_canvas.size.x - 12.0
+	var edge: float = map_canvas.size.x - CONTENT_RIGHT_MARGIN
 	var width: float = maxf(1.0, edge - x)
 	var header_tint := Color("#b8d9ef")
 	var outline := Color("#101824")
@@ -207,7 +210,7 @@ func _style_objective_header_button(button: Button, accent: Color) -> void:
 	button.add_theme_color_override("font_color", accent.lightened(0.25))
 
 func _heading_left(font: Font, heading: String) -> float:
-	return map_canvas.size.x - 12.0 - font.get_string_size(heading, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+	return map_canvas.size.x - CONTENT_RIGHT_MARGIN - font.get_string_size(heading, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
 
 func layout() -> void:
 	if conquest_buttons.is_empty():
@@ -233,7 +236,7 @@ func layout() -> void:
 		refresh.visible = button.visible
 		if not button.visible:
 			continue
-		var right: float = map_canvas.size.x - 12.0
+		var right: float = map_canvas.size.x - CONTENT_RIGHT_MARGIN
 		var header_y: float = roundf(y - font.get_ascent(13))
 		button.position = Vector2(right - upgrade_width, header_y)
 		button.size = Vector2(upgrade_width, height)
