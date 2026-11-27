@@ -649,7 +649,10 @@ static func _populate_field(field: Dictionary, rng: RandomNumberGenerator) -> vo
 	if not special:
 		for chunk in chunks:
 			var original: float = float(chunk["radius"])
-			chunk["radius"] = minf(original * ASTEROID_RADIUS_SCALE, ASTEROID_MAX_RADIUS)
+			# Vary the ceiling using an existing seeded angle, avoiding a pile
+			# of identically sized max-radius rocks without consuming RNG.
+			var cap: float = ASTEROID_MAX_RADIUS * lerpf(0.5, 1.0, float(chunk["rotation"]) / TAU)
+			chunk["radius"] = minf(original * ASTEROID_RADIUS_SCALE, cap)
 	# Preserve the generated total while normalizing individual ore amounts.
 	# Otherwise random rock sizes and concentration can exceed the cap.
 	if crystal_count > 0:

@@ -8,6 +8,7 @@ func _initialize() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
+	_test_asteroid_memory()
 	# Art variant assignment is independent of observation, resource and time.
 	var tiles: Dictionary = {}
 	for id in range(64):
@@ -82,3 +83,36 @@ func _run() -> void:
 	assert(fog._live.is_empty() and fog._ship_vision_cache.is_empty() and fog.texture == null)
 	print("PASS: exact static and orbital vision cache, detached masks, diplomacy, ownership, geometry, fog pixels and live observation")
 	quit()
+
+# Unexplored terrain is not published; live observation is remembered without
+# exposing unseen depletion. Revisiting removes a depleted rock.
+func _test_asteroid_memory() -> void:
+	var fog = FOG.new()
+	var size := Vector2(10000, 10000)
+	var point := Vector2(1000, 1000)
+	var distant := Vector2(9000, 9000)
+	var chunk: Dictionary = {"id": 1, "position": point, "remaining": 10.0, "initial": 10.0, "radius": 8.0, "resource": "Metals", "rotation": 0.0}
+	var unseen: Dictionary = chunk.duplicate()
+	unseen["id"] = 2
+	unseen["position"] = distant
+	var fields: Array = [{"position": point, "radius": 10000.0, "chunks": [chunk, unseen]}]
+	fog._initial_map = {"fields": fields}
+	fog._seed_rock_memory()
+	var state: Dictionary = {"map": {"fields": fields}}
+	fog._observe_rocks(state, size)
+	assert(fog.rock_view(0)["live"].is_empty() and fog.rock_view(0)["hidden"].is_empty())
+	assert(fog.rock_at(0, 2).is_empty())
+	fog._live[ECON.vision_cell(point)] = true
+	fog._observe_rocks(state, size)
+	assert(fog.rock_view(0)["live"].size() == 1 and fog.rock_view(0)["hidden"].is_empty())
+	fog._live.clear()
+	chunk["remaining"] = 4.0
+	fog._observe_rocks(state, size)
+	assert(fog.rock_view(0)["live"].is_empty() and fog.rock_view(0)["hidden"].size() == 1)
+	assert(float(fog.rock_at(0, 1)["remaining"]) == 10.0 and fog.rock_at(0, 2).is_empty())
+	fields[0]["chunks"].remove_at(0)
+	fog._observe_rocks(state, size)
+	assert(fog.rock_view(0)["hidden"].size() == 1)
+	fog._live[ECON.vision_cell(point)] = true
+	fog._observe_rocks(state, size)
+	assert(fog.rock_view(0)["hidden"].is_empty() and fog.rock_at(0, 1).is_empty())

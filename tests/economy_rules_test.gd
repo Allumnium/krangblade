@@ -3575,7 +3575,8 @@ func _initialize() -> void:
 				for chunk in field["chunks"]:
 					smallest_rock = minf(smallest_rock, float(chunk["radius"]))
 					largest_rock = maxf(largest_rock, float(chunk["radius"]))
-				assert(largest_rock > smallest_rock * 1.5)
+				assert(smallest_rock > 0.0 and largest_rock <= MAP.ASTEROID_MAX_RADIUS + ECON.EPS)
+				assert(largest_rock > smallest_rock)
 			var chunk_ids: Dictionary = {}
 			for chunk in field["chunks"]:
 				assert(not chunk_ids.has(chunk["id"]))
