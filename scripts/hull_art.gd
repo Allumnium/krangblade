@@ -1,6 +1,27 @@
 extends RefCounted
 ## Client-only canonical hull silhouettes and texture caches for portraits, shields and world art.
 const ECONOMY = preload("res://scripts/economy_rules.gd")
+const SCIENCE_SPRITE = preload("res://assets/sprites/science-vessel/pixellab-top-down-science-vessel-space--1795754091586.png")
+var science_textures: Dictionary = {}
+
+func science_texture(empire: Color) -> Texture2D:
+	var key: String = empire.to_html(false)
+	if not science_textures.has(key):
+		var image: Image = SCIENCE_SPRITE.get_image()
+		image.convert(Image.FORMAT_RGBA8)
+		for y in range(image.get_height()):
+			for x in range(image.get_width()):
+				var c: Color = image.get_pixel(x, y)
+				if c.a > 0.0:
+					var value: float = maxf(c.r, maxf(c.g, c.b))
+					var accent := Color(empire.r * value, empire.g * value, empire.b * value, c.a)
+					image.set_pixel(x, y, c.lerp(accent, 0.30))
+		science_textures[key] = ImageTexture.create_from_image(image)
+	return science_textures[key]
+
+func is_science_texture(texture: Texture2D) -> bool:
+	return science_textures.values().has(texture)
+
 const FREIGHTER_OUTLINE: Array[Vector2] = [Vector2(23, 4), Vector2(19, 8), Vector2(-20, 8), Vector2(-20, -8), Vector2(19, -8), Vector2(23, -4)]
 # Authored top-down silhouette and interior panel geometry in hull-local
 # coordinates (forward, lateral). Freighter has five paired cargo rows.
@@ -144,9 +165,13 @@ func portrait_scale(kind: String) -> float:
 	return float({"ship": 0.6, "cruiser": 0.52, "destroyer": 0.30, "railgun_ship": 0.42}.get(kind, 1.0))
 
 func texture_half_size(kind: String) -> float:
+	if kind == "science_ship":
+		return 18.0
 	return 50.0 if kind == "destroyer" else 40.0
 
 func production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
+	if kind == "science_ship":
+		return science_texture(tint)
 	var key: String = "%s:%s:%d" % [kind, tint.to_html(false), pixels]
 	if not production_icons.has(key):
 		var portrait_factor: float = portrait_scale(kind)
@@ -200,6 +225,8 @@ func selection_portrait_icon(kind: String) -> Texture2D:
 	return selection_portrait_icons[kind]
 
 func hull_texture(kind: String, empire: Color, detailed: bool) -> Texture2D:
+	if kind == "science_ship":
+		return science_texture(empire)
 	var key: String = "%s:%s:%s" % [kind, empire.to_html(false), str(detailed)]
 	if not hull_textures.has(key):
 		var vertices: Array = HULL_OUTLINES.get(kind, FREIGHTER_OUTLINE if kind == "ship" else [Vector2(9, 0), Vector2(-6, 5), Vector2(-3, 0), Vector2(-6, -5)])
