@@ -1,8 +1,7 @@
 extends RefCounted
-## Visual-only planetary production and upgrade delivery traffic.
+## Planetary production inspector helpers and visual-only upgrade deliveries.
 const ECONOMY = preload("res://scripts/economy_rules.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
-const STRUCTURE_VIEW = preload("res://scripts/structure_view.gd")
 const CELESTIAL_VIEW = preload("res://scripts/celestial_view.gd")
 const HULL_ART = preload("res://scripts/hull_art.gd")
 
@@ -37,31 +36,6 @@ func production_rate(system: Dictionary, resource: String) -> float:
 	if resource == "Organics":
 		output = maxf(0.0, output - ECONOMY.eco_organics(system))
 	return output
-
-func draw_production(state: Dictionary, index: int, center: Vector2, radius: float, detail: float) -> void:
-	var system: Dictionary = state["planets"][index]
-	if detail < 0.05 or not ECONOMY.has_station(system) or bool(system.get("planet_blockaded", false)):
-		return
-	var bodies: Array = celestial_view.system_visual(index, state)["bodies"]
-	if bodies.is_empty():
-		return
-	var elapsed: float = celestial_view.orbit_time(state)
-	for resource in ECONOMY.ACTIVE_PRODUCTION:
-		var output: float = production_rate(system, resource)
-		if output <= ECONOMY.EPS:
-			continue
-		var sources: Array = production_sources(bodies, resource)
-		var color: Color = HUD.COLORS[resource]
-		var bay: int = clampi(floori(float(system["stock"][resource]) / maxf(ECONOMY.EPS, ECONOMY.storage_capacity(system, resource)) * ECONOMY.STATION_STORAGE_BAYS), 0, ECONOMY.STATION_STORAGE_BAYS - 1)
-		var destination: Vector2 = STRUCTURE_VIEW.bay_point(screen_point.call(ECONOMY.station_position(state, index, elapsed)), station_radius.call(), elapsed, resource, bay)
-		for slot in sources:
-			var origin: Vector2 = center + celestial_view.body_position(bodies[slot], radius, elapsed)
-			var count: int = clampi(ceili(sqrt(output / float(sources.size()))), 1, 7)
-			for k in range(count):
-				var phase: float = fposmod(elapsed * 0.8 + float(k) / float(count) + float(slot) * 0.173, 1.0)
-				var point: Vector2 = origin.lerp(destination, phase)
-				var alpha: float = detail * smoothstep(0.0, 0.15, phase) * (1.0 - smoothstep(0.85, 1.0, phase))
-				_draw_planet_cargo_pod(point, origin.direction_to(destination), clampf(radius * 0.025, 2.0, 8.0) * 0.25, color, alpha)
 
 func _draw_planet_cargo_pod(point: Vector2, axis: Vector2, size_factor: float, color: Color, alpha: float) -> void:
 	var forward: Vector2 = axis * size_factor

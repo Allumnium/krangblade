@@ -6983,6 +6983,21 @@ func _test_map_layouts() -> void:
 				assert(galaxy["cluster_sizes"].is_empty())
 				assert(galaxy["points"].size() >= player_count * 4 + 2 and galaxy["points"].size() < player_count * MAP.PATTERN_SITES_PER_PLAYER)
 				var points: Array = galaxy["points"]
+				var map_size: Vector2 = galaxy["size"]
+				var max_belt_radius: float = MAP.ORBIT_WORLD_RADIUS
+				for index in range(points.size()):
+					var ring: Dictionary = galaxy["fields"][index]
+					assert(ring["orbit_center"] == points[index])
+					assert(ring["chunks"].size() >= MAP.ORBIT_ROCK_MIN and ring["chunks"].size() <= MAP.ORBIT_ROCK_MAX)
+					max_belt_radius = maxf(max_belt_radius, float(ring["orbit_radius"]))
+					var nearest: float = INF
+					for other in range(points.size()):
+						if other != index:
+							nearest = minf(nearest, (points[index] as Vector2).distance_to(points[other]))
+					assert(float(ring["orbit_radius"]) <= nearest * 0.396 + 0.1)
+				for point in points:
+					var clearance: float = minf(minf(point.x, point.y), minf(map_size.x - point.x, map_size.y - point.y))
+					assert(clearance + 0.1 >= MAP.STAR_EDGE_BELT_RADII * max_belt_radius)
 				var degrees: Array[int] = []
 				degrees.resize(points.size())
 				degrees.fill(0)
