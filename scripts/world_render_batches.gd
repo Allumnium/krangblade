@@ -3,6 +3,7 @@ extends RefCounted
 ## The match decides draw order and submits projected geometry; no gameplay state.
 const HUD = preload("res://scripts/ui_theme.gd")
 const HULL_ART = preload("res://scripts/hull_art.gd")
+const CELESTIAL_VIEW = preload("res://scripts/celestial_view.gd")
 const CLOAK_OPACITY: float = 0.30
 
 var map_canvas: Control
@@ -38,6 +39,7 @@ var world_lights: Array = []
 var shadow_discs: Array = []
 var shadow_uniforms := PackedVector4Array()
 var planet_lighting: ShaderMaterial
+var metal_planet_lighting: Array[ShaderMaterial] = []
 
 func _lighting_material(kind: String) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
@@ -66,6 +68,22 @@ func _freighter_map(atlas: Texture2D) -> Texture2D:
 func _fighter_map(atlas: Texture2D) -> Texture2D:
 	return ImageTexture.create_from_image(HULL_ART.sprite_cell(atlas, HULL_ART.FIGHTER_GRID, HULL_ART.FIGHTER_GRID))
 
+func _build_metal_planet_materials() -> void:
+	for variant in range(CELESTIAL_VIEW.METAL_PLANET_VARIANTS):
+		var material: ShaderMaterial = _lighting_material("")
+		material.set_shader_parameter("spherical_surface", true)
+		material.set_shader_parameter("authored_sprite", true)
+		material.set_shader_parameter("normal_map", CELESTIAL_VIEW.metal_planet_map(preload("res://assets/sprites/metal_planet/pixellab-top-down-lustrous-grey-rocky-p-1795763765639_n.png"), variant))
+		material.set_shader_parameter("occlusion_map", CELESTIAL_VIEW.metal_planet_map(preload("res://assets/sprites/metal_planet/pixellab-top-down-lustrous-grey-rocky-p-1795763765639_o.png"), variant))
+		material.set_shader_parameter("height_map", CELESTIAL_VIEW.metal_planet_map(preload("res://assets/sprites/metal_planet/pixellab-top-down-lustrous-grey-rocky-p-1795763765639_p.png"), variant))
+		material.set_shader_parameter("specular_map", CELESTIAL_VIEW.metal_planet_map(preload("res://assets/sprites/metal_planet/pixellab-top-down-lustrous-grey-rocky-p-1795763765639_s.png"), variant))
+		metal_planet_lighting.append(material)
+
+func planet_material(body: Dictionary) -> ShaderMaterial:
+	if body.get("resource", "") == "Metals":
+		return metal_planet_lighting[CELESTIAL_VIEW.metal_planet_variant(int(body["surface_seed"]))]
+	return planet_lighting
+
 func set_world_lights(lights: Array, blockers: Array = []) -> void:
 	world_lights = lights
 	shadow_discs = blockers
@@ -85,11 +103,13 @@ func set_world_lights(lights: Array, blockers: Array = []) -> void:
 		var tint: Color = entry[2]
 		positions[i] = Vector4(pos.x, pos.y, float(entry[1]) * radius_scale, float(entry[3]))
 		colors[i] = Vector4(tint.r, tint.g, tint.b, 1.0 if entry.size() > 5 and bool(entry[5]) else 0.0)
-	for material in [vector_lighting, science_lighting, fighter_lighting, freighter_lighting, planet_lighting]:
+	var materials: Array = [vector_lighting, science_lighting, fighter_lighting, freighter_lighting, planet_lighting]
+	materials.append_array(metal_planet_lighting)
+	for material in materials:
 		material.set_shader_parameter("light_points", positions)
 		material.set_shader_parameter("light_colors", colors)
 		material.set_shader_parameter("light_count", mini(16, lights.size()))
-		if material == planet_lighting:
+		if material == planet_lighting or metal_planet_lighting.has(material):
 			material.set_shader_parameter("shadow_discs", shadow_uniforms)
 			material.set_shader_parameter("shadow_count", mini(8, blockers.size()))
 
@@ -130,6 +150,7 @@ func build(canvas: Control) -> void:
 	freighter_lighting = _lighting_material("ship")
 	planet_lighting = _lighting_material("")
 	planet_lighting.set_shader_parameter("spherical_surface", true)
+	_build_metal_planet_materials()
 	_build_exhaust_batch()
 	lamp_glow_batch = _build_effect_batch(false)
 	lamp_glow_batch.texture = _resource_glow()

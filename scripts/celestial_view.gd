@@ -13,10 +13,16 @@ const STAR_SPARK_COUNT: int = 9
 
 const ROCK_ATLAS = preload("res://assets/sprites/asteroids/pixellab-rocky-realistic-asteroids-of-b-1793247758903_d.png")
 const ROCK_LIGHTING = preload("res://assets/shaders/asteroid_lighting.gdshader")
+# The 256px atlas has a 4x4 stride, but only its upper-left 3x3
+# cells contain planet designs. Diffuse and all material maps share it.
+const METAL_PLANET_VARIANTS: int = 9
+const METAL_PLANET_CELL: int = 64
+const METAL_PLANET_DIFFUSE = preload("res://assets/sprites/metal_planet/pixellab-top-down-lustrous-grey-rocky-p-1795763765639_d.png")
 const ROCK_GRID: int = 8
 const ROCK_SPRITE_MIN_RADIUS: float = 2.5
 var asteroid_sprite_nodes: Dictionary = {}
 var planet_sprite_nodes: Dictionary = {}
+var metal_planet_textures: Dictionary = {}
 var asteroid_material: ShaderMaterial
 var asteroid_shape_cache: Dictionary = {}
 
@@ -289,6 +295,8 @@ func draw_lit_body(canvas: Control, key: Vector2i, body: Dictionary, point: Vect
 		sprite = Sprite2D.new()
 		sprite.texture = body_texture(body)
 		sprite.material = material
+		if body.get("resource", "") == "Metals":
+			sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		sprite.show_behind_parent = true
 		canvas.add_child(sprite)
 		planet_sprite_nodes[key] = sprite
@@ -297,7 +305,28 @@ func draw_lit_body(canvas: Control, key: Vector2i, body: Dictionary, point: Vect
 	sprite.modulate = Color(1.0, 1.0, 1.0, opacity)
 	sprite.show()
 
+static func metal_planet_variant(surface_seed: int) -> int:
+	return posmod(surface_seed, METAL_PLANET_VARIANTS)
+
+static func metal_planet_cell_rect(variant: int) -> Rect2i:
+	var index: int = clampi(variant, 0, METAL_PLANET_VARIANTS - 1)
+	# Remove two pixels of transparent padding on every side; keep
+	# the exact same crop for the five maps and all nine variants.
+	var origin := Vector2i(index % 3, floori(float(index) / 3.0)) * METAL_PLANET_CELL
+	return Rect2i(origin + Vector2i(2, 2), Vector2i(60, 60))
+
+static func metal_planet_map(atlas: Texture2D, variant: int) -> Texture2D:
+	var source: Image = atlas.get_image()
+	if source.is_compressed():
+		source.decompress()
+	return ImageTexture.create_from_image(source.get_region(metal_planet_cell_rect(variant)))
+
 func body_texture(body: Dictionary) -> Texture2D:
+	if body.get("resource", "") == "Metals":
+		var variant: int = metal_planet_variant(int(body["surface_seed"]))
+		if not metal_planet_textures.has(variant):
+			metal_planet_textures[variant] = metal_planet_map(METAL_PLANET_DIFFUSE, variant)
+		return metal_planet_textures[variant]
 	if body.has("texture"):
 		return body["texture"]
 	var noise := FastNoiseLite.new()

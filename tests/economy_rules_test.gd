@@ -5196,8 +5196,18 @@ func _initialize() -> void:
 	assert(ECON.operational_shipyards(staffed_home) == 2)
 	staffed_home["population"] = 21000.0
 	assert(ECON.operational_shipyards(staffed_home) == 3)
+	var metal_art = preload("res://scripts/celestial_view.gd")
+	var cells: Dictionary = {}
+	for variant in range(metal_art.METAL_PLANET_VARIANTS):
+		var rect: Rect2i = metal_art.metal_planet_cell_rect(variant)
+		assert(rect.size == Vector2i(60, 60) and rect.end.x <= 192 and rect.end.y <= 192)
+		assert(not cells.has(rect))
+		cells[rect] = true
+		assert(metal_art.metal_planet_variant(variant) == variant)
+	assert(cells.size() == 9 and metal_art.metal_planet_variant(9) == 0)
 	print("PASS: neutral mining delivery and population-gated shipyards")
 	quit(0)
+
 
 func _test_neutral_direct_occupation() -> void:
 	var state: Dictionary = _funded_fixture(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)

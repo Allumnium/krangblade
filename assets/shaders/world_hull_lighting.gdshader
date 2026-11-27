@@ -91,7 +91,21 @@ void fragment() {
 	if (spherical_surface) {
 		vec2 q = (UV - vec2(0.5)) * 2.0;
 		vec3 n = normalize(vec3(q.x, -q.y, sqrt(max(0.0, 1.0 - dot(q, q)))));
-		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, base.rgb, 0.0, vec3(0.035, 0.035, 0.045), 1.0);
+		float ao = 1.0;
+		float specular = 0.0;
+		if (authored_sprite) {
+			// Keep the spherical day/night boundary while adding authored
+			// relief and reflections from the same cropped atlas cell.
+			vec3 relief = texture(normal_map, UV).rgb * 2.0 - 1.0;
+			vec2 pixel = TEXTURE_PIXEL_SIZE;
+			float dx = texture(height_map, UV + vec2(pixel.x, 0.0)).r - texture(height_map, UV - vec2(pixel.x, 0.0)).r;
+			float dy = texture(height_map, UV + vec2(0.0, pixel.y)).r - texture(height_map, UV - vec2(0.0, pixel.y)).r;
+			relief = normalize(relief + vec3(-dx * 0.10, dy * 0.10, 0.15));
+			n = normalize(mix(n, relief, 0.45));
+			ao = mix(0.72, 1.0, texture(occlusion_map, UV).r);
+			specular = texture(specular_map, UV).r * 0.50;
+		}
+		lit = surface_lighting(surface_position, surface_axis_x, surface_axis_y, n, base.rgb, specular, vec3(0.035, 0.035, 0.045), ao);
 	} else if (authored_sprite) {
 		vec3 n = texture(normal_map, UV).rgb * 2.0 - 1.0;
 		vec2 pixel = TEXTURE_PIXEL_SIZE;
