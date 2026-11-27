@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.121.14: Verify linear world-space hull/structure/celestial sizes across zoom and map dimensions, constant flag pixels, hit tolerance and cargo placement, subpixel rendering without polygon errors, overview FPS with full sprite batches, full parse and peer smoke.
+
 - [ ] v0.121.13: Verify active/queued move, patrol, formation, construction and rally ghosts/lines across unexplored and remembered fog; verify hidden enemy targets do not leak, selection rectangle and projection across pan/zoom, Godot parse and peer smoke.
 
 - [ ] v0.121.11–12: Validate enlarged stars/planets/station orbits and belt clearance across layouts, orbital speed ordering and mining balance, unknown fog glow masking, flags at all headings/zoom/cargo/cloak states, details without activity/ETA, full Godot parse, FPS and real peers.

@@ -7,6 +7,11 @@ const LIGHT_BATCHES = preload("res://scripts/world_render_batches.gd")
 const LIGHT_CELESTIAL = preload("res://scripts/celestial_view.gd")
 
 func _initialize() -> void:
+	var camera_script = preload("res://scripts/camera_view.gd")
+	var fit: float = 0.015
+	for zoom in [0.91, 1.0, 8.0, 64.0, 512.0]:
+		assert(is_equal_approx(camera_script.ship_art_scale(fit, float(zoom)) / (fit * float(zoom)), camera_script.SHIP_WORLD_SCALE))
+	assert(is_equal_approx(LIGHT_BATCHES.SHIP_FLAG_RADIUS, 2.0))
 	if "--lighting-test" in OS.get_cmdline_user_args():
 		call_deferred("_run_lighting_test")
 	else:
