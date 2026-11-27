@@ -2,6 +2,7 @@ extends RefCounted
 ## Per-match celestial geometry, surface art, detail fades and asteroid meshes.
 ## Shared geometry is used for picking and drawing; no simulation mutations.
 const ECONOMY = preload("res://scripts/economy_rules.gd")
+const ORBIT_MAP = preload("res://scripts/planet_map.gd")
 const HUD = preload("res://scripts/ui_theme.gd")
 const SYSTEM_WORLD_RADIUS: float = ECONOMY.SYSTEM_WORLD_RADIUS
 const PLANET_FADE_START: float = 40.0
@@ -151,7 +152,7 @@ static func terrain_footprint(chunks: Array, offset: Vector2, scale: float, tint
 		colors.append(Color("#b879a0") if rock["resource"] == "Crystals" else tint)
 	return {"segments": segments, "colors": colors}
 
-func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, shading: float = 1.0, rotation_time: float = 0.0, field_index: int = -1) -> void:
+func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scale: float, map_canvas: Control, screen_center: Vector2, world_center: Vector2, projection_fit: float, projection_zoom: float, shading: float = 1.0, rotation_time: float = 0.0, field_index: int = -1, orbit_transforms: Array[Transform2D] = []) -> void:
 	var chunks: Array = field["chunks"]
 	var rock_vertices := PackedVector3Array()
 	var rock_colors := PackedColorArray()
@@ -161,7 +162,7 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 	var pixel: Vector2 = Vector2(0.5, 0.5) / Vector2(ROCK_ATLAS.get_size())
 	for chunk in chunks:
 		var shape_key := Vector2i(field_index, int(chunk["id"]))
-		var rock_pos: Vector2 = screen_center + ((chunk["position"] as Vector2) - world_center) * projection_fit * projection_zoom
+		var rock_pos: Vector2 = screen_center + (ORBIT_MAP.asteroid_orbit_position(chunk, orbit_transforms) - world_center) * projection_fit * projection_zoom
 		if not viewport_bounds.grow(maxf(4.0, float(chunk["radius"]) * render_scale * 2.0)).has_point(rock_pos):
 			continue
 		var fraction: float = clampf(float(chunk["remaining"]) / maxf(ECONOMY.EPS, float(chunk["initial"])), 0.0, 1.0)

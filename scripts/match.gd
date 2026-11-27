@@ -1842,10 +1842,10 @@ func _draw_fog_content() -> void:
 	var bounds := Rect2(Vector2.ZERO, map_canvas.size)
 	fog_state.draw(fog_overlay, bounds, Rect2(offset, _map_size() * scale), _map_size())
 
-func _draw_rock_selection(canvas: Control, rock: Dictionary, scale: float) -> void:
+func _draw_rock_selection(canvas: Control, rock: Dictionary, scale: float, position: Vector2) -> void:
 	var fraction: float = float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock["initial"]))
 	var radius: float = maxf(4.0, float(rock["radius"]) * scale * sqrt(clampf(fraction, 0.0, 1.0)) + 3.0)
-	canvas.draw_arc(_screen_point(rock["position"]), radius, 0.0, TAU, 24, Color(HUD.ACCENT, 0.70), 0.8, true)
+	canvas.draw_arc(_screen_point(position), radius, 0.0, TAU, 24, Color(HUD.ACCENT, 0.70), 0.8, true)
 
 # Names are static generated map geography, not live tactical information.
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
@@ -3890,12 +3890,13 @@ func _asteroid_hit(point: Vector2, state: Dictionary, mining: bool) -> Vector2i:
 			continue
 		if distance > float(field.get("rock_extent", field["radius"])) * scale + 4.0 or (mining and not known):
 			continue
+		var transforms: Array[Transform2D] = MAP.asteroid_orbit_transforms(field, celestial_view.orbit_time(state))
 		for rock in fog_state.rock_view(index).get("live", []):
 			if mining and not bool(rock.get("surveyed", false)):
 				continue
 			var fraction: float = clampf(float(rock["remaining"]) / maxf(ECONOMY.EPS, float(rock["initial"])), 0.0, 1.0)
 			var hit_radius: float = maxf(2.5, float(rock["radius"]) * scale * sqrt(fraction))
-			var d: float = point.distance_to(_screen_point(rock["position"]))
+			var d: float = point.distance_to(_screen_point(MAP.asteroid_orbit_position(rock, transforms)))
 			if fraction > 0.0 and d < best and d <= hit_radius:
 				best = d
 				result = Vector2i(index, int(rock["id"]))
@@ -4789,7 +4790,10 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 	if selected_field >= 0 and selected_field < fields.size():
 		var rock: Dictionary = fog_state.rock_at(selected_field, selected_rock)
 		if selected_rock >= 0 and not rock.is_empty():
-			_center_world(rock["position"])
+			var position: Vector2 = rock["position"]
+			if _fog_visible(position):
+				position = MAP.asteroid_orbit_position(rock, MAP.asteroid_orbit_transforms(fields[selected_field], celestial_view.orbit_time(state)))
+			_center_world(position)
 		elif selected_rock < 0 and ECONOMY.discovered(state, _me(), "fields", selected_field):
 			_center_world(fields[selected_field]["position"])
 		return
@@ -5048,11 +5052,12 @@ func _draw_map_content() -> void:
 			continue
 		if not bool(field.get("antimatter", false)):
 			var live_rocks: Array = fog_state.rock_view(field_index).get("live", [])
-			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, world_batches.light_level(center), visual_clock, field_index)
+			var transforms: Array[Transform2D] = MAP.asteroid_orbit_transforms(field, celestial_view.orbit_time(state))
+			celestial_view.draw_asteroid_chunks({"chunks": live_rocks}, viewport_bounds, render_scale, map_canvas, _draw_projection_size * 0.5, _draw_world_center, _draw_fit, _draw_zoom, world_batches.light_level(center), visual_clock, field_index, transforms)
 			if selected_field == field_index and selected_rock >= 0:
 				var rock: Dictionary = fog_state.rock_at(field_index, selected_rock)
 				if not rock.is_empty() and _fog_visible(rock["position"]):
-					_draw_rock_selection(map_canvas, rock, render_scale)
+					_draw_rock_selection(map_canvas, rock, render_scale, MAP.asteroid_orbit_position(rock, transforms))
 			continue
 		if not ECONOMY.discovered(state, _me(), "fields", field_index):
 			if bool(field.get("antimatter", false)):

@@ -7650,6 +7650,22 @@ func _test_orbital_asteroids() -> void:
 	assert(rock["position"] != first)
 	assert(is_equal_approx((rock["position"] as Vector2).distance_to(ring["orbit_center"]), radius))
 	var current: Vector2 = rock["position"]
+	var groups: Dictionary = {}
+	for chunk in ring["chunks"]:
+		var group: int = MAP.asteroid_orbit_group(chunk)
+		groups[group] = true
+		var start: Vector2 = MAP.asteroid_orbit_position(chunk, MAP.asteroid_orbit_transforms(ring, 80.0))
+		var middle: Vector2 = MAP.asteroid_orbit_position(chunk, MAP.asteroid_orbit_transforms(ring, 80.5))
+		var end: Vector2 = MAP.asteroid_orbit_position(chunk, MAP.asteroid_orbit_transforms(ring, 81.0))
+		assert(start.is_equal_approx(chunk["position"]))
+		assert(middle.distance_to(start) > 0.0 and middle.distance_to(end) > 0.0)
+		assert(is_equal_approx(middle.distance_to(ring["orbit_center"]), (chunk["orbit_offset"] as Vector2).length()))
+		var expected: float = absf(float(ring["orbit_rate"])) * (0.9 + 0.1 * float(group))
+		var turn: float = absf((start - (ring["orbit_center"] as Vector2)).angle_to(end - (ring["orbit_center"] as Vector2)))
+		assert(absf(turn - expected) < 0.00002)
+	assert(groups.size() == 3)
+	assert(MAP.asteroid_orbit_position({"position": Vector2(3, 5)}, MAP.asteroid_orbit_transforms({}, 80.5)) == Vector2(3, 5))
+	assert(rock["position"] == current)
 	MAP.update_asteroid_orbits(map_data, 80.5)
 	assert(rock["position"] == current)
 	MAP.update_asteroid_orbits(map_data, 0.0)
