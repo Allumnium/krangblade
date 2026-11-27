@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.121.3: Re-run Godot parse and verify colony transformation and completed station shading after fixing illumination scope regression.
+
 - [ ] v0.121.2: Verify star-facing hull/rock highlights at multiple rotations, dark-side contrast, metallic and procedural planet terminators, station structural shading, impact lights, shader compilation, hardware FPS and peer smoke. No runtime validation yet.
 
 - [ ] v0.121.1: Validate all nine metal planet atlas cells and matched material maps in Godot, confirm stellar terminator/eclipses, fog memory and selection, commit genuine Godot import metadata when available; verify runtime/peer/FPS. No simulation changes.
