@@ -1331,7 +1331,7 @@ func _test_nearest_colony_and_queued_hold() -> void:
 	for direction in [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]:
 		var approach: Vector2 = ECON.colony_approach_position(state, 2, star + direction * 2000.0)
 		assert((approach - star).normalized().is_equal_approx(direction))
-		assert(approach.distance_to(star) <= maxf(ECON.STATION_ORBIT_RADIUS, ECON.system_world_radius(state, 2) * 0.13 + 100.0) + ECON.EPS)
+		assert(approach.distance_to(star) <= ECON.STATION_ORBIT_RADIUS + ECON.EPS)
 	assert(not near.get("retreating", false) and not near.has("repair_site"))
 	assert(ECON.nearest_idle_colony(state, 1, 2) == -1)
 	assert(ECON.nearest_idle_colony(state, 1, 1) == 100)

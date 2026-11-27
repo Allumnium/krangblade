@@ -5295,7 +5295,7 @@ func _draw_map_content() -> void:
 		# visible and owner-colored rather than drawing degenerate geometry.
 		var metrics: Dictionary = ship_metrics_cache.get(kind, {})
 		if metrics.is_empty():
-			metrics = {"radius": hull_art.ui_radius(kind), "max_hp": ECONOMY.ship_max_hp(kind), "half_size": hull_art.texture_half_size(kind)}
+			metrics = {"radius": hull_art.ui_radius(kind), "max_hp": ECONOMY.ship_max_hp(kind), "half_size": hull_art.texture_half_size(kind), "flag_offset": hull_art.ship_flag_offset(kind)}
 			ship_metrics_cache[kind] = metrics
 		var radius: float = float(metrics["radius"])
 		var maximum_hp: float = ECONOMY.hull_max_hp(ship) if ECONOMY.is_static_structure(ship) else float(metrics["max_hp"])
@@ -5332,7 +5332,7 @@ func _draw_map_content() -> void:
 		var art_angle: float = direction.angle() + HULL_ART.sprite_heading_offset(kind)
 		world_batches.queue_overview_hull(texture, point, art_angle, half_size * scale, cloaked)
 		if logistics_view.ship_flags_enabled and owner > 0 and not bool(ship.get("rogue", false)) and not ECONOMY.is_static_structure(ship) and kind != "probe":
-			var flag_at: Vector2 = point + direction * hull_art.ship_flag_offset(kind)
+			var flag_at: Vector2 = point + direction * float(metrics["flag_offset"])
 			world_batches.queue_ship_flag(flag_at, clampf(1.6 * scale, 1.1, 4.0), Color(empire.lightened(0.18), 0.45 if cloaked else 1.0))
 		if kind == "ship" and scale >= 0.42:
 			# Foreground bay fills on the authored hull. Preserve fractional cargo

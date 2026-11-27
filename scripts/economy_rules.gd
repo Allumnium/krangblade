@@ -2317,7 +2317,7 @@ static func colony_station_position(state: Dictionary, index: int, elapsed: floa
 	return _colony_orbit_point(state, index, center, axis)
 
 static func _colony_orbit_point(state: Dictionary, index: int, center: Vector2, axis: Vector2) -> Vector2:
-	var radius: float = minf(maxf(STATION_ORBIT_RADIUS, system_world_radius(state, index) * 0.13 + 100.0), sector_limit(military_graph(state), index, axis) * 0.5)
+	var radius: float = minf(STATION_ORBIT_RADIUS, sector_limit(military_graph(state), index, axis) * 0.5)
 	return center + axis * radius
 
 # The nearest radial point on the normal orbit. Re-evaluate from the

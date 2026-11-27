@@ -2,7 +2,7 @@
 
 ## Approved command and observation changes (2026-11-27)
 
-- [ ] v0.121.11: Validate enlarged stars/planets/station orbits and belt clearance across layouts, orbital speed ordering and mining balance, unknown fog glow masking, flags at all headings/zoom/cargo/cloak states, details without activity/ETA, full Godot parse, FPS and real peers.
+- [ ] v0.121.11–12: Validate enlarged stars/planets/station orbits and belt clearance across layouts, orbital speed ordering and mining balance, unknown fog glow masking, flags at all headings/zoom/cargo/cloak states, details without activity/ETA, full Godot parse, FPS and real peers.
 
 - [ ] v0.121.10: Run real asteroid atlas and all-hull direction captures with authored-map completeness guard; inspect results. Separate immediate-mode structure fixtures still needed when introducing their authored art.
 
