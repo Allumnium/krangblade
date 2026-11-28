@@ -9,6 +9,7 @@ func _initialize() -> void:
 
 func _run() -> void:
 	_test_asteroid_memory()
+	_test_static_structure_vision()
 	# Art variant assignment is independent of observation, resource and time.
 	var tiles: Dictionary = {}
 	for id in range(64):
@@ -83,6 +84,35 @@ func _run() -> void:
 	assert(fog._live.is_empty() and fog._ship_vision_cache.is_empty() and fog.texture == null)
 	print("PASS: exact static and orbital vision cache, detached masks, diplomacy, ownership, geometry, fog pixels and live observation")
 	quit()
+
+
+# Exact coverage parity when moving hulls overlap static wall sensors,
+# including source ownership, position and removal changes.
+func _test_static_structure_vision() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(827, 2, "Radial"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	ECON.initialize_diplomacy(state)
+	var center: Vector2 = state["map"]["points"][0]
+	var wall: Dictionary = {"id": 100, "kind": "wall_segment", "owner": 1, "position": center + Vector2(8000, 0)}
+	var mobile: Dictionary = {"id": 101, "kind": "fighter", "owner": 1, "position": wall["position"]}
+	state["ships"] = [wall, mobile]
+	var cache: Dictionary = {}
+	var expected: Dictionary = ECON.team_vision(state, 1)
+	assert(ECON.team_vision(state, 1, cache) == expected)
+	var fixed: Dictionary = cache["fixed_cells"]
+	mobile["position"] += Vector2(400, 160)
+	assert(ECON.team_vision(state, 1, cache) == ECON.team_vision(state, 1))
+	assert(is_same(fixed, cache["fixed_cells"]), "Mobile movement rebuilt wall vision")
+	wall["position"] += Vector2(400, 0)
+	assert(ECON.team_vision(state, 1, cache) == ECON.team_vision(state, 1))
+	assert(not is_same(fixed, cache["fixed_cells"]), "Wall relocation failed to invalidate vision")
+	wall["owner"] = 2
+	assert(ECON.team_vision(state, 1, cache) == ECON.team_vision(state, 1))
+	assert(cache["static_sources"].is_empty())
+	wall["owner"] = 1
+	assert(ECON.team_vision(state, 1, cache) == ECON.team_vision(state, 1))
+	state["ships"].remove_at(0)
+	assert(ECON.team_vision(state, 1, cache) == ECON.team_vision(state, 1))
+	assert(cache["static_sources"].is_empty())
 
 # Unexplored terrain is not published; live observation is remembered without
 # exposing unseen depletion. Revisiting removes a depleted rock.
