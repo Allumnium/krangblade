@@ -186,6 +186,9 @@ func _phase_changed() -> void:
 			if not ECON.empires_allied(state, imperial, int(player)) or not ECON.open_borders(state, imperial, int(player)):
 				_fail("Imperial alliance or open borders missing.")
 				return
+		if state["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) == imperial and craft["kind"] == "wall_segment").size() != ECON.IMPERIAL_WALL_SEGMENTS:
+			_fail("Imperial perimeter missing.")
+			return
 		if mode == "normal" and not _check_map_codec(state):
 			_fail("Static-map codec failed exact inventory round trip.")
 			return
