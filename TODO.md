@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.122.7: Opening-game profiler investigation: asteroid orbit/ore changes caused full immutable-map duplication/freezing on the authority worker. Reuse equal detached top-level map values and unchanged fields, recursively freeze changed fields only, avoid scalar recursive calls; exact value comparison, previous snapshot isolation and wire schema preserved. Extend worker map lifecycle regression for geometry/field identity, ore/position mutation and removal. User reports better FPS after v0.122.6 territory reduction. Fog union/mask, wall sensor cost and render/pose costs remain profiling targets; no hardware FPS or runtime/peer claim.
+
 ## Imperial core and frontier redesign (2026-11-27; confirmed direction, implementation pending)
 
 - Confirmed: radial-only maps, increased stellar spacing, established AI Empire at exact map center with a fully walled system and fleets; symmetric equally spaced ordinary-player starts on one ring; neutral expansion stars concentrated inward toward the Empire; outer space primarily empty with asteroid fields, pirate bases and reserved room for future content.
