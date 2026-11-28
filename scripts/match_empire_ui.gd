@@ -103,6 +103,8 @@ func _diplomacy_action(action: String, other: int, enabled: bool = true) -> void
 	session.call("request_diplomacy", action, other, enabled)
 
 func empire_name(id: int) -> String:
+	if ECONOMY.is_imperial_owner(session.get("economy"), id):
+		return "The Empire"
 	var roster: Dictionary = session.get("players")
 	return str(roster.get(id, {}).get("name", "Empire %d" % id))
 

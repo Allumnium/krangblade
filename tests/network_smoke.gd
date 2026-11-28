@@ -178,6 +178,14 @@ func _phase_changed() -> void:
 		if int(state["map"]["seed"]) != preview_seed or state["map"] != MAP.generate(preview_seed, expected_players, _expected_layout()):
 			_fail("Generated map does not match authoritative seed and layout.")
 			return
+		var imperial: int = int(state.get("imperial_owner", 0))
+		if imperial <= 0 or int(state["planets"][state["map"]["imperial_system"]]["owner"]) != imperial or session.get("players").has(imperial):
+			_fail("Imperial core identity or ownership did not initialize.")
+			return
+		for player in session.get("players"):
+			if not ECON.empires_allied(state, imperial, int(player)) or not ECON.open_borders(state, imperial, int(player)):
+				_fail("Imperial alliance or open borders missing.")
+				return
 		if mode == "normal" and not _check_map_codec(state):
 			_fail("Static-map codec failed exact inventory round trip.")
 			return

@@ -94,6 +94,9 @@ const ROGUE_GRACE_YEARS: float = 60.0
 const ROGUE_CHECK_YEARS: float = 10.0
 const ROGUE_CHANCE: float = 0.005
 const PIRATE_OWNER: int = -1
+const IMPERIAL_OWNER_START: int = 2147482999
+const IMPERIAL_START_GC: float = 10000.0
+const IMPERIAL_COLOR := Color("#d8ad64")
 const PIRATE_COMBAT_GROUP: int = 2147483000
 const PIRATE_DECISION_YEARS: float = 3.0
 const PIRATE_GROUP_RANGE: float = 900.0
@@ -319,6 +322,66 @@ static func create(map_data: Dictionary, players: Dictionary, ordered: Array[int
 	_seed_starting_exploration(state)
 	update_exploration(state)
 	return state
+
+# Match bootstrap only: keep ordinary player slots and legacy rule fixtures intact.
+# The Imperial faction participates in the shared economy and combat but not
+# the competing-player AI, objective race or victory census.
+static func initialize_imperial_core(state: Dictionary) -> bool:
+	if state.has("imperial_owner"):
+		return false
+	var index: int = int(state["map"].get("imperial_system", -1))
+	if index < 0 or index >= state["planets"].size():
+		return false
+	var system: Dictionary = state["planets"][index]
+	if int(system["owner"]) != 0:
+		return false
+	var owner: int = IMPERIAL_OWNER_START
+	while state["teams"].has(owner):
+		owner -= 1
+	state["imperial_owner"] = owner
+	state["teams"][owner] = owner
+	state["galactic_credits"][owner] = IMPERIAL_START_GC
+	system["owner"] = owner
+	system["planetless"] = false
+	system["station"] = {"hp": REINFORCED_STATION_HP, "reinforced_plating": true, "laser_matrix": true, "weapons": [_new_pds(), _new_pds(), _new_pds(), _new_pds()]}
+	system["yards"] = []
+	for slot in range(1, MAX_SHIPYARDS + 1):
+		system["yards"].append({"level": MAX_SHIPYARD_LEVEL, "job": -1, "hp": YARD_HP * MAX_SHIPYARD_LEVEL, "station_slot": slot})
+	system["warehouse_level"] = 3
+	system["habitation_level"] = 3
+	for resource in RESOURCES:
+		system["buildings"][resource] = 6 if resource == "Organics" else 3
+		system["stock"][resource] = storage_capacity(system, resource) * 0.75
+	for resource in EXTRACTED:
+		system["abundance"][resource] = maxf(1.0, float(system["abundance"][resource]))
+	system["bonuses"]["Organics"] = maxf(1.5, float(system["bonuses"]["Organics"]))
+	system["eco_population"] = eco_capacity(system)
+	system["population"] = sustainable_population_capacity(system) * 0.80
+	for slot in range(int(system.get("planet_count", 0))):
+		system["pds"][slot] = _new_pds()
+	_spawn_imperial_fleet(state, index, system)
+	return true
+
+static func is_imperial_owner(state: Dictionary, owner: int) -> bool:
+	return owner > 0 and owner == int(state.get("imperial_owner", 0))
+
+static func _spawn_imperial_fleet(state: Dictionary, index: int, system: Dictionary) -> void:
+	var kinds: Array = []
+	for entry in [["fighter", 12], ["cruiser", 4], ["destroyer", 2], ["railgun_ship", 2], ["miner", 3], ["ship", 2], ["science_ship", 1], ["construction_ship", 1]]:
+		for count in range(int(entry[1])):
+			kinds.append(entry[0])
+	for slot in range(kinds.size()):
+		var kind: String = kinds[slot]
+		var id: int = int(state["next_id"])
+		state["next_id"] = id + 1
+		var crew: float = float(CREW_COSTS[kind])
+		system["population"] = maxf(0.0, float(system["population"]) - crew)
+		var offset: Vector2 = Vector2.from_angle(TAU * float(slot) / float(kinds.size())) * (SHIP_CLEARANCE * 7.0)
+		_launch_finished_hull(state, index, system, {"id": id, "kind": kind, "population_allocated": crew, "spawn_offset": offset, "starting_fleet": true})
+		var hull: Dictionary = state["ships"].back()
+		if military_hull(kind):
+			hull["holding"] = true
+			hull["wander_auto"] = false
 
 static func _generate_system(rng: RandomNumberGenerator, i: int, ordered: Array[int]) -> Dictionary:
 	var stock: Dictionary = empty_stock()
@@ -5275,6 +5338,10 @@ static func initialize_diplomacy(state: Dictionary) -> bool:
 		return false
 	state["diplomacy"] = {}
 	state["diplomacy_revision"] = 1
+	var imperial: int = int(state.get("imperial_owner", 0))
+	if imperial > 0:
+		for player in state.get("starting_empires", []):
+			state["diplomacy"][_diplomacy_pair(imperial, int(player))] = {"relation": DIPLO_ALLIED, "open_borders": {imperial: true, int(player): true}}
 	# Legacy team exploration cannot be attributed to individual empires.
 	# Rebuild from their own stations rather than leaking former team data.
 	state["explored"] = {}
@@ -11964,7 +12031,7 @@ static func _reroute_after_capture(state: Dictionary, index: int) -> void:
 # Server peer membership is checked in GameSession before dispatch.
 # Recheck gameplay eligibility against the current authoritative state.
 static func _authority_active_player(state: Dictionary, id: int) -> bool:
-	return state.get("teams", {}).has(id) and state.get("match_result", {}).is_empty() and not state.get("eliminated", []).has(id)
+	return state.get("teams", {}).has(id) and not is_imperial_owner(state, id) and state.get("match_result", {}).is_empty() and not state.get("eliminated", []).has(id)
 
 # The same command implementations serve synchronous and worker modes.
 static func authority_colonize_for(state: Dictionary, id: int, ship_id: int, target: int) -> bool:
@@ -12167,7 +12234,7 @@ static func _distribute_defeat_credits(state: Dictionary, player: int, viable: D
 	var allies: Array[int] = []
 	for candidate in state["teams"]:
 		var id: int = int(candidate)
-		if id != player and viable.has(id) and not eliminated.has(id) and empires_allied(state, player, id):
+		if id != player and not is_imperial_owner(state, id) and viable.has(id) and not eliminated.has(id) and empires_allied(state, player, id):
 			allies.append(id)
 	if allies.is_empty():
 		return
@@ -12190,7 +12257,8 @@ static func update_match_outcome(state: Dictionary) -> bool:
 		return false
 	var starting_teams: Dictionary = {}
 	for player in state["teams"]:
-		starting_teams[_combat_group(state, int(player))] = true
+		if not is_imperial_owner(state, int(player)):
+			starting_teams[_combat_group(state, int(player))] = true
 	var viable: Dictionary = {}
 	for planet in state["planets"]:
 		var owner: int = int(planet["owner"])
@@ -12206,7 +12274,7 @@ static func update_match_outcome(state: Dictionary) -> bool:
 	var eliminated: Array = state.get("eliminated", [])
 	var changed: bool = false
 	for player in state["teams"]:
-		if viable.has(player) or eliminated.has(player):
+		if is_imperial_owner(state, int(player)) or viable.has(player) or eliminated.has(player):
 			continue
 		eliminated.append(player)
 		_distribute_defeat_credits(state, int(player), viable, eliminated)
@@ -12227,7 +12295,7 @@ static func update_match_outcome(state: Dictionary) -> bool:
 		return changed
 	var remaining_teams: Dictionary = {}
 	for player in viable:
-		if not eliminated.has(player) and state["teams"].has(player):
+		if not is_imperial_owner(state, int(player)) and not eliminated.has(player) and state["teams"].has(player):
 			remaining_teams[_combat_group(state, int(player))] = true
 	if remaining_teams.size() <= 1:
 		var winner: int = int(remaining_teams.keys()[0]) if remaining_teams.size() == 1 else 0
@@ -13503,7 +13571,7 @@ static func _update_objectives(state: Dictionary) -> void:
 	var events: Array = state.get("objective_events", [])
 	var now: float = float(state.get("objective_clock", state["elapsed"]))
 	for player in state["teams"]:
-		if state.get("eliminated", []).has(player):
+		if is_imperial_owner(state, int(player)) or state.get("eliminated", []).has(player):
 			continue
 		var progress: Dictionary = objective_progress(state, int(player))
 		progress["population"] = float(populations.get(player, 0.0))
