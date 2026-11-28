@@ -47,7 +47,7 @@ const MAP = preload("res://scripts/planet_map.gd")
 const RULES = preload("res://scripts/lobby_rules.gd")
 
 func _expected_layout() -> String:
-	return ("Grid" if expected_players == 2 else "Hex Grid") if mode == "normal" else MAP.DEFAULT_LAYOUT
+	return MAP.DEFAULT_LAYOUT
 
 func _initialize() -> void:
 	call_deferred("_begin")

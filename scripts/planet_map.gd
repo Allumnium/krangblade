@@ -8,7 +8,10 @@ const SYSTEM_SPACING_MULTIPLIER: float = 2.0
 const MAX_CONNECTIONS: int = 3
 const EXTRA_LINK_CHANCE: float = 0.35
 const ANTIMATTER := "Raw antimatter"
-const LAYOUTS: Array[String] = ["Radial", "Grid", "Hex Grid", "Scramble"]
+const LAYOUTS: Array[String] = ["Radial"]
+const RADIAL_STAR_SPACING: float = 30000.0
+const RADIAL_INNER_MIN: float = 44000.0
+const FRONTIER_RADIUS_FACTOR: float = 1.5
 const DEFAULT_LAYOUT: String = "Radial"
 # Clearance from a starting system to the edge of a special field, before
 # the map's common travel-distance normalization.
@@ -39,7 +42,7 @@ static func cluster_count_for(_player_count: int, _layout: String) -> int:
 static func planetless_systems(seed_value: int, count: int, edges: Array, homes: int) -> Array[int]:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value + 176911
-	var protected: Dictionary = {}
+	var protected: Dictionary = {homes: true}
 	for home in range(homes):
 		protected[home] = true
 		for edge in edges:
@@ -60,332 +63,98 @@ static func planetless_systems(seed_value: int, count: int, edges: Array, homes:
 	candidates.sort()
 	return candidates
 
-static func generate(seed_value: int, player_count: int = 3, layout: String = DEFAULT_LAYOUT) -> Dictionary:
-	if not valid_layout(layout):
-		layout = DEFAULT_LAYOUT
+static func generate(seed_value: int, player_count: int = 3, _layout: String = DEFAULT_LAYOUT) -> Dictionary:
 	player_count = clampi(player_count, 1, 8)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
-	var radial: bool = layout == "Radial"
-	var grid: bool = layout == "Grid"
-	var hex: bool = layout == "Hex Grid"
-	# Each occupied stellar site contains exactly one independent star.
-	# Legacy empty cluster metadata is retained only for snapshot compatibility.
-	var count: int = player_count * PATTERN_SITES_PER_PLAYER
-	var spacing: float = 950.0
-	var raw: Array[Vector2] = []
-	var bounds: Vector2
 	var rotation: float = rng.randf_range(0.0, TAU)
-	if radial:
-		var per_ring: int = count / 2
-		var inner: float = maxf(spacing, spacing / (2.0 * sin(PI / float(per_ring))))
-		var outer: float = inner + spacing
-		bounds = Vector2.ONE * (outer + spacing) * 2.0
-		for ring in range(2):
-			for k in range(per_ring):
-				var angle: float = rotation + TAU * float(k) / float(per_ring)
-				raw.append(bounds * 0.5 + Vector2.from_angle(angle) * (outer if ring == 0 else inner))
-	else:
-		var columns: int = ceili(sqrt(float(count)))
-		var rows: int = ceili(float(count) / float(columns))
-		bounds = Vector2(columns + 1.0, rows + 1.0) * spacing
-		for row in range(rows):
-			var row_count: int = mini(columns, count - raw.size())
-			for k in range(row_count):
-				var col: int = k if row % 2 == 0 else columns - 1 - k
-				var pos := Vector2(float(col) + 0.75, float(row) + 0.75)
-				if hex:
-					pos.x += float(row % 2) * 0.5
-					pos.y = 0.75 + float(row) * sqrt(3.0) * 0.5
-				if not grid and not hex:
-					pos += Vector2(rng.randf_range(-0.15, 0.15), rng.randf_range(-0.15, 0.15))
-				raw.append(pos * spacing)
-	# Assign spread-out homes first; every home retains a neutral neighbor.
-	var home_raw: Array[int] = []
-	if radial:
-		for player in range(player_count):
-			home_raw.append(player * (PATTERN_SITES_PER_PLAYER / 2))
-	else:
-		var candidates: Array[int] = []
-		for k in range(0, count, 2):
-			candidates.append(k)
-		home_raw.append(candidates.pop_at(rng.randi_range(0, candidates.size() - 1)))
-		while home_raw.size() < player_count:
-			var best: int = 0
-			var best_distance: float = -1.0
-			for k in range(candidates.size()):
-				var nearest: float = INF
-				for home in home_raw:
-					nearest = minf(nearest, raw[candidates[k]].distance_squared_to(raw[home]))
-				if nearest > best_distance:
-					best_distance = nearest
-					best = k
-			home_raw.append(candidates.pop_at(best))
-	# Pattern sites are candidates, not automatically stars or colonies.
-	# Keep home indices stable, then roll each other site independently.
-	var site_rng := RandomNumberGenerator.new()
-	site_rng.seed = seed_value + 88301
-	var order: Array[int] = home_raw.duplicate()
-	var asteroid_sites: Array[int] = []
-	var vacant: Array[int] = []
-	for k in range(count):
-		if home_raw.has(k):
-			continue
-		var roll: float = site_rng.randf()
-		if roll < STAR_SITE_CHANCE:
-			order.append(k)
-		elif roll < STAR_SITE_CHANCE + ASTEROID_SITE_CHANCE:
-			asteroid_sites.append(k)
-		else:
-			vacant.append(k)
-	# Rare low-star rolls must still allow an expansion neighbor per home
-	# and enough planetless colonies for the existing orbital economy.
-	var minimum_stars: int = player_count * 4 + 2
-	while order.size() < minimum_stars:
-		var pool: Array[int] = vacant if not vacant.is_empty() else asteroid_sites
-		order.append(pool.pop_at(site_rng.randi_range(0, pool.size() - 1)))
-	var neutral_raw: Array[int] = []
-	neutral_raw.assign(order.slice(player_count))
-	neutral_raw.sort()
-	order.assign(home_raw)
-	order.append_array(neutral_raw)
+	var ring_count: int = player_count * 2
+	var inner_radius: float = maxf(RADIAL_INNER_MIN, RADIAL_STAR_SPACING / (2.0 * sin(PI / float(ring_count))))
+	var outer_radius: float = inner_radius + RADIAL_STAR_SPACING
+	var home_radius: float = outer_radius + RADIAL_STAR_SPACING
+	var extent: float = maxf(home_radius * FRONTIER_RADIUS_FACTOR, home_radius + ORBIT_WORLD_RADIUS * 1.10 * STAR_EDGE_BELT_RADII + 1.0)
+	var center := Vector2.ONE * extent
+	var bounds: Vector2 = center * 2.0
 	var points: Array[Vector2] = []
+	for player in range(player_count):
+		points.append(center + Vector2.from_angle(rotation + TAU * float(player) / float(player_count)) * home_radius)
+	# Preserve home indices; reserve the next index for the Imperial core.
+	var imperial_system: int = points.size()
+	points.append(center)
+	var inner_start: int = points.size()
+	for k in range(ring_count):
+		points.append(center + Vector2.from_angle(rotation + TAU * (float(k) + 0.5) / float(ring_count)) * inner_radius)
+	var outer_start: int = points.size()
+	for k in range(ring_count):
+		points.append(center + Vector2.from_angle(rotation + TAU * (float(k) + 0.15) / float(ring_count)) * outer_radius)
 	var clusters: Array[int] = []
-	var sizes: Array[int] = []
-	var remap: Dictionary = {}
-	for k in order:
-		remap[k] = points.size()
-		points.append(raw[k])
-		clusters.append(-1)
-	var edges: Array = []
+	clusters.resize(points.size())
+	clusters.fill(-1)
 	var degrees: Array[int] = []
 	degrees.resize(points.size())
 	degrees.fill(0)
-	# Follow the pattern through occupied neutral positions only.
-	# Home systems attach as leaves to keep each start next to a neutral.
-	if radial:
-		var rings: Array = [[], []]
-		for k in neutral_raw:
-			rings[0 if k < count / 2 else 1].append(int(remap[k]))
-		for chain in rings:
-			for k in range(1, chain.size()):
-				_add_edge(edges, degrees, [mini(chain[k - 1], chain[k]), maxi(chain[k - 1], chain[k])])
-		if not rings[0].is_empty() and not rings[1].is_empty():
-			var best_pair: Array = []
-			var shortest: float = INF
-			for a in rings[0]:
-				for b in rings[1]:
-					var distance: float = points[a].distance_squared_to(points[b])
-					if distance < shortest:
-						shortest = distance
-						best_pair = [mini(a, b), maxi(a, b)]
-			_add_edge(edges, degrees, best_pair)
-	else:
-		# Nearest-neighbor backbone avoids crossing large vacant spans where possible.
-		var remaining: Array[int] = []
-		for node in range(player_count, points.size()):
-			remaining.append(node)
-		var last: int = remaining.pop_front()
-		while not remaining.is_empty():
-			var best: int = 0
-			var shortest: float = INF
-			for k in range(remaining.size()):
-				var distance: float = points[last].distance_squared_to(points[remaining[k]])
-				if distance < shortest:
-					shortest = distance
-					best = k
-			var next: int = remaining.pop_at(best)
-			_add_edge(edges, degrees, [mini(last, next), maxi(last, next)])
-			last = next
-	var home_neighbors: Dictionary = {}
-	for home in range(player_count):
-		var nearest: int = -1
-		var shortest: float = INF
-		for node in range(player_count, points.size()):
-			if degrees[node] >= MAX_CONNECTIONS or home_neighbors.has(node):
-				continue
-			var distance: float = points[home].distance_squared_to(points[node])
-			if distance < shortest:
-				shortest = distance
-				nearest = node
-		# At least three neutral stars per home guarantee a free port.
-		if nearest >= 0:
-			_add_edge(edges, degrees, [home, nearest])
-			home_neighbors[nearest] = true
-	# Place deposits against actual remaining ports, not nominal cluster counts.
+	var edges: Array = []
+	# Connected three-port graph for existing strategic queries.
+	_add_edge(edges, degrees, [imperial_system, inner_start])
+	for k in range(ring_count - 1):
+		_add_edge(edges, degrees, [inner_start + k, inner_start + k + 1])
+		_add_edge(edges, degrees, [outer_start + k, outer_start + k + 1])
+	_add_edge(edges, degrees, [inner_start + ring_count - 1, outer_start + ring_count - 1])
+	for player in range(player_count):
+		_add_edge(edges, degrees, [player, outer_start + player * 2])
+	# Protected Pulsars in the inner gap, outside the central belt.
 	var fields: Array = []
-	var special_sites: Array[Vector2] = []
-	var galaxy_center: Vector2 = bounds * 0.5
-	if radial:
-		for y in range(-5, 6):
-			for x in range(-5, 6):
-				special_sites.append(galaxy_center + Vector2(x * 80.0, y * 80.0))
-		special_sites.sort_custom(func(a: Vector2, b: Vector2) -> bool: return a.distance_squared_to(galaxy_center) < b.distance_squared_to(galaxy_center))
-	else:
-		for index in range(player_count, points.size()):
-			for ring in range(1, 4):
-				for angle in range(12):
-					special_sites.append(points[index] + Vector2.from_angle(TAU * float(angle) / 12.0) * (340.0 + 105.0 * ring))
-		for index in range(special_sites.size() - 1, 0, -1):
-			var other: int = rng.randi_range(0, index)
-			var swap: Vector2 = special_sites[index]
-			special_sites[index] = special_sites[other]
-			special_sites[other] = swap
+	var pulsar_distance: float = maxf(22000.0, inner_radius * 0.50)
 	var needed: int = 1 if player_count <= 2 else 2
-	for center in special_sites:
+	for step in range(64):
 		if fields.size() >= needed:
 			break
-		var remote: bool = true
-		for home in range(player_count):
-			if center.distance_to(points[home]) < ANTIMATTER_CLEARANCE + ANTIMATTER_RADIUS:
-				remote = false
-				break
-		if not remote:
-			continue
-		var field: Dictionary = _field_at(center, ANTIMATTER_RADIUS, points, edges, fields, degrees, player_count)
+		var angle: float = rotation + TAU * (float(step) + 0.5) / 64.0
+		var location: Vector2 = center + Vector2.from_angle(angle) * pulsar_distance
+		var field: Dictionary = _field_at(location, 1100.0, points, edges, fields, degrees, player_count)
 		if field.is_empty():
 			continue
 		field.merge({"Metals": 1.0, "Crystals": 1.0, "antimatter": true})
 		fields.append(field)
-	var specials: Array = fields.duplicate()
-	# Asteroid-only pattern sites are actual ore fields, never fake stars.
-	# Preserve the protected Pulsar corridor and the existing route-port cap;
-	# infeasible cluster candidates remain empty.
-	var site_fields: Array = []
-	for site in asteroid_sites:
-		var at: Vector2 = raw[site]
-		if radial and specials.size() == 2 and Geometry2D.get_closest_point_to_segment(at, specials[0]["position"], specials[1]["position"]).distance_to(at) <= 100.0:
-			continue
-		var field: Dictionary = _field_at(at, 100.0, points, edges, fields, degrees, 0)
-		if field.is_empty():
-			continue
-		field.merge({"Metals": rng.randf_range(1.0, 2.0), "Crystals": rng.randf_range(1.0, 2.0), "pattern_cluster": true})
-		site_fields.append(field)
-		fields.append(field)
-	# A few interstellar deposits complement the system rings. Reserve
-	# ordinary resource ports only for these static clusters and Pulsars.
-	var ordinary: Array = []
-	for anchor in range(points.size()):
-		if anchor < player_count or degrees[anchor] >= MAX_CONNECTIONS or rng.randf() >= 0.28:
-			continue
-		var field: Dictionary = _ordinary_field(anchor, points, edges, fields, degrees, rng, specials if radial else [])
-		if not field.is_empty():
-			ordinary.append(field)
-			fields.append(field)
-	fields = site_fields + ordinary + specials
-	# Reserve nearby deposit-to-deposit lanes before filling spare star ports.
-	# The central radial antimatter pair is a deliberate traversal corridor.
 	var field_edges: Array = []
-	var field_degrees: Array[int] = []
-	var field_options: Array = []
-	for field in fields:
-		field_degrees.append(field["access"].size())
-	for a in range(fields.size()):
-		for b in range(a + 1, fields.size()):
-			var start: Vector2 = fields[a]["position"]
-			var finish: Vector2 = fields[b]["position"]
-			var distance: float = start.distance_to(finish)
-			var central_pair: bool = radial and fields[a].get("antimatter", false) and fields[b].get("antimatter", false)
-			if not central_pair and distance > 3.0 * (float(fields[a]["radius"]) + float(fields[b]["radius"])):
+	if fields.size() == 2:
+		field_edges.append([0, 1])
+	# Sparse outer asteroid sites with real spare home mining ports.
+	for player in range(player_count):
+		for slot in range(2):
+			var angle: float = rotation + TAU * float(player) / float(player_count)
+			angle += (-1.0 if slot == 0 else 1.0) * rng.randf_range(0.06, 0.15)
+			var distance: float = lerpf(home_radius, extent, rng.randf_range(0.30, 0.75))
+			var location: Vector2 = center + Vector2.from_angle(angle) * distance
+			var field: Dictionary = _field_at(location, rng.randf_range(1100.0, 1800.0), points, edges, fields, degrees, 0, player)
+			if field.is_empty():
 				continue
-			var clear: bool = true
-			for other in range(fields.size()):
-				if other != a and other != b and Geometry2D.get_closest_point_to_segment(fields[other]["position"], start, finish).distance_to(fields[other]["position"]) <= float(fields[other]["radius"]):
-					clear = false
-					break
-			if clear:
-				field_options.append({"a": a, "b": b, "score": -1.0 if central_pair else distance})
-	field_options.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] < b["score"])
-	for option in field_options:
-		var a: int = option["a"]
-		var b: int = option["b"]
-		if field_degrees[a] < MAX_CONNECTIONS and field_degrees[b] < MAX_CONNECTIONS:
-			field_edges.append([a, b])
-			field_degrees[a] += 1
-			field_degrees[b] += 1
-	var options: Array = []
-	for index in range(fields.size()):
-		var field: Dictionary = fields[index]
-		var center: Vector2 = field["position"]
-		var reach: float = center.distance_to(points[int(field["anchor"])]) * 1.5 + float(field["radius"])
-		for node in range(points.size()):
-			if degrees[node] >= MAX_CONNECTIONS or field["access"].has(node) or (bool(field.get("antimatter", false)) and node < player_count):
-				continue
-			var distance: float = center.distance_to(points[node])
-			if distance > reach:
-				continue
-			var clear: bool = true
-			for other in range(fields.size()):
-				if other != index and Geometry2D.get_closest_point_to_segment(fields[other]["position"], center, points[node]).distance_to(fields[other]["position"]) <= float(fields[other]["radius"]):
-					clear = false
-					break
-			if clear:
-				options.append({"field": index, "node": node, "distance": distance})
-	options.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["distance"] < b["distance"])
-	for option in options:
-		var node: int = option["node"]
-		var access: Array = fields[option["field"]]["access"]
-		if degrees[node] < MAX_CONNECTIONS and field_degrees[option["field"]] < MAX_CONNECTIONS:
-			access.append(node)
-			degrees[node] += 1
-			field_degrees[option["field"]] += 1
-	var longest: float = 0.0
-	for edge in edges:
-		longest = maxf(longest, points[edge[0]].distance_to(points[edge[1]]))
-	var scale: float = LONGEST_LINK_YEARS * TRAVEL_SPEED / maxf(longest, 1.0)
-	var static_scale: float = scale / SYSTEM_SPACING_MULTIPLIER
-	# One orbital resource pool per star. These additional logical mining
-	# access spurs do not consume a physical star-to-star route port.
+			field.merge({"Metals": rng.randf_range(1.0, 2.0), "Crystals": rng.randf_range(1.0, 2.0), "pattern_cluster": true})
+			fields.append(field)
+	# Preserve one orbital resource pool per star and existing rock identity.
 	var rings: Array = []
 	for anchor in range(points.size()):
-		var center: Vector2 = points[anchor]
+		var star: Vector2 = points[anchor]
 		var nearest: float = INF
 		for other in range(points.size()):
 			if other != anchor:
-				nearest = minf(nearest, center.distance_to(points[other]))
-		var edge_clearance: float = minf(minf(center.x, center.y), minf(bounds.x - center.x, bounds.y - center.y))
-		var room: float = minf(nearest * 0.44, edge_clearance * 0.78)
-		for special in specials:
-			room = minf(room, (center.distance_to(special["position"]) - float(special["radius"])) * 0.72)
-		var orbit_radius: float = maxf(12.0, minf(ORBIT_WORLD_RADIUS / scale * rng.randf_range(0.90, 1.10), room * 0.90))
+				nearest = minf(nearest, star.distance_to(points[other]))
+		var room: float = nearest * 0.44
+		for special in fields:
+			if bool(special.get("antimatter", false)):
+				room = minf(room, (star.distance_to(special["position"]) - float(special["radius"])) * 0.72)
+		var orbit_radius: float = maxf(12.0, minf(ORBIT_WORLD_RADIUS * rng.randf_range(0.90, 1.10), room * 0.90))
 		var phase: float = rng.randf_range(0.0, TAU)
-		var node: Vector2 = center + Vector2.from_angle(phase) * orbit_radius * 0.45
+		var node: Vector2 = star + Vector2.from_angle(phase) * orbit_radius * 0.45
 		var rate: float = rng.randf_range(0.0015, 0.0035) * (1.0 if rng.randf() < 0.5 else -1.0)
 		rings.append({"position": node, "radius": orbit_radius * 1.75, "anchor": anchor, "access": [anchor],
-			"orbit_center": center, "orbit_radius": orbit_radius, "orbit_rate": rate,
+			"orbit_center": star, "orbit_radius": orbit_radius, "orbit_rate": rate,
 			"Metals": rng.randf_range(1.0, 2.0), "Crystals": rng.randf_range(1.0, 2.0)})
-	# Keep ring indices aligned with systems; shift legacy static-site edges.
 	for edge in field_edges:
 		edge[0] += rings.size()
 		edge[1] += rings.size()
 	fields = rings + fields
-	# Pad the raw layout only after belt radii are chosen. This preserves
-	# seeded ring sizes and relative star positions while enforcing the
-	# absolute world-space edge margin, including the largest jittered ring.
-	var required_margin: float = ORBIT_WORLD_RADIUS / scale
-	for ring in rings:
-		required_margin = maxf(required_margin, float(ring["orbit_radius"]))
-	required_margin = required_margin * STAR_EDGE_BELT_RADII + 1.0
-	var padding := Vector2.ZERO
-	for point in points:
-		padding.x = maxf(padding.x, required_margin - minf(point.x, bounds.x - point.x))
-		padding.y = maxf(padding.y, required_margin - minf(point.y, bounds.y - point.y))
-	bounds += padding * 2.0
-	for index in range(points.size()):
-		points[index] = (points[index] + padding) * scale
 	for field in fields:
-		var raw_center: Vector2 = field["position"]
-		var center: Vector2 = (raw_center + padding) * scale
-		var orbital: bool = field.has("orbit_center")
-		var local_scale: float = scale if orbital else static_scale
-		field["position"] = center
-		field["radius"] = float(field["radius"]) * local_scale
-		if orbital:
-			field["orbit_center"] = ((field["orbit_center"] as Vector2) + padding) * scale
-			field["orbit_radius"] = float(field["orbit_radius"]) * scale
-		for lobe in field.get("belt_lobes", []):
-			lobe["position"] = center + ((lobe["position"] as Vector2) - raw_center) * local_scale
-			lobe["radius"] = float(lobe["radius"]) * local_scale
 		_populate_field(field, rng)
 		if bool(field.get("antimatter", false)):
 			field["Metals"] = 0.0
@@ -395,7 +164,7 @@ static func generate(seed_value: int, player_count: int = 3, layout: String = DE
 				chunk["resource"] = ANTIMATTER
 				chunk["remaining"] = floorf(float(chunk["remaining"]))
 				chunk["initial"] = chunk["remaining"]
-	return {"seed": seed_value, "layout": layout, "planetless": planetless_systems(seed_value, points.size(), edges, player_count), "antimatter_home_clearance": ANTIMATTER_CLEARANCE * scale, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "field_edges": field_edges, "size": bounds * scale, "cluster_sizes": sizes, "player_count": player_count, "max_junctions": points.size()}
+	return {"seed": seed_value, "layout": DEFAULT_LAYOUT, "planetless": planetless_systems(seed_value, points.size(), edges, player_count), "antimatter_home_clearance": RADIAL_STAR_SPACING, "names": system_names(seed_value, points.size()), "points": points, "edges": edges, "clusters": clusters, "fields": fields, "field_edges": field_edges, "size": bounds, "cluster_sizes": [], "player_count": player_count, "max_junctions": points.size(), "imperial_system": imperial_system}
 
 # Existing seeded spin is uniform and immutable: use it to assign each
 # rock to one of three mixed-speed cohorts without new RNG or wire state.

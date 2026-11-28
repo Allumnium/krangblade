@@ -640,7 +640,8 @@ func _map_layout_picker() -> OptionButton:
 	for layout in MAP.LAYOUTS:
 		picker.add_item(layout)
 	picker.select(0)
-	picker.tooltip_text = "Galaxy layout"
+	picker.tooltip_text = "Radial galaxy layout"
+	picker.disabled = true
 	return picker
 
 func _refresh_roster() -> void:
@@ -651,7 +652,7 @@ func _refresh_roster() -> void:
 	var is_lobby: bool = str(network.get("phase")) == "lobby"
 	_build_roster_rows(roster, roster_data, false)
 	lobby_layout_picker.select(maxi(0, MAP.LAYOUTS.find(str(network.get("map_layout")))))
-	lobby_layout_picker.disabled = not is_lobby or not is_host
+	lobby_layout_picker.disabled = true
 	var seed_value: int = int(network.get("lobby_map_seed"))
 	if not lobby_seed_edit.has_focus():
 		lobby_seed_edit.text = str(seed_value)

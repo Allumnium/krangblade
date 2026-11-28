@@ -3518,7 +3518,7 @@ func _initialize() -> void:
 		var player_count: int = seed_value % 8 + 1
 		var clustered: Dictionary = _planetary_fixture(seed_value, player_count, "Grid")
 		var cluster_points: Array = clustered["points"]
-		assert(cluster_points.size() >= player_count * 4 + 2 and cluster_points.size() < player_count * MAP.PATTERN_SITES_PER_PLAYER)
+		assert(cluster_points.size() == player_count * 5 + 1)
 		rolled_neutral_stars += cluster_points.size() - player_count
 		neutral_sites += player_count * (MAP.PATTERN_SITES_PER_PLAYER - 1)
 		assert(clustered["cluster_sizes"].is_empty())
@@ -3533,7 +3533,7 @@ func _initialize() -> void:
 			degrees[edge[1]] += 1
 		for degree in degrees:
 			assert(degree >= 1 and degree <= MAP.MAX_CONNECTIONS)
-		assert(is_equal_approx(longest / ECON.SHIP_SPEED, MAP.LONGEST_LINK_YEARS))
+		assert(longest >= MAP.RADIAL_STAR_SPACING - 1.0)
 		assert(not (clustered["fields"] as Array).is_empty())
 		for edge in clustered["edges"]:
 			assert(not MAP.blocked(cluster_points[edge[0]], cluster_points[edge[1]], clustered["fields"]))
@@ -3607,8 +3607,7 @@ func _initialize() -> void:
 		assert(seen.size() == cluster_points.size())
 	assert(crystal_shares.has(0) and crystal_shares.size() >= 5)
 	assert(pattern_clusters > 0)
-	var neutral_star_fraction: float = float(rolled_neutral_stars) / float(neutral_sites)
-	assert(neutral_star_fraction >= 0.22 and neutral_star_fraction <= 0.40)
+	assert(rolled_neutral_stars > 0 and neutral_sites > 0)
 	print("PASS: rescaled asteroid inventory, seeded metal-rich fields and crystal share cap")
 	var players: Dictionary = {1: {"team": 1}, 2: {"team": 1}, 3: {"team": 2}}
 	var ids: Array[int] = [1, 2, 3]
@@ -6981,9 +6980,24 @@ func _test_map_layouts() -> void:
 				for home in range(player_count):
 					assert(not galaxy["planetless"].has(home))
 				assert(galaxy["cluster_sizes"].is_empty())
-				assert(galaxy["points"].size() >= player_count * 4 + 2 and galaxy["points"].size() < player_count * MAP.PATTERN_SITES_PER_PLAYER)
+				assert(galaxy["points"].size() == player_count * 5 + 1)
 				var points: Array = galaxy["points"]
 				var map_size: Vector2 = galaxy["size"]
+				var galaxy_center: Vector2 = map_size * 0.5
+				assert(galaxy["imperial_system"] == player_count and points[player_count] == galaxy_center)
+				assert(not galaxy["planetless"].has(player_count))
+				var home_radius: float = (points[0] as Vector2).distance_to(galaxy_center)
+				for home in range(player_count):
+					assert(absf((points[home] as Vector2).distance_to(galaxy_center) - home_radius) < 0.1)
+					if player_count > 1:
+						var a: Vector2 = points[home] - galaxy_center
+						var b: Vector2 = points[(home + 1) % player_count] - galaxy_center
+						assert(absf(absf(a.angle_to(b)) - TAU / float(player_count)) < 0.0001)
+				for index in range(player_count, points.size()):
+					assert((points[index] as Vector2).distance_to(galaxy_center) < home_radius)
+				for field in galaxy["fields"]:
+					if field.get("pattern_cluster", false):
+						assert((field["position"] as Vector2).distance_to(galaxy_center) > home_radius)
 				var max_belt_radius: float = MAP.ORBIT_WORLD_RADIUS
 				for index in range(points.size()):
 					var ring: Dictionary = galaxy["fields"][index]
@@ -6994,6 +7008,7 @@ func _test_map_layouts() -> void:
 					for other in range(points.size()):
 						if other != index:
 							nearest = minf(nearest, (points[index] as Vector2).distance_to(points[other]))
+					assert(nearest >= MAP.RADIAL_STAR_SPACING - 0.1)
 					assert(float(ring["orbit_radius"]) <= nearest * 0.396 + 0.1)
 				for point in points:
 					var clearance: float = minf(minf(point.x, point.y), minf(map_size.x - point.x, map_size.y - point.y))
@@ -7012,7 +7027,7 @@ func _test_map_layouts() -> void:
 					adjacency[edge[1]].append(edge[0])
 					assert(not MAP.blocked(points[edge[0]], points[edge[1]], galaxy["fields"]))
 					longest = maxf(longest, (points[edge[0]] as Vector2).distance_to(points[edge[1]]))
-				assert(is_equal_approx(longest / MAP.TRAVEL_SPEED, MAP.LONGEST_LINK_YEARS))
+				assert(longest >= MAP.RADIAL_STAR_SPACING - 1.0)
 				assert(galaxy["clusters"].count(-1) == points.size())
 				assert(degrees.count(3) <= int(galaxy["max_junctions"]))
 				for degree in degrees:
@@ -7058,12 +7073,11 @@ func _test_map_layouts() -> void:
 					for home in range(player_count):
 						assert(not access.has(home))
 						assert(center.distance_to(points[home]) - float(field["radius"]) + 0.01 >= float(galaxy["antimatter_home_clearance"]))
-						if layout == "Radial":
-							assert(center.distance_to(galaxy["size"] * 0.5) < (points[home] as Vector2).distance_to(galaxy["size"] * 0.5) * 0.3)
+						assert(center.distance_to(galaxy["size"] * 0.5) < (points[home] as Vector2).distance_to(galaxy["size"] * 0.5))
 				assert(deposits == (1 if player_count <= 2 else 2))
-	assert(MAP.generate(7021, 4, "Radial")["points"] != MAP.generate(7021, 4, "Grid")["points"])
-	assert(MAP.generate(7021, 4, "Grid")["points"] != MAP.generate(7021, 4, "Scramble")["points"])
-	assert(MAP.generate(7021, 4, "Grid")["points"] != MAP.generate(7021, 4, "Hex Grid")["points"])
+	assert(MAP.LAYOUTS == ["Radial"])
+	assert(not MAP.valid_layout("Grid"))
+	assert(MAP.generate(7021, 4, "Grid") == MAP.generate(7021, 4, "Radial"))
 	print("PASS: all map layouts, seed reproducibility, connected routes and protected antimatter")
 
 func _test_orbital_housing() -> void:
@@ -7679,8 +7693,8 @@ func _test_orbital_asteroids() -> void:
 		assert(start.is_equal_approx(chunk["position"]))
 		assert(middle.distance_to(start) > 0.0 and middle.distance_to(end) > 0.0)
 		assert(is_equal_approx(middle.distance_to(ring["orbit_center"]), (chunk["orbit_offset"] as Vector2).length()))
-		var expected: float = absf(float(ring["orbit_rate"])) * (0.9 + 0.1 * float(group))
-		var turn: float = absf((start - (ring["orbit_center"] as Vector2)).angle_to(end - (ring["orbit_center"] as Vector2)))
+		var expected: float = float(ring["orbit_rate"]) * float([-1.1, 0.55, 1.1][group])
+		var turn: float = (start - (ring["orbit_center"] as Vector2)).angle_to(end - (ring["orbit_center"] as Vector2))
 		assert(absf(turn - expected) < 0.00002)
 	assert(groups.size() == 3)
 	assert(MAP.asteroid_orbit_position({"position": Vector2(3, 5)}, MAP.asteroid_orbit_transforms({}, 80.5)) == Vector2(3, 5))
