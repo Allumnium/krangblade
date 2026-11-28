@@ -6,6 +6,8 @@
 
 **Lighting asset regression:** Every new ship or structure art asset must be registered in the common hull renderer and direction regression roster (or add a real-render fixture for a separate renderer) in the same versioned change. Test actual rendered star-facing response, not only synthetic normals; keep all prior asset types covered.
 
+- v0.121.19: Record confirmed Imperial core/frontier design: neutral expansion toward center, Imperial wall outside the entire asteroid belt, bilateral initial alliances/open borders with every ordinary player, independent pirate reinforcement and unpaid defectors traveling to the nearest pirate base. Document remaining base lifecycle and wall scalability decisions; no gameplay implementation.
+
 - v0.121.18: Expand the PDS construction description to Planetary Defense System (PDS); keep the compact card label and gameplay unchanged. Record proposed radial Empire/frontier/pirate direction for discussion only. Static review; runtime pending.
 
 - v0.121.17: Flatten station construction into the top two rows, move plating/lasers/conditional Dyson to row three, keep Shipyards and Trade in bottom row; PDS uses P to avoid T conflict. Remove redundant Shipyard Build shortcut, retain parent Station. Construction Ship Build (B) opens separate four-row card with Resource Depot (F), Defense Cannon (I), Wall (Z), Return (Esc); cancel/upgrade remain on main card. Preserve existing dispatch/eligibility, construction repeat, selection resets, armed-order cancellation and authority. Build and Auto-Repair may share B because their hull types are mutually exclusive. Static review only; parse, visual/hotkey and peer checks pending.
