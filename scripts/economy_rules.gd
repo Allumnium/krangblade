@@ -639,6 +639,7 @@ static func team_vision(state: Dictionary, team: int, ship_cache: Variant = null
 	if team <= 0:
 		return cells
 	var sources: Dictionary = {}
+	var static_sources: Dictionary = {}
 	var owner_shares: Dictionary = {}
 	var owner_sensor: Dictionary = {}
 	for ship in state.get("ships", []):
@@ -654,14 +655,20 @@ static func team_vision(state: Dictionary, team: int, ship_cache: Variant = null
 				owner_sensor[owner] = _player_factor(state, owner, "rank_sensor", 0.10)
 			factor = float(owner_sensor[owner])
 		var cell: Vector2i = vision_cell(ship["position"])
-		sources[cell] = maxf(float(sources.get(cell, 0.0)), sight_radius(kind) * factor)
+		var radius: float = sight_radius(kind) * factor
+		# Stationary walls/sites share the fixed coverage cache below.
+		# Rebuild source eligibility and cell/radius keys on every call.
+		if ship_cache != null and is_static_structure(ship):
+			static_sources[cell] = maxf(float(static_sources.get(cell, 0.0)), radius)
+		else:
+			sources[cell] = maxf(float(sources.get(cell, 0.0)), radius)
 	if ship_cache != null and ship_cache.get("sources") == sources and ship_cache.has("cells"):
 		cells = ship_cache["cells"].duplicate()
 	else:
 		_stamp_cell_sources(cells, sources)
 		if ship_cache != null:
 			ship_cache["sources"] = sources
-			# Structure sight mutates the result below; cache only the ship mask.
+			# Static and orbital sight mutate the result below; cache only the mobile mask.
 			ship_cache["cells"] = cells.duplicate()
 	var elapsed: float = float(state["elapsed"])
 	var base_radius: float
@@ -697,14 +704,15 @@ static func team_vision(state: Dictionary, team: int, ship_cache: Variant = null
 			var station: Vector2 = station_position(state, index, elapsed)
 			if ship_cache == null:
 				_stamp_vision(cells, station, STATION_SIGHT)
-			else:
+			elif station.distance_to(point) + STATION_SIGHT + VISION_CELL > float(fixed_sources.get(point, 0.0)):
+				# A conservative margin makes this a strict contained-disk test.
 				moving_sources.append(station)
 				moving_radii.append(STATION_SIGHT)
 		for slot in range(system["yards"].size()):
 			var yard: Vector2 = shipyard_position(state, index, slot, elapsed)
 			if ship_cache == null:
 				_stamp_vision(cells, yard, YARD_SIGHT)
-			else:
+			elif yard.distance_to(point) + YARD_SIGHT + VISION_CELL > float(fixed_sources.get(point, 0.0)):
 				moving_sources.append(yard)
 				moving_radii.append(YARD_SIGHT)
 		if not system.get("pds", {}).is_empty():
@@ -713,12 +721,15 @@ static func team_vision(state: Dictionary, team: int, ship_cache: Variant = null
 			else:
 				fixed_sources[point] = maxf(float(fixed_sources.get(point, 0.0)), PDS_SIGHT)
 	if ship_cache != null:
-		# Exact union keyed by live eligible centers and radii. Population,
-		# ownership, diplomacy and construction can invalidate it immediately.
-		if ship_cache.get("fixed_sources") != fixed_sources or not ship_cache.has("fixed_cells"):
+		# Exact union keyed by eligible structure cell centers and fixed
+		# system centers/radii. Movement of an ordinary hull cannot rebuild it;
+		# ownership, diplomacy, sensor, construction or removal still can.
+		if ship_cache.get("fixed_sources") != fixed_sources or ship_cache.get("static_sources") != static_sources or not ship_cache.has("fixed_cells"):
 			var fixed_cells: Dictionary = {}
+			_stamp_cell_sources(fixed_cells, static_sources)
 			for point: Vector2 in fixed_sources:
 				_stamp_vision(fixed_cells, point, float(fixed_sources[point]))
+			ship_cache["static_sources"] = static_sources
 			ship_cache["fixed_sources"] = fixed_sources
 			ship_cache["fixed_cells"] = fixed_cells
 		cells.merge(ship_cache["fixed_cells"], true)
