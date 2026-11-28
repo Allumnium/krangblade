@@ -44,7 +44,7 @@ func _reference_tick(state: Dictionary, dt: float) -> void:
 
 func _test_snapshot_map_reuse() -> void:
 	var worker = WORKER.new()
-	var source: Dictionary = {"map": {"points": [Vector2.ZERO], "fields": [{"chunks": [{"id": 1, "remaining": 10.0}]}]}, "ships": [{"id": 1, "hp": 10.0}]}
+	var source: Dictionary = {"map": {"points": [Vector2.ZERO], "fields": [{"chunks": [{"id": 1, "remaining": 10.0}]}, {"chunks": [{"id": 2, "remaining": 20.0}]}]}, "ships": [{"id": 1, "hp": 10.0}]}
 	var first: Dictionary = worker._copy_snapshot(source)
 	var second: Dictionary = worker._copy_snapshot(source)
 	_check(first == source and second == source, "map copy differs from reference")
@@ -57,6 +57,14 @@ func _test_snapshot_map_reuse() -> void:
 	var changed: Dictionary = worker._copy_snapshot(source)
 	_check(changed == source and not is_same(changed["map"], first["map"]), "ore change did not replace cached map")
 	_check(first["map"]["fields"][0]["chunks"][0]["remaining"] == 10.0, "old snapshot ore changed")
+	_check(is_same(first["map"]["points"], changed["map"]["points"]), "unchanged geometry copied again")
+	_check(is_same(first["map"]["fields"][1], changed["map"]["fields"][1]), "unchanged field copied again")
+	_check(not is_same(first["map"]["fields"][0], changed["map"]["fields"][0]), "changed field shared")
+	source["map"]["fields"][1]["chunks"][0]["position"] = Vector2(100.0, 200.0)
+	var moved: Dictionary = worker._copy_snapshot(source)
+	_check(moved == source and not changed["map"]["fields"][1]["chunks"][0].has("position"), "orbit position mutation leaked")
+	_check(is_same(moved["map"]["fields"][0], changed["map"]["fields"][0]), "unaffected ore field copied again")
+	_check(moved["map"]["fields"][1]["chunks"][0].is_read_only(), "changed field not recursively frozen")
 	source["map"]["fields"][0]["chunks"].clear()
 	_check(worker._copy_snapshot(source) == source and changed["map"]["fields"][0]["chunks"].size() == 1, "rock removal leaked into previous map")
 

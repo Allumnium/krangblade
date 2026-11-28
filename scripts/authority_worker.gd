@@ -134,18 +134,52 @@ func _run(state: Dictionary) -> void:
 func _freeze_map_values(value: Variant) -> void:
 	if value is Dictionary:
 		for child in value.values():
-			_freeze_map_values(child)
+			if child is Dictionary or child is Array:
+				_freeze_map_values(child)
 		value.make_read_only()
 	elif value is Array:
 		for child in value:
-			_freeze_map_values(child)
+			if child is Dictionary or child is Array:
+				_freeze_map_values(child)
 		value.make_read_only()
+
+# Reuse already detached immutable top-level geometry and unchanged fields.
+# Compare values rather than live identity: mining, depletion, orbit updates
+# and map replacement can mutate nested containers in place.
+func _copy_map_fields(live_fields: Array, previous_fields: Array) -> Array:
+	var fields: Array = []
+	for index in range(live_fields.size()):
+		var field: Dictionary = live_fields[index]
+		if index < previous_fields.size() and previous_fields[index] == field:
+			fields.append(previous_fields[index])
+		else:
+			var detached: Dictionary = field.duplicate(true)
+			_freeze_map_values(detached)
+			fields.append(detached)
+	fields.make_read_only()
+	return fields
+
+func _copy_map_values(live_map: Dictionary) -> Dictionary:
+	var next_map: Dictionary = {}
+	for key in live_map:
+		var value: Variant = live_map[key]
+		if _snapshot_map.has(key) and _snapshot_map[key] == value:
+			next_map[key] = _snapshot_map[key]
+		elif key == "fields" and value is Array:
+			next_map[key] = _copy_map_fields(value, _snapshot_map.get(key, []))
+		elif value is Dictionary or value is Array:
+			var detached: Variant = value.duplicate(true)
+			_freeze_map_values(detached)
+			next_map[key] = detached
+		else:
+			next_map[key] = value
+	next_map.make_read_only()
+	return next_map
 
 func _copy_snapshot(state: Dictionary) -> Dictionary:
 	var live_map: Dictionary = state["map"]
 	if not _snapshot_map.is_read_only() or _snapshot_map != live_map:
-		_snapshot_map = live_map.duplicate(true)
-		_freeze_map_values(_snapshot_map)
+		_snapshot_map = _copy_map_values(live_map)
 	var snapshot: Dictionary = state.duplicate()
 	for key in state:
 		if key == "map":
