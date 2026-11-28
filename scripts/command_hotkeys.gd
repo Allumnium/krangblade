@@ -32,6 +32,9 @@ func conflict(id: String, key: int, candidate: Dictionary) -> String:
 	for other in entries:
 		if other == id:
 			continue
+		# Construction ships cannot use Auto-Repair; these two main-card actions never coexist.
+		if (id == "fleet_build" and other == "fleet_auto_repair") or (id == "fleet_auto_repair" and other == "fleet_build"):
+			continue
 		var other_scope: String = entries[other]["scope"]
 		if (scope == other_scope or scope == "General" or other_scope == "General") and value(other, candidate) == key:
 			return str(entries[other]["title"])

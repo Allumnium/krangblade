@@ -167,7 +167,7 @@ func _open_hotkey_editor() -> void:
 		var rows := VBoxContainer.new()
 		rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		scroll.add_child(rows)
-		for scope in ["General", "Fleet", "Shipyard", "Station", "Station Build", "Station Trade", "Asteroid Field"]:
+		for scope in ["General", "Fleet", "Shipyard", "Station", "Construction Build", "Station Trade", "Asteroid Field"]:
 			var heading: Label = make_label.call(scope.to_upper(), 13)
 			heading.add_theme_color_override("font_color", HUD.ACCENT)
 			rows.add_child(heading)
