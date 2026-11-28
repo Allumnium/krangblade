@@ -1,6 +1,13 @@
 # Warbound — development TODO
 
+## Proposed Imperial core and frontier redesign (2026-11-27; discussion, not implementation)
+
+- User direction: radial-only maps, increased stellar spacing, established AI Empire at exact map center with a fully walled system and fleets; symmetric equally spaced ordinary-player starts on a ring; outer space primarily empty with asteroid fields and reserved room for future content. Initial roaming pirate factions can be defeated, grow slowly, avoid settled systems and attack favorable targets. Preserve future design space for Empire anti-pirate patrols/rewards, majority-opt-in tournament minigames, favor and rebellion; do not implement those yet.
+- Design choices to settle: neutral expansion star distribution, absolute travel spacing and frontier size; Empire's diplomacy, victory eligibility and replenishment; practical wall perimeter and segment budget; pirate faction identity, growth source/cap and starting fleet strength. Existing pirate AI already groups rogue hulls under PIRATE_OWNER=-1 and uses bounded target sampling/strength estimates; reuse behavior but explicitly separate starting groups and any growth policy. Existing map assumes home indices first and player count 1–8; preserve those contracts or migrate deliberately. Keep deterministic seed, fair resources, authority and compact replication.
+
 ## Approved command and observation changes (2026-11-27)
+
+- [ ] v0.121.18: Verify full Planetary Defense System name in command description and compact PDS card label.
 
 - [ ] v0.121.17: Validate station construction/upgrade rows, repeat controls, Shipyard navigation, constructor Build/Return, placement/cancel/upgrade, custom hotkeys, mixed selection, parse and peers.
 

@@ -6,6 +6,8 @@
 
 **Lighting asset regression:** Every new ship or structure art asset must be registered in the common hull renderer and direction regression roster (or add a real-render fixture for a separate renderer) in the same versioned change. Test actual rendered star-facing response, not only synthetic normals; keep all prior asset types covered.
 
+- v0.121.18: Expand the PDS construction description to Planetary Defense System (PDS); keep the compact card label and gameplay unchanged. Record proposed radial Empire/frontier/pirate direction for discussion only. Static review; runtime pending.
+
 - v0.121.17: Flatten station construction into the top two rows, move plating/lasers/conditional Dyson to row three, keep Shipyards and Trade in bottom row; PDS uses P to avoid T conflict. Remove redundant Shipyard Build shortcut, retain parent Station. Construction Ship Build (B) opens separate four-row card with Resource Depot (F), Defense Cannon (I), Wall (Z), Return (Esc); cancel/upgrade remain on main card. Preserve existing dispatch/eligibility, construction repeat, selection resets, armed-order cancellation and authority. Build and Auto-Repair may share B because their hull types are mutually exclusive. Static review only; parse, visual/hotkey and peer checks pending.
 
 - v0.121.16: Use three signed orbital cohort factors (-1.1, 0.55, 1.1) of the existing seeded belt rate; keep group assignment, radius, shared authority/visual transforms and wire format. Destination ghosts for all registered authored hulls use the shared diffuse sprite, heading offset and texture extent, with command tint and translucency; vector fallback and above-fog overlay unchanged. Static review only; full Godot parse, visual and peer checks pending.

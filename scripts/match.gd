@@ -1482,7 +1482,7 @@ func _refresh_station_build(p: Dictionary, owned: bool) -> void:
 			if eligible:
 				description = "Staffing: %s population\n+1 Small shipyard\n+%s housing and residents" % [UI_TEXT.compact_amount(ECONOMY.SHIPYARD_POPULATION[slot - 1]), UI_TEXT.compact_amount(ECONOMY.ORBITAL_HOUSING_POPULATION)]
 		elif key == "pds":
-			name_text = "PDS"
+			name_text = "Planetary Defense System (PDS)"
 			current_level = p.get("pds", {}).size()
 			eligible = ECONOMY.next_pds(p) >= 0
 			available = eligible and ECONOMY.pds_job(p).is_empty()
